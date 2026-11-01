@@ -25,6 +25,7 @@ type outcome =
   | Finished of Machine.finished
   | Pending of string
   | Stopped of {position : int; report : Memory_runtime.not_committed}
+  | Superseded
 
 module Positions = Map.Make (Int)
 
@@ -48,7 +49,7 @@ let hole_reasons report =
   | Memory_runtime.Smaller_input_may_help, (_ :: _ as reasons) -> Some reasons
   | (Memory_runtime.Smaller_input_may_help | Invalid_output_blocks_descent | No_descent_evidence), _ -> None
 
-let run ~store ~config ~reserved ~owner ~range ~input ~sources ~fresh ~unread_message =
+let run ~store ~config ~reserved ~owner ~range ~input ~sources ~fresh ~current ~unread_message =
   let keeper_name = Durable.keeper_id owner in
   let* found = Step_owner.discover ~store ~owner |> Result.map_error owner_error in
   let mine = List.filter (fun (_, (header : Step.header)) -> header.range = range) found in
@@ -68,15 +69,18 @@ let run ~store ~config ~reserved ~owner ~range ~input ~sources ~fresh ~unread_me
      the transaction, the facts the floor started from, and the state and unread
      messages it carried in. The caller's [fresh] names a chain's start only
      once, so a restart cannot start the same range from another Memory. *)
-  let* start = match Positions.find_opt 0 retained with
-    | None -> fresh ()
+  let* start, observed = match Positions.find_opt 0 retained with
+    | None -> let* start = fresh () in Ok (start, start.current)
     | Some (record, _) ->
       let* first = Step.restore ~owner record in
       let step = Step.step first in
-      Ok {transaction_id = Step.transaction_id first;
+      let* observed = current () in
+      Ok ({transaction_id = Step.transaction_id first;
           current = step.preparation.source_input.current;
           previous_state = step.context.previous_state;
-          unread_messages = step.context.unread_messages} in
+          unread_messages = step.context.unread_messages}, observed) in
+  let facts = Option.map (fun (selection : Keeper_librarian.current_selection) -> selection.facts) in
+  if facts start.current <> facts observed then Ok Superseded else
   let* read = Machine.read ~keeper_name ~sources ~unread_messages:start.unread_messages
     ~previous_state:start.previous_state input in
   let* plan = Plan.create_over ~keeper_id:input.keeper_id ~turn_ref:input.turn_ref ~current:start.current

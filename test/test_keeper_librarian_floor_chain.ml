@@ -27,17 +27,19 @@ let unread_message messages source ~reasons =
 let fresh : Chain.fresh =
   { transaction_id = "floor-chain-transaction-1"; current = None; previous_state = None; unread_messages = [] }
 
-let run_once fixture ~owner ~range ?(messages = messages) ?(fresh = fresh) () =
+let run_once fixture ~owner ~range ?(messages = messages) ?(fresh = fresh)
+    ?(current = fresh.current) () =
   Chain.run ~store:fixture.store ~config:fixture.config ~reserved:(Edge.reserved ()) ~owner ~range
     ~input:(input_over messages) ~sources:(sources_of messages) ~fresh:(fun () -> Ok fresh)
+    ~current:(fun () -> Ok current)
     ~unread_message:(unread_message messages)
 
 (* Run the chain as the consumer's wakes do: a chain that waits on a worker runs
    again after the worker's delivery, never earlier. *)
-let drive fixture ~owner ~range ?messages ?fresh () =
+let drive fixture ~owner ~range ?messages ?fresh ?current () =
   let rec go attempts =
     let before = !(fixture.deliveries) in
-    match run_once fixture ~owner ~range ?messages ?fresh () with
+    match run_once fixture ~owner ~range ?messages ?fresh ?current () with
     | Ok (Chain.Pending _) when attempts > 0 -> await_delivery fixture ~after:before; go (attempts - 1)
     | result -> result in
   go 12
@@ -69,6 +71,7 @@ let finished = function
   | Ok (Chain.Finished finished) -> finished
   | Ok (Chain.Pending detail) -> failf "the chain was still pending: %s" detail
   | Ok (Chain.Stopped { position; report }) -> failf "the chain stopped at %d: %s" position report.detail
+  | Ok Chain.Superseded -> fail "the chain's initial facts were superseded"
   | Error detail -> failf "the chain refused: %s" detail
 
 let steps_of fixture ~owner =
@@ -179,13 +182,13 @@ let test_a_refusal_that_shows_nothing_about_reading_less_stops_the_chain () = wi
      check int "at the first message" 0 position;
      check bool "its report does not let the floor read less" true
        (report.message_descent <> Memory_runtime.Smaller_input_may_help && report.provider_input_refusals = [])
-   | Ok (Chain.Finished _ | Chain.Pending _) -> fail "the chain went past a message no slot could answer"
+   | Ok (Chain.Finished _ | Chain.Pending _ | Chain.Superseded) -> fail "the chain went past a message no slot could answer"
    | Error detail -> fail detail);
   check int "no second message was asked" 1 (List.length (steps_of fixture ~owner));
   let calls = F.post_count fixture.server in
   (match drive fixture ~owner ~range () with
    | Ok (Chain.Stopped { position; _ }) -> check int "a restart stops at the same message" 0 position
-   | Ok (Chain.Finished _ | Chain.Pending _) | Error _ -> fail "a restart did not stop at the same message");
+   | Ok (Chain.Finished _ | Chain.Pending _ | Chain.Superseded) | Error _ -> fail "a restart did not stop at the same message");
   check int "without asking the provider again" calls (F.post_count fixture.server))
 
 let stale_fact = Types.observed ~claim:"a fact from the Memory of another moment" ~category:Types.Fact
@@ -224,7 +227,7 @@ let retain_copy ~store ~owner (record : Owner.retained) ~edit =
 
 let expect_refused label ~mentioning = function
   | Error detail -> check bool (Printf.sprintf "%s (%s)" label detail) true (contains detail mentioning)
-  | Ok (Chain.Finished _ | Chain.Pending _ | Chain.Stopped _) -> failf "%s was accepted" label
+  | Ok (Chain.Finished _ | Chain.Pending _ | Chain.Stopped _ | Chain.Superseded) -> failf "%s was accepted" label
 
 let test_a_chain_that_disagrees_with_itself_is_refused () = with_fixture (fun fixture ->
   fixture.respond := answering ();
@@ -278,17 +281,17 @@ let test_a_chain_that_starts_from_facts_gets_them_back_on_restart () = with_fixt
            | Ok step -> (Step.step step).preparation.source_input.current = Some { Keeper_librarian.facts = [ stale_fact ] }
            | Error _ -> false)) (steps_of fixture ~owner));
   let calls = F.post_count fixture.server in
-  let without = finished (drive fixture ~owner ~range ()) in
+  let without = finished (drive fixture ~owner ~range ~current:starting.current ()) in
   check bool "a restart that names no facts restores them" true (without.program.initial_current = Some [ stale_fact ]);
   check bool "and makes the same program" true
     (Yojson.Safe.equal (Program.to_json without.program) (Program.to_json first.program));
   let other = { fresh with current = Some { Keeper_librarian.facts = [] } } in
-  let elsewhere = finished (drive fixture ~owner ~range ~fresh:other ()) in
+  let elsewhere = finished (drive fixture ~owner ~range ~fresh:other ~current:starting.current ()) in
   check bool "and so does one that names other facts" true
     (Yojson.Safe.equal (Program.to_json elsewhere.program) (Program.to_json first.program));
   check int "none of them asks the provider anything" calls (F.post_count fixture.server))
 
-(* The Memory of the moment is read when a chain begins and never again. *)
+(* A restart revalidates current facts without minting another start. *)
 let test_a_chain_asks_for_its_start_only_while_it_has_no_step () = with_fixture (fun fixture ->
   fixture.respond := answering ();
   let owner = owner fixture and range = range_link (owner fixture) in
@@ -296,6 +299,7 @@ let test_a_chain_asks_for_its_start_only_while_it_has_no_step () = with_fixture 
   let run_chain start =
     Chain.run ~store:fixture.store ~config:fixture.config ~reserved:(Edge.reserved ()) ~owner ~range
       ~input:(input_over messages) ~sources:(sources_of messages) ~fresh:start
+      ~current:(fun () -> Ok None)
       ~unread_message:(unread_message messages) in
   (* A start that cannot be read is the chain's error, and nothing was made. *)
   (match run_chain (fun () -> Error "the Memory of the moment is unreadable") with
@@ -311,6 +315,31 @@ let test_a_chain_asks_for_its_start_only_while_it_has_no_step () = with_fixture 
   check int "the chain asked once, while it had no step" 1 !asked;
   ignore (finished (drive_chain 12) : Machine.finished);
   check int "and a restart never asks" 1 !asked)
+
+let test_a_retained_chain_revalidates_current_facts_before_resuming () = with_fixture (fun fixture ->
+  fixture.respond := answering ();
+  let owner = owner fixture and range = range_link (owner fixture) in
+  ignore (finished (drive fixture ~owner ~range ()) : Machine.finished);
+  let calls = F.post_count fixture.server in
+  let records () = List.map (fun ((record : Owner.retained), _) -> record.request_id)
+    (steps_of fixture ~owner) in
+  let before = records () in
+  let resume current =
+    Chain.run ~store:fixture.store ~config:fixture.config ~reserved:(Edge.reserved ()) ~owner ~range
+      ~input:(input_over messages) ~sources:(sources_of messages)
+      ~fresh:(fun () -> fail "a retained chain minted another start") ~current
+      ~unread_message:(unread_message messages) in
+  (match resume (fun () -> Error "current Memory is unreadable") with
+   | Error detail -> check string "the authority read error stays visible" "current Memory is unreadable" detail
+   | Ok _ -> fail "a failed authority read was accepted");
+  (match resume (fun () -> Ok (Some { Keeper_librarian.facts = [ stale_fact ] })) with
+   | Ok Chain.Superseded -> ()
+   | Ok (Chain.Pending _ | Chain.Finished _ | Chain.Stopped _) | Error _ ->
+     fail "changed Memory did not supersede the chain");
+  check (list string) "neither outcome settles records on the caller's behalf" before (records ());
+  check int "neither resumes a model step" calls (F.post_count fixture.server);
+  ignore (finished (resume (fun () -> Ok None)) : Machine.finished);
+  check int "unchanged facts still replay the same steps" calls (F.post_count fixture.server))
 
 (* A pass reads the gate scope once. The steps that earlier passes finished are
    judged from that one read: with the scope taken away after it, each still
@@ -380,6 +409,7 @@ let test_a_chain_judges_the_steps_it_replays_from_one_read_of_the_gate_scope () 
     Fun.protect ~finally:(fun () -> if !hidden then Sys.rename aside directory) (fun () ->
       Chain.run ~store:fixture.store ~config:fixture.config ~reserved:(Edge.reserved ()) ~owner ~range
         ~input:(input_over three_messages) ~sources:(sources_of three_messages) ~fresh:(fun () -> Ok fresh)
+        ~current:(fun () -> Ok None)
         ~unread_message:unread_message_hiding_the_scope) in
   check bool "the restart replayed a refusal between two judgments" true !hidden;
   check bool "and judged the third message without the scope" true
@@ -404,12 +434,12 @@ let test_a_pass_with_no_answered_step_does_not_read_the_gate_scope () = with_fix
   (match run_once fixture ~owner ~range () with
    | Ok (Chain.Pending detail) ->
      check bool "the first step waits on its worker" true (contains detail "waiting on its worker")
-   | Ok (Chain.Finished _ | Chain.Stopped _) -> fail "the chain went past a step nothing had answered"
+   | Ok (Chain.Finished _ | Chain.Stopped _ | Chain.Superseded) -> fail "the chain went past a step nothing had answered"
    | Error detail -> failf "a pass with no answered step read the gate scope: %s" detail);
   await_delivery fixture ~after:before;
   match run_once fixture ~owner ~range () with
   | Error _ -> ()
-  | Ok (Chain.Pending _ | Chain.Finished _ | Chain.Stopped _) -> fail "an answered step was judged without the gate scope")
+  | Ok (Chain.Pending _ | Chain.Finished _ | Chain.Stopped _ | Chain.Superseded) -> fail "an answered step was judged without the gate scope")
 
 let absorbing_answer = `Assoc
   [ "new_claims", `List [ `Assoc [ "claim", `String "a claim that absorbs the stale fact"; "category", `String "fact";
@@ -433,7 +463,7 @@ let test_a_failed_gate_is_not_a_decision_and_a_retried_one_is_judged_from_the_in
     (match run_through_workers fixture ~owner ~range ~fresh:starting () with
      | Ok (Chain.Pending detail) ->
        check bool "the chain waits on the gate, not on a worker" false (contains detail "waiting on its worker")
-     | Ok (Chain.Finished _ | Chain.Stopped _) -> fail "a gate that failed was taken for a decision"
+     | Ok (Chain.Finished _ | Chain.Stopped _ | Chain.Superseded) -> fail "a gate that failed was taken for a decision"
      | Error detail -> failf "the chain refused: %s" detail);
     let failed = Gate.Inventory.read ~store:fixture.store ~owner |> get in
     check bool "the failed journal is in the inventory" true (Gate.Inventory.record_count failed > 0);
@@ -479,6 +509,8 @@ let () =
         ; test_case "chains of other ranges do not mix" `Slow test_chains_of_other_ranges_do_not_mix
         ; test_case "a chain asks for its start only while it has no step" `Slow
             test_a_chain_asks_for_its_start_only_while_it_has_no_step
+        ; test_case "a retained chain revalidates current facts before resuming" `Slow
+            test_a_retained_chain_revalidates_current_facts_before_resuming
         ; test_case "a finished step is judged from the inventory and not from the store" `Slow
             test_a_finished_step_is_judged_from_the_inventory_and_not_from_the_store
         ; test_case "a step the inventory does not show is judged from the store" `Slow

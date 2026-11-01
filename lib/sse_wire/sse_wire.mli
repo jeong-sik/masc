@@ -46,7 +46,7 @@ val format_event_encoded : ?id:int -> ?event_type:string -> encoded_json -> stri
 (** {!format_event_yojson} of [encoded.json], written from [encoded.text]. *)
 
 type observer_cursor = { instance_id : string; event_id : int }
-type observer_reset = Instance_changed | Unscoped_cursor
+type observer_reset = Instance_changed | Unscoped_cursor | Cursor_ahead
 type observer_replay =
   | Fresh
   | Resumed  (** No event after the cursor left the retained window. *)
@@ -62,12 +62,14 @@ val observer_cursor_headers : observer_cursor option -> (string * string) list
 
 val negotiate_observer :
   instance_id:string ->
+  current_event_id:int ->
   headers:(string * string) list ->
   last_event_id:int option ->
   observer_handshake * int option
 (** The returned cursor is the only cursor suitable for both registration and
-    replay. A cursor from another or unspecified instance is discarded before
-    either path can suppress new events. [Fresh] and [Reset] start live only.
+    replay. A cursor from another or unspecified instance, or ahead of the
+    current process counter, is discarded before either path can suppress
+    new events. [Fresh] and [Reset] start live only.
     Repeated instance headers are unscoped even when their values agree.
     [Resumed] reads the retained replay window; whether events after the
     cursor expired from it is known only after the replay is read, and

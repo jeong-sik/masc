@@ -813,6 +813,7 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
             let handshake, cursor =
               Sse_wire.negotiate_observer
                 ~instance_id:Build_identity.runtime_instance_id
+                ~current_event_id:(Sse.current_id ())
                 ~headers:(Httpun.Headers.to_list request.headers) ~last_event_id
             in
             Some handshake, cursor

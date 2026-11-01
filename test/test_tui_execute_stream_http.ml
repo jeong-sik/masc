@@ -360,6 +360,10 @@ let test_observer_rejects_bad_replay_before_delivering_bytes env =
       [ "x-masc-sse-instance-id", "process-b"; "x-masc-sse-replay", "reset-instance-changed" ]
     ; "scoped request reported unscoped", requested,
       [ "x-masc-sse-instance-id", "process-a"; "x-masc-sse-replay", "reset-unscoped-cursor" ]
+    ; "future cursor reset with another instance", requested,
+      [ "x-masc-sse-instance-id", "process-b"; "x-masc-sse-replay", "reset-cursor-ahead" ]
+    ; "future cursor reset without a cursor", None,
+      [ "x-masc-sse-instance-id", "process-a"; "x-masc-sse-replay", "reset-cursor-ahead" ]
     ; "resumed with another instance", requested,
       [ "x-masc-sse-instance-id", "process-b"; "x-masc-sse-replay", "resumed" ]
     ; "unadvertised replay after a cursor", requested, []
@@ -404,7 +408,9 @@ let test_observer_accepts_valid_and_unadvertised_live_streams env =
       [ "x-masc-sse-instance-id", "process-a"; "x-masc-sse-replay", "resumed-after-gap"
       ; "x-masc-sse-replay-missed-through", "51" ]
     ; "instance reset", requested,
-      [ "x-masc-sse-instance-id", "process-b"; "x-masc-sse-replay", "reset-instance-changed" ] ]
+      [ "x-masc-sse-instance-id", "process-b"; "x-masc-sse-replay", "reset-instance-changed" ]
+    ; "future cursor reset", requested,
+      [ "x-masc-sse-instance-id", "process-a"; "x-masc-sse-replay", "reset-cursor-ahead" ] ]
 ;;
 
 (* Exercise the real MCP GET handler over H1. Authentication is supplied by
@@ -448,6 +454,83 @@ let test_mcp_rejects_duplicate_cursors_before_registration env =
     ; [ "last-event-id", "20"; "Last-Event-ID", "20" ] ]
 ;;
 
+let test_mcp_future_cursor_resets_before_live_delivery env =
+  let module Transport = Server_mcp_transport_http in
+  let workspace = Masc_test_deps.setup_test_workspace () in
+  let session_id = "observer-future-test-" ^ string_of_int (Random.bits ()) in
+  let auth = Masc_test_deps.make_sse_auth workspace "future-observer" in
+  let token = Option.get auth.Masc.Sse.token in
+  ignore (Masc.Session.McpSessionStore.get_or_create ~id:session_id ());
+  Fun.protect
+    ~finally:(fun () ->
+      Eio.Cancel.protect (fun () -> Transport.stop_sse_session session_id);
+      Masc_test_deps.cleanup_test_workspace workspace)
+    (fun () -> Eio.Switch.run (fun sw ->
+      let authority = match Server_request_authority.of_host_port ~host:"127.0.0.1" ~port:8935 with
+        | Ok authority -> authority | Error `Malformed -> Alcotest.fail "fixture authority" in
+      let admit ~base_path:_ _request = Ok () in
+      let runtime : Transport.runtime =
+        { base_path = workspace
+        ; sw
+        ; clock = Eio.Stdenv.clock env
+        ; tool_allowed_in_profile = (fun _ _ -> true)
+        ; handle_request =
+            (fun ?profile:_ ?mcp_session_id:_ ?otel_mcp_protocol_version:_
+                 ?otel_transport_context:_ ?auth_token:_ ?internal_keeper_runtime:_ _ -> `Null)
+        ; clear_resource_subscriptions_for_session = (fun _ -> ())
+        } in
+      let deps : Transport.deps =
+        { get_origin = (fun _ -> "")
+        ; cors_headers = (fun _ -> [])
+        ; auth_token_from_request = (fun _ -> None)
+        ; is_ready = (fun () -> true)
+        ; get_runtime_result = (fun () -> Ok runtime)
+        ; get_base_path = (fun () -> workspace)
+        ; verify_mcp_auth = admit
+        ; verify_mcp_observer_stream_auth = admit
+        ; verify_operator_mcp_auth = admit
+        ; verify_seat_mcp_auth = admit
+        } in
+      let handler reqd =
+        let request = Httpun.Reqd.request reqd in
+        Server_request_authority.with_current authority (fun () ->
+          Transport.handle_get_mcp ~deps ~sse_kind:Masc.Sse.Observer request reqd) in
+      with_server env ~handler (fun ~port ->
+        let response, publish_response = Eio.Promise.create () in
+        let event, publish_event = Eio.Promise.create () in
+        let decoder = Sse_wire.create_decoder () in
+        let url = Printf.sprintf "http://127.0.0.1:%d/mcp?sse_kind=observer" port in
+        let headers =
+          [ "Accept", "text/event-stream"
+          ; "Mcp-Session-Id", session_id
+          ; "Authorization", "Bearer " ^ token
+          ; "x-masc-sse-instance-id", Masc.Build_identity.runtime_instance_id
+          ; "Last-Event-ID", string_of_int max_int
+          ] in
+        Eio.Fiber.fork ~sw (fun () ->
+          ignore (Masc_http_client.get_stream ~clock:(Eio.Stdenv.clock env)
+            ~idle_timeout_sec:3. ~url ~headers
+            ~on_response:(fun ~status ~headers ->
+              ignore (Eio.Promise.try_resolve publish_response (status, headers)))
+            ~on_chunk:(fun chunk ->
+              Sse_wire.feed decoder chunk |> List.iter (fun (frame : Sse_wire.frame) ->
+                Option.iter (fun id -> ignore (Eio.Promise.try_resolve publish_event id)) frame.id)) ()));
+        let clock = Eio.Stdenv.clock env in
+        let status, headers = Eio.Time.with_timeout_exn clock 3. (fun () -> Eio.Promise.await response) in
+        Alcotest.(check int) "MCP stream opens" 200 status;
+        let handshake = Sse_wire.decode_observer_response headers in
+        let expected : Sse_wire.observer_handshake =
+          { instance_id = Masc.Build_identity.runtime_instance_id
+          ; replay = Sse_wire.Reset Sse_wire.Cursor_ahead } in
+        Alcotest.(check bool) "same-instance future cursor is reset" true
+          (handshake = Ok (Some expected));
+        Masc.Sse.broadcast_to Masc.Sse.Observers (`Assoc [ "type", `String "future-reset-live" ]);
+        let id = Eio.Time.with_timeout_exn clock 3. (fun () -> Eio.Promise.await event) in
+        Alcotest.(check bool) "a lower live event is delivered" true
+          (match int_of_string_opt id with Some id -> id < max_int | None -> false);
+        Transport.stop_sse_session session_id)))
+;;
+
 let () =
   let case name test = Alcotest.test_case name `Quick (with_env test) in
   Alcotest.run
@@ -478,6 +561,7 @@ let () =
       , [ case "invalid handshake is not opened or read" test_observer_rejects_bad_replay_before_delivering_bytes
         ; case "valid and unadvertised live streams still open" test_observer_accepts_valid_and_unadvertised_live_streams
         ; case "MCP rejects duplicate cursor headers" test_mcp_rejects_duplicate_cursors_before_registration
+        ; case "MCP resets a future cursor and sends live events" test_mcp_future_cursor_resets_before_live_delivery
         ] )
     ]
 ;;

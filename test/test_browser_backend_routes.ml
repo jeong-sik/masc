@@ -126,10 +126,31 @@ let independent_ego_spaces_route_exact_clients () =
         | Ok commit -> commit.binding | Error error -> fail (Browser_goal_space.error_message error) in
       let second_instance=(List.nth attached 1).F.instance_id in
       check bool "Goal pin records the actual manual publisher" true
-        (bound.installation=Lane_addon_tool_request_owner.Manual second_instance);
+        (bound.owner=Browser_goal_space.Installation (Lane_addon_tool_request_owner.Manual second_instance));
       reaches_instance "a bound initial browse dispatches on that exact Space" attached (List.nth attached 1)
         (live second) B.Tabs_list
         (fun () -> Browser_addon_host.issue ~goal_space:bound host ~preference:Browser_selection.Automatic B.Tabs_list);
+      let store=Filename.concat (Workspace.masc_dir config) "browser_goal_spaces.json" in
+      let legacy_goal=match Goal_store.upsert_goal config ~title:"Legacy Space routing" ~metric:"verified" ~target_value:"1" () with
+        | Ok (goal,_) -> goal.id | Error error -> fail (Goal_store.write_error_to_string error) in
+      Workspace.write_json config store (`Assoc ["bindings",`List [
+        `Assoc ["goalId",`String legacy_goal;"addonInstanceId",`String (List.nth attached 0).F.instance_id;
+          "space",B.ego_space_to_json {B.id=51;name="First Goal"};"actor",`String "keeper:legacy"];
+        Browser_goal_space.to_json bound]]);
+      let legacy_bound=match Browser_addon_host.goal_space host ~goal_id:legacy_goal with
+        | Ok (Some binding) -> binding | Ok None -> fail "expected legacy Goal binding"
+        | Error error -> fail (Browser_goal_space.error_message error) in
+      refuses_before_dispatch "legacy addonInstanceId Goal pin is refused before dispatch" attached
+        Tool_result.Workflow_rejection
+        (fun () -> Browser_addon_host.issue ~goal_space:legacy_bound host ~preference:Browser_selection.Automatic B.Tabs_list);
+      (match Browser_goal_space.unbind config ~goal_id:legacy_goal with
+       | Ok {removed=Some _; _} -> () | Ok {removed=None; _} -> fail "expected legacy removal"
+       | Error error -> fail (Browser_goal_space.error_message error));
+      let rebound_legacy=match Browser_addon_host.bind_goal_space host ~goal_id:legacy_goal ~client_id:first.client_id with
+        | Ok commit -> commit.binding | Error error -> fail (Browser_goal_space.error_message error) in
+      reaches_instance "after unbind and rebind, legacy Goal dispatches on its publisher" attached (List.nth attached 0)
+        (live first) B.Tabs_list
+        (fun () -> Browser_addon_host.issue ~goal_space:rebound_legacy host ~preference:Browser_selection.Automatic B.Tabs_list);
       check bool "unbound automatic browse never guesses among clients" true
         (Result.is_error (Browser_addon_host.issue host ~preference:Browser_selection.Automatic B.Tabs_list)));
   let conflicting={second with space=first.space} in

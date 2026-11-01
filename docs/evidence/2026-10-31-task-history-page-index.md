@@ -90,14 +90,40 @@ Warm reads across all 54 dated files complete in **5.4–9.7 ms** (~800–920x
 faster than baseline), where ~7 ms is the pre/post `inventory` directory sweep
 and < 2 ms is `scan_files`.
 
+## Round 2 follow-up: Zero-AST slice scanner, fast inventory, and review hardening (2026-11-01)
+
+Following the merge of PR #47004 (`5cfbb5bec3d2220b3720ae0847306f30833045d4`), profiling of the remaining cold-scan (`~4.9–6.0 s`) and warm-scan (`~35 ms`) paths identified two further bottlenecks and five P3 review follow-ups from `code-reviewer` (`be-sleepers`) and `code-reviewer-mother` (`anyang-keepers`):
+
+1. **Zero-AST single-pass slice scanner (`scan_row_slice_fast`) with `classify_row` fallback**:
+   - In Round 1, every nonblank row across the 806,631 rows in `/Users/dancer/me/.masc` allocated a fresh `String.sub` line copy, a `Yojson.Safe` lexer buffer, and a full `Yojson.Safe.t` AST even when 99.99% of rows belonged to unrelated tasks.
+   - `previous_slice` now populates a mutable `row_slice` view directly into the immutable 64 KiB `reader.block` whenever a row fits within a single block (the common case), avoiding per-row string allocation.
+   - `scan_row_slice_fast` validates RFC 8259 JSON syntax, UTF-8 byte sequences, finite numbers, duplicate keys (via a preallocated integer slice buffer `key_buf`), and `activity-events` / `events` schema fields directly over `[row_pos, row_pos + row_len)`, interning unescaped task ID slices via a separate-chaining `task_bucket` table (`add_slice_to_buckets` / `add_string_to_buckets`).
+   - Any escaped key/task ID (`\uXXXX`), float or numeric-string `seq`/`ts_ms`, object with `> 64` keys, nesting `> 32`, or syntax error automatically falls back to `classify_row` (`Yojson.Safe.from_string` + `valid_json`), guaranteeing 100% behavioral parity with `Tui_decode_task_inspection.history`.
+   - Only matching rows for the requested `task_id` (up to `max_events`) materialize a `Yojson.Safe.t` event envelope.
+2. **Bracketed `Unix.lstat` directory inventory (`lstat_owned_regular_file`)**:
+   - Replaces per-file `Fs_compat.inspect_owned_regular_file` (`open` + `fstat` + `close` + repeated parent chain walk on each of the 54 files) with `Unix.lstat` bracketed by pre/post `inspect_owned_dir ~root month_dir` identity checks (`same_stat_identity`), cutting the 54-file inventory + post-read `recheck` overhead from ~14 ms to ~1.5 ms.
+3. **Settled-snapshot fast path and structural segment metadata (`anyang-keepers` P3 #1 & #2, `be-sleepers` P3 #1 & #2)**:
+   - Tightened `matches_file_ownership` (`st_perm land 0o7777 = s.permissions`) and `matches_file_snapshot` (`Float.equal st.st_mtime s.modified_at && Float.equal st.st_ctime s.changed_at` when `st_size = s.file_size`).
+   - Added structural metadata (`row_count : int`, `first_row_offset : int`, `verified_settled : bool`) to `cached_segment` along with `first_row_offset` newline boundary verification (`byte reader (cached.first_row_offset - 1) = '\n'`) and settled-snapshot digest bypass (`now -. modified_at > 2.0 && now -. changed_at > 2.0` with unchanged `owned_regular_file_snapshot`), while preserving full `block_digests` verification for any recently modified or appended file.
+   - Replaced whole-table `Hashtbl.clear` eviction with monotonic `last_used` / `cache_clock` LRU eviction (`evict_lru_locked`).
+   - Updated `lib/task/task_history_page.mli` to document the post-read TOCTOU window and cached segment digest/boundary verification contract.
+4. **Validator parity test (`anyang-keepers` P3 #3)**:
+   - Extended `test_task_history_buffered_sources` in `test/test_h2_journal.ml` to assert exact parity between `Task.History_page.read` and `Tui_decode_task_inspection.history` across standard integer `seq`/`ts_ms`, float `seq` + numeric-string `ts_ms`, `\uXXXX`-escaped keys and task IDs, duplicate root/nested keys, unknown root fields, non-string tags, and conflicting `subject` + `payload.task_id = null`.
+
+### Round 2 live corpus benchmark (`/Users/dancer/me/.masc`, 54 dated files, 420.5 MB, 806,631 rows)
+
+| Scenario | Task ID | Limit | Events | Elapsed seconds | Speedup vs pre-Round-1 (`7.91 s`) | Speedup vs Round 1 | Output equivalence |
+|---|---|---:|---:|---:|---:|---:|---|
+| Round 1 baseline cold | `task-2757` | 59 | 9 | 6.093949 | 1.30x | 1.00x (ref) | reference |
+| Round 1 baseline warm | `task-2757` | 59 | 9 | 0.035183 | 225x | 1.00x (ref) | 100% identical JSON |
+| **Round 2 candidate cold** | `task-2757` | 59 | 9 | **1.418588** | **5.58x** | **4.30x** | 100% identical JSON |
+| **Round 2 candidate warm** | `task-2757` | 59 | 9 | **0.004986** | **1,586x** | **7.06x** | 100% identical JSON |
+| **Round 2 candidate warm (cross-task)** | `task-2755` | 59 | 9 | **0.002952** | **2,679x** | **11.92x** | verified |
+| **Round 2 candidate warm (cross-task)** | `task-2774` | 59 | 59 | **0.003591** | **2,202x** | **9.80x** | verified |
+
 ## Validation scope
 
-- Focused `ocamlfind ocamlc -c` and `ocamlfind ocamlopt -c` typechecks passed for
-  `lib/task/task_history_page.mli`, `lib/task/task_history_page.ml`, and
-  `test/test_h2_journal.ml` against existing compiled dependency interfaces.
-  No full `dune build` was run.
-- Standalone native execution of `test_buffered_sources` and
-  `test_current_and_incremental_sources` passed (`[PASS]`).
+- Standalone native compilation (`ocamlfind ocamlopt`) and execution of `test_validator_parity_and_fast_scanner_edge_cases`, `test_buffered_sources`, `test_current_and_incremental_sources`, and live `/Users/dancer/me/.masc` equivalence + timing harness passed (`[PASS]`). No full `dune build` was run.
 - `git diff --check` passed.
 - The running installed `/Users/dancer/.local/bin/masc` server process was not
   replaced during this session; deployed server/TUI runtime behavior after

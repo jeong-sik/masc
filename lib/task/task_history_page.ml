@@ -73,19 +73,52 @@ let owned result = Result.map_error (fun _ -> Source_unavailable) result
 let root_entry_is_metadata source name = match source with
   | Activity -> Activity_graph.root_entry_is_metadata name
   | Audit -> false
+
+let same_stat_identity (a : Unix.stats) (b : Unix.stats) =
+  a.st_dev = b.st_dev && a.st_ino = b.st_ino
+
+let snapshot_of_stats (stats : Unix.stats) : Fs_compat.owned_regular_file_snapshot =
+  { device = stats.st_dev
+  ; inode = stats.st_ino
+  ; owner_uid = stats.st_uid
+  ; permissions = stats.st_perm land 0o7777
+  ; file_size = stats.st_size
+  ; modified_at = stats.st_mtime
+  ; changed_at = stats.st_ctime
+  }
+
+let lstat_owned_regular_file ~owner_uid path =
+  try
+    let st = Unix.lstat path in
+    if st.st_kind <> Unix.S_REG
+       || st.st_uid <> owner_uid
+       || (st.st_perm land 0o022) <> 0
+       || (st.st_perm land 0o400) = 0
+       || st.st_size < 0
+    then Error Source_unavailable
+    else Ok (snapshot_of_stats st)
+  with
+  | Unix.Unix_error (Unix.ENOENT, _, _) -> Error Source_changed
+  | Unix.Unix_error _ -> Error Source_unavailable
+
+let inspect_owned_dir ~root path =
+  match Fs_compat.inspect_owned_directory_chain ~ownership_root:root path with
+  | Ok (Fs_compat.Owned_directory stat) -> Ok stat
+  | Ok Owned_directory_missing -> Error Source_changed
+  | Error _ -> Error Source_unavailable
+
 let inventory ~root ~held =
+  let owner_uid = Unix.geteuid () in
   let* observations,roots,files=List.fold_left (fun result source ->
     let* observations,roots,files=result in
     let name=source_name source in
     let directory=Filename.concat root name in
-    let* months=Fs_compat.read_owned_directory_if_present ~owner_uid:(Unix.geteuid ())
+    let* months=Fs_compat.read_owned_directory_if_present ~owner_uid
       ~inventory_root:held ~ownership_root:root directory |> owned in
     match months with
     | None -> Ok ((source,Not_created)::observations,`Assoc ["source",`String name;"state",`String "not-created"]::roots,files)
     | Some months ->
-      let* stat=match Fs_compat.inspect_owned_directory_chain ~ownership_root:root directory with
-        | Ok (Fs_compat.Owned_directory stat) -> Ok stat
-        | Ok Owned_directory_missing | Error _ -> Error Source_changed in
+      let* stat=inspect_owned_dir ~root directory in
       let* files=List.fold_left (fun result month ->
         let* collected=result in
         if Layout.entry_is_foreign_to_layout month || root_entry_is_metadata source month
@@ -93,20 +126,24 @@ let inventory ~root ~held =
         match Layout.year_and_month_of_directory_name month with
         | None -> Error (Invalid_layout {entry=name ^ "/" ^ month})
         | Some (year,month_number) ->
-          let directory=Filename.concat directory month in
-          let* names=Fs_compat.read_owned_directory ~owner_uid:(Unix.geteuid ()) ~inventory_root:held ~ownership_root:root directory |> owned in
-          List.fold_left (fun result filename ->
-            let* collected=result in
-            if Layout.entry_is_foreign_to_layout filename then Ok collected
-            else if not (Layout.day_file_name_is_valid ~year ~month:month_number filename)
-            then Error (Invalid_layout {entry=name ^ "/" ^ month ^ "/" ^ filename})
-            else
-              let path=Filename.concat directory filename in
-              let* observed=Fs_compat.load_owned_regular_file_range ~ownership_root:root ~offset:0 ~max_bytes:0 path |> owned in
-              match observed with
-              | None -> Error Source_changed
-              | Some observed -> Ok ({source;relative=name ^ "/" ^ month ^ "/" ^ filename;path;snapshot=observed.snapshot}::collected)
-          ) (Ok collected) names
+          let month_dir=Filename.concat directory month in
+          let* names=Fs_compat.read_owned_directory ~owner_uid ~inventory_root:held ~ownership_root:root month_dir |> owned in
+          let* month_before=inspect_owned_dir ~root month_dir in
+          let* collected=
+            List.fold_left (fun result filename ->
+              let* collected=result in
+              if Layout.entry_is_foreign_to_layout filename then Ok collected
+              else if not (Layout.day_file_name_is_valid ~year ~month:month_number filename)
+              then Error (Invalid_layout {entry=name ^ "/" ^ month ^ "/" ^ filename})
+              else
+                let path=Filename.concat month_dir filename in
+                let* snapshot=lstat_owned_regular_file ~owner_uid path in
+                Ok ({source;relative=name ^ "/" ^ month ^ "/" ^ filename;path;snapshot}::collected)
+            ) (Ok collected) names
+          in
+          let* month_after=inspect_owned_dir ~root month_dir in
+          if not (same_stat_identity month_before month_after) then Error Source_changed
+          else Ok collected
       ) (Ok files) months in
       Ok ((source,Observed)::observations,`Assoc ["source",`String name;"state",`String "observed";
         "device",`Int stat.st_dev;"inode",`Int stat.st_ino]::roots,files)
@@ -114,6 +151,7 @@ let inventory ~root ~held =
   if List.for_all (fun (_,availability) -> availability=Not_created) observations then Error Source_unavailable
   else Ok {observations=List.rev observations;roots=List.rev roots;
     files=List.sort (fun left right -> compare_relative right.relative left.relative) files}
+
 let capture files = List.filter_map (fun source ->
   Option.map (fun file -> {file=file.relative;size=file.snapshot.file_size})
     (List.find_opt (fun file -> file.source=source) files)) sources
@@ -141,28 +179,27 @@ type reader = {
   mutable fd : Unix.file_descr option;
   mutable parent_stat : Unix.stats option;
   mutable block_from : int;
+  mutable block_len : int;
   mutable block : string;
 }
-
-let same_stat_identity (a : Unix.stats) (b : Unix.stats) =
-  a.st_dev = b.st_dev && a.st_ino = b.st_ino
 
 let matches_file_ownership (s : Fs_compat.owned_regular_file_snapshot) (st : Unix.stats) =
   st.st_kind = Unix.S_REG
   && st.st_uid = s.owner_uid
+  && (st.st_perm land 0o7777) = s.permissions
   && (st.st_perm land 0o022) = 0
 
 let matches_file_snapshot (s : Fs_compat.owned_regular_file_snapshot) (st : Unix.stats) =
   matches_file_ownership s st
   && st.st_dev = s.device
   && st.st_ino = s.inode
-  && st.st_size >= s.file_size
+  && (st.st_size > s.file_size
+      || (st.st_size = s.file_size
+          && Float.equal st.st_mtime s.modified_at
+          && Float.equal st.st_ctime s.changed_at))
 
 let inspect_parent_dir ~root path =
-  match Fs_compat.inspect_owned_directory_chain ~ownership_root:root (Filename.dirname path) with
-  | Ok (Fs_compat.Owned_directory stat) -> Ok stat
-  | Ok Owned_directory_missing -> Error Source_changed
-  | Error _ -> Error Source_unavailable
+  inspect_owned_dir ~root (Filename.dirname path)
 
 let inspect_leaf_path (file : file) =
   try
@@ -209,7 +246,9 @@ let ensure_reader_fd reader =
        err)
 
 let with_reader ~root file fn =
-  let r = { root; file; fd = None; parent_stat = None; block_from = -1; block = "" } in
+  let r =
+    { root; file; fd = None; parent_stat = None; block_from = -1; block_len = 0; block = "" }
+  in
   let close_quiet () =
     match r.fd with
     | None -> ()
@@ -228,7 +267,7 @@ let with_reader ~root file fn =
     | Some _, None -> Error Source_changed)
 
 let rec read_exact fd bytes offset remaining =
-  if remaining = 0 then Ok (Bytes.unsafe_to_string bytes)
+  if remaining = 0 then Ok ()
   else
     match Unix.read fd bytes offset remaining with
     | 0 -> Error Source_changed
@@ -238,7 +277,7 @@ let rec read_exact fd bytes offset remaining =
 
 let load_block reader offset =
   if offset<0 || offset>=reader.file.snapshot.file_size then Error Source_changed
-  else if offset>=reader.block_from && offset-reader.block_from<String.length reader.block then Ok ()
+  else if offset>=reader.block_from && offset-reader.block_from<reader.block_len then Ok ()
   else
     let from=offset-(offset mod io_block_bytes) in
     let length=min io_block_bytes (reader.file.snapshot.file_size-from) in
@@ -246,7 +285,8 @@ let load_block reader offset =
     let* ()=
       try if Unix.lseek fd from Unix.SEEK_SET=from then Ok () else Error Source_changed
       with Unix.Unix_error _ -> Error Source_unavailable in
-    let* content=read_exact fd (Bytes.create length) 0 length in
+    let bytes=Bytes.create length in
+    let* ()=read_exact fd bytes 0 length in
     let* ()=
       try
         let st=Unix.fstat fd in
@@ -254,37 +294,75 @@ let load_block reader offset =
         else if matches_file_snapshot reader.file.snapshot st then Ok () else Error Source_changed
       with Unix.Unix_error _ -> Error Source_unavailable in
     reader.block_from<-from;
-    reader.block<-content;
+    reader.block_len<-length;
+    reader.block<-Bytes.unsafe_to_string bytes;
     Ok ()
 
 let byte reader offset =
   let* ()=load_block reader offset in
   Ok reader.block.[offset-reader.block_from]
 
-let previous reader before =
-  if before=0 then Ok None
+type row_slice = {
+  mutable row_offset : int;
+  mutable row_buf : string;
+  mutable row_pos : int;
+  mutable row_len : int;
+}
+
+let slice_to_string (s : row_slice) =
+  if s.row_pos = 0 && s.row_len = String.length s.row_buf then s.row_buf
+  else String.sub s.row_buf s.row_pos s.row_len
+
+let rec rindex_newline s i =
+  if i < 0 then -1
+  else if String.unsafe_get s i = '\n' then i
+  else rindex_newline s (i - 1)
+
+let rec index_newline s limit i =
+  if i >= limit then -1
+  else if String.unsafe_get s i = '\n' then i
+  else index_newline s limit (i + 1)
+
+let rec previous_slice_walk reader (out : row_slice) offset chunks =
+  if offset < 0 then (
+    let line = match chunks with [ single ] -> single | _ -> String.concat "" chunks in
+    out.row_offset <- 0;
+    out.row_buf <- line;
+    out.row_pos <- 0;
+    out.row_len <- String.length line;
+    Ok true)
   else
-    let* ending=byte reader (before-1) in
-    if ending<>'\n' then Error (Invalid_event {file=reader.file.relative;offset=before-1})
+    let* () = load_block reader offset in
+    let index = offset - reader.block_from in
+    let ending = rindex_newline reader.block index in
+    if ending >= 0 then
+      let start_in_block = ending + 1 in
+      let chunk_len = index - ending in
+      match chunks with
+      | [] ->
+        out.row_offset <- reader.block_from + start_in_block;
+        out.row_buf <- reader.block;
+        out.row_pos <- start_in_block;
+        out.row_len <- chunk_len;
+        Ok true
+      | _ ->
+        let chunk = String.sub reader.block start_in_block chunk_len in
+        let line = String.concat "" (chunk :: chunks) in
+        out.row_offset <- reader.block_from + start_in_block;
+        out.row_buf <- line;
+        out.row_pos <- 0;
+        out.row_len <- String.length line;
+        Ok true
     else
-      (* Search whole slices, preserving their forward byte order. Walking
-         Result/Buffer once per byte and reversing every row made sparse
-         histories spend seconds on unrelated workspace activity. *)
-      let rec walk offset chunks =
-        if offset<0 then
-          Ok (Some (0, match chunks with [ single ] -> single | _ -> String.concat "" chunks))
-        else
-          let* ()=load_block reader offset in
-          let index=offset-reader.block_from in
-          match String.rindex_from_opt reader.block index '\n' with
-          | Some ending ->
-            let chunk=String.sub reader.block (ending+1) (index-ending) in
-            let line=match chunks with [] -> chunk | _ -> String.concat "" (chunk::chunks) in
-            Ok (Some (reader.block_from+ending+1,line))
-          | None ->
-            let chunk=String.sub reader.block 0 (index+1) in
-            walk (reader.block_from-1) (chunk::chunks) in
-      walk (before-2) []
+      let chunk = String.sub reader.block 0 (index + 1) in
+      previous_slice_walk reader out (reader.block_from - 1) (chunk :: chunks)
+
+let previous_slice reader (out : row_slice) before =
+  if before = 0 then Ok false
+  else
+    let* ending = byte reader (before - 1) in
+    if ending <> '\n' then Error (Invalid_event { file = reader.file.relative; offset = before - 1 })
+    else previous_slice_walk reader out (before - 2) []
 
 let read_line_at reader offset =
   let buffer=Buffer.create 256 in
@@ -293,16 +371,16 @@ let read_line_at reader offset =
     else
       let* ()=load_block reader pos in
       let index=pos-reader.block_from in
-      match String.index_from_opt reader.block index '\n' with
-      | Some ending ->
+      let ending = index_newline reader.block reader.block_len index in
+      if ending >= 0 then
         if Buffer.length buffer=0 then
           Ok (String.sub reader.block index (ending-index))
         else (
           Buffer.add_substring buffer reader.block index (ending-index);
           Ok (Buffer.contents buffer))
-      | None ->
-        Buffer.add_substring buffer reader.block index (String.length reader.block-index);
-        walk (reader.block_from+String.length reader.block) in
+      else (
+        Buffer.add_substring buffer reader.block index (reader.block_len-index);
+        walk (reader.block_from+reader.block_len)) in
   walk offset
 
 let read_line_at_bounded reader ~limit offset =
@@ -315,19 +393,19 @@ let read_line_at_bounded reader ~limit offset =
       else
         let* () = load_block reader pos in
         let index = pos - reader.block_from in
-        let avail = min (String.length reader.block) (limit - reader.block_from) in
+        let avail = min reader.block_len (limit - reader.block_from) in
         if avail <= index then Ok None
         else
-          match String.index_from_opt reader.block index '\n' with
-          | Some ending when ending < avail ->
+          let ending = index_newline reader.block avail index in
+          if ending >= 0 then
             if Buffer.length buffer = 0 then
               Ok (Some (String.sub reader.block index (ending - index)))
             else (
               Buffer.add_substring buffer reader.block index (ending - index);
               Ok (Some (Buffer.contents buffer)))
-          | Some _ | None ->
+          else (
             Buffer.add_substring buffer reader.block index (avail - index);
-            walk (reader.block_from + avail)
+            walk (reader.block_from + avail))
     in
     walk offset
 
@@ -343,14 +421,13 @@ let is_whitespace = function
   | ' ' | '\x0c' | '\n' | '\r' | '\t' -> true
   | _ -> false
 
-let is_blank_line s =
-  let len = String.length s in
-  let rec loop i =
-    if i = len then true
-    else if is_whitespace s.[i] then loop (i + 1)
-    else false
-  in
-  loop 0
+let rec is_blank_slice_loop s stop i =
+  if i = stop then true
+  else if is_whitespace (String.unsafe_get s i) then is_blank_slice_loop s stop (i + 1)
+  else false
+
+let is_blank_slice s ~pos ~len =
+  is_blank_slice_loop s (pos + len) pos
 
 let is_nonempty_trimmed s =
   let len = String.length s in
@@ -481,12 +558,14 @@ type row_outcome =
 
 let classify_identities ~json = function
   | [] | [ `Null ] | [ `Null; `Null ] -> Row_unrelated
-  | [ `String id ] -> Row_task { task_id = id; json }
-  | [ `String id1; `String id2 ] when String.equal id1 id2 ->
+  | [ `String id ] when is_nonempty_trimmed id -> Row_task { task_id = id; json }
+  | [ `String id1; `String id2 ] when is_nonempty_trimmed id1 && String.equal id1 id2 ->
     Row_task { task_id = id1; json }
   | identities ->
     let string_ids =
-      List.filter_map (function `String id -> Some id | _ -> None) identities
+      List.filter_map
+        (function `String id when is_nonempty_trimmed id -> Some id | _ -> None)
+        identities
     in
     (match string_ids with
      | [] -> Row_unrelated
@@ -510,6 +589,708 @@ let classify_row ~source line =
   | _ -> Row_invalid
   | exception Yojson.Json_error _ -> Row_invalid
 
+(* Zero-AST single-pass RFC 8259 scanner over a slice [pos, pos + len) in [s].
+   Handles standard rows with unescaped ASCII keys and task IDs without
+   allocating a Yojson.Safe.t AST or lexer buffer. Any escape in a key/ID,
+   non-integer seq/ts_ms, >64 keys in an object, nesting >32, or malformed
+   input falls back to [classify_row] so Yojson parity is exact. *)
+let max_fast_depth = 32
+let max_fast_keys = 64
+let key_stride = max_fast_keys * 2
+
+let rec skip_ws s stop i =
+  if i >= stop then i
+  else
+    match String.unsafe_get s i with
+    | ' ' | '\t' | '\n' | '\r' -> skip_ws s stop (i + 1)
+    | '\x0c' -> -1
+    | _ -> i
+
+let is_hex_digit = function
+  | '0' .. '9' | 'a' .. 'f' | 'A' .. 'F' -> true
+  | _ -> false
+
+let is_utf8_cont c =
+  let code = Char.code c in
+  code >= 0x80 && code <= 0xbf
+
+let rec skip_valid_string s stop i =
+  if i >= stop then -1
+  else
+    let c = String.unsafe_get s i in
+    match c with
+    | '"' -> i + 1
+    | '\\' ->
+      if i + 1 >= stop then -1
+      else (
+        match String.unsafe_get s (i + 1) with
+        | '"' | '\\' | '/' | 'b' | 'f' | 'n' | 'r' | 't' ->
+          skip_valid_string s stop (i + 2)
+        | 'u' ->
+          if i + 5 >= stop then -1
+          else
+            let h0 = String.unsafe_get s (i + 2) in
+            let h1 = String.unsafe_get s (i + 3) in
+            let h2 = String.unsafe_get s (i + 4) in
+            let h3 = String.unsafe_get s (i + 5) in
+            if not (is_hex_digit h0 && is_hex_digit h1 && is_hex_digit h2 && is_hex_digit h3) then -1
+            else if (h0 = 'd' || h0 = 'D')
+                    && (match h1 with '8' .. '9' | 'a' .. 'f' | 'A' .. 'F' -> true | _ -> false)
+            then -1
+            else skip_valid_string s stop (i + 6)
+        | _ -> -1)
+    | '\x00' .. '\x1f' -> -1
+    | '\x20' .. '\x7f' -> skip_valid_string s stop (i + 1)
+    | '\xc2' .. '\xdf' ->
+      if i + 1 < stop && is_utf8_cont (String.unsafe_get s (i + 1)) then
+        skip_valid_string s stop (i + 2)
+      else -1
+    | '\xe0' ->
+      if i + 2 < stop
+         && (let b1 = Char.code (String.unsafe_get s (i + 1)) in b1 >= 0xa0 && b1 <= 0xbf)
+         && is_utf8_cont (String.unsafe_get s (i + 2))
+      then skip_valid_string s stop (i + 3)
+      else -1
+    | '\xe1' .. '\xec' | '\xee' .. '\xef' ->
+      if i + 2 < stop
+         && is_utf8_cont (String.unsafe_get s (i + 1))
+         && is_utf8_cont (String.unsafe_get s (i + 2))
+      then skip_valid_string s stop (i + 3)
+      else -1
+    | '\xed' ->
+      if i + 2 < stop
+         && (let b1 = Char.code (String.unsafe_get s (i + 1)) in b1 >= 0x80 && b1 <= 0x9f)
+         && is_utf8_cont (String.unsafe_get s (i + 2))
+      then skip_valid_string s stop (i + 3)
+      else -1
+    | '\xf0' ->
+      if i + 3 < stop
+         && (let b1 = Char.code (String.unsafe_get s (i + 1)) in b1 >= 0x90 && b1 <= 0xbf)
+         && is_utf8_cont (String.unsafe_get s (i + 2))
+         && is_utf8_cont (String.unsafe_get s (i + 3))
+      then skip_valid_string s stop (i + 4)
+      else -1
+    | '\xf1' .. '\xf3' ->
+      if i + 3 < stop
+         && is_utf8_cont (String.unsafe_get s (i + 1))
+         && is_utf8_cont (String.unsafe_get s (i + 2))
+         && is_utf8_cont (String.unsafe_get s (i + 3))
+      then skip_valid_string s stop (i + 4)
+      else -1
+    | '\xf4' ->
+      if i + 3 < stop
+         && (let b1 = Char.code (String.unsafe_get s (i + 1)) in b1 >= 0x80 && b1 <= 0x8f)
+         && is_utf8_cont (String.unsafe_get s (i + 2))
+         && is_utf8_cont (String.unsafe_get s (i + 3))
+      then skip_valid_string s stop (i + 4)
+      else -1
+    | _ -> -1
+
+let rec find_unescaped_ascii_end s stop i =
+  if i >= stop then -1
+  else
+    match String.unsafe_get s i with
+    | '"' -> i
+    | '\\' | '\x00' .. '\x1f' | '\x7f' .. '\xff' -> -1
+    | _ -> find_unescaped_ascii_end s stop (i + 1)
+
+let slice_is_nonempty_trimmed s off len =
+  len > 0
+  && not (is_whitespace (String.unsafe_get s off))
+  && not (is_whitespace (String.unsafe_get s (off + len - 1)))
+
+let rec slice_eq_lit_loop s off lit len k =
+  if k = len then true
+  else if String.unsafe_get s (off + k) <> String.unsafe_get lit k then false
+  else slice_eq_lit_loop s off lit len (k + 1)
+
+let slice_eq_lit s off len lit =
+  len = String.length lit && slice_eq_lit_loop s off lit len 0
+
+let rec slice_eq_slice_loop s off1 off2 len k =
+  if k = len then true
+  else if String.unsafe_get s (off1 + k) <> String.unsafe_get s (off2 + k) then false
+  else slice_eq_slice_loop s off1 off2 len (k + 1)
+
+let slice_eq_slice s off1 len1 off2 len2 =
+  len1 = len2 && slice_eq_slice_loop s off1 off2 len1 0
+
+let rec register_unique_key_loop s (key_buf : int array) base count k_off k_len j =
+  if j = count then (
+    Array.unsafe_set key_buf (base + (count * 2)) k_off;
+    Array.unsafe_set key_buf (base + (count * 2) + 1) k_len;
+    true)
+  else
+    let prev_off = Array.unsafe_get key_buf (base + (j * 2)) in
+    let prev_len = Array.unsafe_get key_buf (base + (j * 2) + 1) in
+    if slice_eq_slice s k_off k_len prev_off prev_len then false
+    else register_unique_key_loop s key_buf base count k_off k_len (j + 1)
+
+let register_unique_key s (key_buf : int array) base count k_off k_len =
+  count < max_fast_keys
+  && register_unique_key_loop s key_buf base count k_off k_len 0
+
+let rec count_digits s stop i =
+  if i < stop then
+    match String.unsafe_get s i with
+    | '0' .. '9' -> count_digits s stop (i + 1)
+    | _ -> i
+  else i
+
+let scan_int_field s stop i =
+  if i >= stop then -1
+  else
+    let i = if String.unsafe_get s i = '-' then i + 1 else i in
+    if i >= stop then -1
+    else
+      match String.unsafe_get s i with
+      | '0' ->
+        let next = i + 1 in
+        if next < stop
+           && (match String.unsafe_get s next with '0' .. '9' | '.' | 'e' | 'E' -> true | _ -> false)
+        then -1
+        else next
+      | '1' .. '9' ->
+        let next = count_digits s stop (i + 1) in
+        let digits = next - i in
+        if digits > 18 then -1
+        else if next < stop
+                && (match String.unsafe_get s next with '.' | 'e' | 'E' -> true | _ -> false)
+        then -1
+        else next
+      | _ -> -1
+
+let skip_exponent s stop i =
+  if i >= stop then i
+  else
+    match String.unsafe_get s i with
+    | 'e' | 'E' ->
+      let i = i + 1 in
+      if i >= stop then -1
+      else
+        let i =
+          match String.unsafe_get s i with
+          | '+' | '-' -> i + 1
+          | _ -> i
+        in
+        if i >= stop then -1
+        else
+          let exp_end = count_digits s stop i in
+          let exp_digits = exp_end - i in
+          if exp_digits < 1 || exp_digits > 2 then -1
+          else exp_end
+    | _ -> i
+
+let skip_valid_number s stop i =
+  if i >= stop then -1
+  else
+    let i = if String.unsafe_get s i = '-' then i + 1 else i in
+    if i >= stop then -1
+    else
+      let int_end =
+        match String.unsafe_get s i with
+        | '0' ->
+          let next = i + 1 in
+          if next < stop && (match String.unsafe_get s next with '0' .. '9' -> true | _ -> false)
+          then -1
+          else next
+        | '1' .. '9' ->
+          let next = count_digits s stop (i + 1) in
+          if next - i > 18 then -1 else next
+        | _ -> -1
+      in
+      if int_end < 0 then -1
+      else if int_end < stop && String.unsafe_get s int_end = '.' then
+        let frac_start = int_end + 1 in
+        let frac_end = count_digits s stop frac_start in
+        let frac_digits = frac_end - frac_start in
+        if frac_digits < 1 || frac_digits > 64 then -1
+        else skip_exponent s stop frac_end
+      else skip_exponent s stop int_end
+
+let rec skip_valid_value s stop key_buf depth i =
+  if depth >= max_fast_depth then -1
+  else
+    let i = skip_ws s stop i in
+    if i < 0 || i >= stop then -1
+    else
+      match String.unsafe_get s i with
+      | '"' -> skip_valid_string s stop (i + 1)
+      | '-' | '0' .. '9' -> skip_valid_number s stop i
+      | 't' ->
+        if i + 4 <= stop
+           && String.unsafe_get s (i + 1) = 'r'
+           && String.unsafe_get s (i + 2) = 'u'
+           && String.unsafe_get s (i + 3) = 'e'
+        then i + 4
+        else -1
+      | 'f' ->
+        if i + 5 <= stop
+           && String.unsafe_get s (i + 1) = 'a'
+           && String.unsafe_get s (i + 2) = 'l'
+           && String.unsafe_get s (i + 3) = 's'
+           && String.unsafe_get s (i + 4) = 'e'
+        then i + 5
+        else -1
+      | 'n' ->
+        if i + 4 <= stop
+           && String.unsafe_get s (i + 1) = 'u'
+           && String.unsafe_get s (i + 2) = 'l'
+           && String.unsafe_get s (i + 3) = 'l'
+        then i + 4
+        else -1
+      | '[' ->
+        let i = skip_ws s stop (i + 1) in
+        if i < 0 || i >= stop then -1
+        else if String.unsafe_get s i = ']' then i + 1
+        else skip_valid_array s stop key_buf (depth + 1) i
+      | '{' ->
+        let i = skip_ws s stop (i + 1) in
+        if i < 0 || i >= stop then -1
+        else if String.unsafe_get s i = '}' then i + 1
+        else skip_valid_object s stop key_buf depth 0 i
+      | _ -> -1
+
+and skip_valid_array s stop key_buf depth i =
+  let i = skip_valid_value s stop key_buf depth i in
+  if i < 0 then -1
+  else
+    let i = skip_ws s stop i in
+    if i < 0 || i >= stop then -1
+    else
+      match String.unsafe_get s i with
+      | ']' -> i + 1
+      | ',' -> skip_valid_array s stop key_buf depth (i + 1)
+      | _ -> -1
+
+and skip_valid_object s stop key_buf depth count i =
+  let i = skip_ws s stop i in
+  if i < 0 || i >= stop || String.unsafe_get s i <> '"' then -1
+  else
+    let k_off = i + 1 in
+    let k_end = find_unescaped_ascii_end s stop k_off in
+    if k_end < 0 then -1
+    else
+      let k_len = k_end - k_off in
+      let base = depth * key_stride in
+      if not (register_unique_key s key_buf base count k_off k_len) then -1
+      else
+        let i = skip_ws s stop (k_end + 1) in
+        if i < 0 || i >= stop || String.unsafe_get s i <> ':' then -1
+        else
+          let i = skip_valid_value s stop key_buf (depth + 1) (i + 1) in
+          if i < 0 then -1
+          else
+            let i = skip_ws s stop i in
+            if i < 0 || i >= stop then -1
+            else
+              match String.unsafe_get s i with
+              | '}' -> i + 1
+              | ',' -> skip_valid_object s stop key_buf depth (count + 1) (i + 1)
+              | _ -> -1
+
+(* Pre-allocated [state : int array] layout (13 ints, zero heap allocation):
+   - Slot 0 (subject / audit task):   state[0] = 0(absent)|1(null)|2(slice), state[1]=off, state[2]=len
+   - Slot 3 (payload / audit task_id): state[3] = 0|1|2, state[4]=off, state[5]=len
+   - Slot 6 (context):                 state[6] = 0|1|2, state[7]=off, state[8]=len
+   - Entity scratch:                   state[9]=kind_off, state[10]=kind_len, state[11]=id_off, state[12]=id_len
+   Return code of [scan_row_slice_fast]:
+   - 0  = Fast_unrelated
+   - 1  = Fast_task (matched slice offset in state[1], length in state[2])
+   - -1 = Fast_fallback *)
+
+let scan_entity_field s stop (state : int array) ~is_subject i =
+  let i = skip_ws s stop i in
+  if i < 0 || i >= stop then -1
+  else
+    match String.unsafe_get s i with
+    | 'n' ->
+      if i + 4 <= stop
+         && String.unsafe_get s (i + 1) = 'u'
+         && String.unsafe_get s (i + 2) = 'l'
+         && String.unsafe_get s (i + 3) = 'l'
+      then i + 4
+      else -1
+    | '{' ->
+      let i1 = skip_ws s stop (i + 1) in
+      if i1 < 0 || i1 >= stop || String.unsafe_get s i1 <> '"' then -1
+      else
+        let k1_off = i1 + 1 in
+        let k1_end = find_unescaped_ascii_end s stop k1_off in
+        if k1_end < 0 then -1
+        else
+          let k1_len = k1_end - k1_off in
+          let c1 = skip_ws s stop (k1_end + 1) in
+          if c1 < 0 || c1 >= stop || String.unsafe_get s c1 <> ':' then -1
+          else
+            let v1 = skip_ws s stop (c1 + 1) in
+            if v1 < 0 || v1 >= stop || String.unsafe_get s v1 <> '"' then -1
+            else
+              let v1_off = v1 + 1 in
+              let v1_end = find_unescaped_ascii_end s stop v1_off in
+              if v1_end < 0 then -1
+              else
+                let v1_len = v1_end - v1_off in
+                if not (slice_is_nonempty_trimmed s v1_off v1_len) then -1
+                else
+                  let sep = skip_ws s stop (v1_end + 1) in
+                  if sep < 0 || sep >= stop || String.unsafe_get s sep <> ',' then -1
+                  else
+                    let i2 = skip_ws s stop (sep + 1) in
+                    if i2 < 0 || i2 >= stop || String.unsafe_get s i2 <> '"' then -1
+                    else
+                      let k2_off = i2 + 1 in
+                      let k2_end = find_unescaped_ascii_end s stop k2_off in
+                      if k2_end < 0 then -1
+                      else
+                        let k2_len = k2_end - k2_off in
+                        let c2 = skip_ws s stop (k2_end + 1) in
+                        if c2 < 0 || c2 >= stop || String.unsafe_get s c2 <> ':' then -1
+                        else
+                          let v2 = skip_ws s stop (c2 + 1) in
+                          if v2 < 0 || v2 >= stop || String.unsafe_get s v2 <> '"' then -1
+                          else
+                            let v2_off = v2 + 1 in
+                            let v2_end = find_unescaped_ascii_end s stop v2_off in
+                            if v2_end < 0 then -1
+                            else
+                              let v2_len = v2_end - v2_off in
+                              if not (slice_is_nonempty_trimmed s v2_off v2_len) then -1
+                              else
+                                let close = skip_ws s stop (v2_end + 1) in
+                                if close < 0 || close >= stop || String.unsafe_get s close <> '}' then
+                                  -1
+                                else if slice_eq_lit s k1_off k1_len "kind"
+                                        && slice_eq_lit s k2_off k2_len "id"
+                                then (
+                                  if is_subject && slice_eq_lit s v1_off v1_len "task" then (
+                                    Array.unsafe_set state 0 2;
+                                    Array.unsafe_set state 1 v2_off;
+                                    Array.unsafe_set state 2 v2_len);
+                                  close + 1
+                                ) else if slice_eq_lit s k1_off k1_len "id"
+                                          && slice_eq_lit s k2_off k2_len "kind"
+                                then (
+                                  if is_subject && slice_eq_lit s v2_off v2_len "task" then (
+                                    Array.unsafe_set state 0 2;
+                                    Array.unsafe_set state 1 v1_off;
+                                    Array.unsafe_set state 2 v1_len);
+                                  close + 1
+                                ) else -1
+    | _ -> -1
+
+let scan_id_value s stop (state : int array) slot_base i =
+  let i = skip_ws s stop i in
+  if i < 0 || i >= stop then -1
+  else
+    match String.unsafe_get s i with
+    | 'n' ->
+      if i + 4 <= stop
+         && String.unsafe_get s (i + 1) = 'u'
+         && String.unsafe_get s (i + 2) = 'l'
+         && String.unsafe_get s (i + 3) = 'l'
+      then (
+        Array.unsafe_set state slot_base 1;
+        i + 4)
+      else -1
+    | '"' ->
+      let v_off = i + 1 in
+      let v_end = find_unescaped_ascii_end s stop v_off in
+      if v_end < 0 then -1
+      else
+        let v_len = v_end - v_off in
+        if not (slice_is_nonempty_trimmed s v_off v_len) then -1
+        else (
+          Array.unsafe_set state slot_base 2;
+          Array.unsafe_set state (slot_base + 1) v_off;
+          Array.unsafe_set state (slot_base + 2) v_len;
+          v_end + 1)
+    | _ -> -1
+
+let rec scan_assoc_loop s stop key_buf (state : int array) slot_base depth base count pos =
+  let pos = skip_ws s stop pos in
+  if pos < 0 || pos >= stop || String.unsafe_get s pos <> '"' then -1
+  else
+    let k_off = pos + 1 in
+    let k_end = find_unescaped_ascii_end s stop k_off in
+    if k_end < 0 then -1
+    else
+      let k_len = k_end - k_off in
+      if not (register_unique_key s key_buf base count k_off k_len) then -1
+      else
+        let colon = skip_ws s stop (k_end + 1) in
+        if colon < 0 || colon >= stop || String.unsafe_get s colon <> ':' then -1
+        else
+          let next_pos =
+            if slice_eq_lit s k_off k_len "task_id" then
+              scan_id_value s stop state slot_base (colon + 1)
+            else
+              skip_valid_value s stop key_buf (depth + 1) (colon + 1)
+          in
+          if next_pos < 0 then -1
+          else
+            let after = skip_ws s stop next_pos in
+            if after < 0 || after >= stop then -1
+            else
+              match String.unsafe_get s after with
+              | '}' -> after + 1
+              | ',' ->
+                scan_assoc_loop s stop key_buf state slot_base depth base (count + 1) (after + 1)
+              | _ -> -1
+
+let scan_assoc_extracting_task_id s stop key_buf (state : int array) slot_base depth i =
+  let i = skip_ws s stop i in
+  if i < 0 || i >= stop || String.unsafe_get s i <> '{' then -1
+  else
+    let i = skip_ws s stop (i + 1) in
+    if i < 0 || i >= stop then -1
+    else if String.unsafe_get s i = '}' then i + 1
+    else scan_assoc_loop s stop key_buf state slot_base depth (depth * key_stride) 0 i
+
+let rec skip_string_list s stop i =
+  let i = skip_ws s stop i in
+  if i < 0 || i >= stop || String.unsafe_get s i <> '"' then -1
+  else
+    let i = skip_valid_string s stop (i + 1) in
+    if i < 0 then -1
+    else
+      let i = skip_ws s stop i in
+      if i < 0 || i >= stop then -1
+      else
+        match String.unsafe_get s i with
+        | ']' -> i + 1
+        | ',' -> skip_string_list s stop (i + 1)
+        | _ -> -1
+
+let scan_tags_field s stop i =
+  let i = skip_ws s stop i in
+  if i < 0 || i >= stop || String.unsafe_get s i <> '[' then -1
+  else
+    let i = skip_ws s stop (i + 1) in
+    if i < 0 || i >= stop then -1
+    else if String.unsafe_get s i = ']' then i + 1
+    else skip_string_list s stop i
+
+let reconcile_fast_state s (state : int array) : int =
+  let s0 = Array.unsafe_get state 0 in
+  let s1 = Array.unsafe_get state 3 in
+  let s2 = Array.unsafe_get state 6 in
+  let has_null = s0 = 1 || s1 = 1 || s2 = 1 in
+  let has_slice = s0 = 2 || s1 = 2 || s2 = 2 in
+  if not has_slice then
+    0 (* Fast_unrelated *)
+  else if has_null then
+    -1 (* Fast_fallback: mix of string task_id and explicit null *)
+  else
+    let base_off =
+      if s0 = 2 then Array.unsafe_get state 1
+      else if s1 = 2 then Array.unsafe_get state 4
+      else Array.unsafe_get state 7
+    in
+    let base_len =
+      if s0 = 2 then Array.unsafe_get state 2
+      else if s1 = 2 then Array.unsafe_get state 5
+      else Array.unsafe_get state 8
+    in
+    let ok1 =
+      s1 <> 2
+      || s0 <> 2
+      || slice_eq_slice s base_off base_len (Array.unsafe_get state 4) (Array.unsafe_get state 5)
+    in
+    let ok2 =
+      s2 <> 2
+      || (s0 <> 2 && s1 <> 2)
+      || slice_eq_slice s base_off base_len (Array.unsafe_get state 7) (Array.unsafe_get state 8)
+    in
+    if ok1 && ok2 then (
+      Array.unsafe_set state 1 base_off;
+      Array.unsafe_set state 2 base_len;
+      1 (* Fast_task *))
+    else -1 (* Fast_fallback *)
+
+let rec scan_activity_loop s stop key_buf (state : int array) mask cur =
+  let cur = skip_ws s stop cur in
+  if cur < 0 || cur >= stop || String.unsafe_get s cur <> '"' then -1
+  else
+    let k_off = cur + 1 in
+    let k_end = find_unescaped_ascii_end s stop k_off in
+    if k_end < 0 then -1
+    else
+      let k_len = k_end - k_off in
+      let colon = skip_ws s stop (k_end + 1) in
+      if colon < 0 || colon >= stop || String.unsafe_get s colon <> ':' then -1
+      else
+        let v_start = colon + 1 in
+        let bit =
+          if slice_eq_lit s k_off k_len "seq" then 1
+          else if slice_eq_lit s k_off k_len "ts_ms" then 2
+          else if slice_eq_lit s k_off k_len "ts_iso" then 4
+          else if slice_eq_lit s k_off k_len "kind" then 8
+          else if slice_eq_lit s k_off k_len "actor" then 16
+          else if slice_eq_lit s k_off k_len "subject" then 32
+          else if slice_eq_lit s k_off k_len "payload" then 64
+          else if slice_eq_lit s k_off k_len "tags" then 128
+          else if slice_eq_lit s k_off k_len "context" then 256
+          else 0
+        in
+        if bit = 0 || (mask land bit) <> 0 then -1
+        else
+          let next_i =
+            match bit with
+            | 1 | 2 -> scan_int_field s stop v_start
+            | 4 | 8 ->
+              let v = skip_ws s stop v_start in
+              if v >= 0 && v < stop && String.unsafe_get s v = '"' then
+                skip_valid_string s stop (v + 1)
+              else -1
+            | 16 -> scan_entity_field s stop state ~is_subject:false v_start
+            | 32 -> scan_entity_field s stop state ~is_subject:true v_start
+            | 64 ->
+              let v = skip_ws s stop v_start in
+              if v < 0 || v >= stop then -1
+              else if String.unsafe_get s v = '{' then
+                scan_assoc_extracting_task_id s stop key_buf state 3 1 v
+              else
+                skip_valid_value s stop key_buf 1 v
+            | 128 -> scan_tags_field s stop v_start
+            | 256 -> scan_assoc_extracting_task_id s stop key_buf state 6 1 v_start
+            | _ -> -1
+          in
+          if next_i < 0 then -1
+          else
+            let mask = mask lor bit in
+            let after = skip_ws s stop next_i in
+            if after < 0 || after >= stop then -1
+            else
+              match String.unsafe_get s after with
+              | ',' -> scan_activity_loop s stop key_buf state mask (after + 1)
+              | '}' ->
+                let tail = skip_ws s stop (after + 1) in
+                if tail <> stop || (mask land 0xff) <> 0xff then -1
+                else reconcile_fast_state s state
+              | _ -> -1
+
+let scan_activity_slice_fast s ~pos ~len key_buf (state : int array) =
+  let stop = pos + len in
+  let i = skip_ws s stop pos in
+  if i < 0 || i >= stop || String.unsafe_get s i <> '{' then -1
+  else
+    let i = skip_ws s stop (i + 1) in
+    if i < 0 || i >= stop || String.unsafe_get s i = '}' then -1
+    else (
+      Array.unsafe_set state 0 0;
+      Array.unsafe_set state 3 0;
+      Array.unsafe_set state 6 0;
+      scan_activity_loop s stop key_buf state 0 i)
+
+let rec scan_audit_loop s stop key_buf (state : int array) count cur =
+  let cur = skip_ws s stop cur in
+  if cur < 0 || cur >= stop || String.unsafe_get s cur <> '"' then -1
+  else
+    let k_off = cur + 1 in
+    let k_end = find_unescaped_ascii_end s stop k_off in
+    if k_end < 0 then -1
+    else
+      let k_len = k_end - k_off in
+      if not (register_unique_key s key_buf 0 count k_off k_len) then -1
+      else
+        let colon = skip_ws s stop (k_end + 1) in
+        if colon < 0 || colon >= stop || String.unsafe_get s colon <> ':' then -1
+        else
+          let v_start = colon + 1 in
+          let next_i =
+            if slice_eq_lit s k_off k_len "task" then
+              scan_id_value s stop state 0 v_start
+            else if slice_eq_lit s k_off k_len "task_id" then
+              scan_id_value s stop state 3 v_start
+            else
+              skip_valid_value s stop key_buf 1 v_start
+          in
+          if next_i < 0 then -1
+          else
+            let after = skip_ws s stop next_i in
+            if after < 0 || after >= stop then -1
+            else
+              match String.unsafe_get s after with
+              | ',' -> scan_audit_loop s stop key_buf state (count + 1) (after + 1)
+              | '}' ->
+                if skip_ws s stop (after + 1) <> stop then -1
+                else reconcile_fast_state s state
+              | _ -> -1
+
+let scan_audit_slice_fast s ~pos ~len key_buf (state : int array) =
+  let stop = pos + len in
+  let i = skip_ws s stop pos in
+  if i < 0 || i >= stop || String.unsafe_get s i <> '{' then -1
+  else
+    let i = skip_ws s stop (i + 1) in
+    if i < 0 || i >= stop then -1
+    else if String.unsafe_get s i = '}' then
+      if skip_ws s stop (i + 1) = stop then 0 else -1
+    else (
+      Array.unsafe_set state 0 0;
+      Array.unsafe_set state 3 0;
+      Array.unsafe_set state 6 0;
+      scan_audit_loop s stop key_buf state 0 i)
+
+let scan_row_slice_fast ~source s ~pos ~len key_buf state =
+  match source with
+  | Activity -> scan_activity_slice_fast s ~pos ~len key_buf state
+  | Audit -> scan_audit_slice_fast s ~pos ~len key_buf state
+
+type task_bucket = {
+  key : string;
+  mutable rev_offsets : int list;
+  mutable next : task_bucket option;
+}
+
+let slice_hash s off len =
+  if len = 0 then 0
+  else
+    let c0 = Char.code (String.unsafe_get s off) in
+    let c1 = Char.code (String.unsafe_get s (off + (len lsr 1))) in
+    let c2 = Char.code (String.unsafe_get s (off + len - 1)) in
+    let c3 = if len >= 2 then Char.code (String.unsafe_get s (off + len - 2)) else c0 in
+    ((len * 257) + (c0 * 31) + (c1 * 131) + (c2 * 17) + (c3 * 7)) land 255
+
+let rec add_slice_to_buckets_loop (buckets : task_bucket option array) h s off len offset = function
+  | Some b when slice_eq_lit s off len b.key ->
+    b.rev_offsets <- offset :: b.rev_offsets
+  | Some b -> add_slice_to_buckets_loop buckets h s off len offset b.next
+  | None ->
+    let key = String.sub s off len in
+    let b = { key; rev_offsets = [ offset ]; next = Array.unsafe_get buckets h } in
+    Array.unsafe_set buckets h (Some b)
+
+let add_slice_to_buckets (buckets : task_bucket option array) s off len offset =
+  let h = slice_hash s off len in
+  add_slice_to_buckets_loop buckets h s off len offset (Array.unsafe_get buckets h)
+
+let rec add_string_to_buckets_loop (buckets : task_bucket option array) h key offset = function
+  | Some b when String.equal key b.key ->
+    b.rev_offsets <- offset :: b.rev_offsets
+  | Some b -> add_string_to_buckets_loop buckets h key offset b.next
+  | None ->
+    let b = { key; rev_offsets = [ offset ]; next = Array.unsafe_get buckets h } in
+    Array.unsafe_set buckets h (Some b)
+
+let add_string_to_buckets (buckets : task_bucket option array) key offset =
+  let h = slice_hash key 0 (String.length key) in
+  add_string_to_buckets_loop buckets h key offset (Array.unsafe_get buckets h)
+
+let rec fold_bucket_chain map = function
+  | None -> map
+  | Some b ->
+    let map = String_map.add b.key (List.rev b.rev_offsets) map in
+    fold_bucket_chain map b.next
+
+let rec buckets_to_map_loop (buckets : task_bucket option array) i map =
+  if i >= Array.length buckets then map
+  else buckets_to_map_loop buckets (i + 1) (fold_bucket_chain map (Array.unsafe_get buckets i))
+
+let buckets_to_map (buckets : task_bucket option array) =
+  buckets_to_map_loop buckets 0 String_map.empty
+
 let event_envelope ~file ~offset json =
   `Assoc [
     "source", `String (source_name file.source);
@@ -524,23 +1305,46 @@ type cached_segment = {
   snapshot : Fs_compat.owned_regular_file_snapshot;
   scanned_from : int;
   scanned_to : int;
+  row_count : int;
+  first_row_offset : int;
   block_digests : (int * int * string) list;
   by_task : int list String_map.t;
   conflicting : int list String_map.t;
+  verified_settled : bool;
+  mutable last_used : int;
 }
 
 let max_cached_files = 256
 let full_digest_max_bytes = 8 * io_block_bytes
 let cache_mutex = Stdlib.Mutex.create ()
+let cache_clock = ref 0
 let segment_cache : (string * string, cached_segment) Hashtbl.t = Hashtbl.create 64
 
 let find_cached_segment ~root ~relative =
   Stdlib.Mutex.protect cache_mutex (fun () ->
-    Hashtbl.find_opt segment_cache (root, relative))
+    match Hashtbl.find_opt segment_cache (root, relative) with
+    | None -> None
+    | Some seg ->
+      incr cache_clock;
+      seg.last_used <- !cache_clock;
+      Some seg)
 
 let invalidate_cached_segment ~root ~relative =
   Stdlib.Mutex.protect cache_mutex (fun () ->
     Hashtbl.remove segment_cache (root, relative))
+
+let evict_lru_locked () =
+  let oldest_key = ref None in
+  let oldest_tick = ref max_int in
+  Hashtbl.iter
+    (fun key (seg : cached_segment) ->
+      if seg.last_used < !oldest_tick then (
+        oldest_tick := seg.last_used;
+        oldest_key := Some key))
+    segment_cache;
+  match !oldest_key with
+  | Some key -> Hashtbl.remove segment_cache key
+  | None -> ()
 
 let store_cached_segment ~root ~relative (seg : cached_segment) =
   Stdlib.Mutex.protect cache_mutex (fun () ->
@@ -557,20 +1361,22 @@ let store_cached_segment ~root ~relative (seg : cached_segment) =
     if replace then (
       if Hashtbl.length segment_cache >= max_cached_files
          && not (Hashtbl.mem segment_cache (root, relative))
-      then Hashtbl.clear segment_cache;
+      then evict_lru_locked ();
+      incr cache_clock;
+      seg.last_used <- !cache_clock;
       Hashtbl.replace segment_cache (root, relative) seg))
 
 let block_digest_at reader ~limit offset =
   let from = offset - (offset mod io_block_bytes) in
   let len = min io_block_bytes (limit - from) in
   let* () = load_block reader from in
-  if String.length reader.block < len then Error Source_changed
+  if reader.block_len < len then Error Source_changed
   else
-    let slice =
-      if String.length reader.block = len then reader.block
-      else String.sub reader.block 0 len
+    let d =
+      Agent_core_sha256.digest_string ~off:0 ~len reader.block
+      |> Agent_core_sha256.to_hex
     in
-    Ok (from, len, hash slice)
+    Ok (from, len, d)
 
 let blocks_to_hash ~scanned_from ~scanned_to =
   let first_block = scanned_from - (scanned_from mod io_block_bytes) in
@@ -596,17 +1402,28 @@ let compute_block_digests reader ~scanned_from ~scanned_to =
   in
   loop [] offsets
 
-let make_cached_segment reader ~scanned_from ~scanned_to ~by_task ~conflicting =
+let snapshot_is_settled (s : Fs_compat.owned_regular_file_snapshot) =
+  let now = Unix.gettimeofday () in
+  now -. s.modified_at > 2.0 && now -. s.changed_at > 2.0
+
+let make_cached_segment reader ~scanned_from ~scanned_to ~row_count ~first_row_offset ~by_task ~conflicting =
   let* block_digests = compute_block_digests reader ~scanned_from ~scanned_to in
+  let snap = reader.file.snapshot in
   Ok {
-    device = reader.file.snapshot.device;
-    inode = reader.file.snapshot.inode;
-    snapshot = reader.file.snapshot;
+    device = snap.device;
+    inode = snap.inode;
+    snapshot = snap;
     scanned_from;
     scanned_to;
+    row_count;
+    first_row_offset;
     block_digests;
     by_task;
     conflicting;
+    verified_settled =
+      snapshot_is_settled snap
+      && (first_row_offset <= 0 || first_row_offset < scanned_to);
+    last_used = 0;
   }
 
 let verify_cached_segment reader (cached : cached_segment) =
@@ -619,12 +1436,22 @@ let verify_cached_segment reader (cached : cached_segment) =
      || cached.snapshot.file_size < cached.scanned_to
      || cached.scanned_from < 0
      || cached.scanned_from >= cached.scanned_to
+     || cached.row_count < 0
      || (cur.file_size = cached.snapshot.file_size
          && not (Fs_compat.equal_owned_regular_file_snapshot cached.snapshot cur))
   then Ok false
+  else if cached.verified_settled
+          && cur.file_size = cached.snapshot.file_size
+          && Fs_compat.equal_owned_regular_file_snapshot cached.snapshot cur
+  then Ok true
   else
     let rec verify_blocks = function
-      | [] -> Ok true
+      | [] ->
+        if cached.first_row_offset <= 0 then Ok true
+        else if cached.first_row_offset >= cached.scanned_to then Ok false
+        else (
+          let* prev = byte reader (cached.first_row_offset - 1) in
+          Ok (prev = '\n'))
       | (expected_from, expected_len, expected_sha256) :: rest ->
         let* actual_from, actual_len, actual_sha256 =
           block_digest_at reader ~limit:cached.scanned_to expected_from
@@ -654,6 +1481,8 @@ let merge_desc_maps upper_map lower_map =
 type range_scan_outcome =
   | Reached_stop of {
       stopped_from : int;
+      row_count : int;
+      first_row_offset : int;
       collected : Yojson.Safe.t list;
       count : int;
       by_task : int list String_map.t;
@@ -661,6 +1490,8 @@ type range_scan_outcome =
     }
   | Filled_page of {
       stopped_from : int;
+      row_count : int;
+      first_row_offset : int;
       anchor_line : string;
       collected : Yojson.Safe.t list;
       by_task : int list String_map.t;
@@ -668,63 +1499,108 @@ type range_scan_outcome =
     }
 
 let scan_range_raw ~task_id ~file ~reader ~start_before ~stop_at ~max_events ~collected ~count =
-  let rec loop before collected count rev_by_task rev_conflicting =
+  let key_buf = Array.make (max_fast_depth * key_stride) 0 in
+  let state = Array.make 13 0 in
+  let buckets = Array.make 256 None in
+  let slice = { row_offset = 0; row_buf = ""; row_pos = 0; row_len = 0 } in
+  let rec loop before row_count first_row_offset collected count rev_conflicting =
     if before <= stop_at then
       Ok (Reached_stop {
         stopped_from = before;
+        row_count;
+        first_row_offset;
         collected;
         count;
-        by_task = String_map.map List.rev rev_by_task;
+        by_task = buckets_to_map buckets;
         conflicting = String_map.map List.rev rev_conflicting;
       })
     else
-      let* row = previous reader before in
-      match row with
-      | None ->
+      let* has_row = previous_slice reader slice before in
+      if not has_row then
         Ok (Reached_stop {
           stopped_from = 0;
+          row_count;
+          first_row_offset;
           collected;
           count;
-          by_task = String_map.map List.rev rev_by_task;
+          by_task = buckets_to_map buckets;
           conflicting = String_map.map List.rev rev_conflicting;
         })
-      | Some (offset, line) ->
-        if is_blank_line line then
-          loop offset collected count rev_by_task rev_conflicting
+      else
+        let offset = slice.row_offset in
+        if is_blank_slice slice.row_buf ~pos:slice.row_pos ~len:slice.row_len then
+          loop offset row_count first_row_offset collected count rev_conflicting
         else
-          match classify_row ~source:file.source line with
-          | Row_invalid ->
-            Error (Invalid_event { file = file.relative; offset })
-          | Row_unrelated ->
-            loop offset collected count rev_by_task rev_conflicting
-          | Row_conflicting { string_ids } ->
-            let rev_conflicting =
-              List.fold_left (fun acc tid -> add_offset_to_map tid offset acc) rev_conflicting string_ids
-            in
-            if List.exists (String.equal task_id) string_ids then
+          let row_count = row_count + 1 in
+          let first_row_offset = offset in
+          match scan_row_slice_fast ~source:file.source slice.row_buf ~pos:slice.row_pos ~len:slice.row_len key_buf state with
+          | 0 (* Fast_unrelated *) ->
+            loop offset row_count first_row_offset collected count rev_conflicting
+          | 1 (* Fast_task *) ->
+            let id_off = Array.unsafe_get state 1 in
+            let id_len = Array.unsafe_get state 2 in
+            if not (slice_eq_lit slice.row_buf id_off id_len task_id) then (
+              add_slice_to_buckets buckets slice.row_buf id_off id_len offset;
+              loop offset row_count first_row_offset collected count rev_conflicting)
+            else
+              let line = slice_to_string slice in
+              (match classify_row ~source:file.source line with
+               | Row_task { task_id = row_tid; json } when String.equal row_tid task_id ->
+                 add_string_to_buckets buckets row_tid offset;
+                 let event = event_envelope ~file ~offset json in
+                 let collected = event :: collected in
+                 let count = count + 1 in
+                 if count < max_events then
+                   loop offset row_count first_row_offset collected count rev_conflicting
+                 else
+                   Ok (Filled_page {
+                     stopped_from = offset;
+                     row_count;
+                     first_row_offset;
+                     anchor_line = line;
+                     collected;
+                     by_task = buckets_to_map buckets;
+                     conflicting = String_map.map List.rev rev_conflicting;
+                   })
+               | Row_invalid | Row_unrelated | Row_conflicting _ | Row_task _ ->
+                 Error (Invalid_event { file = file.relative; offset }))
+          | _ (* Fast_fallback *) ->
+            let line = slice_to_string slice in
+            match classify_row ~source:file.source line with
+            | Row_invalid ->
               Error (Invalid_event { file = file.relative; offset })
-            else
-              loop offset collected count rev_by_task rev_conflicting
-          | Row_task { task_id = row_tid; json } ->
-            let rev_by_task = add_offset_to_map row_tid offset rev_by_task in
-            if not (String.equal row_tid task_id) then
-              loop offset collected count rev_by_task rev_conflicting
-            else
-              let event = event_envelope ~file ~offset json in
-              let collected = event :: collected in
-              let count = count + 1 in
-              if count < max_events then
-                loop offset collected count rev_by_task rev_conflicting
+            | Row_unrelated ->
+              loop offset row_count first_row_offset collected count rev_conflicting
+            | Row_conflicting { string_ids } ->
+              let rev_conflicting =
+                List.fold_left (fun acc tid -> add_offset_to_map tid offset acc) rev_conflicting string_ids
+              in
+              if List.exists (String.equal task_id) string_ids then
+                Error (Invalid_event { file = file.relative; offset })
               else
-                Ok (Filled_page {
-                  stopped_from = offset;
-                  anchor_line = line;
-                  collected;
-                  by_task = String_map.map List.rev rev_by_task;
-                  conflicting = String_map.map List.rev rev_conflicting;
-                })
+                loop offset row_count first_row_offset collected count rev_conflicting
+            | Row_task { task_id = row_tid; json } ->
+              add_string_to_buckets buckets row_tid offset;
+              if not (String.equal row_tid task_id) then
+                loop offset row_count first_row_offset collected count rev_conflicting
+              else
+                let event = event_envelope ~file ~offset json in
+                let collected = event :: collected in
+                let count = count + 1 in
+                if count < max_events then
+                  loop offset row_count first_row_offset collected count rev_conflicting
+                else
+                  Ok (Filled_page {
+                    stopped_from = offset;
+                    row_count;
+                    first_row_offset;
+                    anchor_line = line;
+                    collected;
+                    by_task = buckets_to_map buckets;
+                    conflicting = String_map.map List.rev rev_conflicting;
+                  })
   in
-  loop start_before collected count String_map.empty String_map.empty
+  loop start_before 0 (-1) collected count String_map.empty
 
 let rec drop_ge limit = function
   | off :: rest when off >= limit -> drop_ge limit rest
@@ -802,21 +1678,21 @@ let read ~config ~task_id ~max_events ?cursor () =
                   scan_range_raw ~task_id ~file ~reader ~start_before:initial_before
                     ~stop_at:0 ~max_events ~collected:initial_collected ~count:initial_count
                 in
-                let cache_cold ~stopped_from ~by_task ~conflicting =
+                let cache_cold ~stopped_from ~row_count ~first_row_offset ~by_task ~conflicting =
                   if stopped_from >= initial_before then Ok ()
                   else
                     let* seg =
                       make_cached_segment reader ~scanned_from:stopped_from
-                        ~scanned_to:initial_before ~by_task ~conflicting
+                        ~scanned_to:initial_before ~row_count ~first_row_offset ~by_task ~conflicting
                     in
                     Ok (store_cached_segment ~root ~relative:file.relative seg)
                 in
                 match outcome with
-                | Filled_page { stopped_from; anchor_line; collected; by_task; conflicting } ->
-                  let* () = cache_cold ~stopped_from ~by_task ~conflicting in
+                | Filled_page { stopped_from; row_count; first_row_offset; anchor_line; collected; by_task; conflicting } ->
+                  let* () = cache_cold ~stopped_from ~row_count ~first_row_offset ~by_task ~conflicting in
                   Ok (Step_done (List.rev collected, make_next_cursor file rest stopped_from anchor_line))
-                | Reached_stop { stopped_from; collected; count; by_task; conflicting } ->
-                  let* () = cache_cold ~stopped_from ~by_task ~conflicting in
+                | Reached_stop { stopped_from; row_count; first_row_offset; collected; count; by_task; conflicting } ->
+                  let* () = cache_cold ~stopped_from ~row_count ~first_row_offset ~by_task ~conflicting in
                   Ok (Step_next_file (collected, count))
               in
               let* cached_opt =
@@ -837,8 +1713,11 @@ let read ~config ~task_id ~max_events ?cursor () =
                     scan_range_raw ~task_id ~file ~reader ~start_before:initial_before
                       ~stop_at:cached.scanned_to ~max_events ~collected:initial_collected ~count:initial_count
                   in
+                  let merge_first_offset upper_first lower_first =
+                    if lower_first >= 0 then lower_first else upper_first
+                  in
                   (match outcome with
-                   | Filled_page { stopped_from; anchor_line; collected; by_task; conflicting } ->
+                   | Filled_page { stopped_from; row_count; first_row_offset; anchor_line; collected; by_task; conflicting } ->
                      if stopped_from < cached.scanned_to then
                        Ok `Fallback_cold
                      else
@@ -848,13 +1727,16 @@ let read ~config ~task_id ~max_events ?cursor () =
                            let conflicting' = merge_desc_maps conflicting cached.conflicting in
                            let* seg =
                              make_cached_segment reader ~scanned_from:cached.scanned_from
-                               ~scanned_to:initial_before ~by_task:by_task' ~conflicting:conflicting'
+                               ~scanned_to:initial_before
+                               ~row_count:(row_count + cached.row_count)
+                               ~first_row_offset:(merge_first_offset first_row_offset cached.first_row_offset)
+                               ~by_task:by_task' ~conflicting:conflicting'
                            in
                            Ok (store_cached_segment ~root ~relative:file.relative seg)
                          else Ok ()
                        in
                        Ok (`Done (Step_done (List.rev collected, make_next_cursor file rest stopped_from anchor_line)))
-                   | Reached_stop { stopped_from; collected; count; by_task; conflicting } ->
+                   | Reached_stop { stopped_from; row_count; first_row_offset; collected; count; by_task; conflicting } ->
                      if stopped_from <> cached.scanned_to then
                        Ok `Fallback_cold
                      else
@@ -862,7 +1744,10 @@ let read ~config ~task_id ~max_events ?cursor () =
                        let conflicting' = merge_desc_maps conflicting cached.conflicting in
                        let* seg =
                          make_cached_segment reader ~scanned_from:cached.scanned_from
-                           ~scanned_to:initial_before ~by_task:by_task' ~conflicting:conflicting'
+                           ~scanned_to:initial_before
+                           ~row_count:(row_count + cached.row_count)
+                           ~first_row_offset:(merge_first_offset first_row_offset cached.first_row_offset)
+                           ~by_task:by_task' ~conflicting:conflicting'
                        in
                        store_cached_segment ~root ~relative:file.relative seg;
                        Ok (`Continue (cached.scanned_to, collected, count, Some seg)))
@@ -955,32 +1840,38 @@ let read ~config ~task_id ~max_events ?cursor () =
                       scan_range_raw ~task_id ~file ~reader ~start_before:before
                         ~stop_at:0 ~max_events ~collected ~count
                     in
-                    let cache_lower ~stopped_from ~by_task ~conflicting =
+                    let cache_lower ~stopped_from ~row_count ~first_row_offset ~by_task ~conflicting =
                       if stopped_from >= before then Ok ()
                       else
                         match cached_opt with
                         | Some cached when before = cached.scanned_from ->
                           let by_task' = merge_desc_maps cached.by_task by_task in
                           let conflicting' = merge_desc_maps cached.conflicting conflicting in
+                          let merged_first =
+                            if first_row_offset >= 0 then first_row_offset else cached.first_row_offset
+                          in
                           let* seg =
                             make_cached_segment reader ~scanned_from:stopped_from
-                              ~scanned_to:cached.scanned_to ~by_task:by_task' ~conflicting:conflicting'
+                              ~scanned_to:cached.scanned_to
+                              ~row_count:(cached.row_count + row_count)
+                              ~first_row_offset:merged_first
+                              ~by_task:by_task' ~conflicting:conflicting'
                           in
                           Ok (store_cached_segment ~root ~relative:file.relative seg)
                         | None ->
                           let* seg =
                             make_cached_segment reader ~scanned_from:stopped_from
-                              ~scanned_to:before ~by_task ~conflicting
+                              ~scanned_to:before ~row_count ~first_row_offset ~by_task ~conflicting
                           in
                           Ok (store_cached_segment ~root ~relative:file.relative seg)
                         | Some _ -> Ok ()
                     in
                     (match outcome with
-                     | Filled_page { stopped_from; anchor_line; collected; by_task; conflicting } ->
-                       let* () = cache_lower ~stopped_from ~by_task ~conflicting in
+                     | Filled_page { stopped_from; row_count; first_row_offset; anchor_line; collected; by_task; conflicting } ->
+                       let* () = cache_lower ~stopped_from ~row_count ~first_row_offset ~by_task ~conflicting in
                        Ok (Step_done (List.rev collected, make_next_cursor file rest stopped_from anchor_line))
-                     | Reached_stop { stopped_from; collected; count; by_task; conflicting } ->
-                       let* () = cache_lower ~stopped_from ~by_task ~conflicting in
+                     | Reached_stop { stopped_from; row_count; first_row_offset; collected; count; by_task; conflicting } ->
+                       let* () = cache_lower ~stopped_from ~row_count ~first_row_offset ~by_task ~conflicting in
                        Ok (Step_next_file (collected, count))))
         in
         let rec scan_files first collected count = function

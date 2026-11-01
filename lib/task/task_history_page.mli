@@ -32,6 +32,13 @@ val read : config:Workspace_core.config -> task_id:string -> max_events:int ->
     advancement. A source not yet created is explicitly reported and pinned;
     unreadable sources and both absent are errors. Reads use bounded transfer
     blocks plus the current row, independent of the dated file's size; rows
-    may span any number of blocks. Exhaustion applies only to
+    may span any number of blocks. Post-read directory, descriptor, and
+    inventory verification guarantees that the observed sources did not change
+    while the page was read, not that the returned page reflects mutations
+    occurring after [read] returns. Cached segment indices re-verify file
+    snapshots (requiring unchanged modification/change timestamps whenever file
+    size is unchanged), 64 KiB block digests (all blocks up to 512 KiB, and
+    boundary blocks with row-boundary anchors on larger growing files), and
+    every materialized row before emission. Exhaustion applies only to
     the observed stored prefix, never deleted/retained-away history. *)
 val to_json : page -> Yojson.Safe.t

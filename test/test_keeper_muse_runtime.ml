@@ -921,6 +921,7 @@ let declare_keeper ~base_path profile_lines =
 
 type observed_run =
   { outcome : Keeper_muse_runtime.attempt_outcome
+  ; adapter_result : (Runtime_agent.run_result, Agent_core.Error.t) result
   ; events : Agent_core.Types.sse_event list
   ; reports : Keeper_client_usage_report.t list
   ; transmitted : Keeper_official_client_host.transmitted_model_input list
@@ -998,9 +999,10 @@ let run_turn_with ?raw_trace ?composed_context ?goal_blocks ?(accepts_image_inpu
       ~config
       ()
   in
-  (* This direct adapter fixture is its caller: accept the returned result
-     before consuming the opaque durable result set. The routed Keeper test
-     separately exercises a rejecting caller predicate. *)
+  (* Native stop/session assertions observe the adapter result separately.
+     The caller still applies acceptance before consuming durable results;
+     a repeated-tool stop is settled by the adapter and rejected by the caller. *)
+  let adapter_result = outcome.result in
   let result = Result.bind outcome.result (fun result ->
     Result.bind
       (Keeper_turn_driver.For_testing.apply_official_client_accept ~runtime_id
@@ -1015,6 +1017,7 @@ let run_turn_with ?raw_trace ?composed_context ?goal_blocks ?(accepts_image_inpu
         | Ok () -> Ok result | Error detail -> Error (Agent_core.Error.Internal detail))) in
   let outcome = {outcome with result} in
   { outcome
+  ; adapter_result
   ; events = List.rev !events
   ; reports = List.rev !reports
   ; transmitted = List.rev !transmitted
@@ -1627,6 +1630,22 @@ let check_effect label expected (outcome : Keeper_muse_runtime.attempt_outcome) 
     (Keeper_provider_attempt_effect.to_string outcome.effect_disposition)
 ;;
 
+let check_repeated_stop_rejected ~base_path (run : observed_run) =
+  (match run.outcome.result with
+   | Error error ->
+     (match Keeper_internal_error.classify_masc_internal_error error with
+      | Some (Keeper_internal_error.Host_stopped_turn
+          {runtime_id = observed_runtime; stop = Repeated_tool_call}) ->
+        check string "caller rejection names the runtime" runtime_id observed_runtime
+      | Some _ | None -> failf "repeated stop lost its caller rejection: %s"
+          (Agent_core.Error.to_string error))
+   | Ok _ -> fail "the caller accepted a repeated-tool stop");
+  let retained = Keeper_client_tool_outbox.load ~base_path ~keeper_name
+      |> function Ok retained -> retained | Error detail -> fail detail in
+  check int "rejected stop keeps its completed tool result" 1
+    (List.length (Keeper_client_tool_outbox.receipt_ids retained))
+;;
+
 let started_turn_id ~base_path = read_text (Filename.concat base_path "start-turn-id.txt")
 
 let test_failed_muse_turn_reads_typed_usage_without_replay () =
@@ -1799,7 +1818,8 @@ let test_a_stop_before_the_turn_start_answer_settles () =
         ~tool:(masc_probe_tool (ref `Null))
         ()
     in
-    (match run.outcome.result with
+    check_repeated_stop_rejected ~base_path run;
+    (match run.adapter_result with
      | Ok { Runtime_agent.stop_reason =
               Runtime_agent.Yielded_after_repeated_tool_call { tool_name; repeated_count; _ }; _ } ->
        check string "stopped tool" "masc_probe" tool_name;
@@ -2691,7 +2711,8 @@ let test_a_host_stopped_turns_context_stays_held_whatever_the_host_counted () =
         ~on_official_client_tool_boundary:(fun ~tool_name:_ ->
           Ok (Some (Keeper_official_client_host.Repeated_tool_call
             { tool_name = "masc_probe"; repeated_count = 3 }))) in
-    (match stopped.outcome.result with
+    check_repeated_stop_rejected ~base_path stopped;
+    (match stopped.adapter_result with
      | Ok { Runtime_agent.stop_reason = Runtime_agent.Yielded_after_repeated_tool_call _; _ } -> ()
      | Ok _ -> fail "the host stop lost its cause"
      | Error error -> fail (Agent_core.Error.to_string error));
@@ -2810,7 +2831,8 @@ let test_host_stop_resume_admits_either_ending_of_the_stopped_turn () =
         ~on_official_client_tool_boundary:(fun ~tool_name:_ ->
           Ok (Some (Keeper_official_client_host.Repeated_tool_call
             { tool_name = "masc_probe"; repeated_count = 3 }))) () in
-      (match stopped.outcome.result with
+      check_repeated_stop_rejected ~base_path stopped;
+      (match stopped.adapter_result with
        | Ok { Runtime_agent.stop_reason =
                 Runtime_agent.Yielded_after_repeated_tool_call { tool_name; repeated_count; _ }; _ } ->
          check string "stopped tool" "masc_probe" tool_name;

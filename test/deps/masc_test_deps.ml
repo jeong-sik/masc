@@ -2,6 +2,7 @@
    Also hosts tiny test helpers that need a single SSOT across files. *)
 
 module Server_grpc_tool_dispatch = Server_grpc_tool_dispatch
+module Board_test_preparation = Board_test_preparation
 
 (** Install the Eio clock + optional switch in every registry the lib
     code reads from.

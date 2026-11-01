@@ -187,8 +187,9 @@ def completed_boundary(item: Json) -> Json:
         or position.get("kind") != "atom_history"
     ):
         raise AcceptanceError("the exact completed atom boundary is unavailable")
+    prepared = object_value(item.get("prepared_input"), "prepared input")
     return {
-        "trace_id": item["prepared_input"]["trace_id"],
+        "trace_id": text(prepared.get("trace_id"), "trace id"),
         "history_start_boundary_line": natural(
             value.get("history_start_boundary_line"), "history generation"
         ),
@@ -227,11 +228,21 @@ def prefix_omission(target: Json, probe: Json) -> Json:
         )
         if not rows:
             raise AcceptanceError("no attributed request range was retained")
-        record = probe["turn_records"]["entries"][0]["record"]
+        turn_records = object_value(
+            probe.get("turn_records"), "probe turn records"
+        )
+        entries = list_value(turn_records.get("entries"), "turn record entries")
+        if not entries:
+            raise AcceptanceError("probe has no turn record")
+        record = object_value(
+            object_value(entries[0], "turn record entry").get("record"),
+            "turn record",
+        )
         expected = []
-        for attempt in list_value(
+        for attempt_item in list_value(
             record.get("request_observations"), "request observations"
         ):
+            attempt = object_value(attempt_item, "request observation attempt")
             observation = object_value(
                 attempt.get("evidence"), "request observation evidence"
             )
@@ -241,9 +252,10 @@ def prefix_omission(target: Json, probe: Json) -> Json:
                 raise AcceptanceError(
                     "a provider attempt has unavailable request evidence"
                 )
-            for request in list_value(
+            for request_item in list_value(
                 observation.get("requests"), "serialized requests"
             ):
+                request = object_value(request_item, "serialized request entry")
                 provenance = object_value(
                     request.get("provenance"), "request provenance"
                 )
@@ -260,11 +272,12 @@ def prefix_omission(target: Json, probe: Json) -> Json:
                 )
         actual = []
         ranges = []
-        for row in rows:
+        for row_item in rows:
+            row = object_value(row_item, "attributed request row")
             if row.get("schema") != "masc.continuity-request.v3" or (
                 row.get("keeper"),
                 row.get("turn_ref"),
-            ) != (probe["continuity_evidence"]["keeper"], probe["turn_ref"]):
+            ) != (evidence.get("keeper"), probe.get("turn_ref")):
                 raise AcceptanceError(
                     "attributed request identity differs from the probe"
                 )
@@ -315,7 +328,12 @@ def prefix_omission(target: Json, probe: Json) -> Json:
             raise AcceptanceError(
                 "attributed ranges do not cover every serialized request in the exact turn record"
             )
-        last_wire = probe["prepared_input"]["wire"]
+        prepared_probe = object_value(
+            probe.get("prepared_input"), "probe prepared input"
+        )
+        last_wire = object_value(
+            prepared_probe.get("wire"), "probe prepared wire"
+        )
         if not any(row["wire"] == last_wire for row in rows) or not probe.get(
             "working_state_messages"
         ):
@@ -330,7 +348,7 @@ def prefix_omission(target: Json, probe: Json) -> Json:
                 "librarian_causal_attribution": "not_established",
             }
         )
-    except (AcceptanceError, KeyError, TypeError) as error:
+    except AcceptanceError as error:
         result["reason"] = str(error)
     return result
 

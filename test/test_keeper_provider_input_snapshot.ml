@@ -500,40 +500,82 @@ let test_continuity_export_keeps_every_attributed_request_and_exact_boundary () 
     let module E = Keeper_continuity_evidence in
     let module B = Keeper_turn_boundaries in
     let reference = turn_ref 7 in
+    let request_store =
+      Dated_jsonl.open_store
+        (Dated_jsonl.Store.keeper
+           (Workspace.dated_store_root config)
+           ~keeper
+           Dated_jsonl.Store.Keeper.Continuity_requests)
+    in
+    (* Legacy v2 rows and explicitly unbound v3 rows (turn_ref: null) have no
+       turn identity; they must be skipped and counted rather than aborting the
+       scan or discarding collected rows for [reference]. *)
+    Dated_jsonl.append
+      request_store
+      (`Assoc
+         [ "schema", `String "masc.continuity-request.v2"
+         ; "runtime_id", `String "local"
+         ]);
     let range : C.range = { origin = Keeper_carried_front.Turn_start { end_atom = 0 };
       first_atom = 0; total_atoms = 1; custom_projection_changed = false } in
-    let record_request ~range wire =
-      C.record_best_effort ~config ~keeper_name:keeper ~turn_ref:(Some reference)
+    let record_request ?(turn_ref = Some reference) ~range wire =
+      C.record_best_effort ~config ~keeper_name:keeper ~turn_ref
         ~unread:Keeper_librarian_request_unread.empty ~runtime_id:"local"
         ~selection:C.Without_snapshot ~range ~wire in
     record_request ~range:(Some range) { wire with capture_id = Some "first-wire" };
     record_request ~range:None wire;
+    record_request ~turn_ref:None ~range:None { wire with capture_id = Some "unbound-later-wire" };
     write config 7;
-    let position = match B.position_of_messages [message] with
+    let position_one = match B.position_of_messages [message] with
       | Ok value -> value | Error detail -> fail detail in
-    let boundary : B.record = { recorded_at = 1.; event = B.Turn_ended {
+    let position_two = match B.position_of_messages [message; message] with
+      | Ok value -> value | Error detail -> fail detail in
+    let boundary_one : B.record = { recorded_at = 1.; event = B.Turn_ended {
       turn_ref = reference; task_context = Keeper_turn_task_context.No_task;
-      history_at_start = B.Fresh_history; position } } in
+      history_at_start = B.Fresh_history; position = position_one } } in
+    let boundary_two : B.record = { recorded_at = 1.5; event = B.Turn_ended {
+      turn_ref = reference; task_context = Keeper_turn_task_context.No_task;
+      history_at_start = B.Fresh_history; position = position_two } } in
     let append record = match B.append ~keepers_dir:(Workspace.keepers_runtime_dir config)
         ~keeper_id:keeper record with
       | Ok () -> () | Error error -> fail (B.append_error_to_string error) in
-    append boundary;
+    append boundary_one;
+    append boundary_two;
     let evidence = match E.read ~config ~keeper ~turn_ref:reference with
       | Ok value -> value | Error error -> fail (Snapshot.read_error_to_string error) in
     let open Yojson.Safe.Util in
+    check string "schema matches constant" E.schema (evidence |> member "schema" |> to_string);
     check string "exact owner" keeper (evidence |> member "keeper" |> to_string);
     check bool "last wire is the retained canonical manifest" true
       (member "wire" evidence = Wire.observation_to_yojson wire);
-    let requests = evidence |> member "requests" |> member "value" |> to_list in
-    check int "both serializations retained" 2 (List.length requests);
+    let requests_obs = evidence |> member "requests" in
+    let requests = requests_obs |> member "value" |> to_list in
+    check int "both attributed serializations retained" 2 (List.length requests);
+    check int "all 4 store rows scanned" 4 (requests_obs |> member "scanned_rows" |> to_int);
+    check int "legacy v2 and unbound v3 counted as skipped" 2
+      (requests_obs |> member "skipped_unattributed_rows" |> to_int);
     check bool "unassociated serialization never inherits an older range" true
       (List.nth requests 1 |> member "bounded_range" = `Null);
-    check bool "typed completed boundary exported exactly" true
+    check bool "latest completed boundary in generation exported" true
       (evidence |> member "completed_boundary" |> member "value" |> member "record"
-       = B.record_to_json boundary);
+       = B.record_to_json boundary_two);
     append { recorded_at = 2.; event = B.History_restarted { trace_id = Ids.Turn_ref.trace_id reference } };
     check string "another history generation cannot reuse the old boundary" "unavailable"
-      (E.completed_boundary ~config ~keeper ~turn_ref:reference |> member "kind" |> to_string))
+      (E.completed_boundary ~config ~keeper ~turn_ref:reference |> member "kind" |> to_string);
+    (* Malformed turn_ref or owner mismatch in v3 still fails closed. *)
+    Dated_jsonl.append
+      request_store
+      (`Assoc
+         [ "schema", `String "masc.continuity-request.v3"
+         ; "keeper", `String keeper
+         ; "turn_ref", `String "not-a-valid-turn-ref"
+         ]);
+    let after_corrupt = match E.read ~config ~keeper ~turn_ref:reference with
+      | Ok value -> value | Error error -> fail (Snapshot.read_error_to_string error) in
+    check string "corrupt turn_ref fails closed" "unavailable"
+      (after_corrupt |> member "requests" |> member "kind" |> to_string);
+    check string "corrupt turn_ref reason" "malformed continuity request turn identity"
+      (after_corrupt |> member "requests" |> member "reason" |> to_string))
 ;;
 
 let () =

@@ -40,3 +40,8 @@ val pp : Format.formatter -> t -> unit
 val show : t -> string
 val to_yojson : t -> Yojson.Safe.t
 val of_yojson : Yojson.Safe.t -> t Ppx_deriving_yojson_runtime.error_or
+
+(** Default HTTP request path selected by the closed wire kind. Gemini has no
+    HTTP dispatch path and returns the empty string. Catalog parsing and request
+    construction share this value; explicit path overrides remain unchanged. *)
+val request_path_default : t -> string

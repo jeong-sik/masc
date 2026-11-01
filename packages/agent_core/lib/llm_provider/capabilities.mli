@@ -119,7 +119,7 @@ type json_schema_dialect = Capability_vocab.json_schema_dialect =
   | Openai_json_schema
   | Json_object_schema
 
-type anthropic_thinking_control =
+type anthropic_thinking_control = Capability_profile.anthropic_thinking_control =
   | Anthropic_adaptive_default
   | Anthropic_adaptive_disabled_through_high
       (** Explicit disabled thinking accepts low/medium/high effort, or the
@@ -136,7 +136,7 @@ val anthropic_thinking_control_of_vocab_value
     operator- or catalog-facing strings with
     {!Capability_vocab.anthropic_thinking_control_of_string} first. *)
 
-type capabilities =
+type capabilities = Capability_profile.capabilities =
   { (* Numeric limits *)
     max_context_tokens : int option
   ; serving_constraint : Serving_constraint.t option

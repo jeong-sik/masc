@@ -297,7 +297,7 @@ let default_http_request_path ~kind ~base_url =
     | Llm_provider.Provider_kind.Ollama
     | Llm_provider.Provider_kind.Gemini
     | Llm_provider.Provider_kind.Glm ->
-      Llm_provider.Provider_config.request_path_default_for_kind kind in
+      Llm_provider.Provider_kind.request_path_default kind in
   normalize_http_request_path ~kind ~base_url ~request_path
 
 let request_path_for_http_provider ~(provider : Runtime_schema.provider) ~declaration ~kind
@@ -359,7 +359,7 @@ let request_path_for_http_provider ~(provider : Runtime_schema.provider) ~declar
            | Llm_provider.Provider_kind.Glm ) ) ->
          (match declaration with
           | Some entry -> entry.Declarations.request_path
-          | None -> Llm_provider.Provider_config.request_path_default_for_kind kind))
+          | None -> Llm_provider.Provider_kind.request_path_default kind))
   in
   normalize_http_request_path ~kind ~base_url ~request_path
 ;;

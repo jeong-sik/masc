@@ -49,8 +49,12 @@ related: ["browser-live-ego"]
 - `Browser_goal_space` 저장소(`bind_goal`)는 관측 메타데이터만 저장한다.
   공간을 만들지 않고, 재할당과 공간 공유를 거부한다.
 - Goal 수명은 `Workspace_goals` 가 관리한다. `executing` → … → `completed` /
-  `dropped`. `request_complete` 로 완료 전이가 일어난다.
-- Goal ID 는 `goal-msx-play-token-cost` 같은 kebab 문자열이다.
+  `dropped`. `request_complete` 는 `verifying` 로 옮길 뿐이고, 증명 판정과
+  운영자 `confirm_completion` 이 있어야 `completed` 가 된다.
+- Goal ID 는 자동 생성 ID 또는 운영자 지정 ID 이다. 지정 ID 는 빈 값과
+  앞뒤 공백만 거부하고 형식을 강제하지 않는다(`goal_store` 의
+  `resolve_goal_id`). `goal-msx-play-token-cost` 는 관측된 예시이지
+  계약이 아니다.
 - ego 공간은 브라우저 프로필의 쿠키를 함께 쓴다. 공간이 계정을 나누지는
   않는다. 공간마다 로그인이 따로 놓이지는 않는다.
 
@@ -72,7 +76,9 @@ ego-browser 0.6.1.13)로 추가로 확인한 사실:
 
 공간의 주인은 Goal 이다. 공간과 Goal 을 강결합으로 묶는다.
 
-1. 공간 이름은 Goal 에서 파생한다: `masc-<goal_id>`. 바인딩 저장소를 따로
+1. 공간 이름은 Goal 에서 파생한다: `masc-<goal_id>`. Goal ID 에 형식
+   제한이 없으므로 파생 규칙은 특정 모양(kebab 등)을 가정하지 않는다.
+   운영자 지정 ID 도 같은 규칙으로 파생한다. 바인딩 저장소를 따로
    두지 않는다. Goal 이 곧 공간 신원이다.
 2. 호스트가 공간을 알아서 만들고 이어 붙인다. Keeper 의 현재 Task 가 Goal
    하나에 연결돼 있으면 그 공간으로 라우팅한다. 공간이 없으면 `taskSpace`
@@ -125,11 +131,22 @@ ego-browser 0.6.1.13)로 추가로 확인한 사실:
 - 호스트는 Goal 공간의 마지막 관측 numeric ID 를 들고 있다가(원장이 아닌
   메모리 관측값), 연 결과의 ID 가 다르면 영수증에 이전 ID 와 새 ID 를
   함께 실는다. Keeper 는 페이지가 사라졌음을 알고 재작업을 판단한다.
+- 메모리 관측값은 호스트 재시작과 함께 사라진다. 재시작 뒤 첫 관측은
+  새 ID 만 알 수 있으므로 이전 ID 없이 「이전 ID 미확인」으로 보고한다.
+  이전 ID·새 ID 영수증은 같은 호스트 프로세스가 둘 다 관측한 경우에만
+  보장한다(best-effort).
 
 ### 완료
 
 - Goal 이 `completed` 또는 `dropped` 로 전이하면 호스트가 `finish_space`
   를 호출한다. keepPages 는 기본값(없음)이다.
+- `finish_space` 는 살아 있는 관측 클라이언트가 있어야만 부를 수 있다.
+  브라우저 호스트가 내려가 있거나 워커가 교체된 상태에서 전이가 일어나면
+  이 호출은 저절로 실행되지 않는다. 그래서 완료·중단 전이는
+  `Workspace_goals` 경로에 durable 하게 남고, 호스트는 다음 살아 있는
+  관측 클라이언트에서 `finish_space` 를 다시 시도한다(전이 이벤트를
+  durable 하게 소비하는 reconciler). 재시도는 기존 `finish_space`
+  규칙 — 재생 금지, 불확실 유지 — 을 그대로 따른다.
 - finish 가 불확실하면 기존 `finish_space` 규칙을 따른다. 재생하지 않고
   파일을 보존한다.
 
@@ -159,7 +176,10 @@ ego-browser 0.6.1.13)로 추가로 확인한 사실:
 
 1. 파생 라우팅: Task 의 Goal 링크가 1개·0개·여러 개일 때 각각 선택 경로.
 2. 소실 보고: 가짜 워커로 이전 ID 와 다른 ID 를 답하게 하고 영수증 확인.
-3. 완료 연결: `request_complete` 전이 후 `finish_space` 호출과 영수증.
+3. 완료 연결: Goal 이 종착(`completed` — 증명 판정과 운영자
+   `confirm_completion` 이 끝난 상태 — 또는 `dropped`)에 도달한 뒤
+   `finish_space` 호출과 영수증. `request_complete` 는 `verifying` 만
+   만들므로 완료 판정 기준이 아니다.
 4. 동시성: 서로 다른 두 Goal 공간에 동시 명령 — 2026-10-30 프로브로 확인
    완료(`docs/evidence/2026-10-30-ego-goal-spaces-probes/`). 구현 뒤 워커
    두 개가 같은 조건을 유지하는지 다시 잰다.

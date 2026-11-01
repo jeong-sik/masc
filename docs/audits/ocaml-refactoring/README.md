@@ -172,7 +172,7 @@ does not waive their coverage.
 | [D7](#d7) | next | in review | Preserve evidence transport decisions in the complete review request, then isolate snapshot projections |
 | [S1](#s1) | next | in review | Extract the provider usage acceptance/revocation reducer from the shared observation store |
 | [S2](#s2) | next | in review | Move lane edit decisions into a pure declared-configuration planner |
-| [S3](#s3) | later | candidate | Separate Antigravity protocol transitions from persistence and stream callbacks |
+| [S3](#s3) | later | implemented; execution unverified | Separate Antigravity protocol transitions from persistence and stream callbacks |
 | [S4](#s4) | investigate | implemented; execution unverified | Make provider-metrics cache refresh ownership explicit and cancellation-complete |
 | [S5](#s5) | later | implemented; execution unverified | Consolidate full-health refresh bookkeeping into an immutable owned state machine |
 | [S6](#s6) | later | implemented; execution unverified | Give connector status a common typed projection before JSON aggregation |
@@ -1435,6 +1435,50 @@ should be retained as the effect shell.
 
 **Separate Antigravity protocol transitions from persistence and stream callbacks**
 
+Implemented in [#47157](https://github.com/jeong-sik/masc/pull/47157) above
+[#47153](https://github.com/jeong-sik/masc/pull/47153), with repaired parent
+`b7b792e2360ff8143c065cdabba5c52eace55f69`. The private
+`Runtime_antigravity_protocol` module belongs to `masc.runtime` and owns decoded
+transitions plus immutable Awaiting/Admitted/Completed phases. A terminal result
+requires the original admitted identity, removing the optional init/result
+combination and its unreachable missing-init branch. Canonical decoded/stream/error
+types are reexported with their exact constructor and record identities; the public
+`runtime_antigravity.mli` is byte-identical to the parent. The shell also shares the
+previously duplicated successful turn-result construction.
+
+The pure transition returns ordered admission, terminal and stream obligations.
+The existing shell interprets them under the original callback deadline and replaces
+its state only after required callbacks return. Readiness still precedes
+Turn_started; result identity checks precede terminal observation, optional text and
+usage. Identical indexed response replay keeps the exact original state and last
+step, including an active tool's read phase. Partial callback effects are not rolled
+back or replayed. JSON decoding, subprocess/FD ownership, prompt/EOF receipts,
+clocks, cancellation, stderr masking, process drain and final turn interpretation
+remain in the shell with their existing policies.
+
+The public executable fixture now composes closed-response replay with actual tool
+silence and checks ordered stream/tool/usage completion. Admission refusal and
+ordinary callback exception both require zero start/terminal/usage observations,
+even with a buffered result. These are authored scenarios; syntax/whitespace checks
+are not typechecking or behavior execution. Exact-head source review and selected
+remote execution belong to the PR evidence, without a full-regression or runtime
+claim. The coding session runs no local Dune build/typecheck/tests.
+
+The source/peer audit found #47026 still open at
+`81f5d78578378deabf5447de961dae483b400312` over
+`df076a53d3fc05065b2e078b2b29e6a9dfe8965a`, Native Stack47014 position7/13, in its
+2026-11-01 07:38:42 UTC snapshot. That peer changes non-completion Result policy in
+the same types/result/finalizer hunks; it does not supply this extraction. No peer
+code was imported. Future integration must put its new canonical variants/evidence
+in this owner and preserve unbound pre-init observations, admitted identity and
+usage, and the peer's recovery fencing. This is an integration obligation, not an
+approval of that peer or a claim that its changes reached main.
+
+This brings the initial queue to29 implemented candidates; T1's authoritative
+unknown-acknowledgement contract remains open. The whole-repository semantic audit
+and broader improvement objective remain active. The historical investigation below
+retains its original source revision.
+
 Source:
 [lib/runtime/runtime_antigravity.ml:679](https://github.com/jeong-sik/masc/blob/aea8424926ea79f110315eec5ab429ac51043598/lib/runtime/runtime_antigravity.ml#L679-L923),
 [lib/runtime/runtime_antigravity.ml:1000](https://github.com/jeong-sik/masc/blob/aea8424926ea79f110315eec5ab429ac51043598/lib/runtime/runtime_antigravity.ml#L1000-L1060).
@@ -2161,8 +2205,8 @@ T1 remains open: ordinary Board creation still lacks a persisted client operatio
 identity and authoritative unknown-acknowledgement reconciliation. Session history
 does not survive restart, and unchanged-draft protection compares bytes rather than
 composer revisions. No text matching, automatic retry, timeout or global Board
-blocker substitutes for the missing contract. The queue count remains 28 implemented
-candidates; T1 and S3 stay open. Exact-head independent source review and selected
+blocker substitutes for the missing contract. The queue now has29 implemented
+candidates following the S3 layer above; T1 stays open. Exact-head independent source review and selected
 remote execution are recorded on each layer PR; syntax parsing is not type checking
 or execution, and no installed-runtime or full regression result is implied. No
 local Dune build, typecheck or test is used in this external coding session.

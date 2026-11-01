@@ -66,6 +66,9 @@ type month_view = {
   fleet : fleet;
 }
 
+val valid_month : string -> bool
+(** Whether a string has the ["YYYY-MM"] calendar month shape ([01..12]). *)
+
 val read_month : masc_root:string -> month:string -> (month_view, string) result
 (** Aggregate the requested month, reusing and updating the boundary cache.
     An invalid month string is an [Error]. A missing ledger is an empty

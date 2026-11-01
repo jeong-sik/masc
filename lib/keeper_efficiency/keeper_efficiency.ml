@@ -114,6 +114,13 @@ let update_keeper acc name f =
 
 (* ---- cost-ledger rows ---- *)
 
+let non_negative_int n = if n < 0 then 0 else n
+
+let non_negative_finite_float v =
+  if Float.is_nan v || v = infinity || v = neg_infinity || v < 0.0 then 0.0
+  else v
+;;
+
 let fold_cost_row acc json =
   match Cost_ledger.of_json json with
   | Error _ -> acc  (* malformed rows are skipped, as ledger reads skip them *)
@@ -141,11 +148,14 @@ let fold_cost_row acc json =
       (match row.Cost_ledger.usage with
        | Cost_ledger.Usage_missing -> acc
        | Cost_ledger.Usage_reported reported ->
+         let input_tokens = non_negative_int reported.input_tokens in
+         let output_tokens = non_negative_int reported.output_tokens in
+         let cost_usd = non_negative_finite_float reported.cost_usd in
          update_keeper acc agent (fun k ->
              { k with
-               input_tokens = k.input_tokens + reported.input_tokens
-             ; output_tokens = k.output_tokens + reported.output_tokens
-             ; cost_usd = k.cost_usd +. reported.cost_usd
+               input_tokens = k.input_tokens + input_tokens
+             ; output_tokens = k.output_tokens + output_tokens
+             ; cost_usd = k.cost_usd +. cost_usd
              });
          acc)
 ;;
@@ -160,10 +170,31 @@ let string_member fields name =
   match List.assoc_opt name fields with Some (`String value) -> Some value | _ -> None
 ;;
 
+let int_member fields name =
+  match List.assoc_opt name fields with Some (`Int value) -> Some value | _ -> None
+;;
+
+let non_neg_int_member fields name =
+  match int_member fields name with
+  | Some value when value >= 0 -> Some value
+  | _ -> None
+;;
+
 let float_member fields name =
   match List.assoc_opt name fields with
   | Some (`Float value) -> Some value
   | Some (`Int value) -> Some (float_of_int value)
+  | _ -> None
+;;
+
+let non_neg_finite_float_member fields name =
+  match float_member fields name with
+  | Some value
+    when not (Float.is_nan value)
+         && value <> infinity
+         && value <> neg_infinity
+         && value >= 0.0 ->
+    Some value
   | _ -> None
 ;;
 
@@ -191,7 +222,11 @@ let fold_tool_row (acc : day_acc) (json : Yojson.Safe.t) : day_acc =
       match name with
       | None -> acc
       | Some keeper ->
-        let duration = match float_member fields "duration_ms" with Some ms -> ms | None -> 0.0 in
+        let duration =
+          match float_member fields "duration_ms" with
+          | Some ms -> non_negative_finite_float ms
+          | None -> 0.0
+        in
         update_keeper acc keeper (fun k ->
             let k = { k with calls = k.calls + 1; tool_ms = k.tool_ms +. duration } in
             match string_member fields "disposition" with
@@ -206,14 +241,15 @@ let fold_tool_row (acc : day_acc) (json : Yojson.Safe.t) : day_acc =
 ;;
 
 (* A day file that shrank below its cached boundary was re-read from zero,
-   so this day's accumulator counted its rows twice. The caller discards
-   that day's accumulator and folds it again from an empty one. *)
+   and a previously cached day file that was removed is absent from
+   [returned]. In either case this day's cached accumulator is stale and the
+   caller folds the day again from an empty accumulator. *)
 let shrank ~passed ~returned =
   List.exists
     (fun (path, prior) ->
        match List.assoc_opt path returned with
        | Some boundary -> boundary < prior
-       | None -> false)
+       | None -> true)
     passed
 ;;
 
@@ -230,68 +266,111 @@ type day_section = {
 
 let empty_section day = { day; costs_cursors = []; tool_cursors = []; turn_ids = []; keepers = [] }
 
+let rec all_some acc = function
+  | [] -> Some (List.rev acc)
+  | Some v :: rest -> all_some (v :: acc) rest
+  | None :: _ -> None
+;;
+
+let cursor_pair_of_json = function
+  | `Assoc fields ->
+    (match (string_member fields "path", non_neg_int_member fields "boundary") with
+     | Some path, Some boundary when path <> "" -> Some (path, boundary)
+     | _ -> None)
+  | _ -> None
+;;
+
 let cursors_of_json fields name =
   match List.assoc_opt name fields with
-  | Some (`List pairs) ->
-    List.filter_map
-      (function
-        | `Assoc [ ("path", `String path); ("boundary", `Int boundary) ] -> Some (path, boundary)
-        | _ -> None)
-      pairs
-  | _ -> []
+  | Some (`List pairs) -> all_some [] (List.map cursor_pair_of_json pairs)
+  | _ -> None
+;;
+
+let turn_id_of_json = function
+  | `Assoc fields ->
+    (match (string_member fields "agent", int_member fields "turn") with
+     | Some agent, Some turn when agent <> "" -> Some (agent, turn)
+     | _ -> None)
+  | _ -> None
 ;;
 
 let turn_ids_of_json fields =
   match List.assoc_opt "turn_ids" fields with
-  | Some (`List ids) ->
-    List.filter_map
-      (function
-        | `Assoc [ ("agent", `String agent); ("turn", `Int turn) ] -> Some (agent, turn)
-        | _ -> None)
-      ids
-  | _ -> []
+  | Some (`List ids) -> all_some [] (List.map turn_id_of_json ids)
+  | _ -> None
 ;;
 
 let keeper_of_json = function
-  | `Assoc
-      [ ("keeper", `String keeper)
-      ; ("turns", `Int turns)
-      ; ("input_tokens", `Int input_tokens)
-      ; ("output_tokens", `Int output_tokens)
-      ; ("cost_usd", `Float cost_usd)
-      ; ("calls", `Int calls)
-      ; ("failed", `Int failed)
-      ; ("deferred", `Int deferred)
-      ; ("tool_ms", `Float tool_ms)
-      ] ->
-    Some
-      { keeper
-      ; turns
-      ; input_tokens
-      ; output_tokens
-      ; cost_usd
-      ; calls
-      ; failed
-      ; deferred
-      ; tool_ms
-      }
+  | `Assoc fields ->
+    (match
+       ( string_member fields "keeper"
+       , non_neg_int_member fields "turns"
+       , non_neg_int_member fields "input_tokens"
+       , non_neg_int_member fields "output_tokens"
+       , non_neg_finite_float_member fields "cost_usd"
+       , non_neg_int_member fields "calls"
+       , non_neg_int_member fields "failed"
+       , non_neg_int_member fields "deferred"
+       , non_neg_finite_float_member fields "tool_ms" )
+     with
+     | ( Some keeper
+       , Some turns
+       , Some input_tokens
+       , Some output_tokens
+       , Some cost_usd
+       , Some calls
+       , Some failed
+       , Some deferred
+       , Some tool_ms )
+       when keeper <> "" ->
+       Some
+         { keeper
+         ; turns
+         ; input_tokens
+         ; output_tokens
+         ; cost_usd
+         ; calls
+         ; failed
+         ; deferred
+         ; tool_ms
+         }
+     | _ -> None)
   | _ -> None
 ;;
 
 let section_of_json day json =
   match json with
   | `Assoc fields ->
-    (match List.assoc_opt "keepers" fields with
-     | Some (`List rows) ->
-       let keepers = List.filter_map keeper_of_json rows in
-       Some
-         { day
-         ; costs_cursors = cursors_of_json fields "costs_cursors"
-         ; tool_cursors = cursors_of_json fields "tool_cursors"
-         ; turn_ids = turn_ids_of_json fields
-         ; keepers
-         }
-     | _ -> None)
+    let day_ok =
+      match int_member fields "day" with
+      | Some d -> Int.equal d day
+      | None -> true
+    in
+    if not day_ok then None
+    else
+      (match
+         ( cursors_of_json fields "costs_cursors"
+         , cursors_of_json fields "tool_cursors"
+         , turn_ids_of_json fields
+         , List.assoc_opt "keepers" fields )
+       with
+       | Some costs_cursors, Some tool_cursors, Some turn_ids, Some (`List rows) ->
+         (match all_some [] (List.map keeper_of_json rows) with
+          | Some keepers ->
+            if (keepers <> [] || turn_ids <> [])
+               && costs_cursors = []
+               && tool_cursors = []
+            then None
+            else
+              Some
+                { day
+                ; costs_cursors
+                ; tool_cursors
+                ; turn_ids
+                ; keepers
+                }
+          | None -> None)
+       | _ -> None)
   | _ -> None
 ;;
 
@@ -334,6 +413,15 @@ let section_to_json section =
 
 type month_cache = { sections : day_section list }
 
+let day_entry_of_json = function
+  | `Assoc fields ->
+    (match (int_member fields "day", List.assoc_opt "section" fields) with
+     | Some day, Some section_json when day >= 1 && day <= 31 ->
+       section_of_json day section_json
+     | _ -> None)
+  | _ -> None
+;;
+
 let cache_of_json ~month json =
   match json with
   | `Assoc fields ->
@@ -344,15 +432,9 @@ let cache_of_json ~month json =
      with
      | Some (`String schema), Some (`String m), Some (`List days)
        when String.equal schema cache_schema && String.equal m month ->
-       let sections =
-         List.filter_map
-           (function
-             | `Assoc [ ("day", `Int day); ("section", section_json) ] ->
-               section_of_json day section_json
-             | _ -> None)
-           days
-       in
-       Some { sections }
+       (match all_some [] (List.map day_entry_of_json days) with
+        | Some sections -> Some { sections }
+        | None -> None)
      | _ -> None)
   | _ -> None
 ;;

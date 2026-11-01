@@ -42,6 +42,12 @@ val request_of_yojson : Yojson.Safe.t -> (request, string) result
 val execute :
   Workspace.config -> keeper_name:string -> request -> (outcome, error) result
 
+val committed_followup_failed_projection : string
+(** Canonical ["projection"] wire token ("committed_followup_failed") returned
+    when the durable disposition commit succeeded, but live projection or
+    follow-up reconciliation failed (HTTP 202 Accepted with ["ok": false] and
+    ["committed": true]). *)
+
 val outcome_to_yojson : outcome -> Yojson.Safe.t
 val outcome_projection_complete : outcome -> bool
 val error_to_string : error -> string

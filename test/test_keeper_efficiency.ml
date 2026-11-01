@@ -195,7 +195,14 @@ let month_tests =
           check int "after rewrite turns" 1
             ((keeper_row third "polisher" |> Option.get).KE.turns);
           check int "after rewrite calls" 1
-            ((keeper_row third "polisher" |> Option.get).KE.calls)) )
+            ((keeper_row third "polisher" |> Option.get).KE.calls);
+          (* Removal: deleting the day file invalidates the cached day
+             boundary and recomputes the day from the remaining files. *)
+          Sys.remove (today_day_file (Filename.concat root "costs"));
+          Sys.remove (today_day_file (Filename.concat root "tool_calls"));
+          let fourth = KE.read_month ~masc_root:root ~month:(today_month ()) |> Result.get_ok in
+          check int "after removal days_covered" 0 fourth.KE.days_covered;
+          check int "after removal keepers" 0 (List.length fourth.KE.keepers)) )
   ; ( "a corrupt cache rebuilds from the ledgers"
     , `Quick
     , fun () ->
@@ -210,7 +217,34 @@ let month_tests =
           let view = KE.read_month ~masc_root:root ~month:(today_month ()) |> Result.get_ok in
           let row = keeper_row view "polisher" |> Option.get in
           check int "rebuilt turns" 1 row.KE.turns;
-          check int "rebuilt input_tokens" 5 row.KE.input_tokens) )
+          check int "rebuilt input_tokens" 5 row.KE.input_tokens;
+          (* A structurally partial cache (e.g. keepers present with missing or
+             corrupted cursors) must also rebuild from zero rather than folding
+             from offset 0 on top of the cached keeper totals. *)
+          let broken_cursors =
+            Printf.sprintf
+              {|{"schema":"masc.keeper-efficiency-cache/v1","month":%S,"days":[{"day":1,"section":{"day":1,"costs_cursors":"corrupt","tool_cursors":[],"turn_ids":[["polisher",1]],"keepers":[{"keeper":"polisher","turns":1,"input_tokens":5,"output_tokens":6,"cost_usd":0.25,"calls":0,"failed":0,"deferred":0,"tool_ms":0.0}]}}]}|}
+              (today_month ())
+          in
+          Fs_compat.save_file cache broken_cursors;
+          let view_after_partial =
+            KE.read_month ~masc_root:root ~month:(today_month ()) |> Result.get_ok
+          in
+          let row_after_partial = keeper_row view_after_partial "polisher" |> Option.get in
+          check int "partial cache does not double-count input_tokens" 5
+            row_after_partial.KE.input_tokens) )
+  ; ( "negative tool duration is clamped so TUI decoder accepts month_view_to_json"
+    , `Quick
+    , fun () ->
+      with_masc_root (fun root ->
+          let tools = tool_store root in
+          Dated_jsonl.append tools (tool_row ~keeper:"polisher" ~duration_ms:(-25.0) ());
+          let view = KE.read_month ~masc_root:root ~month:(today_month ()) |> Result.get_ok in
+          let row = keeper_row view "polisher" |> Option.get in
+          near "negative duration clamped to 0" 0.0 row.KE.tool_ms;
+          check bool "TUI decoder accepts view json" true
+            (Result.is_ok
+               (Masc.Tui_decode_keeper_efficiency.of_json (KE.month_view_to_json view)))) )
   ; ( "invalid month is an error; empty ledgers are an empty view"
     , `Quick
     , fun () ->

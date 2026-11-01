@@ -29,22 +29,26 @@ let error_json code detail =
 
 let handle_get state req reqd =
   let month = month_parameter req in
-  let masc_root =
-    Common.masc_dir_from_base_path ~base_path:(Mcp_server.workspace_config state).base_path
-  in
-  (* [Keeper_efficiency.read_month] folds dated JSONL with blocking channel
-     IO, exactly the shape the metrics tail routes off the Eio domain. *)
-  let reading =
-    Eio_guard.with_named_switch "keeper-efficiency" (fun () ->
-        Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
-            Keeper_efficiency.read_month ~masc_root ~month))
-  in
-  match reading with
-  | Error detail ->
+  if not (Keeper_efficiency.valid_month month) then
     Server_auth.respond_json_value_with_cors ~status:`Bad_request req reqd
-      (error_json "keeper_efficiency_invalid_month" detail)
-  | Ok view ->
-    Http.Response.json_value ~status:`OK ~compress:true ~request:req
-      ~extra_headers:(Server_auth.cors_headers (Server_auth.get_origin req))
-      (Keeper_efficiency.month_view_to_json view) reqd
+      (error_json "keeper_efficiency_invalid_month" ("invalid month: " ^ month))
+  else
+    let masc_root =
+      Common.masc_dir_from_base_path ~base_path:(Mcp_server.workspace_config state).base_path
+    in
+    (* [Keeper_efficiency.read_month] folds dated JSONL with blocking channel
+       IO, exactly the shape the metrics tail routes off the Eio domain. *)
+    let reading =
+      Eio_guard.with_named_switch "keeper-efficiency" (fun () ->
+          Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+              Keeper_efficiency.read_month ~masc_root ~month))
+    in
+    match reading with
+    | Error detail ->
+      Server_auth.respond_json_value_with_cors ~status:`Service_unavailable req reqd
+        (error_json "keeper_efficiency_unavailable" detail)
+    | Ok view ->
+      Http.Response.json_value ~status:`OK ~compress:true ~request:req
+        ~extra_headers:(Server_auth.cors_headers (Server_auth.get_origin req))
+        (Keeper_efficiency.month_view_to_json view) reqd
 ;;

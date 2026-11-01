@@ -257,7 +257,28 @@ let test_runs_follows_the_roster_and_not_the_pause () =
          (Control.Present
             (runtime ~keepalive_running:false ~paused:true
                ~phase:(phase "offline") ~health:(health "offline") "analyst"))
-       "analyst")
+       "analyst");
+  List.iter
+    (fun transitioning_phase ->
+       let r =
+         reading
+           ~liveness:
+             (Control.Present
+                (runtime ~keepalive_running:false
+                   ~phase:(phase transitioning_phase)
+                   ~health:(health "offline") "analyst"))
+           "analyst"
+       in
+       check (transitioning_phase ^ " phase is transitioning, not bootable") None r;
+       check_actions
+         (transitioning_phase ^ " phase offers only delete")
+         [ Control.Delete ]
+         (Control.available r);
+       Alcotest.(check (option action_testable))
+         (transitioning_phase ^ " phase has no primary toggle action")
+         None
+         (Control.primary r))
+    [ "draining"; "restarting" ]
 
 let test_only_shutdown_confirms () =
   List.iter
@@ -742,6 +763,24 @@ let test_workspace_conflict_is_rejected_not_paused_owner () =
   | Control.Committed_followup_failed _
   | Control.Paused_owner_conflict _ ->
       Alcotest.fail "workspace mismatch 409 must not trigger paused-owner recovery"
+
+let test_boot_phase_conflict_is_rejected_not_paused_owner () =
+  match
+    Control.classify_response ~status:409
+      ~body:
+        {|{"ok":false,"code":"keeper_boot_phase_conflict","error":"keeper is currently draining; wait for the transition to settle before booting"}|}
+  with
+  | Control.Rejected { status; detail } ->
+      Alcotest.(check int) "status" 409 status;
+      Alcotest.(check string)
+        "detail"
+        "keeper is currently draining; wait for the transition to settle before booting"
+        detail
+  | Control.Accepted _
+  | Control.Purge_accepted _
+  | Control.Committed_followup_failed _
+  | Control.Paused_owner_conflict _ ->
+      Alcotest.fail "boot phase conflict 409 must not trigger paused-owner recovery"
 
 (* A 400 whose prose mentions pausing must stay a rejection. Routing on the
    words instead of the status is how a rejected request gets retried as a
@@ -1489,6 +1528,8 @@ let () =
             test_conflict_is_its_own_outcome
         ; Alcotest.test_case "workspace 409 is rejected, not paused-owner conflict" `Quick
             test_workspace_conflict_is_rejected_not_paused_owner
+        ; Alcotest.test_case "boot phase 409 is rejected, not paused-owner conflict" `Quick
+            test_boot_phase_conflict_is_rejected_not_paused_owner
         ; Alcotest.test_case "rejection prose stays a rejection" `Quick
             test_rejection_prose_does_not_become_a_conflict
         ; Alcotest.test_case "non-JSON error keeps its text" `Quick

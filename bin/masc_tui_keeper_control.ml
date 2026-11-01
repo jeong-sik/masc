@@ -243,9 +243,11 @@ let runs reading =
   | Unobserved | Invalid _ -> None
   | Absent -> Some false
   | Present runtime ->
-      Some
-        (runtime.Decode.kr_keepalive_running
-         || Decode.keeper_phase_is_paused runtime.Decode.kr_phase)
+      if Decode.keeper_phase_is_transitioning runtime.Decode.kr_phase then None
+      else
+        Some
+          (runtime.Decode.kr_keepalive_running
+           || Decode.keeper_phase_is_paused runtime.Decode.kr_phase)
 
 (* Confirmed deletion uses the durable server shutdown operation, which
    stops and joins the exact lane before removing its artifacts. *)
@@ -309,7 +311,10 @@ let classify_2xx_response ~status body =
           let committed =
             List.assoc_opt "committed" fields = Some (`Bool true)
             || List.assoc_opt "projection" fields
-               = Some (`String "committed_followup_failed")
+               = Some
+                   (`String
+                     Masc.Keeper_paused_work_operator
+                     .committed_followup_failed_projection)
           in
           let detail = response_detail ~status body in
           if committed then Committed_followup_failed detail
@@ -318,7 +323,7 @@ let classify_2xx_response ~status body =
   | _ -> Accepted { already_live = false }
   | exception Yojson.Json_error _ -> Accepted { already_live = false }
 
-let is_workspace_conflict body =
+let is_non_recoverable_conflict body =
   match Yojson.Safe.from_string body with
   | `Assoc fields -> (
       match List.assoc_opt "code" fields with
@@ -326,6 +331,7 @@ let is_workspace_conflict body =
           String.equal code
             (Masc.Request_workspace_precondition.refusal_code
                Masc.Request_workspace_precondition.Workspace_mismatch)
+          || String.equal code Decode.keeper_boot_phase_conflict_code
       | Some _ | None -> false)
   | _ -> false
   | exception Yojson.Json_error _ -> false
@@ -333,7 +339,7 @@ let is_workspace_conflict body =
 let classify_response ~status ~body =
   if status >= 200 && status < 300 then
     classify_2xx_response ~status body
-  else if status = 409 && not (is_workspace_conflict body) then
+  else if status = 409 && not (is_non_recoverable_conflict body) then
     Paused_owner_conflict (response_detail ~status body)
   else Rejected { status; detail = response_detail ~status body }
 

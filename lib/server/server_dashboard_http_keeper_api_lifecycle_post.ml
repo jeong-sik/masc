@@ -389,19 +389,34 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
              reqd
              why
          | Boot_allowed ->
-        let live_boot_entry =
-          match Keeper_registry.get ~base_path:config.base_path name with
-          | Some entry
-            when String.equal action "boot"
-                 && entry.conditions.fiber_alive
-                 && not entry.conditions.stop_requested
-                 && (entry.phase = Keeper_state_machine.Running
-                     || entry.phase = Keeper_state_machine.Paused) ->
-            Some entry
-          | Some _ | None -> None
+        let boot_entry =
+          if String.equal action "boot" then
+            Keeper_registry.get ~base_path:config.base_path name
+          else None
         in
-        (match live_boot_entry with
-         | Some entry when entry.phase = Keeper_state_machine.Paused ->
+        (match boot_entry with
+         | Some entry
+           when entry.phase = Keeper_state_machine.Draining
+                || entry.phase = Keeper_state_machine.Restarting ->
+           let why =
+             Printf.sprintf
+               "keeper is currently %s; wait for the transition to settle \
+                before booting"
+               (Keeper_state_machine.phase_to_string entry.phase)
+           in
+           log_lifecycle_result (Rejected why);
+           Http.Response.json_value
+             ~status:`Conflict
+             ~request:req
+             (Server_refusal.json
+                ~code:Tui_decode.keeper_boot_phase_conflict_code
+                ~fields:[ "ok", `Bool false ]
+                why)
+             reqd
+         | Some entry
+           when entry.conditions.fiber_alive
+                && not entry.conditions.stop_requested
+                && entry.phase = Keeper_state_machine.Paused ->
            let why =
              "keeper registry lane is paused; commit Resume_owner through the \
               directive endpoint"
@@ -413,7 +428,11 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
              ~ok:false
              reqd
              why
-         | Some entry ->
+         | Some entry
+           when entry.conditions.fiber_alive
+                && not entry.conditions.stop_requested
+                && (entry.phase = Keeper_state_machine.Running
+                    || entry.phase = Keeper_state_machine.Failing) ->
            (* Dashboard boot is an idempotent lifecycle action.  If a keeper
               is already live, do not send it through masc_keeper_up's update
               path: that path intentionally stop/starts changed keepers, and
@@ -430,7 +449,7 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
                 ~name
                 (Keeper_lifecycle_events.Custom_event
                    { verb = Keeper_lifecycle_events.Started
-                   ; phase = Some Keeper_state_machine.Running
+                   ; phase = Some entry.phase
                    })
                : surface_refresh);
            let detail =
@@ -449,7 +468,7 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
                   ("detail", detail);
                 ])
              reqd
-         | None ->
+         | Some _ | None ->
            (match Keeper_tool_surface.dispatch keeper_ctx ~name:tool_name ~args with
             | Some result
               when Tool_result.is_success result

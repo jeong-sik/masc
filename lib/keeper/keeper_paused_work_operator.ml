@@ -68,6 +68,8 @@ let commit_status = function
   | `Already_committed -> "already_committed"
 ;;
 
+let committed_followup_failed_projection = "committed_followup_failed"
+
 let cancellation_result_json (success : Cancellation.success) =
   let commit_status, ok, projection, receipt, error =
     match success.transition with
@@ -85,7 +87,7 @@ let cancellation_result_json (success : Cancellation.success) =
       in
       ( "committed"
       , false
-      , "committed_followup_failed"
+      , committed_followup_failed_projection
       , receipt
       , Some (Printf.sprintf "%s: %s" stage detail) )
   in
@@ -114,7 +116,7 @@ let outcome_to_yojson = function
         true, Keeper_state_machine.phase_to_string phase, None
       | Resume.Committed_followup_failed failure ->
         ( false
-        , "committed_followup_failed"
+        , committed_followup_failed_projection
         , Some
             (Resume.error_to_string
                { cause = failure; reservation_release = None }) )
@@ -145,7 +147,7 @@ let outcome_to_yojson = function
         true, projection, None
       | Transfer.Committed_followup_failed failure ->
         ( false
-        , "committed_followup_failed"
+        , committed_followup_failed_projection
         , Some
             (Transfer.error_to_string
                { cause = failure; reservation_release = None }) )
@@ -170,7 +172,7 @@ let outcome_to_yojson = function
       | Source_terminal.Applied _ -> true, "applied", None
       | Source_terminal.Committed_followup_failed failure ->
         ( false
-        , "committed_followup_failed"
+        , committed_followup_failed_projection
         , Some
             (Source_terminal.error_to_string
                { cause = failure; reservation_release = None }) )

@@ -20,7 +20,11 @@ let open_identity state =
   | Fusion_detail run_id -> Some ("run:" ^ run_id)
   | Fusion_historical_detail reference -> Some ("board:" ^ reference.fhe_post_id)
 
+let stale_reason = "Fusion changed while reading; refreshing"
+
 let begin_runs state ~demand =
+  if demand = After_change then
+    state.fusion_runs <- Masc_tui_fetched.invalidate ~reason:stale_reason state.fusion_runs;
   match Masc_tui_fetched.start ~equal:Unit.equal state.fusion_runs ~key:() with
   | Masc_tui_fetched.Already_loading ->
       if demand = After_change then state.fusion_runs_reread_pending <- true;
@@ -28,10 +32,24 @@ let begin_runs state ~demand =
   | Masc_tui_fetched.Started (reading, request) ->
       state.fusion_runs <- reading;
       state.fusion_runs_reread_pending <- false;
+      state.fusion_runs_awaiting_observer <- false;
       state.fusion_runs_open_at_start <- open_identity state;
       Some request
 
+let mark_detail_stale state ~run_id =
+  if Option.exists
+       (fun detail -> String.equal detail.Masc.Tui_decode_fusion.fud_run.fur_run_id run_id)
+       state.fusion_detail then
+    state.fusion_detail_stale <- true
+
+let mark_historical_stale state ~reference =
+  if Option.exists
+       (fun detail -> detail.Masc.Tui_decode_fusion.fhd_reference = reference)
+       state.fusion_historical_detail then
+    state.fusion_historical_detail_stale <- true
+
 let begin_detail state ~demand ~run_id =
+  if demand = After_change then mark_detail_stale state ~run_id;
   match state.fusion_detail_inflight with
   | Some (generation, current)
     when generation = state.fusion_detail_generation && String.equal current run_id ->
@@ -42,9 +60,11 @@ let begin_detail state ~demand ~run_id =
       let generation = state.fusion_detail_generation in
       state.fusion_detail_inflight <- Some (generation, run_id);
       state.fusion_detail_reread_pending <- false;
+      state.fusion_detail_awaiting_observer <- false;
       Some generation
 
 let begin_historical state ~demand ~reference =
+  if demand = After_change then mark_historical_stale state ~reference;
   match state.fusion_historical_inflight with
   | Some (generation, current)
     when generation = state.fusion_detail_generation && current = reference ->
@@ -55,6 +75,7 @@ let begin_historical state ~demand ~reference =
       let generation = state.fusion_detail_generation in
       state.fusion_historical_inflight <- Some (generation, reference);
       state.fusion_historical_reread_pending <- false;
+      state.fusion_historical_awaiting_observer <- false;
       Some generation
 
 (* Subscribe first, then re-read the visible projection: its initial read may
@@ -75,6 +96,13 @@ let revalidate_visible state ~runs ~detail ~historical =
     | Approvals | Planning | Schedules | Verification | Harness
     | Repositories | Code | Changes | Connectors | Runtime | Config
     | Resources | Tools | System_logs -> ()
+
+let observer_failed state ~runs ~detail ~historical =
+  revalidate_visible state
+    ~runs:(fun () -> if state.fusion_runs_awaiting_observer then runs ())
+    ~detail:(fun run_id -> if state.fusion_detail_awaiting_observer then detail run_id)
+    ~historical:(fun reference ->
+      if state.fusion_historical_awaiting_observer then historical reference)
 
 let apply_fusion_runs_load state request ~superseded = function
   | Ok (snapshot : Masc.Tui_decode_fusion.fusion_snapshot) ->
@@ -173,6 +201,7 @@ let apply_fusion_runs_load state request ~superseded = function
            state.fusion_mode <- Fusion_list;
            state.fusion_scroll <- 0;
            state.fusion_detail <- None;
+           state.fusion_detail_stale <- false;
            state.fusion_detail_error <- None;
            state.fusion_detail_generation <- state.fusion_detail_generation + 1
        | Fusion_historical_detail _, _ | Fusion_list, _ -> ())
@@ -232,20 +261,16 @@ let runs_loaded state request result =
     (match result with
      | Ok _ ->
          state.fusion_runs <- Masc_tui_fetched.invalidate
-             ~reason:"Fusion changed while reading; refreshing" state.fusion_runs
+             ~reason:stale_reason state.fusion_runs
      | Error _ -> ());
-    if reread then Reread else Await_observer
+    if reread then Reread else begin
+      state.fusion_runs_awaiting_observer <- true;
+      Await_observer
+    end
   end else begin
     apply_fusion_runs_load state request ~superseded:false result;
     Applied
   end
-
-let mark_detail_stale state =
-  let message = "Fusion changed while reading; refreshing" in
-  state.fusion_detail_error <- Some
-      (match state.fusion_detail_error with
-       | None -> message
-       | Some error -> message ^ " (last read: " ^ error ^ ")")
 
 let detail_loaded state ~generation ~run_id result =
   match state.fusion_detail_inflight with
@@ -259,10 +284,20 @@ let detail_loaded state ~generation ~run_id result =
           || state.fusion_mode <> Fusion_detail run_id then Obsolete
        else if reread || state.observer = Observer_opening then begin
          apply_fusion_detail_load state generation run_id result;
-         mark_detail_stale state;
-         if reread then Reread else Await_observer
+         mark_detail_stale state ~run_id;
+         if reread then Reread else begin
+           state.fusion_detail_awaiting_observer <- true;
+           Await_observer
+         end
        end
-       else begin apply_fusion_detail_load state generation run_id result; Applied end
+       else begin
+         apply_fusion_detail_load state generation run_id result;
+         (match result with
+          | Ok detail when String.equal detail.Masc.Tui_decode_fusion.fud_run.fur_run_id run_id ->
+              state.fusion_detail_stale <- false
+          | Ok _ | Error _ -> mark_detail_stale state ~run_id);
+         Applied
+       end
    | Some _ | None -> Obsolete
 
 let historical_detail_loaded state ~generation ~reference result =
@@ -276,10 +311,20 @@ let historical_detail_loaded state ~generation ~reference result =
           || state.fusion_mode <> Fusion_historical_detail reference then Obsolete
        else if reread || state.observer = Observer_opening then begin
          apply_fusion_historical_detail_load state generation reference result;
-         mark_detail_stale state;
-         if reread then Reread else Await_observer
+         mark_historical_stale state ~reference;
+         if reread then Reread else begin
+           state.fusion_historical_awaiting_observer <- true;
+           Await_observer
+         end
        end
-       else begin apply_fusion_historical_detail_load state generation reference result; Applied end
+       else begin
+         apply_fusion_historical_detail_load state generation reference result;
+         (match result with
+          | Ok detail when detail.Masc.Tui_decode_fusion.fhd_reference = reference ->
+              state.fusion_historical_detail_stale <- false
+          | Ok _ | Error _ -> mark_historical_stale state ~reference);
+         Applied
+       end
    | Some _ | None -> Obsolete
 
 let launch_options_loaded state ~generation ~report result =

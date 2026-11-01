@@ -6757,9 +6757,11 @@ let launch_fusion_runs_load ?(demand = Masc_tui_fusion_updates.Share) state ~mai
   | Some request ->
       let host = server_peer_host in
       let port = state.port in
+      let read = capture_workspace_json_read state (fun () ->
+        Masc_tui_loader.load_fusion_runs ~host ~port) in
       let run () =
         let result =
-          try Masc_tui_loader.load_fusion_runs ~host ~port with
+          try read () with
           | Eio.Cancel.Cancelled _ as exn -> raise exn
           | exn -> Error (Printexc.to_string exn)
         in
@@ -6783,10 +6785,12 @@ let launch_fusion_detail_load ?(demand = Masc_tui_fusion_updates.Share) state ~m
   | Some generation ->
     let host = server_peer_host in
     let port = state.port in
+    let read = capture_workspace_json_read state (fun () ->
+      Masc_tui_loader.load_fusion_detail ~host ~port ~run_id) in
     Masc_tui_async_read.launch
       ~deliver:(fun result ->
         enqueue_async mailbox (Fusion_detail_loaded (generation, run_id, result)))
-      (fun () -> Masc_tui_loader.load_fusion_detail ~host ~port ~run_id)
+      read
   end
 
 let launch_fusion_historical_detail_load ?(demand = Masc_tui_fusion_updates.Share) state ~mailbox ~reference =
@@ -6797,10 +6801,12 @@ let launch_fusion_historical_detail_load ?(demand = Masc_tui_fusion_updates.Shar
   | Some generation ->
     let host = server_peer_host in
     let port = state.port in
+    let read = capture_workspace_json_read state (fun () ->
+      Masc_tui_loader.load_fusion_historical_detail ~host ~port ~reference) in
     Masc_tui_async_read.launch
       ~deliver:(fun result ->
         enqueue_async mailbox (Fusion_historical_detail_loaded (generation, reference, result)))
-      (fun () -> Masc_tui_loader.load_fusion_historical_detail ~host ~port ~reference)
+      read
   end
 
 let revalidate_visible_fusion state ~mailbox =
@@ -6810,6 +6816,13 @@ let revalidate_visible_fusion state ~mailbox =
     ~detail:(fun run_id -> launch_fusion_detail_load ~demand state ~mailbox ~run_id)
     ~historical:(fun reference ->
       launch_fusion_historical_detail_load ~demand state ~mailbox ~reference)
+
+let resume_fusion_after_observer_failure state ~mailbox =
+  Masc_tui_fusion_updates.observer_failed state
+    ~runs:(fun () -> launch_fusion_runs_load state ~mailbox)
+    ~detail:(fun run_id -> launch_fusion_detail_load state ~mailbox ~run_id)
+    ~historical:(fun reference ->
+      launch_fusion_historical_detail_load state ~mailbox ~reference)
 
 (* The server's reading of which Keepers the memory recall judgment reaches,
    asked when the [m] form opens and drawn in it. Each open takes a new
@@ -14374,6 +14387,7 @@ let revoke_detail_readings state =
   state.keeper_schedules_pending <- None;
   state.fusion_runs <- Masc_tui_fetched.clear state.fusion_runs;
   state.fusion_runs_reread_pending <- false;
+  state.fusion_runs_awaiting_observer <- false;
   state.fusion_runs_open_at_start <- None
 
 let same_currency_workspace source current =
@@ -18403,6 +18417,7 @@ let open_fusion_detail state ~mailbox =
       state.fusion_mode <- Fusion_historical_detail evidence;
       state.fusion_scroll <- 0;
       state.fusion_historical_detail <- None;
+      state.fusion_historical_detail_stale <- false;
       state.fusion_detail_error <- None;
       launch_fusion_historical_detail_load ~demand:Masc_tui_fusion_updates.After_change
         state ~mailbox ~reference:evidence
@@ -18410,6 +18425,7 @@ let open_fusion_detail state ~mailbox =
       state.fusion_mode <- Fusion_detail run.fur_run_id;
       state.fusion_scroll <- 0;
       state.fusion_detail <- None;
+      state.fusion_detail_stale <- false;
       state.fusion_detail_error <- None;
       launch_fusion_detail_load ~demand:Masc_tui_fusion_updates.After_change
         state ~mailbox ~run_id:run.fur_run_id
@@ -20430,7 +20446,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
          | Observer_closed_after_live _ ->
            Observer_closed_before_answer { reason; at });
       add_event state "observer" ("runtime event feed closed: " ^ reason);
-      if was_opening then revalidate_visible_fusion state ~mailbox
+      if was_opening then resume_fusion_after_observer_failure state ~mailbox
   | Fleet_stream_view view ->
       (* A view from a job that is no longer followed has no screen to go to. *)
       (match state.fleet_stream_reader with
@@ -32138,6 +32154,7 @@ Use relative paths for resources already held in the package. -->
                 state.fusion_mode <- Fusion_detail run.fur_run_id;
                 state.fusion_scroll <- 0;
                 state.fusion_detail <- None;
+                state.fusion_detail_stale <- false;
                 state.fusion_detail_error <- None;
                 launch_fusion_detail_load ~demand:Masc_tui_fusion_updates.After_change
                   state ~mailbox:async_messages ~run_id:run.fur_run_id)
@@ -34645,6 +34662,7 @@ Use relative paths for resources already held in the package. -->
                      state.fusion_mode <- Fusion_list;
                      state.fusion_scroll <- 0;
                      state.fusion_detail <- None;
+                     state.fusion_detail_stale <- false;
                      state.fusion_detail_error <- None;
                      state.fusion_detail_generation <-
                        state.fusion_detail_generation + 1
@@ -34838,6 +34856,7 @@ Use relative paths for resources already held in the package. -->
                      state.fusion_mode <- Fusion_list;
                      state.fusion_scroll <- 0;
                      state.fusion_detail <- None;
+                     state.fusion_detail_stale <- false;
                      state.fusion_detail_error <- None;
                      state.fusion_detail_generation <-
                        state.fusion_detail_generation + 1

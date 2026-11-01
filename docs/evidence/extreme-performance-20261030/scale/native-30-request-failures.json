@@ -1,0 +1,38 @@
+[
+  {
+    "phase": "enqueue",
+    "start_ns": 471579760605833,
+    "status": 429,
+    "end_ns": 471579761053541,
+    "wire_ms": 0.447708,
+    "server_timing": null,
+    "tool": "masc_keeper_msg"
+  },
+  {
+    "phase": "queue-held",
+    "start_ns": 471580992739000,
+    "status": 429,
+    "end_ns": 471580993346583,
+    "wire_ms": 0.607583,
+    "server_timing": null,
+    "tool": "masc_keeper_delegate_status"
+  },
+  {
+    "phase": "queue-held",
+    "start_ns": 471582148420500,
+    "status": 429,
+    "end_ns": 471582148937583,
+    "wire_ms": 0.517083,
+    "server_timing": null,
+    "tool": "masc_keeper_delegate_status"
+  },
+  {
+    "phase": "settlement",
+    "start_ns": 471585824335750,
+    "status": 429,
+    "end_ns": 471585824930000,
+    "wire_ms": 0.59425,
+    "server_timing": null,
+    "tool": "masc_keeper_delegate_status"
+  }
+]

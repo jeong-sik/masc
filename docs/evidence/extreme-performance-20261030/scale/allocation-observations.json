@@ -1,0 +1,411 @@
+{
+  "scope": "Read-only cumulative admin reports, no reset. Timestamps are retained-file write times, not synchronized sampling anchors. Top30 truncation, pending events and lifetime drops remain; no complete window attribution or byte-rate claim.",
+  "observations": [
+    {
+      "original": "memprof-before.json",
+      "original_sha256": "8eb7fc7a6d18b494535dc85874a7629f2b0beaca222e2bfb7ba802e8def642b6",
+      "file_write_mtime_ns": 1793323621557747444,
+      "scalars": {
+        "sampling_rate": 1e-05,
+        "sampling": true,
+        "live_samples": 470,
+        "live_bytes": 375999992,
+        "allocated_samples": 593940,
+        "allocated_bytes": 475151999992,
+        "major_samples": 318593,
+        "major_bytes": 254874399992,
+        "direct_major_samples": 297449,
+        "dropped_samples": 41393109,
+        "pending_events": 78,
+        "sites": 18642,
+        "site_bound": 50000,
+        "overflow_site_key": "<sites past the table bound>"
+      },
+      "top_allocated": [
+        {
+          "samples": 23049,
+          "words": 2304900000,
+          "bytes": 18439200000,
+          "callstack": "Raised by primitive operation at Masc__Lane_addon_store.record_bytes in file \"lib/lane_addon/lane_addon_store.ml\", line 489, characters 13-30\nRaised by primitive operation at Masc__Lane_addon_store.read_owned_tool_request_bytes.(fun) in file \"lib/lane_addon/lane_addon_store.ml\", line 664, characters 19-54\nRaised by primitive operation at Masc__Lane_addon_store.protect in file \"lib/lane_addon/lane_addon_store.ml\", line 18, characters 6-10\nRaised by primitive operation at Fs_compat.with_owned_inventory_regular_file.(fun) in file \"lib/fs_compat/fs_compat.ml\", line 1709, characters 12-36\nRaised by primitive operation at Fs_compat.with_owned_inventory_entry.(fun) in file \"lib/fs_compat/fs_compat.ml\", line 1610, characters 25-42\nRaised by primitive operation at Fs_compat.with_owned_inventory_entry in file \"lib/fs_compat/fs_compat.ml\", lines 1585-1615, characters 6-12\n"
+        },
+        {
+          "samples": 14990,
+          "words": 1498999999,
+          "bytes": 11991999992,
+          "callstack": "Raised by primitive operation at Masc__Lane_addon_tool_request_owner.request_of_body in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 91, characters 23-54\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 117, characters 19-77\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.current_reading.(fun) in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 85, characters 40-78\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.load_parent_with in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 90, characters 16-95\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.restore_record_with in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 199, characters 16-71\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.read_chain_with.(fun) in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 291, characters 13-80\n"
+        },
+        {
+          "samples": 14701,
+          "words": 1470099999,
+          "bytes": 11760799992,
+          "callstack": "Raised by primitive operation at Masc__Lane_addon_request_receipt.make in file \"lib/lane_addon/lane_addon_request_receipt.ml\", line 15, characters 39-70\nRaised by primitive operation at Masc__Lane_addon_request_receipt.of_json in file \"lib/lane_addon/lane_addon_request_receipt.ml\", line 27, characters 17-73\nRaised by primitive operation at Masc__Lane_addon_request_receipt.event_of_json.intended in file \"lib/lane_addon/lane_addon_request_receipt.ml\", line 50, characters 19-56\nRaised by primitive operation at Masc__Lane_addon_request_progress.event_of_json in file \"lib/lane_addon/lane_addon_request_progress.ml\", line 76, characters 17-62\nRaised by primitive operation at Masc__Lane_addon_request_progress.of_json.(fun) in file \"lib/lane_addon/lane_addon_request_progress.ml\", line 253, characters 41-59\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.decode in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 82, characters 18-84\n"
+        },
+        {
+          "samples": 13337,
+          "words": 1333700000,
+          "bytes": 10669600000,
+          "callstack": "Raised by primitive operation at Masc__Lane_addon_tool_request_owner.request_of_body in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 93, characters 20-51\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 117, characters 19-77\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.current_reading.(fun) in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 85, characters 40-78\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.load_parent_with in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 90, characters 16-95\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.restore_record_with in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 199, characters 16-71\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.read_chain_with.(fun) in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 291, characters 13-80\n"
+        },
+        {
+          "samples": 11766,
+          "words": 1176600000,
+          "bytes": 9412800000,
+          "callstack": "Raised by primitive operation at Masc__Lane_addon_action.unique in file \"lib/lane_addon/lane_addon_action.ml\", line 25, characters 37-74\nRaised by primitive operation at Masc__Lane_addon_action.canonical in file \"lib/lane_addon/lane_addon_action.ml\", line 33, characters 31-44\nRaised by primitive operation at Masc__Lane_addon_action.canonical.(fun) in file \"lib/lane_addon/lane_addon_action.ml\", line 34, characters 63-78\nRaised by primitive operation at Masc__Lane_addon_action.traverse.(fun) in file \"lib/lane_addon/lane_addon_action.ml\", line 31, characters 33-40\nRaised by primitive operation at Masc__Lane_addon_action.traverse in file \"lib/lane_addon/lane_addon_action.ml\", lines 30-31, characters 24-77\nRaised by primitive operation at Masc__Lane_addon_action.canonical in file \"lib/lane_addon/lane_addon_action.ml\", line 34, characters 20-105\n"
+        },
+        {
+          "samples": 11146,
+          "words": 1114600000,
+          "bytes": 8916800000,
+          "callstack": "Raised by primitive operation at Masc__Lane_addon_action.canonical in file \"lib/lane_addon/lane_addon_action.ml\", line 35, characters 17-77\nRaised by primitive operation at Masc__Lane_addon_action.traverse.(fun) in file \"lib/lane_addon/lane_addon_action.ml\", line 31, characters 33-40\nRaised by primitive operation at Masc__Lane_addon_action.traverse in file \"lib/lane_addon/lane_addon_action.ml\", lines 30-31, characters 24-77\nRaised by primitive operation at Masc__Lane_addon_action.canonical in file \"lib/lane_addon/lane_addon_action.ml\", line 36, characters 20-45\nRaised by primitive operation at Masc__Lane_addon_action.canonical.(fun) in file \"lib/lane_addon/lane_addon_action.ml\", line 34, characters 63-78\nRaised by primitive operation at Masc__Lane_addon_action.traverse.(fun) in file \"lib/lane_addon/lane_addon_action.ml\", line 31, characters 33-40\n"
+        },
+        {
+          "samples": 11134,
+          "words": 1113400000,
+          "bytes": 8907200000,
+          "callstack": "Raised by primitive operation at Masc__Lane_addon_action.unique in file \"lib/lane_addon/lane_addon_action.ml\", line 25, characters 37-74\nRaised by primitive operation at Masc__Lane_addon_action.canonical in file \"lib/lane_addon/lane_addon_action.ml\", line 33, characters 31-44\nRaised by primitive operation at Masc__Lane_addon_action.traverse.(fun) in file \"lib/lane_addon/lane_addon_action.ml\", line 31, characters 33-40\nRaised by primitive operation at Masc__Lane_addon_action.traverse in file \"lib/lane_addon/lane_addon_action.ml\", lines 30-31, characters 24-77\nRaised by primitive operation at Masc__Lane_addon_action.canonical in file \"lib/lane_addon/lane_addon_action.ml\", line 36, characters 20-45\nRaised by primitive operation at Masc__Lane_addon_action.canonical.(fun) in file \"lib/lane_addon/lane_addon_action.ml\", line 34, characters 63-78\n"
+        },
+        {
+          "samples": 10575,
+          "words": 1057499999,
+          "bytes": 8459999992,
+          "callstack": "Raised by primitive operation at Masc__Lane_addon_tool_request_owner.request_of_body in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 93, characters 20-51\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 117, characters 19-77\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load_listed in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 157, characters 18-79\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load_scope.restore in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 186, characters 22-47\nRaised by primitive operation at Masc__Verifier_review_owner.selected_records in file \"lib/keeper/verifier_review_owner.ml\", line 354, characters 17-47\nRaised by primitive operation at Masc__Verifier_review_owner.retained_commits in file \"lib/keeper/verifier_review_owner.ml\", line 439, characters 17-51\n"
+        },
+        {
+          "samples": 9568,
+          "words": 956799999,
+          "bytes": 7654399992,
+          "callstack": "Raised by primitive operation at Masc__Lane_addon_tool_request_owner.request_of_body in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 91, characters 23-54\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 117, characters 19-77\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load_listed in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 157, characters 18-79\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load_scope.restore in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 186, characters 22-47\nRaised by primitive operation at Masc__Verifier_review_owner.selected_records in file \"lib/keeper/verifier_review_owner.ml\", line 354, characters 17-47\nRaised by primitive operation at Masc__Verifier_review_owner.retained_commits in file \"lib/keeper/verifier_review_owner.ml\", line 439, characters 17-51\n"
+        },
+        {
+          "samples": 9082,
+          "words": 908199999,
+          "bytes": 7265599992,
+          "callstack": "Raised by primitive operation at Masc__Lane_addon_store.read_owned_tool_request.(fun) in file \"lib/lane_addon/lane_addon_store.ml\", line 670, characters 24-55\nRaised by primitive operation at Masc__Lane_addon_store.protect in file \"lib/lane_addon/lane_addon_store.ml\", line 18, characters 6-10\nRaised by primitive operation at Masc__Lane_addon_store.tool_request_owner_record.(fun) in file \"lib/lane_addon/lane_addon_store.ml\", line 709, characters 11-101\nRaised by primitive operation at Masc__Lane_addon_store.read_tool_request_scope.(fun) in file \"lib/lane_addon/lane_addon_store.ml\", line 633, characters 23-47\nRaised by primitive operation at Fs_compat.read_owned_directory_blocking in file \"lib/fs_compat/fs_compat.ml\", line 1283, characters 22-48\nRaised by primitive operation at Fs_compat.with_owned_directory_inventory_if_present in file \"lib/fs_compat/fs_compat.ml\", lines 1357-1359, characters 2-71\n"
+        },
+        {
+          "samples": 8742,
+          "words": 874199999,
+          "bytes": 6993599992,
+          "callstack": "Raised by primitive operation at Masc__Lane_addon_store.read_owned_tool_request.(fun) in file \"lib/lane_addon/lane_addon_store.ml\", line 670, characters 24-55\nRaised by primitive operation at Masc__Lane_addon_store.protect in file \"lib/lane_addon/lane_addon_store.ml\", line 18, characters 6-10\nRaised by primitive operation at Masc__Lane_addon_store.tool_request_owner_inventory_with.(fun).read in file \"lib/lane_addon/lane_addon_store.ml\", line 824, characters 24-92\nRaised by primitive operation at Masc__Lane_addon_store.read_tool_request_scope.(fun) in file \"lib/lane_addon/lane_addon_store.ml\", line 633, characters 23-47\nRaised by primitive operation at Fs_compat.read_owned_directory_blocking in file \"lib/fs_compat/fs_compat.ml\", line 1283, characters 22-48\nRaised by primitive operation at Fs_compat.with_owned_directory_inventory_if_present in file \"lib/fs_compat/fs_compat.ml\", lines 1357-1359, characters 2-71\n"
+        },
+        {
+          "samples": 7400,
+          "words": 739999999,
+          "bytes": 5919999992,
+          "callstack": "Raised by primitive operation at Masc__Lane_addon_store.record_bytes in file \"lib/lane_addon/lane_addon_store.ml\", line 489, characters 13-30\nRaised by primitive operation at Masc__Lane_addon_store.verify_record_bytes in file \"lib/lane_addon/lane_addon_store.ml\", line 519, characters 43-63\nRaised by primitive operation at Masc__Lane_addon_store.settle_verified_record in file \"lib/lane_addon/lane_addon_store.ml\", line 558, characters 14-52\nRaised by primitive operation at Masc__Lane_addon_store.read_owned_tool_request_bytes.(fun) in file \"lib/lane_addon/lane_addon_store.ml\", line 665, characters 18-92\nRaised by primitive operation at Masc__Lane_addon_store.protect in file \"lib/lane_addon/lane_addon_store.ml\", line 18, characters 6-10\nRaised by primitive operation at Fs_compat.with_owned_inventory_regular_file.(fun) in file \"lib/fs_compat/fs_compat.ml\", line 1709, characters 12-36\n"
+        },
+        {
+          "samples": 6578,
+          "words": 657800000,
+          "bytes": 5262400000,
+          "callstack": "Raised by primitive operation at Masc__Lane_addon_store.observe_record_with.(fun) in file \"lib/lane_addon/lane_addon_store.ml\", line 597, characters 50-81\nRaised by primitive operation at Masc__Lane_addon_store.with_record_fd in file \"lib/lane_addon/lane_addon_store.ml\", line 509, characters 8-13\nRaised by primitive operation at Masc__Lane_addon_store.protect in file \"lib/lane_addon/lane_addon_store.ml\", line 18, characters 6-10\nRaised by primitive operation at Masc__Lane_addon_store.load_record_with in file \"lib/lane_addon/lane_addon_store.ml\", line 600, characters 18-78\nRaised by primitive operation at Masc__Lane_addon_exact.load_proofs in file \"lib/lane_addon/lane_addon_exact.ml\", line 623, characters 12-76\nRaised by primitive operation at Masc__Lane_addon_exact.bound_proofs in file \"lib/lane_addon/lane_addon_exact.ml\", line 671, characters 14-56\n"
+        },
+        {
+          "samples": 6459,
+          "words": 645900000,
+          "bytes": 5167200000,
+          "callstack": "Raised by primitive operation at Masc__Lane_addon_action.canonical in file \"lib/lane_addon/lane_addon_action.ml\", line 35, characters 17-77\nRaised by primitive operation at Masc__Lane_addon_action.canonical.(fun) in file \"lib/lane_addon/lane_addon_action.ml\", line 34, characters 63-78\nRaised by primitive operation at Masc__Lane_addon_action.traverse.(fun) in file \"lib/lane_addon/lane_addon_action.ml\", line 31, characters 33-40\nRaised by primitive operation at Masc__Lane_addon_action.traverse in file \"lib/lane_addon/lane_addon_action.ml\", lines 30-31, characters 24-77\nRaised by primitive operation at Masc__Lane_addon_action.canonical in file \"lib/lane_addon/lane_addon_action.ml\", line 34, characters 20-105\nRaised by primitive operation at Masc__Lane_addon_action.canonical.(fun) in file \"lib/lane_addon/lane_addon_action.ml\", line 34, characters 63-78\n"
+        },
+        {
+          "samples": 5461,
+          "words": 546100000,
+          "bytes": 4368800000,
+          "callstack": "Raised by primitive operation at Masc__Lane_addon_action.canonical.(fun) in file \"lib/lane_addon/lane_addon_action.ml\", line 34, characters 82-97\nRaised by primitive operation at Masc__Lane_addon_action.traverse.(fun) in file \"lib/lane_addon/lane_addon_action.ml\", line 31, characters 33-40\nRaised by primitive operation at Masc__Lane_addon_action.traverse in file \"lib/lane_addon/lane_addon_action.ml\", lines 30-31, characters 24-77\nRaised by primitive operation at Masc__Lane_addon_action.canonical in file \"lib/lane_addon/lane_addon_action.ml\", line 34, characters 20-105\nRaised by primitive operation at Masc__Lane_addon_action.traverse.(fun) in file \"lib/lane_addon/lane_addon_action.ml\", line 31, characters 33-40\nRaised by primitive operation at Masc__Lane_addon_action.traverse in file \"lib/lane_addon/lane_addon_action.ml\", lines 30-31, characters 24-77\n"
+        },
+        {
+          "samples": 5400,
+          "words": 540000000,
+          "bytes": 4320000000,
+          "callstack": "Raised by primitive operation at Masc__Lane_addon_tool_request_owner.request_of_body in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 91, characters 23-54\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 117, characters 19-77\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load_listed in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 157, characters 18-79\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load_scope.restore in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 186, characters 22-47\nRaised by primitive operation at Masc__Keeper_librarian_admission_parts.validate_execution_inventory in file \"lib/keeper/keeper_librarian_admission_parts.ml\", line 500, characters 15-67\nRaised by primitive operation at Masc__Keeper_librarian_admission_parts.validate_forest in file \"lib/keeper/keeper_librarian_admission_parts.ml\", line 533, characters 10-62\n"
+        },
+        {
+          "samples": 5357,
+          "words": 535699999,
+          "bytes": 4285599992,
+          "callstack": "Raised by primitive operation at Masc__Lane_addon_action.traverse.(fun) in file \"lib/lane_addon/lane_addon_action.ml\", line 31, characters 44-61\nRaised by primitive operation at Masc__Lane_addon_action.traverse in file \"lib/lane_addon/lane_addon_action.ml\", lines 30-31, characters 24-77\nRaised by primitive operation at Masc__Lane_addon_action.canonical in file \"lib/lane_addon/lane_addon_action.ml\", line 34, characters 20-105\nRaised by primitive operation at Masc__Lane_addon_action.traverse.(fun) in file \"lib/lane_addon/lane_addon_action.ml\", line 31, characters 33-40\nRaised by primitive operation at Masc__Lane_addon_action.traverse in file \"lib/lane_addon/lane_addon_action.ml\", lines 30-31, characters 24-77\nRaised by primitive operation at Masc__Lane_addon_action.canonical in file \"lib/lane_addon/lane_addon_action.ml\", line 36, characters 20-45\n"
+        },
+        {
+          "samples": 5235,
+          "words": 523499999,
+          "bytes": 4187999992,
+          "callstack": "Raised by primitive operation at Masc__Lane_addon_action.traverse.(fun) in file \"lib/lane_addon/lane_addon_action.ml\", line 31, characters 44-61\nRaised by primitive operation at Masc__Lane_addon_action.traverse in file \"lib/lane_addon/lane_addon_action.ml\", lines 30-31, characters 24-77\nRaised by primitive operation at Masc__Lane_addon_action.canonical in file \"lib/lane_addon/lane_addon_action.ml\", line 34, characters 20-105\nRaised by primitive operation at Masc__Lane_addon_action.canonical.(fun) in file \"lib/lane_addon/lane_addon_action.ml\", line 34, characters 63-78\nRaised by primitive operation at Masc__Lane_addon_action.traverse.(fun) in file \"lib/lane_addon/lane_addon_action.ml\", line 31, characters 33-40\nRaised by primitive operation at Masc__Lane_addon_action.traverse in file \"lib/lane_addon/lane_addon_action.ml\", lines 30-31, characters 24-77\n"
+        },
+        {
+          "samples": 5178,
+          "words": 517799999,
+          "bytes": 4142399992,
+          "callstack": "Raised by primitive operation at Masc__Lane_addon_action.canonical.(fun) in file \"lib/lane_addon/lane_addon_action.ml\", line 34, characters 82-97\nRaised by primitive operation at Masc__Lane_addon_action.traverse.(fun) in file \"lib/lane_addon/lane_addon_action.ml\", line 31, characters 33-40\nRaised by primitive operation at Masc__Lane_addon_action.traverse in file \"lib/lane_addon/lane_addon_action.ml\", lines 30-31, characters 24-77\nRaised by primitive operation at Masc__Lane_addon_action.canonical in file \"lib/lane_addon/lane_addon_action.ml\", line 34, characters 20-105\nRaised by primitive operation at Masc__Lane_addon_action.canonical.(fun) in file \"lib/lane_addon/lane_addon_action.ml\", line 34, characters 63-78\nRaised by primitive operation at Masc__Lane_addon_action.traverse.(fun) in file \"lib/lane_addon/lane_addon_action.ml\", line 31, characters 33-40\n"
+        },
+        {
+          "samples": 5036,
+          "words": 503599999,
+          "bytes": 4028799992,
+          "callstack": "Raised by primitive operation at Masc__Lane_addon_exact.digest in file \"lib/lane_addon/lane_addon_exact.ml\", line 90, characters 45-94\nRaised by primitive operation at Masc__Lane_addon_exact.proof_to_json in file \"lib/lane_addon/lane_addon_exact.ml\", line 586, characters 64-80\nRaised by primitive operation at Masc__Lane_addon_exact.proofs_to_json in file \"lib/lane_addon/lane_addon_exact.ml\", lines 618-619, characters 23-94\nRaised by primitive operation at Masc__Lane_addon_exact.load_proofs in file \"lib/lane_addon/lane_addon_exact.ml\", line 643, characters 45-99\nRaised by primitive operation at Masc__Lane_addon_exact.bound_proofs in file \"lib/lane_addon/lane_addon_exact.ml\", line 671, characters 14-56\nRaised by primitive operation at Masc__Lane_addon_exact.read_latest_original_execution in file \"lib/lane_addon/lane_addon_exact.ml\", line 735, characters 16-66\n"
+        },
+        {
+          "samples": 4996,
+          "words": 499599999,
+          "bytes": 3996799992,
+          "callstack": "Raised by primitive operation at Masc__Lane_addon_exact.digest in file \"lib/lane_addon/lane_addon_exact.ml\", line 90, characters 45-94\nRaised by primitive operation at Masc__Lane_addon_exact.proof_to_json in file \"lib/lane_addon/lane_addon_exact.ml\", line 586, characters 64-80\nRaised by primitive operation at Masc__Lane_addon_exact.decode_proof in file \"lib/lane_addon/lane_addon_exact.ml\", line 609, characters 4-85\nRaised by primitive operation at Masc__Lane_addon_exact.load_proofs.(fun) in file \"lib/lane_addon/lane_addon_exact.ml\", line 640, characters 28-93\nRaised by primitive operation at Masc__Lane_addon_exact.load_proofs in file \"lib/lane_addon/lane_addon_exact.ml\", lines 633-641, characters 18-89\nRaised by primitive operation at Masc__Lane_addon_exact.bound_proofs in file \"lib/lane_addon/lane_addon_exact.ml\", line 671, characters 14-56\n"
+        },
+        {
+          "samples": 4927,
+          "words": 492699999,
+          "bytes": 3941599992,
+          "callstack": "Raised by primitive operation at Masc__Lane_addon_tool_request_owner.request_of_body in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 93, characters 20-51\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 117, characters 19-77\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load_listed in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 157, characters 18-79\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load_scope.restore in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 186, characters 22-47\nRaised by primitive operation at Masc__Verifier_review_owner.selected_records in file \"lib/keeper/verifier_review_owner.ml\", line 354, characters 17-47\nRaised by primitive operation at Masc__Verifier_review_owner.next_attempt in file \"lib/keeper/verifier_review_owner.ml\", line 368, characters 17-82\n"
+        },
+        {
+          "samples": 4696,
+          "words": 469599999,
+          "bytes": 3756799992,
+          "callstack": "Raised by primitive operation at Masc__Lane_addon_tool_request_owner.request_of_body in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 93, characters 20-51\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 117, characters 19-77\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load_listed in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 157, characters 18-79\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load_scope.restore in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 186, characters 22-47\nRaised by primitive operation at Masc__Keeper_librarian_admission_parts.validate_execution_inventory in file \"lib/keeper/keeper_librarian_admission_parts.ml\", line 500, characters 15-67\nRaised by primitive operation at Masc__Keeper_librarian_admission_parts.validate_forest in file \"lib/keeper/keeper_librarian_admission_parts.ml\", line 533, characters 10-62\n"
+        },
+        {
+          "samples": 4632,
+          "words": 463199999,
+          "bytes": 3705599992,
+          "callstack": "Raised by primitive operation at Masc__Lane_addon_tool_request_owner.request_of_body in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 91, characters 23-54\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 117, characters 19-77\nRaised by primitive operation at Masc__Keeper_librarian_admission_parts.original_capture in file \"lib/keeper/keeper_librarian_admission_parts.ml\", line 228, characters 16-87\nRaised by primitive operation at Masc__Keeper_librarian_admission_parts.terminal_witness in file \"lib/keeper/keeper_librarian_admission_parts.ml\", line 381, characters 57-119\nRaised by primitive operation at Masc__Keeper_librarian_admission_parts.check_replacement.(fun) in file \"lib/keeper/keeper_librarian_admission_parts.ml\", line 459, characters 24-124\nRaised by primitive operation at Masc__Keeper_librarian_admission_parts.traverse in file \"lib/keeper/keeper_librarian_admission_parts.ml\", line 331, characters 30-37\n"
+        },
+        {
+          "samples": 4619,
+          "words": 461899999,
+          "bytes": 3695199992,
+          "callstack": "Raised by primitive operation at Agent_core__Checkpoint_objects.head_of_string in file \"packages/agent_core/lib/checkpoint_objects.ml\", line 801, characters 8-36\nRaised by primitive operation at Masc__Keeper_checkpoint_store.decode_head_off_scheduler.(fun) in file \"lib/keeper/keeper_checkpoint_store.ml\", line 116, characters 10-40\nRaised by primitive operation at Masc__Keeper_checkpoint_store.load_agent_core_as in file \"lib/keeper/keeper_checkpoint_store.ml\", line 752, characters 15-65\nRaised by primitive operation at Masc__Keeper_librarian_durable_consumer.load_current_checkpoint.(fun) in file \"lib/keeper/keeper_librarian_durable_consumer.ml\", line 958, characters 4-77\n"
+        },
+        {
+          "samples": 4478,
+          "words": 447799999,
+          "bytes": 3582399992,
+          "callstack": "Raised by primitive operation at Masc__Lane_addon_tool_request_owner.request_of_body in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 91, characters 23-54\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 117, characters 19-77\nRaised by primitive operation at Masc__Keeper_librarian_admission_parts.original_capture in file \"lib/keeper/keeper_librarian_admission_parts.ml\", line 228, characters 16-87\nRaised by primitive operation at Masc__Keeper_librarian_admission_parts.answered_original in file \"lib/keeper/keeper_librarian_admission_parts.ml\", line 349, characters 52-114\nRaised by primitive operation at Masc__Keeper_librarian_admission_parts.terminal_witness in file \"lib/keeper/keeper_librarian_admission_parts.ml\", line 390, characters 48-111\nRaised by primitive operation at Stdlib__Result.bind in file \"result.ml\" (inlined), line 25, characters 36-39\nCalled from Masc__Keeper_librarian_admission_parts.terminal_witness in file \"lib/keeper/keeper_librarian_admission_parts.ml\", lines 381-403, characters 6-101\n"
+        },
+        {
+          "samples": 4406,
+          "words": 440599999,
+          "bytes": 3524799992,
+          "callstack": "Raised by primitive operation at Fs_compat.read_owned_directory_blocking in file \"lib/fs_compat/fs_compat.ml\", lines 1280-1281, characters 22-39\nRaised by primitive operation at Fs_compat.with_owned_directory_inventory_if_present in file \"lib/fs_compat/fs_compat.ml\", lines 1357-1359, characters 2-71\nRaised by primitive operation at Masc__Lane_addon_store.read_tool_request_scope.(fun) in file \"lib/lane_addon/lane_addon_store.ml\", lines 631-637, characters 22-24\nRaised by primitive operation at Fs_compat.with_owned_inventory_root.(fun) in file \"lib/fs_compat/fs_compat.ml\", line 1186, characters 21-28\nRaised by primitive operation at Fs_compat.with_owned_inventory_root in file \"lib/fs_compat/fs_compat.ml\", lines 1177-1188, characters 4-67\nRaised by primitive operation at Masc__Lane_addon_store.read_tool_request_scope in file \"lib/lane_addon/lane_addon_store.ml\", lines 625-641, characters 16-14\n"
+        },
+        {
+          "samples": 4336,
+          "words": 433599999,
+          "bytes": 3468799992,
+          "callstack": "Raised by primitive operation at Masc__Lane_addon_tool_request_owner.request_of_body in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 91, characters 23-54\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 117, characters 19-77\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load_listed in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 157, characters 18-79\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load_scope.restore in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 186, characters 22-47\nRaised by primitive operation at Masc__Verifier_review_owner.selected_records in file \"lib/keeper/verifier_review_owner.ml\", line 354, characters 17-47\nRaised by primitive operation at Masc__Verifier_review_owner.next_attempt in file \"lib/keeper/verifier_review_owner.ml\", line 368, characters 17-82\n"
+        },
+        {
+          "samples": 4302,
+          "words": 430199999,
+          "bytes": 3441599992,
+          "callstack": "Raised by primitive operation at Fs_compat.read_owned_directory_blocking in file \"lib/fs_compat/fs_compat.ml\", lines 1280-1281, characters 22-39\nRaised by primitive operation at Fs_compat.read_owned_directory in file \"lib/fs_compat/fs_compat.ml\", lines 1341-1342, characters 8-95\nRaised by primitive operation at Masc__Lane_addon_store.read_tool_request_scope.(fun) in file \"lib/lane_addon/lane_addon_store.ml\", lines 634-635, characters 25-47\nRaised by primitive operation at Fs_compat.read_owned_directory_blocking in file \"lib/fs_compat/fs_compat.ml\", line 1283, characters 22-48\nRaised by primitive operation at Fs_compat.with_owned_directory_inventory_if_present in file \"lib/fs_compat/fs_compat.ml\", lines 1357-1359, characters 2-71\nRaised by primitive operation at Masc__Lane_addon_store.read_tool_request_scope.(fun) in file \"lib/lane_addon/lane_addon_store.ml\", lines 631-637, characters 22-24\n"
+        },
+        {
+          "samples": 4301,
+          "words": 430099999,
+          "bytes": 3440799992,
+          "callstack": "Raised by primitive operation at Masc__Lane_addon_action.traverse.(fun) in file \"lib/lane_addon/lane_addon_action.ml\", line 31, characters 20-61\nRaised by primitive operation at Masc__Lane_addon_action.traverse in file \"lib/lane_addon/lane_addon_action.ml\", lines 30-31, characters 24-77\nRaised by primitive operation at Masc__Lane_addon_action.canonical in file \"lib/lane_addon/lane_addon_action.ml\", line 34, characters 20-105\nRaised by primitive operation at Masc__Lane_addon_action.canonical.(fun) in file \"lib/lane_addon/lane_addon_action.ml\", line 34, characters 63-78\nRaised by primitive operation at Masc__Lane_addon_action.traverse.(fun) in file \"lib/lane_addon/lane_addon_action.ml\", line 31, characters 33-40\nRaised by primitive operation at Masc__Lane_addon_action.traverse in file \"lib/lane_addon/lane_addon_action.ml\", lines 30-31, characters 24-77\n"
+        }
+      ]
+    },
+    {
+      "original": "memprof-after.json",
+      "original_sha256": "e5cb9f2921b830f07e03652a140417d0386286330d427123142443dde1c578ad",
+      "file_write_mtime_ns": 1793323674962771570,
+      "scalars": {
+        "sampling_rate": 1e-05,
+        "sampling": true,
+        "live_samples": 1845,
+        "live_bytes": 1475999992,
+        "allocated_samples": 639176,
+        "allocated_bytes": 511340799992,
+        "major_samples": 339912,
+        "major_bytes": 271929599992,
+        "direct_major_samples": 316841,
+        "dropped_samples": 41393109,
+        "pending_events": 14,
+        "sites": 19968,
+        "site_bound": 50000,
+        "overflow_site_key": "<sites past the table bound>"
+      },
+      "top_allocated": [
+        {
+          "samples": 24545,
+          "words": 2454500000,
+          "bytes": 19636000000,
+          "callstack": "Raised by primitive operation at Masc__Lane_addon_store.record_bytes in file \"lib/lane_addon/lane_addon_store.ml\", line 489, characters 13-30\nRaised by primitive operation at Masc__Lane_addon_store.read_owned_tool_request_bytes.(fun) in file \"lib/lane_addon/lane_addon_store.ml\", line 664, characters 19-54\nRaised by primitive operation at Masc__Lane_addon_store.protect in file \"lib/lane_addon/lane_addon_store.ml\", line 18, characters 6-10\nRaised by primitive operation at Fs_compat.with_owned_inventory_regular_file.(fun) in file \"lib/fs_compat/fs_compat.ml\", line 1709, characters 12-36\nRaised by primitive operation at Fs_compat.with_owned_inventory_entry.(fun) in file \"lib/fs_compat/fs_compat.ml\", line 1610, characters 25-42\nRaised by primitive operation at Fs_compat.with_owned_inventory_entry in file \"lib/fs_compat/fs_compat.ml\", lines 1585-1615, characters 6-12\n"
+        },
+        {
+          "samples": 16401,
+          "words": 1640099999,
+          "bytes": 13120799992,
+          "callstack": "Raised by primitive operation at Masc__Lane_addon_request_receipt.make in file \"lib/lane_addon/lane_addon_request_receipt.ml\", line 15, characters 39-70\nRaised by primitive operation at Masc__Lane_addon_request_receipt.of_json in file \"lib/lane_addon/lane_addon_request_receipt.ml\", line 27, characters 17-73\nRaised by primitive operation at Masc__Lane_addon_request_receipt.event_of_json.intended in file \"lib/lane_addon/lane_addon_request_receipt.ml\", line 50, characters 19-56\nRaised by primitive operation at Masc__Lane_addon_request_progress.event_of_json in file \"lib/lane_addon/lane_addon_request_progress.ml\", line 76, characters 17-62\nRaised by primitive operation at Masc__Lane_addon_request_progress.of_json.(fun) in file \"lib/lane_addon/lane_addon_request_progress.ml\", line 253, characters 41-59\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.decode in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 82, characters 18-84\n"
+        },
+        {
+          "samples": 15717,
+          "words": 1571699999,
+          "bytes": 12573599992,
+          "callstack": "Raised by primitive operation at Masc__Lane_addon_tool_request_owner.request_of_body in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 91, characters 23-54\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 117, characters 19-77\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.current_reading.(fun) in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 85, characters 40-78\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.load_parent_with in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 90, characters 16-95\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.restore_record_with in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 199, characters 16-71\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.read_chain_with.(fun) in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 291, characters 13-80\n"
+        },
+        {
+          "samples": 14119,
+          "words": 1411900000,
+          "bytes": 11295200000,
+          "callstack": "Raised by primitive operation at Masc__Lane_addon_tool_request_owner.request_of_body in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 93, characters 20-51\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 117, characters 19-77\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.current_reading.(fun) in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 85, characters 40-78\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.load_parent_with in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 90, characters 16-95\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.restore_record_with in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 199, characters 16-71\nRaised by primitive operation at Masc__Keeper_librarian_original_gate.Make.read_chain_with.(fun) in file \"lib/keeper/keeper_librarian_original_gate.ml\", line 291, characters 13-80\n"
+        },
+        {
+          "samples": 12621,
+          "words": 1262100000,
+          "bytes": 10096800000,
+          "callstack": "Raised by primitive operation at Masc__Lane_addon_action.unique in file \"lib/lane_addon/lane_addon_action.ml\", line 25, characters 37-74\nRaised by primitive operation at Masc__Lane_addon_action.canonical in file \"lib/lane_addon/lane_addon_action.ml\", line 33, characters 31-44\nRaised by primitive operation at Masc__Lane_addon_action.canonical.(fun) in file \"lib/lane_addon/lane_addon_action.ml\", line 34, characters 63-78\nRaised by primitive operation at Masc__Lane_addon_action.traverse.(fun) in file \"lib/lane_addon/lane_addon_action.ml\", line 31, characters 33-40\nRaised by primitive operation at Masc__Lane_addon_action.traverse in file \"lib/lane_addon/lane_addon_action.ml\", lines 30-31, characters 24-77\nRaised by primitive operation at Masc__Lane_addon_action.canonical in file \"lib/lane_addon/lane_addon_action.ml\", line 34, characters 20-105\n"
+        },
+        {
+          "samples": 12271,
+          "words": 1227100000,
+          "bytes": 9816800000,
+          "callstack": "Raised by primitive operation at Masc__Lane_addon_action.unique in file \"lib/lane_addon/lane_addon_action.ml\", line 25, characters 37-74\nRaised by primitive operation at Masc__Lane_addon_action.canonical in file \"lib/lane_addon/lane_addon_action.ml\", line 33, characters 31-44\nRaised by primitive operation at Masc__Lane_addon_action.traverse.(fun) in file \"lib/lane_addon/lane_addon_action.ml\", line 31, characters 33-40\nRaised by primitive operation at Masc__Lane_addon_action.traverse in file \"lib/lane_addon/lane_addon_action.ml\", lines 30-31, characters 24-77\nRaised by primitive operation at Masc__Lane_addon_action.canonical in file \"lib/lane_addon/lane_addon_action.ml\", line 36, characters 20-45\nRaised by primitive operation at Masc__Lane_addon_action.canonical.(fun) in file \"lib/lane_addon/lane_addon_action.ml\", line 34, characters 63-78\n"
+        },
+        {
+          "samples": 12258,
+          "words": 1225800000,
+          "bytes": 9806400000,
+          "callstack": "Raised by primitive operation at Masc__Lane_addon_action.canonical in file \"lib/lane_addon/lane_addon_action.ml\", line 35, characters 17-77\nRaised by primitive operation at Masc__Lane_addon_action.traverse.(fun) in file \"lib/lane_addon/lane_addon_action.ml\", line 31, characters 33-40\nRaised by primitive operation at Masc__Lane_addon_action.traverse in file \"lib/lane_addon/lane_addon_action.ml\", lines 30-31, characters 24-77\nRaised by primitive operation at Masc__Lane_addon_action.canonical in file \"lib/lane_addon/lane_addon_action.ml\", line 36, characters 20-45\nRaised by primitive operation at Masc__Lane_addon_action.canonical.(fun) in file \"lib/lane_addon/lane_addon_action.ml\", line 34, characters 63-78\nRaised by primitive operation at Masc__Lane_addon_action.traverse.(fun) in file \"lib/lane_addon/lane_addon_action.ml\", line 31, characters 33-40\n"
+        },
+        {
+          "samples": 11554,
+          "words": 1155400000,
+          "bytes": 9243200000,
+          "callstack": "Raised by primitive operation at Masc__Lane_addon_tool_request_owner.request_of_body in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 93, characters 20-51\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 117, characters 19-77\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load_listed in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 157, characters 18-79\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load_scope.restore in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 186, characters 22-47\nRaised by primitive operation at Masc__Verifier_review_owner.selected_records in file \"lib/keeper/verifier_review_owner.ml\", line 354, characters 17-47\nRaised by primitive operation at Masc__Verifier_review_owner.retained_commits in file \"lib/keeper/verifier_review_owner.ml\", line 439, characters 17-51\n"
+        },
+        {
+          "samples": 10469,
+          "words": 1046899999,
+          "bytes": 8375199992,
+          "callstack": "Raised by primitive operation at Masc__Lane_addon_tool_request_owner.request_of_body in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 91, characters 23-54\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 117, characters 19-77\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load_listed in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 157, characters 18-79\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load_scope.restore in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 186, characters 22-47\nRaised by primitive operation at Masc__Verifier_review_owner.selected_records in file \"lib/keeper/verifier_review_owner.ml\", line 354, characters 17-47\nRaised by primitive operation at Masc__Verifier_review_owner.retained_commits in file \"lib/keeper/verifier_review_owner.ml\", line 439, characters 17-51\n"
+        },
+        {
+          "samples": 9966,
+          "words": 996599999,
+          "bytes": 7972799992,
+          "callstack": "Raised by primitive operation at Masc__Lane_addon_store.read_owned_tool_request.(fun) in file \"lib/lane_addon/lane_addon_store.ml\", line 670, characters 24-55\nRaised by primitive operation at Masc__Lane_addon_store.protect in file \"lib/lane_addon/lane_addon_store.ml\", line 18, characters 6-10\nRaised by primitive operation at Masc__Lane_addon_store.tool_request_owner_record.(fun) in file \"lib/lane_addon/lane_addon_store.ml\", line 709, characters 11-101\nRaised by primitive operation at Masc__Lane_addon_store.read_tool_request_scope.(fun) in file \"lib/lane_addon/lane_addon_store.ml\", line 633, characters 23-47\nRaised by primitive operation at Fs_compat.read_owned_directory_blocking in file \"lib/fs_compat/fs_compat.ml\", line 1283, characters 22-48\nRaised by primitive operation at Fs_compat.with_owned_directory_inventory_if_present in file \"lib/fs_compat/fs_compat.ml\", lines 1357-1359, characters 2-71\n"
+        },
+        {
+          "samples": 9546,
+          "words": 954599999,
+          "bytes": 7636799992,
+          "callstack": "Raised by primitive operation at Masc__Lane_addon_store.read_owned_tool_request.(fun) in file \"lib/lane_addon/lane_addon_store.ml\", line 670, characters 24-55\nRaised by primitive operation at Masc__Lane_addon_store.protect in file \"lib/lane_addon/lane_addon_store.ml\", line 18, characters 6-10\nRaised by primitive operation at Masc__Lane_addon_store.tool_request_owner_inventory_with.(fun).read in file \"lib/lane_addon/lane_addon_store.ml\", line 824, characters 24-92\nRaised by primitive operation at Masc__Lane_addon_store.read_tool_request_scope.(fun) in file \"lib/lane_addon/lane_addon_store.ml\", line 633, characters 23-47\nRaised by primitive operation at Fs_compat.read_owned_directory_blocking in file \"lib/fs_compat/fs_compat.ml\", line 1283, characters 22-48\nRaised by primitive operation at Fs_compat.with_owned_directory_inventory_if_present in file \"lib/fs_compat/fs_compat.ml\", lines 1357-1359, characters 2-71\n"
+        },
+        {
+          "samples": 8132,
+          "words": 813199999,
+          "bytes": 6505599992,
+          "callstack": "Raised by primitive operation at Masc__Lane_addon_store.record_bytes in file \"lib/lane_addon/lane_addon_store.ml\", line 489, characters 13-30\nRaised by primitive operation at Masc__Lane_addon_store.verify_record_bytes in file \"lib/lane_addon/lane_addon_store.ml\", line 519, characters 43-63\nRaised by primitive operation at Masc__Lane_addon_store.settle_verified_record in file \"lib/lane_addon/lane_addon_store.ml\", line 558, characters 14-52\nRaised by primitive operation at Masc__Lane_addon_store.read_owned_tool_request_bytes.(fun) in file \"lib/lane_addon/lane_addon_store.ml\", line 665, characters 18-92\nRaised by primitive operation at Masc__Lane_addon_store.protect in file \"lib/lane_addon/lane_addon_store.ml\", line 18, characters 6-10\nRaised by primitive operation at Fs_compat.with_owned_inventory_regular_file.(fun) in file \"lib/fs_compat/fs_compat.ml\", line 1709, characters 12-36\n"
+        },
+        {
+          "samples": 6918,
+          "words": 691800000,
+          "bytes": 5534400000,
+          "callstack": "Raised by primitive operation at Masc__Lane_addon_store.observe_record_with.(fun) in file \"lib/lane_addon/lane_addon_store.ml\", line 597, characters 50-81\nRaised by primitive operation at Masc__Lane_addon_store.with_record_fd in file \"lib/lane_addon/lane_addon_store.ml\", line 509, characters 8-13\nRaised by primitive operation at Masc__Lane_addon_store.protect in file \"lib/lane_addon/lane_addon_store.ml\", line 18, characters 6-10\nRaised by primitive operation at Masc__Lane_addon_store.load_record_with in file \"lib/lane_addon/lane_addon_store.ml\", line 600, characters 18-78\nRaised by primitive operation at Masc__Lane_addon_exact.load_proofs in file \"lib/lane_addon/lane_addon_exact.ml\", line 623, characters 12-76\nRaised by primitive operation at Masc__Lane_addon_exact.bound_proofs in file \"lib/lane_addon/lane_addon_exact.ml\", line 671, characters 14-56\n"
+        },
+        {
+          "samples": 6748,
+          "words": 674800000,
+          "bytes": 5398400000,
+          "callstack": "Raised by primitive operation at Masc__Lane_addon_action.canonical in file \"lib/lane_addon/lane_addon_action.ml\", line 35, characters 17-77\nRaised by primitive operation at Masc__Lane_addon_action.canonical.(fun) in file \"lib/lane_addon/lane_addon_action.ml\", line 34, characters 63-78\nRaised by primitive operation at Masc__Lane_addon_action.traverse.(fun) in file \"lib/lane_addon/lane_addon_action.ml\", line 31, characters 33-40\nRaised by primitive operation at Masc__Lane_addon_action.traverse in file \"lib/lane_addon/lane_addon_action.ml\", lines 30-31, characters 24-77\nRaised by primitive operation at Masc__Lane_addon_action.canonical in file \"lib/lane_addon/lane_addon_action.ml\", line 34, characters 20-105\nRaised by primitive operation at Masc__Lane_addon_action.canonical.(fun) in file \"lib/lane_addon/lane_addon_action.ml\", line 34, characters 63-78\n"
+        },
+        {
+          "samples": 5998,
+          "words": 599800000,
+          "bytes": 4798400000,
+          "callstack": "Raised by primitive operation at Masc__Lane_addon_action.canonical.(fun) in file \"lib/lane_addon/lane_addon_action.ml\", line 34, characters 82-97\nRaised by primitive operation at Masc__Lane_addon_action.traverse.(fun) in file \"lib/lane_addon/lane_addon_action.ml\", line 31, characters 33-40\nRaised by primitive operation at Masc__Lane_addon_action.traverse in file \"lib/lane_addon/lane_addon_action.ml\", lines 30-31, characters 24-77\nRaised by primitive operation at Masc__Lane_addon_action.canonical in file \"lib/lane_addon/lane_addon_action.ml\", line 34, characters 20-105\nRaised by primitive operation at Masc__Lane_addon_action.traverse.(fun) in file \"lib/lane_addon/lane_addon_action.ml\", line 31, characters 33-40\nRaised by primitive operation at Masc__Lane_addon_action.traverse in file \"lib/lane_addon/lane_addon_action.ml\", lines 30-31, characters 24-77\n"
+        },
+        {
+          "samples": 5883,
+          "words": 588300000,
+          "bytes": 4706400000,
+          "callstack": "Raised by primitive operation at Masc__Lane_addon_action.traverse.(fun) in file \"lib/lane_addon/lane_addon_action.ml\", line 31, characters 44-61\nRaised by primitive operation at Masc__Lane_addon_action.traverse in file \"lib/lane_addon/lane_addon_action.ml\", lines 30-31, characters 24-77\nRaised by primitive operation at Masc__Lane_addon_action.canonical in file \"lib/lane_addon/lane_addon_action.ml\", line 34, characters 20-105\nRaised by primitive operation at Masc__Lane_addon_action.traverse.(fun) in file \"lib/lane_addon/lane_addon_action.ml\", line 31, characters 33-40\nRaised by primitive operation at Masc__Lane_addon_action.traverse in file \"lib/lane_addon/lane_addon_action.ml\", lines 30-31, characters 24-77\nRaised by primitive operation at Masc__Lane_addon_action.canonical in file \"lib/lane_addon/lane_addon_action.ml\", line 36, characters 20-45\n"
+        },
+        {
+          "samples": 5626,
+          "words": 562600000,
+          "bytes": 4500800000,
+          "callstack": "Raised by primitive operation at Masc__Lane_addon_action.traverse.(fun) in file \"lib/lane_addon/lane_addon_action.ml\", line 31, characters 44-61\nRaised by primitive operation at Masc__Lane_addon_action.traverse in file \"lib/lane_addon/lane_addon_action.ml\", lines 30-31, characters 24-77\nRaised by primitive operation at Masc__Lane_addon_action.canonical in file \"lib/lane_addon/lane_addon_action.ml\", line 34, characters 20-105\nRaised by primitive operation at Masc__Lane_addon_action.canonical.(fun) in file \"lib/lane_addon/lane_addon_action.ml\", line 34, characters 63-78\nRaised by primitive operation at Masc__Lane_addon_action.traverse.(fun) in file \"lib/lane_addon/lane_addon_action.ml\", line 31, characters 33-40\nRaised by primitive operation at Masc__Lane_addon_action.traverse in file \"lib/lane_addon/lane_addon_action.ml\", lines 30-31, characters 24-77\n"
+        },
+        {
+          "samples": 5570,
+          "words": 557000000,
+          "bytes": 4456000000,
+          "callstack": "Raised by primitive operation at Masc__Lane_addon_action.canonical.(fun) in file \"lib/lane_addon/lane_addon_action.ml\", line 34, characters 82-97\nRaised by primitive operation at Masc__Lane_addon_action.traverse.(fun) in file \"lib/lane_addon/lane_addon_action.ml\", line 31, characters 33-40\nRaised by primitive operation at Masc__Lane_addon_action.traverse in file \"lib/lane_addon/lane_addon_action.ml\", lines 30-31, characters 24-77\nRaised by primitive operation at Masc__Lane_addon_action.canonical in file \"lib/lane_addon/lane_addon_action.ml\", line 34, characters 20-105\nRaised by primitive operation at Masc__Lane_addon_action.canonical.(fun) in file \"lib/lane_addon/lane_addon_action.ml\", line 34, characters 63-78\nRaised by primitive operation at Masc__Lane_addon_action.traverse.(fun) in file \"lib/lane_addon/lane_addon_action.ml\", line 31, characters 33-40\n"
+        },
+        {
+          "samples": 5502,
+          "words": 550200000,
+          "bytes": 4401600000,
+          "callstack": "Raised by primitive operation at Masc__Lane_addon_tool_request_owner.request_of_body in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 91, characters 23-54\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 117, characters 19-77\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load_listed in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 157, characters 18-79\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load_scope.restore in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 186, characters 22-47\nRaised by primitive operation at Masc__Keeper_librarian_admission_parts.validate_execution_inventory in file \"lib/keeper/keeper_librarian_admission_parts.ml\", line 500, characters 15-67\nRaised by primitive operation at Masc__Keeper_librarian_admission_parts.validate_forest in file \"lib/keeper/keeper_librarian_admission_parts.ml\", line 533, characters 10-62\n"
+        },
+        {
+          "samples": 5317,
+          "words": 531699999,
+          "bytes": 4253599992,
+          "callstack": "Raised by primitive operation at Masc__Lane_addon_tool_request_owner.request_of_body in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 93, characters 20-51\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 117, characters 19-77\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load_listed in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 157, characters 18-79\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load_scope.restore in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 186, characters 22-47\nRaised by primitive operation at Masc__Verifier_review_owner.selected_records in file \"lib/keeper/verifier_review_owner.ml\", line 354, characters 17-47\nRaised by primitive operation at Masc__Verifier_review_owner.next_attempt in file \"lib/keeper/verifier_review_owner.ml\", line 368, characters 17-82\n"
+        },
+        {
+          "samples": 5302,
+          "words": 530199999,
+          "bytes": 4241599992,
+          "callstack": "Raised by primitive operation at Masc__Lane_addon_exact.digest in file \"lib/lane_addon/lane_addon_exact.ml\", line 90, characters 45-94\nRaised by primitive operation at Masc__Lane_addon_exact.proof_to_json in file \"lib/lane_addon/lane_addon_exact.ml\", line 586, characters 64-80\nRaised by primitive operation at Masc__Lane_addon_exact.proofs_to_json in file \"lib/lane_addon/lane_addon_exact.ml\", lines 618-619, characters 23-94\nRaised by primitive operation at Masc__Lane_addon_exact.load_proofs in file \"lib/lane_addon/lane_addon_exact.ml\", line 643, characters 45-99\nRaised by primitive operation at Masc__Lane_addon_exact.bound_proofs in file \"lib/lane_addon/lane_addon_exact.ml\", line 671, characters 14-56\nRaised by primitive operation at Masc__Lane_addon_exact.read_latest_original_execution in file \"lib/lane_addon/lane_addon_exact.ml\", line 735, characters 16-66\n"
+        },
+        {
+          "samples": 5246,
+          "words": 524599999,
+          "bytes": 4196799992,
+          "callstack": "Raised by primitive operation at Masc__Lane_addon_exact.digest in file \"lib/lane_addon/lane_addon_exact.ml\", line 90, characters 45-94\nRaised by primitive operation at Masc__Lane_addon_exact.proof_to_json in file \"lib/lane_addon/lane_addon_exact.ml\", line 586, characters 64-80\nRaised by primitive operation at Masc__Lane_addon_exact.decode_proof in file \"lib/lane_addon/lane_addon_exact.ml\", line 609, characters 4-85\nRaised by primitive operation at Masc__Lane_addon_exact.load_proofs.(fun) in file \"lib/lane_addon/lane_addon_exact.ml\", line 640, characters 28-93\nRaised by primitive operation at Masc__Lane_addon_exact.load_proofs in file \"lib/lane_addon/lane_addon_exact.ml\", lines 633-641, characters 18-89\nRaised by primitive operation at Masc__Lane_addon_exact.bound_proofs in file \"lib/lane_addon/lane_addon_exact.ml\", line 671, characters 14-56\n"
+        },
+        {
+          "samples": 5132,
+          "words": 513199999,
+          "bytes": 4105599992,
+          "callstack": "Raised by primitive operation at Agent_core__Checkpoint_objects.head_of_string in file \"packages/agent_core/lib/checkpoint_objects.ml\", line 801, characters 8-36\nRaised by primitive operation at Masc__Keeper_checkpoint_store.decode_head_off_scheduler.(fun) in file \"lib/keeper/keeper_checkpoint_store.ml\", line 116, characters 10-40\nRaised by primitive operation at Masc__Keeper_checkpoint_store.load_agent_core_as in file \"lib/keeper/keeper_checkpoint_store.ml\", line 752, characters 15-65\nRaised by primitive operation at Masc__Keeper_librarian_durable_consumer.load_current_checkpoint.(fun) in file \"lib/keeper/keeper_librarian_durable_consumer.ml\", line 958, characters 4-77\n"
+        },
+        {
+          "samples": 4944,
+          "words": 494399999,
+          "bytes": 3955199992,
+          "callstack": "Raised by primitive operation at Fs_compat.read_owned_directory_blocking in file \"lib/fs_compat/fs_compat.ml\", lines 1280-1281, characters 22-39\nRaised by primitive operation at Fs_compat.with_owned_directory_inventory_if_present in file \"lib/fs_compat/fs_compat.ml\", lines 1357-1359, characters 2-71\nRaised by primitive operation at Masc__Lane_addon_store.read_tool_request_scope.(fun) in file \"lib/lane_addon/lane_addon_store.ml\", lines 631-637, characters 22-24\nRaised by primitive operation at Fs_compat.with_owned_inventory_root.(fun) in file \"lib/fs_compat/fs_compat.ml\", line 1186, characters 21-28\nRaised by primitive operation at Fs_compat.with_owned_inventory_root in file \"lib/fs_compat/fs_compat.ml\", lines 1177-1188, characters 4-67\nRaised by primitive operation at Masc__Lane_addon_store.read_tool_request_scope in file \"lib/lane_addon/lane_addon_store.ml\", lines 625-641, characters 16-14\n"
+        },
+        {
+          "samples": 4812,
+          "words": 481199999,
+          "bytes": 3849599992,
+          "callstack": "Raised by primitive operation at Fs_compat.read_owned_directory_blocking in file \"lib/fs_compat/fs_compat.ml\", lines 1280-1281, characters 22-39\nRaised by primitive operation at Fs_compat.read_owned_directory in file \"lib/fs_compat/fs_compat.ml\", lines 1341-1342, characters 8-95\nRaised by primitive operation at Masc__Lane_addon_store.read_tool_request_scope.(fun) in file \"lib/lane_addon/lane_addon_store.ml\", lines 634-635, characters 25-47\nRaised by primitive operation at Fs_compat.read_owned_directory_blocking in file \"lib/fs_compat/fs_compat.ml\", line 1283, characters 22-48\nRaised by primitive operation at Fs_compat.with_owned_directory_inventory_if_present in file \"lib/fs_compat/fs_compat.ml\", lines 1357-1359, characters 2-71\nRaised by primitive operation at Masc__Lane_addon_store.read_tool_request_scope.(fun) in file \"lib/lane_addon/lane_addon_store.ml\", lines 631-637, characters 22-24\n"
+        },
+        {
+          "samples": 4811,
+          "words": 481099999,
+          "bytes": 3848799992,
+          "callstack": "Raised by primitive operation at Masc__Lane_addon_tool_request_owner.request_of_body in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 93, characters 20-51\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 117, characters 19-77\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load_listed in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 157, characters 18-79\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load_scope.restore in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 186, characters 22-47\nRaised by primitive operation at Masc__Keeper_librarian_admission_parts.validate_execution_inventory in file \"lib/keeper/keeper_librarian_admission_parts.ml\", line 500, characters 15-67\nRaised by primitive operation at Masc__Keeper_librarian_admission_parts.validate_forest in file \"lib/keeper/keeper_librarian_admission_parts.ml\", line 533, characters 10-62\n"
+        },
+        {
+          "samples": 4733,
+          "words": 473299999,
+          "bytes": 3786399992,
+          "callstack": "Raised by primitive operation at Masc__Lane_addon_tool_request_owner.request_of_body in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 91, characters 23-54\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 117, characters 19-77\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load_listed in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 157, characters 18-79\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load_scope.restore in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 186, characters 22-47\nRaised by primitive operation at Masc__Verifier_review_owner.selected_records in file \"lib/keeper/verifier_review_owner.ml\", line 354, characters 17-47\nRaised by primitive operation at Masc__Verifier_review_owner.next_attempt in file \"lib/keeper/verifier_review_owner.ml\", line 368, characters 17-82\n"
+        },
+        {
+          "samples": 4728,
+          "words": 472799999,
+          "bytes": 3782399992,
+          "callstack": "Raised by primitive operation at Masc__Lane_addon_action.traverse.(fun) in file \"lib/lane_addon/lane_addon_action.ml\", line 31, characters 20-61\nRaised by primitive operation at Masc__Lane_addon_action.traverse in file \"lib/lane_addon/lane_addon_action.ml\", lines 30-31, characters 24-77\nRaised by primitive operation at Masc__Lane_addon_action.canonical in file \"lib/lane_addon/lane_addon_action.ml\", line 34, characters 20-105\nRaised by primitive operation at Masc__Lane_addon_action.traverse.(fun) in file \"lib/lane_addon/lane_addon_action.ml\", line 31, characters 33-40\nRaised by primitive operation at Masc__Lane_addon_action.traverse in file \"lib/lane_addon/lane_addon_action.ml\", lines 30-31, characters 24-77\nRaised by primitive operation at Masc__Lane_addon_action.canonical in file \"lib/lane_addon/lane_addon_action.ml\", line 36, characters 20-45\n"
+        },
+        {
+          "samples": 4632,
+          "words": 463199999,
+          "bytes": 3705599992,
+          "callstack": "Raised by primitive operation at Masc__Lane_addon_tool_request_owner.request_of_body in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 91, characters 23-54\nRaised by primitive operation at Masc__Lane_addon_tool_request_owner.load in file \"lib/lane_addon/lane_addon_tool_request_owner.ml\", line 117, characters 19-77\nRaised by primitive operation at Masc__Keeper_librarian_admission_parts.original_capture in file \"lib/keeper/keeper_librarian_admission_parts.ml\", line 228, characters 16-87\nRaised by primitive operation at Masc__Keeper_librarian_admission_parts.terminal_witness in file \"lib/keeper/keeper_librarian_admission_parts.ml\", line 381, characters 57-119\nRaised by primitive operation at Masc__Keeper_librarian_admission_parts.check_replacement.(fun) in file \"lib/keeper/keeper_librarian_admission_parts.ml\", line 459, characters 24-124\nRaised by primitive operation at Masc__Keeper_librarian_admission_parts.traverse in file \"lib/keeper/keeper_librarian_admission_parts.ml\", line 331, characters 30-37\n"
+        },
+        {
+          "samples": 4593,
+          "words": 459299999,
+          "bytes": 3674399992,
+          "callstack": "Raised by primitive operation at Masc__Lane_addon_action.traverse.(fun) in file \"lib/lane_addon/lane_addon_action.ml\", line 31, characters 20-61\nRaised by primitive operation at Masc__Lane_addon_action.traverse in file \"lib/lane_addon/lane_addon_action.ml\", lines 30-31, characters 24-77\nRaised by primitive operation at Masc__Lane_addon_action.canonical in file \"lib/lane_addon/lane_addon_action.ml\", line 34, characters 20-105\nRaised by primitive operation at Masc__Lane_addon_action.canonical.(fun) in file \"lib/lane_addon/lane_addon_action.ml\", line 34, characters 63-78\nRaised by primitive operation at Masc__Lane_addon_action.traverse.(fun) in file \"lib/lane_addon/lane_addon_action.ml\", line 31, characters 33-40\nRaised by primitive operation at Masc__Lane_addon_action.traverse in file \"lib/lane_addon/lane_addon_action.ml\", lines 30-31, characters 24-77\n"
+        }
+      ]
+    }
+  ]
+}

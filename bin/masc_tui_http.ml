@@ -1307,7 +1307,7 @@ let read_nested_manifest ~host ~port = function
       (match get_json ~host ~port ~path:("/api/v1/artifacts/" ^ reference.sha256) with
        | Error detail -> Masc.Keeper_composition_observation.Invalid detail
        | Ok json -> Masc.Keeper_composition_observation.of_blob_response reference json)
-  | reading -> reading
+  | (Absent | Observed _ | Invalid _) as reading -> reading
 
 let fetch_keeper_call ~host ~port ~keeper_name ~execution_id =
   let ( let* ) = Result.bind in

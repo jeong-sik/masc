@@ -13703,11 +13703,20 @@ let complete_tools_async_detail state request result =
       let module Detail = Masc.Tui_decode_async_request in
       let prior = Masc_tui_fetched.view_for ~equal:Detail.equal_target state.tools_async_detail
           ~key:(Masc_tui_fetched.request_key request.tad_ticket) |> Masc_tui_fetched.value in
-      match reading,prior with
-      | Detail.Observed {nested=Masc.Keeper_composition_observation.Invalid detail;source;_},
-        Some (Detail.Observed {nested=Masc.Keeper_composition_observation.Observed _;source=previous;_})
-        when Detail.equal_source source previous -> Error detail
-      | _ -> Ok reading) in
+      let module Nested = Masc.Keeper_composition_observation in
+      match reading with
+      | Detail.Absent -> Ok reading
+      | Detail.Observed snapshot ->
+        match snapshot.nested with
+        | Nested.Absent | Observed _ | Stored _ -> Ok reading
+        | Invalid detail ->
+          match prior with
+          | None | Some Detail.Absent -> Ok reading
+          | Some (Detail.Observed previous) ->
+            match previous.nested with
+            | Nested.Absent | Stored _ | Invalid _ -> Ok reading
+            | Observed _ ->
+              if Detail.equal_source snapshot.source previous.source then Error detail else Ok reading) in
     (match result with
      | Error _ -> ()
      | Ok Masc.Tui_decode_async_request.Absent -> state.tools_async_last_logical <- None

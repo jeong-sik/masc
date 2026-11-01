@@ -63,7 +63,7 @@ let original_failure = function
   | Original_pending -> Some "The enclosing turn's original trace is not published yet"
   | Original_unavailable reason -> Some reason
   | Original_body {nested=Invalid detail;_} -> Some detail
-  | Original_not_read | Original_body _ -> None
+  | Original_not_read | Original_body {nested=(Absent | Observed _ | Stored _);_} -> None
 let output_sections (call:Masc.Tui_decode.keeper_call) =
   let preview () = [section "Recorded output preview"
     (match call.kc_output with Some output -> output | None -> "No output was recorded.")] in
@@ -126,12 +126,15 @@ let complete t request result =
   let result = Result.bind result (fun call ->
     match original_failure call.Masc.Tui_decode.kc_original, observation t with
     | Some reason, (Fetched.Ready previous | Stale (previous,_)) ->
-        (match previous.Masc.Tui_decode.kc_original,call.kc_original with
-         | Original_body previous,Original_body current
-           when not (String.equal previous.source_id current.source_id
-                     && String.equal previous.sha256 current.sha256) -> Ok call
-         | Original_body _,_ -> Error reason
-         | (Original_not_read | Original_pending | Original_unavailable _ | Original_failed _),_ -> Ok call)
+        (match previous.Masc.Tui_decode.kc_original with
+         | Original_body previous ->
+           (match call.kc_original with
+            | Original_body current
+              when not (String.equal previous.source_id current.source_id
+                        && String.equal previous.sha256 current.sha256) -> Ok call
+            | Original_body _ | Original_not_read | Original_pending
+            | Original_unavailable _ | Original_failed _ -> Error reason)
+         | Original_not_read | Original_pending | Original_unavailable _ | Original_failed _ -> Ok call)
     | (None | Some _), (Fetched.Absent | Loading | Failed _ | Ready _ | Stale _) -> Ok call) in
   if not (Fetched.is_current ~equal:String.equal t.fetched request) then t
   else let t={t with fetched=Fetched.complete ~equal:String.equal t.fetched request result} in

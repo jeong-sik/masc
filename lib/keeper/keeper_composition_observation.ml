@@ -56,7 +56,8 @@ let admission ~alias ~reference ?run_id = function
           && Skill_reference.equal_identity reference.Skill_reference.identity activation.identity
           && reference.content_revision = activation.content_revision
           && String.equal (Ledger.activation_frame_sha256 activation) frame_sha256 -> Ok ()
-      | _ -> Error "Child admission differs from its original scope, occurrence or activation frame" in
+      | Ledger.Nested_composition_invocation _ | Instruction_invocation _ | Composition_invocation _ ->
+          Error "Child admission differs from its original scope, occurrence or activation frame" in
     Ok (Recorded {tool_use_id;frame_sha256;activation})
 
 let node json =

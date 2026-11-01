@@ -861,7 +861,9 @@ module Ring = struct
         category;
       } in
     buf.(idx) <- entry;
-    if !file_channel <> None then
+    (* A failed append closes the channel. Keep sending later entries to the
+       configured sink so its next write can reopen it. *)
+    if !file_base_dir <> "" then
       write_to_sink (entry_to_json entry)
 
   let recent ?(limit = 200) ?(min_level = 0) ?(module_filter = "")

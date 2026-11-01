@@ -175,6 +175,10 @@ module Ring : sig
       into the ring buffer, then opens the file for appending new entries.
       [dir] is the directory for dated JSONL log files.
 
+      A failed append can close the channel; later entries still attempt to
+      reopen this configured sink. The failed batch is not replayed because
+      some of its bytes may already have been written.
+
       [identity_recheck_interval_s] (default 5.0) throttles the per-emit
       sink-identity stat pair that detects external unlink/rename of the
       live log file. Records emitted inside the window after an external

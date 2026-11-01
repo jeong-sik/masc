@@ -62,6 +62,18 @@ let our_messages lines =
 let file_messages dir = our_messages (lines_of (In_channel.with_open_text (sink_file dir) In_channel.input_all))
 let emit message = Log.emit Log.Warn ~module_name message
 
+let test_unconfigured_sink_stays_disabled () =
+  silence_console ();
+  Log.Ring.start_writer ();
+  Fun.protect ~finally:Log.Ring.stop_writer (fun () -> emit "ring-only");
+  let sink = Yojson.Safe.Util.member "file_sink" (Log.Ring.summary_json ()) in
+  check bool "no file sink was enabled" false Yojson.Safe.Util.(member "enabled" sink |> to_bool);
+  check bool "no directory was configured" true (Yojson.Safe.Util.member "dir" sink = `Null);
+  check (list string) "the ring still receives the record" [ "ring-only" ]
+    (Log.Ring.recent ~limit:1 ~module_filter:module_name ()
+     |> List.map (fun (entry : Log.Ring.entry) -> entry.message))
+;;
+
 let test_synchronous_before_start () =
   silence_console ();
   let dir = Filename.temp_dir "masc-log-writer-" "" in
@@ -212,11 +224,55 @@ let test_synchronous_after_stop () =
   check (list string) "the record is in the file when emit returns" [ "after-stop" ] (file_messages dir)
 ;;
 
+let test_later_emit_reopens_after_write_failure ~queued () =
+  silence_console ();
+  let previous_sigpipe = Sys.signal Sys.sigpipe Sys.Signal_ignore in
+  let reader = ref None in
+  Fun.protect
+    ~finally:(fun () ->
+      Log.Ring.stop_writer ();
+      Option.iter Unix.close !reader;
+      Sys.set_signal Sys.sigpipe previous_sigpipe)
+    (fun () ->
+      let dir = Filename.temp_dir "masc-log-reopen-" "" in
+      Log.Ring.init_file_sink ~identity_recheck_interval_s:0.0 dir;
+      let path = sink_file dir in
+      Unix.rename path (Filename.concat dir "previous-sink");
+      Unix.mkfifo path 0o600;
+      let pipe_reader = Unix.openfile path [ Unix.O_RDONLY; Unix.O_NONBLOCK ] 0 in
+      reader := Some pipe_reader;
+      (* Open and flush the FIFO while it has a reader. The next write will
+         fail on this same channel after the reader closes. *)
+      emit "fifo-prime";
+      Unix.close pipe_reader;
+      reader := None;
+      if queued then Log.Ring.start_writer ();
+      (* Larger than the output-channel buffer: EPIPE is raised by
+         output_string, so the real append path drops its failed channel. *)
+      emit (String.make (1024 * 1024) 'x');
+      bounded 20.0 "the failed append closes its channel" (fun () ->
+        let rec await_close () =
+          let sink = Yojson.Safe.Util.member "file_sink" (Log.Ring.summary_json ()) in
+          if Yojson.Safe.Util.(member "enabled" sink |> to_bool)
+          then (Thread.yield (); await_close ())
+        in
+        await_close ());
+      (* The filesystem is healthy again while the queued writer, if any,
+         remains running. Only the later emit may cause it to reopen. *)
+      Unix.unlink path;
+      Out_channel.with_open_bin path (fun _ -> ());
+      emit "after-write-failure";
+      Log.Ring.stop_writer ();
+      check (list string) "the later record reaches the reopened file" [ "after-write-failure" ]
+        (file_messages dir))
+;;
+
 let () =
   run
     "log_file_writer"
     [ ( "file sink writer"
-      , [ test_case "synchronous before start" `Quick test_synchronous_before_start
+      , [ test_case "unconfigured sink stays disabled" `Quick test_unconfigured_sink_stays_disabled
+        ; test_case "synchronous before start" `Quick test_synchronous_before_start
         ; test_case
             "queued records are complete and ordered"
             `Quick
@@ -226,6 +282,10 @@ let () =
             `Quick
             test_a_stalled_file_makes_producers_wait_and_drops_nothing
         ; test_case "synchronous after stop" `Quick test_synchronous_after_stop
+        ; test_case "synchronous later emit reopens after write failure" `Quick
+            (test_later_emit_reopens_after_write_failure ~queued:false)
+        ; test_case "queued later emit reopens after write failure" `Quick
+            (test_later_emit_reopens_after_write_failure ~queued:true)
         ] )
     ]
 ;;

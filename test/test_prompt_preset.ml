@@ -1426,9 +1426,8 @@ let test_restore_retains_visible_commit_observation ~sync_fails () =
       | _ -> fail "report part must be an object" in
     let runtime = Yojson.Safe.Util.member "runtime" wire in
     let commit_json = Yojson.Safe.Util.member "commit" runtime in
-    let with_ignored_keys = { receipt with Runtime.ignored_legacy_keys = ["max-prompt-bytes"] } in
     let ignored_runtime = replace "commit"
-      (Runtime.config_commit_receipt_to_yojson with_ignored_keys) runtime in
+      (replace "ignored_legacy_keys" (`List [`String "max-prompt-bytes"]) commit_json) runtime in
     (match (or_fail (Masc.Tui_decode.decode_preset_restore
       (payload (replace "runtime" ignored_runtime wire)))).prr_runtime with
      | Masc.Tui_decode.Preset_runtime_committed commit ->

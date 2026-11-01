@@ -93,7 +93,7 @@ runtime gates. Source-review completion alone leaves a Draft item in review.
 
 The queue now contains **30 concrete candidates**: 24 from the first semantic pass, A1
 from the Agent Core follow-up, T1 from the integrated TUI investigation, E1/E2 from
-Exec, M1 from multimodal/media, and J1 from the Schedule investigation. Twenty-eight are
+Exec, M1 from multimodal/media, and J1 from the Schedule investigation. Twenty-nine are
 implemented as PRs; source review and execution evidence are recorded separately on each PR: `S1` in
 [#43367](https://github.com/jeong-sik/masc/pull/43367) isolates provider usage
 acceptance; `K1` in [#43370](https://github.com/jeong-sik/masc/pull/43370) preserves
@@ -172,7 +172,7 @@ does not waive their coverage.
 | [D7](#d7) | next | in review | Preserve evidence transport decisions in the complete review request, then isolate snapshot projections |
 | [S1](#s1) | next | in review | Extract the provider usage acceptance/revocation reducer from the shared observation store |
 | [S2](#s2) | next | in review | Move lane edit decisions into a pure declared-configuration planner |
-| [S3](#s3) | later | implemented; execution unverified | Separate Antigravity protocol transitions from persistence and stream callbacks |
+| [S3](#s3) | later | implemented; selected execution passed | Separate Antigravity protocol transitions from persistence and stream callbacks |
 | [S4](#s4) | investigate | implemented; execution unverified | Make provider-metrics cache refresh ownership explicit and cancellation-complete |
 | [S5](#s5) | later | implemented; execution unverified | Consolidate full-health refresh bookkeeping into an immutable owned state machine |
 | [S6](#s6) | later | implemented; execution unverified | Give connector status a common typed projection before JSON aggregation |
@@ -1459,10 +1459,17 @@ remain in the shell with their existing policies.
 The public executable fixture now composes closed-response replay with actual tool
 silence and checks ordered stream/tool/usage completion. Admission refusal and
 ordinary callback exception both require zero start/terminal/usage observations,
-even with a buffered result. These are authored scenarios; syntax/whitespace checks
-are not typechecking or behavior execution. Exact-head source review and selected
-remote execution belong to the PR evidence, without a full-regression or runtime
-claim. The coding session runs no local Dune build/typecheck/tests.
+even with a buffered result. Targeted **Test**
+[41286784310](https://github.com/jeong-sik/masc/actions/runs/41286784310) completed
+with **success** at `e777cdf51a06e46a34add00490b780b9dfcf299d`, ref
+`refactor/antigravity-protocol-core-20261101`. Actual `TARGET_SUITES` selected
+`test_runtime_antigravity,test_keeper_antigravity_runtime`; the logs report 67 and
+23 tests respectively. The opt-in live official-client start/resume case was
+skipped. This supplies selected subprocess/Keeper execution evidence, without a
+live-provider, full-regression or installed-runtime claim. The coding session runs
+no local Dune build/typecheck/tests. External integration merged #47157 as
+`f4b4cd2197ce179d015c7e40c1ede616fe89de55` on 2026-11-01 at 09:12:16 UTC;
+the selected run remains bound to the original PR head.
 
 The source/peer audit found #47026 still open at
 `81f5d78578378deabf5447de961dae483b400312` over
@@ -2194,12 +2201,37 @@ through the request owner and TCP transport: a committed HTTP400, a committed wr
 whose acknowledgement is dropped, pre-POST file failure, cancellation after the
 actual upstream commit, and late/duplicate/foreign/A-to-B-to-A receipt admission.
 Peer EOF and receipt publication are separate observations; existing I/O-domain
-scenarios own physical pool cleanup evidence. These are authored scenarios, not an
-execution claim. Server prerequisite Test run
+scenarios own physical pool cleanup evidence. Targeted **Test**
+[41286782867](https://github.com/jeong-sik/masc/actions/runs/41286782867) completed
+with **success** at repaired head `b7b792e2360ff8143c065cdabba5c52eace55f69`,
+ref `refactor/board-request-outcome-20261101`. Actual `TARGET_SUITES` selected
+`test_tui_board_request_outcome,test_tui_board_attachments,test_tui_io_domain,test_tui_workspace_share_cancel`;
+the four suites report 6, 26, 7 and 4 tests, with no selected-case skips. The
+original Test run 41285529615 failed compiling the cancellation fixture before
+behavior execution; the repaired head removes its unreachable statement and
+retains the cancellation path and assertions. External integration merged #47153
+as `226402587b72c4a8df00a9482a07b5f7a7a43880` on 2026-11-01 at 09:12:15 UTC;
+this session performed neither that merge nor the S3 merge. Server prerequisite Test run
 [41283385935](https://github.com/jeong-sik/masc/actions/runs/41283385935) completed
 successfully at `3ac145916e09f7317ff61f2cf6a647ec971f49f0` on
 `fix/board-publication-proof-main-20261101`, with the six selected Board/Fusion suites.
 It does not validate this later TUI layer.
+
+The policy-admission prerequisite moves sub-board CRUD into the private
+`Board_sub_boards` owner. Ordinary post creation checks current policy under the
+store's persistence mutex before attempting append; runtime sub-board creation,
+updates and deletion take that same mutex before the state mutex. A rejected
+policy therefore appends no post and needs no orphan cleanup. Same-slug creation
+also makes its final uniqueness decision before append. The unused post-cleanup
+rewrite helper and its obsolete tests are removed; real flush/pin/delete snapshot
+scenarios remain. A named hearth requires a fully readable sub-board source through
+the shared policy validator, including its existing comment callers; an unscoped
+post remains independent. Comment append/commit ordering is otherwise unchanged.
+This is one-store serialization, with startup loading completed before concurrent
+operations. It does not serialize other stores/processes, replace cached appends
+with fsynced commits, change sub-board snapshot-error reporting, or provide a
+durable operation receipt. Its focused producer scenarios and exact-head review
+and execution status belong to its PR evidence.
 
 T1 remains open: ordinary Board creation still lacks a persisted client operation
 identity and authoritative unknown-acknowledgement reconciliation. Session history

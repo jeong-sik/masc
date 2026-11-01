@@ -521,13 +521,15 @@ let ensure_masc_dir = Board_paths.ensure_masc_dir
 include Board_core_json
 
 (** {1 Rewrite Helpers} *)
-let posts_jsonl_unlocked ?replacement store =
+let posts_jsonl_unlocked ~(replacement : post) store =
   let buf = Buffer.create 4096 in
   Hashtbl.iter
     (fun key (pst : post) ->
-       let pst = match replacement with
-         | Some (updated : post) when String.equal key (Post_id.to_string updated.id) -> updated
-         | Some _ | None -> pst in
+       let pst =
+         if String.equal key (Post_id.to_string replacement.id)
+         then replacement
+         else pst
+       in
        Buffer.add_string buf (Yojson.Safe.to_string (post_to_yojson pst));
        Buffer.add_char buf '\n')
     store.posts;
@@ -565,24 +567,6 @@ let save_posts_snapshot store content =
      with
      | Sys_error msg -> persist_io_error ~where:"rewrite_posts" msg)
 ;;
-(* The only caller rewrites the snapshot to drop an orphan row an aborted
-   append left on disk. Dropping the write's Error meant a failed rewrite left
-   the orphan there with nothing scheduled to try again, so a restart revived a
-   post that never reached memory -- the loader cannot tell a self-contained
-   row was never committed. Re-marking puts the snapshot back in the queue for
-   the next flush, the same way board_votes recovers (#29361). *)
-let rewrite_posts store =
-  with_persist_lock store (fun () ->
-    let content = with_lock store (fun () -> posts_jsonl_unlocked store) in
-    match save_posts_snapshot store content with
-    | Ok () -> ()
-    | Error _ ->
-      with_lock store (fun () ->
-        store.dirty_posts <- true;
-        Hashtbl.iter
-          (fun key _ -> Hashtbl.replace store.dirty_post_ids key ())
-          store.posts))
-;;
 let comments_jsonl_unlocked store =
   let buf = Buffer.create 4096 in
   Hashtbl.iter
@@ -609,7 +593,7 @@ let save_comments_snapshot store content =
 ;;
 (* Snapshot capture and write share the persist lock, so a waiting rewrite
    cannot overwrite a newer committed snapshot. A refused or failed write stays
-   scheduled for the next flush, as [rewrite_posts] does. *)
+   scheduled for the next flush. *)
 let rewrite_comments store =
   with_persist_lock store (fun () ->
     let content = with_lock store (fun () -> comments_jsonl_unlocked store) in
@@ -712,18 +696,22 @@ let validate_sub_board_post_policy_unlocked store ~author_id ~hearth =
   match hearth with
   | None -> Ok ()
   | Some slug ->
-    (match Hashtbl.find_opt store.sub_boards_by_slug slug with
-     | None -> Ok ()
-     | Some id ->
-       (match Hashtbl.find_opt store.sub_boards id with
+    Result.bind
+      (require_persisted_snapshot_readable store.sub_boards_load_result)
+      (fun () ->
+        match Hashtbl.find_opt store.sub_boards_by_slug slug with
         | None -> Ok ()
-        | Some sb when sub_board_author_allowed sb ~author_id -> Ok ()
-        | Some sb ->
-          let author = Agent_id.to_string author_id in
-          let access = sub_board_access_to_string sb.access in
-          Error
-            (Validation_error
-               (Printf.sprintf "Sub-board %S is %s; %s cannot post" sb.slug access author))))
+        | Some id ->
+          (match Hashtbl.find_opt store.sub_boards id with
+           | None -> Ok ()
+           | Some sb when sub_board_author_allowed sb ~author_id -> Ok ()
+           | Some sb ->
+             let author = Agent_id.to_string author_id in
+             let access = sub_board_access_to_string sb.access in
+             Error
+               (Validation_error
+                  (Printf.sprintf "Sub-board %S is %s; %s cannot post"
+                     sb.slug access author))))
 ;;
 
 (** {1 Post Operations} *)
@@ -844,13 +832,9 @@ let create_post_with_audience
       with
       | Error _ as error -> error
       | Ok (audience, unresolved) ->
-      (* Write-ahead (PR #28934 class, #28952): validate under
-         [with_lock] with no mutation, then hold the persistence lock across the durable
-         append and the in-memory commit under [with_lock]. The previous shape mutated
-         first and appended second, so a racing [flush_dirty] could
-         snapshot-write a post whose durable append was about to fail
-         and be rolled back — reviving it from the snapshot on restart.
-         If staging rejects or the append fails, nothing was mutated. *)
+      (* Stage under the state lock without mutation. The final policy check,
+         append and memory commit share the persistence lock with runtime
+         sub-board mutations and snapshot writers. *)
       let staged =
         with_lock store (fun () ->
           match validate_sub_board_post_policy_unlocked store ~author_id ~hearth with
@@ -884,42 +868,28 @@ let create_post_with_audience
       | Error _ as e -> e
       | Ok post ->
         let creation = { post; audience; unresolved } in
-        (match with_persist_lock store (fun () ->
-           phase := Append_started;
-           match append_post post with
-           | Error _ as e -> e
-           | Ok () -> Ok (with_lock store (fun () ->
-               (* Commit re-checks the policy: staging validated it, but
-                  it can flip while the append is in flight, and commit
-                  is the authoritative gate — a durable row without a
-                  commit stays provisional. *)
-               match
-                 validate_sub_board_post_policy_unlocked store ~author_id ~hearth
-               with
-               | Error _ as e -> e
-               | Ok () ->
-                 Hashtbl.add store.posts (Post_id.to_string post.id) post;
-                 index_post_origin store post;
-                 index_hot_post store post;
-                 Stdlib.incr store.post_count;
-                 invalidate_post_caches store;
-                 phase := Post_committed creation;
-                 Ok ()) )) with
-         | Error _ as e -> e
-         | Ok committed ->
-           (match committed with
-            | Ok () -> Ok creation
-            | Error e ->
-              (* The appended row is an orphan on disk (the policy
-                 flipped mid-append; the post never reached memory).
-                 Rewrite the posts snapshot to dispose of it — the
-                 snapshot cannot contain the orphan. If the rewrite
-                 itself fails, the next successful snapshot rewrite
-                 disposes of the row; a restart before that would
-                 revive the post, because a post row is self-contained
-                 and the loader cannot tell it was never committed. *)
-              rewrite_posts store;
-              Error e))
+        with_persist_lock store (fun () ->
+          (* Runtime sub-board mutations share this persistence lock. Check
+             their current policy before append; no policy rejection follows
+             a successful append. The state lock is released for I/O. *)
+          match
+            with_lock store (fun () ->
+              validate_sub_board_post_policy_unlocked store ~author_id ~hearth)
+          with
+          | Error _ as error -> error
+          | Ok () ->
+            phase := Append_started;
+            match append_post post with
+            | Error _ as error -> error
+            | Ok () ->
+              with_lock store (fun () ->
+                Hashtbl.add store.posts (Post_id.to_string post.id) post;
+                index_post_origin store post;
+                index_hot_post store post;
+                Stdlib.incr store.post_count;
+                invalidate_post_caches store;
+                phase := Post_committed creation);
+              Ok creation)
   in
   Result.map_error (fun error -> failure (Post_publication_failure.Board_error error)) result
   with

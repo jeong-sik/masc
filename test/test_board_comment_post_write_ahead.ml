@@ -499,6 +499,302 @@ let test_dispatch_preparation_failure_proves_no_publication () =
       Alcotest.(check int) "both healthy publications reached the WAL" 2
         (List.length (post_rows ()))))
 
+
+let restart_board () =
+  Board.reset_global_for_test ();
+  Board_dispatch.reset_for_test ();
+  Board_dispatch.init_jsonl ~recipient_lookup:Recipient_lookup.none_declared ()
+
+let board_result_exn = function
+  | Ok value -> value
+  | Error error -> Alcotest.fail (Board.show_board_error error)
+
+let create_policy_board ?(access = Board.Open) slug =
+  Board_dispatch.create_sub_board ~slug ~name:"Policy admission"
+    ~description:"Concurrent producer policy" ~owner:"policy-owner" ~access ()
+
+let policy_post hearth =
+  Board_dispatch.create_post_with_unresolved ~author:"policy-visitor"
+    ~content:"post admitted by the current policy" ~post_kind:Board.Human_post
+    ~hearth ()
+
+let post_refusal_exn = function
+  | Ok _ -> Alcotest.fail "the policy must refuse this publication"
+  | Error failure ->
+    check_effect "policy refusal precedes append"
+      Failure_effect.Proven_pre_effect failure;
+    Alcotest.(check bool) "a refused post has no committed receipt" true
+      (Option.is_none (Board.Post_publication_failure.committed failure));
+    failure
+
+let check_denied_policy failure =
+  match Board.Post_publication_failure.cause failure with
+  | Board.Post_publication_failure.Board_error (Board.Validation_error _) -> ()
+  | Board.Post_publication_failure.Board_error _
+  | Board.Post_publication_failure.Raised _ ->
+    Alcotest.fail (Board.Post_publication_failure.to_string failure)
+
+let fanout_counts () =
+  let signals = ref 0 and sse = ref 0 and writes = ref 0 in
+  Board_dispatch.set_board_signal_hook (fun _ -> incr signals);
+  Board_dispatch.set_board_sse_hook (fun _ -> incr sse);
+  Board_dispatch.set_board_write_hook (fun () -> incr writes);
+  fun () -> [!signals; !sse; !writes]
+
+let check_no_posts () =
+  Alcotest.(check int) "no post reached memory" 0
+    (List.length (Board_dispatch.list_posts ()));
+  Alcotest.(check int) "no post reached the WAL" 0 (List.length (post_rows ()))
+
+let sub_board_rows () =
+  let path = Board.sub_boards_path () in
+  if Sys.file_exists path then Fs_compat.load_jsonl path else []
+
+let test_queued_post_uses_the_policy_before_append () =
+  ignore (board_result_exn (create_policy_board "queued-policy"));
+  let observations = fanout_counts () in
+  let failure = Eio.Switch.run (fun sw ->
+    let posted, resolve_posted = Eio.Promise.create () in
+    let start_post = ref true in
+    with_observer
+      { noop_observer with observe_persist_lock_acquire_sec = (fun _ ->
+          if !start_post then begin
+            start_post := false;
+            (* The real update owns persistence but has not changed state.
+               The post stages under Open policy, then queues on that lock. *)
+            Eio.Fiber.fork ~sw (fun () ->
+              Eio.Promise.resolve resolve_posted (policy_post "queued-policy"));
+            Alcotest.(check bool) "the post waits for the policy writer" false
+              (Eio.Promise.is_resolved posted)
+          end) }
+      (fun () ->
+        ignore (board_result_exn
+          (Board_dispatch.update_sub_board ~sub_board_id:"queued-policy"
+             ~access:Board.Owner_only ()));
+        Eio.Promise.await posted |> post_refusal_exn))
+  in
+  check_denied_policy failure;
+  check_no_posts ();
+  Alcotest.(check (list int)) "a refused post emits no fanout" [0; 0; 0]
+    (observations ());
+  restart_board ();
+  check_no_posts ();
+  let policy = board_result_exn
+      (Board_dispatch.get_sub_board ~sub_board_id:"queued-policy") in
+  Alcotest.(check bool) "the denying policy survives restart" true
+    (policy.access = Board.Owner_only)
+
+let test_post_admission_defers_the_policy_update () =
+  ignore (board_result_exn (create_policy_board "admitted-policy"));
+  let observations = fanout_counts () in
+  let creation = Eio.Switch.run (fun sw ->
+    let updated, resolve_updated = Eio.Promise.create () in
+    let start_update = ref true in
+    with_observer
+      { noop_observer with observe_persist_lock_acquire_sec = (fun _ ->
+          if !start_update then begin
+            start_update := false;
+            (* This seam is inside post persistence, before append. The
+               competing API must wait before mutating the policy. *)
+            Eio.Fiber.fork ~sw (fun () ->
+              Eio.Promise.resolve resolve_updated
+                (Board_dispatch.update_sub_board ~sub_board_id:"admitted-policy"
+                   ~access:Board.Owner_only ()));
+            Alcotest.(check bool) "the updater waits for post admission" false
+              (Eio.Promise.is_resolved updated);
+            let policy = board_result_exn
+                (Board_dispatch.get_sub_board ~sub_board_id:"admitted-policy") in
+            Alcotest.(check bool) "a waiting update has not changed policy" true
+              (policy.access = Board.Open)
+          end) }
+      (fun () ->
+        let creation = match policy_post "admitted-policy" with
+          | Ok creation -> creation
+          | Error failure ->
+            Alcotest.fail (Board.Post_publication_failure.to_string failure)
+        in
+        ignore (board_result_exn (Eio.Promise.await updated));
+        creation))
+  in
+  let post_id = Board.Post_id.to_string creation.post.id in
+  Alcotest.(check int) "the admitted post has one WAL row" 1
+    (List.length (post_rows ()));
+  Alcotest.(check (list int)) "the accepted post emits its fanout once" [1; 1; 0]
+    (observations ());
+  check_denied_policy (post_refusal_exn (policy_post "admitted-policy"));
+  Alcotest.(check int) "the later refusal appends nothing" 1
+    (List.length (post_rows ()));
+  restart_board ();
+  let post = board_result_exn (Board_dispatch.get_post ~post_id) in
+  Alcotest.(check string) "restart retains the exact admitted post" post_id
+    (Board.Post_id.to_string post.id);
+  Alcotest.(check string) "the retained receipt body survives restart"
+    creation.post.body post.body;
+  let policy = board_result_exn
+      (Board_dispatch.get_sub_board ~sub_board_id:"admitted-policy") in
+  Alcotest.(check bool) "the serialized update survives restart" true
+    (policy.access = Board.Owner_only)
+
+let test_same_slug_loser_never_appends () =
+  let winner, loser, rows_at_unlock = Eio.Switch.run (fun sw ->
+    let created, resolve_created = Eio.Promise.create () in
+    let start_competitor = ref true in
+    let rows_at_unlock = ref [] in
+    with_observer
+      { noop_observer with
+        observe_persist_lock_acquire_sec = (fun _ ->
+          if !start_competitor then begin
+            start_competitor := false;
+            Eio.Fiber.fork ~sw (fun () ->
+              Eio.Promise.resolve resolve_created
+                (create_policy_board "one-policy"));
+            Alcotest.(check bool) "the competing create waits before append" false
+              (Eio.Promise.is_resolved created)
+          end)
+      ; observe_persist_lock_held_sec = (fun _ ->
+          (* Observe each real write before a possible later cleanup rewrite
+             could conceal an appended losing row. *)
+          rows_at_unlock := List.length (sub_board_rows ()) :: !rows_at_unlock)
+      }
+      (fun () ->
+        let winner = board_result_exn (create_policy_board "one-policy") in
+        let loser = Eio.Promise.await created in
+        winner, loser, List.rev !rows_at_unlock))
+  in
+  (match loser with
+   | Error (Board.Already_exists _) -> ()
+   | Error error -> Alcotest.fail (Board.show_board_error error)
+   | Ok _ -> Alcotest.fail "two same-slug creations were accepted");
+  Alcotest.(check (list int)) "neither persistence interval appends a losing row"
+    [1; 1] rows_at_unlock;
+  Alcotest.(check int) "one sub-board row remains" 1 (List.length (sub_board_rows ()));
+  restart_board ();
+  let reloaded = board_result_exn
+      (Board_dispatch.get_sub_board ~sub_board_id:"one-policy") in
+  Alcotest.(check string) "the winner keeps its identity after restart"
+    (Board.Sub_board_id.to_string winner.id)
+    (Board.Sub_board_id.to_string reloaded.id)
+
+let test_new_restrictive_board_rechecks_a_queued_unknown_hearth () =
+  let observations = fanout_counts () in
+  let failure = Eio.Switch.run (fun sw ->
+    let posted, resolve_posted = Eio.Promise.create () in
+    let start_post = ref true in
+    with_observer
+      { noop_observer with observe_persist_lock_acquire_sec = (fun _ ->
+          if !start_post then begin
+            start_post := false;
+            Eio.Fiber.fork ~sw (fun () ->
+              Eio.Promise.resolve resolve_posted (policy_post "new-private-policy"));
+            Alcotest.(check bool) "the unknown-hearth post queues behind create"
+              false (Eio.Promise.is_resolved posted)
+          end) }
+      (fun () ->
+        ignore (board_result_exn
+          (create_policy_board ~access:Board.Owner_only "new-private-policy"));
+        Eio.Promise.await posted |> post_refusal_exn))
+  in
+  check_denied_policy failure;
+  check_no_posts ();
+  Alcotest.(check (list int)) "the newly denied post emits no fanout" [0; 0; 0]
+    (observations ());
+  restart_board ();
+  check_no_posts ();
+  let policy = board_result_exn
+      (Board_dispatch.get_sub_board ~sub_board_id:"new-private-policy") in
+  Alcotest.(check bool) "the new restrictive policy survives restart" true
+    (policy.access = Board.Owner_only)
+
+let test_partial_policy_source_refuses_only_hearth_posts () =
+  ignore (board_result_exn (create_policy_board "partial-policy"));
+  Fs_compat.append_file (Board.sub_boards_path ()) "{broken-policy-row\n";
+  restart_board ();
+  Alcotest.(check int) "best-effort reads retain the valid policy row" 1
+    (List.length (Board_dispatch.list_sub_boards ()));
+  let observations = fanout_counts () in
+  List.iter (fun hearth ->
+    let failure = post_refusal_exn (policy_post hearth) in
+    match Board.Post_publication_failure.cause failure with
+    | Board.Post_publication_failure.Board_error (Board.Io_error _) -> ()
+    | Board.Post_publication_failure.Board_error _
+    | Board.Post_publication_failure.Raised _ ->
+      Alcotest.fail (Board.Post_publication_failure.to_string failure))
+    ["partial-policy"; "policy-may-be-in-the-unreadable-row"];
+  check_no_posts ();
+  Alcotest.(check (list int)) "partial source refusals emit no fanout" [0; 0; 0]
+    (observations ());
+  let post = create_post_exn ~author:"policy-visitor" ~content:"no hearth policy needed" in
+  Alcotest.(check int) "a hearth-free post still appends" 1
+    (List.length (post_rows ()));
+  restart_board ();
+  let reloaded = board_result_exn
+      (Board_dispatch.get_post ~post_id:(Board.Post_id.to_string post.id)) in
+  Alcotest.(check string) "the hearth-free post survives the partial policy reload"
+    post.body reloaded.body
+
+let test_partial_policy_source_refuses_comment_publication () =
+  ignore (board_result_exn (create_policy_board "comment-policy"));
+  let post = match policy_post "comment-policy" with
+    | Ok creation -> creation.post
+    | Error failure ->
+      Alcotest.fail (Board.Post_publication_failure.to_string failure)
+  in
+  let post_id = Board.Post_id.to_string post.id in
+  Fs_compat.append_file (Board.sub_boards_path ()) "{broken-comment-policy-row\n";
+  let policy_source = Fs_compat.load_file (Board.sub_boards_path ()) in
+  restart_board ();
+  let observations = fanout_counts () in
+  (match Board_dispatch.add_comment ~post_id ~author:"policy-owner"
+           ~content:"a comment needs a readable hearth policy" () with
+   | Error (Board.Io_error _) -> ()
+   | Error error -> Alcotest.fail (Board.show_board_error error)
+   | Ok _ -> Alcotest.fail "partial policy source admitted a comment");
+  let comments = board_result_exn (Board_dispatch.get_comments ~post_id) in
+  Alcotest.(check int) "no comment reached memory" 0 (List.length comments);
+  let comment_path = Board.comments_path () in
+  let rows = if Sys.file_exists comment_path then comment_rows () else [] in
+  Alcotest.(check int) "no comment reached the WAL" 0 (List.length rows);
+  let retained = board_result_exn (Board_dispatch.get_post ~post_id) in
+  Alcotest.(check int) "the refused comment leaves reply count unchanged" 0
+    retained.reply_count;
+  Alcotest.(check string) "the existing post remains readable" post.body retained.body;
+  Alcotest.(check int) "the existing post remains the sole post row" 1
+    (List.length (post_rows ()));
+  Alcotest.(check (list int)) "the refused comment emits no fanout" [0; 0; 0]
+    (observations ());
+  Alcotest.(check string) "comment refusal preserves the corrupt policy source"
+    policy_source (Fs_compat.load_file (Board.sub_boards_path ()))
+
+let test_queued_update_does_not_resurrect_a_deleted_policy () =
+  ignore (board_result_exn (create_policy_board "deleted-policy"));
+  let updated = Eio.Switch.run (fun sw ->
+    let updated, resolve_updated = Eio.Promise.create () in
+    let start_update = ref true in
+    with_observer
+      { noop_observer with observe_persist_lock_acquire_sec = (fun _ ->
+          if !start_update then begin
+            start_update := false;
+            Eio.Fiber.fork ~sw (fun () ->
+              Eio.Promise.resolve resolve_updated
+                (Board_dispatch.update_sub_board ~sub_board_id:"deleted-policy"
+                   ~name:"must not resurrect" ()));
+            Alcotest.(check bool) "the updater waits for deletion" false
+              (Eio.Promise.is_resolved updated)
+          end) }
+      (fun () ->
+        board_result_exn (Board_dispatch.delete_sub_board ~sub_board_id:"deleted-policy");
+        Eio.Promise.await updated))
+  in
+  (match updated with
+   | Error (Board.Invalid_id _) -> ()
+   | Error error -> Alcotest.fail (Board.show_board_error error)
+   | Ok _ -> Alcotest.fail "a queued update accepted a deleted policy");
+  Alcotest.(check int) "the deleted policy has no persisted row" 0
+    (List.length (sub_board_rows ()));
+  restart_board ();
+  Alcotest.(check int) "a stale queued update does not revive the policy" 0
+    (List.length (Board_dispatch.list_sub_boards ()))
+
 let () =
   Alcotest.run "board_comment_post_write_ahead"
     [
@@ -512,6 +808,20 @@ let () =
             (with_eio test_dispatch_preparation_failure_proves_no_publication);
           Alcotest.test_case "creations commit before persistence unlock" `Quick
             (with_eio test_creation_commits_before_releasing_persistence);
+          Alcotest.test_case "queued post uses the policy before append" `Quick
+            (with_eio test_queued_post_uses_the_policy_before_append);
+          Alcotest.test_case "post admission defers the policy update" `Quick
+            (with_eio test_post_admission_defers_the_policy_update);
+          Alcotest.test_case "same-slug loser never appends" `Quick
+            (with_eio test_same_slug_loser_never_appends);
+          Alcotest.test_case "new restrictive board rechecks a queued unknown hearth" `Quick
+            (with_eio test_new_restrictive_board_rechecks_a_queued_unknown_hearth);
+          Alcotest.test_case "partial policy source refuses only hearth posts" `Quick
+            (with_eio test_partial_policy_source_refuses_only_hearth_posts);
+          Alcotest.test_case "partial policy source refuses comment publication" `Quick
+            (with_eio test_partial_policy_source_refuses_comment_publication);
+          Alcotest.test_case "queued update does not resurrect a deleted policy" `Quick
+            (with_eio test_queued_update_does_not_resurrect_a_deleted_policy);
           Alcotest.test_case
             "comment: failed append leaves nothing committed" `Quick
             (with_eio test_comment_append_failure_commits_nothing);

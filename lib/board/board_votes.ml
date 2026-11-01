@@ -578,8 +578,8 @@ let set_pinned store ~post_id ~pinned : (unit, board_error) Result.t =
       | Error e -> Error e
       | Ok (previous, updated) ->
           (match append_post store updated with
-           | Ok () -> Ok ()
-           | Error e ->
+           | (Posts_written _ | Posts_write_unknown _) as outcome -> finish_posts_write outcome
+           | (Posts_not_written _ as outcome) ->
                with_lock store (fun () ->
                  let key = Post_id.to_string previous.id in
                  (match Hashtbl.find_opt store.posts key with
@@ -589,7 +589,7 @@ let set_pinned store ~post_id ~pinned : (unit, board_error) Result.t =
                     Hashtbl.replace store.posts key previous;
                     invalidate_post_caches store
                   | _ -> ()));
-               Error e))
+               finish_posts_write outcome))
 
 (** A close must state its successor decision explicitly: [Successor id]
     continues the thread, [No_successor] says there is none. There is no
@@ -686,8 +686,8 @@ let set_closed store ~post_id ~closed_by ~successor ~summary ()
          | Error e -> Error e
          | Ok (previous, updated) ->
            (match append_post store updated with
-            | Ok () -> Ok ()
-            | Error e ->
+            | (Posts_written _ | Posts_write_unknown _) as outcome -> finish_posts_write outcome
+            | (Posts_not_written _ as outcome) ->
               with_lock store (fun () ->
                 let key = Post_id.to_string previous.id in
                 (match Hashtbl.find_opt store.posts key with
@@ -697,7 +697,7 @@ let set_closed store ~post_id ~closed_by ~successor ~summary ()
                    Hashtbl.replace store.posts key previous;
                    invalidate_post_caches store
                  | _ -> ()));
-              Error e)))
+              finish_posts_write outcome)))
 ;;
 
 (** Reopen a closed post: clears [closed] back to [None]. A true no-op on an
@@ -728,8 +728,8 @@ let reopen store ~post_id : (unit, board_error) Result.t =
       | Ok None -> Ok () (* already open: no write, no updated_at bump *)
       | Ok (Some (previous, updated)) ->
         (match append_post store updated with
-         | Ok () -> Ok ()
-         | Error e ->
+         | (Posts_written _ | Posts_write_unknown _) as outcome -> finish_posts_write outcome
+         | (Posts_not_written _ as outcome) ->
            with_lock store (fun () ->
              let key = Post_id.to_string previous.id in
              (match Hashtbl.find_opt store.posts key with
@@ -739,11 +739,8 @@ let reopen store ~post_id : (unit, board_error) Result.t =
                 Hashtbl.replace store.posts key previous;
                 invalidate_post_caches store
               | _ -> ()));
-           Error e))
+           finish_posts_write outcome))
 ;;
-
-let posts_jsonl_snapshot store =
-  Board_snapshot_rows.render ~rows:store.post_rows ~to_json:post_to_yojson store.posts
 
 let comments_jsonl_snapshot store =
   Board_snapshot_rows.render
@@ -764,19 +761,18 @@ module Snapshot_batch = Board_snapshot_batch
 
 (* Snapshot rendering updates the row caches, so callers hold the state lock. *)
 let capture_snapshot_batch store selection =
-  Snapshot_batch.capture selection ~read:(function
-    | Snapshot_batch.Posts -> posts_jsonl_snapshot store
-    | Snapshot_batch.Comments -> comments_jsonl_snapshot store
-    | Snapshot_batch.Votes -> vote_log_jsonl store
-    | Snapshot_batch.Reactions -> reactions_jsonl_snapshot store)
+  Snapshot_batch.capture selection
+    ~posts:(fun () -> capture_posts_snapshot store)
+    ~comments:(fun () -> comments_jsonl_snapshot store)
+    ~votes:(fun () -> vote_log_jsonl store)
+    ~reactions:(fun () -> reactions_jsonl_snapshot store)
 ;;
 
-(* Callers retain the persistence lock and release the state lock for writes. *)
 let write_snapshot store = function
-  | Snapshot_batch.Posts -> save_posts_snapshot store
-  | Snapshot_batch.Comments -> save_comments_snapshot store
-  | Snapshot_batch.Votes -> save_vote_log_jsonl store
-  | Snapshot_batch.Reactions -> Board_core_persist.save_reactions_jsonl_result store
+  | Snapshot_batch.Posts_payload snapshot -> finish_posts_write (save_posts_snapshot store snapshot)
+  | Snapshot_batch.Comments_payload content -> save_comments_snapshot store content
+  | Snapshot_batch.Votes_payload content -> save_vote_log_jsonl store content
+  | Snapshot_batch.Reactions_payload content -> Board_core_persist.save_reactions_jsonl_result store content
 ;;
 
 (* Re-mark everything dirty after a failed snapshot write, so the next flush
@@ -807,14 +803,14 @@ type deletion_outcome =
 let delete_post store ~post_id : (deletion_outcome, board_error) Result.t =
   (* Deleting rewrites every snapshot below after the post has left memory, so
      each file it rewrites must have loaded fully first (#38595). *)
-  let* () = require_persisted_snapshot_readable store.posts_load_result in
+  with_persist_lock store (fun () ->
+  let* () = require_posts_source_readable store in
   let* () = require_persisted_snapshot_readable store.comments_load_result in
   let* () = require_persisted_snapshot_readable store.votes_load_result in
   let* () = require_persisted_snapshot_readable store.reactions_load_result in
   match Post_id.of_string post_id with
   | Error e -> Error e
   | Ok pid ->
-    with_persist_lock store (fun () ->
     let snapshot =
       with_lock store (fun () ->
       let post_key = Post_id.to_string pid in
@@ -885,6 +881,7 @@ let delete_post store ~post_id : (deletion_outcome, board_error) Result.t =
           Preserve failed writes for a later flush. *)
        with_lock store (fun () ->
          List.iter (remark_snapshot_retry store) (Snapshot_batch.retries outcome));
+       Snapshot_batch.finish_settlement outcome;
        let failures =
          List.map show_board_error (Snapshot_batch.errors outcome)
        in
@@ -964,14 +961,18 @@ let flush_dirty store =
   in
   (* Flush requeues each failed write before attempting the next. Captured
      empty snapshots still write, and later edits keep their own dirty flags. *)
-  ignore
-    (Snapshot_batch.persist batch ~write:(fun kind content ->
-       match write_snapshot store kind content with
+  let outcome = Snapshot_batch.persist batch ~write:(fun content ->
+       match write_snapshot store content with
        | Ok () -> Ok ()
        | Error _ as error ->
          with_lock store (fun () ->
-           remark_snapshot_retry store (Snapshot_batch.retry_for_kind kind));
-         error)))
+           remark_snapshot_retry store (Snapshot_batch.retry_for_kind (Snapshot_batch.kind_of_payload content)));
+         error) in
+  (* A proven nonwrite may carry reserved descriptor cleanup as typed data,
+     bypassing the callback's normal returned-error retry arm. *)
+  with_lock store (fun () ->
+    List.iter (remark_snapshot_retry store) (Snapshot_batch.retries outcome));
+  Snapshot_batch.finish_settlement outcome)
 
 
 (** {1 Karma & Flair - Reddit-style} *)

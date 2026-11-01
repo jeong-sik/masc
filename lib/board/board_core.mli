@@ -76,6 +76,14 @@ val flush_interval_sec : float
     and grants no ongoing symlink/resource identity or loaded-source proof. *)
 val create_store : workspace_masc_dir:string -> unit -> store
 
+val create_store_with_posts_io_for_testing :
+  workspace_masc_dir:string ->
+  io:Fs_compat.private_jsonl_transaction_io_for_testing -> unit -> store
+(** The same production store and posts writer with an immutable, store-local
+    Fs descriptor-settlement seam. [io.before_sync_parent] covers stable-lock
+    initialization and the actual post-rename rewrite-parent sync; [close_fd]
+    covers descriptor settlement. Posts remain unobserved until explicit load. *)
+
 (** {1 Locking + cache invalidation} *)
 
 (** [with_lock store f] runs [f ()] under
@@ -135,8 +143,9 @@ val ensure_masc_dir : store -> unit
 
 (** {1 Append-only persistence} *)
 
-(** Appends one post snapshot to {!persist_path}. *)
-val append_post : store -> post -> (unit, board_error) result
+(** Appends one post snapshot only against its loaded exact source observation.
+    The stable-lock precondition rereads all prior bytes on each append. *)
+val append_post : store -> post -> posts_write_outcome
 
 (** RFC-0233 §7: maintain the origin secondary indexes ([posts_by_turn_ref] /
     [posts_by_run_id]) from a post's [origin].  Used by the load path to
@@ -157,12 +166,35 @@ val append_comment : store -> comment -> (unit, board_error) result
 
 (** {1 Whole-state JSONL rewrite} *)
 
-(** Atomically replaces {!persist_path} with [content], a snapshot of
-    [store.posts]. Every posts snapshot write goes through here. Refused with
-    [Io_error] while [store.posts_load_result] is [Error]: memory then holds
-    every row the loader could decode but not the line it could not, and the
-    rewrite would delete that line (#38595). *)
-val save_posts_snapshot : store -> string -> (unit, board_error) result
+(** A captured whole-posts replacement uses the exact prior source bytes and
+    cursor. It cannot discard rejected source rows or adopt unrelated disk state. *)
+type posts_snapshot = Board_core_persist.posts_snapshot
+(** Frozen candidate rows and their exact expected source observation. *)
+val capture_posts_snapshot : ?replacement:post -> store -> posts_snapshot
+val save_posts_snapshot : store -> posts_snapshot -> posts_write_outcome
+(** Capture under persist then state; save retains persist and acquires no
+    recursive Board lock. A stale or unreadable source cannot authorize save.
+    Snapshots bind the canonical path and exact observation, not a store-owner
+    token; trusted callers sharing both may pass a captured snapshot. *)
+val require_posts_source_readable : store -> (unit, board_error) result
+(** Pure source gate; caller holds the persistence mutex. Refused and unsettled
+    sources never grant a write. Definite transient nonwrites retain the expected
+    observation, while observed stale identity/bytes/tail revoke it. *)
+val posts_source_failure_to_board_error : posts_source_failure -> board_error
+val finish_posts_write : posts_write_outcome -> (unit, board_error) result
+(** Caller holds persistence. Observe settlement diagnostics only after known
+    successful memory publication, or a proven nonwrite after rollback/refusal.
+    Reserved cleanup exceptions leave enclosing Board mutexes normally and are
+    reraised after unlocking with their original backtrace. *)
+val publish_posts_read : store -> posts_source_read -> unit
+(** Loader publication under persistence then state locks. *)
+val read_posts_source : store -> posts_source_read
+(** Caller holds persistence; general reads never recover tails or settle an
+    unknown write. Complete and partial reads retain the actual Fs snapshot. *)
+val finish_posts_read : posts_source_read -> unit
+val inspect_posts_source : workspace_masc_dir:string -> posts_source_read
+(** Coherent lower-shell read for durable preflight. It grants no operation
+    receipt, historical absence or authority to mutate a separate live store. *)
 
 (** {!save_posts_snapshot} for {!comments_path}, guarded by
     [store.comments_load_result]. *)

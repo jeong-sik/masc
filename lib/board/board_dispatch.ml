@@ -668,9 +668,13 @@ let get_comments ~post_id =
 let require_persisted_sources_readable () =
   match backend () with
   | Jsonl store ->
-      (match store.Board.posts_load_result, store.Board.comments_load_result with
-       | Ok (), Ok () -> Ok ()
-       | Error detail, _ | _, Error detail -> Error (Board.Io_error detail))
+      Board.with_persist_lock store (fun () ->
+        let open Result.Syntax in
+        let* () = Board.require_posts_source_readable store in
+        Board.with_lock store (fun () ->
+          match store.Board.comments_load_result with
+          | Ok () -> Ok ()
+          | Error detail -> Error (Board.Io_error detail)))
 
 let get_post_and_comments ~post_id =
   match backend () with

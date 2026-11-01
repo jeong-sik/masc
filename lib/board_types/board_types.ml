@@ -793,10 +793,67 @@ type flusher_msg =
   | Flush
   | Sweep
 
+type posts_source_observation = {
+  source_path : string;
+  snapshot : Fs_compat.private_jsonl_snapshot;
+}
+
+type posts_row_error =
+  | Invalid_posts_json of { line : int; detail : string }
+  | Invalid_posts_row of { line : int }
+
+type posts_source_failure =
+  | Posts_not_observed
+  | Posts_rows_rejected of posts_row_error list
+  | Posts_transaction_failed of Fs_compat.private_jsonl_transaction_error
+  | Posts_missing_after_observation
+  | Posts_source_binding_mismatch
+  | Posts_snapshot_stale
+  | Posts_raised of { exception_ : exn; backtrace : Printexc.raw_backtrace }
+
+type posts_source_state =
+  | Posts_unobserved
+  | Posts_readable of {
+      observation : posts_source_observation;
+      settlement_diagnostic : Fs_compat.private_jsonl_transaction_error option;
+    }
+  | Posts_refused of {
+      last_observed : posts_source_observation option;
+      failure : posts_source_failure;
+    }
+  | Posts_unsettled of {
+      last_observed : posts_source_observation option;
+      failure : posts_source_failure;
+    }
+
+type posts_write_outcome =
+  | Posts_written of {
+      settlement_diagnostic : Fs_compat.private_jsonl_transaction_error option;
+    }
+  | Posts_not_written of posts_source_failure
+  | Posts_write_unknown of posts_source_failure
+
+type posts_source_read =
+  | Posts_complete of {
+      observation : posts_source_observation;
+      posts : post list;
+      settlement_diagnostic : Fs_compat.private_jsonl_transaction_error option;
+    }
+  | Posts_partial of {
+      observation : posts_source_observation;
+      posts : post list;
+      errors : posts_row_error list;
+      settlement_diagnostic : Fs_compat.private_jsonl_transaction_error option;
+    }
+  | Posts_unavailable of posts_source_failure
+
 type store = {
-  (** Derived last full-load outcomes; never persisted as another authority.
-      A failed snapshot read blocks mutations that could rewrite that source. *)
-  mutable posts_load_result : (unit, string) result;
+  (** Canonical posts observation/refusal/uncertainty, owned by persist_mutex.
+      Successful loads and writes advance it; dirty cards need not equal its bytes. *)
+  mutable posts_source : posts_source_state;
+  posts_io_for_testing : Fs_compat.private_jsonl_transaction_io_for_testing option;
+  (** Immutable store-scoped descriptor/rewrite settlement seam; production uses None. *)
+  (** Derived outcomes of the other four source loads. *)
   mutable comments_load_result : (unit, string) result;
   mutable votes_load_result : (unit, string) result;
   mutable reactions_load_result : (unit, string) result;

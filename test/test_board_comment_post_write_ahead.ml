@@ -243,8 +243,8 @@ let test_post_append_failure_commits_nothing () =
    with
    | Ok _ -> Alcotest.fail "post must not succeed when the append fails"
    | Error failure ->
-     check_effect "an attempted append has unknown effect"
-       Failure_effect.Effect_outcome_unknown failure;
+     check_effect "blocked filesystem proves the append did not start"
+       Failure_effect.Proven_pre_effect failure;
      Alcotest.(check bool) "append failure has no committed receipt" true
        (Option.is_none (Board.Post_publication_failure.committed failure));
      (match Board.Post_publication_failure.cause failure with

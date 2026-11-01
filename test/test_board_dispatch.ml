@@ -446,11 +446,34 @@ let check_io_error ~where = function
   | Error e -> Alcotest.fail ("expected Io_error, got " ^ Board.show_board_error e)
   | Ok _ -> Alcotest.fail "expected Io_error"
 
-let check_publication_io_error ~where = function
+let check_posts_io_error = function
+  | Error (Board.Io_error _) -> ()
+  | Error error -> Alcotest.fail ("expected Io_error, got " ^ Board.show_board_error error)
+  | Ok _ -> Alcotest.fail "expected posts persistence Io_error"
+
+let posts_observation store =
+  match store.Board.posts_source with
+  | Board.Posts_readable { observation; _ } ->
+    observation.source_path, observation.snapshot.bytes, observation.snapshot.cursor
+  | Board.Posts_unobserved | Board.Posts_refused _ | Board.Posts_unsettled _ ->
+    Alcotest.fail "fixture must retain a readable posts source"
+
+let check_retained_posts_source (path, bytes, cursor) store =
+  let retained_path, retained_bytes, retained_cursor = posts_observation store in
+  Alcotest.(check string) "retained posts path" path retained_path;
+  Alcotest.(check string) "retained exact posts bytes" bytes retained_bytes;
+  Alcotest.(check bool) "retained posts cursor" true
+    (Fs_compat.Private_jsonl_cursor.equal cursor retained_cursor)
+
+let check_publication_io_error = function
   | Error failure ->
+    Alcotest.(check bool) "blocked path is proven before publication" true
+      (Board.Post_publication_failure.effect_disposition failure = Failure_effect.Proven_pre_effect);
+    Alcotest.(check bool) "refused append has no committed receipt" true
+      (Option.is_none (Board.Post_publication_failure.committed failure));
     (match Board.Post_publication_failure.cause failure with
      | Board.Post_publication_failure.Board_error error ->
-       check_io_error ~where (Error error)
+       check_posts_io_error (Error error)
      | Board.Post_publication_failure.Raised _ ->
        Alcotest.fail ("expected Io_error, got " ^
          Board.Post_publication_failure.to_string failure))
@@ -544,6 +567,8 @@ let test_identical_content_creates_two_posts () =
   Alcotest.(check int) "SSE post_created emitted per post" 2 !sse_post_created
 
 let test_create_post_persistence_failure_returns_error_without_fanout () =
+  let active = Board.global () in
+  let observed_source = posts_observation active in
   let keeper_signals = ref 0 in
   let sse_post_created = ref 0 in
   Board_dispatch.set_board_signal_hook (fun _ -> incr keeper_signals);
@@ -553,7 +578,6 @@ let test_create_post_persistence_failure_returns_error_without_fanout () =
   with_blocked_board_masc_dir (fun () ->
   let before_errors = Board.persist_error_count () in
   check_publication_io_error
-    ~where:"append_post"
     (Board_dispatch.create_post
        ~author:"persist-fail-agent"
        ~content:"this post must not survive a failed append"
@@ -563,6 +587,7 @@ let test_create_post_persistence_failure_returns_error_without_fanout () =
     "persist error counter incremented"
     true
     (Board.persist_error_count () > before_errors);
+  check_retained_posts_source observed_source active;
   Alcotest.(check int) "keeper signal not emitted" 0 !keeper_signals;
   Alcotest.(check int) "SSE post_created not emitted" 0 !sse_post_created;
   Alcotest.(check int)
@@ -2073,11 +2098,12 @@ let test_set_pinned_persistence_failure_rolls_back () =
     | Ok post -> post
   in
   let post_id = Board.Post_id.to_string post.id in
+  let active = Board.global () in
+  let observed_source = posts_observation active in
   with_blocked_board_masc_dir (fun () ->
   let before_errors = Board.persist_error_count () in
-  check_io_error
-    ~where:"append_post"
-    (Board_dispatch.set_pinned ~post_id ~pinned:true);
+  check_posts_io_error (Board_dispatch.set_pinned ~post_id ~pinned:true);
+  check_retained_posts_source observed_source active;
   Alcotest.(check bool)
     "persist error counter incremented"
     true

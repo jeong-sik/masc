@@ -68,6 +68,22 @@ let store () =
   match Board_dispatch.backend () with
   | Board_dispatch.Jsonl store -> store
 
+let refuse_posts_source () =
+  let active = store () in
+  let path = Board.persist_path active in
+  let original = In_channel.with_open_bin path In_channel.input_all in
+  Out_channel.with_open_gen [Open_wronly; Open_append; Open_binary] 0o600 path
+    (fun out -> output_string out "{invalid-post-source\n");
+  Alcotest.(check bool) "actual malformed posts source fails reload" true
+    (Result.is_error (Masc_board_handlers.Board_votes_json.load_persisted_posts active));
+  fun () ->
+    Out_channel.with_open_bin path (fun out -> output_string out original);
+    match Masc_board_handlers.Board_votes_json.load_persisted_posts active with
+    | Ok _ -> ()
+    | Error (failed_path, cause) ->
+      Alcotest.failf "repaired posts reload failed: %s (%s)"
+        failed_path (Printexc.to_string cause)
+
 let create_post_exn ~content =
   match
     Board_dispatch.create_post ~author:"delete-rq-author" ~content
@@ -242,7 +258,7 @@ let test_unreadable_snapshot_refuses_before_transition () =
   let post_id = Board.Post_id.to_string post.id in
   let writes = ref 0 in
   Board_dispatch.set_board_write_hook (fun () -> incr writes);
-  (store ()).Board.posts_load_result <- Error "snapshot could not be fully loaded";
+  let _repair_source = refuse_posts_source () in
   (match Board_dispatch.delete_post ~post_id with
    | Error (Board.Io_error _) -> ()
    | Error error -> Alcotest.fail (Board.show_board_error error)
@@ -337,7 +353,9 @@ let test_cleanup_refusal_is_pre_effect () =
   Board.put_post (store ())
     { post with Board.created_at = Time_compat.now () -. 7200.0 };
   Board.invalidate_post_caches (store ());
-  (store ()).Board.posts_load_result <- Error "snapshot read failed";
+  (store ()).Board.dirty_posts <- true;
+  flush ();
+  let _repair_source = refuse_posts_source () in
   let result =
     Board_tool.handle_tool ~result_boundary:Tool_output.Sent_to_client "masc_board_cleanup"
       (`Assoc ["dry_run", `Bool false; "max_age_hours", `Int 1])
@@ -367,9 +385,12 @@ let test_cleanup_mixed_pending_and_refused_is_post_effect () =
   Board.invalidate_post_caches (store ());
   (store ()).Board.dirty_posts <- true;
   flush ();
+  let repair_source = ref None in
   with_blocked_reactions (fun () ->
+    (* The hook runs after persistence unlock, so this is a real subsequent
+       source read rather than a reentrant loader under the write mutex. *)
     Board_dispatch.set_board_write_hook (fun () ->
-      (store ()).Board.posts_load_result <- Error "source became unreadable after first deletion");
+      repair_source := Some (refuse_posts_source ()));
     let result =
       Board_tool.handle_tool ~result_boundary:Tool_output.Sent_to_client "masc_board_cleanup"
         (`Assoc ["dry_run", `Bool false; "max_age_hours", `Int 1])
@@ -384,7 +405,10 @@ let test_cleanup_mixed_pending_and_refused_is_post_effect () =
        |> List.map (fun row -> row |> member "post_id" |> to_string));
     Alcotest.(check bool) "refused post remains readable" true
       (Result.is_ok (Board_dispatch.get_post ~post_id:refused_id)));
-  (store ()).Board.posts_load_result <- Ok ();
+  Board_dispatch.set_board_write_hook (fun () -> ());
+  (match !repair_source with
+   | Some repair -> repair ()
+   | None -> Alcotest.fail "first applied deletion did not reach the corruption hook");
   flush ()
 
 let () =

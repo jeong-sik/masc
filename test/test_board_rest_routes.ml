@@ -645,7 +645,11 @@ let test_dashboard_delete_preserves_applied_pending_and_refused () =
     Yojson.Safe.Util.(receipt |> member "persistence" |> to_string);
   let refused_id = create "do not delete with an unreadable source" in
   let writes_before_refusal = !writes in
-  store.Masc.Board.posts_load_result <- Error "snapshot read failed";
+  let path = Masc.Board.persist_path store in
+  Out_channel.with_open_gen [Open_wronly; Open_append; Open_binary] 0o600 path
+    (fun out -> output_string out "{invalid-post-source\n");
+  Alcotest.(check bool) "actual malformed posts source fails reload" true
+    (Result.is_error (Masc_board_handlers.Board_votes_json.load_persisted_posts store));
   let status, _ = delete refused_id in
   check int "storage refusal is not a lookup miss" 503 status;
   check bool "refused deletion leaves the post readable" true

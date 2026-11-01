@@ -14,6 +14,7 @@
  ; in the masc umbrella, which already depends on masc_board.
  (libraries
   yojson
+  fs_compat
   re
   re.pcre
   eio

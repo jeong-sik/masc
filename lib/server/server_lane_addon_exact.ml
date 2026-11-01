@@ -197,7 +197,7 @@ let call ~before_dispatch ~admission_class ~cli_runner ~base_path ~(resolved : R
   let ended () = ending (List.rev !failures) in
   let complete cli_result outcome =
     let cli=Receipt.cli ~visited:(List.rev !visited) ~dispatched:(List.rev !dispatched) ~failures:(List.rev !cli_failures) ~result:cli_result in
-    let receipt=match Receipt.make
+    let receipt=match Receipt.make_v2
       ~declared_http:(List.map (fun (slot : Registry.selected_slot) -> slot.slot_id) resolved.selected_slots)
       ~excluded_http:[] ~declared_cli:resolved.cli_slots ~http:!http ~cli with
       | Ok receipt -> receipt

@@ -5,6 +5,7 @@ module Exec = Exact_output_execution
    existing fingerprint contract. *)
 type t =
   { fingerprint : string
+  ; raw_body_sha256 : string
   ; responses_lifecycle : Backend_openai_responses.lifecycle_observation option
   }
 
@@ -16,7 +17,9 @@ type raw_response =
 let fingerprint trace = trace.fingerprint
 let equal left right =
   String.equal left.fingerprint right.fingerprint
+  && String.equal left.raw_body_sha256 right.raw_body_sha256
   && Option.equal ( = ) left.responses_lifecycle right.responses_lifecycle
+let raw_body_sha256 trace = trace.raw_body_sha256
 let responses_lifecycle trace = trace.responses_lifecycle
 
 let raw_response (evidence : Exec.raw_response_evidence) =
@@ -60,5 +63,6 @@ let of_evidence ?response receipt (evidence : Exec.raw_response_evidence) =
     |> Agent_core_sha256.digest_string
     |> Agent_core_sha256.to_hex
   in
-  { fingerprint; responses_lifecycle = evidence.responses_lifecycle }
+  { fingerprint; raw_body_sha256 = evidence.raw_body_sha256
+  ; responses_lifecycle = evidence.responses_lifecycle }
 ;;

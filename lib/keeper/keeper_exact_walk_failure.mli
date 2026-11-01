@@ -61,6 +61,8 @@ type api_observation
 val api_observation : Agent_core.Exact_output.execution_error_cause -> api_observation
 val api_observation_to_yojson : api_observation -> Yojson.Safe.t
 val api_observation_of_yojson : Yojson.Safe.t -> (api_observation,string) result
+val api_observation_is_body_deadline : api_observation -> bool
+(** True only for the body deadline that followed successful HTTP headers. *)
 val of_api_observation : api_observation -> t
 val dispatched_valid_output_failure : api_observation -> bool
 

@@ -4191,6 +4191,12 @@ let test_responses_lifecycle_is_captured_with_actual_status () =
     check (option int) (label ^ " actual HTTP status")
       (Some (Cohttp.Code.code_of_status status))
       (EO.generation_receipt_snapshot_http_status receipt);
+    check bool (label ^ " frozen response family") true
+      (EO.generation_receipt_snapshot_response_family receipt
+       = (if path="/v1/responses" then EO.Openai_responses_codec else EO.Other_http_codec));
+    let body_sha256=Agent_core_sha256.(to_hex (digest_string response)) in
+    check (option string) (label ^ " complete response body digest") (Some body_sha256)
+      (EO.generation_receipt_snapshot_response_body_sha256 receipt);
     check bool (label ^ " same-parse lifecycle") true
       (EO.generation_receipt_snapshot_responses_lifecycle receipt = expected_lifecycle);
     check (option int) (label ^ " result snapshot HTTP status")
@@ -4198,11 +4204,16 @@ let test_responses_lifecycle_is_captured_with_actual_status () =
       (EO.generation_receipt_snapshot_http_status result_snapshot);
     check bool (label ^ " result snapshot lifecycle") true
       (EO.generation_receipt_snapshot_responses_lifecycle result_snapshot = expected_lifecycle);
+    check (option string) (label ^ " result snapshot body digest") (Some body_sha256)
+      (EO.generation_receipt_snapshot_response_body_sha256 result_snapshot);
     Option.iter (fun expected -> check bool (label ^ " result") expected (Result.is_ok result))
       expected_success;
     match initial_snapshot with
-    | Some snapshot -> check bool (label ^ " earlier snapshot remains unobserved") true
-        (EO.generation_receipt_snapshot_responses_lifecycle snapshot = None)
+    | Some snapshot ->
+      check bool (label ^ " earlier snapshot remains unobserved") true
+        (EO.generation_receipt_snapshot_responses_lifecycle snapshot = None);
+      check (option string) (label ^ " earlier snapshot has no body digest") None
+        (EO.generation_receipt_snapshot_response_body_sha256 snapshot)
     | None -> fail (label ^ " initial snapshot was not published")
   in
   let observed status = Some (Backend_openai_responses.Observed_status status) in
@@ -4302,7 +4313,9 @@ let test_responses_incomplete_body_has_no_lifecycle () =
   check (option int) "partial body kept its actual HTTP status" (Some 200)
     (EO.generation_receipt_snapshot_http_status receipt);
   check bool "partial body was not parsed into a lifecycle" true
-    (EO.generation_receipt_snapshot_responses_lifecycle receipt = None)
+    (EO.generation_receipt_snapshot_responses_lifecycle receipt = None);
+  check (option string) "partial body has no complete response digest" None
+    (EO.generation_receipt_snapshot_response_body_sha256 receipt)
 ;;
 
 (* The provider's own wait survives the collapsed refusal, so a caller that

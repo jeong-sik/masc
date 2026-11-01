@@ -369,6 +369,39 @@ let test_confirmed_proof_recovers_lost_outcome_publication () =
        | _ -> false);
     check int "without a send" 0 !sends)
 
+let test_v2_proof_recovers_lost_outcome_publication () =
+  with_root (fun root ->
+    let module Receipt=Masc.Keeper_exact_walk_receipt in
+    let store=Store.create ~root in
+    let directory=Filename.concat (Filename.concat root "exact-requests") (Store.digest declaration_id) in
+    let original=request "v2-publication-recovery" in
+    let sent=ref 0 in
+    let locking ~before_dispatch:_ ~admission_class:_ ~lane_key:_ ~schema:_ _ =
+      Ok (fun ~validate ->
+        incr sent;
+        Unix.chmod directory 0o500;
+        let output=require (validate question) in
+        let cli=Receipt.cli ~visited:["s"] ~dispatched:["s"] ~failures:[] ~result:(Receipt.Answered "s") in
+        let receipt=require (Receipt.make_v2 ~declared_http:[] ~excluded_http:[] ~declared_cli:["s"]
+          ~http:(Receipt.http_not_started ~detail:"synthetic host publication fixture") ~cli) in
+        {Exact.outcome=Exact.Call_ended (Exact.Answered {output;slot="s";usage=None});receipt}) in
+    let result=Exact.run ~authorize_request ~store ~declaration_id ~package ~runner:locking original in
+    Unix.chmod directory 0o700;
+    check bool "outcome index publication failed" true (Result.is_error result);
+    (match require (Exact.read_original_execution ~store ~declaration_id ~schema ~attempt_ordinal:1 original) with
+     | Exact.Completed_original {receipt;_} ->
+       check bool "the confirmed original proof is v2" true (Receipt.response_observations receipt=Some [])
+     | Exact.No_completed_original -> fail "the v2 proof did not survive the failed index publication");
+    let wire=Option.get (require (Store.load_exact_request store ~declaration_id ~request_id:original.request_id)) in
+    let interrupted=match wire with
+      | `Assoc fields -> `Assoc (("attempts",`List [other_process_marker])::List.remove_assoc "attempts" fields)
+      | _ -> fail "original Exact record expected" in
+    require (Store.save_exact_request store ~declaration_id ~request_id:original.request_id interrupted);
+    let unused,sends,_=counting_runner store (ref []) in
+    check bool "v2 proof restores the original answer" true (answered_with question (run_request store unused original));
+    check int "the original runner was called once" 1 !sent;
+    check int "recovery did not call a provider" 0 !sends)
+
 let original_execution store ?(attempt_ordinal=1) original =
   Exact.read_original_execution ~store ~declaration_id ~schema ~attempt_ordinal original
 
@@ -376,6 +409,71 @@ let proof_address original =
   let tuple values=Yojson.Safe.to_string (`List values) in
   tuple [`String "exact-original-execution";`String declaration_id],
   tuple [`String "original-request";`String original.Exact.request_id;`String (Exact.digest original)]
+
+let test_v1_and_v2_original_proofs_remain_distinct () =
+  with_root (fun root ->
+    let module Receipt=Masc.Keeper_exact_walk_receipt in
+    let store=Store.create ~root in
+    let original=request "mixed-version-originals" in
+    let busy=Exact.Provider_unavailable {detail="synthetic first refusal"} in
+    let first,_,_=counting_runner store (ref [Refused busy]) in
+    ignore (run_request store first original);
+    let instance_id,request_id=proof_address original in
+    let read_link ()=Option.get (require (Store.load_host_result store ~instance_id ~request_id)) in
+    let prior=match Yojson.Safe.Util.member "executions" (read_link ()) with
+      | `List [one] -> one | _ -> fail "expected one v1 original proof" in
+    let runner ~before_dispatch:_ ~admission_class:_ ~lane_key:_ ~schema:_ _ =
+      Ok (fun ~validate ->
+        let output=require (validate question) in
+        let cli=Receipt.cli ~visited:["s"] ~dispatched:["s"] ~failures:[] ~result:(Receipt.Answered "s") in
+        let receipt=require (Receipt.make_v2 ~declared_http:[] ~excluded_http:[] ~declared_cli:["s"]
+          ~http:(Receipt.http_not_started ~detail:"synthetic host publication fixture") ~cli) in
+        {Exact.outcome=Exact.Call_ended (Exact.Answered {output;slot="s";usage=None});receipt}) in
+    check bool "a later v2 fixture publishes the original answer" true
+      (answered_with question (run_request store runner original));
+    (match Yojson.Safe.Util.member "executions" (read_link ()) with
+     | `List [unchanged;newer] ->
+       check bool "earlier v1 proof is preserved exactly" true (Yojson.Safe.equal prior unchanged);
+       check int "earlier receipt remains version 1" 1
+         Yojson.Safe.Util.(unchanged |> member "receipt" |> member "version" |> to_int);
+       check int "later receipt uses version 2" 2
+         Yojson.Safe.Util.(newer |> member "receipt" |> member "version" |> to_int)
+     | _ -> fail "expected both ordered original proofs");
+    let reopened=Store.create ~root in
+    (match require (original_execution reopened original),require (original_execution reopened ~attempt_ordinal:2 original) with
+     | Exact.Completed_original {receipt=old;_},Exact.Completed_original {receipt=newer;_} ->
+       check bool "v1 has no invented response observations" true (Receipt.response_observations old=None);
+       check bool "v2 keeps its empty synthetic HTTP walk" true (Receipt.response_observations newer=Some [])
+     | _ -> fail "mixed original proofs did not reopen");
+    let replace field transform = function
+      | `Assoc fields -> `Assoc (List.map (fun (key,value) -> key,if key=field then transform value else value) fields)
+      | _ -> fail "expected an original proof object" in
+    let original_link=read_link () in
+    let historical_wrapper=original_link |> replace "executions" (function
+      | `List [first;second] -> `List [first
+          |> replace "version" (fun _ -> `Float 1.0)
+          |> replace "attempt_ordinal" (fun _ -> `Float 1.0)
+          |> replace "receipt" (replace "version" (fun _ -> `Float 1.0));second]
+      | _ -> fail "expected mixed original proofs") in
+    require (Store.save_host_result store ~instance_id ~request_id historical_wrapper);
+    check bool "historical v1 wrapper retains its prior canonical reading" true
+      (match original_execution reopened original with Ok (Exact.Completed_original _) -> true
+       | Ok Exact.No_completed_original | Error _ -> false);
+    require (Store.save_host_result store ~instance_id ~request_id original_link);
+    let alter_second transform = original_link |> replace "executions" (function
+      | `List [first;second] -> `List [first;transform second]
+      | _ -> fail "expected mixed original proofs") in
+    let unused,sends,_=counting_runner store (ref []) in
+    List.iter (fun malformed ->
+      require (Store.save_host_result store ~instance_id ~request_id malformed);
+      check bool "stored v2 proof rejects a float before wrapper normalization" true
+        (Result.is_error (original_execution reopened ~attempt_ordinal:2 original));
+      check bool "malformed original proof cannot recover or dispatch" true
+        (Result.is_error (Exact.run ~authorize_request ~store:reopened ~declaration_id ~package ~runner:unused original)))
+      [alter_second (replace "receipt" (replace "version" (fun _ -> `Float 2.0)));
+       alter_second (replace "attempt_ordinal" (fun _ -> `Float 2.0));
+       alter_second (replace "version" (fun _ -> `Float 1.0))];
+    check int "malformed proof caused no new call" 0 !sends)
 
 let test_original_execution_is_bound_to_one_attempt () =
   with_root (fun root ->
@@ -1019,7 +1117,10 @@ let () =
             test_a_retained_answer_is_checked_against_the_schema_declared_now
         ; test_case "confirmed proof recovers lost outcome publication" `Quick
             test_confirmed_proof_recovers_lost_outcome_publication
+        ; test_case "v2 proof recovers lost outcome publication" `Quick
+            test_v2_proof_recovers_lost_outcome_publication
         ; test_case "original execution binds request schema and actual attempt" `Quick test_original_execution_is_bound_to_one_attempt
+        ; test_case "v1 and v2 original proofs remain distinct" `Quick test_v1_and_v2_original_proofs_remain_distinct
         ; test_case "latest original evidence cannot borrow a previous attempt" `Quick test_latest_execution_never_borrows_an_earlier_proof
         ; test_case "proof failure leaves uncertainty without exposing an answer" `Quick test_proof_publication_failure_never_exposes_an_answer
         ; test_case "malformed proof refuses local recovery without provider replay" `Quick test_malformed_proof_refuses_publication_recovery

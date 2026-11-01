@@ -43,6 +43,7 @@ let plan_provenance_target_identity (provenance : plan_provenance) =
 type call_id = Generation_receipt.call_id = Call_id of string
 type provider_trace = Trace.t
 type receipt = Generation_receipt.t
+type response_family = Generation_receipt.response_family = Openai_responses_codec | Other_http_codec
 
 type attempt =
   { ready : ready_plan
@@ -426,6 +427,9 @@ let start_attempt (ready : ready_plan) =
         ~call_id:(Call_id id)
         ~plan_fingerprint:ready.plan_fingerprint
         ~request_body_sha256:ready.request_body_sha256
+        ~response_family:(match Plan.response_codec ready.plan with
+          | Provider_http_codec.Openai_responses -> Openai_responses_codec
+          | Anthropic_messages | Openai_chat | Ollama_chat | Gemini_generate_content | Glm_chat -> Other_http_codec)
         ~catalog_generation:ready.catalog_generation
         ~catalog_evidence:ready.catalog_evidence
         ~target_identity:ready.target_identity
@@ -545,6 +549,8 @@ let candidate_visit_count_to_int (Candidate_visit_count count) = count
 let generation_receipt_snapshot_phase = Generation_receipt.snapshot_phase
 let generation_receipt_snapshot_generation_dispatched = Generation_receipt.snapshot_generation_dispatched
 let generation_receipt_snapshot_http_status = Generation_receipt.snapshot_http_status
+let generation_receipt_snapshot_response_family = Generation_receipt.snapshot_response_family
+let generation_receipt_snapshot_response_body_sha256 = Generation_receipt.snapshot_response_body_sha256
 let generation_receipt_snapshot_responses_lifecycle = Generation_receipt.snapshot_responses_lifecycle
 
 let generation_receipt_snapshot_dispatch_count =

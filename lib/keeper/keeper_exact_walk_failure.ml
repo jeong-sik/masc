@@ -132,6 +132,11 @@ let api_observation (cause : Exact_output.execution_error_cause) = match cause w
   | Ambiguous_output count -> Ambiguous count | Unexpected_output_content -> Unexpected
   | Invalid_json_output -> Invalid_json | Response_body_deadline_exceeded -> Body_deadline
 
+let api_observation_is_body_deadline = function
+  | Body_deadline -> true
+  | Provider_refused _ | Completion_failed _ | Output_limit | Incomplete | Missing | Ambiguous _
+  | Unexpected | Invalid_json -> false
+
 let of_completion = function
   | Deadline (First_token | Wall_clock | Http_operation | Non_streaming_body | Stream_body)
   | Response_body_too_large | Empty_completion Max_tokens -> historical_size

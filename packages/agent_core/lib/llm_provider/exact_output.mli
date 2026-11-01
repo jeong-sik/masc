@@ -663,6 +663,7 @@ val receipt_target_identity : receipt -> target_identity
 
 (** Immutable generation-receipt fact captured from one atomic state read. *)
 type generation_receipt_snapshot
+type response_family = Openai_responses_codec | Other_http_codec
 
 val receipt_snapshot : receipt -> generation_receipt_snapshot
 (** Capture phase, status and any published lifecycle observation together. *)
@@ -680,6 +681,18 @@ val generation_receipt_snapshot_http_status : generation_receipt_snapshot -> int
     occurred. A status does not prove that the body completed or that the
     provider's model turn has terminated. This in-memory snapshot alone is
     not a durable execution proof. *)
+
+val generation_receipt_snapshot_response_family
+  :  generation_receipt_snapshot -> response_family
+(** The frozen plan's wire family, retained even if no response arrived. *)
+
+val generation_receipt_snapshot_response_body_sha256
+  :  generation_receipt_snapshot
+  -> string option
+(** Digest of the complete response body captured for this attempt, copied
+    with status and lifecycle from one receipt state. [None] can mean the body
+    was incomplete or its trace had not yet been published; it is not evidence
+    that the provider did not respond. This is not the request body digest. *)
 
 val generation_receipt_snapshot_responses_lifecycle
   :  generation_receipt_snapshot

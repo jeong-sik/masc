@@ -21,7 +21,7 @@ repairs are installed.
 | [#47030](https://github.com/jeong-sik/masc/pull/47030) | OpenRouter catalog tests used an old model ID/output limit and incomplete probe inventory | Exact 25-ID inventory with historical declared ladders separated from the two October 28 measured-disable rows |
 | [#47037](https://github.com/jeong-sik/masc/pull/47037) | Two OpenRouter rows admitted unsupported reasoning depths; the Nemotron seed requested an unsupported depth and DeepSeek's enabled default was undeclared | Shipped runtime → scoped catalog → typed completion admission → request JSON; DeepSeek 1017 accepts none/low/high/max and its enabled default, Nemotron uses explicit reasoning.enabled booleans without a depth; omission keeps the provider default |
 | [#47095](https://github.com/jeong-sik/masc/pull/47095) | An omitted GLM clear control let the Coding endpoint preserve history that the client had cleared | Resolved reasoning capabilities → explicit client clear policy on the wire; omitted thinking.type and non-reasoning requests remain omitted |
-| [#47096](https://github.com/jeong-sik/masc/pull/47096) | An observed Antigravity built-in action followed by process exit or idle could leave another candidate eligible | Typed native start/finish → effect uncertainty before observers → candidate replay fence, including DONE/ERROR without ACTIVE |
+| [#47096](https://github.com/jeong-sik/masc/pull/47096) | An Antigravity native action followed by process exit or idle could leave another candidate eligible, including missing action telemetry | Resolved full-native posture → validated session admission and typed native observations → effect uncertainty before observers; read-only/pre-admission fallback and actual MCP effects retain their own rules |
 | [#47097](https://github.com/jeong-sik/masc/pull/47097) | Muse terminal delivery could precede a gap hiding compaction or a newer final answer | Durable current-turn pages → final reply/usage/model witness → successful settlement; selected Memory is resent on resume until retention has durable proof |
 | [#47098](https://github.com/jeong-sik/masc/pull/47098) | Three unchanged dialect fixtures depended on undeclared local model contracts; Responses boolean coverage was missing | Explicit fixture contracts and real shipped Nemotron Responses admission → serialization for omitted/true/false controls |
 
@@ -92,9 +92,14 @@ non-completed states retain partial responses as error evidence, never as a
 completed answer. Independent review caught that nonretryable provider errors
 could still trigger candidate fanout; the final repair marks unobserved native
 effects as unavailable before projection, while preserving known effects.
-#47096 additionally observes typed native start and finish before fallible
-observers, fencing replay after a transport exit or idle failure even when a
-finish event arrives without a start event.
+#47096 additionally bounds uncertainty to the resolved full-native posture and
+records it first at the validated conversation-ready callback, before fallible
+session persistence. Typed native start/finish observations also fence a partial
+stream. A full-native transport exit or idle failure therefore cannot replay an
+unobserved action. Read-only/no-native execution does not acquire a native effect
+fence; actual MCP effects retain their stronger independent evidence. Invalid
+init/config/spawn paths preserve pre-admission behavior. Non-completed provider
+statuses keep their existing terminal retry policy independently of that fence.
 
 Strict review also found that live Muse push delivery cannot prove either final
 answer completeness or retained context. #47097 reads the contiguous durable
@@ -104,6 +109,14 @@ the latest complete final answer and per-call usage/model facts from that same
 witness, without replaying tools or approvals. Missing or inconsistent proof
 retains uncertainty and receipts. The original reserved exception identity and
 known explicit terminal usage survive cleanup or history failure.
+
+Later automated review caught three more witness boundaries. Durable pages now
+require the schema's nested SourceRange fields and refuse an injected push-only
+view/gap record. All accumulated agent messages require terminal completion,
+including an older open message before a newer completed answer or commentary
+before quiet completion. Ephemeral item starts with no SourceRange are not
+invented as durable records; actual durable updates are retained in the fixtures.
+No sequence ordering, closed stream-kind vocabulary or timing heuristic is added.
 
 Muse sessions are still reused, but unproved held-context certificates are no
 longer persisted or trusted. Selected current Memory/context is resent on resume.
@@ -163,6 +176,7 @@ not a pass.
 | [41262679047](https://github.com/jeong-sik/masc/actions/runs/41262679047) | `a52c4d149a9f6545401c3e07becc5a5dc12420d3` | SUCCESS: corrected Codex protocol suite, 198 cases, including ordinary observer-failure propagation and operator interruption. The later direct stream-observer cancellation fixture is a separate untested delta at this boundary. |
 | [41263657342](https://github.com/jeong-sik/masc/actions/runs/41263657342) | `16e345622b08347a2aac9090b877f1f9ded488b1` | FAILURE: eight suites passed, 234 cases (catalog 28, Antigravity runtime 69, CLI 24, exact lane 5, Fusion 33, verification 22, checkpoint 29, GLM thinking 24). Two of 25 Keeper Antigravity cases failed during setup: dynamic tools lacked a shared context and the fallback runtime lacked its required timeout. Both fixture setup errors are repaired; assertions and production guards are retained. |
 | [41265918467](https://github.com/jeong-sik/masc/actions/runs/41265918467) | `7fd50df9ddb1079279f9ca295cb9a331e4f9fc01` | FAILURE: eleven suites passed, 821 cases, including Codex 199 and Keeper Antigravity 25. Thinking dialects failed three of 51 cases because local Ollama/Anthropic/Gemini fixture contracts were undeclared or mismatched. #47098 repairs those fixtures; this older run does not test the four strict-review followups. |
+| [41270288353](https://github.com/jeong-sik/masc/actions/runs/41270288353) | `0d9d54f389309838ca4db1887e9156fde09581f9` | FAILURE: provider config 142, GLM coverage 11 and reasoning replay 59 passed (212 total). New Responses test constructed a private codec value; shared native-test compilation then stopped on a direct Digestif reference. Tests now use the public codec tag and SHA-256 facade. The native executable group did not run. Later bot-boundary/source and compile repairs require their own selected execution. |
 
 Independent source reviews passed the integrated Muse head `5e3b61b848e1e9e4403b8ccf4a9768e547e712df`,
 the final Antigravity layer `7cb26cc755ae4e801b390ca190373b1d7a334bbb`,
@@ -182,8 +196,9 @@ The strict-review source checks covered eight GLM, two Antigravity, seven Muse,
 three caller-fixture and one dialect-fixture OCaml files. All 21 parsed, and their
 integrated blobs match the authored review snapshots in the retained
 [source-equivalence record](../evidence/2026-11-01-official-client-self-review/source-equivalence.json).
-Peer source review found no remaining concrete P0–P2 within its recorded scopes.
-This is separate from type checking, behavior CI and formal GitHub approval. The
+Initial peer source reads and later automated review are recorded separately;
+later findings led to the additional posture/admission and witness repairs above.
+A source verdict is separate from type checking, behavior CI and formal GitHub approval. The
 original nine published heads were preserved; four followup layers carry these
 repairs. No external-session local Dune was run.
 

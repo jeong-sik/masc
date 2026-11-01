@@ -60,16 +60,17 @@
     "limits": "No execution at the later publication head. The MLI input, lib tree and Core tree are not byte-identical to ed7; the historical Antigravity run does not execute the new Core repair.",
     "changed_core_tree": {
       "reference_tree": "c4b3002ea517ec584858ee05971ca84f0da15819",
-      "publication_tree": "352d2b8a2d2ef1a11c9f7c3f85fcbab7d3687fc0",
       "identical": false,
       "changed_paths": [
         "packages/agent_core/lib/pipeline/pipeline.ml",
         "packages/agent_core/lib/pipeline/pipeline_execution_resume.mli",
         "packages/agent_core/lib/pipeline/pipeline_execution_scope.mli",
         "packages/agent_core/test/test_pipeline.ml"
-      ]
+      ],
+      "scope": "Excluded from historical targeted execution. Exact current Core identity is reviewed at its own PR; this record retains only the tested reference and changed source paths."
     },
-    "lower_core_repair_head": "8b33c1143c9551bc7cbf5624dfbd0566fb7bc836",
-    "preserved_external_core_commit": "356a1e02ce3637668c357cf4467d738243c51fe9"
+    "preserved_external_core_commit": "356a1e02ce3637668c357cf4467d738243c51fe9",
+    "lower_core_production_repair_ancestor": "8b33c1143c9551bc7cbf5624dfbd0566fb7bc836",
+    "lower_core_fixture_correction_ancestor": "b8a1523884e571a91b90971d8cb682442d4296f7"
   }
 }

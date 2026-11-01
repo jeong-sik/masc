@@ -7,14 +7,18 @@ const source = fs.readFileSync(path.join(__dirname,'../lib/browser_ego_recovery.
   .match(/let script = \{js\|([\s\S]*?)\|js\}/)?.[1];
 assert.ok(source);
 const recover = vm.runInNewContext('('+source+')');
-function fixture({label='p1',origin='agent',target='T1',foreignPage=false,foreignSpace=false,fail=false}={}) {
+function fixture({label='p1',origin='agent',target='T1',foreignPage=false,foreignSpace=false,duplicate=false,fail=false}={}) {
   const calls=[];
   const observed={label,targetId:target,openedBy:origin};
   const page={spaceId:foreignSpace?99:51,label:'p1',targetId:foreignPage?'T2':'T1',openedBy:origin,
     async cdp(method,...params){calls.push([method,...params]);if(fail)throw Error('lost after native stop');return {};}};
   for(const method of ['url','info','snapshot','title','goto','reload','evaluate'])
     page[method]=async()=>{throw Error('EGO_PAGE_UNRESPONSIVE');};
-  const task={spaceId:51,tabs:async()=>[observed],page:requested=>{assert.equal(requested,'p1');return page;}};
+  observed.page=page;
+  // Native task.page(label) is lightweight: it does not expose targetId or
+  // openedBy. Only the inventory row carries the canonical enriched Page.
+  const task={spaceId:51,tabs:async()=>duplicate?[observed,observed]:[observed],
+    page:requested=>{assert.equal(requested,'p1');return {spaceId:51,label:'p1',cdp:page.cdp};}};
   return {task,calls};
 }
 test('loading recovery does not depend on any responsive Page observation',async()=>{
@@ -29,7 +33,8 @@ test('loading recovery does not depend on any responsive Page observation',async
   }
 });
 test('only the exact managed native Page receives recovery',async()=>{
-  for(const options of [{label:null},{label:'p2'},{origin:'user'},{target:''},{foreignPage:true},{foreignSpace:true}]) {
+  for(const options of [{label:null},{label:'p2'},{origin:'user'},{target:''},{target:'  '},
+    {foreignPage:true},{foreignSpace:true},{duplicate:true}]) {
     const {task,calls}=fixture(options);const result=await recover(task,{label:'p1'});
     assert.equal(result.ok,false);assert.equal(result.before,true);assert.deepEqual(calls,[]);
   }

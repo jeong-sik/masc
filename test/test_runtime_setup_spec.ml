@@ -561,7 +561,102 @@ max-context = 8192
   List.iter (fun row -> Alcotest.(check (float 0.)) "declared transport timeout is projected" 824.5
     (row |> member "provider_timeout_s" |> to_float)) [provider; runtime]
 
+let named_catalog_spec ?(declared=false) ?(provider="glm-coding") ?endpoint ?image ?(model_key="glm-5-3-flash") ?(model="glm-5.3-flash") () =
+  let connection = Agent_core.Provider_runtime_binding.find "glm-coding" |> Option.get in
+  `Assoc (["choice",`String "openai_compatible"; "provider_id",`String provider;
+    "provider_display_name",`String "Selected coding account";
+    "provider_declared",`Bool declared; "model_key",`String model_key;
+    "model",`String model; "max_context",`Int 1000000;
+    "tools",`Bool true; "streaming",`Bool true;
+    "endpoint",`String (Option.value endpoint ~default:connection.base_url);
+    "api_key_env",`String "SETUP_NAMED_TEST_KEY"; "reasoning_effort",`String "high"]
+    @ (match image with None -> [] | Some value -> ["supports_image_input",`Bool value]))
+
+let parse_setup json = match Runtime_setup_spec.of_json json with
+  | Ok spec -> spec | Error error -> Alcotest.fail (Runtime_setup_spec.error_message error)
+
+let parse_rendered rendered =
+  let whole = "[runtime]\ndefault = " ^ Yojson.Safe.to_string (`String rendered.Runtime_setup_spec.runtime_id)
+    ^ "\n" ^ rendered.runtime_toml in
+  match Runtime_toml.parse_string whole with
+  | Ok config -> config | Error _ -> Alcotest.fail "native named selection renders invalid runtime TOML"
+
+let test_named_catalog_selection_reaches_native_rendering () =
+  List.iter (fun image ->
+    let spec = parse_setup (named_catalog_spec ?image ()) in
+    let spec = Runtime_setup_spec.resolve_provider spec [] |> Result.get_ok in
+    let rendered = Runtime_setup_spec.render spec in
+    Alcotest.(check string) "the selected named runtime survives the batch parser"
+      "glm-coding.glm-coding-glm-5-3-flash" rendered.runtime_id;
+    let config = parse_rendered rendered in
+    let model = List.hd config.Runtime_schema.models in
+    let provider = List.hd config.providers in
+    let binding = List.hd config.bindings in
+    Alcotest.(check string) "provider identity remains catalog-scoped" "glm-coding" provider.id;
+    Alcotest.(check string) "binding points at that same provider" provider.id binding.provider_id;
+    Alcotest.(check (option bool)) "selected image declaration survives actual TOML parsing"
+      image (Option.bind model.capabilities (fun caps -> caps.Runtime_schema.supports_image_input));
+    Alcotest.(check (option string)) "selected effort reaches the runtime model"
+      (Some "high") (Option.map Llm_provider.Reasoning_effort.to_string model.reasoning_effort);
+    Alcotest.(check (option int)) "catalog owns the named model window" None model.max_context)
+    [Some true;Some false;None]
+
+let test_named_catalog_selection_revalidates_existing_provider () =
+  let original = parse_rendered (Runtime_setup_spec.render (parse_setup (named_catalog_spec ()))) in
+  let provider = List.hd original.Runtime_schema.providers in
+  let spec = parse_setup (named_catalog_spec ~declared:true ~model_key:"second-model" ~image:true ()) in
+  let bound = Runtime_setup_spec.resolve_provider spec [provider] |> Result.get_ok in
+  let additions = Runtime_setup_spec.render ~include_provider:false ~wizard_default:false bound in
+  let config = match Runtime_toml.parse_string
+      ("[runtime]\ndefault = \"glm-coding.glm-coding-glm-5-3-flash\"\n"
+       ^ (Runtime_setup_spec.render (parse_setup (named_catalog_spec ()))).runtime_toml
+       ^ additions.runtime_toml) with
+    | Ok config -> config | Error _ -> Alcotest.fail "appended named model duplicates or changes its provider" in
+  Alcotest.(check int) "one configured account remains one provider" 1 (List.length config.providers);
+  Alcotest.(check int) "the selected new model is appended" 2 (List.length config.models);
+  Alcotest.(check bool) "an existing-provider claim cannot create an absent account" true
+    (Result.is_error (Runtime_setup_spec.resolve_provider spec []));
+  Alcotest.(check bool) "disabled accounts stay disabled" true
+    (Result.is_error (Runtime_setup_spec.resolve_provider spec [{provider with enabled=false}]));
+  Alcotest.(check bool) "changed credential selection does not overwrite the account" true
+    (Result.is_error (Runtime_setup_spec.resolve_provider spec
+      [{provider with credentials=Some (Runtime_schema.Env "DIFFERENT_SETUP_KEY")}]))
+
+let test_named_provider_identity_cannot_claim_an_unrelated_endpoint () =
+  let changed = parse_setup (named_catalog_spec ~endpoint:"https://unrelated.invalid/v1" ()) in
+  Alcotest.(check bool) "catalog provider cannot be transplanted onto another endpoint" true
+    (Result.is_error (Runtime_setup_spec.resolve_provider changed []));
+  let unknown = parse_setup (named_catalog_spec ~provider:"unknown-named-fixture" ()) in
+  Alcotest.(check bool) "a new named provider requires catalog authority" true
+    (Result.is_error (Runtime_setup_spec.resolve_provider unknown []));
+  let fields = match named_catalog_spec () with `Assoc fields -> fields | _ -> assert false in
+  Alcotest.(check bool) "conflicting provider selection mechanisms are refused" true
+    (Result.is_error (Runtime_setup_spec.of_json
+      (`Assoc (("existing_provider_id",`String "other")::fields))))
+
+let test_named_selection_requires_exact_provider_model_membership () =
+  let original = parse_rendered (Runtime_setup_spec.render (parse_setup (named_catalog_spec ()))) in
+  let provider = List.hd original.Runtime_schema.providers in
+  let uncurated = "uncurated-named-vision-model" in
+  List.iter (fun declared ->
+    let spec = parse_setup (named_catalog_spec ~declared ~model:uncurated ()) in
+    Alcotest.(check bool) "uncurated named model is refused for new and existing providers" true
+      (Result.is_error (Runtime_setup_spec.resolve_provider spec (if declared then [provider] else []))))
+    [false;true];
+  let custom = parse_setup (`Assoc ["choice",`String "openai_compatible";
+    "existing_provider_id",`String provider.id; "model",`String uncurated;
+    "max_context",`Int 8192; "tools",`Bool true; "streaming",`Bool true;
+    "endpoint",`String (match provider.transport with Runtime_schema.Http url -> url
+      | Runtime_schema.Cli _ -> Alcotest.fail "HTTP provider required");
+    "provider_kind",`String "glm"; "api_key_env",`String "SETUP_NAMED_TEST_KEY"]) in
+  Alcotest.(check bool) "ordinary explicit provider selection retains its custom-model admission" true
+    (Result.is_ok (Runtime_setup_spec.resolve_provider custom [provider]))
+
 let () = Alcotest.run "native runtime setup spec" ["contract",[
+  Alcotest.test_case "named model membership is exact without restricting custom selections" `Quick test_named_selection_requires_exact_provider_model_membership;
+  Alcotest.test_case "named catalog selection reaches native rendering" `Quick test_named_catalog_selection_reaches_native_rendering;
+  Alcotest.test_case "named selection revalidates the configured provider" `Quick test_named_catalog_selection_revalidates_existing_provider;
+  Alcotest.test_case "named provider cannot claim an unrelated endpoint" `Quick test_named_provider_identity_cannot_claim_an_unrelated_endpoint;
   Alcotest.test_case "existing inline account selection is revalidated without exporting secrets" `Quick test_existing_inline_selection;
   Alcotest.test_case "Antigravity inventory preserves declared timeout" `Quick test_antigravity_inventory_keeps_declared_timeout;
   Alcotest.test_case "CLI reuse follows actual execution eligibility" `Quick test_cli_reuse_requires_non_interactive;

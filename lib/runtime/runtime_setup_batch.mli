@@ -72,8 +72,15 @@ val configure : ?pending_credentials:Runtime_setup_credentials.pending list -> ?
     unrelated lanes and Keeper assignments remain unchanged. The receipt names
     that lane as [runtime_id], with concrete candidates in [runtime_ids].
     Specs resolve against enabled configured providers before rendering. Callers
-    prepare selection IDs against the same inventory (the native renderer accepts
-    [--base-path]); IDs for an unresolved provider are not accepted as aliases.
+    naming the same provider must select the same connection and account;
+    conflicting credential references are refused before staging or inference.
+    Callers prepare selection IDs against the same inventory (the native
+    renderer accepts [--base-path]); IDs for an unresolved provider are not
+    accepted as aliases.
+    Repeated rendered IDs must also carry identical selections, including
+    model, context, image capability and effort, before they can be deduplicated.
+    A supplied named spec targeting a saved ID must match that saved selection;
+    selecting a saved runtime ID without a spec keeps ordinary reuse semantics.
     Existing provider and unrelated settings bytes are retained. The source is
     compared again after stage validation under the runtime writer lock.
     Publication validates and atomically replaces runtime.toml through the

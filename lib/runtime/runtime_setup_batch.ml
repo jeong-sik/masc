@@ -183,6 +183,20 @@ let configure_locked ~replace_file ~pending_credentials ~default_lane_id ~binary
         |> Result.map_error (fun _ -> Invalid_selection) in
       let* rest = resolve_specs rest in Ok (spec :: rest) in
   let* specs = resolve_specs specs in
+  let rec consistent_selections previous = function
+    | [] -> Ok ()
+    | spec :: rest ->
+      let provider_id = Runtime_setup_spec.provider_id spec in
+      let runtime_id = (Runtime_setup_spec.render spec).runtime_id in
+      if List.for_all (fun (other,other_runtime_id) ->
+          (Runtime_setup_spec.provider_id other <> provider_id
+           || Runtime_setup_spec.same_connection spec other)
+          && (other_runtime_id <> runtime_id || Runtime_setup_spec.same_selection spec other)) previous
+      then consistent_selections ((spec,runtime_id) :: previous) rest
+      else Error Invalid_selection in
+  let* () = consistent_selections [] specs in
+  let* () = if List.for_all (fun spec -> Runtime_setup_spec.matches_existing_selection spec parsed) specs
+    then Ok () else Error Invalid_selection in
   let existing = List.map Runtime_instance.id_of_binding parsed.Runtime_schema.bindings in
   let previous_primary = match default_lane_id with
     | None -> parsed.Runtime_schema.default_runtime_id

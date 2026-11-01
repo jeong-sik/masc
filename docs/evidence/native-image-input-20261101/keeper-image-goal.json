@@ -1,0 +1,17 @@
+{
+  "scope": "real Keeper image goal; no image-analysis delegation; separate from screenshot tool-result proof",
+  "operation_id": "kmsg-6331fccab3264d67b52e9894c616ece0",
+  "state": "Succeeded",
+  "outcome_ref": "trace-1793504508658-00000#1",
+  "runtime_ids": [
+    "glm-coding.glm-5.3-flash"
+  ],
+  "binary_commit": "19bcbb75a8233115ec0745e34e95cee90ede4fbf",
+  "image_sha256": "0a1566f62d17bfc5d568e692f4209aed9771a71ae6af6bf94bbb2d50f96730d3",
+  "reply": "LIME 8472",
+  "expected": "LIME 8472",
+  "matched": true,
+  "tool_calls": 0,
+  "created_at": 1793504508.848319,
+  "completed_at": 1793504850.37769
+}

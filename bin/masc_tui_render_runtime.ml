@@ -1304,8 +1304,8 @@ let usage_lines ~cols ~rows (state : state) =
         ; Printf.sprintf " As of %04d-%02d-%02d %02d:%02d UTC"
             (generated.Unix.tm_year + 1900) (generated.Unix.tm_mon + 1)
             generated.Unix.tm_mday generated.Unix.tm_hour generated.Unix.tm_min
-        ; " Bars compare read windows; each metric scales to its largest Keeper."
-        ; " Partial windows have no comparison bar; missing metrics can understate totals; bars are not quota."
+        ; " Bars: relative to largest read value per metric; not quota."
+        ; " Partial rows: no bars. Missing values can understate totals."
         ; Printf.sprintf " Scale: tokens %s · cost %s"
             (scale token_value (fun value -> grouped_digits (Printf.sprintf "%.0f" value)) token_max)
             (scale cost_value (Printf.sprintf "$%.4f") cost_max)

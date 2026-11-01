@@ -273,6 +273,8 @@ let open_space ~run ~run_native ~now ~space ~version ~capture_directory ~downloa
   let* bound_space=Browser_lane.ego_space_of_json (obj ["id",id;"name",name]) in
   let* ()=match space with
     | Browser_configuration.Existing_space id when id<>bound_space.id -> Error "ego answered a different Space ID; no replacement or fallback is permitted"
+    | Named_space name when not (String.equal name bound_space.name) ->
+        Error "ego answered a different Space name; no replacement or fallback is permitted"
     | Existing_space _|Named_space _ -> Ok () in
   let* observation=Browser_ego_space_observation.of_sdk ~expected_id:bound_space.id ~observed_at:(now ()) opened in
   match List.assoc_opt "ownership" fields with

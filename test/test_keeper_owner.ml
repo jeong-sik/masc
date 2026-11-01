@@ -6369,6 +6369,7 @@ let test_owner_preparation_wait_and_explicit_retry ?(generic_failure=false)
       ~operation_store_path:path ~session_root:(Filename.concat (Filename.dirname path) "traces")
       ~now:(fun () -> 42.) ~keeper_name:"preparation-owner"
       ~initial_meta:(Some (make_meta "preparation-owner"))
+      ~on_turn_slot_released:None
       ~operation_runner:(Some Owner.{ready=(fun ~keeper_name:_ -> true);execute;
         on_execution_settled=(fun ~keeper_name:_ ~claimed_operation_id ~operations:_ ~execution:_ ->
           match claimed_operation_id with

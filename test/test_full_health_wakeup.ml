@@ -35,34 +35,35 @@ let test_non_eio_invalidation_wakes_waiter () =
 
 let test_committed_registry_failure_wakes_health () =
   let module Registry = Masc.Keeper_registry in
-  let other_path = Masc_test_deps.setup_test_workspace () in
   let base_path = Masc_test_deps.setup_test_workspace () in
+  let other_path = Filename.concat base_path "other-workspace" in
   let previous_state = Server_auth.For_testing.snapshot_server_state () in
-  let state = Masc.Mcp_server.For_testing.create_state ~base_path in
-  Server_auth.For_testing.restore_server_state (Some state);
-  Registry.For_testing.clear ();
-  let meta =
-    match Masc_test_deps.meta_of_json_fixture
-      (`Assoc [ "name", `String "health-observer"
-              ; "trace_id", `String "trace-health-observer"
-              ; "activation_mode", `String "manual" ]) with
-    | Ok meta -> meta
-    | Error error -> fail error
-  in
-  ignore (Registry.For_testing.register ~base_path meta.name meta);
-  ignore (Registry.For_testing.register ~base_path:other_path meta.name meta);
-  reset ();
-  Registry.install_state_change_observer
-    Runtime.invalidate_full_health_snapshot_for_registry_change;
   Fun.protect
     ~finally:(fun () ->
       Registry.install_state_change_observer (fun ~base_path:_ _ -> ());
       Registry.For_testing.clear ();
       reset ();
       Server_auth.For_testing.restore_server_state previous_state;
-      Masc_test_deps.cleanup_test_workspace other_path;
       Masc_test_deps.cleanup_test_workspace base_path)
     (fun () ->
+      Unix.mkdir other_path 0o755;
+      Unix.mkdir (Filename.concat other_path Common.masc_dirname) 0o755;
+      let state = Masc.Mcp_server.For_testing.create_state ~base_path in
+      Server_auth.For_testing.restore_server_state (Some state);
+      Registry.For_testing.clear ();
+      let meta =
+        match Masc_test_deps.meta_of_json_fixture
+          (`Assoc [ "name", `String "health-observer"
+                  ; "trace_id", `String "trace-health-observer"
+                  ; "activation_mode", `String "manual" ]) with
+        | Ok meta -> meta
+        | Error error -> fail error
+      in
+      ignore (Registry.For_testing.register ~base_path meta.name meta);
+      ignore (Registry.For_testing.register ~base_path:other_path meta.name meta);
+      reset ();
+      Registry.install_state_change_observer
+        Runtime.invalidate_full_health_snapshot_for_registry_change;
       Eio_main.run (fun _env ->
         Eio.Switch.run (fun sw ->
           Runtime.For_testing.run_full_health_refresh_worker ~sw

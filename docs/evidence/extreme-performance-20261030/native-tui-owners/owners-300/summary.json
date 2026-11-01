@@ -1,0 +1,51 @@
+{
+  "keepers": 300,
+  "messages": 600,
+  "succeeded_operations": 600,
+  "actual_model_calls": 600,
+  "max_provider_requests_in_flight": 300,
+  "latency_samples": 1269,
+  "valid_latency_samples": 1269,
+  "scope": "Pinned-native-source real Keeper turns with a loopback scripted text-only model, durable queued operations and offline SQLite reread. No guest/tool execution, browser/TUI or production throughput proof.",
+  "latency_by_phase": {
+    "submitting_model_held": {
+      "samples": 267,
+      "valid": 267,
+      "failures": 0,
+      "p50_ms": 3.23525,
+      "p95_ms": 11.894833,
+      "max_ms": 319.871708
+    },
+    "model_held_queue_observation": {
+      "samples": 357,
+      "valid": 357,
+      "failures": 0,
+      "p50_ms": 2.688334,
+      "p95_ms": 8.64325,
+      "max_ms": 274.410125
+    },
+    "running_model_released": {
+      "samples": 642,
+      "valid": 642,
+      "failures": 0,
+      "p50_ms": 1.766792,
+      "p95_ms": 47.81475,
+      "max_ms": 8269.019125
+    },
+    "settled": {
+      "samples": 3,
+      "valid": 3,
+      "failures": 0,
+      "p50_ms": 0.809958,
+      "p95_ms": 1.670542,
+      "max_ms": 1.670542
+    }
+  },
+  "rejected_429_count": 33,
+  "rate_limit_wait_s": 33.089231291,
+  "rate_limit_wait_by_source_s": {
+    "client_fallback_no_retry_after": 33.089231291
+  },
+  "denied_read_only_inventory_attempts": 991,
+  "unexpected_guest_command_attempts": 0
+}

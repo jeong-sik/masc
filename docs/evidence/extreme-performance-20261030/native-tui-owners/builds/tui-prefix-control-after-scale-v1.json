@@ -1,0 +1,11 @@
+{
+  "id": 41014690379,
+  "name": "Minimal manual checks",
+  "head_sha": "f06ab8f4fb3dd2c18e92366922c13a7c73f140f3",
+  "head_branch": "main",
+  "status": "completed",
+  "conclusion": "success",
+  "event": "workflow_dispatch",
+  "observed_at_unix": 1793344402.24994,
+  "requested_source_sha": "b004188be0805f5deb37127bdd7c70943691cb22"
+}

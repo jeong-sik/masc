@@ -1,0 +1,12 @@
+{
+  "observed_at_unix": 1793341353.294004,
+  "id": 41011842325,
+  "name": "Minimal manual checks",
+  "head_sha": "f06ab8f4fb3dd2c18e92366922c13a7c73f140f3",
+  "head_branch": "main",
+  "event": "workflow_dispatch",
+  "status": "completed",
+  "conclusion": "success",
+  "requested_source_sha": "5297349b101d61bb901b3729d43c4dec8bb30ec4",
+  "scope": "Single read at the completed DAW work boundary; wrapper source differs from requested native source. No installation or runtime proof."
+}

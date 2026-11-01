@@ -1,0 +1,22 @@
+{
+  "command": [
+    "python3",
+    "artifacts/extreme-perf-20261030/tui-owner-probe-v2/keeper_scale_session.py",
+    "--binary",
+    "artifacts/extreme-perf-20261030/tui-prefix-native-v1/masc",
+    "--tui-binary",
+    "artifacts/extreme-perf-20261030/tui-prefix-native-v1/masc-tui",
+    "--repo",
+    ".",
+    "--output",
+    "artifacts/extreme-perf-20261030/native-tui-owner2-v2",
+    "--keepers",
+    "2",
+    "--messages-per-keeper",
+    "2"
+  ],
+  "started_at_unix": 1793343474.910965,
+  "ended_at_unix": 1793343492.125216,
+  "returncode": 0,
+  "scope": "v2 actual owned Keeper/native TUI qualification. Durable workload, transport capture and performance target remain separate verdicts."
+}

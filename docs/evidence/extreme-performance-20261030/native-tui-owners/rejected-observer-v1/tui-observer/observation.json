@@ -1,0 +1,564 @@
+{
+  "scope": "Native TUI with real owned Keeper owners and a scripted loopback provider. Input writes, protocol frame ends and native phase samples are separate observations. No text/layout assertions, per-key application acknowledgement, physical emulator/paint or real peer authority proof.",
+  "source": "5297349b101d61bb901b3729d43c4dec8bb30ec4",
+  "binary_sha256": "e1e41a1ed79de05ba563bb1fd7d517c7578b475c9eaa6a606da28e89028d991d",
+  "binary_sha256_after": "e1e41a1ed79de05ba563bb1fd7d517c7578b475c9eaa6a606da28e89028d991d",
+  "server_before": {
+    "build": {
+      "release_version": "0.66.0",
+      "binary_version": "0.66.0",
+      "repo_version": "0.66.0",
+      "commit": "5297349b101d61bb901b3729d43c4dec8bb30ec4",
+      "commit_source": "embedded",
+      "binary_commit": "5297349b101d61bb901b3729d43c4dec8bb30ec4",
+      "binary_commit_source": "embedded",
+      "provenance_source": "self_observed",
+      "executable_sha256": "464fc0090639d89b03e85e73435632a9a709506dc139ccdb50f586e8ead0fc2e",
+      "binary_commit_unix_ts": 1793340094.0,
+      "binary_commit_age_seconds": 2486,
+      "repo_head_commit": "fd230b33f1c",
+      "repo_head_commit_source": "runtime_repo_head",
+      "repo_head_commit_unix_ts": 1793341474.0,
+      "repo_head_commit_age_seconds": 1106,
+      "executable_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/native-tui-owner2-v1/masc-installed-copy",
+      "executable_dir": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/native-tui-owner2-v1",
+      "repo_root": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030",
+      "runtime_instance_id": "01a18b8c-2154-7000-a111-a0780f87ab78",
+      "started_at": "2026-10-30T06:42:59Z",
+      "uptime_seconds": 1
+    },
+    "paths": {
+      "cwd": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/native-tui-owner2-v1/owned-base",
+      "effective_base_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/native-tui-owner2-v1/owned-base",
+      "effective_masc_root": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/native-tui-owner2-v1/owned-base/.masc",
+      "current_task_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/native-tui-owner2-v1/owned-base/.masc/current_task",
+      "current_task_shape": "absent",
+      "effective_has_masc_dir": true,
+      "roots_diverge": false,
+      "strict_mode_requested": false,
+      "startup_rejected": false,
+      "startup_abort_eligible": false,
+      "input_base_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/native-tui-owner2-v1/owned-base",
+      "env_masc_base_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/native-tui-owner2-v1/owned-base",
+      "resolution_source": "explicit_cli"
+    },
+    "keeper_fibers": 2
+  },
+  "server_after": {
+    "build": {
+      "release_version": "0.66.0",
+      "binary_version": "0.66.0",
+      "repo_version": "0.66.0",
+      "commit": "5297349b101d61bb901b3729d43c4dec8bb30ec4",
+      "commit_source": "embedded",
+      "binary_commit": "5297349b101d61bb901b3729d43c4dec8bb30ec4",
+      "binary_commit_source": "embedded",
+      "provenance_source": "self_observed",
+      "executable_sha256": "464fc0090639d89b03e85e73435632a9a709506dc139ccdb50f586e8ead0fc2e",
+      "binary_commit_unix_ts": 1793340094.0,
+      "binary_commit_age_seconds": 2498,
+      "repo_head_commit": "fd230b33f1c",
+      "repo_head_commit_source": "runtime_repo_head",
+      "repo_head_commit_unix_ts": 1793341474.0,
+      "repo_head_commit_age_seconds": 1118,
+      "executable_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/native-tui-owner2-v1/masc-installed-copy",
+      "executable_dir": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/native-tui-owner2-v1",
+      "repo_root": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030",
+      "runtime_instance_id": "01a18b8c-2154-7000-a111-a0780f87ab78",
+      "started_at": "2026-10-30T06:42:59Z",
+      "uptime_seconds": 13
+    },
+    "paths": {
+      "cwd": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/native-tui-owner2-v1/owned-base",
+      "effective_base_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/native-tui-owner2-v1/owned-base",
+      "effective_masc_root": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/native-tui-owner2-v1/owned-base/.masc",
+      "current_task_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/native-tui-owner2-v1/owned-base/.masc/current_task",
+      "current_task_shape": "absent",
+      "effective_has_masc_dir": true,
+      "roots_diverge": false,
+      "strict_mode_requested": false,
+      "startup_rejected": false,
+      "startup_abort_eligible": false,
+      "input_base_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/native-tui-owner2-v1/owned-base",
+      "env_masc_base_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/native-tui-owner2-v1/owned-base",
+      "resolution_source": "explicit_cli"
+    },
+    "keeper_fibers": 2
+  },
+  "same_runtime": true,
+  "server_pid": 13383,
+  "server_returncode_at_end": null,
+  "tui_pid": 14015,
+  "started_ns": "490944600088958",
+  "ended_ns": "490951674620458",
+  "clock": {
+    "implementation": "mach_absolute_time()",
+    "monotonic": true,
+    "adjustable": false,
+    "resolution": 4.166666666666666e-08
+  },
+  "exit_code": 0,
+  "forced_kill": false,
+  "error": null,
+  "sent_actions": 13,
+  "planned_actions": 13,
+  "protocol_ready": true,
+  "timing_file_present": true,
+  "user_cpu_seconds": 0.402066,
+  "system_cpu_seconds": 0.16558799999999999,
+  "terminal_bytes": 94088,
+  "events": [
+    {
+      "kind": "transport_frame_ends",
+      "count": 1,
+      "read_start_ns": "490944859491416",
+      "read_end_ns": "490944859492791"
+    },
+    {
+      "kind": "transport_frame_ends",
+      "count": 1,
+      "read_start_ns": "490944876517875",
+      "read_end_ns": "490944876526666"
+    },
+    {
+      "kind": "transport_frame_ends",
+      "count": 1,
+      "read_start_ns": "490944894072541",
+      "read_end_ns": "490944894078958"
+    },
+    {
+      "kind": "transport_frame_ends",
+      "count": 1,
+      "read_start_ns": "490944910665416",
+      "read_end_ns": "490944910677208"
+    },
+    {
+      "kind": "transport_frame_ends",
+      "count": 1,
+      "read_start_ns": "490944927543916",
+      "read_end_ns": "490944927545791"
+    },
+    {
+      "kind": "transport_frame_ends",
+      "count": 1,
+      "read_start_ns": "490944943962750",
+      "read_end_ns": "490944943975250"
+    },
+    {
+      "kind": "transport_frame_ends",
+      "count": 1,
+      "read_start_ns": "490945066582291",
+      "read_end_ns": "490945066586125"
+    },
+    {
+      "kind": "sent_input",
+      "action": "keepers",
+      "bytes_hex": "33",
+      "bytes_written": 1,
+      "write_start_ns": "490945273341375",
+      "write_end_ns": "490945273370125"
+    },
+    {
+      "kind": "transport_frame_ends",
+      "count": 1,
+      "read_start_ns": "490945318889958",
+      "read_end_ns": "490945318894541"
+    },
+    {
+      "kind": "sent_input",
+      "action": "chat",
+      "bytes_hex": "63",
+      "bytes_written": 1,
+      "write_start_ns": "490945667414958",
+      "write_end_ns": "490945667437041"
+    },
+    {
+      "kind": "transport_frame_ends",
+      "count": 1,
+      "read_start_ns": "490945668861875",
+      "read_end_ns": "490945668865375"
+    },
+    {
+      "kind": "transport_frame_ends",
+      "count": 1,
+      "read_start_ns": "490945686636333",
+      "read_end_ns": "490945686648250"
+    },
+    {
+      "kind": "transport_frame_ends",
+      "count": 1,
+      "read_start_ns": "490945704812083",
+      "read_end_ns": "490945704815750"
+    },
+    {
+      "kind": "transport_frame_ends",
+      "count": 1,
+      "read_start_ns": "490945721593958",
+      "read_end_ns": "490945721606250"
+    },
+    {
+      "kind": "transport_frame_ends",
+      "count": 1,
+      "read_start_ns": "490945775567208",
+      "read_end_ns": "490945775580125"
+    },
+    {
+      "kind": "transport_frame_ends",
+      "count": 1,
+      "read_start_ns": "490945929252083",
+      "read_end_ns": "490945929265416"
+    },
+    {
+      "kind": "sent_input",
+      "action": "page-up-1",
+      "bytes_hex": "1b5b357e",
+      "bytes_written": 4,
+      "write_start_ns": "490946078518083",
+      "write_end_ns": "490946078536291"
+    },
+    {
+      "kind": "transport_frame_ends",
+      "count": 1,
+      "read_start_ns": "490946079128541",
+      "read_end_ns": "490946079147125"
+    },
+    {
+      "kind": "transport_frame_ends",
+      "count": 1,
+      "read_start_ns": "490946096288375",
+      "read_end_ns": "490946096301375"
+    },
+    {
+      "kind": "transport_frame_ends",
+      "count": 1,
+      "read_start_ns": "490946248764875",
+      "read_end_ns": "490946248778333"
+    },
+    {
+      "kind": "transport_frame_ends",
+      "count": 1,
+      "read_start_ns": "490946401144583",
+      "read_end_ns": "490946401163000"
+    },
+    {
+      "kind": "sent_input",
+      "action": "page-up-2",
+      "bytes_hex": "1b5b357e",
+      "bytes_written": 4,
+      "write_start_ns": "490946470250541",
+      "write_end_ns": "490946470272125"
+    },
+    {
+      "kind": "transport_frame_ends",
+      "count": 1,
+      "read_start_ns": "490946471195166",
+      "read_end_ns": "490946471208333"
+    },
+    {
+      "kind": "transport_frame_ends",
+      "count": 1,
+      "read_start_ns": "490946557637875",
+      "read_end_ns": "490946557642750"
+    },
+    {
+      "kind": "transport_frame_ends",
+      "count": 1,
+      "read_start_ns": "490946710689291",
+      "read_end_ns": "490946710703083"
+    },
+    {
+      "kind": "transport_frame_ends",
+      "count": 1,
+      "read_start_ns": "490946868625708",
+      "read_end_ns": "490946868634875"
+    },
+    {
+      "kind": "sent_input",
+      "action": "page-up-3",
+      "bytes_hex": "1b5b357e",
+      "bytes_written": 4,
+      "write_start_ns": "490946868654500",
+      "write_end_ns": "490946868663125"
+    },
+    {
+      "kind": "transport_frame_ends",
+      "count": 1,
+      "read_start_ns": "490946869082291",
+      "read_end_ns": "490946869097375"
+    },
+    {
+      "kind": "transport_frame_ends",
+      "count": 1,
+      "read_start_ns": "490946886062500",
+      "read_end_ns": "490946886070916"
+    },
+    {
+      "kind": "transport_frame_ends",
+      "count": 1,
+      "read_start_ns": "490946907545541",
+      "read_end_ns": "490946907560291"
+    },
+    {
+      "kind": "transport_frame_ends",
+      "count": 1,
+      "read_start_ns": "490947026898458",
+      "read_end_ns": "490947026905416"
+    },
+    {
+      "kind": "transport_frame_ends",
+      "count": 1,
+      "read_start_ns": "490947178973000",
+      "read_end_ns": "490947178981000"
+    },
+    {
+      "kind": "sent_input",
+      "action": "page-down-1",
+      "bytes_hex": "1b5b367e",
+      "bytes_written": 4,
+      "write_start_ns": "490947268274375",
+      "write_end_ns": "490947268299458"
+    },
+    {
+      "kind": "transport_frame_ends",
+      "count": 1,
+      "read_start_ns": "490947337834291",
+      "read_end_ns": "490947337847541"
+    },
+    {
+      "kind": "transport_frame_ends",
+      "count": 1,
+      "read_start_ns": "490947491752416",
+      "read_end_ns": "490947491791666"
+    },
+    {
+      "kind": "transport_frame_ends",
+      "count": 1,
+      "read_start_ns": "490947646491083",
+      "read_end_ns": "490947646503833"
+    },
+    {
+      "kind": "sent_input",
+      "action": "page-down-2",
+      "bytes_hex": "1b5b367e",
+      "bytes_written": 4,
+      "write_start_ns": "490947670610250",
+      "write_end_ns": "490947670629875"
+    },
+    {
+      "kind": "transport_frame_ends",
+      "count": 1,
+      "read_start_ns": "490947808368958",
+      "read_end_ns": "490947808378000"
+    },
+    {
+      "kind": "transport_frame_ends",
+      "count": 1,
+      "read_start_ns": "490947963024791",
+      "read_end_ns": "490947963035708"
+    },
+    {
+      "kind": "sent_input",
+      "action": "clear-owned-draft",
+      "bytes_hex": "15",
+      "bytes_written": 1,
+      "write_start_ns": "490948075393208",
+      "write_end_ns": "490948075413500"
+    },
+    {
+      "kind": "transport_frame_ends",
+      "count": 1,
+      "read_start_ns": "490948127940125",
+      "read_end_ns": "490948127953166"
+    },
+    {
+      "kind": "transport_frame_ends",
+      "count": 1,
+      "read_start_ns": "490948281503166",
+      "read_end_ns": "490948281520166"
+    },
+    {
+      "kind": "transport_frame_ends",
+      "count": 1,
+      "read_start_ns": "490948434559833",
+      "read_end_ns": "490948434573750"
+    },
+    {
+      "kind": "sent_input",
+      "action": "switch-owned-keeper",
+      "bytes_hex": "2f6b6565706572207363616c652d6b65657065722d30303031",
+      "bytes_written": 25,
+      "write_start_ns": "490948482104333",
+      "write_end_ns": "490948482118666"
+    },
+    {
+      "kind": "transport_frame_ends",
+      "count": 1,
+      "read_start_ns": "490948482521791",
+      "read_end_ns": "490948482523083"
+    },
+    {
+      "kind": "transport_frame_ends",
+      "count": 1,
+      "read_start_ns": "490948484386500",
+      "read_end_ns": "490948484388041"
+    },
+    {
+      "kind": "transport_frame_ends",
+      "count": 1,
+      "read_start_ns": "490948585974750",
+      "read_end_ns": "490948585984416"
+    },
+    {
+      "kind": "transport_frame_ends",
+      "count": 1,
+      "read_start_ns": "490948745873000",
+      "read_end_ns": "490948745881500"
+    },
+    {
+      "kind": "sent_input",
+      "action": "apply-switch",
+      "bytes_hex": "0d",
+      "bytes_written": 1,
+      "write_start_ns": "490948865622916",
+      "write_end_ns": "490948865636583"
+    },
+    {
+      "kind": "transport_frame_ends",
+      "count": 1,
+      "read_start_ns": "490948866224166",
+      "read_end_ns": "490948866229958"
+    },
+    {
+      "kind": "transport_frame_ends",
+      "count": 1,
+      "read_start_ns": "490948901715875",
+      "read_end_ns": "490948901717750"
+    },
+    {
+      "kind": "transport_frame_ends",
+      "count": 1,
+      "read_start_ns": "490948919505666",
+      "read_end_ns": "490948919512375"
+    },
+    {
+      "kind": "transport_frame_ends",
+      "count": 1,
+      "read_start_ns": "490949055603041",
+      "read_end_ns": "490949055611541"
+    },
+    {
+      "kind": "transport_frame_ends",
+      "count": 1,
+      "read_start_ns": "490949207670000",
+      "read_end_ns": "490949207677583"
+    },
+    {
+      "kind": "sent_input",
+      "action": "leave-chat",
+      "bytes_hex": "11",
+      "bytes_written": 1,
+      "write_start_ns": "490949275959333",
+      "write_end_ns": "490949275971083"
+    },
+    {
+      "kind": "transport_frame_ends",
+      "count": 1,
+      "read_start_ns": "490949276717416",
+      "read_end_ns": "490949276719208"
+    },
+    {
+      "kind": "transport_frame_ends",
+      "count": 1,
+      "read_start_ns": "490949665950791",
+      "read_end_ns": "490949665960166"
+    },
+    {
+      "kind": "sent_input",
+      "action": "next-surface-1",
+      "bytes_hex": "09",
+      "bytes_written": 1,
+      "write_start_ns": "490949665988958",
+      "write_end_ns": "490949665995083"
+    },
+    {
+      "kind": "transport_frame_ends",
+      "count": 1,
+      "read_start_ns": "490949666567875",
+      "read_end_ns": "490949666569166"
+    },
+    {
+      "kind": "transport_frame_ends",
+      "count": 1,
+      "read_start_ns": "490949684307750",
+      "read_end_ns": "490949684309500"
+    },
+    {
+      "kind": "sent_input",
+      "action": "next-surface-2",
+      "bytes_hex": "09",
+      "bytes_written": 1,
+      "write_start_ns": "490950078334875",
+      "write_end_ns": "490950078349416"
+    },
+    {
+      "kind": "transport_frame_ends",
+      "count": 1,
+      "read_start_ns": "490950079243125",
+      "read_end_ns": "490950079248625"
+    },
+    {
+      "kind": "transport_frame_ends",
+      "count": 1,
+      "read_start_ns": "490950097250625",
+      "read_end_ns": "490950097275125"
+    },
+    {
+      "kind": "transport_frame_ends",
+      "count": 1,
+      "read_start_ns": "490950283489833",
+      "read_end_ns": "490950283505750"
+    },
+    {
+      "kind": "transport_frame_ends",
+      "count": 1,
+      "read_start_ns": "490950898426208",
+      "read_end_ns": "490950898439333"
+    },
+    {
+      "kind": "transport_frame_ends",
+      "count": 1,
+      "read_start_ns": "490950914786875",
+      "read_end_ns": "490950914797916"
+    },
+    {
+      "kind": "transport_frame_ends",
+      "count": 1,
+      "read_start_ns": "490950931782750",
+      "read_end_ns": "490950931796333"
+    },
+    {
+      "kind": "transport_frame_ends",
+      "count": 1,
+      "read_start_ns": "490950948482791",
+      "read_end_ns": "490950948492500"
+    },
+    {
+      "kind": "transport_frame_ends",
+      "count": 1,
+      "read_start_ns": "490951356758625",
+      "read_end_ns": "490951356779375"
+    },
+    {
+      "kind": "transport_frame_ends",
+      "count": 1,
+      "read_start_ns": "490951577818583",
+      "read_end_ns": "490951577829041"
+    },
+    {
+      "kind": "transport_frame_ends",
+      "count": 1,
+      "read_start_ns": "490951666295833",
+      "read_end_ns": "490951666303416"
+    }
+  ]
+}

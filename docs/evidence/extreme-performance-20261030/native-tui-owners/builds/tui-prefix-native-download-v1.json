@@ -1,0 +1,17 @@
+{
+  "command": [
+    "gh",
+    "run",
+    "download",
+    "41011842325",
+    "-n",
+    "tui-macos-arm64-5297349b101d61bb901b3729d43c4dec8bb30ec4-41011842325",
+    "-D",
+    "artifacts/extreme-perf-20261030/tui-prefix-native-v1"
+  ],
+  "started_at_unix": 1793341353.2954922,
+  "ended_at_unix": 1793342236.591913,
+  "returncode": 0,
+  "stdout": "",
+  "stderr": ""
+}

@@ -1,0 +1,23 @@
+{
+  "scope": "Post-hoc reading of immutable v1 captures by the v2 diagnostic parser, not a v2 run, output/layout assertion, input acknowledgement or physical paint.",
+  "native_report": {
+    "native_raw_frame_records": 166,
+    "native_raw_stage_records": 538,
+    "native_raw_ask_omissions": [],
+    "native_diagnostic_omissions": [],
+    "native_declared_frames": {
+      "build": 83,
+      "present": 83
+    },
+    "native_declared_stage_calls": 538,
+    "native_malformed_json_lines": [],
+    "native_malformed_summary_lines": [],
+    "native_report_consistent": true
+  },
+  "paired_transport_controls": {
+    "begins": 56,
+    "completed_blocks": 56,
+    "unpaired_ends": 2
+  },
+  "sync_open_at_end": false
+}

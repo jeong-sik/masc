@@ -90,6 +90,85 @@ let file_digest path = Digest.to_hex (Digest.file path)
 let write_raw path bytes =
   Out_channel.with_open_bin path (fun channel -> output_string channel bytes)
 
+type goal_publication_backend = Goal_file_system | Goal_memory
+
+let with_goal_publication_backend backend_kind f =
+  Eio_main.run @@ fun env ->
+  let fs = Eio.Stdenv.fs env in
+  Fs_compat.set_fs fs;
+  let dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> rm_rf dir)
+    (fun () ->
+      let backend_config : Backend_types.config =
+        { base_path = Filename.concat dir Common.masc_dirname
+        ; node_id = "goal-local-publication-test"
+        ; pubsub_max_messages = Backend_types.pubsub_max_messages
+        }
+      in
+      let backend =
+        match backend_kind with
+        | Goal_file_system ->
+            Workspace_utils.FileSystem (Backend.FileSystem.create ~fs backend_config)
+        | Goal_memory -> Workspace_utils.Memory (Backend.Memory.create ())
+      in
+      let config : Workspace_utils.config =
+        { base_path = dir
+        ; workspace_path = dir
+        ; lock_expiry_minutes = 2
+        ; backend_config
+        ; backend
+        }
+      in
+      ignore (Workspace.init config ~agent_name:(Some "test"));
+      f config)
+
+let goal_backend_key config path =
+  match Workspace_utils.key_of_path config path with
+  | Some key -> key
+  | None -> fail "Goal path must have a workspace backend key"
+
+let goal_backend_document config path =
+  match Workspace_utils.backend_get config ~key:(goal_backend_key config path) with
+  | Ok document -> document
+  | Error error -> fail (Backend_types.show_error error)
+
+(* Seed independent documents only where the generic backend is physically
+   separate. A FileSystem key aliases the local Goal file, so seeding it would
+   poison the actual authoritative input instead of creating an independent
+   backend observation. *)
+let seed_goal_memory_documents config =
+  match config.Workspace_utils.backend with
+  | Workspace_utils.FileSystem _ -> None
+  | Workspace_utils.Memory _ ->
+      let seed path role =
+        let value = Yojson.Safe.to_string
+          (`Assoc ["backend_only", `String role]) in
+        match Workspace_utils.backend_set config
+                ~key:(goal_backend_key config path) ~value with
+        | Ok () -> value
+        | Error error -> fail (Backend_types.show_error error)
+      in
+      let primary = seed (Goal_store.goals_path config) "primary" in
+      let recovery = seed (goals_recovery_path config) "recovery" in
+      Some (primary, recovery)
+
+let check_goal_memory_documents config = function
+  | None -> ()
+  | Some (primary, recovery) ->
+      check (option string) "independent backend primary remains exact"
+        (Some primary) (goal_backend_document config (Goal_store.goals_path config));
+      check (option string) "independent backend recovery remains exact"
+        (Some recovery) (goal_backend_document config (goals_recovery_path config))
+
+let check_goal_filesystem_alias config =
+  match config.Workspace_utils.backend with
+  | Workspace_utils.Memory _ -> ()
+  | Workspace_utils.FileSystem _ ->
+      let primary = Goal_store.goals_path config in
+      check (option string) "filesystem key reads the authoritative local primary"
+        (Some (Fs_compat.load_file primary)) (goal_backend_document config primary)
+
 let test_delete_goal_bumps_version () =
   with_workspace @@ fun config ->
   let g = make_goal "g-1" "to delete" in
@@ -547,22 +626,120 @@ let test_write_state_sanitizes_invalid_utf8_before_persisting () =
   let stats = Safe_ops.persistence_utf8_repair_stats () in
   check int "read path did not repair goal store" 0 stats.repaired_reads
 
-let test_write_state_result_keeps_primary_commit_when_recovery_write_fails () =
-  with_workspace @@ fun config ->
+let test_goal_publication_uses_local_authority backend_kind () =
+  with_goal_publication_backend backend_kind @@ fun config ->
+  let independent = seed_goal_memory_documents config in
+  (* Backend-only copies cannot initialize or authorize the Goal store. *)
+  (match Goal_store.load_source config with
+   | Goal_store.Uninitialized -> ()
+   | Goal_store.Available _ | Goal_store.Unavailable _ ->
+       fail "backend-only documents changed the local Goal source");
+  let generation = Goal_projection_generation.current () in
+  let goal, events =
+    match Goal_store.upsert_goal_with_events config ~actor:"local-author"
+            ~title:"Local authority" ~metric:"proof" ~target_value:"1" () with
+    | Ok (goal, `created, events) -> goal, events
+    | Ok (_, `updated _, _) -> fail "expected local Goal creation"
+    | Error error -> fail (write_error_msg error)
+  in
+  let stored = available config in
+  check bool "public read sees the committed local Goal" true
+    (stored.goals = [goal]);
+  check int "successful primary advances generation once" (generation + 1)
+    (Goal_projection_generation.current ());
+  check int "creation returns one durable audit intent" 1 (List.length events);
+  check bool "local snapshot retains exactly the returned outbox" true
+    (stored.pending_events = events);
+  List.iter (fun (event : Goal_store.pending_event) ->
+      check int "outbox witnesses this local commit" stored.version event.store_revision)
+    events;
+  let primary = Goal_store.goals_path config in
+  check string "recovery holds the same local state and outbox"
+    (Fs_compat.load_file primary) (Fs_compat.load_file (goals_recovery_path config));
+  check bool "publication has not delivered the pending audit intent" false
+    (Sys.file_exists (Filename.concat (Filename.dirname primary) "goal_events.jsonl"));
+  check_goal_memory_documents config independent;
+  check_goal_filesystem_alias config
+
+let test_blocked_goal_primary_preserves_publication backend_kind () =
+  with_goal_publication_backend backend_kind @@ fun config ->
+  let goal =
+    match Goal_store.upsert_goal_with_events config ~actor:"original-author"
+            ~title:"Preserved local Goal" ~metric:"proof" ~target_value:"1" () with
+    | Ok (goal, `created, _) -> goal
+    | Ok (_, `updated _, _) -> fail "expected initial Goal creation"
+    | Error error -> fail (write_error_msg error)
+  in
+  let before = available config in
+  let primary = Goal_store.goals_path config in
+  let recovery = goals_recovery_path config in
+  let primary_bytes = Fs_compat.load_file primary in
+  let recovery_bytes = Fs_compat.load_file recovery in
+  let independent = seed_goal_memory_documents config in
+  let generation = Goal_projection_generation.current () in
+  let next =
+    { before with
+      version = before.version + 1;
+      goals = [{ goal with priority = goal.priority + 1 }]
+    }
+  in
+  let saved_primary = primary ^ ".blocked-write-original" in
+  Sys.rename primary saved_primary;
+  Unix.mkdir primary 0o755;
+  Fun.protect
+    ~finally:(fun () -> rm_rf primary; Sys.rename saved_primary primary)
+    (fun () ->
+      (* The low-level public writer deliberately does not read first. This
+         is the I/O fault boundary, not a claim that upsert would authorize a
+         directory: normal read-modify-write correctly refuses it earlier. *)
+      (match Goal_store.write_state_result config next with
+       | Error _ -> ()
+       | Ok () -> fail "a directory accepted an authoritative Goal replacement");
+      check int "failed local primary does not advance generation" generation
+        (Goal_projection_generation.current ());
+      check string "failed primary never rewrites recovery or its outbox"
+        recovery_bytes (Fs_compat.load_file recovery);
+      check string "original local primary and outbox remain exact"
+        primary_bytes (Fs_compat.load_file saved_primary);
+      check bool "failed local primary remains unavailable" true
+        (match Goal_store.load_source config with
+         | Goal_store.Unavailable _ -> true
+         | Goal_store.Uninitialized | Goal_store.Available _ -> false);
+      check bool "failed publication delivers no audit rows" false
+        (Sys.file_exists (Filename.concat (Filename.dirname primary) "goal_events.jsonl"));
+      check_goal_memory_documents config independent);
+  let restored = available config in
+  check string "restored authority has the original bytes" primary_bytes
+    (Fs_compat.load_file primary);
+  check bool "failed publication leaves original state and pending outbox"
+    true (restored = before);
+  check_goal_filesystem_alias config
+
+let test_write_state_result_keeps_primary_commit_when_recovery_write_fails
+    backend_kind () =
+  with_goal_publication_backend backend_kind @@ fun config ->
+  let independent = seed_goal_memory_documents config in
   Unix.mkdir (goals_recovery_path config) 0o755;
   let goal = make_goal "recovery-mirror-fail" "recovery mirror fail" in
-  let state = { Goal_store.pending_events = []; pending_notifications = []; version = 3; updated_at = iso_now (); goals = [ goal ] } in
+  let state =
+    { Goal_store.pending_events = []; pending_notifications = []; version = 3;
+      updated_at = iso_now (); goals = [goal] }
+  in
+  let generation = Goal_projection_generation.current () in
   (match Goal_store.write_state_result config state with
    | Ok () -> ()
-   | Error msg ->
-     fail ("recovery mirror failure should not fail committed primary write: " ^ msg));
-  (* A primary that decodes is Available without the mirror being opened, so
-     a directory at the mirror path does not reach the lookup. *)
-  match Goal_store.find_goal config ~goal_id:goal.Goal_store.id with
-  | Goal_store.Goal_found stored -> check string "primary has goal" goal.title stored.title
-  | Goal_store.Goal_absent -> fail "primary goal missing after recovery mirror failure"
-  | Goal_store.Store_unavailable u ->
-    fail ("mirror failure made the primary unreadable: " ^ Goal_store.unavailable_to_string u)
+   | Error _ -> fail "recovery failure rejected a committed local primary");
+  check int "primary success advances generation before failed recovery"
+    (generation + 1) (Goal_projection_generation.current ());
+  check bool "failed recovery path remains a directory" true
+    (Sys.is_directory (goals_recovery_path config));
+  (match Goal_store.find_goal config ~goal_id:goal.Goal_store.id with
+   | Goal_store.Goal_found stored -> check string "primary has goal" goal.title stored.title
+   | Goal_store.Goal_absent -> fail "primary Goal missing after recovery failure"
+   | Goal_store.Store_unavailable _ -> fail "recovery failure hid committed local primary");
+  check bool "primary retains the supplied state" true (available config = state);
+  check_goal_memory_documents config independent;
+  check_goal_filesystem_alias config
 
 let upsert_exn config ?id ?title ?metric ?target_value ?due_date ?priority () =
   match Goal_store.upsert_goal config ?id ?title ?metric ?target_value ?due_date ?priority () with
@@ -1657,8 +1834,18 @@ let () =
             test_update_goal_if_phase_refuses_stale_phase;
           test_case "write_state sanitizes invalid utf8" `Quick
             test_write_state_sanitizes_invalid_utf8_before_persisting;
-          test_case "recovery mirror write failure preserves primary" `Quick
-            test_write_state_result_keeps_primary_commit_when_recovery_write_fails ] );
+            test_case "local Goal publication uses FileSystem authority" `Quick
+            (test_goal_publication_uses_local_authority Goal_file_system);
+          test_case "local Goal publication leaves Memory documents independent" `Quick
+            (test_goal_publication_uses_local_authority Goal_memory);
+          test_case "blocked local primary preserves FileSystem Goal publication" `Quick
+            (test_blocked_goal_primary_preserves_publication Goal_file_system);
+          test_case "blocked local primary leaves Memory documents independent" `Quick
+            (test_blocked_goal_primary_preserves_publication Goal_memory);
+          test_case "recovery failure preserves FileSystem primary commit" `Quick
+            (test_write_state_result_keeps_primary_commit_when_recovery_write_fails Goal_file_system);
+          test_case "recovery failure preserves Memory local primary commit" `Quick
+            (test_write_state_result_keeps_primary_commit_when_recovery_write_fails Goal_memory) ] );
       ( "rfc-0444 source",
         [ test_case "uninitialized only when both files are absent" `Quick
             test_source_uninitialized_only_when_both_files_absent;

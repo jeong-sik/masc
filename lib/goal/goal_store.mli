@@ -211,8 +211,10 @@ val write_state : Workspace_utils.config -> state -> unit
 
 val write_state_result :
   Workspace_utils.config -> state -> (unit, string) result
-(** Result-returning variant of {!write_state}. A mirror write failure after
-    the primary committed is logged and still [Ok ()]. *)
+(** Result-returning variant of {!write_state}. Publish through the shared local
+    JSON writer for every workspace backend, matching {!load_source}'s local
+    primary authority. Advance projection generation after primary publication;
+    a subsequent recovery mirror failure is logged and still [Ok ()]. *)
 
 type write_error =
   | Store_unavailable of unavailable

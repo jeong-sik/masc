@@ -103,12 +103,13 @@ val match_signal
 
 val match_observation
   :  post_kind:Board.post_kind
+  -> audience:Board.audience option
   -> meta:Keeper_meta_contract.keeper_meta
   -> observation:board_observation
   -> match_result
-(** The text of a [System_post] carries evidence, not an address, so a created
-    or edited system post matches no lane. Comments, reactions and votes match
-    by their own text whatever the post's kind. *)
+(** Match the recorded [audience] of a Board post or comment against [meta]
+    without re-parsing [@name] tokens from text (RFC-at-name-resolves-to-declared-recipient L2d).
+    A [System_post] matches no lane. *)
 
 val check_self_comment_status
   :  self_ids:Keeper_identity.Keeper_id.t list

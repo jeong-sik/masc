@@ -270,19 +270,7 @@ let mention_ids_of_text text =
 
 let mention_ids_of_signal signal = mention_ids_of_text (address_text signal)
 
-let address_text_of_observation observation =
-  match observation.kind with
-  | Observed_post_created | Observed_post_updated _ ->
-    String.concat
-      "\n"
-      (List.filter
-         (fun part -> not (String.equal (String.trim part) ""))
-         [ observation.title; observation.content ])
-  | Observed_comment_added _ -> observation.content
-  | Observed_reaction_changed _ | Observed_vote_cast _ -> ""
-;;
-
-let match_authored_text ~(meta : keeper_meta) ~author ~address_text =
+let match_targets_of_ids ~(meta : keeper_meta) ~author target_ids =
   let self_ids = Message_scope.self_ids meta in
   if Message_scope.is_self_author ~self_ids author
   then { explicit_mention = false; matched_targets = [] }
@@ -290,7 +278,6 @@ let match_authored_text ~(meta : keeper_meta) ~author ~address_text =
     let targets =
       if meta.mention_targets <> [] then meta.mention_targets else [ meta.name ]
     in
-    let mentions = mention_ids_of_text address_text in
     let matched_targets =
       targets
       |> List.filter (fun target ->
@@ -299,11 +286,25 @@ let match_authored_text ~(meta : keeper_meta) ~author ~address_text =
         | Some target_id ->
           List.exists
             (Keeper_identity.Keeper_id.equal target_id)
-            mentions)
+            target_ids)
     in
     if matched_targets <> []
     then { explicit_mention = true; matched_targets }
     else { explicit_mention = false; matched_targets = [] })
+;;
+
+let match_authored_text ~(meta : keeper_meta) ~author ~address_text =
+  match_targets_of_ids ~meta ~author (mention_ids_of_text address_text)
+;;
+
+let match_recorded_targets ~(meta : keeper_meta) ~author recorded_targets =
+  let recorded_ids =
+    List.filter_map
+      (fun target ->
+         Keeper_identity.Keeper_id.of_string (Board.Agent_id.to_string target))
+      recorded_targets
+  in
+  match_targets_of_ids ~meta ~author recorded_ids
 ;;
 
 let match_signal
@@ -316,20 +317,30 @@ let match_signal
 
 let match_observation
       ~(post_kind : Board.post_kind)
+      ~(audience : Board.audience option)
       ~(meta : keeper_meta)
       ~(observation : board_observation)
   =
-  match observation.kind, post_kind with
-  | (Observed_post_created | Observed_post_updated _), Board.System_post ->
+  match observation.kind, post_kind, audience with
+  | (Observed_post_created | Observed_post_updated _), Board.System_post, _ ->
     { explicit_mention = false; matched_targets = [] }
   | ( (Observed_post_created | Observed_post_updated _)
-    , (Board.Human_post | Board.Automation_post) )
-  | ( (Observed_comment_added _ | Observed_reaction_changed _ | Observed_vote_cast _)
-    , (Board.System_post | Board.Human_post | Board.Automation_post) ) ->
-    match_authored_text
-      ~meta
-      ~author:observation.author
-      ~address_text:(address_text_of_observation observation)
+    , (Board.Human_post | Board.Automation_post)
+    , Some (Board.Targets targets) )
+  | ( Observed_comment_added _
+    , (Board.System_post | Board.Human_post | Board.Automation_post)
+    , Some (Board.Targets targets) ) ->
+    match_recorded_targets ~meta ~author:observation.author targets
+  | ( (Observed_post_created | Observed_post_updated _)
+    , (Board.Human_post | Board.Automation_post)
+    , (None | Some (Board.Broadcast | Board.Thread_participants | Board.Discoverable)) )
+  | ( Observed_comment_added _
+    , (Board.System_post | Board.Human_post | Board.Automation_post)
+    , (None | Some (Board.Broadcast | Board.Thread_participants | Board.Discoverable)) )
+  | ( (Observed_reaction_changed _ | Observed_vote_cast _)
+    , (Board.System_post | Board.Human_post | Board.Automation_post)
+    , _ ) ->
+    { explicit_mention = false; matched_targets = [] }
 ;;
 
 (** Check whether this keeper has commented on a post, and which comments

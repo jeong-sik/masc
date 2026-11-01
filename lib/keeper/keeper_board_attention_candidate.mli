@@ -378,6 +378,23 @@ val normalize_requeued_consumed :
     consumed resumable state. Direct [Consumed] is idempotent; every other
     state is rejected. *)
 
+type comment_parent_visibility_filter =
+  | Keep_discoverable_comment
+  | Skip_non_discoverable_comment
+
+val filter_comment_parent_visibility :
+  Board.visibility -> comment_parent_visibility_filter
+(** Closed parent-post visibility gate for unaddressed comment discovery:
+    [Public] and [Internal] threads remain discoverable, while [Unlisted] and
+    [Direct] threads are skipped. *)
+
+val candidate_parent_visibility_filter :
+  candidate -> comment_parent_visibility_filter
+(** Evaluate {!filter_comment_parent_visibility} for a [Board_comment_added]
+    candidate against its parent post (or skip when the parent post is absent
+    or non-discoverable). Non-comment candidates return
+    [Keep_discoverable_comment]. *)
+
 type judgment_delivery_outcome =
   | Delivered of candidate
   | Candidate_absent

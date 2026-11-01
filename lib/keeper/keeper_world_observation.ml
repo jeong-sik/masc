@@ -627,56 +627,49 @@ let pending_board_event_of_board_observation
       ; error
       }
   | Ok post_snapshot ->
-    let matched =
-      Board_signal.match_observation
-        ~post_kind:(post_snapshot : Board.post).post_kind
-        ~meta
-        ~observation
-    in
-    let title, preview, hearth, post_kind, updated_at =
-      let post : Board.post = post_snapshot in
+    let recorded_audience =
       match observation.kind with
-      | Board_signal.Observed_post_updated { content_updated_at } ->
-        ( observation.title
-        , short_preview ~max_len:80 observation.content
-        , observation.hearth
-        , post.post_kind
-        , content_updated_at )
-      | Board_signal.Observed_post_created
-      | Board_signal.Observed_comment_added _
-      | Board_signal.Observed_reaction_changed _
-      | Board_signal.Observed_vote_cast _ ->
-      ( post.title
-      , short_preview ~max_len:80 post.body
-      , post.hearth
-      , post.post_kind
-      , post.updated_at )
+      | Board_signal.Observed_post_created | Board_signal.Observed_post_updated _ ->
+        Ok (post_snapshot : Board.post).audience
+      | Board_signal.Observed_comment_added identity ->
+        (match Board_dispatch.read_comments ~post_id:observation.post_id with
+         | Error error ->
+           Error { Board_signal.operation = Board_signal.Get_comments; post_id = observation.post_id; error }
+         | Ok comments ->
+           Ok (Option.bind (List.find_opt (fun (c : Board.comment) ->
+                 Board.Comment_id.equal c.id identity.comment_id) comments)
+                 (fun comment -> comment.audience)))
+      | Board_signal.Observed_reaction_changed _ | Board_signal.Observed_vote_cast _ -> Ok None
     in
-    let event_kind = pending_board_event_kind_of_observation observation in
-    let latest_external_author, latest_external_preview =
-      match observation.kind with
-      | Board_signal.Observed_comment_added _ ->
-        Some observation.author, Some (short_preview ~max_len:60 observation.content)
-      | Board_signal.Observed_post_created
-      | Board_signal.Observed_post_updated _
-      | Board_signal.Observed_reaction_changed _
-      | Board_signal.Observed_vote_cast _ -> None, None
-    in
-    Ok
-      { event_kind
-      ; post_id = observation.post_id
-      ; author = observation.author
-      ; title
-      ; preview
-      ; hearth
-      ; post_kind
-      ; updated_at
-      ; explicit_mention = matched.explicit_mention
-      ; matched_targets = matched.matched_targets
-      ; replies_after_own_comment = None
-      ; latest_external_author
-      ; latest_external_preview
-      }
+    Result.map (fun audience ->
+      let matched =
+        Board_signal.match_observation
+          ~post_kind:(post_snapshot : Board.post).post_kind ~audience ~meta ~observation
+      in
+      let title, preview, hearth, post_kind, updated_at =
+        let post : Board.post = post_snapshot in
+        match observation.kind with
+        | Board_signal.Observed_post_updated { content_updated_at } ->
+          ( observation.title, short_preview ~max_len:80 observation.content
+          , observation.hearth, post.post_kind, content_updated_at )
+        | Board_signal.Observed_post_created | Board_signal.Observed_comment_added _
+        | Board_signal.Observed_reaction_changed _ | Board_signal.Observed_vote_cast _ ->
+          ( post.title, short_preview ~max_len:80 post.body
+          , post.hearth, post.post_kind, post.updated_at )
+      in
+      let event_kind = pending_board_event_kind_of_observation observation in
+      let latest_external_author, latest_external_preview =
+        match observation.kind with
+        | Board_signal.Observed_comment_added _ ->
+          Some observation.author, Some (short_preview ~max_len:60 observation.content)
+        | Board_signal.Observed_post_created | Board_signal.Observed_post_updated _
+        | Board_signal.Observed_reaction_changed _ | Board_signal.Observed_vote_cast _ -> None, None
+      in
+      { event_kind; post_id = observation.post_id; author = observation.author
+      ; title; preview; hearth; post_kind; updated_at
+      ; explicit_mention = matched.explicit_mention; matched_targets = matched.matched_targets
+      ; replies_after_own_comment = None; latest_external_author; latest_external_preview })
+      recorded_audience
 ;;
 
 (* RFC-0266: fusion answers are the deliberation result the keeper requested,
@@ -1238,11 +1231,23 @@ let pending_board_event_of_stimulus
     |> Result.map Option.some
   | Keeper_event_queue.Board_attention attention ->
     Result.bind
-      (Board_signal.board_observation_of_board_stimulus
-         ~post_id:stimulus.post_id
-         attention.signal)
-      (pending_board_event_of_board_observation ~meta ~arrived_at:stimulus.arrived_at)
-    |> Result.map Option.some
+      (Board_signal.board_observation_of_board_stimulus ~post_id:stimulus.post_id attention.signal)
+      (fun observation ->
+         match observation.kind with
+         | Board_signal.Observed_comment_added _ ->
+           (match Board_dispatch.read_post ~post_id:observation.post_id with
+            | Error error ->
+              Error { Board_signal.operation = Board_signal.Get_post; post_id = observation.post_id; error }
+            | Ok post_snapshot ->
+              match Keeper_board_attention_candidate.filter_comment_parent_visibility post_snapshot.visibility with
+              | Keeper_board_attention_candidate.Skip_non_discoverable_comment -> Ok None
+              | Keeper_board_attention_candidate.Keep_discoverable_comment ->
+                pending_board_event_of_board_observation ~meta ~arrived_at:stimulus.arrived_at observation
+                |> Result.map Option.some)
+         | Board_signal.Observed_post_created | Board_signal.Observed_post_updated _
+         | Board_signal.Observed_reaction_changed _ | Board_signal.Observed_vote_cast _ ->
+           pending_board_event_of_board_observation ~meta ~arrived_at:stimulus.arrived_at observation
+           |> Result.map Option.some)
   | Keeper_event_queue.Fusion_completed fc ->
     Ok (Some (pending_board_event_of_fusion_completion ~meta ~arrived_at:stimulus.arrived_at fc))
   | Keeper_event_queue.Schedule_due sw ->

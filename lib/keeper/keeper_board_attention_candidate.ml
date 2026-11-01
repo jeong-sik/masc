@@ -1033,11 +1033,38 @@ let request_owner_wake ~site ~base_path candidate =
   outcome
 ;;
 
+type comment_parent_visibility_filter =
+  | Keep_discoverable_comment
+  | Skip_non_discoverable_comment
+
+let filter_comment_parent_visibility = function
+  | Board.Public | Board.Internal -> Keep_discoverable_comment
+  | Board.Unlisted | Board.Direct -> Skip_non_discoverable_comment
+;;
+
+let candidate_parent_visibility_filter (candidate : candidate) =
+  match candidate.signal.kind with
+  | Board_dispatch.Board_post_created
+  | Board_dispatch.Board_post_updated _
+  | Board_dispatch.Board_reaction_changed _
+  | Board_dispatch.Board_vote_cast _ ->
+    Keep_discoverable_comment
+  | Board_dispatch.Board_comment_added _ ->
+    (match Board_dispatch.read_post ~post_id:candidate.signal.post_id with
+     | Ok post -> filter_comment_parent_visibility post.visibility
+     | Error (Board.Read_post_not_found _ | Board.Read_invalid_id _) ->
+       Skip_non_discoverable_comment)
+;;
+
 let consume_judged ~base_path candidate (judged : judged_state) =
-  match judged.judgment.verdict.decision with
-  | Keeper_board_attention_judgment.Not_relevant ->
+  match
+    judged.judgment.verdict.decision,
+    candidate_parent_visibility_filter candidate
+  with
+  | Keeper_board_attention_judgment.Not_relevant, _
+  | Keeper_board_attention_judgment.Relevant, Skip_non_discoverable_comment ->
     mark_consumed ~base_path candidate judged.judgment Not_relevant
-  | Keeper_board_attention_judgment.Relevant ->
+  | Keeper_board_attention_judgment.Relevant, Keep_discoverable_comment ->
     let stimulus = board_attention_stimulus candidate in
     (match
        Keeper_registry_event_queue.enqueue_if_missing_durable_result

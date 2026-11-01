@@ -409,6 +409,121 @@ let test_queued_edits_keep_their_captured_content () =
     (event.Keeper_world_observation.event_kind = Keeper_world_observation.Board_post_updated)) events
 ;;
 
+let test_existing_durable_comment_candidates_respect_parent_visibility () =
+  Eio_main.run @@ fun _env ->
+  List.iter
+    (fun (label, visibility, expected_delivery) ->
+       with_temp_workspace @@ fun config ->
+       let meta = keeper_meta ~board_interests:[ "research" ] config "durablelane" in
+       register config meta;
+       let get = function Ok value -> value | Error error -> fail (Board.show_board_error error) in
+       let post =
+         get
+           (Board_dispatch.create_post
+              ~author:"thread-author"
+              ~title:"thread"
+              ~content:"@thread-owner discussion"
+              ~visibility
+              ~post_kind:Board.Human_post
+              ())
+       in
+       let post_id = Board.Post_id.to_string post.id in
+       let comment =
+         get
+           (Board_dispatch.add_comment
+              ~post_id
+              ~author:"comment-author"
+              ~content:"unaddressed research comment"
+              ())
+       in
+       let comment_signal : Board_dispatch.board_signal =
+         { kind =
+             Board_dispatch.Board_comment_added
+               { comment_id = comment.id; parent_id = comment.parent_id }
+         ; post_id
+         ; author = "comment-author"
+         ; title = post.title
+         ; content = comment.content
+         ; hearth = post.hearth
+         ; updated_at = Some comment.created_at
+         }
+       in
+       let candidate = KBAC.of_board_signal ~meta ~recorded_at:comment.created_at comment_signal in
+       let persisted =
+         match KBAC.record ~base_path:config.base_path candidate with
+         | KBAC.Recorded persisted | KBAC.Duplicate persisted -> persisted
+         | KBAC.Record_error detail -> fail detail
+       in
+       let minted_roots =
+         match
+           Keeper_board_attention_partition.ensure_roots
+             ~base_path:config.base_path
+             ~keeper_name:meta.name
+             [ persisted ]
+         with
+         | Ok count -> count
+         | Error detail -> fail detail
+       in
+       check int (label ^ ": pending partition root gate") expected_delivery minted_roots;
+       let relevant_judgment : KBAC.judgment =
+         { verdict =
+             { decision = Keeper_board_attention_judgment.Relevant
+             ; rationale = "matches research interest"
+             }
+         ; slot_id = "slot-1"
+         ; source = KBAC.Cli_lane_slot
+         ; judged_at = comment.created_at +. 1.0
+         }
+       in
+       let delivered =
+         match
+           KBAC.apply_judgment_and_deliver
+             ~base_path:config.base_path
+             ~keeper_name:meta.name
+             ~candidate_id:persisted.candidate_id
+             ~judgment:relevant_judgment
+         with
+         | Ok (KBAC.Delivered delivered) -> delivered
+         | Ok KBAC.Candidate_absent -> fail "expected persisted candidate to remain present"
+         | Error detail -> fail detail
+       in
+       (match delivered.status, expected_delivery with
+        | KBAC.Consumed { delivery = KBAC.Enqueued_to_keeper_lane; _ }, 1 -> ()
+        | KBAC.Consumed { delivery = KBAC.Not_relevant; _ }, 0 -> ()
+        | _ -> fail (label ^ ": unexpected durable candidate consumption outcome"));
+       check int (label ^ ": durable candidate queue delivery") expected_delivery
+         (queue_length config meta.name);
+       let attention_stimulus : Keeper_event_queue.stimulus =
+         { post_id
+         ; urgency = Keeper_event_queue.Normal
+         ; arrived_at = comment.created_at +. 2.0
+         ; payload =
+             Keeper_event_queue.Board_attention
+               { candidate_id = persisted.candidate_id
+               ; signal =
+                   Keeper_world_observation_board_signal.board_stimulus_of_board_signal
+                     comment_signal
+               }
+         }
+       in
+       match
+         Keeper_world_observation.pending_board_event_of_stimulus
+           ~base_path:config.base_path
+           ~meta
+           attention_stimulus
+       with
+       | Ok (Some _) when expected_delivery = 1 -> ()
+       | Ok None when expected_delivery = 0 -> ()
+       | Ok _ -> fail (label ^ ": unexpected stimulus intake visibility outcome")
+       | Error unavailable ->
+         fail (Keeper_world_observation_board_signal.unavailable_to_string unavailable))
+    [ "public", Board.Public, 1
+    ; "internal", Board.Internal, 1
+    ; "unlisted", Board.Unlisted, 0
+    ; "direct", Board.Direct, 0
+    ]
+;;
+
 let () =
   run
     "keeper Board discoverable cursor"
@@ -419,6 +534,8 @@ let () =
             test_initialized_cursor_receives_each_discoverable_edit
         ; test_case "replayed comment discovery follows parent visibility" `Quick
             test_replayed_comment_discovery_respects_parent_visibility
+        ; test_case "existing durable comment candidates respect parent visibility" `Quick
+            test_existing_durable_comment_candidates_respect_parent_visibility
         ; test_case "queued edits preserve captured content before consumption" `Quick
             test_queued_edits_keep_their_captured_content
         ; test_case

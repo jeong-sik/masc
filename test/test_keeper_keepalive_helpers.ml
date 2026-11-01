@@ -1469,6 +1469,26 @@ let test_unresolved_comment_name_cannot_become_a_recipient () =
               (board_queue_length config bystander.name);
             check int (label ^ ": discovery still follows visibility") expected_candidates
               (board_attention_count config bystander.name);
+            let poster_with_late_alias =
+              { poster with mention_targets = [ poster.name; "latealias" ] }
+            in
+            (match Keeper_registry_event_queue.snapshot_result
+                     ~base_path:config.base_path poster.name with
+             | Error detail -> fail detail
+             | Ok queue ->
+               (match Keeper_event_queue.to_list queue with
+                | [ stimulus ] ->
+                  (match Keeper_world_observation.pending_board_event_of_stimulus
+                           ~base_path:config.base_path ~meta:poster_with_late_alias stimulus with
+                   | Ok (Some event) ->
+                     check bool (label ^ ": input assembly preserves recorded thread audience")
+                       false event.explicit_mention;
+                     check (list string) (label ^ ": input assembly matches no late alias")
+                       [] event.matched_targets
+                   | Ok None -> fail "expected queued comment event for post author"
+                   | Error unavailable ->
+                     fail (KWOBS.unavailable_to_string unavailable))
+                | _ -> fail "expected exactly one queued stimulus for post author"));
             ignore (get (Board_dispatch.add_comment ~post_id ~author:"external-author"
               ~content:"@latealias explicit target" ()));
             let addressed_target = Option.get !last_signal in
@@ -1476,7 +1496,24 @@ let test_unresolved_comment_name_cannot_become_a_recipient () =
               (match addressed_target.audience with Board.Targets _ -> true | _ -> false);
             KKS.wakeup_relevant_keeper_for_board_signal ~config addressed_target;
             check int (label ^ ": stored target still receives a direct comment") 1
-              (board_queue_length config bystander.name)))
+              (board_queue_length config bystander.name);
+            (match Keeper_registry_event_queue.snapshot_result
+                     ~base_path:config.base_path bystander.name with
+             | Error detail -> fail detail
+             | Ok queue ->
+               (match Keeper_event_queue.to_list queue with
+                | [ stimulus ] ->
+                  (match Keeper_world_observation.pending_board_event_of_stimulus
+                           ~base_path:config.base_path ~meta:bystander stimulus with
+                   | Ok (Some event) ->
+                     check bool (label ^ ": recorded target sets explicit_mention in input assembly")
+                       true event.explicit_mention;
+                     check (list string) (label ^ ": recorded target preserves matched_targets")
+                       [ "latealias" ] event.matched_targets
+                   | Ok None -> fail "expected queued target event for bystander"
+                   | Error unavailable ->
+                     fail (KWOBS.unavailable_to_string unavailable))
+                | _ -> fail "expected exactly one queued stimulus for bystander")))
     [ "public", Board.Public, 1
     ; "internal", Board.Internal, 1
     ; "unlisted", Board.Unlisted, 0

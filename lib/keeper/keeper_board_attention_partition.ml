@@ -850,7 +850,12 @@ let ensure_roots_with_reader ~base_path ~keeper_name read_candidates =
                 | Candidate.Direct_resumable (Candidate.Resumable_consumed _) ->
                   Ok roots
                 | Candidate.Direct_resumable (Candidate.Resumable_pending _) ->
-                  resolve_root ~reopen_abandoned:true ()
+                  (match
+                     Candidate.candidate_parent_visibility_filter candidate
+                   with
+                   | Candidate.Keep_discoverable_comment ->
+                     resolve_root ~reopen_abandoned:true ()
+                   | Candidate.Skip_non_discoverable_comment -> Ok roots)
                 | Candidate.Direct_resumable (Candidate.Resumable_judged _)
                   -> resolve_root ~reopen_abandoned:false ())
            (Ok [])

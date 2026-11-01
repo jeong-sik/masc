@@ -30,7 +30,8 @@ let read_bytes path = In_channel.with_open_bin path In_channel.input_all
 let load expected store =
   match Rows.load_persisted_posts store with
   | Ok actual -> Alcotest.(check int) "explicit posts load" expected actual
-  | Error error -> Alcotest.fail (Board.show_board_error error)
+  | Error (path, cause) ->
+    Alcotest.failf "load %s: %s" path (Printexc.to_string cause)
 
 let create store body =
   match Board.create_post store

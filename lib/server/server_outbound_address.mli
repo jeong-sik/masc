@@ -13,7 +13,7 @@
 
 val ipaddr_is_private_or_reserved : Ipaddr.t -> bool
 (** An IPv4-mapped IPv6 address ([::ffff:a.b.c.d]) is judged as the IPv4
-    address it carries. IPv6 documentation addresses are exactly
+    address it carries. The RFC3849 documentation-prefix rule matches
     [2001:db8::/32]. *)
 
 val resolve_allowed_host :

@@ -11,9 +11,27 @@ from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
+import importlib.util
 import json
+from pathlib import Path
 import re
+import sys
 from typing import Sequence
+
+
+HERE = Path(__file__).resolve().parent
+
+
+def _load_review_helper(name, filename):
+    spec = importlib.util.spec_from_file_location(name, HERE / filename)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+formal_order = _load_review_helper("routing_formal_order", "review-formal-order.py")
+cr_ownership = _load_review_helper("routing_cr_ownership", "review-cr-ownership.py")
 
 
 class Reason(str, Enum):
@@ -117,6 +135,7 @@ class Pull:
     account_ids: tuple[tuple[str, int], ...]
     commit_identities_complete: bool
     reviews: tuple[Review, ...]
+    unresolved_cr_ids: frozenset[int]
     admission: bool
     independent_source_review: bool
     blockers: tuple[Blocker, ...]
@@ -296,8 +315,20 @@ def parse_pull(raw: object) -> Pull:
                         sha(raw["base_sha"], "base_sha"),
                         frozen_json(stack, "stack"),
                         instant(raw["created_at"], "created_at"))
-    reviews = tuple(r for r in (parse_review(r) for r in sequence(raw["reviews"], "reviews"))
+    review_records = sequence(raw["reviews"], "reviews")
+    # Refuse an ambiguous latest formal decision just as the admission guard
+    # does. Retain each CR separately until its own owner replaces it.
+    formal_order.ordered_rows([r for r in review_records
+                               if isinstance(r, dict) and r.get("state") in formal_order.FORMAL])
+    unresolved = frozenset(rid for rid, _, _ in cr_ownership.outstanding([list(review_records)]))
+    reviews = tuple(r for r in (parse_review(r) for r in review_records)
                     if r is not None)
+    review_names = {}
+    for review in reviews:
+        name = review.actor.casefold()
+        if review.actor_id in review_names and review_names[review.actor_id] != name:
+            raise ValueError("one review account has conflicting logins")
+        review_names[review.actor_id] = name
     if not isinstance(raw["account_ids"], dict):
         raise ValueError("account_ids must be an object")
     accounts = tuple((login(name, "account_ids").casefold(), positive_id(value, "account_ids"))
@@ -321,7 +352,7 @@ def parse_pull(raw: object) -> Pull:
                 unique_logins(raw["requested_reviewers"], "requested_reviewers"),
                 unique_logins(raw["requested_teams"], "requested_teams"),
                 commit_names, commit_ids, accounts,
-                boolean(raw["commit_identities_complete"], "commit_identities_complete"), reviews,
+                boolean(raw["commit_identities_complete"], "commit_identities_complete"), reviews, unresolved,
                 boolean(raw["admission"], "admission"),
                 boolean(raw["independent_source_review"], "independent_source_review"),
                 tuple(parse_blocker(b) for b in sequence(raw["blockers"], "blockers")))
@@ -342,18 +373,7 @@ def reviewer_eligibility(pull: Pull, account: str) -> ReviewerEligibility:
 
 
 def current_crs(pull: Pull) -> tuple[Review, ...]:
-    latest: dict[int, Review] = {}
-    # Match the admission guard's formal-state reduction by review ID.
-    # COMMENTED does not resolve a prior formal change request; a later
-    # APPROVED review does, even if both submissions share an API timestamp.
-    formal = {ReviewState.DISMISSED, ReviewState.APPROVED, ReviewState.CHANGES_REQUESTED}
-    for review in pull.reviews:
-        if review.state not in formal:
-            continue
-        previous = latest.get(review.actor_id)
-        if previous is None or review.review_id > previous.review_id:
-            latest[review.actor_id] = review
-    return tuple(sorted((r for r in latest.values() if r.state is ReviewState.CHANGES_REQUESTED),
+    return tuple(sorted((r for r in pull.reviews if r.review_id in pull.unresolved_cr_ids),
                         key=lambda r: (r.actor.casefold(), r.review_id)))
 
 
@@ -439,24 +459,32 @@ def plan(snapshot: Sequence[dict], roster: Sequence[str]) -> Worklist:
                 if independent:
                     add(pull, Reason.AWAITING_OWNER, account=blockers[0].actor,
                         reviews=own, blockers=independent)
+        # A shared account may have several unresolved CRs. Keep every ID,
+        # but propose at most one request to that account.
+        cr_groups: dict[int, list[Review]] = {}
         for review in crs:
+            cr_groups.setdefault(review.actor_id, []).append(review)
+        for group in cr_groups.values():
+            review = group[0]
             owner = key(review.actor)
             if owner in requested:
                 continue
-            if review.head == pull.identity.head:
+            same_head = tuple(r for r in group if r.head == pull.identity.head)
+            if same_head:
+                same_head_ids = {r.review_id for r in same_head}
                 own_blockers = tuple(b for b in blocker_groups.get(owner, ())
-                                     if b.record_id == review.review_id
+                                     if b.record_id in same_head_ids
                                      and json.loads(b.raw_json).get("kind") == "review")
                 add(pull, Reason.AWAITING_AUTHOR, account=pull.author,
-                    reviews=(review,), blockers=own_blockers)
+                    reviews=tuple(group), blockers=own_blockers)
             elif owner in blocker_groups:
                 continue
             elif not pull.admission and owner in pool_keys \
                     and reviewer_eligibility(pull, review.actor) is ReviewerEligibility.ELIGIBLE:
                 add(pull, Reason.CHANGED_HEAD_CR, Assignment.PROPOSED_USER,
-                    account=review.actor, actionable=True, reviews=(review,))
+                    account=review.actor, actionable=True, reviews=tuple(group))
             else:
-                add(pull, Reason.AWAITING_OWNER, account=review.actor, reviews=(review,))
+                add(pull, Reason.AWAITING_OWNER, account=review.actor, reviews=tuple(group))
         # An existing request or CR stays owned even when that account also
         # contributed to the current diff. It does not supply an independent
         # reviewer, so propose one separately while retaining all old facts.

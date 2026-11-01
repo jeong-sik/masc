@@ -30,6 +30,22 @@ def review(actor="alice", *, state="CHANGES_REQUESTED", head=OLD, rid=1, at=T1):
             "commit_id": head, "submitted_at": at, "body": "source findings"}
 
 
+def signed_request(actor="alice", *, keeper="one", rid=1, at=T1, head=OLD):
+    row = review(actor, rid=rid, at=at, head=head)
+    row["body"] = f"verdict: FAIL head: {head} by: {keeper}\nproblem"
+    return row
+
+
+def replacement(actor="alice", *, keeper="one", rid=2, request=1, at=T2):
+    row = review(actor, state="APPROVED", head=HEAD, rid=rid, at=at)
+    row["author_association"] = "MEMBER"
+    row["body"] = (f"verdict: PASS head: {HEAD} by: {keeper}\n"
+                   f'review-scope: {{"base_ref":"main","base_sha":"{BASE}","stack":null}}\n'
+                   f"approve-guard: head `{HEAD}` · source review · replaces own CHANGES_REQUESTED {request}"
+                   f" · reviewed base `{BASE}` · diff sha256 `{'d' * 64}`")
+    return row
+
+
 def pull(number=1, **changes):
     raw = {"number": number, "title": f"Fix {number}", "url": f"https://example/pull/{number}",
            "state": "open", "draft": False, "author": "author", "head": HEAD,
@@ -209,23 +225,56 @@ class RoutingScenarios(unittest.TestCase):
         self.assertEqual(before.to_json(), after.to_json())
         self.assertEqual(after.actions[0].reason, M.Reason.EXISTING_REQUEST)
 
-    def test_later_formal_approval_or_dismissal_supersedes_own_cr(self):
-        for state in ("APPROVED", "DISMISSED"):
-            with self.subTest(state=state):
-                result = actions([pull(reviews=[review(), review(state=state, head=HEAD, at=T2, rid=2)])])
-                self.assertEqual(result[0].reason, M.Reason.REVIEW_NEEDED)
+    def test_only_explicit_later_same_keeper_replacement_clears_a_cr(self):
+        cr = signed_request()
+        self.assertEqual(actions([pull(reviews=[cr, replacement()])])[0].reason, M.Reason.REVIEW_NEEDED)
+        for approval in (review(state="APPROVED", head=HEAD, at=T2, rid=2),
+                         replacement(keeper="other"), replacement(request=99),
+                         review(state="DISMISSED", head=HEAD, at=T2, rid=2)):
+            with self.subTest(approval=approval):
+                result = actions([pull(reviews=[cr, approval])])
+                self.assertEqual((result[0].reason, result[0].account, result[0].review_ids),
+                                 (M.Reason.CHANGED_HEAD_CR, "alice", (1,)))
+        dismissed = cr | {"state": "DISMISSED"}
+        self.assertEqual(actions([pull(reviews=[dismissed])])[0].reason, M.Reason.REVIEW_NEEDED)
 
-    def test_same_timestamp_later_formal_approval_supersedes_cr(self):
-        result = actions([pull(reviews=[review(), review(state="APPROVED", head=HEAD, rid=2)])])
-        self.assertEqual(result[0].reason, M.Reason.REVIEW_NEEDED)
+    def test_ambiguous_latest_formal_time_or_missing_time_refuses(self):
+        for reviews in ([signed_request(), replacement(at=T1)],
+                        [review(at=None)],
+                        [review(at="invalid")]):
+            with self.subTest(reviews=reviews), self.assertRaises(ValueError):
+                actions([pull(reviews=reviews)])
 
-    def test_same_timestamp_later_formal_cr_supersedes_approval(self):
-        result = actions([pull(reviews=[review(state="APPROVED", head=HEAD), review(rid=2)])])
-        self.assertEqual(result[0].reason, M.Reason.CHANGED_HEAD_CR)
+    def test_older_tie_cannot_replace_cr_even_after_unrelated_later_approval(self):
+        cr = signed_request(at=T1)
+        tied = replacement(at=T1)
+        latest = replacement(rid=3, request=99, at=T2)
+        result = actions([pull(reviews=[cr, tied, latest])])
+        self.assertEqual((result[0].reason, result[0].review_ids),
+                         (M.Reason.CHANGED_HEAD_CR, (1,)))
 
-    def test_formal_id_order_matches_guard_even_when_timestamps_disagree(self):
-        result = actions([pull(reviews=[review(at=T2), review(state="APPROVED", head=HEAD, at=T1, rid=2)])])
-        self.assertEqual(result[0].reason, M.Reason.REVIEW_NEEDED)
+    def test_submitted_time_not_id_preserves_later_cr_owner(self):
+        later = review("bob", rid=1, at=T2)
+        older = review("bob", state="APPROVED", head=HEAD, rid=99, at=T1)
+        result = actions([pull(reviews=[later, older])])
+        self.assertEqual((result[0].reason, result[0].account, result[0].review_ids),
+                         (M.Reason.CHANGED_HEAD_CR, "bob", (1,)))
+        result = actions([pull(reviews=(later, older))])
+        self.assertEqual((result[0].reason, result[0].account, result[0].review_ids),
+                         (M.Reason.CHANGED_HEAD_CR, "bob", (1,)))
+
+    def test_multiple_unresolved_crs_of_same_account_make_one_owned_action(self):
+        crs = [signed_request(keeper="one", rid=1), signed_request(keeper="two", rid=2, at=T2)]
+        result = actions([pull(reviews=crs)])
+        self.assertEqual([(a.reason, a.account, a.review_ids) for a in result],
+                         [(M.Reason.CHANGED_HEAD_CR, "alice", (1, 2))])
+        current = signed_request(keeper="two", rid=2, at=T2, head=HEAD)
+        result = actions([pull(reviews=[crs[0], current])])
+        self.assertEqual([(a.reason, a.account, a.review_ids) for a in result],
+                         [(M.Reason.AWAITING_AUTHOR, "author", (1, 2))])
+        result = actions([pull(reviews=crs + [replacement(request=1, rid=3, at=T3)])])
+        self.assertEqual([(a.reason, a.account, a.review_ids) for a in result],
+                         [(M.Reason.CHANGED_HEAD_CR, "alice", (2,))])
 
     def test_same_head_cr_structured_failure_remains_author_action(self):
         formal = {**blocker(state="FAIL"), "kind": "review"}

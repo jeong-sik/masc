@@ -109,7 +109,10 @@ if len(parts) == 2:
 if parts[2] == 'reviews':
     if number == s.get('invalid_review_number') and s.get('detail_reads',{}).get(number,0) >= 2:
         done([[None]])
-    done(s.get('review_pages', {}).get(number, [[]]))
+    pages = s.get('review_pages', {}).get(number, [[]])
+    if s.get('detail_reads',{}).get(number,0) >= 2:
+        pages = s.get('preflight_review_pages', {}).get(number, pages)
+    done(pages)
 assert parts[2] == 'requested_reviewers'
 if not post:
     if s.get('post_seen') and s.get('readback_error'):
@@ -186,10 +189,66 @@ class WorklistFlow(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertEqual(state['posts'], [{'number':1, 'reviewers':['reviewer-b']}])
 
+    def test_multiple_owned_crs_request_once_and_keep_all_ids(self):
+        def cr(rid, when):
+            return {'id':rid, 'state':'CHANGES_REQUESTED', 'commit_id':'c'*40,
+                    'user':user('reviewer-b'), 'body':'Please fix the finding.',
+                    'submitted_at':when}
+        self.state['review_pages'] = {'1':[[cr(12, '2026-10-26T09:00:00Z'),
+                                             cr(13, '2026-10-26T09:00:00Z')],
+                                            [cr(14, '2026-10-26T10:00:00Z')]]}
+        result, out, state = self.run_cli(request=True)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(state['posts'], [{'number':1, 'reviewers':['reviewer-b']}])
+        [action] = [a for a in out['actions'] if a['reason'] == 'changed_head_cr']
+        self.assertEqual(action['review_ids'], [12, 13, 14])
+
+    def test_ambiguous_latest_cr_time_never_posts(self):
+        cr = {'id':12, 'state':'CHANGES_REQUESTED', 'commit_id':'c'*40,
+              'user':user('reviewer-b'), 'body':'Please fix the finding.',
+              'submitted_at':'2026-10-26T09:00:00Z'}
+        self.state['review_pages'] = {'1':[[cr, cr | {'id':13}]]}
+        result, out, state = self.run_cli(request=True)
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertEqual(out['status'], 'unavailable')
+        self.assertIn('ambiguous submission times', out['reason'])
+        self.assertNotIn('posts', state)
+
+    def test_pending_comment_and_other_dismissal_leave_original_cr_owned(self):
+        cr = {'id':12, 'state':'CHANGES_REQUESTED', 'commit_id':'c'*40,
+              'user':user('reviewer-b'), 'body':'Please fix the finding.',
+              'submitted_at':'2026-10-26T09:00:00Z'}
+        pending = cr | {'id':13, 'state':'PENDING', 'commit_id':None, 'submitted_at':None}
+        comment = cr | {'id':14, 'state':'COMMENTED', 'submitted_at':'2026-10-26T10:00:00Z'}
+        dismissed = cr | {'id':15, 'state':'DISMISSED', 'submitted_at':'2026-10-26T11:00:00Z'}
+        self.state['review_pages'] = {'1':[[cr, pending], [comment, dismissed]]}
+        result, out, state = self.run_cli(request=True)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(state['posts'], [{'number':1, 'reviewers':['reviewer-b']}])
+        [action] = [a for a in out['actions'] if a['reason'] == 'changed_head_cr']
+        self.assertEqual(action['review_ids'], [12])
+
+    def test_changed_review_body_or_time_before_post_is_not_requested(self):
+        original = {'id':12, 'state':'CHANGES_REQUESTED', 'commit_id':'c'*40,
+                    'user':user('reviewer-b'), 'body':'Please fix the finding.',
+                    'submitted_at':'2026-10-26T09:00:00Z'}
+        for change in ({'body':'Updated finding.'},
+                       {'submitted_at':'2026-10-26T09:00:01Z'},
+                       {'submitted_at':None}):
+            with self.subTest(change=change):
+                self.state = {'pulls':{'1':pull()}, 'review_pages':{'1':[[original]]},
+                              'preflight_review_pages':{'1':[[original | change]]}}
+                result, out, state = self.run_cli(request=True)
+                self.assertEqual(result.returncode, 0, result.stdout)
+                self.assertEqual(out['requests'][0]['state'],
+                                 'unavailable' if change.get('submitted_at', True) is None else 'snapshot_changed')
+                self.assertNotIn('posts', state)
+
     def test_closed_draft_or_changed_head_before_post_skips(self):
         for change in ({'state':'closed'}, {'draft':True},
                        {'head':{'sha':'c'*40, 'ref':'fix/1'}},
-                       {'base':{'sha':'c'*40, 'ref':'main'}}):
+                       {'base':{'sha':'c'*40, 'ref':'main'}},
+                       {'stack':{'number':46935, 'position':5, 'base_ref':'main'}}):
             with self.subTest(change=change):
                 self.state = {'pulls':{'1':pull()}, 'preflight_change':change}
                 result, out, state = self.run_cli(request=True)
@@ -434,7 +493,8 @@ class WorklistFlow(unittest.TestCase):
                 f'approve-guard: head `{HEAD}` · source review · reviewed base `{BASE}` · diff sha256 `{digest}`')
         approved = {'id':10, 'state':'APPROVED', 'user':user('reviewer-b'), 'body':body, 'commit_id':HEAD,
                     'author_association':'MEMBER', 'submitted_at':'2026-10-26T09:00:00Z'}
-        cr = {'id':11, 'state':'CHANGES_REQUESTED', 'user':user('reviewer-a')}
+        cr = {'id':11, 'state':'CHANGES_REQUESTED', 'user':user('reviewer-a'),
+              'commit_id':HEAD, 'body':'source finding', 'submitted_at':'2026-10-26T09:00:00Z'}
         pr = pull()
         pr['requested_reviewers'] = [user('reviewer-a')]
         accounts = [('reviewer-a', uid('reviewer-a'))]
@@ -447,7 +507,7 @@ class WorklistFlow(unittest.TestCase):
             self.assertFalse(M.GitHub('o/r').independent_source_review(pr, [cr, old_commit], [], accounts, True))
             missing_commit = {k:v for k,v in approved.items() if k != 'commit_id'}
             self.assertFalse(M.GitHub('o/r').independent_source_review(pr, [cr, missing_commit], [], accounts, True))
-            superseded = approved | {'id':12, 'state':'CHANGES_REQUESTED'}
+            superseded = approved | {'id':12, 'state':'CHANGES_REQUESTED', 'submitted_at':'2026-10-26T10:00:00Z'}
             self.assertFalse(M.GitHub('o/r').independent_source_review(pr, [cr, approved, superseded], [], accounts, True))
             self.assertFalse(M.GitHub('o/r').independent_source_review(pr, [cr, approved], [], accounts, False))
             release = pr | {'head':{'sha':HEAD, 'ref':'release/v1'}}
@@ -480,6 +540,48 @@ class WorklistFlow(unittest.TestCase):
                 pr, [cr, approved], [valid_fail, invalid_pass], accounts, True))
             renamed_commit = accounts + [('old-reviewer-b', uid('reviewer-b'))]
             self.assertFalse(M.GitHub('o/r').independent_source_review(pr, [cr, approved], [], renamed_commit, True))
+
+    def test_independent_source_approval_requires_unique_latest_submission(self):
+        digest = 'd' * 64
+        body = (f'verdict: PASS head: {HEAD} by: reviewer-b\n\n'
+                f'review-scope: {{"base_ref":"main","base_sha":"{BASE}","stack":null}}\n'
+                f'approve-guard: head `{HEAD}` · source review · reviewed base `{BASE}` · diff sha256 `{digest}`')
+        approved = {'id':90, 'state':'APPROVED', 'user':user('reviewer-b'), 'body':body,
+                    'commit_id':HEAD, 'author_association':'MEMBER',
+                    'submitted_at':'2026-10-26T09:00:00Z'}
+        dismissed = approved | {'id':77, 'state':'DISMISSED', 'body':'',
+                                'submitted_at':'2026-10-26T10:00:00Z'}
+        pr = pull()
+        pr['requested_reviewers'] = [user('reviewer-a')]
+        accounts = [('reviewer-a', uid('reviewer-a'))]
+        github = M.GitHub('o/r', '/fake/gh')
+        with patch.object(M, 'command', return_value=M.CommandResult(0, digest, '')):
+            self.assertFalse(github.independent_source_review(pr, [approved, dismissed], [], accounts, True))
+            newer_approval = approved | {'id':77, 'submitted_at':'2026-10-26T10:00:00Z'}
+            older_dismissed = dismissed | {'id':90, 'submitted_at':'2026-10-26T09:00:00Z'}
+            self.assertTrue(github.independent_source_review(pr, [newer_approval, older_dismissed], [], accounts, True))
+            older_tie = older_dismissed | {'id':88}
+            self.assertTrue(github.independent_source_review(pr, [older_tie, older_dismissed, newer_approval], [], accounts, True))
+            for at in ('2026-10-26T09:00:00Z', None, 'invalid'):
+                with self.subTest(at=at), self.assertRaises(M.Unavailable):
+                    github.independent_source_review(pr, [approved, dismissed | {'submitted_at':at}], [], accounts, True)
+
+    def test_unreplaced_commit_actor_cr_remains_a_conflict_after_another_approval(self):
+        digest = 'd' * 64
+        body = (f'verdict: PASS head: {HEAD} by: reviewer-b\n\n'
+                f'review-scope: {{"base_ref":"main","base_sha":"{BASE}","stack":null}}\n'
+                f'approve-guard: head `{HEAD}` · source review · reviewed base `{BASE}` · diff sha256 `{digest}`')
+        approved = {'id':90, 'state':'APPROVED', 'user':user('reviewer-b'), 'body':body,
+                    'commit_id':HEAD, 'author_association':'MEMBER',
+                    'submitted_at':'2026-10-26T11:00:00Z'}
+        old_cr = {'id':11, 'state':'CHANGES_REQUESTED', 'user':user('reviewer-a'),
+                  'body':f'verdict: FAIL head: {HEAD} by: keeper-one', 'commit_id':HEAD,
+                  'submitted_at':'2026-10-26T09:00:00Z'}
+        other_approval = approved | {'id':12, 'user':user('reviewer-a'),
+                                     'body':'unrelated approval', 'submitted_at':'2026-10-26T10:00:00Z'}
+        with patch.object(M, 'command', return_value=M.CommandResult(0, digest, '')):
+            self.assertTrue(M.GitHub('o/r', '/fake/gh').independent_source_review(
+                pull(), [old_cr, other_approval, approved], [], [('reviewer-a', uid('reviewer-a'))], True))
 
     def test_unreadable_diff_or_admission_never_means_unreviewed(self):
         for results in ([M.CommandResult(1, '', 'diff unavailable')],

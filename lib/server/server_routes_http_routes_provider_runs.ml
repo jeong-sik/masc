@@ -137,13 +137,11 @@ let cached_dashboard_json_result ~now:clock ~sync_first ~sw ~cache ~key ~placeho
       in
       if background then Pool_lane.with_background run else run ())
   in
-  (* Observe cancellation before the cache mutation below: the missing-key
-     path evicts and installs under the mutex, and a cancel arriving between
-     that mutation and [Cache_state.start] would leave an empty entry no
-     owner will ever refresh. *)
-  Eio.Switch.check sw;
   let view, owner =
     Stdlib.Mutex.protect dashboard_metrics_cache_mu (fun () ->
+        (* The supplied clock can cancel this scope after the initial check.
+           Refuse admission before lookup, eviction or insertion mutates it. *)
+        Eio.Switch.check sw;
         let entry =
           match Hashtbl.find_opt cache key with
           | Some entry -> entry
@@ -157,7 +155,6 @@ let cached_dashboard_json_result ~now:clock ~sync_first ~sw ~cache ~key ~placeho
         match Cache_state.admit ~now ~ttl_s:dashboard_metrics_cache_ttl_s entry with
         | Cache_state.Reuse view -> view, None
         | Cache_state.Refresh (view, plan) ->
-            Eio.Switch.check sw;
             let entry, owner = Cache_state.start plan in
             Hashtbl.replace cache key entry;
             view, Some owner)
@@ -178,19 +175,24 @@ let cached_dashboard_json_result ~now:clock ~sync_first ~sw ~cache ~key ~placeho
                   ~generated_at:refreshed_at ())
          | Error _, _ -> response)
       else
-        (* The pre-fork check alone cannot guarantee the callback runs: Eio may
-           schedule the child and then have the switch reject it before its
-           body, so the child's [Fun.protect] never registers. Register the
-           owner's release on the switch itself — teardown releases it whether
-           or not the child ever ran, and [Cache_state.cancel] matches the
-           owner identity, so the double release is a no-op. *)
+        (* The switch retains fallback ownership cleanup until the child exits.
+           Remove completed hooks so a serving switch retains only live work;
+           exact-owner release makes worker and switch cleanup idempotent. *)
         (try
            Eio.Switch.check sw;
-           Eio.Switch.on_release sw (fun () -> release owner);
-           Eio.Fiber.fork ~sw (fun () ->
-               ignore (run_compute_and_store ~background:true owner
-                 : (Yojson.Safe.t, string) result * float));
-           response
+           let hook =
+             Eio.Switch.on_release_cancellable sw (fun () -> release owner)
+           in
+           (try
+              Eio.Fiber.fork ~sw (fun () ->
+                  Fun.protect ~finally:(fun () -> Eio.Switch.remove_hook hook)
+                    (fun () ->
+                      ignore (run_compute_and_store ~background:true owner
+                        : (Yojson.Safe.t, string) result * float)));
+              response
+            with exn ->
+              Eio.Switch.remove_hook hook;
+              raise exn)
          with exn ->
            release owner;
            raise exn)

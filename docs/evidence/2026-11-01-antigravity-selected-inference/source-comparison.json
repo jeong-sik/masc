@@ -1,0 +1,42 @@
+{
+  "baseline": "fa138512cfb1c9a8b5cffbcc4bb331779ce9449c",
+  "candidate": "ed7c00c5922f1014faf052787923012689bef432",
+  "complete_delta": [
+    "changelog.d/47228.md",
+    "docs/evidence/2026-11-01-fusion-selected-timeout/README.md",
+    "docs/evidence/2026-11-01-fusion-selected-timeout/baseline.txt",
+    "docs/evidence/2026-11-01-fusion-selected-timeout/candidate.txt",
+    "docs/evidence/2026-11-01-fusion-selected-timeout/cases.tsv",
+    "docs/evidence/2026-11-01-fusion-selected-timeout/invalid-compiler-context.txt",
+    "docs/evidence/2026-11-01-fusion-selected-timeout/manifest.json",
+    "docs/evidence/2026-11-01-fusion-selected-timeout/repaired-baseline.txt",
+    "docs/evidence/2026-11-01-fusion-selected-timeout/repaired-candidate.txt",
+    "docs/evidence/2026-11-01-fusion-selected-timeout/repro-baseline.txt",
+    "docs/evidence/2026-11-01-fusion-selected-timeout/source-comparison.json",
+    "docs/evidence/2026-11-01-fusion-selected-timeout/source-sha256.json",
+    "lib/keeper/keeper_antigravity_runtime.ml",
+    "lib/keeper/keeper_antigravity_runtime.mli",
+    "lib/keeper/keeper_turn_driver.ml",
+    "test/test_keeper_antigravity_runtime.ml",
+    "test/test_official_client_claim_cause.ml"
+  ],
+  "production_delta": [
+    "lib/keeper/keeper_antigravity_runtime.ml",
+    "lib/keeper/keeper_antigravity_runtime.mli",
+    "lib/keeper/keeper_turn_driver.ml"
+  ],
+  "identical_fixture_and_runner_inputs": {
+    "test/test_keeper_antigravity_selected_inference.ml": "c47cf1adf64e7b84667fa89040a14d2bfafb19c087f930a804bcc15e84bbc3d1",
+    "test/stanzas/test_keeper_antigravity_selected_inference.inc": "c523a761ba23bfacb7bfa37f2c586675ce1c06e78b9a069193cd9da5db7058ec",
+    "test/dune": "6282da0242d4808a0f9e4a62556879be99874b494ad24ee68f85c130f64250f4",
+    "test/deps/masc_test_deps.ml": "867eacb8cdfc177eb05804a06fcf6f8c162f25a49be8b64e969f6e6cdd86002b",
+    "test/deps/dune": "67a195fc8b4d7c7858634e5cd05c2999d0bf2565c88220ab82dc2c692c503dd9",
+    ".github/workflows/test.yml": "99286b2989de40ea72ad184b6c8335da64e9213e289e260a4afc16bd3bd8bb6d",
+    "scripts/ci-run-targeted-tests.sh": "7391426895132a2c027aea2d6c85bfcae18a038fd4e9640cc3c0b9fa66a8ca72",
+    "scripts/ci/stanza_env.py": "8e6905e4009423ffdf2655176166444a9f52d584acb7654ef32e04f90819f35b"
+  },
+  "lower_parent_delta": "Eleven Fusion evidence files only; no lower production change.",
+  "test_delta": "Only explicit required-argument migrations in two existing fixtures; selected new fixture and its build/runner inputs are byte-identical.",
+  "execution_result": "Observed baseline Test41299786698 FAILURE3PASS/7FAIL and candidate Test41300307241 SUCCESS23PASS/0FAIL. Common10:3maintained7fixed0regression. Candidate-only13 controls are separate.",
+  "limits": "Three baseline reasoning cases stop at their first input-receipt assertion; later typed-error and resume assertions were not reached there. Candidate passes all10 cases. No full regression/live provider/installed runtime/restart/deployment/integration/whole-issue acceptance."
+}

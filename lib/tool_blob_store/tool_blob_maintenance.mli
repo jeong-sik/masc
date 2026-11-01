@@ -12,9 +12,14 @@
     no children. No other blob content is parsed or treated as an ownership
     edge.
     The arbitrary input of a decoded History ToolUse, the JSON payload of
-    decoded History/Keeper tool results, and a tool-call receipt's input are
-    opaque to history-media recognition, including inside nested lists. Their
-    ordinary [type="stored"] data are not media ownership. Reserved artifact
+    decoded History/Keeper tool results, a tool-call receipt's input, and a
+    complete official-client outbox receipt's arguments/response are opaque
+    to history-media recognition, including inside nested lists. Outbox
+    receipts require the shared strict codec, exact filename digest and the
+    shared official-client storage path authority. Only a whole JSON document
+    at that source qualifies; nested envelopes and JSONL rows cannot acquire
+    this source authority.
+    Their ordinary [type="stored"] data are not media ownership. Reserved artifact
     markers and [_blob] references remain authoritative in those payloads.
     These are field-ownership projections, not complete validation of each
     result or call-log row. Sibling [content] and [content_blocks] remain

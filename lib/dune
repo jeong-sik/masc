@@ -105,6 +105,7 @@
   ; Result projection lives below this library so masc_task_handlers can use
   ; it without a cycle (the root masc library depends on masc_task_handlers).
   masc.tool_projection
+  masc.keeper_client_tool_outbox_codec
   masc.browser_lane
   masc.slack_lane
   masc.machine_live_publication

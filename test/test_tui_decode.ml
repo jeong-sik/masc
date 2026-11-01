@@ -4229,8 +4229,8 @@ let test_decode_connector_snapshot_reads_the_live_shape () =
        | [ c ] ->
            Alcotest.(check string) "name" "Slack"
              c.Masc.Tui_decode_connectors.cn_display_name;
-           Alcotest.(check bool) "available" true c.Masc.Tui_decode_connectors.cn_available;
-           Alcotest.(check bool) "connected" true c.Masc.Tui_decode_connectors.cn_connected;
+           Alcotest.(check bool) "available" true (Masc.Tui_decode_connectors.connector_available c);
+           Alcotest.(check bool) "connected" true (Masc.Tui_decode_connectors.connector_connected c);
            Alcotest.(check (option string)) "channel"
              (Some "#release-deployment") c.Masc.Tui_decode_connectors.cn_channel;
            Alcotest.(check bool) "typed connected state" true
@@ -4276,8 +4276,8 @@ let test_decode_connector_configured_but_unreachable () =
          [ connector_json ~connected:(`Bool false) ~status:"disconnected" () ])
   with
   | Ok { Masc.Tui_decode_connectors.cs_connectors = [ c ]; _ } ->
-      Alcotest.(check bool) "configured" true c.Masc.Tui_decode_connectors.cn_available;
-      Alcotest.(check bool) "but not reachable" false c.Masc.Tui_decode_connectors.cn_connected
+      Alcotest.(check bool) "configured" true (Masc.Tui_decode_connectors.connector_available c);
+      Alcotest.(check bool) "but not reachable" false (Masc.Tui_decode_connectors.connector_connected c)
   | Ok _ -> Alcotest.fail "expected one connector"
   | Error err -> Alcotest.failf "decode failed: %s" err
 
@@ -4387,8 +4387,8 @@ let test_decode_connector_absent_flags_are_off () =
          ])
   with
   | Ok { Masc.Tui_decode_connectors.cs_connectors = [ c ]; _ } ->
-      Alcotest.(check bool) "not available" false c.Masc.Tui_decode_connectors.cn_available;
-      Alcotest.(check bool) "not connected" false c.Masc.Tui_decode_connectors.cn_connected;
+      Alcotest.(check bool) "not available" false (Masc.Tui_decode_connectors.connector_available c);
+      Alcotest.(check bool) "not connected" false (Masc.Tui_decode_connectors.connector_connected c);
       Alcotest.(check (option string)) "no channel" None
         c.Masc.Tui_decode_connectors.cn_channel
   | Ok _ -> Alcotest.fail "expected one connector"
@@ -4420,7 +4420,13 @@ let test_decode_connector_keeps_connected_but_unavailable_distinct () =
   with
   | Ok { Masc.Tui_decode_connectors.cs_connectors = [ connector ]; _ } ->
       Alcotest.(check bool) "typed degraded connection" true
-        (connector.cn_connection = Masc.Tui_decode_connectors.Connector_connected_unavailable)
+        (connector.cn_connection = Masc.Tui_decode_connectors.Connector_connected_unavailable);
+      Alcotest.(check bool) "transport remains connected" true
+        (Masc.Tui_decode_connectors.connector_connected connector);
+      Alcotest.(check bool) "connected transport remains unavailable" false
+        (Masc.Tui_decode_connectors.connector_available connector);
+      Alcotest.(check string) "degraded status remains offline" "offline"
+        (Masc.Tui_decode_connectors.connector_status connector)
   | Ok _ -> Alcotest.fail "expected one connector"
   | Error err -> Alcotest.failf "decode failed: %s" err
 

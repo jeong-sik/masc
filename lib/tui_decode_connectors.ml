@@ -50,9 +50,6 @@ type connector_poll_state =
 type connector = {
   cn_id : string;
   cn_display_name : string;
-  cn_available : bool;
-  cn_connected : bool;
-  cn_status : string;
   cn_connection : connector_connection;
   cn_channel : string option;
   cn_error : string option;
@@ -93,6 +90,23 @@ type connector = {
   cn_names_error : string option;
   cn_bindings : connector_binding list;
 }
+
+let connector_available connector =
+  match connector.cn_connection with
+  | Connector_connected | Connector_disconnected | Connector_stale -> true
+  | Connector_connected_unavailable | Connector_offline -> false
+
+let connector_connected connector =
+  match connector.cn_connection with
+  | Connector_connected | Connector_connected_unavailable -> true
+  | Connector_disconnected | Connector_offline | Connector_stale -> false
+
+let connector_status connector =
+  match connector.cn_connection with
+  | Connector_connected -> "connected"
+  | Connector_connected_unavailable | Connector_offline -> "offline"
+  | Connector_disconnected -> "disconnected"
+  | Connector_stale -> "stale"
 
 type connector_name_page = {
   cnp_connector_id : string;
@@ -159,15 +173,14 @@ let optional_bot_user_id ~connector_id json =
 let decode_connector json =
   let* cn_id = required_string_field json "connector_id" in
   let* cn_display_name = required_string_field json "display_name" in
-  let* cn_status = required_string_field json "status" in
+  let* status = required_string_field json "status" in
   (* Both default to false: a connector that does not say it is available or
      connected is not, and defaulting the other way would draw a dead
      connector as a working one. *)
-  let* cn_available = decode_bool_field_or json "available" ~default:false in
-  let* cn_connected = decode_bool_field_or json "connected" ~default:false in
+  let* available = decode_bool_field_or json "available" ~default:false in
+  let* connected = decode_bool_field_or json "connected" ~default:false in
   let* cn_connection =
-    decode_connector_connection ~status:cn_status ~available:cn_available
-      ~connected:cn_connected
+    decode_connector_connection ~status ~available ~connected
   in
   let* cn_channel = optional_string_field json "channel" in
   let* cn_error = optional_string_field json "error" in
@@ -262,9 +275,6 @@ let decode_connector json =
   Ok
     { cn_id
     ; cn_display_name
-    ; cn_available
-    ; cn_connected
-    ; cn_status
     ; cn_connection
     ; cn_channel = nonblank_option cn_channel
     ; cn_error = nonblank_option cn_error

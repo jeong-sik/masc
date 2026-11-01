@@ -269,5 +269,18 @@
     "original_selected_capture": "snapshot-candidate.txt"
   },
   "case_identity": "phase/source/emitted_group/index/fixture_sha256; emitted group and display text can be ellipsized; all keys unique per phase",
-  "skips": "SKIP rows are not passes and are excluded from executed-case counts."
+  "skips": "SKIP rows are excluded from completed PASS/FAIL counts. These three bodies attempted subprocess startup before skip; terminal health/dashboard assertions were not established. They are neither passes nor completed startup proof.",
+  "case_key_sha256_serialization": {
+    "partition": "Each phase separately; phase is not included in a per-phase key.",
+    "fields": [
+      "source",
+      "emitted_group",
+      "index (JSON integer)",
+      "source_sha256"
+    ],
+    "order": "The phase rows in cases.tsv, in retained case-emission order.",
+    "container": "JSON array of four-element arrays, without status or display fields.",
+    "encoding": "UTF-8, ensure_ascii=false, compact separators comma and colon, no other whitespace.",
+    "suffix": "Append exactly one LF byte (0x0a) before SHA-256."
+  }
 }

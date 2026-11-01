@@ -7,8 +7,10 @@ Initial **Test** [41329452881](https://github.com/jeong-sik/masc/actions/runs/41
 checkout `1546b54953269fedb15d7e6d8f1a02c344585219`: **FAILURE, 980 PASS / 1 FAIL,
 3 SKIP** across 18 explicit suites. The nested provider/model fixture erased
 its outer JSON overlay, so its exact tuple assertion could not find the binding.
-New snapshot24 and bootstrap132 cases passed inside that failed workflow.
-Bootstrap SKIP indices115,116,118 were not executed or counted as passes.
+All 24 snapshot cases and 132 bootstrap cases passed inside that failed workflow.
+Bootstrap cases 115,116,118 attempted subprocess startup and ended SKIP before
+terminal health/dashboard assertions. They are neither passes nor completed
+startup proof.
 
 Corrected **Test** [41359944826](https://github.com/jeong-sik/masc/actions/runs/41359944826),
 checkout `e3d6f3bef78da14a0a89e1faca6929cd3f1dc5d3`: **SUCCESS, 1082 PASS / 0 FAIL, 3 SKIP** across
@@ -26,12 +28,19 @@ its separate receipt preserve the original selection bytes and digest.
 Display/group text may be ellipsized. Hashes
 identify exact fixture bytes; skipped cases are never promoted to passes.
 
-Each expanded source manifest binds108 named inputs and four complete trees at
+Each per-phase case-key digest uses that phase's `cases.tsv` rows in retained
+case-emission order. Serialize an array of `[source, emitted_group, index,
+source_sha256]` arrays with index as a JSON integer, UTF-8, ensure_ascii=false
+and compact comma/colon separators, then append exactly one LF byte before
+SHA-256. Phase, status and display text are excluded from this per-phase hash;
+phase still distinguishes rows in the combined table.
+
+Each expanded source manifest binds 108 named inputs and four complete trees at
 its own executed head. Three named fixture inputs differ; Core/test trees also
 differ, while lib/config trees match. Corrected inputs and all four corrected
 trees match the evidence parent; later evidence-only heads are not newly
-executed. `original-corrected-source.json` preserves the initial30-input capture;
-the expanded108-input derivative adds complete unit paths at the same e3 head
+executed. `original-corrected-source.json` preserves the initial 30-input capture;
+the expanded 108-input derivative adds complete unit paths at the same e3 head
 and explains that derivation rather than relabeling the original capture.
 
 Native/batch negative controls now reject invalid input before publication and

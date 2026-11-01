@@ -102,6 +102,11 @@ Thirteen additional cases compare fresh output with persisted active,
 provider-closed and turn-closed recovery, including registered ToolUse under
 MaxTokens, Refusal and injected EndTurn, plus malformed-stop controls. They
 check exact recovery, zero effects/redispatch/AfterTurn, pending-only OnStop,
-unchanged usage/counter and no canonical tool observations. New execution
-receipts will retain their own heads and outcomes; no completed result is
-claimed here. Full regression and issue acceptance remain unverified.
+unchanged usage/counter and no canonical tool observations. The corrected
+fixture pair completed: Test 41291035705 at e185f43bf978cc4922584754f9e3e398ec2cff57
+failed with 126 PASS / 9 FAIL; Test 41291435494 at
+c3d7d202c2abad5a9b5fa173757fe621fcc797e0 succeeded with 135 PASS / 0 FAIL, both
+on fix/terminal-resume-frontier-20261101 with Pipeline and journal targets.
+The two earlier fixture compilation failures are preserved separately in
+[the follow-up evidence](../2026-11-01-terminal-stop-authority/README.md).
+Full regression and complete issue acceptance remain unverified.

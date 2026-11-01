@@ -5,104 +5,30 @@ include Board_core_classify
 
 (** {1 JSON Serialization} *)
 
-(* RFC-0233 §7: encode the typed origin as its own top-level [origin] key
-   (sibling of [meta], NOT nested under it) so the index key needs no
-   meta_json substring scan (RFC §7.6 guard #2). Each sub-field is emitted
-   only when present; turn_ref serializes via [Ids.Turn_ref.to_yojson] (a flat
-   "trace#turn" string), matching the chat-row wire form. *)
-let post_origin_to_yojson (o : post_origin) : Yojson.Safe.t =
-  `Assoc
-    ((match o.turn_ref with
-      | Some tr -> [ "turn_ref", Ids.Turn_ref.to_yojson tr ]
-      | None -> [])
-     @ (match o.source with
-        | Some s -> [ "source", `String s ]
-        | None -> [])
-     @
-     (match o.fusion_run_id with
-      | Some r -> [ "fusion_run_id", `String r ]
-      | None -> [])
-     @ (match o.fusion_producer with
-        | Some producer -> ["fusion_producer", `String producer]
-        | None -> []))
+let post_to_yojson = Board_content_json.post_to_yojson
+let post_origin_to_yojson = Board_content_json.post_origin_to_yojson
+let post_close_state_to_yojson = Board_content_json.post_close_state_to_yojson
+let comment_to_yojson = Board_content_json.comment_to_yojson
+let audience_to_yojson = Board_content_json.audience_to_yojson
+
+let emit_content_diagnostic (diagnostic : Board_content_json.diagnostic) =
+  match diagnostic with
+  | Board_content_json.Invalid_post_kind { post_id } ->
+    Log.BoardLog.warn
+      "dropping persisted board post %s: missing or invalid post_kind"
+      post_id
+  | Board_content_json.Invalid_agent_id { raw } ->
+    ignore (Agent_id.of_string raw)
 ;;
 
-(* Only emitted when the post is closed; the same shape is decoded back by
-   [Board_votes_json.optional_closed]. Absence of the ["closed"] key on read
-   means open, which lets every post minted before this field existed
-   round-trip unchanged. *)
-let post_close_state_to_yojson (c : post_close_state) : Yojson.Safe.t =
-  `Assoc
-    ([ "closed_by", `String (Agent_id.to_string c.closed_by)
-     ; "closed_at", `Float c.closed_at
-     ]
-     @ (match c.successor_id with
-        | Some id -> [ "successor_id", `String (Post_id.to_string id) ]
-        | None -> [])
-     @ (match c.summary with
-        | Some s -> [ "summary", `String s ]
-        | None -> []))
+let decoded_content (decoded : 'a Board_content_json.decoded) : 'a option =
+  List.iter emit_content_diagnostic decoded.diagnostics;
+  decoded.value
 ;;
 
-let post_to_yojson (p : post) : Yojson.Safe.t =
-  `Assoc
-    ([ "id", `String (Post_id.to_string p.id)
-     ; "author", `String (Agent_id.to_string p.author)
-     ; "title", `String p.title
-     ; "body", `String p.body
-     ; "post_kind", `String (post_kind_to_string p.post_kind)
-     ; "visibility", `String (visibility_to_string p.visibility)
-     ; "created_at", `Float p.created_at
-     ; "content_updated_at", `Float p.content_updated_at
-     ; "updated_at", `Float p.updated_at
-     ; "expires_at", `Float p.expires_at
-     ; "votes_up", `Int p.votes_up
-     ; "votes_down", `Int p.votes_down
-     ; "reply_count", `Int p.reply_count
-     ; "pinned", `Bool p.pinned
-     ]
-     @ (match p.audience with
-        | Some audience -> [ "audience", Board_audience.to_yojson audience ]
-        | None -> [])
-     @ (match p.hearth with
-        | Some h -> [ "hearth", `String h ]
-        | None -> [])
-     @ (match p.thread_id with
-        | Some t -> [ "thread_id", `String t ]
-        | None -> [])
-     @ (match p.origin with
-        | Some o -> [ "origin", post_origin_to_yojson o ]
-        | None -> [])
-     @ (match p.closed with
-        | Some c -> [ "closed", post_close_state_to_yojson c ]
-        | None -> [])
-     @ (match post_classification_reason p with
-        | Some reason -> [ "classification_reason", `String reason ]
-        | None -> [])
-     @
-     match p.meta_json with
-     | Some meta -> [ "meta", meta ]
-     | None -> [])
-;;
-
-let comment_to_yojson (c : comment) : Yojson.Safe.t =
-  `Assoc
-    ([ "id", `String (Comment_id.to_string c.id)
-     ; "post_id", `String (Post_id.to_string c.post_id)
-     ; ( "parent_id"
-       , Json_util.string_opt_to_json (Option.map Comment_id.to_string c.parent_id) )
-     ; "author", `String (Agent_id.to_string c.author)
-     ; "content", `String c.content
-     ; "created_at", `Float c.created_at
-     ; "expires_at", `Float c.expires_at
-     ; "votes_up", `Int c.votes_up
-     ; "votes_down", `Int c.votes_down
-     ]
-     @
-     match c.audience with
-     | Some audience -> [ "audience", Board_audience.to_yojson audience ]
-     | None -> [])
-;;
+let post_of_yojson json = decoded_content (Board_content_json.post_of_yojson json)
+let comment_of_yojson json = decoded_content (Board_content_json.comment_of_yojson json)
+let audience_of_yojson json = decoded_content (Board_content_json.audience_of_yojson json)
 
 let reaction_target_type_to_string = function
   | Reaction_post -> "post"

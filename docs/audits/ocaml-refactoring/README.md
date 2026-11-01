@@ -93,7 +93,7 @@ runtime gates. Source-review completion alone leaves a Draft item in review.
 
 The queue now contains **30 concrete candidates**: 24 from the first semantic pass, A1
 from the Agent Core follow-up, T1 from the integrated TUI investigation, E1/E2 from
-Exec, M1 from multimodal/media, and J1 from the Schedule investigation. Twenty-four are
+Exec, M1 from multimodal/media, and J1 from the Schedule investigation. Twenty-five are
 implemented as PRs; source review and execution evidence are recorded separately on each PR: `S1` in
 [#43367](https://github.com/jeong-sik/masc/pull/43367) isolates provider usage
 acceptance; `K1` in [#43370](https://github.com/jeong-sik/masc/pull/43370) preserves
@@ -143,8 +143,9 @@ and retry classification between Board deletion and flush. K6 in
 [#47091](https://github.com/jeong-sik/masc/pull/47091) gives committed-batch scans
 immutable accumulation and a private semantic-validation owner. K7 in
 [#47114](https://github.com/jeong-sik/masc/pull/47114) isolates immutable receipt
-selection while retaining durable reconciliation effects. Six candidates
-remain unfinished. This ordering does not waive their coverage.
+selection while retaining durable reconciliation effects. D4 in
+[#47125](https://github.com/jeong-sik/masc/pull/47125) aligns Goal publication
+with its existing local primary authority. Five candidates remain unfinished. This ordering does not waive their coverage.
 
 | ID | Priority | Status | Refactoring point |
 | --- | --- | --- | --- |
@@ -154,11 +155,11 @@ remain unfinished. This ordering does not waive their coverage.
 | [K4](#k4) | later | candidate | Make request-evidence reset and projection ownership explicit per attempt |
 | [K5](#k5) | later | source reviewed; execution unverified | Separate approval restart replay decisions from recovery effects |
 | [K6](#k6) | investigate | implemented; execution unverified | Make Agent Core committed-batch scanning an explicit returned state |
-| [K7](#k7) | later | implemented; execution unverified | Separate Memory receipt reconciliation selection from its durable plan |
+| [K7](#k7) | later | implemented; targeted Current suite passed | Separate Memory receipt reconciliation selection from its durable plan |
 | [D1](#d1) | next | in review | Return an explicit task commit receipt instead of a cross-scope notification ref |
 | [D2](#d2) | next | in review | Make Goal upsert a typed immutable transaction decision |
 | [D3](#d3) | later | in review | Isolate the Goal document codec and schema rejection contract |
-| [D4](#d4) | investigate | candidate | Audit and retain typed Goal publication outcomes across the backend adapter |
+| [D4](#d4) | investigate | implemented; execution unverified | Publish Goal state through the shared local-authoritative writer |
 | [D5](#d5) | later | source reviewed; execution unverified | Extract the Board vote decision from post/comment mutation shells |
 | [D6](#d6) | later | implemented; execution unverified | Represent Board snapshot flush work and retry obligations explicitly |
 | [D7](#d7) | next | in review | Preserve evidence transport decisions in the complete review request, then isolate snapshot projections |
@@ -416,8 +417,9 @@ Source:
 [lib/keeper/keeper_agent_run.ml:1910](https://github.com/jeong-sik/masc/blob/aea8424926ea79f110315eec5ab429ac51043598/lib/keeper/keeper_agent_run.ml#L1910-L2065),
 [lib/keeper/keeper_agent_run.ml:2545](https://github.com/jeong-sik/masc/blob/aea8424926ea79f110315eec5ab429ac51043598/lib/keeper/keeper_agent_run.ml#L2545-L2701).
 
-Problem: Request attribution, wire evidence, projected provider content, and projected
-messages occupy four independently reset refs; the source comment explicitly documents
+Problem: At refreshed source `f8bb999751a1cdde238b2b3f398915b251fd0de1`, request
+attribution, wire evidence and current provider content occupy three independently reset
+refs; projected messages already belong to wire evidence. The source comment documents
 that clearing only the final record cells lets a failed lane attempt leak its inputs
 into the next lane. Their updates and final projections are hundreds of lines apart.
 Turn-local model-input windows and last-response observations intentionally have
@@ -661,8 +663,10 @@ the exact unproven range at decoded index 1, a clean receipt WAL, unchanged proo
 snapshot and stable repeat reads. Canonical decoding is checked before
 reconciliation. It does not establish hook, scan-cancellation or fsync-failure
 coverage. Existing preparation, authority, quarantine and fixed-point scenarios
-remain. Syntax parsing and source review are distinct from execution; behavior
-is unverified until an actual targeted result is recorded on the PR.
+remain. Completed targeted [Test 41273746640](https://github.com/jeong-sik/masc/actions/runs/41273746640)
+passed all 156 Current cases at `f8bb999751a1cdde238b2b3f398915b251fd0de1`, including
+the new scenario. This is scoped execution evidence, separate from source review,
+full regression, merge and installed runtime observation.
 
 
 ### D1
@@ -897,50 +901,63 @@ review. The historical file-census and consulted-source counts are unchanged.
 
 ### D4
 
-**Audit and retain typed Goal publication outcomes across the backend adapter**
+**Publish Goal state through the shared local-authoritative writer**
 
-Source:
-[lib/goal/goal_store.ml:514](https://github.com/jeong-sik/masc/blob/aea8424926ea79f110315eec5ab429ac51043598/lib/goal/goal_store.ml#L514-L576),
-[lib/goal/goal_store.ml:592](https://github.com/jeong-sik/masc/blob/aea8424926ea79f110315eec5ab429ac51043598/lib/goal/goal_store.ml#L592-L604),
-[lib/workspace/workspace_utils_ops.ml:257](https://github.com/jeong-sik/masc/blob/aea8424926ea79f110315eec5ab429ac51043598/lib/workspace/workspace_utils_ops.ml#L257-L300),
-[lib/workspace/workspace_backlog.ml:215](https://github.com/jeong-sik/masc/blob/aea8424926ea79f110315eec5ab429ac51043598/lib/workspace/workspace_backlog.ml#L215-L220).
+Implemented in [#47125](https://github.com/jeong-sik/masc/pull/47125).
+Code head `b24ff51c5f76678b8b481281744646c7aca78941`:
+[Goal store](https://github.com/jeong-sik/masc/blob/b24ff51c5f76678b8b481281744646c7aca78941/lib/goal/goal_store.ml#L217-L233),
+[public contract](https://github.com/jeong-sik/masc/blob/b24ff51c5f76678b8b481281744646c7aca78941/lib/goal/goal_store.mli#L204-L216).
 
-Problem: Workspace_utils_ops already distinguishes a committed backend mutation with
-local mirror failure as Ok {mirror_error=Some _}. Its write_json_result compatibility
-adapter converts that outcome back to Error. Goal_store.write_state_result uses that
-adapter and returns Persist_failed to callers before advancing the projection
-generation, while Goal reads are direct local-file reads. Whether this is correct
-depends on which store is authoritative for each backend; the code exposes a semantic
-question rather than proof of a reproduced production bug.
+The authority audit resolved the earlier candidate's question: `load_source` reads
+local `goals.json` for both supported workspace backends, FileSystem and Memory.
+Its public interface identifies the primary as authoritative and the recovery file
+as evidence. A committed generic Memory-map mutation with a failed local mirror is
+therefore not a Goal commit. Treating that adapter's mirror warning as Goal success
+would advance projections while readers still see old or unavailable local state.
+RFC-0444 describes the same direction but is still Draft; the current implementation
+and public interface establish the authority used here.
 
-Change: First trace Goal backend authority and add a focused fault scenario for backend
-success/local mirror failure. Then carry an explicit publication outcome if the backend
-commit is authoritative, or use a clearly local-authoritative writer if local goals.json
-is the authority. Reuse the existing typed write_json_commit capability instead of
-inventing string matching. Keep this separate from the pure upsert extraction.
+Both primary and recovery now use the existing `Workspace_utils.write_json_local`.
+The change removes unrelated Memory-map writes without introducing another encoder,
+Result adapter or local file writer. Shared UTF-8 repair and pretty encoding remain.
+The existing local atomic writer keeps its non-strict durability/error semantics;
+this does not introduce staged post-rename outcomes or a stronger cancellation promise.
 
-Preserve:
+Ordering remains: successful local primary publication, projection generation
+advance, then best-effort recovery publication. Recovery failure logs a warning and
+returns success. Primary failure skips generation and recovery. Mutation locks,
+corrupt/unavailable-primary refusal, pending audit/notification state and public API
+shapes remain unchanged. The low-level direct writer is still unlocked and is not
+an admission check.
 
-- Never report a definitive pre-effect failure for a mutation that the chosen authority
-  has committed.
-- A recovery mirror failure remains a committed primary write, as the current test already requires.
-- Unavailable or corrupt primary state must not authorize mutation through a fallback mirror.
-- Projection generation and event delivery must be tied to the actual authoritative commit.
-- Do not change backend authority without an explicit documented decision.
+Fresh main `716d22c3ef7243cee7a29d8650c2b2b8cba61c37` has identical relevant Goal,
+shared writer/backend and direct test source to the parent. The 83-open-PR census
+found [#47002](https://github.com/jeong-sik/masc/pull/47002) touching this writer for
+Goal cache invalidation, while retaining the generic write route. That distinct
+change is not included here; preserve its invalidation before publication when
+integrating the shared writer hunk. Adjacent Goal verification/list and JSONL work
+remain outside this layer.
 
-Consumers: [lib/workspace_goals.ml](../../../lib/workspace_goals.ml),
-[lib/goal/goal_measurement.ml](../../../lib/goal/goal_measurement.ml),
-[lib/goal/goal_verification.ml](../../../lib/goal/goal_verification.ml).
+Public scenarios in [test_goal_store.ml](../../../test/test_goal_store.ml) explicitly
+cover both backends: audited creation readable from the local primary with the
+same recovery bytes and pending events; blocked primary replacement retaining
+generation, recovery and the original outbox; recovery failure after a successful
+primary. Memory-only backend documents stay byte-identical and cannot authorize
+initialization. FileSystem backend keys alias local authority and naturally change.
+The blocked-primary case uses the documented low-level writer to isolate the I/O
+failure; normal locked mutation would refuse that unreadable source earlier.
+The pre-existing UTF-8 and unavailable/corrupt-store scenarios remain.
 
-Scenarios: [test/test_goal_store.ml](../../../test/test_goal_store.ml),
-[test/test_workspace.ml](../../../test/test_workspace.ml),
-[test/test_goal_tools.ml](../../../test/test_goal_tools.ml). **Not executed in this
-audit.**
+Syntax-only parsing passed for all three changed source/test files. Test authoring
+and source review do not establish execution; targeted run results are recorded on
+the PR when observed. No local Dune build, typecheck or test execution was performed.
 
-Ordering rationale: The exact flattening exists in current source, but the authority
-choice needs clarification from implementation and fault evidence. This is not a blanket
-change of every Result-returning writer; Workspace_backlog is a useful existing example
-of a committed-outcome boundary.
+Consumers: [workspace goals](../../../lib/workspace_goals.ml),
+[measurement](../../../lib/goal/goal_measurement.ml),
+[verification](../../../lib/goal/goal_verification.ml).
+Targeted verification: [Goal store](../../../test/test_goal_store.ml) and
+[Goal notification contract](../../../test/test_goal_notification_contract.ml).
+The generic workspace/backend writer contract is not changed by this layer.
 
 ### D5
 

@@ -15,10 +15,10 @@ function open(base:AppState=initial){
   const result=vi.fn(),restore=vi.fn(),changed=vi.fn()
   const session=new ArtifactAppSession({initial:base,workspace,current:()=>owner,result,restore,changed})
   session.attachFrame('first-document')
-  return {session,result,restore,loseOwner:()=>{owner=false}}
+  return {session,result,restore,changed,loseOwner:()=>{owner=false}}
 }
 beforeEach(()=>{vi.mocked(readAppState).mockReset();vi.mocked(writeAppState).mockReset()})
-afterEach(()=>{vi.unstubAllGlobals();for(const copy of appInputRecoveries(workspace,initial))discardAppInput(copy);localStorage.clear()})
+afterEach(()=>{vi.unstubAllGlobals();vi.restoreAllMocks();for(const copy of appInputRecoveries(workspace,initial))discardAppInput(copy);localStorage.clear()})
 it('keeps typing locally, commits on change and clears only acknowledged inputs',async()=>{
   vi.mocked(writeAppState).mockImplementation(async request=>saved(request))
   const {session,result}=open()
@@ -63,7 +63,7 @@ it('requires a deliberate conflict choice and keeps the other-tab copy after a s
   vi.mocked(readAppState).mockResolvedValue(remote);await session.check()
   expect(session.snapshot().mode).toBe('conflict')
   session.input(inputs('my later input'),2,true);expect(writeAppState).toHaveBeenCalledTimes(1)
-  const other=retainAppInput('another-tab',workspace,initial,inputs('separate recovery'),null)
+  const other=retainAppInput('another-tab',workspace,initial,inputs('separate recovery'),null).record
   vi.mocked(writeAppState).mockImplementation(async request=>saved(request,remote))
   await session.overwrite();expect(session.snapshot().pending).toBe(false)
   expect(vi.mocked(writeAppState).mock.calls[1]![0].expected_version).toBe(1)
@@ -124,10 +124,10 @@ it('keeps an idle check ready when the server state is identical',async()=>{
   expect(session.snapshot().pending).toBe(false)
 })
 it('clears owned and imported recoveries only after an identical server read',async()=>{
-  const owned=retainAppInput('owned',workspace,initial,initial.data,null)
+  const owned=retainAppInput('owned',workspace,initial,initial.data,null).record
   const {session}=open()
   session.restore(owned)
-  const other=retainAppInput('other-tab',workspace,initial,inputs('other tab'),null)
+  const other=retainAppInput('other-tab',workspace,initial,inputs('other tab'),null).record
   vi.mocked(readAppState).mockResolvedValue(initial)
   await session.check()
   expect(session.snapshot().mode).toBe('ready')
@@ -137,7 +137,7 @@ it('clears owned and imported recoveries only after an identical server read',as
 })
 it('preserves imported unsent data after editing the restored value back to the server state',async()=>{
   const server=saved(appRequest(initial,inputs('server value')))
-  const imported=retainAppInput('other-tab',workspace,server,inputs('unsent other tab'),null)
+  const imported=retainAppInput('other-tab',workspace,server,inputs('unsent other tab'),null).record
   const {session}=open(server)
   session.restore(imported)
   session.input(inputs('server value'),1,false)
@@ -147,7 +147,7 @@ it('preserves imported unsent data after editing the restored value back to the 
   expect(appInputRecoveries(workspace,server)).toEqual([imported])
 })
 it('preserves imported unsent data after overwriting the restored conflict',async()=>{
-  const imported=retainAppInput('other-tab',workspace,initial,inputs('unsent other tab'),null)
+  const imported=retainAppInput('other-tab',workspace,initial,inputs('unsent other tab'),null).record
   const {session}=open()
   session.restore(imported)
   session.input(inputs('replacement'),1,false)
@@ -159,7 +159,7 @@ it('preserves imported unsent data after overwriting the restored conflict',asyn
 })
 it('preserves newer imported data after GET confirms only the original request',async()=>{
   const request=appRequest(initial,inputs('request data'))
-  const imported=retainAppInput('other-tab',workspace,initial,inputs('newer unsent data'),request)
+  const imported=retainAppInput('other-tab',workspace,initial,inputs('newer unsent data'),request).record
   const server=saved(request)
   const {session}=open(server)
   session.restore(imported)
@@ -171,7 +171,7 @@ it('preserves newer imported data after GET confirms only the original request',
 })
 it('preserves newer imported data after retry confirms only the original request',async()=>{
   const request=appRequest(initial,inputs('request data'))
-  const imported=retainAppInput('other-tab',workspace,initial,inputs('newer unsent data'),request)
+  const imported=retainAppInput('other-tab',workspace,initial,inputs('newer unsent data'),request).record
   const {session}=open()
   session.restore(imported)
   session.input(inputs('request data'),1,false)
@@ -182,4 +182,57 @@ it('preserves newer imported data after retry confirms only the original request
   await session.retry()
   expect(session.snapshot().mode).toBe('ready')
   expect(appInputRecoveries(workspace,initial)).toEqual([imported])
+})
+it('reuses observed peer copies only after confirmed own input and still stores each input immediately',()=>{
+  const peer=retainAppInput('peer',workspace,initial,inputs('peer bytes'),null).record
+  const {session,changed}=open()
+  session.snapshot()
+  const read=vi.spyOn(localStorage,'key')
+  for(const [index,text]of ['first','second'].entries()){
+    read.mockClear();session.input(inputs(text),index+1,false)
+    expect(read).not.toHaveBeenCalled()
+    const state=changed.mock.calls.at(-1)![0]
+    expect(state.copies).toEqual([peer]);expect(state.data).toEqual(inputs(text))
+    expect(JSON.parse(localStorage.getItem(`masc.artifact-app-recovery.v1:${state.recovery!.id}:${state.recovery!.revision}`)!)).toMatchObject({data:inputs(text),request:null})
+  }
+})
+it('reads on first observation, a replacement frame and external refresh instead of inheriting another identity',()=>{
+  const {session,changed}=open()
+  const read=vi.spyOn(localStorage,'key')
+  session.input(inputs('before first snapshot'),1,false);expect(read).toHaveBeenCalled()
+  read.mockClear();session.attachFrame('replacement-frame')
+  session.input(inputs('new frame input'),1,false);expect(read).toHaveBeenCalled()
+  const external=retainAppInput('external',workspace,initial,inputs('external bytes'),null).record
+  read.mockClear();session.refreshCopies();expect(read).toHaveBeenCalled()
+  expect(changed.mock.calls.at(-1)![0].copies).toEqual([external])
+  discardAppInput(external);read.mockClear();session.refreshCopies();expect(read).toHaveBeenCalled()
+  expect(changed.mock.calls.at(-1)![0].copies).toEqual([])
+})
+it.each(['write','remove'] as const)('rereads after uncertain %s and preserves current input, durable fallback and other copies',failure=>{
+  const peer=retainAppInput('peer',workspace,initial,inputs('peer bytes'),null).record
+  const {session,changed}=open();session.input(inputs('durable'),1,false);session.snapshot()
+  const before=changed.mock.calls.at(-1)![0].recovery!,storage=localStorage
+  const key=vi.fn(storage.key.bind(storage))
+  vi.stubGlobal('localStorage',{get length(){return storage.length},key,getItem:storage.getItem.bind(storage),
+    setItem(name:string,value:string){if(failure==='write')throw new DOMException('full','QuotaExceededError');storage.setItem(name,value)},
+    removeItem(name:string){if(failure==='remove')throw new Error('deletion refused');storage.removeItem(name)}})
+  session.input(inputs('latest'),2,false)
+  expect(key).toHaveBeenCalled()
+  const state=changed.mock.calls.at(-1)![0]
+  expect(state.data).toEqual(inputs('latest'));expect(state.copies).toEqual([peer])
+  expect(state.recovery?.persisted).toBe(failure!=='write')
+  expect(storage.getItem(`masc.artifact-app-recovery.v1:${before.id}:${before.revision}`)).not.toBeNull()
+})
+it('keeps authoritative reads at saving, ACK and local-delete transitions',async()=>{
+  const {session,changed}=open();session.snapshot()
+  const pending=deferred<AppState>();vi.mocked(writeAppState).mockReturnValue(pending.promise)
+  const read=vi.spyOn(localStorage,'key')
+  session.input(inputs('committed'),1,true);expect(read).toHaveBeenCalled()
+  session.input(inputs('typing while saving'),2,false)
+  const peer=retainAppInput('peer',workspace,initial,inputs('peer bytes'),null).record
+  const request=vi.mocked(writeAppState).mock.calls[0]![0]
+  read.mockClear();pending.resolve(saved(request));await waitFor(()=>expect(changed.mock.calls.at(-1)![0].mode).toBe('ready'))
+  expect(read).toHaveBeenCalled();expect(changed.mock.calls.at(-1)![0].copies).toEqual([peer])
+  read.mockClear();session.input(inputs('committed'),3,false)
+  expect(read).toHaveBeenCalled();expect(changed.mock.calls.at(-1)![0].recovery).toBeNull()
 })

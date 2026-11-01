@@ -15,6 +15,8 @@
     is closed; this module only connects it to the socket. *)
 
 val serve :
+  ?scope_is_current:(unit -> bool) ->
+  ?scope_replaced:unit Eio.Promise.t ->
   sw:Eio.Switch.t ->
   clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
   subscribe:(on_event:(Fleet_stream.event -> unit) -> unit -> unit) ->

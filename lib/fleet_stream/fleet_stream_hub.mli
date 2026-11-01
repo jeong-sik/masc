@@ -36,6 +36,10 @@ val note_degraded : t -> since:float -> Fleet_stream.degraded_reason -> unit
     the outage began. Before the first reading it sends an
     [Unavailable_snapshot] with no invented fleet. *)
 
+val note_unavailable_if_unmeasured : t -> since:float -> Fleet_stream.degraded_reason -> unit
+(** Record an unavailable shared refresh only if this hub has no reading or
+    prior outage. A later reading wins over an old generation's wait failure. *)
+
 val subscribe : t -> on_event:(Fleet_stream.event -> unit) -> unit -> unit
 (** [subscribe t ~on_event] registers [on_event] and returns the function that
     removes it. If a state exists, [on_event] receives its [Snapshot] or

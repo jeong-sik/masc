@@ -95,7 +95,9 @@ type event =
       { revision : Revision.t
       ; degradation : degradation
       }
-      (** The first scan failed before any reading was available. *)
+      (** The refresh needed for the first reading failed or timed out. This
+          includes a wait behind an earlier scope's worker and does not assert
+          that a scan in the current scope began. *)
   | Snapshot of
       { revision : Revision.t
       ; measured_at : float

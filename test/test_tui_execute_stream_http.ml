@@ -601,6 +601,100 @@ let test_fleet_route_attests_its_admitted_workspace env =
            | _ -> false))))
 ;;
 
+(* Exercise the registered HTTP/1 route and its workspace admission wrapper,
+   not just [serve], across a same-path workspace replacement. *)
+let test_registered_fleet_route_replaces_its_scope env =
+  let workspace = Masc_test_deps.setup_test_workspace () in
+  let previous_state = Server_auth.For_testing.snapshot_server_state () in
+  let previous_startup = Masc.Server_startup_state.snapshot () in
+  let transport_env =
+    [ "MASC_HTTP_AUTH_STRICT", "false"
+    ; "MASC_HOST", "127.0.0.1"
+    ; "MASC_HTTP_BASE_URL", "http://127.0.0.1:8935" ]
+  in
+  let previous_env = List.map (fun (name, _) -> name, Sys.getenv_opt name) transport_env in
+  let state = Masc.Mcp_server.For_testing.create_state ~base_path:workspace in
+  Fun.protect
+    ~finally:(fun () ->
+      Server_auth.For_testing.restore_server_state previous_state;
+      Masc.Server_startup_state.For_testing.restore previous_startup;
+      List.iter (fun (name, value) ->
+        match value with Some value -> Unix.putenv name value | None -> Unix.unsetenv name)
+        previous_env;
+      Masc_test_deps.cleanup_test_workspace workspace)
+    (fun () ->
+      List.iter (fun (name, value) -> Unix.putenv name value) transport_env;
+      Server_auth.For_testing.restore_server_state (Some state);
+      Masc.Server_startup_state.reset ();
+      Result.get_ok (Masc.Server_startup_state.mark_state_ready ());
+      Eio.Switch.run (fun sw ->
+        let clock = Eio.Stdenv.clock env in
+        let scope = Masc.Mcp_server.workspace_scope state in
+        let hub_for scope =
+          match Server_routes_http_runtime.fleet_stream_hub_for_scope ~state ~scope with
+          | Some hub -> hub
+          | None -> Alcotest.fail "the current scope has no fleet hub"
+        in
+        let old_hub = hub_for scope in
+        Masc.Fleet_stream_hub.note_degraded old_hub ~since:10. Masc.Fleet_stream.Scan_failed;
+        let router = Server_routes_http_routes_fleet_stream.add_routes ~sw ~clock
+            (Masc.Http_server_eio.Router.create ()) in
+        let handler reqd =
+          Masc.Http_server_eio.Router.dispatch router (Httpun.Reqd.request reqd) reqd in
+        with_server env ~handler (fun ~port ->
+          let query = Uri.add_query_params' (Uri.of_string "")
+              [ "expected_base_path", Unix.realpath workspace
+              ; "expected_masc_root", Unix.realpath (Filename.concat workspace ".masc") ]
+            |> Uri.to_string in
+          let url = Printf.sprintf "http://127.0.0.1:%d%s%s" port
+              Masc.Fleet_stream.stream_path query in
+          let switched = ref false and attested = ref false in
+          let result =
+            Eio.Time.with_timeout_exn clock 3.0 (fun () ->
+              Masc_http_client.get_stream ~clock ~idle_timeout_sec:2.0 ~url ~headers:[]
+                ~on_response:(fun ~status ~headers ->
+                  Alcotest.(check int) "the registered route opens" 200 status;
+                  attested := List.exists (fun (name, value) ->
+                    String.equal (String.lowercase_ascii name) receipt_name
+                    && String.equal value (snd receipt)) headers)
+                ~on_chunk:(fun _ ->
+                  if not !switched then begin
+                    switched := true;
+                    Result.get_ok (Masc.Mcp_server.set_workspace_config state scope.config)
+                  end) ())
+          in
+          (match result with
+           | Ok (Masc_http_client.Pool.Streamed _) -> ()
+           | Ok (Masc_http_client.Pool.Buffered _) -> Alcotest.fail "fleet response was buffered"
+           | Error detail -> Alcotest.failf "fleet stream failed: %s" detail);
+          Alcotest.(check bool) "the first workspace was attested" true !attested;
+          Alcotest.(check bool) "the first scope delivered its snapshot" true !switched;
+          let new_scope = Masc.Mcp_server.workspace_scope state in
+          let new_hub = hub_for new_scope in
+          Alcotest.(check bool) "the replacement has no old snapshot" true
+            (Option.is_none (Masc.Fleet_stream_hub.current new_hub));
+          Masc.Fleet_stream_hub.note_degraded new_hub ~since:20. Masc.Fleet_stream.Scan_timed_out;
+          let reader = Masc_tui_fleet_stream.create () in
+          let exception Snapshot_received in
+          (match Http.observe_fleet_stream ~clock ~expected_workspace:
+               { identity with
+                 sid_base_path = Masc.Tui_decode.Canonical_path.of_path (Unix.realpath workspace)
+               ; sid_masc_root = Masc.Tui_decode.Canonical_path.of_path
+                   (Unix.realpath (Filename.concat workspace ".masc")) }
+               ~host:"127.0.0.1" ~port ~on_chunk:(fun chunk ->
+                 ignore (Masc_tui_fleet_stream.feed reader chunk : Masc_tui_fleet_stream.step);
+                 match Masc_tui_fleet_stream.view reader with
+                 | Masc_tui_fleet_stream.Unavailable _ -> raise Snapshot_received
+                 | _ -> ()) with
+           | exception Snapshot_received -> ()
+           | _ -> Alcotest.fail "the replacement stream supplied no snapshot");
+          Alcotest.(check bool) "the replacement received only its own state" true
+            (match Masc_tui_fleet_stream.view reader with
+             | Masc_tui_fleet_stream.Unavailable { degradation; _ } ->
+                 degradation.reason = Masc.Fleet_stream.Scan_timed_out
+             | _ -> false))))
+;;
+
 (* Exercise the real MCP GET handler over H1. Authentication is supplied by
    this fixture; the assertion is that ambiguous cursors stop before SSE
    registration. *)
@@ -757,6 +851,7 @@ let () =
       , [ case "both subscriptions validate status and media type" test_sse_status_and_content_type_gate
         ; case "HTTP refusals keep status and body" test_sse_http_refusals_keep_status_and_body
         ; case "fleet requires the workspace receipt" test_fleet_requires_workspace_receipt
-        ; case "fleet route attests its admitted workspace" test_fleet_route_attests_its_admitted_workspace ] )
+        ; case "fleet route attests its admitted workspace" test_fleet_route_attests_its_admitted_workspace
+        ; case "registered fleet route replaces its scope" test_registered_fleet_route_replaces_its_scope ] )
     ]
 ;;

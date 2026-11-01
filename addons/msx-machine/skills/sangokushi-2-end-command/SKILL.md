@@ -1,14 +1,22 @@
 ---
 name: sangokushi-2-end-command
-description: "Sends the observed Sangokushi II province-command end sequence (0, Return, y), waits for screen settling and returns the observation. Use only at the province (0-19)? prompt while authorized to drive the shared machine. Inspect the returned image: screen settling does not prove province completion or month progression. If another driver intervened or the result is uncertain, observe the current state before choosing further input; do not replay the sequence automatically."
+description: "Sends the observed Sangokushi II province-command end sequence (0, Return, y), attempts screen settling and returns an observation. Use only at the province (0-19)? prompt while authorized to drive the shared machine. Check the settle result: stable=false means the frame budget ended before settling; continue observation with masc_msx_step_until_change or masc_msx_step before judging completion. Inspect the image even when stable=true; settling does not prove province completion or month progression. If another driver intervened or the result is uncertain, observe before further input; do not replay the sequence automatically."
 ---
 
 # Sangokushi II: end the province's commands
 
 The verified province-command end for Sangokushi II, observed as the province
-10 to 18 transition. One call presses `0`, Return, `y` in sequence, advances
-until the screen settles (`masc_msx_step_until_change`), and returns the
-settled observation with its frame and artifact.
+10 to 18 transition. One call presses `0`, Return, `y` in sequence, attempts
+screen settling (`masc_msx_step_until_change`), and returns a screen observation
+with its frame and artifact. The frame budget can expire before settling.
+
+Read the settle node's `stable` result before treating the image as settled.
+If `stable=false`, continue observation with `masc_msx_step_until_change` or
+`masc_msx_step` and inspect the resulting state. If the composition result does
+not expose `stable`, call `masc_msx_step_until_change` directly to obtain it.
+Neither `stable=true` nor a returned PNG proves province completion or month
+progression; verify the visible game state. Do not replay the key sequence to
+continue a transition.
 
 Use it only when the visible prompt is the province command prompt of the
 province you are finishing; a macro pressed on another screen is just keys.
@@ -20,7 +28,7 @@ re-observe before retrying (the `msx-play` Skill, shared machine).
 ```toml composition
 [[compositions]]
 name = "sangokushi-2-end-command"
-description = "Sends the observed Sangokushi II province-command end sequence (0, Return, y), waits for screen settling and returns the observation. Use only at the province (0-19)? prompt while authorized to drive the shared machine. Inspect the returned image: screen settling does not prove province completion or month progression. If another driver intervened or the result is uncertain, observe the current state before choosing further input; do not replay the sequence automatically."
+description = "Sends the observed Sangokushi II province-command end sequence (0, Return, y), attempts screen settling and returns an observation. Use only at the province (0-19)? prompt while authorized to drive the shared machine. Check the settle result: stable=false means the frame budget ended before settling; continue observation with masc_msx_step_until_change or masc_msx_step before judging completion. Inspect the image even when stable=true; settling does not prove province completion or month progression. If another driver intervened or the result is uncertain, observe before further input; do not replay the sequence automatically."
 execution = "inline"
 
 [[compositions.nodes]]

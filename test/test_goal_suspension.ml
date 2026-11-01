@@ -117,7 +117,7 @@ let test_bound_result () = with_workspace @@ fun config wakes ->
       let request = pending config goal.id in
       (match Goal_verification.bind_review config ~goal_id:goal.id with
        | Ok (_, (request_id, _, _)) -> check string "bound existing request" (fst request) request_id
-       | Error error -> fail error);
+       | Error error -> fail (Goal_verification.review_binding_error_to_string error));
       change config goal.id suspend;
       check bool "daemon binding rejects suspended Goal" true
         (Result.is_error (Goal_verification.bind_review config ~goal_id:goal.id));
@@ -288,6 +288,33 @@ let test_drop_without_reason_is_refused () = with_workspace @@ fun config _ ->
        | _ -> fail (label ^ " touched a linked Task")))
     [ "no note", []; "blank note", ["note", `String "   "] ]
 
+let test_binding_unavailable_is_not_an_ended_request () = with_workspace @@ fun config _ ->
+  let goal = create config in
+  change config goal.id "request_complete";
+  let request_id, _ = pending config goal.id in
+  List.iter (fun path ->
+    let original = Fs_compat.load_file path in
+    let corrupt = "{unavailable" in
+    Fun.protect ~finally:(fun () -> Fs_compat.save_file_atomic path original)
+      (fun () ->
+        Fs_compat.save_file_atomic path corrupt;
+        (match Goal_verification.bind_review config ~goal_id:goal.id with
+         | Error (Goal_verification.Binding_unavailable _) -> ()
+         | Error (Goal_verification.No_current_review _) ->
+           fail "unreadable authority was mistaken for an ended request"
+         | Ok _ -> fail "unreadable authority admitted a review");
+        check string "binding preserves unavailable bytes" corrupt (Fs_compat.load_file path));
+    (match Goal_verification.bind_review config ~goal_id:goal.id with
+     | Ok (_, (current, _, _)) -> check string "recovery binds the same request" request_id current
+     | Error error -> fail (Goal_verification.review_binding_error_to_string error)))
+    [Goal_store.goals_path config; Goal_verification.verifications_path config];
+  change config goal.id "pause";
+  (match Goal_verification.bind_review config ~goal_id:goal.id with
+   | Error (Goal_verification.No_current_review _) -> ()
+   | Error (Goal_verification.Binding_unavailable _) -> fail "confirmed suspension is not a read failure"
+   | Ok _ -> fail "suspension admitted a new review");
+  check string "suspension keeps the original pending proof" request_id (fst (pending config goal.id))
+
 let () = run "Goal suspension" ["drop", [
   test_case "drop cancels leftover todo, keeps shared and held work" `Quick test_drop_cancels_left_over_todo;
   test_case "drop without a reason is refused and changes nothing" `Quick test_drop_without_reason_is_refused;
@@ -295,6 +322,7 @@ let () = run "Goal suspension" ["drop", [
   test_case "restore every live state across both suspension kinds" `Quick test_restore_matrix;
   test_case "terminal refusal and Drop/Reopen escape" `Quick test_terminal_and_escape;
   test_case "bound verdict preserves suspension and reconciles on restore" `Quick test_bound_result;
+  test_case "unavailable binding preserves the pending request" `Quick test_binding_unavailable_is_not_an_ended_request;
   test_case "criterion edit invalidates proof but preserves suspension" `Quick test_edit_suspended;
   test_case "confirmation restores the same proof binding" `Quick test_confirmation_restores_binding;
   test_case "Candle failure retains pending proof and suspension" `Quick test_candle_failure;

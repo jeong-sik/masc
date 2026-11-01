@@ -53,9 +53,35 @@ it('returns a typed refusal for a stale Keeper range and leaves the committed st
   const selected = accepted({ kind: 'select', state: first.state, anchor: 0, head: 2 })
   const edited = accepted({ kind: 'edit', state: first.state, selection: selected.selection, expected: '원래', replacement: '수정' })
   const refused = run({ kind: 'edit', state: edited.state, selection: selected.selection, expected: '원래', replacement: '덮어쓰기' })
-  expect(refused.ok).toBe(false)
+  expect(refused).toMatchObject({ ok: false, code: 'changed_selection' })
   expect(refused).not.toHaveProperty('state')
   expect(accepted({ kind: 'merge', state: edited.state, updates: [] }).content).toBe('수정 본문')
+})
+
+it('refuses invalid input metadata even when a later update would remove it', () => {
+  const first = accepted({ kind: 'seed', content: 'safe text' }), remote = new Y.Doc()
+  try {
+    Y.applyUpdate(remote, Uint8Array.from(atob(first.state!), value => value.charCodeAt(0)))
+    remote.getMap('content').set('actor', 'trusted-keeper')
+    const invalid = btoa(String.fromCharCode(...Y.encodeStateAsUpdate(remote)))
+    remote.getMap('content').delete('actor')
+    const repaired = btoa(String.fromCharCode(...Y.encodeStateAsUpdate(remote)))
+    expect(accepted({ kind: 'merge', state: repaired, updates: [] }).content).toBe('safe text')
+    const refused = run({ kind: 'merge', state: invalid, updates: [repaired] })
+    expect(refused).toMatchObject({ ok: false, code: 'invalid_document' })
+    expect(refused).not.toHaveProperty('state')
+  } finally { remote.destroy() }
+})
+
+it.each([
+  { kind: 'select', anchor: 2, head: 2 },
+  { kind: 'resolve', selection: { anchor: [], head: [] } },
+])('preserves invalid_selection refusal and the original state: %o', request => {
+  const first = accepted({ kind: 'seed', content: '가😀나' })
+  const refused = run({ ...request, state: first.state })
+  expect(refused).toMatchObject({ ok: false, code: 'invalid_selection' })
+  expect(refused).not.toHaveProperty('state')
+  expect(accepted({ kind: 'merge', state: first.state, updates: [] }).state).toBe(first.state)
 })
 
 it('rejects broken surrogate replacements before changing the draft', () => {

@@ -934,8 +934,10 @@ let test_glm_vision_rows_agree () =
 (* Every number here was read from OpenRouter's own GET /api/v1/models
    metadata or measured on the wire on 2026-09-10
    (evidence/task-openrouter-support/) or 2026-09-22
-   (evidence/task-openrouter-new-models/). Provider-scoped lookup is an exact
-   id match, so each row is asserted on its own rather than through a prefix. *)
+   (evidence/task-openrouter-new-models/). The 2026-10-28 refresh is retained
+   in evidence/2026-10-28-openrouter-bindings/; its two ids, windows and output
+   ceilings also match GET /api/v1/models on 2026-11-01. Provider-scoped lookup
+   is an exact id match, so each row is asserted on its own. *)
 let openrouter_rows =
   (* id, context, max output, input $/1M, output $/1M, image input *)
   [ "anthropic/claude-opus-5", 1_000_000, 128_000, 5.0, 25.0, None
@@ -947,7 +949,7 @@ let openrouter_rows =
   ; "moonshotai/kimi-k3", 1_048_576, 943_718, 3.0, 15.0, None
   ; "z-ai/glm-5.3-flash", 1_310_720, 131_072, 0.075, 0.25, None
   ; "z-ai/glm-5.3", 1_310_720, 943_718, 1.4, 4.4, Some false
-  ; "deepseek/deepseek-v4.1-flash", 1_048_576, 384_000, 0.3, 1.2, None
+  ; "deepseek/deepseek-v4.1-flash-1017", 1_048_576, 393_216, 0.3, 1.2, None
   ; "deepseek/deepseek-v4-flash", 1_048_576, 384_000, 0.088606, 0.177212, Some false
   ; "deepseek/deepseek-v4-pro", 1_048_576, 384_000, 0.95526, 1.91052, Some false
   ; "qwen/qwen3.8-max-0902", 1_000_000, 131_072, 2.0, 6.0, None
@@ -960,6 +962,7 @@ let openrouter_rows =
   ; "x-ai/grok-4.7", 500_000, 450_000, 1.6, 4.8, None
   ; "qwen/qwen3.8-flash", 1_000_000, 131_072, 0.15, 0.47, None
   ; "z-ai/glm-5.3-flashx", 1_048_576, 131_072, 0.37, 1.25, None
+  ; "nvidia/nemotron-3.5-super-vl:free", 1_000_000, 131_072, 0.0, 0.0, None
   ]
 ;;
 
@@ -1115,7 +1118,6 @@ let openrouter_effort_ladders =
       ; "openai/gpt-5.6-sol"
       ; "moonshotai/kimi-k3"
       ; "deepseek/deepseek-v4-flash"
-      ; "deepseek/deepseek-v4.1-flash"
       ; "deepseek/deepseek-v4-pro"
       ; "anthropic/claude-haiku-4.5"
       ; "openai/gpt-5.6-terra"
@@ -1127,20 +1129,32 @@ let openrouter_effort_ladders =
       ]
 ;;
 
-let test_openrouter_rows_declare_their_measured_effort_ladder () =
+(* The 2026-10-28 refresh measured only [none], basic output and one tool call
+   (evidence/2026-10-28-openrouter-bindings/status.txt). It did not measure a
+   seven-rung ladder for either id; do not transfer the old snapshot's probes. *)
+let openrouter_disable_probe_rows =
+  [ "deepseek/deepseek-v4.1-flash-1017"; "nvidia/nemotron-3.5-super-vl:free" ]
+;;
+
+let test_openrouter_rows_retain_measured_effort_evidence () =
   let catalog =
     Model_catalog_test_support.load_repo_model_catalog ~suite:"OpenRouter efforts"
   in
   let entries = Model_catalog.model_entries catalog in
+  let catalog_model_ids =
+    List.filter_map
+      (fun (entry : Model_catalog.model_entry) ->
+         if entry.provider_name = Some "openrouter" then
+           Some (Llm_provider.Model_identifiers.Model_id.to_string entry.model_id)
+         else None)
+      entries
+  in
   check
-    int
-    "every OpenRouter row in the catalog has a measured ladder"
-    (List.length
-       (List.filter
-          (fun (entry : Model_catalog.model_entry) ->
-             entry.provider_name = Some "openrouter")
-          entries))
-    (List.length openrouter_effort_ladders);
+    (list string)
+    "every OpenRouter row has retained effort evidence for its exact id"
+    (List.sort String.compare
+       (List.map fst openrouter_effort_ladders @ openrouter_disable_probe_rows))
+    (List.sort String.compare catalog_model_ids);
   List.iter
     (fun (model_id, expected) ->
        let entry = openrouter_entry entries model_id in
@@ -1149,7 +1163,14 @@ let test_openrouter_rows_declare_their_measured_effort_ladder () =
          (model_id ^ " effort ladder")
          (Some expected)
          entry.accepted_reasoning_efforts)
-    openrouter_effort_ladders
+    openrouter_effort_ladders;
+  List.iter
+    (fun model_id ->
+       let entry = openrouter_entry entries model_id in
+       check bool (model_id ^ " retains its measured disable rung") true
+         (Option.fold ~none:false ~some:(List.mem "none")
+            entry.accepted_reasoning_efforts))
+    openrouter_disable_probe_rows
 ;;
 
 (* F422: the six single-value capability vocab parsers answered [""] with
@@ -1284,9 +1305,9 @@ let () =
             `Quick
             test_openrouter_rows_lower_contradicted_base_claims
         ; test_case
-            "OpenRouter rows declare their measured effort ladder"
+            "OpenRouter rows retain measured effort evidence"
             `Quick
-            test_openrouter_rows_declare_their_measured_effort_ladder
+            test_openrouter_rows_retain_measured_effort_evidence
         ; test_case
             "empty capability vocab value is rejected"
             `Quick

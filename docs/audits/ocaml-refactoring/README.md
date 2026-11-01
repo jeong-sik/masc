@@ -93,7 +93,7 @@ runtime gates. Source-review completion alone leaves a Draft item in review.
 
 The queue now contains **30 concrete candidates**: 24 from the first semantic pass, A1
 from the Agent Core follow-up, T1 from the integrated TUI investigation, E1/E2 from
-Exec, M1 from multimodal/media, and J1 from the Schedule investigation. Twenty-five are
+Exec, M1 from multimodal/media, and J1 from the Schedule investigation. Twenty-six are
 implemented as PRs; source review and execution evidence are recorded separately on each PR: `S1` in
 [#43367](https://github.com/jeong-sik/masc/pull/43367) isolates provider usage
 acceptance; `K1` in [#43370](https://github.com/jeong-sik/masc/pull/43370) preserves
@@ -145,14 +145,17 @@ immutable accumulation and a private semantic-validation owner. K7 in
 [#47114](https://github.com/jeong-sik/masc/pull/47114) isolates immutable receipt
 selection while retaining durable reconciliation effects. D4 in
 [#47125](https://github.com/jeong-sik/masc/pull/47125) aligns Goal publication
-with its existing local primary authority. Five candidates remain unfinished. This ordering does not waive their coverage.
+with its existing local primary authority. K4 in
+[#47126](https://github.com/jeong-sik/masc/pull/47126) gives attempt-local request
+evidence one immutable owner. Four candidates remain unfinished. This ordering
+does not waive their coverage.
 
 | ID | Priority | Status | Refactoring point |
 | --- | --- | --- | --- |
 | [K1](#k1) | next | in review | Compute librarian failure evidence once with explicit independent policy axes |
 | [K2](#k2) | next | in review | Give canonical child export selection a typed pure boundary |
 | [K3](#k3) | next | in review | Represent Board contention rearm tickets with one explicit phase |
-| [K4](#k4) | later | candidate | Make request-evidence reset and projection ownership explicit per attempt |
+| [K4](#k4) | later | implemented; execution unverified | Make request-evidence reset and projection ownership explicit per attempt |
 | [K5](#k5) | later | source reviewed; execution unverified | Separate approval restart replay decisions from recovery effects |
 | [K6](#k6) | investigate | implemented; execution unverified | Make Agent Core committed-batch scanning an explicit returned state |
 | [K7](#k7) | later | implemented; execution unverified | Separate Memory receipt reconciliation selection from its durable plan |
@@ -412,54 +415,72 @@ repair would require its own explicit contract.
 
 **Make request-evidence reset and projection ownership explicit per attempt**
 
-Source:
-[lib/keeper/keeper_agent_run.ml:1475](https://github.com/jeong-sik/masc/blob/aea8424926ea79f110315eec5ab429ac51043598/lib/keeper/keeper_agent_run.ml#L1475-L1547),
-[lib/keeper/keeper_agent_run.ml:1910](https://github.com/jeong-sik/masc/blob/aea8424926ea79f110315eec5ab429ac51043598/lib/keeper/keeper_agent_run.ml#L1910-L2065),
-[lib/keeper/keeper_agent_run.ml:2545](https://github.com/jeong-sik/masc/blob/aea8424926ea79f110315eec5ab429ac51043598/lib/keeper/keeper_agent_run.ml#L2545-L2701).
+Implemented in [#47126](https://github.com/jeong-sik/masc/pull/47126).
+Code head `b5492ef8c1e94a1d73376ddff9d346acfdd1f4d8`:
+[private evidence owner](https://github.com/jeong-sik/masc/blob/b5492ef8c1e94a1d73376ddff9d346acfdd1f4d8/lib/keeper/keeper_attempt_request_evidence.mli#L1-L77),
+[run integration](https://github.com/jeong-sik/masc/blob/b5492ef8c1e94a1d73376ddff9d346acfdd1f4d8/lib/keeper/keeper_agent_run.ml#L1279-L1412).
 
-Problem: Request attribution, wire evidence, projected provider content, and projected
-messages occupy four independently reset refs; the source comment explicitly documents
-that clearing only the final record cells lets a failed lane attempt leak its inputs
-into the next lane. Their updates and final projections are hundreds of lines apart.
-Turn-local model-input windows and last-response observations intentionally have
-different lifetimes, so a broad single optional evidence cell would also be wrong.
+The three independently reset attribution, wire and provider-content refs are now
+one callback-owned publication cell holding an abstract immutable product. The
+private module owns the two existing payload records with a seven-value interface;
+Agent_run retains observation, classification, logging, scheduling, persistence
+and runtime effects. The public Agent_run interface is byte-identical. Root
+`lib/dune` owns the private helper; no new library dependency or facade is added.
 
-Change: Encapsulate attempt-local request evidence in a private state record with an
-explicit unprojected/projected projection variant and named
-begin_attempt/observe_projection/observe_wire/observe_native_input operations. Each
-operation returns the new state; one callback-owned cell may publish it. Keep turn-local
-window/response evidence and digest memo ownership separate. Expose immutable snapshots
-to receipt generation.
+Projection is explicitly `Unprojected | Projected of result`. Unprojected means
+no retained provider-content projection and includes source-projection failure;
+it does not establish that dispatch did not happen. An observed provenance
+failure remains Projected(Error), distinct from a classified empty message list.
+Clearing projection leaves attribution and wire unchanged. A wire observation
+without a newly classified attribution retains the previous attribution within
+that same attempt, preserving the existing policy.
 
-Preserve:
+Reset remains exactly after attempt preview and before Run_tools' materialized
+attempt callback. A failed/missing catalog candidate does not reset evidence
+merely by emitting an error. Field-specific updates read the current outer state
+at the existing publication point; no pre-await snapshot is later written back.
+Repeated projection reads and final receipt/store reads keep their original
+positions. Unchanged fields retain the original payload objects, including the
+physical attribution identity used by the existing input-segment memo.
 
-- Every materialized runtime attempt resets all attempt-local evidence together.
-- Turn-local window cuts and last-response input observations survive a later runtime selection.
-- A native client holding input is an explicit attribution gap, not zero bytes or an
-  absent dispatch.
-- A wire observation can exist without a serializable body or successful provenance and
-  must retain that distinction.
-- A turn-local digest memo is mutated only by its owning fiber after the awaited CPU
-  job; cancellation does not hand shared mutable state to a worker.
-- Persisted input snapshots and receipt runtime attribution use the actual observed attempt.
+Turn-long input windows, response observations, request-comparison state, digest
+memo, observation rows and the shared tool-agent cell stay outside this owner.
+The digest worker still receives a private memo snapshot, with caller publication
+after the awaited result. Native request attribution remains independent of
+MASC-owned HTTP wire measurement. Final provider-input snapshots retain the wire's
+runtime and its independently optional serialized/messages/system-prompt data.
+No new reset, synchronization, timing, durability or performance claim is made.
 
-Consumers: [lib/keeper/keeper_agent_run.ml](../../../lib/keeper/keeper_agent_run.ml),
-[lib/keeper/keeper_turn.ml](../../../lib/keeper/keeper_turn.ml),
-[lib/keeper/keeper_turn_record_writer.ml](../../../lib/keeper/keeper_turn_record_writer.ml),
-[lib/keeper/keeper_provider_input_snapshot.ml](../../../lib/keeper/keeper_provider_input_snapshot.ml).
+Fresh main `e715c3de796d00066b6ec0b2981cbc6660b0333c` has identical relevant
+production/interfaces and app-server fixture/stanza to the parent. The 82-open-PR
+census found shared paths in #47116/#46936/#46942 and app-server test additions in
+#47121/#47030, but no existing implementation of this evidence owner or changed
+last-projection cases. Preserve their runtime image/tool preparation arguments,
+checkpoint callbacks and independent fixtures on later integration. Unrelated
+root/test Dune differences are not imported; the prior K7 private entry remains.
 
-Scenarios:
-[test/test_keeper_prompt_metrics.ml](../../../test/test_keeper_prompt_metrics.ml),
-[test/test_keeper_model_input_ledger.ml](../../../test/test_keeper_model_input_ledger.ml),
-[test/test_keeper_projection_change.ml](../../../test/test_keeper_projection_change.ml),
-[test/test_keeper_model_input_demotion.ml](../../../test/test_keeper_model_input_demotion.ml),
-[test/test_keeper_official_client_host.ml](../../../test/test_keeper_official_client_host.ml).
-**Not executed in this audit.**
+The existing actual production `test_production_last_projection` cases in
+[test_runtime_codex_app_server.ml](../../../test/test_runtime_codex_app_server.ml)
+now also check absent stale components/tool reference/wire evidence on later
+materialized Codex claim refusal, while retaining the exact prior input window
+and typed recovery cause. Fresh successful native Start compares its typed
+Attributed runtime/segments with the actual durable record and retains no earlier
+HTTP wire measurement. The new focused alias selects the existing seven-case
+last-projection group. There is no callback replica or new private test hook.
 
-Ordering rationale: Causal historical risk is documented directly beside the reset code.
-High impact on observability integrity, but callback lifetime and mixed native/Agent
-Core paths make this less isolated than K1-K3. Existing helper tests do not by
-themselves prove a complete multi-attempt run_turn scenario.
+A failed run returns Error without ctx_composition, so its nullable record fields
+do not directly prove a typed Dispatch_not_reached metric. Fresh native Start does
+not prove resumed/client-held-session production coverage. Existing prompt-metric
+scenarios retain their separate typed unavailable/provenance contracts.
+Syntax-only parsing/source review and actual execution are separate evidence;
+completed targeted results, when observed, are recorded on the PR. No local Dune
+build, typecheck or test execution was performed.
+
+Consumers: [Agent_run](../../../lib/keeper/keeper_agent_run.ml),
+[turn record writer](../../../lib/keeper/keeper_turn_record_writer.ml),
+[provider snapshot](../../../lib/keeper/keeper_provider_input_snapshot.ml).
+Verification targets: `test_runtime_codex_app_server_last_projection` and
+[test_keeper_prompt_metrics.ml](../../../test/test_keeper_prompt_metrics.ml).
 
 ### K5
 

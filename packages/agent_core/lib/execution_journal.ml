@@ -2466,7 +2466,7 @@ let create_durable_writer_from open_store =
 ;;
 
 let open_durable_writer_from open_store =
-  let* opened =
+  let* (opened : Store.opened) =
     match open_store () with
     | Ok result -> Ok result
     | Error error -> Error (Persistence_failure error)

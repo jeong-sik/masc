@@ -633,11 +633,19 @@ let test_fusion_capture_retains_exact_state_across_terminal_change () =
           let reused_run = run_id ^ "/reused/" ^ string_of_int index in
           let origin : Masc.Board.post_origin = {turn_ref=None;source=Some "fusion";
             fusion_run_id=Some reused_run;fusion_producer=producer} in
-          (match Masc.Board_dispatch.create_post_once_by_fusion_run_id
-            ~fusion_run_id:reused_run ~author ~content:"private foreign transcript"
-            ~meta_json:(`Assoc ["prompt",`String "private foreign prompt"])
-            ~post_kind:Masc.Board.System_post ~visibility:Masc.Board.Unlisted ~ttl_hours:0 ~origin () with
-           | Ok _ -> () | Error _ -> fail "fixture Board post creation failed");
+          (match producer with
+           | Some _ ->
+             (match Masc.Board_dispatch.create_post_once_by_fusion_run_id
+               ~fusion_run_id:reused_run ~author ~content:"private foreign transcript"
+               ~meta_json:(`Assoc ["prompt",`String "private foreign prompt"])
+               ~post_kind:Masc.Board.System_post ~visibility:Masc.Board.Unlisted ~ttl_hours:0 ~origin () with
+              | Ok _ -> () | Error _ -> fail "fixture Board post creation failed")
+           | None ->
+             (match Masc.Board_dispatch.create_post
+               ~author ~content:"private foreign transcript"
+               ~meta_json:(`Assoc ["prompt",`String "private foreign prompt"])
+               ~post_kind:Masc.Board.System_post ~visibility:Masc.Board.Unlisted ~ttl_hours:0 ~origin () with
+              | Ok _ -> () | Error _ -> fail "fixture Board post creation failed"));
           Fusion_run_registry.register_running registry ~run_id:reused_run
             ~keeper:"fixture" ~preset:"default" ~roster:Fusion_types.preset_roster
             ~topology:Fusion_types.Simple ~started_at:2.;

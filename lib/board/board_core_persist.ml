@@ -882,8 +882,9 @@ let create_post_once_by_fusion_run_id
   else if ttl_hours < 0
   then pre_effect (Validation_error "ttl_hours must be non-negative")
   else
-    match origin.fusion_run_id with
-    | Some origin_run_id when String.equal origin_run_id fusion_run_id ->
+    match origin.fusion_run_id, origin.fusion_producer with
+    | Some origin_run_id, Some producer
+      when String.equal origin_run_id fusion_run_id && String.trim producer <> "" ->
       (match
          Agent_id.of_string author,
          normalize_post_payload ~content ~post_kind ?meta_json ()
@@ -934,14 +935,19 @@ let create_post_once_by_fusion_run_id
                create_post_with_audience store ~lookup ~author ~content ~post_kind
                  ?meta_json ~visibility ~ttl_hours ~origin ()
                |> Result.map (fun creation -> Post_created creation)))
-    | Some origin_run_id ->
+    | Some origin_run_id, (None | Some _)
+      when String.equal origin_run_id fusion_run_id ->
+      pre_effect
+        (Validation_error
+           "create_post_once_by_fusion_run_id requires non-empty origin.fusion_producer")
+    | Some origin_run_id, _ ->
       pre_effect
         (Validation_error
            (Printf.sprintf
               "fusion_run_id mismatch: argument=%S origin=%S"
               fusion_run_id
               origin_run_id))
-    | None ->
+    | None, _ ->
       pre_effect
         (Validation_error
            "create_post_once_by_fusion_run_id requires typed fusion origin")

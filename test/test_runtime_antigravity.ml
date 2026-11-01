@@ -479,6 +479,29 @@ let test_keeper_preserves_final_suffix_after_partial_steps () =
      "DONE", [`Text (0,"PO"); `Stop 0; `Stop 1; `Text (2,"NG\n"); `Stop 2]]
 ;;
 
+let test_keeper_reconciles_raw_current_and_previous_messages () =
+  let module Stream = Keeper_official_client_text_stream in
+  let t = Stream.create ~equal:String.equal () in
+  ignore (Stream.forward t ~message:(Some "first") "첫째\n");
+  ignore (Stream.forward t ~message:(Some "second") "둘째");
+  let finish final_text = Stream.finish_response t ~final_text in
+  check (option string) "raw continuation forwards only its suffix" (Some "!")
+    (finish "첫째\n둘째!");
+  check (option string) "current message continuation forwards only its suffix" (Some "!")
+    (finish "둘째!");
+  check (option string) "raw text is not repeated" None (finish "첫째\n둘째");
+  check (option string) "current text is not repeated" None (finish "둘째");
+  check (option string) "an earlier message is not repeated" None (finish "첫째\n");
+  check (option string) "empty final text adds nothing" None (finish "");
+  check (option string) "a different response begins a new paragraph" (Some "\n\n완료")
+    (finish "완료");
+  Stream.tool_row t;
+  check (option string) "a tool row separates the different response" (Some "완료")
+    (finish "완료");
+  check (option string) "reconciliation does not change retained text" (Some "!")
+    (finish "둘째!")
+;;
+
 let test_keeper_reconciles_four_response_steps_and_new_final () =
   List.iter (fun response ->
     let events = ref [] in
@@ -1837,6 +1860,8 @@ let () =
     "runtime_antigravity"
     [ ( "stream-json"
       , [ test_case "response content identity and native completion" `Quick test_response_step_ends_preserve_content_identity
+        ; test_case "raw current and previous response reconciliation" `Quick
+            test_keeper_reconciles_raw_current_and_previous_messages
         ; test_case "complete response closes before tool" `Quick test_done_only_response_closes_before_next_tool
         ; test_case "late response update rejected" `Quick test_late_or_conflicting_response_update_is_rejected
         ; test_case "unassigned ending cannot close named response" `Quick test_unassigned_ends_cannot_close_named_content

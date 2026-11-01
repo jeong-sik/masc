@@ -1,0 +1,73 @@
+let fuzz () =
+  let rng=Random.State.make [|2026;10;30;46888|] in
+  let draw n=Random.State.int rng n in
+  let parts=[|"";"x";"hi";"\n";"\n\n";"한글";"\000";"\xed";"\x95\x9c";"DONE"|] in
+  let ids=[|None;Some "a";Some "b";Some "c"|] in
+  let count=ref 0 in
+  for sequence=1 to 1000 do
+    let old=Old_stream.create ~equal:String.equal () and newer=New_stream.create ~equal:String.equal () in
+    let equal_state () =
+      Buffer.contents old.shown=Buffer.contents newer.shown
+      && Buffer.contents old.raw=Buffer.contents newer.raw
+      && Buffer.contents old.current=Buffer.contents newer.current
+      && old.previous_messages=newer.previous_messages && old.message=newer.message
+      && old.after_tool_row=newer.after_tool_row in
+    for step=1 to 60 do
+      let piece=parts.(draw (Array.length parts)) in
+      let id=ids.(draw (Array.length ids)) in
+      let raw=Buffer.contents old.raw and current=Buffer.contents old.current in
+      let candidate=match draw 8 with
+        | 0 -> raw | 1 -> current | 2 -> raw^piece | 3 -> current^piece
+        | 4 -> (match old.previous_messages with [] -> piece | s::_ -> s)
+        | _ -> piece in
+      let same=match draw 5 with
+        | 0 -> Old_stream.forward old ~message:id piece = New_stream.forward newer ~message:id piece
+        | 1 -> Old_stream.tool_row old;New_stream.tool_row newer;true
+        | 2 -> let message=Option.value ~default:"a" id in
+          Old_stream.complete_message old ~message ~text:candidate =
+          New_stream.complete_message newer ~message ~text:candidate
+        | 3 -> Old_stream.remainder old ~final_text:candidate = New_stream.remainder newer ~final_text:candidate
+        | _ -> Old_stream.finish_response old ~final_text:candidate = New_stream.finish_response newer ~final_text:candidate in
+      if not same || not (equal_state ()) then failwith (Printf.sprintf "mismatch at %d/%d" sequence step);
+      incr count
+    done
+  done;
+  Printf.printf "PASS: %d seeded stream operations preserve outputs and internal state\n%!" !count
+
+let sample csv bytes shape iterations version =
+  let a=String.make bytes 'a' and b=String.make bytes 'b' in
+  let raw=a^b in
+  let final=match shape with
+    | "raw-equal" -> raw | "current-equal" -> b | "previous" -> a
+    | "raw-prefix" -> raw^"suffix" | "current-prefix" -> b^"suffix"
+    | "different" -> String.make (bytes+1) 'z' | _ -> "" in
+  let run = if version="old" then (
+    let t=Old_stream.create ~equal:String.equal () in
+    ignore (Old_stream.forward t ~message:(Some "a") a);
+    ignore (Old_stream.forward t ~message:(Some "b") b);
+    fun () -> ignore (Sys.opaque_identity (Old_stream.finish_response t ~final_text:final)))
+  else (
+    let t=New_stream.create ~equal:String.equal () in
+    ignore (New_stream.forward t ~message:(Some "a") a);
+    ignore (New_stream.forward t ~message:(Some "b") b);
+    fun () -> ignore (Sys.opaque_identity (New_stream.finish_response t ~final_text:final))) in
+  Gc.full_major ();
+  let allocated=Gc.allocated_bytes () and cpu=Sys.time () and wall=Unix.gettimeofday () in
+  for _=1 to iterations do run () done;
+  let wall=Unix.gettimeofday ()-.wall and cpu=Sys.time ()-.cpu and allocated=Gc.allocated_bytes ()-.allocated in
+  Printf.fprintf csv "%d,%s,%d,%s,%.9f,%.9f,%.0f\n%!" bytes shape iterations version cpu wall allocated
+
+let () =
+  fuzz ();
+  if Array.length Sys.argv=2 then begin
+    let csv=open_out Sys.argv.(1) in
+    output_string csv "bytes_per_message,shape,iterations,version,cpu_s,wall_s,allocated_bytes\n";
+    List.iter (fun (bytes,iterations) ->
+      List.iter (fun shape ->
+        for i=0 to 6 do
+          if i mod 2=0 then (sample csv bytes shape iterations "old";sample csv bytes shape iterations "new")
+          else (sample csv bytes shape iterations "new";sample csv bytes shape iterations "old")
+        done) ["raw-equal";"current-equal";"previous";"raw-prefix";"current-prefix";"different";"empty"])
+      [16,100_000;4096,5000;65536,300;1048576,20];
+    close_out csv
+  end

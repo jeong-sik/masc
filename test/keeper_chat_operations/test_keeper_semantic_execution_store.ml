@@ -688,7 +688,7 @@ let test_dispatch_admission_requires_semantic_checkpoint () =
     check bool "refused admission creates no semantic row" true
       (Store.semantic_get store scope |> execution_ok = None))
 
-let test_preparation_wait_preserves_official_checkpoint client_kind fault () =
+let test_preparation_wait_preserves_official_checkpoint ?retry_fault client_kind fault () =
   with_path (fun path ->
     let operation_id = operation_id "preparation-original" in
     let scope = Scope.direct_operation operation_id in
@@ -748,8 +748,20 @@ let test_preparation_wait_preserves_official_checkpoint client_kind fault () =
         ~expected_revision:waiting.revision ~execution_digest:(hash "another input"));
       check bool "failed retry keeps exact blocked state" true
         (Store.direct_preparation_wait store ~operation_id |> store_ok = Some waiting);
-      Store.retry_direct_preparation store ~now:14. ~operation_id
-        ~expected_revision:waiting.revision ~execution_digest:operation.execution_digest |> store_ok |> ignore;
+      Option.iter Store.For_testing.fail_next_commit retry_fault;
+      let retried = Store.retry_direct_preparation store ~now:14. ~operation_id
+          ~expected_revision:waiting.revision ~execution_digest:operation.execution_digest in
+      (match retry_fault,retried with
+       | Some Store.For_testing.Fail_before_commit, Error (Store.Store_unavailable _) ->
+         check bool "retry rollback keeps exact blocked state" true
+           (Store.direct_preparation_wait store ~operation_id |> store_ok = Some waiting);
+         check bool "retry rollback does not release ordinary drain" true
+           (Option.is_none (Store.claim_next store ~now:14. |> store_ok));
+         Store.retry_direct_preparation store ~now:14. ~operation_id
+           ~expected_revision:waiting.revision ~execution_digest:operation.execution_digest |> store_ok |> ignore
+       | _,result -> result |> store_ok |> ignore);
+      check bool "confirmed retry advances the exact observed revision once" true
+        (Int64.equal (get store scope).revision (Int64.succ waiting.revision));
       assert_execution_error (Store.retry_direct_preparation store ~now:14. ~operation_id
         ~expected_revision:waiting.revision ~execution_digest:operation.execution_digest);
       let resumed = claim store ~now:15. in
@@ -782,7 +794,11 @@ let () =
         test_case "rolled-back wait survives restart with original authority" `Quick
           (test_preparation_wait_preserves_official_checkpoint Execution.Muse (Some Store.For_testing.Fail_before_commit));
         test_case "committed uncertain wait is confirmed exactly" `Quick
-          (test_preparation_wait_preserves_official_checkpoint Execution.Muse (Some Store.For_testing.Fail_after_commit)) ];
+          (test_preparation_wait_preserves_official_checkpoint Execution.Muse (Some Store.For_testing.Fail_after_commit));
+        test_case "retry rollback keeps the exact wait blocked" `Quick
+          (test_preparation_wait_preserves_official_checkpoint ~retry_fault:Store.For_testing.Fail_before_commit Execution.Muse None);
+        test_case "retry acknowledgement loss confirms exact committed transition" `Quick
+          (test_preparation_wait_preserves_official_checkpoint ~retry_fault:Store.For_testing.Fail_after_commit Execution.Muse None) ];
       "offline preparation", [
         test_case "copy preserves original rows and unknown input" `Quick test_offline_copy_preserves_evidence_and_prior_uncertainty;
         test_case "occupied destinations and corrupt source are refused" `Quick test_offline_copy_refuses_nonempty_destination_and_corrupt_source;

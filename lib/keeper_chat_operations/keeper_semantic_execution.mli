@@ -131,8 +131,8 @@ type phase =
   | Ready
   | Running
   | Preparing_checkpoint of official_client_checkpoint
-      (** Positive durable exclusion of transport entry. Only Enter, Wait or
-          explicit cancellation can leave it; an entered/uncertain attempt
+      (** Positive durable exclusion of transport entry. Enter, Wait, terminal
+          failure or cancellation can leave it; an entered/uncertain attempt
           has already committed Running. *)
   | Preparation_wait of preparation_wait
   | Resuming_runtime_retry of runtime_retry

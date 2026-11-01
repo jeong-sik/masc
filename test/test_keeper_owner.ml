@@ -6279,7 +6279,7 @@ let test_input_writer_is_bound_to_child_and_predecessor () =
   ignore (Owner.begin_stopping owner |> owner_ok)
 ;;
 
-let test_owner_preparation_wait_and_explicit_retry fault () =
+let test_owner_preparation_wait_and_explicit_retry ?(generic_failure=false) ?retry_fault fault () =
   Eio_main.run @@ fun _env -> Eio.Switch.run @@ fun sw ->
   let id = operation_id "kmsg-preparation-owner" in
   let other = operation_id "kmsg-preparation-independent" in
@@ -6321,6 +6321,10 @@ let test_owner_preparation_wait_and_explicit_retry fault () =
         (match Owner.wait_direct_preparation owner ~operation_id:id
             ~execution_digest:operation.execution_digest ~observed:checkpoint ~failure:generic_config with
          | Error _ -> () | Ok _ -> fail "generic Config error gained preparation retry authority");
+        if generic_failure then
+          Owner.Operation_failed {kind=Chat_operation.Turn_exception;
+            detail=Agent_core.Error.to_string generic_config;outcome_ref=None}
+        else (
         Option.iter Keeper_chat_operation_store.For_testing.fail_next_commit fault;
         let retained = Owner.wait_direct_preparation owner ~operation_id:id
             ~execution_digest:operation.execution_digest ~observed:checkpoint ~failure in
@@ -6342,7 +6346,7 @@ let test_owner_preparation_wait_and_explicit_retry fault () =
           ~operation_state ~pending_continuation
           ~outcome:(Some (Server_routes_http_keeper_stream.Failed
             {kind=Turn_failed;detail="typed preparation could not commit its wait"}))
-          ~delivery:(Error "preparation failed")
+          ~delivery:(Error "preparation failed"))
       | 3 ->
         check_original owner;
         Owner.resume_direct_checkpoint owner ~operation_id:id ~observed:checkpoint |> owner_ok;
@@ -6373,6 +6377,18 @@ let test_owner_preparation_wait_and_explicit_retry fault () =
   Eio.Promise.resolve owner_resolver owner;
   Owner.submit_operation owner ~operation_id:id ~source:operation_source ~input |> owner_ok |> ignore;
   Eio.Promise.await blocked;
+  if generic_failure then (
+    check bool "generic Config settlement has no preparation wait" true
+      (Option.is_none (Owner.direct_preparation_wait owner ~operation_id:id |> owner_ok));
+    let terminal = Owner.exact_operation owner id |> owner_ok |> Option.get in
+    check string "generic failure follows its terminal path" "failed" (Chat_operation.state_to_string terminal.state);
+    check bool "terminal generic failure releases original input" true (Option.is_none terminal.input);
+    (match Owner.retry_direct_preparation owner ~operation_id:id
+        ~expected_revision:0L ~execution_digest:terminal.execution_digest with
+     | Error _ -> () | Ok _ -> fail "generic failure acquired preparation retry authority");
+    check int "generic failure was never automatically dispatched again" 2 !attempts;
+    Owner.begin_stopping owner |> owner_ok |> ignore)
+  else (
   let waiting = Owner.direct_preparation_wait owner ~operation_id:id |> owner_ok |> Option.get in
   check int "no automatic retry after child settlement" 2 !attempts;
   check_original owner;
@@ -6383,26 +6399,43 @@ let test_owner_preparation_wait_and_explicit_retry fault () =
   (match Owner.retry_direct_preparation owner ~operation_id:id
       ~expected_revision:(Int64.pred waiting.revision) ~execution_digest:waiting.execution_digest with
    | Error _ -> () | Ok _ -> fail "stale retry was admitted");
-  Owner.retry_direct_preparation owner ~operation_id:id
-    ~expected_revision:waiting.revision ~execution_digest:waiting.execution_digest |> owner_ok |> ignore;
+  Option.iter Keeper_chat_operation_store.For_testing.fail_next_commit retry_fault;
+  let retried = Owner.retry_direct_preparation owner ~operation_id:id
+      ~expected_revision:waiting.revision ~execution_digest:waiting.execution_digest in
+  (match retry_fault,retried with
+   | Some Keeper_chat_operation_store.For_testing.Fail_before_commit, Error _ ->
+     check bool "retry rollback keeps exact wait" true
+       (Owner.direct_preparation_wait owner ~operation_id:id |> owner_ok = Some waiting);
+     Owner.wake_operation_drain owner |> owner_ok;
+     check_original owner;
+     check int "retry rollback cannot dispatch" 2 !attempts;
+     Owner.retry_direct_preparation owner ~operation_id:id
+       ~expected_revision:waiting.revision ~execution_digest:waiting.execution_digest |> owner_ok |> ignore
+   | _,result -> result |> owner_ok |> ignore);
   Eio.Promise.await finished;
   check int "explicit retry runs original operation exactly once" 3 !attempts;
   let terminal = Owner.exact_operation owner id |> owner_ok |> Option.get in
   check bool "successful continuation releases original input" true (Option.is_none terminal.input);
   check string "original operation completes" "succeeded" (Chat_operation.state_to_string terminal.state);
-  Owner.begin_stopping owner |> owner_ok |> ignore
+  Owner.begin_stopping owner |> owner_ok |> ignore)
 ;;
 
 let () =
   run
     "keeper owner"
     [ ( "preparation wait", [
+        test_case "generic Config settlement cannot gain preparation retry authority" `Quick
+          (test_owner_preparation_wait_and_explicit_retry ~generic_failure:true None);
         test_case "exact retained operation retries only explicitly" `Quick
           (test_owner_preparation_wait_and_explicit_retry None);
         test_case "real stream failure after wait rollback retains exact operation" `Quick
           (test_owner_preparation_wait_and_explicit_retry (Some Keeper_chat_operation_store.For_testing.Fail_before_commit));
         test_case "wait uncertainty confirms exact committed continuation" `Quick
-          (test_owner_preparation_wait_and_explicit_retry (Some Keeper_chat_operation_store.For_testing.Fail_after_commit)) ] )
+          (test_owner_preparation_wait_and_explicit_retry (Some Keeper_chat_operation_store.For_testing.Fail_after_commit));
+        test_case "retry rollback keeps the operation blocked" `Quick
+          (test_owner_preparation_wait_and_explicit_retry ~retry_fault:Keeper_chat_operation_store.For_testing.Fail_before_commit None);
+        test_case "retry commit acknowledgement loss starts the confirmed child once" `Quick
+          (test_owner_preparation_wait_and_explicit_retry ~retry_fault:Keeper_chat_operation_store.For_testing.Fail_after_commit None) ] )
     ; ( "scheduled source handoff", [
         test_case "consumer termination releases additions and rejects late registration" `Quick
           (test_scheduled_source_handoff Ended_consumer_handoff)

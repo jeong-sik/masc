@@ -514,6 +514,10 @@ val direct_preparation_wait : t -> operation_id:Operation.Operation_id.t ->
   (preparation_wait_observation option, error) result
 val wait_direct_preparation : t -> now:float -> operation_id:Operation.Operation_id.t ->
   execution_digest:string -> observed:Semantic.gate_checkpoint -> detail:string -> (Operation.t, error) result
+
+(** A lost commit acknowledgement succeeds only after the exact queued operation
+    and expected semantic transition are read back. A rolled-back retry keeps
+    the original wait blocked. *)
 val retry_direct_preparation : t -> now:float -> operation_id:Operation.Operation_id.t ->
   expected_revision:int64 -> execution_digest:string -> (Operation.t, error) result
 
@@ -521,6 +525,4 @@ val retry_direct_preparation : t -> now:float -> operation_id:Operation.Operatio
     uncertain write is Error even if its transaction committed. *)
 val enter_direct_preparation : t -> now:float -> operation_id:Operation.Operation_id.t ->
   execution_digest:string -> (unit,error) result
-val block_preparing_checkpoint : t -> now:float -> operation_id:Operation.Operation_id.t ->
-  detail:string -> (Operation.t option,error) result
 val block_preparing_operations : t -> now:float -> (unit,error) result

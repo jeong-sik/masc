@@ -528,7 +528,7 @@ let apply ~now action current =
     let unchanged phase = Ok phase in
     let reject () = Error (Invalid_transition ("action is not admitted in " ^ phase_name current.phase)) in
     let* () = match current.phase, action with
-      | Preparing_checkpoint _, (Enter_official_checkpoint | Wait_preparation _ | Settle Cancelled) -> Ok ()
+      | Preparing_checkpoint _, (Enter_official_checkpoint | Wait_preparation _ | Settle (Cancelled | Failed _)) -> Ok ()
       | (Preparing | Ready | Running | Resuming_runtime_retry _ | Resuming_gate _ | Recovering _
          | Preparation_wait _ | Suspended _ | Settled _),
         (Confirm_sources | Begin_execution | Resume_checkpoint _ | Resume_official_checkpoint _
@@ -546,7 +546,7 @@ let apply ~now action current =
          | Update_runtime_retry_wait _ | Suspend_gate_reconciliation _ | Suspend_gate _
          | Suspend_input _ | Prepare_input_response _ | Resolve_input _ | Resolve_input_branch _
          | Advance_input_branch _ | Reconcile_gate_binding _ | Resolve_gate _
-         | Resume_gate _ | Discharge_gate _ | Settle (Completed | Failed _)) -> reject () in
+         | Resume_gate _ | Discharge_gate _ | Settle Completed) -> reject () in
     let* phase = match action with
       | Confirm_sources ->
           (match current.phase with
@@ -785,11 +785,6 @@ let apply ~now action current =
                  | Running | Resuming_runtime_retry _ | Resuming_gate _ ->
                    if current.gate_obligations = [] then unchanged (Settled terminal) else reject ()
                  | Preparing | Ready | Preparing_checkpoint _ | Recovering _ | Preparation_wait _ | Suspended _ | Settled _ -> reject ())
-            | Failed _ when (match current.phase with
-                              | Preparing_checkpoint _ -> true
-                              | Preparing | Ready | Running | Resuming_runtime_retry _
-                              | Resuming_gate _ | Recovering _ | Preparation_wait _
-                              | Suspended _ | Settled _ -> false) -> reject ()
             | Cancelled | Failed _ ->
                 (match current.phase with
                  | Preparing | Ready | Running | Preparing_checkpoint _ | Resuming_runtime_retry _ | Resuming_gate _ | Recovering _ | Preparation_wait _ | Suspended _ -> unchanged (Settled terminal)

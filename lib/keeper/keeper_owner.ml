@@ -255,6 +255,11 @@ type retired_input_cut =
     observed:Keeper_native_call.state; call:Keeper_native_call.t;
     cut:Keeper_input_history_cut.binding }
 
+type preparation_wait_intent =
+  { preparation_operation:Operation_id.t; preparation_digest:string;
+    preparation_checkpoint:Keeper_semantic_execution.gate_checkpoint;
+    preparation_failure:Agent_core.Error.t; preparation_child:Keeper_interrupt_token.t }
+
 type _ command =
   | Exact_projection :
       (Keeper_owner_reducer.projection, error) result command
@@ -1539,6 +1544,9 @@ let start
         keeper_name
         (Chat_operation_store.error_to_string error));
   Eio.Fiber.fork_daemon ~sw (fun () ->
+    (* Only an exact child request carrying the positive preparation marker
+       can retry a failed wait write during that child's settlement. *)
+    let unpersisted_preparation_wait : preparation_wait_intent option ref = ref None in
     let fail_running_operation ~operation_id ~kind ~detail ~outcome_ref =
       run_operation_command t ~label:"fail running Keeper chat operation" (fun () ->
         Chat_operation_store.fail_running
@@ -1599,6 +1607,8 @@ let start
       |> Result.map fst
     in
     let finish_operation_child claimed_operation_id execution ~ended =
+      let preparation_wait = !unpersisted_preparation_wait in
+      unpersisted_preparation_wait := None;
       let policy () =
         active_native_call_policy
           ~owner_stopping:(Atomic.get t.projection).Keeper_owner_reducer.stopping
@@ -1663,8 +1673,22 @@ let start
               ~detail:native_call_unknown_effect_success_detail
               ~outcome_ref:(Some outcome_ref))
       | Some operation_id, Operation_failed { kind; detail; outcome_ref } ->
-        let preparation = run_operation_store ~label:"block failed official preparation" (fun () ->
-          Chat_operation_store.block_preparing_checkpoint t.operation_store ~now:(t.now ()) ~operation_id ~detail) in
+        let preparation = match preparation_wait with
+          | None -> Ok None
+          | Some intent ->
+            (match Atomic.get t.turn_in_flight with
+             | Some {lane=Chat_operation;interrupt_token;_}
+                 when Operation_id.equal intent.preparation_operation operation_id
+                   && Keeper_interrupt_token.equal intent.preparation_child interrupt_token ->
+               (match Keeper_internal_error.guidance_preparation_failure intent.preparation_failure with
+                | Some detail ->
+                  run_operation_store ~label:"retain failed official preparation" (fun () ->
+                    Chat_operation_store.wait_direct_preparation t.operation_store ~now:(t.now ())
+                      ~operation_id ~execution_digest:intent.preparation_digest
+                      ~observed:intent.preparation_checkpoint ~detail)
+                  |> Result.map Option.some
+                | None -> Ok None)
+             | Some {lane=Chat_operation | Autonomous | Maintenance;_} | None -> Ok None) in
         (match preparation with
          | Error error -> Error (record_operation_error t error)
          | Ok (Some _) ->
@@ -2022,10 +2046,18 @@ let start
             | Some detail, Some {lane=Chat_operation;interrupt_token;_}, Some running
                 when Keeper_interrupt_token.equal child interrupt_token
                   && Operation_id.equal operation_id running ->
-              run_operation_command t ~label:"retain direct preparation wait" (fun () ->
+              let response = run_operation_command t ~label:"retain direct preparation wait" (fun () ->
                 Chat_operation_store.wait_direct_preparation t.operation_store ~now:(t.now ())
                   ~operation_id ~execution_digest ~observed ~detail)
-              |> Result.map fst
+                |> Result.map fst in
+              (match response with
+               | Error (Store_unavailable _) ->
+                 unpersisted_preparation_wait := Some
+                   {preparation_operation=operation_id;preparation_digest=execution_digest;
+                    preparation_checkpoint=observed;preparation_failure=failure;preparation_child=child}
+               | Ok _ -> unpersisted_preparation_wait := None
+               | Error (Reducer_rejected _ | Operation_rejected _ | Owner_stopping | Owner_closed) -> ());
+              response
             | None, _, _
             | Some _, None, _
             | Some _, Some _, None

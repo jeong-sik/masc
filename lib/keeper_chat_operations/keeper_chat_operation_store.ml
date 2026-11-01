@@ -2733,23 +2733,6 @@ let block_preparing_with_db store ~now ~detail operation execution =
             | Semantic.Suspended _ | Semantic.Settled _; _}) -> Ok None
 ;;
 
-let block_preparing_checkpoint store ~now ~operation_id ~detail =
-  let* () = ensure_open store in
-  let* operation = operation_or_unknown store.db operation_id in
-  let* execution = direct_execution_with_db store.db operation in
-  match execution with
-  | Some {Semantic.phase=Semantic.Preparing_checkpoint _;_} ->
-    with_transaction store (fun () ->
-      let* operation = operation_or_unknown store.db operation_id in
-      let* execution = direct_execution_with_db store.db operation in
-      block_preparing_with_db store ~now ~detail operation execution)
-  | Some {Semantic.phase=Semantic.Preparing | Semantic.Ready | Semantic.Running
-          | Semantic.Resuming_runtime_retry _ | Semantic.Resuming_gate _
-          | Semantic.Recovering _ | Semantic.Preparation_wait _
-          | Semantic.Suspended _ | Semantic.Settled _; _}
-  | None -> Ok None
-;;
-
 let block_preparing_operations store ~now =
   let* () = ensure_open store in
   with_transaction store (fun () ->
@@ -2796,7 +2779,18 @@ let enter_direct_preparation store ~now ~operation_id ~execution_digest =
 
 let retry_direct_preparation store ~now ~operation_id ~expected_revision ~execution_digest =
   let* () = ensure_open store in
-  with_transaction store (fun () ->
+  let expected_commit = ref None in
+  let read_confirmed () =
+    match !expected_commit with
+    | None -> Error (Integrity_error "preparation retry has no expected transition")
+    | Some (operation, next) ->
+      let* current = operation_or_unknown store.db operation_id in
+      let* execution = direct_execution_with_db store.db current in
+      (match execution with
+       | Some execution when Operation.to_json current = Operation.to_json operation
+           && Semantic.to_json execution = Semantic.to_json next -> Ok current
+       | Some _ | None -> Error (Integrity_error "preparation retry commit is not confirmed")) in
+  let result = with_transaction store (fun () ->
     let* operation = operation_or_unknown store.db operation_id in
     if not (String.equal operation.execution_digest execution_digest)
     then Error (Invalid_input "preparation retry execution digest changed")
@@ -2809,12 +2803,19 @@ let retry_direct_preparation store ~now ~operation_id ~expected_revision ~execut
           when Int64.equal revision expected_revision ->
         let* next = semantic_transition ~now (Semantic.Retry_preparation waiting) expected in
         let* () = update_semantic store ~expected next in
+        expected_commit := Some (operation, next);
         Ok operation
       | Some {Semantic.phase=Semantic.Preparing | Semantic.Ready | Semantic.Running
               | Semantic.Preparing_checkpoint _ | Semantic.Resuming_runtime_retry _
               | Semantic.Resuming_gate _ | Semantic.Recovering _ | Semantic.Preparation_wait _
               | Semantic.Suspended _ | Semantic.Settled _; _}
-      | None -> Error (Invalid_input "preparation retry revision or state changed"))
+      | None -> Error (Invalid_input "preparation retry revision or state changed")) in
+  match result with
+  | Ok _ -> read_confirmed ()
+  | Error (Store_unavailable _ as error) ->
+    (match read_confirmed () with Ok operation -> Ok operation | Error _ -> Error error)
+  | Error (Invalid_input _ | Unknown_operation _ | Not_queued _ | Not_running _
+      | Idempotency_conflict _ | Integrity_error _ | Native_call_unsettled) as error -> error
 ;;
 
 let direct_gate_state store ~operation_id =

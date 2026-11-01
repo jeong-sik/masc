@@ -1035,7 +1035,12 @@ let test_public_nested_prepare_run_records_only_admitted_children ?(execution=Ma
       let entry = Async.load_canonical_durable_terminal ~base_path ~caller:"fixture" original_request
         |> require "retained original request proof" |> Async.durable_terminal_entry in
       let snapshot=Masc.Keeper_composition_result_delivery.observe_status ~base_path entry in
-      Masc.Keeper_msg_async_record.entry_record_to_json entry,
+      let record_path = Filename.concat
+          (Filename.concat (Masc.Common.masc_dir_from_base_path ~base_path:entry.base_path)
+             "keeper_msg_requests/terminal") (entry.request_id ^ ".json") in
+      let record = In_channel.with_open_bin record_path (fun channel ->
+          Yojson.Safe.from_string (In_channel.input_all channel)) in
+      record,
       `Assoc ["schema",`String "masc.async-request-status/v1";"status",`String "observed";
         "request",Masc.Keeper_composition_result_delivery.request_payload snapshot] in
   Printf.printf "nested_observation_proof=%s\n%!" (Yojson.Safe.to_string (`Assoc

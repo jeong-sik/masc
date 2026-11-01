@@ -3202,6 +3202,7 @@ let run_named
           in
           let try_provider_ctx : Keeper_turn_driver_try_provider.try_provider_ctx =
             { runtime_id = attempt_runtime_id
+            ; input_runtime = Some runtime
             ; error_runtime_id
             ; input_policy
             ; turn_boundary = Eio.Lazy.force turn_boundary

@@ -105,6 +105,7 @@ type config =
   ; runtime_id : string option
     (** The executing runtime's id, typed. [None] for callers that are
         not dispatching on behalf of a configured runtime. *)
+  ; input_runtime : Runtime_instance.t option
   ; execution_actor : string option
     (** Host-owned tool actor, independent of the synthetic agent name. *)
   ; initial_messages : Agent_core.Types.message list
@@ -185,6 +186,7 @@ let default_config
   ; session_id = None
   ; description = None
   ; runtime_id = None
+  ; input_runtime = None
   ; execution_actor = None
   ; initial_messages = []
   ; media_store

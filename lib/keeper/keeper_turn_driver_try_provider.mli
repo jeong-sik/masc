@@ -339,6 +339,10 @@ type request_input =
 
 type try_provider_ctx =
   { runtime_id : string
+  ; input_runtime : Runtime_instance.t option
+        (** Materialized dispatch's selected model/execution snapshot, carried
+            unchanged to Runtime_agent preflight. [None] retains runtime-ID
+            lookup for callers without a materialized selection. *)
   ; error_runtime_id : string
   ; carried_front_seed : unit -> Keeper_carried_front.seed_read
         (** The durable seed: with no Librarian point, read only when

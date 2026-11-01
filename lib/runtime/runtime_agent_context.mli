@@ -103,6 +103,12 @@ type config = {
   session_id : string option;
   description : string option;
   runtime_id : string option;
+  input_runtime : Runtime_instance.t option;
+      (** Selected immutable runtime whose model and execution constrain media
+          input for this dispatch. [Some] avoids rereading a replaced runtime
+          registry; [provider_cfg] still owns the final provider and serializer
+          settings. [None] retains runtime-ID lookup and provider-only fallback
+          for callers without a materialized selection. *)
   execution_actor : string option;
       (** Host-owned actor whose tool invocations this execution dispatches.
           Independent of the synthetic agent name. Absent means unobserved. *)

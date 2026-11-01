@@ -969,6 +969,30 @@ let append_table_array_entry lines ~segments ~path ~block =
      | _ :: _ -> lines @ ("" :: block))
 ;;
 
+let inline_key_at_path lines ~segments =
+  match List.rev segments with
+  | [] | [ _ ] -> false
+  | key :: reversed_parent ->
+    let parent = List.rev reversed_parent in
+    let parent_header line =
+      match header_of_line line with
+      | Some (Table found) -> List.equal String.equal found parent
+      | Some (Table_array _) | None -> false
+    in
+    (match find_structural_index parent_header lines with
+     | None -> false
+     | Some index ->
+       (match snd (split_at index lines) with
+        | [] -> false
+        | _header :: after ->
+          let body =
+            match find_structural_index is_table_header after with
+            | None -> after
+            | Some next -> fst (split_at next after)
+          in
+          Option.is_some (find_structural_index (has_key ~key) body)))
+;;
+
 (* The path a new [\[\[a.b\]\]] would open must not already exist in another
    shape. A key [b] in table [a] -- which is how an empty endpoint list is
    spelled today -- or a standard table [\[a.b\]] both make the file refuse to
@@ -982,30 +1006,9 @@ let path_conflict lines ~path =
   in
   if Option.is_some (find_structural_index standard_table lines)
   then Some (Standard_table_at_path path)
-  else (
-    match List.rev segments with
-    | [] | [ _ ] -> None
-    | key :: reversed_parent ->
-      let parent = List.rev reversed_parent in
-      let parent_header line =
-        match header_of_line line with
-        | Some (Table found) -> List.equal String.equal found parent
-        | Some (Table_array _) | None -> false
-      in
-      (match find_structural_index parent_header lines with
-       | None -> None
-       | Some index ->
-         (match snd (split_at index lines) with
-          | [] -> None
-          | _header :: after ->
-            let body =
-              match find_structural_index is_table_header after with
-              | None -> after
-              | Some next -> fst (split_at next after)
-            in
-            if Option.is_some (find_structural_index (has_key ~key) body)
-            then Some (Inline_key_at_path path)
-            else None)))
+  else if inline_key_at_path lines ~segments
+  then Some (Inline_key_at_path path)
+  else None
 ;;
 
 let upsert_table_array_entry content ~path ~id_key ~id ~fields =
@@ -1129,15 +1132,26 @@ type table_rename =
 let rename_table content ~path ~to_path =
   let lines, _trailing = split_lines content in
   let renamed_header = Printf.sprintf "[%s]" to_path in
-  let rec loop acc ~renamed state = function
-    | [] -> List.rev acc, renamed
+  let to_segments = path_segments to_path in
+  let rec loop acc ~matched ~other_conflict state = function
+    | [] -> List.rev acc, matched, other_conflict
     | line :: rest when is_structural state && is_table ~path line ->
-      loop (renamed_header :: acc) ~renamed:true (scan_line state line) rest
-    | line :: rest -> loop (line :: acc) ~renamed (scan_line state line) rest
+      loop (renamed_header :: acc) ~matched:(matched + 1) ~other_conflict
+        (scan_line state line) rest
+    | line :: rest ->
+      let other_conflict =
+        other_conflict
+        || (is_structural state
+            && (is_table ~path:to_path line || is_table_array ~path:to_path line))
+      in
+      loop (line :: acc) ~matched ~other_conflict (scan_line state line) rest
   in
-  match loop [] ~renamed:false outside lines with
-  | _, false -> Table_rename_absent
-  | _, true when Option.is_some (find_structural_index (is_table ~path:to_path) lines) ->
+  match loop [] ~matched:0 ~other_conflict:false outside lines with
+  | _, 0, _ -> Table_rename_absent
+  | _, matched, other_conflict
+    when matched > 1
+         || other_conflict
+         || inline_key_at_path lines ~segments:to_segments ->
     Table_rename_conflict
-  | kept, true -> Table_renamed (join_lines kept ~trailing_newline:true)
+  | kept, _, _ -> Table_renamed (join_lines kept ~trailing_newline:true)
 ;;

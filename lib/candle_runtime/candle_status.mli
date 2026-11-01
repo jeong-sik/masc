@@ -38,9 +38,15 @@ val current_view : now:(unit -> float) -> base_path:string -> (view, error) resu
     returned amounts are accepted; failure returns no usable balance. *)
 
 val configured : base_path:string -> Candle_config.t
-(** Current configuration and appraiser availability only. Does not recover,
-    truncate or otherwise change the ledger. Read and purchase surfaces use
-    this before their authoritative ledger read. *)
+(** Current configured money policy only. Appraiser availability does not gate
+    balance, catalog, purchase, equipment or their observations. Does not recover,
+    truncate or otherwise change the ledger; Off and invalid configuration still
+    refuse those operations. *)
+
+val for_appraisal : base_path:string -> Candle_config.t
+(** Current configuration and appraiser availability, without ledger recovery.
+    New appraisal and its publication use this boundary; durable money and
+    inventory operations use {!configured}. *)
 
 val current : base_path:string -> Candle_config.t
 (** Goal control availability and first-use recovery only. A live writer lock
@@ -51,11 +57,8 @@ val for_recording : base_path:string -> Candle_config.t
     Granted facts. An unavailable appraiser postpones settlement without
     discarding these facts. Configuration and recovery failures retain the
     same Off/Disabled semantics as {!current}. Each append still acquires
-    its lock. Grants deliberately bypass the appraiser gate: an operator
-    outside the server has no lane registry to consult, and a gift needs
-    no appraisal. While the appraiser is down the operator can therefore
-    mint while keepers cannot spend; that asymmetry is the explicit
-    policy, and the minted money stays durable and accounted. *)
+    its lock. Grants, like spending already recorded money, need no appraisal;
+    an operator outside the server also has no lane registry to consult. *)
 
 val report_at_start : base_path:string -> unit
 val install_appraiser_check : (unit -> (unit, string) result) -> unit

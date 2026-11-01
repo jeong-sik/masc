@@ -232,6 +232,49 @@ let replay_in_fresh_process config keeper =
     | _ -> failf "fresh process could not replay the account: %s" output)
 ;;
 
+let test_appraiser_outage_preserves_wallet_and_equipment () =
+  with_workspace (fun _ _ config ->
+    credit config ~goal:"appraiser-outage-funding" ~keeper:"keeper-a" 1000;
+    let base_path = config.Workspace.base_path in
+    Candle_status.install_appraiser_check (fun () -> Error "fixture appraiser unavailable");
+    Fun.protect
+      ~finally:(fun () -> Candle_status.install_appraiser_check (fun () -> Ok ()))
+      (fun () ->
+        check string "earned money remains visible" "1000"
+          U.(member "balance_milli" (balance config "keeper-a") |> to_string);
+        let catalog = call config "keeper-a" "keeper_candle_catalog" (`Assoc []) |> succeeded in
+        check bool "the configured shop stays available" true
+          (List.exists (fun row -> U.(member "id" row = `String "glasses"))
+             U.(member "items" catalog |> to_list));
+        let purchase = buy config "keeper-a" "glasses" |> succeeded in
+        check string "spending retains the canonical debit" "600"
+          U.(member "account" purchase |> member "balance_milli" |> to_string);
+        let equipped = call config "keeper-a" "keeper_candle_equip"
+            (`Assoc ["slot",`String "face";"item",`String "glasses"]) |> succeeded in
+        check bool "owned equipment can be worn" true
+          U.(member "changed" equipped |> to_bool);
+        let now () = Time_compat.now () in
+        let observed = Candle_equipment.reader ~now ~base_path () ~keeper:"keeper-a" in
+        let persisted = Candle_equipment.read_persisted ~now ~base_path ~keeper:"keeper-a" in
+        check bool "roster and persisted portraits retain the same equipment" true
+          (match observed, persisted with Ok left, Ok right -> left = right | _ -> false);
+        (match Candle_status.for_appraisal ~base_path with
+         | Candle_config.Disabled {reason} ->
+           check string "new earning still needs an appraiser" "fixture appraiser unavailable" reason
+         | Candle_config.Off | Candle_config.Enabled _ -> fail "appraisal bypassed its unavailable lane");
+        let committed = bytes config in
+        let policy_path = Config_dir_resolver.candle_toml_path_for_base_path ~base_path in
+        Sys.remove policy_path;
+        rejected "candle_off" (call config "keeper-a" "keeper_candle_balance" (`Assoc []));
+        rejected "candle_off" (buy config "keeper-a" "medal");
+        rejected "equipment_unavailable"
+          (call config "keeper-a" "keeper_candle_equip"
+             (`Assoc ["slot",`String "face";"item",`String "default"]));
+        Fs_compat.save_file policy_path "half_life_hours = 72\n";
+        rejected "candle_disabled" (call config "keeper-a" "keeper_candle_catalog" (`Assoc []));
+        check string "disabled money operations preserve every durable fact" committed (bytes config)))
+;;
+
 let test_tool_purchase_and_restart () =
   with_workspace (fun _ _ config ->
     credit config ~goal:"goal-a" ~keeper:"keeper-a" 1000;
@@ -856,7 +899,9 @@ let () =
     run
       "candle_purchase_flow"
       [ ( "public tools and ledger"
-        , [ test_case "purchase reprices every real cursor retry" `Quick test_purchase_reprices_each_cursor_attempt
+        , [ test_case "appraiser outage preserves wallet, shop and equipment" `Quick
+              test_appraiser_outage_preserves_wallet_and_equipment
+          ; test_case "purchase reprices every real cursor retry" `Quick test_purchase_reprices_each_cursor_attempt
           ; test_case
               "recorded decay keeps purchase ownership and portrait equipment coherent" `Quick
               test_policy_intervals_preserve_purchase_and_equipped_ownership

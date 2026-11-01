@@ -155,7 +155,7 @@ let settle ~now ~appraise ~policy ~base_path events (waiting : Candle_payout.wai
       (* Read the clock on every CAS attempt, then check availability so a
          yielding or injected clock cannot leave a pre-clock policy authoritative. *)
       let* at = Candle_stamp.at ~now |> Result.map_error (fun detail -> A.Transport_unavailable detail) in
-      let* current_policy = match Candle_status.configured ~base_path with
+      let* current_policy = match Candle_status.for_appraisal ~base_path with
         | Candle_config.Enabled policy -> Ok policy
         | Candle_config.Off -> Error (A.Transport_unavailable "Candle was turned off during appraisal")
         | Candle_config.Disabled {reason} -> Error (A.Transport_unavailable ("Candle disabled during appraisal: " ^ reason)) in

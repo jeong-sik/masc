@@ -723,9 +723,10 @@ let test_durable_intent_failure_never_dispatches_native_input () =
       | other->failf "unexpected write-ahead fixture step %s" other) in
     ignore (dispatch peer Live.Tabs_list (obj []));
     let result=if workflow then dispatch peer Live.Page_native_workflow
-      (obj ["tabId",`Int 1;"maxChars",`Int 1000;"steps",`List [obj ["method",str "click";"selector",str "#send"]]])
+      (obj ["tabId",`Int 1;"expectedUrl",str observed_url;"maxChars",`Int 1000;"steps",`List [obj ["method",str "click";"selector",str "#send"]]])
       else dispatch peer Live.Page_interact (interact_args (Lane.Click_target (Lane.Target_ref 12))) in
-    ignore (before_effect "failed retained input intent" result);
+    check string "refusal comes from durable intent publication" "retained input publication unavailable"
+      (before_effect "failed retained input intent" result);
     check int "no native holding effect after failed durable write" 0 !native_calls;
     check int "attachment claim and one intent publication only" 2 !writes;
     check bool "failed publication leaves input blocked" true

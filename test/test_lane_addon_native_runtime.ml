@@ -837,6 +837,8 @@ max_reply_bytes = 65536
   let ready id=Option.is_some (service id) && phase id="attached" && seq id>0 in
   let client="0c000000-0000-4000-8000-000000000001" in
   let client_id=require (Browser_lane.client_id_of_string client) in
+  let client_info : Browser_lane.client_info = {Browser_lane.client_id;browser=Firefox;version="158";
+    engine_version="158";transport=Webdriver_bidi;space=None} in
   let document=`Assoc ["ok",`Bool true;"data",`Assoc ["clientId",`String client;"tabId",`Int 4;
     "documentId",`String "fixture-document";"url",`String "https://fixture.example/";
     "observedAt",`Float 1000.;"html",`String "<html>fixture</html>";"htmlComplete",`Bool true]] in
@@ -853,13 +855,33 @@ max_reply_bytes = 65536
     wait clock (fun () -> Sys.file_exists path && phase consumer="attached" && seq consumer >= !observed);
     Yojson.Safe.from_file path |> Yojson.Safe.Util.to_list |> List.hd in
   let observe id=ignore (dispatch config R.Observe ["instance_id",`String id]) in
+  let publish_client id =
+    let original=match service id with Some service->service|None->fail "original browser service unavailable" in
+    (match R.call_browser_service ~config ~access ~service:original
+      ~command:(Browser_addon_wire.Poll {client=client_info;window_sec=0.001}) with
+     | Ok (Browser_addon_wire.Poll_result _)->()
+     | Ok _|Error _->fail "exact browser fixture did not register its client");
+    let before=seq id in
+    observe id;
+    wait clock (fun () -> List.exists (fun (reading:R.browser_observation) ->
+      match reading.observation with
+      | Ok (Some (observed:R.export_observation)) when observed.instance_id=id && observed.observation_seq>before ->
+        (match Browser_addon_observation.read observed.output with
+         | Ok (published:Browser_addon_observation.published) ->
+           List.exists (fun (client:Browser_lane.client_info) -> client=client_info) published.clients
+         | Error _ -> false)
+      | Ok None | Ok (Some _) | Error _ -> false) (R.browser_observations ~config ~access)) in
   let unavailable source=member "complete" source=`Bool false
     && (member "observations" source |> Yojson.Safe.Util.to_list)=[] in
   check bool "with no browser Add-on the source is unavailable" true (unavailable (next_source ()));
   let browser=attach manifest [] in
   wait clock (fun () -> ready browser);
-  let browser_seq=seq browser in
   let idle_request=Filename.concat root ("idle-request-"^browser) in
+  observe consumer;
+  check bool "an unobserved explicit client leaves the source unavailable" true (unavailable (next_source ()));
+  check bool "an unobserved explicit client sends no document request" false (Sys.file_exists idle_request);
+  publish_client browser;
+  let browser_seq=seq browser in
   reply (Browser_addon_wire.Issue_result (Ok (Browser_lane.Answered document)));
   observe consumer;
   let source=next_source () in
@@ -883,6 +905,7 @@ max_reply_bytes = 65536
   check int "nor send it into another observation" browser_seq (seq browser);
   let second=attach manifest [] in
   wait clock (fun () -> ready second);
+  publish_client second;
   check bool "two browser installations exporting one name leave the public tools readable" true
     (Result.is_ok (R.tool_export_reading ~config ~access ~reserved:[]));
   check int "and the browser host reads both exports by identity" 2
@@ -891,7 +914,7 @@ max_reply_bytes = 65536
   let second_request=Filename.concat root ("idle-request-"^second) in
   Unix.unlink idle_request;
   observe consumer;
-  check bool "with two browser Add-ons the source is unavailable" true (unavailable (next_source ()));
+  check bool "two publishers of the same explicit client leave the source unavailable" true (unavailable (next_source ()));
   check bool "and neither browser Add-on is asked for the document" false
     (Sys.file_exists idle_request || Sys.file_exists second_request);
   ignore (dispatch config R.Detach ["instance_id",`String second]);

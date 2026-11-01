@@ -11889,7 +11889,7 @@ let open_preview_image ?skill_reference ?board_subject state ~mailbox ~notice ~n
       (Masc_tui_terminal_palette.snapshot_palette palette) in
     let board_worker = match owner with
       | Board_image_read _ -> Some board_preview_worker
-      | Local_file_image_read _ | Draft_image_read _ | Peer_image_read _ -> None in
+      | Local_file_image_read _ | Remote_url_image_read _ | Draft_image_read _ | Peer_image_read _ -> None in
     let run = match board_worker with
       | Some _ -> Masc_tui_image_cache.run_bounded ~deadline_seconds:image_process_deadline_seconds
       | None -> Unix.system in
@@ -11907,7 +11907,7 @@ let open_preview_image ?skill_reference ?board_subject state ~mailbox ~notice ~n
      | Board_image_read (_,_,job), Generated _ ->
          launch_workspace_result ~key:job ~observation:true state ~mailbox
            ~boundary_error:Fun.id ~deliver:completion load
-     | (Local_file_image_read _ | Draft_image_read _ | Peer_image_read _),
+     | (Local_file_image_read _ | Remote_url_image_read _ | Draft_image_read _ | Peer_image_read _),
        (Local_file _ | Draft _ | Retained _ | Board_artifact _ | Generated _)
      | Board_image_read _, (Local_file _ | Draft _ | Retained _) ->
          match Eio_context.get_switch_opt () with
@@ -11960,18 +11960,19 @@ let prepare_inspected_frame state ~mailbox =
              let runner = match pending.sir_owner with
                | Board_image_read _ -> Some (Masc_tui_pele.command_runner
                    ~run:(Masc_tui_image_cache.run_bounded ~deadline_seconds:image_process_deadline_seconds))
-               | Local_file_image_read _ | Draft_image_read _ | Peer_image_read _ -> None in
+               | Local_file_image_read _ | Remote_url_image_read _ | Draft_image_read _ | Peer_image_read _ -> None in
              let* png = Masc_tui_pele.render ~cache_dir:(ensure_img_cache_dir ()) ~raster ?runner scene in
              let* () = match pending.sir_owner with
                | Board_image_read _ when not (Masc_tui_image_cache.has_png_structure png) ->
                    Error "image has an invalid or truncated PNG structure"
-               | Board_image_read _ | Local_file_image_read _ | Draft_image_read _ | Peer_image_read _ -> Ok () in
+               | Board_image_read _ | Local_file_image_read _ | Remote_url_image_read _
+               | Draft_image_read _ | Peer_image_read _ -> Ok () in
              let* prepared = Masc_tui_image_cache.prepare_presentation ~run:Unix.system
                ~cache_dir:(ensure_img_cache_dir ()) Masc_tui_image_cache.Pixel_graphics png in
              Ok (prepared,Some scene) in
              match pending.sir_owner with
              | Board_image_read _ -> Masc_tui_board_preview_work.run board_preview_worker render
-             | Local_file_image_read _ | Draft_image_read _ | Peer_image_read _ -> render ()) in
+             | Local_file_image_read _ | Remote_url_image_read _ | Draft_image_read _ | Peer_image_read _ -> render ()) in
            deliver mailbox (Sent_image_ready {generation;view=pending.sir_view;
              keeper_name=pending.sir_keeper;name=pending.sir_name;skill_reference=None;result});
            `Stop_daemon)
@@ -22637,7 +22638,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
           let opened_original = match origin.sir_owner with
             | Board_image_read (_, subject, _) ->
                 board_image_source_reader state ~message:("Image preview unavailable: " ^ reason) subject
-            | Local_file_image_read _ | Draft_image_read _ | Peer_image_read _ -> false in
+            | Local_file_image_read _ | Remote_url_image_read _ | Draft_image_read _ | Peer_image_read _ -> false in
           if not opened_original then
             notice ~kind:Notice_failure (Printf.sprintf "image %s: %s" name reason)
         in

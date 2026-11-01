@@ -34,6 +34,7 @@ let event =
          let label = match reason with
            | Http_status status -> Printf.sprintf "http-%d" status
            | Unattested_response status -> Printf.sprintf "unattested-%d" status
+           | Invalid_stream_response status -> Printf.sprintf "invalid-stream-%d" status
            | Unexpected_error -> "unexpected" in
          Format.fprintf ppf "Reopen_required (%s, %S)" label detail)
     ( = )
@@ -280,6 +281,21 @@ let test_unattested_response_stops_with_its_typed_reason env =
       (events ()))
 ;;
 
+let test_invalid_stream_response_stops env =
+  let started = ref 0 in
+  let observe ~on_chunk:_ =
+    incr started;
+    Error (Job.Invalid_response { status = 204; detail = "unexpected stream status" }) in
+  with_job env ~observe (fun events ->
+    wait_until env "invalid response" (fun () -> events () <> []);
+    Eio.Time.sleep (Eio.Stdenv.clock env) (2. *. reconnect_s);
+    Alcotest.(check int) "one connection" 1 !started;
+    Alcotest.(check (list event)) "the invalid response stops the job"
+      [ Ended (Job.Reopen_required
+          { reason = Invalid_stream_response 204; detail = "unexpected stream status" }) ]
+      (events ()))
+;;
+
 let test_retriable_statuses_and_bounded_delay env =
   let statuses = [| 408; 425; 429; 500; 503 |] in
   let started = ref 0 in
@@ -381,6 +397,7 @@ let () =
         ; case "permanent refusals stop" test_permanent_refusals_stop
         ; case "unattested response stops with its typed reason"
             test_unattested_response_stops_with_its_typed_reason
+        ; case "invalid stream response stops" test_invalid_stream_response_stops
         ; case "retriable statuses and bounded delay" test_retriable_statuses_and_bounded_delay
         ; case "only a stable valid connection resets" test_only_a_stable_valid_connection_resets_delay
         ; case "post delay is not connection uptime" test_post_delay_is_not_connection_uptime

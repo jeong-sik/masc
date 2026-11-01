@@ -1715,6 +1715,7 @@ type execute_output_stream_error =
   | Execute_transport_failed of string
   | Execute_http_refused of { status : int; detail : string }
   | Execute_unattested of { status : int; detail : string }
+  | Execute_invalid_response of { status : int; detail : string }
 
 (** Stream headers are delivered before body chunks. A transport disconnect
     and an explicit HTTP refusal remain distinct so a quiet connection does
@@ -1831,6 +1832,7 @@ let observe_execute_output_stream_with_refusal_timeout ~refusal_body_timeout_s ~
     ~(port : int) ~(keeper : string) ~(on_chunk : string -> unit)
     : (unit, execute_output_stream_error) result =
   let exception Not_attested of int in
+  let exception Invalid_execute_response of int * string in
   let url =
     url_of ~host ~port
       ~path:
@@ -1848,6 +1850,9 @@ let observe_execute_output_stream_with_refusal_timeout ~refusal_body_timeout_s ~
   let refusal_received, signal_refusal = Eio.Promise.create () in
   let on_response ~status ~headers =
     if Masc.Tui_decode.is_success_http_status status then (
+      (match validate_sse_response ~status ~headers with
+       | Ok () -> ()
+       | Error detail -> raise (Invalid_execute_response (status, detail)));
       if not (workspace_read_attested headers) then raise (Not_attested status)
     ) else (
       refused_status := Some status;
@@ -1872,6 +1877,8 @@ let observe_execute_output_stream_with_refusal_timeout ~refusal_body_timeout_s ~
       Error
         (Execute_unattested
            { status; detail = "Server did not attest the requested workspace read" })
+  | exception Invalid_execute_response (status, detail) ->
+      Error (Execute_invalid_response { status; detail })
   | `Refusal_timeout status ->
       Error (Execute_http_refused
         { status

@@ -15885,6 +15885,8 @@ let launch_keeper_execute_stream state ~mailbox ~expected_workspace ~key =
               Error (Masc_tui_execute_stream_job.Http_refusal { status; detail })
             | Error (Masc_tui_http.Execute_unattested { status; detail }) ->
               Error (Masc_tui_execute_stream_job.Unattested { status; detail })
+            | Error (Masc_tui_http.Execute_invalid_response { status; detail }) ->
+              Error (Masc_tui_execute_stream_job.Invalid_response { status; detail })
             | Error (Masc_tui_http.Execute_transport_failed detail) ->
               Error (Masc_tui_execute_stream_job.Transport_failure detail))
           ~on_view:(fun view ->

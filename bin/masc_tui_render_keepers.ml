@@ -1165,6 +1165,7 @@ let terminal_drawing (state : state) ~width =
       let cause = match reason with
         | Masc_tui_execute_stream_job.Http_status status -> Printf.sprintf "HTTP %d" status
         | Unattested_response _ -> "unattested"
+        | Invalid_stream_response _ -> "invalid stream"
         | Unexpected_error -> "error" in
       let prefix = "Retry[] " ^ cause in
       let lead = Theme.bad () ^ prefix ^ Ansi.reset in

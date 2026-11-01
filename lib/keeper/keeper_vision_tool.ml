@@ -34,23 +34,24 @@ let provider_for_vision (provider_cfg : Llm_provider.Provider_config.t) =
   }
   |> Keeper_structured_output_schema.without_response_format
 
-let vision_output_instruction =
-  "Return only a JSON object with a non-empty string field named text. When \
-   the requested content is not visible, explicitly describe its absence \
-   in text; do not invent content to fill the field. Distinguish no visible \
-   content from content that is present but unreadable. Do not include \
-   markdown fences or prose outside the JSON object."
+type guidance = { request_header : string; output_instruction : string }
 
-let prompt_of_request (req : Va.request) =
-  Printf.sprintf "Analyze the attached image for this request:\n%s\n\n%s"
-    req.Va.query vision_output_instruction
+let load_guidance () =
+  let open Result.Syntax in
+  let render key = Prompt_registry.render_prompt_template key [] |> Result.map String.trim in
+  let* request_header = render Prompt_names.keeper_vision_request_header in
+  let+ output_instruction = render Prompt_names.keeper_vision_output in
+  {request_header; output_instruction}
+
+let prompt_of_request ~guidance (req : Va.request) =
+  guidance.request_header ^ "\n" ^ req.Va.query ^ "\n\n" ^ guidance.output_instruction
 
 (* A vision sub-call is a provider request, not history: the image rides
    inline. *)
-let message_of_request (req : Va.request) : Llm_provider.Types.message =
+let message_of_request ~prompt (req : Va.request) : Llm_provider.Types.message =
   Llm_provider.Types.make_message
     ~role:Llm_provider.Types.User
-    [ Llm_provider.Types.text_block (prompt_of_request req)
+    [ Llm_provider.Types.text_block prompt
     ; Llm_provider.Types.image_block
         ~media_type:req.Va.image_media_type
         ~source:(Llm_provider.Types.Base64 (Base64.encode_string req.Va.image_bytes))
@@ -646,6 +647,8 @@ let run_candidates_outcome
     ~clock
     ~net
     ~(req : Va.request)
+    ~guidance
+    ~prompt
     ~last_error
     ~attempt_index
     candidates
@@ -685,8 +688,8 @@ let run_candidates_outcome
         | Some base_dir ->
           (try
              Fusion_official_client.run_with_images ~base_dir ~runtime:rt
-               ~system_prompt:vision_output_instruction
-               ~prompt:(prompt_of_request req)
+               ~system_prompt:guidance.output_instruction
+               ~prompt
                ~images:[{ Fusion_official_client.media_type = req.image_media_type;
                           base64_data = Base64.encode_string req.image_bytes }]
                ~output_schema:(`Assoc [
@@ -746,7 +749,7 @@ let run_candidates_outcome
         (match
            (try
               Keeper_provider_subcall.complete ?override:complete ~sw ~net ~clock
-                ~config ~messages:[ message_of_request req ] ()
+                ~config ~messages:[ message_of_request ~prompt req ] ()
             with
             | Eio.Cancel.Cancelled _ as exn ->
               record_vision_candidate_cancelled
@@ -947,7 +950,14 @@ let run_vision
               in
               match selected with
               | Error detail -> Vo_invalid_request detail
-              | Ok candidates -> run_candidates_outcome
+              | Ok candidates ->
+                (match load_guidance () with
+                 | Error detail -> Vo_provider
+                   {failure_class=Tool_result.Runtime_failure;
+                    detail="vision guidance unavailable: " ^ detail}
+                 | Ok guidance ->
+                let prompt = prompt_of_request ~guidance req in
+                run_candidates_outcome
                 ?base_path
                 ?complete
                 ?tool_use_id
@@ -956,9 +966,11 @@ let run_vision
                 ~clock
                 ~net
                 ~req
+                ~guidance
+                ~prompt
                 ~last_error:None
                 ~attempt_index:0
-                candidates))
+                candidates)))
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | _exn ->

@@ -610,6 +610,11 @@ val split_cells : max_cells:int -> string -> string list
     text has no word boundaries to wrap at -- a fenced code line, an
     identifier longer than the frame. *)
 
+val split_cells_after_prefix :
+  prefix_cells:int -> max_cells:int -> string -> string * string list
+(** The same prefix as {!split_at_cells}, followed by any nonempty remaining
+    text split as {!split_cells}. Reuses one grapheme walk for valid UTF-8. *)
+
 val split_styled_cells : max_cells:int -> string -> string list
 (** Preserve cell padding and prefer space boundaries for renderer-owned SGR text. Each row
     restores its inherited style and closes it, so rows can scroll separately. *)

@@ -75,6 +75,23 @@ let render ~closing ~width body =
 let document ~width body =
   render ~closing:Ansi.reset ~width body
 
+(* A typed payload is code even when its contents contain Markdown fence
+   markers. Render its lexer rows directly, keeping empty source lines and
+   wrapping long lines instead of cutting them at the pane edge. *)
+let code ~language ~width body =
+  let width = max 1 width in
+  let palette = palette ~closing:Ansi.reset in
+  let palette =
+    if Masc_tui_message_layout.display_width palette.code_gutter >= width then
+      { palette with code_gutter = "" }
+    else palette
+  in
+  Masc_tui_code_lexer.rows_of_source ~language:(Some language) body
+  |> List.concat_map (fun pieces ->
+       match Markdown.render_lexed_line ~palette ~width pieces with
+       | [] -> [ palette.code_gutter ]
+       | rows -> rows)
+
 
 let fenced ~language text =
   match

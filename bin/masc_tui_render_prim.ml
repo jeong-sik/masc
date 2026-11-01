@@ -4642,35 +4642,54 @@ let context_part_text_or_status = function
         ((Theme.bad ()) ^ "This part could not be read: "
          ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset)
 
+type context_retained_projection =
+  { retained_text : string
+  ; retained_width : int
+  ; retained_palette_generation : int
+  ; retained_table_frame : bool
+  ; retained_lines : string list
+  }
+
+let context_retained_projection = ref None
+
+let context_retained_body_lines ~width text =
+  let generation = Masc_tui_terminal_palette.(snapshot_generation (snapshot ())) in
+  match !context_retained_projection with
+  | Some cached
+    when cached.retained_text == text
+         && cached.retained_width = width
+         && cached.retained_palette_generation = generation
+         && cached.retained_table_frame = !table_frame_enabled -> cached.retained_lines
+  | Some _ | None ->
+      let section_lines = function
+        | Retained_view.Text text ->
+            document_markdown ~width
+              (Keeper_chat.terminal_safe_text ~preserve_newlines:true text)
+        | Retained_view.Json payload ->
+            Masc_tui_markdown_theme.code ~language:"json" ~width
+              (Keeper_chat.terminal_safe_text ~preserve_newlines:true payload)
+        | Retained_view.Marker label ->
+            [ Ansi.bold ^ "▸ " ^ Keeper_chat.terminal_safe_text label ^ Ansi.reset ]
+      in
+      let lines = Retained_view.sections ~text
+        |> List.concat_map (fun group -> section_lines group @ [ "" ]) in
+      context_retained_projection := Some
+          { retained_text = text; retained_width = width
+          ; retained_palette_generation = generation
+          ; retained_table_frame = !table_frame_enabled; retained_lines = lines };
+      lines
+
 let context_exact_item_detail_lines ~width ~scale ~part
     (item : Masc_tui_context_inspector.exact_input_item) =
   let module Inspector = Masc_tui_context_inspector in
   (* A message's text is wire JSON; its typed blocks are where the prose
      lives. Walking the blocks and rendering each part for what it is --
-     markdown prose, a clipped JSON payload, a structural label -- is the
+     markdown prose, a highlighted JSON payload, a structural label -- is the
      difference between reading the item and re-reading the envelope. *)
-  let section_lines = function
-    | Retained_view.Text text ->
-        document_markdown ~width (Keeper_chat.terminal_safe_text text)
-    | Retained_view.Json payload ->
-        String.split_on_char '\n' payload
-        |> List.map (fun line ->
-               (Masc_tui_theme.tone Masc_tui_theme.Accent)
-               ^ Message_layout.fit_width
-                   (Keeper_chat.terminal_safe_text line) width
-               ^ Ansi.reset)
-    | Retained_view.Marker label ->
-        [ Ansi.bold
-          ^ "▸ " ^ Keeper_chat.terminal_safe_text label
-          ^ Ansi.reset
-        ]
-  in
   let body =
     match context_part_text_or_status part with
     | Error status -> [ status ]
-    | Ok text ->
-        Retained_view.sections ~text
-        |> List.concat_map (fun group -> section_lines group @ [ "" ])
+    | Ok text -> context_retained_body_lines ~width text
   in
   [ Ansi.bold ^ Theme.info () ^ "[ RETAINED ITEM ]" ^ Ansi.reset
   ; Ansi.bold ^ Inspector.exact_input_label item.kind ^ Ansi.reset
@@ -4828,7 +4847,8 @@ let context_response_body_lines ~width state parts =
       let lines = List.concat_map
           (function
             | Masc_tui_context_inspector.Reply_text text ->
-                document_markdown ~width (Keeper_chat.terminal_safe_text text)
+                document_markdown ~width
+                  (Keeper_chat.terminal_safe_text ~preserve_newlines:true text)
             | Masc_tui_context_inspector.Request_failure detail ->
                 List.map (fun line -> (Theme.bad ()) ^ line ^ Ansi.reset)
                   (Context_bars.wrap ~width

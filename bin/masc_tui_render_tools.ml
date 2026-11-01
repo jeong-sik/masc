@@ -548,15 +548,47 @@ let skill_usage_box ~cols rows =
     @ [border Ansi.box_bl Ansi.box_br; Ansi.dim, ""]
 ;;
 
-let skill_io_lines = function
+let skill_json_lines ~cols ~indent json =
+  let width = max 1 (Masc_tui_frame.inner_width ~cols) in
+  let indent = String.make (min indent (max 0 (width - 1))) ' ' in
+  let body_width = max 1 (width - String.length indent) in
+  let source = Yojson.Safe.pretty_to_string json
+    |> String.split_on_char '\n'
+    |> List.map Terminal_text.single_line
+    |> String.concat "\n" in
+  Masc_tui_markdown_theme.code ~language:"json" ~width:body_width source
+  |> List.map (fun line -> Ansi.reset, indent ^ line)
+
+type skill_json_projection =
+  { json_source : Yojson.Safe.t
+  ; json_cols : int
+  ; json_palette_generation : int
+  ; json_lines : (string * string) list
+  }
+
+let skill_schema_projection = ref None
+let skill_settlements_projection = ref None
+
+let cached_skill_json projection ~cols ~render json =
+  let generation = Masc_tui_terminal_palette.(snapshot_generation (snapshot ())) in
+  match !projection with
+  | Some cached when cached.json_source == json && cached.json_cols = cols
+                     && cached.json_palette_generation = generation -> cached.json_lines
+  | Some _ | None ->
+      let lines = render json in
+      projection := Some {json_source=json; json_cols=cols;
+        json_palette_generation=generation; json_lines=lines};
+      lines
+
+let skill_io_lines ~cols = function
   | Masc.Tui_decode_tools.Model_orchestrated ->
       [ Ansi.dim, "     Input: exact Skill reference / optional resource path";
         Ansi.dim, "     Output: instruction body or resource; subsequent tools are model-orchestrated";
         Ansi.dim, "     Average execution: not applicable to instruction text" ]
   | Composition_io { input_schema; exports } ->
       (Ansi.bold, "     Declared input schema (required parameters, types and enums)")
-      :: List.map (fun line -> Ansi.dim, "       " ^ Terminal_text.single_line line)
-          (String.split_on_char '\n' (Yojson.Safe.pretty_to_string input_schema))
+      :: cached_skill_json skill_schema_projection ~cols
+           ~render:(skill_json_lines ~cols ~indent:7) input_schema
       @ (match exports with
          | [] -> [Ansi.dim, "     Declared output: complete execution result (no selected exports)"]
          | routes -> (Ansi.bold, "     Declared output routes") :: List.map (fun route ->
@@ -604,7 +636,7 @@ let skill_statistics_lines ~cols = function
       @ [ Ansi.dim, "deferred는 실행 시간에서 제외 · queue/의존 대기/model 시간은 별도" ]
 ;;
 
-let skill_settlement_lines composition =
+let skill_settlement_lines_uncached ~cols composition =
   match json_assoc_member_opt "executor_settlements" composition with
   | Some (`List settlements) ->
       List.concat_map (fun node ->
@@ -612,12 +644,10 @@ let skill_settlement_lines composition =
           | Some (`String value) -> value
           | Some value -> Yojson.Safe.to_string value
           | None -> "unavailable" in
-        let value name = match json_assoc_member_opt name node with
-          | Some value -> Yojson.Safe.pretty_to_string value
-          | None -> "unavailable" in
-        let content label text = (Ansi.bold, "       " ^ label) ::
-          List.map (fun line -> Ansi.dim, "         " ^ Terminal_text.single_line line)
-            (String.split_on_char '\n' text) in
+        let content label name = (Ansi.bold, "       " ^ label) ::
+          (match json_assoc_member_opt name node with
+           | Some value -> skill_json_lines ~cols ~indent:9 value
+           | None -> [Ansi.dim, "         unavailable"]) in
         [Ansi.bold, Printf.sprintf "     Observed node %s · %s · origin=%s"
            (Terminal_text.single_line (field "node_id")) (Terminal_text.single_line (field "tool_name"))
            (Terminal_text.single_line (field "execution_origin"));
@@ -625,10 +655,14 @@ let skill_settlement_lines composition =
            (Terminal_text.single_line (field "result_bytes")) (Terminal_text.single_line (field "truncated_to"));
          Ansi.dim, "       execution=" ^ Terminal_text.single_line (field "execution_id")
            ^ " · tool use=" ^ Terminal_text.single_line (field "tool_use_id")]
-        @ content "Observed input" (value "input")
-        @ content "Observed result (disposition, duration, output)" (value "result")) settlements
+        @ content "Observed input" "input"
+        @ content "Observed result (disposition, duration, output)" "result") settlements
   | Some _ | None -> []
 ;;
+
+let skill_settlement_lines ~cols composition =
+  cached_skill_json skill_settlements_projection ~cols
+    ~render:(skill_settlement_lines_uncached ~cols) composition
 
 let skill_run_history_lines state (evidence : Masc.Tui_decode_skill_evidence.skill_evidence) =
   match evidence.se_composition_runs with
@@ -1185,7 +1219,7 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
                  | Masc.Tui_decode_tools.Model_orchestrated -> []
                  | Composition_io _ -> skill_statistics_lines ~cols evidence.se_composition_statistics in
                statistics_lines, skill_run_history_lines state evidence @ evidence_lines
-               @ Option.fold ~none:[] ~some:skill_settlement_lines evidence.se_composition
+               @ Option.fold ~none:[] ~some:(skill_settlement_lines ~cols) evidence.se_composition
                @ coverage_lines)
              | Some _ | None ->
                [ Ansi.dim, "Enter: 선택 revision 실측 불러오기 · f: 다음 Composition 실측" ],
@@ -1240,7 +1274,7 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
           Ansi.dim, "   digest=" ^ Terminal_text.single_line digest ]
         @ skill_profile_lines
         @ (match selected_tools_skill_profile state with
-           | None -> [] | Some profile -> skill_io_lines profile.esp_io)
+           | None -> [] | Some profile -> skill_io_lines ~cols profile.esp_io)
         @ selected_skill_flow_lines
         @ (match state.tools_evidence_reference, state.tools_evidence_request, selected_tools_skill_profile state with
            | Some reference, Some _, Some profile when Skill_reference.equal reference profile.esp_reference ->

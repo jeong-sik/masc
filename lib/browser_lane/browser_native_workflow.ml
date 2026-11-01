@@ -36,10 +36,37 @@ type snapshot_scope = Viewport | Full_page
 type t = { tab_id : int; expected_url : string; steps : step list;
   snapshot_scope : snapshot_scope; max_chars : int }
 open Result.Syntax
+type validation_context = Workflow | Step of { index : int; method_ : string option }
+type validation_error = { context : validation_context; message : string }
+let quoted value = Yojson.Safe.to_string (`String value)
+let at_context context = Result.map_error (fun message -> {context;message})
+let validation_message {context;message} =
+  let location = match context with
+    | Workflow -> "native workflow"
+    | Step {index;method_} -> Printf.sprintf "native workflow step[%d]%s" index
+        (match method_ with None -> "" | Some name -> " (method " ^ quoted name ^ ")") in
+  location ^ ": " ^ message
+let step_context index value =
+  let method_ = match value with
+    | `Assoc fields ->
+      (match List.filter (fun (name,_) -> name="method") fields with
+       | [_,`String name] when String.trim name<>"" -> Some name
+       | []|[_]|_::_::_ -> None)
+    | `Null|`Bool _|`Int _|`Intlit _|`Float _|`String _|`List _ -> None in
+  Step {index;method_}
 let object_fields allowed = function
-  | `Assoc fields when List.for_all (fun (name, _) -> List.mem name allowed) fields
-      && List.length fields = List.length (List.sort_uniq String.compare (List.map fst fields)) -> Ok fields
-  | _ -> Error "unknown or duplicate native workflow fields"
+  | `Assoc fields ->
+    let names=List.map fst fields in
+    let unknown=List.sort_uniq String.compare (List.filter (fun name -> not (List.mem name allowed)) names) in
+    let rec duplicates acc = function
+      | first::(second::_ as rest) -> duplicates (if first=second then first::acc else acc) rest
+      | []|[_] -> List.sort_uniq String.compare acc in
+    let duplicate=duplicates [] (List.sort String.compare names) in
+    let describe kind names = match names with
+      | [] -> [] | _::_ -> [kind ^ " fields: " ^ String.concat ", " (List.map quoted names)] in
+    (match describe "unknown" unknown @ describe "duplicate" duplicate with
+     | [] -> Ok fields | messages -> Error (String.concat "; " messages))
+  | `Null|`Bool _|`Int _|`Intlit _|`Float _|`String _|`List _ -> Error "must be an object"
 let required name fields = Option.to_result ~none:("workflow requires " ^ name) (List.assoc_opt name fields)
 let text name fields = let* value = required name fields in match value with
   | `String value when String.trim value <> "" -> Ok value
@@ -297,22 +324,28 @@ let step_of_json value =
     | Some value -> Result.map Option.some (options_of_json action value) in
   Ok {action;options}
 let of_json value =
-  let* fields = object_fields ["tabId";"expectedUrl";"steps";"snapshotScope";"maxChars"] value in
-  let* tab_id = integer "tabId" fields in
-  let* expected_url = text "expectedUrl" fields in
-  let* max_chars = integer "maxChars" fields in
-  let* () = if max_chars > 0 then Ok () else Error "maxChars must be positive" in
-  let* snapshot_scope = match List.assoc_opt "snapshotScope" fields with
-    | None | Some (`String "viewport") -> Ok Viewport
-    | Some (`String "full_page") -> Ok Full_page
-    | Some _ -> Error "workflow snapshotScope must be viewport or full_page" in
-  let* raw = required "steps" fields in
-  let* steps = match raw with
-    | `List values ->
-      let rec decode acc = function [] -> Ok (List.rev acc)
-        | value :: rest -> let* step = step_of_json value in decode (step :: acc) rest in decode [] values
-    | _ -> Error "steps must be a native Page call array" in
-  Ok {tab_id;expected_url;steps;snapshot_scope;max_chars}
+  let decoded =
+    let* fields = at_context Workflow (object_fields ["tabId";"expectedUrl";"steps";"snapshotScope";"maxChars"] value) in
+    let* tab_id = at_context Workflow (integer "tabId" fields) in
+    let* expected_url = at_context Workflow (text "expectedUrl" fields) in
+    let* max_chars = at_context Workflow (integer "maxChars" fields) in
+    let* () = at_context Workflow (if max_chars > 0 then Ok () else Error "maxChars must be positive") in
+    let* snapshot_scope = at_context Workflow (match List.assoc_opt "snapshotScope" fields with
+      | None | Some (`String "viewport") -> Ok Viewport
+      | Some (`String "full_page") -> Ok Full_page
+      | Some _ -> Error "workflow snapshotScope must be viewport or full_page") in
+    let* raw = at_context Workflow (required "steps" fields) in
+    let* steps = match raw with
+      | `List values ->
+        let rec decode index acc = function
+          | [] -> Ok (List.rev acc)
+          | value :: rest ->
+            let* step = at_context (step_context index value) (step_of_json value) in
+            decode (index+1) (step :: acc) rest in
+        decode 0 [] values
+      | _ -> at_context Workflow (Error "steps must be a native Page call array") in
+    Ok {tab_id;expected_url;steps;snapshot_scope;max_chars} in
+  Result.map_error validation_message decoded
 let is_effect = function
   | Click _ | Click_and_wait_for_popup _ | Double_click _ | Hover _ | Drag_and_drop _ | Mouse_click _ | Mouse_move _ | Mouse_wheel _
   | Fill _ | Press _ | Focus _ | Reload

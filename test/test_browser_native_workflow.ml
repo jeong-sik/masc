@@ -185,6 +185,33 @@ let strict_inputs () =
      obj (base [step "selectOption" ["selector",str "#x";"selectionJson",str "{}"]]);
      obj (base [step "selectOption" ["selector",str "#x";"selectionJson",str "[1]"]]);
      obj (base [step "selectOption" ["selector",str "#x";"selectionJson",str "{\"index\":-1}"]])]
+let validation_diagnostics () =
+  let rejected label expected value = match W.of_json value with
+    | Error message -> check string label expected message
+    | Ok _ -> fail (label ^ ": invalid input was accepted") in
+  rejected "an unknown key names the later step and its method"
+    "native workflow step[2] (method \"fill\"): unknown fields: \"ref\""
+    (obj (base [step "url" [];click;step "fill" ["ref",str "@4";"text",str "hello"]]));
+  rejected "a field accepted by another method stays disallowed on fill"
+    "native workflow step[1] (method \"fill\"): unknown fields: \"html\""
+    (obj (base [step "title" [];step "fill" ["selector",str "#editor";"text",str "hello";"html",str "<b>hello</b>"]]));
+  rejected "duplicate argument names do not choose a value"
+    "native workflow step[1] (method \"fill\"): duplicate fields: \"selector\""
+    (obj (base [step "title" [];step "fill" ["selector",str "#first";"selector",str "#second";"text",str "hello"]]));
+  rejected "duplicate method names do not choose a diagnostic method"
+    "native workflow step[0]: duplicate fields: \"method\""
+    (obj (base [step "url" ["method",str "title"]]));
+  rejected "workflow keys are distinguished from step keys and both problems are retained"
+    "native workflow: unknown fields: \"ref\"; duplicate fields: \"maxChars\""
+    (obj (("ref",str "@4")::("maxChars",`Int 20)::base []));
+  rejected "native option key errors retain their step and method"
+    "native workflow step[1] (method \"fill\"): unknown fields: \"delay\""
+    (obj (base [step "title" [];step "fill" ["selector",str "#editor";"text",str "hello";
+      "options",obj ["delay",`Int 0]] ]));
+  let valid=request [step "url" [];step "fill" ["selector",str "@4";"text",str "hello";
+    "options",obj ["clearFirst",`Bool false;"timeout",`Int 0]]] in
+  check bool "corrected input retains the same valid native roundtrip" true
+    (W.of_json (W.to_json valid)=Ok valid)
 let download_cancel () =
   let id="60c7683f-f552-4c01-a5cb-2d487bb62e5e" in
   let cancel=step "download.cancel" ["downloadId",str id] in
@@ -669,6 +696,7 @@ let () = if Array.length Sys.argv=2 && Sys.argv.(1)="--receipt-contract" then
   test_case "Download cancellation binds identity and exact effect progress" `Quick download_cancel;
   test_case "URL matcher forms preserve native syntax and reject ambiguous input" `Quick url_matchers;
   test_case "invalid methods and fields are refused" `Quick strict_inputs;
+  test_case "validation identifies the exact workflow or step fields before execution" `Quick validation_diagnostics;
   test_case "snapshot completes the exact requested sequence" `Quick complete;
   test_case "failed waits and uncertain effects retain progress" `Quick progress_and_uncertainty;
   test_case "native observations retain values and event-drain effects" `Quick observations;

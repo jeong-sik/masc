@@ -138,8 +138,14 @@ let annotate_response_cost ~source (response : Types.api_response) =
   match response.usage with
   | None -> response
   | Some usage ->
+    let model_id = match Option.bind response.telemetry (fun telemetry -> telemetry.Types.reported_model) with
+      | Some (Types.Provider_reported_model model) -> Some model
+      | Some Types.Provider_model_not_reported | None -> None in
+    let usage = match model_id with
+      | Some model_id -> annotate_usage_cost ~source ~model_id usage
+      | None -> usage in
     { response with
-      usage = Some (annotate_usage_cost ~source ~model_id:response.model usage)
+      usage = Some usage
     }
 ;;
 

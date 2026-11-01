@@ -16,11 +16,19 @@ to the configured request model.
 
 The initial repair `5e6793b467853e5da9b2db155e710d70283b0f78` captures price lookup
 authority with the request. It still retains the second estimator. Independent
-adversarial review found a P2: Complete prices the raw reported ID before
+adversarial review found a P2: outer Complete attempts pricing before its own
 `Complete_common.patch_telemetry` applies its explicitly display/routing-only
 model fallback. A missing reported ID is therefore left unpriced by Complete,
 but Agent can turn the display fallback into a charge. A padded ID can likewise
 be rejected by the exact parser and then trimmed into a price by Agent.
+
+Review of successor `c020f3610cc792886d42b316d93f25c96fe68b31` found another P2:
+native HTTP streaming applies a lower display patch before outer Complete
+annotation. Injected callbacks do not traverse that layer. Pricing must therefore
+consume the typed `reported_model` observation rather than response display
+text, independent of patch order. The existing Types interface explicitly says
+that an unavailable observation does not authorize inference from response or
+configured model labels. Production parsers/finalizers already capture it.
 
 The first candidate's eight executed suites passed 518 cases, including the
 original ten pricing cases; the provider-complete fixture failed to compile
@@ -37,7 +45,10 @@ All its sync/stream and injected transport paths return through Complete.
 
 Complete remains the response-cost annotation authority. Its immutable price
 source captures the original model catalog and effective provider permission.
-It estimates only against the exact reported model; provider-reported charges,
+It estimates only against a captured exact reported-model observation;
+explicit absence and unavailable observation remain unknown. Raw custom
+producers can stamp their model observation with `Types.with_reported_model`
+before normalization. Provider-reported charges,
 including zero, take precedence. Missing rates and required cache multipliers
 remain unknown.
 

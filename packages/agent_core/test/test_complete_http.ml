@@ -1853,6 +1853,7 @@ let start_sse_server
       ~net
       ?capture_body
       ?capture_path
+      ?on_request
       ?(content_type = "text/event-stream")
       response_body
   =
@@ -1865,6 +1866,7 @@ let start_sse_server
     (match capture_path with
      | Some seen -> seen := Some (Cohttp.Request.uri req |> Uri.path)
      | None -> ());
+    Option.iter (fun on_request -> on_request ()) on_request;
     let headers = Cohttp.Header.of_list [ "content-type", content_type ] in
     Cohttp_eio.Server.respond_string ~status:`OK ~headers ~body:response_body ()
   in
@@ -4807,10 +4809,88 @@ let test_prepared_work_timeout_retains_serialization () =
   with Exit -> ()
 ;;
 
+let test_native_http_pricing ~stream ~via_transport ~reported () =
+  let catalog scale =
+    let source = Printf.sprintf {|
+[[providers]]
+id = "http-price"
+kind = "openai_compat"
+base_url = "https://pricing.invalid"
+request_path = "/v1/chat/completions"
+auth = "none"
+capabilities_base = "openai_chat"
+[[models]]
+model_id = "priced-http-model"
+provider_name = "http-price"
+base = "openai_chat"
+input_per_million = %.1f
+output_per_million = %.1f
+|} scale (2.0 *. scale) in
+    match Model_catalog.of_toml_string ~source:"native HTTP pricing fixture" source with
+    | Ok catalog -> catalog | Error detail -> fail detail in
+  let previous = Model_catalog.global () in
+  Fun.protect ~finally:(fun () -> match previous with
+    | Some catalog -> Model_catalog.set_global catalog | None -> Model_catalog.clear_global ())
+    (fun () ->
+      Model_catalog.set_global (catalog 1.0);
+      let model = if reported then ["model", `String "priced-http-model"] else [] in
+      let usage = `Assoc ["prompt_tokens", `Int 1_000_000; "completion_tokens", `Int 1_000_000] in
+      let body = if stream then
+          let chunk choices extra = Yojson.Safe.to_string (`Assoc
+            (["id", `String "priced-http"; "object", `String "chat.completion.chunk";
+              "choices", `List choices] @ model @ extra)) in
+          "data: " ^ chunk [`Assoc ["index", `Int 0; "delta", `Assoc ["content", `String "ok"];
+            "finish_reason", `Null]] [] ^ "\n\ndata: " ^
+          chunk [`Assoc ["index", `Int 0; "delta", `Assoc []; "finish_reason", `String "stop"]]
+            ["usage", usage] ^ "\n\ndata: [DONE]\n\n"
+        else Yojson.Safe.to_string (`Assoc
+          (["id", `String "priced-http"; "object", `String "chat.completion";
+            "choices", `List [`Assoc ["index", `Int 0; "message", `Assoc
+              ["role", `String "assistant"; "content", `String "ok"];
+              "finish_reason", `String "stop"]]; "usage", usage] @ model)) in
+      Eio_main.run (fun env -> try Eio.Switch.run (fun sw ->
+        let on_request () = Model_catalog.set_global (catalog 10.0) in
+        let base_url = if stream then start_sse_server ~sw ~net:env#net ~on_request body
+          else start_mock_server ~sw ~net:env#net ~on_request body in
+        let config = Provider_config.make ~kind:OpenAI_compat ~provider_id:"http-price"
+            ~model_id:"priced-http-model" ~base_url () in
+        let transport = if via_transport then Some (Complete.make_http_transport ~sw ~net:env#net ())
+          else None in
+        let result = if stream then Complete.complete_stream ~sw ~net:env#net ?transport
+            ~config ~messages:[Types.user_msg "answer"] ~on_event:(fun _ -> ()) ()
+          else Complete.complete ~sw ~net:env#net ?transport ~config
+            ~messages:[Types.user_msg "answer"] () in
+        (match result.Completion_outcome.result with
+         | Error _ -> fail "native pricing completion failed"
+         | Ok response ->
+           check (option (float 1e-9)) "native response uses captured rates only for a reported ID"
+             (if reported then Some 3.0 else None)
+             (Option.bind response.usage (fun usage -> usage.cost_usd));
+           check bool "raw model observation survives lower display patches" true
+             (Option.bind response.telemetry (fun telemetry -> telemetry.Types.reported_model)
+              = Some (if reported then Types.Provider_reported_model "priced-http-model"
+                else Types.Provider_model_not_reported)));
+        Eio.Switch.fail sw Exit)
+      with Exit -> ()))
+;;
+
 let () =
   run
     "complete_http"
-    [ ( "native_request_provenance"
+    [ ( "native pricing authority"
+      , [ test_case "sync captures original rates" `Quick
+            (test_native_http_pricing ~stream:false ~via_transport:false ~reported:true)
+        ; test_case "sync omitted model remains unknown" `Quick
+            (test_native_http_pricing ~stream:false ~via_transport:false ~reported:false)
+        ; test_case "stream captures original rates" `Quick
+            (test_native_http_pricing ~stream:true ~via_transport:false ~reported:true)
+        ; test_case "stream omitted model remains unknown" `Quick
+            (test_native_http_pricing ~stream:true ~via_transport:false ~reported:false)
+        ; test_case "factory stream captures original rates" `Quick
+            (test_native_http_pricing ~stream:true ~via_transport:true ~reported:true)
+        ; test_case "factory stream omitted model remains unknown" `Quick
+            (test_native_http_pricing ~stream:true ~via_transport:true ~reported:false) ] )
+    ; ( "native_request_provenance"
       , [ test_case "success/error retain receipt without observer delivery"
             `Quick (test_native_completion_outcome ~via_transport:false)
         ; test_case "native transport factory preserves the received wire evidence"

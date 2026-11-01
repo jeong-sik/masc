@@ -52,7 +52,7 @@ let response ?(model = "request-model") ?cost () : Llm_provider.Types.api_respon
   { id = "pricing-response"; model; stop_reason = EndTurn; content = [Text "ok"]
   ; usage = Some {input_tokens = 1_000_000; output_tokens = 1_000_000;
       cache_creation_input_tokens = 0; cache_read_input_tokens = 0; cost_usd = cost}
-  ; telemetry = None }
+  ; telemetry = Some (Llm_provider.Types.with_reported_model ~model None) }
 
 let transport ~before_response response = Llm_transport.custom
   { complete_sync = (fun _ -> before_response (); {response = Ok response; latency_ms = Some 0})
@@ -186,6 +186,20 @@ let test_agent_run_price ?cost ~priced ~model expected () =
         subtotal usage.estimated_cost_usd;
       Alcotest.(check bool) "actual Agent preserves pricing coverage" true (usage.pricing_gap = gap))))
 
+let test_reported_observation observation expected () =
+  with_catalog (catalog 1.0) (fun () ->
+    let original = response () in
+    let observed = {original with telemetry = Some
+      {Llm_provider.Types.default_inference_telemetry with reported_model = observation}} in
+    List.iter (fun cost ->
+      let usage = match observed.usage with
+        | Some usage -> {usage with cost_usd = cost}
+        | None -> Alcotest.fail "fixture usage missing" in
+      let actual = complete ~stream:false ~config:(raw_config ()) ~before_response:(fun () -> ())
+          {observed with usage = Some usage} in
+      check_cost (match cost with Some _ -> cost | None -> expected) actual)
+      [None; Some 0.0; Some 0.25])
+
 let () = Alcotest.run "request pricing snapshot"
   ["price authority", List.map (fun (name, run) -> Alcotest.test_case name `Quick run)
     ["selection before config conversion", test_selected_before_config;
@@ -208,4 +222,10 @@ let () = Alcotest.run "request pricing snapshot"
      "actual Agent does not trim a reported ID into a price",
        test_agent_run_price ~priced:true ~model:" returned-model " None;
      "actual Agent keeps reported zero with missing model",
-       test_agent_run_price ~cost:0.0 ~priced:true ~model:"" (Some 0.0)]]
+       test_agent_run_price ~cost:0.0 ~priced:true ~model:"" (Some 0.0);
+     "typed reported ID owns pricing instead of display ID",
+       test_reported_observation (Some (Llm_provider.Types.Provider_reported_model "returned-model")) (Some 12.0);
+     "typed reported-model absence grants no estimate",
+       test_reported_observation (Some Llm_provider.Types.Provider_model_not_reported) None;
+     "unobserved model grants no estimate",
+       test_reported_observation None None]]

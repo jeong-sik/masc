@@ -1794,7 +1794,7 @@ let test_annotate_response_cost () =
           ; cache_read_input_tokens = 0
           ; cost_usd = None
           }
-    ; telemetry = None
+    ; telemetry = Some (Llm_provider.Types.with_reported_model ~model:"claude-sonnet-5" None)
     }
   in
   let source = Llm_provider.Pricing.of_catalog ~catalog:(Llm_provider.Model_catalog.global ())
@@ -1819,7 +1819,7 @@ let test_annotate_response_cost_keeps_missing_scoped_rates () =
           ; cache_read_input_tokens = 0
           ; cost_usd = None
           }
-    ; telemetry = None
+    ; telemetry = Some (Llm_provider.Types.with_reported_model ~model:"gpt-5.5" None)
     }
   in
   let source = Llm_provider.Pricing.of_catalog ~catalog:(Llm_provider.Model_catalog.global ())
@@ -1865,7 +1865,7 @@ cache_read_multiplier = 1.0
           ; cache_read_input_tokens = 0
           ; cost_usd = None
           }
-    ; telemetry = None
+    ; telemetry = Some (Llm_provider.Types.with_reported_model ~model:"shared-priced-model" None)
     }
   in
   let config =

@@ -195,7 +195,9 @@ provider ownership from a bare model name.
   captured catalog; absent rates or required cache multipliers stay unknown.
   Provider-reported charges, including zero, take precedence. Read-only
   `Pricing.pricing_for_model_opt` separately inspects the active catalog.
-- Complete annotates cost from the reported model before display/routing model
-  fallback. A missing or padded reported ID grants no catalog estimate. Agent usage only
+- Complete annotates cost from the typed reported-model observation, independently
+  of display/routing fallback. Missing, padded or unobserved reported identity
+  grants no catalog estimate. Raw custom producers use `Types.with_reported_model`
+  to capture their observation before normalization. Agent usage only
   sums annotated charges and retains unknown cost as a coverage gap; it never
   retries pricing against a model label or catalog.

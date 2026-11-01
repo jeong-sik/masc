@@ -70,7 +70,11 @@ val annotate_usage_cost
   -> Types.api_usage
   -> Types.api_usage
 
-(** Apply {!annotate_usage_cost} to a response usage record. *)
+(** Apply {!annotate_usage_cost} using the producer's typed reported-model
+    observation when available. An observed absence grants no estimate, even
+    when [response.model] contains a display fallback. An unavailable observation
+    also grants no estimate; raw custom producers can capture their observation
+    with [Types.with_reported_model]. Explicit charges always remain known. *)
 val annotate_response_cost
   :  source:source
   -> Types.api_response

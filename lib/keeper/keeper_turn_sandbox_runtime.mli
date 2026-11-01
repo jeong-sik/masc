@@ -485,9 +485,11 @@ val teardown_keeper_sandbox_by_name :
 
 val remove_keeper_volumes_by_name :
   ?timeout_sec:float ->
+  base_path:string ->
   keeper_name:string ->
   backend:Keeper_sandbox.backend ->
   ?microvm_backend:Keeper_microvm_backend.t ->
+  ?sandbox_image:string ->
   unit ->
   (unit, string) result
 (** Decide whether a dissolved keeper's volumes can be removed after
@@ -495,14 +497,19 @@ val remove_keeper_volumes_by_name :
     paused keeper is torn down too and comes back to its work volume.
 
     Apple volume names are shared by same-named Keepers in different
-    workspaces. Until durable ownership can establish which workspaces own a
-    volume, automatic deletion returns an error and leaves it in place.
+    workspaces. Ownership is settled through the work volume's claims marker
+    ({!Keeper_sandbox_microvm.release_apple_work_volume_claim}): the marker
+    is written at every fresh boot, this releases [base_path]'s claim, and
+    the volumes are deleted only when no other claimant remains. A legacy
+    volume with no marker, an unreadable marker, a container still
+    referencing the keeper, a missing [sandbox_image] to run the claims
+    helper with, or any helper failure returns [Error] naming what was left
+    in place; volumes another workspace still claims are kept and logged.
     Docker and remote SSH keepers own no volume.
     Microsandbox and nerdctl create the work volume as a host directory but
     have no established removal spelling, so they return [Error] naming the
     volume left behind, as does a [Micro_vm] keeper with no
-    [microvm_backend]. [timeout_sec] is retained for callers; no backend here
-    issues a volume deletion command while ownership remains unverified. *)
+    [microvm_backend]. *)
 
 val teardown_keeper_sandbox :
   ?timeout_sec:float ->

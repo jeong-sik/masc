@@ -542,7 +542,7 @@ def cursor():
     CURSOR[0] += 1
     return "v:%d" % CURSOR[0]
 
-def notify(method, params, visible=True):
+def notify(method, params, visible=True, gap_after=None):
     # Muse's turnCount counts completed turns only: a failed or cancelled
     # terminal leaves it where it was.
     if method == "turn/completed" and params.get("terminal") == "completed":
@@ -555,6 +555,8 @@ def notify(method, params, visible=True):
                                  "first": position, "last": position}
         VIEW.append({"method": method, "params": dict(params)})
     if visible:
+        if gap_after is not None:
+            notify("view/gap", {"sessionId": SESSION, "after": gap_after, "next": params["viewCursor"]})
         send({"jsonrpc": "2.0", "method": method, "params": params})
     if method == "turn/completed" and FIXTURE.get("late_view_gap"):
         notify("view/gap", {"sessionId": SESSION, "after": "before-hole", "next": params["viewCursor"]})
@@ -745,14 +747,6 @@ def acknowledge(disposition="started"):
             notify("session/tokenUsage", usage)
         for usage in FIXTURE.get("model_usage", []):
             notify("session/tokenUsage", dict(usage, sessionId=SESSION, turnId=turn_id))
-        if FIXTURE.get("lost_model_before_failure"):
-            after = "v:%d" % CURSOR[0]
-            hidden = {"sessionId": SESSION, "turnId": turn_id, "modelId": "hidden-model-b",
-                      "promptTokens": 9, "totalTokens": 10,
-                      "usage": {"inputTokens": 9, "outputTokens": 1,
-                                "cachedTokens": 0, "reasoningTokens": 0}}
-            notify("session/tokenUsage", hidden, visible=False)
-            notify("view/gap", {"sessionId": SESSION, "after": after, "next": hidden["viewCursor"]})
 
 def tool_item(item_id, tool, call_id, status, revision, args="{}"):
     return {"itemId": item_id, "kind": "toolCall", "turnId": turn_id, "revision": revision,
@@ -870,7 +864,14 @@ if SCENARIO in ["turn_failed", "turn_failed_with_usage", "read_only_tool_failure
     if SCENARIO == "turn_failed_with_usage":
         terminal["usage"] = {"inputTokens": 10, "outputTokens": 2,
                              "cachedTokens": 0, "reasoningTokens": 0}
-    notify("turn/completed", terminal)
+    gap_after = None
+    if FIXTURE.get("lost_model_before_failure"):
+        gap_after = "v:%d" % CURSOR[0]
+        notify("session/tokenUsage", {"sessionId": SESSION, "turnId": turn_id,
+            "modelId": "hidden-model-b", "promptTokens": 9, "totalTokens": 10,
+            "usage": {"inputTokens": 9, "outputTokens": 1,
+                      "cachedTokens": 0, "reasoningTokens": 0}}, visible=False)
+    notify("turn/completed", terminal, gap_after=gap_after)
     drain()
 if SCENARIO == "text_only":
     item("item/completed", {"itemId": "m-1", "kind": "agentMessage", "turnId": turn_id,

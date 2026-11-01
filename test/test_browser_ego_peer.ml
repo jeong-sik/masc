@@ -759,11 +759,11 @@ let test_a_raw_drag_reports_what_the_script_saw () =
   check bool "an open dialog changes what is reported" true
     (seen_with ["dialog",ego_dialog "confirm" "sure?"] <> seen_with [])
 
-(* dragAndDrop is the one drag whose answer the SDK declares: a receipt object,
-   with a [dialog] member when a dialog interrupted it. Only a receipt object
-   without [dialog] lets the next input run. *)
-let test_a_target_drag_settles_only_from_the_receipt_it_returns () =
+(* Native clicks, double-clicks and drags can open a dialog before release.
+   Only their declared receipt without [dialog] lets the next input run. *)
+let test_a_target_gesture_settles_only_from_the_receipt_it_returns () =
   let drag = Lane.Drag_to {source=Lane.Selector "#source";destination=Lane.Selector "#destination";via=[];duration_ms=0} in
+  List.iter (fun gesture ->
   let tab = obj ["url",str observed_url;"title",str "Slack"] in
   let drag_reply fields = answered (obj (["urlBefore",str observed_url;"tab",tab] @ fields)) in
   let failed_after_start = Ok (Peer.result_marker ^ Yojson.Safe.to_string (obj ["ok",`Bool false;"error",str "native failed"]) ^ "\n") in
@@ -776,10 +776,10 @@ let test_a_target_drag_settles_only_from_the_receipt_it_returns () =
       | "page.target_input" -> reply
       | other -> failf "%s unexpectedly dispatched %s" name other) in
     ignore (dispatch peer Live.Tabs_list (obj []));
-    check string (name ^ " answers the drag") first
-      (failure_kind (dispatch peer Live.Page_interact (interact_args drag)));
+    check string (name ^ " answers the gesture") first
+      (failure_kind (dispatch peer Live.Page_interact (interact_args gesture)));
     let before = List.length !asked in
-    let next = failure_kind (dispatch peer Live.Page_interact (interact_args drag)) in
+    let next = failure_kind (dispatch peer Live.Page_interact (interact_args gesture)) in
     if settles then check int (name ^ " lets the next input run") (before + 1) (List.length !asked)
     else begin
       check string (name ^ " keeps input blocked") "before effect" next;
@@ -806,7 +806,59 @@ let test_a_target_drag_settles_only_from_the_receipt_it_returns () =
       "a reply without its starting URL", answered (obj ["receipt",obj [];"error",`Null;"tab",tab]), "unknown", false;
       "a reply without its tab", answered (obj ["urlBefore",str observed_url;"receipt",obj [];"error",`Null]), "unknown", false;
       "a refusal before the drag", refused "observed_url_changed", "before effect", true;
-      "a script that never started", Error (Peer.Unstarted "no node here"), "before effect", true ]
+      "a script that never started", Error (Peer.Unstarted "no node here"), "before effect", true ])
+    [drag; Lane.Click "#source"; Lane.Double_click (Lane.Selector "#source");
+     Lane.Click_target (Lane.Target_ref 12); Lane.Double_click_target (Lane.Target_ref 12)]
+
+let test_target_dialog_preserves_original_input_until_operator_reset () =
+  let module Input=Masc.Browser_ego_input in
+  let dialog=ego_dialog "alert" "mousedown interrupted" in
+  let input_reply receipt = answered (obj ["urlBefore",str observed_url;
+    "tab",obj ["url",str observed_url;"title",str "Slack"];"receipt",receipt;"error",`Null]) in
+  List.iter (fun gesture ->
+    let asked=ref [] and reply=ref (input_reply (obj ["dialog",dialog])) in
+    let peer=opened (fun sent ->
+      asked:=sent.step :: !asked;
+      match sent.step with
+      | "tabs.list" -> answered tabs
+      | "page.target_input" -> !reply
+      | "page.dialog" -> answered (obj ["answered",`Bool true;"dialog",dialog])
+      | other -> failf "unexpected target recovery step %s" other) in
+    ignore (dispatch peer Live.Tabs_list (obj []));
+    let first=Peer.dispatch ~command_id:"original-target-gesture" peer ~verb:Live.Page_interact (interact_args gesture) in
+    check string "the original dialog remains a served observation" "served" (failure_kind first);
+    let pending=match Peer.input_status peer with
+      | Input.Uncertain pending -> pending
+      | Ready _ -> fail "dialog-interrupted gesture lost its original input ownership" in
+    check bool "pending input belongs to the original command and Page" true
+      (pending.command_id="original-target-gesture" && pending.tab_id=1 && pending.page_label="p1");
+    check bool "the returned command released only its local running marker" false (Peer.input_busy peer);
+    check string "answering the dialog succeeds" "served" (failure_kind (dispatch peer Live.Page_act
+      (act_args (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Accept_dialog None}))));
+    check bool "answering the dialog preserves the exact pending generation" true
+      (Peer.input_status peer=Input.Uncertain pending);
+    let before=List.length !asked in
+    check string "another input is refused before an effect" "before effect"
+      (failure_kind (dispatch peer Live.Page_interact (interact_args gesture)));
+    check int "blocked input sends no native call" before (List.length !asked);
+    check bool "the operator can reset the original pending input" true
+      (Result.is_ok (Peer.assert_input_reset peer ~generation:pending.generation));
+    let reset=Peer.input_status peer in
+    check bool "the operator assertion has distinct provenance" true
+      (match reset with Input.Ready (Input.Operator_reset_asserted _) -> true
+       | Ready Input.Command_settled | Uncertain _ -> false);
+    List.iter (fun refused_reply ->
+      reply:=refused_reply;
+      check string "input that never starts is refused before an effect" "before effect"
+        (failure_kind (dispatch peer Live.Page_interact (interact_args gesture)));
+      check bool "pre-effect refusal restores the original operator provenance" true (Peer.input_status peer=reset))
+      [refused "observed URL changed"; Error (Peer.Unstarted "no node here")];
+    reply:=input_reply (obj []);
+    check string "a new original gesture can complete after operator reset" "served"
+      (failure_kind (dispatch peer Live.Page_interact (interact_args gesture)));
+    check bool "the SDK clean receipt establishes command settlement" true
+      (Peer.input_status peer=Input.Ready Input.Command_settled))
+    [Lane.Click "#source"; Lane.Double_click_target (Lane.Target_ref 12)]
 
 let test_chooser_upload_respects_uncertain_pointer_release () =
   let directory = Unix.realpath (capture_directory ()) in
@@ -1349,6 +1401,12 @@ let test_a_snapshot_target_is_found_by_ego_and_checked_first () =
     | Ok answer -> Yojson.Safe.to_string answer
     | other -> failf "%s was %s" label (failure_kind other) in
   let click target = on (Lane.Click_target target) in
+  let operator_reset_between_scenarios () =
+    match Peer.input_status peer with
+    | Masc.Browser_ego_input.Uncertain pending ->
+      check bool "the fixture operator confirms reset before another scenario" true
+        (Result.is_ok (Peer.assert_input_reset peer ~generation:pending.generation))
+    | Ready _ -> fail "an interrupted target gesture did not preserve input uncertainty" in
   check string "a ref is clicked by ego once it names one element"
     (Yojson.Safe.to_string (obj ["inputReadiness",str "command_settled";"tabId",`Int 1;"action",str "click";"target",obj ["ref",`Int 12];
       "urlBefore",str observed_url;"url",str observed_url;"title",str "Slack"]))
@@ -1384,6 +1442,7 @@ let test_a_snapshot_target_is_found_by_ego_and_checked_first () =
   check bool "and the tab's row still says where the page is" true
     (contains with_dialog (Printf.sprintf {|"url":%S|} observed_url));
   check string "the page itself is not read after the dialog" {|["info","url","click @3"]|} (seen ());
+  operator_reset_between_scenarios ();
   act := "return {};";
   let runs = List.length !asked in
   let refused label result = match result with
@@ -1403,6 +1462,7 @@ let test_a_snapshot_target_is_found_by_ego_and_checked_first () =
   (match click (Lane.Target_text {text="A";exact=true}) with
    | Error (Live.Outcome_unknown detail | Live.Observed_failure {disposition=Live.Uncertain;message=detail;_}) -> check bool "native ambiguity is uncertain" true (contains detail "matched 2 elements")
    | other -> failf "native ambiguity was %s" (failure_kind other));
+  operator_reset_between_scenarios ();
   act := {|throw new Error("Target closed");|};
   (match click (Lane.Target_ref 12) with
    | Error (Live.Outcome_unknown detail | Live.Observed_failure {disposition=Live.Uncertain;message=detail;_}) -> check bool "a failed click is unknown and asks for a read" true (contains detail "read tab 1")
@@ -3384,7 +3444,8 @@ let () =
       test_case "saved fetch survives snapshot failure and reaches the download broker" `Quick test_saved_fetch_survives_snapshot_failure_and_reaches_download_broker;
       test_case "a raw drag never confirms input release" `Quick test_native_drag_and_release;
       test_case "a raw drag reports what its script saw" `Quick test_a_raw_drag_reports_what_the_script_saw;
-      test_case "a target drag settles only from the receipt it returns" `Quick test_a_target_drag_settles_only_from_the_receipt_it_returns;
+      test_case "target gestures settle only from their declared receipt" `Quick test_a_target_gesture_settles_only_from_the_receipt_it_returns;
+      test_case "target dialog preserves original input until operator reset" `Quick test_target_dialog_preserves_original_input_until_operator_reset;
       test_case "operator input assertion resumes the same peer without replay" `Quick test_operator_input_recovery;
       test_case "native workflows retain input ownership after a lost result" `Quick test_native_workflow_pointer_ownership;
       test_case "a workflow that never held input keeps the previous readiness" `Quick test_a_workflow_that_never_held_input_keeps_the_previous_readiness;

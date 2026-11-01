@@ -121,9 +121,10 @@ reported before release: answering it alone does not prove that every original
 key or pointer button was released. An unconfirmed release prevents further
 input on that connection. The result reports `inputReleased` independently of completed
 effects; a guard does not make the failed action successful.
-Manual held-button and held-key workflows are not exposed. A single `click`, `dblclick`,
-pointer or keyboard verb outside a workflow does not take the input, so only workflow steps
-and drags are judged by the rule below.
+Manual held-button and held-key workflows are not exposed. The rule below applies
+to native selector and snapshot-target `click` and `dblclick`, drags, and
+input-holding workflow steps. Other standalone pointer and keyboard verbs do not
+acquire this input ownership.
 
 `keyboard.type`, `keyboard.press` and `keyboard.paste` have no selector preflight.
 An exception after entering their SDK method cannot be classified as definitely

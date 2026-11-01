@@ -1340,8 +1340,9 @@ let native_input t ~id ~label ~cursor ~expected_url ~locator ~reference ~operati
     | Target_select (Browser_lane.Multiple_options values) -> `List (List.map (fun value -> obj ["value",str value]) values)
     | Target_click | Target_fill _ | Target_hover | Target_double_click | Target_drag _ -> `Null in
   let unknown = Printf.sprintf "read tab %d before another step" id in
-  let holds_button = match operation with Target_drag _ -> true
-    | Target_click | Target_fill _ | Target_hover | Target_double_click | Target_select _ -> false in
+  let holds_button = match operation with
+    | Target_click | Target_double_click | Target_drag _ -> true
+    | Target_fill _ | Target_hover | Target_select _ -> false in
   let* ()=if holds_button then Input.begin_holding t.input ~scope:Input.Page_scope ~tab_id:id ~page_label:label ~operation:"native_target_input"
     |> Result.map_error (fun detail -> Live.Before_effect detail) else Ok () in
   let response = run_native_step t ~step:"page.target_input"
@@ -1369,17 +1370,17 @@ let native_input t ~id ~label ~cursor ~expected_url ~locator ~reference ~operati
     match field "error" value, field "urlBefore" value, field "receipt" value, field "tab" value with
     | Some (`String error), _, _, _ -> outcome (head error)
     | Some `Null, Some (`String url_before), Some (`Assoc receipt), Some ((`Null | `Assoc _) as tab) ->
-      (* dragAndDrop answers with the SDK's receipt, and the drag settles only from a reply read whole. A receipt
+      (* Click, double-click and dragAndDrop settle only from the SDK's receipt read whole. A receipt
          with a member the SDK does not declare is not an answer, so it is read as neither released nor served. *)
       let answer = Browser_ego_release.answer_of_json (`Assoc receipt) in
       let declared = match operation with
-        | Target_drag _ ->
+        | Target_click | Target_double_click | Target_drag _ ->
           (match answer with
            | Browser_ego_release.Unreleased Browser_ego_release.Undeclared_answer ->
-             Error "ego answered the drag with a receipt the SDK does not declare"
+             Error "ego answered the input with a receipt the SDK does not declare"
            | Browser_ego_release.Receipt_without_dialog
            | Browser_ego_release.Unreleased (Browser_ego_release.Receipt_with_dialog | Void_answer | Never_returned) -> Ok ())
-        | Target_click | Target_fill _ | Target_hover | Target_double_click | Target_select _ -> Ok () in
+        | Target_fill _ | Target_hover | Target_select _ -> Ok () in
       let popups = match List.assoc_opt "popups" receipt with
         | None -> Ok []
         | Some (`List popups) ->

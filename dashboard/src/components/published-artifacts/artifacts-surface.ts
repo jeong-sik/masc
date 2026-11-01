@@ -15,7 +15,8 @@ import { ArtifactPreview } from './artifact-preview'
 import { ArtifactCheckControl, type ArtifactCheckOutcome } from './artifact-check-control'
 import { executionWorkspaceAuthority } from '../../store'
 import { ArtifactImport } from './artifact-import'
-import { downloadArtifactDraft, type ArtifactDraftRetention, type ArtifactDraftSnapshot, type ArtifactPublicationOutcome } from './artifact-composer'
+import { downloadArtifactDraft, type ArtifactDraftRetention, type ArtifactPublicationOutcome } from './artifact-composer'
+import { useArtifactDraftSession } from './artifact-draft-session'
 
 type Remote<T> = { key: object; kind: 'loaded'; data: T; receivedAt: number }
   | { key: object; kind: 'error'; message: string; data?: T; revalidating?: boolean }
@@ -70,18 +71,14 @@ export function ArtifactsSurface() {
   }, [owner])
   const [receipts, setReceipts] = useState<readonly { owner: typeof owner; outcome: ArtifactCheckOutcome }[]>([])
   const [readerOpen, setReaderOpen] = useState(false)
-  const [drafts, setDrafts] = useState<readonly { owner: typeof owner; snapshot: ArtifactDraftSnapshot }[]>([])
+  const draftSession = useArtifactDraftSession()
   // Callbacks close over the original owner, never the replacement authority.
   const draftRetention: ArtifactDraftRetention = {
-    remember: snapshot => setDrafts(previous => {
-      const entry = { owner, snapshot }
-      return previous.some(item => item.owner === owner && item.snapshot.identity === snapshot.identity)
-        ? previous.map(item => item.owner === owner && item.snapshot.identity === snapshot.identity ? entry : item)
-        : [...previous, entry]
-    }),
-    forget: identity => setDrafts(previous => previous.filter(item => item.owner !== owner || item.snapshot.identity !== identity)),
+    remember: snapshot => draftSession.remember(owner, snapshot),
+    release: identity => draftSession.release(owner, identity),
+    forget: identity => draftSession.forget(owner, identity),
   }
-  const retiredDrafts = drafts.filter(entry => entry.owner !== owner)
+  const retiredDrafts = draftSession.drafts.filter(entry => entry.owner !== owner || entry.detached)
   const ownsSession = () => !owner.retired && currentStoredTokenRevision() === owner.authRevision
     && executionWorkspaceAuthority.peek() === owner.authority
   const current = () => owner.authority !== null && ownsSession()
@@ -100,7 +97,7 @@ export function ArtifactsSurface() {
         <button type="button" onClick=${() => downloadArtifactDraft(snapshot.value)}>원고 다운로드</button>
         <button type="button" onClick=${() => {
           if (window.confirm('보관한 원고를 폐기할까요? 다운로드하지 않은 내용은 사라집니다.')) {
-            setDrafts(previous => previous.filter(entry => entry.owner !== original || entry.snapshot.identity !== snapshot.identity))
+            draftSession.forget(original, snapshot.identity)
           }
         }}>원고 폐기</button>
       </article>`)}
@@ -137,7 +134,7 @@ export function ArtifactsSurface() {
   </div>`
 }
 
-const noopDraftRetention: ArtifactDraftRetention = { remember: () => {}, forget: () => {} }
+const noopDraftRetention: ArtifactDraftRetention = { remember: () => {}, release: () => {}, forget: () => {} }
 type ObservedDocument =
   | { kind: 'operator'; document: ArtifactDocument; shareObservation?: ShareObservation; workspace?: ArtifactWorkspace }
   | { kind: 'public'; document: ArtifactDocument }

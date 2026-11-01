@@ -323,6 +323,7 @@ export function ArtifactSharedEditor({ doc, workspaceRoot, capturedWorkspace, dr
       capturedWorkspace=${publication.owner.workspace} workspaceRoot=${workspaceRoot} isCurrent=${isCurrent} onMutation=${onMutation}
       captureAttempt=${() => { const generation = pageGeneration.current; return () => mounted.current && !retired.current && pageGeneration.current === generation }}
       onDraftChange=${(value: ArtifactDraftSnapshot['value']) => draftRetention.remember({ ...publication.snapshot, value })}
+      onRelease=${() => draftRetention.release(publication.snapshot.identity)}
       onSaved=${(value: ArtifactPublication) => {
         if (attempted.current.has(publication.snapshot.identity)) return
         attempted.current.add(publication.snapshot.identity)

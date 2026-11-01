@@ -1,5 +1,5 @@
 import { html } from 'htm/preact'
-import { useEffect, useRef, useState } from 'preact/hooks'
+import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks'
 import { ApiRequestError } from '../../api/core'
 import {
   publishArtifact, readPublishedDraft, fetchWorkspacePublishedArtifact, captureArtifactWorkspace,
@@ -19,6 +19,7 @@ export type ArtifactDraftSnapshot = {
 }
 export type ArtifactDraftRetention = {
   remember: (snapshot: ArtifactDraftSnapshot) => void;
+  release: (identity: object) => void;
   forget: (identity: object) => void;
 }
 type SaveState = { kind: 'ready'; message?: string } | { kind: 'saving' }
@@ -37,11 +38,12 @@ export function downloadArtifactDraft(draft: ArtifactDraft) {
   URL.revokeObjectURL(url)
 }
 
-export function ArtifactComposer({ initial, base, workspaceRoot, isCurrent, onDraftChange, onMutation, onSaved, onCancel, capturedWorkspace, captureAttempt }: {
+export function ArtifactComposer({ initial, base, workspaceRoot, isCurrent, onDraftChange, onRelease, onMutation, onSaved, onCancel, capturedWorkspace, captureAttempt }: {
   initial: ArtifactDraft; base?: ArtifactDocument; capturedWorkspace?: ArtifactWorkspace; isCurrent: () => boolean;
   captureAttempt?: () => () => boolean;
   workspaceRoot: string;
   onDraftChange: (draft: ArtifactDraft) => void;
+  onRelease: () => void;
   onMutation: (outcome: ArtifactPublicationOutcome) => void;
   onSaved: (publication: ArtifactPublication, workspace: ArtifactWorkspace) => void; onCancel: () => void;
 }) {
@@ -60,7 +62,7 @@ export function ArtifactComposer({ initial, base, workspaceRoot, isCurrent, onDr
   const sending = useRef(false)
   const [workspace, setWorkspace] = useState<WorkspaceState>({ kind: 'loading' })
   const baseRef = base ? { id: base.artifact.id, revision: base.artifact.revision } : undefined
-  useEffect(() => () => { active.current = false }, [])
+  useLayoutEffect(() => () => { active.current = false; onRelease() }, [])
   const current = () => active.current && isCurrent()
   useEffect(() => {
     // Freeze both canonical roots when the editable draft is created. Never

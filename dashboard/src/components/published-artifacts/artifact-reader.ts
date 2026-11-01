@@ -344,6 +344,7 @@ export function ArtifactReader({ doc, fixedRevision, readOnly = false, readOnlyI
           : editing ? html`<${ArtifactComposer} initial=${editing.snapshot.value}
           base=${editing.document} workspaceRoot=${workspaceRoot} capturedWorkspace=${editing.workspace} isCurrent=${isCurrent} onMutation=${onPublication}
           onDraftChange=${(value: ArtifactDraftSnapshot['value']) => draftRetention.remember({ ...editing.snapshot, value })}
+          onRelease=${() => draftRetention.release(editing.snapshot.identity)}
           onSaved=${(publication: ArtifactPublication, workspace: ArtifactWorkspace) => { draftRetention.forget(editing.snapshot.identity); setEditing(null); onPublished(publication, workspace) }}
           onCancel=${() => { if (discardDraft()) { draftRetention.forget(editing.snapshot.identity); setEditing(null) } }} />`
           : view === 'source'

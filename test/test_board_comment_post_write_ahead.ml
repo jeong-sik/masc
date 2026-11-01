@@ -158,6 +158,55 @@ let test_held_observer_failure_keeps_the_committed_receipt () =
   Alcotest.(check int) "both actual writes reached the WAL" 2
     (List.length (post_rows ()))
 
+let test_combined_reserved_held_observer_is_reraised_after_commit () =
+  let original_backtrace = Printexc.get_raw_backtrace () in
+  let original, original_backtrace = Eio.Exn.combine
+      (Failure "ordinary held observer failure", original_backtrace)
+      (Eio.Time.Timeout, original_backtrace) in
+  let active = Board.global () in
+  let calls = ref 0 in
+  let raised = with_observer
+      { noop_observer with observe_persist_lock_held_sec = (fun _ ->
+          incr calls;
+          if !calls = 1 then Printexc.raise_with_backtrace original original_backtrace) }
+      (fun () ->
+        match Board_dispatch.create_post_with_unresolved
+                ~author:"combined-receipt-author"
+                ~content:"committed before combined observer failure"
+                ~post_kind:Board.Human_post () with
+        | Ok _ -> Alcotest.fail "reserved observer failure must be rethrown"
+        | Error failure ->
+          Alcotest.fail ("reserved observer failure became a typed publication failure: " ^
+            Board.Post_publication_failure.to_string failure)
+        | exception (Eio.Exn.Multiple _ as raised) -> raised)
+  in
+  Alcotest.(check bool) "the original combined exception is rethrown" true (raised == original);
+  Alcotest.(check int) "the held observer failed once" 1 !calls;
+  Alcotest.(check bool) "the original store is retained" true (active == Board.global ());
+  let post = match Board_dispatch.list_posts () with
+    | [post] -> post
+    | posts -> Alcotest.failf "expected one actual committed post, got %d" (List.length posts)
+  in
+  let post_id = Board.Post_id.to_string post.id in
+  Alcotest.(check string) "the actual committed body remains in memory"
+    "committed before combined observer failure" post.body;
+  (match post_rows () with
+   | [row] ->
+     (match Board.post_of_yojson row with
+      | Some persisted ->
+        Alcotest.(check string) "the actual committed identity remains on disk" post_id
+          (Board.Post_id.to_string persisted.id);
+        Alcotest.(check string) "disk retains the actual committed body" post.body persisted.body
+      | None -> Alcotest.fail "the actual committed post row did not decode")
+   | rows -> Alcotest.failf "expected one actual committed post row, got %d" (List.length rows));
+  (* Keep the same store and mutex after the original reserved failure. *)
+  let later = create_post_exn ~author:"combined-receipt-author" ~content:"later real write" in
+  Alcotest.(check bool) "the later write has a distinct identity" false
+    (String.equal post_id (Board.Post_id.to_string later.id));
+  Alcotest.(check int) "both actual posts remain in memory" 2
+    (List.length (Board_dispatch.list_posts ()));
+  Alcotest.(check int) "both actual writes remain on disk" 2 (List.length (post_rows ()))
+
 let test_acquire_observer_failure_proves_no_publication () =
   let calls = ref 0 in
   let failure = with_observer
@@ -814,6 +863,8 @@ let () =
         [
           Alcotest.test_case "held observer failure retains committed receipt and later writes" `Quick
             (with_eio test_held_observer_failure_keeps_the_committed_receipt);
+          Alcotest.test_case "combined reserved held observer is rethrown after commit" `Quick
+            (with_eio test_combined_reserved_held_observer_is_reraised_after_commit);
           Alcotest.test_case "acquire observer failure proves no publication" `Quick
             (with_eio test_acquire_observer_failure_proves_no_publication);
           Alcotest.test_case "dispatch preparation failure proves no publication" `Quick

@@ -432,6 +432,8 @@ let notify_post_creation (creation : Board.post_creation) =
     | Stack_overflow | Sys.Break) as exn ->
     Printexc.raise_with_backtrace exn (Printexc.get_raw_backtrace ())
   | exn ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    Board_posts_source.propagate_reserved exn backtrace;
     Error
       (Board.Post_publication_failure.after_commit creation
          (Board.Post_publication_failure.Raised exn))
@@ -446,6 +448,8 @@ let resolve_post_dispatch_context () =
     | Stack_overflow | Sys.Break) as exn ->
     Printexc.raise_with_backtrace exn (Printexc.get_raw_backtrace ())
   | exn ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    Board_posts_source.propagate_reserved exn backtrace;
     Error
       (Board.Post_publication_failure.before_effect
          (Board.Post_publication_failure.Raised exn))
@@ -480,6 +484,8 @@ let create_post_with_unresolved ~author ~content ?title ?body ~post_kind ?meta_j
        | Stack_overflow | Sys.Break) as exn ->
        Printexc.raise_with_backtrace exn (Printexc.get_raw_backtrace ())
      | exn ->
+       let backtrace = Printexc.get_raw_backtrace () in
+       Board_posts_source.propagate_reserved exn backtrace;
        Error
          (Board.Post_publication_failure.unknown
             (Board.Post_publication_failure.Raised exn)))
@@ -510,6 +516,8 @@ let create_post_once_by_fusion_run_id ~fusion_run_id ~author ~content ~post_kind
        | Stack_overflow | Sys.Break) as exn ->
        Printexc.raise_with_backtrace exn (Printexc.get_raw_backtrace ())
      | exn ->
+       let backtrace = Printexc.get_raw_backtrace () in
+       Board_posts_source.propagate_reserved exn backtrace;
        Error
          (Board.Post_publication_failure.unknown
             (Board.Post_publication_failure.Raised exn)))

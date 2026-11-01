@@ -28,16 +28,22 @@ let of_snapshot ~observed_at = function
       Lane_addon_types.output_of_json (Lane_addon_types.output_to_json output)
   | _ -> Error "browser snapshot must be an object"
 
-let publish_client (client : Browser_lane.client_info) ~(space_observation : Browser_ego_space_observation.t option) =
+let publish_client (client : Browser_lane.client_info) ~(space_observation : Browser_ego_space_observation.t option)
+    ~(space_presence : Browser_ego_space_observation.presence option) =
   let observation=match client.transport,client.space,space_observation with
     | Ego_task_space,Some space,Some observation when space.id=observation.space.id ->
         Browser_ego_space_observation.to_json observation
     | (Ego_task_space|Web_extension|Webdriver_bidi),(Some _|None),(Some _|None) -> `Null in
+  let presence=match client.transport,client.space,space_presence with
+    | Ego_task_space,Some space,Some presence when space.id=presence.space_id ->
+      Browser_ego_space_observation.presence_to_json presence
+    | (Ego_task_space|Web_extension|Webdriver_bidi),(Some _|None),(Some _|None) -> `Null in
   let `Assoc fields=Browser_lane.client_json client in
-  `Assoc (("spaceObservation",observation)::fields)
+  `Assoc (("spacePresence",presence)::("spaceObservation",observation)::fields)
 
 type published = {
   clients : Browser_lane.client_info list;
+  space_presence : (Browser_lane.client_id * Browser_ego_space_observation.presence) list;
   client_rows : Yojson.Safe.t list;
   automation : Browser_selection.work_browser;
   stagehand : Browser_selection.work_browser;
@@ -54,7 +60,7 @@ let decode_snapshot = function
              | [] -> Ok (List.rev acc)
              | `Assoc row::rest ->
                  let* ()=if List.sort String.compare (List.map fst row)
-                   =["browser";"clientId";"engineVersion";"interactions";"lastActivities";"space";"spaceObservation";"transport";"version"]
+                   =["browser";"clientId";"engineVersion";"interactions";"lastActivities";"space";"spaceObservation";"spacePresence";"transport";"version"]
                    then Ok () else Error "invalid browser inventory client fields" in
                  let validate name decode = match List.assoc_opt name row with
                    | Some (`List values) -> List.fold_left (fun result value ->
@@ -63,7 +69,7 @@ let decode_snapshot = function
                  let* ()=validate "interactions" Browser_lane.interaction_activity_of_json in
                  let* ()=validate "lastActivities" Browser_lane.settled_activity_of_json in
                  let* client=Browser_addon_wire.client_of_json (`Assoc
-                   (List.filter (fun (name,_) -> name<>"interactions" && name<>"lastActivities" && name<>"spaceObservation") row)) in
+                   (List.filter (fun (name,_) -> name<>"interactions" && name<>"lastActivities" && name<>"spaceObservation" && name<>"spacePresence") row)) in
                  let* ()=match client.transport,client.space,List.assoc_opt "spaceObservation" row with
                    | Ego_task_space,Some space,Some value when value<>`Null ->
                        Browser_ego_space_observation.of_json ~expected_id:space.id value |> Result.map (fun _ -> ())
@@ -74,6 +80,19 @@ let decode_snapshot = function
                  then Error "duplicate browser inventory client" else decode (client::acc) rest
              | _::_ -> Error "invalid browser inventory client" in
            let* clients=decode [] rows in
+           let rec presences acc clients rows = match clients,rows with
+             | [],[] -> Ok (List.rev acc)
+             | (client:Browser_lane.client_info)::clients,`Assoc row::rows ->
+               let* presence=match client.transport,client.space,List.assoc_opt "spacePresence" row with
+                 | Ego_task_space,Some space,Some value when value<>`Null ->
+                   Browser_ego_space_observation.presence_of_json ~expected_id:space.id value
+                   |> Result.map (fun presence -> Some (client.client_id,presence))
+                 | (Ego_task_space|Web_extension|Webdriver_bidi),(Some _|None),Some `Null -> Ok None
+                 | (Ego_task_space|Web_extension|Webdriver_bidi),(Some _|None),(None|Some _) ->
+                   Error "invalid browser Space presence" in
+               presences (match presence with None -> acc | Some value -> value::acc) clients rows
+             | [],_::_ | _::_,([]|_::_) -> Error "invalid browser inventory presence alignment" in
+           let* space_presence=presences [] clients rows in
            let rec unavailable acc = function
              | [] -> Ok (List.rev acc)
              | row :: rest -> let* item = unavailable_of_json row in unavailable (item :: acc) rest in
@@ -81,7 +100,7 @@ let decode_snapshot = function
              | None -> Ok []
              | Some (`List rows) -> unavailable [] rows
              | Some _ -> Error "invalid unavailable browser backends" in
-           Ok {clients;client_rows=rows;automation;stagehand;unavailable}
+           Ok {clients;space_presence;client_rows=rows;automation;stagehand;unavailable}
        | Some (`String "retired"),(None|Some _),(None|Some _) -> Error "the browser worker is retired"
        | (None|Some _),(None|Some _),(None|Some _) -> Error "browser inventory is unavailable")
   | _ -> Error "browser inventory is unavailable"
@@ -109,6 +128,7 @@ let merge ~among workers =
     | [ (_, Some published) ] -> pick published
     | [ (_, None) ] | [] | _ :: _ :: _ -> unobserved in
   { clients = List.concat_map (fun published -> published.clients) live;
+    space_presence = List.concat_map (fun published -> published.space_presence) live;
     client_rows = List.concat_map (fun published -> published.client_rows) live;
     unavailable = List.concat_map (fun published -> published.unavailable) live;
     automation = owned Browser_lane.Backend.Automation (fun published -> published.automation);

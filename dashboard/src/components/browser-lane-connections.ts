@@ -10,6 +10,11 @@ const transports: Record<BrowserConnection['transport'], string> = {
 const outcomes: Record<BrowserConnection['lastActivities'][number]['outcome'], string> = {
   returned: 'Returned', refused: 'Not performed', partial: 'Partly performed', unknown: 'Outcome unknown',
 }
+const presenceReasons = {
+  transport_unavailable: 'The native inventory could not be reached.',
+  invalid_inventory: 'The native inventory could not be read.',
+  ambiguous_inventory: 'The native inventory repeated the original Space ID.',
+}
 function interaction(work: BrowserInteraction) {
   return html`<span>${work.actor ?? 'Caller not recorded'} · ${work.action} · ${work.tabId === null ? 'Space scope' : `Tab ${work.tabId}`}
     <span class="break-all"> · Request ${work.requestId}</span></span>`
@@ -42,6 +47,11 @@ export function BrowserLaneConnections({ row, instances }: {
           <h5 class="font-semibold">${browsers[client.browser]} · ${transports[client.transport]}</h5>
           <p class="break-all">Client ${client.clientId} · browser ${client.version} · engine ${client.engineVersion}</p>
           ${client.space !== null && html`<p>Space ${client.space.id} · ${client.space.name}</p>`}
+          ${client.transport === 'ego_task_space' && (client.spacePresence === null
+            ? html`<p>No native Space presence observation recorded. Automatic browsing is unavailable.</p>`
+            : html`<p>Original Space presence: ${client.spacePresence.state} · ${formatLaneTime(client.spacePresence.observedAt)}.
+                ${client.spacePresence.state !== 'present' && 'Automatic browsing is unavailable. Refresh space_status for this client to observe the same binding again.'}
+                ${client.spacePresence.state === 'unknown' && presenceReasons[client.spacePresence.reason.kind]}</p>`)}
           ${client.transport === 'ego_task_space' && (client.spaceObservation === null
             ? html`<p>No SDK control observation recorded. Window visibility and login are unverified.</p>`
             : html`<p>Last SDK control observation: ${client.spaceObservation.ownership} ·

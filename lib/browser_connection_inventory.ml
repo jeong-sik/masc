@@ -67,7 +67,7 @@ type t = {client_rows:Yojson.Safe.t list; issues:issue list; browse:decision; wo
 module Client_map = Map.Make (struct type t=B.client_id let compare=compare end)
 module Instance_set = Set.Make (String)
 let snapshot (published:Browser_addon_observation.published) : S.snapshot =
-  {live_activity=B.Enabled;live_clients=published.clients;automation=published.automation;stagehand=published.stagehand}
+  {live_activity=B.Enabled;live_clients=published.clients;live_space_presence=published.space_presence;automation=published.automation;stagehand=published.stagehand}
 let decide snapshot verb = match S.choose ~verb ~bound:false ~snapshot S.Automatic with
   | Ok selected -> Selected selected | Error error -> Refused error
 let build ~observations ~issues =
@@ -98,6 +98,7 @@ let build ~observations ~issues =
     | [],([]|_::_::_) ->
       let disabled:S.work_browser={activity=B.Disabled;registered=false;session=B.Browser_unknown;locate=false} in
       let snapshot:S.snapshot={live_activity=B.Enabled;live_clients=List.map (fun (_,client,_) -> client) pairs;
+        live_space_presence=List.concat_map (fun observation -> observation.published.space_presence) observations;
         automation=disabled;stagehand=disabled} in
       let browse=match decide snapshot B.Tabs_list with
         | Refused S.No_available_browser -> Worker_scope_required

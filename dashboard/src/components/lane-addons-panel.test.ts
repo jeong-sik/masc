@@ -65,6 +65,7 @@ describe('optional Lane Add-on surface', () => {
         stagehand: { activity: 'unobserved', registered: false, session: 'unknown', locate: false } }, clients: [{ clientId: 'client-original', browser: 'ego_lite',
         version: '0.6.1.11', engineVersion: 'chromium', transport: 'ego_task_space', space: { id: 32, name: 'Goal Space' },
         spaceObservation: { spaceId: 32, spaceName: 'Goal Space', ownership: 'agentDelegatedToUser', observedAt: 42 },
+        spacePresence: { spaceId: 32, state: 'present', observedAt: 42 },
         interactions: [{ requestId: 'request-original', actor: 'keeper/research', action: 'page.read', tabId: 0, phase: 'running' }],
         lastActivities: [] }],
     } }

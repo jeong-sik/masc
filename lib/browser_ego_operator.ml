@@ -1,6 +1,7 @@
 module Input = Browser_ego_input
 type recovery = {status:unit -> Input.status;busy:unit -> bool;assert_reset:generation:string -> (unit,string) result;
-  space_observation:unit -> Browser_ego_space_observation.t option}
+  space_observation:unit -> Browser_ego_space_observation.t option;
+  space_presence:unit -> Browser_ego_space_observation.presence}
 type connection = {client_id:string;space:Browser_lane.ego_space;recovery:recovery}
 let schema = `Assoc ["type",`String "object";"properties",`Assoc [
   "action",`Assoc ["type",`String "string";"enum",`List [`String "view";`String "assert_input_reset"]];

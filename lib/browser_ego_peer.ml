@@ -76,11 +76,13 @@ type finish_state = Active | Finish_uncertain | Finished of {
 type t = { run : runner; run_native : string -> (string, run_failure) result; now : unit -> float; space : Browser_lane.ego_space; version : string; capture_directory : string;
   downloads : downloads; published : (string, Yojson.Safe.t) Hashtbl.t; uploads : Browser_lane.Upload_lease.owner;
   input : Input.t; mutable finish_state : finish_state; mutable space_observation : Browser_ego_space_observation.t option;
+  mutable space_presence : Browser_ego_space_observation.presence;
   mutable pages : (page * int) list; mutable next_tab : int; mutable captures : int }
 
 let space_id t = t.space.id
 let space t = t.space
 let space_observation t = t.space_observation
+let space_presence t = t.space_presence
 let input_status t = Input.status t.input
 let input_busy t = Input.busy t.input
 let assert_input_reset t ~generation = Input.assert_reset t.input ~generation ~now:(t.now ())
@@ -279,7 +281,8 @@ let open_space ~run ~run_native ~now ~space ~version ~capture_directory ~downloa
      | Some (Agent_owner | Handed_to_operator) ->
        Ok {run; run_native; now; space=bound_space; version; capture_directory; downloads; published = Hashtbl.create 16;
          uploads = Browser_lane.Upload_lease.create_owner ();
-         input=Input.create (); finish_state=Active; space_observation=Some observation; pages=[]; next_tab=0; captures=0}
+         input=Input.create (); finish_state=Active; space_observation=Some observation;
+         space_presence={space_id=bound_space.id;observed_at=observation.observed_at;state=Present}; pages=[]; next_tab=0; captures=0}
      | Some Operator_owner | None ->
        Error (Printf.sprintf "ego task space %s belongs to %s, not to an agent" (Yojson.Safe.to_string reference) ownership))
   | _ -> Error "ego answered the task space without its owner"
@@ -1600,32 +1603,34 @@ let wait_for_control t (options : Browser_lane.Action.control_wait) =
      | (None|Some _),(None|Some _),(None|Some _) -> Error (Live.Before_effect "invalid native control wait observation"))
   | Ok _ -> Error (Live.Before_effect "invalid native control wait observation")
 
-let space_status_script ~space_id = String.concat "\n" [
-  "// masc-ego: space.status";
-  "const emit = answer => console.log(" ^ Yojson.Safe.to_string (str result_marker) ^ " + JSON.stringify(answer));";
-  "const args = JSON.parse(" ^ Yojson.Safe.to_string (str (Yojson.Safe.to_string (obj ["spaceId",`Int space_id]))) ^ ");";
-  "try {";
-  "  const matches = (await listTaskSpaces()).filter(space => space.id === args.spaceId);";
-  "  if (matches.length !== 1) throw new Error('the bound Space is absent or ambiguous in the native inventory');";
-  "  const observed = matches[0];";
-  "  emit({ok: true, value: {spaceId: observed.id, name: observed.name, ownership: observed.ownership}});";
-  "} catch (error) {";
-  "  emit({ok: false, error: String(error && error.message || error)});";
-  "}" ]
+let space_status_script ~space_id = frame ~step:"space.status" ~args:(obj ["spaceId",`Int space_id]) [
+  "  const spaces = await listTaskSpaces();";
+  "  emit({ok: true, value: Array.isArray(spaces)";
+  "    ? spaces.map(space => space !== null && typeof space === \"object\"";
+  "        ? {spaceId: space.id, name: space.name, ownership: space.ownership} : space)";
+  "    : spaces});" ]
 
 let space_status t =
-  (* A failed refresh must not leave an earlier owner looking current. The
-     numeric helper never creates a replacement, and no Page is addressed. *)
+  (* Only an authoritative inventory can establish absence. A failed query
+     remains unknown; neither outcome changes the original attachment. *)
+  let module Observation=Browser_ego_space_observation in
   t.space_observation <- None;
-  let* value=run_native_script t (space_status_script ~space_id:t.space.id)
-    |> Result.map_error (fun failure -> Live.Before_effect (step_failure_message failure)) in
-  let* observation=Browser_ego_space_observation.of_sdk ~expected_id:t.space.id ~observed_at:(t.now ()) value
-    |> Result.map_error (fun detail -> Live.Before_effect detail) in
-  t.space_observation <- Some observation;
-  match Browser_ego_space_observation.to_json observation with
-  | `Assoc fields -> Ok (obj (("action",str "space_status")::fields))
-  | `Null|`Bool _|`Int _|`Intlit _|`Float _|`String _|`List _ ->
-    Error (Live.Before_effect "invalid encoded Space observation")
+  let presence,observation=match run_native_script t (space_status_script ~space_id:t.space.id) with
+    | Ok value -> Observation.inventory ~expected_id:t.space.id ~observed_at:(t.now ()) value
+    | Error failure ->
+      {Observation.space_id=t.space.id;observed_at=t.now ();
+       state=Unknown (Transport_unavailable (step_failure_message failure))},None in
+  t.space_presence <- presence;
+  t.space_observation <- observation;
+  match presence.state,observation with
+  | Present,Some observation ->
+    (match Observation.to_json observation with
+     | `Assoc fields -> Ok (obj (("action",str "space_status")::fields))
+     | _ -> Error (Live.Before_effect "invalid encoded Space observation"))
+  | Missing,None -> Error (Live.Before_effect "the original bound Space is missing from the native inventory; no replacement was opened")
+  | Unknown (Transport_unavailable detail|Invalid_inventory detail),None -> Error (Live.Before_effect ("Space presence is unknown: " ^ detail))
+  | Unknown Ambiguous_inventory,None -> Error (Live.Before_effect "Space presence is unknown: the native inventory lists the original ID more than once")
+  | (Present,None)|((Missing|Unknown _),Some _) -> Error (Live.Before_effect "inconsistent native Space presence observation")
 
 let page_management_script = {js|async (task, args) => {
   const tabs = await task.tabs();

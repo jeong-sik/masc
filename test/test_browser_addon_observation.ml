@@ -21,7 +21,7 @@ let work registered = `Assoc ["activity",`String "enabled";"registered",`Bool re
   "session",`String "closed";"locate",`Bool false]
 let client id browser = `Assoc ["clientId",`String id;"browser",`String browser;
   "version",`String "158.0.1";"engineVersion",`String "158.0.1";"transport",`String "web_extension";"space",`Null;
-  "interactions",`List [];"lastActivities",`List [];"spaceObservation",`Null]
+  "interactions",`List [];"lastActivities",`List [];"spaceObservation",`Null;"spacePresence",`Null]
 let serving clients = `Assoc ["state",`String "serving";"clients",`List clients;
   "owned_backends",`Assoc ["automation",work true;"stagehand",work false]]
 (* The server reads the browser rows of the Lanes list from this cached
@@ -56,6 +56,33 @@ let duplicate_client () =
     (Result.is_error (Observation.decode_snapshot (serving [client id "firefox"; client id "firefox"])))
 let sdk_observation id ownership = `Assoc ["spaceId",`Int id;"spaceName",`String "Renamed native Space";
   "ownership",`String ownership;"observedAt",`Float 42.]
+let native_space_presence () =
+  let module O=Masc.Browser_ego_space_observation in
+  let row id=`Assoc ["spaceId",`Int id;"name",`String "native";"ownership",`String "future-owner"] in
+  let inspect value=O.inventory ~expected_id:32 ~observed_at:42. value in
+  let present,metadata=inspect (`List [row 32]) in
+  check bool "exact native ID establishes presence without interpreting ownership" true
+    (present.state=O.Present && Option.is_some metadata);
+  let missing,metadata=inspect (`List [row 33]) in
+  check bool "a successful inventory without the original ID establishes missing" true
+    (missing.state=O.Missing && metadata=None);
+  let ambiguous,_=inspect (`List [row 32;row 32]) in
+  check bool "duplicate original IDs are unknown, never missing" true
+    (ambiguous.state=O.Unknown O.Ambiguous_inventory);
+  List.iter (fun value -> let unknown,_=inspect value in
+    check bool "unreadable inventory cannot establish absence" true
+      (match unknown.state with O.Unknown (O.Invalid_inventory _) -> true | Present|Missing|Unknown _ -> false))
+    [`Null;`List [`Null];`List [`Assoc ["spaceId",`String "33"]]];
+  let user_row=`Assoc ["spaceId",`Int 0;"name",`String "";"ownership",`String "user"] in
+  check bool "unrelated unnamed user Spaces do not invalidate the bound observation" true
+    ((fst (inspect (`List [user_row;row 32]))).state=O.Present);
+  let transport={missing with state=O.Unknown (O.Transport_unavailable "offline")} in
+  List.iter (fun presence ->
+    let encoded=O.presence_to_json presence in
+    check bool "dated typed presence roundtrips" true (O.presence_of_json ~expected_id:32 encoded=Ok presence);
+    check bool "a different bound ID cannot borrow presence" true
+      (Result.is_error (O.presence_of_json ~expected_id:33 encoded)))
+    [present;missing;ambiguous;transport]
 let ego_client observation = match client "01a16363-ef67-7000-ad62-05bcd0320d99" "ego_lite" with
   | `Assoc fields -> `Assoc (("transport",`String "ego_task_space")::
       ("space",`Assoc ["id",`Int 32;"name",`String "Attachment name"])::
@@ -91,7 +118,7 @@ let publisher_binds_original_client_space () = Eio_main.run (fun _ ->
     "clientId",`String "01a16363-ef67-7000-ad62-05bcd0320d99";"browser",`String "ego_lite";
     "version",`String "0.6.1.11";"engineVersion",`String "chromium";"transport",`String "ego_task_space";
     "space",`Assoc ["id",`Int 32;"name",`String "Attachment name"]])) in
-  let published client observation = Observation.publish_client client ~space_observation:observation
+  let published client observation = Observation.publish_client client ~space_observation:observation ~space_presence:None
     |> Yojson.Safe.Util.member "spaceObservation" in
   check bool "same-Space cache is published" true (published base (Some native)=sdk_observation 32 "agentDelegatedToUser");
   check bool "invalidated cache is explicitly unknown" true (published base None=`Null);
@@ -99,6 +126,25 @@ let publisher_binds_original_client_space () = Eio_main.run (fun _ ->
     (published {base with space=Some {id=33;name="Another"}} (Some native)=`Null);
   check bool "non-Ego client cannot borrow the cache" true
     (published {base with browser=Firefox;transport=Web_extension;space=None} (Some native)=`Null))
+let published_space_presence () =
+  let module O=Masc.Browser_ego_space_observation in
+  let set key value = function `Assoc fields -> `Assoc ((key,value)::List.remove_assoc key fields)
+    | _ -> fail "fixture client must be an object" in
+  List.iter (fun state ->
+    let presence:O.presence={space_id=32;observed_at=42.;state} in
+    let encoded=O.presence_to_json presence in
+    let row=ego_client `Null |> set "spacePresence" encoded in
+    let published=ok (Observation.decode_snapshot (serving [row])) in
+    check bool "typed absence/unknown survives worker-to-host publication" true
+      (List.map snd published.space_presence=[presence]);
+    check bool "the connected identity remains present" true (List.length published.clients=1);
+    let foreign=O.presence_to_json {presence with space_id=33} in
+    check bool "foreign Space presence cannot enter the host snapshot" true
+      (Result.is_error (Observation.decode_snapshot (serving [set "spacePresence" foreign row])));
+    check bool "a non-Ego connection cannot borrow Space presence" true
+      (Result.is_error (Observation.decode_snapshot
+        (serving [client "01a16363-ef67-7000-ad62-05bcd0320d99" "firefox" |> set "spacePresence" encoded]))))
+    [O.Missing;O.Unknown (O.Transport_unavailable "offline")]
 let unavailable_reads_back () =
   let unavailable = Observation.Ego_user_owned_name {space="masc";observed_at=42.} in
   let snapshot = match serving [] with
@@ -123,6 +169,8 @@ let merge_keeps_the_live_workers_unavailability () =
   let doubled = Observation.merge ~among:[B.Ego; B.Ego] [B.Ego, Some ego] in
   check bool "a doubled live source publishes no unavailability" true (doubled.unavailable=[])
 let ()=run "browser addon observation" ["publication",[
+  test_case "native inventory distinguishes missing and observation unknown" `Quick native_space_presence;
+  test_case "typed Space presence reaches cached host observations" `Quick published_space_presence;
   test_case "native Space metadata reaches cached host observations" `Quick published_space_observation;
   test_case "publisher binds cache to original Space" `Quick publisher_binds_original_client_space;
   test_case "published snapshot reads back" `Quick published_reads_back;

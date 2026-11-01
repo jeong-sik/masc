@@ -10,6 +10,7 @@ type error = Binding_required | No_available_browser | Ambiguous_browsers of Lan
   | Unsupported_required_actions of { route : Lane.route; missing : Browser_capabilities.operation list }
 type work_browser = { activity : Lane.activity; registered : bool; session : Lane.session_observation; locate : bool }
 type snapshot = { live_activity : Lane.activity; live_clients : Lane.client_info list
+  ; live_space_presence : (Lane.client_id * Browser_ego_space_observation.presence) list
   ; automation : work_browser; stagehand : work_browser }
 
 let reason_to_wire = function
@@ -122,7 +123,14 @@ let choose_candidates ~verb ~bound ~snapshot preference =
     match Lane.live_capability verb with
     | None -> []
     | Some capability -> List.filter_map (fun (info : Lane.client_info) ->
-      if info.transport=transport && Lane.live_transport_serves info.transport capability
+      let space_available=match info.transport with
+        | Lane.Web_extension|Webdriver_bidi -> true
+        | Ego_task_space ->
+          (match info.space,List.assoc_opt info.client_id snapshot.live_space_presence with
+           | Some space,Some {space_id;state=Present;_} -> space.id=space_id
+           | (Some _|None),(Some {state=Missing|Unknown _;_}|None)
+           | None,Some {state=Present;_} -> false) in
+      if space_available && info.transport=transport && Lane.live_transport_serves info.transport capability
       then Some (Lane.Live_route (Some info.client_id)) else None) snapshot.live_clients in
   match preference with
   | Exact (Lane.Live_route None) when bound -> Error Binding_required

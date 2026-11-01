@@ -325,7 +325,7 @@ def handle(conn):
         if op=="snapshot" and os.path.exists(lose): os.unlink(lose);lost=True
         if op=="snapshot": result={"reply":"receipt"} if lost or a.mode=="bad_ready" or os.path.exists(os.path.join(a.root,"reject-snapshot-"+a.incarnation)) else {"reply":"snapshot","snapshot":{"command_running":running,"state":"serving","clients":list(clients.values()),"owned_backends":{"automation":{"activity":"disabled","registered":False,"session":"closed","locate":False},"stagehand":{"activity":"disabled","registered":False,"session":"unknown","locate":False}}}}
         elif op=="poll":
-            client=dict(req["client"]);client["interactions"]=[];client["lastActivities"]=[];client["spaceObservation"]=None;clients[client["clientId"]]=client
+            client=dict(req["client"]);client["interactions"]=[];client["lastActivities"]=[];client["spaceObservation"]=None;client["spacePresence"]={"spaceId":client["space"]["id"],"observedAt":1,"state":"present"} if client["transport"]=="ego_task_space" else None;clients[client["clientId"]]=client
             result={"reply":"poll","command":None,"state_id":hashlib.sha256(json.dumps({"command_running":running}).encode()).hexdigest()}
         elif op=="disconnect":
             clients.pop(req["clientId"],None);result={"reply":"receipt"}

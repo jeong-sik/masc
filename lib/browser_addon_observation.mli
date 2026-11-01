@@ -9,7 +9,8 @@ val unavailable_to_json : unavailable -> Yojson.Safe.t
 val unavailable_of_json : Yojson.Safe.t -> (unavailable, string) result
 
 val publish_client : Browser_lane.client_info ->
-  space_observation:Browser_ego_space_observation.t option -> Yojson.Safe.t
+  space_observation:Browser_ego_space_observation.t option ->
+  space_presence:Browser_ego_space_observation.presence option -> Yojson.Safe.t
 (** Add the cached SDK observation to the ordinary connection/activity row.
     No SDK calls. Foreign Space IDs and non-Ego connections publish [null]. *)
 
@@ -17,6 +18,7 @@ val publish_client : Browser_lane.client_info ->
     whether its automation and Stagehand backends are registered. *)
 type published = {
   clients : Browser_lane.client_info list;
+  space_presence : (Browser_lane.client_id * Browser_ego_space_observation.presence) list;
   client_rows : Yojson.Safe.t list;
   (** The client rows as the worker sent them, for a caller that passes them on. *)
   automation : Browser_selection.work_browser;

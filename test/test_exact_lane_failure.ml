@@ -77,7 +77,7 @@ let test_cli_failures () =
 
 let test_antigravity_noncompletion_is_not_transient () =
   List.iter (fun status ->
-      let cause = Masc.Runtime_antigravity.Result_not_completed
+      let cause = Runtime_antigravity.Result_not_completed
           { status; conversation_id = Some "interrupted-conversation"
           ; response = "partial reply"; error = None } in
       let classified = F.cli_failure
@@ -85,7 +85,7 @@ let test_antigravity_noncompletion_is_not_transient () =
              { runtime_id = "agy.fixture"; cause = Masc.Fusion_official_client.Antigravity_failure cause }) in
       check failure "non-completed answer is unusable" F.Output_unusable classified;
       check bool "no safe transient replay" false (F.is_transient classified))
-    [ Masc.Runtime_antigravity.Canceled; Interrupted; Invalid; Waiting; Running ]
+    [ Runtime_antigravity.Canceled; Interrupted; Invalid; Waiting; Running ]
 
 let () =
   run "exact lane failure"

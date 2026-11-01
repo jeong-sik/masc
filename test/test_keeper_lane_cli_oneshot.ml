@@ -339,13 +339,13 @@ let test_muse_binding_rest_requires_typed_quota () =
 let test_antigravity_noncompletion_is_not_quota_or_input_refusal () =
   List.iter (fun status ->
     let cause = Masc.Fusion_official_client.Antigravity_failure
-        (Masc.Runtime_antigravity.Result_not_completed
+        (Runtime_antigravity.Result_not_completed
            { status; conversation_id = Some "interrupted-conversation"
            ; response = "partial reply"; error = Some "quota context input words are not evidence" }) in
     let failed = Cli_oneshot.Execution_failed { runtime_id = "agy.fixture"; cause } in
     check bool "does not rest an account" false (Cli_oneshot.refused_for_binding_rest failed);
     check bool "does not authorize input shrinking" false (Cli_oneshot.refused_for_input_size failed))
-    [ Masc.Runtime_antigravity.Canceled; Interrupted; Invalid; Waiting; Running ]
+    [ Runtime_antigravity.Canceled; Interrupted; Invalid; Waiting; Running ]
 ;;
 
 (* These fixtures drive the actual Claude stream adapter and Antigravity

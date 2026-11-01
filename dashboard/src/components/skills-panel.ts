@@ -150,7 +150,7 @@ export function usageLabel(surface: SkillSurface | null): string {
   if (surface?.usage === undefined) return 'Usage observation unavailable'
   if (usage.length === 0) return 'No invocation observed in retained sessions'
   return usage
-    .map(row => `${row.keeper} ${row.invocations}×/${row.deliveries} delivered/${row.actions} actions · last ${row.last_used_at}`)
+    .map(row => `${row.keeper} ${row.invocations} invoked / ${row.deliveries} received / ${row.actions} observed actions · last activation ${row.last_used_at}`)
     .join(' · ')
 }
 
@@ -384,6 +384,12 @@ function SkillEvidenceView({ result, io }: { result: SkillEvidenceResponse | nul
             · ${composition.keeper}
           </div>
           <div class="ss-muted mono">${composition.composition_run_id} · ${compositionNodeCount} typed node settlements</div>
+          ${composition.result.disposition === 'failed' ? html`
+            <div class="mt-2 rounded border border-[var(--color-status-err)] p-2" role="note" aria-label="Composition failure">
+              <strong>Composition failed</strong>
+              <pre class="whitespace-pre-wrap text-3xs">${runField(composition.result, 'message')}</pre>
+              <div class="ss-muted text-3xs">Failure class: ${runField(composition.result, 'failure_class')} · effect evidence: ${runField(composition.result, 'effect_disposition')}</div>
+            </div>` : null}
           <div class="mt-2 font-semibold">Composition output</div>
           <pre class="mt-2 max-h-56 overflow-auto whitespace-pre-wrap rounded bg-[var(--color-surface-raised)] p-2 text-3xs">${runOutput(output)}</pre>
           <${SkillNodeEvidenceView} nodes=${composition.executor_settlements} />

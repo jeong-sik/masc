@@ -1058,8 +1058,17 @@ let tools_display_lines ?(cols = 80) (state : state) =
                              (Terminal_text.single_line
                                 (string_field "composition_run_id" Masc_tui_theme.Glyph.no_value))
                              settlement_count
-                         ; Ansi.dim, "       " ^ Terminal_text.single_line output
                          ]
+                         @ (match json_assoc_member_opt "disposition" result with
+                            | Some (`String "failed") ->
+                              let field name = match json_assoc_member_opt name result with
+                                | Some (`String value) -> Terminal_text.single_line value
+                                | _ -> "unavailable" in
+                              [ Theme.bad (), "       " ^ field "message"
+                              ; Ansi.dim, "       failure class=" ^ field "failure_class"
+                                ^ " · effect evidence=" ^ field "effect_disposition" ]
+                            | _ -> [])
+                         @ [ Ansi.dim, "       " ^ Terminal_text.single_line output ]
                        | Some _ | None ->
                          [ Theme.bad (), "     Composition evidence is malformed" ])
                     | None -> []
@@ -1662,7 +1671,7 @@ let tools_display_lines ?(cols = 80) (state : state) =
                keepers (invocations all_rows)
                (total (fun (row : Masc.Tui_decode_tools.skill_usage_row) -> row.su_deliveries) all_rows)
                (total (fun (row : Masc.Tui_decode_tools.skill_usage_row) -> row.su_actions) all_rows)
-           ; Ansi.dim, "Scope: exact Skill revisions in current Keeper sessions"
+           ; Ansi.dim, "Scope: exact Skill revisions in current Keeper sessions · deliveries include async handoffs"
            ; Ansi.dim, Printf.sprintf "%d without retained invocation; this does not establish never used."
                (List.length sc_surfaces - List.length used)
            ] @ coverage_lines)

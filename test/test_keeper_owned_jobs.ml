@@ -5638,6 +5638,16 @@ let test_nested_skill_job_continuation ?(fault_after_acceptance=false) ?(dynamic
        (List.length evidence.async_evidence.action_observations)
    | Masc.Keeper_skill_activation_discovery.Not_observed
    | Masc.Keeper_skill_activation_discovery.Most_recent_observed_timestamp_tie _ -> fail "fresh retained async Skill detail is missing");
+  let catalog_summary = Masc.Keeper_skill_activation_summary.summarize
+    ~activations:[original_activation]
+    ~async_result_deliveries:(Ledger.async_result_deliveries (ledger ()))
+    ~async_actions:(Ledger.async_actions (ledger ()))
+    ~transition_rejections:[] in
+  check bool "catalog accounting sees a child received only through async handoff" true
+    (catalog_summary.composition_provider_deliveries
+     + catalog_summary.composition_official_client_handoffs > 0);
+  check int "catalog accounting retains unique async actions, not causal link count" 7
+    catalog_summary.composition_actions_observed;
   let detail = Server_skill_evidence.project ~config reference in
   let evidence = detail |> member "activation" |> member "evidence" in
   check string "detail uses required async evidence contract" "masc.skill-evidence/v8"

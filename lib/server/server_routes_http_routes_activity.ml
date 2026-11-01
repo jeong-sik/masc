@@ -1463,31 +1463,34 @@ let add_routes ~sw ~clock router =
                  in
                  match matching with
                  | [] -> None
-                 | activations ->
-                   let delivered =
-                     List.fold_left
-                       (fun count
-                            (activation : Keeper_skill_activation_ledger.activation) ->
-                          if Option.is_some activation.delivery then count + 1 else count)
-                       0
-                       activations
+                 | first :: rest as activations ->
+                   let async_result_deliveries = Keeper_skill_activation_ledger.async_result_deliveries ledger in
+                   let async_actions = Keeper_skill_activation_ledger.async_actions ledger in
+                   let delivered, actions =
+                     List.fold_left (fun (delivered, actions) activation ->
+                       let summary = Keeper_skill_activation_summary.summarize
+                         ~activations:[activation] ~async_result_deliveries ~async_actions
+                         ~transition_rejections:[] in
+                       let delivery_boundaries = summary.instruction_provider_deliveries
+                         + summary.instruction_official_client_handoffs
+                         + summary.composition_provider_deliveries
+                         + summary.composition_official_client_handoffs in
+                       (* The catalog counts invocations received at either boundary,
+                          not repeated lookups or the number of receiving runtimes. *)
+                       delivered + (if delivery_boundaries > 0 then 1 else 0),
+                       actions + summary.instruction_actions_observed
+                         + summary.composition_actions_observed)
+                       (0, 0) activations
                    in
-                   let actions =
-                     List.fold_left
-                       (fun count
-                            (activation : Keeper_skill_activation_ledger.activation) ->
-                          count + List.length activation.actions)
-                       0
-                       activations
-                   in
-                   let last_used_at =
-                     List.fold_left
-                       (fun latest
-                            (activation : Keeper_skill_activation_ledger.activation) ->
-                          max latest activation.activated_at)
-                       ""
-                       activations
-                   in
+                   (* Activation codecs already validate these RFC3339 instants;
+                      offsets must be compared as time, not as wire text. *)
+                   let timestamp (activation : Keeper_skill_activation_ledger.activation) =
+                     Time_codec.parse_rfc3339 activation.activated_at |> Result.get_ok in
+                   let _, last_activation = List.fold_left (fun (last, previous) candidate ->
+                     let at = timestamp candidate in
+                     if at > last then at, candidate else last, previous)
+                     (timestamp first, first) rest in
+                   let last_used_at = last_activation.activated_at in
                    Some
                      (`Assoc
                         [ "keeper", `String keeper_name

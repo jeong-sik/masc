@@ -418,6 +418,54 @@ let validate_host_turns binding =
       Error "a resumable Muse session must record its host's completed-turn count"
 ;;
 
+let carried_context_rank = function
+  | Context_block _ -> 0
+  | Context_section _ -> 1
+  | Context_section_row _ -> 2
+  | Context_carrier -> 3
+  | Librarian_working_state -> 4
+  | Librarian_unread -> 5
+  | Tool_result_receipts -> 6
+  | Historical_task_reference -> 7
+;;
+
+let compare_carried_context a b =
+  match a, b with
+  | Context_block a, Context_block b ->
+    String.compare (Prompt_block_id.to_string a) (Prompt_block_id.to_string b)
+  | Context_section a, Context_section b ->
+    String.compare (Keeper_context_layers.source_name a) (Keeper_context_layers.source_name b)
+  | Context_section_row a, Context_section_row b ->
+    let c =
+      String.compare
+        (Keeper_context_layers.source_name a.section)
+        (Keeper_context_layers.source_name b.section)
+    in
+    if c <> 0 then c else String.compare a.row_sha256 b.row_sha256
+  | Context_carrier, Context_carrier
+  | Librarian_working_state, Librarian_working_state
+  | Librarian_unread, Librarian_unread
+  | Tool_result_receipts, Tool_result_receipts
+  | Historical_task_reference, Historical_task_reference -> 0
+  | ( Context_block _
+    | Context_section _
+    | Context_section_row _
+    | Context_carrier
+    | Librarian_working_state
+    | Librarian_unread
+    | Tool_result_receipts
+    | Historical_task_reference ),
+    ( Context_block _
+    | Context_section _
+    | Context_section_row _
+    | Context_carrier
+    | Librarian_working_state
+    | Librarian_unread
+    | Tool_result_receipts
+    | Historical_task_reference ) ->
+    Int.compare (carried_context_rank a) (carried_context_rank b)
+;;
+
 let validate binding =
   let* () = non_empty "runtime_id" binding.runtime_id in
   let* () = validate_phase binding.phase in
@@ -453,7 +501,7 @@ let validate binding =
                    | Historical_task_reference | Tool_result_receipts -> false)
                 frontier.held_context
       then Error "held section row is not named by its own digest"
-      else if List.length (List.sort_uniq compare held_contexts) <> List.length held_contexts
+      else if List.length (List.sort_uniq compare_carried_context held_contexts) <> List.length held_contexts
       then Error "held context names one carried context twice"
       else (match frontier.acknowledged_turn with
         | None -> Ok ()
@@ -798,10 +846,14 @@ let context_frontier_to_yojson = function
 let context_frontier_of_yojson json =
   let decode delivery message_count acknowledged held_items =
     let* held_context =
-      List.fold_right (fun item acc ->
-        let* held = held_context_of_yojson item in
-        let* rest = acc in
-        Ok (held :: rest)) held_items (Ok []) in
+      let rec loop acc = function
+        | [] -> Ok (List.rev acc)
+        | item :: rest ->
+          let* held = held_context_of_yojson item in
+          loop (held :: acc) rest
+      in
+      loop [] held_items
+    in
     let* acknowledged_turn = settlement_opt_of_yojson acknowledged in
     Ok (Some {message_count; delivery; acknowledged_turn; held_context}) in
   match json with

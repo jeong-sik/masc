@@ -817,14 +817,17 @@ let schedule_signal_rows_and_errors config limit =
       | Ok signal -> Decoded_schedule_signal signal
       | Error error -> Schedule_signal_decode_error (ordinal, error))
   in
-  List.fold_right
-    (fun entry (signals, errors) ->
-       match entry with
-       | Decoded_schedule_signal signal -> signal :: signals, errors
-       | Schedule_signal_decode_error (ordinal, error) ->
-         signals, schedule_signal_decode_error_dashboard_json ordinal error :: errors)
-    entries
-    ([], [])
+  let signals_rev, errors_rev =
+    List.fold_left
+      (fun (signals, errors) entry ->
+         match entry with
+         | Decoded_schedule_signal signal -> signal :: signals, errors
+         | Schedule_signal_decode_error (ordinal, error) ->
+           signals, schedule_signal_decode_error_dashboard_json ordinal error :: errors)
+      ([], [])
+      entries
+  in
+  List.rev signals_rev, List.rev errors_rev
 ;;
 
 (* The runner's own hold, read from the same [held] list [/health] reports.

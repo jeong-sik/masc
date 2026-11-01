@@ -161,7 +161,20 @@ let of_provider provider =
 
 module Source_map = Map.Make (struct
   type nonrec t = login_source
-  let compare = Stdlib.compare
+  let source_rank = function
+    | Codex_auth _ -> 0
+    | Claude_account _ -> 1
+    | Muse_auth _ -> 2
+    | Google_oauth _ -> 3
+  let compare a b =
+    match a, b with
+    | Codex_auth x, Codex_auth y
+    | Claude_account x, Claude_account y
+    | Muse_auth x, Muse_auth y
+    | Google_oauth x, Google_oauth y -> String.compare x y
+    | (Codex_auth _ | Claude_account _ | Muse_auth _ | Google_oauth _),
+      (Codex_auth _ | Claude_account _ | Muse_auth _ | Google_oauth _) ->
+      Int.compare (source_rank a) (source_rank b)
 end)
 
 type observation = {

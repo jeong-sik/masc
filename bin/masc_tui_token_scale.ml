@@ -69,7 +69,7 @@ let of_turn ~(rows : Turn_record.t list) (turn : Turn_record.t) =
             | Ok (wire_bytes, tokens) -> Some (float tokens /. float wire_bytes)
             | Error (No_body | No_count | Turn_total_count | Cumulative_count | Unknown_scope) -> None)
           rows
-        |> List.sort compare
+        |> List.sort Float.compare
       in
       match median ratios with
       | Some tokens_per_byte ->

@@ -33,12 +33,13 @@ let parse_binding ~button fields =
     | None -> Error (Printf.sprintf "%s: keys is required" button)
     | Some (Otoml.TomlArray []) -> Error (Printf.sprintf "%s: keys is empty; leave the button out instead" button)
     | Some (Otoml.TomlArray items) ->
-      List.fold_right
-        (fun item acc ->
-          let* rest = acc in
+      let rec loop acc = function
+        | [] -> Ok (List.rev acc)
+        | item :: rest ->
           let* key = parse_key ~button item in
-          Ok (key :: rest))
-        items (Ok [])
+          loop (key :: acc) rest
+      in
+      loop [] items
     | Some ((Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _ | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _ | Otoml.TomlTable _ | Otoml.TomlInlineTable _ | Otoml.TomlTableArray _) as other) -> Error (Printf.sprintf "%s: keys must be an array, got %s" button (kind_name other))
   in
   let* label =

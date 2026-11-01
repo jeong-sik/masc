@@ -35,10 +35,12 @@ let seconds_per_hour = 3600.
 let cutoff_of ~now ~hours =
   Time_codec.rfc3339_of_unix (now -. (float_of_int hours *. seconds_per_hour))
 
+module Tool_map = Map.Make (String)
+
 let top_tools counts ~limit =
-  Hashtbl.fold (fun name calls acc -> { tu_name = name; tu_calls = calls } :: acc) counts []
+  Tool_map.fold (fun name calls acc -> { tu_name = name; tu_calls = calls } :: acc) counts []
   |> List.sort (fun a b ->
-         match compare b.tu_calls a.tu_calls with
+         match Int.compare b.tu_calls a.tu_calls with
          | 0 -> String.compare a.tu_name b.tu_name
          | order -> order)
   |> List.filteri (fun index _ -> index < limit)
@@ -48,7 +50,7 @@ type reading =
   | Rows of window
 
 let summarize ~since entries =
-  let counts = Hashtbl.create 16 in
+  let counts = ref Tool_map.empty in
   let oldest = ref None in
   let window =
     List.fold_left
@@ -62,8 +64,8 @@ let summarize ~since entries =
            | Some _ | None -> oldest := Some entry.Decode.le_ts);
           List.iter
             (fun tool ->
-              let previous = Option.value (Hashtbl.find_opt counts tool) ~default:0 in
-              Hashtbl.replace counts tool (previous + 1))
+              let previous = Option.value (Tool_map.find_opt tool !counts) ~default:0 in
+              counts := Tool_map.add tool (previous + 1) !counts)
             entry.Decode.le_tools_used;
           {
             acc with
@@ -104,7 +106,7 @@ let summarize ~since entries =
   in
   {
     window with
-    aw_top_tools = top_tools counts ~limit:3;
+    aw_top_tools = top_tools !counts ~limit:3;
     aw_covered = covered;
     aw_oldest_ts = !oldest;
   }

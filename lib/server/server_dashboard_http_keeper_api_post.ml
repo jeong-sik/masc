@@ -1029,14 +1029,16 @@ let validate_dashboard_config_patch fields =
         (Printf.sprintf "duplicate dashboard config field(s): %s"
            (String.concat ", " duplicates))
   | [] ->
-      let known, unknown =
-        List.fold_right
-          (fun (key, value) (known, unknown) ->
+      let known_rev, unknown_rev =
+        List.fold_left
+          (fun (known, unknown) (key, value) ->
              match dashboard_config_field_of_key key with
              | Some field -> ((field, value) :: known, unknown)
              | None -> (known, key :: unknown))
-          fields ([], [])
+          ([], []) fields
       in
+      let known = List.rev known_rev
+      and unknown = List.rev unknown_rev in
       (match dedupe_keep_order_strings unknown with
        | _ :: _ as unknown ->
            Error

@@ -40,8 +40,12 @@ let of_json value =
   let* description = optional fields "description" in
   let* readings = match List.assoc_opt "readings" fields with
     | None -> Ok [] | Some value -> array reading value in
+  let compare_identity (l1, p1) (l2, p2) =
+    let c = String.compare l1 l2 in
+    if c <> 0 then c else List.compare String.compare p1 p2
+  in
   let identities = List.map (fun r -> r.lane_id,r.path) readings in
-  if List.length identities <> List.length (List.sort_uniq Stdlib.compare identities)
+  if List.length identities <> List.length (List.sort_uniq compare_identity identities)
   then Error "duplicate presentation reading"
   else Ok {description;readings}
 let to_json t =

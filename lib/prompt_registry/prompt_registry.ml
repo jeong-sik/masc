@@ -974,7 +974,9 @@ let validate_prompt_templates () =
       in
       issues @ acc)
     [] snapshots
-  |> List.sort compare
+  |> List.sort (fun (k1, v1) (k2, v2) ->
+       let c = String.compare k1 k2 in
+       if c <> 0 then c else String.compare v1 v2)
 
 (** List all registered prompts with metadata, for API/dashboard.
 
@@ -1034,7 +1036,9 @@ let default_revisions () =
        Option.map
          (fun body -> key, Prompt_override_persistence.default_revision ~body)
          body)
-  |> List.sort Stdlib.compare
+  |> List.sort (fun (k1, r1) (k2, r2) ->
+       let c = String.compare k1 k2 in
+       if c <> 0 then c else String.compare r1 r2)
 
 (** JSON export of all prompts for API *)
 let prompts_json () =

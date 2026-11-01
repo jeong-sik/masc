@@ -30,14 +30,12 @@ let request_error_message = function
 let field_names = [ "package_id"; "source_text"; "draft_sha256"; "evidence" ]
 
 let evidence_strings items =
-  List.fold_right
-    (fun item acc ->
-       let* strings = acc in
-       match item with
-       | `String value -> Ok (value :: strings)
-       | _ -> Error (Malformed "evidence entries must be strings"))
-    items
-    (Ok [])
+  let rec loop acc = function
+    | [] -> Ok (List.rev acc)
+    | `String value :: rest -> loop (value :: acc) rest
+    | _ :: _ -> Error (Malformed "evidence entries must be strings")
+  in
+  loop [] items
 ;;
 
 let request ~config ~capability_surface ~keeper_name = function

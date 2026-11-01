@@ -27,13 +27,7 @@ let warn_on_drift_observation source = function
 ;;
 
 let partition_drift_observations source observations =
-  List.fold_right
-    (fun observation (warn_observations, info_observations) ->
-       if warn_on_drift_observation source observation
-       then observation :: warn_observations, info_observations
-       else warn_observations, observation :: info_observations)
-    observations
-    ([], [])
+  List.partition (warn_on_drift_observation source) observations
 ;;
 
 let capability_observation_payload

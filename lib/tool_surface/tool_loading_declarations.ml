@@ -9,28 +9,29 @@ let loading_of_declaration ~path ~name ~contents =
   | Ok loaded -> loaded.Tool_definition_toml.loading
 ;;
 
+module String_map = Map.Make (String)
+
 (* One parse of the embedded tool tree, on first ask. The files are constant
    for the life of the process -- they are crunched into the binary -- so a
    second parse would read the same bytes to the same answer. *)
-let table : (string, Tool_definition_toml.loading) Hashtbl.t Lazy.t =
+let table : Tool_definition_toml.loading String_map.t Lazy.t =
   lazy
-    (let table = Hashtbl.create 256 in
-     List.iter
-       (fun path ->
+    (List.fold_left
+       (fun table path ->
           match Filename.dirname path, Filename.extension path with
           | "tools", ".toml" ->
             let name = Filename.remove_extension (Filename.basename path) in
             (match Embedded_config.read path with
-             | None -> ()
+             | None -> table
              | Some contents ->
-               Hashtbl.replace table name (loading_of_declaration ~path ~name ~contents))
-          | _, _ -> ())
-       Embedded_config.file_list;
-     table)
+               String_map.add name (loading_of_declaration ~path ~name ~contents) table)
+          | _, _ -> table)
+       String_map.empty
+       Embedded_config.file_list)
 ;;
 
 let loading_of_tool name =
-  match Hashtbl.find_opt (Lazy.force table) name with
+  match String_map.find_opt name (Lazy.force table) with
   | Some loading -> loading
   | None -> Tool_definition_toml.Always_loaded
 ;;

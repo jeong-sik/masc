@@ -3921,12 +3921,12 @@ let json_string_list = function
     (* All or nothing. A non-string element that quietly vanished would show
        a command missing one of its words, which is worse than showing the
        envelope. *)
-    List.fold_right
-      (fun item acc ->
-        match item, acc with
-        | `String value, Some rest -> Some (value :: rest)
-        | _, _ -> None)
-      items (Some [])
+    let rec loop acc = function
+      | [] -> Some (List.rev acc)
+      | `String value :: rest -> loop (value :: acc) rest
+      | _ :: _ -> None
+    in
+    loop [] items
   | _ -> None
 
 let shell_word word =

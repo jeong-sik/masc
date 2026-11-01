@@ -1276,9 +1276,9 @@ let oldest_last_written state =
 let refresh_due config ~now ~retention_days =
   Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
     let* state = load_for_mutation config in
-    let schedules, changed =
-      List.fold_right
-        (fun request (schedules, changed) ->
+    let schedules_rev, changed =
+      List.fold_left
+        (fun (schedules, changed) request ->
           let updated = Schedule_domain.mark_due ~now request in
           let changed =
             if updated.Schedule_domain.status <> request.Schedule_domain.status
@@ -1286,9 +1286,10 @@ let refresh_due config ~now ~retention_days =
             else changed
           in
           updated :: schedules, changed)
-        state.schedules
         ([], 0)
+        state.schedules
     in
+    let schedules = List.rev schedules_rev in
     (* A clock behind the ledger's own last write cannot judge how long ago
        anything finished, so such a tick only marks what is due. A tick that
        marked nothing holds the loaded state's own schedules, so when the
@@ -1323,9 +1324,9 @@ let reschedule_due_recurring config ~now ~schedule_ids =
   let target_ids = Schedule_id_set.of_list schedule_ids in
   Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
     let* state = load_for_mutation config in
-    let schedules, changed =
-      List.fold_right
-        (fun (request : schedule_request) (schedules, changed) ->
+    let schedules_rev, changed =
+      List.fold_left
+        (fun (schedules, changed) (request : schedule_request) ->
           if not (Schedule_id_set.mem request.schedule_id target_ids)
           then
             request :: schedules, changed
@@ -1333,9 +1334,10 @@ let reschedule_due_recurring config ~now ~schedule_ids =
             match Schedule_domain.reschedule_after_due_signal ~now request with
             | None -> request :: schedules, changed
             | Some updated -> updated :: schedules, changed + 1)
-        state.schedules
         ([], 0)
+        state.schedules
     in
+    let schedules = List.rev schedules_rev in
     if changed = 0 then
       Ok (state, 0)
     else (

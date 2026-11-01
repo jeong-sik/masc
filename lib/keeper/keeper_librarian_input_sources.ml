@@ -206,11 +206,14 @@ let goal_context_for_task ~config = function
         Result.map_error Goal_store.unavailable_to_string
           (Goal_store.load_goals_by_id_result config)
       in
-      List.fold_right (fun id rest ->
-        let* rest = rest in
-        match Goal_store.Goal_id_map.find_opt id goals_by_id with
-        | None -> Error ("Linked Goal is missing: " ^ id)
-        | Some goal -> Ok ((id, goal.phase, Goal_store.criterion_of_goal goal) :: rest)) ids (Ok [])
+      let rec loop acc = function
+        | [] -> Ok (List.rev acc)
+        | id :: rest ->
+          match Goal_store.Goal_id_map.find_opt id goals_by_id with
+          | None -> Error ("Linked Goal is missing: " ^ id)
+          | Some goal -> loop ((id, goal.phase, Goal_store.criterion_of_goal goal) :: acc) rest
+      in
+      loop [] ids
     in
     Keeper_librarian.Task_goals { task_id; criteria }
 ;;

@@ -65,11 +65,13 @@ let paths text =
   in
   (* Named twice in one message is one file to look at. Order is first
      mention, since that is the order a reader met them in. *)
-  let seen = Hashtbl.create 8 in
-  scan 0 []
-  |> List.filter (fun path ->
-         if Hashtbl.mem seen path then false
-         else begin
-           Hashtbl.add seen path ();
-           true
-         end)
+  let module String_set = Set.Make (String) in
+  let _, unique_rev =
+    List.fold_left
+      (fun (seen, acc) path ->
+        if String_set.mem path seen then (seen, acc)
+        else (String_set.add path seen, path :: acc))
+      (String_set.empty, [])
+      (scan 0 [])
+  in
+  List.rev unique_rev

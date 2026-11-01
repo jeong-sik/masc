@@ -49,8 +49,13 @@ let validate_weights ~keepers ~weight_max weights =
   else Ok ()
 let weights_of_json json =
   let* fields = Candle_json.object_fields ~context:"weights" json in
-  List.fold_right (fun (name, value) rest ->
-    let* rest = rest in let* n = as_int value in Ok ((name, n) :: rest)) fields (Ok [])
+  let rec loop acc = function
+    | [] -> Ok (List.rev acc)
+    | (name, value) :: rest ->
+      let* n = as_int value in
+      loop ((name, n) :: acc) rest
+  in
+  loop [] fields
 let decode request json =
   let context = "candle appraisal " ^ stage request in
   let* fields = Candle_json.object_fields ~context json in

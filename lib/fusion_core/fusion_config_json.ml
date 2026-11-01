@@ -115,12 +115,13 @@ let nullable decode = function
 
 let list decode = function
   | `List items ->
-    List.fold_right
-      (fun item acc ->
-         let* rest = acc in
-         let* value = decode item in
-         Ok (value :: rest))
-      items (Ok [])
+    let rec loop acc = function
+      | [] -> Ok (List.rev acc)
+      | item :: rest ->
+        let* value = decode item in
+        loop (value :: acc) rest
+    in
+    loop [] items
   | _ -> Error "must be an array"
 ;;
 

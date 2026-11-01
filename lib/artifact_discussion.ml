@@ -122,14 +122,23 @@ let event_to_json (event : event) = `Assoc ["request", request_to_json event.req
 let events_to_json events = `List (List.map event_to_json events)
 let events_of_json = function
   | `List values ->
-    let* events = List.fold_right (fun json result ->
-      let* rest = result in let* values = fields ["request"; "actor"; "at"; "applied"] json in
-      let* request = request_of_json (field "request" values) in
-      let* actor = string "actor" values in let* at = string "at" values in
-      let* applied = match List.assoc_opt "applied" values with
-        | Some `Null -> Ok None | Some json -> Engine.selection_of_json json |> Result.map Option.some
-        | None -> Error "missing discussion effect" in
-      Ok ({ request; actor; at; applied } :: rest)) values (Ok []) in
+    let* events =
+      let rec loop acc = function
+        | [] -> Ok (List.rev acc)
+        | json :: rest ->
+          let* values = fields ["request"; "actor"; "at"; "applied"] json in
+          let* request = request_of_json (field "request" values) in
+          let* actor = string "actor" values in
+          let* at = string "at" values in
+          let* applied = match List.assoc_opt "applied" values with
+            | Some `Null -> Ok None
+            | Some json -> Engine.selection_of_json json |> Result.map Option.some
+            | None -> Error "missing discussion effect"
+          in
+          loop ({ request; actor; at; applied } :: acc) rest
+      in
+      loop [] values
+    in
     let* _ = project events in Ok events
   | _ -> Error "expected discussion event list"
 let thread_to_json (thread : thread) =

@@ -40,12 +40,11 @@ let allow_exact : string list =
   ; "MASC_KEEPER_TEST_DOCKER_LOG"
   ]
 
-let allow_exact_table =
-  let t = Hashtbl.create (List.length allow_exact) in
-  List.iter (fun k -> Hashtbl.replace t k ()) allow_exact;
-  t
+module String_set = Set_util.StringSet
 
-let is_allowed key = Hashtbl.mem allow_exact_table key
+let allow_exact_table = String_set.of_list allow_exact
+
+let is_allowed key = String_set.mem key allow_exact_table
 
 let key_of_entry entry =
   match String.index_opt entry '=' with

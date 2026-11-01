@@ -68,16 +68,17 @@ let all_tool_names () : string list =
 let is_tool_allowed tool_name =
   Tool_catalog.is_visible tool_name
 
-(* O(1) membership lookup for "is this name in raw_all_tool_schemas?". *)
-let raw_tool_name_set : (string, unit) Hashtbl.t =
-  let tbl = Hashtbl.create (List.length raw_all_tool_schemas * 2) in
-  List.iter
-    (fun (schema : Masc_domain.tool_schema) ->
-      Hashtbl.replace tbl schema.name ())
-    raw_all_tool_schemas;
-  tbl
+module String_set = Set_util.StringSet
 
-let is_raw_tool_name name = Hashtbl.mem raw_tool_name_set name
+(* Immutable membership lookup for "is this name in raw_all_tool_schemas?". *)
+let raw_tool_name_set : String_set.t =
+  List.fold_left
+    (fun acc (schema : Masc_domain.tool_schema) ->
+      String_set.add schema.name acc)
+    String_set.empty
+    raw_all_tool_schemas
+
+let is_raw_tool_name name = String_set.mem name raw_tool_name_set
 
 let visible_tool_schemas ?(include_hidden = false) () :
     Masc_domain.tool_schema list =

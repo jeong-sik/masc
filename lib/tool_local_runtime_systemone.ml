@@ -371,37 +371,43 @@ let decode_questions = function
 
 (* Bind object fields to the original request, including duplicate and missing
    keys. Object order is not significant; the returned list follows the request. *)
+module String_set = Set.Make (String)
+module String_map = Map.Make (String)
+
 let requested_members ~context ~keys = function
   | `Assoc pairs ->
-      let* _ =
+      let key_set = String_set.of_list keys in
+      let* pair_map =
         List.fold_left
-          (fun acc (key, _) ->
+          (fun acc (key, value) ->
             let* seen = acc in
-            if not (List.mem key keys) then
+            if not (String_set.mem key key_set) then
               Error (Printf.sprintf "%s has unasked key %S" context key)
-            else if List.mem key seen then
+            else if String_map.mem key seen then
               Error (Printf.sprintf "%s key %S appears more than once" context key)
-            else Ok (key :: seen))
-          (Ok []) pairs
+            else Ok (String_map.add key value seen))
+          (Ok String_map.empty) pairs
       in
-      List.fold_right
-        (fun key acc ->
-          let* acc = acc in
-          match List.assoc_opt key pairs with
-          | None -> Error (Printf.sprintf "%s is missing key %S" context key)
-          | Some value -> Ok ((key, value) :: acc))
-        keys (Ok [])
+      let rec loop acc = function
+        | [] -> Ok (List.rev acc)
+        | key :: rest ->
+          (match String_map.find_opt key pair_map with
+           | None -> Error (Printf.sprintf "%s is missing key %S" context key)
+           | Some value -> loop ((key, value) :: acc) rest)
+      in
+      loop [] keys
   | _ -> Error (context ^ " must be an object")
 ;;
 
 let decode_probabilities ~context ~keys json =
   let* pairs = requested_members ~context ~keys json in
-  List.fold_right
-    (fun (key, value) acc ->
-      let* acc = acc in
+  let rec loop acc = function
+    | [] -> Ok (List.rev acc)
+    | (key, value) :: rest ->
       let* probability = probability_member ~context:(context ^ "." ^ key) value in
-      Ok ((key, probability) :: acc))
-    pairs (Ok [])
+      loop ((key, probability) :: acc) rest
+  in
+  loop [] pairs
 ;;
 
 let decode_answer (name, question) = function
@@ -452,12 +458,13 @@ let decode_answer (name, question) = function
             match List.assoc_opt "legend" body with
             | Some json ->
                 let* entries = requested_members ~context:(name ^ ".legend") ~keys json in
-                List.fold_right
-                  (fun (_, entry) acc ->
-                    let* acc = acc in
+                let rec loop acc = function
+                  | [] -> Ok (List.rev acc)
+                  | (_, entry) :: rest ->
                     let* value = string_member ~context:(name ^ ".legend entry") entry in
-                    Ok (value :: acc))
-                  entries (Ok [])
+                    loop (value :: acc) rest
+                in
+                loop [] entries
             | None -> Error (name ^ " answer is missing legend")
           in
           let probabilities =

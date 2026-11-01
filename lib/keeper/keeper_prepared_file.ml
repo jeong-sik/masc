@@ -73,6 +73,16 @@ let entry_identity ~parent leaf =
     | Scope.Empty_key -> "filesystem entry identity is empty")
 ;;
 
+let map_ancestry chain =
+  let rec loop acc = function
+    | [] -> Ok (List.rev acc)
+    | (_, resource) :: rest ->
+      let* resource = scope_identity resource in
+      loop (resource :: acc) rest
+  in
+  loop [] chain
+;;
+
 let object_scope ~access directory stat =
   let resource = identity stat in
   let* occupied = Scope.identity ~namespace:"filesystem-object"
@@ -80,10 +90,7 @@ let object_scope ~access directory stat =
     |> Result.map_error (function
       | Scope.Empty_namespace -> "filesystem object namespace is empty"
       | Scope.Empty_key -> "filesystem object identity is empty") in
-  let* ancestry = List.fold_right (fun (_, resource) accumulated ->
-    let* tail = accumulated in
-    let* resource = scope_identity resource in
-    Ok (resource :: tail)) directory.native_chain (Ok []) in
+  let* ancestry = map_ancestry directory.native_chain in
   Ok (Scope.create ~access ~occupied ~ancestors:ancestry)
 ;;
 
@@ -162,10 +169,15 @@ let inspect_directory_capability ~fs ~access ~leaf ~components
   | None -> Ok None
   | Some native ->
     let native = Fs_compat.realpath native in
-    let* native_chain = List.fold_right (fun path accumulated ->
-      let* tail = accumulated in
-      let* identity = stat_directory Eio.Path.(fs / path) in
-      Ok ((path, identity) :: tail)) (ancestors native) (Ok []) in
+    let* native_chain =
+      let rec loop acc = function
+        | [] -> Ok (List.rev acc)
+        | path :: rest ->
+          let* identity = stat_directory Eio.Path.(fs / path) in
+          loop ((path, identity) :: acc) rest
+      in
+      loop [] (ancestors native)
+    in
     let* actual = stat_directory capability in
     (match native_chain with
      | [] -> Error "prepared file has no native directory identity"
@@ -174,10 +186,7 @@ let inspect_directory_capability ~fs ~access ~leaf ~components
          Error "prepared file native parent differs from its pinned capability"
        else
          let* occupied = entry_identity ~parent:actual leaf in
-         let* ancestry = List.fold_right (fun (_, resource) accumulated ->
-           let* tail = accumulated in
-           let* resource = scope_identity resource in
-           Ok (resource :: tail)) native_chain (Ok []) in
+         let* ancestry = map_ancestry native_chain in
          Ok (Some { capability; components; identity = actual; native_chain
                   ; scope = Scope.create ~access ~occupied ~ancestors:ancestry }))
 ;;
@@ -373,11 +382,18 @@ module Write = struct
         (* An absent entry has no inode to unify filesystem spelling aliases.
            Its actual parent owns creation; do not guess case/Unicode folding. *)
         let* occupied = scope_identity directory.identity in
-        let* ancestry = List.fold_right (fun (_, resource) accumulated ->
-          let* tail = accumulated in
-          if equal_identity resource directory.identity then Ok tail
-          else let* resource = scope_identity resource in Ok (resource :: tail))
-            directory.native_chain (Ok []) in
+        let* ancestry =
+          let rec loop acc = function
+            | [] -> Ok (List.rev acc)
+            | (_, resource) :: rest ->
+              if equal_identity resource directory.identity
+              then loop acc rest
+              else
+                let* resource = scope_identity resource in
+                loop (resource :: acc) rest
+          in
+          loop [] directory.native_chain
+        in
         Ok (Scope.create ~access:Scope.Write ~occupied ~ancestors:ancestry) in
       let claim directory = function
         | Some resource -> Ok resource

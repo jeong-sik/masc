@@ -23,20 +23,15 @@ let managed_agent_instructions () = instruction Prompt_names.mcp_managed_agent
 let managed_agent_passthrough_tool_names =
   Tool_catalog_surfaces.spawned_agent_surface_tools
 
-(* O(1) membership view of [managed_agent_passthrough_tool_names].
+module StringSet = Set_util.StringSet
+module StringMap = Map.Make (String)
+
+(* O(log N) immutable membership view of [managed_agent_passthrough_tool_names].
    Used by [tool_schemas_for_profile Managed_agent] to filter
    ~150 visible schemas per request — replaces a per-schema
    [List.mem] scan over ~20 passthrough names. *)
-let managed_agent_passthrough_tool_set : (string, unit) Hashtbl.t =
-  let tbl =
-    Hashtbl.create (List.length managed_agent_passthrough_tool_names)
-  in
-  List.iter
-    (fun name -> Hashtbl.replace tbl name ())
-    managed_agent_passthrough_tool_names;
-  tbl
-
-module StringSet = Set_util.StringSet
+let managed_agent_passthrough_tool_set : StringSet.t =
+  StringSet.of_list managed_agent_passthrough_tool_names
 
 let default_instructions () = instruction Prompt_names.mcp_full
 
@@ -75,7 +70,7 @@ let tool_schemas_for_profile ?(include_hidden = false)
         let passthrough =
           Config.visible_tool_schemas ~include_hidden:true ()
           |> List.filter (fun (schema : Masc_domain.tool_schema) ->
-                 Hashtbl.mem managed_agent_passthrough_tool_set schema.name
+                 StringSet.mem schema.name managed_agent_passthrough_tool_set
                  && Option.is_none
                       (Agent_core_tool_contract.agent_core_binding_by_name schema.name)
                  && Tool_catalog.is_visible ~include_hidden:true schema.name)
@@ -173,27 +168,26 @@ let label_words_from_identifier ident =
     second parse would read the same bytes to the same answer. A file that
     does not parse raises rather than answering "no title": a misplaced
     declaration and no declaration are the same answer at every call site. *)
-let declared_title_table : (string, string) Hashtbl.t Lazy.t =
+let declared_title_table : string StringMap.t Lazy.t =
   lazy
-    (let table = Hashtbl.create 256 in
-     List.iter
-       (fun path ->
+    (List.fold_left
+       (fun table path ->
           match Filename.dirname path, Filename.extension path with
           | "tools", ".toml" ->
             let name = Filename.remove_extension (Filename.basename path) in
             (match Embedded_config.read path with
-             | None -> ()
+             | None -> table
              | Some contents ->
                (match Tool_definition_toml.load ~name ~contents with
                 | Error message ->
                   failwith (Printf.sprintf "tool titles: %s: %s" path message)
                 | Ok loaded ->
                   (match loaded.Tool_definition_toml.title with
-                   | Some title -> Hashtbl.replace table name title
-                   | None -> ())))
-          | _, _ -> ())
-       Embedded_config.file_list;
-     table)
+                   | Some title -> StringMap.add name title table
+                   | None -> table)))
+          | _, _ -> table)
+       StringMap.empty
+       Embedded_config.file_list)
 
 (* Three titled tools have no [config/tools] file to carry the key:
    masc_operator_snapshot, masc_operator_digest and masc_operator_action each
@@ -202,7 +196,7 @@ let declared_title_table : (string, string) Hashtbl.t Lazy.t =
    the mechanical fallback below derives from the name, so the fallback covers
    them byte-identically. *)
 let tool_title_of_name name =
-  match Hashtbl.find_opt (Lazy.force declared_title_table) name with
+  match StringMap.find_opt name (Lazy.force declared_title_table) with
   | Some title -> title
   | None ->
     let trimmed =

@@ -865,17 +865,37 @@ let execute_locate t ~tab_id ~instruction =
     else Error (Protocol "locate document changed while waiting for its model; read the original tab again") in
   let* raw_nodes=match field "nodes" json with Some (`List nodes) -> Ok nodes
     | None|Some _ -> Error (Protocol "missing current locate nodes") in
-  let* matches=List.fold_right (fun (matched:located_node) acc ->
-    let* rest=acc in
-    let find scene=List.find_opt (fun (node:Browser_scene.node) -> node.node_id=matched.node_id) scene.Browser_scene.nodes in
-    match find original,find current with
-    | Some before,Some now when before.kind=now.kind && before.tag=now.tag && before.text=now.text
-        && before.ancestor_region=now.ancestor_region && before.source_context=now.source_context ->
-        let* observation=List.find_opt (fun node -> field "nodeId" node=Some (`String matched.node_id)) raw_nodes
-          |> Option.to_result ~none:(Protocol "missing current locate node") in
-        Ok (`Assoc ["target",`Assoc ["documentId",`String current.document_id;"nodeId",`String matched.node_id];
-          "observation",observation;"inference",`Assoc ["description",`String matched.description]]::rest)
-    | (None|Some _),(None|Some _) -> Error (Protocol "locate target changed or was not observed; read the original tab again")) matches (Ok []) in
+  let* matches =
+    let rec loop acc = function
+      | [] -> Ok (List.rev acc)
+      | (matched : located_node) :: rest ->
+        let find scene =
+          List.find_opt (fun (node : Browser_scene.node) -> node.node_id = matched.node_id) scene.Browser_scene.nodes
+        in
+        match find original, find current with
+        | Some before, Some now
+          when before.kind = now.kind
+               && before.tag = now.tag
+               && before.text = now.text
+               && before.ancestor_region = now.ancestor_region
+               && before.source_context = now.source_context ->
+          let* observation =
+            List.find_opt (fun node -> field "nodeId" node = Some (`String matched.node_id)) raw_nodes
+            |> Option.to_result ~none:(Protocol "missing current locate node")
+          in
+          loop
+            (`Assoc
+               [ "target", `Assoc [ "documentId", `String current.document_id; "nodeId", `String matched.node_id ]
+               ; "observation", observation
+               ; "inference", `Assoc [ "description", `String matched.description ]
+               ]
+             :: acc)
+            rest
+        | (None | Some _), (None | Some _) ->
+          Error (Protocol "locate target changed or was not observed; read the original tab again")
+    in
+    loop [] matches
+  in
   let* viewport=field "viewport" json |> Option.to_result ~none:(Protocol "missing current locate viewport") in
   Ok (`Assoc ["tabId",`Int tab_id;"documentId",`String current.document_id;"url",`String current.url;
     "title",`String current.title;"viewport",viewport;"truncated",`Bool current.truncated;

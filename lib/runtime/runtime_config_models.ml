@@ -17,7 +17,9 @@ module Names = Map.Make (String)
 module Ids = Set.Make (String)
 module Bindings = Set.Make (struct
   type t = string * string
-  let compare = Stdlib.compare
+  let compare (a1, b1) (a2, b2) =
+    let c = String.compare a1 a2 in
+    if c <> 0 then c else String.compare b1 b2
 end)
 
 open Result.Syntax

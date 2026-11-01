@@ -3,7 +3,17 @@
 module Thinking_key = struct
   type t = int * int * Trajectory.withheld_reasoning_kind
 
-  let compare = Stdlib.compare
+  let kind_rank = function
+    | Trajectory.Thinking_block -> 0
+    | Trajectory.Reasoning_details -> 1
+    | Trajectory.Redacted_thinking -> 2
+
+  let compare (t1, b1, k1) (t2, b2, k2) =
+    let c = Int.compare t1 t2 in
+    if c <> 0 then c
+    else
+      let c = Int.compare b1 b2 in
+      if c <> 0 then c else Int.compare (kind_rank k1) (kind_rank k2)
 end
 
 module Thinking_set = Set.Make (Thinking_key)

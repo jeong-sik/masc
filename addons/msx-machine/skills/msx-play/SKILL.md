@@ -30,10 +30,10 @@ The screen is the expensive way to ask what changed; memory answers in bytes. To
 1. `masc_msx_peek` any address to take the snapshot.
 2. Make exactly one meaningful input — one menu choice, one command — with `sequence=true` where a path is involved.
 3. `masc_msx_ram_diff`: the changed runs are candidates for that action's state.
-4. Compare the changed bytes with the returned PNG. A value matching a visible menu, cursor or resource is a candidate address. Repeat under controlled conditions before treating it as that state's location; an unrelated timer or rendering buffer can change in the same interval.
-5. Record verified addresses with the game/media identity, interpretation and observations that support them. A few peeked bytes can then answer routine questions; image reads stay for evidence, unfamiliar screens and periodic confirmation.
+4. Confirm meaning against the screen (the returned PNG image): the run whose before/after matches the visible change — a menu id, a cursor, gold — is that state's address.
+5. Record confirmed addresses in keeper memory as the game's address table. A few peeked bytes then answer routine questions; image reads stay for evidence, unfamiliar screens and periodic confirmation.
 
-Re-verify a saved address after a reload or restore before trusting the table. A large diff does not identify who acted or why memory changed: machine replacement, guest execution and another caller can all affect it. Check available machine identity and caller-tagged input evidence, preserve uncertainty, and take a fresh baseline when continuity cannot be established.
+Re-verify a saved address after a reload or restore: the layout is usually the same, but confirm with one diff before trusting the table. If a diff after a clearly one-step action shows wholesale change, someone else drove the machine — treat the snapshot as lost and take a fresh peek.
 
 ## Per-game Skills
 

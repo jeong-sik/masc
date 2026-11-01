@@ -1,6 +1,6 @@
 ---
 name: sangokushi-2-end-command
-description: "Sends the observed Sangokushi II province-command end sequence (0, Return, y), waits for screen settling and returns the observation. Use only at the province (0-19)? prompt while authorized to drive the shared machine. Inspect the returned image: screen settling does not prove province completion or month progression. If another driver intervened or the result is uncertain, observe the current state before choosing further input; do not replay the sequence automatically."
+description: "One call to end the current province's commands in Sangokushi II (0, Return, y): presses the verified sequence, waits for the settled screen, returns the observation. Use only at the province (0-19)? prompt."
 ---
 
 # Sangokushi II: end the province's commands
@@ -20,7 +20,7 @@ re-observe before retrying (the `msx-play` Skill, shared machine).
 ```toml composition
 [[compositions]]
 name = "sangokushi-2-end-command"
-description = "Sends the observed Sangokushi II province-command end sequence (0, Return, y), waits for screen settling and returns the observation. Use only at the province (0-19)? prompt while authorized to drive the shared machine. Inspect the returned image: screen settling does not prove province completion or month progression. If another driver intervened or the result is uncertain, observe the current state before choosing further input; do not replay the sequence automatically."
+description = "End the current province's commands (0, Return, y) and return the settled screen."
 execution = "inline"
 
 [[compositions.nodes]]

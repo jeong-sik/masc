@@ -709,6 +709,7 @@ let load_snapshot_unlocked ~base_path : (loaded_snapshot, storage_error) result 
            in
            (match plan.rewrite with
            | Rewrite { classification_changed; partial_tail } ->
+             let previous_durable = durable_state_for ~base_path in
              set_durable_state ~base_path durable;
              let write_snapshot ~generation =
                Result.map
@@ -727,7 +728,11 @@ let load_snapshot_unlocked ~base_path : (loaded_snapshot, storage_error) result 
                  ~pending_map:loaded_pending
                  ~delivery_map:loaded_deliveries
              with
-             | Error _ as error -> error
+             | Error _ as error ->
+               (match previous_durable with
+                | Some prior -> set_durable_state ~base_path prior
+                | None -> drop_durable_state ~base_path);
+               error
              | Ok (Fsync_completed | Visible_sync_unconfirmed _) ->
                Log.Server.warn
                  "gate_pending restart rewrite workspace=%s classification=%b partial_log_tail=%b"
@@ -1012,6 +1017,16 @@ let record_consumed_resolution_replay ~base_path ~id ~outcome =
                Error (Grant_replay_projection_unavailable error)
              | Ok Fsync_completed ->
                Atomic.set deliveries updated_deliveries;
+               (match durable_state_for ~base_path with
+                | None -> ()
+                | Some durable when SMap.mem id durable.durable_deliveries ->
+                  set_durable_state
+                    ~base_path
+                    { durable with
+                      durable_deliveries =
+                        SMap.add id updated_delivery durable.durable_deliveries
+                    }
+                | Some _ -> ());
                Ok Replay_recorded
              | Ok (Visible_sync_unconfirmed reason) ->
                let error =
@@ -2683,20 +2698,23 @@ let install_persistence_internal ~after_load ~after_pending_publish ~base_path =
             ; loaded_read_errors = pending_read_errors
             ; loaded_durable
             } ->
-          (match loaded_durable with
-           | Some durable -> set_durable_state ~base_path durable
-           | None -> drop_durable_state ~base_path);
           let loaded_deliveries, replay_projection_error =
             load_replay_results_unlocked
               ~base_path
               ~delivery_map:loaded_deliveries
+          in
+          let loaded_durable =
+            Option.map
+              (fun durable -> { durable with durable_deliveries = loaded_deliveries })
+              loaded_durable
           in
           Ok
             ( loaded_pending
             , loaded_deliveries
             , loaded_next_sequence
             , replay_projection_error
-            , pending_read_errors )
+            , pending_read_errors
+            , loaded_durable )
       in
       after_load ();
       match loaded_snapshot with
@@ -2708,7 +2726,8 @@ let install_persistence_internal ~after_load ~after_pending_publish ~base_path =
           , loaded_deliveries
           , loaded_next_sequence
           , replay_projection_error
-          , pending_entry_read_errors ) ->
+          , pending_entry_read_errors
+          , loaded_durable ) ->
         let current_pending =
           remove_base_entries ~base_path (Atomic.get pending) Fun.id
         in
@@ -2754,6 +2773,9 @@ let install_persistence_internal ~after_load ~after_pending_publish ~base_path =
               mark_store_unavailable_unlocked ~base_path error;
               Error error
             | None ->
+              (match loaded_durable with
+               | Some durable -> set_durable_state ~base_path durable
+               | None -> drop_durable_state ~base_path);
               (match pending_entry_read_errors with
                | [] -> clear_store_unavailable_unlocked ~base_path
                | first :: _ -> mark_store_unavailable_unlocked ~base_path first);

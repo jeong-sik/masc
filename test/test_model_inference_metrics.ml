@@ -2187,6 +2187,52 @@ let test_metrics_cache_eviction_ignores_late_refresh () =
       check string "the replacement remains fresh" "fresh"
         (after |> member "cache" |> member "state" |> to_string)))
 
+let test_metrics_cache_sync_cold_failure_and_clock_rollback () =
+  Eio_main.run (fun _env ->
+    Executor_pool_ref.For_testing.with_pool_option None (fun () ->
+      let module Cache = Server_dashboard_json_cache in
+      let cache = Cache.create () in
+      let placeholder = `Assoc ["state", `String "loading"] in
+      let clock = ref 100. in
+      let open Yojson.Safe.Util in
+      let cold_failed = Eio.Switch.run (fun sw ->
+        Cache.read_result ~now:(fun () ->
+          let t = !clock in
+          clock := t +. 3.;
+          t)
+          ~sync_first:true ~sw ~cache ~key:"cold-failure-and-rollback"
+          ~placeholder
+          ~compute:(fun () -> Error "cold-compute-boom")) in
+      check string "failed cold fill stays warming" "warming"
+        (cold_failed |> member "cache" |> member "state" |> to_string);
+      check string "failed cold fill immediately surfaces last_error"
+        "cold-compute-boom"
+        (cold_failed |> member "cache" |> member "last_error" |> to_string);
+      check (float 0.0001) "failed cold fill uses post-compute timestamp"
+        103.
+        (cold_failed |> member "cache" |> member "generated_at" |> to_float);
+      clock := 200.;
+      let warm = Eio.Switch.run (fun sw ->
+        Cache.read_result ~now:(fun () -> !clock) ~sync_first:true ~sw ~cache
+          ~key:"cold-failure-and-rollback" ~placeholder
+          ~compute:(fun () -> Ok (`Assoc ["measurement", `Int 10]))) in
+      check int "subsequent fill succeeds" 10
+        (warm |> member "measurement" |> to_int);
+      (* Step wall-clock backward below updated_at = 200. *)
+      clock := 150.;
+      let refreshed = ref 0 in
+      let rolled_back = Eio.Switch.run (fun sw ->
+        Cache.read_result ~now:(fun () -> !clock) ~sync_first:false ~sw ~cache
+          ~key:"cold-failure-and-rollback" ~placeholder
+          ~compute:(fun () -> incr refreshed; Ok (`Assoc ["measurement", `Int 11]))) in
+      check string "clock rollback triggers stale refresh instead of negative-age fresh"
+        "stale_refreshing"
+        (rolled_back |> member "cache" |> member "state" |> to_string);
+      check (float 0.0001) "clock rollback clamps age_s to 0.0"
+        0.0
+        (rolled_back |> member "cache" |> member "age_s" |> to_float);
+      check int "clock rollback scheduled background refresh" 1 !refreshed))
+
 let test_runtime_history_keeps_non_error_outcomes () =
   let base = test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
@@ -2306,6 +2352,7 @@ let () =
       test_case "cancelled switch cannot reserve a cache refresh" `Quick test_metrics_cache_cancelled_switch_does_not_reserve_refresh;
       test_case "cancelled cache admission preserves the oldest cached value" `Quick test_metrics_cache_cancelled_admission_preserves_oldest;
       test_case "evicted refresh cannot overwrite its replacement" `Quick test_metrics_cache_eviction_ignores_late_refresh;
+      test_case "cold sync failure and clock rollback cache semantics" `Quick test_metrics_cache_sync_cold_failure_and_clock_rollback;
       test_case "runtime history preserves yielded non-error outcomes" `Quick test_runtime_history_keeps_non_error_outcomes;
       test_case "decision outcome validation" `Quick test_decision_outcome_validation;
       test_case "unrenderable timestamp is a typed invalid row" `Quick test_unrenderable_decision_timestamp;

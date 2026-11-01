@@ -6,6 +6,22 @@ let format_of_mime mime =
   | essence :: _ when String.equal (String.trim essence) "image/svg+xml" -> Svg
   | _ -> General_image
 
+(* A Board blob records an image kind but no MIME. Parse only its XML root;
+   Pele validates the complete original document before rendering it. *)
+let format_of_bytes bytes =
+  if not (String.is_valid_utf_8 bytes) then General_image
+  else
+    let malformed = ref false in
+    let report _ _ = malformed := true in
+    let signals = Markup.string bytes |> Markup.parse_xml ~report |> Markup.signals in
+    let rec root () = match Markup.next signals with
+      | Some (`Xml _ | `Comment _ | `PI _ | `Doctype _) -> root ()
+      | Some (`Text parts) when List.for_all (fun part -> String.trim part = "") parts -> root ()
+      | Some (`Start_element ((namespace, name), _))
+        when not !malformed && namespace = "http://www.w3.org/2000/svg" && name = "svg" -> Svg
+      | Some (`Start_element _ | `End_element | `Text _) | None -> General_image in
+    root ()
+
 let of_base64 ~mime_type encoded = {format=format_of_mime mime_type;encoded}
 let format payload = payload.format
 let encoded payload = payload.encoded

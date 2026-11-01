@@ -2990,7 +2990,7 @@
  (name masc_tui_image_payload)
  (wrapped false)
  (modules masc_tui_image_payload)
- (libraries base64 uri))
+ (libraries base64 uri markup))
 
 (library
  (name masc_tui_image_preview)

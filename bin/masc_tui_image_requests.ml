@@ -3,6 +3,7 @@ type source =
   | Draft of Masc_tui_keeper_chat_projection.attachment
   | Retained of { reference : Tool_output.artifact_ref;
       format : Masc_tui_image_payload.format }
+  | Board_artifact of Masc_tui_board_reader.key
   | Generated of Masc_tui_image_preview.output_source
 
 let load ~host ~port ~cache_dir ~diagram_width ~diagram_height ~diagram_font_size
@@ -49,6 +50,15 @@ let load ~host ~port ~cache_dir ~diagram_width ~diagram_height ~diagram_font_siz
           let* response = Masc_tui_http.decode_json ~allow_empty:false ~status_code ~body in
           let* bytes = Masc_tui_image_preview.decode_artifact reference response in
           prepare_declared format bytes))
+  | Board_artifact key ->
+    Result.bind
+      (Masc_tui_http.get_workspace_bytes ~host ~port
+         ~max_body_bytes:Masc_tui_board_upload.max_attachment_bytes
+         ~path:("/api/v1/artifact-bytes/" ^ key.sha256))
+      (fun bytes ->
+        Eio_guard.run_in_systhread ~label:"tui-board-image-decode" (fun () ->
+          Result.bind (Masc_tui_board_reader.validate key bytes) (fun _ ->
+            prepare_declared (Masc_tui_image_payload.format_of_bytes bytes) bytes)))
   | Generated (Masc_tui_image_preview.Inline_data data) ->
     Eio_guard.run_in_systhread ~label:"tui-output-image-decode" (fun () ->
       Result.bind (Masc_tui_image_payload.decode data)

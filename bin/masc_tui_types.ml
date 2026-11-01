@@ -8785,11 +8785,22 @@ type schedule_form_refusal =
   ; sfr_workspace : workspace_input_identity option
   }
 
+(* The content selected on Board owns an image request until the exact post,
+   comment, or attachment is no longer the one on screen. *)
+type board_diagram_subject =
+  | Board_post_diagram of { post_id : string; body : string }
+  | Board_comment_diagram of { post_id : string; comment_id : string; body : string }
+
+type board_preview_subject =
+  | Board_diagram of board_diagram_subject
+  | Board_attachment_image of { post_id : string; attachment : board_attachment }
+
 type image_read_owner =
   | Local_file_image_read of workspace_authority
   | Remote_url_image_read of workspace_authority
   | Draft_image_read of workspace_authority * Masc_tui_keeper_chat_projection.attachment
   | Peer_image_read of unit ref
+  | Board_image_read of unit ref * board_preview_subject * unit ref
 
 type sent_image_read =
   { sir_generation : int
@@ -9033,7 +9044,7 @@ type state = {
      observation epoch. A late answer must not reopen a closed reader. *)
   (* A pending page does not replace the last observed page until it succeeds. *)
   mutable keeper_peer_reading: keeper_peer_reading option;
-  mutable board_reader_owner: (workspace_authority * unit ref) option;
+  mutable board_reader_owner: (workspace_authority * unit ref * board_attachment_kind) option;
   mutable board_reader: Masc_tui_board_reader.t;
   mutable keeper_deletions_open: bool;
   mutable keeper_deletions_loading: bool;
@@ -9976,6 +9987,9 @@ type state = {
      read against the open post's thread: an id that thread does not hold
      selects nothing. *)
   mutable board_comment_cursor: string option;
+  (* The diagram index belongs to its original post or comment, not the
+     current list position. A changed reading starts again at the first. *)
+  mutable board_diagram_cursor: (board_diagram_subject * int) option;
   (* One frame's request to scroll the comment column so the selected
      comment is on screen. j/k set it; PgUp/PgDn do not, so they still move
      by rows through a comment longer than the column. Cleared with
@@ -11136,25 +11150,6 @@ let restore_message_draft (state : state) keeper_name =
       (Masc_tui_message_input.invalidate_revision state.msg_input; state.msg_references <- draft.kcd_references);
       state.msg_attachments_since <- draft.kcd_since;
       state.msg_recall_walk <- draft.kcd_recall
-
-(* Local files, drafts and explicit remote URLs survive peer reconfirmation
-   but never a workspace replacement. Peer images retain their exact reading.
-   Completion, retirement and footer projection use this same admission. *)
-let image_reading_is_current (state : state) (pending : sent_image_read) =
-  match pending.sir_owner with
-  | Local_file_image_read authority -> authority = state.workspace_authority
-  | Remote_url_image_read authority -> authority = state.workspace_authority
-  | Draft_image_read (authority, attachment) ->
-    authority = state.workspace_authority
-    && List.exists (fun current -> current == attachment) state.msg_attachments
-  | Peer_image_read reading ->
-    reading == state.workspace_read_authority
-    && (pending.sir_view <> Resources
-        || (Masc_tui_resource_images.same_reading
-              ~equal:Masc_tui_resource_catalog.equal_key
-              pending.sir_resource state.resource_content
-            && Option.is_none state.resource_pending_key
-            && Option.is_none state.resource_content_error))
 
 (* These transitions are shared by the mailbox handler and readonly overview
    projection. Preview admission never changes confirmed data or authority. *)
@@ -17556,6 +17551,54 @@ let board_post_on_screen (state : state) =
     | Connectors | Runtime | Config | Resources | Tools | Code | System_logs), _
   | Board, (Board_list | Board_compose) -> None
 
+let board_diagram_subject (state : state) =
+  Option.bind (board_post_on_screen state) (fun post ->
+    if not state.board_comments_focused then
+      Some (Board_post_diagram {post_id=post.bp_id; body=post.bp_body})
+    else
+      match Masc_tui_board_detail.view_for state.board_detail ~post_id:post.bp_id,
+            state.board_comment_cursor with
+      | Ready (_, comments, _), Some comment_id ->
+          List.find_opt (fun comment -> comment.bc_id = comment_id) comments
+          |> Option.map (fun comment -> Board_comment_diagram
+               {post_id=post.bp_id; comment_id; body=comment.bc_content})
+      | (Absent | Loading | Failed _ | Ready _), _ -> None)
+
+let board_preview_subject_is_current state subject =
+  match subject with
+  | Board_diagram subject ->
+      board_diagram_subject state = Some subject
+  | Board_attachment_image {post_id; attachment} ->
+      (match board_post_on_screen state with
+       | Some post -> post.bp_id = post_id
+           && List.exists (( = ) (Ok attachment)) post.bp_attachments
+       | None -> false)
+
+let image_keeper_is_current (state : state) ~view ~keeper_name =
+  view = Resources || view = Board || keeper_name = state.msg_target_keeper_name
+
+(* Local files, drafts and explicit remote URLs survive peer reconfirmation
+   but never a workspace replacement. Peer images retain their exact reading.
+   Completion, retirement and footer projection use this same admission. *)
+let image_reading_is_current (state : state) (pending : sent_image_read) =
+  match pending.sir_owner with
+  | Local_file_image_read authority -> authority = state.workspace_authority
+  | Remote_url_image_read authority -> authority = state.workspace_authority
+  | Draft_image_read (authority, attachment) ->
+    authority = state.workspace_authority
+    && List.exists (fun current -> current == attachment) state.msg_attachments
+  | Peer_image_read reading ->
+    reading == state.workspace_read_authority
+    && (pending.sir_view <> Resources
+        || (Masc_tui_resource_images.same_reading
+              ~equal:Masc_tui_resource_catalog.equal_key
+              pending.sir_resource state.resource_content
+            && Option.is_none state.resource_pending_key
+            && Option.is_none state.resource_content_error))
+  | Board_image_read (reading, subject, _) ->
+    reading == state.workspace_read_authority && server_authority_ready state
+    && pending.sir_view = Board && board_preview_subject_is_current state subject
+
 let board_successor (state : state) =
   Option.bind (board_post_on_screen state) (fun post ->
     Option.bind post.bp_closed (fun closed ->
@@ -17628,14 +17671,14 @@ let keeper_peer_frame_owner_changed ~presented ~candidate =
 let current_board_reader (state : state) =
   match state.board_reader_owner, Masc_tui_board_reader.key state.board_reader,
         board_post_on_screen state with
-  | Some (authority,reading),Some key,Some post
+  | Some (authority,reading,kind),Some key,Some post
     when authority=state.workspace_authority && reading==state.workspace_read_authority
       && server_authority_ready state && post.bp_id=key.post_id ->
     if List.exists (function
-      | Ok {ba_kind=(Ak_file|Ak_score);ba_source=As_artifact {sha256;bytes};ba_name} ->
-        sha256=key.sha256 && bytes=key.bytes && ba_name=key.name
-      | Ok {ba_kind=(Ak_file|Ak_score);ba_source=As_url _;_}
-      | Ok {ba_kind=(Ak_image|Ak_video|Ak_youtube|Ak_external_link|Ak_audio|Ak_midi|Ak_unknown _);_}
+      | Ok {ba_kind=(Ak_file|Ak_score|Ak_image as current_kind);ba_source=As_artifact {sha256;bytes};ba_name} ->
+        current_kind=kind && sha256=key.sha256 && bytes=key.bytes && ba_name=key.name
+      | Ok {ba_kind=(Ak_file|Ak_score|Ak_image);ba_source=As_url _;_}
+      | Ok {ba_kind=(Ak_video|Ak_youtube|Ak_external_link|Ak_audio|Ak_midi|Ak_unknown _);_}
       | Error _ -> false) post.bp_attachments then Some state.board_reader else None
   | Some _,Some _,Some _ | None,_,_ | _,None,_ | _,_,None -> None
 
@@ -18536,6 +18579,7 @@ let create_state
   board_comment_scroll = 0;
   board_comments_focused = false;
   board_comment_cursor = None;
+  board_diagram_cursor = None;
   board_comment_follow = false;
   board_mode = Board_list;
   board_focus = Right_pane;

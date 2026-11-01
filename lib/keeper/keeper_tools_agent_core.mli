@@ -82,6 +82,11 @@ type listing_placement =
 
 type image_admission = Image_input_admitted | Image_input_unavailable
 
+val descriptor_admitted : image_admission -> Keeper_tool_descriptor.t -> bool
+(** One typed descriptor rule for constructing and independently checking a
+    candidate's model surface. Only the native image reader requires admitted
+    image input; delegated analysis retains its existing availability. *)
+
 type model_tool_surface = private
   { image_admission : image_admission
   ; tools : Agent_core.Tool.t list
@@ -111,6 +116,9 @@ val assemble_model_tool_surface :
     one), so only the bundle's capture path — which derives both from the
     same runtime observation — should build production surfaces. *)
 
+type model_tool_projection =
+  runtime:Runtime_instance.t -> carried:Agent_core.Tool.t list -> model_tool_surface
+
 type tool_bundle =
   { tools : Agent_core.Tool.t list
     (** Every tool this turn can run, attached-service tools included as
@@ -136,10 +144,7 @@ type tool_bundle =
         service returned them. The Agent Core lane does not read it. *)
   ; listing : listing_placement
         (** What this turn put behind the listing, if it placed one. *)
-  ; project_for_runtime :
-      runtime:Runtime_instance.t ->
-      carried:Agent_core.Tool.t list ->
-      model_tool_surface
+  ; project_for_runtime : model_tool_projection
         (** Construct the current candidate's schemas and deferred loader from
             the same admitted set. [carried] is the preceding Agent Core view;
             only canonical entries admitted now can be carried. Outstanding

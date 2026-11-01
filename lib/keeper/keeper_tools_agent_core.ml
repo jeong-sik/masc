@@ -42,6 +42,12 @@ type listing_placement =
   | Listing of { deferred_builtin_names : string list }
 
 type image_admission = Image_input_admitted | Image_input_unavailable
+
+let descriptor_admitted admission (descriptor : Keeper_tool_descriptor.t) =
+  match admission with
+  | Image_input_admitted -> true
+  | Image_input_unavailable -> descriptor.runtime_handler <> Keeper_tool_descriptor.Tool_read_image
+
 type model_tool_surface =
   { image_admission : image_admission
   ; tools : Agent_core.Tool.t list
@@ -55,13 +61,16 @@ let assemble_model_tool_surface ~image_admission ~tools ~agent_core_tools
     ~on_demand_tool_names ~result_bounds ~listing : model_tool_surface =
   { image_admission; tools; agent_core_tools; on_demand_tool_names; result_bounds; listing }
 
+type model_tool_projection =
+  runtime:Runtime_instance.t -> carried:Agent_core.Tool.t list -> model_tool_surface
+
 type tool_bundle =
   { tools : Agent_core.Tool.t list
   ; agent_core_tools : Agent_core.Tool.t list
   ; on_demand_tool_names : string list
   ; result_bounds : (string * int) list
   ; listing : listing_placement
-  ; project_for_runtime : runtime:Runtime_instance.t -> carried:Agent_core.Tool.t list -> model_tool_surface
+  ; project_for_runtime : model_tool_projection
   ; cleanup : unit -> unit
   ; terminal_effect_state : unit -> terminal_effect_state
   ; gate_replay_delivery : gate_replay_delivery option

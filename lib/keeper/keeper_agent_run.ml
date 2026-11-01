@@ -1684,6 +1684,7 @@ let run_turn
                       ~tools:built_tools
                       ~loading_plan
                       ~agent_core_tools
+                      ~project_for_runtime:s.Keeper_run_tools.project_for_runtime
                       ~checkpoint_sink
                       ~initial_messages
                       ~argument_demotion_seed

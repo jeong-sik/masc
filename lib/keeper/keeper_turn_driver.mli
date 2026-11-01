@@ -300,6 +300,9 @@ val run_named :
   ?tools:Agent_core.Tool.t list ->
   ?loading_plan:Keeper_official_client_host.loading_plan ->
   agent_core_tools:Agent_core.Tool.t list ->
+  ?project_for_runtime:Keeper_tools_agent_core.model_tool_projection ->
+  (* Keeper bundles supply this per-candidate projection. Its captured image
+      admission also governs the execution hook and official-client host. *)
   ?tool_requirement:Keeper_required_tools.t ->
   ?required_native_posture:Runtime_native_tools.posture ->
   ?initial_messages:Agent_core.Types.message list ->

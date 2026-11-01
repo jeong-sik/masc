@@ -547,8 +547,8 @@ let make_tool_bundle_for_descriptors_with_policy
                 the descriptor is in hand, rather than looked up again by the
                 model name, which answered Always_loaded for every such tool. *)
              , Keeper_tool_descriptor.declared_loading descriptor
-             , (if descriptor.runtime_handler = Keeper_tool_descriptor.Tool_read_image
-                then Model_image else No_model_image) )))
+             , (if descriptor_admitted Image_input_unavailable descriptor
+                then No_model_image else Model_image) )))
       descriptors
   in
   let descriptor_tools_with_loading =

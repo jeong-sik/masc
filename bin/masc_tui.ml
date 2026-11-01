@@ -11742,12 +11742,15 @@ let conversation_image_sources state =
   Masc_tui_image_preview.prioritize_sources ~newly_observed candidates
 
 let board_preview_worker = Masc_tui_board_preview_work.create ()
+let vector_inspection_worker = Masc_tui_board_preview_work.create ()
 
 let () = at_exit (fun () ->
   Masc_tui_board_preview_work.stop board_preview_worker;
+  Masc_tui_board_preview_work.stop vector_inspection_worker;
   Masc_tui_board_preview_work.stop board_image_prepare_worker;
   Masc_tui_image_cache.stop_subprocesses ();
   Masc_tui_board_preview_work.await_stopped board_preview_worker;
+  Masc_tui_board_preview_work.await_stopped vector_inspection_worker;
   Masc_tui_board_preview_work.await_stopped board_image_prepare_worker)
 
 let image_notice (state : state) ~view ~keeper_name ~kind text =
@@ -11798,6 +11801,7 @@ let settle_retired_sent_image state =
   match state.sent_image_read with
   | Some pending when not (image_reading_is_current state pending) ->
       cancel_board_image_read state;
+      Masc_tui_board_preview_work.withdraw_pending vector_inspection_worker;
       state.sent_image_read <- None;
       if not state.msx_open && pending.sir_generation = state.image_request_generation
          && pending.sir_view = state.view
@@ -11907,7 +11911,7 @@ let open_preview_image ?skill_reference ?board_subject state ~mailbox ~notice ~n
       Masc_tui_image_requests.load ~host:server_peer_host ~port
         ~cache_dir:ensure_img_cache_dir ~diagram_width ~diagram_height ~diagram_font_size
         ~diagram_colors ~board_worker ~run ~display source in
-    let completion result = Sent_image_ready { request; skill_reference; result } in
+    let completion result = Sent_image_ready { request; skill_reference; result=Image_prepared result } in
     (match owner, source with
      | Board_image_read (_,_,job), Masc_tui_image_requests.Board_artifact _ ->
          (* The actual binary GET, not a separate health probe, carries the
@@ -11926,9 +11930,11 @@ let open_preview_image ?skill_reference ?board_subject state ~mailbox ~notice ~n
              state.sent_image_read <- None;
              notice ~kind:Notice_failure "image preview requires an active background session")
 
-(* One vector raster worker per inspection. Input changes the desired viewport;
-   completion retires the old job and the next loop renders only the latest
-   window. All windows use the original full-scene PNG coordinate system. *)
+(* Input changes the desired viewport; completion retires the old job and
+   the next loop renders only the latest window. A separate physical slot for
+   non-Board inspections survives closing their logical image, so another
+   inspection waits for its worker to return. Board openings keep their own
+   slot. All windows use the original full-scene PNG coordinate system. *)
 let prepare_inspected_frame state ~mailbox =
   match state.image_open, state.image_inspection, state.sent_image_read,
       !active_graphics_protocol, !image_cell_pixels, Eio_context.get_switch_opt () with
@@ -11946,6 +11952,21 @@ let prepare_inspected_frame state ~mailbox =
          | Original_image -> false in
        if not current_frame
           && (window.width < window.columns*cw || window.height < window.rows*ch) then begin
+         (* Reserve on the input loop before dispatch. Closing the image can
+            revoke a worker that has not entered its system thread yet. *)
+         let run_in_slot = match origin.sir_owner with
+           | Board_image_read _ -> Some (fun render ->
+               Image_prepared (Masc_tui_board_preview_work.run board_preview_worker render))
+           | Local_file_image_read _ | Remote_url_image_read _
+           | Draft_image_read _ | Peer_image_read _ ->
+               Option.map (fun admission render ->
+                 match Masc_tui_board_preview_work.run_reserved vector_inspection_worker admission render with
+                 | None -> Image_worker_busy
+                 | Some result -> Image_prepared result)
+                 (Masc_tui_board_preview_work.reserve vector_inspection_worker) in
+         match run_in_slot with
+         | None -> () (* An earlier physical worker still owns the slot. *)
+         | Some run_in_slot ->
          let generation = state.image_request_generation in
          let pending = {origin with sir_generation=generation;
            sir_purpose=Inspect_image {identity=inspected.ii_identity;window}} in
@@ -11966,11 +11987,9 @@ let prepare_inspected_frame state ~mailbox =
            let result = Eio_guard.run_in_systhread ~label:"tui-vector-window" (fun () ->
              let render () =
              let open Result.Syntax in
-             let runner = match pending.sir_owner with
-               | Board_image_read _ -> Some (Masc_tui_pele.command_runner
-                   ~run:(Masc_tui_image_cache.run_bounded ~deadline_seconds:image_process_deadline_seconds))
-               | Local_file_image_read _ | Remote_url_image_read _ | Draft_image_read _ | Peer_image_read _ -> None in
-             let* png = Masc_tui_pele.render ~cache_dir:(ensure_img_cache_dir ()) ~raster ?runner scene in
+             let runner = Masc_tui_pele.command_runner
+                 ~run:(Masc_tui_image_cache.run_bounded ~deadline_seconds:image_process_deadline_seconds) in
+             let* png = Masc_tui_pele.render ~cache_dir:(ensure_img_cache_dir ()) ~raster ~runner scene in
              let* () = match pending.sir_owner with
                | Board_image_read _ when not (Masc_tui_image_cache.has_png_structure png) ->
                    Error "image has an invalid or truncated PNG structure"
@@ -11979,9 +11998,7 @@ let prepare_inspected_frame state ~mailbox =
              let* prepared = Masc_tui_image_cache.prepare_presentation ~run:Unix.system
                ~cache_dir:(ensure_img_cache_dir ()) Masc_tui_image_cache.Pixel_graphics png in
              Ok (prepared,Some scene) in
-             match pending.sir_owner with
-             | Board_image_read _ -> Masc_tui_board_preview_work.run board_preview_worker render
-             | Local_file_image_read _ | Remote_url_image_read _ | Draft_image_read _ | Peer_image_read _ -> render ()) in
+             run_in_slot render) in
            deliver mailbox (Sent_image_ready {request=pending;skill_reference=None;result});
            `Stop_daemon)
        end
@@ -12268,6 +12285,7 @@ let withdraw_pending_music_editor state =
 (* Take the picture away and give the frame back. The terminal holds images in
    its own layer, so clearing the screen is not enough to remove one. *)
 let close_image state =
+  Masc_tui_board_preview_work.withdraw_pending vector_inspection_worker;
   state.sent_image_read <- None;
   browser_pointer_press := None;
   browser_image_region := None;
@@ -14677,6 +14695,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.lane_addons <- None;
   state.lane_addons_cached <- Masc_tui_lane_addons.initial;
   state.lane_nested_read_resume <- None;
+  Masc_tui_board_preview_work.withdraw_pending vector_inspection_worker;
   state.sent_image_read <- None;
   state.msg_copy_pending <- None;
   state.chat_command_reads <- [];
@@ -22614,7 +22633,9 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
             (match selected_tools_skill_profile state with
              | Some profile -> Skill_reference.equal reference profile.esp_reference
              | None -> false) in
-      (match pending with
+      (match result with
+       | Image_worker_busy -> ()
+       | Image_prepared result -> match pending with
        | Some {sir_purpose=Inspect_image {identity;window};_}
            when state.image_open && not state.msx_open && view=state.view
              && image_keeper_is_current state ~view ~keeper_name ->

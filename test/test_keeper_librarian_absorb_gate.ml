@@ -2630,7 +2630,7 @@ let require_replay = function
 
 let test_completed_captured_replay_does_not_acquire_clock () =
   let facts, absorbed = replay_inputs () in
-  let _, _, evaluations = record_gate_evaluations ~facts ~absorbed
+  let _, _, evaluations = record_gate_evaluations ~captured_guidance:(guidance ()) ~facts ~absorbed
       ~respond:(replay_response ~forward:"mergeable" ~reverse:0.9) in
   let expected = restore_gate ~facts ~absorbed evaluations |> require_replay in
   let actual = Gate.continue_captured
@@ -2677,7 +2677,7 @@ let test_a_new_captured_question_needs_a_clock_before_its_intent () =
 
 let test_an_inflight_captured_question_needs_no_clock_or_resend () =
   let facts, absorbed = replay_inputs () in
-  let _, _, records = record_gate_evaluations ~facts ~absorbed
+  let _, _, records = record_gate_evaluations ~captured_guidance:(guidance ()) ~facts ~absorbed
       ~respond:(replay_response ~forward:"mergeable" ~reverse:0.9) in
   let first = match records with first::_ -> {first with Gate.returned=None}
     | [] -> Alcotest.fail "the original made no request" in

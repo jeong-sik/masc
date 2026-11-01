@@ -148,6 +148,11 @@ let prepare_read ~tab_id raw_tabs =
      caller receiving whichever tab the browser listed first. *)
   let* selection = select ~tab_id tabs in
   Ok {inventory;selection}
+let inventory_tab ~tab_id raw_tabs =
+  let* plan = prepare_read ~tab_id:(Some tab_id) raw_tabs in
+  match List.filter (fun (tab:tab) -> tab.id=tab_id) plan.inventory.tabs with
+  | [tab] -> Ok tab
+  | [] | _::_ -> Error "requested tab is absent or ambiguous in the browser inventory"
 let selected_tab plan=match plan.selection with
   | None_active -> None | Requested tab|Active tab -> Some tab
 let project_read plan ~binding ~started ~page =

@@ -1722,14 +1722,11 @@ let act ?actor t args =
 
 let workflow_source t ~tab_id ~label =
   let* rows=tab_rows t in
-  let* inventory=Browser_surface.decode_inventory rows in
-  match List.filter (fun (tab:Browser_surface.tab) -> tab.id=tab_id) inventory.tabs with
-  | [tab] ->
-    (match tab.ego_page with
-     | Some {label=Some observed;target_id;opened_by} when observed=label ->
-       Ok {Browser_ego_workflow.space_id=t.space.id;label;target_id;opened_by}
-     | None|Some _ -> Error "workflow source is not the exact managed Page in the native inventory")
-  | []|_::_ -> Error "workflow source Page is absent, unreadable or ambiguous in the native inventory"
+  let* tab=Browser_surface.inventory_tab ~tab_id rows in
+  match tab.ego_page with
+  | Some {label=Some observed;target_id;opened_by} when observed=label ->
+    Ok {Browser_ego_workflow.space_id=t.space.id;label;target_id;opened_by}
+  | None|Some _ -> Error "workflow source is not the exact managed Page in the native inventory"
 
 let workflow ?actor t args =
   let pre result = Result.map_error (fun detail -> Live.Before_effect detail) result in

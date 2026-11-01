@@ -27,6 +27,11 @@ type selection = Requested of tab | Active of tab | None_active
 val select : tab_id:int option -> tab list -> (selection, string) result
 type read_plan
 val prepare_read : tab_id:int option -> Yojson.Safe.t -> (read_plan, string) result
+val inventory_tab : tab_id:int -> Yojson.Safe.t -> (tab, string) result
+(** Decode the same inventory as [prepare_read] and return the uniquely observed
+    requested tab. A missing, duplicate or explicitly unreadable requested ID is
+    refused; no active tab or other inventory entry is substituted. This pure
+    observation does not grant permission to operate the tab. *)
 val selected_tab : read_plan -> tab option
 val project_read : read_plan -> binding:Browser_binding.t -> started:int64 ->
   page:Yojson.Safe.t option -> (Yojson.Safe.t, string) result

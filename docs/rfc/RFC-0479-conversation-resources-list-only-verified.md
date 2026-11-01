@@ -74,6 +74,9 @@ Keeper와 나눈 대화에서 다룬 artifact·wiki·파일을 늘 보이게 하
 - **스코프 밖은 분류기 variant 그대로다.** `Other_task`·`Unknown_task`는 목록에서
   제외되고, 그 사실은 이미 exhaustive한 분류기가 드러낸다.
 
+**목록의 셈 단위는 자원 identity다.** 같은 파일을 몇 번 읽었든, 같은 artifact를 몇
+번 꺼냈든 항목은 하나다. 호출 수를 세지 않고 다룬 자원 수를 센다.
+
 **신원 추출은 도구 handler variant에 대한 exhaustive match로만 한다.**
 `bin/masc_tui_keeper_chat_activity_projection.ml`이 이미
 `Tool_artifact_read`·`Tool_artifact_publish`·`Tool_wiki_read`·`Tool_read_file` 등을
@@ -97,7 +100,11 @@ SSOT로 관리하고, content_of를 exhaustive match로 강제한다. 레이어 
 
 **상한과 순서는 표시 상수다.** 멤버십에는 영향을 주지 않는다. 정렬은 마지막 참조
 시간 순(최근 먼저)으로 정하고, 잘린 양은 "외 N건"으로 표시해 잘림이 드러나야 한다.
-상한 수치 자체는 열린 질문이다(§9).
+수치는 PO 제안(board 댓글 c-e9e4507e, 2026-11-01)을 채택해 다음으로 정한다:
+주입 레이어는 8건, TUI 패널은 30건, 각각 "외 N건" 표시. 이 레이어는 Recent_work·
+Own_recent_actions와 컨텍스트 예산을 나누는 신규 입주자라 주입을 작게 시작하고,
+TUI는 스크롤이 있으니 넉넉히 한다. 수치는 named constant이므로 측정(§8) 결과로
+바꾸는 변경은 한 줄이다.
 
 Recent_work·Own_recent_actions와의 경계: 저 둘은 "어떤 호출을 했나"(행위)를,
 새 레이어는 "어떤 자원을 다뤘나"(대상)를 나열한다. 같은 로그의 서로 다른 투영이라
@@ -136,12 +143,17 @@ Recent_work·Own_recent_actions와의 경계: 저 둘은 "어떤 호출을 했�
 - **lane 스코프.** 증거에 lane 귀속이 없다. 요구가 생기면 별도 제안.
 - **자원 내용 주입.** 이름만 준다. 내용은 Keeper가 요청할 때 가져온다.
 
-## 8. 열린 질문
+## 8. 착지 후 측정
 
-주입 상한 몇 건인가. 안: 10건 안팎 + "외 N건". board 토론에서 정한다.
+PO 제안(board 댓글 c-e9e4507e)을 받아들여, 착지 뒤 keeper_tool_call_log로
+"자원을 처음 다룬 뒤 같은 자원을 다시 조회하기까지의 턴 수"를 도입 전후로 대조한다.
+이 기능이 실제로 재탐색을 줄이는지 숫자로 확인하는 것이 목적이고, 줄지 않으면 상한·
+레이어 배치를 다시 묻는 근거로 쓴다. 측정은 병합의 문이 아니라 착지 후 관찰이다.
 
 ## 9. 논의
 
 - board 글 `p-4bfd4e181eebe251e66e7ef3eaa20b90` (2026-11-01) — 원제안, 소스 확인
   3건, 휴리스틱 절대 금지 조항. @context-reviewer·@e-masc-the-leader에게 의견을
   요청한 상태.
+- PO(masc-productor-owner) 방향 승인·상한 제안(주입 8건·TUI 30건)·자원 identity
+  셈 단위·착지 후 측정 제안 — 댓글 c-e9e4507e, 2026-11-01. 본 문서에 반영했다.

@@ -120,7 +120,9 @@ let read_result ~now:clock ~sync_first ~sw ~cache ~key ~placeholder ~compute =
              json_with_cache_metadata json
                (cache_metadata ~state:Dashboard_cache_wire.Cache_fresh
                   ~generated_at:refreshed_at ())
-         | Error _, _ -> response)
+         | Error message, refreshed_at ->
+             cache_response ~now:refreshed_at ~placeholder
+               (Cache_state.Warming { last_error = Some message }))
       else
         (* The switch retains fallback ownership cleanup until the child exits.
            Remove completed hooks so a serving switch retains only live work;

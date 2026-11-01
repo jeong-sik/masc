@@ -6994,6 +6994,46 @@ let test_partial_log_tail_is_dropped_and_the_snapshot_rewritten () =
          (List.sort String.compare (snapshot_file_ids ~base_path "pending")))
 ;;
 
+let test_replay_outcome_preserves_durable_delivery_identity_for_log_deltas () =
+  with_spent_fixture "queue-replay-durable-identity" (fun ~base_path ~keeper_name ->
+    let input = `Assoc [ "target", `String "replay-identity" ] in
+    let approval_id, _ = approve_with_wake ~base_path ~keeper_name ~input in
+    consume_grant_exn ~base_path ~keeper_name ~input approval_id;
+    (* Consumption crossed the compaction ratio and rewrote the snapshot,
+       leaving the log empty. *)
+    Alcotest.(check int) "log emptied after consumption compaction" 0 (log_row_count ~base_path);
+    let output_ref = store_replay_artifact ~base_path "replay identity result" in
+    (match
+       AQ.record_consumed_resolution_replay
+         ~base_path
+         ~id:approval_id
+         ~outcome:(Masc.Keeper_approval_queue_result.Replay_applied output_ref)
+     with
+     | Ok Masc.Keeper_approval_queue_result.Replay_recorded -> ()
+     | Ok Masc.Keeper_approval_queue_result.Replay_already_recorded ->
+       Alcotest.fail "outcome was already recorded"
+     | Error error ->
+       Alcotest.fail (Masc.Keeper_approval_queue_result.grant_error_to_string error));
+    (* Submit an unrelated pending entry: only 1 pending_upsert row should be
+       appended, not a redundant delivery_upsert for the replay-outcome record. *)
+    let second_id = submit ~base_path ~keeper_name ~input:(`Assoc [ "target", `String "second" ]) in
+    Alcotest.(check int)
+      "post-replay submit appends only the new pending entry row"
+      1
+      (log_row_count ~base_path);
+    (* Restart with the queued wake still unacknowledged so the consumed
+       delivery with its replay outcome is loaded and retained via
+       attach_replay_results. *)
+    let report = reinstall_exn ~base_path in
+    Alcotest.(check int) "retained delivery is not retired while wake is queued" 0 report.retired_deliveries;
+    let third_id = submit ~base_path ~keeper_name ~input:(`Assoc [ "target", `String "third" ]) in
+    ignore (second_id, third_id);
+    Alcotest.(check int)
+      "post-restart submit after attach_replay_results appends only one row"
+      2
+      (log_row_count ~base_path))
+;;
+
 (* The queue reads recover a torn log tail for exactly the errors this
    predicate accepts. [expected] has no wildcard, so a new transaction error
    constructor fails to compile here until its recovery status is decided. *)
@@ -7419,6 +7459,10 @@ let () =
             "partial log tail is dropped and the snapshot rewritten"
             `Quick
             test_partial_log_tail_is_dropped_and_the_snapshot_rewritten
+        ; Alcotest.test_case
+            "replay outcome preserves durable delivery identity for log deltas"
+            `Quick
+            test_replay_outcome_preserves_durable_delivery_identity_for_log_deltas
         ; Alcotest.test_case
             "an observation survives the row round trip"
             `Quick

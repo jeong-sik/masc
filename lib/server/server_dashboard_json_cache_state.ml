@@ -37,8 +37,10 @@ let admit ~now ~ttl_s state =
     | Refreshing _ -> Reuse view
   in
   match state.value with
-  | Some json when age_s <= ttl_s -> Reuse (Fresh { json; age_s })
-  | Some json -> stale (Stale { json; age_s; last_error = state.last_error })
+  | Some json when age_s >= 0.0 && age_s <= ttl_s ->
+    Reuse (Fresh { json; age_s })
+  | Some json ->
+    stale (Stale { json; age_s = Float.max 0.0 age_s; last_error = state.last_error })
   | None -> stale (Warming { last_error = state.last_error })
 
 let start (Start_plan state) =

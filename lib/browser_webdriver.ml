@@ -415,7 +415,14 @@ let execute_action t action =
        Ok (`Assoc ["tabId",`Int id;"navigation",`String "blocked_by_dialog";"requested_url",`String url])
      | Error ((Transport _ | Protocol _
               | Remote { code = Invalid_session_id | No_such_window | No_such_alert | Other _; _ }) as error) -> Error (error_at_tab id error))
-  | Browser_lane.Action.On_tab {tab_id=id;frame_path;interaction} ->
+  | Browser_lane.Action.On_tab {tab_id=id;frame_path;
+      interaction=(Browser_lane.Action.Upload _ | Browser_lane.Action.Set_cookie _
+        | Browser_lane.Action.Delete_cookie _ | Browser_lane.Action.Set_emulation _
+        | Browser_lane.Action.Clear_emulation | Browser_lane.Action.Block_requests _
+        | Browser_lane.Action.Unblock_requests | Browser_lane.Action.Accept_dialog _
+        | Browser_lane.Action.Dismiss_dialog | Browser_lane.Action.Back
+        | Browser_lane.Action.Forward | Browser_lane.Action.Reload
+        | Browser_lane.Action.Close_tab) as interaction} ->
     let* session = session t in
     with_tab t session (Some id) (fun () ->
       let* () = enter_frames t session frame_path in

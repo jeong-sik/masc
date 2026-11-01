@@ -14,6 +14,7 @@ type t =
   | Token_permission of Masc_domain.permission
   | Private_token_permission of Masc_domain.permission
   | Tool of { tool_name : string }
+  | Tool_observation of { tool_name : string }
   | Tool_actor of { tool_name : string }
   | Self_authenticated of self_authenticated_reason
 
@@ -39,6 +40,7 @@ let to_json t =
   | Token_permission p -> permission "token_permission" p
   | Private_token_permission p -> permission "private_token_permission" p
   | Tool { tool_name } -> kind "tool" [ "tool_name", `String tool_name ]
+  | Tool_observation { tool_name } -> kind "tool_observation" [ "tool_name", `String tool_name ]
   | Tool_actor { tool_name } -> kind "tool_actor" [ "tool_name", `String tool_name ]
   | Self_authenticated reason ->
     kind "self_authenticated" [ "reason", `String (reason_to_string reason) ]

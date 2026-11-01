@@ -641,34 +641,30 @@ let test_slack_credential_error_is_a_closed_sum () =
 let test_telegram_connector_json_reads_runtime_status () =
   with_temp_dir @@ fun dir ->
   with_sidecar_paths "telegram" dir (fun () ->
-    ignore
-      (Channel_gate_telegram_state.bind ~channel_id:"12345" ~keeper_name:"luna"
-         ~actor_name:"dashboard");
-    let status_path = Filename.concat dir "telegram-status.json" in
-    Yojson.Safe.to_file status_path
-      (`Assoc
-        [
-          ("updated_at", `String (python_utc_iso_now ()));
-          ("connected", `Bool true);
-          ("gate_base_url", `String "http://127.0.0.1:8935");
-          ("gate_healthy", `Bool true);
-          ("gate_health_checked_at", `String (python_utc_iso_now ()));
-          ("last_message_at", `String "2026-06-06T00:00:00Z");
-          ("messages_processed", `Int 7);
-          ("messages_failed", `Int 1);
-          ("binding_source", `String "persisted");
-          ("runtime_bindings_count", `Int 1);
-          ("pid", `Int 4242);
-        ]);
-    let json = Channel_gate_telegram_state.connector_json () in
-    check string "connector id" "telegram"
-      (json |> U.member "connector_id" |> U.to_string);
-    check bool "available" true (json |> U.member "available" |> U.to_bool);
-    check bool "connected" true (json |> U.member "connected" |> U.to_bool);
-    check int "messages processed" 7
-      (json |> U.member "messages_processed" |> U.to_int);
-    check int "configured bindings count" 1
-      (json |> U.member "configured_bindings" |> U.to_list |> List.length))
+    with_env "TELEGRAM_BOT_TOKEN" (Some "fixture-telegram-token") (fun () ->
+      Fun.protect ~finally:Channel_gate_telegram_state.record_not_configured (fun () ->
+        (match Channel_gate_telegram_state.bind ~channel_id:"12345" ~keeper_name:"luna"
+                 ~actor_name:"dashboard" with
+         | Ok _ -> ()
+         | Error detail -> fail detail);
+        (* Telegram now owns liveness in its native poll loop. A stale sidecar
+           file must not replace the in-process observation. *)
+        Yojson.Safe.to_file (Filename.concat dir "telegram-status.json")
+          (`Assoc ["connected", `Bool false; "messages_processed", `Int 99]);
+        Channel_gate_telegram_state.record_poll_ok ~bot_user_id:4242L ~next_offset:(Some 17L);
+        let json = Channel_gate_telegram_state.connector_json () in
+        check string "connector id" "telegram"
+          (json |> U.member "connector_id" |> U.to_string);
+        check string "status source" "in_process_gateway"
+          (json |> U.member "status_source" |> U.to_string);
+        check bool "available" true (json |> U.member "available" |> U.to_bool);
+        check bool "connected from the native poll" true (json |> U.member "connected" |> U.to_bool);
+        check bool "native bot identity" true (json |> U.member "bot_user_id" = `Intlit "4242");
+        check bool "native poll cursor" true (json |> U.member "next_offset" = `Intlit "17");
+        check bool "sidecar message count is not projected" true
+          (json |> U.member "messages_processed" = `Null);
+        check int "configured bindings count" 1
+          (json |> U.member "configured_bindings" |> U.to_list |> List.length))))
 
 let test_slack_connector_json_carries_identity () =
   with_temp_dir @@ fun dir ->
@@ -931,10 +927,84 @@ let test_keeper_status_http_200_valid_keeper () =
           Eio.Executor_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env)
         in
         Executor_pool_ref.For_testing.with_pool pool (fun () ->
+          let base = Unix.realpath config.Workspace.base_path in
+          let root = Unix.realpath (Workspace.masc_dir config) in
+          let encode = Uri.pct_encode ~component:`Query_value in
+          let binding = "expected_base_path=" ^ encode base ^ "&expected_masc_root=" ^ encode root in
+          let capture_request = Httpun.Request.create `GET
+              ("/api/v1/gate/keeper-kata-name?name=valid_keeper&" ^ binding) in
+          let captured = match Routes.Sandbox_read_for_testing.capture_workspace state capture_request with
+            | Ok config -> config | Error _ -> fail "matching workspace was refused" in
+          let replacement = {config with Workspace.workspace_path = config.workspace_path ^ "-replacement"} in
+          (match Mcp_server.set_workspace_config state replacement with
+           | Ok () -> () | Error _ -> fail "same-root config replacement failed");
+          check string "admitted request retains captured workspace config"
+            config.workspace_path captured.workspace_path;
+          check string "replacement is current for future requests"
+            replacement.workspace_path (Mcp_server.workspace_config state).workspace_path;
+          (match Mcp_server.set_workspace_config state config with
+           | Ok () -> () | Error _ -> fail "could not restore fixture config");
           let response = dispatch_gate_route ~sw ~clock state token "/api/v1/gate/keeper-status?name=valid_keeper" in
           let status, json = parse_http_response response in
           check int "http status 200" 200 status;
-          check string "keeper name in response" "valid_keeper" (json |> U.member "name" |> U.to_string)))))
+          check string "keeper name in response" "valid_keeper" (json |> U.member "name" |> U.to_string);
+          check bool "ordinary status retains its checkout projection" true
+            (json |> U.member "execution_context" |> U.member "repository_checkouts" <> `Null);
+          check bool "ordinary status does not request Kata name observation" true
+            (json |> U.member "sandbox_live" |> U.member "kata_name_observation" = `Null);
+          let router = Routes.add_routes ~sw ~clock (Http_server_eio.Router.create ()) in
+          List.iter (fun path ->
+            match Http_server_eio.Router.routes router
+                  |> List.find_opt (fun route -> String.equal route.Http_server_eio.Router.path path) with
+            | Some route -> check bool "sandbox read registers the channel_gate observation boundary" true
+                (route.access = Masc.Route_access.Tool_observation {tool_name = "channel_gate"})
+            | None -> fail "sandbox read route is missing")
+            ["/api/v1/gate/keeper-sandbox-status"; "/api/v1/gate/keeper-kata-name"];
+          let quota_key = match Masc.Rate_limit.agent_key_of_token_or_name ~token () with
+            | Some key -> key | None -> fail "route bearer has no agent quota key" in
+          let quota_before = Masc.Rate_limit.remaining_agent_global ~key:quota_key in
+          let response = dispatch_gate_route ~sw ~clock state token
+              ("/api/v1/gate/keeper-sandbox-status?name=valid_keeper&" ^ binding) in
+          let status, sandbox = parse_http_response response in
+          check int "sandbox status 200" 200 status;
+          check bool "status response attests admission" true
+            (String.split_on_char '\n' response |> List.exists (fun line ->
+              String.equal (String.lowercase_ascii (String.trim line)) "x-masc-workspace-read: matched-v1"));
+          check bool "sandbox request uses the fast status projection" true
+            (sandbox |> U.member "status_options" |> U.member "fast" |> U.to_bool);
+          check bool "sandbox request disables checkout inspection" false
+            (sandbox |> U.member "status_options" |> U.member "include_repository_checkouts" |> U.to_bool);
+          check string "checkout not inspected" "not_inspected"
+            (sandbox |> U.member "execution_context" |> U.member "repository_checkouts" |> U.member "state" |> U.to_string);
+          check bool "inventory does not wait for name observation" false
+            (sandbox |> U.member "status_options" |> U.member "include_kata_name_observation" |> U.to_bool);
+          let response = dispatch_gate_route ~sw ~clock state token
+              ("/api/v1/gate/keeper-kata-name?name=valid_keeper&" ^ binding) in
+          let status, name = parse_http_response response in
+          check int "independent name status 200" 200 status;
+          check bool "name response attests admission" true
+            (String.split_on_char '\n' response |> List.exists (fun line ->
+              String.equal (String.lowercase_ascii (String.trim line)) "x-masc-workspace-read: matched-v1"));
+          check string "name response retains keeper" "valid_keeper" (name |> U.member "keeper" |> U.to_string);
+          check bool "name response retains its observed network mode" true
+            (match name |> U.member "network_mode" with `String value -> value <> "" | _ -> false);
+          check string "non-Kata name observation" "not_applicable" (name |> U.member "state" |> U.to_string);
+          check bool "non-Kata observation has no Kata selector verdict" true
+            (name |> U.member "host_environment_alignment" = `Null);
+          check int "both independent routes preserve the operation bucket" quota_before
+            (Masc.Rate_limit.remaining_agent_global ~key:quota_key);
+          List.iter (fun route ->
+            let status, _ = parse_http_response (dispatch_gate_route ~sw ~clock state token
+                (route ^ "?name=unregistered")) in
+            check int "unbound new route is refused" 400 status;
+            let bad = "expected_base_path=" ^ encode (base ^ "-other") ^ "&expected_masc_root=" ^ encode root in
+            let status, _ = parse_http_response (dispatch_gate_route ~sw ~clock state token
+                (route ^ "?name=unregistered&" ^ bad)) in
+            check int "foreign workspace rejected before Keeper lookup" 409 status;
+            let status, _ = parse_http_response (dispatch_gate_route ~sw ~clock state token
+                (route ^ "?name=valid_keeper&" ^ binding ^ "&expected_base_path=" ^ encode base)) in
+            check int "duplicate workspace path rejected" 400 status)
+            ["/api/v1/gate/keeper-sandbox-status"; "/api/v1/gate/keeper-kata-name"]))))
 
 let test_keeper_status_http_502_dispatch_failure () =
   with_temp_base_path (fun dir state token ->
@@ -988,6 +1058,37 @@ let test_keeper_status_http_502_dispatch_failure () =
         check int "http status 502" 502 status;
         check bool "ok is false" false (json |> U.member "ok" |> U.to_bool);
         check bool "error contains message" true (String.length (json |> U.member "error" |> U.to_string) > 0))))
+
+let test_sandbox_reads_share_a_single_worker_without_waiting_for_each_other () =
+  with_temp_base_path (fun _dir state _token ->
+    Eio_main.run (fun env ->
+      let clock = Eio.Stdenv.clock env in
+      Eio.Switch.run (fun sw ->
+        let pool = Eio.Executor_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
+        Executor_pool_ref.For_testing.with_pool pool (fun () ->
+          let config = Mcp_server.workspace_config state in
+          let entered, enter = Eio.Promise.create () in
+          let release, release_slow = Eio.Promise.create () in
+          let fast, complete_fast = Eio.Promise.create () in
+          let slow, complete_slow = Eio.Promise.create () in
+          let run name fn = Server_dashboard_http_runtime_support.run_dashboard_compute
+              ~sw ~clock ~config ~kind:Routes.Sandbox_read_for_testing.work_kind
+              ~name (fun ~config:_ ~sw:_ -> fn ()) in
+          Eio.Fiber.fork ~sw (fun () ->
+            let result = run "sandbox-slow-fixture" (fun () ->
+              Eio.Promise.resolve enter ();
+              Eio.Promise.await release;
+              "slow") in
+            Eio.Promise.resolve complete_slow result);
+          Eio.Time.with_timeout_exn clock 5. (fun () -> Eio.Promise.await entered);
+          Eio.Fiber.fork ~sw (fun () ->
+            Eio.Promise.resolve complete_fast (run "sandbox-fast-fixture" (fun () -> "fast")));
+          let result = Eio.Time.with_timeout_exn clock 5. (fun () -> Eio.Promise.await fast) in
+          check string "other sandbox read completes before slow read" "fast" result;
+          Eio.Promise.resolve release_slow ();
+          check string "slow read still settles" "slow"
+            (Eio.Time.with_timeout_exn clock 5. (fun () -> Eio.Promise.await slow))))))
+
 let () =
   run "channel_gate_connector_routes"
     [
@@ -1009,6 +1110,8 @@ let () =
             test_keeper_status_http_200_valid_keeper;
           test_case "HTTP 502 Bad Gateway on post-precheck dispatch failure" `Quick
             test_keeper_status_http_502_dispatch_failure;
+          test_case "sandbox reads do not monopolize one worker" `Quick
+            test_sandbox_reads_share_a_single_worker_without_waiting_for_each_other;
         ] );
 
       ( "resolve_connector_status_name",

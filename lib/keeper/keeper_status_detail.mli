@@ -20,6 +20,12 @@ type tail_order = Keeper_status_options_defaults.tail_order =
 val keeper_exists_config :
   config:Workspace.config -> string -> (bool, string) result
 
+val kata_name_observation_config :
+  config:Workspace.config -> keeper_name:string -> timeout_sec:float ->
+  (Yojson.Safe.t, string) result
+(** Resolve the same effective Keeper as status, then perform only the
+    separate Kata name observation. *)
+
 (** Variant labels used in tool-input enum schemas. *)
 val valid_tail_order_strings : string list
 

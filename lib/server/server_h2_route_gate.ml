@@ -30,7 +30,7 @@ let plan (kind : Route_access.t) =
   | Public_read -> Ok Public_read
   | Read_auth -> Ok Read_auth
   | Token_permission permission -> Ok (Token_permission permission)
-  | Permission _ | Private_token_permission _ | Tool _ | Tool_actor _ ->
+  | Permission _ | Private_token_permission _ | Tool _ | Tool_observation _ | Tool_actor _ ->
     Error (Kind_not_served kind)
 ;;
 

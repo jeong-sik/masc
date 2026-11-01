@@ -37,6 +37,7 @@ type status_options =
   ; include_metrics_overview : bool
   ; include_history_tail : bool
   ; include_repository_checkouts : bool
+  ; include_kata_name_observation : bool
   }
 
 let normalize_status_name = String.trim
@@ -216,6 +217,12 @@ let status_options_of_fields fields =
       Keeper_status_options_defaults.Argument.include_repository_checkouts
       ~default:(not fast)
   in
+  let* include_kata_name_observation =
+    optional_bool_argument
+      fields
+      Keeper_status_options_defaults.Argument.include_kata_name_observation
+      ~default:false
+  in
   Ok
     { tail_turns
     ; tail_messages
@@ -226,6 +233,7 @@ let status_options_of_fields fields =
     ; include_metrics_overview
     ; include_history_tail
     ; include_repository_checkouts
+    ; include_kata_name_observation
     }
 
 let apply_tail_order order items =
@@ -270,6 +278,13 @@ let resolve_status_target_config ~(config : Workspace.config) ~(agent_name : str
            | Ok None -> loop rest)
     in
     loop candidates
+
+let kata_name_observation_config ~config ~keeper_name ~timeout_sec =
+  let open Result.Syntax in
+  let* _, meta = resolve_status_target_config ~config ~agent_name:"gate:connector"
+      ["name", `String keeper_name] in
+  Ok (Keeper_sandbox_control.kata_name_observation_json ~config ~meta ~timeout_sec)
+;;
 
 let chat_operation_status_to_json ~base_path ~keeper_name =
   match Keeper_owner_registry.operation_projection ~base_path ~keeper_name with
@@ -357,6 +372,7 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
         ; include_metrics_overview
         ; include_history_tail
         ; include_repository_checkouts
+        ; include_kata_name_observation
         }
         = options
       in
@@ -580,6 +596,7 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
            Keeper_sandbox_control.live_status_json
              ~include_preflight:false
              ~include_repository_checkouts:false
+             ~include_kata_name_observation
              ~config:config ~meta:m
              ~timeout_sec:(Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Io ())
              ~verbose:false ()
@@ -711,6 +728,7 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
              ("include_metrics_overview", `Bool include_metrics_overview);
              ("include_history_tail", `Bool include_history_tail);
              ("include_repository_checkouts", `Bool include_repository_checkouts);
+             ("include_kata_name_observation", `Bool include_kata_name_observation);
              ("tail_order", `String (tail_order_to_string tail_order));
            ]);
            ("context_budget", context_budget);

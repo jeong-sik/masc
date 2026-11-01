@@ -58,3 +58,12 @@ val launch :
     it armed before launching -- an inflight flag, a slot -- so the pane
     cannot stay "loading" forever. A read that did start releases through
     its delivered message instead. *)
+
+val launch_independent_pair :
+  deliver_first:(('a, string) result -> unit) ->
+  deliver_second:(('b, string) result -> unit) ->
+  (unit -> ('a, string) result) ->
+  (unit -> ('b, string) result) ->
+  unit
+(** Launch two independent reads and deliver each result as soon as it is
+    available. Neither result waits for the other read to finish. *)

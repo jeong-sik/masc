@@ -1885,11 +1885,18 @@ let load_keeper_sandbox_view ~(host : string) ~(port : int)
   match
     Masc_tui_http.fetch_keeper_status_snapshot ~host ~port ~keeper_name
   with
-  | Error err -> Error ("keeper sandbox status load failed: " ^ err)
+  | Error err -> Error err
   | Ok json ->
-    Masc_tui_keeper_sandbox.decode
+    Masc_tui_keeper_sandbox.decode_for_keeper ~keeper_name
       ~sanitize:Masc.Tui_terminal_text.sanitize_terminal_text
       json
+
+let load_keeper_sandbox_name ~(host : string) ~(port : int)
+    ~(keeper_name : string) : (Masc_tui_keeper_sandbox.name_report, string) result =
+  match Masc_tui_http.fetch_keeper_kata_name_snapshot ~host ~port ~keeper_name with
+  | Error err -> Error err
+  | Ok json -> Masc_tui_keeper_sandbox.decode_name
+      ~sanitize:Masc.Tui_terminal_text.sanitize_terminal_text ~keeper_name json
 
 let load_keeper_sandbox_logs ~(host : string) ~(port : int)
     ~(keeper_name : string) ~(tail : int) :

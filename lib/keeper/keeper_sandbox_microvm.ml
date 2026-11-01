@@ -2775,6 +2775,96 @@ let nerdctl_inventory_argv () =
       {|{"id":{{json .ID}},"name":{{json .Names}},"image":{{json .Image}},"status":{{json .Status}},"created_at":{{json .CreatedAt}},"runtime":{{json .Runtime}},"labels":{{json .LabelsMap}}}|} ]
 ;;
 
+type kata_name_observation =
+  | Kata_name_absent
+  | Kata_name_expected_runtime
+  | Kata_name_other_runtime
+  | Kata_name_runtime_unreported
+  | Kata_name_unavailable
+
+(* This listing deliberately asks for no labels, images, IDs, logs or guest
+   files. A reported runtime is a CLI observation, never proof of ownership. *)
+let kata_name_listing_argv () =
+  command_argv_for Backend.Nerdctl_kata
+  @ [ "ps"; "-a"; "--no-trunc"; "--format";
+      {|{"name":{{json .Names}},"runtime":{{json .Runtime}}}|} ]
+;;
+
+let kata_name_observation_of_json_lines ~guest_name raw =
+  let open Result.Syntax in
+  let row line =
+    let* json =
+      try Ok (Yojson.Safe.from_string line) with Yojson.Json_error _ -> Error ()
+    in
+    match json with
+    | `Assoc fields ->
+      let keys = List.map fst fields in
+      if List.length keys <> List.length (List.sort_uniq String.compare keys)
+      then Error ()
+      else
+        let* name = match List.assoc_opt "name" fields with
+          | Some (`String name) when String.trim name <> "" -> Ok name
+          | Some _ | None -> Error () in
+        let* runtime = match List.assoc_opt "runtime" fields with
+          | None | Some `Null | Some (`String "") -> Ok Kata_name_runtime_unreported
+          | Some (`String runtime) ->
+            if String.trim runtime = "" then Ok Kata_name_runtime_unreported
+            else if String.equal runtime Backend.kata_containerd_shim
+            then Ok Kata_name_expected_runtime else Ok Kata_name_other_runtime
+          | Some _ -> Error () in
+        Ok (name, runtime)
+    | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) ->
+      Error ()
+  in
+  let decode () =
+    let* rows =
+      String.split_on_char '\n' raw
+      |> List.map String.trim
+      |> List.filter (fun line -> line <> "")
+      |> fun lines -> List.fold_right (fun line acc ->
+           let* rows = acc in
+           let* current = row line in
+           Ok (current :: rows)) lines (Ok [])
+    in
+    let names = List.map fst rows in
+    if List.length names <> List.length (List.sort_uniq String.compare names)
+       || String.trim guest_name = ""
+    then Error ()
+    else Ok (match List.assoc_opt guest_name rows with
+      | Some observation -> observation
+      | None -> Kata_name_absent)
+  in
+  match decode () with
+  | Ok observation -> observation
+  | Error () -> Kata_name_unavailable
+;;
+
+let observe_kata_name_with ~run ~env ~cwd ~base_path ~keeper_name ~network_mode ~timeout_sec =
+  let guest_name =
+    Keeper_sandbox_container_name.make
+      (Keeper_sandbox_container_name.Micro_vm_persistent
+         { base_path; keeper_name; network_mode })
+    |> Keeper_sandbox_container_name.to_string in
+  if not (Float.is_finite timeout_sec) || timeout_sec <= 0. then Kata_name_unavailable
+  else match run ~timeout_sec ~env ~cwd ~argv:(kata_name_listing_argv ()) with
+  | Ok (Unix.WEXITED 0, stdout) ->
+    kata_name_observation_of_json_lines ~guest_name stdout
+  | Ok ((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _) | Error () ->
+    Kata_name_unavailable
+  | exception (Sys_error _ | Unix.Unix_error _ | Eio.Io _) -> Kata_name_unavailable
+;;
+
+let observe_kata_name ~env ~cwd ~base_path ~keeper_name ~network_mode ~timeout_sec =
+  let run ~timeout_sec ~env ~cwd ~argv =
+    Fd_accountant.observe ~kind:Fd_accountant.Docker_spawn (fun () ->
+      Keeper_microvm_cli_output.read_with_environment ~timeout_sec
+        ~stdout_limit:Common.max_process_capture_head_bytes
+        ~stderr_limit:Common.max_process_capture_tail_bytes ~env ~cwd ~argv ()
+      |> Result.map (fun (status, stdout, _) -> status, stdout)
+      |> Result.map_error (fun _ -> ())) in
+  observe_kata_name_with ~run ~env ~cwd ~base_path ~keeper_name ~network_mode ~timeout_sec
+;;
+
 let container_listing_for backend =
   match (backend : Backend.t) with
   | Backend.Apple_container -> Labelled_json_array (apple_container_list_argv ())
@@ -3060,8 +3150,11 @@ let classify_guest_probe_for backend ~container_name ~inspect ~listing =
             (output_for_log ~stdout ~stderr)))
 ;;
 
-let list_live_containers_for backend ~base_path ~keeper_name ~timeout_sec =
-  match container_listing_for backend with
+let list_live_containers_for_with ~run backend ~base_path ~keeper_name ~timeout_sec =
+  let open Result.Syntax in
+  if not (Float.is_finite timeout_sec) || timeout_sec <= 0. then
+    Error "microvm observation timeout is unavailable"
+  else match container_listing_for backend with
   | Listing_not_established reason ->
     Error
       (Printf.sprintf
@@ -3069,18 +3162,16 @@ let list_live_containers_for backend ~base_path ~keeper_name ~timeout_sec =
          (Backend.to_string backend)
          reason)
   | (Labelled_json_array argv | Nerdctl_labelled_json_lines argv) as listing ->
-    (match Process_eio.run_argv_with_status_split ~timeout_sec argv with
+    (match run ~timeout_sec argv with
      | Unix.WEXITED 0, stdout, _ ->
        (match listing with
         | Nerdctl_labelled_json_lines _ ->
-          let open Result.Syntax in
           let* containers = nerdctl_live_containers_of_json_lines ~base_path ~keeper_name stdout in
           (* ps Status is display prose. Ask the existing typed bool inspect
              for each scoped guest so status does not misreport unknown as idle. *)
           List.fold_right (fun (container : Keeper_sandbox_runtime.live_container) acc ->
             let* rest = acc in
-            match Process_eio.run_argv_with_status_split ~timeout_sec
-                    (inspect_argv_for backend ~container_name:container.id) with
+            match run ~timeout_sec (inspect_argv_for backend ~container_name:container.id) with
             | Unix.WEXITED 0, state, _ ->
               let* running = running_of_nerdctl_state_json state in
               Ok ({ container with running = Some running } :: rest)
@@ -3101,6 +3192,16 @@ let list_live_containers_for backend ~base_path ~keeper_name ~timeout_sec =
             (Keeper_sandbox_exec_failure.status_label status)
             (output_for_log ~stdout ~stderr)))
 ;;
+
+let list_live_containers_for ?env ?cwd backend ~base_path ~keeper_name ~timeout_sec =
+  let run ~timeout_sec argv = Process_eio.run_argv_with_status_split ~timeout_sec ?env ?cwd argv in
+  list_live_containers_for_with ~run backend ~base_path ~keeper_name ~timeout_sec
+;;
+
+module Kata_observation_for_testing = struct
+  let observe = observe_kata_name_with
+  let inventory = list_live_containers_for_with
+end
 
 type sweep_outcome =
   { removed : string list

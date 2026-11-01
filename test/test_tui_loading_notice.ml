@@ -182,6 +182,53 @@ let test_logs_keep_repainting_after_status_arrives () =
   check bool "finished logs stop requesting repaints" false
     (Types.detail_read_waiting state ~tab:Types.Detail_sandbox ~keeper:"analyst")
 
+let test_sandbox_partial_results_follow_authority_and_generation () =
+  let module K = Masc_tui_keeper_sandbox in
+  let state = fresh () in
+  let start keeper =
+    let request = Types.mark_detail_read_started state ~tab:Types.Detail_sandbox
+        ~keeper ~now_ns:(ns 10) in
+    state.keeper_sandbox_view <- Some (keeper, K.empty_partial);
+    request in
+  let apply request selected result = Types.apply_keeper_sandbox_result state
+      ~selected_keeper:selected ~authority_ready:true request result in
+  let partial () = match state.keeper_sandbox_view with
+    | Some (_, value) -> value | None -> fail "expected sandbox partial" in
+  let old = start "alpha" in
+  apply old (Some "alpha") (K.Name_result (Error "name unavailable"));
+  check bool "one result leaves the other in flight" true
+    (Types.detail_read_waiting state ~tab:Types.Detail_sandbox ~keeper:"alpha");
+  check bool "first result is retained" true
+    (K.partial_results (partial ()) = (None, Some (Error "name unavailable")));
+  let current = start "alpha" in
+  apply old (Some "alpha") (K.Inventory_result (Error "old inventory"));
+  check bool "superseded result cannot alter newer request" true
+    (K.partial_results (partial ()) = (None, None));
+  apply current (Some "alpha") (K.Inventory_result (Error "inventory timeout"));
+  apply current (Some "alpha") (K.Name_result (Error "name timeout"));
+  check bool "both terminal results are stored" true
+    (K.partial_results (partial ()) =
+       (Some (Error "inventory timeout"), Some (Error "name timeout")));
+  check bool "both terminal results release wait" false
+    (Types.detail_read_waiting state ~tab:Types.Detail_sandbox ~keeper:"alpha");
+  let switched = start "alpha" in
+  apply switched (Some "beta") (K.Name_result (Error "offscreen"));
+  check bool "another selected Keeper cannot accept the result" true
+    (K.partial_results (partial ()) = (None, None));
+  check bool "offscreen request is retired" false
+    (Types.detail_read_waiting state ~tab:Types.Detail_sandbox ~keeper:"alpha");
+  let withdrawn = start "alpha" in
+  Types.suspend_workspace_readings state;
+  check bool "authority withdrawal clears pending partial state" true
+    (Option.is_none state.keeper_sandbox_view);
+  let successor = start "alpha" in
+  apply withdrawn (Some "alpha") (K.Name_result (Error "old workspace"));
+  check bool "old workspace completion cannot fill successor" true
+    (K.partial_results (partial ()) = (None, None));
+  apply successor (Some "alpha") (K.Name_result (Error "current workspace"));
+  check bool "successor remains current" true
+    (K.partial_results (partial ()) = (None, Some (Error "current workspace")))
+
 let test_schedule_responses_follow_keeper_and_generation () =
   let keeper name : Types.keeper =
     { k_origin = Masc.Tui_decode.Persisted_keeper; k_name = name
@@ -259,6 +306,8 @@ let () =
             test_offscreen_completion_and_late_poll_do_not_age_a_new_wait
         ; test_case "logs keep repainting after status arrives" `Quick
             test_logs_keep_repainting_after_status_arrives
+        ; test_case "sandbox results follow authority and generation" `Quick
+            test_sandbox_partial_results_follow_authority_and_generation
         ; test_case "the elapsed needs a start" `Quick
             test_the_elapsed_needs_a_start
         ; test_case "two reads are timed apart" `Quick

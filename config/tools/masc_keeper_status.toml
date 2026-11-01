@@ -79,3 +79,10 @@ description = """
 Inspect Keeper-visible repository checkout identity, branch and local-ref \
 freshness (default: !fast). This can enter the sandbox and run Git. When false, \
 execution_context.repository_checkouts reports not_inspected with no entries."""
+
+[[params]]
+name = "include_kata_name_observation"
+type = "boolean"
+description = """
+Read the configured Kata guest name from the runtime listing (default: false). \
+This reports a point-in-time observation, not ownership or permission to act."""

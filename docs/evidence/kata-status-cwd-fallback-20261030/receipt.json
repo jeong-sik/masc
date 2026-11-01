@@ -1,0 +1,47 @@
+{
+  "cases": [
+    {
+      "case": "current_directory",
+      "decision": "ok",
+      "exit": 0
+    },
+    {
+      "case": "deleted_cwd_base_fallback",
+      "decision": "ok",
+      "exit": 0
+    },
+    {
+      "case": "deleted_cwd_home_fallback",
+      "decision": "ok",
+      "exit": 0
+    },
+    {
+      "case": "deleted_cwd_temp_fallback",
+      "decision": "ok",
+      "exit": 0
+    },
+    {
+      "case": "deleted_cwd_missing_base",
+      "decision": "error",
+      "exit": 0
+    },
+    {
+      "case": "deleted_cwd_regular_base",
+      "decision": "error",
+      "exit": 0
+    },
+    {
+      "case": "deleted_cwd_resolver_failure",
+      "decision": "error",
+      "exit": 0
+    }
+  ],
+  "schema": 1,
+  "scope": "extracted OCaml with stub Host_config, runtime and CLI callbacks",
+  "source_sha256": {
+    "config_dir_resolver.ml": "ca48f1349cfe6d5600355334a15f68dfab8b5336c03eb872961824d293b0d9b5",
+    "env_keeper_scrub.ml": "59d749b7c4e7680eebadd2170ae18a0f50641ddb233f0034bf07b2c124b4f8ce",
+    "keeper_sandbox_control.ml": "927f3aa954df8363efdf4e3d1ff1ab8cb6d681f665bf6b1da3a5d254c8729fd0",
+    "reproduce.py": "276cedf2c8b96330f0e78846ac4dcd62955509f295e000983658f21b9b68117c"
+  }
+}

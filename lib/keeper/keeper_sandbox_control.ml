@@ -128,7 +128,7 @@ let live_containers ~config ~meta ~timeout_sec =
 (* Which runtime holds this Keeper's guests is the Keeper's own declaration.
    A microvm Keeper with none has no inventory to read, and saying so beats
    an empty list that reads as "no guests". *)
-let live_microvm_containers ~config ~(meta : keeper_meta) ~timeout_sec =
+let live_microvm_containers ~execution_context ~config ~(meta : keeper_meta) ~timeout_sec =
   match meta.microvm_backend with
   | None ->
     Error
@@ -138,7 +138,11 @@ let live_microvm_containers ~config ~(meta : keeper_meta) ~timeout_sec =
           to list guests on"
          meta.name)
   | Some backend ->
+    let env, cwd = match execution_context with
+      | Some (env, cwd) -> Some env, Some cwd
+      | None -> None, None in
     Keeper_sandbox_microvm.list_live_containers_for
+      ?env ?cwd
       backend
       ~base_path:config.Workspace.base_path
       ~keeper_name:meta.name
@@ -1058,7 +1062,7 @@ let sandbox_resource_config_json ~timeout_sec (meta : keeper_meta) =
     (* The same resolution the boot argv takes, so the size shown is the size
        a guest starting now gets. A size that cannot be resolved refuses the
        boot, and says why here rather than showing nothing. *)
-    let memory, cpus, guest_size_error =
+    let memory, cpus, guest_size_error, guest_size_error_code =
       match
         Env_config_sandbox.Runtime.microvm_guest_size
           ~memory:meta.microvm_memory
@@ -1067,13 +1071,14 @@ let sandbox_resource_config_json ~timeout_sec (meta : keeper_meta) =
       | Ok (size : Keeper_microvm_guest_size.t) ->
         ( `String (Keeper_microvm_guest_size.memory_argv size.memory)
         , `String (string_of_int (Keeper_microvm_guest_size.cpus_count size.cpus))
-        , `Null )
-      | Error detail -> `Null, `Null, `String detail
+        , `Null, `Null )
+      | Error detail -> `Null, `Null, `String detail, `String "guest_size_unresolved"
     in
     `Assoc
       [ "memory", memory
       ; "cpus", cpus
       ; "guest_size_error", guest_size_error
+      ; "guest_size_error_code", guest_size_error_code
       ; "work_volume_size", `String (Env_config_sandbox.Runtime.microvm_work_volume_size ())
       ; "work_volume_discard_default", work_volume_discard_default_json ~timeout_sec meta
       ; "pids_limit", `Null
@@ -1084,6 +1089,7 @@ let sandbox_resource_config_json ~timeout_sec (meta : keeper_meta) =
       [ "memory", `String (Env_config_sandbox.Hardening.memory ())
       ; "cpus", `Null
       ; "guest_size_error", `Null
+      ; "guest_size_error_code", `Null
       ; "work_volume_size", `Null
       ; "work_volume_discard_default", `Null
       ; "pids_limit", `Int (Env_config_sandbox.Hardening.pids_limit ())
@@ -1127,10 +1133,217 @@ let sandbox_paths_json ~(config : Workspace.config) (meta : keeper_meta) =
       ]
 ;;
 
+type kata_host_environment_alignment =
+  | Kata_selectors_match
+  | Kata_selectors_differ
+  | Kata_selectors_unavailable
+
+type kata_execution_context =
+  { env : string array
+  ; cwd : string
+  ; host_alignment : kata_host_environment_alignment
+  }
+
+(* nerdctl 2.1.6 resolves its containerd address, namespace, config file and
+   rootless socket from these selectors. Other CLI versions or wrappers may
+   depend on more; matching selectors is not a proof of endpoint identity. *)
+let kata_selector_keys =
+  [ "PATH"; "HOME"; "XDG_CONFIG_HOME"; "XDG_DATA_HOME"; "XDG_RUNTIME_DIR"
+  ; "NERDCTL_TOML"; "CONTAINERD_ADDRESS"; "CONTAINERD_NAMESPACE"
+  ; "CONTAINERD_SNAPSHOTTER"; "ROOTLESSKIT_STATE_DIR"
+  ; "ROOTLESSKIT_PARENT_EUID"; "ROOTLESSKIT_PARENT_EGID" ]
+
+let kata_environment_alignment ~ambient ~execution ~cwd =
+  let parse env =
+    Array.fold_left (fun acc entry ->
+      match acc, String.index_opt entry '=' with
+      | Error (), _ | _, None | _, Some 0 -> Error ()
+      | Ok entries, Some separator ->
+        let key = String.sub entry 0 separator in
+        if not (List.mem key kata_selector_keys) then Ok entries
+        else if List.mem_assoc key entries then Error ()
+        else Ok ((key, String.sub entry (separator + 1)
+                            (String.length entry - separator - 1)) :: entries))
+      (Ok []) env in
+  let absolute value = value <> "" && not (Filename.is_relative value) in
+  let valid_paths entries =
+    let path = match List.assoc_opt "PATH" entries with
+      | Some value -> List.for_all absolute (String.split_on_char ':' value)
+      | None -> false in
+    let home = match List.assoc_opt "HOME" entries with
+      | Some value -> absolute value | None -> false in
+    let optional_absolute key = match List.assoc_opt key entries with
+      | None -> true | Some value -> absolute value in
+    path && home && optional_absolute "XDG_CONFIG_HOME" && optional_absolute "XDG_DATA_HOME"
+  in
+  if not (absolute cwd) then Kata_selectors_unavailable
+  else match parse ambient, parse execution with
+    | Ok host, Ok child when valid_paths host && valid_paths child ->
+      if List.for_all (fun key -> List.assoc_opt key host = List.assoc_opt key child)
+          kata_selector_keys then Kata_selectors_match else Kata_selectors_differ
+    | (Error () | Ok _), (Error () | Ok _) -> Kata_selectors_unavailable
+;;
+
+let kata_context_from_environment ~ambient ~cwd =
+  let env = Env_keeper_scrub.filter_environment ambient in
+  { env; cwd; host_alignment = kata_environment_alignment ~ambient ~execution:env ~cwd }
+;;
+
+(* Comparison can be unavailable for a valid execution context: PATH may
+   contain a relative component and HOME need not be set. A captured absolute
+   cwd and well-formed, unambiguous child environment use the turn runner's
+   filtering convention. Executable lookup can also read process PATH at
+   spawn time, so these values do not establish the CLI's identity. *)
+let kata_execution_context_usable {env; cwd; _} =
+  let rec entries seen = function
+    | [] -> true
+    | entry :: rest ->
+      (match String.index_opt entry '=' with
+       | Some separator when separator > 0 && not (String.contains entry '\000') ->
+         let name = String.sub entry 0 separator in
+         if List.mem name seen then false else entries (name :: seen) rest
+       | Some _ | None -> false) in
+  cwd <> "" && not (Filename.is_relative cwd) && entries [] (Array.to_list env)
+;;
+
+let kata_execution_context (meta : keeper_meta) =
+  match meta.sandbox_profile, meta.microvm_backend with
+  | Micro_vm, Some Keeper_microvm_backend.Nerdctl_kata ->
+    Some (try
+      let ambient = Unix.environment () in
+      (* The turn runner uses this resolver, including its base/home/temp
+         fallback when the process cwd has been removed. Do not replace it
+         with [Sys.getcwd], which would refuse a runnable fallback. *)
+      let cwd = Config_dir_resolver.current_working_dir () in
+      let context = kata_context_from_environment ~ambient ~cwd in
+      if not (kata_execution_context_usable context) then Error ()
+      else match Unix.stat cwd with
+        | { Unix.st_kind = Unix.S_DIR; _ } -> Ok context
+        | { Unix.st_kind = (Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK
+                            | Unix.S_FIFO | Unix.S_SOCK); _ } -> Error ()
+      with Sys_error _ | Unix.Unix_error _ | Env_config_core.Config_error _ -> Error ())
+  | (Docker | Remote_ssh), _
+  | Micro_vm, (None | Some (Keeper_microvm_backend.Apple_container
+                            | Keeper_microvm_backend.Microsandbox)) -> None
+;;
+
+let read_microvm_inventory_with ~observe ~context ~config ~meta ~timeout_sec =
+  match context with
+  | Some (Error ()) -> Error "sandbox execution context unavailable"
+  | Some (Ok ({env; cwd; _} as context)) when kata_execution_context_usable context ->
+    observe ~execution_context:(Some (env, cwd)) ~config ~meta ~timeout_sec
+  | Some (Ok _) -> Error "sandbox execution context unavailable"
+  | None -> observe ~execution_context:None ~config ~meta ~timeout_sec
+;;
+
+let read_kata_name_with ~observe ~config ~(meta : keeper_meta) ~context ~timeout_sec =
+  let guest_name () =
+      Keeper_sandbox_container_name.make
+        (Keeper_sandbox_container_name.Micro_vm_persistent
+           { base_path = config.Workspace.base_path
+           ; keeper_name = meta.name; network_mode = meta.network_mode })
+      |> Keeper_sandbox_container_name.to_string in
+  match meta.sandbox_profile, meta.microvm_backend with
+  | Micro_vm, Some Keeper_microvm_backend.Nerdctl_kata ->
+    let observation = match context with
+      | Some (Ok {env; cwd; host_alignment = Kata_selectors_match}) ->
+        observe ~env ~cwd
+          ~base_path:config.Workspace.base_path ~keeper_name:meta.name
+          ~network_mode:meta.network_mode ~timeout_sec
+      | Some (Ok {host_alignment = (Kata_selectors_differ | Kata_selectors_unavailable); _})
+      | Some (Error ()) | None -> Keeper_sandbox_microvm.Kata_name_unavailable in
+    Some (guest_name (), observation)
+  | Micro_vm, None ->
+    (* An unresolved backend cannot establish that Kata is inapplicable. *)
+    Some (guest_name (), Keeper_sandbox_microvm.Kata_name_unavailable)
+  | (Docker | Remote_ssh), _
+  | Micro_vm, Some (Keeper_microvm_backend.Apple_container
+                     | Keeper_microvm_backend.Microsandbox) -> None
+;;
+
+let read_kata_name = read_kata_name_with ~observe:Keeper_sandbox_microvm.observe_kata_name
+
+let kata_alignment_json = function
+  | Some (Ok {host_alignment = Kata_selectors_match; _}) -> `String "selectors_match"
+  | Some (Ok {host_alignment = Kata_selectors_differ; _}) -> `String "selectors_differ"
+  | Some (Ok {host_alignment = Kata_selectors_unavailable; _}) | Some (Error ()) -> `String "selectors_unavailable"
+  | None -> `Null
+;;
+
+let kata_name_state = function
+  | None -> "not_applicable"
+  | Some Keeper_sandbox_microvm.Kata_name_absent -> "absent"
+  | Some Keeper_sandbox_microvm.Kata_name_expected_runtime -> "expected_runtime"
+  | Some Keeper_sandbox_microvm.Kata_name_other_runtime -> "other_runtime"
+  | Some Keeper_sandbox_microvm.Kata_name_runtime_unreported -> "runtime_unreported"
+  | Some Keeper_sandbox_microvm.Kata_name_unavailable -> "unavailable"
+;;
+
+let kata_name_observation_json ~config ~(meta : keeper_meta) ~timeout_sec =
+  let context = kata_execution_context meta in
+  let observed = read_kata_name ~config ~meta ~context ~timeout_sec in
+  let name, observation = match observed with
+    | None -> None, None
+    | Some (name, observation) -> Some name, Some observation in
+  `Assoc [ "keeper", `String meta.name
+         ; "expected_name", Json_util.string_opt_to_json name
+         ; "host_environment_alignment", (match observed, context with
+             | Some _, None -> `String "selectors_unavailable"
+             | _ -> kata_alignment_json context)
+         ; "network_mode", `String (network_mode_to_string meta.network_mode)
+         ; "state", `String (kata_name_state observation) ]
+;;
+
+let project_kata_status ~observation ~scoped_name_seen ~has_containers
+    ~initial_effective_mode:_ ~initial_why_no_container =
+  match observation, scoped_name_seen with
+  | Keeper_sandbox_microvm.Kata_name_expected_runtime, Some true ->
+    (* The listing and name lookup are separate reads. Equal names alone do
+       not bind them to the same guest or to a current running state. *)
+    None, initial_why_no_container
+  | Keeper_sandbox_microvm.Kata_name_absent, Some false ->
+    let reason = if not has_containers then
+        Some "the expected name was not seen in this runtime listing at observation time"
+      else initial_why_no_container in
+    None, reason
+  | Keeper_sandbox_microvm.Kata_name_expected_runtime, (Some false | None)
+  | Keeper_sandbox_microvm.Kata_name_other_runtime, _
+  | Keeper_sandbox_microvm.Kata_name_runtime_unreported, _ ->
+    let reason = if not has_containers then
+        Some "the expected name was seen; ownership is unverified"
+      else initial_why_no_container in
+    None, reason
+  | Keeper_sandbox_microvm.Kata_name_absent, (Some true | None)
+  | Keeper_sandbox_microvm.Kata_name_unavailable, _ ->
+    let reason = if not has_containers then
+        Some "the expected name could not be established from these observations"
+      else initial_why_no_container in
+    None, reason
+;;
+
+module Kata_status_for_testing = struct
+  let environment_alignment ~ambient ~cwd =
+    (kata_context_from_environment ~ambient ~cwd).host_alignment
+
+  let observe_name ~run ~config ~meta ~ambient ~cwd ~timeout_sec =
+    let observe ~env ~cwd ~base_path ~keeper_name ~network_mode ~timeout_sec =
+      Keeper_sandbox_microvm.Kata_observation_for_testing.observe
+        ~run ~env ~cwd ~base_path ~keeper_name ~network_mode ~timeout_sec in
+    let context = Some (Ok (kata_context_from_environment ~ambient ~cwd)) in
+    read_kata_name_with ~observe ~config ~meta ~context ~timeout_sec
+
+  let observe_inventory ~run ~config ~meta ~ambient ~cwd ~timeout_sec =
+    let context = Some (Ok (kata_context_from_environment ~ambient ~cwd)) in
+    read_microvm_inventory_with ~observe:run ~context ~config ~meta ~timeout_sec
+
+  let project = project_kata_status
+end
+
 let live_status_json ?(include_preflight = true)
     ?preflight_override
     ?containers_override
     ?(include_repository_checkouts = true)
+    ?(include_kata_name_observation = false)
     ~(config : Workspace.config)
     ~(meta : keeper_meta)
     ~(timeout_sec : float)
@@ -1156,6 +1369,9 @@ let live_status_json ?(include_preflight = true)
         ~timeout_sec ()
     | None, (Some _ | None) -> None
   in
+  (* Scope inventory to the same scrubbed environment and cwd that the turn
+     start/probe uses, even when the separate name observation is disabled. *)
+  let kata_context = kata_execution_context meta in
   let container_observation =
     match meta.sandbox_profile with
     | Docker ->
@@ -1163,15 +1379,17 @@ let live_status_json ?(include_preflight = true)
        | Some observation ->
          Result.map (live_containers_for_keeper ~meta) observation
        | None -> live_containers ~config ~meta ~timeout_sec)
-    | Micro_vm -> live_microvm_containers ~config ~meta ~timeout_sec
+    | Micro_vm ->
+      read_microvm_inventory_with ~observe:live_microvm_containers
+        ~context:kata_context ~config ~meta ~timeout_sec
     | Remote_ssh -> Ok []
   in
-  let containers, container_error, effective_mode =
+  let containers, container_error, initial_effective_mode =
     match container_observation with
     | Ok containers -> containers, None, Some (container_mode meta containers)
     | Error error -> [], Some error, None
   in
-  let why_no_container =
+  let initial_why_no_container =
     match container_error with
     | Some _ ->
       Some
@@ -1181,11 +1399,57 @@ let live_status_json ?(include_preflight = true)
          | Remote_ssh -> "remote_ssh_container_listing_failed")
     | None -> why_no_container meta ~preflight containers
   in
+  let kata_name =
+    if not include_kata_name_observation then None
+    else
+      let observation, scoped_name_seen =
+        match read_kata_name ~config ~meta ~context:kata_context ~timeout_sec with
+        | Some (guest_name, observation) ->
+          let scoped_name_seen = match container_observation with
+            | Error _ -> None
+            | Ok rows ->
+              Some (List.exists
+                (fun (row : Keeper_sandbox_runtime.live_container) ->
+                   String.equal row.name guest_name) rows) in
+          Some observation, scoped_name_seen
+        | None -> None, None
+      in
+      Some (observation, scoped_name_seen)
+  in
+  let effective_mode, why_no_container =
+    match kata_name with
+    | Some (Some observation, scoped_name_seen) ->
+      project_kata_status ~observation ~scoped_name_seen
+        ~has_containers:(containers <> []) ~initial_effective_mode ~initial_why_no_container
+    | Some (None, _) | None -> initial_effective_mode, initial_why_no_container
+  in
+  let kata_name_fields =
+    match kata_name with
+    | None -> []
+    | Some (observation, scoped_name_seen) ->
+      let state = kata_name_state observation in
+      let scoped_name_seen = match scoped_name_seen with
+        | None -> `Null | Some value -> `Bool value in
+      [ "kata_name_observation", `Assoc
+          [ "state", `String state; "scoped_name_seen", scoped_name_seen ] ]
+  in
+  let backend_unresolved = match meta.sandbox_profile with
+    | Micro_vm -> Option.is_none meta.microvm_backend
+    | Docker | Remote_ssh -> false in
+  let container_error_code = match container_error with
+    | None -> `Null
+    | Some _ when backend_unresolved -> `String "microvm_backend_unresolved"
+    | Some _ -> (match kata_context with
+      | Some (Error ()) -> `String "kata_execution_context_unavailable"
+      | Some (Ok context) when not (kata_execution_context_usable context) ->
+        `String "kata_execution_context_unavailable"
+      | Some (Ok _) | None -> `Null) in
   `Assoc
-    [
+    ([
       ("keeper", `String meta.name);
       ("sandbox_profile", `String (sandbox_profile_to_string meta.sandbox_profile));
       ("configured_network_mode", `String (network_mode_to_string meta.network_mode));
+      ("kata_host_environment_alignment", kata_alignment_json kata_context);
       (* The image the Keeper names, the build the host catalog has for it
          now, or why the catalog has none -- the reason its next container
          will not start. Remote_ssh runs on a host rather than from an image,
@@ -1201,6 +1465,10 @@ let live_status_json ?(include_preflight = true)
       ("configured_image_unresolved",
         (match configured_image with
          | Some (Error error) -> `String (Keeper_sandbox_image_resolver.error_to_string error)
+         | Some (Ok _) | None -> `Null));
+      ("configured_image_unresolved_code",
+        (match configured_image with
+         | Some (Error error) -> `String (Keeper_sandbox_image_resolver.error_code error)
          | Some (Ok _) | None -> `Null));
       ("effective_mode", Json_util.string_opt_to_json effective_mode);
       ( "managed_container_kind"
@@ -1252,10 +1520,11 @@ let live_status_json ?(include_preflight = true)
              (Keeper_volume_filesystem_watch.volumes_of_meta meta)) );
       ("paths", sandbox_paths_json ~config meta);
       ("container_error", Json_util.string_opt_to_json container_error);
+      ("container_error_code", container_error_code);
       ("why_no_container", Json_util.string_opt_to_json why_no_container);
       ( "repository_checkouts",
         repository_checkouts_json ~include_repository_checkouts ~config ~meta );
-    ]
+    ] @ kata_name_fields)
 
 type sandbox_log_backend =
   | Docker_logs
@@ -1289,16 +1558,16 @@ let remote_ssh_no_local_stream_reason =
    stream exists on this host; read the logs on the endpoint."
 ;;
 
-let resolve_sandbox_log_target ~(config : Workspace.config) ~keeper_name =
+let resolve_sandbox_log_target_with_reason_code ~(config : Workspace.config) ~keeper_name =
   match Keeper_meta_store.read_effective_meta config keeper_name with
   | Error detail -> Error (Sandbox_logs_meta_read_failed detail)
   | Ok None -> Error Sandbox_logs_keeper_not_found
   | Ok (Some meta) ->
     (match meta.sandbox_profile with
-     | Docker -> Ok (Local_backend Docker_logs, meta.name)
+     | Docker -> Ok (Local_backend Docker_logs, meta, None)
      | Micro_vm ->
        (match meta.microvm_backend with
-        | Some backend -> Ok (Local_backend (Micro_vm_logs backend), meta.name)
+       | Some backend -> Ok (Local_backend (Micro_vm_logs backend), meta, None)
         | None ->
           Error
             (Sandbox_logs_backend_failed
@@ -1308,7 +1577,12 @@ let resolve_sandbox_log_target ~(config : Workspace.config) ~keeper_name =
                    runtime to read a log stream from"
                   meta.name)))
      | Remote_ssh ->
-       Ok (No_local_stream remote_ssh_no_local_stream_reason, meta.name))
+       Ok (No_local_stream remote_ssh_no_local_stream_reason, meta, Some "remote_ssh"))
+;;
+
+let resolve_sandbox_log_target ~config ~keeper_name =
+  Result.map (fun (source, (meta : keeper_meta), _) -> source, meta.name)
+    (resolve_sandbox_log_target_with_reason_code ~config ~keeper_name)
 ;;
 
 let sandbox_log_argv backend ~tail ~container_id =
@@ -1320,50 +1594,32 @@ let sandbox_log_argv backend ~tail ~container_id =
     Keeper_sandbox_microvm.logs_tail_argv_for microvm_backend ~tail ~container_id
 ;;
 
-let logs_json ~(config : Workspace.config) ~keeper_name ~timeout_sec ~tail () =
-  let tail = max 1 (min 500 tail) in
-  match resolve_sandbox_log_target ~config ~keeper_name with
-  (* Rebuilt, not re-used: the payload type on the Ok side differs here, so
-     [Error _ as e] would not typecheck. *)
-  | Error resolve_error -> Error resolve_error
-  | Ok (No_local_stream reason, effective_keeper_name) ->
-    (* A profile that keeps no container here is answered, not failed: the
-       key set matches the local shapes so no caller tests for presence. *)
-    Ok
-      (`Assoc
-        [ "keeper", `String effective_keeper_name
-        ; "backend", `Null
-        ; "state", `String "no_local_stream"
-        ; "reason", `String reason
-        ; "tail", `Int tail
-        ; "instances", `List []
-        ])
-  | Ok (Local_backend backend, effective_keeper_name) ->
-    let containers =
-      match backend with
-      | Docker_logs ->
-        Keeper_sandbox_runtime.list_containers
-          ~keeper_name:effective_keeper_name
-          ~base_path:config.Workspace.base_path
-          ~timeout_sec
-          ()
-      | Micro_vm_logs microvm_backend ->
-        Keeper_sandbox_microvm.list_live_containers_for
-          microvm_backend
-          ~base_path:config.Workspace.base_path
-          ~keeper_name:effective_keeper_name
-          ~timeout_sec
-    in
-    Result.map_error
-      (fun detail -> Sandbox_logs_backend_failed detail)
-      containers
-    |> Result.map (fun containers ->
+let sandbox_log_commands_with ~list_containers ~read_logs ~(config : Workspace.config)
+    ~(meta : keeper_meta) ~backend ~context ~timeout_sec ~tail =
+  let execution_context =
+    match backend, context with
+    | Micro_vm_logs Keeper_microvm_backend.Nerdctl_kata,
+      Some (Ok ({env; cwd; _} as context)) when kata_execution_context_usable context ->
+      Ok (Some env, Some cwd)
+    | Micro_vm_logs Keeper_microvm_backend.Nerdctl_kata, (Some (Error ()) | Some (Ok _) | None) ->
+      Error (Sandbox_logs_backend_failed "Kata execution context unavailable; logs were not queried")
+    | (Docker_logs | Micro_vm_logs (Keeper_microvm_backend.Apple_container
+                                   | Keeper_microvm_backend.Microsandbox)), _ ->
+      Ok (None, None)
+  in
+  let open Result.Syntax in
+  let* env, cwd = execution_context in
+  let* containers =
+    list_containers ~env ~cwd ~backend ~config ~keeper_name:meta.name ~timeout_sec
+    |> Result.map_error (fun detail -> Sandbox_logs_backend_failed detail)
+  in
+  Ok (
          let rows =
            List.map
              (fun (container : Keeper_sandbox_runtime.live_container) ->
                let status, stdout, stderr =
-                 Process_eio.run_argv_with_status_split ~timeout_sec
-                   (sandbox_log_argv backend ~tail ~container_id:container.id)
+                 read_logs ~env ~cwd ~timeout_sec
+                   ~argv:(sandbox_log_argv backend ~tail ~container_id:container.id)
                in
                let error =
                  match status with
@@ -1384,11 +1640,62 @@ let logs_json ~(config : Workspace.config) ~keeper_name ~timeout_sec ~tail () =
              containers
          in
          `Assoc
-           [ "keeper", `String effective_keeper_name
+           [ "keeper", `String meta.name
            ; "backend", `String (sandbox_log_backend_label backend)
            ; "state", `String (if rows = [] then "no_instance" else "available")
            ; "reason", `Null
+           ; "reason_code", `Null
+           ; "kata_host_environment_alignment", kata_alignment_json context
            ; "tail", `Int tail
            ; "instances", `List rows
            ])
+;;
+
+let sandbox_log_list_containers ~env ~cwd ~backend ~(config : Workspace.config)
+    ~keeper_name ~timeout_sec =
+  match backend with
+  | Docker_logs ->
+    Keeper_sandbox_runtime.list_containers
+      ~keeper_name ~base_path:config.base_path ~timeout_sec ()
+  | Micro_vm_logs microvm_backend ->
+    Keeper_sandbox_microvm.list_live_containers_for ?env ?cwd microvm_backend
+      ~base_path:config.base_path ~keeper_name ~timeout_sec
+;;
+
+let sandbox_log_read ~env ~cwd ~timeout_sec ~argv =
+  Process_eio.run_argv_with_status_split ~timeout_sec ?env ?cwd argv
+;;
+
+module Sandbox_logs_for_testing = struct
+  let collect ~list_containers ~read_logs ~config ~meta ~backend ~ambient ~cwd
+      ~timeout_sec ~tail =
+    let context = match backend with
+      | Micro_vm_logs Keeper_microvm_backend.Nerdctl_kata ->
+        Some (Ok (kata_context_from_environment ~ambient ~cwd))
+      | Docker_logs | Micro_vm_logs (Keeper_microvm_backend.Apple_container
+                                   | Keeper_microvm_backend.Microsandbox) -> None in
+    sandbox_log_commands_with ~list_containers ~read_logs ~config ~meta ~backend ~context
+      ~timeout_sec ~tail
+end
+
+let logs_json ~(config : Workspace.config) ~keeper_name ~timeout_sec ~tail () =
+  let tail = max 1 (min 500 tail) in
+  match resolve_sandbox_log_target_with_reason_code ~config ~keeper_name with
+  | Error resolve_error -> Error resolve_error
+  | Ok (No_local_stream reason, meta, reason_code) ->
+    Ok
+      (`Assoc
+        [ "keeper", `String meta.name
+        ; "backend", `Null
+        ; "state", `String "no_local_stream"
+        ; "reason", `String reason
+        ; "reason_code", Json_util.string_opt_to_json reason_code
+        ; "kata_host_environment_alignment", `Null
+        ; "tail", `Int tail
+        ; "instances", `List []
+        ])
+  | Ok (Local_backend backend, meta, _reason_code) ->
+    let context = kata_execution_context meta in
+    sandbox_log_commands_with ~list_containers:sandbox_log_list_containers
+      ~read_logs:sandbox_log_read ~config ~meta ~backend ~context ~timeout_sec ~tail
 ;;

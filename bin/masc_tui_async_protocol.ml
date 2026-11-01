@@ -645,7 +645,7 @@ type async_msg =
   | Keeper_items_loaded of
       Masc_tui_types.detail_read_request * (string option * Masc_tui_keeper_items.t, string) result
   | Keeper_sandbox_view_loaded of
-      Masc_tui_types.detail_read_request * (Masc_tui_keeper_sandbox.t, string) result
+      Masc_tui_types.detail_read_request * Masc_tui_keeper_sandbox.load_result
   | Keeper_sandbox_logs_loaded of
       string * int * (Masc_tui_keeper_sandbox.logs, string) result
   | Exact_activity_read of Masc_tui_exact_activity.request * (Masc_tui_exact_activity.document, string) result

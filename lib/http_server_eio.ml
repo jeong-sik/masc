@@ -837,6 +837,11 @@ module Router = struct
       -> (state -> Httpun.Request.t -> Httpun.Reqd.t -> unit)
       -> request_handler
 
+    val with_tool_observation_auth
+      :  tool_name:string
+      -> (state -> Httpun.Request.t -> Httpun.Reqd.t -> unit)
+      -> request_handler
+
     val with_tool_actor_auth
       :  tool_name:string
       -> (state -> string -> Httpun.Request.t -> Httpun.Reqd.t -> unit)
@@ -860,6 +865,7 @@ module Router = struct
       | Token_permission : Masc_domain.permission -> token_handler auth
       | Private_token_permission : Masc_domain.permission -> token_handler auth
       | Tool : { tool_name : string } -> state_handler auth
+      | Tool_observation : { tool_name : string } -> state_handler auth
       | Tool_actor : { tool_name : string } -> actor_handler auth
       | Self_authenticated :
           Route_access.self_authenticated_reason
@@ -899,6 +905,7 @@ module Router = struct
       | Token_permission : Masc_domain.permission -> token_handler auth
       | Private_token_permission : Masc_domain.permission -> token_handler auth
       | Tool : { tool_name : string } -> state_handler auth
+      | Tool_observation : { tool_name : string } -> state_handler auth
       | Tool_actor : { tool_name : string } -> actor_handler auth
       | Self_authenticated :
           Route_access.self_authenticated_reason
@@ -914,6 +921,7 @@ module Router = struct
       | Private_token_permission permission ->
         Route_access.Private_token_permission permission
       | Tool { tool_name } -> Route_access.Tool { tool_name }
+      | Tool_observation { tool_name } -> Route_access.Tool_observation { tool_name }
       | Tool_actor { tool_name } -> Route_access.Tool_actor { tool_name }
       | Self_authenticated reason -> Route_access.Self_authenticated reason
 
@@ -934,6 +942,7 @@ module Router = struct
       | Private_token_permission permission ->
         W.with_private_token_permission_auth ~permission handler
       | Tool { tool_name } -> W.with_tool_auth ~tool_name handler
+      | Tool_observation { tool_name } -> W.with_tool_observation_auth ~tool_name handler
       | Tool_actor { tool_name } -> W.with_tool_actor_auth ~tool_name handler
 
     let register auth ~kind ~path ~methods handler routes =

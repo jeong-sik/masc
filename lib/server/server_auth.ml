@@ -1352,6 +1352,13 @@ and with_permission_auth ~permission handler request reqd =
       | Error err -> respond_auth_error request reqd err)
 
 and with_tool_auth ~tool_name handler request reqd =
+  with_tool_quota_auth ~tool_name ~quota:Metered_operation handler request reqd
+
+and with_tool_observation_auth ~tool_name handler request reqd =
+  with_tool_quota_auth ~tool_name ~quota:(read_request_quota request.Httpun.Request.meth)
+    handler request reqd
+
+and with_tool_quota_auth ~tool_name ~quota handler request reqd =
   match current_server_state () with
   | None -> respond_not_initialized request reqd
   | Some state ->
@@ -1365,9 +1372,7 @@ and with_tool_auth ~tool_name handler request reqd =
            request
        with
       | Ok () ->
-          (* Metered whatever the method: a tool invocation is an operation
-             because of what it does, not because of how it was addressed. *)
-          (match check_agent_rate_limit ~quota:Metered_operation request reqd with
+          (match check_agent_rate_limit ~quota request reqd with
           | Ok () -> handler state request reqd
           | Error () -> ())
       | Error err -> respond_auth_error request reqd err)

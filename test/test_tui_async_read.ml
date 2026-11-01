@@ -148,6 +148,37 @@ let test_resource_read_keeps_context_for_transport_and_launch_errors () =
   check (list result_t) "missing switch still names the read"
     [ Error "resource read: Eio switch is unavailable" ] !answers
 
+let test_independent_pair_delivers_while_other_is_waiting () =
+  List.iter (fun slow_first ->
+    Eio_main.run (fun env ->
+      Eio.Switch.run (fun sw ->
+        let release, release_slow = Eio.Promise.create () in
+        let fast_done, resolve_fast = Eio.Promise.create () in
+        let slow_done, resolve_slow = Eio.Promise.create () in
+        let outcomes = ref [] in
+        let slow () = Eio.Promise.await release; Error "transport timeout" in
+        let fast () = Ok "observed" in
+        let deliver ~is_slow answer =
+          outcomes := (is_slow, answer) :: !outcomes;
+          if is_slow then Eio.Promise.resolve resolve_slow ()
+          else Eio.Promise.resolve resolve_fast () in
+        Eio_context.with_turn_switch sw (fun () ->
+          Masc_tui_async_read.launch_independent_pair
+            ~deliver_first:(deliver ~is_slow:slow_first)
+            ~deliver_second:(deliver ~is_slow:(not slow_first))
+            (if slow_first then slow else fast)
+            (if slow_first then fast else slow));
+        Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 5. (fun () ->
+          Eio.Promise.await fast_done);
+        check (list (pair bool result_t)) "fast answer precedes slow answer"
+          [false, Ok "observed"] !outcomes;
+        Eio.Promise.resolve release_slow ();
+        Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 5. (fun () ->
+          Eio.Promise.await slow_done);
+        check (list (pair bool result_t)) "failure leaves the other answer intact"
+          [true, Error "transport timeout"; false, Ok "observed"] !outcomes)))
+    [true; false]
+
 let () =
   run "test_tui_async_read"
     [
@@ -175,5 +206,7 @@ let () =
             test_keeper_turns_uses_one_label_for_every_failure_boundary;
           test_case "resource read keeps context" `Quick
             test_resource_read_keeps_context_for_transport_and_launch_errors;
+          test_case "independent pair does not wait for a slow peer" `Quick
+            test_independent_pair_delivers_while_other_is_waiting;
         ] );
     ]

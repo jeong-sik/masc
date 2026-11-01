@@ -2406,28 +2406,30 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
       | Detail_sandbox ->
           let width = max 24 (framed_inner_width cols - 4) in
           let status =
-            stamped_or
-              (Option.map
-                 (fun (stamp, reading) ->
-                   stamp, Masc_tui_keeper_sandbox.view_lines ~width reading)
-                 state.keeper_sandbox_view)
-              state.keeper_sandbox_view_error
+            match state.keeper_sandbox_view with
+            | Some (stamp, partial) when String.equal stamp k.k_name ->
+              Masc_tui_keeper_sandbox.partial_view_lines
+                ~sanitize:Masc.Tui_terminal_text.sanitize_terminal_text
+                ~ko:(state.ui_language = Lang_ko) ~width partial
+            | Some _ | None ->
+              [ Ansi.dim ^ (if state.ui_language = Lang_ko then
+                    "  샌드박스 상태 미조회" else "  Sandbox status not observed") ^ Ansi.reset ]
           in
           let logs =
             match state.keeper_sandbox_logs_inflight with
             | Some request when String.equal request.slr_keeper k.k_name ->
               [ loading_row ~started_ns:request.slr_started_ns
-                  "loading actual container logs" ]
+                  (if state.ui_language = Lang_ko then "실제 컨테이너 로그 조회 중" else "loading actual container logs") ]
             | Some _ | None ->
               match state.keeper_sandbox_logs_error with
               | Some (stamp, detail) when String.equal stamp k.k_name ->
-                [ (Theme.bad ()) ^ "  Container logs unavailable: "
+                [ (Theme.bad ()) ^ (if state.ui_language = Lang_ko then "  컨테이너 로그 조회 실패: " else "  Container logs unavailable: ")
                   ^ Terminal_text.single_line detail ^ Ansi.reset
                 ]
               | Some _ | None ->
                 (match state.keeper_sandbox_logs with
                  | Some (stamp, logs) when String.equal stamp k.k_name ->
-                   Masc_tui_keeper_sandbox.logs_view_lines ~width logs
+                   Masc_tui_keeper_sandbox.logs_view_lines ~ko:(state.ui_language = Lang_ko) ~width logs
                    |> List.map (fun line -> "  " ^ line)
                  | Some _ | None -> [])
           in

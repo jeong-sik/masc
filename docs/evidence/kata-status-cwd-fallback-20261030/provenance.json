@@ -1,0 +1,30 @@
+{
+  "annotation_kind": "post_run_source_provenance",
+  "base_head": "06e43272be3f4bec7d2798f7d8d464774536895c",
+  "base_head_recorded_in_original_receipt": false,
+  "original_receipt": "receipt.json",
+  "original_receipt_sha256": "9aef112c166f3ba079f86d198d8c1ca631d32180ed3adc70415a4774b8e95cdf",
+  "source_scope": "Full input file hashes; the fixture compiles only extracted portions with stubs. These do not identify the entire uncommitted worktree.",
+  "sources": [
+    {
+      "path": "lib/keeper/keeper_sandbox_control.ml",
+      "relation_to_base": "modified_uncommitted",
+      "sha256": "927f3aa954df8363efdf4e3d1ff1ab8cb6d681f665bf6b1da3a5d254c8729fd0"
+    },
+    {
+      "path": "lib/config_dir_resolver/config_dir_resolver.ml",
+      "relation_to_base": "byte_identical",
+      "sha256": "ca48f1349cfe6d5600355334a15f68dfab8b5336c03eb872961824d293b0d9b5"
+    },
+    {
+      "path": "lib/env_keeper_scrub.ml",
+      "relation_to_base": "byte_identical",
+      "sha256": "59d749b7c4e7680eebadd2170ae18a0f50641ddb233f0034bf07b2c124b4f8ce"
+    },
+    {
+      "path": "docs/evidence/kata-status-cwd-fallback-20261030/reproduce.py",
+      "relation_to_base": "new_uncommitted",
+      "sha256": "276cedf2c8b96330f0e78846ac4dcd62955509f295e000983658f21b9b68117c"
+    }
+  ]
+}

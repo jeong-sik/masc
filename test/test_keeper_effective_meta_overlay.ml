@@ -427,7 +427,7 @@ instructions = "Run on the endpoint."
       expected_no_local_stream_reason reason
 
 (* The one [logs_json] branch that starts no process, and the branch this fix
-   exists for. It pins the wire the TUI decoder parses: the same six keys in
+   exists for. It pins the wire the TUI decoder parses: the same keys in
    the same order as the two local shapes, a null backend, an empty instance
    list, and the reason carried through. Without it the payload is asserted
    only by a hand-written fixture on the reader's side, which cannot notice
@@ -459,12 +459,15 @@ instructions = "Run on the endpoint."
         ; ("backend", `Null)
         ; ("state", `String state)
         ; ("reason", `String reason)
+        ; ("reason_code", `String reason_code)
+        ; ("kata_host_environment_alignment", `Null)
         ; ("tail", `Int tail)
         ; ("instances", `List instances)
         ]) ->
     Alcotest.(check string) "canonical keeper name" name keeper;
     Alcotest.(check string) "state" "no_local_stream" state;
     Alcotest.(check string) "reason" expected_no_local_stream_reason reason;
+    Alcotest.(check string) "typed location" "remote_ssh" reason_code;
     Alcotest.(check int) "the requested tail is echoed" 200 tail;
     Alcotest.(check int) "no instances" 0 (List.length instances)
   | Ok payload ->

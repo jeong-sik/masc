@@ -489,6 +489,13 @@ val with_tool_auth :
     Use [with_tool_actor_auth] when a handler records or checks caller identity;
     consume its resolved actor rather than reading identity headers. *)
 
+val with_tool_observation_auth :
+  tool_name:string ->
+  (Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit) ->
+  Httpun.Request.t -> Httpun.Reqd.t -> unit
+(** The same tool authorization and origin checks. GET/HEAD use observation
+    quota; other methods remain metered operations. *)
+
 val with_tool_actor_auth :
   tool_name:string ->
   (Mcp_server.server_state ->

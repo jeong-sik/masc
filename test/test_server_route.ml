@@ -62,6 +62,9 @@ let kinds : (string * (Router.t -> Router.t) * Route_access.t) list =
   ; ( "tool"
     , Server_route.get (Server_route.Tool { tool_name = "masc_status" }) "/x" state_handler
     , Route_access.Tool { tool_name = "masc_status" } )
+  ; ( "tool_observation"
+    , Server_route.get (Server_route.Tool_observation { tool_name = "masc_status" }) "/x" state_handler
+    , Route_access.Tool_observation { tool_name = "masc_status" } )
   ; ( "tool_actor"
     , Server_route.get
         (Server_route.Tool_actor { tool_name = "masc_lane_evidence" })
@@ -146,6 +149,10 @@ let test_json_shape () =
     (Route_access.Tool_actor { tool_name = "masc_lane_evidence" })
     {|{"kind":"tool_actor","tool_name":"masc_lane_evidence"}|};
   expect
+    "tool_observation"
+    (Route_access.Tool_observation { tool_name = "masc_status" })
+    {|{"kind":"tool_observation","tool_name":"masc_status"}|};
+  expect
     "self_authenticated"
     (Route_access.Self_authenticated Route_access.Oauth_protocol)
     {|{"kind":"self_authenticated","reason":"oauth_protocol"}|}
@@ -215,7 +222,10 @@ let parse_response raw =
   | [] -> failf "empty response %S" raw
 ;;
 
-let dispatch ?(host = "127.0.0.1") ?token router path =
+type origin = Same_origin | No_origin | Origin of string
+
+let dispatch ?(host = "127.0.0.1") ?(method_ = "GET") ?(origin = Same_origin)
+    ?token router path =
   Server_request_authority.with_current (authority_of host) (fun () ->
     let output = Buffer.create 256 in
     let connection =
@@ -225,12 +235,17 @@ let dispatch ?(host = "127.0.0.1") ?token router path =
     let authorization =
       Option.fold ~none:"" ~some:(fun token -> "Authorization: Bearer " ^ token ^ "\r\n") token
     in
+    let origin = match origin with
+      | Same_origin -> "Origin: http://" ^ host ^ ":8935\r\n"
+      | No_origin -> ""
+      | Origin value -> "Origin: " ^ value ^ "\r\n" in
     let raw_request =
       Printf.sprintf
-        "GET %s HTTP/1.1\r\nHost: %s:8935\r\nOrigin: http://%s:8935\r\n%s\r\n"
+        "%s %s HTTP/1.1\r\nHost: %s:8935\r\n%s%s\r\n"
+        method_
         path
         host
-        host
+        origin
         authorization
     in
     let input =
@@ -405,6 +420,15 @@ let dispatch_kinds =
           "/tool"
           (Server_auth.with_tool_auth ~tool_name:"masc_status" (on_state "tool"))
           r )
+  ; ( "tool_observation"
+    , (fun r ->
+        Server_route.get
+          (Server_route.Tool_observation { tool_name = "masc_status" })
+          "/tool_observation" (on_state "tool_observation") r)
+    , fun r ->
+        Server_route.get Server_route.Always_public "/tool_observation"
+          (Server_auth.with_tool_observation_auth ~tool_name:"masc_status"
+             (on_state "tool_observation")) r )
   ; ( "tool_actor"
     , (fun r ->
         Server_route.get
@@ -516,7 +540,7 @@ let with_authentication ~strict f =
          | Ok (token, _) -> token
          | Error error -> fail (Masc_domain.masc_error_to_string error)
        in
-       f ~worker:(token "worker") ~admin:(token "admin"))
+       f ~base_path ~worker:(token "worker") ~admin:(token "admin"))
 ;;
 
 (* The status each kind answers with no credential, with a Worker token and with
@@ -534,13 +558,14 @@ let expected_status ~strict =
   ; "token_permission", (401, 403, 200)
   ; "private_token_permission", (401, 403, 200)
   ; "tool", (401, 200, 200)
+  ; "tool_observation", (401, 200, 200)
   ; "tool_actor", (401, 200, 200)
   ]
 ;;
 
 let test_typed_routes_answer_like_the_wrapper_by_hand ~strict () =
   with_authentication ~strict
-  @@ fun ~worker ~admin ->
+  @@ fun ~base_path:_ ~worker ~admin ->
   let typed =
     List.fold_left (fun r (_, typed, _) -> typed r) (Router.create ()) dispatch_kinds
   in
@@ -564,6 +589,53 @@ let test_typed_routes_answer_like_the_wrapper_by_hand ~strict () =
          ; "an admin token", Some admin, admin_status
          ])
     dispatch_kinds
+;;
+
+let test_tool_observation_does_not_consume_operation_quota () =
+  with_authentication ~strict:false @@ fun ~base_path:_ ~worker ~admin ->
+  let routes = Router.create ()
+    |> Server_route.get (Server_route.Tool_observation {tool_name = "masc_status"})
+         "/observation" (on_state "observation")
+    |> Server_route.post (Server_route.Tool_observation {tool_name = "masc_status"})
+         "/observation" (on_state "observation")
+    |> Server_route.get (Server_route.Tool {tool_name = "masc_status"})
+         "/operation" (on_state "operation") in
+  let key = match Rate_limit.agent_key_of_token_or_name ~token:worker () with
+    | Some key -> key | None -> fail "worker has no quota key" in
+  let before = Rate_limit.remaining_agent_global ~key in
+  check int "first observation authorized" 200 (dispatch ~token:worker routes "/observation").status;
+  check int "second observation authorized" 200 (dispatch ~token:worker routes "/observation").status;
+  check int "observations leave the operation bucket alone" before (Rate_limit.remaining_agent_global ~key);
+  check int "operation authorized" 200 (dispatch ~token:worker routes "/operation").status;
+  check int "ordinary tool still consumes an operation" (before - 1) (Rate_limit.remaining_agent_global ~key);
+  let admin_key = match Rate_limit.agent_key_of_token_or_name ~token:admin () with
+    | Some key -> key | None -> fail "admin has no quota key" in
+  let admin_before = Rate_limit.remaining_agent_global ~key:admin_key in
+  check int "non-read method authorized" 200
+    (dispatch ~method_:"POST" ~token:admin routes "/observation").status;
+  check int "non-read method remains metered" (admin_before - 1)
+    (Rate_limit.remaining_agent_global ~key:admin_key)
+;;
+
+let test_tool_observation_preserves_anonymous_tool_authorization () =
+  with_authentication ~strict:false @@ fun ~base_path ~worker:_ ~admin:_ ->
+  Auth.save_auth_config base_path
+    { Masc_domain.default_auth_config with enabled = false; require_token = false };
+  Server_auth.For_testing.restore_auth_config (Some Server_auth_config.fail_closed);
+  Fun.protect ~finally:(fun () -> Server_auth.For_testing.restore_auth_config None) (fun () ->
+    let routes = Router.create ()
+      |> Server_route.get (Server_route.Tool {tool_name = "masc_status"})
+           "/operation" (on_state "operation")
+      |> Server_route.get (Server_route.Tool_observation {tool_name = "masc_status"})
+           "/observation" (on_state "observation") in
+    List.iter (fun (origin, expected) ->
+      let operation = dispatch ~origin routes "/operation" in
+      let observation = dispatch ~origin routes "/observation" in
+      check int "observation and ordinary tool enforce the same origin policy"
+        operation.status observation.status;
+      check bool "same-origin admits; missing or foreign origin refuses"
+        expected (observation.status = 200))
+      [Same_origin, true; No_origin, false; Origin "http://elsewhere.invalid:8935", false])
 ;;
 
 (* ---- the canonical-host redirect runs before the public read ---- *)
@@ -600,7 +672,7 @@ let test_alias_host_is_redirected_while_the_server_is_not_ready () =
    the canonical host gets the answer of the public read. *)
 let test_alias_host_is_redirected_before_the_workspace_precondition () =
   with_authentication ~strict:false
-  @@ fun ~worker:_ ~admin:_ ->
+  @@ fun ~base_path:_ ~worker:_ ~admin:_ ->
   let routes = page_routes () in
   let one_parameter = "?expected_base_path=/x" in
   let mismatch = "?expected_base_path=/nowhere&expected_masc_root=/nowhere/.masc" in
@@ -766,6 +838,10 @@ let () =
             "without server state a wrapper stops the handler, the others run it"
             `Quick
             test_wrappers_gate_the_handler
+        ; test_case "tool observations preserve operation quota" `Quick
+            test_tool_observation_does_not_consume_operation_quota
+        ; test_case "tool observations preserve anonymous origin authorization" `Quick
+            test_tool_observation_preserves_anonymous_tool_authorization
         ; test_case
             "strict auth: each kind answers like its wrapper by hand"
             `Quick

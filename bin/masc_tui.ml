@@ -11947,7 +11947,7 @@ let open_preview_image ?skill_reference ?board_subject state ~mailbox ~notice ~n
    the next loop renders only the latest window. A non-Board vector worker
    owns its physical slot until it returns, including after image close.
    All windows use the original full-scene PNG coordinate system. *)
-let prepare_inspected_frame state ~mailbox =
+let prepare_inspected_frame state ~mailbox ~worker_geometry_current =
   match state.image_open, state.image_inspection, state.sent_image_read,
       !active_graphics_protocol, !image_cell_pixels, Eio_context.get_switch_opt () with
   | true, Some inspected, None, Masc_tui_graphics.Kitty_protocol,
@@ -11958,6 +11958,7 @@ let prepare_inspected_frame state ~mailbox =
          when origin.sir_view=state.view
            && image_keeper_is_current state ~view:state.view ~keeper_name:origin.sir_keeper
            && image_reading_is_current state origin ->
+       let geometry = Masc_tui_ansi.get_terminal_size () in
        let window = inspection_window ~cell_pixels inspected.ii_viewport in
        let current_frame = match inspected.ii_frame with
          | Raster_image (shown,_) | Raster_unavailable (shown,_) -> shown=window
@@ -11995,7 +11996,8 @@ let prepare_inspected_frame state ~mailbox =
              && (match state.image_inspection, !image_cell_pixels with
                  | Some current, Some pixels -> current.ii_identity == inspected.ii_identity
                      && window = inspection_window ~cell_pixels:pixels current.ii_viewport
-                 | (Some _ | None), (Some _ | None) -> false) in
+                 | (Some _ | None), (Some _ | None) -> false)
+             && worker_geometry_current geometry in
            let render () =
              let open Result.Syntax in
              let runner = Masc_tui_pele.command_runner
@@ -27186,6 +27188,15 @@ Use relative paths for resources already held in the package. -->
       invalidate_frame_for_resize frame_presenter render_schedule
     end
   in
+  let worker_geometry_current cached =
+    let module Size = Render_schedule.Terminal_size_cache in
+    match Size.verify_for_work ~cached
+        ~resize_pending:(fun () -> Atomic.get resize_requested)
+        ~probe:Masc_tui_ansi.probe_terminal_size with
+    | Size.Current -> true
+    | Size.Resize_pending -> false
+    | Size.Resize_detected -> request_full_repaint Sys.sigwinch; false
+  in
   let share_interrupt_barrier = ref false in
   let run_loop () =
     while true do
@@ -27366,7 +27377,7 @@ Use relative paths for resources already held in the package. -->
           ~frame_presenter ~render_schedule async_messages
       then Render_schedule.request render_schedule Render_schedule.Background;
       prepare_resource_diagrams state ~mailbox:async_messages;
-      prepare_inspected_frame state ~mailbox:async_messages;
+      prepare_inspected_frame state ~mailbox:async_messages ~worker_geometry_current;
       (match state.lane_addons with
        | Some view when view.editor_ready && not (input_not_yet_admissible ()) -> handle_lane_document_editor ()
        | Some _ | None -> ());

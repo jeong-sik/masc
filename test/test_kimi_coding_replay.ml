@@ -28,6 +28,19 @@ let runtime_config () =
       then { provider with credentials = Some (Runtime_schema.Inline "fixture-key") }
       else provider) config.providers }
 
+let with_catalog f =
+  let catalog = Provider.Model_catalog.load_file (Sys.getenv "MASC_TEST_MODEL_CATALOG")
+      |> expect_ok in
+  Fun.protect ~finally:Provider.Model_catalog.clear_global (fun () ->
+    Provider.Model_catalog.set_global catalog;
+    f ())
+
+let provider_config runtime model_id =
+  let binding = List.find (fun (binding : Runtime_schema.binding) ->
+    binding.provider_id = "kimi_coding" && binding.model_id = model_id)
+      runtime.Runtime_schema.bindings in
+  Runtime_adapter.binding_to_provider_config runtime binding |> expect_ok
+
 let checkpoint model messages =
   Agent_core.Checkpoint.
     { provider_binding = None; version = checkpoint_version
@@ -90,14 +103,8 @@ let assistant ~stream (config : Provider.Provider_config.t) ~tool ~reasoning ~co
   |> expect_ok
 
 let test_configured_replay model_id ~stream () =
-  let catalog = Provider.Model_catalog.load_file (Sys.getenv "MASC_TEST_MODEL_CATALOG")
-      |> expect_ok in
-  Fun.protect ~finally:Provider.Model_catalog.clear_global (fun () ->
-    Provider.Model_catalog.set_global catalog;
-    let runtime = runtime_config () in
-    let binding = List.find (fun (binding : Runtime_schema.binding) ->
-      binding.provider_id = "kimi_coding" && binding.model_id = model_id) runtime.bindings in
-    let config = Runtime_adapter.binding_to_provider_config runtime binding |> expect_ok in
+  with_catalog (fun () ->
+    let config = provider_config (runtime_config ()) model_id in
     check bool "Coding Plan uses Chat HTTP" true
       (config.kind = Provider.Provider_config.OpenAI_compat);
     check string "Coding provider scope" "kimi_coding" (Option.get config.provider_id);
@@ -162,6 +169,51 @@ let test_configured_replay model_id ~stream () =
       check bool "reasoning uses the declared field" true
         (J.member "reasoning" tool_assistant = `Null)))
 
+let test_configured_effort model_id () =
+  with_catalog (fun () ->
+    let runtime = runtime_config () in
+    let request config =
+      let serialized = Result.bind (Provider.Complete_common.validate_all config)
+          (fun () -> Provider.Complete_common.serialize_http_request ~stream:false ~config
+            ~messages:[Provider.Types.user_msg "Weather?"] ~tools:[]) in
+      match serialized with
+      | Ok artifact -> Yojson.Safe.from_string artifact.body
+      | Error (Provider.Http_client.AcceptRejected {reason}) -> fail reason
+      | Error _ -> fail "Kimi Coding request serialization failed" in
+    let default = provider_config runtime model_id in
+    let check_effort label expected body =
+      (match expected with
+       | None -> check bool (label ^ " has no effort field") false
+           (List.mem_assoc "reasoning_effort" (J.to_assoc body))
+       | Some _ -> ());
+      check (option string) label expected
+        (body |> J.member "reasoning_effort" |> J.to_string_option);
+      check string "effort request retains the configured API ID" default.model_id
+        (body |> J.member "model" |> J.to_string) in
+    check_effort "shipped default omits effort" None (request default);
+    check_effort "explicit enable uses the provider default without choosing a depth" None
+      (request {default with enable_thinking = Some true});
+    List.iter (fun effort ->
+      (* An operator's typed runtime model setting must reach the admitted
+         request, with the shipped provider and binding unchanged. *)
+      let configured = {runtime with models = List.map
+          (fun (model : Runtime_schema.model_spec) ->
+            if model.id = model_id then {model with reasoning_effort = Some effort}
+            else model) runtime.models} in
+      let config = provider_config configured model_id in
+      check bool "runtime adapter carries the explicit effort" true
+        (config.reasoning_effort = Some effort);
+      check_effort "documented effort reaches the request"
+        (Some (Provider.Reasoning_effort.to_string effort))
+        (request {config with enable_thinking = Some true});
+      (* The API documents none as K2.8 Preview routing without thinking.
+         This asserts the requested control, not the served model identity. *)
+      check_effort "explicit disable overrides the configured depth" (Some "none")
+        (request {config with enable_thinking = Some false}))
+      Provider.Reasoning_effort.[Low; High; Max];
+    check_effort "explicit disable without a configured depth" (Some "none")
+      (request {default with enable_thinking = Some false}))
+
 let () =
   Alcotest.run "Kimi Coding replay"
     [ "configured HTTP checkpoint replay",
@@ -169,4 +221,7 @@ let () =
         List.map (fun stream ->
           test_case (model_id ^ if stream then " stream" else " sync") `Quick
             (test_configured_replay model_id ~stream)) [false; true])
+        ["kimi-for-coding"; "kimi-k3"; "kimi-k3-256k"]
+    ; "configured HTTP effort contract",
+      List.map (fun model_id -> test_case model_id `Quick (test_configured_effort model_id))
         ["kimi-for-coding"; "kimi-k3"; "kimi-k3-256k"] ]

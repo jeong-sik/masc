@@ -783,17 +783,18 @@ let test_unset_thinking_does_not_disable_reasoning_model () =
     let caps = match Llm_provider.Provider_config.capabilities_for_config_model config with
       | Some caps -> caps | None -> fail "Kimi provider capability is missing" in
     let rejection = Llm_provider.Complete_common.thinking_control_request_rejection ~caps config in
+    check bool "declared Kimi thinking request is admitted" true (Option.is_none rejection);
+    check bool "Kimi completion admission accepts the request" true
+      (Result.is_ok (Llm_provider.Complete_common.validate_all config));
+    let request = Llm_provider.Backend_openai.build_request_assoc ~config ~messages:[] () in
+    let open Yojson.Safe.Util in
+    check bool "no invented thinking object" true ((request |> member "thinking") = `Null);
     match expected with
-    | None ->
-      check bool "unspecified request is not rejected" true (Option.is_none rejection);
-      let request = Llm_provider.Backend_openai.build_request_assoc ~config ~messages:[] () in
-      let open Yojson.Safe.Util in
-      check bool "no invented thinking toggle" true ((request |> member "thinking") = `Null);
+    | None | Some true ->
       check bool "no invented effort" true ((request |> member "reasoning_effort") = `Null)
     | Some false ->
-      check bool "explicit unsupported disable is still rejected" true
-        (rejection = Some Llm_provider.Complete_common.Disable_not_encodable)
-    | Some true -> ())
+      check (option string) "explicit Kimi disable reaches the wire" (Some "none")
+        (request |> member "reasoning_effort" |> to_string_option))
     ["", None; "false", Some false; "true", Some true]
 ;;
 

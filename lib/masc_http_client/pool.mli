@@ -98,6 +98,7 @@ val request :
   ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
   ?timeout_seconds:float ->
   ?max_body_bytes:int ->
+  ?resolved_addresses:Eio.Net.Ipaddr.v4v6 list ->
   method_:http_method ->
   url:string ->
   ?headers:(string * string) list ->
@@ -115,6 +116,13 @@ val request :
     each chunk is appended. Refusal names the HTTP status and closes the
     partially read connection, without returning a partial body.
     Omission leaves response size unrestricted; a negative limit is invalid.
+
+    [resolved_addresses] binds this request to addresses the caller resolved
+    and admitted for the URI host. It uses a fresh client, tries only those
+    addresses at the URI port, and retires it after the response. Reconnects
+    remain bound to the selected address; no DNS or idle-client fallback is
+    allowed, including for an empty list. The URI hostname still supplies
+    Host and TLS verification. Omission retains ordinary pooled resolution.
 
     Failure modes (all return [Error]):
     - DNS / TCP / TLS failure during connect

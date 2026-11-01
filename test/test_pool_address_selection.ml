@@ -157,10 +157,90 @@ let test_reconnect_resolves_original_host_again = with_runtime (fun env sw ->
   Alcotest.(check int) "second request acquired that client" 1 stats.reuse_count_total;
   Pool.shutdown pool)
 
+let tcp = function
+  | `Tcp (ip, port) -> ip, port
+  | `Unix _ -> Alcotest.fail "fixture requires a TCP listener"
+
+let pinned_post pool ~url addresses =
+  match Pool.request pool ~resolved_addresses:addresses ~method_:`POST
+    ~url ~body:"one request" () with
+  | Ok response -> response
+  | Error reason -> Alcotest.fail reason
+
+let test_pinned_address_preserves_http_identity = with_runtime (fun env sw ->
+  let requests = ref [] in
+  let address = start_server ~sw ~net:env#net (fun _ request body ->
+    read_request requests request body;
+    Cohttp_eio.Server.respond_string ~status:`OK ~body:"admitted target" ()) in
+  let ip, port = tcp address in
+  let attempted = ref [] in
+  let resolve ~service:_ _ = Alcotest.fail "pinned request resolved DNS again" in
+  let pool = Pool.create ~sw ~env:(routed_env env ~resolve ~attempted) () in
+  let host = Printf.sprintf "provider.test:%d" port in
+  let response = pinned_post pool ~url:("http://" ^ host ^ "/request?turn=1") [ip] in
+  Alcotest.(check string) "admitted response" "admitted target" response.body;
+  check_request_identity ~host requests;
+  check_attempts [address;address] attempted;
+  Alcotest.(check int) "pinned connection is not parked" 0 (Pool.stats pool).total_idle;
+  Pool.shutdown pool)
+
+let test_pinned_address_bypasses_previous_idle_client = with_runtime (fun env sw ->
+  let old_requests = ref [] and admitted_requests = ref [] in
+  let old = start_server ~sw ~net:env#net (fun _ request body ->
+    read_request old_requests request body;
+    Cohttp_eio.Server.respond_string ~status:`OK ~body:"earlier target" ()) in
+  let admitted = start_server ~sw ~net:env#net (fun _ request body ->
+    read_request admitted_requests request body;
+    Cohttp_eio.Server.respond_string ~status:`OK ~body:"admitted target" ()) in
+  let ip,port = tcp admitted in
+  let attempted = ref [] and queries = ref 0 in
+  (* Like the existing selected-address fixture, DNS chooses another local
+     listener's port while the original URI/Host remains fixed. *)
+  let resolve ~service:_ _ = incr queries;[old] in
+  let pool = Pool.create ~sw ~env:(routed_env env ~resolve ~attempted) () in
+  let host = Printf.sprintf "provider.test:%d" port in
+  let url = "http://" ^ host ^ "/request?turn=1" in
+  Alcotest.(check string) "earlier ordinary connection exists" "earlier target" (post ~url pool).body;
+  Alcotest.(check string) "pin does not reuse earlier authority" "admitted target"
+    (pinned_post pool ~url [ip]).body;
+  check_request_identity ~host old_requests;
+  check_request_identity ~host admitted_requests;
+  check_attempts [old;old;admitted;admitted] attempted;
+  Alcotest.(check int) "only ordinary request asks DNS" 1 !queries;
+  Alcotest.(check int) "pinned request reused no client" 0 (Pool.stats pool).reuse_count_total;
+  Alcotest.(check int) "only earlier ordinary connection stays idle" 1 (Pool.stats pool).total_idle;
+  Pool.shutdown pool)
+
+let test_empty_pin_never_falls_back_to_idle_or_dns = with_runtime (fun env sw ->
+  let requests = ref [] in
+  let address = start_server ~sw ~net:env#net (fun _ request body ->
+    read_request requests request body;
+    Cohttp_eio.Server.respond_string ~status:`OK ~body:"earlier target" ()) in
+  let _,port = tcp address in
+  let attempted = ref [] and queries = ref 0 in
+  let resolve ~service:_ _ = incr queries;[address] in
+  let pool = Pool.create ~sw ~env:(routed_env env ~resolve ~attempted) () in
+  let url = Printf.sprintf "http://provider.test:%d/request?turn=1" port in
+  ignore (post ~url pool);
+  Alcotest.(check bool) "empty authority is refused" true
+    (Result.is_error (Pool.request pool ~resolved_addresses:[] ~method_:`POST ~url ()));
+  check_attempts [address;address] attempted;
+  Alcotest.(check int) "no fallback lookup" 1 !queries;
+  Alcotest.(check int) "no fallback dispatch" 1 (List.length !requests);
+  Alcotest.(check int) "invalid pin does not poison connect backoff" 0
+    (Pool.For_testing.connect_failure_count pool);
+  Pool.shutdown pool)
+
 let () =
   Alcotest.run "Pool address selection"
     ["real HTTP",
      [Alcotest.test_case "selected probe address handles one HTTP request" `Quick
         test_selected_address_handles_http;
       Alcotest.test_case "construction address override ends before reconnect" `Quick
-        test_reconnect_resolves_original_host_again]]
+        test_reconnect_resolves_original_host_again;
+      Alcotest.test_case "pinned address preserves HTTP identity" `Quick
+        test_pinned_address_preserves_http_identity;
+      Alcotest.test_case "pinned address bypasses earlier idle authority" `Quick
+        test_pinned_address_bypasses_previous_idle_client;
+      Alcotest.test_case "empty pin never falls back to idle or DNS" `Quick
+        test_empty_pin_never_falls_back_to_idle_or_dns]]

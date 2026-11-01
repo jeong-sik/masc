@@ -194,8 +194,14 @@ let is_success_status code = code >= 200 && code < 300
 let is_redirect_status code =
   code = 301 || code = 302 || code = 303 || code = 307 || code = 308
 
-let fetch_response ~net:_ ~url =
-  Masc_http_client.get_response_sync ~url
+let fetch_response ~net ~url =
+  match normalize_request_url url with
+  | Error _ as error -> error
+  | Ok url ->
+  match Server_outbound_address.resolve_allowed_host ~net (Uri.of_string url) with
+  | Error _ as error -> error
+  | Ok resolved_addresses ->
+  Masc_http_client.get_response_sync ~resolved_addresses ~url
     ~headers:
       [
         ("Accept", "text/html,application/xhtml+xml,image/*;q=0.9,*/*;q=0.1");
@@ -248,9 +254,9 @@ let fetch_preview ~clock ~net url =
   match normalize_request_url url with
   | Error reason -> Error reason
   | Ok normalized_url -> (
-      match Server_outbound_address.validate_resolved_host ~net (Uri.of_string normalized_url) with
+      match Server_outbound_address.resolve_allowed_host ~net (Uri.of_string normalized_url) with
       | Error reason -> Error reason
-      | Ok () ->
+      | Ok _ ->
           if infer_image_url normalized_url then
             Ok
               (build_preview_json ~url:normalized_url ~kind:"image"

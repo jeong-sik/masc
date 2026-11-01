@@ -33,9 +33,9 @@ let test_refused_hosts () =
     let net = Eio.Stdenv.net env in
     List.iter
       (fun url ->
-        match Server_outbound_address.validate_resolved_host ~net (Uri.of_string url) with
+        match Server_outbound_address.resolve_allowed_host ~net (Uri.of_string url) with
         | Error _ -> ()
-        | Ok () -> fail (url ^ " was allowed"))
+        | Ok _ -> fail (url ^ " was allowed"))
       [ "https://localhost/meta.json"
       ; "https://127.0.0.1/meta.json"
       ; "https://0.0.0.0/meta.json"
@@ -65,6 +65,63 @@ let test_document_fetch_refuses_before_connecting () =
     | Ok _ -> fail "a private address was fetched")
 ;;
 
+module Rebinding_net = struct
+  type tag = [ `Generic | `Unix ]
+  type t = {
+    net : tag Eio.Net.ty Eio.Resource.t;
+    lookups : int ref;
+    attempted : Eio.Net.Ipaddr.v4v6 list ref;
+  }
+  let getaddrinfo t ~service _host =
+    incr t.lookups;
+    let ip = if !(t.lookups) = 1 then Eio.Net.Ipaddr.of_raw "\008\008\008\008"
+      else Eio.Net.Ipaddr.V4.loopback in
+    [`Tcp (ip, int_of_string service)]
+  let connect t ~sw:_ = function
+    | `Tcp (ip, _) ->
+      t.attempted := ip :: !(t.attempted);
+      (* Observe the destination without sending any packet. *)
+      raise (Unix.Unix_error (Unix.ECONNREFUSED, "fixture TCP boundary", ""))
+    | `Unix _ -> fail "metadata fetch attempted a Unix socket"
+  let getnameinfo t = Eio.Net.getnameinfo t.net
+  let listen t ~reuse_addr ~reuse_port ~backlog ~sw address =
+    Eio.Net.listen t.net ~reuse_addr ~reuse_port ~backlog ~sw address
+  let datagram_socket t ~reuse_addr ~reuse_port ~sw address =
+    Eio.Net.datagram_socket t.net ~reuse_addr ~reuse_port ~sw address
+end
+
+let test_document_fetch_binds_approved_dns_answer () =
+  Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+    let lookups = ref 0 and attempted = ref [] in
+    let net = Eio.Resource.T
+      ({ Rebinding_net.net = env#net; lookups; attempted },
+       Eio.Net.Pi.network (module Rebinding_net)) in
+    let routed = object
+      method net = net
+      method stdin = env#stdin
+      method stdout = env#stdout
+      method stderr = env#stderr
+      method domain_mgr = env#domain_mgr
+      method process_mgr = env#process_mgr
+      method clock = env#clock
+      method mono_clock = env#mono_clock
+      method fs = env#fs
+      method cwd = env#cwd
+      method secure_random = env#secure_random
+      method debug = env#debug
+      method backend_id = env#backend_id
+    end in
+    let url = match Auth_oauth_client_metadata.classify_client_id "https://provider.test/meta.json" with
+      | Ok (Auth_oauth_client_metadata.Document url) -> url
+      | _ -> fail "fixture must be a metadata document URL" in
+    let result = Masc_http_client.with_scoped_pool ~sw ~env:routed (fun () ->
+      Server_oauth_client_metadata_fetch.fetch ~clock:env#clock ~net url) in
+    check bool "fixture refuses TCP" true (Result.is_error result);
+    check int "only the admitted lookup occurs" 1 !lookups;
+    check (list string) "only the admitted address reaches TCP"
+      ["8.8.8.8"] (List.map (Fmt.str "%a" Eio.Net.Ipaddr.pp) !attempted)))
+;;
+
 let () =
   run
     "server_outbound_address"
@@ -75,6 +132,8 @@ let () =
             "document fetch refuses before connecting"
             `Quick
             test_document_fetch_refuses_before_connecting
+        ; test_case "document fetch binds the approved DNS answer" `Quick
+            test_document_fetch_binds_approved_dns_answer
         ] )
     ]
 ;;

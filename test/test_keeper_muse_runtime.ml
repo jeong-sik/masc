@@ -2461,6 +2461,22 @@ let test_an_unobserved_final_message_is_not_silence () =
     [ "gap_no_message"; "open_message" ]
 ;;
 
+let test_gap_before_ack_cannot_settle_lost_response_as_silence () =
+  List.iter (fun other_session ->
+    let fixture = scenario "no_message" @ ["start_view_gap", `String "before_ack"]
+        @ (if other_session then ["view_gap_session", `String "another-session"] else []) in
+    with_scripted_host ~fixture (fun ~base_path ->
+      let run = run_turn ~base_path ~tool:(masc_probe_tool (ref `Null)) in
+      match other_session, run.outcome.result with
+      | true, Ok result -> check int "unrelated gap permits a quiet turn" 0 (List.length result.response.content)
+      | false, Error _ ->
+        check_effect "lost response keeps effect uncertainty"
+          Keeper_provider_attempt_effect.Observation_unavailable run.outcome
+      | true, Error error -> fail (Agent_core.Error.to_string error)
+      | false, Ok _ -> fail "a gap before acknowledgement settled as silence"))
+    [false; true]
+;;
+
 let test_a_message_completed_after_a_gap_is_kept () =
   with_scripted_host ~fixture:(scenario "gap_then_message") (fun ~base_path ->
     let run = run_turn ~base_path ~tool:(masc_probe_tool (ref `Null)) in
@@ -3353,6 +3369,8 @@ let () =
         ; test_case "commentary is never the reply" `Quick test_commentary_is_never_the_reply
         ; test_case "an unobserved final message is not silence" `Quick
             test_an_unobserved_final_message_is_not_silence
+        ; test_case "gap before acknowledgement cannot turn a lost response into silence" `Quick
+            test_gap_before_ack_cannot_settle_lost_response_as_silence
         ; test_case "a message completed after a gap is kept" `Quick
             test_a_message_completed_after_a_gap_is_kept
         ; test_case "later unstreamed message reaches live consumers" `Quick test_later_unstreamed_message_reaches_live_consumers

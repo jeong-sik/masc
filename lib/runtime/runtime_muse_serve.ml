@@ -1424,12 +1424,14 @@ let run_protocol
      that follows adopts the declared idle policy. *)
   io.set_receive_phase Model_turn;
   let observed_usage = ref (Observing_usage None) in
+  let message_gap = ref false in
   let discarded_usage_turns = ref [] in
   let* ack =
     match await_response
       ~on_view_gap:(fun sid ->
         if gap_applies ~session_id sid then (
           observed_usage := Usage_gap;
+          message_gap := true;
           emit_stream_event on_stream_event View_gap_observed))
       ~on_model_usage:(fun ~session_id:sid ~turn_id ->
         if String.equal sid session_id then
@@ -1481,7 +1483,7 @@ let run_protocol
         ; usage_cursors = []
         ; observed_usage = !observed_usage
         ; last_call_usage = None
-        ; message_gap = false
+        ; message_gap = !message_gap
         ; tool_calls = 0
         ; approvals = 0
         ; pending_decisions = []

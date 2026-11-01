@@ -1115,7 +1115,7 @@ let run_without_lifecycle ~result_scope ~media_store ~input_source ~argument_sou
     in
     let* () =
       Serve.validate_turn ~session_mode client_config ~workspace_root ~prompt ~images
-      |> Result.map_error runtime_error_to_core_error
+      |> Result.map_error (fun error -> runtime_error_to_core_error error)
     in
     let raw_trace_run =
       Host.start_raw_trace

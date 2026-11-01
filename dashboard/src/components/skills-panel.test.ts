@@ -1,7 +1,7 @@
 import { createReceiptMessage } from './skill-create-form'
 import { html } from 'htm/preact'
 import type { Signal } from '@preact/signals'
-import { cleanup, fireEvent, render, waitFor } from '@testing-library/preact'
+import { cleanup, fireEvent, render, waitFor, within } from '@testing-library/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { executionWorkspaceAuthority, type ExecutionWorkspaceAuthority } from '../store'
 import type {
@@ -282,6 +282,63 @@ function expectContractCode(run: () => unknown, code: SkillsContractError['code'
     expect((error as SkillsContractError).code).toBe(code)
   }
 }
+
+describe('published name selection', () => {
+  beforeEach(() => {
+    editorApiMocks.fetchAsyncRequestObservation.mockResolvedValue({
+      schema: 'masc.async-request-observation/v1', status: 'unavailable', error: {}, startup_recovery: null,
+    })
+  })
+
+  it('shows the published winner and filters shadowed packages without using row order', async () => {
+    const winner = entry('shared', { source_id: 'z-source' })
+    const shadow = entry('shared', { source_id: 'a-source' })
+    const payload = readyPayload([shadow, winner], [instructionSurface(shadow), instructionSurface(winner)])
+    const snapshot = payload.snapshot as Record<string, unknown>
+    snapshot.effective_skills = [winner.identity]
+    snapshot.shadows = [{ winner: winner.identity, shadowed: shadow.identity }]
+    editorApiMocks.fetchSkills.mockResolvedValue(decodeSkillsResponse(payload))
+    const view = render(html`<${SkillsPanel} />`)
+    const rows = await view.findAllByTestId('skill-row-shared')
+    const winnerRow = rows.find(row => within(row).queryByText('z-source/shared', { exact: true }))!
+    const shadowRow = rows.find(row => within(row).queryByText('a-source/shared', { exact: true }))!
+    expect(within(winnerRow).getByText('Effective by name')).toBeTruthy()
+    expect(within(shadowRow).getByText('Shadowed by z-source/shared')).toBeTruthy()
+    fireEvent.change(view.getByLabelText('Name selection'), { target: { value: 'effective' } })
+    expect(winnerRow.hidden).toBe(false)
+    expect(shadowRow.hidden).toBe(true)
+    fireEvent.change(view.getByLabelText('Name selection'), { target: { value: 'shadowed' } })
+    expect(winnerRow.hidden).toBe(true)
+    expect(shadowRow.hidden).toBe(false)
+    fireEvent.click(view.getByRole('button', { name: 'Clear filters' }))
+    expect(winnerRow.hidden).toBe(false)
+    expect(shadowRow.hidden).toBe(false)
+  })
+
+  it('does not invent a name winner when the published selection is unavailable', async () => {
+    const payload = readyPayload([intake], [instructionSurface(intake)])
+    ;(payload.snapshot as Record<string, unknown>).effective_skills = []
+    editorApiMocks.fetchSkills.mockResolvedValue(decodeSkillsResponse(payload))
+    const view = render(html`<${SkillsPanel} />`)
+    const row = await view.findByTestId('skill-row-work-intake')
+    expect(within(row).getByText('Name selection unavailable')).toBeTruthy()
+    expect(within(row).queryByText('Effective by name')).toBeNull()
+  })
+
+  it('rejects malformed winner identities instead of treating shadow metadata as arbitrary JSON', () => {
+    const payload = readyPayload([intake], [instructionSurface(intake)])
+    ;(payload.snapshot as Record<string, unknown>).shadows = [{ shadowed: intake.identity }]
+    expect(() => decodeSkillsResponse(payload)).toThrow(SkillsContractError)
+  })
+
+  it('rejects shadow pairs with different names or one identity on both sides', () => {
+    for (const winner of [intake.identity, entry('unrelated').identity]) {
+      const payload = readyPayload([intake], [instructionSurface(intake)])
+      ;(payload.snapshot as Record<string, unknown>).shadows = [{ winner, shadowed: intake.identity }]
+      expect(() => decodeSkillsResponse(payload)).toThrow(SkillsContractError)
+    }
+  })
+})
 
 describe('decodeSkillsResponse', () => {
   it('accepts an empty surfaces projection only for an empty snapshot', () => {

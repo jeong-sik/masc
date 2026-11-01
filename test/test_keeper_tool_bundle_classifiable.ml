@@ -39,17 +39,20 @@ let rec remove_tree path =
   | Unix.S_SOCK -> Unix.unlink path
 ;;
 
-let with_publication_recovery_registry ~registry_root f =
+let with_publication_recovery_registry ?(install_eio_context = false) ~registry_root f =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
-  Eio_context.with_test_env ~sw ~net:env#net ~clock:env#clock ~mono_clock:env#mono_clock
-  @@ fun () ->
-  Masc_test_deps.init_eio_clock ~sw env;
-  Masc_test_deps.with_publication_recovery_registry
-    ~sw
-    ~fs:(Eio.Stdenv.fs env)
-    ~registry_root
-    (fun registry -> f registry (Eio.Stdenv.net env) sw)
+  let use_registry () =
+    Masc_test_deps.with_publication_recovery_registry
+      ~sw
+      ~fs:(Eio.Stdenv.fs env)
+      ~registry_root
+      (fun registry -> f registry (Eio.Stdenv.net env) sw)
+  in
+  if install_eio_context then
+    Eio_context.with_test_env ~sw ~net:env#net ~clock:env#clock
+      ~mono_clock:env#mono_clock use_registry
+  else use_registry ()
 ;;
 
 let publication_recovery_turn_context ~registry ~keeper_name =
@@ -316,6 +319,7 @@ let with_bundle_tools
       ?(addon_exports = [])
       ?agent_cell
       ?(with_identity_surface = true)
+      ?(install_eio_context = false)
       ?(check_bundle = fun _config _bundle _net _sw -> ())
       ?(check_on_demand = fun _ -> ())
       f
@@ -376,7 +380,7 @@ let with_bundle_tools
        let ctx_snapshot =
          Keeper_context_runtime.create ~eio:false ~system_prompt:"test"
        in
-       with_publication_recovery_registry ~registry_root:dir
+       with_publication_recovery_registry ~install_eio_context ~registry_root:dir
        @@ fun publication_recovery_registry net sw ->
        Option.iter (fun _ ->
          (* Load receipts read the current Task from the same Owner projection
@@ -503,7 +507,9 @@ let test_the_bundle_is_the_model_visible_surface () =
 ;;
 
 let check_stored_image_reader_is_callable_with_read_authority ~agent_core ~name ~input ~handler =
-  with_bundle_tools ~agent_core
+  (* This authority oracle exercises the eager fallback. Deferred loading is
+     exercised with the real Agent and loader in the projection tests below. *)
+  with_bundle_tools ~agent_core ~with_identity_surface:false
   @@ fun _config _meta _snapshot _plan_index surface tools ->
   let tool =
     match
@@ -625,8 +631,8 @@ let test_addon_exports_load_into_the_running_agent () =
 ;;
 
 (* Exercise the real bundle and real deferred loader with an injected LLM
-   transport. This is the projection API boundary, not the production Keeper
-   candidate driver, which still needs to adopt it. No provider is contacted. *)
+   transport. The separate HTTP test exercises the production Keeper driver.
+   No external provider is contacted. *)
 let image_projection_runtime ~declared =
   let source = {|[runtime]
 default = "image_projection_fixture.selected"
@@ -647,7 +653,18 @@ supports-multimodal-inputs = true
   match config.bindings with
   | [binding] ->
     (match Runtime_instance.of_binding config binding with
-     | Ok runtime -> runtime
+     | Ok runtime ->
+       (* An explicit endpoint capability override makes this fixture's broad
+          provider premise real. Its model declaration remains unchanged:
+          an unknown explicit provider otherwise has conservative defaults. *)
+       (match runtime.Runtime_instance.execution with
+        | Runtime_execution.Agent_core provider ->
+          let provider = {provider with
+            Llm_provider.Provider_config.model_capabilities_override =
+              Some (Llm_provider.Capabilities.capabilities_of_kind provider.kind)} in
+          {runtime with Runtime_instance.execution = Runtime_execution.Agent_core provider}
+        | Codex_app_server _ | Claude_code _ | Antigravity_cli _ | Muse_serve _ ->
+          fail "fixture must materialize an Agent Core runtime")
      | Error reason -> fail (Runtime_config_error.string_of_drop_reason reason))
   | [] | _::_::_ -> fail "fixture must materialize exactly one selected runtime"
 ;;
@@ -669,6 +686,8 @@ let test_per_candidate_image_projection () =
       fail "fixture must use the Agent Core transport" in
   check bool "the provider preset alone advertises images" true
     (Runtime_agent.provider_caps_of_config provider).supports_image_input;
+  check bool "the model has no image capability declaration" true
+    (Option.is_none text_runtime.model.capabilities);
   check bool "absent model declaration withholds admission" false
     (Runtime_agent.runtime_accepts_image_input ~runtime:text_runtime);
   let cell = ref None in
@@ -781,12 +800,13 @@ let test_per_candidate_image_projection () =
     (fun _ _ _ _ _ _ -> ())
 ;;
 
-(* Real run_named candidate failover over its actual HTTP transport. Both
-   endpoints are owned loopback fixtures; no external provider is contacted.
-   The separate test above covers Agent's custom-transport bundle boundary. *)
-let test_driver_image_projection_failover () =
+(* Two legal completed run_named requests over the real HTTP transport, using
+   one bundle/Agent cell. A tool checkpoint forbids same-run failover, so this
+   tests a candidate change between fresh requests without replaying pending
+   work on a different runtime. Both endpoints are owned loopback fixtures. *)
+let test_driver_image_projection_candidate_change () =
   let cell = ref None in
-  with_bundle_tools ~agent_cell:cell
+  with_bundle_tools ~agent_cell:cell ~install_eio_context:true
     ~check_bundle:(fun config bundle net sw ->
       let image = "keeper_image_read" in
       let clock = match Eio_context.get_clock () with Ok clock -> clock | Error detail -> fail detail in
@@ -810,7 +830,8 @@ let test_driver_image_projection_failover () =
             check bool "the vision attempt loads pixels only after its loader result"
               (index > 0) (has_image body);
             if index=0 then `OK,reply ~tool:true
-            else `Bad_gateway,{|{"error":{"message":"owned fixture rotates the candidate"}}|})) in
+            else if index=1 then `OK,reply ~tool:false
+            else fail "vision fixture received an unexpected extra provider round")) in
       let text = Exact_output_fixture.start_server ~sw ~net ~clock
           (Exact_output_fixture.Reply_with (fun index body ->
             check bool "the text attempt never transmits the carried image schema" false (has_image body);
@@ -828,8 +849,6 @@ let test_driver_image_projection_failover () =
             end else fail "text fixture received an unexpected extra provider round")) in
       let config_source ~text_declared = Printf.sprintf {|[runtime]
 default = "projection_vision.vision"
-[runtime.lanes.projection_lane]
-candidates = ["projection_vision.vision", "projection_text.selected"]
 [providers.projection_vision]
 protocol = "openai-compatible-http"
 endpoint = %S
@@ -860,38 +879,56 @@ max-context = 100000
         let captured=ref [] and attempts=ref [] and native_reads=ref 0 in
         let project_for_runtime ~runtime ~carried =
           if runtime.Runtime_instance.id="projection_text.selected" then
-            check bool "the real driver passes the preceding attempt's loaded image for narrowing" true
+            check bool "the real driver carries the completed request's loaded image for narrowing" true
               (List.exists (fun (tool : Agent_core.Tool.t) -> tool.schema.name=image) carried);
           let view=bundle.Keeper_tools_agent_core.project_for_runtime ~runtime ~carried in
           captured := (runtime.Runtime_instance.id,view) :: !captured;view in
         let hooks={Agent_core.Hooks.empty with pre_tool_use=Some (fun event ->
           (match event with Agent_core.Hooks.PreToolUse {tool_name;_} when tool_name=image -> incr native_reads
            | _ -> ());Agent_core.Hooks.Continue)} in
-        let result=Eio.Time.with_timeout_exn clock Exact_output_fixture.fixture_wait_seconds (fun () ->
+        let run_request runtime_id goal =
+          Eio.Time.with_timeout_exn clock Exact_output_fixture.fixture_wait_seconds (fun () ->
           Keeper_turn_driver.run_named
             ~input_source:(Keeper_request_source.Keeper_history {trace_id="projection-driver"})
             ~raw_trace:None ~walk_owner:Keeper_turn_driver.One_shot_walk
             ~base_path:config.base_path ~media_store:(Agent_core.History.Memory_store.create ())
-            ~runtime_id:"projection_lane" ~keeper_name:"projection-driver"
+            ~runtime_id ~keeper_name:"projection-driver"
             ~system_prompt:"Exercise only the owned image-tool projection fixture."
-            ~goal:"Load the native image tool once." ~tools:bundle.tools
+            ~goal ~tools:bundle.tools
             ~agent_core_tools:bundle.agent_core_tools ~project_for_runtime ~agent_ref:cell ~hooks
             ~on_runtime_attempt:(fun attempt ->
               attempts := attempt.Keeper_turn_driver.runtime_id :: !attempts;
               if attempt.runtime_id="projection_text.selected" then load true)
-            ~sw ~net ()) in
-        (match result with Ok selected -> check string "real driver selected its fallback"
-           "projection_text.selected" selected.selected_runtime_id
-         | Error error -> fail (Agent_core.Error.to_string error));
-        check (list string) "the actual walk preserves both candidate attempts"
+            ~sw ~net ())
+        in
+        let assert_completed runtime_id = function
+          | Ok selected ->
+            check string "real driver used the requested candidate" runtime_id
+              selected.Keeper_turn_driver.selected_runtime_id;
+            (match selected.run_result.stop_reason with
+             | Runtime_agent.Completed _ -> ()
+             | Yielded_to_operation_queued _ | Yielded_to_durable_stimulus _
+             | Yielded_after_repeated_tool_call _ | Yielded_after_repeated_assistant_text _
+             | InputRequired _ -> fail "candidate did not complete its own request")
+          | Error error -> fail (Agent_core.Error.to_string error)
+        in
+        assert_completed "projection_vision.vision"
+          (run_request "projection_vision.vision" "Load the native image tool once.");
+        let image_agent = match !cell with Some agent -> agent | None -> fail "image Agent missing" in
+        check bool "the completed image request really loaded its image schema" true
+          (Agent_core.Tool_set.mem image (Agent_core.Agent.tools image_agent));
+        assert_completed "projection_text.selected"
+          (run_request "projection_text.selected" "Try loading the image tool in this new request.");
+        check (list string) "the actual fresh requests use both candidate snapshots"
           ["projection_vision.vision";"projection_text.selected"] (List.rev !attempts);
         (match List.rev !vision_views with
          | false :: true :: rest when List.for_all Fun.id rest -> ()
-         | _ -> fail "the real vision attempt must load and transmit the image schema before failing");
+         | _ -> fail "the completed vision request must load and transmit the image schema");
         check int "neither loading nor refusing dispatches a native image read" 0 !native_reads;
+        check int "image candidate completes after its actual loader success" 2 (Atomic.get vision.posts);
         check int "text candidate finishes after its actual loader refusal" 2 (Atomic.get text.posts);
         let final_agent=match !cell with Some agent -> agent | None -> fail "driver did not retain its Agent" in
-        check bool "the fallback Agent cannot carry the old native image tool" false
+        check bool "the text Agent cannot carry the old native image tool" false
           (Agent_core.Tool_set.mem image (Agent_core.Agent.tools final_agent));
         let selected=match Runtime.get_runtime_by_id "projection_text.selected" with
           | Some runtime -> runtime | None -> fail "replacement fixture runtime is missing" in
@@ -1481,8 +1518,8 @@ let () =
             test_addon_exports_load_into_the_running_agent
         ; test_case "materialized image admission bounds each candidate tool view" `Quick
             test_per_candidate_image_projection
-        ; test_case "real HTTP candidate failover uses the captured image tool admission" `Quick
-            test_driver_image_projection_failover
+        ; test_case "real HTTP candidate changes retain captured image tool admission" `Quick
+            test_driver_image_projection_candidate_change
         ; test_case "effect contracts survive bundle construction" `Quick
             test_bundle_effect_contracts
         ; test_case "no tool advertises a schema reference" `Quick

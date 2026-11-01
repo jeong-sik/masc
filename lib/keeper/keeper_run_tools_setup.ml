@@ -539,7 +539,7 @@ let prepare_agent_setup
     ; on_demand_tool_names
     ; result_bounds
     ; listing = keeper_listing
-    ; project_for_runtime = _
+    ; project_for_runtime = project_bundle_for_runtime
     ; cleanup = keeper_tools_cleanup
     ; terminal_effect_state
     ; gate_replay_delivery
@@ -732,11 +732,12 @@ let prepare_agent_setup
   let expected_base_names =
     base_model_tool_names ~skill_catalog
       ~model_visible_descriptors:turn_model_visible_descriptors () in
-  let check_projection ?deferred_names ~surface ~identity_names tools =
+  let active_model_surface = ref None in
+  let check_projection ?deferred_names ~base_names ~surface ~identity_names tools =
     let actual = List.map (fun (tool : Agent_core.Tool.t) -> tool.schema.name) tools in
     let expected =
       project_model_tool_names ?deferred_names
-        ~base_names:expected_base_names ~identity_names ()
+        ~base_names ~identity_names ()
     in
     let deduped = List.sort_uniq String.compare actual in
     if not (expected = deduped && List.length deduped = List.length actual)
@@ -754,33 +755,50 @@ let prepare_agent_setup
              ])
         "Keeper model tool bundle differs from the descriptor projection"
   in
-  check_projection ~surface:"tools" ~identity_names:attached_names keeper_tools;
-  let agent_core_actual_names =
-    List.map
-      (fun (tool : Agent_core.Tool.t) -> tool.schema.name)
-      keeper_agent_core_tools
+  let check_surfaces ~base_names ~tools ~agent_core_tools ~listing =
+    check_projection ~base_names ~surface:"tools" ~identity_names:attached_names tools;
+    let agent_core_actual_names =
+      List.map
+        (fun (tool : Agent_core.Tool.t) -> tool.schema.name)
+        agent_core_tools
+    in
+    check_projection
+      ~base_names
+      ~surface:"agent_core_tools"
+      ~deferred_names:
+        (match listing with
+         | Keeper_tools_agent_core.No_listing -> []
+         | Keeper_tools_agent_core.Listing { deferred_builtin_names } ->
+           deferred_names_absent_from
+             ~declared_names:deferred_builtin_names
+             ~actual_names:
+               (List.map
+                  (fun (tool : Agent_core.Tool.t) -> tool.Agent_core.Tool.schema.name)
+                  agent_core_tools))
+      ~identity_names:
+        (agent_core_identity_names
+           ~listed:
+             (match listing with
+              | Keeper_tools_agent_core.No_listing -> false
+              | Keeper_tools_agent_core.Listing _ -> true)
+           ~attached_names
+           ~actual_names:agent_core_actual_names)
+      agent_core_tools
   in
-  check_projection
-    ~surface:"agent_core_tools"
-    ~deferred_names:
-      (match keeper_listing with
-       | Keeper_tools_agent_core.No_listing -> []
-       | Keeper_tools_agent_core.Listing { deferred_builtin_names } ->
-         deferred_names_absent_from
-           ~declared_names:deferred_builtin_names
-           ~actual_names:
-             (List.map
-                (fun (tool : Agent_core.Tool.t) -> tool.Agent_core.Tool.schema.name)
-                keeper_agent_core_tools))
-    ~identity_names:
-      (agent_core_identity_names
-         ~listed:
-           (match keeper_listing with
-            | Keeper_tools_agent_core.No_listing -> false
-            | Keeper_tools_agent_core.Listing _ -> true)
-         ~attached_names
-         ~actual_names:agent_core_actual_names)
-    keeper_agent_core_tools;
+  check_surfaces ~base_names:expected_base_names
+    ~tools:keeper_tools ~agent_core_tools:keeper_agent_core_tools ~listing:keeper_listing;
+  let project_for_runtime ~runtime ~carried =
+    let view = project_bundle_for_runtime ~runtime ~carried in
+    let descriptors = List.filter
+        (Keeper_tools_agent_core.descriptor_admitted view.image_admission)
+        turn_model_visible_descriptors in
+    let base_names = base_model_tool_names ~skill_catalog
+        ~model_visible_descriptors:descriptors () in
+    check_surfaces ~base_names ~tools:view.tools ~agent_core_tools:view.agent_core_tools
+      ~listing:view.listing;
+    active_model_surface := Some view;
+    view
+  in
   Log.Keeper.routine
     "keeper:%s tool visibility: registered=%d visible=%d transport_alias=%d \
      operator_only=%d invalid_schema=%d unexplained=%d"
@@ -832,7 +850,8 @@ let prepare_agent_setup
        attempt left its agent in the shared cell. *)
     let schema_filter =
       (Keeper_agent_tool_surface.for_attempt
-         ~checkpoint_owner:!active_checkpoint_owner ~agent_cell ~built:keeper_tools).tools
+         ~checkpoint_owner:!active_checkpoint_owner ~agent_cell
+         ~built:(match !active_model_surface with None -> keeper_tools | Some view -> view.tools)).tools
       |> List.map (fun (tool : Agent_core.Tool.t) -> tool.schema.name) in
     let lane : Keeper_agent_tool_surface.turn_lane =
       if schema_filter <> []
@@ -858,6 +877,8 @@ let prepare_agent_setup
          | Keeper_tools_agent_core.No_listing -> []
          | Keeper_tools_agent_core.Listing { deferred_builtin_names } ->
            deferred_builtin_names)
+    ; current_model_surface = (fun () -> !active_model_surface)
+    ; project_for_runtime
     ; compute_tool_surface
     ; record_tool_assignment
     ; config

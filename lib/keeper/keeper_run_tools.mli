@@ -51,6 +51,9 @@ type agent_setup =
   ; on_demand_tool_names : string list
   ; result_bounds : (string * int) list
       (** {!Keeper_tools_agent_core.tool_bundle.result_bounds}. *)
+  ; project_for_runtime : Keeper_tools_agent_core.model_tool_projection
+      (** Select and retain the candidate's tools under its captured materialized
+          image admission. Called before either execution host is constructed. *)
   ; agent_cell : Agent_core.Agent.t option ref
   ; cleanup : unit -> unit
   ; terminal_effect_state : unit -> Keeper_tools_agent_core.terminal_effect_state

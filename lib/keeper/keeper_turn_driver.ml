@@ -1723,6 +1723,7 @@ let run_named
     ?(tools = [])
     ?(loading_plan = Keeper_official_client_host.All_on_demand)
     ~agent_core_tools
+    ?project_for_runtime
     ?(tool_requirement = Keeper_required_tools.Optional)
     ?required_native_posture
     ?(initial_messages = [])
@@ -2294,23 +2295,42 @@ let run_named
         , Keeper_provider_attempt_effect.No_effect_observed
         , Keeper_attempt_dispatch.Rejected_before_dispatch )
       | Resolved_runtime runtime ->
+      let accepts_image_input, tools, agent_core_tools, loading_plan =
+        match project_for_runtime with
+        | Some (project : Keeper_tools_agent_core.model_tool_projection) ->
+          let carried = match agent_ref with
+            | None -> []
+            | Some cell -> (match !cell with
+                | None -> []
+                | Some agent -> Agent_core.Tool_set.to_list (Agent_core.Agent.tools agent)) in
+          let view = project ~runtime ~carried in
+          let accepts_image_input = match view.image_admission with
+            | Keeper_tools_agent_core.Image_input_admitted -> true
+            | Image_input_unavailable -> false in
+          accepts_image_input, view.tools, view.agent_core_tools,
+          Keeper_official_client_host.Declared {
+            on_demand=view.on_demand_tool_names;result_bounds=view.result_bounds}
+        | None ->
+          let tools_on_wire = match runtime.Runtime_instance.execution, agent_ref with
+            | Runtime_execution.Agent_core _, Some agent_cell ->
+              Keeper_agent_tool_surface.on_the_wire ~agent_cell ~built:agent_core_tools
+            | (Runtime_execution.Agent_core _, None)
+            | ((Runtime_execution.Codex_app_server _ | Antigravity_cli _
+                | Claude_code _ | Muse_serve _), _) -> agent_core_tools in
+          Runtime_agent.runtime_accepts_image_input ~runtime, tools, tools_on_wire, loading_plan
+      in
       (* Freeze admission with this selected candidate, including tools loaded
          later in the loop. A text-only attempt can recover through the explicit
          analysis tool without a provider error or a second implicit inference. *)
       let image_hooks =
         { Agent_core.Hooks.empty with pre_tool_use = Some
             (Keeper_image_read.admission_hook
-               ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input ~runtime)) }
+               ~accepts_image_input) }
       in
       let hooks = Some (match hooks with
         | None -> image_hooks
         | Some hooks -> Agent_core.Hooks.compose ~outer:image_hooks ~inner:hooks)
       in
-      let agent_core_tools = match runtime.Runtime_instance.execution, agent_ref with
-        | Runtime_execution.Agent_core _, Some agent_cell -> Keeper_agent_tool_surface.on_the_wire
-            ~agent_cell ~built:agent_core_tools
-        | (Runtime_execution.Agent_core _, None)
-        | ((Runtime_execution.Codex_app_server _ | (Runtime_execution.Antigravity_cli _ | (Runtime_execution.Claude_code _ | Runtime_execution.Muse_serve _))), _) -> agent_core_tools in
       let source_reader_ready =
         let native_ready = match native_runtime, runtime.Runtime_instance.execution with
           | None, _ -> true
@@ -2572,7 +2592,7 @@ let run_named
             ?on_tool_execution
             ~context_window:(Some (Runtime_instance.max_context_of_runtime runtime))
             ?composed_context:official_client_composed_context
-            ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input ~runtime)
+            ~accepts_image_input
             ?required_native_posture
             ~runtime_id:attempt_runtime_id
             ~keeper_name
@@ -2735,7 +2755,7 @@ let run_named
             ?argument_source:official_argument_source
             ?on_tool_execution
             ?composed_context:official_client_composed_context
-            ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input ~runtime)
+            ~accepts_image_input
             ?required_native_posture
             ~runtime_id:attempt_runtime_id
             ~keeper_name
@@ -2873,7 +2893,7 @@ let run_named
             ~turn_timeout_s:runtime.model.turn_timeout_s
             ~quota_scope:runtime.quota_scope
             ~workspace_root
-            ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input ~runtime)
+            ~accepts_image_input
             ?required_native_posture
             ~runtime_id:attempt_runtime_id
             ~keeper_name
@@ -3008,7 +3028,7 @@ let run_named
               on_native_task_observation)
             ?on_tool_execution
             ?composed_context:official_client_composed_context
-            ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input ~runtime)
+            ~accepts_image_input
             ?required_native_posture
             ~runtime_id:attempt_runtime_id
             ~keeper_name

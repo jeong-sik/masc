@@ -37,6 +37,7 @@ type agent_setup = Keeper_run_tools_hooks.agent_setup =
   ; identity_tool_index : Keeper_identity_tool_index.t
   ; on_demand_tool_names : string list
   ; result_bounds : (string * int) list
+  ; project_for_runtime : Keeper_tools_agent_core.model_tool_projection
   ; agent_cell : Agent_core.Agent.t option ref
   ; cleanup : unit -> unit
   ; terminal_effect_state : unit -> Keeper_tools_agent_core.terminal_effect_state

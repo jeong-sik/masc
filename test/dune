@@ -716,7 +716,6 @@
   test_telemetry_unified_source
   test_telemetry_error_occurred_wire_10358
   test_warn_root_causes
-  test_keeper_tool_bundle_classifiable
   test_keeper_identity_tool_search
   test_mid_turn_resume
   test_telemetry_observe
@@ -1071,7 +1070,6 @@
   test_telemetry_unified_source
   test_telemetry_error_occurred_wire_10358
   test_warn_root_causes
-  test_keeper_tool_bundle_classifiable
   test_keeper_identity_tool_search
   test_mid_turn_resume
   test_telemetry_observe
@@ -2247,6 +2245,12 @@
  (name test_otel_metric_total)
  (modules test_otel_metric_total)
  (libraries alcotest otel_metric_store))
+
+(test
+ (name test_keeper_tool_bundle_classifiable)
+ (modules test_keeper_tool_bundle_classifiable)
+ (libraries masc_test_deps exact_output_fixture mcp_protocol
+  masc.keeper_identity masc.skill_config masc.skill_reference masc.mcp_client))
 
 ; Real local exact-output fixture shared by exact-output lane tests.
 (library

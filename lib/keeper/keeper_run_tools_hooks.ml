@@ -34,6 +34,7 @@ type agent_setup =
   ; identity_tool_index : Keeper_identity_tool_index.t
   ; on_demand_tool_names : string list
   ; result_bounds : (string * int) list
+  ; project_for_runtime : Keeper_tools_agent_core.model_tool_projection
   ; agent_cell : Agent_core.Agent.t option ref
         (** The cell the turn's tools captured, so the AGENT_CORE call site
             fills the one they read rather than a second one of its own. *)
@@ -81,6 +82,8 @@ type ctx =
   ; deferred_tool_names : string list
         (** Built tools held back from the request until [keeper_tool_search]
             names them. Empty when the turn places no listing. *)
+  ; current_model_surface : unit -> Keeper_tools_agent_core.model_tool_surface option
+  ; project_for_runtime : Keeper_tools_agent_core.model_tool_projection
   ; compute_tool_surface :
       turn:int -> current_tool_choice:Agent_core.Types.tool_choice option -> unit ->
       string list * turn_lane
@@ -1022,6 +1025,17 @@ let assemble_hooks
                 (* Deferred compositions follow the current execution owner.
                    A prior Agent Core cell can survive official-client
                    failover; it cannot describe that client's tools or loader. *)
+                let built_tools, all_tool_names, deferred_tool_names =
+                  match ctx.current_model_surface () with
+                  | None -> built_tools, all_tool_names, deferred_tool_names
+                  | Some view ->
+                    let deferred = match view.listing with
+                      | Keeper_tools_agent_core.No_listing -> []
+                      | Listing {deferred_builtin_names} -> deferred_builtin_names in
+                    view.tools,
+                    List.map (fun (tool : Agent_core.Tool.t) -> tool.schema.name) view.tools,
+                    deferred
+                in
                 let attempt_surface = Keeper_agent_tool_surface.for_attempt
                     ~checkpoint_owner:!active_checkpoint_owner
                     ~agent_cell:turn_agent_cell ~built:built_tools in
@@ -1052,7 +1066,7 @@ let assemble_hooks
                     ~tool_choice:current_params.tool_choice ~schema_names:schema_filter
                     ~agent_cell:turn_agent_cell ~built:built_tools in
                 let personal_recall_access = Keeper_request_tool_access.create
-                    ~offered:offered_tools ~deferred_names:ctx.deferred_tool_names
+                    ~offered:offered_tools ~deferred_names:deferred_tool_names
                     ~loader_alive:attempt_surface.loader_alive in
                 let recall_tool_available name =
                   List.exists (fun (tool : Agent_core.Tool.t) ->
@@ -1078,7 +1092,7 @@ let assemble_hooks
                   prepare_request_dynamic_context
                     ~meta ~turn_kind ~system_prompt:turn_system_prompt ~user_message
                     ~post_tool_round ~dynamic_context ~dynamic_context_for_tools
-                    ~deferred_names:ctx.deferred_tool_names
+                    ~deferred_names:deferred_tool_names
                     ~loader_alive:attempt_surface.loader_alive ~host_recall offered_tools in
                 let dynamic_context_partition = dynamic_context in
                 let dynamic_context = Keeper_context_layers.text dynamic_context in
@@ -1418,6 +1432,7 @@ let assemble_hooks
       ; identity_tool_index = ctx.identity_tool_index
       ; on_demand_tool_names = ctx.on_demand_tool_names
       ; result_bounds = ctx.result_bounds
+      ; project_for_runtime = ctx.project_for_runtime
       ; agent_cell = ctx.agent_cell
       ; cleanup = keeper_tools_cleanup
       ; terminal_effect_state

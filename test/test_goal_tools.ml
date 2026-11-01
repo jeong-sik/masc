@@ -1169,16 +1169,21 @@ let test_operator_confirmation_binds_current_proof () =
       ~config ~operator_id (`Assoc ["goal_id", `String goal.id;
         "criterion_revision", `String goal.criterion_revision; "request_id", `String request_id;
         "verification_run_id", `String run_id; "expected_workspace", expected_workspace;
-        "expected_operator_id", `String expected_operator_id]) in
+        "expected_operator_id", `String expected_operator_id;
+        "expected_runtime_instance_id", `String Build_identity.runtime_instance_id]) in
   let required_fields = ["goal_id", `String goal.id; "criterion_revision", `String goal.criterion_revision;
     "request_id", `String verdict.request_id; "verification_run_id", `String verdict.verification_run_id;
-    "expected_operator_id", `String "authenticated-operator"] in
+    "expected_operator_id", `String "authenticated-operator";
+    "expected_runtime_instance_id", `String Build_identity.runtime_instance_id] in
   let refused fields =
     match Server_routes_http_routes_verification.For_testing.commit_goal_confirmation_json
       ~config ~operator_id:"authenticated-operator" (`Assoc fields) with
     | Error _ -> () | Ok _ -> fail "invalid workspace binding accepted" in
   refused required_fields;
   refused (("expected_workspace", workspace) :: List.remove_assoc "expected_operator_id" required_fields);
+  refused (("expected_workspace", workspace) :: List.remove_assoc "expected_runtime_instance_id" required_fields);
+  refused (("expected_workspace", workspace) :: ("expected_runtime_instance_id", `String "different-instance") ::
+    List.remove_assoc "expected_runtime_instance_id" required_fields);
   refused (("expected_workspace", `Null) :: required_fields);
   refused (("expected_workspace", workspace) :: ("expected_workspace", workspace) :: required_fields);
   (match confirm ~expected_workspace:(`Assoc ["base_path", `String "/different"; "masc_root", `String "/different/.masc"]) () with

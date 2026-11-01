@@ -174,7 +174,7 @@ let respond_goal_confirmation ~cors reqd result =
   let status, json = goal_confirmation_response result in
   let status = Http.Response.timeout_envelope_status_override ~status json in
   Http.Response.bytes ~status
-    ~headers:(("cache-control", "private, no-store") :: cors)
+    ~headers:(("cache-control", "private, no-store") :: Server_dashboard_goal_candle.generation_headers @ cors)
     ~content_type:"application/json; charset=utf-8" (Yojson.Safe.to_string json) reqd
 ;;
 
@@ -183,7 +183,7 @@ let commit_goal_confirmation_json ~config ~operator_id json : (Yojson.Safe.t, co
   match json with
                | `Assoc fields ->
                  let names = List.map fst fields in
-                 let allowed = ["goal_id"; "criterion_revision"; "request_id"; "verification_run_id"; "expected_workspace"; "expected_operator_id"] in
+                 let allowed = ["goal_id"; "criterion_revision"; "request_id"; "verification_run_id"; "expected_workspace"; "expected_operator_id"; "expected_runtime_instance_id"] in
                  if List.exists (fun key -> not (List.mem key allowed)) names
                     || List.length names <> List.length (List.sort_uniq String.compare names)
                  then Error (Confirmation_rejected "unknown or duplicate confirmation fields")
@@ -194,6 +194,9 @@ let commit_goal_confirmation_json ~config ~operator_id json : (Yojson.Safe.t, co
                    let* request_id = rejected (non_empty_string_field fields "request_id") in
                    let* verification_run_id = rejected (non_empty_string_field fields "verification_run_id") in
                    let* expected_operator_id = rejected (non_empty_string_field fields "expected_operator_id") in
+                   let* expected_runtime_instance_id = rejected (non_empty_string_field fields "expected_runtime_instance_id") in
+                   let* () = if String.equal expected_runtime_instance_id Build_identity.runtime_instance_id then Ok ()
+                     else Error (Confirmation_rejected "server instance changed; inspect the proof again") in
                    let* () = if String.equal expected_operator_id operator_id then Ok ()
                      else Error (Confirmation_rejected "operator changed; inspect the proof again") in
                    let* () =

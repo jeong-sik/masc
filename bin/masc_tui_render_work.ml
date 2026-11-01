@@ -18,6 +18,22 @@ module Chart = Masc_tui_chart
 
 module Task_id_set = Set.Make (String)
 
+let goal_receipt_authority_current (state : state) (receipt : goal_action_receipt) =
+  match receipt.gar_authority with
+  | None -> true
+  | Some authority ->
+      let current_confirmation = match state.goal_confirmation with
+        | Planning_detail.Inspecting read ->
+          (match Planning_detail.confirmation_view_for read ~goal_id:receipt.gar_goal_id with
+           | Ready confirmation -> Some confirmation
+           | Absent | Loading | Stale _ | Failed _ -> None)
+        | Planning_detail.Submitting _ -> None in
+      let credential_current = state.workspace_identity = Workspace_identity_match
+        && Masc_tui_http.credential_owner_is_current authority.ra_credential_owner in
+      let current_instance = Option.bind state.server_identity (fun identity -> identity.sid_runtime_instance_id) in
+      Planning_detail.receipt_authority_current ~credential_current ~current_instance
+        ~current_confirmation ~receipt:authority
+
 let task_line ~cols ~ordinal ~task_ids ~use_ordinals (task : task) =
   let status = Masc_domain.task_status_to_string task.status in
   (* The icon and the status word share one color so the row's state reads at
@@ -593,14 +609,10 @@ let planning_summary_reading ~cols (state : state) =
          section (text "기준 대비 변화" "Change from baseline") change_rows;
          section (text "목록 밖 목표 이력" "Unlisted Goal history") history]
   in
-  let retired = List.rev state.goal_action_receipts |> List.map (fun (goal_id, ticket, workspace, owner, result) ->
-    let answer = match owner, result with
-      | Some owner, _ when not (Masc_tui_http.credential_owner_is_current owner) ->
-          text "이전 인증의 결과" "Result belongs to an earlier credential"
-      | _, Ok message -> text "응답: " "Response: " ^ Terminal_text.single_line message
-      | _, Error error -> text "오류: " "Error: " ^ Terminal_text.single_line error in
-    Printf.sprintf "%s · %s · %s · %s" (Terminal_text.single_line goal_id)
-      (Terminal_text.single_line workspace) (Terminal_text.single_line ticket) answer) in
+  let retired = List.rev state.goal_action_receipts |> List.map (fun receipt ->
+    let answer = Planning_detail.receipt_outcome_text ~ko ~current:(goal_receipt_authority_current state receipt) receipt.gar_result in
+    Printf.sprintf "%s · %s · %s · %s" (Terminal_text.single_line receipt.gar_goal_id)
+      (Terminal_text.single_line receipt.gar_workspace) (Terminal_text.single_line receipt.gar_ticket) answer) in
   let sections = sections @ (match retired with
     | [] -> []
     | _ -> [section (text "Goal 요청 결과" "Goal request results") retired]) in
@@ -1005,12 +1017,25 @@ let planning_measurement_lines (state : state) (goal : planning_goal) =
 let planning_confirmation_view (state : state) ~goal_id =
   match state.goal_confirmation with
   | Planning_detail.Inspecting read ->
-      let view = Masc_tui_fetched.view_for ~equal:String.equal read ~key:goal_id in
+      let view = Planning_detail.confirmation_view_for read ~goal_id in
       let view = match view with
+        | (Ready _ | Stale _ | Failed _) when state.workspace_identity <> Workspace_identity_match ->
+            Masc_tui_fetched.Failed "Workspace identity is unconfirmed; read the proof again"
         | (Ready confirmation | Stale (confirmation, _))
           when not (Masc_tui_http.credential_owner_is_current confirmation.credential_owner) ->
             Masc_tui_fetched.Failed "Credential changed; read the proof again"
-        | Ready _ | Stale _ | Loading | Absent | Failed _ -> view in
+        | (Ready confirmation | Stale (confirmation, _))
+          when not (Option.exists (fun identity -> identity.sid_runtime_instance_id = Some confirmation.runtime_instance_id) state.server_identity) ->
+            Masc_tui_fetched.Failed "Server changed; read the proof again"
+        | Stale (confirmation, error) ->
+            Stale (confirmation, Planning_detail.confirmation_read_error_message
+              ~credential_is_current:Masc_tui_http.credential_owner_is_current error)
+        | Failed error ->
+            Failed (Planning_detail.confirmation_read_error_message
+              ~credential_is_current:Masc_tui_http.credential_owner_is_current error)
+        | Ready confirmation -> Ready confirmation
+        | Loading -> Loading
+        | Absent -> Absent in
       `Inspect view
   | Planning_detail.Submitting (submitted_goal, _) when String.equal submitted_goal goal_id -> `Submitting
   | Planning_detail.Submitting _ -> `Inspect Absent
@@ -1024,7 +1049,8 @@ let planning_detail_action_rows ~cols ~armed ~drop_reason (goal : planning_goal)
   in
   let actions = List.map item Goal_phase.Public_action.all
     @ (if Goal_phase.moves_goal ~phase:goal.pg_phase ~action:Goal_phase.Confirm_completion
-       then ["[a] Confirm proof"] else []) in
+       then ["[a] Confirm proof"] else if goal.pg_phase = Goal_phase.Completed
+       then ["[a] Inspect confirmation"] else []) in
   (* These are commands, so every action stays visible while its evidence is
      read. Their physical rows are subtracted before the reader is allocated. *)
   Message_layout.wrap_styled_words ~max_cells:(max 1 (framed_inner_width cols - 2))
@@ -1092,13 +1118,12 @@ let planning_detail_lines (state : state) ~confirmation ~cols (goal : planning_g
        | Some error ->
          field ~tone:Planning_detail.Refused "Error" error
        | None -> [])
-    @ (state.goal_action_receipts |> List.filter_map (fun (goal_id, ticket, workspace, owner, result) ->
-         if not (String.equal goal_id goal.pg_id) then None
+    @ (state.goal_action_receipts |> List.filter_map (fun receipt ->
+         if not (String.equal receipt.gar_goal_id goal.pg_id) then None
          else Some (field ~tone:Planning_detail.Unreadable "Request result"
-           (Printf.sprintf "%s · %s · %s" workspace ticket
-             (match owner, result with
-              | Some owner, _ when not (Masc_tui_http.credential_owner_is_current owner) -> "result belongs to an earlier credential"
-              | _, Ok message -> "response: " ^ message | _, Error error -> "error: " ^ error))))
+           (Printf.sprintf "%s · %s · %s" receipt.gar_workspace receipt.gar_ticket
+             (Planning_detail.receipt_outcome_text ~ko:(state.ui_language = Lang_ko)
+               ~current:(goal_receipt_authority_current state receipt) receipt.gar_result))))
        |> List.concat)
   in
   let linked_tasks = List.filter (fun (row : Tui_decode.task) -> List.mem goal.pg_id row.goal_ids) state.tasks in

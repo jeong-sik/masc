@@ -3172,17 +3172,62 @@ let upload_artifact ~(host : string) ~(port : int) ~(bytes : string)
       | Error _ as error -> error
       | Ok json -> Masc_tui_board_upload.uploaded_sha256 json)
 
-let fetch_goal_confirmation ~credential ~host ~port ~goal_id =
+type goal_confirmation_http_error = Confirmation_server_changed | Confirmation_status of int | Confirmation_read_failed of string
+
+let goal_confirmation_header_failure ~expected_instance ~status ~headers =
+  if status < 200 || status >= 300 then Some (Confirmation_status status)
+  else if not (workspace_read_attested headers) then
+    Some (Confirmation_read_failed "Server did not attest the requested workspace read")
+  else
+    let instances = List.filter_map (fun (key, value) ->
+      if String.equal (String.lowercase_ascii key) "x-masc-runtime-instance-id" then Some value else None) headers in
+    match instances with
+    | [instance] when String.equal instance expected_instance -> None
+    | [instance] when String.trim instance <> "" -> Some Confirmation_server_changed
+    | [] | [_] | _ :: _ :: _ -> Some (Confirmation_read_failed "Goal confirmation server instance was not uniquely attested")
+
+let decode_goal_confirmation_response ~expected_instance { Masc_http_client.status; body; headers } =
+  let decode () = decode_json ~allow_empty:false ~status_code:status ~body
+    |> Result.map_error (fun detail -> Confirmation_read_failed detail) in
+  match goal_confirmation_header_failure ~expected_instance ~status ~headers with
+  | None -> decode ()
+  | Some error -> Error error
+
+exception Goal_confirmation_header_refused of goal_confirmation_http_error
+
+let fetch_goal_confirmation ~credential ~expected_instance ~host ~port ~goal_id =
   let path = "/api/v1/goals/confirmation?goal_id=" ^ percent_encode_query_value goal_id in
   let send ~path =
     let url = url_of ~host ~port ~path in
-    match Masc_http_client.get_response_sync ?clock:(request_clock ())
-      ~timeout_sec:(request_timeout_sec ()) ~url ~headers:credential.bound_headers () with
-    | Ok response -> Ok response
-    | Error detail -> Error (Masc.Tui_decode.http_transport_error ~verb:"GET" ~url ~detail) in
-  match Masc_tui_workspace_read.read_bound_response ~send ~host ~port ~path with
-  | Error (Masc_tui_workspace_read.Transport_failed detail | Workspace_refused detail) -> Error detail
-  | Ok { Masc_http_client.status; body; _ } -> decode_json ~allow_empty:false ~status_code:status ~body
+    match request_clock () with
+    | None -> Error "Goal confirmation request clock is unavailable"
+    | Some clock ->
+      let result = on_io_domain (fun () ->
+        let body = Buffer.create 1024 in
+        let on_response ~status ~headers =
+          match goal_confirmation_header_failure ~expected_instance ~status ~headers with
+          | None -> ()
+          | Some failure -> raise (Goal_confirmation_header_refused failure) in
+        match Eio.Time.with_timeout clock (request_timeout_sec ()) (fun () ->
+          Ok (Masc_http_client.get_stream ~clock ~idle_timeout_sec:(request_timeout_sec ())
+            ~url ~headers:credential.bound_headers ~on_response ~on_chunk:(Buffer.add_string body) ())) with
+        | Error `Timeout -> Error "Goal confirmation response timed out"
+        | Ok (Error detail) -> Error detail
+        | Ok (Ok (Masc_http_client.Pool.Buffered {status; headers; body})) ->
+          Ok Masc_http_client.{status; headers; body}
+        | Ok (Ok (Masc_http_client.Pool.Streamed {status; headers; _})) ->
+          Ok Masc_http_client.{status; headers; body=Buffer.contents body}) in
+      Result.map_error (fun detail -> Masc.Tui_decode.http_transport_error ~verb:"GET" ~url ~detail) result in
+  let convert = function
+    | Confirmation_server_changed -> Masc_tui_planning_detail.Server_changed credential.bound_owner
+    | Confirmation_status status -> Masc_tui_planning_detail.Read_http_error (credential.bound_owner, status)
+    | Confirmation_read_failed detail -> Masc_tui_planning_detail.Read_failed (Some credential.bound_owner, detail) in
+  try
+    match Masc_tui_workspace_read.read_bound_response ~send ~host ~port ~path with
+    | Error (Masc_tui_workspace_read.Transport_failed detail | Workspace_refused detail) ->
+      Error (Masc_tui_planning_detail.Read_failed (Some credential.bound_owner, detail))
+    | Ok response -> decode_goal_confirmation_response ~expected_instance response |> Result.map_error convert
+  with Goal_confirmation_header_refused failure -> Error (convert failure)
 
 let decode_goal_candle_response = function
   | { Masc_http_client.status=(401 | 403); _ } -> Error Masc_tui_types.Goal_candle_access_denied

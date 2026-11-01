@@ -1243,6 +1243,7 @@ function GoalDetailPanel({
     goalId: selectedNode.id,
     workspace: binding.workspace,
     credentialScope: JSON.stringify([binding.authRevision, binding.actor]),
+    executionEpoch: binding.authority.epoch,
   } : null
   const confirmationIsCurrent = () => Boolean(binding && selectedGoalId.peek() === selectedNode.id
     && treeDecisionBinding.peek() === binding && treeData.peek() === binding.snapshot

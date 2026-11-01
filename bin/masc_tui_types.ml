@@ -9184,6 +9184,14 @@ type keeper_peer_status =
 
 type goal_candle_failure = Goal_candle_access_denied | Goal_candle_authority_changed | Goal_candle_read_failed of string
 
+type goal_action_receipt = {
+  gar_goal_id : string;
+  gar_ticket : string;
+  gar_workspace : string;
+  gar_authority : Masc_tui_planning_detail.receipt_authority option;
+  gar_result : (string, string) result;
+}
+
 type state = {
   observation_instance : Masc_tui_observation_origin.instance;
   mutable ui_language : ui_language;
@@ -9979,6 +9987,8 @@ type state = {
   mutable goal_timeline: (string, Tui_decode.goal_timeline_event list) Masc_tui_fetched.t;
   mutable goal_candle: (string, unit ref * string * Candle_goal_observation.t) Masc_tui_fetched.t;
   mutable goal_candle_revalidation_attempts: (string * unit ref) list;
+  mutable goal_confirmation_revalidation_attempts: (string * unit ref) list;
+  mutable goal_confirmation_identity_refresh: (string * Masc_tui_planning_detail.confirmation_workspace) option;
   mutable task_history: (string, Masc.Tui_decode_task_inspection.history) Masc_tui_fetched.t;
   mutable task_history_request: string task_history_request option;
   mutable task_history_last_reading: unit ref option;
@@ -10267,7 +10277,7 @@ type state = {
   mutable goal_action_errors: (string * string) list;
   mutable goal_transition_latest: (string * string) list;
   mutable goal_action_inflight: (string * string) list;
-  mutable goal_action_receipts: (string * string * string * unit ref option * (string, string) result) list;
+  mutable goal_action_receipts: goal_action_receipt list;
   mutable goal_confirmation_presented : Masc_tui_planning_detail.confirmation option;
   mutable goal_confirmation:
     Masc_tui_planning_detail.confirmation_state;
@@ -10972,8 +10982,10 @@ let note_goal_action_result state ~goal_id ~ticket result =
     true
   end
 
-let record_goal_action_receipt ?owner state ~goal_id ~ticket ~workspace result =
-  state.goal_action_receipts <- (goal_id, ticket, workspace, owner, result) :: state.goal_action_receipts
+let record_goal_action_receipt ?authority state ~goal_id ~ticket ~workspace result =
+  state.goal_action_receipts <-
+    { gar_goal_id = goal_id; gar_ticket = ticket; gar_workspace = workspace;
+      gar_authority = authority; gar_result = result } :: state.goal_action_receipts
 
 (* The server trims names and accepts ASCII only. Group case aliases
    conservatively even when its filesystem happens to be case-sensitive. *)
@@ -18711,6 +18723,19 @@ let clear_goal_candle_revalidation (state : state) ~goal_id =
   state.goal_candle_revalidation_attempts <-
     List.filter (fun (id, _) -> not (String.equal id goal_id)) state.goal_candle_revalidation_attempts
 
+let clear_goal_confirmation_revalidation (state : state) ~goal_id =
+  state.goal_confirmation_revalidation_attempts <-
+    List.filter (fun (id, _) -> not (String.equal id goal_id)) state.goal_confirmation_revalidation_attempts
+
+let take_goal_confirmation_revalidation (state : state) ~goal_id ~owner =
+  if List.exists (fun (id, previous) -> String.equal id goal_id && previous == owner)
+      state.goal_confirmation_revalidation_attempts then false
+  else begin
+    clear_goal_confirmation_revalidation state ~goal_id;
+    state.goal_confirmation_revalidation_attempts <- (goal_id, owner) :: state.goal_confirmation_revalidation_attempts;
+    true
+  end
+
 let take_goal_candle_revalidation (state : state) ~goal_id ~owner =
   if List.exists (fun (id, previous) -> String.equal id goal_id && previous == owner)
       state.goal_candle_revalidation_attempts then false
@@ -19242,6 +19267,8 @@ let create_state
   goal_timeline = Masc_tui_fetched.initial;
   goal_candle = Masc_tui_fetched.initial;
   goal_candle_revalidation_attempts = [];
+  goal_confirmation_revalidation_attempts = [];
+  goal_confirmation_identity_refresh = None;
   task_history = Masc_tui_fetched.initial;
   task_history_request = None;
   task_history_last_reading = None;

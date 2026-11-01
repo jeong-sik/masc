@@ -1457,7 +1457,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                 |> Server_routes_http_routes_verification.goal_confirmation_response in
               h2_respond_json_value h2_reqd json ~status:(status :> H2.Status.t)
                 ~compress:false
-                ~extra_headers:(("cache-control", "private, no-store") :: workspace_headers @ cors)))
+                ~extra_headers:(("cache-control", "private, no-store") :: Server_dashboard_goal_candle.generation_headers @ workspace_headers @ cors)))
 
       | `POST, "/api/v1/goals/confirmation" ->
           h2_gate_actor h2_reqd (fun state operator_id ->
@@ -1469,7 +1469,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                 |> Server_routes_http_routes_verification.goal_confirmation_response in
               h2_respond_json_value h2_reqd json ~status:(status :> H2.Status.t)
                 ~compress:false
-                ~extra_headers:(("cache-control", "private, no-store") :: cors)))
+                ~extra_headers:(("cache-control", "private, no-store") :: Server_dashboard_goal_candle.generation_headers @ cors)))
 
       | _, "/api/v1/goals/confirmation" ->
           (match Lazy.force route_access with

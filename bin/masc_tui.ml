@@ -15004,6 +15004,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.planning_error <- None;
   state.planning_mode <- Planning_list;
   state.goal_confirmation <- Goal_confirmation.Inspecting Goal_confirmation_read.initial;
+  state.goal_confirmation_identity_refresh <- None;
   state.goals_to_confirm <- Masc_tui_agenda.Not_read;
   state.standalone_lanes_generation <- state.standalone_lanes_generation + 1;
   state.lane_inventory <- None;
@@ -15805,6 +15806,7 @@ let apply_confirmed_server_identity_reading state ~mailbox reading =
    matches again. Only a read that names a workspace goes on to compare it. *)
 let apply_server_identity_reading state ~mailbox reading =
   withdraw_resource_diagram_pending state;
+  let previous_identity = state.server_identity in
   let previous_instance = Option.bind state.server_identity (fun identity -> identity.Tui_decode.sid_runtime_instance_id) in
   (match
     Masc_tui_types.next_workspace_identity ~previous:state.workspace_identity
@@ -15836,6 +15838,19 @@ let apply_server_identity_reading state ~mailbox reading =
   let current_instance = Option.bind state.server_identity (fun identity -> identity.Tui_decode.sid_runtime_instance_id) in
   if previous_instance <> current_instance then begin
     state.goal_candle <- Masc_tui_fetched.clear state.goal_candle;
+    state.goal_confirmation_presented <- None;
+    let confirmation_key = (match state.goal_confirmation with
+     | Goal_confirmation.Inspecting read ->
+       state.goal_confirmation <- Goal_confirmation.Inspecting (Goal_confirmation.suspend_confirmation_read read);
+       Goal_confirmation_read.current_key read
+     | Goal_confirmation.Submitting _ -> None) in
+    state.goal_confirmation_identity_refresh <-
+      (match confirmation_key, previous_identity with
+       | Some goal_id, Some identity ->
+           Some (goal_id, Goal_confirmation.{
+             base_path = Masc.Tui_decode.Canonical_path.to_string identity.sid_base_path;
+             masc_root = Masc.Tui_decode.Canonical_path.to_string identity.sid_masc_root })
+       | (None, _ | _, None) -> None);
     match state.view, state.planning_mode with
     | Planning, Planning_detail goal_id when server_authority_ready state ->
       launch_goal_candle_load state ~mailbox goal_id
@@ -17349,20 +17364,38 @@ let launch_goal_confirmation_read state ~mailbox ~goal_id =
              let workspace = Goal_confirmation.{
                base_path = Masc.Tui_decode.Canonical_path.to_string expected_workspace.sid_base_path;
                masc_root = Masc.Tui_decode.Canonical_path.to_string expected_workspace.sid_masc_root } in
-             launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+             launch_workspace_request state ~mailbox ~boundary_error:(fun detail -> Goal_confirmation.Read_failed (None, detail))
                ~deliver:(fun result -> Goal_confirmation_loaded (request, result))
                (fun () ->
                  let open Result.Syntax in
                  let credential = Masc_tui_http.bind_credential () in
+                 let* runtime_instance_id = match expected_workspace.sid_runtime_instance_id with
+                   | Some instance when String.trim instance <> "" -> Ok instance
+                   | Some _ | None -> Error (Goal_confirmation.Read_failed (Some credential.bound_owner, "Server instance is unavailable; read the server identity again")) in
                  let* json = Masc_tui_workspace_read.with_binding ~host ~port ~expected:expected_workspace
                    ~proof:Masc_tui_workspace_read.Request_precondition (fun () ->
-                     Masc_tui_http.fetch_goal_confirmation ~credential ~host ~port ~goal_id) in
+                     Masc_tui_http.fetch_goal_confirmation ~credential ~expected_instance:runtime_instance_id ~host ~port ~goal_id) in
                  let* confirmation = Goal_confirmation.decode_confirmation ~goal_id ~workspace
-                   ~credential_headers:credential.bound_headers ~credential_owner:credential.bound_owner json in
+                   ~runtime_instance_id ~credential_headers:credential.bound_headers ~credential_owner:credential.bound_owner json
+                   |> Result.map_error (fun detail -> Goal_confirmation.Read_failed (Some credential.bound_owner, detail)) in
                  match confirmation.phase with
-                 | Goal_phase.Awaiting_confirmation -> Ok confirmation
-                 | Goal_phase.Executing | Goal_phase.Verifying | Goal_phase.Completed
-                 | Goal_phase.Dropped | Goal_phase.Paused _ | Goal_phase.Blocked _ -> Error "goal is not awaiting confirmation"))
+                 | Goal_phase.Awaiting_confirmation | Goal_phase.Completed -> Ok confirmation
+                 | Goal_phase.Executing | Goal_phase.Verifying
+                 | Goal_phase.Dropped | Goal_phase.Paused _ | Goal_phase.Blocked _ -> Error (Goal_confirmation.Read_failed (Some credential.bound_owner, "goal is not awaiting confirmation"))))
+
+let resume_goal_confirmation_identity_refresh state ~mailbox =
+  if server_authority_ready state then begin
+    let pending = state.goal_confirmation_identity_refresh in
+    state.goal_confirmation_identity_refresh <- None;
+    match pending, state.view, state.planning_mode, state.server_identity, state.goal_confirmation with
+    | Some (goal_id, workspace), Planning, Planning_detail selected, Some identity, Goal_confirmation.Inspecting read
+      when String.equal goal_id selected
+           && String.equal workspace.base_path (Masc.Tui_decode.Canonical_path.to_string identity.sid_base_path)
+           && String.equal workspace.masc_root (Masc.Tui_decode.Canonical_path.to_string identity.sid_masc_root)
+           && Goal_confirmation_read.current_key read = Some goal_id ->
+        launch_goal_confirmation_read state ~mailbox ~goal_id
+    | _, _, _, _, _ -> ()
+  end
 
 let launch_skill_evidence_read ?composition_run_id state ~mailbox reference =
   if server_authority_ready state then begin
@@ -17414,6 +17447,7 @@ let resume_reads_after_authority_change state ~mailbox ~refresh_inflight
     ~scoped_refresh_inflight ~scoped_refresh_followup;
   let workspace_moved = before.read_workspace <> state.workspace_authority in
   let moved = workspace_moved || before.read_detail != state.detail_read_authority in
+  resume_goal_confirmation_identity_refresh state ~mailbox;
   (* The detail goes first: it restores the remembered Keeper focus and
      marks its identity read pending, so the side reads below neither poll
      the same login again nor ask about the Keeper the cursor fell on. *)
@@ -18771,14 +18805,19 @@ let handle_goal_confirmation_key state ~mailbox =
       match Goal_confirmation_read.view_for ~equal:String.equal read ~key:goal_id with
        | Ready confirmation when not (Option.exists (fun identity ->
            String.equal confirmation.workspace.base_path (Masc.Tui_decode.Canonical_path.to_string identity.sid_base_path)
-           && String.equal confirmation.workspace.masc_root (Masc.Tui_decode.Canonical_path.to_string identity.sid_masc_root)) state.server_identity) ->
+           && String.equal confirmation.workspace.masc_root (Masc.Tui_decode.Canonical_path.to_string identity.sid_masc_root)
+           && identity.sid_runtime_instance_id = Some confirmation.runtime_instance_id) state.server_identity) ->
            state.goal_confirmation_presented <- None;
-           report_action state "error" "Goal confirmation workspace changed; read the proof again";
+           report_action state "error" "Goal confirmation workspace or server changed; read the proof again";
+           clear_goal_confirmation_revalidation state ~goal_id;
            launch_goal_confirmation_read state ~mailbox ~goal_id
        | Ready confirmation when not (Masc_tui_http.credential_owner_is_current confirmation.credential_owner) ->
            state.goal_confirmation_presented <- None;
            report_action state "error" "Goal confirmation credential changed; read the proof again";
+           clear_goal_confirmation_revalidation state ~goal_id;
            launch_goal_confirmation_read state ~mailbox ~goal_id
+       | Ready confirmation when confirmation.phase = Goal_phase.Completed ->
+           report_action state "system" "Goal confirmation is already recorded; no additional request sent"
        | Ready confirmation when state.goal_confirmation_presented <> Some confirmation ->
            report_action state "system"
              (ui_text state
@@ -18792,7 +18831,8 @@ let handle_goal_confirmation_key state ~mailbox =
            else begin
            let origin = Option.fold ~none:"unconfirmed" ~some:(fun identity ->
              Masc.Tui_decode.Canonical_path.to_string identity.sid_base_path
-             ^ " (masc root " ^ Masc.Tui_decode.Canonical_path.to_string identity.sid_masc_root ^ ")") state.server_identity in
+             ^ " (masc root " ^ Masc.Tui_decode.Canonical_path.to_string identity.sid_masc_root ^ ")") state.server_identity
+             ^ " (server instance " ^ confirmation.runtime_instance_id ^ ")" in
            let verdict = confirmation.Goal_confirmation.verdict in
            let Goal_store.Criterion criterion = verdict.Goal_verification.criterion in
            let proof_context = " (criterion " ^ criterion.revision
@@ -18801,34 +18841,54 @@ let handle_goal_confirmation_key state ~mailbox =
            let annotate_error error =
              "Goal confirmation did not return a confirmed result; inspect the Goal before retrying: " ^ error
              ^ proof_context in
+           let receipt_authority = Goal_confirmation.confirmation_receipt_authority confirmation in
            state.goal_confirmation <- Goal_confirmation.Submitting
-               (goal_id, Goal_confirmation_read.clear read);
+               (goal_id, Goal_confirmation.suspend_confirmation_read read);
            state.planning_scroll <- 0;
            let workspace_authority = state.workspace_authority in
            let workspace_read_authority = state.workspace_read_authority in
+           let expected_workspace = state.server_identity in
            launch_workspace_request ~operation:true state ~mailbox ~boundary_error:Fun.id
-             ~cancelled:(Goal_confirmation_submitted (goal_id, ticket, origin, confirmation.credential_owner, Error (annotate_error "request interrupted")))
-             ~deliver:(fun result -> Goal_confirmation_submitted (goal_id, ticket, origin, confirmation.credential_owner,
+             ~cancelled:(Goal_confirmation_submitted (goal_id, ticket, origin, receipt_authority, Error (annotate_error "request interrupted")))
+             ~deliver:(fun result -> Goal_confirmation_submitted (goal_id, ticket, origin, receipt_authority,
                result |> Result.map (fun message -> message ^ proof_context) |> Result.map_error annotate_error))
              (fun () ->
                let open Result.Syntax in
                let credential = Masc_tui_http.bind_credential () in
                let* () = if credential.bound_owner == confirmation.credential_owner then Ok ()
                  else Error "Goal confirmation credential changed; read the proof again" in
-               let* () = if workspace_authority = state.workspace_authority
+               let authority_current () = workspace_authority = state.workspace_authority
                  && workspace_read_authority == state.workspace_read_authority
                  && server_authority_ready state && state.port = port
-                 && Masc_tui_http.credential_owner_is_current confirmation.credential_owner
-                 then Ok () else Error "Goal confirmation authority changed; read the proof again" in
+                 && Option.exists (fun identity -> identity.Tui_decode.sid_runtime_instance_id = Some confirmation.runtime_instance_id) state.server_identity
+                 && Masc_tui_http.credential_owner_is_current confirmation.credential_owner in
+               let* expected_workspace = match expected_workspace with
+                 | Some expected -> Ok expected
+                 | None -> Error "Goal confirmation workspace is unavailable" in
+               let* () = if authority_current () then Ok ()
+                 else Error "Goal confirmation authority changed; read the proof again" in
                let* json = Masc_tui_http.post_goal_confirmation ~host ~port confirmation in
                let* confirmed = Goal_confirmation.decode_confirmation ~goal_id ~workspace:confirmation.workspace
-                 ~credential_headers:confirmation.credential_headers ~credential_owner:confirmation.credential_owner json in
-               match confirmed.phase with
-               | Goal_phase.Completed
-                 when Goal_confirmation.same_confirmation_binding confirmation confirmed ->
-                   Ok "completion confirmed"
-               | Goal_phase.Executing | Goal_phase.Verifying | Goal_phase.Awaiting_confirmation
-               | Goal_phase.Dropped | Goal_phase.Paused _ | Goal_phase.Blocked _ | Completed -> Error "goal confirmation: server did not confirm completion"
+                 ~runtime_instance_id:confirmation.runtime_instance_id ~credential_headers:confirmation.credential_headers ~credential_owner:confirmation.credential_owner json in
+               let* () = if confirmed.phase = Goal_phase.Completed
+                   && Goal_confirmation.same_confirmation_binding confirmation confirmed
+                 then Ok () else Error "goal confirmation: server did not confirm the inspected proof" in
+               let* () = if authority_current () then Ok ()
+                 else Error "Goal confirmation authority changed before readback" in
+               let* readback_json = Masc_tui_workspace_read.with_binding ~host ~port ~expected:expected_workspace
+                 ~proof:Masc_tui_workspace_read.Request_precondition (fun () ->
+                   Masc_tui_http.fetch_goal_confirmation ~credential ~expected_instance:confirmation.runtime_instance_id ~host ~port ~goal_id)
+                 |> Result.map_error (function
+                   | Goal_confirmation.Read_failed _ -> "Goal confirmation readback failed; inspect the current proof"
+                   | Goal_confirmation.Read_http_error (_, status) -> Printf.sprintf "Goal confirmation readback failed (HTTP %d)" status
+                   | Goal_confirmation.Server_changed _ -> "Goal confirmation server changed before readback") in
+               let* readback = Goal_confirmation.decode_confirmation ~goal_id ~workspace:confirmation.workspace
+                 ~runtime_instance_id:confirmation.runtime_instance_id ~credential_headers:confirmation.credential_headers ~credential_owner:confirmation.credential_owner readback_json in
+               if authority_current () && readback.phase = Goal_phase.Completed
+                  && Goal_confirmation.same_confirmation_binding confirmation readback
+                  && Goal_confirmation.same_recorded_confirmation confirmed readback
+               then Ok "completion confirmed by readback"
+               else Error "goal confirmation: readback did not match the confirmed proof and operator record"
              )
            end
        | Loading -> ()
@@ -18837,6 +18897,7 @@ let handle_goal_confirmation_key state ~mailbox =
           answered. Ask again. *)
        | Absent | Stale _ | Failed _ ->
            state.planning_scroll <- 0;
+           clear_goal_confirmation_revalidation state ~goal_id;
            launch_goal_confirmation_read state ~mailbox ~goal_id)
 
 (* The lifecycle keys on a goal detail. The first press names the action, the
@@ -20106,8 +20167,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
           record_goal_action_receipt state ~goal_id ~ticket ~workspace result;
           report_action state "error" ("Goal " ^ goal_id ^ " from " ^ workspace
             ^ ": a request outcome arrived after workspace authority was withdrawn; inspect Work summary")
-        | Workspace_operation (Goal_confirmation_submitted (goal_id, ticket, workspace, owner, result)) ->
-          record_goal_action_receipt ~owner state ~goal_id ~ticket ~workspace result;
+        | Workspace_operation (Goal_confirmation_submitted (goal_id, ticket, workspace, authority, result)) ->
+          record_goal_action_receipt ~authority state ~goal_id ~ticket ~workspace result;
           report_action state "error" ("Goal " ^ goal_id ^ " from " ^ workspace
             ^ ": a confirmation outcome arrived after workspace authority was withdrawn; inspect Work summary")
         | Workspace_operation (Resource_share_changed (request, result)) ->
@@ -21771,41 +21832,75 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
              ~scoped_refresh_followup ~mailbox
        | Error err ->
            report_action state "error" (label ^ err))
-  | Goal_confirmation_submitted (goal_id, ticket, workspace, owner, result) ->
-      record_goal_action_receipt ~owner state ~goal_id ~ticket ~workspace result;
+  | Goal_confirmation_submitted (goal_id, ticket, workspace, authority, result) ->
+      record_goal_action_receipt ~authority state ~goal_id ~ticket ~workspace result;
       (match state.goal_confirmation with
        | Goal_confirmation.Submitting (submitted_goal, read) when String.equal submitted_goal goal_id ->
            state.goal_confirmation <- Goal_confirmation.Inspecting read
        | Goal_confirmation.Submitting _ | Goal_confirmation.Inspecting _ -> ());
-      let owned = Masc_tui_http.credential_owner_is_current owner in
-      let status = Result.map_error (fun _ -> "Confirmation result is in the request history") result in
+      let owned = Masc_tui_http.credential_owner_is_current authority.ra_credential_owner
+        && Option.exists (fun identity -> identity.Tui_decode.sid_runtime_instance_id = Some authority.ra_runtime_instance_id) state.server_identity in
+      let status = if owned then Result.map_error (fun _ -> "Confirmation result is in the request history") result
+        else Error "Confirmation outcome belongs to an earlier server or credential; inspect request history" in
       let current = note_goal_action_result state ~goal_id ~ticket status in
       let label = "Goal " ^ goal_id ^ (if current then "" else " (earlier request)") ^ ": " in
       (match owned, result with
        | false, _ ->
-           report_action state "system" (label ^ "confirmation result belongs to an earlier credential; inspect the original workspace")
-       | true, Ok message ->
-           report_action state "system" (label ^ message);
+           report_action state "system" (label ^ "confirmation result belongs to an earlier server or credential; inspect the original workspace")
+       | true, Ok _ ->
+           report_action state "system" (label ^ "confirmation response received; inspect the current proof and request history");
            start_http_refresh state ~host:(server_peer_host)
              ~port:state.port ~intent:Revalidate
              ~refresh_inflight:http_refresh_inflight
              ~scoped_refresh_inflight:http_scoped_refresh_inflight
              ~scoped_refresh_followup ~mailbox
-       | true, Error err ->
-           report_action state "error" (label ^ err))
+       | true, Error _ ->
+           report_action state "error" (label ^ "confirmation outcome unconfirmed; inspect the current proof and request history"));
+      (match state.view, state.planning_mode with
+       | Planning, Planning_detail selected when String.equal selected goal_id ->
+           state.goal_confirmation_identity_refresh <- Some (goal_id, authority.ra_workspace);
+           resume_goal_confirmation_identity_refresh state ~mailbox
+       | _, _ -> ())
   | Goal_confirmation_loaded (request, result) ->
       (match state.goal_confirmation with
        | Goal_confirmation.Inspecting read ->
-           if Goal_confirmation_read.is_current ~equal:String.equal read request then begin
+           let current = Goal_confirmation_read.is_current ~equal:String.equal read request in
+           if current then begin
              state.planning_scroll <- 0;
              state.goal_confirmation_presented <- None
            end;
+           let changed_owner = match result with
+             | Error (Goal_confirmation.Server_changed owner)
+               when current && Masc_tui_http.credential_owner_is_current owner -> Some owner
+             | Ok _ | Error (Goal_confirmation.Read_failed _ | Goal_confirmation.Read_http_error _ | Goal_confirmation.Server_changed _) -> None in
+           let credential_changed = match result with
+             | Ok confirmation -> not (Masc_tui_http.credential_owner_is_current confirmation.credential_owner)
+             | Error (Goal_confirmation.Read_failed (Some owner, _) | Goal_confirmation.Read_http_error (owner, _) | Goal_confirmation.Server_changed owner) ->
+                 not (Masc_tui_http.credential_owner_is_current owner)
+             | Error (Goal_confirmation.Read_failed (None, _)) -> false in
            let result = match result with
              | Ok confirmation when not (Masc_tui_http.credential_owner_is_current confirmation.credential_owner) ->
-                 Error "Goal confirmation credential changed; read the proof again"
-             | Ok _ | Error _ -> result in
+                 Error (Goal_confirmation.Read_failed (Some confirmation.credential_owner, "Goal confirmation credential changed; read the proof again"))
+             | Ok confirmation when not (Option.exists (fun identity ->
+                 identity.Tui_decode.sid_runtime_instance_id = Some confirmation.runtime_instance_id) state.server_identity) ->
+                 Error (Goal_confirmation.Read_failed (Some confirmation.credential_owner, "Goal confirmation server changed; read the proof again"))
+             | Ok confirmation -> Ok confirmation
+             | Error failure -> Error failure in
+           let goal_id = Goal_confirmation_read.request_key request in
+           (match result with Ok _ when current -> clear_goal_confirmation_revalidation state ~goal_id | Ok _ | Error _ -> ());
            state.goal_confirmation <- Goal_confirmation.Inspecting
-             (Goal_confirmation_read.complete ~equal:String.equal read request result)
+             (Goal_confirmation_read.complete ~equal:String.equal read request result);
+           (match changed_owner, state.view, state.planning_mode with
+            | Some owner, Planning, Planning_detail selected when String.equal goal_id selected
+                && take_goal_confirmation_revalidation state ~goal_id ~owner ->
+              start_http_refresh state ~host:server_peer_host ~port:state.port ~intent:Revalidate
+                ~refresh_inflight:http_refresh_inflight ~scoped_refresh_inflight:http_scoped_refresh_inflight
+                ~scoped_refresh_followup ~mailbox
+            | (Some _ | None), _, _ -> ());
+           (match credential_changed, current, state.view, state.planning_mode with
+            | true, true, Planning, Planning_detail selected when String.equal goal_id selected ->
+                launch_goal_confirmation_read state ~mailbox ~goal_id
+            | _, _, _, _ -> ())
        | Goal_confirmation.Submitting _ -> ())
   | Verification_evidence_exported (request, result) ->
       let progress = Atomic.get request.vex_progress in

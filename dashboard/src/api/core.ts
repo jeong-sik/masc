@@ -956,6 +956,8 @@ export async function post<T>(
   timeoutMs = DEFAULT_POST_TIMEOUT_MS,
   signal?: AbortSignal,
   consumeWithinTimeout = false,
+  opts: { reportCredentialRefusal?: boolean; preserveErrorBodyFailure?: boolean;
+    beforeResponseBody?: (response: Pick<Response, 'status' | 'statusText' | 'ok' | 'headers'>) => void } = {},
 ): Promise<T> {
   const init = {
     method: 'POST',
@@ -964,11 +966,19 @@ export async function post<T>(
       ...(extraHeaders ?? {}),
     },
     body: JSON.stringify(body),
+    reportCredentialRefusal: opts.reportCredentialRefusal,
     ...(signal ? { signal } : {}),
   }
   const consumeBody = Boolean(signal) || consumeWithinTimeout
   const consume = async (res: Response): Promise<T> => {
-    if (!res.ok) throw await apiRequestErrorFromResponse('POST', path, res, consumeBody)
+    if (opts.beforeResponseBody) {
+      try { opts.beforeResponseBody(res) }
+      catch (reason) {
+        if (consumeBody) throw new ResponseHeaderRejected(reason)
+        throw reason
+      }
+    }
+    if (!res.ok) throw await apiRequestErrorFromResponse('POST', path, res, consumeBody, opts.preserveErrorBodyFailure)
     return parseJsonResponse<T>('POST', path, res, consumeBody)
   }
   if (consumeBody) return fetchWithTimeout(path, init, timeoutMs, consume)

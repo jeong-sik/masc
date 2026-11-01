@@ -7411,11 +7411,11 @@ let row_list (state : state) : row_list option =
                     ~selected:(Masc_tui_overview_tasks.selection state.task_focus))
              in
              windowed ~count:(List.length rows) ~cursor (fun index ->
-               state.task_focus <-
-                 Masc_tui_overview_tasks.Task_focus
+               task_list_user_focus state
+                 (Masc_tui_overview_tasks.Task_focus
                    { selected =
                        Option.map (fun (task : Tui_decode.task) -> task.id)
-                         (List.nth_opt rows index) })
+                         (List.nth_opt rows index) }))
        | Planning_list ->
            let count =
              match state.planning with
@@ -27363,6 +27363,28 @@ Use relative paths for resources already held in the package. -->
         | Presented.Reject_action | Presented.Reject_paste ->
             pointer_gesture := Masc_tui_pane_selection.Idle;
             None in
+      (* A backlog refresh can withdraw the visible Task before the list that
+         replaces it is emitted. No action belongs to that unseen list yet. *)
+      let task_reader_decision = match input with
+        | None -> Presented.Accept_input
+        | Some event ->
+            let kind = match event with
+              | Pasted _ -> Presented.Paste
+              | Graphics_reply _ -> Presented.Protocol
+              | Key _ | Mouse_left_press _ | Mouse_left_drag _ | Mouse_left_release _
+              | Mouse_wheel _ -> Presented.Action in
+            Presented.decide_unpresented_input
+              ~frame_presented:(not (task_detail_reader_withdrawn state (!presented).reader))
+              ~external_surface:(state.image_open || state.msx_open) kind in
+      (match task_reader_decision with
+       | Presented.Reject_paste when Option.is_some interrupted_paste ->
+           presented := Presented.reject_recovery !presented
+       | Presented.Accept_input | Presented.Reject_action | Presented.Reject_paste -> ());
+      let input = match task_reader_decision with
+        | Presented.Accept_input -> input
+        | Presented.Reject_action | Presented.Reject_paste ->
+            pointer_gesture := Masc_tui_pane_selection.Idle;
+            None in
       (* A rejected press may be followed by motion/release after the replacement
          frame. Without an accepted press there is no gesture to complete;
          that tail must not acknowledge the displayed rejection either. *)
@@ -27385,7 +27407,7 @@ Use relative paths for resources already held in the package. -->
         | Presented.Reject_action | Presented.Reject_paste -> true in
       let rejected_operator_input = rejected || decision_rejected unpresented_decision
         || decision_rejected panel_decision || decision_rejected peer_owner_decision
-        || decision_rejected queue_viewport_decision
+        || decision_rejected queue_viewport_decision || decision_rejected task_reader_decision
         || orphan_pointer_tail in
       let panel_owns_input = Option.is_some current_panel
         && panel_owner_matches current_panel
@@ -27616,6 +27638,16 @@ Use relative paths for resources already held in the package. -->
        | Presented.Reject_paste ->
            report_input_rejection state Masc_tui_action_notice.Paste_rejected
              "Queue changed: paste was not applied; retry in a text field";
+           Render_schedule.request render_schedule Render_schedule.Background);
+      (match task_reader_decision with
+       | Presented.Accept_input -> ()
+       | Presented.Reject_action ->
+           report_input_rejection state Masc_tui_action_notice.Input_rejected
+             "Task view changed: input was not applied; review and retry";
+           Render_schedule.request render_schedule Render_schedule.Background
+       | Presented.Reject_paste ->
+           report_input_rejection state Masc_tui_action_notice.Paste_rejected
+             "Task view changed: paste was not applied; review and retry";
            Render_schedule.request render_schedule Render_schedule.Background);
       reconcile_chat_focus ();
       (* Any deliberate input withdraws a standing Ctrl-C. Without this the
@@ -35116,9 +35148,9 @@ Use relative paths for resources already held in the package. -->
                        move_task_detail
                          (Masc_tui_types.scroll_down_from state.task_detail_scroll ~by:1)
                      end else
-                       state.task_focus <-
+                       task_list_user_focus state (
                          Masc_tui_overview_tasks.move state.tasks state.task_focus
-                           Masc_tui_overview_tasks.Next
+                           Masc_tui_overview_tasks.Next)
                  | Planning_list ->
                      let goals =
                        match state.planning with
@@ -35449,9 +35481,9 @@ Use relative paths for resources already held in the package. -->
                      if Option.is_some (task_detail_on_screen state) then begin
                        move_task_detail (max 0 (state.task_detail_scroll - 1))
                      end else
-                       state.task_focus <-
+                       task_list_user_focus state (
                          Masc_tui_overview_tasks.move state.tasks state.task_focus
-                           Masc_tui_overview_tasks.Previous
+                           Masc_tui_overview_tasks.Previous)
                  | Planning_list ->
                      if state.planning_cursor > 0 then
                        state.planning_cursor <- state.planning_cursor - 1
@@ -36081,8 +36113,8 @@ Use relative paths for resources already held in the package. -->
             | Keepers Keeper_runtime_pick -> ()
             | Planning when state.planning_mode = Planning_list
                             && Option.is_none (task_detail_on_screen state) ->
-                state.task_focus <-
-                  Masc_tui_overview_tasks.toggle state.tasks state.task_focus
+                task_list_user_focus state
+                  (Masc_tui_overview_tasks.toggle state.tasks state.task_focus)
             | Keepers (Keeper_list | Keeper_detail) ->
                 (* Tool calls, from the roster and from detail, the way logs
                    are: the keeper under the cursor is the one asked about. *)

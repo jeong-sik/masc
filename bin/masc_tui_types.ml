@@ -20232,20 +20232,31 @@ let same_task_detail_owner a b =
 let task_detail_owner_current state owner =
   Option.exists (same_task_detail_owner owner) (task_detail_owner state)
 
-let task_history_request_in_scope state request =
-  let task_id = Masc_tui_fetched.request_key request.thr_ticket in
+let task_detail_owner_in_scope state owner =
+  let current = task_detail_owner_current state owner in
   state.view = Planning && state.planning_mode = Planning_list
   && Masc_tui_overview_tasks.is_focused state.task_focus
-  && state.task_detail_id = Some task_id
-  && state.workspace_read_authority == request.thr_reading
+  && state.task_detail_id = Some owner.tdo_task_id
+  && state.workspace_read_authority == owner.tdo_reading
   (* An unavailable or degraded local read cannot prove Task removal. A
      recovered backup can omit newer Tasks; unrelated archive errors also make
      this conservative, but must never turn an uncertain absence into fact. *)
   && match state.task_reading,state.tasks_error with
      | (Masc_tui_overview_tasks.Rows_unread | Rows_unavailable _),_ -> true
      | Rows_read _,Some _ -> true
-     | Rows_read _,None -> Option.exists (fun owner -> owner.tdo_task_id = task_id)
-         (task_detail_owner state)
+     | Rows_read _,None -> current
+
+let task_history_request_in_scope state request =
+  task_detail_owner_in_scope state
+    {tdo_task_id=Masc_tui_fetched.request_key request.thr_ticket;
+     tdo_reading=request.thr_reading}
+
+let task_detail_end_in_scope state owner =
+  task_detail_owner_in_scope state owner
+  && match state.task_focus with
+     | Masc_tui_overview_tasks.No_task_focus -> false
+     | Task_focus {selected=None} -> true
+     | Task_focus {selected=Some selected} -> selected = owner.tdo_task_id
 
 let task_detail_following_end state =
   Option.exists (task_detail_owner_current state) state.task_detail_follow_end
@@ -20255,13 +20266,21 @@ let current_task_detail_presented state =
   | Some shown when task_detail_owner_current state shown.tdp_owner -> Some shown
   | Some _ | None -> None
 
+let task_detail_reader_withdrawn state reader =
+  Option.is_some (task_detail_of_reader reader)
+  && Option.is_none (current_task_detail_presented state)
+
 let task_detail_viewport_changed state ~count ~height =
   match current_task_detail_presented state with
   | None -> true
   | Some shown -> count <> shown.tdp_count || height <> shown.tdp_height
 
 let reconcile_task_detail_scroll state =
-  if not (task_detail_following_end state) then state.task_detail_follow_end <- None;
+  (* An unread or degraded backlog hides the viewport, but does not prove
+     that its Task disappeared. Keep the pending End until the same owner is
+     visible again or an explicit navigation/workspace change retires it. *)
+  if not (Option.exists (task_detail_end_in_scope state) state.task_detail_follow_end)
+  then state.task_detail_follow_end <- None;
   if Option.is_none (current_task_detail_presented state) then
     state.task_detail_presented <- None
 
@@ -20297,6 +20316,13 @@ let task_detail_select_end state ~cols =
       then Some shown.tdp_owner else None
 
 let task_detail_cancel_follow_end state = state.task_detail_follow_end <- None
+
+let task_list_user_focus state focus =
+  (match state.task_detail_follow_end, focus with
+   | Some _, Masc_tui_overview_tasks.Task_focus {selected=None} -> ()
+   | Some owner, Task_focus {selected=Some selected} when selected=owner.tdo_task_id -> ()
+   | (Some _ | None), (Task_focus _ | No_task_focus) -> task_detail_cancel_follow_end state);
+  state.task_focus <- focus
 
 let task_detail_user_scroll state offset =
   task_detail_cancel_follow_end state;

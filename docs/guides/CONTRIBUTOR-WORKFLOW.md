@@ -270,14 +270,29 @@ Reviewers clear their own REQUEST_CHANGES when the corrected code resolves their
 findings. A green CI run alone does not resolve a finding.
 After rereview, use `approve-guard.sh --replace-own-cr REVIEW_ID` to replace
 your own open request with a current-head approval; repeat the option to name
-several requests. Each ID must belong to your authenticated account on that PR.
+several requests. Name each unresolved request signed by the Keeper whose review
+is being replaced; other Keepers sharing the account can resolve their own
+requests separately, and those requests continue to block consumption. An
+unsigned request or a request signed by another Keeper cannot be claimed just
+because the GitHub account is shared; its actual owner must resolve it. The
+guard compares claims in review bodies, not authenticated Keeper sessions, so
+verify actual ownership separately. Replacement order is determined from
+submission times, not review IDs. Missing times or a tie for an account's latest
+formal review leave ordering unavailable; a replacement must be strictly later
+than its request.
 Existing CRs and comment verdicts do not prevent recording a new independent
-approval. At merge/receipt consumption, each account's unresolved FAIL/HOLD still
-blocks: a PASS from another account, including the PR author, cannot clear it.
-Keeper names are diagnostic; sharing a GitHub login does not add an independent
-formal reviewer. The guard never dismisses another account's request. All head,
-diff, identity and Release CI checks remain; ordinary source publication does
+approval from a different account. At merge/receipt consumption, each account's
+unresolved FAIL/HOLD still blocks: a PASS from another account, including the PR
+author, cannot clear it.
+Keeper names are claims, not authenticated identities; sharing a GitHub login
+does not add an independent formal reviewer. The guard never dismisses another
+account's request. All head, diff, identity and Release CI checks remain;
+ordinary source publication does
 not wait for selected CI, while merge admission retains the CI pin check.
+
+The ownership check above covers GitHub change-request reviews. Structured
+FAIL/HOLD comments are still reduced by GitHub account, so the separate comment
+path does not verify which Keeper authored a shared account's decision.
 
 The ordinary source-review verdict uses actual values:
 

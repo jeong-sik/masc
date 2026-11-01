@@ -145,8 +145,8 @@ admit_review() {
     --base-sha "$pr_base_sha" --current-diff "$current_diff" --release-run "${release_run:-}"
 }
 review_rows() {
-  ci_gh_json "repos/$repo/pulls/$pr/reviews?per_page=100" '.[] | select(.state == "APPROVED" or .state == "CHANGES_REQUESTED" or .state == "DISMISSED") | [.user.login, (.id|tostring), .state] | @tsv' |
-    sort -t "$(printf '\t')" -k1,1 -k2,2nr
+  ci_gh_json "repos/$repo/pulls/$pr/reviews?per_page=100" '.[] | select(.state == "APPROVED" or .state == "CHANGES_REQUESTED" or .state == "DISMISSED") | @json' |
+    python3 "$here/review-formal-order.py"
 }
 check_reviews() {
   local all_rows rows who rid state bound scope_status review_json admit_status replacement_id owned_state actor_id
@@ -159,6 +159,10 @@ check_reviews() {
     owned_state=$(printf '%s\n' "$all_rows" | awk -F '\t' -v actor="$me" -v rid="$replacement_id" '$1==actor && ("id:" $2)==("id:" rid) {print $3}')
     [ "$owned_state" = CHANGES_REQUESTED ] || refuse "--replace-own-cr $replacement_id does not name this account's open request on this PR"
   done
+  # An older request can still be unresolved after another Keeper sharing the
+  # account has approved. Ownership is checked against the complete review list
+  # below; the account's latest review does not decide whether an ID is open.
+  replaced="$replace_cr"
   while IFS=$'\t' read -r who rid state; do
     [ -n "$who" ] || continue
     if [ "$state" = CHANGES_REQUESTED ]; then
@@ -166,7 +170,6 @@ check_reviews() {
         refuse "open CHANGES_REQUESTED from $who (review $rid)"
       elif [ "$who" = "$me" ]; then
         [ -n "$replace_cr" ] || refuse "open CHANGES_REQUESTED from $who (review $rid); use --replace-own-cr $rid after rereview"
-        replaced="$replace_cr"
       else
         # Recording one independent review must not wait for every other
         # reviewer to withdraw theirs. Consumption still refuses above.
@@ -210,7 +213,6 @@ $(printf '%s\n' "$bound" | sed 's/^/    - /')
       fi
     fi
   done <<<"$rows"
-  [ -z "$replace_cr" ] || [ "$replaced" = "$replace_cr" ] || refuse "--replace-own-cr does not name this account's current open request"
 }
 check_verdict() {
   local value state cited
@@ -241,9 +243,20 @@ check_publication_policy() {
   read_current_pr || return $?
   if [ "$review_policy" = release ]; then check_current_ci; fi
 }
+check_cr_ownership() {
+  local mode="$1" replacement_id
+  local args=(--repo "$repo" --pr "$pr" --gh "$GH" --mode "$mode")
+  if [ "$mode" = publish ]; then
+    args+=(--reviewer-id "$me_id")
+    [ -z "${keeper:-}" ] || args+=(--keeper "$keeper")
+    for replacement_id in $replace_cr; do args+=(--replace "$replacement_id"); done
+  fi
+  python3 "$here/review-cr-ownership.py" "${args[@]}"
+}
 check_reviews
 check_verdict
 if [ "$merge_check" -eq 1 ] || [ "$source_receipt" -eq 1 ]; then
+  check_cr_ownership consume || exit $?
   [ -n "$approvals" ] || refuse_detail "no trusted non-author approval bound to this head and complete diff"
   read_current_pr
   check_reviews
@@ -257,6 +270,8 @@ if [ "$merge_check" -eq 1 ] || [ "$source_receipt" -eq 1 ]; then
   [ -n "$approvals" ] || refuse "approval changed after final diff read"
   check_verdict
   recheck_commit_accounts || exit $?
+  read_current_pr
+  check_cr_ownership consume || exit $?
   read_current_pr
   if [ "$receipt_json" -eq 1 ] || [ "$source_receipt" -eq 1 ]; then
     python3 -c 'import json,sys; print(json.dumps({"pr":int(sys.argv[1]),"head":sys.argv[2],"approval_ids":[int(x) for x in sys.argv[3].split()],"scope":json.loads(sys.argv[4]),"policy":sys.argv[5]}))' "$pr" "$head" "$approvals" "$(compute_scope)" "$review_policy"
@@ -307,6 +322,7 @@ sys.exit(any(line.startswith(("review-scope:", "approve-guard:")) for line in li
   fi
   [ "$keeper" != "$me" ] || refuse "by must name the reviewing Keeper"
 fi
+check_cr_ownership publish || exit $?
 check_publication_policy
 check_reviews
 check_verdict
@@ -325,18 +341,22 @@ fi
 if [ "$check_only" -eq 1 ]; then
   recheck_commit_accounts || exit $?
   read_current_pr
+  check_cr_ownership publish || exit $?
+  read_current_pr
   echo "WOULD APPROVE #$pr head $head policy $review_policy"; exit 0
 fi
 # Bind the reviewed base and native stack position to the approval itself.
 # Main may advance later when the reviewed diff base remains identical.
 scope=$(compute_scope)
 footer=$(printf '\n\n---\nreview-scope: %s\napprove-guard: head `%s` · %s review' "$scope" "$head" "$review_policy")
-if [ -n "$own_approval" ]; then
+if [ -n "$own_approval" ] && [ -z "$replace_cr" ]; then
   previous_scope=$(ci_gh_object "repos/$repo/pulls/$pr/reviews/$own_approval" '.body | split("\n") | map(select(startswith("review-scope: "))) | if length == 1 then .[0] else "" end')
   own_verdict=$(verdict_for "$pr" "$head" "" "$me") || { echo "approve-guard: own verdict read failed" >&2; exit 1; }
   read -r own_state _ <<<"$own_verdict"
   if [ "$previous_scope" = "review-scope: $scope" ] && [ "$own_state" = PASS ]; then
     recheck_commit_accounts || exit $?
+    read_current_pr
+    check_cr_ownership publish || exit $?
     read_current_pr
     echo "SKIP #$pr: $me already APPROVED this head and scope (review $own_approval)"
     exit 0
@@ -346,6 +366,8 @@ fi
 [ -z "$replaced" ] || footer="$footer · replaces own CHANGES_REQUESTED $replaced"
 footer="$footer$(printf ' · reviewed base `%s` · diff sha256 `%s`' "$review_base" "$review_diff")"
 recheck_commit_accounts || exit $?
+read_current_pr
+check_cr_ownership publish || exit $?
 read_current_pr
 if ! response=$( { printf '%s' "$review_body"; printf '%s' "$footer"; } | "$GH" api -X POST "repos/$repo/pulls/$pr/reviews" -f event=APPROVE -f "commit_id=$head" -F body=@- --jq '[(.id|tostring), .state, .commit_id] | @tsv'); then
   echo "approval submission outcome is unknown; inspect reviews before retry" >&2

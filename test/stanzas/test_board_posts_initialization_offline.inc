@@ -2,5 +2,5 @@
 (test
  (name test_board_posts_initialization_offline)
  (modules test_board_posts_initialization_offline)
- (libraries masc masc.server masc.board_handlers fs_compat alcotest unix yojson
+ (libraries masc masc.server masc.host_config masc.board_handlers fs_compat alcotest unix yojson
   eio eio_main))

@@ -139,14 +139,17 @@ let finish result =
    | Inspection inspection -> Board.finish_inspection inspection
    | Outcome outcome -> ignore (Board.finish_outcome outcome)
    | Refused (Raised { evidence; _ }) -> propagate evidence
-   | Refused _ -> ());
+   | Refused (Empty_base_path | Invalid_intent | Not_directory _ | Root_changed _
+       | Parent_refused _ | Workspace_in_use _ | Lease_rejected _) -> ());
   Option.iter propagate result.release_failure
 
 let exit_code result =
   match result.release_failure, result.body with
   | Some _, _ | None, Refused _ -> 1
   | None, Inspection inspection ->
-    (match Board.decision inspection with Board.Refused -> 1 | _ -> 0)
+    (match Board.decision inspection with
+     | Board.Refused -> 1
+     | Bootstrap_required | Adoption_required | Ready_observed -> 0)
   | None, Outcome outcome ->
     (match Board.completion outcome with Board.Completed -> 0 | Not_completed -> 1)
 

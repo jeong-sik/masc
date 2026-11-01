@@ -93,7 +93,7 @@ runtime gates. Source-review completion alone leaves a Draft item in review.
 
 The queue now contains **30 concrete candidates**: 24 from the first semantic pass, A1
 from the Agent Core follow-up, T1 from the integrated TUI investigation, E1/E2 from
-Exec, M1 from multimodal/media, and J1 from the Schedule investigation. Seventeen are
+Exec, M1 from multimodal/media, and J1 from the Schedule investigation. Eighteen are
 implemented as PRs; their source-review evidence is recorded on each PR: `S1` in
 [#43367](https://github.com/jeong-sik/masc/pull/43367) isolates provider usage
 acceptance; `K1` in [#43370](https://github.com/jeong-sik/masc/pull/43370) preserves
@@ -125,8 +125,10 @@ canonical snapshot codec/projection ownership in
 codecs one private owner while retaining source and transaction effects. K5 in
 [#47056](https://github.com/jeong-sik/masc/pull/47056) isolates immutable approval
 restart planning; D5 in [#47057](https://github.com/jeong-sik/masc/pull/47057) shares
-immutable Board vote transitions. Thirteen
-candidates remain queued; this ordering does not waive their coverage.
+immutable Board vote transitions. S5 in
+[#47068](https://github.com/jeong-sik/masc/pull/47068) and
+[#47069](https://github.com/jeong-sik/masc/pull/47069) separates full-health
+observations from immutable refresh ownership. Twelve candidates remain queued; this ordering does not waive their coverage.
 
 | ID | Priority | Status | Refactoring point |
 | --- | --- | --- | --- |
@@ -148,7 +150,7 @@ candidates remain queued; this ordering does not waive their coverage.
 | [S2](#s2) | next | in review | Move lane edit decisions into a pure declared-configuration planner |
 | [S3](#s3) | later | candidate | Separate Antigravity protocol transitions from persistence and stream callbacks |
 | [S4](#s4) | investigate | candidate | Make provider-metrics cache refresh ownership explicit and cancellation-complete |
-| [S5](#s5) | later | candidate | Consolidate full-health refresh bookkeeping into an immutable owned state machine |
+| [S5](#s5) | later | implemented; execution unverified | Consolidate full-health refresh bookkeeping into an immutable owned state machine |
 | [S6](#s6) | later | candidate | Give connector status a common typed projection before JSON aggregation |
 | [S7](#s7) | later | candidate | Replace connector ingress scheduling flag combinations with explicit lane lifecycle |
 | [S8](#s8) | next | in review | Separate durable provider-history decoding and daily projection from journal IO |
@@ -1455,8 +1457,18 @@ consecutive-failure evidence now share a private immutable owner. Publication,
 clocks, cold-placeholder acquisition and metrics remain under the existing shell
 lock. The added public-coordinator scenario covers repeated waiter reports plus
 late failure, exact configured alert crossing, recovery reset and a second outage.
-Coordinator consolidation remains the next layer. Syntax-only parsing and
-independent source review are separate from unexecuted builds and behavior suites.
+[#47069](https://github.com/jeong-sik/masc/pull/47069) consolidates coordinator
+bookkeeping in `Server_full_health_refresh_state`: worker ownership and typed
+flight metadata remain independent, including direct/shared overlap and a waiter
+failure without a start timestamp. Admission, join, once-only waiter failure,
+exact-owner settlement and first invalidation are pure transitions. The shell
+keeps one observation cell and one coordinator cell under the existing lock,
+allocates promises only after start admission, and retains fleet/wakeup ordering.
+The eight-field positional cache view is replaced by named immutable fields;
+the public test stats tuple and response payload remain unchanged.
+
+Syntax-only parsing and independent source review are separate from unexecuted
+builds and behavior suites. No runtime or integration result is claimed.
 
 ### S6
 

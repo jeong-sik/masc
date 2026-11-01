@@ -39,7 +39,7 @@ The command palette is `:`.
 | `j/k` | move between decision links and conversations |
 | `Enter` | open the selected destination; never approve |
 | `p` | approvals and questions |
-| `;` | held calls, questions, Goal confirmations and tasks waiting on you |
+| `;` | held calls, questions, Goal confirmations and task owner routes |
 | `m` | account windows and Keeper usage |
 | `s` | phrases, arrangements and recorded takes; no Keeper or score required |
 
@@ -745,7 +745,7 @@ count is drawn beyond the available space.
 | `J/K` | in async runs, select an original request; otherwise select a published Skill |
 | `f` | outside async requests, select the next Composition and load its exact-revision performance charts |
 | `Ctrl-O` | outside async requests, preview the declared composition with Pele |
-| `[ / ]` | change the effective Keeper surface |
+| `[ / ]` | in Available, older/newer retained original run; in other panes, previous/next Keeper |
 | `c / C` | open $EDITOR on a template for a new Skill; c starts an instruction Skill, C starts a composition Skill |
 | `e` | open the selected SKILL.md in $EDITOR, validate, CAS-save, and publish |
 | `Esc` | return from original Task to request, then request to list; otherwise back to the System surface it hangs off |

@@ -201,6 +201,7 @@ type t =
   | MemoryRecallTotal           (* counter: recall judgments, by outcome *)
   | MemoryRecallSelected        (* counter: candidates a recall judgment carried *)
   | MemoryRecallJudgmentSeconds (* histogram: seconds a recall judgment took, from its first request to its saved outcome *)
+  | MemoryRecallPreparationFailures (* counter: recall preparation failures, by bounded reason; no judgment is implied *)
 
 val to_string : t -> string
 

@@ -211,6 +211,7 @@ type t =
   | MemoryRecallTotal           (* counter: recall judgments, by outcome *)
   | MemoryRecallSelected        (* counter: candidates a recall judgment carried *)
   | MemoryRecallJudgmentSeconds (* histogram: seconds a recall judgment took, from its first request to its saved outcome *)
+  | MemoryRecallPreparationFailures (* counter: recall preparation failures, by bounded reason; no judgment is implied *)
 [@@deriving enumerate]
 
 (** String conversion
@@ -435,6 +436,7 @@ let to_string = function
   | MemoryRecallTotal -> "masc_keeper_memory_recall_total"
   | MemoryRecallSelected -> "masc_keeper_memory_recall_selected_total"
   | MemoryRecallJudgmentSeconds -> "masc_keeper_memory_recall_judgment_seconds"
+  | MemoryRecallPreparationFailures -> "masc_keeper_memory_recall_preparation_failures_total"
 ;;
 
 type collection =
@@ -498,7 +500,7 @@ let collection = function
   | HistoryFragmentFailures | QuietFinals | WorkingStateNotCarried | WorkspaceMemoryBriefingBytes
   | WorkspaceMemoryLedgerClaims | MemoryRecallRequests | MemoryRecallInputBytes
   | MemoryRecallRequestSeconds | MemoryRecallTotal | MemoryRecallSelected
-  | MemoryRecallJudgmentSeconds -> Metric_store
+  | MemoryRecallJudgmentSeconds | MemoryRecallPreparationFailures -> Metric_store
 ;;
 
 (* Zero-fill: register the unlabeled 0-cell of every counter at module

@@ -33,28 +33,42 @@ let describe_build_error = function
 
 let is_judged = Keeper_memory_recall_standing.is_judged
 
+type preparation_failure = Facts_unreadable | Request_not_built | Preparation_raised | Clock_unavailable
+
+let failure_token = function
+  | Facts_unreadable -> "facts_unreadable"
+  | Request_not_built -> "request_not_built"
+  | Preparation_raised -> "preparation_raised"
+  | Clock_unavailable -> "clock_unavailable"
+
+let unavailable ~keeper_id ~turn_ref ~memory_search_available failure =
+  let reason = failure_token failure in
+  Otel_metric_store.inc_counter Keeper_metrics.(to_string MemoryRecallPreparationFailures)
+    ~labels:["keeper",keeper_id;"reason",reason] ();
+  Some {status=Render.unavailable_status ~memory_search_available ~turn_ref ~reason;body=None}
+
 (* The recall must not end the turn it is meant to help. Whatever raises in
    here (the store read and its lock, the IO pool job, the client, the
-   renderer) reaches the turn through the hook and would end it, so the failure
-   is logged and the turn goes on without the texts, as
-   [Keeper_memory_os_recall.render_if_enabled] does for the older notice. A
+   renderer) reaches the turn through the hook and would end it, so the
+   failure is logged and the turn receives only its unavailable status. A
    cancellation is the turn's own and passes. *)
 let prepare_with ~judge ~read_facts ~keeper_id ~turn_ref ~memory_search_available =
+  let unavailable = unavailable ~keeper_id ~turn_ref ~memory_search_available in
   if not (is_judged ~keeper_id)
   then None
   else
     try
       match read_facts () with
       | Error detail ->
-        Log.Keeper.warn "memory recall has no status line: the facts could not be read keeper=%s: %s"
+        Log.Keeper.warn "memory recall facts could not be read keeper=%s: %s"
           keeper_id detail;
-        None
+        unavailable Facts_unreadable
       | Ok facts ->
         (match judge (List.map Candidates.of_fact facts) with
          | Error build_error ->
-           Log.Keeper.warn "memory recall has no status line: nothing was sent keeper=%s: %s"
+           Log.Keeper.warn "memory recall request could not be built keeper=%s: %s"
              keeper_id (describe_build_error build_error);
-           None
+           unavailable Request_not_built
          | Ok (Turn.Off _ | Turn.Nothing_to_judge) -> None
          | Ok (Turn.Judged judged) ->
            Some
@@ -64,9 +78,9 @@ let prepare_with ~judge ~read_facts ~keeper_id ~turn_ref ~memory_search_availabl
     with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
     | exn ->
-      Log.Keeper.warn "memory recall has no status line: it raised keeper=%s: %s"
+      Log.Keeper.warn "memory recall preparation raised keeper=%s: %s"
         keeper_id (Printexc.to_string exn);
-      None
+      unavailable Preparation_raised
 
 (* The client puts a time limit on a request only with a clock. Without one a
    destination that accepts the connection and never answers would hold the
@@ -75,10 +89,11 @@ let prepare ~memo ~config ~keepers_dir ~keeper_id ~turn_ref ~purpose ~memory_sea
   match Eio_context.get_clock_opt () with
   | None ->
     if is_judged ~keeper_id
-    then
-      Log.Keeper.warn "memory recall has no status line: there is no clock to limit the request keeper=%s"
+    then (
+      Log.Keeper.warn "memory recall has no clock to limit the request keeper=%s"
         keeper_id;
-    None
+      unavailable ~keeper_id ~turn_ref ~memory_search_available Clock_unavailable)
+    else None
   | Some clock ->
     prepare_with
       ~judge:(Turn.judge ~clock ~memo ~config ~keeper_id ~turn_ref ~purpose)

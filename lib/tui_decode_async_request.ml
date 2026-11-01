@@ -40,9 +40,9 @@ let target_of_json json =
   let* keeper_name = string fields "keeper_name" in
   Ok {submitted_by;request_id;keeper_name}
 let number = function
-  | `Float value when Float.is_finite value && value >= 0. -> Ok value
-  | `Int value when value >= 0 -> Ok (float_of_int value)
-  | _ -> Error "expected finite nonnegative time"
+  | `Float value when Float.is_finite value -> Ok value
+  | `Int value -> Ok (float_of_int value)
+  | _ -> Error "expected finite timestamp"
 let time fields name = let* json = get fields name in number json
 let digest fields name = let* value = string fields name in
   if String.length value = 64 && String.for_all

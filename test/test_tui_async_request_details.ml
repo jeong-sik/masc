@@ -79,6 +79,17 @@ let scenario ok () = with_base @@ fun base_path -> Eio_main.run @@ fun _env -> E
     (Option.equal Detail.equal_target (Some target) state.tools_async_selection && state.tools_async_detail_open);
   let final=begin_read state ~force:true in complete_tools_async_detail state final (read ());
   check bool "terminal outcome retains its actual success or failure" true ((observed state target).phase=Detail.Done ok);
+  let signed_wire = match wire () with
+    | `Assoc envelope -> `Assoc (List.map (fun (name,json) -> name,
+        if name <> "request" then json else match json with
+          | `Assoc fields -> `Assoc (("submitted_at",`Float (-1.)) :: ("completed_at",`Int 0)
+              :: List.remove_assoc "completed_at" (List.remove_assoc "submitted_at" fields))
+          | _ -> fail "original request missing") envelope)
+    | _ -> fail "status envelope missing" in
+  check bool "finite pre-epoch and epoch timestamps remain valid observations" true
+    (match Detail.decode ~target signed_wire |> value with
+     | Observed snapshot -> snapshot.submitted_at = -1. && snapshot.completed_at = Some 0.
+     | Absent -> false);
   let module Nested = Masc.Keeper_composition_observation in
   let terminal_snapshot=observed state target in
   let ready={terminal_snapshot with Detail.nested=Nested.Observed []} in

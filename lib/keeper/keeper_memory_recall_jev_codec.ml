@@ -87,7 +87,8 @@ let load_guidance ~question_ids =
             key (Unix.error_message error) operation path)) in
     List.fold_left (fun result id ->
       let* questions = result in
-      let* instructions = Prompt_registry.render_resolved_prompt_template key resolution ["question_id",id]
+      let* instructions = Prompt_registry.render_resolved_prompt_template
+        ~required_variables:["question_id"] key resolution ["question_id",id]
         |> Result.map_error (fun detail -> Guidance_unavailable detail) in
       Ok (By_id.add id (Types.choice_of_set choices ~instructions) questions))
       (Ok By_id.empty) question_ids in

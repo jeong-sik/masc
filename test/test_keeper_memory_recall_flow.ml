@@ -833,6 +833,24 @@ let fixture_policy version = [
 let publish_policy policy = List.iter (fun (key,value) -> match Prompt_registry.set_override key value with
   | Ok () -> () | Error detail -> Alcotest.fail detail) policy
 
+let test_candidate_and_time_policies_require_original_question_id () =
+  List.iter (fun key -> Eio_main.run (fun _ ->
+    let original=(Prompt_registry.resolve_prompt key).override_value in
+    Fun.protect ~finally:(fun () -> match original with
+      | None -> Prompt_registry.clear_prompt_override key
+      | Some value -> publish_policy [key,value]) (fun () ->
+      publish_policy [key,"Classify the memory named by question_id."];
+      let candidates=List.init 2 (fun index -> sized index small) in
+      let calls=ref [] in
+      (match Flow.run ~evaluate:(evaluator calls accepting) ~purpose candidates with
+       | Error (Codec.Guidance_unavailable detail) ->
+         Alcotest.(check string) "each candidate question requires its original ID"
+           (Printf.sprintf "Prompt '%s' omits required template variables: question_id" key) detail
+       | Error (Codec.Duplicate_candidate_id _ | Codec.Choice_set_invalid _) | Ok _ ->
+         Alcotest.fail "an unscoped candidate or time policy must be a guidance error");
+      Alcotest.(check int) "no turn, candidate or time evaluation starts" 0 (List.length !calls))))
+    [Prompt_names.keeper_recall_candidate;Prompt_names.keeper_recall_time]
+
 let test_capacity_splits_and_time_questions_keep_one_policy_snapshot () =
   let originals=List.map (fun (_,key) -> key,(Prompt_registry.resolve_prompt key).override_value) recall_fragments in
   Fun.protect ~finally:(fun () -> List.iter (fun (key,value) -> match value with
@@ -887,6 +905,8 @@ let () =
             test_every_required_policy_is_resolved_before_any_call
         ; Alcotest.test_case "unrenderable time policy refuses before evaluation" `Quick
             test_unrenderable_time_policy_refuses_before_any_call
+        ; Alcotest.test_case "candidate and time policies require the original question ID" `Quick
+            test_candidate_and_time_policies_require_original_question_id
         ; Alcotest.test_case "capacity splits and time questions retain one policy snapshot" `Quick
             test_capacity_splits_and_time_questions_keep_one_policy_snapshot
         ; Alcotest.test_case "sized candidates have the line bytes they are named for" `Quick

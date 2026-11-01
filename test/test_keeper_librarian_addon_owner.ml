@@ -243,6 +243,7 @@ let with_fixture ?(initial=["a","Durable A";"b","Durable B"]) f =
     Fun.protect ~finally:(fun () -> Process_eio.reset_for_testing ();Fs_compat.clear_fs ();Config_dir_resolver.reset ()) (fun () ->
     Eio_context.with_test_env ~sw ~net:(Eio.Stdenv.net env) ~clock:(Eio.Stdenv.clock env)
       ~mono_clock:(Eio.Stdenv.mono_clock env) (fun () ->
+      Masc_http_client.with_scoped_pool ~sw ~env @@ fun () ->
       Config_dir_resolver.reset ();Runtime.For_testing.reset ();Memory_lane.For_testing.reset ();Memory_lane.init ~sw;
       Prompt_registry.set_markdown_dir "../config/prompts";Prompt_defaults.init ();
       Prompt_registry.clear_prompt_override Prompt_names.librarian;

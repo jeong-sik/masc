@@ -7,3 +7,7 @@
 (rule
  (alias runtest-test_keeper_claude_async_outbox)
  (action (run %{exe:test_keeper_claude_code_runtime.exe} test "async result outbox")))
+
+(rule
+ (alias runtest-test_keeper_claude_selected_inference)
+ (action (run %{exe:test_keeper_claude_code_runtime.exe} test "selected inference")))

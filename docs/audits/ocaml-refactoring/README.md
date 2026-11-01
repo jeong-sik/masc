@@ -93,8 +93,8 @@ runtime gates. Source-review completion alone leaves a Draft item in review.
 
 The queue now contains **30 concrete candidates**: 24 from the first semantic pass, A1
 from the Agent Core follow-up, T1 from the integrated TUI investigation, E1/E2 from
-Exec, M1 from multimodal/media, and J1 from the Schedule investigation. Twenty-three are
-implemented as PRs; their source-review evidence is recorded on each PR: `S1` in
+Exec, M1 from multimodal/media, and J1 from the Schedule investigation. Twenty-four are
+implemented as PRs; source review and execution evidence are recorded separately on each PR: `S1` in
 [#43367](https://github.com/jeong-sik/masc/pull/43367) isolates provider usage
 acceptance; `K1` in [#43370](https://github.com/jeong-sik/masc/pull/43370) preserves
 separate Librarian failure-policy axes; `D2` in
@@ -141,7 +141,9 @@ flags with an explicit lane phase. D6 in
 and retry classification between Board deletion and flush. K6 in
 [#47084](https://github.com/jeong-sik/masc/pull/47084) and
 [#47091](https://github.com/jeong-sik/masc/pull/47091) gives committed-batch scans
-immutable accumulation and a private semantic-validation owner. Seven candidates
+immutable accumulation and a private semantic-validation owner. K7 in
+[#47114](https://github.com/jeong-sik/masc/pull/47114) isolates immutable receipt
+selection while retaining durable reconciliation effects. Six candidates
 remain unfinished. This ordering does not waive their coverage.
 
 | ID | Priority | Status | Refactoring point |
@@ -152,7 +154,7 @@ remain unfinished. This ordering does not waive their coverage.
 | [K4](#k4) | later | candidate | Make request-evidence reset and projection ownership explicit per attempt |
 | [K5](#k5) | later | source reviewed; execution unverified | Separate approval restart replay decisions from recovery effects |
 | [K6](#k6) | investigate | implemented; execution unverified | Make Agent Core committed-batch scanning an explicit returned state |
-| [K7](#k7) | later | candidate | Separate Memory receipt reconciliation selection from its durable plan |
+| [K7](#k7) | later | implemented; execution unverified | Separate Memory receipt reconciliation selection from its durable plan |
 | [D1](#d1) | next | in review | Return an explicit task commit receipt instead of a cross-scope notification ref |
 | [D2](#d2) | next | in review | Make Goal upsert a typed immutable transaction decision |
 | [D3](#d3) | later | in review | Isolate the Goal document codec and schema rejection contract |
@@ -614,51 +616,54 @@ implementation does not establish runtime, integration or whole-campaign complet
 
 **Separate Memory receipt reconciliation selection from its durable plan**
 
-Source:
-[lib/keeper/keeper_memory_os_current.ml:705](https://github.com/jeong-sik/masc/blob/aea8424926ea79f110315eec5ab429ac51043598/lib/keeper/keeper_memory_os_current.ml#L705-L788).
+Implemented in [#47114](https://github.com/jeong-sik/masc/pull/47114). Source at
+code head `3c5e933b7c267ed30201f5bd864d28e6977af888`:
+[private selection](https://github.com/jeong-sik/masc/blob/3c5e933b7c267ed30201f5bd864d28e6977af888/lib/keeper/keeper_memory_os_receipt_selection.ml#L1-L80),
+[store shell](https://github.com/jeong-sik/masc/blob/3c5e933b7c267ed30201f5bd864d28e6977af888/lib/keeper/keeper_memory_os_current.ml#L715-L814).
 
-Problem: Receipt reconciliation interleaves cached fixed-point checks, lazy snapshot
-hashing, prepared-snapshot durability confirmation, pure eligibility filtering,
-first-occurrence deduplication in a local hash table, quarantine, cache marking, file
-removal, and rewriting. The receipt selection policy is therefore read together with its
-effect order even though it can be calculated from observed receipt/snapshot values.
+Receipt eligibility, exact-range proof exclusion, first-occurrence coarse-key
+retention and keep/remove/rewrite decisions now have a private pure owner.
+An immutable key set replaces the pass-local mutation. The same coarse-key policy
+serves receipt upsert. Canonical range/receipt data joins the existing
+`Keeper_memory_os_current_types`; the public Current interface is unchanged.
+This is an ownership/readability refactor, with no speedup claim.
 
-Change: After the existing Memory stack integrates, extract a pure receipt selection
-result carrying ordered reconciled receipts and a typed unchanged/remove/rewrite
-decision. Use an immutable set for exact receipt-key deduplication or retain a private
-local hash table if measured cardinality justifies it; the substantive boundary is the
-returned decision. Leave snapshot sync, quarantine-before-rewrite, atomic I/O, and cache
-identity checks in the store.
+The selection retains every verified receipt for archival, including promoted
+prepared receipts and redundant scopes with different unread holes. Its unproven
+output holds original typed receipts and decoded-list positions, which the shell
+serializes only after archival. Exact consumed-range proof equality stays distinct
+from the coarse key used for retention. First occurrence and original order remain.
 
-Preserve:
+The store still owns snapshot durability confirmation before selection, the shared
+lazy digest, fixed-point shortcut, all-verified unread archival, unproven quarantine,
+decoder-skipped quarantine, atomic replacement/removal and cache identity effects.
+Both quarantines precede file mutation. Empty clean input retains `Keep []` behavior.
+`preserved_committed_receipts` remains byte-identical, preserving strict admission
+authority instead of routing it through generic reconciliation.
 
-- Prepared receipts become committed only for the exact snapshot revision and digest and
-  after durability confirmation.
-- Committed receipts remain valid at a higher authoritative snapshot revision.
-- Duplicate keys retain their first input occurrence and existing order.
-- Skipped receipt bytes are quarantined before any rewrite or removal forgets them.
-- The fixed-point shortcut requires unchanged or newer authoritative snapshot evidence;
-  missing/lower/different same-revision snapshots require reconciliation.
-- Candidate consumption receipts survive unrelated snapshot commits and fact retirement.
-- Coordinate after PRs 43347, 43348, and 43353; this candidate excludes their codec and
-  successor-projection scope.
+The prerequisite Memory PRs 43347, 43348 and 43353 were freshly confirmed merged
+ancestors of observed main `3caf4a323e69b5f4e2acea19e7adc71635e4208d` and this
+stack's pre-extraction source. A refreshed open-PR census found no Current,
+Current_types or direct Current-test overlap; adjacent durable caller changes
+remain outside this scope. Source observation is bounded to that inspected main.
 
 Consumers:
-[lib/keeper/keeper_memory_os_current.ml](../../../lib/keeper/keeper_memory_os_current.ml),
-[lib/keeper/keeper_librarian_durable_consumer.ml](../../../lib/keeper/keeper_librarian_durable_consumer.ml),
-[lib/keeper/keeper_memory_admission_worker.ml](../../../lib/keeper/keeper_memory_admission_worker.ml).
+[Current](../../../lib/keeper/keeper_memory_os_current.ml),
+[durable consumer](../../../lib/keeper/keeper_librarian_durable_consumer.ml),
+[admission worker](../../../lib/keeper/keeper_memory_admission_worker.ml).
 
-Scenarios:
-[test/test_keeper_memory_os_current.ml](../../../test/test_keeper_memory_os_current.ml),
-[test/test_keeper_librarian_durable_consumer.ml](../../../test/test_keeper_librarian_durable_consumer.ml),
-[test/test_keeper_memory_admission_queue.ml](../../../test/test_keeper_memory_admission_queue.ml).
-**Not executed in this audit.**
+The new public-store scenario in
+[test_keeper_memory_os_current.ml](../../../test/test_keeper_memory_os_current.ml)
+uses one coarse atom scope with three distinct exact ranges: first verified
+Committed, future unproven Prepared, then exact-snapshot Prepared. It requires
+first-key retention, archival of both verified unread sources, quarantine of only
+the exact unproven range at decoded index 1, a clean receipt WAL, unchanged proof
+snapshot and stable repeat reads. Canonical decoding is checked before
+reconciliation. It does not establish hook, scan-cancellation or fsync-failure
+coverage. Existing preparation, authority, quarantine and fixed-point scenarios
+remain. Syntax parsing and source review are distinct from execution; behavior
+is unverified until an actual targeted result is recorded on the PR.
 
-Ordering rationale: Distinct residual responsibility from the in-review Memory
-codec/successor slices. Existing tests include first-order receipt reconciliation,
-prepared exact-snapshot recovery, cache invalidation, no-change consumption, and
-retirement replay rejection. Defer until that stack lands to avoid overlapping
-ownership.
 
 ### D1
 

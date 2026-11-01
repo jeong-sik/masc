@@ -141,6 +141,48 @@ type admission_recall_binding =
   ; target_memory_id : string
   }
 
+type durable_range_id =
+  { receipt_scope : string
+  ; trace_id : string
+  ; history_start_boundary_line : int
+  ; start_atom : int
+  ; end_atom : int
+  ; last_atom_digest : string
+  ; end_boundary_line : int
+  ; boundary_lines_seen : int
+  ; unread_messages : Keeper_librarian_unread.t list
+  }
+
+type official_range_id =
+  { receipt_scope : string
+  ; after_boundary_line : int
+  ; turns : (int * Ids.Turn_ref.t) list
+  ; unread_messages : Keeper_librarian_unread.t list
+  }
+
+type admission_recall =
+  { decided_at_revision : int option
+  ; bindings : admission_recall_binding list
+  }
+
+type consumed_range =
+  | Atom_range of durable_range_id
+  | Official_range of official_range_id
+  | Explicit_candidate of explicit_candidate_id
+  | Explicit_candidate_with_recall of admission_recall_binding
+
+type durable_range_receipt =
+  | Prepared of
+      { range_id : consumed_range
+      ; snapshot_revision : int
+      ; snapshot_sha256 : string
+      }
+  | Committed of
+      { range_id : consumed_range
+      ; snapshot_revision : int
+      ; snapshot_sha256 : string
+      }
+
 type revision_evidence =
   { snapshot_revision : int
   ; recorded_at : float

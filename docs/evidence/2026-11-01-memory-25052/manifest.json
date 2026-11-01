@@ -12,9 +12,11 @@
     {
       "original_path": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/issues-oldest-20261101/observe-memory-25052.py",
       "path": "docs/evidence/2026-11-01-memory-25052/observe-memory-25052.py",
-      "bytes": 8177,
-      "sha256": "58203681afb699fcc1a6be909d054535eebbd0f2ea58d8b1ea488804bb8f3404",
-      "transform": "none; byte-for-byte copy"
+      "bytes": 8556,
+      "sha256": "bfc53ce05eb1b00792cb06ba9561feae2ba1f565695227cba6a5d55caa49f7c4",
+      "transform": "Retained helper adds pre-collection resolved repository artifacts output checks and final exclusive creation; collection logic unchanged. Original capture-time helper remains unchanged at original_path.",
+      "original_bytes": 8177,
+      "original_sha256": "58203681afb699fcc1a6be909d054535eebbd0f2ea58d8b1ea488804bb8f3404"
     }
   ],
   "superseded_initial_capture": {

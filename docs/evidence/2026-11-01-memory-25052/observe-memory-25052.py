@@ -15,6 +15,12 @@ parser.add_argument('--config-root', type=Path, required=True)
 parser.add_argument('--repo', type=Path, required=True)
 parser.add_argument('--out', type=Path, required=True)
 args = parser.parse_args()
+output_path = args.out.resolve()
+artifact_root = (args.repo / 'artifacts').resolve()
+if not output_path.is_relative_to(artifact_root):
+    parser.error('--out must name a new file under the selected repository artifacts directory')
+if output_path.exists():
+    parser.error('--out already exists; select a new capture path')
 
 
 def now():
@@ -154,7 +160,8 @@ output = {
         'Availability is not provider execution, semantic relevance, use in decisions or cross-Keeper admission proof.',
     ],
 }
-args.out.parent.mkdir(parents=True, exist_ok=True)
-args.out.write_text(json.dumps(output, indent=2) + '\n')
-print(json.dumps({'path': str(args.out), 'sha256': hashlib.sha256(args.out.read_bytes()).hexdigest(),
+output_path.parent.mkdir(parents=True, exist_ok=True)
+with output_path.open('x') as destination:
+    destination.write(json.dumps(output, indent=2) + '\n')
+print(json.dumps({'path': str(output_path), 'sha256': hashlib.sha256(output_path.read_bytes()).hexdigest(),
                   'runtime_identity_stable': output['runtime_identity_stable'], 'summary': summary}))

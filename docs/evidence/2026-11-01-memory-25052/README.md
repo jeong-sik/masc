@@ -63,6 +63,14 @@ credentials. [manifest.json](manifest.json) records the exact source and copied
 capture hashes. The initial capture's component filter was corrected from block
 identifiers to Turn_record's canonical prompt.<block> identifiers; its original
 bytes remain separate in ignored artifacts and are not silently rewritten.
+The retained helper additionally rejects existing outputs before collection,
+requires a resolved path under the selected repository's artifacts directory,
+and creates the final file exclusively. Its digest is recorded separately from
+the original capture-time helper; the collection logic is unchanged.
+[Collector output checks](collector-output-checks.json) record a fresh output,
+refusal of a repeat before health access, preservation of existing bytes, and
+refusal of a resolved parent-symlink escape. That output probe is separate from
+the retained Memory OS observation above.
 
 Run the retained [collector](observe-memory-25052.py) against the affected
 runtime's health URL and admitted configuration root, selecting a **new output

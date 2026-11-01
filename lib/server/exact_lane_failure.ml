@@ -139,6 +139,7 @@ let claude_error = function
 
 let antigravity_error = function
   | Runtime_antigravity.Invalid_config _ -> Configuration_refused
+  | Runtime_antigravity.Result_not_completed _ -> Output_unusable
   (* A counted breach is deterministic — the same turn re-kills — so the
      workspace needs operator action, not a retry. A pressure refusal may
      pass with the pressure, so it stays transient. *)

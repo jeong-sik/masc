@@ -1233,6 +1233,104 @@ let test_result_error_is_not_success () =
        | Ok _ -> fail "ERROR result was admitted as success")
 ;;
 
+let noncompletion_statuses =
+  [ "CANCELED", Runtime_antigravity.Canceled
+  ; "INTERRUPTED", Runtime_antigravity.Interrupted
+  ; "INVALID", Runtime_antigravity.Invalid
+  ; "WAITING", Runtime_antigravity.Waiting
+  ; "RUNNING", Runtime_antigravity.Running
+  ]
+;;
+
+let test_documented_noncompletion_results_never_complete () =
+  List.iter
+    (fun (wire_status, expected_status) ->
+       let admitted = ref [] in
+       let received = ref 0 in
+       let events = ref [] in
+       with_fixture ~require_resume:true
+         [ init (); result ~conversation_id:"" ~status:wire_status
+             ~response:"a partial reply" ~error:"fixture stopped" () ]
+         (fun path ->
+            (match run_fixture path
+                ~conversation_mode:(Runtime_antigravity.Resume { conversation_id = "conversation-1" })
+                ~on_conversation_ready:(fun ~conversation_id ->
+                  admitted := conversation_id :: !admitted;
+                  Ok ())
+                ~on_terminal_received:(fun () -> incr received)
+                ~on_stream_event:(fun event -> events := event :: !events)
+             with
+             | Error (Runtime_antigravity.Result_not_completed
+                 { status; conversation_id; response; error }) ->
+               check bool "exact typed status" true (status = expected_status);
+               check (option string) "init identity survives blank restatement"
+                 (Some "conversation-1") conversation_id;
+               check string "partial reply retained" "a partial reply" response;
+               check (option string) "wire reason retained" (Some "fixture stopped") error
+             | Error error -> fail (Runtime_antigravity.error_to_string error)
+             | Ok _ -> failf "%s became a completed turn" wire_status);
+            check (list string) "resume identity admitted once" [ "conversation-1" ] !admitted;
+            check int "matching result observed without granting completion" 1 !received;
+            let usage_reports = List.filter_map (function
+              | Runtime_antigravity.Usage_reported { conversation_id; num_turns; usage; _ } ->
+                Some (conversation_id, num_turns, usage.input_tokens)
+              | _ -> None) !events in
+            check (list (triple string int int)) "failed result keeps usage"
+              [ "conversation-1", 1, 100 ] usage_reports;
+            check int "no success or result-only answer emitted" 0
+              (List.length (List.filter (function
+                | Runtime_antigravity.Turn_finished _ | Text_delta _ -> true
+                | _ -> false) !events))))
+    noncompletion_statuses
+;;
+
+let test_pre_init_noncompletion_keeps_unbound_identity () =
+  List.iter (fun (wire_status, expected_status) ->
+    let admitted = ref false in
+    with_fixture [ result ~conversation_id:"unbound-conversation" ~status:wire_status () ]
+      (fun path ->
+        (match run_fixture path
+            ~on_conversation_ready:(fun ~conversation_id:_ -> admitted := true; Ok ()) with
+         | Error (Runtime_antigravity.Result_not_completed { status; conversation_id; _ }) ->
+           check bool "typed pre-init state" true (status = expected_status);
+           check (option string) "unbound identity retained"
+             (Some "unbound-conversation") conversation_id
+         | Error error -> fail (Runtime_antigravity.error_to_string error)
+         | Ok _ -> fail "a non-completed invocation was admitted");
+        check bool "result alone never admits a session" false !admitted))
+    noncompletion_statuses
+;;
+
+let test_interrupted_partial_stream_is_not_a_completed_reply () =
+  let pieces = ref [] in
+  let completed = ref false in
+  with_fixture
+    [ init (); step ~state:"ACTIVE" ~text_delta:"partial " ()
+    ; result ~status:"INTERRUPTED" ~response:"partial final fragment" () ]
+    (fun path ->
+      (match run_fixture path ~on_stream_event:(function
+          | Runtime_antigravity.Text_delta { text; _ } -> pieces := text :: !pieces
+          | Turn_finished _ -> completed := true
+          | _ -> ()) with
+       | Error (Runtime_antigravity.Result_not_completed
+           { status = Interrupted; response = "partial final fragment"; _ }) -> ()
+       | Error error -> fail (Runtime_antigravity.error_to_string error)
+       | Ok _ -> fail "a streamed fragment completed an interrupted turn");
+      check (list string) "partial stream is not duplicated by the result" [ "partial " ] !pieces;
+      check bool "no successful turn ending" false !completed)
+;;
+
+let test_noncompletion_identity_mismatch_is_refused () =
+  let received = ref 0 in
+  with_fixture [ init (); result ~conversation_id:"other-conversation" ~status:"RUNNING" () ]
+    (fun path ->
+      (match run_fixture ~on_terminal_received:(fun () -> incr received) path with
+       | Error (Runtime_antigravity.Protocol_error _) -> ()
+       | Error error -> fail (Runtime_antigravity.error_to_string error)
+       | Ok _ -> fail "a mismatched non-completed result was admitted");
+      check int "unrelated result never closes delivery frontier" 0 !received)
+;;
+
 (* The CLI marks the whole result ERROR when any trajectory step errored,
    even a tool call the model corrected and went on from (analyst,
    2026-08-22T01:39Z: rejection, retry 3s later, post created, reply
@@ -2045,6 +2143,14 @@ let () =
             test_operator_interrupt_callback_keeps_typed_cause
         ; test_case "tool measurements" `Quick test_tool_steps_and_errors_are_measured
         ; test_case "error result" `Quick test_result_error_is_not_success
+        ; test_case "documented noncompletion results never complete" `Quick
+            test_documented_noncompletion_results_never_complete
+        ; test_case "pre-init noncompletion keeps unbound identity" `Quick
+            test_pre_init_noncompletion_keeps_unbound_identity
+        ; test_case "interrupted partial stream is not a completed reply" `Quick
+            test_interrupted_partial_stream_is_not_a_completed_reply
+        ; test_case "noncompletion identity mismatch is refused" `Quick
+            test_noncompletion_identity_mismatch_is_refused
         ; test_case
             "error result with a reply completes"
             `Quick

@@ -955,6 +955,17 @@ let test_client_timeouts_project_to_timeout () =
    | other ->
      failf "a non-timeout client failure must stay Provider_error, got %s"
        (Fusion_types.show_panel_failure other));
+  List.iter (fun status ->
+    let error = Runtime_antigravity.Result_not_completed
+        { status; conversation_id = Some "interrupted-conversation"
+        ; response = "partial reply"; error = None } in
+    match project (Masc.Fusion_official_client.Antigravity_failure error) with
+    | Fusion_types.Provider_error detail ->
+      check string "noncompletion retains exact status diagnostic"
+        (official_client_runtime ^ ": " ^ Runtime_antigravity.error_to_string error) detail
+    | other -> failf "a non-completed result changed its panel failure kind: %s"
+        (Fusion_types.show_panel_failure other))
+    [ Runtime_antigravity.Canceled; Interrupted; Invalid; Waiting; Running ];
   let detail =
     Masc.Fusion_official_client.failure_detail ~runtime_id:official_client_runtime
       (Masc.Fusion_official_client.Claude_failure (Runtime_claude_code.Timeout 3.0))

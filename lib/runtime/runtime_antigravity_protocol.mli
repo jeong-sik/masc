@@ -26,6 +26,13 @@ type permission_mode =
 
 type response_ending = Response_done | Response_error
 
+type noncompletion_status =
+  | Canceled
+  | Interrupted
+  | Invalid
+  | Waiting
+  | Running
+
 type stream_event =
   | Turn_started of
       { conversation_id : string
@@ -55,6 +62,12 @@ type error =
       }
   | State_callback_failed of string
   | Turn_failed of string
+  | Result_not_completed of
+      { status : noncompletion_status
+      ; conversation_id : string option
+      ; response : string
+      ; error : string option
+      }
   | Process_exited of string
   | Unhandled_exception of string
   | Child_fd_ceiling_exceeded of
@@ -112,6 +125,7 @@ and step_type =
 and result_status =
   | Success
   | Result_error
+  | Not_completed of noncompletion_status
 
 (** A terminal observation always carries the previously admitted identity.
     This projection is available only after a Result transition; no phase can

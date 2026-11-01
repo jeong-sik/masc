@@ -164,6 +164,21 @@ type turn_result =
 
 type response_ending = Protocol.response_ending = Response_done | Response_error
 
+type noncompletion_status = Protocol.noncompletion_status =
+  | Canceled
+  | Interrupted
+  | Invalid
+  | Waiting
+  | Running
+
+let noncompletion_status_to_string = function
+  | Canceled -> "CANCELED"
+  | Interrupted -> "INTERRUPTED"
+  | Invalid -> "INVALID"
+  | Waiting -> "WAITING"
+  | Running -> "RUNNING"
+;;
+
 type stream_event = Protocol.stream_event =
   | Turn_started of
       { conversation_id : string
@@ -206,6 +221,12 @@ type error = Protocol.error =
       }
   | State_callback_failed of string
   | Turn_failed of string
+  | Result_not_completed of
+      { status : noncompletion_status
+      ; conversation_id : string option
+      ; response : string
+      ; error : string option
+      }
   | Process_exited of string
   | Unhandled_exception of string
   | Child_fd_ceiling_exceeded of
@@ -223,6 +244,10 @@ let error_to_string = function
     Printf.sprintf "Antigravity stream-json protocol error during %s: %s" stage detail
   | State_callback_failed detail -> "Antigravity conversation state callback failed: " ^ detail
   | Turn_failed detail -> "Antigravity turn failed: " ^ detail
+  | Result_not_completed { status; error; _ } ->
+    Printf.sprintf "Antigravity result did not complete (status=%s)%s"
+      (noncompletion_status_to_string status)
+      (match error with None -> "" | Some detail -> ": " ^ detail)
   | Process_exited detail -> "Antigravity CLI exited before completion: " ^ detail
   | Unhandled_exception detail -> "Antigravity runtime raised: " ^ detail
   | Child_fd_ceiling_exceeded { count = Some count; ceiling } ->
@@ -349,6 +374,7 @@ and step_type = Protocol.step_type =
 and result_status = Protocol.result_status =
   | Success
   | Result_error
+  | Not_completed of noncompletion_status
 
 let closed_string stage name parse value =
   match parse value with
@@ -418,6 +444,11 @@ let parse_result_status stage value =
     (function
       | "SUCCESS" -> Some Success
       | "ERROR" -> Some Result_error
+      | "CANCELED" -> Some (Not_completed Canceled)
+      | "INTERRUPTED" -> Some (Not_completed Interrupted)
+      | "INVALID" -> Some (Not_completed Invalid)
+      | "WAITING" -> Some (Not_completed Waiting)
+      | "RUNNING" -> Some (Not_completed Running)
       | _ -> None)
     value
 ;;
@@ -1041,7 +1072,7 @@ let run_turn ?(conversation_mode = Start) ?home_dir ?before_spawn ?on_spawned ?o
   in
   match status, Protocol.terminal state with
   | _, Some terminal ->
-    (* The parsed result completes the protocol regardless of how the CLI
+    (* The parsed result ends the protocol regardless of how the CLI
        shut down. The core guarantees its original admitted identity exists.
        Final interpretation and Turn_finished remain after process drain. *)
     let deliverable =
@@ -1061,7 +1092,12 @@ let run_turn ?(conversation_mode = Start) ?home_dir ?before_spawn ?on_spawned ?o
          (* A corrected trajectory can report ERROR with a real reply.
             Prior streamed text cannot rescue an empty terminal response. *)
          if deliverable then complete terminal ~trajectory_error:(Some detail)
-         else Error (Turn_failed detail))
+         else Error (Turn_failed detail)
+     | Not_completed status ->
+         Error
+           (Result_not_completed
+              { status; conversation_id = Some terminal.conversation_id
+              ; response = terminal.response; error = terminal.error }))
   | `Exited 0, None ->
     Error (Protocol_error { stage = "process completion"; detail = "missing result event" })
   | (`Exited _ | `Signaled _), None ->

@@ -28,6 +28,13 @@ let runtime_error_to_core_error = function
          ; error_type = Some "turn_failed"
          ; detail
          })
+  | Runtime_antigravity.Result_not_completed { status; _ } as error ->
+    Agent_core.Error.Provider
+      (Llm_provider.Error.ProviderReportedError
+         { provider = "antigravity_cli"
+         ; error_type = Some (Runtime_antigravity.noncompletion_status_to_string status)
+         ; detail = Runtime_antigravity.error_to_string error
+         })
   (* A file-table safety kill, not a spawn failure: refiring the same turn
      re-kills it, so report it as the provider's terminal failure rather
      than an unavailable provider that invites blind retries. *)
@@ -78,7 +85,12 @@ let recovery_failure_of_runtime_error = function
     (* Killed mid-turn for file-table safety: Ambiguous, needs a look —
        a sick workspace (operator cleans) or system pressure (passes). *)
     Session_store.Transport_interrupted
-  | Runtime_antigravity.Process_exited _ | Runtime_antigravity.Timeout _ ->
+  | Runtime_antigravity.Process_exited _
+  | Runtime_antigravity.Timeout _ ->
+    Session_store.Transport_interrupted
+  | Runtime_antigravity.Result_not_completed _ ->
+    (* A result state is not a safe resume or replay witness. Retain the
+       admitted identity under the existing ambiguous recovery fence. *)
     Session_store.Transport_interrupted
   | Runtime_antigravity.Invalid_config _
   | Runtime_antigravity.Protocol_error _ ->

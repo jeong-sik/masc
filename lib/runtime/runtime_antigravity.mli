@@ -120,6 +120,17 @@ type turn_result =
 
 type response_ending = Response_done | Response_error
 
+type noncompletion_status =
+  | Canceled
+  | Interrupted
+  | Invalid
+  | Waiting
+  | Running
+(** Documented result states that do not prove a completed turn. None grants
+    replay or successful session settlement, even when a partial reply exists. *)
+
+val noncompletion_status_to_string : noncompletion_status -> string
+
 type stream_event =
   | Turn_started of
       { conversation_id : string
@@ -163,6 +174,15 @@ type error =
       }
   | State_callback_failed of string
   | Turn_failed of string
+  | Result_not_completed of
+      { status : noncompletion_status
+      ; conversation_id : string option
+      ; response : string
+      ; error : string option
+      }
+      (** The exact documented result state and any partial reply. The identity
+          is the matching [init] identity when present; before [init] it is only
+          the result's unbound restatement and does not admit a session. *)
   | Process_exited of string
   | Unhandled_exception of string
       (** An exception nothing in the runtime expected, caught as the turn
@@ -208,7 +228,8 @@ val run_turn :
   ?on_context_submission:(Runtime_official_client_write.t -> unit) ->
   ?on_terminal_received:(unit -> unit) ->
     (** Pure observer after the matching result is decoded, before stream or
-        usage callbacks and process draining; not a consumption ACK. *)
+        usage callbacks and process draining; not successful completion or a
+        consumption ACK. Includes non-completed result states. *)
   mgr:_ Eio.Process.mgr ->
   clock:_ Eio.Time.clock ->
   cwd:Eio.Fs.dir_ty Eio.Path.t ->

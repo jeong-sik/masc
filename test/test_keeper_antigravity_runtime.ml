@@ -81,7 +81,7 @@ let prepared_account_home ~base_path =
   | Error error -> fail (Runtime_antigravity_home.error_to_string error)
 ;;
 
-let fixture_script_with_tools ~argument_reader ~base_path =
+let fixture_script_with_tools ~result_status ~argument_reader ~base_path =
   let path = Filename.concat base_path "agy-fixture.sh" in
   let prompt_path = Filename.concat base_path "antigravity-prompt.txt" in
   let script =
@@ -178,7 +178,7 @@ printf '{"event":"step_update","step_update":{"conversation_id":"%%s","step_inde
 printf '{"event":"step_update","step_update":{"conversation_id":"%%s","step_index":1,"state":"ACTIVE","step_type":"tool","tool_name":"call_mcp_tool"}}\n' "$conversation"
 printf '{"event":"step_update","step_update":{"conversation_id":"%%s","step_index":1,"state":"DONE","step_type":"tool","tool_name":"call_mcp_tool"}}\n' "$conversation"
 printf '%%s\n' "$turns" > "$turn_counter"
-printf '{"event":"result","result":{"conversation_id":"%%s","status":"SUCCESS","response":"MASC_ANTIGRAVITY_KEEPER_OK","error":null,"num_turns":%%d,"usage":{"input_tokens":12,"output_tokens":4,"thinking_tokens":1,"cache_read_tokens":40,"total_tokens":16}}}\n' "$conversation" "$turns"
+printf '{"event":"result","result":{"conversation_id":"%%s","status":%s,"response":"MASC_ANTIGRAVITY_KEEPER_OK","error":null,"num_turns":%%d,"usage":{"input_tokens":12,"output_tokens":4,"thinking_tokens":1,"cache_read_tokens":40,"total_tokens":16}}}\n' "$conversation" "$turns"
 |}
       (shell_quote
          (account_store ~base_path))
@@ -190,12 +190,14 @@ printf '{"event":"result","result":{"conversation_id":"%%s","status":"SUCCESS","
              "antigravity-fixture")))))
       (Yojson.Safe.to_string (`List (List.map (fun name -> `String name)
          (if argument_reader then ["keeper_artifact_read";"masc_probe"] else ["masc_probe"]))))
+      (Yojson.Safe.to_string (`String result_status))
   in
   write_file ~mode:0o700 path script;
   path
 ;;
 
-let fixture_script ~base_path = fixture_script_with_tools ~argument_reader:false ~base_path
+let fixture_script ~base_path =
+  fixture_script_with_tools ~result_status:"SUCCESS" ~argument_reader:false ~base_path
 ;;
 
 let blank_then_success_fixture_script ~base_path =
@@ -1063,6 +1065,89 @@ let test_blank_success_requires_fresh_conversation () =
           } ->
         ()
       | _ -> fail "fresh Antigravity conversation did not settle")
+;;
+
+let test_noncompletion_preserves_durable_identity_and_effect_fence () =
+  List.iter (fun result_status ->
+    let base_path = temp_workspace () |> Unix.realpath in
+    let runtime_snapshot = Runtime.For_testing.snapshot () in
+    Fun.protect
+      ~finally:(fun () -> Runtime.For_testing.restore runtime_snapshot; cleanup_tree base_path)
+      (fun () ->
+        Unix.mkdir (Filename.concat base_path ".masc") 0o700;
+        Masc_test_deps.declare_fixture_keeper ~base_path
+          ~sandbox_profile:(Some Keeper_types_profile_sandbox.Docker) "antigravity-fixture";
+        let oauth_source = Filename.concat base_path "operator-oauth-token" in
+        write_file ~mode:0o600 oauth_source
+          (Masc_test_deps.antigravity_oauth_fixture "operator-oauth-fixture");
+        let cli_path = fixture_script_with_tools ~result_status ~argument_reader:false ~base_path in
+        let runtime_path = Filename.concat base_path "runtime.toml" in
+        write_file ~mode:0o600 runtime_path (runtime_toml ~cli_path ~oauth_source);
+        let called = ref 0 in
+        let marker_param : Agent_core.Types.tool_param =
+          { name = "marker"; description = "Fixture marker"; param_type = String; required = true }
+        in
+        let tool = Agent_core.Tool.create ~name:"masc_probe"
+            ~description:"Return a deterministic fixture marker" ~parameters:[ marker_param ]
+            (fun _ ->
+              incr called;
+              Ok { Agent_core.Types.content = "MASC_TOOL_RESULT"; content_blocks = None; _meta = None })
+        in
+        Eio_main.run (fun env ->
+          Eio.Switch.run (fun sw ->
+            Eio_context.set_env env;
+            Eio_context.with_test_env ~net:(Eio.Stdenv.net env)
+              ~clock:(Eio.Stdenv.clock env) ~mono_clock:(Eio.Stdenv.mono_clock env) ~sw
+              (fun () ->
+                Runtime.init_default ~config_path:runtime_path |> Result.get_ok;
+                let runtime = Runtime.get_runtime_by_id "antigravity.gemini" |> Option.get in
+                let config = match runtime.Runtime_instance.execution with
+                  | Runtime_execution.Antigravity_cli config -> config
+                  | _ -> fail "Antigravity runtime fixture did not resolve"
+                in
+                let events = ref [] in
+                let attempt = Keeper_antigravity_runtime.run
+                    ~input_source:(Keeper_request_source.Keeper_history { trace_id = "antigravity-incomplete" })
+                    ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 0 })
+                    ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input ~runtime)
+                    ~pre_tool_rejects:(ref []) ~runtime_id:"antigravity.gemini"
+                    ~keeper_name:"antigravity-fixture" ~base_path
+                    ~goal:"Call masc_probe once" ~goal_blocks:None
+                    ~system_prompt:"noncompletion fixture system prompt" ~tools:[ tool ]
+                    ~initial_messages:[] ~model_input_projection:None
+                    ~on_transmitted_model_input:(fun _ -> ()) ~hooks:None ~context_injector:None
+                    ~context:None ~event_bus:None ~raw_trace:None
+                    ~on_event:(Some (fun event -> events := event :: !events)) ~config ()
+                in
+                (match attempt.result with
+                 | Error (Agent_core.Error.Provider
+                     (Llm_provider.Error.ProviderReportedError { provider; error_type; _ }) as error) ->
+                   check string "provider" "antigravity_cli" provider;
+                   check (option string) "exact status projection" (Some result_status) error_type;
+                   check bool "partial reply never grants retry" false (Agent_core.Error.is_retryable error)
+                 | Error error -> fail (Agent_core.Error.to_string error)
+                 | Ok _ -> failf "%s settled as a completed turn" result_status);
+                check int "effect ran exactly once" 1 !called;
+                check bool "observed effect stays fenced" true
+                  (attempt.effect_disposition = Keeper_provider_attempt_effect.Effect_attempted);
+                check bool "effect cannot grant replay" false
+                  (Keeper_provider_attempt_effect.allows_same_turn_retry attempt.effect_disposition);
+                check bool "no completed session ACK" true (Option.is_none attempt.settled_session);
+                check bool "no successful receipt consumption" true (Option.is_none attempt.pending_result_receipts);
+                check bool "no EndTurn stream ACK" false
+                  (List.exists (function Agent_core.Types.MessageDelta { stop_reason = Some EndTurn; _ } -> true
+                    | _ -> false) !events);
+                let session = Keeper_official_client_session_store.load
+                    ~base_path ~keeper_name:"antigravity-fixture" |> Result.get_ok |> Option.get in
+                match session.phase with
+                | Keeper_official_client_session_store.Recovery_required recovery ->
+                  check (option string) "durable admitted identity retained"
+                    (Some "conversation-antigravity-fixture") recovery.observed_session_id;
+                  check bool "failure remains ambiguous" true
+                    (recovery.failure = Transport_interrupted
+                     && Keeper_official_client_session_store.failure_disposition recovery.failure = Ambiguous)
+                | _ -> fail "non-completed result did not retain recovery evidence")))))
+    [ "CANCELED"; "INTERRUPTED"; "INVALID"; "WAITING"; "RUNNING" ]
 ;;
 
 let test_spawn_failure_is_pre_dispatch () =
@@ -2031,7 +2116,7 @@ let test_actual_start_demotes_arguments_but_resume_keeps_them_held () =
         ~sandbox_profile:(Some Keeper_types_profile_sandbox.Docker) keeper_name;
       let oauth_source=Filename.concat base_path "operator-oauth-token" in
       write_file ~mode:0o600 oauth_source (Masc_test_deps.antigravity_oauth_fixture "argument-account");
-      let cli_path=fixture_script_with_tools ~argument_reader:enabled ~base_path in
+      let cli_path=fixture_script_with_tools ~result_status:"SUCCESS" ~argument_reader:enabled ~base_path in
       let runtime_path=Filename.concat base_path "runtime.toml" in
       write_file ~mode:0o600 runtime_path (runtime_toml ~cli_path ~oauth_source);
       Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
@@ -2302,6 +2387,10 @@ let () =
               "blank result starts fresh next turn"
               `Quick
               test_blank_success_requires_fresh_conversation
+          ; test_case
+              "noncompletion retains durable identity and effect fence"
+              `Quick
+              test_noncompletion_preserves_durable_identity_and_effect_fence
           ; test_case
               "spawn failure is pre-dispatch"
               `Quick

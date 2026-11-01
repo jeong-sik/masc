@@ -162,8 +162,38 @@ test('native stopped-execution diagnostics do not settle held input',async()=>{
  assert.equal(result.completed.length,0);assert.equal(result.failure.nativeError.executionStopped,true);
  assert.deepEqual(f.calls,['url']);
 });
-test('ordinary error messages never manufacture native timeout diagnostics',async()=>{
- for(const message of ['EGO_PAGE_EVALUATION_TIMED_OUT executionStopped=true','EGO_NAVIGATION_TIMEOUT committed=true']){
+test('native dialog errors preserve their exact SDK observation and stop without follow-up',async()=>{
+ for(const stage of ['initialUrl','evaluate','click']){
+  for(const type of ['alert','confirm','prompt','beforeunload']){
+   const f=fixture();let entries=0;
+   const native={code:'EGO_PAGE_DIALOG_OPENED',method:'Runtime.evaluate',sessionId:'session-1',
+    dialog:{type,message:'page-owned content',defaultPrompt:'',url:initial,frameId:'frame-1',hasBrowserHandler:false}};
+   const fail=async()=>{entries++;throw Object.assign(Error('native dialog interruption'),native);};
+   if(stage==='initialUrl')f.page.url=fail;
+   else f.page[stage]=fail;
+   const method=stage==='click'?'click':'evaluate';
+   const result=await run(f.page,request([{method,selector:'#first',source:'window.operation()'},
+    {method:'fill',selector:'#never',text:'must not run'}]));
+   assert.deepEqual(JSON.parse(JSON.stringify(result.failure.nativeError)),native);
+   assert.equal(entries,1);assert.equal(result.failure.method,stage);
+   assert.equal(result.effectStarted,stage!=='initialUrl');assert.equal(result.completedEffect,false);
+   assert.equal(result.inputReleased,stage!=='click');assert.equal(result.completed.length,0);
+   assert.deepEqual(f.calls,stage==='initialUrl'?[]:['url']);
+  }
+ }
+});
+test('a returned application object cannot manufacture a native dialog failure',async()=>{
+ const f=fixture();
+ const data={code:'EGO_PAGE_DIALOG_OPENED',method:'Runtime.evaluate',sessionId:'page-text',
+  dialog:{type:'alert',message:'application data'}};
+ f.page.evaluate=async()=>data;
+ const result=await run(f.page,request([{method:'evaluate',source:'window.data'}]));
+ assert.equal(result.failure,null);
+ assert.deepEqual(JSON.parse(JSON.stringify(result.completed[0].receipt)),data);
+});
+test('ordinary error messages never manufacture native diagnostics',async()=>{
+ for(const message of ['EGO_PAGE_EVALUATION_TIMED_OUT executionStopped=true','EGO_NAVIGATION_TIMEOUT committed=true',
+  'PageDialogOpenedError EGO_PAGE_DIALOG_OPENED alert']){
  const f=fixture();
  f.page.evaluate=async()=>{throw Error(message);};
  const result=await run(f.page,request([{method:'evaluate',source:'window.slow()'}]));

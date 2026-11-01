@@ -299,6 +299,18 @@ prove no external effect occurred. Read the same Page before deciding the next
 action. Receipt/SDK-stand-in checks do not establish actual Keeper navigation
 timeout behavior.
 
+An SDK `EGO_PAGE_DIALOG_OPENED` error retains `code`, `method`, `sessionId` and
+the native `dialog` object under `failure.nativeError`. MASC validates the
+dialog's recognized `type` and text `message`, plus any supplied `defaultPrompt`,
+`url`, `frameId` and `hasBrowserHandler` fields, without interpreting page text.
+These names follow the [SDK error](https://github.com/citrolabs/ego-lite/blob/12407167f84a58af24044f072868051952131491/package/ego-browser/src/browser-runtime.ts#L115).
+Missing optional observations stay absent. This preserves an interrupted first
+evaluation's diagnostics even when no effect completed. Its outcome remains
+unknown; initial reads that failed before input retain their not-started phase.
+The dialog observation neither completes the interrupted operation nor clears
+pending input. Answer the dialog on the same managed Page, observe its state,
+and decide a distinct next action without replaying the stopped workflow.
+
 After successful work, `BrowserAct action=finish_space` completes that native
 task once. `keepPages` accepts either a list of distinct observed permanent
 Page labels (default `[]`) or the native literal `"all"`. MASC forwards `"all"`

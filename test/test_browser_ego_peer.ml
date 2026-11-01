@@ -2719,6 +2719,113 @@ const taskSpace = async () => ({ownership:'agent',
     check (list string) "bounded runner does not wrap native evaluation"
       ["space.open";"tabs.list"] (List.rev !bounded_steps)) [false,false;false,true;true,false;true,true]
 
+let test_native_dialog_error_keeps_progress_and_wire_observation () =
+  let module Wire=Masc.Browser_addon_wire in
+  let module Input=Masc.Browser_ego_input in
+  List.iter (fun (stage,prior) ->
+    let output=ref "" and native_calls=ref 0 in
+    let shim=Printf.sprintf {js|
+const seen = [], stage = %S;
+const dialog = {type:'prompt',message:'page text',defaultPrompt:'',
+  url:'https://app.slack.com/',frameId:'F1',hasBrowserHandler:false};
+const interrupt = () => { throw Object.assign(new Error('native dialog interruption'), {
+  code:'EGO_PAGE_DIALOG_OPENED',method:'Runtime.evaluate',sessionId:'S1',dialog}); };
+const page = {
+  url: async () => {seen.push('url');if(stage==='initialUrl')interrupt();return 'https://app.slack.com/';},
+  evaluate: async () => {seen.push('evaluate');interrupt();},
+  click: async () => {seen.push('click');interrupt();},
+  fill: async () => {seen.push('fill');return {};},
+  info: async () => {seen.push('info');return {};},
+  snapshot: async () => {seen.push('snapshot');return 'must not reach';}
+};
+const taskSpace = async () => ({ownership:'agent',page:()=>page});
+|js} stage in
+    let run ~window_s script = match (sent_of ~window_s script).step with
+      | "space.open" -> answered (obj ["spaceId",`Int 51;"name",str "SDK Space";"ownership",str "agent"])
+      | "tabs.list" -> answered tabs
+      | step -> failf "unexpected bounded runner step %s" step in
+    let run_native script =
+      incr native_calls;
+      output:=in_node (shim ^ script ^ "\nconsole.log('dialog-calls '+JSON.stringify(seen));");
+      Ok !output in
+    let peer=match Peer.open_space ~input:volatile_input ~downloads:no_downloads ~run ~run_native ~now
+        ~space:(Browser_configuration.Named_space "SDK Space") ~version:"fixture" ~capture_directory:(capture_directory ()) with
+      | Ok peer -> peer | Error detail -> fail detail in
+    ignore (dispatch peer Live.Tabs_list (obj []));
+    let action=if stage="click" then obj ["method",str "click";"selector",str "#interrupt"]
+      else obj ["method",str "evaluate";"source",str "window.operation()"] in
+    let prefix=if prior then [obj ["method",str "fill";"selector",str "#editor";"text",str "changed"]] else [] in
+    let args=obj ["tabId",`Int 1;"expectedUrl",str "https://app.slack.com/";"maxChars",`Int 100;
+      "steps",`List (prefix @ [action;obj ["method",str "fill";"selector",str "#never";"text",str "must not run"]])] in
+    let result=Peer.dispatch ~command_id:"native-dialog-error" peer ~verb:Live.Page_native_workflow args in
+    let receipt=match result with
+      | Error (Live.Partial_failure {receipt;_}) when prior -> receipt
+      | Error (Live.Observed_failure {disposition;receipt;_}) when not prior ->
+        check bool "native metadata does not change failed progress" true
+          (disposition=(if stage="initialUrl" then Live.Not_started else Live.Uncertain)); receipt
+      | Ok _|Error (Live.Before_effect _|Partial_failure _|Outcome_unknown _|Observed_failure _) ->
+        fail "native dialog failure lost its observation or changed disposition" in
+    let native=field "nativeError" (field "failure" receipt) in
+    check string "native code retained" "EGO_PAGE_DIALOG_OPENED" (text (field "code" native));
+    check string "native method retained" "Runtime.evaluate" (text (field "method" native));
+    check string "native session retained" "S1" (text (field "sessionId" native));
+    check bool "raw prompt fields and false handler flag retained" true (field "dialog" native=
+      obj ["type",str "prompt";"message",str "page text";"defaultPrompt",str "";
+        "url",str "https://app.slack.com/";"frameId",str "F1";"hasBrowserHandler",`Bool false]);
+    check bool "completed prefix remains exact" true
+      (List.length (Yojson.Safe.Util.to_list (field "completed" receipt))=(if prior then 1 else 0));
+    check bool "completed effect follows prefix only" true (field "completedEffect" receipt=`Bool prior);
+    (match Peer.input_status peer with
+     | Input.Ready Input.Command_settled when stage<>"click" -> ()
+     | Input.Uncertain pending when stage="click" ->
+       check string "interrupted holding command stays pending" "native-dialog-error" pending.command_id
+     | Input.Ready _|Input.Uncertain _ -> fail "dialog diagnostics changed input readiness");
+    let payload=Live.payload result in
+    check bool "model-facing failure retains the complete receipt" true (field "data" payload=receipt && field "ok" payload=`Bool false);
+    let wire=Wire.reply_to_json (Wire.Issue_result (Ok (Lane.Answered payload))) in
+    (match Wire.reply_of_json wire with
+     | Ok (Wire.Issue_result (Ok (Lane.Answered restored))) -> check bool "worker wire retains full observation" true (restored=payload)
+     | Ok _|Error _ -> fail "worker wire lost native dialog observation");
+    let prefix="dialog-calls " in
+    let calls=match List.filter (String.starts_with ~prefix) (String.split_on_char '\n' !output) with
+      | [line] -> Yojson.Safe.from_string (after ~prefix line)
+      | _ -> fail "missing SDK stand-in call receipt" in
+    check bool "no follow-up read, step or replay after interruption" true
+      (calls=`List (List.map str (if stage="initialUrl" then ["url"]
+        else ["url"] @ (if prior then ["fill"] else []) @ [stage])));
+    check int "one workflow dispatch" 1 !native_calls)
+    ["initialUrl",false;"evaluate",false;"evaluate",true;"click",false]
+
+let test_malformed_native_dialog_error_stays_unknown () =
+  let dialog_fields=["type",str "alert";"message",str "page text"] in
+  let dialog=obj dialog_fields in
+  let diagnostic dialog=obj ["code",str "EGO_PAGE_DIALOG_OPENED";"method",str "Runtime.evaluate";
+    "sessionId",str "S1";"dialog",dialog] in
+  let malformed=[`Null;obj [];obj ["type",str "future";"message",str "page text"];
+    obj ["type",str "alert";"message",`Null];
+    obj ["type",str "alert";"message",str "page text";"message",str "duplicate"]]
+    @ List.map (fun (key,value) -> obj ((key,value)::dialog_fields))
+      ["defaultPrompt",`Null;"url",`Bool true;"frameId",`Int 1;"hasBrowserHandler",str "false";"unknown",str "value"] in
+  List.iter (fun native ->
+    let calls=ref 0 in
+    let peer=opened (fun sent -> match sent.step with
+      | "tabs.list" -> answered tabs
+      | "page.native_workflow" -> incr calls; answered (obj ["completed",`List [];"effectStarted",`Bool true;
+          "completedEffect",`Bool false;"inputReleased",`Bool true;
+          "failure",obj ["index",`Int 0;"method",str "evaluate";"message",str "native dialog error";"nativeError",native]])
+      | step -> failf "unexpected step %s" step) in
+    ignore (dispatch peer Live.Tabs_list (obj []));
+    let result=dispatch peer Live.Page_native_workflow (obj ["tabId",`Int 1;
+      "expectedUrl",str "https://app.slack.com/";"maxChars",`Int 100;
+      "steps",`List [obj ["method",str "evaluate";"source",str "window.operation()"]]]) in
+    (match result with
+     | Error (Live.Outcome_unknown _) -> ()
+     | Ok _|Error (Live.Before_effect _|Live.Partial_failure _|Live.Observed_failure _) ->
+       fail "malformed native dialog evidence was accepted");
+    check int "malformed reply never replays the workflow" 1 !calls)
+    (List.map diagnostic malformed @ [obj ["code",str "EGO_PAGE_DIALOG_OPENED";"dialog",dialog];
+      obj ["code",str "EGO_PAGE_DIALOG_OPENED";"method",`Null;"sessionId",str "S1";"dialog",dialog]])
+
 let test_saved_fetch_survives_snapshot_failure_and_reaches_download_broker () =
   let module Broker=Masc.Browser_addon_downloads in
   let ok=function Ok value->value|Error detail->fail detail in
@@ -3452,6 +3559,8 @@ let () =
       test_case "Space status reads native metadata without Page or control effects" `Quick test_native_space_status;
       test_case "production workflow envelope preserves special JSON header keys" `Quick test_native_workflow_json_headers;
       test_case "first evaluation timeout preserves unknown native receipt" `Quick test_first_evaluation_timeout_preserves_unknown_native_receipt;
+      test_case "native dialog errors retain progress and wire observation" `Quick test_native_dialog_error_keeps_progress_and_wire_observation;
+      test_case "malformed native dialog errors stay unknown" `Quick test_malformed_native_dialog_error_stays_unknown;
       test_case "adopted managed Pages retain origin while using native actions" `Quick test_adopted_managed_page_uses_native_actions_without_changing_origin;
       test_case "takeover receipts and native runner preserve pending input" `Quick test_takeover_receipt_and_native_runner_preserve_pending_input;
       test_case "saved fetch survives snapshot failure and reaches the download broker" `Quick test_saved_fetch_survives_snapshot_failure_and_reaches_download_broker;

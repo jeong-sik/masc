@@ -48,6 +48,10 @@ let script = {js|async function nativeWorkflow(page, args, task, watchPage) {
     const nativeError = (() => {
       if (method === 'popupWait') return undefined;
       switch (error?.code) {
+        case 'EGO_PAGE_DIALOG_OPENED': return {
+          code: error.code, method: error.method,
+          sessionId: error.sessionId, dialog: error.dialog
+        };
         case 'EGO_PAGE_EVALUATION_TIMED_OUT': return {
           code: error.code, timeoutMs: error.timeoutMs,
           executionStopped: error.executionStopped,
@@ -340,8 +344,18 @@ type navigation_timeout = {
   wait_until : navigation_wait;
 }
 type popup_event_error = { name : string option; code : string option; timeout_ms : float option }
+type native_dialog = {
+  kind : Browser_surface.dialog_kind;
+  message : string;
+  default_prompt : string option;
+  url : string option;
+  frame_id : string option;
+  has_browser_handler : bool option;
+}
+type dialog_error = { method_ : string; session_id : string; dialog : native_dialog }
 type native_error = Evaluation_timed_out of evaluation_timeout
   | Navigation_timed_out of navigation_timeout | Popup_event_failed of popup_event_error
+  | Page_dialog_opened of dialog_error
 module Release = Browser_ego_release
 type page_identity = { space_id : int; label : string; target_id : string;
   opened_by : Browser_surface.ego_page_origin }
@@ -374,6 +388,19 @@ let optional_text key fields = match List.assoc_opt key fields with
   | None -> Ok None
   | Some (`String value) -> Ok (Some value)
   | Some _ -> Error ("invalid native " ^ key ^ " observation")
+let optional_bool key fields = match List.assoc_opt key fields with
+  | None -> Ok None
+  | Some (`Bool value) -> Ok (Some value)
+  | Some _ -> Error ("invalid native " ^ key ^ " observation")
+let native_dialog value =
+  let* fields=object_fields ["type";"message";"defaultPrompt";"url";"frameId";"hasBrowserHandler"] value in
+  let* kind=text "type" fields in
+  let* kind=Option.to_result ~none:"invalid native dialog type" (Browser_surface.dialog_kind_of_wire kind) in
+  let* message=text "message" fields in
+  let* default_prompt=optional_text "defaultPrompt" fields in
+  let* url=optional_text "url" fields in let* frame_id=optional_text "frameId" fields in
+  let* has_browser_handler=optional_bool "hasBrowserHandler" fields in
+  Ok {kind;message;default_prompt;url;frame_id;has_browser_handler}
 let native_error fields = match List.assoc_opt "eventError" fields,List.assoc_opt "nativeError" fields with
   | Some value,None ->
     let* fields=object_fields ["name";"code";"timeoutMs"] value in
@@ -388,6 +415,11 @@ let native_error fields = match List.assoc_opt "eventError" fields,List.assoc_op
     let* code=match value with `Assoc fields -> text "code" fields
       | _ -> Error "native error is not an object" in
     match code with
+    | "EGO_PAGE_DIALOG_OPENED" ->
+    let* fields=object_fields ["code";"method";"sessionId";"dialog"] value in
+    let* method_=text "method" fields in let* session_id=text "sessionId" fields in
+    let* value=get "dialog" fields in let* dialog=native_dialog value in
+    Ok (Some (Page_dialog_opened {method_;session_id;dialog}))
     | "EGO_PAGE_EVALUATION_TIMED_OUT" ->
     let* fields=object_fields ["code";"timeoutMs";"executionStopped";"mayHaveLateEffects";"pageResponsive"] value in
     let* timeout_ms=timeout_ms fields in

@@ -173,10 +173,16 @@ let handle_sandbox_volume_gc ~tool_name ~start_time (ctx : context) args : Tool_
       (match
          Keeper_volume_gc.apple_keeper_volume_gc
            ~run:(fun ~timeout_sec argv ->
-              Process_eio.run_argv_with_status_split
-                ~timeout_sec
-                ~cwd:(Config_dir_resolver.current_working_dir ())
-                argv)
+              (* The same boundary every keeper CLI spawn crosses: the
+                 environment is scrubbed of keeper-secret keys and the
+                 descriptor is accounted, so the operator tool cannot leak
+                 what a keeper lane would not see. *)
+              Fd_accountant.observe ~kind:Fd_accountant.Docker_spawn (fun () ->
+                  Process_eio.run_argv_with_status_split
+                    ~timeout_sec
+                    ~env:(Env_keeper_scrub.filter_environment (Unix.environment ()))
+                    ~cwd:(Config_dir_resolver.current_working_dir ())
+                    argv))
            ~timeout_sec
            ~registered_keeper
            ~claims_image

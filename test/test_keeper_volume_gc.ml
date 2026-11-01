@@ -202,7 +202,13 @@ let test_the_decision_table_keeps_every_protected_volume () =
        (Gc.keeper_outcome_to_string other));
   Alcotest.(check (list string))
     "exactly the candidates' volumes are deleted"
-    [ "masc-keeper-work-retired"; "masc-keeper-build-retired"; "masc-keeper-work-legacy" ]
+    [ "masc-keeper-work-retired"
+    ; "masc-keeper-build-retired"
+    ; "masc-keeper-work-legacy"
+    ; (* the removal deletes both of a keeper's volumes, including a build
+         volume the listing never showed *)
+      "masc-keeper-build-legacy"
+    ]
     (deleted_volume_names sent)
 ;;
 

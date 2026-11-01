@@ -232,8 +232,10 @@ let test_fresh_roster_reads_lifecycle_transition () =
     ~after_list_with_args:(fun config read ->
       let events = ref [] in
       let subscriber = "fresh-roster-lifecycle-test" in
-      Sse.subscribe_external ~id:subscriber ~callback:(fun event ->
-        events := event.Sse.ext_payload :: !events) ();
+      Sse.subscribe_external
+        ~runtime_authority:(Sse.runtime_authority_exn ~base_path:config.Workspace.base_path)
+        ~id:subscriber ~callback:(fun event ->
+          events := event.Sse.ext_payload :: !events) ();
       Fun.protect ~finally:(fun () -> Sse.unsubscribe_external subscriber) (fun () ->
         (match Keeper_registry.dispatch_event ~base_path:config.Workspace.base_path
             "alpha" Keeper_state_machine.Fiber_started with

@@ -1238,7 +1238,7 @@ let mark_turn_started ~observation_token ~base_path ~wake name =
         current_turn_observation = Some obs
         }, true)
   in
-  if changed then broadcast_composite_changed ~name ~ts_unix:now
+  if changed then broadcast_composite_changed ~base_path ~name ~ts_unix:now
 ;;
 
 let record_turn_progress ~observation_token ~base_path name ~event_kind =
@@ -1285,7 +1285,7 @@ let mark_agent_core_turn_started ~observation_token ~base_path name =
           in
           { e with current_turn_observation = Some new_obs }, true))
   in
-  if changed then broadcast_composite_changed ~name ~ts_unix:now
+  if changed then broadcast_composite_changed ~base_path ~name ~ts_unix:now
 ;;
 
 let mark_turn_measurement ~observation_token ~base_path name =
@@ -1307,7 +1307,7 @@ let mark_turn_measurement ~observation_token ~base_path name =
         }, true
       | _ -> e, false)
   in
-  if changed then broadcast_composite_changed ~name ~ts_unix:now
+  if changed then broadcast_composite_changed ~base_path ~name ~ts_unix:now
 ;;
 
 (* FSM transition validators moved to Keeper_registry_fsm_validators. *)
@@ -1327,7 +1327,7 @@ let set_turn_decision_stage ~observation_token ~base_path name (decision_stage :
             decision_stage = target_packed
           })))
   in
-  if changed then broadcast_composite_changed ~name ~ts_unix:now
+  if changed then broadcast_composite_changed ~base_path ~name ~ts_unix:now
 ;;
 
 let set_turn_phase_direct ~observation_token ~base_path name ~event_kind (turn_phase : packed_turn_phase) =
@@ -1356,7 +1356,7 @@ let set_turn_phase_direct ~observation_token ~base_path name ~event_kind (turn_p
       in
       e', changed)
   in
-  if changed then broadcast_composite_changed ~name ~ts_unix:now
+  if changed then broadcast_composite_changed ~base_path ~name ~ts_unix:now
 ;;
 
 let set_turn_phase_with ~observation_token ~base_path name ~event_kind ~target ~update_obs =
@@ -1395,7 +1395,7 @@ let set_turn_phase_with ~observation_token ~base_path name ~event_kind ~target ~
       in
       e', changed)
   in
-  if changed then broadcast_composite_changed ~name ~ts_unix:now
+  if changed then broadcast_composite_changed ~base_path ~name ~ts_unix:now
 ;;
 
 let mark_turn_runtime_exhausted ~observation_token ~base_path name =

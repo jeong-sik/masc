@@ -28,6 +28,7 @@ type broadcast_target =
   | Observers
   | Runtime_observers of runtime_authority
   | Presence_only
+  | Runtime_presence of runtime_authority
 
 type delivery_audience =
   | Broadcast_audience of broadcast_target
@@ -167,12 +168,16 @@ val broadcast_to_with_commit
     accepted the delivery and failed sessions have been unregistered. A later
     diagnostic or external-subscriber exception does not undo that receipt.
     This callback is not a receipt for external subscribers. [Presence_only]
-    is rejected because it is not a replayable observer delivery. *)
+    and [Runtime_presence] are rejected because presence is not replayable. *)
 
 val broadcast_encoded_to : broadcast_target -> Sse_wire.encoded_json -> unit
 (** {!broadcast_to} of [encoded.json], its frame written from [encoded.text]
     so the value is not encoded again under the fan-out lock. *)
 val broadcast_presence : Yojson.Safe.t -> unit
+val broadcast_presence_to_runtime : runtime_authority -> Yojson.Safe.t -> unit
+(** Deliver an ephemeral presence event only to sessions in this runtime.
+    It is not replay-buffered and does not reach external subscribers.
+    [Runtime_presence] cannot be passed to the generic broadcast functions. *)
 val send_to : string -> Yojson.Safe.t -> unit
 val pop : string -> string option
 val try_pop : string -> string option

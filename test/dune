@@ -2708,6 +2708,7 @@
 (include stanzas/test_board_persistence_load_contract.inc)
 
 (include stanzas/test_board_posts_source_authority.inc)
+(include stanzas/test_board_posts_preflight.inc)
 
 (include stanzas/test_board_snapshot_rows.inc)
 
@@ -2975,6 +2976,7 @@
 (include stanzas/test_fs_compat_append_jsonl_atomicity.inc)
 
 (include stanzas/test_fs_compat_durable_append.inc)
+(include stanzas/test_fs_compat_unique_fold.inc)
 
 (include stanzas/test_fs_compat_home_guard.inc)
 (include stanzas/test_retention_directory.inc)

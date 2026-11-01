@@ -284,15 +284,24 @@ let board_posts_store =
         let observed = Posts.inspect_posts_source
             ~workspace_masc_dir:(Common.masc_dir_from_base_path ~base_path) in
         match observed with
-        | Board_types.Posts_complete { posts; _ } ->
-          Ok { empty_report with rows = List.length posts }
-        | Board_types.Posts_partial { posts; errors; _ } ->
+        | Posts.Inspected { observation = Observed_missing; _ } -> Ok empty_report
+        | Posts.Inspected {
+            observation = Observed_present {
+              framing = Torn_tail { rows_end; end_offset }; _ };
+            _ } ->
+          Error (Printf.sprintf "posts source has an incomplete tail after byte %d (end %d)"
+            rows_end end_offset)
+        | Posts.Inspected {
+            observation = Observed_present { accepted_rows; errors; framing = Complete_rows };
+            _ } ->
           let refused = List.length errors in
-          let detail = Posts.posts_source_failure_to_board_error (Board_types.Posts_rows_rejected errors)
-            |> Board_types.show_board_error in
-          Ok { rows = List.length posts + refused; refused; first_refusal = Some detail }
-        | Board_types.Posts_unavailable failure ->
-          Error (Posts.posts_source_failure_to_board_error failure |> Board_types.show_board_error))
+          let first_refusal = match errors with
+            | [] -> None
+            | _ :: _ -> Some (Posts.posts_source_failure_to_board_error
+                (Board_types.Posts_rows_rejected errors) |> Board_types.show_board_error) in
+          Ok { rows = accepted_rows + refused; refused; first_refusal }
+        | Posts.Inspection_failed { error; _ } ->
+          Error (Fs_compat.Private_jsonl_unique_fold.error_to_string error))
   }
 ;;
 

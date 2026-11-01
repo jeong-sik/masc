@@ -136,13 +136,14 @@ let read store =
         else
           let posts = ref [] and errors = ref [] in
           String.split_on_char '\n' receipt.value.bytes |> List.iteri (fun index text ->
-            if not (String.equal (String.trim text) "") then
-              match Yojson.Safe.from_string text with
-              | json -> (match Board_core_json.post_of_yojson json with
-                | Some post -> posts := post :: !posts
-                | None -> errors := Invalid_posts_row { line = index + 1 } :: !errors)
-              | exception Yojson.Json_error detail ->
-                errors := Invalid_posts_json { line = index + 1; detail } :: !errors);
+            match Board_posts_rows.decode ~line:(index + 1) text with
+            | Blank -> ()
+            | Accepted { post; diagnostics } ->
+              Board_content_diagnostics.emit diagnostics;
+              posts := post :: !posts
+            | Rejected { error; diagnostics } ->
+              Board_content_diagnostics.emit diagnostics;
+              errors := error :: !errors);
           let posts = List.rev !posts in
           match List.rev !errors with
           | [] -> Posts_complete { observation; posts; settlement_diagnostic = receipt.settlement_error }

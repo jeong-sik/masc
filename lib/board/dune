@@ -4,11 +4,14 @@
  (name masc_board_handlers)
  (public_name masc.board_handlers)
  (wrapped true)
- (private_modules board_content_json board_vote_transition board_snapshot_batch board_sub_boards board_posts_source)
+ (private_modules board_content_json board_content_diagnostics board_posts_rows board_posts_inspection board_vote_transition board_snapshot_batch board_sub_boards board_posts_source)
  (modules
   board
   board_audience
   board_content_json
+  board_content_diagnostics
+  board_posts_rows
+  board_posts_inspection
   board_core
   board_core_classify
   board_core_json

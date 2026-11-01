@@ -1558,6 +1558,39 @@ and private_jsonl_transaction_error =
       }
   | Transaction_append_failed of durable_append_error
 
+module Private_jsonl_unique_fold : sig
+  type error =
+    | Non_regular_file of Unix.file_kind
+    | Snapshot_changed
+    | Binding_refused of private_jsonl_transaction_error
+    | Operation_failed of private_jsonl_operation_failure
+
+  val error_to_string : error -> string
+end
+
+val fold_private_jsonl_unique_regular_locked_result :
+  string -> init:'a -> f:('a -> string -> 'a) ->
+  ('a Private_jsonl_fold.t, Private_jsonl_unique_fold.error)
+    private_file_transaction_outcome
+(** Noncreating observation of a uniquely linked regular JSONL file. The
+    existing descriptor reader and row-fold kernel are shared with
+    {!fold_private_jsonl_locked_result}, whose symlink-support contract is
+    unchanged. This variant checks lstat/fstat identity and single-link binding
+    before the first callback and after the last callback. A dangling symlink
+    is refused, not reported as [Missing]. Only actual initial absence yields
+    [Missing]; observed replacement, disappearance or content drift is an error.
+
+    Complete rows, including blanks, reach [f] in order in the blocking worker;
+    [f] must not use Eio effects or re-enter this path. A final unterminated
+    fragment is reported by [rows_end < end_offset] and never reaches [f].
+    Primary operation failures retain the original exception and backtrace;
+    descriptor settlement remains separate in [private_file_transaction_outcome].
+
+    This operation creates no parent, sibling lock or stage and does not chmod,
+    truncate, append or fsync. It takes the data-reader shared lock, not the
+    stable sibling lock. Before/after checks describe a read observation;
+    they confer no stable cursor, durability, history or later write authority. *)
+
 type 'a private_jsonl_success_receipt =
   { value : 'a
   ; settlement_error : private_jsonl_transaction_error option
@@ -1644,6 +1677,14 @@ type private_jsonl_transaction_io_for_testing =
   { before_sync_parent : string -> unit
   ; close_fd : Unix.file_descr -> unit
   }
+
+val fold_private_jsonl_unique_regular_locked_with_io_for_testing :
+  io:private_jsonl_transaction_io_for_testing ->
+  string -> init:'a -> f:('a -> string -> 'a) ->
+  ('a Private_jsonl_fold.t, Private_jsonl_unique_fold.error)
+    private_file_transaction_outcome
+(** Same noncreating observation with actual descriptor-settlement injection.
+    [before_sync_parent] is never called by this read-only operation. *)
 
 val purge_private_jsonl_durable_locked_with_io_for_testing :
   io:private_jsonl_transaction_io_for_testing ->

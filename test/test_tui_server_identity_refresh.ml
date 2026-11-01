@@ -4897,7 +4897,27 @@ let test_active_history_remains_until_its_unconfirmed_view_closes () =
   state.task_detail_id <- Some task_id;
   ignore (sync_task_documents state ~cols);
   Alcotest.(check bool) "the new authority prepares its own history document" true
-    (Option.is_some state.task_document_history.tds_request)
+    (Option.is_some state.task_document_history.tds_request);
+  let state, task_id = fixture () in
+  state.task_document_history <- initial_task_document_slot;
+  ignore (sync_task_documents state ~cols);
+  Alcotest.(check bool) "history preparation is in flight before the interruption" true
+    (Option.is_some state.task_document_history.tds_request);
+  state.workspace_identity <- Workspace_identity_match_unconfirmed "fixture disconnected";
+  suspend_workspace_readings state;
+  complete_task_scroll_documents state ~cols (sync_task_documents state ~cols);
+  Alcotest.(check bool) "a document prepared from unconfirmed history has no reusable owner" true
+    (match state.task_document_history.tds_previous with
+     | Some (_,None,_) -> true | Some (_,Some _,_) | None -> false);
+  state.workspace_identity <- Workspace_identity_match;
+  let request = match begin_task_history_read state ~task_id ~limit:40 with
+    | Some request -> request | None -> Alcotest.fail "history revalidation did not start" in
+  complete_task_history_read state request (Ok (task_scroll_history task_id));
+  state.task_detail_id <- None;
+  ignore (sync_task_documents state ~cols);
+  Alcotest.(check bool) "a later raw success cannot authorize a document prepared from unconfirmed history" true
+    (state.task_document_history.tds_previous = None
+     && Fetched.current_key state.task_document_history.tds_reading = None)
 
 let test_task_detail_end_respects_presented_input () =
   let open Masc_tui_types in

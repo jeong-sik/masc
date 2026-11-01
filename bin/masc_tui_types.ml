@@ -5550,7 +5550,9 @@ type task_document_request =
 type task_document_slot =
   { tds_reading : (task_document_key,string list) Masc_tui_fetched.t
   ; tds_request : task_document_request option
-  ; tds_previous : (task_document_key * unit ref * string list) option }
+  (* A Work History document prepared from an unconfirmed source has no
+     reusable owner, even if the formatter itself ran under the current ref. *)
+  ; tds_previous : (task_document_key * unit ref option * string list) option }
 type task_detail_owner = { tdo_task_id : string; tdo_reading : unit ref }
 type task_detail_presented =
   { tdp_owner : task_detail_owner
@@ -20086,7 +20088,7 @@ let sync_task_documents state ~cols =
       Option.iter (fun request -> Observation.observe request.tdr_observation
         (Retired Source_unavailable)) slot.tds_request;
       let previous = match part,slot.tds_previous with
-        | History,Some ({tdk_target=Work_task_document task_id;_},owner,_)
+        | History,Some ({tdk_target=Work_task_document task_id;_},Some owner,_)
           when owner == state.workspace_read_authority && task_history_owned_by state ~task_id -> slot.tds_previous
         | History,(None | Some ({tdk_target=(Work_task_document _ | Async_task_document _);_},_,_))
         | Masc_tui_task_document.Body,(None | Some _) -> None in
@@ -20147,8 +20149,14 @@ let complete_task_document state ~cols request result =
     end;
     Observation.observe request.tdr_observation (Ui_disposition (Rejected reason))
   | None ->
+    let previous_owner = match part,key.tdk_target with
+      | History,Work_task_document task_id ->
+        if task_history_owned_by state ~task_id then Some request.tdr_reading else None
+      | History,Async_task_document _
+      | Masc_tui_task_document.Body,(Work_task_document _ | Async_task_document _) ->
+        Some request.tdr_reading in
     set_task_document_slot state part {tds_request=None;
-      tds_previous=(match result with Ok rows -> Some (key,request.tdr_reading,rows) | Error _ -> slot.tds_previous);
+      tds_previous=(match result with Ok rows -> Some (key,previous_owner,rows) | Error _ -> slot.tds_previous);
       tds_reading=Masc_tui_fetched.complete ~equal:equal_task_document_key slot.tds_reading request.tdr_ticket result};
     Observation.observe request.tdr_observation (Ui_disposition (match result with Ok _ -> Applied | Error _ -> Applied_failure))
 

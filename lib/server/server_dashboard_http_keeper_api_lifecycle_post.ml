@@ -170,6 +170,7 @@ let shutdown_outcome_of_data data =
 
 type boot_preflight =
   | Boot_allowed
+  | Boot_phase_transitioning of Keeper_state_machine.phase
   | Boot_operator_paused
   | Boot_meta_read_failed of string
   | Boot_model_setup_required of Runtime_startup_state.reason
@@ -340,27 +341,55 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
         in
         Log.Server.info "keeper lifecycle %s name=%s actor=%s started"
           action name agent_name;
+        let boot_entry =
+          if String.equal action "boot" then
+            Keeper_registry.get ~base_path:config.base_path name
+          else None
+        in
         let boot_preflight =
           if not (String.equal action "boot")
           then Boot_allowed
-          else if Runtime_startup_state.requires_setup () then
-            (match Runtime_startup_state.get () with
-             | Setup_required reason -> Boot_model_setup_required reason
-             | Not_initialized | Available -> Boot_allowed)
           else
-            match Keeper_meta_store.read_meta config name with
-            | Error error -> Boot_meta_read_failed error
-            | Ok None -> Boot_allowed
-            | Ok (Some meta) ->
-              (match
-                 Keeper_lifecycle_admission.state
-                   ~paused:meta.paused
-                   ~latched_reason:meta.latched_reason
-               with
-               | Keeper_lifecycle_admission.Paused _ -> Boot_operator_paused
-               | Keeper_lifecycle_admission.Active -> Boot_allowed)
+            match boot_entry with
+            | Some entry
+              when entry.phase = Keeper_state_machine.Draining
+                   || entry.phase = Keeper_state_machine.Restarting ->
+              Boot_phase_transitioning entry.phase
+            | Some _ | None ->
+              if Runtime_startup_state.requires_setup () then
+                (match Runtime_startup_state.get () with
+                 | Setup_required reason -> Boot_model_setup_required reason
+                 | Not_initialized | Available -> Boot_allowed)
+              else
+                match Keeper_meta_store.read_meta config name with
+                | Error error -> Boot_meta_read_failed error
+                | Ok None -> Boot_allowed
+                | Ok (Some meta) ->
+                  (match
+                     Keeper_lifecycle_admission.state
+                       ~paused:meta.paused
+                       ~latched_reason:meta.latched_reason
+                   with
+                   | Keeper_lifecycle_admission.Paused _ -> Boot_operator_paused
+                   | Keeper_lifecycle_admission.Active -> Boot_allowed)
         in
         (match boot_preflight with
+         | Boot_phase_transitioning phase ->
+           let why =
+             Printf.sprintf
+               "keeper is currently %s; wait for the transition to settle \
+                before booting"
+               (Keeper_state_machine.phase_to_string phase)
+           in
+           log_lifecycle_result (Rejected why);
+           Http.Response.json_value
+             ~status:`Conflict
+             ~request:req
+             (Server_refusal.json
+                ~code:Tui_decode.keeper_boot_phase_conflict_code
+                ~fields:[ "ok", `Bool false ]
+                why)
+             reqd
          | Boot_model_setup_required reason ->
            let why = Runtime_startup_state.message reason in
            log_lifecycle_result (Rejected why);
@@ -389,30 +418,7 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
              reqd
              why
          | Boot_allowed ->
-        let boot_entry =
-          if String.equal action "boot" then
-            Keeper_registry.get ~base_path:config.base_path name
-          else None
-        in
         (match boot_entry with
-         | Some entry
-           when entry.phase = Keeper_state_machine.Draining
-                || entry.phase = Keeper_state_machine.Restarting ->
-           let why =
-             Printf.sprintf
-               "keeper is currently %s; wait for the transition to settle \
-                before booting"
-               (Keeper_state_machine.phase_to_string entry.phase)
-           in
-           log_lifecycle_result (Rejected why);
-           Http.Response.json_value
-             ~status:`Conflict
-             ~request:req
-             (Server_refusal.json
-                ~code:Tui_decode.keeper_boot_phase_conflict_code
-                ~fields:[ "ok", `Bool false ]
-                why)
-             reqd
          | Some entry
            when entry.conditions.fiber_alive
                 && not entry.conditions.stop_requested

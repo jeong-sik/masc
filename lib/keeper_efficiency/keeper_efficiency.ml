@@ -241,16 +241,28 @@ let fold_tool_row (acc : day_acc) (json : Yojson.Safe.t) : day_acc =
 ;;
 
 (* A day file that shrank below its cached boundary was re-read from zero,
-   and a previously cached day file that was removed is absent from
-   [returned]. In either case this day's cached accumulator is stale and the
-   caller folds the day again from an empty accumulator. *)
-let shrank ~passed ~returned =
-  List.exists
-    (fun (path, prior) ->
-       match List.assoc_opt path returned with
-       | Some boundary -> boundary < prior
-       | None -> true)
-    passed
+   and a previously cached day file that was confirmed removed ([ENOENT]) is
+   absent from [returned]. In either case this day's cached accumulator is
+   stale and the caller folds the day again from an empty accumulator.
+   Storage inspection failures on a missing path propagate as [Error] so an
+   unreadable ledger never rebuilds and overwrites cached totals. *)
+let check_shrank ~label ~passed ~returned =
+  let rec loop shrank_any = function
+    | [] -> Ok shrank_any
+    | (path, prior) :: rest ->
+      (match List.assoc_opt path returned with
+       | Some boundary -> loop (shrank_any || boundary < prior) rest
+       | None ->
+         (match Unix.lstat path with
+          | _stats -> loop true rest
+          | exception Unix.Unix_error ((Unix.ENOENT | Unix.ENOTDIR), _, _) ->
+            loop true rest
+          | exception Unix.Unix_error (err, op, arg) ->
+            Error
+              (Printf.sprintf "%s%s(%s): %s" label op arg
+                 (Unix.error_message err))))
+  in
+  loop false passed
 ;;
 
 (* ------------------------------------------------------------------ *)
@@ -338,6 +350,22 @@ let keeper_of_json = function
   | _ -> None
 ;;
 
+let has_positive_cursor cursors =
+  List.exists (fun (_path, boundary) -> boundary > 0) cursors
+;;
+
+let keeper_has_cost_state (k : keeper_month) =
+  k.turns > 0
+  || k.input_tokens > 0
+  || k.output_tokens > 0
+  || k.cost_usd > 0.0
+  || (k.calls = 0 && k.failed = 0 && k.deferred = 0 && k.tool_ms = 0.0)
+;;
+
+let keeper_has_tool_state (k : keeper_month) =
+  k.calls > 0 || k.failed > 0 || k.deferred > 0 || k.tool_ms > 0.0
+;;
+
 let section_of_json day json =
   match json with
   | `Assoc fields ->
@@ -357,9 +385,12 @@ let section_of_json day json =
        | Some costs_cursors, Some tool_cursors, Some turn_ids, Some (`List rows) ->
          (match all_some [] (List.map keeper_of_json rows) with
           | Some keepers ->
-            if (keepers <> [] || turn_ids <> [])
-               && costs_cursors = []
-               && tool_cursors = []
+            let has_cost_state =
+              turn_ids <> [] || List.exists keeper_has_cost_state keepers
+            in
+            let has_tool_state = List.exists keeper_has_tool_state keepers in
+            if (has_cost_state && not (has_positive_cursor costs_cursors))
+               || (has_tool_state && not (has_positive_cursor tool_cursors))
             then None
             else
               Some
@@ -458,46 +489,59 @@ let cache_path ~masc_root ~month =
   else Error ("invalid month: " ^ month)
 ;;
 
-(* The cache is a rebuildable projection, so an unreadable or malformed
-   cache is the empty cache and the next fold rebuilds every day it
-   disagreees with. A plain blocking read matches how Dated_jsonl itself
-   reads day files. *)
+(* The cache is a rebuildable projection when missing or malformed, while an
+   unreadable cache file surfaces a storage error so the caller does not
+   silently discard or overwrite an existing cache on I/O failure. *)
 let read_cache_file path =
-  match Fs_compat.file_exists path with
-  | false -> None
-  | true ->
-    let ic = open_in_bin path in
-    Fun.protect
-      ~finally:(fun () -> close_in_noerr ic)
-      (fun () ->
-         try Some (really_input_string ic (in_channel_length ic)) with
-         | End_of_file -> None)
+  match Unix.lstat path with
+  | exception Unix.Unix_error ((Unix.ENOENT | Unix.ENOTDIR), _, _) -> Ok None
+  | exception Unix.Unix_error (err, op, arg) ->
+    Error
+      (Printf.sprintf "efficiency cache: %s(%s): %s" op arg
+         (Unix.error_message err))
+  | _stats ->
+    (try
+       let ic = open_in_bin path in
+       Fun.protect
+         ~finally:(fun () -> close_in_noerr ic)
+         (fun () ->
+            try Ok (Some (really_input_string ic (in_channel_length ic))) with
+            | End_of_file -> Ok None)
+     with
+     | Sys_error detail -> Error ("efficiency cache: " ^ detail)
+     | Unix.Unix_error (err, op, arg) ->
+       Error
+         (Printf.sprintf "efficiency cache: %s(%s): %s" op arg
+            (Unix.error_message err)))
 ;;
 
 let load_cache ~masc_root ~month =
   match cache_path ~masc_root ~month with
-  | Error _ -> { sections = [] }
+  | Error detail -> Error detail
   | Ok path ->
     (match read_cache_file path with
-     | None -> { sections = [] }
-     | Some content ->
+     | Error detail -> Error detail
+     | Ok None -> Ok { sections = [] }
+     | Ok (Some content) ->
        (match Yojson.Safe.from_string content with
-        | exception _ -> { sections = [] }
+        | exception _ -> Ok { sections = [] }
         | json ->
           (match cache_of_json ~month json with
-           | Some cache -> cache
-           | None -> { sections = [] })))
+           | Some cache -> Ok cache
+           | None -> Ok { sections = [] })))
 ;;
 
 let save_cache ~masc_root ~month cache =
   match cache_path ~masc_root ~month with
   | Error _ -> ()  (* read_month validated the month before folding *)
   | Ok path ->
-    Fs_compat.mkdir_p (Filename.dirname path);
-    let json = Yojson.Safe.to_string (cache_to_json ~month cache) in
-    (match Fs_compat.save_file_atomic path json with
-     | Ok () -> ()
-     | Error _ ->
+    (try
+       Fs_compat.mkdir_p (Filename.dirname path);
+       let json = Yojson.Safe.to_string (cache_to_json ~month cache) in
+       match Fs_compat.save_file_atomic path json with
+       | Ok () | Error _ -> ()
+     with
+     | Sys_error _ | Unix.Unix_error _ ->
        (* A failed cache write only costs a later re-read of bytes this call
           already folded; the ledgers are the authority. *)
        ())
@@ -506,66 +550,108 @@ let save_cache ~masc_root ~month cache =
 (* ------------------------------------------------------------------ *)
 (* Month fold *)
 
-let fold_day_store ~store ~day ~cursors ~fold_row acc =
-  Dated_jsonl.fold_range_appended store ~since:day ~until:day ~cursors ~init:acc
-    ~f:fold_row
+let fold_day_store ~label ~store ~day ~cursors ~fold_row acc =
+  match Dated_jsonl.range_day_file_paths_result store ~since:day ~until:day with
+  | Error err -> Error (label ^ Dated_jsonl.read_error_to_string err)
+  | Ok paths ->
+    let rec loop acc next_cursors = function
+      | [] -> Ok (acc, List.rev next_cursors)
+      | path :: rest ->
+        (match Unix.lstat path with
+         | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
+           loop acc next_cursors rest
+         | exception Unix.Unix_error (err, op, arg) ->
+           Error
+             (Printf.sprintf "%s%s(%s): %s" label op arg
+                (Unix.error_message err))
+         | _stats ->
+           let from =
+             match List.assoc_opt path cursors with Some n -> n | None -> 0
+           in
+           (match
+              Fs_compat.fold_appended_lines ~path ~from ~init:acc
+                ~f:(fun acc line ->
+                  match Yojson.Safe.from_string line with
+                  | json -> fold_row acc json
+                  | exception Yojson.Json_error _ -> acc)
+            with
+            | acc, boundary -> loop acc ((path, boundary) :: next_cursors) rest
+            | exception Sys_error detail -> Error (label ^ detail)
+            | exception Unix.Unix_error (err, op, arg) ->
+              Error
+                (Printf.sprintf "%s%s(%s): %s" label op arg
+                   (Unix.error_message err))))
+    in
+    loop acc [] paths
 ;;
 
 let compute_month ~costs_store ~tool_store ~month ~cache =
+  let open Result.Syntax in
   let sections = List.init (days_in_month month) (fun i -> empty_section (i + 1)) in
-  List.iter
-    (fun section ->
-       let day = day_string month section.day in
-       let cached =
-         List.find_opt (fun (s : day_section) -> Int.equal s.day section.day) cache.sections
-       in
-       let costs_cursors =
-         Option.map (fun (s : day_section) -> s.costs_cursors) cached |> Option.value ~default:[]
-       in
-       let tool_cursors =
-         Option.map (fun (s : day_section) -> s.tool_cursors) cached |> Option.value ~default:[]
-       in
-       let acc =
-         let acc = empty_day_acc () in
-         List.iter
-           (fun (agent, turn) -> Hashtbl.add acc.turn_ids (agent, turn) ())
-           (Option.map (fun (s : day_section) -> s.turn_ids) cached
-            |> Option.value ~default:[]);
-         List.iter
-           (fun k -> Hashtbl.replace acc.keepers k.keeper k)
-           (Option.map (fun (s : day_section) -> s.keepers) cached
-            |> Option.value ~default:[]);
-         acc
-       in
-       let acc, returned_costs, returned_tools =
-         let acc, returned_costs =
-           fold_day_store ~store:costs_store ~day ~cursors:costs_cursors ~fold_row:fold_cost_row acc
-         in
-         let acc, returned_tools =
-           fold_day_store ~store:tool_store ~day ~cursors:tool_cursors ~fold_row:fold_tool_row acc
-         in
-         if
-           shrank ~passed:costs_cursors ~returned:returned_costs
-           || shrank ~passed:tool_cursors ~returned:returned_tools
-         then
-           let fresh = empty_day_acc () in
-           let fresh, returned_costs =
-             fold_day_store ~store:costs_store ~day ~cursors:[] ~fold_row:fold_cost_row fresh
-           in
-           let fresh, returned_tools =
-             fold_day_store ~store:tool_store ~day ~cursors:[] ~fold_row:fold_tool_row fresh
-           in
-           (fresh, returned_costs, returned_tools)
-         else (acc, returned_costs, returned_tools)
-       in
-       section.costs_cursors <- returned_costs;
-       section.tool_cursors <- returned_tools;
-       section.turn_ids <- Hashtbl.fold (fun key () list -> key :: list) acc.turn_ids [];
-       section.keepers <-
-         Hashtbl.fold (fun _ k list -> k :: list) acc.keepers []
-         |> List.sort (fun a b -> String.compare a.keeper b.keeper))
-    sections;
-  { sections }
+  let rec loop = function
+    | [] -> Ok { sections }
+    | (section : day_section) :: rest ->
+      let day = day_string month section.day in
+      let cached =
+        List.find_opt (fun (s : day_section) -> Int.equal s.day section.day) cache.sections
+      in
+      let costs_cursors =
+        Option.map (fun (s : day_section) -> s.costs_cursors) cached |> Option.value ~default:[]
+      in
+      let tool_cursors =
+        Option.map (fun (s : day_section) -> s.tool_cursors) cached |> Option.value ~default:[]
+      in
+      let acc =
+        let acc = empty_day_acc () in
+        List.iter
+          (fun (agent, turn) -> Hashtbl.add acc.turn_ids (agent, turn) ())
+          (Option.map (fun (s : day_section) -> s.turn_ids) cached
+           |> Option.value ~default:[]);
+        List.iter
+          (fun k -> Hashtbl.replace acc.keepers k.keeper k)
+          (Option.map (fun (s : day_section) -> s.keepers) cached
+           |> Option.value ~default:[]);
+        acc
+      in
+      let* acc, returned_costs =
+        fold_day_store ~label:"costs store: " ~store:costs_store ~day
+          ~cursors:costs_cursors ~fold_row:fold_cost_row acc
+      in
+      let* acc, returned_tools =
+        fold_day_store ~label:"tool_calls store: " ~store:tool_store ~day
+          ~cursors:tool_cursors ~fold_row:fold_tool_row acc
+      in
+      let* costs_shrank =
+        check_shrank ~label:"costs store: " ~passed:costs_cursors
+          ~returned:returned_costs
+      in
+      let* tools_shrank =
+        check_shrank ~label:"tool_calls store: " ~passed:tool_cursors
+          ~returned:returned_tools
+      in
+      let* acc, returned_costs, returned_tools =
+        if costs_shrank || tools_shrank then
+          let fresh = empty_day_acc () in
+          let* fresh, returned_costs =
+            fold_day_store ~label:"costs store: " ~store:costs_store ~day
+              ~cursors:[] ~fold_row:fold_cost_row fresh
+          in
+          let* fresh, returned_tools =
+            fold_day_store ~label:"tool_calls store: " ~store:tool_store ~day
+              ~cursors:[] ~fold_row:fold_tool_row fresh
+          in
+          Ok (fresh, returned_costs, returned_tools)
+        else Ok (acc, returned_costs, returned_tools)
+      in
+      section.costs_cursors <- returned_costs;
+      section.tool_cursors <- returned_tools;
+      section.turn_ids <- Hashtbl.fold (fun key () list -> key :: list) acc.turn_ids [];
+      section.keepers <-
+        Hashtbl.fold (fun _ k list -> k :: list) acc.keepers []
+        |> List.sort (fun a b -> String.compare a.keeper b.keeper);
+      loop rest
+  in
+  loop sections
 ;;
 
 (* ------------------------------------------------------------------ *)
@@ -689,6 +775,10 @@ let read_month ~masc_root ~month =
          let open_store label open_ =
            try Ok (open_ ()) with
            | Sys_error detail -> Error (label ^ detail)
+           | Unix.Unix_error (err, op, arg) ->
+             Error
+               (Printf.sprintf "%s%s(%s): %s" label op arg
+                  (Unix.error_message err))
          in
          match
            ( open_store "costs store: " (fun () -> Cost_ledger.store_of_masc_root masc_root)
@@ -696,8 +786,9 @@ let read_month ~masc_root ~month =
          with
          | Error detail, _ | _, Error detail -> Error detail
          | Ok costs_store, Ok tool_store ->
-           let cache = load_cache ~masc_root ~month in
-           let computed = compute_month ~costs_store ~tool_store ~month ~cache in
+           let open Result.Syntax in
+           let* cache = load_cache ~masc_root ~month in
+           let* computed = compute_month ~costs_store ~tool_store ~month ~cache in
            save_cache ~masc_root ~month computed;
            Ok (month_view_of_cache ~month ~generated_at:(Unix.time ()) computed))
   end

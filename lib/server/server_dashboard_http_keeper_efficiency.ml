@@ -37,11 +37,17 @@ let handle_get state req reqd =
       Common.masc_dir_from_base_path ~base_path:(Mcp_server.workspace_config state).base_path
     in
     (* [Keeper_efficiency.read_month] folds dated JSONL with blocking channel
-       IO, exactly the shape the metrics tail routes off the Eio domain. *)
+       IO, exactly the shape the metrics tail routes off the Eio domain.
+       Convert storage exceptions inside the worker without catching
+       cancellation so unreadable paths still answer 503. *)
     let reading =
       Eio_guard.with_named_switch "keeper-efficiency" (fun () ->
           Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
-              Keeper_efficiency.read_month ~masc_root ~month))
+              try Keeper_efficiency.read_month ~masc_root ~month with
+              | Sys_error detail -> Error detail
+              | Unix.Unix_error (err, op, arg) ->
+                Error
+                  (Printf.sprintf "%s(%s): %s" op arg (Unix.error_message err))))
     in
     match reading with
     | Error detail ->

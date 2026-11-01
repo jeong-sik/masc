@@ -211,6 +211,8 @@ let month_tests =
           Dated_jsonl.append costs
             (CL.to_json (cost_row ~agent:"polisher" ~turn:1 ~input_tokens:5
                            ~output_tokens:6 ~cost_usd:0.25 Resolved));
+          let tools = tool_store root in
+          Dated_jsonl.append tools (tool_row ~keeper:"polisher" ~duration_ms:10.0 ());
           let (_ : KE.month_view) = KE.read_month ~masc_root:root ~month:(today_month ()) |> Result.get_ok in
           let cache = KE.cache_path ~masc_root:root ~month:(today_month ()) |> Result.get_ok in
           Fs_compat.save_file cache "{ not json";
@@ -218,21 +220,45 @@ let month_tests =
           let row = keeper_row view "polisher" |> Option.get in
           check int "rebuilt turns" 1 row.KE.turns;
           check int "rebuilt input_tokens" 5 row.KE.input_tokens;
-          (* A structurally partial cache (e.g. keepers present with missing or
-             corrupted cursors) must also rebuild from zero rather than folding
-             from offset 0 on top of the cached keeper totals. *)
+          check int "rebuilt calls" 1 row.KE.calls;
+          (* A structurally partial cache (valid turn_ids and today's day, but
+             corrupted or missing cursor lists for a ledger whose totals are
+             present) must rebuild from zero rather than folding from offset 0
+             on top of the cached keeper totals. *)
+          let day_num = (Unix.gmtime (Unix.time ())).Unix.tm_mday in
+          let tool_path = today_day_file (Filename.concat root "tool_calls") in
+          let tool_size = (Unix.stat tool_path).Unix.st_size in
           let broken_cursors =
             Printf.sprintf
-              {|{"schema":"masc.keeper-efficiency-cache/v1","month":%S,"days":[{"day":1,"section":{"day":1,"costs_cursors":"corrupt","tool_cursors":[],"turn_ids":[["polisher",1]],"keepers":[{"keeper":"polisher","turns":1,"input_tokens":5,"output_tokens":6,"cost_usd":0.25,"calls":0,"failed":0,"deferred":0,"tool_ms":0.0}]}}]}|}
-              (today_month ())
+              {|{"schema":"masc.keeper-efficiency-cache/v1","month":%S,"days":[{"day":%d,"section":{"day":%d,"costs_cursors":"corrupt","tool_cursors":[{"path":%S,"boundary":%d}],"turn_ids":[{"agent":"polisher","turn":1}],"keepers":[{"keeper":"polisher","turns":1,"input_tokens":5,"output_tokens":6,"cost_usd":0.25,"calls":1,"failed":0,"deferred":0,"tool_ms":10.0}]}}]}|}
+              (today_month ()) day_num day_num tool_path tool_size
           in
           Fs_compat.save_file cache broken_cursors;
-          let view_after_partial =
+          let view_after_corrupt =
             KE.read_month ~masc_root:root ~month:(today_month ()) |> Result.get_ok
           in
-          let row_after_partial = keeper_row view_after_partial "polisher" |> Option.get in
-          check int "partial cache does not double-count input_tokens" 5
-            row_after_partial.KE.input_tokens) )
+          let row_after_corrupt = keeper_row view_after_corrupt "polisher" |> Option.get in
+          check int "corrupt cursor does not double-count input_tokens" 5
+            row_after_corrupt.KE.input_tokens;
+          (* Missing only one ledger's cursor list while retaining both ledgers'
+             totals must also be rejected and rebuilt instead of replaying the
+             cursorless ledger on top of cached totals. *)
+          let missing_cost_cursor_only =
+            Printf.sprintf
+              {|{"schema":"masc.keeper-efficiency-cache/v1","month":%S,"days":[{"day":%d,"section":{"day":%d,"costs_cursors":[],"tool_cursors":[{"path":%S,"boundary":%d}],"turn_ids":[{"agent":"polisher","turn":1}],"keepers":[{"keeper":"polisher","turns":1,"input_tokens":5,"output_tokens":6,"cost_usd":0.25,"calls":1,"failed":0,"deferred":0,"tool_ms":10.0}]}}]}|}
+              (today_month ()) day_num day_num tool_path tool_size
+          in
+          Fs_compat.save_file cache missing_cost_cursor_only;
+          let view_after_missing_one =
+            KE.read_month ~masc_root:root ~month:(today_month ()) |> Result.get_ok
+          in
+          let row_after_missing_one =
+            keeper_row view_after_missing_one "polisher" |> Option.get
+          in
+          check int "empty cost cursor with cost state does not double-count" 5
+            row_after_missing_one.KE.input_tokens;
+          check int "tool calls stay single-counted" 1
+            row_after_missing_one.KE.calls) )
   ; ( "negative tool duration is clamped so TUI decoder accepts month_view_to_json"
     , `Quick
     , fun () ->

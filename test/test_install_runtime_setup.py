@@ -1741,6 +1741,46 @@ class MultipleSelection(unittest.TestCase):
         self.renderer.assert_called_once_with(configured, '/fixture/masc', base_path=None)
         self.assertEqual(identity, 'fixture.native-model')
 
+    def test_ollama_preparation_keeps_reported_image_declaration(self):
+        source = dict(choice='ollama', endpoint='http://localhost:11434', api_key_env='', command='')
+        for discovered in (True, False, None):
+            for observed in (True, False, None):
+                with self.subTest(discovered=discovered, observed=observed), \
+                        patch.object(SETUP, 'native_serving_context', return_value=dict(
+                            context=16384, tools=True, supports_image_input=observed)):
+                    _, configured = SETUP.resolve_model_spec(source, dict(
+                        id='selected-model', context=None, supports_image_input=discovered), 10,
+                        binary='/fixture/masc')
+                expected = discovered if discovered is not None else observed
+                if expected is None:
+                    self.assertNotIn('supports_image_input', configured)
+                else:
+                    self.assertIs(configured['supports_image_input'], expected)
+
+    def test_native_serving_context_rejects_malformed_image_observation(self):
+        source = dict(choice='ollama', endpoint='http://localhost:11434', api_key_env='', command='')
+        for declared in (True, False, None, 'true', 1, []):
+            with self.subTest(declared=declared), patch.object(SETUP, 'native_connection_command',
+                    return_value=subprocess.CompletedProcess([], 0, json.dumps(dict(
+                        model='selected-model', context=16384, tools=True,
+                        context_source='running_model', supports_image_input=declared)), '')):
+                if declared is None or type(declared) is bool:
+                    observation = SETUP.native_serving_context('/fixture/masc', source, 'selected-model', 10)
+                    self.assertIs(observation['supports_image_input'], declared)
+                else:
+                    with self.assertRaises(SETUP.SetupError):
+                        SETUP.native_serving_context('/fixture/masc', source, 'selected-model', 10)
+
+    def test_ollama_preparation_refuses_malformed_discovery_image_declaration(self):
+        source = dict(choice='ollama', endpoint='http://localhost:11434', api_key_env='', command='')
+        with patch.object(SETUP, 'native_serving_context') as native:
+            for declared in ('true', 1, []):
+                with self.subTest(declared=declared), self.assertRaises(SETUP.SetupError):
+                    SETUP.resolve_model_spec(source, dict(
+                        id='selected-model', context=None, supports_image_input=declared), 10,
+                        binary='/fixture/masc')
+        native.assert_not_called()
+
     def test_wizard_ollama_context_uses_native_private_reference(self):
         source = dict(choice='ollama', endpoint='http://localhost:11434', api_key_env='',
                       credential_kind='file', credential_file='/private/key', command='')

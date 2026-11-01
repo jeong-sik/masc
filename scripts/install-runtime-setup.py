@@ -1524,10 +1524,12 @@ def native_serving_context(binary, source, model, timeout, load=False):
         raise SetupError('The selected server did not return its serving context. Check its account or server configuration.')
     try:
         observation = json.loads(result.stdout)
-        if (observation.get('model') != model
+        if (not isinstance(observation, dict) or observation.get('model') != model
                 or observation.get('context_source') not in ('running_model', 'configured_model', 'serving_endpoint', 'not_reported')
                 or (observation.get('context') is not None and not positive_integer(observation['context']))
-                or (observation.get('tools') is not None and type(observation['tools']) is not bool)):
+                or (observation.get('tools') is not None and type(observation['tools']) is not bool)
+                or (observation.get('supports_image_input') is not None
+                    and type(observation['supports_image_input']) is not bool)):
             raise ValueError('invalid observation')
     except (TypeError, ValueError):
         raise SetupError('The native serving-context observation was invalid')
@@ -1722,6 +1724,9 @@ def source_models(binary, source, timeout, refresh=False):
 
 
 def resolve_model_spec(source, model, timeout, binary=None, base_path=None):
+    image_input = model.get('supports_image_input')
+    if image_input is not None and type(image_input) is not bool:
+        raise SetupError('The selected model returned invalid image capability metadata')
     existing = model.get('existing')
     choice = source['choice']
     # Preserve every setting on an operator's existing connection. Its actual
@@ -1783,6 +1788,8 @@ def resolve_model_spec(source, model, timeout, binary=None, base_path=None):
         if details['tools'] is False:
             raise SetupError('this Ollama model reports no tool support; select a tool-capable model for imp')
         context = details['context']
+        if image_input is None:
+            image_input = details.get('supports_image_input')
     elif choice in ('llama_cpp', 'openai_compatible') and context is None:
         try:
             context = native_serving_context(binary, source, model['id'], timeout)['context']
@@ -1800,8 +1807,8 @@ def resolve_model_spec(source, model, timeout, binary=None, base_path=None):
             context = int(answer) if answer.isascii() and answer.isdigit() else None
     spec = dict(choice=choice, model=model['id'], max_context=context, tools=True,
                 streaming=choice in ('claude_code', 'codex', 'antigravity', 'muse'))
-    if type(model.get('supports_image_input')) is bool:
-        spec['supports_image_input'] = model['supports_image_input']
+    if type(image_input) is bool:
+        spec['supports_image_input'] = image_input
     if choice in ('claude_code', 'codex') and binary:
         # Refresh may provide context without media metadata. Join only the
         # selected native client's exact model, leaving unknowns undeclared.

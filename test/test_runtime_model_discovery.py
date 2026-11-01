@@ -282,6 +282,24 @@ class NativeDiscovery(unittest.TestCase):
         self.assertIsNone(json.loads(result.stdout)['context'])
         self.assertEqual([path for path, _, _ in self.posts], ['/api/show'])
 
+    def test_ollama_serving_context_preserves_declared_image_support(self):
+        self.respond = lambda path: (200, {}, dict(models=[dict(name='selected-model', context_length=16384)]))
+        for capabilities, expected in [(['completion', 'tools', 'vision'], True),
+                                       (['completion', 'tools'], False), ([], False), (None, None)]:
+            with self.subTest(capabilities=capabilities):
+                self.respond_post = lambda path, body: (200, {} if capabilities is None else dict(capabilities=capabilities))
+                result = self.serving_context('ollama')
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIs(json.loads(result.stdout).get('supports_image_input'), expected)
+
+    def test_ollama_serving_context_refuses_malformed_capabilities(self):
+        for capabilities in ('vision', ['tools', True], [42], None):
+            with self.subTest(capabilities=capabilities):
+                self.respond_post = lambda path, body: (200, dict(capabilities=capabilities))
+                result = self.serving_context('ollama')
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(result.stdout, '')
+
     def test_ollama_invalid_running_metadata_does_not_fall_back_to_configured_window(self):
         self.respond_post = lambda path, body: (200, dict(parameters='num_ctx 8192'))
         responses = [dict(models=[dict(name='selected-model', context_length=value)])

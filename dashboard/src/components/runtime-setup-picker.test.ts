@@ -1,7 +1,7 @@
 import { html } from 'htm/preact'
 import { render, fireEvent, screen, waitFor, cleanup } from '@testing-library/preact'
 import { afterEach, expect, it, vi } from 'vitest'
-import { discoverSetupModels, saveSetupSelections } from '../api/runtime-setup'
+import { discoverSetupModels, prepareSetupModel, saveSetupSelections } from '../api/runtime-setup'
 import { RuntimeSetupPicker } from './runtime-setup-picker'
 import { post, postControlPlane } from '../api/core'
 import { modelSetupResumeState } from '../lib/model-setup-resume'
@@ -473,6 +473,37 @@ it.each([true, false, undefined])('preserves image capability %s through discove
 it('rejects malformed image capability metadata', async () => {
   vi.mocked(post).mockResolvedValue({ models: [{ id: 'bad-image', context: 4096, supports_image_input: 'true' }] })
   await expect(discoverSetupModels({ integration_id: 'openrouter' })).rejects.toThrow('Invalid model image capability metadata')
+})
+
+it.each([true, false, undefined])('preserves prepared image declaration %s through selection and save', async capability => {
+  vi.mocked(post).mockImplementation(async path => path.endsWith('/context')
+    ? { model: 'image-model', context: 16384, tools: true,
+      ...(capability === undefined ? {} : { supports_image_input: capability }) }
+    : { configured: true, commit: { durability: 'durable', warnings: [] }, readiness: 'verified', runtime_id: 'image-model', runtime_ids: ['image-model'] })
+  const source = { integration_id: 'ollama' }
+  const model = await prepareSetupModel(source, { id: 'image-model', label: 'Image model', context: null, tools: null }, true)
+  expect(model.supports_image_input).toBe(capability)
+  await saveSetupSelections('revision', [{ kind: 'new', source, model, label: 'Image model' }])
+  const call = vi.mocked(post).mock.calls.find(([path]) => path.endsWith('/connections'))
+  expect(call?.[1]).toEqual({ revision: 'revision', connections: [{ source, models: [{
+    id: 'image-model', context: 16384, streaming: true,
+    ...(capability === undefined ? {} : { supports_image_input: capability }),
+  }] }], selection: [{ connection: 0, model: 0 }] })
+})
+
+it.each([true, false])('keeps existing endpoint image declaration %s during preparation', async declared => {
+  vi.mocked(post).mockResolvedValue({ model: 'selected-model', context: 16384, tools: true, supports_image_input: !declared })
+  const model = await prepareSetupModel({ integration_id: 'ollama' }, {
+    id: 'selected-model', label: 'Selected', context: null, tools: null, supports_image_input: declared,
+  }, true)
+  expect(model.supports_image_input).toBe(declared)
+})
+
+it('rejects malformed prepared image capability metadata', async () => {
+  vi.mocked(post).mockResolvedValue({ model: 'selected-model', context: 16384, tools: true, supports_image_input: 'true' })
+  await expect(prepareSetupModel({ integration_id: 'ollama' }, {
+    id: 'selected-model', label: 'Selected', context: null, tools: null,
+  }, true)).rejects.toThrow('Invalid model image capability metadata')
 })
 
 it('identifies grouped accounts by reported email and keeps duplicate runtime connections distinguishable', async () => {

@@ -2,11 +2,18 @@
 import { readFileSync } from 'node:fs';
 import { renderDocument } from './engine.mjs';
 
+const protocolVersion = 1;
+
 if (process.argv.length === 3 && process.argv[2] === '--help') {
   console.log('masc-pele: read {format:mermaid|svg,source,maxWidth,fontSize?,now?,colors?,raster?:{width,height,crop?:{left,top,right,bottom}}} JSON from stdin; write PNG to stdout');
 } else {
   try {
-    const result = renderDocument(JSON.parse(readFileSync(0, 'utf8')));
+    const request = JSON.parse(readFileSync(0, 'utf8'));
+    if (Object.hasOwn(request, 'protocol')) {
+      if (request.protocol !== protocolVersion) throw new TypeError('unsupported Pele protocol');
+      process.stdout.write(`masc-pele-protocol:${protocolVersion}\n`);
+    }
+    const result = renderDocument(request);
     process.stdout.write(result.png);
   } catch (error) {
     // Errors can contain untrusted source. Emit plain diagnostics only on stderr.

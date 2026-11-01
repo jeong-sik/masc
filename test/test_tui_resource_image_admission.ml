@@ -740,7 +740,7 @@ let test_vector_character_presentation_is_bounded () =
     Unix.rmdir directory) (fun () ->
       Out_channel.with_open_bin png_path (fun out -> Out_channel.output_string out png);
       Out_channel.with_open_text executable (fun out ->
-        Printf.fprintf out "#!/bin/sh\ncat %s\n" (Filename.quote png_path));
+        Printf.fprintf out "#!/bin/sh\nprintf 'masc-pele-protocol:1\\n'\ncat %s\n" (Filename.quote png_path));
       Unix.chmod executable 0o700;
       Unix.putenv "PATH" (directory ^ ":" ^ previous);
       let worker=Work.create () in

@@ -103,8 +103,8 @@ let test_post_decoder_retains_nested_rejections () =
   let row = replace_key canonical "audience"
       (`Assoc ["kind", `String "targets";
                "targets", `List [`String "bad/target"; `String "another/target"]]) in
-  let row = replace_key row "closed"
-      (`Assoc ["closed_by", `String "bad/closer"; "closed_at", `Float 1.]) in
+  let row = prepend_field row ("closed",
+      `Assoc ["closed_by", `String "bad/closer"; "closed_at", `Float 1.]) in
   let row = replace_key row "author" (`String "bad/author") in
   let row = replace_key row "post_kind" (`String "unknown") in
   let row = remove_key row "body" in
@@ -126,8 +126,8 @@ let test_closed_decoder_validates_only_a_complete_close_shape () =
         ~base_path:(Env_config_core.base_path ())) () in
   let canonical = Board_core.post_to_yojson
       (create_no_origin store ~content:"closed validation stages") in
-  let row = replace_key canonical "closed"
-      (`Assoc ["closed_by", `String "bad/closer"; "closed_at", `Float 1.;
+  let row = prepend_field canonical ("closed",
+      `Assoc ["closed_by", `String "bad/closer"; "closed_at", `Float 1.;
                "successor_id", `Int 7]) in
   let decoded = check_rejection_count
       "a malformed close shape never reaches agent validation" 0

@@ -261,19 +261,29 @@ let fold_tool_row (acc : day_acc) (json : Yojson.Safe.t) : day_acc =
 ;;
 
 (* A day file that shrank below its cached boundary was re-read from zero,
-   and a previously cached day file that was confirmed removed ([ENOENT]) is
-   absent from [returned]. In either case this day's cached accumulator is
+   a previously cached day file that was confirmed removed ([ENOENT]) is
+   absent from [returned], or an enumerated day file lacks a cursor while the
+   cached section already holds state for that ledger (rotation or partial
+   cursor loss). In any of these cases this day's cached accumulator is
    stale and the caller folds the day again from an empty accumulator.
    Storage inspection failures on a missing path propagate as [Error] so an
    unreadable ledger never rebuilds and overwrites cached totals. *)
-let check_shrank ~label ~passed ~returned =
+let check_shrank ~label ~has_cached_state ~passed ~returned =
+  let untracked_file_with_cached_state =
+    (has_cached_state || passed <> [])
+    && List.exists
+         (fun (path, _boundary) -> not (List.mem_assoc path passed))
+         returned
+  in
   let rec loop shrank_any = function
-    | [] -> Ok shrank_any
+    | [] -> Ok (shrank_any || untracked_file_with_cached_state)
     | (path, prior) :: rest ->
       (match List.assoc_opt path returned with
        | Some boundary -> loop (shrank_any || boundary < prior) rest
        | None ->
          (match Unix.lstat path with
+          | stats when stats.Unix.st_kind <> Unix.S_REG ->
+            Error (Printf.sprintf "%snot a regular file: %s" label path)
           | _stats -> loop true rest
           | exception Unix.Unix_error ((Unix.ENOENT | Unix.ENOTDIR), _, _) ->
             loop true rest
@@ -314,7 +324,21 @@ let cursor_pair_of_json = function
 
 let cursors_of_json fields name =
   match List.assoc_opt name fields with
-  | Some (`List pairs) -> all_some [] (List.map cursor_pair_of_json pairs)
+  | Some (`List pairs) ->
+    (match all_some [] (List.map cursor_pair_of_json pairs) with
+     | Some decoded ->
+       let seen = Hashtbl.create (List.length decoded) in
+       let unique =
+         List.for_all
+           (fun (path, _boundary) ->
+              if Hashtbl.mem seen path then false
+              else (
+                Hashtbl.add seen path ();
+                true))
+           decoded
+       in
+       if unique then Some decoded else None
+     | None -> None)
   | _ -> None
 ;;
 
@@ -524,7 +548,18 @@ let cache_of_json ~month json =
      | Some (`String schema), Some (`String m), Some (`List days)
        when String.equal schema cache_schema && String.equal m month ->
        (match all_some [] (List.map day_entry_of_json days) with
-        | Some sections -> Some { sections }
+        | Some sections ->
+          let seen_days = Hashtbl.create (List.length sections) in
+          let unique_days =
+            List.for_all
+              (fun (s : day_section) ->
+                 if Hashtbl.mem seen_days s.day then false
+                 else (
+                   Hashtbl.add seen_days s.day ();
+                   true))
+              sections
+          in
+          if unique_days then Some { sections } else None
         | None -> None)
      | _ -> None)
   | _ -> None
@@ -559,6 +594,8 @@ let read_cache_file path =
     Error
       (Printf.sprintf "efficiency cache: %s(%s): %s" op arg
          (Unix.error_message err))
+  | stats when stats.Unix.st_kind <> Unix.S_REG ->
+    Error ("efficiency cache: not a regular file: " ^ path)
   | _stats ->
     (try
        let ic = open_in_bin path in
@@ -624,6 +661,8 @@ let fold_day_store ~label ~store ~day ~cursors ~fold_row acc =
            Error
              (Printf.sprintf "%s%s(%s): %s" label op arg
                 (Unix.error_message err))
+         | stats when stats.Unix.st_kind <> Unix.S_REG ->
+           Error (Printf.sprintf "%snot a regular file: %s" label path)
          | _stats ->
            let from =
              match List.assoc_opt path cursors with Some n -> n | None -> 0
@@ -661,6 +700,16 @@ let compute_month ~costs_store ~tool_store ~month ~cache =
       let tool_cursors =
         Option.map (fun (s : day_section) -> s.tool_cursors) cached |> Option.value ~default:[]
       in
+      let has_cached_cost_state =
+        match cached with
+        | None -> false
+        | Some s -> s.turn_ids <> [] || List.exists keeper_has_cost_state s.keepers
+      in
+      let has_cached_tool_state =
+        match cached with
+        | None -> false
+        | Some s -> List.exists keeper_has_tool_state s.keepers
+      in
       let acc =
         let acc = empty_day_acc () in
         List.iter
@@ -682,11 +731,13 @@ let compute_month ~costs_store ~tool_store ~month ~cache =
           ~cursors:tool_cursors ~fold_row:fold_tool_row acc
       in
       let* costs_shrank =
-        check_shrank ~label:"costs store: " ~passed:costs_cursors
+        check_shrank ~label:"costs store: "
+          ~has_cached_state:has_cached_cost_state ~passed:costs_cursors
           ~returned:returned_costs
       in
       let* tools_shrank =
-        check_shrank ~label:"tool_calls store: " ~passed:tool_cursors
+        check_shrank ~label:"tool_calls store: "
+          ~has_cached_state:has_cached_tool_state ~passed:tool_cursors
           ~returned:returned_tools
       in
       let* acc, returned_costs, returned_tools =

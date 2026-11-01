@@ -282,7 +282,64 @@ let month_tests =
           check int "rebuilt turn_ids deduplicates same turn across attempts" 1
             row_after_turn_id_mismatch.KE.turns;
           check int "both attempts' input_tokens summed" 8
-            row_after_turn_id_mismatch.KE.input_tokens) )
+            row_after_turn_id_mismatch.KE.input_tokens;
+          (* Duplicate cursor paths ([boundary=0; boundary=size]) must be rejected
+             so fold_day_store does not use the first (0) boundary and replay
+             already-counted rows on top of cached totals. *)
+          let cost_size_now = (Unix.stat cost_path).Unix.st_size in
+          let dup_tool_cursors =
+            Printf.sprintf
+              {|{"schema":"masc.keeper-efficiency-cache/v1","month":%S,"days":[{"day":%d,"section":{"day":%d,"costs_cursors":[{"path":%S,"boundary":%d}],"tool_cursors":[{"path":%S,"boundary":0},{"path":%S,"boundary":%d}],"turn_ids":[{"agent":"polisher","turn":1}],"keepers":[{"keeper":"polisher","turns":1,"input_tokens":8,"output_tokens":10,"cost_usd":0.40,"calls":1,"failed":0,"deferred":0,"tool_ms":10.0}]}}]}|}
+              (today_month ()) day_num day_num cost_path cost_size_now
+              tool_path tool_path tool_size
+          in
+          Fs_compat.save_file cache dup_tool_cursors;
+          let view_after_dup =
+            KE.read_month ~masc_root:root ~month:(today_month ()) |> Result.get_ok
+          in
+          let row_after_dup = keeper_row view_after_dup "polisher" |> Option.get in
+          check int "duplicate tool cursor paths do not double-count calls" 1
+            row_after_dup.KE.calls;
+          (* A multi-file day (DD.001.jsonl + DD.jsonl) whose cached totals
+             already include both files (calls=2) but whose cache lost one cursor
+             must rebuild the day rather than replaying the untracked file into
+             calls=3. *)
+          let rotated_tool_path =
+            Filename.concat (Filename.dirname tool_path)
+              (Printf.sprintf "%02d.001.jsonl" day_num)
+          in
+          Fs_compat.save_file rotated_tool_path
+            (Yojson.Safe.to_string (tool_row ~keeper:"polisher" ~duration_ms:10.0 ()) ^ "\n");
+          let rotated_size = (Unix.stat rotated_tool_path).Unix.st_size in
+          let missing_second_tool_cursor =
+            Printf.sprintf
+              {|{"schema":"masc.keeper-efficiency-cache/v1","month":%S,"days":[{"day":%d,"section":{"day":%d,"costs_cursors":[{"path":%S,"boundary":%d}],"tool_cursors":[{"path":%S,"boundary":%d}],"turn_ids":[{"agent":"polisher","turn":1}],"keepers":[{"keeper":"polisher","turns":1,"input_tokens":8,"output_tokens":10,"cost_usd":0.40,"calls":2,"failed":0,"deferred":0,"tool_ms":20.0}]}}]}|}
+              (today_month ()) day_num day_num cost_path cost_size_now
+              rotated_tool_path rotated_size
+          in
+          Fs_compat.save_file cache missing_second_tool_cursor;
+          let view_after_multi_file =
+            KE.read_month ~masc_root:root ~month:(today_month ()) |> Result.get_ok
+          in
+          let row_after_multi_file =
+            keeper_row view_after_multi_file "polisher" |> Option.get
+          in
+          check int "multi-file missing cursor rebuilds to 2 calls instead of 3" 2
+            row_after_multi_file.KE.calls;
+          (* A dangling symlink replacing a day file must return Error and
+             preserve the cached file rather than folding 0 bytes and discarding
+             cached totals. *)
+          let saved_cache_before_symlink = Fs_compat.load_file cache in
+          Sys.remove rotated_tool_path;
+          Unix.symlink (Filename.concat root "missing-target.jsonl") rotated_tool_path;
+          Fun.protect
+            ~finally:(fun () -> try Unix.unlink rotated_tool_path with _ -> ())
+            (fun () ->
+               check bool "dangling day-file symlink returns Error" true
+                 (Result.is_error
+                    (KE.read_month ~masc_root:root ~month:(today_month ())));
+               check string "cache preserved across symlink error"
+                 saved_cache_before_symlink (Fs_compat.load_file cache))) )
   ; ( "negative or overflowing tool duration is clamped so TUI decoder accepts month_view_to_json"
     , `Quick
     , fun () ->

@@ -230,7 +230,7 @@ type recovery_origin =
   | Gate_binding of gate_binding
   | Input_wait of input_wait
 type recovery = { origin : recovery_origin; diagnostic : string }
-type preparation_wait = { checkpoint : official_client_checkpoint; detail : string }
+type preparation_wait = { checkpoint : gate_checkpoint; detail : string }
 type phase =
   | Preparing
   | Ready
@@ -269,7 +269,7 @@ type action =
   | Begin_execution
   | Resume_checkpoint of Keeper_checkpoint_ref.t
   | Resume_official_checkpoint of official_client_checkpoint
-  | Wait_preparation of { observed : official_client_checkpoint; detail : string }
+  | Wait_preparation of { observed : gate_checkpoint; detail : string }
   | Enter_official_checkpoint
   | Retry_preparation of preparation_wait
   | Require_reconciliation of string
@@ -320,7 +320,8 @@ let gate_binding_retained (binding : gate_binding) =
   @ (match binding.unconfirmed_wait with Some waiting -> gate_wait_retained waiting | None -> [])
 let phase_checkpoints execution = match execution.phase with
   | Preparing | Ready | Running | Settled _ -> []
-  | Preparing_checkpoint _ | Preparation_wait _ -> []
+  | Preparing_checkpoint _ -> []
+  | Preparation_wait {checkpoint;_} -> gate_checkpoint_references checkpoint
   | Resuming_runtime_retry retry -> [retry.checkpoint]
   | Resuming_gate (waiting, _) -> gate_wait_retained waiting
   | Suspended reference -> [reference]
@@ -456,7 +457,10 @@ let validate_input_branch ~id ~revision ~phase ~native_call ~intent = function
         else Error "input branch and native checkpoint disagree" in
     let* () = match phase with
       | Running | Recovering {origin=Interrupted_execution;_} -> Ok ()
-      | Preparing_checkpoint _ | Preparation_wait _ ->
+      | Preparation_wait {checkpoint=Agent_core checkpoint;_} ->
+        if current_reference checkpoint then Ok ()
+        else Error "input branch preparation changed its current checkpoint"
+      | Preparing_checkpoint _ | Preparation_wait {checkpoint=Official_client _;_} ->
         Error "input branch preparation has no Agent Core checkpoint"
       | Resuming_runtime_retry retry ->
         if admitted_reference retry.checkpoint then Ok ()
@@ -584,11 +588,15 @@ let apply ~now action current =
             | Keeper_native_call.No_native_call -> Ok ()
             | Active _ | Terminal_unacknowledged _ -> Error Native_call_unsettled in
           let expected = match current.phase with
-            | Preparing_checkpoint checkpoint | Preparation_wait {checkpoint;_} -> Some checkpoint
-            | Preparing | Ready | Running | Suspended _ | Resuming_runtime_retry _ | Resuming_gate _ | Recovering _ | Settled _ -> None in
-          if String.trim detail <> "" && gate_checkpoint_owns (Official_client observed) (scope current)
+            | Preparing_checkpoint checkpoint -> Some (Official_client checkpoint)
+            | Preparation_wait {checkpoint;_} -> Some checkpoint
+            | Suspended checkpoint | Recovering {origin=Checkpointed checkpoint;_} -> Some (Agent_core checkpoint)
+            | Preparing | Ready | Running | Resuming_runtime_retry _ | Resuming_gate _ | Settled _
+            | Recovering {origin=(Official_checkpointed _ | Unconfirmed_sources | Confirmed_undispatched
+                | Interrupted_execution | Runtime_retry _ | Gate_wait _ | Gate_binding _ | Input_wait _);_} -> None in
+          if String.trim detail <> "" && gate_checkpoint_owns observed (scope current)
              && Option.fold ~none:false ~some:(fun expected ->
-               equal_gate_checkpoint (Official_client observed) (Official_client expected)) expected
+               equal_gate_checkpoint observed expected) expected
           then unchanged (Preparation_wait {checkpoint=observed;detail}) else reject ()
       | Enter_official_checkpoint ->
           (match current.phase with
@@ -598,8 +606,10 @@ let apply ~now action current =
       | Retry_preparation observed ->
           (match current.phase with
            | Preparation_wait expected when expected = observed ->
-             unchanged (Recovering {origin=Official_checkpointed expected.checkpoint;
-               diagnostic="explicit retry of retained official-client preparation"})
+             let origin = match expected.checkpoint with
+               | Agent_core checkpoint -> Checkpointed checkpoint
+               | Official_client checkpoint -> Official_checkpointed checkpoint in
+             unchanged (Recovering {origin;diagnostic="explicit retry of retained checkpoint preparation"})
            | Preparing | Ready | Running | Preparing_checkpoint _ | Resuming_runtime_retry _
            | Resuming_gate _ | Recovering _ | Preparation_wait _ | Suspended _ | Settled _ -> reject ())
       | Suspend_official_checkpoint checkpoint ->
@@ -944,7 +954,10 @@ let phase_json = function
   | Preparing_checkpoint checkpoint -> `Assoc ["kind", `String "preparing_checkpoint";
       "official_client", official_client_checkpoint_json checkpoint]
   | Preparation_wait {checkpoint;detail} -> `Assoc ["kind", `String "preparation_wait";
-      "official_client", official_client_checkpoint_json checkpoint; "detail", `String detail]
+      (match checkpoint with
+       | Agent_core checkpoint -> "checkpoint", checkpoint_json checkpoint
+       | Official_client checkpoint -> "official_client", official_client_checkpoint_json checkpoint);
+      "detail", `String detail]
   | Resuming_runtime_retry retry -> `Assoc ["kind", `String "resuming_runtime_retry";
       "origin", recovery_origin_json (Runtime_retry retry)]
   | Resuming_gate (waiting, resolution) -> `Assoc ["kind", `String "resuming_gate";
@@ -1200,8 +1213,15 @@ let phase_of_json json =
       let* fields = exact ["kind";"official_client"] json in
       official_client_checkpoint_of_json (field "official_client" fields) |> Result.map (fun checkpoint -> Preparing_checkpoint checkpoint)
   | "preparation_wait" ->
-      let* fields = exact ["kind";"official_client";"detail"] json in
-      let* checkpoint = official_client_checkpoint_of_json (field "official_client" fields) in
+      let* checkpoint, fields = match json with
+        | `Assoc fields when List.mem_assoc "official_client" fields ->
+          let* fields = exact ["kind";"official_client";"detail"] json in
+          let* checkpoint = official_client_checkpoint_of_json (field "official_client" fields) in
+          Ok (Official_client checkpoint, fields)
+        | _ ->
+          let* fields = exact ["kind";"checkpoint";"detail"] json in
+          let* checkpoint = checkpoint_of_json (field "checkpoint" fields) in
+          Ok (Agent_core checkpoint, fields) in
       let* detail = string "detail" fields in
       if String.trim detail = "" then Error "preparation wait detail is blank"
       else Ok (Preparation_wait {checkpoint;detail})
@@ -1321,8 +1341,11 @@ let of_json json =
       | _ -> Error "execution frame must contain only its admitted scope" in
     let* phase = phase_of_json (field "phase" fields) in
     let* () = match phase with
-      | Preparing_checkpoint checkpoint | Preparation_wait {checkpoint;_} ->
+      | Preparing_checkpoint checkpoint ->
         if gate_checkpoint_owns (Official_client checkpoint) expected then Ok ()
+        else Error "preparation checkpoint changed execution scope"
+      | Preparation_wait {checkpoint;_} ->
+        if gate_checkpoint_owns checkpoint expected then Ok ()
         else Error "preparation checkpoint changed execution scope"
       | Recovering {origin=Gate_binding binding; _} ->
         if gate_obligations = binding.obligations

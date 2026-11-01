@@ -691,26 +691,31 @@ let test_dispatch_admission_requires_semantic_checkpoint () =
     check bool "refused admission creates no semantic row" true
       (Store.semantic_get store scope |> execution_ok = None))
 
-let test_preparation_wait_preserves_official_checkpoint ?retry_fault client_kind fault () =
+let test_preparation_wait_preserves_official_checkpoint ?(agent_core=false) ?retry_fault client_kind fault () =
   with_path (fun path ->
     let operation_id = operation_id "preparation-original" in
     let scope = Scope.direct_operation operation_id in
     let input = `Assoc ["instructions",`String "original authority";"message",`String "original input"] in
     let frame = Frame.admit Frame.empty (Frame.Fresh scope) |> frame_ok in
-    let checkpoint = Execution.Official_client
-      {client_kind;runtime_id="official.test";session_id="original-session";
-       turn_id="original-turn";tool_surface_sha256=hash "original tools";frame} in
+    let checkpoint = if agent_core then Execution.Agent_core (checkpoint ())
+      else Execution.Official_client
+        {client_kind;runtime_id="official.test";session_id="original-session";
+         turn_id="original-turn";tool_surface_sha256=hash "original tools";frame} in
     let operation, waiting = with_open path (fun store ->
       submit store ~now:1. "preparation-original" input;
       let original = claim store ~now:2. in
       Store.defer_direct_checkpoint store ~now:3. ~operation_id
         ~execution_digest:original.execution_digest ~checkpoint |> store_ok |> ignore;
       let operation = claim store ~now:4. in
-      Store.resume_direct_checkpoint store ~now:5. ~operation_id ~observed:checkpoint |> store_ok;
+      if not agent_core then
+        Store.resume_direct_checkpoint store ~now:5. ~operation_id ~observed:checkpoint |> store_ok;
       let before = Execution.to_json (get store scope) in
       let changed = match checkpoint with
         | Execution.Official_client original -> Execution.Official_client {original with turn_id="unrelated-turn"}
-        | Agent_core _ -> fail "expected official checkpoint" in
+        | Agent_core reference ->
+          let changed = Keeper_checkpoint_ref.of_persisted ~trace_id:reference.trace_id
+              ~turn_count:(reference.turn_count + 1) ~sha256:(hash "unrelated checkpoint") in
+          Execution.Agent_core (match changed with Ok value -> value | Error _ -> fail "changed checkpoint fixture") in
       assert_execution_error (Store.wait_direct_preparation store ~now:6. ~operation_id
         ~execution_digest:operation.execution_digest ~observed:changed ~detail:"missing managed guidance");
       check bool "stale checkpoint changes no authority" true (before = Execution.to_json (get store scope));
@@ -736,7 +741,12 @@ let test_preparation_wait_preserves_official_checkpoint ?retry_fault client_kind
       let retained = get store scope in
       check bool "original input remains independently owned" true (retained.input = Some input);
       check bool "original checkpoint remains exact" true
-        (Execution.equal_gate_checkpoint checkpoint (Execution.Official_client reread.waiting.checkpoint));
+        (Execution.equal_gate_checkpoint checkpoint reread.waiting.checkpoint);
+      (match checkpoint with
+       | Execution.Agent_core reference ->
+         check bool "preparation wait retains original checkpoint bytes" true
+           (List.exists (Keeper_checkpoint_ref.equal reference) (Execution.checkpoint_references retained))
+       | Official_client _ -> ());
       check bool "reopened wait does not spin" true
         (Option.is_none (Store.claim_next store ~now:9. |> store_ok));
       submit store ~now:10. "preparation-independent" (`String "new steering");
@@ -782,6 +792,21 @@ let test_preparation_wait_preserves_official_checkpoint ?retry_fault client_kind
         (Option.is_none (get store scope).input);
       check bool "no duplicate invocation remains" true
         (Option.is_none (Store.claim_next store ~now:18. |> store_ok))))
+
+let test_preparation_wait_rejects_consumed_core_checkpoint () =
+  with_store (fun _ store ->
+    submit store ~now:1. "entered-core-preparation" fixture_input;
+    let original = claim store ~now:2. in
+    let checkpoint = Execution.Agent_core (checkpoint ()) in
+    Store.defer_direct_checkpoint store ~now:3. ~operation_id:original.operation_id
+      ~execution_digest:original.execution_digest ~checkpoint |> store_ok |> ignore;
+    ignore (claim store ~now:4.);
+    Store.resume_direct_checkpoint store ~now:5. ~operation_id:original.operation_id ~observed:checkpoint |> store_ok;
+    let before = Execution.to_json (get store (Scope.direct_operation original.operation_id)) in
+    assert_execution_error (Store.wait_direct_preparation store ~now:6. ~operation_id:original.operation_id
+      ~execution_digest:original.execution_digest ~observed:checkpoint ~detail:"late preparation failure");
+    check bool "entered Core execution cannot regain a consumed checkpoint" true
+      (before=Execution.to_json (get store (Scope.direct_operation original.operation_id))))
 
 let test_uncertain_preparation_retry_reopens_by_original_identity () =
   with_path (fun path ->
@@ -842,6 +867,12 @@ let test_uncertain_preparation_retry_reopens_by_original_identity () =
 let () =
   run "keeper semantic execution store"
     [ "preparation wait", [
+        test_case "consumed Core checkpoint cannot regain preparation retry authority" `Quick
+          test_preparation_wait_rejects_consumed_core_checkpoint;
+        test_case "Agent Core preparation keeps original checkpoint through explicit retry" `Quick
+          (test_preparation_wait_preserves_official_checkpoint ~agent_core:true Execution.Codex None);
+        test_case "Agent Core uncertain wait retains its exact checkpoint" `Quick
+          (test_preparation_wait_preserves_official_checkpoint ~agent_core:true Execution.Codex (Some Store.For_testing.Fail_after_commit));
         test_case "fresh claim without semantic checkpoint refuses dispatch admission" `Quick
           test_dispatch_admission_requires_semantic_checkpoint;
         test_case "Muse after consume retains original authority" `Quick

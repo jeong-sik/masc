@@ -3,6 +3,14 @@
 type request
 type image = private { png : string; key : string; width : int; height : int }
 type t
+type frame = {
+  mime_type : string option;
+  contents : Masc_tui_mcp.resource_content list;
+  width : int;
+  cell_pixels : int * int;
+  colors : (string * string) option;
+}
+type admission = Admit | Retire | Ignore
 val create : mime_type:string option -> contents:Masc_tui_mcp.resource_content list ->
   width:int -> cell_pixels:(int * int) -> colors:(string * string) option -> t
 val request : t -> request
@@ -11,6 +19,11 @@ val width : request -> int
 val colors : request -> (string * string) option
 val matches : mime_type:string option -> contents:Masc_tui_mcp.resource_content list ->
   width:int -> cell_pixels:(int * int) -> colors:(string * string) option -> t -> bool
+val matches_frame : frame -> t -> bool
+val admission : request -> frame:frame option -> t option -> admission
+(** Check the current owner and all frame inputs before starting a physical
+    renderer. A retired owner may be removed; a replaced owner is untouched. *)
+val retire : request -> t option -> t option
 val settle : request -> source:string -> (string, string) result -> t -> t
 (** Another request cannot change this snapshot. Bytes must be an actual PNG
     with positive dimensions; a failed render stays explicit until reread. *)

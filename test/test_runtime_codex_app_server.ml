@@ -769,6 +769,26 @@ let test_fixture_preserves_stream_observer_interrupt () =
         | _ -> ()))))
 ;;
 
+let test_fixture_preserves_stream_observer_cancellation () =
+  let started = ref false in
+  let finished = ref false in
+  let reason = Failure "stream observer cancellation fixture" in
+  with_fixture [init_result; account_chatgpt; thread_result; turn_result;
+    item_completed; turn_completed] (fun path ->
+    (try
+       ignore (run_fixture path ~on_stream_event:(function
+         | Runtime_codex_app_server.Turn_started _ ->
+           started := true;
+           raise (Eio.Cancel.Cancelled reason)
+         | Turn_finished _ -> finished := true
+         | _ -> ()));
+       fail "stream observer cancellation was converted or swallowed"
+     with Eio.Cancel.Cancelled observed ->
+       check bool "the original cancellation reason propagates" true (observed == reason));
+    check bool "cancellation originated in the stream observer" true !started;
+    check bool "cancellation never emits a completed turn" false !finished)
+;;
+
 let run_undelivered_fixture ?(queued_effect = false) ?(provider_error = false) ?(retry_progress = false) ~eof ~retain () =
   let started, signal_started = Eio.Promise.create () in
   let closed, signal_closed = Eio.Promise.create () in
@@ -10140,6 +10160,8 @@ let () =
             test_fixture_exposes_stream_observer_failure
         ; test_case "fixture preserves stream observer interrupt" `Quick
             test_fixture_preserves_stream_observer_interrupt
+        ; test_case "fixture preserves stream observer cancellation" `Quick
+            test_fixture_preserves_stream_observer_cancellation
         ; test_case "completed vendor turn retains pending tool receipt" `Quick
             (test_ended_turn_retains_tool_result ~eof:false)
         ; test_case "provider terminal drains tools and retry progress stays live" `Quick

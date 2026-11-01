@@ -118,6 +118,39 @@ let check_status_only ~reason result =
       (contains status reason)
   | _ -> Alcotest.fail "failed preparation must carry only its status block"
 
+(* A socket is a present, non-directory path that the OS refuses to open as a
+   prompt even for uid 0. A relative symlink keeps AF_UNIX's path short when the
+   test's temporary directory is under a long platform-owned prefix. *)
+let with_unreadable_status_prompt f =
+  let previous =
+    match Prompt_registry.get_markdown_dir () with
+    | Some dir -> dir
+    | None -> Alcotest.fail "recall tests require their source prompt directory" in
+  let dir = Filename.temp_dir "recall-io-" "" in
+  let socket = Unix.socket Unix.PF_UNIX Unix.SOCK_STREAM 0 in
+  Fun.protect
+    ~finally:(fun () ->
+      Fun.protect ~finally:(fun () -> Fs_compat.remove_tree dir)
+        (fun () ->
+          Unix.close socket;
+          Prompt_registry.set_markdown_dir previous))
+    (fun () ->
+      Prompt_registry.set_markdown_dir dir;
+      let path =
+        match (Prompt_registry.resolve_prompt Prompt_names.keeper_recall_status_unavailable).file_path with
+        | Some path -> path
+        | None -> Alcotest.fail "the pinned prompt has no source path" in
+      Unix.bind socket (Unix.ADDR_UNIX (Filename.concat dir "socket"));
+      Unix.symlink "socket" path;
+      Alcotest.(check bool) "the prompt exists and is not a directory" true
+        (Sys.file_exists path && not (Sys.is_directory path));
+      let refused =
+        match In_channel.with_open_text path In_channel.input_all with
+        | _ -> false
+        | exception (Sys_error _ | Unix.Unix_error _) -> true in
+      Alcotest.(check bool) "a real prompt read is refused by the OS" true refused;
+      f path)
+
 (* ---- who gets the texts ---- *)
 
 let test_a_keeper_that_is_not_judged_reads_nothing_and_asks_nothing () =
@@ -263,6 +296,31 @@ let test_preparation_failure_respects_search_tool_availability () =
         memory_search_available
         (contains (some_or_fail result).Blocks.status "keeper_memory_search"))
       [false;true])
+
+let test_unreadable_status_prompt_keeps_the_failure_status_only () =
+  with_policy (recall Runtime_schema.All_keepers) (fun () ->
+    with_unreadable_status_prompt (fun path ->
+      List.iter (fun memory_search_available ->
+        let p = probe () in
+        let before = total_preparation_failures () in
+        let before_read = preparation_failures "facts_unreadable" in
+        let result = prepare ~memory_search_available ~probe:p
+            ~facts_result:(Error "private store detail") ~answer:(Ok Turn.Nothing_to_judge) () in
+        check_status_only ~reason:"facts_unreadable" result;
+        let status = (some_or_fail result).Blocks.status in
+        Alcotest.(check bool) "the fallback identifies the failed prompt" true
+          (contains status Prompt_names.keeper_recall_status_unavailable);
+        Alcotest.(check bool) "only an available search route is named"
+          memory_search_available (contains status Prompt_names.keeper_recall_status_search_hint_unavailable);
+        Alcotest.(check bool) "raw prompt and store details stay out of context" false
+          (contains status path || contains status "private store detail");
+        Alcotest.(check (float 0.)) "the original read failure is recorded once"
+          (before_read +. 1.) (preparation_failures "facts_unreadable");
+        Alcotest.(check (float 0.)) "render I/O does not count another preparation failure"
+          (before +. 1.) (total_preparation_failures ());
+        Alcotest.(check int) "facts were read once" 1 !(p.reads);
+        Alcotest.(check int) "no judgment was dispatched" 0 !(p.judgments))
+        [false;true]))
 
 let test_a_request_that_cannot_be_built_gives_status_only () =
   with_policy (recall Runtime_schema.All_keepers) (fun () ->
@@ -526,6 +584,24 @@ let test_a_judged_keeper_without_a_clock_gets_status_only () =
       Alcotest.(check (float 0.)) "missing clock is recorded without dispatch"
         (before +. 1.) (preparation_failures "clock_unavailable")))
 
+let test_no_clock_with_an_unreadable_status_prompt_keeps_status_only () =
+  with_policy (recall Runtime_schema.All_keepers) (fun () ->
+    with_unreadable_status_prompt (fun path ->
+      with_directories (fun config keepers_dir ->
+        Alcotest.(check bool) "the test has no ambient clock" true
+          (Option.is_none (Eio_context.get_clock_opt ()));
+        let before = total_preparation_failures () in
+        let before_clock = preparation_failures "clock_unavailable" in
+        let result = Blocks.prepare ~memo:(Turn.create_memo ()) ~config ~keepers_dir
+            ~keeper_id ~turn_ref ~purpose:`Null ~memory_search_available:false in
+        check_status_only ~reason:"clock_unavailable" result;
+        Alcotest.(check bool) "the prompt path stays out of context" false
+          (contains (some_or_fail result).Blocks.status path);
+        Alcotest.(check (float 0.)) "one missing-clock failure is recorded"
+          (before_clock +. 1.) (preparation_failures "clock_unavailable");
+        Alcotest.(check (float 0.)) "render I/O does not add another failure"
+          (before +. 1.) (total_preparation_failures ()))))
+
 let () =
   Alcotest.run "keeper_memory_recall_blocks"
     [ ( "who gets the texts"
@@ -553,6 +629,8 @@ let () =
             test_facts_that_cannot_be_read_give_status_and_no_judgment
         ; Alcotest.test_case "preparation failure respects search tool availability" `Quick
             test_preparation_failure_respects_search_tool_availability
+        ; Alcotest.test_case "unreadable status prompt preserves the failure status" `Quick
+            test_unreadable_status_prompt_keeps_the_failure_status_only
         ; Alcotest.test_case "a request that cannot be built gives status only" `Quick
             test_a_request_that_cannot_be_built_gives_status_only
         ; Alcotest.test_case "something that raises gives status and does not end the turn" `Quick
@@ -575,5 +653,7 @@ let () =
             test_a_judged_turn_asks_once_and_a_retry_gets_the_same_status_from_the_facts_it_reads
         ; Alcotest.test_case "a judged keeper without a clock gets status only" `Quick
             test_a_judged_keeper_without_a_clock_gets_status_only
+        ; Alcotest.test_case "no clock and an unreadable prompt preserve status only" `Quick
+            test_no_clock_with_an_unreadable_status_prompt_keeps_status_only
         ] )
     ]

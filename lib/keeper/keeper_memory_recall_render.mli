@@ -4,8 +4,8 @@
     The status line says what the judgment came to and is sent every turn. The
     body holds the memories the judgment carried and is sent when that set
     changes. Neither is a prompt block yet: this module only makes their text.
-    It reads no file and sends nothing. The sentences are the named fragments
-    [recall.*] of config/prompts/keeper.md; a fragment that does not render is
+    It resolves prompt fragments and sends nothing. The sentences are the named
+    fragments [recall.*] of config/prompts/keeper.md; a fragment that does not render is
     placed in the text under its name, the way the other Keeper fragments are,
     so a missing sentence reads as a broken one. *)
 
@@ -43,7 +43,12 @@ val unavailable_status :
   string
 (** A status-only failure before a judgment exists. [reason] is the caller's
     bounded failure token, never raw exception or store content. This names
-    the turn and optional search route without inventing candidate coverage. *)
+    the turn and optional search route without inventing candidate coverage.
+    If prompt resolution raises [Sys_error] or [Unix.Unix_error], logs the I/O
+    detail and returns a bounded diagnostic containing the unavailable prompt
+    key, reason and turn identity; the optional search-hint key is included only
+    when that tool is available. It does not read another prompt in that fallback.
+    Other exceptions, including cancellation, propagate. *)
 
 val unknown_day : string
 (** What a body item writes for a time that is not a representable date. *)

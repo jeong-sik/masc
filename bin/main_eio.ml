@@ -4239,9 +4239,9 @@ let wizard_model_image_input ~prefer_bare model entries =
          | Some _ as declared -> declared
          | None ->
            Option.bind entry.base_label (fun base ->
-             Option.map
-               (fun (caps : Llm_provider.Capabilities.capabilities) -> caps.supports_image_input)
-               (Llm_provider.Capabilities.capabilities_for_provider_label base)))
+             Option.bind
+               (Llm_provider.Capabilities.capabilities_for_provider_label base)
+               (fun (caps : Llm_provider.Capabilities.capabilities) -> caps.declared_image_input)))
     |> List.sort_uniq (Option.compare Bool.compare) in
   match values with [Some value] -> Some value | _ -> None
 

@@ -116,5 +116,12 @@ export async function saveSetupSelections(revision: string, choices: Selection[]
 export async function prepareSetupModel(source: Source, model: Model, load: boolean, options: { signal?: AbortSignal } = {}): Promise<Model> {
   const response = await postControlPlane<unknown>('/api/v1/setup/context', { source, model: model.id, load }, undefined, options)
   if (!isRecord(response) || response.model !== model.id || !positive(response.context)) throw new Error('Context not confirmed')
-  return { ...model, context: response.context, tools: typeof response.tools === 'boolean' ? response.tools : model.tools }
+  if (response.supports_image_input != null && typeof response.supports_image_input !== 'boolean') {
+    throw new Error('Invalid model image capability metadata')
+  }
+  // Preparation fills missing endpoint metadata; an existing declaration,
+  // including an explicit disable, remains the selected model's authority.
+  const imageInput = model.supports_image_input ?? response.supports_image_input
+  return { ...model, context: response.context, tools: typeof response.tools === 'boolean' ? response.tools : model.tools,
+    ...(typeof imageInput === 'boolean' ? { supports_image_input: imageInput } : {}) }
 }

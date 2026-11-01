@@ -1,6 +1,12 @@
 module Discovery = Runtime_model_discovery
 type source = Running_model | Configured_model | Serving_endpoint | Not_reported
-type observation = { model : string; context : int option; source : source; tools : bool option }
+type observation = {
+  model : string;
+  context : int option;
+  source : source;
+  tools : bool option;
+  supports_image_input : bool option;
+}
 open Result.Syntax
 let fields_of_object = function
   | `Assoc fields when not (List.mem_assoc "error" fields) ->
@@ -62,10 +68,10 @@ let observe_with ~get ~post (connection : Discovery.connection) ~model ~load =
     let body = Yojson.Safe.to_string (`Assoc ["model", `String model]) in
     let* shown = post ~url:(at "/api/show") ~body in
     let* shown = object_fields shown in
-    let* tools = match List.assoc_opt "capabilities" shown with
-      | None -> Ok None
+    let* tools, supports_image_input = match List.assoc_opt "capabilities" shown with
+      | None -> Ok (None, None)
       | Some (`List values) when List.for_all (function `String _ -> true | _ -> false) values ->
-        Ok (Some (List.mem (`String "tools") values))
+        Ok (Some (List.mem (`String "tools") values), Some (List.mem (`String "vision") values))
       | _ -> Error Discovery.Invalid_response in
     let* configured = configured_context (List.assoc_opt "parameters" shown) in
     let* () = if load && tools <> Some false then
@@ -81,7 +87,7 @@ let observe_with ~get ~post (connection : Discovery.connection) ~model ~load =
       | Some value, _ -> Some value, Running_model
       | None, Some value -> Some value, Configured_model
       | None, None -> None, Not_reported in
-    Ok {model; context; source; tools}
+    Ok {model; context; source; tools; supports_image_input}
   | Openai ->
     let* models = Discovery.discover_with ~get connection in
     match models with
@@ -95,13 +101,15 @@ let observe_with ~get ~post (connection : Discovery.connection) ~model ~load =
         | Some settings ->
           let* settings = fields_of_object settings in
           optional_context (List.assoc_opt "n_ctx" settings) in
-      Ok {model; context; source=(if context = None then Not_reported else Serving_endpoint); tools=None}
-    | _ -> Ok {model; context=None; source=Not_reported; tools=None}
+      Ok {model; context; source=(if context = None then Not_reported else Serving_endpoint); tools=None;
+          supports_image_input=served.supports_image_input}
+    | _ -> Ok {model; context=None; source=Not_reported; tools=None; supports_image_input=None}
 let to_json observation =
   let optional f = function None -> `Null | Some value -> f value in
   `Assoc ["model", `String observation.model;
     "context", optional (fun value -> `Int value) observation.context;
     "tools", optional (fun value -> `Bool value) observation.tools;
+    "supports_image_input", optional (fun value -> `Bool value) observation.supports_image_input;
     "context_source", `String (match observation.source with Running_model -> "running_model"
       | Configured_model -> "configured_model" | Serving_endpoint -> "serving_endpoint" | Not_reported -> "not_reported")]
 let observe ~sw ~net connection ~model ~load =

@@ -1107,7 +1107,15 @@ let run_without_lifecycle ~result_scope ~input_source ~argument_source ~official
             |> Result.map_error (fun error ->
               (match error with
                | Runtime_antigravity.Result_not_completed _ -> observe_result_not_completed ()
-               | _ -> ());
+               | Runtime_antigravity.Invalid_config _
+               | Runtime_antigravity.Spawn_failed _
+               | Runtime_antigravity.Protocol_error _
+               | Runtime_antigravity.State_callback_failed _
+               | Runtime_antigravity.Turn_failed _
+               | Runtime_antigravity.Process_exited _
+               | Runtime_antigravity.Unhandled_exception _
+               | Runtime_antigravity.Child_fd_ceiling_exceeded _
+               | Runtime_antigravity.Timeout _ -> ());
               recovery_failure := recovery_failure_of_runtime_error error;
               runtime_error_to_core_error error)
           | `Abort stop -> Ok (`Stopped stop))

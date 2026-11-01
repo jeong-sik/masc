@@ -107,6 +107,89 @@ let test_committed_registry_failure_wakes_health () =
         (Runtime.For_testing.take_full_health_wakeup_nonblocking ()))
 ;;
 
+let test_registry_membership_wakes_health () =
+  let module Registry = Masc.Keeper_registry in
+  let base_path = Masc_test_deps.setup_test_workspace () in
+  let other_path = Filename.concat base_path "other-workspace" in
+  let previous_state = Server_auth.For_testing.snapshot_server_state () in
+  Fun.protect
+    ~finally:(fun () ->
+      Registry.install_state_change_observer (fun ~base_path:_ _ -> ());
+      Registry.For_testing.clear ();
+      reset ();
+      Server_auth.For_testing.restore_server_state previous_state;
+      Masc_test_deps.cleanup_test_workspace base_path)
+    (fun () ->
+      Unix.mkdir other_path 0o755;
+      Unix.mkdir (Filename.concat other_path Common.masc_dirname) 0o755;
+      let state = Masc.Mcp_server.For_testing.create_state ~base_path in
+      Server_auth.For_testing.restore_server_state (Some state);
+      Registry.For_testing.clear ();
+      reset ();
+      Registry.install_state_change_observer
+        Runtime.invalidate_full_health_snapshot_for_registry_change;
+      let hub =
+        match Runtime.fleet_stream_hub_for_scope
+          ~state ~scope:(Masc.Mcp_server.workspace_scope state) with
+        | Some hub -> hub
+        | None -> fail "current workspace fleet hub was unavailable"
+      in
+      ignore (Runtime.For_testing.take_full_health_wakeup_nonblocking ());
+      let fleet_paused_counts = ref [] in
+      let unsubscribe = Masc.Fleet_stream_hub.subscribe hub ~on_event:(function
+        | Masc.Fleet_stream.Snapshot { fleet; _ }
+        | Masc.Fleet_stream.Changed { fleet; _ } ->
+          fleet_paused_counts := fleet.fs_paused_count :: !fleet_paused_counts
+        | Masc.Fleet_stream.Unavailable_snapshot _ | Masc.Fleet_stream.Degraded _ -> ())
+      in
+      let refresh () =
+        Eio_main.run (fun _env ->
+          Eio.Switch.run (fun sw ->
+            Runtime.For_testing.run_full_health_refresh_worker ~sw
+              ~compute:(fun () ->
+                Ok (Runtime.keeper_fleet_runtime_resolution_light_fields ()))))
+      in
+      refresh ();
+      check (list int) "initial fleet reports no paused keepers" [ 0 ]
+        (List.rev !fleet_paused_counts);
+      let meta =
+        match Masc_test_deps.meta_of_json_fixture
+          (`Assoc [ "name", `String "membership-observer"
+                  ; "trace_id", `String "trace-membership-observer"
+                  ; "activation_mode", `String "manual"
+                  ; "paused", `Bool true ]) with
+        | Ok meta -> meta
+        | Error error -> fail error
+      in
+      let entry = Registry.For_testing.register ~base_path:other_path meta.name meta in
+      check bool "other workspace registration changes global paused inventory" true
+        (List.mem meta.name (Server_routes_http_runtime_fleet_scan.registry_paused_keeper_names ()));
+      check bool "registration wakes the health worker" true
+        (Runtime.For_testing.take_full_health_wakeup_nonblocking ());
+      let _, _, _, _, _, requested =
+        Runtime.For_testing.full_health_refresh_worker_stats () in
+      check bool "registration invalidates the published snapshot" true requested;
+      refresh ();
+      check (list int) "fleet subscriber sees the registered keeper" [ 0; 1 ]
+        (List.rev !fleet_paused_counts);
+      (match Registry.unregister_exact entry with
+       | Registry.Exact_unregistered -> ()
+       | _ -> fail "registered keeper could not be removed");
+      check bool "removal changes global paused inventory" false
+        (List.mem meta.name (Server_routes_http_runtime_fleet_scan.registry_paused_keeper_names ()));
+      check bool "removal wakes the health worker" true
+        (Runtime.For_testing.take_full_health_wakeup_nonblocking ());
+      refresh ();
+      check (list int) "fleet subscriber sees the removal" [ 0; 1; 0 ]
+        (List.rev !fleet_paused_counts);
+      (match Registry.unregister_exact entry with
+       | Registry.Exact_entry_missing -> ()
+       | _ -> fail "removed keeper was not missing");
+      check bool "a missing entry does not wake the worker" false
+        (Runtime.For_testing.take_full_health_wakeup_nonblocking ());
+      unsubscribe ())
+;;
+
 let test_non_eio_wakes_coalesce_without_blocking () =
   Eio_main.run (fun env ->
     reset ();
@@ -198,5 +281,7 @@ let () =
             test_non_eio_invalidation_runs_refresh_worker
         ; test_case "committed registry failure wakes health" `Quick
             test_committed_registry_failure_wakes_health
+        ; test_case "registry membership wakes health" `Quick
+            test_registry_membership_wakes_health
         ]
       ])

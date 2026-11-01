@@ -1077,6 +1077,7 @@ let get_phase ~base_path name =
 
 module For_testing = struct
   let unsafe_put_entry = unsafe_put_entry
+  let finish_unregistration_cleanup = finish_unregistration_cleanup
   let register = register
   let unregister = unregister
   let clear = clear

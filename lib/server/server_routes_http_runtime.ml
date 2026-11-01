@@ -1554,7 +1554,8 @@ let invalidate_full_health_snapshot () =
 
 let invalidate_full_health_snapshot_for_registry_change ~base_path = function
   (* Paused-keeper health still includes registry entries from all workspaces. *)
-  | Keeper_registry.Lifecycle_phase_changed -> invalidate_full_health_snapshot ()
+  | Keeper_registry.Lifecycle_phase_changed | Keeper_registry.Membership_changed ->
+    invalidate_full_health_snapshot ()
   | Keeper_registry.Failure_reason_changed ->
     let wake =
       with_full_health_snapshot_lock (fun () ->

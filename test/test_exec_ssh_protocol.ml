@@ -578,9 +578,16 @@ let test_a_cut_off_frame_is_not_payload () =
   let open Exec_ssh_protocol in
   let frame = render_acceptance_frame newest in
   let cut = String.sub frame 0 9 in
+  let at k = String.make k 'x' in
   check string "a cut frame is dropped" "" (settle_acceptance_head cut);
   check string "a transport line before it is kept" "warn\n"
     (settle_acceptance_head ("warn\n" ^ cut));
+  check string "a cut frame starting at the last byte inside the bound is dropped"
+    (at (acceptance_frame_max_bytes - 1))
+    (settle_acceptance_head (at (acceptance_frame_max_bytes - 1) ^ cut));
+  check string "a cut frame starting at the bound is kept as payload"
+    (at acceptance_frame_max_bytes ^ cut)
+    (settle_acceptance_head (at acceptance_frame_max_bytes ^ cut));
   check string "output without a separator is kept" "warn\n"
     (settle_acceptance_head "warn\n")
 

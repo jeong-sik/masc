@@ -3766,6 +3766,12 @@ let purge_private_jsonl_durable_locked_with_io ~io path =
     private_jsonl_with_fd ~close_operation:Close_transaction_data
       ~close_fd:io.close_fd ~success fd (fun () ->
         let* () =
+          private_jsonl_validate_open_binding
+            ~operation:Inspect_transaction_path
+            ~path
+            fd
+        in
+        let* () =
           private_jsonl_capture Remove_transaction_data (fun () -> Unix.unlink path)
           |> Result.map_error (fun failure -> Private_jsonl_operation_failed failure)
         in
@@ -5239,9 +5245,28 @@ let append_private_jsonl_durable_locked_with_expected_end_offset_with_io
              dir;
            let path_mu = get_append_path_mutex path in
            Stdlib.Mutex.protect path_mu (fun () ->
+             match
+               (match Unix.lstat path with
+                | stats when stats.Unix.st_kind <> Unix.S_REG ->
+                  Error
+                    (Existing_jsonl_refused
+                       ("private JSONL store is not a regular file: "
+                        ^ file_kind_to_string stats.Unix.st_kind))
+                | stats when stats.Unix.st_nlink <> 1 ->
+                  Error
+                    (Existing_jsonl_refused
+                       (Printf.sprintf
+                          "private JSONL store has ambiguous hard-link identity: %s (links=%d)"
+                          path
+                          stats.Unix.st_nlink))
+                | _ -> Ok ()
+                | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok ())
+             with
+             | Error error -> Private_file_failed error
+             | Ok () ->
              let fd =
                Unix.openfile path
-                 [ Unix.O_RDWR; Unix.O_CREAT; Unix.O_APPEND; Unix.O_CLOEXEC ]
+                 [ Unix.O_RDWR; Unix.O_CREAT; Unix.O_APPEND; Unix.O_CLOEXEC; Unix.O_NONBLOCK ]
                  0o600
              in
              private_jsonl_with_fd_outcome
@@ -5249,19 +5274,58 @@ let append_private_jsonl_durable_locked_with_expected_end_offset_with_io
                ~close_fd:io.close_fd
                fd
                (fun () ->
-                  Unix.fchmod fd 0o600;
-                  fsync_parent_directory dir;
-                  (* See Unix.lseek: only the file-position side effect is required. *)
-                  ignore (Unix.lseek fd 0 Unix.SEEK_SET : int);
-                  lock_whole_file fd;
-                  let original_length = Unix.lseek fd 0 Unix.SEEK_END in
-                  let validation = match validate_first_row with
-                    | None -> Ok ()
-                    | Some _ when original_length = 0 -> Ok ()
-                    | Some validate ->
-                        validate (read_first_jsonl_row fd)
-                        |> Result.map_error (fun detail -> Existing_jsonl_refused detail) in
-                  Result.bind validation (fun () ->
+                  let validate_binding () =
+                    match Unix.lstat path, Unix.fstat fd with
+                    | path_stats, _ when path_stats.Unix.st_kind <> Unix.S_REG ->
+                      Error
+                        (Existing_jsonl_refused
+                           ("private JSONL store is not a regular file: "
+                            ^ file_kind_to_string path_stats.Unix.st_kind))
+                    | _, fd_stats when fd_stats.Unix.st_kind <> Unix.S_REG ->
+                      Error
+                        (Existing_jsonl_refused
+                           ("private JSONL store is not a regular file: "
+                            ^ file_kind_to_string fd_stats.Unix.st_kind))
+                    | path_stats, _ when path_stats.Unix.st_nlink <> 1 ->
+                      Error
+                        (Existing_jsonl_refused
+                           (Printf.sprintf
+                              "private JSONL store has ambiguous hard-link identity: %s (links=%d)"
+                              path
+                              path_stats.Unix.st_nlink))
+                    | _, fd_stats when fd_stats.Unix.st_nlink <> 1 ->
+                      Error
+                        (Existing_jsonl_refused
+                           (Printf.sprintf
+                              "private JSONL store has ambiguous hard-link identity: %s (links=%d)"
+                              path
+                              fd_stats.Unix.st_nlink))
+                    | path_stats, fd_stats
+                      when not (private_jsonl_same_identity path_stats fd_stats) ->
+                      Error
+                        (Existing_jsonl_refused
+                           ("private JSONL store path binding changed during operation: "
+                            ^ path))
+                    | _ -> Ok ()
+                  in
+                  let validation =
+                    Result.bind (validate_binding ()) (fun () ->
+                      Unix.fchmod fd 0o600;
+                      fsync_parent_directory dir;
+                      (* See Unix.lseek: only the file-position side effect is required. *)
+                      ignore (Unix.lseek fd 0 Unix.SEEK_SET : int);
+                      lock_whole_file fd;
+                      Result.bind (validate_binding ()) (fun () ->
+                        let original_length = Unix.lseek fd 0 Unix.SEEK_END in
+                        match validate_first_row with
+                        | None -> Ok original_length
+                        | Some _ when original_length = 0 -> Ok original_length
+                        | Some validate ->
+                          validate (read_first_jsonl_row fd)
+                          |> Result.map (fun () -> original_length)
+                          |> Result.map_error (fun detail -> Existing_jsonl_refused detail)))
+                  in
+                  Result.bind validation (fun original_length ->
                   match expected_end_offset with
                   | Some expected when expected <> original_length ->
                     Error

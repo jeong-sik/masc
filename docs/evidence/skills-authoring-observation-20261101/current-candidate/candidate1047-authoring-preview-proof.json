@@ -1,0 +1,10 @@
+{
+  "at": "2026-11-01T10:21:54.767Z",
+  "source_commit": "1047c150a3086190677bf4affb4cdde8cc82ed51",
+  "source": "audit-second",
+  "name": "audit-preview-read",
+  "generated": "---\nname: \"audit-preview-read\"\ndescription: \"Inspect a lane profile using an explicitly selected read tool.\"\n---\n\n```toml composition\n[[compositions]]\nname = \"audit-preview-read\"\ndescription = \"Inspect a lane profile using an explicitly selected read tool.\"\nexecution = \"inline\"\nplan_json = \"{\\\"nodes\\\":[{\\\"id\\\":\\\"lane\\\",\\\"tool\\\":\\\"keeper_lane_status\\\",\\\"after\\\":[],\\\"args\\\":{}}],\\\"branch_failure_policy\\\":\\\"fail_fast\\\",\\\"exports\\\":[{\\\"name\\\":\\\"profile\\\",\\\"node\\\":\\\"lane\\\",\\\"pointer\\\":\\\"/profile\\\"}]}\"\n```\n\n# audit-preview-read\n\nRead the declared lane profile and inspect its returned profile field.\n",
+  "preview": "composition · inline · 1 nodes · draft revision 90853cbe8324010ba31967859e673d324fa86a888105325a10650bc81609f3dbbatch 0 · concurrentlanekeeper_lane_statusdepends rootDraft validated; no files written. Source availability, name conflicts and publication are checked when creating.",
+  "create_clicked": false,
+  "model_execution": false
+}

@@ -1,0 +1,24 @@
+{
+  "at": "2026-11-01T10:05:36.432918+00:00",
+  "run": 41295012653,
+  "head": "69c65ab0fd0484712ab118885ffcf20b4124d56d",
+  "status": "completed",
+  "conclusion": "success",
+  "source_log": "artifacts/skills-completion-audit-20261101/native69-testlog/ci-run-tests.log",
+  "source_log_sha256": "a7d8a018007983036ec18291f8b185c35939ca875967ae99b4c2297b56fa308e",
+  "source_log_bytes": 230518,
+  "suite_names": [
+    "test_keeper_composition_nested",
+    "test_tui_chat_call_reader",
+    "test_tui_async_request_details",
+    "test_tui_decode"
+  ],
+  "scope": "Existing native producer/read ownership and canonical terminal sanitizer behavior; no new UI text/layout tests",
+  "suite_cases": {
+    "test_keeper_composition_nested": 14,
+    "test_tui_chat_call_reader": 11,
+    "test_tui_async_request_details": 2,
+    "test_tui_decode": 377
+  },
+  "case_count": 404
+}

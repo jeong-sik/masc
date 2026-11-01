@@ -1,0 +1,31 @@
+{
+  "at": "2026-11-01T10:23:49.740112+00:00",
+  "browser_task_space": 17,
+  "browser_finished": true,
+  "browser_kept_pages": [],
+  "processes": [
+    {
+      "pid": 7215,
+      "before": "already exited"
+    },
+    {
+      "pid": 7214,
+      "before": "already exited"
+    },
+    {
+      "pid": 7168,
+      "signal": "SIGTERM"
+    },
+    {
+      "pid": 74179,
+      "signal": "SIGTERM"
+    }
+  ],
+  "running_owned_pids_after": [],
+  "listeners_closed": {
+    "18763": true,
+    "18764": true
+  },
+  "private_login_capture_removed": true,
+  "isolated_raw_token_removed": true
+}

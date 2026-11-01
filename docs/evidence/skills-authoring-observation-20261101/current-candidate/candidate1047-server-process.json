@@ -1,0 +1,33 @@
+{
+  "at": "2026-11-01T10:07:25.964579+00:00",
+  "pid": 74179,
+  "port": 18763,
+  "base": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/skills-completion-audit-20261101/artifacts/skills-completion-audit-20261101/candidate-base",
+  "binary": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/skills-completion-audit-20261101/artifacts/skills-completion-audit-20261101/mac1047/stage/masc",
+  "source_commit": "1047c150a3086190677bf4affb4cdde8cc82ed51",
+  "argv": [
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/skills-completion-audit-20261101/artifacts/skills-completion-audit-20261101/mac1047/stage/masc",
+    "start",
+    "--host",
+    "127.0.0.1",
+    "--port",
+    "18763",
+    "--base-path",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/skills-completion-audit-20261101/artifacts/skills-completion-audit-20261101/candidate-base"
+  ],
+  "environment_keys": [
+    "HOME",
+    "LANG",
+    "LC_ALL",
+    "LC_CTYPE",
+    "LOGNAME",
+    "MASC_ASSETS_DIR",
+    "PATH",
+    "SHELL",
+    "TMPDIR",
+    "USER",
+    "XDG_CONFIG_HOME"
+  ],
+  "external_channel_credentials_passed": false,
+  "live_runtime_reused": false
+}

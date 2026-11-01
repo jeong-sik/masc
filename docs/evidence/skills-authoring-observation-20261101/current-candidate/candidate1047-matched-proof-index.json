@@ -1,0 +1,139 @@
+{
+  "schema": "masc.skills-candidate-ui-proof/v1",
+  "at": "2026-11-01T10:32:32.435520+00:00",
+  "product_source_commit": "1047c150a3086190677bf4affb4cdde8cc82ed51",
+  "mac_probe_run": 41294630269,
+  "mac_artifact_id": 13079290025,
+  "mac_manifest_entries_verified": 14,
+  "mac_server_and_tui_embedded_commit_match": true,
+  "dashboard_build_source": "1047c150a3086190677bf4affb4cdde8cc82ed51",
+  "dashboard_assets_file_count": 688,
+  "actual_http_asset_files_verified": 4,
+  "runtime_instance": "01a19694-0bb4-7000-815a-05fe411b9024",
+  "server_executable_sha256": "2b7a0fcd52021d844d8c254fb842106496199cec252155ca001fb2334546d4b2",
+  "effective_base": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/skills-completion-audit-20261101/artifacts/skills-completion-audit-20261101/candidate-base",
+  "keeper_fibers": 0,
+  "fixture_paused": true,
+  "fixture_turns": 0,
+  "catalog_sources": [
+    "audit-first",
+    "audit-second"
+  ],
+  "native_fixture_source_id": "fixture",
+  "actual_native_producer": {
+    "head": "26e713fa41de5f6a96a8a98597ea96c95cef523a",
+    "run": 41291355669,
+    "cases": 27
+  },
+  "current_native_and_security": {
+    "head": "69c65ab0fd0484712ab118885ffcf20b4124d56d",
+    "run": 41295012653,
+    "cases": 404,
+    "suites": {
+      "test_keeper_composition_nested": 14,
+      "test_tui_chat_call_reader": 11,
+      "test_tui_async_request_details": 2,
+      "test_tui_decode": 377
+    }
+  },
+  "current_dashboard_checks": {
+    "at": "2026-11-01T10:31:09.033369+00:00",
+    "source_head": "e43491a61b06b1c95f7d180fe766b8351d7636b1",
+    "typecheck": "passed",
+    "runs": [
+      {
+        "log": "dashboard-final-current-tests.log",
+        "cases": 230,
+        "files": 12
+      },
+      {
+        "log": "dashboard-final-current-inspector-tests.log",
+        "cases": 27,
+        "files": 1
+      },
+      {
+        "log": "dashboard-final-current-inspector-render-tests.log",
+        "cases": 13,
+        "files": 1
+      },
+      {
+        "log": "dashboard-final-current-tool-blob-tests.log",
+        "cases": 4,
+        "files": 1
+      }
+    ],
+    "distinct_files": 15,
+    "case_count": 274,
+    "scope": "Four disjoint focused selections at unchanged final Dashboard/test inputs; includes shared blob transport and original-call inspector consumers. Evidence-only edits do not change these inputs."
+  },
+  "read_carriers": {
+    "completed": {
+      "kind": "Actual native async terminal record, base_path rebound only",
+      "request_id": "kmsg-4e8b11245ab78f212cb75fa90ceb206a",
+      "data_unchanged": true,
+      "current_continuation": "unavailable/missing_journal",
+      "native_original_continuation": "Separate retained canonical native status has a newer logical owner; original journal was not copied"
+    },
+    "failure": {
+      "kind": "Manually seeded terminal READ carrier of unchanged native INLINE failure data",
+      "request_id": "kmsg-634d534f1591493a8ce5715fcdd96799",
+      "is_actual_native_async_execution": false,
+      "data_unchanged": true,
+      "current_continuation": "not_composition",
+      "children": [
+        "completed",
+        "completed",
+        "admission_rejected",
+        "not_started"
+      ]
+    }
+  },
+  "authoring": {
+    "selected_source": "audit-second",
+    "name": "audit-preview-read",
+    "server_parser_preview": "valid",
+    "nodes": 1,
+    "output": "profile at /profile",
+    "create_clicked": false,
+    "package_created": false
+  },
+  "tui_capture": {
+    "terminal": "ttyd1.7.7 xterm-256color Menlo14",
+    "rows": 60,
+    "cols": 188,
+    "editor": "Deterministic cp of explicit target JSON through actual external-editor roundtrip; no VI interaction claim",
+    "navigation": [
+      ":tools",
+      "Enter",
+      "p",
+      "o completed target",
+      "End",
+      "o failure target",
+      "End",
+      "PageUp"
+    ],
+    "raw_bytes": 455224,
+    "raw_sha256": "670540ede47ffe1c0cf2fbffac877ac044506e28d96d1ad56eb03ec408c44fa0",
+    "compression": "gzip mtime=0; decompressed bytes equal original"
+  },
+  "cleanup": {
+    "browser_task_space": 17,
+    "browser_finished": true,
+    "running_owned_pids_after": [],
+    "listeners_closed": {
+      "18763": true,
+      "18764": true
+    },
+    "private_token_captures_removed": true
+  },
+  "model_or_worker_replayed": false,
+  "live_runtime_reused": false,
+  "live_deployment_claimed": false,
+  "limits": [
+    "Controlled QA read carriers and parser preview, not production workload or fleet health",
+    "Catalog audit-first/audit-second identities remain separate from original native fixture identity",
+    "Original native journal/ledger were not copied; current missing logical evidence is unavailable",
+    "No new UI wording/layout/ANSI/row-order assertions",
+    "Same identified1047 binary and served Dashboard input source; full executable-binding build metadata absent"
+  ]
+}

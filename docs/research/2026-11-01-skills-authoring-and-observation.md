@@ -54,14 +54,14 @@ the first implementation unit.
 | Requirement | Required evidence | Current state |
 | --- | --- | --- |
 | Explain applicable prior art and concrete adaptations | Official-source comparison linked to actual changes | Comparison above; adaptations described below and in the stacked PRs |
-| Create instruction Skills and compositions through clear, validated flows | Real create/preview/publish/readback with source choice, diagnostics and publication outcomes | Guided Dashboard and TUI candidates implemented; server preview/create/publish checks passed; missing-source discovery repair and actual screen proof pending |
-| Compose existing capabilities with explicit inputs, dependencies and outputs | Parser/executor-backed preparation and execution; inspectable flow and resulting records | Guided canonical-plan authoring and parser-backed preview implemented; focused server checks passed; candidate screen proof pending |
-| Count original runs and asynchronous use honestly | Producer-to-store-to-read-model tests, exact revision and coverage consistency | Candidates #47036/#47041: focused retained-run and async usage checks passed; installed/runtime proof pending |
-| Make statistics interpretable | Sample sizes, populations, units, recorded-time bounds, empty/unavailable distinction, duration distributions | First candidate implemented and tested; rendered/runtime proof pending |
-| Explain actual failures and nested execution | Failure reasons, parent/child/node identities and outcomes visible in both clients | Top-level failure/effect and node evidence visible; exact-run history and parent/request identities implemented; final OCaml and screen proof pending |
+| Create instruction Skills and compositions through clear, validated flows | Real create/preview/publish/readback with source choice, diagnostics and publication outcomes | Guided creation and canonical composition authoring, explicit writable-source selection, parser preview and publication/readback verified; missing declared writable roots covered. Retained candidate captures and authoring receipts are linked below. |
+| Compose existing capabilities with explicit inputs, dependencies and outputs | Parser/executor-backed preparation and execution; inspectable flow and resulting records | Guided canonical plans and parser preview rendered; public native prepare/run emits actual nested child results. Native-to-Dashboard parity verifies these unchanged outputs. |
+| Count original runs and asynchronous use honestly | Producer-to-store-to-read-model tests, exact revision and coverage consistency | Retained-run and asynchronous activation usage producers/readers tested; exact-reference history and coverage shown in both candidate clients. Installed production runtime is a separate delivery boundary. |
+| Make statistics interpretable | Sample sizes, populations, units, recorded-time bounds, empty/unavailable distinction, duration distributions | Both clients render outcome-specific duration samples, mean/P50/P95/min/max, milliseconds, recorded-result bounds and incomplete retained coverage; captured with an explicitly seeded five-run QA population. |
+| Explain actual failures and nested execution | Failure reasons, parent/child/node identities and outcomes visible in both clients | Top-level failure/effect and node evidence captured in both clients. Actual nested producer, manifest integrity and reader ownership pass 27 native cases; Dashboard parity passes against the emitted native outputs. Matched1047 nested screens and explicitly scoped native-result read carriers are retained. |
 | Remove obsolete UI and compatibility paths | Call-site inventory and replacement behavior; no parallel authorities | Obsolete single-file evidence reader, fixed executable starter and silent first-source choice removed; v9 has no prior-version reader |
-| Verify TUI and Dashboard behavior | Candidate source checks, focused behavioral tests, actual rendered captures and runtime observations with provenance | Incomplete |
-| Deliver independently reviewed changes | Current-head review, checks, PR integration; installed/runtime evidence separately | Incomplete |
+| Verify TUI and Dashboard behavior | Candidate source checks, focused behavioral tests, actual rendered captures and runtime observations with provenance | Earlier authoring/history/statistics captures and matched1047 nested/collision/input captures retained. Current native/security404 and Dashboard274/15-file checks, TypeScript and source reviews pass; capture producers, manual carriers and cleanup are explicit. |
+| Deliver independently reviewed changes | Current-head review, checks, PR integration; installed/runtime evidence separately | Earlier six-PR stack integrated. Completion-audit stack integration remains pending current-head formal approval and final compile; no production installation claim. |
 
 ## First implementation unit
 
@@ -118,3 +118,51 @@ requested reference and selector. Dashboard generations reject late replies;
 TUI's existing request owner does so and continuous navigation follows its
 pending target rather than stale displayed detail. Latest independent Skill
 activation remains separately labelled from the selected composition run.
+
+
+## Retained verification and completion audit
+
+The selected [evidence bundle](../evidence/skills-authoring-observation-20261101/README.md)
+keeps actual candidate screenshots, authoring/readback receipts, native producer
+outputs and immutable file identities. Earlier six-PR integration ended at
+`e2492b345dc5f322868b15ec22c7e7b014df629f`; it did not settle the reopened
+completion audit.
+
+That audit found two P2 gaps: published same-name precedence was hidden in the
+Dashboard, and nested execution outcomes still required interpreting raw JSON.
+PRs [47159](https://github.com/jeong-sik/masc/pull/47159),
+[47174](https://github.com/jeong-sik/masc/pull/47174) and
+[47183](https://github.com/jeong-sik/masc/pull/47183) address those gaps. Name
+selection comes from catalog authority and does not block exact-source editing.
+Nested children preserve admission, arguments, cause, node settlement/effect and
+individual export availability. Manifest reads verify exact bytes and hashes.
+Physical completion and newer logical continuation ownership stay distinct.
+Same-source failed refreshes label the retained snapshot stale; a changed source
+or request owner cannot borrow another result's child observations.
+
+No new executor, retry path, persisted statistics authority or ledger-derived
+admission gate was added. Controlled candidate captures and native test
+execution are separate from production installation, real model execution,
+fleet-scale measurements and user-objective verification.
+
+
+The completion review additionally closed a terminal-control P2 in the async
+reader's nested headings using the existing canonical sanitizer. Source evidence
+is preserved. Actual Dashboard inspection found that Skill fields referenced an
+undefined input style; the shared class now gives creation, lookup and filtering
+controls visible boundaries and keyboard focus. These are repairs to the
+requested operator flows, with no new UI assertion tests.
+
+
+The final matched1047 candidate uses one identified source for the Mac server,
+TUI and clean-built Dashboard assets. Actual HTTP domain results match the
+unchanged native producer payloads. A copied genuine async terminal record
+remains distinct from its unavailable staged logical journal; the inline-failure
+visual carrier has explicitly manufactured outer request metadata and does not
+claim async worker execution. Both interfaces show available sibling outputs,
+admission rejection, proven pre-effect node failures and unstarted descendants.
+Guided authoring also completed an actual parser preview with an explicitly
+chosen writable source, tool, JSON input and named output; this additional
+preview created no package. Current404-case native/security and274-case
+Dashboard checks describe separate named populations, not objective success.
+Final formal approval and whole-stack integration remain pending.

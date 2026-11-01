@@ -1,0 +1,58 @@
+{
+  "source_head": "26e713fa41de5f6a96a8a98597ea96c95cef523a",
+  "workflow_run": 41291355669,
+  "suites": {
+    "test_keeper_composition_nested": 14,
+    "test_tui_chat_call_reader": 11,
+    "test_tui_async_request_details": 2
+  },
+  "case_count": 27,
+  "proofs": [
+    {
+      "file": "native-inline-completed.json",
+      "bytes": 19805,
+      "sha256": "1905d5e7132344d28af57c30ab800fb9cebed952f1e1c6b3a22b8142b66cb266",
+      "source_bytes_sha256": "16d761952b1ecd2e0a2e588080f909676b14886d728e92915694bb27b88fca68",
+      "skill_content_revision": "45eb9509e7073bac18e4e997e9e5bf6288889364e6dc5103e53e3317b823dfe8",
+      "source_revision_codec": "Skill_reference.content_revision_of_source_text; length-prefixed skill_document field",
+      "execution": "inline",
+      "success": true,
+      "dispositions": [
+        "completed",
+        "completed"
+      ]
+    },
+    {
+      "file": "native-inline-admission-rejected.json",
+      "bytes": 33010,
+      "sha256": "39dffe56679e4bbfd6767ca1c47ae42f1813163d143b207582f71997b1ddf591",
+      "source_bytes_sha256": "16d761952b1ecd2e0a2e588080f909676b14886d728e92915694bb27b88fca68",
+      "skill_content_revision": "45eb9509e7073bac18e4e997e9e5bf6288889364e6dc5103e53e3317b823dfe8",
+      "source_revision_codec": "Skill_reference.content_revision_of_source_text; length-prefixed skill_document field",
+      "execution": "inline",
+      "success": false,
+      "dispositions": [
+        "completed",
+        "completed",
+        "admission_rejected",
+        "not_started"
+      ]
+    },
+    {
+      "file": "native-async-completed.json",
+      "bytes": 50742,
+      "sha256": "adf720b694b2c171cf656448daccc3cfad6c659646f3606fbf43bd17472f1c7b",
+      "source_bytes_sha256": "16d761952b1ecd2e0a2e588080f909676b14886d728e92915694bb27b88fca68",
+      "skill_content_revision": "45eb9509e7073bac18e4e997e9e5bf6288889364e6dc5103e53e3317b823dfe8",
+      "source_revision_codec": "Skill_reference.content_revision_of_source_text; length-prefixed skill_document field",
+      "execution": "async",
+      "success": true,
+      "dispositions": [
+        "completed",
+        "completed"
+      ]
+    }
+  ],
+  "formatting": "Parsed and pretty-printed derivative of exact nested_observation_proof stdout; original suite-runner log retained",
+  "real_model_execution": false
+}

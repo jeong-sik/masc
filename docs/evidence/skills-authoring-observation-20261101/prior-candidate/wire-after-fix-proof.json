@@ -1,0 +1,96 @@
+{
+  "source_commit": "3832592eea019048729fdd9422324144ee00744e",
+  "verified_at": "2026-11-01T05:37:06.644357+00:00",
+  "keys": [
+    "f",
+    "[",
+    "[",
+    "]",
+    "Enter"
+  ],
+  "observed_requests": [
+    {
+      "phase": "request",
+      "reference": {
+        "identity": {
+          "source_id": "proof-second",
+          "package_id": "proof-composition",
+          "name": "proof-composition"
+        },
+        "content_revision": "67d33ff240aa4db09fda6a88076438f71eb42f6de9dfcfe1b1b862697e9aeb9c"
+      },
+      "composition_run_id": null,
+      "at": "2026-11-01T05:36:40.430456+00:00"
+    },
+    {
+      "phase": "request",
+      "reference": {
+        "identity": {
+          "source_id": "proof-second",
+          "package_id": "proof-composition",
+          "name": "proof-composition"
+        },
+        "content_revision": "67d33ff240aa4db09fda6a88076438f71eb42f6de9dfcfe1b1b862697e9aeb9c"
+      },
+      "composition_run_id": "01a19565-0004-7000-8000-000000000004",
+      "at": "2026-11-01T05:36:50.921108+00:00"
+    },
+    {
+      "phase": "request",
+      "reference": {
+        "identity": {
+          "source_id": "proof-second",
+          "package_id": "proof-composition",
+          "name": "proof-composition"
+        },
+        "content_revision": "67d33ff240aa4db09fda6a88076438f71eb42f6de9dfcfe1b1b862697e9aeb9c"
+      },
+      "composition_run_id": "01a19565-0003-7000-8000-000000000003",
+      "at": "2026-11-01T05:36:50.922576+00:00"
+    },
+    {
+      "phase": "request",
+      "reference": {
+        "identity": {
+          "source_id": "proof-second",
+          "package_id": "proof-composition",
+          "name": "proof-composition"
+        },
+        "content_revision": "67d33ff240aa4db09fda6a88076438f71eb42f6de9dfcfe1b1b862697e9aeb9c"
+      },
+      "composition_run_id": "01a19565-0004-7000-8000-000000000004",
+      "at": "2026-11-01T05:37:06.569885+00:00"
+    },
+    {
+      "phase": "request",
+      "reference": {
+        "identity": {
+          "source_id": "proof-second",
+          "package_id": "proof-composition",
+          "name": "proof-composition"
+        },
+        "content_revision": "67d33ff240aa4db09fda6a88076438f71eb42f6de9dfcfe1b1b862697e9aeb9c"
+      },
+      "composition_run_id": null,
+      "at": "2026-11-01T05:37:06.571294+00:00"
+    }
+  ],
+  "expected_selectors": [
+    null,
+    "01a19565-0004-7000-8000-000000000004",
+    "01a19565-0003-7000-8000-000000000003",
+    "01a19565-0004-7000-8000-000000000004",
+    null
+  ],
+  "same_exact_revision": true,
+  "request_navigation_pass": true,
+  "controlled_run4_response_delay_ms": 250,
+  "fixture_kind": "manually seeded controlled evidence, not Keeper executions",
+  "proof_scope": "Production native TUI input dispatcher and HTTP requests, no UI wording/layout assertions",
+  "responses_http_200": 5,
+  "visually_inspected": [
+    "tui-3832592-two-older.png",
+    "tui-3832592-latest-after-navigation.png"
+  ],
+  "visual_inspection_note": "Actual screenshots show run3 after two older inputs and run5 after newer/latest, while delayed run4 responses arrive later. Samples/statistics remain five retained runs. This is manual visual inspection, not UI wording assertions."
+}

@@ -250,7 +250,15 @@ type guest_facts_reading =
 1. `Unreadable`: start 를 거절한다(새 실패 `Guest_facts_unreadable`). 게스트는 지우지 않는다.
 2. `plan_label` 이 없거나 지금 계획의 digest 와 다르다: `Replace_running_guest`. reason 에는 사실로 보이는 차이(이미지, 크기, 사용자, 마운트, 격리, 네트워크)를 모두 적고, 사실로 안 보이는 차이(환경 변수, `--rm`)는 `Plan_changed` 로 적는다.
 3. policy 모드에서 `HTTPS_PROXY` 의 포트가 지금 lane 이 잡은 포트와 다르다: `Replace_running_guest [ Policy_route_stale ]`. 지금 `policy_route_holds`(`keeper_turn_sandbox_runtime.ml:194-203`)의 규칙과 같다.
-4. 사본 디렉토리(§4.3)를 읽지 못한다: `Replace_running_guest [ Identity_unreadable ]`.
+4. 사본 디렉토리(§4.3)가 확인된 부재이거나 내용·경로·권한 검증에서 거절됐다:
+   `Replace_running_guest [ Identity_unreadable ]`. I/O·파일 정체성 변경·descriptor
+   close·recovery/lifecycle 오류로 관측 권위를 얻지 못한 경우는 기존 typed 오류로
+   start를 거절하고 게스트를 보존한다. 이 오류는 새 자격 증명 캡처나 교체를
+   승인하지 않는다. 다음 요청은 기존 읽기·판정 경계에서 다시 확인한다.
+
+   2026-11-01 P3 개선 결정: 기존 규칙은 확인된 무효와 일시적 읽기 불가를 모두
+   `Identity_unreadable`로 묶었다. #44678에 기록한 구분을 이 규칙으로 채택한다.
+   부재·검증 거절의 교체 정책은 유지하며 자동 재시도나 시한은 추가하지 않는다.
 5. 사실이 계획과 다르다: start 를 거절한다(새 실패 `Runtime_reports_other_than_asked`, 다른 자리를 모두 적는다). 게스트는 지우지 않는다. 환경 변수는 계획의 이름마다 값이 같은지만 본다. 런타임 목록에는 이미지의 환경 변수가 섞여 있기 때문이다.
 6. 모두 같다: `Adopt_running_guest`.
 

@@ -93,6 +93,9 @@ val microvm_remote_endpoint :
 (** {!microvm_remote_endpoint_of_running} after ensuring the guest is up.
     Apple completes its first process handoff under Keeper lifecycle ownership,
     including durable identity validation, shim verification and build cleanup.
+    Unavailable identity-store observation refuses admission and preserves the
+    existing guest before fresh credential capture or replacement. Confirmed
+    missing or rejected identity follows the declared replacement policy.
     Its final endpoint admission rechecks readiness under that same owner; if
     an observation invalidated it in between, this call fails and can be retried.
     A scope-matched stopped observation also invalidates cached readiness, so a

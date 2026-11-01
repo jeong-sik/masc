@@ -30,6 +30,14 @@ type error =
 val error_message : error -> string
 (** Diagnostics contain no captured credential bytes. *)
 
+type load_failure = Rejected_snapshot | Observation_unavailable
+val classify_load_error : error -> load_failure
+(** Distinguish an explicit content/path/permission rejection from unavailable
+    observation authority. I/O, identity changes, descriptor-close and
+    recovery/lifecycle failures do not establish that a snapshot is invalid.
+    The caller retains the original error for diagnostics. This classification
+    grants no mutation or execution authority. *)
+
 val host_path :
   base_path:string -> keeper_name:string -> backend:Keeper_microvm_backend.t ->
   network_mode:Keeper_types_profile_sandbox.network_mode -> string

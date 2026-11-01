@@ -82,6 +82,31 @@ exception Invalid_directory_permissions
 exception Invalid_file_permissions
 exception Snapshot_directory_changed
 
+type load_failure = Rejected_snapshot | Observation_unavailable
+
+let rejected_snapshot_exception = function
+  | Invalid_directory_permissions | Invalid_file_permissions -> true
+  | _ -> false
+
+let classify_load_error = function
+  | Invalid_snapshot _ -> Rejected_snapshot
+  | Filesystem_unavailable {close_failure = None; failure} ->
+    (match failure with
+     | Fs_compat.Ownership_boundary_rejected _ | Path_is_not_regular_file _
+     | Owned_path_owner_mismatch _ | Owned_path_writable_by_others _ -> Rejected_snapshot
+     | Owned_file_operation_failed {cause; _} when rejected_snapshot_exception cause -> Rejected_snapshot
+     | Filesystem_identity_changed _ | Owned_file_operation_failed _ -> Observation_unavailable)
+  | Filesystem_operation_failed (cause, _) ->
+    if rejected_snapshot_exception cause then Rejected_snapshot else Observation_unavailable
+  | Filesystem_unavailable {close_failure = Some _; _}
+  | Scope_unavailable _ | Inventory_unavailable _ | Guest_present | Snapshot_already_exists
+  | Registry_unavailable _ | Lane_unavailable _ | Lane_release_failed _
+  | Invalid_publication_target _ | Publication_failed _ | Removal_failed _ -> Observation_unavailable
+
+let observation_changed path =
+  Error (Filesystem_unavailable
+    {failure = Fs_compat.Filesystem_identity_changed {path}; close_failure = None})
+
 let check_directory ~permissions (stat : Unix.stats) =
   if stat.st_kind <> Unix.S_DIR || stat.st_uid <> Unix.getuid ()
      || stat.st_perm <> permissions || stat.st_perm land 0o022 <> 0
@@ -97,7 +122,8 @@ let inspect_root ~base_path =
     Fs_compat.with_owned_inventory_root spelling (fun held ->
       let stat = Fs_compat.owned_inventory_root_stat held in
       let original = Unix.lstat spelling in
-      if original.st_kind <> Unix.S_DIR || not (same_identity original stat)
+      if not (same_identity original stat) then Ok (observation_changed spelling)
+      else if original.st_kind <> Unix.S_DIR
          || stat.st_uid <> Unix.getuid () || stat.st_perm land 0o022 <> 0
       then Ok (Error (Invalid_snapshot "unsafe workspace state root"))
       else Ok (Ok {spelling; canonical=Fs_compat.owned_inventory_root_path held; stat}))
@@ -120,7 +146,7 @@ let with_child ~parent ~parent_permissions ~leaf ~permissions callback =
                   || stat.st_size <> child.st_size || stat.st_nlink <> child.st_nlink)
            then raise Snapshot_directory_changed);
           (match permissions with None -> child.st_perm | Some permissions -> permissions)
-        | Some _ | None -> raise Invalid_directory_permissions in
+        | Some _ | None -> raise Snapshot_directory_changed in
     check_directory ~permissions:expected stat;
     Unix.fsync fd in
   let directory = Filename.concat (Fs_compat.owned_inventory_root_path parent) leaf in
@@ -168,7 +194,7 @@ let read_snapshot ~root ~base_path ~keeper_name ~backend ~network_mode =
       let original = Unix.lstat root.spelling in
       if original.st_kind <> Unix.S_DIR || not (same_identity root.stat observed)
          || not (same_identity original observed)
-      then Ok (Error (Invalid_snapshot "workspace state root changed"))
+      then Ok (observation_changed root.spelling)
       else (
         check_directory ~permissions:root.stat.st_perm observed;
         let rec descend parent parent_permissions = function
@@ -192,7 +218,7 @@ let read_snapshot ~root ~base_path ~keeper_name ~backend ~network_mode =
                   ~owner_uid:(Unix.getuid ()) ~inventory_root:child ~sync_directory
                   (Fs_compat.owned_inventory_root_path child) (fun _ names -> names)
                 |> filesystem_result in
-              if second <> Some names then Error (Invalid_snapshot "snapshot inventory changed")
+              if second <> Some names then observation_changed (Fs_compat.owned_inventory_root_path child)
               else if List.exists (fun name -> not (List.mem name ["hosts.yml"; "config.yml"; "gitconfig"])) names
               then Error (Invalid_snapshot "unknown snapshot entries")
               else
@@ -218,7 +244,7 @@ let with_recovery ~fs ~root ~owner callback =
   Eio.Path.with_open_dir Eio.Path.(fs / root.canonical) (fun registry_root ->
     let stat = Eio.Path.stat ~follow:true registry_root in
     if stat.dev <> Int64.of_int root.stat.st_dev || stat.ino <> Int64.of_int root.stat.st_ino
-    then Error (Invalid_snapshot "workspace state capability changed")
+    then observation_changed root.canonical
     else Eio.Switch.run @@ fun sw ->
       let* registry = Recovery.open_registry ~sw ~fs ~registry_root
         |> Result.map_error (fun error -> Registry_unavailable error) in

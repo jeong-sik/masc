@@ -1,0 +1,41 @@
+2026-11-01T01:04:18.5715761Z   ref: 2db89555a45998a0b6ed08a0098a7b62b5c55a02
+2026-11-01T01:04:18.9814434Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin 2db89555a45998a0b6ed08a0098a7b62b5c55a02
+2026-11-01T01:04:28.7803555Z  * branch              2db89555a45998a0b6ed08a0098a7b62b5c55a02 -> FETCH_HEAD
+2026-11-01T01:04:28.7811968Z [command]/usr/bin/git rev-parse --verify --quiet 2db89555a45998a0b6ed08a0098a7b62b5c55a02^{object}
+2026-11-01T01:04:28.7836357Z 2db89555a45998a0b6ed08a0098a7b62b5c55a02
+2026-11-01T01:04:28.7925472Z [command]/usr/bin/git checkout --progress --force 2db89555a45998a0b6ed08a0098a7b62b5c55a02
+2026-11-01T01:04:30.8904347Z Note: switching to '2db89555a45998a0b6ed08a0098a7b62b5c55a02'.
+2026-11-01T01:04:30.9057840Z 2db89555a45998a0b6ed08a0098a7b62b5c55a02
+2026-11-01T01:05:49.4294962Z   TARGET_SUITES: packages/agent_core/test/test_provider_failure_attribution,packages/agent_core/test/test_provider_runtime_binding
+2026-11-01T01:05:49.4390826Z   TARGET_SUITES: packages/agent_core/test/test_provider_failure_attribution,packages/agent_core/test/test_provider_runtime_binding
+2026-11-01T01:05:49.4945461Z [targeted] EIO_BACKEND=<unset> timeout=600s per suite
+2026-11-01T01:05:49.4967601Z [targeted] @@packages/agent_core/test/runtest-test_provider_failure_attribution: start 2026-11-01T01:05:49Z (dune alias)
+2026-11-01T01:06:21.3128229Z ASSERT selected authentication is retained
+2026-11-01T01:06:21.3128717Z ASSERT selected credential scope is retained
+2026-11-01T01:06:21.3129127Z ASSERT catalog replacement cannot change failure ownership
+2026-11-01T01:06:21.3130087Z ASSERT a fresh selection observes the changed account scope
+2026-11-01T01:06:21.3130555Z ASSERT removing declarations cannot change failure ownership
+2026-11-01T01:06:21.3131066Z ASSERT changing provider identity invalidates selection-owned attribution
+2026-11-01T01:06:21.3131611Z ASSERT changing provider identity invalidates selection-owned attribution
+2026-11-01T01:06:21.3132148Z ASSERT an endpoint override retains the selected account scope
+2026-11-01T01:06:21.3132649Z ASSERT request policy refresh preserves unchanged provider identity
+2026-11-01T01:06:21.3133215Z   [OK]          binding identity            1   selected identity survives ca...
+2026-11-01T01:06:21.3133686Z ASSERT selected authentication is retained
+2026-11-01T01:06:21.3140389Z ASSERT selected credential scope is retained
+2026-11-01T01:06:21.3140686Z ASSERT catalog replacement cannot change failure ownership
+2026-11-01T01:06:21.3141387Z ASSERT a fresh selection observes the changed account scope
+2026-11-01T01:06:21.3141822Z ASSERT removing declarations cannot change failure ownership
+2026-11-01T01:06:21.3142258Z ASSERT changing provider identity invalidates selection-owned attribution
+2026-11-01T01:06:21.3142604Z ASSERT changing provider identity invalidates selection-owned attribution
+2026-11-01T01:06:21.3142913Z ASSERT an endpoint override retains the selected account scope
+2026-11-01T01:06:21.3143207Z ASSERT request policy refresh preserves unchanged provider identity
+2026-11-01T01:06:21.3143558Z   [OK]          binding identity            2   identity selection precedes c...
+2026-11-01T01:06:21.3143892Z ASSERT an unselected config cannot acquire later declaration ownership
+2026-11-01T01:06:21.3144186Z ASSERT provider observation keeps the explicit identity
+2026-11-01T01:06:21.3144493Z   [OK]          binding identity            3   unselected identity cannot ac...
+2026-11-01T01:06:21.3166073Z Test Successful in 0.020s. 18 tests run.
+2026-11-01T01:06:21.3424170Z [targeted] @@packages/agent_core/test/runtest-test_provider_failure_attribution: OK in 32s
+2026-11-01T01:06:21.3446528Z [targeted] @@packages/agent_core/test/runtest-test_provider_runtime_binding: start 2026-11-01T01:06:21Z (dune alias)
+2026-11-01T01:06:22.6283645Z Test Successful in 0.051s. 34 tests run.
+2026-11-01T01:06:22.6479018Z [targeted] @@packages/agent_core/test/runtest-test_provider_runtime_binding: OK in 1s
+

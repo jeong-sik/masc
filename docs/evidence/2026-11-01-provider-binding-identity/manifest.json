@@ -1,0 +1,112 @@
+{
+  "source_heads": {
+    "98b63fc277c8e129415acb50e6a33e4a9efcb230": {
+      "packages/agent_core/lib/binding_identity.ml": "e5f3b52a1875d7dc733174c7645a11c38a346fabc9af9454dd6e01201b168256",
+      "packages/agent_core/lib/binding_identity.mli": "ab65076acfe3a22f7cb2348cf1f7c9c754850a35b2f052ed825a7575cd3ee5b0",
+      "packages/agent_core/lib/llm_provider/provider_config.ml": "446306f8ff9385df24d1b28d5baffc759758ca6313d3ec2e57b998fabe1d27a2",
+      "packages/agent_core/lib/llm_provider/provider_config.mli": "791a8de828a4413cd101f3338571e37c4d9010461d9e9cc1114be61d85a9ce32",
+      "packages/agent_core/lib/provider_runtime_binding.ml": "c464e8c0a909221373850154f08091325066bde5ba4cdba445915b0c1ed61dd7",
+      "packages/agent_core/lib/provider_runtime_binding.mli": "20da1702e6bb6e47df2df00370fbad3c58e1ecf66b6018317c582f39f625329f",
+      "packages/agent_core/test/test_provider_failure_attribution.ml": "d10badfab8540e4fd82f2803493014326462698fe2e8bb979f9080238273c49e",
+      "packages/agent_core/test/test_provider_runtime_binding.ml": "348c370fb2275eba150db55fea8ef274a47a50d5fd711b7913b4264072b33d59"
+    },
+    "2db89555a45998a0b6ed08a0098a7b62b5c55a02": {
+      "packages/agent_core/lib/binding_identity.ml": "f9fc624ef95ed4a9d113cc952f492dbd110bb3c1ba90927c4f230584b4956586",
+      "packages/agent_core/lib/binding_identity.mli": "a25a24db2e7fa22822c5abd77470fc35b6a33994cc5807a39f684a34837b3cf4",
+      "packages/agent_core/lib/llm_provider/provider_config.ml": "5f8926b61b8ae56b73cb9806565d83b51ffbae1c70d567b45b52d455385edb9e",
+      "packages/agent_core/lib/llm_provider/provider_config.mli": "4554f7402e0e08fd2ff21436fcaa8cda622298be13b147c60ed062f663d457b7",
+      "packages/agent_core/lib/provider_runtime_binding.ml": "0fc5624862cbd6dc7264fc5f524454580324a63b779e4c9ae9bb5a9a0ae0ebc8",
+      "packages/agent_core/lib/provider_runtime_binding.mli": "adf9c9c0d391e9f26d25abdf83854853883d505a05716e72ed5913774ad398d9",
+      "packages/agent_core/test/test_provider_failure_attribution.ml": "9ccb73ad15046626d9cbb20a0ad26dd2cac8f9625c2d00003604198fe5140c04",
+      "packages/agent_core/test/test_provider_runtime_binding.ml": "a5c0675df892b5951e292f72773112f3df45c3e8e904e982d8522ff3f8e7be3d"
+    },
+    "818c01e5f6dce6c2806d7cdcb9cb71f04076718e": {
+      "packages/agent_core/lib/binding_identity.ml": "f9fc624ef95ed4a9d113cc952f492dbd110bb3c1ba90927c4f230584b4956586",
+      "packages/agent_core/lib/binding_identity.mli": "a25a24db2e7fa22822c5abd77470fc35b6a33994cc5807a39f684a34837b3cf4",
+      "packages/agent_core/lib/llm_provider/provider_config.ml": "5f8926b61b8ae56b73cb9806565d83b51ffbae1c70d567b45b52d455385edb9e",
+      "packages/agent_core/lib/llm_provider/provider_config.mli": "9c7f735043d44752aaab10eed5887a7fb79dd923d842eb1444440fc9ea5a4934",
+      "packages/agent_core/lib/provider_runtime_binding.ml": "0fc5624862cbd6dc7264fc5f524454580324a63b779e4c9ae9bb5a9a0ae0ebc8",
+      "packages/agent_core/lib/provider_runtime_binding.mli": "adf9c9c0d391e9f26d25abdf83854853883d505a05716e72ed5913774ad398d9",
+      "packages/agent_core/test/test_provider_failure_attribution.ml": "9ccb73ad15046626d9cbb20a0ad26dd2cac8f9625c2d00003604198fe5140c04",
+      "packages/agent_core/test/test_provider_runtime_binding.ml": "a5c0675df892b5951e292f72773112f3df45c3e8e904e982d8522ff3f8e7be3d"
+    }
+  },
+  "captures": [
+    {
+      "path": "baseline-41259248934-decoded.log",
+      "bytes": 88014,
+      "sha256": "9007e7af86b3bf3eb6dbcad731874215148193cdd6f8290afb974351c5d794e7",
+      "retained": false
+    },
+    {
+      "path": "baseline-41259248934-selected.txt",
+      "bytes": 8448,
+      "sha256": "20f2476146d463b1b0f4984da32ba61980f63b77011c1a1796370d85c8415725",
+      "retained": true
+    },
+    {
+      "path": "corrected-41259487017-decoded.log",
+      "bytes": 97421,
+      "sha256": "74cc777afb3c0f7f65f1129c5f120125605c21eda8b4b0f8f7ecdd4115920b97",
+      "retained": false
+    },
+    {
+      "path": "corrected-41259487017-selected.txt",
+      "bytes": 4049,
+      "sha256": "9d862b430ccafebc2069695b4df64c60725a62f21aa044d6f659a65499408ff4",
+      "retained": true
+    },
+    {
+      "path": "final-41259789315-decoded.log",
+      "bytes": 97579,
+      "sha256": "d1c307f237296061acbdc03459a3de89eaf89da56df4368b24445564a7f426d0",
+      "retained": false
+    },
+    {
+      "path": "final-41259789315-selected.txt",
+      "bytes": 4049,
+      "sha256": "9c963fc9ee96d25395fe4aea02c38096e9050bb5aeda4c2909f8cab9f76b5a68",
+      "retained": true
+    }
+  ],
+  "runs": [
+    {
+      "workflow": "Test",
+      "run_id": 41259248934,
+      "head": "98b63fc277c8e129415acb50e6a33e4a9efcb230",
+      "ref": "fix/provider-binding-identity-20261101",
+      "conclusion": "failure",
+      "target_suites": [
+        "packages/agent_core/test/test_provider_failure_attribution"
+      ],
+      "passed": 15,
+      "failed": 3
+    },
+    {
+      "workflow": "Test",
+      "run_id": 41259487017,
+      "head": "2db89555a45998a0b6ed08a0098a7b62b5c55a02",
+      "ref": "fix/provider-binding-identity-20261101",
+      "conclusion": "success",
+      "target_suites": [
+        "packages/agent_core/test/test_provider_failure_attribution",
+        "packages/agent_core/test/test_provider_runtime_binding"
+      ],
+      "passed": 52,
+      "failed": 0
+    },
+    {
+      "workflow": "Test",
+      "run_id": 41259789315,
+      "head": "818c01e5f6dce6c2806d7cdcb9cb71f04076718e",
+      "ref": "fix/provider-binding-identity-20261101",
+      "conclusion": "success",
+      "target_suites": [
+        "packages/agent_core/test/test_provider_failure_attribution",
+        "packages/agent_core/test/test_provider_runtime_binding"
+      ],
+      "passed": 52,
+      "failed": 0
+    }
+  ]
+}

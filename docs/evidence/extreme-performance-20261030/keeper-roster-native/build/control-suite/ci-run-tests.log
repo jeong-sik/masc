@@ -1,0 +1,305 @@
+[targeted] EIO_BACKEND=<unset> timeout=600s per suite
+[targeted] dune build test/test_tui_keeper_control.exe 
+(cd _build/default/lib/sse_event && /home/runner/.opam/ci-5-5-1/bin/atdgen -j -j-std ./sse_event.atd)
+Warning: option "-j-std" is deprecated.
+[targeted] test/test_tui_keeper_control: stanza env MASC_BASE_PATH= ZAI_API_KEY= TYPESAFEAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+[targeted] test/test_tui_keeper_control: start 2026-10-30T10:39:51Z
+::group::{tui-keeper-control}
+Testing `tui-keeper-control'.
+This run has ID `07HA74HN'.
+
+ASSERT idle is counted as idle, not folded into a healthier word
+  [OK]          health_tally                 0   idle is not folded into a he...
+ASSERT the column shows "healthy" somewhere
+ASSERT the column shows "idle" somewhere
+ASSERT the column shows "offline" somewhere
+ASSERT the column shows "absent" somewhere
+ASSERT the column shows "unread" somewhere
+ASSERT every reading is counted exactly once
+  [OK]          health_tally                 1   every counted word appears i...
+ASSERT a paused keeper still reports the health underneath
+ASSERT and still reports being paused
+  [OK]          health_tally                 2   pause does not hide health.
+ASSERT health survives the surface fold
+ASSERT pause is its own field
+ASSERT and does not replace the health
+ASSERT the action is carried
+  [OK]          reading                      0   roster keeps the axes apart.
+ASSERT health is the failing reading
+ASSERT the action is probe
+ASSERT the column says failing
+ASSERT the tally counts it under the same word
+ASSERT a running keeper's actions
+  [OK]          reading                      1   a failing keeper reads failing.
+ASSERT no turn means idle
+ASSERT keeps the typed failure
+ASSERT a turn awaiting the provider is waiting, not idle
+ASSERT a failed attempt in an open turn is not running
+ASSERT streaming remains current activity
+ASSERT tool event remains distinguishable
+  [OK]          reading                      2   failing status separates las...
+ASSERT healthy keeper has no failure status
+ASSERT unknown failure cause stays absent
+ASSERT unobserved current state stays unknown
+  [OK]          reading                      3   healthy is quiet and missing...
+ASSERT null decodes to None
+  [OK]          reading                      4   a null action decodes to None.
+ASSERT the error names the action: keepers[0]: keeper "odd" has unknown next action "reboot_the_universe"
+  [OK]          reading                      5   an unknown action is rejected.
+ASSERT valid keeper retains live actions
+ASSERT broken configuration remains deletable
+ASSERT p never becomes delete
+ASSERT configuration failure is visible
+ASSERT exact error retained
+  [OK]          reading                      6   configuration error isolated...
+ASSERT the rejection names the field
+ASSERT the rejection names the missing field
+  [OK]          reading                      7   a mismatched error identity ...
+ASSERT only confirmed delete without a roster
+ASSERT no primary without a roster
+ASSERT health is unread
+  [OK]          reading                      8   unobserved roster offers con...
+ASSERT boot, then delete
+ASSERT an absent keeper reads absent, not unread
+  [OK]          reading                      9   absent keeper offers boot.
+ASSERT pause survives an absent roster
+ASSERT boot, then delete
+  [OK]          reading                     10   absent and paused reads paused.
+ASSERT pause first
+ASSERT primary is pause
+ASSERT healthy
+  [OK]          reading                     11   live keeper offers pause.
+ASSERT resume first
+ASSERT primary is resume
+  [OK]          reading                     12   live paused keeper offers re...
+ASSERT health reads the same either way
+ASSERT pause does not overwrite it
+ASSERT and pause is still readable
+  [OK]          reading                     13   pause and health are read se...
+ASSERT boot, not pause; delete too
+  [OK]          reading                     14   registered without a fiber o...
+ASSERT roster not read
+ASSERT roster unreadable
+ASSERT absent from the roster
+ASSERT registered without a fiber
+ASSERT a fiber runs it
+ASSERT paused, and its fiber runs
+  [OK]          reading                     15   runs follows the roster and ...
+ASSERT pause
+ASSERT resume
+ASSERT boot
+ASSERT wake
+ASSERT shutdown
+  [OK]          confirmation                 0   only shutdown confirms.
+  [OK]          confirmation                 1   reversible action submits at...
+ASSERT armed keeper
+  [OK]          confirmation                 2   shutdown arms then submits.
+ASSERT re-armed on the keeper under the cursor
+  [OK]          confirmation                 3   arming stays with its keeper.
+  [OK]          confirmation                 4   arming stays with its action.
+  [OK]          confirmation                 5   an action in flight blocks t...
+ASSERT pause is a directive
+ASSERT resume is a directive
+ASSERT wake is a directive
+ASSERT boot is a lifecycle post
+ASSERT shutdown is a lifecycle post
+ASSERT delete is the purge post
+  [OK]          requests                     0   plans name their endpoints.
+ASSERT delete arms before it submits
+ASSERT and a conflict on it is a rejection, not a detour
+ASSERT the body names the keeper
+ASSERT delete takes x
+ASSERT and the arm has a list to name
+  [OK]          requests                     1   delete is confirmed and irre...
+ASSERT confirmed delete available while a fiber runs
+ASSERT also for a paused lane
+ASSERT also without a roster; server resolves ownership
+ASSERT offered once the fiber is gone
+ASSERT the toggle key still means boot
+  [OK]          requests                     2   delete is not offered to a l...
+ASSERT resume then boot
+ASSERT pause
+ASSERT resume
+ASSERT shutdown
+ASSERT wake
+  [OK]          requests                     3   boot recovers a paused owner.
+ASSERT directive binds both workspace paths
+ASSERT action
+ASSERT operation id
+  [OK]          requests                     4   resume body carries the oper...
+ASSERT directive binds both workspace paths
+ASSERT no operation id
+  [OK]          requests                     5   other directives omit the op...
+ASSERT stable within an attempt
+ASSERT distinct across attempts
+ASSERT distinct across keepers
+  [OK]          requests                     6   operation id is per attempt.
+ASSERT no bearer is named absent
+ASSERT no bearer is not called refused
+ASSERT a sent bearer is named refused
+ASSERT a sent bearer is not called absent
+ASSERT both name the command that mints one
+ASSERT both keep the surface's own subject
+ASSERT an expired bearer is said to have expired
+ASSERT a 403 without an auth code keeps the server's words
+ASSERT and says the server answered with a 403
+ASSERT an unreachable route keeps its own detail
+ASSERT an unreachable route blames no credential
+ASSERT an unreachable route keeps its own detail
+ASSERT an unreachable route blames no credential
+  [OK]          refusal                      0   absent and rejected credenti...
+ASSERT nothing observed
+ASSERT ten exist
+  [OK]          roster completeness          0   a roster short of its total ...
+ASSERT unread, not offline
+ASSERT only deletion on an unread keeper
+  [OK]          roster completeness          1   a missing row reads unread, ...
+ASSERT the row it did return is kept
+  [OK]          roster completeness          2   a clamped roster is partial.
+ASSERT the observed keeper reports its health
+ASSERT and it can be paused
+  [OK]          roster completeness          3   a partial roster still confi...
+ASSERT one row
+ASSERT a name a complete roster omits is absent
+  [OK]          roster completeness          4   a full roster is complete.
+ASSERT first runtime supplies the reading
+ASSERT a later stopped duplicate cannot offer boot
+  [OK]          roster completeness          5   duplicate runtime preserves ...
+ASSERT first source error is preserved
+ASSERT an invalid runtime cannot authorize lifecycle changes
+  [OK]          roster completeness          6   first error overrides a live...
+ASSERT a new unread observation borrows no old runtime
+ASSERT unconfirmed presence cannot offer boot or live control
+ASSERT a new unread observation borrows no old runtime
+ASSERT unconfirmed presence cannot offer boot or live control
+ASSERT the previous value still belongs to its original observation
+  [OK]          roster completeness          7   replacement withdraws old li...
+ASSERT durable operation retained
+  [OK]          responses                    0   purge binds exact operation.
+ASSERT not already live
+  [OK]          responses                    1   a success is accepted.
+ASSERT already live
+  [OK]          responses                    2   already-live is carried.
+ASSERT detail is the server's
+  [OK]          responses                    3   409 is its own outcome.
+ASSERT status
+ASSERT detail is the server's error
+  [OK]          responses                    4   rejection prose stays a reje...
+ASSERT status
+ASSERT text survives
+  [OK]          responses                    5   non-JSON error keeps its text.
+ASSERT status stands in
+  [OK]          responses                    6   empty error body names the s...
+ASSERT canonical server trace
+ASSERT public roster never invents activity
+ASSERT invalid identity is explicit
+ASSERT original identity failure survives
+ASSERT invalid identity cannot bind events
+ASSERT named failure remains readable
+ASSERT valid correlation survives beside failure
+ASSERT failure not hidden by valid correlation
+ASSERT independently valid lifecycle remains actionable
+ASSERT invalid identity is explicit
+ASSERT original identity failure survives
+ASSERT invalid identity cannot bind events
+ASSERT named failure remains readable
+ASSERT valid correlation survives beside failure
+ASSERT failure not hidden by valid correlation
+ASSERT independently valid lifecycle remains actionable
+ASSERT invalid identity is explicit
+ASSERT original identity failure survives
+ASSERT invalid identity cannot bind events
+ASSERT named failure remains readable
+ASSERT valid correlation survives beside failure
+ASSERT failure not hidden by valid correlation
+ASSERT independently valid lifecycle remains actionable
+  [OK]          roster                       0   remote identity failures pre...
+ASSERT each row keeps its own declaration
+  [OK]          roster                       1   the sandbox profile survives...
+ASSERT actual server gear survives
+ASSERT portrait failure does not discard Keeper
+ASSERT malformed portrait is never synthesized from name
+ASSERT malformed portrait is never synthesized from name
+ASSERT malformed portrait is never synthesized from name
+ASSERT missing snapshot rejected
+  [OK]          roster                       2   server equipment required; f...
+ASSERT wallet is not rounded through float
+ASSERT supply exceeds machine integer without loss
+ASSERT roster keeps the exact account revision
+ASSERT currency failure is visible
+ASSERT currency failure preserves live Keeper actions
+ASSERT currency failure withdraws every wallet
+ASSERT currency failure is visible
+ASSERT currency failure preserves live Keeper actions
+ASSERT currency failure withdraws every wallet
+ASSERT currency failure is visible
+ASSERT currency failure preserves live Keeper actions
+ASSERT currency failure withdraws every wallet
+ASSERT currency failure is visible
+ASSERT currency failure preserves live Keeper actions
+ASSERT currency failure withdraws every wallet
+ASSERT currency failure is visible
+ASSERT currency failure preserves live Keeper actions
+ASSERT currency failure withdraws every wallet
+ASSERT currency failure is visible
+ASSERT currency failure preserves live Keeper actions
+ASSERT currency failure withdraws every wallet
+ASSERT currency failure is visible
+ASSERT currency failure preserves live Keeper actions
+ASSERT currency failure withdraws every wallet
+ASSERT currency failure is visible
+ASSERT currency failure preserves live Keeper actions
+ASSERT currency failure withdraws every wallet
+ASSERT currency failure is visible
+ASSERT currency failure preserves live Keeper actions
+ASSERT currency failure withdraws every wallet
+ASSERT currency failure is visible
+ASSERT currency failure preserves live Keeper actions
+ASSERT currency failure withdraws every wallet
+ASSERT currency failure is visible
+ASSERT currency failure preserves live Keeper actions
+ASSERT currency failure withdraws every wallet
+ASSERT failure survives
+  [OK]          roster                       3   Candle exact amounts and env...
+ASSERT canonical ready revision decoded
+ASSERT disabled revision decoded without balance
+ASSERT null authorizes only observed Off
+ASSERT invalid authority reported independently
+ASSERT invalid authority retains lifecycle controls
+ASSERT invalid authority reported independently
+ASSERT invalid authority retains lifecycle controls
+ASSERT invalid authority reported independently
+ASSERT invalid authority retains lifecycle controls
+ASSERT invalid authority reported independently
+ASSERT invalid authority retains lifecycle controls
+ASSERT invalid authority reported independently
+ASSERT invalid authority retains lifecycle controls
+  [OK]          roster                       4   Item revision hints preserve...
+ASSERT the pause reading is per row
+ASSERT and the phase agrees on both, which is the point
+  [OK]          roster                       5   paused stays apart from phase.
+ASSERT and the failure names the field
+  [OK]          roster                       6   a row without a sandbox prof...
+ASSERT two rows
+ASSERT not truncated
+ASSERT total
+ASSERT names in order
+ASSERT health parsed
+ASSERT phase parsed
+  [OK]          roster                       7   rows decode in order.
+ASSERT error names the health
+  [OK]          roster                       8   unknown health is rejected.
+ASSERT error names keeper and phase
+  [OK]          roster                       9   unknown phase is rejected.
+ASSERT only observed runtime rows survive
+ASSERT missing metadata stays an error
+ASSERT healthy row retained
+  [OK]          roster                      10   an error row decodes without...
+ASSERT healthy Keeper remains visible
+ASSERT producer error retained verbatim
+  [OK]          roster                      11   actual producer error stays ...
+  [OK]          roster                      12   present unknown health on an...
+
+Test Successful in 0.002s. 61 tests run.
+::endgroup::
+[targeted] test/test_tui_keeper_control: OK in 0s

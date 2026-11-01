@@ -1,0 +1,127 @@
+{
+  "actual_model_calls": 60,
+  "max_provider_requests_in_flight": 30,
+  "per_keeper_sequences": {
+    "scale-keeper-0000": [
+      1,
+      2
+    ],
+    "scale-keeper-0001": [
+      1,
+      2
+    ],
+    "scale-keeper-0002": [
+      1,
+      2
+    ],
+    "scale-keeper-0003": [
+      1,
+      2
+    ],
+    "scale-keeper-0004": [
+      1,
+      2
+    ],
+    "scale-keeper-0005": [
+      1,
+      2
+    ],
+    "scale-keeper-0006": [
+      1,
+      2
+    ],
+    "scale-keeper-0007": [
+      1,
+      2
+    ],
+    "scale-keeper-0008": [
+      1,
+      2
+    ],
+    "scale-keeper-0009": [
+      1,
+      2
+    ],
+    "scale-keeper-0010": [
+      1,
+      2
+    ],
+    "scale-keeper-0011": [
+      1,
+      2
+    ],
+    "scale-keeper-0012": [
+      1,
+      2
+    ],
+    "scale-keeper-0013": [
+      1,
+      2
+    ],
+    "scale-keeper-0014": [
+      1,
+      2
+    ],
+    "scale-keeper-0015": [
+      1,
+      2
+    ],
+    "scale-keeper-0016": [
+      1,
+      2
+    ],
+    "scale-keeper-0017": [
+      1,
+      2
+    ],
+    "scale-keeper-0018": [
+      1,
+      2
+    ],
+    "scale-keeper-0019": [
+      1,
+      2
+    ],
+    "scale-keeper-0020": [
+      1,
+      2
+    ],
+    "scale-keeper-0021": [
+      1,
+      2
+    ],
+    "scale-keeper-0022": [
+      1,
+      2
+    ],
+    "scale-keeper-0023": [
+      1,
+      2
+    ],
+    "scale-keeper-0024": [
+      1,
+      2
+    ],
+    "scale-keeper-0025": [
+      1,
+      2
+    ],
+    "scale-keeper-0026": [
+      1,
+      2
+    ],
+    "scale-keeper-0027": [
+      1,
+      2
+    ],
+    "scale-keeper-0028": [
+      1,
+      2
+    ],
+    "scale-keeper-0029": [
+      1,
+      2
+    ]
+  },
+  "errors": []
+}

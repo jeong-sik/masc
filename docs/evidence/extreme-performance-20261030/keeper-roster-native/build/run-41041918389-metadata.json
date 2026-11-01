@@ -1,0 +1,277 @@
+{
+  "read_at_unix": 1793357183.361693,
+  "artifacts": {
+    "total_count": 1,
+    "artifacts": [
+      {
+        "id": 12970781800,
+        "node_id": "MDg6QXJ0aWZhY3QxMjk3MDc4MTgwMA==",
+        "name": "suite-runner-log",
+        "size_in_bytes": 3656,
+        "url": "https://api.github.com/repos/jeong-sik/masc/actions/artifacts/12970781800",
+        "archive_download_url": "https://api.github.com/repos/jeong-sik/masc/actions/artifacts/12970781800/zip",
+        "expired": false,
+        "digest": "sha256:55144411cbb8c52755ae74fed65198ce95acc88f72956f95700f1ef47ff1a3e2",
+        "created_at": "2026-10-30T10:39:53Z",
+        "updated_at": "2026-10-30T10:39:53Z",
+        "expires_at": "2026-11-13T10:39:52Z",
+        "workflow_run": {
+          "id": 41041918389,
+          "repository_id": 1136640865,
+          "head_repository_id": 1136640865,
+          "head_branch": "perf/tui-roster-prepared-reading-20261030",
+          "head_sha": "c275c5e18bdf0977ec3cfdd33e16bd65d3367236"
+        }
+      }
+    ]
+  },
+  "jobs": {
+    "total_count": 1,
+    "jobs": [
+      {
+        "id": 124016540316,
+        "run_id": 41041918389,
+        "workflow_name": "Test",
+        "head_branch": "perf/tui-roster-prepared-reading-20261030",
+        "run_url": "https://api.github.com/repos/jeong-sik/masc/actions/runs/41041918389",
+        "run_attempt": 1,
+        "node_id": "CR_kwDOQ7_DYc8AAAAc3_Y6nA",
+        "head_sha": "c275c5e18bdf0977ec3cfdd33e16bd65d3367236",
+        "url": "https://api.github.com/repos/jeong-sik/masc/actions/jobs/124016540316",
+        "html_url": "https://github.com/jeong-sik/masc/actions/runs/41041918389/job/124016540316",
+        "status": "completed",
+        "conclusion": "success",
+        "created_at": "2026-10-30T10:36:00Z",
+        "started_at": "2026-10-30T10:36:02Z",
+        "completed_at": "2026-10-30T10:39:56Z",
+        "name": "test suite",
+        "steps": [
+          {
+            "name": "Set up job",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 1,
+            "started_at": "2026-10-30T10:36:03Z",
+            "completed_at": "2026-10-30T10:36:06Z"
+          },
+          {
+            "name": "Require explicit minimal suites",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 2,
+            "started_at": "2026-10-30T10:36:06Z",
+            "completed_at": "2026-10-30T10:36:06Z"
+          },
+          {
+            "name": "Free disk space",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 3,
+            "started_at": "2026-10-30T10:36:06Z",
+            "completed_at": "2026-10-30T10:36:06Z"
+          },
+          {
+            "name": "Checkout",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 4,
+            "started_at": "2026-10-30T10:36:06Z",
+            "completed_at": "2026-10-30T10:36:19Z"
+          },
+          {
+            "name": "Setup OCaml toolchain",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 5,
+            "started_at": "2026-10-30T10:36:19Z",
+            "completed_at": "2026-10-30T10:36:45Z"
+          },
+          {
+            "name": "Pin minimal OCaml dependencies",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 6,
+            "started_at": "2026-10-30T10:36:45Z",
+            "completed_at": "2026-10-30T10:37:04Z"
+          },
+          {
+            "name": "Pin external OCaml dependencies",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 7,
+            "started_at": "2026-10-30T10:37:04Z",
+            "completed_at": "2026-10-30T10:37:04Z"
+          },
+          {
+            "name": "Install system and OCaml dependencies",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 8,
+            "started_at": "2026-10-30T10:37:04Z",
+            "completed_at": "2026-10-30T10:37:30Z"
+          },
+          {
+            "name": "Install native media verification tools",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 9,
+            "started_at": "2026-10-30T10:37:30Z",
+            "completed_at": "2026-10-30T10:37:30Z"
+          },
+          {
+            "name": "Install native media tools for selected minimal verifier checks",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 10,
+            "started_at": "2026-10-30T10:37:30Z",
+            "completed_at": "2026-10-30T10:37:30Z"
+          },
+          {
+            "name": "Prepare managed presentation verification inputs",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 11,
+            "started_at": "2026-10-30T10:37:30Z",
+            "completed_at": "2026-10-30T10:37:30Z"
+          },
+          {
+            "name": "Make pnpm available to the suites that read a dashboard PATH",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 12,
+            "started_at": "2026-10-30T10:37:30Z",
+            "completed_at": "2026-10-30T10:37:30Z"
+          },
+          {
+            "name": "Prepare static shim compiler outside the test workers",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 13,
+            "started_at": "2026-10-30T10:37:30Z",
+            "completed_at": "2026-10-30T10:37:30Z"
+          },
+          {
+            "name": "Set up image cache for targeted suites",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 14,
+            "started_at": "2026-10-30T10:37:30Z",
+            "completed_at": "2026-10-30T10:37:30Z"
+          },
+          {
+            "name": "Prepare Keeper sandbox image",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 15,
+            "started_at": "2026-10-30T10:37:30Z",
+            "completed_at": "2026-10-30T10:37:30Z"
+          },
+          {
+            "name": "Drop the image build cache the suite never reads",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 16,
+            "started_at": "2026-10-30T10:37:30Z",
+            "completed_at": "2026-10-30T10:37:30Z"
+          },
+          {
+            "name": "Test",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 17,
+            "started_at": "2026-10-30T10:37:30Z",
+            "completed_at": "2026-10-30T10:39:51Z"
+          },
+          {
+            "name": "Upload equipped portrait HTTP evidence",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 18,
+            "started_at": "2026-10-30T10:39:51Z",
+            "completed_at": "2026-10-30T10:39:52Z"
+          },
+          {
+            "name": "Upload the full Dune suite log",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 19,
+            "started_at": "2026-10-30T10:39:52Z",
+            "completed_at": "2026-10-30T10:39:52Z"
+          },
+          {
+            "name": "Upload the Dune suite timing",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 20,
+            "started_at": "2026-10-30T10:39:52Z",
+            "completed_at": "2026-10-30T10:39:52Z"
+          },
+          {
+            "name": "Exercise creative artifacts in the built Keeper image",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 21,
+            "started_at": "2026-10-30T10:39:52Z",
+            "completed_at": "2026-10-30T10:39:52Z"
+          },
+          {
+            "name": "Upload creative artifact proof",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 22,
+            "started_at": "2026-10-30T10:39:52Z",
+            "completed_at": "2026-10-30T10:39:52Z"
+          },
+          {
+            "name": "Upload the suite runner log",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 23,
+            "started_at": "2026-10-30T10:39:52Z",
+            "completed_at": "2026-10-30T10:39:53Z"
+          },
+          {
+            "name": "File the scheduled failure as an issue",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 24,
+            "started_at": "2026-10-30T10:39:53Z",
+            "completed_at": "2026-10-30T10:39:53Z"
+          },
+          {
+            "name": "Post Setup OCaml toolchain",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 47,
+            "started_at": "2026-10-30T10:39:53Z",
+            "completed_at": "2026-10-30T10:39:53Z"
+          },
+          {
+            "name": "Post Checkout",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 48,
+            "started_at": "2026-10-30T10:39:53Z",
+            "completed_at": "2026-10-30T10:39:54Z"
+          },
+          {
+            "name": "Complete job",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 49,
+            "started_at": "2026-10-30T10:39:54Z",
+            "completed_at": "2026-10-30T10:39:54Z"
+          }
+        ],
+        "check_run_url": "https://api.github.com/repos/jeong-sik/masc/check-runs/124016540316",
+        "labels": [
+          "ubuntu-24.04"
+        ],
+        "runner_id": 1001704875,
+        "runner_name": "GitHub Actions 1001704875",
+        "runner_group_id": 0,
+        "runner_group_name": "GitHub Actions"
+      }
+    ]
+  }
+}

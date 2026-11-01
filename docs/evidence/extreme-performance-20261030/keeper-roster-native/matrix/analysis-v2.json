@@ -1,0 +1,768 @@
+{
+  "scope": "Six-arm native workload matrix. The invoked controller path applied source/resource checks before expansion; current raw reports are requalified here. Controller/qualifier bytes were not independently pinned at invocation; listed support hashes are read at analysis time. Failed workload arms retain timings as diagnostics only. One arm per source/population, uncontrolled shared host, differing build wrappers/dependency provenance. No causal/stable fleet speedup, applied UI cardinality/key/physical paint or 100us completion claim.",
+  "matrix_passed": false,
+  "quantile": "sorted[int(q*(n-1)+0.5)] over exact raw integer nanoseconds",
+  "matrix_execution_sha256": "ae4cdd556052a31c3d1cb3e2e3c2bd581219f9033159f236cf1cf65119e18842",
+  "analysis_source_sha256": "3d38436638829f4e4144210a0919b6d0005f0848564edfe7bacf08f2f549f47f",
+  "support_read_after_sha256": {
+    "run.py": "7bfc6d0b60d9091506ea699db3ee9b1c94ca7b977106d38c61ec0bec815d8685",
+    "qualify.py": "41367c25229bd992ef46359c58c9e5bc01fb465d8493dd47576439045526fb7b",
+    "probe/tui_observer.py": "7ffa5657c998c9487f27feaee3b038b9ed77aa1459fce72d4e31ccb6b7cc3113"
+  },
+  "records": [
+    {
+      "case": "owners-2-control",
+      "population": 2,
+      "variant": "control",
+      "source": "5de2eb7684f0e4fecee1c48caef50010c2f951fa",
+      "returncode": 0,
+      "qualification": {
+        "scope": "Direct owned resource receipts and recorded source/digests only; no global host quiescence, descendant absence, applied key, UI row cardinality or physical paint claim.",
+        "cleanup_ok": true,
+        "next_arm_safe": true,
+        "eligible": true,
+        "checks": {
+          "expected_pins_valid": true,
+          "qualifier_parser_source": true,
+          "main_cleanup_complete": true,
+          "no_cleanup_errors": true,
+          "cleanup_receipts_readable": true,
+          "fallback_consistent": true,
+          "failure_receipts_match_exit": true,
+          "execution_output_binding": true,
+          "owned_base_binding": true,
+          "source_identity": true,
+          "server_digest": true,
+          "owned_process_binding": true,
+          "tui_digest": true,
+          "server_before_identity": true,
+          "server_after_identity": true,
+          "same_runtime": true,
+          "probe_identity": true,
+          "tui_exit": true,
+          "capture_record": true,
+          "current_native_report_consistent": true,
+          "captured_probe_copies_match": true,
+          "list_builds_observed": true,
+          "workload": true,
+          "required_inputs_readable": true
+        },
+        "missing_or_invalid": [],
+        "native_list_builds": 71,
+        "inputs_sha256": {
+          "cleanup.json": "642f0e656387c5d6004d4202f9b2fb8e4a63a561466c4d1019c221aa2accbe33",
+          "identity.json": "60b4db097cf75a6e3a19c93b43ab6c5523977150754ad1cf1fde64505433ac84",
+          "owned-process.json": "5090ce3f3d032822a6dc1efdc6d03a0ba9616b0f14b0dee0c16f105d2c69cd9d",
+          "tui-observer/observation.json": "5f309132be90d937ea4949a732e02ce38ccaaafd4f5d63610c53b58de8eb67f7",
+          "summary.json": "3f177fae7989cadb010aaedd78708080bbf8cde86a1786841cc5e30f5199eef7",
+          "tui-observer/frame-timing.txt": "9a40b985ee959d6742fe9470846d593d2ce62f8b7881a39a90ddde4e00febebf",
+          "keeper_scale_session.py": "2275c38094884418a88407aaecf9f40a2326e67535796df98cc4a1ba8683efe6",
+          "tui_observer.py": "7ffa5657c998c9487f27feaee3b038b9ed77aa1459fce72d4e31ccb6b7cc3113",
+          "keeper_scale_trace.py": "3dd78330c4922fd058b46644df8ea21dace0f8698ceb3f502c16b8add563b2dd"
+        }
+      },
+      "predecessors_safe": true,
+      "sequential_execution_receipts": true,
+      "arm_eligible": true,
+      "native_list_build": {
+        "samples": 71,
+        "p50_ns": 323917,
+        "p95_ns": 1161458,
+        "max_ns": 3719041
+      },
+      "native_all_present": {
+        "samples": 89,
+        "p50_ns": 22041,
+        "p95_ns": 459000,
+        "max_ns": 3142375
+      },
+      "whole_tui_cpu_seconds": 0.534493,
+      "whole_tui_wall_seconds": 8.392580083,
+      "workload_summary": {
+        "keepers": 2,
+        "messages": 4,
+        "succeeded_operations": 4,
+        "actual_model_calls": 4,
+        "max_provider_requests_in_flight": 2,
+        "latency_samples": 155,
+        "valid_latency_samples": 155,
+        "scope": "Pinned-native-source real Keeper turns with a loopback scripted text-only model, durable queued operations and offline SQLite reread. No guest/tool execution, browser/TUI or production throughput proof.",
+        "latency_by_phase": {
+          "submitting_model_held": {
+            "samples": 7,
+            "valid": 7,
+            "failures": 0,
+            "p50_ms": 3.891084,
+            "p95_ms": 15.822208,
+            "max_ms": 15.822208
+          },
+          "model_held_queue_observation": {
+            "samples": 103,
+            "valid": 103,
+            "failures": 0,
+            "p50_ms": 2.313541,
+            "p95_ms": 9.385083,
+            "max_ms": 33.48675
+          },
+          "running_model_released": {
+            "samples": 35,
+            "valid": 35,
+            "failures": 0,
+            "p50_ms": 2.801584,
+            "p95_ms": 17.168833,
+            "max_ms": 41.233209
+          },
+          "settled": {
+            "samples": 10,
+            "valid": 10,
+            "failures": 0,
+            "p50_ms": 3.233458,
+            "p95_ms": 13.472334,
+            "max_ms": 13.472334
+          }
+        },
+        "rejected_429_count": 0,
+        "rate_limit_wait_s": 0,
+        "rate_limit_wait_by_source_s": {},
+        "denied_read_only_inventory_attempts": 2,
+        "unexpected_guest_command_attempts": 0
+      },
+      "failure": null,
+      "loadavg_before": [
+        33.64794921875,
+        28.6533203125,
+        27.90966796875
+      ],
+      "loadavg_after": [
+        47.09619140625,
+        32.859375,
+        29.4931640625
+      ],
+      "cpu_count": 16,
+      "frame_report_sha256": "9a40b985ee959d6742fe9470846d593d2ce62f8b7881a39a90ddde4e00febebf",
+      "pair_comparison_eligible": true
+    },
+    {
+      "case": "owners-2-candidate",
+      "population": 2,
+      "variant": "candidate",
+      "source": "c275c5e18bdf0977ec3cfdd33e16bd65d3367236",
+      "returncode": 0,
+      "qualification": {
+        "scope": "Direct owned resource receipts and recorded source/digests only; no global host quiescence, descendant absence, applied key, UI row cardinality or physical paint claim.",
+        "cleanup_ok": true,
+        "next_arm_safe": true,
+        "eligible": true,
+        "checks": {
+          "expected_pins_valid": true,
+          "qualifier_parser_source": true,
+          "main_cleanup_complete": true,
+          "no_cleanup_errors": true,
+          "cleanup_receipts_readable": true,
+          "fallback_consistent": true,
+          "failure_receipts_match_exit": true,
+          "execution_output_binding": true,
+          "owned_base_binding": true,
+          "source_identity": true,
+          "server_digest": true,
+          "owned_process_binding": true,
+          "tui_digest": true,
+          "server_before_identity": true,
+          "server_after_identity": true,
+          "same_runtime": true,
+          "probe_identity": true,
+          "tui_exit": true,
+          "capture_record": true,
+          "current_native_report_consistent": true,
+          "captured_probe_copies_match": true,
+          "list_builds_observed": true,
+          "workload": true,
+          "required_inputs_readable": true
+        },
+        "missing_or_invalid": [],
+        "native_list_builds": 76,
+        "inputs_sha256": {
+          "cleanup.json": "f043616cdfbfa595962a1b33e12e147705cb7e643720f16bb9f9921e41a13761",
+          "identity.json": "3210c6c3a2e2a9884eb37abf519b9ee9cb495fc1c543b61a8c2ee5ca1f6200f1",
+          "owned-process.json": "21f165095f601117f9bef5f2280d203855745620b5caaf0709fd9469cae5150b",
+          "tui-observer/observation.json": "b9737b5032e4a25ec6ed424a016e2000b39a94b58e50838a803ba908413bce98",
+          "summary.json": "a67df641cb569271dac67258f5d7dde3c5e8d1cfe601e2dc944fabc50b50ed02",
+          "tui-observer/frame-timing.txt": "dcf07f28a6da163cc6fe3663d47d0e3159460a5bdbdb533cc706c5a04070d493",
+          "keeper_scale_session.py": "2275c38094884418a88407aaecf9f40a2326e67535796df98cc4a1ba8683efe6",
+          "tui_observer.py": "7ffa5657c998c9487f27feaee3b038b9ed77aa1459fce72d4e31ccb6b7cc3113",
+          "keeper_scale_trace.py": "3dd78330c4922fd058b46644df8ea21dace0f8698ceb3f502c16b8add563b2dd"
+        }
+      },
+      "predecessors_safe": true,
+      "sequential_execution_receipts": true,
+      "arm_eligible": true,
+      "native_list_build": {
+        "samples": 76,
+        "p50_ns": 302833,
+        "p95_ns": 667958,
+        "max_ns": 1337917
+      },
+      "native_all_present": {
+        "samples": 90,
+        "p50_ns": 20792,
+        "p95_ns": 290875,
+        "max_ns": 17646333
+      },
+      "whole_tui_cpu_seconds": 0.47423000000000004,
+      "whole_tui_wall_seconds": 8.520029083,
+      "workload_summary": {
+        "keepers": 2,
+        "messages": 4,
+        "succeeded_operations": 4,
+        "actual_model_calls": 4,
+        "max_provider_requests_in_flight": 2,
+        "latency_samples": 134,
+        "valid_latency_samples": 134,
+        "scope": "Pinned-native-source real Keeper turns with a loopback scripted text-only model, durable queued operations and offline SQLite reread. No guest/tool execution, browser/TUI or production throughput proof.",
+        "latency_by_phase": {
+          "submitting_model_held": {
+            "samples": 8,
+            "valid": 8,
+            "failures": 0,
+            "p50_ms": 3.2275,
+            "p95_ms": 14.767292,
+            "max_ms": 14.767292
+          },
+          "model_held_queue_observation": {
+            "samples": 99,
+            "valid": 99,
+            "failures": 0,
+            "p50_ms": 3.020083,
+            "p95_ms": 14.040375,
+            "max_ms": 134.369
+          },
+          "running_model_released": {
+            "samples": 23,
+            "valid": 23,
+            "failures": 0,
+            "p50_ms": 4.889042,
+            "p95_ms": 36.057334,
+            "max_ms": 112.0775
+          },
+          "settled": {
+            "samples": 4,
+            "valid": 4,
+            "failures": 0,
+            "p50_ms": 2.306084,
+            "p95_ms": 4.900375,
+            "max_ms": 4.900375
+          }
+        },
+        "rejected_429_count": 0,
+        "rate_limit_wait_s": 0,
+        "rate_limit_wait_by_source_s": {},
+        "denied_read_only_inventory_attempts": 2,
+        "unexpected_guest_command_attempts": 0
+      },
+      "failure": null,
+      "loadavg_before": [
+        47.09619140625,
+        32.859375,
+        29.4931640625
+      ],
+      "loadavg_after": [
+        53.01220703125,
+        35.18603515625,
+        30.40869140625
+      ],
+      "cpu_count": 16,
+      "frame_report_sha256": "dcf07f28a6da163cc6fe3663d47d0e3159460a5bdbdb533cc706c5a04070d493",
+      "pair_comparison_eligible": true
+    },
+    {
+      "case": "owners-30-candidate",
+      "population": 30,
+      "variant": "candidate",
+      "source": "c275c5e18bdf0977ec3cfdd33e16bd65d3367236",
+      "returncode": 0,
+      "qualification": {
+        "scope": "Direct owned resource receipts and recorded source/digests only; no global host quiescence, descendant absence, applied key, UI row cardinality or physical paint claim.",
+        "cleanup_ok": true,
+        "next_arm_safe": true,
+        "eligible": true,
+        "checks": {
+          "expected_pins_valid": true,
+          "qualifier_parser_source": true,
+          "main_cleanup_complete": true,
+          "no_cleanup_errors": true,
+          "cleanup_receipts_readable": true,
+          "fallback_consistent": true,
+          "failure_receipts_match_exit": true,
+          "execution_output_binding": true,
+          "owned_base_binding": true,
+          "source_identity": true,
+          "server_digest": true,
+          "owned_process_binding": true,
+          "tui_digest": true,
+          "server_before_identity": true,
+          "server_after_identity": true,
+          "same_runtime": true,
+          "probe_identity": true,
+          "tui_exit": true,
+          "capture_record": true,
+          "current_native_report_consistent": true,
+          "captured_probe_copies_match": true,
+          "list_builds_observed": true,
+          "workload": true,
+          "required_inputs_readable": true
+        },
+        "missing_or_invalid": [],
+        "native_list_builds": 62,
+        "inputs_sha256": {
+          "cleanup.json": "43c4740f90777a4485423ebaa1a70941b99c109f26eb6e121b6eb8198392eadf",
+          "identity.json": "8538a35e23d91ba76a9f53563a97c61c505e4a47f74c0d355bce6a4d319ac505",
+          "owned-process.json": "0af48c0f37495322941028d34c0ed864c9711ee4ac2f822779c6aa1a799e0796",
+          "tui-observer/observation.json": "a514c6d729ee52cb7094c694e32c17a6fe1cba3311841dd286d51e8472a27217",
+          "summary.json": "dcff3dd3a18da4c4bcb136e1a4c1445213a2be04d7556c2ed237f1e629bf92be",
+          "tui-observer/frame-timing.txt": "3e65e2ef9d011fd4c6397fe8825d82dffbfc9fc3894b6835d1e232c1389204f8",
+          "keeper_scale_session.py": "2275c38094884418a88407aaecf9f40a2326e67535796df98cc4a1ba8683efe6",
+          "tui_observer.py": "7ffa5657c998c9487f27feaee3b038b9ed77aa1459fce72d4e31ccb6b7cc3113",
+          "keeper_scale_trace.py": "3dd78330c4922fd058b46644df8ea21dace0f8698ceb3f502c16b8add563b2dd"
+        }
+      },
+      "predecessors_safe": true,
+      "sequential_execution_receipts": true,
+      "arm_eligible": true,
+      "native_list_build": {
+        "samples": 62,
+        "p50_ns": 846917,
+        "p95_ns": 1648500,
+        "max_ns": 3518416
+      },
+      "native_all_present": {
+        "samples": 75,
+        "p50_ns": 62166,
+        "p95_ns": 254792,
+        "max_ns": 636041
+      },
+      "whole_tui_cpu_seconds": 0.516914,
+      "whole_tui_wall_seconds": 8.289682791,
+      "workload_summary": {
+        "keepers": 30,
+        "messages": 60,
+        "succeeded_operations": 60,
+        "actual_model_calls": 60,
+        "max_provider_requests_in_flight": 30,
+        "latency_samples": 224,
+        "valid_latency_samples": 224,
+        "scope": "Pinned-native-source real Keeper turns with a loopback scripted text-only model, durable queued operations and offline SQLite reread. No guest/tool execution, browser/TUI or production throughput proof.",
+        "latency_by_phase": {
+          "submitting_model_held": {
+            "samples": 30,
+            "valid": 30,
+            "failures": 0,
+            "p50_ms": 2.133542,
+            "p95_ms": 12.304417,
+            "max_ms": 13.994375
+          },
+          "model_held_queue_observation": {
+            "samples": 113,
+            "valid": 113,
+            "failures": 0,
+            "p50_ms": 1.326792,
+            "p95_ms": 2.682875,
+            "max_ms": 6.202167
+          },
+          "running_model_released": {
+            "samples": 80,
+            "valid": 80,
+            "failures": 0,
+            "p50_ms": 6.036,
+            "p95_ms": 22.921209,
+            "max_ms": 293.781333
+          },
+          "settled": {
+            "samples": 1,
+            "valid": 1,
+            "failures": 0,
+            "p50_ms": 0.863375,
+            "p95_ms": 0.863375,
+            "max_ms": 0.863375
+          }
+        },
+        "rejected_429_count": 0,
+        "rate_limit_wait_s": 0,
+        "rate_limit_wait_by_source_s": {},
+        "denied_read_only_inventory_attempts": 2,
+        "unexpected_guest_command_attempts": 0
+      },
+      "failure": null,
+      "loadavg_before": [
+        53.01220703125,
+        35.18603515625,
+        30.40869140625
+      ],
+      "loadavg_after": [
+        57.53515625,
+        38.30322265625,
+        31.7373046875
+      ],
+      "cpu_count": 16,
+      "frame_report_sha256": "3e65e2ef9d011fd4c6397fe8825d82dffbfc9fc3894b6835d1e232c1389204f8",
+      "pair_comparison_eligible": true
+    },
+    {
+      "case": "owners-30-control",
+      "population": 30,
+      "variant": "control",
+      "source": "5de2eb7684f0e4fecee1c48caef50010c2f951fa",
+      "returncode": 0,
+      "qualification": {
+        "scope": "Direct owned resource receipts and recorded source/digests only; no global host quiescence, descendant absence, applied key, UI row cardinality or physical paint claim.",
+        "cleanup_ok": true,
+        "next_arm_safe": true,
+        "eligible": true,
+        "checks": {
+          "expected_pins_valid": true,
+          "qualifier_parser_source": true,
+          "main_cleanup_complete": true,
+          "no_cleanup_errors": true,
+          "cleanup_receipts_readable": true,
+          "fallback_consistent": true,
+          "failure_receipts_match_exit": true,
+          "execution_output_binding": true,
+          "owned_base_binding": true,
+          "source_identity": true,
+          "server_digest": true,
+          "owned_process_binding": true,
+          "tui_digest": true,
+          "server_before_identity": true,
+          "server_after_identity": true,
+          "same_runtime": true,
+          "probe_identity": true,
+          "tui_exit": true,
+          "capture_record": true,
+          "current_native_report_consistent": true,
+          "captured_probe_copies_match": true,
+          "list_builds_observed": true,
+          "workload": true,
+          "required_inputs_readable": true
+        },
+        "missing_or_invalid": [],
+        "native_list_builds": 67,
+        "inputs_sha256": {
+          "cleanup.json": "642ab333d8e21f15d3627a2e063dda0555934fbbf7923f6e592fd390a2da9252",
+          "identity.json": "ca974f9908d723ec42491068bed0716f7de44e6daee62484b4562ad9537044bc",
+          "owned-process.json": "85002ec24e658b5ac2fb6664f245fb816661727ffe59b5ab46d3209f028dd559",
+          "tui-observer/observation.json": "d75facdbc97b5516fa6cbf8e3180cb50d13362460ac135a0ded2b7339f51309e",
+          "summary.json": "c834d6b8e87e3f31042da4f33f021cf588b4bc947aec438f2cf1d0ceb74c84b4",
+          "tui-observer/frame-timing.txt": "3e04b06584b12decd131329d678e9a612b863434af8b8b4f2e3e6d5c94a1d019",
+          "keeper_scale_session.py": "2275c38094884418a88407aaecf9f40a2326e67535796df98cc4a1ba8683efe6",
+          "tui_observer.py": "7ffa5657c998c9487f27feaee3b038b9ed77aa1459fce72d4e31ccb6b7cc3113",
+          "keeper_scale_trace.py": "3dd78330c4922fd058b46644df8ea21dace0f8698ceb3f502c16b8add563b2dd"
+        }
+      },
+      "predecessors_safe": true,
+      "sequential_execution_receipts": true,
+      "arm_eligible": true,
+      "native_list_build": {
+        "samples": 67,
+        "p50_ns": 921167,
+        "p95_ns": 2517000,
+        "max_ns": 6843958
+      },
+      "native_all_present": {
+        "samples": 80,
+        "p50_ns": 92542,
+        "p95_ns": 465583,
+        "max_ns": 2250708
+      },
+      "whole_tui_cpu_seconds": 0.569618,
+      "whole_tui_wall_seconds": 8.27881075,
+      "workload_summary": {
+        "keepers": 30,
+        "messages": 60,
+        "succeeded_operations": 60,
+        "actual_model_calls": 60,
+        "max_provider_requests_in_flight": 30,
+        "latency_samples": 194,
+        "valid_latency_samples": 194,
+        "scope": "Pinned-native-source real Keeper turns with a loopback scripted text-only model, durable queued operations and offline SQLite reread. No guest/tool execution, browser/TUI or production throughput proof.",
+        "latency_by_phase": {
+          "submitting_model_held": {
+            "samples": 19,
+            "valid": 19,
+            "failures": 0,
+            "p50_ms": 1.947167,
+            "p95_ms": 21.596166,
+            "max_ms": 21.596166
+          },
+          "model_held_queue_observation": {
+            "samples": 110,
+            "valid": 110,
+            "failures": 0,
+            "p50_ms": 1.403,
+            "p95_ms": 3.5705,
+            "max_ms": 32.417584
+          },
+          "running_model_released": {
+            "samples": 63,
+            "valid": 63,
+            "failures": 0,
+            "p50_ms": 4.068542,
+            "p95_ms": 25.916417,
+            "max_ms": 40.747083
+          },
+          "settled": {
+            "samples": 2,
+            "valid": 2,
+            "failures": 0,
+            "p50_ms": 0.61575,
+            "p95_ms": 0.762333,
+            "max_ms": 0.762333
+          }
+        },
+        "rejected_429_count": 0,
+        "rate_limit_wait_s": 0,
+        "rate_limit_wait_by_source_s": {},
+        "denied_read_only_inventory_attempts": 2,
+        "unexpected_guest_command_attempts": 0
+      },
+      "failure": null,
+      "loadavg_before": [
+        57.53515625,
+        38.30322265625,
+        31.7373046875
+      ],
+      "loadavg_after": [
+        46.80615234375,
+        37.4892578125,
+        31.6650390625
+      ],
+      "cpu_count": 16,
+      "frame_report_sha256": "3e04b06584b12decd131329d678e9a612b863434af8b8b4f2e3e6d5c94a1d019",
+      "pair_comparison_eligible": true
+    },
+    {
+      "case": "owners-300-control",
+      "population": 300,
+      "variant": "control",
+      "source": "5de2eb7684f0e4fecee1c48caef50010c2f951fa",
+      "returncode": 1,
+      "qualification": {
+        "scope": "Direct owned resource receipts and recorded source/digests only; no global host quiescence, descendant absence, applied key, UI row cardinality or physical paint claim.",
+        "cleanup_ok": true,
+        "next_arm_safe": true,
+        "eligible": false,
+        "checks": {
+          "expected_pins_valid": true,
+          "qualifier_parser_source": true,
+          "main_cleanup_complete": true,
+          "no_cleanup_errors": true,
+          "cleanup_receipts_readable": true,
+          "fallback_consistent": true,
+          "failure_receipts_match_exit": true,
+          "execution_output_binding": true,
+          "owned_base_binding": true,
+          "source_identity": true,
+          "server_digest": true,
+          "owned_process_binding": true,
+          "tui_digest": true,
+          "server_before_identity": true,
+          "server_after_identity": true,
+          "same_runtime": true,
+          "probe_identity": true,
+          "tui_exit": true,
+          "capture_record": true,
+          "current_native_report_consistent": true,
+          "captured_probe_copies_match": true,
+          "list_builds_observed": true,
+          "workload": false,
+          "required_inputs_readable": false
+        },
+        "missing_or_invalid": [
+          "summary.json"
+        ],
+        "native_list_builds": 89,
+        "inputs_sha256": {
+          "cleanup.json": "a2c8e9531556c704d307c80f4612fb590df71be606d593a518a0116e2cca743a",
+          "fallback-cleanup.json": "e4002cdbd41242e7ab4d778fd6ba650f83a944f95331edc1204c933b10e22688",
+          "failure.json": "3045f04525bb812c1b1976a2f18bbc736ae8d62741c142ced5a7339c4a6034af",
+          "identity.json": "86dccb6b54d473e95311ad0e83453853dcb28853cd0d57cc90c570d7f1b1338b",
+          "owned-process.json": "c8a1e233a5b296c514e1be7c9a19ed8de311b725a84650a0f9a89b9e6fdf12a5",
+          "tui-observer/observation.json": "c4291e11887f6cdffa2656ffe14d481d1beeb7491a6adddd9390cbad5a06088b",
+          "tui-observer/frame-timing.txt": "26341813df71c84a6155f87aa07e8e98454beffd29b9309a84dc89090f756576",
+          "keeper_scale_session.py": "2275c38094884418a88407aaecf9f40a2326e67535796df98cc4a1ba8683efe6",
+          "tui_observer.py": "7ffa5657c998c9487f27feaee3b038b9ed77aa1459fce72d4e31ccb6b7cc3113",
+          "keeper_scale_trace.py": "3dd78330c4922fd058b46644df8ea21dace0f8698ceb3f502c16b8add563b2dd"
+        }
+      },
+      "predecessors_safe": true,
+      "sequential_execution_receipts": true,
+      "arm_eligible": false,
+      "native_list_build": {
+        "samples": 89,
+        "p50_ns": 4298334,
+        "p95_ns": 8017917,
+        "max_ns": 34619959
+      },
+      "native_all_present": {
+        "samples": 98,
+        "p50_ns": 46042,
+        "p95_ns": 3140833,
+        "max_ns": 20074708
+      },
+      "whole_tui_cpu_seconds": 1.750593,
+      "whole_tui_wall_seconds": 8.482854583,
+      "workload_summary": null,
+      "failure": {
+        "type": "ProbeError",
+        "message": "read-only operation observation deadline; owner still live",
+        "notes": [],
+        "cleanup_errors": []
+      },
+      "loadavg_before": [
+        46.80615234375,
+        37.4892578125,
+        31.6650390625
+      ],
+      "loadavg_after": [
+        60.484375,
+        50.7060546875,
+        38.98486328125
+      ],
+      "cpu_count": 16,
+      "frame_report_sha256": "26341813df71c84a6155f87aa07e8e98454beffd29b9309a84dc89090f756576",
+      "pair_comparison_eligible": false
+    },
+    {
+      "case": "owners-300-candidate",
+      "population": 300,
+      "variant": "candidate",
+      "source": "c275c5e18bdf0977ec3cfdd33e16bd65d3367236",
+      "returncode": 0,
+      "qualification": {
+        "scope": "Direct owned resource receipts and recorded source/digests only; no global host quiescence, descendant absence, applied key, UI row cardinality or physical paint claim.",
+        "cleanup_ok": true,
+        "next_arm_safe": true,
+        "eligible": true,
+        "checks": {
+          "expected_pins_valid": true,
+          "qualifier_parser_source": true,
+          "main_cleanup_complete": true,
+          "no_cleanup_errors": true,
+          "cleanup_receipts_readable": true,
+          "fallback_consistent": true,
+          "failure_receipts_match_exit": true,
+          "execution_output_binding": true,
+          "owned_base_binding": true,
+          "source_identity": true,
+          "server_digest": true,
+          "owned_process_binding": true,
+          "tui_digest": true,
+          "server_before_identity": true,
+          "server_after_identity": true,
+          "same_runtime": true,
+          "probe_identity": true,
+          "tui_exit": true,
+          "capture_record": true,
+          "current_native_report_consistent": true,
+          "captured_probe_copies_match": true,
+          "list_builds_observed": true,
+          "workload": true,
+          "required_inputs_readable": true
+        },
+        "missing_or_invalid": [],
+        "native_list_builds": 85,
+        "inputs_sha256": {
+          "cleanup.json": "79886356c3bb03feb98bf00b6ef0f35b842b81e36efe32a62c9c540fe45ee310",
+          "identity.json": "8b579b130fd0ddb1c3450ca41a54de42076eb390f4551fc9b29c4b9dacc2c763",
+          "owned-process.json": "7d11f971b2b90bfb7e39cc9a139b386462b271b3392ef38ca23c446d246484a7",
+          "tui-observer/observation.json": "63521dc77b0be9946695e7d19b879e4c392fb2ec00e81ceb64800cd3a537b045",
+          "summary.json": "96630844b3b7e3494bad3bcd3b26fd502854a8b83a152f96c5bbb44ea5affa14",
+          "tui-observer/frame-timing.txt": "9b2c2a809eeed0a746699c5de3805dabdd8515d8d7179eb8601f2750a1b8151e",
+          "keeper_scale_session.py": "2275c38094884418a88407aaecf9f40a2326e67535796df98cc4a1ba8683efe6",
+          "tui_observer.py": "7ffa5657c998c9487f27feaee3b038b9ed77aa1459fce72d4e31ccb6b7cc3113",
+          "keeper_scale_trace.py": "3dd78330c4922fd058b46644df8ea21dace0f8698ceb3f502c16b8add563b2dd"
+        }
+      },
+      "predecessors_safe": true,
+      "sequential_execution_receipts": true,
+      "arm_eligible": true,
+      "native_list_build": {
+        "samples": 85,
+        "p50_ns": 3048792,
+        "p95_ns": 7832958,
+        "max_ns": 13271250
+      },
+      "native_all_present": {
+        "samples": 95,
+        "p50_ns": 40583,
+        "p95_ns": 120083,
+        "max_ns": 210666
+      },
+      "whole_tui_cpu_seconds": 1.38034,
+      "whole_tui_wall_seconds": 8.300246583,
+      "workload_summary": {
+        "keepers": 300,
+        "messages": 600,
+        "succeeded_operations": 600,
+        "actual_model_calls": 600,
+        "max_provider_requests_in_flight": 300,
+        "latency_samples": 1191,
+        "valid_latency_samples": 1191,
+        "scope": "Pinned-native-source real Keeper turns with a loopback scripted text-only model, durable queued operations and offline SQLite reread. No guest/tool execution, browser/TUI or production throughput proof.",
+        "latency_by_phase": {
+          "submitting_model_held": {
+            "samples": 276,
+            "valid": 276,
+            "failures": 0,
+            "p50_ms": 2.153917,
+            "p95_ms": 11.973,
+            "max_ms": 128.132084
+          },
+          "model_held_queue_observation": {
+            "samples": 376,
+            "valid": 376,
+            "failures": 0,
+            "p50_ms": 1.905625,
+            "p95_ms": 4.674375,
+            "max_ms": 29.362709
+          },
+          "running_model_released": {
+            "samples": 536,
+            "valid": 536,
+            "failures": 0,
+            "p50_ms": 1.082417,
+            "p95_ms": 62.006125,
+            "max_ms": 12541.967542
+          },
+          "settled": {
+            "samples": 3,
+            "valid": 3,
+            "failures": 0,
+            "p50_ms": 0.700291,
+            "p95_ms": 0.712958,
+            "max_ms": 0.712958
+          }
+        },
+        "rejected_429_count": 45,
+        "rate_limit_wait_s": 45.16109092,
+        "rate_limit_wait_by_source_s": {
+          "client_fallback_no_retry_after": 45.16109092
+        },
+        "denied_read_only_inventory_attempts": 1202,
+        "unexpected_guest_command_attempts": 0
+      },
+      "failure": null,
+      "loadavg_before": [
+        60.484375,
+        50.7060546875,
+        38.98486328125
+      ],
+      "loadavg_after": [
+        18.23779296875,
+        36.01513671875,
+        35.109375
+      ],
+      "cpu_count": 16,
+      "frame_report_sha256": "9b2c2a809eeed0a746699c5de3805dabdd8515d8d7179eb8601f2750a1b8151e",
+      "pair_comparison_eligible": false
+    }
+  ]
+}

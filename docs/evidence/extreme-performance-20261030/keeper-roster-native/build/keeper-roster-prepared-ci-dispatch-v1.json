@@ -1,0 +1,50 @@
+[
+  {
+    "started_unix": 1793356555.290188,
+    "ended_unix": 1793356557.336009,
+    "command": [
+      "gh",
+      "workflow",
+      "run",
+      "pr-check.yml",
+      "--repo",
+      "jeong-sik/masc",
+      "--ref",
+      "main",
+      "-f",
+      "native-tui-source-sha=c275c5e18bdf0977ec3cfdd33e16bd65d3367236",
+      "-f",
+      "native-tui-scenario=workspace-files"
+    ],
+    "returncode": 0,
+    "stdout": "https://github.com/jeong-sik/masc/actions/runs/41041914326\n",
+    "stderr": "",
+    "requested_source": "c275c5e18bdf0977ec3cfdd33e16bd65d3367236",
+    "main_read_before_dispatch": "50011c4550cb49153c189586f60bee6438b2f232",
+    "scope": "Explicit native product build + three workspace suites; separate single Keeper-control suite. Not full regression."
+  },
+  {
+    "started_unix": 1793356557.341161,
+    "ended_unix": 1793356559.143863,
+    "command": [
+      "gh",
+      "workflow",
+      "run",
+      "test.yml",
+      "--repo",
+      "jeong-sik/masc",
+      "--ref",
+      "perf/tui-roster-prepared-reading-20261030",
+      "-f",
+      "suite=test_tui_keeper_control",
+      "-f",
+      "minimal=true"
+    ],
+    "returncode": 0,
+    "stdout": "https://github.com/jeong-sik/masc/actions/runs/41041918389\n",
+    "stderr": "",
+    "requested_source": "c275c5e18bdf0977ec3cfdd33e16bd65d3367236",
+    "main_read_before_dispatch": "50011c4550cb49153c189586f60bee6438b2f232",
+    "scope": "Explicit native product build + three workspace suites; separate single Keeper-control suite. Not full regression."
+  }
+]

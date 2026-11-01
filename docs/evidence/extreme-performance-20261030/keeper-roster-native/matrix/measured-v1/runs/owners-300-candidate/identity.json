@@ -1,0 +1,25 @@
+{
+  "source": "c275c5e18bdf0977ec3cfdd33e16bd65d3367236",
+  "sha256": "71eeee4314600f1431d587b5ae2377a707aa5230f4930cd418435ef6046b59cc",
+  "original_binary": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-native-v1/native/masc",
+  "copied_binary": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-300-candidate/masc-installed-copy",
+  "base": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-300-candidate/owned-base",
+  "port": 60885,
+  "model_port": 60884,
+  "environment_keys": [
+    "HOME",
+    "LANG",
+    "MASC_BASE_PATH",
+    "MASC_CONFIG_BOOTSTRAP",
+    "MASC_CONFIG_DIR",
+    "MASC_GRPC_ENABLED",
+    "MASC_KEEPER_AUTONOMOUS_ENABLED",
+    "MASC_WS_ENABLED",
+    "PATH"
+  ],
+  "runner_sha256": "2275c38094884418a88407aaecf9f40a2326e67535796df98cc4a1ba8683efe6",
+  "observer_sha256": "7ffa5657c998c9487f27feaee3b038b9ed77aa1459fce72d4e31ccb6b7cc3113",
+  "runtime_fixture_sha256": "ccbe65e399f47a3abddbf4299e15dd0fd55001dd785b2e0d75948ad86acf7cfd",
+  "evidence_schema": "masc.keeper-scale-evidence.v3",
+  "sandbox_scope": "Explicit lazy microVM declaration, unexecuted fixture image pin; no daemon preflight disabled and no guest execution proven."
+}

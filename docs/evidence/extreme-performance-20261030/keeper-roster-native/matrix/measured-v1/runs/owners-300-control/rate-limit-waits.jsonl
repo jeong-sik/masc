@@ -1,0 +1,10 @@
+{"request_id": 1062, "phase": "queue-held", "raw_retry_after": null, "delay_s": 1.0, "source": "client_fallback_no_retry_after", "wait_started_ns": 506189558409750, "wait_finished_ns": 506190563996875}
+{"request_id": 1582, "phase": "settlement", "raw_retry_after": null, "delay_s": 1.0, "source": "client_fallback_no_retry_after", "wait_started_ns": 506333851838791, "wait_finished_ns": 506334856488208}
+{"request_id": 1609, "phase": "settlement", "raw_retry_after": null, "delay_s": 1.0, "source": "client_fallback_no_retry_after", "wait_started_ns": 506335183576750, "wait_finished_ns": 506336187932833}
+{"request_id": 1636, "phase": "settlement", "raw_retry_after": null, "delay_s": 1.0, "source": "client_fallback_no_retry_after", "wait_started_ns": 506336559751000, "wait_finished_ns": 506337563191083}
+{"request_id": 1660, "phase": "settlement", "raw_retry_after": null, "delay_s": 1.0, "source": "client_fallback_no_retry_after", "wait_started_ns": 506337757409916, "wait_finished_ns": 506338761650583}
+{"request_id": 1683, "phase": "settlement", "raw_retry_after": null, "delay_s": 1.0, "source": "client_fallback_no_retry_after", "wait_started_ns": 506338908847750, "wait_finished_ns": 506339913195416}
+{"request_id": 1745, "phase": "settlement", "raw_retry_after": null, "delay_s": 1.0, "source": "client_fallback_no_retry_after", "wait_started_ns": 506341987797833, "wait_finished_ns": 506342992565208}
+{"request_id": 1790, "phase": "settlement", "raw_retry_after": null, "delay_s": 1.0, "source": "client_fallback_no_retry_after", "wait_started_ns": 506344262176125, "wait_finished_ns": 506345263486166}
+{"request_id": 1835, "phase": "settlement", "raw_retry_after": null, "delay_s": 1.0, "source": "client_fallback_no_retry_after", "wait_started_ns": 506346486369666, "wait_finished_ns": 506347488215041}
+{"request_id": 1861, "phase": "settlement", "raw_retry_after": null, "delay_s": 1.0, "source": "client_fallback_no_retry_after", "wait_started_ns": 506347782601458, "wait_finished_ns": 506348785014708}

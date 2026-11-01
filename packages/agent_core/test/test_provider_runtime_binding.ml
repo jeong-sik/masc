@@ -186,26 +186,15 @@ let test_explicit_provider_identity_selects_catalog_binding () =
   with_provider_catalog catalog_json (fun () ->
     [ "subscriber-local"; "Subscriber-Alias" ]
     |> List.iter (fun provider_id ->
-      let cfg =
-        Llm_provider.Provider_config.make
-          ~kind:Llm_provider.Provider_config.OpenAI_compat
-          ~provider_id
-          ~model_id:"local-model"
-          ~base_url:"https://deliberately-different.example/v9"
-          ~request_path:"/not-the-catalog-path"
-          ()
-      in
-      match Provider_runtime_binding.binding_for_provider_config cfg with
-      | Some binding ->
-        Alcotest.(check string)
-          (provider_id ^ " canonical binding")
-          "subscriber-local"
-          binding.id;
-        Alcotest.(check string)
-          (provider_id ^ " canonical provider id")
-          "subscriber-local"
-          (Provider_runtime_binding.provider_id_of_provider_config cfg)
-      | None -> Alcotest.failf "expected explicit binding for %S" provider_id))
+      let binding = expect_binding provider_id in
+      let cfg = expect_ok (Provider_runtime_binding.to_provider_config binding) in
+      let cfg = {cfg with base_url="https://deliberately-different.example/v9";
+        request_path="/not-the-catalog-path"} in
+      Alcotest.(check bool) (provider_id ^ " retains selected attribution") true
+        (Option.is_some (Llm_provider.Provider_config.selected_provider_identity cfg));
+      Alcotest.(check string)
+        (provider_id ^ " canonical provider id") "subscriber-local"
+        (Provider_runtime_binding.provider_id_of_provider_config cfg)))
 ;;
 
 let test_endpoint_only_config_does_not_select_catalog_facts () =
@@ -221,7 +210,7 @@ let test_endpoint_only_config_does_not_select_catalog_facts () =
     Alcotest.(check bool)
       "endpoint does not select binding"
       true
-      (Option.is_none (Provider_runtime_binding.binding_for_provider_config cfg));
+      (Option.is_none (Llm_provider.Provider_config.selected_provider_identity cfg));
     let caps = Provider_runtime_binding.capabilities_for_provider_config cfg in
     Alcotest.(check bool)
       "endpoint does not select catalog reasoning capability"
@@ -297,18 +286,9 @@ let test_shared_endpoint_is_disambiguated_by_explicit_provider_id () =
         ~request_path:"/chat/completions"
         ()
     in
-    let alpha = config "shared-alpha" in
     let beta = config "Beta-Alias" in
-    let alpha_binding =
-      match Provider_runtime_binding.binding_for_provider_config alpha with
-      | Some binding -> binding
-      | None -> Alcotest.fail "expected explicit shared-alpha binding"
-    in
-    let beta_binding =
-      match Provider_runtime_binding.binding_for_provider_config beta with
-      | Some binding -> binding
-      | None -> Alcotest.fail "expected explicit beta alias binding"
-    in
+    let alpha_binding = expect_binding "shared-alpha" in
+    let beta_binding = expect_binding "Beta-Alias" in
     Alcotest.(check string) "alpha binding" "shared-alpha" alpha_binding.id;
     Alcotest.(check string) "beta alias canonical binding" "shared-beta" beta_binding.id;
     Alcotest.(check bool) "raw beta identity alone grants no reasoning policy" false
@@ -337,7 +317,7 @@ let test_unknown_explicit_provider_id_never_switches_by_endpoint () =
     Alcotest.(check bool)
       "unknown explicit id has no binding"
       true
-      (Option.is_none (Provider_runtime_binding.binding_for_provider_config cfg));
+      (Option.is_none (Llm_provider.Provider_config.selected_provider_identity cfg));
     Alcotest.(check string)
       "unknown explicit id remains normalized and opaque"
       "unknown-explicit"

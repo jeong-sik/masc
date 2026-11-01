@@ -8,7 +8,7 @@ module PD = Llm_provider.Provider_declarations
 type provider_kind = PConfig.provider_kind
 type capabilities = Llm_provider.Capabilities.capabilities
 
-type auth =
+type auth = PConfig.provider_authentication =
   | No_auth
   | Api_key
   | Setup_token
@@ -73,20 +73,9 @@ let find_catalog label =
      | Error error -> raise (PD.Invalid_declarations error))
 ;;
 
-let binding_for_provider_config (cfg : PConfig.t) = Option.bind cfg.provider_id find
-
-let canonical_explicit_provider_id (cfg : PConfig.t) =
+let provider_id_of_provider_config (cfg : PConfig.t) =
   match cfg.provider_id with
-  | Some provider_id ->
-    (match find provider_id with
-     | Some binding -> Some binding.id
-     | None -> Some (normalize provider_id))
-  | None -> None
-;;
-
-let provider_id_of_provider_config cfg =
-  match canonical_explicit_provider_id cfg with
-  | Some provider_id -> provider_id
+  | Some provider_id -> normalize provider_id
   | None -> PConfig.string_of_provider_kind cfg.kind
 ;;
 
@@ -130,6 +119,7 @@ let to_provider_config ?model binding =
          ?request_path
          ?max_context
          ()
-       |> PConfig.with_request_policy policy)
+       |> PConfig.with_binding_policy ~authentication:binding.auth
+            ~credential_scope:binding.credential_scope policy)
     (resolve_model binding ~requested_model:model)
 ;;

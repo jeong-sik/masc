@@ -41,6 +41,15 @@ type credential_source =
 type request_policy_snapshot
 (** Internal request-owned catalog resolution, including absent entries. *)
 
+type provider_authentication = No_auth | Api_key | Setup_token
+
+type provider_identity = private
+  { authentication : provider_authentication
+  ; credential_scope : string option
+  }
+(** Attribution facts from the admitted provider selection. No credential
+    material or mutable catalog handle is retained here. *)
+
 type t =
   { kind : provider_kind
   ; provider_id : string option
@@ -394,10 +403,21 @@ val resolve_request_capabilities : t -> Capabilities.capabilities * capability_s
     or registry state. *)
 
 
-val with_request_policy : Capabilities.request_policy -> t -> t
-(** Install an already resolved policy, including absent facts, for this exact
-    kind/provider/model identity. Does not read global state or alter overrides. *)
+val with_binding_policy
+  :  authentication:provider_authentication
+  -> credential_scope:string option
+  -> Capabilities.request_policy
+  -> t
+  -> t
+(** Attach the admitted binding's policy and attribution facts together.
+    Requires an explicit canonical [provider_id]. This is not a lookup;
+    the caller supplies facts from its already selected declaration. *)
 
+val selected_provider_identity : t -> provider_identity option
+(** Read only selection-owned authentication and credential scope. Changing
+    [provider_id] or [kind] invalidates that selection. Model or endpoint
+    overrides do not change provider identity. An unselected config never
+    acquires attribution facts from a later global catalog. *)
 val freeze_for_request : t -> t
 (** Capture the catalog resolution for this request without changing explicit
     overrides. Idempotent while provider/model identity is unchanged. *)

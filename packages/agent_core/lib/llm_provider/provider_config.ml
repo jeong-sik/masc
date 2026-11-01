@@ -35,11 +35,19 @@ type credential_source =
   | Static_credential
   | Refreshable_credential of (unit -> (Secret.t, credential_refresh_error) result)
 
+type provider_authentication = No_auth | Api_key | Setup_token
+
+type provider_identity =
+  { authentication : provider_authentication
+  ; credential_scope : string option
+  }
+
 type request_policy_snapshot =
   { snapshot_kind : provider_kind
   ; snapshot_provider_id : string option
   ; snapshot_model_id : string
   ; policy : Capabilities.request_policy
+  ; provider_identity : provider_identity option
   }
 
 type t =
@@ -244,10 +252,29 @@ let resolve_request_policy (config : t) =
     ~provider:(provider_reference config) ~model_id:config.model_id
 ;;
 
+let selected_provider_identity (config : t) =
+  match config.request_policy_snapshot with
+  | Some snapshot
+    when snapshot.snapshot_kind = config.kind
+         && snapshot.snapshot_provider_id = config.provider_id -> snapshot.provider_identity
+  | Some _ | None -> None
+;;
+
 let with_request_policy policy (config : t) =
   { config with request_policy_snapshot = Some
       { snapshot_kind=config.kind;snapshot_provider_id=config.provider_id
-      ; snapshot_model_id=config.model_id;policy } }
+      ; snapshot_model_id=config.model_id;policy
+      ; provider_identity=selected_provider_identity config } }
+;;
+
+let with_binding_policy ~authentication ~credential_scope policy (config : t) =
+  match config.provider_id with
+  | None -> invalid_arg "Provider_config.with_binding_policy requires a selected provider id"
+  | Some _ ->
+    { config with request_policy_snapshot = Some
+        { snapshot_kind=config.kind;snapshot_provider_id=config.provider_id
+        ; snapshot_model_id=config.model_id;policy
+        ; provider_identity=Some {authentication;credential_scope} } }
 ;;
 
 let freeze_for_request (config : t) =

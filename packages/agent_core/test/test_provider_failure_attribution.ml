@@ -119,9 +119,30 @@ let test_selected_identity_retains_auth_scope ~replace_before_construction () =
       (Binding_identity.equal first replaced);
     Alcotest.(check int) "stable identity retains its hash"
       (Binding_identity.hash first) (Binding_identity.hash replaced);
+    let next_binding = match Provider_runtime_binding.find "captured-identity" with
+      | Some binding -> binding | None -> Alcotest.fail "replacement binding is absent" in
+    let next_config = match Provider_runtime_binding.to_provider_config next_binding with
+      | Ok selected -> {selected with api_key=config.api_key}
+      | Error error -> Alcotest.fail (Error.to_string error) in
+    let next_identity = Binding_identity.of_provider_config
+      ~transport:Binding_identity.Http next_config |> require_identity in
+    check_bool "a fresh selection observes the changed account scope" false
+      (Binding_identity.equal first next_identity);
     Catalog.clear_global ();
     check_bool "removing declarations cannot change failure ownership" true
-      (Binding_identity.equal first (identity ())))
+      (Binding_identity.equal first (identity ()));
+    let altered_provider = {config with provider_id=Some "different-explicit-provider"} in
+    let altered_wire = {config with kind=PC.Anthropic} in
+    List.iter (fun altered ->
+      check_bool "changing provider identity invalidates selection-owned attribution" true
+        (Option.is_none (PC.selected_provider_identity altered)))
+      [altered_provider;altered_wire];
+    let moved_endpoint = {config with base_url="https://override.example.invalid"} in
+    check_bool "an endpoint override retains the selected account scope" true
+      (PC.selected_provider_identity moved_endpoint = PC.selected_provider_identity config);
+    let next_model = {config with model_id="next-model"} |> PC.freeze_for_request in
+    check_bool "request policy refresh preserves unchanged provider identity" true
+      (PC.selected_provider_identity next_model = PC.selected_provider_identity config))
 ;;
 
 let test_unselected_identity_does_not_acquire_catalog_facts () =

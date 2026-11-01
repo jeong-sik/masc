@@ -785,12 +785,20 @@ module Terminal_size_cache : sig
     | Changed of (int * int)
     | Unchanged of (int * int)
 
+  type work_geometry = Current | Resize_pending | Resize_detected
+
   type t
 
   val create : fallback:int * int -> t
   val invalidate : t -> unit
   val get : t -> probe:(unit -> (int * int) option) -> int * int
   val refresh : t -> probe:(unit -> (int * int) option) -> refresh
+  val verify_for_work :
+    cached:(int * int) -> resize_pending:(unit -> bool) ->
+    probe:(unit -> (int * int) option) -> work_geometry
+  (** Check before admitting geometry-dependent work. A failed probe keeps the
+      cached size, as [get] does. The caller must request a resize on
+      [Resize_detected] so the next loop refreshes the cache. *)
 end
 
 (** {1 Planning strip and Keeper schedule page} *)

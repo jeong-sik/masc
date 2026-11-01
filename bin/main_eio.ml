@@ -1103,7 +1103,7 @@ let run_cmd ?schema_observation ?(record_default = false) ?(previous_owner = Ref
                   would bypass the typed scheduler diagnostic below. *)
                preserve_reserved primary_failure report_failure;
                match primary with
-               | Unix.Unix_error (Unix.EINTR, _, _) ->
+               | Unix.Unix_error (error, _, _) when error = Unix.EINTR ->
                    log_other report_failure;
                    Printexc.raise_with_backtrace primary primary_backtrace
                | _ ->

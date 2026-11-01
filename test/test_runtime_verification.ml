@@ -1285,7 +1285,7 @@ durable_cursors = {"turn/started": "readiness-turn-start", "item/completed": "re
 def notify(method, **params):
     params = {"sessionId": "s-readiness", "viewCursor": durable_cursors.get(method, "v:1"), **params}
     event = {"method": method, "params": params}
-    if method in ("turn/started", "item/completed"):
+    if method in ("turn/started", "item/completed", "session/tokenUsage"):
         position = {"id": "readiness-record-%d" % (len(retained_events) + 1), "sequence": len(retained_events) + 1}
         params["sourceRange"] = {"stream": {"kind": "run", "id": "readiness-run"},
                                  "first": position, "last": position}

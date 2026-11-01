@@ -1778,6 +1778,11 @@ let temporal_input_lines ~width ~sha256 (report : Temporal.t) =
     @ optional "SOURCE CAPTURE SHA256  " report.source_capture_sha256
     @ optional "BINARY COMMIT  " report.binary_commit
     @ optional "EXECUTABLE SHA256  " report.executable_sha256
+    @ (match report.memory_readiness with
+       | None | Some Temporal.Memory_unavailable -> ["MEMORY READINESS  UNAVAILABLE"]
+       | Some (Temporal.Memory_operations operations) ->
+         ["MEMORY READINESS  " ^ String.concat "  ·  "
+            (List.map (fun (tool, state) -> tool ^ " " ^ state) operations)])
     @ [ "Durable originals are retained. Omission describes prepared organic ranges."
       ; "Provider receipt and Librarian-only causal attribution remain unestablished."
       ; "Probabilities are separate observations with no pass threshold." ] in
@@ -1804,6 +1809,11 @@ let temporal_output_lines ~width (report : Temporal.t) =
          | T.Message -> ["W MESSAGES IN LAST REQUEST  " ^ natural step.working_state_messages]
          | T.Restart | T.Await_summary -> [])
       @ (match step.target_end_atom with None -> [] | Some value -> ["WAIT TARGET END  " ^ string_of_int value]) in
+    let readiness = match step.readiness with
+      | None -> []
+      | Some T.Readiness_not_available -> ["SUMMARY READINESS  NOT AVAILABLE"]
+      | Some (T.Covered { end_atom; last_atom_digest = _ }) ->
+        ["SUMMARY READINESS  COVERED · W END " ^ string_of_int end_atom] in
     let omitted = match step.omission with
       | T.Not_requested -> []
       | T.Omission_unavailable reason -> ["PREFIX OMISSION  UNAVAILABLE"; reason]
@@ -1820,7 +1830,7 @@ let temporal_output_lines ~width (report : Temporal.t) =
       | None | Some [] -> []
       | Some messages -> ["W IN LAST PREPARED REQUEST"; Yojson.Safe.pretty_to_string (`List messages)] in
     [Ansi.dim, ""] @ List.map (fun value -> Ansi.reset, value)
-      (identity @ omitted @ working_state
+      (identity @ readiness @ omitted @ working_state
        @ (if step.reply = [] then [] else "ORIGINAL REPLY" :: step.reply) @ judgments)) report.timeline in
   let errors = match report.error with None -> [] | Some value -> [Theme.warn (), value] in
   measurement_output_preview ~width ~output_path:report.report_path (errors @ steps)

@@ -47,11 +47,16 @@ let origin_to_json = function
     | Turn_start _) as origin -> Keeper_carried_front.origin_to_json origin
 
 let to_json ~keeper ~turn_ref ~unread ~runtime_id ~selection ~range ~wire =
+  let associated_range =
+    match turn_ref, wire.Llm_provider.Request_wire_observer.capture_id, range with
+    | Some _, Some _, Some range -> Some range
+    | None, _, _ | _, None, _ | _, _, None -> None
+  in
   `Assoc
     [ "schema", `String "masc.continuity-request.v3"
     ; "keeper", `String keeper
     ; "turn_ref", (match turn_ref with Some value -> Ids.Turn_ref.to_yojson value | None -> `Null)
-    ; "association", `String (match range with Some _ -> "projection_associated" | None -> "projection_unavailable")
+    ; "association", `String (match associated_range with Some _ -> "projection_associated" | None -> "projection_unavailable")
     ; "evidence", `String "pre_dispatch_projection_and_selection"
     ; "runtime_id", `String runtime_id
     ; "binding", `String (match wire.Llm_provider.Request_wire_observer.capture_id with
@@ -59,7 +64,7 @@ let to_json ~keeper ~turn_ref ~unread ~runtime_id ~selection ~range ~wire =
     ; "wire", Llm_provider.Request_wire_observer.observation_to_yojson wire
     ; "unread", Keeper_librarian_request_unread.to_json unread
     ; "selection", selection_to_json selection
-    ; "bounded_range", (match range with None -> `Null | Some (range : range) -> `Assoc
+    ; "bounded_range", (match associated_range with None -> `Null | Some (range : range) -> `Assoc
         [ "origin", origin_to_json range.origin
         ; "first_atom", `Int range.first_atom
         ; "total_atoms", `Int range.total_atoms

@@ -524,6 +524,10 @@ let test_continuity_export_keeps_every_attributed_request_and_exact_boundary () 
         ~selection:C.Without_snapshot ~range ~wire in
     record_request ~range:(Some range) { wire with capture_id = Some "first-wire" };
     record_request ~range:None wire;
+    (* A range whose serialization has no capture identity stays explicitly
+       unbound: the association must not advertise a projection that cannot be
+       joined back to this serialization. *)
+    record_request ~range:(Some range) { wire with capture_id = None };
     record_request ~turn_ref:None ~range:None { wire with capture_id = Some "unbound-later-wire" };
     write config 7;
     let position_one = match B.position_of_messages [message] with
@@ -550,12 +554,17 @@ let test_continuity_export_keeps_every_attributed_request_and_exact_boundary () 
       (member "wire" evidence = Wire.observation_to_yojson wire);
     let requests_obs = evidence |> member "requests" in
     let requests = requests_obs |> member "value" |> to_list in
-    check int "both attributed serializations retained" 2 (List.length requests);
-    check int "all 4 store rows scanned" 4 (requests_obs |> member "scanned_rows" |> to_int);
+    check int "all three attributed serializations retained" 3 (List.length requests);
+    check int "all 5 store rows scanned" 5 (requests_obs |> member "scanned_rows" |> to_int);
     check int "legacy v2 and unbound v3 counted as skipped" 2
       (requests_obs |> member "skipped_unattributed_rows" |> to_int);
     check bool "unassociated serialization never inherits an older range" true
       (List.nth requests 1 |> member "bounded_range" = `Null);
+    check bool "a range without capture identity stays unbound" true
+      (let row = List.nth requests 2 in
+       member "association" row = `String "projection_unavailable"
+       && member "bounded_range" row = `Null
+       && member "binding" row = `String "unbound");
     check bool "latest completed boundary in generation exported" true
       (evidence |> member "completed_boundary" |> member "value" |> member "record"
        = B.record_to_json boundary_two);
@@ -591,7 +600,23 @@ let test_continuity_export_keeps_every_attributed_request_and_exact_boundary () 
     check string "missing turn_ref field fails closed" "unavailable"
       (after_missing |> member "requests" |> member "kind" |> to_string);
     check string "missing turn_ref reason" "continuity request missing turn identity field"
-      (after_missing |> member "requests" |> member "reason" |> to_string))
+      (after_missing |> member "requests" |> member "reason" |> to_string);
+    (* A v3 row carrying the requested turn_ref but violating the row body
+       (here: no wire observation at all) is corruption, not evidence: the
+       export must fail closed instead of returning the raw row. *)
+    Dated_jsonl.append
+      request_store
+      (`Assoc
+         [ "schema", `String "masc.continuity-request.v3"
+         ; "keeper", `String keeper
+         ; "turn_ref", Ids.Turn_ref.to_yojson reference
+         ]);
+    let after_body_corrupt = match E.read ~config ~keeper ~turn_ref:reference with
+      | Ok value -> value | Error error -> fail (Snapshot.read_error_to_string error) in
+    check string "an attributed row with a violated body fails closed" "unavailable"
+      (after_body_corrupt |> member "requests" |> member "kind" |> to_string);
+    check string "violated body reason" "malformed continuity request row"
+      (after_body_corrupt |> member "requests" |> member "reason" |> to_string))
 ;;
 
 let () =

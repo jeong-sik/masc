@@ -195,19 +195,41 @@ def completed_boundary(item: Json) -> Json:
         ),
         "boundary_line": natural(value.get("boundary_line"), "boundary line"),
         "end_atom": natural(position.get("end_atom"), "completed end atom"),
+        "last_atom_digest": text(
+            position.get("last_atom_digest"), "boundary last atom digest"
+        ),
     }
 
 
 def summary_covers(snapshot: Json, boundary: Json) -> bool:
-    return (
-        snapshot.get("kind") == "summarized"
-        and snapshot.get("trace_id") == boundary["trace_id"]
-        and snapshot.get("history_start_boundary_line")
-        == boundary["history_start_boundary_line"]
-        and natural(snapshot.get("end_atom"), "summary end atom")
-        >= boundary["end_atom"]
-        and snapshot.get("unread_messages") == []
-    )
+    if (
+        snapshot.get("kind") != "summarized"
+        or snapshot.get("trace_id") != boundary["trace_id"]
+        or snapshot.get("history_start_boundary_line")
+        != boundary["history_start_boundary_line"]
+        or snapshot.get("unread_messages") != []
+    ):
+        return False
+    # A snapshot the Librarian is still rewriting from atom 0 does not stand
+    # for the history yet, whatever atom count it has reached.
+    if snapshot.get("catch_up_end_atom") is not None:
+        return False
+    end_atom = natural(snapshot.get("end_atom"), "summary end atom")
+    if end_atom < boundary["end_atom"]:
+        return False
+    if end_atom == boundary["end_atom"]:
+        # The same generation and atom count must also carry the same chain
+        # digest; a rewritten history would otherwise satisfy the count alone.
+        return snapshot.get("last_atom_digest") == boundary["last_atom_digest"]
+    covering = natural(snapshot.get("covering_end_atom"), "covering end atom")
+    if covering == boundary["end_atom"]:
+        return (
+            snapshot.get("covering_last_atom_digest") == boundary["last_atom_digest"]
+        )
+    # Beyond the boundary the snapshot states no digest at the boundary
+    # position, so coverage must be witnessed by a later real completed row of
+    # the same generation.
+    return covering > boundary["end_atom"]
 
 
 def prefix_omission(target: Json, probe: Json) -> Json:
@@ -353,6 +375,60 @@ def prefix_omission(target: Json, probe: Json) -> Json:
     return result
 
 
+def memory_readiness_projection(section: Any) -> Json:
+    """A compact typed selection of the health section; the report stays
+    authoritative. Any unexpected shape projects to unavailable rather than
+    inventing an operation state."""
+    rows = section.get("operations") if isinstance(section, dict) else None
+    if not isinstance(rows, list) or not rows:
+        return {"state": "unavailable"}
+    projected: list[Json] = []
+    for row in rows:
+        tool = row.get("tool") if isinstance(row, dict) else None
+        state = row.get("state") if isinstance(row, dict) else None
+        if not (
+            isinstance(tool, str)
+            and tool
+            and isinstance(state, str)
+            and state
+        ):
+            return {"state": "unavailable"}
+        projected.append({"tool": tool, "state": state})
+    return {"state": "operations", "operations": projected}
+
+
+def summary_readiness_projection(item: Json) -> Json | None:
+    """The saved-state readiness of a wait item, separate from prefix
+    omission. None on steps that never wait; the recorded continuity
+    evidence in the authoritative report keeps the full observation."""
+    if item.get("kind") != "await_summary":
+        return None
+    evidence = item.get("continuity_evidence")
+    saved = (
+        evidence.get("saved_readiness_only")
+        if isinstance(evidence, dict)
+        else None
+    )
+    value = (
+        saved.get("value")
+        if isinstance(saved, dict) and saved.get("kind") == "available"
+        else None
+    )
+    if (
+        isinstance(value, dict)
+        and value.get("kind") == "summarized"
+        and type(value.get("end_atom")) is int
+        and isinstance(value.get("last_atom_digest"), str)
+        and value["last_atom_digest"]
+    ):
+        return {
+            "state": "covered",
+            "end_atom": value["end_atom"],
+            "last_atom_digest": value["last_atom_digest"],
+        }
+    return {"state": "not_available"}
+
+
 def view_projection(report: Json, *, report_path: str, report_sha256: str) -> Json:
     """A compact selection for the TUI; the original report stays authoritative."""
     build = report.get("server_build") or {}
@@ -378,6 +454,7 @@ def view_projection(report: Json, *, report_path: str, report_sha256: str) -> Js
                 "reply": [row["text"] for row in item.get("reply", [])],
                 "prefix_omission": omitted,
                 "target_boundary": item.get("target_boundary"),
+                "summary_readiness": summary_readiness_projection(item),
                 "judgments": [
                     {
                         "criterion_id": row["criterion"]["id"],
@@ -406,6 +483,9 @@ def view_projection(report: Json, *, report_path: str, report_sha256: str) -> Js
         "executable_sha256": build.get("executable_sha256"),
         "body_response_binding": report["body_response_binding"],
         "librarian_causal_attribution": report["librarian_causal_attribution"],
+        "memory_execution_readiness": memory_readiness_projection(
+            report.get("memory_execution_readiness")
+        ),
         "continuity_pass": None,
         "timeline": timeline,
     }

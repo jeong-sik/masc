@@ -11,18 +11,22 @@ type judgment = { criterion_id : string; scope : scope; result : judgment_result
 type request_range = { capture_id : string; body_sha256 : string; first_atom : int; summary_end_atom : int option }
 type omission_detail = { target_end_atom : int; requests : request_range list }
 type omission = Not_requested | Omission_unavailable of string | Not_observed of string * omission_detail | Observed of omission_detail
+type summary_readiness = Readiness_not_available | Covered of { end_atom : int; last_atom_digest : string }
+type memory_readiness = Memory_unavailable | Memory_operations of (string * string) list
 type step = {
   id : string; kind : step_kind; status : step_status;
   operation_state : string option; turn_ref : string option;
   working_state_messages : int option; working_state : Yojson.Safe.t list option; reply : string list;
   omission : omission; target_end_atom : int option; judgments : judgment list;
+  readiness : summary_readiness option;
 }
 type t = {
   keeper : string; provenance : provenance; status : capture_status;
   started_at : string; finished_at : string option; error : string option;
   report_path : string; report_sha256 : string; harness_source_sha256 : string;
   source_capture_sha256 : string option; binary_commit : string option;
-  executable_sha256 : string option; timeline : step list;
+  executable_sha256 : string option; memory_readiness : memory_readiness option;
+  timeline : step list;
 }
 
 let schema = "masc.keeper-temporal-continuity-view.v1"
@@ -106,6 +110,34 @@ let judgment json =
     | _ -> Error ("judgment: unsupported status " ^ status) in
   Ok { criterion_id; scope; result }
 
+let summary_readiness json =
+  let* state = required_string_field json "state" in
+  match state with
+  | "not_available" -> Ok Readiness_not_available
+  | "covered" ->
+    let* end_atom = required_nonnegative_int_field json "end_atom" in
+    let* last_atom_digest = required_nonempty_string_field json "last_atom_digest" in
+    Ok (Covered { end_atom; last_atom_digest })
+  | _ -> Error ("summary readiness: unsupported state " ^ state)
+
+let optional_summary_readiness json =
+  match Yojson.Safe.Util.member "summary_readiness" json with
+  | `Null -> Ok None
+  | value -> Result.map Option.some (summary_readiness value)
+
+let memory_readiness json =
+  let* state = required_string_field json "state" in
+  match state with
+  | "unavailable" -> Ok Memory_unavailable
+  | "operations" ->
+    let* rows = required_list_field json "operations" in
+    let* operations = decode_list "operations" (fun row ->
+        let* tool = required_nonempty_string_field row "tool" in
+        let* state = required_nonempty_string_field row "state" in
+        Ok (tool, state)) rows in
+    Ok (Memory_operations operations)
+  | _ -> Error ("memory readiness: unsupported state " ^ state)
+
 let step json =
   let* id = required_nonempty_string_field json "step_id" in
   let* kind = choice json "kind" ["message", Message; "restart", Restart; "await_summary", Await_summary] in
@@ -130,8 +162,9 @@ let step json =
   let* target_end_atom = target_boundary boundary in
   let* rows = required_list_field json "judgments" in
   let* judgments = decode_list "judgments" judgment rows in
+  let* readiness = optional_summary_readiness json in
   Ok { id; kind; status; operation_state; turn_ref; working_state_messages; working_state; reply;
-       omission; target_end_atom; judgments }
+       omission; target_end_atom; judgments; readiness }
 
 let of_yojson json =
   let* _ = choice json "schema" [schema, ()] in
@@ -152,8 +185,11 @@ let of_yojson json =
   let* () = require_null_field json "continuity_pass" in
   let* _ = choice json "body_response_binding" ["not_established", ()] in
   let* _ = choice json "librarian_causal_attribution" ["not_established", ()] in
+  let* memory_readiness = match Yojson.Safe.Util.member "memory_execution_readiness" json with
+    | `Null -> Ok None
+    | value -> Result.map Option.some (memory_readiness value) in
   let* rows = required_list_field json "timeline" in
   let* timeline = decode_list "timeline" step rows in
   Ok { keeper; provenance; status; started_at; finished_at; error; report_path;
        report_sha256; harness_source_sha256; source_capture_sha256; binary_commit;
-       executable_sha256; timeline }
+       executable_sha256; memory_readiness; timeline }

@@ -62,7 +62,8 @@ module Make (Capture : Capture) : sig
       Uncertainty never permits a replacement attempt. *)
   type result = Pending of Lane_addon_tool_request_owner.retained
     | Complete of Keeper_librarian_absorb_gate.run_result * Lane_addon_tool_request_owner.retained
-  val resume : store:Lane_addon_store.t -> owner:Capture.owner ->
+  val resume : request_clock:Keeper_librarian_absorb_gate.request_clock ->
+    store:Lane_addon_store.t -> owner:Capture.owner ->
     capture:Capture.t -> record:Lane_addon_tool_request_owner.retained ->
     live_authority:Keeper_librarian_absorb_gate.live_authority option ->
     before_dispatch:(unit -> (unit, string) Stdlib.result) -> (result, string) Stdlib.result
@@ -71,6 +72,9 @@ module Make (Capture : Capture) : sig
       question without an intent can execute, using a live handle whose captured
       authority is exactly the original one. Pending/aborted requests remain
       unknown. Complete replay and terminal publication require no live config.
+      The clock supplier is consumed only when a new TypeSafe evaluation is
+      needed; absence returns an error before its intent or HTTP dispatch,
+      preserving the original. Completed replay does not consult it.
       No Memory save, candidate ACK, partition or automatic new attempt occurs. *)
   val validate : store:Lane_addon_store.t -> owner:Capture.owner ->
     capture:Capture.t -> record:Lane_addon_tool_request_owner.retained ->

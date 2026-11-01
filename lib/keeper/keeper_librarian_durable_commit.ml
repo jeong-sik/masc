@@ -344,7 +344,8 @@ let publish_with ~before_settlement ~store ~config ~request ~(original : Owner.r
                | Some _,Some Input_capacity_exceeded | None,(Some Input_capacity_exceeded | Some Evaluation_failed | None) ->
                  Ok latest)
             | None,(None | Some _) | Some _,None -> Ok latest in
-          Journal.resume ~store ~owner ~capture:request ~record:next ~live_authority
+          Journal.resume ~request_clock:Eio_context.get_clock
+            ~store ~owner ~capture:request ~record:next ~live_authority
             ~before_dispatch:fresh_authority
       | Captured | Admission_wait _ | Dispatch_pending _ | Conflicted _ | Rejected _
       | Subdividing _ | Subdivided _ -> Error "History publication lacks its original answered phase" in

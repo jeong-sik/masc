@@ -1610,6 +1610,41 @@ default = "muse_fixture.fixture"
     (Yojson.Safe.to_string !observed)
 ;;
 
+let test_muse_refuses_exact_none_without_replay () =
+  with_scripted_host ~fixture:["scenario", `String "refuse_turn"] @@ fun ~base_path ->
+  let previous_catalog = Llm_provider.Model_catalog.global () in
+  Fun.protect ~finally:(fun () -> match previous_catalog with
+    | None -> Llm_provider.Model_catalog.clear_global ()
+    | Some catalog -> Llm_provider.Model_catalog.set_global catalog) @@ fun () ->
+  (match Llm_provider.Model_catalog.of_toml_string ~source:"Muse explicit none refusal"
+    {|[[models]]
+model_id = "muse-fixture-1"
+accepted_reasoning_efforts = ["low"]
+|} with
+   | Error detail -> fail detail
+   | Ok catalog -> Llm_provider.Model_catalog.set_global catalog);
+  let hooks = { Agent_core.Hooks.empty with before_turn_params=Some (function
+    | Agent_core.Hooks.BeforeTurnParams {current_params; _} ->
+      Agent_core.Hooks.AdjustParams
+        {current_params with reasoning_effort=Some Llm_provider.Reasoning_effort.None_}
+    | _ -> fail "expected before_turn_params hook event") } in
+  let run = run_turn_with ~model:"muse-fixture-1" ~hooks ~base_path
+    ~tool:(masc_probe_tool (ref `Null)) () in
+  let params = Yojson.Safe.from_file (Filename.concat base_path "start-turn-params.json") in
+  check string "the refusing host received explicit none"
+    "none" Yojson.Safe.Util.(params |> member "reasoningEffort" |> to_string);
+  (match run.outcome.result with
+   | Error (Agent_core.Error.Provider
+       (Llm_provider.Error.ProviderReportedError {error_type=Some "rpc_error"; _})) -> ()
+   | Error error -> fail (Agent_core.Error.to_string error)
+   | Ok _ -> fail "the native refusal became success");
+  check bool "the refused turn stays effect-free" true
+    (run.outcome.effect_disposition = Keeper_provider_attempt_effect.No_effect_observed);
+  check (list string) "no substituted-effort child retry" ["start"]
+    (read_text (Filename.concat base_path "sessions.log")
+      |> String.split_on_char '\n' |> List.filter (fun line -> line <> ""))
+;;
+
 (* What the operator surface holds for [scope]: source, window kind, used
    percent and reset (epoch seconds), sorted. *)
 let recorded_usage_windows scope =
@@ -3753,7 +3788,9 @@ let () =
           ; test_case "hook effort override reaches MSP without a catalog clamp" `Quick
               (test_routed_muse_effort_ignores_http_catalog
                 ~hook_effort:Llm_provider.Reasoning_effort.Ultra
-                (Some Llm_provider.Reasoning_effort.High))] )
+                (Some Llm_provider.Reasoning_effort.High))
+          ; test_case "host refusal of explicit none is preserved without replay" `Quick
+              test_muse_refuses_exact_none_without_replay] )
     ; ( "async result outbox"
       , [test_case "original result crosses checkpoint and fresh-session delivery" `Quick
            test_original_result_crosses_checkpoint_and_fresh_session

@@ -1459,6 +1459,21 @@ sys.stdin.read()
 |}
 
 let test_muse_private_tool_roundtrip () =
+  let previous_catalog = Llm_provider.Model_catalog.global () in
+  Fun.protect ~finally:(fun () -> match previous_catalog with
+    | None -> Llm_provider.Model_catalog.clear_global ()
+    | Some catalog -> Llm_provider.Model_catalog.set_global catalog) @@ fun () ->
+  (match Llm_provider.Model_catalog.of_toml_string ~source:"Muse readiness effort collision"
+    {|[[models]]
+model_id = "fixture-selected-model"
+accepted_reasoning_efforts = ["low"]
+|} with
+   | Error detail -> fail detail
+   | Ok catalog -> Llm_provider.Model_catalog.set_global catalog);
+  (match Llm_provider.Capabilities.for_model_id "fixture-selected-model" with
+   | Some caps -> check bool "readiness has a conflicting HTTP ladder" true
+       (caps.accepted_reasoning_efforts = Some [Llm_provider.Reasoning_effort.Low])
+   | None -> fail "the readiness collision row is missing");
   Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
     let directory = Filename.temp_dir "muse-readiness-test-" "" |> Unix.realpath in
     Eio.Switch.on_release sw (fun () -> Fs_compat.remove_tree directory);

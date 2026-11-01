@@ -64,7 +64,12 @@ val issue : ?goal_space:Browser_goal_space.t -> ?upload_paths:string list -> ?re
     for a snapshot. Duplicate client IDs and multiple controllers of one
     native Ego Space are refused. A handle cannot silently ignore a newly
     visible live service; reacquire it after service topology changes.
-    Incomplete live observations never authorize an automatic fallback.
+    Topology and unready metadata are re-read after snapshot I/O. This does
+    not serialize lifecycle changes after admission with command dispatch.
+    Incomplete live observations never authorize an automatic fallback or an
+    Ego route (including an exact or Goal-bound route), because an unreadable
+    live publisher may still control the same native Space. Explicit non-Ego
+    clients remain usable; unrelated owned backend failures do not block Ego.
     An explicit owned
     route without [required_actions] needs no snapshot. The receipt names the
     browser the host chose; the worker states no identity. A worker refusal

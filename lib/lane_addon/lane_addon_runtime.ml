@@ -2298,30 +2298,44 @@ let choose_document_service ~visibility candidates =
   | [] -> (match candidates with [] -> No_browser_service | _ :: _ -> Browser_narrower_than_consumer)
 (* A live document read uses the exact observed publisher. The same native
    identity conflict policy is used by public discovery and Page dispatch. *)
-let document_route_services ~services ~backend ~clients route =
+let document_route_services ~services ~unready ~backend ~clients route =
   let live=List.filter (fun service -> Browser_addon_observation.serves_live (backend service)) services in
+  let observed=List.map (fun service -> service,clients service) live in
+  let identities=List.map (fun (service,observation) -> backend service,observation) observed
+    @ List.map (fun backend -> backend,Browser_addon_observation.Unobserved_clients) unready in
+  let knowledge=Browser_addon_observation.ego_identity_knowledge identities in
   match route with
   | Browser_lane.Automation_route -> Ok (List.filter (fun service -> backend service=Browser_lane.Backend.Automation) services)
   | Stagehand_route -> Ok (List.filter (fun service -> backend service=Browser_lane.Backend.Stagehand) services)
-  | Live_route None -> (match live with []|[_] -> Ok live
-      | _::_::_ -> Error "a live document read requires an explicit client when multiple workers are visible")
+  | Live_route None -> (match knowledge,live with
+      | Browser_addon_observation.Unknown_ego_identities,_ ->
+          Error "live browser controller identities are incomplete; the document read requires an explicit observed non-Ego client"
+      | Known_ego_identities,([]|[_]) -> Ok live
+      | Known_ego_identities,_::_::_ -> Error "a live document read requires an explicit client when multiple workers are visible")
   | Live_route (Some client_id) ->
-      let listed=List.concat_map clients live in
+      let listed=List.concat_map (function
+        | _,Browser_addon_observation.Observed_clients clients -> clients
+        | _,Unobserved_clients -> []) observed in
       let conflicts=Browser_addon_observation.live_conflicts listed in
       (match List.find_opt (fun (client:Browser_lane.client_info) -> client.client_id=client_id) listed with
        | Some client ->
+           let* ()=Browser_addon_observation.check_ego_identity knowledge client in
            (match List.find_opt (Browser_addon_observation.conflicts_with client) conflicts with
             | Some conflict -> Error (Browser_addon_observation.conflict_message conflict)
-            | None -> Ok (List.filter (fun service -> List.exists (fun (client:Browser_lane.client_info) ->
-                client.client_id=client_id) (clients service)) live))
+            | None -> Ok (List.filter_map (function
+                | service,Browser_addon_observation.Observed_clients clients
+                  when List.exists (fun (client:Browser_lane.client_info) -> client.client_id=client_id) clients -> Some service
+                | _,(Observed_clients _|Unobserved_clients) -> None) observed))
        | None -> Ok [])
 let document_services m (reading : browser_reading) route =
   let clients (service : browser_service) = match Hashtbl.find_opt m.entries service.instance_id with
-    | None -> []
+    | None -> Browser_addon_observation.Unobserved_clients
     | Some (e : entry) -> (match Browser_addon_observation.read e.output with
-        | Ok published -> published.clients
-        | Error _ -> []) in
-  document_route_services ~services:reading.services ~backend:(fun (service : browser_service) -> service.backend)
+        | Ok published -> Browser_addon_observation.Observed_clients published.clients
+        | Error _ -> Browser_addon_observation.Unobserved_clients) in
+  let unready=List.filter_map (fun (source:Lane_addon_unready.t) -> match source.service with
+    | Browser_service backend -> Some backend | Mcp_tools -> None) reading.unready in
+  document_route_services ~services:reading.services ~unready ~backend:(fun (service : browser_service) -> service.backend)
     ~clients route
 let read_browser_document m ~access ~visibility ~route ~tab_id =
   with_tool_call_owner (fun () ->

@@ -48,6 +48,22 @@ let snapshot host=match Browser_addon_host.selection_snapshot host with
   | Ok (published,_) -> published
   | Error (Browser_addon_host.Snapshot_unavailable detail|Snapshot_unreadable detail) -> fail detail
 let live client=B.Live_route (Some client.B.client_id)
+let ledger attached = List.map (fun (worker:F.attached) -> worker.instance_id,worker.commands ()) attached
+let reaches_instance name attached (intended:F.attached) route verb call =
+  let before=ledger attached in
+  (match call () with Ok _ -> () | Error result -> fail (name ^ ": " ^ Tool_result.message result));
+  List.iter (fun (worker:F.attached) ->
+    let earlier=List.assoc worker.instance_id before in
+    let expected=if worker.instance_id=intended.instance_id then earlier @ [route,verb] else earlier in
+    check bool (name ^ ": exact per-instance command ledger") true (worker.commands ()=expected)) attached
+let refuses_before_dispatch name attached class_ call =
+  let before=ledger attached in
+  (match call () with
+   | Error (Tool_result.Failed failure) ->
+       check bool (name ^ ": typed refusal") true
+         (failure.class_=class_ && failure.effect_disposition=Tool_result.Proven_pre_effect)
+   | Ok _|Error (Tool_result.Completed _|Deferred _) -> fail (name ^ ": expected a pre-effect refusal"));
+  check bool (name ^ ": no worker received a command") true (ledger attached=before)
 
 let every_source_reaches_its_own_worker () =
   run_with [one Automation [stray];one Stagehand [];one Owned_firefox [bidi];one Ego [ego];
@@ -97,8 +113,10 @@ let independent_ego_spaces_route_exact_clients () =
     space=Some {B.id=52;name="Second Goal"}} in
   run_with [one Ego [first];one Ego [second];one External_host [extension]]
     (fun ~config ~host ~issue ~attached ->
-      reaches "first Space reaches exactly its publisher" ~issue (live first) B.Backend.Ego;
-      reaches "second Space reaches exactly its publisher" ~issue (live second) B.Backend.Ego;
+      reaches_instance "first Space reaches exactly its publisher" attached (List.nth attached 0) (live first) B.Tabs_list
+        (fun () -> fst (issue (live first)));
+      reaches_instance "second Space reaches exactly its publisher" attached (List.nth attached 1) (live second) B.Tabs_list
+        (fun () -> fst (issue (live second)));
       check (list string) "all distinct live clients remain visible" (ids [first;second;extension]) (ids (snapshot host).clients);
       let goal=match Goal_store.upsert_goal config ~title:"Second Space routing" ~metric:"verified" ~target_value:"1" () with
         | Ok (goal,_) -> goal.id | Error error -> fail (Goal_store.write_error_to_string error) in
@@ -106,8 +124,9 @@ let independent_ego_spaces_route_exact_clients () =
         | Ok commit -> commit.binding | Error error -> fail (Browser_goal_space.error_message error) in
       let second_instance=(List.nth attached 1).F.instance_id in
       check string "Goal pin records the actual second publisher" second_instance bound.addon_instance_id;
-      check bool "a bound initial browse dispatches on that exact Space" true
-        (Result.is_ok (Browser_addon_host.issue ~goal_space:bound host ~preference:Browser_selection.Automatic B.Tabs_list));
+      reaches_instance "a bound initial browse dispatches on that exact Space" attached (List.nth attached 1)
+        (live second) B.Tabs_list
+        (fun () -> Browser_addon_host.issue ~goal_space:bound host ~preference:Browser_selection.Automatic B.Tabs_list);
       check bool "unbound automatic browse never guesses among clients" true
         (Result.is_error (Browser_addon_host.issue host ~preference:Browser_selection.Automatic B.Tabs_list)));
   let conflicting={second with space=first.space} in
@@ -117,6 +136,58 @@ let independent_ego_spaces_route_exact_clients () =
       refused "second controller of duplicate native Space is refused" ~because:"multiple browser controllers" ~issue (live conflicting);
       reaches "unrelated client remains usable" ~issue (live extension) B.Backend.External_host;
       check (list string) "duplicate native controllers are excluded from choices" (ids [extension]) (ids (snapshot host).clients))
+
+let unreadable_live_controller_never_authorizes_ego_input () =
+  let first={ego with space=Some {B.id=51;name="First Goal"}} in
+  let second={ego with client_id=(client 5 B.Ego_lite B.Ego_task_space).client_id;
+    space=Some {B.id=52;name="Second Goal"}} in
+  run_with [one Ego [first];one Ego [second];one External_host [extension];one Automation []]
+    (fun ~config ~host ~issue:_ ~attached ->
+      let first_worker=List.nth attached 0 and second_worker=List.nth attached 1
+      and extension_worker=List.nth attached 2 and automation=List.nth attached 3 in
+      let bind title client =
+        let goal=match Goal_store.upsert_goal config ~title ~metric:"verified" ~target_value:"1" () with
+          | Ok (goal,_) -> goal.id | Error error -> fail (Goal_store.write_error_to_string error) in
+        match Browser_addon_host.bind_goal_space host ~goal_id:goal ~client_id:client.B.client_id with
+        | Ok commit -> commit.binding | Error error -> fail (Browser_goal_space.error_message error) in
+      let first_goal=bind "First owned Space" first and second_goal=bind "Second owned Space" second in
+      let goto=B.Page_goto {url="https://fixture.invalid/owned";tab_id=Some 1}
+      and open_session=B.Session_open {headless=None} in
+      let exact client verb ()=Browser_addon_host.issue host ~preference:(Browser_selection.Exact (live client)) verb in
+      let goal binding verb ()=Browser_addon_host.issue ~goal_space:binding host ~preference:Browser_selection.Automatic verb in
+      second_worker.set_snapshot (F.Snapshot_clients [{second with space=first.space}]);
+      refuses_before_dispatch "known duplicate Space refuses exact Page navigation" attached Tool_result.Workflow_rejection
+        (exact first goto);
+      refuses_before_dispatch "known duplicate Space refuses stored Goal open" attached Tool_result.Workflow_rejection
+        (goal first_goal open_session);
+      second_worker.set_snapshot F.Snapshot_unavailable;
+      refuses_before_dispatch "unreadable sibling cannot authorize exact Ego Page navigation" attached Tool_result.Dependency_unavailable
+        (exact first goto);
+      refuses_before_dispatch "unreadable sibling cannot authorize stored Goal open" attached Tool_result.Dependency_unavailable
+        (goal first_goal open_session);
+      refuses_before_dispatch "unreadable sibling cannot authorize exact Ego document read" attached Tool_result.Dependency_unavailable
+        (exact first (B.Page_document {tab_id=1}));
+      let unbound_goal=match Goal_store.upsert_goal config ~title:"Unknown controller pin" ~metric:"verified" ~target_value:"1" () with
+        | Ok (goal,_) -> goal.id | Error error -> fail (Goal_store.write_error_to_string error) in
+      check bool "unknown controller prevents a new Goal pin" true
+        (match Browser_addon_host.bind_goal_space host ~goal_id:unbound_goal ~client_id:first.client_id with
+         | Error (Browser_goal_space.Unavailable _) -> true
+         | Ok _|Error (Invalid _|Conflict _|Goal_reference _) -> false);
+      check bool "refused Goal pin wrote no binding" true (Browser_goal_space.find config ~goal_id:unbound_goal=Ok None);
+      reaches_instance "exact extension input remains independent" attached extension_worker (live extension) goto
+        (exact extension goto);
+      second_worker.set_snapshot (F.Snapshot_clients [second]);
+      automation.set_snapshot F.Snapshot_unavailable;
+      reaches_instance "unreadable Automation does not block exact Ego input" attached first_worker (live first) goto
+        (exact first goto);
+      reaches_instance "unreadable Automation does not block a stored Goal" attached first_worker (live first) open_session
+        (goal first_goal open_session);
+      reaches_instance "second distinct Space reaches its exact instance" attached second_worker (live second) goto
+        (exact second goto);
+      let reconnected={second with client_id=(client 6 B.Ego_lite B.Ego_task_space).client_id} in
+      second_worker.set_snapshot (F.Snapshot_clients [reconnected]);
+      reaches_instance "Goal re-resolves its own Space after client reconnect" attached second_worker (live reconnected) B.Tabs_list
+        (goal second_goal B.Tabs_list))
 
 (* A service that advertises no browser command still serves its source:
    it is counted, so the source is not given to another, and a command to it
@@ -164,6 +235,7 @@ let () = run "browser backend routes" ["one worker per source",[
   test_case "a missing source fails alone" `Slow a_missing_source_fails_alone;
   test_case "a doubled source fails alone" `Slow a_doubled_source_fails_alone;
   test_case "independent Ego Spaces route exact clients and reject duplicate controllers" `Slow independent_ego_spaces_route_exact_clients;
+  test_case "unknown live controllers refuse Ego input and reads before dispatch" `Slow unreadable_live_controller_never_authorizes_ego_input;
   test_case "a service without its command still counts" `Slow a_service_without_its_command_still_counts;
   test_case "a client two workers list is refused" `Slow a_client_two_workers_list_is_refused;
   test_case "a first native poll needs the one external host worker" `Slow

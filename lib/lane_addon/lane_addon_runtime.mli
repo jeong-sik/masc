@@ -505,10 +505,14 @@ module For_testing : sig
         (** Every such browser is visible to fewer readers than the consumer's output. *)
     | Several_browser_services
   val document_route_services :
-    services:'service list -> backend:('service -> Browser_lane.Backend.t) ->
-    clients:('service -> Browser_lane.client_info list) -> Browser_lane.route -> ('service list, string) result
+    services:'service list -> unready:Browser_lane.Backend.t list ->
+    backend:('service -> Browser_lane.Backend.t) ->
+    clients:('service -> Browser_addon_observation.client_observation) ->
+    Browser_lane.route -> ('service list, string) result
   (** The browser services a [browser_document] read on a route may go to;
-      duplicate client IDs and conflicting native Space controllers are refused. *)
+      duplicate client IDs and conflicting native Space controllers are refused.
+      An unreadable live publisher is unknown, not an empty client list, and
+      prevents an Ego document read. Owned backend reads remain independent. *)
   val choose_document_service :
     visibility:visibility -> ('service * visibility) list -> 'service document_service
   (** Which browser Add-on a [browser_document] source reads: only one whose

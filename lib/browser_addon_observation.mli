@@ -49,6 +49,17 @@ val live_conflicts : Browser_lane.client_info list -> live_conflict list
 val conflicts_with : Browser_lane.client_info -> live_conflict -> bool
 val conflict_message : live_conflict -> string
 
+type client_observation = Observed_clients of Browser_lane.client_info list | Unobserved_clients
+type ego_identity_knowledge = Known_ego_identities | Unknown_ego_identities
+val ego_identity_knowledge :
+  (Browser_lane.Backend.t * client_observation) list -> ego_identity_knowledge
+(** Every live-source publisher can report an Ego controller under the current
+    snapshot contract. An unreadable or unready live publisher can therefore
+    hide a conflicting controller. Owned Automation/Stagehand are unrelated. *)
+val check_ego_identity : ego_identity_knowledge -> Browser_lane.client_info -> (unit, string) result
+(** An Ego route requires all possible controllers' identities. Explicit
+    non-Ego clients remain usable when another publisher is unreadable. *)
+
 (** What several browser workers published, read as one, with each worker's
     source: unique live clients and unavailable backends of live workers, and the
     automation and Stagehand reports of the one worker that serves each, when

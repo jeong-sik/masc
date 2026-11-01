@@ -92,6 +92,15 @@ not inherit a binding silently. Task completion requires a confirmed native
 `finish_space` receipt for only the owned Space before detaching that installation;
 retirement alone preserves an active Space, and an unknown finish is never replayed.
 
+An unreadable or unready live-source publisher can hide another controller of
+the same native Space. Until every live publisher's identity is observed, Ego
+commands and Goal pins are refused before dispatch, including exact-client and
+stored Goal routes. Explicit extension clients remain usable, and a failed
+Automation or Stagehand observation does not block an exact Ego route. Cached
+`browser_document` reads preserve the same unknown-identity refusal.
+The host rechecks topology after snapshot I/O; this admission observation does
+not provide an atomic native-Space lease against later lifecycle changes.
+
 The worker exports `browser_command` to its host only. A browser service's
 exports are not public tools, so Keeper tool lists and MCP `tools/list` leave
 them out and several browser installations may export the same name. The host

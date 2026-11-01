@@ -116,23 +116,30 @@ type gathered = {
   conflicts : Browser_addon_observation.live_conflict list;
   listed : Browser_lane.client_info list;
   incomplete : bool;
+  ego_identities : Browser_addon_observation.ego_identity_knowledge;
 }
 (* [reach] names the services a request can go to; only those are asked, so
    a slow worker of another source does not hold the request up. Whether a
    live client is usable is judged among every service. *)
 let gather t ~reach =
-  let current=R.browser_services ~config:t.config ~access:t.access in
-  let* ()=if List.exists (fun (service:R.browser_service) ->
+  let check_topology services=if List.exists (fun (service:R.browser_service) ->
     Browser_addon_observation.serves_live service.backend && not (List.exists (fun (served:served) ->
       served.service.instance_id=service.instance_id
-      && Lane_addon_tool_export.equal_owner served.service.owner service.owner) t.services)) current
+      && Lane_addon_tool_export.equal_owner served.service.owner service.owner) t.services)) services
     then Error (Snapshot_unavailable "live browser services changed; reacquire the browser handle before selecting a Page")
     else Ok () in
+  let current=R.browser_service_reading ~config:t.config ~access:t.access in
+  let* ()=check_topology current.services in
   let among=List.map (fun (served:served) -> served.service.backend) t.services in
   match List.filter reach t.services with
   | [] -> Error (Snapshot_unavailable "no attached browser Add-on serves the requested browser")
   | reached ->
   let answers=Eio.Fiber.List.map (fun served -> served,published_of t served) reached in
+  (* Snapshot I/O yields to lifecycle reconciliation. Re-read once before
+     selection so a newly ready or unready publisher cannot be omitted from
+     the controller knowledge used below. This is not a lifecycle lease. *)
+  let current=R.browser_service_reading ~config:t.config ~access:t.access in
+  let* ()=check_topology current.services in
   match List.filter_map (fun (_,answer) -> Result.to_option answer) answers,answers with
   | [],(_,Error failure)::_ -> Error failure
   | [],((_,Ok _)::_|[]) -> Error (Snapshot_unavailable "no browser Add-on answered its snapshot")
@@ -145,8 +152,16 @@ let gather t ~reach =
       | Ok _|Error _ -> None) answers in
     let listed=List.concat_map (fun (_, (published:Browser_addon_observation.published)) -> published.clients) live in
     let conflicts=Browser_addon_observation.live_conflicts listed in
-    let incomplete=List.exists (fun (_,answer) -> Result.is_error answer) answers in
-    Ok {published;conflicts;listed;incomplete;
+    let unready=List.filter_map (fun (unready:Lane_addon_unready.t) -> match unready.service with
+      | Browser_service backend -> Some (backend,Browser_addon_observation.Unobserved_clients)
+      | Mcp_tools -> None) current.unready in
+    let identities=List.map (fun ((served:served),answer) -> served.service.backend,
+      match answer with
+      | Ok published -> Browser_addon_observation.Observed_clients published.clients
+      | Error _ -> Browser_addon_observation.Unobserved_clients) answers @ unready in
+    let ego_identities=Browser_addon_observation.ego_identity_knowledge identities in
+    let incomplete=List.exists (fun (_,answer) -> Result.is_error answer) answers || unready<>[] in
+    Ok {published;conflicts;listed;incomplete;ego_identities;
         selection={live_activity=(match live with [] -> Browser_lane.Unobserved | _::_ -> Browser_lane.Enabled);
           live_clients=published.clients;live_space_presence=published.space_presence;automation=published.automation;stagehand=published.stagehand};
         holders=List.concat_map (fun (served,(listed:Browser_addon_observation.published)) ->
@@ -189,7 +204,9 @@ let bind_goal_space t ~goal_id ~client_id =
   | Some {transport=Ego_task_space;space=None;_}
   | Some {transport=(Web_extension|Webdriver_bidi);_} ->
       Error (Browser_goal_space.Invalid "Goal Space binding requires an observed Ego Space connection")
-  | Some {transport=Browser_lane.Ego_task_space;space=Some space;_} ->
+  | Some ({transport=Browser_lane.Ego_task_space;space=Some space;_} as client) ->
+    let* ()=Browser_addon_observation.check_ego_identity gathered.ego_identities client
+      |> Result.map_error (fun detail -> Browser_goal_space.Unavailable detail) in
     match holders with
       | [served] ->
           Browser_goal_space.bind t.config ~goal_id ~addon_instance_id:served.service.instance_id
@@ -310,6 +327,13 @@ let resolve ?goal_space ~required_actions t ~preference verb ~start_time =
         |> Result.fold ~ok:Result.ok ~error:(unchosen ~clients:published.clients) in
       let* browser=Browser_selection.target ~verb ~snapshot selected.route
         |> Result.fold ~ok:Result.ok ~error:(fun error -> refuse (Browser_lane.selection_error_message error)) in
+      let* ()=match browser with
+        | Browser_selection.Connected client ->
+            Browser_addon_observation.check_ego_identity gathered.ego_identities client
+            |> Result.map_error (fun detail -> Tool_result.make_err
+                ~tool_name:Browser_addon_tool.definition.name ~start_time
+                ~class_:Tool_result.Dependency_unavailable ~effect_disposition:Tool_result.Proven_pre_effect detail)
+        | Owned_automation|Owned_stagehand -> Ok () in
       let* ()=Browser_selection.require ~snapshot required_actions browser
         |> Result.fold ~ok:Result.ok ~error:(unchosen ~clients:published.clients) in
       let* served=served_for t gathered browser |> Result.fold ~ok:Result.ok ~error:refuse in

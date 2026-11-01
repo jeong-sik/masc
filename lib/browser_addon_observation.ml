@@ -138,6 +138,19 @@ let conflicts_with (client:Browser_lane.client_info) = function
 let conflict_message = function
   | Duplicate_client id -> "Browser client " ^ Browser_lane.client_id_to_string id ^ " is advertised by multiple browser controllers"
   | Duplicate_ego_space id -> Printf.sprintf "Ego Space %d is advertised by multiple browser controllers; no input was dispatched" id
+type client_observation = Observed_clients of Browser_lane.client_info list | Unobserved_clients
+type ego_identity_knowledge = Known_ego_identities | Unknown_ego_identities
+let ego_identity_knowledge observations =
+  if List.exists (function
+    | backend,Unobserved_clients -> serves_live backend
+    | _,Observed_clients _ -> false) observations
+  then Unknown_ego_identities else Known_ego_identities
+let check_ego_identity knowledge (client:Browser_lane.client_info) =
+  match knowledge,client.transport with
+  | Unknown_ego_identities,Browser_lane.Ego_task_space ->
+      Error "live browser controller identities are incomplete; the Ego Space may have another controller, so no browser command was dispatched"
+  | Known_ego_identities,(Ego_task_space|Web_extension|Webdriver_bidi)
+  | Unknown_ego_identities,(Web_extension|Webdriver_bidi) -> Ok ()
 let merge ~among workers =
   let live=List.filter_map (fun (backend,published) -> if serves_live backend then published else None) workers in
   let clients=List.concat_map (fun published -> published.clients) live in

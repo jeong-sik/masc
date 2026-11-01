@@ -86,6 +86,9 @@ Ego 설치는 `[binding]`의 `space`에 작업별 이름 또는 이미 관측한
 전에 거절하고 기본 Space로 바꾸지 않는다. 실행 파일은 기존 host 설정을 유지한다.
 서로 다른 Space의 연결은 함께 표시되며 정확한 `clientId`로 해당 worker에만 보낸다.
 같은 client 또는 같은 native Space를 여러 controller가 광고하면 입력 전에 거절한다.
+live publisher 관측이 실패했거나 아직 준비되지 않았으면 다른 Ego controller가
+숨겨져 있을 수 있으므로 명시한 Ego 연결·Goal 경로와 document read도 거절한다.
+Automation·Stagehand 관측 실패는 명시한 Ego 경로를 막지 않는다.
 Space ID는 이 workspace가 사용하는 단일 Ego native runtime 안의 식별자다.
 
 선언 예제와 Goal binding·종료 의미는 [Browser 패키지 안내](../../addons/browser/README.md)를

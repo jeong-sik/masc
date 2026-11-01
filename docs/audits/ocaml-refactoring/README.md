@@ -2131,13 +2131,41 @@ their exceptions are re-raised after normal unlock so an observation failure can
 poison the persistence mutex. Exceptions from mutation still retain Eio poisoning.
 The adapter and HTTP route preserve canonical structured proof and committed IDs.
 
-This server layer does not finish T1. The TUI still needs request-owned outcome
-retention, exact sent-draft/attachment handling, and honest unknown-outcome
-reconciliation. The queue count remains 28 implemented candidates; T1 and S3 stay
-open. Source review and selected remote execution are recorded on the layer PR;
-syntax parsing is not type checking or execution, and no installed-runtime or full
-regression result is implied. No local Dune build, typecheck or test is used in this
-external coding session.
+The next TUI layer is [#47153](https://github.com/jeong-sik/masc/pull/47153),
+rebased with `gh stack rebase` after #47145 merged externally at
+`638fe7afb7a9cfd4c48dad8a24db3378faa9312d`. Its immutable publication owner captures
+original request/workspace/draft/staged-object identity and the exact serialized
+body produced after ordered uploads. It decodes the nested canonical tool result
+before HTTP status reduction. A committed failure retains its exact post ID and
+removes only the original sent attachment objects; changed draft bytes and later
+staged objects survive. An unanswered POST retains its original body and unknown
+effect without replay. First terminal outcomes are archived before current-request
+and workspace admission, so a late or withdrawn receipt cannot settle a successor.
+The actual request path is now a separate library used by route/transport scenarios;
+workspace cancellation, I/O-domain ownership and real401 credential refresh remain
+with their existing owners.
+
+New scenarios exercise actual authenticated artifact/Board routes and storage
+through the request owner and TCP transport: a committed HTTP400, a committed write
+whose acknowledgement is dropped, pre-POST file failure, cancellation after the
+actual upstream commit, and late/duplicate/foreign/A-to-B-to-A receipt admission.
+Peer EOF and receipt publication are separate observations; existing I/O-domain
+scenarios own physical pool cleanup evidence. These are authored scenarios, not an
+execution claim. Server prerequisite Test run
+[41283385935](https://github.com/jeong-sik/masc/actions/runs/41283385935) completed
+successfully at `3ac145916e09f7317ff61f2cf6a647ec971f49f0` on
+`fix/board-publication-proof-main-20261101`, with the six selected Board/Fusion suites.
+It does not validate this later TUI layer.
+
+T1 remains open: ordinary Board creation still lacks a persisted client operation
+identity and authoritative unknown-acknowledgement reconciliation. Session history
+does not survive restart, and unchanged-draft protection compares bytes rather than
+composer revisions. No text matching, automatic retry, timeout or global Board
+blocker substitutes for the missing contract. The queue count remains 28 implemented
+candidates; T1 and S3 stay open. Exact-head independent source review and selected
+remote execution are recorded on each layer PR; syntax parsing is not type checking
+or execution, and no installed-runtime or full regression result is implied. No
+local Dune build, typecheck or test is used in this external coding session.
 
 Inspection revision: `857c8647ce7cc7305d6aa081d1aa24ac5b93f05e`. This follows the merged
 TUI I/O work; it is not a regression attribution to #43355.

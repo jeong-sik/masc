@@ -32,13 +32,14 @@ type model_key = {
 type model_observation = {
   key : model_key;
   model_id : string;
-  observed_at : float;
+  observed_elapsed : float;
 }
 
 type cache_snapshot = {
   endpoints : endpoint_info list;
   models : model_observation list;
   updated_at : float;
+  refreshed_elapsed : float;
 }
 
 type runtime_state = {
@@ -46,9 +47,13 @@ type runtime_state = {
   cache : cache_snapshot;
 }
 
-let empty_cache = { endpoints = []; models = []; updated_at = 0.0 }
+let empty_cache = {
+  endpoints = []; models = []; updated_at = 0.0; refreshed_elapsed = 0.0;
+}
 let state = Atomic.make { environment = None; cache = empty_cache }
 let cache_ttl = 30.0
+
+let elapsed_seconds () = Mtime.Span.to_float_ns (Mtime_clock.elapsed ()) /. 1e9
 
 let set_env ~sw ~clock ~(net : [`Generic | `Unix] Eio.Net.ty Eio.Resource.t) =
   Atomic_util.update state (fun _ ->
@@ -65,13 +70,13 @@ let model_of_status (status : endpoint_info) =
        | None -> None)
 
 let fresh_observation now (observation : model_observation) =
-  now -. observation.observed_at <= cache_ttl
+  now -. observation.observed_elapsed <= cache_ttl
 
 let public_observations now results =
   List.filter_map (fun (status : endpoint_info) ->
     Option.map (fun model_id ->
       let key = { url = status.url; protocol = status.protocol; scope = Public } in
-      { key; model_id; observed_at = now }) (model_of_status status)) results
+      { key; model_id; observed_elapsed = now }) (model_of_status status)) results
 
 let scope_of_headers = function
   | [] -> Public
@@ -88,11 +93,11 @@ let same_model_key left right =
   && left.scope = right.scope
 
 let publish_model_observation observed key model_id =
-  let observed_at = Time_compat.now () in
+  let observed_elapsed = elapsed_seconds () in
   let models =
-    { key; model_id; observed_at }
+    { key; model_id; observed_elapsed }
     :: List.filter (fun observation ->
-      not (same_model_key observation.key key) && fresh_observation observed_at observation)
+      not (same_model_key observation.key key) && fresh_observation observed_elapsed observation)
       observed.cache.models
   in
   let next = { observed with cache = { observed.cache with models } } in
@@ -112,7 +117,8 @@ let refresh_cache () =
     let results =
       Llm_provider.Discovery.discover ~headers:[] ~clock ~sw:switch ~net ~endpoints ()
     in
-    let now = Time_compat.now () in
+    let updated_at = Time_compat.now () in
+    let now = elapsed_seconds () in
     let retained =
       List.filter (fun observation ->
         fresh_observation now observation
@@ -127,7 +133,8 @@ let refresh_cache () =
     let cache = {
       endpoints = results;
       models = public_observations now results @ retained;
-      updated_at = now;
+      updated_at;
+      refreshed_elapsed = now;
     } in
     let next = { observed with cache } in
     ignore (Atomic.compare_and_set state observed next : bool)
@@ -135,7 +142,7 @@ let refresh_cache () =
 
 let get_cached_or_refresh () =
   let snapshot = (Atomic.get state).cache in
-  let stale_by_ttl = Time_compat.now () -. snapshot.updated_at > cache_ttl in
+  let stale_by_ttl = elapsed_seconds () -. snapshot.refreshed_elapsed > cache_ttl in
   let need_refresh =
     stale_by_ttl || snapshot.endpoints = []
   in
@@ -150,7 +157,7 @@ let first_ollama_model_id_for_url ~timeout_s ?(headers=[]) url =
   let snapshot = Atomic.get state in
   let scope = scope_of_headers headers in
   let key = { url; protocol = Llm_provider.Discovery.Ollama_native; scope } in
-  let now = Time_compat.now () in
+  let now = elapsed_seconds () in
   let cached =
     List.find_map (fun observation ->
       if same_model_key observation.key key && fresh_observation now observation

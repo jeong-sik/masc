@@ -3,7 +3,8 @@
 
     All HTTP probing logic lives in [Llm_provider.Discovery]; this
     module adds:
-    - 30-second TTL caching as one immutable atomic snapshot;
+    - 30-second TTL caching measured by monotonic elapsed time, as one
+      immutable atomic snapshot;
     - Eio capability injection via {!set_env} at server init so
       the cached probe can issue HTTP without threading the
       runtime through every caller.
@@ -48,8 +49,10 @@ val get_cached_or_refresh : unit -> endpoint_info list
     - the TTL has elapsed (30 seconds), or
     - the cached result is empty (including every call after an empty probe).
 
-    The staleness decision reads the endpoints and timestamp from the
-    same immutable snapshot. Global probes use each active endpoint's declared
+    The staleness decision reads the endpoints and monotonic timestamp from the
+    same immutable snapshot. Wall-clock adjustments do not change the TTL;
+    {!cache_age_seconds} remains a separate wall-clock observation.
+    Global probes use each active endpoint's declared
     [discovery_timeout_s] with the captured clock. No fallback deadline is chosen;
     an undeclared endpoint retains its existing unbounded behavior. *)
 
@@ -60,7 +63,8 @@ val first_ollama_model_id_for_url :
   timeout_s:float -> ?headers:(string * string) list -> string -> string option
 (** Return the first nonblank model of a healthy Ollama endpoint with this exact URL.
     Reuse a fresh positive observation only for the same URL, native protocol and
-    header fingerprint scope. A stale or missing observation probes only that endpoint
+    header fingerprint scope within the monotonic 30-second TTL.
+    A stale or missing observation probes only that endpoint
     with the caller-declared total HTTP deadline; no fallback deadline is chosen here.
     Successful results are published by compare-and-set if the pre-probe state is still
     current. The scope stores a SHA-256 digest of the exact header list, never its

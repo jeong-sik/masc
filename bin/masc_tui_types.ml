@@ -6325,7 +6325,6 @@ module Browser_lane_view = struct
     | Frame_read -> "frame read"
     | Operator_handoff -> "hand to operator"
     | Page_management -> "adopt/release tab"
-    | Page_recovery -> "same-Page recovery"
     | Download_listing -> "downloads"
     | File_upload -> "upload"
   (* What a live connection of this transport leaves out, read from the lane's

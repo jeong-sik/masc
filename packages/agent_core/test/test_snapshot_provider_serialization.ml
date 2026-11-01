@@ -124,7 +124,8 @@ let nudged_messages =
           ; content_blocks = None
           }
       ]
-  ; msg User [ Text "nudge: try a different tool" ]
+  ; Types.make_message ~origin:Recovery_instruction ~role:User
+      [ Text "nudge: try a different tool" ]
   ]
 ;;
 
@@ -677,6 +678,25 @@ let test_anthropic_nudged_tool_turn_merges_followup_text () =
     (List.nth content 1 |> member "text" |> to_string)
 ;;
 
+let test_anthropic_caller_input_keeps_its_message () =
+  let body =
+    Backend_anthropic.build_request
+      ~config:(anthropic_cfg ~tool_choice:(Tool "get_weather"))
+      ~messages:(messages @ [msg User [Text "a new caller request"]])
+      ~tools:[tool_decl]
+      ()
+  in
+  let open Yojson.Safe.Util in
+  let wire = Yojson.Safe.from_string body |> member "messages" |> to_list in
+  check int "caller input is not absorbed into tool result" 4 (List.length wire);
+  let result = List.nth wire 2 |> member "content" |> to_list in
+  check int "tool result has no caller text" 1 (List.length result);
+  let caller = List.nth wire 3 in
+  check string "caller role" "user" (caller |> member "role" |> to_string);
+  check string "caller request retained" "a new caller request"
+    (caller |> member "content" |> to_list |> List.hd |> member "text" |> to_string)
+;;
+
 (* ── Gemini ─────────────────────────────────────────── *)
 
 let gemini_any_expected =
@@ -741,6 +761,25 @@ let test_gemini_nudged_tool_turn_merges_followup_text () =
     "text followup"
     "nudge: try a different tool"
     (List.nth parts 1 |> member "text" |> to_string)
+;;
+
+let test_gemini_caller_input_keeps_its_message () =
+  let body =
+    Backend_gemini.build_request
+      ~config:(gemini_cfg ~tool_choice:Any)
+      ~messages:(messages @ [msg User [Text "a new caller request"]])
+      ~tools:[tool_decl]
+      ()
+  in
+  let open Yojson.Safe.Util in
+  let wire = Yojson.Safe.from_string body |> member "contents" |> to_list in
+  check int "caller input is not absorbed into function response" 4 (List.length wire);
+  let result = List.nth wire 2 |> member "parts" |> to_list in
+  check int "function response has no caller text" 1 (List.length result);
+  let caller = List.nth wire 3 in
+  check string "caller role" "user" (caller |> member "role" |> to_string);
+  check string "caller request retained" "a new caller request"
+    (caller |> member "parts" |> to_list |> List.hd |> member "text" |> to_string)
 ;;
 
 (* ── GLM (OpenAI-compatible wire format) ────────────── *)
@@ -952,6 +991,10 @@ let () =
             "nudged tool turn merges followup text"
             `Quick
             test_anthropic_nudged_tool_turn_merges_followup_text
+        ; test_case
+            "caller input keeps its message"
+            `Quick
+            test_anthropic_caller_input_keeps_its_message
         ] )
     ; ( "gemini"
       , [ test_case "tool_choice Any" `Quick test_gemini_any
@@ -959,6 +1002,10 @@ let () =
             "nudged tool turn merges followup text"
             `Quick
             test_gemini_nudged_tool_turn_merges_followup_text
+        ; test_case
+            "caller input keeps its message"
+            `Quick
+            test_gemini_caller_input_keeps_its_message
         ] )
     ; "glm", [ test_case "tool_choice Any" `Quick test_glm_any ]
     ; ( "ollama"

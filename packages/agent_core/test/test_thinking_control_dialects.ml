@@ -1599,7 +1599,7 @@ let test_gemini_default_keeps_sampling_fields () =
   let config =
     PC.make
       ~kind:Gemini
-      ~model_id:"gemini-3.8-flash-high"
+      ~model_id:"gemini-3.8-flash"
       ~base_url:"https://generativelanguage.googleapis.com/v1beta"
       ~temperature:0.7
       ~top_p:0.9

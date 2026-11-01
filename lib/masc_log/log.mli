@@ -175,6 +175,20 @@ module Ring : sig
       into the ring buffer, then opens the file for appending new entries.
       [dir] is the directory for dated JSONL log files.
 
+      Opening, rotation, reconfiguration and appends share one sink lock.
+      If loading [dir] fails, the previous sink stays disabled. After loading
+      succeeds, [dir] remains the intended sink even if opening it fails;
+      later entries retry that directory rather than the previous one.
+
+      A failed append or flush closes the channel; later entries still
+      attempt to reopen this configured sink. The failed batch is not
+      replayed because some of its bytes may already have been written.
+      On opening a regular file, a nonempty tail without a newline is sealed
+      with a newline before any new record. Existing bytes are preserved:
+      malformed JSON rows remain visible on disk and the JSONL reader skips
+      them, while complete rows still undergo strict entry decoding. This
+      does not recover a failed batch or guarantee crash durability.
+
       [identity_recheck_interval_s] (default 5.0) throttles the per-emit
       sink-identity stat pair that detects external unlink/rename of the
       live log file. Records emitted inside the window after an external

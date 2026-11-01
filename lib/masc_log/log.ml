@@ -273,6 +273,11 @@ module Ring = struct
   let file_current_date : string ref = ref ""
   let file_base_dir : string ref = ref ""
 
+  (* One lock owns channel open/swap/close and complete append+flush batches.
+     Stdlib.Mutex also works before Eio starts and during [at_exit]. Helpers
+     below run with this lock held and never call back into the log ring. *)
+  let sink_mutex = Stdlib.Mutex.create ()
+
   (* Sink-identity recheck throttle. The dev/ino check in [sink_matches_path]
      exists to catch external unlink/rename of the live log file — a rare
      event — but it sits on the emit path, so unthrottled it cost three
@@ -303,14 +308,58 @@ module Ring = struct
         file_channel := None
     | None -> ()
 
-  let open_sink dir =
+  let seal_regular_file_tail path oc =
+    let writer_stat = Unix.LargeFile.fstat (Unix.descr_of_out_channel oc) in
+    if writer_stat.st_kind = Unix.S_REG && writer_stat.st_size > 0L then begin
+      (* Keep the output channel write-only: a FIFO must still fail with
+         EPIPE when its reader disappears. Nonblocking open also avoids
+         waiting if an external rename replaces this path with a FIFO. *)
+      let reader = Unix.openfile path [Unix.O_RDONLY; Unix.O_NONBLOCK] 0 in
+      Fun.protect ~finally:(fun () -> Unix.close reader) (fun () ->
+        let reader_stat = Unix.LargeFile.fstat reader in
+        if reader_stat.st_dev <> writer_stat.st_dev
+           || reader_stat.st_ino <> writer_stat.st_ino
+           || reader_stat.st_kind <> Unix.S_REG then
+          raise (Sys_error (path ^ ": sink changed during tail inspection"));
+        if reader_stat.st_size > 0L then begin
+          ignore
+            (Unix.LargeFile.lseek reader (Int64.pred reader_stat.st_size) Unix.SEEK_SET);
+          let tail = Bytes.create 1 in
+          if Unix.read reader tail 0 1 <> 1 then
+            raise (Sys_error (path ^ ": sink shrank during tail inspection"));
+          if Bytes.get tail 0 <> '\n' then begin
+            (* Do not truncate or replay ambiguous failed bytes. Separate
+               their row from future records; [fold_jsonl_lines] warns and
+               skips malformed JSON but still strictly decodes valid rows. *)
+            output_char oc '\n';
+            flush oc
+          end
+        end)
+    end
+
+  let open_channel dir =
     ensure_dir dir;
     let date = date_string () in
     let path = log_file_path dir date in
-    let oc = open_out_gen [Open_append; Open_creat; Open_wronly] 0o644 path in
-    file_channel := Some oc;
-    file_current_date := date;
-    file_base_dir := dir
+    (* [O_NONBLOCK] is only for the open: a write-only FIFO open without a
+       reader fails ENXIO at once instead of blocking under the sink lock.
+       Clear it again so writes keep their normal semantics — a full pipe
+       still applies backpressure and a vanished reader still raises EPIPE.
+       Regular files ignore the flag either way. An open failure reaches
+       [try_open_channel]'s guard, which keeps the previous channel and
+       retries later. *)
+    let fd =
+      Unix.openfile path
+        [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_APPEND; Unix.O_NONBLOCK ]
+        0o644 in
+    Unix.clear_nonblock fd;
+    let oc = Unix.out_channel_of_descr fd in
+    match seal_regular_file_tail path oc with
+    | () -> (oc, date)
+    | exception exn ->
+        let backtrace = Printexc.get_raw_backtrace () in
+        close_out_noerr oc;
+        Printexc.raise_with_backtrace exn backtrace
 
   (* Atomic rotate: open the new sink first, swap only on success. The
      previous [close_sink (); open_sink ()] pair left [file_channel := None]
@@ -324,13 +373,7 @@ module Ring = struct
      [protect] guard turns an [open_out_gen] failure into a logged warning
      plus retained old channel, instead of permanent silent loss. *)
   let try_open_channel dir =
-    ensure_dir dir;
-    let date = date_string () in
-    let path = log_file_path dir date in
-    protect ~default:None (fun () ->
-      Some
-        ( open_out_gen [Open_append; Open_creat; Open_wronly] 0o644 path
-        , date ))
+    protect ~default:None (fun () -> Some (open_channel dir))
 
   (* RFC-0079: typed encoder. Exhaustive match on [level] / [source] means
      adding a new variant fails to compile here until the wire format is
@@ -383,9 +426,7 @@ module Ring = struct
         | Some oc ->
             if today <> !file_current_date then true
             else begin
-              (* [last_sink_identity_check_at] races benignly across threads —
-                 this function already runs outside [sink_mutex]; the worst
-                 case is a duplicate identity check. A backward wall-clock
+              (* The sink lock also owns the identity-check throttle. A backward wall-clock
                  jump delays the next check by at most the jump size, which
                  only widens the unlink-detection window. *)
               let now = Time_compat.now () in
@@ -420,61 +461,26 @@ module Ring = struct
       end
     end
 
-  (* RFC-0108: serialize the JSONL append under a single mutex
-     critical section so concurrent fibers (or domains) cannot
-     interleave bytes from different records.  Pre-fix, the three-
-     call sequence [output_string oc json; output_char oc '\n';
-     flush oc] left a race window between the JSON and the newline —
-     observed on 2026-05-17 as ["}{"]-concat lines in
-     [.masc/logs/system_log_2026-05-17.jsonl:3498] and [:4635].
-
-     [Stdlib.Mutex] is sufficient here because [Ring.init_file_sink]
-     runs before [Eio_main.run] (see [bin/main_eio.ml]); the writer
-     therefore cannot assume an Eio scheduler is available and must
-     work from non-Eio contexts (e.g. [at_exit]).  The mutex protects
-     the single global [file_channel], so one lock covers the whole
-     write path. Building the [json + "\n"] payload as a single
-     string before [output_string] also keeps the kernel-visible
-     write boundary at record granularity (the channel buffer is
-     flushed once per record).
-
-     [rotate_if_needed] runs outside the mutex on purpose — it only
-     mutates [file_channel] when the date rolls, and recursing into
-     the mutex there would deadlock.  Reading [!file_channel] inside
-     the lock means a rotate racing with a write sees whichever
-     channel is current; the worst case is one record on the
-     about-to-rotate channel, which is harmless. *)
-  let sink_mutex = Stdlib.Mutex.create ()
-
   (* Append [lines] (each already ends in a newline) and flush once. The
      writer thread passes a batch; a synchronous producer passes one line. *)
   let write_lines_now lines =
-    rotate_if_needed ();
     Stdlib.Mutex.protect sink_mutex
       (fun () ->
-        (* Self-heal: if a prior rotate left [file_channel = None]
-           (open failure) but the base dir is still configured, try
-           to reopen now. Bounded: at most one attempt per write, no
-           backoff loop. Failure is silent here because [rotate_if_needed]
-           already emitted the WARN; logging again per emit would spam. *)
-        if !file_channel = None && !file_base_dir <> "" then begin
-          match try_open_channel !file_base_dir with
-          | Some (oc, date) ->
-              file_channel := Some oc;
-              file_current_date := date
-          | None -> ()
-        end;
+        rotate_if_needed ();
         match !file_channel with
         | Some oc ->
-            (try List.iter (output_string oc) lines
-             with exn ->
+            (try
+               List.iter (output_string oc) lines;
+               flush oc
+             with
+             | Eio.Cancel.Cancelled _ as exn -> close_sink (); raise exn
+             | exn ->
                Printf.eprintf
                  "[%s] [ERROR] [Log] file-sink write failed: %s; \
                   dropping channel for next-emit re-open\n%!"
                  (timestamp ())
                  (Printexc.to_string exn);
-               close_sink ());
-            protect ~default:() (fun () -> flush oc)
+               close_sink ())
         | None -> ())
 
   (* RFC async-log-sink-durable-append-offload §3. Once [start_writer] runs,
@@ -768,13 +774,22 @@ module Ring = struct
   let init_file_sink
       ?(identity_recheck_interval_s = default_sink_identity_recheck_interval_s)
       dir =
-    sink_identity_recheck_interval_s := identity_recheck_interval_s;
-    last_sink_identity_check_at := neg_infinity;
-    close_sink ();
-    let loaded = load_from_file dir in
-    open_sink dir;
-    if loaded > 0 then
-      Printf.eprintf "[%s] [INFO] [Log] Restored %d log entries from disk\n%!" (timestamp ()) loaded
+    Stdlib.Mutex.protect sink_mutex (fun () ->
+      sink_identity_recheck_interval_s := identity_recheck_interval_s;
+      last_sink_identity_check_at := neg_infinity;
+      close_sink ();
+      (* A failed load must not resume appends with unconfirmed sequence
+         state. Once loaded, retries belong to B even if its open fails;
+         the previous directory A is no longer an authorized destination. *)
+      file_base_dir := "";
+      file_current_date := "";
+      let loaded = load_from_file dir in
+      file_base_dir := dir;
+      let oc, date = open_channel dir in
+      file_channel := Some oc;
+      file_current_date := date;
+      if loaded > 0 then
+        Printf.eprintf "[%s] [INFO] [Log] Restored %d log entries from disk\n%!" (timestamp ()) loaded)
 
   let cleanup_old_files ?(keep_days = 7) dir =
     if Sys.file_exists dir then begin
@@ -861,7 +876,9 @@ module Ring = struct
         category;
       } in
     buf.(idx) <- entry;
-    if !file_channel <> None then
+    (* A failed append closes the channel. Keep sending later entries to the
+       configured sink so its next write can reopen it. *)
+    if !file_base_dir <> "" then
       write_to_sink (entry_to_json entry)
 
   let recent ?(limit = 200) ?(min_level = 0) ?(module_filter = "")

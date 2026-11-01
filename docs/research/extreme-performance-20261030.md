@@ -145,6 +145,26 @@ completed and its downloaded TUI digest/embedded source were verified. That
 artifact provides no server; a performance execution/comparison remains future
 evidence.
 
+## Sampled list path and a failed owner-settlement observation
+
+The [same-draw reuse investigation](../evidence/extreme-performance-20261030/keeper-list-sampling/README.md)
+adds native stack sampling under 2 and 300 held owners. The 300 TUI capture has
+103 list Builds, p50 5.151 ms and p95 11.096 ms, with sampler overhead. Named
+`keeper_reading`/`liveness_of_roster` occur together in 141 of the recorded
+main-thread graph occurrences; these are not call counts, exclusive CPU or a
+binding to a particular render. No applied UI cardinality is measured.
+
+Source review independently identifies a renderer-local duplicate: selection
+rebuilds the same ordered model, and fleet health/width separately reread the
+roster. PR #46941 reuses the synchronous existing rows without a mutable cache.
+Exact-source candidate execution and speedup remain unverified.
+
+The 300-owner overall workload failed at its settlement status deadline. Its API
+terminal receipt is empty. After harness-requested shutdown, SQLite exports show
+321 successes, 268 Turn_cancelled failures and 11 queued inputs; those are
+post-shutdown states, not 600 successful completions or proof of cancellation
+before shutdown. The server delay remains open, and the failed capture is kept.
+
 ## Measurement matrix still required for completion
 
 Use 100 us as the explicit target for every relevant boundary below. Report

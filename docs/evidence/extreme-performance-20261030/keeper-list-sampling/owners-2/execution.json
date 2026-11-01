@@ -1,0 +1,23 @@
+{
+  "command": [
+    "/opt/homebrew/opt/python@3.14/bin/python3.14",
+    "artifacts/extreme-perf-20261030/tui-owner-profile-v1/keeper_scale_session.py",
+    "--binary",
+    "artifacts/extreme-perf-20261030/tui-prefix-native-v1/masc",
+    "--tui-binary",
+    "artifacts/extreme-perf-20261030/tui-prefix-native-v1/masc-tui",
+    "--repo",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030",
+    "--output",
+    "artifacts/extreme-perf-20261030/native-tui-profile2-v1",
+    "--keepers",
+    "2",
+    "--messages-per-keeper",
+    "2"
+  ],
+  "started_unix": 1793347258.057411,
+  "completed_unix": 1793347280.3109398,
+  "returncode": 0,
+  "stdout": "{\n  \"keepers\": 2,\n  \"messages\": 4,\n  \"succeeded_operations\": 4,\n  \"actual_model_calls\": 4,\n  \"max_provider_requests_in_flight\": 2,\n  \"latency_samples\": 156,\n  \"valid_latency_samples\": 156,\n  \"scope\": \"Pinned-native-source real Keeper turns with a loopback scripted text-only model, durable queued operations and offline SQLite reread. No guest/tool execution, browser/TUI or production throughput proof.\",\n  \"latency_by_phase\": {\n    \"submitting_model_held\": {\n      \"samples\": 3,\n      \"valid\": 3,\n      \"failures\": 0,\n      \"p50_ms\": 1.503834,\n      \"p95_ms\": 2.7025,\n      \"max_ms\": 2.7025\n    },\n    \"model_held_queue_observation\": {\n      \"samples\": 146,\n      \"valid\": 146,\n      \"failures\": 0,\n      \"p50_ms\": 1.051792,\n      \"p95_ms\": 2.325875,\n      \"max_ms\": 15.128667\n    },\n    \"running_model_released\": {\n      \"samples\": 6,\n      \"valid\": 6,\n      \"failures\": 0,\n      \"p50_ms\": 0.638708,\n      \"p95_ms\": 3.88975,\n      \"max_ms\": 3.88975\n    },\n    \"settled\": {\n      \"samples\": 1,\n      \"valid\": 1,\n      \"failures\": 0,\n      \"p50_ms\": 0.740125,\n      \"p95_ms\": 0.740125,\n      \"max_ms\": 0.740125\n    }\n  },\n  \"rejected_429_count\": 0,\n  \"rate_limit_wait_s\": 0,\n  \"rate_limit_wait_by_source_s\": {},\n  \"denied_read_only_inventory_attempts\": 2,\n  \"unexpected_guest_command_attempts\": 0\n}\n",
+  "stderr": ""
+}

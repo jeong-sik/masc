@@ -1,0 +1,36 @@
+[
+  {
+    "phase": "submitting_model_held",
+    "started_ns": 495692020512250,
+    "wall_time_ns": 1793347333116030000
+  },
+  {
+    "phase": "model_held_queue_observation",
+    "started_ns": 495731118259458,
+    "wall_time_ns": 1793347372214574000
+  },
+  {
+    "event": "tui_observer_start",
+    "at_ns": 495731128127958,
+    "wall_time_ns": 1793347372224441000
+  },
+  {
+    "event": "tui_observer_end",
+    "at_ns": 495741788885708,
+    "tui_exit_code": 0,
+    "observer_error": null,
+    "capture_qualified": true,
+    "wall_time_ns": 1793347382885420000
+  },
+  {
+    "event": "provider_release",
+    "at_ns": 495772464041125,
+    "active_provider_requests": 300,
+    "wall_time_ns": 1793347413561196000
+  },
+  {
+    "phase": "running_model_released",
+    "started_ns": 495772464474708,
+    "wall_time_ns": 1793347413561630000
+  }
+]

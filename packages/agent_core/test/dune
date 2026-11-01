@@ -141,6 +141,7 @@
   test_metrics
   test_model_catalog_default
   test_model_catalog_composition
+  test_request_pricing_snapshot
   test_model_identifiers
   test_module_check
   test_multimodal
@@ -280,6 +281,7 @@
   test_metrics
   test_model_catalog_default
   test_model_catalog_composition
+  test_request_pricing_snapshot
   test_model_identifiers
   test_module_check
   test_multimodal

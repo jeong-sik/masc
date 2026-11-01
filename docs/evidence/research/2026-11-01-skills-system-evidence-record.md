@@ -71,3 +71,13 @@
 - 선택 권한: source picker의 표시와 키 입력이 같은 실제 content-height budget을 사용한다. Tools chrome 계산을 한 곳으로 모으고, 내부 페이지 선택에는 외부 overflow row를 중복 차감하지 않는다. 화면 밖 source 선택 및 일시 단절의 초안 삭제라는 검토 지적을 수정했다.
 - TUI 검증 범위: 변경 OCaml의 parse-only 및 전체 parent-to-working-tree diff check 통과. 요청 target, 선택 결정, 원래 workspace별 초안 보류·복원, 실제 publisher-to-wire 경계를 검사하도록 시나리오를 추가했다. 화면 문구·ANSI·배치 assertion은 추가하지 않았다. 이 후속 변경의 컴파일·실행 및 실제 후보 화면 검증은 아직 미완료다.
 - 한계: source PASS와 이전 후보 Test 성공을 설치·운영·화면 실측으로 바꾸어 쓰지 않는다. 실행 기록 탐색과 최종 UI 증거, 공식 승인 및 전체 stack integration은 계속 진행한다.
+
+## TUI 작성 검사와 첫 패키지 탐색
+
+- 출처: https://github.com/jeong-sik/masc/actions/runs/41268883232, 후보 worktree의 writable_sources 및 Dashboard discovery 변경
+- 확인일시: 2026-11-01T03:36:06Z
+- 신뢰도: High
+- TUI 후보: 69a0b63d2f2793e3d4d643cd37f0e86b902b3d51, branch feat/skills-tui-authoring-20261101, Test workflow, TARGET_SUITES=test_server_skill_editor,test_tui_text_input_target,test_tui_quit_key_yields, minimal=true, completed/success. 38 + 36 + 2 = 76개 검사 통과. 공식 승인 및 실제 화면 검증과는 별개다.
+- 탐색 수정: 선언된 read-write Source_missing을 선택 목록에 포함한다. 조회에는 파일 쓰기가 없고, 기존 create가 후보 검증 이후에만 폴더를 초기화한다. ready/missing/read-only/not-directory/unavailable/unresolved를 실제 임시 파일시스템 fixture로 구분하고 첫 생성 후 exact-reference readback을 검사한다. 이 OCaml 후속 검사의 실행은 아직 미확인이다.
+- Dashboard: source/kind/text 필터와 전체 대비 표시 개수, no-match 상태를 추가했다. 필터가 열린 편집기를 unmount해 초안을 잃는다는 독립 검토 지적은 keyed owner를 유지하고 visibility만 바꾸어 수정했다. 필터를 지웠을 때 작성한 bytes가 복원되고 저장 요청이 없음을 검사한다. Dashboard 관련 파일 32개 검사, touched-file ESLint 및 TypeScript typecheck 통과.
+- 한계: 실행 기록 탐색, 후보 화면, 공식 승인 및 병합은 계속 진행 중이다. 기존 제품의 장점을 반영했다는 설계 설명은 설치·운영 증거를 대신하지 않는다.

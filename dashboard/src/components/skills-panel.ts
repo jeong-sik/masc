@@ -764,6 +764,9 @@ function SkillsObservationPanel({ owner, onMutation }: {
   const asyncObservation = useSignal<AsyncRequestObservation | null>(null)
   const asyncObservationError = useSignal<string | null>(null)
   const expanded = useSignal<string | null>(null)
+  const search = useSignal('')
+  const sourceFilter = useSignal('')
+  const kindFilter = useSignal('')
   const createOpen = useSignal(false)
   const createMounted = useSignal(false)
   const editorNotice = useSignal<string | null>(null)
@@ -830,6 +833,15 @@ function SkillsObservationPanel({ owner, onMutation }: {
     return html`<${EmptyState} message=${stateMessage(res.state)} />`
   }
   const rows = sortSkillRows(mergeSkillRows(res.snapshot.skills, res.surfaces))
+  const sourceIds = [...new Set(rows.map(row => row.identity.source_id))]
+  const query = search.value.trim().toLocaleLowerCase()
+  const visibleRows = rows.filter(row =>
+    (!sourceFilter.value || row.identity.source_id === sourceFilter.value)
+    && (!kindFilter.value || (row.surface?.kind ?? 'unavailable') === kindFilter.value)
+    && (!query || [row.name, row.description, row.source]
+      .some(value => value.toLocaleLowerCase().includes(query))),
+  )
+  const visibleKeys = new Set(visibleRows.map(skillRowKey))
   return html`
     <${SurfaceCard} testId="skills-panel">
       ${error.value ? html`<div role="alert">Catalog refresh failed: ${error.value}</div>` : null}
@@ -868,7 +880,23 @@ function SkillsObservationPanel({ owner, onMutation }: {
         ` : html`Coverage unavailable; displayed users cannot establish fleet-wide usage.`}
         Received counts invocations handed to a provider/client, including asynchronous results. Actions are counted per Skill invocation; one tool call may contribute to several invocations. An observed action does not imply completion.
       </div>
-      ${rows.length > 0 ? html`<table class="ss-table" data-testid="skills-table">
+      ${rows.length > 0 ? html`<div class="my-3 flex flex-wrap items-end gap-2" aria-label="Skill filters">
+        <label>Find Skill<input class="ss-input" type="search" value=${search.value}
+          placeholder="Name, purpose or source" onInput=${(event: Event) => { search.value = (event.currentTarget as HTMLInputElement).value }} /></label>
+        <label>Source<select class="ss-input" value=${sourceFilter.value}
+          onChange=${(event: Event) => { sourceFilter.value = (event.currentTarget as HTMLSelectElement).value }}>
+          <option value="">All sources</option>
+          ${sourceIds.map(source => html`<option value=${source} key=${source}>${source}</option>`)}
+        </select></label>
+        <label>Kind<select class="ss-input" value=${kindFilter.value}
+          onChange=${(event: Event) => { kindFilter.value = (event.currentTarget as HTMLSelectElement).value }}>
+          <option value="">All kinds</option><option value="instruction">Instruction</option>
+          <option value="composition">Composition</option><option value="unavailable">Surface unavailable</option>
+        </select></label>
+        <button class="ss-btn" type="button" onClick=${() => { search.value = ''; sourceFilter.value = ''; kindFilter.value = '' }}>Clear filters</button>
+        <span role="status">${visibleRows.length} of ${rows.length} published Skills</span>
+      </div>` : null}
+      ${rows.length > 0 ? html`<table hidden=${visibleRows.length === 0} class="ss-table" data-testid="skills-table">
         <thead>
           <tr>
             <th>skill</th><th>capability</th><th>context</th><th>Session usage</th><th>source</th>
@@ -878,8 +906,9 @@ function SkillsObservationPanel({ owner, onMutation }: {
           ${rows.map(row => {
             const rowKey = skillRowKey(row)
             const isExpanded = expanded.value === rowKey
+            const filtered = !visibleKeys.has(rowKey)
             return html`
-              <tr key=${rowKey} data-testid=${`skill-row-${row.name}`}>
+              <tr hidden=${filtered} key=${rowKey} data-testid=${`skill-row-${row.name}`}>
                 <td>
                   <button class="text-left" type="button" aria-expanded=${isExpanded} aria-label=${`Read instructions for ${row.name}`} onClick=${() => { expanded.value = isExpanded ? null : rowKey }}><strong>${isExpanded ? '▾' : '▸'} ${row.name}</strong><span class="ss-muted ml-2">Read instructions</span></button><div class="ss-muted">${row.description}</div>
                   ${row.diagnostics.map(
@@ -895,7 +924,7 @@ function SkillsObservationPanel({ owner, onMutation }: {
                 <td class="mono">${row.source}</td>
               </tr>
               ${isExpanded ? html`
-                <tr key=${`${rowKey}-detail`}><td colspan="5">
+                <tr hidden=${filtered} key=${`${rowKey}-detail`}><td colspan="5">
                   ${row.surface ? html`<${SkillSourceInspector} reference=${row.surface.reference} />`
                     : html`<p role="status">Exact source unavailable: this Skill has no published source reference.</p>`}
                   <div class="grid gap-3 p-2 lg:grid-cols-[minmax(0,2fr)_minmax(18rem,1fr)]">
@@ -923,6 +952,8 @@ function SkillsObservationPanel({ owner, onMutation }: {
       </table>` : res.snapshot.rejections.length > 0
         ? html`<div class="ss-muted py-3" data-testid="skills-no-valid">No valid Skills are published.</div>`
         : html`<${EmptyState} message="The published snapshot lists no skills." />`}
+      ${rows.length > 0 && visibleRows.length === 0
+        ? html`<p role="status">No published Skills match these filters.</p>` : null}
       ${res.snapshot.rejections.length > 0 ? html`
         <div class="mt-4" data-testid="skill-rejections">
           <strong>Rejected source candidates</strong>

@@ -798,6 +798,26 @@ let test_public_nested_prepare_run_records_only_admitted_children ?(execution=Ma
   check bool "retained manifest refuses altered bytes" true
     (match Observation.of_blob_response manifest_reference (manifest_response (manifest_content ^ " ")) with
      | Invalid _ -> true | _ -> false);
+  let envelope_fields = ["artifact_manifest",Tool_output.normalized_artifact_ref_to_json manifest_reference;
+    "structured_content",result] in
+  check bool "duplicate structured content is refused" true
+    (match Observation.of_data (`Assoc (("structured_content",`Assoc []) :: envelope_fields)) with
+     | Invalid _ -> true | _ -> false);
+  let admitted = List.filter (fun child -> member "admission" child <> `Null
+    && member "skill_tool_use_id" (member "admission" child) <> `Null) child_scopes in
+  let swap_first_admission replacement =
+    let first=List.hd admitted in
+    let altered = List.map (fun child -> if child <> first then child else
+      match child with `Assoc fields -> `Assoc (("admission",replacement) :: List.remove_assoc "admission" fields)
+      | _ -> fail "expected child object") child_scopes in
+    match result with `Assoc fields -> `Assoc (("nested_scopes",`List altered) :: List.remove_assoc "nested_scopes" fields)
+    | _ -> fail "expected parent object" in
+  let first_admission = List.hd admitted |> member "admission" |> to_assoc in
+  List.iter (fun replacement ->
+    check bool "malformed or sibling admission is refused" true
+      (match Observation.of_data (swap_first_admission replacement) with Invalid _ -> true | _ -> false))
+    [`Assoc (("activation",`Assoc []) :: List.remove_assoc "activation" first_admission);
+     List.nth admitted 1 |> member "admission"];
   let bad = match result with
     | `Assoc fields -> `Assoc (("nested_scopes",`List [`Assoc []]) :: List.remove_assoc "nested_scopes" fields)
     | _ -> fail "expected actual structured result" in

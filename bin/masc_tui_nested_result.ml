@@ -11,8 +11,9 @@ let sections = function
         let admission = match child.admission with
           | Not_attempted -> "not attempted"
           | Rejected reason -> "rejected\n" ^ json reason
-          | Recorded {tool_use_id;frame_sha256} ->
-              "recorded occurrence: " ^ tool_use_id ^ "\nactivation frame: " ^ frame_sha256 in
+          | Recorded {tool_use_id;frame_sha256;activation} ->
+              "recorded occurrence: " ^ tool_use_id ^ "\nactivation frame: " ^ frame_sha256
+              ^ "\n" ^ json (Masc.Keeper_skill_activation_ledger.activation_to_yojson activation) in
         let nodes = List.map (fun (node : Observation.node) ->
           let origin = match node.origin with
             | Arguments -> "arguments" | Submission -> "submission" | Result -> "result"

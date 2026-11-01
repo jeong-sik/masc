@@ -1,10 +1,11 @@
 module Run = Keeper_composition_nested_run
 module Catalog = Keeper_tool_composition_catalog
+module Ledger = Keeper_skill_activation_ledger
 open Result.Syntax
 
 type admission =
   | Not_attempted
-  | Recorded of { tool_use_id : string; frame_sha256 : string }
+  | Recorded of { tool_use_id : string; frame_sha256 : string; activation : Ledger.activation }
   | Rejected of Yojson.Safe.t
 type node_origin = Arguments | Submission | Result | Child_node of string
 type node =
@@ -30,7 +31,7 @@ let list decode = function
       let* value = decode value in Ok (value :: acc)) (Ok []) values |> Result.map List.rev
   | _ -> Error "Expected nested observation list"
 
-let admission = function
+let admission ~alias ~reference ?run_id = function
   | `Null -> Ok Not_attempted
   | `Assoc ["rejection", rejection] -> Ok (Rejected rejection)
   | json ->
@@ -38,9 +39,25 @@ let admission = function
     let* tool_use_id = text (List.assoc "skill_tool_use_id" f) in
     let* frame_sha256 = text (List.assoc "activation_frame_sha256" f) in
     let* () = Tool_output.validate_sha256 frame_sha256 |> Result.map_error Tool_output.invalid_sha256_to_string in
-    (match List.assoc "activation" f with
-     | `Assoc _ -> Ok (Recorded {tool_use_id;frame_sha256})
-     | _ -> Error "Recorded child admission has no activation")
+    let activation_json = List.assoc "activation" f in
+    let* turn_json = match activation_json with
+      | `Assoc fields -> (match List.assoc_opt "turn_ref" fields with
+          | Some value -> Ok value | None -> Error "Child activation has no original turn")
+      | _ -> Error "Child activation is not an object" in
+    let* turn_ref = Ids.Turn_ref.of_yojson turn_json in
+    let expected_trace_id = Keeper_id.Trace_id.of_string (Ids.Turn_ref.trace_id turn_ref) in
+    let* activation = Ledger.activation_of_yojson ~expected_trace_id activation_json
+        |> Result.map_error Ledger.decode_error_code in
+    let* () = match activation.invocation with
+      | Ledger.Nested_composition_invocation {scope;_}
+        when String.equal scope.alias alias
+          && Option.fold ~none:true ~some:(String.equal scope.composition_run_id) run_id
+          && String.equal activation.skill_tool_use_id tool_use_id
+          && Skill_reference.equal_identity reference.Skill_reference.identity activation.identity
+          && reference.content_revision = activation.content_revision
+          && String.equal (Ledger.activation_frame_sha256 activation) frame_sha256 -> Ok ()
+      | _ -> Error "Child admission differs from its original scope, occurrence or activation frame" in
+    Ok (Recorded {tool_use_id;frame_sha256;activation})
 
 let node json =
   let* f = fields ["node_id";"settled";"disposition"]
@@ -84,7 +101,7 @@ let route observed json =
     | _ -> Error "Missing or duplicated child export observation" in
   Ok {name;node_id;pointer;value}
 
-let child json =
+let child ?run_id json =
   let* f = fields ["scope";"admission";"disposition";"cause";"nodes";"exports"] [] json in
   let* scope = fields ["alias";"reference";"arguments";"scope";"exports"] [] (List.assoc "scope" f) in
   let* alias = text (List.assoc "alias" scope) in
@@ -103,7 +120,7 @@ let child json =
     | `String "fixed",Some _,None -> Ok ()
     | `String "upstream",None,Some _ -> Ok ()
     | _ -> Error "Unknown declared child argument form" in
-  let* admission = admission (List.assoc "admission" f) in
+  let* admission = admission ~alias ~reference ?run_id (List.assoc "admission" f) in
   let* disposition_text = text (List.assoc "disposition" f) in
   let* disposition = Run.disposition_of_string disposition_text in
   let cause = nullable (List.assoc "cause" f) in
@@ -117,7 +134,13 @@ let direct = function
   | `Assoc f ->
     (match List.filter (fun (key,_) -> key="nested_scopes") f with
      | [] -> Absent
-     | [_,json] -> (match list child json with Ok children -> Observed children | Error detail -> Invalid detail)
+     | [_,json] ->
+       let decoded =
+         let* run_id = match List.filter (fun (key,_) -> key="composition_run_id") f with
+           | [] -> Ok None | [_,value] -> text value |> Result.map Option.some
+           | _ -> Error "Duplicate parent run identity" in
+         list (child ?run_id) json in
+       (match decoded with Ok children -> Observed children | Error detail -> Invalid detail)
      | _ -> Invalid "Duplicate nested scope metadata")
   | _ -> Absent
 
@@ -131,13 +154,15 @@ let of_data json =
      | Not_artifact_manifest ->
        match json with
        | `Assoc f when List.mem_assoc "artifact_manifest" f ->
-         (match List.assoc_opt "artifact_manifest" f,List.assoc_opt "structured_content" f with
-          | Some reference,Some data ->
+         (match fields ["artifact_manifest";"structured_content"] ["content"] json with
+          | Ok envelope ->
+            let reference=List.assoc "artifact_manifest" envelope in
+            let data=List.assoc "structured_content" envelope in
             (match Tool_output.normalized_artifact_ref_of_json reference with
              | Decoded_normalized_artifact_ref reference when reference.mime=Tool_output.artifact_manifest_mime -> direct data
              | Decoded_normalized_artifact_ref _ | Not_normalized_artifact_ref
              | Invalid_normalized_artifact_ref _ -> Invalid "Invalid structured result manifest reference")
-          | _ -> Invalid "Incomplete structured result envelope")
+          | Error detail -> Invalid detail)
        | `Assoc f when List.mem_assoc "masc.tool_disposition" f ->
          let decoded =
            let* f = fields ["message";"masc.tool_disposition";"failure_class"]

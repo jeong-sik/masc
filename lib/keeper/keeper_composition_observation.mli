@@ -2,7 +2,8 @@
     definition or invocation artifact is treated as execution completion. *)
 type admission =
   | Not_attempted
-  | Recorded of { tool_use_id : string; frame_sha256 : string }
+  | Recorded of { tool_use_id : string; frame_sha256 : string;
+      activation : Keeper_skill_activation_ledger.activation }
   | Rejected of Yojson.Safe.t
 type node_origin = Arguments | Submission | Result | Child_node of string
 type node =

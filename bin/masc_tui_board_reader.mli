@@ -15,7 +15,7 @@ val preparation_job : preparation_request -> unit ref
 val initial : t
 val key : t -> key option
 val equal_key : key -> key -> bool
-val offer_image : key:key -> reason:string -> t -> t
+val offer_image : key:key -> message:string -> t -> t
 (** Keep the image's original reference without fetching. The operator may
     explicitly read it and save the verified bytes. *)
 val open_read : ?content_kind:content_kind -> key:key -> t -> t * request option

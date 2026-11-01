@@ -29,6 +29,10 @@ val verdict_of_bytes : string -> verdict
     {!Masc.Keeper_vision_tool.sniff_image_media_type}, so the cache and the
     composer name the same signatures. *)
 
+val has_png_header : string -> bool
+(** Check the complete PNG signature, IHDR and positive dimensions. This is
+    a header check, not a full image decode. *)
+
 (** {1 The fetch} *)
 
 type fetch_failure =

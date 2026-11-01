@@ -206,6 +206,10 @@ type resume_confirmation =
   | Owner_resumed
   | Owner_already_active
 
+type board_attachment_action_result =
+  | Board_saved_original of string
+  | Board_image_open_ready of Masc_tui_attachment_action.prepared
+
 type async_msg =
   | Chat_search_finished of int * bool * Masc_tui_render_chat.chat_search_plan
       * (Masc_tui_render_chat.chat_search_work * Masc_tui_render_chat.chat_search_match, string) result
@@ -626,7 +630,7 @@ type async_msg =
   | Chat_call_loaded of chat_call_request * (Masc.Tui_decode.keeper_call, string) result
   | Board_attachment_loaded of Masc_tui_board_reader.request * (Masc_tui_board_reader.content, string) result
   | Board_attachment_prepared of Masc_tui_board_reader.preparation_request * (Masc_tui_detail_reading.row list, string) result
-  | Board_attachment_saved of Masc_tui_board_reader.request * (string, string) result
+  | Board_attachment_saved of Masc_tui_board_reader.request * (board_attachment_action_result, string) result
   | Keeper_calls_loaded of
       int * string * (Masc.Tui_decode.keeper_calls_snapshot, string) result
   | Goal_timeline_loaded of
@@ -816,7 +820,7 @@ end
 
 val workspace_message_is_read : async_msg -> bool
 val board_preview_waits_for_input : async_msg -> bool
-(** A Board preview cannot take over the terminal until pending input has
+(** A Board preview or prepared external open waits until pending input has
     been classified; terminal protocol replies are not operator cancellation. *)
 val message_matches_share_input :
   resource_read:(Masc_tui_resource_catalog.read_request -> bool) ->

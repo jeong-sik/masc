@@ -10,6 +10,12 @@ let verdict_of_bytes bytes =
     | Ok media_type -> Known_image { media_type }
     | Error _ -> Unknown_signature
 
+let has_png_header bytes =
+  String.starts_with ~prefix:"\137PNG\r\n\026\n\000\000\000\rIHDR" bytes
+  && match Masc.Keeper_image_dimensions.image_dimensions bytes with
+     | Some (width,height) -> width > 0 && height > 0
+     | None -> false
+
 (* Exit statuses with a documented meaning. curl(1) "EXIT CODES"; sh(1):
    a command that is not found exits 127. *)
 let curl_exit_could_not_resolve_host = 6

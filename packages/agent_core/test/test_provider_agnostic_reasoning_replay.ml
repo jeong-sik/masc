@@ -2100,7 +2100,60 @@ let test_provider_replay_policy_matrix_pinned () =
             ~model_id
             ~base_url
             ()))
-    [ "glm-5"; "glm-5.2"; "glm-4-flash"; "glm-4v"; "glm-4"; "glm-unlisted" ]
+    [ "glm-5"; "glm-5.2"; "glm-unlisted" ]
+;;
+
+let test_clear_thinking_replay_requires_catalog_reasoning_support () =
+  let previous = Model_catalog.global () in
+  let restore () = match previous with
+    | Some catalog -> Model_catalog.set_global catalog
+    | None -> Model_catalog.clear_global () in
+  let catalog = match Model_catalog.load_default () with
+    | Ok catalog -> catalog
+    | Error detail -> Alcotest.fail detail in
+  Fun.protect ~finally:restore (fun () ->
+    Model_catalog.set_global catalog;
+    List.iter (fun (model_id, supports_reasoning) ->
+      let config = Provider_config.make
+          ~kind:Glm ~provider_id:"glm" ~model_id ~base_url:"https://api.z.ai"
+          () in
+      let caps = match Provider_config.capabilities_for_config_model config with
+        | Some caps -> caps
+        | None -> Alcotest.failf "missing catalog row for glm/%s" model_id in
+      check_bool (model_id ^ " declares reasoning support") supports_reasoning
+        caps.supports_reasoning;
+      check_bool (model_id ^ " declares the clear-thinking wire") true
+        (caps.preserve_thinking_control_format = Thinking_object_clear_thinking);
+      let source = source_for_config config in
+      let messages =
+        [ message User [Text "question"]
+        ; with_source source Assistant
+            [ Thinking {content="catalog reasoning"; signature=None}
+            ; ToolUse {id="catalog-call";name="inspect";input=`Assoc []} ]
+        ; message Tool [tool_result "catalog-call"] ]
+        |> List.map reload_through_checkpoint in
+      List.iter (fun (label, config) ->
+        let wire = Backend_glm.build_request ~config ~messages ()
+          |> Yojson.Safe.from_string in
+        let open Yojson.Safe.Util in
+        let wire_messages = wire |> member "messages" |> to_list in
+        let reasoning = wire_messages |> List.filter_map (fun item ->
+          match member "reasoning_content" item with
+          | `String value -> Some value
+          | _ -> None) in
+        Alcotest.(check (list string)) (model_id ^ " " ^ label)
+          (if supports_reasoning then ["catalog reasoning"] else []) reasoning;
+        Alcotest.(check string) "capability gating retains the tool call" "catalog-call"
+          (List.nth wire_messages 1 |> member "tool_calls" |> to_list |> List.hd
+           |> member "id" |> to_string);
+        Alcotest.(check string) "capability gating retains the tool result" "catalog-call"
+          (List.nth wire_messages 2 |> member "tool_call_id" |> to_string))
+        [ "default thinking", config
+        ; "explicit thinking", {config with enable_thinking=Some true}
+        ; "explicit preservation",
+          {config with enable_thinking=Some true; preserve_thinking=Some true} ])
+      ["glm-4-flash",false;"glm-4v",false;"glm-4",false;
+       "glm-5.2",true;"glm-5.3-flash",true])
 ;;
 
 (* The preserved-thinking replay gate is selected by the declared
@@ -2705,6 +2758,10 @@ let () =
             "provider replay policy matrix"
             `Quick
             test_provider_replay_policy_matrix_pinned
+        ; Alcotest.test_case
+            "clear-thinking replay requires catalog reasoning support"
+            `Quick
+            test_clear_thinking_replay_requires_catalog_reasoning_support
         ; Alcotest.test_case
             "clear-thinking gate is capability not identity"
             `Quick

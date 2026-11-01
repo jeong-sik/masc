@@ -640,9 +640,12 @@ let base_for_provider_config (config : Provider_config.t) =
 let apply_clear_thinking_replay_gate (config : Provider_config.t) dialect =
   match dialect.preserve_wire with
   | Thinking_object_clear_thinking ->
+    let caps, _ = Provider_config.resolve_request_capabilities config in
     { dialect with
       replay_policy =
-        (if
+        (if not caps.supports_reasoning
+         then No_replay
+         else if
            Provider_config.preserved_thinking_active
              ~enable_thinking:config.enable_thinking
              ~clear_thinking:config.clear_thinking

@@ -17,7 +17,8 @@ let with_observer f =
     (fun () ->
       let connect ~instance_id ~headers ~last_event_id =
         let handshake, cursor =
-          Wire.negotiate_observer ~instance_id ~headers ~last_event_id
+          Wire.negotiate_observer ~instance_id ~current_event_id:(Sse.current_id ())
+            ~headers ~last_event_id
         in
         match Sse.register ~kind:Sse.Observer ~auth session_id
                 ~last_event_id:(Option.value ~default:0 cursor) with
@@ -100,6 +101,20 @@ let test_unusable_epoch_cannot_suppress_new_live expected headers =
     check bool "response carries the new epoch and reset reason" true
       (Wire.decode_observer_response (Wire.observer_response_headers handshake)
        = Ok (Some handshake)))
+;;
+
+let test_future_cursor_cannot_claim_resume () =
+  with_observer (fun ~session_id:_ ~connect ->
+    let headers = Wire.observer_cursor_headers
+      (Some { instance_id = "instance-a"; event_id = max_int }) in
+    let handshake, cursor, stream =
+      connect ~instance_id:"instance-a" ~headers ~last_event_id:(Some max_int) in
+    check bool "a future cursor reports a reset" true
+      (handshake.replay = Wire.Reset Wire.Cursor_ahead);
+    check (option int) "a future cursor is not used for replay" None cursor;
+    let payload = tool_result "live after rejecting the future cursor" in
+    Sse.broadcast_to Sse.Observers payload;
+    check bool "live events are still delivered" true ((take stream).payload = payload))
 ;;
 
 let delivery ~event_id ~emitted_at =
@@ -226,6 +241,8 @@ let () =
             test_unusable_epoch_cannot_suppress_new_live Wire.Unscoped_cursor
               [ "x-masc-sse-instance-id", "instance-new"
               ; "X-Masc-Sse-Instance-Id", "instance-new" ])
+      ; test_case "a future cursor cannot claim resume" `Quick
+          test_future_cursor_cannot_claim_resume
       ; test_case "missing capability differs from invalid metadata" `Quick
           test_missing_or_malformed_response
       ]

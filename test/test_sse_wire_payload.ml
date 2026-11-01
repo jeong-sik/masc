@@ -45,11 +45,22 @@ let test_observer_replay_headers () =
     ; [ "x-masc-sse-instance-id", "  "; "x-masc-sse-replay", "fresh" ]
     ; [ "x-masc-sse-instance-id", "process-a, process-b"; "x-masc-sse-replay", "fresh" ]
     ];
-  let handshake, cursor = negotiate_observer ~instance_id:"process-a"
+  let handshake, cursor = negotiate_observer ~instance_id:"process-a" ~current_event_id:50
       ~headers:[ "x-masc-sse-instance-id", "process-a"; "X-Masc-Sse-Instance-Id", "process-a" ]
       ~last_event_id:(Some 50) in
   check bool "duplicate request instance discards its cursor" true
     (handshake.replay = Reset Unscoped_cursor && cursor = None);
+  let negotiate event_id =
+    negotiate_observer ~instance_id:"process-a" ~current_event_id:50
+      ~headers:[ "x-masc-sse-instance-id", "process-a" ] ~last_event_id:(Some event_id) in
+  let at_head, at_head_cursor = negotiate 50 in
+  check bool "the current event id is a valid resume" true
+    (at_head.replay = Resumed && at_head_cursor = Some 50);
+  let ahead, ahead_cursor = negotiate 51 in
+  check bool "the next event id is a future-cursor reset" true
+    (ahead.replay = Reset Cursor_ahead && ahead_cursor = None);
+  check bool "the future-cursor reset round trips" true
+    (decode_observer_response (observer_response_headers ahead) = Ok (Some ahead));
   let resumed = observer_response_headers ordinary in
   let requested = Some { instance_id = "process-a"; event_id = 50 } in
   check bool "a matching requested cursor can resume" true
@@ -75,6 +86,15 @@ let test_observer_replay_headers () =
   check bool "a changed instance can reset the cursor" true
     (Result.is_ok (validate_observer_response ~cursor:requested
       (headers "process-b" (Reset Instance_changed))));
+  check bool "a future cursor can reset within the requested instance" true
+    (Result.is_ok (validate_observer_response ~cursor:requested
+      (headers "process-a" (Reset Cursor_ahead))));
+  check bool "a future-cursor reset cannot name another instance" true
+    (Result.is_error (validate_observer_response ~cursor:requested
+      (headers "process-b" (Reset Cursor_ahead))));
+  check bool "a future-cursor reset needs a requested cursor" true
+    (Result.is_error (validate_observer_response ~cursor:None
+      (headers "process-a" (Reset Cursor_ahead))));
   List.iter (fun cursor ->
     check bool "an unscoped reset contradicts this client's request" true
       (Result.is_error (validate_observer_response ~cursor

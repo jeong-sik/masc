@@ -148,7 +148,7 @@ let format_event_encoded ?id ?event_type encoded =
 ;;
 
 type observer_cursor = { instance_id : string; event_id : int }
-type observer_reset = Instance_changed | Unscoped_cursor
+type observer_reset = Instance_changed | Unscoped_cursor | Cursor_ahead
 type observer_replay =
   | Fresh
   | Resumed
@@ -184,11 +184,14 @@ let observer_cursor_headers = function
     [ instance_header, instance_id; "last-event-id", string_of_int event_id ]
 ;;
 
-let negotiate_observer ~instance_id ~headers ~last_event_id =
+let negotiate_observer ~instance_id ~current_event_id ~headers ~last_event_id =
   let replay, cursor =
     match last_event_id, headers_named instance_header headers with
     | None, _ -> Fresh, None
     | Some _, [] | Some _, _ :: _ :: _ -> Reset Unscoped_cursor, None
+    | Some event_id, [ requested ]
+      when String.equal requested instance_id && event_id > current_event_id ->
+      Reset Cursor_ahead, None
     | Some event_id, [ requested ] when String.equal requested instance_id ->
       Resumed, Some event_id
     | Some _, [ _ ] -> Reset Instance_changed, None
@@ -214,6 +217,7 @@ let observer_response_headers { instance_id; replay } =
       ; missed_through_header, string_of_int missed_through ]
     | Reset Instance_changed -> [ replay_header, "reset-instance-changed" ]
     | Reset Unscoped_cursor -> [ replay_header, "reset-unscoped-cursor" ]
+    | Reset Cursor_ahead -> [ replay_header, "reset-cursor-ahead" ]
   in
   (instance_header, instance_id) :: replay
 ;;
@@ -238,8 +242,9 @@ let decode_observer_response headers =
          | Some _ | None -> Error "Observer replay gap without a positive missed-through id")
       | "reset-instance-changed", [] -> Ok (Reset Instance_changed)
       | "reset-unscoped-cursor", [] -> Ok (Reset Unscoped_cursor)
+      | "reset-cursor-ahead", [] -> Ok (Reset Cursor_ahead)
       | "resumed-after-gap", [] -> Error "Observer replay gap without a positive missed-through id"
-      | ("fresh" | "resumed" | "reset-instance-changed" | "reset-unscoped-cursor"), [ _ ] ->
+      | ("fresh" | "resumed" | "reset-instance-changed" | "reset-unscoped-cursor" | "reset-cursor-ahead"), [ _ ] ->
         Error "Unexpected observer replay gap"
       | _ -> Error "Unknown observer replay response"
     in
@@ -271,6 +276,10 @@ let validate_observer_response ~(cursor : observer_cursor option) headers =
     (match cursor with
      | Some requested when not (String.equal requested.instance_id instance_id) -> response
      | Some _ | None -> Error "Observer reported an instance change without a changed requested instance")
+  | Ok (Some { instance_id; replay = Reset Cursor_ahead }) as response ->
+    (match cursor with
+     | Some requested when String.equal requested.instance_id instance_id -> response
+     | Some _ | None -> Error "Observer reset a future cursor without its requested instance")
   | Ok (Some { replay = Reset Unscoped_cursor; _ }) ->
     Error "Observer reported an unscoped cursor for a scoped request"
   | Ok None as response -> response

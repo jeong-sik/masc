@@ -19,12 +19,13 @@ import threading
 import time
 import unittest
 import urllib.parse
-from typing import Callable, cast
+from typing import Callable, Literal, cast
 
 
 SESSION = "fixture-session"
 INSTANCE = "fixture-instance"
 CURSORS = {"37", "38", "500", "501", "502"}
+Mode = Literal["invalid", "resumed", "ahead"]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -41,17 +42,17 @@ class ObserverServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
     # probe just because the fixture's accept queue is smaller than the burst.
     request_queue_size = 128
 
-    def __init__(self, base: str, *, resumed: bool) -> None:
+    def __init__(self, base: str, *, mode: Mode) -> None:
         super().__init__(("127.0.0.1", 0), ObserverHandler)
         self.base = os.path.realpath(base)
-        self.resumed = resumed
+        self.mode = mode
         self.condition = threading.Condition()
         self.initializes = 0
         self.health_responses = 0
         self.requests: list[StreamRequest] = []
         self.sent: list[int] = []
         # The final request is recorded but held until cleanup.
-        self.gates = [threading.Event() for _ in range(4 if resumed else 3)]
+        self.gates = [threading.Event() for _ in range(4 if mode == "resumed" else 3)]
 
     def snapshot(self) -> tuple[int, int, list[StreamRequest], list[int]]:
         with self.condition:
@@ -171,17 +172,24 @@ class ObserverHandler(http.server.BaseHTTPRequestHandler):
         if index >= len(server.gates) or not server.gates[index].wait(30):
             self.respond(503, {"error": "fixture gate unavailable"})
             return
-        response_count = 3 if server.resumed else 2
+        response_count = 3 if server.mode == "resumed" else 2
         if index >= response_count:
             self.respond(503, {"error": "fixture completed"})
             return
 
-        if server.resumed and index < 2:
+        if server.mode == "resumed" and index < 2:
             replay = "fresh" if index == 0 else "resumed"
             headers = (
                 f"x-masc-sse-instance-id: {INSTANCE}\r\nx-masc-sse-replay: {replay}\r\n"
             )
             event_id = 37 + index
+            name = "fixture-control"
+        elif server.mode == "ahead":
+            replay = "fresh" if index == 0 else "reset-cursor-ahead"
+            headers = (
+                f"x-masc-sse-instance-id: {INSTANCE}\r\nx-masc-sse-replay: {replay}\r\n"
+            )
+            event_id = 500 if index == 0 else 38
             name = "fixture-control"
         else:
             # Conflicting duplicates must reject the entire response, including
@@ -212,7 +220,7 @@ class ObserverHandler(http.server.BaseHTTPRequestHandler):
 class ObserverHandshakeTest(unittest.TestCase):
     binary = ""
 
-    def run_scenario(self, *, resumed: bool) -> None:
+    def run_scenario(self, *, mode: Mode) -> None:
         with tempfile.TemporaryDirectory(prefix="masc-observer-handshake-") as base:
             config = pathlib.Path(base, ".masc", "config")
             config.mkdir(parents=True)
@@ -221,7 +229,7 @@ class ObserverHandshakeTest(unittest.TestCase):
                 "help_hint_shown = true\nreduce_motion = true\n",
                 encoding="utf-8",
             )
-            server = ObserverServer(base, resumed=resumed)
+            server = ObserverServer(base, mode=mode)
             thread = threading.Thread(target=server.serve_forever, daemon=True)
             thread.start()
             master, slave = pty.openpty()
@@ -303,7 +311,9 @@ class ObserverHandshakeTest(unittest.TestCase):
                         ("38", "fixture"),
                         ("38", "fixture"),
                     ]
-                    if resumed
+                    if mode == "resumed"
+                    else [(None, "missing"), ("500", "fixture"), ("38", "fixture")]
+                    if mode == "ahead"
                     else [(None, "missing"), (None, "missing"), (None, "missing")]
                 )
                 for index, (cursor, instance) in enumerate(expected):
@@ -343,10 +353,13 @@ class ObserverHandshakeTest(unittest.TestCase):
                 thread.join(timeout=5)
 
     def test_invalid_handshakes_preserve_session_and_empty_cursor(self) -> None:
-        self.run_scenario(resumed=False)
+        self.run_scenario(mode="invalid")
 
     def test_rejected_handshake_keeps_last_resumed_cursor(self) -> None:
-        self.run_scenario(resumed=True)
+        self.run_scenario(mode="resumed")
+
+    def test_future_cursor_reset_accepts_lower_live_event(self) -> None:
+        self.run_scenario(mode="ahead")
 
 
 if __name__ == "__main__":

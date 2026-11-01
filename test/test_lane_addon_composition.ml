@@ -716,7 +716,7 @@ let test_native_fusion_report_is_readable_after_detach () =
           ~author:"fixture-producer" ~content:"Fusion deliberation: Alternative A"
           ~meta_json:(`Assoc ["judge",Fusion_sink.judge_meta (Ok synthesis)])
           ~post_kind:Board.System_post ~visibility:Board.Unlisted ~ttl_hours:0 ~origin ()
-          |> Result.map_error Board.show_board_error));
+          |> Result.map_error Board.Post_publication_failure.to_string));
         Fusion_run_registry.mark_completed registry ~run_id ~outcome:Fusion_run_registry.Succeeded;
         let addons = match Sys.getenv_opt "DUNE_SOURCEROOT" with
           | Some source_root -> Filename.concat source_root "addons"

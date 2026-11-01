@@ -57,7 +57,118 @@ let create_post_exn ~author ~content =
     Board_dispatch.create_post ~author ~content ~post_kind:Board.Human_post ()
   with
   | Ok post -> post
-  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Error e -> Alcotest.fail (Board.Post_publication_failure.to_string e)
+
+let noop_observer : Board_metrics_hooks.observer =
+  { observe_persist_lock_acquire_sec = (fun _ -> ())
+  ; observe_persist_lock_held_sec = (fun _ -> ())
+  ; inc_dispatch_flusher_start_outcome = (fun ~outcome:_ -> ())
+  }
+
+let with_observer observer f =
+  Eio.Switch.run (fun sw ->
+    Eio.Switch.on_release sw (fun () ->
+      Board_metrics_hooks.set_observer noop_observer);
+    Board_metrics_hooks.set_observer observer;
+    f ())
+
+let check_effect label expected failure =
+  let effect_testable = Alcotest.testable
+      (fun fmt value -> Format.pp_print_string fmt (Failure_effect.to_string value))
+      ( = ) in
+  Alcotest.check effect_testable label expected
+    (Board.Post_publication_failure.effect_disposition failure)
+
+let post_rows () =
+  let path = Board.persist_path () in
+  if Sys.file_exists path then Fs_compat.load_jsonl path else []
+
+let test_held_observer_failure_keeps_the_committed_receipt () =
+  let calls = ref 0 in
+  let failure = with_observer
+      { noop_observer with observe_persist_lock_held_sec = (fun _ ->
+          incr calls;
+          if !calls = 1 then failwith "held observer failed") }
+      (fun () ->
+        match Board_dispatch.create_post_with_unresolved
+                ~author:"receipt-author"
+                ~content:"published before observer failure @unresolved-receipt"
+                ~post_kind:Board.Human_post () with
+        | Ok _ -> Alcotest.fail "the failing held observer must be reported"
+        | Error failure -> failure)
+  in
+  Alcotest.(check int) "the real held observer was invoked once" 1 !calls;
+  check_effect "publication preceded the observer failure"
+    Failure_effect.Proven_post_effect failure;
+  (match Board.Post_publication_failure.cause failure with
+   | Board.Post_publication_failure.Raised (Failure _) -> ()
+   | Board.Post_publication_failure.Raised _
+   | Board.Post_publication_failure.Board_error _ ->
+     Alcotest.fail "expected the ordinary observer exception");
+  let creation = match Board.Post_publication_failure.committed failure with
+    | Some creation -> creation
+    | None -> Alcotest.fail "committed publication lost its creation receipt"
+  in
+  let post_id = Board.Post_id.to_string creation.post.id in
+  Alcotest.(check string) "the receipt retains the actual published body"
+    "published before observer failure @unresolved-receipt" creation.post.body;
+  Alcotest.(check string) "the receipt retains the actual author" "receipt-author"
+    (Board.Agent_id.to_string creation.post.author);
+  Alcotest.(check (list string)) "the admitted unresolved names are retained"
+    ["unresolved-receipt"] creation.unresolved;
+  Alcotest.(check bool) "the admitted audience is retained" true
+    (creation.post.audience = Some creation.audience);
+  (match Board_dispatch.get_post ~post_id with
+   | Ok post ->
+     Alcotest.(check string) "receipt identifies the actual committed post"
+       creation.post.body post.body;
+     Alcotest.(check string) "receipt retains the actual post identity" post_id
+       (Board.Post_id.to_string post.id)
+   | Error error -> Alcotest.fail (Board.show_board_error error));
+  (match post_rows () with
+   | [row] ->
+     (match Board.post_of_yojson row with
+      | Some post ->
+        Alcotest.(check string) "the WAL contains the same committed ID" post_id
+          (Board.Post_id.to_string post.id);
+        Alcotest.(check string) "the WAL contains the actual receipt body"
+          creation.post.body post.body
+      | None -> Alcotest.fail "the actual post WAL row did not decode")
+   | rows -> Alcotest.failf "expected one actual post WAL row, got %d" (List.length rows));
+  (* No reset or replacement store: this takes the very persistence mutex
+     whose held observer failed, so a poisoned lock cannot hide in readback. *)
+  let later = create_post_exn ~author:"receipt-author" ~content:"later real write" in
+  Alcotest.(check bool) "the later write has its own identity" false
+    (String.equal post_id (Board.Post_id.to_string later.id));
+  Alcotest.(check int) "both real posts remain in memory" 2
+    (List.length (Board_dispatch.list_posts ()));
+  Alcotest.(check int) "both actual writes reached the WAL" 2
+    (List.length (post_rows ()))
+
+let test_acquire_observer_failure_proves_no_publication () =
+  let calls = ref 0 in
+  let failure = with_observer
+      { noop_observer with observe_persist_lock_acquire_sec = (fun _ ->
+          incr calls;
+          if !calls = 1 then failwith "acquire observer failed") }
+      (fun () ->
+        match Board_dispatch.create_post_with_unresolved
+                ~author:"receipt-author" ~content:"never reached publication"
+                ~post_kind:Board.Human_post () with
+        | Ok _ -> Alcotest.fail "the failing acquire observer must be reported"
+        | Error failure -> failure)
+  in
+  Alcotest.(check int) "the real acquire observer was invoked once" 1 !calls;
+  check_effect "the write did not begin" Failure_effect.Proven_pre_effect failure;
+  Alcotest.(check bool) "pre-effect failure has no committed receipt" true
+    (Option.is_none (Board.Post_publication_failure.committed failure));
+  Alcotest.(check int) "pre-effect failure publishes no post" 0
+    (List.length (Board_dispatch.list_posts ()));
+  Alcotest.(check int) "pre-effect failure appends no WAL row" 0
+    (List.length (post_rows ()));
+  ignore (create_post_exn ~author:"receipt-author" ~content:"healthy after refusal");
+  Alcotest.(check int) "the same store accepts a later real write" 1
+    (List.length (post_rows ()))
 
 let flush () =
   match Board_dispatch.backend () with
@@ -124,9 +235,17 @@ let test_post_append_failure_commits_nothing () =
        ~post_kind:Board.Human_post ()
    with
    | Ok _ -> Alcotest.fail "post must not succeed when the append fails"
-   | Error (Board.Io_error _) -> ()
-   | Error e ->
-     Alcotest.fail ("expected Io_error, got " ^ Board.show_board_error e));
+   | Error failure ->
+     check_effect "an attempted append has unknown effect"
+       Failure_effect.Effect_outcome_unknown failure;
+     Alcotest.(check bool) "append failure has no committed receipt" true
+       (Option.is_none (Board.Post_publication_failure.committed failure));
+     (match Board.Post_publication_failure.cause failure with
+      | Board.Post_publication_failure.Board_error (Board.Io_error _) -> ()
+      | Board.Post_publication_failure.Board_error _
+      | Board.Post_publication_failure.Raised _ ->
+        Alcotest.fail ("expected Io_error, got " ^
+          Board.Post_publication_failure.to_string failure)));
   Unix.putenv "MASC_BASE_PATH" working_base;
   (* Same store, no reset: the failed create must have left nothing in
      memory for the healthy-path retry to collide with. *)
@@ -140,7 +259,8 @@ let test_post_append_failure_commits_nothing () =
    with
    | Ok _ -> ()
    | Error e ->
-     Alcotest.fail ("retry must succeed, got " ^ Board.show_board_error e));
+     Alcotest.fail ("retry must succeed, got " ^
+       Board.Post_publication_failure.to_string e));
   Alcotest.(check int)
     "exactly the retried post is listed" 1
     (List.length (Board_dispatch.list_posts ()));
@@ -163,7 +283,8 @@ let test_post_edit_failure_is_reported () =
     with
     | Ok post -> post
     | Error e ->
-      Alcotest.fail ("setup create must succeed, got " ^ Board.show_board_error e)
+      Alcotest.fail ("setup create must succeed, got " ^
+        Board.Post_publication_failure.to_string e)
   in
   let post_id = Board.Post_id.to_string post.Board.id in
   ignore (block_board_masc_dir_with_file ());
@@ -309,6 +430,10 @@ let () =
     [
       ( "durability",
         [
+          Alcotest.test_case "held observer failure retains committed receipt and later writes" `Quick
+            (with_eio test_held_observer_failure_keeps_the_committed_receipt);
+          Alcotest.test_case "acquire observer failure proves no publication" `Quick
+            (with_eio test_acquire_observer_failure_proves_no_publication);
           Alcotest.test_case "creations commit before persistence unlock" `Quick
             (with_eio test_creation_commits_before_releasing_persistence);
           Alcotest.test_case

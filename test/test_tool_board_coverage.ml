@@ -290,7 +290,7 @@ let test_board_dashboard_json_embeds_reaction_summaries () =
         ~content:"reactable post" ~post_kind:Board.Human_post ()
     with
     | Ok post -> post
-    | Error e -> Alcotest.fail (Board.show_board_error e)
+    | Error e -> Alcotest.fail (Board.Post_publication_failure.to_string e)
   in
   let post_id = Board.Post_id.to_string post.id in
   (match
@@ -368,7 +368,7 @@ let test_board_dashboard_json_shows_closed_state_and_successor () =
         ~content:"closeable dashboard post" ~post_kind:Board.Human_post ()
     with
     | Ok post -> post
-    | Error e -> Alcotest.fail (Board.show_board_error e)
+    | Error e -> Alcotest.fail (Board.Post_publication_failure.to_string e)
   in
   let post_id = Board.Post_id.to_string post.id in
   let open_json =
@@ -382,7 +382,7 @@ let test_board_dashboard_json_shows_closed_state_and_successor () =
         ~content:"successor post" ~post_kind:Board.Human_post ()
     with
     | Ok post -> post
-    | Error e -> Alcotest.fail (Board.show_board_error e)
+    | Error e -> Alcotest.fail (Board.Post_publication_failure.to_string e)
   in
   let successor_id = Board.Post_id.to_string successor.id in
   (match
@@ -1208,7 +1208,7 @@ let test_masc_board_configured_moderator_can_close_and_reopen () =
     match Board_dispatch.create_post ~author:"post-author"
             ~content:"moderated thread" ~post_kind:Board.Human_post () with
     | Ok post -> post
-    | Error error -> Alcotest.fail (Board.show_board_error error)
+    | Error error -> Alcotest.fail (Board.Post_publication_failure.to_string error)
   in
   let post_id = Board.Post_id.to_string post.id in
   let close actor =
@@ -2150,7 +2150,7 @@ let test_post_get_shows_closed_state_and_successor () =
         ~post_kind:Board.Human_post ()
     with
     | Ok post -> post
-    | Error e -> Alcotest.fail (Board.show_board_error e)
+    | Error e -> Alcotest.fail (Board.Post_publication_failure.to_string e)
   in
   let post_id = Board.Post_id.to_string post.id in
   let successor =
@@ -2159,7 +2159,7 @@ let test_post_get_shows_closed_state_and_successor () =
         ~post_kind:Board.Human_post ()
     with
     | Ok post -> post
-    | Error e -> Alcotest.fail (Board.show_board_error e)
+    | Error e -> Alcotest.fail (Board.Post_publication_failure.to_string e)
   in
   let successor_id = Board.Post_id.to_string successor.id in
   (match
@@ -2191,7 +2191,7 @@ let test_post_get_continued_read_shows_closed_state () =
         ~post_kind:Board.Human_post ()
     with
     | Ok post -> post
-    | Error e -> Alcotest.fail (Board.show_board_error e)
+    | Error e -> Alcotest.fail (Board.Post_publication_failure.to_string e)
   in
   let post_id = Board.Post_id.to_string post.id in
   for i = 1 to 3 do

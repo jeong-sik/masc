@@ -260,7 +260,7 @@ let notify_submit_for_verification ~(config : Workspace.config)
       Log.Task.error
         ~keeper_name:task.id
         "board post failed (task=%s vrf=%s): %s"
-        task.id verification_id (Board_types.show_board_error e)
+        task.id verification_id (Board.Post_publication_failure.to_string e)
   in
   Subscriptions.push_event_to_sessions (`Assoc ([
     ("type", `String "masc/verification/requested");
@@ -370,7 +370,7 @@ let post_verdict_board
     Log.Task.error
       ~keeper_name:task_id
       "board post failed (task=%s vrf=%s): %s"
-      task_id verification_id (Board_types.show_board_error e)
+      task_id verification_id (Board.Post_publication_failure.to_string e)
 
 let notify_approve_verification
       ~task_id
@@ -726,7 +726,7 @@ let notify_stalled_verification_with_runtime
             (fun (name, value) -> name ^ "=" ^ value)
             (subject_identity_fields subject)))
       gate
-      (Board_types.show_board_error e)
+      (Board.Post_publication_failure.to_string e)
 
 let notify_stalled_verification ~authority ~subject ~gate ~detail =
   notify_stalled_verification_with_runtime

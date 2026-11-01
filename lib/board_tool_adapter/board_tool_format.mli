@@ -23,6 +23,13 @@ val format_expiry : float -> string
 val board_error_to_string : Board.board_error -> string
 val board_error_failure_class : Board.board_error -> Tool_result.tool_failure_class
 val error_of_board_error : tool_name:string -> start_time:Tool_timing.started -> Board.board_error -> Tool_result.result
+val error_of_post_publication_failure :
+  tool_name:string ->
+  start_time:Tool_timing.started ->
+  Board.Post_publication_failure.t ->
+  Tool_result.result
+(** Project producer-owned effect evidence without deriving it from the error
+    class or message. Proven commits carry [data.committed_post_id]. *)
 
 val with_unresolved : Yojson.Safe.t -> string list -> Yojson.Safe.t
 (** [with_unresolved written names] adds the [unresolved] list to the JSON of a

@@ -203,7 +203,7 @@ let board_attention_stimulus ~label ~arrived_at : Q.stimulus =
     with
     | Ok post -> post
     | Error error ->
-      failf "failed to create Board batch source: %s" (Board.show_board_error error)
+      failf "failed to create Board batch source: %s" (Board.Post_publication_failure.to_string error)
   in
   let post_id = Board.Post_id.to_string post.id in
   { Q.post_id

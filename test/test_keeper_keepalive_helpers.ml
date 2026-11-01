@@ -748,7 +748,7 @@ let persist_board_signal (signal : Board_dispatch.board_signal) =
       ?hearth:signal.hearth
       ()
   with
-  | Error error -> fail (Board.show_board_error error)
+  | Error error -> fail (Board.Post_publication_failure.to_string error)
   | Ok post ->
     let signal = { signal with post_id = Board.Post_id.to_string post.id } in
     let audience =
@@ -837,8 +837,12 @@ let test_mixed_address_signal_is_dropped_at_routing () =
             ()
         with
         | Ok _ -> fail "mixed-address post must be rejected at the write boundary"
-        | Error (Board.Validation_error _) -> ()
-        | Error error -> fail (Board.show_board_error error));
+        | Error failure when
+            (match Board.Post_publication_failure.cause failure with
+             | Board.Post_publication_failure.Board_error (Board.Validation_error _) -> true
+             | Board.Post_publication_failure.Board_error _
+             | Board.Post_publication_failure.Raised _ -> false) -> ()
+        | Error error -> fail (Board.Post_publication_failure.to_string error));
        check int "mixed-address target durable queue" 0
          (board_queue_length config "alpha");
        check int "mixed-address non-target durable queue" 0
@@ -1013,7 +1017,7 @@ let create_thread_fixture config ~keeper_name =
         ~visibility:Board.Internal
         ()
     with
-    | Error error -> fail (Board.show_board_error error)
+    | Error error -> fail (Board.Post_publication_failure.to_string error)
     | Ok post -> post
   in
   let post_id = Board.Post_id.to_string post.id in
@@ -1084,7 +1088,7 @@ let create_self_post_fixture config ~keeper_name =
         ~visibility:Board.Internal
         ()
     with
-    | Error error -> fail (Board.show_board_error error)
+    | Error error -> fail (Board.Post_publication_failure.to_string error)
     | Ok post -> post
   in
   let post_id = Board.Post_id.to_string post.id in
@@ -1166,7 +1170,7 @@ let create_post_exn ~author ~title ~content =
       ~visibility:Board.Internal
       ()
   with
-  | Error error -> fail (Board.show_board_error error)
+  | Error error -> fail (Board.Post_publication_failure.to_string error)
   | Ok post -> Board.Post_id.to_string post.id
 ;;
 
@@ -1455,7 +1459,7 @@ let test_comments_address_post_and_direct_parent_only () =
       List.iter (persist_and_register_board_lane config) [poster; parent_author; participant];
       let post = match Board_dispatch.create_post ~author:poster.name ~content:"research question"
           ~title:"thread" ~post_kind:Board.Human_post ~visibility:Board.Internal () with
-        | Ok post -> post | Error error -> fail (Board.show_board_error error) in
+        | Ok post -> post | Error error -> fail (Board.Post_publication_failure.to_string error) in
       let post_id = Board.Post_id.to_string post.id in
       let add ?parent_id author =
         match Board_dispatch.add_comment ~post_id ~author ~content:"same text" ?parent_id () with

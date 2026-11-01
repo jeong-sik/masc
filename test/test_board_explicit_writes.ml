@@ -35,7 +35,7 @@ let create_post ~content =
       ()
   with
   | Ok post -> post
-  | Error error -> Alcotest.fail (Board.show_board_error error)
+  | Error error -> Alcotest.fail (Board.Post_publication_failure.to_string error)
 ;;
 
 let test_identical_posts_are_distinct_writes () =

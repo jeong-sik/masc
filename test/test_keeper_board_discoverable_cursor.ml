@@ -7,6 +7,11 @@ module KBAC = Keeper_board_attention_candidate
 (* These tests pin how a comment or an edit reaches the cursor, not who is
    declared: every name with the shape of a Board identity stands for itself.
    Which names are declared is pinned in test_board_recipient_resolution. *)
+let get_created = function
+  | Ok value -> value
+  | Error failure ->
+    Alcotest.fail (Masc.Board.Post_publication_failure.to_string failure)
+
 let every_name_declared =
   Recipient_lookup.make (fun candidate ->
     Ok
@@ -107,7 +112,7 @@ let persist_discoverable signal =
       ~visibility:Board.Internal
       ()
   with
-  | Error error -> fail (Board.show_board_error error)
+  | Error error -> fail (Board.Post_publication_failure.to_string error)
   | Ok post ->
     { Board_dispatch.signal =
         { signal with post_id = Board.Post_id.to_string post.id }
@@ -222,7 +227,7 @@ let test_initialized_cursor_receives_each_discoverable_edit () =
   let meta = keeper_meta ~board_interests:["research"] config "editobserver" in
   register config meta;
   let get = function Ok value -> value | Error error -> fail (Board.show_board_error error) in
-  let post = get (Board_dispatch.create_post ~author:"editor" ~content:"Original evidence"
+  let post = get_created (Board_dispatch.create_post ~author:"editor" ~content:"Original evidence"
     ~title:"Research" ~body:"Original evidence" ~visibility:Board.Internal ~post_kind:Board.Human_post ()) in
   ignore (Keeper_world_observation.collect_board_events ~base_path:config.base_path ~meta);
   let _, cursor = Keeper_registry.get_board_cursor ~base_path:config.base_path meta.name in
@@ -254,7 +259,7 @@ let test_live_comment_and_catchup_share_identity_after_title_edit () =
   let meta = keeper_meta config "commentreader" in
   register config meta;
   let get = function Ok value -> value | Error error -> fail (Board.show_board_error error) in
-  let post = get (Board_dispatch.create_post ~author:"editor" ~content:"body"
+  let post = get_created (Board_dispatch.create_post ~author:"editor" ~content:"body"
       ~title:"original title" ~body:"body" ~visibility:Board.Internal ~post_kind:Board.Human_post ()) in
   ignore (Keeper_world_observation.collect_board_events ~base_path:config.base_path ~meta);
   Board_dispatch.set_board_signal_hook (KKS.wakeup_relevant_keeper_for_board_signal ~config);
@@ -284,7 +289,7 @@ let test_queued_edits_keep_their_captured_content () =
   let meta = keeper_meta config "editreader" in
   register config meta;
   let get = function Ok value -> value | Error error -> fail (Board.show_board_error error) in
-  let post = get (Board_dispatch.create_post ~author:"editor" ~content:"Original evidence"
+  let post = get_created (Board_dispatch.create_post ~author:"editor" ~content:"Original evidence"
     ~title:"Original title" ~body:"Original evidence" ~visibility:Board.Internal ~post_kind:Board.Human_post ()) in
   Board_dispatch.set_board_signal_hook (KKS.wakeup_relevant_keeper_for_board_signal ~config);
   let edit title body = get (Board_dispatch.update_post ~post_id:(Board.Post_id.to_string post.id)

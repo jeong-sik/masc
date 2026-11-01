@@ -17,6 +17,7 @@
   board_dispatch
   board_metrics_hooks
   board_paths
+  board_post_publication_failure
   board_snapshot_batch
   board_snapshot_rows
   board_sort

@@ -3,6 +3,11 @@
 open Masc.Board
 
 (* The store-level writers ask a recipient lookup; no name is declared here. *)
+let get_created = function
+  | Ok value -> value
+  | Error failure ->
+    Alcotest.fail (Masc.Board.Post_publication_failure.to_string failure)
+
 let nobody_declared = Masc.Recipient_lookup.none_declared
 let create_post store = create_post store ~lookup:nobody_declared
 let add_comment store = add_comment store ~lookup:nobody_declared
@@ -93,7 +98,7 @@ let test_permanent_post () =
   with
   | Ok post ->
       Alcotest.(check (float 0.0)) "expires_at = 0.0" 0.0 post.expires_at
-  | Error e -> Alcotest.fail (show_board_error e)
+  | Error e -> Alcotest.fail (Post_publication_failure.to_string e)
 
 let test_expiring_post () =
   let store = create_store () in
@@ -103,7 +108,7 @@ let test_expiring_post () =
   with
   | Ok post ->
       Alcotest.(check bool) "expires_at > 0.0" true (post.expires_at > 0.0)
-  | Error e -> Alcotest.fail (show_board_error e)
+  | Error e -> Alcotest.fail (Post_publication_failure.to_string e)
 
 let test_sweeper_skips_permanent () =
   let store = create_store () in
@@ -112,7 +117,7 @@ let test_sweeper_skips_permanent () =
        ~post_kind:Human_post ()
    with
    | Ok _ -> ()
-   | Error e -> Alcotest.fail (show_board_error e));
+   | Error e -> Alcotest.fail (Post_publication_failure.to_string e));
   let (removed_posts, _) = sweep store in
   Alcotest.(check int) "sweeper removed 0 permanent posts" 0 removed_posts
 
@@ -126,7 +131,7 @@ let test_sweep_removes_the_rows_of_an_expired_target () =
         ~ttl_hours:1 ()
     with
     | Ok post -> Post_id.to_string post.id
-    | Error e -> Alcotest.fail (show_board_error e)
+    | Error e -> Alcotest.fail (Post_publication_failure.to_string e)
   in
   (match
      toggle_reaction store ~target_type:Reaction_post ~target_id:post_id
@@ -157,7 +162,7 @@ let test_sweep_keeps_rows_whose_target_is_not_loaded () =
         ~post_kind:Human_post ()
     with
     | Ok post -> Post_id.to_string post.id
-    | Error e -> Alcotest.fail (show_board_error e)
+    | Error e -> Alcotest.fail (Post_publication_failure.to_string e)
   in
   (match
      toggle_reaction store ~target_type:Reaction_post ~target_id:post_id
@@ -185,7 +190,7 @@ let test_sweep_takes_an_expired_reply_out_of_the_post_count () =
         ~post_kind:Human_post ()
     with
     | Ok post -> Post_id.to_string post.id
-    | Error e -> Alcotest.fail (show_board_error e)
+    | Error e -> Alcotest.fail (Post_publication_failure.to_string e)
   in
   let add_reply ~ttl_hours =
     match
@@ -219,7 +224,7 @@ let test_sweep_cascades_an_expired_post_to_its_comments () =
         ~ttl_hours:1 ()
     with
     | Ok post -> Post_id.to_string post.id
-    | Error e -> Alcotest.fail (show_board_error e)
+    | Error e -> Alcotest.fail (Post_publication_failure.to_string e)
   in
   let comment_id =
     match
@@ -252,7 +257,7 @@ let test_sweep_drains_a_post_larger_than_two_comment_batches () =
     | Error e -> Alcotest.fail (show_board_error e)
   in
   let post =
-    unwrap (create_post store ~author:"test-agent" ~content:"Large expired thread"
+    get_created (create_post store ~author:"test-agent" ~content:"Large expired thread"
       ~post_kind:Human_post ~ttl_hours:1 ())
   in
   let post_id = Post_id.to_string post.id in
@@ -498,7 +503,7 @@ let test_post_kind_direct_default () =
       let json = post_to_yojson post in
       let kind = Yojson.Safe.Util.(json |> member "post_kind" |> to_string) in
       Alcotest.(check string) "kind is direct" "direct" kind
-  | Error e -> Alcotest.fail (show_board_error e)
+  | Error e -> Alcotest.fail (Post_publication_failure.to_string e)
 
 let test_post_kind_automation_contract () =
   let store = create_store () in
@@ -511,7 +516,7 @@ let test_post_kind_automation_contract () =
       let json = post_to_yojson post in
       let kind = Yojson.Safe.Util.(json |> member "post_kind" |> to_string) in
       Alcotest.(check string) "kind is automation" "automation" kind
-  | Error e -> Alcotest.fail (show_board_error e)
+  | Error e -> Alcotest.fail (Post_publication_failure.to_string e)
 
 let test_post_kind_system_contract () =
   let store = create_store () in
@@ -523,7 +528,7 @@ let test_post_kind_system_contract () =
       let json = post_to_yojson post in
       let kind = Yojson.Safe.Util.(json |> member "post_kind" |> to_string) in
       Alcotest.(check string) "kind is system" "system" kind
-  | Error e -> Alcotest.fail (show_board_error e)
+  | Error e -> Alcotest.fail (Post_publication_failure.to_string e)
 
 let () =
   Alcotest.run "Board_TTL"

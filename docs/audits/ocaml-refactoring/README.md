@@ -2120,6 +2120,24 @@ standalone diagnostic suite moves to the public HTTP streaming scenario suite. P
 
 **Give Board post completion an explicit dispatch and commit outcome**
 
+The first server publication-evidence layer is in progress against campaign parent
+`ca50b0da7d09ae45db1941071ff516995a28b4c1`. It moves the existing effect-proof
+vocabulary to the shared core without changing its wire values, gives Board
+creation failures an opaque owner, and retains the exact immutable `post_creation`
+only after the append and full state/index/count/cache commit. An attempted append
+without that proof stays unknown. Persistence observers keep their callback timing;
+their exceptions are re-raised after normal unlock so an observation failure cannot
+poison the persistence mutex. Exceptions from mutation still retain Eio poisoning.
+The adapter and HTTP route preserve canonical structured proof and committed IDs.
+
+This server layer does not finish T1. The TUI still needs request-owned outcome
+retention, exact sent-draft/attachment handling, and honest unknown-outcome
+reconciliation. The queue count remains 28 implemented candidates; T1 and S3 stay
+open. Source review and selected remote execution are recorded on the layer PR;
+syntax parsing is not type checking or execution, and no installed-runtime or full
+regression result is implied. No local Dune build, typecheck or test is used in this
+external coding session.
+
 Inspection revision: `857c8647ce7cc7305d6aa081d1aa24ac5b93f05e`. This follows the merged
 TUI I/O work; it is not a regression attribution to #43355.
 

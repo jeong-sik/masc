@@ -11,6 +11,11 @@ open Masc
 
 module KBA = Keeper_board_audience
 
+let get_created = function
+  | Ok value -> value
+  | Error failure ->
+    Alcotest.fail (Masc.Board.Post_publication_failure.to_string failure)
+
 let rec remove_tree path =
   if Sys.file_exists path
   then
@@ -173,7 +178,7 @@ let test_scan_follows_the_recorded_audience () =
   @@ fun config ->
   let meta = register_keeper config "scanreader" in
   let create content =
-    get
+    get_created
       (Board_dispatch.create_post
          ~author:"external-author"
          ~content
@@ -246,7 +251,7 @@ let test_an_old_post_without_an_audience_costs_nothing () =
   let name = meta.Keeper_meta_contract.name in
   let base_path = config.Workspace.base_path in
   let old_post =
-    get
+    get_created
       (Board_dispatch.create_post
          ~author:"external-author"
          ~content:"@scanreader older row"
@@ -299,7 +304,7 @@ let test_a_post_without_an_audience_does_not_stop_its_comments () =
   @@ fun config ->
   let meta = register_keeper config "scanreader" in
   let post =
-    get
+    get_created
       (Board_dispatch.create_post
          ~author:"external-author"
          ~content:"plain note"
@@ -344,7 +349,7 @@ let test_scan_follows_the_recorded_comment_audience () =
   @@ fun config ->
   let meta = register_keeper config "scanreader" in
   let post =
-    get
+    get_created
       (Board_dispatch.create_post
          ~author:"scanreader"
          ~content:"thread root"

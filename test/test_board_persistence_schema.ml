@@ -49,7 +49,7 @@ let create store ~origin ~content =
       ~post_kind:Board.Human_post ~origin ()
   with
   | Ok post -> post
-  | Error e -> Alcotest.failf "create_post failed: %s" (Board.show_board_error e)
+  | Error e -> Alcotest.failf "create_post failed: %s" (Board.Post_publication_failure.to_string e)
 ;;
 
 let create_no_origin store ~content =
@@ -58,7 +58,7 @@ let create_no_origin store ~content =
       ~post_kind:Board.Human_post ()
   with
   | Ok post -> post
-  | Error e -> Alcotest.failf "create_post failed: %s" (Board.show_board_error e)
+  | Error e -> Alcotest.failf "create_post failed: %s" (Board.Post_publication_failure.to_string e)
 ;;
 
 let decode = Masc_board_handlers.Board_votes_json.post_of_yojson

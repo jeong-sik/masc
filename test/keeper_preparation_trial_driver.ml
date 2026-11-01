@@ -966,7 +966,7 @@ let run_trial ~base ~experiment ~strategy ~prompt_root ~counter ~receipt ~sw ~en
   Board_dispatch.reset_for_test ();
   Board_dispatch.init_jsonl ~recipient_lookup:Recipient_lookup.none_declared ();
   ignore (Board_dispatch.create_post ~author:"synthetic-user" ~content:"unaddressed fixture baseline"
-      ~post_kind:Board.Human_post ~visibility:Board.Internal () |> get Board.show_board_error);
+      ~post_kind:Board.Human_post ~visibility:Board.Internal () |> get Board.Post_publication_failure.to_string);
   ignore (Keeper_world_observation.collect_board_events ~base_path:base ~meta);
   Board_dispatch.set_board_signal_hook (Keeper_keepalive_signal.wakeup_relevant_keeper_for_board_signal ~config);
   let content = Printf.sprintf
@@ -974,7 +974,7 @@ let run_trial ~base ~experiment ~strategy ~prompt_root ~counter ~receipt ~sw ~en
     keeper (string "selection_sha256" fixture) (Yojson.Safe.to_string (field "skill_reference" fixture)) in
   let admission_entered = now counter in
   let post = stage Admit_source (fun () -> Board_dispatch.create_post ~author:"synthetic-user" ~content
-      ~post_kind:Board.Human_post ~visibility:Board.Internal () |> get Board.show_board_error) in
+      ~post_kind:Board.Human_post ~visibility:Board.Internal () |> get Board.Post_publication_failure.to_string) in
   let admission_returned = now counter in
   let selection = match pending base with
     | [selection] -> selection

@@ -95,6 +95,14 @@ let activity_result_json_with_data ~ok ~message ~data =
     ]
 ;;
 
+let activity_result_json_with_tool_result result =
+  `Assoc
+    [ "ok", `Bool (Tool_result.is_success result)
+    ; "message", `String (Tool_result.message result)
+    ; "result", Tool_result.to_json result
+    ]
+;;
+
 type schedule_write_tool =
   | Schedule_create
   | Schedule_update
@@ -1178,13 +1186,25 @@ let add_routes ~sw ~clock router =
 
   |> Server_route.post (Server_route.Tool_actor { tool_name = (Tool_name.Board_name.to_string Tool_name.Board_name.Board_post) }) "/api/v1/tools/masc_board_post" (fun state agent_name request reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
+           let tool_name = Tool_name.Board_name.to_string Tool_name.Board_name.Board_post in
+           let start_time = Tool_timing.start () in
+           (* A later response failure does not replace an observed Board
+              result with an unsupported claim about its publication. *)
+           let observed_result = ref None in
+           let respond ~status result =
+             observed_result := Some result;
+             respond_json_value_with_cors ~status request reqd
+               (activity_result_json_with_tool_result result)
+           in
            try
              let ( let* ) r f =
                match r with
                | Ok v -> f v
                | Error msg ->
-                   respond_json_value_with_cors ~status:`Bad_request request reqd
-                     (activity_result_json ~ok:false ~message:msg)
+                   respond ~status:`Bad_request
+                     (Tool_result.make_err ~tool_name ~start_time
+                        ~class_:Tool_result.Workflow_rejection
+                        ~effect_disposition:Tool_result.Proven_pre_effect msg)
              in
              let* args =
                try Ok (Yojson.Safe.from_string body_str)
@@ -1196,15 +1216,29 @@ let add_routes ~sw ~clock router =
              let* args = json_upsert_string_field "author" author args in
              let* args = json_ensure_meta_source "dashboard_board_post" args in
              let result = Board_tool.handle_tool ~result_boundary:Tool_output.Sent_to_client
-                 (Tool_name.Board_name.to_string Tool_name.Board_name.Board_post) args in
+                 tool_name args in
              let ok = Tool_result.is_success result in
-             let msg = Tool_result.message result in
              let status = if ok then `Created else `Bad_request in
+             respond ~status result
+           with
+           | (Eio.Cancel.Cancelled _ | Eio.Time.Timeout | Out_of_memory
+             | Stack_overflow | Sys.Break) as exn ->
+             Printexc.raise_with_backtrace exn (Printexc.get_raw_backtrace ())
+           | exn ->
+             let result =
+               match !observed_result with
+               | Some result -> result
+               | None ->
+                 Tool_result.make_err ~tool_name ~start_time
+                   ~class_:(Tool_result.classify_from_exception exn)
+                   ~effect_disposition:Tool_result.Effect_outcome_unknown
+                   (Printexc.to_string exn)
+             in
+             let status =
+               if Tool_result.is_success result then `Created else `Bad_request
+             in
              respond_json_value_with_cors ~status request reqd
-               (activity_result_json ~ok ~message:msg)
-           with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-             respond_json_value_with_cors ~status:`Bad_request request reqd
-               (activity_result_json ~ok:false ~message:(Printexc.to_string exn))
+               (activity_result_json_with_tool_result result)
          )
        )
 

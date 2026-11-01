@@ -596,7 +596,7 @@ let test_dashboard_delete_preserves_applied_pending_and_refused () =
         ~post_kind:Masc.Board.Human_post ()
     with
     | Ok post -> Masc.Board.Post_id.to_string post.id
-    | Error error -> fail (Masc.Board.show_board_error error)
+    | Error error -> fail (Masc.Board.Post_publication_failure.to_string error)
   in
   let delete post_id =
     dispatch_json ~router ~token ~path:"/api/v1/dashboard/board/delete"
@@ -707,6 +707,96 @@ let test_board_write_routes_reject_foreign_workspace () =
   | Ok (Some Masc.Board.Up) -> ()
   | Ok (Some Masc.Board.Down) | Ok None -> fail "matching workspace did not store comment vote"
   | Error error -> fail (Masc.Board.show_board_error error)
+;;
+
+let test_board_post_route_preserves_publication_evidence () =
+  with_authenticated_activity_router
+    ~prefix:"board-post-publication-" ~agent_name:"publication-operator"
+  @@ fun ~base_path ~config ~state:_ ~sw:_ ~clock:_ ~router ~token ->
+  with_board_store ~base_path @@ fun () ->
+  let open Yojson.Safe.Util in
+  let workspace masc_root = `Assoc
+      [ "base_path", `String (Unix.realpath config.Masc.Workspace.base_path)
+      ; "masc_root", `String masc_root ] in
+  let current = workspace (Unix.realpath (Masc.Workspace.masc_dir config)) in
+  let post ~expected_workspace title =
+    dispatch_json ~router ~token ~path:"/api/v1/tools/masc_board_post"
+      ~extra_headers:[] ~body:(Yojson.Safe.to_string (`Assoc
+        [ "expected_workspace", expected_workspace
+        ; "title", `String title
+        ; "body", `String title
+        ; "author", `String "forged-publication-author" ])) ()
+  in
+  let noop : Masc.Board_metrics_hooks.observer =
+    { observe_persist_lock_acquire_sec = (fun _ -> ())
+    ; observe_persist_lock_held_sec = (fun _ -> ())
+    ; inc_dispatch_flusher_start_outcome = (fun ~outcome:_ -> ()) }
+  in
+  let calls = ref 0 in
+  let status, failed =
+    Fun.protect ~finally:(fun () -> Masc.Board_metrics_hooks.set_observer noop)
+      (fun () ->
+        Masc.Board_metrics_hooks.set_observer
+          { noop with observe_persist_lock_held_sec = (fun _ ->
+              incr calls;
+              if !calls = 1 then failwith "HTTP held observer failed") };
+        post ~expected_workspace:current "committed before the HTTP observer fault")
+  in
+  check int "the actual held observer fault ran once" 1 !calls;
+  check int "the post-effect failure remains an error response" 400 status;
+  check bool "the response reports failure" false (failed |> member "ok" |> to_bool);
+  let failed_result = failed |> member "result" in
+  check string "the nested result keeps the failed disposition" "failed"
+    (failed_result |> member "disposition" |> to_string);
+  check string "the route keeps producer proof of publication" "proven_post_effect"
+    (failed_result |> member "effect_disposition" |> to_string);
+  let committed_id =
+    failed_result |> member "data" |> member "committed_post_id" |> to_string in
+  let committed = match Masc.Board_dispatch.get_post ~post_id:committed_id with
+    | Ok post -> post
+    | Error error -> fail (Masc.Board.show_board_error error) in
+  check string "the error receipt identifies the actual committed body"
+    "committed before the HTTP observer fault" committed.body;
+  check string "publication uses the authenticated actor" "publication-operator"
+    (Masc.Board.Agent_id.to_string committed.author);
+  check int "the failed response still has one actual WAL row" 1
+    (List.length (Fs_compat.load_jsonl (Masc.Board.persist_path ())));
+  (* Keep this store alive: a reset would conceal persistence-mutex poison. *)
+  let status, completed = post ~expected_workspace:current "later HTTP publication" in
+  check int "the same real route accepts a later write" 201 status;
+  check bool "the later route reports success" true
+    (completed |> member "ok" |> to_bool);
+  let completed_result = completed |> member "result" in
+  check string "the success carries its canonical disposition" "completed"
+    (completed_result |> member "disposition" |> to_string);
+  let data = completed_result |> member "data" in
+  let later_id = data |> member "id" |> to_string in
+  check bool "the later response identifies a distinct actual post" false
+    (String.equal committed_id later_id);
+  check (list string) "success keeps the admitted unresolved names" []
+    (data |> member "unresolved" |> to_list |> List.map to_string);
+  (match Masc.Board_dispatch.get_post ~post_id:later_id with
+   | Ok post ->
+     check string "structured success data identifies the stored body" post.body
+       (data |> member "body" |> to_string);
+     check string "structured success data identifies the stored author"
+       (Masc.Board.Agent_id.to_string post.author)
+       (data |> member "author" |> to_string)
+   | Error error -> fail (Masc.Board.show_board_error error));
+  let status, refused = post
+      ~expected_workspace:(workspace (base_path ^ "/foreign-root"))
+      "refused before publication" in
+  check int "foreign workspace is refused" 400 status;
+  check string "pre-call refusal retains canonical producer proof" "proven_pre_effect"
+    (refused |> member "result" |> member "effect_disposition" |> to_string);
+  check bool "pre-call refusal invents no committed receipt" true
+    (match refused |> member "result" |> member "data" with
+     | `Assoc fields -> not (List.mem_assoc "committed_post_id" fields)
+     | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> true);
+  check int "the refused request leaves exactly the two real posts" 2
+    (List.length (Masc.Board_dispatch.list_posts ()));
+  check int "the refused request appends no additional WAL row" 2
+    (List.length (Fs_compat.load_jsonl (Masc.Board.persist_path ())))
 ;;
 
 let test_board_write_routes_use_authenticated_actor () =
@@ -1249,7 +1339,7 @@ let test_board_context_inference_uses_current_owner_contract_and_actor () =
         ()
     with
     | Ok post -> post
-    | Error error -> fail (Board_tool.board_error_to_string error)
+    | Error error -> fail (Masc.Board.Post_publication_failure.to_string error)
   in
   let submit () =
     dispatch_json ~router ~token
@@ -1594,7 +1684,7 @@ let test_board_detail_defaults_to_latest_comments_with_older_pages () =
         ~post_kind:Masc.Board.Human_post ()
     with
     | Ok post -> post
-    | Error error -> fail (Board_tool.board_error_to_string error)
+    | Error error -> fail (Masc.Board.Post_publication_failure.to_string error)
   in
   let post_id = Masc.Board.Post_id.to_string post.id in
   for n = 1 to 25 do
@@ -1679,6 +1769,8 @@ let () =
             test_board_write_routes_use_authenticated_actor
         ; test_case "Board writes bind the receiving workspace" `Quick
             test_board_write_routes_reject_foreign_workspace
+        ; test_case "Board post HTTP keeps publication proof and structured receipt" `Quick
+            test_board_post_route_preserves_publication_evidence
         ; test_case "Dashboard deletion preserves pending and refused outcomes" `Quick
             test_dashboard_delete_preserves_applied_pending_and_refused
         ; test_case "the Board list route and projection share the kept page" `Quick

@@ -35,6 +35,7 @@ let attachment_error ~tool_name ~start_time error : Tool_result.result =
   Tool_result.make_err
     ~tool_name
     ~class_
+    ~effect_disposition:Tool_result.Proven_pre_effect
     ~start_time
     (Board_tool_attachment.error_to_string error)
 ;;
@@ -53,7 +54,15 @@ let body_or_content_arg args =
 (* Attachment syntax is checked first, like any other argument. Artifact bytes
    are read last, after every check that needs no I/O, so a post that is going
    to be rejected for its title, author or post_kind reads no blob. *)
+type post_creation_progress =
+  | Before_creation
+  | Creation_started
+  | Creation_committed of Board.post_creation
+  | Creation_failed of Board.Post_publication_failure.t
+
 let handle_post_create ~tool_name ~start_time args : Tool_result.result =
+  let progress = ref Before_creation in
+  try
   match Board_tool_attachment.parse_args args with
   | Error error -> attachment_error ~tool_name ~start_time error
   | Ok attachment_entries ->
@@ -64,6 +73,7 @@ let handle_post_create ~tool_name ~start_time args : Tool_result.result =
     Tool_result.make_err
       ~tool_name
       ~class_:Tool_result.Workflow_rejection
+      ~effect_disposition:Tool_result.Proven_pre_effect
       ~start_time
       "Title must not be empty or whitespace-only"
   | _ ->
@@ -88,6 +98,7 @@ let handle_post_create ~tool_name ~start_time args : Tool_result.result =
       Tool_result.make_err
         ~tool_name
         ~class_:Tool_result.Workflow_rejection
+        ~effect_disposition:Tool_result.Proven_pre_effect
         ~start_time
         "title is required"
     else if
@@ -98,6 +109,7 @@ let handle_post_create ~tool_name ~start_time args : Tool_result.result =
       Tool_result.make_err
         ~tool_name
         ~class_:Tool_result.Workflow_rejection
+        ~effect_disposition:Tool_result.Proven_pre_effect
         ~start_time
         "author is required"
     else
@@ -106,6 +118,7 @@ let handle_post_create ~tool_name ~start_time args : Tool_result.result =
         Tool_result.make_err
           ~tool_name
           ~class_:Tool_result.Workflow_rejection
+          ~effect_disposition:Tool_result.Proven_pre_effect
           ~start_time
           "author is required"
       | Some author ->
@@ -124,6 +137,7 @@ let handle_post_create ~tool_name ~start_time args : Tool_result.result =
         Tool_result.make_err
           ~tool_name
           ~class_:Tool_result.Workflow_rejection
+          ~effect_disposition:Tool_result.Proven_pre_effect
           ~start_time
           msg
       | Ok post_kind ->
@@ -143,6 +157,7 @@ let handle_post_create ~tool_name ~start_time args : Tool_result.result =
               entries
           | None -> Board_tool_format.normalize_board_post_meta ~attachments args
         in
+        progress := Creation_started;
         (match
            Board_dispatch.create_post_with_unresolved
              ~author
@@ -157,13 +172,35 @@ let handle_post_create ~tool_name ~start_time args : Tool_result.result =
              ?thread_id
              ()
          with
-         | Ok (post, unresolved) ->
+         | Ok (creation : Board.post_creation) ->
+              (* Capture the typed receipt before any response projection. *)
+              progress := Creation_committed creation;
               let json =
-                Board_tool_format.with_unresolved (Board.post_to_yojson post) unresolved
+                Board_tool_format.with_unresolved
+                  (Board.post_to_yojson creation.post) creation.unresolved
               in
               Tool_result.make_ok ~tool_name ~start_time ~data:json ()
-         | Error e ->
-           Board_tool_format.error_of_board_error ~tool_name ~start_time e)
+         | Error failure ->
+           progress := Creation_failed failure;
+           Board_tool_format.error_of_post_publication_failure
+             ~tool_name ~start_time failure)
+  with
+  | (Eio.Cancel.Cancelled _ | Eio.Time.Timeout | Out_of_memory
+    | Stack_overflow | Sys.Break) as exn ->
+    Printexc.raise_with_backtrace exn (Printexc.get_raw_backtrace ())
+  | exn ->
+    let module Failure = Board.Post_publication_failure in
+    let failure =
+      match !progress with
+      | Before_creation -> Failure.before_effect (Failure.Raised exn)
+      | Creation_started -> Failure.unknown (Failure.Raised exn)
+      | Creation_committed creation ->
+        Failure.after_commit creation (Failure.Raised exn)
+      | Creation_failed failure ->
+        Failure.with_cause failure (Failure.Raised exn)
+    in
+    Board_tool_format.error_of_post_publication_failure
+      ~tool_name ~start_time failure
 ;;
 
 let handle_post_edit ~tool_name ~start_time args : Tool_result.result =

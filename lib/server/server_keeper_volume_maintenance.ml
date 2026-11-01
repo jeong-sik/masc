@@ -103,7 +103,7 @@ let post ~keeper_name:_ ~volume:_ ~content ~meta_json =
     ~hearth
     ()
   |> Result.map (fun _ -> ())
-  |> Result.map_error Board_types.show_board_error
+  |> Result.map_error Board.Post_publication_failure.to_string
 ;;
 
 let post_damage ~post ~keeper_name ~(volume : Watch.volume) ~state ~count ~first ~last =

@@ -275,7 +275,7 @@ let with_intake_sources ~max_events f =
         ~post_kind:Board.Human_post ~visibility:Board.Internal ()
     with
     | Ok post -> Board.Post_id.to_string post.id
-    | Error error -> failf "failed to create Board source: %s" (Board.show_board_error error)
+    | Error error -> failf "failed to create Board source: %s" (Board.Post_publication_failure.to_string error)
   in
   let seed stimulus =
     match Keeper_registry_event_queue.enqueue_durable_result ~base_path meta.name stimulus with
@@ -476,7 +476,7 @@ let create_thread ~title content =
       ()
   with
   | Ok post -> Board.Post_id.to_string post.id
-  | Error error -> failf "post: %s" (Board.show_board_error error)
+  | Error error -> failf "post: %s" (Board.Post_publication_failure.to_string error)
 ;;
 
 let add_comment ~post_id ~author content =
@@ -536,7 +536,7 @@ let test_board_replay_routes_exact_replies () =
     match Board_dispatch.create_post ~author:poster.name ~content:"thread topic"
             ~title:"thread" ~post_kind:Board.Human_post () with
     | Ok post -> Board.Post_id.to_string post.id
-    | Error error -> fail (Board.show_board_error error)
+    | Error error -> fail (Board.Post_publication_failure.to_string error)
   in
   let parent_id = add_comment ~post_id ~author:parent_author.name "parent comment" in
   ignore (add_comment ~post_id ~author:bystander.name "past participation" : string);
@@ -604,7 +604,7 @@ let test_missing_parent_comment_does_not_abort_later_comment_replay () =
     match Board_dispatch.create_post ~author:"external-poster" ~content:"thread topic"
             ~title:"thread" ~post_kind:Board.Human_post () with
     | Ok post -> Board.Post_id.to_string post.id
-    | Error error -> fail (Board.show_board_error error)
+    | Error error -> fail (Board.Post_publication_failure.to_string error)
   in
   let parent_id = add_comment ~post_id ~author:parent_author.name "keeper parent comment" in
   ignore (Keeper_registry.For_testing.register ~base_path parent_author.name parent_author);

@@ -44,6 +44,25 @@ let get = function
   | Error error -> fail (Board.show_board_error error)
 ;;
 
+let creation = function
+  | Ok value -> value
+  | Error failure -> fail (Board.Post_publication_failure.to_string failure)
+;;
+
+let refused_before_publication = function
+  | Ok _ -> fail "expected post creation to be refused"
+  | Error failure ->
+    check bool "the refusal proves no publication began" true
+      (Board.Post_publication_failure.effect_disposition failure
+       = Failure_effect.Proven_pre_effect);
+    check bool "the refusal has no committed receipt" true
+      (Option.is_none (Board.Post_publication_failure.committed failure));
+    (match Board.Post_publication_failure.cause failure with
+     | Board.Post_publication_failure.Board_error error -> error
+     | Board.Post_publication_failure.Raised _ ->
+       fail "expected a typed Board refusal")
+;;
+
 let spelled = Recipient_lookup.Candidate.to_string
 
 (* The recipient each spelling stands for, whatever its case.  Two spellings
@@ -90,8 +109,8 @@ let post_id (post : Board.post) = Board.Post_id.to_string post.id
 
 let test_declared_names_are_targets_and_the_rest_are_reported =
   started ~lookup:(declaring table) (fun () ->
-    let post, unresolved =
-      get (write "@alice and @bob please look, @check is a dune alias and @Param a doc tag")
+    let { Board.post; unresolved; _ } =
+      creation (write "@alice and @bob please look, @check is a dune alias and @Param a doc tag")
     in
     check
       (list string)
@@ -113,19 +132,20 @@ let test_declared_names_are_targets_and_the_rest_are_reported =
 
 let test_spellings_standing_for_one_recipient_are_one_target =
   started ~lookup:(declaring table) (fun () ->
-    let post, unresolved = get (write "@Alice @a-team @ALICE") in
+    let { Board.post; unresolved; _ } = creation (write "@Alice @a-team @ALICE") in
     check (list string) "one recipient, once" [ "alice" ] (target_names post.audience);
     check (list string) "nothing is left over" [] unresolved)
 ;;
 
 let test_an_undeclared_name_does_not_reject_the_post =
   started ~lookup:(declaring table) (fun () ->
-    let post, unresolved = get (write ~visibility:Board.Public "@check please") in
+    let { Board.post; unresolved; _ } = creation (write ~visibility:Board.Public "@check please") in
     check string "the post is open to discovery" "discoverable" (label post.audience);
     check (list string) "the name is reported" [ "check" ] unresolved;
     (* A refused post returns no [unresolved], so the refusal names them. *)
-    match write ~visibility:Board.Direct "@check and @param please" with
-    | Error (Board.Validation_error detail) ->
+    match refused_before_publication
+      (write ~visibility:Board.Direct "@check and @param please") with
+    | Board.Validation_error detail ->
       List.iter
         (fun name ->
            check
@@ -134,13 +154,12 @@ let test_an_undeclared_name_does_not_reject_the_post =
              true
              (contains ~sub:("@" ^ name) detail))
         [ "check"; "param" ]
-    | Ok _ -> fail "a Direct post with no declared target must be refused"
-    | Error error -> fail (Board.show_board_error error))
+    | error -> fail (Board.show_board_error error))
 ;;
 
 let test_a_comment_resolves_the_same_way =
   started ~lookup:(declaring table) (fun () ->
-    let post, _ = get (write "thread root") in
+    let { Board.post; _ } = creation (write "thread root") in
     let comment, unresolved =
       get
         (Board_dispatch.add_comment_with_unresolved
@@ -176,14 +195,13 @@ let test_a_lookup_failure_refuses_the_write_and_stores_nothing =
       else Ok None)
   in
   started ~lookup:failing (fun () ->
-    (match write "@broken look zzmarker-create" with
-     | Error (Board.Recipient_lookup_failed detail) ->
+    (match refused_before_publication (write "@broken look zzmarker-create") with
+     | Board.Recipient_lookup_failed detail ->
        check bool "the error says what is broken" true (contains ~sub:"broken" detail)
-     | Ok _ -> fail "the write must be refused"
-     | Error error -> fail (Board.show_board_error error));
+     | error -> fail (Board.show_board_error error));
     check int "nothing was stored" 0 (List.length (Board_dispatch.list_posts ()));
     check bool "nothing reached the disk" false (persisted_text_contains "zzmarker-create");
-    let post, _ = get (write "original text, no address") in
+    let { Board.post; _ } = creation (write "original text, no address") in
     (match
        Board_dispatch.update_post_with_unresolved
          ~post_id:(post_id post)
@@ -215,7 +233,7 @@ let test_a_lookup_failure_refuses_the_write_and_stores_nothing =
     check bool "the comment reached no disk" false (persisted_text_contains "zzmarker-comment");
     (* The control: a stored post does show up in those files, so the checks
        above are able to see a write. *)
-    ignore (get (write "a stored post zzmarker-control"));
+    ignore (creation (write "a stored post zzmarker-control"));
     check bool "a stored post reaches the disk" true (persisted_text_contains "zzmarker-control"))
 ;;
 
@@ -229,8 +247,8 @@ let test_a_system_post_never_asks_the_lookup =
       Error "must not be asked")
   in
   started ~lookup:counting (fun () ->
-    let post, unresolved =
-      get (write ~post_kind:Board.System_post ~visibility:Board.Unlisted "refused: @broken")
+    let { Board.post; unresolved; _ } =
+      creation (write ~post_kind:Board.System_post ~visibility:Board.Unlisted "refused: @broken")
     in
     check string "the audience follows the visibility" "thread_participants" (label post.audience);
     check (list string) "nothing is reported" [] unresolved;
@@ -266,7 +284,7 @@ let test_the_write_asks_once_and_the_signal_carries_that_answer =
       asked := 0
     in
     armed := true;
-    let post, _ = get (write "@a-team hello") in
+    let { Board.post; _ } = creation (write "@a-team hello") in
     expect_once ~step:"create";
     check (list string) "create: the record agrees" [ "alice" ] (target_names post.audience);
     armed := true;
@@ -297,7 +315,7 @@ let test_an_edit_resolves_again_with_the_current_declaration =
   let current = ref table in
   let lookup = Recipient_lookup.make (fun candidate -> declared_from !current candidate) in
   started ~lookup (fun () ->
-    let post, _ = get (write ~visibility:Board.Public "@alice first") in
+    let { Board.post; _ } = creation (write ~visibility:Board.Public "@alice first") in
     check (list string) "declared at the first write" [ "alice" ] (target_names post.audience);
     current := [ "bob", "bob" ];
     let edited, unresolved =
@@ -322,11 +340,11 @@ let test_a_per_write_lookup_starts_once_for_each_uncontended_write =
       declared_from table)
   in
   started ~lookup (fun () ->
-    ignore (get (write "@alice @bob @check @nobody @other"));
+    ignore (creation (write "@alice @bob @check @nobody @other"));
     check int "one start for a write with five names" 1 !starts;
-    ignore (get (write "@alice"));
+    ignore (creation (write "@alice"));
     check int "the next write starts again" 2 !starts;
-    ignore (get (write "no address here"));
+    ignore (creation (write "no address here"));
     check int "a text with no name starts nothing" 2 !starts)
 ;;
 
@@ -371,9 +389,9 @@ let test_no_write_asks_the_lookup_while_a_lock_is_held =
       declared_from table candidate)
   in
   started ~lookup (fun () ->
-    let post, _ = get (write "first") in
+    let { Board.post; _ } = creation (write "first") in
     armed := true;
-    ignore (get (write "@alice a new post"));
+    ignore (creation (write "@alice a new post"));
     ignore
       (get
          (Board_dispatch.add_comment_with_unresolved
@@ -402,7 +420,7 @@ let test_an_edit_by_somebody_else_asks_the_lookup_nothing =
       declared_from table candidate)
   in
   started ~lookup (fun () ->
-    let post, _ = get (write "first") in
+    let { Board.post; _ } = creation (write "first") in
     armed := true;
     (match
        Board_dispatch.update_post_with_unresolved
@@ -434,7 +452,7 @@ let test_an_edit_works_out_again_when_the_post_changed_during_the_lookup =
       declared_from table candidate)
   in
   started ~lookup (fun () ->
-    let post, _ = get (write ~visibility:Board.Public "first") in
+    let { Board.post; _ } = creation (write ~visibility:Board.Public "first") in
     during_the_lookup :=
       (fun () ->
          ignore
@@ -482,7 +500,7 @@ let test_an_edit_replans_after_repeated_changes_without_holding_a_lock =
         declared_from table candidate)
   in
   started ~lookup (fun () ->
-    let post, _ = get (write ~visibility:Board.Public "first") in
+    let { Board.post; _ } = creation (write ~visibility:Board.Public "first") in
     during_the_lookup :=
       (fun () ->
          ignore
@@ -523,7 +541,7 @@ let test_an_edit_can_be_cancelled_during_continuous_changes =
       declared_from table candidate)
   in
   started ~lookup (fun () ->
-    let post, _ = get (write ~visibility:Board.Public "first") in
+    let { Board.post; _ } = creation (write ~visibility:Board.Public "first") in
     during_the_lookup :=
       (fun () ->
          ignore
@@ -551,7 +569,7 @@ let test_an_edit_can_be_cancelled_during_continuous_changes =
     let stored = get (Board_dispatch.get_post ~post_id:(post_id post)) in
     check bool "the cancelled edit did not land" false
       (String.equal stored.body "@alice never stable");
-    ignore (get (write "a later write")))
+    ignore (creation (write "a later write")))
 ;;
 
 (* A changed owner is checked again before using the first plan. *)
@@ -568,7 +586,7 @@ let test_an_edit_refuses_if_the_owner_changes_during_lookup =
       declared_from table candidate)
   in
   started ~lookup (fun () ->
-    let post, _ = get (write ~visibility:Board.Public "first") in
+    let { Board.post; _ } = creation (write ~visibility:Board.Public "first") in
     during_the_lookup :=
       (fun () ->
          ignore
@@ -611,7 +629,7 @@ let test_an_edit_keeps_the_concurrent_write_if_the_replan_fails =
       else declared_from table candidate)
   in
   started ~lookup (fun () ->
-    let post, _ = get (write ~visibility:Board.Public "first") in
+    let { Board.post; _ } = creation (write ~visibility:Board.Public "first") in
     during_the_lookup :=
       (fun () ->
          ignore
@@ -649,7 +667,7 @@ let test_an_edit_that_leaves_the_text_alone_keeps_the_recorded_audience =
       declared_from !current candidate)
   in
   started ~lookup (fun () ->
-    let post, _ = get (write ~visibility:Board.Public "@alice same text") in
+    let { Board.post; _ } = creation (write ~visibility:Board.Public "@alice same text") in
     check (list string) "declared when written" [ "alice" ] (target_names post.audience);
     current := [ "bob", "bob" ];
     asked := 0;
@@ -677,7 +695,7 @@ let test_an_unchanged_legacy_edit_resolves_its_missing_audience =
       if !broken then Error "legacy lookup failed" else declared_from table candidate)
   in
   started ~lookup (fun () ->
-    let post, _ = get (write ~visibility:Board.Public "@alice same legacy text") in
+    let { Board.post; _ } = creation (write ~visibility:Board.Public "@alice same legacy text") in
     let legacy =
       match Board.post_to_yojson post with
       | `Assoc fields -> `Assoc (List.remove_assoc "audience" fields)
@@ -747,7 +765,7 @@ let test_a_comment_during_the_lookup_does_not_make_the_edit_ask_again =
       declared_from table candidate)
   in
   started ~lookup (fun () ->
-    let post, _ = get (write ~visibility:Board.Public "first") in
+    let { Board.post; _ } = creation (write ~visibility:Board.Public "first") in
     during_the_lookup :=
       (fun () ->
          ignore
@@ -773,7 +791,7 @@ let test_a_comment_during_the_lookup_does_not_make_the_edit_ask_again =
    the same names make the same record. *)
 let test_targets_are_stored_in_name_order =
   started ~lookup:(declaring table) (fun () ->
-    let post, _ = get (write "@bob and then @alice") in
+    let { Board.post; _ } = creation (write "@bob and then @alice") in
     check (list string) "name order" [ "alice"; "bob" ] (target_names post.audience))
 ;;
 
@@ -787,20 +805,19 @@ let test_a_backend_started_by_a_read_refuses_addresses_until_a_lookup_is_install
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
   ignore (Board_dispatch.list_posts ());
-  (match write "@alice hello" with
-   | Error (Board.Recipient_lookup_failed _) -> ()
-   | Ok _ -> fail "an address must be refused without a lookup"
-   | Error error -> fail (Board.show_board_error error));
-  ignore (get (write "no address here"));
+  (match refused_before_publication (write "@alice hello") with
+   | Board.Recipient_lookup_failed _ -> ()
+   | error -> fail (Board.show_board_error error));
+  ignore (creation (write "no address here"));
   Board_dispatch.init_jsonl ~recipient_lookup:(declaring table) ();
-  let post, _ = get (write "@alice hello") in
+  let { Board.post; _ } = creation (write "@alice hello") in
   check (list string) "the installed lookup is used" [ "alice" ] (target_names post.audience)
 ;;
 
 let test_a_second_init_keeps_the_first_lookup =
   started ~lookup:(declaring table) (fun () ->
     Board_dispatch.init_jsonl ~recipient_lookup:Recipient_lookup.none_declared ();
-    let post, _ = get (write "@alice hello") in
+    let { Board.post; _ } = creation (write "@alice hello") in
     check (list string) "the first lookup stays" [ "alice" ] (target_names post.audience))
 ;;
 
@@ -828,7 +845,7 @@ let test_the_post_tool_answers_with_the_unresolved_names =
 (* The comment and the edit tool answer like the post tool does. *)
 let test_the_comment_and_edit_tools_answer_with_the_unresolved_names =
   started ~lookup:(declaring table) (fun () ->
-    let post, _ = get (write "first") in
+    let { Board.post; _ } = creation (write "first") in
     let call name args =
       Board_tool.handle_tool ~result_boundary:Tool_output.Sent_to_client name (`Assoc args)
     in

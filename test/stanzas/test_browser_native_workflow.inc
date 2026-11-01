@@ -20,3 +20,8 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_browser_ego_popup)))
+
+(test
+ (name test_browser_ego_native_window)
+ (modules test_browser_ego_native_window)
+ (libraries masc alcotest yojson))

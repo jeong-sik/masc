@@ -539,6 +539,7 @@ let prepare_agent_setup
     ; on_demand_tool_names
     ; result_bounds
     ; listing = keeper_listing
+    ; project_for_runtime = _
     ; cleanup = keeper_tools_cleanup
     ; terminal_effect_state
     ; gate_replay_delivery

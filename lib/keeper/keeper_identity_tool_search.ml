@@ -199,7 +199,7 @@ let load_found ~agent ~entries ~usage ~receipts ~invocation found =
     Ok ("now callable:\n" ^ String.concat "\n" (List.map describe found))
 ;;
 
-let load ~keeper_name ~agent_cell ~entries ~usage ~receipts ~invocation requested =
+let load ~held_schemas ~keeper_name ~agent_cell ~entries ~usage ~receipts ~invocation requested =
   match !agent_cell with
   | None ->
     (* The cell is filled at agent creation, so an empty one here means the
@@ -244,7 +244,13 @@ let load ~keeper_name ~agent_cell ~entries ~usage ~receipts ~invocation requeste
     let callable, unknown =
       List.partition_map
         (fun name ->
-           match Agent_core.Tool_set.find name (Agent_core.Agent.tools agent) with
+           let admitted = match held_schemas with
+             | None -> true
+             | Some schemas -> List.exists
+                 (fun (schema : Agent_core.Types.tool_schema) -> String.equal schema.name name) schemas
+           in
+           match if admitted then Agent_core.Tool_set.find name (Agent_core.Agent.tools agent)
+                 else None with
            | Some tool ->
              Either.Left
                (Printf.sprintf "- %s: %s" name
@@ -432,7 +438,7 @@ let already_used_from_history ~carry_window ~entries ~receipts history =
   placed, carried_names, dropped
 ;;
 
-let make ~keeper_name { deferred; agent_cell; history; carry_window; receipts } =
+let make ?(carried=[]) ?held_schemas ~keeper_name { deferred; agent_cell; history; carry_window; receipts } =
   match deferred with
   | [] -> None
   | _ :: _ ->
@@ -448,6 +454,16 @@ let make ~keeper_name { deferred; agent_cell; history; carry_window; receipts } 
     in
     let already_used, carried_names, dropped =
       already_used_from_history ~carry_window ~entries ~receipts history
+    in
+    (* Resolve prior loaded names only inside this view. Never transplant a
+       previous attempt's callable or its broader listing into the new one. *)
+    let already_used =
+      List.filter_map
+        (fun entry ->
+           let holds = List.exists (fun (tool : Agent_core.Tool.t) ->
+             String.equal tool.schema.name entry.name) in
+           if holds already_used || holds carried then Some entry.callable else None)
+        entries
     in
     (match dropped with
      | [] -> ()
@@ -496,6 +512,7 @@ let make ~keeper_name { deferred; agent_cell; history; carry_window; receipts } 
         invalid_arg
           (Printf.sprintf "%s has a malformed argument schema: %s" tool_name reason)
     in
+    let held_schemas = Option.map (fun schemas -> schema :: schemas) held_schemas in
     let handler env input =
       match requested_names input with
       | Error message -> refusal message
@@ -509,7 +526,7 @@ let make ~keeper_name { deferred; agent_cell; history; carry_window; receipts } 
              ; error_class = Some Agent_core.Types.Deterministic
              }
          | Some invocation ->
-           load ~keeper_name ~agent_cell ~entries ~usage ~receipts ~invocation requested)
+           load ~held_schemas ~keeper_name ~agent_cell ~entries ~usage ~receipts ~invocation requested)
     in
     Some
       { tool = Agent_core.Tool.of_schema schema handler

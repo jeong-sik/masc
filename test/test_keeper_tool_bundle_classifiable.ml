@@ -312,6 +312,8 @@ let with_bundle_tools
       ?(tool_deny = [])
       ?(addon_exports = [])
       ?agent_cell
+      ?(with_identity_surface = true)
+      ?(check_bundle = fun _bundle _net _sw -> ())
       ?(check_on_demand = fun _ -> ())
       f
   =
@@ -419,13 +421,14 @@ let with_bundle_tools
            ~publication_recovery
            ~ctx_snapshot
            ~capability_surface
-           ~identity_surface:
+           ?identity_surface:
+             (if with_identity_surface then Some
              { Masc.Keeper_tools_agent_core.offered = identity_tools ()
              ; agent_cell = Option.value ~default:(ref None) agent_cell
              ; history = []
              ; load_receipts
              ; keeper_turn_id = 1
-             }
+             } else None)
            ~composition_plan_index
            ?skill_activation_context:
              (if record_activations then Some skill_activation_context else None)
@@ -435,6 +438,7 @@ let with_bundle_tools
          ~config:(Agent_core.Types.default_config ~model:"fixture-model")
          ~net ~tools:bundle.agent_core_tools ())) agent_cell;
        Fun.protect ~finally:bundle.cleanup (fun () ->
+         check_bundle bundle net sw;
          check_on_demand bundle.on_demand_tool_names;
          f
            config
@@ -615,6 +619,163 @@ let test_addon_exports_load_into_the_running_agent () =
       ignore (run_tool loader (`Assoc ["names", `List [`String name]]));
       check bool "loader cannot expose a denied Addon export" false
         (Agent_core.Tool_set.mem name (Agent_core.Agent.tools agent)))
+;;
+
+(* Exercise the real bundle and real deferred loader with an injected LLM
+   transport. This is the projection API boundary, not the production Keeper
+   candidate driver, which still needs to adopt it. No provider is contacted. *)
+let image_projection_runtime ~declared =
+  let source = {|[runtime]
+default = "image_projection_fixture.selected"
+[providers.image_projection_fixture]
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1/v1"
+[models.selected]
+api-name = "image-projection-uncatalogued"
+max-context = 4096
+|} ^ (if declared then {|[models.selected.capabilities]
+supports-image-input = true
+supports-multimodal-inputs = true
+|} else "") ^ "[image_projection_fixture.selected]\n" in
+  let config = match Runtime_toml.parse_string source with
+    | Ok config -> config
+    | Error errors -> fail (String.concat "; "
+        (List.map (fun (error : Runtime_toml.parse_error) -> error.message) errors)) in
+  match config.bindings with
+  | [binding] ->
+    (match Runtime_instance.of_binding config binding with
+     | Ok runtime -> runtime
+     | Error reason -> fail (Runtime_config_error.string_of_drop_reason reason))
+  | [] | _::_::_ -> fail "fixture must materialize exactly one selected runtime"
+;;
+
+let test_per_candidate_image_projection () =
+  let image_name = "keeper_image_read" in
+  let has_image tools = List.exists
+      (fun (tool : Agent_core.Tool.t) -> tool.schema.name = image_name) tools in
+  let tool_named tools name = match List.find_opt
+      (fun (tool : Agent_core.Tool.t) -> tool.schema.name = name) tools with
+    | Some tool -> tool | None -> fail ("missing projected tool " ^ name) in
+  let text_runtime = image_projection_runtime ~declared:false in
+  let image_runtime = image_projection_runtime ~declared:true in
+  check string "the same runtime id can carry different immutable declarations"
+    text_runtime.id image_runtime.id;
+  let provider = match text_runtime.execution with
+    | Runtime_execution.Agent_core provider -> provider
+    | Codex_app_server _ | Claude_code _ | Antigravity_cli _ | Muse_serve _ ->
+      fail "fixture must use the Agent Core transport" in
+  check bool "the provider preset alone advertises images" true
+    (Runtime_agent.provider_caps_of_config provider).supports_image_input;
+  check bool "absent model declaration withholds admission" false
+    (Runtime_agent.runtime_accepts_image_input ~runtime:text_runtime);
+  let cell = ref None in
+  with_bundle_tools ~agent_cell:cell
+    ~check_bundle:(fun bundle net sw ->
+      let allowed = bundle.Keeper_tools_agent_core.project_for_runtime
+          ~runtime:image_runtime ~carried:[] in
+      let denied = bundle.project_for_runtime ~runtime:text_runtime ~carried:[] in
+      let check_denied (view : Keeper_tools_agent_core.model_tool_surface) =
+        check bool "fixed and official-client schemas omit native pixels" false (has_image view.tools);
+        check bool "Agent Core schemas omit native pixels" false (has_image view.agent_core_tools);
+        check bool "official-client deferred names omit native pixels" false
+          (List.mem image_name view.on_demand_tool_names);
+        check bool "official-client bounds omit the withheld tool" false
+          (List.mem_assoc image_name view.result_bounds);
+        let loader = tool_named view.agent_core_tools Keeper_identity_tool_search.tool_name in
+        check bool "the deferred listing omits native pixels" false
+          (contains ~needle:image_name loader.schema.description);
+        check bool "delegated analysis remains available" true
+          (List.mem "keeper_analyze_image" view.on_demand_tool_names)
+      in
+      check_denied denied;
+      check bool "declared image input keeps the official schema" true (has_image allowed.tools);
+      check bool "unrelated handlers are shared across views" true
+        (tool_named allowed.tools "keeper_analyze_image"
+         == tool_named denied.tools "keeper_analyze_image");
+      let run_view ~accepted (view : Keeper_tools_agent_core.model_tool_surface) =
+        let requests = ref 0 and read_dispatches = ref 0 in
+        let response content stop_reason : Agent_core.Types.api_response =
+          {id="projection-fixture";model="image-projection-uncatalogued";
+           stop_reason;content;usage=None;telemetry=None} in
+        let complete (request : Llm_provider.Llm_transport.completion_request) =
+          incr requests;
+          check bool "every actual completion uses the projected image schemas"
+            (accepted && !requests > 1)
+            (List.exists (fun schema -> Yojson.Safe.Util.member "name" schema = `String image_name)
+               request.tools);
+          match !requests with
+          | 1 -> response [Llm_provider.Types.ToolUse {
+              id="load-native-image";name=Keeper_identity_tool_search.tool_name;
+              input=`Assoc ["names",`List [`String image_name]]}] Agent_core.Types.StopToolUse
+          | 2 -> response [Llm_provider.Types.Text "projection checked"] Agent_core.Types.EndTurn
+          | _ -> fail "projection fixture must finish after one loader result" in
+        let transport = Llm_provider.Llm_transport.custom {
+          complete_sync=(fun request -> {response=Ok (complete request);latency_ms=None});
+          complete_stream=(fun ?on_telemetry:_ ~on_event:_ request -> Ok (complete request))} in
+        let accepts_image_input = match view.image_admission with
+          | Image_input_admitted -> true | Image_input_unavailable -> false in
+        let hooks = {Agent_core.Hooks.empty with pre_tool_use=Some (fun event ->
+          (match event with
+           | Agent_core.Hooks.PreToolUse {tool_name;_} ->
+             if tool_name=image_name then incr read_dispatches
+           | BeforeTurn _ | BeforeTurnParams _ | AfterTurn _ | PostToolUse _
+           | PostToolUseFailure _ | OnStop _ | OnError _ | OnToolError _ -> ());
+          Keeper_image_read.admission_hook ~accepts_image_input event)} in
+        let options = {Agent_core.Agent.default_options with provider_config=Some provider;
+          transport=Some transport;hooks} in
+        let agent = Agent_core.Agent.create ~media_store:(Agent_core.History.Memory_store.create ())
+            ~config:(Agent_core.Types.default_config ~model:"image-projection-uncatalogued")
+            ~net ~tools:view.agent_core_tools ~options () in
+        cell := Some agent;
+        Fun.protect ~finally:(fun () -> Agent_core.Agent.close agent) (fun () ->
+          (match Agent_core.Agent.run ~sw agent "Load the native image tool once." with
+           | Ok _ -> () | Error error -> fail (Agent_core.Error.to_string error));
+          check int "only injected completion callbacks ran" 2 !requests;
+          check int "loading or refusing a schema never dispatches an image read" 0 !read_dispatches;
+          let messages = (Agent_core.Agent.checkpoint ~session_id:"projection" agent).messages in
+          let outcomes = List.concat_map (fun (message : Agent_core.Types.message) -> message.content)
+              messages |> List.filter_map (function
+                | Agent_core.Types.ToolResult {tool_use_id;outcome;_} ->
+                  if tool_use_id="load-native-image"
+                  then Some (Agent_core.Types.tool_result_outcome_is_error outcome) else None
+                | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _
+                | ToolUse _ | Image _ | Document _ | Audio _ -> None) in
+          check (list bool) "the actual loader result distinguishes load from refusal"
+            [not accepted] outcomes;
+          let carried = Agent_core.Tool_set.to_list (Agent_core.Agent.tools agent) in
+          if accepted then begin
+            let next = bundle.project_for_runtime ~runtime:text_runtime ~carried in
+            check_denied next;
+            (* Even before replacing the previous, broader agent in the cell,
+               its held image tool cannot escape through the new listing. *)
+            let loader = tool_named next.agent_core_tools Keeper_identity_tool_search.tool_name in
+            let invocation = tool_invocation ~tool_use_id:"refuse-held-image" loader in
+            (match Agent_core.Tool.execute ~invocation loader
+                (`Assoc ["names",`List [`String image_name]]) with
+             | Error _ -> () | Ok _ -> fail "prior held image tool escaped the projected loader");
+            let invocation = tool_invocation ~tool_use_id:"retain-held-listing" loader in
+            (match Agent_core.Tool.execute ~invocation loader
+                (`Assoc ["names",`List [`String Keeper_identity_tool_search.tool_name]]) with
+             | Ok _ -> () | Error _ -> fail "the admitted listing must remain acknowledged as callable");
+            let restored = bundle.project_for_runtime ~runtime:image_runtime ~carried:[] in
+            check bool "withholding a view preserves the pending canonical load receipt" true
+              (has_image restored.agent_core_tools)
+          end;
+          carried) in
+      let carried = run_view ~accepted:true allowed in
+      let next = bundle.project_for_runtime ~runtime:text_runtime ~carried in
+      ignore (run_view ~accepted:false next);
+      check bool "a later candidate cannot mutate the saved admitted view" true (has_image allowed.tools);
+      check bool "a later candidate cannot mutate the saved withheld view" false (has_image denied.tools))
+    (fun _ _ _ _ _ _ -> ());
+  with_bundle_tools ~with_identity_surface:false
+    ~check_bundle:(fun bundle _net _sw ->
+      let view = bundle.Keeper_tools_agent_core.project_for_runtime ~runtime:text_runtime ~carried:[] in
+      check bool "eager fallback also omits native pixels" false (has_image view.agent_core_tools);
+      check bool "eager fallback retains delegated analysis" true
+        (List.exists (fun (tool : Agent_core.Tool.t) -> tool.schema.name="keeper_analyze_image")
+           view.agent_core_tools))
+    (fun _ _ _ _ _ _ -> ())
 ;;
 
 let fetch_blob_exn ~base_path reference =
@@ -1183,6 +1344,8 @@ let () =
     [ ( "the bundle"
       , [ test_case "Addon exports defer and load into the running agent" `Quick
             test_addon_exports_load_into_the_running_agent
+        ; test_case "materialized image admission bounds each candidate tool view" `Quick
+            test_per_candidate_image_projection
         ; test_case "effect contracts survive bundle construction" `Quick
             test_bundle_effect_contracts
         ; test_case "no tool advertises a schema reference" `Quick

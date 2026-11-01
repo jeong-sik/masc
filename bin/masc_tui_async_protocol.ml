@@ -1119,6 +1119,12 @@ let rec workspace_message_is_read = function
 (* Whether a pending share or copy makes this message stale: a read of the
    document being copied, or the answer to the share recovery lookup. Every
    other message is unaffected. *)
+let rec board_preview_waits_for_input = function
+  | Workspace_scoped (_, _, message) | Workspace_operation message ->
+      board_preview_waits_for_input message
+  | Sent_image_ready {view=Board;_} -> true
+  | _ -> false
+
 let rec message_matches_share_input ~resource_read ~recovery_loaded = function
   | Workspace_scoped (_, _, message) ->
       message_matches_share_input ~resource_read ~recovery_loaded message

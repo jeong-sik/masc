@@ -815,6 +815,9 @@ module Delivery_round : sig
 end
 
 val workspace_message_is_read : async_msg -> bool
+val board_preview_waits_for_input : async_msg -> bool
+(** A Board preview cannot take over the terminal until pending input has
+    been classified; terminal protocol replies are not operator cancellation. *)
 val message_matches_share_input :
   resource_read:(Masc_tui_resource_catalog.read_request -> bool) ->
   recovery_loaded:(Masc_tui_types.resource_share_recovery_lookup -> bool) ->

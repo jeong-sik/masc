@@ -741,7 +741,11 @@ let for_surface = function
       ; board_vote_key
       ; board_reply_key
       ; b Navigate "1–9" "attachment" ~detail:Detail_only
-          ~help:"read a stored File/Score here; u:source m:Markdown h:HTML y:copy s:save r:retry Esc:post. Other media use their existing action."
+          ~help:"preview a stored image or read a stored File/Score here; other media use their existing action"
+      ; b Navigate "Ctrl-O" "diagram" ~detail:Detail_only
+          ~help:"preview the selected post or comment's Mermaid diagram"
+      ; b Navigate ", / ." "diagram choice" ~detail:Detail_only
+          ~help:"choose the previous or next Mermaid diagram in the selected post or comment"
       (* Three keys below answer only while a post is open, and the table said
          so in prose the footer cannot read. The list footer named them and
          the dispatcher refused all three there: [[ / ]] steps the open post
@@ -1736,6 +1740,8 @@ let footer_hints_board_read ~focus_posts ~focus_comments ~full_history
         wave as [c], [Y], [r] and [Tab] — the row is over budget long
         before this key existed. *)
      @ (if has_attachments then [ b Navigate "1-9" "open" ] else [])
+     @ (if focus_posts then [] else
+          [b Navigate "Ctrl-O" "diagram"; b Navigate ",/." "choose diagram"])
      @ [ b Navigate "o" (if full_history then "newest 20" else "all comments") ]
      @ [ vote_key
        ; board_reply_key

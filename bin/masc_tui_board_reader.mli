@@ -2,6 +2,7 @@
     Format is an operator-selected interpretation, never inferred MIME. *)
 type key = { post_id : string; sha256 : string; bytes : int; name : string option }
 type presentation = Source | Markdown | Html
+type content_kind = Document | Image_bytes
 type content
 type t
 type request
@@ -14,7 +15,10 @@ val preparation_job : preparation_request -> unit ref
 val initial : t
 val key : t -> key option
 val equal_key : key -> key -> bool
-val open_read : key:key -> t -> t * request option
+val offer_image : key:key -> reason:string -> t -> t
+(** Keep the image's original reference without fetching. The operator may
+    explicitly read it and save the verified bytes. *)
+val open_read : ?content_kind:content_kind -> key:key -> t -> t * request option
 val close : t -> t
 val pending : t -> request option
 val pending_preparation : t -> preparation_request option

@@ -1941,6 +1941,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
           h2_gate_actor
             h2_reqd
             (fun state _actor ->
+             with_artifact_read_workspace state (fun workspace_headers ->
                let prefix = "/api/v1/artifact-bytes/" in
                let sha256 = String.sub path (String.length prefix)
                    (String.length path - String.length prefix) in
@@ -1959,7 +1960,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                         ([ "cache-control", "no-store"
                          ; "x-content-type-options", "nosniff"
                          ; "content-disposition", "attachment; filename=artifact-" ^ sha256 ^ ".bin"
-                         ] @ cors)
+                         ] @ workspace_headers @ cors)
                   | Ok None ->
                     h2_respond_json_value h2_reqd
                       (`Assoc [ "error", `String "not found" ])
@@ -1977,7 +1978,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                       sha256 (Tool_blob_store.fetch_error_to_string error);
                     h2_respond_json_value h2_reqd
                       (`Assoc [ "error", `String "tool blob read failed" ])
-                      ~status:`Service_unavailable ~extra_headers:cors))
+                      ~status:`Service_unavailable ~extra_headers:cors)))
 
       | _
         when Server_h2_artifact_routes.dispatch ~request_sw ~h2_reqd

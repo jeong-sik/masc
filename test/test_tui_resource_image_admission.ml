@@ -186,8 +186,133 @@ let test_operator_protocol_boundary () =
     [Reader.Key "esc";Reader.Mouse_left_press (1,1);
      Reader.Mouse_wheel (Masc.Tui_mouse_protocol.Wheel_up,1,1)]
 
+let board_post ?(body="post body") ?(attachments=[]) id : Types.board_post =
+  {bp_id=id;bp_author="author";bp_title="title";bp_body=body;bp_votes=0;
+   bp_comment_count=0;bp_created_at="";bp_created_at_unix=None;bp_updated_at=None;
+   bp_hearth=None;bp_kind=None;bp_closed=None;bp_attachments=attachments}
+
+let board_comment id body : Types.board_comment =
+  {bc_id=id;bc_parent_id=None;bc_author="author";bc_content=body;
+   bc_created_at="";bc_votes={bcv_up=0;bcv_down=0}}
+
+let board_detail state post comments =
+  let module Detail = Masc_tui_board_detail in
+  let loading,request = match Detail.start (Detail.clear state.Types.board_detail) ~post_id:post.Types.bp_id with
+    | Started (loading,request) -> loading,request
+    | Already_loading -> fail "unexpected pending Board detail" in
+  state.board_detail <- Detail.complete loading request (Ok (post,comments,None))
+
+let board_state post comments =
+  let state=state () in
+  let module Decode=Masc.Tui_decode in
+  let identity : Decode.server_identity =
+    {sid_version="test";sid_binary_commit="test";sid_binary_commit_age_s=None;
+     sid_base_path=Decode.Canonical_path.of_path "/board-test";
+     sid_masc_root=Decode.Canonical_path.of_path "/board-test/.masc";
+     sid_executable_in_worktree=None;sid_state_ready=Some true;sid_uptime=None;
+     sid_sse_clients=None;sid_gc=None;sid_scheduler=None} in
+  state.server_identity <- Some identity;
+  state.workspace_identity <- Types.Workspace_identity_match;
+  state.view <- Types.Board;
+  state.board_mode <- Types.Board_read post.Types.bp_id;
+  board_detail state post comments;
+  state
+
+let test_board_diagram_ownership () =
+  let post=board_post ~body:"post diagram" "post-a" in
+  let comment=board_comment "comment-a" "comment diagram" in
+  let state=board_state post [comment] in
+  let owner=Types.Board_diagram (Board_post_diagram {post_id=post.bp_id;body=post.bp_body}) in
+  let post_read=pending state (Types.Board_image_read (state.workspace_read_authority,owner,ref ())) in
+  let current pending = Types.image_reading_is_current state pending in
+  check bool "post diagram owns its source" true (current post_read);
+  board_detail state {post with bp_body="replacement"} [comment];
+  check bool "changed post body retires preview" false (current post_read);
+  board_detail state post [comment];
+  state.board_comments_focused <- true;
+  state.board_comment_cursor <- Some comment.bc_id;
+  check bool "selected comment is not the post" false (current post_read);
+  let owner=Types.Board_diagram (Board_comment_diagram
+    {post_id=post.bp_id;comment_id=comment.bc_id;body=comment.bc_content}) in
+  let comment_read=pending state (Types.Board_image_read (state.workspace_read_authority,owner,ref ())) in
+  check bool "selected comment owns its source" true (current comment_read);
+  board_detail state post [{comment with bc_content="updated"}];
+  check bool "changed comment retires preview" false (current comment_read);
+  board_detail state post [comment];
+  state.board_comment_cursor <- Some "other";
+  check bool "another selection retires preview" false (current comment_read);
+  state.board_comment_cursor <- Some comment.bc_id;
+  state.board_mode <- Types.Board_read "post-b";
+  check bool "another post retires preview" false (current comment_read)
+
+let test_board_attachment_ownership () =
+  let attachment : Types.board_attachment =
+    {ba_kind=Ak_image;ba_source=As_artifact {sha256=String.make 64 'a';bytes=4};
+     ba_name=Some "image.png"} in
+  let post=board_post ~attachments:[Ok attachment] "post-a" in
+  let state=board_state post [] in
+  let owner=Types.Board_attachment_image {post_id=post.bp_id;attachment} in
+  let image=pending state (Types.Board_image_read (state.workspace_read_authority,owner,ref ())) in
+  let current () = Types.image_reading_is_current state image in
+  check bool "exact selected attachment owns preview" true (current ());
+  board_detail state {post with bp_attachments=[Ok {attachment with ba_source=As_artifact
+    {sha256=String.make 64 'a';bytes=5}}]} [];
+  check bool "changed byte count retires preview" false (current ());
+  board_detail state {post with bp_attachments=[Ok {attachment with ba_kind=Ak_file}]} [];
+  check bool "changed attachment kind retires preview" false (current ());
+  board_detail state post [];
+  state.view <- Types.Resources;
+  check bool "leaving Board retires preview" false (current ());
+  state.view <- Types.Board;
+  Types.suspend_workspace_readings state;
+  check bool "withdrawn workspace reading retires preview" false (current ())
+
+let test_board_preview_input_barrier () =
+  let module Protocol = Masc_tui_async_protocol in
+  let preview view = Protocol.Sent_image_ready {generation=1;view;keeper_name=None;
+    name="preview";skill_reference=None;result=Error "unavailable"} in
+  let scoped message = Protocol.Workspace_scoped (Types.Workspace_authority 0,Some (ref ()),message) in
+  check bool "Board completion waits for pending input" true
+    (Protocol.board_preview_waits_for_input (scoped (preview Types.Board)));
+  check bool "other image surfaces retain their existing policy" false
+    (Protocol.board_preview_waits_for_input (scoped (preview Types.Resources)))
+
+let test_board_svg_and_original_reader () =
+  let module Payload = Masc_tui_image_payload in
+  let module Reader = Masc_tui_board_reader in
+  let svg="<?xml version='1.0'?><svg xmlns='http://www.w3.org/2000/svg'><rect width='1' height='1'/></svg>" in
+  check bool "SVG namespace selects the offline renderer" true (Payload.format_of_bytes svg=Svg);
+  check bool "a different XML namespace is not SVG" true
+    (Payload.format_of_bytes "<svg xmlns='urn:other'/>"=General_image);
+  check bool "binary data is not an SVG root" true (Payload.format_of_bytes "\255\000"=General_image);
+  let key : Reader.key = {post_id="post-a";sha256=Agent_core_sha256.(digest_string svg |> to_hex);
+    bytes=String.length svg;name=Some "image.svg"} in
+  let attachment : Types.board_attachment =
+    {ba_kind=Ak_image;ba_source=As_artifact {sha256=key.sha256;bytes=key.bytes};ba_name=key.name} in
+  let post=board_post ~attachments:[Ok attachment] key.post_id in
+  let state=board_state post [] in
+  state.board_reader_owner <- Some (state.workspace_authority,state.workspace_read_authority,Ak_image);
+  state.board_reader <- Reader.offer_image ~key ~reason:"renderer unavailable" state.board_reader;
+  check bool "fallback retains original attachment ownership" true (Option.is_some (Types.current_board_reader state));
+  check bool "fallback does not fetch or offer unverified bytes" true
+    (Option.is_none (Reader.pending state.board_reader) && Option.is_none (Reader.saved_source state.board_reader));
+  board_detail state {post with bp_attachments=[Ok {attachment with ba_kind=Ak_file}]} [];
+  check bool "same bytes under another kind retire reader" true (Option.is_none (Types.current_board_reader state));
+  board_detail state post [];
+  let reader,request=Reader.open_read ~content_kind:Image_bytes ~key state.board_reader in
+  let request=match request with Some request -> request | None -> fail "original read did not start" in
+  let reader=Reader.complete reader request (Reader.validate key svg) in
+  check bool "image source is not expanded as text" true (Result.is_error (Reader.source reader));
+  (match Reader.saved_source reader with
+   | Some (_,_,bytes) -> check string "verified original remains saveable" svg bytes
+   | None -> fail "verified original image is unavailable for saving")
+
 let () = run "resource image admission" ["stored source",[
   test_case "protocol replies are not cancellation input" `Quick test_operator_protocol_boundary;
+  test_case "Board post and comment diagram ownership" `Quick test_board_diagram_ownership;
+  test_case "Board attachment ownership" `Quick test_board_attachment_ownership;
+  test_case "Board preview waits for input" `Quick test_board_preview_input_barrier;
+  test_case "Board SVG and original-image reader" `Quick test_board_svg_and_original_reader;
   test_case "workspace suspension retires diagram preparation" `Quick test_suspended_diagram_preparation;
   test_case "original SVG and multipart admission" `Quick test_original_admission;
   test_case "wrong pending URI" `Quick test_wrong_pending;

@@ -248,6 +248,30 @@ let test_superseded_resource_diagram_worker () =
     (decide ~frame:None (Some partially_done) = Diagrams.Retire);
   check bool "the partially completed request is removed" true
     (Option.is_none (Diagrams.retire request (Some partially_done)));
+  let first,first_claim,first_preparing = match Diagrams.claim_next old with
+    | Some claim -> claim | None -> fail "first diagram claim" in
+  check bool "the first source is exclusively claimed" true
+    (String.equal first source && Diagrams.owns_claim request ~source:first first_claim first_preparing
+     && Option.is_none (Diagrams.claim_next first_preparing));
+  let first_done=Diagrams.settle request ~source:first (Error "first source finished") first_preparing in
+  let second,old_claim,second_preparing = match Diagrams.claim_next first_done with
+    | Some claim -> claim | None -> fail "second diagram claim" in
+  let interrupted=Diagrams.abandon_preparing second_preparing in
+  check bool "withdrawing a pending source preserves completed progress" true
+    (Diagrams.progress interrupted = (1,2));
+  let retry,retry_claim,retrying = match Diagrams.claim_next interrupted with
+    | Some claim -> claim | None -> fail "retry diagram claim" in
+  check bool "only the unfinished source is retried" true (String.equal second retry);
+  let after_old_cleanup=Diagrams.abandon request ~source:second old_claim retrying in
+  check bool "old cleanup cannot abandon a new claim for the same source" true
+    (Diagrams.owns_claim request ~source:retry retry_claim after_old_cleanup);
+  let stale_completion=Diagrams.settle_claimed request ~source:second old_claim
+    (Error "stale completion") after_old_cleanup in
+  check bool "an old completion cannot settle a new claim for the same source" true
+    (stale_completion == after_old_cleanup);
+  let finished=Diagrams.settle_claimed request ~source:retry retry_claim
+    (Error "retry finished") stale_completion in
+  check bool "the retained and retried sources both finish" true (Diagrams.progress finished = (2,2));
   List.iter (fun changed ->
     check bool "changed frame is not admitted" true
       (decide ~frame:(Some changed) (Some old) = Diagrams.Retire))
@@ -260,7 +284,17 @@ let test_superseded_resource_diagram_worker () =
   check bool "retiring the old request preserves its replacement" true
     (Diagrams.retire request (Some next) = Some next);
   let worker=Work.create () in
+  let old_ticket=match Work.reserve worker with Some ticket -> ticket | None -> fail "old dispatch" in
+  if decide ~frame:None (Some old) = Diagrams.Retire then
+    check bool "pending dispatch was withdrawn" true (Work.withdraw_pending worker);
+  let new_ticket=match Work.reserve worker with Some ticket -> ticket | None -> fail "replacement dispatch" in
+  check bool "withdrawn diagram dispatch cannot start" true
+    (Option.is_none (Work.run_reserved worker old_ticket (fun () -> ())));
+  Work.withdraw worker old_ticket;
+  check bool "old cleanup cannot cancel the replacement dispatch" true
+    (Option.is_some (Work.run_reserved worker new_ticket (fun () -> ())));
   check bool "the old physical worker starts" true (Work.try_acquire worker);
+  check bool "withdrawal does not free an active renderer" false (Work.withdraw_pending worker);
   check bool "new width no longer matches the old request" false
     (Diagrams.matches ~mime_type:None ~contents ~width:320 ~cell_pixels:(8,16) ~colors:None old);
   check bool "a replacement waits while physical work remains" true (Option.is_none (Work.reserve worker));
@@ -591,7 +625,7 @@ let test_physical_inspection_worker () =
   let mutex=Mutex.create () and changed=Condition.create () in
   let started=ref false and attempted=ref false and finish=ref false in
   let retired=match Work.reserve worker with Some ticket -> ticket | None -> fail "first reservation" in
-  Work.withdraw_pending worker;
+  ignore (Work.withdraw_pending worker);
   let current=match Work.reserve worker with Some ticket -> ticket | None -> fail "new reservation" in
   let stale_started=ref false in
   let stale=Work.run_reserved worker retired (fun () -> stale_started := true) in
@@ -610,7 +644,7 @@ let test_physical_inspection_worker () =
   while not !started && not !attempted do Condition.wait changed mutex done;
   let did_start = !started in
   Mutex.unlock mutex;
-  Work.withdraw_pending worker;
+  ignore (Work.withdraw_pending worker);
   let second_started=ref false in
   let second=Work.try_run worker (fun () -> second_started := true) in
   Mutex.lock mutex;
@@ -667,7 +701,7 @@ let test_initial_vector_worker () =
     check bool "raster preview still loads without a reservation" true
       (Result.is_ok (load ~board_worker:None ~vector_admission:None raster));
     let old=match Work.reserve worker with Some ticket -> ticket | None -> fail "old admission" in
-    Work.withdraw_pending worker;
+    ignore (Work.withdraw_pending worker);
     let current=match Work.reserve worker with Some ticket -> ticket | None -> fail "current admission" in
     check bool "withdrawn open cannot start Pele" true
       (Result.is_error (load ~board_worker:None ~vector_admission:(Some (worker,old)) source));

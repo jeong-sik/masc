@@ -507,10 +507,10 @@ let fusion_tool_preview_lines ~width ~frame_width ~label preview =
       let document = String.concat "\n" [ marker ^ "json"; safe; marker ] in
       let body_width = max 1 (width - indent_cells) in
       let render palette body_width =
-        let rows, clipped = Masc_tui_markdown.render_with_clipping
+        let reading = Masc_tui_markdown.render_with_clipping
             ~palette ~width:body_width document in
-        let rows, overflow = fusion_preview_indent ~frame_width ~indent_cells rows in
-        rows, clipped, overflow
+        let rows, overflow = fusion_preview_indent ~frame_width ~indent_cells reading.reading_rows in
+        rows, reading.clipped, overflow
       in
       let rows, clipped, overflow = render palette body_width in
       if not clipped && not overflow then rows
@@ -527,24 +527,31 @@ let fusion_tool_preview_lines ~width ~frame_width ~label preview =
     else
       let safe = Keeper_chat.terminal_safe_text ~preserve_newlines:true text in
       let palette = Masc_tui_markdown_theme.palette ~closing:Ansi.reset in
-      let render body_width =
-        let rows, clipped =
-          Masc_tui_markdown.render_with_clipping ~palette ~width:body_width safe in
-        let rows, overflow = fusion_preview_indent ~frame_width ~indent_cells:6 rows in
-        rows, (clipped || overflow)
+      let source_rows () =
+        let heading = Message_layout.split_cells ~max_cells:(max 1 frame_width)
+            "Markdown source:" |> List.map (fun line -> Ansi.dim, line) in
+        heading @ direct_safe_rows ~language:None safe
       in
-      let rows, clipped = render (max 1 (width - 6)) in
+      let render body_width =
+        let reading =
+          Masc_tui_markdown.render_with_clipping ~palette ~width:body_width safe in
+        let rows, overflow =
+          fusion_preview_indent ~frame_width ~indent_cells:6 reading.reading_rows in
+        rows, (reading.clipped || overflow), reading.width_sensitive_fence
+      in
+      let rows, clipped, width_sensitive_fence = render (max 1 (width - 6)) in
       if not clipped then rows
+      (* A wider retry can replace source with a newly drawn diagram or score;
+         retain the source instead of changing that reading during a reflow. *)
+      else if width_sensitive_fence then source_rows ()
       else begin
         (* A table cell or code label may be fitted before the frame sees it. *)
-        let rows, clipped = render (max 1 frame_width) in
+        let rows, clipped, _ = render (max 1 frame_width) in
         if not clipped then rows
         else
           (* Markdown's own list, quote or code chrome can still crowd out a
              grapheme. Identify the safe source when showing it directly. *)
-          let heading = Message_layout.split_cells ~max_cells:(max 1 frame_width)
-              "Markdown source:" |> List.map (fun line -> Ansi.dim, line) in
-          heading @ direct_safe_rows ~language:None safe
+          source_rows ()
       end
   in
   let rows =

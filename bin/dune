@@ -3388,7 +3388,8 @@
 (library
  (name masc_tui_board_preview_work)
  (wrapped false)
- (modules masc_tui_board_preview_work))
+ (modules masc_tui_board_preview_work)
+ (libraries threads))
 
 (library
  (name masc_tui_board_reader)

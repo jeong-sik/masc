@@ -362,6 +362,11 @@ let test_board_worker_and_png_boundary () =
   Work.release worker;
   check bool "a reaped opener releases the slot" true (Work.try_acquire worker);
   Work.release worker;
+  check bool "a last worker acquires its slot" true (Work.try_acquire worker);
+  Work.stop worker;
+  check bool "shutdown rejects work that has not started" false (Work.try_acquire worker);
+  Work.release worker;
+  Work.await_stopped worker;
   check bool "truncated PNG magic does not reach the terminal" false
     (Masc_tui_image_cache.has_png_structure "\137PNG");
   let header="\137PNG\r\n\026\n\000\000\000\rIHDR\000\000\000\001\000\000\000\001" in
@@ -428,10 +433,14 @@ let test_board_pele_deadline () =
 
 let test_renderer_shutdown () =
   let directory=Filename.temp_dir "board renderer shutdown " "" in
-  let executable=Filename.concat directory "renderer" and marker=Filename.concat directory "pid" in
-  let partial=marker ^ ".tmp" in
+  let executable=Filename.concat directory "renderer" and marker=Filename.concat directory "pid"
+  and result=Filename.concat directory "result" in
+  let partial=marker ^ ".tmp" and partial_result=result ^ ".tmp" in
   Fun.protect ~finally:(fun () ->
-    List.iter (fun name -> if Sys.file_exists name then Unix.unlink name) [executable;marker;partial];
+    Sys.readdir directory |> Array.iter (fun name ->
+      if String.starts_with ~prefix:"pele-" name then Unix.unlink (Filename.concat directory name));
+    List.iter (fun name -> if Sys.file_exists name then Unix.unlink name)
+      [executable;marker;partial;result;partial_result];
     Unix.rmdir directory) (fun () ->
     Out_channel.with_open_text executable (fun out ->
       Printf.fprintf out "#!/bin/sh\nprintf '%%s' \"$$\" > %s && mv %s %s && exec sleep 30\n"
@@ -439,35 +448,53 @@ let test_renderer_shutdown () =
     Unix.chmod executable 0o700;
     let test_executable=Unix.realpath Sys.executable_name in
     let null=Unix.openfile "/dev/null" [Unix.O_RDWR] 0 in
-    let child=Fun.protect ~finally:(fun () -> Unix.close null) (fun () ->
+    let supervisor=Fun.protect ~finally:(fun () -> Unix.close null) (fun () ->
       Unix.create_process test_executable
-        [|test_executable;"--board-renderer-shutdown-probe";executable;marker|] null null null) in
-    let started=Mtime_clock.elapsed_ns () in
-    let rec wait_probe () = match Unix.waitpid [Unix.WNOHANG] child with
-      | 0,_ when Int64.sub (Mtime_clock.elapsed_ns ()) started < 5_000_000_000L ->
-          Unix.sleepf 0.01; wait_probe ()
-      | 0,_ ->
-          (* The probe owns this process group while it is alive. Kill the
-             entire fixture before reaping its leader on a timeout. *)
-          (try Unix.kill (-child) Sys.sigkill with Unix.Unix_error (Unix.ESRCH,_,_) -> ());
-          (try Unix.kill child Sys.sigkill with Unix.Unix_error (Unix.ESRCH,_,_) -> ());
-          let rec reap () = match Unix.waitpid [] child with
-            | _ -> ()
-            | exception Unix.Unix_error (Unix.EINTR,_,_) -> reap () in
-          reap (); false
-      | _,status -> status = Unix.WEXITED 0
-      | exception Unix.Unix_error (Unix.EINTR,_,_) -> wait_probe () in
-    check bool "process shutdown reaps its renderer" true (wait_probe ());
-    let pid=In_channel.with_open_text marker In_channel.input_all |> int_of_string in
-    check bool "renderer did not survive its parent" true
-      (match Unix.kill pid 0 with
-       | exception Unix.Unix_error (Unix.ESRCH,_,_) -> true
-       | () -> false))
+        [|test_executable;"--board-renderer-supervisor";executable;marker;result|] null null null) in
+    let reaped=ref false in
+    let rec poll () = match Unix.waitpid [Unix.WNOHANG] supervisor with
+      | 0,_ -> true
+      | _,_ -> reaped := true; false
+      | exception Unix.Unix_error (Unix.EINTR,_,_) -> poll () in
+    Fun.protect ~finally:(fun () ->
+      if not !reaped && poll () then begin
+        (* The live supervisor owns the fixture's process group, including a
+           renderer left behind by the failure this test is looking for. *)
+        (try Unix.kill (-supervisor) Sys.sigkill with Unix.Unix_error (Unix.ESRCH,_,_) -> ());
+        (try Unix.kill supervisor Sys.sigkill with Unix.Unix_error (Unix.ESRCH,_,_) -> ());
+        let rec reap () = match Unix.waitpid [] supervisor with
+          | _ -> ()
+          | exception Unix.Unix_error (Unix.EINTR,_,_) -> reap () in
+        reap ()
+      end) (fun () ->
+      let started=Mtime_clock.elapsed_ns () in
+      let rec wait_result () =
+        if Sys.file_exists result then true
+        else if not (poll ()) || Int64.sub (Mtime_clock.elapsed_ns ()) started >= 5_000_000_000L then false
+        else (Unix.sleepf 0.01; wait_result ()) in
+      check bool "shutdown probe completed" true (wait_result ());
+      check string "process shutdown completed" "ok" (In_channel.with_open_text result In_channel.input_all);
+      let pid=In_channel.with_open_text marker In_channel.input_all |> int_of_string in
+      check bool "renderer did not survive its parent" true
+        (match Unix.kill pid 0 with
+         | exception Unix.Unix_error (Unix.ESRCH,_,_) -> true
+         | () -> false);
+      check bool "renderer source and output temporaries were removed" false
+        (Sys.readdir directory |> Array.exists (String.starts_with ~prefix:"pele-"))))
 
 let renderer_shutdown_probe executable marker =
-  ignore (Unix.setsid ());
+  let worker=Masc_tui_board_preview_work.create () in
+  at_exit (fun () ->
+    Masc_tui_board_preview_work.stop worker;
+    Masc_tui_image_cache.stop_subprocesses ();
+    Masc_tui_board_preview_work.await_stopped worker);
+  let runner ~input:_ ~output:_ ~errors:_ =
+    Masc_tui_image_cache.run_bounded ~deadline_seconds:30. (Filename.quote executable) in
+  let scene=Masc_tui_pele.scene ~format:Mermaid ~max_width:100 ~font_size:12
+    ~now_ms:0L ~colors:None "graph TD; A-->B" in
   let _thread=Thread.create (fun () ->
-    ignore (Masc_tui_image_cache.run_bounded ~deadline_seconds:30. (Filename.quote executable))) () in
+    ignore (Masc_tui_board_preview_work.run worker (fun () ->
+      Masc_tui_pele.render ~cache_dir:(Filename.dirname marker) ~runner scene))) () in
   let started=Mtime_clock.elapsed_ns () in
   let rec wait () =
     if Sys.file_exists marker then exit 0
@@ -475,9 +502,29 @@ let renderer_shutdown_probe executable marker =
     else (Unix.sleepf 0.01; wait ()) in
   wait ()
 
+let renderer_shutdown_supervisor executable marker result =
+  ignore (Unix.setsid ());
+  let outcome = try
+    let test_executable=Unix.realpath Sys.executable_name in
+    let child=Unix.create_process test_executable
+      [|test_executable;"--board-renderer-shutdown-probe";executable;marker|]
+      Unix.stdin Unix.stdout Unix.stderr in
+    let rec wait () = match Unix.waitpid [] child with
+      | _,status -> status
+      | exception Unix.Unix_error (Unix.EINTR,_,_) -> wait () in
+    if wait ()=Unix.WEXITED 0 then "ok" else "failed"
+    with _ -> "failed" in
+  (try
+    Out_channel.with_open_text (result ^ ".tmp") (fun out -> Out_channel.output_string out outcome);
+    Sys.rename (result ^ ".tmp") result
+   with Sys_error _ -> ());
+  while true do Unix.sleepf 30. done
+
 let () =
   match Array.to_list Sys.argv with
   | [_;"--board-renderer-shutdown-probe";executable;marker] -> renderer_shutdown_probe executable marker
+  | [_;"--board-renderer-supervisor";executable;marker;result] ->
+      renderer_shutdown_supervisor executable marker result
   | _ -> run "resource image admission" ["stored source",[
   test_case "protocol replies are not cancellation input" `Quick test_operator_protocol_boundary;
   test_case "Board post and comment diagram ownership" `Quick test_board_diagram_ownership;

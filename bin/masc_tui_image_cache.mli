@@ -110,6 +110,9 @@ val wait_bounded : ?cancelled:(unit -> bool) -> deadline_seconds:float -> int ->
 (** Reap an already-started child, killing it at the same deadline or when
     [cancelled] becomes true. *)
 
+val stop_subprocesses : unit -> unit
+(** Prevent future bounded subprocesses and cancel and reap existing ones. *)
+
 val run_decoder :
   run:(string -> Unix.process_status) -> output_path:string -> string ->
   (string, decode_failure) result

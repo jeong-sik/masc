@@ -4257,9 +4257,7 @@ let use_board_read state ~mailbox ~action =
               match outcome.result with
               | Failed _ -> Error description
               | Saved _ | Played | Opened -> Ok (Board_saved_original description) in
-        match attempt with
-        | None -> prepare ()
-        | Some _ -> Masc_tui_board_preview_work.run board_image_prepare_worker prepare))
+        Masc_tui_board_preview_work.run board_image_prepare_worker prepare))
 
 let open_chat_call_reader ?execution_id state ~mailbox keeper_name =
   if state.view = Keepers Keeper_message
@@ -11756,6 +11754,13 @@ let conversation_image_sources state =
   Masc_tui_image_preview.prioritize_sources ~newly_observed candidates
 
 let board_preview_worker = Masc_tui_board_preview_work.create ()
+
+let () = at_exit (fun () ->
+  Masc_tui_board_preview_work.stop board_preview_worker;
+  Masc_tui_board_preview_work.stop board_image_prepare_worker;
+  Masc_tui_image_cache.stop_subprocesses ();
+  Masc_tui_board_preview_work.await_stopped board_preview_worker;
+  Masc_tui_board_preview_work.await_stopped board_image_prepare_worker)
 
 let image_notice (state : state) ~view ~keeper_name ~kind text =
   if view = Resources then report_action state "resources" text

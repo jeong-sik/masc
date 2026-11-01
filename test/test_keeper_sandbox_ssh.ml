@@ -528,13 +528,90 @@ let test_endpoint_namespace_roundtrip () =
         = Tool_result.Dependency_unavailable))
 ;;
 
+let test_validation_refusals_keep_the_captured_endpoint_namespace () =
+  with_eio @@ fun ~clock:_ ->
+  let base_path = temp_dir () in
+  let config = Workspace.default_config base_path in
+  let keepers = Filename.concat base_path ".masc/config/keepers" in
+  Fs_compat.mkdir_p keepers;
+  save (Filename.concat base_path ".masc/config/runtime.toml")
+    (Exec_ssh_endpoint.to_toml endpoint);
+  save (Filename.concat keepers "keeper-a.toml")
+    "[keeper]\nsandbox_profile = \"remote_ssh\"\nremote_endpoint = \"build-box\"\n";
+  let meta = match Masc_test_deps.meta_of_json_fixture
+    (`Assoc [ "name", `String "keeper-a" ]) with
+    | Error error -> fail error
+    | Ok meta -> { meta with Keeper_meta_contract.sandbox_profile =
+        Keeper_types_profile_sandbox.Remote_ssh } in
+  let root = Keeper_sandbox_remote.keeper_root
+    ~remote_root:endpoint.remote_root ~keeper_name:meta.name in
+  let dispatched = ref 0 in
+  let previous = !(Keeper_tool_execute_runtime.For_testing.dispatch_override) in
+  Fun.protect
+    ~finally:(fun () -> Keeper_tool_execute_runtime.For_testing.dispatch_override := previous)
+    (fun () ->
+      Keeper_tool_execute_runtime.For_testing.dispatch_override := Some (fun () ->
+        incr dispatched;
+        fail "validation refusal reached shell dispatch");
+      let refuse ?(class_ = Tool_result.Policy_rejection) args =
+        let result = Keeper_tool_execute_runtime.handle_tool_execute_with_outcome
+          ~turn_sandbox_factory:None ~config ~meta
+          ~shell_ir_rewrite:Keeper_shell_tool_command.refuse_reserved_command
+          ~result_projection:Tool_output.default_model_projection ~args () in
+        check bool "the typed failure class is preserved" true
+          (result.disposition = Tool_result.Failed class_);
+        check bool "the refusal remains proven pre-effect" true
+          (result.failure_effect_disposition = Tool_result.Proven_pre_effect);
+        check int "no shell dispatch" 0 !dispatched;
+        Yojson.Safe.from_string result.raw_output
+      in
+      List.iter (fun (args, expected_cwd) ->
+        let json = refuse args in
+        let open Yojson.Safe.Util in
+        check bool "typed admission refusal" true (member "typed" json = `Bool true);
+        check string "refusal cwd names the endpoint" expected_cwd
+          (member "cwd" json |> to_string);
+        let location = member "execution_location" json in
+        check string "nested cwd names the same endpoint" expected_cwd
+          (member "cwd" location |> to_string);
+        check string "the captured endpoint owns the root" root
+          (member "playground_root" location |> to_string))
+        [ `Assoc [ "argv", `List [] ], root
+        ; `Assoc [ "argv", `List []; "cwd", `String root ], root
+        ; `Assoc [ "argv", `List []; "cwd", `String "src" ], Filename.concat root "src"
+        ; `Assoc [ "argv", `String "echo" ], root
+        ; `Null, root
+        ; `Assoc [ "argv", `List [ `String "echo" ]; "timeout_sec", `Int 0 ], root
+        ];
+      let outside = "/srv/another-keeper" in
+      let rejected = refuse (`Assoc [ "argv", `List []; "cwd", `String outside ]) in
+      let open Yojson.Safe.Util in
+      check string "the cwd refusal stays authoritative" "cwd_outside_sandbox"
+        (member "code" rejected |> to_string);
+      check bool "an unsafe cwd is not invented" true (member "cwd" rejected = `Null);
+      let reason = match Keeper_remote_path.host_to_remote
+        ~base_path ~remote_workspace_root:root ~keeper:meta.name outside with
+        | Ok _ -> fail "the out-of-jail fixture unexpectedly projected"
+        | Error reason -> reason in
+      check string "the namespace is resolved even when its cwd is refused" reason
+        (member "execution_location" rejected |> member "reason" |> to_string);
+      save (Filename.concat keepers "keeper-a.toml")
+        "[keeper]\nsandbox_profile = \"remote_ssh\"\nremote_endpoint = \"absent\"\n";
+      let unavailable = refuse ~class_:Tool_result.Dependency_unavailable
+        (`Assoc [ "argv", `List [] ]) in
+      check bool "an unresolved endpoint invents no execution location" true
+        (member "execution_location" unavailable = `Null))
+;;
+
 let () =
   if Array.length Sys.argv > 1 && String.equal Sys.argv.(1) "--ssh-stub"
   then stub_main ()
   else
     run "keeper_sandbox_ssh"
       [ ( "runner"
-        , [ test_case "endpoint namespace roundtrip" `Quick test_endpoint_namespace_roundtrip
+        , [ test_case "validation refusals retain the captured endpoint namespace" `Quick
+              test_validation_refusals_keep_the_captured_endpoint_namespace
+          ; test_case "endpoint namespace roundtrip" `Quick test_endpoint_namespace_roundtrip
           ; test_case "pinned argv + framed streams" `Quick test_argv_frame_stream_and_exit
           ; test_case "signal + remote timeout" `Quick test_signal_and_remote_timeout
           ; test_case "transport failures" `Quick test_transport_failures

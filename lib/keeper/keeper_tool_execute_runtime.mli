@@ -92,6 +92,9 @@ val handle_tool_execute_with_outcome :
   args:Yojson.Safe.t ->
   unit ->
   Keeper_tool_execution.t
+(** SSH validation refusals project location through the endpoint captured for
+    this call. A cwd outside that namespace retains its path refusal and null
+    location; it is not reported as an unresolved endpoint. *)
 
 module For_testing : sig
   val secret_files_for_source :

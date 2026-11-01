@@ -148,7 +148,7 @@ let model_shim_evidence_fields receipts =
   | [] | [ _ ] | _ :: _ :: _ ->
     [ "shim_execution_evidence", shim_execution_evidence_json receipts ]
 
-let model_execute_cwd_resolution_error ~config ~meta ~args ~cwd error =
+let model_execute_cwd_resolution_error ~remote_workspace_root ~config ~meta ~args ~cwd error =
   let code = Keeper_tool_execute_path.execute_cwd_resolution_error_code error in
   let private_message =
     Keeper_tool_execute_path.execute_cwd_resolution_error_private_message error
@@ -160,7 +160,7 @@ let model_execute_cwd_resolution_error ~config ~meta ~args ~cwd error =
     private_message;
   let fields =
     [ "typed", `Bool true; "code", `String code ]
-    @ model_execute_location_fields ~remote_workspace_root:None ~config ~meta ~args ~cwd
+    @ model_execute_location_fields ~remote_workspace_root ~config ~meta ~args ~cwd
   in
   let message =
     match meta.sandbox_profile with
@@ -394,10 +394,10 @@ let handle_tool_execute_typed
           ~write_enabled:true
           ~args
       in
-      model_execute_cwd_resolution_error ~config ~meta ~args ~cwd e
+      model_execute_cwd_resolution_error ~remote_workspace_root ~config ~meta ~args ~cwd e
     | Ok cwd ->
         let model_location_fields =
-          model_execute_location_fields ~remote_workspace_root:None ~config ~meta ~args ~cwd
+          model_execute_location_fields ~remote_workspace_root ~config ~meta ~args ~cwd
       in
       let typed_args = assoc_upsert "cwd" (`String cwd) args in
       match Keeper_tool_execute_typed_input.of_json typed_args with

@@ -1,0 +1,409 @@
+{
+  "scope": "Five alternating-order batches in one component execution. Reported medians summarize per-call batch averages, not per-call latency quantiles. Reduced record stubs exclude actual activity/date parsing and sorting. Shared host uncontrolled. No native TUI, physical paint or target proof.",
+  "source_samples_sha256": {
+    "samples-v1.jsonl": "02ed3360a1b04be13e4218767facf8c1f2fceceba5ef4f23fba40f61e83a1b2b",
+    "samples-v2.jsonl": "572cb5064f8001676204a283efe7df52c4fed4804e788703218e253c2200b438"
+  },
+  "metadata_validation": {
+    "metadata_decision_cases": 1920,
+    "scope": "Reduced typed records; no rendered UI text, layout or row-order assertion; identical no-op activity and sorting stubs."
+  },
+  "cases": [
+    {
+      "case": "empty",
+      "variants": {
+        "baseline": {
+          "batches": 5,
+          "iterations_per_batch": [
+            2000,
+            2000,
+            2000,
+            2000,
+            2000
+          ],
+          "median_per_call_batch_wall_ns": 2.6455,
+          "median_per_call_batch_cpu_s": 4.5e-09,
+          "median_per_call_batch_allocated_bytes": 32.072
+        },
+        "candidate": {
+          "batches": 5,
+          "iterations_per_batch": [
+            2000,
+            2000,
+            2000,
+            2000,
+            2000
+          ],
+          "median_per_call_batch_wall_ns": 2.229,
+          "median_per_call_batch_cpu_s": 2.5e-09,
+          "median_per_call_batch_allocated_bytes": 0.072
+        }
+      },
+      "candidate_over_baseline": {
+        "median_per_call_batch_wall_ns": 0.8425628425628425,
+        "median_per_call_batch_cpu_s": 0.5555555555555556,
+        "median_per_call_batch_allocated_bytes": 0.002244948865053629
+      }
+    },
+    {
+      "case": "one-dense",
+      "variants": {
+        "baseline": {
+          "batches": 5,
+          "iterations_per_batch": [
+            5000,
+            5000,
+            5000,
+            5000,
+            5000
+          ],
+          "median_per_call_batch_wall_ns": 127.0166,
+          "median_per_call_batch_cpu_s": 6.300000000000001e-08,
+          "median_per_call_batch_allocated_bytes": 672.0288
+        },
+        "candidate": {
+          "batches": 5,
+          "iterations_per_batch": [
+            5000,
+            5000,
+            5000,
+            5000,
+            5000
+          ],
+          "median_per_call_batch_wall_ns": 383.8416,
+          "median_per_call_batch_cpu_s": 2e-07,
+          "median_per_call_batch_allocated_bytes": 1816.0288
+        }
+      },
+      "candidate_over_baseline": {
+        "median_per_call_batch_wall_ns": 3.0219798042145674,
+        "median_per_call_batch_cpu_s": 3.174603174603174,
+        "median_per_call_batch_allocated_bytes": 2.702307996323967
+      }
+    },
+    {
+      "case": "two-dense",
+      "variants": {
+        "baseline": {
+          "batches": 5,
+          "iterations_per_batch": [
+            5000,
+            5000,
+            5000,
+            5000,
+            5000
+          ],
+          "median_per_call_batch_wall_ns": 239.2418,
+          "median_per_call_batch_cpu_s": 2.1580000000000001e-07,
+          "median_per_call_batch_allocated_bytes": 1312.0288
+        },
+        "candidate": {
+          "batches": 5,
+          "iterations_per_batch": [
+            5000,
+            5000,
+            5000,
+            5000,
+            5000
+          ],
+          "median_per_call_batch_wall_ns": 931.4166,
+          "median_per_call_batch_cpu_s": 5.898e-07,
+          "median_per_call_batch_allocated_bytes": 3768.0288
+        }
+      },
+      "candidate_over_baseline": {
+        "median_per_call_batch_wall_ns": 3.893201773268718,
+        "median_per_call_batch_cpu_s": 2.7330861909175157,
+        "median_per_call_batch_allocated_bytes": 2.8719101288020505
+      }
+    },
+    {
+      "case": "thirty-dense",
+      "variants": {
+        "baseline": {
+          "batches": 5,
+          "iterations_per_batch": [
+            500,
+            500,
+            500,
+            500,
+            500
+          ],
+          "median_per_call_batch_wall_ns": 35506.666,
+          "median_per_call_batch_cpu_s": 3.0802e-05,
+          "median_per_call_batch_allocated_bytes": 19232.288
+        },
+        "candidate": {
+          "batches": 5,
+          "iterations_per_batch": [
+            500,
+            500,
+            500,
+            500,
+            500
+          ],
+          "median_per_call_batch_wall_ns": 39456.25,
+          "median_per_call_batch_cpu_s": 3.0096e-05,
+          "median_per_call_batch_allocated_bytes": 116408.288
+        }
+      },
+      "candidate_over_baseline": {
+        "median_per_call_batch_wall_ns": 1.1112350002109463,
+        "median_per_call_batch_cpu_s": 0.9770794104278943,
+        "median_per_call_batch_allocated_bytes": 6.052752953782722
+      }
+    },
+    {
+      "case": "threehundred-dense",
+      "variants": {
+        "baseline": {
+          "batches": 5,
+          "iterations_per_batch": [
+            50,
+            50,
+            50,
+            50,
+            50
+          ],
+          "median_per_call_batch_wall_ns": 3368778.32,
+          "median_per_call_batch_cpu_s": 0.002845,
+          "median_per_call_batch_allocated_bytes": 192034.88
+        },
+        "candidate": {
+          "batches": 5,
+          "iterations_per_batch": [
+            50,
+            50,
+            50,
+            50,
+            50
+          ],
+          "median_per_call_batch_wall_ns": 732781.66,
+          "median_per_call_batch_cpu_s": 0.0006002,
+          "median_per_call_batch_allocated_bytes": 1686874.88
+        }
+      },
+      "candidate_over_baseline": {
+        "median_per_call_batch_wall_ns": 0.21752148416818357,
+        "median_per_call_batch_cpu_s": 0.21096660808435852,
+        "median_per_call_batch_allocated_bytes": 8.784210868358914
+      }
+    },
+    {
+      "case": "threethousand-dense",
+      "variants": {
+        "baseline": {
+          "batches": 5,
+          "iterations_per_batch": [
+            1,
+            1,
+            1,
+            1,
+            1
+          ],
+          "median_per_call_batch_wall_ns": 426595667.0,
+          "median_per_call_batch_cpu_s": 0.292721,
+          "median_per_call_batch_allocated_bytes": 1920176.0
+        },
+        "candidate": {
+          "batches": 5,
+          "iterations_per_batch": [
+            1,
+            1,
+            1,
+            1,
+            1
+          ],
+          "median_per_call_batch_wall_ns": 11460625.0,
+          "median_per_call_batch_cpu_s": 0.010029,
+          "median_per_call_batch_allocated_bytes": 21881816.0
+        }
+      },
+      "candidate_over_baseline": {
+        "median_per_call_batch_wall_ns": 0.026865310378316618,
+        "median_per_call_batch_cpu_s": 0.03426129317677925,
+        "median_per_call_batch_allocated_bytes": 11.395734557665547
+      }
+    },
+    {
+      "case": "threehundred-sparse",
+      "variants": {
+        "baseline": {
+          "batches": 5,
+          "iterations_per_batch": [
+            100,
+            100,
+            100,
+            100,
+            100
+          ],
+          "median_per_call_batch_wall_ns": 196871.25,
+          "median_per_call_batch_cpu_s": 0.00016393999999999998,
+          "median_per_call_batch_allocated_bytes": 132033.44
+        },
+        "candidate": {
+          "batches": 5,
+          "iterations_per_batch": [
+            100,
+            100,
+            100,
+            100,
+            100
+          ],
+          "median_per_call_batch_wall_ns": 97194.16,
+          "median_per_call_batch_cpu_s": 7.004e-05,
+          "median_per_call_batch_allocated_bytes": 224409.44
+        }
+      },
+      "candidate_over_baseline": {
+        "median_per_call_batch_wall_ns": 0.493694025917954,
+        "median_per_call_batch_cpu_s": 0.4272294741978773,
+        "median_per_call_batch_allocated_bytes": 1.6996409394468552
+      }
+    },
+    {
+      "case": "two-large-sides",
+      "variants": {
+        "baseline": {
+          "batches": 5,
+          "iterations_per_batch": [
+            10,
+            10,
+            10,
+            10,
+            10
+          ],
+          "median_per_call_batch_wall_ns": 132916.7,
+          "median_per_call_batch_cpu_s": 0.0001232,
+          "median_per_call_batch_allocated_bytes": 1326.4
+        },
+        "candidate": {
+          "batches": 5,
+          "iterations_per_batch": [
+            10,
+            10,
+            10,
+            10,
+            10
+          ],
+          "median_per_call_batch_wall_ns": 10263195.8,
+          "median_per_call_batch_cpu_s": 0.0069858,
+          "median_per_call_batch_allocated_bytes": 20874358.4
+        }
+      },
+      "candidate_over_baseline": {
+        "median_per_call_batch_wall_ns": 77.21524684257132,
+        "median_per_call_batch_cpu_s": 56.702922077922075,
+        "median_per_call_batch_allocated_bytes": 15737.60434258142
+      }
+    },
+    {
+      "case": "threehundred-declared",
+      "variants": {
+        "baseline": {
+          "batches": 5,
+          "iterations_per_batch": [
+            50,
+            50,
+            50,
+            50,
+            50
+          ],
+          "median_per_call_batch_wall_ns": 4045667.5,
+          "median_per_call_batch_cpu_s": 0.0029576000000000003,
+          "median_per_call_batch_allocated_bytes": 172834.88
+        },
+        "candidate": {
+          "batches": 5,
+          "iterations_per_batch": [
+            50,
+            50,
+            50,
+            50,
+            50
+          ],
+          "median_per_call_batch_wall_ns": 1116651.68,
+          "median_per_call_batch_cpu_s": 0.00061628,
+          "median_per_call_batch_allocated_bytes": 1682074.88
+        }
+      },
+      "candidate_over_baseline": {
+        "median_per_call_batch_wall_ns": 0.2760117285960846,
+        "median_per_call_batch_cpu_s": 0.20837165269137134,
+        "median_per_call_batch_allocated_bytes": 9.732265153885603
+      }
+    },
+    {
+      "case": "one-large-sides-300",
+      "variants": {
+        "baseline": {
+          "batches": 5,
+          "iterations_per_batch": [
+            100,
+            100,
+            100,
+            100,
+            100
+          ],
+          "median_per_call_batch_wall_ns": 4708.75,
+          "median_per_call_batch_cpu_s": 4.72e-06,
+          "median_per_call_batch_allocated_bytes": 673.44
+        },
+        "candidate": {
+          "batches": 5,
+          "iterations_per_batch": [
+            100,
+            100,
+            100,
+            100,
+            100
+          ],
+          "median_per_call_batch_wall_ns": 316176.25,
+          "median_per_call_batch_cpu_s": 0.00031549000000000003,
+          "median_per_call_batch_allocated_bytes": 1586409.44
+        }
+      },
+      "candidate_over_baseline": {
+        "median_per_call_batch_wall_ns": 67.14653570480489,
+        "median_per_call_batch_cpu_s": 66.84110169491527,
+        "median_per_call_batch_allocated_bytes": 2355.6804466619146
+      }
+    },
+    {
+      "case": "two-large-sides-300",
+      "variants": {
+        "baseline": {
+          "batches": 5,
+          "iterations_per_batch": [
+            100,
+            100,
+            100,
+            100,
+            100
+          ],
+          "median_per_call_batch_wall_ns": 11092.09,
+          "median_per_call_batch_cpu_s": 1.11e-05,
+          "median_per_call_batch_allocated_bytes": 1313.44
+        },
+        "candidate": {
+          "batches": 5,
+          "iterations_per_batch": [
+            100,
+            100,
+            100,
+            100,
+            100
+          ],
+          "median_per_call_batch_wall_ns": 318153.75,
+          "median_per_call_batch_cpu_s": 0.0003159,
+          "median_per_call_batch_allocated_bytes": 1586745.44
+        }
+      },
+      "candidate_over_baseline": {
+        "median_per_call_batch_wall_ns": 28.682939824685878,
+        "median_per_call_batch_cpu_s": 28.459459459459456,
+        "median_per_call_batch_allocated_bytes": 1208.0836886344255
+      }
+    }
+  ]
+}

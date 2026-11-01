@@ -1,0 +1,77 @@
+[
+  {
+    "command": [
+      "ocamlfind",
+      "ocamlopt",
+      "-w",
+      "+4+32+69",
+      "-warn-error",
+      "+a",
+      "-c",
+      "fixture_types.ml"
+    ],
+    "returncode": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  {
+    "command": [
+      "ocamlfind",
+      "ocamlopt",
+      "-w",
+      "+4+32+69",
+      "-warn-error",
+      "+a",
+      "-c",
+      "control_baseline.ml"
+    ],
+    "returncode": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  {
+    "command": [
+      "ocamlfind",
+      "ocamlopt",
+      "-w",
+      "+4+32+69",
+      "-warn-error",
+      "+a",
+      "-c",
+      "control_candidate.ml"
+    ],
+    "returncode": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  {
+    "command": [
+      "ocamlfind",
+      "ocamlopt",
+      "-w",
+      "+4+32+69",
+      "-warn-error",
+      "+a",
+      "-c",
+      "projection_baseline.ml"
+    ],
+    "returncode": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  {
+    "command": [
+      "ocamlfind",
+      "ocamlopt",
+      "-w",
+      "+4+32+69",
+      "-warn-error",
+      "+a",
+      "-c",
+      "projection_candidate.ml"
+    ],
+    "returncode": 0,
+    "stdout": "",
+    "stderr": ""
+  }
+]

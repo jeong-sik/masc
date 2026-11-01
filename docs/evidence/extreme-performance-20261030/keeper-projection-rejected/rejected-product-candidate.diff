@@ -1,0 +1,221 @@
+diff --git a/bin/masc_tui_keeper_control.ml b/bin/masc_tui_keeper_control.ml
+index bc96e7b2f5d..a5002a6d12e 100644
+--- a/bin/masc_tui_keeper_control.ml
++++ b/bin/masc_tui_keeper_control.ml
+@@ -117,6 +117,37 @@ let liveness_of_roster roster name =
+       | Some row -> Present row
+       | None -> Absent)
+ 
++module Roster_names = Map.Make (String)
++
++let liveness_reader roster =
++  let observed, errors, missing =
++    match roster with
++    | Roster_unobserved -> [], [], Unobserved
++    | Roster_partial { observed; total = _ } -> observed, [], Unobserved
++    | Roster_invalid { observed; errors; complete } ->
++        observed, errors, (if complete then Absent else Unobserved)
++    | Roster_complete observed -> observed, [], Absent
++  in
++  let first_rows =
++    List.fold_left
++      (fun index (row : Decode.keeper_runtime) ->
++        Roster_names.update row.kr_name
++          (function None -> Some (Present row) | Some _ as first -> first) index)
++      Roster_names.empty observed
++  in
++  let first_errors =
++    List.fold_left
++      (fun index (name, detail) ->
++        Roster_names.update name
++          (function None -> Some (Invalid detail) | Some _ as first -> first) index)
++      Roster_names.empty errors
++  in
++  let entries = Roster_names.union (fun _ error _ -> Some error) first_errors first_rows in
++  fun name ->
++    match Roster_names.find_opt name entries with
++    | Some reading -> reading
++    | None -> missing
++
+ 
+ (* One keeper, four separate readings, one accessor each. Nothing here folds
+    one axis into another: the function this replaced let operator pause
+diff --git a/bin/masc_tui_keeper_control.mli b/bin/masc_tui_keeper_control.mli
+index 485c4c1ec7d..17d27a311bf 100644
+--- a/bin/masc_tui_keeper_control.mli
++++ b/bin/masc_tui_keeper_control.mli
+@@ -85,6 +85,15 @@ val liveness_of_roster : roster -> string -> liveness
+ (** What the roster says about one keeper by name. An incomplete roster can
+     only confirm presence, never absence. *)
+ 
++val liveness_reader : roster -> (string -> liveness)
++(** Prepare an immutable name lookup for repeated reads of this exact roster.
++    First observed rows and first errors win within their respective lists;
++    errors take precedence over observed rows, as in {!liveness_of_roster}.
++    Missing names retain the roster's complete/partial distinction. The reader
++    owns no mutable state and performs no I/O. A caller preparing one list uses
++    it only during that preparation, without retaining it as lifecycle authority
++    or reusing it after a new roster reading. *)
++
+ (** One keeper as the Keepers surface reads it: durable pause from metadata,
+     live runtime from the roster. *)
+ type reading = {
+diff --git a/bin/masc_tui_types.ml b/bin/masc_tui_types.ml
+index d2780dabaed..4e74012bd73 100644
+--- a/bin/masc_tui_types.ml
++++ b/bin/masc_tui_types.ml
+@@ -11794,17 +11794,6 @@ let keeper_reading (state : state) (keeper : keeper) :
+          Masc_tui_keeper_control.liveness_of_roster state.keeper_roster keeper.k_name)
+   }
+ 
+-let keeper_open_question_count state keeper_name =
+-  match state.asks_snapshot with
+-  | None -> 0
+-  | Some snapshot ->
+-      List.fold_left
+-        (fun count row ->
+-          match row.Masc.Tui_decode_asks.ar_asker with
+-          | Masc.Tui_decode_asks.Ask_keeper name when String.equal name keeper_name -> count + 1
+-          | Masc.Tui_decode_asks.Ask_keeper _ | Masc.Tui_decode_asks.Ask_installation _ -> count)
+-        0 snapshot.Masc.Tui_decode_asks.asn_rows
+-
+ let keeper_last_turn_at (keeper : keeper) =
+   Option.bind keeper.k_activity (fun activity ->
+     Masc_domain.parse_iso8601_opt activity.Tui_decode.k_last_turn_ts)
+@@ -11828,20 +11817,73 @@ let keeper_activity_at ~turn ~waiting (keeper : keeper) =
+          | Some { Tui_decode.kwr_since; _ } -> kwr_since
+          | None -> None)
+ 
++module Keeper_projection_names = Map.Make (String)
++
++let first_keeper_projection_rows name_of rows =
++  List.fold_left
++    (fun index row ->
++      Keeper_projection_names.update (name_of row)
++        (function None -> Some row | Some _ as first -> first) index)
++    Keeper_projection_names.empty rows
++
+ let keeper_list_rows (state : state) : Masc_tui_keeper_list_model.row list =
++  match state.keepers with
++  | [] -> []
++  | keepers ->
++  (* All indexes belong to this synchronous preparation. Keepers remain the
++     traversal source: duplicate rows and stable sort ties retain their original
++     identities, while source lists keep their first matching reading. *)
++  let liveness = Masc_tui_keeper_control.liveness_reader state.keeper_roster in
++  let turns = first_keeper_projection_rows
++      (fun (row : Tui_decode.keeper_turn_row) -> row.ktr_keeper_name) state.keeper_turns in
++  let waiting_rows = first_keeper_projection_rows
++      (fun (row : Tui_decode.keeper_waiting_row) -> row.kwr_keeper_name) state.keeper_waiting in
++  let approvals = first_keeper_projection_rows
++      (fun (row : Tui_decode.keeper_tool_approval) -> row.kta_keeper) state.keeper_tool_approvals in
++  let tasks = first_keeper_projection_rows
++      (fun (task : Tui_decode.task) -> task.id) state.tasks in
++  let verifying =
++    List.fold_left
++      (fun index (task : Tui_decode.task) ->
++        match task.status with
++        | Masc_domain.AwaitingVerification { assignee; _ } ->
++            Keeper_projection_names.add assignee () index
++        | Masc_domain.Todo | Masc_domain.Claimed _ | Masc_domain.InProgress _
++        | Masc_domain.Done _ | Masc_domain.Cancelled _ -> index)
++      Keeper_projection_names.empty state.tasks
++  in
++  let questions =
++    match state.asks_snapshot with
++    | None -> Keeper_projection_names.empty
++    | Some snapshot ->
++        List.fold_left
++          (fun index row ->
++            match row.Masc.Tui_decode_asks.ar_asker with
++            | Masc.Tui_decode_asks.Ask_keeper name ->
++                Keeper_projection_names.update name
++                  (function None -> Some 1 | Some count -> Some (count + 1)) index
++            | Masc.Tui_decode_asks.Ask_installation _ -> index)
++          Keeper_projection_names.empty snapshot.Masc.Tui_decode_asks.asn_rows
++  in
++  let async_by_keeper =
++    match state.tools_async_observation with
++    | Some (Tui_decode.Async_ready { requests; _ }) ->
++        List.fold_left
++          (fun index (row : Tui_decode.async_request_row) ->
++            Keeper_projection_names.add_to_list row.ar_keeper_name row index)
++          Keeper_projection_names.empty requests
++        |> Keeper_projection_names.map List.rev
++    | Some (Tui_decode.Async_unavailable _) | None -> Keeper_projection_names.empty
++  in
+   List.map
+     (fun (keeper : keeper) ->
+       let name = keeper.k_name in
+       let turn =
+-        List.find_map
+-          (fun (row : Tui_decode.keeper_turn_row) ->
+-            if String.equal row.ktr_keeper_name name then Some row.ktr_state else None)
+-          state.keeper_turns
++        Option.map (fun (row : Tui_decode.keeper_turn_row) -> row.ktr_state)
++          (Keeper_projection_names.find_opt name turns)
+       in
+       let observed_waiting =
+-        List.find_opt
+-          (fun (row : Tui_decode.keeper_waiting_row) -> String.equal row.kwr_keeper_name name)
+-          state.keeper_waiting
++        Keeper_projection_names.find_opt name waiting_rows
+       in
+       let waiting, activity_waiting =
+         match state.keeper_waiting_failure, observed_waiting with
+@@ -11850,37 +11892,41 @@ let keeper_list_rows (state : state) : Masc_tui_keeper_list_model.row list =
+         | None, None -> Masc_tui_keeper_list_model.Waiting_unobserved, None
+       in
+       let approval =
+-        List.find_opt
+-          (fun (row : Tui_decode.keeper_tool_approval) -> String.equal row.kta_keeper name)
+-          state.keeper_tool_approvals
++        Keeper_projection_names.find_opt name approvals
+       in
+       let task =
+         match keeper.k_activity with
+         | Some { Tui_decode.k_current_task_id = Some task_id; _ } ->
+-            List.find_opt (fun (task : Tui_decode.task) -> String.equal task.id task_id) state.tasks
++            Keeper_projection_names.find_opt task_id tasks
+         | Some { Tui_decode.k_current_task_id = None; _ } | None -> None
+       in
+       let async_requests =
+-        match state.tools_async_observation with
+-        | Some (Tui_decode.Async_ready { requests; _ }) ->
+-            List.filter
+-              (fun (row : Tui_decode.async_request_row) -> String.equal row.ar_keeper_name name)
+-              requests
+-        | Some (Tui_decode.Async_unavailable _) | None -> []
++        match Keeper_projection_names.find_opt name async_by_keeper with
++        | Some requests -> requests
++        | None -> []
+       in
+       { Masc_tui_keeper_list_model.keeper
+-      ; reading = keeper_reading state keeper
++      ; reading =
++          { name; paused = keeper.k_paused
++          ; liveness =
++              (match keeper.k_origin with
++               | Tui_decode.Declared_keeper _ -> Masc_tui_keeper_control.Absent
++               | Persisted_keeper | Remote_keeper -> liveness name)
++          }
+       ; turn
+       ; waiting
+       ; approval
+       ; task
+       ; awaiting_verification =
+-          Masc_tui_keeper_list_model.holds_awaiting_verification ~keeper_name:name state.tasks
+-      ; open_questions = keeper_open_question_count state name
++          Keeper_projection_names.mem name verifying
++      ; open_questions =
++          (match Keeper_projection_names.find_opt name questions with
++           | Some count -> count
++           | None -> 0)
+       ; async_requests
+       ; last_activity_at = keeper_activity_at ~turn ~waiting:activity_waiting keeper
+       })
+-    state.keepers
++    keepers
+   |> Masc_tui_keeper_list_model.order_rows ~layout:state.keeper_list_layout
+        ~sort:state.keeper_list_sort
+ 

@@ -1,0 +1,32 @@
+{
+  "decision": "rejected",
+  "read_at_unix": 1793352147.517747,
+  "reason": "Eager preparation improves dense 300/3000 component time but increases allocation and sharply regresses small queried fleets with large side inputs. Do not ship this per-preparation whole-source indexing candidate.",
+  "product_base": "d0a4db845644cf946f419b47687223700c7e79ce",
+  "candidate_files": [
+    {
+      "file": "bin/masc_tui_keeper_control.ml",
+      "sha256": "1cf2b816b045dc347354605a8c90eb9e9a45c40bcf7d01b2b3afd3bf1bb4a537"
+    },
+    {
+      "file": "bin/masc_tui_keeper_control.mli",
+      "sha256": "1f62ea6d0a6557ab5feffef96d0070ad9fb44a167059d83bd954e5151d4a7a7e"
+    },
+    {
+      "file": "bin/masc_tui_types.ml",
+      "sha256": "64b62a12bcb24c73d8ae2ed6b059be57245afc832b9f7310ae40176ad0b6db70"
+    }
+  ],
+  "patch_sha256": "ebef7f813599439e61fc6286be73d09028a100880d126f01852447cf44c7ee82",
+  "environment_read_after_execution": {
+    "cpu_count": 16,
+    "loadavg": [
+      64.35986328125,
+      54.64453125,
+      39.748046875
+    ],
+    "compiler_version": "5.5.1"
+  },
+  "source_scope": "Reduced typed-record component fragments; production full type/build and native TUI speed unverified. No new UI text/layout/order assertions.",
+  "preparation_failure_note": "The initial invocation used the repo-relative generator path while cwd was already the component directory. No fixture sources existed and subsequent compiler reads failed. Corrected generator ran from repo root; compile-v1 and execution-v1 record the resulting successful component invocation. No product build was attempted."
+}

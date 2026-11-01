@@ -765,10 +765,10 @@ let glm_capabilities =
     supports_structured_output = false
   ; supports_native_streaming = true
   ; (* Z.AI's chat-completion API carries the thinking toggle in a top-level
-       [thinking] object and only echoes prior-turn [reasoning_content] under
-       "preserved thinking" ([clear_thinking = false]). Declaring the wire here
-       is what makes the replay conditional typed capability data: the dialect
-       resolver reads [preserve_thinking_control_format], not a provider
+       [thinking] object. [clear_thinking = false] retains reasoning across user
+       turns; interleaved tool reasoning remains part of the active exchange.
+       Declaring the wire here makes that replay policy typed capability data:
+       the dialect resolver reads [preserve_thinking_control_format], not a provider
        identity predicate (Agent Core contract S1.1/S3.1).
        Ref: https://docs.z.ai/api-reference/llm/chat-completion *)
     preserve_thinking_control_format = Thinking_object_clear_thinking

@@ -328,12 +328,10 @@ val reasoning_effort_of_string : string -> reasoning_effort option
     inverse of [preserve_thinking], else the wire default [true]. SSOT for both
     request builders. *)
 
-(** [true] iff the request is under Preserved Thinking: thinking active AND
-    [clear_thinking] false. Rows whose
-    {!Capabilities.preserve_thinking_control_format} is
-    [Thinking_object_clear_thinking] replay prior-turn reasoning exactly then;
-    under the wire default [clear_thinking = true] the server discards prior
-    reasoning, so replaying it violates the contract and bloats the request. *)
+(** [true] iff the request explicitly enables Preserved Thinking: thinking
+    active AND [clear_thinking] false. This enables reasoning across completed
+    user turns. It does not decide replay inside the active tool exchange;
+    {!Reasoning_dialect} retains that interleaved reasoning separately. *)
 val preserved_thinking_active
   :  enable_thinking:bool option
   -> clear_thinking:bool option

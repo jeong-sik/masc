@@ -378,11 +378,10 @@ let reasoning_effort_of_string = Reasoning_effort.of_string
    wire (SSOT).
 
    Rows declaring that wire carry the thinking toggle in a top-level [thinking]
-   object and only echo prior-turn [reasoning_content] under Preserved
-   Thinking — that is, when thinking is active AND [clear_thinking] is false.
-   With the wire default [clear_thinking = true] the server ignores/removes
-   prior-turn reasoning, so sending it back violates the documented contract and
-   grows the request every turn. [clear_thinking] resolves from the explicit
+   object. Preserved Thinking keeps reasoning across completed user turns when
+   thinking is active AND [clear_thinking] is false. The active tool exchange's
+   interleaved reasoning has its own replay policy in [Reasoning_dialect].
+   [clear_thinking] resolves from the explicit
    field, else the inverse of [preserve_thinking], else the wire default [true].
 
    Exposed on raw fields rather than on [t] because the request builders carry

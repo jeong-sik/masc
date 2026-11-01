@@ -131,7 +131,7 @@ candidates remain queued; this ordering does not waive their coverage.
 | [K2](#k2) | next | in review | Give canonical child export selection a typed pure boundary |
 | [K3](#k3) | next | in review | Represent Board contention rearm tickets with one explicit phase |
 | [K4](#k4) | later | candidate | Make request-evidence reset and projection ownership explicit per attempt |
-| [K5](#k5) | later | implemented; review pending | Separate approval restart replay decisions from recovery effects |
+| [K5](#k5) | later | source reviewed; execution unverified | Separate approval restart replay decisions from recovery effects |
 | [K6](#k6) | investigate | candidate | Make Agent Core committed-batch scanning an explicit returned state |
 | [K7](#k7) | later | candidate | Separate Memory receipt reconciliation selection from its durable plan |
 | [D1](#d1) | next | in review | Return an explicit task commit receipt instead of a cross-scope notification ref |
@@ -497,6 +497,7 @@ a private immutable plan. Read errors veto rewrite while retaining classified
 readable entries. The persistence shell retains tail recovery, generation,
 sequence, cursor, diagnostics, durable cache publication and compaction order.
 Its loaded result now names fields rather than returning a five-element tuple.
+Implementation: [#47056](https://github.com/jeong-sik/masc/pull/47056).
 
 The existing partial-snapshot public-store scenario now includes a bound uncertain
 attempt: installation must classify that readable entry, expose the malformed entry,

@@ -2022,6 +2022,62 @@ let test_durable_turn_bus_uses_canonical_facts
     (List.length (read reopened retry.next_cursor 1024).observations)
 ;;
 
+let test_nested_execution_stores_use_their_own_bus_observers () =
+  with_execution_test_dir "agent_core-independent-observers-"
+  @@ fun ~env ~sw ~runtime ~dir ->
+  let root_bus = Event_bus.create () and child_bus = Event_bus.create () in
+  let subscribe bus = Event_bus.subscribe bus
+      ~config:(Result.get_ok (Event_bus.subscription_config ~capacity:16 ~overflow:Drop_newest)) in
+  let root_subscription = subscribe root_bus and child_subscription = subscribe child_bus in
+  let root_locator = ref None and child_locator = ref None in
+  let root_calls = ref 0 and child_calls = ref 0 in
+  let child_dir = Eio.Path.(dir / "independent-child") in
+  let child_store = Agent.execution_store ~runtime ~dir:child_dir
+      ~on_scope_ready:(fun value -> child_locator:=Some value; Ok ()) () in
+  let make_agent name bus calls hooks =
+    let response = {(Provider_mock.text_response "done" []) with
+      telemetry=Some {Types.default_inference_telemetry with
+        provider_kind=Some Llm_provider.Provider_kind.OpenAI_compat}} in
+    let next () = incr calls; Ok response in
+    let transport = Llm_provider.Llm_transport.custom
+      { complete_sync=(fun _ -> {Llm_provider.Llm_transport.response=next ();latency_ms=None})
+      ; complete_stream=(fun ?on_telemetry:_ ~on_event:_ _ -> next ()) } in
+    Agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net:env#net
+      ~config:{(Types.default_config ~model:"test-model") with name}
+      ~options:{Agent.default_options with event_bus=Some bus;transport=Some transport;hooks;
+        provider_config=Some (Provider_mock.to_provider_config ())} () in
+  let child = make_agent "independent-child" child_bus child_calls Hooks.empty in
+  let hooks = {Hooks.empty with after_turn=Some (fun _ ->
+    match Agent.run ~sw ~execution_store:child_store child "child" with
+    | Ok _ -> Hooks.Continue
+    | Error error -> Alcotest.fail (Error.to_string error))} in
+  let root = make_agent "independent-root" root_bus root_calls hooks in
+  let root_store = Agent.execution_store ~runtime ~dir
+      ~on_scope_ready:(fun value -> root_locator:=Some value; Ok ()) () in
+  (match Agent.run ~sw ~execution_store:root_store root "root" with
+   | Ok _ -> () | Error error -> Alcotest.fail (Error.to_string error));
+  Alcotest.(check int) "parent provider once" 1 !root_calls;
+  Alcotest.(check int) "separate child provider once" 1 !child_calls;
+  let turn_observations events = List.filter (fun event -> match event.Event_bus.payload with
+    | TurnStarted _ | TurnReady _ | TurnCompleted _ | InferenceTelemetry _ -> true
+    | AgentStarted _ | AgentCompleted _ | AgentYielded _ | AgentInputRequired _ | AgentFailed _
+    | ToolCalled _ | ToolCompleted _ | HandoffRequested _ | HandoffCompleted _
+    | ElicitationCompleted _ | ToolApprovalCompleted _ | Custom _ -> false) events in
+  List.iter (fun (dir, locator, subscription) ->
+    let projection = match Agent.open_execution_projection ~runtime ~dir (Option.get !locator) with
+      | Ok projection -> projection
+      | Error error -> Alcotest.fail (Agent.Execution_projection.error_to_string error) in
+    let page = match Agent.Execution_projection.read_bus_observations projection
+        ~after:(Agent.Execution_projection.beginning_cursor projection) ~limit:1024 () with
+      | Ok page -> page | Error error -> Alcotest.fail (Agent.Execution_projection.error_to_string error) in
+    let source = List.map (fun (o:Agent.Execution_projection.bus_observation)->o.event) page.observations in
+    Alcotest.(check int) "each journal retains its four turn observations" 4 (List.length source);
+    let delivered = turn_observations (Event_bus.drain subscription) in
+    Alcotest.(check int) "separate journal has its own live cursor" 4 (List.length delivered);
+    Alcotest.(check bool) "each audience observes only its exact journal source" true (delivered=source))
+    [dir,root_locator,root_subscription; child_dir,child_locator,child_subscription]
+;;
+
 let test_durable_tool_bus_uses_canonical_facts ?(delivery_fault=false) ?checkpoint_failure () =
   with_execution_test_dir "agent_core-tool-observation-"
   @@ fun ~env ~sw ~runtime ~dir ->
@@ -5138,6 +5194,8 @@ let () =
             (test_durable_turn_bus_uses_canonical_facts ~delivery_fault:true ~caller_checkpoint:false)
         ; Alcotest.test_case "checkpoint refusal does not publish assistant collection" `Quick
             (test_durable_turn_bus_uses_canonical_facts ~refuse_checkpoint:true ~caller_checkpoint:true)
+        ; Alcotest.test_case "nested independent stores own separate live observers" `Quick
+            test_nested_execution_stores_use_their_own_bus_observers
         ; Alcotest.test_case
             "durable tool bus uses canonical committed facts"
             `Quick

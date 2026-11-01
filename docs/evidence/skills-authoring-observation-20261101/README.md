@@ -99,9 +99,11 @@ its typed Skill content revision is
 The latter uses the existing length-prefixed `skill_document` field codec.
 These identities are intentionally distinct.
 
-### Final product source review
+### Product source review at the matched candidate
 
-The completion-audit product sources passed independent full-diff review at:
+The matched candidate product sources passed independent full-diff review at the
+following immutable coordinates. Subsequent integration restacks require fresh
+formal reviews and do not rename these source/build/UI snapshots:
 
 | PR | Head | Base | Complete diff SHA256 (`masc-reviewed-git-diff-v1`) |
 | --- | --- | --- | --- |

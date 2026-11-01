@@ -134,9 +134,13 @@ let test_load_preview_and_publish () =
        (Skill_reference.equal reference preview.profile.reference));
   (match Editor.save ~descriptors:(Ok (Masc.Keeper_tool_descriptor.all_descriptors ())) ~base_path ~reference ~source_text:edited ~refresh with
    | Error error -> fail (Editor.error_to_string error)
-   | Ok (Editor.Saved_and_published { preview; _ }) ->
+   | Ok (Editor.Saved_and_published { preview; _ } as outcome) ->
      check bool "new exact reference" false
-       (Skill_reference.equal reference preview.profile.reference)
+       (Skill_reference.equal reference preview.profile.reference);
+     (match Masc_tui_editor_wire.decode_skill_editor_save_receipt (Editor.save_outcome_to_yojson outcome) with
+      | Ok receipt -> check bool "TUI reads the producer's nested profile reference" true
+          (Skill_reference.equal preview.profile.reference receipt.ses_reference)
+      | Error detail -> fail detail)
    | Ok (Unchanged _ | Saved_but_unpublished _) ->
      fail "edited Skill was not saved and published");
   let persisted =
@@ -338,11 +342,40 @@ let test_new_preview_uses_public_plan_without_writing () =
   check bool "descriptor failure cannot become a successful preview" true
     (Result.is_error (Editor.preview_new ~expected_kind:(Some Editor.Composition_kind) ~descriptors:(Error "tool source unavailable") ~source_id ~package_id:"authored" valid));
   (match Editor.create ~expected_kind:(Some Editor.Composition_kind) ~descriptors ~base_path ~source_id ~package_id:"authored" ~source_text:valid ~refresh with
-   | Ok (Editor.Created_and_published { preview = published; _ }) ->
+   | Ok (Editor.Created_and_published { preview = published; _ } as outcome) ->
      check bool "create revalidates and publishes the exact previewed revision" true
-       (Skill_reference.equal published.profile.reference preview.profile.reference)
+       (Skill_reference.equal published.profile.reference preview.profile.reference);
+     let wire = Editor.create_outcome_to_yojson outcome in
+     (match Masc_tui_editor_wire.decode_skill_editor_create_receipt
+        ~source_id:"workspace" ~package_id:"authored" ~source_text:valid wire with
+      | Ok receipt -> check bool "TUI create receipt binds actual persisted revision" true
+          (Skill_reference.equal receipt.sec_reference published.profile.reference)
+      | Error detail -> fail detail);
+     check bool "a receipt for another selected source cannot be reused" true
+       (Result.is_error (Masc_tui_editor_wire.decode_skill_editor_create_receipt
+         ~source_id:"personal" ~package_id:"authored" ~source_text:valid wire));
+     check bool "a receipt for different document bytes cannot be reused" true
+       (Result.is_error (Masc_tui_editor_wire.decode_skill_editor_create_receipt
+         ~source_id:"workspace" ~package_id:"authored" ~source_text:(valid ^ "different") wire))
    | Ok _ -> fail "authored composition was not published"
    | Error error -> fail (Editor.error_to_string error))
+;;
+
+let test_tui_source_selection_is_the_request_target () =
+  let sources = ["workspace"; "personal"] in
+  let cursor = match Masc_tui_pick_list.apply ~page:2 ~label:Fun.id sources
+      Masc_tui_pick_list.closed (Move Next) with
+    | Masc_tui_pick_list.Stay cursor -> cursor
+    | _ -> fail "source selection did not move" in
+  let selected = match Masc_tui_pick_list.apply ~page:2 ~label:Fun.id sources cursor Choose with
+    | Masc_tui_pick_list.Chosen source -> source
+    | _ -> fail "source selection did not choose" in
+  let body = Masc_tui_editor_wire.skill_editor_create_body ~composition:true
+    ~source_id:selected ~package_id:"authored" ~source_text:"exact draft" |> Yojson.Safe.from_string in
+  let open Yojson.Safe.Util in
+  check string "the chosen second source is the request authority" "personal" (body |> member "source_id" |> to_string);
+  check string "the explicit creation kind reaches canonical validation" "composition" (body |> member "kind" |> to_string);
+  check string "the draft is not replaced with a starter" "exact draft" (body |> member "source_text" |> to_string)
 ;;
 
 let test_authoring_tools_keep_canonical_names_and_contracts () =
@@ -445,8 +478,18 @@ let test_saved_but_unpublished_is_explicit () =
   let edited = skill_text "Edited description." "# Edited" in
   let refresh () = Error "injected publication failure" in
   (match Editor.save ~descriptors:(Ok (Masc.Keeper_tool_descriptor.all_descriptors ())) ~base_path ~reference ~source_text:edited ~refresh with
-   | Ok (Editor.Saved_but_unpublished { reason; _ }) ->
-     check string "failure is preserved" "injected publication failure" reason
+   | Ok (Editor.Saved_but_unpublished { reason; _ } as outcome) ->
+     check string "failure is preserved" "injected publication failure" reason;
+     let wire = Editor.save_outcome_to_yojson outcome in
+     (match Masc_tui_editor_wire.decode_skill_editor_save_receipt wire with
+      | Ok { ses_status = Skill_saved_but_unpublished actual; _ } ->
+        check string "TUI retains the actual publication failure" reason actual
+      | Ok _ -> fail "TUI save decoder changed the outcome"
+      | Error detail -> fail detail);
+     let without_reason = match wire with
+       | `Assoc fields -> `Assoc (List.remove_assoc "reason" fields) | _ -> assert false in
+     check bool "missing failure detail is not replaced with an invented reason" true
+       (Result.is_error (Masc_tui_editor_wire.decode_skill_editor_save_receipt without_reason))
    | Error error -> fail (Editor.error_to_string error)
    | Ok (Unchanged _ | Saved_and_published _) ->
      fail "publication failure was reported as published");
@@ -577,7 +620,13 @@ let test_create_behind_an_earlier_source_names_the_winner () =
        Yojson.Safe.Util.(member "status" json |> to_string);
      check bool "receipt names the winner" true
        (Yojson.Safe.Util.member "winner" json
-        = Skill_catalog_snapshot.identity_to_yojson winner)
+        = Skill_catalog_snapshot.identity_to_yojson winner);
+     (match Masc_tui_editor_wire.decode_skill_editor_create_receipt ~source_id:"workspace"
+        ~package_id:"shared" ~source_text:(named_skill_text "shared" "A later procedure." "# Later") json with
+      | Ok { sec_status = Skill_created_but_shadowed actual; _ } ->
+        check bool "TUI keeps the producer's earlier-source identity" true (Skill_reference.equal_identity actual winner)
+      | Ok _ -> fail "TUI create decoder changed the shadowed outcome"
+      | Error detail -> fail detail)
    | Ok (Created_and_published _) ->
      fail "a package behind an earlier source was reported as the one Keepers see"
    | Ok (Created_but_unpublished { reason; _ }) -> fail ("not published: " ^ reason)
@@ -1352,6 +1401,8 @@ let () =
             test_new_preview_uses_public_plan_without_writing
         ; test_case "authoring tool discovery preserves canonical contracts" `Quick
             test_authoring_tools_keep_canonical_names_and_contracts
+        ; test_case "TUI source choice becomes the create request target" `Quick
+            test_tui_source_selection_is_the_request_target
         ; test_case "external edit conflicts" `Quick test_external_edit_causes_revision_conflict
         ; test_case "read-only source rejects save" `Quick test_read_only_source_rejects_save
         ; test_case "unreadable body is never written" `Quick

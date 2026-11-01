@@ -624,6 +624,10 @@ let skill_settlement_lines composition =
 ;;
 
 let tools_selection_line ~cols state =
+  match state.tools_skill_source_picker with
+  | Some picker -> Printf.sprintf "New %s · choose a save location"
+      (if picker.ssp_composition then "Composition" else "Instruction")
+  | None ->
   if state.tools_pane=Tools_async then
     (match state.tools_async_selection with
      | None -> "Async request: none"
@@ -663,7 +667,27 @@ let tools_selection_document state =
           (Skill_reference.content_revision_to_string reference.content_revision)
       ]
 
-let tools_display_lines ?(cols = 80) (state : state) =
+let skill_source_picker_prefix summary =
+  [ Ansi.bold, " Choose the writable source for this package"
+  ; Ansi.dim, " j/k or arrows: select · Enter: edit · /:filter · Esc:cancel"
+  ; Ansi.dim, " " ^ Terminal_text.single_line summary ]
+
+let skill_source_picker_page state ~terminal_rows =
+  max 1 (tools_content_rows state ~terminal_rows ~count:0
+    - List.length (skill_source_picker_prefix ""))
+
+let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
+  match state.tools_skill_source_picker with
+  | Some picker ->
+    let terminal_rows = match terminal_rows with Some rows -> rows | None -> fst (get_terminal_size ()) in
+    let view = Masc_tui_pick_list.view ~page:(skill_source_picker_page state ~terminal_rows)
+      ~window:Masc_tui_pick_list.Opens_at_cursor ~label:Fun.id picker.ssp_sources picker.ssp_list in
+    skill_source_picker_prefix (Masc_tui_pick_list.summary view)
+    @ (if view.rows = [] then [Theme.warn (), " No matching source"] else
+        List.mapi (fun index source ->
+          (if view.selected_row = Some index then Theme.selection else Ansi.dim),
+          " " ^ Terminal_text.single_line source) view.rows)
+  | None ->
   let registered_tools =
     match state.tools_inventory with
     | None -> []
@@ -1903,7 +1927,11 @@ let tools_display_lines ?(cols = 80) (state : state) =
        if Masc_tui_message_layout.display_width text <= width then [style, text]
        else Masc_tui_message_layout.wrap_words ~max_cells:width text
             |> List.map (fun line -> style, line)) lines in
-  let prefix=tools_selection_document state @ reading_lines @ error_lines @ explanation in
+  let drafts = List.map (fun draft -> Theme.warn (), Terminal_text.single_line
+    (Printf.sprintf " Unpublished %s draft retained for %s · %s:resume in editor"
+      (if draft.scd_composition then "Composition" else "Instruction") draft.scd_source_id
+      (if draft.scd_composition then "C" else "c"))) (skill_create_drafts_for_current_workspace state) in
+  let prefix=tools_selection_document state @ drafts @ reading_lines @ error_lines @ explanation in
   if state.tools_pane=Tools_async && state.tools_async_detail_open && Option.is_some state.tools_async_task_source then
     wrap prefix @ pane_lines
   else wrap (prefix @ pane_lines)

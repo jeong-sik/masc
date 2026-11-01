@@ -3513,11 +3513,7 @@ let runtime_all_rows (snapshot : Masc.Tui_decode.runtime_surface_snapshot) =
 
 
 let tools_scrolled_for_lines state display_lines =
-  { sc_count = List.length display_lines
-  ; sc_chrome = if Option.is_some state.tools_error then 9 else 7
-  ; sc_overflow_takes_row = true
-  ; sc_preview_keep = None
-  }
+  tools_scroll_layout state ~count:(List.length display_lines)
 
 
 (* The Config surface: runtime.toml exactly as the server reads it. The

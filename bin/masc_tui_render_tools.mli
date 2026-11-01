@@ -16,7 +16,11 @@ val tools_selection_line : cols:int -> state -> string
 (** Pinned action target, sharing the exact selection used by Enter/edit.
     The complete reference remains in the scrolling document. *)
 
-val tools_display_lines : ?cols:int -> state -> (string * string) list
+val skill_source_picker_page : state -> terminal_rows:int -> int
+(** The visible source rows after the existing Tools frame and the picker's
+    own prefix. Rendering and selection use this same budget. *)
+
+val tools_display_lines : ?cols:int -> ?terminal_rows:int -> state -> (string * string) list
 (** Every row the surface would draw, before scrolling narrows it, each as
     the style to draw it in paired with its text. The caller measures this
     list to lay the viewport out, so it counts rows rather than entries -- a

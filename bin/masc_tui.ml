@@ -14551,6 +14551,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.tools_error <- None;
   state.skills_catalog <- None;
   state.skills_catalog_error <- None;
+  state.tools_skill_source_picker <- None;
   state.tools_async_request_generation <- state.tools_async_request_generation + 1;
   state.tools_async_observation_inflight <- false;
   state.tools_async_observation <- None;
@@ -26201,174 +26202,126 @@ let main
           (fun () -> Masc_tui_http.post_runtime_param_clear ~host:server_peer_host
             ~port:state.port ~key)
   in
-  let skill_template_placeholder_name = "new-skill" in
   let skill_template ~composition =
-    if composition
-    then
-      Printf.sprintf {|---
-name: %s
-description: Describe the repeatable job this Skill performs.
+    if composition then {|---
+name: ""
+description: ""
 ---
-
-# New composition Skill
-
-This preset runs one no-argument tool. Add nodes and dependencies after the
-first preview succeeds. Change execution to "async" for durable background work.
-Replace the frontmatter name and composition name below with the same unique name.
 
 ```toml composition
 [[compositions]]
-name = %S
-description = "Describe the repeatable job this Skill performs."
+name = ""
 execution = "inline"
-
-[[compositions.nodes]]
-id = "lane"
-tool = "keeper_lane_status"
-[compositions.nodes.input]
-kind = "literal"
-value = {}
+plan_json = "{\"nodes\":[],\"exports\":[],\"branch_failure_policy\":\"fail_fast\"}"
 ```
-|} skill_template_placeholder_name skill_template_placeholder_name
-    else
-      Printf.sprintf {|---
-name: %s
-description: Describe when an agent should use this Skill.
+
+<!-- Set the same package name in frontmatter and composition. Author the
+nodes, JSON inputs, after dependencies and named outputs in plan_json.
+The server validates tool contracts; this empty plan cannot be published.
+Add instructions below the closed executable declaration. -->
+|}
+    else {|---
+name: ""
+description: ""
 ---
 
-# New instruction Skill
-
-Write the durable procedure here. The body stays out of the eager tool context
-and is loaded on demand through keeper_skill.
-|} skill_template_placeholder_name
+<!-- Describe the procedure, expected result and verification here.
+Agents discover the name and description first; the body loads on demand.
+Use relative paths for resources already held in the package. -->
+|}
+  in
+  let edit_new_skill ~origin ~composition ~source_id ~check ~port () =
+    let same_draft draft = draft.scd_composition = composition
+      && String.equal draft.scd_source_id source_id && draft.scd_origin = origin in
+    let source_text = match List.find_opt same_draft state.tools_skill_create_drafts with
+      | Some draft -> draft.scd_source_text
+      | None -> skill_template ~composition in
+    match Masc_tui_editor.editor_command () with
+    | None -> report_action state "error" "Set $EDITOR to author a Skill document"
+    | Some _ ->
+      (match Masc_tui_editor.roundtrip ~restore:restore_terminal ~reenter:reenter_terminal
+          ~suffix:".md" source_text with
+       | Error abort -> report_editor_abort state ~action:"Skill creation" abort
+       | Ok source_text ->
+         state.tools_skill_create_drafts <-
+           { scd_source_id = source_id; scd_composition = composition; scd_source_text = source_text; scd_origin = origin }
+           :: List.filter (fun draft -> not (same_draft draft)) state.tools_skill_create_drafts;
+         (match Agent_core.Skill_document.decode_authored source_text with
+          | Agent_core.Skill_document.Unloadable diagnostics ->
+            report_action state "error" (Terminal_text.single_line
+              ("Draft retained: " ^ String.concat "; "
+                (List.map Agent_core.Skill_document.diagnostic_to_string diagnostics)))
+          | Agent_core.Skill_document.Loaded document ->
+            let package_id = document.name in
+            let report kind text = report_action state kind (Terminal_text.single_line text) in
+            (match check () with
+             | Error detail -> report "error" ("Create not sent; draft retained: " ^ detail)
+             | Ok () ->
+               match Masc_tui_http.post_skill_editor_create ~host:server_peer_host ~port
+                   ~composition ~source_id ~package_id ~source_text with
+               | Error (Masc_tui_http.Skill_write_refused detail) ->
+                 report "error" ("Create refused; draft retained: " ^ detail)
+               | Error (Skill_write_unconfirmed detail) ->
+                 report "error" ("Create effect not confirmed; draft retained. Read the package before retrying: " ^ detail)
+               | Ok receipt ->
+                 state.tools_skill_create_drafts <- List.filter (fun draft -> not (same_draft draft))
+                   state.tools_skill_create_drafts;
+                 (match receipt.sec_status with
+                  | Masc_tui_http.Skill_created_and_published ->
+                    report "system" (Printf.sprintf "created and published · %s/%s" source_id package_id)
+                  | Skill_created_but_shadowed winner ->
+                    report "error" (Printf.sprintf "shadowed by %s/%s: %s/%s was created; Keepers see the earlier source by name"
+                      (Skill_reference.identity_source_id_to_string winner)
+                      (Skill_reference.identity_package_id_to_string winner) source_id package_id)
+                  | Skill_created_but_unpublished reason ->
+                    report "error" (Printf.sprintf "%s/%s created but NOT published: %s" source_id package_id reason));
+                 launch_tools_load state ~mailbox:async_messages)))
   in
   let handle_skill_create ~composition () =
     let check = capture_workspace_check state ~mailbox:async_messages in
-    let host = server_peer_host in
     let port = state.port in
+    let origin = workspace_input_identity_of_server state.server_identity in
     match Result.bind (check ()) (fun () ->
-      Masc_tui_http.fetch_skill_editor_sources ~host ~port) with
+      Masc_tui_http.fetch_skill_editor_sources ~host:server_peer_host ~port) with
     | Error detail -> report_action state "error" ("Skill sources failed: " ^ detail)
-    | Ok [] -> report_action state "error" "no ready read-write Skill source"
-    | Ok (source_id :: _) ->
-      (match Masc_tui_editor.editor_command () with
-       | None -> report_action state "error" "no $EDITOR set; export EDITOR to create Skills"
-       | Some _ ->
-         (match
-            Masc_tui_editor.roundtrip
-              ~restore:restore_terminal
-              ~reenter:reenter_terminal
-              ~suffix:".md"
-              (skill_template ~composition)
-          with
-          | Error abort ->
-            report_editor_abort state ~action:"Skill creation" abort
-          | Ok source_text ->
-            (match Agent_core.Skill_document.decode_authored source_text with
-             | Agent_core.Skill_document.Unloadable diagnostics ->
-               report_action state "error"
-                 (String.concat "; "
-                    (List.map Agent_core.Skill_document.diagnostic_to_string diagnostics))
-             | Agent_core.Skill_document.Loaded document
-               when String.equal document.name skill_template_placeholder_name ->
-               report_action state "error"
-                 (Printf.sprintf "change %s to a real unique name before creating"
-                    skill_template_placeholder_name)
-             | Agent_core.Skill_document.Loaded document ->
-               let package_id = document.name in
-               (* The server validates composition nodes against its current
-                  attached Add-ons and enforces source size before writing. *)
-               (match
-                  Result.bind (check ()) (fun () ->
-                    Masc_tui_http.post_skill_editor_create
-                      ~composition
-                      ~host ~port ~source_id ~package_id ~source_text)
-                with
-                | Error detail -> report_action state "error" ("Skill create failed: " ^ detail)
-                | Ok json ->
-                  (* The server answers exactly created_and_published,
-                     created_but_shadowed(+winner) or
-                     created_but_unpublished(+reason). The old "created"
-                     default reported a status the server never sends and
-                     swallowed the not-published reason — the save path
-                     below already reports it; the create path now does
-                     the same, in the footer of the surface [c] was pressed
-                     on, as #32069 meant for every editor-backed outcome.
-                     The event log escapes an entry where it draws it, the
-                     footer draws what it is given, and [source_id] and the
-                     receipt come from the server, so every receipt outcome
-                     crosses [Terminal_text.single_line] here. *)
-                  let report event_type text =
-                    report_action state event_type (Terminal_text.single_line text)
-                  in
-                  (match json_assoc_member_opt "status" json with
-                   | Some (`String "created_and_published") ->
-                     report
-                       "system"
-                       (Printf.sprintf
-                          "created and published · %s/%s"
-                          source_id
-                          package_id)
-                   | Some (`String "created_but_shadowed") ->
-                     (* A package earlier in the catalog declares the same
-                        name, so Keepers listing by name see that one; the
-                        winner leads because the footer cuts the tail
-                        first. *)
-                     let winner_field field =
-                       match json_assoc_member_opt "winner" json with
-                       | Some winner ->
-                         (match json_assoc_member_opt field winner with
-                          | Some (`String value) -> Some value
-                          | Some _ | None -> None)
-                       | None -> None
-                     in
-                     (match winner_field "source_id", winner_field "package_id" with
-                      | Some winner_source, Some winner_package ->
-                        report
-                          "error"
-                          (Printf.sprintf
-                             "shadowed by %s/%s: %s/%s was created and \
-                              published, but Keepers see that one by name"
-                             winner_source
-                             winner_package
-                             source_id
-                             package_id)
-                      | None, _ | _, None ->
-                        report
-                          "error"
-                          (Printf.sprintf
-                             "%s/%s: shadowed create receipt named no winner"
-                             source_id
-                             package_id))
-                   | Some (`String "created_but_unpublished") ->
-                     let reason =
-                       match json_assoc_member_opt "reason" json with
-                       | Some (`String reason) -> reason
-                       | _ -> "(no reason reported)"
-                     in
-                     report
-                       "error"
-                       (Printf.sprintf
-                          "%s/%s was created but NOT published: %s"
-                          source_id
-                          package_id
-                          reason)
-                   | Some (`String other) ->
-                     report
-                       "error"
-                       (Printf.sprintf
-                          "%s/%s: unrecognized create status %S"
-                          source_id
-                          package_id
-                          other)
-                   | Some _ | None ->
-                     report
-                       "error"
-                       (Printf.sprintf
-                          "%s/%s: create receipt carried no status"
-                          source_id
-                          package_id));
-                  launch_tools_load state ~mailbox:async_messages))))
+    | Ok [] -> report_action state "error" "No ready read-write Skill source"
+    | Ok [source_id] ->
+      (match origin with
+       | None -> report_action state "error" "Confirm the current workspace before authoring a Skill"
+       | Some origin -> edit_new_skill ~origin ~composition ~source_id ~check ~port ())
+    | Ok sources ->
+      state.search <- None;
+      state.tools_scroll <- 0;
+      state.tools_skill_source_picker <- Some
+        { ssp_sources = sources; ssp_composition = composition; ssp_list = Masc_tui_pick_list.closed
+        ; ssp_authority = state.workspace_authority; ssp_identity = state.server_identity; ssp_port = port }
+  in
+  let handle_skill_source_key key =
+    state.tools_scroll <- 0;
+    match state.tools_skill_source_picker with
+    | None -> ()
+    | Some picker ->
+      (match Masc_tui_pick_list.action_of_key ~close_keys:[] picker.ssp_list key with
+       | None -> ()
+       | Some action ->
+         let terminal_rows, _ = get_terminal_size () in
+         match Masc_tui_pick_list.apply ~page:(Masc_tui_render_tools.skill_source_picker_page state ~terminal_rows)
+             ~label:Fun.id picker.ssp_sources picker.ssp_list action with
+         | Masc_tui_pick_list.Stay list ->
+           state.tools_skill_source_picker <- Some { picker with ssp_list = list }
+         | Dismissed -> state.tools_skill_source_picker <- None
+         | Chosen source_id ->
+           state.tools_skill_source_picker <- None;
+           let check = workspace_check_sequence state ~mailbox:async_messages
+             ~authority:picker.ssp_authority ~identity:picker.ssp_identity
+             ~host:server_peer_host ~port:picker.ssp_port in
+           match check () with
+           | Error detail -> report_action state "error" ("Skill creation withdrawn: " ^ detail)
+           | Ok () ->
+             match workspace_input_identity_of_server picker.ssp_identity with
+             | None -> report_action state "error" "Original Skill workspace is unconfirmed"
+             | Some origin -> edit_new_skill ~origin ~composition:picker.ssp_composition
+                 ~source_id ~check ~port:picker.ssp_port ())
   in
   let handle_async_request_lookup () =
     let authority = state.workspace_authority and reading = state.workspace_read_authority in
@@ -26463,12 +26416,17 @@ and is loaded on demand through keeper_skill.
                   report_action state "error" ("Skill preview rejected: " ^ detail)
                 | Ok _ ->
                   (match
-                     Result.bind (check ()) (fun () ->
+                     Result.bind (Result.map_error
+                       (fun detail -> Masc_tui_http.Skill_write_refused ("Save not sent: " ^ detail))
+                       (check ())) (fun () ->
                        Masc_tui_http.post_skill_editor_save ~host ~port
                          ~reference:loaded.sel_reference ~source_text:edited)
                    with
-                   | Error detail ->
-                     report_action state "error" ("Skill save failed: " ^ detail)
+                   | Error (Masc_tui_http.Skill_write_refused detail) ->
+                     report_action state "error" (Terminal_text.single_line ("Skill save refused: " ^ detail))
+                   | Error (Skill_write_unconfirmed detail) ->
+                     report_action state "error" (Terminal_text.single_line
+                       ("Skill save effect not confirmed; read the current package before retrying: " ^ detail))
                    | Ok receipt ->
                      (match receipt.ses_status with
                       | Masc_tui_http.Skill_unchanged ->
@@ -28428,6 +28386,10 @@ and is loaded on demand through keeper_skill.
             | Some Text_keeper_runtime_picker_filter ->
                 state.runtime_pick_list <-
                   Masc_tui_pick_list.type_text state.runtime_pick_list text
+            | Some Text_skill_source_filter ->
+                state.tools_skill_source_picker <- Option.map (fun picker ->
+                  { picker with ssp_list = Masc_tui_pick_list.type_text picker.ssp_list text })
+                  state.tools_skill_source_picker
             | Some Text_row_search ->
                 let longer =
                   Option.value state.search ~default:"" ^ text
@@ -28522,6 +28484,14 @@ and is loaded on demand through keeper_skill.
                 handle_paste ~protect_recovered:recovered_paste state
                   ~base_path ~mailbox:async_messages ~paste)
        | Some (Mouse_left_release _ | Mouse_wheel _) when help_owns_input -> ()
+       | Some (Mouse_wheel (direction, _, _))
+         when state.view = Tools && Option.is_some state.tools_skill_source_picker ->
+           if not compact_viewport then handle_skill_source_key
+             (match direction with
+              | Masc.Tui_mouse_protocol.Wheel_up -> "wheel-up"
+              | Wheel_down -> "wheel-down")
+       | Some (Mouse_left_release _)
+         when state.view = Tools && Option.is_some state.tools_skill_source_picker -> ()
        | Some (Mouse_left_release _) when (play_was_presented || Option.is_some presented_queue)
            && queue_play_owner = Wait_for_frame -> ()
        | Some (Mouse_left_release _) when Option.is_some presented_queue ->
@@ -31556,6 +31526,9 @@ and is loaded on demand through keeper_skill.
                       | Masc_tui_types.Pick_media_failover -> ())
                  | Masc_tui_pick_list.Dismissed ->
                      state.runtime_lane_pick <- None))
+       | Some k when state.view = Tools && Option.is_some state.tools_skill_source_picker ->
+           if not compact_viewport then handle_skill_source_key k
+           else if String.equal k "esc" then state.tools_skill_source_picker <- None
        | Some k
          when state.view = Keepers Keeper_runtime_pick
               && (Option.is_some (keeper_runtime_picker_action state.runtime_pick_list k)
@@ -33194,7 +33167,7 @@ and is loaded on demand through keeper_skill.
                    | Text_runtime_lane_name | Text_runtime_param
                    | Text_runtime_model_form | Text_runtime_account_form | Text_memory_recall_form
                    | Text_voice_wizard | Text_palette | Text_row_search
-                   | Text_runtime_picker_filter | Text_keeper_runtime_picker_filter
+                   | Text_runtime_picker_filter | Text_keeper_runtime_picker_filter | Text_skill_source_filter
                    | Text_identity_app_form | Text_identity_filter
                    | Text_goal_drop_reason | Text_github_token)
                | None -> false) ->

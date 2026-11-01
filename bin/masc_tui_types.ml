@@ -576,6 +576,15 @@ let server_is_booting
 type workspace_authority = Workspace_authority of int
 type workspace_reply_kind = Workspace_observation | Workspace_operation_outcome
 
+type skill_source_picker =
+  { ssp_sources : string list
+  ; ssp_composition : bool
+  ; ssp_list : Masc_tui_pick_list.t
+  ; ssp_authority : workspace_authority
+  ; ssp_identity : Tui_decode.server_identity option
+  ; ssp_port : int
+  }
+
 type workspace_identity =
   | Workspace_identity_unread
   | Workspace_identity_match
@@ -617,6 +626,13 @@ type pending_task_followup =
 type workspace_input_identity =
   { wi_base_path : string
   ; wi_masc_root : string
+  }
+
+type skill_create_draft =
+  { scd_source_id : string
+  ; scd_composition : bool
+  ; scd_source_text : string
+  ; scd_origin : workspace_input_identity
   }
 
 (* An unidentified workspace cannot share an edit with a later authority. *)
@@ -10178,6 +10194,8 @@ type state = {
   mutable skills_catalog_error: string option;
   mutable tools_scroll: int;
   mutable tools_skill_cursor: int;
+  mutable tools_skill_source_picker: skill_source_picker option;
+  mutable tools_skill_create_drafts: skill_create_draft list;
   mutable tools_skill_evidence: (string * Yojson.Safe.t) option;
   mutable tools_evidence_request: unit ref option;
   mutable tools_evidence_reference: Skill_reference.t option;
@@ -14318,6 +14336,12 @@ let reconcile_keeper_message_focus (state : state) ~cols =
 
 
 (* One selection shared by Tools actions, pinned heading and document. *)
+let skill_create_drafts_for_current_workspace (state : state) =
+  if not (server_authority_ready state) then []
+  else match workspace_input_identity_of_server state.server_identity with
+    | None -> []
+    | Some origin -> List.filter (fun draft -> draft.scd_origin = origin) state.tools_skill_create_drafts
+
 let tools_skill_profiles (state : state) =
   match state.tools_inventory with
   | Some { Masc.Tui_decode_tools.ts_effective =
@@ -14664,6 +14688,7 @@ type text_input_target =
   | Text_row_search
   | Text_runtime_picker_filter
   | Text_keeper_runtime_picker_filter
+  | Text_skill_source_filter
   | Text_identity_app_form
   | Text_identity_filter
   | Text_goal_drop_reason
@@ -14767,6 +14792,9 @@ let text_input_target (state : state) ~compact_viewport =
           && not state.context_inspector_open && Option.is_some state.ask_text_entry
   then Some Text_ask_answer
   else if state.palette_open then Some Text_palette
+  else if state.view = Tools && not compact_viewport
+          && Option.is_some state.tools_skill_source_picker
+  then Some Text_skill_source_filter
   else if Option.is_some state.search then Some Text_row_search
   (* The runtime picker's filter, after [/]: its letter keys (j/k, e) are
      the filter's text until Esc, and so are the Runtime surface's. *)
@@ -14815,7 +14843,7 @@ let quit_key_allowed_for = function
       | Text_preset_name | Text_resource_save | Text_runtime_lane_name | Text_runtime_param
       | Text_runtime_account_form | Text_memory_recall_form | Text_runtime_model_form
       | Text_voice_wizard | Text_palette | Text_row_search
-      | Text_runtime_picker_filter | Text_keeper_runtime_picker_filter
+      | Text_runtime_picker_filter | Text_keeper_runtime_picker_filter | Text_skill_source_filter
       | Text_identity_app_form | Text_identity_filter | Text_github_token
       | Text_board_draft | Text_board_attach_path | Text_goal_drop_reason ) ->
       false
@@ -17833,7 +17861,8 @@ let keeper_peer_sender_target state target =
     | _ :: _ :: _ -> Error "The recorded sender matches more than one Keeper in the roster"
 
 let modal_owns_keys (state : state) =
-  Option.is_some (current_board_reader state)
+  (state.view = Tools && Option.is_some state.tools_skill_source_picker)
+  || Option.is_some (current_board_reader state)
   || Option.is_some (current_task_inspector state)
   || Option.is_some (current_chat_call_reader state)
   || Option.is_some (current_detail_reading state)
@@ -18601,6 +18630,8 @@ let create_state
   skills_catalog_error = None;
   tools_scroll = 0;
   tools_skill_cursor = 0;
+  tools_skill_source_picker = None;
+  tools_skill_create_drafts = [];
   tools_skill_evidence = None;
   tools_evidence_request = None;
   tools_evidence_reference = None;
@@ -20206,6 +20237,20 @@ let surface_body_rows (state : state) ~terminal_rows =
     (terminal_rows
      - Masc_tui_composer.rows_for ~terminal_rows
      - agenda_chrome_rows state)
+;;
+
+let tools_scroll_layout state ~count =
+  { sc_count = count
+  ; sc_chrome = if Option.is_some state.tools_error then 9 else 7
+  ; sc_overflow_takes_row = Option.is_none state.tools_skill_source_picker
+  ; sc_preview_keep = None }
+;;
+
+let tools_content_rows state ~terminal_rows ~count =
+  let layout = tools_scroll_layout state ~count in
+  Masc_tui_scroll.content_height ~rows:(surface_body_rows state ~terminal_rows)
+    ~chrome:layout.sc_chrome ~count:layout.sc_count
+    ~preview_keep:layout.sc_preview_keep ~overflow_takes_row:layout.sc_overflow_takes_row
 ;;
 
 (* Parameters split their body between the cursor-following list and the

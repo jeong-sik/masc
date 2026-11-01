@@ -351,7 +351,13 @@ let handle_ask_withdraw ~tool_name ~start_time (ctx : context) : Tool_result.res
           Keeper_ask_store.withdraw ~base_path ~keeper_name ~ask_id ~reason
             ~now:(Time_compat.now ())
         with
-        | Error failure ->
+        | Error ((Keeper_ask_store.Withdraw_store_failed _
+                  | Keeper_ask_store.Withdraw_recorded_unconfirmed _) as failure) ->
+            Some (Tool_result.error ~failure_class:Tool_result.Runtime_failure ~tool_name
+              ~start_time (Keeper_ask_store.withdraw_failure_to_string failure))
+        | Error ((Keeper_ask_store.Withdraw_ask_not_found _
+                  | Keeper_ask_store.Withdraw_already_answered _
+                  | Keeper_ask_store.Withdraw_already_withdrawn _) as failure) ->
             reject (Keeper_ask_store.withdraw_failure_to_string failure)
         | Ok () ->
             Log.Keeper.info "keeper_ask_withdraw: keeper=%s ask_id=%s" keeper_name ask_id;

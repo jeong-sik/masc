@@ -6,11 +6,11 @@
     {!Keeper_external_attention}.
 
     Durable appends are serialized by a per-path mutex and file lock. Answer
-    preflight remains optimistic: two surfaces can validate an open ask before
-    either appends, so both answer rows may land. The fold chooses the first
-    recorded answer. {!answer} rereads the canonical fold before returning
-    [Ok], and reports the other winner or a committed-but-unconfirmed append
-    explicitly. *)
+    and withdrawal preflight remain optimistic: two surfaces can observe an
+    open ask before either appends, so competing terminal rows may land. The
+    fold chooses the first terminal event. {!answer} and {!withdraw} reread
+    that canonical fold before returning [Ok], and report a competing winner
+    or a committed-but-unconfirmed append explicitly. *)
 
 type answer_failure =
   | Ask_not_found of { ask_id : string }
@@ -65,6 +65,9 @@ type withdraw_failure =
   | Withdraw_already_answered of { answered_at : float }
   | Withdraw_already_withdrawn of { withdrawn_at : float }
   | Withdraw_store_failed of string
+  | Withdraw_recorded_unconfirmed of { detail : string }
+      (** The append committed, but its canonical terminal outcome could not
+          be confirmed. This does not prove the question was withdrawn. *)
 
 val answer_failure_to_string : answer_failure -> string
 val withdraw_failure_to_string : withdraw_failure -> string
@@ -98,7 +101,9 @@ val withdraw :
   now:float ->
   (unit, withdraw_failure) result
 (** Appends [Withdrawn]. Only the asking Keeper withdraws a question; nothing
-    withdraws one on its behalf after an interval. *)
+    withdraws one on its behalf after an interval. Success confirms that this
+    withdrawal is the canonical first terminal event; an earlier answer or
+    competing withdrawal is returned explicitly. *)
 
 val rows :
   base_path:string ->
@@ -130,4 +135,10 @@ module For_testing : sig
     (Keeper_ask.answer list, answer_failure) result
   (** The production append/read boundary with another writer interleaved
       after preflight, or storage made unreadable after a committed append. *)
+
+  val withdraw_with_interleaving :
+    before_append:(unit -> unit) -> after_append:(unit -> unit) ->
+    base_path:string -> keeper_name:string -> ask_id:string ->
+    reason:string -> now:float -> (unit, withdraw_failure) result
+  (** The same canonical confirmation boundary for withdrawal. *)
 end

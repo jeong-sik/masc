@@ -289,6 +289,72 @@ let committed_answer_with_unreadable_winner_is_explicit () =
   | Ok (Keeper_ask_store.Stored_rows [ _, (_, Keeper_ask.Answered_by _) ]) -> ()
   | Ok _ | Error _ -> Alcotest.fail "the committed answer did not survive the failed reread"
 
+let a_racing_answer_prevents_withdrawal_acknowledgement () =
+  let base_path = temp_dir () in
+  record base_path "ask-1";
+  let before_append () =
+    match Keeper_ask_store.answer ~base_path ~keeper_name:keeper ~ask_id:"ask-1"
+        ~submissions:["q1", Keeper_ask.Chose {choice_ids=["a"]}] ~responder ~now:1100. with
+    | Ok _ -> ()
+    | Error error -> Alcotest.fail (Keeper_ask_store.answer_failure_to_string error) in
+  (match Keeper_ask_store.For_testing.withdraw_with_interleaving ~before_append
+      ~after_append:(fun () -> ()) ~base_path ~keeper_name:keeper ~ask_id:"ask-1"
+      ~reason:"found another route" ~now:1200. with
+   | Error (Keeper_ask_store.Withdraw_already_answered {answered_at}) ->
+       Alcotest.(check (float 0.)) "the operator's winning answer time" 1100. answered_at
+   | Error error -> Alcotest.fail (Keeper_ask_store.withdraw_failure_to_string error)
+   | Ok () -> Alcotest.fail "a losing withdrawal was reported as accepted");
+  match Keeper_ask_store.settled ~base_path ~keeper_name:keeper ~ask_id:"ask-1" with
+  | Some (Keeper_ask.Answered_by {answers=[{response=Keeper_ask.Chose {choice_ids=[choice]};_}];_}) ->
+      Alcotest.(check string) "the answer remains available for its wake" "a" choice
+  | Some (Keeper_ask.Open | Keeper_ask.Withdrawn_because _)
+  | Some (Keeper_ask.Answered_by _) | None -> Alcotest.fail "the winning answer was lost"
+
+let a_racing_withdrawal_keeps_the_first_reason () =
+  let base_path = temp_dir () in
+  record base_path "ask-1";
+  let before_append () =
+    match Keeper_ask_store.withdraw ~base_path ~keeper_name:keeper ~ask_id:"ask-1"
+        ~reason:"original reason" ~now:1100. with
+    | Ok () -> ()
+    | Error error -> Alcotest.fail (Keeper_ask_store.withdraw_failure_to_string error) in
+  (match Keeper_ask_store.For_testing.withdraw_with_interleaving ~before_append
+      ~after_append:(fun () -> ()) ~base_path ~keeper_name:keeper ~ask_id:"ask-1"
+      ~reason:"later reason" ~now:1200. with
+   | Error (Keeper_ask_store.Withdraw_already_withdrawn {withdrawn_at}) ->
+       Alcotest.(check (float 0.)) "the first withdrawal wins" 1100. withdrawn_at
+   | Error error -> Alcotest.fail (Keeper_ask_store.withdraw_failure_to_string error)
+   | Ok () -> Alcotest.fail "a later withdrawal was acknowledged as the first");
+  match Keeper_ask_store.settled ~base_path ~keeper_name:keeper ~ask_id:"ask-1" with
+  | Some (Keeper_ask.Withdrawn_because {reason;_}) ->
+      Alcotest.(check string) "the original reason remains" "original reason" reason
+  | Some (Keeper_ask.Open | Keeper_ask.Answered_by _) | None ->
+      Alcotest.fail "the first withdrawal was lost"
+
+let committed_withdrawal_with_unreadable_outcome_is_explicit () =
+  let base_path = temp_dir () in
+  record base_path "ask-1";
+  let path = Keeper_ask_store.log_path ~base_path ~keeper_name:keeper in
+  let saved = path ^ ".committed" in
+  let after_append () =
+    Unix.rename path saved;
+    let out = open_out path in
+    output_string out ("{broken middle row}\n" ^
+      Yojson.Safe.to_string (Keeper_ask.event_to_json (Keeper_ask.Asked (an_ask ~ask_id:"ask-1"))) ^ "\n");
+    close_out out in
+  (match Keeper_ask_store.For_testing.withdraw_with_interleaving
+      ~before_append:(fun () -> ()) ~after_append ~base_path ~keeper_name:keeper ~ask_id:"ask-1"
+      ~reason:"done elsewhere" ~now:1100. with
+   | Error (Keeper_ask_store.Withdraw_recorded_unconfirmed _) -> ()
+   | Error error -> Alcotest.fail (Keeper_ask_store.withdraw_failure_to_string error)
+   | Ok () -> Alcotest.fail "an unreadable canonical outcome became withdrawal success");
+  Unix.unlink path;
+  Unix.rename saved path;
+  match Keeper_ask_store.rows_result ~base_path ~keeper_name:keeper with
+  | Ok (Keeper_ask_store.Stored_rows [_, (_, Keeper_ask.Withdrawn_because {reason;_})]) ->
+      Alcotest.(check string) "the committed append survives a failed confirmation" "done elsewhere" reason
+  | Ok _ | Error _ -> Alcotest.fail "the committed withdrawal did not survive"
+
 let same_size_external_mutation_cannot_reuse_a_cached_answer () =
   let base_path = temp_dir () in
   record base_path "ask-1";
@@ -360,6 +426,21 @@ let ask_status_counts_the_same_snapshot_it_filters () =
         Yojson.Safe.Util.(row |> member "resolution" |> member "state" |> to_string)
   | _ -> Alcotest.fail "Ask status lost its requested canonical row"
 
+let withdrawal_storage_failures_are_runtime_failures () =
+  let base_path = temp_dir () in
+  record base_path "ask-1";
+  append_raw base_path "{broken middle row}\n";
+  record base_path "ask-2";
+  let ctx : Mcp_tool_runtime_ask.context =
+    { config=Workspace.default_config base_path; agent_name=keeper;
+      arguments=`Assoc ["ask_id", `String "ask-1"; "reason", `String "done elsewhere"] } in
+  match Mcp_tool_runtime_ask.handle_ask_withdraw ~tool_name:"masc_ask_withdraw"
+      ~start_time:(Tool_timing.start ()) ctx with
+  | Some result ->
+      Alcotest.(check bool) "storage damage is not a workflow refusal" true
+        (Tool_result.failure_class result = Some Tool_result.Runtime_failure)
+  | None -> Alcotest.fail "Ask withdrawal did not handle its operation"
+
 let () =
   Alcotest.run "keeper_ask_store"
     [
@@ -387,6 +468,14 @@ let () =
             optimistic_answer_reports_the_canonical_first_writer;
           Alcotest.test_case "committed answer with unreadable winner is explicit" `Quick
             committed_answer_with_unreadable_winner_is_explicit;
+          Alcotest.test_case "a racing answer prevents withdrawal acknowledgement" `Quick
+            a_racing_answer_prevents_withdrawal_acknowledgement;
+          Alcotest.test_case "a racing withdrawal retains the first reason" `Quick
+            a_racing_withdrawal_keeps_the_first_reason;
+          Alcotest.test_case "committed withdrawal with unreadable outcome is explicit" `Quick
+            committed_withdrawal_with_unreadable_outcome_is_explicit;
+          Alcotest.test_case "withdrawal storage failures are runtime failures" `Quick
+            withdrawal_storage_failures_are_runtime_failures;
         ] );
       ( "a damaged log",
         [

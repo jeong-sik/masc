@@ -42,6 +42,7 @@ type withdraw_failure =
   | Withdraw_already_answered of { answered_at : float }
   | Withdraw_already_withdrawn of { withdrawn_at : float }
   | Withdraw_store_failed of string
+  | Withdraw_recorded_unconfirmed of { detail : string }
 
 let answer_failure_to_string = function
   | Ask_not_found { ask_id } -> "no such ask: " ^ ask_id
@@ -61,6 +62,8 @@ let withdraw_failure_to_string = function
   | Withdraw_already_withdrawn { withdrawn_at } ->
       Printf.sprintf "already withdrawn at %.0f" withdrawn_at
   | Withdraw_store_failed detail -> "store failed: " ^ detail
+  | Withdraw_recorded_unconfirmed { detail } ->
+      "withdrawal append committed but canonical withdrawal could not be confirmed: " ^ detail
 
 (* Every read validates the owned descriptor and its before/after snapshot.
    Keep decoding work only for those exact validated bytes; a same-size write
@@ -304,7 +307,8 @@ let answer_with_interleaving ~before_append ~after_append
 
 let answer = answer_with_interleaving ~before_append:(fun () -> ()) ~after_append:(fun () -> ())
 
-let withdraw ~base_path ~keeper_name ~ask_id ~reason ~now =
+let withdraw_with_interleaving ~before_append ~after_append
+    ~base_path ~keeper_name ~ask_id ~reason ~now =
   let open Result.Syntax in
   let* snapshot = rows_result ~base_path ~keeper_name
       |> Result.map_error (fun error -> Withdraw_store_failed (read_error_to_string error)) in
@@ -317,10 +321,30 @@ let withdraw ~base_path ~keeper_name ~ask_id ~reason ~now =
       Error (Withdraw_already_withdrawn { withdrawn_at })
   | Some (_, Keeper_ask.Open) -> (
       let event = Keeper_ask.Withdrawn { ask_id; reason; withdrawn_at = now } in
+      before_append ();
       match append_event ~base_path ~keeper_name event with
-      | Ok () -> Ok ()
+      | Ok () ->
+          after_append ();
+          (match rows_result ~base_path ~keeper_name with
+           | Error error -> Error (Withdraw_recorded_unconfirmed
+               { detail = read_error_to_string error })
+           | Ok snapshot ->
+               let rows = match snapshot with Missing_log -> [] | Stored_rows rows -> rows in
+               (match find_row rows ask_id with
+                | Some (_, Keeper_ask.Withdrawn_because canonical)
+                  when String.equal canonical.reason reason && canonical.withdrawn_at = now -> Ok ()
+                | Some (_, Keeper_ask.Answered_by { answered_at; _ }) ->
+                    Error (Withdraw_already_answered { answered_at })
+                | Some (_, Keeper_ask.Withdrawn_because { withdrawn_at; _ }) ->
+                    Error (Withdraw_already_withdrawn { withdrawn_at })
+                | None | Some (_, Keeper_ask.Open) ->
+                    Error (Withdraw_recorded_unconfirmed
+                      { detail = "committed append has no canonical terminal row" })))
       | Error detail -> Error (Withdraw_store_failed detail))
+
+let withdraw = withdraw_with_interleaving ~before_append:(fun () -> ()) ~after_append:(fun () -> ())
 
 module For_testing = struct
   let answer_with_interleaving = answer_with_interleaving
+  let withdraw_with_interleaving = withdraw_with_interleaving
 end

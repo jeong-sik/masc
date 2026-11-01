@@ -31,7 +31,10 @@ let run_probe setting =
   let text = Fun.protect ~finally:(fun () -> close_in_noerr channel)
     (fun () -> In_channel.input_all channel) in
   let _, status = Unix.waitpid [] pid in
-  (match status with Unix.WEXITED 0 -> () | _ -> fail "minor heap probe failed");
+  (match status with
+   | Unix.WEXITED 0 -> ()
+   | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
+     fail "minor heap probe failed");
   Scanf.sscanf text "%d %d %d %d %d %d"
     (fun before after again worker_before worker_after worker_again ->
       (before, after, again), (worker_before, worker_after, worker_again))
@@ -42,7 +45,7 @@ let test_operator_configuration setting () =
   List.iter (fun (label, (before, after, again)) ->
     check int (label ^ " preserves the runtime heap") before after;
     check int (label ^ " remains unchanged on another job") after again)
-    ["main", main; "pool domain", worker]
+    ["main", main; "worker domain", worker]
 ;;
 
 let test_default_policy () =
@@ -50,7 +53,7 @@ let test_default_policy () =
   List.iter (fun (label, (before, after, again)) ->
     check bool (label ^ " does not shrink its heap") true (after >= before);
     check int (label ^ " is idempotent") after again)
-    ["main", main; "pool domain", worker];
+    ["main", main; "worker domain", worker];
   let _, main_after, _ = main and _, worker_after, _ = worker in
   check int "both domains use the shared default" main_after worker_after
 ;;

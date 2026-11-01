@@ -362,6 +362,39 @@ let test_idle_session_is_not_hot ~auth () =
       in
       Alcotest.(check int) "idle sessions are not hot" 0 (List.length hot_sessions))
 
+let test_waiting_inventory_observer_authority ~auth () =
+  reset ();
+  let base_a = auth.Sse.config in
+  let base_b = Filename.concat base_a "waiting-inventory-beta" in
+  Fs_compat.mkdir_p (Filename.concat base_b Common.masc_dirname);
+  let auth_b = Masc_test_deps.make_sse_auth base_b "waiting-inventory-agent" in
+  let authority_a = Sse.runtime_authority_exn ~base_path:base_a in
+  let authority_b = Sse.runtime_authority_exn ~base_path:base_b in
+  let before = Sse.current_id () in
+  ignore (register_exn ~auth ~kind:Sse.Observer "waiting-observer-a" ~last_event_id:before);
+  ignore (register_exn ~auth:auth_b ~kind:Sse.Observer "waiting-observer-b" ~last_event_id:before);
+  Fun.protect
+    ~finally:(fun () -> List.iter Sse.unregister [ "waiting-observer-a"; "waiting-observer-b" ])
+    (fun () ->
+      Keeper_waiting_inventory_broadcast.changed ~base_path:base_a
+        ~keeper_name:"alpha" ~source:Event_queue;
+      Alcotest.(check bool) "matching observer receives the event" true
+        (Option.is_some (Sse.try_pop "waiting-observer-a"));
+      Alcotest.(check bool) "other workspace receives no event" true
+        (Option.is_none (Sse.try_pop "waiting-observer-b"));
+      let replay authority session_id =
+        (Sse.replay_after_for_session ~runtime_authority:authority
+          ~session_id ~kind:Sse.Observer before).deliveries in
+      Alcotest.(check int) "matching observer can replay" 1
+        (List.length (replay authority_a "waiting-observer-a"));
+      Alcotest.(check int) "other observer cannot replay" 0
+        (List.length (replay authority_b "waiting-observer-b"));
+      Alcotest.(check int) "unbound observer cannot replay" 0
+        (List.length
+          (Sse.replay_after_for_session ~session_id:"waiting-unbound"
+             ~kind:Sse.Observer before).deliveries))
+;;
+
 let test_runtime_observer_authority ~auth () =
   reset ();
   let base_a = auth.Sse.config in
@@ -467,6 +500,8 @@ let () =
             [
               Alcotest.test_case "runtime authority live, replay and external" `Quick
                 (test_runtime_observer_authority ~auth);
+              Alcotest.test_case "waiting inventory authority live and replay" `Quick
+                (test_waiting_inventory_observer_authority ~auth);
               Alcotest.test_case "observers only" `Quick (test_broadcast_to_observers_only ~auth);
               Alcotest.test_case "all targets" `Quick (test_broadcast_to_all ~auth);
               Alcotest.test_case "broadcast = broadcast_to All" `Quick (test_broadcast_equals_broadcast_to_all ~auth);

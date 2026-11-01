@@ -5,9 +5,10 @@ let source_to_string = function
   | Event_queue -> "event_queue"
 ;;
 
-let changed ~keeper_name ~source =
+let changed ~base_path ~keeper_name ~source =
   try
-    Sse.broadcast
+    let authority = Sse.runtime_authority_exn ~base_path in
+    Sse.broadcast_to (Sse.Runtime_observers authority)
       (`Assoc
         [ "type", `String "keeper_waiting_inventory_changed"
         ; "keeper_name", `String keeper_name

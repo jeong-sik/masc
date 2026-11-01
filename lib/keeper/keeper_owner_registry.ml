@@ -196,6 +196,7 @@ let start_owner pool ~keeper_name ~initial_meta =
     (match
        Keeper_owner.start
          ~sw:pool.sw
+         ~base_path:pool.config.base_path
          ~store:(store_for pool keeper_name)
          ~operation_store_path
          ~session_root:(Keeper_fs.session_store_path pool.config)

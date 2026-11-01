@@ -176,7 +176,7 @@ let fresh_store_path ~sw =
 
 let start_owner ~sw ~path ~name ~runner =
   owner_ok
-    (Owner.start
+    (Owner.start ~base_path:(Filename.dirname path)
        ~sw
        ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
        ~operation_store_path:path ~session_root:(Filename.concat (Filename.dirname path) "traces")

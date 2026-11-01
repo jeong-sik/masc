@@ -474,6 +474,7 @@ let retain_operation_fault fault previous =
 
 type t =
   { keeper_name : string
+  ; base_path : string
   ; mailbox : packed_command Eio.Stream.t
   ; projection : Keeper_owner_reducer.projection Atomic.t
   ; chat_control_token : string Atomic.t
@@ -1182,6 +1183,7 @@ let run_operation_command t ~label f =
         | Ok projection ->
           publish_operation_projection t projection;
           Keeper_waiting_inventory_broadcast.changed
+            ~base_path:t.base_path
             ~keeper_name:t.keeper_name
             ~source:Keeper_waiting_inventory_broadcast.Chat_operation;
           Ok (value, projection)))
@@ -1288,6 +1290,7 @@ let shutdown_reservation t operation_id =
 
 let start
       ~sw
+      ~base_path
       ~store
       ~operation_store_path
       ~session_root
@@ -1345,6 +1348,7 @@ let start
   let closed_p, resolve_closed = Eio.Promise.create () in
   let t =
     { keeper_name
+    ; base_path
     ; mailbox = Eio.Stream.create mailbox_capacity
     ; projection = Atomic.make (Keeper_owner_reducer.projection initial_state)
     ; chat_control_token = Atomic.make (Random_id.uuid_v7 ())

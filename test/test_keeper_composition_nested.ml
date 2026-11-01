@@ -1027,6 +1027,24 @@ let test_public_nested_prepare_run_records_only_admitted_children ?(execution=Ma
      check bool "retained results add no child activation or clock" true
        (Ledger.activations restored = Ledger.activations final_ledger);
      check int "completed resume retains original runtime without callback selection" 1 !runtime_reads);
+  let request_record,status_response = match execution with
+    | Inline -> `Null,`Null
+    | Async ->
+      let module Async = Masc.Keeper_msg_async in
+      let original_request = accepted |> member "request_id" |> to_string in
+      let entry = Async.load_canonical_durable_terminal ~base_path ~caller:"fixture" original_request
+        |> require "retained original request proof" |> Async.durable_terminal_entry in
+      let snapshot=Masc.Keeper_composition_result_delivery.observe_status ~base_path entry in
+      Masc.Keeper_msg_async_record.entry_record_to_json entry,
+      `Assoc ["schema",`String "masc.async-request-status/v1";"status",`String "observed";
+        "request",Masc.Keeper_composition_result_delivery.request_payload snapshot] in
+  Printf.printf "nested_observation_proof=%s\n%!" (Yojson.Safe.to_string (`Assoc
+    ["schema",`String "masc.nested-observation-proof/v1";
+     "execution",`String (match execution with Inline -> "inline" | Async -> "async");
+     "rejected_child",`Bool reject_child;"success",`Bool success;
+     "source",`String public_document;"reference",Skill_reference.to_yojson reference;
+     "recipe",recipe;"result",result;"provider_content",`String result_content;
+     "request_record",request_record;"status_response",status_response]));
   Printf.printf "composition_nested_public_trial rejected_child=%b prepared_scopes=%d admitted_children=%d child_admission_calls=%d actual_leaf_successes=%d blocked_children=%d parent_deliveries=%d exact_run_binding=true original_task_retained=true model_latency_measured=false\n%!"
     reject_child (List.length scopes) (List.length (Ledger.activations ledger)) !calls successful_leaves blocked_children (List.length delivered)
 ;;

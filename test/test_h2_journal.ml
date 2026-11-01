@@ -1973,11 +1973,11 @@ let test_task_history_buffered_sources () = with_workspace (fun _env _sw base_pa
          check int ("parity page event count: " ^ label) 2 (List.length page_events);
          check bool ("parity page includes activity row: " ^ label) true
            (List.exists
-              (fun (ev : Types.task_history_event) ->
+              (fun (ev : Masc.Tui_decode.task_history_event) ->
                 ev.th_origin
                 = Some
                     {
-                      Types.tho_source = Types.Task_activity;
+                      Masc.Tui_decode.tho_source = Masc.Tui_decode.Task_activity;
                       tho_file = "activity-events/2099-12/31.jsonl";
                       tho_offset = 0;
                     })
@@ -2002,6 +2002,50 @@ let test_task_history_buffered_sources () = with_workspace (fun _env _sw base_pa
    | Ok p -> check int "task-1297 found in warm >1024 task table" 1 (List.length p.events)
    | Error _ -> fail "failed reading warm >1024 distinct task table"))
 
+let test_task_history_row_boundaries () = with_workspace (fun _env _sw base_path ->
+  let module History = Masc.Task.History_page in
+  let config = Workspace.default_config base_path in
+  let task_id = "row-boundary-task" in
+  let directory = Filename.concat (Workspace.masc_dir config) "events/2099-12" in
+  Fs_compat.mkdir_p directory;
+  let path = Filename.concat directory "31.jsonl" in
+  let row label padding = Yojson.Safe.to_string (`Assoc [
+      "task_id", `String task_id; "type", `String label;
+      "note", `String ("한글" ^ String.make padding 'x')]) ^ "\n" in
+  let contents = Buffer.create 4096 in
+  let expected = ref [] in
+  for index = 0 to 15 do
+    let label = Printf.sprintf "event-%02d" index in
+    let base_row = row label 0 in
+    let offset = Buffer.length contents in
+    let padding = (index - ((String.length base_row - 1) mod 8) + 8) mod 8 in
+    let event = row label padding in
+    expected := (label, offset) :: !expected;
+    Buffer.add_string contents event;
+    if index mod 3 = 0 then Buffer.add_char contents '\n'
+  done;
+  write path (Buffer.contents contents);
+  let get ?cursor () = History.read ~config ~task_id ~max_events:1 ?cursor ()
+    |> require "row-boundary history" in
+  let first = get () in
+  let append = open_out_gen [Open_wronly; Open_append; Open_binary] 0o600 path in
+  Fun.protect ~finally:(fun () -> close_out append)
+    (fun () -> output_string append (row "later-append" 0));
+  let rec consume expected (page : History.page) =
+    match expected, page.events, page.next_cursor with
+    | (label, offset) :: rest, [event], next ->
+      let raw = Yojson.Safe.Util.member "event" event in
+      check (option string) "continued event order" (Some label) (Json_util.get_string raw "type");
+      check int "continued physical byte offset" offset
+        (Yojson.Safe.Util.member "offset" event |> Yojson.Safe.Util.to_int);
+      (match next with
+       | Some cursor -> consume rest (get ~cursor ())
+       | None -> check int "all original rows were returned" 0 (List.length rest))
+    | [], [], None -> ()
+    | _ -> fail "history page lost, duplicated or included an appended row"
+  in
+  consume !expected first)
+
 let () = match Array.to_list Sys.argv with
   | [_; "--resume-child"; base_path; run_id] -> child_resume base_path run_id
   | [_; "--refuse-active-child"; base_path; run_id] -> child_refuse_active base_path run_id
@@ -2010,6 +2054,7 @@ let () = match Array.to_list Sys.argv with
       ["continuation", [
         test_case "canonical creation and both current Task history sources" `Quick test_task_history_current_sources;
         test_case "buffered original history preserves byte offsets, anchors and ordered failures" `Quick test_task_history_buffered_sources;
+        test_case "history continuation preserves rows at varied byte boundaries" `Quick test_task_history_row_boundaries;
         test_case "restart reuses completed data and occurrence" `Quick test_restart_reuses_completed;
         test_case "source and plan identity refuse unsafe dispatch" `Quick test_source_and_plan_identity;
         test_case "original source observations freeze once without late backfill" `Quick test_source_observation_is_frozen_at_creation;

@@ -358,10 +358,23 @@ let slice_to_string (s : row_slice) =
   if s.row_pos = 0 && s.row_len = String.length s.row_buf then s.row_buf
   else String.sub s.row_buf s.row_pos s.row_len
 
-let rec rindex_newline s i =
+let rec rindex_newline_scalar s i =
   if i < 0 then -1
   else if String.unsafe_get s i = '\n' then i
-  else rindex_newline s (i - 1)
+  else rindex_newline_scalar s (i - 1)
+
+let rec rindex_newline s i =
+  if i < 7 then rindex_newline_scalar s i
+  else
+    (* XOR makes each newline byte zero. The zero-byte test checks the whole
+       word; a scalar search then finds the exact last byte in that word. *)
+    let open Int64 in
+    let bytes = logxor (String.get_int64_ne s (i - 7)) 0x0a0a0a0a0a0a0a0aL in
+    let has_newline =
+      logand (logand (sub bytes 0x0101010101010101L) (lognot bytes))
+        0x8080808080808080L <> 0L in
+    if has_newline then rindex_newline_scalar s i
+    else rindex_newline s (i - 8)
 
 let rec index_newline s limit i =
   if i >= limit then -1

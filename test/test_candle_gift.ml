@@ -425,6 +425,69 @@ let test_tool_item_gift_moves_ownership () =
       U.(member "owned_items" receiver |> to_list |> List.map to_string))
 ;;
 
+let test_appraiser_outage_preserves_durable_gifts () =
+  with_workspace (fun config ->
+    write_config config "\n[shop.prices_milli]\ncrown = 700\n";
+    register_keeper config "keeper-a";
+    register_keeper config "keeper-b";
+    let base_path = config.Workspace.base_path in
+    (match Candle_grant.grant ~now:Time_compat.now ~base_path
+        ~keeper:(ok (Keeper_id.Keeper_name.of_string "keeper-a"))
+        ~amount_milli:1000 ~reason:"outage gift funding" with
+     | Ok _ -> ()
+     | Error error -> fail (Candle_grant.error_to_string error));
+    ignore (call config "keeper-a" "keeper_candle_purchase"
+      (`Assoc ["item",`String "crown"]) |> succeeded);
+    Candle_status.install_appraiser_check (fun () -> Error "fixture appraiser unavailable");
+    Fun.protect
+      ~finally:(fun () -> Candle_status.install_appraiser_check (fun () -> Ok ()))
+      (fun () ->
+        let receipt = gift config "keeper-a"
+            ["to",`String "keeper-b";"amount_milli",`Int 200;
+             "reason",`String "outage transfer"] |> succeeded in
+        check string "outage gift debits existing money" "100"
+          U.(member "from_balance_milli" receipt |> to_string);
+        check string "outage gift credits the recipient" "200"
+          U.(member "to_balance_milli" receipt |> to_string);
+        ignore (gift config "keeper-a"
+          ["to",`String "keeper-b";"item",`String "crown"] |> succeeded);
+        let events = match Candle_ledger.read ~base_path with
+          | Ok view -> Candle_ledger.events view
+          | Error error -> fail (Candle_ledger.read_error_to_string error) in
+        check int "one durable money transfer" 1
+          (List.length (List.filter (fun (row:E.t) ->
+             match row.body with E.Gifted _ -> true | _ -> false) events));
+        check int "one durable item transfer" 1
+          (List.length (List.filter (fun (row:E.t) ->
+             match row.body with E.Gifted_item _ -> true | _ -> false) events));
+        let at = (List.hd (List.rev events)).E.at in
+        let replayed = match Candle_balance.of_events ~at events with
+          | Ok state -> state
+          | Error error -> fail (Candle_balance.error_to_string error) in
+        check int "reopened ledger preserves giver money" 100
+          (Candle_balance.balance replayed ~keeper:"keeper-a");
+        check int "reopened ledger preserves recipient money" 200
+          (Candle_balance.balance replayed ~keeper:"keeper-b");
+        check bool "giver no longer owns the item" false
+          (List.mem crown (Candle_balance.owned replayed ~keeper:"keeper-a"));
+        check bool "recipient owns the item after replay" true
+          (List.mem crown (Candle_balance.owned replayed ~keeper:"keeper-b"));
+        let path = Candle_ledger.path ~base_path in
+        let committed = In_channel.with_open_bin path In_channel.input_all in
+        let refused code = List.iter (fun (keeper,args) ->
+          rejected code (gift config keeper args))
+          ["keeper-a",["to",`String "keeper-b";"amount_milli",`Int 10;
+                       "reason",`String "policy refusal"];
+           "keeper-b",["to",`String "keeper-a";"item",`String "crown"]] in
+        let policy_path = Config_dir_resolver.candle_toml_path_for_base_path ~base_path in
+        Sys.remove policy_path;
+        refused "candle_off";
+        Fs_compat.save_file policy_path "half_life_hours = 72\n";
+        refused "candle_disabled";
+        check string "configuration refusals preserve all durable gifts" committed
+          (In_channel.with_open_bin path In_channel.input_all)))
+;;
+
 let test_tool_gift_refusals () =
   with_workspace (fun config ->
     write_config config "\n[shop.prices_milli]\ncrown = 700\n";
@@ -635,6 +698,8 @@ let () =
       , [ Alcotest.test_case "money gift moves money" `Quick test_tool_money_gift_moves_money
         ; Alcotest.test_case "item gift moves ownership" `Quick
             test_tool_item_gift_moves_ownership
+        ; Alcotest.test_case "appraiser outage preserves durable money and item gifts" `Quick
+            test_appraiser_outage_preserves_durable_gifts
         ; Alcotest.test_case "gift target must be a registered keeper" `Quick
             test_tool_gift_target_must_be_registered
         ; Alcotest.test_case "gift target matches the roster spelling" `Quick

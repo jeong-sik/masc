@@ -4214,20 +4214,27 @@ let prepare_board_read state ~mailbox ~cols =
          (fun () -> Masc_tui_response_decode.run ~name:"board.attachment.prepare_wait"
            (fun () -> Ok (Masc_tui_board_reader.prepare request))))
 
-let save_board_read state ~mailbox =
+type board_original_action = Save_board_original | Open_board_image
+
+let use_board_read state ~mailbox ~action =
   match Masc_tui_board_reader.saved_source state.board_reader with
   | None -> ()
   | Some (request,key,bytes) ->
     launch_workspace_result ~operation:true state ~mailbox ~boundary_error:Fun.id
       ~deliver:(fun result -> Board_attachment_saved (request,result))
       (fun () -> Eio_unix.run_in_systhread (fun () ->
-        let attachment={ba_kind=Ak_file;ba_source=As_artifact {sha256=key.sha256;bytes=key.bytes};ba_name=key.name} in
-        let outcome=Masc_tui_attachment_action.run ~fetch:(fun ~sha256:_ -> Ok bytes)
-          attachment ~midi_soundfont:None in
-        let description=Masc_tui_attachment_action.describe_outcome outcome in
-        match outcome.result with
-        | Failed _ -> Error description
-        | Saved _ | Played | Opened -> Ok description))
+        let kind=match action with Save_board_original -> Ak_file | Open_board_image -> Ak_image in
+        let attachment={ba_kind=kind;ba_source=As_artifact {sha256=key.sha256;bytes=key.bytes};ba_name=key.name} in
+        match Masc_tui_attachment_action.prepare ~fetch:(fun ~sha256:_ -> Ok bytes) attachment with
+        | Error outcome -> Error (Masc_tui_attachment_action.describe_outcome outcome)
+        | Ok prepared -> match action with
+          | Open_board_image -> Ok (Board_image_open_ready prepared)
+          | Save_board_original ->
+              let outcome=Masc_tui_attachment_action.perform prepared ~midi_soundfont:None in
+              let description=Masc_tui_attachment_action.describe_outcome outcome in
+              match outcome.result with
+              | Failed _ -> Error description
+              | Saved _ | Played | Opened -> Ok (Board_saved_original description)))
 
 let open_chat_call_reader ?execution_id state ~mailbox keeper_name =
   if state.view = Keepers Keeper_message
@@ -11723,6 +11730,8 @@ let conversation_image_sources state =
   in
   Masc_tui_image_preview.prioritize_sources ~newly_observed candidates
 
+let board_preview_worker = Masc_tui_board_preview_work.create ()
+
 let image_notice (state : state) ~view ~keeper_name ~kind text =
   if view = Resources then report_action state "resources" text
   else if view = Board then state.board_attachment_status <- Some text
@@ -11730,13 +11739,13 @@ let image_notice (state : state) ~view ~keeper_name ~kind text =
     report_action state (match kind with Notice_failure -> "error" | Notice_reply -> "system") text
   else chat_notice state ~keeper_name ~kind text
 
-let board_image_source_reader state ~reason subject =
+let board_image_source_reader state ~message subject =
   match subject with
   | Board_attachment_image {post_id;attachment={ba_kind=Ak_image;
       ba_source=As_artifact {sha256;bytes};ba_name}} ->
       close_board_reader state;
       let key = {Masc_tui_board_reader.post_id;sha256;bytes;name=ba_name} in
-      state.board_reader <- Masc_tui_board_reader.offer_image ~key ~reason state.board_reader;
+      state.board_reader <- Masc_tui_board_reader.offer_image ~key ~message state.board_reader;
       state.board_reader_owner <- Some (state.workspace_authority,state.workspace_read_authority,Ak_image);
       true
   | Board_diagram _ | Board_attachment_image _ -> false
@@ -11811,7 +11820,7 @@ let open_preview_image ?skill_reference ?board_subject state ~mailbox ~notice ~n
   match display with
   | None ->
       let reason = "image preview requires pixel graphics or 256-colour text" in
-      if not (Option.exists (board_image_source_reader state ~reason) board_subject) then
+      if not (Option.exists (board_image_source_reader state ~message:("Image preview unavailable: " ^ reason)) board_subject) then
         notice ~kind:Notice_failure reason
   | Some display ->
     let port = state.port in
@@ -11842,10 +11851,16 @@ let open_preview_image ?skill_reference ?board_subject state ~mailbox ~notice ~n
       hex (Masc_tui_terminal_palette.foreground palette),
       hex (Masc_tui_terminal_palette.background palette))
       (Masc_tui_terminal_palette.snapshot_palette palette) in
+    let board_worker = match owner with
+      | Board_image_read _ -> Some board_preview_worker
+      | Local_file_image_read _ | Draft_image_read _ | Peer_image_read _ -> None in
+    let run = match board_worker with
+      | Some _ -> Masc_tui_image_cache.run_bounded ~deadline_seconds:evidence_converter_deadline_seconds
+      | None -> Unix.system in
     let load () =
       Masc_tui_image_requests.load ~host:server_peer_host ~port
         ~cache_dir:ensure_img_cache_dir ~diagram_width ~diagram_height ~diagram_font_size
-        ~diagram_colors ~display source in
+        ~diagram_colors ~board_worker ~run ~display source in
     let completion result =
       Sent_image_ready { generation; view; keeper_name; name; skill_reference; result } in
     (match owner, source with
@@ -11904,11 +11919,15 @@ let prepare_inspected_frame state ~mailbox =
          Eio.Fiber.fork_daemon ~sw (fun () ->
            Eio.Fiber.yield ();
            let result = Eio_guard.run_in_systhread ~label:"tui-vector-window" (fun () ->
+             let render () =
              let open Result.Syntax in
              let* png = Masc_tui_pele.render ~cache_dir:(ensure_img_cache_dir ()) ~raster scene in
              let* prepared = Masc_tui_image_cache.prepare_presentation ~run:Unix.system
                ~cache_dir:(ensure_img_cache_dir ()) Masc_tui_image_cache.Pixel_graphics png in
-             Ok (prepared,Some scene)) in
+             Ok (prepared,Some scene) in
+             match pending.sir_owner with
+             | Board_image_read _ -> Masc_tui_board_preview_work.run board_preview_worker render
+             | Local_file_image_read _ | Draft_image_read _ | Peer_image_read _ -> render ()) in
            deliver mailbox (Sent_image_ready {generation;view=pending.sir_view;
              keeper_name=pending.sir_keeper;name=pending.sir_name;skill_reference=None;result});
            `Stop_daemon)
@@ -17229,6 +17248,7 @@ let open_board_post_id state ~mailbox ~focus post_id =
   state.board_comment_landing <- None;
   state.board_comments_focused <- false;
   state.board_attachment_status <- None;
+  state.board_image_selection <- None;
   Masc_tui_board_requests.start_board_post_refresh state ~host:server_peer_host
     ~port:state.port ~post_id ~launch:(launch_workspace_request state ~mailbox ~boundary_error:Fun.id)
 
@@ -17388,7 +17408,10 @@ let open_board_attachment state ~mailbox ~digit ~host ~port =
             | Some (Ok ({ba_kind=Ak_image;ba_source=As_artifact {sha256;bytes};ba_name} as attachment)) ->
                 let notice = image_notice state ~view:Board ~keeper_name:None in
                 let key = {Masc_tui_board_reader.post_id;sha256;bytes;name=ba_name} in
-                open_preview_image ~board_subject:(Board_attachment_image {post_id;attachment})
+                let subject=Board_attachment_image {post_id;attachment} in
+                state.board_image_selection <- Some subject;
+                state.board_attachment_status <- Some "O: original image";
+                open_preview_image ~board_subject:subject
                   state ~mailbox ~notice ~name:(Option.value ba_name ~default:"Board image")
                   (Masc_tui_image_requests.Board_artifact key)
             | Some (Ok ({ba_kind=(Ak_file|Ak_score as kind);ba_source=As_artifact {sha256;bytes};ba_name} : board_attachment)) ->
@@ -20996,10 +21019,18 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
   | Board_attachment_prepared (request,result) ->
       if Option.is_some (current_board_reader state) then
         state.board_reader <- Masc_tui_board_reader.complete_preparation state.board_reader request result
-  | Board_attachment_saved (_request,result) ->
+  | Board_attachment_saved (request,result) ->
       (* The original workspace operation envelope admits this receipt.
          Closing or retiring its read view cannot revoke a completed save. *)
-      (match result with Ok text -> report_action state "system" text | Error error -> report_action state "error" error)
+      (match result with
+       | Ok (Board_saved_original text) -> report_action state "system" text
+       | Ok (Board_image_open_ready prepared) ->
+           if Option.is_some (current_board_reader state)
+              && Masc_tui_board_reader.owns state.board_reader request
+              && (match state.board_reader_owner with Some (_,_,Ak_image) -> true | _ -> false) then
+             let outcome=Masc_tui_attachment_action.perform prepared ~midi_soundfont:None in
+             report_action state "system" (Masc_tui_attachment_action.describe_outcome outcome)
+       | Error error -> report_action state "error" error)
   | Chat_call_loaded (request, result) ->
       ignore (complete_chat_call_read state request result)
   | Keeper_calls_loaded (generation, keeper_name, result) -> (
@@ -22491,7 +22522,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
         let notice = image_notice state ~view ~keeper_name in
         let refuse reason =
           let opened_original = match origin.sir_owner with
-            | Board_image_read (_, subject, _) -> board_image_source_reader state ~reason subject
+            | Board_image_read (_, subject, _) ->
+                board_image_source_reader state ~message:("Image preview unavailable: " ^ reason) subject
             | Local_file_image_read _ | Draft_image_read _ | Peer_image_read _ -> false in
           if not opened_original then
             notice ~kind:Notice_failure (Printf.sprintf "image %s: %s" name reason)
@@ -30686,7 +30718,11 @@ Use relative paths for resources already held in the package. -->
                 | Ok source -> copy_reference_to_terminal render_schedule source;
                     report_action state "system" "Original attachment sent to terminal clipboard"
                 | Error error -> report_action state "error" error)
-            | "s" -> save_board_read state ~mailbox:async_messages
+            | "s" -> use_board_read state ~mailbox:async_messages ~action:Save_board_original
+            | "o" ->
+                (match state.board_reader_owner with
+                 | Some (_,_,Ak_image) -> use_board_read state ~mailbox:async_messages ~action:Open_board_image
+                 | Some _ | None -> ())
             | "j" | "down" | "wheel-down" | "k" | "up" | "wheel-up"
             | "pagedown" | "pageup" | "home" | "g" | "end" | "G" ->
                 let movement=match k with
@@ -33770,6 +33806,14 @@ Use relative paths for resources already held in the package. -->
            Option.iter
              (fun digit -> open_board_attachment state ~mailbox:async_messages ~digit ~host ~port)
              (board_attachment_digit_of_key key)
+       | Some "O" when state.view = Board
+           && (match state.board_mode with Board_read _ -> true | Board_list | Board_compose -> false) ->
+           (match state.board_image_selection with
+            | Some subject when board_preview_subject_is_current state subject
+                && server_authority_ready state ->
+                ignore (board_image_source_reader state ~message:"Original image selected." subject)
+            | Some _ | None ->
+                state.board_attachment_status <- Some "Select an image attachment first")
        | Some "o" when state.view = Board ->
            (match state.board_mode with
             | Board_read post_id

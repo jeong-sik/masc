@@ -33,11 +33,11 @@ let close t={t with opened=None;source=F.clear t.source;preparation=F.clear t.pr
   document=D.create ~title:"Board attachment" []}
 let title key=Option.value key.name ~default:"Board attachment"
 let notice key body=D.create ~title:(title key) [{D.heading="Attachment";body}]
-let offer_image ~key ~reason t=
+let offer_image ~key ~message t=
   let t=close t in
   {t with opened=Some key;content_kind=Image_bytes;
-    document=notice key ("Image preview unavailable: " ^ reason ^
-      "\nPress r to read the original; s saves it after successful verification.")}
+    document=notice key (message ^
+      "\nPress r to read the original; after verification s saves it and o opens it.")}
 let open_read ?(content_kind=Document) ~key t=
   let t=close t in
   match F.start ~equal:equal_key t.source ~key with
@@ -118,8 +118,10 @@ let complete_preparation t request result=
       Masc_tui_message_layout.split_cells ~max_cells:input.width
         (Masc.Tui_terminal_text.sanitize_terminal_text error)
       |> List.map (fun line -> D.Note line) in
-    let document=D.replace_prepared ~title:(title input.key)
-      ~hints:"j/k:scroll PgUp/PgDn:page Home/End:edges u:source m:Markdown h:HTML y:copy s:save r:retry Esc:back"
+    let hints=match input.content_kind with
+      | Image_bytes -> "s:save o:open original r:retry Esc:back"
+      | Document -> "j/k:scroll PgUp/PgDn:page Home/End:edges u:source m:Markdown h:HTML y:copy s:save r:retry Esc:back" in
+    let document=D.replace_prepared ~title:(title input.key) ~hints
       ~width:input.width rows t.document in
     {t with preparation;document}
 let document t=t.document

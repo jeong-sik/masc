@@ -7,13 +7,18 @@ type source =
   | Generated of Masc_tui_image_preview.output_source
 
 let load ~host ~port ~cache_dir ~diagram_width ~diagram_height ~diagram_font_size
-    ~diagram_colors ~display source =
+    ~diagram_colors ~board_worker ~run ~display source =
+  let work f = match board_worker with
+    | Some slot -> Masc_tui_board_preview_work.run slot f
+    | None -> f () in
   let present ?scene result = Result.bind result (fun png ->
-    Masc_tui_image_cache.prepare_presentation ~run:Unix.system
+    let valid_header = Option.is_none board_worker || Masc_tui_image_cache.has_png_header png in
+    if not valid_header then Error "image has an invalid or truncated PNG header"
+    else Masc_tui_image_cache.prepare_presentation ~run
       ~cache_dir:(cache_dir ()) display png
-    |> Result.map (fun presentation -> presentation,scene)) in
+      |> Result.map (fun presentation -> presentation,scene)) in
   let prepare bytes =
-    Masc_tui_image_cache.prepare_payload ~run:Unix.system ~cache_dir:(cache_dir ()) bytes in
+    Masc_tui_image_cache.prepare_payload ~run ~cache_dir:(cache_dir ()) bytes in
   let vector format bytes =
     let scene = Masc_tui_pele.scene ~format ~max_width:diagram_width
       ~font_size:diagram_font_size
@@ -34,22 +39,22 @@ let load ~host ~port ~cache_dir ~diagram_width ~diagram_height ~diagram_font_siz
   match source with
   | Local_file path ->
     Eio_guard.run_in_systhread ~label:"tui-local-image-read" (fun () ->
-      present (Masc_tui_image_cache.prepare_file ~run:Unix.system
-        ~cache_dir:(cache_dir ()) path))
+      work (fun () -> present (Masc_tui_image_cache.prepare_file ~run
+        ~cache_dir:(cache_dir ()) path)))
   | Draft attachment ->
     Eio_guard.run_in_systhread ~label:"tui-draft-image-decode" (fun () ->
-      let data = Masc_tui_image_payload.of_base64
+      work (fun () -> let data = Masc_tui_image_payload.of_base64
         ~mime_type:attachment.Masc_tui_keeper_chat_projection.mime_type attachment.data in
       Result.bind (Masc_tui_image_payload.decode data)
-        (prepare_declared (Masc_tui_image_payload.format data)))
+        (prepare_declared (Masc_tui_image_payload.format data))))
   | Retained {reference;format} ->
     Result.bind (peer ("/api/v1/artifacts/" ^ reference.Tool_output.sha256))
       (fun (status_code, body) ->
         Eio_guard.run_in_systhread ~label:"tui-sent-image-decode" (fun () ->
-          let open Result.Syntax in
+          work (fun () -> let open Result.Syntax in
           let* response = Masc_tui_http.decode_json ~allow_empty:false ~status_code ~body in
           let* bytes = Masc_tui_image_preview.decode_artifact reference response in
-          prepare_declared format bytes))
+          prepare_declared format bytes)))
   | Board_artifact key ->
     Result.bind
       (Masc_tui_http.get_workspace_bytes ~host ~port
@@ -57,21 +62,21 @@ let load ~host ~port ~cache_dir ~diagram_width ~diagram_height ~diagram_font_siz
          ~path:("/api/v1/artifact-bytes/" ^ key.sha256))
       (fun bytes ->
         Eio_guard.run_in_systhread ~label:"tui-board-image-decode" (fun () ->
-          Result.bind (Masc_tui_board_reader.validate key bytes) (fun _ ->
-            prepare_declared (Masc_tui_image_payload.format_of_bytes bytes) bytes)))
+          work (fun () -> Result.bind (Masc_tui_board_reader.validate key bytes) (fun _ ->
+            prepare_declared (Masc_tui_image_payload.format_of_bytes bytes) bytes))))
   | Generated (Masc_tui_image_preview.Inline_data data) ->
     Eio_guard.run_in_systhread ~label:"tui-output-image-decode" (fun () ->
-      Result.bind (Masc_tui_image_payload.decode data)
-        (prepare_declared (Masc_tui_image_payload.format data)))
+      work (fun () -> Result.bind (Masc_tui_image_payload.decode data)
+        (prepare_declared (Masc_tui_image_payload.format data))))
   | Generated (Masc_tui_image_preview.Inline_svg svg) ->
     Eio_guard.run_in_systhread ~label:"tui-output-svg-convert" (fun () ->
-      vector Svg svg)
+      work (fun () -> vector Svg svg))
   | Generated (Masc_tui_image_preview.Inline_mermaid source) ->
     Eio_guard.run_in_systhread ~label:"tui-pele-render" (fun () ->
-      vector Mermaid source)
+      work (fun () -> vector Mermaid source))
   | Generated (Masc_tui_image_preview.Remote_uri url) ->
     Eio_guard.run_in_systhread ~label:"tui-output-image-download" (fun () ->
-      present (Masc_tui_image_cache.prepare_png ~run:Unix.system ~cache_dir:(cache_dir ()) url))
+      work (fun () -> present (Masc_tui_image_cache.prepare_png ~run ~cache_dir:(cache_dir ()) url)))
   | Generated (Masc_tui_image_preview.Server_path path) ->
     Result.bind (peer path) (fun (_, body) ->
-      Eio_guard.run_in_systhread ~label:"tui-output-image-convert" (fun () -> present (prepare body)))
+      Eio_guard.run_in_systhread ~label:"tui-output-image-convert" (fun () -> work (fun () -> present (prepare body))))

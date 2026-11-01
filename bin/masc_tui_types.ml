@@ -9990,6 +9990,7 @@ type state = {
   (* The diagram index belongs to its original post or comment, not the
      current list position. A changed reading starts again at the first. *)
   mutable board_diagram_cursor: (board_diagram_subject * int) option;
+  mutable board_image_selection: board_preview_subject option;
   (* One frame's request to scroll the comment column so the selected
      comment is on screen. j/k set it; PgUp/PgDn do not, so they still move
      by rows through a comment longer than the column. Cleared with
@@ -18580,6 +18581,7 @@ let create_state
   board_comments_focused = false;
   board_comment_cursor = None;
   board_diagram_cursor = None;
+  board_image_selection = None;
   board_comment_follow = false;
   board_mode = Board_list;
   board_focus = Right_pane;

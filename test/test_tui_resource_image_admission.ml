@@ -275,7 +275,18 @@ let test_board_preview_input_barrier () =
   check bool "Board completion waits for pending input" true
     (Protocol.board_preview_waits_for_input (scoped (preview Types.Board)));
   check bool "other image surfaces retain their existing policy" false
-    (Protocol.board_preview_waits_for_input (scoped (preview Types.Resources)))
+    (Protocol.board_preview_waits_for_input (scoped (preview Types.Resources)));
+  let key : Masc_tui_board_reader.key =
+    {post_id="post";sha256=String.make 64 'a';bytes=0;name=None} in
+  let _,request=Masc_tui_board_reader.open_read ~key Masc_tui_board_reader.initial in
+  let request=match request with Some request -> request | None -> fail "missing reader request" in
+  let attachment : Types.board_attachment =
+    {ba_kind=Ak_image;ba_source=As_url "https://example.invalid/image.png";ba_name=None} in
+  let prepared=match Masc_tui_attachment_action.prepare ~fetch:(fun ~sha256:_ -> Error "unused") attachment with
+    | Ok prepared -> prepared | Error _ -> fail "URL preparation failed" in
+  let open_ready=Protocol.Board_attachment_saved (request, Ok (Protocol.Board_image_open_ready prepared)) in
+  check bool "external open waits for pending input" true
+    (Protocol.board_preview_waits_for_input (scoped (Protocol.Workspace_operation open_ready)))
 
 let test_board_svg_and_original_reader () =
   let module Payload = Masc_tui_image_payload in
@@ -292,7 +303,7 @@ let test_board_svg_and_original_reader () =
   let post=board_post ~attachments:[Ok attachment] key.post_id in
   let state=board_state post [] in
   state.board_reader_owner <- Some (state.workspace_authority,state.workspace_read_authority,Ak_image);
-  state.board_reader <- Reader.offer_image ~key ~reason:"renderer unavailable" state.board_reader;
+  state.board_reader <- Reader.offer_image ~key ~message:"renderer unavailable" state.board_reader;
   check bool "fallback retains original attachment ownership" true (Option.is_some (Types.current_board_reader state));
   check bool "fallback does not fetch or offer unverified bytes" true
     (Option.is_none (Reader.pending state.board_reader) && Option.is_none (Reader.saved_source state.board_reader));
@@ -307,12 +318,30 @@ let test_board_svg_and_original_reader () =
    | Some (_,_,bytes) -> check string "verified original remains saveable" svg bytes
    | None -> fail "verified original image is unavailable for saving")
 
+let test_board_worker_and_png_boundary () =
+  let module Work=Masc_tui_board_preview_work in
+  let worker=Work.create () in
+  let busy=ref false in
+  let first=Work.run worker (fun () ->
+    busy := Result.is_error (Work.run worker (fun () -> Ok ()));
+    Ok ()) in
+  check bool "worker refuses a second preparation before physical return" true !busy;
+  check bool "first worker completes" true (Result.is_ok first);
+  (try ignore (Work.run worker (fun () -> failwith "worker exception")) with Failure _ -> ());
+  check bool "worker releases its slot even on exception" true (Result.is_ok (Work.run worker (fun () -> Ok ())));
+  check bool "truncated PNG magic does not reach the terminal" false
+    (Masc_tui_image_cache.has_png_header "\137PNG");
+  let header="\137PNG\r\n\026\n\000\000\000\rIHDR\000\000\000\001\000\000\000\001" in
+  check bool "a complete positive-size PNG header is recognized" true
+    (Masc_tui_image_cache.has_png_header header)
+
 let () = run "resource image admission" ["stored source",[
   test_case "protocol replies are not cancellation input" `Quick test_operator_protocol_boundary;
   test_case "Board post and comment diagram ownership" `Quick test_board_diagram_ownership;
   test_case "Board attachment ownership" `Quick test_board_attachment_ownership;
   test_case "Board preview waits for input" `Quick test_board_preview_input_barrier;
   test_case "Board SVG and original-image reader" `Quick test_board_svg_and_original_reader;
+  test_case "Board worker and PNG header boundary" `Quick test_board_worker_and_png_boundary;
   test_case "workspace suspension retires diagram preparation" `Quick test_suspended_diagram_preparation;
   test_case "original SVG and multipart admission" `Quick test_original_admission;
   test_case "wrong pending URI" `Quick test_wrong_pending;

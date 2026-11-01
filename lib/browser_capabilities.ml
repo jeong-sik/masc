@@ -40,14 +40,15 @@ let target = "Use one freshly observed selector or documentId/nodeId; the target
 let geometry = "Use the current documentId and viewport geometry; stale URL/document/viewport is refused."
 let native = function Connected Browser_lane.Webdriver_bidi | Owned_gecko | Owned_chromium -> true
   | Connected (Browser_lane.Web_extension | Browser_lane.Ego_task_space) | Safari_unavailable -> false
-let ego_pages = "Only a page the ego task space manages; a tab the operator opened in that space is listed and refused before any read."
+let ego_pages = "Only a Page the ego task space manages, including an explicitly adopted Page; an unmanaged operator tab must be adopted before a read or effect."
 (* A read every connection serves, which an ego connection serves only on its own pages. *)
 let read backend invocation constraints = match backend with
   | Connected Browser_lane.Ego_task_space -> Conditional {invocation;constraints=constraints @ [ego_pages]}
   | Connected (Browser_lane.Web_extension | Browser_lane.Webdriver_bidi) | Owned_gecko | Owned_chromium | Safari_unavailable ->
     (match constraints with [] -> Available invocation | _ :: _ -> Conditional {invocation;constraints})
-let ego_agent_pages = "Only a page an agent opened in the ego task space, its first page included; a tab the operator opened there is refused before any effect."
-(* An effect an ego connection takes only on the pages its space opened. *)
+let ego_agent_pages = ego_pages
+let ego_closable_pages = "Only a page an agent opened in the ego task space, its first page included; release an adopted unknown-origin Page without closing it."
+(* Page effects use the managed-page boundary; closing also requires known agent origin. *)
 let on_agent_pages = function
   | Available invocation -> Conditional {invocation;constraints=[ego_agent_pages]}
   | Conditional {invocation;constraints} -> Conditional {invocation;constraints=constraints @ [ego_agent_pages]}
@@ -74,7 +75,7 @@ let snapshot_target backend ~action = match backend with
 let manage_page backend ~action = match backend with
   | Connected Browser_lane.Ego_task_space -> conditional ~action Act [observed;
       "Requires exact clientId and tabId in an agent-controlled Space. Adoption explicitly manages an observed unmanaged tab; optional pageLabel is the native SDK as option. Release unmanages an unknown-origin Page without closing it; agent-created Pages must be closed.";
-      "Origin is preserved. Reads support adopted Pages; current mutation paths still require agent-created Pages. Neither action resolves uncertain input release; after a lost receipt list the same Space's tabs, never replay."]
+      "Origin is preserved. Adopted Pages support reads, input, navigation and activation; closing still requires an agent-created Page. Neither action resolves uncertain input release; after a lost receipt list the same Space's tabs, never replay."]
   | Connected (Browser_lane.Web_extension|Browser_lane.Webdriver_bidi)|Owned_gecko|Owned_chromium|Safari_unavailable ->
       Unsupported "Only an ego connection provides native Page adoption and release."
 let support backend operation = match backend with
@@ -96,7 +97,7 @@ let support backend operation = match backend with
           [observed;"Top-level tab only; the ID is retired after confirmed closure, not a lost or unconfirmed receipt."]
       | Connected Browser_lane.Webdriver_bidi -> conditional ~action:"close_tab" Act
           [observed;"Only a tab this connection opened with open_tab; a tab the operator opened is refused before any effect. Closes without running the page's unload prompt."]
-      | Connected Browser_lane.Ego_task_space -> conditional ~action:"close_tab" Act [observed;ego_agent_pages]
+      | Connected Browser_lane.Ego_task_space -> conditional ~action:"close_tab" Act [observed;ego_closable_pages]
       | Connected Browser_lane.Web_extension | Safari_unavailable -> missing)
     | Activate_tab -> (match backend with
       | Connected Browser_lane.Web_extension -> conditional ~action:"activate_tab" Interact

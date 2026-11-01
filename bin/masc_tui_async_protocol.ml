@@ -515,6 +515,7 @@ type async_msg =
       result : (Masc_tui_image_cache.presentation * Masc_tui_pele.scene option, string) result;
     }
   | Image_render_ready of {
+      request : sent_image_read;
       title : string;
       caption : string list;
       page_url : string;
@@ -522,7 +523,10 @@ type async_msg =
       result : (string, string) result;
     }
       (** A [v]-requested or /image-requested web image, downloaded and
-          converted to PNG off the render loop. [result] is the PNG bytes
+          converted to PNG off the render loop. [request] is the exact pending
+          image owner captured before dispatch; a superseded or dismissed
+          request cannot paint, notify another pane, or open its fallback.
+          [result] is the PNG bytes
           ready to draw, or why they could not be produced. [title] is what
           the screen shows: [v] indents a display title, /image passes the URL
           itself. [image_url] is what was fetched; [page_url] is the link the

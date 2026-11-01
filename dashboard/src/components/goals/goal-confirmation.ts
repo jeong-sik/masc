@@ -262,6 +262,7 @@ export function GoalConfirmationPanel({ owner, isCurrent, readAuthority, lifecyc
       <p class="mt-2 text-sm">${view.evidence.proof.confirmation
         ? '위 기준과 저장된 확인을 검토했습니다. 같은 증명의 완료 처리를 재개합니다.'
         : '위 기준과 verifier 증거를 검토했습니다. 이 증명을 기준으로 목표 완료를 최종 확인합니다.'}</p>
+      <p class="mt-2 text-xs text-text-muted">현재 Candle 후보 생성은 증명 기록 중 저장된 Snapshot의 연결 작업만 읽습니다. 연결·삭제 이력 전체와 Snapshot 밖의 지급 누락 여부는 확인되지 않았습니다.</p>
       <button type="button" class="mt-2 rounded border px-3 py-2" onClick=${() => { void confirm(view.evidence) }}>${view.evidence.proof.confirmation
         ? '이 증명의 완료 처리 재개' : '이 증명으로 목표 완료 확인'}</button>` : null}
     ${view.kind === 'ready' && canReveal(view.evidence) && view.evidence.phase !== 'awaiting_confirmation' ? html`<p role="status">현재 단계는 최종 확인 대기가 아닙니다: ${view.evidence.phase}</p>` : null}

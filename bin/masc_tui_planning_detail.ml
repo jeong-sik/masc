@@ -419,9 +419,18 @@ let confirmation_lines ~width ~ko { goal_id; phase; verdict; recorded_confirmati
                   ^ text))
   in
   let blank = [ line_of Quiet "" ] in
+  let coverage =
+    if phase = Goal_phase.Awaiting_confirmation then
+      blank
+      @ paragraph ~indent:0 Quiet (if ko
+          then "Candle 후보는 증명 기록 중 저장된 Snapshot의 연결 작업만 사용합니다."
+          else "Candle candidates use the links in the Snapshot saved during proof recording.")
+      @ paragraph ~indent:0 Quiet (if ko
+          then "지급 누락 여부: 미확인" else "Missing contributions: unknown.")
+    else [] in
   header
-  :: (instruction @ (if recorded = [] then [] else blank @ recorded) @ blank @ promise @ blank @ binding @ blank @ evidence
-      @ (match submitted with [] -> [] | _ -> blank @ submitted))
+  :: (instruction @ (if recorded = [] then [] else blank @ recorded) @ blank @ promise @ blank @ binding
+      @ coverage @ blank @ evidence @ (match submitted with [] -> [] | _ -> blank @ submitted))
 
 (* A verdict is a headline and, when the judge left one, the measurement it
    rests on. They are separate rows because the reason wraps and the headline

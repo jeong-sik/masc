@@ -85,12 +85,12 @@ val same_recorded_confirmation : confirmation -> confirmation -> bool
 val receipt_authority_current : credential_current:bool -> current_instance:string option -> current_confirmation:confirmation option -> receipt:receipt_authority -> bool
 val receipt_outcome_text : ko:bool -> current:bool -> (string, string) result -> string
 val confirmation_lines : width:int -> ko:bool -> confirmation -> line list
-(** The exact proof displayed before the operator confirms, in layers: the
-    instruction, the goal's promise, the binding fine print, then the
-    evidence. Its binding is retained for the POST, so a newer proof cannot
-    silently replace it. Confirmation requires a presented reader frame
-    containing the block's final row, which is why the evidence stays the
-    last group. *)
+(** The proof displayed before the operator confirms, in layers: the
+    instruction, the goal's promise, the binding, a candidate coverage
+    notice, and the evidence. Its binding is retained for the POST, so a
+    newer proof cannot silently replace it. Confirmation requires a
+    presented reader frame containing the block's final evidence row; this
+    does not establish that each earlier row was read. *)
 
 val timestamp_line : label:string -> string -> string
 (** One timeline row of the detail pane. The field is one wider than the

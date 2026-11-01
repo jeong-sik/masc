@@ -9182,7 +9182,7 @@ type keeper_peer_status =
   | Keeper_peer_current of int
   | Keeper_peer_unread
 
-type goal_candle_failure = Goal_candle_access_denied | Goal_candle_authority_changed | Goal_candle_read_failed of string
+type goal_candle_failure = Goal_candle_access_denied of int | Goal_candle_authority_changed of int option | Goal_candle_http_status of int | Goal_candle_read_failed of string
 
 type goal_action_receipt = {
   gar_goal_id : string;
@@ -18757,25 +18757,30 @@ let begin_goal_candle_read (state : state) ~goal_id =
 
 let complete_goal_candle_read (state : state) ~credential_is_current request result =
   match result with
-    | Ok (owner, Error Goal_candle_access_denied) when credential_is_current owner ->
+    | Ok (owner, Error (Goal_candle_access_denied status)) when credential_is_current owner ->
       state.goal_candle <- Masc_tui_fetched.refuse ~equal:String.equal state.goal_candle request
-        "Candle access denied; administrator permission is required"
-    | Ok (owner, Error Goal_candle_authority_changed) when credential_is_current owner ->
+        (if status = 401 then "Candle authentication failed (HTTP 401); check the credential"
+         else Printf.sprintf "Candle access denied (HTTP %d); administrator permission is required" status)
+    | Ok (owner, Error (Goal_candle_authority_changed status)) when credential_is_current owner ->
       state.goal_candle <- Masc_tui_fetched.refuse ~equal:String.equal state.goal_candle request
-        "Candle server or workspace identity changed; read again"
+        (match status with Some code -> Printf.sprintf "Candle server or workspace identity changed (HTTP %d); read again" code
+         | None -> "Candle server or workspace identity changed; read again")
     | Ok (owner, Ok (instance, _))
       when credential_is_current owner
            && not (Option.exists (fun identity -> identity.Tui_decode.sid_runtime_instance_id = Some instance) state.server_identity) ->
       state.goal_candle <- Masc_tui_fetched.refuse ~equal:String.equal state.goal_candle request
         "Candle server process changed; read again"
-    | Error _ | Ok (_, (Ok _ | Error (Goal_candle_access_denied | Goal_candle_authority_changed | Goal_candle_read_failed _))) ->
+    | Error _ | Ok (_, (Ok _ | Error (Goal_candle_access_denied _ | Goal_candle_authority_changed _ | Goal_candle_http_status _ | Goal_candle_read_failed _))) ->
   let result = match result with
-    | Error detail -> Error detail
+    | Error _ -> Error "Candle read unavailable; check the connection and read again"
     | Ok (owner, _) when not (credential_is_current owner) ->
       Error "Candle credential changed; read again"
-    | Ok (_, Error Goal_candle_access_denied) -> Error "Candle access denied"
-    | Ok (_, Error Goal_candle_authority_changed) -> Error "Candle server or workspace identity changed"
-    | Ok (_, Error (Goal_candle_read_failed detail)) -> Error detail
+    | Ok (_, Error (Goal_candle_access_denied status)) -> Error (Printf.sprintf "Candle access denied (HTTP %d)" status)
+    | Ok (_, Error (Goal_candle_authority_changed status)) -> Error
+        (match status with Some code -> Printf.sprintf "Candle server or workspace identity changed (HTTP %d)" code
+         | None -> "Candle server or workspace identity changed")
+    | Ok (_, Error (Goal_candle_http_status status)) -> Error (Printf.sprintf "Candle read failed (HTTP %d)" status)
+    | Ok (_, Error (Goal_candle_read_failed _)) -> Error "Candle read failed; check the connection and read again"
     | Ok (owner, Ok (instance_id, observation)) ->
       (match state.server_identity with
        | Some identity when identity.Tui_decode.sid_runtime_instance_id = Some instance_id ->

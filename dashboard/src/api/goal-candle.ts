@@ -129,11 +129,12 @@ export class GoalCandleEpochMismatchError extends Error {
   constructor() { super('서버 실행 세대가 변경되어 지급 기록을 다시 확인해야 합니다') }
 }
 export class GoalCandleWorkspaceRefusalError extends Error {
-  constructor() { super('작업 공간을 다시 확인해야 합니다') }
+  constructor() { super('HTTP 409: 작업 공간을 다시 확인해야 합니다') }
 }
 
 export async function readGoalCandle(goalId: string, workspace: ArtifactWorkspace, executionEpoch: string,
-  onResponseRefused?: (error: ApiRequestError) => void): Promise<GoalCandleObservation> {
+  onResponseRefused?: (error: ApiRequestError) => void,
+  onSuccessfulHeaders?: (status: number) => void): Promise<GoalCandleObservation> {
   const query = artifactWorkspaceQuery(workspace)
   query.set('goal_id', goalId)
   const path = `/api/v1/dashboard/goals/candle?${query}`
@@ -151,12 +152,14 @@ export async function readGoalCandle(goalId: string, workspace: ArtifactWorkspac
     beforeResponseBody: response => {
       if (response.status === 409) throw new GoalCandleWorkspaceRefusalError()
       if (!response.ok) {
-        // Retain every HTTP refusal immediately, then read its body for the
-        // server's detailed reason if it arrives.
-        onResponseRefused?.(new ApiRequestError({ method: 'GET', path, status: response.status, statusText: response.statusText }))
-        return
+        // An error body does not attest which operator it was produced for.
+        // Refuse it at the headers, including when the body never completes.
+        const error = new ApiRequestError({ method: 'GET', path, status: response.status })
+        onResponseRefused?.(error)
+        throw error
       }
       validateHeaders(response.headers)
+      onSuccessfulHeaders?.(response.status)
     },
   })
   validateHeaders(result.headers)

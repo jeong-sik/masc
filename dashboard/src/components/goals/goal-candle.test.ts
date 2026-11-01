@@ -33,8 +33,16 @@ describe('Goal Candle observation', () => {
     expect(screen.getByText('마지막 조회 시 설정: 꺼짐')).toBeTruthy()
     expect(screen.getByText(/keeper-a: 9007199254740\.993 Candle · 가중치 7/)).toBeTruthy()
     expect(screen.getByText(/모델 요청의 실행 여부는 이 원장만으로 확인할 수 없습니다/)).toBeTruthy()
+    expect(screen.getByText(/연결·삭제 이력 전체와 Snapshot 밖의 누락은 이 원장만으로 확인할 수 없습니다/)).toBeTruthy()
     expect(api.getWithResponse.mock.calls[0]?.[0]).toContain('expected_base_path=%2Fworkspace-a')
     expect(api.getWithResponse.mock.calls[0]?.[0]).toContain('expected_masc_root=%2Fworkspace-a%2F.masc')
+  })
+
+  it('does not present a candidate coverage warning when no payout is recorded', async () => {
+    api.getWithResponse.mockResolvedValue(response(payload('goal-1', { state: 'no_recorded_obligation' })))
+    render(html`<${GoalCandlePanel} owner=${owner()} isCurrent=${current} refreshKey="completed" />`)
+    await screen.findByText(/지급 의무가 기록되지 않았습니다/)
+    expect(screen.queryByText(/현재 후보 생성은/)).toBeNull()
   })
 
   it('requires a workspace receipt and a matching Goal identity', async () => {
@@ -45,7 +53,7 @@ describe('Goal Candle observation', () => {
     expect(screen.queryByText(/지급이 원장에 기록되었습니다/)).toBeNull()
     fireEvent.click(screen.getByText('지급 기록 새로고침'))
     await waitFor(() => expect(api.getWithResponse).toHaveBeenCalledTimes(2))
-    await screen.findByText(/유효하지 않은 Candle 지급 관측 응답/)
+    await screen.findByText(/서버 응답을 확인할 수 없습니다/)
   })
 
   it('hides the previous observation while a refresh is pending and after it fails', async () => {
@@ -58,7 +66,8 @@ describe('Goal Candle observation', () => {
     await screen.findByText('지급 기록을 확인하는 중...')
     expect(screen.queryByText(/keeper-a:/)).toBeNull()
     failRefresh(new Error('ledger read failed'))
-    await screen.findByText(/ledger read failed/)
+    await screen.findByText(/서버 응답을 확인할 수 없습니다/)
+    expect(screen.queryByText(/ledger read failed/)).toBeNull()
     expect(screen.queryByText(/지급이 원장에 기록되었습니다/)).toBeNull()
   })
 

@@ -1164,6 +1164,8 @@ let planning_detail_lines (state : state) ~confirmation ~cols (goal : planning_g
   let timeline = Planning_detail.timeline ~width ~goal_id:goal.pg_id state.goal_timeline in
   let candle =
     let open Candle_goal_observation in
+    let coverage = field ~tone:Planning_detail.Quiet "Candidate coverage"
+      "current candidate preparation reads Snapshot links saved during proof recording; this ledger cannot establish full link history or missing contributions" in
     let describe ({configuration; ledger} : Candle_goal_observation.t) =
       let config = match configuration with Enabled -> "enabled" | Off -> "off" | Disabled -> "disabled or unreadable" in
       let identity (id : identity) =
@@ -1225,6 +1227,9 @@ let planning_detail_lines (state : state) ~confirmation ~cols (goal : planning_g
          | Unavailable reason -> field ~tone:Planning_detail.Unreadable "Ledger"
              (match reason with Locked -> "locked" | Unreadable -> "unreadable" | Invalid_row -> "invalid row")
          | Observed result -> payout result)
+      @ (match ledger with
+         | Observed (Owed _ | Held _ | Paid _ | Unattributed _ | Payout_failed _) -> coverage
+         | Missing | Unavailable _ | Observed _ -> [])
       @ field ~tone:Planning_detail.Quiet "Model execution" "not observed from the payout ledger" in
     let reading = Masc_tui_fetched.view_for ~equal:String.equal state.goal_candle ~key:goal.pg_id in
     let rows =

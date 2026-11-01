@@ -49,17 +49,17 @@ let message_line spill =
      that file for the text.]"
     (described spill) spill.file_name
 
+let placeholder_index spill text =
+  String_util.find_substring text (draft_line spill)
+
+let contains_placeholder spill text =
+  Option.is_some (placeholder_index spill text)
+
 let substituted spill ~replacement text =
   let placeholder = draft_line spill in
   let placeholder_length = String.length placeholder in
   let text_length = String.length text in
-  let rec find start =
-    if start + placeholder_length > text_length then None
-    else if String.equal (String.sub text start placeholder_length) placeholder
-    then Some start
-    else find (start + 1)
-  in
-  match find 0 with
+  match String_util.find_substring text placeholder with
   | None -> None
   | Some at ->
       Some

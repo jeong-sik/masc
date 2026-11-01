@@ -257,6 +257,11 @@ let test_shared_context_preserves_each_retained_result () = with_workspace (fun 
   let snapshot = load base_path in
   let ids = Outbox.receipt_ids snapshot in
   check int "physical calls and both producer kinds remain distinct" 22 (List.length ids);
+  List.iter (fun id ->
+    check bool "each retained result is found by its exact identity" true
+      (Outbox.contains_receipt snapshot ~receipt_id:id)) ids;
+  check bool "a different identity is not present" false
+    (Outbox.contains_receipt snapshot ~receipt_id:"not-a-receipt");
   let session = get (Keeper_official_client_session_store.path ~base_path ~keeper_name) in
   let directory = Filename.concat (Filename.dirname session) "undelivered-tools" in
   let originals = List.map (fun id -> Yojson.Safe.from_file (Filename.concat directory (id ^ ".json"))) ids in

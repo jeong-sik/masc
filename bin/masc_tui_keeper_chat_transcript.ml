@@ -1361,12 +1361,26 @@ type call_update =
   | Call_ambiguous
   | Call_conflicting
 
+let rec has_local_id local_id = function
+  | [] -> false
+  | (call : live_tool_call) :: rest ->
+    call.local_id = local_id || has_local_id local_id rest
+
+(* Share the unchanged suffix, but preserve the old update-all behavior if a
+   local id ever occurs twice. This walk remains stack-safe on long turns. *)
+let[@tail_mod_cons] rec replace_local_call local_id f = function
+  | [] -> []
+  | (call : live_tool_call) :: rest ->
+    if call.local_id = local_id then
+      let call = f call in
+      if has_local_id local_id rest then
+        call :: List.map (fun (call : live_tool_call) ->
+          if call.local_id = local_id then f call else call) rest
+      else call :: rest
+    else call :: replace_local_call local_id f rest
+
 let update_local_call t local_id f =
-  t.reversed_tool_calls <-
-    List.map
-      (fun (call : live_tool_call) ->
-        if call.local_id = local_id then f call else call)
-      t.reversed_tool_calls
+  t.reversed_tool_calls <- replace_local_call local_id f t.reversed_tool_calls
 ;;
 
 let update_unique_call t ~call_id ~eligible f =

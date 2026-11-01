@@ -1328,9 +1328,8 @@ let assemble_hooks
                           ; digest = sha256_hex text
                           })
                        recorded_blocks_for_receipt;
-                acc.extra_system_context_digest <- Option.map sha256_hex ctx;
-                acc.extra_system_context_size <- Option.map String.length ctx;
                 acc.extra_system_context_assembly <- Some extra_system_context_assembly;
+                let extra_context_receipt = extra_system_context_assembly.receipt in
                 (match runtime_manifest_context, runtime_manifest_append with
                  | Some manifest_context, Some append_manifest ->
                    let post_tool_context = post_tool_round in
@@ -1357,10 +1356,14 @@ let assemble_hooks
                                    `Int (List.length acc.prompt_blocks) )
                                ; ( "extra_system_context_digest",
                                    Json_util.string_opt_to_json
-                                     acc.extra_system_context_digest )
+                                     (Option.map
+                                        (fun (receipt : Keeper_context_assembly.receipt) -> receipt.sha256)
+                                        extra_context_receipt) )
                                ; ( "extra_system_context_computed_size",
                                    Json_util.int_opt_to_json
-                                     acc.extra_system_context_size )
+                                     (Option.map
+                                        (fun (receipt : Keeper_context_assembly.receipt) -> receipt.bytes)
+                                        extra_context_receipt) )
                                ; ( "extra_system_context_partition",
                                    match extra_system_context_assembly.receipt with
                                    | None -> `Null

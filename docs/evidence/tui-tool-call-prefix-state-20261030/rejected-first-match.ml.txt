@@ -1,0 +1,12 @@
+let update_local_call t local_id f =
+  match t.reversed_tool_calls with
+  | (call : live_tool_call) :: rest when call.local_id = local_id ->
+    t.reversed_tool_calls <- f call :: rest
+  | calls ->
+    let[@tail_mod_cons] rec replace = function
+      | [] -> []
+      | (call : live_tool_call) :: rest ->
+        if call.local_id = local_id then f call :: rest else call :: replace rest
+    in
+    t.reversed_tool_calls <- replace calls
+;;

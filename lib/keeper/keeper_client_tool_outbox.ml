@@ -221,11 +221,12 @@ let load ~base_path ~keeper_name =
       if inactive then Ok ({path; json} :: acc) else Ok acc) (Ok []) names in
   Ok {directory; entries = List.rev entries}
 
-let receipt_ids snapshot =
-  List.map (fun entry -> Filename.remove_extension (Filename.basename entry.path)) snapshot.entries
+let id_of_entry entry = Filename.remove_extension (Filename.basename entry.path)
+
+let receipt_ids snapshot = List.map id_of_entry snapshot.entries
 
 let contains_receipt snapshot ~receipt_id =
-  List.exists (String.equal receipt_id) (receipt_ids snapshot)
+  List.exists (fun entry -> String.equal receipt_id (id_of_entry entry)) snapshot.entries
 
 let developer_context snapshot =
   match snapshot.entries with

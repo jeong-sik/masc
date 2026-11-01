@@ -1,0 +1,12 @@
+ASSERT stale validation returns an explicit unavailable projection
+File "case.ml", line 92, character 4:
+FAIL stale validation returns an explicit unavailable projection
+
+   Expected: `true'
+   Received: `false'
+
+Raised at Alcotest_engine__Test.check in file "src/alcotest-engine/test.ml", lines 216-226, characters 4-19
+Called from Case.test_revalidation_does_not_publish_a_changed_projection.(fun) in file "case.ml", lines 92-93, characters 4-84
+Called from Stdlib__List.iter in file "list.ml", line 114, characters 12-15
+Called from Alcotest_engine__Core.Make.protect_test.(fun) in file "src/alcotest-engine/core.ml", line 186, characters 17-23
+Called from Alcotest_engine__Monad.Identity.catch in file "src/alcotest-engine/monad.ml", line 24, characters 31-35

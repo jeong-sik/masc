@@ -228,6 +228,34 @@ let test_calls_keep_stream_order () =
     (Transcript.tool_calls t
      |> List.map (fun (c : Transcript.tool_activity) -> c.Transcript.tool_name))
 
+let test_interleaved_updates_keep_each_tool_occurrence () =
+  let t = fresh () in
+  feed t [Live.Run_started];
+  List.iter (fun index ->
+    feed t [tool_started ~block_index:index "reused" (Printf.sprintf "tool-%d" index)])
+    (List.init 24 Fun.id);
+  let before = Transcript.drawn t in
+  feed t
+    [ tool_args_snapshot ~block_index:0 "reused" {|{"path":"old"}|}
+    ; tool_args_snapshot ~block_index:12 "reused" {|{"path":"middle"}|}
+    ; tool_args_delta ~block_index:23 "reused" {|{"path":"new"}|}
+    ; tool_ended ~block_index:0 "reused"
+    ; tool_ended ~block_index:23 "reused"
+    ; tool_result ~block_index:0 "reused" "exec-old"
+    ; tool_result ~block_index:23 "reused" "exec-new"
+    ];
+  let calls = Array.of_list (Transcript.tool_calls t) in
+  check int "all opened calls remain" 24 (Array.length calls);
+  check (list string) "old, middle and newest keep their own arguments"
+    [ {|{"path":"old"}|}; {|{"path":"middle"}|}; {|{"path":"new"}|} ]
+    [ calls.(0).args; calls.(12).args; calls.(23).args ];
+  check (list (option string)) "late results stay on the matching occurrences"
+    [Some "exec-old"; None; Some "exec-new"]
+    [calls.(0).execution_id; calls.(12).execution_id; calls.(23).execution_id];
+  check string "an untouched row keeps its name" "tool-11" calls.(11).tool_name;
+  check bool "the drawn cache follows the updates" true (Transcript.drawn t != before)
+;;
+
 let test_reused_provider_id_keeps_distinct_live_occurrences () =
   let t = fresh () in
   feed t
@@ -3353,6 +3381,8 @@ let () =
       , [ test_case "named as the other surfaces name it" `Quick
             test_tool_call_is_named_the_way_the_other_surfaces_name_it
         ; test_case "kept in stream order" `Quick test_calls_keep_stream_order
+        ; test_case "interleaved updates keep each occurrence" `Quick
+            test_interleaved_updates_keep_each_tool_occurrence
         ; test_case "reused provider id keeps distinct live occurrences" `Quick
             test_reused_provider_id_keeps_distinct_live_occurrences
         ; test_case "canonical result identity is write-once" `Quick

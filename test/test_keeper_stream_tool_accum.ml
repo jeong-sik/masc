@@ -145,6 +145,23 @@ let test_log_commit_attaches_canonical_execution_identity () =
     (A.to_tool_calls t)
 ;;
 
+let test_tool_occurrence_keeps_the_start_message_identity () =
+  List.iter (fun (message_id,expected) ->
+    let t = A.create () in
+    Option.iter (fun id -> A.on_event t (message_start id)) message_id;
+    A.on_event t (start ~index:0 ~tool_id:(Some "call") ~tool_name:(Some "Read"));
+    A.on_event t (stop ~index:0);
+    seal_turn t [0];
+    match A.record_execution_id t ~tool_call_id:"call" ~turn:0 ~planned_index:0
+        ~execution_id:(Ids.Execution_id.of_string "exec-message-identity") with
+    | Error detail -> fail detail
+    | Ok occurrence ->
+      check (option string) "raw nonblank id or no provider id" expected
+        occurrence.provider_message_id)
+    [ None,None; Some "",None; Some " \t\n",None;
+      Some "  provider-id \t",Some "  provider-id \t" ]
+;;
+
 let test_unknown_result_identity_is_not_attached_by_position () =
   let t = A.create () in
   A.on_event t
@@ -1023,6 +1040,19 @@ let test_message_stop_without_reason_is_not_tool_authority () =
   A.on_event t Agent_core.Types.MessageStop;
   check (list tool_call) "incomplete terminal omits the tool" [] (A.to_tool_calls t)
 
+let test_stop_before_start_does_not_admit_later_tool () =
+  List.iter (fun with_message_stop ->
+    let t = A.create () in
+    A.on_event t message_stop_reason;
+    if with_message_stop then A.on_event t Agent_core.Types.MessageStop;
+    A.on_event t (message_start "late-start");
+    A.on_event t (start ~index:0 ~tool_id:(Some "late") ~tool_name:(Some "Read"));
+    A.on_event t (json_delta ~index:0 "{}");
+    A.on_event t (stop ~index:0);
+    check (list tool_call) "a start after stop cannot admit a tool" [] (A.to_tool_calls t))
+    [false;true]
+;;
+
 let test_non_tool_events_are_ignored () =
   let t = A.create () in
   A.on_event t (non_tool_start ~index:0 ~content_type:"text");
@@ -1534,12 +1564,16 @@ let () =
             test_tool_call_id_is_preserved_before_persistence
         ; test_case "replay identity compares raw provider values" `Quick
             test_replay_identity_is_compared_before_trimming
+        ; test_case "tool occurrence retains message-start identity" `Quick
+            test_tool_occurrence_keeps_the_start_message_identity
         ; test_case "conflicting start stays closed until new attempt" `Quick
             test_conflicting_start_cannot_reopen_until_stop
         ; test_case "block without tool name is dropped" `Quick
             test_block_without_tool_name_is_dropped
         ; test_case "MessageStop without reason is not tool authority" `Quick
             test_message_stop_without_reason_is_not_tool_authority
+        ; test_case "stop before start cannot admit a later tool" `Quick
+            test_stop_before_start_does_not_admit_later_tool
         ; test_case "non-tool events are ignored" `Quick test_non_tool_events_are_ignored
         ; test_case "identity-free non-tool start quarantines active tool" `Quick
             test_identity_free_non_tool_start_quarantines_active_tool

@@ -1030,7 +1030,7 @@
  (name masc_tui_paste_spill)
  (wrapped false)
  (modules masc_tui_paste_spill)
- (libraries masc_tui_message_layout masc.keeper_paste_naming))
+ (libraries masc_tui_message_layout masc.keeper_paste_naming masc.string_util))
 
 (library
  (name masc_tui_image_viewport)

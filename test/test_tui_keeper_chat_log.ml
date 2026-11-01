@@ -181,6 +181,49 @@ let test_commit_is_idempotent_and_bumps_once () =
   check bool "committed" true (Log.committed t);
   check int "one bump for two commits" (before + 1) (Log.revision t)
 
+let test_operation_and_terminal_replay_share_one_observation () =
+  let open Keeper_chat_operation in
+  let terminals =
+    [ Succeeded {completed_at=3.;outcome_ref="result"}
+    ; Failed {completed_at=3.;failure={kind=Turn_exception;detail="failed";outcome_ref=None}}
+    ; Cancelled {completed_at=3.} ] in
+  List.iter (fun terminal ->
+    let t = log () in
+    Log.observe_terminal_replay t Log.Replayed_after_terminal;
+    check int "pre-terminal replay changes nothing" 0 (Log.revision t);
+    Log.observe_operation_state t (Some Queued);
+    Log.observe_operation_state t (Some Queued);
+    Log.observe_terminal_replay t Log.Replayed_after_terminal;
+    check int "same queued state and pre-terminal replay change nothing" 1 (Log.revision t);
+    check bool "replay still pending" true (Log.terminal_replay t = Log.Replay_pending);
+    Log.observe_operation_state t (Some (Running {started_at=2.}));
+    Log.observe_operation_state t None;
+    let observed = Some terminal in
+    Log.observe_operation_state t observed;
+    Log.observe_operation_state t (Some Queued);
+    Log.observe_terminal_replay t Log.Replay_pending;
+    check bool "the first terminal remains" true (Log.operation_state t == observed);
+    check int "terminal cannot be erased before replay" 4 (Log.revision t);
+    Log.observe_terminal_replay t Log.Replayed_after_terminal;
+    Log.observe_terminal_replay t Log.Replayed_after_terminal;
+    Log.observe_terminal_replay t Log.Replay_pending;
+    Log.observe_operation_state t None;
+    check bool "the exact terminal observation remains after replay" true
+      (Log.operation_state t == observed);
+    check bool "terminal replay is retained" true
+      (Log.terminal_replay t = Log.Replayed_after_terminal);
+    check int "terminal replay bumps once" 5 (Log.revision t)) terminals;
+  let turn = Ids.Turn_ref.make ~trace_id:"autonomous-replay" ~absolute_turn:7 in
+  let autonomous = Log.create_for_source ~keeper_name:"keeper.one"
+      ~source:(Log.Autonomous_turn turn) ~started_at:10. in
+  Log.observe_operation_state autonomous (Some (Succeeded {completed_at=3.;outcome_ref="result"}));
+  Log.observe_terminal_replay autonomous Log.Replayed_after_terminal;
+  check bool "autonomous source has no operation" true (Log.operation_state autonomous = None);
+  check bool "autonomous source has no terminal replay receipt" true
+    (Log.terminal_replay autonomous = Log.Replay_pending);
+  check int "ignored autonomous observations do not bump" 0 (Log.revision autonomous)
+;;
+
 (* ── v2 page ──────────────────────────────────────────────────────── *)
 
 let line seq ts event : Journal.journaled_event = { seq; ts; event }
@@ -1231,6 +1274,8 @@ let () =
             test_attempt_advances_on_runtime_attempt_started
         ; test_case "commit is idempotent and bumps once" `Quick
             test_commit_is_idempotent_and_bumps_once
+        ; test_case "operation and replay share one observation" `Quick
+            test_operation_and_terminal_replay_share_one_observation
         ; test_case "a blank reason is not a reason" `Quick
             test_a_blank_reason_is_not_a_reason
         ] )

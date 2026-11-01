@@ -1,0 +1,84 @@
+let make_old () =
+  Option.get (Old_spill.of_paste ~now_iso:"20261030-1234" ~nonce:"abc1" (String.make 8193 'x'))
+
+let make_new () =
+  Option.get (New_spill.of_paste ~now_iso:"20261030-1234" ~nonce:"abc1" (String.make 8193 'x'))
+
+let old = make_old ()
+let fresh = make_new ()
+let marker = Old_spill.draft_line old
+let () = assert (String.equal marker (New_spill.draft_line fresh))
+let old_sub text = Old_spill.substituted old ~replacement:"R\000é" text
+let new_sub text = New_spill.substituted fresh ~replacement:"R\000é" text
+let old_present text = Option.is_some (Old_spill.substituted old ~replacement:"" text)
+let new_present text = New_spill.contains_placeholder fresh text
+
+let verify text =
+  if old_sub text <> new_sub text || old_present text <> new_present text then
+    failwith (Printf.sprintf "different result for %S" text)
+
+let random_bytes random length =
+  String.init length (fun _ -> Char.chr (Random.State.int random 256))
+
+let differential () =
+  let random = Random.State.make [| 2026; 10; 30 |] in
+  let partial = String.sub marker 0 (String.length marker - 1) in
+  let cases = [ ""; marker; partial; marker ^ marker; "\000" ^ marker ^ "\255" ] in
+  List.iter verify cases;
+  for i = 1 to 100_000 do
+    let before = random_bytes random (Random.State.int random 256) in
+    let after = random_bytes random (Random.State.int random 256) in
+    let text = match i mod 5 with
+      | 0 -> before ^ marker ^ after
+      | 1 -> before ^ partial ^ marker ^ after ^ marker
+      | 2 -> before ^ partial ^ after
+      | 3 -> before ^ marker ^ marker ^ after
+      | _ -> before ^ after
+    in
+    verify text
+  done;
+  Printf.printf "differential: %d cases passed\n%!" 100_005
+
+let sink = ref 0
+let run_sub f text = match f text with None -> sink := !sink + 1 | Some s -> sink := !sink + String.length s
+let run_presence f text = if f text then sink := !sink + 1
+
+let sample oc ~case ~operation ~variant ~n f =
+  Gc.full_major ();
+  let allocated = Gc.allocated_bytes () in
+  let cpu = Sys.time () in
+  let wall = Unix.gettimeofday () in
+  for _ = 1 to n do f () done;
+  let wall = Unix.gettimeofday () -. wall in
+  let cpu = Sys.time () -. cpu in
+  let allocated = Gc.allocated_bytes () -. allocated in
+  Printf.fprintf oc "%s,%s,%s,%d,%.9f,%.9f,%.0f\n%!"
+    case operation variant n cpu wall allocated
+
+let bench path =
+  let almost_marker = String.sub marker 0 (String.length marker - 1) ^ "!" in
+  let adversarial = String.concat "" (List.init 130 (fun _ -> almost_marker)) in
+  let cases =
+    [ "short_absent", "abc"
+    ; "short_head", marker ^ " tail"
+    ; "8k_absent", String.make 8192 'a'
+    ; "8k_tail", String.make 8192 'a' ^ marker
+    ; "near_markers", adversarial
+    ] in
+  let oc = open_out path in
+  Fun.protect ~finally:(fun () -> close_out oc) (fun () ->
+    output_string oc "case,operation,variant,n,cpu_seconds,wall_seconds,allocated_bytes\n";
+    List.iter (fun (case,text) ->
+      verify text;
+      List.iter (fun (operation,old_run,new_run) ->
+        for round = 0 to 6 do
+          let old_sample () = sample oc ~case ~operation ~variant:"old" ~n:1500 old_run in
+          let new_sample () = sample oc ~case ~operation ~variant:"new" ~n:1500 new_run in
+          if round mod 2 = 0 then (old_sample (); new_sample ()) else (new_sample (); old_sample ())
+        done)
+        [ "substitute", (fun () -> run_sub old_sub text), (fun () -> run_sub new_sub text)
+        ; "presence", (fun () -> run_presence old_present text), (fun () -> run_presence new_present text)
+        ]) cases);
+  Printf.printf "benchmark sink %d\n%!" !sink
+
+let () = differential (); bench Sys.argv.(1)

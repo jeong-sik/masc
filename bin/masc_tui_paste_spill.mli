@@ -41,6 +41,9 @@ val message_line : t -> string
     it, and where to look. The keeper reads paths relative to its own
     directory, so the name is given bare and said to be there. *)
 
+val contains_placeholder : t -> string -> bool
+(** Whether this exact spill's draft line occurs in the given text. *)
+
 val substituted : t -> replacement:string -> string -> string option
 (** Put [replacement] where {!draft_line} stands in the draft.
 

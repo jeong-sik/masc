@@ -19,6 +19,29 @@ let with_guidance_override key text f =
      | Ok () -> () | Error detail -> Alcotest.fail detail);
     f ())
 
+let with_absorb_guidance_gap ~empty f =
+  let original=Prompt_registry.get_markdown_dir () |> Option.get in
+  let key=Prompt_names.librarian_absorb_forward in
+  let override=(Prompt_registry.resolve_prompt key).override_value in
+  let directory=Filename.temp_dir "librarian-absorb-policy-gap-" "" in
+  Fun.protect ~finally:(fun () ->
+    Prompt_registry.set_markdown_dir original;
+    (match override with
+     | None -> Prompt_registry.clear_prompt_override key
+     | Some value -> (match Prompt_registry.set_override key value with
+         | Ok () -> () | Error detail -> Alcotest.fail detail));
+    Fs_compat.remove_tree directory) (fun () ->
+    let text=Fs_compat.load_file (Filename.concat original "librarian.md") in
+    let _,lines=List.fold_left (fun (skipping,lines) line ->
+      if line="### absorb_forward" then true,(if empty then ""::line::lines else lines)
+      else if skipping && not (String.starts_with ~prefix:"### " line) then true,lines
+      else false,line::lines) (false,[]) (String.split_on_char '\n' text) in
+    Out_channel.with_open_bin (Filename.concat directory "librarian.md")
+      (fun channel -> output_string channel (String.concat "\n" (List.rev lines)));
+    Prompt_registry.clear_prompt_override key;
+    Prompt_registry.set_markdown_dir directory;
+    f ())
+
 (* The one element a single-destination case expects. A mismatch fails with
    every element it got, not only how many, so the failure log shows what the
    run actually reported. *)
@@ -396,7 +419,7 @@ let test_a_missing_seventeenth_statement_keeps_the_whole_memory () =
 
 type runtime_case =
   | Judged_run | Gate_disabled_run | Lane_disabled_run | Missing_key_run | Excluded_run
-  | Http_failure | Invalid_json_run | Invalid_response_run | Nonfinite_response_run | Duplicate_response_run | Nonutf8_response_run
+  | Guidance_failure_run | Http_failure | Invalid_json_run | Invalid_response_run | Nonfinite_response_run | Duplicate_response_run | Nonutf8_response_run
   | Invalid_answer_run | Memory_write_failure
 
 let runtime_case_name = function
@@ -405,6 +428,7 @@ let runtime_case_name = function
   | Excluded_run -> "excluded"
   | Lane_disabled_run -> "lane-disabled"
   | Missing_key_run -> "missing-key"
+  | Guidance_failure_run -> "guidance-failure"
   | Http_failure -> "http-failure"
   | Invalid_json_run -> "invalid-json"
   | Invalid_response_run -> "invalid-response"
@@ -422,7 +446,7 @@ let invalid_response_body = function
   | Duplicate_response_run -> Some {|{"model":"duplicate-fixture","answers":{"s0_0":{"type":"noul","noul":1.0},"s0_0":{"type":"noul","noul":0.0}}}|}
   | Nonutf8_response_run -> Some ("{\"model\":\"binary-" ^ String.make 1 (Char.chr 255) ^ "\",\"answers\":{}}")
   | Judged_run | Gate_disabled_run | Excluded_run | Lane_disabled_run | Missing_key_run
-  | Http_failure | Invalid_answer_run | Memory_write_failure -> None
+  | Guidance_failure_run | Http_failure | Invalid_answer_run | Memory_write_failure -> None
 ;;
 
 let runtime_skip_reason = function
@@ -430,7 +454,7 @@ let runtime_skip_reason = function
   | Excluded_run -> Some "keeper_excluded"
   | Lane_disabled_run -> Some "lane_disabled"
   | Missing_key_run -> Some "no_armed_destination"
-  | Judged_run | Http_failure | Invalid_json_run | Invalid_response_run | Nonfinite_response_run | Duplicate_response_run | Nonutf8_response_run
+  | Judged_run | Guidance_failure_run | Http_failure | Invalid_json_run | Invalid_response_run | Nonfinite_response_run | Duplicate_response_run | Nonutf8_response_run
   | Invalid_answer_run | Memory_write_failure -> None
 ;;
 
@@ -466,8 +490,9 @@ let run_runtime_evidence () =
   Prompt_registry.set_markdown_dir (Filename.concat root "config/prompts");
   Masc.Prompt_defaults.init ();
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
-  List.iter (fun scenario ->
-    let case_name = runtime_case_name scenario in
+  List.iter (fun (scenario,guidance_gap) ->
+    let case_name = runtime_case_name scenario ^ (match guidance_gap with
+      | None -> "" | Some false -> "-missing-guidance" | Some true -> "-empty-guidance") in
     let a = fact (List.nth sources 0) in
     let b = fact (List.nth sources 1) in
     let untouched = fact "The unrelated service retains its own deployment instructions." in
@@ -500,7 +525,7 @@ let run_runtime_evidence () =
       | Judged_run -> claims @
           [ `Assoc [ "claim", `String (String.make 70000 'x' ^ "EXACT_OUTPUT_TAIL")
                    ; "category", `String "fact" ] ]
-      | Gate_disabled_run | Excluded_run | Lane_disabled_run | Missing_key_run | Http_failure | Invalid_json_run | Invalid_response_run | Nonfinite_response_run | Duplicate_response_run | Nonutf8_response_run
+      | Gate_disabled_run | Excluded_run | Lane_disabled_run | Missing_key_run | Guidance_failure_run | Http_failure | Invalid_json_run | Invalid_response_run | Nonfinite_response_run | Duplicate_response_run | Nonutf8_response_run
   | Invalid_answer_run | Memory_write_failure -> claims
     in
     let answer = `Assoc
@@ -524,6 +549,7 @@ let run_runtime_evidence () =
     let jev_requests = ref [] in
     let jev_targets = ref [] in
     let observed_storage_error = ref None in
+    let guidance_failure = ref None in
     let handler _conn request body =
       jev_targets := Cohttp.Request.uri request :: !jev_targets;
       let raw = Eio.Buf_read.(of_flow ~max_size:max_int body |> take_all) in
@@ -539,7 +565,7 @@ let run_runtime_evidence () =
             Alcotest.fail "the directory must fail the Memory file read"
           with Sys_error _ as exn ->
             observed_storage_error := Some (Printexc.to_string exn))
-       | Memory_write_failure | Judged_run | Gate_disabled_run | Excluded_run | Lane_disabled_run | Missing_key_run | Http_failure | Invalid_json_run | Invalid_response_run | Nonfinite_response_run | Duplicate_response_run | Nonutf8_response_run | Invalid_answer_run -> ());
+       | Memory_write_failure | Judged_run | Gate_disabled_run | Excluded_run | Lane_disabled_run | Missing_key_run | Guidance_failure_run | Http_failure | Invalid_json_run | Invalid_response_run | Nonfinite_response_run | Duplicate_response_run | Nonutf8_response_run | Invalid_answer_run -> ());
       let qids = Yojson.Safe.Util.(member "questions" (Yojson.Safe.from_string raw) |> to_assoc |> List.map fst) in
       let jev_response = Yojson.Safe.to_string
         (`Assoc [ "model", `String "jev-fixture"
@@ -550,7 +576,7 @@ let run_runtime_evidence () =
       | Invalid_json_run | Invalid_response_run | Nonfinite_response_run | Duplicate_response_run | Nonutf8_response_run ->
         Cohttp_eio.Server.respond_string ~status:`OK
           ~body:(Option.get (invalid_response_body scenario)) ()
-      | Judged_run | Gate_disabled_run | Excluded_run | Lane_disabled_run | Missing_key_run | Invalid_answer_run | Memory_write_failure ->
+      | Judged_run | Gate_disabled_run | Excluded_run | Lane_disabled_run | Missing_key_run | Guidance_failure_run | Invalid_answer_run | Memory_write_failure ->
         Cohttp_eio.Server.respond_string ~status:`OK ~body:jev_response ()
     in
     let socket = Eio.Net.listen net ~sw ~backlog:8 ~reuse_addr:true
@@ -590,13 +616,22 @@ let run_runtime_evidence () =
         ; excluded_keepers = (if scenario = Excluded_run then [ keeper_id ] else [])
         }
         (fun () ->
-          Masc.Keeper_librarian_runtime.run_best_effort
-            ~base_path ~keepers_dir ~keeper_id ~expected_revision:(Some seeded.revision) input));
+          let run ()=Masc.Keeper_librarian_runtime.run_best_effort
+            ~base_path ~keepers_dir ~keeper_id ~expected_revision:(Some seeded.revision) input in
+          match guidance_gap with
+          | None -> run ()
+          | Some empty -> with_absorb_guidance_gap ~empty (fun () ->
+            let authority=Gate.resolve ~keeper_id in
+            (match scenario,Gate.guidance_of_authority authority with
+             | Guidance_failure_run,Error detail -> guidance_failure:=Some detail
+             | (Gate_disabled_run | Excluded_run),Ok None -> ()
+             | _ -> Alcotest.fail "guidance gap must respect captured gate availability");
+            run ())));
     Alcotest.(check int) "real Librarian request" 1 (Fixture.post_count librarian);
     Alcotest.(check int) "JEV request count"
       (match scenario with
        | Judged_run | Memory_write_failure -> 2
-       | Gate_disabled_run | Excluded_run | Lane_disabled_run | Missing_key_run -> 0
+       | Gate_disabled_run | Excluded_run | Lane_disabled_run | Missing_key_run | Guidance_failure_run -> 0
        | Http_failure | Invalid_json_run | Invalid_response_run | Nonfinite_response_run
        | Duplicate_response_run | Nonutf8_response_run | Invalid_answer_run -> 1)
       (List.length !jev_requests);
@@ -636,7 +671,7 @@ let run_runtime_evidence () =
           (String.concat "; " (List.map describe actor_runs)) in
     Alcotest.(check string) "Memory result remains distinct from JEV result"
       (match scenario with
-       | Http_failure | Invalid_json_run | Invalid_response_run | Nonfinite_response_run
+       | Guidance_failure_run | Http_failure | Invalid_json_run | Invalid_response_run | Nonfinite_response_run
        | Duplicate_response_run | Nonutf8_response_run | Invalid_answer_run
        | Memory_write_failure | Lane_disabled_run | Missing_key_run -> "failed"
        | Judged_run | Gate_disabled_run | Excluded_run -> "succeeded")
@@ -661,7 +696,7 @@ let run_runtime_evidence () =
        Alcotest.(check string) "the actual storage exception reaches run detail"
          expected
          (member "detail" original |> string)
-     | Judged_run | Gate_disabled_run | Excluded_run | Lane_disabled_run | Missing_key_run | Http_failure | Invalid_json_run | Invalid_response_run | Nonfinite_response_run | Duplicate_response_run | Nonutf8_response_run | Invalid_answer_run -> ());
+     | Judged_run | Gate_disabled_run | Excluded_run | Lane_disabled_run | Missing_key_run | Guidance_failure_run | Http_failure | Invalid_json_run | Invalid_response_run | Nonfinite_response_run | Duplicate_response_run | Nonutf8_response_run | Invalid_answer_run -> ());
     let replayed = Runs.get (Runs.replay registry_path) ~run_id:run.run_id |> Option.get in
     check_json "the full execution evidence survives disk replay"
       original (Runs.run_to_yojson replayed);
@@ -684,7 +719,7 @@ let run_runtime_evidence () =
     let expected_status = match scenario with
       | Judged_run | Memory_write_failure -> "judged"
       | Gate_disabled_run | Excluded_run | Lane_disabled_run | Missing_key_run -> "skipped"
-      | Http_failure | Invalid_json_run | Invalid_response_run | Nonfinite_response_run | Duplicate_response_run | Nonutf8_response_run | Invalid_answer_run -> "failed" in
+      | Guidance_failure_run | Http_failure | Invalid_json_run | Invalid_response_run | Nonfinite_response_run | Duplicate_response_run | Nonutf8_response_run | Invalid_answer_run -> "failed" in
     Alcotest.(check string) "gate status" expected_status (member "status" gate |> string);
     (match scenario with
      | Gate_disabled_run | Excluded_run | Lane_disabled_run | Missing_key_run ->
@@ -693,6 +728,11 @@ let run_runtime_evidence () =
        check_json "a skipped gate has no applied boundary" `Null
          (member "conveyed_boundary" gate);
        check_json "no invented evaluations" `Null (member "evaluations" gate)
+     | Guidance_failure_run ->
+       check_json "unavailable policy never retains an invented evaluation" (`List [])
+         (member "evaluations" gate);
+       Alcotest.(check string) "the real runtime retains the exact policy failure"
+         (Option.get !guidance_failure) (member "reason" gate |> string)
      | Judged_run | Http_failure | Invalid_json_run | Invalid_response_run | Nonfinite_response_run | Duplicate_response_run | Nonutf8_response_run
   | Invalid_answer_run | Memory_write_failure ->
        Alcotest.(check string) "the gate records whole-source contextual judgment"
@@ -786,12 +826,12 @@ let run_runtime_evidence () =
             check_json "typed decision evidence survives replay" (choice_json decision)
               (member qid (member "typed_answers" evaluation)))
             evaluations [ "s0_0", "mergeable"; "s1_0", "loses_knowledge" ]
-        | Gate_disabled_run | Excluded_run | Lane_disabled_run | Missing_key_run -> Alcotest.fail "disabled scenario cannot evaluate"));
+        | Gate_disabled_run | Excluded_run | Lane_disabled_run | Missing_key_run | Guidance_failure_run -> Alcotest.fail "unavailable scenario cannot evaluate"));
     (match scenario with
      | Memory_write_failure ->
        Unix.rmdir current_path;
        Unix.rename saved_path current_path
-     | Judged_run | Gate_disabled_run | Excluded_run | Lane_disabled_run | Missing_key_run | Http_failure | Invalid_json_run | Invalid_response_run | Nonfinite_response_run | Duplicate_response_run | Nonutf8_response_run | Invalid_answer_run -> ());
+     | Judged_run | Gate_disabled_run | Excluded_run | Lane_disabled_run | Missing_key_run | Guidance_failure_run | Http_failure | Invalid_json_run | Invalid_response_run | Nonfinite_response_run | Duplicate_response_run | Nonutf8_response_run | Invalid_answer_run -> ());
     let stored = match Current.read_for_keepers_dir ~keepers_dir ~keeper_id |> require with
       | Some snapshot -> snapshot
       | None -> Alcotest.fail "current snapshot is missing" in
@@ -800,7 +840,7 @@ let run_runtime_evidence () =
       | Gate_disabled_run | Excluded_run -> untouched :: selection.new_claims
       (* An enabled judgment must finish before any candidate commits. *)
       | Lane_disabled_run | Missing_key_run -> seeded.facts
-      | Http_failure | Invalid_json_run | Invalid_response_run | Nonfinite_response_run
+      | Guidance_failure_run | Http_failure | Invalid_json_run | Invalid_response_run | Nonfinite_response_run
       | Duplicate_response_run | Nonutf8_response_run | Invalid_answer_run -> seeded.facts
       | Memory_write_failure -> seeded.facts in
     Alcotest.(check (list string)) "correct originals remain current"
@@ -814,16 +854,19 @@ let run_runtime_evidence () =
       | Judged_run -> [ a.claim ]
       | Gate_disabled_run | Excluded_run -> [ a.claim; b.claim ]
       | Lane_disabled_run | Missing_key_run -> []
-      | Http_failure | Invalid_json_run | Invalid_response_run | Nonfinite_response_run | Duplicate_response_run | Nonutf8_response_run | Invalid_answer_run -> []
+      | Guidance_failure_run | Http_failure | Invalid_json_run | Invalid_response_run | Nonfinite_response_run | Duplicate_response_run | Nonutf8_response_run | Invalid_answer_run -> []
       | Memory_write_failure -> [] in
     Alcotest.(check (list string)) "only applied originals are archived"
       (List.sort String.compare archived)
       (List.sort String.compare (List.map (fun (r : Absorbed.record) -> r.fact.claim) records));
     Librarian_run_tui_reading.check replayed)
-    [ Judged_run; Gate_disabled_run; Lane_disabled_run; Missing_key_run; Excluded_run
-    ; Http_failure; Invalid_json_run; Invalid_response_run; Nonfinite_response_run
-    ; Duplicate_response_run; Nonutf8_response_run
-    ; Invalid_answer_run; Memory_write_failure ]
+    (List.map (fun scenario -> scenario,None)
+       [ Judged_run; Gate_disabled_run; Lane_disabled_run; Missing_key_run; Excluded_run
+       ; Http_failure; Invalid_json_run; Invalid_response_run; Nonfinite_response_run
+       ; Duplicate_response_run; Nonutf8_response_run
+       ; Invalid_answer_run; Memory_write_failure ]
+     @ List.concat_map (fun empty -> List.map (fun scenario -> scenario,Some empty)
+         [Gate_disabled_run;Excluded_run;Guidance_failure_run]) [false;true])
 ;;
 
 let test_selection_gate_and_store_keep_the_unconveyed_original () =
@@ -1086,7 +1129,7 @@ let test_run_records_the_destination_passed_over () =
   let authority = match !captured_destinations with
     | first::rest -> Gate.Gate_available (first,rest)
     | [] -> Alcotest.fail "the actual walk captured its original destinations" in
-  (match Gate.restore ~guidance:(guidance ()) ~authority ~new_observations:[] ~facts:[first] ~new_claims:[merged]
+  (match Gate.restore ~guidance:(Some (guidance ())) ~authority ~new_observations:[] ~facts:[first] ~new_claims:[merged]
       ~superseding:[] ~absorbed ~evaluations:(List.rev !retained) with
    | Error error -> Alcotest.fail (Gate.replay_error_to_string error)
    | Ok restored -> Alcotest.(check string) "the original failed-prefix/reserve walk rederives its decision"
@@ -1198,7 +1241,7 @@ let test_run_uses_one_destination_and_model_snapshot () =
       | _ -> Alcotest.fail "retained evaluation file is a list" in
     let destination : Masc.Typesafeai_client.destination_id =
       { destination_uri = initial.base_url; model = "initial-request-model" } in
-    match Gate.restore ~guidance:(guidance ()) ~authority:(Gate.Gate_available (destination, []))
+    match Gate.restore ~guidance:(Some (guidance ())) ~authority:(Gate.Gate_available (destination, []))
       ~new_observations:[] ~facts:[first; second] ~new_claims:[merged; other]
       ~superseding:[] ~absorbed ~evaluations:restored_records with
     | Error error -> Alcotest.fail (Gate.replay_error_to_string error)
@@ -2576,7 +2619,7 @@ let replay_response ~forward ~reverse direction questions =
 ;;
 
 let restore_gate ?(captured_guidance=guidance ()) ~facts ~absorbed evaluations =
-  Gate.restore ~guidance:captured_guidance ~authority:(Gate.Gate_available (replay_destination, []))
+  Gate.restore ~guidance:(Some captured_guidance) ~authority:(Gate.Gate_available (replay_destination, []))
     ~new_observations:[] ~facts ~new_claims:[merged] ~superseding:[] ~absorbed ~evaluations
 ;;
 
@@ -2591,7 +2634,7 @@ let test_completed_captured_replay_does_not_acquire_clock () =
       ~respond:(replay_response ~forward:"mergeable" ~reverse:0.9) in
   let expected = restore_gate ~facts ~absorbed evaluations |> require_replay in
   let actual = Gate.continue_captured
-      ~guidance:(guidance ())
+      ~guidance:(Some (guidance ()))
       ~request_clock:(fun () -> Alcotest.fail "completed replay acquired a clock")
       ~keeper_id:"captured-clock" ~authority:(Gate.Gate_available (replay_destination, []))
       ~live_authority:None ~evaluations
@@ -2616,7 +2659,7 @@ let test_a_new_captured_question_needs_a_clock_before_its_intent () =
   let live_authority = Gate.resolve ~keeper_id:"captured-clock" in
   let clock_reads = ref 0 and intents = ref 0 in
   let result = Gate.continue_captured
-      ~guidance:(guidance ())
+      ~guidance:(Some (guidance ()))
       ~request_clock:(fun () -> incr clock_reads; Error "fixture clock is absent")
       ~keeper_id:"captured-clock" ~authority:(Gate.replay_authority live_authority)
       ~live_authority:(Some live_authority) ~evaluations:[]
@@ -2639,7 +2682,7 @@ let test_an_inflight_captured_question_needs_no_clock_or_resend () =
   let first = match records with first::_ -> {first with Gate.returned=None}
     | [] -> Alcotest.fail "the original made no request" in
   let result = Gate.continue_captured
-      ~guidance:(guidance ())
+      ~guidance:(Some (guidance ()))
       ~request_clock:(fun () -> Alcotest.fail "inflight request acquired a clock")
       ~keeper_id:"captured-clock" ~authority:(Gate.Gate_available (replay_destination, []))
       ~live_authority:None ~evaluations:[first]
@@ -2666,7 +2709,7 @@ let test_cancellation_precedes_an_unavailable_captured_clock () =
   (try Eio.Cancel.sub (fun context ->
      Eio.Cancel.cancel context Exit;
      ignore (Gate.continue_captured
-       ~guidance:(guidance ())
+       ~guidance:(Some (guidance ()))
        ~request_clock:(fun () -> Error "fixture clock is absent")
        ~keeper_id:"captured-clock" ~authority:(Gate.replay_authority live_authority)
        ~live_authority:(Some live_authority) ~evaluations:[]
@@ -2790,7 +2833,7 @@ let test_replay_refuses_incomplete_or_rebound_originals () =
     (map_member "request_body_sha256" (fun _ -> `String (String.make 64 '0')))) records);
   check "different destination" (map_first_returned (map_member "result"
     (map_member "destination" (map_member "model" (fun _ -> `String "new-model")))) records);
-  Gate.restore ~guidance:(guidance ()) ~authority:(Gate.Gate_available (replay_destination, []))
+  Gate.restore ~guidance:(Some (guidance ())) ~authority:(Gate.Gate_available (replay_destination, []))
     ~new_observations:[`String "new input after the original request"] ~facts ~new_claims:[merged]
     ~superseding:[] ~absorbed ~evaluations:records |> refuse_replay "different original observations";
   restore_gate ~facts:(List.rev facts) ~absorbed:(List.rev absorbed) records
@@ -2871,14 +2914,30 @@ let test_replay_preserves_original_failed_and_partial_results () =
 let test_replay_preserves_unavailable_and_local_capacity () =
   let facts, absorbed = replay_inputs () in
   List.iter (fun (reason, expected) ->
-    let result = Gate.restore ~guidance:(guidance ()) ~authority:(Gate.Gate_unavailable reason) ~new_observations:[]
+    let authority=Gate.Gate_unavailable reason in
+    let result = Gate.restore ~guidance:None ~authority ~new_observations:[]
       ~facts ~new_claims:[merged] ~superseding:[] ~absorbed ~evaluations:[] |> require_replay in
     Alcotest.(check int) "captured availability preserves original absorption policy" expected
-      (Gate.absorbed_of_run result |> List.length))
+      (Gate.absorbed_of_run result |> List.length);
+    let continued=Gate.continue_captured ~guidance:None ~keeper_id:"unavailable-policy-owner"
+      ~request_clock:(fun () -> Alcotest.fail "unavailable authority acquired a request clock")
+      ~authority ~live_authority:None ~evaluations:[] ~new_observations:[]
+      ~facts ~new_claims:[merged] ~superseding:[] ~absorbed
+      ~before_evaluate:(fun ~direction:_ ~destinations:_ ~state:_ ~questions:_ ->
+        Alcotest.fail "unavailable authority must not publish an evaluation")
+      ~after_evaluate:(fun ~evaluation_id:_ _ -> Alcotest.fail "no evaluation can complete")
+      ~on_evaluation_aborted:(fun ~evaluation_id:_ _ -> Alcotest.fail "no evaluation can abort") ()
+      |> require_replay in
+    Alcotest.(check string) "unavailable continuation needs no policy or live authority"
+      (Gate.run_result_to_yojson result |> Yojson.Safe.to_string)
+      (Gate.run_result_to_yojson continued |> Yojson.Safe.to_string))
     [Masc.Typesafeai_config.Absorb_gate_disabled,2; Masc.Typesafeai_config.Keeper_excluded,2;
      Masc.Typesafeai_config.Lane_disabled,0; Masc.Typesafeai_config.No_armed_destination,0];
+  Gate.restore ~guidance:None ~authority:(Gate.Gate_available (replay_destination,[]))
+    ~new_observations:[] ~facts ~new_claims:[merged] ~superseding:[] ~absorbed ~evaluations:[]
+    |> refuse_replay "an available gate cannot replay without captured guidance";
   let oversized = [`String (String.make (Gate.request_bytes_limit + 1) 'x')] in
-  let result = Gate.restore ~guidance:(guidance ()) ~authority:(Gate.Gate_available (replay_destination,[]))
+  let result = Gate.restore ~guidance:(Some (guidance ())) ~authority:(Gate.Gate_available (replay_destination,[]))
     ~new_observations:oversized ~facts ~new_claims:[merged] ~superseding:[] ~absorbed
     ~evaluations:[] |> require_replay in
   Alcotest.(check bool) "original pre-dispatch capacity failure needs no fabricated evaluation" true
@@ -2930,7 +2989,7 @@ let test_replay_uses_captured_policy_after_override () =
     let live=Gate.resolve ~keeper_id:"original-policy-owner" in
     (* A complete prefix needs no live destination. Requiring it to match new
        wording here would invalidate otherwise complete original evidence. *)
-    Gate.continue_captured ~guidance:restored_guidance ~keeper_id:"original-policy-owner"
+    Gate.continue_captured ~guidance:(Some restored_guidance) ~keeper_id:"original-policy-owner"
       ~request_clock:(fun () -> Alcotest.fail "a completed original acquired a request clock")
       ~authority:(Gate.Gate_available (replay_destination,[])) ~live_authority:(Some live)
       ~evaluations ~new_observations:[] ~facts ~new_claims:[merged] ~superseding:[] ~absorbed
@@ -2952,7 +3011,9 @@ let test_continuation_uses_original_policy_with_current_live_destinations () =
   let keeper_id="original-policy-owner" in
   let original=Gate.resolve ~keeper_id in
   let captured=Gate.guidance_of_authority original |> (function
-    | Ok value -> value | Error detail -> Alcotest.fail detail) in
+    | Ok (Some value) -> value
+    | Ok None -> Alcotest.fail "the enabled gate must capture its policy"
+    | Error detail -> Alcotest.fail detail) in
   let serialized=Gate.guidance_to_yojson captured in
   let facts=List.map fact (List.take 2 sources) in
   let other=fact "The independent second context remains useful." in
@@ -2980,7 +3041,7 @@ let test_continuation_uses_original_policy_with_current_live_destinations () =
     let live=Gate.resolve ~keeper_id in
     let guidance=Gate.guidance_of_yojson serialized |> (function
       | Ok value -> value | Error detail -> Alcotest.fail detail) in
-    let result=Gate.continue_captured ~guidance ~keeper_id
+    let result=Gate.continue_captured ~guidance:(Some guidance) ~keeper_id
       ~request_clock:(fun () -> Ok clock)
       ~authority:(Gate.replay_authority original) ~live_authority:(Some live)
       ~evaluations:!evaluations ~new_observations:[] ~facts ~new_claims:[merged;other]
@@ -2990,7 +3051,7 @@ let test_continuation_uses_original_policy_with_current_live_destinations () =
     Alcotest.(check int) "continuation sends only the first unstarted original question" 2 (F.post_count server);
     Alcotest.(check int) "both sources are judged using the captured short policy" 2
       (List.length (Gate.absorbed_of_run result));
-    let replayed=Gate.restore ~guidance ~authority:(Gate.replay_authority original)
+    let replayed=Gate.restore ~guidance:(Some guidance) ~authority:(Gate.replay_authority original)
       ~new_observations:[] ~facts ~new_claims:[merged;other] ~superseding:[] ~absorbed
       ~evaluations:!evaluations |> require_replay in
     Alcotest.(check string) "the continued exact journal replays without current prompt lookup"

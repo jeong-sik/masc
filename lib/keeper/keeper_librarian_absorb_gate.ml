@@ -950,12 +950,16 @@ type replay_authority =
 
 type live_authority =
   { keeper_id : string
-  ; guidance : (guidance, string) result
+  ; guidance : (guidance option, string) result
   ; armed_destinations : (Typesafeai_config.destinations, Typesafeai_config.unavailable_reason) result
   }
 
 let resolve ~keeper_id : live_authority =
-  { keeper_id; guidance = resolve_guidance (); armed_destinations = Typesafeai_config.absorb_gate_destinations ~keeper_id }
+  let armed_destinations = Typesafeai_config.absorb_gate_destinations ~keeper_id in
+  let guidance = match armed_destinations with
+    | Error _ -> Ok None
+    | Ok _ -> Result.map Option.some (resolve_guidance ()) in
+  { keeper_id; guidance; armed_destinations }
 ;;
 
 let keeper_of_authority (authority : live_authority) = authority.keeper_id
@@ -1198,9 +1202,6 @@ let replay_authority_of_yojson (json : Yojson.Safe.t) : (replay_authority, strin
 
 let restore_with ~missing ~guidance ~authority ~new_observations ~facts ~new_claims ~superseding ~absorbed ~evaluations =
   try
-    (match validate_guidance guidance with
-     | Ok () -> ()
-     | Error detail -> raise (Replay.Rejected (Invalid_evidence {index=0;detail})));
     let remaining = ref evaluations in
     let completed = ref [] in
     let count = ref 0 in
@@ -1219,6 +1220,12 @@ let restore_with ~missing ~guidance ~authority ~new_observations ~facts ~new_cla
         | Typesafeai_config.Memory_recall_disabled -> [] in
       finish (Skipped { reason = Unavailable reason; absorbed = applied })
     | _ :: _, Gate_available (first, rest) ->
+      let guidance = match guidance with
+        | Some guidance -> guidance
+        | None -> Replay.reject 0 "Available absorption gate has no captured guidance" in
+      (match validate_guidance guidance with
+       | Ok () -> ()
+       | Error detail -> Replay.reject 0 detail);
       let destinations = first :: rest in
       List.iter (fun destination -> ignore (Replay.destination 0 (Typesafeai_client.destination_id_to_yojson destination))) destinations;
       let evaluate direction ~state ~questions =
@@ -1457,13 +1464,11 @@ let run_resolved
   | _ :: _ ->
     let authority : live_authority = resolve_authority () in
     let keeper_id = authority.keeper_id in
-    (match authority.guidance with
-     | Error reason -> complete (Evaluated {
+    let guidance_failed reason = complete (Evaluated {
          outcome=Failed {reason;kind=Evaluation_failed;absorbed=[];left=[];conveyed=[];
            unjudged=absorbed;unjudgeable=[]};
          copy_checks=not_judged_checks (copy_candidates ~new_claims ~absorbed ~applied:[]) Gate_judgment_failed;
-         evaluations=[]})
-     | Ok guidance ->
+         evaluations=[]}) in
     (match authority.armed_destinations with
      | Error
          ((Typesafeai_config.Absorb_gate_disabled | Typesafeai_config.Keeper_excluded) as reason)
@@ -1495,6 +1500,10 @@ let run_resolved
           the safe direction is the same as above. *)
        complete (Skipped { reason = Unavailable reason; absorbed = [] })
      | Ok ((first, rest) as armed) ->
+       (match authority.guidance with
+        | Error reason -> guidance_failed reason
+        | Ok None -> guidance_failed "Available absorption gate has no captured guidance"
+        | Ok (Some guidance) ->
        let destinations = List.map Typesafeai_client.identify (first :: rest) in
        (* The sha256 of each request body, as the client computed it, so the
           log names exactly what was sent (the Board gate keeps the same

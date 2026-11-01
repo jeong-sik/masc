@@ -167,14 +167,20 @@ let transcript_step previous next =
     | ([] | _::_), ([] | _::_) -> Error "Gate transcript did not append or complete exactly one original request" in
   transition previous.evaluations next.evaluations
 
-type restored = {proposal:Yojson.Safe.t;authority:Gate.replay_authority;guidance:Gate.guidance;
+type restored = {proposal:Yojson.Safe.t;authority:Gate.replay_authority;guidance:Gate.guidance option;
   input:inputs;transcript:transcript;complete:Gate.run_result option}
+let captured_guidance ~authority = function
+  | `Null ->
+    (match authority with
+     | Gate.Gate_unavailable _ -> Ok None
+     | Gate.Gate_available _ -> Error "Available absorption gate has no captured guidance")
+  | json -> Gate.guidance_of_yojson json |> Result.map Option.some
 let gate_request ~owner ~capture ~parent ~proposal ~request_id ~authority ~guidance ~predecessor =
   `Assoc ["version",`Int request_version;"kind",`String Capture.gate_kind;"request_id",`String request_id;
     "owner",Capture.owner_to_json owner;"execution_id",`String (Capture.request_id capture);
     "execution_digest",`String parent.Owner.request_digest;
     "proposal",proposal;"authority",Gate.replay_authority_to_yojson authority;
-    "guidance",Gate.guidance_to_yojson guidance;
+    "guidance",Option.fold ~none:`Null ~some:Gate.guidance_to_yojson guidance;
     "predecessor",Option.fold ~none:`Null ~some:(fun id -> `String id) predecessor]
 let completed_json transcript result =
   let* sha = digest (transcript_json transcript) in
@@ -187,7 +193,7 @@ let request_payload ~owner ~capture ~(parent:Owner.retained) ~request_id request
   let proposal = value "proposal" members in
   let* input = inputs capture proposal in
   let* authority = Gate.replay_authority_of_yojson (value "authority" members) in
-  let* guidance = Gate.guidance_of_yojson (value "guidance" members) in
+  let* guidance = captured_guidance ~authority (value "guidance" members) in
   let* predecessor = optional_text (value "predecessor" members) in
   let+ () = equal request
     (gate_request ~owner ~capture ~parent ~proposal ~request_id ~authority ~guidance ~predecessor)
@@ -295,7 +301,7 @@ let validate_successor_request_with ~read ~store ~owner ~capture ~(prior:Owner.r
   let* () = equal proposal (value "proposal" prior_members) "Gate successor changed the original proposal" in
   let* parent = load_parent_with ~read ~store ~owner ~capture ~proposal in
   let* authority = Gate.replay_authority_of_yojson (value "authority" members) in
-  let* guidance = Gate.guidance_of_yojson (value "guidance" members) in
+  let* guidance = captured_guidance ~authority (value "guidance" members) in
   equal request (gate_request ~owner ~capture ~parent ~proposal
     ~request_id:successor.request_id ~authority ~guidance ~predecessor:(Some prior.request_id))
     "Gate successor differs from its complete original request"
@@ -486,7 +492,7 @@ let root_preparation_with ~read ~store ~owner ~capture =
   let proposal=value "proposal" members in
   let* current=load_parent_with ~read ~store ~owner ~capture ~proposal in
   let* authority=Gate.replay_authority_of_yojson (value "authority" members) in
-  let* guidance=Gate.guidance_of_yojson (value "guidance" members) in
+  let* guidance=captured_guidance ~authority (value "guidance" members) in
   let* ()=equal intended.request (gate_request ~owner ~capture ~parent:current ~proposal
     ~request_id:intended.request_id ~authority ~guidance ~predecessor:None) "Original gate publication intent differs" in
   let* child=read.load ~scope:(scope owner) ~request_id:intended.request_id in

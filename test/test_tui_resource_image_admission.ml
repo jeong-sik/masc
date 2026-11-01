@@ -273,7 +273,8 @@ let test_image_preview_input_barrier () =
   let preview view =
     let request={ (pending state (Types.Local_file_image_read state.workspace_authority)) with
       sir_view=view } in
-    Protocol.Sent_image_ready {request;skill_reference=None;result=Error "unavailable"} in
+    Protocol.Sent_image_ready {request;skill_reference=None;
+      result=Protocol.Image_prepared (Error "unavailable")} in
   let scoped message = Protocol.Workspace_scoped (Types.Workspace_authority 0,Some (ref ()),message) in
   let waits message = Protocol.message_waits_for_input ~resource_read:(fun _ -> false)
       ~recovery_loaded:(fun _ -> false) message in
@@ -282,6 +283,8 @@ let test_image_preview_input_barrier () =
   check bool "Resources completion also waits" true
     (waits (scoped (preview Types.Resources)));
   let request=pending state (Types.Remote_url_image_read state.workspace_authority) in
+  check bool "a busy inspection waits for pending input" true
+    (waits (Protocol.Sent_image_ready {request;skill_reference=None;result=Protocol.Image_worker_busy}));
   let remote=Protocol.Image_render_ready {request;title="image";caption=[];
     page_url="https://example.invalid";image_url="https://example.invalid/image";
     result=Error "unavailable"} in
@@ -489,6 +492,53 @@ let test_board_worker_and_png_boundary () =
   check bool "complete one-pixel PNG has the required structure" true
     (Masc_tui_image_cache.has_png_structure png)
 
+let test_physical_inspection_worker () =
+  let module Work=Masc_tui_board_preview_work in
+  let worker=Work.create () in
+  let mutex=Mutex.create () and changed=Condition.create () in
+  let started=ref false and attempted=ref false and finish=ref false in
+  let retired=match Work.reserve worker with Some ticket -> ticket | None -> fail "first reservation" in
+  Work.withdraw_pending worker;
+  let current=match Work.reserve worker with Some ticket -> ticket | None -> fail "new reservation" in
+  let stale_started=ref false in
+  let stale=Work.run_reserved worker retired (fun () -> stale_started := true) in
+  let first=Thread.create (fun () -> Fun.protect ~finally:(fun () ->
+    Mutex.lock mutex;
+    attempted := true;
+    Condition.broadcast changed;
+    Mutex.unlock mutex) (fun () ->
+      ignore (Work.run_reserved worker current (fun () ->
+        Mutex.lock mutex;
+        started := true;
+        Condition.broadcast changed;
+        while not !finish do Condition.wait changed mutex done;
+        Mutex.unlock mutex)))) () in
+  Mutex.lock mutex;
+  while not !started && not !attempted do Condition.wait changed mutex done;
+  let did_start = !started in
+  Mutex.unlock mutex;
+  Work.withdraw_pending worker;
+  let second_started=ref false in
+  let second=Work.try_run worker (fun () -> second_started := true) in
+  Mutex.lock mutex;
+  finish := true;
+  Condition.broadcast changed;
+  Mutex.unlock mutex;
+  Thread.join first;
+  check bool "the current reservation starts" true did_start;
+  check bool "a withdrawn reservation cannot start after a new reservation" true
+    (Option.is_none stale && not !stale_started);
+  check bool "a withdrawn observer cannot start a second physical worker" true
+    (Option.is_none second && not !second_started);
+  check bool "a later inspection starts after the worker returns" true
+    (Option.is_some (Work.try_run worker (fun () -> ())));
+  let later=match Work.reserve worker with Some ticket -> ticket | None -> fail "later reservation" in
+  Work.stop worker;
+  check bool "shutdown withdraws a worker that has not started" true
+    (Option.is_none (Work.run_reserved worker later (fun () -> ())));
+  check bool "shutdown prevents later inspections" true
+    (Option.is_none (Work.try_run worker (fun () -> ())))
+
 let test_board_pele_deadline () =
   let directory=Filename.temp_dir "board pele test " "" in
   let executable=Filename.concat directory "masc-pele" in
@@ -645,6 +695,7 @@ let () =
   test_case "image completions wait for input" `Quick test_image_preview_input_barrier;
   test_case "Board SVG and original-image reader" `Quick test_board_svg_and_original_reader;
   test_case "Board worker and PNG header boundary" `Quick test_board_worker_and_png_boundary;
+  test_case "inspection worker stays owned until physical return" `Quick test_physical_inspection_worker;
   test_case "Board Pele deadline releases worker" `Quick test_board_pele_deadline;
   test_case "Board renderer shutdown reaps child" `Quick test_renderer_shutdown;
   test_case "workspace suspension retires diagram preparation" `Quick test_suspended_diagram_preparation;

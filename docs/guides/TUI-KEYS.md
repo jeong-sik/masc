@@ -398,6 +398,7 @@ and UI admission decision; these are not painted-frame or key-latency evidence.
 | `PgUp/PgDn` | on the Channels tab: detail page |
 | `b / e / u u` | on the Channels tab: bind a channel, reassign the selected row, or remove it twice-confirmed |
 | `U U` | on the Channels tab: remove every channel binding of this Keeper on every transport, twice-confirmed; a channel rebound to another Keeper meanwhile is left as is |
+| `< / >` | on the Automation tab: previous / next page for this Keeper; pages are separate observations |
 | `j/k` | on the Terminal tab: scroll |
 | `PgUp/PgDn` | on the Terminal tab: page |
 | `Home/End` | on the Terminal tab: Home goes to the oldest output kept; End goes back to the bottom and follows new output again |
@@ -583,6 +584,7 @@ count is drawn beyond the available space.
 |---|---|
 | `j/k` | move; in details, scroll the payload |
 | `PgUp/PgDn` | page |
+| `< / >` | previous / next server page; pages are separate observations |
 | `Right / Enter` | open schedule details |
 | `Left / Esc` | back to the schedule list |
 | `[ / ]` | while a detail is open, step to the row before or after it |

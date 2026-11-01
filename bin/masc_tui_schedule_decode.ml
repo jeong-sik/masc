@@ -258,8 +258,39 @@ let decode_schedule_rows json_list =
    the route reports [status = "unknown"] with a null [request_count] and an
    empty row list, and the pane must not draw that as "no schedules". *)
 let snapshot_of_json json =
+  let* () =
+    match Yojson.Safe.Util.member "status" json with
+    | `String "invalid_cursor" ->
+        (match Yojson.Safe.Util.member "cursor_error" json with
+         | `String message -> Error message
+         | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _ ->
+             Error "schedule page cursor was refused")
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ | `List _ -> Ok ()
+  in
   let* scs_observed_at_iso = Masc.Tui_decode_fields.required_string_field json "generated_at" in
   let* scs_status = Masc.Tui_decode_fields.required_string_field json "status" in
+  let* scs_payload_target =
+    Masc.Tui_decode_fields.optional_string_field json "payload_target_selector"
+  in
+  let* scs_paging =
+    match json with
+    | `Assoc fields ->
+        (match List.assoc_opt "page_cursor" fields, List.assoc_opt "next_cursor" fields with
+         | None, None -> Ok Schedule_paging_unavailable
+         | Some page, Some next ->
+             let cursor = function
+               | `Null -> Ok None
+               | `String value when value <> "" -> Ok (Some value)
+               | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ | `List _ ->
+                   Error "schedule cursor must be a nonempty string or null"
+             in
+             let* page_cursor = cursor page in
+             let* next_cursor = cursor next in
+             Ok (Schedule_paging { page_cursor; next_cursor })
+         | None, Some _ | Some _, None -> Error "schedule paging metadata is partial")
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+        Error "schedule snapshot must be an object"
+  in
   let* scs_read_error =
     Masc.Tui_decode_fields.optional_string_field json "schedule_store_read_error"
   in
@@ -339,6 +370,8 @@ let snapshot_of_json json =
     ; scs_read_error
     ; scs_request_count
     ; scs_truncated
+    ; scs_payload_target
+    ; scs_paging
     ; scs_next_due_iso
     ; scs_counts
     ; scs_rows

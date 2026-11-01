@@ -599,7 +599,7 @@ type async_msg =
   | Goal_confirmation_submitted of (string, string) result
   | Goal_confirmation_loaded of
       string Masc_tui_fetched.request * (Masc_tui_planning_detail.confirmation, string) result
-  | Schedules_loaded of Snapshot_read.request * (schedule_snapshot, string) result
+  | Schedules_loaded of schedule_page_request * (schedule_snapshot, string) result
   (* Carries the schedule it was asked about: the reader can step to the next
      row or close the detail while a load is in flight, and an answer that did
      not say whose it was would be filed under whoever is open when it lands. *)
@@ -608,7 +608,7 @@ type async_msg =
   (* Carries the keeper it was asked about: the roster cursor can move while a
      load is in flight, and an answer that did not say whose it was would be
      filed under whoever is selected when it lands. *)
-  | Keeper_schedules_loaded of detail_read_request * (schedule_snapshot, string) result
+  | Keeper_schedules_loaded of keeper_schedule_page_request * (schedule_snapshot, string) result
   | System_logs_loaded of Surface_read_order.request * (system_log_snapshot, string) result
   | Schedule_cancel_done of string * (string, string) result
   (* (message, noop): [noop = true] says the verdict already stood. *)

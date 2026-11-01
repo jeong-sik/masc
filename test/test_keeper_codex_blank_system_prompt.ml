@@ -393,7 +393,7 @@ let test_core_checkpoint_survives_codex_guidance_failure () =
               (Owner.direct_checkpoint owner ~operation_id:id |> require)) in
         let execute ~sw:_ ~keeper_name:_ ~claim =
           let owner = Eio.Promise.await owner_p in
-          let operation = claim () |> require |> Option.get in
+          let operation : Operation.t = claim () |> require |> Option.get in
           incr attempts;
           match !attempts with
           | 1 ->

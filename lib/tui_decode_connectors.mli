@@ -53,12 +53,6 @@ type connector_poll_state =
 type connector = {
   cn_id : string;
   cn_display_name : string;
-  cn_available : bool;  (** Configured and usable. *)
-  cn_connected : bool;
-      (** Reachable right now. Kept apart from [cn_available]: a connector can
-          be configured and unreachable, and the two call for different
-          actions. *)
-  cn_status : string;
   cn_connection : connector_connection;
   cn_channel : string option;
   cn_error : string option;
@@ -99,6 +93,17 @@ type connector = {
   cn_names_error : string option;
   cn_bindings : connector_binding list;
 }
+
+val connector_available : connector -> bool
+(** Configured and usable, derived from the canonical connection state. *)
+
+val connector_connected : connector -> bool
+(** Transport reachability, independent of availability: a connected but
+    unavailable connector remains reachable. *)
+
+val connector_status : connector -> string
+(** The accepted wire status word for display, derived from the connection
+    state. A connected but unavailable connector has status ["offline"]. *)
 
 type connector_name_page = {
   cnp_connector_id : string;

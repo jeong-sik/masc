@@ -523,13 +523,15 @@ let render_connectors (state : state) =
           | None -> c.push_empty ()
           | Some connector ->
               let open Masc.Tui_decode_connectors in
+              let available = connector_available connector in
+              let connected = connector_connected connector in
               let yes_no flag = if flag then "yes" else "no" in
               let line =
                 "  " ^ Masc_tui_table.row (cells
                   ~name:(Terminal_text.single_line connector.cn_display_name)
-                  ~configured:(yes_no connector.cn_available)
-                  ~reachable:(yes_no connector.cn_connected)
-                  ~status:(Terminal_text.single_line connector.cn_status)
+                  ~configured:(yes_no available)
+                  ~reachable:(yes_no connected)
+                  ~status:(Terminal_text.single_line (connector_status connector))
                   ~channel:(Terminal_text.single_line_or ~default:Masc_tui_theme.Glyph.no_value
                      connector.cn_channel))
               in
@@ -537,9 +539,9 @@ let render_connectors (state : state) =
                 (* Set up and unreachable is the row to act on: it was
                    working. Never configured is dim -- it is a choice, not a
                    fault. *)
-                if connector.cn_available && not connector.cn_connected then
+                if available && not connected then
                   Theme.bad ()
-                else if not connector.cn_available then Ansi.dim
+                else if not available then Ansi.dim
                 else Ansi.reset
               in
               if idx = state.connectors_cursor then c.push_selected line

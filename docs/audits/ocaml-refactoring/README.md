@@ -93,7 +93,7 @@ runtime gates. Source-review completion alone leaves a Draft item in review.
 
 The queue now contains **30 concrete candidates**: 24 from the first semantic pass, A1
 from the Agent Core follow-up, T1 from the integrated TUI investigation, E1/E2 from
-Exec, M1 from multimodal/media, and J1 from the Schedule investigation. Nineteen are
+Exec, M1 from multimodal/media, and J1 from the Schedule investigation. Twenty are
 implemented as PRs; their source-review evidence is recorded on each PR: `S1` in
 [#43367](https://github.com/jeong-sik/masc/pull/43367) isolates provider usage
 acceptance; `K1` in [#43370](https://github.com/jeong-sik/masc/pull/43370) preserves
@@ -131,7 +131,10 @@ immutable Board vote transitions. S5 in
 observations from immutable refresh ownership. S4 in
 [#47070](https://github.com/jeong-sik/masc/pull/47070) and
 [#47071](https://github.com/jeong-sik/masc/pull/47071) repairs dashboard cache
-refresh ownership and extracts its bounded execution module. Eleven candidates remain queued; this ordering does not waive their coverage.
+refresh ownership and extracts its bounded execution module. S6 in
+[#47075](https://github.com/jeong-sik/masc/pull/47075) and
+[#47076](https://github.com/jeong-sik/masc/pull/47076) shares connector observations
+through HTTP aggregation and removes redundant TUI connector fields. Ten candidates remain queued; this ordering does not waive their coverage.
 
 | ID | Priority | Status | Refactoring point |
 | --- | --- | --- | --- |
@@ -154,7 +157,7 @@ refresh ownership and extracts its bounded execution module. Eleven candidates r
 | [S3](#s3) | later | candidate | Separate Antigravity protocol transitions from persistence and stream callbacks |
 | [S4](#s4) | investigate | implemented; execution unverified | Make provider-metrics cache refresh ownership explicit and cancellation-complete |
 | [S5](#s5) | later | implemented; execution unverified | Consolidate full-health refresh bookkeeping into an immutable owned state machine |
-| [S6](#s6) | later | candidate | Give connector status a common typed projection before JSON aggregation |
+| [S6](#s6) | later | implemented; execution unverified | Give connector status a common typed projection before JSON aggregation |
 | [S7](#s7) | later | candidate | Replace connector ingress scheduling flag combinations with explicit lane lifecycle |
 | [S8](#s8) | next | in review | Separate durable provider-history decoding and daily projection from journal IO |
 | [R1](#r1) | later | candidate | Credential batch ownership projection |
@@ -1574,7 +1577,14 @@ module with overridden identity: it requires one observation, correct identity,
 and counts matching the rendered descriptors. Existing binding-store and
 transport scenarios remain. Syntax parsing and independent source review are
 recorded on the PR; builds/typechecks/behavior suites are not claimed. TUI
-redundant-field removal follows in the next layer.
+[#47076](https://github.com/jeong-sik/masc/pull/47076) removes `cn_available`,
+`cn_connected` and `cn_status`. Exhaustive getters derive those observations
+from the five accepted `cn_connection` variants. Decoder absent-flag defaults,
+contradictory-row refusal and identity/position evidence stay unchanged. The
+renderer uses those getters, and existing decoder scenarios verify the same
+projections, including connected-but-unavailable. No layout or wording tests
+were added. This remains source-only evidence, without runtime or integration
+proof.
 
 ### S7
 

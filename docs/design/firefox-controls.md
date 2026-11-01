@@ -55,7 +55,7 @@ observation and durable artifact reading are supported through native BiDi; see
 [Firefox downloads](firefox-downloads.md).
 Iframe, dialog and upload behavior is described below.
 
-## Screenshot to Vision
+## Read a screenshot
 
 `BrowserRead {"lane":"automation","tabId":73,"mode":"screenshot"}` captures
 the selected viewport as PNG. The same mode supports live Firefox through
@@ -63,11 +63,22 @@ the selected viewport as PNG. The same mode supports live Firefox through
 capture is rejected. Live capture also compares document identity, viewport
 dimensions and scroll position before and after capture. Changes to pixels
 without a corresponding viewport-identity change are not detected by that
-guard. The tool returns URL/title, dimensions and an
-`artifact` handle; `keeper_analyze_image {"artifact":<handle>,"query":<question>}` loads
-those stored pixels into the configured Vision reader. Encoded pixels do not
-ride in the browser tool's text response. This does not inject screenshots
-directly into the Keeper's own conversation.
+guard. For a Keeper, the tool returns URL/title, dimensions and a Keeper-local
+image `artifact` handle. Use that exact handle with
+`keeper_image_read {"artifact":<handle>}` to load those stored pixels into the
+current model's conversation without another model call. The browser
+tool's text response carries the handle; a successful image read supplies the
+image block. If an image block is already attached to the message, inspect it
+directly.
+
+Use `keeper_analyze_image {"artifact":<handle>,"query":<question>}` when the
+current runtime capability and actual tool surface confirm that the image reader
+was excluded for unavailable native image admission, after an explicit admission
+rejection, or when another model's text interpretation is needed. Such exclusion
+also covers deferred/discovery tools, so a rejected read is not a prerequisite.
+An unloaded schema or unsuccessful tool search alone does not establish this
+exclusion. Model/provider names, older skill guidance, file/artifact failures and
+account quota errors do not establish unsupported image input either.
 
 The native host retains Mozilla's 1 MiB command limit and accepts bounded 8 MiB
 replies, enough for the default 5 MiB Vision image after base64 encoding. The

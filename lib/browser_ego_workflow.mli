@@ -20,8 +20,18 @@ type navigation_timeout = {
 (** [url] and [ready_state] are absent when the SDK supplied no observation;
     absence is never replaced by an empty string or inferred page state. *)
 type popup_event_error = { name : string option; code : string option; timeout_ms : float option }
+type native_dialog = {
+  kind : Browser_surface.dialog_kind;
+  message : string;
+  default_prompt : string option;
+  url : string option;
+  frame_id : string option;
+  has_browser_handler : bool option;
+}
+type dialog_error = { method_ : string; session_id : string; dialog : native_dialog }
 type native_error = Evaluation_timed_out of evaluation_timeout
   | Navigation_timed_out of navigation_timeout | Popup_event_failed of popup_event_error
+  | Page_dialog_opened of dialog_error
 (** Native SDK diagnostics, preserved as observations. Stopped execution may
     still have late effects, and committed navigation may not have reached the
     requested lifecycle. These fields never authorize replay, release held
@@ -47,9 +57,14 @@ type outcome =
     progress/effect flags and final snapshot
     fields against the exact request, including the SDK's optional
     [failure.nativeError] evaluation/navigation timeout code, nonnegative finite
-    timeout, boolean observations and declared navigation lifecycle. Optional
-    navigation URL/readiness observations remain absent when omitted. The public
-    receipt retains the SDK field names.
+    timeout, boolean observations and declared navigation lifecycle. Native
+    dialog errors require the SDK method, session ID and recognized dialog
+    type/message. Optional dialog [defaultPrompt], URL, frame ID and browser
+    handler observations are validated when present; absence is not an inferred
+    value. Optional navigation URL/readiness observations remain absent when
+    omitted. The public receipt retains the SDK field names. A dialog error
+    preserves failed progress and never establishes execution completion or
+    input release.
     A malformed post-execution reply is
     unknown, never a proof that no effect started.
 

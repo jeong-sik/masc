@@ -421,7 +421,7 @@ let decode_composition_statistics json =
     let valid_window = match scst_records, scst_first_recorded_at, scst_last_recorded_at with
       | 0, None, None -> true
       | n, Some first, Some last when n > 0 ->
-        Float.is_finite first && Float.is_finite last && first >= 0. && first <= last
+        Float.is_finite first && Float.is_finite last && first <= last
       | _ -> false in
     if scst_completed.sds_samples + scst_failed.sds_samples + scst_deferred <> scst_records
     then Error "Skill duration sample counts disagree with records"

@@ -423,6 +423,13 @@ describe('stored composition duration statistics', () => {
       },
     }
     expect(decodeSkillEvidenceResponse(raw).composition_statistics?.completed.mean_ms).toBe(20)
+    const beforeEpoch = { ...raw,
+      composition: { ...raw.composition, recorded_at: -100.5 },
+      composition_statistics: { ...raw.composition_statistics,
+        recorded_window: { first_recorded_at: -100.5, last_recorded_at: -100.5 } },
+    }
+    expect(decodeSkillEvidenceResponse(beforeEpoch).composition_statistics?.recorded_window)
+      .toEqual({ first_recorded_at: -100.5, last_recorded_at: -100.5 })
     expect(() => decodeSkillEvidenceResponse({ ...raw,
       status: 'not_observed_in_retained_coverage', composition: null, coverage,
     })).toThrow(SkillsContractError)

@@ -12683,6 +12683,17 @@ let test_decode_skill_evidence_reads_exact_v7_coverage () =
        Alcotest.(check (option (float 0.00001))) "recorded duration mean" (Some 20.) stats.scst_completed.sds_mean_ms
    | Ok _ -> Alcotest.fail "missing statistics"
    | Error detail -> Alcotest.fail detail);
+  let before_epoch = with_statistics (statistics 2 (`Float 20.))
+    |> replace "composition" (composition |> replace "recorded_at" (`Float (-100.5)))
+    |> replace "composition_statistics" (statistics 2 (`Float 20.)
+      |> replace "recorded_window" (`Assoc [
+        "first_recorded_at", `Float (-100.5); "last_recorded_at", `Float (-100.5)])) in
+  (match Tui_decode_skill_evidence.decode_skill_evidence before_epoch with
+   | Ok { se_composition_statistics = Some stats; _ } ->
+       Alcotest.(check (option (float 0.00001))) "finite pre-epoch record is retained"
+         (Some (-100.5)) stats.scst_first_recorded_at
+   | Ok _ -> Alcotest.fail "missing pre-epoch statistics"
+   | Error detail -> Alcotest.fail detail);
   let contradictory = base |> replace "composition_statistics" (statistics 2 (`Float 20.)) in
   Alcotest.(check bool) "positive samples require retained evidence" true
     (Result.is_error (Tui_decode_skill_evidence.decode_skill_evidence contradictory));

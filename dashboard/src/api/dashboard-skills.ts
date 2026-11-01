@@ -1517,7 +1517,7 @@ export function decodeSkillEvidenceResponse(raw: unknown): SkillEvidenceResponse
     const { first_recorded_at: first, last_recorded_at: last } = statistics.recorded_window
     const validWindow = statistics.records === 0 ? first === null && last === null
       : first !== null && last !== null && Number.isFinite(first) && Number.isFinite(last)
-        && first >= 0 && first <= last && last === decoded.composition?.recorded_at
+        && first <= last && last === decoded.composition?.recorded_at
     if (!validWindow) contractError('invalid_response', 'composition recorded window disagrees with retained evidence')
   }
   const { composition_scope: scope, composition_runs_observed: read } = decoded.coverage

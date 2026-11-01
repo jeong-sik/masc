@@ -386,6 +386,12 @@ let test_duration_statistics () =
   Alcotest.(check (option (float 0.00001))) "p95 distinguishes tail from maximum" (Some 18.) tail.completed.p95_ms;
   Alcotest.(check (option (float 0.00001))) "outlier remains visible" (Some 1000.) tail.completed.max_ms;
   Alcotest.(check (option (float 0.00001))) "zero is measured" (Some 0.) tail.completed.min_ms;
+  let before_epoch = change ~disposition:"completed" ~duration:10. ~recorded_at:(-100.5) first
+    |> fun evidence -> E.statistics [evidence] in
+  Alcotest.(check (option (float 0.00001))) "finite pre-epoch record starts the window"
+    (Some (-100.5)) before_epoch.first_recorded_at;
+  Alcotest.(check (option (float 0.00001))) "finite pre-epoch record ends the window"
+    (Some (-100.5)) before_epoch.last_recorded_at;
   let empty = E.statistics [] in
   List.iter (Alcotest.(check (option (float 0.00001))) "empty is unknown, not zero" None)
     [empty.completed.mean_ms; empty.completed.min_ms; empty.completed.p50_ms;

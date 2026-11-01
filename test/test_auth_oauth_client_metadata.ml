@@ -179,6 +179,34 @@ let test_non_loopback_redirects_match_exactly () =
       (Metadata.redirect_uri_allowed document "https://client.example:8443/cb")
 ;;
 
+let test_malformed_listed_redirects_grant_no_target () =
+  let document redirect_uris =
+    let body = Yojson.Safe.to_string
+      (`Assoc [ "client_id", `String claude_code_url
+              ; "client_name", `String "Client"
+              ; "redirect_uris", `List (List.map (fun uri -> `String uri) redirect_uris)
+              ]) in
+    match Metadata.parse_document (document_url claude_code_url) body with
+    | Ok document -> document
+    | Error reason -> fail reason
+  in
+  List.iter
+    (fun (listed, requested) ->
+      check bool "a malformed listed URI grants no redirect" false
+        (Metadata.redirect_uri_allowed (document [ listed ]) requested))
+    [ "http://localhost:1/callback\n", "http://localhost:2/callback"
+    ; "http://localhost:1/callback\r", "http://localhost:2/callback"
+    ; "http://localhost:1/callback\t", "http://localhost:2/callback"
+    ; "http://localhost:1/callback ", "http://localhost:2/callback"
+    ; "http://[::1]:1/callback\n", "http://[::1]:2/callback"
+    ; "https://client.example/callback\n", "https://client.example/callback"
+    ];
+  check bool "an independent valid listed URI still grants its target" true
+    (Metadata.redirect_uri_allowed
+       (document [ "http://localhost:1/callback\n"; "http://localhost/callback" ])
+       "http://localhost:2/callback")
+;;
+
 let () =
   run
     "auth_oauth_client_metadata"
@@ -199,6 +227,8 @@ let () =
             test_ipv6_loopback_redirects_ignore_the_port
         ; test_case "non-loopback redirects match exactly" `Quick
             test_non_loopback_redirects_match_exactly
+        ; test_case "malformed listed redirects grant no target" `Quick
+            test_malformed_listed_redirects_grant_no_target
         ] )
     ]
 ;;

@@ -66,5 +66,7 @@ val redirect_uri_allowed : document -> string -> bool
     literals; [localhost] is treated the same because Claude Code's document
     lists it, although RFC 8252 section 8.3 does not recommend it.
 
-    Listed entries are not checked here. The caller must still require the
-    requested URI to be one it is willing to redirect to. *)
+    A listed entry must also be plain URL text before either comparison;
+    lenient parsing must not turn a malformed entry into redirect authority.
+    Other URI policy remains the caller's responsibility, including requiring
+    the requested URI to be one it is willing to redirect to. *)

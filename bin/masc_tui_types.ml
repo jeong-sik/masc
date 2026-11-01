@@ -3595,7 +3595,8 @@ type observer_replay_status =
   | Observer_replay_unavailable of string
   | Observer_replay_rejected of string
 
-let observer_replay_description = function
+let observer_replay_description ?(source_loss = false) replay =
+  let description = match replay with
   | Observer_replay_unobserved -> "Replay: not negotiated"
   | Observer_replay_unavailable detail -> "Replay unavailable (live only): " ^ detail
   | Observer_replay_rejected detail -> "Observer handshake rejected: " ^ detail
@@ -3613,6 +3614,16 @@ let observer_replay_description = function
       "Replay reset: previous cursor had no instance; disconnected history not recovered"
   | Observer_replay_scoped { replay = Sse_wire.Reset Sse_wire.Cursor_ahead; _ } ->
       "Replay reset: cursor ahead of server; disconnected history not recovered"
+  in
+  if source_loss then "SOURCE EVENTS LOST · " ^ description
+  else description
+
+(* A retry after a partially published SSE event can have a new transport
+   cursor. Remember the highest notice sequence independently per source. *)
+let note_observer_source_loss ~source_id ~sequence seen =
+  match List.assoc_opt source_id seen with
+  | Some previous when previous >= sequence -> false, seen
+  | Some _ | None -> true, (source_id, sequence) :: List.remove_assoc source_id seen
 
 (** One event off the feed, kept for the Acting surface. *)
 (* How many feed events the TUI keeps. On the live runtime the feed ran at
@@ -9280,6 +9291,8 @@ type state = {
      complete a tool call and on the operator cadence. *)
   mutable acting_pane_changes:
     (acting_pane_key, acting_pane_read) Masc_tui_fetched.t;
+  (* A loss during a read owes one more reading after that read settles. *)
+  mutable acting_pane_changes_loss_followup: acting_pane_key option;
   (* When the answer on screen landed, so the tab can say how old it is. *)
   mutable acting_pane_changes_at: float option;
   (* Derived display phase for the selected long name in the narrow roster.
@@ -10590,6 +10603,8 @@ type state = {
   mutable observer_cursor: Sse_wire.observer_cursor option;
       (** Last applied complete event, scoped to the responding process. *)
   mutable observer_replay: observer_replay_status;
+  mutable observer_source_loss: bool;
+  mutable observer_source_loss_sequences: (string * int) list;
   mutable acting: Masc_tui_acting.entry list;  (** newest first, at most [acting_retained_entries] + [acting_retained_quiet] *)
   mutable acting_dropped: int;  (** events that fell off the end of [acting] *)
   mutable acting_undecodable: int;  (** frames the feed reader could not read *)
@@ -10697,6 +10712,7 @@ type state = {
      arrive after the second alpha request and still name the visible Keeper. *)
   mutable msg_history_load_generation: int;
   mutable msg_history_inflight: Keeper_history_read.t option;
+  mutable msg_history_loss_followup: (string * workspace_authority * unit ref) option;
   mutable msg_copy_generation: int;
   mutable chat_command_reads: (unit ref * unit ref * string) list;
   mutable msg_copy_pending: (int * string * unit ref) option;
@@ -14008,6 +14024,7 @@ let suspend_workspace_readings state =
   state.lane_addons_reading <- None;
   state.board_detail <- Masc_tui_board_detail.suspend state.board_detail;
   state.acting_pane_changes <- Masc_tui_fetched.suspend state.acting_pane_changes;
+  state.acting_pane_changes_loss_followup <- None;
   state.prompts <- Masc_tui_fetched.suspend state.prompts;
   state.preset_detail <- Masc_tui_fetched.suspend state.preset_detail;
   state.keeper_board_quarantines <- Masc_tui_fetched.suspend state.keeper_board_quarantines;
@@ -14094,6 +14111,7 @@ let suspend_workspace_readings state =
     | Some request -> Keeper_history_read.page_pending request
     | None -> false in
   state.msg_history_inflight <- None;
+  state.msg_history_loss_followup <- None;
   (* A cold page is refresh preparation, not an explicit older-page demand.
      Normal eligible history dispatch can request it again. A scrolled view
      retains its cached source and uses explicit refresh/paging instead. *)
@@ -18387,6 +18405,7 @@ let create_state
   acting_pane_expanded = [];
   acting_chunk_projection = None;
   acting_pane_changes = Masc_tui_fetched.initial;
+  acting_pane_changes_loss_followup = None;
   acting_pane_changes_at = None;
   roster_marquee_frame = 0;
   activity_frame = -1;
@@ -19093,6 +19112,8 @@ let create_state
   mcp_session = None;
   observer_cursor = None;
   observer_replay = Observer_replay_unobserved;
+  observer_source_loss = false;
+  observer_source_loss_sequences = [];
   acting = [];
   acting_dropped = 0;
   acting_undecodable = 0;
@@ -19148,6 +19169,7 @@ let create_state
   msg_memory_dropped = 0;
   msg_history_load_generation = 0;
   msg_history_inflight = None;
+  msg_history_loss_followup = None;
   msg_copy_generation = 0;
   msg_copy_pending = None;
   chat_command_reads = [];
@@ -19487,6 +19509,7 @@ let restore_keeper_chat_page (state : state) keeper_name =
      restored during A -> B -> A, even before the next GET starts. *)
   state.msg_history_load_generation <- state.msg_history_load_generation + 1;
   state.msg_history_inflight <- None;
+  state.msg_history_loss_followup <- None;
   state.msg_older_loading <- false;
   match List.assoc_opt keeper_name state.msg_loaded_pages with
   | Some page ->

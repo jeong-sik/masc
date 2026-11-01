@@ -4396,8 +4396,11 @@ let render_keeper_message (state : state) =
           (Theme.recede ()) display_keeper_name Ansi.reset
       in
       let mode_suffix =
-        if String.equal modes "" then ""
-        else Printf.sprintf "  %s%s%s" Ansi.dim modes Ansi.reset
+        (if state.observer_source_loss then
+           "  " ^ Theme.warn () ^ "[events lost]" ^ Ansi.reset
+         else "")
+        ^ (if String.equal modes "" then ""
+           else Printf.sprintf "  %s%s%s" Ansi.dim modes Ansi.reset)
       in
       title, mode_suffix
     in

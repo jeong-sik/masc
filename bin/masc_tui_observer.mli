@@ -62,6 +62,8 @@ type agent_core_kind =
   | Agent_input_required of { elapsed_s : float; request_id : string; question : string }
   | Tool_approval_completed
   | Telemetry
+  | Relay_subscription_loss of { source_id : string; sequence : int; dropped_count : int }
+      (** The relay subscriber lost this many events before SSE publication. *)
   | Agent_core_other of string
 
 type agent_core = {

@@ -52,8 +52,10 @@ let with_recovered_ledger ~base_path = function
      | Not_recoverable reason -> Candle_config.Disabled { reason })
 ;;
 
-let configured ~base_path =
-  match Candle_config.load ~base_path with
+let configured ~base_path = Candle_config.load ~base_path
+
+let for_appraisal ~base_path =
+  match configured ~base_path with
   | (Candle_config.Off | Candle_config.Disabled _) as answer -> answer
   | Candle_config.Enabled policy ->
     (match (Atomic.get appraiser_check) () with
@@ -125,11 +127,11 @@ let current_view ~now ~base_path =
       Ledger_unavailable (Candle_ledger.update_error_to_string error_to_string error))
 
 let current ~base_path =
-  with_recovered_ledger ~base_path (configured ~base_path)
+  with_recovered_ledger ~base_path (for_appraisal ~base_path)
 ;;
 
 let for_recording ~base_path =
-  with_recovered_ledger ~base_path (Candle_config.load ~base_path)
+  with_recovered_ledger ~base_path (configured ~base_path)
 ;;
 
 

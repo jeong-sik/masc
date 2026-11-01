@@ -5744,7 +5744,8 @@ let decode_preset_registry json =
 let decode_preset_commit runtime =
   let commit = member "commit" runtime in
   let* () = preset_receipt_object "preset runtime commit"
-    ["source_revision"; "order"; "durability"; "durability_detail"; "warnings"] commit in
+    ["source_revision"; "order"; "durability"; "durability_detail"; "warnings"; "ignored_legacy_keys"] commit in
+  let* _ignored_legacy_keys = decode_string_list commit "ignored_legacy_keys" in
   let* prc_source_revision = required_string_field commit "source_revision" in
   let* () =
     if String_util.is_lowercase_sha256_hex prc_source_revision then Ok ()

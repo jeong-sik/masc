@@ -7629,7 +7629,9 @@ let reading_pane (state : state) ~cols : (int -> Masc_tui_types.clamped_scroll) 
      [render_metrics] already answers [Metrics_scroll] through
      [surface_chrome]'s [Self_scrolled] overflow, so the generic End sentinel is
      corrected after drawing exactly as the other reading panes are. *)
-  | Metrics -> pane (fun v -> Metrics_scroll v)
+  | Metrics -> pane (fun scroll ->
+      Metrics_scroll { scroll; content_height = state.metrics_content_height;
+                       card_rows = state.metrics_scroll_card_rows })
   (* The voice pane is lines the frame lays out; its wizard takes its own keys
      while open. *)
   | Config when state.config_pane = Config_voice -> pane (fun v -> Voice_scroll v)
@@ -7954,7 +7956,7 @@ let goto_surface ?(from_reference = false) state ~mailbox (destination : surface
        (* Usage is the top-level account reading. Explicit telemetry entry
           opts into diagnostics after navigation, rather than inheriting it. *)
        state.usage_telemetry_open <- false;
-       state.metrics_scroll <- 0
+       reset_metrics_scroll state
    | Overview | Acting | Memory | Lanes | Clients | Board | Approvals
    | Schedules | Verification | Harness | Fusion | Repositories | Code
    | Runtime | Config | Resources | Tools | System_logs
@@ -16008,7 +16010,7 @@ let enter_config_pane state ~mailbox pane =
    arrival, shared with a press on the entry's name. *)
 let enter_metrics_section state section =
   state.metrics_section <- section;
-  state.metrics_scroll <- 0
+  reset_metrics_scroll state
 ;;
 
 (* The scroll belonged to the list that just went away. Carrying it into a
@@ -31539,7 +31541,7 @@ Use relative paths for resources already held in the package. -->
                      state.usage_scope_id <- scope_id;
                      state.usage_telemetry_open <- false;
                      if state.usage_section=Usage_keepers then state.usage_section <- Usage_plan;
-                     state.metrics_scroll <- 0;
+                     reset_metrics_scroll state;
                      goto_surface state ~mailbox:async_messages Metrics
                  | Some (_, Masc_tui_palette.Palette_config pane) ->
                      state.config_pane <- pane;
@@ -33158,16 +33160,16 @@ Use relative paths for resources already held in the package. -->
             state.palette_cursor <- 0
         | Some "a" when state.view = Metrics && not state.usage_telemetry_open ->
             state.usage_scope_id <- None;
-            state.metrics_scroll <- 0
+            reset_metrics_scroll state
         | Some "x" when state.view = Metrics && not state.usage_telemetry_open ->
             state.usage_show_limit_exhausted <- not state.usage_show_limit_exhausted;
-            state.metrics_scroll <- 0
+            reset_metrics_scroll state
         | Some "v" when state.view = Metrics && not state.usage_telemetry_open ->
             state.usage_section <- next_usage_section state.usage_section;
-            state.metrics_scroll <- 0
+            reset_metrics_scroll state
         | Some ("p" | "P") when state.view = Metrics ->
             state.usage_telemetry_open <- not state.usage_telemetry_open;
-            state.metrics_scroll <- 0
+            reset_metrics_scroll state
         | Some ("1" | "2" | "3") as section
           when state.view = Metrics && state.usage_telemetry_open ->
             enter_metrics_section state
@@ -34408,6 +34410,7 @@ Use relative paths for resources already held in the package. -->
                  (* Saturating, like every other clamped scroll: the frame
                     reports the row it drew and until it has, the stored value
                     may be a row past the end. *)
+                 let page = Masc_tui_scroll.page_step ~height:state.metrics_content_height in
                  state.metrics_scroll <-
                    (if direction > 0 then
                       Masc_tui_types.scroll_down_from state.metrics_scroll

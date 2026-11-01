@@ -309,6 +309,25 @@ val surface_chrome :
 
 val connection_badge : Masc_tui_types.state -> string
 
+type compact_connection_state =
+  | Compact_workspace_mismatch
+  | Compact_workspace_unconfirmed
+  | Compact_workspace_unread
+  | Compact_read_failed
+  | Compact_read_partial
+  | Compact_read_interrupted
+  | Compact_read_unfinished
+  | Compact_reading
+  | Compact_http of Masc_tui_types.connection_status
+
+val compact_connection_state : Masc_tui_types.state -> compact_connection_state
+(** Select the highest-priority current workspace, read or HTTP observation. *)
+
+val usage_connection_badge : Masc_tui_types.state -> string
+
+val compact_connection_badge : Masc_tui_types.state -> width:int -> string * string option
+(** A narrow textual state and any longer status details that remain to show. *)
+
 val badge_row : cols:int -> lead:string -> label:string -> badge:string -> string
 (** A header row of [lead], a bracketed [label] and [badge] for a surface drawn
     in [cols] columns. The label is cut with an ellipsis to the cells left after

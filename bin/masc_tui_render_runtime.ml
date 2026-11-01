@@ -1407,27 +1407,53 @@ let render_metrics (state : state) =
       (if state.usage_telemetry_open then " MASC Usage / Telemetry"
        else " MASC Usage")
   in
-  let connection = connection_badge state in
+  let connection = usage_connection_badge state in
   let timed_title = Printf.sprintf "%s  %s  %s" heading timestamp connection in
-  let title =
-    if Message_layout.display_width timed_title <= framed_inner_width cols then
-      timed_title
-    else Printf.sprintf "%s  %s" heading connection
+  let untimed_title = Printf.sprintf "%s  %s" heading connection in
+  let width = framed_inner_width cols in
+  let title, connection_rows =
+    if Message_layout.display_width timed_title <= width then timed_title, []
+    else if Message_layout.display_width untimed_title <= width then untimed_title, []
+    else
+      let summary, details =
+        match compact_connection_state state with
+        | Compact_http Connected ->
+            let name = screen_title "Usage" in
+            let available = width - Message_layout.display_width name - 1 in
+            let status, details = compact_connection_badge state ~width:available in
+            if Message_layout.display_width status <= available then name ^ " " ^ status, details
+            else compact_connection_badge state ~width
+        | Compact_workspace_mismatch | Compact_workspace_unconfirmed | Compact_workspace_unread | Compact_read_failed
+        | Compact_read_partial | Compact_read_interrupted | Compact_read_unfinished
+        | Compact_reading | Compact_http (Degraded | Connecting | Booting | Disconnected) ->
+            compact_connection_badge state ~width in
+      let rows = Option.fold ~none:[] ~some:(fun details ->
+        let wrap = Message_layout.split_styled_cells ~max_cells:(max 1 width) in
+        wrap "Status" @ wrap details) details in
+      summary, rows
   in
   (* The section's lines are formatted by the drawing, so the row it could
      start at is known only once it has. The body writes it here and the
      contract reads it back out. *)
   let drawn_metrics_scroll = ref state.metrics_scroll in
+  let drawn_metrics_height = ref state.metrics_content_height in
+  let drawn_metrics_card_rows = ref state.metrics_scroll_card_rows in
   surface_chrome
-    ~overflow:(Self_scrolled (fun () -> Metrics_scroll !drawn_metrics_scroll))
+    ~overflow:(Self_scrolled (fun () ->
+      Metrics_scroll { scroll = !drawn_metrics_scroll;
+                       content_height = !drawn_metrics_height;
+                       card_rows = !drawn_metrics_card_rows }))
     state ~terminal_rows ~cols ~surface_key:"metrics"
     ~title
     ~hints:(Masc_tui_keys.footer_hints_metrics
               ~telemetry:state.usage_telemetry_open)
     ~body:(fun ~budget c ->
       if state.usage_telemetry_open then
-        Metrics_page.render_metrics_body ~cols ~budget state
-          ~report_scroll:(fun scroll -> drawn_metrics_scroll := scroll)
+        Metrics_page.render_metrics_body ~cols ~budget ~suffix_lines:connection_rows state
+          ~report_scroll:(fun scroll height card_rows ->
+            drawn_metrics_scroll := scroll;
+            drawn_metrics_height := height;
+            drawn_metrics_card_rows := Some card_rows)
           ~push:c.push ~push_styled:c.push_styled
           ~push_selected:c.push_selected ~push_divider:c.push_divider
           ~push_empty:c.push_empty
@@ -1442,7 +1468,6 @@ let render_metrics (state : state) =
         let compact_navigation =
           pill Usage_plan "Plan" ^ " " ^ pill Usage_trend "Trend"
           ^ " " ^ pill Usage_keepers "Keepers" ^ " v:next" in
-        let width = framed_inner_width cols in
         let navigation =
           if Message_layout.display_width wide_navigation <= width then wide_navigation
           else if Message_layout.display_width compact_navigation <= width then
@@ -1467,14 +1492,20 @@ let render_metrics (state : state) =
         let navigation_rows = if budget >= 3 then 1 else 0 in
         let spacing_rows = if budget >= 6 then 1 else 0 in
         if navigation_rows > 0 then c.push navigation;
-        if spacing_rows > 0 then c.push "";
+        if spacing_rows > 0 then
+          c.push (if connection_rows = [] then ""
+                  else Theme.recede () ^ "End: status" ^ Ansi.reset);
         let content_budget = max 0 (budget - navigation_rows - spacing_rows) in
-        let lines = usage_lines ~cols ~rows:content_budget state in
+        (* Put variable-length status details after account rows: refreshes do
+           not move the account the reader is already scrolling through. *)
+        let lines = usage_lines ~cols ~rows:content_budget state @ connection_rows in
         let overflow_rows = if content_budget >= 2 && List.length lines > content_budget then 1 else 0 in
         let height = content_budget - overflow_rows in
         let max_scroll = max 0 (List.length lines - height) in
         let scroll = min max_scroll (max 0 state.metrics_scroll) in
         drawn_metrics_scroll := scroll;
+        drawn_metrics_height := height;
+        drawn_metrics_card_rows := Some 0;
         List.iteri
           (fun index line ->
             if index >= scroll && index < scroll + height then c.push line)

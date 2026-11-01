@@ -9018,6 +9018,8 @@ type state = {
   credential_preparation : Masc_tui_credential_preparation.t;
   mutable home_chat_visit : Masc_tui_chat_visit.request option;
   mutable metrics_scroll: int;
+  mutable metrics_content_height: int;
+  mutable metrics_scroll_card_rows: int option;
   mutable metrics_section: metrics_section;
   mutable usage_telemetry_open: bool;
   mutable usage_section: usage_section;
@@ -17544,6 +17546,11 @@ let usage_providers_reading (state : state) =
       Providers_read {reading with puws_accounts=List.filter (fun account ->
         String.equal account.Masc.Tui_decode_usage.pua_scope_id scope_id) reading.puws_accounts}
 
+let reset_metrics_scroll (state : state) =
+  state.metrics_scroll <- 0;
+  state.metrics_content_height <- 0;
+  state.metrics_scroll_card_rows <- None
+
 (* A period change is an explicit read demand on the same surface. Its
    dataset ticket must supersede the previous period even when cycling back
    to the same number of days; the surface-needs delta cannot express this. *)
@@ -17555,7 +17562,7 @@ let cycle_usage_history_window (state : state) =
      | 7 -> 14
      | 14 | _ -> 1);
   state.provider_history <- Provider_history_unread;
-  state.metrics_scroll <- 0;
+  reset_metrics_scroll state;
   { nothing with needs_provider_history = true }
 
 let usage_history_reading (state : state) =
@@ -18096,6 +18103,8 @@ let create_state
   credential_preparation = Masc_tui_credential_preparation.create ();
   home_chat_visit = None;
   metrics_scroll = 0;
+  metrics_content_height = 0;
+  metrics_scroll_card_rows = None;
   metrics_section = Section_fleet;
   usage_telemetry_open = false;
   usage_section = Usage_plan;
@@ -19859,7 +19868,7 @@ type clamped_scroll =
      took one press per step taken beyond it. Named here so End can reach the
      bottom of a section at all -- without a report there is nothing to
      correct the row it names. *)
-  | Metrics_scroll of int
+  | Metrics_scroll of { scroll : int; content_height : int; card_rows : int option }
   | Approval_detail_scroll of int
   (* Both modals draw over a surface rather than being one, and both counted
      their rows the same way the diff does: the patch modal out of the recorded
@@ -20029,7 +20038,10 @@ let apply_clamped_scroll (state : state) = function
   | Repository_changes_diff_scroll value ->
       state.repository_changes_diff_scroll <- value
   | Resource_scroll value -> state.resource_scroll <- value
-  | Metrics_scroll value -> state.metrics_scroll <- value
+  | Metrics_scroll { scroll; content_height; card_rows } ->
+      state.metrics_scroll <- scroll;
+      state.metrics_content_height <- content_height;
+      state.metrics_scroll_card_rows <- card_rows
   | Approval_detail_scroll value -> state.approval_detail_scroll <- value
   | Patch_modal_scroll (vertical, horizontal) ->
       state.patch_modal_scroll <- vertical;

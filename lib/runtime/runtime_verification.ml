@@ -633,8 +633,13 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
           admission_timeout_s = Float.min timeout_s execution.timeout_s;
           timeout_s = Some timeout_s } in
         let reasoning_effort =
-          Option.map Runtime_muse_msp.reasoning_effort_of_requested
-            runtime.model.reasoning_effort in
+          Runtime_inference.clamp_reasoning_effort_to_catalog
+            ~model_id:(Some execution.model) ~requested:runtime.model.reasoning_effort
+          |> Option.map (function
+            | Llm_provider.Reasoning_effort.None_ -> Runtime_muse_msp.Effort_none
+            | Minimal -> Effort_minimal | Low -> Effort_low | Medium -> Effort_medium
+            | High -> Effort_high | XHigh -> Effort_xhigh | Max -> Effort_max
+            | Ultra -> Effort_ultra) in
         (match Runtime_verification_muse.run ~secure_random ~net ~mgr ~clock ~cwd
            ~directory:cwd_path ~account_home:execution.account_home
            ~quota_scope:(Runtime_instance.quota_scope_of_runtime runtime) ~config

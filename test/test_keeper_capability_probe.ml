@@ -766,6 +766,7 @@ default = "muse.fixture"
           (match Llm_provider.Model_catalog.of_toml_string ~source:"Muse capability effort collision"
             {|[[models]]
 model_id = "fixture-selected-model"
+supports_reasoning = true
 accepted_reasoning_efforts = ["low"]
 |} with
            | Error detail -> fail detail

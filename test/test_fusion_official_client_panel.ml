@@ -840,6 +840,7 @@ let test_muse_panel_effort_ignores_http_catalog requested () =
       | Some catalog -> Llm_provider.Model_catalog.set_global catalog) @@ fun () ->
     let source = {|[[models]]
 model_id = "muse-spark-1.3"
+supports_reasoning = true
 accepted_reasoning_efforts = ["low"]
 |} in
     (match Llm_provider.Model_catalog.of_toml_string ~source:"Muse Fusion effort collision" source with

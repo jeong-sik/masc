@@ -1466,6 +1466,7 @@ let test_muse_private_tool_roundtrip () =
   (match Llm_provider.Model_catalog.of_toml_string ~source:"Muse readiness effort collision"
     {|[[models]]
 model_id = "fixture-selected-model"
+supports_reasoning = true
 accepted_reasoning_efforts = ["low"]
 |} with
    | Error detail -> fail detail

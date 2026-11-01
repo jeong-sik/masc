@@ -1563,7 +1563,7 @@ default = "muse_fixture.fixture"
     | Some catalog -> Llm_provider.Model_catalog.set_global catalog) @@ fun () ->
   let install_catalog accepted =
     let source = Printf.sprintf
-      "[[models]]\nmodel_id = \"muse-fixture-1\"\naccepted_reasoning_efforts = [%S]\n"
+      "[[models]]\nmodel_id = \"muse-fixture-1\"\nsupports_reasoning = true\naccepted_reasoning_efforts = [%S]\n"
       accepted in
     match Llm_provider.Model_catalog.of_toml_string ~source:"Muse effort collision" source with
     | Error detail -> fail detail
@@ -1619,6 +1619,7 @@ let test_muse_refuses_exact_none_without_replay () =
   (match Llm_provider.Model_catalog.of_toml_string ~source:"Muse explicit none refusal"
     {|[[models]]
 model_id = "muse-fixture-1"
+supports_reasoning = true
 accepted_reasoning_efforts = ["low"]
 |} with
    | Error detail -> fail detail

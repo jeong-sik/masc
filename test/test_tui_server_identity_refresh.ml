@@ -4788,9 +4788,9 @@ let test_task_detail_end_respects_presented_input () =
   task_detail_select_end state ~cols;
   let wheel = Masc_tui_render_prim.(reader_after_wheel
       (clamped_scroll_now state (Task_detail (0, None))) Masc.Tui_mouse_protocol.Wheel_up) in
-  (match wheel with
-   | Some (Task_detail (offset, _)) -> task_detail_user_scroll state offset
-   | _ -> Alcotest.fail "task wheel did not return a task offset");
+  (match task_detail_of_reader wheel with
+   | Some (offset, _) -> task_detail_user_scroll state offset
+   | None -> Alcotest.fail "task wheel did not return a task offset");
   Alcotest.(check int) "wheel Up leaves the displayed end" 6 state.task_detail_scroll;
   Alcotest.(check bool) "wheel releases the pending End" false (task_detail_following_end state);
   task_detail_select_end state ~cols;

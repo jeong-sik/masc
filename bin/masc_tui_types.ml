@@ -19809,6 +19809,21 @@ type clamped_scroll =
   | Context_inspector_scroll of int
   | Context_inspector_response_scroll of int
 
+let task_detail_of_reader = function
+  | Some (Task_detail (offset, viewport)) -> Some (offset, viewport)
+  | Some (Planning_list_page_rows _ | Board_read _ | Message_scroll _ | Schedule_detail_scroll _
+         | Keeper_detail _ | Keeper_terminal_scroll _ | Keeper_calls _ | Keeper_logs_scroll _ | Acting _
+         | Acting_selection _ | Acting_detail_scroll _ | Memory_fact_detail_scroll _
+         | Client_detail_scroll _ | Verification_detail_scroll _ | Harness_detail_scroll _
+         | Fusion_detail_scroll _ | Runtime_detail_scroll _ | Runtime_params_scroll _
+         | System_log_detail_scroll _ | Planning_confirmation_scroll _ | Planning_detail_scroll _
+         | Lane_run_detail_scroll _ | Changes_diff_scroll _ | Repository_changes_diff_scroll _
+         | Resource_scroll _ | Metrics_scroll _ | Approval_detail_scroll _ | Patch_modal_scroll _
+         | Link_modal_scroll _ | Play_invite_scroll _ | Voice_scroll _ | Preset_detail_scroll _
+         | Keeper_list_scroll _ | Context_inspector_scroll _ | Context_inspector_response_scroll _
+         | Queue_panel_presented _ | Help_presented)
+  | None -> None
+
 let play_card_of_reader = function
   | Some (Play_invite_scroll (card, _)) -> Some card
   | Some (Task_detail _ | Planning_list_page_rows _ | Board_read _ | Message_scroll _ | Schedule_detail_scroll _
@@ -20125,13 +20140,13 @@ let task_documents_pending state =
 (* The last emitted Task viewport is the authority for a key pressed while a
    newer history or document is waiting to be drawn. *)
 let task_detail_owner state =
-  match state.view, state.planning_mode, state.task_detail_id with
-  | Planning, Planning_list, Some id
-    when Masc_tui_overview_tasks.is_focused state.task_focus
-         && List.exists (fun (task : Masc_domain.task) -> task.id = id)
-              (task_domain_values state) ->
+  if state.view <> Planning || state.planning_mode <> Planning_list
+     || not (Masc_tui_overview_tasks.is_focused state.task_focus) then None
+  else match state.task_detail_id with
+    | Some id when List.exists (fun (task : Masc_domain.task) -> task.id = id)
+                         (task_domain_values state) ->
       Some { tdo_task_id = id; tdo_reading = state.workspace_read_authority }
-  | _ -> None
+    | Some _ | None -> None
 
 let same_task_detail_owner a b =
   a.tdo_task_id = b.tdo_task_id && a.tdo_reading == b.tdo_reading

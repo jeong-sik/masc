@@ -25196,10 +25196,10 @@ let main
         !presented_change_authority change_authority) in
     let task_detail_needs_present =
       String.equal frame.Frame_presenter.surface_key "task-detail"
-      && ((match reader with
-           | Some (Task_detail (_, Some (count, height))) ->
+      && ((match task_detail_of_reader reader with
+           | Some (_, Some (count, height)) ->
              task_detail_viewport_changed state ~count ~height
-           | _ -> Option.is_none (current_task_detail_presented state))
+           | Some (_, None) | None -> Option.is_none (current_task_detail_presented state))
           || (task_detail_following_end state
               && match state.task_detail_id with
                  | None -> false
@@ -25221,14 +25221,14 @@ let main
     with
     | Frame_presenter.Presented _ as frame_result ->
         state.frames_presented <- state.frames_presented + 1;
-        (match reader, state.task_detail_id with
-         | Some (Task_detail (offset, Some (count, height))), Some task_id
+        (match task_detail_of_reader reader, state.task_detail_id with
+         | Some (offset, Some (count, height)), Some task_id
            when String.equal frame.surface_key "task-detail"
                 && not frame.compact_frame ->
            let _, terminal_cols = Masc_tui_render_prim.get_terminal_size () in
            let cols = task_document_columns state ~terminal_cols in
            task_detail_presented_frame state ~task_id ~count ~height ~offset ~cols
-         | _ -> task_detail_forget_frame state);
+         | (Some _ | None), (Some _ | None) -> task_detail_forget_frame state);
         (match Option.bind reader resource_scroll_position, state.resource_share_recovery_prompt with
          | Some position, Some prompt
            when not frame.Frame_presenter.compact_frame
@@ -28084,11 +28084,13 @@ Use relative paths for resources already held in the package. -->
         if not play_was_presented then true
         else play_card_matches ~presented:presented_play ~current:(play_card_shown state) in
       let task_detail_wheel_withdrawn =
-        match input, (!presented).reader with
-        | Some (Mouse_wheel (_, row, column)), Some (Task_detail _) ->
-          acting_pane_hit state ~row ~column = Pane_miss
-          && Option.is_none (current_task_detail_presented state)
-        | _ -> false in
+        Option.is_some (task_detail_of_reader (!presented).reader)
+        && match input with
+           | Some (Mouse_wheel (_, row, column)) ->
+             acting_pane_hit state ~row ~column = Pane_miss
+             && Option.is_none (current_task_detail_presented state)
+           | Some (Key _ | Pasted _ | Graphics_reply _ | Mouse_left_press _
+                  | Mouse_left_drag _ | Mouse_left_release _) | None -> false in
       (* Where a notch leaves the reader on screen, when it is the reader's:
          not over the Activity pane, which keeps the wheel it had. The frame
          names the reader; the notch moves it from where it is now. *)
@@ -28587,9 +28589,9 @@ Use relative paths for resources already held in the package. -->
              pressed
        | Some (Mouse_wheel _) when Option.is_some wheel_reader ->
            Option.iter (fun reader ->
-             match reader with
-             | Task_detail (offset, _) -> move_task_detail offset
-             | _ -> apply_clamped_scroll state reader) wheel_reader
+             match task_detail_of_reader (Some reader) with
+             | Some (offset, _) -> move_task_detail offset
+             | None -> apply_clamped_scroll state reader) wheel_reader
        | Some (Mouse_wheel _) when task_detail_wheel_withdrawn -> ()
        | Some (Mouse_wheel _) when queue_play_owner = Wait_for_frame -> ()
        (* Marked panel controls and its reader wheel were handled above.
@@ -34042,13 +34044,13 @@ Use relative paths for resources already held in the package. -->
          when Option.is_some (reading_pane state ~cols:terminal_columns) ->
            Option.iter
              (fun clamped ->
-               match clamped 0 with
-               | Task_detail _ when key = Some "end" ->
+               match task_detail_of_reader (Some (clamped 0)) with
+               | Some _ when key = Some "end" ->
                    let cols = task_document_columns state ~terminal_cols:terminal_columns in
                    task_detail_select_end state ~cols
-               | Task_detail _ ->
+               | Some _ ->
                    task_detail_user_scroll state 0
-               | _ ->
+               | None ->
                    apply_clamped_scroll state
                      (clamped (if key = Some "end" then clamped_scroll_end else 0)))
              (reading_pane state ~cols:terminal_columns)
@@ -37376,9 +37378,10 @@ Use relative paths for resources already held in the package. -->
               here rather than inside the drawing: a surface whose row count
               only exists once the frame is built cannot be bounded before it,
               but the drawing does not have to be the thing that stores it. *)
-           Option.iter (function
-             | Task_detail _ when task_detail_following_end state -> ()
-             | value -> apply_clamped_scroll state value) clamped;
+           Option.iter (fun value ->
+             if not (task_detail_following_end state
+                     && Option.is_some (task_detail_of_reader (Some value))) then
+               apply_clamped_scroll state value) clamped;
            if Terminal_profile.dynamic_title terminal_profile then
              Terminal_title.present terminal_title ~write:(output_string stdout)
                ~flush:(fun () -> flush stdout)

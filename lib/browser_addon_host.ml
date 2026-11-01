@@ -157,7 +157,7 @@ let gather t ~reach =
       | Mcp_tools -> None) current.unready in
     let identities=List.map (fun ((served:served),answer) -> served.service.backend,
       match answer with
-      | Ok published -> Browser_addon_observation.Observed_clients published.clients
+      | Ok (published:Browser_addon_observation.published) -> Browser_addon_observation.Observed_clients published.clients
       | Error _ -> Browser_addon_observation.Unobserved_clients) answers @ unready in
     let ego_identities=Browser_addon_observation.ego_identity_knowledge identities in
     let incomplete=List.exists (fun (_,answer) -> Result.is_error answer) answers || unready<>[] in

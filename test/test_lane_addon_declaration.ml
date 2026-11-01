@@ -148,7 +148,7 @@ max_reply_bytes=4096
   check bool "manual attach uses the same target validator before worker allocation" true
     (Result.is_error (Runtime.dispatch ~config ~operation:Runtime.Attach (`Assoc ["manifest_path",`String manifest_path;
       "run_id",`String "invalid-ego";"binding",`Assoc ["sources",`List [];"space",`Int (-1)]])));
-  check (list string) "neither path started a worker" [] !started)
+  check (Alcotest.list Alcotest.string) "neither path started a worker" [] !started)
 
 let test_keeper_create_operator_read_and_edit () = with_fixture (fun clock config directory _root started ->
   let bytes = declaration () in

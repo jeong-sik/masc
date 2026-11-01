@@ -59,7 +59,7 @@ let reaches_instance name attached (intended:F.attached) route verb call =
 let refuses_before_dispatch name attached class_ call =
   let before=ledger attached in
   (match call () with
-   | Error (Tool_result.Failed failure) ->
+   | Error (Tool_result.Failed (failure:Tool_result.failure_payload)) ->
        check bool (name ^ ": typed refusal") true
          (failure.class_=class_ && failure.effect_disposition=Tool_result.Proven_pre_effect)
    | Ok _|Error (Tool_result.Completed _|Deferred _) -> fail (name ^ ": expected a pre-effect refusal"));

@@ -20,6 +20,7 @@
   board_sort
   board_sub_board_json
   board_vote_key
+  board_vote_transition
   board_votes
   board_votes_json
   recipient_lookup)

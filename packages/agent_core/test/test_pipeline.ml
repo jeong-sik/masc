@@ -2032,6 +2032,7 @@ let test_nested_execution_stores_use_their_own_bus_observers () =
   let root_locator = ref None and child_locator = ref None in
   let root_calls = ref 0 and child_calls = ref 0 in
   let child_dir = Eio.Path.(dir / "independent-child") in
+  Eio.Path.mkdirs ~exists_ok:false ~perm:0o700 child_dir;
   let child_store = Agent.execution_store ~runtime ~dir:child_dir
       ~on_scope_ready:(fun value -> child_locator:=Some value; Ok ()) () in
   let make_agent name bus calls hooks =

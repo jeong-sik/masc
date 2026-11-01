@@ -1750,9 +1750,9 @@ let workflow ?actor t args =
     | `Assoc fields ->
       let expected=match source with
         | None -> []
-        | Some identity -> ["expectedSourcePage",obj ["spaceId",`Int identity.space_id;
-            "label",str identity.label;"targetId",str identity.target_id;
-            "openedBy",str (match identity.opened_by with Browser_surface.Agent_created -> "agent" | Unknown_origin -> "unknown")]] in
+        | Some identity -> ["expectedSourcePage",obj (("spaceId",`Int identity.space_id)::
+            Browser_surface.ego_page_fields {label=Some identity.label;
+              target_id=identity.target_id;opened_by=identity.opened_by})] in
       obj (expected @ ["inputReceiptContract",Browser_ego_release.receipt_contract;
         "label",str label;"cursor",str (cursor_label ~actor ~verb:"workflow")] @ fields)
     | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> args in
@@ -1787,7 +1787,7 @@ let workflow ?actor t args =
           | None -> fields
           | Some pages ->
             let page_json (identity:Browser_ego_workflow.page_identity) =
-              let `Assoc native=Browser_surface.ego_page_to_json
+              let native=Browser_surface.ego_page_fields
                 {label=Some identity.label;target_id=identity.target_id;opened_by=identity.opened_by} in
               obj (("spaceId",`Int identity.space_id)::("tabId",`Int (tab_of_page identity))::native) in
             let observed=obj ["source",page_json pages.source;"current",page_json pages.current;

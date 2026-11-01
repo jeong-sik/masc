@@ -9,10 +9,11 @@ let dialog_kind_of_wire = function
   | "beforeunload" -> Some Beforeunload | _ -> None
 type ego_page_origin = Agent_created | Unknown_origin
 type ego_page = { label : string option; target_id : string; opened_by : ego_page_origin }
-let ego_page_to_json page = `Assoc [
+let ego_page_fields page = [
   "label",(match page.label with None -> `Null | Some label -> `String label);
   "targetId",`String page.target_id;
   "openedBy",`String (match page.opened_by with Agent_created -> "agent" | Unknown_origin -> "unknown")]
+let ego_page_to_json page = `Assoc (ego_page_fields page)
 let ego_page_of_json = function
   | `Assoc fields when List.sort String.compare (List.map fst fields)=["label";"openedBy";"targetId"] ->
     (match List.assoc_opt "label" fields,List.assoc_opt "targetId" fields,List.assoc_opt "openedBy" fields with

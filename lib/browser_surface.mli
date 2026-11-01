@@ -14,6 +14,9 @@ type ego_page = { label : string option; target_id : string; opened_by : ego_pag
 (** SDK Page provenance observed in a tab inventory. A missing label means the
     tab is unmanaged. [target_id] is ephemeral, not durable Page identity.
     Origin does not grant control or permission to close/adopt a page. *)
+val ego_page_fields : ego_page -> (string * Yojson.Safe.t) list
+(** Canonical provenance members for composing an observation object. The JSON
+    encoder wraps these same members; this grants no Page authority. *)
 val ego_page_to_json : ego_page -> Yojson.Safe.t
 val ego_page_of_json : Yojson.Safe.t -> (ego_page, string) result
 (** [window_id] names the browser window a tab is in, when the browser says which. Tabs that share a

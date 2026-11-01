@@ -627,10 +627,42 @@ let test_canvas_source_positions () =
       List.iter (fun identity -> Alcotest.(check bool) "equal labels keep distinct origins" true
         (List.mem identity identities)) [Node_label (Named "A"); Node_label (Named "B"); Edge_label 0]
 
+let test_undrawn_source_decisions () =
+  let source = "graph TD\nA[ok]\n  style A fill:#f00  \n  click A href URL" in
+  let fragments = match Mermaid.render_with_status ~cols:120 source with
+    | Ok result -> result.undrawn_sources
+    | Error _ -> Alcotest.fail "trailing undrawn statements should retain source ranges" in
+  let traced = match Mermaid.render_with_source_labels ~cols:120 source with
+    | Ok result -> result.undrawn_sources
+    | Error _ -> Alcotest.fail "traced rendering should make the same source decision" in
+  Alcotest.(check bool) "plain and traced source ranges agree" true (fragments=traced);
+  let bytes = List.map (fun (range : Mermaid.undrawn_source) ->
+    String.sub source range.source_start (range.source_end-range.source_start)) fragments in
+  Alcotest.(check (list string)) "ranges retain the original statements and whitespace"
+    ["  style A fill:#f00  \n  click A href URL"] bytes;
+  List.iter (fun (source, original) ->
+    match Mermaid.render_with_status ~cols:120 source with
+    | Ok {undrawn_sources=[range]; _} ->
+        Alcotest.(check string) "intervening source stays in the range" original
+          (String.sub source range.source_start (range.source_end-range.source_start))
+    | Ok _ | Error _ -> Alcotest.fail "undrawn source should be one continuous range")
+    ["graph TD\nA[ok]\nstyle A fill:red\n\n  click A href URL", "style A fill:red\n\n  click A href URL";
+     "graph TD\nA[ok];style A fill:red; click A href URL", "style A fill:red; click A href URL"];
+  (match Mermaid.render_with_status ~cols:120 "%% important note\ngraph TD\nA[ok]" with
+   | Ok {undrawn_sources=[{placement=Before_diagram; _}]; _} -> ()
+   | Ok _ | Error _ -> Alcotest.fail "leading undrawn source belongs before the drawing");
+  let fallback source =
+    match Mermaid.render_with_status ~cols:120 source, Mermaid.render_with_source_labels ~cols:120 source with
+    | Error (Mermaid.Unsupported _), Error (Mermaid.Unsupported _) -> ()
+    | _ -> Alcotest.fail "source order or overwritten content requires source fallback" in
+  fallback "graph TD\nA[first]\nclassDef hot fill:red\nB[second]";
+  fallback "stateDiagram-v2\nA: first description\nA: second description"
+
 let () =
   Alcotest.run "tui mermaid"
     [ ( "goldens"
-      , [ Alcotest.test_case "canvas semantic byte positions" `Quick test_canvas_source_positions
+      , [ Alcotest.test_case "undrawn source decisions" `Quick test_undrawn_source_decisions
+        ; Alcotest.test_case "canvas semantic byte positions" `Quick test_canvas_source_positions
         ; Alcotest.test_case "state semantic source identities" `Quick test_state_source_label_identity
         ; Alcotest.test_case "group/sequence semantic source identities" `Quick test_group_and_sequence_source_identity
         ; Alcotest.test_case "parser-owned label identity and source ranges" `Quick test_parser_source_label_identity

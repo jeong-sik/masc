@@ -23,20 +23,21 @@
     flow, without their id, as Mermaid draws them. A state id is
     one token of letters, digits, [_] or non-ASCII text. A [note left of] or
     [note right of] a state, on one line or running to [end note], is read
-    and its text is not drawn.
+    but its text is not drawn; callers can show the source alongside the drawing.
     [sequenceDiagram] draws participants, lifelines, messages with their
     text, notes and the framed blocks. A diagram of any other kind, or a
     line this grammar cannot read, comes back as a {!failure} naming the
     kind or the line, and the caller shows the source under that name. Nothing is guessed. [subgraph] blocks are
     drawn as titled bounding boxes around their members (RFC-0429 §3.3);
     [classDef], [class], [style] and [click] statements, and [linkStyle] in
-    a flowchart, are accepted and change nothing on a text canvas.
+    a flowchart, are accepted and do not change the text canvas. The rendering
+    status reports those accepted but undrawn statements.
 
     Layout is layered: back edges are turned around so the rest is a DAG,
     layers come from the longest path, an edge across several layers gets a
     pass-through cell in each layer between, and each layer is ordered by
     the barycenter of its neighbours in a fixed number of sweeps. Same
-    source, same width: same bytes. Every glyph is one cell wide. *)
+    source, same width: same bytes. Width is measured in display cells. *)
 
 type direction =
   | Top_down
@@ -239,7 +240,22 @@ val parse : string -> (diagram, failure) result
 
 val render : cols:int -> string -> (string list, failure) result
 (** {!parse}, then lay out and draw. Each row is at most [cols] cells and
-    carries no trailing spaces; rows are not padded. *)
+    carries no trailing spaces; rows are not padded. Use {!render_with_status}
+    when the caller needs to preserve accepted but undrawn content. *)
+
+type source_placement = Before_diagram | After_diagram
+type undrawn_source = { source_start : int; source_end : int; placement : source_placement }
+(** A half-open byte range in the input source, for content not drawn. *)
+
+type rendered_with_status = {
+  rows : string list;
+  undrawn_sources : undrawn_source list;
+}
+
+val render_with_status : cols:int -> string -> (rendered_with_status, failure) result
+(** Like {!render}, also reporting source ranges accepted but not drawn and
+    their safe position beside the drawing. If no position preserves source
+    reading order, the renderer requests the source fallback. *)
 
 
 type semantic_position = { identity : label_identity; byte : int }
@@ -248,6 +264,7 @@ type rendered_with_sources = {
   rendered_rows : string list;
   rendered_positions : semantic_position option array array;
   labels : source_mapping;
+  undrawn_sources : undrawn_source list;
 }
 
 val render_with_source_labels : cols:int -> string -> (rendered_with_sources, failure) result

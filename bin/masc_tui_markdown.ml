@@ -1436,6 +1436,25 @@ let render_streaming_internal ?on_block ?on_diagram ?on_semantic ?on_unmapped
          | Some _ -> emit_inline ~joins_previous:(i>0) ~base:!source_byte (render_lexed_line_with_spans ~palette ~width pieces));
         source_byte := !source_byte + String.length (String.concat "" (List.map fst pieces)) + 1) lines
     in
+    let emit_undrawn_source placement fragments =
+      let fragments = List.filter (fun (fragment : Masc_tui_mermaid.undrawn_source) ->
+        fragment.placement = placement) fragments in
+      if fragments <> [] then begin
+        (* This is a section marker, not another occurrence of source text. *)
+        emit_all (code_rows palette ~width "mermaid: undrawn source follows");
+        let source = body_text () in
+        List.iter (fun (fragment : Masc_tui_mermaid.undrawn_source) ->
+          let offset = ref fragment.source_start in
+          let text = String.sub source fragment.source_start (fragment.source_end - fragment.source_start) in
+          let lines = String.split_on_char '\n' text in
+          let last = List.length lines - 1 in
+          List.iteri (fun i line ->
+            let visible = if i < last && String.ends_with ~suffix:"\r" line
+              then String.sub line 0 (String.length line - 1) else line in
+            emit_code ~joins_previous:(i>0) ~base:(body_base + !offset) visible;
+            offset := !offset + String.length line + 1) lines) fragments
+      end
+    in
     Option.iter
       (fun language ->
         let label = fence_header_label language in
@@ -1463,8 +1482,11 @@ let render_streaming_internal ?on_block ?on_diagram ?on_semantic ?on_unmapped
      | None, Some "mermaid", _ ->
          let body_width = max 1 (width - Layout.display_width palette.code_gutter) in
          (match on_semantic with
-          | None -> (match Masc_tui_mermaid.render ~cols:body_width (body_text ()) with
-              | Ok rows -> List.iter (fun row -> emit_all (code_rows palette ~width row)) rows
+          | None -> (match Masc_tui_mermaid.render_with_status ~cols:body_width (body_text ()) with
+              | Ok rendered ->
+                  emit_undrawn_source Masc_tui_mermaid.Before_diagram rendered.undrawn_sources;
+                  List.iter (fun row -> emit_all (code_rows palette ~width row)) rendered.rows;
+                  emit_undrawn_source Masc_tui_mermaid.After_diagram rendered.undrawn_sources
               | Error failure ->
                   emit_all (code_rows palette ~width (mermaid_failure_text failure));
                   List.iter (fun line -> emit_all (code_rows palette ~width line.source_text)) body)
@@ -1473,6 +1495,7 @@ let render_streaming_internal ?on_block ?on_diagram ?on_semantic ?on_unmapped
                   emit_generated ~block_start ~field:Mermaid_diagnostic (mermaid_failure_text failure);
                   List.iteri (fun i line -> emit_code ~joins_previous:(i>0) ~base:line.source_start line.source_text) body
               | Ok mapped ->
+                  emit_undrawn_source Masc_tui_mermaid.Before_diagram mapped.undrawn_sources;
                   let labels = match mapped.labels with
                     | Complete labels -> labels
                     | Incomplete {mapped;missing} ->
@@ -1500,7 +1523,8 @@ let render_streaming_internal ?on_block ?on_diagram ?on_semantic ?on_unmapped
                       origins=Array.map (fun (range : Masc_tui_mermaid.label_source_range) ->
                         Some (Original {start_byte=body_base+range.start_byte;end_byte=body_base+range.end_byte})) label.ranges;
                       visible_rows=Option.value (Hashtbl.find_opt visible label.identity) ~default:[] |> List.rev;
-                      reading=Drawn_diagram {block_start}}) labels))
+                      reading=Drawn_diagram {block_start}}) labels;
+                  emit_undrawn_source Masc_tui_mermaid.After_diagram mapped.undrawn_sources))
      | None, Some tag, Some lexer when is_alphatex_tag tag ->
          let source = body_text () in
          let body_width = max 1 (width - Layout.display_width palette.code_gutter) in

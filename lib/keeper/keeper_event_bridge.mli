@@ -6,9 +6,9 @@
 
     @since 2.96.0 *)
 
-(** Start the bridge fiber. Subscribes to [bus], drains events on an
-    env-configurable interval
-    ([MASC_AGENT_CORE_SSE_DRAIN_INTERVAL_SEC], default 0.25s),
+(** Start the bridge fiber. Subscribes to [bus], waits for events without
+    polling, and retries failed relays after an env-configurable delay
+    ([MASC_AGENT_CORE_SSE_DRAIN_INTERVAL_SEC], default 2s),
     broadcasts each as an SSE event, and appends each observed serializable
     event to the [.masc/agent-core-events/] store for offline/debugging.
     The server's prune pass removes the store's day files by age.
@@ -39,4 +39,12 @@ module For_testing : sig
   val emit_native_event_log : Agent_core.Event_bus.event -> Yojson.Safe.t -> unit
   (** The production log projection. The envelope owns the Keeper turn;
       the payload owns the agent. Session-local ordinals are never substituted. *)
+
+  val start_with_retry_interval :
+    interval_s:float ->
+    sw:Eio.Switch.t ->
+    clock:_ Eio.Time.clock ->
+    config:Workspace.config ->
+    bus:Agent_core.Event_bus.t ->
+    unit
 end

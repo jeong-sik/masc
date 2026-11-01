@@ -50,5 +50,17 @@ let drain_reporting_drops handle =
   { events; overflow_loss = claim_unreported_drops handle }
 ;;
 
+type awaited_batch =
+  | Batch of batch
+  | Unsubscribed
+
+let await_reporting_drops handle =
+  Eio.Fiber.yield ();
+  match Agent_core.Event_bus.await_batch handle.subscription with
+  | Agent_core.Event_bus.Events events ->
+    Batch { events; overflow_loss = claim_unreported_drops handle }
+  | Agent_core.Event_bus.Unsubscribed -> Unsubscribed
+;;
+
 let unsubscribe bus handle = Agent_core.Event_bus.unsubscribe bus handle.subscription
 let publish = Agent_core.Event_bus.publish

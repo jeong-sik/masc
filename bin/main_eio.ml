@@ -1059,10 +1059,7 @@ let run_cmd ?schema_observation ?(record_default = false) ?(previous_owner = Ref
          the finalizer only after exclusive creation succeeds. *)
       Unix.mkdir directory 0o700;
       let observer = Agent_core.Base.Schema_observation.create ~mode in
-      Fun.protect
-        (fun () -> Agent_core.Base.Schema_observation.within observer
-          (fun () -> run_inside_scheduler env))
-        ~finally:(fun () ->
+      let write_report () =
           (* All server-owned switches and pool jobs have settled. The
              observer binding is gone before snapshot serialization and I/O. *)
           let report = Agent_core.Base.Schema_observation.snapshot observer in
@@ -1073,7 +1070,48 @@ let run_cmd ?schema_observation ?(record_default = false) ?(previous_owner = Ref
                       ~write:(output_string channel) report) with
           | Ok () -> ()
           | Error failure ->
-            Printexc.raise_with_backtrace failure.exception_ failure.backtrace)
+            Printexc.raise_with_backtrace failure.exception_ failure.backtrace
+      in
+      match Agent_core.Base.Schema_observation.within observer
+              (fun () -> run_inside_scheduler env) with
+      | result ->
+          (* Keep report-only failures on the existing finalizer path. In
+             particular, report I/O EINTR is not a scheduler-loop EINTR. *)
+          Fun.protect (fun () -> result) ~finally:write_report
+      | exception primary ->
+          let primary_backtrace = Printexc.get_raw_backtrace () in
+          (match write_report () with
+           | () -> Printexc.raise_with_backtrace primary primary_backtrace
+           | exception report_error ->
+               let report_backtrace = Printexc.get_raw_backtrace () in
+               let primary_failure = primary, primary_backtrace in
+               let report_failure = report_error, report_backtrace in
+               let log_other (error, backtrace) =
+                 Eio.traceln "schema-observe: additional failure: %s\n%s"
+                   (Printexc.to_string error)
+                   (Printexc.raw_backtrace_to_string backtrace)
+               in
+               let preserve_reserved (error, backtrace) other =
+                 match Agent_core.Llm_provider.Reserved_exn.reraise_if_reserved error with
+                 | () -> ()
+                 | exception reserved ->
+                     log_other other;
+                     Printexc.raise_with_backtrace reserved backtrace
+               in
+               (* A primary control exception wins over any report failure.
+                  [combine] would discard bare cancellation; wrapping EINTR
+                  would bypass the typed scheduler diagnostic below. *)
+               preserve_reserved primary_failure report_failure;
+               match primary with
+               | Unix.Unix_error (Unix.EINTR, _, _) ->
+                   log_other report_failure;
+                   Printexc.raise_with_backtrace primary primary_backtrace
+               | _ ->
+                   preserve_reserved report_failure primary_failure;
+                   let combined, backtrace =
+                     Eio.Exn.combine primary_failure report_failure
+                   in
+                   Printexc.raise_with_backtrace combined backtrace)
   in
   (match Eio_main.run run_observed with
    | () -> ()

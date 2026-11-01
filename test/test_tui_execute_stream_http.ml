@@ -435,7 +435,7 @@ let test_sse_status_and_content_type_gate env =
     ; "no-content status", `No_content, [], false
     ] in
   List.iter (fun (label, status, content_types, expected_open) ->
-    let handler = stream_response ~status ~content_types ~receipts:[] [ "data: {}\n\n" ] in
+    let handler = stream_response ~status ~content_types ~receipts:[ receipt ] [ "data: {}\n\n" ] in
     with_server env ~handler (fun ~port ->
       let opens = ref 0 and chunks = ref 0 in
       let observer = Http.observe_runtime_events ~clock:(Eio.Stdenv.clock env)
@@ -477,6 +477,97 @@ let test_sse_http_refusals_keep_status_and_body env =
       Alcotest.(check int) "no stream opened" 0 !opens;
       Alcotest.(check int) "no refusal body reached a stream decoder" 0 !chunks))
     [ `Unauthorized, 401; `Not_found, 404; `Conflict, 409; `Service_unavailable, 503 ]
+;;
+
+(* A peer that ignores the expected-workspace query can still answer 200.
+   The body is not usable unless this response carries its own receipt. *)
+let test_fleet_requires_workspace_receipt env =
+  List.iter (fun (label, receipts, accepted) ->
+    with_server env ~handler:(stream_response ~receipts [ "data: {}\n\n" ]) (fun ~port ->
+      let chunks = ref 0 in
+      let result = Http.observe_fleet_stream ~clock:(Eio.Stdenv.clock env)
+          ~expected_workspace:identity ~host:"127.0.0.1" ~port
+          ~on_chunk:(fun _ -> incr chunks) in
+      (match accepted, result with
+       | true, Ok () | false, Error (Http.Invalid_handshake _) -> ()
+       | _ -> Alcotest.failf "%s: wrong fleet admission" label);
+      Alcotest.(check bool) (label ^ ": body delivered only if attested") accepted (!chunks > 0)))
+    [ "matched", [ receipt ], true
+    ; "missing", [], false
+    ; "wrong", [ receipt_name, "not-matched" ], false
+    ; "duplicate", [ receipt; receipt ], false
+    ; "case-mixed duplicate", [ receipt; "X-Masc-Workspace-Read", snd receipt ], false
+    ; "combined", [ receipt_name, "matched-v1, matched-v1" ], false ]
+;;
+
+(* Exercise the actual H1 workspace precondition wrapper and fleet stream
+   route together; neither authentication nor a production server is used. *)
+let test_fleet_route_attests_its_admitted_workspace env =
+  let workspace = Masc_test_deps.setup_test_workspace () in
+  let base_path = Unix.realpath workspace in
+  let masc_root = Unix.realpath (Filename.concat workspace ".masc") in
+  let state = Masc.Mcp_server_eio.For_testing.create_state ~base_path:workspace () in
+  Fun.protect
+    ~finally:(fun () -> Masc_test_deps.cleanup_test_workspace workspace)
+    (fun () -> Eio.Switch.run (fun sw ->
+      let clock = Eio.Stdenv.clock env in
+      let hub = Masc.Fleet_stream_hub.create ~on_subscriber_error:(fun _ -> ()) in
+      Masc.Fleet_stream_hub.note_degraded hub ~since:10. Masc.Fleet_stream.Scan_failed;
+      let handler reqd =
+        let request = Httpun.Reqd.request reqd in
+        Server_auth.with_read_workspace_precondition state
+          (fun _ _ reqd ->
+             Server_routes_http_routes_fleet_stream.serve ~sw ~clock
+               ~subscribe:(Masc.Fleet_stream_hub.subscribe hub)
+               ~ping_interval_s:0.1 ~stalled_after_s:2. ~max_queued_events:4 reqd)
+          request reqd in
+      with_server env ~handler (fun ~port ->
+        let exception Headers of int * (string * string) list in
+        let get_headers query =
+          let url = Printf.sprintf "http://127.0.0.1:%d/api/v1/stream/fleet%s" port query in
+          match Masc_http_client.get_stream ~clock ~idle_timeout_sec:3. ~url ~headers:[]
+              ~on_response:(fun ~status ~headers -> raise (Headers (status, headers)))
+              ~on_chunk:(fun _ -> ()) () with
+          | exception Headers (status, headers) -> status, headers
+          | _ -> Alcotest.fail "fleet response did not deliver headers" in
+        let query base root =
+          Uri.add_query_params' (Uri.of_string "")
+            [ "expected_base_path", base; "expected_masc_root", root ]
+          |> Uri.to_string in
+        let receipt_values headers =
+          List.filter_map (fun (name, value) ->
+            if String.equal (String.lowercase_ascii name) receipt_name then Some value else None)
+            headers in
+        let status, headers = get_headers (query base_path masc_root) in
+        Alcotest.(check int) "matched route opens" 200 status;
+        Alcotest.(check (list string)) "matched stream carries its receipt"
+          [ snd receipt ] (receipt_values headers);
+        let status, headers = get_headers "" in
+        Alcotest.(check int) "unbound route opens" 200 status;
+        Alcotest.(check (list string)) "unbound stream has no receipt" [] (receipt_values headers);
+        let status, headers = get_headers (query "/foreign-workspace" masc_root) in
+        Alcotest.(check int) "foreign workspace is refused" 409 status;
+        Alcotest.(check (list string)) "refusal has no matched receipt" [] (receipt_values headers);
+        let expected : Masc.Tui_decode.server_identity =
+          { identity with
+            sid_base_path = Masc.Tui_decode.Canonical_path.of_path base_path
+          ; sid_masc_root = Masc.Tui_decode.Canonical_path.of_path masc_root
+          } in
+        let reader = Masc_tui_fleet_stream.create () in
+        let exception Snapshot_received in
+        (match Http.observe_fleet_stream ~clock ~expected_workspace:expected
+             ~host:"127.0.0.1" ~port ~on_chunk:(fun chunk ->
+               ignore (Masc_tui_fleet_stream.feed reader chunk : Masc_tui_fleet_stream.step);
+               match Masc_tui_fleet_stream.view reader with
+               | Masc_tui_fleet_stream.Unavailable _ -> raise Snapshot_received
+               | _ -> ()) with
+         | exception Snapshot_received -> ()
+         | _ -> Alcotest.fail "attested client did not receive the route snapshot");
+        Alcotest.(check bool) "the real client decoded the admitted snapshot" true
+          (match Masc_tui_fleet_stream.view reader with
+           | Masc_tui_fleet_stream.Unavailable { degradation; _ } ->
+               degradation.reason = Masc.Fleet_stream.Scan_failed
+           | _ -> false))))
 ;;
 
 (* Exercise the real MCP GET handler over H1. Authentication is supplied by
@@ -631,6 +722,8 @@ let () =
         ] )
     ; ( "SSE response"
       , [ case "both subscriptions validate status and media type" test_sse_status_and_content_type_gate
-        ; case "HTTP refusals keep status and body" test_sse_http_refusals_keep_status_and_body ] )
+        ; case "HTTP refusals keep status and body" test_sse_http_refusals_keep_status_and_body
+        ; case "fleet requires the workspace receipt" test_fleet_requires_workspace_receipt
+        ; case "fleet route attests its admitted workspace" test_fleet_route_attests_its_admitted_workspace ] )
     ]
 ;;

@@ -203,6 +203,7 @@ type capabilities =
   ; (* ── Input modalities ──────────────────────────────── *)
     supports_multimodal_inputs : bool (** Any non-text input *)
   ; supports_image_input : bool
+  ; declared_image_input : bool option
   ; supports_audio_input : bool
   ; supports_video_input : bool
   ; supports_document_input : bool
@@ -276,6 +277,7 @@ let default_capabilities =
   ; json_schema_dialect = Openai_json_schema
   ; supports_multimodal_inputs = false
   ; supports_image_input = false
+  ; declared_image_input = None
   ; supports_audio_input = false
   ; supports_video_input = false
   ; supports_document_input = false
@@ -392,6 +394,10 @@ let anthropic_thinking_control_for_provider_model_id ~provider ~model_id =
       ~provider model_id)
 ;;
 
+let with_declared_image_input value capabilities =
+  { capabilities with supports_image_input = value; declared_image_input = Some value }
+;;
+
 let anthropic_capabilities =
   { default_capabilities with
     max_context_tokens = Some 200_000
@@ -406,7 +412,6 @@ let anthropic_capabilities =
   ; supports_reasoning = true
   ; supports_structured_output = true
   ; supports_multimodal_inputs = true
-  ; supports_image_input = true
   ; (* The Messages API has a first-class [document] content block with its own
        [source] object (docs.anthropic.com/en/docs/build-with-claude/pdf-support);
        {!Api_common.content_block_to_json} emits exactly that shape. *)
@@ -425,6 +430,7 @@ let anthropic_capabilities =
      remains [false] — Anthropic does not accept min_p. *)
     supports_top_k = true
   }
+  |> with_declared_image_input true
 ;;
 
 let kimi_capabilities =
@@ -483,8 +489,8 @@ let kimi_capabilities =
   ; supports_system_prompt = true
   ; supports_native_streaming = true
   ; supports_multimodal_inputs = true
-  ; supports_image_input = true
   }
+  |> with_declared_image_input true
 ;;
 
 let openai_compat_chat_capabilities =
@@ -506,10 +512,10 @@ let openai_compat_chat_capabilities =
   ; supports_response_format_json = true
   ; supports_structured_output = true
   ; supports_multimodal_inputs = true
-  ; supports_image_input = true
   ; supports_native_streaming = true
   ; supports_prompt_caching = false
   }
+  |> with_declared_image_input true
 ;;
 
 let openai_compat_chat_extended_capabilities =
@@ -584,12 +590,12 @@ let mimo_capabilities =
   ; supports_response_format_json = true
   ; supports_structured_output = false
   ; supports_multimodal_inputs = false
-  ; supports_image_input = false
   ; supports_audio_input = false
   ; supports_video_input = false
   ; supports_document_input = false
   ; supports_native_streaming = true
   }
+  |> with_declared_image_input false
 ;;
 
 (* Ollama OpenAI-compat endpoint behavior on tool_choice is model-dependent
@@ -781,7 +787,6 @@ let gemini_capabilities =
   ; supports_response_format_json = true
   ; supports_structured_output = true
   ; supports_multimodal_inputs = true
-  ; supports_image_input = true
   ; supports_audio_input = true
   ; supports_video_input = true
   ; (* [inlineData] carries an arbitrary MIME type plus base64 bytes, so a
@@ -801,6 +806,7 @@ let gemini_capabilities =
      min_p field. *)
     supports_top_k = true
   }
+  |> with_declared_image_input true
 ;;
 
 (* CLI subprocess transports have been removed; CLI-specific capability
@@ -1094,6 +1100,9 @@ let apply_declarative_capability_overrides ?(base=default_capabilities) override
        | Some c -> c
        | None -> default_capabilities)
   in
+  let base = match overrides.supports_image_input with
+    | Some value -> with_declared_image_input value base
+    | None -> base in
   let override_bool base_val = function
     | Some b -> b
     | None -> base_val
@@ -1191,8 +1200,6 @@ let apply_declarative_capability_overrides ?(base=default_capabilities) override
   ; json_schema_dialect = Option.value overrides.json_schema_dialect ~default:base.json_schema_dialect
   ; supports_multimodal_inputs =
       override_bool base.supports_multimodal_inputs overrides.supports_multimodal_inputs
-  ; supports_image_input =
-      override_bool base.supports_image_input overrides.supports_image_input
   ; supports_audio_input =
       override_bool base.supports_audio_input overrides.supports_audio_input
   ; supports_video_input =
@@ -1444,6 +1451,20 @@ let apply_catalog_entry ?base ~provider_entry ~wire
         (fun (provider : Model_catalog.provider_entry) -> provider.capabilities_base)
   in
   apply_declarative_capability_overrides ?base { overrides with base_label }
+;;
+
+let declared_image_input_for_provider_model ~catalog ~wire ~provider ~model_id =
+  match provider with
+  | Model_catalog.Anonymous_wire _ -> None
+  | Model_catalog.Declared_provider _ ->
+    Option.bind (Model_catalog.provider_entry_for_reference catalog provider)
+      (fun provider_entry ->
+        Option.bind (Model_catalog.lookup_model_for_provider catalog ~provider ~model_id)
+          (fun entry ->
+            let provider_entry, wire = match entry.Model_catalog.provider_name with
+              | None -> None, None
+              | Some _ -> Some provider_entry, wire in
+            (apply_catalog_entry ~provider_entry ~wire entry).declared_image_input))
 ;;
 
 (** Look up capabilities for [model_id] in the loaded model catalog only.

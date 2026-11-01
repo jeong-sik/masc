@@ -1,6 +1,7 @@
 (** JSON builder for [GET /api/v1/runtime/resolved] — the single resolved
     runtime document (bugs #14/#15/#36): every configured runtime's effective
-    max-context and which source produced it, every configured lane in its
+    max-context and which source produced it, effective image admission and
+    the model's optional image declaration, every configured lane in its
     declared candidate order, and the
     full keeper fleet joined against [\[runtime.assignments\]] with the
     [\[runtime\].default] rider made explicit. This is the sole document the

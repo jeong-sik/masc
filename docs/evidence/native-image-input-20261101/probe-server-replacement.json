@@ -1,0 +1,13 @@
+{
+  "scope": "external server replacement interrupted the earlier Keeper probe",
+  "previous_binary_commit": "61b4d5531d44cb780dff64158fdbf7d641f1658f",
+  "current_binary_commit": "19bcbb75a8233115ec0745e34e95cee90ede4fbf",
+  "current_runtime_instance_id": "01a1952c-ff63-7000-affd-592b27a8ec6d",
+  "current_started_at": "2026-11-01T03:35:16Z",
+  "operation_id": "kmsg-e090929e1459a9471f1c791329fee5ba",
+  "state": "Failed",
+  "failure_kind": "Turn_cancelled",
+  "failure_detail": "Keeper owner stopped the active turn",
+  "current_glm_image_input": true,
+  "observed_at": "2026-11-01T03:42:24Z"
+}

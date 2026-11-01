@@ -400,6 +400,13 @@ let provider_model_rows (provider_id : string) : (Yojson.Safe.t, string) result 
                              | Some rungs -> `List (List.map (fun rung -> `String rung) rungs)) )
                         ; ("default_reasoning_effort", default_effort)
                         ; ("supports_tools", `Bool capabilities.supports_tools)
+                        ; ( "supports_image_input"
+                          , (match Llm_provider.Capabilities.declared_image_input_for_provider_model
+                              ~catalog ~wire:(Some provider.kind)
+                              ~provider:(Llm_provider.Model_catalog.Declared_provider provider.id)
+                              ~model_id:entry.model_id with
+                             | Some declared -> `Bool declared
+                             | None -> `Null) )
                         ; ("supports_streaming", `Bool capabilities.supports_native_streaming)
                         ]))
               | _ -> None)

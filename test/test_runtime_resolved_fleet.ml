@@ -24,6 +24,8 @@ let runtime_toml =
    [models.sol]\n\
    api-name = \"gpt-5.6-sol\"\n\
    max-context = 400000\n\
+   [models.sol.capabilities]\n\
+   supports-image-input = true\n\
    \n\
    [fleet_claude.sonnet]\n\
    \n\
@@ -118,6 +120,23 @@ let () =
             "every keeper has a row and its lane"
             `Quick
             test_every_keeper_has_a_row_and_its_lane
+        ; test_case
+            "resolved image admission distinguishes unreported declarations"
+            `Quick
+            (fun () -> with_fleet ~directory_keepers:[] @@ fun config ->
+               let open Yojson.Safe.Util in
+               let rows = resolved config |> member "runtimes" |> to_list in
+               let row id = List.find (fun row -> row |> member "id" |> to_string = id) rows in
+               let vision = row "fleet_codex.sol" in
+               check bool "declared images reach a capable transport" true
+                 (vision |> member "supports_image_input" |> to_bool);
+               check bool "declaration is visible" true
+                 (vision |> member "declared_image_input" |> to_bool);
+               let undeclared = row "fleet_claude.sonnet" in
+               check bool "unreported image capability is not admitted" false
+                 (undeclared |> member "supports_image_input" |> to_bool);
+               check bool "unreported stays null rather than false" true
+                 (undeclared |> member "declared_image_input" = `Null))
         ] )
     ]
 ;;

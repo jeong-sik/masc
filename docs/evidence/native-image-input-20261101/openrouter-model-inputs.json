@@ -1,0 +1,115 @@
+{
+  "deepseek/deepseek-v4.1-flash-1017": [
+    "text",
+    "image"
+  ],
+  "nvidia/nemotron-3.5-super-vl:free": [
+    "text",
+    "image",
+    "video"
+  ],
+  "x-ai/grok-4.7": [
+    "text",
+    "image",
+    "file"
+  ],
+  "z-ai/glm-5.3-flashx": [
+    "text",
+    "image",
+    "video"
+  ],
+  "openai/gpt-6-astra": [
+    "file",
+    "image",
+    "text"
+  ],
+  "qwen/qwen3.8-max-0902": [
+    "text",
+    "image",
+    "video"
+  ],
+  "google/gemini-3.8-flash": [
+    "text",
+    "image",
+    "video",
+    "file",
+    "audio"
+  ],
+  "anthropic/claude-fable-5.1": [
+    "text",
+    "image",
+    "file"
+  ],
+  "qwen/qwen3.8-flash": [
+    "text",
+    "image",
+    "video"
+  ],
+  "z-ai/glm-5.3-flash": [
+    "text",
+    "image",
+    "video"
+  ],
+  "z-ai/glm-5.3": [
+    "text"
+  ],
+  "x-ai/grok-4.6": [
+    "text",
+    "image",
+    "file"
+  ],
+  "liquid/lfm-2.5-2.6b:free": [
+    "text"
+  ],
+  "anthropic/claude-opus-5": [
+    "text",
+    "image",
+    "file"
+  ],
+  "moonshotai/kimi-k3": [
+    "text",
+    "image",
+    "video"
+  ],
+  "openai/gpt-5.6-luna": [
+    "file",
+    "image",
+    "text"
+  ],
+  "openai/gpt-5.6-terra": [
+    "file",
+    "image",
+    "text"
+  ],
+  "openai/gpt-5.6-sol": [
+    "file",
+    "image",
+    "text"
+  ],
+  "cohere/north-mini-code:free": [
+    "text"
+  ],
+  "openai/gpt-5.5": [
+    "file",
+    "image",
+    "text"
+  ],
+  "deepseek/deepseek-v4-pro": [
+    "text"
+  ],
+  "deepseek/deepseek-v4-flash": [
+    "text"
+  ],
+  "google/gemini-3.1-pro-preview": [
+    "audio",
+    "file",
+    "image",
+    "text",
+    "video"
+  ],
+  "anthropic/claude-haiku-4.5": [
+    "text",
+    "image",
+    "file"
+  ]
+}

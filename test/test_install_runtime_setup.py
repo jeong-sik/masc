@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import tomllib
 import unittest
 from unittest.mock import patch
 
@@ -185,6 +186,30 @@ class PresentationPrerequisites(unittest.TestCase):
 
 
 class ModelSelection(unittest.TestCase):
+    def test_selected_http_model_preserves_reported_image_support(self):
+        source = dict(choice='openai_compatible', command='', endpoint='https://fixture.invalid/v1')
+        for declared in (True, False, None):
+            with self.subTest(declared=declared):
+                _, selected = SETUP.resolve_model_spec(
+                    source, dict(id='selected-model', context=8192, supports_image_input=declared), 10)
+                self.assertEqual(selected.get('supports_image_input'), declared)
+                if declared is None:
+                    self.assertNotIn('supports_image_input', selected)
+
+    def test_standalone_selection_keeps_selected_model_image_metadata(self):
+        for declared in (True, False, None):
+            rows = [dict(id='different-model', label='other', context=8192, supports_image_input=True),
+                    dict(id='selected-model', label='selected', context=8192, supports_image_input=declared)]
+            with self.subTest(declared=declared), \
+                    patch.object(SETUP, 'native_discover_models', return_value=(rows, 'fixture')), \
+                    patch.object(SETUP.sys, 'stdin', io.StringIO('2\n')), \
+                    contextlib.redirect_stderr(io.StringIO()):
+                selected = SETUP.select_model('/fixture/masc', 'openai_compatible')
+                self.assertEqual(selected['model'], 'selected-model')
+                self.assertEqual(selected.get('supports_image_input'), declared)
+                if declared is None:
+                    self.assertNotIn('supports_image_input', selected)
+
     def test_account_model_preserves_exact_native_image_declaration_and_context(self):
         source = dict(choice='codex', command='codex', account_home='/owned/codex')
         for declared in (True, False, None):
@@ -1406,6 +1431,62 @@ class NamedCatalogSources(unittest.TestCase):
             SETUP.resolve_model_spec(source, dict(id=catalog['id'], label='x', context=None,
                                                   existing=None, catalog=catalog), 1)
         self.assertIn('tool support', str(raised.exception))
+
+    def test_named_provider_render_preserves_catalog_image_declaration(self):
+        source = self.catalog_sources(self.INVENTORY)[0]
+        for declared in (True, False, None):
+            catalog = dict(id='vendor/selected-model', max_context=8192,
+                           supports_tools=True, supports_streaming=True)
+            if declared is not None:
+                catalog['supports_image_input'] = declared
+            with self.subTest(declared=declared):
+                _, selected = SETUP.resolve_model_spec(
+                    source, dict(id=catalog['id'], catalog=catalog), 1)
+                self.assertEqual(selected.get('supports_image_input'), declared)
+                _, rendered = SETUP.render(selected)
+                if declared is None:
+                    self.assertNotIn(b'supports-image-input', rendered)
+                else:
+                    models = tomllib.loads(rendered.decode())['models']
+                    self.assertEqual(next(iter(models.values()))['capabilities']['supports-image-input'], declared)
+
+    def test_named_provider_keeps_explicit_endpoint_image_metadata(self):
+        source = self.catalog_sources(self.INVENTORY)[0]
+        catalog = dict(id='vendor/selected-model', max_context=8192,
+                       supports_tools=True, supports_streaming=True, supports_image_input=None)
+        _, selected = SETUP.resolve_model_spec(
+            source, dict(id=catalog['id'], catalog=catalog, supports_image_input=True), 1)
+        self.assertIs(selected['supports_image_input'], True)
+        catalog['supports_image_input'] = True
+        _, selected = SETUP.resolve_model_spec(
+            source, dict(id=catalog['id'], catalog=catalog, supports_image_input=False), 1)
+        self.assertIs(selected['supports_image_input'], False)
+
+    def test_source_models_preserves_endpoint_images_through_selection_and_rendering(self):
+        source = self.catalog_sources(self.INVENTORY)[0]
+        for catalog_image, endpoint_image, expected in [
+                (True, False, False), (False, True, True),
+                (True, None, True), (None, None, None), (None, False, False)]:
+            catalog = dict(id='vendor/selected-model', label='Selected', max_context=8192,
+                           supports_tools=True, supports_streaming=True,
+                           supports_image_input=catalog_image)
+            observed = dict(id=catalog['id'], label='Selected endpoint model', context=8192,
+                            supports_image_input=endpoint_image)
+            with self.subTest(catalog=catalog_image, endpoint=endpoint_image), \
+                    patch.object(SETUP, 'provider_catalog_models', return_value=[catalog]), \
+                    patch.object(SETUP, 'native_discover_models', return_value=([observed], 'endpoint')):
+                rows, _ = SETUP.source_models('/fixture/masc', source, 1)
+                selected = next(row for row in rows if row['id'] == catalog['id'])
+                self.assertIn('supports_image_input', selected)
+                self.assertIs(selected['supports_image_input'], endpoint_image)
+                _, spec = SETUP.resolve_model_spec(source, selected, 1)
+                _, rendered = SETUP.render(spec)
+                model = next(iter(tomllib.loads(rendered.decode())['models'].values()))
+                self.assertIs(spec.get('supports_image_input'), expected)
+                self.assertIs(model.get('capabilities', {}).get('supports-image-input'), expected)
+                if expected is None:
+                    self.assertNotIn('supports_image_input', spec)
+                    self.assertNotIn('supports-image-input', model.get('capabilities', {}))
 
     def test_a_failed_catalog_read_is_an_error_not_an_empty_list(self):
         failure = subprocess.CompletedProcess([], 1, '', 'provider listing exploded')

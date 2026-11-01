@@ -1,0 +1,158 @@
+{
+  "checks": 72240,
+  "scope": "Extracted count/index navigation decisions with integer row-count adapter. Not formatting, full TUI rendering, requests or physical display latency. Hot counts prefilled; cold includes new cache arrays and simulated per-entry rows. Per-call answer checking is included equally. Eight AB/BA batches; default runtime, shared host.",
+  "summary": [
+    {
+      "entries": 30,
+      "mode": "hot",
+      "before": {
+        "wall_us": 0.03636045,
+        "cpu_us": 0.03644999999999898,
+        "allocated_bytes": 88.0256
+      },
+      "after": {
+        "wall_us": 0.023502099999999998,
+        "cpu_us": 0.023599999999990295,
+        "allocated_bytes": 72.0256
+      },
+      "ratios": {
+        "wall_us": 0.6463643876794704,
+        "cpu_us": 0.6474622770916585,
+        "allocated_bytes": 0.8182346953613494
+      }
+    },
+    {
+      "entries": 30,
+      "mode": "cold",
+      "before": {
+        "wall_us": 0.47602500000000003,
+        "cpu_us": 0.5249999999956678,
+        "allocated_bytes": 3644.8
+      },
+      "after": {
+        "wall_us": 0.48855,
+        "cpu_us": 0.5000000000032756,
+        "allocated_bytes": 3692.8
+      },
+      "ratios": {
+        "wall_us": 1.0263116432960453,
+        "cpu_us": 0.9523809523950505,
+        "allocated_bytes": 1.0131694468832309
+      }
+    },
+    {
+      "entries": 300,
+      "mode": "hot",
+      "before": {
+        "wall_us": 0.3148958,
+        "cpu_us": 0.2914000000000083,
+        "allocated_bytes": 88.0256
+      },
+      "after": {
+        "wall_us": 0.027441649999999998,
+        "cpu_us": 0.02735000000000376,
+        "allocated_bytes": 72.0256
+      },
+      "ratios": {
+        "wall_us": 0.08714517627735904,
+        "cpu_us": 0.0938572409059814,
+        "allocated_bytes": 0.8182346953613494
+      }
+    },
+    {
+      "entries": 300,
+      "mode": "cold",
+      "before": {
+        "wall_us": 4.71355,
+        "cpu_us": 4.750000000003363,
+        "allocated_bytes": 34324.8
+      },
+      "after": {
+        "wall_us": 4.89375,
+        "cpu_us": 4.925000000000068,
+        "allocated_bytes": 34372.8
+      },
+      "ratios": {
+        "wall_us": 1.0382302086537747,
+        "cpu_us": 1.0368421052624381,
+        "allocated_bytes": 1.0013984058173682
+      }
+    },
+    {
+      "entries": 3000,
+      "mode": "hot",
+      "before": {
+        "wall_us": 3.00978535,
+        "cpu_us": 2.8536999999999924,
+        "allocated_bytes": 88.0256
+      },
+      "after": {
+        "wall_us": 0.03066875,
+        "cpu_us": 0.03090000000000037,
+        "allocated_bytes": 72.0256
+      },
+      "ratios": {
+        "wall_us": 0.010189680137821124,
+        "cpu_us": 0.010828047797596262,
+        "allocated_bytes": 0.8182346953613494
+      }
+    },
+    {
+      "entries": 3000,
+      "mode": "cold",
+      "before": {
+        "wall_us": 77.23750000000001,
+        "cpu_us": 54.92500000000566,
+        "allocated_bytes": 340188.8
+      },
+      "after": {
+        "wall_us": 62.795825,
+        "cpu_us": 55.800000000000296,
+        "allocated_bytes": 340236.8
+      },
+      "ratios": {
+        "wall_us": 0.8130224955494415,
+        "cpu_us": 1.0159308147472834,
+        "allocated_bytes": 1.0001410981196324
+      }
+    },
+    {
+      "entries": 30000,
+      "mode": "hot",
+      "before": {
+        "wall_us": 32.1490271,
+        "cpu_us": 29.141699999999982,
+        "allocated_bytes": 88.0256
+      },
+      "after": {
+        "wall_us": 0.03547915,
+        "cpu_us": 0.035749999999978854,
+        "allocated_bytes": 72.0256
+      },
+      "ratios": {
+        "wall_us": 0.0011035839401808834,
+        "cpu_us": 0.0012267643960365688,
+        "allocated_bytes": 0.8182346953613494
+      }
+    },
+    {
+      "entries": 30000,
+      "mode": "cold",
+      "before": {
+        "wall_us": 671.6531,
+        "cpu_us": 667.9749999999984,
+        "allocated_bytes": 3399604.8
+      },
+      "after": {
+        "wall_us": 654.491675,
+        "cpu_us": 638.1749999999963,
+        "allocated_bytes": 3399652.8
+      },
+      "ratios": {
+        "wall_us": 0.9744489752224772,
+        "cpu_us": 0.9553875519293354,
+        "allocated_bytes": 1.0000141192882184
+      }
+    }
+  ]
+}

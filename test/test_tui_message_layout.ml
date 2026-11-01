@@ -459,6 +459,39 @@ let test_a_span_that_is_not_a_number_reads_as_nothing () =
     [ 0.; -0.; 0.0004; 1.2; 59.96; 3600.; 9_000_000. ];
   nothing "equal clocks are a zero age" (Option.is_some (Layout.age_text ~now:5. ~since:5.))
 
+
+let test_scroll_anchor_round_trip_after_revisiting_history () =
+  let entries = transcript 600 in
+  let walk entries ~origin ~inner_width requested =
+    let window = Layout.clamped_scrolled_rows ~origin ~inner_width
+        ~height:12 ~requested entries in
+    check bool "the input anchor has a body owner" true
+      (window.body_positions <> []);
+    List.iter
+      (fun (position : Layout.body_row_position) ->
+        check (option int) "the same original body maps back to its scroll"
+          (Some (window.scroll + position.rows_below))
+          (Layout.scroll_for_body_row ~origin ~inner_width
+             ~entry_index:position.entry_index ~body_row:position.body_row entries))
+      window.body_positions
+  in
+  let revisit entries origin inner_width =
+    walk entries ~origin ~inner_width 700;
+    check bool "an older original body remains addressable" true
+      (Option.is_some (Layout.scroll_for_body_row ~origin ~inner_width
+         ~entry_index:0 ~body_row:0 entries));
+    List.iter (walk entries ~origin ~inner_width) [3;2200;41;7000;700]
+  in
+  revisit entries Layout.Origin_row 27;
+  revisit entries Layout.Origin_row 80;
+  revisit entries Layout.Origin_bare 80;
+  revisit entries Layout.Origin_bare 27;
+  revisit entries Layout.Origin_row 27;
+  let changed = List.mapi (fun index (entry : Layout.entry) ->
+      if index = 0 then {entry with body = entry.body ^ "\nA new paragraph in the original body."}
+      else entry) entries in
+  revisit changed Layout.Origin_row 27
+
 let () =
   run "tui_message_layout"
     [
@@ -502,7 +535,9 @@ let () =
     ; ( "composer"
       , [] )
     ; ( "scrollback"
-      , [ test_case "journal source spans" `Quick test_journal_source_spans
+      , [ test_case "scroll anchors survive history revisit and input changes" `Quick
+            test_scroll_anchor_round_trip_after_revisiting_history
+        ; test_case "journal source spans" `Quick test_journal_source_spans
         ; test_case "live-edge positions own actual selected rows" `Quick
             test_live_edge_positions_belong_to_actual_selected_rows
         ] )

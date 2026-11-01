@@ -1,0 +1,32 @@
+{
+  "scope": "Current source binding supplements historical immutable candidate records. Full current ML differs from the recorded prototype only in the explanatory row-cache comment; measured fragments are byte-identical. No installed candidate or full TUI performance claim.",
+  "base_git": "b004188be0805f5deb37127bdd7c70943691cb22",
+  "product_sha256": {
+    "bin/masc_tui_message_layout.ml": "5c84f50cb13e7ab56d3073aef96a0656145f966cd905d578e707aee0eed29443",
+    "bin/masc_tui_message_layout.mli": "f84b6776795476012fa22836b5cb21fdfd9d7272789c5c0990157625e8af3785",
+    "test/test_tui_message_layout.ml": "834e1f6a303ac0423255530993eef581054f0b7c04311847a14025099d259b3e"
+  },
+  "fragments": {
+    "tui-scroll-prefix-v1": {
+      "fragment_sha256": "fbc2208c4767a37f6791f6c6f573b3b6fb506d83f735e32f0ae9b48db162f52d",
+      "current_source_contains_exact_fragment": true
+    },
+    "tui-scroll-window-v2": {
+      "fragment_sha256": "7e5fc1af53307381d0162806a8514f743b58e74e2b75dc74cbb819f64208f7f6",
+      "current_source_contains_exact_fragment": true
+    }
+  },
+  "installed_baseline": {
+    "embedded_source": "8c08d4cb902f26356bc14d5a2e2758126c8ede12",
+    "binary_sha256": "e4fa3c0f15b3e80ded9b4de12d57685b17d4b2224a0fd8d838bd897706dc3c57",
+    "scope": "Earlier, unretained tool self-report only. It is not the identity of the fresh receipt below or a timed candidate comparison.",
+    "receipt": "installed-baseline-observation.json",
+    "recapture_scope": "Original earlier tool output was not retained in this bundle. This fresh self-report is distinct and timestamped; no performance data depends on either installed identity.",
+    "fresh_observation": {
+      "embedded_source": "f06ab8f4fb3dd2c18e92366922c13a7c73f140f3",
+      "binary_sha256": "69ba07d92f1410acb416652d2063d61cfdc51b80f03e163841bc4dd6bdedcbd1",
+      "observed_at_unix": 1793339591.602699,
+      "identity_changed_since_earlier_observation": true
+    }
+  }
+}

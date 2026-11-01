@@ -1,0 +1,171 @@
+{
+  "scope": "Selected captures and declared EOF-only source derivatives. Original compiled bytes/digests remain distinct from retained reproduction-source bytes. Historical full prototype SHA is not current full product-file SHA; see source-bindings.json.",
+  "files": [
+    {
+      "retained": "count-v1/before.ml",
+      "source": "tui-scroll-prefix-v1/before.ml",
+      "derivative": true,
+      "source_sha256": "069bde63ffd15c5c24d6284c97dfceba6262af5a7d2c0b59c8957e7e9677051b",
+      "retained_sha256": "44d91445d9617511db0b9d227ce409fbba3244820a518f1c76dc6bf5acdb9425",
+      "transform": "Remove extra final empty lines only for Git whitespace validation; original compiled carrier bytes remain under ignored source path."
+    },
+    {
+      "retained": "count-v1/after.ml",
+      "source": "tui-scroll-prefix-v1/after.ml",
+      "derivative": true,
+      "source_sha256": "ee6493d4397d412a3564a01a2a08ef0048e4adb5d00cc11cc80621705400e3f0",
+      "retained_sha256": "33f63156a1e27dc6c0470109e2100483b9f5836092b318e7c03d22a18edfee6a",
+      "transform": "Remove extra final empty lines only for Git whitespace validation; original compiled carrier bytes remain under ignored source path."
+    },
+    {
+      "retained": "count-v1/bench.ml",
+      "source": "tui-scroll-prefix-v1/bench.ml",
+      "derivative": false,
+      "source_sha256": "698ba60d5c16589b0eda55e3eb6f38bef37c7267848c330811bbcb9dd34074eb",
+      "retained_sha256": "698ba60d5c16589b0eda55e3eb6f38bef37c7267848c330811bbcb9dd34074eb"
+    },
+    {
+      "retained": "count-v1/identity.json",
+      "source": "tui-scroll-prefix-v1/identity.json",
+      "derivative": false,
+      "source_sha256": "2b6484fa7402646bc858f364a401d90b69f6cca79acc3fd6bf5c133aff89dbb4",
+      "retained_sha256": "2b6484fa7402646bc858f364a401d90b69f6cca79acc3fd6bf5c133aff89dbb4"
+    },
+    {
+      "retained": "count-v1/execution.json",
+      "source": "tui-scroll-prefix-v1/execution.json",
+      "derivative": false,
+      "source_sha256": "780c78ecd6fc6cef81f116147e2e1b4a3352b42b7f789905f284791915b60730",
+      "retained_sha256": "780c78ecd6fc6cef81f116147e2e1b4a3352b42b7f789905f284791915b60730"
+    },
+    {
+      "retained": "count-v1/result.json",
+      "source": "tui-scroll-prefix-v1/result.json",
+      "derivative": false,
+      "source_sha256": "ed5093827c5b8812f5063e230ed753b3424b02e7925936ff63a571fd3aecd753",
+      "retained_sha256": "ed5093827c5b8812f5063e230ed753b3424b02e7925936ff63a571fd3aecd753"
+    },
+    {
+      "retained": "count-v1/summary.json",
+      "source": "tui-scroll-prefix-v1/summary.json",
+      "derivative": false,
+      "source_sha256": "f3ad2264dae0708d68890bac962a3b883730b2f5b42b16937bb30e754f010065",
+      "retained_sha256": "f3ad2264dae0708d68890bac962a3b883730b2f5b42b16937bb30e754f010065"
+    },
+    {
+      "retained": "window-v2/before.ml",
+      "source": "tui-scroll-window-v2/before.ml",
+      "derivative": true,
+      "source_sha256": "ec43f15517ce0bc94e5dacca6f920c4c3aa90b8383ad3f425a3948e002baa635",
+      "retained_sha256": "7a68149b4a27377363f3995a3e0cbb01153461149e5562b1ad17bc87f03da08e",
+      "transform": "Remove extra final empty lines only for Git whitespace validation; original compiled carrier bytes remain under ignored source path."
+    },
+    {
+      "retained": "window-v2/after.ml",
+      "source": "tui-scroll-window-v2/after.ml",
+      "derivative": true,
+      "source_sha256": "3e08fcc8df8fa56b2d79129af13d89cac18fa312bbde44442801ee40be7e0815",
+      "retained_sha256": "6f75c6d10b30a6677041d24f6bd34414c011553bff5076ccd6c5f231c1a256d0",
+      "transform": "Remove extra final empty lines only for Git whitespace validation; original compiled carrier bytes remain under ignored source path."
+    },
+    {
+      "retained": "window-v2/bench.ml",
+      "source": "tui-scroll-window-v2/bench.ml",
+      "derivative": false,
+      "source_sha256": "ce457b1dc1dc6187149b26fb0a10772536cf4d6d4345530066335aea5919bb0d",
+      "retained_sha256": "ce457b1dc1dc6187149b26fb0a10772536cf4d6d4345530066335aea5919bb0d"
+    },
+    {
+      "retained": "window-v2/identity.json",
+      "source": "tui-scroll-window-v2/identity.json",
+      "derivative": false,
+      "source_sha256": "eec392a263651ca266499718d2c537fc5a0e399c6a387f9af004a960723aaaca",
+      "retained_sha256": "eec392a263651ca266499718d2c537fc5a0e399c6a387f9af004a960723aaaca"
+    },
+    {
+      "retained": "window-v2/execution.json",
+      "source": "tui-scroll-window-v2/execution.json",
+      "derivative": false,
+      "source_sha256": "8088c91392ffb7b95f1525fe386f73afb532adde88505f4e381ce38a88084ff4",
+      "retained_sha256": "8088c91392ffb7b95f1525fe386f73afb532adde88505f4e381ce38a88084ff4"
+    },
+    {
+      "retained": "window-v2/result.json",
+      "source": "tui-scroll-window-v2/result.json",
+      "derivative": false,
+      "source_sha256": "1d44673809e8a589442c8750401b20b60cf7b5081709b9f8553ad06d91bfe6ae",
+      "retained_sha256": "1d44673809e8a589442c8750401b20b60cf7b5081709b9f8553ad06d91bfe6ae"
+    },
+    {
+      "retained": "window-v2/summary.json",
+      "source": "tui-scroll-window-v2/summary.json",
+      "derivative": false,
+      "source_sha256": "d7e4e9d8f27d0a81411eacbc0f45cce506eed1f761323c42468211fc209608da",
+      "retained_sha256": "d7e4e9d8f27d0a81411eacbc0f45cce506eed1f761323c42468211fc209608da"
+    },
+    {
+      "retained": "large-entry-v3/before.ml",
+      "source": "tui-scroll-large-body-v3/before.ml",
+      "derivative": true,
+      "source_sha256": "ec43f15517ce0bc94e5dacca6f920c4c3aa90b8383ad3f425a3948e002baa635",
+      "retained_sha256": "7a68149b4a27377363f3995a3e0cbb01153461149e5562b1ad17bc87f03da08e",
+      "transform": "Remove extra final empty lines only for Git whitespace validation; original compiled carrier bytes remain under ignored source path."
+    },
+    {
+      "retained": "large-entry-v3/after.ml",
+      "source": "tui-scroll-large-body-v3/after.ml",
+      "derivative": true,
+      "source_sha256": "3e08fcc8df8fa56b2d79129af13d89cac18fa312bbde44442801ee40be7e0815",
+      "retained_sha256": "6f75c6d10b30a6677041d24f6bd34414c011553bff5076ccd6c5f231c1a256d0",
+      "transform": "Remove extra final empty lines only for Git whitespace validation; original compiled carrier bytes remain under ignored source path."
+    },
+    {
+      "retained": "large-entry-v3/bench.ml",
+      "source": "tui-scroll-large-body-v3/bench.ml",
+      "derivative": false,
+      "source_sha256": "efa4c6df3e621eeea3ee825dceb718a557529aca5f817723b2e35861a8500e2a",
+      "retained_sha256": "efa4c6df3e621eeea3ee825dceb718a557529aca5f817723b2e35861a8500e2a"
+    },
+    {
+      "retained": "large-entry-v3/identity.json",
+      "source": "tui-scroll-large-body-v3/identity.json",
+      "derivative": false,
+      "source_sha256": "f532f609975f1144f48c3a1ca4f5b24c3aa3ea47187e9cab20a2b2c8edcca253",
+      "retained_sha256": "f532f609975f1144f48c3a1ca4f5b24c3aa3ea47187e9cab20a2b2c8edcca253"
+    },
+    {
+      "retained": "large-entry-v3/execution.json",
+      "source": "tui-scroll-large-body-v3/execution.json",
+      "derivative": false,
+      "source_sha256": "58c2837e5029d389e9a63d01a67b13693e6c25790ed29ed4035e689e352bb627",
+      "retained_sha256": "58c2837e5029d389e9a63d01a67b13693e6c25790ed29ed4035e689e352bb627"
+    },
+    {
+      "retained": "large-entry-v3/result.json",
+      "source": "tui-scroll-large-body-v3/result.json",
+      "derivative": false,
+      "source_sha256": "0a950edfc28bc7e917ed3e8e239df09485442d3cb2d1f92e3d8ec0f15863c94c",
+      "retained_sha256": "0a950edfc28bc7e917ed3e8e239df09485442d3cb2d1f92e3d8ec0f15863c94c"
+    },
+    {
+      "retained": "large-entry-v3/summary.json",
+      "source": "tui-scroll-large-body-v3/summary.json",
+      "derivative": false,
+      "source_sha256": "03553b7aa7854ff40027b2c9e09eaef69b85c2713b70fddfba37f5be34ba6ec0",
+      "retained_sha256": "03553b7aa7854ff40027b2c9e09eaef69b85c2713b70fddfba37f5be34ba6ec0"
+    },
+    {
+      "retained": "installed-baseline-observation.json",
+      "source": "tui-installed-identity-v1.json",
+      "source_sha256": "4da20137ea6112ca5e8339e50e9206e5e1ee1b45b939dbb5722e9708796c30ed",
+      "retained_sha256": "4da20137ea6112ca5e8339e50e9206e5e1ee1b45b939dbb5722e9708796c30ed",
+      "derivative": false
+    }
+  ],
+  "derived": [
+    {
+      "retained": "source-bindings.json",
+      "sha256": "97517115da4fda5612be866718533d5f158729314d26b395e78ca597e5ff0e4c"
+    }
+  ]
+}

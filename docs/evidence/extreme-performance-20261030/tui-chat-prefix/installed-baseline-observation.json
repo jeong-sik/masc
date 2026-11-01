@@ -1,0 +1,14 @@
+{
+  "scope": "Read-only current installed self-report, not a candidate execution or speed comparison.",
+  "observed_at_unix": 1793339591.602699,
+  "command": [
+    "masc-tui",
+    "--build-commit"
+  ],
+  "returncode": 0,
+  "stdout": "f06ab8f4fb3dd2c18e92366922c13a7c73f140f3\n",
+  "stderr": "[2026-10-30 14:53:11] [INFO] [MCP] Tag registry initialized: 182 tools registered\n",
+  "sha256_before": "69ba07d92f1410acb416652d2063d61cfdc51b80f03e163841bc4dd6bdedcbd1",
+  "sha256_after": "69ba07d92f1410acb416652d2063d61cfdc51b80f03e163841bc4dd6bdedcbd1",
+  "bytes": 128107232
+}

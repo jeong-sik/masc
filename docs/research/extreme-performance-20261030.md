@@ -6,8 +6,8 @@ and maximum of 8.94 seconds, and MCP status reads time out three times. This is
 a latency problem even though the durable workload completes. Evidence and
 provenance are in the [scale bundle](../evidence/extreme-performance-20261030/scale/README.md).
 
-The shared runtime and isolated experiments execute installed source d55ec56,
-while this investigation starts from checkout 0b18418. The measured native
+The earlier shared-server baseline and isolated server experiments used installed
+source d55ec56, while this investigation started from checkout 0b18418. The measured native
 canonical-function candidate is a third, explicitly extracted source pair;
 it has not been installed or observed in the shared server.
 
@@ -79,6 +79,33 @@ is not applied to production. The parallel values are inverse throughput,
 not individual action latency or evidence of meeting 0.1 ms. Both rejected
 approaches remain visible with CPU, wall, allocation and exact-byte readback.
 
+## Added TUI and DAW scope
+
+The current objective explicitly includes scrolling, Page Down, surface changes,
+Draw, DAW features and visible flicker. DAW and Draw were confirmed as separate
+requirements. An earlier unretained installed self-report was `8c08d4c…`; the
+subsequent retained receipt self-reports `f06ab8f…` with a different binary
+digest. These are separate observations of a moving shared installation. The
+earlier d55ec56 server observations establish neither TUI behavior nor timing.
+
+The [chat prefix-index component](../evidence/extreme-performance-20261030/tui-chat-prefix/README.md)
+removes repeated scans of a measured newest suffix without adding mutable fields.
+Its viewport/body-anchor adapter passes 113,100 decision checks; a warm
+30,000-entry component improves substantially, with small cold-path and large
+single-entry negative observations retained. Neither this adapter nor source
+parsing proves actual TUI response or visible smoothness. The large single-entry
+materialization/fold remains a separate bottleneck candidate.
+
+DAW source is in `tools/alphatex/music-workbench.mjs`, `sequencer-tui.mjs` and
+`arrangement-tui.mjs`. These views erase the entire viewport before rewriting it;
+the piano roll also scans the complete note list separately for every visible
+pitch. These are source candidates, not measured DAW causes yet.
+[Ghostty's synchronized-output documentation](https://ghostty.org/docs/help/synchronized-output)
+explains why intermediate large redraws can flicker. A DEC 2026/differential
+presentation experiment must preserve terminal policy, recovery and child-view
+ownership; source markers alone will not prove a visible improvement. DAW
+edit/navigation, audio/MIDI timing and redraw costs require separate observations.
+
 ## Measurement matrix still required for completion
 
 Use 100 us as the explicit target for every relevant boundary below. Report
@@ -88,7 +115,7 @@ stale/partial/failed results and controlled 30/300 owner populations.
 
 | Boundary | Current evidence | Remaining proof |
 | --- | --- | --- |
-| TUI input decision, decode, state application, build, present | Installed TUI identifies d55ec56; no new timing run | Real native requests/state decisions and phase timings, physical display scope separate |
+| TUI input decision, decode, state application, build, present | Last retained TUI self-report f06ab8f; no native TUI timing in this investigation | Real native requests/state decisions and phase timings, physical display scope separate |
 | HTTP and MCP | Limited live wire baseline; isolated health/status | Route-specific semantic/freshness predicates, aligned server stages, tails under controlled load |
 | Markdown/HTML/file I/O | Original-record allocation clues | Read/hash/parse/commit attribution, growth and replacement, durable before/after |
 | SQLite queue operations | 60/600 exact durable outcomes | Admission, lookup, commit/checkpoint distributions and duplicate/loss checks |

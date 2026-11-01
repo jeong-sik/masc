@@ -1,0 +1,26 @@
+{
+  "scope": "Actual private row-count implementation fragment with explicit integer row-count adapter; no typography, Markdown, full Build/Present or terminal timing. Candidate reuses existing incremental cache arrays/filled field; no additional mutable product field.",
+  "base_git": "b004188be0805f5deb37127bdd7c70943691cb22",
+  "source": "bin/masc_tui_message_layout.ml",
+  "source_sha256": "df5cf240bd9f18539233a507421bd89aa766534e741648cef08bb513d25fbae6",
+  "before_fragment_sha256": "fca0bd91608df617e5d7cd11016e10a1379c42497bea6e8c73a987a7b6b153de",
+  "candidate_fragment_sha256": "fbc2208c4767a37f6791f6c6f573b3b6fb506d83f735e32f0ae9b48db162f52d",
+  "candidate_source_sha256": "f8e885e9beb94ed12727d6edca1a6f9e9178af0667cc5549aa2201254f235df6",
+  "adapter": "type entry = int\ntype origin_display = Origin_row | Origin_bare\nlet rows_of_entry ?markdown:(_ : (int -> int) option) ~origin:_ ~inner_width:_ ~previous:_ entry =\n  List.init entry Fun.id\n",
+  "compile_argv": [
+    "ocamlfind",
+    "ocamlopt",
+    "-package",
+    "unix,mtime.clock.os,yojson",
+    "-linkpkg",
+    "before.ml",
+    "after.ml",
+    "bench.ml",
+    "-o",
+    "bench.exe"
+  ],
+  "compile_returncode": 0,
+  "compiler": "5.5.1",
+  "native_sha256": "eb8169f4c59bba99a89929747eef8d2baf74bd311f2cc7a13ee55f307d960b05",
+  "carrier_sha256": "698ba60d5c16589b0eda55e3eb6f38bef37c7267848c330811bbcb9dd34074eb"
+}

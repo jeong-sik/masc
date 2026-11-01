@@ -877,6 +877,9 @@ val clamped_scrolled_rows :
     layout pass. Calling {!clamp_scroll} and then {!scrolled_rows} separately
     is still available to independent callers, but a frame that needs both
     should use this function so the same entry is not rendered twice.
+    Measured entries retain cumulative row endings in the existing cache. A
+    later positive viewport uses binary search to locate its known suffix,
+    extends only newly reached counts, and renders only overlapping entries.
     [body_positions] describes the actual selected rows, oldest first, including
     the live-edge view. Generated gaps and synthesized repeat rows have no
     original body owner and are omitted. *)

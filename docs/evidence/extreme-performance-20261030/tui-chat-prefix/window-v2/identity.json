@@ -1,0 +1,25 @@
+{
+  "scope": "Actual clamped viewport and body-anchor decision source, with explicit metadata/body row-count adapter. Oracle checks scroll state and body anchor identities, not rendered text/appearance. No full typography/Markdown, native TUI or physical paint claim.",
+  "adapter": "type entry = int\ntype origin_display = Origin_row | Origin_bare\ntype row_kind = Body | Metadata of unit | Spacing | Viewport_gap of unit\ntype row = { kind : row_kind }\ntype body_row_position = {entry_index:int;body_row:int;rows_below:int}\nlet rows_of_entry ?markdown:(_ : (int -> int) option) ~origin:_ ~inner_width:_ ~previous:_ entry =\n List.init entry (fun i -> {kind=if i mod 7=0 then Metadata () else if i mod 11=0 then Spacing else Body})\nlet visible_rows_with_positions ?markdown ?origin ~inner_width ~height entries =\n let _=markdown,origin,inner_width in\n let all=List.concat (List.mapi (fun entry_index count ->\n   let body=ref 0 in List.map (fun row -> let ordinal= !body in\n     if row.kind=Body then incr body;row,entry_index,ordinal)\n     (rows_of_entry ~origin:Origin_row ~inner_width:80 ~previous:None count)) entries) in\n let count=List.length all in\n let selected=List.filteri (fun i _ -> i>=count-max 0 height) all in\n List.map (fun (row,_,_)->row) selected,\n List.filter_map (fun (i,(row,entry_index,body_row)) -> if row.kind=Body then\n   Some {entry_index;body_row;rows_below=List.length selected-i-1} else None)\n   (List.mapi (fun i x->i,x) selected)\n",
+  "base_git": "b004188be0805f5deb37127bdd7c70943691cb22",
+  "before_source_sha256": "df5cf240bd9f18539233a507421bd89aa766534e741648cef08bb513d25fbae6",
+  "before_fragment_sha256": "46fa6de7fa2cb9d7581b75170ef70c85196e4d471137a5d8db3071ebdb02a739",
+  "after_source_sha256": "f8e885e9beb94ed12727d6edca1a6f9e9178af0667cc5549aa2201254f235df6",
+  "after_fragment_sha256": "7e5fc1af53307381d0162806a8514f743b58e74e2b75dc74cbb819f64208f7f6",
+  "compile_argv": [
+    "ocamlfind",
+    "ocamlopt",
+    "-package",
+    "unix,mtime.clock.os,yojson",
+    "-linkpkg",
+    "before.ml",
+    "after.ml",
+    "bench.ml",
+    "-o",
+    "bench.exe"
+  ],
+  "compiler": "5.5.1",
+  "compile_returncode": 0,
+  "binary_sha256": "1f1dc6d77f8a6b6ac7e2393b9bed70c09f872a1727e3bdbde00ebda98aebb196",
+  "carrier_sha256": "ce457b1dc1dc6187149b26fb0a10772536cf4d6d4345530066335aea5919bb0d"
+}

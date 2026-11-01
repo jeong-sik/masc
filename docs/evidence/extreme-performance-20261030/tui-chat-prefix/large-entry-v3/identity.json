@@ -1,0 +1,22 @@
+{
+  "scope": "Negative large-single-body control, same exact algorithm fragments/adapters as v2. Simulated rows, not actual Markdown or native TUI frames. Unchanged full-entry row materialization/fold can dominate prefix lookup.",
+  "compile_argv": [
+    "ocamlfind",
+    "ocamlopt",
+    "-package",
+    "unix,mtime.clock.os,yojson",
+    "-linkpkg",
+    "before.ml",
+    "after.ml",
+    "bench.ml",
+    "-o",
+    "bench.exe"
+  ],
+  "compile_returncode": 0,
+  "sources_sha256": {
+    "before.ml": "ec43f15517ce0bc94e5dacca6f920c4c3aa90b8383ad3f425a3948e002baa635",
+    "after.ml": "3e08fcc8df8fa56b2d79129af13d89cac18fa312bbde44442801ee40be7e0815",
+    "bench.ml": "efa4c6df3e621eeea3ee825dceb718a557529aca5f817723b2e35861a8500e2a"
+  },
+  "binary_sha256": "7e3a8941a2190b8aed636b84946a56e99ee1c5b572e7a235cc3b1247f9ec1682"
+}

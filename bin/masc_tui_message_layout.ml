@@ -2087,8 +2087,9 @@ let clamp_scroll ?markdown ?origin ~inner_width ~height requested entries =
     Int.min requested (Int.max 0 (count 0 (List.rev entries) - height))
   end
 
-(* How many rows each entry takes, newest first, for one list of entries at
-   one width.
+(* Cumulative row endings, newest first, for one immutable list of entries
+   at one width. The existing array stores prefix sums rather than individual
+   heights, so a warm viewport and an anchor need not re-add the known suffix.
 
    Reading back through a conversation asks the same question of the same
    entries on every frame: a wheel notch moves the window three rows and the
@@ -2105,7 +2106,7 @@ type row_counts = {
   rc_inner_width : int;
   rc_origin : origin_display;
   rc_newest_first : entry array;
-  rc_counts : int array;
+  rc_row_ends : int array;
   mutable rc_filled : int;
       (** Entries from the newest whose count is known, so a frame that
           scrolled further extends this rather than starting again. *)
@@ -2127,7 +2128,7 @@ let row_counts_for entries ~inner_width ~origin =
           rc_inner_width = inner_width;
           rc_origin = origin;
           rc_newest_first = newest_first;
-          rc_counts = Array.make (Array.length newest_first) 0;
+          rc_row_ends = Array.make (Array.length newest_first) 0;
           rc_filled = 0;
         }
       in
@@ -2145,21 +2146,38 @@ let entry_rows_at held ?markdown index =
 (* Extend the known counts from the newest until they cover [wanted] rows, or
    until the conversation runs out. Answers how many rows and how many entries
    that took, which is the walk the window is then cut out of. *)
-let count_rows_until held ?markdown ~wanted () =
-  let entry_count = Array.length held.rc_newest_first in
-  let rec walk index total =
-    if total >= wanted || index >= entry_count then (index, total)
-    else begin
-      if index >= held.rc_filled
-      then begin
-        held.rc_counts.(index) <-
-          List.length (entry_rows_at held ?markdown index);
-        held.rc_filled <- index + 1
-      end;
-      walk (index + 1) (total + held.rc_counts.(index))
-    end
+(* Locate the first measured newest-prefix whose cumulative count reaches
+   [wanted]. Empty entries can share an end, so keep the first equal end. *)
+let first_row_count_at_least held ~wanted =
+  let rec search low high =
+    if low >= high then low
+    else
+      let middle = low + (high - low) / 2 in
+      if held.rc_row_ends.(middle) >= wanted then search low middle
+      else search (middle + 1) high
   in
-  walk 0 0
+  search 0 held.rc_filled
+
+let extend_row_count held ?markdown index =
+  let before = if index = 0 then 0 else held.rc_row_ends.(index - 1) in
+  let total = before + List.length (entry_rows_at held ?markdown index) in
+  held.rc_row_ends.(index) <- total;
+  held.rc_filled <- index + 1;
+  total
+
+let count_rows_until held ?markdown ~wanted () =
+  if wanted <= 0 then 0, 0
+  else
+    let known = first_row_count_at_least held ~wanted in
+    if known < held.rc_filled then known + 1, held.rc_row_ends.(known)
+    else
+      let entry_count = Array.length held.rc_newest_first in
+      let total = if known = 0 then 0 else held.rc_row_ends.(known - 1) in
+      let rec extend index total =
+        if total >= wanted || index >= entry_count then index, total
+        else extend (index + 1) (extend_row_count held ?markdown index)
+      in
+      extend known total
 
 (* The window, and the scroll it had to be clamped to.
 
@@ -2193,7 +2211,8 @@ let clamped_scrolled_rows ?markdown ?origin ~inner_width ~height ~requested entr
     let rec gather index before (selected, positions) =
       if index >= visited then selected, positions
       else begin
-        let count = held.rc_counts.(index) in
+        let count = held.rc_row_ends.(index)
+          - (if index = 0 then 0 else held.rc_row_ends.(index - 1)) in
         let low = total - before - count in
         let high = total - before in
         let selected, positions =
@@ -2223,7 +2242,9 @@ let clamped_scrolled_rows ?markdown ?origin ~inner_width ~height ~requested entr
         gather (index + 1) (before + count) (selected, positions)
       end
     in
-    let rows, body_positions = gather 0 0 ([], []) in
+    let first_entry = first_row_count_at_least held ~wanted:(from_bottom + 1) in
+    let before = if first_entry = 0 then 0 else held.rc_row_ends.(first_entry - 1) in
+    let rows, body_positions = gather first_entry before ([], []) in
     { scroll = from_bottom; rows; body_positions }
   end
 
@@ -2235,17 +2256,14 @@ let scroll_for_body_row ?markdown ?(origin = Origin_row) ~inner_width
   let index = Array.length held.rc_newest_first - entry_index - 1 in
   if index < 0 || index >= Array.length held.rc_newest_first || body_row < 0 then None
   else
-    let rec newer at total =
-      if at = index then total
-      else begin
-        if at >= held.rc_filled then begin
-          held.rc_counts.(at) <- List.length (entry_rows_at held ?markdown at);
-          held.rc_filled <- at + 1
-        end;
-        newer (at + 1) (total + held.rc_counts.(at))
+    let rec fill_newer at =
+      if at < index then begin
+        ignore (extend_row_count held ?markdown at : int);
+        fill_newer (at + 1)
       end
     in
-    let suffix = newer 0 0 in
+    fill_newer held.rc_filled;
+    let suffix = if index = 0 then 0 else held.rc_row_ends.(index - 1) in
     let rows = entry_rows_at held ?markdown index in
     let rec locate offset ordinal = function
       | [] -> None

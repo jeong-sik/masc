@@ -1286,8 +1286,7 @@ let messages_of_items ~stage ~notified = function
   | _ -> protocol_error stage "turn items must be an array"
 ;;
 
-(* Human prose and ad-hoc scalar fields are observational detail only; the
-   provider-owned classification is [codexErrorInfo], read below. *)
+(* Human prose and ad-hoc scalar fields are observational detail only. *)
 let turn_error_detail ~message error_fields =
   let annotation (name, value) =
     if String.equal name "message"
@@ -1374,14 +1373,45 @@ let codex_error_info_of_json json =
     unrecognized
 ;;
 
+(* Codex can carry a Responses WebSocket error as a JSON-encoded [message]
+   with [codexErrorInfo=other]. Decode that provider envelope, not its prose,
+   so its context refusal reaches the same effect-aware recovery as the
+   official enum. An explicit classification other than [other] still wins. *)
+let wrapped_context_window_error message =
+  try
+    let json = Yojson.Safe.from_string message in
+    match validate_unique_object_keys ~stage:"Responses error" ~path:"$" json with
+    | Error _ -> false
+    | Ok () ->
+      (match json with
+       | `Assoc fields ->
+         (match List.assoc_opt "type" fields, List.assoc_opt "status" fields,
+                List.assoc_opt "error" fields with
+          | Some (`String "error"), Some (`Int 400), Some (`Assoc error) ->
+            (match List.assoc_opt "type" error, List.assoc_opt "param" error,
+                   List.assoc_opt "code" error with
+             | Some (`String "invalid_request_error"), Some (`String "input"),
+               Some (`String "context_length_exceeded") -> true
+             | _ -> false)
+          | _ -> false)
+       | _ -> false)
+  with Yojson.Json_error _ -> false
+;;
+
 let turn_error_of_fields ~tool_effect_attempted ~message error_fields =
   let detail = turn_error_detail ~message error_fields in
-  match List.assoc_opt "codexErrorInfo" error_fields with
-  | None | Some `Null -> Turn_failed { detail; codex_error_info = None }
-  | Some json ->
-    (match codex_error_info_of_json json with
-     | Context_window -> Context_window_exceeded { message; tool_effect_attempted }
-     | Turn_failure info -> Turn_failed { detail; codex_error_info = Some info })
+  let classification =
+    match List.assoc_opt "codexErrorInfo" error_fields with
+    | None | Some `Null -> None
+    | Some json -> Some (codex_error_info_of_json json)
+  in
+  match classification with
+  | Some Context_window -> Context_window_exceeded { message; tool_effect_attempted }
+  | (None | Some (Turn_failure Codex_error_info.Other))
+    when wrapped_context_window_error message ->
+    Context_window_exceeded { message; tool_effect_attempted }
+  | Some (Turn_failure info) -> Turn_failed { detail; codex_error_info = Some info }
+  | None -> Turn_failed { detail; codex_error_info = None }
 ;;
 
 let turn_error ~tool_effect_attempted fields =

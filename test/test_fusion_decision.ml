@@ -250,6 +250,64 @@ let test_read_source_ownership_and_no_adoption () = with_fixture (fun config _ _
     |> Result.map_error Board.show_board_error
     |> require "transfer source author"
   in
+  let replay_origin : Board.post_origin =
+    { turn_ref = None
+    ; source = Some "fusion"
+    ; fusion_run_id = Some "run-advice"
+    ; fusion_producer = Some "fusion-keeper"
+    }
+  in
+  (match
+     Board_dispatch.create_post_once_by_fusion_run_id
+       ~fusion_run_id:"run-advice"
+       ~author:"fusion-keeper"
+       ~content:"Judge recommends A"
+       ~meta_json:(original_evidence ~task:(List.hd (Workspace.read_backlog config).tasks).id ())
+       ~post_kind:Board.System_post
+       ~visibility:Board.Unlisted
+       ~ttl_hours:0
+       ~origin:replay_origin
+       ()
+   with
+   | Ok (Board.Post_already_present replayed) ->
+     check string "replay after author transfer returns the transferred post" "peer"
+       (Board.Agent_id.to_string replayed.author)
+   | Ok (Board.Post_created _) -> fail "replay after author transfer minted a duplicate post"
+   | Error error ->
+     fail ("replay after author transfer failed: " ^ Board.Post_publication_failure.to_string error));
+  let mismatched_origin : Board.post_origin =
+    { turn_ref = None
+    ; source = Some "fusion"
+    ; fusion_run_id = Some "run-mismatch"
+    ; fusion_producer = Some "peer"
+    }
+  in
+  (match
+     Board_dispatch.create_post_once_by_fusion_run_id
+       ~fusion_run_id:"run-mismatch"
+       ~author:"fusion-keeper"
+       ~content:"Mismatched producer"
+       ~post_kind:Board.System_post
+       ~visibility:Board.Unlisted
+       ~ttl_hours:0
+       ~origin:mismatched_origin
+       ()
+   with
+   | Error _ -> ()
+   | Ok _ -> fail "create_post_once_by_fusion_run_id accepted mismatched author vs fusion_producer");
+  (match
+     Board_dispatch.create_post
+       ~author:"fusion-keeper"
+       ~content:"Mismatched producer via create_post"
+       ~post_kind:Board.System_post
+       ~visibility:Board.Unlisted
+       ~origin:mismatched_origin
+       ()
+   with
+   | Error _ -> ()
+   | Ok _ -> fail "create_post accepted mismatched author vs fusion_producer");
+  check bool "mismatched origin did not index or persist run-mismatch" true
+    (Option.is_none (Board_dispatch.find_post_by_run_id ~run_id:"run-mismatch"));
   let _still_owned =
     Fusion_decision.source ~keeper:"fusion-keeper" ~run_id:"run-advice"
     |> require "original fusion_producer retains ownership after author transfer"

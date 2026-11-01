@@ -231,7 +231,7 @@ let test_detail_uses_exact_typed_board_origin () =
   let post =
     match
       Board_dispatch.create_post
-        ~author:"fusion-detail-test"
+        ~author:"fusion-detail-keeper"
         ~content:"exact typed origin evidence"
         ~post_kind:Board.System_post
         ~meta_json:(`Assoc [ "panel", panel_meta ])

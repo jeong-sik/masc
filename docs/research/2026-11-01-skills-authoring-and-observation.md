@@ -58,9 +58,9 @@ the first implementation unit.
 | Compose existing capabilities with explicit inputs, dependencies and outputs | Parser/executor-backed preparation and execution; inspectable flow and resulting records | Guided canonical plans and parser preview rendered; public native prepare/run emits actual nested child results. Native-to-Dashboard parity verifies these unchanged outputs. |
 | Count original runs and asynchronous use honestly | Producer-to-store-to-read-model tests, exact revision and coverage consistency | Retained-run and asynchronous activation usage producers/readers tested; exact-reference history and coverage shown in both candidate clients. Installed production runtime is a separate delivery boundary. |
 | Make statistics interpretable | Sample sizes, populations, units, recorded-time bounds, empty/unavailable distinction, duration distributions | Both clients render outcome-specific duration samples, mean/P50/P95/min/max, milliseconds, recorded-result bounds and incomplete retained coverage; captured with an explicitly seeded five-run QA population. |
-| Explain actual failures and nested execution | Failure reasons, parent/child/node identities and outcomes visible in both clients | Top-level failure/effect and node evidence captured in both clients. Actual nested producer, manifest integrity and reader ownership pass 27 native cases; Dashboard parity passes against the emitted native outputs. New nested screen evidence is recorded in the retained bundle. |
+| Explain actual failures and nested execution | Failure reasons, parent/child/node identities and outcomes visible in both clients | Top-level failure/effect and node evidence captured in both clients. Actual nested producer, manifest integrity and reader ownership pass 27 native cases; Dashboard parity passes against the emitted native outputs. Matched1047 nested screens and explicitly scoped native-result read carriers are retained. |
 | Remove obsolete UI and compatibility paths | Call-site inventory and replacement behavior; no parallel authorities | Obsolete single-file evidence reader, fixed executable starter and silent first-source choice removed; v9 has no prior-version reader |
-| Verify TUI and Dashboard behavior | Candidate source checks, focused behavioral tests, actual rendered captures and runtime observations with provenance | Earlier matched server/Dashboard/TUI captures retained; completion-audit source checks and native producer parity passed. The evidence bundle states the source and limitations of each capture. |
+| Verify TUI and Dashboard behavior | Candidate source checks, focused behavioral tests, actual rendered captures and runtime observations with provenance | Earlier authoring/history/statistics captures and matched1047 nested/collision/input captures retained. Current native/security404 and Dashboard274/15-file checks, TypeScript and source reviews pass; capture producers, manual carriers and cleanup are explicit. |
 | Deliver independently reviewed changes | Current-head review, checks, PR integration; installed/runtime evidence separately | Earlier six-PR stack integrated. Completion-audit stack integration remains pending current-head formal approval and final compile; no production installation claim. |
 
 ## First implementation unit
@@ -144,3 +144,25 @@ No new executor, retry path, persisted statistics authority or ledger-derived
 admission gate was added. Controlled candidate captures and native test
 execution are separate from production installation, real model execution,
 fleet-scale measurements and user-objective verification.
+
+
+The completion review additionally closed a terminal-control P2 in the async
+reader's nested headings using the existing canonical sanitizer. Source evidence
+is preserved. Actual Dashboard inspection found that Skill fields referenced an
+undefined input style; the shared class now gives creation, lookup and filtering
+controls visible boundaries and keyboard focus. These are repairs to the
+requested operator flows, with no new UI assertion tests.
+
+
+The final matched1047 candidate uses one identified source for the Mac server,
+TUI and clean-built Dashboard assets. Actual HTTP domain results match the
+unchanged native producer payloads. A copied genuine async terminal record
+remains distinct from its unavailable staged logical journal; the inline-failure
+visual carrier has explicitly manufactured outer request metadata and does not
+claim async worker execution. Both interfaces show available sibling outputs,
+admission rejection, proven pre-effect node failures and unstarted descendants.
+Guided authoring also completed an actual parser preview with an explicitly
+chosen writable source, tool, JSON input and named output; this additional
+preview created no package. Current404-case native/security and274-case
+Dashboard checks describe separate named populations, not objective success.
+Final formal approval and whole-stack integration remain pending.

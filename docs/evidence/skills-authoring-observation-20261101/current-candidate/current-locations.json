@@ -1,0 +1,187 @@
+{
+  "schema": "masc.evidence.current-locations.v1",
+  "purpose": "Exact matched1047 UI, actual HTTP, native/security and Dashboard proof copies. Failure carrier is explicit QA read projection; raw capture and original identities preserved.",
+  "paths_relative_to": "repository_root",
+  "recorded_manifest": {
+    "path": "captured-paths.json",
+    "sha256": "f5dc709b771b4df40fd4e1e29b9ea532cdd4cbe24e8236707108deec43133fab"
+  },
+  "files": {
+    "docs/evidence/skills-authoring-observation-20261101/current-candidate/dashboard1047-final-name-precedence.png": {
+      "recorded_path": "artifacts/skills-completion-audit-20261101/dashboard1047-final-name-precedence.png",
+      "recorded_sha256": "6c75d0190c022ce9249fb0a468b213251946275def498a2f8f0c033d725b5839",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/skills-authoring-observation-20261101/current-candidate/dashboard1047-final-shadowed-filter.png": {
+      "recorded_path": "artifacts/skills-completion-audit-20261101/dashboard1047-final-shadowed-filter.png",
+      "recorded_sha256": "5345f143ec67ca8b5f9293bb1c9a94e97c6f1a91a952f67b3fd07fd0a2febdeb",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/skills-authoring-observation-20261101/current-candidate/dashboard1047-final-completed-children.png": {
+      "recorded_path": "artifacts/skills-completion-audit-20261101/dashboard1047-final-completed-children.png",
+      "recorded_sha256": "611792884faf402cb211abbed18d7b2c7bacf227cf1dcb01d89895d8f4f32757",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/skills-authoring-observation-20261101/current-candidate/dashboard1047-final-parent-failure.png": {
+      "recorded_path": "artifacts/skills-completion-audit-20261101/dashboard1047-final-parent-failure.png",
+      "recorded_sha256": "a16be9571e20706eed7f05dd930bd05fc5422ccedef897c0240efe222e40c82e",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/skills-authoring-observation-20261101/current-candidate/dashboard1047-final-rejected-children.png": {
+      "recorded_path": "artifacts/skills-completion-audit-20261101/dashboard1047-final-rejected-children.png",
+      "recorded_sha256": "f86917c760f2080d7b72cc90e9040b8e233b410b02c10065d704502d9e4a3e2f",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/skills-authoring-observation-20261101/current-candidate/dashboard1047-final-unstarted-child.png": {
+      "recorded_path": "artifacts/skills-completion-audit-20261101/dashboard1047-final-unstarted-child.png",
+      "recorded_sha256": "2b759d855878bc701ff58280ba8f6699d602a32c19cf8ac0d0494568c6f56649",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/skills-authoring-observation-20261101/current-candidate/dashboard1047-guided-preview-result.png": {
+      "recorded_path": "artifacts/skills-completion-audit-20261101/dashboard1047-guided-preview-result.png",
+      "recorded_sha256": "3003ff86a3b6dc9808e5ba37bacf374142c468bafc8083419865a1fa522e23b7",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/skills-authoring-observation-20261101/current-candidate/tui1047-completed-lookup.png": {
+      "recorded_path": "artifacts/skills-completion-audit-20261101/tui1047-completed-lookup.png",
+      "recorded_sha256": "382260fd841840e51a3f4b4e963a1fd9e0c3952e44e48de611cd407df98ae986",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/skills-authoring-observation-20261101/current-candidate/tui1047-completed-exports.png": {
+      "recorded_path": "artifacts/skills-completion-audit-20261101/tui1047-completed-exports.png",
+      "recorded_sha256": "3bbb441eb25e8c8b5a9fd885e2e1f95d080144e06c516d2400e4775700007042",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/skills-authoring-observation-20261101/current-candidate/tui1047-failure-lookup.png": {
+      "recorded_path": "artifacts/skills-completion-audit-20261101/tui1047-failure-lookup.png",
+      "recorded_sha256": "472db4730f40af4fbbbe3431ccb7eaba0c2fc193b1688245f97114ca62889c30",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/skills-authoring-observation-20261101/current-candidate/tui1047-unstarted-child.png": {
+      "recorded_path": "artifacts/skills-completion-audit-20261101/tui1047-unstarted-child.png",
+      "recorded_sha256": "5fc42dba4772864b7c1416921905291767581c0cfd1bc2c816f4e3ecdeb1d687",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/skills-authoring-observation-20261101/current-candidate/dashboard1047-assets-proof.json": {
+      "recorded_path": "artifacts/skills-completion-audit-20261101/dashboard1047-assets-proof.json",
+      "recorded_sha256": "8914f5559048c3d851527a6d92deef3b78749b4b43743eb0a3603d34c59cbd33",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/skills-authoring-observation-20261101/current-candidate/candidate1047-http-asset-identity.json": {
+      "recorded_path": "artifacts/skills-completion-audit-20261101/candidate1047-http-asset-identity.json",
+      "recorded_sha256": "bf4f94fd28724938128058068aeee94a02115459605abb1628f3039691a119e9",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/skills-authoring-observation-20261101/current-candidate/candidate1047-http-completed.json": {
+      "recorded_path": "artifacts/skills-completion-audit-20261101/candidate1047-http-completed.json",
+      "recorded_sha256": "3320a5edba566fe47ab1a2d92a4228c1afae01d46c7b9d129c3120a5522ffb13",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/skills-authoring-observation-20261101/current-candidate/candidate1047-http-failure.json": {
+      "recorded_path": "artifacts/skills-completion-audit-20261101/candidate1047-http-failure.json",
+      "recorded_sha256": "774b77bc0ba0679c81da9c92f4885d2861928178e0cd5a6956955f62a8d35e96",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/skills-authoring-observation-20261101/current-candidate/candidate-canonical-request-fixture.json": {
+      "recorded_path": "artifacts/skills-completion-audit-20261101/candidate-canonical-request-fixture.json",
+      "recorded_sha256": "a77e262446653bc75fd34ed51d590b884946e4d9a89e1ef7f2776183862e49b2",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/skills-authoring-observation-20261101/current-candidate/candidate-failure-read-carrier.json": {
+      "recorded_path": "artifacts/skills-completion-audit-20261101/candidate-failure-read-carrier.json",
+      "recorded_sha256": "e93890744433be4e8537ce8e0453f897cdf328cf65d41a926a28d7907711b924",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/skills-authoring-observation-20261101/current-candidate/candidate1047-authoring-preview-proof.json": {
+      "recorded_path": "artifacts/skills-completion-audit-20261101/candidate1047-authoring-preview-proof.json",
+      "recorded_sha256": "4047181ab417caa5e6ae46d6044ad552fbb7d3616c2654928bc7b9867d532af5",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/skills-authoring-observation-20261101/current-candidate/candidate1047-cleanup.json": {
+      "recorded_path": "artifacts/skills-completion-audit-20261101/candidate1047-cleanup.json",
+      "recorded_sha256": "4e0cb542a436318e172f1f5447c27a2a4401b8df1835902f9ed881086dfd7f9d",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/skills-authoring-observation-20261101/current-candidate/candidate1047-matched-proof-index.json": {
+      "recorded_path": "artifacts/skills-completion-audit-20261101/candidate1047-matched-proof-index.json",
+      "recorded_sha256": "35e1fafa0b6e9597a125331d892125920eb5b5840dd5cf3b0e8538629241662d",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/skills-authoring-observation-20261101/current-candidate/candidate1047-server-process.json": {
+      "recorded_path": "artifacts/skills-completion-audit-20261101/candidate1047-server-process.json",
+      "recorded_sha256": "172d3f2b43fe7a250307e835f3351085c6ea8093c695ec8d01bbfb17949a56f8",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/skills-authoring-observation-20261101/current-candidate/candidate1047-tui-process.json": {
+      "recorded_path": "artifacts/skills-completion-audit-20261101/candidate1047-tui-process.json",
+      "recorded_sha256": "2920e2a5deae080cb5e08da9d778cca6dfbf124c83375faa51c74969095da1cc",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/skills-authoring-observation-20261101/current-candidate/candidate-tui1047.raw.ansi.gz": {
+      "recorded_path": "artifacts/skills-completion-audit-20261101/candidate-tui1047.raw.ansi.gz",
+      "recorded_sha256": "546c956cd384199c2a6ebf9f1bf3a60cfe59db5debdab98da490d9b227789a6a",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/skills-authoring-observation-20261101/current-candidate/native69-verification.json": {
+      "recorded_path": "artifacts/skills-completion-audit-20261101/native69-verification.json",
+      "recorded_sha256": "7f757d6bf947556a3d05cdfeebb81aa062b1f7c69c6929438461628c0afe0e52",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/skills-authoring-observation-20261101/current-candidate/dashboard-final-current-verification.json": {
+      "recorded_path": "artifacts/skills-completion-audit-20261101/dashboard-final-current-verification.json",
+      "recorded_sha256": "8568225defd226296a467763e67560baf2581c6be836286a16905fb36339843b",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/skills-authoring-observation-20261101/current-candidate/dashboard-final-current-tests.log": {
+      "recorded_path": "artifacts/skills-completion-audit-20261101/dashboard-final-current-tests.log",
+      "recorded_sha256": "66b19f02f8fafd17394ccafa0e97fa8b1a304bfe7e7362caf958a73c512d7450",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/skills-authoring-observation-20261101/current-candidate/dashboard-final-current-inspector-tests.log": {
+      "recorded_path": "artifacts/skills-completion-audit-20261101/dashboard-final-current-inspector-tests.log",
+      "recorded_sha256": "b695e46d3c69c4a685ac31be6ac886b7582c756416a44c93d1bbdfee210fb9a6",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/skills-authoring-observation-20261101/current-candidate/dashboard-final-current-inspector-render-tests.log": {
+      "recorded_path": "artifacts/skills-completion-audit-20261101/dashboard-final-current-inspector-render-tests.log",
+      "recorded_sha256": "22883e3f54fcc2fc13b4a1a962648e5e895fa8bf407fba20dda60cad3ec54742",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/skills-authoring-observation-20261101/current-candidate/dashboard-final-current-tool-blob-tests.log": {
+      "recorded_path": "artifacts/skills-completion-audit-20261101/dashboard-final-current-tool-blob-tests.log",
+      "recorded_sha256": "ebad79b6ed1fa2c4fbc7416dba908fde41a2b354d9a159d23dda0a54ae6ed90e",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/skills-authoring-observation-20261101/current-candidate/dashboard-final-current-typecheck.log": {
+      "recorded_path": "artifacts/skills-completion-audit-20261101/dashboard-final-current-typecheck.log",
+      "recorded_sha256": "74f8ebedebd845892d3ae7cdbc7cce2f464e7b1b4e29ae2609313cab7f2ea5fa",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/skills-authoring-observation-20261101/current-candidate/final-product-source-verdicts.json": {
+      "recorded_path": "artifacts/skills-completion-audit-20261101/final-product-source-verdicts.json",
+      "recorded_sha256": "bb847af198273921c740a384fbd457e6ccff2042167678004373eae577cf028a",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/skills-authoring-observation-20261101/current-candidate/dashboard183-before-input-styles.png": {
+      "recorded_path": "artifacts/skills-completion-audit-20261101/dashboard183-name-precedence.png",
+      "recorded_sha256": "d0be1f54457a50e08c67a087a9c59533b2ec0b3c71048a4e34d784815862911c",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/skills-authoring-observation-20261101/current-candidate/mac1047-verified-download.json": {
+      "recorded_path": "artifacts/skills-completion-audit-20261101/mac1047/verified-download.json",
+      "recorded_sha256": "1af9e9eb62c235b90b05576c2004255c1ebcfa2ac71ae33b3a702716c10494fb",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/skills-authoring-observation-20261101/current-candidate/mac1047-runtime-provenance.json": {
+      "recorded_path": "artifacts/skills-completion-audit-20261101/mac1047/runtime-provenance.json",
+      "recorded_sha256": "96b0b6711bb51d5b48b6e35f84ebd682b756ede8b3c2c93d05dc0c5c4effdd16",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/skills-authoring-observation-20261101/current-candidate/native69-ci-run-tests.log": {
+      "recorded_path": "artifacts/skills-completion-audit-20261101/native69-testlog/ci-run-tests.log",
+      "recorded_sha256": "a7d8a018007983036ec18291f8b185c35939ca875967ae99b4c2297b56fa308e",
+      "content_kind": "retained_capture"
+    }
+  },
+  "historical_records": []
+}

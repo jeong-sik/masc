@@ -1,0 +1,330 @@
+{
+  "schema": "masc.async-request-status/v1",
+  "status": "observed",
+  "request": {
+    "request_id": "kmsg-4e8b11245ab78f212cb75fa90ceb206a",
+    "keeper_name": "fixture",
+    "submitted_by": "fixture",
+    "request_context": {
+      "composition_run_id": "01a1965c-77d7-7000-95ee-866747f5bd9b",
+      "composition_tool": "keeper_composition_run",
+      "draft_reference": {
+        "_blob": {
+          "bytes": 12963,
+          "mime": "application/vnd.masc.tool-result-manifest+json",
+          "preview": "",
+          "sha256": "8e0e554ae3a7f1eb5ec26ab36d569951f3b8e6bfc5cd1ddd107e417873bac0ed"
+        }
+      },
+      "parent_tool_use_id": "run-nested",
+      "run_artifact": {
+        "_blob": {
+          "bytes": 1781,
+          "mime": "application/vnd.masc.tool-result-manifest+json",
+          "preview": "",
+          "sha256": "18961f222f83c13812a340d89529365ed5d642b9812de869555c072471c817ad"
+        }
+      },
+      "source_task_id": "task-nested",
+      "source_turn": 1
+    },
+    "status": "done",
+    "submitted_at": 1793524004.825482,
+    "completed_at": 1793524004.846727,
+    "ok": true,
+    "result": {
+      "composition_tool": "keeper_composition_run",
+      "tool_kind": "async_composition",
+      "nested_scopes": [
+        {
+          "scope": {
+            "alias": "left",
+            "reference": {
+              "identity": {
+                "source_id": "fixture",
+                "package_id": "nested-read",
+                "name": "nested-read"
+              },
+              "content_revision": "45eb9509e7073bac18e4e997e9e5bf6288889364e6dc5103e53e3317b823dfe8"
+            },
+            "arguments": {
+              "kind": "fixed",
+              "value": {}
+            },
+            "scope": {
+              "kind": "inline",
+              "node_mapping": [
+                {
+                  "source": "lane-a",
+                  "expanded": "[\"left\",\"lane-a\"]"
+                },
+                {
+                  "source": "lane-b",
+                  "expanded": "[\"left\",\"lane-b\"]"
+                }
+              ]
+            },
+            "exports": [
+              {
+                "name": "profile",
+                "node": "[\"left\",\"lane-a\"]",
+                "pointer": "/profile"
+              }
+            ]
+          },
+          "admission": {
+            "skill_tool_use_id": "composition-skill:[\"01a1965c-77d7-7000-95ee-866747f5bd9b\",\"run-nested\",\"left\"]",
+            "activation": {
+              "identity": {
+                "source_id": "fixture",
+                "package_id": "nested-read",
+                "name": "nested-read"
+              },
+              "content_revision": "45eb9509e7073bac18e4e997e9e5bf6288889364e6dc5103e53e3317b823dfe8",
+              "snapshot_revision": "c9e0c2a33469ffc166ba4a5798135ea8f7c4214ce2b8399cbdb6234b85018ccc",
+              "turn_ref": "trace-nested-public#1",
+              "runtime_id": "fixture.runtime",
+              "skill_tool_use_id": "composition-skill:[\"01a1965c-77d7-7000-95ee-866747f5bd9b\",\"run-nested\",\"left\"]",
+              "agent_core_turn": 1,
+              "invocation": {
+                "kind": "nested_composition",
+                "origin": {
+                  "kind": "task_composition",
+                  "task_ids": [
+                    "task-nested"
+                  ]
+                },
+                "tool_name": "keeper_composition_run",
+                "scope": {
+                  "parent_tool_use_id": "composition-result:01a1965c-77d7-7000-95ee-866747f5bd9b",
+                  "composition_run_id": "01a1965c-77d7-7000-95ee-866747f5bd9b",
+                  "alias": "left"
+                }
+              },
+              "delivery": null,
+              "actions": [],
+              "activated_at": "2026-11-01T09:06:44Z"
+            },
+            "activation_frame_sha256": "3772bd23674e413500e304d0f1d48d2e7eafbabd6b3f7734b310bd41646e733f"
+          },
+          "disposition": "completed",
+          "cause": null,
+          "nodes": [
+            {
+              "source": "lane-a",
+              "node_id": "[\"left\",\"lane-a\"]",
+              "settled": true,
+              "disposition": "completed",
+              "tool_use_id": "composition:36:01a1965c-77d7-7000-95ee-866747f5bd9b:55:composition-async:kmsg-4e8b11245ab78f212cb75fa90ceb206a:17:[\"left\",\"lane-a\"]",
+              "failure_effect_disposition": null,
+              "output_validation_error": null
+            },
+            {
+              "source": "lane-b",
+              "node_id": "[\"left\",\"lane-b\"]",
+              "settled": true,
+              "disposition": "completed",
+              "tool_use_id": "composition:36:01a1965c-77d7-7000-95ee-866747f5bd9b:55:composition-async:kmsg-4e8b11245ab78f212cb75fa90ceb206a:17:[\"left\",\"lane-b\"]",
+              "failure_effect_disposition": null,
+              "output_validation_error": null
+            }
+          ],
+          "exports": {
+            "profile": {
+              "available": true,
+              "value": "docker"
+            }
+          }
+        },
+        {
+          "scope": {
+            "alias": "right",
+            "reference": {
+              "identity": {
+                "source_id": "fixture",
+                "package_id": "nested-read",
+                "name": "nested-read"
+              },
+              "content_revision": "45eb9509e7073bac18e4e997e9e5bf6288889364e6dc5103e53e3317b823dfe8"
+            },
+            "arguments": {
+              "kind": "fixed",
+              "value": {}
+            },
+            "scope": {
+              "kind": "inline",
+              "node_mapping": [
+                {
+                  "source": "lane-a",
+                  "expanded": "[\"right\",\"lane-a\"]"
+                },
+                {
+                  "source": "lane-b",
+                  "expanded": "[\"right\",\"lane-b\"]"
+                }
+              ]
+            },
+            "exports": [
+              {
+                "name": "profile",
+                "node": "[\"right\",\"lane-a\"]",
+                "pointer": "/profile"
+              }
+            ]
+          },
+          "admission": {
+            "skill_tool_use_id": "composition-skill:[\"01a1965c-77d7-7000-95ee-866747f5bd9b\",\"run-nested\",\"right\"]",
+            "activation": {
+              "identity": {
+                "source_id": "fixture",
+                "package_id": "nested-read",
+                "name": "nested-read"
+              },
+              "content_revision": "45eb9509e7073bac18e4e997e9e5bf6288889364e6dc5103e53e3317b823dfe8",
+              "snapshot_revision": "c9e0c2a33469ffc166ba4a5798135ea8f7c4214ce2b8399cbdb6234b85018ccc",
+              "turn_ref": "trace-nested-public#1",
+              "runtime_id": "fixture.runtime",
+              "skill_tool_use_id": "composition-skill:[\"01a1965c-77d7-7000-95ee-866747f5bd9b\",\"run-nested\",\"right\"]",
+              "agent_core_turn": 1,
+              "invocation": {
+                "kind": "nested_composition",
+                "origin": {
+                  "kind": "task_composition",
+                  "task_ids": [
+                    "task-nested"
+                  ]
+                },
+                "tool_name": "keeper_composition_run",
+                "scope": {
+                  "parent_tool_use_id": "composition-result:01a1965c-77d7-7000-95ee-866747f5bd9b",
+                  "composition_run_id": "01a1965c-77d7-7000-95ee-866747f5bd9b",
+                  "alias": "right"
+                }
+              },
+              "delivery": null,
+              "actions": [],
+              "activated_at": "2026-11-01T09:06:44Z"
+            },
+            "activation_frame_sha256": "a1a1ab5b3457ed4df4b592916ae5129b701010c55a7f5632ada32733843e2fa3"
+          },
+          "disposition": "completed",
+          "cause": null,
+          "nodes": [
+            {
+              "source": "lane-a",
+              "node_id": "[\"right\",\"lane-a\"]",
+              "settled": true,
+              "disposition": "completed",
+              "tool_use_id": "composition:36:01a1965c-77d7-7000-95ee-866747f5bd9b:55:composition-async:kmsg-4e8b11245ab78f212cb75fa90ceb206a:18:[\"right\",\"lane-a\"]",
+              "failure_effect_disposition": null,
+              "output_validation_error": null
+            },
+            {
+              "source": "lane-b",
+              "node_id": "[\"right\",\"lane-b\"]",
+              "settled": true,
+              "disposition": "completed",
+              "tool_use_id": "composition:36:01a1965c-77d7-7000-95ee-866747f5bd9b:55:composition-async:kmsg-4e8b11245ab78f212cb75fa90ceb206a:18:[\"right\",\"lane-b\"]",
+              "failure_effect_disposition": null,
+              "output_validation_error": null
+            }
+          ],
+          "exports": {
+            "profile": {
+              "available": true,
+              "value": "docker"
+            }
+          }
+        }
+      ],
+      "exports": {
+        "answer": {
+          "available": true,
+          "value": "docker"
+        }
+      },
+      "nodes": [
+        {
+          "node_id": "[\"left\",\"lane-a\"]",
+          "execution_id": "exec-1793524004832-001f",
+          "execution_origin": "fresh_dispatch",
+          "tool_name": "keeper_lane_status",
+          "settled": true,
+          "disposition": "completed",
+          "schedule": {
+            "planned_index": 0,
+            "batch_index": 0,
+            "batch_size": 4,
+            "execution_mode": "concurrent"
+          },
+          "output_validation_error": null,
+          "failure_effect_disposition": null,
+          "deferred_kind": null
+        },
+        {
+          "node_id": "[\"left\",\"lane-b\"]",
+          "execution_id": "exec-1793524004832-0020",
+          "execution_origin": "fresh_dispatch",
+          "tool_name": "keeper_lane_status",
+          "settled": true,
+          "disposition": "completed",
+          "schedule": {
+            "planned_index": 1,
+            "batch_index": 0,
+            "batch_size": 4,
+            "execution_mode": "concurrent"
+          },
+          "output_validation_error": null,
+          "failure_effect_disposition": null,
+          "deferred_kind": null
+        },
+        {
+          "node_id": "[\"right\",\"lane-a\"]",
+          "execution_id": "exec-1793524004832-0021",
+          "execution_origin": "fresh_dispatch",
+          "tool_name": "keeper_lane_status",
+          "settled": true,
+          "disposition": "completed",
+          "schedule": {
+            "planned_index": 2,
+            "batch_index": 0,
+            "batch_size": 4,
+            "execution_mode": "concurrent"
+          },
+          "output_validation_error": null,
+          "failure_effect_disposition": null,
+          "deferred_kind": null
+        },
+        {
+          "node_id": "[\"right\",\"lane-b\"]",
+          "execution_id": "exec-1793524004832-0022",
+          "execution_origin": "fresh_dispatch",
+          "tool_name": "keeper_lane_status",
+          "settled": true,
+          "disposition": "completed",
+          "schedule": {
+            "planned_index": 3,
+            "batch_index": 0,
+            "batch_size": 4,
+            "execution_mode": "concurrent"
+          },
+          "output_validation_error": null,
+          "failure_effect_disposition": null,
+          "deferred_kind": null
+        }
+      ],
+      "execution_artifact": {
+        "_blob": {
+          "sha256": "703b0d60068c5ef1b4e313f822a37acd978a4ba1b3851030a2da5ac86cfa056e",
+          "bytes": 25372,
+          "mime": "application/vnd.masc.tool-result-manifest+json",
+          "preview": ""
+        }
+      }
+    },
+    "continuation": {
+      "kind": "unavailable",
+      "detail": "{\"kind\":\"missing_journal\"}"
+    }
+  }
+}

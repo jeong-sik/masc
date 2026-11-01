@@ -1,0 +1,28 @@
+{
+  "at": "2026-11-01T10:10:25.237525+00:00",
+  "local_build_identity": {
+    "schema": "masc.dashboard-build.v1",
+    "source_commit": "1047c150a3086190677bf4affb4cdde8cc82ed51"
+  },
+  "server_binary_commit": "1047c150a3086190677bf4affb4cdde8cc82ed51",
+  "verified_http_files": [
+    {
+      "path": "/dashboard/",
+      "sha256": "24cb4c67f8456f62a8a274d96a2ec259dde6bc0b635923e16ce18cab4dead346"
+    },
+    {
+      "path": "/dashboard/assets/index-8__qBwfL.js",
+      "sha256": "b55a070beefe2cf20c3971612035bbde28f92a869f7a86898d397d878126d4bc"
+    },
+    {
+      "path": "/dashboard/assets/index-CW-ICE0b.css",
+      "sha256": "3b49b1cae06a48a8603f5ee56b4fa01f52964fe663070c8c61035f7ee61a3675"
+    },
+    {
+      "path": "/dashboard/assets/vendor-DoibHDuM.js",
+      "sha256": "c48c1e4f60608ec27faf09ab584d8aaf596a9a0f9acf8cbf9d6fc7932c8db1ff"
+    }
+  ],
+  "health_build_source_commit": null,
+  "source_authority": "Clean1047 checkout/build identity plus staged688file hashes; actual HTTP HTML/module/CSS/vendor bytes equal staged assets. Health full executable binding metadata is absent."
+}

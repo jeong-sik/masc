@@ -1,0 +1,32 @@
+{
+  "at": "2026-11-01T09:54:45.987163+00:00",
+  "kind": "Independent agent source verdicts, freshly REST-bound by root; not GitHub formal approval",
+  "stack": 47176,
+  "members": [
+    {
+      "pr": 47159,
+      "head": "94240d9c0d70d987aa167a28b32cf5903f1f7315",
+      "base": "7c6dbe4fb58cecc0bce06a60069f18320f3b4968",
+      "guard_diff_sha256": "b45605967cc69a4c1fbec0f6c2b0ec79d138b55f5d2dd7efa866fd9425bdbf30",
+      "reviewer": "Codex-review_response_skills_usage",
+      "verdict": "PASS"
+    },
+    {
+      "pr": 47174,
+      "head": "69c65ab0fd0484712ab118885ffcf20b4124d56d",
+      "base": "94240d9c0d70d987aa167a28b32cf5903f1f7315",
+      "guard_diff_sha256": "f67b61e6e4d18c8897ccba78a060ff7677210f42cca7efca4d90d05180848a10",
+      "reviewer": "adversarial-reviewer",
+      "verdict": "PASS"
+    },
+    {
+      "pr": 47183,
+      "head": "1047c150a3086190677bf4affb4cdde8cc82ed51",
+      "base": "69c65ab0fd0484712ab118885ffcf20b4124d56d",
+      "guard_diff_sha256": "afc72536f58002443e6140d6fdf7dbaf9641a01ae89e151f0dd26108789a8292",
+      "reviewer": "Codex-review_response_skills_usage",
+      "verdict": "PASS"
+    }
+  ],
+  "remaining_p0_p1_p2": []
+}

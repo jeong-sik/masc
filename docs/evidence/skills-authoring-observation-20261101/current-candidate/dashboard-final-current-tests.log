@@ -1,0 +1,12 @@
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/skills-completion-audit-20261101/dashboard
+
+
+ Test Files  12 passed (12)
+      Tests  230 passed (230)
+   Start at  19:24:57
+   Duration  7.52s (environment 30%, import 30%, setup 22%, tests 10%, transform 7%, worker 1%)
+
+    Isolate  12 workers spawned · ~267ms startup each (spawn + environment, per file)
+             at least ~2.94s faster with isolate: false — reuses workers across files instead of one per file
+

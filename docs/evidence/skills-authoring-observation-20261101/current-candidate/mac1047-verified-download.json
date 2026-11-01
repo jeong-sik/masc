@@ -1,0 +1,91 @@
+{
+  "at": "2026-11-01T10:05:45.358971+00:00",
+  "workflow_run": 41294630269,
+  "artifact_id": 13079290025,
+  "probe": {
+    "source_commit": "1047c150a3086190677bf4affb4cdde8cc82ed51",
+    "source_tree": "13bb6c09067d4c1c5ce78d98ec67912714cc8bb0",
+    "workflow_head": "7ac51bcaec1f756157dc3043bf2455e7141fdd22",
+    "platform": "macos-arm64",
+    "run_id": "41294630269",
+    "run_attempt": "1",
+    "release_verified": false,
+    "published": false
+  },
+  "embedded_commits": {
+    "masc": "1047c150a3086190677bf4affb4cdde8cc82ed51",
+    "masc-tui": "1047c150a3086190677bf4affb4cdde8cc82ed51"
+  },
+  "entries": [
+    {
+      "path": "dependencies.txt",
+      "sha256": "a6d5799d4afb24edde41b179dc87b253a56b1d61378a649067266c7472977131",
+      "bytes": 17684
+    },
+    {
+      "path": "masc-browser-host-macos-arm64",
+      "sha256": "aedc6c407bfa75eef4fecb759339f4018e015e8ebab7c30a86d61fbc5002cfc2",
+      "bytes": 46419424
+    },
+    {
+      "path": "masc-check-runtime-deployment-preflight-macos-arm64",
+      "sha256": "7d0f568a9f67e266c635bf8cb1d2f53d0f1d32e3aa2cc4bf3e21dffb1775b0a4",
+      "bytes": 16928
+    },
+    {
+      "path": "masc-deployment-preflight-helper-macos-arm64",
+      "sha256": "d676c4036e247b2640b41bbd7fe94fedbb65807aae209fd18a0078a2bc641a07",
+      "bytes": 111291312
+    },
+    {
+      "path": "masc-exec-ssh-bootstrap-macos-arm64",
+      "sha256": "127195a939ce4e14a7025a5aacd5837e89fb5507305daeb0c03c009c7aaa5067",
+      "bytes": 29314368
+    },
+    {
+      "path": "masc-macos-arm64",
+      "sha256": "2b7a0fcd52021d844d8c254fb842106496199cec252155ca001fb2334546d4b2",
+      "bytes": 113614912
+    },
+    {
+      "path": "masc-runtime-macos-arm64.tar.gz",
+      "sha256": "7fae865edc0d65e9e88c78bac0c863b62437617ac87608730a5d85b355a4d3dc",
+      "bytes": 57196197
+    },
+    {
+      "path": "masc-tui-macos-arm64",
+      "sha256": "d90a3af5e033da7ed986217c5adc4ff166cde7c030cf4ea86da5080471a8485c",
+      "bytes": 125643520
+    },
+    {
+      "path": "probe.json",
+      "sha256": "bc1a4ef2750863ab4b6f9c74bdc7845680afa9c8ea9e9a20755a974925bcbf18",
+      "bytes": 319
+    },
+    {
+      "path": "runtime-provenance.json",
+      "sha256": "96b0b6711bb51d5b48b6e35f84ebd682b756ede8b3c2c93d05dc0c5c4effdd16",
+      "bytes": 1224
+    },
+    {
+      "path": "server-version.txt",
+      "sha256": "26cab1c740ba1a059762639ed3ccf7c3ee447b60f0806d5e6d683bfc22191f5d",
+      "bytes": 7
+    },
+    {
+      "path": "ssh-bootstrap-help.txt",
+      "sha256": "41ef472ad49c017d7e7afc79d2fa391bd68ff256036062f4fdcc978348939b17",
+      "bytes": 1471
+    },
+    {
+      "path": "tui-build-commit.txt",
+      "sha256": "da3d70ff6473956be0827cae03b3058441c869a29d6e119cb43963d6c2013a8a",
+      "bytes": 41
+    },
+    {
+      "path": "tui-version.txt",
+      "sha256": "26cab1c740ba1a059762639ed3ccf7c3ee447b60f0806d5e6d683bfc22191f5d",
+      "bytes": 7
+    }
+  ]
+}

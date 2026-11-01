@@ -1,0 +1,30 @@
+{
+  "at": "2026-11-01T10:31:09.033369+00:00",
+  "source_head": "e43491a61b06b1c95f7d180fe766b8351d7636b1",
+  "typecheck": "passed",
+  "runs": [
+    {
+      "log": "dashboard-final-current-tests.log",
+      "cases": 230,
+      "files": 12
+    },
+    {
+      "log": "dashboard-final-current-inspector-tests.log",
+      "cases": 27,
+      "files": 1
+    },
+    {
+      "log": "dashboard-final-current-inspector-render-tests.log",
+      "cases": 13,
+      "files": 1
+    },
+    {
+      "log": "dashboard-final-current-tool-blob-tests.log",
+      "cases": 4,
+      "files": 1
+    }
+  ],
+  "distinct_files": 15,
+  "case_count": 274,
+  "scope": "Four disjoint focused selections at unchanged final Dashboard/test inputs; includes shared blob transport and original-call inspector consumers. Evidence-only edits do not change these inputs."
+}

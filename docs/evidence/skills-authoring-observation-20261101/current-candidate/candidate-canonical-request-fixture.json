@@ -1,0 +1,17 @@
+{
+  "at": "2026-11-01T09:24:09.665772+00:00",
+  "kind": "Controlled read-projection derivative of an actual native CI terminal record",
+  "source_head": "26e713fa41de5f6a96a8a98597ea96c95cef523a",
+  "workflow_run": 41291355669,
+  "original_record_base": "/tmp/masc-nested-public-8f5430",
+  "current_record_base": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/skills-completion-audit-20261101/artifacts/skills-completion-audit-20261101/candidate-base",
+  "only_record_domain_change": "base_path rebinding to this isolated fixture store; outcome, identity, context and retained result unchanged",
+  "request_id": "kmsg-4e8b11245ab78f212cb75fa90ceb206a",
+  "submitted_by": "fixture",
+  "keeper_name": "fixture",
+  "record_sha256": "20266f273350d82f0fe7520427efcefd4b672bdc731c1bcb79d1bc475fd62d49",
+  "original_native_result_preserved": true,
+  "worker_or_model_replayed": false,
+  "original_journal_or_ledger_copied": false,
+  "expected_logical_status": "unavailable in this fixture; original source journal is not copied"
+}

@@ -1,0 +1,9 @@
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/skills-completion-audit-20261101/dashboard
+
+
+ Test Files  1 passed (1)
+      Tests  4 passed (4)
+   Start at  19:31:08
+   Duration  843ms (environment 38%, setup 33%, transform 25%, import 3%, tests 2%, worker 1%)
+

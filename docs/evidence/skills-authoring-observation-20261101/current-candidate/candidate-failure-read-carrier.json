@@ -1,0 +1,35 @@
+{
+  "at": "2026-11-01T10:12:46.118873+00:00",
+  "kind": "Manually seeded terminal read carrier of an unchanged actual native inline-failure result",
+  "target": {
+    "submitted_by": "fixture",
+    "request_id": "kmsg-634d534f1591493a8ce5715fcdd96799",
+    "keeper_name": "fixture"
+  },
+  "schema_template": "actual native async request_record, with explicit QA-only envelope fields",
+  "source_head": "26e713fa41de5f6a96a8a98597ea96c95cef523a",
+  "source_run": 41291355669,
+  "source_payload": "native-inline-admission-rejected.json",
+  "source_payload_sha256": "39dffe56679e4bbfd6767ca1c47ae42f1813163d143b207582f71997b1ddf591",
+  "unchanged_data_object": true,
+  "native_execution": "inline",
+  "carrier_is_native_async_execution": false,
+  "carrier_fields_changed": [
+    "request_id",
+    "base_path",
+    "request_context",
+    "status",
+    "submitted_at",
+    "completed_at",
+    "ok",
+    "body",
+    "data"
+  ],
+  "request_context": null,
+  "record_sha256": "9036185dc567c5c6caf63162e14ed7c6d8f2bac2c12593e86f847538dc594c3f",
+  "record_bytes": 17762,
+  "model_or_worker_replayed": false,
+  "live_runtime_reused": false,
+  "carrier_status": "error",
+  "serialization_authority": "Keeper_msg_async_record.status_to_string: Done{ok=false} serializes as error; malformed initial done/false was rejected and repaired before any accepted screen capture"
+}

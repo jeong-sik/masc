@@ -76,7 +76,8 @@ let test_original_body_refresh () =
   let content=String.concat "\n" (List.init 120 (fun i ->
     Printf.sprintf "원문 %03d 🙂" (i+1))) in
   let original=Decode.Original_body {source_id=String.make 64 'a';
-    sha256=String.make 64 'b';recorded_bytes=String.length content;content} in
+    sha256=String.make 64 'b';recorded_bytes=String.length content;content;
+    nested=Masc.Keeper_composition_observation.Absent} in
   List.iter (fun failure ->
     let initial={ (decode "original" "canonical preview") with Decode.kc_original=original } in
     let reader,request=start (Reader.create [choice "original"]) in

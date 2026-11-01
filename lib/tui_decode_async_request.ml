@@ -20,7 +20,7 @@ type logical = Confirmed of logical_value | Unavailable of string
 type snapshot =
   { source : source; phase : phase; submitted_at : float; completed_at : float option
   ; dependencies : Keeper_composition_dependency.t list; result : Yojson.Safe.t option
-  ; notice : string option; logical : logical }
+  ; notice : string option; logical : logical; nested : Keeper_composition_observation.reading }
 type reading = Observed of snapshot | Absent
 
 let fields ~required ?(optional=[]) json =
@@ -166,6 +166,11 @@ let decode ~target json =
          | Some (`Assoc result) -> let* reason = get result "reason" in text reason |> Result.map Option.some
          | Some _ | None -> Error "physical failure lacks its original reason")
       | Queued | Running | Waiting | Done _ -> Ok None in
+    let result=List.assoc_opt "result" f in
+    let nested = match result with
+      | None -> Keeper_composition_observation.Absent
+      | Some (`String content) -> Keeper_composition_observation.of_content content
+      | Some data -> Keeper_composition_observation.of_data data in
     Ok (Observed {source={target;request_context};phase;submitted_at;completed_at;dependencies;
-      result=List.assoc_opt "result" f;notice;logical})
+      result;notice;logical;nested})
   | _ -> Error "unknown async request observation"

@@ -256,7 +256,7 @@ let async_logical_lines value =
          Ansi.dim,Printf.sprintf " 결정: %s · %.3f" (safe resolution.requested_by) resolution.resolved_at;
          Theme.info ()," 사유: " ^ safe resolution.reason])
 
-let async_request_detail_lines state target =
+let async_request_detail_lines ~cols state target =
   let module Detail = Masc.Tui_decode_async_request in
   let view = Masc_tui_fetched.view_for ~equal:Detail.equal_target state.tools_async_detail ~key:target in
   let pending = Masc_tui_fetched.in_flight state.tools_async_detail in
@@ -293,8 +293,13 @@ let async_request_detail_lines state target =
             | Some (source,value) when Detail.equal_source source snapshot.source ->
               [Theme.warn ()," 아래 논리는 마지막 관측이며 최신 확인이 아닙니다"] @ async_logical_lines value
             | Some _ | None -> [Ansi.dim," 확인된 이전 논리 관측 없음"]) in
+      let nested = Masc_tui_nested_result.sections snapshot.nested
+        |> List.concat_map (fun (heading,body) ->
+          (Ansi.bold,heading) ::
+          (Masc_tui_text_block.rows ~max_cells:(max 1 (Masc_tui_frame.inner_width ~cols)) body
+           |> List.map (fun row -> Ansi.dim,row))) in
       physical @ Option.to_list (Option.map (fun notice -> Theme.warn (),
-        " 물리 사유: " ^ Terminal_text.single_line notice) snapshot.notice) @ dependencies @ logical in
+        " 물리 사유: " ^ Terminal_text.single_line notice) snapshot.notice) @ dependencies @ logical @ nested in
   [Ansi.bold," 원본 비동기 요청 · t:원본 Task · o:원본 ID 조회 · r:재조회 · Esc:목록"] @ reading @ failures @ snapshot
 
 let async_source_task_lines ~cols state source =
@@ -331,7 +336,7 @@ let async_source_task_lines ~cols state source =
 let async_request_observation_lines ~cols state =
   match state.tools_async_detail_open,state.tools_async_selection,state.tools_async_task_source with
   | true,Some _,Some source -> async_source_task_lines ~cols state source
-  | true,Some target,None -> async_request_detail_lines state target
+  | true,Some target,None -> async_request_detail_lines ~cols state target
   | true,None,_ | false,_,_ -> async_request_inventory_lines state
 
 (* The Tools sections, named where the reader is standing. Same shape as

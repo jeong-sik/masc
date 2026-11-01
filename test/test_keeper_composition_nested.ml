@@ -757,6 +757,54 @@ let test_public_nested_prepare_run_records_only_admitted_children ?(execution=Ma
   check bool "usable selected answer survives independent admission failure" true
     (result |> member "exports" |> member "answer" |> member "available" |> to_bool);
   let child_scopes = result |> member "nested_scopes" |> to_list in
+  let module Observation = Masc.Keeper_composition_observation in
+  let observed = match Observation.of_data result with
+    | Observed children -> children
+    | Invalid detail -> fail detail
+    | Absent | Stored _ -> fail "actual result lost nested observation" in
+  check int "observation preserves every actual child" (List.length child_scopes) (List.length observed);
+  List.iter2 (fun raw (child : Observation.child) ->
+    check string "observed alias comes from actual scope"
+      (raw |> member "scope" |> member "alias" |> to_string) child.alias;
+    check string "observed disposition preserves actual aggregate"
+      (raw |> member "disposition" |> to_string)
+      (Masc.Keeper_composition_nested_run.disposition_to_string child.disposition);
+    check bool "observed exact reference is the executed revision" true
+      (Skill_reference.equal reference child.reference);
+    check int "all expanded node occurrences are preserved"
+      (raw |> member "nodes" |> to_list |> List.length) (List.length child.nodes);
+    List.iter (fun (export : Observation.export) ->
+      let available = raw |> member "exports" |> member export.name |> member "available" |> to_bool in
+      check bool "export availability is independent of parent success" available
+        (match export.value with Available _ -> true | Unavailable _ -> false)) child.exports) child_scopes observed;
+  let complete_reading = match Observation.of_content result_content with
+    | Stored reference ->
+        let content = match Tool_blob_store.fetch (Tool_blob_store.create ~base_path)
+            ~sha256:reference.sha256 with
+          | Ok (Some content) -> content | _ -> fail "actual result manifest was not retained" in
+        Observation.of_blob_response reference (`Assoc ["sha256",`String reference.sha256;
+          "bytes",`Int reference.bytes;"mime",`String reference.mime;"content",`String content])
+    | reading -> reading in
+  check bool "actual provider result bytes project the same retained children" true
+    (complete_reading = Observation.Observed observed);
+  let manifest_content = Tool_output.artifact_manifest_to_json ~content:result_content
+      ~structured_content:result |> Yojson.Safe.to_string in
+  let manifest_reference = Tool_blob_store.put_durable (Tool_blob_store.create ~base_path)
+      ~bytes:manifest_content ~mime:Tool_output.artifact_manifest_mime in
+  let manifest_response content = `Assoc ["sha256",`String manifest_reference.sha256;
+    "bytes",`Int manifest_reference.bytes;"mime",`String manifest_reference.mime;"content",`String content] in
+  check bool "retained manifest preserves the actual execution observation" true
+    (Observation.of_blob_response manifest_reference (manifest_response manifest_content) = Observed observed);
+  check bool "retained manifest refuses altered bytes" true
+    (match Observation.of_blob_response manifest_reference (manifest_response (manifest_content ^ " ")) with
+     | Invalid _ -> true | _ -> false);
+  let bad = match result with
+    | `Assoc fields -> `Assoc (("nested_scopes",`List [`Assoc []]) :: List.remove_assoc "nested_scopes" fields)
+    | _ -> fail "expected actual structured result" in
+  check bool "malformed child evidence is not silently empty" true
+    (match Observation.of_data bad with Invalid _ -> true | _ -> false);
+  check bool "user exports are not recursively interpreted as child execution" true
+    (Observation.of_data (`Assoc ["exports",result]) = Absent);
   List.iter (fun child ->
     let alias = child |> member "scope" |> member "alias" |> to_string in
     let expected = match alias with "reject" -> "admission_rejected" | "blocked" -> "not_started" | _ -> "completed" in

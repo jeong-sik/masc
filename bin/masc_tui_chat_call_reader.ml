@@ -62,6 +62,7 @@ let original_failure = function
   | Masc.Tui_decode.Original_failed detail -> Some detail
   | Original_pending -> Some "The enclosing turn's original trace is not published yet"
   | Original_unavailable reason -> Some reason
+  | Original_body {nested=Invalid detail;_} -> Some detail
   | Original_not_read | Original_body _ -> None
 let output_sections (call:Masc.Tui_decode.keeper_call) =
   let preview () = [section "Recorded output preview"
@@ -76,7 +77,8 @@ let output_sections (call:Masc.Tui_decode.keeper_call) =
                | Some (Masc_tui_execute_result.Printed text) -> [section "Printed output" text]
                | Some (Stored reference) ->
                    [section "Stored output" (Masc_tui_execute_result.stored_text reference)]) in
-      printed @ [section "Retained original result" body.content;
+      List.map (fun (heading,body) -> section heading body) (Masc_tui_nested_result.sections body.nested)
+      @ printed @ [section "Retained original result" body.content;
         section "Original source" (Printf.sprintf
           "%d projected bytes · %d recorded bytes · sha256 %s"
           (String.length body.content) body.recorded_bytes body.sha256)]

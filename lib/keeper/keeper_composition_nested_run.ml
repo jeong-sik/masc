@@ -229,6 +229,13 @@ let disposition_to_string = function
   | Partially_settled -> "partially_settled"
 ;;
 
+let disposition_of_string = function
+  | "not_started" -> Ok Not_started | "admission_rejected" -> Ok Admission_rejected
+  | "completed" -> Ok Completed | "failed" -> Ok Failed | "deferred" -> Ok Deferred
+  | "partially_settled" -> Ok Partially_settled
+  | _ -> Error "Unknown nested composition disposition"
+;;
+
 let export_error = function
   | Plan.Producer_unavailable node_id -> `Assoc
       [ "kind", `String "producer_unavailable"; "node_id", `String (Plan.Node_id.to_string node_id) ]

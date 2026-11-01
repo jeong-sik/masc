@@ -292,7 +292,8 @@ type keeper_call_original =
   | Original_pending
   | Original_unavailable of string
   | Original_failed of string
-  | Original_body of { source_id : string; sha256 : string; recorded_bytes : int; content : string }
+  | Original_body of { source_id : string; sha256 : string; recorded_bytes : int; content : string;
+      nested : Keeper_composition_observation.reading }
 
 type keeper_call = {
   kc_at : float;  (** [ts], unix seconds *)

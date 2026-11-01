@@ -3328,10 +3328,13 @@ let test_loading_recovery_receipt_requires_original_page () =
      obj (("ready",`Bool true)::fields)]
 
 let test_loading_recovery_preserves_original_input_hold () =
-  let calls = ref 0 in
+  let calls = ref 0 and original_calls = ref 0 in
   let peer = opened (fun sent -> match sent.step with
     | "tabs.list" -> answered tabs
-    | "page.target_input" -> Error (Peer.Unobserved "original click result lost")
+    | "page.target_input" ->
+      incr original_calls;
+      check string "the original native input holds a drag" "drag_to" (text (field "action" sent.args));
+      Error (Peer.Unobserved "original drag result lost")
     | "page.stop_loading" ->
       incr calls;
       check string "recovery stays on the original managed Page" "p1" (text (field "label" sent.args));
@@ -3339,11 +3342,14 @@ let test_loading_recovery_preserves_original_input_hold () =
         "openedBy",str "agent";"method",str "Page.stopLoading";"returned",`Bool true])
     | other -> failf "recovery must not require an observation: %s" other) in
   ignore (dispatch peer Live.Tabs_list (obj []));
-  ignore (Peer.dispatch ~command_id:"original-lost-click" peer ~verb:Live.Page_interact
-    (interact_args (Lane.Click_target (Lane.Target_ref 12))));
+  let original = Peer.dispatch ~command_id:"original-lost-drag" peer ~verb:Live.Page_interact
+    (interact_args (Lane.Drag_to {source=Lane.Selector "#source";destination=Lane.Selector "#destination";
+      via=[];duration_ms=0})) in
+  check string "the original holding input has an unknown outcome" "unknown" (failure_kind original);
+  check int "the original holding input reached native exactly once" 1 !original_calls;
   let pending = Peer.input_status peer in
   check bool "fixture retains the original lost input generation" true
-    (match pending with Masc.Browser_ego_input.Uncertain value -> value.command_id="original-lost-click"
+    (match pending with Masc.Browser_ego_input.Uncertain value -> value.command_id="original-lost-drag"
      | Ready _ -> false);
   let action tab_id = obj ["action",str "stop_loading";"tabId",`Int tab_id] in
   (match dispatch peer Live.Page_act (action 1) with

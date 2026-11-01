@@ -36,7 +36,23 @@ let unread_keeper_census_json detail = function
   | _ -> invalid_arg "Keeper fleet health unavailable projection is not an object"
 ;;
 
-let keeper_reaction_ledger_health_json () =
+let queue_owner_lifecycle execution_snapshot ~keeper_name =
+  match owner_execution_truth execution_snapshot ~keeper_name with
+  | Keeper_activation_readiness.Executable ->
+    Keeper_event_queue_persistence.Runnable
+  | Keeper_activation_readiness.Recoverable ->
+    Keeper_event_queue_persistence.Recoverable
+  | Keeper_activation_readiness.Retained_disabled _ ->
+    Keeper_event_queue_persistence.Retained_disabled
+  | Keeper_activation_readiness.Paused_dead _ ->
+    Keeper_event_queue_persistence.Paused_dead
+  | Keeper_activation_readiness.Shutdown_fenced _ ->
+    Keeper_event_queue_persistence.Shutdown_fenced
+  | Keeper_activation_readiness.Unknown detail ->
+    Keeper_event_queue_persistence.Lifecycle_unknown detail
+;;
+
+let keeper_reaction_ledger_health_json ~execution_snapshot () =
   match current_server_state_opt () with
   | None -> Keeper_reaction_ledger.unavailable_fleet_summary_json ()
   | Some state ->
@@ -49,6 +65,7 @@ let keeper_reaction_ledger_health_json () =
     Keeper_reaction_ledger.fleet_summary_json
       ~base_path:config.base_path
       ~keeper_names
+      ~owner_lifecycle:(queue_owner_lifecycle execution_snapshot)
       ~limit_per_keeper:20
 ;;
 
@@ -533,27 +550,10 @@ let keeper_event_queue_health_json ~execution_snapshot () =
       (* NDT-OK: full health samples wall-clock at the HTTP boundary to report
          durable queue ages; queue parsing below stays deterministic. *)
     in
-    let owner_lifecycle ~keeper_name =
-      match
-        owner_execution_truth execution_snapshot ~keeper_name
-      with
-      | Keeper_activation_readiness.Executable ->
-        Keeper_event_queue_persistence.Runnable
-      | Keeper_activation_readiness.Recoverable ->
-        Keeper_event_queue_persistence.Recoverable
-      | Keeper_activation_readiness.Retained_disabled _
-        -> Keeper_event_queue_persistence.Retained_disabled
-      | Keeper_activation_readiness.Paused_dead _ ->
-        Keeper_event_queue_persistence.Paused_dead
-      | Keeper_activation_readiness.Shutdown_fenced _ ->
-        Keeper_event_queue_persistence.Shutdown_fenced
-      | Keeper_activation_readiness.Unknown detail ->
-        Keeper_event_queue_persistence.Lifecycle_unknown detail
-    in
     Keeper_event_queue_persistence.fleet_summary_json
       ~now
       ~base_path
-      ~owner_lifecycle
+      ~owner_lifecycle:(queue_owner_lifecycle execution_snapshot)
     |> keeper_event_queue_health_dimensions ~source_unavailable:false
 
 (* [fleet_reading] pairs the reading with the meta scan taken from it. It is
@@ -617,7 +617,9 @@ let keeper_fleet_runtime_resolution_base_fields
     ]
   in
   if include_reaction_ledger
-  then fields @ [ "keeper_reaction_ledger", keeper_reaction_ledger_health_json () ]
+  then
+    fields @
+    [ "keeper_reaction_ledger", keeper_reaction_ledger_health_json ~execution_snapshot () ]
   else fields
 ;;
 

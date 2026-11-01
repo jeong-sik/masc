@@ -424,10 +424,6 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
           |> Mcp_server.workspace_scope_publication_recovery_snapshot
           |> Mcp_server.publication_recovery_snapshot_to_health_yojson)
   in
-  let reaction_ledger_json =
-    compute_section ~name:"keeper_reaction_ledger" ?section_timings_ref
-      keeper_reaction_ledger_health_json
-  in
   let keeper_owner_json =
     compute_section ~name:"keeper_owner" ?section_timings_ref
       keeper_owner_health_json
@@ -444,10 +440,10 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
      execution and fleet-safety sections. It is taken right before the
      event-queue section, which discovers the queue-holding Keepers again:
      the owner set and that discovery stay adjacent. The paused and autoboot
-     answers are therefore read after the reaction-ledger, owner and
-     board-event sections above; a meta change in between shows in these
-     sections and not in those, for one response. Owner-set adjacency is
-     the reason for the order. *)
+     answers are therefore read after the owner and board-event sections
+     above; a meta change in between shows in these sections and not in
+     those, for one response. The reaction-ledger projection below shares
+     this execution snapshot after the adjacent event-queue read. *)
   let fleet_reading =
     Option.map
       (fun state ->
@@ -477,6 +473,10 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
     compute_section ~name:"keeper_event_queue" ?section_timings_ref
       (fun () ->
         keeper_event_queue_health_json ~execution_snapshot ())
+  in
+  let reaction_ledger_json =
+    compute_section ~name:"keeper_reaction_ledger" ?section_timings_ref
+      (fun () -> keeper_reaction_ledger_health_json ~execution_snapshot ())
   in
   let keeper_waiting_inventory_json =
     compute_section ~name:"keeper_waiting_inventory" ?section_timings_ref

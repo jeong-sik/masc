@@ -7,6 +7,7 @@ import { route } from '../router'
 import { dashboardWsConnected, dashboardWsLastError, dashboardWsReady } from '../dashboard-ws-state'
 import { dashboardLoading } from '../store'
 import { namespaceTruthInitializing } from '../namespace-truth-store'
+import { normalizeDashboardRuntimeResolution } from '../store-normalizers'
 
 describe('DashboardMain solo mode', () => {
   let container: HTMLDivElement
@@ -145,6 +146,69 @@ describe('isKeeperDetailDashboardRoute', () => {
 })
 
 describe('dashboardHealthChips', () => {
+  function reactionChip(overrides: Record<string, unknown> = {}) {
+    const configItem = { path: '/fixture/workspace', source: 'test', exists: true }
+    const runtimeResolution = normalizeDashboardRuntimeResolution({
+      status: 'ready',
+      base_path: configItem,
+      workspace_path: configItem,
+      resolved_base_path: configItem,
+      data_root: configItem,
+      prompt_markdown_dir: configItem,
+      build: {
+        release_version: 'test',
+        started_at: '2026-10-30T00:00:00Z',
+        uptime_seconds: 1,
+      },
+      keeper_reaction_ledger: {
+        status: 'ok',
+        operator_action_required: false,
+        pending_stimulus_count: 3,
+        attention_required_stimulus_count: 0,
+        cursor_swept_stimulus_count: 0,
+        quarantined_row_count: 0,
+        read_error_count: 0,
+        ...overrides,
+      },
+    })
+    expect(runtimeResolution).not.toBeNull()
+    return dashboardHealthChips({
+      connected: true,
+      counts: { keepers: 1, configured_keepers: 1 },
+      keepers: [],
+      runtimeResolution,
+      executionError: null,
+      loading: false,
+    }).find(chip => chip.key === 'reaction-ledger')
+  }
+
+  it('keeps ordinary reaction-ledger pending visible without warning severity', () => {
+    expect(reactionChip()).toMatchObject({ key: 'reaction-ledger', tone: 'ok' })
+  })
+
+  it.each([
+    { attention_required_stimulus_count: 1 },
+    { operator_action_required: true },
+    { status: 'degraded' },
+    { quarantined_row_count: 1 },
+  ])('warns on reaction-ledger operator attention or degradation (%j)', overrides => {
+    expect(reactionChip(overrides)?.tone).toBe('warn')
+  })
+
+  it.each([
+    { read_error_count: 1 },
+    { status: 'unknown' },
+    { status: 'unavailable' },
+    { status: 'unrecognized-status' },
+    { attention_required_stimulus_count: 'unread' },
+    { attention_required_stimulus_count: null },
+    { attention_required_stimulus_count: -1 },
+    { attention_required_stimulus_count: 1.5 },
+    { pending_stimulus_count: null },
+  ])('retains reaction-ledger unknown or unread severity (%j)', overrides => {
+    expect(reactionChip(overrides)?.tone).toBe('bad')
+  })
+
   it('separates source mismatch, paused keepers, and execution errors', () => {
     const chips = dashboardHealthChips({
       connected: true,
@@ -388,6 +452,7 @@ describe('dashboardHealthChips', () => {
             cursor_swept_stimulus_count: 3,
             quarantined_row_count: 1,
             pending_stimulus_count: 0,
+            attention_required_stimulus_count: 0,
             read_error_count: 0,
           },
         },
@@ -423,6 +488,7 @@ describe('dashboardHealthChips', () => {
             cursor_swept_stimulus_count: 3,
             quarantined_row_count: 1,
             pending_stimulus_count: 2,
+            attention_required_stimulus_count: 2,
             read_error_count: 0,
           },
         },
@@ -528,6 +594,7 @@ describe('dashboardHealthChips', () => {
           keeper_reaction_ledger: {
             status: 'degraded',
             pending_stimulus_count: 2,
+            attention_required_stimulus_count: 2,
             cursor_swept_stimulus_count: 0,
             quarantined_row_count: 0,
             read_error_count: 0,

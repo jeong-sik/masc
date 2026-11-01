@@ -670,6 +670,7 @@ function normalizeDashboardKeeperReactionLedgerHealth(
   const quarantinedRowCount = asNumber(raw.quarantined_row_count)
   const cursorSweptStimulusCount = asNumber(raw.cursor_swept_stimulus_count)
   const pendingStimulusCount = asNumber(raw.pending_stimulus_count)
+  const attentionRequiredStimulusCount = asNumber(raw.attention_required_stimulus_count)
   const readErrorCount = asNumber(raw.read_error_count)
   const pendingByKeeper = (Array.isArray(raw.pending_by_keeper) ? raw.pending_by_keeper : [])
     .map(normalizeDashboardKeeperReactionLedgerPendingKeeper)
@@ -685,6 +686,7 @@ function normalizeDashboardKeeperReactionLedgerHealth(
     && quarantinedRowCount == null
     && cursorSweptStimulusCount == null
     && pendingStimulusCount == null
+    && attentionRequiredStimulusCount == null
     && readErrorCount == null
     && pendingByKeeper.length === 0
   ) {
@@ -701,6 +703,7 @@ function normalizeDashboardKeeperReactionLedgerHealth(
     quarantined_row_count: quarantinedRowCount ?? null,
     cursor_swept_stimulus_count: cursorSweptStimulusCount ?? null,
     pending_stimulus_count: pendingStimulusCount ?? null,
+    attention_required_stimulus_count: attentionRequiredStimulusCount ?? null,
     read_error_count: readErrorCount ?? null,
     pending_by_keeper: pendingByKeeper,
   }

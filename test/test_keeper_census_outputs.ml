@@ -51,7 +51,11 @@ let pause_status config =
 
 let health_projections =
   [ "owner", Health.keeper_owner_health_json, "ok"
-  ; "reaction ledger", Health.keeper_reaction_ledger_health_json, "empty"
+  ; "reaction ledger"
+    , (fun () -> Health.keeper_reaction_ledger_health_json
+        ~execution_snapshot:Server_routes_http_runtime_fleet_scan.empty_keeper_execution_snapshot
+        ())
+    , "empty"
   ; "board collection", Health.keeper_board_event_collection_health_json, "ok"
   ]
 ;;

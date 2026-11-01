@@ -1187,7 +1187,7 @@ let acting_pane_input (state : state) =
           state.workspace_identity = Workspace_identity_match
           && server_authority_ready state in
         let waiting =
-          if not workspace_ready then
+          if not workspace_ready || List.mem keeper.k_name state.keeper_waiting_unverified then
             Masc_tui_keeper_list_model.Waiting_unavailable
           else match state.keeper_waiting_failure with
             | Some _ -> Masc_tui_keeper_list_model.Waiting_unavailable

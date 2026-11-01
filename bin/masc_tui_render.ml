@@ -75,7 +75,7 @@ let keeper_roster_marquee_target (state : state) ~cols =
     | (Keepers (Keeper_list | (Keeper_logs | (Keeper_calls | Keeper_runtime_pick))), _)
     | ((Acting | (Metrics | (Memory | (Lanes | (Clients | (Board | (Approvals | (Planning | (Schedules | (Verification | (Harness | (Fusion | (Repositories | (Code | (Changes | (Connectors | (Runtime | (Config | (Resources | (Tools | System_logs)))))))))))))))))))), _) -> None
 
-let acting_pane_suppressed (state : state) =
+let base_acting_pane_suppressed (state : state) =
   let modal =
     Option.is_some state.account_login || Option.is_some state.lane_addons || state.palette_open
     || Masc_tui_types.modal_owns_keys state
@@ -85,15 +85,48 @@ let acting_pane_suppressed (state : state) =
   || Masc_tui_types.on_activity_screen state.view
   || Option.is_some (browser_lane_on_screen state)
 
-let acting_pane_columns (state : state) ~terminal_cols =
-  if acting_pane_suppressed state then 0
+let normal_acting_pane_columns (state : state) ~terminal_cols =
+  if base_acting_pane_suppressed state then 0
   else Masc_tui_acting_pane.drawn_cols ~layout:(acting_pane_layout state) ~cols:terminal_cols
+
+(* If the complete exit warning cannot fit the surface footer, give it the
+   whole terminal. The arm's ordinary notice is its identity; stale arms do
+   not get to change the frame or authorize a later key. *)
+let quit_requires_full_frame (state : state) ~terminal_cols =
+  match state.quit_armed, Masc_tui_action_notice.ordinary state.last_action with
+  | Some arm, Some ordinary
+    when ordinary == Masc_tui_action_notice.quit_ordinary arm.qa_confirmation
+         && quit_arm_matches state arm ->
+      let content_cols = terminal_cols - normal_acting_pane_columns state ~terminal_cols in
+      Message_layout.display_width (fst ordinary) > framed_inner_width content_cols
+  | (Some _ | None), (Some _ | None) -> false
+
+let notice_requires_full_frame (state : state) ~terminal_cols ~now =
+  let content_cols = terminal_cols - normal_acting_pane_columns state ~terminal_cols in
+  let rejection = Masc_tui_action_notice.rejection state.last_action
+      ~now ~window:Masc_tui_types.last_action_window_s in
+  quit_requires_full_frame state ~terminal_cols
+  || Option.exists (fun notice ->
+       Message_layout.display_width (Masc_tui_action_notice.rejection_text notice)
+       > framed_inner_width content_cols) rejection
+
+let acting_pane_suppressed (state : state) =
+  let _, terminal_cols = Masc_tui_ansi.get_terminal_size () in
+  base_acting_pane_suppressed state
+  || notice_requires_full_frame state ~terminal_cols ~now:(Unix.gettimeofday ())
+
+let acting_pane_columns_at (state : state) ~terminal_cols ~now =
+  if notice_requires_full_frame state ~terminal_cols ~now then 0
+  else normal_acting_pane_columns state ~terminal_cols
+
+let acting_pane_columns (state : state) ~terminal_cols =
+  acting_pane_columns_at state ~terminal_cols ~now:(Unix.gettimeofday ())
 
 (* Pure preparation shared with the loop. Terminal dimensions are the raw
    cached measurement, before the surface strip and composer reserve rows. *)
-let acting_pane_chunk_projection (state : state) ~terminal_rows ~terminal_cols =
+let acting_pane_chunk_projection (state : state) ~terminal_rows ~terminal_cols ~now =
   let rows = surface_body_rows state ~terminal_rows:(max 1 (terminal_rows - 1)) in
-  if acting_pane_columns state ~terminal_cols = 0
+  if acting_pane_columns_at state ~terminal_cols ~now = 0
      || Render_schedule.Viewport.requires_compact_frame ~rows
      || state.acting_pane_tab = Masc_tui_acting_pane.Tab_changes
   then None
@@ -671,16 +704,20 @@ let frame_choice_after_play (state : state) =
           | Some client -> `Client_detail client
           | None -> `Surface
 
-let frame_choice (state : state) ~terminal_rows =
+let compact_frame_required (state : state) ~terminal_rows ~terminal_cols ~now =
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
-  if Render_schedule.Viewport.requires_compact_frame ~rows then `Too_small rows
+  Render_schedule.Viewport.requires_compact_frame ~rows
+  || notice_requires_full_frame state ~terminal_cols ~now
+
+let frame_choice (state : state) ~terminal_rows ~terminal_cols ~now =
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  if compact_frame_required state ~terminal_rows ~terminal_cols ~now then `Too_small rows
   else match play_card_shown state with
   | Some card -> `Play_card card
   | None -> frame_choice_after_play state
 
-let queue_below_play state ~terminal_rows =
-  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
-  if Render_schedule.Viewport.requires_compact_frame ~rows then None
+let queue_below_play state ~terminal_rows ~terminal_cols ~now =
+  if compact_frame_required state ~terminal_rows ~terminal_cols ~now then None
   else match frame_choice_after_play state with
     | `Queue panel -> Some panel
     | `Account_login _ | `Palette | `Collab _ | `Lane_addons _ | `Detail_reading _
@@ -689,9 +726,9 @@ let queue_below_play state ~terminal_rows =
 
 (* Input follows the same top frame as rendering. Only the inspector's visible
    row-search editor accepts text; its covered surface never owns paste. *)
-let panel_input_owner (state : state) ~terminal_rows =
+let panel_input_owner (state : state) ~terminal_rows ~terminal_cols ~now =
   let module Presented = Masc_tui_presented in
-  match frame_choice state ~terminal_rows with
+  match frame_choice state ~terminal_rows ~terminal_cols ~now with
   | `Help -> Some Presented.Help
   | `About -> Some Presented.About
   | `Context ->
@@ -720,13 +757,15 @@ let render ~home ~compact_recovery_notice (state : state) =
   (* Decide the pane before any surface measures the terminal. Modals draw
      over the whole terminal and the Activity screen, both its tabs,
      already fills its own, so neither reserves the columns. *)
+  let now = Unix.gettimeofday () in
   (acting_pane_reserved_cols :=
      let _rows, terminal_cols = Masc_tui_ansi.get_terminal_size () in
-     acting_pane_columns state ~terminal_cols);
+     acting_pane_columns_at state ~terminal_cols ~now);
   let terminal_rows, cols = get_terminal_size () in
   (* The composer owns the terminal's last row; everything this surface
      lays out fits above it. *)
-  match frame_choice state ~terminal_rows with
+  let _, terminal_cols = Masc_tui_ansi.get_terminal_size () in
+  match frame_choice state ~terminal_rows ~terminal_cols ~now with
   | `Too_small _ ->
     let frame, clamped = render_terminal_too_small state
         ~recovery_notice:compact_recovery_notice ~rows:terminal_rows ~cols in

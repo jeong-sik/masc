@@ -626,8 +626,19 @@ def emit(frame):
 def reply(request, result):
     emit({"jsonrpc": "2.0", "id": request["id"], "result": result})
 
+retained_events = []
+durable_cursors = {"turn/started": "capability-turn-start", "item/completed": "capability-message",
+                   "turn/completed": "capability-terminal"}
+
 def notify(method, **params):
-    emit({"jsonrpc": "2.0", "method": method, "params": {"sessionId": "s-readiness", "viewCursor": "v:1", **params}})
+    params = {"sessionId": "s-readiness", "viewCursor": durable_cursors.get(method, "v:1"), **params}
+    event = {"method": method, "params": params}
+    if method in ("turn/started", "item/completed"):
+        position = {"id": "capability-record-%d" % (len(retained_events) + 1), "sequence": len(retained_events) + 1}
+        params["sourceRange"] = {"stream": {"kind": "run", "id": "capability-run"},
+                                 "first": position, "last": position}
+        retained_events.append(event)
+    emit({"jsonrpc": "2.0", **event})
 
 request = read()
 assert request["method"] == "initialize"
@@ -686,7 +697,12 @@ terminal = {"muse-failed": "failed", "muse-cancelled": "cancelled"}.get(mode, "c
 notify("turn/completed", turnId="t-readiness", terminal=terminal,
     error={"kind": "modelError", "message": "synthetic failure", "retryable": False} if terminal == "failed" else None)
 for line in sys.stdin:
-    pass
+    request = json.loads(line)
+    if request.get("method") == "view/page":
+        assert terminal == "completed"
+        assert request["params"] == {"sessionId": "s-readiness", "cursor": "capability-terminal",
+                                     "direction": "backward", "limit": 1000}
+        reply(request, {"events": retained_events, "nextCursor": None})
 signal.signal(signal.SIGTERM, signal.SIG_IGN)
 |}
 ;;

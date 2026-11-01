@@ -547,8 +547,16 @@ def read():
         sys.exit(97)
     return json.loads(line)
 
+retained_events = []
+
 def notify(method, params):
-    send({"jsonrpc": "2.0", "method": method, "params": params})
+    event = {"method": method, "params": params}
+    if method in ("turn/started", "item/completed"):
+        position = {"id": "panel-record-%d" % (len(retained_events) + 1), "sequence": len(retained_events) + 1}
+        params["sourceRange"] = {"stream": {"kind": "run", "id": "panel-run"},
+                                 "first": position, "last": position}
+        retained_events.append(event)
+    send({"jsonrpc": "2.0", **event})
 
 assert "--no-session-log" not in sys.argv
 storage_keys = ["XDG_DATA_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME", "XDG_RUNTIME_DIR", "TMPDIR"]
@@ -605,20 +613,25 @@ send({"jsonrpc": "2.0", "id": turn["id"], "result": {
     "commandId": turn_id, "status": "accepted", "turnId": turn_id,
     "startedNewTurn": True, "disposition": "started"}})
 notify("turn/started", {"sessionId": "panel-session", "turnId": turn_id,
-                        "commandId": turn_id, "viewCursor": "v:2"})
+                        "commandId": turn_id, "viewCursor": "panel-turn-start"})
 notify("usage/changed", {"observedAtMs": 100000, "tier": "fixture",
     "window": {"usedPercent": 100, "resetsAtMs": 500000, "windowDurationMins": 5},
     "weekly": {"usedPercent": 99, "resetsAtMs": 900000}})
 if not control.get("missing_reply", False):
-    notify("item/completed", {"sessionId": "panel-session", "viewCursor": "v:3", "item": {
+    notify("item/completed", {"sessionId": "panel-session", "viewCursor": "panel-message", "item": {
         "itemId": "m-1", "kind": "agentMessage", "turnId": turn_id, "revision": 1,
         "status": "completed", "text": control.get("answers", {}).get(opened["params"]["modelId"], "MUSE_PANEL_ANSWER")}})
 notify("turn/completed", {"sessionId": "panel-session", "turnId": turn_id,
-                          "terminal": control.get("terminal", "completed"), "viewCursor": "v:4",
+                          "terminal": control.get("terminal", "completed"), "viewCursor": "panel-terminal",
                           "error": control.get("error"),
                           "usage": {"inputTokens": 11, "outputTokens": 7, "cachedTokens": 3, "reasoningTokens": 2}})
-for _ in sys.stdin:
-    pass
+for line in sys.stdin:
+    request = json.loads(line)
+    if request.get("method") == "view/page":
+        assert control.get("terminal", "completed") == "completed"
+        assert request["params"] == {"sessionId": "panel-session", "cursor": "panel-terminal",
+                                     "direction": "backward", "limit": 1000}
+        send({"jsonrpc": "2.0", "id": request["id"], "result": {"events": retained_events, "nextCursor": None}})
 signal.signal(signal.SIGTERM, signal.SIG_IGN)
 |}
 ;;

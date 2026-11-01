@@ -740,13 +740,6 @@ function SkillEvidenceLoader({ reference, io, isCurrent }: {
     try {
       const evidence = await fetchSkillEvidence(reference, runId)
       if (!active.current || !isCurrent() || generation !== requestGeneration.current) return
-      const selection = evidence.composition_selection
-      if (referenceKey(evidence.reference.identity, evidence.reference.content_revision)
-          !== referenceKey(reference.identity, reference.content_revision)
-        || (runId === undefined ? selection.mode !== 'latest_retained'
-          : selection.mode !== 'exact_run' || selection.composition_run_id !== runId)) {
-        throw new Error('Returned evidence does not match the requested Skill revision and run.')
-      }
       result.value = evidence
     } catch (cause) {
       if (active.current && isCurrent() && generation === requestGeneration.current) {

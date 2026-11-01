@@ -552,6 +552,20 @@ describe('stored composition duration statistics', () => {
 })
 
 describe('skill evidence contract', () => {
+  it('rejects a valid envelope for a different requested revision or run selection', async () => {
+    const response = sharedAsyncSkillEvidence()
+    const fetch = vi.fn(async () => Response.json(response))
+    vi.stubGlobal('fetch', fetch)
+    await expect(fetchSkillEvidence({ ...response.reference, content_revision: 'f'.repeat(64) }))
+      .rejects.toThrow('evidence response disagrees with requested reference or selection')
+    const runId = '01a045f2-cd8b-7000-a3f7-1d718a712207'
+    await expect(fetchSkillEvidence(response.reference, runId))
+      .rejects.toThrow('evidence response disagrees with requested reference or selection')
+    expect(fetch.mock.calls[1]).toEqual(['/api/v1/skills/evidence', expect.objectContaining({
+      method: 'POST', body: JSON.stringify({ reference: response.reference, composition_run_id: runId }),
+    })])
+  })
+
   it('fetches retained SDK results and native starts with their original Task frame', async () => {
     const response = sharedAsyncSkillEvidence()
     vi.stubGlobal('crypto', {})

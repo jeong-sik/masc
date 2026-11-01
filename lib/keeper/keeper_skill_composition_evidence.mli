@@ -59,6 +59,9 @@ type statistics = private
   ; first_recorded_at : float option
   ; last_recorded_at : float option
   }
+
+(** Payload-free observation metadata; disposition reuses Tool_result's closed
+    sum. This does not admit or retry an execution. *)
 type run_summary = private
   { run_id : Keeper_tool_plan.Composition_run_id.t
   ; keeper : string
@@ -71,8 +74,6 @@ type run_summary = private
 val run_summary : t -> run_summary
 val run_summary_to_yojson : run_summary -> Yojson.Safe.t
 val run_summary_of_yojson : Yojson.Safe.t -> (run_summary, error) result
-(** Payload-free observation metadata; disposition reuses Tool_result's closed
-    sum. This does not admit or retry an execution. *)
 type observation = private { latest : t option; runs : t list; statistics : statistics }
 
 val statistics : t list -> statistics

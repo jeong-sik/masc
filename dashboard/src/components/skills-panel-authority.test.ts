@@ -158,12 +158,13 @@ describe('Skills observation owner', () => {
     expect(screen.getByText(/7 retained sessions inspected/)).toBeTruthy()
   })
 
-  it('rejects a valid evidence envelope for another selected reference', async () => {
-    api.fetchSkillEvidence.mockResolvedValue(evidence('beta', 99))
+  it('reports an evidence contract failure from the API boundary', async () => {
+    const detail = 'evidence response disagrees with requested reference or selection'
+    api.fetchSkillEvidence.mockRejectedValue(new Error(detail))
     render(html`<${SkillsPanel} />`)
     await open('alpha'); load()
-    await screen.findByRole('alert')
-    expect(screen.queryByText(/99 retained sessions inspected/)).toBeNull()
+    expect((await screen.findByRole('alert')).textContent).toContain(detail)
+    expect(api.fetchSkillEvidence).toHaveBeenCalledWith(reference('alpha'), undefined)
   })
 
   it('withdraws loaded evidence across credential changes', async () => {

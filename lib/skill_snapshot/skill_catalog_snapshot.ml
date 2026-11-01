@@ -176,6 +176,17 @@ let identity_key (identity : identity) =
   , identity.name )
 ;;
 
+module Identity_key_map = Map.Make (struct
+  type t = string * string * string
+
+  let compare (s1, p1, n1) (s2, p2, n2) =
+    let c = String.compare s1 s2 in
+    if c <> 0 then c
+    else
+      let c = String.compare p1 p2 in
+      if c <> 0 then c else String.compare n1 n2
+end)
+
 let identity_to_yojson = Skill_reference.identity_to_yojson
 
 let source_operation_to_string = function
@@ -328,7 +339,7 @@ let effective_projection (entries : entry list) =
 ;;
 
 let build_entries sources =
-  let exact = Hashtbl.create (List.length sources) in
+  let exact = ref Identity_key_map.empty in
   let entries, rejections =
     List.fold_left
       (fun (entries, rejections) (source_index, scan) ->
@@ -394,7 +405,7 @@ let build_entries sources =
                     | Loaded document ->
                       let identity = make_identity ~source_id ~package_id ~name:document.name in
                       let key = identity_key identity in
-                      (match Hashtbl.find_opt exact key with
+                      (match Identity_key_map.find_opt key !exact with
                        | Some first_directory ->
                          ( entries
                          , { source_index
@@ -406,7 +417,7 @@ let build_entries sources =
                            }
                            :: rejections )
                        | None ->
-                         Hashtbl.add exact key directory;
+                         exact := Identity_key_map.add key directory !exact;
                          ( { identity
                            ; source_index
                            ; directory

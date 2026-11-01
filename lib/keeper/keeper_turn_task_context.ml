@@ -78,7 +78,13 @@ let nonblank key fields =
   if String.trim s = "" then W.wire_fail [W.Wire_field key] W.Blank_string else Ok s
 let list parse = function
   | `List values ->
-    List.fold_right (fun value rest -> let* item = parse value in let* rest = rest in Ok (item :: rest)) values (Ok [])
+    let rec loop acc = function
+      | [] -> Ok (List.rev acc)
+      | value :: rest ->
+        let* item = parse value in
+        loop (item :: acc) rest
+    in
+    loop [] values
   | _ -> W.wire_here W.Expected_array
 
 let source_error_of_json json =

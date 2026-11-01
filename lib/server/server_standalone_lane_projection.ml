@@ -588,6 +588,21 @@ let p50 values =
   | sorted -> Some (List.nth sorted (List.length sorted / 2))
 ;;
 
+let compare_observation_id (a : observation_id) (b : observation_id) =
+  let rank = function
+    | Exact_id _ -> 0
+    | Task_verification_id _ -> 1
+    | Goal_verification_id _ -> 2
+  in
+  match a, b with
+  | Exact_id x, Exact_id y
+  | Task_verification_id x, Task_verification_id y
+  | Goal_verification_id x, Goal_verification_id y -> String.compare x y
+  | (Exact_id _ | Task_verification_id _ | Goal_verification_id _),
+    (Exact_id _ | Task_verification_id _ | Goal_verification_id _) ->
+    Int.compare (rank a) (rank b)
+;;
+
 let latest_run runs =
   List.fold_left
     (fun latest run ->
@@ -595,7 +610,7 @@ let latest_run runs =
        | None -> Some run
        | Some current when run.started_at > current.started_at
                             || (Float.equal run.started_at current.started_at
-                                && Int64.compare run.observation_id current.observation_id > 0) -> Some run
+                                && compare_observation_id run.observation_id current.observation_id > 0) -> Some run
        | Some _ -> latest)
     None
     runs
@@ -614,7 +629,7 @@ let latest_terminal_run terminal_runs =
     | None -> Some candidate
     | Some (current,current_terminal)
         when let order = Float.compare (terminal_order run terminal) (terminal_order current current_terminal) in
-          order > 0 || (order = 0 && Int64.compare run.observation_id current.observation_id > 0) -> Some candidate
+          order > 0 || (order = 0 && compare_observation_id run.observation_id current.observation_id > 0) -> Some candidate
     | Some _ -> latest) None terminal_runs
 ;;
 

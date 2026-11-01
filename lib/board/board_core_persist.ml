@@ -4,6 +4,15 @@ include Board_core_payload
 
 module Post_publication_failure = Board_post_publication_failure
 
+module Expired_target_set = Set.Make (struct
+  type t = [ `Post | `Comment ] * string
+
+  let compare (k1, id1) (k2, id2) =
+    let rank = function `Post -> 0 | `Comment -> 1 in
+    let c = Int.compare (rank k1) (rank k2) in
+    if c <> 0 then c else String.compare id1 id2
+end)
+
 let flush_interval_sec = Env_config.Board.flush_interval_sec
 let flusher_inbox_capacity = Env_config.Board.flusher_inbox_capacity
 
@@ -354,16 +363,23 @@ let sweep store =
        every vote as an orphan. A row whose target is absent is left alone —
        [recalculate_vote_counts] never counts it, and the target may still
        arrive on the next load. *)
-    let expired_targets = Hashtbl.create 16 in
-    List.iter (fun id -> Hashtbl.replace expired_targets (`Post, id) ()) !swept_posts;
-    List.iter
-      (fun id -> Hashtbl.replace expired_targets (`Comment, id) ())
-      expired_comments;
-    List.iter
-      (fun id -> Hashtbl.replace expired_targets (`Comment, id) ())
-      !cascaded_comment_ids;
+    let expired_targets =
+      let acc =
+        List.fold_left
+          (fun acc id -> Expired_target_set.add (`Post, id) acc)
+          Expired_target_set.empty !swept_posts
+      in
+      let acc =
+        List.fold_left
+          (fun acc id -> Expired_target_set.add (`Comment, id) acc)
+          acc expired_comments
+      in
+      List.fold_left
+        (fun acc id -> Expired_target_set.add (`Comment, id) acc)
+        acc !cascaded_comment_ids
+    in
     let removed_reactions, removed_votes =
-      if Hashtbl.length expired_targets = 0
+      if Expired_target_set.is_empty expired_targets
       then 0, 0
       else begin
         let expired_reaction_keys =
@@ -374,7 +390,7 @@ let sweep store =
                  | Reaction_post -> `Post, reaction.target_id
                  | Reaction_comment -> `Comment, reaction.target_id
                in
-               if Hashtbl.mem expired_targets target then key :: acc else acc)
+               if Expired_target_set.mem target expired_targets then key :: acc else acc)
             store.reactions
             []
         in
@@ -382,7 +398,7 @@ let sweep store =
           Hashtbl.fold
             (fun key _ acc ->
                match vote_key_target key with
-               | Some target when Hashtbl.mem expired_targets target -> key :: acc
+               | Some target when Expired_target_set.mem target expired_targets -> key :: acc
                | Some _ | None -> acc)
             store.vote_log
             []

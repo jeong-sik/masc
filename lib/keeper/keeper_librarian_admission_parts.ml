@@ -16,7 +16,14 @@ let text = function `String value when String.trim value <> "" -> Ok value
   | _ -> Error "Original Librarian part requires nonblank text"
 let integer = function `Int value -> Ok value | _ -> Error "Original Librarian part requires integer"
 let list decode = function
-  | `List values -> List.fold_right (fun json result -> let* item=decode json in let+ rest=result in item::rest) values (Ok [])
+  | `List values ->
+    let rec loop acc = function
+      | [] -> Ok (List.rev acc)
+      | json :: rest ->
+        let* item = decode json in
+        loop (item :: acc) rest
+    in
+    loop [] values
   | _ -> Error "Original Librarian part requires array"
 let optional encode = Option.fold ~none:`Null ~some:encode
 let option decode = function `Null -> Ok None | json -> let+ value=decode json in Some value
@@ -316,7 +323,14 @@ let decode_partition ~owner (record:Owner.retained) =
   let* ()=check_record ~scope:(partition_scope owner) ~id ~destination:left.destination record in
   let* ()=equal record.request (partition_json ~owner ~id ~parent_id ~left ~right ~evidence) "Noncanonical original partition" in
   let+ ()=check_transaction partition in partition
-let sequence results = List.fold_right (fun result tail -> let* value=result in let+ tail=tail in value::tail) results (Ok [])
+let sequence results =
+  let rec loop acc = function
+    | [] -> Ok (List.rev acc)
+    | result :: tail ->
+      let* value = result in
+      loop (value :: acc) tail
+  in
+  loop [] results
 let check_children (parent:part) (partition:partition_record) =
   let* ()=require (parent.id<>partition.left.id && parent.id<>partition.right.id
     && partition.left.id<>partition.right.id && partition.id<>parent.id
@@ -354,9 +368,14 @@ let load_parent_payload ~read ~owner ~request_id =
         equal (to_json part) (to_json expected) "Original partition child changed" in
     Ok part in
   let+ part=visit [] request_id in part.original_batch
-let rec traverse f = function
-  | [] -> Ok []
-  | first::rest -> let* value=f first in let+ rest=traverse f rest in value::rest
+let traverse f list =
+  let rec loop acc = function
+    | [] -> Ok (List.rev acc)
+    | first :: rest ->
+      let* value = f first in
+      loop (value :: acc) rest
+  in
+  loop [] list
 let leaves_of_roots inventory root_parts =
   let rec walk (part:part) =
     match List.find_opt (fun (partition:partition_record) -> partition.parent_id=part.id) inventory.partitions with
@@ -435,6 +454,18 @@ let terminal_witness ~store ~owner ~inventory ~restore_gate ~committed reference
     "original_facts",facts_json (original_facts capture);"authority",authority] in
   Ok ({reference;evidence},capture)
 let root_candidates root_parts = List.concat_map (fun (part:part) -> Queue.candidate_ids part.original_batch) root_parts
+let compare_explicit_candidate_id
+    (a : Current.explicit_candidate_id)
+    (b : Current.explicit_candidate_id) =
+  let c = String.compare a.queue_generation b.queue_generation in
+  if c <> 0 then c
+  else
+    let c = String.compare a.request_id b.request_id in
+    if c <> 0 then c
+    else
+      let c = Int.compare a.sequence b.sequence in
+      if c <> 0 then c else String.compare a.input_sha256 b.input_sha256
+
 let candidate_collision (a:Current.explicit_candidate_id) (b:Current.explicit_candidate_id) =
   a.queue_generation=b.queue_generation && (a.request_id=b.request_id || a.sequence=b.sequence)
 let read_committed ~owner ids =
@@ -467,7 +498,7 @@ let check_replacement ~store ~owner ~restore_gate ~inventory (proof:supersession
   let* ()=require (frontier_ids proof.frontier=expected_ids) "Replacement does not retain the entire original ordered frontier" in
   let ids=root_candidates predecessors in
   let* ()=require (List.for_all (fun id -> List.mem id ids) proof.committed &&
-    List.length proof.committed=List.length (List.sort_uniq Stdlib.compare proof.committed))
+    List.length proof.committed=List.length (List.sort_uniq compare_explicit_candidate_id proof.committed))
     "Replacement has unrelated or duplicate committed candidate identities" in
   let* ()=require (proof.committed=List.filter (fun id -> List.mem id proof.committed) ids)
     "Original committed frontier identities are out of order" in

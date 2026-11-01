@@ -28,31 +28,33 @@ let normalize (s : string) : string =
   let n = String.length r in
   if n > 0 && r.[n - 1] = ' ' then String.sub r 0 (n - 1) else r
 
+module String_map = Map.Make (String)
+
 let majority_vote (samples : string list) : string =
   match samples with
   | [] -> invalid_arg "majority_vote: empty sample list"
   | _ ->
     (* 정규화 키 -> (첫 등장 원문, 카운트). order는 첫 등장 순서(역순 누적). *)
-    let tbl : (string, string * int) Hashtbl.t = Hashtbl.create 8 in
-    let order = ref [] in
-    List.iter
-      (fun s ->
-        let key = normalize s in
-        match Hashtbl.find_opt tbl key with
-        | None ->
-          Hashtbl.replace tbl key (s, 1);
-          order := key :: !order
-        | Some (rep, n) -> Hashtbl.replace tbl key (rep, n + 1))
-      samples;
-    let ordered_keys = List.rev !order in
+    let tbl, order_rev =
+      List.fold_left
+        (fun (tbl, order) s ->
+          let key = normalize s in
+          match String_map.find_opt key tbl with
+          | None -> String_map.add key (s, 1) tbl, key :: order
+          | Some (rep, n) -> String_map.add key (rep, n + 1) tbl, order)
+        (String_map.empty, []) samples
+    in
+    let ordered_keys = List.rev order_rev in
     (* 최대 카운트, 동률은 첫 등장 순(ordered_keys가 등장 순이라 > 만 갱신). *)
     let best =
       List.fold_left
         (fun acc key ->
-          let rep, n = Hashtbl.find tbl key in
-          match acc with
-          | Some (_, best_n) when n <= best_n -> acc
-          | _ -> Some (rep, n))
+          match String_map.find_opt key tbl with
+          | None -> acc
+          | Some (rep, n) ->
+            match acc with
+            | Some (_, best_n) when n <= best_n -> acc
+            | _ -> Some (rep, n))
         None ordered_keys
     in
     (match best with

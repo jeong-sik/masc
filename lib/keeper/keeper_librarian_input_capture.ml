@@ -22,7 +22,14 @@ let integer = function
   | `Int n -> Ok n
   | `Assoc _ | `Null | `Bool _ | `Intlit _ | `Float _ | `String _ | `List _ -> Error "Expected captured integer"
 let list decode = function
-  | `List values -> List.fold_right (fun json result -> let* x=decode json in let+ xs=result in x::xs) values (Ok [])
+  | `List values ->
+    let rec loop acc = function
+      | [] -> Ok (List.rev acc)
+      | json :: rest ->
+        let* x = decode json in
+        loop (x :: acc) rest
+    in
+    loop [] values
   | `Assoc _ | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ -> Error "Expected captured list"
 let strings = list text
 let json_strings values = `List (List.map (fun s -> `String s) values)

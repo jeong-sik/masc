@@ -21,7 +21,27 @@ type coordinate =
   | Atom_coordinate of string * int * int * int
   | Official_coordinate of string * int * int
 
-module Coordinates = Set.Make (struct type t = coordinate let compare = compare end)
+let compare_coordinate a b =
+  match a, b with
+  | Atom_coordinate (t1, b1, a1, m1), Atom_coordinate (t2, b2, a2, m2) ->
+    let c = String.compare t1 t2 in
+    if c <> 0 then c
+    else
+      let c = Int.compare b1 b2 in
+      if c <> 0 then c
+      else
+        let c = Int.compare a1 a2 in
+        if c <> 0 then c else Int.compare m1 m2
+  | Official_coordinate (t1, b1, m1), Official_coordinate (t2, b2, m2) ->
+    let c = String.compare t1 t2 in
+    if c <> 0 then c
+    else
+      let c = Int.compare b1 b2 in
+      if c <> 0 then c else Int.compare m1 m2
+  | Atom_coordinate _, Official_coordinate _ -> -1
+  | Official_coordinate _, Atom_coordinate _ -> 1
+
+module Coordinates = Set.Make (struct type t = coordinate let compare = compare_coordinate end)
 
 let coordinate = function
   | Unread.Atom {trace_id;history_start_boundary_line;atom;message_in_atom;_} ->

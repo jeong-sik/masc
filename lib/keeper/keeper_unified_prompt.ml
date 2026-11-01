@@ -27,7 +27,11 @@ type turn_prompt_parts = {
 
 module Layer_map = Map.Make (struct
   type t = Keeper_context_layers.layer_id
-  let compare = Stdlib.compare
+
+  let compare a b =
+    Int.compare
+      (Keeper_context_layers.order_index a)
+      (Keeper_context_layers.order_index b)
 end)
 
 type prepared_prompt =

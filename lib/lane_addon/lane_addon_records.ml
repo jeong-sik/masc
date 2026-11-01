@@ -1,5 +1,16 @@
 open Result.Syntax
 
+module String_map = Map.Make (String)
+
+let map_result f values =
+  let rec loop acc = function
+    | [] -> Ok (List.rev acc)
+    | value :: rest ->
+      let* mapped = f value in
+      loop (mapped :: acc) rest
+  in
+  loop [] values
+
 type grant =
   | Board of { source_id : string; visibilities : Board_types.visibility list }
   | Repository of { source_id : string; repository_id : string; paths : string list }
@@ -25,13 +36,11 @@ let strings fields key =
   match List.assoc_opt key fields with
   | Some (`List (_ :: _ as values)) ->
     let* values =
-      List.fold_right
-        (fun value acc ->
-           let* acc = acc in
-           match value with
-           | `String text -> Ok (text :: acc)
-           | _ -> Error (key ^ " holds strings"))
-        values (Ok [])
+      map_result
+        (function
+          | `String text -> Ok text
+          | _ -> Error (key ^ " holds strings"))
+        values
     in
     if List.length (List.sort_uniq String.compare values) = List.length values then Ok values
     else Error (key ^ " names a value twice")
@@ -51,13 +60,12 @@ let grant_of_json = function
        let* () = exact_keys [ "source_id"; "kind"; "visibilities" ] fields in
        let* names = strings fields "visibilities" in
        let* visibilities =
-         List.fold_right
-           (fun name acc ->
-              let* acc = acc in
+         map_result
+           (fun name ->
               match Board_core_classify.visibility_of_string name with
-              | Some visibility -> Ok (visibility :: acc)
+              | Some visibility -> Ok visibility
               | None -> Error ("visibilities has no value " ^ name))
-           names (Ok [])
+           names
        in
        Ok (Board { source_id; visibilities })
      | Some (`String "repository") ->
@@ -84,14 +92,7 @@ let grants ~operator_owned = function
      | None -> Ok []
      | Some _ when not operator_owned -> Error "only an operator-owned declaration may hold record grants"
      | Some (`List values) ->
-       let* grants =
-         List.fold_right
-           (fun value acc ->
-              let* acc = acc in
-              let* grant = grant_of_json value in
-              Ok (grant :: acc))
-           values (Ok [])
-       in
+       let* grants = map_result grant_of_json values in
        let ids = List.map source_id grants in
        if List.length (List.sort_uniq String.compare ids) = List.length ids then Ok grants
        else Error "records names the same source_id twice"
@@ -296,17 +297,18 @@ let first_parent_commits ~cwd ~head start =
      | Error detail -> Unreadable detail
      | Ok output ->
        let newer =
-         List.fold_right
-           (fun line acc ->
-              let* acc = acc in
-              match String.split_on_char ' ' line with
-              | [ sha; time ] ->
-                (match float_of_string_opt time with
-                 | Some committed_at when committed_at >= at -> Ok (sha :: acc)
-                 | Some _ -> Ok acc
-                 | None -> Error ("commit time of " ^ sha))
-              | _ -> Error ("unreadable history line " ^ line))
-           (lines output) (Ok [])
+         let rec loop acc = function
+           | [] -> Ok (List.rev acc)
+           | line :: rest ->
+             match String.split_on_char ' ' line with
+             | [ sha; time ] ->
+               (match float_of_string_opt time with
+                | Some committed_at when committed_at >= at -> loop (sha :: acc) rest
+                | Some _ -> loop acc rest
+                | None -> Error ("commit time of " ^ sha))
+             | _ -> Error ("unreadable history line " ^ line)
+         in
+         loop [] (lines output)
        in
        (match newer with Ok shas -> Commits shas | Error detail -> Unreadable detail))
 
@@ -393,23 +395,32 @@ let wiki_records ~base_path ~store ~measure ~max_bytes ~source_id ~start =
     (match wiki_window lines start with
      | Error reason -> Not_allowed reason
      | Ok within ->
-       let latest = Hashtbl.create (Array.length lines) in
-       Array.iteri (fun position (line : Wiki_log.line) -> Hashtbl.replace latest line.page position) lines;
+       let latest =
+         Array.fold_left
+           (fun (pos, acc) (line : Wiki_log.line) ->
+              pos + 1, String_map.add line.page pos acc)
+           (0, String_map.empty) lines
+         |> snd
+       in
        let pending =
          List.filter
-           (fun position -> within position && Hashtbl.find_opt latest lines.(position).Wiki_log.page = Some position)
+           (fun position -> within position && String_map.find_opt lines.(position).Wiki_log.page latest = Some position)
            (List.init (Array.length lines) Fun.id)
        in
        let items =
-         List.fold_right
-           (fun position acc ->
-              let* acc = acc in
-              let line = lines.(position) in
-              let* page = wiki_page ~root line.Wiki_log.page in
-              match page with
-              | None -> Ok acc
-              | Some json -> Ok ((wiki_cursor ~position:(position + 1) line, fun () -> Ok (Some json)) :: acc))
-           pending (Ok [])
+         let rec loop acc = function
+           | [] -> Ok (List.rev acc)
+           | position :: rest ->
+             let line = lines.(position) in
+             let* page = wiki_page ~root line.Wiki_log.page in
+             match page with
+             | None -> loop acc rest
+             | Some json ->
+               loop
+                 ((wiki_cursor ~position:(position + 1) line, fun () -> Ok (Some json)) :: acc)
+                 rest
+         in
+         loop [] pending
        in
        (match items with
         | Error detail -> Unavailable ("a wiki page cannot be read: " ^ detail)
@@ -505,9 +516,6 @@ let gh_author json =
   | Some `Null -> Ok `Null
   | Some author -> Result.map (fun login -> `String login) (gh_text author "login")
   | None -> Error "author is absent"
-
-let map_result f values =
-  List.fold_right (fun value acc -> let* acc = acc in let* mapped = f value in Ok (mapped :: acc)) values (Ok [])
 
 let github_request ~query ~variables ~after =
   `Assoc

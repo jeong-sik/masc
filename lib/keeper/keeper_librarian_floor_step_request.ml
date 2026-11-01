@@ -23,7 +23,13 @@ let equal left right detail =
   let* right=Lane_addon_action.canonical right in
   require (Yojson.Safe.equal left right) detail
 let all decode items =
-  List.fold_right (fun item rest -> let* rest=rest in let+ item=decode item in item::rest) items (Ok [])
+  let rec loop acc = function
+    | [] -> Ok (List.rev acc)
+    | item :: rest ->
+      let* x = decode item in
+      loop (x :: acc) rest
+  in
+  loop [] items
 
 let request_kind = "keeper-librarian-floor-step"
 let hash text = Agent_core_sha256.(to_hex (digest_string text))

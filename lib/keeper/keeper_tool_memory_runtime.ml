@@ -5,6 +5,14 @@ open Keeper_tool_shared_runtime
 open Keeper_context_runtime
 module StringSet = Set_util.StringSet
 module StringMap = Set_util.StringMap
+module IntMap = Map.Make (Int)
+module StringPairMap = Map.Make (struct
+  type t = string * string
+
+  let compare (a1, b1) (a2, b2) =
+    let c = String.compare a1 a2 in
+    if c <> 0 then c else String.compare b1 b2
+end)
 
 
 (* Issue #8484: Variant SSOT for memory search scope. Adding a new
@@ -150,17 +158,22 @@ let answering ~claim_of ~query items =
   if String.equal query ""
   then items, []
   else (
-    let scores = Hashtbl.create 16 in
-    (match Keeper_memory_search_index.rank ~query (List.map claim_of items) with
-     | Ok ranked -> List.iter (fun (position, score) -> Hashtbl.replace scores position score) ranked
-     | Error error ->
-       if Atomic.compare_and_set ranking_failure_logged false true
-       then
-         Log.Keeper.warn
-           "keeper_memory_search answers in store order; the ranking index failed \
-            (logged once per process): %s"
-           (Keeper_memory_search_index.error_to_string error));
-    let score (position, _) = Hashtbl.find_opt scores position in
+    let scores =
+      match Keeper_memory_search_index.rank ~query (List.map claim_of items) with
+      | Ok ranked ->
+        List.fold_left
+          (fun acc (position, score) -> IntMap.add position score acc)
+          IntMap.empty ranked
+      | Error error ->
+        if Atomic.compare_and_set ranking_failure_logged false true
+        then
+          Log.Keeper.warn
+            "keeper_memory_search answers in store order; the ranking index failed \
+             (logged once per process): %s"
+            (Keeper_memory_search_index.error_to_string error);
+        IntMap.empty
+    in
+    let score (position, _) = IntMap.find_opt position scores in
     let best_first a b =
       match score a, score b with
       | Some x, Some y -> Float.compare x y
@@ -531,14 +544,16 @@ let search_absorbed_facts ~keepers_dir ~keeper_id ~current_ids ~answered_by ~que
        memory_id and the claim its into reaches states the same thing, kept
        once at its last write. *)
     let statements_of resolved =
-      let last_write : (string * string, int) Hashtbl.t = Hashtbl.create 64 in
-      List.iteri
-        (fun index (m : absorbed_match) ->
-           Hashtbl.replace last_write (m.row.Keeper_memory_absorbed.memory_id, m.into) index)
-        resolved;
+      let last_write =
+        List.fold_left
+          (fun (index, acc) (m : absorbed_match) ->
+             index + 1, StringPairMap.add (m.row.Keeper_memory_absorbed.memory_id, m.into) index acc)
+          (0, StringPairMap.empty) resolved
+        |> snd
+      in
       List.filteri
         (fun index (m : absorbed_match) ->
-           Hashtbl.find_opt last_write (m.row.Keeper_memory_absorbed.memory_id, m.into) = Some index)
+           StringPairMap.find_opt (m.row.Keeper_memory_absorbed.memory_id, m.into) last_write = Some index)
         resolved
     in
     let answered statements =

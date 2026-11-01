@@ -1,4 +1,5 @@
 module Registry = Keeper_tool_approval_registry
+module String_map = Map.Make (String)
 
 (* What one timed-out ask was about. The wait itself is gone — the registry
    does not hold it (registry.mli: a call whose waiter is gone is not held
@@ -174,7 +175,7 @@ type journal_row =
 (* Rows are decoded oldest first, the order they were appended in: a deliver
    or ack is accepted only after the consume it closes. *)
 let decode_records records =
-  let attempts = Hashtbl.create 16 in
+  let attempts = ref String_map.empty in
   let bad detail = raise (Yojson.Json_error detail) in
   let decode fields =
     let string name = match List.assoc_opt name fields with
@@ -202,9 +203,9 @@ let decode_records records =
       | _ -> bad "invalid journal timestamp" in
     let close_consume () =
       let id = string "consume_id" in
-      (match Hashtbl.find_opt attempts id with
+      (match String_map.find_opt id !attempts with
        | Some (expected, false) when expected = identity_key ->
-           Hashtbl.replace attempts id (identity_key, true)
+           attempts := String_map.add id (identity_key, true) !attempts
        | _ -> bad "closure does not name an open exact consume");
       id in
     match op with
@@ -218,8 +219,8 @@ let decode_records records =
         Row_remember_late { identity; tool_call_id; decision; actor; at }
     | Consume ->
         let id = string "consume_id" in
-        if Hashtbl.mem attempts id then bad "duplicate consume attempt";
-        Hashtbl.add attempts id (identity_key, false);
+        if String_map.mem id !attempts then bad "duplicate consume attempt";
+        attempts := String_map.add id (identity_key, false) !attempts;
         Row_consume { identity; consume_id = id; at }
     | Deliver -> Row_deliver { identity; consume_id = close_consume () }
     | Ack_uncertain -> Row_ack_uncertain { identity; consume_id = close_consume (); at } in

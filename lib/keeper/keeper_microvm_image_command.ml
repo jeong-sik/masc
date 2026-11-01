@@ -51,11 +51,13 @@ let of_apple_inspect ~reference ~(identity : identity) raw =
   let entrypoint fields = match List.assoc_opt "Entrypoint" fields with
     | None | Some `Null -> Ok []
     | Some (`List values) ->
-      let* values = List.fold_right (fun value result ->
-        let* rest = result in
-        match value with
-        | `String value when not (String.contains value '\000') -> Ok (value :: rest)
-        | _ -> invalid "Entrypoint argv") values (Ok []) in
+      let rec loop acc = function
+        | [] -> Ok (List.rev acc)
+        | `String value :: rest when not (String.contains value '\000') ->
+          loop (value :: acc) rest
+        | _ :: _ -> invalid "Entrypoint argv"
+      in
+      let* values = loop [] values in
       (match values with "" :: _ -> invalid "Entrypoint executable" | [] | _ :: _ -> Ok values)
     | Some _ -> invalid "Entrypoint" in
   let decode json =
@@ -73,12 +75,16 @@ let of_apple_inspect ~reference ~(identity : identity) raw =
       | _ -> invalid "image row identity" in
     let* variants = member "variants" row in
     let* variants = match variants with
-      | `List values -> List.fold_right (fun value result ->
-          let* rest = result in
-          let* fields = object_fields "image variant" value in
-          let* value = member "platform" fields in
-          let* observed = platform value in
-          Ok ((observed, fields) :: rest)) values (Ok [])
+      | `List values ->
+        let rec loop acc = function
+          | [] -> Ok (List.rev acc)
+          | value :: rest ->
+            let* fields = object_fields "image variant" value in
+            let* value = member "platform" fields in
+            let* observed = platform value in
+            loop ((observed, fields) :: acc) rest
+        in
+        loop [] values
       | _ -> invalid "variants" in
     let matching = List.filter (fun (observed, _) -> observed = identity.platform) variants in
     let* selected = match matching with

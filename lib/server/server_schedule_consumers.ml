@@ -10,6 +10,8 @@ let reaction_ledger_record_failed_label = "record_failed"
 
 open Result.Syntax
 
+module String_map = Map.Make (String)
+
 let terminal_dispatch_result result =
   Result.map_error
     (fun detail -> Schedule_runner.Terminal_dispatch_rejection detail)
@@ -728,12 +730,9 @@ let occurrence_state_equal left right =
 ;;
 
 let durable_occurrence_index state =
-  let index = Hashtbl.create 16 in
-  let add (occurrence : Keeper_event_queue_state.schedule_occurrence) =
-    match Hashtbl.find_opt index occurrence.occurrence_id with
-    | None ->
-      Hashtbl.add index occurrence.occurrence_id occurrence;
-      Ok ()
+  let add acc (occurrence : Keeper_event_queue_state.schedule_occurrence) =
+    match String_map.find_opt occurrence.occurrence_id acc with
+    | None -> Ok (String_map.add occurrence.occurrence_id occurrence acc)
     | Some (existing : Keeper_event_queue_state.schedule_occurrence) ->
       let incarnation_order =
         Int64.compare
@@ -741,16 +740,14 @@ let durable_occurrence_index state =
           existing.occurrence_incarnation
       in
       if incarnation_order > 0
-      then (
-        Hashtbl.replace index occurrence.occurrence_id occurrence;
-        Ok ())
+      then Ok (String_map.add occurrence.occurrence_id occurrence acc)
       else if incarnation_order < 0
-      then Ok ()
+      then Ok acc
       else if existing.occurrence_source = occurrence.occurrence_source
               && occurrence_state_equal
                    existing.occurrence_state
                    occurrence.occurrence_state
-      then Ok ()
+      then Ok acc
       else
       Error
         (Printf.sprintf
@@ -758,18 +755,17 @@ let durable_occurrence_index state =
            occurrence.occurrence_id
            occurrence.occurrence_incarnation)
   in
-  let rec add_all = function
-    | [] -> Ok ()
+  let rec add_all acc = function
+    | [] -> Ok acc
     | occurrence :: rest ->
-      let* () = add occurrence in
-      add_all rest
+      let* acc = add acc occurrence in
+      add_all acc rest
   in
-  let* () = add_all (Keeper_event_queue_state.schedule_occurrences state) in
-  Ok index
+  add_all String_map.empty (Keeper_event_queue_state.schedule_occurrences state)
 ;;
 
 let owner_index_result cache ~read_state ~base_path keeper_name =
-  match Hashtbl.find_opt cache keeper_name with
+  match String_map.find_opt keeper_name !cache with
   | Some result -> result
   | None ->
     let result =
@@ -777,13 +773,13 @@ let owner_index_result cache ~read_state ~base_path keeper_name =
         read_state ~base_path keeper_name
         |> Result.map_error (fun detail ->
           Printf.sprintf
-            "scheduled keeper wake durable state read failed keeper=%s: %s"
-            keeper_name
-            detail)
+             "scheduled keeper wake durable state read failed keeper=%s: %s"
+             keeper_name
+             detail)
       in
       durable_occurrence_index state
     in
-    Hashtbl.add cache keeper_name result;
+    cache := String_map.add keeper_name result !cache;
     result
 ;;
 
@@ -800,7 +796,7 @@ let rec resolve_durable_occurrence
   else
     let* index = owner_index_result cache ~read_state ~base_path keeper_name in
     let resolve_transfer target =
-      let target_was_cached = Hashtbl.mem cache target in
+      let target_was_cached = String_map.mem target !cache in
       let resolve_target () =
         resolve_durable_occurrence
           cache
@@ -814,7 +810,7 @@ let rec resolve_durable_occurrence
       match target_disposition with
       | Absent_at _ when target_was_cached ->
         (* A cached target snapshot may predate the transfer commit. *)
-        Hashtbl.remove cache target;
+        cache := String_map.remove target !cache;
         resolve_target ()
       | (Pending_at (_, _) | Transfer_projecting_at (_, _, _) | Terminal_completed_at (_, _, _) | Terminal_failed_at (_, _, _, _) | Terminal_cancelled_at (_, _, _, _) | Absent_at _) as disposition -> Ok disposition
     in
@@ -839,7 +835,7 @@ let rec resolve_durable_occurrence
       | Keeper_event_queue_state.Occurrence_transferred_to target ->
         resolve_transfer target
     in
-    match Hashtbl.find_opt index occurrence_id with
+    match String_map.find_opt occurrence_id index with
     | Some occurrence -> disposition_of_occurrence occurrence
     | None ->
       (* A retired queue witness is read by exact occurrence id. A new
@@ -871,7 +867,7 @@ let resolved_occurrence_owner = function
 
 let resolve_keeper_wake_occurrence ~base_path ~keeper_name ~stimulus_id =
   resolve_durable_occurrence
-    (Hashtbl.create 4)
+    (ref String_map.empty)
     ~read_state:Keeper_registry_event_queue.durable_state_result
     ~base_path
     ~occurrence_id:stimulus_id
@@ -880,7 +876,7 @@ let resolve_keeper_wake_occurrence ~base_path ~keeper_name ~stimulus_id =
 ;;
 
 let resolve_keeper_wake_occurrences_with ~read_state ~base_path occurrences =
-  let cache = Hashtbl.create 4 in
+  let cache = ref String_map.empty in
   List.map
     (fun (keeper_name, stimulus_id) ->
        keeper_name, stimulus_id,

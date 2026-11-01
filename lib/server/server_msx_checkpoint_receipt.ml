@@ -47,8 +47,12 @@ let schema_objects db =
         else if rc = Sqlite3.Rc.DONE then Ok (List.rev acc)
         else Error (sql_error db) in
       rows [])
-let expected_schema = List.sort compare
-  ["receipts",schema;"terminal_immutable",immutable;"receipt_retained",no_delete;"binding_immutable",binding_immutable]
+let expected_schema =
+  List.sort
+    (fun (k1, s1) (k2, s2) ->
+      let c = String.compare k1 k2 in
+      if c <> 0 then c else String.compare s1 s2)
+    ["receipts",schema;"terminal_immutable",immutable;"receipt_retained",no_delete;"binding_immutable",binding_immutable]
 let validate_schema db =
   let* actual = schema_objects db in
   if actual = expected_schema then Ok () else Error (Store_unavailable "checkpoint receipt schema differs")

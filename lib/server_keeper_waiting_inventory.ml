@@ -1,3 +1,6 @@
+module String_map = Map.Make (String)
+module String_set = Set.Make (String)
+
 type waiting_source =
   | Event_queue_pending
   | Chat_operation_queued
@@ -363,29 +366,27 @@ let rows_for_queue_snapshot ~keeper_name ~source ~next_action selections =
   let connectors_emitted = ref false in
   (* One entry per schedule_id with two or more pending occurrences. Members
      keep queue order; the aggregate row takes the position of the first. *)
-  let schedule_members
-    : (string, (Keeper_event_queue.scheduled_wake * Keeper_event_queue_state.pending_selection) list) Hashtbl.t =
-    Hashtbl.create 8
+  let schedule_members =
+    List.fold_left
+      (fun acc (selection : Keeper_event_queue_state.pending_selection) ->
+         match selection.source.payload with
+         | Keeper_event_queue.Schedule_due wake ->
+           let existing =
+             Option.value (String_map.find_opt wake.schedule_id acc) ~default:[]
+           in
+           String_map.add wake.schedule_id ((wake, selection) :: existing) acc
+         | Board_signal _ | Board_attention _ | Bootstrap | Fusion_completed _
+         | Connector_attention _ | Hitl_resolved _ | Ask_answered _
+         | Completion_authority_rejected _ | Task_outcome _ | Task_cancelled _
+         | Workspace_message _ | Delegate_completed _ | Composition_completed _ | Tool_result_ready _ | Owned_job_completed _ | Addon_operation_changed _ -> acc)
+      String_map.empty selections
   in
-  List.iter
-    (fun (selection : Keeper_event_queue_state.pending_selection) ->
-       match selection.source.payload with
-       | Keeper_event_queue.Schedule_due wake ->
-         let existing =
-           Option.value (Hashtbl.find_opt schedule_members wake.schedule_id) ~default:[]
-         in
-         Hashtbl.replace schedule_members wake.schedule_id ((wake, selection) :: existing)
-       | Board_signal _ | Board_attention _ | Bootstrap | Fusion_completed _
-       | Connector_attention _ | Hitl_resolved _ | Ask_answered _
-       | Completion_authority_rejected _ | Task_outcome _ | Task_cancelled _
-       | Workspace_message _ | Delegate_completed _ | Composition_completed _ | Tool_result_ready _ | Owned_job_completed _ | Addon_operation_changed _ -> ())
-    selections;
   let schedule_group wake_schedule_id =
-    match Hashtbl.find_opt schedule_members wake_schedule_id with
+    match String_map.find_opt wake_schedule_id schedule_members with
     | Some (_ :: _ :: _ as members) -> Some (List.rev members)
     | Some ([] | [ _ ]) | None -> None
   in
-  let schedules_emitted : (string, unit) Hashtbl.t = Hashtbl.create 8 in
+  let schedules_emitted = ref String_set.empty in
   let rec go queue_index acc = function
     | [] -> List.rev acc
     | (selection : Keeper_event_queue_state.pending_selection) :: rest ->
@@ -436,11 +437,11 @@ let rows_for_queue_snapshot ~keeper_name ~source ~next_action selections =
         | Keeper_event_queue.Task_outcome _ -> None
       in
       (match grouped_schedule with
-       | Some (wake, _) when Hashtbl.mem schedules_emitted wake.schedule_id ->
+       | Some (wake, _) when String_set.mem wake.schedule_id !schedules_emitted ->
          (* Already represented by the schedule's aggregate row. *)
          go (queue_index + 1) acc rest
        | Some (wake, members) ->
-         Hashtbl.replace schedules_emitted wake.schedule_id ();
+         schedules_emitted := String_set.add wake.schedule_id !schedules_emitted;
          let count = List.length members in
          let oldest_arrived_at, first_due, last_due =
            List.fold_left

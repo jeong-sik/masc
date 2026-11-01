@@ -128,8 +128,9 @@ let is_run_status (a : run_status) (b : run_status) =
   | Run_ok, Run_ok
   | Run_unsupported, Run_unsupported
   | Run_runtime_unreachable, Run_runtime_unreachable -> true
-  | (Run_ok | Run_unsupported | Run_runtime_unreachable),
-    (Run_ok | Run_unsupported | Run_runtime_unreachable) -> false
+  | Run_other x, Run_other y -> String.equal x y
+  | (Run_ok | Run_unsupported | Run_runtime_unreachable | Run_other _),
+    (Run_ok | Run_unsupported | Run_runtime_unreachable | Run_other _) -> false
 
 let repeated_metrics_for_view view runs =
   let grouped =
@@ -353,6 +354,7 @@ let summarize ~cases ~runs ?model_filters ?keeper_filters () =
         match run.status with
         | Run_unsupported -> unsupported + 1, unreachable, unknown_case
         | Run_runtime_unreachable -> unsupported, unreachable + 1, unknown_case
+        | Run_other _ -> unsupported, unreachable, unknown_case
         | Run_ok ->
           if String_set.mem run.case_id case_id_set
           then unsupported, unreachable, unknown_case

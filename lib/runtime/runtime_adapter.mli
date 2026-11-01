@@ -37,8 +37,9 @@ val create_construction : unit -> construction
 (** One construction lifetime for a single binding or a complete batch.
     Its first HTTP binding captures admitted declarations before credential
     I/O; all subsequent HTTP bindings share that immutable selection, including
-    missing policy. Creating an owner reads no catalog: native-only, empty,
-    disabled and unresolved bindings do not force unused HTTP declarations.
+    missing policy. Creating an owner reads no catalog. [Runtime_instance]
+    filters native-only, empty, disabled and unresolved cases before unused
+    HTTP declarations would be forced; direct adapter callers own validation.
     Create another owner when selecting from newly published catalogs. *)
 
 type provider_materialization = private

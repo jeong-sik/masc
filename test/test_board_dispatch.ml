@@ -3214,8 +3214,12 @@ let test_initialization_refuses_foreign_workspace_alias ~lookup_installed () =
               (match addressed with
                | Error failure ->
                  (match Board.Post_publication_failure.cause failure with
-                  | Board.Recipient_lookup_failed _ -> ()
-                  | error -> Alcotest.fail (Board.show_board_error error))
+                  | Board.Post_publication_failure.Board_error
+                      (Board.Recipient_lookup_failed _) -> ()
+                  | Board.Post_publication_failure.Board_error error ->
+                    Alcotest.fail (Board.show_board_error error)
+                  | Board.Post_publication_failure.Raised exception_ ->
+                    Alcotest.fail (Printexc.to_string exception_))
                | Ok _ -> Alcotest.fail "an uninstalled lookup must stay unavailable");
               Result.get_ok (Board_dispatch.init_jsonl ~workspace_masc_dir:root_a
                 ~recipient_lookup:every_name_declared ());

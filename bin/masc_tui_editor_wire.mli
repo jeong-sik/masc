@@ -22,9 +22,25 @@ type skill_editor_save_receipt =
   ; ses_snapshot_revision : string option
   }
 
+type skill_editor_create_status =
+  | Skill_created_and_published
+  | Skill_created_but_shadowed of Skill_reference.identity
+  | Skill_created_but_unpublished of string
+
+type skill_editor_create_receipt =
+  { sec_status : skill_editor_create_status
+  ; sec_reference : Skill_reference.t
+  }
+
+type skill_editor_write_error =
+  | Skill_write_refused of string
+  | Skill_write_unconfirmed of string
+
 val runtime_config_save_error_message : runtime_config_save_error -> string
 val runtime_config_text_revision : string -> string
 val runtime_config_conflict_document : string -> (Masc_tui_runtime_config_edit.document, string) result
 val skill_editor_body : Skill_reference.t -> string option -> string
 val decode_skill_editor_loaded : Yojson.Safe.t -> (skill_editor_loaded, string) result
 val decode_skill_editor_save_receipt : Yojson.Safe.t -> (skill_editor_save_receipt, string) result
+val skill_editor_create_body : composition:bool -> source_id:string -> package_id:string -> source_text:string -> string
+val decode_skill_editor_create_receipt : source_id:string -> package_id:string -> source_text:string -> Yojson.Safe.t -> (skill_editor_create_receipt, string) result

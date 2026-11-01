@@ -341,6 +341,7 @@
  (libraries
   alcotest
   masc_tui_editor_wire
+  masc_tui_pick_list
   masc
   masc.masc_core
   masc.runtime
@@ -3731,6 +3732,7 @@
   masc.masc_goal
   masc_tui_model_runtime_table
   masc_tui_types
+  masc_tui_render_tools
   masc_tui_voice_wizard_session
   masc_tui_pick_list
   masc_tui_fusion_launch

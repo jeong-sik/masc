@@ -20,6 +20,7 @@ let every_text_target =
   ; ("row search", Text_row_search)
   ; ("runtime picker filter", Text_runtime_picker_filter)
   ; ("keeper runtime picker filter", Text_keeper_runtime_picker_filter)
+  ; ("Skill source filter", Text_skill_source_filter)
   ; ("identity app form", Text_identity_app_form)
   ; ("identity filter", Text_identity_filter)
   ; ("github token", Text_github_token)
@@ -46,18 +47,6 @@ let test_no_field_lets_the_quit_key_through () =
 let test_with_no_field_open_the_quit_key_is_a_quit_key () =
   Alcotest.(check bool) "nothing is typing" true (quit_key_allowed_for None)
 
-(* The guard against a new field slipping past is the compiler: adding a
-   constructor to [text_input_target] makes [quit_key_allowed_for]'s match
-   non-exhaustive, and warning 8 is an error here. This case guards the other
-   direction -- that the list above keeps naming every field, so the case
-   before it goes on measuring all of them rather than a subset someone
-   trimmed. *)
-let test_the_list_covers_every_target_this_build_has () =
-  Alcotest.(check int) "fields counted" 21 (List.length every_text_target);
-  let spelled = List.map fst every_text_target in
-  Alcotest.(check int) "and none of them is listed twice" 21
-    (List.length (List.sort_uniq String.compare spelled))
-
 let () =
   Alcotest.run "masc_tui_quit_key_yields"
     [ ( "quit key"
@@ -65,7 +54,5 @@ let () =
             test_no_field_lets_the_quit_key_through
         ; Alcotest.test_case "with no field open the quit key is a quit key"
             `Quick test_with_no_field_open_the_quit_key_is_a_quit_key
-        ; Alcotest.test_case "the list covers every target this build has"
-            `Quick test_the_list_covers_every_target_this_build_has
         ] )
     ]

@@ -45,6 +45,69 @@ type skill_editor_save_receipt =
   ; ses_snapshot_revision : string option
   }
 
+type skill_editor_create_status =
+  | Skill_created_and_published
+  | Skill_created_but_shadowed of Skill_reference.identity
+  | Skill_created_but_unpublished of string
+
+type skill_editor_create_receipt =
+  { sec_status : skill_editor_create_status
+  ; sec_reference : Skill_reference.t
+  }
+
+type skill_editor_write_error =
+  | Skill_write_refused of string
+  | Skill_write_unconfirmed of string
+
+let skill_editor_create_body ~composition ~source_id ~package_id ~source_text =
+  Yojson.Safe.to_string (`Assoc
+    [ "kind", `String (if composition then "composition" else "instruction")
+    ; "source_id", `String source_id; "package_id", `String package_id
+    ; "source_text", `String source_text ])
+;;
+
+let preview_reference fields =
+  let open Result.Syntax in
+  let* json = match List.assoc_opt "preview" fields with
+    | Some (`Assoc preview) ->
+      (match List.assoc_opt "profile" preview with
+       | Some (`Assoc profile) ->
+         (match List.assoc_opt "reference" profile with
+          | Some json -> Ok json | None -> Error "Skill preview profile reference is missing")
+       | _ -> Error "Skill preview profile is missing")
+    | _ -> Error "Skill response preview is missing" in
+  Skill_reference.of_yojson json
+  |> Result.map_error (fun _ -> "Skill response exact reference is invalid")
+;;
+
+let decode_skill_editor_create_receipt ~source_id ~package_id ~source_text = function
+  | `Assoc fields ->
+    let open Result.Syntax in
+    let* sec_reference = preview_reference fields in
+    let* () =
+      if String.equal source_id (Skill_reference.identity_source_id_to_string sec_reference.identity)
+         && String.equal package_id (Skill_reference.identity_package_id_to_string sec_reference.identity)
+         && String.equal package_id sec_reference.identity.name
+         && Skill_reference.equal_content_revision sec_reference.content_revision
+              (Skill_reference.content_revision_of_source_text source_text)
+      then Ok () else Error "Skill create receipt does not match the submitted identity and bytes" in
+    let* sec_status = match List.assoc_opt "status" fields with
+      | Some (`String "created_and_published") -> Ok Skill_created_and_published
+      | Some (`String "created_but_shadowed") ->
+        (match List.assoc_opt "winner" fields with
+         | Some json -> Skill_reference.identity_of_yojson json
+             |> Result.map (fun winner -> Skill_created_but_shadowed winner)
+             |> Result.map_error (fun _ -> "Shadowed create receipt has no valid winner")
+         | None -> Error "Shadowed create receipt has no winner")
+      | Some (`String "created_but_unpublished") ->
+        (match List.assoc_opt "reason" fields with
+         | Some (`String reason) -> Ok (Skill_created_but_unpublished reason)
+         | _ -> Error "Unpublished create receipt has no reason")
+      | _ -> Error "Skill create response has an unknown or missing status" in
+    Ok { sec_status; sec_reference }
+  | _ -> Error "Skill create response must be an object"
+;;
+
 let skill_editor_body reference source_text =
   `Assoc
     ([ "reference", Skill_reference.to_yojson reference ]
@@ -84,36 +147,23 @@ let decode_skill_editor_save_receipt = function
       | Some (`String value) -> Some value
       | Some _ | None -> None
     in
-    let reason =
-      match List.assoc_opt "reason" fields with
-      | Some (`String value) -> value
-      | Some _ | None -> "publication did not complete"
-    in
     let status =
       match List.assoc_opt "status" fields with
-      | Some (`String "unchanged") -> Ok Skill_unchanged
-      | Some (`String "saved_and_published") -> Ok Skill_saved_and_published
+      | Some (`String "unchanged") when Option.is_some snapshot_revision -> Ok Skill_unchanged
+      | Some (`String "saved_and_published") when Option.is_some snapshot_revision -> Ok Skill_saved_and_published
+      | Some (`String ("unchanged" | "saved_and_published")) -> Error "Published Skill save receipt has no snapshot revision"
       | Some (`String "saved_but_unpublished") ->
-        Ok (Skill_saved_but_unpublished reason)
+        (match List.assoc_opt "reason" fields with
+         | Some (`String reason) -> Ok (Skill_saved_but_unpublished reason)
+         | _ -> Error "Unpublished Skill save receipt has no reason")
       | Some (`String unknown) -> Error ("unknown Skill save status: " ^ unknown)
       | Some _ | None -> Error "Skill save status is missing"
     in
-    let reference =
-      match List.assoc_opt "preview" fields with
-      | Some (`Assoc preview_fields) ->
-        (match List.assoc_opt "reference" preview_fields with
-         | Some json -> Skill_reference.of_yojson json
-         | None -> Error (Skill_reference.Missing_field
-                            { object_name = "preview"; field = "reference" }))
-      | Some _ | None ->
-        Error
-          (Skill_reference.Missing_field
-             { object_name = "Skill save response"; field = "preview" })
-    in
+    let reference = preview_reference fields in
     (match status, reference with
      | Ok ses_status, Ok ses_reference ->
        Ok { ses_status; ses_reference; ses_snapshot_revision = snapshot_revision }
      | Error detail, _ -> Error detail
-     | _, Error _ -> Error "Skill save response reference is invalid")
+     | _, Error detail -> Error detail)
   | _ -> Error "Skill save response must be an object"
 ;;

@@ -3746,15 +3746,17 @@ let post_skill_editor_preview ~host ~port ~reference ~source_text =
 ;;
 
 let post_skill_editor_save ~host ~port ~reference ~source_text =
-  match
-    post_json
-      ~host
-      ~port
-      ~path:"/api/v1/skills/editor/save"
-      ~body:(skill_editor_body reference (Some source_text))
-  with
-  | Error _ as error -> error
-  | Ok json -> decode_skill_editor_save_receipt json
+  match post_json_outcome ~host ~port ~path:"/api/v1/skills/editor/save"
+      ~body:(skill_editor_body reference (Some source_text)) with
+  | Post_refused detail -> Error (Skill_write_refused detail)
+  | Post_unanswered detail -> Error (Skill_write_unconfirmed detail)
+  | Post_answered json ->
+    (match decode_skill_editor_save_receipt json with
+     | Error detail -> Error (Skill_write_unconfirmed detail)
+     | Ok receipt when Skill_reference.equal_identity reference.identity receipt.ses_reference.identity
+         && Skill_reference.equal_content_revision receipt.ses_reference.content_revision
+              (Skill_reference.content_revision_of_source_text source_text) -> Ok receipt
+     | Ok _ -> Error (Skill_write_unconfirmed "Save receipt does not match the submitted identity and bytes"))
 ;;
 
 let fetch_skill_editor_sources ~host ~port =
@@ -3780,18 +3782,13 @@ let fetch_skill_editor_sources ~host ~port =
 ;;
 
 let post_skill_editor_create ~host ~port ~composition ~source_id ~package_id ~source_text =
-  post_json
-    ~host
-    ~port
-    ~path:"/api/v1/skills/editor/create"
-    ~body:
-      (Yojson.Safe.to_string
-         (`Assoc
-           [ "source_id", `String source_id
-           ; "kind", `String (if composition then "composition" else "instruction")
-           ; "package_id", `String package_id
-           ; "source_text", `String source_text
-           ]))
+  match post_json_outcome ~host ~port ~path:"/api/v1/skills/editor/create"
+    ~body:(skill_editor_create_body ~composition ~source_id ~package_id ~source_text) with
+  | Post_refused detail -> Error (Skill_write_refused detail)
+  | Post_unanswered detail -> Error (Skill_write_unconfirmed detail)
+  | Post_answered json ->
+    decode_skill_editor_create_receipt ~source_id ~package_id ~source_text json
+    |> Result.map_error (fun detail -> Skill_write_unconfirmed detail)
 ;;
 
 let post_skill_evidence ~host ~port reference =

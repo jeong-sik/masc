@@ -27,6 +27,7 @@ let target =
       | Some Tui_types.Text_row_search -> "row-search"
       | Some Tui_types.Text_runtime_picker_filter -> "runtime-picker-filter"
       | Some Tui_types.Text_keeper_runtime_picker_filter -> "keeper-runtime-picker-filter"
+      | Some Tui_types.Text_skill_source_filter -> "skill-source-filter"
       | Some Tui_types.Text_identity_app_form -> "identity-app-form"
       | Some Tui_types.Text_identity_filter -> "identity-filter"
       | Some Tui_types.Text_github_token -> "github-token"
@@ -384,6 +385,75 @@ let test_a_new_lane_name_claims_typing_on_runtime () =
   check target "naming a lane" (Some Tui_types.Text_runtime_lane_name) (resolved state);
   state.Tui_types.view <- Tui_types.Lanes;
   check target "another surface" None (resolved state)
+;;
+
+let test_skill_source_picker_owns_text_on_its_visible_surface () =
+  let state = fresh_state () in
+  state.Tui_types.view <- Tui_types.Tools;
+  state.Tui_types.tools_skill_source_picker <- Some
+    { Tui_types.ssp_sources = ["workspace"; "personal"]; ssp_composition = true
+    ; ssp_list = Masc_tui_pick_list.closed; ssp_authority = state.workspace_authority
+    ; ssp_identity = state.server_identity; ssp_port = state.port };
+  check target "paste belongs to source filtering even before slash" (Some Tui_types.Text_skill_source_filter) (resolved state);
+  check bool "picker owns the tool keys" true (Tui_types.modal_owns_keys state);
+  check target "hidden compact input takes no text" None (resolved ~compact_viewport:true state);
+  state.Tui_types.view <- Tui_types.Overview;
+  check target "a retained picker does not claim another surface" None (resolved state);
+  check bool "another surface keeps its key owner" false (Tui_types.modal_owns_keys state)
+;;
+
+let test_skill_source_paging_chooses_the_windowed_item () =
+  let state = fresh_state () in
+  state.Tui_types.view <- Tui_types.Tools;
+  state.Tui_types.tools_error <- Some "previous inventory read failed";
+  let sources = List.init 50 (fun index -> "source-" ^ string_of_int index) in
+  state.Tui_types.tools_skill_source_picker <- Some
+    { Tui_types.ssp_sources = sources; ssp_composition = true
+    ; ssp_list = Masc_tui_pick_list.closed; ssp_authority = state.workspace_authority
+    ; ssp_identity = state.server_identity; ssp_port = state.port };
+  let page = Masc_tui_render_tools.skill_source_picker_page state ~terminal_rows:20 in
+  let cursor = match Masc_tui_pick_list.apply ~page ~label:Fun.id sources
+      Masc_tui_pick_list.closed (Masc_tui_pick_list.Move Masc_tui_pick_list.Page_next) with
+    | Masc_tui_pick_list.Stay cursor -> cursor | _ -> fail "page did not move" in
+  let view = Masc_tui_pick_list.view ~page ~window:Masc_tui_pick_list.Opens_at_cursor ~label:Fun.id sources cursor in
+  let shown_selection = match view.selected_row with
+    | Some index -> List.nth view.rows index | None -> fail "selection missing" in
+  match Masc_tui_pick_list.apply ~page ~label:Fun.id sources cursor Masc_tui_pick_list.Choose with
+  | Masc_tui_pick_list.Chosen source ->
+    check string "page movement selects the next page's exact source" (List.nth sources page) source;
+    check string "the request target is the presented semantic selection" shown_selection source
+  | _ -> fail "source was not chosen"
+;;
+
+let test_skill_drafts_are_suspended_by_original_workspace () =
+  let state = fresh_state () in
+  let identity root =
+    match Masc.Tui_decode.decode_server_identity (`Assoc
+      ["paths", `Assoc ["effective_base_path", `String root; "effective_masc_root", `String (root ^ "/.masc")]
+      ; "startup", `Assoc ["state_ready", `Bool true]]) with
+    | Ok identity -> identity | Error detail -> fail detail in
+  let original = identity "/workspace-a" in
+  let origin = Tui_types.workspace_input_identity_of_server (Some original) |> Option.get in
+  let draft = { Tui_types.scd_source_id = "workspace"; scd_composition = false
+    ; scd_source_text = "my authored procedure"; scd_origin = origin } in
+  state.Tui_types.tools_skill_create_drafts <- [draft];
+  state.Tui_types.workspace_identity <- Tui_types.Workspace_identity_match;
+  state.Tui_types.server_identity <- Some original;
+  check int "the original workspace can resume its authored draft" 1
+    (List.length (Tui_types.skill_create_drafts_for_current_workspace state));
+  state.Tui_types.workspace_identity <- Tui_types.Workspace_identity_unread;
+  state.Tui_types.server_identity <- None;
+  check int "an unavailable workspace cannot present an earlier draft as current" 0
+    (List.length (Tui_types.skill_create_drafts_for_current_workspace state));
+  check string "uncertainty does not erase authored bytes" draft.scd_source_text
+    (List.hd state.tools_skill_create_drafts).scd_source_text;
+  state.Tui_types.workspace_identity <- Tui_types.Workspace_identity_match;
+  state.Tui_types.server_identity <- Some (identity "/workspace-b");
+  check int "another root cannot borrow the same source name's draft" 0
+    (List.length (Tui_types.skill_create_drafts_for_current_workspace state));
+  state.Tui_types.server_identity <- Some original;
+  check bool "returning to the matching workspace restores the exact draft" true
+    (Tui_types.skill_create_drafts_for_current_workspace state = [draft])
 ;;
 
 (* While the attach path is being typed, typed and pasted text is the path:
@@ -808,6 +878,12 @@ let () =
             test_the_runtime_picker_filter_claims_once_opened;
           test_case "the keeper runtime picker filter claims once opened" `Quick
             test_the_keeper_runtime_picker_filter_claims_once_opened;
+          test_case "Skill source choice owns typing and paste only on its surface" `Quick
+            test_skill_source_picker_owns_text_on_its_visible_surface;
+          test_case "Skill source paging chooses the windowed request target" `Quick
+            test_skill_source_paging_chooses_the_windowed_item;
+          test_case "authored Skill drafts stay owned through workspace uncertainty" `Quick
+            test_skill_drafts_are_suspended_by_original_workspace;
           test_case "a drop reason claims typing on its Goal detail" `Quick
             test_a_drop_reason_claims_typing_on_its_goal_detail;
           test_case "the Fusion launch form claims while open" `Quick

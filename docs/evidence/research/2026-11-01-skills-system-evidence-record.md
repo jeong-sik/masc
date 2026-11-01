@@ -59,3 +59,15 @@
 - 후속 검증: Dashboard 5개 파일 107개 검사 및 TypeScript typecheck 통과. OCaml은 변경 파일의 parse-only 검사만 통과했고, 새 preview/create/HTTP/배포와 화면 실측은 아직 완료하지 않았다. 로컬 Dune build는 실행하지 않았다.
 - Python caller: ruff check 통과. pyright의 17개 오류는 수정 전 HEAD 파일과 오류 메시지가 모두 같았고, formatter 미통과도 기준 파일에 재현됐다. 이번 변경은 create 요청의 kind 한 필드다. 관련 기준 결함은 https://github.com/jeong-sik/masc/issues/47072 에 기록했다.
 - 한계: 독립 소스 검토와 기능 검사, 공식 GitHub 승인, 병합, 설치 및 실제 UI 동작은 각각 별도 증거다. 전체 #47033 요구는 계속 진행 중이다.
+
+## 생성 후보의 서버 검사와 TUI 저작 경로
+
+- 출처: https://github.com/jeong-sik/masc/actions/runs/41267182472, 현재 worktree의 TUI 생성·editor wire·Tools geometry 변경 및 독립 source/review-response 검토
+- 확인일시: 2026-11-01T03:19:02Z
+- 신뢰도: High
+- 서버 후보: e06188aca716a4ed186eb18916129eca4aeb6fc4, branch feat/skills-authoring-20261101, Test workflow, TARGET_SUITES=test_server_skill_editor,test_dashboard_http_core,test_keeper_skill_publish,test_acceptance_composition_fixtures, minimal=true, completed/success. 직전 53003bffffed01b9598a32f9a6d84c91087ad326의 Test 41266600174는 optional body를 추가한 H1 helper의 부분 적용 타입 오류로 실패했고, 두 protocol matrix의 body=None을 명시하여 수정했다. 현재 head 소스 검토도 PASS이며 공식 GitHub 승인과는 별개다.
+- TUI 변경: 복수 저장 위치를 직접 선택한다. 고정 실행 예제와 이름 자리표 휴리스틱을 제거하고, 작성한 초안을 source·kind·원래 base/MASC root에 묶어 보존한다. 연결이 불확실하면 숨기되 지우지 않고, 같은 workspace에서 다시 열 수 있다. 생성·저장 응답은 원래 identity와 실제 source bytes에 묶으며, 거절과 결과 미확인을 구분한다.
+- 기존 오류 수정: 서버의 실제 save serializer는 preview.profile.reference를 보낸다. TUI가 preview.reference를 찾던 경로를 고치고, 실제 producer 결과를 decoder에 넣어 확인하는 검사를 추가했다. 미게시 사유를 임의의 기본값으로 대체하지 않는다.
+- 선택 권한: source picker의 표시와 키 입력이 같은 실제 content-height budget을 사용한다. Tools chrome 계산을 한 곳으로 모으고, 내부 페이지 선택에는 외부 overflow row를 중복 차감하지 않는다. 화면 밖 source 선택 및 일시 단절의 초안 삭제라는 검토 지적을 수정했다.
+- TUI 검증 범위: 변경 OCaml의 parse-only 및 전체 parent-to-working-tree diff check 통과. 요청 target, 선택 결정, 원래 workspace별 초안 보류·복원, 실제 publisher-to-wire 경계를 검사하도록 시나리오를 추가했다. 화면 문구·ANSI·배치 assertion은 추가하지 않았다. 이 후속 변경의 컴파일·실행 및 실제 후보 화면 검증은 아직 미완료다.
+- 한계: source PASS와 이전 후보 Test 성공을 설치·운영·화면 실측으로 바꾸어 쓰지 않는다. 실행 기록 탐색과 최종 UI 증거, 공식 승인 및 전체 stack integration은 계속 진행한다.

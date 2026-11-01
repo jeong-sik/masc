@@ -93,3 +93,5 @@
 - 독립 검토 수정: 누락된 공개 .mli 타입, HTTP body 문자열 직렬화, closed-enum match 및 진행 중 이력 입력을 수정했다. review-response도 소스에서 수정 경계를 독립 확인했다. 공식 GitHub 승인은 별개다.
 - 검증: Dashboard 6개 파일 112개 검사, TypeScript typecheck와 touched-file ESLint 통과. 실제 보존된 completed/deferred/failed의 선택·격리, 같은 RunID의 결과 교체, 시각 동률 정렬, 요청 중복·잘못된 selector, 두 strict consumer의 모순된 history 거절 및 TUI 입력 결정을 검사하도록 추가했다. OCaml은 parse-only 통과이며 이 후보의 컴파일·실행 CI는 아직 미확인이다.
 - 한계: 후보 화면·runtime 실측, 최종 공식 승인과 stack integration은 계속 진행 중이다. 설치된 서버가 이 fresh 계약을 제공한다고 주장하지 않는다.
+
+- CI 후속: Test 41271139975, head d80696edc4d11752af51403878256e42060ef45c, branch feat/skills-run-history-20261101, TARGET_SUITES=test_keeper_skill_composition_evidence,test_tui_decode,test_dashboard_http_core,test_tui_text_input_target,test_keeper_owned_jobs, minimal=true, completed/failure. 새 metadata record와 기존 evidence record가 같은 recorded_at label을 갖고 있어 통계 window fold의 인자가 run_summary로 추론됐다. 기존 evidence 타입 t를 인자에 명시해 바로잡았다. 이 실패는 기능 검사 성공이 아니며, 수정 후보의 새 CI 확인이 필요하다.

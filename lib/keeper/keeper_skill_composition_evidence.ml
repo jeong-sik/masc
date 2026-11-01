@@ -548,7 +548,7 @@ let statistics runs =
     | _ -> invalid_arg "validated composition result lost its disposition or duration")
     ([], [], 0) runs in
   let first_recorded_at, last_recorded_at = List.fold_left
-    (fun (first, last) run ->
+    (fun (first, last) (run : t) ->
       Some (Option.fold ~none:run.recorded_at ~some:(min run.recorded_at) first),
       Some (Option.fold ~none:run.recorded_at ~some:(max run.recorded_at) last))
     (None, None) runs in

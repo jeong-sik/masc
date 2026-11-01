@@ -1,0 +1,204 @@
+{
+  "read_at_unix": 1793356073.7855349,
+  "scope": "Selected exact source/capture bytes read after the prototype and fragment invocations. Not full-product build or capture-time identity beyond each execution input receipt. V1 and V2 fragment checks are distinct; V2 structurally compares complete/partial/invalid source-view contents, compares unobserved liveness, and avoids immutable physical-equality assertions.",
+  "pairs": [
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-roster-prepared-v1/prepared_roster.mli",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-roster-prepared/keeper-roster-prepared-v1/prepared_roster.mli",
+      "sha256": "357d5688308045ab051c03a413684b4f223154cffef0589b1ac59d8ba3f87671",
+      "bytes": 378
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-roster-prepared-v1/prepared_roster.ml",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-roster-prepared/keeper-roster-prepared-v1/prepared_roster.ml",
+      "sha256": "fdd4ab34dff749a9cba5a329e27fe73640c93a47244300e89bd9ef8bb148f1dd",
+      "bytes": 1337
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-roster-prepared-v1/benchmark.ml",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-roster-prepared/keeper-roster-prepared-v1/benchmark.ml",
+      "sha256": "7b3f0ba67a81bda1b022dfedd6bca885f2fec494adc97c29b64334e2a8ae6211",
+      "bytes": 4856
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-roster-prepared-v1/compile-v1.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-roster-prepared/keeper-roster-prepared-v1/compile-v1.json",
+      "sha256": "2950d6907c11ce007207dc191b6b0217a5783de91c35d6215b7d1bd0cf67fdbe",
+      "bytes": 1654
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-roster-prepared-v1/samples-v1.jsonl",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-roster-prepared/keeper-roster-prepared-v1/samples-v1.jsonl",
+      "sha256": "fa23130d011dfc01470d38e4ebdbcd8a703dc1078b3196adf4ab68494999db75",
+      "bytes": 36599
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-roster-prepared-v1/execution-v1.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-roster-prepared/keeper-roster-prepared-v1/execution-v1.json",
+      "sha256": "828bd3b88d95c8bdbf27e794788346af23d40c3e5d7e72cb0bd77564b708028e",
+      "bytes": 2307
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-roster-prepared-v1/live_memory.ml",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-roster-prepared/keeper-roster-prepared-v1/live_memory.ml",
+      "sha256": "efdb4285be4f041b744597240be568f56f0d9fa591fa1e94db83fe0b5158fb05",
+      "bytes": 1143
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-roster-prepared-v1/live-memory-compile-v1.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-roster-prepared/keeper-roster-prepared-v1/live-memory-compile-v1.json",
+      "sha256": "8c1c627e26131da2c217dde2cb76a92c39b22296dae5d7b767674c0e81c293db",
+      "bytes": 749
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-roster-prepared-v1/live-memory-samples-v1.jsonl",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-roster-prepared/keeper-roster-prepared-v1/live-memory-samples-v1.jsonl",
+      "sha256": "88b408aca255e324921bb8d598114c0574f65e5547fb4317f3476873eebb66e0",
+      "bytes": 3718
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-roster-prepared-v1/live-memory-execution-v1.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-roster-prepared/keeper-roster-prepared-v1/live-memory-execution-v1.json",
+      "sha256": "a8ea39258339329cc9c019e29137f8ca9942b03e39eeb4f424b4539b5807bd93",
+      "bytes": 284
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-roster-prepared-v1/analyze.py",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-roster-prepared/keeper-roster-prepared-v1/analyze.py",
+      "sha256": "9a4ea5ce5414e88b4084af7c695ab9d64d47eda84ac5ad9fca560c6be9abeb3b",
+      "bytes": 2301
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-roster-prepared-v1/analysis-v1.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-roster-prepared/keeper-roster-prepared-v1/analysis-v1.json",
+      "sha256": "ebe12028b6e39ca6b5ee25d64e9daffe37e82b013888ca8265927dd7d8046eac",
+      "bytes": 21389
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-roster-prepared-product-v1/prepare.py",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-roster-prepared/keeper-roster-prepared-product-v1/prepare.py",
+      "sha256": "49b5f3855378b7f3d8fcc76afffcbeb44a414b98d60f4f39a40e4469924195e7",
+      "bytes": 3075
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-roster-prepared-product-v1/fixture_types.ml",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-roster-prepared/keeper-roster-prepared-product-v1/fixture_types.ml",
+      "sha256": "26e0864ea25215eb919094ed5524e45ce71fdc012c5f32aa5c1abc0ae8770a22",
+      "bytes": 423
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-roster-prepared-product-v1/actual_control_baseline.ml",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-roster-prepared/keeper-roster-prepared-product-v1/actual_control_baseline.ml",
+      "sha256": "8e3722c20e943ebd931a991f7780e7dbb76e006a0d57331167aaaaf6ae829461",
+      "bytes": 2790
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-roster-prepared-product-v1/actual_control_candidate.mli",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-roster-prepared/keeper-roster-prepared-product-v1/actual_control_candidate.mli",
+      "sha256": "a59af769b8dee6a08fd3175af98e82dbef6bbbb0c7169a39e2e997b82517efe1",
+      "bytes": 1828
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-roster-prepared-product-v1/actual_control_candidate.ml",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-roster-prepared/keeper-roster-prepared-product-v1/actual_control_candidate.ml",
+      "sha256": "8a53d7bc954029bc7ab4e27e7eb618073f1b4390e3cb6b7a254a618f5d509c37",
+      "bytes": 3347
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-roster-prepared-product-v1/verify.ml",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-roster-prepared/keeper-roster-prepared-product-v1/verify.ml",
+      "sha256": "7bfdb1e4a00f871487a5e4d2b4256f47b692957022f6c8eab813f8700bc6e846",
+      "bytes": 3513
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-roster-prepared-product-v1/source-identity-v1.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-roster-prepared/keeper-roster-prepared-product-v1/source-identity-v1.json",
+      "sha256": "a67f904d31775a642c2c73b5a7b964829cbe4b74df611bb9d5ef46d2e0b24ec5",
+      "bytes": 1428
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-roster-prepared-product-v1/compile-v1.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-roster-prepared/keeper-roster-prepared-product-v1/compile-v1.json",
+      "sha256": "61abed950addddb6754250236add559567296825b9c532479059af43c968592c",
+      "bytes": 1277
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-roster-prepared-product-v1/verification-v1.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-roster-prepared/keeper-roster-prepared-product-v1/verification-v1.json",
+      "sha256": "8126205c758081d7dcff7b40a33fe1e4187bd30666e166e5b60bb10eea979a81",
+      "bytes": 962
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-roster-prepared-product-v2/prepare.py",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-roster-prepared/keeper-roster-prepared-product-v2/prepare.py",
+      "sha256": "49b5f3855378b7f3d8fcc76afffcbeb44a414b98d60f4f39a40e4469924195e7",
+      "bytes": 3075
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-roster-prepared-product-v2/fixture_types.ml",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-roster-prepared/keeper-roster-prepared-product-v2/fixture_types.ml",
+      "sha256": "26e0864ea25215eb919094ed5524e45ce71fdc012c5f32aa5c1abc0ae8770a22",
+      "bytes": 423
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-roster-prepared-product-v2/actual_control_baseline.ml",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-roster-prepared/keeper-roster-prepared-product-v2/actual_control_baseline.ml",
+      "sha256": "8e3722c20e943ebd931a991f7780e7dbb76e006a0d57331167aaaaf6ae829461",
+      "bytes": 2790
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-roster-prepared-product-v2/actual_control_candidate.mli",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-roster-prepared/keeper-roster-prepared-product-v2/actual_control_candidate.mli",
+      "sha256": "38794ba028e61b8cccb39a600095cad4dd8cfb5a73664fec47f1a3e90bde80b1",
+      "bytes": 1888
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-roster-prepared-product-v2/actual_control_candidate.ml",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-roster-prepared/keeper-roster-prepared-product-v2/actual_control_candidate.ml",
+      "sha256": "8a53d7bc954029bc7ab4e27e7eb618073f1b4390e3cb6b7a254a618f5d509c37",
+      "bytes": 3347
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-roster-prepared-product-v2/verify.ml",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-roster-prepared/keeper-roster-prepared-product-v2/verify.ml",
+      "sha256": "f28514f64d018d1157426cdbbc282fd908b5236e447bd95b07c5579c4d645297",
+      "bytes": 3210
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-roster-prepared-product-v2/source-identity-v1.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-roster-prepared/keeper-roster-prepared-product-v2/source-identity-v1.json",
+      "sha256": "84c3cb7a754b6dc019a1cfbf19a8ea4abba88197bb0daedf6c9705a27648ce35",
+      "bytes": 1428
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-roster-prepared-product-v2/compile-v1.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-roster-prepared/keeper-roster-prepared-product-v2/compile-v1.json",
+      "sha256": "61abed950addddb6754250236add559567296825b9c532479059af43c968592c",
+      "bytes": 1277
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-roster-prepared-product-v2/verification-v1.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-roster-prepared/keeper-roster-prepared-product-v2/verification-v1.json",
+      "sha256": "8dc2ea44f33b507462f0a1b31cce41bc60bbe7a195a76c46ef34c171dbc40974",
+      "bytes": 976
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-projection-component-v1/fixture_types.ml",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-roster-prepared/keeper-projection-component-v1/fixture_types.ml",
+      "sha256": "8ec90e805205e9802f4c0e50a589df266fdd3b6dd7b300dd727dbd240cd30eee",
+      "bytes": 4007
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-projection-component-v1/control_baseline.ml",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-roster-prepared/keeper-projection-component-v1/control_baseline.ml",
+      "sha256": "fc05671cc22995812e9c59f256b296782e495c209fe0408166c8a78120f22332",
+      "bytes": 958
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-roster-prepared-product-v2/parse-v2.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-roster-prepared/keeper-roster-prepared-product-v2/parse-v2.json",
+      "sha256": "e44ce117bf73c8d0c2d5013626acbdeba72bfbd3ebd286adfe38de340bd7bf80",
+      "bytes": 1390
+    }
+  ]
+}

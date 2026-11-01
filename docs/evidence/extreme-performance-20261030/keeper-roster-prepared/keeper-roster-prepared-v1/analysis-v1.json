@@ -1,0 +1,892 @@
+{
+  "scope": "Prototype over reduced typed records. Five batches per case; medians of per-operation batch averages, not individual latency quantiles. Batch lookup operations contain all N existing names of a complete roster in roster order. First means the first name, repeatedly queried after warmup. Cold batch includes prepare of an existing view; cold source preparation separately includes the source constructor. Neither includes actual fetch/JSON decode or UI/workspace admission. Warm allocation excludes prior construction and retained graph. GC live-word increments are not RSS or peak/reclamation proof.",
+  "inputs_sha256": {
+    "samples-v1.jsonl": "fa23130d011dfc01470d38e4ebdbcd8a703dc1078b3196adf4ab68494999db75",
+    "live-memory-samples-v1.jsonl": "88b408aca255e324921bb8d598114c0574f65e5547fb4317f3476873eebb66e0"
+  },
+  "validation": {
+    "scope": "Research prototype with reduced runtime records. No full product compile, TUI frame, real fetch/decode, workspace/caller authority or physical paint claim.",
+    "reading_comparisons": 150,
+    "ocaml_version": "5.5.1"
+  },
+  "cases": [
+    {
+      "roster_rows": 0,
+      "case": "source-construction",
+      "batches": 5,
+      "iterations_per_batch": [
+        2000,
+        2000,
+        2000,
+        2000,
+        2000
+      ],
+      "median_operation_batch_wall_ns": 2.3125,
+      "median_operation_batch_cpu_s": 3e-09,
+      "median_operation_batch_allocated_bytes": 16.072
+    },
+    {
+      "roster_rows": 0,
+      "case": "cold-source-preparation",
+      "batches": 5,
+      "iterations_per_batch": [
+        2000,
+        2000,
+        2000,
+        2000,
+        2000
+      ],
+      "median_operation_batch_wall_ns": 5.6455,
+      "median_operation_batch_cpu_s": 7.500000000000001e-09,
+      "median_operation_batch_allocated_bytes": 40.072
+    },
+    {
+      "roster_rows": 0,
+      "case": "prepare-only",
+      "batches": 5,
+      "iterations_per_batch": [
+        2000,
+        2000,
+        2000,
+        2000,
+        2000
+      ],
+      "median_operation_batch_wall_ns": 4.0,
+      "median_operation_batch_cpu_s": 3.9999999999999994e-09,
+      "median_operation_batch_allocated_bytes": 24.072
+    },
+    {
+      "roster_rows": 0,
+      "case": "linear-batch",
+      "batches": 5,
+      "iterations_per_batch": [
+        2000,
+        2000,
+        2000,
+        2000,
+        2000
+      ],
+      "median_operation_batch_wall_ns": 3.1665,
+      "median_operation_batch_cpu_s": 4.5e-09,
+      "median_operation_batch_allocated_bytes": 80.072
+    },
+    {
+      "roster_rows": 0,
+      "case": "cold-prepared-batch",
+      "batches": 5,
+      "iterations_per_batch": [
+        2000,
+        2000,
+        2000,
+        2000,
+        2000
+      ],
+      "median_operation_batch_wall_ns": 5.792,
+      "median_operation_batch_cpu_s": 6.4999999999999995e-09,
+      "median_operation_batch_allocated_bytes": 104.072
+    },
+    {
+      "roster_rows": 0,
+      "case": "warm-prepared-batch",
+      "batches": 5,
+      "iterations_per_batch": [
+        2000,
+        2000,
+        2000,
+        2000,
+        2000
+      ],
+      "median_operation_batch_wall_ns": 3.4375,
+      "median_operation_batch_cpu_s": 3.9999999999999994e-09,
+      "median_operation_batch_allocated_bytes": 80.072
+    },
+    {
+      "roster_rows": 0,
+      "case": "linear-first",
+      "batches": 5,
+      "iterations_per_batch": [
+        2000,
+        2000,
+        2000,
+        2000,
+        2000
+      ],
+      "median_operation_batch_wall_ns": 3.625,
+      "median_operation_batch_cpu_s": 5e-09,
+      "median_operation_batch_allocated_bytes": 32.072
+    },
+    {
+      "roster_rows": 0,
+      "case": "cold-prepared-first",
+      "batches": 5,
+      "iterations_per_batch": [
+        2000,
+        2000,
+        2000,
+        2000,
+        2000
+      ],
+      "median_operation_batch_wall_ns": 6.208,
+      "median_operation_batch_cpu_s": 7.999999999999999e-09,
+      "median_operation_batch_allocated_bytes": 24.072
+    },
+    {
+      "roster_rows": 0,
+      "case": "warm-prepared-first",
+      "batches": 5,
+      "iterations_per_batch": [
+        2000,
+        2000,
+        2000,
+        2000,
+        2000
+      ],
+      "median_operation_batch_wall_ns": 2.875,
+      "median_operation_batch_cpu_s": 7e-09,
+      "median_operation_batch_allocated_bytes": 0.072
+    },
+    {
+      "roster_rows": 1,
+      "case": "source-construction",
+      "batches": 5,
+      "iterations_per_batch": [
+        2000,
+        2000,
+        2000,
+        2000,
+        2000
+      ],
+      "median_operation_batch_wall_ns": 2.875,
+      "median_operation_batch_cpu_s": 3.9999999999999994e-09,
+      "median_operation_batch_allocated_bytes": 16.072
+    },
+    {
+      "roster_rows": 1,
+      "case": "cold-source-preparation",
+      "batches": 5,
+      "iterations_per_batch": [
+        2000,
+        2000,
+        2000,
+        2000,
+        2000
+      ],
+      "median_operation_batch_wall_ns": 10.5,
+      "median_operation_batch_cpu_s": 1.1e-08,
+      "median_operation_batch_allocated_bytes": 152.072
+    },
+    {
+      "roster_rows": 1,
+      "case": "prepare-only",
+      "batches": 5,
+      "iterations_per_batch": [
+        2000,
+        2000,
+        2000,
+        2000,
+        2000
+      ],
+      "median_operation_batch_wall_ns": 8.6875,
+      "median_operation_batch_cpu_s": 9.5e-09,
+      "median_operation_batch_allocated_bytes": 136.072
+    },
+    {
+      "roster_rows": 1,
+      "case": "linear-batch",
+      "batches": 5,
+      "iterations_per_batch": [
+        2000,
+        2000,
+        2000,
+        2000,
+        2000
+      ],
+      "median_operation_batch_wall_ns": 16.646,
+      "median_operation_batch_cpu_s": 1.35e-08,
+      "median_operation_batch_allocated_bytes": 144.072
+    },
+    {
+      "roster_rows": 1,
+      "case": "cold-prepared-batch",
+      "batches": 5,
+      "iterations_per_batch": [
+        2000,
+        2000,
+        2000,
+        2000,
+        2000
+      ],
+      "median_operation_batch_wall_ns": 23.3125,
+      "median_operation_batch_cpu_s": 2.4e-08,
+      "median_operation_batch_allocated_bytes": 232.072
+    },
+    {
+      "roster_rows": 1,
+      "case": "warm-prepared-batch",
+      "batches": 5,
+      "iterations_per_batch": [
+        2000,
+        2000,
+        2000,
+        2000,
+        2000
+      ],
+      "median_operation_batch_wall_ns": 10.9585,
+      "median_operation_batch_cpu_s": 1.15e-08,
+      "median_operation_batch_allocated_bytes": 96.072
+    },
+    {
+      "roster_rows": 1,
+      "case": "linear-first",
+      "batches": 5,
+      "iterations_per_batch": [
+        2000,
+        2000,
+        2000,
+        2000,
+        2000
+      ],
+      "median_operation_batch_wall_ns": 6.2295,
+      "median_operation_batch_cpu_s": 6.4999999999999995e-09,
+      "median_operation_batch_allocated_bytes": 64.072
+    },
+    {
+      "roster_rows": 1,
+      "case": "cold-prepared-first",
+      "batches": 5,
+      "iterations_per_batch": [
+        2000,
+        2000,
+        2000,
+        2000,
+        2000
+      ],
+      "median_operation_batch_wall_ns": 16.5625,
+      "median_operation_batch_cpu_s": 1.8e-08,
+      "median_operation_batch_allocated_bytes": 152.072
+    },
+    {
+      "roster_rows": 1,
+      "case": "warm-prepared-first",
+      "batches": 5,
+      "iterations_per_batch": [
+        2000,
+        2000,
+        2000,
+        2000,
+        2000
+      ],
+      "median_operation_batch_wall_ns": 7.021,
+      "median_operation_batch_cpu_s": 7.500000000000001e-09,
+      "median_operation_batch_allocated_bytes": 16.072
+    },
+    {
+      "roster_rows": 2,
+      "case": "source-construction",
+      "batches": 5,
+      "iterations_per_batch": [
+        2000,
+        2000,
+        2000,
+        2000,
+        2000
+      ],
+      "median_operation_batch_wall_ns": 3.7915,
+      "median_operation_batch_cpu_s": 5.5e-09,
+      "median_operation_batch_allocated_bytes": 16.072
+    },
+    {
+      "roster_rows": 2,
+      "case": "cold-source-preparation",
+      "batches": 5,
+      "iterations_per_batch": [
+        2000,
+        2000,
+        2000,
+        2000,
+        2000
+      ],
+      "median_operation_batch_wall_ns": 34.0415,
+      "median_operation_batch_cpu_s": 3.05e-08,
+      "median_operation_batch_allocated_bytes": 312.072
+    },
+    {
+      "roster_rows": 2,
+      "case": "prepare-only",
+      "batches": 5,
+      "iterations_per_batch": [
+        2000,
+        2000,
+        2000,
+        2000,
+        2000
+      ],
+      "median_operation_batch_wall_ns": 24.271,
+      "median_operation_batch_cpu_s": 2.5999999999999998e-08,
+      "median_operation_batch_allocated_bytes": 296.072
+    },
+    {
+      "roster_rows": 2,
+      "case": "linear-batch",
+      "batches": 5,
+      "iterations_per_batch": [
+        2000,
+        2000,
+        2000,
+        2000,
+        2000
+      ],
+      "median_operation_batch_wall_ns": 28.521,
+      "median_operation_batch_cpu_s": 2.5000000000000002e-08,
+      "median_operation_batch_allocated_bytes": 208.072
+    },
+    {
+      "roster_rows": 2,
+      "case": "cold-prepared-batch",
+      "batches": 5,
+      "iterations_per_batch": [
+        2000,
+        2000,
+        2000,
+        2000,
+        2000
+      ],
+      "median_operation_batch_wall_ns": 63.3125,
+      "median_operation_batch_cpu_s": 5.9e-08,
+      "median_operation_batch_allocated_bytes": 408.072
+    },
+    {
+      "roster_rows": 2,
+      "case": "warm-prepared-batch",
+      "batches": 5,
+      "iterations_per_batch": [
+        2000,
+        2000,
+        2000,
+        2000,
+        2000
+      ],
+      "median_operation_batch_wall_ns": 53.9585,
+      "median_operation_batch_cpu_s": 4.15e-08,
+      "median_operation_batch_allocated_bytes": 112.072
+    },
+    {
+      "roster_rows": 2,
+      "case": "linear-first",
+      "batches": 5,
+      "iterations_per_batch": [
+        2000,
+        2000,
+        2000,
+        2000,
+        2000
+      ],
+      "median_operation_batch_wall_ns": 6.2295,
+      "median_operation_batch_cpu_s": 7e-09,
+      "median_operation_batch_allocated_bytes": 64.072
+    },
+    {
+      "roster_rows": 2,
+      "case": "cold-prepared-first",
+      "batches": 5,
+      "iterations_per_batch": [
+        2000,
+        2000,
+        2000,
+        2000,
+        2000
+      ],
+      "median_operation_batch_wall_ns": 47.3125,
+      "median_operation_batch_cpu_s": 4.15e-08,
+      "median_operation_batch_allocated_bytes": 312.072
+    },
+    {
+      "roster_rows": 2,
+      "case": "warm-prepared-first",
+      "batches": 5,
+      "iterations_per_batch": [
+        2000,
+        2000,
+        2000,
+        2000,
+        2000
+      ],
+      "median_operation_batch_wall_ns": 13.6875,
+      "median_operation_batch_cpu_s": 1.35e-08,
+      "median_operation_batch_allocated_bytes": 16.072
+    },
+    {
+      "roster_rows": 30,
+      "case": "source-construction",
+      "batches": 5,
+      "iterations_per_batch": [
+        2000,
+        2000,
+        2000,
+        2000,
+        2000
+      ],
+      "median_operation_batch_wall_ns": 20.979,
+      "median_operation_batch_cpu_s": 2.15e-08,
+      "median_operation_batch_allocated_bytes": 16.072
+    },
+    {
+      "roster_rows": 30,
+      "case": "cold-source-preparation",
+      "batches": 5,
+      "iterations_per_batch": [
+        2000,
+        2000,
+        2000,
+        2000,
+        2000
+      ],
+      "median_operation_batch_wall_ns": 1626.1875,
+      "median_operation_batch_cpu_s": 1.6235e-06,
+      "median_operation_batch_allocated_bytes": 11416.072
+    },
+    {
+      "roster_rows": 30,
+      "case": "prepare-only",
+      "batches": 5,
+      "iterations_per_batch": [
+        2000,
+        2000,
+        2000,
+        2000,
+        2000
+      ],
+      "median_operation_batch_wall_ns": 1672.146,
+      "median_operation_batch_cpu_s": 1.6375e-06,
+      "median_operation_batch_allocated_bytes": 11400.072
+    },
+    {
+      "roster_rows": 30,
+      "case": "linear-batch",
+      "batches": 5,
+      "iterations_per_batch": [
+        2000,
+        2000,
+        2000,
+        2000,
+        2000
+      ],
+      "median_operation_batch_wall_ns": 1853.4375,
+      "median_operation_batch_cpu_s": 1.751e-06,
+      "median_operation_batch_allocated_bytes": 2000.072
+    },
+    {
+      "roster_rows": 30,
+      "case": "cold-prepared-batch",
+      "batches": 5,
+      "iterations_per_batch": [
+        2000,
+        2000,
+        2000,
+        2000,
+        2000
+      ],
+      "median_operation_batch_wall_ns": 2579.729,
+      "median_operation_batch_cpu_s": 2.5775e-06,
+      "median_operation_batch_allocated_bytes": 11960.072
+    },
+    {
+      "roster_rows": 30,
+      "case": "warm-prepared-batch",
+      "batches": 5,
+      "iterations_per_batch": [
+        2000,
+        2000,
+        2000,
+        2000,
+        2000
+      ],
+      "median_operation_batch_wall_ns": 980.896,
+      "median_operation_batch_cpu_s": 9.81e-07,
+      "median_operation_batch_allocated_bytes": 560.072
+    },
+    {
+      "roster_rows": 30,
+      "case": "linear-first",
+      "batches": 5,
+      "iterations_per_batch": [
+        2000,
+        2000,
+        2000,
+        2000,
+        2000
+      ],
+      "median_operation_batch_wall_ns": 6.229,
+      "median_operation_batch_cpu_s": 7e-09,
+      "median_operation_batch_allocated_bytes": 64.072
+    },
+    {
+      "roster_rows": 30,
+      "case": "cold-prepared-first",
+      "batches": 5,
+      "iterations_per_batch": [
+        2000,
+        2000,
+        2000,
+        2000,
+        2000
+      ],
+      "median_operation_batch_wall_ns": 1617.8125,
+      "median_operation_batch_cpu_s": 1.618e-06,
+      "median_operation_batch_allocated_bytes": 11416.072
+    },
+    {
+      "roster_rows": 30,
+      "case": "warm-prepared-first",
+      "batches": 5,
+      "iterations_per_batch": [
+        2000,
+        2000,
+        2000,
+        2000,
+        2000
+      ],
+      "median_operation_batch_wall_ns": 29.9375,
+      "median_operation_batch_cpu_s": 3.05e-08,
+      "median_operation_batch_allocated_bytes": 16.072
+    },
+    {
+      "roster_rows": 300,
+      "case": "source-construction",
+      "batches": 5,
+      "iterations_per_batch": [
+        100,
+        100,
+        100,
+        100,
+        100
+      ],
+      "median_operation_batch_wall_ns": 247.92,
+      "median_operation_batch_cpu_s": 2.6e-07,
+      "median_operation_batch_allocated_bytes": 17.44
+    },
+    {
+      "roster_rows": 300,
+      "case": "cold-source-preparation",
+      "batches": 5,
+      "iterations_per_batch": [
+        100,
+        100,
+        100,
+        100,
+        100
+      ],
+      "median_operation_batch_wall_ns": 26947.08,
+      "median_operation_batch_cpu_s": 2.686e-05,
+      "median_operation_batch_allocated_bytes": 166553.44
+    },
+    {
+      "roster_rows": 300,
+      "case": "prepare-only",
+      "batches": 5,
+      "iterations_per_batch": [
+        100,
+        100,
+        100,
+        100,
+        100
+      ],
+      "median_operation_batch_wall_ns": 26324.16,
+      "median_operation_batch_cpu_s": 2.6340000000000002e-05,
+      "median_operation_batch_allocated_bytes": 166537.44
+    },
+    {
+      "roster_rows": 300,
+      "case": "linear-batch",
+      "batches": 5,
+      "iterations_per_batch": [
+        100,
+        100,
+        100,
+        100,
+        100
+      ],
+      "median_operation_batch_wall_ns": 146446.25,
+      "median_operation_batch_cpu_s": 0.00013898,
+      "median_operation_batch_allocated_bytes": 19281.44
+    },
+    {
+      "roster_rows": 300,
+      "case": "cold-prepared-batch",
+      "batches": 5,
+      "iterations_per_batch": [
+        100,
+        100,
+        100,
+        100,
+        100
+      ],
+      "median_operation_batch_wall_ns": 48777.08,
+      "median_operation_batch_cpu_s": 4.8729999999999996e-05,
+      "median_operation_batch_allocated_bytes": 171417.44
+    },
+    {
+      "roster_rows": 300,
+      "case": "warm-prepared-batch",
+      "batches": 5,
+      "iterations_per_batch": [
+        100,
+        100,
+        100,
+        100,
+        100
+      ],
+      "median_operation_batch_wall_ns": 21682.5,
+      "median_operation_batch_cpu_s": 2.144e-05,
+      "median_operation_batch_allocated_bytes": 4881.44
+    },
+    {
+      "roster_rows": 300,
+      "case": "linear-first",
+      "batches": 5,
+      "iterations_per_batch": [
+        100,
+        100,
+        100,
+        100,
+        100
+      ],
+      "median_operation_batch_wall_ns": 8.75,
+      "median_operation_batch_cpu_s": 2e-08,
+      "median_operation_batch_allocated_bytes": 65.44
+    },
+    {
+      "roster_rows": 300,
+      "case": "cold-prepared-first",
+      "batches": 5,
+      "iterations_per_batch": [
+        100,
+        100,
+        100,
+        100,
+        100
+      ],
+      "median_operation_batch_wall_ns": 27397.09,
+      "median_operation_batch_cpu_s": 2.74e-05,
+      "median_operation_batch_allocated_bytes": 166553.44
+    },
+    {
+      "roster_rows": 300,
+      "case": "warm-prepared-first",
+      "batches": 5,
+      "iterations_per_batch": [
+        100,
+        100,
+        100,
+        100,
+        100
+      ],
+      "median_operation_batch_wall_ns": 50.0,
+      "median_operation_batch_cpu_s": 6.000000000000001e-08,
+      "median_operation_batch_allocated_bytes": 17.44
+    },
+    {
+      "roster_rows": 3000,
+      "case": "source-construction",
+      "batches": 5,
+      "iterations_per_batch": [
+        2,
+        2,
+        2,
+        2,
+        2
+      ],
+      "median_operation_batch_wall_ns": 5145.5,
+      "median_operation_batch_cpu_s": 5.5e-06,
+      "median_operation_batch_allocated_bytes": 88.0
+    },
+    {
+      "roster_rows": 3000,
+      "case": "cold-source-preparation",
+      "batches": 5,
+      "iterations_per_batch": [
+        2,
+        2,
+        2,
+        2,
+        2
+      ],
+      "median_operation_batch_wall_ns": 505541.5,
+      "median_operation_batch_cpu_s": 0.000506,
+      "median_operation_batch_allocated_bytes": 2154304.0
+    },
+    {
+      "roster_rows": 3000,
+      "case": "prepare-only",
+      "batches": 5,
+      "iterations_per_batch": [
+        2,
+        2,
+        2,
+        2,
+        2
+      ],
+      "median_operation_batch_wall_ns": 492562.5,
+      "median_operation_batch_cpu_s": 0.000493,
+      "median_operation_batch_allocated_bytes": 2154288.0
+    },
+    {
+      "roster_rows": 3000,
+      "case": "linear-batch",
+      "batches": 5,
+      "iterations_per_batch": [
+        2,
+        2,
+        2,
+        2,
+        2
+      ],
+      "median_operation_batch_wall_ns": 14639500.0,
+      "median_operation_batch_cpu_s": 0.0144635,
+      "median_operation_batch_allocated_bytes": 192152.0
+    },
+    {
+      "roster_rows": 3000,
+      "case": "cold-prepared-batch",
+      "batches": 5,
+      "iterations_per_batch": [
+        2,
+        2,
+        2,
+        2,
+        2
+      ],
+      "median_operation_batch_wall_ns": 767812.5,
+      "median_operation_batch_cpu_s": 0.000769,
+      "median_operation_batch_allocated_bytes": 2202368.0
+    },
+    {
+      "roster_rows": 3000,
+      "case": "warm-prepared-batch",
+      "batches": 5,
+      "iterations_per_batch": [
+        2,
+        2,
+        2,
+        2,
+        2
+      ],
+      "median_operation_batch_wall_ns": 266729.5,
+      "median_operation_batch_cpu_s": 0.0002675,
+      "median_operation_batch_allocated_bytes": 48152.0
+    },
+    {
+      "roster_rows": 3000,
+      "case": "linear-first",
+      "batches": 5,
+      "iterations_per_batch": [
+        2,
+        2,
+        2,
+        2,
+        2
+      ],
+      "median_operation_batch_wall_ns": 21.0,
+      "median_operation_batch_cpu_s": 5e-07,
+      "median_operation_batch_allocated_bytes": 136.0
+    },
+    {
+      "roster_rows": 3000,
+      "case": "cold-prepared-first",
+      "batches": 5,
+      "iterations_per_batch": [
+        2,
+        2,
+        2,
+        2,
+        2
+      ],
+      "median_operation_batch_wall_ns": 453458.5,
+      "median_operation_batch_cpu_s": 0.000454,
+      "median_operation_batch_allocated_bytes": 2154304.0
+    },
+    {
+      "roster_rows": 3000,
+      "case": "warm-prepared-first",
+      "batches": 5,
+      "iterations_per_batch": [
+        2,
+        2,
+        2,
+        2,
+        2
+      ],
+      "median_operation_batch_wall_ns": 104.5,
+      "median_operation_batch_cpu_s": 5e-07,
+      "median_operation_batch_allocated_bytes": 88.0
+    }
+  ],
+  "retained_live_graph": [
+    {
+      "roster_rows": 0,
+      "delta_live_words": [
+        3,
+        3,
+        3,
+        3,
+        3
+      ],
+      "median_delta_live_bytes": 24.0
+    },
+    {
+      "roster_rows": 1,
+      "delta_live_words": [
+        11,
+        11,
+        11,
+        11,
+        11
+      ],
+      "median_delta_live_bytes": 88.0
+    },
+    {
+      "roster_rows": 2,
+      "delta_live_words": [
+        19,
+        19,
+        19,
+        19,
+        19
+      ],
+      "median_delta_live_bytes": 152.0
+    },
+    {
+      "roster_rows": 30,
+      "delta_live_words": [
+        243,
+        243,
+        243,
+        243,
+        243
+      ],
+      "median_delta_live_bytes": 1944.0
+    },
+    {
+      "roster_rows": 300,
+      "delta_live_words": [
+        2403,
+        2403,
+        2403,
+        2403,
+        2403
+      ],
+      "median_delta_live_bytes": 19224.0
+    },
+    {
+      "roster_rows": 3000,
+      "delta_live_words": [
+        24003,
+        24003,
+        24003,
+        24003,
+        24003
+      ],
+      "median_delta_live_bytes": 192024.0
+    }
+  ]
+}

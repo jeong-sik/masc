@@ -6423,6 +6423,8 @@
 
 (include stanzas/test_runtime_construction_snapshot.inc)
 
+(include stanzas/test_runtime_batch_construction_snapshot.inc)
+
 (test
  (name test_runtime_official_cli_install)
  (modules test_runtime_official_cli_install)

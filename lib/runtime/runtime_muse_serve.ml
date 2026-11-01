@@ -1311,7 +1311,12 @@ let rec await_terminal io (config : config) ~mcp_servers ~session_id ~turn_id ~o
            let usage = match terminal with
              | Msp.Terminal_completed -> terminal_usage ~observed:state.observed_usage ~terminal:usage
              | Msp.Terminal_failed _ | Msp.Terminal_host_died _
-             | Msp.Terminal_cancelled | Msp.Unrecognized_terminal _ -> usage in
+             | Msp.Terminal_cancelled | Msp.Unrecognized_terminal _ ->
+               (* Counts are authoritative; live delivery cannot certify which
+                  model made the newest call without a durable witness. *)
+               Option.iter (fun _ ->
+                 emit (Model_call_reported {session_id; turn_id; model=None})) usage;
+               usage in
            Option.iter report_usage usage;
            (match terminal with
             | Msp.Terminal_completed ->

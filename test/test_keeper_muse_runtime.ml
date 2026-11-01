@@ -745,6 +745,14 @@ def acknowledge(disposition="started"):
             notify("session/tokenUsage", usage)
         for usage in FIXTURE.get("model_usage", []):
             notify("session/tokenUsage", dict(usage, sessionId=SESSION, turnId=turn_id))
+        if FIXTURE.get("lost_model_before_failure"):
+            after = "v:%d" % CURSOR[0]
+            hidden = {"sessionId": SESSION, "turnId": turn_id, "modelId": "hidden-model-b",
+                      "promptTokens": 9, "totalTokens": 10,
+                      "usage": {"inputTokens": 9, "outputTokens": 1,
+                                "cachedTokens": 0, "reasoningTokens": 0}}
+            notify("session/tokenUsage", hidden, visible=False)
+            notify("view/gap", {"sessionId": SESSION, "after": after, "next": hidden["viewCursor"]})
 
 def tool_item(item_id, tool, call_id, status, revision, args="{}"):
     return {"itemId": item_id, "kind": "toolCall", "turnId": turn_id, "revision": revision,
@@ -2473,6 +2481,27 @@ let test_call_usage_survives_missing_terminal_aggregate () =
         | _ -> fail "expected one usage report per completed turn") [1; 2])
 ;;
 
+let test_failed_aggregate_does_not_claim_live_model_after_gap () =
+  with_scripted_host ~fixture:(scenario "turn_failed_with_usage" @
+    ["call_models", `List [`String "observed-model-a"];
+     "lost_model_before_failure", `Bool true]) (fun ~base_path ->
+    let run = run_turn_with ~base_path ~tool:(masc_probe_tool (ref `Null)) () in
+    check bool "failed native turn remains failed" true (Result.is_error run.outcome.result);
+    check bool "non-success aggregate does not request answer history" false
+      (Sys.file_exists (Filename.concat base_path "view-pages.log"));
+    match run.reports with
+    | [report] ->
+      check string "hidden latest model prevents attribution to observed A" runtime_id report.model;
+      check bool "explicit aggregate is still the turn total" true
+        (report.usage_scope = Runtime_usage_scope.Turn_total);
+      (match report.count with
+       | Running_count usage ->
+         check int "explicit provider input aggregate retained" 10 usage.input_tokens;
+         check int "explicit provider output aggregate retained" 2 usage.output_tokens
+       | Count_replaced -> fail "explicit aggregate unexpectedly replaced")
+    | _ -> fail "expected one explicit aggregate for the failed turn")
+;;
+
 let test_text_only_session_does_not_require_session_mcp () =
   with_scripted_host ~fixture:(scenario "text_only") (fun ~base_path ->
     let tool = masc_probe_tool (ref `Null) in
@@ -3528,6 +3557,8 @@ let () =
             test_usage_report_after_an_unnamed_call_is_not_the_earlier_model
         ; test_case "a turn is named after its last reported call" `Quick
             test_turn_is_named_after_its_last_reported_call
+        ; test_case "failed aggregate cannot claim a live model after a gap" `Quick
+            test_failed_aggregate_does_not_claim_live_model_after_gap
         ] )
     ; ( "errors"
       , [ test_case "callback failure keeps persistence cause" `Quick test_persistence_cause_survives_callback_protocol_projection

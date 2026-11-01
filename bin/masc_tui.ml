@@ -19207,12 +19207,18 @@ let handle_paste ?(protect_recovered = false) state ~base_path ~mailbox
            || state.msg_attachments <> [] || state.msg_references <> [])
     then
       protect_recovered_paste_for_current_keeper state;
-    (match
-       Masc_tui_paste_spill.of_paste ~now_iso:(spill_stamp ())
-         ~nonce:(spill_nonce ()) text
-     with
-     | None -> Masc_tui_message_input.insert state.msg_input text
-     | Some spill ->
+    (match state.msg_spill with
+     | Some _ ->
+         (* The draft still owns its first spill. Keep later paste bytes in
+            the editable input rather than replacing that original source. *)
+         Masc_tui_message_input.insert state.msg_input text
+     | None ->
+       match
+         Masc_tui_paste_spill.of_paste ~now_iso:(spill_stamp ())
+           ~nonce:(spill_nonce ()) text
+       with
+       | None -> Masc_tui_message_input.insert state.msg_input text
+       | Some spill ->
          (* One line in the draft, the text kept beside it. The composer is
             five rows: a four-hundred-line paste in it is a draft the operator
             cannot read, and a draft they cannot read is a message they cannot

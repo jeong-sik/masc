@@ -2264,7 +2264,8 @@ rejected values and validation-count deltas; their execution evidence belongs to
 the layer PR. This prepares the stable posts source owner without changing any
 writer protocol, source authority, guard, receipt or client behavior.
 
-The posts writer foundation replaces `posts_load_result` with one closed source
+The posts writer foundation [#47224](https://github.com/jeong-sik/masc/pull/47224)
+replaces `posts_load_result` with one closed source
 state and a private `Board_posts_source` owner. A new store is unobserved; posts
 persistence requires an explicit stable load that publishes the matching model.
 Complete and rejected-row observations retain the captured path, bytes and cursor.

@@ -152,6 +152,63 @@ let test_two_missing_observations workspace =
   Alcotest.(check string) "reloaded authority admitted the next post"
     next.body (current fresh next).body
 
+let with_dangling_posts store test =
+  let path = Board.persist_path store in
+  let target = Filename.concat (Filename.dirname path) "absent-posts-target.jsonl" in
+  Unix.symlink target path;
+  let binding = Unix.lstat path in
+  Fun.protect
+    ~finally:(fun () ->
+      match Unix.lstat path with
+      | { Unix.st_kind = Unix.S_LNK; _ } -> Unix.unlink path
+      | _ -> ()
+      | exception Unix.Unix_error (Unix.ENOENT, _, _) -> ())
+    (fun () -> test ~path ~target ~binding)
+
+let check_dangling_posts ~path ~target ~binding =
+  let current = Unix.lstat path in
+  Alcotest.(check bool) "actual dangling source remains a symlink" true
+    (current.Unix.st_kind = Unix.S_LNK);
+  Alcotest.(check (pair int int)) "source link identity is preserved"
+    (binding.Unix.st_dev, binding.Unix.st_ino) (current.Unix.st_dev, current.Unix.st_ino);
+  Alcotest.(check string) "source link target is preserved" target (Unix.readlink path);
+  (match Unix.lstat target with
+   | _ -> Alcotest.fail "the absent external target gained a directory entry"
+   | exception Unix.Unix_error (Unix.ENOENT, _, _) -> ());
+  Alcotest.(check bool) "no rewrite stage remains" false
+    (Sys.readdir (Filename.dirname path) |> Array.exists (fun name ->
+       String.starts_with ~prefix:".private_jsonl_" name))
+
+let test_missing_then_dangling_source workspace =
+  let store = make_store workspace in
+  load_posts store 0;
+  with_dangling_posts store (fun ~path ~target ~binding ->
+    require_pre_effect (create store "must not replace an existing dangling source");
+    check_dangling_posts ~path ~target ~binding;
+    Alcotest.(check int) "refused source published no in-memory post" 0
+      (List.length (Board.list_posts store ()));
+    (* A proven nonwrite retains the original Missing expectation. A later
+       retry still uses that actual snapshot; it never adopts the alias. *)
+    Unix.unlink path;
+    let post = require_post (create store "retry after actual alias removal") in
+    check_observed_bytes store;
+    let fresh = reloaded workspace 1 in
+    Alcotest.(check string) "only the later explicit publication survives"
+      post.body (current fresh post).body)
+
+let test_initial_dangling_source workspace =
+  let store = make_store workspace in
+  Fs_compat.mkdir_p workspace;
+  with_dangling_posts store (fun ~path ~target ~binding ->
+    refuse_load store;
+    (match store.Board.posts_source with
+     | Board.Posts_refused {
+         failure = Posts_transaction_failed
+           (Fs_compat.Unexpected_transaction_file_kind Unix.S_LNK); _ } -> ()
+     | _ -> Alcotest.fail "dangling source did not retain its actual typed refusal");
+    require_pre_effect (create store "an existing alias is not initial absence");
+    check_dangling_posts ~path ~target ~binding)
+
 let tamper_same_cursor store (post : Board.post) =
   let path = Board.persist_path store in
   let before = read_bytes path in
@@ -731,6 +788,8 @@ let () =
     ; "source admission",
         [ case "explicit posts load precedes publication" test_explicit_load_before_create
         ; case "two Missing observations cannot auto-adopt" test_two_missing_observations
+        ; case "Missing cannot replace a later dangling source" test_missing_then_dangling_source
+        ; case "initial dangling source is never Missing" test_initial_dangling_source
         ; case "same inode and length still require exact bytes" test_same_cursor_changed_bytes
         ; case "append also compares same-cursor source bytes" test_same_cursor_append_refused
         ; case "partial then Missing never grants empty authority" test_partial_then_missing

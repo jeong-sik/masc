@@ -3718,6 +3718,27 @@ let private_jsonl_cursor_of_stats stats =
          })
 ;;
 
+module Private_jsonl_absence = struct
+  type error =
+    | Binding_refused of private_jsonl_transaction_error
+    | Operation_failed of private_jsonl_operation_failure
+
+  (* An existing-file open can return ENOENT for a dangling leaf symlink.
+     Only actual leaf absence can support the caller's Missing observation. *)
+  let check path =
+    match private_jsonl_capture Inspect_transaction_path (fun () ->
+      match Unix.lstat path with
+      | stats -> Some stats
+      | exception Unix.Unix_error (Unix.ENOENT, _, _) -> None) with
+    | Error failure -> Error (Operation_failed failure)
+    | Ok None -> Ok ()
+    | Ok (Some stats) ->
+      let error = if stats.Unix.st_kind <> Unix.S_REG
+        then Unexpected_transaction_file_kind stats.Unix.st_kind
+        else Transaction_path_binding_changed { path } in
+      Error (Binding_refused error)
+end
+
 let private_jsonl_open_existing ~close_fd path flags =
   (* The type check below needs an opened descriptor. Without O_NONBLOCK,
      opening a FIFO for reading can wait forever before we can reject it. *)
@@ -3735,7 +3756,12 @@ let private_jsonl_open_existing ~close_fd path flags =
         | Ok () -> Error error
         | Error cleanup_failure ->
           Error (private_jsonl_add_cleanup_failure error cleanup_failure)))
-  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok None
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
+    (match Private_jsonl_absence.check path with
+     | Ok () -> Ok None
+     | Error (Private_jsonl_absence.Binding_refused error) -> Error error
+     | Error (Private_jsonl_absence.Operation_failed failure) ->
+       Error (Private_jsonl_operation_failed failure))
   | exception (Eio.Cancel.Cancelled _ as cancellation) -> raise cancellation
   | exception exception_ ->
     Error
@@ -4677,17 +4703,12 @@ end
 let fold_private_jsonl_unique_regular_locked_with_io ~io path ~init ~f =
   let open Private_jsonl_unique_fold in
   let on_missing () =
-    match private_jsonl_capture Inspect_transaction_path (fun () ->
-      match Unix.lstat path with
-      | stats -> Some stats
-      | exception Unix.Unix_error (Unix.ENOENT, _, _) -> None) with
-    | Error failure -> Error (Operation_failed failure)
-    | Ok None -> Ok (Ok Private_jsonl_fold.Missing)
-    | Ok (Some stats) ->
-      let error = if stats.Unix.st_kind <> Unix.S_REG
-        then Unexpected_transaction_file_kind stats.Unix.st_kind
-        else Transaction_path_binding_changed { path } in
+    match Private_jsonl_absence.check path with
+    | Ok () -> Ok (Ok Private_jsonl_fold.Missing)
+    | Error (Private_jsonl_absence.Binding_refused error) ->
       Ok (Error (Binding_refused error))
+    | Error (Private_jsonl_absence.Operation_failed failure) ->
+      Error (Operation_failed failure)
   in
   read_private_jsonl_locked_with_errors ~io ~on_missing
     ~non_regular:(fun kind -> Non_regular_file kind)

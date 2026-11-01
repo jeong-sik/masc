@@ -903,7 +903,7 @@ let queue_panel_detail_viewport state panel =
   let terminal_rows, cols = get_terminal_size () in
   let count = List.length (queue_panel_detail_lines state panel ~cols) in
   let budget = surface_chrome_budget state ~terminal_rows in
-  let height = if count > budget then max 0 (budget - 1) else budget in
+  let height = queue_panel_window_height ~count ~budget in
   count, height
 
 let queue_panel_layout state (panel : queue_panel) =
@@ -929,8 +929,8 @@ let queue_panel_viewport state panel =
     if Option.is_some panel.qp_detail then queue_panel_detail_viewport state panel
     else
       let items = queue_panel_items state panel in
-      List.length items, max 0 (queue_panel_list_budget state panel
-        - queue_panel_fixed_rows ~items panel) in
+      List.length items,
+        queue_panel_list_height ~items ~budget:(queue_panel_list_budget state panel) panel in
   {qv_placement; qv_content_rows; qv_document_rows}
 
 let render_queue_panel (state : state) (panel : queue_panel) =
@@ -949,11 +949,11 @@ let render_queue_panel (state : state) (panel : queue_panel) =
       ~hints:(Masc_tui_keys.footer_hints_queue state panel)
       ~body:(fun ~budget c ->
         let count = List.length lines in
-        let height = if count > budget then max 0 (budget - 1) else budget in
+        let height = queue_panel_window_height ~count ~budget in
         let scroll = Masc_tui_scroll.normalize ~count ~height panel.qp_detail_scroll in
         List.iteri (fun index line ->
           if index >= scroll && index < scroll + height then c.push ("  " ^ line)) lines;
-        Option.iter c.push (overlay_window_row ~scroll ~height count))
+        if budget > 0 then Option.iter c.push (overlay_window_row ~scroll ~height count))
   else
   let placement = queue_panel_layout state panel in
   let context_caption =
@@ -1023,7 +1023,7 @@ let render_queue_panel (state : state) (panel : queue_panel) =
       (match queue_panel_selection_note ~items panel with
        | Some note when budget > note_row -> c.push ("  " ^ note)
        | Some _ | None -> ());
-      let height = max 0 (budget - queue_panel_fixed_rows ~items panel) in
+      let height = queue_panel_list_height ~items ~budget panel in
       let scroll = queue_panel_scroll ~items ~height panel in
       let selected_index = queue_panel_selected_index ~items panel in
       List.iteri (fun index (item : Masc_tui_queue_inspection.item) ->
@@ -1046,7 +1046,9 @@ let render_queue_panel (state : state) (panel : queue_panel) =
               | None -> row
             else row in
           c.push row
-        end) items) in
+        end) items;
+      if budget > queue_panel_fixed_rows ~items panel then
+        Option.iter c.push (overlay_window_row ~scroll ~height (List.length items))) in
   (* Shared chrome has three leading rows and two trailing rows. Its body
      copies as separate documents, even though the terminal writes one row. *)
   frame_panes := Masc_tui_queue_layout.panes placement ~cols

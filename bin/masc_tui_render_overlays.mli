@@ -96,7 +96,8 @@ val queue_panel_list_budget : Masc_tui_types.state -> Masc_tui_types.queue_panel
 
 val queue_panel_viewport : Masc_tui_types.state -> Masc_tui_types.queue_panel -> Masc_tui_types.queue_panel_viewport
 (** The placement, actual content height and document length shared by drawing
-    and input admission, including current receipt and selected-action rows. *)
+    and input admission, including current receipt, selected-action rows and
+    the overflow position row. A body without item space has zero content rows. *)
 
 val queue_panel_detail_viewport : Masc_tui_types.state -> Masc_tui_types.queue_panel -> int * int
 

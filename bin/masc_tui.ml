@@ -10687,7 +10687,8 @@ let handle_queue_panel_key state ~base_path ~mailbox ~presented_presses (panel :
     update (queue_panel_move ~items:rows ~budget ~direction) in
   let selected () = queue_panel_selected_id ~items:(items ()) panel in
   let act command =
-    if Masc_tui_render_overlays.queue_panel_list_budget state panel <= queue_panel_fixed_rows ~items:(items ()) panel then ()
+    if queue_panel_list_height ~items:(items ())
+        ~budget:(Masc_tui_render_overlays.queue_panel_list_budget state panel) panel = 0 then ()
     else if panel.qp_reading = Queue_loading then notice "Wait for the current queue request"
     else if panel.qp_reading <> Queue_current || not (server_authority_ready state) then
       notice ~failure:true "Queue observation is unavailable; refresh before changing it"
@@ -10757,17 +10758,17 @@ let handle_queue_panel_key state ~base_path ~mailbox ~presented_presses (panel :
     let rows = items () in
     let count = List.length rows in
     update (fun panel ->
-      let old_height = max 0 (budget - queue_panel_fixed_rows ~items:rows panel) in
+      let old_height = queue_panel_list_height ~items:rows ~budget panel in
       let old_scroll = queue_panel_scroll ~items:rows ~height:old_height panel in
       let panel = {panel with qp_selected=None} in
       let budget = Masc_tui_render_overlays.queue_panel_list_budget state panel in
-      let height = max 1 (budget - queue_panel_fixed_rows ~items:rows panel) in
+      let height = queue_panel_list_height ~items:rows ~budget panel in
       let scroll = (match key with
         | "pageup" ->
-          Masc_tui_scroll.page_up ~count ~height:(max 1 old_height) old_scroll
+          Masc_tui_scroll.page_up ~count ~height:old_height old_scroll
           |> Masc_tui_scroll.normalize ~count ~height
         | "pagedown" ->
-          Masc_tui_scroll.page_down ~count ~height:(max 1 old_height) old_scroll
+          Masc_tui_scroll.page_down ~count ~height:old_height old_scroll
           |> Masc_tui_scroll.normalize ~count ~height
         | "home" -> 0
         | "end" -> Masc_tui_scroll.maximum ~count ~height

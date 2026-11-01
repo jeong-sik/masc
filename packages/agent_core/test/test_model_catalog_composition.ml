@@ -90,6 +90,26 @@ let test_json_selected_and_raw_agree () = with_catalog (fun catalog ->
     Alcotest.(check bool) "original catalog remains immutable" true
       ((row catalog "catalog-model").max_context_tokens=None)))
 
+let test_composed_policy_reaches_request_body () = with_catalog (fun catalog ->
+  let composed=Model_catalog.with_model_overrides catalog (overrides
+    [declaration "catalog-model" ~extra:["base",`String "openai_chat";
+      "max_output_tokens",`Int 17;"supports_reasoning",`Bool true;
+      "thinking_control_format",`String "reasoning_effort";
+      "accepted_reasoning_efforts",`List [`String "high"]]]) in
+  with_catalog_value composed (fun () ->
+    let selected=selected_config composed in
+    List.iter (fun config ->
+      let config={config with Provider_config.max_tokens=Some 64;
+        reasoning_effort=Some Reasoning_effort.High} in
+      let body=Backend_openai_request.build_request_assoc ~config
+        ~messages:[Types.user_msg "return an answer"] () in
+      let open Yojson.Safe.Util in
+      Alcotest.(check int) "composed output ceiling reaches serialized request"
+        17 (body |> member "max_tokens" |> to_int);
+      Alcotest.(check string) "composed reasoning dialect reaches serialized request"
+        "high" (body |> member "reasoning_effort" |> to_string))
+      [selected;raw_config ();{selected with Provider_config.base_url="https://rotated.invalid"}]))
+
 let test_preserve_exact_metadata () =
   let source = catalog_source ^ {|
 suggested_clients = ["codex"]
@@ -212,6 +232,7 @@ let () = Alcotest.run "Model catalog composition"
       (test_catalog_allowlist (fun catalog -> resolved (selected_config catalog)));
     Alcotest.test_case "selected and raw bare-row bases agree" `Quick test_bare_row_has_one_base
     ; Alcotest.test_case "composed JSON agrees across request paths" `Quick test_json_selected_and_raw_agree
+    ; Alcotest.test_case "composed policy reaches serialized request" `Quick test_composed_policy_reaches_request_body
     ; Alcotest.test_case "exact metadata and unknown prices survive composition" `Quick test_preserve_exact_metadata
     ; Alcotest.test_case "scoped shadowing and provider isolation survive composition" `Quick test_scoped_shadow_and_provider_isolation
     ; Alcotest.test_case "selected and frozen policies survive recomposition" `Quick test_frozen_selection_and_endpoint

@@ -1758,7 +1758,7 @@ let test_explicit_composition_retains_other_models () =
   let m = make_manifest "totally-other-model" in
   match catalog_capabilities (Model_catalog.with_model_overrides (current_catalog ()) m) "claude-opus-5-5" with
   | Some c ->
-    check (option int) "fallback ctx 1M" (Some 1_000_000) c.max_context_tokens
+    check (option int) "unmodified model context 1M" (Some 1_000_000) c.max_context_tokens
   | None -> fail "should fall through to model catalog"
 ;;
 
@@ -1812,11 +1812,11 @@ let test_manifest_unknown_model_still_none () =
     (catalog_capabilities (Model_catalog.with_model_overrides (current_catalog ()) m) "totally-unknown-xyz" = None)
 ;;
 
-let test_malformed_model_id_does_not_fallback_to_manifest () =
+let test_malformed_model_id_is_rejected_before_composition_lookup () =
   let m = make_manifest "claude-opus-5-5" in
   check
     bool
-    "malformed id is refused before manifest fallback"
+    "malformed id is refused before catalog lookup"
     true
     (catalog_capabilities (Model_catalog.with_model_overrides (current_catalog ()) m) " claude-opus-5-5 " = None)
 ;;
@@ -1931,9 +1931,8 @@ let test_example_manifest_base_labels_are_canonical () =
       entries
 ;;
 
-let test_explicit_manifest_exact_model_precedes_catalog_fallback () =
-  (* Explicit manifest lookup lets callers test or apply a manifest before
-     consulting the global catalog fallback. *)
+let test_composed_exact_model_replaces_original_capabilities () =
+  (* The exact composed row supplies the replacement capabilities. *)
   let m =
     make_manifest
       ~base:"openai_chat"
@@ -3400,20 +3399,20 @@ let () =
     ; "merge", [ test_case "with_context_size" `Quick test_with_context_size ]
     ; ( "manifest"
       , [ test_case
-            "explicit manifest precedes catalog fallback"
+            "explicit composition replaces exact model"
             `Quick
             test_explicit_composition_replaces_exact_model
         ; test_case
-            "explicit manifest falls back to catalog"
+            "composition retains unrelated catalog rows"
             `Quick
             test_explicit_composition_retains_other_models
         ; test_case "exact model identity and order" `Quick test_manifest_exact_identity_and_order
         ; test_case "explicit v2 model identity" `Quick test_manifest_requires_explicit_v2_model_identity
         ; test_case "unknown model → None" `Quick test_manifest_unknown_model_still_none
         ; test_case
-            "malformed model id does not fall back to manifest"
+            "malformed model identity is refused"
             `Quick
-            test_malformed_model_id_does_not_fallback_to_manifest
+            test_malformed_model_id_is_rejected_before_composition_lookup
         ; test_case "base openai_chat" `Quick test_manifest_base_label_openai_chat
         ; test_case "base anthropic" `Quick test_manifest_base_label_anthropic
         ; test_case "base absent = default" `Quick test_manifest_base_absent_uses_default
@@ -3430,11 +3429,11 @@ let () =
             `Quick
             test_example_manifest_base_labels_are_canonical
         ; test_case
-            "explicit exact manifest precedes catalog fallback"
+            "exact composed declaration replaces original capabilities"
             `Quick
-            test_explicit_manifest_exact_model_precedes_catalog_fallback
+            test_composed_exact_model_replaces_original_capabilities
         ; test_case
-            "global catalog precedes global manifest"
+            "single composed catalog owns exact capability fields"
             `Quick
             test_composed_catalog_replaces_exact_capability_row
         ; test_case

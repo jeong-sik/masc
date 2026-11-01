@@ -513,26 +513,34 @@ let record_human_confirmation config ~goal_id verdict ~operator_id =
     | Completion_idle | Proof_pending _ | Proof_proven _ | Proof_refuted _ | Human_confirmed _ ->
         Error "human confirmation does not match the current proven request")
 
+type review_binding_error =
+  | No_current_review of string
+  | Binding_unavailable of string
+
+let review_binding_error_to_string = function
+  | No_current_review detail | Binding_unavailable detail -> detail
+
 let bind_review config ~goal_id =
-  Result.map_error Goal_store.write_error_to_string @@
-  Goal_store.transact_goal config ~goal_id (fun goal ->
-    match goal.Goal_store.phase with
-    | Goal_phase.Awaiting_confirmation | Goal_phase.Executing | Goal_phase.Completed | Goal_phase.Dropped
-    | Goal_phase.Paused _ | Goal_phase.Blocked _ ->
-      Error "goal is not awaiting verification"
-    | Goal_phase.Verifying ->
-      Result.bind (get_record_authoritative config ~goal_id)
-        (function
-          | Some { completion = Proof_pending pending; submitted_evidence; _ }
-            when Goal_store.criterion_equal pending.criterion (Goal_store.criterion_of_goal goal) ->
-            Ok (goal, (pending.request_id, pending.criterion, submitted_evidence))
-          | Some
-              { completion =
-                  ( Completion_idle
-                  | Proof_pending _
-                  | Proof_proven _
-                  | Proof_refuted _
-                  | Human_confirmed _ )
-              ; _
-              }
-          | None -> Error "goal has no pending proof for its current criterion"))
+  match Goal_store.transact_goal config ~goal_id (fun goal ->
+    let binding = match goal.Goal_store.phase with
+      | Goal_phase.Awaiting_confirmation | Goal_phase.Executing | Goal_phase.Completed | Goal_phase.Dropped
+      | Goal_phase.Paused _ | Goal_phase.Blocked _ ->
+        Error (No_current_review "goal is not awaiting verification")
+      | Goal_phase.Verifying ->
+        (match get_record_authoritative config ~goal_id with
+         | Error detail -> Error (Binding_unavailable detail)
+         | Ok (Some { completion = Proof_pending pending; submitted_evidence; _ })
+           when Goal_store.criterion_equal pending.criterion (Goal_store.criterion_of_goal goal) ->
+           Ok (pending.request_id, pending.criterion, submitted_evidence)
+         | Ok (Some { completion =
+                  ( Completion_idle | Proof_pending _ | Proof_proven _
+                  | Proof_refuted _ | Human_confirmed _ ); _ }
+              | None) ->
+           Error (No_current_review "goal has no pending proof for its current criterion")) in
+    Ok (goal, binding)) with
+  | Ok (goal, Ok binding) -> Ok (goal, binding)
+  | Ok (_, Error error) -> Error error
+  | Error (Goal_store.Goal_not_found _ as error) ->
+    Error (No_current_review (Goal_store.write_error_to_string error))
+  | Error (Goal_store.Store_unavailable _ | Rejected _ | Persist_failed _ as error) ->
+    Error (Binding_unavailable (Goal_store.write_error_to_string error))

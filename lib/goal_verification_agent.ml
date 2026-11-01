@@ -344,7 +344,9 @@ let announce_deferral ~goal_id ~request_id ~disposition deferral =
 
 (* Capture the Goal and its durable request under the Goal lock. The callback
    performs no writes; the model runs only after this lock is released. *)
-let bind_review = Goal_verification.bind_review
+let bind_review config ~goal_id =
+  Goal_verification.bind_review config ~goal_id
+  |> Result.map_error Goal_verification.review_binding_error_to_string
 ;;
 
 let original_read_binding config ~goal_id =
@@ -772,13 +774,24 @@ let schedule_retry (runtime : runtime) ~goal_id ~request_id deferral =
           ~retry_interval_sec:Env_config.Timeouts.maintenance_pulse_interval_sec
           ~now:(Eio.Time.now runtime.clock) runtimes in
       Eio.Fiber.fork_daemon ~sw:runtime.sw (fun () ->
-        Eio.Time.sleep runtime.clock seconds;
-        if remove_retry runtime key then (
-          match bind_review runtime.config ~goal_id with
-          | Ok (_, (current, _, _)) when String.equal current request_id ->
-            retain_active_wake runtime ~goal_id;
-            request_scan runtime
-          | Ok _ | Error _ -> ());
+        let rec reread_after delay =
+          Eio.Time.sleep runtime.clock delay;
+          if List.mem key (Atomic.get runtime.retries) then
+            match Goal_verification.bind_review runtime.config ~goal_id with
+            | Ok (_, (current, _, _)) when String.equal current request_id ->
+              if remove_retry runtime key then (
+                retain_active_wake runtime ~goal_id;
+                request_scan runtime)
+            | Ok _ | Error (Goal_verification.No_current_review _) ->
+              ignore (remove_retry runtime key)
+            | Error (Goal_verification.Binding_unavailable detail) ->
+              Log.Misc.warn
+                "goal verifier retry binding unavailable goal_id=%s request_id=%s; retaining retry: %s"
+                goal_id request_id detail;
+              if List.mem key (Atomic.get runtime.retries) then
+                reread_after Env_config.Timeouts.maintenance_pulse_interval_sec
+        in
+        reread_after seconds;
         `Stop_daemon);
       Verification_protocol.Retry_scheduled {delay=Full_interval {seconds}})
   | Not_reviewed _ | Review_not_bound _ | Proof_lookup_unavailable _

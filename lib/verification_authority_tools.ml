@@ -852,7 +852,8 @@ type goal_review = {
 let create_goal_review ~config ~goal_id =
   let open Result.Syntax in
     let* goal, (request_id, criterion, submitted_evidence) =
-      Goal_verification.bind_review config ~goal_id in
+      Goal_verification.bind_review config ~goal_id
+      |> Result.map_error Goal_verification.review_binding_error_to_string in
     let subject = {goal_id; request_id; criterion} in
     let goal_measurement = Goal_measurement.latest_for_goal
       (Goal_measurement.load config) goal in

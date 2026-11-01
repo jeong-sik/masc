@@ -152,8 +152,18 @@ val validate_state_json : Yojson.Safe.t -> (unit, string) result
 val record_human_confirmation : Workspace_utils.config -> goal_id:string -> verdict -> operator_id:string -> (record, string) result
 (** Caller holds the Goal transaction and supplies token-bound operator identity. *)
 
+type review_binding_error =
+  | No_current_review of string
+      (** An authoritative read found no matching, currently Verifying proof
+          request (including a missing Goal). An old retry can be retired. *)
+  | Binding_unavailable of string
+      (** Goal/proof authority could not be read. This does not establish that
+          the request ended and must not consume its existing retry. *)
+
+val review_binding_error_to_string : review_binding_error -> string
+
 val bind_review : Workspace_utils.config -> goal_id:string ->
-  (Goal_store.goal * (string * Goal_store.criterion * Workspace_verification_store.submitted_evidence_item list), string) result
+  (Goal_store.goal * (string * Goal_store.criterion * Workspace_verification_store.submitted_evidence_item list), review_binding_error) result
 (** Admit a verifier against the complete current lifecycle and exact pending
     proof under the Goal lock. Suspended Goals admit no new work. A binding
     acquired before suspension may still commit its exact ledger result. *)

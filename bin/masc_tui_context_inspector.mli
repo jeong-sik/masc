@@ -412,6 +412,9 @@ val input_map_rows :
     prompt block; it does not authorize an item-level join by itself. *)
 val exact_input_items : provider_input -> exact_input_item list
 val format_bytes : int -> string
+(** Exact byte count with separators, for surfaces that promise exact
+    sizes; [format_bytes] keeps its rounded storage form. *)
+val exact_bytes : int -> string
 val format_tokens : int -> string
 
 val client_context_tokens :

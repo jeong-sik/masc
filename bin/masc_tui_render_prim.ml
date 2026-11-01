@@ -4679,7 +4679,7 @@ let context_exact_item_detail_lines ~width ~scale ~part
   ; Ansi.bold ^ Inspector.exact_input_label item.kind ^ Ansi.reset
   ; Printf.sprintf "%s tok (%s)  ·  sha256 %s"
       (Masc_tui_token_scale.format_estimate scale item.bytes)
-      (Inspector.format_bytes item.bytes)
+      (Inspector.exact_bytes item.bytes)
       (String.sub item.sha256 0 12)
   ; ""
   ; Ansi.dim ^ Masc_tui_token_scale.note scale ^ Ansi.reset
@@ -4776,7 +4776,7 @@ let context_exact_input_summary ~width ~scale
           label Ansi.reset Ansi.dim count
           (if count = 1 then "item " else "items")
           Ansi.reset
-          (Masc_tui_context_inspector.format_bytes bytes)
+          (Masc_tui_context_inspector.exact_bytes bytes)
           (Masc_tui_context_inspector.format_tokens
              (Masc_tui_token_scale.estimate scale bytes))
           share_text)
@@ -4788,7 +4788,7 @@ let context_exact_input_summary ~width ~scale
             (Printf.sprintf "%s, %s tok (%s) retained"
                (Masc_tui_message_layout.count_noun (List.length items) "item")
                (Masc_tui_token_scale.format_estimate scale total)
-               (Masc_tui_context_inspector.format_bytes total))
+               (Masc_tui_context_inspector.exact_bytes total))
     ]
     @ bar @ rows
   , total )
@@ -4936,7 +4936,7 @@ let context_exact_input_lines ~cols ~scale state ~response ~response_parts
         Printf.sprintf "  Prepared request  %s · %s · %s tok (%s) · %s"
           input.wire.provider input.wire.model
           (Masc_tui_token_scale.format_estimate scale input.wire.body_bytes)
-          (Inspector.format_bytes input.wire.body_bytes)
+          (Inspector.exact_bytes input.wire.body_bytes)
           (String.sub input.wire.body_sha256 0 12)
       in
       let summary, retained =

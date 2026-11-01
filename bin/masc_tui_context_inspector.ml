@@ -637,6 +637,18 @@ let format_bytes bytes =
   else if bytes >= 1024 then Printf.sprintf "%.1f KB" (float bytes /. 1024.)
   else Printf.sprintf "%d B" bytes
 
+(* Exact byte counts with thin separators: the context diagnostics promise
+   exact sizes, and two sizes that round to the same KB must stay distinct. *)
+let exact_bytes bytes =
+  let digits = string_of_int (max 0 bytes) in
+  let grouped =
+    String.concat ","
+      (List.rev (let rec parts acc s =
+        if String.length s <= 3 then (if s = "" then acc else s :: acc)
+        else parts (String.sub s (String.length s - 3) 3 :: acc)
+          (String.sub s 0 (String.length s - 3)) in parts [] digits)) in
+  grouped ^ " B"
+
 let input_source = function
   | Turn_record.Prompt_block _ -> Turn_prompt_assembly
   | Turn_record.Tool_schemas -> Effective_tool_surface

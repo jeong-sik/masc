@@ -116,6 +116,51 @@ let test_execution_error_cause () =
   check_cases "execution error cause" EO.execution_error_cause_to_string cases
 ;;
 
+let test_execution_error_does_not_render_provider_strings () =
+  let private_value = "private payload\nforged line" in
+  let failure kind = Http.ProviderFailure { kind; message = private_value } in
+  let cases : (Http.http_error * string) list =
+    [ ( failure
+          (Http.Capacity_exhausted
+             { scope = Http.Failure_scope_model; retry_after = None; model = Some private_value })
+      , "capacity_exhausted:model" )
+    ; failure (Http.Hard_quota { retry_after = None }), "hard_quota"
+    ; failure (Http.Capability_mismatch { capability = Some private_value }), "capability_mismatch"
+    ; ( failure (Http.Cli_policy_invalid { tool_name = Some private_value; rule = Some 7 })
+      , "cli_policy_invalid:rule_7" )
+    ; ( failure (Http.Cli_policy_invalid { tool_name = Some private_value; rule = None })
+      , "cli_policy_invalid" )
+    ; ( failure (Http.Cli_startup_failed { reason = Http.Executable_unavailable })
+      , "cli_startup_failed:executable_unavailable" )
+    ; failure (Http.Provider_parse_error { parser = Some private_value }), "provider_parse_error"
+    ; ( failure (Http.Provider_wire_error { format = Http.Sse; kind = Http.Malformed_payload })
+      , "provider_wire_error:sse:malformed_payload" )
+    ; ( failure (Http.Provider_reported_error { error_type = Some private_value })
+      , "provider_reported_error" )
+    ; failure Http.Provider_interrupted, "provider_interrupted"
+    ; failure (Http.Response_body_too_large { limit_bytes = 1024 }), "response_body_too_large:1024"
+    ; ( failure (Http.Empty_completion { stop_reason = Llm_provider.Types.Unknown private_value })
+      , "empty_completion:unknown" )
+    ; ( failure (Http.Empty_completion { stop_reason = Llm_provider.Types.EndTurn })
+      , "empty_completion:end_turn" )
+    ; failure (Http.Context_overflow { limit = Some 4096 }), "context_overflow:limit_4096"
+    ; ( failure (Http.Unknown_provider_failure { reason = Some private_value })
+      , "unknown_provider_failure" )
+    ; ( Http.ProviderTerminal { kind = Http.Other private_value; message = private_value }
+      , "provider_terminal:other" )
+    ]
+  in
+  List.iter
+    (fun (error, kind) ->
+       check
+         string
+         kind
+         (Printf.sprintf "completion failed (%s, sent)" kind)
+         (EO.execution_error_cause_to_string
+            (EO.Completion_failed { error; dispatch = EO.Generation_dispatch_started })))
+    cases
+;;
+
 let test_start_errors () =
   check
     string
@@ -142,6 +187,10 @@ let () =
             `Quick
             test_candidate_rejection_disposition
         ; test_case "execution error cause" `Quick test_execution_error_cause
+        ; test_case
+            "execution errors omit provider strings"
+            `Quick
+            test_execution_error_does_not_render_provider_strings
         ; test_case "start errors" `Quick test_start_errors
         ] )
     ]

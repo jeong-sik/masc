@@ -914,10 +914,12 @@ val flow_execution_binding_standing
     exhaustively, so a new constructor is a compile error in AGENT_CORE rather
     than a payload a consumer drops behind [_]. Numeric fields (token counts,
     unix seconds, HTTP status) are always printed: they are what separates a
-    local capacity refusal from a provider failure. Transport errors are
-    rendered by their typed kind, never by their message, because a message
-    can echo request material. A raw provider body is rendered by the
-    caller-supplied [raw_response_to_string]: {!raw_response_sha256_to_string}
+    local capacity refusal from a provider failure. Execution-failure
+    transport errors are rendered by their typed kind, never by their message
+    or free-form string fields in the kind, because those can echo request
+    material. Known stop-reason labels and numeric diagnostic fields are
+    retained. A raw provider body is rendered by the caller-supplied
+    [raw_response_to_string]: {!raw_response_sha256_to_string}
     prints only its sha256, and a consumer that owns a redactor may print a
     redacted excerpt instead. *)
 

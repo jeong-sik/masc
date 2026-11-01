@@ -293,6 +293,34 @@ let test_a_rate_limit_is_not_final_and_is_sent_again () =
     check bool "the next trigger sends again and answers" true (answered_by (run_request ~base_path ~store "a5") <> None);
     check int "two calls" 2 (F.post_count server))
 
+let test_provider_error_type_is_not_exposed_in_the_refusal_detail () =
+  with_case (fun ~sw ~net ~clock ~base_path ~store ->
+    let credential = "sk-fixtureCredentialForExactOutput" in
+    let body =
+      Yojson.Safe.to_string
+        (`Assoc
+           [ "error", `Assoc [ "message", `String "provider error"; "type", `String credential ] ])
+    in
+    let server = F.start_server ~sw ~net ~clock (F.Reply body) in
+    publish ~base_path [ { F.id = "only"; base_url = server.base_url } ];
+    (match run_request ~base_path ~store "provider-error-type" with
+     | Exact.Not_final (Exact.Provider_refused (Exact.Provider_unavailable { detail })) ->
+       check bool "the typed failure remains visible" true
+         (Astring.String.is_infix ~affix:"provider_reported_error" detail);
+       check bool "the provider's credential-shaped type is absent" false
+         (Astring.String.is_infix ~affix:credential detail)
+     | Exact.Final _ | Exact.Not_final _ -> fail "expected the typed provider failure");
+    let reopened = Lane_addon_store.create ~root:(Lane_addon_store.root store) in
+    (match Eio_unix.run_in_systhread (fun () ->
+       Exact.read_original_execution ~store:reopened ~declaration_id ~schema ~attempt_ordinal:1
+         (request "provider-error-type")) with
+     | Ok (Exact.Completed_original { outcome = Exact.Call_refused (Exact.Provider_unavailable { detail }); _ }) ->
+       check bool "reopened refusal detail does not contain the credential" false
+         (Astring.String.is_infix ~affix:credential detail)
+     | Ok (Exact.Completed_original _) | Ok Exact.No_completed_original | Error _ ->
+       fail "expected the retained provider failure");
+    check int "only the original request was sent" 1 (F.post_count server))
+
 let test_an_auth_refusal_is_not_final () =
   with_case (fun ~sw ~net ~clock ~base_path ~store ->
     let server =
@@ -960,6 +988,7 @@ let () =
         ; test_case "measured input rejection stays terminal" `Quick (test_original_capacity_evidence_keeps_its_retry_meaning Input_rejected)
         ; test_case "a refused input is final" `Quick test_a_refused_input_is_final
         ; test_case "a rate limit is not final and is sent again" `Quick test_a_rate_limit_is_not_final_and_is_sent_again
+        ; test_case "provider error type is not exposed" `Quick test_provider_error_type_is_not_exposed_in_the_refusal_detail
         ; test_case "an auth refusal is not final" `Quick test_an_auth_refusal_is_not_final
         ; test_case "a slot that may pass keeps the request open" `Quick test_a_slot_that_may_pass_keeps_the_request_open
         ; test_case "an unconfigured lane sends nothing" `Quick test_an_unconfigured_lane_sends_nothing

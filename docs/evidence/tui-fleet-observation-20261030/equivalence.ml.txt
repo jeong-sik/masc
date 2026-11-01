@@ -1,0 +1,68 @@
+module F = Masc.Fleet_stream
+module O = Old_client
+module N = New_client
+
+type trouble = Scan of F.degradation | Down of float
+type failure = Refused of int * string | Schema of int * int | Frame of string
+type state = Awaiting | Unreachable of float | Reading of int * float * F.fleet * F.degradation option * trouble option | Unavailable of F.degradation * float option | Cannot_read of failure
+let old_view = function
+  | O.Awaiting_first_reading -> Awaiting | O.Unreachable {since} -> Unreachable since
+  | O.Unavailable {degradation;disconnected_since} -> Unavailable (degradation,disconnected_since)
+  | O.Cannot_read (O.Refused {status;detail}) -> Cannot_read (Refused (status,detail))
+  | O.Cannot_read (O.Schema_mismatch {expected;received}) -> Cannot_read (Schema (expected,received))
+  | O.Cannot_read (O.Frame_rejected detail) -> Cannot_read (Frame detail)
+  | O.Reading {reading;trouble} ->
+    let trouble = Option.map (function O.Scans_failing d -> Scan d | O.Disconnected {since} -> Down since) trouble in
+    Reading (F.Revision.to_int reading.revision,reading.measured_at,reading.fleet,reading.degraded,trouble)
+let new_view = function
+  | N.Awaiting_first_reading -> Awaiting | N.Unreachable {since} -> Unreachable since
+  | N.Unavailable {degradation;disconnected_since} -> Unavailable (degradation,disconnected_since)
+  | N.Cannot_read (N.Refused {status;detail}) -> Cannot_read (Refused (status,detail))
+  | N.Cannot_read (N.Schema_mismatch {expected;received}) -> Cannot_read (Schema (expected,received))
+  | N.Cannot_read (N.Frame_rejected detail) -> Cannot_read (Frame detail)
+  | N.Reading {reading;trouble} ->
+    let trouble = Option.map (function N.Scans_failing d -> Scan d | N.Disconnected {since} -> Down since) trouble in
+    Reading (F.Revision.to_int reading.revision,reading.measured_at,reading.fleet,reading.degraded,trouble)
+let fleet running : F.fleet =
+  { fs_status=Keeper_fleet_grade.Fleet_ok; fs_blocker=None; fs_operator_action_required=false;
+    fs_bootable_count=0; fs_running_count=running; fs_executable_count=0; fs_failing_count=0;
+    fs_recovering_count=0; fs_turn_configuration_error_count=0; fs_official_client_recovery_required_count=0;
+    fs_paused_count=0; fs_target_reaction_capacity=0; fs_reaction_capacity_shortfall=0;
+    fs_bootable_names=F.Names.empty; fs_running_names=F.Names.empty; fs_executable_names=F.Names.empty;
+    fs_turn_configuration_error_names=F.Names.empty; fs_official_client_recovery_required_names=F.Names.empty;
+    fs_active_task_owner_without_fiber_count=0; fs_completion_authority_pending_count=0; fs_active_task_owner_scan_error_count=0 }
+let rev n = Option.get (F.Revision.of_int n)
+let events n =
+  let revision = rev n and measured_at = float_of_int n in
+  let degradation = {F.since=measured_at;reason=F.Scan_failed} in
+  [|F.Snapshot {revision;measured_at;fleet=fleet n;degraded=None};
+    F.Unavailable_snapshot {revision;degradation};
+    F.Changed {revision;measured_at;fleet=fleet n};
+    F.Degraded {revision;degradation}|]
+let frame e = Sse_wire.format_event_yojson ~id:(F.Revision.to_int (F.revision_of_event e)) (F.encode e)
+let () =
+ let rng=Random.State.make [|477;20261030|] in
+ let checked=ref 0 and chunks=ref 0 in
+ for sequence=1 to 2500 do
+  let old=O.create () and new_=N.create () in
+  for step=1 to 80 do
+   (match Random.State.int rng 10 with
+    | 0 -> O.started old; N.started new_
+    | 1 -> let now=float_of_int (Random.State.int rng 1000) in O.lost old ~now; N.lost new_ ~now
+    | 2 -> O.refused old ~status:401 ~detail:"blocked"; N.refused new_ ~status:401 ~detail:"blocked"
+    | mode ->
+      let data = if mode=3 then "data: not-json\n\n" else if mode=4 then ": keepalive\n\n" else
+        frame (events (1 + Random.State.int rng 6)).(Random.State.int rng 4) in
+      let data = if mode=5 && String.length data>1 then String.sub data 0 (String.length data/2)
+        else if mode=6 && String.length data>1 then String.sub data (String.length data/2) (String.length data-String.length data/2)
+        else data in
+      let before=O.feed old data and after=N.feed new_ data in
+      let expected=match before with O.Keep_reading -> true | O.Reconnect -> false in
+      let observed=match after with N.Keep_reading -> true | N.Reconnect -> false in
+      if expected<>observed then failwith (Printf.sprintf "step diverged sequence=%d step=%d" sequence step);
+      incr chunks);
+   if old_view (O.view old) <> new_view (N.view new_) then failwith (Printf.sprintf "state diverged sequence=%d step=%d" sequence step);
+   incr checked
+  done
+ done;
+ Printf.printf "lifecycle actions=%d; fed chunks=%d; equal\n%!" !checked !chunks

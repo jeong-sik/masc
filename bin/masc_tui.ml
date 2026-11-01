@@ -17317,7 +17317,7 @@ let apply_approval_decision_result state approval decision approvals result =
        in
        state.home_decision_receipt <- Some (request, receipt)
    | Some (Home_held_call _ | Home_gate_request _ | Home_operator_request _
-          | Home_question _ | Home_goal_confirmation _ | Home_operator_task _)
+          | Home_question _ | Home_goal_confirmation _)
    | None -> ());
   state.home_decision_inflight <- None;
   (match result with
@@ -25879,31 +25879,14 @@ let main
     | None -> ()
     | Some (task : Masc_domain.task) -> (
         let task_id = task.id in
-        let stalled_reason =
-          match state.operator_stalled with
-          | Masc_tui_agenda.Read rows ->
-              Option.map
-                (fun (row : Masc_tui_agenda.stalled) -> String.trim row.what)
-                (List.find_opt
-                   (fun (row : Masc_tui_agenda.stalled) ->
-                     String.equal row.task_id task_id)
-                   rows)
-          | Masc_tui_agenda.Not_read | Masc_tui_agenda.Read_failed _ -> None
-        in
         match Masc_tui_editor.editor_command () with
-        | None -> (
-            match stalled_reason with
-            | Some reason when not (String.equal reason "") ->
-                launch_task_cancel state ~mailbox:async_messages
-                  ~authority ~identity ~task_id ~reason
-            | Some _ | None ->
-                report_action state "error"
-                  "no $EDITOR set; export EDITOR to cancel here")
+        | None ->
+            report_action state "error"
+              "no $EDITOR set; export EDITOR to cancel here"
         | Some _ -> (
-            let default_reason = Option.value ~default:"" stalled_reason in
             let stem =
               Yojson.Safe.pretty_to_string
-                (`Assoc [ ("reason", `String default_reason) ])
+                (`Assoc [ ("reason", `String "") ])
               ^ "\n"
             in
             match
@@ -29393,8 +29376,7 @@ Use relative paths for resources already held in the package. -->
                          Masc_tui_agenda.Stuck_task task_id
                      ; _
                      } ->
-                     (* Work nobody holds is read on the task itself, the
-                        same landing the palette gives a task id. *)
+                     (* Inspect the exact Task whose owner route was observed. *)
                      close ();
                      goto_surface state ~mailbox:async_messages Planning;
                      state.planning_mode <- Planning_list;
@@ -30465,8 +30447,7 @@ Use relative paths for resources already held in the package. -->
                  | Some (Home_question _) ->
                      goto_surface state ~mailbox:async_messages Overview
                  | Some (Home_held_call _) | None | Some (Home_gate_request _)
-                 | Some (Home_operator_request _) | Some (Home_goal_confirmation _)
-                 | Some (Home_operator_task _) -> ())
+                 | Some (Home_operator_request _) | Some (Home_goal_confirmation _) -> ())
             | "left" | "up" | "k" -> move_ask_question_cursor state (-1)
             | "right" | "down" | "j" -> move_ask_question_cursor state 1
             | "pageup" | "pagedown" | "wheel-up" | "wheel-down" ->
@@ -32991,15 +32972,7 @@ Use relative paths for resources already held in the package. -->
                      Masc_tui_home.reconcile_home_request_detail state;
                      state.planning_scroll <- 0;
                      state.goal_timeline <- Masc_tui_fetched.clear state.goal_timeline;
-                     launch_goal_timeline_load state ~mailbox:async_messages goal_id
-                 | Home_operator_task task_id ->
-                     navigate Planning;
-                     state.planning_mode <- Planning_list;
-                     state.task_detail_id <- Some task_id;
-                     state.task_detail_scroll <- 0;
-                     state.task_history <- Masc_tui_fetched.clear state.task_history;
-                     state.task_focus <- Masc_tui_overview_tasks.land_on state.tasks ~task_id;
-                     launch_task_history_load state ~mailbox:async_messages task_id)
+                     launch_goal_timeline_load state ~mailbox:async_messages goal_id)
             | Home_agenda ->
                 state.agenda_open <- true;
                 state.agenda_scroll <- 0;

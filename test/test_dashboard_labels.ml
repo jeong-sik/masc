@@ -330,12 +330,11 @@ let test_attention_empty () =
   in
   Alcotest.(check int) "no items" 0 (List.length items)
 
-(* An abandoned task is the operator's to end; a Keeper record that does not
-   decode is a repair, and the task moves again once it is fixed. *)
+(* A missing Keeper route does not prove that the task owner has stopped. *)
 let test_attention_grades_the_operators_tasks () =
   let items =
     Dashboard_attention.detect_operator_tasks
-      [ Masc.Operator_task_attention.Held_without_actor
+      [ Masc.Operator_task_attention.Held_without_keeper_route
           { task_id = "task-1486"
           ; title = "abandoned browser upload"
           ; assignee = "codex-mcp-client"
@@ -360,8 +359,8 @@ let test_attention_grades_the_operators_tasks () =
             | Info -> "Info"))
       ( = )
   in
-  Alcotest.(check (list severity)) "a repair is a warning, not an operator decision"
-    [ Dashboard_attention.Critical; Dashboard_attention.Warning ]
+  Alcotest.(check (list severity)) "route observations do not prove a critical abandoned task"
+    [ Dashboard_attention.Warning; Dashboard_attention.Warning ]
     (List.map (fun (item : Dashboard_attention.attention_item) -> item.severity) items)
 
 let test_attention_compact_empty () =

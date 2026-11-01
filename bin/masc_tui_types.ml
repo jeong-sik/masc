@@ -8465,7 +8465,6 @@ type home_request =
       (** An installation's ask id is unique only within that installation, so
           the asker is part of which question a row opens. *)
   | Home_goal_confirmation of string
-  | Home_operator_task of string
 
 type home_action =
   | Home_approvals
@@ -8485,11 +8484,10 @@ let equal_home_request left right =
       String.equal left.keeper right.keeper && String.equal left.call_id right.call_id
   | Home_gate_request left, Home_gate_request right
   | Home_operator_request left, Home_operator_request right
-  | Home_goal_confirmation left, Home_goal_confirmation right
-  | Home_operator_task left, Home_operator_task right -> String.equal left right
+  | Home_goal_confirmation left, Home_goal_confirmation right -> String.equal left right
   | Home_question left, Home_question right -> Masc.Tui_decode_asks.equal_ask_key left right
   | ( Home_held_call _ | Home_gate_request _ | Home_operator_request _ | Home_question _
-    | Home_goal_confirmation _ | Home_operator_task _ ), _ -> false
+    | Home_goal_confirmation _ ), _ -> false
 
 let equal_home_action left right =
   match left, right with

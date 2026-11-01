@@ -160,7 +160,6 @@ let test_empty_sections_answer_in_words () =
     (contains ~needle:"no keeper is holding a call" text);
   check bool "so does the goal section" true
     (contains ~needle:"no goal awaits confirmation" text);
-  check bool "and the stuck section" true (contains ~needle:"no task is stuck on you" text);
   check int "all five headings are still drawn" 5 (List.length (tones_of lines Agenda.Heading))
 ;;
 
@@ -252,16 +251,25 @@ let with_stuck rows =
     ~stalled:(Agenda.Read rows)
 ;;
 
-(* The row above the composer holds the next wake and nothing else: a task
-   stuck on the operator is counted and named by the badge on the surface
-   strip, so it must not also raise this row. *)
-let test_a_stuck_task_alone_is_counted_but_takes_no_row () =
+(* A missing route is not a request for the operator to answer. *)
+let test_a_task_route_is_not_an_operator_request () =
   let t = with_stuck [ stuck "task-348: held by codex-mcp-client, which has no Keeper queue" ] in
-  check int "a stuck task waits on the operator" 1 (Agenda.waiting t);
-  check int "and takes no row above the composer" 0 (Agenda.rows_taken t);
-  check bool "so the row draws nothing" true (strip_of t = None);
-  check bool "while the badge has something to say" true
-    (Agenda.waiting_label ~cells:80 t <> "")
+  check int "the route does not count as a request" 0 (Agenda.waiting t);
+  check int "and takes no row above the composer" 0 (Agenda.rows_taken t)
+;;
+
+let test_task_route_text_cannot_control_the_terminal () =
+  let task_id = "task-control" in
+  let raw = "title\rnext\nline\tend\027[31m\127\194\155" in
+  let lines = overlay_of ~cols:160 (with_stuck [ stuck ~task_id raw ]) in
+  match List.find_opt (fun (line : Agenda.line) ->
+      line.goes_to = Agenda.Stuck_task task_id) lines with
+  | None -> fail "the task remains reachable"
+  | Some line ->
+      check bool "external control bytes do not reach the terminal" false
+        (String.exists (fun c -> Char.code c < 32 || Char.code c = 127) line.text);
+      check bool "a UTF-8 C1 control does not reach the terminal" false
+        (contains ~needle:"\194\155" line.text)
 ;;
 
 let test_the_stuck_section_draws_every_row () =
@@ -437,35 +445,24 @@ let test_goal_selection_survives_refresh_reordering () =
   check bool "Enter still opens the Goal actually selected" true
     (opened_target state refreshed = Some (Agenda.Goal_to_confirm "goal-a"))
 
-let test_home_task_survives_supplemental_source_failure () =
+let test_task_route_is_not_a_home_decision () =
   List.iter (fun diagnostic ->
     let state = agenda_state () in
     let task_id = "task-primary" in
-    state.operator_stalled <- Agenda.Read [stuck ~task_id "Task to inspect"];
     state.tasks_error <- Some diagnostic;
-    check bool "Home retains a current task despite supplemental failure" true
-      (List.mem_assoc (Masc_tui_types.Home_request (Home_operator_task task_id))
-         (Masc_tui_home.home_decision_rows (Masc_tui_home.prepare state)));
-    check bool "Agenda uses the same primary reading" true
+    state.operator_stalled <- Agenda.Read [];
+    let without_route = Masc_tui_home.home_decision_rows (Masc_tui_home.prepare state) in
+    state.operator_stalled <- Agenda.Read [stuck ~task_id "Task to inspect"];
+    check bool "an owner route does not add a Home decision" true
+      (without_route = Masc_tui_home.home_decision_rows (Masc_tui_home.prepare state));
+    check bool "the task remains reachable in Agenda" true
       (List.exists (fun line -> line.Agenda.goes_to = Agenda.Stuck_task task_id)
-         (lines_of_state state));
-    state.view <- Masc_tui_types.Planning;
-    state.home_opened_request <- Some (Home_operator_task task_id);
-    state.task_detail_id <- Some task_id;
-    Masc_tui_home.reconcile_home_request_detail state;
-    check bool "refresh retains the opened task reader" true
-      (state.view = Planning && state.home_opened_request = Some (Home_operator_task task_id)
-       && state.task_detail_id = Some task_id))
+         (lines_of_state state)))
     ["task archive unavailable"; "goal links unavailable"]
 
 let test_home_and_agenda_refuse_noncurrent_task_source () =
   let state = agenda_state () in
-  let task_id = "task-primary" in
   state.operator_stalled <- Agenda.Read_failed "backlog recovered from backup";
-  check bool "Home offers no current task from a backup" false
-    (List.exists (fun (action, _) -> match action with
-       | Masc_tui_types.Home_request (Home_operator_task _) -> true
-       | _ -> false) (Masc_tui_home.home_decision_rows (Masc_tui_home.prepare state)));
   let agenda_lines = lines_of_state state in
   check bool "Agenda reports the noncurrent source" true
     (List.exists (fun line -> line.Agenda.tone = Agenda.Failed
@@ -473,12 +470,7 @@ let test_home_and_agenda_refuse_noncurrent_task_source () =
        agenda_lines);
   check bool "Agenda offers no task from a backup" false
     (List.exists (fun line -> match line.Agenda.goes_to with
-       | Agenda.Stuck_task _ -> true | _ -> false) agenda_lines);
-  state.view <- Masc_tui_types.Planning;
-  state.home_opened_request <- Some (Home_operator_task task_id);
-  Masc_tui_home.reconcile_home_request_detail state;
-  check bool "an unavailable source requires fresh selection" true
-    (state.view = Overview && state.home_opened_request = None)
+       | Agenda.Stuck_task _ -> true | _ -> false) agenda_lines)
 
 let test_inserted_goals_do_not_retarget_a_selected_task () =
   let state = agenda_state () in
@@ -592,9 +584,9 @@ let one_of_each =
     ~confirming:(Agenda.Read [ goal "v0.38.0 release" ])
     ~stalled:(Agenda.Read [ stuck "work nobody holds" ])
 
-(* The total is the sum of the four lists. *)
+(* Route observations do not add to the request count. *)
 let test_the_strip_count_adds_the_questions () =
-  check int "one of each is four" 4 (Agenda.waiting one_of_each)
+  check int "one of each request plus a task route is three" 3 (Agenda.waiting one_of_each)
 
 (* What the badge says is the badge's to change, so this does not read its
    words. It reads what the badge is for: nothing waiting says nothing, each
@@ -799,9 +791,11 @@ let () =
         ; test_case "failed schedule snapshots share the display boundary" `Quick
             test_failed_schedule_snapshot_uses_the_same_display_boundary
         ;] )
-    ; ( "tasks stuck on the operator"
-      , [ test_case "a stuck task alone is counted but takes no row" `Quick
-            test_a_stuck_task_alone_is_counted_but_takes_no_row
+    ; ( "task owner routes"
+      , [ test_case "a task route is not an operator request" `Quick
+            test_a_task_route_is_not_an_operator_request
+        ; test_case "task route text cannot control the terminal" `Quick
+            test_task_route_text_cannot_control_the_terminal
         ; test_case "the section draws every row" `Quick
             test_the_stuck_section_draws_every_row
         ; test_case "only rows that lead somewhere take the cursor" `Quick
@@ -838,8 +832,8 @@ let () =
             test_home_approval_list_preserves_its_caller
         ; test_case "Task Goal references preserve registry reading truth" `Quick
             test_task_goal_reading_preserves_source_truth
-        ; test_case "Home retains tasks when supplemental sources fail" `Quick
-            test_home_task_survives_supplemental_source_failure
+        ; test_case "task routes are not Home decisions" `Quick
+            test_task_route_is_not_a_home_decision
         ; test_case "Home and Agenda refuse noncurrent task sources" `Quick
             test_home_and_agenda_refuse_noncurrent_task_source
         ; test_case "same Keeper calls retain distinct navigation identities" `Quick

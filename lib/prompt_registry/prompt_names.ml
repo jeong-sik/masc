@@ -203,6 +203,18 @@ let keeper_world_frame_held_rows_sections = "keeper.world.frame.held_rows_sectio
    recent-conversation rows in the turn context. *)
 let keeper_world_transcript_header = "keeper.world.transcript.header"
 let keeper_world_transcript_intro = "keeper.world.transcript.intro"
+(* Managed recall instructions and external criterion policy. *)
+let keeper_recall_candidate = "keeper.memory.recall.candidate"
+let keeper_recall_candidate_possibly_needed = "keeper.memory.recall.candidate.possibly_needed"
+let keeper_recall_candidate_not_needed = "keeper.memory.recall.candidate.not_needed"
+let keeper_recall_time = "keeper.memory.recall.time"
+let keeper_recall_time_standing = "keeper.memory.recall.time.standing"
+let keeper_recall_time_bound = "keeper.memory.recall.time.time_bound"
+let keeper_recall_turn = "keeper.memory.recall.turn"
+let keeper_recall_turn_yes = "keeper.memory.recall.turn.yes"
+let keeper_recall_turn_no = "keeper.memory.recall.turn.no"
+let keeper_recall_turn_unsure = "keeper.memory.recall.turn.unsure"
+
 (* The two blocks of the recall judgment (RFC-keeper-recall-reaches-the-turn
    section 4.4): the status line a judged turn always carries, and the body of
    the memories the judgment carried. *)

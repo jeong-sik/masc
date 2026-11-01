@@ -333,7 +333,8 @@ let test_a_request_that_cannot_be_built_gives_status_only () =
       Alcotest.(check (float 0.)) "one construction failure is recorded"
         (before +. 1.) (preparation_failures "request_not_built"))
       [Codec.Duplicate_candidate_id "private construction detail";
-       Codec.Choice_set_invalid "private construction detail"])
+       Codec.Choice_set_invalid "private construction detail";
+       Codec.Guidance_unavailable "private construction detail"])
 
 (* The recall must not end the turn it is meant to help: whatever raises in it
    is logged and the Keeper gets its unavailable status. *)

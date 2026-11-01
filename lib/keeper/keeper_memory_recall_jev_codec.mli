@@ -32,6 +32,18 @@ type build_error =
   | Choice_set_invalid of string
       (** The option set of a question could not be built; carries the
           client's reason. *)
+  | Guidance_unavailable of string
+      (** Required managed guidance could not be resolved or rendered. *)
+
+type guidance
+(** Immutable prompt and criterion snapshot shared by every question in one
+    recall flow, including capacity partitions and later time questions. *)
+
+val load_guidance : question_ids:string list -> (guidance, build_error) result
+(** Resolve every managed instruction and criterion once, then render all
+    original candidate/time questions eagerly. Requires original candidate IDs;
+    it does not invent a validation ID. The immutable map supports only these
+    IDs and their subsets, with no renderer or registry lookup after loading. *)
 
 (** One read answer. [Not_decoded] carries the reason for the evaluation
     record. The probabilities and confidence of an [Answered] value are
@@ -42,7 +54,7 @@ type 'a answer =
   | Not_decoded of string
 
 val candidate_request :
-  purpose:Yojson.Safe.t -> Keeper_memory_recall_candidates.piece ->
+  guidance:guidance -> purpose:Yojson.Safe.t -> Keeper_memory_recall_candidates.piece ->
   (request, build_error) result
 (** Question (a). [state] holds the purpose and the candidate lines, and every
     candidate gets one question, keyed by its id, whose instructions are short
@@ -72,7 +84,7 @@ val candidate_result :
   Keeper_memory_recall_judgment.candidate_result
 
 val turn_request :
-  purpose:Yojson.Safe.t -> (request, build_error) result
+  guidance:guidance -> purpose:Yojson.Safe.t -> (request, build_error) result
 (** Question (b). [state] holds the purpose and no candidates. *)
 
 val decode_turn :
@@ -85,7 +97,7 @@ val turn_answer :
   Keeper_memory_recall_judgment.turn_answer
 
 val time_request :
-  Keeper_memory_recall_candidates.piece -> (request, build_error) result
+  guidance:guidance -> Keeper_memory_recall_candidates.piece -> (request, build_error) result
 (** Question (c), for candidates question (a) carried. Same shape as
     {!candidate_request} except that [state] holds no purpose: the question is
     about the memory alone, so the turn input is not sent. *)

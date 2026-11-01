@@ -889,32 +889,44 @@ let configuration_lines view snapshot = match snapshot.configuration with
         @ (if Document.editable_source_path ~directory:config.directory declaration.source_path then []
            else ["   Configuration issue; no declaration file to edit"])
         @ List.map (fun message -> "   Error: " ^ message) declaration.issues) config.declarations)
-let instance_lines view instances =
+type technical_part =
+  | Technical_text of string
+  | Technical_json of { value : Yojson.Safe.t; indent : int }
+
+let technical_text lines = List.map (fun line -> Technical_text line) lines
+
+let instance_parts view instances =
   List.concat (List.mapi (fun i item ->
-    [Printf.sprintf "%s %s · %s · %s · run %s · rev %s · seq %d · rows %d"
+    technical_text [Printf.sprintf "%s %s · %s · %s · run %s · rev %s · seq %d · rows %d"
        (if view.instance_cursor=i then ">" else " ") item.id item.title (phase_label item.phase)
        item.run_id item.revision item.observation_seq item.rows_count;
      "   TOML " ^ Option.value ~default:"manual attachment" item.source_path;
      "   binding"]
-    @ List.map (fun line -> "     " ^ line) (String.split_on_char '\n' (Yojson.Safe.pretty_to_string item.binding))
-    @ List.map (fun (id, selection) -> "   output " ^ id ^ " → " ^ (match selection with
-      | Row.All_lanes -> "all supplied lanes" | Row.Selected_lanes lanes -> String.concat ", " lanes)) item.outputs
-    @ (match item.skills_directory with None -> [] | Some directory -> ["   Skills " ^ directory])
+    @ [Technical_json {value=item.binding;indent=5}]
+    @ technical_text (List.map (fun (id, selection) -> "   output " ^ id ^ " → " ^ (match selection with
+      | Row.All_lanes -> "all supplied lanes" | Row.Selected_lanes lanes -> String.concat ", " lanes)) item.outputs)
+    @ technical_text (match item.skills_directory with None -> [] | Some directory -> ["   Skills " ^ directory])
     @ (match item.action_schema with None -> [] | Some schema ->
-        ["   action schema · incarnation " ^ item.incarnation]
-        @ List.map (fun line -> "     " ^ line) (String.split_on_char '\n' (Yojson.Safe.pretty_to_string schema)))) instances)
-let action_lines view = match view.last_action with
+        [Technical_text ("   action schema · incarnation " ^ item.incarnation);
+         Technical_json {value=schema;indent=5}])) instances)
+let action_parts view = match view.last_action with
     | None -> []
-    | Some request -> ["Action request " ^ request.request_id ^ " · t:read status (never replays)";
+    | Some request -> technical_text ["Action request " ^ request.request_id ^ " · t:read status (never replays)";
         "  instance " ^ request.instance_id ^ " · incarnation " ^ request.incarnation]
         @ (match view.action_receipt with
-          | None -> ["  receipt unknown; t queries this exact request"]
-          | Some receipt -> ["  state " ^ (match receipt.Action.state with
+          | None -> technical_text ["  receipt unknown; t queries this exact request"]
+          | Some receipt -> technical_text ["  state " ^ (match receipt.Action.state with
               | Action.Queued -> "queued" | Action.Running -> "running" | Action.Confirmed -> "confirmed"
               | Action.Failed_before_effect -> "failed_before_effect" | Action.Outcome_unknown -> "outcome_unknown");
               "  requester " ^ receipt.requester ^ " · executor " ^ Option.fold ~none:"unknown" ~some:Masc.Lane_addon_lifecycle.resource_to_string receipt.executor]
-              @ (match receipt.detail with None -> [] | Some detail -> ["  " ^ detail])
-              @ (match receipt.result with None -> [] | Some result -> String.split_on_char '\n' (Yojson.Safe.pretty_to_string result)))
+              @ technical_text (match receipt.detail with None -> [] | Some detail -> ["  " ^ detail])
+              @ (match receipt.result with None -> [] | Some result -> [Technical_json {value=result;indent=0}]))
+let action_lines view =
+  List.concat_map (function
+    | Technical_text text -> [text]
+    | Technical_json {value;indent} ->
+        String.split_on_char '\n' (Yojson.Safe.pretty_to_string value)
+        |> List.map (fun line -> String.make indent ' ' ^ line)) (action_parts view)
 let move_observation view delta =
   match view.snapshot with
   | None -> view
@@ -1064,29 +1076,46 @@ let rec finite_values = function
 
 let technical_lines ?(height=24) ?(failed_note = "") ~width view =
   let _ = height in
-  let wrap = document_rows ~width in
+  let render = function
+    | Technical_text text -> document_rows ~width text
+    | Technical_json {value;indent} ->
+        let lines = Yojson.Safe.pretty_to_string value
+          |> String.split_on_char '\n'
+          |> List.map Masc.Tui_terminal_text.sanitize_terminal_text in
+        let source = String.concat "\n" lines in
+        (* The gutter and indentation must not take space from a grapheme
+           that would otherwise fit in the pane. *)
+        let palette = Masc_tui_markdown_theme.palette ~closing:"" in
+        let gutter = Masc_tui_message_layout.display_width palette.code_gutter in
+        let widest = List.fold_left (fun widest line ->
+          max widest (Masc_tui_message_layout.widest_grapheme_cells line)) 0 lines in
+        if width < gutter + widest then document_rows ~width source
+        else
+          let indent = min indent (width - gutter - widest) in
+          Masc_tui_markdown_theme.code ~language:"json" ~width:(width - indent) source
+          |> List.map (fun line -> String.make indent ' ' ^ line) in
   let raw_row (row : Row.row) =
-    [row.title; "Row " ^ row.id; "Lane " ^ row.lane_id;
+    technical_text ([row.title; "Row " ^ row.id; "Lane " ^ row.lane_id;
      "Observed " ^ utc_stamp row.observed_at ^ " UTC";
      "Subject " ^ row.subject_id]
     @ Option.to_list (Option.map (fun actor -> "Actor " ^ actor) row.actor)
     @ Option.to_list (Option.map (fun (clock : Row.clock) ->
-        "Clock " ^ clock.domain ^ " · " ^ clock.value) row.clock)
-    @ String.split_on_char '\n' (Yojson.Safe.pretty_to_string (`Assoc row.fields))
-    @ List.map (fun (e : Row.evidence) ->
+        "Clock " ^ clock.domain ^ " · " ^ clock.value) row.clock))
+    @ [Technical_json {value=`Assoc row.fields;indent=0}]
+    @ technical_text (List.map (fun (e : Row.evidence) ->
         "Evidence " ^ e.uri ^ " · sha256 " ^ Option.value ~default:"unknown" e.sha256)
         row.evidence
     @ (if row.related_ids=[] then []
-       else ["Related " ^ String.concat ", " row.related_ids]) in
+       else ["Related " ^ String.concat ", " row.related_ids])) in
   let content = match view.snapshot with
-    | None -> [unread_body_text ~failed_note view]
+    | None -> technical_text [unread_body_text ~failed_note view]
     | Some snapshot ->
         let selected = match view.screen with
           | Overview -> at_cursor (selectable_overview_entries view snapshot) view.instance_cursor
           | Detail _ -> Option.map (fun item -> `Instance item)
               (detail_instance view snapshot) in
         let worker = match selected with
-          | Some (`Instance item) -> instance_lines {view with instance_cursor=0} [item]
+          | Some (`Instance item) -> instance_parts {view with instance_cursor=0} [item]
           | Some (`Declaration _) | None -> [] in
         let declaration = match selected with
           | Some (`Declaration (_, item)) -> Some item
@@ -1102,12 +1131,12 @@ let technical_lines ?(height=24) ?(failed_note = "") ~width view =
           | Overview, Some _ -> []
           | Overview, None -> snapshot.output.rows
           | Detail _, _ -> Option.to_list (selected_row view) in
-        ["Raw details";
+        technical_text ["Raw details";
          "Snapshot " ^ (match snapshot.complete with
            | Some true -> "complete" | Some false -> "partial" | None -> "unknown")]
-        @ (if rows=[] then [] else "Records" :: List.concat_map raw_row rows)
-        @ worker @ configuration
-        @ (if snapshot.output.coverage=[] then [] else
+        @ (if rows=[] then [] else Technical_text "Records" :: List.concat_map raw_row rows)
+        @ worker @ technical_text configuration
+        @ technical_text (if snapshot.output.coverage=[] then [] else
              "Coverage" :: List.map (fun (source : Row.coverage) ->
                source.source_id ^ " · " ^ (if source.complete then "complete" else "partial")
                ^ " · incarnation " ^ source.incarnation
@@ -1117,16 +1146,16 @@ let technical_lines ?(height=24) ?(failed_note = "") ~width view =
   let receipt = match view.receipt with
     | None -> []
     | Some json ->
-        evidence_receipt_lines json
-        @ ("Last receipt:" :: String.split_on_char '\n' (Yojson.Safe.pretty_to_string json)) in
+        technical_text (evidence_receipt_lines json @ ["Last receipt:"])
+        @ [Technical_json {value=json;indent=0}] in
   let draft = match view.draft with
     | None -> []
     | Some text -> [(if view.naming then "New TOML filename: " else "Plugin command: ") ^ text] in
   let document = match selected_document view with
     | None -> [] | Some session -> document_application_lines view session @ Document.summary session in
-  List.concat_map wrap
-    (["?:help  Esc:back  J/K:scroll"] @ diagnostic_lines view @ content @ draft @ document
-     @ action_lines view @ receipt)
+  List.concat_map render
+    (technical_text (["?:help  Esc:back  J/K:scroll"] @ diagnostic_lines view)
+     @ content @ technical_text (draft @ document) @ action_parts view @ receipt)
 
 let installation_detail_lines ~width view =
   let wrap = document_rows ~width in

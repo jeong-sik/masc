@@ -27,7 +27,10 @@ let reserve slot = with_lock slot (fun () ->
   if slot.active || Option.is_some slot.pending || slot.stopping then None
   else let admission = ref () in slot.pending <- Some admission; Some admission)
 
-let withdraw_pending slot = with_lock slot (fun () -> slot.pending <- None)
+let withdraw_pending slot = with_lock slot (fun () ->
+  let withdrawn = Option.is_some slot.pending in
+  slot.pending <- None;
+  withdrawn)
 
 let withdraw slot admission = with_lock slot (fun () ->
   match slot.pending with

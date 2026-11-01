@@ -67,7 +67,7 @@ val restore_anchor : cols:int -> height:int -> Masc_tui_types.state -> anchor ->
 (** Preserve the same source block after layout changes. Mermaid interiors
     preserve fractional block progress; explicit top and End stay explicit.
     Another content observation or reading mode cannot consume this anchor. *)
-val settle_diagram : cols:int -> height:int -> Masc_tui_types.state ->
+val settle_diagram : ?claim:Masc_tui_resource_diagrams.claim -> cols:int -> height:int -> Masc_tui_types.state ->
   request:Masc_tui_resource_diagrams.request -> source:string ->
   (string, string) result -> unit
 (** Settle only the current preparation, preserving the reader's source anchor

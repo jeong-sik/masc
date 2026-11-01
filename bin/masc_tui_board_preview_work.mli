@@ -17,8 +17,9 @@ val try_run : t -> (unit -> 'a) -> 'a option
     worker releases its own slot only after its work returns or raises. *)
 val reserve : t -> admission option
 (** Reserve an idle slot before dispatching a worker. *)
-val withdraw_pending : t -> unit
-(** Revoke an unstarted reservation without releasing an active worker. *)
+val withdraw_pending : t -> bool
+(** Revoke an unstarted reservation without releasing an active worker.
+    Returns whether a reservation was withdrawn. *)
 val withdraw : t -> admission -> unit
 (** Revoke only the exact unstarted reservation, never a later one. *)
 val run_reserved : t -> admission -> (unit -> 'a) -> 'a option

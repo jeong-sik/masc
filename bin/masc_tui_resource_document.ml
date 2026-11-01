@@ -493,10 +493,12 @@ let restore_anchor ~cols ~height state anchor =
         Masc_tui_scroll.Position.clamp ~count:(List.length rendered.lines) ~height position) position
   | Some _ | None -> ()
 
-let settle_diagram ~cols ~height state ~request ~source result =
+let settle_diagram ?claim ~cols ~height state ~request ~source result =
   match state.resource_diagrams with
   | Some diagrams when Masc_tui_resource_diagrams.request diagrams == request ->
-      let settled = Masc_tui_resource_diagrams.settle request ~source result diagrams in
+      let settled = match claim with
+        | None -> Masc_tui_resource_diagrams.settle request ~source result diagrams
+        | Some claim -> Masc_tui_resource_diagrams.settle_claimed request ~source claim result diagrams in
       if Masc_tui_resource_diagrams.progress settled <> Masc_tui_resource_diagrams.progress diagrams then begin
         let anchor = capture_anchor ~cols ~height state in
         state.resource_diagrams <- Some settled;

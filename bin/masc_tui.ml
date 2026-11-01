@@ -9,6 +9,13 @@ open Masc_tui_input_reader
 
 module Ask_followup_observation = Masc_tui_ask_followup_observation
 
+let resource_diagram_worker = Masc_tui_board_preview_work.create ()
+
+let withdraw_resource_diagram_pending state =
+  if Masc_tui_board_preview_work.withdraw_pending resource_diagram_worker then
+    state.resource_diagrams <- Option.map Masc_tui_resource_diagrams.abandon_preparing
+      state.resource_diagrams
+
 (* How long the pane waits on [gh pr view --web] before reporting it. The
    call is a lookup and a browser hand-off; a network that answers slower
    than this is reported rather than held. *)
@@ -2091,6 +2098,7 @@ let open_resource_in_dashboard state ~mailbox =
           |> Result.map (fun opener -> "Opened " ^ url ^ " via " ^ opener ^ "; browser authentication may be required"))
 
 let launch_resources_read state ~mailbox ~key =
+  withdraw_resource_diagram_pending state;
   let share_origin = Result.to_option (workspace_change_origin state) in
   Masc_tui_resources_requests.launch_read state ~host:server_peer_host
     ~share_origin
@@ -2280,6 +2288,7 @@ let resource_public_copy_is_current state copy =
      | None -> false
 
 let finish_resource_share state request result =
+  withdraw_resource_diagram_pending state;
   let read_key = Masc_tui_resources_updates.share_changed state request ~result in
   let key = request.share_workspace_identity, request.share_report.id in
   match result with
@@ -11743,7 +11752,6 @@ let conversation_image_sources state =
 
 let board_preview_worker = Masc_tui_board_preview_work.create ()
 let vector_inspection_worker = Masc_tui_board_preview_work.create ()
-let resource_diagram_worker = Masc_tui_board_preview_work.create ()
 
 let () = at_exit (fun () ->
   Masc_tui_board_preview_work.stop board_preview_worker;
@@ -12079,14 +12087,14 @@ let resource_diagram_frame state ~geometry_stable =
              let hex color = Printf.sprintf "#%02x%02x%02x"
                (Masc_tui_terminal_palette.red color) (Masc_tui_terminal_palette.green color)
                (Masc_tui_terminal_palette.blue color) in
-             let colors = Option.map (fun palette ->
+             let palette_colors = Option.map (fun palette ->
                hex (Masc_tui_terminal_palette.foreground palette),
                hex (Masc_tui_terminal_palette.background palette))
                (Masc_tui_terminal_palette.snapshot_palette palette) in
              Masc_tui_resource_diagrams.{
                frame_mime_type=(Masc_tui_resource_catalog.metadata reading.entry).mime_type;
                frame_contents=contents; frame_width=columns*cell_width;
-               frame_cell_pixels=(cell_width,cell_height); frame_colors=colors
+               frame_cell_pixels=(cell_width,cell_height); frame_colors=palette_colors
              }) reading.contents
        | Some _ | None -> None)
   | (Overview | Keepers _ | Planning | Board | Acting | Metrics | Lanes | Clients | Schedules | Harness | Fusion
@@ -12095,58 +12103,67 @@ let resource_diagram_frame state ~geometry_stable =
     (Left_pane | Right_pane), (true | false),
     (Masc_tui_portrait_view.Pixels _ | Mosaic | No_picture) -> None
 
-let prepare_resource_diagrams state ~mailbox ~geometry_stable =
+let prepare_resource_diagrams state ~mailbox ~geometry_stable ~worker_geometry_current =
   let module Diagrams = Masc_tui_resource_diagrams in
   let module Work = Masc_tui_board_preview_work in
   let current_frame () = resource_diagram_frame state ~geometry_stable in
   match current_frame (), Eio_context.get_switch_opt () with
   | Some frame, Some sw ->
-      if not (Option.exists (Diagrams.matches_frame frame) state.resource_diagrams) then begin
-        (* A withdrawn projection does not free a physical renderer. *)
-        state.resource_diagrams <- None;
-        if not (Work.is_busy resource_diagram_worker) then begin
-          let diagrams = Diagrams.create ~mime_type:frame.frame_mime_type ~contents:frame.frame_contents
-            ~width:frame.frame_width ~cell_pixels:frame.frame_cell_pixels ~colors:frame.frame_colors in
-          state.resource_diagrams <- Some diagrams;
-          let request = Diagrams.request diagrams in
-          let deliver = workspace_enqueue state in
-          let retire () = state.resource_diagrams <- Diagrams.retire request state.resource_diagrams in
-          Eio.Fiber.fork_daemon ~sw (fun () ->
-            Eio.Fiber.yield ();
-            let rec render_sources = function
-              | [] -> ()
-              | source :: rest ->
-                  (match Diagrams.admission request ~frame:(current_frame ()) state.resource_diagrams with
-                   | Diagrams.Ignore -> ()
-                   | Diagrams.Retire -> retire ()
-                   | Diagrams.Admit ->
-                       if not (geometry_stable ()) then retire ()
-                       else (match Work.reserve resource_diagram_worker with
-                        | None -> retire ()
-                        | Some admission ->
-                            let result = Fun.protect
-                              ~finally:(fun () -> Work.withdraw resource_diagram_worker admission)
-                              (fun () -> Eio_guard.run_in_systhread ~label:"tui-artifact-diagram" (fun () ->
-                                Work.run_reserved resource_diagram_worker admission (fun () ->
-                                  let cell_width,_ = frame.frame_cell_pixels in
-                                  let scene = Masc_tui_pele.scene ~format:Mermaid
-                                    ~max_width:(Diagrams.width request)
-                                    ~font_size:(max 1 (cell_width*2))
-                                    ~now_ms:(Int64.of_float (Unix.gettimeofday () *. 1000.))
-                                    ~colors:(Diagrams.colors request) source in
-                                  let runner = Masc_tui_pele.command_runner
-                                    ~run:(Masc_tui_image_cache.run_bounded ~deadline_seconds:image_process_deadline_seconds) in
-                                  Masc_tui_pele.render ~cache_dir:(ensure_img_cache_dir ()) ~runner scene))) in
-                            (match result with
-                             | None -> retire ()
-                             | Some result ->
-                                 deliver mailbox (Resource_diagram_ready (request,source,result));
-                                 render_sources rest))) in
-            render_sources (Diagrams.sources request);
-            `Stop_daemon)
-        end
-      end
-  | (Some _ | None), (Some _ | None) -> ()
+      let diagrams = match state.resource_diagrams with
+        | Some diagrams when Diagrams.matches_frame frame diagrams -> diagrams
+        | Some _ | None ->
+            withdraw_resource_diagram_pending state;
+            let diagrams = Diagrams.create ~mime_type:frame.frame_mime_type ~contents:frame.frame_contents
+              ~width:frame.frame_width ~cell_pixels:frame.frame_cell_pixels ~colors:frame.frame_colors in
+            state.resource_diagrams <- Some diagrams;
+            diagrams in
+      if not (Work.is_busy resource_diagram_worker) then
+        (match Diagrams.claim_next diagrams with
+         | None -> ()
+         | Some (source,claim,claimed) ->
+             state.resource_diagrams <- Some claimed;
+             let request = Diagrams.request diagrams in
+             let terminal_size = Masc_tui_ansi.get_terminal_size () in
+             let deliver = workspace_enqueue state in
+             let abandon () = state.resource_diagrams <- Option.map
+               (Diagrams.abandon request ~source claim) state.resource_diagrams in
+             Eio.Fiber.fork_daemon ~sw (fun () ->
+               Eio.Fiber.yield ();
+               (match Diagrams.admission request ~frame:(current_frame ()) state.resource_diagrams with
+                | Diagrams.Ignore -> ()
+                | Diagrams.Retire -> abandon ()
+                | Diagrams.Admit ->
+                    if not (geometry_stable ()) then abandon ()
+                    else (match Work.reserve resource_diagram_worker with
+                     | None -> abandon ()
+                     | Some admission ->
+                         let delivered = ref false in
+                         Fun.protect
+                           ~finally:(fun () ->
+                             Work.withdraw resource_diagram_worker admission;
+                             if not !delivered then abandon ())
+                           (fun () ->
+                             let result = Eio_guard.run_in_systhread ~label:"tui-artifact-diagram" (fun () ->
+                               Work.run_reserved resource_diagram_worker admission (fun () ->
+                                 if not (worker_geometry_current terminal_size) then None
+                                 else begin
+                                   let cell_width,_ = frame.frame_cell_pixels in
+                                   let scene = Masc_tui_pele.scene ~format:Mermaid
+                                     ~max_width:(Diagrams.width request)
+                                     ~font_size:(max 1 (cell_width*2))
+                                     ~now_ms:(Int64.of_float (Unix.gettimeofday () *. 1000.))
+                                     ~colors:(Diagrams.colors request) source in
+                                   let runner = Masc_tui_pele.command_runner
+                                     ~run:(Masc_tui_image_cache.run_bounded ~deadline_seconds:image_process_deadline_seconds) in
+                                   Some (Masc_tui_pele.render ~cache_dir:(ensure_img_cache_dir ()) ~runner scene)
+                                 end)) in
+                             match result with
+                             | Some (Some result) ->
+                                 deliver mailbox (Resource_diagram_ready (request,source,claim,result));
+                                 delivered := true
+                             | Some None | None -> ())));
+               `Stop_daemon))
+  | (Some _ | None), (Some _ | None) -> withdraw_resource_diagram_pending state
 
 let open_resource_image (state : state) ~mailbox =
   let notice = image_notice state ~view:Resources ~keeper_name:state.msg_target_keeper_name in
@@ -15508,6 +15525,7 @@ let apply_confirmed_server_identity_reading state ~mailbox reading =
    [Workspace_identity_match], so decisions and new reads wait for a read that
    matches again. Only a read that names a workspace goes on to compare it. *)
 let apply_server_identity_reading state ~mailbox reading =
+  withdraw_resource_diagram_pending state;
   match
     Masc_tui_types.next_workspace_identity ~previous:state.workspace_identity
       ~local_paths:state.local_workspace_paths reading
@@ -15537,6 +15555,7 @@ let apply_server_identity_reading state ~mailbox reading =
     apply_confirmed_server_identity_reading state ~mailbox reading
 
 let apply_refused_workspace_identity state ~mailbox ~detail latest =
+  withdraw_resource_diagram_pending state;
   let reading = retire_refused_workspace_readings state ~detail latest in
   (match !msx_pending_poll with
    | Poll_observing (_, refusal) -> msx_pending_poll := Poll_ready (Observing refusal)
@@ -16270,6 +16289,7 @@ let refresh_keeper_detail_selection state ~mailbox =
 ;;
 
 let open_keeper_detail state ~mailbox (keeper : keeper) =
+  withdraw_resource_diagram_pending state;
   state.detail_focus_recovery <- None;
   state.keeper_run_cursor <- 0;
   state.view <- Keepers Keeper_detail;
@@ -16903,6 +16923,7 @@ let resume_task_followups state ~mailbox ~refresh_inflight
                 different Keeper. Deliver to its own queue without switching
                 that editor (which would retire its recalled draft). *)
              if task_handoff_may_focus state ~keeper editor then begin
+               withdraw_resource_diagram_pending state;
                close_key_modals state;
                state.palette_open <- false;
                state.palette_mode <- Masc_tui_types.Palette_jump;
@@ -19249,6 +19270,7 @@ let handle_composer_key state ~base_path ~mailbox key =
            drain_queued_message state ~base_path ~mailbox);
       true
   | Composer.Send keeper_name ->
+      withdraw_resource_diagram_pending state;
       if recovered_paste_send_locked state then begin
         report_action state "system"
           "Recovered draft protected; press Ctrl-G to enable Enter";
@@ -20942,6 +20964,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
                  launch_local_keeper_read state ~mailbox ~intent:Snapshot_read.Refresh base_path;
                  wait_for_created_keeper_metadata state request.kcr_keeper;
                  if focus && cleared && not (input_pending ()) then begin
+                   withdraw_resource_diagram_pending state;
                    open_message_for_keeper ~return_to:request.kcr_return state
                      request.kcr_keeper ~drain_queue:(fun () -> ());
                    set_msg_scroll state 0;
@@ -21938,6 +21961,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
   | Code_history_loaded (request, result) ->
       Code_results.apply_history state request result
   | Resources_listed (owner, result) ->
+      withdraw_resource_diagram_pending state;
       Masc_tui_resources_updates.listed state ~owner result
   | Artifact_checks_loaded (request, result) ->
       Masc_tui_resources_updates.checks_loaded state request result
@@ -22052,6 +22076,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
                  show_recovery entry ~missing_journal:false))
        | Some _ | None -> ())
   | Resource_read (request, result, journal) ->
+      withdraw_resource_diagram_pending state;
       let admitted = match state.resource_read_owner with
         | Some owner -> owner == request.Masc_tui_resource_catalog.owner
         | None -> false in
@@ -22094,11 +22119,11 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
                public_copy_read_authority=state.workspace_read_authority;
                public_copy_origin=origin; public_copy_key=request.key })
       end
-  | Resource_diagram_ready (request,source,result) ->
+  | Resource_diagram_ready (request,source,claim,result) ->
       let _,cols = get_terminal_size () in
       let _,height = Masc_tui_render_resources.document_viewport state
         ~rows:(surface_rows state) ~cols in
-      Masc_tui_resource_document.settle_diagram
+      Masc_tui_resource_document.settle_diagram ~claim
         ~cols:(resource_content_cols state ~cols) ~height state ~request ~source result
   | Github_identity_view_loaded (request, result) ->
       Masc_tui_identity_updates.github_view_loaded state request result
@@ -25688,6 +25713,7 @@ let main
     | Some "iTerm.app" -> Masc_tui_graphics.ITerm2_protocol
     | Some _ | None -> Masc_tui_graphics.Unsupported_protocol in
   let apply_terminal_observation (observation : Masc_tui_terminal_probe.observation) =
+    withdraw_resource_diagram_pending state;
     Masc_tui_terminal_palette.set_current observation.palette;
     Option.iter (fun mode -> Masc_tui_terminal_palette.set_theme_mode (Some mode))
       observation.theme_mode;
@@ -27210,6 +27236,7 @@ Use relative paths for resources already held in the package. -->
   in
   let consume_resize_request () =
     if Atomic.exchange resize_requested false then begin
+      withdraw_resource_diagram_pending state;
       state.resource_copy_pending <- None;
       state.resource_copy_ready <- None;
       state.resource_share_recovery_lookup <- None;
@@ -27412,7 +27439,8 @@ Use relative paths for resources already held in the package. -->
       let diagram_geometry_stable () =
         worker_geometry_current (Masc_tui_ansi.get_terminal_size ()) in
       prepare_resource_diagrams state ~mailbox:async_messages
-        ~geometry_stable:diagram_geometry_stable;
+        ~geometry_stable:diagram_geometry_stable
+        ~worker_geometry_current;
       prepare_inspected_frame state ~mailbox:async_messages ~worker_geometry_current;
       (match state.lane_addons with
        | Some view when view.editor_ready && not (input_not_yet_admissible ()) -> handle_lane_document_editor ()
@@ -27532,7 +27560,10 @@ Use relative paths for resources already held in the package. -->
       in
       (* Retire the old preview before a frame barrier or paste recovery can
          consume the event. Protocol replies do not represent operator input. *)
-      if Option.exists is_operator_input input then withdraw_pending_image_open state;
+      if Option.exists is_operator_input input then begin
+        withdraw_pending_image_open state;
+        withdraw_resource_diagram_pending state
+      end;
       (* SIGWINCH can arrive while [read_input] is waiting. Consume it before
          this input sees the old frame; the next loop would be one key too
          late. *)
@@ -27542,6 +27573,7 @@ Use relative paths for resources already held in the package. -->
          SIGWINCH, without allowing nested renderers to disagree mid-frame. *)
       (match refresh_terminal_size () with
        | Render_schedule.Terminal_size_cache.Changed _ ->
+           withdraw_resource_diagram_pending state;
            ignore (Atomic.fetch_and_add resize_generation 1);
            state.resource_copy_pending <- None;
            state.resource_copy_ready <- None;

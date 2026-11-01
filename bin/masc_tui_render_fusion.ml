@@ -430,7 +430,16 @@ let rec fusion_json_escape_controls (json : Yojson.Raw.t) : Yojson.Raw.t =
   | `List values -> `List (List.map fusion_json_escape_controls values)
   | `Null | `Bool _ | `Intlit _ | `Floatlit _ | `Stringlit _ -> json
 
-let fusion_tool_preview_lines ~width ~label preview =
+(* Wrapping can place one indivisible grapheme on a row even when it is wider
+   than the requested body width. Spend indentation after measuring the rows,
+   keeping one indent for the whole reading so its alignment is preserved. *)
+let fusion_preview_indent ~frame_width ~indent_cells rows =
+  let widest = List.fold_left (fun cells line ->
+    max cells (Message_layout.display_width_for_wrapping line)) 0 rows in
+  let indent = String.make (min indent_cells (max 0 (frame_width - widest))) ' ' in
+  List.map (fun line -> Ansi.reset, indent ^ line) rows, widest > frame_width
+
+let fusion_tool_preview_lines ~width ~frame_width ~label preview =
   let size =
     if preview.ftp_truncated
     then Printf.sprintf "%d bytes; preview truncated" preview.ftp_bytes
@@ -471,33 +480,72 @@ let fusion_tool_preview_lines ~width ~label preview =
           Some (Fusion_json_scalar preview.ftp_text)
       with Yojson.Json_error _ -> None
   in
-  let direct_safe_json_rows ?(language = "json") safe =
+  let direct_safe_rows ~language safe =
     let indent_cells = min 6 (max 0 (width - 1)) in
-    let indent = String.make indent_cells ' ' in
     let body_width = max 1 (width - indent_cells) in
     let palette =
       { (Masc_tui_markdown_theme.palette ~closing:Ansi.reset) with code_gutter = "" } in
-    Masc_tui_code_lexer.rows_of_source ~language:(Some language) safe
+    Masc_tui_code_lexer.rows_of_source ~language safe
     |> List.concat_map (fun pieces ->
          match Masc_tui_markdown.render_lexed_line ~palette ~width:body_width pieces with
          | [] -> [ "" ]
          | rows -> rows)
-    |> List.map (fun line -> Ansi.reset, indent ^ line)
+    |> fusion_preview_indent ~frame_width ~indent_cells
+    |> fst
   in
+  let direct_safe_json_rows ?(language = "json") safe =
+    direct_safe_rows ~language:(Some language) safe in
   let fenced_json_rows payload =
     (* Choose a fence only after control characters have been made safe: that
        pass can otherwise turn a line into a closing fence. *)
     let safe = Keeper_chat.terminal_safe_text ~preserve_newlines:true payload in
-    let gutter =
-      Message_layout.display_width
-        (Masc_tui_markdown_theme.palette ~closing:Ansi.reset).code_gutter in
+    let palette = Masc_tui_markdown_theme.palette ~closing:Ansi.reset in
+    let gutter = Message_layout.display_width palette.code_gutter in
     let indent_cells = min 6 (max 0 (width - gutter - 1)) in
-    let indent = String.make indent_cells ' ' in
     match Masc_tui_markdown.non_colliding_fence_marker (String.split_on_char '\n' safe) with
     | Some marker when width > gutter ->
       let document = String.concat "\n" [ marker ^ "json"; safe; marker ] in
-      fusion_safe_markdown_block ~width ~indent document
+      let body_width = max 1 (width - indent_cells) in
+      let render palette body_width =
+        let rows, clipped = Masc_tui_markdown.render_with_clipping
+            ~palette ~width:body_width document in
+        let rows, overflow = fusion_preview_indent ~frame_width ~indent_cells rows in
+        rows, clipped, overflow
+      in
+      let rows, clipped, overflow = render palette body_width in
+      if not clipped && not overflow then rows
+      else
+        let palette = if overflow then { palette with code_gutter = "" } else palette in
+        let rows, clipped, overflow = render palette (max 1 frame_width) in
+        if clipped || overflow then direct_safe_json_rows safe else rows
     | Some _ | None -> direct_safe_json_rows safe
+  in
+  let markdown_rows text =
+    if String.equal (String.trim text) "" then
+      fusion_preview_indent ~frame_width ~indent_cells:6 [ "(empty)" ]
+      |> fst |> List.map (fun (_, line) -> Ansi.dim, line)
+    else
+      let safe = Keeper_chat.terminal_safe_text ~preserve_newlines:true text in
+      let palette = Masc_tui_markdown_theme.palette ~closing:Ansi.reset in
+      let render body_width =
+        let rows, clipped =
+          Masc_tui_markdown.render_with_clipping ~palette ~width:body_width safe in
+        let rows, overflow = fusion_preview_indent ~frame_width ~indent_cells:6 rows in
+        rows, (clipped || overflow)
+      in
+      let rows, clipped = render (max 1 (width - 6)) in
+      if not clipped then rows
+      else begin
+        (* A table cell or code label may be fitted before the frame sees it. *)
+        let rows, clipped = render (max 1 frame_width) in
+        if not clipped then rows
+        else
+          (* Markdown's own list, quote or code chrome can still crowd out a
+             grapheme. Identify the safe source when showing it directly. *)
+          let heading = Message_layout.split_cells ~max_cells:(max 1 frame_width)
+              "Markdown source:" |> List.map (fun line -> Ansi.dim, line) in
+          heading @ direct_safe_rows ~language:None safe
+      end
   in
   let rows =
     match complete_json with
@@ -519,11 +567,11 @@ let fusion_tool_preview_lines ~width ~label preview =
         direct_safe_json_rows ~language:"js"
           (fusion_json_safe_original preview.ftp_text scan.string_newlines)
       else if container then fenced_json_rows preview.ftp_text
-      else fusion_markdown_block ~width ~indent:"      " preview.ftp_text
+      else markdown_rows preview.ftp_text
   in
   [ Ansi.dim, Printf.sprintf "    %s (%s)" label size ] @ rows
 
-let fusion_tool_event_lines ~width = function
+let fusion_tool_event_lines ~width ~frame_width = function
   | Fusion_tool_called event ->
       [ ( (Masc_tui_theme.tone Masc_tui_theme.Accent)
         , Printf.sprintf "  [called] %s%s  %s  turn %d/%d  id=%s"
@@ -533,7 +581,7 @@ let fusion_tool_event_lines ~width = function
             event.fte_turn event.fte_planned_index
             (Terminal_text.single_line event.fte_tool_use_id) )
       ]
-      @ fusion_tool_preview_lines ~width ~label:"Input" event.fte_input
+      @ fusion_tool_preview_lines ~width ~frame_width ~label:"Input" event.fte_input
   | Fusion_tool_completed event ->
       let status, style, output, failure_suffix =
         match event.fte_completion with
@@ -557,9 +605,9 @@ let fusion_tool_event_lines ~width = function
             (Terminal_text.single_line event.fte_tool_use_id)
             failure_suffix )
       ]
-      @ fusion_tool_preview_lines ~width ~label:"Output" output
+      @ fusion_tool_preview_lines ~width ~frame_width ~label:"Output" output
 
-let fusion_tool_trace_uncached ~width (trace : Masc.Tui_decode_fusion.fusion_tool_trace) =
+let fusion_tool_trace_uncached ~width ~frame_width (trace : Masc.Tui_decode_fusion.fusion_tool_trace) =
       let coverage =
         if trace.ftt_complete
         then
@@ -598,7 +646,7 @@ let fusion_tool_trace_uncached ~width (trace : Masc.Tui_decode_fusion.fusion_too
         | events ->
             events
             |> List.concat_map (fun event ->
-                   (Ansi.dim, "") :: fusion_tool_event_lines ~width event)
+                   (Ansi.dim, "") :: fusion_tool_event_lines ~width ~frame_width event)
       in
       (coverage :: observed) @ gaps @ events
 
@@ -607,6 +655,7 @@ let fusion_tool_trace_uncached ~width (trace : Masc.Tui_decode_fusion.fusion_too
 type fusion_trace_projection =
   { trace : Masc.Tui_decode_fusion.fusion_tool_trace
   ; width : int
+  ; frame_width : int
   ; palette_generation : int
   ; table_frame : bool
   ; lines : (string * string) list
@@ -616,12 +665,13 @@ let fusion_trace_projection = ref None
 
 let clear_fusion_trace_projection () = fusion_trace_projection := None
 
-let fusion_tool_trace_lines ~width trace =
+let fusion_tool_trace_lines ~width ~frame_width trace =
   let palette_generation =
     Masc_tui_terminal_palette.(snapshot_generation (snapshot ())) in
   match !fusion_trace_projection with
   | Some cached
     when cached.width = width
+         && cached.frame_width = frame_width
          && cached.palette_generation = palette_generation
          && cached.table_frame = !table_frame_enabled
          && (cached.trace == trace || cached.trace = trace) ->
@@ -629,9 +679,9 @@ let fusion_tool_trace_lines ~width trace =
         fusion_trace_projection := Some { cached with trace };
       cached.lines
   | Some _ | None ->
-    let lines = fusion_tool_trace_uncached ~width trace in
+    let lines = fusion_tool_trace_uncached ~width ~frame_width trace in
     fusion_trace_projection := Some
-      { trace; width; palette_generation; table_frame = !table_frame_enabled; lines };
+      { trace; width; frame_width; palette_generation; table_frame = !table_frame_enabled; lines };
     lines
 
 let fusion_pipeline_diagram (run : Masc.Tui_decode_fusion.fusion_run) =
@@ -660,7 +710,7 @@ let fusion_pipeline_diagram (run : Masc.Tui_decode_fusion.fusion_run) =
     ~glyph_done ~glyph_active ~glyph_waiting ~glyph_failed ~arrow
     ~status ~stage ~panel_answered ~panel_expected ()
 
-let fusion_evidence_lines ~width (evidence : fusion_evidence) =
+let fusion_evidence_lines ~width ~frame_width (evidence : fusion_evidence) =
   let answered, failed, input_tokens, output_tokens =
     List.fold_left
       (fun (answered, failed, input_tokens, output_tokens) result ->
@@ -832,7 +882,7 @@ let fusion_evidence_lines ~width (evidence : fusion_evidence) =
         :: first_cards
   in
   let tool_lines =
-    fusion_tool_trace_lines ~width evidence.fe_tool_trace
+    fusion_tool_trace_lines ~width ~frame_width evidence.fe_tool_trace
   in
   (* One line per seat: the route it was given and who answered, each
      failed candidate under it. *)
@@ -881,7 +931,7 @@ let fusion_evidence_lines ~width (evidence : fusion_evidence) =
             (Terminal_text.single_line evidence.fe_post_id) )
     ]
 
-let fusion_detail_lines ~width (detail : fusion_detail) =
+let fusion_detail_lines ~width ~frame_width (detail : fusion_detail) =
   let run = detail.fud_run in
   let status = fusion_run_status_to_string run.fur_status in
   let now = Unix.gettimeofday () in
@@ -964,7 +1014,7 @@ let fusion_detail_lines ~width (detail : fusion_detail) =
         [ (Theme.warn ())
         , "  Evidence: absent (no current Board projection for this retained run)"
         ]
-    | Fusion_evidence_recorded, Some evidence -> fusion_evidence_lines ~width evidence
+    | Fusion_evidence_recorded, Some evidence -> fusion_evidence_lines ~width ~frame_width evidence
     | Fusion_evidence_recorded, None
     | Fusion_evidence_pending, Some _
     | Fusion_evidence_absent, Some _ ->
@@ -976,7 +1026,7 @@ let fusion_detail_lines ~width (detail : fusion_detail) =
   in
   run_lines @ [ Ansi.dim, "" ] @ evidence_lines
 
-let fusion_historical_lines ~width (detail : fusion_historical_detail) =
+let fusion_historical_lines ~width ~frame_width (detail : fusion_historical_detail) =
   [ Ansi.bold, "  HISTORICAL BOARD EVIDENCE"
   ; Theme.warn (), "  This Board evidence does not provide execution status or finish time"
   ; Ansi.reset, "  Run reference: " ^ Terminal_text.single_line detail.fhd_reference.fhe_run_id
@@ -997,7 +1047,7 @@ let fusion_historical_lines ~width (detail : fusion_historical_detail) =
   @ [ Ansi.dim, "  B: Board original · Y: copy Board link · Esc: back to Fusion list"
   ; Ansi.dim, "" ]
   @ (match detail.fhd_evidence with
-     | Ok evidence -> fusion_evidence_lines ~width evidence
+     | Ok evidence -> fusion_evidence_lines ~width ~frame_width evidence
      | Error error ->
          clear_fusion_trace_projection ();
          [ Theme.bad (), "  Structured Fusion evidence could not be decoded: " ^ Terminal_text.single_line error ])
@@ -1035,7 +1085,8 @@ let fusion_detail_pane (state : state) ~rows ~cols run_id buf =
          | Some original when original.fhd_reference.fhe_post_id = reference.fhe_post_id
                               && original.fhd_reference.fhe_run_id = reference.fhe_run_id ->
              (if Option.is_some state.fusion_detail_error then [ Theme.warn (), "  Previous Board reading retained" ] else [])
-             @ fusion_historical_lines ~width:(max 1 (framed_inner_width cols - 4)) original
+             @ fusion_historical_lines ~width:(max 1 (framed_inner_width cols - 4))
+                 ~frame_width:(framed_inner_width cols) original
          | Some _ | None ->
              clear_fusion_trace_projection ();
              [ Ansi.dim, "  (waiting for the selected Board original; r retries)" ])
@@ -1047,7 +1098,9 @@ let fusion_detail_pane (state : state) ~rows ~cols run_id buf =
          | None, Some _ ->
              clear_fusion_trace_projection ();
              [ Ansi.dim, page_failed_note ]
-         | Some detail, (Some _ | None) -> fusion_detail_lines ~width:(max 1 (framed_inner_width cols - 4)) detail)
+         | Some detail, (Some _ | None) ->
+             fusion_detail_lines ~width:(max 1 (framed_inner_width cols - 4))
+               ~frame_width:(framed_inner_width cols) detail)
   in
   let total = List.length lines in
   let max_scroll = max 0 (total - content_height) in

@@ -694,6 +694,63 @@ let test_view_gap_preserves_subscription_identity () =
        (`Assoc ["sessionId", `String "s-1"; "after", `String "v:1"])))
 ;;
 
+let test_terminal_cursor_is_required () =
+  List.iter (fun (terminal, extra) ->
+    let params = ["sessionId", `String "s-1"; "turnId", `String "t-1";
+                  "terminal", `String terminal] @ extra in
+    check bool "terminal without a durable anchor is refused" true
+      (Result.is_error (Msp.parse_notification ~method_:"turn/completed" (`Assoc params)));
+    match ok_or_fail (Msp.parse_notification ~method_:"turn/completed"
+        (`Assoc (("viewCursor", `String "opaque-terminal") :: params))) with
+    | Msp.Turn_completed {view_cursor; _} ->
+      check string "terminal anchor stays opaque" "opaque-terminal" view_cursor
+    | _ -> fail "terminal decoded as another notification")
+    ["completed", []; "cancelled", [];
+     "failed", ["error", `Assoc ["kind", `String "modelError";
+       "message", `String "fixture"; "retryable", `Bool false]]]
+;;
+
+let test_durable_view_page_contract () =
+  check json "backward page uses an exclusive opaque anchor and published page size"
+    (`Assoc ["jsonrpc", `String "2.0"; "id", `Int 7; "method", `String "view/page";
+      "params", `Assoc ["sessionId", `String "s-1"; "cursor", `String "opaque-terminal";
+        "direction", `String "backward"; "limit", `Int 1000]])
+    (Msp.view_page_backward_request ~id:7 ~session_id:"s-1" ~cursor:"opaque-terminal");
+  let position = `Assoc ["id", `String "record"; "sequence", `Int 1] in
+  let params = ["sessionId", `String "s-1"; "viewCursor", `String "opaque-item";
+    "sourceRange", `Assoc ["stream", `Assoc ["kind", `String "run"; "id", `String "t-1"];
+      "first", position; "last", position];
+    "item", `Assoc ["itemId", `String "m-1"; "turnId", `String "t-1";
+      "kind", `String "agentMessage"; "revision", `Int 2; "status", `String "completed";
+      "text", `String "latest"; "truncated", `Bool true]] in
+  let event params = `Assoc ["method", `String "item/completed"; "params", `Assoc params] in
+  let page params next = `Assoc ["events", `List [event params]; "nextCursor", next] in
+  let parsed = ok_or_fail (Msp.parse_view_page_result (page params (`String "opaque-item"))) in
+  check (option string) "backward continuation remains opaque" (Some "opaque-item") parsed.next_cursor;
+  (match parsed.events with
+   | [{session_id; view_cursor; item_truncated=true;
+       notification=Msp.Item_completed {item; _}}] ->
+     check string "durable event session" "s-1" session_id;
+     check string "durable event cursor" "opaque-item" view_cursor;
+     check (option string) "full item is decoded" (Some "latest") item.text
+   | _ -> fail "durable full item or truncation evidence was lost");
+  let empty = ok_or_fail (Msp.parse_view_page_result
+      (`Assoc ["events", `List []; "nextCursor", `Null])) in
+  check bool "end of durable history is explicit" true
+    (empty.events = [] && empty.next_cursor = None);
+  List.iter (fun malformed ->
+    check bool "malformed durable witness is refused" true
+      (Result.is_error (Msp.parse_view_page_result malformed)))
+    [ `Assoc ["events", `List []]
+    ; `Assoc ["events", `String "not-an-array"; "nextCursor", `Null]
+    ; page params (`String "")
+    ; page (List.remove_assoc "viewCursor" params) `Null
+    ; page (List.remove_assoc "sourceRange" params) `Null
+    ; page (("sourceRange", `Null) :: List.remove_assoc "sourceRange" params) `Null
+    ; page (("item", `Assoc ["truncated", `String "true"])
+            :: List.remove_assoc "item" params) `Null ]
+;;
+
 let () =
   run
     "runtime_muse_msp"
@@ -725,6 +782,8 @@ let () =
         ; test_case "session model selection wire contract" `Quick test_session_model_selection_wire_contract
         ; test_case "model usage names the call model" `Quick test_model_usage_names_the_call_model
         ; test_case "view gap preserves subscription identity" `Quick test_view_gap_preserves_subscription_identity
+        ; test_case "terminal cursor is required" `Quick test_terminal_cursor_is_required
+        ; test_case "durable view page contract" `Quick test_durable_view_page_contract
         ] )
     ]
 ;;

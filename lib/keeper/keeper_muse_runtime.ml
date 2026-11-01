@@ -726,7 +726,7 @@ let stream_projection ~quota_scope ~keeper_name ~runtime_id ~configured_model ~r
         | Serve.Turn_finished { text } ->
           Option.iter
             emit_text
-            (Keeper_official_client_text_stream.remainder text_stream ~final_text:text);
+            (Keeper_official_client_text_stream.finish_response text_stream ~final_text:text);
           finish_stream ())
   ; on_tool_started =
       (fun ~call_id ~tool_name ~arguments ->
@@ -1071,13 +1071,12 @@ let run_without_lifecycle ~result_scope ~media_store ~input_source ~argument_sou
         Printexc.raise_with_backtrace exn backtrace
     in
     let composed_context = prepared.composed_context in
-    let held = Session_store.held_context_for_resume claim_plan ~expected:stored_session in
-    let held_context =
-      if is_resume
-      then (Host.resume_prompt ~goal ~held ?composed_context prepared.messages).held_context
-      else Host.start_held_context ?composed_context prepared.messages
-    in
-    let context_frontier = { context_frontier with held_context } in
+    (* Push gaps may arrive after a terminal. Until this adapter has a durable
+       retention witness spanning turns, a stored digest cannot certify exact
+       context after compaction. Resend the selected current context, including
+       Memory, on every resume. This increases request bytes/tokens; it does not
+       cure oversized inputs. Session/history continuity remains independent. *)
+    let held = [] in
     let* prompt = Host.framed_prompt_for_turn ?composed_context ~held ~is_resume ~goal prepared in
     Log.Keeper.info
       ~keeper_name
@@ -1183,7 +1182,6 @@ let run_without_lifecycle ~result_scope ~media_store ~input_source ~argument_sou
         Error error
     in
     let session_state = ref claimed_session in
-    let settled_held_context = ref held_context in
     let recovery_failure = ref Session_store.Transport_interrupted in
     let update_session label transition =
       match transition !session_state with
@@ -1383,7 +1381,7 @@ let run_without_lifecycle ~result_scope ~media_store ~input_source ~argument_sou
          request carried its user message as history. *)
       let* settled =
         Session_store.settle_holding
-          ~held_context:!settled_held_context
+          ~held_context:[]
           ~base_path
           ~keeper_name
           ~expected:!session_state
@@ -1498,22 +1496,10 @@ let run_without_lifecycle ~result_scope ~media_store ~input_source ~argument_sou
                          observed_turn := Option.map
                              (fun (turn : observed_turn) -> { turn with model })
                              !observed_turn
-                       | Serve.Compaction_observed compaction ->
-                         (* A rewritten or unreported context cannot certify
-                            the exact blocks delivered before compaction. *)
-                         (match compaction.Msp.outcome with
-                          | Some (Msp.Compaction_noop | Msp.Compaction_failed
-                                 | Msp.Compaction_cancelled) -> ()
-                          | Some (Msp.Compaction_compacted
-                                 | Msp.Unrecognized_compaction_outcome _)
-                          | None -> settled_held_context := [])
-                       | Serve.View_gap_observed ->
-                         (* A dropped compaction cannot certify the exact
-                            blocks retained by the vendor session. *)
-                         settled_held_context := []
                        | Serve.Turn_started _ | Serve.Text_delta _ | Serve.Text_completed _
                        | Serve.Native_tool_started _ | Serve.Native_tool_finished _
                        | Serve.Approval_decided _ | Serve.Subscription_usage_observed _
+                       | Serve.Compaction_observed _ | Serve.View_gap_observed
                        | Serve.Usage_reported _ | Serve.Turn_finished _ -> ());
                       stream.on_serve_event event)
                     ~mgr:process_mgr
@@ -1678,7 +1664,7 @@ let run_without_lifecycle ~result_scope ~media_store ~input_source ~argument_sou
           recovery_failure := Session_store.State_persistence_failed;
           let* () =
             Session_store.settle_completed_holding
-              ~held_context:!settled_held_context
+              ~held_context:[]
               ~base_path
               ~keeper_name
               ~expected:!session_state

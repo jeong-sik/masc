@@ -523,6 +523,7 @@ FIXTURE = json.load(open(os.path.join(HERE, "fixture.json")))
 SESSION = FIXTURE["session_id"]
 SCENARIO = FIXTURE.get("scenario", "complete")
 CURSOR = [0]
+VIEW = []
 COUNT_PATH = os.path.join(HERE, "host-turn-count.txt")
 with open(os.path.join(HERE, "cwd.txt"), "w") as handle:
     handle.write(os.getcwd())
@@ -541,18 +542,46 @@ def cursor():
     CURSOR[0] += 1
     return "v:%d" % CURSOR[0]
 
-def notify(method, params):
+def notify(method, params, visible=True):
     # Muse's turnCount counts completed turns only: a failed or cancelled
     # terminal leaves it where it was.
     if method == "turn/completed" and params.get("terminal") == "completed":
         with open(COUNT_PATH, "w") as handle:
             handle.write(str(completed_turns + 1))
     params["viewCursor"] = cursor()
-    send({"jsonrpc": "2.0", "method": method, "params": params})
+    if method in ["turn/started", "turn/completed", "item/completed", "item/updated", "session/tokenUsage"]:
+        position = {"id": "record-" + params["viewCursor"], "sequence": CURSOR[0]}
+        params["sourceRange"] = {"stream": {"kind": "run", "id": "fixture-run"},
+                                 "first": position, "last": position}
+        VIEW.append({"method": method, "params": dict(params)})
+    if visible:
+        send({"jsonrpc": "2.0", "method": method, "params": params})
+    if method == "turn/completed" and FIXTURE.get("late_view_gap"):
+        notify("view/gap", {"sessionId": SESSION, "after": "before-hole", "next": params["viewCursor"]})
 
 def drain():
-    for _ in sys.stdin:
-        pass
+    for line in sys.stdin:
+        request = json.loads(line)
+        if request.get("method") != "view/page":
+            continue
+        params = request["params"]
+        assert params["sessionId"] == SESSION, request
+        assert params["direction"] == "backward" and params["limit"] == 1000, request
+        with open(os.path.join(HERE, "view-pages.log"), "a") as handle:
+            handle.write(json.dumps(params) + "\n")
+        if FIXTURE.get("history_error"):
+            send({"jsonrpc": "2.0", "id": request["id"],
+                  "error": {"code": -32040, "message": "fixture history unavailable"}})
+            continue
+        anchor = next(i for i, event in enumerate(VIEW) if event["params"]["viewCursor"] == params["cursor"])
+        events = VIEW[:anchor]
+        if FIXTURE.get("history_missing_boundary"):
+            events = [event for event in events if event["method"] != "turn/started"]
+        size = min(params["limit"], FIXTURE.get("history_page_size", params["limit"]))
+        page = events[-size:]
+        next_cursor = page[0]["params"]["viewCursor"] if len(events) > size else None
+        send({"jsonrpc": "2.0", "id": request["id"],
+              "result": {"events": page, "nextCursor": next_cursor}})
     sys.exit(0)
 
 init = read()
@@ -699,8 +728,10 @@ def acknowledge(disposition="started"):
         if mode == "start" and ("start_compaction" in FIXTURE or "compaction_metadata" in FIXTURE):
             metadata = FIXTURE.get("compaction_metadata", {
                 "trigger": "auto", "outcome": FIXTURE.get("start_compaction")})
-            item("item/completed", {"itemId": "compact-1", "kind": "compaction",
-                 "turnId": turn_id, "status": "completed", "revision": 1, **metadata})
+            notify("item/completed", {"sessionId": SESSION, "item": {
+                "itemId": "compact-1", "kind": "compaction", "turnId": turn_id,
+                "status": "completed", "revision": 1, **metadata}},
+                visible=not FIXTURE.get("drop_compaction"))
         if "subscription_usage" in FIXTURE and not FIXTURE.get("suppress_turn_usage_notification"):
             notify("usage/changed", FIXTURE["subscription_usage"])
         # One session/tokenUsage per model call; null names no model.
@@ -789,6 +820,32 @@ if SCENARIO == "later_unstreamed":
     item("item/completed", {"itemId": "later", "kind": "agentMessage", "turnId": turn_id,
                             "revision": 1, "status": "completed", "text": "final answer"})
     notify("turn/completed", {"sessionId": SESSION, "turnId": turn_id, "terminal": "completed"})
+    drain()
+if SCENARIO == "lost_latest":
+    older = {"sessionId": SESSION, "item": {
+        "itemId": "answer-a", "kind": "agentMessage", "turnId": turn_id,
+        "revision": 1, "status": "completed", "text": "OLDER_ANSWER"}}
+    notify("item/completed", older, visible=not FIXTURE.get("gap_before_older"))
+    if FIXTURE.get("gap_before_older"):
+        notify("view/gap", {"sessionId": SESSION, "after": "before-hole", "next": older["viewCursor"]})
+        send({"jsonrpc": "2.0", "method": "item/completed", "params": older})
+    notify("session/tokenUsage", {"sessionId": SESSION, "turnId": turn_id,
+        "modelId": "observed-model-a", "promptTokens": 10, "totalTokens": 12,
+        "usage": {"inputTokens": 10, "outputTokens": 2, "cachedTokens": 0, "reasoningTokens": 0}})
+    call_probe()
+    built_in_tool("tc-history", "read_file", "call-history")
+    # The durable commit exists even though the push queue lost it.
+    notify("item/completed", {"sessionId": SESSION, "item": {
+        "itemId": "answer-b", "kind": "agentMessage", "turnId": turn_id,
+        "revision": 1, "status": "completed", "text": "DURABLE_LATEST_ANSWER",
+        "truncated": FIXTURE.get("truncated_answer", False)}}, visible=False)
+    notify("session/tokenUsage", {"sessionId": SESSION, "turnId": turn_id,
+        "modelId": None, "promptTokens": 30, "totalTokens": 34,
+        "usage": {"inputTokens": 30, "outputTokens": 4, "cachedTokens": 0, "reasoningTokens": 0}}, visible=False)
+    terminal = {"sessionId": SESSION, "turnId": turn_id, "terminal": "completed"}
+    if "terminal_usage" in FIXTURE:
+        terminal["usage"] = FIXTURE["terminal_usage"]
+    notify("turn/completed", terminal)
     drain()
 if SCENARIO == "exit_mid_turn":
     item("item/started", tool_item("tc-1", "write_file", "call-native-1", "inProgress", 1))
@@ -2279,7 +2336,7 @@ let test_compaction_trace_failure_preserves_provider_result () =
     ; "break", Sys.Break ]
 ;;
 
-let check_resume_recall_blocks ?(fixture = []) ~compaction ~resend_after_start () =
+let check_resume_recall_blocks ?(fixture = []) ?(seed_held = false) ~compaction () =
   let fixture = match compaction with
     | None -> fixture
     | Some outcome -> ("start_compaction", `String outcome) :: fixture in
@@ -2304,25 +2361,44 @@ let check_resume_recall_blocks ?(fixture = []) ~compaction ~resend_after_start (
        | Error error -> fail (Agent_core.Error.to_string error));
       let mode = if index = 0 then "start" else "resume" in
       let prompt = read_text (Filename.concat base_path (mode ^ "-prompt.txt")) in
-      check bool "recall appears initially, when revised, or after compaction"
-        (index = 0 || index = 2 || (resend_after_start && index = 1))
+      check bool "current recall is redelivered without a retention witness"
+        true
         (String_util.contains_substring prompt recall);
       check bool "current clock delivered" true (String_util.contains_substring prompt clock);
       check bool "identical operator note remains an instruction" true
-        (String_util.contains_substring prompt "REPEATED_OPERATOR_NOTE"))
+        (String_util.contains_substring prompt "REPEATED_OPERATOR_NOTE");
+      let session = Store.load ~base_path ~keeper_name |> Result.get_ok |> Option.get in
+      check bool "no unproven exact context certificate is persisted" true
+        (match session.context_frontier with
+         | Some frontier -> frontier.held_context = []
+         | None -> false);
+      if seed_held && index = 0 then (
+        (* A previously written certificate must not revive the optimization. *)
+        let path = Store.path ~base_path ~keeper_name |> Result.get_ok in
+        let fields = read_text path |> Yojson.Safe.from_string |> Yojson.Safe.Util.to_assoc in
+        let frontier = List.assoc "context_frontier" fields |> Yojson.Safe.Util.to_assoc in
+        let held = `Assoc ["context", `String "block";
+          "block", `String (Prompt_block_id.to_string Prompt_block_id.Memory_os_recall);
+          "sha256", `String Digestif.SHA256.(to_hex (digest_string recall))] in
+        write_file ~mode:0o600 path (Yojson.Safe.to_string (`Assoc
+          (("context_frontier", `Assoc (("held_context", `List [held])
+            :: List.remove_assoc "held_context" frontier)) :: List.remove_assoc "context_frontier" fields)));
+        let seeded = Store.load ~base_path ~keeper_name |> Result.get_ok |> Option.get in
+        check bool "fixture seeds a readable prior certificate" true
+          ((Option.get seeded.context_frontier).held_context <> [])))
       ["RECALL_REVISION_ONE"; "RECALL_REVISION_ONE"; "RECALL_REVISION_TWO"; "RECALL_REVISION_TWO"])
 ;;
 
-let test_resume_deduplicates_recall_blocks () =
-  check_resume_recall_blocks ~compaction:None ~resend_after_start:false ()
+let test_resume_redelivers_recall_blocks () =
+  check_resume_recall_blocks ~seed_held:true ~compaction:None ()
 ;;
 
 let test_resume_restores_recall_after_compaction () =
-  check_resume_recall_blocks ~compaction:(Some "compacted") ~resend_after_start:true ()
+  check_resume_recall_blocks ~compaction:(Some "compacted") ()
 ;;
 
-let test_resume_keeps_recall_after_noop_compaction () =
-  check_resume_recall_blocks ~compaction:(Some "noop") ~resend_after_start:false ()
+let test_resume_redelivers_recall_after_noop_compaction () =
+  check_resume_recall_blocks ~compaction:(Some "noop") ()
 ;;
 
 let test_resume_restores_recall_after_view_gap () =
@@ -2330,7 +2406,7 @@ let test_resume_restores_recall_after_view_gap () =
     (fun timing ->
        check_resume_recall_blocks
          ~fixture:["start_view_gap", `String timing]
-         ~compaction:None ~resend_after_start:true ())
+         ~compaction:None ())
     ["before_ack"; "after_ack"]
 ;;
 
@@ -2340,8 +2416,14 @@ let test_other_session_view_gap_keeps_held_recall () =
        check_resume_recall_blocks
          ~fixture:["start_view_gap", `String timing;
                    "view_gap_session", `String "another-session"]
-         ~compaction:None ~resend_after_start:false ())
+         ~compaction:None ())
     ["before_ack"; "after_ack"]
+;;
+
+let test_late_gap_after_dropped_compaction_redelivers_recall () =
+  check_resume_recall_blocks
+    ~fixture:["late_view_gap", `Bool true; "drop_compaction", `Bool true]
+    ~compaction:(Some "compacted") ()
 ;;
 
 let test_call_usage_survives_missing_terminal_aggregate () =
@@ -2468,8 +2550,8 @@ let test_commentary_is_never_the_reply () =
 (* A turn whose final message MASC may have missed must not read as the
    model's silence: the reply could exist on the host. *)
 let test_an_unobserved_final_message_is_not_silence () =
-  List.iter (fun name ->
-    with_scripted_host ~fixture:(scenario name) (fun ~base_path ->
+  List.iter (fun (name, extra) ->
+    with_scripted_host ~fixture:(scenario name @ extra) (fun ~base_path ->
       let run = run_turn ~base_path ~tool:(masc_probe_tool (ref `Null)) in
       (match run.outcome.result with
        | Error _ -> ()
@@ -2478,22 +2560,19 @@ let test_an_unobserved_final_message_is_not_silence () =
            (List.length result.response.content));
       check_effect (name ^ ": effects unknown")
         Keeper_provider_attempt_effect.Observation_unavailable run.outcome))
-    [ "gap_no_message"; "open_message" ]
+    [ "gap_no_message", ["history_error", `Bool true]; "open_message", [] ]
 ;;
 
-let test_gap_before_ack_cannot_settle_lost_response_as_silence () =
+let test_gap_before_ack_reconciles_quiet_completion () =
   List.iter (fun other_session ->
     let fixture = scenario "no_message" @ ["start_view_gap", `String "before_ack"]
         @ (if other_session then ["view_gap_session", `String "another-session"] else []) in
     with_scripted_host ~fixture (fun ~base_path ->
       let run = run_turn ~base_path ~tool:(masc_probe_tool (ref `Null)) in
       match other_session, run.outcome.result with
-      | true, Ok result -> check int "unrelated gap permits a quiet turn" 0 (List.length result.response.content)
-      | false, Error _ ->
-        check_effect "lost response keeps effect uncertainty"
-          Keeper_provider_attempt_effect.Observation_unavailable run.outcome
-      | true, Error error -> fail (Agent_core.Error.to_string error)
-      | false, Ok _ -> fail "a gap before acknowledgement settled as silence"))
+      | (true | false), Ok result ->
+        check int "durable current turn proves quiet completion" 0 (List.length result.response.content)
+      | (true | false), Error error -> fail (Agent_core.Error.to_string error)))
     [false; true]
 ;;
 
@@ -2726,9 +2805,9 @@ let test_a_host_stopped_turns_context_stays_held_whatever_the_host_counted () =
      | Error error -> fail (Agent_core.Error.to_string error));
     let prompt = resume_prompt () in
     check bool
-      (Printf.sprintf "host count %d: the stopped turn's recall is held, not sent again"
+      (Printf.sprintf "host count %d: the stopped turn's current recall is redelivered"
          resumed_count)
-      false (String_util.contains_substring prompt "RECALL_SENT_BY_THE_STOPPED_TURN");
+      true (String_util.contains_substring prompt "RECALL_SENT_BY_THE_STOPPED_TURN");
     check bool "a block sent on every resume still goes out" true
       (String_util.contains_substring prompt "HOST_STOP_OPERATOR_NOTE")))
     [1; 2]
@@ -3291,6 +3370,84 @@ let test_ordinary_result_is_acknowledged_only_after_accepted_completion () =
     [false;true]
 ;;
 
+let test_durable_view_reconciles_answer_before_result_ack () =
+  List.iter (fun (extra, succeeds) ->
+    with_scripted_host ~fixture:(scenario "lost_latest" @
+      ["late_view_gap", `Bool true; "history_page_size", `Int 1] @ extra) (fun ~base_path ->
+      let effects = ref 0 in
+      let tool = Agent_core.Tool.create ~name:"masc_probe" ~description:"Return one original result"
+        ~parameters:[{Agent_core.Types.name="marker";description="Fixture marker";param_type=String;required=true}]
+        (fun _ -> incr effects;
+          Ok {Agent_core.Types.content="MASC_TOOL_RESULT";content_blocks=None;_meta=None}) in
+      let run = run_turn_with ~base_path ~tool () in
+      (match succeeds, run.outcome.result with
+       | true, Ok result ->
+         check string "durable latest answer replaces older push" "DURABLE_LATEST_ANSWER"
+           (response_text result);
+         let usage = Option.get result.response.usage in
+         check int "complete durable call input sum" 40 usage.input_tokens;
+         check int "complete durable call output sum" 6 usage.output_tokens;
+         let observation = Option.get result.runtime_observation in
+         check int "latest durable call supplies occupancy" 30
+           (Option.get observation.request_context).input_tokens;
+         check (option string) "unnamed newest call never inherits the older model" None
+           (Option.get result.response.telemetry).canonical_model_id;
+         check int "one authoritative usage report" 1 (List.length run.reports);
+         let texts = List.filter_map (function
+           | Agent_core.Types.ContentBlockDelta {delta=TextDelta text; _} -> Some text
+           | _ -> None) run.events in
+         check bool "authoritative recovered answer reaches the stream" true
+           (String.ends_with ~suffix:"DURABLE_LATEST_ANSWER" (String.concat "" texts));
+         check int "recovered final is streamed once" 1
+           (List.length (List.filter (String.ends_with ~suffix:"DURABLE_LATEST_ANSWER") texts))
+       | false, Error _ ->
+         check bool "incomplete witness grants no receipt ACK" true
+           (Option.is_none run.outcome.pending_result_receipts);
+         check bool "incomplete witness grants no session settlement" true
+           (Option.is_none run.outcome.settled_session);
+         check bool "incomplete witness grants no EndTurn" false
+           (List.exists (function
+              | Agent_core.Types.MessageDelta {stop_reason=Some EndTurn; _} -> true
+              | _ -> false) run.events)
+       | true, Error error -> fail (Agent_core.Error.to_string error)
+       | false, Ok _ -> fail "unavailable durable witness settled as a complete answer");
+      check int "MCP effect executes once" 1 !effects;
+      check int "durable replay does not repeat native tool observation" 1 (List.length run.native_actions);
+      (match List.assoc_opt "terminal_usage" extra with
+       | Some _ ->
+         (match run.reports with
+          | [report] ->
+            check string "failed witness cannot attribute the aggregate to a stale call model"
+              runtime_id report.model;
+            (match report.count with
+             | Running_count usage ->
+               check int "known provider aggregate survives failed reconciliation" 40 usage.input_tokens;
+               check int "known provider output survives failed reconciliation" 6 usage.output_tokens
+             | Count_replaced -> fail "aggregate unexpectedly replaced")
+          | _ -> fail "expected exactly one known aggregate despite failed reconciliation")
+       | None ->
+         if not succeeds then check int "unproven live call sums stay unknown" 0 (List.length run.reports));
+      let pending = Keeper_client_tool_outbox.load ~base_path ~keeper_name |> Result.get_ok in
+      check int "only proven completion consumes original result" (if succeeds then 0 else 1)
+        (List.length (Keeper_client_tool_outbox.receipt_ids pending));
+      if succeeds then (
+        let pages = String.split_on_char '\n' (String.trim
+            (read_text (Filename.concat base_path "view-pages.log"))) in
+        check bool "witness follows backward pages to the turn boundary" true
+          (List.length pages > 1);
+        write_fixture ~base_path [];
+        match (run_turn_with ~base_path ~tool ()).outcome.result with
+        | Ok result -> check (option bool) "ordinary no-gap session resumes" (Some true) result.session_resumed
+        | Error error -> fail (Agent_core.Error.to_string error))))
+    [ [], true; ["gap_before_older", `Bool true], true
+    ; ["history_error", `Bool true], false
+    ; ["history_error", `Bool true; "terminal_usage", `Assoc
+        ["inputTokens", `Int 40; "outputTokens", `Int 6;
+         "cachedTokens", `Int 0; "reasoningTokens", `Int 0]], false
+    ; ["history_missing_boundary", `Bool true], false
+    ; ["truncated_answer", `Bool true], false ]
+;;
+
 let test_original_result_retention_failure_cannot_yield () =
   with_scripted_host ~fixture:(scenario "stop_before_ack" @
     ["expected_probe_result", `Assoc ["content", `String "ORIGINAL_EFFECT_RESULT"; "is_error", `Bool true]])
@@ -3343,6 +3500,8 @@ let () =
            test_original_result_crosses_checkpoint_and_fresh_session
         ; test_case "ordinary physical result survives failed completion acceptance" `Quick
             test_ordinary_result_is_acknowledged_only_after_accepted_completion
+        ; test_case "durable view reconciles answer before result ACK" `Quick
+            test_durable_view_reconciles_answer_before_result_ack
         ; test_case "post-effect original retention failure cannot yield or complete" `Quick
             test_original_result_retention_failure_cannot_yield])
     ; ( "stream"
@@ -3406,8 +3565,8 @@ let () =
         ; test_case "commentary is never the reply" `Quick test_commentary_is_never_the_reply
         ; test_case "an unobserved final message is not silence" `Quick
             test_an_unobserved_final_message_is_not_silence
-        ; test_case "gap before acknowledgement cannot turn a lost response into silence" `Quick
-            test_gap_before_ack_cannot_settle_lost_response_as_silence
+        ; test_case "gap before acknowledgement reconciles quiet completion" `Quick
+            test_gap_before_ack_reconciles_quiet_completion
         ; test_case "a message completed after a gap is kept" `Quick
             test_a_message_completed_after_a_gap_is_kept
         ; test_case "later unstreamed message reaches live consumers" `Quick test_later_unstreamed_message_reaches_live_consumers
@@ -3459,13 +3618,15 @@ let () =
     ; ( "account selection"
       , [ test_case "account switch starts fresh" `Quick test_account_selection_starts_a_fresh_vendor_session
         ; test_case "source relogin starts fresh, refresh survives" `Quick test_source_relogin_starts_fresh_and_preserves_vendor_refresh
-        ; test_case "recall blocks deduplicated on native resume" `Quick test_resume_deduplicates_recall_blocks
+        ; test_case "current recall redelivered on native resume" `Quick test_resume_redelivers_recall_blocks
         ; test_case "native compaction metadata joins request trace" `Quick test_native_compaction_metadata_reaches_request_trace
         ; test_case "compaction trace failure preserves provider result" `Quick test_compaction_trace_failure_preserves_provider_result
         ; test_case "recall restored after host compaction" `Quick test_resume_restores_recall_after_compaction
-        ; test_case "noop compaction preserves held recall" `Quick test_resume_keeps_recall_after_noop_compaction
+        ; test_case "noop compaction still redelivers recall" `Quick test_resume_redelivers_recall_after_noop_compaction
         ; test_case "view gap redelivers held recall" `Quick test_resume_restores_recall_after_view_gap
-        ; test_case "another session's view gap preserves held recall" `Quick test_other_session_view_gap_keeps_held_recall
+        ; test_case "unrelated gap still redelivers selected recall" `Quick test_other_session_view_gap_keeps_held_recall
+        ; test_case "late gap after dropped compaction redelivers recall" `Quick
+            test_late_gap_after_dropped_compaction_redelivers_recall
         ; test_case "hook nudge identity and carried context" `Quick test_hook_nudges_bind_the_session_but_carried_context_does_not
         ; test_case "per-call usage survives missing terminal aggregate" `Quick test_call_usage_survives_missing_terminal_aggregate
         ; test_case "effective system override starts fresh" `Quick test_effective_system_override_starts_fresh

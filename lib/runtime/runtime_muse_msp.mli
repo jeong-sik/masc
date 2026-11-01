@@ -498,6 +498,7 @@ type notification =
   | Turn_completed of
       { session_id : string
       ; turn_id : string
+      ; view_cursor : string
       ; terminal : terminal
       ; usage : token_usage option
       ; reason : string option  (** Display text only; never branched on. *)
@@ -547,6 +548,23 @@ type notification =
           these. The method is kept so an observer can report it. *)
 
 val parse_notification : method_:string -> Yojson.Safe.t -> (notification, error) result
+
+type view_event =
+  { session_id : string
+  ; view_cursor : string
+  ; notification : notification
+  ; item_truncated : bool
+  }
+
+type view_page = { events : view_event list; next_cursor : string option }
+
+val view_page_backward_request : id:int -> session_id:string -> cursor:string -> Yojson.Safe.t
+(** The observed cursor is exclusive. Uses the published maximum page size;
+    callers follow returned cursors without interpreting their contents. *)
+
+val parse_view_page_result : Yojson.Safe.t -> (view_page, error) result
+(** Durable, ascending events with opaque provenance. A truncated agent item
+    cannot certify a complete answer. *)
 
 type approval_decision =
   | Approved

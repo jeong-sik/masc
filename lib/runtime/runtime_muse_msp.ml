@@ -1041,6 +1041,7 @@ type notification =
   | Turn_completed of
       { session_id : string
       ; turn_id : string
+      ; view_cursor : string
       ; terminal : terminal
       ; usage : token_usage option
       ; reason : string option
@@ -1096,6 +1097,7 @@ let parse_notification ~method_ params =
   | "turn/completed" ->
     let* session_id = required_string stage "sessionId" fields in
     let* turn_id = required_string stage "turnId" fields in
+    let* view_cursor = required_string stage "viewCursor" fields in
     let* terminal = parse_terminal stage fields in
     let* usage = optional_assoc stage "usage" fields in
     let* usage =
@@ -1106,7 +1108,7 @@ let parse_notification ~method_ params =
         Ok (Some usage)
     in
     let* reason = optional_text stage "reason" fields in
-    Ok (Turn_completed { session_id; turn_id; terminal; usage; reason })
+    Ok (Turn_completed { session_id; turn_id; view_cursor; terminal; usage; reason })
   | "item/started" ->
     let* session_id, item = item_notification ~stage fields in
     Ok (Item_started { session_id; item })
@@ -1317,4 +1319,53 @@ let parse_usage_read_result json =
   | Some usage ->
     let* usage = parse_subscription_usage stage usage in
     Ok (Some usage)
+;;
+
+type view_event =
+  { session_id : string
+  ; view_cursor : string
+  ; notification : notification
+  ; item_truncated : bool
+  }
+
+type view_page = { events : view_event list; next_cursor : string option }
+
+let view_page_backward_request ~id ~session_id ~cursor =
+  (* MSP publishes 1–1000, and may return fewer. This is a page boundary,
+     never a bound on the turn or on the number of pages we read. *)
+  request ~id ~method_:"view/page"
+    [ "sessionId", `String session_id; "cursor", `String cursor
+    ; "direction", `String "backward"; "limit", `Int 1000 ]
+;;
+
+let parse_view_page_result json =
+  let stage = "view/page" in
+  let* fields = assoc_at stage json in
+  let* events = required_member stage "events" fields in
+  let* events = match events with
+    | `List events -> Ok events
+    | _ -> fail stage "events must be an array" in
+  let* next = required_member stage "nextCursor" fields in
+  let* next_cursor = match next with
+    | `Null -> Ok None
+    | `String cursor when String.trim cursor <> "" -> Ok (Some cursor)
+    | _ -> fail stage "nextCursor must be a non-empty string or null" in
+  let* events = map_result (fun json ->
+    let* fields = assoc_at stage json in
+    let* method_ = required_string stage "method" fields in
+    let* params = required_member stage "params" fields in
+    let* params_fields = assoc_at stage params in
+    let* session_id = required_string stage "sessionId" params_fields in
+    let* view_cursor = required_string stage "viewCursor" params_fields in
+    let* source_range = required_member stage "sourceRange" params_fields in
+    let* _ = assoc_at stage source_range in
+    let* item_fields = optional_assoc stage "item" params_fields in
+    let* item_truncated =
+      match Option.bind item_fields (List.assoc_opt "truncated") with
+      | None -> Ok false
+      | Some (`Bool value) -> Ok value
+      | Some _ -> fail stage "item.truncated must be a boolean" in
+    let* notification = parse_notification ~method_ params in
+    Ok { session_id; view_cursor; notification; item_truncated }) events in
+  Ok { events; next_cursor }
 ;;

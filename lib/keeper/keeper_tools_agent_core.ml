@@ -51,6 +51,10 @@ type model_tool_surface =
   ; listing : listing_placement
   }
 
+let assemble_model_tool_surface ~image_admission ~tools ~agent_core_tools
+    ~on_demand_tool_names ~result_bounds ~listing : model_tool_surface =
+  { image_admission; tools; agent_core_tools; on_demand_tool_names; result_bounds; listing }
+
 type tool_bundle =
   { tools : Agent_core.Tool.t list
   ; agent_core_tools : Agent_core.Tool.t list

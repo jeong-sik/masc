@@ -94,6 +94,18 @@ type model_tool_surface = private
     from [Runtime_agent.runtime_accepts_image_input], without rereading a
     mutable runtime table. Handler, sandbox and effect state stay bundle-owned. *)
 
+val assemble_model_tool_surface :
+  image_admission:image_admission ->
+  tools:Agent_core.Tool.t list ->
+  agent_core_tools:Agent_core.Tool.t list ->
+  on_demand_tool_names:string list ->
+  result_bounds:(string * int) list ->
+  listing:listing_placement ->
+  model_tool_surface
+(** Internal bundle projection data assembly. This constructor grants no tool
+    authority and is not an operator policy setting. The bundle supplies its
+    already captured admission and the views selected under that same value. *)
+
 type tool_bundle =
   { tools : Agent_core.Tool.t list
     (** Every tool this turn can run, attached-service tools included as

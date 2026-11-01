@@ -922,13 +922,13 @@ let make_tool_bundle_for_descriptors_with_policy
     let held_schemas = List.map (fun (tool : Agent_core.Tool.t) -> tool.schema) tools in
     let listing = make_identity_listing ~held_schemas ~admitted ~carried () in
     let names = List.map (fun (tool : Agent_core.Tool.t) -> tool.schema.name) tools in
-    { image_admission
-    ; tools
-    ; agent_core_tools = agent_core_view ~admitted ~deferred listing
-    ; on_demand_tool_names = List.map (fun (tool : Agent_core.Tool.t) -> tool.schema.name)
-        (deferred @ identity_agent_tools)
-    ; result_bounds = List.filter (fun (name, _) -> List.mem name names) result_bounds
-    ; listing = placement deferred listing }
+    assemble_model_tool_surface
+      ~image_admission ~tools
+      ~agent_core_tools:(agent_core_view ~admitted ~deferred listing)
+      ~on_demand_tool_names:(List.map (fun (tool : Agent_core.Tool.t) -> tool.schema.name)
+        (deferred @ identity_agent_tools))
+      ~result_bounds:(List.filter (fun (name, _) -> List.mem name names) result_bounds)
+      ~listing:(placement deferred listing)
   in
   { tools
   ; agent_core_tools = agent_core_view ~admitted:(fun _ -> true) ~deferred:deferred_builtin_tools identity_listing

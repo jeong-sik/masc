@@ -25843,31 +25843,14 @@ let main
     | None -> ()
     | Some (task : Masc_domain.task) -> (
         let task_id = task.id in
-        let stalled_reason =
-          match state.operator_stalled with
-          | Masc_tui_agenda.Read rows ->
-              Option.map
-                (fun (row : Masc_tui_agenda.stalled) -> String.trim row.what)
-                (List.find_opt
-                   (fun (row : Masc_tui_agenda.stalled) ->
-                     String.equal row.task_id task_id)
-                   rows)
-          | Masc_tui_agenda.Not_read | Masc_tui_agenda.Read_failed _ -> None
-        in
         match Masc_tui_editor.editor_command () with
-        | None -> (
-            match stalled_reason with
-            | Some reason when not (String.equal reason "") ->
-                launch_task_cancel state ~mailbox:async_messages
-                  ~authority ~identity ~task_id ~reason
-            | Some _ | None ->
-                report_action state "error"
-                  "no $EDITOR set; export EDITOR to cancel here")
+        | None ->
+            report_action state "error"
+              "no $EDITOR set; export EDITOR to cancel here"
         | Some _ -> (
-            let default_reason = Option.value ~default:"" stalled_reason in
             let stem =
               Yojson.Safe.pretty_to_string
-                (`Assoc [ ("reason", `String default_reason) ])
+                (`Assoc [ ("reason", `String "") ])
               ^ "\n"
             in
             match

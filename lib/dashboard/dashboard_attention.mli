@@ -2,15 +2,13 @@
     operator intervention.
 
     Pure functions. Scans {!Dashboard_labels.workspace_snapshot} values
-    to produce a sorted list of items the operator should act on.
-    Each item carries what ends the wait — usually an MCP tool name, and for a
-    stop the operator signs, the surface that takes the signature.
+    to produce a sorted list of attention items. Each item carries a suggested
+    next step, often an MCP tool name.
 
-    Tasks that only an operator can move arrive already projected, in
-    [operator_tasks]. Deciding whether an agent can still act needs the Keeper
-    registry and the meta store, which a pure module cannot read; the
-    projection answers it the same way the rejection delivery does, so the
-    dashboard and the delivery cannot disagree about the same agent. *)
+    Keeper route observations arrive already projected in [operator_tasks].
+    The projection uses the same registry and meta store as rejection delivery;
+    an unavailable route does not establish that the task's owner has stopped
+    or that an operator decision is needed. *)
 
 (** {1 Types} *)
 
@@ -27,8 +25,8 @@ type attention_item = {
 (** {1 Collection} *)
 
 (** [collect ~now ~operator_tasks snapshots] scans for stuck agents and
-    idle-with-pending-work situations, folds in the tasks only the operator can
-    move, and returns the items sorted by severity (Critical first). *)
+    idle-with-pending-work situations, folds in task owner route observations,
+    and returns the items sorted by severity (Critical first). *)
 val collect :
   now:float ->
   operator_tasks:Operator_task_attention.item list ->
@@ -37,9 +35,8 @@ val collect :
 
 val detect_operator_tasks :
   Operator_task_attention.item list -> attention_item list
-(** A stop waiting for a signature and work held by nobody are the operator's
-    to end and are [Critical]; a Keeper record that does not decode is a
-    repair, and the task moves again once it is fixed, so it is [Warning]. *)
+(** An unavailable Keeper route and an unreadable Keeper record are both
+    [Warning] observations. Neither proves the task is abandoned. *)
 
 (** {1 Presentation} *)
 

@@ -214,7 +214,7 @@ let test_terminal_and_unclaimed_tasks_are_not_rows () =
 
 let () =
   Alcotest.run "operator_task_attention"
-    [ ( "tasks only an operator can move"
+    [ ( "task owner route observations"
       , [ Alcotest.test_case "a holder's cancel is not an operator row" `Quick
             test_a_holders_cancel_is_not_an_operator_row
         ; Alcotest.test_case "a completion is not an operator row" `Quick

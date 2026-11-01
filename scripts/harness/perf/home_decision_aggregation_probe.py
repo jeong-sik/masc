@@ -26,7 +26,7 @@ import sys
 HOME = "bin/masc_tui_home.ml"
 TYPES = "bin/masc_tui_types.ml"
 ASKS = "lib/tui_decode_asks.ml"
-SCOPE = ("Exact extracted Home decision aggregation under the OCaml interpreter; "
+SCOPE = ("Extracted Home decision aggregation with no baseline task routes under the OCaml interpreter; "
          "not complete Home projection, native frame timing, terminal paint, "
          "live-agent scale, installed performance or a latency target verdict")
 BENCHMARK = r"""let installation title declaration id =
@@ -144,9 +144,12 @@ def main():
             ["git", "show", f"{args.before_ref}:{name}"], cwd=root, text=True)
                   for name in (HOME, TYPES, ASKS)}
         after = {name: (root / name).read_text() for name in (HOME, TYPES, ASKS)}
-        if declarations(before) != declarations(after):
-            parser.error("baseline and candidate action type declarations differ")
+        before_asker, before_ask_key, before_home_types = declarations(before)
         asker, ask_key, home_types = declarations(after)
+        # A removed task-route constructor is the one intentional type change.
+        before_home_types = before_home_types.replace("  | Home_operator_task of string\n", "")
+        if (before_asker, before_ask_key, before_home_types) != (asker, ask_key, home_types):
+            parser.error("baseline and candidate action type declarations differ")
         old = aggregation(before[HOME])
         old_helper = (extract(before[HOME], "module Action_table =", "\n(* Current successes survive")
                       if "ordered_decision_rows" in old else "")
@@ -162,7 +165,7 @@ def main():
         parser.error(str(error))
     probe = ("module Masc = struct module Tui_decode_asks = struct\n"
              + asker + "\n" + ask_key + "\nend end\n" + home_types + "\n" + old_helper
-             + "\nlet before approval_rows questions goals approvals =\n" + old
+             + "\nlet before approval_rows questions goals approvals =\n  let tasks = [] in\n" + old
              + "\n" + helper
              + "\nlet after approval_rows questions goals approvals =\n" + new
              + "\n" + BENCHMARK)
@@ -178,7 +181,7 @@ def main():
         "version": subprocess.check_output([ocaml, "-version"], text=True).strip(),
         "command": command, "requests": [30, 300, 3000], "alternating_rounds": 9,
         "iterations_per_batch": {"30": 1000, "300": 100, "3000": 3},
-        "type_shim": "Only enclosing Masc.Tui_decode_asks module recreated; declarations copied exactly",
+        "type_shim": "Enclosing Ask module recreated; removed baseline task constructor omitted and baseline task rows empty",
         "before_files_sha256": {name: digest(value) for name, value in before.items()},
         "after_files_sha256": {name: digest(value) for name, value in after.items()},
         "before_helper_sha256": digest(old_helper),

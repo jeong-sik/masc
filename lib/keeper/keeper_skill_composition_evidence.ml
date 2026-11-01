@@ -436,7 +436,74 @@ type statistics =
   ; first_recorded_at : float option
   ; last_recorded_at : float option
   }
-type observation = { latest : t option; statistics : statistics }
+type run_summary =
+  { run_id : Keeper_tool_plan.Composition_run_id.t
+  ; keeper : string
+  ; execution : Keeper_tool_composition_catalog.execution_mode
+  ; request_id : string option
+  ; disposition : (unit, unit, unit) Tool_result.disposition
+  ; duration_ms : float
+  ; recorded_at : float
+  }
+
+let run_summary (run : t) =
+  let fields = match run.result with `Assoc fields -> fields | _ -> assert false in
+  { run_id = Keeper_tool_plan.Composition_run_id.of_string run.composition_run_id |> Result.get_ok
+  ; keeper = run.keeper_name
+  ; execution = run.composition_execution
+  ; request_id = run.request_id
+  ; disposition = (match List.assoc "disposition" fields with
+      | `String value -> Tool_result.unit_disposition_of_string value |> Result.get_ok
+      | _ -> assert false)
+  ; duration_ms = (match List.assoc "duration_ms" fields with `Float value -> value | _ -> assert false)
+  ; recorded_at = run.recorded_at
+  }
+;;
+
+let run_summary_to_yojson (summary : run_summary) =
+  `Assoc
+    [ "composition_run_id", `String (Keeper_tool_plan.Composition_run_id.to_string summary.run_id)
+    ; "keeper", `String summary.keeper
+    ; "composition_execution", `String (execution_to_string summary.execution)
+    ; "request_id", Option.fold ~none:`Null ~some:(fun value -> `String value) summary.request_id
+    ; "disposition", `String (Tool_result.string_of_disposition summary.disposition)
+    ; "duration_ms", `Float summary.duration_ms
+    ; "recorded_at", `Float summary.recorded_at
+    ]
+;;
+
+let run_summary_of_yojson = function
+  | `Assoc fields ->
+    (match List.sort (fun (a, _) (b, _) -> String.compare a b) fields with
+     | [ "composition_execution", `String execution
+       ; "composition_run_id", `String run_id
+       ; "disposition", `String disposition
+       ; "duration_ms", `Float duration_ms
+       ; "keeper", `String keeper
+       ; "recorded_at", `Float recorded_at
+       ; "request_id", request_id
+       ] ->
+       let request = match request_id with
+         | `Null -> Some None
+         | `String value when String.trim value <> "" -> Some (Some value)
+         | _ -> None in
+       (match Keeper_tool_plan.Composition_run_id.of_string run_id,
+          execution_of_string execution, Tool_result.unit_disposition_of_string disposition, request with
+        | Ok run_id, Some execution, Ok disposition, Some request_id
+          when String.trim keeper <> ""
+            && Float.is_finite duration_ms && duration_ms >= 0.
+            && Float.is_finite recorded_at
+            && (match execution, request_id with
+                | Inline, None | Async, Some _ -> true
+                | Inline, Some _ | Async, None -> false) ->
+          Ok { run_id; keeper; execution; request_id; disposition; duration_ms; recorded_at }
+        | Error _, _, _, _ | _, None, _, _ | _, _, Error _, _ | _, _, _, None
+        | Ok _, Some _, Ok _, Some _ -> Error (Invalid_record "invalid retained run summary"))
+     | _ -> Error (Invalid_record "invalid retained run summary fields"))
+  | _ -> Error (Invalid_record "retained run summary must be an object")
+;;
+
+type observation = { latest : t option; runs : t list; statistics : statistics }
 
 let unique_runs runs =
   let module Runs = Map.Make (String) in
@@ -507,12 +574,8 @@ let statistics_to_yojson stats =
 let load_observation config reference =
   let open Result.Syntax in
   let* runs = scan_runs config reference in
-  let runs = unique_runs runs in
-  let latest = List.fold_left (fun newest candidate -> match newest with
-    | None -> Some candidate
-    | Some newest -> Some (if newest_order candidate newest > 0 then candidate else newest))
-    None runs in
-  Ok { latest; statistics = statistics runs }
+  let runs = unique_runs runs |> List.sort (fun left right -> newest_order right left) in
+  Ok { latest = List.nth_opt runs 0; runs; statistics = statistics runs }
 ;;
 
 let load_latest config reference =

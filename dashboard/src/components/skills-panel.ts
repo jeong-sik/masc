@@ -6,6 +6,7 @@ import { SkillSourceInspector } from './skill-source-inspector'
 import { SkillAsyncEvidenceView } from './skill-async-evidence-view'
 import { SkillNodeEvidenceView } from './skill-node-evidence-view'
 import { SkillFlowView } from './skill-flow-view'
+import { SkillRunHistory } from './skill-run-history'
 import { SkillCreateForm, createReceiptMessage } from './skill-create-form'
 import {
   classifySkillEditorError,
@@ -320,7 +321,7 @@ function SkillEvidenceView({ result, io }: { result: SkillEvidenceResponse | nul
         const ownerClaims = item.owner.claims.map(claim => claim.keeper).join(', ') || 'unclaimed'
         return html`
           <div key=${JSON.stringify([item.trace_id, runField(activation, 'skill_tool_use_id')])}>
-            <div class="font-semibold">Original activation · ${delivered ? '✓ delivered' : '◌ invoked'} · ${ownerClaims} · ${actions} original-turn actions${activationEvidence.length > 1 ? ` · equal-time candidate ${index + 1}/${activationEvidence.length}` : ''}</div>
+            <div class="font-semibold">Latest independent activation · ${delivered ? '✓ delivered' : '◌ invoked'} · ${ownerClaims} · ${actions} original-turn actions${activationEvidence.length > 1 ? ` · equal-time candidate ${index + 1}/${activationEvidence.length}` : ''}</div>
             <div class="ss-muted mono">${runField(activation, 'activated_at')} · tool use ${runField(activation, 'skill_tool_use_id')} · trace ${item.trace_id} · owner ${item.owner.status}</div>
             <div class="ss-muted mono">original ${runField(activation, 'turn_ref')} · runtime ${runField(activation, 'runtime_id')}</div>
             <${SkillAsyncEvidenceView} evidence=${item} />
@@ -335,6 +336,8 @@ function SkillEvidenceView({ result, io }: { result: SkillEvidenceResponse | nul
             · ${composition.keeper}
           </div>
           <div class="ss-muted mono">${composition.composition_run_id} · ${compositionNodeCount} typed node settlements</div>
+          <div class="ss-muted mono text-3xs">Recorded result ${recordedTimestamp(composition.recorded_at)} · ${composition.composition_execution} · request ${composition.request_id ?? 'inline'}
+            · parent tool use ${composition.parent_tool_use_id || '(empty)'} · turn ${composition.parent_turn} · planned index ${composition.parent_planned_index}</div>
           ${composition.result.disposition === 'failed' ? html`
             <div class="mt-2 rounded border border-[var(--color-status-err)] p-2" role="note" aria-label="Composition failure">
               <strong>Composition failed</strong>
@@ -727,29 +730,39 @@ function SkillEvidenceLoader({ reference, io, isCurrent }: {
   const error = useSignal<string | null>(null)
   const loading = useSignal(false)
   const active = useRef(true)
-  useEffect(() => () => { active.current = false }, [])
+  const requestGeneration = useRef(0)
+  useEffect(() => () => { active.current = false; requestGeneration.current += 1 }, [])
+  const load = async (runId?: string) => {
+    if (!active.current || !isCurrent()) return
+    const generation = ++requestGeneration.current
+    loading.value = true
+    error.value = null
+    try {
+      const evidence = await fetchSkillEvidence(reference, runId)
+      if (!active.current || !isCurrent() || generation !== requestGeneration.current) return
+      const selection = evidence.composition_selection
+      if (referenceKey(evidence.reference.identity, evidence.reference.content_revision)
+          !== referenceKey(reference.identity, reference.content_revision)
+        || (runId === undefined ? selection.mode !== 'latest_retained'
+          : selection.mode !== 'exact_run' || selection.composition_run_id !== runId)) {
+        throw new Error('Returned evidence does not match the requested Skill revision and run.')
+      }
+      result.value = evidence
+    } catch (cause) {
+      if (active.current && isCurrent() && generation === requestGeneration.current) {
+        error.value = cause instanceof Error ? cause.message : String(cause)
+      }
+    } finally {
+      if (active.current && isCurrent() && generation === requestGeneration.current) loading.value = false
+    }
+  }
   return html`<div>
     <div class="mb-2 flex items-center justify-between"><strong>Retained evidence</strong>
-      <button class="ss-btn" type="button" disabled=${loading.value} onClick=${async () => {
-        if (!active.current || !isCurrent() || loading.value) return
-        loading.value = true
-        error.value = null
-        try {
-          const evidence = await fetchSkillEvidence(reference)
-          if (!active.current || !isCurrent()) return
-          if (referenceKey(evidence.reference.identity, evidence.reference.content_revision)
-              !== referenceKey(reference.identity, reference.content_revision)) {
-            throw new Error('Returned evidence does not match the selected Skill revision.')
-          }
-          result.value = evidence
-        } catch (cause) {
-          if (active.current && isCurrent()) error.value = cause instanceof Error ? cause.message : String(cause)
-        } finally {
-          if (active.current && isCurrent()) loading.value = false
-        }
-      }}>${loading.value ? 'Loading…' : 'Load'}</button>
+      <button class="ss-btn" type="button" disabled=${loading.value} onClick=${() => { void load() }}>${loading.value ? 'Loading…' : 'Load'}</button>
     </div>
+    ${loading.value && result.value ? html`<p role="status">Loading requested selection; previous observation retained.</p>` : null}
     ${error.value ? html`<div role="alert" class="text-[var(--color-status-err)]">${error.value}</div>` : null}
+    ${result.value ? html`<${SkillRunHistory} result=${result.value} onSelect=${(runId?: string) => { void load(runId) }} />` : null}
     <${SkillEvidenceView} result=${result.value} io=${io} />
   </div>`
 }

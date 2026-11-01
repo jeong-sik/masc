@@ -59,7 +59,21 @@ type statistics = private
   ; first_recorded_at : float option
   ; last_recorded_at : float option
   }
-type observation = private { latest : t option; statistics : statistics }
+type run_summary = private
+  { run_id : Keeper_tool_plan.Composition_run_id.t
+  ; keeper : string
+  ; execution : Keeper_tool_composition_catalog.execution_mode
+  ; request_id : string option
+  ; disposition : (unit, unit, unit) Tool_result.disposition
+  ; duration_ms : float
+  ; recorded_at : float
+  }
+val run_summary : t -> run_summary
+val run_summary_to_yojson : run_summary -> Yojson.Safe.t
+val run_summary_of_yojson : Yojson.Safe.t -> (run_summary, error) result
+(** Payload-free observation metadata; disposition reuses Tool_result's closed
+    sum. This does not admit or retry an execution. *)
+type observation = private { latest : t option; runs : t list; statistics : statistics }
 
 val statistics : t list -> statistics
 (** One sample per original run id, selecting its most recently recorded
@@ -71,8 +85,9 @@ val statistics : t list -> statistics
     when executions started. Empty observations have null bounds and durations. *)
 val statistics_to_yojson : statistics -> Yojson.Safe.t
 val load_observation : Workspace.config -> Skill_reference.t -> (observation, error) result
-(** Read the exact-reference partition once, sharing the same validated records
-    between latest selection and statistics. A read error refuses both. *)
+(** Read the exact-reference partition once. [runs] is newest first, with the
+    same deduplicated original runs used for latest selection and statistics.
+    A read error refuses all three projections. *)
 val load_latest : Workspace.config -> Skill_reference.t -> (t option, error) result
 val reference : t -> Skill_reference.t
 val to_yojson : t -> Yojson.Safe.t

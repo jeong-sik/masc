@@ -3729,6 +3729,7 @@
   alcotest
   fmt
   masc
+  masc.skill_reference
   masc.masc_goal
   masc_tui_model_runtime_table
   masc_tui_types

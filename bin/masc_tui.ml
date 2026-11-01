@@ -14559,6 +14559,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   withdraw_tools_async_details state;
   state.tools_skill_evidence <- None;
   state.tools_evidence_reference <- None;
+  state.tools_evidence_run_id <- None;
   state.browser_lane_read_resume <- None;
   state.tools_skill_cursor <- 0;
   state.tools_scroll <- 0;
@@ -16726,12 +16727,13 @@ let launch_goal_confirmation_read state ~mailbox ~goal_id =
                  | Goal_phase.Executing | Goal_phase.Verifying | Goal_phase.Completed
                  | Goal_phase.Dropped | Goal_phase.Paused _ | Goal_phase.Blocked _ -> Error "goal is not awaiting confirmation"))
 
-let launch_skill_evidence_read state ~mailbox reference =
+let launch_skill_evidence_read ?composition_run_id state ~mailbox reference =
   if server_authority_ready state then begin
     let key = Skill_reference.to_yojson reference |> Yojson.Safe.to_string in
     let request = ref () in
     state.tools_evidence_request <- Some request;
     state.tools_evidence_reference <- Some reference;
+    state.tools_evidence_run_id <- composition_run_id;
     let check = capture_workspace_check state ~mailbox in
     let host = server_peer_host and port = state.port in
     launch_workspace_request state ~mailbox ~boundary_error:Fun.id
@@ -16739,7 +16741,7 @@ let launch_skill_evidence_read state ~mailbox reference =
       (fun () ->
         let open Result.Syntax in
         let* () = check () in
-        let* json = Masc_tui_http.post_skill_evidence ~host ~port reference in
+        let* json = Masc_tui_http.post_skill_evidence ?composition_run_id ~host ~port reference in
         let* () = check () in
         Ok json)
   end
@@ -16879,8 +16881,8 @@ let resume_reads_after_authority_change state ~mailbox ~refresh_inflight
          launch_tools_async_task ~force:true state ~mailbox;
          (match state.tools_evidence_reference, selected_tools_skill_profile state with
           | Some reference, Some profile when Skill_reference.equal reference profile.esp_reference ->
-              launch_skill_evidence_read state ~mailbox reference
-          | _ -> state.tools_evidence_reference <- None)
+              launch_skill_evidence_read ?composition_run_id:state.tools_evidence_run_id state ~mailbox reference
+          | _ -> state.tools_evidence_reference <- None; state.tools_evidence_run_id <- None)
      | Code ->
          let deliver = workspace_enqueue state mailbox in
          let host = server_peer_host in
@@ -23303,6 +23305,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
       if Option.exists (fun held -> held == request) state.tools_evidence_request then (
         state.tools_evidence_request <- None;
         state.tools_evidence_reference <- None;
+        state.tools_evidence_run_id <- None;
         match result with
         | Error detail -> report_action state "error" ("Skill evidence lookup failed: " ^ detail)
         | Ok json -> state.tools_skill_evidence <- Some (key, json))
@@ -26374,6 +26377,20 @@ Use relative paths for resources already held in the package. -->
     | None -> report_action state "error" "no published Skill selected"
     | Some profile ->
         launch_skill_evidence_read state ~mailbox:async_messages profile.esp_reference
+  in
+  let handle_skill_run delta =
+    match selected_tools_skill_profile state, state.tools_skill_evidence with
+    | Some profile, Some (key, json)
+      when String.equal key (Skill_reference.to_yojson profile.esp_reference |> Yojson.Safe.to_string) ->
+      (match Masc.Tui_decode_skill_evidence.decode_skill_evidence json with
+       | Error detail -> report_action state "error" detail
+       | Ok evidence ->
+         (match adjacent_skill_evidence_run state ~reference:profile.esp_reference
+            ~selection:evidence.se_composition_selection ~runs:evidence.se_composition_runs ~delta with
+          | None -> report_action state "system" "No adjacent original run in retained coverage"
+          | Some composition_run_id -> launch_skill_evidence_read ~composition_run_id
+              state ~mailbox:async_messages profile.esp_reference))
+    | _ -> report_action state "system" "Load this Skill revision's retained evidence first"
   in
   let handle_skill_edit () =
     let check = capture_workspace_check state ~mailbox:async_messages in
@@ -32664,6 +32681,8 @@ Use relative paths for resources already held in the package. -->
                 handle_skill_evidence ())
        | Some "J" when state.view = Tools -> move_tools_skill_cursor state 1
        | Some "K" when state.view = Tools -> move_tools_skill_cursor state (-1)
+       | Some "[" when state.view = Tools && state.tools_pane = Tools_surface -> handle_skill_run 1
+       | Some "]" when state.view = Tools && state.tools_pane = Tools_surface -> handle_skill_run (-1)
        | Some "\r" when state.view = Tools && state.tools_pane = Tools_async ->
            if Option.is_some state.tools_async_selection then begin
              state.tools_async_detail_open <- true;

@@ -58,10 +58,17 @@ type composition_statistics =
   ; scst_last_recorded_at : float option
   }
 
+type composition_selection =
+  | Latest_retained
+  | Exact_run of Keeper_tool_plan.Composition_run_id.t
+
 type skill_evidence =
-  { se_status : skill_evidence_status
+  { se_reference : Skill_reference.t
+  ; se_status : skill_evidence_status
   ; se_activation : skill_evidence_activation option
   ; se_composition : Yojson.Safe.t option
+  ; se_composition_selection : composition_selection
+  ; se_composition_runs : Keeper_skill_composition_evidence.run_summary list option
   ; se_composition_statistics : composition_statistics option
   ; se_coverage : skill_evidence_coverage
   }
@@ -430,8 +437,47 @@ let decode_composition_statistics json =
             ; scst_first_recorded_at; scst_last_recorded_at }
 ;;
 
+let decode_composition_selection = function
+  | `Assoc [ "mode", `String "latest_retained" ] -> Ok Latest_retained
+  | `Assoc fields when skill_evidence_exact_fields [ "mode"; "composition_run_id" ] fields
+      && List.assoc_opt "mode" fields = Some (`String "exact_run") ->
+    (match List.assoc_opt "composition_run_id" fields with
+     | Some (`String value) ->
+       Keeper_tool_plan.Composition_run_id.of_string value
+       |> Result.map (fun value -> Exact_run value)
+       |> Result.map_error (fun _ -> "selected composition_run_id must be UUIDv7")
+     | _ -> Error "selected composition_run_id must be UUIDv7")
+  | _ -> Error "invalid composition selection"
+;;
+
+let decode_composition_runs json =
+  match json with
+  | `Assoc fields when not (List.mem_assoc "composition_runs" fields) -> Error "composition_runs is required"
+  | _ -> match member "composition_runs" json with
+    | `Null -> Ok None
+    | `List values ->
+      let* runs = List.fold_left (fun acc json ->
+        let* acc = acc in
+        let* summary = Keeper_skill_composition_evidence.run_summary_of_yojson json
+          |> Result.map_error Keeper_skill_composition_evidence.error_to_string in
+        Ok (summary :: acc)) (Ok []) values |> Result.map List.rev in
+      let rec ordered = function
+        | [] | [_] -> true
+        | (left : Keeper_skill_composition_evidence.run_summary) :: (right :: _ as rest) ->
+          (left.recorded_at > right.recorded_at
+            || (left.recorded_at = right.recorded_at
+              && String.compare (Keeper_tool_plan.Composition_run_id.to_string left.run_id)
+                   (Keeper_tool_plan.Composition_run_id.to_string right.run_id) > 0))
+          && ordered rest in
+      let ids = List.map (fun (run : Keeper_skill_composition_evidence.run_summary) ->
+        Keeper_tool_plan.Composition_run_id.to_string run.run_id) runs in
+      if ordered runs && List.length ids = List.length (List.sort_uniq String.compare ids)
+      then Ok (Some runs) else Error "retained run history is duplicated or unordered"
+    | _ -> Error "composition_runs must be a list or null"
+;;
+
 let decode_skill_evidence json =
-  if member "schema" json <> `String "masc.skill-evidence/v8"
+  if member "schema" json <> `String "masc.skill-evidence/v9"
   then Error "Skill evidence schema is unsupported"
   else
     let* reference =
@@ -440,25 +486,39 @@ let decode_skill_evidence json =
       | Error _ -> Error "Skill evidence reference is invalid"
     in
     let* se_activation = decode_skill_evidence_activation reference json in
+    let* se_composition_selection = decode_composition_selection (member "composition_selection" json) in
+    let* se_composition_runs = decode_composition_runs json in
     let* se_composition = decode_skill_evidence_optional_object "composition" json in
     let* statistics = decode_skill_evidence_optional_object "composition_statistics" json in
     let* se_composition_statistics = match statistics with
       | None -> Ok None
       | Some statistics -> decode_composition_statistics statistics |> Result.map Option.some in
-    let* () =
+    let* composition_record =
       match se_composition with
-      | None -> Ok ()
+      | None -> Ok None
       | Some composition ->
         (match Keeper_skill_composition_evidence.of_yojson composition with
          | Ok evidence
            when Skill_reference.equal
                   reference
                   (Keeper_skill_composition_evidence.reference evidence) ->
-           Ok ()
+           Ok (Some evidence)
          | Ok _ -> Error "Skill composition evidence reference disagrees with envelope"
          | Error _ -> Error "Skill composition evidence record is invalid")
     in
-    let observed = Option.is_some se_activation || Option.is_some se_composition in
+    let selected = match se_composition_runs with
+      | None -> None
+      | Some runs -> match se_composition_selection with
+        | Latest_retained -> List.nth_opt runs 0
+        | Exact_run run_id -> List.find_opt
+            (fun (run : Keeper_skill_composition_evidence.run_summary) ->
+              Keeper_tool_plan.Composition_run_id.equal run_id run.run_id) runs in
+    let* () = match selected, composition_record with
+      | None, None -> Ok ()
+      | Some selected, Some record when selected = Keeper_skill_composition_evidence.run_summary record -> Ok ()
+      | None, Some _ | Some _, None | Some _, Some _ -> Error "composition detail disagrees with retained selection" in
+    let observed = Option.is_some se_activation
+      || Option.exists (fun runs -> runs <> []) se_composition_runs in
     let* se_status =
       match member "status" json, observed with
       | `String "observed", true -> Ok Skill_evidence_observed
@@ -522,15 +582,13 @@ let decode_skill_evidence json =
           coverage
       in
       let* () =
-        match sec_composition_scope, se_composition, sec_composition_runs_observed with
-        | Skill_evidence_exact_reference_retained_runs, Some _, n
-          when n > 0 && sec_composition_unavailable = [] ->
-          Ok ()
-        | Skill_evidence_exact_reference_retained_runs, None, 0
-          when sec_composition_unavailable = [] ->
+        match sec_composition_scope, se_composition_runs, sec_composition_runs_observed with
+        | Skill_evidence_exact_reference_retained_runs, Some runs, n
+          when List.length runs = n && sec_composition_unavailable = []
+            && Option.is_some se_composition_statistics ->
           Ok ()
         | Skill_evidence_composition_unavailable, None, 0
-          when sec_composition_unavailable <> [] ->
+          when sec_composition_unavailable <> [] && Option.is_none se_composition_statistics ->
           Ok ()
         | ( Skill_evidence_exact_reference_retained_runs
           | Skill_evidence_composition_unavailable ), (None | Some _), _ ->
@@ -543,13 +601,22 @@ let decode_skill_evidence json =
              | Skill_evidence_composition_unavailable ->
                  Error "Skill statistics cannot claim an unavailable composition partition"
              | Skill_evidence_exact_reference_retained_runs ->
-                 let latest_recorded_at = Option.bind se_composition (fun value ->
-                   match member "recorded_at" value with
-                   | `Float value -> Some value
-                   | `Int value -> Some (float_of_int value)
-                   | _ -> None) in
+                 let runs = Option.value ~default:[] se_composition_runs in
+                 let latest_recorded_at = Option.map
+                   (fun (run : Keeper_skill_composition_evidence.run_summary) -> run.recorded_at)
+                   (List.nth_opt runs 0) in
+                 let first_recorded_at = Option.map
+                   (fun (run : Keeper_skill_composition_evidence.run_summary) -> run.recorded_at)
+                   (List.nth_opt (List.rev runs) 0) in
+                 let count disposition = List.fold_left
+                   (fun count (run : Keeper_skill_composition_evidence.run_summary) ->
+                     if run.disposition = disposition then count + 1 else count) 0 runs in
                  if statistics.scst_records = sec_composition_runs_observed
                     && statistics.scst_last_recorded_at = latest_recorded_at
+                    && statistics.scst_first_recorded_at = first_recorded_at
+                    && statistics.scst_completed.sds_samples = count (Tool_result.Completed ())
+                    && statistics.scst_failed.sds_samples = count (Tool_result.Failed ())
+                    && statistics.scst_deferred = count (Tool_result.Deferred ())
                  then Ok ()
                  else Error "Skill statistics disagree with retained composition evidence") in
       let owner_gap_count =
@@ -592,9 +659,12 @@ let decode_skill_evidence json =
         else Error "Skill evidence activation coverage disagrees with snapshot"
       in
       Ok
-        { se_status
+        { se_reference = reference
+        ; se_status
         ; se_activation
         ; se_composition
+        ; se_composition_selection
+        ; se_composition_runs
         ; se_composition_statistics
         ; se_coverage =
             { sec_composition_scope

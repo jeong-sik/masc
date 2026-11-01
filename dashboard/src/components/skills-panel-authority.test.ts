@@ -35,8 +35,13 @@ function catalog(names = ['alpha', 'beta']): SkillsResponse {
 const observation = (id: string): AsyncRequestObservation => ({ schema: 'masc.async-request-observation/v1', status: 'ready',
   summary: { active: 1, runtime_owned: 1, ownership_unknown: 0, record_errors: 0 }, record_errors: [], startup_recovery: null,
   requests: [{ request_id: id, keeper_name: 'owner', submitted_by: 'operator', request_context: null, status: 'running', submitted_at: 1, worker_ownership: 'runtime_owned' }] })
-const evidence = (name: string, sessions: number): SkillEvidenceResponse => ({ schema: 'masc.skill-evidence/v8',
-  status: 'not_observed_in_retained_coverage', reference: reference(name), activation: null, composition: null, composition_statistics: null,
+const evidence = (name: string, sessions: number): SkillEvidenceResponse => ({ schema: 'masc.skill-evidence/v9',
+  status: 'not_observed_in_retained_coverage', reference: reference(name), activation: null, composition: null,
+  composition_selection: { mode: 'latest_retained' }, composition_runs: [],
+  composition_statistics: { scope: 'exact_reference_retained_runs', duration_scope: 'stored_executor_result', percentile_method: 'nearest_rank',
+    records: 0, recorded_window: { first_recorded_at: null, last_recorded_at: null },
+    completed: { samples: 0, mean_ms: null, min_ms: null, p50_ms: null, p95_ms: null, max_ms: null },
+    failed: { samples: 0, mean_ms: null, min_ms: null, p50_ms: null, p95_ms: null, max_ms: null }, deferred: 0 },
   coverage: { composition_scope: 'exact_reference_retained_runs', composition_runs_observed: 0, composition_unavailable: [], coverage_complete: false,
     activation_scope: 'complete_retained_trace_snapshot', activation_sessions_inspected: sessions, activation_ledgers_loaded: 0, activation_gaps: [], activation_owner_gap_count: 0 } })
 const open = async (name: string) => fireEvent.click(await screen.findByRole('button', { name: `Read instructions for ${name}` }))

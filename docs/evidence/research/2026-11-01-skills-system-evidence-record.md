@@ -81,3 +81,15 @@
 - 탐색 수정: 선언된 read-write Source_missing을 선택 목록에 포함한다. 조회에는 파일 쓰기가 없고, 기존 create가 후보 검증 이후에만 폴더를 초기화한다. ready/missing/read-only/not-directory/unavailable/unresolved를 실제 임시 파일시스템 fixture로 구분하고 첫 생성 후 exact-reference readback을 검사한다. 이 OCaml 후속 검사의 실행은 아직 미확인이다.
 - Dashboard: source/kind/text 필터와 전체 대비 표시 개수, no-match 상태를 추가했다. 필터가 열린 편집기를 unmount해 초안을 잃는다는 독립 검토 지적은 keyed owner를 유지하고 visibility만 바꾸어 수정했다. 필터를 지웠을 때 작성한 bytes가 복원되고 저장 요청이 없음을 검사한다. Dashboard 관련 파일 32개 검사, touched-file ESLint 및 TypeScript typecheck 통과.
 - 한계: 실행 기록 탐색, 후보 화면, 공식 승인 및 병합은 계속 진행 중이다. 기존 제품의 장점을 반영했다는 설계 설명은 설치·운영 증거를 대신하지 않는다.
+
+## 실행 ID별 보존 기록 탐색 후보
+
+- 출처: https://github.com/jeong-sik/masc/actions/runs/41269969174, 현재 worktree의 v9 producer/strict consumers와 dashboard-tests-unit6.log
+- 확인일시: 2026-11-01T03:54:13Z
+- 신뢰도: High
+- 첫 패키지 후보: 117d19299f79908817f43ac422813eefdddcff75, branch feat/skills-discovery-20261101, Test workflow, TARGET_SUITES=test_server_skill_editor, minimal=true, completed/success, 39개 검사 통과. 실제 missing/ready/readonly/file/unavailable/unresolved 관측과 검증 전 쓰기 금지, 생성 후 exact-reference readback을 포함한다.
+- 실행 탐색: 하나의 exact-reference 관측에서 original RunID 중복 제거와 정렬, metadata history, 선택 본문 및 전체 통계를 함께 만든다. 없는 ID나 다른 revision의 ID를 조회하면 본문이 없으며 최신 실행으로 대체하지 않는다. 기록 목록은 각 실행의 최근 보존 결과로, 모든 중간 전이를 보존한다는 뜻이 아니다.
+- 소비자: Dashboard는 outcome/Keeper/RunID 필터, 선택 본문과 부모·요청 ID를 표시한다. TUI는 이전·다음 원래 실행과 latest를 조회한다. 두 클라이언트는 응답의 revision/selector를 요청과 비교한다. 늦은 응답은 세대 또는 기존 request owner로 배제하며, TUI 연속 입력은 진행 중인 선택을 기준으로 계산한다.
+- 독립 검토 수정: 누락된 공개 .mli 타입, HTTP body 문자열 직렬화, closed-enum match 및 진행 중 이력 입력을 수정했다. review-response도 소스에서 수정 경계를 독립 확인했다. 공식 GitHub 승인은 별개다.
+- 검증: Dashboard 6개 파일 112개 검사, TypeScript typecheck와 touched-file ESLint 통과. 실제 보존된 completed/deferred/failed의 선택·격리, 같은 RunID의 결과 교체, 시각 동률 정렬, 요청 중복·잘못된 selector, 두 strict consumer의 모순된 history 거절 및 TUI 입력 결정을 검사하도록 추가했다. OCaml은 parse-only 통과이며 이 후보의 컴파일·실행 CI는 아직 미확인이다.
+- 한계: 후보 화면·runtime 실측, 최종 공식 승인과 stack integration은 계속 진행 중이다. 설치된 서버가 이 fresh 계약을 제공한다고 주장하지 않는다.

@@ -252,7 +252,23 @@ let test_same_reference_runs_do_not_overlap () =
        let open Yojson.Safe.Util in
        Alcotest.(check string) "latest still selects the newest run"
          (Keeper_tool_plan.Composition_run_id.to_string second)
-         (loaded |> member "composition_run_id" |> to_string))
+         (loaded |> member "composition_run_id" |> to_string);
+       save (make_evidence reference settlements first ~recorded_at:200.0);
+       let tied = Keeper_skill_composition_evidence.load_observation config reference |> Result.get_ok in
+       let ids = List.map (fun evidence ->
+         (Keeper_skill_composition_evidence.run_summary evidence).run_id
+         |> Keeper_tool_plan.Composition_run_id.to_string) tied.runs in
+       Alcotest.(check (list string)) "equal timestamps use descending original ID order"
+         (List.sort (fun a b -> String.compare b a)
+           [Keeper_tool_plan.Composition_run_id.to_string first; Keeper_tool_plan.Composition_run_id.to_string second]) ids;
+       save (make_evidence reference settlements first ~recorded_at:300.0);
+       let updated = Keeper_skill_composition_evidence.load_observation config reference |> Result.get_ok in
+       Alcotest.(check int) "a replacement result keeps one original run" 2 updated.statistics.records;
+       Alcotest.(check int) "history and samples share original-run deduplication" 2 (List.length updated.runs);
+       Alcotest.(check string) "updated result is first in retained history"
+         (Keeper_tool_plan.Composition_run_id.to_string first)
+         ((Keeper_skill_composition_evidence.run_summary (List.hd updated.runs)).run_id
+          |> Keeper_tool_plan.Composition_run_id.to_string))
 ;;
 
 let test_only_run_partition_is_authoritative () =

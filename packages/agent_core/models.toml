@@ -4261,6 +4261,11 @@ supports_native_streaming = true
 # (raw chunk 2026-09-16T14:53Z: `"delta":{"reasoning_content":"Let"}`). Left
 # undeclared, the reasoning_effort dialect default "reasoning" is read instead,
 # the first chunk fails the stream, and history replays under that name too.
+# Kimi Code requires reasoning_content on thinking tool-call messages
+# (https://www.kimi.com/code/docs/en/kimi-code/error-reference.html, checked
+# 2026-11-01). Preserve the complete assistant reasoning across turns, as
+# required by the Kimi K3 multi-turn and tool-call contract:
+# https://platform.kimi.ai/docs/guide/kimi-k3-quickstart.
 [[models]]
 model_id = "k3"
 provider_name = "kimi_coding"
@@ -4271,6 +4276,7 @@ supports_tool_choice = false
 supports_reasoning = true
 thinking_control_format = "reasoning_effort"
 reasoning_streaming_format = "delta:reasoning_content"
+reasoning_replay = "preserve_always"
 accepted_reasoning_efforts = ["none"]
 supports_image_input = true
 supports_multimodal_inputs = true
@@ -4294,6 +4300,7 @@ supports_tool_choice = false
 supports_reasoning = true
 thinking_control_format = "reasoning_effort"
 reasoning_streaming_format = "delta:reasoning_content"
+reasoning_replay = "preserve_always"
 accepted_reasoning_efforts = ["none"]
 supports_image_input = true
 supports_multimodal_inputs = true
@@ -4318,6 +4325,8 @@ max_output_tokens = 131072
 supports_tools = true
 supports_tool_choice = false
 supports_reasoning = true
+reasoning_streaming_format = "delta:reasoning_content"
+reasoning_replay = "preserve_always"
 supports_response_format_json = true
 supports_structured_output = true
 supports_native_streaming = true

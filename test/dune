@@ -3102,6 +3102,8 @@
 
 (include stanzas/test_keeper_replay_checkpoint.inc)
 
+(include stanzas/test_kimi_coding_replay.inc)
+
 (include stanzas/test_keeper_supervisor_observability_10125.inc)
 
 (include stanzas/test_prompt_registry_dune_fallback.inc)

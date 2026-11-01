@@ -1113,10 +1113,16 @@
  (libraries masc_tui_keeper_chat_projection masc_tui_message_layout yojson))
 
 (library
+ (name masc_tui_nested_result)
+ (wrapped false)
+ (modules masc_tui_nested_result)
+ (libraries masc masc.tool_types masc_skill_reference yojson))
+
+(library
  (name masc_tui_chat_call_reader)
  (wrapped false)
  (modules masc_tui_chat_call_reader)
- (libraries masc masc_tui_fetched masc_tui_detail_reading masc_tui_execute_result uri))
+ (libraries masc masc_tui_fetched masc_tui_detail_reading masc_tui_execute_result masc_tui_nested_result uri))
 
 (library
  (name masc_tui_keeper_call_evidence)
@@ -2086,6 +2092,7 @@
  (wrapped false)
  (modules masc_tui_render_tools)
  (libraries
+  masc_tui_nested_result
   masc_tui_pick_list
   masc_tui_fetched
   masc_tui_text_block

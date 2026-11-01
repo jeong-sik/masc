@@ -757,6 +757,79 @@ let test_public_nested_prepare_run_records_only_admitted_children ?(execution=Ma
   check bool "usable selected answer survives independent admission failure" true
     (result |> member "exports" |> member "answer" |> member "available" |> to_bool);
   let child_scopes = result |> member "nested_scopes" |> to_list in
+  let module Observation = Masc.Keeper_composition_observation in
+  let observed = match Observation.of_data result with
+    | Observed children -> children
+    | Invalid detail -> fail detail
+    | Absent | Stored _ -> fail "actual result lost nested observation" in
+  check int "observation preserves every actual child" (List.length child_scopes) (List.length observed);
+  List.iter2 (fun raw (child : Observation.child) ->
+    check string "observed alias comes from actual scope"
+      (raw |> member "scope" |> member "alias" |> to_string) child.alias;
+    check string "observed disposition preserves actual aggregate"
+      (raw |> member "disposition" |> to_string)
+      (Masc.Keeper_composition_nested_run.disposition_to_string child.disposition);
+    check bool "observed exact reference is the executed revision" true
+      (Skill_reference.equal reference child.reference);
+    check int "all expanded node occurrences are preserved"
+      (raw |> member "nodes" |> to_list |> List.length) (List.length child.nodes);
+    List.iter (fun (export : Observation.export) ->
+      let available = raw |> member "exports" |> member export.name |> member "available" |> to_bool in
+      check bool "export availability is independent of parent success" available
+        (match export.value with Available _ -> true | Unavailable _ -> false)) child.exports) child_scopes observed;
+  let complete_reading = match Observation.of_content result_content with
+    | Stored reference ->
+        let response,status = Server_routes_http_routes_artifacts.blob_response
+            ~base_path ~sha256:reference.sha256 in
+        check bool "actual original manifest HTTP response succeeds" true (status=`OK);
+        Observation.of_blob_response reference response
+    | reading -> reading in
+  check bool "actual provider result bytes project the same retained children" true
+    (complete_reading = Observation.Observed observed);
+  let manifest_content = Tool_output.artifact_manifest_to_json ~content:result_content
+      ~structured_content:result |> Yojson.Safe.to_string in
+  let manifest_reference = Tool_blob_store.put_durable (Tool_blob_store.create ~base_path)
+      ~bytes:manifest_content ~mime:Tool_output.artifact_manifest_mime in
+  let manifest_response,status = Server_routes_http_routes_artifacts.blob_response
+      ~base_path ~sha256:manifest_reference.sha256 in
+  check bool "actual retained manifest HTTP response succeeds" true (status=`OK);
+  check bool "retained manifest preserves the actual execution observation" true
+    (Observation.of_blob_response manifest_reference manifest_response = Observed observed);
+  let altered_response = match manifest_response with `Assoc fields ->
+    `Assoc (("content",`String (manifest_content ^ " ")) :: List.remove_assoc "content" fields)
+    | _ -> fail "actual blob DTO is not an object" in
+  check bool "retained manifest refuses altered bytes" true
+    (match Observation.of_blob_response manifest_reference altered_response with
+     | Invalid _ -> true | _ -> false);
+  let envelope_fields = ["artifact_manifest",Tool_output.normalized_artifact_ref_to_json manifest_reference;
+    "structured_content",result] in
+  check bool "inline envelope waits for its exact retained manifest" true
+    (Observation.of_data (`Assoc envelope_fields) = Stored manifest_reference);
+  check bool "duplicate structured content is refused" true
+    (match Observation.of_data (`Assoc (("structured_content",`Assoc []) :: envelope_fields)) with
+     | Invalid _ -> true | _ -> false);
+  let admitted = List.filter (fun child -> member "admission" child <> `Null
+    && member "skill_tool_use_id" (member "admission" child) <> `Null) child_scopes in
+  let swap_first_admission replacement =
+    let first=List.hd admitted in
+    let altered = List.map (fun child -> if child <> first then child else
+      match child with `Assoc fields -> `Assoc (("admission",replacement) :: List.remove_assoc "admission" fields)
+      | _ -> fail "expected child object") child_scopes in
+    match result with `Assoc fields -> `Assoc (("nested_scopes",`List altered) :: List.remove_assoc "nested_scopes" fields)
+    | _ -> fail "expected parent object" in
+  let first_admission = List.hd admitted |> member "admission" |> to_assoc in
+  List.iter (fun replacement ->
+    check bool "malformed or sibling admission is refused" true
+      (match Observation.of_data (swap_first_admission replacement) with Invalid _ -> true | _ -> false))
+    [`Assoc (("activation",`Assoc []) :: List.remove_assoc "activation" first_admission);
+     List.nth admitted 1 |> member "admission"];
+  let bad = match result with
+    | `Assoc fields -> `Assoc (("nested_scopes",`List [`Assoc []]) :: List.remove_assoc "nested_scopes" fields)
+    | _ -> fail "expected actual structured result" in
+  check bool "malformed child evidence is not silently empty" true
+    (match Observation.of_data bad with Invalid _ -> true | _ -> false);
+  check bool "user exports are not recursively interpreted as child execution" true
+    (Observation.of_data (`Assoc ["exports",result]) = Absent);
   List.iter (fun child ->
     let alias = child |> member "scope" |> member "alias" |> to_string in
     let expected = match alias with "reject" -> "admission_rejected" | "blocked" -> "not_started" | _ -> "completed" in
@@ -959,6 +1032,29 @@ let test_public_nested_prepare_run_records_only_admitted_children ?(execution=Ma
      check bool "retained results add no child activation or clock" true
        (Ledger.activations restored = Ledger.activations final_ledger);
      check int "completed resume retains original runtime without callback selection" 1 !runtime_reads);
+  let request_record,status_response = match execution with
+    | Inline -> `Null,`Null
+    | Async ->
+      let module Async = Masc.Keeper_msg_async in
+      let original_request = accepted |> member "request_id" |> to_string in
+      let entry = Async.load_canonical_durable_terminal ~base_path ~caller:"fixture" original_request
+        |> require "retained original request proof" |> Async.durable_terminal_entry in
+      let snapshot=Masc.Keeper_composition_result_delivery.observe_status ~base_path entry in
+      let record_path = Filename.concat
+          (Filename.concat (Common.masc_dir_from_base_path ~base_path:entry.base_path)
+             "keeper_msg_requests/terminal") (entry.request_id ^ ".json") in
+      let record = In_channel.with_open_bin record_path (fun channel ->
+          Yojson.Safe.from_string (In_channel.input_all channel)) in
+      record,
+      `Assoc ["schema",`String "masc.async-request-status/v1";"status",`String "observed";
+        "request",Masc.Keeper_composition_result_delivery.request_payload snapshot] in
+  Printf.printf "nested_observation_proof=%s\n%!" (Yojson.Safe.to_string (`Assoc
+    ["schema",`String "masc.nested-observation-proof/v1";
+     "execution",`String (match execution with Inline -> "inline" | Async -> "async");
+     "rejected_child",`Bool reject_child;"success",`Bool success;
+     "source",`String public_document;"reference",Skill_reference.to_yojson reference;
+     "recipe",recipe;"result",result;"provider_content",`String result_content;
+     "request_record",request_record;"status_response",status_response]));
   Printf.printf "composition_nested_public_trial rejected_child=%b prepared_scopes=%d admitted_children=%d child_admission_calls=%d actual_leaf_successes=%d blocked_children=%d parent_deliveries=%d exact_run_binding=true original_task_retained=true model_latency_measured=false\n%!"
     reject_child (List.length scopes) (List.length (Ledger.activations ledger)) !calls successful_leaves blocked_children (List.length delivered)
 ;;

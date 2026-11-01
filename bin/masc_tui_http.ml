@@ -1302,6 +1302,13 @@ let fetch_keeper_calls ~(host : string) ~(port : int) ~(keeper_name : string)
     |> Result.map_error (fun detail -> "tool calls: " ^ detail) in
   Masc.Tui_decode.decode_keeper_calls_snapshot ~requested_keeper:keeper_name json
 
+let read_nested_manifest ~host ~port = function
+  | Masc.Keeper_composition_observation.Stored reference ->
+      (match get_json ~host ~port ~path:("/api/v1/artifacts/" ^ reference.sha256) with
+       | Error detail -> Masc.Keeper_composition_observation.Invalid detail
+       | Ok json -> Masc.Keeper_composition_observation.of_blob_response reference json)
+  | (Absent | Observed _ | Invalid _) as reading -> reading
+
 let fetch_keeper_call ~host ~port ~keeper_name ~execution_id =
   let ( let* ) = Result.bind in
   let* json = get_json ~host ~port
@@ -1330,11 +1337,13 @@ let fetch_keeper_call ~host ~port ~keeper_name ~execution_id =
       Buffer.add_string bytes content;
       if not page.eof then read (Some (identity,page)) page.next_offset
       else
-        Masc_tui_response_decode.run ~name:"keeper.original_body.verify_wait" (fun () ->
-          let content=Buffer.contents bytes in
-          let* () = Page.verify_body identity page content in
-          Ok (Masc.Tui_decode.Original_body {source_id=identity.source_id;
-            sha256=identity.sha256;recorded_bytes=identity.recorded_bytes;content})) in
+        let content=Buffer.contents bytes in
+        let* () = Masc_tui_response_decode.run ~name:"keeper.original_body.verify_wait"
+            (fun () -> Page.verify_body identity page content) in
+        let nested = Masc.Keeper_composition_observation.of_content content
+            |> read_nested_manifest ~host ~port in
+        Ok (Masc.Tui_decode.Original_body {source_id=identity.source_id;
+          sha256=identity.sha256;recorded_bytes=identity.recorded_bytes;content;nested}) in
   let result = read None 0 in
   let kc_original = match result with
     | Ok original -> original | Error detail -> Masc.Tui_decode.Original_failed detail in
@@ -3833,9 +3842,15 @@ let fetch_async_request_observation ~host ~port =
 let fetch_async_request_detail ~host ~port ~(target : Masc.Tui_decode_async_request.target) =
   let path = Uri.make ~path:"/api/v1/async-requests/status"
       ~query:["submitted_by",[target.submitted_by];"request_id",[target.request_id]] () |> Uri.to_string in
-  Result.bind (get_json ~host ~port ~path) (fun json ->
-    Masc_tui_response_decode.run ~name:"tools.async_request.decode_wait" (fun () ->
-      Masc.Tui_decode_async_request.decode ~target json))
+  let ( let* ) = Result.bind in
+  let* json = get_json ~host ~port ~path in
+  let* reading = Masc_tui_response_decode.run ~name:"tools.async_request.decode_wait"
+      (fun () -> Masc.Tui_decode_async_request.decode ~target json) in
+  match reading with
+  | Masc.Tui_decode_async_request.Absent -> Ok reading
+  | Observed snapshot ->
+      let nested=read_nested_manifest ~host ~port snapshot.nested in
+      Ok (Masc.Tui_decode_async_request.Observed {snapshot with nested})
 ;;
 
 (** GET /api/v1/prompts — every prompt the registry serves, with the file

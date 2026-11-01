@@ -76,7 +76,8 @@ let test_original_body_refresh () =
   let content=String.concat "\n" (List.init 120 (fun i ->
     Printf.sprintf "원문 %03d 🙂" (i+1))) in
   let original=Decode.Original_body {source_id=String.make 64 'a';
-    sha256=String.make 64 'b';recorded_bytes=String.length content;content} in
+    sha256=String.make 64 'b';recorded_bytes=String.length content;content;
+    nested=Masc.Keeper_composition_observation.Absent} in
   List.iter (fun failure ->
     let initial={ (decode "original" "canonical preview") with Decode.kc_original=original } in
     let reader,request=start (Reader.create [choice "original"]) in
@@ -103,7 +104,22 @@ let test_original_body_refresh () =
         check (option string) "initial failure still retains ledger preview"
           (Some "new preview") observed.kc_output
     | Absent | Loading | Stale _ | Failed _ -> fail "initial preview was lost")
-    [Decode.Original_pending;Original_unavailable "trace not retained";Original_failed "HTTP 503"]
+    [Decode.Original_pending;Original_unavailable "trace not retained";Original_failed "HTTP 503";
+     Original_body {source_id=String.make 64 'a';sha256=String.make 64 'b';
+       recorded_bytes=String.length content;content;
+       nested=Masc.Keeper_composition_observation.Invalid "manifest verification failed"}];
+  let reader,request=start (Reader.create [choice "original"]) in
+  let initial={ (decode "original" "preview") with Decode.kc_original=original } in
+  let reader=Reader.complete reader request (Ok initial) in
+  let reader,request=start reader in
+  let changed=Decode.Original_body {source_id=String.make 64 'c';sha256=String.make 64 'd';
+    recorded_bytes=3;content="new";
+    nested=Masc.Keeper_composition_observation.Invalid "changed source manifest is invalid"} in
+  let reader=Reader.complete reader request (Ok {initial with Decode.kc_original=changed}) in
+  check bool "changed original source cannot borrow the old source's nested reading" true
+    (match Reader.observation reader with
+     | Fetched.Ready call -> call.kc_original=changed
+     | Absent | Loading | Stale _ | Failed _ -> false)
 let state () =
   let state=create_state ~workspace:"reader-test" ~port:0 ~refresh_interval:0. () in
   let workspace={Decode.sid_version="test";sid_binary_commit="test";

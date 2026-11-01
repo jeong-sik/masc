@@ -18,7 +18,7 @@ type logical = Confirmed of logical_value | Unavailable of string
 type snapshot =
   { source : source; phase : phase; submitted_at : float; completed_at : float option
   ; dependencies : Keeper_composition_dependency.t list; result : Yojson.Safe.t option
-  ; notice : string option; logical : logical }
+  ; notice : string option; logical : logical; nested : Keeper_composition_observation.reading }
 type reading = Observed of snapshot | Absent
 val decode : target:target -> Yojson.Safe.t -> (reading, string) result
 (** Strict schema, physical owner/target echo, closed outcomes, original run/Task

@@ -13711,6 +13711,24 @@ let complete_tools_async_detail state request result =
       && Masc_tui_fetched.is_current ~equal:Masc.Tui_decode_async_request.equal_target
           state.tools_async_detail request.tad_ticket then begin
     state.tools_async_detail_request <- None;
+    let result = Result.bind result (fun reading ->
+      let module Detail = Masc.Tui_decode_async_request in
+      let prior = Masc_tui_fetched.view_for ~equal:Detail.equal_target state.tools_async_detail
+          ~key:(Masc_tui_fetched.request_key request.tad_ticket) |> Masc_tui_fetched.value in
+      let module Nested = Masc.Keeper_composition_observation in
+      match reading with
+      | Detail.Absent -> Ok reading
+      | Detail.Observed snapshot ->
+        match snapshot.nested with
+        | Nested.Absent | Observed _ | Stored _ -> Ok reading
+        | Invalid detail ->
+          match prior with
+          | None | Some Detail.Absent -> Ok reading
+          | Some (Detail.Observed previous) ->
+            match previous.nested with
+            | Nested.Absent | Stored _ | Invalid _ -> Ok reading
+            | Observed _ ->
+              if Detail.equal_source snapshot.source previous.source then Error detail else Ok reading) in
     (match result with
      | Error _ -> ()
      | Ok Masc.Tui_decode_async_request.Absent -> state.tools_async_last_logical <- None

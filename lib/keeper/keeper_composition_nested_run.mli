@@ -11,6 +11,10 @@ type record_activation =
 
 type t
 
+type disposition = Not_started | Admission_rejected | Completed | Failed | Deferred | Partially_settled
+val disposition_to_string : disposition -> string
+val disposition_of_string : string -> (disposition, string) result
+
 val create :
   ?delivery_parent_tool_use_id:string ->
   calls:Keeper_composition_nested.call list ->

@@ -22100,6 +22100,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
                   state.resource_share_recovery_prompt <- None;
                   report_action state "error" "Conflicting details were observed for this operation ID. Sharing remains blocked; verify the server receipt before recovery."
                 end else begin
+                  withdraw_resource_diagram_pending state;
                   state.resource_share_recovery_prompt <- Some
                     {recovery_entry=entry;recovery_workspace=state.workspace_authority;
                      recovery_key=request.recovery_lookup_key;

@@ -1284,15 +1284,14 @@ let rec await_terminal io (config : config) ~mcp_servers ~session_id ~turn_id ~o
        let report_usage usage =
          usage_reported := true;
          emit (Usage_reported { session_id; turn_id; usage }) in
-       Fun.protect
-         ~finally:(fun () ->
-           (* An authoritative provider aggregate survives even when history
-              cannot certify the answer or its owner cancels that RPC. *)
-           if not !usage_reported then
-             Eio.Cancel.protect (fun () -> Option.iter (fun usage ->
-               emit (Model_call_reported {session_id; turn_id; model=None});
-               report_usage usage) usage))
-         (fun () ->
+       let preserve_aggregate () =
+         (* An authoritative provider aggregate survives even when history
+            cannot certify the answer or its owner cancels that RPC. *)
+         if not !usage_reported then
+           Eio.Cancel.protect (fun () -> Option.iter (fun usage ->
+             emit (Model_call_reported {session_id; turn_id; model=None});
+             report_usage usage) usage) in
+       let complete () =
            let* state = match terminal with
              | Msp.Terminal_completed ->
                let* witness = read_durable_turn io ~session_id ~turn_id
@@ -1331,7 +1330,16 @@ let rec await_terminal io (config : config) ~mcp_servers ~session_id ~turn_id ~o
             | Msp.Terminal_host_died { reason } -> Error (host_died_error ~reason)
             | Msp.Terminal_cancelled -> Error Turn_cancelled
             | Msp.Unrecognized_terminal terminal ->
-              protocol_error "turn/completed" ("unrecognized terminal " ^ terminal)))
+              protocol_error "turn/completed" ("unrecognized terminal " ^ terminal)) in
+       (match complete () with
+        | result -> preserve_aggregate (); result
+        | exception exn ->
+          let backtrace = Printexc.get_raw_backtrace () in
+          (* [Fun.protect] wraps a finalizer's reserved control. Observe outside
+             it, preserving the original exception if observation also raises. *)
+          (match preserve_aggregate () with
+           | () -> Printexc.raise_with_backtrace exn backtrace
+           | exception _ -> Printexc.raise_with_backtrace exn backtrace))
      | Msp.Turn_started _
      | Msp.Turn_completed _
      | Msp.Item_started _

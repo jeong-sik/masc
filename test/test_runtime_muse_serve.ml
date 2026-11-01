@@ -1382,6 +1382,29 @@ let test_stream_callback_preserves_reserved_controls () =
   Serve.emit_stream_event None event
 ;;
 
+let test_history_failure_usage_observer_preserves_reserved_controls () =
+  List.iter (fun (name, reserved) ->
+    let usage_seen = ref false in
+    (match run_scripted
+       ~on_stream_event:(function
+         | Serve.Usage_reported _ -> usage_seen := true; raise reserved
+         | _ -> ())
+       (handshake_and_session ~granted:[]
+        @ [Write agent_completed; Write turn_completed; Read;
+           Write {|{"jsonrpc":"2.0","id":4,"error":{"code":-32040,"message":"history unavailable"}}|}])
+       (fun _ _ -> fail "reserved aggregate observer control was swallowed") with
+     | () -> fail "reserved aggregate observer returned"
+     | exception observed ->
+       check bool ("same aggregate observer " ^ name ^ " propagates") true (observed == reserved));
+    check bool "known aggregate reaches the observer despite failed history" true !usage_seen)
+    [ "operator interrupt", Keeper_operator_interrupt.Operator_interrupt
+    ; "timeout", Eio.Time.Timeout
+    ; "cancellation", Eio.Cancel.Cancelled (Failure "aggregate observer cancelled")
+    ; "out of memory", Out_of_memory
+    ; "stack overflow", Stack_overflow
+    ; "break", Sys.Break ]
+;;
+
 (* The owner is cancelled while the host is still exiting after its turn ended.
    The cleanup is cancel-protected, so a [run_turn] that does not return cannot
    be interrupted from inside the process: the alarm turns that hang into a
@@ -1626,6 +1649,8 @@ let () =
         ; test_case "message phase marks the answer" `Quick test_message_phase_marks_the_answer
         ; test_case "stream callback preserves reserved controls" `Quick
             test_stream_callback_preserves_reserved_controls
+        ; test_case "history failure aggregate observer preserves reserved controls" `Quick
+            test_history_failure_usage_observer_preserves_reserved_controls
         ; test_case "native-only tool completion keeps status, arguments and output" `Quick
             test_native_tool_completion_preserves_vendor_evidence
         ; test_case "turn with tool and approval" `Quick test_turn_with_tool_and_approval

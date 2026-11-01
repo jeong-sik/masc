@@ -21,6 +21,9 @@ export type DiscussionLocalRecord = typeof RecordSchema.Type & { persisted: bool
 export type DiscussionLocalRetention =
   | { kind: 'stored'; record: DiscussionLocalRecord; removedRevisions: readonly string[] }
   | { kind: 'needs_reread'; record: DiscussionLocalRecord }
+/** Immutable copies were removed, or cleanup failed/retained a revision that
+ *  backs a newer in-memory write. Only confirmed cleanup releases origins. */
+export type DiscussionLocalDiscard = { kind: 'discarded' } | { kind: 'needs_reread' }
 const prefix = 'masc.artifact-discussion-local.v1:'
 const memory = new Map<string, DiscussionLocalRecord>()
 const storageKey = (record: Pick<DiscussionLocalRecord,'id'|'revision'>) => `${prefix}${record.id}:${record.revision}`
@@ -53,15 +56,18 @@ export function retainDiscussionLocal(id: string, workspace: ArtifactWorkspace, 
     : { kind: 'needs_reread', record }
 }
 // A late ACK or stale recovery view cannot delete a newer copy in another tab.
-export function discardDiscussionLocal(record: DiscussionLocalRecord): void {
+export function discardDiscussionLocal(record: DiscussionLocalRecord): DiscussionLocalDiscard {
   const current = memory.get(record.id)
   if (current?.revision === record.revision) memory.delete(record.id)
   const protectedRevision = current && current.revision !== record.revision && !current.persisted ? current.storedRevision : null
+  let discarded = true
   try {
     for(const revision of new Set([record.revision,record.storedRevision])) {
-      if(revision && revision!==protectedRevision)localStorage.removeItem(storageKey({...record,revision}))
+      if(revision && revision===protectedRevision)discarded=false
+      else if(revision)localStorage.removeItem(storageKey({...record,revision}))
     }
-  } catch { /* Remaining copies are only offered for explicit recovery. */ }
+  } catch { return { kind: 'needs_reread' } }
+  return { kind: discarded ? 'discarded' : 'needs_reread' }
 }
 export function discussionLocals(workspace: ArtifactWorkspace, artifactId: string): DiscussionLocalRecord[] {
   const records = new Map([...memory.values()].map(record=>[record.revision,record]))

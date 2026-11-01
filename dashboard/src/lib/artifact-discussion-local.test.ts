@@ -49,10 +49,22 @@ it('can discard a separate old immutable copy while preserving newer memory and 
   const copy=discussionLocals(workspace,target.artifact_id).find(record=>record.revision===external.revision)!
   vi.stubGlobal('localStorage',{get length(){return storage.length},key:storage.key.bind(storage),getItem:storage.getItem.bind(storage),removeItem:storage.removeItem.bind(storage),setItem(){throw new DOMException('full','QuotaExceededError')}})
   const newer=retainDiscussionLocal(old.id,workspace,target,'human',{...input,input:{...input.input,body:'메모리의 새 입력'}}).record
-  discardDiscussionLocal(copy);discardDiscussionLocal(old)
+  expect(discardDiscussionLocal(copy)).toEqual({kind:'discarded'})
+  expect(discardDiscussionLocal(old)).toEqual({kind:'needs_reread'})
   expect(storage.getItem(key(copy))).toBeNull()
   expect(storage.getItem(key(old))).not.toBeNull()
   expect(discussionLocals(workspace,target.artifact_id)).toEqual([newer])
+})
+it('reports failed cleanup while leaving its durable copy available for recovery', () => {
+  const record=retainDiscussionLocal('failed-discard',workspace,target,'human',input).record
+  const storage=localStorage, bytes=storage.getItem(key(record))
+  vi.stubGlobal('localStorage',{removeItem(){throw new Error('cleanup failed')}})
+  expect(discardDiscussionLocal(record)).toEqual({kind:'needs_reread'})
+  vi.unstubAllGlobals()
+  expect(storage.getItem(key(record))).toBe(bytes)
+  expect(discussionLocals(workspace,target.artifact_id)).toEqual([record])
+  expect(discardDiscussionLocal(record)).toEqual({kind:'discarded'})
+  expect(storage.getItem(key(record))).toBeNull()
 })
 it('offers other generations separately while isolating canonical workspace roots', () => {
   const original = retainDiscussionLocal('scope', workspace, target, 'human', input).record

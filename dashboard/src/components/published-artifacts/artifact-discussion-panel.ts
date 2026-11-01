@@ -50,16 +50,21 @@ export function ArtifactDiscussionPanel({ session, state, onPending, onReveal }:
   const refresh = () => showRecords(discussionLocals(session.workspace, target.artifact_id))
   const updateComposer = (next: Composer | null) => { composerRef.current = next; reportPending(); if (visible()) setComposer(next) }
   useLayoutEffect(() => { reportPending() }, [])
-  const discard = (copies: readonly DiscussionLocalRecord[]) => { copies.forEach(discardDiscussionLocal); refresh() }
+  const discardCopies = (copies: readonly DiscussionLocalRecord[]) => copies.filter(record => discardDiscussionLocal(record).kind === 'needs_reread')
+  const discard = (copies: readonly DiscussionLocalRecord[]) => { discardCopies(copies); refresh() }
   const preserve = (next: Composer) => {
+    const recovering = next.recoveredFrom.length !== 0
     let retained: DiscussionLocalRetention | null = null
     if (meaningful(next.input)) {
       retained = retainDiscussionLocal(next.id, session.workspace, target, next.actor, { kind: 'input', input: next.input })
       next = { ...next, record: retained.record }
-      if (next.record?.persisted) next.recoveredFrom.forEach(discardDiscussionLocal)
-    } else { discard([...(next.record ? [next.record] : []), ...next.recoveredFrom]); next = { ...next, record: null } }
+      if (next.record?.persisted) next = { ...next, recoveredFrom: discardCopies(next.recoveredFrom) }
+    } else {
+      if (next.record) discardDiscussionLocal(next.record)
+      next = { ...next, record: null, recoveredFrom: discardCopies(next.recoveredFrom) }
+    }
     updateComposer(next)
-    if (retained?.kind === 'stored' && next.recoveredFrom.length === 0) {
+    if (retained?.kind === 'stored' && !recovering) {
       const { record: stored, removedRevisions } = retained
       const removed = new Set(removedRevisions)
       showRecords([...recordsRef.current.filter(record =>

@@ -5,7 +5,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import * as Y from 'yjs'
 import { ArtifactDiscussionPanel } from './artifact-discussion-panel'
 import { ArtifactLiveSession, draftBase64, draftBytes, type ArtifactLiveState } from '../../lib/artifact-live-session'
-import { seedSharedDocument, sharedSource, sharedState, selectSharedSource } from '../../lib/artifact-shared-document'
+import { seedSharedDocument, restoreSharedDocument, sharedSource, sharedState, selectSharedSource } from '../../lib/artifact-shared-document'
 import { discussionLocals, discardDiscussionLocal, retainDiscussionLocal } from '../../lib/artifact-discussion-local'
 import { fetchArtifactDraft, sendArtifactDraftCommand, type ArtifactDraftView } from '../../api/artifact-drafts'
 import { streamArtifactDraft, sendArtifactPresence, type ArtifactDraftLiveFrame } from '../../api/artifact-draft-live'
@@ -21,8 +21,8 @@ afterEach(() => {
   cleanup(); sessions.splice(0).forEach(s => s.dispose()); documents.splice(0).forEach(d => d.destroy())
   vi.restoreAllMocks(); vi.unstubAllGlobals(); discussionLocals(workspace,target.artifact_id).forEach(discardDiscussionLocal); localStorage.clear()
 })
-function fixture(actor = 'human') {
-  const authority=seedSharedDocument(source);documents.push(authority)
+function fixture(actor = 'human', storedState?: string) {
+  const authority=storedState ? restoreSharedDocument(draftBytes(storedState)) : seedSharedDocument(source);documents.push(authority)
   let threads: readonly ArtifactThread[]=[], receipts: ArtifactDraftView['discussion_receipts']=[], sequence=0, current=true
   let changed: (state: ArtifactLiveState)=>void = ()=>{}
   const snapshot=():ArtifactDraftView=>({draft:{schema:'masc.artifact_draft.v2',target,base_revision:1,base_sha256:'a'.repeat(64),state:draftBase64(sharedState(authority)),sequence,updated_by:actor,updated_at:at},content:sharedSource(authority),threads,discussion_receipts:receipts,selection:null})
@@ -101,6 +101,93 @@ it('updates retained discussion input without rescanning unrelated local copies'
   } finally {
     vi.unstubAllGlobals();copies.forEach(discardDiscussionLocal)
   }
+})
+it('stops rescanning after confirmed recovery cleanup while preserving the operation and acknowledgement',async()=>{
+  const original=fixture();await start(original)
+  const old=pending()[0]!, storage=localStorage
+  const key=(record:{id:string;revision:string})=>`masc.artifact-discussion-local.v1:${record.id}:${record.revision}`
+  const foreign=retainDiscussionLocal('foreign-recovered-input',workspace,{...target,artifact_id:`artifact-${'f'.repeat(32)}`},'human',old.value).record
+  const foreignBytes=storage.getItem(key(foreign))
+  original.retire();cleanup()
+  const f=fixture('human',original.snapshot().draft.state);f.mount()
+  await waitFor(()=>expect((screen.getByRole('button',{name:'원고와 댓글 입력 복구'}) as HTMLButtonElement).disabled).toBe(false))
+  fireEvent.click(screen.getByRole('button',{name:'원고와 댓글 입력 복구'}))
+  await screen.findByLabelText('댓글 내용')
+  await waitFor(()=>expect(f.session.snapshot.pending).toBe(false))
+  expect(storage.getItem(key(old))).toBeNull()
+  const restored=pending()[0]!
+  expect(restored.id).not.toBe(old.id)
+  const counts={enumeratedKeys:0,readValues:0,storedValues:0,removedValues:0}
+  vi.stubGlobal('localStorage',{
+    get length(){return storage.length},key(index:number){counts.enumeratedKeys++;return storage.key(index)},
+    getItem(name:string){counts.readValues++;return storage.getItem(name)},
+    setItem(name:string,value:string){counts.storedValues++;storage.setItem(name,value)},
+    removeItem(name:string){counts.removedValues++;storage.removeItem(name)},
+  })
+  fireEvent.input(screen.getByLabelText('댓글 내용'),{target:{value:'recovered input edited once'}})
+  const observed={...counts};vi.unstubAllGlobals()
+  const current=pending()[0]!
+  expect(current.id).toBe(restored.id)
+  expect(current.value.kind==='input'&&current.value.input.body).toBe('recovered input edited once')
+  expect(current.value.kind==='input'&&current.value.input.operationId).toBe(old.value.kind==='input'&&old.value.input.operationId)
+  expect(current.value.kind==='input'&&current.value.input.kind==='comment'&&current.value.input.source)
+    .toEqual(old.value.kind==='input'&&old.value.input.kind==='comment'&&old.value.input.source)
+  expect(JSON.parse(storage.getItem(key(current))!).value).toEqual(current.value)
+  expect(storage.getItem(key(restored))).toBeNull()
+  vi.mocked(sendArtifactDraftCommand).mockImplementation(async command=>command.action==='discuss'?f.ack(command.request):f.snapshot())
+  fireEvent.click(screen.getByRole('button',{name:'댓글 보내기'}))
+  await waitFor(()=>expect(pending()).toHaveLength(0))
+  expect(submitted().id).toBe(old.value.kind==='input'&&old.value.input.operationId)
+  expect(submitted().command).toMatchObject({body:'recovered input edited once'})
+  expect(f.onPending).toHaveBeenLastCalledWith(false)
+  expect(storage.getItem(key(foreign))).toBe(foreignBytes)
+  discardDiscussionLocal(foreign)
+  console.info('discussion-recovered-input-storage',JSON.stringify(observed))
+  expect(observed.storedValues).toBe(1)
+  expect(observed.enumeratedKeys).toBe(0)
+  expect(observed.readValues).toBe(0)
+})
+it.each(['write','origin removal'] as const)('keeps rereading after recovered-input %s failure until cleanup is confirmed',async failure=>{
+  const original=fixture();await start(original)
+  const old=pending()[0]!, storage=localStorage
+  const key=(record:{id:string;revision:string})=>`masc.artifact-discussion-local.v1:${record.id}:${record.revision}`
+  const oldKey=key(old), originalBytes=storage.getItem(oldKey)
+  original.retire();cleanup()
+  const f=fixture('human',original.snapshot().draft.state);f.mount()
+  await waitFor(()=>expect((screen.getByRole('button',{name:'원고와 댓글 입력 복구'}) as HTMLButtonElement).disabled).toBe(false))
+  let failing=true, enumeratedKeys=0
+  vi.stubGlobal('localStorage',{
+    get length(){return storage.length},key(index:number){enumeratedKeys++;return storage.key(index)},
+    getItem:storage.getItem.bind(storage),
+    setItem(name:string,value:string){if(failing&&failure==='write')throw new DOMException('full','QuotaExceededError');storage.setItem(name,value)},
+    removeItem(name:string){if(failing&&failure==='origin removal'&&name===oldKey)throw new Error('origin cleanup failed');storage.removeItem(name)},
+  })
+  fireEvent.click(screen.getByRole('button',{name:'원고와 댓글 입력 복구'}))
+  await screen.findByLabelText('댓글 내용')
+  await waitFor(()=>expect(f.session.snapshot.pending).toBe(false))
+  enumeratedKeys=0
+  fireEvent.input(screen.getByLabelText('댓글 내용'),{target:{value:'recovered edit during failure'}})
+  const failedKeys=enumeratedKeys
+  expect(storage.getItem(oldKey)).toBe(originalBytes)
+  expect(failedKeys).toBeGreaterThan(0)
+  const retained=pending().find(record=>record.id!==old.id)!
+  expect(retained.value.kind==='input'&&retained.value.input.body).toBe('recovered edit during failure')
+  expect(retained.persisted).toBe(failure==='origin removal')
+  failing=false;enumeratedKeys=0
+  fireEvent.input(screen.getByLabelText('댓글 내용'),{target:{value:'recovered edit after repair'}})
+  const cleanupKeys=enumeratedKeys
+  expect(storage.getItem(oldKey)).toBeNull()
+  expect(cleanupKeys).toBeGreaterThan(0)
+  enumeratedKeys=0
+  fireEvent.input(screen.getByLabelText('댓글 내용'),{target:{value:'own edit after confirmed cleanup'}})
+  const ownKeys=enumeratedKeys
+  vi.unstubAllGlobals()
+  const current=pending()[0]!
+  expect(current.value.kind==='input'&&current.value.input.body).toBe('own edit after confirmed cleanup')
+  expect(current.value.kind==='input'&&current.value.input.operationId).toBe(old.value.kind==='input'&&old.value.input.operationId)
+  expect(JSON.parse(storage.getItem(key(current))!).value).toEqual(current.value)
+  console.info('discussion-recovered-failure-boundary',failure,JSON.stringify({failedKeys,cleanupKeys,ownKeys}))
+  expect(ownKeys).toBe(0)
 })
 it.each(['write','remove'] as const)('rereads recovery copies when an own %s fails',async failure=>{
   const f=fixture();await start(f)

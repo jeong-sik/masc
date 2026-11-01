@@ -782,6 +782,10 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
            Error
              (Unavailable
                 (Missing_credential (Runtime_instance.dispatch_credential_error_to_string error)))
+         | Error (Runtime_instance.Missing_credential_selection _ as error) ->
+           Error
+             (Unavailable
+                (Invalid_configuration (Runtime_instance.dispatch_credential_error_to_string error)))
          | Ok () ->
            let seed =
              Runtime_inference.seed_of_thinking_support

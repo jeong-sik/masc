@@ -15,6 +15,7 @@ type t =
     (** Turn owner materialized at load time. HTTP bindings become
         [Agent_core]; official client runtimes remain distinct and can never
         be dispatched as a fake LLM provider config. *)
+  ; credential_admission : Runtime_credential_selection.admission option
   ; candidate_backpressure : Runtime_candidate_backpressure.candidate
     (** Candidate-only backpressure tied to the frozen dispatch binding. *)
   ; quota_scope : Runtime_quota_window.scope
@@ -33,6 +34,7 @@ type dispatch_credential_error =
       ; carrier : Agent_core.Error.credential_carrier
       }
   | Undeclared_credential of { provider_id : string }
+  | Missing_credential_selection of { provider_id : string }
 
 let undeclared_credential_detail ~provider_id =
   Printf.sprintf
@@ -58,6 +60,8 @@ let dispatch_credential_error_to_string = function
        | Agent_core.Error.UndeclaredCredential -> "undeclared")
   | Undeclared_credential { provider_id } ->
     undeclared_credential_detail ~provider_id
+  | Missing_credential_selection {provider_id} ->
+    Printf.sprintf "runtime provider %S has no materialized credential selection" provider_id
 ;;
 
 let dispatch_credential_error_to_core_error = function
@@ -70,6 +74,10 @@ let dispatch_credential_error_to_core_error = function
     Agent_core.Error.Config
       (Agent_core.Error.CredentialUnavailable
          { provider_id; carrier = Agent_core.Error.UndeclaredCredential })
+  | Missing_credential_selection {provider_id} ->
+    Agent_core.Error.Config (Agent_core.Error.InvalidConfig
+      {field="credential_selection";
+       detail=dispatch_credential_error_to_string (Missing_credential_selection {provider_id})})
 ;;
 
 let validate_dispatch_credential
@@ -83,48 +91,21 @@ let validate_dispatch_credential
   | Runtime_execution.Muse_serve _ ->
     Ok ()
   | Runtime_execution.Agent_core _ ->
-    let requirement =
-      Runtime_adapter.credential_requirement
-        ~provider_id:runtime.provider.id
-        runtime.provider.credentials
-    in
-    if not (Llm_provider.Secret.is_empty provider_config.api_key)
-    then Ok ()
-    else
-      match requirement with
-      | Not_required -> Ok ()
-      (* An unknown provider is not turned away here: nothing says whether it
-         needs a key, and [Runtime_adapter.resolve_api_key] answers that case
-         where it names the missing catalog entry. A catalog row that states
-         [requires_api_key] while the runtime row declares no credential is
-         turned away before the request leaves, the same way a declared but
-         empty one is: dispatching would send no auth header at all.
-
-         Do not close this arm before runtime.toml can declare "no key" for a
-         row (task-2314, [credentials] [type = "none"]). The v0.54.0 Known
-         issues tell an operator whose catalog row points at a keyless proxy
-         to rename the row to an id the catalog does not know; that rename
-         passes through here. Closing it first would stop those rows with no
-         declaration left to add. *)
-      | Unknown_provider -> Ok ()
-      | Missing_declared_credential { provider_id } ->
-        Error (Undeclared_credential { provider_id })
-      | Reference (Env env_key) ->
-        Error
-          (Required_env_credential_missing
-             { provider_id = runtime.provider.id; env_key })
-      | Reference (Inline _) ->
-        Error
-          (Declared_credential_unavailable
-             { provider_id = runtime.provider.id
-             ; carrier = Agent_core.Error.InlineCredential
-             })
-      | Reference (File _) ->
-        Error
-          (Declared_credential_unavailable
-             { provider_id = runtime.provider.id
-             ; carrier = Agent_core.Error.FileCredential
-             })
+    (match runtime.credential_admission with
+     | None -> Error (Missing_credential_selection {provider_id=runtime.provider.id})
+     | Some admission ->
+       if not (Llm_provider.Secret.is_empty provider_config.api_key) then Ok ()
+       else
+         let provider_id = Runtime_credential_selection.provider_id admission in
+         match Runtime_credential_selection.requirement admission with
+         | Not_required -> Ok ()
+         | Unknown_provider -> Ok ()
+         | Required_undeclared -> Error (Undeclared_credential {provider_id})
+         | Required_env env_key -> Error (Required_env_credential_missing {provider_id;env_key})
+         | Required_inline -> Error (Declared_credential_unavailable
+             {provider_id;carrier=Agent_core.Error.InlineCredential})
+         | Required_file -> Error (Declared_credential_unavailable
+             {provider_id;carrier=Agent_core.Error.FileCredential}))
 ;;
 
 (* id 파생의 단일 출처는 {!Runtime_schema.binding_key} — runtime 을 id 로
@@ -144,18 +125,8 @@ let id_of_binding (b : binding) : string = binding_key b
    (PR #28219 review). *)
 let quota_scope_of_materialized
     ~(provider : provider)
-    ~(execution : Runtime_execution.t) =
-  let credential =
-    match execution with
-    | Runtime_execution.Agent_core _ ->
-      Runtime_adapter.effective_credential_reference
-        ~provider_id:provider.id
-        provider.credentials
-    | Runtime_execution.Antigravity_cli _ -> provider.credentials
-    | Runtime_execution.Codex_app_server _
-    | Runtime_execution.Claude_code _
-    | Runtime_execution.Muse_serve _ -> None
-  in
+    ~(execution : Runtime_execution.t)
+    ~credential_admission =
   let official_home client selected scope =
     match selected with
     | None -> Error (client ^ " needs account-home or an absolute CLI home")
@@ -176,9 +147,12 @@ let quota_scope_of_materialized
   | Runtime_execution.Muse_serve client ->
     Runtime_account_home.of_string client.account_home
     |> Result.map Runtime_quota_window.scope_of_muse_home
-  | Runtime_execution.Agent_core _
+  | Runtime_execution.Agent_core _ ->
+    (match credential_admission with
+     | Some admission -> Ok (Runtime_credential_selection.quota_scope admission)
+     | None -> Error "HTTP materialization has no credential selection")
   | Runtime_execution.Antigravity_cli _ ->
-    Ok (Runtime_quota_window.scope_of_credential ~provider_id:provider.id credential)
+    Ok (Runtime_quota_window.scope_of_credential ~provider_id:provider.id provider.credentials)
 ;;
 
 (* Why a binding did not become a runtime, as a closed vocabulary rather than a
@@ -201,14 +175,17 @@ let of_binding (cfg : config) (b : binding) : (t, drop_reason) result =
     if not provider.enabled
     then Error (Provider_disabled provider.id)
     else
-      (match Runtime_adapter.binding_to_execution cfg b with
-       | Ok execution ->
+      (match Runtime_adapter.materialize_execution cfg b with
+       | Ok selected ->
+         let execution = selected.Runtime_adapter.execution in
+         let credential_admission = selected.credential_admission in
          Result.map (fun quota_scope ->
            { id = id_of_binding b
            ; provider
            ; model
            ; binding = b
            ; execution
+           ; credential_admission
            ; candidate_backpressure = (
                let binding = match execution with
                  | Runtime_execution.Agent_core config ->
@@ -224,7 +201,7 @@ let of_binding (cfg : config) (b : binding) : (t, drop_reason) result =
                Runtime_candidate_backpressure.create_candidate ~binding)
            ; quota_scope
            })
-           (quota_scope_of_materialized ~provider ~execution)
+           (quota_scope_of_materialized ~provider ~execution ~credential_admission)
          |> Result.map_error (fun reason -> Execution_unbuildable reason)
        | Error reason -> Error (Execution_unbuildable reason))
   | None, _ -> Error (Provider_not_declared b.provider_id)

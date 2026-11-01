@@ -16,6 +16,12 @@
 open Alcotest
 open Masc
 
+let execution_for_binding config binding =
+  Runtime_adapter.materialize_execution config binding
+  |> Result.map (fun (selected : Runtime_adapter.execution_materialization) -> selected.execution)
+;;
+
+
 let set_runtime_lane_candidates ?runtime_config_path ?expected_source_revision
     ~lane_id ~runtime_ids () =
   Runtime.set_runtime_lane_candidates ?runtime_config_path ?expected_source_revision
@@ -1891,7 +1897,7 @@ tools-support = true
     | Error errors -> Alcotest.failf "multi-account TOML refused: %s"
         (String.concat "; " (List.map (fun e -> e.Runtime_toml.message) errors)) in
   let homes = List.map (fun binding ->
-    match Runtime_adapter.binding_to_execution config binding with
+    match execution_for_binding config binding with
     | Ok (Runtime_execution.Claude_code execution) -> execution.account_home
     | Ok (Runtime_execution.Codex_app_server execution) -> execution.account_home
     | Ok _ -> Alcotest.fail "expected an official client"

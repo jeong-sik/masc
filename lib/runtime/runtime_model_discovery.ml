@@ -190,13 +190,13 @@ let to_json models =
       "provider_listed_at", optional Fun.id model.listed_at;
       "release_date", `Null]) models)]
 let resolve_credential connection =
-  let requirement = match connection.provider, connection.credential with
-    | Anonymous_endpoint, None -> Runtime_adapter.Not_required
-    | Anonymous_endpoint, Some credential -> Runtime_adapter.explicit_credential_requirement credential
+  let selected = match connection.provider, connection.credential with
+    | Anonymous_endpoint, None -> Ok (Llm_provider.Secret.of_string "")
+    | Anonymous_endpoint, Some credential -> Runtime_credential_selection.resolve_explicit credential
     | Named_provider provider_id, credential ->
-      Runtime_adapter.credential_requirement ~provider_id credential in
-  Runtime_adapter.resolve_credential_requirement requirement
-  |> Result.map_error (fun _ -> Credential_unavailable)
+      Result.bind (Runtime_adapter.materialize_credentials ~provider_id ~credential)
+        Runtime_credential_selection.require_key in
+  selected |> Result.map_error (fun _ -> Credential_unavailable)
 
 let discover ~sw ~net connection =
   let* api_key = resolve_credential connection in

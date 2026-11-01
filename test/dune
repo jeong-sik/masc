@@ -4202,6 +4202,11 @@
  (libraries alcotest str masc_tui_frame_presenter masc_tui_terminal_palette))
 
 (test
+ (name test_tui_lane_records)
+ (modules test_tui_lane_records)
+ (libraries alcotest yojson masc_tui_lane_records))
+
+(test
  (name test_tui_frame_timing)
  (modules test_tui_frame_timing)
  (libraries alcotest yojson masc_tui_frame_timing)

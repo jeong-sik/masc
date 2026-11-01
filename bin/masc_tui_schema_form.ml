@@ -73,6 +73,15 @@ let object_items schema =
   | None,Some (`String "array"),Some item_schema
     when member "type" item_schema=Some (`String "object") && Option.is_none (choices item_schema) -> Some item_schema
   | _ -> None
+let display_draft (field : field) draft =
+  let quoted () = Yojson.Safe.to_string (`String draft) in
+  match member "type" field.schema with
+  | Some (`String "array") ->
+      (try match Yojson.Safe.from_string draft with
+       | `List _ as value -> Yojson.Safe.to_string value
+       | _ -> quoted ()
+       with Yojson.Json_error _ -> quoted ())
+  | Some _ | None -> quoted ()
 let rec insert_text ~text form =
   if form.reviewing then form else
   match form.array_editor with
@@ -173,7 +182,7 @@ and handle_array ~key form editor =
           let* value = Validation.validate_value ~schema:field.schema ~name:(String.concat "." field.path) (`List editor.items) in
           Ok (Updated (replace {form with array_editor=None} (Some value)))
       | _ -> update editor
-let rec lines form =
+let rec lines ?(show_description=false) form =
   match form.array_editor with
   | Some editor ->
       let name = match List.nth_opt form.fields form.cursor with
@@ -181,7 +190,7 @@ let rec lines form =
       (match editor.child with
        | Some (index,child) ->
            (name ^ (match index with None -> " · New item" | Some index -> Printf.sprintf " · Edit item %d" (index+1)))
-           :: "Item review saves into this local array; it does not submit an action." :: lines child
+           :: "Item review saves into this local array; it does not submit an action." :: lines ~show_description child
        | None ->
            [name ^ " · Array items";"a:add  e/Enter:edit  d:remove  j/k:select  Ctrl-S:apply array  Esc:discard array edits";
             Printf.sprintf "%d items · applying validates minItems/maxItems" (List.length editor.items)] @
@@ -193,13 +202,23 @@ let rec lines form =
   if form.reviewing then
     ["Review input · Enter:submit once · Esc:edit · PageUp/PageDown:scroll"] @
       (match value form with Ok value -> String.split_on_char '\n' (Yojson.Safe.pretty_to_string value) | Error error -> [error])
-  else ["Tab/Up/Down:field · Left/Right:choice · Ctrl-E:array items · Ctrl-U:unset · Ctrl-S:review · Esc:cancel";
+  else
+    let selected = List.nth_opt form.fields form.cursor in
+    let array_hint = match selected with
+      | Some field when Option.is_some (object_items field.schema) -> " · Ctrl-E:array items"
+      | Some _ | None -> "" in
+    let description = match show_description, selected with
+      | true, Some field -> (match member "description" field.schema with
+          | Some (`String description) when description <> "" -> [description]
+          | Some _ | None -> [])
+      | false, _ | true, None -> [] in
+    ["Tab/Up/Down:field · Left/Right:choice" ^ array_hint ^ " · Ctrl-U:unset · Ctrl-S:review · Esc:cancel";
         Printf.sprintf "Field %d/%d · PageUp/PageDown:scroll" (form.cursor+1) (List.length form.fields)] @
     List.filter_map (fun (index,(field : field)) -> if index<>form.cursor then None else Some (
       let name = match member "title" field.schema with Some (`String title) -> title
         | _ -> String.concat "." field.path in
       (if index=form.cursor then "> " else "  ") ^ name ^ (if field.required then " *" else "") ^ ": " ^
       (match form.draft with
-       | Some draft when index=form.cursor -> Yojson.Safe.to_string (`String draft)
+       | Some draft when index=form.cursor -> display_draft field draft
        | _ -> Option.fold ~none:"(unset)" ~some:Yojson.Safe.to_string field.value)))
-      (List.mapi (fun index (field : field) -> index,field) form.fields)
+      (List.mapi (fun index (field : field) -> index,field) form.fields) @ description

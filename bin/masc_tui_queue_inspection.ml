@@ -1,7 +1,7 @@
 type action = Inspect | Pause | Resume | Clear | Cancel of string | Move_to_end of string | Run_next of string | Edit of string * string
   | Cancel_event of string * int64 * string
   | Prioritize_event of string * int64 * Keeper_event_queue.urgency
-  | Inspect_peers of unit ref
+  | Inspect_peers of unit ref * string option
 
 type peer_relation = {
   operation_id : string;
@@ -10,6 +10,7 @@ type peer_relation = {
   reply_to : string option;
 }
 type peer_snapshot = { queued_count : int; relations : peer_relation list }
+type peer_page = { snapshot : peer_snapshot; next_sequence : string option }
 
 type item_id =
   | Local_message of string | Server_message of string | Running_message of string
@@ -18,6 +19,7 @@ type item = { id : item_id option; text : string }
 type observation = {
   waiting : (item list, string) result;
   operations : (item list, string) result;
+  peer_page : peer_page option;
 }
 open Result.Syntax
 let split text =
@@ -96,19 +98,49 @@ let peer_snapshot ~keeper_name json =
   let* relations = unique Operation_ids.empty [] decoded in
   Ok { queued_count = List.length operations; relations }
 
-let read_peer_page ~keeper_name ~read_page =
-  let* page = read_page () in
-  peer_snapshot ~keeper_name page
+let next_sequence_after ~after_sequence json =
+  let* operations = list "operations" json in
+  let* previous = match after_sequence with
+    | None -> Ok None
+    | Some raw ->
+        (match Int64.of_string_opt raw with
+         | Some sequence when sequence >= 0L -> Ok (Some sequence)
+         | Some _ | None -> Error "Queue sequence must be a non-negative integer") in
+  let rec walk previous last = function
+    | [] -> Ok (Option.map Int64.to_string last)
+    | operation :: rest ->
+        let* raw = string "sequence" operation in
+        let* sequence = match Int64.of_string_opt raw with
+          | Some sequence when sequence >= 0L -> Ok sequence
+          | Some _ | None -> Error "Queue sequence must be a non-negative integer" in
+        (match previous with
+         | Some boundary when sequence <= boundary -> Error "Queue pagination did not advance"
+         | Some _ | None -> walk (Some sequence) (Some sequence) rest)
+  in
+  walk previous None operations
 
-let peer_lines snapshot =
-  let scope = Printf.sprintf "Observed %d queued requests on the first page; %d from Keepers"
+let next_sequence json = next_sequence_after ~after_sequence:None json
+
+let read_peer_page ~keeper_name ~after_sequence ~read_page =
+  let* page = read_page () in
+  let* snapshot = peer_snapshot ~keeper_name page in
+  let* next_sequence = next_sequence_after ~after_sequence page in
+  Ok { snapshot; next_sequence }
+
+let peer_lines ~page_number { snapshot; next_sequence } =
+  let scope = Printf.sprintf "Page %d · observed %d queued requests; %d from Keepers"
+      page_number
       snapshot.queued_count (List.length snapshot.relations) in
   let lines = List.map (fun relation ->
     Printf.sprintf "%s → %s · queued · %s%s"
       (safe relation.sender) (safe relation.recipient) (safe relation.operation_id)
       (Option.fold ~none:"" ~some:(fun keeper -> " · reply route " ^ safe keeper) relation.reply_to))
     snapshot.relations in
-  scope :: ("First page only; more queued requests may exist. Running and completed requests are not listed." :: lines)
+  let next = match next_sequence with
+    | Some _ -> "> reads later queued requests"
+    | None when page_number = 1 -> "No queued requests in this read"
+    | None -> "No requests after this cursor in this read" in
+  scope :: (("< previous · " ^ next ^ " · r refresh/retry · R start over. Pages are separate observations; running and completed requests are not listed.") :: lines)
 
 let clock_text at =
   let time = Unix.localtime at in
@@ -383,13 +415,3 @@ let edited_input ~message operation =
   Ok (Masc.Keeper_chat_operation_payload.input_to_json ~message
     ~user_blocks:(Masc.Keeper_multimodal_input.User_text message :: media)
     ~turn_instructions:input.turn_instructions ~surface_context:input.surface_context ~attachments:input.attachments)
-
-let next_sequence json =
-  let* operations = list "operations" json in
-  match List.rev operations with
-  | [] -> Ok None
-  | last :: _ ->
-    let* sequence = string "sequence" last in
-    match Int64.of_string_opt sequence with
-    | Some sequence when sequence >= 0L -> Ok (Some (Int64.to_string sequence))
-    | _ -> Error "Queue sequence must be a non-negative integer"

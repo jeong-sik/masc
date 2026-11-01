@@ -1110,6 +1110,8 @@ let test_keeper_preference_cancelled_submission_and_exit () =
 
 let test_keeper_peer_reading_keeps_its_target_and_epoch () =
   let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  let page next_sequence : Masc_tui_queue_inspection.peer_page =
+    { snapshot = {queued_count = 1; relations = []}; next_sequence } in
   state.view <- Keepers Keeper_list;
   let old = begin_keeper_peer_reading state ~keeper_name:"alpha" in
   let current = begin_keeper_peer_reading state ~keeper_name:"beta" in
@@ -1117,13 +1119,55 @@ let test_keeper_peer_reading_keeps_its_target_and_epoch () =
   Alcotest.(check bool) "editing the pending reader preserves request ownership" true
     (keeper_peer_read_current state ~keeper_name:"beta" ~token:current);
   Alcotest.(check bool) "an earlier target cannot replace the current read" false
-    (finish_keeper_peer_reading state ~keeper_name:"alpha" ~token:old (Ok ["old"]));
+    (finish_keeper_peer_reading state ~keeper_name:"alpha" ~token:old (Ok (page None)));
   Alcotest.(check bool) "the matching target may settle" true
-    (finish_keeper_peer_reading state ~keeper_name:"beta" ~token:current (Ok ["current"]));
+    (finish_keeper_peer_reading state ~keeper_name:"beta" ~token:current (Ok (page (Some "10"))));
   Alcotest.(check bool) "a completed request cannot settle twice" false
-    (finish_keeper_peer_reading state ~keeper_name:"beta" ~token:current (Ok ["duplicate"]));
+    (finish_keeper_peer_reading state ~keeper_name:"beta" ~token:current (Ok (page None)));
   Alcotest.(check bool) "a completed reader is visible in its workspace" true
     (Option.is_some (current_detail_reading state));
+  let next = match request_keeper_peer_page state Peer_next with
+    | Some ("beta", token, Some "10") -> token
+    | Some _ | None -> Alcotest.fail "next page lost its Keeper or sequence" in
+  Alcotest.(check bool) "repeated next shares its pending page" true
+    (Option.is_none (request_keeper_peer_page state Peer_next));
+  Alcotest.(check bool) "a failed page retires its request" true
+    (finish_keeper_peer_reading state ~keeper_name:"beta" ~token:next (Error "offline"));
+  let retry = match request_keeper_peer_page state Peer_refresh with
+    | Some ("beta", token, Some "10") -> token
+    | Some _ | None -> Alcotest.fail "failed page did not retain the previous cursor" in
+  Alcotest.(check bool) "repeated retry shares the failed page request" true
+    (Option.is_none (request_keeper_peer_page state Peer_refresh)
+     && keeper_peer_read_current state ~keeper_name:"beta" ~token:retry);
+  Alcotest.(check bool) "the retried next page may settle" true
+    (finish_keeper_peer_reading state ~keeper_name:"beta" ~token:retry (Ok (page None)));
+  let restart = match request_keeper_peer_page state Peer_restart with
+    | Some ("beta", token, None) -> token
+    | Some _ | None -> Alcotest.fail "restart did not request the first page" in
+  Alcotest.(check bool) "the same first-page request shares its owner" true
+    (Option.is_none (request_keeper_peer_page state Peer_previous));
+  Alcotest.(check bool) "restarting lands on a fresh first page" true
+    (finish_keeper_peer_reading state ~keeper_name:"beta" ~token:restart (Ok (page (Some "10"))));
+  let next_again = match request_keeper_peer_page state Peer_next with
+    | Some ("beta", token, Some "10") -> token
+    | Some _ | None -> Alcotest.fail "next page unavailable after restart" in
+  let restart_pending = match request_keeper_peer_page state Peer_restart with
+    | Some ("beta", token, None) -> token
+    | Some _ | None -> Alcotest.fail "restart did not supersede the pending later page" in
+  Alcotest.(check bool) "repeated restart shares the first-page request" true
+    (Option.is_none (request_keeper_peer_page state Peer_restart));
+  Alcotest.(check bool) "a late later page cannot settle after restart" false
+    (finish_keeper_peer_reading state ~keeper_name:"beta" ~token:next_again (Ok (page None)));
+  ignore (finish_keeper_peer_reading state ~keeper_name:"beta" ~token:restart_pending (Ok (page (Some "10"))));
+  let next_again = match request_keeper_peer_page state Peer_next with
+    | Some ("beta", token, Some "10") -> token
+    | Some _ | None -> Alcotest.fail "next page unavailable after replacing a pending read" in
+  ignore (finish_keeper_peer_reading state ~keeper_name:"beta" ~token:next_again (Ok (page None)));
+  let previous = match request_keeper_peer_page state Peer_previous with
+    | Some ("beta", token, None) -> token
+    | Some _ | None -> Alcotest.fail "previous page lost the first cursor" in
+  Alcotest.(check bool) "previous page settles independently" true
+    (finish_keeper_peer_reading state ~keeper_name:"beta" ~token:previous (Ok (page None)));
   Option.iter (update_detail_reading state) (current_detail_reading state);
   suspend_workspace_readings state;
   Alcotest.(check bool) "a completed peer reader closes when workspace confirmation is lost" true
@@ -1133,21 +1177,332 @@ let test_keeper_peer_reading_keeps_its_target_and_epoch () =
   Alcotest.(check bool) "a closed reader sends no further page requests" false
     (keeper_peer_read_current state ~keeper_name:"alpha" ~token:closed);
   Alcotest.(check bool) "a closed reader is not reopened" false
-    (finish_keeper_peer_reading state ~keeper_name:"alpha" ~token:closed (Ok ["late"]));
+    (finish_keeper_peer_reading state ~keeper_name:"alpha" ~token:closed (Ok (page None)));
   let retired = begin_keeper_peer_reading state ~keeper_name:"alpha" in
   state.workspace_read_authority <- ref ();
   Alcotest.(check bool) "a retired epoch sends no further page requests" false
     (keeper_peer_read_current state ~keeper_name:"alpha" ~token:retired);
   Alcotest.(check bool) "a prior workspace reading cannot settle" false
-    (finish_keeper_peer_reading state ~keeper_name:"alpha" ~token:retired (Ok ["stale"]));
+    (finish_keeper_peer_reading state ~keeper_name:"alpha" ~token:retired (Ok (page None)));
   let owner = begin_keeper_peer_reading state ~keeper_name:"alpha" in
-  ignore (finish_keeper_peer_reading state ~keeper_name:"alpha" ~token:owner (Ok ["current"]));
+  ignore (finish_keeper_peer_reading state ~keeper_name:"alpha" ~token:owner (Ok (page None)));
   open_detail_reading state
     (Masc_tui_detail_reading.create_observation ~title:"Other"
       [{ heading = "Other"; body = "Other reader" }]);
   suspend_workspace_readings state;
   Alcotest.(check bool) "retiring a peer read does not close a replacement reader" true
     (Option.is_some (current_detail_reading state))
+
+let test_keeper_peer_page_preserves_scroll_intent () =
+  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  state.view <- Keepers Keeper_list;
+  let page next_sequence : Masc_tui_queue_inspection.peer_page =
+    { snapshot = {queued_count = 1; relations = []}; next_sequence } in
+  let reading () = match current_detail_reading state with
+    | Some reading -> reading
+    | None -> Alcotest.fail "peer reader disappeared" in
+  let move direction =
+    let updated = Masc_tui_detail_reading.move ~count:100 ~height:10 direction (reading ()) in
+    update_detail_reading state updated in
+  let offset () = Masc_tui_detail_reading.scroll ~count:100 ~height:10 (reading ()) in
+  let start move = match request_keeper_peer_page state move with
+    | Some ("beta", token, _) -> token
+    | Some _ | None -> Alcotest.fail "page request did not start" in
+  let initial = begin_keeper_peer_reading state ~keeper_name:"beta" in
+  Alcotest.(check bool) "initial request is loading without a retained page" true
+    (keeper_peer_status state = Some (Keeper_peer_loading {page=1; retained=None; retry=None}));
+  let other_reader = Masc_tui_detail_reading.create_observation ~title:"other" [] in
+  Alcotest.(check bool) "a different reader cannot borrow the peer status" true
+    (Option.is_none (keeper_peer_status_for_reading state other_reader));
+  Alcotest.(check bool) "the matching reader owns the peer status" true
+    (Option.is_some (keeper_peer_status_for_reading state (reading ())));
+  ignore (finish_keeper_peer_reading state ~keeper_name:"beta" ~token:initial (Ok (page (Some "10"))));
+  Alcotest.(check bool) "completed first page is current" true
+    (keeper_peer_status state = Some (Keeper_peer_current 1));
+  move Masc_tui_detail_reading.Last;
+  let displayed = reading () in
+  let next = start Peer_next in
+  Alcotest.(check bool) "requesting a page retains the displayed reader" true
+    (reading () == displayed);
+  Alcotest.(check bool) "pending page names the retained observation" true
+    (keeper_peer_status state = Some (Keeper_peer_loading {page=2; retained=Some 1; retry=None}));
+  Alcotest.(check bool) "the matching response is staged" true
+    (stage_keeper_peer_reading state ~keeper_name:"beta" ~token:next (Ok (page None)));
+  Alcotest.(check bool) "a duplicate response cannot replace it" false
+    (stage_keeper_peer_reading state ~keeper_name:"beta" ~token:next (Error "late"));
+  Alcotest.(check bool) "a settled input permits the next frame to consume it" true
+    (settle_keeper_peer_reading state ~input_pending:false = Peer_result_applied);
+  Alcotest.(check int) "new page starts at the beginning without later input" 0 (offset ());
+  move Masc_tui_detail_reading.Last;
+  let previous = start Peer_previous in
+  Alcotest.(check bool) "response is owned before queued input" true
+    (stage_keeper_peer_reading state ~keeper_name:"beta" ~token:previous (Ok (page (Some "10"))));
+  Alcotest.(check bool) "unsettled input delays settlement" true
+    (settle_keeper_peer_reading state ~input_pending:true = Peer_waiting_input);
+  Alcotest.(check bool) "the retained page still owns the pending frame" true
+    (keeper_peer_status state = Some (Keeper_peer_arrived {page=1; retained=Some 2; retry=None}));
+  move (Masc_tui_detail_reading.By (-3));
+  Alcotest.(check bool) "the following frame settles the response" true
+    (settle_keeper_peer_reading state ~input_pending:false = Peer_result_applied);
+  Alcotest.(check int) "scroll during the read remains the operator's intent" 87 (offset ());
+  let next = start Peer_next in
+  Alcotest.(check bool) "failure is staged for its request" true
+    (stage_keeper_peer_reading state ~keeper_name:"beta" ~token:next (Error "offline"));
+  Alcotest.(check bool) "a received result is not described as loading" true
+    (keeper_peer_status state = Some (Keeper_peer_arrived {page=2; retained=Some 1; retry=None}));
+  Alcotest.(check bool) "the next frame presents the failure" true
+    (settle_keeper_peer_reading state ~input_pending:false = Peer_result_applied);
+  Alcotest.(check bool) "failure names the retained and failed pages" true
+    (keeper_peer_status state = Some (Keeper_peer_failed {page=2; retained=Some 1; reason="offline"}));
+  Alcotest.(check int) "failure keeps the operator's scroll" 87 (offset ());
+  let displayed_failure = reading () in
+  let older_retry = start Peer_next in
+  Alcotest.(check bool) "retry leaves the failed reader and search landing intact" true
+    (reading () == displayed_failure);
+  Alcotest.(check bool) "manual navigation retains the failed retry target" true
+    (keeper_peer_status state = Some (Keeper_peer_loading {page=2; retained=Some 1; retry=Some 2}));
+  Alcotest.(check bool) "r after a retry begins shares the failed page request" true
+    (Option.is_none (request_keeper_peer_page state Peer_refresh));
+  let restart = start Peer_restart in
+  Alcotest.(check bool) "a different page read still names the failed retry target" true
+    (keeper_peer_status state = Some (Keeper_peer_loading {page=1; retained=Some 1; retry=Some 2}));
+  let retry = start Peer_refresh in
+  Alcotest.(check bool) "the earlier retry cannot settle after replacement" false
+    (finish_keeper_peer_reading state ~keeper_name:"beta" ~token:older_retry (Ok (page None)));
+  Alcotest.(check bool) "the abandoned restart cannot settle after retry" false
+    (finish_keeper_peer_reading state ~keeper_name:"beta" ~token:restart (Ok (page None)));
+  ignore (finish_keeper_peer_reading state ~keeper_name:"beta" ~token:retry (Ok (page None)));
+  move Masc_tui_detail_reading.Last;
+  let refresh = start Peer_refresh in
+  ignore (finish_keeper_peer_reading state ~keeper_name:"beta" ~token:refresh (Ok (page None)));
+  Alcotest.(check int) "refresh of the same page keeps its end anchor" 90 (offset ());
+  close_detail_reading state;
+  Alcotest.(check bool) "closing the reader withdraws its status" true
+    (Option.is_none (keeper_peer_status state))
+
+let test_keeper_peer_staged_response_keeps_its_owner () =
+  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  state.view <- Keepers Keeper_list;
+  let page next_sequence : Masc_tui_queue_inspection.peer_page =
+    {snapshot = {queued_count = 1; relations = []}; next_sequence} in
+  let initial = begin_keeper_peer_reading state ~keeper_name:"beta" in
+  ignore (finish_keeper_peer_reading state ~keeper_name:"beta" ~token:initial (Ok (page (Some "10"))));
+  let request move = match request_keeper_peer_page state move with
+    | Some ("beta", token, _) -> token
+    | Some _ | None -> Alcotest.fail "page request did not start" in
+  let older = request Peer_next in
+  Alcotest.(check bool) "the old response is staged" true
+    (stage_keeper_peer_reading state ~keeper_name:"beta" ~token:older (Ok (page None)));
+  let newer = request Peer_restart in
+  Alcotest.(check bool) "a new page request withdraws the staged old response" true
+    (settle_keeper_peer_reading state ~input_pending:false = Peer_no_result);
+  Alcotest.(check bool) "the old response cannot reenter its successor" false
+    (stage_keeper_peer_reading state ~keeper_name:"beta" ~token:older (Ok (page None)));
+  Alcotest.(check bool) "the successor owns its response" true
+    (stage_keeper_peer_reading state ~keeper_name:"beta" ~token:newer (Ok (page None)));
+  state.workspace_read_authority <- ref ();
+  Alcotest.(check bool) "a retired workspace cannot settle a staged response" true
+    (settle_keeper_peer_reading state ~input_pending:false = Peer_no_result)
+
+let test_keeper_peer_staged_failure_preserves_visible_page () =
+  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  state.view <- Keepers Keeper_list;
+  let page : Masc_tui_queue_inspection.peer_page =
+    {snapshot = {queued_count = 1; relations = []}; next_sequence = Some "10"} in
+  let first = begin_keeper_peer_reading state ~keeper_name:"beta" in
+  ignore (stage_keeper_peer_reading state ~keeper_name:"beta" ~token:first (Error "offline"));
+  Alcotest.(check bool) "an unpresented initial response keeps its request" true
+    (Option.is_none (request_keeper_peer_page state Peer_refresh));
+  ignore (settle_keeper_peer_reading state ~input_pending:false);
+  let retry = match request_keeper_peer_page state Peer_refresh with
+    | Some ("beta", token, None) -> token
+    | Some _ | None -> Alcotest.fail "presented initial failure did not retry" in
+  Alcotest.(check bool) "initial retry retains the failed observation" true
+    (keeper_peer_status state = Some (Keeper_peer_loading {page=1; retained=None; retry=Some 1}));
+  ignore (finish_keeper_peer_reading state ~keeper_name:"beta" ~token:retry (Ok page));
+  let next = match request_keeper_peer_page state Peer_next with
+    | Some ("beta", token, _) -> token
+    | Some _ | None -> Alcotest.fail "next page did not start" in
+  ignore (stage_keeper_peer_reading state ~keeper_name:"beta" ~token:next (Error "offline"));
+  let refresh = match request_keeper_peer_page state Peer_refresh with
+    | Some ("beta", token, None) -> token
+    | Some _ | None -> Alcotest.fail "visible page did not own refresh" in
+  Alcotest.(check bool) "the unpresented failed result was superseded" false
+    (stage_keeper_peer_reading state ~keeper_name:"beta" ~token:next (Error "late"));
+  Alcotest.(check bool) "the refresh owns its result" true
+    (finish_keeper_peer_reading state ~keeper_name:"beta" ~token:refresh (Ok page))
+
+let test_keeper_peer_failure_reason_survives_retry () =
+  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  state.view <- Keepers Keeper_list;
+  let reason = String.make 256 'x' ^ "\nsecond line" in
+  let initial = begin_keeper_peer_reading state ~keeper_name:"beta" in
+  ignore (stage_keeper_peer_reading state ~keeper_name:"beta" ~token:initial (Error reason));
+  ignore (settle_keeper_peer_reading state ~input_pending:false);
+  let retained_reason () = match state.keeper_peer_reading with
+    | Some {kpr_failure = Some failure; _} -> Some failure.kpf_reason
+    | Some _ | None -> None in
+  Alcotest.(check (option string)) "full failure remains in the reader state" (Some reason) (retained_reason ());
+  ignore (request_keeper_peer_page state Peer_refresh);
+  Alcotest.(check (option string)) "retry keeps the full previous failure" (Some reason) (retained_reason ())
+
+(* The status row may be clipped, so its retry key also belongs to the
+   scrollable document. Use the same wrapping and frame width as the reader. *)
+let test_keeper_peer_retry_is_readable_on_narrow_failures () =
+  let new_state () =
+    let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+    state.view <- Keepers Keeper_list;
+    state in
+  let reason = "connection lost\noriginal detail" in
+  let check_status ~cols state =
+    let status = match keeper_peer_status state with
+      | Some (Keeper_peer_failed {page;retained;reason}) ->
+          keeper_peer_failure_status ~page ~retained ~reason
+      | Some (Keeper_peer_loading _ | Keeper_peer_arrived _
+             | Keeper_peer_current _ | Keeper_peer_unread)
+      | None -> Alcotest.fail "failure status disappeared" in
+    let rendered = Masc_tui_message_layout.fit_width status (Masc_tui_frame.inner_width ~cols) in
+    let words = String.split_on_char ' ' rendered in
+    Alcotest.(check bool) "failure and retry key fit the fixed status" true
+      (List.mem "failed" words && List.mem "r" words && List.mem "retry" words) in
+  let check_document ~cols state =
+    let reading = match current_detail_reading state with
+      | Some reading -> reading
+      | None -> Alcotest.fail "peer reader disappeared" in
+    let inner = Masc_tui_frame.inner_width ~cols in
+    let rows = Masc_tui_detail_reading.rows ~width:(max 1 (inner - 2)) reading in
+    let text = function
+      | Masc_tui_detail_reading.Heading text
+      | Masc_tui_detail_reading.Content text
+      | Masc_tui_detail_reading.Note text -> text in
+    let rendered = List.map (fun row ->
+      Masc_tui_message_layout.fit_width ("  " ^ text row) inner) rows in
+    let has line = List.exists (fun row -> String.trim row = line) rendered in
+    let retry = match List.find_index (fun row -> String.trim row = "r:retry") rendered with
+      | Some index -> index
+      | None -> Alcotest.fail "retry key does not fit a document row" in
+    let height = 3 and count = List.length rows in
+    let reading = Masc_tui_detail_reading.move ~count ~height Masc_tui_detail_reading.First reading in
+    let reading = Masc_tui_detail_reading.move ~count ~height (Masc_tui_detail_reading.By retry) reading in
+    let scroll = Masc_tui_detail_reading.scroll ~count ~height reading in
+    Alcotest.(check bool) "retry row is reachable by scrolling" true
+      (retry >= scroll && retry < scroll + height);
+    Alcotest.(check bool) "both original failure lines remain readable" true
+      (has "connection lost" && has "original detail");
+    Alcotest.(check (option string)) "the original failure remains exact" (Some reason)
+      (match state.keeper_peer_reading with
+       | Some {kpr_failure=Some failure;_} -> Some failure.kpf_reason
+       | Some _ | None -> None) in
+  let initial = new_state () in
+  let first = begin_keeper_peer_reading initial ~keeper_name:"beta" in
+  ignore (stage_keeper_peer_reading initial ~keeper_name:"beta" ~token:first (Error reason));
+  ignore (settle_keeper_peer_reading initial ~input_pending:false);
+  check_status ~cols:20 initial;
+  check_document ~cols:20 initial;
+  let retry = request_keeper_peer_page initial Peer_refresh in
+  Alcotest.(check bool) "the initial failure can be retried" true (Option.is_some retry);
+  check_document ~cols:20 initial;
+  let retained = new_state () in
+  let page : Masc_tui_queue_inspection.peer_page =
+    {snapshot={queued_count=1;relations=[]};next_sequence=Some "10"} in
+  let first = begin_keeper_peer_reading retained ~keeper_name:"beta" in
+  ignore (stage_keeper_peer_reading retained ~keeper_name:"beta" ~token:first (Ok page));
+  ignore (settle_keeper_peer_reading retained ~input_pending:false);
+  let next = match request_keeper_peer_page retained Peer_next with
+    | Some ("beta", token, Some "10") -> token
+    | Some _ | None -> Alcotest.fail "next page did not retain its cursor" in
+  ignore (stage_keeper_peer_reading retained ~keeper_name:"beta" ~token:next (Error reason));
+  ignore (settle_keeper_peer_reading retained ~input_pending:false);
+  Alcotest.(check bool) "a failed later page retains its previous observation" true
+    (match retained.keeper_peer_reading with
+     | Some {kpr_committed=Some (_, observed);_} -> observed = page
+     | Some _ | None -> false);
+  check_status ~cols:40 retained;
+  check_document ~cols:40 retained;
+  let retry = request_keeper_peer_page retained Peer_refresh in
+  Alcotest.(check bool) "retry retains the failed cursor" true
+    (match retry with Some ("beta", _, Some "10") -> true | Some _ | None -> false);
+  check_document ~cols:40 retained
+
+let test_keeper_peer_presented_owner_barrier () =
+  let module Presented = Masc_tui_presented in
+  let module Frame = Masc_tui_frame_presenter in
+  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  state.view <- Keepers Keeper_list;
+  let page next_sequence : Masc_tui_queue_inspection.peer_page =
+    {snapshot = {queued_count = 1; relations = []}; next_sequence} in
+  let reading () = match current_detail_reading state with
+    | Some reading -> reading
+    | None -> Alcotest.fail "peer reader disappeared" in
+  let owner () = keeper_peer_frame_owner state (reading ()) in
+  let first = begin_keeper_peer_reading state ~keeper_name:"beta" in
+  ignore (finish_keeper_peer_reading state ~keeper_name:"beta" ~token:first (Ok (page (Some "10"))));
+  let old_owner = owner () in
+  let drawn_owner ~compact drawn_reading =
+    keeper_peer_drawn_owner state ~compact ~drawn_reading in
+  Alcotest.(check bool) "the drawn peer reader supplies its input owner" true
+    (Option.equal same_keeper_peer_frame_owner old_owner
+       (drawn_owner ~compact:false (Some (reading ()))));
+  Alcotest.(check bool) "a compact frame cannot publish the peer owner" true
+    (Option.is_none (drawn_owner ~compact:true (Some (reading ()))));
+  let unrelated = Masc_tui_detail_reading.create_observation ~title:"other" [] in
+  Alcotest.(check bool) "another reader cannot publish the peer owner" true
+    (Option.is_none (drawn_owner ~compact:false (Some unrelated)));
+  Alcotest.(check bool) "a non-reader frame cannot publish the peer owner" true
+    (Option.is_none (drawn_owner ~compact:false None));
+  let next = match request_keeper_peer_page state Peer_next with
+    | Some ("beta", token, _) -> token
+    | Some _ | None -> Alcotest.fail "page request did not start" in
+  ignore (stage_keeper_peer_reading state ~keeper_name:"beta" ~token:next (Ok (page (Some "19"))));
+  Alcotest.(check bool) "a staged result does not replace the shown page owner" false
+    (keeper_peer_frame_owner_changed ~presented:old_owner ~candidate:(owner ()));
+  ignore (settle_keeper_peer_reading state ~input_pending:false);
+  let new_owner = owner () in
+  let owner_changed = keeper_peer_frame_owner_changed ~presented:old_owner ~candidate:new_owner in
+  Alcotest.(check bool) "a new observation changes page authority" true owner_changed;
+  let decide ~presented ~candidate ~external_surface kind =
+    Presented.decide_unpresented_input ~external_surface
+      ~frame_presented:(not (keeper_peer_frame_owner_changed ~presented ~candidate)) kind in
+  List.iter (fun (presented, candidate) ->
+    Alcotest.(check bool) "an unpresented peer transition rejects operator input" true
+      (decide ~presented ~candidate ~external_surface:false Presented.Action = Presented.Reject_action
+       && decide ~presented ~candidate ~external_surface:false Paste = Reject_paste);
+    Alcotest.(check bool) "the transition still permits protocol and external surfaces" true
+      (decide ~presented ~candidate ~external_surface:false Protocol = Accept_input
+       && decide ~presented ~candidate ~external_surface:true Action = Accept_input))
+    [None, new_owner; old_owner, None; old_owner, new_owner];
+  Alcotest.(check bool) "the same presented owner accepts scroll input" true
+    (decide ~presented:new_owner ~candidate:new_owner ~external_surface:false Action = Accept_input);
+  let frame : Frame.frame = {surface_key="peer"; compact_frame=false;
+    terminal_rows=1; terminal_cols=1; cursor=Hidden; lines=[]} in
+  let presenter = Frame.create ~synchronized_output:false () in
+  let emit ~changed ~write = Frame.present presenter ~invalidate_before:changed
+      ~write ~flush:(fun () -> ()) frame in
+  ignore (emit ~changed:false ~write:(fun _ -> ()));
+  Alcotest.(check bool) "an unchanged frame normally needs no output" true
+    (match emit ~changed:false ~write:(fun _ -> ()) with
+     | Frame.Unchanged -> true | Presented _ -> false);
+  let input_during_output = ref false in
+  Alcotest.(check bool) "a different page owner forces even identical output" true
+    (match emit ~changed:owner_changed ~write:(fun _ -> input_during_output := true) with
+     | Frame.Presented _ -> true | Unchanged -> false);
+  let snapshot = Presented.initial ~approval:() ~presses:() ~panes:() ~reader:() ~panel_owner:None in
+  let snapshot = Presented.presented snapshot ~approval:() ~presses:() ~panes:() ~reader:()
+      ~panel_owner:None ~owner_changed ~input_pending:!input_during_output in
+  Alcotest.(check bool) "input arriving during page output is quarantined" true
+    (match snapshot.barrier with Presented.Held _ -> true | Open -> false);
+  let drained = Presented.after_input (Presented.reject snapshot ~paste:false) ~input_pending:false in
+  Alcotest.(check bool) "the barrier clears only after input drains" true
+    (match drained.barrier with Presented.Open -> true | Held _ -> false);
+  let refresh = match request_keeper_peer_page state Peer_refresh with
+    | Some ("beta", token, _) -> token
+    | Some _ | None -> Alcotest.fail "page refresh did not start" in
+  ignore (finish_keeper_peer_reading state ~keeper_name:"beta" ~token:refresh (Ok (page (Some "20"))));
+  Alcotest.(check bool) "a same-page refresh changes authority even if text is unchanged" true
+    (keeper_peer_frame_owner_changed ~presented:new_owner ~candidate:(owner ()));
+  ignore (begin_keeper_peer_reading state ~keeper_name:"beta");
+  Alcotest.(check bool) "reopening the same Keeper creates a different reader owner" true
+    (keeper_peer_frame_owner_changed ~presented:new_owner ~candidate:(owner ()))
 
 let test_keeper_list_search_and_mouse_share_order () =
   let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
@@ -1973,6 +2328,18 @@ let () =
             test_keeper_preference_cancelled_submission_and_exit
         ; Alcotest.test_case "Keeper relationships retain target and workspace authority" `Quick
             test_keeper_peer_reading_keeps_its_target_and_epoch
+        ; Alcotest.test_case "Keeper page changes preserve later scroll intent" `Quick
+            test_keeper_peer_page_preserves_scroll_intent
+        ; Alcotest.test_case "Staged Keeper responses keep their request and workspace owner" `Quick
+            test_keeper_peer_staged_response_keeps_its_owner
+        ; Alcotest.test_case "Staged Keeper failures retain the visible page owner" `Quick
+            test_keeper_peer_staged_failure_preserves_visible_page
+        ; Alcotest.test_case "Keeper failures remain available during retry" `Quick
+            test_keeper_peer_failure_reason_survives_retry
+        ; Alcotest.test_case "Keeper retry remains readable on narrow failures" `Quick
+            test_keeper_peer_retry_is_readable_on_narrow_failures
+        ; Alcotest.test_case "Keeper frame ownership quarantines input during output" `Quick
+            test_keeper_peer_presented_owner_barrier
         ; Alcotest.test_case "Keepers search and mouse share the ordered projection" `Quick
             test_keeper_list_search_and_mouse_share_order
         ; Alcotest.test_case "Keepers observation updates preserve the selected name" `Quick

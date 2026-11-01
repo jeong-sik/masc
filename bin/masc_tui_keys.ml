@@ -527,7 +527,7 @@ let for_surface = function
       :: (b Navigate "v" "view" ~help:"cycle compact / detailed / grouped")
       :: (b Navigate "o" "order" ~help:"cycle priority / recent / oldest / activity / name")
       :: (b Act "J" "jobs" ~help:"open the selected Keeper's schedules")
-      :: (b Act "K" "relations" ~help:"read the first page of Keeper-origin requests queued for the selected Keeper")
+      :: (b Act "K" "relations" ~help:"browse Keeper-origin requests queued for the selected Keeper")
       :: (b Act "Right / Enter" "detail" ~help:"keeper detail")
       :: keeper_actions
       @ [ b Search "/" "search" ~help:"search names; Enter keeps the query"

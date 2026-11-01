@@ -76,13 +76,13 @@ let test_pagination_requires_identity () =
 
 let test_peer_page_reads_once () =
   let reads = ref 0 in
-  let result = get (Inbox.read_peer_page ~keeper_name:"receiver" ~read_page:(fun () ->
+  let result = get (Inbox.read_peer_page ~keeper_name:"receiver" ~after_sequence:None ~read_page:(fun () ->
     incr reads; Ok (`Assoc ["operations", `List []]))) in
   Alcotest.(check int) "exactly one server page is read" 1 !reads;
   Alcotest.(check bool) "an empty page has no peer edges" true
-    (result.queued_count = 0 && result.relations = []);
+    (result.snapshot.queued_count = 0 && result.snapshot.relations = [] && result.next_sequence = None);
   let failures = ref 0 in
-  let result = Inbox.read_peer_page ~keeper_name:"receiver" ~read_page:(fun () ->
+  let result = Inbox.read_peer_page ~keeper_name:"receiver" ~after_sequence:None ~read_page:(fun () ->
     incr failures; Error "read failed") in
   Alcotest.(check int) "a failed read is not retried" 1 !failures;
   Alcotest.(check bool) "a failed page is not reported as an empty result" true
@@ -106,7 +106,7 @@ let test_peer_page_workspace_admission () = Eio_main.run (fun _ ->
   let read () =
     Masc_tui_workspace_read.with_binding ~host ~port ~expected
       ~proof:Request_precondition (fun () ->
-        Inbox.read_peer_page ~keeper_name:"receiver" ~read_page:(fun () ->
+        Inbox.read_peer_page ~keeper_name:"receiver" ~after_sequence:None ~read_page:(fun () ->
           Masc_tui_workspace_read.read_json ~kept_reads
             ~address_of:(fun ~path -> Printf.sprintf "http://%s:%d%s" host port path)
             ~send ~decode:Decode.decode_json_response_body ~host ~port
@@ -160,7 +160,22 @@ let test_peer_relations_use_the_recorded_keeper_identity () =
       (`Assoc ["operations", `List [moved; moved]])));
   Alcotest.(check bool) "missing source is not classified as an empty relationship" true
     (Result.is_error (Inbox.peer_snapshot ~keeper_name:target
-      (`Assoc ["operations", `List [`Assoc ["operation_id", `String "peer-1"; "state", `String "Queued"]]])))
+      (`Assoc ["operations", `List [`Assoc ["operation_id", `String "peer-1"; "state", `String "Queued"]]])));
+  let sequenced sequence operation = match operation with
+    | `Assoc fields -> `Assoc (("sequence", `String sequence) :: fields)
+    | _ -> failwith "operation fixture must be an object" in
+  let read after operations =
+    Inbox.read_peer_page ~keeper_name:target ~after_sequence:after
+      ~read_page:(fun () -> Ok (`Assoc ["operations", `List operations])) in
+  let first = get (read None [sequenced "10" moved]) in
+  Alcotest.(check (option string)) "the next read uses the observed sequence" (Some "10") first.next_sequence;
+  Alcotest.(check bool) "a page cannot repeat its boundary" true
+    (Result.is_error (read (Some "10") [sequenced "10" moved]));
+  Alcotest.(check bool) "out-of-order page rows are rejected" true
+    (Result.is_error (read None [sequenced "11" moved; sequenced "9"
+      (operation "peer-2" (source ~sender_keeper:sender ~continuation_channel:back))]));
+  let empty = get (read (Some "10") []) in
+  Alcotest.(check (option string)) "an empty later page has no continuation" None empty.next_sequence
 
 let item_ids items = List.filter_map (fun (item : Inbox.item) -> item.id) items
 

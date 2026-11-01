@@ -547,6 +547,50 @@ let test_exact_bytes_preserves_distinct_sizes_and_digit_order () =
   check string "nine digits keep group order" "123,456,789 B"
     (Inspector.exact_bytes 123_456_789)
 
+let test_provider_usage_distinguishes_unreported_cache_from_reported_zero () =
+  let ollama_json =
+    {|{"model":"qwen3:8b","done":true,"done_reason":"stop","message":{"role":"assistant","content":"ok"},"prompt_eval_count":100,"eval_count":20}|}
+  in
+  let ollama_resp =
+    match Llm_provider.Backend_ollama.parse_ollama_response ollama_json with
+    | Ok resp -> resp
+    | Error err -> fail ("ollama parse: " ^ err)
+  in
+  let ollama_turn_usage =
+    Turn_record.usage_of_reported_counts
+      ~scope:Runtime_usage_scope.Per_request
+      ~usage:(Option.get ollama_resp.usage)
+      ~telemetry:ollama_resp.telemetry
+  in
+  check (option int) "ollama cache read stays None" None
+    ollama_turn_usage.cache_read_input_tokens;
+  check (option int) "ollama cache creation stays None" None
+    ollama_turn_usage.cache_creation_input_tokens;
+  check string "ollama renders unreported without ratio"
+    "Provider usage (last reported request in this turn) · input 100 · cache read unreported"
+    (Inspector.provider_usage_summary ollama_turn_usage);
+  let openai_zero_json =
+    {|{"id":"c1","model":"glm-5.3","choices":[{"index":0,"finish_reason":"stop","message":{"content":"ok"}}],"usage":{"prompt_tokens":100,"completion_tokens":20,"prompt_tokens_details":{"cached_tokens":0}}}|}
+  in
+  let openai_zero_resp =
+    match Llm_provider.Backend_openai_parse.parse_openai_response_result openai_zero_json with
+    | Ok resp -> resp
+    | Error _ -> fail "openai zero parse failed"
+  in
+  let openai_turn_usage =
+    Turn_record.usage_of_reported_counts
+      ~scope:Runtime_usage_scope.Per_request
+      ~usage:(Option.get openai_zero_resp.usage)
+      ~telemetry:openai_zero_resp.telemetry
+  in
+  check (option int) "reported zero cache read stays Some 0" (Some 0)
+    openai_turn_usage.cache_read_input_tokens;
+  check (option int) "unreported cache creation stays None" None
+    openai_turn_usage.cache_creation_input_tokens;
+  check string "reported zero renders 0 (0.0% of input)"
+    "Provider usage (last reported request in this turn) · input 100 · cache read 0 (0.0% of input)"
+    (Inspector.provider_usage_summary openai_turn_usage)
+
 let () =
   run "tui_context_inspector"
     [ ( "decode"
@@ -582,5 +626,8 @@ let () =
             test_late_pending_snapshot_cannot_erase_progress
         ; test_case "exact_bytes preserves distinct sizes and digit order" `Quick
             test_exact_bytes_preserves_distinct_sizes_and_digit_order
+        ; test_case "provider usage distinguishes unreported cache from reported zero"
+            `Quick
+            test_provider_usage_distinguishes_unreported_cache_from_reported_zero
         ] )
     ]

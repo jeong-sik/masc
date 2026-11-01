@@ -4997,34 +4997,8 @@ let context_exact_input_lines ~cols ~scale state ~response ~response_parts
         match response with
         | None -> [ Ansi.dim ^ "  Provider cache usage unavailable" ^ Ansi.reset ]
         | Some (record : Turn_record.t) ->
-            let scope = match record.usage.scope with
-              | Runtime_usage_scope.Per_request -> "last reported request in this turn"
-              | Runtime_usage_scope.Turn_total -> "client turn total"
-              | Runtime_usage_scope.Conversation_cumulative -> "conversation cumulative"
-              | Runtime_usage_scope.Usage_scope_unavailable -> "scope unknown"
-            in
-            let read = match record.usage.cache_read_input_tokens with
-              | None -> "cache read unreported"
-              | Some n -> "cache read " ^ Inspector.format_tokens n
-            in
-            let ratio = match record.usage.scope, record.usage.input_tokens,
-                              record.usage.cache_read_input_tokens with
-              | Runtime_usage_scope.Per_request, Some input, Some read
-                when input > 0 && read >= 0 && read <= input ->
-                  Printf.sprintf " (%.1f%% of input)" (float read /. float input *. 100.)
-              | (Runtime_usage_scope.Per_request | Runtime_usage_scope.Turn_total
-                | Runtime_usage_scope.Conversation_cumulative
-                | Runtime_usage_scope.Usage_scope_unavailable), _, _ -> ""
-            in
-            let parts = List.filter_map Fun.id
-                [ Option.map (fun n -> "input " ^ Inspector.format_tokens n)
-                    record.usage.input_tokens
-                ; Some (read ^ ratio)
-                ; Option.map (fun n -> "cache created " ^ Inspector.format_tokens n)
-                    record.usage.cache_creation_input_tokens
-                ] in
             Context_bars.wrap ~width
-              (Printf.sprintf "Provider usage (%s) · %s" scope (String.concat " · " parts))
+              (Inspector.provider_usage_summary record.usage)
             |> List.map (fun line -> "  " ^ line)
       in
       let common =

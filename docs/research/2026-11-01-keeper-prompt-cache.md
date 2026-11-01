@@ -21,7 +21,9 @@ System의 실제 변경은 바이트 길이와 SHA-256으로 판별해야 한다
 | 300 | 125,780 | 125,617 bytes | 79,115 | 65,280 | 82.5% |
 | 301 | 125,780 | 125,705 bytes | 89,879 | 85,696 | 95.3% |
 
-300→301의 첫 차이는 System 맨 뒤에 붙은 예약 입력 관측의 `turn_ref`다.
+300→301의 첫 차이는 System 맨 뒤에 붙은 예약 입력 관측의 `turn_ref`다
+(System 전체 길이는 `125,780 bytes`, 직전 턴과 동일한 앞부분은 `125,705 bytes`이며
+소수 첫째 자리 `KB` 반올림에서는 둘 다 `122.8 KB`로 겹친다).
 43개 도구 스키마는 네 번의 연속 비교에서 모두 동일했다.
 최신 조립 기록에서 고정 지침은 53,361 bytes이고, 그 뒤에 열린 Goal의 관측과
 예약 입력 관측이 붙는다. 이 최신 조립 기록은 위 요청 스냅샷과 별도 관측이다.
@@ -50,7 +52,12 @@ System suffix 하나로 확정할 수는 없다. 대기 간격, 모델·도구 �
 ## 적용 범위
 
 1. 요청 상세에 provider가 보고한 input/cache read와 비율을 표시한다. per-request이고
-   입력이 양수이며 cache read가 입력 이하일 때만 비율을 계산한다. 누락은 0과 구분한다.
+   입력이 양수이며 cache read가 입력 이하일 때만 비율을 계산한다. 누락은 0과 구분한다:
+   provider wire가 cache 필드를 생략한 응답(예: Ollama `prompt_eval_count`/`eval_count`만
+   있는 응답, `cached_tokens`가 없는 OpenAI 응답)은 parser 경계의 `reported_cache_usage`를
+   통해 `Turn_record.usage.cache_read_input_tokens = None`(`cache read unreported`)과
+   `cost.jsonl` `cache_read_tokens = null`로 남기고, wire가 명시적으로 `0`을 보고한 응답만
+   `Some 0`(`cache read 0 (0.0% of input)`)으로 기록한다.
    사용량은 **이 턴의 마지막 보고 요청**으로 표시한다. pre-dispatch 스냅샷과 사용량 사이에는
    response-to-capture ID가 없으므로 같은 스냅샷의 cache hit라고 부르지 않는다.
 2. 종류별 요약에 실제 bytes를 추가하고, 환산 비율이 바뀌면 추정 토큰도 바뀐다고 알린다.

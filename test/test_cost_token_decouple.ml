@@ -281,6 +281,7 @@ let test_native_decode_rate_uses_current_field_only () =
     ; reasoning_effort = None
     ; canonical_model_id = None
     ; reported_model = None
+    ; reported_cache_usage = None
     ; reasoning_source = None
     ; reasoning_prefix = None
     ; inline_content_replay = None
@@ -339,6 +340,7 @@ let test_timings_cache_fields_land_on_payload () =
     ; reasoning_effort = None
     ; canonical_model_id = None
     ; reported_model = None
+    ; reported_cache_usage = None
     ; reasoning_source = None
     ; reasoning_prefix = None
     ; inline_content_replay = None
@@ -563,6 +565,99 @@ let test_an_attempt_reading_keys_apart_from_the_turn () =
   | None, _ | _, None -> fail "an auto row has no key"
 ;;
 
+let test_unreported_wire_cache_is_null_not_zero () =
+  let ollama_json =
+    {|{"model":"qwen3:8b","done":true,"done_reason":"stop","message":{"role":"assistant","content":"ok"},"prompt_eval_count":100,"eval_count":20}|}
+  in
+  let ollama_resp =
+    match Llm_provider.Backend_ollama.parse_ollama_response ollama_json with
+    | Ok resp -> resp
+    | Error err -> failf "ollama parse: %s" err
+  in
+  let ollama_usage = Option.get ollama_resp.usage in
+  let raw_ollama_payload =
+    H.cost_event_payload
+      ~agent_name:"keeper"
+      ~task_id:None
+      ~trace_id:"trace-ollama"
+      ~keeper_turn_id:1
+      ~agent_core_turn_ordinal:0
+      ~model:ollama_resp.model
+      ~usage_projection:(Cost_ledger.Raw_observation Runtime_usage_scope.Per_request)
+      ~input_tokens:ollama_usage.input_tokens
+      ~output_tokens:ollama_usage.output_tokens
+      ~cost_usd:0.0
+      ?cache_creation_input_tokens:
+        (Agent_core.Types.reported_cache_creation_input_tokens ollama_resp)
+      ?cache_read_input_tokens:
+        (Agent_core.Types.reported_cache_read_input_tokens ollama_resp)
+      ?telemetry:ollama_resp.telemetry
+      ()
+  in
+  check int "ollama input tokens" 100 (int_field raw_ollama_payload "input_tokens");
+  check int "ollama output tokens" 20 (int_field raw_ollama_payload "output_tokens");
+  check_null_field raw_ollama_payload "cache_creation_tokens";
+  check_null_field raw_ollama_payload "cache_read_tokens";
+  check_null_field raw_ollama_payload "cache_miss_input_tokens";
+  check_null_field raw_ollama_payload "non_cached_input_tokens";
+  let settled_ollama_payload =
+    H.cost_event_payload
+      ~agent_name:"keeper"
+      ~task_id:None
+      ~trace_id:"trace-ollama"
+      ~keeper_turn_id:1
+      ~agent_core_turn_ordinal:0
+      ~model:ollama_resp.model
+      ~usage_projection:Cost_ledger.Resolved_delta
+      ~input_tokens:ollama_usage.input_tokens
+      ~output_tokens:ollama_usage.output_tokens
+      ~cost_usd:0.0
+      ~cache_creation_input_tokens:ollama_usage.cache_creation_input_tokens
+      ~cache_read_input_tokens:ollama_usage.cache_read_input_tokens
+      ?telemetry:ollama_resp.telemetry
+      ()
+  in
+  check_null_field settled_ollama_payload "cache_creation_tokens";
+  check_null_field settled_ollama_payload "cache_read_tokens";
+  check_null_field settled_ollama_payload "cache_miss_input_tokens";
+  check_null_field settled_ollama_payload "non_cached_input_tokens";
+  let openai_zero_json =
+    {|{"id":"c1","model":"glm-5.3","choices":[{"index":0,"finish_reason":"stop","message":{"content":"ok"}}],"usage":{"prompt_tokens":100,"completion_tokens":20,"prompt_tokens_details":{"cached_tokens":0}}}|}
+  in
+  let openai_zero_resp =
+    match Llm_provider.Backend_openai_parse.parse_openai_response_result openai_zero_json with
+    | Ok resp -> resp
+    | Error _ -> fail "openai zero parse failed"
+  in
+  let openai_zero_usage = Option.get openai_zero_resp.usage in
+  let openai_zero_payload =
+    H.cost_event_payload
+      ~agent_name:"keeper"
+      ~task_id:None
+      ~trace_id:"trace-openai"
+      ~keeper_turn_id:2
+      ~agent_core_turn_ordinal:0
+      ~model:openai_zero_resp.model
+      ~usage_projection:(Cost_ledger.Raw_observation Runtime_usage_scope.Per_request)
+      ~input_tokens:openai_zero_usage.input_tokens
+      ~output_tokens:openai_zero_usage.output_tokens
+      ~cost_usd:0.0
+      ?cache_creation_input_tokens:
+        (Agent_core.Types.reported_cache_creation_input_tokens openai_zero_resp)
+      ?cache_read_input_tokens:
+        (Agent_core.Types.reported_cache_read_input_tokens openai_zero_resp)
+      ?telemetry:openai_zero_resp.telemetry
+      ()
+  in
+  check_null_field openai_zero_payload "cache_creation_tokens";
+  check int "reported zero cache read stays 0" 0
+    (int_field openai_zero_payload "cache_read_tokens");
+  check int "reported zero cache read yields 100 miss" 100
+    (int_field openai_zero_payload "cache_miss_input_tokens");
+  check int "reported zero cache read yields 100 non-cached" 100
+    (int_field openai_zero_payload "non_cached_input_tokens")
+;;
+
 let () =
   run "cost_token_decouple"
     [
@@ -598,6 +693,8 @@ let () =
             test_timings_cache_fields_land_on_payload;
           test_case "turn complete carries both cache counts" `Quick
             test_turn_complete_carries_both_cache_counts;
+          test_case "unreported wire cache is null, not zero" `Quick
+            test_unreported_wire_cache_is_null_not_zero;
         ] );
       ( "usage-scope",
         [

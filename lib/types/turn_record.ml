@@ -898,3 +898,23 @@ let entries_with_diffs (records : t list) : (t * block_diff option) list =
         (record, diff) :: walk (Some record) rest
   in
   walk None records
+
+let usage_of_reported_counts
+    ~scope
+    ~(usage : Llm_provider.Types.api_usage)
+    ~(telemetry : Llm_provider.Types.inference_telemetry option)
+  : usage
+  =
+  let cache_creation_input_tokens, cache_read_input_tokens =
+    match telemetry with
+    | Some { reported_cache_usage = Some reported; _ } ->
+        reported.cache_creation_input_tokens, reported.cache_read_input_tokens
+    | Some { reported_cache_usage = None; _ } | None ->
+        Some usage.cache_creation_input_tokens, Some usage.cache_read_input_tokens
+  in
+  { input_tokens = Some usage.input_tokens
+  ; output_tokens = Some usage.output_tokens
+  ; cache_creation_input_tokens
+  ; cache_read_input_tokens
+  ; scope
+  }

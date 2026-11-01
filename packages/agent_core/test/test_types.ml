@@ -552,6 +552,7 @@ let test_usage_and_inference_telemetry_yojson_roundtrip () =
     ; reasoning_effort = Some "medium"
     ; canonical_model_id = Some "gpt"
     ; reported_model = Some (Provider_reported_model "wire-gpt")
+    ; reported_cache_usage = None
     ; reasoning_source = None
     ; reasoning_prefix = None
     ; inline_content_replay = None

@@ -59,6 +59,16 @@ type usage =
   ; scope : Runtime_usage_scope.t
   }
 
+val usage_of_reported_counts
+  :  scope:Runtime_usage_scope.t
+  -> usage:Llm_provider.Types.api_usage
+  -> telemetry:Llm_provider.Types.inference_telemetry option
+  -> usage
+(** Build a turn-record [usage] from a reported [api_usage] and its optional
+    [inference_telemetry], retaining [None] for cache fields omitted on the
+    provider wire instead of turning the [api_usage] integer fallback [0] into
+    a reported count. *)
+
 type request_wire_observation =
   { runtime_profile : string
   ; body_bytes : int

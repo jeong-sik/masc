@@ -3921,7 +3921,16 @@ let ollama_chunk_to_events (state : openai_stream_state) (chunk : ollama_chunk)
     emit
       (MessageDelta
          { stop_reason
-         ; usage = Option.map Types.delta_usage_of_api_usage chunk.oll_usage
+         ; usage =
+             Option.map
+               (fun (u : Types.api_usage) : Types.delta_usage ->
+                  { input_tokens = Some u.input_tokens
+                  ; output_tokens = Some u.output_tokens
+                  ; cache_creation_input_tokens = None
+                  ; cache_read_input_tokens = None
+                  ; cost_usd = u.cost_usd
+                  })
+               chunk.oll_usage
          });
     emit MessageStop);
   List.rev !events, !telemetry_event

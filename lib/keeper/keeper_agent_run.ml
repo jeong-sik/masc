@@ -2240,13 +2240,10 @@ let run_turn
                input_tokens on a cache-heavy turn and one on a genuinely large prompt
                read identically without them, and the ctx-fill denominator below is the
                conversation ceiling, so the difference is what an operator acts on. *)
-            { input_tokens = Some result.usage.input_tokens
-            ; output_tokens = Some result.usage.output_tokens
-            ; cache_creation_input_tokens =
-                Some result.usage.cache_creation_input_tokens
-            ; cache_read_input_tokens = Some result.usage.cache_read_input_tokens
-            ; scope = result.usage_scope
-            }
+            Turn_record.usage_of_reported_counts
+              ~scope:result.usage_scope
+              ~usage:result.usage
+              ~telemetry:result.inference_telemetry
           | Ok _ | Error _ ->
             { input_tokens = None
             ; output_tokens = None

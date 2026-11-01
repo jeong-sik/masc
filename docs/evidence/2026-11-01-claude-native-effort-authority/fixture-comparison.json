@@ -1,0 +1,75 @@
+{
+  "baseline": "5b1206e3f18bb0d41f86a20ed2f463293b268d48",
+  "candidate": "0446daea23c42f5f944a7e2f810fec99abfd8cb6",
+  "byte_identical_complete_common_fixture_files": {
+    "test/test_keeper_claude_code_runtime.ml": {
+      "bytes": 368803,
+      "sha256": "99bcce66dd146740a7c27c6b65f0cd619e6f9fa75e42b03f50ba2d876736d5c4"
+    },
+    "test/test_runtime_verification.ml": {
+      "bytes": 85267,
+      "sha256": "77c113a47eaedc52e6f0dca187869d7fff97ab2b39167c522bc5b9bed31cfdc4"
+    },
+    "test/test_fusion_official_client_panel.ml": {
+      "bytes": 103069,
+      "sha256": "af26fa9b324de569d32810552103ae62dd30c90665ea5267c48b77a0b2f655cd"
+    },
+    "test/stanzas/test_keeper_claude_code_runtime.inc": {
+      "bytes": 728,
+      "sha256": "c2b94bb4e99fe85470c54a0a86bd2d8a125ba3282f87c0e96b3d7a6a6b191e39"
+    }
+  },
+  "baseline_production_equal_to_parent": "d2c96d510d21fa393191e10611f66ef92637513c",
+  "baseline_candidate_identical_production_trees": [
+    "packages/agent_core/lib",
+    "config"
+  ],
+  "test_dune_only_delta": {
+    "format": "original lines with endings; concatenated UTF-8 reproduces exact git diff",
+    "bytes": 753,
+    "sha256": "a5cd9f1b675a5f9e7edefa29662e95a0ef3773fcefda543f9d0bdc7489d328da",
+    "lines": [
+      "diff --git a/test/dune b/test/dune\n",
+      "index b6f593e1a2e..82052029395 100644\n",
+      "--- a/test/dune\n",
+      "+++ b/test/dune\n",
+      "@@ -501,7 +501,7 @@\n",
+      "   test_keeper_turn_driver_failover\n",
+      "   test_keeper_rotation_eligibility_census\n",
+      "   test_keeper_codex_error_carriage\n",
+      "-  test_keeper_codex_effort_clamp\n",
+      "+  test_runtime_claude_effort_admission\n",
+      "   test_keeper_codex_write_path_note\n",
+      "   test_keeper_codex_blank_system_prompt\n",
+      "   test_workspace_message_seq_resume\n",
+      "@@ -856,7 +856,7 @@\n",
+      "   test_keeper_turn_driver_failover\n",
+      "   test_keeper_rotation_eligibility_census\n",
+      "   test_keeper_codex_error_carriage\n",
+      "-  test_keeper_codex_effort_clamp\n",
+      "+  test_runtime_claude_effort_admission\n",
+      "   test_keeper_codex_write_path_note\n",
+      "   test_keeper_codex_blank_system_prompt\n",
+      "   test_workspace_message_seq_resume\n"
+    ]
+  },
+  "complete_changed_paths": [
+    "changelog.d/47179.md",
+    "lib/fusion/fusion_official_client.ml",
+    "lib/keeper/keeper_capability_probe.ml",
+    "lib/keeper/keeper_claude_code_runtime.ml",
+    "lib/keeper/keeper_official_client_host.ml",
+    "lib/keeper/keeper_official_client_host.mli",
+    "lib/runtime/runtime_inference.ml",
+    "lib/runtime/runtime_inference.mli",
+    "lib/runtime/runtime_verification.ml",
+    "lib/server/server_dashboard_runtime_resolved_json.ml",
+    "packages/agent_core/test/test_model_catalog_default.ml",
+    "packages/agent_core/test/test_pipeline.ml",
+    "test/dune",
+    "test/test_keeper_codex_effort_clamp.ml",
+    "test/test_runtime_claude_effort_admission.ml"
+  ],
+  "separate_package_fixture_delta": "packages/agent_core/test/test_pipeline.ml was independently corrected to public Agent.run. It is outside the five native targets; the common native fixture files and Agent Core production are byte-identical.",
+  "limits": "Whole test-tree and whole package-tree identity are not claimed. The replacement two-case argv test is candidate-only, and the deleted HTTP-clamp test is not a maintained native contract."
+}

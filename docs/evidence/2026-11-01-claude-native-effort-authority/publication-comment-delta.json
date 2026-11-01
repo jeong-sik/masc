@@ -1,0 +1,66 @@
+{
+  "tested_source": "0446daea23c42f5f944a7e2f810fec99abfd8cb6",
+  "deltas": [
+    {
+      "path": "packages/agent_core/models.toml",
+      "before_sha256": "98715a31795637c7736809e419d0075f5620d0d7f44db93a15d6bdaaad7d6145",
+      "after_sha256": "53454a6dfcbec0c83a2820d431617d1c33fb6e5d1c6cfedc08dc40bf73c41080",
+      "old_comment": "# codex 레인은 이 bare 행 목록으로\n# effort 를 깎으므로(keeper_official_client_host.ml\n# clamp_reasoning_effort_to_catalog) max 가 없으면 max 바인딩이 xhigh 로 나간다.",
+      "new_comment": "# These effort lists belong to HTTP capability validation.\n# Native Codex admits effort from its model/list advertisement; Claude uses\n# its CLI vocabulary. Native effort is independent of these bare ladders.",
+      "unchanged_surrounding_bytes": true,
+      "functional_source_changed": false,
+      "toml_semantic_equal": true,
+      "semantic_encoding": "UTF-8 sorted-key compact JSON of stdlib tomllib parse, one LF",
+      "semantic_sha256": "46984b2278b720bab09477afd7a6799d8e2bca0af73225909086ef15309af522"
+    },
+    {
+      "path": "lib/runtime/runtime_inference.ml",
+      "before_sha256": "fd1826b5d78c6ac299bfaf224214d6212b39c685449a6c636dee700007a59f0e",
+      "after_sha256": "f27f2b85767e1db02b491d15c67a2651f555293eb119f87d81d6c17003dfb5b6",
+      "old_comment": "(* Per-runtime reasoning effort. Official-client runtimes reject\n   [enable_thinking] and take effort instead, so without this the effort a\n   Claude Code / Codex / Antigravity turn runs at is whatever the CLI\n   defaults to and no operator declaration reaches it. [None] leaves the\n   caller's own value in place. *)",
+      "new_comment": "(* Explicit live-ID reasoning lookup for callers that still request it.\n   Snapshot-driven native boundaries carry the selected model declaration\n   directly and apply their own client admission. This helper preserves an\n   absent declaration as [None]; it does not select a runtime or establish\n   a native client's effort policy. *)",
+      "unchanged_surrounding_bytes": true,
+      "functional_source_changed": false
+    }
+  ],
+  "whole_four_tree_identity_after_comments": false,
+  "publication_binding": {
+    "source_parent_before_evidence_and_comments": "0446daea23c42f5f944a7e2f810fec99abfd8cb6",
+    "named_inputs_byte_identical": [
+      "lib/fusion/fusion_official_client.ml",
+      "lib/keeper/keeper_capability_probe.ml",
+      "lib/keeper/keeper_claude_code_runtime.ml",
+      "lib/keeper/keeper_official_client_host.ml",
+      "lib/keeper/keeper_official_client_host.mli",
+      "lib/runtime/runtime_inference.mli",
+      "lib/runtime/runtime_verification.ml",
+      "lib/server/server_dashboard_runtime_resolved_json.ml",
+      "packages/agent_core/test/test_model_catalog_default.ml",
+      "test/stanzas/test_keeper_claude_code_runtime.inc",
+      "test/test_fusion_official_client_panel.ml",
+      "test/test_keeper_claude_code_runtime.ml",
+      "test/test_runtime_claude_effort_admission.ml",
+      "test/test_runtime_verification.ml",
+      "test/dune",
+      ".github/workflows/test.yml",
+      "scripts/ci-run-targeted-tests.sh",
+      "scripts/ci/stanza_env.py",
+      "lib/runtime/runtime_claude_code.ml",
+      "lib/runtime/runtime_claude_code.mli",
+      "lib/keeper/keeper_turn_driver.ml",
+      "lib/keeper/keeper_turn_driver.mli"
+    ],
+    "named_inputs_with_only_recorded_comment_delta": [
+      "packages/agent_core/models.toml",
+      "lib/runtime/runtime_inference.ml"
+    ],
+    "functional_bytes_outside_comments_unchanged": true,
+    "test_and_config_trees_identical": {
+      "test": "6c352703466d0d8e2e30073fbdafca304616da51",
+      "config": "783ac78ba6a516006c5e20d58c1fed0019a0ca5b"
+    },
+    "whole_four_tree_identity": false,
+    "local_ocaml_parser": "passed for runtime_inference.ml; not a typecheck",
+    "local_dune": "not_run"
+  }
+}

@@ -1,0 +1,108 @@
+2026-11-01T08:37:38.1738375Z 5b1206e3f18bb0d41f86a20ed2f463293b268d48
+2026-11-01T08:37:40.4865104Z [command]/usr/bin/git log -1 --format=%H
+2026-11-01T08:37:40.4884753Z 5b1206e3f18bb0d41f86a20ed2f463293b268d48
+2026-11-01T08:38:46.3010626Z   TARGET_SUITES: test_keeper_claude_effort_authority,test_claude_probe_effort_authority,test_fusion_claude_effort_authority
+2026-11-01T08:38:46.3120761Z   TARGET_SUITES: test_keeper_claude_effort_authority,test_claude_probe_effort_authority,test_fusion_claude_effort_authority
+2026-11-01T08:38:46.3255056Z [targeted] EIO_BACKEND=<unset> timeout=900s per suite
+2026-11-01T08:38:46.3278323Z [targeted] @runtest-test_keeper_claude_effort_authority: start 2026-11-01T08:38:46Z (dune alias)
+2026-11-01T08:47:13.5563739Z   [OK]          native effort authority          0   Keeper omission ignores ...
+2026-11-01T08:47:15.6975007Z   [FAIL]        native effort authority          1   Keeper explicit none ign...
+2026-11-01T08:47:19.7642385Z   [OK]          native effort authority          2   Keeper minimal keeps nat...
+2026-11-01T08:47:23.9871678Z   [OK]          native effort authority          3   Keeper low ignores a col...
+2026-11-01T08:47:26.0376492Z   [FAIL]        native effort authority          4   Keeper medium ignores a ...
+2026-11-01T08:47:28.2312803Z   [FAIL]        native effort authority          5   Keeper high ignores a co...
+2026-11-01T08:47:30.2715221Z   [FAIL]        native effort authority          6   Keeper xhigh ignores a c...
+2026-11-01T08:47:32.4912505Z   [FAIL]        native effort authority          7   Keeper max ignores a col...
+2026-11-01T08:47:34.5250346Z   [FAIL]        native effort authority          8   Keeper ultra keeps nativ...
+2026-11-01T08:47:36.5758879Z   [FAIL]        native effort authority          9   Keeper hook override ign...
+2026-11-01T08:47:40.7846156Z   [OK]          native effort authority         10   Keeper hook clear leaves...
+2026-11-01T08:47:40.7926197Z FAIL the selected effort reaches the native CLI
+2026-11-01T08:47:40.7926615Z    Expected: `None'
+2026-11-01T08:47:40.7926944Z    Received: `Some "low"'
+2026-11-01T08:47:40.7937996Z FAIL the selected effort reaches the native CLI
+2026-11-01T08:47:40.7938431Z    Expected: `Some "medium"'
+2026-11-01T08:47:40.7938771Z    Received: `Some "low"'
+2026-11-01T08:47:40.7947545Z FAIL the selected effort reaches the native CLI
+2026-11-01T08:47:40.7947845Z    Expected: `Some "high"'
+2026-11-01T08:47:40.7948088Z    Received: `Some "low"'
+2026-11-01T08:47:40.7956054Z FAIL the selected effort reaches the native CLI
+2026-11-01T08:47:40.7956363Z    Expected: `Some "xhigh"'
+2026-11-01T08:47:40.7956606Z    Received: `Some "low"'
+2026-11-01T08:47:40.7964798Z FAIL the selected effort reaches the native CLI
+2026-11-01T08:47:40.7965090Z    Expected: `Some "max"'
+2026-11-01T08:47:40.7965325Z    Received: `Some "low"'
+2026-11-01T08:47:40.7973182Z FAIL the selected effort reaches the native CLI
+2026-11-01T08:47:40.7973490Z    Expected: `Some "max"'
+2026-11-01T08:47:40.7973727Z    Received: `Some "low"'
+2026-11-01T08:47:40.7981755Z FAIL the selected effort reaches the native CLI
+2026-11-01T08:47:40.7982070Z    Expected: `Some "max"'
+2026-11-01T08:47:40.7982307Z    Received: `Some "low"'
+2026-11-01T08:47:40.7988413Z 7 failures! in 31.503s. 11 tests run.
+2026-11-01T08:47:40.9771805Z [targeted] @runtest-test_keeper_claude_effort_authority: FAIL exit 1 in 534s
+2026-11-01T08:47:40.9794912Z [targeted] @runtest-test_claude_probe_effort_authority: start 2026-11-01T08:47:40Z (dune alias)
+2026-11-01T08:47:55.1719765Z   [OK]          Claude native effort authority          0   capability omissi...
+2026-11-01T08:47:57.2183894Z   [FAIL]        Claude native effort authority          1   capability explic...
+2026-11-01T08:47:59.2659506Z   [FAIL]        Claude native effort authority          2   capability high i...
+2026-11-01T08:48:01.3117328Z   [OK]          Claude native effort authority          3   capability minima...
+2026-11-01T08:48:03.3577733Z   [FAIL]        Claude native effort authority          4   capability ultra ...
+2026-11-01T08:48:05.4044453Z   [OK]          Claude native effort authority          5   readiness omissio...
+2026-11-01T08:48:07.4510331Z   [FAIL]        Claude native effort authority          6   readiness explici...
+2026-11-01T08:48:09.4974726Z   [FAIL]        Claude native effort authority          7   readiness high ig...
+2026-11-01T08:48:11.5447206Z   [OK]          Claude native effort authority          8   readiness minimal...
+2026-11-01T08:48:13.5926989Z   [FAIL]        Claude native effort authority          9   readiness ultra k...
+2026-11-01T08:48:13.5956540Z FAIL claude-code capability probe child received the selected effort
+2026-11-01T08:48:13.5957087Z    Expected: `None'
+2026-11-01T08:48:13.5957441Z    Received: `Some "low"'
+2026-11-01T08:48:13.5976123Z FAIL claude-code capability probe child received the selected effort
+2026-11-01T08:48:13.5976481Z    Expected: `Some "high"'
+2026-11-01T08:48:13.5976728Z    Received: `Some "low"'
+2026-11-01T08:48:13.5990243Z FAIL claude-code capability probe child received the selected effort
+2026-11-01T08:48:13.5990604Z    Expected: `Some "max"'
+2026-11-01T08:48:13.5990847Z    Received: `Some "low"'
+2026-11-01T08:48:13.6004399Z FAIL claude-code readiness child received the selected effort
+2026-11-01T08:48:13.6004829Z    Expected: `None'
+2026-11-01T08:48:13.6005062Z    Received: `Some "low"'
+2026-11-01T08:48:13.6018399Z FAIL claude-code readiness child received the selected effort
+2026-11-01T08:48:13.6018731Z    Expected: `Some "high"'
+2026-11-01T08:48:13.6018987Z    Received: `Some "low"'
+2026-11-01T08:48:13.6032216Z FAIL claude-code readiness child received the selected effort
+2026-11-01T08:48:13.6032556Z    Expected: `Some "max"'
+2026-11-01T08:48:13.6032798Z    Received: `Some "low"'
+2026-11-01T08:48:13.6044401Z 6 failures! in 20.487s. 10 tests run.
+2026-11-01T08:48:13.7440903Z [targeted] @runtest-test_claude_probe_effort_authority: FAIL exit 1 in 33s
+2026-11-01T08:48:13.7465629Z [targeted] @runtest-test_fusion_claude_effort_authority: start 2026-11-01T08:48:13Z (dune alias)
+2026-11-01T08:48:27.6235225Z   [OK]          Claude native effort authority          0   panel omission ke...
+2026-11-01T08:48:29.6676729Z   [FAIL]        Claude native effort authority          1   panel explicit no...
+2026-11-01T08:48:31.7118737Z   [FAIL]        Claude native effort authority          2   panel minimal kee...
+2026-11-01T08:48:33.7563404Z   [FAIL]        Claude native effort authority          3   panel low ignores...
+2026-11-01T08:48:35.8007489Z   [FAIL]        Claude native effort authority          4   panel medium igno...
+2026-11-01T08:48:37.8482254Z   [FAIL]        Claude native effort authority          5   panel high ignore...
+2026-11-01T08:48:39.8935137Z   [FAIL]        Claude native effort authority          6   panel xhigh ignor...
+2026-11-01T08:48:41.9369043Z   [FAIL]        Claude native effort authority          7   panel max ignores...
+2026-11-01T08:48:43.9815455Z   [FAIL]        Claude native effort authority          8   panel ultra keeps...
+2026-11-01T08:48:43.9840270Z FAIL Fusion distinguishes explicit disabled thinking from omission
+2026-11-01T08:48:43.9840621Z    Expected: `Some "disabled"'
+2026-11-01T08:48:43.9841127Z    Received: `None'
+2026-11-01T08:48:43.9847837Z FAIL Fusion carries the selected effort through native admission
+2026-11-01T08:48:43.9848179Z    Expected: `Some "low"'
+2026-11-01T08:48:43.9848431Z    Received: `None'
+2026-11-01T08:48:43.9855853Z FAIL Fusion carries the selected effort through native admission
+2026-11-01T08:48:43.9856191Z    Expected: `Some "low"'
+2026-11-01T08:48:43.9856429Z    Received: `None'
+2026-11-01T08:48:43.9865956Z FAIL Fusion carries the selected effort through native admission
+2026-11-01T08:48:43.9866299Z    Expected: `Some "medium"'
+2026-11-01T08:48:43.9866543Z    Received: `None'
+2026-11-01T08:48:43.9873456Z FAIL Fusion carries the selected effort through native admission
+2026-11-01T08:48:43.9873795Z    Expected: `Some "high"'
+2026-11-01T08:48:43.9874042Z    Received: `None'
+2026-11-01T08:48:43.9880966Z FAIL Fusion carries the selected effort through native admission
+2026-11-01T08:48:43.9881300Z    Expected: `Some "xhigh"'
+2026-11-01T08:48:43.9881538Z    Received: `None'
+2026-11-01T08:48:43.9888595Z FAIL Fusion carries the selected effort through native admission
+2026-11-01T08:48:43.9888935Z    Expected: `Some "max"'
+2026-11-01T08:48:43.9889172Z    Received: `None'
+2026-11-01T08:48:43.9896195Z FAIL Fusion carries the selected effort through native admission
+2026-11-01T08:48:43.9896531Z    Expected: `Some "max"'
+2026-11-01T08:48:43.9896765Z    Received: `None'
+2026-11-01T08:48:43.9901583Z 8 failures! in 18.423s. 9 tests run.
+2026-11-01T08:48:44.1356106Z [targeted] @runtest-test_fusion_claude_effort_authority: FAIL exit 1 in 31s

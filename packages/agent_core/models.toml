@@ -374,9 +374,9 @@ cache_read_multiplier = 0.1
 # 공유한다).
 # Codex CLI cache (2026-09-30) now advertises ultra for Sol and Terra.
 # The provider-scoped openai-responses rows keep their own probed ladders.
-# codex 레인은 이 bare 행 목록으로
-# effort 를 깎으므로(keeper_official_client_host.ml
-# clamp_reasoning_effort_to_catalog) max 가 없으면 max 바인딩이 xhigh 로 나간다.
+# These effort lists belong to HTTP capability validation.
+# Native Codex admits effort from its model/list advertisement; Claude uses
+# its CLI vocabulary. Native effort is independent of these bare ladders.
 [[models]]
 model_id = "gpt-5.6-sol"
 suggested_clients = ["codex"]

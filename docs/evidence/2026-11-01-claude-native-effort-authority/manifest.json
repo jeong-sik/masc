@@ -1,0 +1,153 @@
+{
+  "workflow": "Test",
+  "ref": "fix/claude-native-effort-authority-20261101",
+  "executions": [
+    {
+      "name": "baseline",
+      "workflow": "Test",
+      "run_id": 41289637482,
+      "job_id": 124797995889,
+      "url": "https://github.com/jeong-sik/masc/actions/runs/41289637482",
+      "head": "5b1206e3f18bb0d41f86a20ed2f463293b268d48",
+      "ref": "fix/claude-native-effort-authority-20261101",
+      "status": "completed",
+      "conclusion": "failure",
+      "checkout_head": "5b1206e3f18bb0d41f86a20ed2f463293b268d48",
+      "raw_capture": "/Users/dancer/me/workspace/yousleepwhen/masc-issues-oldest-20261101/artifacts/issues-oldest-20261101/claude-native-effort-authority/baseline-124797995889.raw.log",
+      "raw_bytes": 227015,
+      "raw_sha256": "e95e7a8e8caab09f7bb0913f5c2a49bfaf8a43def096861da8505b52d92e2fb0",
+      "selected_capture": "baseline.txt",
+      "selected_bytes": 8914,
+      "selected_sha256": "25017fde8bad0ca86ab9750df3adf65097b64835635a35f14004894e64944e8d",
+      "actual_pass": 9,
+      "actual_fail": 21,
+      "retained_case_pass": 9,
+      "retained_case_fail": 21,
+      "summaries": [
+        "2026-11-01T08:47:40.7988413Z 7 failures! in 31.503s. 11 tests run.",
+        "2026-11-01T08:48:13.6044401Z 6 failures! in 20.487s. 10 tests run.",
+        "2026-11-01T08:48:43.9901583Z 8 failures! in 18.423s. 9 tests run."
+      ],
+      "minimal": true,
+      "suite_timeout_sec": 900,
+      "suites": [
+        "test_keeper_claude_effort_authority",
+        "test_claude_probe_effort_authority",
+        "test_fusion_claude_effort_authority"
+      ],
+      "per_suite": {
+        "test_keeper_claude_effort_authority": {
+          "pass": 4,
+          "fail": 7
+        },
+        "test_claude_probe_effort_authority": {
+          "pass": 4,
+          "fail": 6
+        },
+        "test_fusion_claude_effort_authority": {
+          "pass": 1,
+          "fail": 8
+        }
+      }
+    },
+    {
+      "name": "candidate",
+      "workflow": "Test",
+      "run_id": 41291441388,
+      "job_id": 124803354834,
+      "url": "https://github.com/jeong-sik/masc/actions/runs/41291441388",
+      "head": "0446daea23c42f5f944a7e2f810fec99abfd8cb6",
+      "ref": "fix/claude-native-effort-authority-20261101",
+      "status": "completed",
+      "conclusion": "success",
+      "checkout_head": "0446daea23c42f5f944a7e2f810fec99abfd8cb6",
+      "raw_capture": "/Users/dancer/me/workspace/yousleepwhen/masc-issues-oldest-20261101/artifacts/issues-oldest-20261101/claude-native-effort-authority/candidate-124803354834.raw.log",
+      "raw_bytes": 261514,
+      "raw_sha256": "4907c0bc79a8eba070a140dafa30c3e69f8524cc6bf27034402943c093f3e69c",
+      "selected_capture": "candidate.txt",
+      "selected_bytes": 7134,
+      "selected_sha256": "6aea29d26e3e95346706df956c473f250fb87dc9239d46c0702f2341d81561d1",
+      "actual_pass": 42,
+      "actual_fail": 0,
+      "retained_case_pass": 42,
+      "retained_case_fail": 0,
+      "summaries": [
+        "2026-11-01T09:14:23.0678967Z Test Successful in 45.231s. 11 tests run.",
+        "2026-11-01T09:14:56.2128699Z Test Successful in 20.512s. 10 tests run.",
+        "2026-11-01T09:15:27.1561743Z Test Successful in 18.451s. 9 tests run.",
+        "2026-11-01T09:16:20.3905666Z Test Successful in 42.597s. 10 tests run.",
+        "2026-11-01T09:16:31.2890339Z Test Successful in 0.000s. 2 tests run."
+      ],
+      "minimal": true,
+      "suite_timeout_sec": 900,
+      "suites": [
+        "test_keeper_claude_effort_authority",
+        "test_claude_probe_effort_authority",
+        "test_fusion_claude_effort_authority",
+        "test_runtime_claude_effort_admission",
+        "test_keeper_claude_selected_inference"
+      ],
+      "per_suite": {
+        "test_keeper_claude_effort_authority": {
+          "pass": 11,
+          "fail": 0
+        },
+        "test_claude_probe_effort_authority": {
+          "pass": 10,
+          "fail": 0
+        },
+        "test_fusion_claude_effort_authority": {
+          "pass": 9,
+          "fail": 0
+        },
+        "test_keeper_claude_selected_inference": {
+          "pass": 10,
+          "fail": 0
+        },
+        "test_runtime_claude_effort_admission": {
+          "pass": 2,
+          "fail": 0
+        }
+      },
+      "observed_execution_order": [
+        "test_keeper_claude_effort_authority",
+        "test_claude_probe_effort_authority",
+        "test_fusion_claude_effort_authority",
+        "test_keeper_claude_selected_inference",
+        "test_runtime_claude_effort_admission"
+      ]
+    }
+  ],
+  "all_completed_case_rows_retained": true,
+  "common_case_key_sha256": "2094c08d7b786ce6fa518a170ed0058f6ce1b6d6a055a5da7657f053014bb817",
+  "candidate_case_key_sha256": "78a31908439b5f819ca37415c52de606aa593d062e2d7a85a6306a8cc0b7017a",
+  "full_regression": {
+    "candidate_status": "not_run",
+    "latest_prior_scheduled_observation": {
+      "workflow": "Test",
+      "query": "latest event=schedule; no watch",
+      "runs": [
+        {
+          "id": 41225921334,
+          "name": "Test",
+          "head_sha": "1abd207e3e2a73cda5423e0ccd18cc85e2e21438",
+          "head_branch": "main",
+          "event": "schedule",
+          "status": "completed",
+          "conclusion": "failure",
+          "html_url": "https://github.com/jeong-sik/masc/actions/runs/41225921334",
+          "created_at": "2026-10-31T17:43:41Z"
+        }
+      ],
+      "TARGET_SUITES": "inferred empty for schedule from checked workflow, not a downloaded job-log receipt",
+      "not_a_current_candidate_full_regression": true
+    }
+  },
+  "publication": "Actual execution is bound to 0446. Final publication additionally corrects two comments and adds evidence; that final SHA is not the CI checkout. publication-comment-delta.json records exact comment-only deltas.",
+  "limits": [
+    "controlled Python native children with actual argv and MCP roundtrip, not live Claude entitlement",
+    "three focused authority aliases, ten selected-inference controls and two argv cases, not the large original suites",
+    "baseline failed cases can stop before resume or disabled-thinking assertions",
+    "no local Dune/typecheck, full regression, installed runtime, deployment, formal approval or issue closure"
+  ]
+}

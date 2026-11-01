@@ -1527,29 +1527,24 @@ const taskSpace=async id=>({spaceId:id,name:'SDK Space',ownership:%s,
   let seen ()=match List.find_opt (String.starts_with ~prefix:"seen ") (String.split_on_char '\n' !output) with
     | Some line -> Yojson.Safe.from_string (after ~prefix:"seen " line)
     | None -> fail "native stand-in emitted no calls" in
-  let reply_ms=Lane.reply_timeout_sec (Lane.Page_act (Lane.Action.Control
-    (Lane.Action.Wait_for_control {Lane.Action.interval_ms=None;timeout_ms=None}))) *. 1000. in
-  ignore (before_effect "a timeout as long as the Keeper's whole wait is refused"
-    (wait (obj ["timeout",`Float reply_ms])));
-  check int "a refused timeout starts no native wait" 0 !calls;
-  let options=obj ["interval",`Float 0.5;"timeout",`Float 30000.] in
+  let options=obj ["interval",`Float 0.5;"timeout",`Int 120000] in
   (match wait options with
    | Ok value -> check bool "wait observation names the same Space" true
        (value=obj ["inputReadiness",str "command_settled";"action",str "wait_for_control";"spaceId",`Int 51;"spaceName",str "SDK Space";"controlAvailable",`Bool true])
    | Error _ -> fail "native control wait failed");
-  check bool "options inside the window reach the SDK unchanged" true
-    (seen ()=`List [obj ["interval",`Float 0.5;"timeout",`Int 30000]]);
+  check bool "the caller's timeout beyond a generic reply window reaches the SDK unchanged" true
+    (seen ()=`List [obj ["interval",`Float 0.5;"timeout",`Int 120000]]);
+  check int "one original SDK wait was dispatched" 1 !calls;
   native_failure:=true;
   ignore (before_effect "SDK wait timeout sends no input" (wait (obj [])));
-  let window_ms=match seen () with
-    | `List [`Assoc ["timeout",`Int ms]] -> ms
-    | other -> failf "an omitted timeout reaches the SDK as one timeout, got %s" (Yojson.Safe.to_string other) in
-  check bool "the omitted timeout fits inside the Keeper's wait" true
-    (window_ms > 0 && float_of_int window_ms < reply_ms);
+  check bool "omitted options remain omitted even when the SDK times out" true
+    (seen ()=`List [obj []]);
   native_failure:=false;
-  (match wait (obj ["timeout",`Int window_ms]) with
+  (match wait (obj ["interval",`Float 0.5]) with
    | Ok _ -> ()
-   | Error _ -> fail "a timeout equal to the reply window is accepted");
+   | Error _ -> fail "an interval without a timeout keeps the SDK deadline default");
+  check bool "an omitted timeout is not replaced with a host deadline" true
+    (seen ()=`List [obj ["interval",`Float 0.5]]);
   native_failure:=false;ownership:="agentDelegatedToUser";
   ignore (before_effect "a user-held Space cannot be reclaimed by waiting" (wait (obj [])));
   check bool "user-held Space runs no native wait or page call" true (seen ()=`List []);
@@ -1558,7 +1553,9 @@ const taskSpace=async id=>({spaceId:id,name:'SDK Space',ownership:%s,
   let drag=Lane.Drag_to {source=Lane.Selector "@12";destination=Lane.Selector "#target";via=[];duration_ms=0} in
   check string "drag first leaves input unconfirmed" "unknown"
     (failure_kind (dispatch peer Live.Page_interact (interact_args drag)));
+  let pending=Peer.input_status peer in
   (match wait (obj []) with Ok _ -> () | Error _ -> fail "control observation was refused after uncertain input");
+  check bool "control availability preserves the exact pending input" true (Peer.input_status peer=pending);
   let before= !calls in
   ignore (before_effect "availability cannot clear uncertain input" (dispatch peer Live.Page_interact (interact_args (Lane.Click "#send"))));
   check int "no later native input was dispatched" before !calls

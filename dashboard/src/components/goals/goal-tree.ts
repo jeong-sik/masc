@@ -1,11 +1,12 @@
 import { GOAL_TRANSITION_LABELS, goalLifecycleActions, type GoalTransitionAction } from '../../api/goal-lifecycle'
 import { GoalProofDetail } from './goal-proof'
+import { GoalCandlePanel } from './goal-candle'
 // Goal Manager — goal-first planning surface with explicit phase, detail, and evidence.
 
 import { html } from 'htm/preact'
 import { GoalConfirmationPanel, confirmationHasUnsettledReceipt, confirmationPending } from './goal-confirmation'
 import { batch, signal } from '@preact/signals'
-import { useCallback, useEffect, useMemo } from 'preact/hooks'
+import { useCallback, useEffect, useMemo, useState } from 'preact/hooks'
 import { SECONDS_PER_HOUR } from '../../lib/format-time'
 import { fetchDashboardGoalDetail, fetchDashboardGoalsTree } from '../../api/dashboard'
 import { currentDashboardActor, getStoredToken, getStoredTokenMeta } from '../../api/core'
@@ -15,7 +16,7 @@ import { executionError, executionLoading, executionWorkspaceAuthority, refreshE
 import { artifactWorkspaceBody, captureArtifactWorkspace, type ArtifactWorkspace } from '../../api/published-artifacts'
 import { approvalInputText } from '../../lib/keeper-approval-input-text'
 import { callMcpToolAtIdentity, mcpCallFailureDisposition, mcpIdentityRequiresGoalRefresh } from '../../api/mcp'
-import { route } from '../../router'
+import { replaceRoute, route } from '../../router'
 import {
   goalStoreUnavailable as storeUnavailable,
   goalTreeData as treeData,
@@ -322,6 +323,11 @@ function toggleNode(id: string) {
 }
 
 function selectGoal(id: string) {
+  if (route.value.params.goal && route.value.params.goal !== id) {
+    const params = { ...route.value.params }
+    delete params.goal
+    replaceRoute('workspace', params)
+  }
   selectedGoalId.value = id
 }
 
@@ -1242,6 +1248,21 @@ function GoalDetailPanel({
     && treeDecisionBinding.peek() === binding && treeData.peek() === binding.snapshot
     && executionWorkspaceAuthority.peek() === binding.authority
     && storedTokenRevision.peek() === binding.authRevision && goalDecisionActor() === binding.actor)
+  const candleIsCurrent = () => {
+    const current = treeDecisionBinding.peek()
+    return Boolean(binding && current && selectedGoalId.peek() === selectedNode.id
+      && executionWorkspaceAuthority.peek() === binding.authority && current.authority === binding.authority
+      && current.workspace.basePath === binding.workspace.basePath && current.workspace.mascRoot === binding.workspace.mascRoot
+      && storedTokenRevision.peek() === binding.authRevision && current.authRevision === binding.authRevision
+      && current.actor === binding.actor && goalDecisionActor() === binding.actor)
+  }
+  const candleOwner = authorized && binding ? {
+    key: JSON.stringify([binding.authority.epoch, binding.authority.connectionGeneration, binding.authority.workspaceRoot,
+      binding.workspace.basePath, binding.workspace.mascRoot, binding.authRevision, binding.actor, selectedNode.id]),
+    recoveryKey: JSON.stringify([binding.authority.workspaceRoot, binding.workspace.basePath, binding.workspace.mascRoot,
+      binding.authRevision, binding.actor, selectedNode.id]),
+    goalId: selectedNode.id, workspace: binding.workspace, executionEpoch: binding.authority.epoch,
+  } : null
   const hasLifecyclePending = () => Boolean(binding && Object.values(goalActionReceipts.peek()).some(item =>
     item.state === 'pending' && item.owner.workspaceRoot === binding.authority.workspaceRoot
     && item.owner.mascRoot === binding.workspace.mascRoot && item.owner.goalId === selectedNode.id))
@@ -1292,6 +1313,8 @@ function GoalDetailPanel({
       <${GoalTaskRelationStrip} node=${selectedNode} />
       <${GoalMeasurementDetail} node=${selectedNode} />
       <${GoalProofDetail} proof=${selectedNode.verification} />
+      ${candleOwner ? html`<${GoalCandlePanel} key=${candleOwner.key} owner=${candleOwner}
+        isCurrent=${candleIsCurrent} refreshKey=${selectedNode.phase} />` : null}
       <${GoalLifecycleActionPanel} key=${selectedNode.id} node=${selectedNode} />
       ${confirmationOwner && (selectedNode.phase === 'awaiting_confirmation' || selectedNode.phase === 'completed'
         || confirmationHasUnsettledReceipt(confirmationOwner.workspace, selectedNode.id)) ? html`
@@ -1445,6 +1468,20 @@ export function GoalTree() {
   const activePhaseFilter = treePhaseFilter.value
   const selectedId = selectedGoalId.value
   const routeGoalId = cleanRouteGoalId(route.value.params.goal)
+  const [handledRoute, setHandledRoute] = useState<{
+    id: string; found: boolean; authority: ExecutionWorkspaceAuthority | null; authRevision: number; actor: string
+  } | null>(null)
+  const routeOwned = Boolean(routeGoalId && handledRoute?.id === routeGoalId
+    && handledRoute.authority === authority && handledRoute.authRevision === tokenRevision
+    && handledRoute.actor === goalDecisionActor())
+  useEffect(() => {
+    setHandledRoute(null)
+    if (routeGoalId) batch(() => {
+      filterQuery.value = ''
+      treePhaseFilter.value = 'all'
+      selectedGoalId.value = routeGoalId
+    })
+  }, [routeGoalId, authority, tokenRevision, actorRevision])
 
   useEffect(() => {
     if (authority && !loading && ((observedData
@@ -1475,8 +1512,8 @@ export function GoalTree() {
   )
 
   const selectedNode = useMemo(
-    () => visibleNodes.find(node => node.id === selectedId) ?? null,
-    [selectedId, visibleNodes],
+    () => routeGoalId && !routeOwned ? null : visibleNodes.find(node => node.id === selectedId) ?? null,
+    [selectedId, visibleNodes, routeGoalId, routeOwned],
   )
 
   useEffect(() => {
@@ -1489,21 +1526,31 @@ export function GoalTree() {
       selectedGoalId.value = null
       return
     }
-    if (routeGoalId) {
+    if (routeGoalId && !routeOwned) {
       const expansionPath = goalExpansionPath(data.tree, routeGoalId)
       if (expansionPath && visibleNodes.some(node => node.id === routeGoalId)) {
         if (selectedGoalId.value !== routeGoalId) selectedGoalId.value = routeGoalId
         if (expansionPath.some(id => !expandedNodes.value.has(id))) {
           expandedNodes.value = new Set([...expandedNodes.value, ...expansionPath])
         }
+        setHandledRoute({ id: routeGoalId, found: true, authority, authRevision: tokenRevision, actor: goalDecisionActor() })
         return
       }
+      if (!expansionPath) {
+        selectedGoalId.value = routeGoalId
+        setHandledRoute({ id: routeGoalId, found: false, authority, authRevision: tokenRevision, actor: goalDecisionActor() })
+      }
+      return
     }
+    if (routeGoalId && !allNodes.some(node => node.id === routeGoalId)) return
     if (!selectedGoalId.value || !visibleNodes.some(node => node.id === selectedGoalId.value)) {
-      selectedGoalId.value = visibleNodes[0]!.id
-      expandedNodes.value = new Set([visibleNodes[0]!.id])
+      const nextId = routeGoalId && visibleNodes.some(node => node.id === routeGoalId)
+        ? routeGoalId : visibleNodes[0]!.id
+      selectGoal(nextId)
+      const expansionPath = goalExpansionPath(data.tree, nextId) ?? [nextId]
+      expandedNodes.value = new Set([...expandedNodes.value, ...expansionPath])
     }
-  }, [allNodes, data, routeGoalId, visibleNodes])
+  }, [allNodes, data, routeGoalId, routeOwned, authority, tokenRevision, actorRevision, visibleNodes])
 
   useEffect(() => {
     if (!selectedId || !decisionBinding || decisionBinding.authority !== authority || decisionBinding.snapshot !== data) {

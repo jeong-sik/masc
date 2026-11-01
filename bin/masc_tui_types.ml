@@ -9182,6 +9182,8 @@ type keeper_peer_status =
   | Keeper_peer_current of int
   | Keeper_peer_unread
 
+type goal_candle_failure = Goal_candle_access_denied | Goal_candle_authority_changed | Goal_candle_read_failed of string
+
 type state = {
   observation_instance : Masc_tui_observation_origin.instance;
   mutable ui_language : ui_language;
@@ -9975,6 +9977,8 @@ type state = {
   (* Detail histories retain their exact request and last good value. A key
      alone cannot reject an older response after refreshing the same item. *)
   mutable goal_timeline: (string, Tui_decode.goal_timeline_event list) Masc_tui_fetched.t;
+  mutable goal_candle: (string, unit ref * string * Candle_goal_observation.t) Masc_tui_fetched.t;
+  mutable goal_candle_revalidation_attempts: (string * unit ref) list;
   mutable task_history: (string, Masc.Tui_decode_task_inspection.history) Masc_tui_fetched.t;
   mutable task_history_request: string task_history_request option;
   mutable task_history_last_reading: unit ref option;
@@ -14315,6 +14319,7 @@ let suspend_workspace_readings state =
   state.fusion_runs_awaiting_observer <- false;
   state.fusion_runs_open_at_start <- None;
   state.goal_confirmation_presented <- None;
+  state.goal_candle <- Masc_tui_fetched.suspend state.goal_candle;
   (match state.goal_confirmation with
    | Masc_tui_planning_detail.Inspecting reading ->
        state.goal_confirmation <- Masc_tui_planning_detail.Inspecting
@@ -18702,6 +18707,57 @@ let begin_goal_timeline_read (state : state) ~goal_id =
   | Masc_tui_fetched.Already_loading -> None
   | Masc_tui_fetched.Started (reading, request) -> state.goal_timeline <- reading; Some request
 
+let clear_goal_candle_revalidation (state : state) ~goal_id =
+  state.goal_candle_revalidation_attempts <-
+    List.filter (fun (id, _) -> not (String.equal id goal_id)) state.goal_candle_revalidation_attempts
+
+let take_goal_candle_revalidation (state : state) ~goal_id ~owner =
+  if List.exists (fun (id, previous) -> String.equal id goal_id && previous == owner)
+      state.goal_candle_revalidation_attempts then false
+  else begin
+    clear_goal_candle_revalidation state ~goal_id;
+    state.goal_candle_revalidation_attempts <- (goal_id, owner) :: state.goal_candle_revalidation_attempts;
+    true
+  end
+
+let begin_goal_candle_read (state : state) ~goal_id =
+  (* Withdraw an earlier admin observation immediately. A new request may
+     be refused or come from a different process before its body arrives. *)
+  let previous = match Masc_tui_fetched.view_for ~equal:String.equal state.goal_candle ~key:goal_id with
+    | Masc_tui_fetched.Ready _ | Stale _ -> Masc_tui_fetched.clear state.goal_candle
+    | Absent | Loading | Failed _ -> state.goal_candle in
+  match Masc_tui_fetched.refresh ~equal:String.equal previous ~key:goal_id with
+  | Masc_tui_fetched.Already_loading -> None
+  | Masc_tui_fetched.Started (reading, request) -> state.goal_candle <- reading; Some request
+
+let complete_goal_candle_read (state : state) ~credential_is_current request result =
+  match result with
+    | Ok (owner, Error Goal_candle_access_denied) when credential_is_current owner ->
+      state.goal_candle <- Masc_tui_fetched.refuse ~equal:String.equal state.goal_candle request
+        "Candle access denied; administrator permission is required"
+    | Ok (owner, Error Goal_candle_authority_changed) when credential_is_current owner ->
+      state.goal_candle <- Masc_tui_fetched.refuse ~equal:String.equal state.goal_candle request
+        "Candle server or workspace identity changed; read again"
+    | Ok (owner, Ok (instance, _))
+      when credential_is_current owner
+           && not (Option.exists (fun identity -> identity.Tui_decode.sid_runtime_instance_id = Some instance) state.server_identity) ->
+      state.goal_candle <- Masc_tui_fetched.refuse ~equal:String.equal state.goal_candle request
+        "Candle server process changed; read again"
+    | Error _ | Ok (_, (Ok _ | Error (Goal_candle_access_denied | Goal_candle_authority_changed | Goal_candle_read_failed _))) ->
+  let result = match result with
+    | Error detail -> Error detail
+    | Ok (owner, _) when not (credential_is_current owner) ->
+      Error "Candle credential changed; read again"
+    | Ok (_, Error Goal_candle_access_denied) -> Error "Candle access denied"
+    | Ok (_, Error Goal_candle_authority_changed) -> Error "Candle server or workspace identity changed"
+    | Ok (_, Error (Goal_candle_read_failed detail)) -> Error detail
+    | Ok (owner, Ok (instance_id, observation)) ->
+      (match state.server_identity with
+       | Some identity when identity.Tui_decode.sid_runtime_instance_id = Some instance_id ->
+         Ok (owner, instance_id, observation)
+       | Some _ | None -> Error "Candle server instance changed; read again") in
+  state.goal_candle <- Masc_tui_fetched.complete ~equal:String.equal state.goal_candle request result
+
 let complete_goal_timeline_read (state : state) request result =
   let result = Result.bind result (function
     | Tui_decode.Goal_timeline_ready events -> Ok events
@@ -18765,6 +18821,9 @@ let ui_text (state : state) ~ko ~en =
 let withdraw_detail_histories (state : state) =
   clear_task_documents state;
   state.goal_timeline <- Masc_tui_fetched.clear state.goal_timeline;
+  state.goal_candle <- Masc_tui_fetched.clear state.goal_candle;
+  (* Keep the revalidation receipt across workspace withdrawal: alternating
+     server identities must not reset it and start an automatic read loop. *)
   state.task_history <- Masc_tui_fetched.clear state.task_history;
   state.task_history_request <- None;
   state.task_history_last_reading <- None
@@ -19181,6 +19240,8 @@ let create_state
   runtime_catalog_resume = false;
   runtime_catalog_reading = Runtime_catalog_unread;
   goal_timeline = Masc_tui_fetched.initial;
+  goal_candle = Masc_tui_fetched.initial;
+  goal_candle_revalidation_attempts = [];
   task_history = Masc_tui_fetched.initial;
   task_history_request = None;
   task_history_last_reading = None;

@@ -1137,6 +1137,99 @@ let planning_detail_lines (state : state) ~confirmation ~cols (goal : planning_g
   in
   let measurement = planning_measurement_lines state goal in
   let timeline = Planning_detail.timeline ~width ~goal_id:goal.pg_id state.goal_timeline in
+  let candle =
+    let open Candle_goal_observation in
+    let describe ({configuration; ledger} : Candle_goal_observation.t) =
+      let config = match configuration with Enabled -> "enabled" | Off -> "off" | Disabled -> "disabled or unreadable" in
+      let identity (id : identity) =
+        field ~tone:Planning_detail.Quiet "Verification request" id.request_id
+        @ field ~tone:Planning_detail.Quiet "Verifier run" id.verification_run_id in
+      let snapshot = function
+        | Snapshot_matching -> []
+        | Snapshot_missing -> field ~tone:Planning_detail.Unreadable "Snapshot" "missing for this confirmed run"
+        | Snapshot_conflicting -> field ~tone:Planning_detail.Unreadable "Snapshot" "conflicting records for this confirmed run" in
+      let payout = function
+        | No_recorded_obligation ->
+          field "Payout" "no obligation recorded in this ledger; prior history is not established"
+        | Inconsistent -> field ~tone:Planning_detail.Unreadable "Payout" "ledger state could not be interpreted"
+        | Owed {identity=id; snapshot=pass; stage} ->
+          field ~tone:Planning_detail.Waiting "Payout"
+            (match stage with
+             | Candidates_unrecorded ->
+               (match pass with Snapshot_matching -> "owed; candidates not recorded; waiting reason not observed"
+                | Snapshot_missing | Snapshot_conflicting -> "owed; candidate preparation waits for the unresolved Snapshot")
+             | Candidates_consistent -> "owed; candidates recorded; awaiting settlement"
+             | Candidates_inconsistent -> "owed; recorded candidate evidence is inconsistent"
+             | Candidates_unchecked -> "owed; recorded candidate evidence is not checked")
+          @ snapshot pass @ identity id
+        | Held {identity=id; snapshot=pass; origin; issues} ->
+          field ~tone:Planning_detail.Waiting "Payout" "held: contribution window is uncertain"
+          @ field ~tone:Planning_detail.Quiet "Hold evidence"
+              (match origin with Stored -> "recorded in ledger" | Derived_candidates -> "derived from recorded candidates")
+          @ snapshot pass @ identity id
+          @ (match issues with
+             | Issues_unavailable -> field ~tone:Planning_detail.Unreadable "Issues" "hold details are not observed"
+             | Complete_issues issues -> List.concat_map (fun issue ->
+                 field ~tone:Planning_detail.Unreadable "Issue" (Candle_payout.window_issue_to_string issue)) issues
+             | Snapshot_independent_issues issues ->
+               List.concat_map (fun issue ->
+                 field ~tone:Planning_detail.Unreadable "Issue" (Candle_payout.window_issue_to_string issue)) issues
+               @ field ~tone:Planning_detail.Unreadable "Time boundary" "additional issues are not observed while the Snapshot is unresolved")
+          @ (match origin with
+             | Stored -> []
+             | Derived_candidates -> field ~tone:Planning_detail.Unreadable "Candidate evidence"
+                 "Task coverage and candidate consistency have not been checked")
+        | Paid {identity=id; recorded_at; allocations} ->
+          field ~tone:Planning_detail.Proven "Payout" ("recorded paid at " ^ Candle_time.to_rfc3339 recorded_at)
+          @ identity id
+          @ List.concat_map (fun (allocation : allocation) ->
+              field "Recorded allocation" (Printf.sprintf "%s: %d.%03d Candle (weight %d)"
+                allocation.keeper (allocation.amount_milli / 1000) (allocation.amount_milli mod 1000) allocation.weight)) allocations
+          @ field ~tone:Planning_detail.Quiet "Amounts" "at payout; current balances may differ"
+        | Unattributed {identity=id; recorded_at; reason} ->
+          field "Payout" ((match reason with
+            | No_candidates -> "no payable candidates"
+            | All_unrelated -> "candidate tasks unrelated"
+            | No_related_keepers -> "no related Keepers") ^ " (" ^ Candle_time.to_rfc3339 recorded_at ^ ")")
+          @ identity id
+        | Payout_failed {identity=id} ->
+          field ~tone:Planning_detail.Refused "Payout" "failure recorded as unreadable due date" @ identity id in
+      field "Last observed config" config
+      @ (match ledger with
+         | Missing -> field ~tone:Planning_detail.Unreadable "Ledger" "file absent; earlier history is not observed"
+         | Unavailable reason -> field ~tone:Planning_detail.Unreadable "Ledger"
+             (match reason with Locked -> "locked" | Unreadable -> "unreadable" | Invalid_row -> "invalid row")
+         | Observed result -> payout result)
+      @ field ~tone:Planning_detail.Quiet "Model execution" "not observed from the payout ledger" in
+    let reading = Masc_tui_fetched.view_for ~equal:String.equal state.goal_candle ~key:goal.pg_id in
+    let rows =
+      if not (server_authority_ready state) then
+        field ~tone:Planning_detail.Unreadable "Candle" "workspace authority unavailable"
+      else match reading with
+      | Masc_tui_fetched.Absent -> field ~tone:Planning_detail.Quiet "Candle" "not read"
+      | Loading -> field ~tone:Planning_detail.Waiting "Candle" "reading payout ledger"
+      | Failed error ->
+        if Masc_tui_fetched.in_flight state.goal_candle then
+          field ~tone:Planning_detail.Waiting "Candle" ("reading; previous read failed: " ^ error)
+        else field ~tone:Planning_detail.Unreadable "Candle" error
+      | Ready (owner, _, _) | Stale ((owner, _, _), _) when not (Masc_tui_http.credential_owner_is_current owner) ->
+        if Masc_tui_fetched.in_flight state.goal_candle then
+          field ~tone:Planning_detail.Waiting "Candle" "reading; previous credential observation hidden"
+        else field ~tone:Planning_detail.Unreadable "Candle" "credential changed; read again"
+      | Ready (_, instance, _) | Stale ((_, instance, _), _)
+        when not (Option.exists (fun identity -> identity.Tui_decode.sid_runtime_instance_id = Some instance) state.server_identity) ->
+        field ~tone:Planning_detail.Unreadable "Candle" "server instance changed; read again"
+      | Ready (_, _, observation) ->
+        if Masc_tui_fetched.in_flight state.goal_candle then
+          field ~tone:Planning_detail.Waiting "Candle" "reading payout ledger"
+        else describe observation
+      | Stale (_, error) ->
+        if Masc_tui_fetched.in_flight state.goal_candle then
+          field ~tone:Planning_detail.Waiting "Candle" ("reading; previous read failed: " ^ error)
+        else field ~tone:Planning_detail.Unreadable "Candle" error in
+    gap @ section (Printf.sprintf "%s [%s:%s]"
+      (ui_text state ~ko:"Candle 지급 기록" ~en:"Candle payout record")
+      Masc_tui_keys.goal_candle_refresh_key (ui_text state ~ko:"조회" ~en:"read")) @ rows in
   (* While a proof waits for confirmation, the decision block leads and the
      timeline -- context, not decision input -- moves behind the goal's own
      summary, so the promise and the metadata read adjacently instead of a
@@ -1149,13 +1242,13 @@ let planning_detail_lines (state : state) ~confirmation ~cols (goal : planning_g
   let wrapped_proof = planning_proof_rows ~width proof in
   (match confirmation with
    | `Inspect Masc_tui_fetched.Absent ->
-       metadata @ linked @ gap
+       metadata @ linked @ candle @ gap
        @ section
            (ui_text state ~ko:"3. 검증 판정 · 측정 및 이력"
               ~en:"3. Verification & Measurement")
        @ wrapped_proof
    | `Submitting | `Inspect (Masc_tui_fetched.Ready _ | Loading | Stale _ | Failed _) ->
-       wrapped_proof @ gap @ metadata @ linked @ timeline)
+       wrapped_proof @ gap @ metadata @ linked @ candle @ timeline)
 
 let planning_detail_header_rows (state : state) ~cols (goal : planning_goal) =
   let phase = "  " ^ bracketed ~max_cells:planning_phase_column
@@ -1314,7 +1407,7 @@ let render_planning_detail (state : state)
        ~hints:
          (match goal_drop_reason_for state goal.pg_id with
           | Some _ -> Masc_tui_keys.footer_hints_goal_drop_reason
-          | None -> Masc_tui_keys.footer_hints ~detail_open:true state.view));
+          | None -> Masc_tui_keys.footer_hints_planning_goal_detail));
   finish_surface state ~clamped:(Planning_confirmation_scroll (scroll, seen))
       ~surface_key:"planning-detail" ~rows:terminal_rows ~cols buf
   end

@@ -117,7 +117,7 @@ let connector_read_ready state base_path =
   let identity : Masc.Tui_decode.server_identity =
     { sid_version = "read-ownership-fixture"
     ; sid_binary_commit = "fixture"
-    ; sid_binary_commit_age_s = None
+    ; sid_binary_commit_age_s = None; sid_runtime_instance_id = None
     ; sid_base_path = Masc.Tui_decode.Canonical_path.of_path base_path
     ; sid_masc_root = Masc.Tui_decode.Canonical_path.of_path (Filename.concat base_path ".masc")
     ; sid_executable_in_worktree = None

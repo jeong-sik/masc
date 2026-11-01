@@ -352,25 +352,28 @@ async function reportRejectedCredential(
   listener({ token, authErrorCode: info.authErrorCode })
 }
 
-async function credentialedFetch(path: string, init: RequestInit): Promise<Response> {
-  const response = await fetch(path, init)
-  void reportRejectedCredential(init, response).catch(err => {
+type CredentialedRequestInit = RequestInit & { reportCredentialRefusal?: boolean }
+
+async function credentialedFetch(path: string, init: CredentialedRequestInit): Promise<Response> {
+  const { reportCredentialRefusal = true, ...requestInit } = init
+  const response = await fetch(path, requestInit)
+  if (reportCredentialRefusal) void reportRejectedCredential(requestInit, response).catch(err => {
     console.warn('[dashboard-auth] rejected credential listener failed', err)
   })
   return response
 }
 
 /** A consumer keeps the deadline and caller abort connected through body read. */
-export function fetchWithTimeout(path: string, init: RequestInit, timeoutMs: number): Promise<Response>
+export function fetchWithTimeout(path: string, init: CredentialedRequestInit, timeoutMs: number): Promise<Response>
 export function fetchWithTimeout<T>(
   path: string,
-  init: RequestInit,
+  init: CredentialedRequestInit,
   timeoutMs: number,
   consume: (response: Response) => Promise<T>,
 ): Promise<T>
 export async function fetchWithTimeout<T>(
   path: string,
-  init: RequestInit,
+  init: CredentialedRequestInit,
   timeoutMs: number,
   consume?: (response: Response) => Promise<T>,
 ): Promise<Response | T> {
@@ -395,6 +398,13 @@ export async function fetchWithTimeout<T>(
     })
     return consume ? await consume(response) : response
   } catch (err) {
+    if (err instanceof ResponseHeaderRejected) {
+      // The consumer deliberately refused this response before its body.
+      // Abort the unread transport (and any cloned error reader) before
+      // releasing the deadline, then preserve its original typed reason.
+      controller.abort()
+      throw err.reason
+    }
     if (isAbortError(err)) {
       if (upstreamSignal?.aborted) {
         throw err
@@ -412,6 +422,10 @@ export async function fetchWithTimeout<T>(
     clearTimeout(timer)
     upstreamSignal?.removeEventListener('abort', abortFromUpstream)
   }
+}
+
+class ResponseHeaderRejected extends Error {
+  constructor(readonly reason: unknown) { super('response rejected before body') }
 }
 
 /**
@@ -570,12 +584,12 @@ interface ErrorResponseInfo {
   authoritativeReloadRequired?: boolean
 }
 
-async function errorResponseInfoFromResponse(res: Response, preserveAbort = false): Promise<ErrorResponseInfo> {
+async function errorResponseInfoFromResponse(res: Response, preserveAbort = false, preserveReadFailure = false): Promise<ErrorResponseInfo> {
   let rawText = ''
   try {
     rawText = (await res.text()).trim()
   } catch (error) {
-    if (preserveAbort && isAbortError(error)) throw error
+    if (preserveReadFailure || (preserveAbort && isAbortError(error))) throw error
     return {}
   }
   if (!rawText) return {}
@@ -656,8 +670,9 @@ export async function apiRequestErrorFromResponse(
   path: string,
   res: Response,
   preserveAbort = false,
+  preserveReadFailure = false,
 ): Promise<ApiRequestError> {
-  const info = await errorResponseInfoFromResponse(res, preserveAbort)
+  const info = await errorResponseInfoFromResponse(res, preserveAbort, preserveReadFailure)
   return new ApiRequestError({
     method,
     path,
@@ -893,13 +908,24 @@ export async function getPublic<T>(path: string, opts: AbortableRequestOptions =
 // payloads are synthesized locally and have no upstream response.
 export async function getWithResponse<T>(
   path: string,
-  opts: GetOptions = {},
+  opts: GetOptions & {
+    beforeResponseBody?: (response: Pick<Response, 'status' | 'statusText' | 'ok' | 'headers'>) => void
+    preserveErrorBodyFailure?: boolean
+    reportCredentialRefusal?: boolean
+  } = {},
 ): Promise<{ readonly data: T; readonly headers: Headers }> {
   const consume = async (res: Response): Promise<{ readonly data: T; readonly headers: Headers }> => {
+    if (opts.beforeResponseBody) {
+      try { opts.beforeResponseBody(res) }
+      catch (reason) {
+        if (opts.consumeWithinTimeout) throw new ResponseHeaderRejected(reason)
+        throw reason
+      }
+    }
     if (!res.ok) {
       const warmPayload = await bootstrapWarmPayload(path, res.clone())
       if (warmPayload !== null) return { data: warmPayload as T, headers: new Headers() }
-      throw await apiRequestErrorFromResponse('GET', path, res, opts.consumeWithinTimeout)
+      throw await apiRequestErrorFromResponse('GET', path, res, opts.consumeWithinTimeout, opts.preserveErrorBodyFailure)
     }
     const data = await parseJsonResponse<T>('GET', path, res, opts.consumeWithinTimeout)
     if (DASHBOARD_BOOTSTRAP_WARM_PATHS.has(path) && isNotInitializedEnvelope(data)) {
@@ -912,6 +938,7 @@ export async function getWithResponse<T>(
     headers: { ...authHeaders({ includeActor: opts.includeActorHeader }), ...opts.extraHeaders },
     cache: readCacheMode(path),
     signal: opts.signal,
+    reportCredentialRefusal: opts.reportCredentialRefusal,
   }
   const timeoutMs = opts.timeoutMs ?? DEFAULT_GET_TIMEOUT_MS
   if (opts.consumeWithinTimeout) return fetchWithTimeout(path, init, timeoutMs, consume)

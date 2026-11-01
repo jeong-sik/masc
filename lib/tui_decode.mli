@@ -1533,6 +1533,9 @@ type server_identity = {
   sid_version : string;
   sid_binary_commit : string;
   sid_binary_commit_age_s : float option;
+  sid_runtime_instance_id : string option;
+      (** Process identity from health [build.runtime_instance_id]; absent on
+          older or incomplete health responses. *)
   sid_base_path : Canonical_path.t;
   sid_masc_root : Canonical_path.t;
       (** Both paths are resolved by {!decode_server_identity}. *)

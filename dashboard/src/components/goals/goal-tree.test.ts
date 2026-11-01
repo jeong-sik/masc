@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   callMcpTool: vi.fn(),
   callIdentity: vi.fn(),
   refreshExecution: vi.fn(),
+  readGoalCandle: vi.fn(),
   mcpCallFailureDisposition: vi.fn(() => 'known_tool_response'),
   mcpIdentityRequiresGoalRefresh: vi.fn(() => false),
   captureArtifactWorkspace: vi.fn(),
@@ -33,6 +34,12 @@ const mocks = vi.hoisted(() => ({
 vi.mock('../../api/dashboard', () => ({
   fetchDashboardGoalDetail: mocks.fetchDashboardGoalDetail,
   fetchDashboardGoalsTree: mocks.fetchDashboardGoalsTree,
+}))
+
+vi.mock('../../api/goal-candle', () => ({
+  readGoalCandle: mocks.readGoalCandle,
+  GoalCandleEpochMismatchError: class extends Error {},
+  GoalCandleWorkspaceRefusalError: class extends Error {},
 }))
 
 vi.mock('../../api/published-artifacts', async original => ({
@@ -68,6 +75,7 @@ vi.mock('../../api/mcp', () => ({
 
 vi.mock('../../router', () => ({
   route: mocks.route,
+  replaceRoute: (tab: string, params: Record<string, string>) => { mocks.route.value = { tab, params, postId: null } },
 }))
 
 vi.mock('../task-manage/task-create-form', () => ({
@@ -142,6 +150,7 @@ describe('GoalTree', () => {
     _testResetGoalActionReceipts()
     ;(executionError as { value: string | null }).value = null
     mocks.refreshExecution.mockResolvedValue(undefined)
+    mocks.readGoalCandle.mockResolvedValue({ config: 'off', ledger: { state: 'missing' } })
     clearStoredToken()
     ;(executionWorkspaceAuthority as { value: unknown }).value =
       { epoch: 'fixture-a', workspaceRoot: '/workspace-a', connectionGeneration: 1 }
@@ -165,6 +174,7 @@ describe('GoalTree', () => {
     mocks.callMcpTool.mockReset()
     mocks.callIdentity.mockReset()
     mocks.refreshExecution.mockReset()
+    mocks.readGoalCandle.mockReset()
     mocks.mcpCallFailureDisposition.mockReset().mockReturnValue('known_tool_response')
     mocks.mcpIdentityRequiresGoalRefresh.mockReset().mockReturnValue(false)
     mocks.captureArtifactWorkspace.mockReset()
@@ -264,6 +274,72 @@ describe('GoalTree', () => {
       expect(mocks.fetchDashboardGoalDetail).toHaveBeenCalledWith('goal-child',
         { basePath: '/workspace-a', mascRoot: '/workspace-a/.masc' })
     })
+    fireEvent.input(screen.getByLabelText('목표 트리 필터'), { target: { value: 'no matching goal' } })
+    await waitFor(() => expect(screen.queryByTestId('goal-detail-panel')).toBeNull())
+    fireEvent.input(screen.getByLabelText('목표 트리 필터'), { target: { value: '' } })
+    await waitFor(() => expect(screen.getByTestId('goal-detail-panel').getAttribute('data-selected-goal-id')).toBe(child.id))
+    expect(screen.getByRole('button', { name: /Parent goal/ }).getAttribute('aria-expanded')).toBe('true')
+    expect(screen.getByRole('button', { name: /Child goal/ })).toBeTruthy()
+  })
+
+  it('clears a previous filter when a Work link opens a different Goal, then permits new filtering', async () => {
+    const first = { ...makeGoal('goal-active', 'Active target'), priority: 2 }
+    const second = { ...makeGoal('goal-done', 'Completed target'), phase: 'completed', priority: 1 }
+    const tree = { approval_queue_state: { state: 'ready' }, tree: [first, second],
+      summary: { ...emptySummary(), total_goals: 2, active_goals: 1 } } satisfies DashboardGoalsTreeResponse
+    mocks.fetchDashboardGoalsTree.mockResolvedValue(tree)
+    mocks.fetchDashboardGoalDetail.mockImplementation(async (id: string) => ({
+      goal: id === first.id ? first : second, linked_tasks: [], linked_keepers: [], approvals: [], execution_receipts: [], timeline: [],
+    }))
+    const initial = render(html`<${GoalTree} />`)
+    await screen.findByTestId('goal-detail-panel')
+    fireEvent.input(screen.getByLabelText('목표 트리 필터'), { target: { value: 'Completed target' } })
+    await waitFor(() => expect(screen.getByTestId('goal-detail-panel').getAttribute('data-selected-goal-id')).toBe(second.id))
+    initial.unmount()
+    mocks.route.value = { tab: 'workspace', params: { section: 'planning', goal: first.id }, postId: null }
+    render(html`<${GoalTree} />`)
+    await waitFor(() => expect(screen.getByTestId('goal-detail-panel').getAttribute('data-selected-goal-id')).toBe(first.id))
+    expect((screen.getByLabelText('목표 트리 필터') as HTMLInputElement).value).toBe('')
+    await waitFor(() => expect(mocks.readGoalCandle).toHaveBeenCalledWith(first.id,
+      { basePath: '/workspace-a', mascRoot: '/workspace-a/.masc' }, 'fixture-a', expect.any(Function)))
+    fireEvent.input(screen.getByLabelText('목표 트리 필터'), { target: { value: 'no matching target' } })
+    await waitFor(() => expect(screen.queryByTestId('goal-detail-panel')).toBeNull())
+    fireEvent.input(screen.getByLabelText('목표 트리 필터'), { target: { value: '' } })
+    await waitFor(() => expect(screen.getByTestId('goal-detail-panel').getAttribute('data-selected-goal-id')).toBe(first.id))
+    expect(mocks.route.value.params.goal).toBe(first.id)
+    fireEvent.input(screen.getByLabelText('목표 트리 필터'), { target: { value: 'Completed target' } })
+    await waitFor(() => expect(screen.getByTestId('goal-detail-panel').getAttribute('data-selected-goal-id')).toBe(second.id))
+    expect(mocks.route.value.params.goal).toBeUndefined()
+    expect(mocks.route.value.params.section).toBe('planning')
+  })
+
+  it('does not substitute a different Goal when the routed Goal is absent in a new workspace', async () => {
+    const first = makeGoal('goal-routed', 'Routed goal')
+    const other = makeGoal('goal-other', 'Other workspace goal')
+    mocks.route.value = { tab: 'workspace', params: { section: 'planning', goal: first.id }, postId: null }
+    mocks.fetchDashboardGoalsTree.mockImplementation(async (workspace: { basePath: string }) => ({
+      approval_queue_state: { state: 'ready' }, tree: [workspace.basePath === '/workspace-a' ? first : other],
+      summary: { ...emptySummary(), total_goals: 1, active_goals: 1 },
+    }))
+    mocks.fetchDashboardGoalDetail.mockImplementation(async (id: string) => ({
+      goal: id === first.id ? first : other, linked_tasks: [], linked_keepers: [], approvals: [], execution_receipts: [], timeline: [],
+    }))
+    render(html`<${GoalTree} />`)
+    await waitFor(() => expect(screen.getByTestId('goal-detail-panel').getAttribute('data-selected-goal-id')).toBe(first.id))
+    ;(executionWorkspaceAuthority as { value: unknown }).value =
+      { epoch: 'fixture-b', workspaceRoot: '/workspace-b', connectionGeneration: 2 }
+    await waitFor(() => expect(mocks.fetchDashboardGoalsTree).toHaveBeenCalledWith({ basePath: '/workspace-b', mascRoot: '/workspace-b/.masc' }))
+    await screen.findByRole('button', { name: /Other workspace goal/ })
+    expect(screen.queryByTestId('goal-detail-panel')).toBeNull()
+    expect(mocks.readGoalCandle.mock.calls.filter(([id, workspace]) => id === other.id && workspace.basePath === '/workspace-b')).toHaveLength(0)
+    fireEvent.input(screen.getByLabelText('목표 트리 필터'), { target: { value: 'nothing matches' } })
+    await waitFor(() => expect(screen.queryByRole('button', { name: /Other workspace goal/ })).toBeNull())
+    fireEvent.input(screen.getByLabelText('목표 트리 필터'), { target: { value: '' } })
+    await screen.findByRole('button', { name: /Other workspace goal/ })
+    expect(screen.queryByTestId('goal-detail-panel')).toBeNull()
+    expect(mocks.route.value.params.goal).toBe(first.id)
+    fireEvent.click(screen.getByRole('button', { name: /Other workspace goal/ }))
+    await waitFor(() => expect(screen.getByTestId('goal-detail-panel').getAttribute('data-selected-goal-id')).toBe(other.id))
   })
 
   it('requests goal completion through the goal transition tool and refreshes goal data', async () => {

@@ -5091,6 +5091,7 @@ type server_identity = {
   sid_version : string;
   sid_binary_commit : string;
   sid_binary_commit_age_s : float option;
+  sid_runtime_instance_id : string option;
   sid_base_path : Canonical_path.t;
   sid_masc_root : Canonical_path.t;
   sid_executable_in_worktree : bool option;
@@ -5141,6 +5142,11 @@ let decode_server_identity json =
     match Option.map (member "binary_commit_age_seconds") build with
     | Some (`Float value) -> Some value
     | Some (`Int value) -> Some (float_of_int value)
+    | Some _ | None -> None
+  in
+  let sid_runtime_instance_id =
+    match Option.map (member "runtime_instance_id") build with
+    | Some (`String value) when String.trim value <> "" -> Some value
     | Some _ | None -> None
   in
   let sid_executable_in_worktree =
@@ -5214,6 +5220,7 @@ let decode_server_identity json =
          | _ -> "")
     ; sid_binary_commit = string_in build "binary_commit"
     ; sid_binary_commit_age_s
+    ; sid_runtime_instance_id
     (* The two paths are resolved here, once per reading, so every later
        workspace check on this identity compares strings without a lookup.
        The TUI runs this decode on its CPU pool, off the frame loop. *)

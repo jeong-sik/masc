@@ -1439,6 +1439,14 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
             in
             h2_respond_json_value h2_reqd payload.json ~extra_headers:(workspace_headers @ cors)))
 
+      | `GET, "/api/v1/dashboard/goals/candle" ->
+          h2_gate_state h2_reqd (fun state ->
+            let config = Mcp_server.workspace_config state in
+            with_captured_read_workspace config (fun workspace_headers ->
+              let status, json = Server_dashboard_goal_candle.response ~config httpun_request in
+              h2_respond_json_value h2_reqd json ~status:(status :> H2.Status.t)
+                ~extra_headers:(("cache-control", "private, no-store") :: Server_dashboard_goal_candle.generation_headers @ workspace_headers @ cors)))
+
       | `GET, "/api/v1/dashboard/goals/detail" ->
           h2_gate_state h2_reqd (fun state ->
             let config = Mcp_server.workspace_config state in

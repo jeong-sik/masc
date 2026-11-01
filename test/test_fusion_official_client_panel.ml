@@ -136,12 +136,10 @@ let test_unknown_runtime_is_not_claimed_by_the_spawn_path () =
 
 let test_official_client_panel_honors_no_deadline () =
   with_classification_runtime (fun () ->
-    let runtime = match Runtime.get_runtime_by_id official_client_runtime with
-      | Some runtime -> runtime | None -> fail "fixture runtime must resolve" in
     check bool "turn-timeout-s = 0 removes the panel turn deadline" true
       (Option.is_none
          (Masc.Fusion_official_client.For_testing.resolved_timeout_s
-            ~turn_timeout_s:runtime.model.turn_timeout_s
+            ~runtime_id:official_client_runtime
             ~override_s:None
             ~default_timeout_s:300.0)))
 ;;

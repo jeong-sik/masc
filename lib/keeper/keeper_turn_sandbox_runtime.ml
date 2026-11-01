@@ -1348,7 +1348,7 @@ let claim_work_volume_at_boot (t : t) ~backend ~volume_name ~timeout_sec =
      | Error error ->
        Log.Keeper.warn ~keeper_name:t.meta.name
          "work volume claim not recorded: %s"
-         (sandbox_image_unresolved_message error)
+         (image_unresolved_message error)
      | Ok image ->
        (match
           Keeper_sandbox_microvm.add_apple_work_volume_claim
@@ -3058,6 +3058,12 @@ let remove_keeper_volumes_by_name
                    still claim them: %s"
                   (List.length claimants)
                   (String.concat ", " claimants);
+                Ok ()
+              | Keeper_sandbox_microvm.Kept_for_containers owners ->
+                Log.Keeper.warn ~keeper_name
+                  "keeper removed; its claim was released but its Apple volumes are \
+                   kept: containers still reference the keeper: %s"
+                  (String.concat ", " owners);
                 Ok ()
               | Keeper_sandbox_microvm.Skipped_unverified detail -> Error detail)))
      | Some

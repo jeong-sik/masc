@@ -2097,6 +2097,9 @@ let test_release_removes_both_volumes_when_the_claim_was_sole () =
    | M.Kept_for_claimants claimants ->
      Alcotest.failf "a sole claim removed the volumes, got kept for %s"
        (String.concat ", " claimants)
+   | M.Kept_for_containers owners ->
+     Alcotest.failf "an empty owner listing removed the volumes, got kept for %s"
+       (String.concat ", " owners)
    | M.Skipped_unverified detail -> Alcotest.failf "a sole claim removed the volumes: %s" detail);
   Alcotest.(check (list string))
     "the keeper's work and build volumes are deleted"
@@ -2118,7 +2121,16 @@ let test_release_keeps_volumes_for_the_remaining_claimants () =
    | M.Removed -> Alcotest.fail "another workspace's claim must keep the volumes"
    | M.Kept_for_claimants claimants ->
      Alcotest.failf "the remaining claimant is named, got %s" (String.concat ", " claimants)
+   | M.Kept_for_containers _ -> Alcotest.fail "no container references this keeper"
    | M.Skipped_unverified detail -> Alcotest.failf "a shared claim is a keep, not a skip: %s" detail);
+  (* The keep came through the release helper, which is also what removed
+     our claim from the marker: the argv names our workspace. *)
+  Alcotest.(check bool) "our claim was released by the helper" true
+    (List.exists
+       (fun argv ->
+          List.exists (String.equal "run") argv
+          && adjacent ~flag:"--env" ~value:"MASC_VOLUME_CLAIMANT=/ws/retiring" argv)
+       sent);
   Alcotest.(check (list string)) "no volume delete is sent" [] (deleted_volume_names sent)
 ;;
 
@@ -2133,6 +2145,9 @@ let test_release_skips_on_legacy_absent_and_unreadable_and_foreign_markers () =
     | M.Removed -> Alcotest.failf "expected a skip (%s), got a removal" affix
     | M.Kept_for_claimants claimants ->
       Alcotest.failf "expected a skip (%s), got kept for %s" affix (String.concat ", " claimants)
+    | M.Kept_for_containers owners ->
+      Alcotest.failf "expected a skip (%s), got kept for containers %s" affix
+         (String.concat ", " owners)
   in
   let outcome, sent =
     run_claim_release
@@ -2182,7 +2197,7 @@ let test_release_skips_on_legacy_absent_and_unreadable_and_foreign_markers () =
   skipped_with "microvm_volume_claims_inventory_failed" outcome
 ;;
 
-let test_release_refuses_while_any_container_references_the_keeper () =
+let test_release_releases_our_claim_but_keeps_volumes_for_containers () =
   (* The inventory decoder projects a row's labels to [None] unless all four
      scoping labels are present, so the guest row carries the full set --
      exactly what a booted guest is labeled with. *)
@@ -2199,6 +2214,9 @@ let test_release_refuses_while_any_container_references_the_keeper () =
       ],
       ""
   in
+  (* A live guest of this keeper: the release helper still runs -- a
+     dissolved workspace must not leave its claim in the marker -- and the
+     volumes are kept with the guest named. *)
   let outcome, sent =
     run_claim_release
       ~keeper_name:"live"
@@ -2208,27 +2226,39 @@ let test_release_refuses_while_any_container_references_the_keeper () =
       ()
   in
   (match outcome with
-   | M.Skipped_unverified detail ->
+   | M.Kept_for_containers owners ->
      Alcotest.(check bool) "the live guest is named" true
-       (Astring.String.is_infix ~affix:"microvm_volume_release_owner_present" detail)
+       (List.exists (Astring.String.is_infix ~affix:"masc-keeper-vm-live") owners)
    | M.Removed -> Alcotest.fail "a live guest of this keeper must keep the volumes"
-   | M.Kept_for_claimants _ -> Alcotest.fail "the refusal names the guest, not claimants");
-  Alcotest.(check bool) "the release helper never ran" true
-    (not (List.exists (fun argv -> List.exists (String.equal "run") argv) sent));
+   | M.Kept_for_claimants _ -> Alcotest.fail "no claimant remains; the guest is the reason"
+   | M.Skipped_unverified detail ->
+     Alcotest.failf "a live guest keeps the volumes after releasing the claim: %s" detail);
+  Alcotest.(check bool) "the release helper ran and released the claim" true
+    (List.exists
+       (fun argv ->
+          List.exists (String.equal "run") argv
+          && adjacent ~flag:"--env" ~value:"MASC_VOLUME_CLAIMANT=/ws/retiring" argv)
+       sent);
+  Alcotest.(check (list string)) "no volume delete is sent" [] (deleted_volume_names sent);
+  (* A present volume helper of this keeper keeps the volumes the same way;
+     with another claimant remaining the outcome still names claimants. *)
   let outcome, _ =
     run_claim_release
       ~keeper_name:"helped"
       ~containers:(Unix.WEXITED 0, {|[{"id":"masc-keeper-work-helped-trim"}]|}, "")
-      ~helper:(Unix.WEXITED 0, "released-last\n", "")
+      ~helper:(Unix.WEXITED 0, "kept\n[\n\"/ws/other\"\n]\n", "")
       ~volumes:(Unix.WEXITED 0, "[]", "")
       ()
   in
   (match outcome with
-   | M.Skipped_unverified detail ->
-     Alcotest.(check bool) "the present trim helper is named" true
-       (Astring.String.is_infix ~affix:"masc-keeper-work-helped-trim" detail)
+   | M.Kept_for_claimants [ "/ws/other" ] -> ()
+   | M.Kept_for_containers _ ->
+     Alcotest.fail "the helper's report is the release outcome; containers only gate deletion"
    | M.Removed -> Alcotest.fail "a present trim helper must keep the volumes"
-   | M.Kept_for_claimants _ -> Alcotest.fail "the refusal names the helper, not claimants")
+   | M.Kept_for_claimants claimants ->
+     Alcotest.failf "the remaining claimant is named, got %s" (String.concat ", " claimants)
+   | M.Skipped_unverified detail ->
+     Alcotest.failf "a shared claim is a keep, not a skip: %s" detail)
 ;;
 
 let test_add_records_and_refuses_a_present_helper () =
@@ -5651,8 +5681,8 @@ let () =
             test_release_keeps_volumes_for_the_remaining_claimants
         ; Alcotest.test_case "release skips on legacy, foreign and failed reads" `Quick
             test_release_skips_on_legacy_absent_and_unreadable_and_foreign_markers
-        ; Alcotest.test_case "release refuses while a container references the keeper" `Quick
-            test_release_refuses_while_any_container_references_the_keeper
+        ; Alcotest.test_case "release releases our claim but keeps volumes for containers" `Quick
+            test_release_releases_our_claim_but_keeps_volumes_for_containers
         ; Alcotest.test_case "add records a claim and refuses a present helper" `Quick
             test_add_records_and_refuses_a_present_helper
         ; Alcotest.test_case "recreate shares the work volume's commands" `Quick

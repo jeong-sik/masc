@@ -2090,6 +2090,7 @@ let valid_volume_claimant claimant =
        (function
          | '"' | '\\' | '\x7f' -> false
          | c -> c >= ' ')
+       claimant
 ;;
 
 (* The marker is one JSON array, one claimant per line, so the scripts can
@@ -2118,7 +2119,7 @@ if [ -f "$marker" ]; then
         elem=${line#,}
         case "$elem" in
           '"'*'"')
-            elem=${elem#\"}; elem=${elem%\"}
+            elem=${elem#\"}; elem=${elem%%\"}
             if [ "$elem" = "$MASC_VOLUME_CLAIMANT" ]; then present=1
             elif [ "$first" -eq 1 ]; then printf '"%%s"\n' "$elem" >> "$tmp"; first=0
             else printf ',"%%s"\n' "$elem" >> "$tmp"; fi ;;
@@ -2156,7 +2157,7 @@ while IFS= read -r line || [ -n "$line" ]; do
       elem=${line#,}
       case "$elem" in
         '"'*'"')
-          elem=${elem#\"}; elem=${elem%\"}
+          elem=${elem#\"}; elem=${elem%%\"}
           if [ "$elem" = "$MASC_VOLUME_CLAIMANT" ]; then found=1
           elif [ "$first" -eq 1 ]; then printf '"%%s"\n' "$elem" >> "$tmp"; first=0
           else printf ',"%%s"\n' "$elem" >> "$tmp"; fi ;;
@@ -2396,16 +2397,29 @@ let add_apple_work_volume_claim ~run ~timeout_sec ~keeper_name ~volume_name ~ima
 type apple_volume_claim_release =
   | Removed
   | Kept_for_claimants of string list
+  | Kept_for_containers of string list
   | Skipped_unverified of string
 
-(* Release one workspace's claim and remove the volumes when nothing else
-   claims them. One helper reads the marker, filters our claim out and
-   rewrites it -- the read and the write are one container, so no other
-   helper can land a claim between them. The volumes are deleted through
-   {!remove_apple_keeper_volumes} only when our claim was the last one;
-   other claimants, a legacy volume with no marker, an unreadable marker, a
-   container still referencing the keeper, or any helper failure all keep
-   the volumes, and the outcome says which. *)
+(* Release one workspace's claim; the volumes are deleted only when nothing
+   else wants them. The release helper always runs when the owner listing
+   is readable -- a dissolved workspace must not leave its claim behind
+   just because another workspace's guest still holds the volume, or the
+   marker would name a workspace that can never come back to release it.
+   One helper reads the marker, filters our claim out and rewrites it: the
+   read and the write are one container, so no other helper can land a
+   claim between them. Deletion needs both our claim being the last one
+   and no owner container; in that case the marker dies with the volume
+   and is not rewritten again. Other claimants, owner containers, a legacy
+   volume with no marker, an unreadable marker, or any helper failure all
+   keep the volumes, and the outcome says which.
+
+   Residual window, documented rather than leased: between the owner
+   listing and the helper or the deletes, another workspace can boot the
+   same-named keeper and claim. The shared helper name serializes claim
+   writes against each other, the delete's settling listing reports a
+   volume that survived, and whether the runtime refuses to delete a
+   volume a guest holds is unmeasured -- an operator reconciles from the
+   report, which is why every uncertain answer keeps the volumes. *)
 let release_apple_work_volume_claim ~run ~timeout_sec ~keeper_name ~volume_name ~image ~claimant
   : apple_volume_claim_release
   =
@@ -2419,13 +2433,7 @@ let release_apple_work_volume_claim ~run ~timeout_sec ~keeper_name ~volume_name 
   else
     match apple_keeper_owner_containers ~run ~timeout_sec ~keeper_name with
     | Error detail -> skipped detail
-    | Ok (_ :: _ as owners) ->
-      skipped
-        (Printf.sprintf
-           "microvm_volume_release_owner_present: %s still reference(s) keeper %s's volumes"
-           (String.concat ", " owners)
-           keeper_name)
-    | Ok [] ->
+    | Ok owners ->
       let status, stdout, stderr =
         run ~timeout_sec
           (apple_volume_claim_release_argv ~keeper_name ~volume_name ~image ~claimant)
@@ -2440,11 +2448,14 @@ let release_apple_work_volume_claim ~run ~timeout_sec ~keeper_name ~volume_name 
           (Printf.sprintf
              "microvm_volume_claims_not_claimed: %s holds no recorded claim on %s"
              claimant volume_name)
-      | Unix.WEXITED 0, Released_last_claim ->
-        (match remove_apple_keeper_volumes ~run ~timeout_sec ~keeper_name with
-         | Ok () -> Removed
-         | Error detail -> skipped ("microvm_volume_removal_unconfirmed: " ^ detail))
       | Unix.WEXITED 0, Kept_with_claimants claimants -> Kept_for_claimants claimants
+      | Unix.WEXITED 0, Released_last_claim ->
+        (match owners with
+         | [] ->
+           (match remove_apple_keeper_volumes ~run ~timeout_sec ~keeper_name with
+            | Ok () -> Removed
+            | Error detail -> skipped ("microvm_volume_removal_unconfirmed: " ^ detail))
+         | _ :: _ -> Kept_for_containers owners)
       | Unix.WEXITED 0, Report_unrecognized word ->
         skipped
           (Printf.sprintf

@@ -689,7 +689,17 @@ val remove_apple_keeper_volumes :
     guest cannot forge or remove a claim. Workspaces claim at every fresh
     boot ({!add_apple_work_volume_claim}) and release at dissolution
     ({!release_apple_work_volume_claim}); every failure path keeps the
-    volumes. *)
+    volumes.
+
+    Dissolution and reclamation answer different questions on purpose.
+    Dissolution never deletes on missing evidence: a volume with no marker,
+    or a marker it cannot read, is kept, because a dissolved keeper has no
+    one left to answer for a wrong deletion. Reclamation
+    ({!Keeper_volume_gc}) exists precisely to collect those unverifiable
+    leftovers under an operator's eyes, report first and delete only on
+    request. Both read owner evidence from [container list --all], which
+    includes stopped guests: a stopped guest is still a workspace's
+    reference to its volume, not an orphan. *)
 
 val volume_claims_marker_name : string
 val claims_guest_root : string
@@ -767,6 +777,9 @@ val add_apple_work_volume_claim :
 type apple_volume_claim_release =
   | Removed
   | Kept_for_claimants of string list
+  | Kept_for_containers of string list
+        (** The claim was released and the volumes kept: a live or stopped
+            guest, or a volume helper, still references the keeper. *)
   | Skipped_unverified of string
 
 val release_apple_work_volume_claim :
@@ -777,12 +790,15 @@ val release_apple_work_volume_claim :
   -> image:string
   -> claimant:string
   -> apple_volume_claim_release
-(** Release [claimant]'s claim and delete both volumes when it was the last
-    one. One helper reads the marker, filters the claim out and rewrites it,
-    so no other helper can land a claim between the read and the write; the
-    deletion itself is {!remove_apple_keeper_volumes}. Any container still
-    referencing the keeper -- a live guest by its scoping label, or a trim,
-    repair or claims helper by name -- refuses the release first.
+(** Release [claimant]'s claim, and delete both volumes only when that claim
+    was the last one and no container references the keeper. One helper
+    reads the marker, filters the claim out and rewrites it, so no other
+    helper can land a claim between the read and the write; the release
+    helper runs even when owner containers are present, so a dissolved
+    workspace never leaves its claim behind. When ours was the last claim
+    and owners are present, the helper's removal of the marker file stands
+    and the volumes stay with [Kept_for_containers]; when deletion is
+    decided the marker is not rewritten again -- it dies with the volume.
     [Kept_for_claimants] carries the claimants that remain, and every
     refusal or failure is [Skipped_unverified] with its detail; the volumes
     are kept in all of those cases. *)

@@ -500,11 +500,12 @@ val remove_keeper_volumes_by_name :
     workspaces. Ownership is settled through the work volume's claims marker
     ({!Keeper_sandbox_microvm.release_apple_work_volume_claim}): the marker
     is written at every fresh boot, this releases [base_path]'s claim, and
-    the volumes are deleted only when no other claimant remains. A legacy
-    volume with no marker, an unreadable marker, a container still
-    referencing the keeper, a missing [sandbox_image] to run the claims
-    helper with, or any helper failure returns [Error] naming what was left
-    in place; volumes another workspace still claims are kept and logged.
+    the volumes are deleted only when no other claimant remains and no
+    container references the keeper. A legacy volume with no marker, an
+    unreadable marker, a missing [sandbox_image] to run the claims helper
+    with, or any helper failure returns [Error] naming what was left in
+    place; volumes another workspace still claims, or a container still
+    references, are kept with the claim released and logged.
     Docker and remote SSH keepers own no volume.
     Microsandbox and nerdctl create the work volume as a host directory but
     have no established removal spelling, so they return [Error] naming the

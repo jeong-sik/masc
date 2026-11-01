@@ -6,7 +6,7 @@ type backend = Connected of Browser_lane.live_transport | Owned_gecko
   | Owned_chromium | Safari_unavailable
 type operation =
   | List_tabs | Open_tab | Close_tab | Activate_tab | List_windows | Create_window | Close_window
-  | Navigate | Follow_link | Back | Forward | Reload | Session_lifecycle
+  | Navigate | Follow_link | Back | Forward | Reload | Stop_loading | Session_lifecycle
   | Read_text | Read_html | Read_elements | Read_scene | Read_regions | Read_snapshot | Screenshot
   | Native_workflow
   | Click_snapshot_target | Fill_snapshot_target | Hover_snapshot_target | Double_click_snapshot_target

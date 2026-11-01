@@ -211,6 +211,10 @@ val assert_input_reset : t -> generation:string -> (unit, string) result
     effects support an adopted Page through the same native SDK authority.
     Adoption does not grant Space takeover or clear uncertain input.
     Lost lifecycle receipts require inventory reconciliation, never replay.
+    [page.act] [stop_loading] recovers the exact cached managed Page through
+    native Page.stopLoading, without Page observation or URL preflight. It
+    preserves uncertain input and never reports document readiness or release.
+    Normal Space ownership and command serialization still apply.
     Verbs this connection does not serve are refused before any effect; selection
     refuses them earlier ({!Browser_lane.live_transport_serves}). *)
 val dispatch

@@ -316,3 +316,22 @@ successful upload cleanup permits broker file cleanup; active, delegated,
 retained or uncertain Spaces preserve files and return unconfirmed cleanup.
 Retained files currently require operator-owned reconciliation; there is no
 cross-worker lease reclamation. Automatic Goal completion is not wired here.
+
+### Native loading recovery
+
+`BrowserAct action=stop_loading` (live Ego client and an observed managed tab ID)
+sends native `page.cdp("Page.stopLoading")` to that Page. It can run after
+`EGO_PAGE_UNRESPONSIVE` when navigation has not committed: it checks Space
+ownership and the native managed Page identity without calling Page URL, info,
+snapshot, or a document reader. It does not expose caller-selected CDP methods,
+host paths, or Browser/Target commands. Other browser backends refuse it.
+
+The receipt retains the native Page label, target identity and origin and says
+only that the command returned. There is no observed or guarded URL, document
+readiness claim, synthetic input cleanup, or automatic retry. The caller must
+read the same Page afterward. Any prior unknown key/button release remains
+unknown and retains its original pending generation.
+
+This recovery operation closes one SDK reachability gap. General native CDP,
+raw keyboard and mouse lifecycle APIs, and native script composition remain
+separate parity work; this operation does not establish full SDK equivalence.

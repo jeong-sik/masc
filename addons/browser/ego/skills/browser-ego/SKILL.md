@@ -87,3 +87,12 @@ is still refused. A tab list that comes back as a plain array carries nothing.
 After a lost confirmation reply, inspect the original installation and read its
 form if the same worker is still available. Never apply its old confirmation to
 a replacement connection or replay browser input.
+
+When Ego reports `EGO_PAGE_UNRESPONSIVE` because navigation has not committed,
+use `BrowserAct` `action = "stop_loading"` on the same observed live client and
+managed `tabId`. This invokes native `page.cdp("Page.stopLoading")` without
+first calling Page URL, info or snapshot; it therefore does not require the
+blocked observation to succeed. The receipt acknowledges native command return
+on the identified Page, not a loaded document or input release. Read that same
+Page afresh before deciding what to do next. Do not replay lost recovery calls,
+create another Space, clear unknown key/button state, or infer login success.

@@ -38,9 +38,15 @@
  (deps test_browser_ego_takeover.cjs ../lib/browser_ego_takeover.ml)
  (action (run node %{dep:test_browser_ego_takeover.cjs})))
 
+(rule
+ (alias runtest-test_browser_ego_recovery)
+ (deps test_browser_ego_recovery.cjs ../lib/browser_ego_recovery.ml)
+ (action (run node --test %{dep:test_browser_ego_recovery.cjs})))
+
 (alias
  (name runtest)
  (deps
+  (alias runtest-test_browser_ego_recovery)
   (alias runtest-ego-takeover-js)
   (alias runtest-test_browser_ego_target)
   (alias runtest-test_browser_ego_upload)

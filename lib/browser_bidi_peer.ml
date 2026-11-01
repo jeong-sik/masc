@@ -466,6 +466,7 @@ let settle_navigation t context id name = function
 let tab_action t ~tab_id interaction =
   let ask = ask_on_tab t in
   let* () = match interaction with
+    | Browser_lane.Action.Stop_loading -> Error (Before_effect "native stop_loading recovery requires an ego connection")
     | (Browser_lane.Action.Close_tab | Browser_lane.Action.Back | Browser_lane.Action.Forward
       | Browser_lane.Action.Reload) when not (List.mem tab_id t.opened) ->
       Error (Before_effect "a connected browser's back, forward, reload and close_tab act only on tabs this connection opened")
@@ -504,7 +505,7 @@ let tab_action t ~tab_id interaction =
     Ok (obj ["tabId",`Int id;"action",str "close_tab";"closed",`Bool true])
   | Browser_lane.Action.Accept_dialog text -> answer_dialog ~accept:true text
   | Browser_lane.Action.Dismiss_dialog -> answer_dialog ~accept:false None
-  | Browser_lane.Action.Upload _ | Browser_lane.Action.Set_cookie _ | Browser_lane.Action.Delete_cookie _
+  | Browser_lane.Action.Stop_loading | Browser_lane.Action.Upload _ | Browser_lane.Action.Set_cookie _ | Browser_lane.Action.Delete_cookie _
   | Browser_lane.Action.Set_emulation _ | Browser_lane.Action.Clear_emulation
   | Browser_lane.Action.Block_requests _ | Browser_lane.Action.Unblock_requests ->
     Error (Before_effect "live BiDi page.act supports open_tab, back, forward, reload, close_tab, accept_dialog and dismiss_dialog only")

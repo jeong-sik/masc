@@ -245,7 +245,7 @@ let test_ego_table () =
   let reachable = List.filter (fun operation -> match Cap.support backend operation with
     | Cap.Available _ | Cap.Conditional _ -> true | Cap.Unsupported _ -> false) Cap.operations in
   check (list string) "reads, capture, the tab list, its own tabs, their history, input, frames, dialogs, uploads and downloads on them, and the space handed to the operator and back"
-    ["list_tabs";"open_tab";"close_tab";"activate_tab";"navigate";"follow_link";"back";"forward";"reload";"read_text";"read_elements";"read_scene";"read_regions";"read_snapshot";"screenshot";"native_workflow";"click_snapshot_target";"fill_snapshot_target";
+    ["list_tabs";"open_tab";"close_tab";"activate_tab";"navigate";"follow_link";"back";"forward";"reload";"stop_loading";"read_text";"read_elements";"read_scene";"read_regions";"read_snapshot";"screenshot";"native_workflow";"click_snapshot_target";"fill_snapshot_target";
      "hover_snapshot_target";"double_click_snapshot_target";"click";"double_click";"right_click";"middle_click";"hover";"pointer_drag";"scroll_page";"scroll_at";
      "fill";"type_text";"press_key";"key_chord";"select_option";"read_frames";"frame_interaction";"read_dialog";"accept_dialog";"dismiss_dialog";"hand_off";"take_over";"space_status";"finish_space";"wait_for_control";"adopt_tab";"release_tab";"upload_file";"list_downloads"]
     (List.map Cap.operation_name reachable);
@@ -263,6 +263,20 @@ let test_ego_table () =
 
 (* ego's own accessibility snapshot, and acting on the targets it names, are
    claimed by the ego connection alone. *)
+let test_loading_recovery_table () =
+  List.iter (fun (backend, label, claimed) ->
+    check bool (label ^ " native loading recovery") claimed
+      (match Cap.support backend Cap.Stop_loading with
+       | Cap.Conditional {invocation; _} -> invocation.Cap.tool=Cap.Act && invocation.Cap.action=Some "stop_loading"
+       | Cap.Available _ -> fail "recovery must retain native Page authority constraints"
+       | Cap.Unsupported _ -> false))
+    [Cap.Connected Lane.Ego_task_space, "Ego", true;
+     Cap.Connected Lane.Webdriver_bidi, "BiDi", false;
+     Cap.Connected Lane.Web_extension, "extension", false;
+     Cap.Owned_gecko, "owned Firefox", false;
+     Cap.Owned_chromium, "Stagehand", false;
+     Cap.Safari_unavailable, "Safari", false]
+
 let test_snapshot_table () =
   List.iter (fun (backend, label, claimed) ->
     List.iter (fun operation ->
@@ -293,5 +307,6 @@ let () = run "task-aware browser choice" ["scenarios",[
   test_case "select_option is claimed where the shared script runs" `Quick test_select_option_table;
   test_case "window listing is claimed only where tabs name their window" `Quick test_list_windows_table;
   test_case "an ego connection is claimed only for what its peer does" `Quick test_ego_table;
+  test_case "native loading recovery is exposed only by Ego" `Quick test_loading_recovery_table;
   test_case "the ego snapshot is claimed by the ego connection alone" `Quick test_snapshot_table;
   test_case "discovery schemas list every operation" `Quick test_required_actions_schema_lists_every_operation]]

@@ -867,6 +867,8 @@ let test_the_scripts_parse_as_modules () =
     | "page.input" -> dom_answer (obj ["action",str "fill"])
     | "page.open" -> answered (obj ["label",str "p4";"error",`Null;"tab",obj ["url",str "https://example.test/";"title",str "New";"active",`Bool true]])
     | "page.goto" -> answered (obj ["error",`Null;"tab",obj ["url",str "https://example.test/";"title",str "Next"]])
+    | "page.stop_loading" -> answered (obj ["spaceId",`Int 51;"label",str "p1";"targetId",str "T1";
+        "openedBy",str "agent";"method",str "Page.stopLoading";"returned",`Bool true])
     | "page.close" -> answered (obj ["closed",`Bool true])
     | "page.reload" | "page.history" -> answered (obj ["error",`Null;"tab",obj ["url",str "https://example.test/";"title",str "Back"]])
     | "page.snapshot" -> answered (obj ["label",str "p1";"url",str "u";"title",str "T";"snapshot",str "root";"truncated",`Bool false;"chars",`Int 4])
@@ -897,6 +899,7 @@ let test_the_scripts_parse_as_modules () =
       Live.Page_interact, interact_args (Lane.Fill_target {target=Lane.Target_ref 5;text="hi"});
       Live.Page_act, act_args (Lane.Action.On_tab {tab_id=3;frame_path=[];interaction=Lane.Action.Close_tab});
       Live.Page_act, act_args (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Reload});
+      Live.Page_act, act_args (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Stop_loading});
       Live.Page_act, act_args (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Back});
       Live.Page_act, act_args (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Accept_dialog (Some "hi")});
       Live.Page_act, act_args (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Dismiss_dialog});
@@ -908,7 +911,7 @@ let test_the_scripts_parse_as_modules () =
   check (list string) "every step"
     ["space.open";"tabs.list";"page.read";"page.elements";"page.scene";"page.snapshot";"page.downloads";"page.capture";
      "page.open";"page.goto";"page.target";"page.pointer";"page.pointer";"page.pointer";"page.keyboard";"page.input";"page.target_input";
-     "page.close";"page.reload";"page.history";"page.dialog";"page.dialog";"page.upload";"page.choose_files";"page.drag";"space.finish"]
+     "page.close";"page.reload";"page.stop_loading";"page.history";"page.dialog";"page.dialog";"page.upload";"page.choose_files";"page.drag";"space.finish"]
     (List.rev_map fst !scripts);
   List.iter (fun (step, script) ->
     let file = Filename.concat directory (step ^ ".mjs") in
@@ -977,6 +980,8 @@ let test_the_peer_serves_what_the_lane_table_says () =
         "active",`Bool true;"window",obj ["windowId",`Int 7;"stateBefore",str "normal";"stateAfter",str "normal";"restored",`Bool false]])
     | "page.open" -> answered (obj ["label",str "p4";"error",`Null;"tab",obj ["url",str "https://example.test/new";"title",str "New";"active",`Bool true]])
     | "page.goto" | "page.history" -> answered (obj ["error",`Null;"tab",obj ["url",str "https://example.test/next";"title",str "Next"]])
+    | "page.stop_loading" -> answered (obj ["spaceId",`Int 51;"label",str "p1";"targetId",str "T1";
+        "openedBy",str "agent";"method",str "Page.stopLoading";"returned",`Bool true])
     | "page.close" -> answered (obj ["closed",`Bool true])
     | "page.dialog" -> answered (obj ["answered",`Bool true;"dialog",ego_dialog "alert" "hello"])
     | "space.hand_off" -> answered (obj ["spaceId",`Int 51;"spaceName",str "masc"])
@@ -1016,6 +1021,7 @@ let test_the_peer_serves_what_the_lane_table_says () =
     | Touch_input -> interact (Swipe {from=point;to_={x=0.75;y=0.5};viewport;via=[];duration_ms=0})
     | Trusted_keyboard -> interact (Type_text {document_id=viewport.document_id;text="hello"})
     | Browser_zoom -> interact (Set_zoom {factor=1.5})
+    | Page_recovery -> Page_act (Action.On_tab {tab_id=1;frame_path=[];interaction=Action.Stop_loading})
     | Tab_history -> Page_act (Action.On_tab {tab_id=1;frame_path=[];interaction=Action.Back})
     | Tab_closing -> Page_act (Action.On_tab {tab_id=3;frame_path=[];interaction=Action.Close_tab})
     | Tab_navigation -> Page_goto {url="https://example.test/next";tab_id=Some 1}
@@ -3188,9 +3194,63 @@ let test_explicit_completion_is_terminal_and_never_replayed () =
      (fun _ -> answered (obj ["spaceId",`Int 999;"closedSpace",`Bool true;"keptManagedLabels",`List [];
        "closedManagedLabels",`List [];"preservedUnmanagedCount",`Int 0]))]
 
+let test_loading_recovery_receipt_requires_original_page () =
+  let fields = ["spaceId",`Int 51;"label",str "p1";"targetId",str "T1";
+    "openedBy",str "agent";"method",str "Page.stopLoading";"returned",`Bool true] in
+  let decode value = Masc.Browser_ego_recovery.receipt ~space_id:51 ~tab_id:1 ~label:"p1" value in
+  check bool "native command-return acknowledgement is accepted" true (Result.is_ok (decode (obj fields)));
+  List.iter (fun (key,value) ->
+    check bool ("invalid " ^ key ^ " is never a recovery acknowledgement") true
+      (Result.is_error (decode (obj ((key,value)::List.remove_assoc key fields)))))
+    ["spaceId",`Int 99;"label",str "p2";"targetId",str "";"openedBy",str "user";
+     "method",str "DOM.setFileInputFiles";"returned",`Bool false];
+  List.iter (fun invalid ->
+    check bool "missing, duplicate, or invented state is not a native acknowledgement" true
+      (Result.is_error (decode invalid)))
+    [obj (List.remove_assoc "targetId" fields);obj (("spaceId",`Int 51)::fields);
+     obj (("ready",`Bool true)::fields)]
+
+let test_loading_recovery_preserves_original_input_hold () =
+  let calls = ref 0 in
+  let peer = opened (fun sent -> match sent.step with
+    | "tabs.list" -> answered tabs
+    | "page.target_input" -> Error (Peer.Unobserved "original click result lost")
+    | "page.stop_loading" ->
+      incr calls;
+      check string "recovery stays on the original managed Page" "p1" (text (field "label" sent.args));
+      answered (obj ["spaceId",`Int 51;"label",str "p1";"targetId",str "T1";
+        "openedBy",str "agent";"method",str "Page.stopLoading";"returned",`Bool true])
+    | other -> failf "recovery must not require an observation: %s" other) in
+  ignore (dispatch peer Live.Tabs_list (obj []));
+  ignore (Peer.dispatch ~command_id:"original-lost-click" peer ~verb:Live.Page_interact
+    (interact_args (Lane.Click_target (Lane.Target_ref 12))));
+  let pending = Peer.input_status peer in
+  check bool "fixture retains the original lost input generation" true
+    (match pending with Masc.Browser_ego_input.Uncertain value -> value.command_id="original-lost-click"
+     | Ready _ -> false);
+  let action tab_id = obj ["action",str "stop_loading";"tabId",`Int tab_id] in
+  (match dispatch peer Live.Page_act (action 1) with
+   | Ok receipt ->
+     check string "native return is acknowledged" "Page.stopLoading" (text (field "method" receipt));
+     check string "recovery does not release input" "release_uncertain" (text (field "inputReadiness" receipt));
+     check bool "no URL or document readiness is invented" true
+       (field "url" receipt=`Null && field "ready" receipt=`Null)
+   | other -> failf "loading recovery did not run: %s" (failure_kind other));
+  check bool "recovery leaves the pending generation unchanged" true (Peer.input_status peer=pending);
+  List.iter (fun tab_id -> ignore (before_effect "foreign or unmanaged recovery"
+      (dispatch peer Live.Page_act (action tab_id)))) [2;99];
+  check int "only one native recovery call was sent" 1 !calls;
+  check bool "URL and caller CDP arguments cannot enter recovery" true
+    (List.for_all (fun (key,value) -> Result.is_error (Lane.Action.parse
+      (obj ["action",str "stop_loading";"tabId",`Int 1;key,value])))
+      ["expectedUrl",str "https://example.test/";"method",str "DOM.setFileInputFiles";
+       "params",obj ["files",`List [str "/host/private"]]])
+
 let () =
   run "browser_ego_peer" [
     "ego", [
+      test_case "loading recovery requires the original native Page acknowledgement" `Quick test_loading_recovery_receipt_requires_original_page;
+      test_case "loading recovery keeps exact Page authority and unknown input" `Quick test_loading_recovery_preserves_original_input_hold;
       test_case "Space status reads native metadata without Page or control effects" `Quick test_native_space_status;
       test_case "production workflow envelope preserves special JSON header keys" `Quick test_native_workflow_json_headers;
       test_case "first evaluation timeout preserves unknown native receipt" `Quick test_first_evaluation_timeout_preserves_unknown_native_receipt;

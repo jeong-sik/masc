@@ -138,7 +138,7 @@ candidates remain queued; this ordering does not waive their coverage.
 | [D2](#d2) | next | in review | Make Goal upsert a typed immutable transaction decision |
 | [D3](#d3) | later | in review | Isolate the Goal document codec and schema rejection contract |
 | [D4](#d4) | investigate | candidate | Audit and retain typed Goal publication outcomes across the backend adapter |
-| [D5](#d5) | later | candidate | Extract the Board vote decision from post/comment mutation shells |
+| [D5](#d5) | later | implemented; review pending | Extract the Board vote decision from post/comment mutation shells |
 | [D6](#d6) | later | candidate | Represent Board snapshot flush work and retry obligations explicitly |
 | [D7](#d7) | next | in review | Preserve evidence transport decisions in the complete review request, then isolate snapshot projections |
 | [S1](#s1) | next | in review | Extract the provider usage acceptance/revocation reducer from the shared observation store |
@@ -920,6 +920,20 @@ executed in this audit.**
 Ordering rationale: This isolates one closed domain decision without abstracting away
 legitimate Eio locks or forcing generic record lenses. Persistence-failure, flip,
 comment-vote and restart tests already provide meaningful consumer evidence.
+
+Current-source continuation (2026-11-01, campaign parent
+`61b4d5531d44cb780dff64158fdbf7d641f1658f`): private
+`Board_vote_transition` now owns same-direction admission, first-vote and flip
+arithmetic using an opaque accepted transition. Both post and comment shells
+recompute the decision from the current vote after durable append; they retain
+locks, timestamps, persistence, record updates and cache invalidation. Duplicate
+first-vote/flip mutation arms have been removed.
+
+The public-store comment scenario now covers Down → Up → Down, duplicate refusal
+without appending a row, durable flush/restart, restored direction/counts and a
+new flip after restart. Existing post-flip, timestamp, append-failure and concurrent
+vote scenarios remain. Syntax-only parsing and independent source review are
+recorded on the PR; behavior execution, build and integration remain unverified.
 
 ### D6
 

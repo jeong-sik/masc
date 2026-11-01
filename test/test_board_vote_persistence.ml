@@ -206,6 +206,55 @@ let test_flip_inherits_flip_time () =
         "rewrite persists flip-time (not original up ts, not now)"
         flip_ts rewritten_ts
 
+let test_comment_vote_flips_and_duplicate_survive_restart () =
+  let post = create_post_exn ~author:"comment-vote-author" ~content:"vote lifecycle" in
+  let post_id = Board.Post_id.to_string post.id in
+  let comment =
+    add_comment_exn ~post_id ~author:"comment-vote-commenter" ~content:"flip my votes"
+  in
+  let comment_id = Board.Comment_id.to_string comment.id in
+  let voter = "comment-vote-flipper" in
+  let check_counts label votes_up votes_down =
+    match Board_dispatch.get_comments ~post_id with
+    | Error error -> Alcotest.fail (Board.show_board_error error)
+    | Ok [ loaded ] ->
+      Alcotest.(check int) (label ^ " up") votes_up loaded.votes_up;
+      Alcotest.(check int) (label ^ " down") votes_down loaded.votes_down
+    | Ok comments -> Alcotest.failf "expected one comment, got %d" (List.length comments)
+  in
+  let cast direction score =
+    match Board_dispatch.vote_comment ~voter ~comment_id ~direction with
+    | Ok actual -> Alcotest.(check int) "comment score after cast" score actual
+    | Error error -> Alcotest.fail (Board.show_board_error error)
+  in
+  cast Board.Down (-1);
+  check_counts "first downvote" 0 1;
+  cast Board.Up 1;
+  check_counts "flip to up" 1 0;
+  cast Board.Down (-1);
+  check_counts "flip back to down" 0 1;
+  let before_duplicate = Fs_compat.load_file (Board_votes.vote_log_path ()) in
+  (match Board_dispatch.vote_comment ~voter ~comment_id ~direction:Board.Down with
+   | Error (Board.Already_voted _) -> ()
+   | Error error -> Alcotest.fail (Board.show_board_error error)
+   | Ok _ -> Alcotest.fail "same-direction comment vote was accepted");
+  check_counts "rejected duplicate" 0 1;
+  Alcotest.(check string) "duplicate does not append a durable row" before_duplicate
+    (Fs_compat.load_file (Board_votes.vote_log_path ()));
+  (match Board_dispatch.backend () with
+   | Board_dispatch.Jsonl store -> Board.flush_dirty store);
+  Board.reset_global_for_test ();
+  Board_dispatch.reset_for_test ();
+  Board_dispatch.init_jsonl ~recipient_lookup:Recipient_lookup.none_declared ();
+  check_counts "restarted comment" 0 1;
+  (match Board_dispatch.current_vote_for_comment ~voter ~comment_id with
+   | Ok (Some Board.Down) -> ()
+   | Ok (Some Board.Up) -> Alcotest.fail "restart restored the previous direction"
+   | Ok None -> Alcotest.fail "restart lost the comment vote"
+   | Error error -> Alcotest.fail (Board.show_board_error error));
+  cast Board.Up 1;
+  check_counts "flip after restart" 1 0
+
 let test_restart_loads_only_current_vote_rows () =
   let post =
     create_post_exn
@@ -871,6 +920,8 @@ let () =
             (with_eio test_flush_preserves_cast_ts);
           Alcotest.test_case "flip inherits flip-time" `Quick
             (with_eio test_flip_inherits_flip_time);
+          Alcotest.test_case "comment flips and duplicate survive restart" `Quick
+            (with_eio test_comment_vote_flips_and_duplicate_survive_restart);
           Alcotest.test_case "restart loads only exact current rows" `Quick
             (with_eio test_restart_loads_only_current_vote_rows);
           Alcotest.test_case "namespaced voter survives snapshot and restart" `Quick

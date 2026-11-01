@@ -315,6 +315,13 @@ let display_width text =
   | Some cells -> cells
   | None -> pieces_width (display_pieces text)
 
+let widest_grapheme_cells text =
+  match ascii_display_width text with
+  | Some cells -> min 1 cells
+  | None ->
+      List.fold_left (fun widest piece -> max widest piece.cell_width) 0
+        (display_pieces text)
+
 let grapheme_count text =
   List.fold_left
     (fun count (piece : display_piece) -> if piece.ansi then count else count + 1)

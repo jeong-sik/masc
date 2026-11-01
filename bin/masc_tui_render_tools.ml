@@ -550,12 +550,19 @@ let skill_usage_box ~cols rows =
 
 let skill_json_lines ~cols ~indent json =
   let width = max 1 (Masc_tui_frame.inner_width ~cols) in
-  let indent = String.make (min indent (max 0 (width - 1))) ' ' in
-  let body_width = max 1 (width - String.length indent) in
-  let source = Yojson.Safe.pretty_to_string json
+  let lines = Yojson.Safe.pretty_to_string json
     |> String.split_on_char '\n'
-    |> List.map Terminal_text.single_line
-    |> String.concat "\n" in
+    |> List.map Terminal_text.single_line in
+  let widest = List.fold_left (fun widest line ->
+    max widest (Masc_tui_message_layout.widest_grapheme_cells line)) 0 lines in
+  let gutter = Masc_tui_message_layout.display_width
+    (Masc_tui_markdown_theme.palette ~closing:Ansi.reset).code_gutter in
+  let indent =
+    if width < gutter + widest then 0
+    else min indent (width - gutter - widest) in
+  let indent = String.make indent ' ' in
+  let body_width = max 1 (width - String.length indent) in
+  let source = String.concat "\n" lines in
   Masc_tui_markdown_theme.code ~language:"json" ~width:body_width source
   |> List.map (fun line -> Ansi.reset, indent ^ line)
 

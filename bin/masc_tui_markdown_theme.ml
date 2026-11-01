@@ -81,8 +81,14 @@ let document ~width body =
 let code ~language ~width body =
   let width = max 1 width in
   let palette = palette ~closing:Ansi.reset in
+  let gutter = Masc_tui_message_layout.display_width palette.code_gutter in
+  let widest =
+    String.split_on_char '\n' body
+    |> List.fold_left (fun widest line ->
+         max widest (Masc_tui_message_layout.widest_grapheme_cells line)) 0
+  in
   let palette =
-    if Masc_tui_message_layout.display_width palette.code_gutter >= width then
+    if gutter >= width || gutter + widest > width then
       { palette with code_gutter = "" }
     else palette
   in

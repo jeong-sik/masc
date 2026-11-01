@@ -189,14 +189,12 @@ let emit_invisible ~copy ~replace text =
           else None
         in
         let after_pictograph =
-          if not valid
+          if not valid || escaped
           then false
           else if Uucp.Emoji.is_extended_pictographic scalar
           then true
-          (* Only a joiner that actually joined carries the state: an escaped
-             one has been written out as text, so what follows it no longer
-             sits inside an emoji and a second joiner cannot ride through on
-             it. *)
+          (* An escaped scalar has become visible text and ends the emoji.
+             Only a joiner that actually joined carries this state forward. *)
           else if continues_pictograph scalar || joins_two_pictographs
           then after_pictograph
           else false
@@ -305,11 +303,15 @@ let emit_terminal_controls ~copy ~replace text =
 let sanitize_terminal_text text =
   if String.for_all (fun byte -> byte >= ' ' && byte <= '~') text then text
   else
-    let output = Buffer.create (String.length text) in
-    emit_terminal_controls text
-      ~copy:(Buffer.add_substring output text)
+    (* Invisible-character decisions must see the original neighbours. A
+       control escape such as [\x09] ends in an emoji-capable digit; running
+       this walk after control escaping can make an unrelated VS16 disappear. *)
+    let visible = escape_invisible text in
+    let output = Buffer.create (String.length visible) in
+    emit_terminal_controls visible
+      ~copy:(Buffer.add_substring output visible)
       ~replace:(fun _ replacement -> Buffer.add_string output replacement);
-    escape_invisible (Buffer.contents output)
+    Buffer.contents output
 ;;
 
 (* A text whose line breaks are its own shape, read whole rather than as one
@@ -370,10 +372,10 @@ let sanitize_terminal_lines_with_source text =
     let ending = match String.index_from_opt text start '\n' with
       | Some ending -> ending | None -> String.length text in
     let line = String.sub text start (ending - start) in
-    let controls = mapped_pass ~emit:emit_terminal_controls ~input:line
+    let invisible = mapped_pass ~emit:emit_invisible ~input:line
       ~source_at:(fun at -> start + at) in
-    append (mapped_pass ~emit:emit_invisible ~input:controls.text
-      ~source_at:(fun at -> controls.source_bytes.(at)));
+    append (mapped_pass ~emit:emit_terminal_controls ~input:invisible.text
+      ~source_at:(fun at -> invisible.source_bytes.(at)));
     if ending < String.length text then (
       Buffer.add_char output '\n'; positions := ending :: !positions;
       lines (ending + 1)) in

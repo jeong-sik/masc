@@ -12,6 +12,12 @@ The same Z.AI Coding endpoint returned `LIME 8472` from the synthetic
 image digest, HTTP status and observed answer. This is a direct provider probe,
 separate from a complete Keeper turn.
 
+The replacement server's real Keeper then read the same attached image and
+returned `LIME 8472` with no tool calls or delegated analysis. The
+[completed operation receipt](keeper-image-goal.json) binds the runtime, binary,
+image digest and durable outcome. This verifies native image input through the
+Keeper pipeline; it is separate from a screenshot returned by a browser tool.
+
 The live model declaration was repaired using the runtime configuration API's
 preview, revision-checked save and readback. An additional 24 model declarations
 were recovered from exact OpenRouter input metadata or the installed native
@@ -43,9 +49,8 @@ Validation:
   build, typecheck, full regression or release validation was run.
 - The isolated Keeper screenshot/read operation was cancelled when an external
   deployment replaced the server. [The replacement record](probe-server-replacement.json)
-  keeps its failed operation and both binary identities separate. A further
-  native image-goal operation was submitted to the replacement server; a queued
-  or running operation is not a completed pixel reading.
+  keeps its failed operation and both binary identities separate. The native
+  image-goal operation on the replacement server completed successfully.
 
 Reference: [ZCode's documented image capability handling](https://zcode.z.ai/en/docs/configuration#how-image-support-is-decided)
 identifies GLM-5.3-Flash on the Z.AI Coding Plan as supporting screenshot and

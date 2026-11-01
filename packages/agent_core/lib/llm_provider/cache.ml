@@ -145,7 +145,28 @@ let request_fingerprint
       ; "disable_parallel_tool_use", `Bool disable_parallel_tool_use
       ; "response_format", Types.response_format_to_json response_format
       ; "cache_system_prompt", `Bool cache_system_prompt
-      ; "system_prompt_cache_prefix", opt_json (fun s -> `String s) system_prompt_cache_prefix
+      ; ( "system_prompt_cache_prefix"
+        , (* The hint changes the wire only when it splits the Anthropic
+             System block — backend_anthropic applies it under exactly these
+             tests (Anthropic kind, prefix caching on, sanitized non-blank
+             prefix that really prefixes the sanitized System text). In every
+             other case the hint is ignored, and hashing the raw value would
+             give identical requests different response-cache keys. *)
+          (match kind, system_prompt_cache_prefix, system_prompt with
+           | Provider_config.Anthropic, Some prefix, Some text
+             when cache_system_prompt
+                  && not (Api_common.string_is_blank prefix)
+                  && not (Api_common.string_is_blank text) ->
+             let prefix = Utf8_sanitize.sanitize prefix in
+             let text = Utf8_sanitize.sanitize text in
+             if String.length prefix < String.length text
+                && String.equal prefix (String.sub text 0 (String.length prefix))
+             then `String prefix
+             else `Null
+           | (Provider_config.Kimi | Provider_config.OpenAI_compat
+              | Provider_config.Ollama | Provider_config.Gemini
+              | Provider_config.Glm), _, _ -> `Null
+           | Provider_config.Anthropic, (None | Some _), (None | Some _) -> `Null) )
       ; "cache_extended_ttl", `Bool cache_extended_ttl
       ; "keep_alive", opt_json (fun s -> `String s) keep_alive
       ; "num_ctx", opt_json (fun n -> `Int n) num_ctx

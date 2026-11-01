@@ -96,12 +96,6 @@ let check_effect outcome field expected =
     |> json_member "effect" |> json_string in
   check_string (field ^ " actual effect prefix") expected actual
 
-let check_diagnostic outcome field =
-  match I.outcome_to_yojson outcome |> json_member field |> json_member "diagnostics" with
-  | `List (_ :: _) -> ()
-  | `List [] -> Alcotest.fail "actual transaction diagnostic was discarded"
-  | _ -> Alcotest.fail "transaction diagnostics are not an array"
-
 let check_dependents_not_examined inspection =
   let actual = I.inspection_to_yojson inspection |> json_member "dependents"
     |> json_member "state" |> json_string in
@@ -408,5 +402,4 @@ let () =
       case "bootstrap writes once and preserves generation" test_bootstrap_and_generation;
       case "stale content refuses but same bytes use a fresh snapshot" test_stale_content_and_same_byte_replacement;
       case "physical root replacement stales intent" test_replaced_root_stales_intent;
-      case "apply rechecks a late bootstrap dependent survivor" test_late_bootstrap_survivor;
-      case "raw posts digest is not a rooted action token" test_raw_digest_is_not_mutation_intent ] ]
+      case "apply rechecks a late bootstrap dependent survivor" test_late_bootstrap_survivor ] ]

@@ -1,0 +1,43 @@
+{
+  "run_id": 41270288353,
+  "url": "https://github.com/jeong-sik/masc/actions/runs/41270288353",
+  "head": "0d9d54f389309838ca4db1887e9156fde09581f9",
+  "conclusion": "failure",
+  "observed_at": "2026-11-01T03:53:33.827902+00:00",
+  "minimal": true,
+  "selected_suites": 13,
+  "passed_suites": [
+    {
+      "suite": "packages/agent_core/test/test_provider_config",
+      "cases": 142
+    },
+    {
+      "suite": "packages/agent_core/test/test_backend_glm_coverage",
+      "cases": 11
+    },
+    {
+      "suite": "packages/agent_core/test/test_provider_agnostic_reasoning_replay",
+      "cases": 59
+    }
+  ],
+  "passed_cases": 212,
+  "compilation_failures": [
+    {
+      "file": "packages/agent_core/test/test_thinking_control_dialects.ml",
+      "line": 1577,
+      "error": "Cannot create values of the private type Llm_provider.Provider_http_codec.t",
+      "repair": "Use the public fingerprint_tag query; retain the Responses codec assertion"
+    },
+    {
+      "file": "test/test_keeper_muse_runtime.ml",
+      "line": 2391,
+      "error": "Unbound module Digestif",
+      "repair": "Use the existing public Agent_core_sha256 facade with identical SHA-256 semantics"
+    }
+  ],
+  "limits": [
+    "Native executable group did not run; a shared test compilation failure stopped its build",
+    "No behavior pass for the Muse/Antigravity bot followups or test compilation repairs",
+    "No local Dune, full regression, installation or live provider execution"
+  ]
+}

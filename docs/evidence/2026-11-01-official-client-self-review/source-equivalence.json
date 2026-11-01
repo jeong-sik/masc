@@ -1,0 +1,174 @@
+{
+  "source_snapshot_head": "62ff44aa00a4f01900e5a14313afe1b9444ed2d5",
+  "comparison": "Exact source blobs only, not whole PR diff, typecheck or behavior.",
+  "files": [
+    {
+      "scope": "GLM",
+      "file": "packages/agent_core/lib/llm_provider/backend_openai_request.ml",
+      "authored_head": "b627ab57a401f0f001451c901a5416b8b692fb39",
+      "authored_blob": "062bdd7995e19cdc6e3d0c5d5d7ac14e4fd61f40",
+      "integrated_blob": "062bdd7995e19cdc6e3d0c5d5d7ac14e4fd61f40",
+      "identical": true
+    },
+    {
+      "scope": "GLM",
+      "file": "packages/agent_core/lib/llm_provider/provider_config.ml",
+      "authored_head": "b627ab57a401f0f001451c901a5416b8b692fb39",
+      "authored_blob": "6ef5b2da33c057ecbf1c2fd398db3ee236072bb3",
+      "integrated_blob": "6ef5b2da33c057ecbf1c2fd398db3ee236072bb3",
+      "identical": true
+    },
+    {
+      "scope": "GLM",
+      "file": "packages/agent_core/lib/llm_provider/provider_config.mli",
+      "authored_head": "b627ab57a401f0f001451c901a5416b8b692fb39",
+      "authored_blob": "01f1d8019e7338cd6810208e6ef758b82e0a68e7",
+      "integrated_blob": "01f1d8019e7338cd6810208e6ef758b82e0a68e7",
+      "identical": true
+    },
+    {
+      "scope": "GLM",
+      "file": "packages/agent_core/lib/llm_provider/reasoning_dialect.mli",
+      "authored_head": "b627ab57a401f0f001451c901a5416b8b692fb39",
+      "authored_blob": "c98cfb699a3bdda987a24e1607e97f5950e91cc1",
+      "integrated_blob": "c98cfb699a3bdda987a24e1607e97f5950e91cc1",
+      "identical": true
+    },
+    {
+      "scope": "GLM",
+      "file": "packages/agent_core/test/test_backend_glm_coverage.ml",
+      "authored_head": "b627ab57a401f0f001451c901a5416b8b692fb39",
+      "authored_blob": "3bb323920089821c4a1a39dd9bbff10b480e18eb",
+      "integrated_blob": "3bb323920089821c4a1a39dd9bbff10b480e18eb",
+      "identical": true
+    },
+    {
+      "scope": "GLM",
+      "file": "packages/agent_core/test/test_glm_thinking_contract.ml",
+      "authored_head": "b627ab57a401f0f001451c901a5416b8b692fb39",
+      "authored_blob": "3ff202f6134947edf37b4cf8f67bcf714d0d12a7",
+      "integrated_blob": "3ff202f6134947edf37b4cf8f67bcf714d0d12a7",
+      "identical": true
+    },
+    {
+      "scope": "GLM",
+      "file": "packages/agent_core/test/test_provider_config.ml",
+      "authored_head": "b627ab57a401f0f001451c901a5416b8b692fb39",
+      "authored_blob": "cdcbdec59c6cea99c71d4e3808f87f594b2973e4",
+      "integrated_blob": "cdcbdec59c6cea99c71d4e3808f87f594b2973e4",
+      "identical": true
+    },
+    {
+      "scope": "GLM",
+      "file": "test/test_keeper_replay_checkpoint.ml",
+      "authored_head": "b627ab57a401f0f001451c901a5416b8b692fb39",
+      "authored_blob": "6057aee352b71f9c10bcf8294e29d1f203f1fa00",
+      "integrated_blob": "6057aee352b71f9c10bcf8294e29d1f203f1fa00",
+      "identical": true
+    },
+    {
+      "scope": "Antigravity",
+      "file": "lib/keeper/keeper_antigravity_runtime.ml",
+      "authored_head": "0caf2425cb5236c5f2eaf6f3fe5b19211755122b",
+      "authored_blob": "feff89b39aaf256951a41338e2a37fff27886a6c",
+      "integrated_blob": "feff89b39aaf256951a41338e2a37fff27886a6c",
+      "identical": true
+    },
+    {
+      "scope": "Antigravity",
+      "file": "test/test_keeper_antigravity_runtime.ml",
+      "authored_head": "0caf2425cb5236c5f2eaf6f3fe5b19211755122b",
+      "authored_blob": "b8efd21bb207e00c2d1a2ccf2c1587784098a9f7",
+      "integrated_blob": "b8efd21bb207e00c2d1a2ccf2c1587784098a9f7",
+      "identical": true
+    },
+    {
+      "scope": "Muse",
+      "file": "lib/keeper/keeper_muse_runtime.ml",
+      "authored_head": "c1a8bf0e99676c2a7e39e11689cd1fed401f3147",
+      "authored_blob": "3e01a9931f95dc27d3c24eacd22416e83263354d",
+      "integrated_blob": "3e01a9931f95dc27d3c24eacd22416e83263354d",
+      "identical": true
+    },
+    {
+      "scope": "Muse",
+      "file": "lib/runtime/runtime_muse_msp.ml",
+      "authored_head": "c1a8bf0e99676c2a7e39e11689cd1fed401f3147",
+      "authored_blob": "1175fc88a309ca579f1efc6f42980bb4e1427aa5",
+      "integrated_blob": "1175fc88a309ca579f1efc6f42980bb4e1427aa5",
+      "identical": true
+    },
+    {
+      "scope": "Muse",
+      "file": "lib/runtime/runtime_muse_msp.mli",
+      "authored_head": "c1a8bf0e99676c2a7e39e11689cd1fed401f3147",
+      "authored_blob": "cf5873de994755e10959966a91855060100178d4",
+      "integrated_blob": "cf5873de994755e10959966a91855060100178d4",
+      "identical": true
+    },
+    {
+      "scope": "Muse",
+      "file": "lib/runtime/runtime_muse_serve.ml",
+      "authored_head": "c1a8bf0e99676c2a7e39e11689cd1fed401f3147",
+      "authored_blob": "1a8e00ccda1ea64b697c0632e7a1cbf498bf86e2",
+      "integrated_blob": "1a8e00ccda1ea64b697c0632e7a1cbf498bf86e2",
+      "identical": true
+    },
+    {
+      "scope": "Muse",
+      "file": "test/test_keeper_muse_runtime.ml",
+      "authored_head": "c1a8bf0e99676c2a7e39e11689cd1fed401f3147",
+      "authored_blob": "41aef188e9b5e060bc0a6abd4d0cf4ed6c6d2f97",
+      "integrated_blob": "41aef188e9b5e060bc0a6abd4d0cf4ed6c6d2f97",
+      "identical": true
+    },
+    {
+      "scope": "Muse",
+      "file": "test/test_runtime_muse_msp.ml",
+      "authored_head": "c1a8bf0e99676c2a7e39e11689cd1fed401f3147",
+      "authored_blob": "90c690fb996162b1eca30b2ccdf5c79deb60bf5e",
+      "integrated_blob": "90c690fb996162b1eca30b2ccdf5c79deb60bf5e",
+      "identical": true
+    },
+    {
+      "scope": "Muse",
+      "file": "test/test_runtime_muse_serve.ml",
+      "authored_head": "c1a8bf0e99676c2a7e39e11689cd1fed401f3147",
+      "authored_blob": "3186d5cae73aa371630a3b3bcb9449a3795ba303",
+      "integrated_blob": "3186d5cae73aa371630a3b3bcb9449a3795ba303",
+      "identical": true
+    },
+    {
+      "scope": "Muse callers",
+      "file": "test/test_fusion_official_client_panel.ml",
+      "authored_head": "de48dd3090af72b01e1ae3fde21b659b78a7a732",
+      "authored_blob": "cab0420e5f1624e4f3ea9e6a2e44c23b5a893964",
+      "integrated_blob": "cab0420e5f1624e4f3ea9e6a2e44c23b5a893964",
+      "identical": true
+    },
+    {
+      "scope": "Muse callers",
+      "file": "test/test_keeper_capability_probe.ml",
+      "authored_head": "de48dd3090af72b01e1ae3fde21b659b78a7a732",
+      "authored_blob": "059e60fb88580bacd311ecc00b7d09b2c98388dc",
+      "integrated_blob": "059e60fb88580bacd311ecc00b7d09b2c98388dc",
+      "identical": true
+    },
+    {
+      "scope": "Muse callers",
+      "file": "test/test_runtime_verification.ml",
+      "authored_head": "de48dd3090af72b01e1ae3fde21b659b78a7a732",
+      "authored_blob": "11cba650ecfa95ee48f5e2eaa67ee9355f890b80",
+      "integrated_blob": "11cba650ecfa95ee48f5e2eaa67ee9355f890b80",
+      "identical": true
+    },
+    {
+      "scope": "Contract fixtures",
+      "file": "packages/agent_core/test/test_thinking_control_dialects.ml",
+      "authored_head": "0df0d1d2a184f5813e09e052f3194bc88d547254",
+      "authored_blob": "83544d5944cc5eee758f7f7837dd590703224b3a",
+      "integrated_blob": "83544d5944cc5eee758f7f7837dd590703224b3a",
+      "identical": true
+    }
+  ]
+}

@@ -1,5 +1,11 @@
 # Official client and provider continuity audit
 
+This is the initial capture and nine-layer audit record. The later
+[strict self-review record](../2026-11-01-official-client-self-review/2026-11-01-official-client-self-review-evidence-record.md)
+supersedes its initial GLM omitted-clear and Muse held-context/finality conclusions.
+Installed versions, captured prefixes, digests and historical CI remain scoped to
+their original observations.
+
 ## 공통 헤더
 
 - 날짜(ISO8601): 2026-11-01T09:59:32+09:00

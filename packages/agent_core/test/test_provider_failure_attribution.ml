@@ -58,6 +58,91 @@ let test_identity_is_structural () =
   check_bool "transport participates" false (Binding_identity.equal first other_transport)
 ;;
 
+let identity_catalog ~auth ~scope =
+  let json = `Assoc
+    [ "schema_version", `Int 1
+    ; "providers", `List [`Assoc
+        [ "id", `String "captured-identity"
+        ; "aliases", `List [`String "captured-identity-alias"]
+        ; "kind", `String "openai_compat"
+        ; "base_url", `String "https://identity.example.invalid"
+        ; "request_path", `String "/v1/chat/completions"
+        ; "auth", auth
+        ; "default_model", `String "identity-model"
+        ; "capabilities_base", `String "openai_chat"
+        ; "credential_scope", `String scope
+        ]]
+    ] in
+  match Llm_provider.Provider_catalog.of_json json with
+  | Ok catalog -> catalog
+  | Error detail -> Alcotest.fail detail
+;;
+
+let with_identity_catalog f =
+  let module Catalog = Llm_provider.Provider_catalog in
+  let previous = Catalog.global () in
+  Fun.protect
+    ~finally:(fun () -> match previous with
+      | Some catalog -> Catalog.set_global catalog
+      | None -> Catalog.clear_global ())
+    f
+;;
+
+let test_selected_identity_retains_auth_scope ~replace_before_construction () =
+  with_identity_catalog (fun () ->
+    let module Catalog = Llm_provider.Provider_catalog in
+    let original = identity_catalog
+      ~auth:(`Assoc ["type",`String "setup_token_env";"env",`String "CAPTURED_IDENTITY_TOKEN"])
+      ~scope:"original-account" in
+    let replacement = identity_catalog
+      ~auth:(`Assoc ["type",`String "none"]) ~scope:"replacement-account" in
+    Catalog.set_global original;
+    let binding = match Provider_runtime_binding.find "captured-identity-alias" with
+      | Some binding -> binding
+      | None -> Alcotest.fail "original binding is absent" in
+    if replace_before_construction then Catalog.set_global replacement;
+    let config = match Provider_runtime_binding.to_provider_config binding with
+      | Ok config -> config
+      | Error error -> Alcotest.fail (Error.to_string error) in
+    let config = {config with api_key=Llm_provider.Secret.of_string "fixture-identity-token"} in
+    let identity () = Binding_identity.of_provider_config
+      ~transport:Binding_identity.Http config |> require_identity in
+    let first = identity () in
+    let json = Binding_identity.to_redacted_yojson first in
+    check_string "selected authentication is retained" "setup_token"
+      (Yojson.Safe.Util.member "auth_scheme" json |> Yojson.Safe.Util.to_string);
+    check_string "selected credential scope is retained" "original-account"
+      (Yojson.Safe.Util.member "credential_scope" json |> Yojson.Safe.Util.to_string);
+    Catalog.set_global replacement;
+    let replaced = identity () in
+    check_bool "catalog replacement cannot change failure ownership" true
+      (Binding_identity.equal first replaced);
+    Alcotest.(check int) "stable identity retains its hash"
+      (Binding_identity.hash first) (Binding_identity.hash replaced);
+    Catalog.clear_global ();
+    check_bool "removing declarations cannot change failure ownership" true
+      (Binding_identity.equal first (identity ())))
+;;
+
+let test_unselected_identity_does_not_acquire_catalog_facts () =
+  with_identity_catalog (fun () ->
+    let module Catalog = Llm_provider.Provider_catalog in
+    Catalog.clear_global ();
+    let config = PC.make ~kind:PC.OpenAI_compat
+      ~provider_id:"captured-identity-alias" ~model_id:"identity-model"
+      ~base_url:"https://identity.example.invalid" () |> PC.freeze_for_request in
+    let identity () = Binding_identity.of_provider_config
+      ~transport:Binding_identity.Http config |> require_identity in
+    let original = identity () in
+    Catalog.set_global (identity_catalog
+      ~auth:(`Assoc ["type",`String "none"]) ~scope:"later-account");
+    check_bool "an unselected config cannot acquire later declaration ownership" true
+      (Binding_identity.equal original (identity ()));
+    check_string "provider observation keeps the explicit identity"
+      "captured-identity-alias"
+      (Provider_runtime_binding.provider_id_of_provider_config config))
+;;
+
 let test_identity_observation_is_redacted () =
   let raw_key = "raw-api-secret" in
   let identity =
@@ -690,6 +775,12 @@ let () =
     "provider failure attribution"
     [ ( "binding identity"
       , [ Alcotest.test_case "structural equality" `Quick test_identity_is_structural
+        ; Alcotest.test_case "selected identity survives catalog replacement" `Quick
+            (test_selected_identity_retains_auth_scope ~replace_before_construction:false)
+        ; Alcotest.test_case "identity selection precedes config construction" `Quick
+            (test_selected_identity_retains_auth_scope ~replace_before_construction:true)
+        ; Alcotest.test_case "unselected identity cannot acquire later catalog facts" `Quick
+            test_unselected_identity_does_not_acquire_catalog_facts
         ; Alcotest.test_case
             "redacted observation"
             `Quick

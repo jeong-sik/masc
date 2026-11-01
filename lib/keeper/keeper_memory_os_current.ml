@@ -6,6 +6,7 @@ open Result.Syntax
 module Snapshot_codec = Keeper_memory_os_snapshot_codec
 module Journal_codec = Keeper_memory_os_journal_codec
 module Successor_recall = Keeper_memory_os_successor_recall
+module Receipt_selection = Keeper_memory_os_receipt_selection
 
 let suffix = ".memory-current.json"
 
@@ -77,48 +78,6 @@ let retraction_plan_receipt_suffix = ".memory-retraction-plan.json"
 let retraction_plan_receipt_path ~keepers_dir ~keeper_id =
   Filename.concat keepers_dir (keeper_id ^ retraction_plan_receipt_suffix)
 ;;
-
-type durable_range_id =
-  { receipt_scope : string
-  ; trace_id : string
-  ; history_start_boundary_line : int
-  ; start_atom : int
-  ; end_atom : int
-  ; last_atom_digest : string
-  ; end_boundary_line : int
-  ; boundary_lines_seen : int
-  ; unread_messages : Keeper_librarian_unread.t list
-  }
-
-type official_range_id =
-  { receipt_scope : string
-  ; after_boundary_line : int
-  ; turns : (int * Ids.Turn_ref.t) list
-  ; unread_messages : Keeper_librarian_unread.t list
-  }
-
-type admission_recall =
-  { decided_at_revision : int option
-  ; bindings : admission_recall_binding list
-  }
-
-type consumed_range =
-  | Atom_range of durable_range_id
-  | Official_range of official_range_id
-  | Explicit_candidate of explicit_candidate_id
-  | Explicit_candidate_with_recall of admission_recall_binding
-
-type durable_range_receipt =
-  | Prepared of
-      { range_id : consumed_range
-      ; snapshot_revision : int
-      ; snapshot_sha256 : string
-      }
-  | Committed of
-      { range_id : consumed_range
-      ; snapshot_revision : int
-      ; snapshot_sha256 : string
-      }
 
 let durable_range_id_to_json (range_id : durable_range_id) =
   `Assoc
@@ -730,14 +689,6 @@ let receipt_range_id = function
   | Prepared { range_id; _ } | Committed { range_id; _ } -> range_id
 ;;
 
-let range_key = function
-  | Atom_range range -> range.receipt_scope, `Atom
-  | Official_range range -> range.receipt_scope, `Official
-  | Explicit_candidate candidate -> candidate.queue_generation, `Explicit_candidate candidate.request_id
-  | Explicit_candidate_with_recall binding ->
-    binding.candidate_id.queue_generation, `Explicit_candidate binding.candidate_id.request_id
-;;
-
 let receipt_holes = function
   | Atom_range range -> range.unread_messages
   | Official_range range -> range.unread_messages
@@ -753,9 +704,9 @@ let archive_verified_holes ~keepers_dir ~keeper_id receipts =
 ;;
 
 let upsert_durable_range_receipt receipts receipt =
-  let key = range_key (receipt_range_id receipt) in
+  let key = Receipt_selection.range_key (receipt_range_id receipt) in
   receipt :: List.filter (fun prior ->
-    range_key (receipt_range_id prior) <> key
+    Receipt_selection.range_key (receipt_range_id prior) <> key
     || (match receipt, prior with
         | Prepared _, Committed _ -> true
         | Prepared _, Prepared _ | Committed _, _ -> false)) receipts
@@ -796,7 +747,7 @@ let reconcile_durable_range_receipts
      kept every receipt: each was committed, their keys were distinct, and each
      named a revision below R, or R with S. The snapshot at R with S is the
      same input. A snapshot above R keeps every receipt through the
-     [current.revision > snapshot_revision] arm below, so the result is
+     higher-revision rule in [Receipt_selection.select], so the result is
      unchanged again. A missing snapshot, a lower revision, or R with other
      bytes runs the full reconcile. *)
   let* () = sync_matching_prepared_snapshot ~keepers_dir ~keeper_id ~snapshot receipts in
@@ -813,68 +764,39 @@ let reconcile_durable_range_receipts
   if covered then
     let+ _ = archive_verified_holes ~keepers_dir ~keeper_id receipts in receipts
   else
-    let seen = Hashtbl.create 16 in
-    let verified =
-      List.filter_map
-        (function
-          | Prepared { range_id; snapshot_revision; snapshot_sha256 } ->
-            (match snapshot with
-             | Some (current, digest)
-               when Int.equal current.revision snapshot_revision
-                    && String.equal (Lazy.force digest) snapshot_sha256 ->
-               Some (Committed { range_id; snapshot_revision; snapshot_sha256 })
-             | None | Some _ -> None)
-          | Committed ({ snapshot_revision; snapshot_sha256; _ } as committed) ->
-            (match snapshot with
-             | Some (current, _digest) when current.revision > snapshot_revision ->
-               Some (Committed committed)
-             | Some (current, digest)
-               when Int.equal current.revision snapshot_revision
-                    && String.equal (Lazy.force digest) snapshot_sha256 ->
-               Some (Committed committed)
-             | None | Some _ -> None))
-        receipts
+    let selection =
+      Receipt_selection.select
+        ~snapshot:(Option.map (fun (current, digest) -> current.revision, digest) snapshot)
+        ~had_skipped_entries:(skipped <> []) receipts
     in
-    (* Archive every verified source before de-duplicating a scope or replacing
-       its WAL entry. Even an otherwise redundant receipt can carry evidence. *)
-    let* _ = archive_verified_holes ~keepers_dir ~keeper_id verified in
-    (* A receipt the snapshot does not prove leaves the ledger here. It can
-       still be the only record that its input was consumed: the snapshot it
-       names may have been published and then lost, and admission counts a
-       prepared explicit receipt as consumed while its snapshot matches. So
-       every such receipt moves aside, whatever its range kind, unless a
-       verified receipt keeps the same range. *)
-    let unproven = List.filter_map (fun (index, receipt) ->
-      let range_id = receipt_range_id receipt in
-      if List.exists (fun known -> receipt_range_id known = range_id) verified
-      then None else Some {index;reason="receipt lacks a matching Memory snapshot proof";
-        entry=durable_range_receipt_to_json receipt})
-      (List.mapi (fun index receipt -> index, receipt) receipts) in
+    (* Keep every verified source for archival before applying the deduplicated
+       decision: a redundant scope can still carry distinct unread evidence. *)
+    let* _ = archive_verified_holes ~keepers_dir ~keeper_id
+      selection.Receipt_selection.all_verified_for_archive in
+    (* Exact-range proof exclusion is distinct from coarse-key retention. Encode
+       unproven entries only after the verified unread evidence is durable. *)
+    let unproven =
+      List.map (fun (index, receipt) ->
+          { index
+          ; reason = "receipt lacks a matching Memory snapshot proof"
+          ; entry = durable_range_receipt_to_json receipt
+          }) selection.Receipt_selection.unproven
+    in
     let* () = quarantine_skipped_range_receipts ~keepers_dir ~keeper_id ~skipped:unproven in
-    let reconciled = verified |> List.fold_left (fun kept receipt ->
-           let key = range_key (receipt_range_id receipt) in
-           if Hashtbl.mem seen key then kept
-           else (Hashtbl.add seen key (); receipt :: kept)) []
-      |> List.rev
-    in
-    (* Neither skipped entries nor unproven receipts reach [reconciled], so a
-       file that lost them rewrites itself clean the first pass that reads
-       it; a file left with nothing is removed. Both quarantines run before
-       either write: the ledger must not forget bytes it has not preserved. *)
+    (* Both quarantines precede removal/replacement, preserving every rejected
+       byte even if the next write fails. Raw decoder positions stay separate. *)
     let* () = quarantine_skipped_range_receipts ~keepers_dir ~keeper_id ~skipped in
-    if receipts = reconciled && skipped = []
-    then (
+    match selection.Receipt_selection.decision with
+    | Receipt_selection.Keep reconciled ->
       (match cached, snapshot with
        | Some entry, Some (current, digest) ->
          mark_receipt_fixed_point ~keepers_dir ~keeper_id entry
            { fixed_revision = current.revision; fixed_snapshot_sha256 = Lazy.force digest }
        | Some _, None | None, (Some _ | None) -> ());
-      Ok reconciled)
-    else if reconciled = []
-    then
-      let+ () = remove_durable_range_receipts ~keepers_dir ~keeper_id in
-      []
-    else
+      Ok reconciled
+    | Receipt_selection.Remove ->
+      let+ () = remove_durable_range_receipts ~keepers_dir ~keeper_id in []
+    | Receipt_selection.Rewrite reconciled ->
       let+ () = write_durable_range_receipts ~keepers_dir ~keeper_id reconciled in
       reconciled
 ;;

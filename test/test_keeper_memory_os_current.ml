@@ -2585,6 +2585,105 @@ let test_candidate_receipt_reconciliation_preserves_first_order () =
     (rejected_receipt_files ~keepers_dir)
 ;;
 
+let test_receipt_reconciliation_archives_before_scope_dedup () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let module H = Masc.Keeper_librarian_unread in
+  let range_with_hole trace_id body : Current.durable_range_id =
+    let text body = Agent_core.Types.make_message ~role:Agent_core.Types.User
+      [Agent_core.Types.Text body] in
+    let messages = [text "Read prefix"; text body] in
+    let hole = H.for_atom ~trace_id
+      ~history_start_boundary_line:durable_range_id.history_start_boundary_line
+      ~atom:durable_range_id.start_atom ~message_in_atom:0 ~messages
+      ~reasons:[Masc.Keeper_librarian_input_refusal.Request_body_refused]
+      |> require_ok in
+    let last_atom_digest =
+      match Runtime_model_input_tail_window.atom_opening_digest messages
+        durable_range_id.start_atom with
+      | Some digest -> digest
+      | None -> fail "unread fixture has no selected atom opening"
+    in
+    {durable_range_id with trace_id; last_atom_digest; unread_messages=[hole]}
+  in
+  let first_range = range_with_hole "first-verified" "First unread original" in
+  let second_range = range_with_hole "second-verified" "Second unread original" in
+  let unproven_range = range_with_hole "unproven" "Unproven unread original" in
+  ignore (replace ~keepers_dir ~facts:[fact ~claim:"receipt proof snapshot" ()] ()
+    |> require_ok);
+  let snapshot, snapshot_sha256 =
+    Current.read_with_snapshot_sha256 ~keepers_dir ~keeper_id:"keeper"
+    |> require_ok |> require_some in
+  let snapshot_path = Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
+  let snapshot_bytes = Fs_compat.load_file snapshot_path in
+  check bool "the fixture has no previously archived unread evidence" true
+    (Current.read_unread_messages ~keepers_dir ~keeper_id:"keeper" |> require_ok = []);
+  let committed range =
+    `Assoc ["state", `String "committed";
+      "range_id", Current.durable_range_id_to_json range;
+      "snapshot_revision", `Int snapshot.revision;
+      "snapshot_sha256", `String snapshot_sha256] in
+  let first_row = committed first_range in
+  (* B has exact prepared proof and must be projected to Committed before
+     its hole is archived, even though A later wins their shared scope. *)
+  let second_row = committed second_range
+    |> map_field "state" (fun _ -> `String "prepared") in
+  let unproven_row = committed unproven_range
+    |> map_field "state" (fun _ -> `String "prepared")
+    |> map_field "snapshot_revision" (fun _ -> `Int (snapshot.revision + 1)) in
+  let receipt_path = Current.durable_range_receipt_path ~keepers_dir ~keeper_id:"keeper" in
+  Fs_compat.save_file_atomic_strict receipt_path
+    (Yojson.Safe.to_string
+      (`Assoc ["receipts", `List [first_row; unproven_row; second_row]]))
+    |> require_ok;
+  (* Every row is canonical. C fails snapshot proof, not receipt decoding. *)
+  Current.validate_durable_range_receipts ~keepers_dir ~keeper_id:"keeper" |> require_ok;
+  let coverage () = Current.committed_durable_coverage ~keepers_dir ~keeper_id:"keeper"
+    ~receipt_scope:first_range.receipt_scope |> require_ok in
+  check bool "first verified exact range wins the shared receipt scope" true
+    (coverage () = Some first_range);
+  let expected_holes = H.merge first_range.unread_messages second_range.unread_messages
+    |> require_ok in
+  check bool "all verified duplicate holes are durably archived without unproven holes" true
+    (Current.read_unread_messages ~keepers_dir ~keeper_id:"keeper"
+      |> require_ok = expected_holes);
+  let rejected_names = rejected_receipt_files ~keepers_dir in
+  let rejected_rows =
+    match rejected_names with
+    | [name] -> Yojson.Safe.Util.(
+        Yojson.Safe.from_file (Filename.concat keepers_dir name)
+        |> member "receipts" |> to_list)
+    | names -> failf "expected one unproven receipt quarantine, found %d" (List.length names)
+  in
+  (match rejected_rows with
+   | [row] ->
+     check int "quarantine names the decoded unproven position" 1
+       Yojson.Safe.Util.(row |> member "index" |> to_int);
+     check bool "only the exact unproven range moves aside" true
+       (Yojson.Safe.Util.member "entry" row = unproven_row)
+   | rows -> failf "expected one quarantined receipt, found %d" (List.length rows));
+  let cleaned_rows = Yojson.Safe.Util.(Yojson.Safe.from_file receipt_path
+    |> member "receipts" |> to_list) in
+  check bool "the cleaned WAL retains only the first verified receipt" true
+    (cleaned_rows = [first_row]);
+  check string "reconciliation does not rewrite the proof snapshot" snapshot_bytes
+    (Fs_compat.load_file snapshot_path);
+  let receipt_bytes = Fs_compat.load_file receipt_path in
+  let unread_path = Current.unread_ledger_path ~keepers_dir ~keeper_id:"keeper" in
+  let unread_bytes = Fs_compat.load_file unread_path in
+  check bool "repeated coverage keeps the same first receipt" true
+    (coverage () = Some first_range);
+  check bool "repeated reconciliation retains both verified sources" true
+    (Current.committed_unread_messages ~keepers_dir ~keeper_id:"keeper"
+      |> require_ok = expected_holes);
+  check string "settled receipt bytes remain unchanged" receipt_bytes
+    (Fs_compat.load_file receipt_path);
+  check string "settled unread archive bytes remain unchanged" unread_bytes
+    (Fs_compat.load_file unread_path);
+  check (list string) "settled receipts create no additional quarantine" rejected_names
+    (rejected_receipt_files ~keepers_dir)
+;;
+
+
 let test_candidate_set_conflict_is_atomic () =
   List.iter (fun colliding ->
     with_temp_keepers @@ fun keepers_dir ->
@@ -5280,6 +5379,8 @@ let () =
             test_sparse_candidate_receipts_survive_retirement
         ; test_case "candidate reconciliation preserves first order" `Quick
             test_candidate_receipt_reconciliation_preserves_first_order
+        ; test_case "receipt reconciliation archives duplicate holes before scope selection" `Quick
+            test_receipt_reconciliation_archives_before_scope_dedup
         ; test_case "candidate receipt set conflicts refuse the whole transaction" `Quick
             test_candidate_set_conflict_is_atomic
         ; test_case "admission recall binds provenance and never revives after retirement" `Quick

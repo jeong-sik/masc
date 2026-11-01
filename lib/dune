@@ -19,6 +19,7 @@
   keeper_msg_async_types
   keeper_msg_async_record
   keeper_memory_os_current_types
+  keeper_memory_os_receipt_selection
   keeper_memory_os_support_core
   keeper_memory_os_disposition_core
   keeper_memory_os_snapshot_codec

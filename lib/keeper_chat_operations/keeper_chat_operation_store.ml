@@ -2300,7 +2300,7 @@ let pending_retry = function
 ;;
 
 let pending_checkpoint = function
-  | Some { Semantic.phase = Semantic.Preparation_wait {checkpoint;_}; _ } -> Some (Semantic.Official_client checkpoint)
+  | Some { Semantic.phase = Semantic.Preparation_wait {checkpoint;_}; _ } -> Some checkpoint
   | Some { Semantic.phase = Semantic.Suspended checkpoint; _ }
   | Some { Semantic.phase = Semantic.Recovering { origin = Semantic.Checkpointed checkpoint; _ }; _ } -> Some (Semantic.Agent_core checkpoint)
   | Some { Semantic.phase = Semantic.Recovering { origin = Semantic.Official_checkpointed checkpoint; _ }; _ } -> Some (Semantic.Official_client checkpoint)
@@ -2681,7 +2681,7 @@ let wait_direct_preparation store ~now ~operation_id ~execution_digest ~observed
     match operation.state, waiting with
     | Operation.Queued, Some waiting
         when String.equal execution_digest waiting.execution_digest
-          && Semantic.equal_gate_checkpoint observed (Semantic.Official_client waiting.waiting.checkpoint)
+          && Semantic.equal_gate_checkpoint observed waiting.waiting.checkpoint
           && String.equal detail waiting.waiting.detail -> Ok operation
     | (Operation.Queued | Operation.Running _ | Operation.Succeeded _
        | Operation.Failed _ | Operation.Cancelled _), None
@@ -2699,9 +2699,6 @@ let wait_direct_preparation store ~now ~operation_id ~execution_digest ~observed
     | Operation.Running _ ->
       let* execution = direct_execution_with_db store.db operation in
       let* expected = Option.to_result ~none:(Integrity_error "preparation wait has no admitted checkpoint") execution in
-      let* observed = match observed with
-        | Semantic.Official_client checkpoint -> Ok checkpoint
-        | Agent_core _ -> Error (Invalid_input "preparation wait requires an official checkpoint") in
       let* next = semantic_transition ~now (Semantic.Wait_preparation {observed;detail}) expected in
       let* () = update_semantic store ~expected next in
       requeue_continuation_with_db store.db operation) in
@@ -2722,7 +2719,7 @@ let wait_direct_preparation store ~now ~operation_id ~execution_digest ~observed
 let block_preparing_with_db store ~now ~detail operation execution =
   match operation.Operation.state, execution with
   | Operation.Running _, Some ({Semantic.phase=Semantic.Preparing_checkpoint observed;_} as expected) ->
-    let* next = semantic_transition ~now (Semantic.Wait_preparation {observed;detail}) expected in
+    let* next = semantic_transition ~now (Semantic.Wait_preparation {observed=Semantic.Official_client observed;detail}) expected in
     let* () = update_semantic store ~expected next in
     requeue_continuation_with_db store.db operation |> Result.map Option.some
   | (Operation.Queued | Operation.Succeeded _ | Operation.Failed _ | Operation.Cancelled _), _

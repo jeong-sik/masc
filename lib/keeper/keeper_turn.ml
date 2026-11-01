@@ -777,15 +777,17 @@ let run_keeper_invocation_turn_admitted_inner
 	              Inference_utils.timed (fun () ->
                       let dispatch_input =
                         let open Result.Syntax in
-                        (* Official consume now retains a not-entered preparation
-                           checkpoint. Establish that durable proof before rendering;
-                           the adapter admits dispatch only after guidance succeeds. *)
+                        (* Official consume retains a not-entered preparation
+                           checkpoint. A Core checkpoint stays suspended until the
+                           runtime has prepared guidance and is ready to enter. *)
                         let* () =
                           (match direct_resume with
                            | None | Some (Keeper_agent_run.Gate_continuation _) -> Ok ()
                            | Some (Keeper_agent_run.Checkpoint_continuation admission) ->
-                             Keeper_direct_checkpoint_continuation.consume
-                               ~base_path:ctx.config.base_path ~keeper_name:meta.name ~operation_id admission
+                             (match Keeper_direct_checkpoint_continuation.official_client admission with
+                              | Some _ -> Keeper_direct_checkpoint_continuation.consume
+                                  ~base_path:ctx.config.base_path ~keeper_name:meta.name ~operation_id admission
+                              | None -> Ok ())
                            | Some (Keeper_agent_run.Runtime_continuation admission) ->
                              Keeper_direct_runtime_continuation.consume
                                ~base_path:ctx.config.base_path ~keeper_name:meta.name ~operation_id admission)

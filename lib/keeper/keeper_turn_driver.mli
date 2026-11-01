@@ -346,7 +346,9 @@ val run_named :
      transmitted:Keeper_official_client_host.transmitted_model_input ->
      unit) ->
   ?official_client_continuation:Keeper_semantic_execution.official_client_checkpoint ->
-  ?on_official_checkpoint_prepared:(unit -> (unit,Agent_core.Error.t) result) ->
+  (* Admit the retained checkpoint after guidance and before native session/call
+     entry. Fallback candidates may invoke it again; consumption is idempotent. *)
+  ?on_checkpoint_prepared:(unit -> (unit,Agent_core.Error.t) result) ->
   ?official_task_reference:Keeper_official_task_reference.t ->
   ?official_client_composed_context:
     (unit -> Keeper_official_client_host.composed_context option) ->

@@ -39,8 +39,9 @@ or that a running deployment contains this change.
 
 ## Preparation waits and explicit retry
 
-An unfinished official-client operation can stop while preparing guidance, before
-its client is admitted to dispatch. The Owner retains its exact checkpoint,
+An unfinished operation can stop while preparing runtime guidance, before
+dispatch is admitted. This also applies when an Agent Core cooperative checkpoint
+continues on an official-client runtime such as Codex. The Owner retains its exact checkpoint,
 original input and operation ID. It becomes Queued with a preparation wait;
 ordinary queue draining and process restarts do not automatically invoke the
 client again. Other eligible operations can still run.

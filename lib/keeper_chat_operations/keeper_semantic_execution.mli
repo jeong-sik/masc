@@ -125,7 +125,7 @@ type recovery_origin =
   | Gate_binding of gate_binding
   | Input_wait of input_wait
 type recovery = { origin : recovery_origin; diagnostic : string }
-type preparation_wait = private { checkpoint : official_client_checkpoint; detail : string }
+type preparation_wait = private { checkpoint : gate_checkpoint; detail : string }
 type phase =
   | Preparing
   | Ready
@@ -174,7 +174,7 @@ type action =
   | Begin_execution
   | Resume_checkpoint of Keeper_checkpoint_ref.t
   | Resume_official_checkpoint of official_client_checkpoint
-  | Wait_preparation of { observed : official_client_checkpoint; detail : string }
+  | Wait_preparation of { observed : gate_checkpoint; detail : string }
   | Enter_official_checkpoint
   | Retry_preparation of preparation_wait
   | Require_reconciliation of string

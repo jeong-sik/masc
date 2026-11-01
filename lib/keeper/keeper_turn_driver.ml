@@ -1765,7 +1765,7 @@ let run_named
     ?on_request_wire_observation
     ?on_request_attribution
     ?official_client_continuation
-    ?on_official_checkpoint_prepared
+    ?on_checkpoint_prepared
     ?official_task_reference
     ?official_client_composed_context
     ?on_official_client_tool_boundary
@@ -2582,7 +2582,7 @@ let run_named
       let guidance_entry = ref false in
       let on_guidance_prepared () =
         let open Result.Syntax in
-        let* () = match on_official_checkpoint_prepared with None -> Ok () | Some enter -> enter () in
+        let* () = match on_checkpoint_prepared with None -> Ok () | Some enter -> enter () in
         guidance_entry := true;
         Ok () in
       let guidance_result result =
@@ -3369,6 +3369,10 @@ let run_named
             ; seq_ref
             }
           in
+          (match on_guidance_prepared () with
+           | Error error -> Error error, None, Keeper_provider_attempt_effect.No_effect_observed,
+               Keeper_attempt_dispatch.Rejected_before_dispatch
+           | Ok () ->
           Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
           let provider_result, checkpoint_after, _success_sample =
             Keeper_turn_driver_try_provider.run_try_provider_with_truncation_recovery
@@ -3384,7 +3388,7 @@ let run_named
           , checkpoint_after
           , Keeper_provider_attempt_effect.No_effect_observed
           , provider_attempt_dispatch ~request_serialized:!request_serialized
-              turn_result ))))
+              turn_result )))))
        ))))
     attempt_candidates)
 

@@ -648,16 +648,22 @@ let run_turn
   let native_binding, native_resume = match native_continuation with
     | None -> None, None
     | Some { binding; resumed } -> Some binding, resumed in
-  let on_official_checkpoint_prepared = match direct_resume, native_binding with
-    | Some (Checkpoint_continuation admission), Some binding
-        when Option.is_some (Keeper_direct_checkpoint_continuation.official_client admission) ->
+  let on_checkpoint_prepared = match direct_resume, native_binding with
+    | Some (Checkpoint_continuation admission), Some binding ->
+      let entered = ref false in
       Some (fun () ->
-        Keeper_owner_registry.enter_direct_preparation ~base_path:binding.base_path ~keeper_name:binding.keeper_name
-          ~operation_id:binding.operation_id ~execution_digest:binding.execution_digest
-        |> Result.map_error (fun error -> Agent_core.Error.Internal
-            (Keeper_owner_registry.command_error_to_string error)))
+        if !entered then Ok ()
+        else
+          let result = match Keeper_direct_checkpoint_continuation.official_client admission with
+            | Some _ ->
+              Keeper_owner_registry.enter_direct_preparation ~base_path:binding.base_path ~keeper_name:binding.keeper_name
+                ~operation_id:binding.operation_id ~execution_digest:binding.execution_digest
+              |> Result.map_error Keeper_owner_registry.command_error_to_string
+            | None -> Keeper_direct_checkpoint_continuation.consume
+                ~base_path:binding.base_path ~keeper_name:binding.keeper_name ~operation_id:binding.operation_id admission in
+          Result.map (fun () -> entered := true) result
+          |> Result.map_error (fun detail -> Agent_core.Error.Internal detail))
     | Some (Gate_continuation _ | Runtime_continuation _), _
-    | Some (Checkpoint_continuation _), Some _
     | None, _ | Some _, None -> None in
   (* Restore the whole native context before prompt/tool setup closes over
      it. The same object must reach Core so new load receipts, repetition
@@ -1680,7 +1686,7 @@ let run_turn
                       ?enable_thinking:(Keeper_config.keeper_enable_thinking ())
                       ?cooperative_yield_probe
                       ?official_client_continuation
-                      ?on_official_checkpoint_prepared
+                      ?on_checkpoint_prepared
                       ?official_task_reference
                       ~on_official_client_tool_boundary
                       ?agent_core_checkpoint:checkpoint

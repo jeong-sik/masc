@@ -1583,7 +1583,9 @@ let run_without_lifecycle ~result_scope ~media_store ~input_source ~argument_sou
       recovery_failure
         := (match !provider_terminal with
             | Some Msp.Terminal_completed -> !recovery_failure
-            | Some (Msp.Terminal_failed {kind=Msp.Auth_required; message; _}) ->
+            | Some (Msp.Terminal_failed ({quota=Some _; _} as error)) ->
+              terminal_failure (Serve.Turn_failed error)
+            | Some (Msp.Terminal_failed {kind=Msp.Auth_required; message; quota=None; _}) ->
               terminal_failure (Serve.Auth_required message)
             | Some
                 (Msp.Terminal_failed

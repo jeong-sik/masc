@@ -2789,10 +2789,13 @@ let test_owner_cancellation_after_completion_keeps_recovery () =
 ;;
 
 let test_owner_cancellation_after_retryable_terminal_retains_turn () =
+  List.iter (fun (extra_fixture, expected_quota_reset) ->
+  Runtime_quota_window.reset_for_testing ();
+  Fun.protect ~finally:Runtime_quota_window.reset_for_testing (fun () ->
   with_scripted_host (fun ~base_path ->
     let tool = masc_probe_tool (ref `Null) in
     ignore (settle_first_turn ~base_path ~tool);
-    write_fixture ~base_path (scenario "turn_failed_with_usage");
+    write_fixture ~base_path (scenario "turn_failed_with_usage" @ extra_fixture);
     let usage_seen = ref false in
     (match Eio.Switch.run (fun turn_sw ->
        Eio.Fiber.fork ~sw:turn_sw (fun () ->
@@ -2805,6 +2808,12 @@ let test_owner_cancellation_after_retryable_terminal_retains_turn () =
      | () -> fail "terminal usage cancellation was swallowed"
      | exception exn when Keeper_registry_types.is_operator_interrupt exn -> ());
     check bool "terminal usage callback reached" true !usage_seen;
+    let scope = Runtime_quota_window.scope_of_muse_home (Filename.concat base_path "account-home") in
+    let other = Runtime_quota_window.scope_of_muse_home (Filename.concat base_path "other-account") in
+    check (option (float 0.001)) "terminal quota remains observed during owner cancellation"
+      expected_quota_reset (Runtime_quota_window.active_until ~scope ~now:100.);
+    check bool "owner cancellation does not rest another account" false
+      (Runtime_quota_window.is_exhausted ~scope:other ~now:100.);
     let after = Store.load ~base_path ~keeper_name |> Result.get_ok |> Option.get in
     check int "retryable terminal ordinal preserved" 2 after.turn_count;
     (match after.phase, after.last_transient_release with
@@ -2816,7 +2825,13 @@ let test_owner_cancellation_after_retryable_terminal_retains_turn () =
     write_fixture ~base_path [];
     match (run_turn_with ~base_path ~tool ()).outcome.result with
     | Ok result -> check (option bool) "matching failed history still resumes" (Some true) result.session_resumed
-    | Error error -> fail (Agent_core.Error.to_string error))
+    | Error error -> fail (Agent_core.Error.to_string error))))
+    [ [], None
+    ; ["turn_error", `Assoc
+        ["kind", `String "authRequired"; "message", `String "fixture quota denial";
+         "retryable", `Bool true;
+         "quota", `Assoc ["limitKind", `String "tierLimit"; "resetsAtMs", `Int 500500]]],
+      Some 500.5 ]
 ;;
 
 (* A host stop settles the turn before the host reports its terminal. A

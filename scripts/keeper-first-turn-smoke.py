@@ -313,6 +313,7 @@ def kata_proof(args, fixture, base, output, runtime_env, server):
     (output / 'kata-native-inspect.json').write_text(json.dumps(rows, indent=2))
     container = rows[0]
     spec = container['Spec']
+# Canonical home of this runtime id: lib/keeper/keeper_microvm_kata_vmm.ml (Keeper_microvm_kata_vmm.default_shim_runtime_id). Keep literals in sync with it.
     if container['Runtime']['Name'] != 'io.containerd.kata.v2':
         raise SmokeError('Keeper container did not use the Kata runtime')
     # nerdctl v2.3.5 labels.Networks is JSON-encoded []string.

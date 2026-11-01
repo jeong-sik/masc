@@ -20,8 +20,10 @@ let of_string raw = List.find_opt (fun b -> String.equal (to_string b) raw) all
 
 (* The containerd shim id for Kata. It is a literal here rather than in the
    argv builder so the one place that knows "this backend is not a microVM
-   without this flag" is the backend's own definition. *)
-let kata_containerd_shim = "io.containerd.kata.v2"
+   without this flag" is the backend's own definition.  The canonical home of
+   the id is [Keeper_microvm_kata_vmm.default_shim_runtime_id]; this binding
+   only re-exports it so the two can never drift apart. *)
+let kata_containerd_shim = Keeper_microvm_kata_vmm.default_shim_runtime_id
 
 let run_runtime_args = function
   | Apple_container | Microsandbox -> []

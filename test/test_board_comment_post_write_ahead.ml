@@ -425,6 +425,34 @@ let test_creation_commits_before_releasing_persistence () =
   Alcotest.(check (list int)) "all three creations survive snapshot and reload"
     [1; 1; 1] (counts reloaded)
 
+let test_uninitialized_dispatch_proves_no_publication () =
+  Board_dispatch.reset_for_test ();
+  let check_pre_effect label = function
+    | Ok _ -> Alcotest.fail (label ^ " must fail when Board_dispatch is uninitialized")
+    | Error failure ->
+      check_effect (label ^ " did not begin publication")
+        Failure_effect.Proven_pre_effect failure;
+      Alcotest.(check bool) (label ^ " has no committed receipt") true
+        (Option.is_none (Board.Post_publication_failure.committed failure))
+  in
+  check_pre_effect "create_post_with_unresolved"
+    (Board_dispatch.create_post_with_unresolved
+       ~author:"uninit-author" ~content:"never started"
+       ~post_kind:Board.Human_post ());
+  check_pre_effect "create_post_once_by_fusion_run_id"
+    (Board_dispatch.create_post_once_by_fusion_run_id
+       ~fusion_run_id:"fusion-uninit-1" ~author:"uninit-author"
+       ~content:"never started" ~post_kind:Board.Automation_post
+       ~visibility:Board.Internal ~ttl_hours:0
+       ~origin:
+         { Board.turn_ref = None
+         ; source = Some "fusion"
+         ; fusion_run_id = Some "fusion-uninit-1"
+         ; fusion_producer = Some "uninit-author"
+         }
+       ());
+  Board_dispatch.init_jsonl ~recipient_lookup:Recipient_lookup.none_declared ()
+
 let () =
   Alcotest.run "board_comment_post_write_ahead"
     [
@@ -434,6 +462,8 @@ let () =
             (with_eio test_held_observer_failure_keeps_the_committed_receipt);
           Alcotest.test_case "acquire observer failure proves no publication" `Quick
             (with_eio test_acquire_observer_failure_proves_no_publication);
+          Alcotest.test_case "uninitialized dispatch failure proves no publication" `Quick
+            (with_eio test_uninitialized_dispatch_proves_no_publication);
           Alcotest.test_case "creations commit before persistence unlock" `Quick
             (with_eio test_creation_commits_before_releasing_persistence);
           Alcotest.test_case

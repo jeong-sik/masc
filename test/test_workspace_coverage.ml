@@ -2965,6 +2965,36 @@ let test_next_task_number_includes_durable_event_history () =
     Alcotest.(check int)
       "durable history same-size newest-file rewrite invalidates cache"
       913
+      (Workspace.next_task_number config (Workspace.read_backlog config));
+    Unix.unlink path;
+    let rotated_999 = Filename.concat month_dir "26.999.jsonl" in
+    let rotated_1000 = Filename.concat month_dir "26.1000.jsonl" in
+    let stray_file = Filename.concat month_dir "zz.tmp" in
+    Fs_compat.save_file
+      rotated_999
+      (Yojson.Safe.to_string
+         (`Assoc [ "type", `String "task_transition"; "task_id", `String "task-700" ])
+       ^ "\n");
+    Fs_compat.save_file
+      rotated_1000
+      (Yojson.Safe.to_string
+         (`Assoc [ "type", `String "task_transition"; "task_id", `String "task-750" ])
+       ^ "\n");
+    Fs_compat.save_file stray_file "not-a-day-file\n";
+    Alcotest.(check int)
+      "durable history rotated 4-digit sequence warm baseline"
+      751
+      (Workspace.next_task_number config (Workspace.read_backlog config));
+    let st_rot = Unix.stat rotated_1000 in
+    Fs_compat.save_file
+      rotated_1000
+      (Yojson.Safe.to_string
+         (`Assoc [ "type", `String "task_transition"; "task_id", `String "task-850" ])
+       ^ "\n");
+    Unix.utimes rotated_1000 st_rot.Unix.st_atime st_rot.Unix.st_mtime;
+    Alcotest.(check int)
+      "same-size rewrite on 26.1000.jsonl invalidates cache ahead of 26.999.jsonl and zz.tmp"
+      851
       (Workspace.next_task_number config (Workspace.read_backlog config)))
 ;;
 

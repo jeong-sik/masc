@@ -11741,6 +11741,8 @@ let settle_retired_sent_image state =
    their original authority envelope; both paths capture the UI generation
    and workspace/draft owner before forking and share completion admission. *)
 let open_preview_image ?skill_reference state ~mailbox ~notice ~name source =
+  state.image_request_generation <- state.image_request_generation + 1;
+  state.sent_image_read <- None;
   let dispatch = match source with
     | Masc_tui_image_requests.Local_file _ ->
       Some (enqueue_async, Local_file_image_read state.workspace_authority)

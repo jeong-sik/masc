@@ -129,6 +129,51 @@ let parse_optional_transition_action args field =
          ~received:(Yojson.Safe.to_string json))
 ;;
 
+type expected_verification_phase = Expect_executing | Expect_verifying
+
+type expected_verification =
+  { phase : expected_verification_phase
+  ; criterion_revision : string
+  ; request_id : string option
+  }
+
+let parse_expected_verification args =
+  match Json_util.assoc_member_opt "expected_verification" args with
+  | None -> Ok None
+  | Some (`Assoc fields) ->
+    let open Result.Syntax in
+    let* () = Json_util.reject_unknown_fields ~surface:"expected_verification"
+        ~allowed:["phase"; "criterion_revision"; "request_id"] fields in
+    let* phase = match List.assoc_opt "phase" fields with
+      | Some (`String "executing") -> Ok Expect_executing
+      | Some (`String "verifying") -> Ok Expect_verifying
+      | None | Some _ -> Error "expected_verification.phase must be executing or verifying" in
+    let* criterion_revision = Json_util.require_field_string
+        ~surface:"expected_verification" "criterion_revision" fields in
+    let* request_id = match List.assoc_opt "request_id" fields with
+      | None -> Ok None
+      | Some (`String id) when String.trim id <> "" -> Ok (Some id)
+      | Some _ -> Error "expected_verification.request_id must be a non-blank string" in
+    if String.trim criterion_revision = "" then
+      Error "expected_verification.criterion_revision must be non-blank"
+    else Ok (Some { phase; criterion_revision; request_id })
+  | Some _ -> Error "expected_verification must be an object"
+;;
+
+let matches_expected_verification expected (goal : Goal_store.goal) record =
+  let request = match record with
+    | None | Some { Goal_verification.completion = Completion_idle; _ } -> Some None
+    | Some { completion = Proof_pending pending; _ } -> Some (Some pending.request_id)
+    | Some { completion = (Proof_proven verdict | Proof_refuted verdict | Human_confirmed (verdict, _)); _ } ->
+      Some (Some verdict.request_id) in
+  (match expected.phase, goal.phase with
+   | Expect_executing, Goal_phase.Executing | Expect_verifying, Goal_phase.Verifying -> true
+   | (Expect_executing | Expect_verifying),
+     (Goal_phase.Executing | Verifying | Awaiting_confirmation | Completed | Dropped | Paused _ | Blocked _) -> false)
+  && String.equal goal.criterion_revision expected.criterion_revision
+  && Option.equal (Option.equal String.equal) request (Some expected.request_id)
+;;
+
 let emit_goal_event (ctx : context) ~goal_id ~event_type ~payload =
   match Goal_store.append_audit_event_after_pending ctx.config
     (`Assoc
@@ -707,8 +752,16 @@ let proof_request_failure ~tool_name ~start_time = function
 (* The phase comes from [Goal_phase.decide_transition], so a proof request
    and a completion request cannot disagree on where the goal goes. Only a goal
    that is, or now enters, [Verifying] gets a pending proof. *)
-let request_current_proof ?evidence_refs config ~goal_id =
+let request_current_proof_bound ?evidence_refs ?expected_verification config ~goal_id =
   transact_or_refuse config ~goal_id (fun goal ->
+    let open Result.Syntax in
+    let* () = match expected_verification with
+      | None -> Ok ()
+      | Some expected ->
+        let* record = Goal_verification.get_record_authoritative config ~goal_id
+          |> Result.map_error (refuse Internal_error) in
+        if matches_expected_verification expected goal record then Ok ()
+        else Error (refuse Conflict "The Goal or verification request changed; refresh before requesting completion") in
     match Goal_phase.decide_transition ~phase:goal.phase ~action:Goal_phase.Request_complete with
     | Ok (Goal_phase.Move_to (Goal_phase.Verifying as phase))
     | Ok (Goal_phase.Already (Goal_phase.Verifying as phase)) ->
@@ -723,6 +776,10 @@ let request_current_proof ?evidence_refs config ~goal_id =
              | Goal_phase.Dropped | Goal_phase.Paused _ | Goal_phase.Blocked _ ))
     | Error _ ->
       Error (refuse Precondition_failed "goal is not requesting verification"))
+;;
+
+let request_current_proof ?evidence_refs config ~goal_id =
+  request_current_proof_bound ?evidence_refs config ~goal_id
 ;;
 
 let recover_current_proof config ~goal_id =
@@ -743,7 +800,7 @@ let recover_current_proof config ~goal_id =
    re-armed, a standing pending request is woken again, and a committed
    verdict whose phase/event write was interrupted is reconciled from that
    exact ledger row without another model call. *)
-let answer_verifying_repeat ?evidence_refs ~tool_name ~start_time (ctx : context) ~goal_id ~action _goal =
+let answer_verifying_repeat ?evidence_refs ?expected_verification ~tool_name ~start_time (ctx : context) ~goal_id ~action =
   let effects goal (_, reconciled) = match reconciled with
     | None -> no_goal_effects
     | Some (verdict, _) -> proof_effects ctx.config goal verdict in
@@ -752,7 +809,9 @@ let answer_verifying_repeat ?evidence_refs ~tool_name ~start_time (ctx : context
       (Goal_verification.get_record_authoritative ctx.config ~goal_id
        |> Result.map_error (refuse Internal_error))
       (fun record ->
-        if goal.phase <> Goal_phase.Verifying then Ok (goal, (record, None))
+        if Option.exists (fun expected -> not (matches_expected_verification expected goal record)) expected_verification then
+          Error (refuse Conflict "The Goal or verification request changed; refresh before retrying")
+        else if goal.phase <> Goal_phase.Verifying then Ok (goal, (record, None))
         else
           match record with
           | Some ({ Goal_verification.completion =
@@ -795,8 +854,10 @@ let answer_verifying_repeat ?evidence_refs ~tool_name ~start_time (ctx : context
             ~package_id:Goal_verifier_worker.host_package_id ~goal_id ~request_id
             ~requested_by:ctx.agent_name ~new_run:(fun () ->
               {Goal_verifier_worker.run_id=Random_id.uuid_v7 (); started_at=Time_compat.now ()})
-          |> Result.map_error (fun error -> Refused (refuse Internal_error
-            ("Goal retry publication unconfirmed: " ^ Goal_verifier_worker.error_to_string error)))
+          |> Result.map_error (function
+            | Goal_verifier_worker.Execution_pending detail -> Refused (refuse Conflict detail)
+            | error -> Refused (refuse Internal_error
+                ("Goal retry publication unconfirmed: " ^ Goal_verifier_worker.error_to_string error)))
         | (Goal_phase.Executing | Awaiting_confirmation | Completed | Dropped | Paused _ | Blocked _), _
         | Verifying, (None | Some {completion=(Completion_idle | Proof_proven _ | Proof_refuted _ | Human_confirmed _); _}) -> Ok () in
       (match retry with
@@ -1034,11 +1095,27 @@ let finish_goal_suspension ~tool_name ~start_time (ctx : context) ~goal_id ~acti
         ; "goal", Goal_store.goal_to_yojson goal ]
 ;;
 
-let handle_goal_transition ~tool_name ~start_time (ctx : context) args
+let finish_goal_request_complete ?evidence_refs ?expected_verification
+    ~tool_name ~start_time (ctx : context) ~goal_id ~action =
+  match request_current_proof_bound ?evidence_refs ?expected_verification ctx.config ~goal_id with
+  | Error error -> proof_request_failure ~tool_name ~start_time error
+  | Ok (updated_goal, record) ->
+    emit_goal_event ctx ~goal_id ~event_type:"goal_phase"
+      ~payload:(`Assoc [ "phase", Goal_phase.to_yojson updated_goal.phase
+                        ; "actor", `String ctx.agent_name ]);
+    notify_goal_verification_pending ctx ~goal_id;
+    ok_result ~tool_name ~start_time
+      [ "goal_id", `String goal_id
+      ; "action", `String (Goal_phase.action_to_string action)
+      ; "goal", Goal_store.goal_to_yojson updated_goal
+      ; "verification", Goal_verification.record_to_yojson_for_goal ~goal:updated_goal record ]
+;;
+
+let handle_goal_transition_validated ~tool_name ~start_time (ctx : context) args
     : Tool_result.result =
-  match parse_goal_evidence_refs args with
-  | Error detail -> error_result_typed ~tool_name ~start_time ~code:Validation_error detail
-  | Ok evidence_refs ->
+  match parse_goal_evidence_refs args, parse_expected_verification args with
+  | Error detail, _ | _, Error detail -> error_result_typed ~tool_name ~start_time ~code:Validation_error detail
+  | Ok evidence_refs, Ok expected_verification ->
   match
     ( validate_string_required args "goal_id"
     , parse_optional_transition_action args "action" )
@@ -1049,6 +1126,10 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args
       when Option.is_some evidence_refs && public_action <> Goal_phase.Public_action.Request_complete ->
       error_result_typed ~tool_name ~start_time ~code:Validation_error
         "evidence_refs is only accepted for request_complete"
+  | Ok _, Ok (Some public_action)
+      when Option.is_some expected_verification && public_action <> Goal_phase.Public_action.Request_complete ->
+      error_result_typed ~tool_name ~start_time ~code:Validation_error
+        "expected_verification is only accepted for request_complete"
   | Ok goal_id, Ok (Some public_action) ->
     let action = Goal_phase.Public_action.to_action public_action in
     let note = get_string_opt args "note" in
@@ -1064,6 +1145,16 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args
      | Goal_phase.Public_action.Pause | Goal_phase.Public_action.Resume
      | Goal_phase.Public_action.Block | Goal_phase.Public_action.Unblock ->
          finish_goal_suspension ~tool_name ~start_time ctx ~goal_id ~action ~note
+     | Goal_phase.Public_action.Request_complete when Option.is_some expected_verification ->
+         (match expected_verification with
+          | Some ({phase=Expect_executing; _} as expected) ->
+            finish_goal_request_complete ?evidence_refs ~expected_verification:expected
+              ~tool_name ~start_time ctx ~goal_id ~action
+          | Some ({phase=Expect_verifying; _} as expected) ->
+            answer_verifying_repeat ?evidence_refs ~expected_verification:expected
+              ~tool_name ~start_time ctx ~goal_id ~action
+          | None -> error_result_typed ~tool_name ~start_time ~code:Internal_error
+              "completion binding disappeared")
      | Goal_phase.Public_action.Request_complete | Goal_phase.Public_action.Drop | Goal_phase.Public_action.Reopen ->
     (match Goal_store.find_goal ctx.config ~goal_id with
      | Goal_store.Goal_absent ->
@@ -1093,7 +1184,7 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args
              (match phase with
               | Goal_phase.Verifying ->
                 answer_verifying_repeat ?evidence_refs
-                  ~tool_name ~start_time ctx ~goal_id ~action goal
+                  ~tool_name ~start_time ctx ~goal_id ~action
               | Goal_phase.Awaiting_confirmation
               | Goal_phase.Executing
               | Goal_phase.Completed
@@ -1119,18 +1210,7 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args
                    allowed. Asking to be judged is not a claim; the judgement is
                    the verdict, and refusing the request only hides the goal
                    from the thing that would judge it. *)
-                   (match request_current_proof ?evidence_refs ctx.config ~goal_id with
-                    | Error error -> proof_request_failure ~tool_name ~start_time error
-                    | Ok (updated_goal, record) ->
-                      emit_goal_event ctx ~goal_id ~event_type:"goal_phase"
-                        ~payload:(`Assoc [ "phase", Goal_phase.to_yojson updated_goal.phase
-                                          ; "actor", `String ctx.agent_name ]);
-                      notify_goal_verification_pending ctx ~goal_id;
-                      ok_result ~tool_name ~start_time
-                        [ "goal_id", `String goal_id
-                        ; "action", `String (Goal_phase.action_to_string action)
-                        ; "goal", Goal_store.goal_to_yojson updated_goal
-                        ; "verification", Goal_verification.record_to_yojson_for_goal ~goal:updated_goal record ])
+                   finish_goal_request_complete ?evidence_refs ~tool_name ~start_time ctx ~goal_id ~action
            | Goal_phase.Public_action.Reopen ->
                 finish_goal_reopen ~tool_name ~start_time ctx ~note goal
            | Goal_phase.Public_action.Pause | Goal_phase.Public_action.Resume
@@ -1149,6 +1229,15 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args
         ; received = None
         }
       ]
+;;
+
+let handle_goal_transition ~tool_name ~start_time (ctx : context) args =
+  match Workspace.validate_expected_workspace ~config:ctx.config args with
+  | Ok args -> handle_goal_transition_validated ~tool_name ~start_time ctx args
+  | Error Workspace.Invalid_workspace_precondition ->
+    error_result_typed ~tool_name ~start_time ~code:Validation_error "invalid expected_workspace precondition"
+  | Error Workspace.Workspace_precondition_failed ->
+    error_result_typed ~tool_name ~start_time ~code:Conflict "workspace precondition failed"
 ;;
 
 let confirm_completion ?after_confirmation config ~goal_id ~operator_id

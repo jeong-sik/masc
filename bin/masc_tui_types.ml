@@ -3840,12 +3840,21 @@ type planning_goal = Tui_decode.planning_goal
   pg_metric: string option;
   pg_target_value: string option;
   pg_proof: Tui_decode.goal_proof;
+  pg_retry_binding: Tui_decode.goal_retry_binding option;
   pg_verifier_unreconciled: Tui_decode.verifier_unreconciled option;
   pg_last_review_note: string option;
   pg_last_review_at: string option;
   pg_created_at: string option;
   pg_updated_at: string option;
 }
+
+let planning_goal_offers_action (goal : planning_goal) action =
+  Goal_phase.offers_public_action ~phase:goal.pg_phase ~action
+  && (action <> Goal_phase.Public_action.Request_complete || Option.is_some goal.pg_retry_binding)
+
+let planning_goal_retains_arm (goal : planning_goal) ~action ~phase ~retry_binding =
+  goal.pg_phase = phase && planning_goal_offers_action goal action
+  && (action <> Goal_phase.Public_action.Request_complete || goal.pg_retry_binding = retry_binding)
 
 type planning_rollup = Tui_decode.planning_rollup
   = {
@@ -8856,7 +8865,8 @@ type runtime_catalog_request = {
    must state, because the Tasks it cancels tell their authors that sentence:
    typing it is the confirmation, Enter sends it and Esc cancels. *)
 type goal_action_pending =
-  | Goal_action_armed of { goal_id : string; action : Goal_phase.Public_action.t }
+  | Goal_action_armed of { goal_id : string; action : Goal_phase.Public_action.t;
+      phase : Goal_phase.t; retry_binding : Tui_decode.goal_retry_binding option }
   | Goal_drop_reason of { goal_id : string; reason : string }
 
 (* The Config presets pane's writes that wait for a second press of their
@@ -10250,7 +10260,10 @@ type state = {
      letters safe: c/x/o are lifecycle only once, and any other key disarms.
      A drop waits for its typed reason instead. *)
   mutable goal_action_pending: goal_action_pending option;
-  mutable goal_action_error: string option;
+  mutable goal_action_errors: (string * string) list;
+  mutable goal_transition_latest: (string * string) list;
+  mutable goal_action_inflight: (string * string) list;
+  mutable goal_action_receipts: (string * string * string * (string, string) result) list;
   mutable goal_confirmation_presented : Masc_tui_planning_detail.confirmation option;
   mutable goal_confirmation:
     Masc_tui_planning_detail.confirmation_state;
@@ -10928,6 +10941,35 @@ type state = {
   port: int;
   refresh_interval: float;
 }
+
+let clear_goal_action_error state ~goal_id =
+  state.goal_action_errors <- List.remove_assoc goal_id state.goal_action_errors
+
+let set_goal_action_error state ~goal_id error =
+  state.goal_action_errors <- (goal_id, error) :: List.remove_assoc goal_id state.goal_action_errors
+
+let note_goal_action_started state ~goal_id ~ticket =
+  if List.mem_assoc goal_id state.goal_action_inflight then false
+  else begin
+    clear_goal_action_error state ~goal_id;
+    state.goal_transition_latest <- (goal_id, ticket) :: List.remove_assoc goal_id state.goal_transition_latest;
+    state.goal_action_inflight <- (goal_id, ticket) :: state.goal_action_inflight;
+    true
+  end
+
+let note_goal_action_result state ~goal_id ~ticket result =
+  if List.assoc_opt goal_id state.goal_transition_latest <> Some ticket then false
+  else begin
+    if List.assoc_opt goal_id state.goal_action_inflight = Some ticket then
+      state.goal_action_inflight <- List.remove_assoc goal_id state.goal_action_inflight;
+    (match result with
+     | Ok _ -> clear_goal_action_error state ~goal_id
+     | Error error -> set_goal_action_error state ~goal_id error);
+    true
+  end
+
+let record_goal_action_receipt state ~goal_id ~ticket ~workspace result =
+  state.goal_action_receipts <- (goal_id, ticket, workspace, result) :: state.goal_action_receipts
 
 (* The server trims names and accepts ASCII only. Group case aliases
    conservatively even when its filesystem happens to be case-sensitive. *)
@@ -19287,7 +19329,10 @@ let create_state
   planning_filter = Planning_filter_active;
   planning_sort = Planning_sort_phase_priority;
   goal_action_pending = None;
-  goal_action_error = None;
+  goal_action_errors = [];
+  goal_transition_latest = [];
+  goal_action_inflight = [];
+  goal_action_receipts = [];
   goal_confirmation_presented = None;
   goal_confirmation = Masc_tui_planning_detail.Inspecting Masc_tui_fetched.initial;
   schedules = None;

@@ -180,3 +180,11 @@ let moves_goal ~phase ~action =
   | Ok (Already _) -> false
   | Error _ -> false
 ;;
+
+let offers_public_action ~phase ~(action : Public_action.t) =
+  match phase, action with
+  | Verifying, Request_complete -> true
+  | (Executing | Verifying | Awaiting_confirmation | Completed | Dropped | Paused _ | Blocked _),
+    (Request_complete | Drop | Reopen | Pause | Resume | Block | Unblock) ->
+      moves_goal ~phase ~action:(Public_action.to_action action)
+;;

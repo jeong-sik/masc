@@ -98,6 +98,15 @@ type verifier_unreconciled = {
   vu_step : Goal_reconcile_step.t;
   vu_detail : string;
 }
+
+type goal_completion_phase = Completion_executing | Completion_verifying
+type goal_retry_binding = {
+  grb_phase : goal_completion_phase;
+  grb_criterion_revision : string;
+  grb_request_id : string option;
+}
+(** The phase and readable verification shown with a Goal. [None] request ID
+    is the observed idle state; an unreadable proof supplies no binding. *)
 (** The latest verifier scan could not settle this Verifying goal. It stays
     Verifying until [request_complete] retries it or a later scan settles it,
     or the operator takes it back or drops it. *)
@@ -112,6 +121,7 @@ type planning_goal = {
   pg_metric : string option;
   pg_target_value : string option;
   pg_proof : goal_proof;
+  pg_retry_binding : goal_retry_binding option;
   pg_verifier_unreconciled : verifier_unreconciled option;
   pg_last_review_note : string option;
       (** What a keeper or operator wrote at the last transition. Free text,

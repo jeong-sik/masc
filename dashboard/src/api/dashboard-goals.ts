@@ -7,7 +7,8 @@ import { decodeGoalResumePhase } from './goal-lifecycle'
 import { isRecord, asBoolean, asInt, asNullableString, asNumber, asRecordArray, asString, asStringArray } from '../components/common/normalize'
 import { normalizeKeeperTrustTerminalReason } from '../keeper-store-normalize'
 import { asTrustDisposition } from '../lib/trust-disposition'
-import { get } from './core'
+import { get, getWithResponse } from './core'
+import { artifactWorkspaceQuery, requireArtifactWorkspaceRead, type ArtifactWorkspace } from './published-artifacts'
 import { decodeKeeperApprovalQueueState } from './dashboard-gate'
 import { goalStoreUnavailableSummary } from '../lib/goal-store-unavailable-labels'
 import {
@@ -545,8 +546,12 @@ function decodeDashboardGoalDetailResponse(raw: unknown): DashboardGoalDetailRes
   return generatedAt ? { ...decoded, generated_at: generatedAt } : decoded
 }
 
-export async function fetchDashboardGoalsTree(): Promise<DashboardGoalsTreeResponse> {
-  const raw = await get<unknown>('/api/v1/dashboard/goals')
+export async function fetchDashboardGoalsTree(workspace?: ArtifactWorkspace): Promise<DashboardGoalsTreeResponse> {
+  const raw = workspace === undefined ? await get<unknown>('/api/v1/dashboard/goals') : await (async () => {
+    const result = await getWithResponse<unknown>(`/api/v1/dashboard/goals?${artifactWorkspaceQuery(workspace)}`, { consumeWithinTimeout: true })
+    requireArtifactWorkspaceRead(result.headers)
+    return result.data
+  })()
   const unavailable = goalSourceUnavailable(raw)
   if (unavailable !== null) throw new GoalSourceUnavailableError(unavailable)
   const decoded = decodeDashboardGoalsTreeResponse(raw)
@@ -554,8 +559,15 @@ export async function fetchDashboardGoalsTree(): Promise<DashboardGoalsTreeRespo
   return decoded
 }
 
-export async function fetchDashboardGoalDetail(goalId: string): Promise<DashboardGoalDetailResponse> {
-  const raw = await get<unknown>(`/api/v1/dashboard/goals/detail?goal_id=${encodeURIComponent(goalId)}`)
+export async function fetchDashboardGoalDetail(goalId: string, workspace?: ArtifactWorkspace): Promise<DashboardGoalDetailResponse> {
+  const params = workspace === undefined ? new URLSearchParams() : artifactWorkspaceQuery(workspace)
+  params.set('goal_id', goalId)
+  const path = `/api/v1/dashboard/goals/detail?${params}`
+  const raw = workspace === undefined ? await get<unknown>(path) : await (async () => {
+    const result = await getWithResponse<unknown>(path, { consumeWithinTimeout: true })
+    requireArtifactWorkspaceRead(result.headers)
+    return result.data
+  })()
   const unavailable = goalSourceUnavailable(raw)
   if (unavailable !== null) throw new GoalSourceUnavailableError(unavailable)
   const decoded = decodeDashboardGoalDetailResponse(raw)

@@ -372,6 +372,8 @@ let planning_detail_tone (tone : Planning_detail.tone) =
    surface and their own verdicts. *)
 let planning_next_step (goal : planning_goal) =
   match goal.pg_phase, goal.pg_proof with
+  | Goal_phase.Executing, _ when Option.is_none goal.pg_retry_binding ->
+    (Theme.warn (), "verification state unavailable - refresh before requesting completion")
   | Goal_phase.Executing, Tui_decode.Proof_refuted _ ->
     ( (Theme.bad ())
     , "refused - fix what the verdict names below, then [c] to resubmit" )
@@ -383,7 +385,8 @@ let planning_next_step (goal : planning_goal) =
   | (Goal_phase.Verifying, Proof_idle) | (Goal_phase.Verifying, Proof_pending)
   | (Goal_phase.Verifying, Proof_proven _) | (Goal_phase.Verifying, Proof_refuted _)
   | (Goal_phase.Verifying, Proof_stale _) | (Goal_phase.Verifying, Proof_unreadable _) ->
-    let tone, text = Planning_detail.verifying_next_step goal.pg_verifier_unreconciled in
+    let tone, text = Planning_detail.verifying_next_step
+        ~can_retry:(Option.is_some goal.pg_retry_binding) goal.pg_verifier_unreconciled in
     (planning_detail_tone tone, text)
   | (Goal_phase.Awaiting_confirmation, Proof_idle)
   | (Goal_phase.Awaiting_confirmation, Proof_pending)
@@ -590,6 +593,15 @@ let planning_summary_reading ~cols (state : state) =
          section (text "기준 대비 변화" "Change from baseline") change_rows;
          section (text "목록 밖 목표 이력" "Unlisted Goal history") history]
   in
+  let retired = List.rev state.goal_action_receipts |> List.map (fun (goal_id, ticket, workspace, result) ->
+    let answer = match result with
+      | Ok message -> text "응답: " "Response: " ^ Terminal_text.single_line message
+      | Error error -> text "오류: " "Error: " ^ Terminal_text.single_line error in
+    Printf.sprintf "%s · %s · %s · %s" (Terminal_text.single_line goal_id)
+      (Terminal_text.single_line workspace) (Terminal_text.single_line ticket) answer) in
+  let sections = sections @ (match retired with
+    | [] -> []
+    | _ -> [section (text "Goal 요청 결과" "Goal request results") retired]) in
   Masc_tui_detail_reading.create ~ko ~title:(text "작업 요약" "Work summary") sections
 
 (* The list owns the first row of the summary; its complete counts and the
@@ -999,8 +1011,7 @@ let planning_detail_action_rows ~cols ~armed ~drop_reason (goal : planning_goal)
   let item action =
     let key = planning_action_key action and label = planning_action_label action in
     let text = Printf.sprintf "[%s] %s" key label in
-    if Goal_phase.moves_goal ~phase:goal.pg_phase
-         ~action:(Goal_phase.Public_action.to_action action)
+    if planning_goal_offers_action goal action
     then text else Ansi.dim ^ text ^ Ansi.reset
   in
   let actions = List.map item Goal_phase.Public_action.all
@@ -1069,7 +1080,16 @@ let planning_detail_lines (state : state) ~confirmation ~cols (goal : planning_g
          | None -> [] | Some value -> field ~tone:Planning_detail.Quiet label value)
          ["Created", goal.pg_created_at; "Updated", goal.pg_updated_at; "Reviewed", goal.pg_last_review_at])
     @ field ~tone:Planning_detail.Quiet "Link" (Link.reference Goal goal.pg_id)
-    @ (match state.goal_action_error with None -> [] | Some error -> field ~tone:Planning_detail.Refused "Error" error)
+    @ (match List.assoc_opt goal.pg_id state.goal_action_errors with
+       | Some error ->
+         field ~tone:Planning_detail.Refused "Error" error
+       | None -> [])
+    @ (state.goal_action_receipts |> List.filter_map (fun (goal_id, ticket, workspace, result) ->
+         if not (String.equal goal_id goal.pg_id) then None
+         else Some (field ~tone:Planning_detail.Unreadable "Request result"
+           (Printf.sprintf "%s · %s · %s" workspace ticket
+             (match result with Ok message -> "response: " ^ message | Error error -> "error: " ^ error))))
+       |> List.concat)
   in
   let linked_tasks = List.filter (fun (row : Tui_decode.task) -> List.mem goal.pg_id row.goal_ids) state.tasks in
   let linked =

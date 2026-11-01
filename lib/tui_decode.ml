@@ -319,6 +319,13 @@ type verifier_unreconciled = {
   vu_detail : string;
 }
 
+type goal_completion_phase = Completion_executing | Completion_verifying
+type goal_retry_binding = {
+  grb_phase : goal_completion_phase;
+  grb_criterion_revision : string;
+  grb_request_id : string option;
+}
+
 type planning_goal = {
   pg_id : string;
   pg_criterion_revision : string option;
@@ -329,6 +336,7 @@ type planning_goal = {
   pg_metric : string option;
   pg_target_value : string option;
   pg_proof : goal_proof;
+  pg_retry_binding : goal_retry_binding option;
   pg_verifier_unreconciled : verifier_unreconciled option;
   pg_last_review_note : string option;
   (* RFC 3339 server timestamps. Optional because an older server build may
@@ -1057,11 +1065,24 @@ let is_success_http_status status_code = status_code >= 200 && status_code < 300
    JSON to read when the server already wrote the sentence, so the sentence
    wins and the envelope is the fallback. *)
 let json_error_sentence body =
+  let non_blank = function
+    | `String message when String.trim message <> "" -> Some (String.trim message)
+    | `String _ | `Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null -> None in
+  let tool_message message =
+    match Yojson.Safe.from_string message with
+    | `Assoc fields when List.assoc_opt "status" fields = Some (`String "error") ->
+      (match List.assoc_opt "message" fields with Some value -> non_blank value | None -> None)
+    | `Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> None
+    | exception Yojson.Json_error _ -> None in
   match Yojson.Safe.from_string body with
   | `Assoc fields -> (
     match List.assoc_opt "error" fields with
     | Some (`String message) when String.trim message <> "" -> Some (String.trim message)
-    | Some _ | None -> None)
+    | Some _ | None ->
+      (match List.assoc_opt "ok" fields, List.assoc_opt "message" fields with
+       | Some (`Bool false), Some (`String message) ->
+         (match tool_message message with Some _ as detail -> detail | None -> non_blank (`String message))
+       | _ -> None))
   | _ -> None
   | exception Yojson.Json_error _ -> None
 ;;
@@ -1277,6 +1298,32 @@ let decode_verifier_unreconciled json =
       (Printf.sprintf "field 'verifier_unreconciled' must be an object or null (received %s)"
          (Json_util.kind_name other))
 
+let decode_goal_retry_binding ~goal_id ~phase ~criterion_revision verification =
+  let expected_phase = match phase with
+    | Goal_phase.Executing -> Some Completion_executing
+    | Verifying -> Some Completion_verifying
+    | Awaiting_confirmation | Completed | Dropped | Paused _ | Blocked _ -> None in
+  match expected_phase, criterion_revision, member "goal_id" verification with
+  | Some grb_phase, Some revision, `String observed_goal
+    when String.equal goal_id observed_goal && String.trim revision <> "" ->
+    let completion = member "completion" verification in
+    let stale, completion = match member "state" completion with
+      | `String "stale_criterion" -> true, member "historical_completion" completion
+      | `Null | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Assoc _ | `String _ -> false, completion in
+    let valid_criterion (Goal_store.Criterion {revision=proof_revision; _}) =
+      if stale then not (String.equal revision proof_revision)
+      else String.equal revision proof_revision in
+    let request =
+      match Goal_verification.completion_state_of_yojson completion with
+      | Ok Goal_verification.Completion_idle when not stale -> Some None
+      | Ok (Proof_pending {request_id; criterion; _}) when valid_criterion criterion -> Some (Some request_id)
+      | Ok (Proof_proven {request_id; criterion; _} | Proof_refuted {request_id; criterion; _}
+          | Human_confirmed ({request_id; criterion; _}, _)) when valid_criterion criterion -> Some (Some request_id)
+      | Ok (Completion_idle | Proof_pending _ | Proof_proven _ | Proof_refuted _ | Human_confirmed _) | Error _ -> None in
+    Option.map (fun grb_request_id -> {grb_phase; grb_criterion_revision=revision; grb_request_id}) request
+  | (Some _ | None), (Some _ | None),
+    (`Null | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Assoc _ | `String _) -> None
+
 let decode_planning_goal json =
   let* pg_id = required_string_field json "id" in
   let* pg_criterion_revision = optional_string_field json "criterion_revision" in
@@ -1290,7 +1337,10 @@ let decode_planning_goal json =
   let* pg_last_review_at = optional_string_field json "last_review_at" in
   let* pg_created_at = optional_string_field json "created_at" in
   let* pg_updated_at = optional_string_field json "updated_at" in
-  let pg_proof = decode_goal_proof (member "verification" json) in
+  let verification = member "verification" json in
+  let pg_proof = decode_goal_proof verification in
+  let pg_retry_binding = decode_goal_retry_binding ~goal_id:pg_id ~phase:pg_phase
+      ~criterion_revision:pg_criterion_revision verification in
   let* pg_verifier_unreconciled = decode_verifier_unreconciled json in
   Ok
     {
@@ -1303,6 +1353,7 @@ let decode_planning_goal json =
       pg_metric;
       pg_target_value;
       pg_proof;
+      pg_retry_binding;
       pg_verifier_unreconciled;
       pg_last_review_note;
       pg_last_review_at;

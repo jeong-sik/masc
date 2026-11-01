@@ -501,6 +501,8 @@ val semantic_status_color : string -> string
 val planning_phase_label : Goal_phase.t -> string
 
 val planning_action_key : Goal_phase.Public_action.t -> string
+
+val planning_action_confirmation_keys : Goal_phase.Public_action.t -> string list
 (** The key a goal detail takes for a lifecycle request. *)
 
 val planning_action_of_key : string -> Goal_phase.Public_action.t option

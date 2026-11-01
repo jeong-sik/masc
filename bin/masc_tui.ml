@@ -14330,6 +14330,13 @@ let apply_planning_load state = function
       in
       if Option.is_none state.planning_baseline then
         state.planning_baseline <- Some planning;
+      (match state.goal_action_pending with
+       | Some (Goal_action_armed armed) ->
+         let goal = List.find_opt (fun goal -> String.equal goal.pg_id armed.goal_id) planning.pl_goals in
+         if not (Option.exists (fun goal -> planning_goal_retains_arm goal ~action:armed.action
+             ~phase:armed.phase ~retry_binding:armed.retry_binding) goal) then
+           state.goal_action_pending <- None
+       | Some (Goal_drop_reason _) | None -> ());
       state.planning <- Some planning;
       state.planning_error <- None;
       (match navigation with
@@ -14965,7 +14972,9 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.board_detail <- Board_detail.clear state.board_detail;
   state.board_mode <- Board_list;
   state.goal_action_pending <- None;
-  state.goal_action_error <- None;
+  state.goal_action_errors <- [];
+  state.goal_transition_latest <- [];
+  state.goal_action_inflight <- [];
   state.planning <- None;
   state.planning_baseline <- None;
   state.planning_error <- None;
@@ -17296,7 +17305,6 @@ let launch_goal_confirmation_read state ~mailbox ~goal_id =
          | Started (loading, request) ->
              state.goal_confirmation <- Goal_confirmation.Inspecting loading;
              state.goal_confirmation_presented <- None;
-             state.goal_action_error <- None;
              let host = server_peer_host and port = state.port in
              launch_workspace_request state ~mailbox ~boundary_error:Fun.id
                ~deliver:(fun result -> Goal_confirmation_loaded (request, result))
@@ -18655,7 +18663,7 @@ let split_board_draft (text : string) : string * string =
 (* Request a goal lifecycle change through the tools route. Runs in a fiber
    like the other writes; the outcome lands in the shared mailbox and the
    server's phase rules decide, so the TUI never pre-guesses a transition. *)
-let start_goal_transition ?note state ~mailbox ~(goal_id : string)
+let start_goal_transition ?note ?retry_binding state ~mailbox ~(goal_id : string)
     ~(action : Goal_phase.Public_action.t) =
   (* The transition carries the workspace this terminal confirmed, and the
      server refuses one without it, so a server replaced on the same port
@@ -18663,21 +18671,35 @@ let start_goal_transition ?note state ~mailbox ~(goal_id : string)
   match state.workspace_identity, state.server_identity with
   | Workspace_identity_match, Some expected_workspace ->
       supersede_home_decision_receipt state;
-      state.goal_action_error <- None;
+      let ticket = Random_id.uuid_v7 () in
+      if not (note_goal_action_started state ~goal_id ~ticket) then
+        report_action state "error" ("Goal " ^ goal_id ^ ": a request is still in progress")
+      else begin
+      let origin = Masc.Tui_decode.Canonical_path.to_string expected_workspace.sid_base_path
+        ^ " (masc root " ^ Masc.Tui_decode.Canonical_path.to_string expected_workspace.sid_masc_root ^ ")" in
+      let proof_context = match retry_binding with
+        | None -> ""
+        | Some binding ->
+          " (criterion " ^ binding.Masc.Tui_decode.grb_criterion_revision
+          ^ "; proof request " ^ Option.value ~default:"none" binding.grb_request_id ^ ")" in
+      let annotate_error error =
+        "Goal request did not return a confirmed result; inspect the Goal before retrying: " ^ error ^ proof_context in
       report_action state "system"
         (Printf.sprintf "goal %s: %s" goal_id
            (Goal_phase.Public_action.to_string action));
       let host = server_peer_host in
       let port = state.port in
-      launch_workspace_request state ~mailbox ~boundary_error:Fun.id
-        ~deliver:(fun result -> Goal_transition_done result)
+      launch_workspace_request ~operation:true state ~mailbox ~boundary_error:annotate_error
+        ~cancelled:(Goal_transition_done (goal_id, ticket, origin, Error (annotate_error "Request interrupted; its outcome is unknown. Inspect the Goal before retrying.")))
+        ~deliver:(fun result -> Goal_transition_done (goal_id, ticket, origin, Result.map (fun message -> message ^ proof_context) result))
         (fun () ->
           match
             Masc_tui_http.post_goal_transition ~expected_workspace
-              ~host ~port ~goal_id ~action ~note
+              ~host ~port ~goal_id ~action ~note ~retry_binding
           with
-          | Error err -> Error err
-          | Ok json -> Masc.Tui_decode.tool_envelope_outcome json)
+          | Error err -> Error (annotate_error err)
+          | Ok json -> Masc.Tui_decode.tool_envelope_outcome json |> Result.map_error annotate_error)
+      end
   | ( Workspace_identity_match | Workspace_identity_mismatch _
     | Workspace_identity_unread | Workspace_identity_match_unconfirmed _ ), _ ->
       report_action state "error" "Cannot change goal: workspace identity is unverified"
@@ -18704,11 +18726,26 @@ let handle_goal_confirmation_key state ~mailbox =
                 ~en:"Read through the proof binding before confirming")
        | Ready confirmation ->
            supersede_home_decision_receipt state;
+           let ticket = Random_id.uuid_v7 () in
+           if not (note_goal_action_started state ~goal_id ~ticket) then
+             report_action state "error" ("Goal " ^ goal_id ^ ": a request is still in progress")
+           else begin
+           let origin = Option.fold ~none:"unconfirmed" ~some:(fun identity ->
+             Masc.Tui_decode.Canonical_path.to_string identity.sid_base_path
+             ^ " (masc root " ^ Masc.Tui_decode.Canonical_path.to_string identity.sid_masc_root ^ ")") state.server_identity in
+           let verdict = confirmation.Goal_confirmation.verdict in
+           let proof_context = " (proof request " ^ verdict.Goal_verification.request_id
+             ^ "; verification run " ^ verdict.verification_run_id ^ ")" in
+           let annotate_error error =
+             "Goal confirmation did not return a confirmed result; inspect the Goal before retrying: " ^ error
+             ^ proof_context in
            state.goal_confirmation <- Goal_confirmation.Submitting
                (goal_id, Goal_confirmation_read.clear read);
            state.planning_scroll <- 0;
-           launch_workspace_request state ~mailbox ~boundary_error:Fun.id
-             ~deliver:(fun result -> Goal_confirmation_submitted result)
+           launch_workspace_request ~operation:true state ~mailbox ~boundary_error:Fun.id
+             ~cancelled:(Goal_confirmation_submitted (goal_id, ticket, origin, Error (annotate_error "request interrupted")))
+             ~deliver:(fun result -> Goal_confirmation_submitted (goal_id, ticket, origin,
+               result |> Result.map (fun message -> message ^ proof_context) |> Result.map_error annotate_error))
              (fun () ->
                let open Result.Syntax in
                let* json = Masc_tui_http.post_goal_confirmation ~host ~port confirmation in
@@ -18720,6 +18757,7 @@ let handle_goal_confirmation_key state ~mailbox =
                | Goal_phase.Executing | Goal_phase.Verifying | Goal_phase.Awaiting_confirmation
                | Goal_phase.Dropped | Goal_phase.Paused _ | Goal_phase.Blocked _ | Completed -> Error "goal confirmation: server did not confirm completion"
              )
+           end
        | Loading -> ()
        (* A confirmation read before a failed re-read is not the goal's
           current state; confirming it would act on what the server no longer
@@ -18736,7 +18774,6 @@ let handle_goal_action_key state ~mailbox ~(action : Goal_phase.Public_action.t)
   match state.planning_mode with
   | Planning_detail goal_id when action = Goal_phase.Public_action.Drop ->
       state.goal_action_pending <- Some (Goal_drop_reason { goal_id; reason = "" });
-      state.goal_action_error <- None;
       report_action state "system"
         (Printf.sprintf "type why goal %s is dropped" goal_id)
   | Planning_detail goal_id -> (
@@ -18745,10 +18782,15 @@ let handle_goal_action_key state ~mailbox ~(action : Goal_phase.Public_action.t)
         when String.equal armed.goal_id goal_id
              && armed.action = action ->
           state.goal_action_pending <- None;
-          start_goal_transition state ~mailbox ~goal_id ~action
+          start_goal_transition ?retry_binding:armed.retry_binding state ~mailbox ~goal_id ~action
       | Some (Goal_action_armed _ | Goal_drop_reason _) | None ->
-          state.goal_action_pending <- Some (Goal_action_armed { goal_id; action });
-          state.goal_action_error <- None;
+          (match goal_detail_on_screen state with
+          | None -> ()
+          | Some goal ->
+          let retry_binding = match action with
+            | Goal_phase.Public_action.Request_complete -> goal.pg_retry_binding
+            | Drop | Reopen | Pause | Resume | Block | Unblock -> None in
+          state.goal_action_pending <- Some (Goal_action_armed { goal_id; action; phase=goal.pg_phase; retry_binding });
           report_action state "system"
             (Printf.sprintf "press %s again to %s goal %s"
                (planning_action_key action)
@@ -18761,7 +18803,7 @@ let handle_goal_action_key state ~mailbox ~(action : Goal_phase.Public_action.t)
                 | Goal_phase.Public_action.Resume -> "resume"
                 | Goal_phase.Public_action.Block -> "block"
                 | Goal_phase.Public_action.Unblock -> "unblock")
-               goal_id))
+               goal_id)))
   | Planning_list -> ()
 
 
@@ -19987,6 +20029,11 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
           ignore (Eio.Promise.try_resolve acknowledge false)
         | Keeper_chat_done (_, _, _, acknowledge) ->
           ignore (Eio.Promise.try_resolve acknowledge ())
+        | Workspace_operation (Goal_transition_done (goal_id, ticket, workspace, result)
+                              | Goal_confirmation_submitted (goal_id, ticket, workspace, result)) ->
+          record_goal_action_receipt state ~goal_id ~ticket ~workspace result;
+          report_action state "error" ("Goal " ^ goal_id ^ " from " ^ workspace
+            ^ ": a request outcome arrived after workspace authority was withdrawn; inspect Work summary")
         | Workspace_operation (Resource_share_changed (request, result)) ->
           if resource_share_is_owned state request then begin
             let read_key = finish_resource_share state request result in
@@ -21633,31 +21680,39 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
           Masc_tui_board_requests.start_board_post_refresh state ~host:server_peer_host
             ~port:state.port ~post_id ~launch:(launch_workspace_request state ~mailbox ~boundary_error:Fun.id))
         target result
-  | (Goal_transition_done result | Goal_confirmation_submitted result) as message -> (
-      (match message, state.goal_confirmation with
-       | Goal_confirmation_submitted _, Goal_confirmation.Submitting (_, read) ->
+  | Goal_transition_done (goal_id, ticket, workspace, result) ->
+      record_goal_action_receipt state ~goal_id ~ticket ~workspace result;
+      let current = note_goal_action_result state ~goal_id ~ticket result in
+      let label = "Goal " ^ goal_id ^ (if current then "" else " (earlier request)") ^ ": " in
+      (match result with
+       | Ok message ->
+           report_action state "system" (label ^ message);
+           (* Even a superseded response may have changed the workspace. *)
+           start_http_refresh state ~host:(server_peer_host)
+             ~port:state.port ~intent:Revalidate
+             ~refresh_inflight:http_refresh_inflight
+             ~scoped_refresh_inflight:http_scoped_refresh_inflight
+             ~scoped_refresh_followup ~mailbox
+       | Error err ->
+           report_action state "error" (label ^ err))
+  | Goal_confirmation_submitted (goal_id, ticket, workspace, result) ->
+      record_goal_action_receipt state ~goal_id ~ticket ~workspace result;
+      (match state.goal_confirmation with
+       | Goal_confirmation.Submitting (submitted_goal, read) when String.equal submitted_goal goal_id ->
            state.goal_confirmation <- Goal_confirmation.Inspecting read
-       | Runtime_form_save_changed _, _ | Keeper_settings_save_changed _, _
-       | Keeper_queue_action_received _, _ -> ()
-       | (Goal_confirmation_submitted _, Goal_confirmation.Inspecting _)
-       | ((Approvals_listing_superseded | (Surface_composer_released | (Chat_search_finished (_, _, _, _) | (Workspace_scoped (_, _, _) | (Workspace_operation _ | (Chat_command_read_completed (_, _) | (Workspace_identity_unconfirmed _ | (Schedule_form_authority_refused _ | (Lane_package_catalog_loaded (_, _, _) | (Lane_package_preview_loaded (_, _, _) | (Keeper_queue_resume_confirmed (_,_, _, _) | (Keeper_queue_loaded (_, _, _, _) | (Lane_addons_loaded (_, _, _) | (Lane_application_loaded (_, _) | (Lane_subscriptions_loaded (_, _) | (Lane_declaration_loaded (_, _, _, _, _) | (Keeper_deletions_loaded (_, _) | (Msx_tick_withdrawn (_, _) | (Keeper_deletion_retry_done (_, _) | (Msx_frame_loaded (_, _) | (Msx_activity_loaded (_, _) | (Msx_live_loaded (_, _) | ( Dos_live_loaded (_, _) | ( Voice_wizard_saved (_, _) | ( Voice_agent_voices_loaded _ | ( Voice_agent_voice_saved _ | ( Voice_wizard_probed (_, _) | ( Voice_wizard_reread (_, _) | ( Voice_config_loaded (_, _, _) | ( Voice_calibrated _ | Voice_level _ | ( Voice_transcribed _ | ( Voice_silent _ | ( Voice_discarded _ | ( Voice_failed _ | ( (Http_keeper_roster_loaded _ | Http_dataset_loaded _ | Http_surface_read_completed _ | Http_initial_identity_read _ | Http_overview_loaded _ | Http_asks_loaded _ | Http_approvals_loaded _ | Ask_answer_receipt_ready _ | Ask_followup_observed _ | Ask_followup_finished _ | Http_refresh_done _) | ( Http_refresh_failed (_, _, _) | ( Approvals_summary_loaded (_, _, _, _) | ( Http_scoped_refresh_done (_, _, _) | ( Http_scoped_refresh_failed (_, _, _, _, _, _) | ( Board_post_refresh_done (_, _) | ( Approval_decision_done (_, _, _, _, _) | ( Ask_answer_done (_, _, _) | ( Keeper_chat_dispatch_started (_, _, _) | ( Keeper_chat_done (_, _, _, _) | ( Keeper_chat_stream_deltas (_, _) | ( Keeper_chat_stream_unavailable (_, _) | ( Keeper_run_next_done (_, _) | ( Keeper_observed_interrupt_done (_, _, _, _) | ( Keeper_chat_interrupt_done (_, _, _) | ( (Keeper_chat_history_loaded (_, _, _) | Keeper_chat_first_page_loaded (_, _)) | ( Keeper_chat_copy_loaded (_, _, _) | ( Keeper_chat_operation_loaded _ | ( Keeper_chat_journal_loaded _ | ( Keeper_native_tasks_loaded (_, _) | ( Keeper_child_content_loaded (_, _) | Keeper_preparation_loaded (_, _) | ( Context_inspector_part_loaded (_, _) | Context_inspector_loaded (_, _, _) | ( Keeper_chat_older_loaded (_, _, _, _) | ( Local_workspace_read (_, _) | Local_keepers_read (_, _) | Live_context_loaded (_, _, _) | ( Keeper_logs_loaded _ | Keeper_execute_loaded _ | Keeper_execute_streamed _) | ( Lanes_loaded (_, _) | ( Lane_inventory_loaded (_, _) | ( Clients_loaded (_, _) | ( Lane_runs_loaded (_, _, _, _) | ( Lane_run_detail_loaded (_, _, _) | ( Measurement_artifact_loaded (_, _, _) | ( Verification_loaded _ | ( Harness_loaded _ | ( Fusion_runs_loaded (_, _) | ( Fusion_detail_loaded (_, _, _) | ( Fusion_historical_detail_loaded (_, _, _) | ( (Fusion_launch_options_loaded (_, _) | Memory_recall_standing_loaded (_, _)) | ( Fusion_launched (_, _) | ( Repositories_loaded _ | ( Workspace_activity_loaded (_, _) | ( Memory_loaded _ | ( Memory_input_loaded (_, _) | ( Memory_facts_loaded (_, _) | ( Repository_changes_loaded (_, _) | ( Repository_changes_diff_loaded (_, _) | ( File_changes_loaded (_, _) | ( Keeper_chat_file_changes_loaded (_, _, _) | ( Git_diff_loaded (_, _) | ( Browser_history_list_loaded (_, _) | ( Browser_history_page_loaded (_, _) | ( Browser_lane_clients_loaded (_, _) | ( Browser_lane_loaded (_, _) | ( Browser_lane_action_done (_, _) | ( Browser_lane_scene_loaded (_, _) | ( Browser_lane_follow_loaded (_, _) | ( Browser_lane_screenshot_ready _ | ( (Connectors_status_loaded (_, _) | Connectors_loaded (_, _)) | ( Connector_unbind_all_done _ | ( Runtime_surface_loaded (_, _) | ( Tools_loaded (_, _, _) | ( Skills_catalog_loaded (_, _) | ( Skill_evidence_loaded (_, _, _) | ( (Tools_async_observation_loaded (_, _) | ((Tools_async_detail_loaded _ | Task_document_prepared _) | Tools_async_task_body_loaded _ | Tools_async_task_history_loaded _)) | ( Runtime_lane_slots_written (_, _, _) | ( Runtime_catalog_loaded (_, _) | ( Runtime_assignment_changed (_, _, _) | ( Keeper_chat_approval_answered (_, _, _, _) | ( Keeper_tool_approvals_loaded (_, _, _) | ( Listen_prepared _ | Sent_image_ready _ | ( Image_render_ready _ | ( Keeper_turns_loaded _ | Keeper_waiting_loaded _ | ( Keeper_chat_control_received (_, _, _) | ( Gate_snapshot_loaded (_, _, _) | ( Gate_approval_resolved (_, _, _, _, _) | ( Gate_auto_judge_retried (_, _, _, _) | ( Gate_mode_set (_, _, _) | ( Surface_tool_approval_answered (_, _, _, _, _, _) | ( Keeper_gate_settings_loaded _ | ( Keeper_tool_modes_loaded (_, _) | ( Keeper_tool_mode_set (_, _, _, _) | ( Keeper_chat_dispatch_blocked (_, _) | ( Keeper_creation_changed _ | Keeper_action_done (_, _, _, _) | ( (Board_publication_done _ | Board_comment_done _) | ( (Board_vote_done _ | Artifact_check_changed _) | ( Goal_transition_done _ | ( Goal_confirmation_loaded (_, _) | ( Schedules_loaded (_, _) | ( Schedule_wake_history_loaded (_, _) | ( Keeper_schedules_loaded (_, _) | ( System_logs_loaded _ | ( Schedule_cancel_done (_, _) | ( Verification_verdict_done _ | ( Harness_label_done _ | ( Board_attachment_loaded _ | Board_attachment_prepared _ | Board_attachment_saved _ | Chat_call_loaded _ | Keeper_calls_loaded (_, _, _) | ( Goal_timeline_loaded (_, _) | ( Task_history_loaded (_, _) | ( Task_cancel_done (_, _, _) | ( (Verification_evidence_loaded (_, _) | Verification_evidence_exported _) | ( Keeper_settings_editor_loaded _ | Keeper_config_view_loaded (_, _) | ( Keeper_items_loaded (_, _) | ( Keeper_sandbox_view_loaded (_, _) | ( Keeper_sandbox_logs_loaded (_, _, _) | ( Exact_activity_read (_, _) | ( Exact_activity_saved (_, _) | ( Machine_activity_read (_, _) | ( Machine_activity_saved (_, _) | ( Runtime_config_view_loaded (_, _, _, _, _) | ( Runtime_params_loaded _ | ( Runtime_param_written (_, _) | ( Prompts_loaded (_, _) | ( Keeper_board_quarantines_loaded (_, _) | ( Board_quarantine_requeued (_, _, _) | ( Board_quarantines_bulk_progress (_, _, _, _, _, _) | ( Board_quarantines_bulk_requeued (_, _) | ( Presets_listed (_, _) | ( Preset_detail_loaded (_, _) | ( Preset_contents_shown (_, _) | ( Preset_saved (_, _) | ( Preset_restored (_, _) | ( Preset_deleted (_, _) | ( Play_room_received (_, _) | ( Play_invites_listed (_, _) | ( Play_invite_issued (_, _, _) | ( Play_invite_revoked (_, _, _, _) | ( Librarian_input_loaded (_, _) | ( (Resources_listed _ | Artifact_checks_loaded _) | ( Code_draft_saved _ | Code_catalog_loaded (_, _) | Code_finder_file_loaded (_, _) | Code_entries_loaded (_, _) | ( Code_file_loaded (_, _, _) | ( Code_history_loaded (_, _) | ( Code_diff_loaded (_, _) | ( Acting_pane_changes_loaded (_, _) | ( Code_blame_loaded (_, _) | ( Code_lsp_answered (_, _) | ( Resource_exported _ | Resource_share_changed _ | Resource_share_recovery_loaded _ | Resource_read (_,_, _) | Resource_diagram_ready _ | ( Github_identity_view_loaded (_, _) | ( Identity_providers_loaded (_, _, _) | Identity_disconnected (_, _, _) | ( Identity_switch_set (_, _, _, _) | ( Identity_login_started (_, _) | ( Identity_refreshed (_, _) | ( Identity_app_saved (_, _, _) | ( Account_login_event (_, _, _) | ( Account_login_json (_, _, _, _) | ( Account_login_removal (_, _, _, _, _) | ( Github_login_lines (_, _) | ( Github_login_finished (_, _) | ( Github_token_saved (_, _) | ( Observer_session_ready _ | Observer_opened _ | ( Observer_received (_, _) | ( Observer_closed _ | Observer_retry_due _ | Observer_recovery_ready _ | Observer_recovery_identity _ | Fleet_stream_view _ | Fleet_stream_reader_ended _ | ( Task_dispatch_completed _ | Task_creation_read_done _ | Original_task_read_done _ | Original_task_history_done _ | Original_task_evidence_done _))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))), _) -> ());
-      match result with
-      | Ok message ->
-          state.goal_action_pending <- None;
-          state.goal_action_error <- None;
-          report_action state "system" ("Goal: " ^ message);
-          (* The phase shown is the half the periodic refresh has not fetched
-             yet; without this the detail keeps the old phase after the
-             operator already changed it. *)
-          start_http_refresh state ~host:(server_peer_host)
-            ~port:state.port ~intent:Revalidate
-            ~refresh_inflight:http_refresh_inflight
-            ~scoped_refresh_inflight:http_scoped_refresh_inflight
-            ~scoped_refresh_followup ~mailbox
-      | Error err ->
-          state.goal_action_pending <- None;
-          state.goal_action_error <- Some err;
-          report_action state "error" ("Goal: " ^ err))
+       | Goal_confirmation.Submitting _ | Goal_confirmation.Inspecting _ -> ());
+      let current = note_goal_action_result state ~goal_id ~ticket result in
+      let label = "Goal " ^ goal_id ^ (if current then "" else " (earlier request)") ^ ": " in
+      (match result with
+       | Ok message ->
+           report_action state "system" (label ^ message);
+           start_http_refresh state ~host:(server_peer_host)
+             ~port:state.port ~intent:Revalidate
+             ~refresh_inflight:http_refresh_inflight
+             ~scoped_refresh_inflight:http_scoped_refresh_inflight
+             ~scoped_refresh_followup ~mailbox
+       | Error err ->
+           report_action state "error" (label ^ err))
   | Goal_confirmation_loaded (request, result) ->
       (match state.goal_confirmation with
        | Goal_confirmation.Inspecting read ->
@@ -29965,9 +30020,17 @@ Use relative paths for resources already held in the package. -->
               ends on the next key like any armed action. *)
            (match state.goal_action_pending with
             | Some (Goal_drop_reason _) when not compact_viewport -> ()
-            | Some (Goal_action_armed _ | Goal_drop_reason _) | None ->
-                if cancelled [ "c"; "C"; "x"; "X"; "o"; "O" ] then
-                  state.goal_action_pending <- None);
+            | Some (Goal_action_armed armed) ->
+                let current = Option.exists (fun goal ->
+                  String.equal goal.pg_id armed.goal_id
+                  && planning_goal_retains_arm goal ~action:armed.action
+                       ~phase:armed.phase ~retry_binding:armed.retry_binding)
+                    (goal_detail_on_screen state) in
+                if not current || cancelled (planning_action_confirmation_keys armed.action) then
+                  state.goal_action_pending <- None
+            | Some (Goal_drop_reason _) ->
+                if input_seen then state.goal_action_pending <- None
+            | None -> ());
            (* Scrolling reads the exact proof; leaving it invalidates pending
               reads as well as an already displayed confirmation binding. *)
            if cancelled [ "a"; "A"; "j"; "k"; "up"; "down";
@@ -31299,14 +31362,16 @@ Use relative paths for resources already held in the package. -->
               (match k with
                | "esc" ->
                  state.goal_action_pending <- None;
-                 state.goal_action_error <- None
+                 clear_goal_action_error state ~goal_id:entry.goal_id
                | "\r" | "\n" | "enter" ->
                  let reason = String.trim entry.reason in
                  if String.equal reason "" then
-                   state.goal_action_error <- Some "A drop needs a reason; type why, or Esc to cancel"
+                   set_goal_action_error state ~goal_id:entry.goal_id "A drop needs a reason; type why, or Esc to cancel"
+                 else if List.mem_assoc entry.goal_id state.goal_action_inflight then
+                   set_goal_action_error state ~goal_id:entry.goal_id "A request is still in progress; the drop reason is retained"
                  else begin
                    state.goal_action_pending <- None;
-                   state.goal_action_error <- None;
+                   clear_goal_action_error state ~goal_id:entry.goal_id;
                    start_goal_transition state ~mailbox:async_messages ~note:reason
                      ~goal_id:entry.goal_id ~action:Goal_phase.Public_action.Drop
                  end
@@ -35642,8 +35707,7 @@ Use relative paths for resources already held in the package. -->
            && Option.exists
                 (fun action ->
                    let goal = Option.get (goal_detail_on_screen state) in
-                   Goal_phase.moves_goal ~phase:goal.pg_phase
-                     ~action:(Goal_phase.Public_action.to_action action))
+                   planning_goal_offers_action goal action)
                 (planning_action_of_key key) ->
            (* Detail actions take precedence over global refresh/navigation.
               The displayed keys and parser share one owner. *)

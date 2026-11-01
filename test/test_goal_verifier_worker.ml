@@ -1112,7 +1112,14 @@ let test_actual_explicit_retry_and_unknown_fence () =
         {message="reply lost"; kind=Llm_provider.Http_client.Connection_reset}))
       else Error (Agent_core.Error.Api (Agent_core.Retry.NotFound {message="candidate removed"}))) (fun () ->
       ignore (run store retained authority);
-      transition config subject.goal_id "request_complete";
+      let ctx : Workspace_types.context = {config; agent_name="planner"} in
+      let result = Workspace_goals.handle_goal_transition ~tool_name:"goal_transition"
+          ~start_time:(Tool_timing.start ()) ctx
+          (`Assoc ["goal_id", `String subject.goal_id; "action", `String "request_complete"]) in
+      Alcotest.(check bool) "retry response distinguishes unknown from settled refusal"
+        (not unknown) (Tool_result.is_success result);
+      if unknown then Alcotest.(check bool) "unknown response explains why no review started" true
+        (String_util.contains_substring (Tool_result.message result) "outcome is unknown");
       let rows = checked (W.inventory ~store ~installation_id:W.host_installation_id ~package_id:W.host_package_id) in
       Alcotest.(check int) "explicit request links only a definitely settled failure" (if unknown then 1 else 2) (List.length rows);
       Atomic.set AR.run_llm_reviewer_fn (actual_approve calls);

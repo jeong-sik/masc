@@ -30,7 +30,10 @@ const {
 vi.mock('./core', () => ({
   clearStoredToken,
   currentDashboardActor,
-  fetchWithTimeout,
+  fetchWithTimeout: (path: string, init: RequestInit, timeout: number, consume?: (res: Response) => Promise<unknown>) => {
+    const response = fetchWithTimeout(path, init, timeout, consume)
+    return consume ? Promise.resolve(response).then(consume) : response
+  },
   getStoredToken,
   getStoredTokenMeta,
   isRemoteAccess,
@@ -61,6 +64,13 @@ describe('ensureDevToken', () => {
 
   afterEach(() => {
     vi.useRealTimers()
+  })
+
+  it('marks a JSON null token response invalid', async () => {
+    fetchWithTimeout.mockResolvedValueOnce(jsonResponse(null))
+    await ensureDevToken()
+    expect(devTokenBootstrapStatus.value).toBe('invalid_response')
+    expect(setStoredToken).not.toHaveBeenCalled()
   })
 
   it('requires an explicit bootstrap call after the server warm-up payload', async () => {

@@ -65,7 +65,10 @@ const {
 vi.mock('./core', () => ({
   ApiRequestError,
   apiRequestErrorFromResponse,
-  fetchWithTimeout,
+  fetchWithTimeout: (path: string, init: RequestInit, timeout: number, consume?: (res: Response) => Promise<unknown>) => {
+    const response = fetchWithTimeout(path, init, timeout, consume)
+    return consume ? Promise.resolve(response).then(consume) : response
+  },
   DEFAULT_MCP_TIMEOUT_MS: 30000,
   authHeaders,
   clearStoredToken,

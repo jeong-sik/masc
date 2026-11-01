@@ -2676,6 +2676,10 @@ let planning_action_of_key key =
   List.find_opt (fun action -> String.equal (planning_action_key action) key)
     Goal_phase.Public_action.all
 
+let planning_action_confirmation_keys action =
+  let key = planning_action_key action in
+  [ key; String.uppercase_ascii key ]
+
 let planning_action_label = function
   | Goal_phase.Public_action.Request_complete -> "Request completion"
   | Goal_phase.Public_action.Drop -> "Drop"

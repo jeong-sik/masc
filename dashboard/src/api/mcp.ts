@@ -185,22 +185,23 @@ async function mcpPost(
 ): Promise<string> {
   assertBinding(binding)
   const request = currentRequest(body)
-  const res = await fetchWithTimeout('/mcp', {
+  return fetchWithTimeout('/mcp', {
     method: 'POST',
     headers: mcpHeadersForActor(binding, request.method, request.name, actorName),
     body: JSON.stringify(request.body),
-  }, timeoutMs)
-  assertBinding(binding)
-  if (!res.ok) {
-    if (res.status === 403) {
-      blockedAuthRevision = binding.authRevision
-      throw new Error(MCP_BLOCKED_MESSAGE)
+  }, timeoutMs, async res => {
+    assertBinding(binding)
+    if (!res.ok) {
+      if (res.status === 403) {
+        blockedAuthRevision = binding.authRevision
+        throw new Error(MCP_BLOCKED_MESSAGE)
+      }
+      throw await apiRequestErrorFromResponse('POST', '/mcp', res, true)
     }
-    throw await apiRequestErrorFromResponse('POST', '/mcp', res)
-  }
-  const text = await res.text()
-  assertBinding(binding)
-  return text
+    const text = await res.text()
+    assertBinding(binding)
+    return text
+  })
 }
 
 async function ensureBinding(): Promise<McpRequestBinding> {
@@ -376,7 +377,7 @@ async function callMcpToolInternal(
     const message = errorToString(err)
     const failure = toolHostFailureObservation(err)
     if (failure) {
-      await bestEffortReportToolHostFailure({
+      void bestEffortReportToolHostFailure({
         toolName,
         message,
         phase: 'tools/call',

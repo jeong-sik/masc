@@ -150,6 +150,56 @@ let test_generated_decision_note_is_read_without_rewriting_history () =
     check bool "read preserves both original journal shapes" true
       (List.mem recorded.event decisions && List.mem historical decisions))
 
+let test_historical_turn_spelling_preserves_conflict_and_retry () =
+  with_fixture (fun config task_id _ ->
+    let proposal = Fusion_decision.parse
+      (args task_id "adopted" "Measured evidence supports it") |> require "parse" in
+    let recorded = Fusion_decision.record ~config ~keeper:"fusion-keeper"
+      ~turn_ref proposal |> require "record" in
+    let fields = match recorded.event with
+      | `Assoc fields -> fields
+      | _ -> fail "recorded decision is not an object" in
+    let dated = events_day_file config in
+    let original_lines = Fs_compat.load_file dated.path |> String.split_on_char '\n' in
+    let original_line = Yojson.Safe.to_string recorded.event in
+    check int "fixture contains exactly the generated decision row" 1
+      (List.length (List.filter (String.equal original_line) original_lines));
+    let historical turn =
+      `Assoc (("notes", `Assoc ["annotation", `String "Preserve this historical shape"])
+        :: List.rev_map (fun (key, value) ->
+          key, if String.equal key "turn_ref" then turn else value) fields) in
+    let replace_generated_row event =
+      let replacement = Yojson.Safe.to_string event in
+      let bytes = List.map (fun line ->
+          if String.equal line original_line then replacement else line) original_lines
+        |> String.concat "\n" in
+      Fs_compat.save_file_atomic dated.path bytes |> require "install historical row";
+      bytes in
+    let historical_turn = `String (Printf.sprintf "%s#0%d"
+      (Ids.Turn_ref.trace_id turn_ref) (Ids.Turn_ref.absolute_turn turn_ref)) in
+    let noncanonical = historical historical_turn in
+    let before_conflict = replace_generated_row noncanonical in
+    let decisions = Fusion_decision.read ~config ~run_id:"run-advice"
+      |> require "read noncanonical historical decision" in
+    check bool "read retains field order, object notes and observed turn spelling" true
+      (decisions = [noncanonical]);
+    (match Fusion_decision.record ~config ~keeper:"fusion-keeper" ~turn_ref proposal with
+     | Error (Fusion_decision.Rejected _ as error) ->
+       check bool "canonical retry of another stored spelling is a workflow conflict" true
+         (Fusion_decision.failure_class error = Tool_result.Workflow_rejection)
+     | Error (Fusion_decision.Storage_failure _) | Ok _ ->
+       fail "noncanonical stored spelling did not preserve the retry conflict");
+    check bool "conflict leaves every journal byte unchanged" true
+      (String.equal before_conflict (Fs_compat.load_file dated.path));
+    let canonical = historical (Ids.Turn_ref.to_yojson turn_ref) in
+    let before_retry = replace_generated_row canonical in
+    let retried = Fusion_decision.record ~config ~keeper:"fusion-keeper"
+      ~turn_ref proposal |> require "retry canonical historical decision" in
+    check bool "idempotent retry returns the original reordered and noted object" true
+      (retried.event = canonical && retried.cleanup_warning = None);
+    check bool "idempotent retry appends and normalizes no journal bytes" true
+      (String.equal before_retry (Fs_compat.load_file dated.path)))
+
 let test_bad_source_and_storage () = with_fixture (fun config task_id _ ->
   let proposal = Fusion_decision.parse (args task_id "adopted" "Measured evidence supports it") |> require "parse" in
   rejected (Fusion_decision.read_for_keeper ~config ~keeper:"foreign" ~run_id:"run-advice");
@@ -302,6 +352,8 @@ let () = run "Fusion decision attribution" ["behavior", [
   test_case "captured request context survives criterion changes and validates scope" `Quick test_request_context_snapshot;
   test_case "model dispatch persists distinct choice and task/goal/turn readback" `Quick test_runtime_record_and_read;
   test_case "generated decision note is read without rewriting history" `Quick test_generated_decision_note_is_read_without_rewriting_history;
+  test_case "historical turn spelling preserves conflict and lossless retry" `Quick
+    test_historical_turn_spelling_preserves_conflict_and_retry;
   test_case "read-only lookup respects source ownership and does not adopt advice" `Quick test_read_source_ownership_and_no_adoption;
   test_case "unknown or foreign source and unreadable history refuse writes" `Quick test_bad_source_and_storage;
   test_case "a decision names only the Task its run was requested for" `Quick test_a_decision_names_the_task_its_run_was_requested_for]]

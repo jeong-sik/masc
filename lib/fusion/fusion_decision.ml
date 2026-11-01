@@ -1,11 +1,9 @@
 (** Keeper decisions are task-history events, distinct from Fusion judge advice. *)
 open Result.Syntax
 
-type disposition = Adopted | Rejected | Modified
-let disposition_to_string = function Adopted -> "adopted" | Rejected -> "rejected" | Modified -> "modified"
-let disposition_of_string = function
-  | "adopted" -> Ok Adopted | "rejected" -> Ok Rejected | "modified" -> Ok Modified
-  | _ -> Error "decision must be adopted, rejected or modified"
+module Event = Fusion_decision_event
+
+type disposition = Event.disposition = Adopted | Rejected | Modified
 
 type error = Rejected of string | Storage_failure of string
 let error_to_string = function Rejected detail | Storage_failure detail -> detail
@@ -15,24 +13,8 @@ let failure_class = function
 
 type recorded = { event : Yojson.Safe.t; cleanup_warning : string option }
 
-type proposal = { run_id:string; task_id:string; disposition:disposition; choice:string; reason:string }
-let parse json =
-  let* fields = match json with `Assoc fields -> Ok fields | _ -> Error "decision must be an object" in
-  let names = List.map fst fields in
-  if List.exists (fun name -> not (List.mem name ["run_id"; "task_id"; "decision"; "choice"; "reason"])) names
-     || List.length names <> List.length (List.sort_uniq String.compare names)
-  then Error "unknown or duplicate decision fields"
-  else
-    let string name = match List.assoc_opt name fields with
-      | Some (`String value) when String.trim value <> "" -> Ok value
-      | _ -> Error (name ^ " must be nonblank") in
-    let* run_id = string "run_id" in
-    let* task_id = string "task_id" in
-    let* decision = string "decision" in
-    let* disposition = disposition_of_string decision in
-    let* choice = string "choice" in
-    let* reason = string "reason" in
-    Ok {run_id; task_id; disposition; choice; reason}
+type proposal = Event.proposal
+let parse = Event.parse
 
 let validate_source ~run_id (post : Board.post) =
   match post.origin with
@@ -59,28 +41,6 @@ let evidence_sha256 (post : Board.post) =
   Agent_core_sha256.(digest_string (Yojson.Safe.to_string
     (`Assoc ["body", `String post.body; "meta", (match post.meta_json with Some json -> json | None -> `Null)])) |> to_hex)
 
-let validate_event json =
-  let names = ["type"; "decision_id"; "fusion_run_id"; "fusion_post_id"; "fusion_evidence_sha256"; "task";
-    "goal_ids"; "agent"; "actor_kind"; "turn_ref"; "decision"; "choice"; "reason"; "ts"] in
-  let* fields = match json with
-    | `Assoc fields when List.sort String.compare (List.map fst (List.remove_assoc "notes" fields)) = List.sort String.compare names -> Ok fields
-    | _ -> Error "invalid Fusion decision event fields" in
-  let value key = List.assoc key fields in
-  let string key = match value key with `String text when String.trim text <> "" -> Ok text
-    | _ -> Error ("invalid decision event " ^ key) in
-  let* _ = List.fold_left (fun result key -> let* () = result in let* _ = string key in Ok ()) (Ok ())
-    ["decision_id"; "fusion_run_id"; "fusion_post_id"; "fusion_evidence_sha256"; "task"; "agent"; "ts"] in
-  let* decision = string "decision" in
-  let* _ = disposition_of_string decision in
-  let* _ = string "choice" in
-  let* _ = string "reason" in
-  let* _ = Ids.Turn_ref.of_yojson (value "turn_ref") in
-  let* () = match value "goal_ids" with
-    | `List goals when List.for_all (function `String id -> String.trim id <> "" | _ -> false) goals -> Ok ()
-    | _ -> Error "invalid decision Goal context" in
-  if value "actor_kind" <> `String "keeper" then Error "invalid decision actor kind"
-  else Ok json
-
 let events_location config =
   Dated_jsonl.Store.at
     (Workspace.dated_store_root config)
@@ -92,7 +52,7 @@ let protect f = try f () with
 
 (* Read the existing task event journal without an arbitrary history cap. A
    malformed row prevents a new write from guessing whether its identity exists. *)
-let read ~config ~run_id = protect (fun () ->
+let read_events ~config ~run_id = protect (fun () ->
   let root = events_root config in
   let rows = ref [] in
   if Sys.file_exists root then
@@ -105,12 +65,14 @@ let read ~config ~run_id = protect (fun () ->
             |> String.split_on_char '\n'
             |> List.iter (fun line -> if String.trim line <> "" then
               let json = Yojson.Safe.from_string line in
-              if Json_util.get_string json "type" = Some "fusion_decision"
-                 && Json_util.get_string json "fusion_run_id" = Some run_id
-              then (match validate_event json with
-                | Ok event -> rows := event :: !rows
-                | Error detail -> raise (Yojson.Json_error detail)))) (Sys.readdir directory)) (Sys.readdir root);
-  Ok (List.sort (fun a b -> compare (Json_util.get_string a "ts") (Json_util.get_string b "ts")) !rows))
+              match Event.select_for_run ~run_id json with
+              | Ok None -> ()
+              | Ok (Some event) -> rows := event :: !rows
+              | Error detail -> raise (Yojson.Json_error detail))) (Sys.readdir directory)) (Sys.readdir root);
+  Ok (List.sort (fun a b -> String.compare (Event.timestamp a) (Event.timestamp b)) !rows))
+
+let read ~config ~run_id =
+  Result.map (List.map Event.to_yojson) (read_events ~config ~run_id)
 
 (* The Task a decision on this run may name: the one the request was captured
    for, read from the evidence post's source_context. Checking only that the
@@ -131,7 +93,7 @@ let run_task ~run_id (post : Board.post) =
        Error (Storage_failure (Printf.sprintf
          "Fusion run %s evidence carries an unreadable source_context: %s" run_id detail)))
 
-let record ~config ~keeper ~turn_ref proposal = protect (fun () ->
+let record ~config ~keeper ~turn_ref (proposal : proposal) = protect (fun () ->
   let* post = source ~keeper ~run_id:proposal.run_id in
   let* () = match run_task ~run_id:proposal.run_id post with
     | Error _ as error -> error
@@ -157,21 +119,16 @@ let record ~config ~keeper ~turn_ref proposal = protect (fun () ->
     "agent", `String keeper; "turn_ref", Ids.Turn_ref.to_yojson turn_ref] in
   let decision_id = Agent_core_sha256.(digest_string (Yojson.Safe.to_string identity) |> to_hex) in
   let evidence_sha256 = evidence_sha256 post in
-  let fields = ["fusion_evidence_sha256", `String evidence_sha256; "type", `String "fusion_decision"; "decision_id", `String decision_id;
-    "fusion_run_id", `String proposal.run_id; "fusion_post_id", `String (Board.Post_id.to_string post.id);
-    "task", `String proposal.task_id; "goal_ids", `List (List.map (fun id -> `String id) goal_ids);
-    "agent", `String keeper; "actor_kind", `String "keeper"; "turn_ref", Ids.Turn_ref.to_yojson turn_ref;
-    "decision", `String (disposition_to_string proposal.disposition); "choice", `String proposal.choice;
-    "reason", `String proposal.reason] in
+  let payload = Event.prepare ~decision_id ~evidence_sha256
+      ~post_id:(Board.Post_id.to_string post.id) ~goal_ids ~agent:keeper ~turn_ref proposal in
   Workspace_utils.with_file_lock config (Filename.concat (events_root config) "fusion-decision.lock") (fun () ->
-    let* existing = read ~config ~run_id:proposal.run_id in
-    match List.find_opt (fun row -> Json_util.get_string row "decision_id" = Some decision_id) existing with
-    | Some (`Assoc stored as row) ->
-      if List.for_all (fun (key,value) -> List.assoc_opt key stored = Some value) fields then Ok {event=row; cleanup_warning=None}
+    let* existing = read_events ~config ~run_id:proposal.run_id in
+    match List.find_opt (fun event -> String.equal (Event.decision_id event) decision_id) existing with
+    | Some event ->
+      if Event.matches_payload event payload then Ok {event=Event.to_yojson event; cleanup_warning=None}
       else Error (Rejected "this turn already recorded a different decision for this run and task")
-    | Some _ -> Error (Storage_failure "invalid existing decision event")
     | None ->
-      let event = `Assoc (fields @ ["ts", `String (Masc_domain.now_iso ())]) in
+      let event = Event.encode payload ~timestamp:(Masc_domain.now_iso ()) in
       let dated = Dated_jsonl.Store.dated_path_now (events_location config) in
       (match Fs_compat.append_private_jsonl_durable_locked_result dated.path (Yojson.Safe.to_string event ^ "\n") with
        | Fs_compat.Private_file_succeeded () -> Ok {event; cleanup_warning=None}
@@ -185,8 +142,9 @@ let record ~config ~keeper ~turn_ref proposal = protect (fun () ->
 
 let read_for_keeper ~config ~keeper ~run_id =
   let* _ = source ~keeper ~run_id in
-  let* rows = read ~config ~run_id in
-  Ok (List.filter (fun row -> Json_util.get_string row "agent" = Some keeper) rows)
+  let* rows = read_events ~config ~run_id in
+  Ok (List.filter (fun event -> String.equal (Event.agent event) keeper) rows
+      |> List.map Event.to_yojson)
 
 let read_to_yojson = function
   | Ok records -> `Assoc ["state", `String "available"; "records", `List records]

@@ -2250,7 +2250,7 @@
  (name test_keeper_tool_bundle_classifiable)
  (modules test_keeper_tool_bundle_classifiable)
  (libraries masc_test_deps exact_output_fixture mcp_protocol
-  masc.skill_config masc.skill_reference masc.mcp_client))
+  masc.keeper_identity masc.skill_config masc.skill_reference masc.mcp_client))
 
 ; Real local exact-output fixture shared by exact-output lane tests.
 (library

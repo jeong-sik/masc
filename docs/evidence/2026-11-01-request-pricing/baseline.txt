@@ -1,0 +1,143 @@
+2026-11-01T03:19:48.9703311Z   SUITES: packages/agent_core/test/test_request_pricing_snapshot
+2026-11-01T03:20:03.5391789Z HEAD is now at d4d39a6c test(agent-core): reproduce response and Agent pricing catalog drift
+2026-11-01T03:21:04.0429151Z   TARGET_SUITES: packages/agent_core/test/test_request_pricing_snapshot
+2026-11-01T03:21:04.0518763Z   TARGET_SUITES: packages/agent_core/test/test_request_pricing_snapshot
+2026-11-01T03:21:04.0813170Z [targeted] EIO_BACKEND=<unset> timeout=600s per suite
+2026-11-01T03:21:04.0834566Z [targeted] @@packages/agent_core/test/runtest-test_request_pricing_snapshot: start 2026-11-01T03:21:04Z (dune alias)
+2026-11-01T03:21:32.3779394Z   [FAIL]        price authority          0   selection before config conversion.
+2026-11-01T03:21:32.3789946Z   [FAIL]        price authority          1   frozen config before dispatch.
+2026-11-01T03:21:32.3793579Z   [FAIL]        price authority          2   sync catalog replacement during ...
+2026-11-01T03:21:32.3802210Z   [FAIL]        price authority          3   stream catalog replacement durin...
+2026-11-01T03:21:32.3806508Z   [FAIL]        price authority          4   exact returned model in captured...
+2026-11-01T03:21:32.3810589Z   [FAIL]        price authority          5   absent rates remain absent in re...
+2026-11-01T03:21:32.3814218Z   [FAIL]        price authority          6   Agent fallback uses selected aut...
+2026-11-01T03:21:32.3824337Z   [OK]          price authority          7   provider charge and zero retain ...
+2026-11-01T03:21:32.3832184Z   [FAIL]        price authority          8   provider overlay cannot regain s...
+2026-11-01T03:21:32.3842924Z   [FAIL]        price authority          9   fresh selection and endpoint rot...
+2026-11-01T03:21:32.3843810Z │ [FAIL]        price authority          0   selection before config conve...  │
+2026-11-01T03:21:32.3844181Z └──────────────────────────────────────────────────────────────────────────────┘
+2026-11-01T03:21:32.3844680Z File "fun.ml", line 34, character 8:
+2026-11-01T03:21:32.3845024Z FAIL cost uses the request-owned price authority
+2026-11-01T03:21:32.3845247Z
+2026-11-01T03:21:32.3845428Z    Expected: `Some 3'
+2026-11-01T03:21:32.3845663Z    Received: `Some 30'
+2026-11-01T03:21:32.3845827Z
+2026-11-01T03:21:32.3846184Z Raised at Alcotest_engine__Test.check in file "src/alcotest-engine/test.ml", lines 216-226, characters 4-19
+2026-11-01T03:21:32.3846645Z Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+2026-11-01T03:21:32.3847080Z Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+2026-11-01T03:21:32.3847609Z Called from Alcotest_engine__Core.Make.protect_test.(fun) in file "src/alcotest-engine/core.ml", line 186, characters 17-23
+2026-11-01T03:21:32.3848110Z Called from Alcotest_engine__Monad.Identity.catch in file "src/alcotest-engine/monad.ml", line 24, characters 31-35
+2026-11-01T03:21:32.3849422Z │ [FAIL]        price authority          1   frozen config before dispatch.    │
+2026-11-01T03:21:32.3850030Z └──────────────────────────────────────────────────────────────────────────────┘
+2026-11-01T03:21:32.3850394Z File "fun.ml", line 34, character 8:
+2026-11-01T03:21:32.3850879Z FAIL cost uses the request-owned price authority
+2026-11-01T03:21:32.3851117Z
+2026-11-01T03:21:32.3851290Z    Expected: `Some 3'
+2026-11-01T03:21:32.3851565Z    Received: `Some 30'
+2026-11-01T03:21:32.3851739Z
+2026-11-01T03:21:32.3852212Z Raised at Alcotest_engine__Test.check in file "src/alcotest-engine/test.ml", lines 216-226, characters 4-19
+2026-11-01T03:21:32.3852732Z Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+2026-11-01T03:21:32.3853222Z Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+2026-11-01T03:21:32.3853770Z Called from Alcotest_engine__Core.Make.protect_test.(fun) in file "src/alcotest-engine/core.ml", line 186, characters 17-23
+2026-11-01T03:21:32.3854460Z Called from Alcotest_engine__Monad.Identity.catch in file "src/alcotest-engine/monad.ml", line 24, characters 31-35
+2026-11-01T03:21:32.3856951Z │ [FAIL]        price authority          2   sync catalog replacement duri...  │
+2026-11-01T03:21:32.3857468Z └──────────────────────────────────────────────────────────────────────────────┘
+2026-11-01T03:21:32.3857860Z File "fun.ml", line 34, character 8:
+2026-11-01T03:21:32.3858201Z FAIL cost uses the request-owned price authority
+2026-11-01T03:21:32.3858382Z
+2026-11-01T03:21:32.3858519Z    Expected: `Some 3'
+2026-11-01T03:21:32.3858718Z    Received: `Some 30'
+2026-11-01T03:21:32.3858807Z
+2026-11-01T03:21:32.3858994Z Raised at Alcotest_engine__Test.check in file "src/alcotest-engine/test.ml", lines 216-226, characters 4-19
+2026-11-01T03:21:32.3859428Z Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+2026-11-01T03:21:32.3859897Z Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+2026-11-01T03:21:32.3860435Z Called from Alcotest_engine__Core.Make.protect_test.(fun) in file "src/alcotest-engine/core.ml", line 186, characters 17-23
+2026-11-01T03:21:32.3860969Z Called from Alcotest_engine__Monad.Identity.catch in file "src/alcotest-engine/monad.ml", line 24, characters 31-35
+2026-11-01T03:21:32.3862833Z │ [FAIL]        price authority          3   stream catalog replacement du...  │
+2026-11-01T03:21:32.3863188Z └──────────────────────────────────────────────────────────────────────────────┘
+2026-11-01T03:21:32.3863537Z File "fun.ml", line 34, character 8:
+2026-11-01T03:21:32.3863782Z FAIL cost uses the request-owned price authority
+2026-11-01T03:21:32.3863939Z
+2026-11-01T03:21:32.3864089Z    Expected: `Some 3'
+2026-11-01T03:21:32.3864272Z    Received: `Some 30'
+2026-11-01T03:21:32.3864361Z
+2026-11-01T03:21:32.3864546Z Raised at Alcotest_engine__Test.check in file "src/alcotest-engine/test.ml", lines 216-226, characters 4-19
+2026-11-01T03:21:32.3864905Z Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+2026-11-01T03:21:32.3865204Z Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+2026-11-01T03:21:32.3865567Z Called from Alcotest_engine__Core.Make.protect_test.(fun) in file "src/alcotest-engine/core.ml", line 186, characters 17-23
+2026-11-01T03:21:32.3865997Z Called from Alcotest_engine__Monad.Identity.catch in file "src/alcotest-engine/monad.ml", line 24, characters 31-35
+2026-11-01T03:21:32.3867593Z │ [FAIL]        price authority          4   exact returned model in captu...  │
+2026-11-01T03:21:32.3867918Z └──────────────────────────────────────────────────────────────────────────────┘
+2026-11-01T03:21:32.3868134Z File "fun.ml", line 34, character 8:
+2026-11-01T03:21:32.3868349Z FAIL cost uses the request-owned price authority
+2026-11-01T03:21:32.3868475Z
+2026-11-01T03:21:32.3868546Z    Expected: `Some 12'
+2026-11-01T03:21:32.3868704Z    Received: `Some 120'
+2026-11-01T03:21:32.3868793Z
+2026-11-01T03:21:32.3868951Z Raised at Alcotest_engine__Test.check in file "src/alcotest-engine/test.ml", lines 216-226, characters 4-19
+2026-11-01T03:21:32.3869269Z Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+2026-11-01T03:21:32.3869522Z Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+2026-11-01T03:21:32.3869852Z Called from Alcotest_engine__Core.Make.protect_test.(fun) in file "src/alcotest-engine/core.ml", line 186, characters 17-23
+2026-11-01T03:21:32.3870253Z Called from Alcotest_engine__Monad.Identity.catch in file "src/alcotest-engine/monad.ml", line 24, characters 31-35
+2026-11-01T03:21:32.3871319Z │ [FAIL]        price authority          5   absent rates remain absent in...  │
+2026-11-01T03:21:32.3871711Z └──────────────────────────────────────────────────────────────────────────────┘
+2026-11-01T03:21:32.3872170Z File "packages/agent_core/test/test_request_pricing_snapshot.ml", line 108, character 4:
+2026-11-01T03:21:32.3872633Z FAIL cost uses the request-owned price authority
+2026-11-01T03:21:32.3872803Z
+2026-11-01T03:21:32.3872877Z    Expected: `None'
+2026-11-01T03:21:32.3873031Z    Received: `Some 30'
+2026-11-01T03:21:32.3873119Z
+2026-11-01T03:21:32.3873276Z Raised at Alcotest_engine__Test.check in file "src/alcotest-engine/test.ml", lines 216-226, characters 4-19
+2026-11-01T03:21:32.3873777Z Called from Dune__exe__Test_request_pricing_snapshot.test_absence_and_agent_usage.(fun) in file "packages/agent_core/test/test_request_pricing_snapshot.ml", line 108, characters 4-26
+2026-11-01T03:21:32.3874206Z Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+2026-11-01T03:21:32.3874460Z Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+2026-11-01T03:21:32.3874801Z Called from Alcotest_engine__Core.Make.protect_test.(fun) in file "src/alcotest-engine/core.ml", line 186, characters 17-23
+2026-11-01T03:21:32.3876182Z │ [FAIL]        price authority          6   Agent fallback uses selected ...  │
+2026-11-01T03:21:32.3876505Z └──────────────────────────────────────────────────────────────────────────────┘
+2026-11-01T03:21:32.3876718Z File "fun.ml", line 34, character 8:
+2026-11-01T03:21:32.3876914Z FAIL Agent fallback uses selected rates
+2026-11-01T03:21:32.3877029Z
+2026-11-01T03:21:32.3877107Z    Expected: `3'
+2026-11-01T03:21:32.3877254Z    Received: `30'
+2026-11-01T03:21:32.3877335Z
+2026-11-01T03:21:32.3877490Z Raised at Alcotest_engine__Test.check in file "src/alcotest-engine/test.ml", lines 216-226, characters 4-19
+2026-11-01T03:21:32.3877801Z Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+2026-11-01T03:21:32.3878056Z Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+2026-11-01T03:21:32.3878386Z Called from Alcotest_engine__Core.Make.protect_test.(fun) in file "src/alcotest-engine/core.ml", line 186, characters 17-23
+2026-11-01T03:21:32.3878886Z Called from Alcotest_engine__Monad.Identity.catch in file "src/alcotest-engine/monad.ml", line 24, characters 31-35
+2026-11-01T03:21:32.3879943Z │ [FAIL]        price authority          8   provider overlay cannot regai...  │
+2026-11-01T03:21:32.3880273Z └──────────────────────────────────────────────────────────────────────────────┘
+2026-11-01T03:21:32.3880486Z File "fun.ml", line 34, character 8:
+2026-11-01T03:21:32.3880692Z FAIL cost uses the request-owned price authority
+2026-11-01T03:21:32.3880821Z
+2026-11-01T03:21:32.3880903Z    Expected: `None'
+2026-11-01T03:21:32.3881056Z    Received: `Some 3'
+2026-11-01T03:21:32.3881140Z
+2026-11-01T03:21:32.3881301Z Raised at Alcotest_engine__Test.check in file "src/alcotest-engine/test.ml", lines 216-226, characters 4-19
+2026-11-01T03:21:32.3881606Z Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+2026-11-01T03:21:32.3881863Z Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+2026-11-01T03:21:32.3882440Z Called from Alcotest_engine__Core.Make.protect_test.(fun) in file "src/alcotest-engine/core.ml", line 186, characters 17-23
+2026-11-01T03:21:32.3883026Z Called from Alcotest_engine__Monad.Identity.catch in file "src/alcotest-engine/monad.ml", line 24, characters 31-35
+2026-11-01T03:21:32.3884028Z │ [FAIL]        price authority          9   fresh selection and endpoint ...  │
+2026-11-01T03:21:32.3884355Z └──────────────────────────────────────────────────────────────────────────────┘
+2026-11-01T03:21:32.3884567Z File "fun.ml", line 34, character 8:
+2026-11-01T03:21:32.3884782Z FAIL cost uses the request-owned price authority
+2026-11-01T03:21:32.3884912Z
+2026-11-01T03:21:32.3884983Z    Expected: `Some 3'
+2026-11-01T03:21:32.3885137Z    Received: `Some 30'
+2026-11-01T03:21:32.3885225Z
+2026-11-01T03:21:32.3885383Z Raised at Alcotest_engine__Test.check in file "src/alcotest-engine/test.ml", lines 216-226, characters 4-19
+2026-11-01T03:21:32.3885692Z Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+2026-11-01T03:21:32.3885948Z Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+2026-11-01T03:21:32.3886386Z Called from Alcotest_engine__Core.Make.protect_test.(fun) in file "src/alcotest-engine/core.ml", line 186, characters 17-23
+2026-11-01T03:21:32.3886787Z Called from Alcotest_engine__Monad.Identity.catch in file "src/alcotest-engine/monad.ml", line 24, characters 31-35
+2026-11-01T03:21:32.3887464Z 9 failures! in 0.023s. 10 tests run.
+2026-11-01T03:21:32.3888669Z (cd _build/.sandbox/4d1cca9b536c5e5efb4052a61065675b/default/packages/agent_core/test && ./test_request_pricing_snapshot.exe)
+2026-11-01T03:21:32.3888971Z Command exited with code 1.
+2026-11-01T03:21:32.4096411Z [targeted] @@packages/agent_core/test/runtest-test_request_pricing_snapshot: FAIL exit 1 in 28s
+2026-11-01T03:21:32.4106039Z ##[error]Process completed with exit code 1.
+2026-11-01T03:21:32.4141199Z ##[group]Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+2026-11-01T03:21:32.4141419Z with:
+2026-11-01T03:21:32.4141546Z   name: candle-equipped-portrait
+2026-11-01T03:21:32.4141732Z   path: /home/runner/work/_temp/candle-equipped-portrait/
+2026-11-01T03:21:32.4141919Z   if-no-files-found: ignore

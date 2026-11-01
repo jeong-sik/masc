@@ -35,6 +35,16 @@ original ten pricing cases; the provider-complete fixture failed to compile
 because its migrated module reference was not qualified. That run does not
 prove the absence of the newly found P2 or constitute overall test success.
 
+The typed-observation candidate's ten suites executed 699 PASS/2 FAIL. All
+nineteen pricing and six native HTTP pricing cases passed; the two failures
+were older Anthropic image fixtures expecting real caller input to merge into
+a tool result. Parent `a736fe76` independently reproduced both (99 PASS/2 FAIL).
+The fixture-only successor asserts six exact roles, retains the native image
+and tool payload checks, and checks the caller text separately, matching the
+existing `Conversation`-origin contract. Test 41271100485 at exact
+`ab7634fe1fe3297a86b21784e8e96acc4b189e1a` completed SUCCESS with 701 actual
+passes across the same ten suites. Counts from other heads are not added.
+
 ## Authority and implementation decision
 
 The issue requires consumers to use the resolved binding rather than

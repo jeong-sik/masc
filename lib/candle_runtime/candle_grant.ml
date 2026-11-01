@@ -28,11 +28,10 @@ let error_to_string = function
   | Invalid_time detail -> detail
 ;;
 
-(* Grants read through [for_recording] instead of the appraiser-gated
-   [configured] the purchase surface uses: the operator CLI runs outside
-   the server, where no lane registry installs an appraiser check, and a
-   gift needs no appraisal. The minted money stays durable and accounted
-   while settlement still waits for its lane. *)
+(* Grants recover the ledger through [for_recording] before appending the
+   operator's fact. Like a purchase, a gift needs no appraisal; the CLI also
+   runs outside the server, where no lane registry installs an appraiser
+   check. Settlement still waits for its lane. *)
 let policy ~base_path =
   match Candle_status.for_recording ~base_path with
   | Candle_config.Off -> Error Off

@@ -588,10 +588,11 @@ type async_msg =
       * string
       * Masc_tui_keeper_control.action
       * (Masc_tui_keeper_control.outcome, string) result
-  | Board_new_post_done of {
-      reply_to : string option;
+  | Board_publication_done of
+      Masc_tui_types.workspace_authority Masc_tui_board_publication.outcome
+  | Board_comment_done of {
+      post_id : string;
       sent_draft : string;
-      sent_attachments : Masc_tui_types.board_staged_attachment list;
       result : (string, string) result;
     }
   | Board_vote_done of Masc_tui_types.board_vote_target * (string, string) result

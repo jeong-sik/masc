@@ -12,17 +12,23 @@ val apply_board_post_load :
     enriches the matching list row without reranking. Failure is reported to
     [report_error] only when the operator is away from the Board surface. *)
 
-val new_post_done :
-  Masc_tui_types.state -> reply_to:string option -> sent_draft:string ->
-  sent_attachments:Masc_tui_types.board_staged_attachment list ->
+val apply_publication :
+  Masc_tui_types.state -> report:(string -> string -> unit) ->
+  refresh:(unit -> unit) ->
+  Masc_tui_types.workspace_authority Masc_tui_board_publication.outcome -> unit
+(** Archive a registered request's first outcome before checking current UI
+    authority. Only that exact current request may release the write or change
+    its draft. A proven publication removes its original staged objects even
+    when a later step failed. Unknown outcomes retain the draft and files.
+    Draft protection compares submitted bytes; it does not track revisions. *)
+
+val comment_done :
+  Masc_tui_types.state -> post_id:string -> sent_draft:string ->
   report:(string -> string -> unit) -> refresh:(unit -> unit) ->
   refresh_detail:(string -> unit) -> (string, string) result -> unit
-(** Completion clears only an unchanged submitted draft. Success reports first,
-    then updates that draft's compose state, refreshes the list and refreshes a
-    reply's detail. The staged files that were sent leave the list even when
-    the draft changed meanwhile; one staged during the send stays, and a
-    comment carried none. Failure keeps the text and the staged files, and
-    records its refusal. *)
+(** A current comment completion releases only a comment write. Success clears
+    an unchanged draft and refreshes the list and its post detail. Failure
+    retains the text. Comments carry no staged attachments. *)
 
 val vote_done :
   Masc_tui_types.state -> report:(string -> string -> unit) ->

@@ -4,6 +4,7 @@ open Masc_tui_types
 open Masc_tui_async_protocol
 
 module Board_detail = Masc_tui_board_detail
+module Publication = Masc_tui_board_publication
 
 type 'a launch =
   deliver:(('a, string) result -> Masc_tui_async_protocol.async_msg) ->
@@ -24,28 +25,48 @@ let start_board_post_refresh state ~host ~port ~post_id ~launch =
 
   end
 
-let start_board_post state ~host ~launch ~report ~(title : string) ~(body : string) ?hearth () =
+type 'authority post_phase =
+  | Before_post
+  | Calling of 'authority Publication.prepared
+  | Observed of 'authority Publication.outcome
+
+let start_board_post state ~host ~results ~admit ~report
+    ~(title : string) ~(body : string) ?hearth () =
   if state.workspace_identity <> Workspace_identity_match then begin
     let detail = "Cannot write to Board: workspace identity is unverified; draft retained" in
     state.board_post_error <- Some detail;
     report "error" detail
   end else begin
   state.board_post_error <- None;
-  state.board_post_inflight <- true;
-  report "system" "posting to Board";
-  (* What this send answers for: the completion clears and lands against
-     these, not against whatever the operator typed while it was out. *)
-  let sent_draft = Buffer.contents state.board_draft in
-  let sent_attachments = state.board_compose_attachments in
-  let port = state.port in
-  let expected_workspace = state.server_identity in
-  launch
-    ~deliver:(fun result -> Board_new_post_done { reply_to = None; sent_draft; sent_attachments; result })
+  let request =
+    Publication.capture ~authority:state.workspace_authority
+      ~host ~port:state.port ~expected_workspace:state.server_identity
+      ~sent_draft:(Buffer.contents state.board_draft)
+      ~staged:state.board_compose_attachments ~title ~body ~hearth ()
+  in
+  state.board_publications <- Publication.register state.board_publications request;
+  state.board_write <- Board_posting request;
+  let phase = ref Before_post in
+  let boundary_error detail =
+    match !phase with
+    | Before_post -> Publication.not_attempted request ~detail
+    | Calling prepared ->
+      Publication.returned prepared (Publication.unanswered detail)
+    | Observed outcome -> outcome
+  in
+  Masc_tui_workspace_result.launch state ~results ~boundary_error
+    ~cancelled_by:(fun () ->
+      Board_publication_done (boundary_error "Board publication interrupted"))
+    ~deliver:(function
+      | Ok outcome | Error outcome -> Board_publication_done outcome)
     (fun () ->
       let open Result.Syntax in
-      let* expected_workspace = match expected_workspace with
-        | Some identity -> Ok identity
-        | None -> Error "Board workspace identity is unavailable" in
+      let* () = admit request |> Result.map_error boundary_error in
+      let* () =
+        match request.expected_workspace with
+        | Some _ -> Ok ()
+        | None -> Error (boundary_error "Board workspace identity is unavailable")
+      in
       (* Staged files upload before the post: a failure here means the post
          was not sent, and the draft and staged list stay as they were. The
          read runs off the UI fiber -- a slow disk or a network mount would
@@ -57,13 +78,22 @@ let start_board_post state ~host ~launch ~report ~(title : string) ~(body : stri
               (fun () ->
                 Masc_tui_board_upload.read_file
                   ~max_bytes:Masc_tui_board_upload.max_attachment_bytes path))
-          ~upload:(fun ~bytes -> Masc_tui_http.upload_artifact ~host ~port ~bytes)
-          sent_attachments
-        |> Result.map_error (fun detail -> "not sent, attachment failed: " ^ detail)
+          ~upload:(fun ~bytes ->
+            Masc_tui_http.upload_artifact ~host:request.host ~port:request.port ~bytes)
+          request.staged
+        |> Result.map_error (fun detail ->
+          boundary_error ("not sent, attachment failed: " ^ detail))
       in
-      match Masc_tui_http.post_board_new ~expected_workspace ~host ~port ~title ~body ?hearth ~attachments () with
-      | Error err -> Error err
-      | Ok json -> Masc.Tui_decode.tool_envelope_outcome json )
+      let* prepared =
+        Masc_tui_http.prepare_board_new request attachments
+        |> Result.map_error boundary_error
+      in
+      phase := Calling prepared;
+      let response = Masc_tui_http.post_board_new prepared in
+      let outcome = Publication.returned prepared response in
+      phase := Observed outcome;
+      Ok outcome);
+  report "system" "posting to Board"
   end
 
 
@@ -75,13 +105,13 @@ let start_board_comment state ~host ~launch ~report ~(post_id : string)
     report "error" detail
   end else begin
   state.board_post_error <- None;
-  state.board_post_inflight <- true;
+  state.board_write <- Board_commenting;
   report "system" "commenting on Board";
   let sent_draft = Buffer.contents state.board_draft in
   let port = state.port in
   let expected_workspace = state.server_identity in
   launch
-    ~deliver:(fun result -> Board_new_post_done { reply_to = Some post_id; sent_draft; sent_attachments = []; result })
+    ~deliver:(fun result -> Board_comment_done { post_id; sent_draft; result })
     (fun () ->
       let open Result.Syntax in
       let* expected_workspace = match expected_workspace with

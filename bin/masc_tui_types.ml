@@ -2551,86 +2551,35 @@ let decode_board_attachments json : board_attachment_entry list =
     {!board_attachment_kind} on purpose: a staged file is never a youtube
     link or a kind this build does not know, and the server refuses both for
     a stored file. *)
-type board_upload_kind =
-  | Uk_image
-  | Uk_audio
-  | Uk_score
-  | Uk_midi
-  | Uk_file
+type board_upload_kind = Masc_tui_board_publication.board_upload_kind =
+  | Uk_image | Uk_audio | Uk_score | Uk_midi | Uk_file
 
-let board_upload_kind_to_wire = function
-  | Uk_image -> "image"
-  | Uk_audio -> "audio"
-  | Uk_score -> "score"
-  | Uk_midi -> "midi"
-  | Uk_file -> "file"
-;;
+let board_upload_kind_to_wire = Masc_tui_board_publication.board_upload_kind_to_wire
+let upload_kind_of_path = Masc_tui_board_publication.upload_kind_of_path
 
-(* Case-insensitive -- tab editors and macOS saves routinely write uppercase
-   extensions, and the kind describes the file, not the case of its name. A
-   bare dotfile (".gp5") or a trailing dot ("notes.") is not an extension. *)
-let extension_of_path path =
-  let base = Filename.basename path in
-  match String.rindex_opt base '.' with
-  | Some dot when dot > 0 && dot < String.length base - 1 ->
-      Some
-        (String.lowercase_ascii
-           (String.sub base (dot + 1) (String.length base - dot - 1)))
-  | Some _ | None -> None
-;;
-
-(* The file's name decides its kind: the store keeps no media type per file,
-   so the name is the only signal a client has. A name that says nothing is
-   a plain file. *)
-let upload_kind_of_path path =
-  match extension_of_path path with
-  | None -> Uk_file
-  | Some extension -> (
-      match extension with
-      | "gp" | "gp3" | "gp4" | "gp5" | "gpx" | "cap" | "capx" | "atex"
-      | "musicxml" | "mxl" ->
-          Uk_score
-      | "mid" | "midi" -> Uk_midi
-      | "png" | "jpg" | "jpeg" | "gif" | "webp" | "svg" | "bmp" -> Uk_image
-      | "mp3" | "wav" | "ogg" | "flac" | "m4a" | "aac" -> Uk_audio
-      | _ -> Uk_file)
-;;
-
-(** A local file the operator staged in board compose. [sa_path] is read at
-    send time, so a file replaced on disk since staging posts its current
-    bytes. *)
-type board_staged_attachment = {
-  sa_path: string;
-  sa_name: string;  (** Basename, sent as the entry's [name]. *)
-  sa_kind: board_upload_kind;
+type board_staged_attachment = Masc_tui_board_publication.board_staged_attachment = {
+  sa_path : string;
+  sa_name : string;
+  sa_kind : board_upload_kind;
 }
 
-(** One uploaded attachment ready for the post payload. *)
-type board_outbound_attachment = {
-  oa_kind: board_upload_kind;
-  oa_sha256: string;
-  oa_name: string;
+type board_outbound_attachment = Masc_tui_board_publication.board_outbound_attachment = {
+  oa_kind : board_upload_kind;
+  oa_sha256 : string;
+  oa_name : string;
 }
 
-(* The payload field for a post's staged uploads. [None] -- the field absent
-   from the payload -- when nothing was staged, so a plain post's payload is
-   exactly what it was before attachments existed. *)
-let board_outbound_attachments_field attachments =
-  match attachments with
-  | [] -> None
-  | _ ->
-      Some
-        ( "attachments"
-        , `List
-            (List.map
-               (fun { oa_kind; oa_sha256; oa_name } ->
-                  `Assoc
-                    [ "kind", `String (board_upload_kind_to_wire oa_kind)
-                    ; "sha256", `String oa_sha256
-                    ; "name", `String oa_name
-                    ])
-               attachments) )
-;;
+let board_outbound_attachments_field =
+  Masc_tui_board_publication.board_outbound_attachments_field
+
+type board_write =
+  | Board_idle
+  | Board_posting of workspace_authority Masc_tui_board_publication.request
+  | Board_commenting
+
+let board_write_inflight = function
+  | Board_idle -> false
+  | Board_posting _ | Board_commenting -> true
 
 (** Board post (light projection for list view) *)
 type board_post = {
@@ -10053,7 +10002,8 @@ type state = {
   mutable board_compose_attach_input: Buffer.t option;
   (* One send at a time: the gate a slow server needs so s-s cannot post
      the same draft twice, and the completion knows it owns the clear. *)
-  mutable board_post_inflight: bool;
+  mutable board_write : board_write;
+  mutable board_publications : workspace_authority Masc_tui_board_publication.history;
   mutable board_post_error: string option;
   (* The last attachment action's one line (played/opened/saved/failed and
      why): set by the numbered attachment keys, cleared when another post
@@ -18564,7 +18514,8 @@ let create_state
   board_compose_hearth = None;
   board_compose_attachments = [];
   board_compose_attach_input = None;
-  board_post_inflight = false;
+  board_write = Board_idle;
+  board_publications = Masc_tui_board_publication.empty;
   board_post_error = None;
   board_attachment_status = None;
   board_vote_armed = None;

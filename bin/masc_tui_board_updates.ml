@@ -52,50 +52,89 @@ let apply_board_post_load state ~report_error request result =
              post_id post.bp_id)
     | Error err -> fail err
 
-let new_post_done state ~reply_to ~sent_draft ~sent_attachments ~report ~refresh ~refresh_detail result =
-  (* The completion answers for the draft it carried, not for whatever
-     is in the buffer now: a slow server must not clear words typed
-     since, nor yank the operator out of a compose they restarted. *)
-  state.board_post_inflight <- false;
-  let compose_unchanged =
-    String.equal (Buffer.contents state.board_draft) sent_draft
-  in
-  match result with
-  | Ok message ->
-      report "system" ("Board: " ^ message);
-      (* The files that went out with the post leave the staged list whether
-         or not the draft was touched since: they are on the board now, and
-         left staged they would ride the next post too. A file staged while
-         the send was out stays. [sent_attachments] is [] for a comment. *)
+module Publication = Masc_tui_board_publication
+
+let publication_diagnostic = function
+  | Publication.Not_attempted { detail; _ } ->
+      "Board publication did not start: " ^ detail
+  | Publication.Returned { response; _ } ->
+      let detail = Option.value (Publication.response_diagnostic response)
+          ~default:"No publication acknowledgement was received" in
+      match Publication.response_effect response with
+      | Failure_effect.Proven_pre_effect ->
+          "Board publication was refused before creation: " ^ detail
+      | Failure_effect.Effect_outcome_unknown ->
+          "Board publication outcome is unknown: " ^ detail
+      | Failure_effect.Proven_post_effect -> detail
+
+let apply_current_publication state ~report ~refresh outcome request =
+  state.board_write <- Board_idle;
+  let committed_post_id = match outcome with
+    | Publication.Not_attempted _ -> None
+    | Publication.Returned { response; _ } -> Publication.committed_post_id response in
+  match committed_post_id with
+  | Some post_id ->
+      let post_id = Board_types.Post_id.to_string post_id in
+      let diagnostic = match outcome with
+        | Publication.Not_attempted _ -> None
+        | Publication.Returned { response; _ } -> Publication.response_diagnostic response in
       state.board_compose_attachments <-
-        List.filter
-          (fun staged -> not (List.memq staged sent_attachments))
+        List.filter (fun staged -> not (List.memq staged request.Publication.staged))
           state.board_compose_attachments;
-      if compose_unchanged then begin
+      if String.equal (Buffer.contents state.board_draft) request.sent_draft then begin
         Buffer.clear state.board_draft;
         state.board_compose_armed <- false;
         state.board_compose_reply_to <- None;
         state.board_compose_hearth <- None;
-        state.board_post_error <- None;
         state.board_compose_attach_input <- None;
-        match reply_to with
-        | Some post_id -> state.board_mode <- Board_read post_id
-        | None -> state.board_mode <- Board_list
+        state.board_mode <- Board_list
       end;
-      (* The posted row is the half the periodic refresh has not fetched
-         yet; without this the operator returns to a list that does not
-         contain what they just published. A comment refreshes the
-         detail too, so the reply is visible the moment it lands. *)
-      refresh ();
-      (match reply_to with
-       | Some post_id ->
-           refresh_detail post_id
-       | None -> ())
-  | Error err ->
+      state.board_post_error <- Option.map
+        (fun detail -> "Board post " ^ post_id ^ " was published; " ^ detail) diagnostic;
+      report "system" ("Board: published " ^ post_id
+        ^ Option.fold ~none:"" ~some:(fun detail -> "; " ^ detail) diagnostic);
+      refresh ()
+  | None ->
       state.board_compose_armed <- false;
-      (* The draft stays: a rejected post is usually one field short, and
-         losing the text over it would make the error a dead end. *)
-      state.board_post_error <- Some err
+      state.board_post_error <- Some (publication_diagnostic outcome)
+
+let apply_publication state ~report ~refresh outcome =
+  match Publication.record state.board_publications outcome with
+  | Publication.Already_recorded | Publication.Not_registered -> ()
+  | Publication.Recorded history ->
+      (* The receipt belongs to its original request even after workspace
+         withdrawal. Retain it before admission or caller-owned callbacks. *)
+      state.board_publications <- history;
+      let request = Publication.outcome_request outcome in
+      let current = match state.board_write with
+        | Board_posting current -> Publication.same_request current request
+        | Board_idle | Board_commenting -> false in
+      if current && workspace_reply_admitted state ~authority:request.authority
+          ~reading:None ~kind:Workspace_operation_outcome then
+        apply_current_publication state ~report ~refresh outcome request
+
+let comment_done state ~post_id ~sent_draft ~report ~refresh ~refresh_detail result =
+  match state.board_write with
+  | Board_idle | Board_posting _ -> ()
+  | Board_commenting ->
+    state.board_write <- Board_idle;
+    match result with
+    | Ok message ->
+        if String.equal (Buffer.contents state.board_draft) sent_draft then begin
+          Buffer.clear state.board_draft;
+          state.board_compose_armed <- false;
+          state.board_compose_reply_to <- None;
+          state.board_compose_hearth <- None;
+          state.board_post_error <- None;
+          state.board_compose_attach_input <- None;
+          state.board_mode <- Board_read post_id
+        end;
+        report "system" ("Board: " ^ message);
+        refresh ();
+        refresh_detail post_id
+    | Error err ->
+        state.board_compose_armed <- false;
+        state.board_post_error <- Some err
 
 let vote_done state ~report ~refresh ~refresh_detail target result =
   match result with

@@ -1,0 +1,2042 @@
+{
+  "scope": "Frozen Fd_cache versus prototype lease validation outside global cache mutex; per-path mutexes in both. Worker domain counts 1/8 plus idle coordinator. Timed window includes coordinator polling, excludes domain start/join/final cache drain/readback; no Eio or HTTP/main-domain stall measurement, no fsync or external rename/invalidation stress. Four AB/BA batches per shape; median batch means, not per-call latency percentile. All exact bytes/counts reread; generated data removed only afterwards. Shared host not quiesced. Allocation is sum of worker-local counter deltas captured before any worker exits.",
+  "compile_identity": {
+    "scope": "Prototype component, not product change. Actual frozen Fd_cache vs descriptor validation moved outside global cache mutex. Per-path mutex held in both variants. 1 or 8 worker domains plus idle coordinator; no Eio/main-domain request trace. Domain creation/final drain excluded. All worker-local allocation counters sampled before any worker exits. Timed CPU includes coordinator and GC.",
+    "argv": [
+      "ocamlfind",
+      "ocamlopt",
+      "-thread",
+      "-package",
+      "threads,unix,yojson,mtime.clock.os",
+      "-linkpkg",
+      "fd_cache.mli",
+      "fd_cache.ml",
+      "fd_cache_split.mli",
+      "fd_cache_split.ml",
+      "bench.ml",
+      "-o",
+      "bench.exe"
+    ],
+    "returncode": 0,
+    "source_sha256": {
+      "fd_cache.ml": "a5aff8c41c9ed1e324709b0fdaf7ce35be42b76e36259120ebed4dc30d786014",
+      "fd_cache.mli": "342f4316a19d5d79eba3445109e1cd0bb069bb33b040f903b5a19e0d0ebfd541",
+      "fd_cache_split.ml": "2f23a230bdd38c476580278687aa888833a34ce55c79ce9bdb749bd3b3779670",
+      "fd_cache_split.mli": "342f4316a19d5d79eba3445109e1cd0bb069bb33b040f903b5a19e0d0ebfd541",
+      "bench.ml": "fa37dbc8cdde576b0f30c7ce0d0e705480aec8b249959f41f8e91f84877a6fe5"
+    }
+  },
+  "driver_sha256": "5fb4def6a41aa604c8e0495ff7a3af6af70eb6f5c21d0df64100b0f603c24589",
+  "driver_unchanged": true,
+  "started_at_unix": 1793336462.2659929,
+  "ended_at_unix": 1793336495.1584482,
+  "validated_calls": 384000,
+  "rows": [
+    {
+      "mode": "cached",
+      "worker_domains": 1,
+      "paths": 30,
+      "calls": 3000,
+      "wall_us": 23856.25,
+      "cpu_us": 24414.0,
+      "allocated_bytes": 13216896.0,
+      "encoded_row_bytes": 570,
+      "validated_rows": 3000,
+      "validated_bytes": 1710000,
+      "sample": "p50",
+      "batch": 0,
+      "order": [
+        "cached",
+        "split"
+      ]
+    },
+    {
+      "mode": "split",
+      "worker_domains": 1,
+      "paths": 30,
+      "calls": 3000,
+      "wall_us": 24415.541,
+      "cpu_us": 23430.0,
+      "allocated_bytes": 13265376.0,
+      "encoded_row_bytes": 570,
+      "validated_rows": 3000,
+      "validated_bytes": 1710000,
+      "sample": "p50",
+      "batch": 0,
+      "order": [
+        "cached",
+        "split"
+      ]
+    },
+    {
+      "mode": "split",
+      "worker_domains": 1,
+      "paths": 30,
+      "calls": 3000,
+      "wall_us": 22426.458,
+      "cpu_us": 22857.000000000004,
+      "allocated_bytes": 13265376.0,
+      "encoded_row_bytes": 570,
+      "validated_rows": 3000,
+      "validated_bytes": 1710000,
+      "sample": "p50",
+      "batch": 1,
+      "order": [
+        "split",
+        "cached"
+      ]
+    },
+    {
+      "mode": "cached",
+      "worker_domains": 1,
+      "paths": 30,
+      "calls": 3000,
+      "wall_us": 24716.917,
+      "cpu_us": 25026.0,
+      "allocated_bytes": 13216896.0,
+      "encoded_row_bytes": 570,
+      "validated_rows": 3000,
+      "validated_bytes": 1710000,
+      "sample": "p50",
+      "batch": 1,
+      "order": [
+        "split",
+        "cached"
+      ]
+    },
+    {
+      "mode": "cached",
+      "worker_domains": 1,
+      "paths": 30,
+      "calls": 3000,
+      "wall_us": 23315.875,
+      "cpu_us": 23634.000000000004,
+      "allocated_bytes": 13216896.0,
+      "encoded_row_bytes": 570,
+      "validated_rows": 3000,
+      "validated_bytes": 1710000,
+      "sample": "p50",
+      "batch": 2,
+      "order": [
+        "cached",
+        "split"
+      ]
+    },
+    {
+      "mode": "split",
+      "worker_domains": 1,
+      "paths": 30,
+      "calls": 3000,
+      "wall_us": 23956.167,
+      "cpu_us": 24423.999999999996,
+      "allocated_bytes": 13265376.0,
+      "encoded_row_bytes": 570,
+      "validated_rows": 3000,
+      "validated_bytes": 1710000,
+      "sample": "p50",
+      "batch": 2,
+      "order": [
+        "cached",
+        "split"
+      ]
+    },
+    {
+      "mode": "split",
+      "worker_domains": 1,
+      "paths": 30,
+      "calls": 3000,
+      "wall_us": 25419.542,
+      "cpu_us": 26071.0,
+      "allocated_bytes": 13265376.0,
+      "encoded_row_bytes": 570,
+      "validated_rows": 3000,
+      "validated_bytes": 1710000,
+      "sample": "p50",
+      "batch": 3,
+      "order": [
+        "split",
+        "cached"
+      ]
+    },
+    {
+      "mode": "cached",
+      "worker_domains": 1,
+      "paths": 30,
+      "calls": 3000,
+      "wall_us": 24760.667,
+      "cpu_us": 25361.0,
+      "allocated_bytes": 13216896.0,
+      "encoded_row_bytes": 570,
+      "validated_rows": 3000,
+      "validated_bytes": 1710000,
+      "sample": "p50",
+      "batch": 3,
+      "order": [
+        "split",
+        "cached"
+      ]
+    },
+    {
+      "mode": "cached",
+      "worker_domains": 8,
+      "paths": 30,
+      "calls": 3000,
+      "wall_us": 29168.042,
+      "cpu_us": 74953.0,
+      "allocated_bytes": 13217568.0,
+      "encoded_row_bytes": 570,
+      "validated_rows": 3000,
+      "validated_bytes": 1710000,
+      "sample": "p50",
+      "batch": 0,
+      "order": [
+        "cached",
+        "split"
+      ]
+    },
+    {
+      "mode": "split",
+      "worker_domains": 8,
+      "paths": 30,
+      "calls": 3000,
+      "wall_us": 11494.583,
+      "cpu_us": 66225.0,
+      "allocated_bytes": 13266048.0,
+      "encoded_row_bytes": 570,
+      "validated_rows": 3000,
+      "validated_bytes": 1710000,
+      "sample": "p50",
+      "batch": 0,
+      "order": [
+        "cached",
+        "split"
+      ]
+    },
+    {
+      "mode": "split",
+      "worker_domains": 8,
+      "paths": 30,
+      "calls": 3000,
+      "wall_us": 11101.0,
+      "cpu_us": 62963.00000000001,
+      "allocated_bytes": 13266048.0,
+      "encoded_row_bytes": 570,
+      "validated_rows": 3000,
+      "validated_bytes": 1710000,
+      "sample": "p50",
+      "batch": 1,
+      "order": [
+        "split",
+        "cached"
+      ]
+    },
+    {
+      "mode": "cached",
+      "worker_domains": 8,
+      "paths": 30,
+      "calls": 3000,
+      "wall_us": 35438.125,
+      "cpu_us": 90898.0,
+      "allocated_bytes": 13217568.0,
+      "encoded_row_bytes": 570,
+      "validated_rows": 3000,
+      "validated_bytes": 1710000,
+      "sample": "p50",
+      "batch": 1,
+      "order": [
+        "split",
+        "cached"
+      ]
+    },
+    {
+      "mode": "cached",
+      "worker_domains": 8,
+      "paths": 30,
+      "calls": 3000,
+      "wall_us": 34330.0,
+      "cpu_us": 90021.0,
+      "allocated_bytes": 13217568.0,
+      "encoded_row_bytes": 570,
+      "validated_rows": 3000,
+      "validated_bytes": 1710000,
+      "sample": "p50",
+      "batch": 2,
+      "order": [
+        "cached",
+        "split"
+      ]
+    },
+    {
+      "mode": "split",
+      "worker_domains": 8,
+      "paths": 30,
+      "calls": 3000,
+      "wall_us": 11370.709,
+      "cpu_us": 63170.99999999999,
+      "allocated_bytes": 13266048.0,
+      "encoded_row_bytes": 570,
+      "validated_rows": 3000,
+      "validated_bytes": 1710000,
+      "sample": "p50",
+      "batch": 2,
+      "order": [
+        "cached",
+        "split"
+      ]
+    },
+    {
+      "mode": "split",
+      "worker_domains": 8,
+      "paths": 30,
+      "calls": 3000,
+      "wall_us": 11964.875,
+      "cpu_us": 62668.0,
+      "allocated_bytes": 13266048.0,
+      "encoded_row_bytes": 570,
+      "validated_rows": 3000,
+      "validated_bytes": 1710000,
+      "sample": "p50",
+      "batch": 3,
+      "order": [
+        "split",
+        "cached"
+      ]
+    },
+    {
+      "mode": "cached",
+      "worker_domains": 8,
+      "paths": 30,
+      "calls": 3000,
+      "wall_us": 34171.875,
+      "cpu_us": 85306.99999999999,
+      "allocated_bytes": 13217568.0,
+      "encoded_row_bytes": 570,
+      "validated_rows": 3000,
+      "validated_bytes": 1710000,
+      "sample": "p50",
+      "batch": 3,
+      "order": [
+        "split",
+        "cached"
+      ]
+    },
+    {
+      "mode": "cached",
+      "worker_domains": 1,
+      "paths": 300,
+      "calls": 3000,
+      "wall_us": 117468.042,
+      "cpu_us": 114522.00000000001,
+      "allocated_bytes": 13348288.0,
+      "encoded_row_bytes": 570,
+      "validated_rows": 3000,
+      "validated_bytes": 1710000,
+      "sample": "p50",
+      "batch": 0,
+      "order": [
+        "cached",
+        "split"
+      ]
+    },
+    {
+      "mode": "split",
+      "worker_domains": 1,
+      "paths": 300,
+      "calls": 3000,
+      "wall_us": 116802.458,
+      "cpu_us": 111254.0,
+      "allocated_bytes": 13465568.0,
+      "encoded_row_bytes": 570,
+      "validated_rows": 3000,
+      "validated_bytes": 1710000,
+      "sample": "p50",
+      "batch": 0,
+      "order": [
+        "cached",
+        "split"
+      ]
+    },
+    {
+      "mode": "split",
+      "worker_domains": 1,
+      "paths": 300,
+      "calls": 3000,
+      "wall_us": 118674.458,
+      "cpu_us": 120139.00000000001,
+      "allocated_bytes": 13463048.0,
+      "encoded_row_bytes": 570,
+      "validated_rows": 3000,
+      "validated_bytes": 1710000,
+      "sample": "p50",
+      "batch": 1,
+      "order": [
+        "split",
+        "cached"
+      ]
+    },
+    {
+      "mode": "cached",
+      "worker_domains": 1,
+      "paths": 300,
+      "calls": 3000,
+      "wall_us": 157162.417,
+      "cpu_us": 120190.99999999999,
+      "allocated_bytes": 13441808.0,
+      "encoded_row_bytes": 570,
+      "validated_rows": 3000,
+      "validated_bytes": 1710000,
+      "sample": "p50",
+      "batch": 1,
+      "order": [
+        "split",
+        "cached"
+      ]
+    },
+    {
+      "mode": "cached",
+      "worker_domains": 1,
+      "paths": 300,
+      "calls": 3000,
+      "wall_us": 117457.833,
+      "cpu_us": 119052.0,
+      "allocated_bytes": 13342968.0,
+      "encoded_row_bytes": 570,
+      "validated_rows": 3000,
+      "validated_bytes": 1710000,
+      "sample": "p50",
+      "batch": 2,
+      "order": [
+        "cached",
+        "split"
+      ]
+    },
+    {
+      "mode": "split",
+      "worker_domains": 1,
+      "paths": 300,
+      "calls": 3000,
+      "wall_us": 167232.958,
+      "cpu_us": 119363.00000000001,
+      "allocated_bytes": 13542208.0,
+      "encoded_row_bytes": 570,
+      "validated_rows": 3000,
+      "validated_bytes": 1710000,
+      "sample": "p50",
+      "batch": 2,
+      "order": [
+        "cached",
+        "split"
+      ]
+    },
+    {
+      "mode": "split",
+      "worker_domains": 1,
+      "paths": 300,
+      "calls": 3000,
+      "wall_us": 217283.75,
+      "cpu_us": 131048.0,
+      "allocated_bytes": 13399728.0,
+      "encoded_row_bytes": 570,
+      "validated_rows": 3000,
+      "validated_bytes": 1710000,
+      "sample": "p50",
+      "batch": 3,
+      "order": [
+        "split",
+        "cached"
+      ]
+    },
+    {
+      "mode": "cached",
+      "worker_domains": 1,
+      "paths": 300,
+      "calls": 3000,
+      "wall_us": 118680.833,
+      "cpu_us": 119721.0,
+      "allocated_bytes": 13363648.0,
+      "encoded_row_bytes": 570,
+      "validated_rows": 3000,
+      "validated_bytes": 1710000,
+      "sample": "p50",
+      "batch": 3,
+      "order": [
+        "split",
+        "cached"
+      ]
+    },
+    {
+      "mode": "cached",
+      "worker_domains": 8,
+      "paths": 300,
+      "calls": 3000,
+      "wall_us": 106825.125,
+      "cpu_us": 151084.0,
+      "allocated_bytes": 13302480.0,
+      "encoded_row_bytes": 570,
+      "validated_rows": 3000,
+      "validated_bytes": 1710000,
+      "sample": "p50",
+      "batch": 0,
+      "order": [
+        "cached",
+        "split"
+      ]
+    },
+    {
+      "mode": "split",
+      "worker_domains": 8,
+      "paths": 300,
+      "calls": 3000,
+      "wall_us": 112163.834,
+      "cpu_us": 158938.0,
+      "allocated_bytes": 13413360.0,
+      "encoded_row_bytes": 570,
+      "validated_rows": 3000,
+      "validated_bytes": 1710000,
+      "sample": "p50",
+      "batch": 0,
+      "order": [
+        "cached",
+        "split"
+      ]
+    },
+    {
+      "mode": "split",
+      "worker_domains": 8,
+      "paths": 300,
+      "calls": 3000,
+      "wall_us": 108613.292,
+      "cpu_us": 138763.0,
+      "allocated_bytes": 13405080.0,
+      "encoded_row_bytes": 570,
+      "validated_rows": 3000,
+      "validated_bytes": 1710000,
+      "sample": "p50",
+      "batch": 1,
+      "order": [
+        "split",
+        "cached"
+      ]
+    },
+    {
+      "mode": "cached",
+      "worker_domains": 8,
+      "paths": 300,
+      "calls": 3000,
+      "wall_us": 103833.833,
+      "cpu_us": 145976.0,
+      "allocated_bytes": 13297480.0,
+      "encoded_row_bytes": 570,
+      "validated_rows": 3000,
+      "validated_bytes": 1710000,
+      "sample": "p50",
+      "batch": 1,
+      "order": [
+        "split",
+        "cached"
+      ]
+    },
+    {
+      "mode": "cached",
+      "worker_domains": 8,
+      "paths": 300,
+      "calls": 3000,
+      "wall_us": 123668.208,
+      "cpu_us": 147894.99999999997,
+      "allocated_bytes": 13315352.0,
+      "encoded_row_bytes": 570,
+      "validated_rows": 3000,
+      "validated_bytes": 1710000,
+      "sample": "p50",
+      "batch": 2,
+      "order": [
+        "cached",
+        "split"
+      ]
+    },
+    {
+      "mode": "split",
+      "worker_domains": 8,
+      "paths": 300,
+      "calls": 3000,
+      "wall_us": 112710.041,
+      "cpu_us": 153831.0,
+      "allocated_bytes": 13404800.0,
+      "encoded_row_bytes": 570,
+      "validated_rows": 3000,
+      "validated_bytes": 1710000,
+      "sample": "p50",
+      "batch": 2,
+      "order": [
+        "cached",
+        "split"
+      ]
+    },
+    {
+      "mode": "split",
+      "worker_domains": 8,
+      "paths": 300,
+      "calls": 3000,
+      "wall_us": 113762.584,
+      "cpu_us": 140256.00000000003,
+      "allocated_bytes": 13404640.0,
+      "encoded_row_bytes": 570,
+      "validated_rows": 3000,
+      "validated_bytes": 1710000,
+      "sample": "p50",
+      "batch": 3,
+      "order": [
+        "split",
+        "cached"
+      ]
+    },
+    {
+      "mode": "cached",
+      "worker_domains": 8,
+      "paths": 300,
+      "calls": 3000,
+      "wall_us": 164496.208,
+      "cpu_us": 183363.0,
+      "allocated_bytes": 13330976.0,
+      "encoded_row_bytes": 570,
+      "validated_rows": 3000,
+      "validated_bytes": 1710000,
+      "sample": "p50",
+      "batch": 3,
+      "order": [
+        "split",
+        "cached"
+      ]
+    },
+    {
+      "mode": "cached",
+      "worker_domains": 1,
+      "paths": 1500,
+      "calls": 6000,
+      "wall_us": 264731.417,
+      "cpu_us": 266349.0,
+      "allocated_bytes": 26750008.0,
+      "encoded_row_bytes": 570,
+      "validated_rows": 6000,
+      "validated_bytes": 3420000,
+      "sample": "p50",
+      "batch": 0,
+      "order": [
+        "cached",
+        "split"
+      ]
+    },
+    {
+      "mode": "split",
+      "worker_domains": 1,
+      "paths": 1500,
+      "calls": 6000,
+      "wall_us": 243836.0,
+      "cpu_us": 237232.0,
+      "allocated_bytes": 26926848.0,
+      "encoded_row_bytes": 570,
+      "validated_rows": 6000,
+      "validated_bytes": 3420000,
+      "sample": "p50",
+      "batch": 0,
+      "order": [
+        "cached",
+        "split"
+      ]
+    },
+    {
+      "mode": "split",
+      "worker_domains": 1,
+      "paths": 1500,
+      "calls": 6000,
+      "wall_us": 252489.417,
+      "cpu_us": 256640.99999999994,
+      "allocated_bytes": 26930328.0,
+      "encoded_row_bytes": 570,
+      "validated_rows": 6000,
+      "validated_bytes": 3420000,
+      "sample": "p50",
+      "batch": 1,
+      "order": [
+        "split",
+        "cached"
+      ]
+    },
+    {
+      "mode": "cached",
+      "worker_domains": 1,
+      "paths": 1500,
+      "calls": 6000,
+      "wall_us": 268193.541,
+      "cpu_us": 250446.0,
+      "allocated_bytes": 26735048.0,
+      "encoded_row_bytes": 570,
+      "validated_rows": 6000,
+      "validated_bytes": 3420000,
+      "sample": "p50",
+      "batch": 1,
+      "order": [
+        "split",
+        "cached"
+      ]
+    },
+    {
+      "mode": "cached",
+      "worker_domains": 1,
+      "paths": 1500,
+      "calls": 6000,
+      "wall_us": 440149.084,
+      "cpu_us": 268239.0,
+      "allocated_bytes": 26760088.0,
+      "encoded_row_bytes": 570,
+      "validated_rows": 6000,
+      "validated_bytes": 3420000,
+      "sample": "p50",
+      "batch": 2,
+      "order": [
+        "cached",
+        "split"
+      ]
+    },
+    {
+      "mode": "split",
+      "worker_domains": 1,
+      "paths": 1500,
+      "calls": 6000,
+      "wall_us": 497134.542,
+      "cpu_us": 272791.0,
+      "allocated_bytes": 26950328.0,
+      "encoded_row_bytes": 570,
+      "validated_rows": 6000,
+      "validated_bytes": 3420000,
+      "sample": "p50",
+      "batch": 2,
+      "order": [
+        "cached",
+        "split"
+      ]
+    },
+    {
+      "mode": "split",
+      "worker_domains": 1,
+      "paths": 1500,
+      "calls": 6000,
+      "wall_us": 222068.75,
+      "cpu_us": 226466.0,
+      "allocated_bytes": 26899288.0,
+      "encoded_row_bytes": 570,
+      "validated_rows": 6000,
+      "validated_bytes": 3420000,
+      "sample": "p50",
+      "batch": 3,
+      "order": [
+        "split",
+        "cached"
+      ]
+    },
+    {
+      "mode": "cached",
+      "worker_domains": 1,
+      "paths": 1500,
+      "calls": 6000,
+      "wall_us": 232387.583,
+      "cpu_us": 230459.00000000003,
+      "allocated_bytes": 26718928.0,
+      "encoded_row_bytes": 570,
+      "validated_rows": 6000,
+      "validated_bytes": 3420000,
+      "sample": "p50",
+      "batch": 3,
+      "order": [
+        "split",
+        "cached"
+      ]
+    },
+    {
+      "mode": "cached",
+      "worker_domains": 8,
+      "paths": 1500,
+      "calls": 6000,
+      "wall_us": 215410.083,
+      "cpu_us": 303863.0,
+      "allocated_bytes": 26629000.0,
+      "encoded_row_bytes": 570,
+      "validated_rows": 6000,
+      "validated_bytes": 3420000,
+      "sample": "p50",
+      "batch": 0,
+      "order": [
+        "cached",
+        "split"
+      ]
+    },
+    {
+      "mode": "split",
+      "worker_domains": 8,
+      "paths": 1500,
+      "calls": 6000,
+      "wall_us": 235642.375,
+      "cpu_us": 320938.0,
+      "allocated_bytes": 26837560.0,
+      "encoded_row_bytes": 570,
+      "validated_rows": 6000,
+      "validated_bytes": 3420000,
+      "sample": "p50",
+      "batch": 0,
+      "order": [
+        "cached",
+        "split"
+      ]
+    },
+    {
+      "mode": "split",
+      "worker_domains": 8,
+      "paths": 1500,
+      "calls": 6000,
+      "wall_us": 217454.917,
+      "cpu_us": 302316.99999999994,
+      "allocated_bytes": 26818120.0,
+      "encoded_row_bytes": 570,
+      "validated_rows": 6000,
+      "validated_bytes": 3420000,
+      "sample": "p50",
+      "batch": 1,
+      "order": [
+        "split",
+        "cached"
+      ]
+    },
+    {
+      "mode": "cached",
+      "worker_domains": 8,
+      "paths": 1500,
+      "calls": 6000,
+      "wall_us": 221801.375,
+      "cpu_us": 312299.0,
+      "allocated_bytes": 26651600.0,
+      "encoded_row_bytes": 570,
+      "validated_rows": 6000,
+      "validated_bytes": 3420000,
+      "sample": "p50",
+      "batch": 1,
+      "order": [
+        "split",
+        "cached"
+      ]
+    },
+    {
+      "mode": "cached",
+      "worker_domains": 8,
+      "paths": 1500,
+      "calls": 6000,
+      "wall_us": 224384.125,
+      "cpu_us": 312735.0,
+      "allocated_bytes": 26634000.0,
+      "encoded_row_bytes": 570,
+      "validated_rows": 6000,
+      "validated_bytes": 3420000,
+      "sample": "p50",
+      "batch": 2,
+      "order": [
+        "cached",
+        "split"
+      ]
+    },
+    {
+      "mode": "split",
+      "worker_domains": 8,
+      "paths": 1500,
+      "calls": 6000,
+      "wall_us": 214205.25,
+      "cpu_us": 300319.0,
+      "allocated_bytes": 26831080.0,
+      "encoded_row_bytes": 570,
+      "validated_rows": 6000,
+      "validated_bytes": 3420000,
+      "sample": "p50",
+      "batch": 2,
+      "order": [
+        "cached",
+        "split"
+      ]
+    },
+    {
+      "mode": "split",
+      "worker_domains": 8,
+      "paths": 1500,
+      "calls": 6000,
+      "wall_us": 215757.0,
+      "cpu_us": 305792.0,
+      "allocated_bytes": 26823680.0,
+      "encoded_row_bytes": 570,
+      "validated_rows": 6000,
+      "validated_bytes": 3420000,
+      "sample": "p50",
+      "batch": 3,
+      "order": [
+        "split",
+        "cached"
+      ]
+    },
+    {
+      "mode": "cached",
+      "worker_domains": 8,
+      "paths": 1500,
+      "calls": 6000,
+      "wall_us": 253945.25,
+      "cpu_us": 343362.0,
+      "allocated_bytes": 26648680.0,
+      "encoded_row_bytes": 570,
+      "validated_rows": 6000,
+      "validated_bytes": 3420000,
+      "sample": "p50",
+      "batch": 3,
+      "order": [
+        "split",
+        "cached"
+      ]
+    },
+    {
+      "mode": "cached",
+      "worker_domains": 1,
+      "paths": 30,
+      "calls": 3000,
+      "wall_us": 120813.375,
+      "cpu_us": 123210.00000000001,
+      "allocated_bytes": 184216896.0,
+      "encoded_row_bytes": 9812,
+      "validated_rows": 3000,
+      "validated_bytes": 29436000,
+      "sample": "p99",
+      "batch": 0,
+      "order": [
+        "cached",
+        "split"
+      ]
+    },
+    {
+      "mode": "split",
+      "worker_domains": 1,
+      "paths": 30,
+      "calls": 3000,
+      "wall_us": 116380.208,
+      "cpu_us": 123946.99999999999,
+      "allocated_bytes": 184265376.0,
+      "encoded_row_bytes": 9812,
+      "validated_rows": 3000,
+      "validated_bytes": 29436000,
+      "sample": "p99",
+      "batch": 0,
+      "order": [
+        "cached",
+        "split"
+      ]
+    },
+    {
+      "mode": "split",
+      "worker_domains": 1,
+      "paths": 30,
+      "calls": 3000,
+      "wall_us": 117588.792,
+      "cpu_us": 118072.00000000001,
+      "allocated_bytes": 184265376.0,
+      "encoded_row_bytes": 9812,
+      "validated_rows": 3000,
+      "validated_bytes": 29436000,
+      "sample": "p99",
+      "batch": 1,
+      "order": [
+        "split",
+        "cached"
+      ]
+    },
+    {
+      "mode": "cached",
+      "worker_domains": 1,
+      "paths": 30,
+      "calls": 3000,
+      "wall_us": 133032.875,
+      "cpu_us": 140215.99999999997,
+      "allocated_bytes": 184216896.0,
+      "encoded_row_bytes": 9812,
+      "validated_rows": 3000,
+      "validated_bytes": 29436000,
+      "sample": "p99",
+      "batch": 1,
+      "order": [
+        "split",
+        "cached"
+      ]
+    },
+    {
+      "mode": "cached",
+      "worker_domains": 1,
+      "paths": 30,
+      "calls": 3000,
+      "wall_us": 144642.084,
+      "cpu_us": 146162.0,
+      "allocated_bytes": 184216896.0,
+      "encoded_row_bytes": 9812,
+      "validated_rows": 3000,
+      "validated_bytes": 29436000,
+      "sample": "p99",
+      "batch": 2,
+      "order": [
+        "cached",
+        "split"
+      ]
+    },
+    {
+      "mode": "split",
+      "worker_domains": 1,
+      "paths": 30,
+      "calls": 3000,
+      "wall_us": 118145.125,
+      "cpu_us": 126118.00000000001,
+      "allocated_bytes": 184265376.0,
+      "encoded_row_bytes": 9812,
+      "validated_rows": 3000,
+      "validated_bytes": 29436000,
+      "sample": "p99",
+      "batch": 2,
+      "order": [
+        "cached",
+        "split"
+      ]
+    },
+    {
+      "mode": "split",
+      "worker_domains": 1,
+      "paths": 30,
+      "calls": 3000,
+      "wall_us": 143947.541,
+      "cpu_us": 141745.0,
+      "allocated_bytes": 184265376.0,
+      "encoded_row_bytes": 9812,
+      "validated_rows": 3000,
+      "validated_bytes": 29436000,
+      "sample": "p99",
+      "batch": 3,
+      "order": [
+        "split",
+        "cached"
+      ]
+    },
+    {
+      "mode": "cached",
+      "worker_domains": 1,
+      "paths": 30,
+      "calls": 3000,
+      "wall_us": 110172.833,
+      "cpu_us": 118649.99999999999,
+      "allocated_bytes": 184216896.0,
+      "encoded_row_bytes": 9812,
+      "validated_rows": 3000,
+      "validated_bytes": 29436000,
+      "sample": "p99",
+      "batch": 3,
+      "order": [
+        "split",
+        "cached"
+      ]
+    },
+    {
+      "mode": "cached",
+      "worker_domains": 8,
+      "paths": 30,
+      "calls": 3000,
+      "wall_us": 61687.125,
+      "cpu_us": 260789.00000000006,
+      "allocated_bytes": 184217568.0,
+      "encoded_row_bytes": 9812,
+      "validated_rows": 3000,
+      "validated_bytes": 29436000,
+      "sample": "p99",
+      "batch": 0,
+      "order": [
+        "cached",
+        "split"
+      ]
+    },
+    {
+      "mode": "split",
+      "worker_domains": 8,
+      "paths": 30,
+      "calls": 3000,
+      "wall_us": 47351.375,
+      "cpu_us": 258766.00000000006,
+      "allocated_bytes": 184266048.0,
+      "encoded_row_bytes": 9812,
+      "validated_rows": 3000,
+      "validated_bytes": 29436000,
+      "sample": "p99",
+      "batch": 0,
+      "order": [
+        "cached",
+        "split"
+      ]
+    },
+    {
+      "mode": "split",
+      "worker_domains": 8,
+      "paths": 30,
+      "calls": 3000,
+      "wall_us": 54709.833,
+      "cpu_us": 278064.99999999994,
+      "allocated_bytes": 184266048.0,
+      "encoded_row_bytes": 9812,
+      "validated_rows": 3000,
+      "validated_bytes": 29436000,
+      "sample": "p99",
+      "batch": 1,
+      "order": [
+        "split",
+        "cached"
+      ]
+    },
+    {
+      "mode": "cached",
+      "worker_domains": 8,
+      "paths": 30,
+      "calls": 3000,
+      "wall_us": 47921.584,
+      "cpu_us": 234263.0,
+      "allocated_bytes": 184217568.0,
+      "encoded_row_bytes": 9812,
+      "validated_rows": 3000,
+      "validated_bytes": 29436000,
+      "sample": "p99",
+      "batch": 1,
+      "order": [
+        "split",
+        "cached"
+      ]
+    },
+    {
+      "mode": "cached",
+      "worker_domains": 8,
+      "paths": 30,
+      "calls": 3000,
+      "wall_us": 48179.709,
+      "cpu_us": 232965.99999999997,
+      "allocated_bytes": 184217568.0,
+      "encoded_row_bytes": 9812,
+      "validated_rows": 3000,
+      "validated_bytes": 29436000,
+      "sample": "p99",
+      "batch": 2,
+      "order": [
+        "cached",
+        "split"
+      ]
+    },
+    {
+      "mode": "split",
+      "worker_domains": 8,
+      "paths": 30,
+      "calls": 3000,
+      "wall_us": 47407.667,
+      "cpu_us": 266080.0,
+      "allocated_bytes": 184266048.0,
+      "encoded_row_bytes": 9812,
+      "validated_rows": 3000,
+      "validated_bytes": 29436000,
+      "sample": "p99",
+      "batch": 2,
+      "order": [
+        "cached",
+        "split"
+      ]
+    },
+    {
+      "mode": "split",
+      "worker_domains": 8,
+      "paths": 30,
+      "calls": 3000,
+      "wall_us": 44931.5,
+      "cpu_us": 254740.00000000003,
+      "allocated_bytes": 184266048.0,
+      "encoded_row_bytes": 9812,
+      "validated_rows": 3000,
+      "validated_bytes": 29436000,
+      "sample": "p99",
+      "batch": 3,
+      "order": [
+        "split",
+        "cached"
+      ]
+    },
+    {
+      "mode": "cached",
+      "worker_domains": 8,
+      "paths": 30,
+      "calls": 3000,
+      "wall_us": 48851.917,
+      "cpu_us": 238041.99999999997,
+      "allocated_bytes": 184217568.0,
+      "encoded_row_bytes": 9812,
+      "validated_rows": 3000,
+      "validated_bytes": 29436000,
+      "sample": "p99",
+      "batch": 3,
+      "order": [
+        "split",
+        "cached"
+      ]
+    },
+    {
+      "mode": "cached",
+      "worker_domains": 1,
+      "paths": 300,
+      "calls": 3000,
+      "wall_us": 339671.125,
+      "cpu_us": 305297.99999999994,
+      "allocated_bytes": 184332568.0,
+      "encoded_row_bytes": 9812,
+      "validated_rows": 3000,
+      "validated_bytes": 29436000,
+      "sample": "p99",
+      "batch": 0,
+      "order": [
+        "cached",
+        "split"
+      ]
+    },
+    {
+      "mode": "split",
+      "worker_domains": 1,
+      "paths": 300,
+      "calls": 3000,
+      "wall_us": 320159.916,
+      "cpu_us": 313472.0,
+      "allocated_bytes": 184476288.0,
+      "encoded_row_bytes": 9812,
+      "validated_rows": 3000,
+      "validated_bytes": 29436000,
+      "sample": "p99",
+      "batch": 0,
+      "order": [
+        "cached",
+        "split"
+      ]
+    },
+    {
+      "mode": "split",
+      "worker_domains": 1,
+      "paths": 300,
+      "calls": 3000,
+      "wall_us": 331698.542,
+      "cpu_us": 332756.0,
+      "allocated_bytes": 184424728.0,
+      "encoded_row_bytes": 9812,
+      "validated_rows": 3000,
+      "validated_bytes": 29436000,
+      "sample": "p99",
+      "batch": 1,
+      "order": [
+        "split",
+        "cached"
+      ]
+    },
+    {
+      "mode": "cached",
+      "worker_domains": 1,
+      "paths": 300,
+      "calls": 3000,
+      "wall_us": 346801.208,
+      "cpu_us": 330124.0,
+      "allocated_bytes": 184356408.0,
+      "encoded_row_bytes": 9812,
+      "validated_rows": 3000,
+      "validated_bytes": 29436000,
+      "sample": "p99",
+      "batch": 1,
+      "order": [
+        "split",
+        "cached"
+      ]
+    },
+    {
+      "mode": "cached",
+      "worker_domains": 1,
+      "paths": 300,
+      "calls": 3000,
+      "wall_us": 377220.166,
+      "cpu_us": 320818.0,
+      "allocated_bytes": 184307368.0,
+      "encoded_row_bytes": 9812,
+      "validated_rows": 3000,
+      "validated_bytes": 29436000,
+      "sample": "p99",
+      "batch": 2,
+      "order": [
+        "cached",
+        "split"
+      ]
+    },
+    {
+      "mode": "split",
+      "worker_domains": 1,
+      "paths": 300,
+      "calls": 3000,
+      "wall_us": 387320.75,
+      "cpu_us": 323017.0,
+      "allocated_bytes": 184454168.0,
+      "encoded_row_bytes": 9812,
+      "validated_rows": 3000,
+      "validated_bytes": 29436000,
+      "sample": "p99",
+      "batch": 2,
+      "order": [
+        "cached",
+        "split"
+      ]
+    },
+    {
+      "mode": "split",
+      "worker_domains": 1,
+      "paths": 300,
+      "calls": 3000,
+      "wall_us": 326948.125,
+      "cpu_us": 307889.0,
+      "allocated_bytes": 184457608.0,
+      "encoded_row_bytes": 9812,
+      "validated_rows": 3000,
+      "validated_bytes": 29436000,
+      "sample": "p99",
+      "batch": 3,
+      "order": [
+        "split",
+        "cached"
+      ]
+    },
+    {
+      "mode": "cached",
+      "worker_domains": 1,
+      "paths": 300,
+      "calls": 3000,
+      "wall_us": 346701.791,
+      "cpu_us": 341822.0,
+      "allocated_bytes": 184361408.0,
+      "encoded_row_bytes": 9812,
+      "validated_rows": 3000,
+      "validated_bytes": 29436000,
+      "sample": "p99",
+      "batch": 3,
+      "order": [
+        "split",
+        "cached"
+      ]
+    },
+    {
+      "mode": "cached",
+      "worker_domains": 8,
+      "paths": 300,
+      "calls": 3000,
+      "wall_us": 225531.709,
+      "cpu_us": 426540.99999999994,
+      "allocated_bytes": 184330480.0,
+      "encoded_row_bytes": 9812,
+      "validated_rows": 3000,
+      "validated_bytes": 29436000,
+      "sample": "p99",
+      "batch": 0,
+      "order": [
+        "cached",
+        "split"
+      ]
+    },
+    {
+      "mode": "split",
+      "worker_domains": 8,
+      "paths": 300,
+      "calls": 3000,
+      "wall_us": 202981.875,
+      "cpu_us": 390010.0,
+      "allocated_bytes": 184434960.0,
+      "encoded_row_bytes": 9812,
+      "validated_rows": 3000,
+      "validated_bytes": 29436000,
+      "sample": "p99",
+      "batch": 0,
+      "order": [
+        "cached",
+        "split"
+      ]
+    },
+    {
+      "mode": "split",
+      "worker_domains": 8,
+      "paths": 300,
+      "calls": 3000,
+      "wall_us": 394530.084,
+      "cpu_us": 545379.0,
+      "allocated_bytes": 184415880.0,
+      "encoded_row_bytes": 9812,
+      "validated_rows": 3000,
+      "validated_bytes": 29436000,
+      "sample": "p99",
+      "batch": 1,
+      "order": [
+        "split",
+        "cached"
+      ]
+    },
+    {
+      "mode": "cached",
+      "worker_domains": 8,
+      "paths": 300,
+      "calls": 3000,
+      "wall_us": 279693.334,
+      "cpu_us": 488871.0,
+      "allocated_bytes": 184335040.0,
+      "encoded_row_bytes": 9812,
+      "validated_rows": 3000,
+      "validated_bytes": 29436000,
+      "sample": "p99",
+      "batch": 1,
+      "order": [
+        "split",
+        "cached"
+      ]
+    },
+    {
+      "mode": "cached",
+      "worker_domains": 8,
+      "paths": 300,
+      "calls": 3000,
+      "wall_us": 231124.958,
+      "cpu_us": 404495.00000000006,
+      "allocated_bytes": 184338000.0,
+      "encoded_row_bytes": 9812,
+      "validated_rows": 3000,
+      "validated_bytes": 29436000,
+      "sample": "p99",
+      "batch": 2,
+      "order": [
+        "cached",
+        "split"
+      ]
+    },
+    {
+      "mode": "split",
+      "worker_domains": 8,
+      "paths": 300,
+      "calls": 3000,
+      "wall_us": 185896.375,
+      "cpu_us": 365414.0,
+      "allocated_bytes": 184450400.0,
+      "encoded_row_bytes": 9812,
+      "validated_rows": 3000,
+      "validated_bytes": 29436000,
+      "sample": "p99",
+      "batch": 2,
+      "order": [
+        "cached",
+        "split"
+      ]
+    },
+    {
+      "mode": "split",
+      "worker_domains": 8,
+      "paths": 300,
+      "calls": 3000,
+      "wall_us": 216427.75,
+      "cpu_us": 376405.0,
+      "allocated_bytes": 184448720.0,
+      "encoded_row_bytes": 9812,
+      "validated_rows": 3000,
+      "validated_bytes": 29436000,
+      "sample": "p99",
+      "batch": 3,
+      "order": [
+        "split",
+        "cached"
+      ]
+    },
+    {
+      "mode": "cached",
+      "worker_domains": 8,
+      "paths": 300,
+      "calls": 3000,
+      "wall_us": 286876.416,
+      "cpu_us": 475039.0,
+      "allocated_bytes": 184315480.0,
+      "encoded_row_bytes": 9812,
+      "validated_rows": 3000,
+      "validated_bytes": 29436000,
+      "sample": "p99",
+      "batch": 3,
+      "order": [
+        "split",
+        "cached"
+      ]
+    },
+    {
+      "mode": "cached",
+      "worker_domains": 1,
+      "paths": 1500,
+      "calls": 6000,
+      "wall_us": 613003.5,
+      "cpu_us": 587393.0,
+      "allocated_bytes": 368713768.0,
+      "encoded_row_bytes": 9812,
+      "validated_rows": 6000,
+      "validated_bytes": 58872000,
+      "sample": "p99",
+      "batch": 0,
+      "order": [
+        "cached",
+        "split"
+      ]
+    },
+    {
+      "mode": "split",
+      "worker_domains": 1,
+      "paths": 1500,
+      "calls": 6000,
+      "wall_us": 684705.75,
+      "cpu_us": 636620.0000000001,
+      "allocated_bytes": 368939808.0,
+      "encoded_row_bytes": 9812,
+      "validated_rows": 6000,
+      "validated_bytes": 58872000,
+      "sample": "p99",
+      "batch": 0,
+      "order": [
+        "cached",
+        "split"
+      ]
+    },
+    {
+      "mode": "split",
+      "worker_domains": 1,
+      "paths": 1500,
+      "calls": 6000,
+      "wall_us": 601567.0,
+      "cpu_us": 589513.0,
+      "allocated_bytes": 368864448.0,
+      "encoded_row_bytes": 9812,
+      "validated_rows": 6000,
+      "validated_bytes": 58872000,
+      "sample": "p99",
+      "batch": 1,
+      "order": [
+        "split",
+        "cached"
+      ]
+    },
+    {
+      "mode": "cached",
+      "worker_domains": 1,
+      "paths": 1500,
+      "calls": 6000,
+      "wall_us": 655259.459,
+      "cpu_us": 656231.9999999999,
+      "allocated_bytes": 368735288.0,
+      "encoded_row_bytes": 9812,
+      "validated_rows": 6000,
+      "validated_bytes": 58872000,
+      "sample": "p99",
+      "batch": 1,
+      "order": [
+        "split",
+        "cached"
+      ]
+    },
+    {
+      "mode": "cached",
+      "worker_domains": 1,
+      "paths": 1500,
+      "calls": 6000,
+      "wall_us": 592293.25,
+      "cpu_us": 606202.9999999999,
+      "allocated_bytes": 368724648.0,
+      "encoded_row_bytes": 9812,
+      "validated_rows": 6000,
+      "validated_bytes": 58872000,
+      "sample": "p99",
+      "batch": 2,
+      "order": [
+        "cached",
+        "split"
+      ]
+    },
+    {
+      "mode": "split",
+      "worker_domains": 1,
+      "paths": 1500,
+      "calls": 6000,
+      "wall_us": 607694.042,
+      "cpu_us": 586541.0,
+      "allocated_bytes": 368871368.0,
+      "encoded_row_bytes": 9812,
+      "validated_rows": 6000,
+      "validated_bytes": 58872000,
+      "sample": "p99",
+      "batch": 2,
+      "order": [
+        "cached",
+        "split"
+      ]
+    },
+    {
+      "mode": "split",
+      "worker_domains": 1,
+      "paths": 1500,
+      "calls": 6000,
+      "wall_us": 671717.875,
+      "cpu_us": 653797.0,
+      "allocated_bytes": 368901448.0,
+      "encoded_row_bytes": 9812,
+      "validated_rows": 6000,
+      "validated_bytes": 58872000,
+      "sample": "p99",
+      "batch": 3,
+      "order": [
+        "split",
+        "cached"
+      ]
+    },
+    {
+      "mode": "cached",
+      "worker_domains": 1,
+      "paths": 1500,
+      "calls": 6000,
+      "wall_us": 725564.417,
+      "cpu_us": 631379.0,
+      "allocated_bytes": 368752728.0,
+      "encoded_row_bytes": 9812,
+      "validated_rows": 6000,
+      "validated_bytes": 58872000,
+      "sample": "p99",
+      "batch": 3,
+      "order": [
+        "split",
+        "cached"
+      ]
+    },
+    {
+      "mode": "cached",
+      "worker_domains": 8,
+      "paths": 1500,
+      "calls": 6000,
+      "wall_us": 484457.584,
+      "cpu_us": 776852.9999999999,
+      "allocated_bytes": 368674760.0,
+      "encoded_row_bytes": 9812,
+      "validated_rows": 6000,
+      "validated_bytes": 58872000,
+      "sample": "p99",
+      "batch": 0,
+      "order": [
+        "cached",
+        "split"
+      ]
+    },
+    {
+      "mode": "split",
+      "worker_domains": 8,
+      "paths": 1500,
+      "calls": 6000,
+      "wall_us": 520931.625,
+      "cpu_us": 921637.0,
+      "allocated_bytes": 368863120.0,
+      "encoded_row_bytes": 9812,
+      "validated_rows": 6000,
+      "validated_bytes": 58872000,
+      "sample": "p99",
+      "batch": 0,
+      "order": [
+        "cached",
+        "split"
+      ]
+    },
+    {
+      "mode": "split",
+      "worker_domains": 8,
+      "paths": 1500,
+      "calls": 6000,
+      "wall_us": 546663.25,
+      "cpu_us": 765479.0,
+      "allocated_bytes": 368864800.0,
+      "encoded_row_bytes": 9812,
+      "validated_rows": 6000,
+      "validated_bytes": 58872000,
+      "sample": "p99",
+      "batch": 1,
+      "order": [
+        "split",
+        "cached"
+      ]
+    },
+    {
+      "mode": "cached",
+      "worker_domains": 8,
+      "paths": 1500,
+      "calls": 6000,
+      "wall_us": 357855.958,
+      "cpu_us": 686085.0,
+      "allocated_bytes": 368666600.0,
+      "encoded_row_bytes": 9812,
+      "validated_rows": 6000,
+      "validated_bytes": 58872000,
+      "sample": "p99",
+      "batch": 1,
+      "order": [
+        "split",
+        "cached"
+      ]
+    },
+    {
+      "mode": "cached",
+      "worker_domains": 8,
+      "paths": 1500,
+      "calls": 6000,
+      "wall_us": 407020.791,
+      "cpu_us": 728762.0,
+      "allocated_bytes": 368683360.0,
+      "encoded_row_bytes": 9812,
+      "validated_rows": 6000,
+      "validated_bytes": 58872000,
+      "sample": "p99",
+      "batch": 2,
+      "order": [
+        "cached",
+        "split"
+      ]
+    },
+    {
+      "mode": "split",
+      "worker_domains": 8,
+      "paths": 1500,
+      "calls": 6000,
+      "wall_us": 439467.667,
+      "cpu_us": 781932.0,
+      "allocated_bytes": 368874080.0,
+      "encoded_row_bytes": 9812,
+      "validated_rows": 6000,
+      "validated_bytes": 58872000,
+      "sample": "p99",
+      "batch": 2,
+      "order": [
+        "cached",
+        "split"
+      ]
+    },
+    {
+      "mode": "split",
+      "worker_domains": 8,
+      "paths": 1500,
+      "calls": 6000,
+      "wall_us": 407194.333,
+      "cpu_us": 726633.0000000001,
+      "allocated_bytes": 368846880.0,
+      "encoded_row_bytes": 9812,
+      "validated_rows": 6000,
+      "validated_bytes": 58872000,
+      "sample": "p99",
+      "batch": 3,
+      "order": [
+        "split",
+        "cached"
+      ]
+    },
+    {
+      "mode": "cached",
+      "worker_domains": 8,
+      "paths": 1500,
+      "calls": 6000,
+      "wall_us": 409381.208,
+      "cpu_us": 707791.0,
+      "allocated_bytes": 368690560.0,
+      "encoded_row_bytes": 9812,
+      "validated_rows": 6000,
+      "validated_bytes": 58872000,
+      "sample": "p99",
+      "batch": 3,
+      "order": [
+        "split",
+        "cached"
+      ]
+    }
+  ],
+  "summary": [
+    {
+      "sample": "p50",
+      "paths": 30,
+      "worker_domains": 1,
+      "encoded_row_bytes": 570,
+      "median_batch_mean_per_call": {
+        "cached": {
+          "wall_us": 8.095527833333334,
+          "cpu_us": 8.24,
+          "allocated_bytes": 4405.632
+        },
+        "split": {
+          "wall_us": 8.061951333333333,
+          "cpu_us": 7.975666666666665,
+          "allocated_bytes": 4421.792
+        }
+      },
+      "split_over_cached": {
+        "wall_us": 0.9958524631511055,
+        "cpu_us": 0.9679207119741099,
+        "allocated_bytes": 1.0036680321915223
+      }
+    },
+    {
+      "sample": "p50",
+      "paths": 30,
+      "worker_domains": 8,
+      "encoded_row_bytes": 570,
+      "median_batch_mean_per_call": {
+        "cached": {
+          "wall_us": 11.416979166666668,
+          "cpu_us": 29.221333333333334,
+          "allocated_bytes": 4405.856
+        },
+        "split": {
+          "wall_us": 3.8108820000000003,
+          "cpu_us": 21.022333333333336,
+          "allocated_bytes": 4422.016
+        }
+      },
+      "split_over_cached": {
+        "wall_us": 0.3337907466036514,
+        "cpu_us": 0.719417320678956,
+        "allocated_bytes": 1.0036678457035364
+      }
+    },
+    {
+      "sample": "p50",
+      "paths": 300,
+      "worker_domains": 1,
+      "encoded_row_bytes": 570,
+      "median_batch_mean_per_call": {
+        "cached": {
+          "wall_us": 39.35814583333333,
+          "cpu_us": 39.7955,
+          "allocated_bytes": 4451.989333333333
+        },
+        "split": {
+          "wall_us": 47.651236,
+          "cpu_us": 39.917,
+          "allocated_bytes": 4488.102666666667
+        }
+      },
+      "split_over_cached": {
+        "wall_us": 1.2107083550578,
+        "cpu_us": 1.0030531090198642,
+        "allocated_bytes": 1.0081117295279534
+      }
+    },
+    {
+      "sample": "p50",
+      "paths": 300,
+      "worker_domains": 8,
+      "encoded_row_bytes": 570,
+      "median_batch_mean_per_call": {
+        "cached": {
+          "wall_us": 38.415555499999996,
+          "cpu_us": 49.829833333333326,
+          "allocated_bytes": 4436.305333333334
+        },
+        "split": {
+          "wall_us": 37.47897916666667,
+          "cpu_us": 49.014500000000005,
+          "allocated_bytes": 4468.3133333333335
+        }
+      },
+      "split_over_cached": {
+        "wall_us": 0.9756198674952565,
+        "cpu_us": 0.9836376467912464,
+        "allocated_bytes": 1.0072150128530377
+      }
+    },
+    {
+      "sample": "p50",
+      "paths": 1500,
+      "worker_domains": 1,
+      "encoded_row_bytes": 570,
+      "median_batch_mean_per_call": {
+        "cached": {
+          "wall_us": 44.41041316666667,
+          "cpu_us": 43.06625,
+          "allocated_bytes": 4457.088
+        },
+        "split": {
+          "wall_us": 41.36045141666666,
+          "cpu_us": 41.15608333333333,
+          "allocated_bytes": 4488.098
+        }
+      },
+      "split_over_cached": {
+        "wall_us": 0.9313232745988225,
+        "cpu_us": 0.9556458557068083,
+        "allocated_bytes": 1.006957457425117
+      }
+    },
+    {
+      "sample": "p50",
+      "paths": 1500,
+      "worker_domains": 8,
+      "encoded_row_bytes": 570,
+      "median_batch_mean_per_call": {
+        "cached": {
+          "wall_us": 37.182125,
+          "cpu_us": 52.08616666666667,
+          "allocated_bytes": 4440.223333333333
+        },
+        "split": {
+          "wall_us": 36.100993083333336,
+          "cpu_us": 50.675749999999994,
+          "allocated_bytes": 4471.23
+        }
+      },
+      "split_over_cached": {
+        "wall_us": 0.9709233424214817,
+        "cpu_us": 0.9729214730718647,
+        "allocated_bytes": 1.0069831322298353
+      }
+    },
+    {
+      "sample": "p99",
+      "paths": 30,
+      "worker_domains": 1,
+      "encoded_row_bytes": 9812,
+      "median_batch_mean_per_call": {
+        "cached": {
+          "wall_us": 42.30770833333333,
+          "cpu_us": 43.904333333333334,
+          "allocated_bytes": 61405.632
+        },
+        "split": {
+          "wall_us": 39.28898616666667,
+          "cpu_us": 41.6775,
+          "allocated_bytes": 61421.792
+        }
+      },
+      "split_over_cached": {
+        "wall_us": 0.9286484121786318,
+        "cpu_us": 0.9492798736647104,
+        "allocated_bytes": 1.0002631680429575
+      }
+    },
+    {
+      "sample": "p99",
+      "paths": 30,
+      "worker_domains": 8,
+      "encoded_row_bytes": 9812,
+      "median_batch_mean_per_call": {
+        "cached": {
+          "wall_us": 16.17193766666667,
+          "cpu_us": 78.7175,
+          "allocated_bytes": 61405.856
+        },
+        "split": {
+          "wall_us": 15.793173666666668,
+          "cpu_us": 87.47433333333333,
+          "allocated_bytes": 61422.016
+        }
+      },
+      "split_over_cached": {
+        "wall_us": 0.9765789352020134,
+        "cpu_us": 1.1112437937349806,
+        "allocated_bytes": 1.0002631670829571
+      }
+    },
+    {
+      "sample": "p99",
+      "paths": 300,
+      "worker_domains": 1,
+      "encoded_row_bytes": 9812,
+      "median_batch_mean_per_call": {
+        "cached": {
+          "wall_us": 115.58383316666666,
+          "cpu_us": 108.49033333333333,
+          "allocated_bytes": 61448.16266666667
+        },
+        "split": {
+          "wall_us": 109.7744445,
+          "cpu_us": 106.0815,
+          "allocated_bytes": 61485.296
+        }
+      },
+      "split_over_cached": {
+        "wall_us": 0.9497387436676392,
+        "cpu_us": 0.9777967929554401,
+        "allocated_bytes": 1.0006043033952825
+      }
+    },
+    {
+      "sample": "p99",
+      "paths": 300,
+      "worker_domains": 8,
+      "encoded_row_bytes": 9812,
+      "median_batch_mean_per_call": {
+        "cached": {
+          "wall_us": 85.136382,
+          "cpu_us": 150.26333333333332,
+          "allocated_bytes": 61444.253333333334
+        },
+        "split": {
+          "wall_us": 69.90160416666666,
+          "cpu_us": 127.73583333333333,
+          "allocated_bytes": 61480.613333333335
+        }
+      },
+      "split_over_cached": {
+        "wall_us": 0.8210544367115185,
+        "cpu_us": 0.8500798598016815,
+        "allocated_bytes": 1.000591755909259
+      }
+    },
+    {
+      "sample": "p99",
+      "paths": 1500,
+      "worker_domains": 1,
+      "encoded_row_bytes": 9812,
+      "median_batch_mean_per_call": {
+        "cached": {
+          "wall_us": 105.68857991666667,
+          "cpu_us": 103.13183333333333,
+          "allocated_bytes": 61454.994666666666
+        },
+        "split": {
+          "wall_us": 106.61765975,
+          "cpu_us": 102.17775,
+          "allocated_bytes": 61481.068
+        }
+      },
+      "split_over_cached": {
+        "wall_us": 1.0087907305980068,
+        "cpu_us": 0.990748895830741,
+        "allocated_bytes": 1.0004242671157122
+      }
+    },
+    {
+      "sample": "p99",
+      "paths": 1500,
+      "worker_domains": 8,
+      "encoded_row_bytes": 9812,
+      "median_batch_mean_per_call": {
+        "cached": {
+          "wall_us": 68.03349991666667,
+          "cpu_us": 119.71275,
+          "allocated_bytes": 61446.51
+        },
+        "split": {
+          "wall_us": 80.03327433333334,
+          "cpu_us": 128.95091666666667,
+          "allocated_bytes": 61477.32666666667
+        }
+      },
+      "split_over_cached": {
+        "wall_us": 1.1763803777751407,
+        "cpu_us": 1.077169446584985,
+        "allocated_bytes": 1.0005015202111018
+      }
+    }
+  ]
+}

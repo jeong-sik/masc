@@ -1,0 +1,116 @@
+(* RFC-0162 §3.4. See [fd_cache.mli] for the contract. *)
+
+type cached_writer =
+  { oc : out_channel
+  ; mutable last_used : float
+  ; mutable active : int
+  ; mutable close_on_release : bool
+  }
+
+let cached : (string, cached_writer) Hashtbl.t = Hashtbl.create 32
+let mu = Stdlib.Mutex.create ()
+let max_entries = 32
+
+let close_silently w =
+  try Stdlib.close_out w.oc with
+  | _ -> () (* cancel-guard-ok: Stdlib.close_out performs no Eio operation. *)
+;;
+
+let drop_cached_writer_locked path w =
+  Hashtbl.remove cached path;
+  if w.active = 0 then close_silently w else w.close_on_release <- true
+;;
+
+(* Evict the inactive writer with the smallest [last_used], closing its fd.
+   Caller must already hold [mu]. Active writers are never closed under a
+   caller still using the returned channel. *)
+let evict_lru_locked () =
+  let oldest = ref None in
+  Hashtbl.iter
+    (fun path w ->
+      if w.active = 0
+      then
+        match !oldest with
+        | None -> oldest := Some (path, w.last_used)
+        | Some (_, ts) when w.last_used < ts -> oldest := Some (path, w.last_used)
+        | _ -> ())
+    cached;
+  match !oldest with
+  | None -> ()
+  | Some (victim_path, _) ->
+    (match Hashtbl.find_opt cached victim_path with
+     | Some w -> drop_cached_writer_locked victim_path w
+     | None -> ())
+;;
+
+let writer_matches_path path w =
+  try
+    let opened = Unix.fstat (Unix.descr_of_out_channel w.oc) in
+    let current = Unix.stat path in
+    opened.Unix.st_dev = current.Unix.st_dev
+    && opened.Unix.st_ino = current.Unix.st_ino
+  with
+  | Unix.Unix_error ((Unix.ENOENT | Unix.ENOTDIR), _, _) -> false
+;;
+
+(* Caller must already hold [mu]. *)
+(* Counterfactual: validate a leased descriptor outside the global cache mutex.
+   This is experiment source, not a product patch. *)
+let get_or_open_locked path now =
+  match Hashtbl.find_opt cached path with
+  | Some w -> w.last_used <- now; (w, true)
+  | None ->
+    if Hashtbl.length cached >= max_entries then evict_lru_locked ();
+    let oc = Stdlib.open_out_gen
+      [ Stdlib.Open_append; Stdlib.Open_creat; Stdlib.Open_wronly ] 0o644 path in
+    let w = { oc; last_used = now; active = 0; close_on_release = false } in
+    Hashtbl.add cached path w; (w, false)
+;;
+
+let release_writer w =
+  Stdlib.Mutex.protect mu (fun () ->
+    w.active <- max 0 (w.active - 1);
+    w.last_used <- Unix.gettimeofday ();
+    if w.active = 0 && w.close_on_release then close_silently w)
+;;
+
+let rec with_writer path f =
+  let w, check = Stdlib.Mutex.protect mu (fun () ->
+    let w, check = get_or_open_locked path (Unix.gettimeofday ()) in
+    w.active <- w.active + 1; (w, check)) in
+  let valid = match if check then writer_matches_path path w else true with
+    | value -> value
+    | exception e ->
+      let bt = Printexc.get_raw_backtrace () in
+      release_writer w; Printexc.raise_with_backtrace e bt
+  in
+  if valid then Fun.protect ~finally:(fun () -> release_writer w) (fun () -> f w.oc)
+  else (
+    Fun.protect ~finally:(fun () -> release_writer w) (fun () ->
+      Stdlib.Mutex.protect mu (fun () ->
+        match Hashtbl.find_opt cached path with
+        | Some current when current == w -> drop_cached_writer_locked path w
+        | Some _ | None -> ()));
+    with_writer path f)
+;;
+
+let invalidate path =
+  Stdlib.Mutex.protect mu (fun () ->
+    match Hashtbl.find_opt cached path with
+    | Some w -> drop_cached_writer_locked path w
+    | None -> ())
+;;
+
+let close_all () =
+  Stdlib.Mutex.protect mu (fun () ->
+    let entries = Hashtbl.fold (fun path w acc -> (path, w) :: acc) cached [] in
+    List.iter (fun (path, w) -> drop_cached_writer_locked path w) entries)
+;;
+
+let reset_for_testing () = close_all ()
+
+(* Best-effort cache drain at process exit. RFC-0108 §6 already
+   states per-record fsync is out of scope, so the [flush] inside
+   the hot path is the durability boundary; this close is just to
+   release the fd handles cleanly. *)
+let () = Stdlib.at_exit close_all

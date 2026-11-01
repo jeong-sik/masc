@@ -1,0 +1,26 @@
+{
+  "scope": "Prototype component, not product change. Actual frozen Fd_cache vs descriptor validation moved outside global cache mutex. Per-path mutex held in both variants. 1 or 8 worker domains plus idle coordinator; no Eio/main-domain request trace. Domain creation/final drain excluded. All worker-local allocation counters sampled before any worker exits. Timed CPU includes coordinator and GC.",
+  "argv": [
+    "ocamlfind",
+    "ocamlopt",
+    "-thread",
+    "-package",
+    "threads,unix,yojson,mtime.clock.os",
+    "-linkpkg",
+    "fd_cache.mli",
+    "fd_cache.ml",
+    "fd_cache_split.mli",
+    "fd_cache_split.ml",
+    "bench.ml",
+    "-o",
+    "bench.exe"
+  ],
+  "returncode": 0,
+  "source_sha256": {
+    "fd_cache.ml": "a5aff8c41c9ed1e324709b0fdaf7ce35be42b76e36259120ebed4dc30d786014",
+    "fd_cache.mli": "342f4316a19d5d79eba3445109e1cd0bb069bb33b040f903b5a19e0d0ebfd541",
+    "fd_cache_split.ml": "2f23a230bdd38c476580278687aa888833a34ce55c79ce9bdb749bd3b3779670",
+    "fd_cache_split.mli": "342f4316a19d5d79eba3445109e1cd0bb069bb33b040f903b5a19e0d0ebfd541",
+    "bench.ml": "fa37dbc8cdde576b0f30c7ce0d0e705480aec8b249959f41f8e91f84877a6fe5"
+  }
+}

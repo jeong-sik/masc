@@ -355,10 +355,17 @@ let test_late_empty_read_preserves_same_artifact_publication () =
   let original = Fs_compat.load_file pin in
   let empty = ok (Context.commit ~observed_sources:[] ~keepers_dir ~keeper_id:"keeper"
       ~expected_version:(Some (Context.version first)) ~sources:[] []) in
+  check int "the stale reader observes an empty owner" 0 (List.length empty.pockets);
   let newer = ref "" in
   ignore (Recall.For_testing.render ~base_path ~keepers_dir ~keeper_name:"keeper"
     ~before_retain:(fun () -> ()) ~before_retire:(fun () ->
-      let reopened = commit ~keepers_dir ~previous:(Some empty) "reopened working context" in
+      (* A fresh owner repeats the original projected context IDs. Continuing
+         the empty revision would mint new IDs and different artifact bytes. *)
+      Sys.remove (Context.path ~keepers_dir ~keeper_id:"keeper");
+      let reopened = commit ~keepers_dir ~previous:None "reopened working context" in
+      check bool "the restored owner has a new generation" false
+        (first.generation = reopened.generation);
+      check int "the restored owner repeats the numeric revision" first.revision reopened.revision;
       ok (Recall.publish ~base_path ~keepers_dir ~keeper_name:"keeper" reopened);
       check string "new publication reuses the same artifact bytes" reference.sha256
         (artifact_of_index ~keepers_dir).sha256;

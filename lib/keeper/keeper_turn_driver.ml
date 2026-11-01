@@ -3044,6 +3044,8 @@ let run_named
           let native_attempt : Runtime_native_tasks.attempt =
             { routing_run_id; runtime_id = attempt_runtime_id; lane_attempt_index = idx } in
           Keeper_claude_code_runtime.run ~input_source ~media_store ?on_native_tool_progress ?on_native_tool_completion
+            ~configured_reasoning_effort:runtime.model.reasoning_effort
+            ~turn_timeout_s:runtime.model.turn_timeout_s
             ?argument_source:official_argument_source
             ?on_provider_retry:(Option.map
               (fun observe retry -> observe ~attempt:native_attempt retry)

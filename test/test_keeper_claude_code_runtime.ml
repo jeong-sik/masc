@@ -3083,20 +3083,20 @@ let run_direct_attempt
                ~sw
                (fun () ->
                   Runtime.init_default ~config_path:runtime_path |> Result.get_ok;
+                  let runtime = Runtime.get_runtime_by_id "claude.claude" |> Option.get in
                   let config =
-                    match Runtime.get_runtime_by_id "claude.claude" with
-                    | Some
-                        { Runtime_instance.execution = Runtime_execution.Claude_code config
-                        ; _
-                        } ->
-                      config
-                    | Some _ | None -> fail "Claude runtime fixture did not resolve"
+                    match runtime.Runtime_instance.execution with
+                    | Runtime_execution.Claude_code config -> config
+                    | Agent_core _ | Codex_app_server _ | Antigravity_cli _ | Muse_serve _ ->
+                      fail "Claude runtime fixture did not resolve"
                   in
                   let config = match admission_timeout_s with
                     | None -> config
                     | Some timeout_s -> { config with Runtime_execution.timeout_s }
                   in
                   Keeper_claude_code_runtime.run ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = "claude-pre-dispatch" })
+                    ~configured_reasoning_effort:runtime.model.reasoning_effort
+                    ~turn_timeout_s:runtime.model.turn_timeout_s
                     ?terminal_effect_state
                     ?composed_context
                     ?argument_source ?librarian_front
@@ -3104,7 +3104,7 @@ let run_direct_attempt
                     ?required_native_posture ?on_native_task_observation ?on_child_content_observation
                     ~turn_start
                     ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input
-                      ~runtime:(Runtime.get_runtime_by_id "claude.claude" |> Option.get))
+                      ~runtime)
                     ~pre_tool_rejects:(ref [])
                     ~runtime_id:"claude.claude"
                     ~keeper_name:"claude-pre-dispatch"

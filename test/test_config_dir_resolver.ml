@@ -242,7 +242,9 @@ let test_normalize_path_lexically_special_components () =
       "/alpha/beta/../gamma", "/alpha/gamma";
       "/../../alpha", "/alpha";
       "alpha/../../beta", "../beta";
-      "../..", "."; "../../..", "..";
+      "../..", "../.."; "../../..", "../../..";
+      "../alpha/../../beta", "../../beta";
+      "alpha/../../../beta", "../../beta";
       "./", "."; "alpha/.", "alpha"; "alpha/..", ".";
       " alpha beta / gamma ", "alpha beta / gamma" ]
 
@@ -256,6 +258,23 @@ let test_normalize_masc_base_path_input_strips_one_masc_component () =
       "project/.masc/.masc", "project/.masc";
       "project/.masc/child", "project/.masc/child";
       "project/.masc-suffix", "project/.masc-suffix" ]
+
+let test_relative_parent_paths_preserve_filesystem_targets () =
+  with_temp_dir "config-relative-parent-target" @@ fun root ->
+  let cwd = Filename.concat root "first/second" in
+  let workspace = Filename.concat root "shared" in
+  List.iter mkdir_p
+    [ cwd; Filename.concat cwd "nested"; Filename.concat cwd "shared";
+      Filename.concat workspace ".masc" ];
+  List.iter
+    (fun path ->
+      let original = Unix.realpath (Filename.concat cwd path) in
+      let normalized = Env_config_core.normalize_path_lexically path in
+      check string path original (Unix.realpath (Filename.concat cwd normalized)))
+    [ "../.."; "../../shared"; "nested/../../../shared" ];
+  let base = Env_config_core.normalize_masc_base_path_input "../../shared/.masc" in
+  check string "terminal .masc keeps the original workspace"
+    (Unix.realpath workspace) (Unix.realpath (Filename.concat cwd base))
 
 let test_env_override_valid () =
   with_temp_dir "config-dir-env" @@ fun root ->
@@ -635,6 +654,8 @@ let () =
             test_normalize_path_lexically_special_components;
           test_case "strips one terminal .masc component" `Quick
             test_normalize_masc_base_path_input_strips_one_masc_component;
+          test_case "relative parents keep their filesystem targets" `Quick
+            test_relative_parent_paths_preserve_filesystem_targets;
         ] );
       ( "rfc_0121_accessors",
         [

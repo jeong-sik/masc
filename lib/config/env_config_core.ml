@@ -278,6 +278,7 @@ let normalize_path_lexically value =
           | "" :: rest | "." :: rest -> fold acc rest
           | ".." :: rest -> (
               match acc, absolute with
+              | ".." :: _, false -> fold (".." :: acc) rest
               | _ :: acc_tail, _ -> fold acc_tail rest
               | [], true -> fold [] rest
               | [], false -> fold [ ".." ] rest)

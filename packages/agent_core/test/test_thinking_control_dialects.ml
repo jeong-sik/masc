@@ -1573,8 +1573,8 @@ let test_openrouter_reasoning_enabled_responses_request () =
       | Ok artifact -> artifact
       | Error (Llm_provider.Http_client.AcceptRejected {reason}) -> fail reason
       | Error _ -> fail "OpenRouter Responses serialization failed" in
-    check bool "admitted request uses the Responses codec" true
-      (artifact.http_codec = Llm_provider.Provider_http_codec.Openai_responses);
+    check string "admitted request uses the Responses codec" "openai-responses"
+      (Llm_provider.Provider_http_codec.fingerprint_tag artifact.http_codec);
     let json = json_of_body artifact.body in
     check string "exact API model survives serialization" model_id
       (json |> member "model" |> to_string);

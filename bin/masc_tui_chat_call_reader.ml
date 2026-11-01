@@ -126,9 +126,12 @@ let complete t request result =
   let result = Result.bind result (fun call ->
     match original_failure call.Masc.Tui_decode.kc_original, observation t with
     | Some reason, (Fetched.Ready previous | Stale (previous,_)) ->
-        (match previous.Masc.Tui_decode.kc_original with
-         | Original_body _ -> Error reason
-         | Original_not_read | Original_pending | Original_unavailable _ | Original_failed _ -> Ok call)
+        (match previous.Masc.Tui_decode.kc_original,call.kc_original with
+         | Original_body previous,Original_body current
+           when not (String.equal previous.source_id current.source_id
+                     && String.equal previous.sha256 current.sha256) -> Ok call
+         | Original_body _,_ -> Error reason
+         | (Original_not_read | Original_pending | Original_unavailable _ | Original_failed _),_ -> Ok call)
     | (None | Some _), (Fetched.Absent | Loading | Failed _ | Ready _ | Stale _) -> Ok call) in
   if not (Fetched.is_current ~equal:String.equal t.fetched request) then t
   else let t={t with fetched=Fetched.complete ~equal:String.equal t.fetched request result} in

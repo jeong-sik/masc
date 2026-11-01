@@ -60,7 +60,7 @@ let set_turn_phase ~observation_token ~base_path name (turn_phase : packed_turn_
       in
       e', changed)
   in
-  if changed then broadcast_composite_changed ~name ~ts_unix:now
+  if changed then broadcast_composite_changed ~base_path ~name ~ts_unix:now
 ;;
 
 let mark_turn_provider_attempt_started ~observation_token ~base_path name =
@@ -86,7 +86,7 @@ let set_turn_selected_runtime ~observation_token ~base_path name selected_runtim
       in
       e', changed)
   in
-  if changed then broadcast_composite_changed ~name ~ts_unix:now
+  if changed then broadcast_composite_changed ~base_path ~name ~ts_unix:now
 ;;
 
 
@@ -136,7 +136,7 @@ let mark_turn_finished ~observation_token ~base_path name =
     Option.iter
       (Keeper_transition_audit.record_completed_turn ~keeper_name:name)
       !completed_turn_to_record;
-  if changed then broadcast_composite_changed ~name ~ts_unix:now
+  if changed then broadcast_composite_changed ~base_path ~name ~ts_unix:now
 ;;
 
 let record_skip_reasons ~base_path name ~reasons =
@@ -898,7 +898,7 @@ let rec dispatch_event_with_audit_internal
              subscribers re-fetch [/api/v1/keepers/:name/composite] for the
              full snapshot so the spec's "single writer, pull observers"
              invariant is preserved. *)
-          broadcast_composite_changed ~name ~ts_unix:now;
+          broadcast_composite_changed ~base_path:entry.base_path ~name ~ts_unix:now;
           notify_state_change_observer ~base_path:entry.base_path Lifecycle_phase_changed;
           Ok tr)
      | Ok tr ->
@@ -956,7 +956,7 @@ let rec dispatch_event_with_audit_internal
               ~new_phase:tr.new_phase
               ~conditions_after:tr.updated_conditions
               ~restart_count:entry.restart_count;
-          broadcast_composite_changed ~name ~ts_unix:now;
+          broadcast_composite_changed ~base_path:entry.base_path ~name ~ts_unix:now;
           Ok tr)
      | Error e -> reject_dispatch e)
 ;;

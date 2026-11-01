@@ -395,6 +395,108 @@ let test_waiting_inventory_observer_authority ~auth () =
              ~kind:Sse.Observer before).deliveries))
 ;;
 
+let test_keeper_composite_authority ~auth () =
+  reset ();
+  let original_buffer = Sse.event_buffer_events_for_test () in
+  let base_a = auth.Sse.config in
+  let base_b = Filename.concat base_a "composite-beta" in
+  Fs_compat.mkdir_p (Filename.concat base_b Common.masc_dirname);
+  let auth_b = Masc_test_deps.make_sse_auth base_b "composite-agent" in
+  let authority_a = Sse.runtime_authority_exn ~base_path:base_a in
+  let authority_b = Sse.runtime_authority_exn ~base_path:base_b in
+  let meta =
+    match Masc_test_deps.meta_of_json_fixture
+      (`Assoc [ "name", `String "alpha"; "trace_id", `String "trace-alpha" ]) with
+    | Ok meta -> meta
+    | Error error -> Alcotest.fail error in
+  ignore (Keeper_registry.register_offline ~base_path:base_a "alpha" meta);
+  ignore (Keeper_registry.register_offline ~base_path:base_b "alpha" meta);
+  let before = Sse.current_id () in
+  let sessions = [ "composite-observer-a"; "composite-observer-b";
+                   "composite-presence-a"; "composite-presence-b" ] in
+  let subscribers = [ "composite-external-a"; "composite-external-b";
+                      "composite-external-unscoped" ] in
+  let external_a = ref [] and external_b = ref [] and unscoped = ref [] in
+  Fun.protect
+    ~finally:(fun () ->
+      List.iter Sse.unsubscribe_external subscribers;
+      List.iter Sse.unregister sessions;
+      Keeper_registry.For_testing.unregister ~base_path:base_a "alpha";
+      Keeper_registry.For_testing.unregister ~base_path:base_b "alpha";
+      Sse.set_event_buffer_for_test original_buffer)
+    (fun () ->
+      Sse.set_event_buffer_for_test [];
+      ignore (register_exn ~auth ~kind:Observer "composite-observer-a" ~last_event_id:before);
+      ignore (register_exn ~auth:auth_b ~kind:Observer "composite-observer-b" ~last_event_id:before);
+      ignore (register_exn ~auth ~kind:Presence "composite-presence-a" ~last_event_id:before);
+      ignore (register_exn ~auth:auth_b ~kind:Presence "composite-presence-b" ~last_event_id:before);
+      Sse.subscribe_external ~runtime_authority:authority_a ~id:"composite-external-a"
+        ~callback:(fun event -> external_a := event :: !external_a) ();
+      Sse.subscribe_external ~runtime_authority:authority_b ~id:"composite-external-b"
+        ~callback:(fun event -> external_b := event :: !external_b) ();
+      Sse.subscribe_external ~id:"composite-external-unscoped"
+        ~callback:(fun event -> unscoped := event :: !unscoped) ();
+      let start base_path =
+        Keeper_registry.mark_turn_started
+          ~observation_token:(Keeper_turn_observation_token.fresh ())
+          ~base_path ~wake:Keeper_registry.Proactive_tick "alpha" in
+      let check_composite session ~presence =
+        let frame = match Sse.try_pop session with
+          | Some frame -> frame
+          | None -> Alcotest.failf "%s received no event" session in
+        let payload = match Sse.data_payload_of_frame frame with
+          | Ok data -> Yojson.Safe.from_string data
+          | Error Sse.Missing_data_payload -> Alcotest.failf "%s has no payload" session in
+        Alcotest.(check bool) (session ^ " event type") true
+          (U.member "type" payload = `String "keeper_composite_changed");
+        Alcotest.(check bool) (session ^ " keeper") true
+          (U.member "name" payload = `String "alpha");
+        Alcotest.(check bool) (session ^ " presence framing") presence
+          (List.exists (String.equal "event: presence") (String.split_on_char '\n' frame)) in
+      start (Filename.concat base_a Common.masc_dirname);
+      check_composite "composite-observer-a" ~presence:false;
+      check_composite "composite-presence-a" ~presence:true;
+      Alcotest.(check bool) "B observer excludes A" true
+        (Option.is_none (Sse.try_pop "composite-observer-b"));
+      Alcotest.(check bool) "B presence excludes A" true
+        (Option.is_none (Sse.try_pop "composite-presence-b"));
+      Alcotest.(check int) "A external receives the durable event once" 1 (List.length !external_a);
+      Alcotest.(check int) "B external excludes A" 0 (List.length !external_b);
+      Alcotest.(check int) "unscoped external excludes A" 0 (List.length !unscoped);
+      start base_b;
+      check_composite "composite-observer-b" ~presence:false;
+      check_composite "composite-presence-b" ~presence:true;
+      Alcotest.(check bool) "A observer excludes B" true
+        (Option.is_none (Sse.try_pop "composite-observer-a"));
+      Alcotest.(check bool) "A presence excludes B" true
+        (Option.is_none (Sse.try_pop "composite-presence-a"));
+      Alcotest.(check int) "B external receives the durable event once" 1 (List.length !external_b);
+      Alcotest.(check int) "A external excludes B" 1 (List.length !external_a);
+      Alcotest.(check int) "unscoped external excludes both" 0 (List.length !unscoped);
+      let replay authority kind =
+        (Sse.replay_after_for_session ~runtime_authority:authority
+          ~session_id:"composite-replay" ~kind before).deliveries in
+      Alcotest.(check int) "A observer replays only A" 1 (List.length (replay authority_a Observer));
+      Alcotest.(check int) "B observer replays only B" 1 (List.length (replay authority_b Observer));
+      Alcotest.(check int) "presence events are not replayed" 0 (List.length (replay authority_a Presence));
+      Alcotest.(check int) "only durable events are buffered" 2
+        (List.length (Sse.get_events_after_for_test before));
+      Alcotest.(check int) "unbound observer cannot replay" 0
+        (List.length (Sse.replay_after_for_session ~session_id:"composite-unbound"
+          ~kind:Observer before).deliveries);
+      Sse.unregister "composite-presence-a";
+      let last_id = Sse.current_id () in
+      Sse.broadcast_presence_to_runtime authority_a (`Assoc [ "type", `String "probe" ]);
+      Alcotest.(check int) "foreign presence alone does not make A observable" last_id
+        (Sse.current_id ());
+      Alcotest.(check bool) "foreign presence receives no A probe" true
+        (Option.is_none (Sse.try_pop "composite-presence-b"));
+      Alcotest.(check bool) "generic broadcast cannot make scoped presence durable" true
+        (match Sse.broadcast_to (Sse.Runtime_presence authority_a) (`Assoc []) with
+         | () -> false
+         | exception Invalid_argument _ -> true))
+;;
+
 let test_runtime_observer_authority ~auth () =
   reset ();
   let base_a = auth.Sse.config in
@@ -502,6 +604,8 @@ let () =
                 (test_runtime_observer_authority ~auth);
               Alcotest.test_case "waiting inventory authority live and replay" `Quick
                 (test_waiting_inventory_observer_authority ~auth);
+              Alcotest.test_case "keeper composite authority live and replay" `Quick
+                (test_keeper_composite_authority ~auth);
               Alcotest.test_case "observers only" `Quick (test_broadcast_to_observers_only ~auth);
               Alcotest.test_case "all targets" `Quick (test_broadcast_to_all ~auth);
               Alcotest.test_case "broadcast = broadcast_to All" `Quick (test_broadcast_equals_broadcast_to_all ~auth);

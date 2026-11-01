@@ -106,6 +106,7 @@ type broadcast_target =
   | Observers    (** Only [Observer] sessions *)
   | Runtime_observers of runtime_authority
   | Presence_only (** Only [Presence] sessions; never replay-buffered *)
+  | Runtime_presence of runtime_authority
 
 type delivery_audience =
   | Broadcast_audience of broadcast_target
@@ -379,6 +380,8 @@ let session_kind_matches_target target ~runtime_authority ~jsonrpc_payload kind 
   | Runtime_observers authority ->
       kind = Observer && Option.exists (equal_runtime_authority authority) runtime_authority
   | Presence_only -> kind = Presence
+  | Runtime_presence authority ->
+      kind = Presence && Option.exists (equal_runtime_authority authority) runtime_authority
 
 let event_matches_session ~runtime_authority ~session_id ~kind event =
   match event.audience with
@@ -908,7 +911,7 @@ let remove_external_subscribers ids =
     removed during iteration, preventing resource leaks. *)
 let external_matches_target target (subscriber : external_subscriber) =
   match target with
-  | Runtime_observers authority ->
+  | Runtime_observers authority | Runtime_presence authority ->
       Option.exists (equal_runtime_authority authority) subscriber.runtime_authority
   | All | Observers | Presence_only -> true
 
@@ -1018,7 +1021,7 @@ let broadcast_is_unobservable target ~buffer ~notify_external =
   && (not notify_external)
   &&
   match target with
-  | Presence_only ->
+  | Presence_only | Runtime_presence _ ->
     (* [session_kind_matches_target] is the only definition of which session a
        target reaches. Asking it here rather than re-testing [kind = Presence]
        keeps the skip and the delivery on one predicate: if [Presence_only]
@@ -1060,7 +1063,7 @@ let broadcast_deliver ~buffer ~notify_external ~event_type ~on_committed target 
   let target_label = match target with
     | All -> "all"
     | Observers | Runtime_observers _ -> "observers"
-    | Presence_only -> "presence"
+    | Presence_only | Runtime_presence _ -> "presence"
   in
   let delivery, failed =
     Stdlib.Mutex.protect delivery_fanout_mutex (fun () ->
@@ -1175,15 +1178,25 @@ let broadcast json = broadcast_impl All (Value json)
 (** Broadcast event to sessions matching [target].
     - [All]: every session (same as [broadcast])
     - [Observers]: dashboard / read-only viewers only *)
-let broadcast_to target json = broadcast_impl target (Value json)
+let broadcast_to target json =
+  match target with
+  | Runtime_presence _ -> invalid_arg "broadcast_to: use broadcast_presence_to_runtime"
+  | All | Observers | Runtime_observers _ | Presence_only ->
+      broadcast_impl target (Value json)
 
 let broadcast_to_with_commit target ~on_committed json =
   match target with
-  | Presence_only -> invalid_arg "broadcast_to_with_commit: presence is not replayed"
+  | Presence_only | Runtime_presence _ ->
+      invalid_arg "broadcast_to_with_commit: presence is not replayed"
   | All | Observers | Runtime_observers _ ->
       broadcast_impl ~on_committed target (Value json)
 
-let broadcast_encoded_to target encoded = broadcast_impl target (Encoded encoded)
+let broadcast_encoded_to target encoded =
+  match target with
+  | Runtime_presence _ ->
+      invalid_arg "broadcast_encoded_to: use broadcast_presence_to_runtime"
+  | All | Observers | Runtime_observers _ | Presence_only ->
+      broadcast_impl target (Encoded encoded)
 
 (** Broadcast an ephemeral presence/awareness event. Presence events are live
     only: they are not replay-buffered and do not fan out through generic
@@ -1192,6 +1205,10 @@ let broadcast_encoded_to target encoded = broadcast_impl target (Encoded encoded
 let broadcast_presence json =
   broadcast_impl ~buffer:false ~notify_external:false ~event_type:"presence"
     Presence_only (Value json)
+
+let broadcast_presence_to_runtime authority json =
+  broadcast_impl ~buffer:false ~notify_external:false ~event_type:"presence"
+    (Runtime_presence authority) (Value json)
 
 (** Send a JSON-RPC message to a specific session.
     Enqueues the event in the session's stream for asynchronous delivery. *)

@@ -55,7 +55,11 @@ let test_default_policy () =
     check int (label ^ " is idempotent") after again)
     ["main", main; "worker domain", worker];
   let _, main_after, _ = main and _, worker_after, _ = worker in
-  check int "both domains use the shared default" main_after worker_after
+  check int "both domains use the shared default" main_after worker_after;
+  (* Equality alone would also hold if a no-op tune left both domains at the
+     2M-word runtime default. Pin the tuned size itself. *)
+  check int "the shared default is the tuned minor heap"
+    (4 * 1024 * 1024) main_after
 ;;
 
 let () =

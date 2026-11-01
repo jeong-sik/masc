@@ -2873,7 +2873,7 @@ let test_catalog_policy_native_and_proxy () =
       {input_tokens = 100; output_tokens = 10; cache_creation_input_tokens = 0;
        cache_read_input_tokens = 0; cost_usd = None} in
     let annotate usage = Pricing.annotate_usage_cost
-      ~provider:(Provider_config.provider_reference proxy) ~model_id:proxy.model_id usage in
+      ~source:(Provider_config.pricing_source proxy) ~model_id:proxy.model_id usage in
     Alcotest.(check (option (float 0.000001))) "missing proxy price remains unknown"
       None (annotate usage).cost_usd;
     Alcotest.(check (option (float 0.000001))) "provider-observed cost is retained"

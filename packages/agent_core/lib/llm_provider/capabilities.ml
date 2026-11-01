@@ -1382,13 +1382,15 @@ let for_provider_model_id ~wire ~provider ~model_id =
 type request_policy =
   { model_capabilities : capabilities option
   ; anthropic_thinking_control : anthropic_thinking_control option
+  ; pricing_source : Pricing.source
   }
 
 let resolve_request_policy ~wire ~provider ~model_id =
-  match Model_identifiers.Model_id.of_string model_id with
-  | Error _ -> { model_capabilities = None; anthropic_thinking_control = None }
-  | Ok model_id ->
   let catalog = Model_catalog.global () in
+  let pricing_source = Pricing.of_catalog ~catalog ~provider in
+  match Model_identifiers.Model_id.of_string model_id with
+  | Error _ -> { model_capabilities = None; anthropic_thinking_control = None; pricing_source }
+  | Ok model_id ->
   let model_capabilities = for_provider_model_id_from_catalog
       ~catalog ~wire:(Some wire) ~provider ~model_id in
   let anthropic_thinking_control =
@@ -1399,11 +1401,12 @@ let resolve_request_policy ~wire ~provider ~model_id =
     | Provider_kind.Kimi | Provider_kind.OpenAI_compat | Provider_kind.Ollama
     | Provider_kind.Gemini | Provider_kind.Glm -> None
   in
-  { model_capabilities; anthropic_thinking_control }
+  { model_capabilities; anthropic_thinking_control; pricing_source }
 ;;
 
 let resolve_bound_request_policy ~catalog ~(provider : Model_catalog.provider_entry)
     ~capabilities ~model_id =
+  let pricing_source = Pricing.of_provider_entry ~catalog ~provider in
   let capabilities = match Option.bind
       (List.assoc_opt provider.kind provider.capabilities_base_by_identity_kind)
       capabilities_for_provider_label with
@@ -1414,7 +1417,7 @@ let resolve_bound_request_policy ~catalog ~(provider : Model_catalog.provider_en
     | Ok model_id -> Option.bind catalog (fun catalog ->
         Model_catalog.lookup_model_for_provider_entry catalog ~provider ~model_id) in
   match row with
-  | None -> {model_capabilities=Some capabilities;anthropic_thinking_control=None}
+  | None -> {model_capabilities=Some capabilities;anthropic_thinking_control=None;pricing_source}
   | Some row ->
     let scoped_provider = match row.Model_catalog.provider_name with
       | None -> None | Some _ -> Some provider in
@@ -1424,11 +1427,12 @@ let resolve_bound_request_policy ~catalog ~(provider : Model_catalog.provider_en
       | Provider_kind.Anthropic -> Option.map anthropic_thinking_control_of_vocab_value
           row.anthropic_thinking_control
       | Kimi | OpenAI_compat | Ollama | Gemini | Glm -> None in
-    {model_capabilities;anthropic_thinking_control}
+    {model_capabilities;anthropic_thinking_control;pricing_source}
 ;;
 
 let request_policy_capabilities policy = policy.model_capabilities
 let request_policy_anthropic_thinking_control policy = policy.anthropic_thinking_control
+let request_policy_pricing_source policy = policy.pricing_source
 
 (* The token is the single source of truth carried by the entry's
    [Chat_template_token] constructor (the parser validated its exactness), so it

@@ -389,6 +389,12 @@ val provider_reference : t -> Model_catalog.provider_reference
     including [None]. *)
 val capabilities_for_config_model : t -> Capabilities.capabilities option
 
+val pricing_source : t -> Pricing.source
+(** Read request-owned price authority from a matching policy snapshot. An
+    unfrozen config resolves its first source from the current catalog; request
+    preparation freezes it before dispatch. Endpoint changes retain authority;
+    provider/kind/model changes invalidate the old request snapshot. *)
+
 type capability_source = Model_capability | Provider_default_capability
 
 val resolve_request_capabilities : t -> Capabilities.capabilities * capability_source

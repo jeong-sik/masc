@@ -92,7 +92,9 @@ val provider_turn_ordinal : Types.agent_state -> int
 
 (** Accumulate response usage into running totals, including observational cost
     estimation. The exact non-empty [response_model] takes precedence over the
-    configured request model. Missing or incomplete pricing records a gap and
+    configured request model. Rates come from the config's captured request
+    authority; no provider config means no inferred catalog price. Missing or
+    incomplete pricing records a gap and
     never blocks the turn. A missing payload advances both the processed
     response count and its independent missing-payload count, preserving known
     subtotals. Payload coverage does not establish per-field reporting. *)

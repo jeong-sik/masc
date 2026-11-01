@@ -352,6 +352,10 @@ val request_policy_capabilities : request_policy -> capabilities option
 val request_policy_anthropic_thinking_control :
   request_policy -> anthropic_thinking_control option
 
+val request_policy_pricing_source : request_policy -> Pricing.source
+(** The same captured catalog and provider authority used for this request's
+    model policy, including unknown rates and selected bare-row permissions. *)
+
 
 (** Exact bare-model lookup from the one loaded model catalog. Returns [None]
     for malformed or undeclared identities. Explicit hosts compose JSON input

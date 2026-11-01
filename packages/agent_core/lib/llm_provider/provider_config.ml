@@ -285,6 +285,13 @@ let freeze_for_request (config : t) =
     with_request_policy policy config
 ;;
 
+let pricing_source (config : t) =
+  let policy = match matching_request_policy config with
+    | Some policy -> policy
+    | None -> resolve_request_policy config in
+  Capabilities.request_policy_pricing_source policy
+;;
+
 let capabilities_for_config_model (config : t) =
   match config.model_capabilities_override with
   | Some caps -> Some caps

@@ -300,15 +300,19 @@ let test_an_empty_walk_is_an_empty_error () =
     | Ok _ | Error _ -> fail "no declared slots means an empty exhaustion")
 ;;
 
-(* MSP names no quota kind, so even a failure the host calls retryable is not
-   the account resting: the board-attention worker must not wait on it. *)
-let test_a_muse_failure_is_never_a_binding_rest () =
+let test_muse_binding_rest_requires_typed_quota () =
   let failed cause =
     Cli_oneshot.Execution_failed
       { runtime_id = "muse_code.muse-code-spark-1-3"
       ; cause = Masc.Fusion_official_client.Muse_failure cause
       }
   in
+  check bool "typed quota is an account rest" true
+    (Cli_oneshot.refused_for_binding_rest (failed
+       (Runtime_muse_serve.Turn_failed
+          {Runtime_muse_msp.kind=Runtime_muse_msp.Model_error;
+           message="fixture failure"; retryable=false;
+           quota=Some {limit_kind="tierLimit"; resets_at_ms=500000}})));
   List.iter
     (fun (label, cause) ->
        check bool label false (Cli_oneshot.refused_for_binding_rest (failed cause)))
@@ -317,6 +321,7 @@ let test_a_muse_failure_is_never_a_binding_rest () =
           { Runtime_muse_msp.kind = Runtime_muse_msp.Model_error
           ; message = "overloaded"
           ; retryable = true
+          ; quota = None
           } )
     ; "auth required", Runtime_muse_serve.Auth_required "login expired"
     ; ( "workspace mismatch"
@@ -1255,9 +1260,9 @@ let () =
             `Quick
             test_an_empty_walk_is_an_empty_error
         ; test_case
-            "a Muse Code failure is never a binding rest"
+            "Muse Code account rest requires typed quota"
             `Quick
-            test_a_muse_failure_is_never_a_binding_rest
+            test_muse_binding_rest_requires_typed_quota
         ] )
     ]
 ;;

@@ -56,6 +56,17 @@ let test_completion_failures () =
     ; Some infinity, F.Configuration_refused; Some 60., F.Transient ]
 
 let test_cli_failures () =
+  List.iter (fun (resets_at_ms, expected) ->
+    check failure "Muse typed quota follows its stated reset" expected
+      (F.cli_failure (Masc.Keeper_lane_cli_oneshot.Execution_failed
+         {runtime_id="muse.fixture";
+          cause=Masc.Fusion_official_client.Muse_failure
+            (Runtime_muse_serve.Turn_failed
+               {Runtime_muse_msp.kind=Runtime_muse_msp.Model_error;
+                message="fixture failure"; retryable=false;
+                quota=Some {limit_kind="tierLimit"; resets_at_ms}})})))
+    [Int.of_float ((Time_compat.now () +. 3600.) *. 1000.), F.Transient;
+     0, F.Configuration_refused];
   check failure "an unknown runtime is configuration" F.Configuration_refused
     (F.cli_failure (Masc.Keeper_lane_cli_oneshot.Unknown_runtime { runtime_id = "r" }));
   check failure "text that is not JSON cannot be used" F.Output_unusable

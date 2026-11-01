@@ -105,9 +105,10 @@ let antigravity_error_is_binding_rest : Runtime_antigravity.error -> bool = func
   | Runtime_antigravity.Timeout _ -> false
 ;;
 
-(* MSP's TurnErrorKind names no quota or rate-limit kind, so no Muse Code
-   refusal says the account itself is resting. *)
+(* Quota presence, rather than the open error kind or its prose, says that
+   the selected account is resting. *)
 let muse_error_is_binding_rest : Runtime_muse_serve.error -> bool = function
+  | Runtime_muse_serve.Turn_failed { quota = Some _; _ } -> true
   | Runtime_muse_serve.Invalid_config _
   | Runtime_muse_serve.Spawn_failed _
   | Runtime_muse_serve.Turn_input_write_failed _
@@ -119,7 +120,7 @@ let muse_error_is_binding_rest : Runtime_muse_serve.error -> bool = function
   | Runtime_muse_serve.Session_workspace_mismatch _
   | Runtime_muse_serve.Session_approval_mode_mismatch _
   | Runtime_muse_serve.Auth_required _
-  | Runtime_muse_serve.Turn_failed _
+  | Runtime_muse_serve.Turn_failed { quota = None; _ }
   | Runtime_muse_serve.Turn_cancelled
   | Runtime_muse_serve.Unsupported_server_request _
   | Runtime_muse_serve.Runtime_shutting_down

@@ -1261,12 +1261,15 @@ let test_documented_noncompletion_results_never_complete () =
                 ~on_stream_event:(fun event -> events := event :: !events)
              with
              | Error (Runtime_antigravity.Result_not_completed
-                 { status; conversation_id; response; error }) ->
+                 { status; conversation_id; response; error; num_turns; usage }) ->
                check bool "exact typed status" true (status = expected_status);
                check (option string) "init identity survives blank restatement"
                  (Some "conversation-1") conversation_id;
                check string "partial reply retained" "a partial reply" response;
-               check (option string) "wire reason retained" (Some "fixture stopped") error
+               check (option string) "wire reason retained" (Some "fixture stopped") error;
+               check int "reported turn count retained" 1 num_turns;
+               check int "raw exclusive input retained" 100 usage.input_tokens;
+               check int "raw cache input retained" 50 usage.cache_read_tokens
              | Error error -> fail (Runtime_antigravity.error_to_string error)
              | Ok _ -> failf "%s became a completed turn" wire_status);
             check (list string) "resume identity admitted once" [ "conversation-1" ] !admitted;
@@ -1287,17 +1290,28 @@ let test_documented_noncompletion_results_never_complete () =
 let test_pre_init_noncompletion_keeps_unbound_identity () =
   List.iter (fun (wire_status, expected_status) ->
     let admitted = ref false in
-    with_fixture [ result ~conversation_id:"unbound-conversation" ~status:wire_status () ]
+    let events = ref [] in
+    with_fixture [ result ~conversation_id:"unbound-conversation" ~status:wire_status
+        ~response:"unbound partial\n  retained  " ~error:"not admitted" ~num_turns:7 () ]
       (fun path ->
         (match run_fixture path
-            ~on_conversation_ready:(fun ~conversation_id:_ -> admitted := true; Ok ()) with
-         | Error (Runtime_antigravity.Result_not_completed { status; conversation_id; _ }) ->
+            ~on_conversation_ready:(fun ~conversation_id:_ -> admitted := true; Ok ())
+            ~on_stream_event:(fun event -> events := event :: !events) with
+         | Error (Runtime_antigravity.Result_not_completed
+             { status; conversation_id; response; error; num_turns; usage }) ->
            check bool "typed pre-init state" true (status = expected_status);
            check (option string) "unbound identity retained"
-             (Some "unbound-conversation") conversation_id
+             (Some "unbound-conversation") conversation_id;
+           check string "unbound partial retained byte-exact" "unbound partial\n  retained  " response;
+           check (option string) "wire reason retained" (Some "not admitted") error;
+           check int "unbound reported turn count retained" 7 num_turns;
+           check (list int) "unbound raw counts retained" [100; 7; 3; 50; 107]
+             [usage.input_tokens; usage.output_tokens; usage.thinking_tokens;
+              usage.cache_read_tokens; usage.total_tokens]
          | Error error -> fail (Runtime_antigravity.error_to_string error)
          | Ok _ -> fail "a non-completed invocation was admitted");
-        check bool "result alone never admits a session" false !admitted))
+        check bool "result alone never admits a session" false !admitted;
+        check int "unbound counts never emit attributed usage or reply events" 0 (List.length !events)))
     noncompletion_statuses
 ;;
 

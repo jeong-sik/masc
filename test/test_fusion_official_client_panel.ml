@@ -958,7 +958,8 @@ let test_client_timeouts_project_to_timeout () =
   List.iter (fun status ->
     let error = Runtime_antigravity.Result_not_completed
         { status; conversation_id = Some "interrupted-conversation"
-        ; response = "partial reply"; error = None } in
+        ; response = "partial reply"; error = None; num_turns = 1
+        ; usage = {input_tokens=1;output_tokens=1;thinking_tokens=0;cache_read_tokens=0;total_tokens=2} } in
     match project (Masc.Fusion_official_client.Antigravity_failure error) with
     | Fusion_types.Provider_error detail ->
       check string "noncompletion retains exact status diagnostic"

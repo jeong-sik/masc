@@ -1068,7 +1068,7 @@ let test_blank_success_requires_fresh_conversation () =
 ;;
 
 let test_noncompletion_preserves_durable_identity_and_effect_fence () =
-  List.iter (fun result_status ->
+  List.iter (fun (result_status, before_init) ->
     let base_path = temp_workspace () |> Unix.realpath in
     let runtime_snapshot = Runtime.For_testing.snapshot () in
     Fun.protect
@@ -1080,7 +1080,16 @@ let test_noncompletion_preserves_durable_identity_and_effect_fence () =
         let oauth_source = Filename.concat base_path "operator-oauth-token" in
         write_file ~mode:0o600 oauth_source
           (Masc_test_deps.antigravity_oauth_fixture "operator-oauth-fixture");
-        let cli_path = fixture_script_with_tools ~result_status ~argument_reader:false ~base_path in
+        let partial_response = if before_init then "unbound partial\n  retained  "
+          else "MASC_ANTIGRAVITY_KEEPER_OK" in
+        let cli_path = if before_init then begin
+            let path = Filename.concat base_path "agy-pre-init-result.sh" in
+            let frame = Printf.sprintf
+                {|{"event":"result","result":{"conversation_id":"unbound-conversation","status":%S,"response":%S,"error":null,"num_turns":7,"usage":{"input_tokens":12,"output_tokens":4,"thinking_tokens":1,"cache_read_tokens":40,"total_tokens":16}}}|}
+                result_status partial_response in
+            write_file ~mode:0o700 path ("#!/bin/sh\ncat >/dev/null\nprintf '%s\\n' " ^ shell_quote frame ^ "\n");
+            path
+          end else fixture_script_with_tools ~result_status ~argument_reader:false ~base_path in
         let runtime_path = Filename.concat base_path "runtime.toml" in
         write_file ~mode:0o600 runtime_path (runtime_toml ~cli_path ~oauth_source);
         let called = ref 0 in
@@ -1106,6 +1115,8 @@ let test_noncompletion_preserves_durable_identity_and_effect_fence () =
                   | _ -> fail "Antigravity runtime fixture did not resolve"
                 in
                 let events = ref [] in
+                let failure_detail = ref None in
+                let usage_reports = ref [] in
                 let attempt = Keeper_antigravity_runtime.run
                     ~input_source:(Keeper_request_source.Keeper_history { trace_id = "antigravity-incomplete" })
                     ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 0 })
@@ -1117,19 +1128,43 @@ let test_noncompletion_preserves_durable_identity_and_effect_fence () =
                     ~initial_messages:[] ~model_input_projection:None
                     ~on_transmitted_model_input:(fun _ -> ()) ~hooks:None ~context_injector:None
                     ~context:None ~event_bus:None ~raw_trace:None
+                    ~on_usage_report:(fun report -> usage_reports := report :: !usage_reports)
                     ~on_event:(Some (fun event -> events := event :: !events)) ~config ()
                 in
                 (match attempt.result with
                  | Error (Agent_core.Error.Provider
-                     (Llm_provider.Error.ProviderReportedError { provider; error_type; _ }) as error) ->
+                     (Llm_provider.Error.ProviderReportedError { provider; error_type; detail }) as error) ->
                    check string "provider" "antigravity_cli" provider;
                    check (option string) "exact status projection" (Some result_status) error_type;
+                   failure_detail := Some (Agent_core.Error.to_string error);
+                   let evidence = Yojson.Safe.from_string detail in
+                   let open Yojson.Safe.Util in
+                   check bool "diagnostic explicitly refuses completion" false
+                     (evidence |> member "completed" |> to_bool);
+                   check string "partial reply survives Keeper projection"
+                     partial_response
+                     (evidence |> member "partial_response" |> to_string);
+                   check string "diagnostic keeps its bound or unbound identity"
+                     (if before_init then "unbound-conversation" else "conversation-antigravity-fixture")
+                     (evidence |> member "conversation_id" |> to_string);
+                   check string "diagnostic keeps status" result_status
+                     (evidence |> member "status" |> to_string);
+                   check int "reported turn count remains diagnostic" (if before_init then 7 else 1)
+                     (evidence |> member "reported_num_turns" |> to_int);
+                   let usage = evidence |> member "reported_usage" in
+                   check (list int) "raw usage survives projection" [12; 4; 1; 40; 16]
+                     (List.map (fun key -> usage |> member key |> to_int)
+                       ["input_tokens"; "output_tokens"; "thinking_tokens";
+                        "cache_read_tokens"; "total_tokens"]);
                    check bool "core retry policy remains nonretryable" false (Agent_core.Error.is_retryable error)
                  | Error error -> fail (Agent_core.Error.to_string error)
                  | Ok _ -> failf "%s settled as a completed turn" result_status);
-                check int "effect ran exactly once" 1 !called;
+                check int "only the admitted fixture executes its MCP effect" (if before_init then 0 else 1) !called;
                 check bool "observed effect stays fenced" true
-                  (attempt.effect_disposition = Keeper_provider_attempt_effect.Effect_attempted);
+                  (attempt.effect_disposition =
+                    (if before_init then Keeper_provider_attempt_effect.Observation_unavailable else Effect_attempted));
+                check int "only matching init permits attributed usage" (if before_init then 0 else 1)
+                  (List.length !usage_reports);
                 check bool "effect cannot grant replay" false
                   (Keeper_provider_attempt_effect.allows_same_turn_retry attempt.effect_disposition);
                 check bool "no completed session ACK" true (Option.is_none attempt.settled_session);
@@ -1141,13 +1176,16 @@ let test_noncompletion_preserves_durable_identity_and_effect_fence () =
                     ~base_path ~keeper_name:"antigravity-fixture" |> Result.get_ok |> Option.get in
                 match session.phase with
                 | Keeper_official_client_session_store.Recovery_required recovery ->
+                  check (option string) "durable failure retains projected evidence"
+                    !failure_detail (Some recovery.detail);
                   check (option string) "durable admitted identity retained"
-                    (Some "conversation-antigravity-fixture") recovery.observed_session_id;
+                    (if before_init then None else Some "conversation-antigravity-fixture") recovery.observed_session_id;
                   check bool "failure remains ambiguous" true
                     (recovery.failure = Transport_interrupted
                      && Keeper_official_client_session_store.failure_disposition recovery.failure = Ambiguous)
                 | _ -> fail "non-completed result did not retain recovery evidence")))))
-    [ "CANCELED"; "INTERRUPTED"; "INVALID"; "WAITING"; "RUNNING" ]
+    (List.concat_map (fun status -> [status, false; status, true])
+      [ "CANCELED"; "INTERRUPTED"; "INVALID"; "WAITING"; "RUNNING" ])
 ;;
 
 let test_noncompletion_without_mcp_cannot_rotate_candidates () =

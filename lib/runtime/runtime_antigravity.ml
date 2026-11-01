@@ -212,6 +212,35 @@ let emit_stream_event on_stream_event event =
          (Printexc.to_string exn))
 ;;
 
+type noncompletion_result = Protocol.noncompletion_result =
+  { status : noncompletion_status
+  ; conversation_id : string option
+  ; response : string
+  ; error : string option
+  ; num_turns : int
+  ; usage : usage
+  }
+
+let noncompletion_result_to_json (result : noncompletion_result) =
+  let optional_string = function None -> `Null | Some value -> `String value in
+  `Assoc
+    [ "kind", `String "result_not_completed"
+    ; "completed", `Bool false
+    ; "status", `String (noncompletion_status_to_string result.status)
+    ; "conversation_id", optional_string result.conversation_id
+    ; "partial_response", `String result.response
+    ; "error", optional_string result.error
+    ; "reported_num_turns", `Int result.num_turns
+    ; "reported_usage", `Assoc
+        [ "input_tokens", `Int result.usage.input_tokens
+        ; "output_tokens", `Int result.usage.output_tokens
+        ; "thinking_tokens", `Int result.usage.thinking_tokens
+        ; "cache_read_tokens", `Int result.usage.cache_read_tokens
+        ; "total_tokens", `Int result.usage.total_tokens
+        ]
+    ]
+;;
+
 type error = Protocol.error =
   | Invalid_config of string
   | Spawn_failed of string
@@ -221,12 +250,7 @@ type error = Protocol.error =
       }
   | State_callback_failed of string
   | Turn_failed of string
-  | Result_not_completed of
-      { status : noncompletion_status
-      ; conversation_id : string option
-      ; response : string
-      ; error : string option
-      }
+  | Result_not_completed of noncompletion_result
   | Process_exited of string
   | Unhandled_exception of string
   | Child_fd_ceiling_exceeded of
@@ -1097,7 +1121,8 @@ let run_turn ?(conversation_mode = Start) ?home_dir ?before_spawn ?on_spawned ?o
          Error
            (Result_not_completed
               { status; conversation_id = Some terminal.conversation_id
-              ; response = terminal.response; error = terminal.error }))
+              ; response = terminal.response; error = terminal.error
+              ; num_turns = terminal.num_turns; usage = terminal.usage }))
   | `Exited 0, None ->
     Error (Protocol_error { stage = "process completion"; detail = "missing result event" })
   | (`Exited _ | `Signaled _), None ->

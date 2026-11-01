@@ -28,12 +28,12 @@ let runtime_error_to_core_error = function
          ; error_type = Some "turn_failed"
          ; detail
          })
-  | Runtime_antigravity.Result_not_completed { status; _ } as error ->
+  | Runtime_antigravity.Result_not_completed evidence ->
     Agent_core.Error.Provider
       (Llm_provider.Error.ProviderReportedError
          { provider = "antigravity_cli"
-         ; error_type = Some (Runtime_antigravity.noncompletion_status_to_string status)
-         ; detail = Runtime_antigravity.error_to_string error
+         ; error_type = Some (Runtime_antigravity.noncompletion_status_to_string evidence.status)
+         ; detail = Runtime_antigravity.noncompletion_result_to_json evidence |> Yojson.Safe.to_string
          })
   (* A file-table safety kill, not a spawn failure: refiring the same turn
      re-kills it, so report it as the provider's terminal failure rather

@@ -341,7 +341,9 @@ let test_antigravity_noncompletion_is_not_quota_or_input_refusal () =
     let cause = Masc.Fusion_official_client.Antigravity_failure
         (Runtime_antigravity.Result_not_completed
            { status; conversation_id = Some "interrupted-conversation"
-           ; response = "partial reply"; error = Some "quota context input words are not evidence" }) in
+           ; response = "partial reply"; error = Some "quota context input words are not evidence"
+           ; num_turns = 1
+           ; usage = {input_tokens=1;output_tokens=1;thinking_tokens=0;cache_read_tokens=0;total_tokens=2} }) in
     let failed = Cli_oneshot.Execution_failed { runtime_id = "agy.fixture"; cause } in
     check bool "does not rest an account" false (Cli_oneshot.refused_for_binding_rest failed);
     check bool "does not authorize input shrinking" false (Cli_oneshot.refused_for_input_size failed))

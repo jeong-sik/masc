@@ -165,6 +165,21 @@ type stream_event =
           still reports it. *)
   | Turn_finished of { text : string }
 
+type noncompletion_result =
+  { status : noncompletion_status
+  ; conversation_id : string option
+  ; response : string
+  ; error : string option
+  ; num_turns : int
+  ; usage : usage
+  }
+(** Raw result evidence, including unbound pre-init counts. These fields do not
+    grant session admission, usage attribution or successful completion. *)
+
+val noncompletion_result_to_json : noncompletion_result -> Yojson.Safe.t
+(** Diagnostic evidence with [completed=false] and [partial_response], never a
+    completed assistant reply. Usage retains the CLI's exclusive raw counts. *)
+
 type error =
   | Invalid_config of string
   | Spawn_failed of string
@@ -174,12 +189,7 @@ type error =
       }
   | State_callback_failed of string
   | Turn_failed of string
-  | Result_not_completed of
-      { status : noncompletion_status
-      ; conversation_id : string option
-      ; response : string
-      ; error : string option
-      }
+  | Result_not_completed of noncompletion_result
       (** The exact documented result state and any partial reply. The identity
           is the matching [init] identity when present; before [init] it is only
           the result's unbound restatement and does not admit a session. *)

@@ -79,7 +79,8 @@ let test_antigravity_noncompletion_is_not_transient () =
   List.iter (fun status ->
       let cause = Runtime_antigravity.Result_not_completed
           { status; conversation_id = Some "interrupted-conversation"
-          ; response = "partial reply"; error = None } in
+          ; response = "partial reply"; error = None; num_turns = 1
+          ; usage = {input_tokens=1;output_tokens=1;thinking_tokens=0;cache_read_tokens=0;total_tokens=2} } in
       let classified = F.cli_failure
           (Masc.Keeper_lane_cli_oneshot.Execution_failed
              { runtime_id = "agy.fixture"; cause = Masc.Fusion_official_client.Antigravity_failure cause }) in

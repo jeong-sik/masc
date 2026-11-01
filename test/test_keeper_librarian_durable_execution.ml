@@ -1358,6 +1358,7 @@ let finished = function
   | Ok (Chain.Finished finished) -> finished
   | Ok (Chain.Pending detail) -> failf "the chain was still pending: %s" detail
   | Ok (Chain.Stopped {position;report}) -> failf "the chain stopped at %d: %s" position report.detail
+  | Ok Chain.Superseded -> fail "the chain's initial facts were superseded"
   | Error detail -> failf "the chain refused: %s" detail
 let program_claims (program:Program.t) =
   List.concat_map (fun (stage:Program.stage) ->
@@ -1503,7 +1504,7 @@ let test_a_checkpoint_whose_read_prefix_changed_stops_the_descent_before_any_ste
   fixture.set_step_response (fun _ -> fail "a changed source reached the provider");
   (match descend fixture candidate with
    | Error _ -> ()
-   | Ok (Chain.Finished _ | Chain.Pending _ | Chain.Stopped _) ->
+   | Ok (Chain.Finished _ | Chain.Pending _ | Chain.Stopped _ | Chain.Superseded) ->
      fail "the floor read a checkpoint the original did not read");
   check int "no step was retained" 0 (List.length (steps_of fixture request));
   check int "and the provider was not asked" 0 (F.post_count fixture.server-posts))
@@ -1947,7 +1948,7 @@ let test_a_pass_starts_the_chain_again_when_memory_changed_under_it () = with_fi
   check bool "the chain that began on the old Memory is dropped, and a new one finishes" true
     (advanced (run_until_done ~wakes fixture));
   check int "dropping it asked the lane for one more pass" 1 !wakes;
-  check int "each chain asked the provider for each message" 4 (F.post_count fixture.server-posts);
+  check int "the obsolete chain asks no further message before the fresh chain" 3 (F.post_count fixture.server-posts);
   check (list string) "Memory holds the independent write and the second chain's claims"
     ["Independent explicit write";"claim number 1";"claim number 2"] (io (fun () -> claims fixture.keepers_dir));
   (match run_worker fixture with
@@ -2025,6 +2026,52 @@ let test_a_settle_that_stops_part_way_leaves_the_steps_the_chain_resumes_from ()
   match descend fixture candidate with
   | Error _ -> ()
   | Ok _ -> fail "steps that skip the first position must be refused")
+let test_a_stale_prefix_left_by_failed_cleanup_restarts_from_current_memory () = with_fixture (fun ~sw fixture ->
+  add_unread_turn fixture four_messages;
+  provider_refuses_one_turn fixture size_refusal;
+  let candidate,request=candidate_and_request fixture in
+  fixture.set_step_response (answering_steps four_tags);
+  let fin=finished (descend fixture candidate) in
+  let independent=Types.observed ~claim:"Independent explicit write" ~category:Types.Fact
+    ~now:(Time_compat.now ()) ~origin:{kind=Types.Authored;trace_id="partial-floor-cleanup"} in
+  io (fun () -> Current.upsert_fact ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name
+    ~now:(Time_compat.now ()) ~source:{kind=Current.Explicit_write;trace_id="partial-floor-cleanup"}
+    independent |> Result.map_error Current.upsert_error_to_string |> get |> ignore);
+  (match publish fixture candidate fin with
+   | Ok Publish.Superseded -> ()
+   | Ok Publish.Published -> fail "the old program was published over different facts"
+   | Error detail -> fail detail);
+  let owner=Capture.physical_owner request in
+  let blocked,_=List.find (fun (_,(header:Keeper_librarian_floor_step_request.header)) -> header.position=1)
+    (steps_of fixture request) in
+  let date=Keeper_librarian_floor_step_request.minted_on blocked.Owner.request_id |> get in
+  let blocker=Filename.concat (Store.root fixture.store)
+    (Store.tool_request_archive_record_path ~scope:blocked.scope ~date ~request_id:blocked.request_id) in
+  io (fun () -> Fs_compat.mkdir_p blocker);
+  Eio.Switch.on_release sw (fun () -> io (fun () ->
+    if Sys.file_exists blocker && Sys.is_directory blocker then Unix.rmdir blocker));
+  (match memory_action fixture (fun () -> Cleanup.settle_chain ~store:fixture.store ~owner candidate) with
+   | Error _ -> ()
+   | Ok _ -> fail "a record cannot be renamed onto the blocker directory");
+  check (list int) "the real failed rename leaves the old prefix" [0;1] (sorted_positions fixture request);
+  let old_basis_refusals=ref 0 in
+  fixture.set_step_response (fun body ->
+    if contains body independent.claim then answering_steps four_tags body
+    else (incr old_basis_refusals;plain_refusal));
+  let posts=F.post_count fixture.server and wakes=ref 0 in
+  (match run_worker_waking fixture wakes with
+   | Error _ -> ()
+   | Ok _ -> fail "the unfinished cleanup was bypassed to resume its old tail");
+  check int "an unavailable cleanup asks no model" posts (F.post_count fixture.server);
+  check (list int) "and preserves the prefix for another cleanup" [0;1] (sorted_positions fixture request);
+  io (fun () -> Unix.rmdir blocker);
+  check bool "the next passes finish a chain over current facts" true (advanced (run_until_done ~wakes fixture));
+  check int "no tail was asked from obsolete facts" 0 !old_basis_refusals;
+  check bool "the fresh first step includes the independent write" true
+    (List.mem independent.claim (first_step_facts fixture request));
+  check int "only the fresh four message steps reached the model" 4 (F.post_count fixture.server-posts);
+  check int "successful cleanup requested the fresh pass" 1 !wakes)
+
 let test_settling_a_position_no_step_holds_is_an_error () = with_fixture (fun ~sw:_ fixture ->
   provider_refuses_one_turn fixture size_refusal;
   let candidate,request=candidate_and_request fixture in
@@ -2138,6 +2185,8 @@ let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured c
     test_a_candidate_covers_its_range_when_a_later_turn_end_states_the_same_position;
   test_case "a settle that stops part way leaves the steps the chain resumes from" `Quick
     test_a_settle_that_stops_part_way_leaves_the_steps_the_chain_resumes_from;
+  test_case "a stale prefix left by failed cleanup restarts from current Memory" `Quick
+    test_a_stale_prefix_left_by_failed_cleanup_restarts_from_current_memory;
   test_case "settling a position no step holds is an error" `Quick
     test_settling_a_position_no_step_holds_is_an_error;
 ]]

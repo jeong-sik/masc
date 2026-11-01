@@ -58,7 +58,9 @@ val descend : store:Lane_addon_store.t -> config:Workspace.config -> reserved:st
     chain reads the turn from the original: an official turn from its retained
     messages, an atom range from the checkpoint as the source lock sees it now,
     which must still hold what the original read. A chain that has a step
-    starts again from that step. A chain with none starts from the Memory facts
+    starts again from that step only while its initial facts still match the
+    current Memory; otherwise it returns [Superseded] without resuming a step.
+    A chain with none starts from the Memory facts
     of this call, no carried working state and the unread ledger as it is.
     An Eio entry point: offload no part of it; its blocking scopes offload
     themselves. *)

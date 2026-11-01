@@ -9,7 +9,8 @@
 
     It performs no Memory commit, source lock, position move or settlement: the
     finished machine hands the ordered program to whoever publishes it. A restart
-    runs the same function again. Every step the first run retained is restored,
+    runs the same function again. While the initial facts remain current,
+    every step the first run retained is restored,
     not asked again, and every gate judgment replays from the journal. A run
     reads the owner's gate scope once, when its first answered step needs
     judging, and answers the judgments of the steps an earlier run finished from
@@ -39,20 +40,28 @@ type outcome =
       (** The step at [position] ended in a refusal that does not show reading
           less could help, or the question is a host observation that cannot become
           a hole. The chain does not advance. [report] is the host's own evidence. *)
+  | Superseded
+      (** The retained first step began from different Memory facts. No step is
+          resumed; the caller settles the chain before beginning from current
+          facts. This also applies to a prefix left by an interrupted settle. *)
 
 val run :
   store:Lane_addon_store.t -> config:Workspace.config -> reserved:string list ->
   owner:Keeper_librarian_durable_request.owner -> range:Keeper_librarian_floor_step_request.link ->
   input:Keeper_librarian.input -> sources:Keeper_librarian_unread.source list ->
   fresh:(unit -> (fresh, string) result) ->
+  current:(unit -> (Keeper_librarian.current_selection option, string) result) ->
   unread_message:(Keeper_librarian_unread.source ->
     reasons:Keeper_librarian_input_refusal.t list -> (Keeper_librarian_unread.t, string) result) ->
   (outcome, string) result
 (** [input] and [sources] are the range's complete input and one source per
     message, as {!Keeper_librarian_message_floor.Machine.read} takes them; [range]
     names the range's original, which every step links to. [fresh] is called
-    only when the chain has no step yet, so a restart never reads the Memory of
-    the moment; an error from it is the chain's error. [unread_message] builds
+    only when the chain has no step yet; a restart restores its start from the
+    first step. An error from [fresh] is the chain's error. A retained chain
+    reads [current] before resuming any step and compares its facts with the
+    first step's. A read failure is an error, not [Superseded]. Publication must
+    still recheck the facts after the chain finishes. [unread_message] builds
     the hole of a message from its source and the refusal causes. An error is a
     chain that disagrees with itself or its range: two steps at one position, a
     step the floor never asked about, a step that is not the question the machine

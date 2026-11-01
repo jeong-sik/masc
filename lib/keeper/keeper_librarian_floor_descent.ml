@@ -127,13 +127,18 @@ let read_source t =
         Ok (official_source line ~messages:(Capture.input (Request.source t.request)).messages)
       | Atoms _, None -> Error "Original checkpoint lock observation is missing"))
 
-let fresh t : (Chain.fresh, string) result =
+let current t =
   let owner = Request.physical_owner t.request in
   let keepers_dir = Request.keepers_dir owner and keeper_id = Request.keeper_id owner in
   let* anchor = io (fun () -> Current.capture_program_anchor ~keepers_dir ~keeper_id) in
-  let current = Option.map (fun (snapshot : Current.t) ->
+  Ok (Option.map (fun (snapshot : Current.t) ->
     ({Keeper_librarian.facts = snapshot.facts} : Keeper_librarian.current_selection))
-    (Current.program_anchor_snapshot anchor) in
+    (Current.program_anchor_snapshot anchor))
+
+let fresh t : (Chain.fresh, string) result =
+  let owner = Request.physical_owner t.request in
+  let keepers_dir = Request.keepers_dir owner and keeper_id = Request.keeper_id owner in
+  let* current = current t in
   let* unread_messages = io (fun () -> Current.read_unread_messages ~keepers_dir ~keeper_id) in
   Ok {Chain.transaction_id = Keeper_librarian_message_floor.fresh_transaction_id (); current;
       previous_state = None; unread_messages}
@@ -141,5 +146,6 @@ let fresh t : (Chain.fresh, string) result =
 let descend ~store ~config ~reserved t =
   let* source = read_source t in
   Chain.run ~store ~config ~reserved ~owner:(Request.physical_owner t.request) ~range:(range t)
-    ~input:(Capture.input (Request.source t.request)) ~sources:source.sources ~fresh:(fun () -> fresh t)
+    ~input:(Capture.input (Request.source t.request)) ~sources:source.sources
+    ~fresh:(fun () -> fresh t) ~current:(fun () -> current t)
     ~unread_message:source.unread_message

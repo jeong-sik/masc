@@ -21,11 +21,9 @@ val settle_chain : store:Lane_addon_store.t -> owner:Keeper_librarian_durable_re
   Keeper_librarian_floor_descent.t -> (int, string) result
 (** Settle every step of one candidate and their gate records. A chain whose
     program the Memory no longer accepts starts again from nothing. If this
-    stops part way, the steps from position 0 up stay and the next pass
-    resumes from the Memory they started from. That chain ends again only if
-    the lost tail can be answered again: a tail the host keeps refusing for a
-    reason other than size ends each pass in [Stopped], which settles only
-    that step. *)
+    stops part way, the steps from position 0 up stay. The next pass rechecks
+    their initial facts before resuming: changed facts return [Superseded]
+    and settlement continues without asking the lost tail again. *)
 
 val settle_step : store:Lane_addon_store.t -> owner:Keeper_librarian_durable_request.owner ->
   Keeper_librarian_floor_descent.t -> position:int -> (int, string) result

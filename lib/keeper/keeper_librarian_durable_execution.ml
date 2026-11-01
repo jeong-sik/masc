@@ -451,11 +451,19 @@ let rec consume_one ~config ~keeper_name ~wake =
            an original of its own: the host already refused it as one request. *)
         let floor candidate =
           let owner=Request.physical_owner (Descent.request candidate) in
+          let superseded () =
+            match Floor_cleanup.settle_chain ~store ~owner candidate with
+            | Error detail -> stop detail
+            | Ok moved ->
+              Log.Keeper.info ~keeper_name
+                "durable Librarian message floor dropped its chain after Memory changed: records=%d" moved;
+              wake ();Consumer.Memory_pending in
           match Descent.descend ~store ~config ~reserved candidate with
           | Error detail -> stop detail
           | Ok (Floor_chain.Pending detail) ->
             Log.Keeper.info ~keeper_name "durable Librarian message floor waits: %s" detail;
             Consumer.Memory_pending
+          | Ok Floor_chain.Superseded -> superseded ()
           | Ok (Floor_chain.Stopped {position;report}) ->
             (* The host ended this step's ID. The steps before it stay, and the
                next pass asks the same position under a new ID. *)
@@ -469,12 +477,7 @@ let rec consume_one ~config ~keeper_name ~wake =
              | Ok Floor_publish.Superseded ->
                (* Memory changed under the chain, so its decisions do not apply.
                   The next pass starts the chain again from the Memory then. *)
-               (match Floor_cleanup.settle_chain ~store ~owner candidate with
-                | Error detail -> stop detail
-                | Ok moved ->
-                  Log.Keeper.info ~keeper_name
-                    "durable Librarian message floor dropped its chain after Memory changed: records=%d" moved;
-                  wake ();Consumer.Memory_pending)) in
+               superseded ()) in
         let commit source =
           match List.find_opt (fun candidate -> Descent.covers candidate source) candidates with
           | Some candidate -> floor candidate

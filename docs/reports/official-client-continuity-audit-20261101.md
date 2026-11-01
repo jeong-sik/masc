@@ -198,6 +198,9 @@ integrated blobs match the authored review snapshots in the retained
 [source-equivalence record](../evidence/2026-11-01-official-client-self-review/source-equivalence.json).
 Initial peer source reads and later automated review are recorded separately;
 later findings led to the additional posture/admission and witness repairs above.
+Subsequent peer reads passed the exact Antigravity `0caf2425cb5236c5f2eaf6f3fe5b19211755122b`
+and Muse `c1a8bf0e99676c2a7e39e11689cd1fed401f3147` followup deltas against
+`0d9d54f389309838ca4db1887e9156fde09581f9`, plus the public test-API repairs.
 A source verdict is separate from type checking, behavior CI and formal GitHub approval. The
 original nine published heads were preserved; four followup layers carry these
 repairs. No external-session local Dune was run.

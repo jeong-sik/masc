@@ -295,7 +295,7 @@ let async_request_detail_lines ~cols state target =
             | Some _ | None -> [Ansi.dim," 확인된 이전 논리 관측 없음"]) in
       let nested = Masc_tui_nested_result.sections snapshot.nested
         |> List.concat_map (fun (heading,body) ->
-          (Ansi.bold,heading) ::
+          (Ansi.bold,Terminal_text.single_line heading) ::
           (Masc_tui_text_block.rows ~max_cells:(max 1 (Masc_tui_frame.inner_width ~cols)) body
            |> List.map (fun row -> Ansi.dim,row))) in
       physical @ Option.to_list (Option.map (fun notice -> Theme.warn (),

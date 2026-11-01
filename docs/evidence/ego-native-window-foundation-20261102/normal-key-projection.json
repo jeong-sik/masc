@@ -1,0 +1,400 @@
+{
+  "schema_version": 1,
+  "derived_public_projection": true,
+  "complete_original_native_array": false,
+  "omitted": "All non-binding interval event parameters and private host paths. The separate native bootstrap context descriptors are retained. Private native Network events can contain browser cookies/headers.",
+  "source_commit": "b5a838d21bf9d13fa8ee9bbb80846fa810e21fd9",
+  "sdk_version": "0.6.2.5",
+  "sdk_executable_sha256": "f1af063d9309fda5c6790a4e2342b573cf8d82759b808edba7983ec9770cd110",
+  "expected": {
+    "commandId": "native-experiment:b26638ad1e8d41f28bc8173724a7877d",
+    "generation": "native-experiment:9722e6b335d54d8aad7d782a2ac21c74",
+    "stepIndex": 0,
+    "sourcePage": {
+      "spaceId": 25,
+      "label": "p1",
+      "targetId": "CA629EE88D2AA3E64655843C79F374EA",
+      "openedBy": "agent"
+    },
+    "currentPage": {
+      "spaceId": 25,
+      "label": "p1",
+      "targetId": "CA629EE88D2AA3E64655843C79F374EA",
+      "openedBy": "agent"
+    },
+    "nonce": "9e742151692b43c5b7ad1d1b5cb11de4",
+    "worldName": "masc.native.window.9e742151692b43c5b7ad1d1b5cb11de4",
+    "bindingName": "__mascNativeWindow_9e742151692b43c5b7ad1d1b5cb11de4"
+  },
+  "native_context": {
+    "id": 2,
+    "uniqueId": "3341646643749437979.1581726602333944438",
+    "name": "masc.native.window.9e742151692b43c5b7ad1d1b5cb11de4",
+    "sessionId": "F90BB46F4CD919B3E4B7F04F6568F924"
+  },
+  "native_frame": {
+    "id": "CA629EE88D2AA3E64655843C79F374EA",
+    "loaderId": "A0A8827F7344B3C84098D54D88B6A478",
+    "url": "http://127.0.0.1:49516/runs/60447392893540d7960dd7edb14daf9f/normal/"
+  },
+  "page_enable": {},
+  "runtime_enable": {},
+  "isolated_world": {
+    "executionContextId": 2
+  },
+  "add_binding": {},
+  "bootstrap_events": [
+    {
+      "method": "Runtime.executionContextCreated",
+      "params": {
+        "context": {
+          "id": 1,
+          "origin": "http://127.0.0.1:49516",
+          "name": "",
+          "uniqueId": "-7994934928131789240.300009857349460538",
+          "auxData": {
+            "isDefault": true,
+            "type": "default",
+            "frameId": "CA629EE88D2AA3E64655843C79F374EA"
+          }
+        }
+      },
+      "sessionId": "F90BB46F4CD919B3E4B7F04F6568F924"
+    },
+    {
+      "method": "Runtime.executionContextCreated",
+      "params": {
+        "context": {
+          "id": 2,
+          "origin": "http://127.0.0.1:49516",
+          "name": "masc.native.window.9e742151692b43c5b7ad1d1b5cb11de4",
+          "uniqueId": "3341646643749437979.1581726602333944438",
+          "auxData": {
+            "isDefault": false,
+            "type": "isolated",
+            "frameId": "CA629EE88D2AA3E64655843C79F374EA"
+          }
+        }
+      },
+      "sessionId": "F90BB46F4CD919B3E4B7F04F6568F924"
+    }
+  ],
+  "start_reply": {
+    "result": {
+      "type": "string",
+      "value": "{\"commandId\":\"native-experiment:b26638ad1e8d41f28bc8173724a7877d\",\"generation\":\"native-experiment:9722e6b335d54d8aad7d782a2ac21c74\",\"stepIndex\":0,\"nonce\":\"9e742151692b43c5b7ad1d1b5cb11de4\",\"sourcePage\":{\"spaceId\":25,\"label\":\"p1\",\"targetId\":\"CA629EE88D2AA3E64655843C79F374EA\",\"openedBy\":\"agent\"},\"currentPage\":{\"spaceId\":25,\"label\":\"p1\",\"targetId\":\"CA629EE88D2AA3E64655843C79F374EA\",\"openedBy\":\"agent\"},\"bound\":\"start\"}"
+    }
+  },
+  "actual_return": {
+    "returnKind": "void"
+  },
+  "end_reply": {
+    "result": {
+      "type": "string",
+      "value": "{\"commandId\":\"native-experiment:b26638ad1e8d41f28bc8173724a7877d\",\"generation\":\"native-experiment:9722e6b335d54d8aad7d782a2ac21c74\",\"stepIndex\":0,\"nonce\":\"9e742151692b43c5b7ad1d1b5cb11de4\",\"sourcePage\":{\"spaceId\":25,\"label\":\"p1\",\"targetId\":\"CA629EE88D2AA3E64655843C79F374EA\",\"openedBy\":\"agent\"},\"currentPage\":{\"spaceId\":25,\"label\":\"p1\",\"targetId\":\"CA629EE88D2AA3E64655843C79F374EA\",\"openedBy\":\"agent\"},\"bound\":\"end\"}"
+    }
+  },
+  "event_projection": [
+    {
+      "method": "Runtime.bindingCalled",
+      "sessionId": "F90BB46F4CD919B3E4B7F04F6568F924",
+      "params": {
+        "name": "__mascNativeWindow_9e742151692b43c5b7ad1d1b5cb11de4",
+        "payload": "{\"commandId\":\"native-experiment:b26638ad1e8d41f28bc8173724a7877d\",\"generation\":\"native-experiment:9722e6b335d54d8aad7d782a2ac21c74\",\"stepIndex\":0,\"nonce\":\"9e742151692b43c5b7ad1d1b5cb11de4\",\"sourcePage\":{\"spaceId\":25,\"label\":\"p1\",\"targetId\":\"CA629EE88D2AA3E64655843C79F374EA\",\"openedBy\":\"agent\"},\"currentPage\":{\"spaceId\":25,\"label\":\"p1\",\"targetId\":\"CA629EE88D2AA3E64655843C79F374EA\",\"openedBy\":\"agent\"},\"bound\":\"start\"}",
+        "executionContextId": 2
+      }
+    },
+    {
+      "method": "Network.requestWillBeSentExtraInfo",
+      "sessionId": "F90BB46F4CD919B3E4B7F04F6568F924"
+    },
+    {
+      "method": "Network.requestWillBeSent",
+      "sessionId": "F90BB46F4CD919B3E4B7F04F6568F924"
+    },
+    {
+      "method": "Network.responseReceivedExtraInfo",
+      "sessionId": "F90BB46F4CD919B3E4B7F04F6568F924"
+    },
+    {
+      "method": "Network.requestWillBeSentExtraInfo",
+      "sessionId": "F90BB46F4CD919B3E4B7F04F6568F924"
+    },
+    {
+      "method": "Network.requestWillBeSentExtraInfo",
+      "sessionId": "F90BB46F4CD919B3E4B7F04F6568F924"
+    },
+    {
+      "method": "Network.requestWillBeSent",
+      "sessionId": "F90BB46F4CD919B3E4B7F04F6568F924"
+    },
+    {
+      "method": "Network.requestWillBeSent",
+      "sessionId": "F90BB46F4CD919B3E4B7F04F6568F924"
+    },
+    {
+      "method": "Network.requestWillBeSent",
+      "sessionId": "F90BB46F4CD919B3E4B7F04F6568F924"
+    },
+    {
+      "method": "Network.requestWillBeSentExtraInfo",
+      "sessionId": "F90BB46F4CD919B3E4B7F04F6568F924"
+    },
+    {
+      "method": "Network.responseReceivedExtraInfo",
+      "sessionId": "F90BB46F4CD919B3E4B7F04F6568F924"
+    },
+    {
+      "method": "Network.responseReceivedExtraInfo",
+      "sessionId": "F90BB46F4CD919B3E4B7F04F6568F924"
+    },
+    {
+      "method": "Network.requestWillBeSent",
+      "sessionId": "F90BB46F4CD919B3E4B7F04F6568F924"
+    },
+    {
+      "method": "Network.responseReceivedExtraInfo",
+      "sessionId": "F90BB46F4CD919B3E4B7F04F6568F924"
+    },
+    {
+      "method": "Network.requestWillBeSentExtraInfo",
+      "sessionId": "F90BB46F4CD919B3E4B7F04F6568F924"
+    },
+    {
+      "method": "Network.responseReceivedExtraInfo",
+      "sessionId": "F90BB46F4CD919B3E4B7F04F6568F924"
+    },
+    {
+      "method": "Network.responseReceived",
+      "sessionId": "F90BB46F4CD919B3E4B7F04F6568F924"
+    },
+    {
+      "method": "Network.dataReceived",
+      "sessionId": "F90BB46F4CD919B3E4B7F04F6568F924"
+    },
+    {
+      "method": "Network.dataReceived",
+      "sessionId": "F90BB46F4CD919B3E4B7F04F6568F924"
+    },
+    {
+      "method": "Network.loadingFinished",
+      "sessionId": "F90BB46F4CD919B3E4B7F04F6568F924"
+    },
+    {
+      "method": "Network.responseReceived",
+      "sessionId": "F90BB46F4CD919B3E4B7F04F6568F924"
+    },
+    {
+      "method": "Network.dataReceived",
+      "sessionId": "F90BB46F4CD919B3E4B7F04F6568F924"
+    },
+    {
+      "method": "Network.dataReceived",
+      "sessionId": "F90BB46F4CD919B3E4B7F04F6568F924"
+    },
+    {
+      "method": "Network.loadingFinished",
+      "sessionId": "F90BB46F4CD919B3E4B7F04F6568F924"
+    },
+    {
+      "method": "Network.responseReceived",
+      "sessionId": "F90BB46F4CD919B3E4B7F04F6568F924"
+    },
+    {
+      "method": "Network.dataReceived",
+      "sessionId": "F90BB46F4CD919B3E4B7F04F6568F924"
+    },
+    {
+      "method": "Network.dataReceived",
+      "sessionId": "F90BB46F4CD919B3E4B7F04F6568F924"
+    },
+    {
+      "method": "Network.loadingFinished",
+      "sessionId": "F90BB46F4CD919B3E4B7F04F6568F924"
+    },
+    {
+      "method": "Network.responseReceived",
+      "sessionId": "F90BB46F4CD919B3E4B7F04F6568F924"
+    },
+    {
+      "method": "Network.dataReceived",
+      "sessionId": "F90BB46F4CD919B3E4B7F04F6568F924"
+    },
+    {
+      "method": "Network.dataReceived",
+      "sessionId": "F90BB46F4CD919B3E4B7F04F6568F924"
+    },
+    {
+      "method": "Network.loadingFinished",
+      "sessionId": "F90BB46F4CD919B3E4B7F04F6568F924"
+    },
+    {
+      "method": "Runtime.bindingCalled",
+      "sessionId": "F90BB46F4CD919B3E4B7F04F6568F924",
+      "params": {
+        "name": "__mascNativeWindow_9e742151692b43c5b7ad1d1b5cb11de4",
+        "payload": "{\"commandId\":\"native-experiment:b26638ad1e8d41f28bc8173724a7877d\",\"generation\":\"native-experiment:9722e6b335d54d8aad7d782a2ac21c74\",\"stepIndex\":0,\"nonce\":\"9e742151692b43c5b7ad1d1b5cb11de4\",\"sourcePage\":{\"spaceId\":25,\"label\":\"p1\",\"targetId\":\"CA629EE88D2AA3E64655843C79F374EA\",\"openedBy\":\"agent\"},\"currentPage\":{\"spaceId\":25,\"label\":\"p1\",\"targetId\":\"CA629EE88D2AA3E64655843C79F374EA\",\"openedBy\":\"agent\"},\"bound\":\"end\"}",
+        "executionContextId": 2
+      }
+    },
+    {
+      "method": "Network.responseReceived",
+      "sessionId": "F90BB46F4CD919B3E4B7F04F6568F924"
+    },
+    {
+      "method": "Network.dataReceived",
+      "sessionId": "F90BB46F4CD919B3E4B7F04F6568F924"
+    },
+    {
+      "method": "Network.dataReceived",
+      "sessionId": "F90BB46F4CD919B3E4B7F04F6568F924"
+    },
+    {
+      "method": "Network.loadingFinished",
+      "sessionId": "F90BB46F4CD919B3E4B7F04F6568F924"
+    }
+  ],
+  "start_index": 0,
+  "end_index": 32,
+  "cleanup": {
+    "attempts": 1,
+    "status": "returned",
+    "reply": {}
+  },
+  "classifier_state": "VERIFIED_EXPERIMENTAL_SDK_TAIL_ONLY",
+  "fixture": {
+    "tool_session": 84952,
+    "pid": 11442,
+    "terminal_exit": 0,
+    "handlers_quiesced": {
+      "utc": "2026-11-01T23:05:18.214607+00:00",
+      "monotonic_ns": 160741415318958
+    },
+    "documents": 1,
+    "post_arrivals": 5,
+    "complete_bodies": 5,
+    "trusted_events": 5,
+    "failures": 0,
+    "final_value": "a",
+    "event_sequence": [
+      "focus",
+      "keydown",
+      "beforeinput",
+      "input",
+      "keyup"
+    ]
+  },
+  "application_state": {
+    "run": "60447392893540d7960dd7edb14daf9f",
+    "documentNonce": "2504e9382e7640609a285eda2678431e",
+    "eventPath": "/runs/60447392893540d7960dd7edb14daf9f/events",
+    "value": "a",
+    "activeId": "entry",
+    "events": [
+      {
+        "run": "60447392893540d7960dd7edb14daf9f",
+        "documentNonce": "2504e9382e7640609a285eda2678431e",
+        "sequence": 1,
+        "kind": "focus",
+        "target": "entry",
+        "trusted": true,
+        "value": "",
+        "key": null,
+        "code": null,
+        "repeat": null,
+        "inputType": null,
+        "data": null,
+        "pageTime": 400547.1999999881
+      },
+      {
+        "run": "60447392893540d7960dd7edb14daf9f",
+        "documentNonce": "2504e9382e7640609a285eda2678431e",
+        "sequence": 2,
+        "kind": "keydown",
+        "target": "entry",
+        "trusted": true,
+        "value": "",
+        "key": "a",
+        "code": "KeyA",
+        "repeat": false,
+        "inputType": null,
+        "data": null,
+        "pageTime": 400549.6999999881
+      },
+      {
+        "run": "60447392893540d7960dd7edb14daf9f",
+        "documentNonce": "2504e9382e7640609a285eda2678431e",
+        "sequence": 3,
+        "kind": "beforeinput",
+        "target": "entry",
+        "trusted": true,
+        "value": "",
+        "key": null,
+        "code": null,
+        "repeat": null,
+        "inputType": "insertText",
+        "data": "a",
+        "pageTime": 400550.09999999404
+      },
+      {
+        "run": "60447392893540d7960dd7edb14daf9f",
+        "documentNonce": "2504e9382e7640609a285eda2678431e",
+        "sequence": 4,
+        "kind": "input",
+        "target": "entry",
+        "trusted": true,
+        "value": "a",
+        "key": null,
+        "code": null,
+        "repeat": null,
+        "inputType": "insertText",
+        "data": "a",
+        "pageTime": 400550.59999999404
+      },
+      {
+        "run": "60447392893540d7960dd7edb14daf9f",
+        "documentNonce": "2504e9382e7640609a285eda2678431e",
+        "sequence": 5,
+        "kind": "keyup",
+        "target": "entry",
+        "trusted": true,
+        "value": "a",
+        "key": "a",
+        "code": "KeyA",
+        "repeat": false,
+        "inputType": null,
+        "data": null,
+        "pageTime": 400552.5
+      }
+    ]
+  },
+  "original_private_digests": {
+    "fixture-1/final-ledger.json": {
+      "bytes": 15680,
+      "sha256": "630406d231ec04a0250fbb3cac64e6ac4935820dc2c945179426ac12a49743b6"
+    },
+    "typed-window-expectation-2/classification.json": {
+      "bytes": 53609,
+      "sha256": "8f0585b610efeee8eb0beb29fb34d2871055ac30f3a981428b0a6acb8f796e36"
+    },
+    "native-normal-key-data-2/13-interval-events-reply.json": {
+      "bytes": 44704,
+      "sha256": "ef161ba58d574aaae2489ea258a0f2a0d1e3db1e26a1958bdff80cd2e2e201db"
+    },
+    "native-normal-key-data-2/native-experiment-intent.json": {
+      "bytes": 2453,
+      "sha256": "f2ff2a797e07f14c175ebf260259c1a589d8ecfe8554a7d34b8bbc7c36c87ba1"
+    },
+    "native-normal-key-data-2/11-keyboard-type-return.json": {
+      "bytes": 27,
+      "sha256": "a28b16fdb4e2d7b7ae7b38954e47922000f854f19aeb64ecdcfdb2a73fea4cf8"
+    },
+    "native-normal-key-round-2/process-result.json": {
+      "bytes": 60,
+      "sha256": "9d588602c07528e1f33b789e800af4e88ea03eb488206b9c1d5dfe2d6ee61915"
+    }
+  },
+  "productInputAuthority": false,
+  "productInputSettlement": false,
+  "physicalFreshnessClaimed": false
+}

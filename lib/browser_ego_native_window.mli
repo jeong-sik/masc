@@ -88,4 +88,7 @@ val matches : completion -> expected -> bool
 
 val observation : completion -> Yojson.Safe.t
 (** Original native setup/responses/arrays and explicit void provenance for
-    retained diagnostics. This JSON cannot construct a [completion]. *)
+    private retained diagnostics. Native Network events may contain cookies or
+    authorization headers; callers must select public diagnostic fields rather
+    than forwarding this value to a tool or model. This JSON cannot construct a
+    [completion]. *)

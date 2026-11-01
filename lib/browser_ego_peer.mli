@@ -100,7 +100,8 @@ type downloads = { root : string; publish : string -> (Yojson.Safe.t, string) re
     serial SDK process, without a cumulative reply window: SDK operations own
     their waits and explicit cancellation still stops the process. *)
 val open_space
-  :  run:runner
+  :  input:(space_id:int -> (Browser_ego_input.t, string) result)
+  -> run:runner
   -> run_native:(string -> (string, run_failure) result)
   -> now:(unit -> float)
   -> space:Browser_configuration.ego_space
@@ -108,6 +109,11 @@ val open_space
   -> capture_directory:string
   -> downloads:downloads
   -> (t, string) result
+(** [input] receives only the validated native Space ID, before this peer can
+    be published. Production restores its retained Input; fixtures explicitly
+    supply volatile state. Stored tab numbers are original-command history,
+    never current Page authority. *)
+
 
 val space_id : t -> int
 (** Space ID and name observed when this connection opened. The ID binds this

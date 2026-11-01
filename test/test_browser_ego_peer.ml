@@ -2,6 +2,7 @@ open Alcotest
 module Peer = Masc.Browser_ego_peer
 module Live = Masc.Browser_live_peer
 module Lane = Browser_lane
+let volatile_input ~space_id:_ = Ok (Masc.Browser_ego_input.create ())
 let obj xs = `Assoc xs
 let str s = `String s
 
@@ -56,10 +57,10 @@ let no_downloads = {Peer.root = "/nonexistent/masc-ego-downloads"; publish = (fu
 let clock = ref 0.
 let now () = !clock
 
-let opened ?(capture_directory=capture_directory ()) ?(downloads=no_downloads) run =
+let opened ?(capture_directory=capture_directory ()) ?(downloads=no_downloads) ?(input=volatile_input) run =
   let run ~window_s script = let sent = sent_of ~window_s script in
     if sent.step = "space.open" then answered (obj ["spaceId",`Int 51;"name",str "SDK Space";"ownership",str "agent"]) else run sent in
-  match Peer.open_space ~downloads ~run ~run_native:(run ~window_s:0.) ~now ~space:(Browser_configuration.Named_space "SDK Space") ~version:"0.6.0.16" ~capture_directory with
+  match Peer.open_space ~input ~downloads ~run ~run_native:(run ~window_s:0.) ~now ~space:(Browser_configuration.Named_space "SDK Space") ~version:"0.6.0.16" ~capture_directory with
   | Ok peer -> peer
   | Error detail -> failf "the space did not open: %s" detail
 
@@ -123,7 +124,7 @@ let test_the_space_opens_by_name_and_is_held_by_number () =
     | "space.finish" -> answered (obj ["spaceId",`Int 51;"closedSpace",`Bool true;
         "keptManagedLabels",`List [];"closedManagedLabels",`List [];"preservedUnmanagedCount",`Int 0])
     | other -> failf "unexpected step %s" other in
-  let peer = match Peer.open_space ~downloads:no_downloads ~run ~run_native:(run ~window_s:0.) ~now ~space:(Browser_configuration.Named_space "SDK Space") ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) with
+  let peer = match Peer.open_space ~input:volatile_input ~downloads:no_downloads ~run ~run_native:(run ~window_s:0.) ~now ~space:(Browser_configuration.Named_space "SDK Space") ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) with
     | Ok peer -> peer | Error detail -> fail detail in
   check int "space number" 51 (Peer.space_id peer);
   check string "attachment matches the configured literal name" "SDK Space" (Peer.space peer).name;
@@ -132,14 +133,14 @@ let test_the_space_opens_by_name_and_is_held_by_number () =
   check (list string) "opened by name, then held by number"
     [ "space.open \"SDK Space\""; "tabs.list 51"; "space.finish 51" ]
     (List.rev_map (fun (step, space) -> step ^ " " ^ Yojson.Safe.to_string space) !spaces);
-  let user = Peer.open_space ~run_native:(fun _ -> Error (Peer.Unstarted "no native command in this fixture")) ~downloads:no_downloads ~now ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) ~space:(Browser_configuration.Named_space "SDK Space")
+  let user = Peer.open_space ~input:volatile_input ~run_native:(fun _ -> Error (Peer.Unstarted "no native command in this fixture")) ~downloads:no_downloads ~now ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) ~space:(Browser_configuration.Named_space "SDK Space")
       ~run:(fun ~window_s:_ _ -> answered (obj ["spaceId",`Int 7;"name",str "SDK Space";"ownership",str "user"])) in
   check bool "a space the operator owns is refused" true (Result.is_error user);
-  let in_use = Peer.open_space ~run_native:(fun _ -> Error (Peer.Unstarted "no native command in this fixture")) ~downloads:no_downloads ~now ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) ~space:(Browser_configuration.Named_space "masc")
+  let in_use = Peer.open_space ~input:volatile_input ~run_native:(fun _ -> Error (Peer.Unstarted "no native command in this fixture")) ~downloads:no_downloads ~now ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) ~space:(Browser_configuration.Named_space "masc")
       ~run:(fun ~window_s:_ _ -> failed "EGO_TASK_SPACE_NAME_IN_USE: masc") in
   check (result reject string) "ego's own refusal is kept" (Error "EGO_TASK_SPACE_NAME_IN_USE: masc") (Result.map ignore in_use);
   List.iter (fun fields ->
-    let result=Peer.open_space ~run_native:(fun _ -> Error (Peer.Unstarted "unused"))
+    let result=Peer.open_space ~input:volatile_input ~run_native:(fun _ -> Error (Peer.Unstarted "unused"))
       ~downloads:no_downloads ~now ~version:"fixture" ~capture_directory:(capture_directory ()) ~space:(Browser_configuration.Named_space "SDK Space")
       ~run:(fun ~window_s:_ script ->
         check string "malformed attachment never dispatches a page operation" "space.open" (sent_of ~window_s:0. script).step;
@@ -183,7 +184,7 @@ let test_the_spaces_of_a_name_are_listed_without_opening_one () =
       "an answer that is not a list", answered `Null ];
   check bool "a failure the frame caught is a listing that failed" true
     (match read (failed "ego lite is not running") with Error (Peer.Spaces_failed _) -> true | Ok _ | Error (Peer.Spaces_malformed _) -> false);
-  let unknown = Peer.open_space ~run_native:(fun _ -> Error (Peer.Unstarted "no native command in this fixture"))
+  let unknown = Peer.open_space ~input:volatile_input ~run_native:(fun _ -> Error (Peer.Unstarted "no native command in this fixture"))
       ~downloads:no_downloads ~now ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) ~space:(Browser_configuration.Named_space "SDK Space")
       ~run:(fun ~window_s:_ _ -> answered (obj ["spaceId",`Int 9;"ownership",str "team"])) in
   check bool "a connection still does not open on an owner masc does not know" true (Result.is_error unknown)
@@ -220,7 +221,7 @@ let test_exact_numeric_space_resume () =
   let calls=ref [] in
   let open_reference reference reply =
     calls:=[];
-    Peer.open_space ~run_native:(fun _ -> Error (Peer.Unstarted "no native action in attachment test"))
+    Peer.open_space ~input:volatile_input ~run_native:(fun _ -> Error (Peer.Unstarted "no native action in attachment test"))
       ~downloads:no_downloads ~now ~version:"fixture" ~capture_directory:(capture_directory ()) ~space:reference
       ~run:(fun ~window_s script ->
         let sent=sent_of ~window_s script in calls:=sent::!calls;
@@ -703,6 +704,33 @@ let test_selector_input_uses_ego_sdk () =
     (failure_kind (dispatch peer Live.Page_interact (interact_args (Lane.Click selector))));
   check int "no automatic replay" (before + 1) (List.length !asked)
 
+let test_durable_intent_failure_never_dispatches_native_input () =
+  let module Input=Masc.Browser_ego_input in
+  List.iter (fun workflow ->
+    let record=ref None and writes=ref 0 and native_calls=ref 0 in
+    let input ~space_id =
+      let persistence={Input.read=(fun ()->Ok !record);
+        compare_and_set=(fun ~expected ~replacement->
+          incr writes;
+          if !writes>1 then Error "retained input publication unavailable"
+          else if expected<> !record then Error "writer changed"
+          else (record:=Some replacement;Ok ()));
+        active=(fun ()->true)} in
+      Input.create_persistent ~persistence ~writer:"worker-epoch" ~space_id in
+    let peer=opened ~input (fun sent -> match sent.step with
+      | "tabs.list"->answered tabs
+      | "page.target_input"|"page.native_workflow"->incr native_calls;Error (Peer.Unobserved "must not dispatch")
+      | other->failf "unexpected write-ahead fixture step %s" other) in
+    ignore (dispatch peer Live.Tabs_list (obj []));
+    let result=if workflow then dispatch peer Live.Page_native_workflow
+      (obj ["tabId",`Int 1;"maxChars",`Int 1000;"steps",`List [obj ["method",str "click";"selector",str "#send"]]])
+      else dispatch peer Live.Page_interact (interact_args (Lane.Click_target (Lane.Target_ref 12))) in
+    ignore (before_effect "failed retained input intent" result);
+    check int "no native holding effect after failed durable write" 0 !native_calls;
+    check int "attachment claim and one intent publication only" 2 !writes;
+    check bool "failed publication leaves input blocked" true
+      (match Peer.input_status peer with Input.Uncertain _->true|Ready _->false)) [false;true]
+
 let test_unattestable_raw_input_is_refused_before_effect () =
   let module Input=Masc.Browser_ego_input in
   let calls=ref [] and lose_receipt=ref false in
@@ -934,7 +962,7 @@ let test_the_scripts_parse_as_modules () =
     | "page.upload" -> answered (obj ["error",`Null;"dialog",`Null;"tab",`Null])
     | "page.choose_files" -> answered (obj ["error",`Null;"dialog",`Null;"tab",`Null])
     | _ -> page_answer ~label:"p1" (obj ["url",str "u"]) in
-  let peer = match Peer.open_space ~downloads:no_downloads ~run ~run_native:(run ~window_s:0.) ~now ~space:(Browser_configuration.Named_space "SDK Space") ~version:"0.6.0.16" ~capture_directory:directory with
+  let peer = match Peer.open_space ~input:volatile_input ~downloads:no_downloads ~run ~run_native:(run ~window_s:0.) ~now ~space:(Browser_configuration.Named_space "SDK Space") ~version:"0.6.0.16" ~capture_directory:directory with
     | Ok peer -> peer | Error detail -> fail detail in
   ignore (dispatch peer Live.Tabs_list (obj []));
   List.iter (fun (verb, args) -> ignore (dispatch peer verb args))
@@ -1176,7 +1204,7 @@ const taskSpace=async()=>({spaceId:51,ownership:%s,
  }});
 |js} (Yojson.Safe.to_string (str !owner)) in
     output:=in_node (shim^script);Ok !output in
-  let peer=match Peer.open_space ~downloads:no_downloads ~run ~run_native ~now
+  let peer=match Peer.open_space ~input:volatile_input ~downloads:no_downloads ~run ~run_native ~now
       ~space:(Browser_configuration.Named_space "SDK Space") ~version:"fixture" ~capture_directory:(capture_directory ()) with
     | Ok peer -> peer | Error detail -> fail detail in
   ignore(dispatch peer Live.Tabs_list (obj []));
@@ -1243,7 +1271,7 @@ const taskSpace = async () => ({ownership: 'agent',
     | None -> Ok output
     | Some options -> answered (obj ["label",str "p1";"path",str path;
         "before",observed_state;"after",observed_state;"captureOptions",options]) in
-  let peer = match Peer.open_space ~downloads:no_downloads ~run ~run_native ~now
+  let peer = match Peer.open_space ~input:volatile_input ~downloads:no_downloads ~run ~run_native ~now
       ~space:(Browser_configuration.Named_space "SDK Space") ~version:"fixture" ~capture_directory:directory with
     | Ok peer -> peer | Error detail -> fail detail in
   ignore (dispatch peer Live.Tabs_list (obj []));
@@ -1303,7 +1331,7 @@ let test_a_snapshot_reads_egos_own_tree () =
       output := in_node (snapshot_stand_in !text ^ script);
       Ok !output
     | other -> failf "unexpected step %s" other in
-  let peer = match Peer.open_space ~downloads:no_downloads ~run ~run_native:(run ~window_s:0.) ~now ~space:(Browser_configuration.Named_space "SDK Space") ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) with
+  let peer = match Peer.open_space ~input:volatile_input ~downloads:no_downloads ~run ~run_native:(run ~window_s:0.) ~now ~space:(Browser_configuration.Named_space "SDK Space") ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) with
     | Ok peer -> peer | Error detail -> fail detail in
   ignore (dispatch peer Live.Tabs_list (obj []));
   let snapshot ?(tab_id=1) ?(max_chars=1000) scope =
@@ -1389,7 +1417,7 @@ let test_a_snapshot_target_is_found_by_ego_and_checked_first () =
       output := in_node (target_stand_in ~url:!url ~blocked:!blocked ~act:!act ^ script);
       Ok !output
     | other -> failf "unexpected step %s" other in
-  let peer = match Peer.open_space ~downloads:no_downloads ~run ~run_native:(run ~window_s:0.) ~now ~space:(Browser_configuration.Named_space "SDK Space") ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) with
+  let peer = match Peer.open_space ~input:volatile_input ~downloads:no_downloads ~run ~run_native:(run ~window_s:0.) ~now ~space:(Browser_configuration.Named_space "SDK Space") ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) with
     | Ok peer -> peer | Error detail -> fail detail in
   ignore (dispatch peer Live.Tabs_list (obj []));
   let printed prefix = match List.find_opt (String.starts_with ~prefix) (String.split_on_char '\n' !output) with
@@ -1520,7 +1548,7 @@ const taskSpace=async id=>({spaceId:id,name:'SDK Space',ownership:%s,
     | "page.target_input" -> answered (obj ["urlBefore",str observed_url;
         "receipt",obj [];"error",str "native drag interrupted";"tab",obj ["url",str observed_url;"title",str "Slack"]])
     | other -> failf "unexpected control wait step %s" other in
-  let peer=match Peer.open_space ~downloads:no_downloads ~run ~run_native:(run ~window_s:0.) ~now
+  let peer=match Peer.open_space ~input:volatile_input ~downloads:no_downloads ~run ~run_native:(run ~window_s:0.) ~now
       ~space:(Browser_configuration.Named_space "SDK Space") ~version:"fixture" ~capture_directory:(capture_directory ()) with
     | Ok peer -> peer | Error detail -> fail detail in
   let wait options=dispatch peer Live.Page_act (obj ["action",str "wait_for_control";"controlOptions",options]) in
@@ -1586,7 +1614,7 @@ const taskSpace=async id=>({spaceId:id,name:'SDK Space',ownership:%s,
     | "page.target_input" -> answered (obj ["urlBefore",str "https://mail.example/";
         "receipt",obj [];"error",str "native drag interrupted";"tab",obj ["url",str "https://mail.example/";"title",str "Mail"]])
     | other -> failf "unexpected Page management step %s" other in
-  let peer=match Peer.open_space ~downloads:no_downloads ~run ~run_native:(run ~window_s:0.) ~now
+  let peer=match Peer.open_space ~input:volatile_input ~downloads:no_downloads ~run ~run_native:(run ~window_s:0.) ~now
       ~space:(Browser_configuration.Named_space "SDK Space") ~version:"fixture" ~capture_directory:(capture_directory ()) with
     | Ok peer -> peer | Error detail -> fail detail in
   let act control=dispatch peer Live.Page_act (act_args (Lane.Action.Control control)) in
@@ -1685,7 +1713,7 @@ const taskSpace=async reference=>{
     used_labels:=List.map text (Yojson.Safe.Util.to_list (field "usedLabels" state));
     calls:=List.map text (Yojson.Safe.Util.to_list (field "seen" state));
     Ok output in
-  let open_peer ()=match Peer.open_space ~downloads:no_downloads ~run ~run_native:(run ~window_s:0.) ~now
+  let open_peer ()=match Peer.open_space ~input:volatile_input ~downloads:no_downloads ~run ~run_native:(run ~window_s:0.) ~now
       ~space:(Browser_configuration.Named_space "SDK Space") ~version:"fixture" ~capture_directory:(capture_directory ()) with
     | Ok peer->peer | Error detail->fail detail in
   let served label=function Ok value->value|other->failf "%s was %s" label (failure_kind other) in
@@ -1763,7 +1791,7 @@ let test_the_space_goes_to_the_operator_and_back () =
     match sent.step with
     | "space.open" -> answered (obj ["spaceId",`Int 51;"name",str "SDK Space";"ownership",str !ownership])
     | _ -> output := in_node (control_stand_in ~ownership:!ownership ~user_page:!user_page ^ script); Ok !output in
-  let peer = match Peer.open_space ~downloads:no_downloads ~run ~run_native:(run ~window_s:0.) ~now ~space:(Browser_configuration.Named_space "SDK Space") ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) with
+  let peer = match Peer.open_space ~input:volatile_input ~downloads:no_downloads ~run ~run_native:(run ~window_s:0.) ~now ~space:(Browser_configuration.Named_space "SDK Space") ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) with
     | Ok peer -> peer | Error detail -> fail detail in
   let seen () = match List.find_opt (String.starts_with ~prefix:"seen ") (String.split_on_char '\n' !output) with
     | Some line -> after ~prefix:"seen " line
@@ -1805,7 +1833,7 @@ let test_the_space_goes_to_the_operator_and_back () =
   check bool "with the agent holding the space, a take-over is refused before any effect" true
     (contains (before_effect "a needless take-over" (act Lane.Action.Take_over)) "already holds");
   check string "and ego is not asked to take it" "[]" (seen ());
-  let open_owned_by owner = Peer.open_space ~run_native:(fun _ -> Error (Peer.Unstarted "no native command in this fixture")) ~downloads:no_downloads ~run:(fun ~window_s:_ _ -> answered (obj ["spaceId",`Int 52;"name",str "SDK Space";"ownership",str owner]))
+  let open_owned_by owner = Peer.open_space ~input:volatile_input ~run_native:(fun _ -> Error (Peer.Unstarted "no native command in this fixture")) ~downloads:no_downloads ~run:(fun ~window_s:_ _ -> answered (obj ["spaceId",`Int 52;"name",str "SDK Space";"ownership",str owner]))
       ~now ~space:(Browser_configuration.Named_space "SDK Space") ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) in
   check bool "a space handed to the operator still opens, so take_over can bring it back" true
     (Result.is_ok (open_owned_by "agentDelegatedToUser"));
@@ -1827,7 +1855,7 @@ let test_history_moves_one_entry () =
         ~same_url:!same_url ~load:!load ^ script);
       Ok !output
     | other -> failf "unexpected step %s" other in
-  let peer = match Peer.open_space ~downloads:no_downloads ~run ~run_native:(run ~window_s:0.) ~now ~space:(Browser_configuration.Named_space "SDK Space") ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) with
+  let peer = match Peer.open_space ~input:volatile_input ~downloads:no_downloads ~run ~run_native:(run ~window_s:0.) ~now ~space:(Browser_configuration.Named_space "SDK Space") ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) with
     | Ok peer -> peer | Error detail -> fail detail in
   ignore (dispatch peer Live.Tabs_list (obj []));
   let on_tab ?(tab_id=1) interaction = dispatch peer Live.Page_act (act_args (Lane.Action.On_tab {tab_id;frame_path=[];interaction})) in
@@ -2066,7 +2094,7 @@ let test_dialog_scripts_in_node () =
         | Some value -> "page.acceptDialog = page.dismissDialog = async () => " ^ value ^ ";\n" in
       output := in_node (dialog_stand_in ~open_ ~opening ~opens_on ~canned:(canned step) ^ answer ^ script);
       Ok !output in
-  let peer = match Peer.open_space ~downloads:no_downloads ~run ~run_native:(run ~window_s:0.) ~now ~space:(Browser_configuration.Named_space "SDK Space") ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) with
+  let peer = match Peer.open_space ~input:volatile_input ~downloads:no_downloads ~run ~run_native:(run ~window_s:0.) ~now ~space:(Browser_configuration.Named_space "SDK Space") ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) with
     | Ok peer -> peer | Error detail -> fail detail in
   ignore (dispatch peer Live.Tabs_list (obj []));
   let seen () = match List.find_opt (String.starts_with ~prefix:"seen ") (String.split_on_char '\n' !output) with
@@ -2253,7 +2281,7 @@ let test_the_download_wait_runs_in_node () =
       output := in_node (String.concat "\n" (List.rev (("{\n" ^ script ^ "\n}") :: !program)));
       Ok !output
     | other -> failf "unexpected step %s" other in
-  let peer = match Peer.open_space ~downloads ~run ~run_native:(run ~window_s:0.) ~now ~space:(Browser_configuration.Named_space "SDK Space") ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) with
+  let peer = match Peer.open_space ~input:volatile_input ~downloads ~run ~run_native:(run ~window_s:0.) ~now ~space:(Browser_configuration.Named_space "SDK Space") ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) with
     | Ok peer -> peer | Error detail -> fail detail in
   ignore (dispatch peer Live.Tabs_list (obj []));
   let goto () = match dispatch peer Live.Page_goto (obj ["tabId",`Int 1;"url",str "https://example.test/"]) with
@@ -2435,7 +2463,7 @@ let test_the_upload_script_runs_in_node () =
     | "tabs.list" -> answered (`List [tab_row ~label:(str "p1") ~target:"T1" ~title:"Form" ~url:"https://example.test/" ~active:true ()])
     | "page.upload" -> output := in_node (upload_stand_in ~opens:!opens ~fails:!fails ^ script); Ok !output
     | other -> failf "unexpected step %s" other in
-  let peer = match Peer.open_space ~downloads:no_downloads ~run ~run_native:(run ~window_s:0.) ~now ~space:(Browser_configuration.Named_space "SDK Space") ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) with
+  let peer = match Peer.open_space ~input:volatile_input ~downloads:no_downloads ~run ~run_native:(run ~window_s:0.) ~now ~space:(Browser_configuration.Named_space "SDK Space") ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) with
     | Ok peer -> peer | Error detail -> fail detail in
   ignore (dispatch peer Live.Tabs_list (obj []));
   let seen () = match List.find_opt (String.starts_with ~prefix:"seen ") (String.split_on_char '\n' !output) with
@@ -2554,7 +2582,7 @@ let test_the_chooser_script_runs_in_node () =
       output := in_node (chooser_stand_in ~opens:!opens ~multiple:!multiple ~set:!set ~fails:!fails ~click_fails:!click_fails
         ^ "\n{\n" ^ script ^ "\n}\n" ^ recovery); Ok !output
     | other -> failf "unexpected step %s" other in
-  let peer = match Peer.open_space ~downloads:no_downloads ~run ~run_native:(run ~window_s:0.) ~now ~space:(Browser_configuration.Named_space "SDK Space") ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) with
+  let peer = match Peer.open_space ~input:volatile_input ~downloads:no_downloads ~run ~run_native:(run ~window_s:0.) ~now ~space:(Browser_configuration.Named_space "SDK Space") ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) with
     | Ok peer -> peer | Error detail -> fail detail in
   ignore (dispatch peer Live.Tabs_list (obj []));
   let seen () = match List.find_opt (String.starts_with ~prefix:"seen ") (String.split_on_char '\n' !output) with
@@ -2626,7 +2654,7 @@ const taskSpace = async () => ({ownership:'agent',
     | "tabs.list" -> answered tabs
     | "page.native_workflow" -> Ok (in_node (shim ^ script))
     | other -> failf "unexpected envelope fixture step %s" other in
-  let peer=match Peer.open_space ~downloads:no_downloads ~run ~run_native:(run ~window_s:0.)
+  let peer=match Peer.open_space ~input:volatile_input ~downloads:no_downloads ~run ~run_native:(run ~window_s:0.)
       ~now ~space:(Browser_configuration.Named_space "SDK Space") ~version:"fixture" ~capture_directory:(capture_directory ()) with
     | Ok value -> value | Error detail -> fail detail in
   ignore (dispatch peer Live.Tabs_list (obj []));
@@ -2681,7 +2709,7 @@ const taskSpace = async () => ({ownership:'agent',
       check string "one native workflow" "page.native_workflow" (sent_of ~window_s:0. script).step;
       output:=in_node (shim ^ script ^ "\nconsole.log('evaluation-calls '+JSON.stringify(seen));");
       Ok !output in
-    let peer=match Peer.open_space ~downloads:no_downloads ~run ~run_native ~now
+    let peer=match Peer.open_space ~input:volatile_input ~downloads:no_downloads ~run ~run_native ~now
         ~space:(Browser_configuration.Named_space "SDK Space") ~version:"fixture" ~capture_directory:(capture_directory ()) with
       | Ok peer -> peer | Error detail -> fail detail in
     ignore (dispatch peer Live.Tabs_list (obj []));
@@ -2811,7 +2839,7 @@ const AsyncFunction=Object.getPrototypeOf(async function(){}).constructor;
           | `Null|`Bool _|`Int _|`Intlit _|`Float _|`Assoc _|`List _ -> Error (Peer.Unobserved (Yojson.Safe.to_string reply)) in
         let published=ref [] in
         let downloads={Peer.root=download_root;publish=(fun path->published:=path::!published;Broker.publish broker path)} in
-        let peer=ok (Peer.open_space ~downloads ~run ~run_native:(run ~window_s:0.) ~now
+        let peer=ok (Peer.open_space ~input:volatile_input ~downloads ~run ~run_native:(run ~window_s:0.) ~now
           ~space:(Browser_configuration.Named_space "SDK Space") ~version:"fixture" ~capture_directory:capture) in
         let served name=function Ok value->value
           | Error (Live.Before_effect detail|Outcome_unknown detail | Observed_failure {message=detail;_}|Partial_failure {message=detail;_})->failf "%s: %s" name detail in
@@ -2908,7 +2936,7 @@ let test_takeover_receipt_and_native_runner_preserve_pending_input () =
        | `Receipt value->answered value
        | `Lost->Error (Peer.Unobserved "takeover effect ran but response was lost"))
     | step->failf "unexpected native step %s" step in
-  let peer=match Peer.open_space ~downloads:no_downloads ~run ~run_native ~now
+  let peer=match Peer.open_space ~input:volatile_input ~downloads:no_downloads ~run ~run_native ~now
       ~space:(Browser_configuration.Named_space "SDK Space") ~version:"fixture" ~capture_directory:(capture_directory ()) with
     | Ok peer->peer | Error detail->fail detail in
   ignore (dispatch peer Live.Tabs_list (obj []));
@@ -3266,7 +3294,7 @@ const listTaskSpaces=async()=>{seen.push('listTaskSpaces');const row={id:%d,name
       output:=in_node (shim ^ script);Ok !output
     | "space.hand_off" -> answered (obj ["spaceId",`Int 51;"spaceName",str "SDK Space"])
     | other -> failf "unexpected Space status fixture step %s" other in
-  let peer=match Peer.open_space ~run ~run_native:(run ~window_s:0.) ~now
+  let peer=match Peer.open_space ~input:volatile_input ~run ~run_native:(run ~window_s:0.) ~now
     ~space:(Browser_configuration.Existing_space 51) ~version:"fixture"
     ~capture_directory:(capture_directory ()) ~downloads:no_downloads with
     | Ok peer -> peer | Error detail -> fail detail in
@@ -3324,7 +3352,7 @@ let test_explicit_completion_is_terminal_and_never_replayed () =
       | "space.open" -> answered (obj ["spaceId",`Int 51;"name",str "SDK Space";"ownership",str "agent"])
       | "space.finish" -> incr calls; reply sent
       | other -> failf "unexpected post-completion SDK call %s" other in
-    let peer=match Peer.open_space ~downloads:no_downloads ~run ~run_native:(run ~window_s:0.) ~now
+    let peer=match Peer.open_space ~input:volatile_input ~downloads:no_downloads ~run ~run_native:(run ~window_s:0.) ~now
         ~space:(Browser_configuration.Existing_space 51) ~version:"fixture" ~capture_directory:(capture_directory ()) with
       | Ok peer -> peer | Error detail -> fail detail in
     check bool "active Space cannot justify retirement deletion" true (Result.is_error (Peer.retirement_settlement peer));
@@ -3448,6 +3476,7 @@ let () =
       test_case "takeover receipts and native runner preserve pending input" `Quick test_takeover_receipt_and_native_runner_preserve_pending_input;
       test_case "saved fetch survives snapshot failure and reaches the download broker" `Quick test_saved_fetch_survives_snapshot_failure_and_reaches_download_broker;
       test_case "unattestable raw inputs refuse before native resolution and preserve pending input" `Quick test_unattestable_raw_input_is_refused_before_effect;
+      test_case "durable intent failure never dispatches target or workflow input" `Quick test_durable_intent_failure_never_dispatches_native_input;
       test_case "an unavailable later workflow step prevents every earlier effect" `Quick test_unavailable_workflow_is_refused_before_any_step;
       test_case "target gestures settle only from their declared receipt" `Quick test_a_target_gesture_settles_only_from_the_receipt_it_returns;
       test_case "target dialog preserves original input until operator reset" `Quick test_target_dialog_preserves_original_input_until_operator_reset;

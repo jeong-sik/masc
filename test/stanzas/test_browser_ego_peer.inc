@@ -3,6 +3,16 @@
  (modules test_browser_ego_peer)
  (libraries masc masc.browser_lane masc.browser_configuration masc.string_util alcotest yojson base64 unix))
 
+(test
+ (name test_browser_ego_input_durability)
+ (modules test_browser_ego_input_durability)
+ (libraries masc alcotest yojson))
+
+(test
+ (name test_browser_ego_input_store)
+ (modules test_browser_ego_input_store)
+ (libraries masc alcotest yojson unix))
+
 (rule
  (alias runtest-test_browser_ego_target)
  (deps test_browser_ego_target.cjs ../lib/browser_ego_peer.ml)

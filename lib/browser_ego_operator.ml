@@ -23,7 +23,7 @@ let view ?(outcome=Observed) connection =
         | Ready (Operator_reset_asserted _) -> where ^ "의 입력 상태를 운영자가 확인·초기화했다고 기록했습니다. 원래 동작은 재실행하지 않습니다.",[]
         | Uncertain pending ->
           let location=match pending.scope with
-            | Input.Page_scope -> Printf.sprintf "%s의 탭 %d" where pending.tab_id
+            | Input.Page_scope -> Printf.sprintf "%s의 원래 요청 Page %s (당시 탭 %d)" where pending.page_label pending.tab_id
             | Input.Space_scope -> where ^ "의 여러 Page를 다룬 작업" in
           location ^ "에서 입력 해제 여부가 불확실합니다. 해당 Space의 모든 관련 Page에서 키·버튼 상태를 직접 확인하고 필요한 초기화를 마친 경우에만 아래 버튼을 누르세요. 로그인 완료와는 별도입니다.",
           [obj ["id",text "assert_input_reset";"label",text "입력 상태 확인·초기화 완료";

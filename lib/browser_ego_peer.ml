@@ -256,7 +256,7 @@ let run_native_step t ~step ~args body =
 let ask t ~step ~args body =
   run_step t ~window_s:read_window_s ~step ~args body |> Result.map_error step_failure_message
 
-let open_space ~run ~run_native ~now ~space ~version ~capture_directory ~downloads =
+let open_space ~input ~run ~run_native ~now ~space ~version ~capture_directory ~downloads =
   let* () = Browser_configuration.validate_ego_space space in
   let reference=match space with Browser_configuration.Named_space name -> str name | Existing_space id -> `Int id in
   let* opened = asked run ~window_s:read_window_s ~step:"space.open" ~space:reference ~holder:Either_holds ~args:`Null
@@ -281,9 +281,10 @@ let open_space ~run ~run_native ~now ~space ~version ~capture_directory ~downloa
   | Some (`String ownership) ->
     (match space_owner_of_wire ownership with
      | Some (Agent_owner | Handed_to_operator) ->
+       let* input=input ~space_id:bound_space.id in
        Ok {run; run_native; now; space=bound_space; version; capture_directory; downloads; published = Hashtbl.create 16;
          uploads = Browser_lane.Upload_lease.create_owner ();
-         input=Input.create (); finish_state=Active; space_observation=Some observation;
+         input; finish_state=Active; space_observation=Some observation;
          space_presence={space_id=bound_space.id;observed_at=observation.observed_at;state=Present}; pages=[]; next_tab=0; captures=0}
      | Some Operator_owner | None ->
        Error (Printf.sprintf "ego task space %s belongs to %s, not to an agent" (Yojson.Safe.to_string reference) ownership))
@@ -1285,9 +1286,11 @@ let target_input_script = {js|async function nativeTargetInput(page, args) {
   return {urlBefore, receipt, error: failure};
 }|js}
 (* An input the SDK showed released is settled. One that was never held keeps the readiness it had. *)
-let settle_input t = function
-  | Browser_ego_release.No_hold -> Input.not_started t.input
-  | Browser_ego_release.Released proof -> Input.command_settled t.input proof
+let settle_input t pending settled = match pending with
+  | None -> Ok ()
+  | Some (pending:Input.pending) -> match settled with
+    | Browser_ego_release.No_hold -> Input.not_started t.input ~generation:pending.generation
+    | Browser_ego_release.Released proof -> Input.command_settled t.input ~generation:pending.generation proof
 let native_input t ~id ~label ~cursor ~expected_url ~locator ~reference ~operation =
   let verb, text = match operation with
     | Target_click -> "click", `Null
@@ -1304,8 +1307,8 @@ let native_input t ~id ~label ~cursor ~expected_url ~locator ~reference ~operati
   let holds_button = match operation with
     | Target_click | Target_double_click | Target_drag _ -> true
     | Target_fill _ | Target_hover | Target_select _ -> false in
-  let* ()=if holds_button then Input.begin_holding t.input ~scope:Input.Page_scope ~tab_id:id ~page_label:label ~operation:"native_target_input"
-    |> Result.map_error (fun detail -> Live.Before_effect detail) else Ok () in
+  let* pending=if holds_button then Input.begin_holding t.input ~scope:Input.Page_scope ~tab_id:id ~page_label:label ~operation:"native_target_input"
+    |> Result.map Option.some |> Result.map_error (fun detail -> Live.Before_effect detail) else Ok None in
   let response = run_native_step t ~step:"page.target_input"
       ~args:(obj ["label",str label;"tabId",`Int id;"expectedUrl",(match expected_url with Some url -> str url | None -> `Null);"target",str locator;
         "action",str verb;"text",text;"selection",selection;"cursor",str cursor;
@@ -1321,9 +1324,10 @@ let native_input t ~id ~label ~cursor ~expected_url ~locator ~reference ~operati
         "      emit({ok: true, value: {...outcome, tab: after === undefined ? null : {url: after.url, title: after.title}}});";
         "    }";
         "  }" ]) in
-  if holds_button then (match response with
-    | Error (Refused _ | Unanswered (Unstarted _)) -> Input.not_started t.input
-    | Ok _ | Error (Unanswered (Exited _ | Signaled _ | Timed_out | Output_exceeded | Unobserved _) | Failed _ | Unreadable _) -> ());
+  let* ()=match pending,response with
+    | Some pending,Error (Refused _ | Unanswered (Unstarted _)) ->
+        Input.not_started t.input ~generation:pending.generation |> Result.map_error (fun detail -> Live.Before_effect detail)
+    | None,_ | Some _,(Ok _ | Error (Unanswered (Exited _ | Signaled _ | Timed_out | Output_exceeded | Unobserved _) | Failed _ | Unreadable _)) -> Ok () in
   match response with
   | Error failure -> Error (effect_failure ~unknown failure)
   | Ok value ->
@@ -1361,9 +1365,10 @@ let native_input t ~id ~label ~cursor ~expected_url ~locator ~reference ~operati
              Ok ["selectedValues",`List values]
            | Target_select _, (None | Some _) -> outcome "ego answered selection without its selected values"
            | (Target_click | Target_fill _ | Target_hover | Target_double_click | Target_drag _), (None | Some _) -> Ok [] in
-         if holds_button then (match Browser_ego_release.judge [0,answer] with
-           | Browser_ego_release.Settled settled -> settle_input t settled
-           | Browser_ego_release.Unconfirmed _ -> ());
+         let* ()=if holds_button then (match Browser_ego_release.judge [0,answer] with
+           | Browser_ego_release.Settled settled -> settle_input t pending settled
+               |> Result.map_error (fun detail -> Live.Outcome_unknown (detail ^ "; " ^ unknown ^ "; never replay the input"))
+           | Browser_ego_release.Unconfirmed _ -> Ok ()) else Ok () in
          Ok (obj (["tabId",`Int id;"action",str verb] @ reference @ ["urlBefore",str url_before]
                   @ tab_fields (Some tab)
                   @ (match popups with [] -> [] | _ :: _ -> ["popups",`List popups])
@@ -1700,17 +1705,18 @@ let workflow ?actor t args =
       obj (expected @ ["inputReceiptContract",Browser_ego_release.receipt_contract;
         "label",str label;"cursor",str (cursor_label ~actor ~verb:"workflow")] @ fields)
     | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> args in
-  let* ()=if holds_input then Input.begin_holding t.input ~scope ~tab_id:request.tab_id ~page_label:label ~operation:"native_workflow"
-    |> Result.map_error (fun detail -> Live.Before_effect detail) else Ok () in
+  let* pending=if holds_input then Input.begin_holding t.input ~scope ~tab_id:request.tab_id ~page_label:label ~operation:"native_workflow"
+    |> Result.map Option.some |> Result.map_error (fun detail -> Live.Before_effect detail) else Ok None in
   let result = run_native_step t ~step:"page.native_workflow" ~args:arguments
       (String.concat "\n" [Browser_ego_workflow.script;unblocked_managed_page;
         "    const outcome = await nativeWorkflow(task.page(args.label), args, task, watchDownloads);";
         "    emit({ok: true, value: outcome});";"  }"]) in
   match result with
   | Error error ->
-    (match error with
-     | Refused _|Unanswered (Unstarted _) -> if holds_input then Input.not_started t.input
-     | Unreadable _|Failed _|Unanswered (Exited _|Signaled _|Timed_out|Output_exceeded|Unobserved _) -> ());
+    let* ()=match pending,error with
+     | Some pending,(Refused _|Unanswered (Unstarted _)) -> Input.not_started t.input ~generation:pending.generation
+         |> Result.map_error (fun detail -> Live.Before_effect detail)
+     | None,_ | Some _,(Unreadable _|Failed _|Unanswered (Exited _|Signaled _|Timed_out|Output_exceeded|Unobserved _)) -> Ok () in
     Error (effect_failure ~unknown:"native workflow result is unknown; read the same tab before another step; never replay the workflow" error)
   | Ok value ->
     let unknown detail = Live.Outcome_unknown (detail ^ "; read the same tab and do not replay the workflow") in
@@ -1722,9 +1728,9 @@ let workflow ?actor t args =
       | Some _ -> Error (unknown "workflow source Page disagrees with its full pre-effect native identity") in
     let tab_of_page (identity:Browser_ego_workflow.page_identity) = remember t (Managed identity.label) in
     let current_tab=match pages with None -> request.tab_id | Some pages -> tab_of_page pages.current in
-    if holds_input then (match outcome with
-      | Browser_ego_workflow.Completed {input;_}|Stopped {input=Browser_ego_release.Settled input;_} -> settle_input t input
-      | Stopped {input=Browser_ego_release.Unconfirmed _;_} -> ());
+    let* ()=if holds_input then (match outcome with
+      | Browser_ego_workflow.Completed {input;_}|Stopped {input=Browser_ego_release.Settled input;_} -> settle_input t pending input |> Result.map_error unknown
+      | Stopped {input=Browser_ego_release.Unconfirmed _;_} -> Ok ()) else Ok () in
     let receipt_of value=match value with
       | `Assoc fields ->
         let fields=match pages with

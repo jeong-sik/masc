@@ -305,7 +305,7 @@ let remove_capture_directory directory = Eio_unix.run_in_systhread (fun () ->
 let downloads_folder = "ego"
 type connection_end = Connected | User_owned_name of { space : string; observed_at : float }
 
-let run ~env ~owner ~downloads (configuration : Browser_configuration.live_ego) work =
+let run ~env ~owner ~input_store ~downloads (configuration : Browser_configuration.live_ego) work =
   let command = configuration.command in
   let downloads = {Peer.root = Filename.concat downloads downloads_folder;
     publish = (fun path -> Eio_unix.run_in_systhread (fun () -> Browser_addon_owner.publish_download owner path))} in
@@ -328,7 +328,15 @@ let run ~env ~owner ~downloads (configuration : Browser_configuration.live_ego) 
     | Some (space, Peer.User_owned_matches _) ->
       Ok (User_owned_name {space; observed_at=Eio.Time.now (Eio.Stdenv.clock env)})
     | Some (_, (Peer.No_user_owned_match | Peer.Space_names_unavailable _)) | None ->
-    let* peer = Peer.open_space ~space:configuration.space ~version ~capture_directory:directory ~downloads
+    let input ~space_id =
+      let active ()=not (Browser_addon_owner.is_retired owner) in
+      let writer=Browser_addon_owner.incarnation owner ^ ":" ^ Uuidm.(to_string (v4_gen (Random.State.make_self_init ()) ())) in
+      let persistence={Browser_ego_input.read=(fun () -> Systhread_host.run (fun () -> Lane_addon_store.load_ego_input input_store ~space_id));
+        compare_and_set=(fun ~expected ~replacement -> Systhread_host.run (fun () ->
+          if active () then Lane_addon_store.compare_and_set_ego_input input_store ~space_id ~expected ~replacement
+          else Error "retired Ego input writer"));active} in
+      Browser_ego_input.create_persistent ~persistence ~writer ~space_id in
+    let* peer = Peer.open_space ~input ~space:configuration.space ~version ~capture_directory:directory ~downloads
         ~now:(fun () -> Eio.Time.now (Eio.Stdenv.clock env))
         ~run:(runner session) ~run_native:(native_runner session) in
     let client_id = Uuidm.v4_gen (Random.State.make_self_init ()) () in

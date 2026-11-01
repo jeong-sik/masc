@@ -50,6 +50,9 @@ val end_session : session -> unit
     and Ego is published as unavailable.
     Screenshots pass through a private directory this run creates and
     removes. Downloads its agent pages start are saved under [downloads],
-    the worker's download folder, and published through [owner]. *)
-val run : env:Eio_unix.Stdenv.base -> owner:Browser_addon_owner.t -> downloads:string ->
+    the worker's download folder, and published through [owner]. [input_store]
+    is the host-selected workspace Lane store, never the ephemeral socket or
+    download directory. Managed Ego attachment must retain/restore Input there;
+    missing/unwritable authority never falls back to volatile state. *)
+val run : env:Eio_unix.Stdenv.base -> owner:Browser_addon_owner.t -> input_store:Lane_addon_store.t -> downloads:string ->
   Browser_configuration.live_ego -> (unit -> unit) -> unit

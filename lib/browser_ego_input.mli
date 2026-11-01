@@ -1,4 +1,4 @@
-(** Local input admission and human reset assertions. Operator confirmation is
+(** Input admission, retained intent and human reset assertions. Operator confirmation is
     a distinct authority; it never proves the original SDK gesture released. *)
 type scope = Page_scope | Space_scope
 type pending = private {
@@ -13,27 +13,53 @@ type readiness = Command_settled | Operator_reset_asserted of { pending:pending;
 type status = Ready of readiness | Uncertain of pending
 type t
 val create : unit -> t
+(** Volatile fixture state. Production Ego workers use [create_persistent]. *)
+
+type persistence = {
+  read : unit -> (Yojson.Safe.t option, string) result;
+  compare_and_set : expected:Yojson.Safe.t option -> replacement:Yojson.Safe.t -> (unit, string) result;
+  active : unit -> bool;
+}
+val create_persistent : persistence:persistence -> writer:string -> space_id:int -> (t, string) result
+(** Claim one writer epoch and restore the same numeric native Space's state.
+    Full-record CAS fences replaced writers. Absence preserves the historical
+    no-known-MASC-pending baseline; it does not attest native freshness or key
+    release. Malformed/unreadable state refuses attachment. [active] must refer
+    to the existing worker owner, never an independent operator setting.
+    [writer] is a new unique immutable epoch for each attachment; production
+    derives it from the owner incarnation and a fresh UUID. *)
+
 val status : t -> status
 val busy : t -> bool
 val within_command : t -> command_id:string -> (unit -> 'a) -> ('a, string) result
 (** Reject overlapping scopes. Cancellation leaves unresolved input pending
     but releases only the local running marker. *)
+
 val admit : t -> (unit, string) result
-val begin_holding : t -> scope:scope -> tab_id:int -> page_label:string -> operation:string -> (unit, string) result
-(** Space_scope preserves the originating Page identity without claiming that
+(** Also refuse a retired/replaced writer or an unreadable retained record,
+    including for methods that do not hold input. Reads are not input admission. *)
+
+val begin_holding : t -> scope:scope -> tab_id:int -> page_label:string -> operation:string -> (pending, string) result
+(** Persist the complete intent before permitting the native effect. An
+    unconfirmed publication keeps local admission blocked; it grants no effect.
+    Space_scope preserves the originating Page identity without claiming that
     later input in a multi-Page workflow stayed on that Page. Neither scope
     changes the connection-wide guard or operator reset authority. *)
-val command_settled : t -> Browser_ego_release.proof -> unit
+
+val command_settled : t -> generation:string -> Browser_ego_release.proof -> (unit, string) result
 (** Settle the pending input. A proof comes only from [Browser_ego_release.judge]
     over answers that [Browser_ego_release.answer_of_json] read, so a flag a
     script sets cannot settle it. The types cannot show that the caller read the
     SDK's answer for this pending input: the proof is not tied to one input, and
     [answer_of_json] reads whatever JSON it is given. This module does not
     inspect physical keys. *)
-val not_started : t -> unit
+
+val not_started : t -> generation:string -> (unit, string) result
 (** Restore the prior readiness, retaining its operator provenance. *)
+
 val assert_reset : t -> generation:string -> now:float -> (unit, string) result
 (** Private authenticated-operator path only. Reject while any command runs,
     or when the generation changed. Repeating the same assertion before new
     input is idempotent; it sends no browser input. *)
+
 val provenance : t -> string

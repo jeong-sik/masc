@@ -1754,7 +1754,8 @@ let backend ~store ~artifact_store () = match !override with
             let command=match socket with None -> command | Some socket ->
               {command with arguments=command.arguments @ Browser_addon_socket.arguments socket
                 ~max_message_bytes:(Lane_addon_types.max_reply_bytes package)
-                @ (match live_ego with Some ego -> Browser_addon_live_ego.arguments ego | None -> [])} in
+                @ (match live_ego with Some ego -> Browser_addon_live_ego.arguments ego
+                    @ ["--ego-input-store";Lane_addon_store.root store] | None -> [])} in
             let browser_client=ref None and combined_release=ref None in
             let stop_worker worker=match !combined_release with
               | Some receipt -> Ok receipt

@@ -24,6 +24,10 @@ val channel : string
 
 (** {1 Connector status} *)
 
+val snapshot : ?audit_limit:int -> unit -> Channel_gate_connector.snapshot
+(** Read gateway liveness, bindings, and recent audit events into one immutable
+    observation for status and descriptor projections. *)
+
 val status_json : ?audit_limit:int -> unit -> Yojson.Safe.t
 (** Runtime status snapshot — bindings, recent audit events, and
     connector liveness from the gateway state machine. [audit_limit]

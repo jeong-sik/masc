@@ -3127,6 +3127,55 @@ let test_popup_workflow_identity_and_scope () =
     (dispatch peer Live.Page_native_workflow (args ~tab_id:1 ~expected_url:source_url [popup])));
   check int "unknown child input was never replayed" 1 !issued
 
+let test_popup_workflow_source_binding () =
+  let source_url="https://fixture.test/opener" and child_url="https://fixture.test/child" in
+  let identity ?(origin="agent") label target=obj ["spaceId",`Int 51;"label",str label;
+    "targetId",str target;"openedBy",str origin] in
+  let source=identity "p1" "T1" and child=identity "p2" "T2" in
+  let popup=obj ["method",str "clickAndWaitForPopup";"selector",str "a[target=_blank]"] in
+  let args=obj ["tabId",`Int 1;"expectedUrl",str source_url;"steps",`List [popup];"maxChars",`Int 1000] in
+  List.iter (fun changed ->
+    let issued=ref 0 and inventories=ref 0 in
+    let peer=opened (fun sent -> match sent.step with
+      | "tabs.list" -> incr inventories;
+        answered (`List [tab_row ~label:(str "p1") ~target:"T1" ~title:"Owned source" ~url:source_url ~active:true ()])
+      | "page.native_workflow" ->
+        incr issued;
+        check bool "host fixes complete source identity before dispatch" true (field "expectedSourcePage" sent.args=source);
+        check bool "host supplies the receipt parser's own field contract" true
+          (field "inputReceiptContract" sent.args=Masc.Browser_ego_release.receipt_contract);
+        let pages=obj ["source",changed;"current",child;"transitions",`List [obj ["index",`Int 0;
+          "source",changed;"popup",child;"selected",`Bool true]]] in
+        answered (obj ["pages",pages;"completed",`List [obj ["index",`Int 0;"method",str "clickAndWaitForPopup";"receipt",obj []]];
+          "effectStarted",`Bool true;"completedEffect",`Bool true;"inputReleased",`Bool true;"failure",`Null;
+          "urlBefore",str source_url;"url",str child_url;"title",str "Child";"snapshot",str "root";"chars",`Int 4;"truncated",`Bool false])
+      | other -> failf "unexpected source-binding step %s" other) in
+    ignore (dispatch peer Live.Tabs_list (obj []));
+    (match dispatch peer Live.Page_native_workflow args with
+     | Error (Live.Outcome_unknown _) -> ()
+     | other -> failf "changed source target/origin was accepted: %s" (failure_kind other));
+    check int "popup source was freshly observed before execution" 2 !inventories;
+    (match Peer.input_status peer with
+     | Masc.Browser_ego_input.Uncertain _ -> ()
+     | Ready _ -> fail "changed source identity incorrectly settled input");
+    ignore (before_effect "source mismatch cannot authorize another input" (dispatch peer Live.Page_native_workflow args));
+    check int "changed-source operation was not replayed" 1 !issued)
+    [identity "p1" "replacement";identity ~origin:"unknown" "p1" "T1"];
+  let issued=ref 0 and inventories=ref 0 in
+  let peer=opened (fun sent -> match sent.step with
+    | "tabs.list" ->
+      incr inventories;
+      let row=tab_row ~label:(str "p1") ~target:"T1" ~title:"Owned source" ~url:source_url ~active:true () in
+      answered (`List (if !inventories=1 then [row] else [row;row]))
+    | "page.native_workflow" -> incr issued; fail "ambiguous native source must refuse before execution"
+    | other -> failf "unexpected source-inventory step %s" other) in
+  ignore (dispatch peer Live.Tabs_list (obj []));
+  ignore (before_effect "ambiguous source inventory refuses before input" (dispatch peer Live.Page_native_workflow args));
+  check int "no workflow was dispatched on an ambiguous native source" 0 !issued;
+  match Peer.input_status peer with
+  | Masc.Browser_ego_input.Ready _ -> ()
+  | Uncertain _ -> fail "source preflight failure manufactured an input hold"
+
 let test_native_space_status () =
   let ownership=ref "agentDelegatedToUser" and invalid=ref false and unavailable=ref false and duplicate=ref false in
   let calls=ref 0 and output=ref "" in
@@ -3320,6 +3369,7 @@ let () =
       test_case "loading recovery requires the original native Page acknowledgement" `Quick test_loading_recovery_receipt_requires_original_page;
       test_case "loading recovery keeps exact Page authority and unknown input" `Quick test_loading_recovery_preserves_original_input_hold;
       test_case "popup workflow preserves Page routing and Space input uncertainty" `Quick test_popup_workflow_identity_and_scope;
+      test_case "popup workflow binds the full pre-effect source and fails closed on changed identity" `Quick test_popup_workflow_source_binding;
       test_case "Space status reads native metadata without Page or control effects" `Quick test_native_space_status;
       test_case "production workflow envelope preserves special JSON header keys" `Quick test_native_workflow_json_headers;
       test_case "first evaluation timeout preserves unknown native receipt" `Quick test_first_evaluation_timeout_preserves_unknown_native_receipt;

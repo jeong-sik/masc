@@ -29,7 +29,7 @@ function fixture({fail,dialog,snapshot='native result'}={}) {
  };
  return {page,calls};
 }
-const request=steps=>({expectedUrl:initial,steps,snapshotScope:'viewport',maxChars:100,cursor:'MASC · fixture · workflow'});
+const request=steps=>({inputReceiptContract:{declaredMembers:['popups','dialog'],popupMembers:['label','targetId'],requiredPopupStringMembers:['label','targetId']},expectedUrl:initial,steps,snapshotScope:'viewport',maxChars:100,cursor:'MASC · fixture · workflow'});
 const downloadId='60c7683f-f552-4c01-a5cb-2d487bb62e5e';
 function cancelFixture({state='pending',source:provenance='native_download',rowLabel='p1',handleLabel='p1',cancel}={}) {
  const f=fixture();let cancellations=0;
@@ -654,4 +654,12 @@ test('receipt-less keyboard input stops on a dialog and retains a settled input 
  assert.equal(inserted,2);assert.equal(later,0);assert.equal(lost.completed.length,1);
  assert.equal(lost.failure.method,'observation');assert.equal(lost.failure.index,1);
  assert.equal(lost.completedEffect,true);
+});
+
+test('an undeclared holding receipt never authorizes a later ordinary action',async()=>{
+ for(const receipt of [{futureSDKField:true},{dialog:null},{popups:null},{popups:[{label:'p2'}]},[],true,new Date(0)]) {
+  const f=fixture();let later=0;f.page.click=async()=>receipt;f.page.fill=async()=>{later++;};
+  const result=await run(f.page,request([{method:'click',selector:'#open'},{method:'fill',selector:'#editor',text:'not sent'}]));
+  assert.equal(later,0);assert.equal(result.inputReleased,false);assert.equal(result.failure.method,'click');
+ }
 });

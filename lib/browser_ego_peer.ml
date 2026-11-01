@@ -1720,15 +1720,23 @@ let act ?actor t args =
       | Browser_lane.Action.Block_requests _ | Browser_lane.Action.Unblock_requests); _}) ->
     Error (Live.Before_effect "an ego connection's page.act serves open_tab, close_tab, back, forward, reload, stop_loading, accept_dialog, dismiss_dialog, upload, hand_off, take_over, space_status, finish_space, wait_for_control, adopt_tab and release_tab only")
 
+let workflow_source t ~tab_id ~label =
+  let* rows=tab_rows t in
+  let* inventory=Browser_surface.decode_inventory rows in
+  match List.filter (fun (tab:Browser_surface.tab) -> tab.id=tab_id) inventory.tabs with
+  | [tab] ->
+    (match tab.ego_page with
+     | Some {label=Some observed;target_id;opened_by} when observed=label ->
+       Ok {Browser_ego_workflow.space_id=t.space.id;label;target_id;opened_by}
+     | None|Some _ -> Error "workflow source is not the exact managed Page in the native inventory")
+  | []|_::_ -> Error "workflow source Page is absent, unreadable or ambiguous in the native inventory"
+
 let workflow ?actor t args =
   let pre result = Result.map_error (fun detail -> Live.Before_effect detail) result in
   let* request = pre (Browser_lane.Native_workflow.of_json args) in
   let* _ = pre (Browser_page_script.text_cap (Some request.max_chars)) in
   let* label = label_of t request.tab_id in
   let* () = Input.admit t.input |> Result.map_error (fun detail -> Live.Before_effect detail) in
-  let arguments = match Browser_lane.Native_workflow.to_json request with
-    | `Assoc fields -> obj (("label",str label)::("cursor",str (cursor_label ~actor ~verb:"workflow"))::fields)
-    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> args in
   let holds_input=List.exists (fun (step : Browser_lane.Native_workflow.step) ->
     Browser_lane.Native_workflow.holds_input step.action) request.steps in
   let scope=if List.exists (fun (step:Browser_lane.Native_workflow.step) -> match step.action with
@@ -1738,6 +1746,19 @@ let workflow ?actor t args =
       | Select_option _|Goto _|Wait_for_url _|Wait_for_selector _|Wait_for_load_state _
       | Evaluate _|Wait_for_function _|Fetch _|Cancel_download _|Url|Title|Info|Snapshot|Events|Wait_for_timeout _ -> false) request.steps
     then Input.Space_scope else Input.Page_scope in
+  let* source=match scope with
+    | Input.Page_scope -> Ok None
+    | Input.Space_scope -> pre (workflow_source t ~tab_id:request.tab_id ~label) |> Result.map Option.some in
+  let arguments = match Browser_lane.Native_workflow.to_json request with
+    | `Assoc fields ->
+      let expected=match source with
+        | None -> []
+        | Some identity -> ["expectedSourcePage",obj ["spaceId",`Int identity.space_id;
+            "label",str identity.label;"targetId",str identity.target_id;
+            "openedBy",str (match identity.opened_by with Browser_surface.Agent_created -> "agent" | Unknown_origin -> "unknown")]] in
+      obj (expected @ ["inputReceiptContract",Browser_ego_release.receipt_contract;
+        "label",str label;"cursor",str (cursor_label ~actor ~verb:"workflow")] @ fields)
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> args in
   let* ()=if holds_input then Input.begin_holding t.input ~scope ~tab_id:request.tab_id ~page_label:label ~operation:"native_workflow"
     |> Result.map_error (fun detail -> Live.Before_effect detail) else Ok () in
   let result = run_native_step t ~step:"page.native_workflow" ~args:arguments
@@ -1756,8 +1777,8 @@ let workflow ?actor t args =
     let pages=match outcome with Browser_ego_workflow.Completed {pages;_}|Stopped {pages;_} -> pages in
     let* ()=match pages with
       | None -> Ok ()
-      | Some pages when pages.source.space_id=t.space.id && pages.source.label=label -> Ok ()
-      | Some _ -> Error (unknown "workflow source Page disagrees with the bound Space and original Page") in
+      | Some pages when source=Some pages.source -> Ok ()
+      | Some _ -> Error (unknown "workflow source Page disagrees with its full pre-effect native identity") in
     let tab_of_page (identity:Browser_ego_workflow.page_identity) = remember t (Managed identity.label) in
     let current_tab=match pages with None -> request.tab_id | Some pages -> tab_of_page pages.current in
     if holds_input then (match outcome with

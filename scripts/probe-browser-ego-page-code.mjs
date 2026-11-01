@@ -3,14 +3,17 @@
 import assert from 'node:assert/strict';
 import {readFileSync,writeFileSync,mkdirSync} from 'node:fs';
 import {createServer} from 'node:http';
-import {spawn} from 'node:child_process';
+import {spawn,execFileSync} from 'node:child_process';
 import {once} from 'node:events';
 import {resolve,join} from 'node:path';
 import {createHash} from 'node:crypto';
+import {fileURLToPath} from 'node:url';
 const [executable,output,space]=process.argv.slice(2);
 assert(executable&&output&&space,'expected Ego executable, output directory and continuing space id');
 mkdirSync(output,{recursive:true});
 const source=readFileSync(new URL('../lib/browser_ego_workflow.ml',import.meta.url),'utf8').split('let script = {js|')[1].split('|js}')[0];
+const inputReceiptContract=JSON.parse(execFileSync(fileURLToPath(new URL('./check-browser-native-workflow-codec.sh',import.meta.url)),['--receipt-contract'],{encoding:'utf8'}));
+writeFileSync(join(output,'input-receipt-contract.json'),JSON.stringify(inputReceiptContract,null,2)+'\n');
 const received=[];let corsReads=0;
 const server=createServer(async(req,res)=>{
  if(req.url==='/api') {
@@ -34,9 +37,11 @@ try {
  const code=`const task=await taskSpace(${JSON.stringify(Number(space))});const page=task.page('p1');
 await page.goto(${JSON.stringify(url)});
 ${source}
+const inputReceiptContract=${JSON.stringify(inputReceiptContract)};
+const invokeWorkflow=request=>nativeWorkflow(page,{...request,inputReceiptContract});
 const assert=(await import('node:assert/strict')).default;
 const request=${JSON.stringify(request)};
-const result=await nativeWorkflow(page,request);
+const result=await invokeWorkflow(request);
 assert.equal(result.failure,null,JSON.stringify(result));assert.equal(result.completed.length,5);
 assert.equal(result.completed[0].receipt.host,'undefined');
 assert.equal(result.completed[0].receipt.dialog,'application data');
@@ -51,7 +56,7 @@ const blockedRequest={...request,steps:[
  {method:'fetch',url:${JSON.stringify(`http://127.0.0.1:${cors.address().port}/blocked`)},options:{timeout:3000}},
  {method:'evaluate',source:'window.shouldNotRun = true'},
 ]};
-const blocked=await nativeWorkflow(page,blockedRequest);
+const blocked=await invokeWorkflow(blockedRequest);
 assert(blocked.failure,JSON.stringify(blocked));assert.equal(blocked.failure.method,'fetch');
 assert.equal(blocked.effectStarted,true);assert.equal(blocked.completed.length,0);
 assert.equal(await page.evaluate('typeof window.shouldNotRun'),'undefined');
@@ -59,7 +64,7 @@ const timeoutRequest={...request,steps:[
  {method:'waitForFunction',source:'(() => {window.predicateVisits=(window.predicateVisits||0)+1;return false})()',options:{timeout:1,polling:1}},
  {method:'evaluate',source:'window.shouldNotRun = true'},
 ]};
-const timedOut=await nativeWorkflow(page,timeoutRequest);
+const timedOut=await invokeWorkflow(timeoutRequest);
 assert(timedOut.failure);assert.equal(timedOut.effectStarted,true);assert.equal(timedOut.completed.length,0);
 assert.equal(await page.evaluate('typeof window.shouldNotRun'),'undefined');
 console.log('MASC_PAGE_CODE_PROOF '+JSON.stringify({spaceId:task.spaceId,page:page.label,finished:false,request,result,blockedRequest,blocked,timeoutRequest,timedOut}));`;

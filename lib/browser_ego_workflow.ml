@@ -22,6 +22,22 @@ let script = {js|async function nativeWorkflow(page, args, task, watchPage) {
     return {page:canonical, identity:{spaceId:task.spaceId,label:row.label,
       targetId:row.targetId,openedBy:row.openedBy}};
   };
+  // Fixed host data comes from the same field lists as the OCaml receipt parser.
+  // It is validation data, never evidence of release by itself.
+  const cleanReceipt = answer => {
+    const contract = args.inputReceiptContract;
+    if (answer === null || typeof answer !== 'object' || Array.isArray(answer)
+        || typeof answer.toJSON === 'function' || !contract) return false;
+    if (!Object.keys(answer).every(key => contract.declaredMembers.includes(key))
+        || Object.hasOwn(answer, 'dialog')) return false;
+    if (!Object.hasOwn(answer, 'popups')) return true;
+    return Array.isArray(answer.popups) && answer.popups.every(popup =>
+      popup !== null && typeof popup === 'object' && !Array.isArray(popup)
+      && typeof popup.toJSON !== 'function'
+      && Object.keys(popup).every(key => contract.popupMembers.includes(key))
+      && contract.requiredPopupStringMembers.every(key =>
+        Object.hasOwn(popup, key) && typeof popup[key] === 'string' && popup[key] !== ''));
+  };
   // These strings are evaluated only by the SDK's browser Page channel.
   // Never eval, import, or compile a caller's source in this Node process.
   const pageExpression = step => step.argumentJson === undefined ? step.source
@@ -68,7 +84,10 @@ let script = {js|async function nativeWorkflow(page, args, task, watchPage) {
   if (hasPopup) {
     try {
       if (typeof watchPage !== 'function') throw new Error('popup workflow requires its fixed managed-Page download observer');
-      const original = await canonicalPage(page); page = original.page;
+      const original = await canonicalPage(page), expected = args.expectedSourcePage;
+      if (!expected || ['spaceId','label','targetId','openedBy'].some(key => original.identity[key] !== expected[key]))
+        throw new Error('native source Page changed since the host inventory observation');
+      page = original.page;
       pages = {source:original.identity,current:original.identity,transitions:[]};
     } catch (error) { return failure(0, 'pageIdentity', error); }
   }
@@ -94,8 +113,7 @@ let script = {js|async function nativeWorkflow(page, args, task, watchPage) {
             receipt = await page.click(step.selector, pointerOptions);
             pendingAction = {index,method:step.method,receipt:receipt ?? null};
             completedEffect = true;
-            inputReleased = receipt !== null && typeof receipt === 'object'
-              && !Array.isArray(receipt) && !receipt.dialog;
+            inputReleased = cleanReceipt(receipt);
           } catch (error) { triggerError = error; }
           const observed = await event;
           let acquired, identityError;
@@ -275,7 +293,11 @@ let script = {js|async function nativeWorkflow(page, args, task, watchPage) {
           'Ego returned no native action receipt; input release remains unconfirmed. Inspect this Space and use its private operator input-reset confirmation before another input. Never replay this step.',
           dialog ? {dialog} : {});
       }
-      inputReleased = !receipt.dialog;
+      inputReleased = cleanReceipt(receipt);
+      if (!inputReleased && !(Object.hasOwn(receipt, 'dialog') && receipt.dialog !== null
+          && typeof receipt.dialog === 'object' && !Array.isArray(receipt.dialog)))
+        return failure(index, step.method,
+          'Ego returned an undeclared native action receipt; input release remains unconfirmed. Never replay this step.');
     }
     completedEffect ||= effect;
     completed.push({index, method: step.method, receipt: receipt ?? null});

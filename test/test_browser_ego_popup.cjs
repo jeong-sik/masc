@@ -6,7 +6,7 @@ const test=require('node:test');
 const source=fs.readFileSync(path.join(__dirname,'../lib/browser_ego_workflow.ml'),'utf8').split('let script = {js|')[1].split('|js}')[0];
 const run=vm.runInNewContext('('+source+')');
 const start='https://fixture.test/opener',childUrl='https://fixture.test/child';
-function fixture({clickError,eventError,raw={},duplicate=false,dialog,watchError=false}={}) {
+function fixture({clickError,eventError,raw={},duplicate=false,dialog,watchError=false,receipt}={}) {
  const calls=[];let resolve,reject,settled=false,value='';
  const waiting=new Promise((yes,no)=>{resolve=p=>{settled=true;yes(p);};reject=e=>{settled=true;no(e);};});
  const child={spaceId:51,label:'p2',targetId:'T2',openedBy:'agent',
@@ -26,7 +26,7 @@ function fixture({clickError,eventError,raw={},duplicate=false,dialog,watchError
    // timeout or action replay in the production script.
    Promise.resolve().then(()=>eventError?reject(eventError):resolve(eventPage));
    if(clickError)throw clickError;
-   return dialog?{dialog}:{};
+   return receipt===undefined?(dialog?{dialog}:{}):receipt;
   },
  };
  const row=page=>({label:page.label,targetId:page.targetId,openedBy:page.openedBy,page});
@@ -35,7 +35,7 @@ function fixture({clickError,eventError,raw={},duplicate=false,dialog,watchError
  const watch=(page,label)=>{calls.push(['watch',page.label,label]);if(watchError)throw Error('download observation failed');};
  return {calls,task,lightweight,watch,settled:()=>settled};
 }
-const request=steps=>({expectedUrl:start,steps,maxChars:1000,snapshotScope:'viewport',cursor:'Owned popup fixture',label:'p1'});
+const request=steps=>({inputReceiptContract:{declaredMembers:['popups','dialog'],popupMembers:['label','targetId'],requiredPopupStringMembers:['label','targetId']},expectedSourcePage:{spaceId:51,label:'p1',targetId:'T1',openedBy:'agent'},expectedUrl:start,steps,maxChars:1000,snapshotScope:'viewport',cursor:'Owned popup fixture',label:'p1'});
 const popup={method:'clickAndWaitForPopup',selector:'a[target="_blank"]'};
 const fill={method:'fill',selector:'input',text:'same-process child'};
 function count(calls,name){return calls.filter(x=>Array.isArray(x)?x[0]===name:x===name).length;}
@@ -95,4 +95,27 @@ test('ordinary receipt-less child typing retains the established input guard',as
  const f=fixture(),result=await run(f.lightweight,request([popup,{method:'keyboard.type',text:'abc'},fill]),f.task,f.watch);
  assert.equal(result.pages.current.label,'p2');assert.equal(result.completed.length,1);assert.equal(result.inputReleased,false);
  assert.equal(result.failure.method,'keyboard.type');assert.equal(count(f.calls,'child.type'),1);assert.equal(count(f.calls,'child.fill'),0);
+});
+
+test('the full host-observed source identity is checked before a popup trigger',async()=>{
+ for(const changed of [{targetId:'replacement'},{openedBy:'unknown'},{spaceId:99},{label:'p9'}]) {
+  const f=fixture(),args=request([popup,fill]);Object.assign(args.expectedSourcePage,changed);
+  const result=await run(f.lightweight,args,f.task,f.watch);
+  assert.equal(result.failure.method,'pageIdentity');assert.equal(result.effectStarted,false);
+  assert.equal(count(f.calls,'click'),0);assert.equal(count(f.calls,'waitForEvent'),0);assert.equal(count(f.calls,'child.fill'),0);
+ }
+});
+test('a malformed native-version trigger receipt cannot select or operate the acquired child',async()=>{
+ for(const receipt of [{futureSDKField:true},{dialog:null},{popups:null},{popups:[{label:'p2'}]},
+   {popups:[{label:'p2',targetId:'T2',future:true}]},[],true,new Date(0)]) {
+  const f=fixture({receipt}),result=await run(f.lightweight,request([popup,fill]),f.task,f.watch);
+  assert.equal(result.inputReleased,false);assert.equal(result.failure.method,'clickAndWaitForPopup');
+  assert.equal(result.pages.current.label,'p1');assert.equal(result.pages.transitions[0].selected,false);
+  assert.equal(count(f.calls,'child.fill'),0);assert.equal(count(f.calls,'watch'),0);assert.equal(f.settled(),true);
+ }
+});
+test('the native declared popup receipt remains valid input-release evidence',async()=>{
+ const f=fixture({receipt:{popups:[{label:'p2',targetId:'T2'}]}});
+ const result=await run(f.lightweight,request([popup,fill]),f.task,f.watch);
+ assert.equal(result.failure,null);assert.equal(result.inputReleased,true);assert.equal(count(f.calls,'child.fill'),1);
 });

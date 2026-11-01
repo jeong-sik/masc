@@ -402,6 +402,10 @@ behavior for this extension remain unverified. See
 against the unique native inventory row, then uses that row's canonical Page.
 The installed SDK's lightweight event handle may omit target ID and origin;
 those fields are never invented from that handle or used to adopt a tab.
+Before any workflow effect, the host fixes the original Page's complete identity
+from a fresh native inventory. The SDK process checks that exact identity before
+acting, and the host compares it again before accepting the returned source.
+The caller cannot supply this internal expected identity.
 
 ```json
 {
@@ -440,7 +444,11 @@ Input uncertainty remains connection-wide. Because a lost reply can follow
 input on a different Page, the private reset view marks popup workflows as
 Space-scoped and retains the original source identity; it does not guess which
 Page holds input. Native receipt requirements, keyboard.type's void ambiguity
-and explicit operator reset authority remain unchanged. This one popup flow is
+and explicit operator reset authority remain unchanged. A shared receipt-field
+contract is used by the host parser and the SDK-side continuation check. Any
+undeclared action receipt, including an unknown field or `dialog: null`, stops
+before later input; a declared optional popup list without a dialog stays valid.
+The contract data itself supplies no input-release authority. This one popup flow is
 not general conditional execution or arbitrary multi-Page scripting. Source,
 component SDK execution and installed MASC acceptance remain separate evidence.
 

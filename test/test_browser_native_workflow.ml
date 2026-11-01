@@ -619,6 +619,8 @@ let popup_progress () =
   List.iter (fun options -> refused "popup options are strict native event options"
     (W.of_json (obj (base [step "clickAndWaitForPopup" ["selector",str "a";"popupOptions",options]]))))
     [obj ["label",str "invented"];obj ["timeout",`Int (-1)];obj ["timeout",`Int 1;"timeout",`Int 2]];
+  List.iter (fun key -> refused "internal source/receipt contracts cannot be supplied by callers"
+    (W.of_json (obj ((key,obj [])::base [popup])))) ["expectedSourcePage";"inputReceiptContract"];
   let identity ?(space_id=51) label target=obj ["spaceId",`Int space_id;"label",str label;
     "targetId",str target;"openedBy",str "agent"] in
   let source=identity "p1" "T1" and child=identity "p2" "T2" in
@@ -631,7 +633,8 @@ let popup_progress () =
      check string "final Page is the child" "p2" pages.current.label;
      check string "opener identity is retained" "p1" pages.source.label;
      check (list int) "native trigger receipt alone proves its input release" [0] proven
-   | R.Completed _|R.Stopped _ -> fail "popup completion lost its typed Page/input observations");
+   | R.Completed {pages=None;input=Rel.Released (Rel.Released_by_receipts _);_}
+   | R.Completed {input=Rel.No_hold;_}|R.Stopped _ -> fail "popup completion lost its typed Page/input observations");
   let pending_reply receipt released = obj (("pages",pages source [])::
     ("pendingAction",obj ["index",`Int 0;"method",str "clickAndWaitForPopup";"receipt",receipt])::
     with_claim released (result ~started:true ~completed_effect:true ~completed:[]
@@ -642,7 +645,9 @@ let popup_progress () =
      check bool "a failed popup wait retains the returned trigger and release proof" true (seen_input input=`Released [0]);
      check bool "native event diagnostics are data, not fabricated Page success" true
        (error.code=Some "native-code" && error.timeout_ms=Some 9.)
-   | R.Stopped _|R.Completed _ -> fail "pending popup click was erased or called completed");
+   | R.Stopped {native_error=None|Some (R.Evaluation_timed_out _|R.Navigation_timed_out _);_}
+   | R.Stopped {completed_effect=false;native_error=Some (R.Popup_event_failed _);_}
+   | R.Completed _ -> fail "pending popup click was erased or called completed");
   stopped "void trigger never manufactures key release" (not_released 0 Rel.Void_answer)
     (R.decode wanted (pending_reply `Null false));
   List.iter (fun value -> refused "foreign/missing/inconsistent Page transitions are refused"
@@ -654,7 +659,9 @@ let popup_progress () =
      obj (("pages",pages child [transition false])::snapshot @
        result ~started:true ~completed_effect:true ~completed:[entry ~receipt:(obj []) 0 "clickAndWaitForPopup";entry 1 "fill"] ~failure:`Null)]
 
-let () = if Array.length Sys.argv=3 && Sys.argv.(1)="--proof" then proof Sys.argv.(2)
+let () = if Array.length Sys.argv=2 && Sys.argv.(1)="--receipt-contract" then
+    print_endline (Yojson.Safe.to_string Rel.receipt_contract)
+  else if Array.length Sys.argv=3 && Sys.argv.(1)="--proof" then proof Sys.argv.(2)
   else if Array.length Sys.argv=3 && Sys.argv.(1)="--page-proof" then page_proof Sys.argv.(2)
   else run "native_browser_workflow" ["SDK contract",[
   test_case "popup acquisition retains identity, partial trigger and input guarantees" `Quick popup_progress;

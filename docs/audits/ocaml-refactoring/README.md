@@ -93,7 +93,7 @@ runtime gates. Source-review completion alone leaves a Draft item in review.
 
 The queue now contains **30 concrete candidates**: 24 from the first semantic pass, A1
 from the Agent Core follow-up, T1 from the integrated TUI investigation, E1/E2 from
-Exec, M1 from multimodal/media, and J1 from the Schedule investigation. Twenty-six are
+Exec, M1 from multimodal/media, and J1 from the Schedule investigation. Twenty-seven are
 implemented as PRs; source review and execution evidence are recorded separately on each PR: `S1` in
 [#43367](https://github.com/jeong-sik/masc/pull/43367) isolates provider usage
 acceptance; `K1` in [#43370](https://github.com/jeong-sik/masc/pull/43370) preserves
@@ -147,7 +147,9 @@ selection while retaining durable reconciliation effects. D4 in
 [#47125](https://github.com/jeong-sik/masc/pull/47125) aligns Goal publication
 with its existing local primary authority. K4 in
 [#47126](https://github.com/jeong-sik/masc/pull/47126) gives attempt-local request
-evidence one immutable owner. Four candidates remain unfinished. This ordering
+evidence one immutable owner. R1 in
+[#47131](https://github.com/jeong-sik/masc/pull/47131) separates frozen credential-batch
+admission evidence from current immutable ownership. Three candidates remain unfinished. This ordering
 does not waive their coverage.
 
 | ID | Priority | Status | Refactoring point |
@@ -174,7 +176,7 @@ does not waive their coverage.
 | [S6](#s6) | later | implemented; execution unverified | Give connector status a common typed projection before JSON aggregation |
 | [S7](#s7) | later | implemented; execution unverified | Replace connector ingress scheduling flag combinations with explicit lane lifecycle |
 | [S8](#s8) | next | in review | Separate durable provider-history decoding and daily projection from journal IO |
-| [R1](#r1) | later | candidate | Credential batch ownership projection |
+| [R1](#r1) | later | implemented; execution unverified | Credential batch ownership projection |
 | [R2](#r2) | later | candidate | Fusion decision event ownership |
 | [A1](#a1) | next | in review | Separate stream error projection from optional diagnostic file I/O |
 | [T1](#t1) | investigate | candidate | Preserve dispatch and commit knowledge in Board post completion |
@@ -1891,6 +1893,46 @@ unchanged lower S8/S1 commits.
 ### R1
 
 **Credential batch ownership projection**
+
+Implemented in [#47131](https://github.com/jeong-sik/masc/pull/47131) against
+parent `d49873fa1ab58a42752eb32d38a2affe93a24366`. A fresh 87-open-PR census
+found no competing change to this Auth owner, its startup consumer or the two
+transaction suites; their source matches observed main
+`e715c3de796d00066b6ec0b2981cbc6660b0333c`.
+
+Private `Auth_credential_batch_projection` belongs to `masc.auth` in
+`lib/auth/dune`. Its interface keeps admission sharing and current ownership
+opaque and distinct. `Map.Make (String)` retains current token/name indexes;
+`Set.Make (String)` captures admission sharing once. Successful publication
+returns the next projection. Every per-name failure still rereads authority,
+even on the final name, and replaces current ownership entirely; reread failure
+retains the failed name's original error and fans its exact new error to the
+remaining names. Initial buckets retain snapshot order, while reread buckets
+retain the previous reverse-by-prepending behavior. Each iteration's validator
+captures that iteration's current projection.
+
+The low-level public `Auth_credential_token` module replaces its Hashtbl-specific
+validator with one read-only lookup callback. Both in-repository callers use the
+same unchanged collision/expiry implementation; `Auth.mli` is unchanged.
+Hashing, clock reads, logging, UUID/path authority, minting, publication and
+rollback remain in their existing effect owners. The projection performs no
+I/O and emits no credential or bearer diagnostics.
+
+The existing public transaction suite adds `[A; C; A; B]`: A/B share at admission,
+A repairs, independent C refuses a directory raw path, repeated A reuses its
+first repaired pair and B still rotates after the mandatory failure reread.
+Assertions check ordered results, legacy-owner UUID acquisition, recoverable
+storage, exact owner verification and original-bearer retirement through public
+Auth APIs. Sensitive comparisons yield booleans and errors use static messages.
+This case does not directly count rereads or cover partial publication,
+reread failure, cancellation or competing processes.
+
+Syntax-only parsing and whitespace checks passed. No local Dune build,
+typecheck or test execution occurred. Targeted execution and independent source
+review are recorded on the PR with their exact identities; source review is
+separate from formal approval, merge and installed-runtime evidence. Full
+regression and runtime behavior remain unverified. The original audit below is
+retained as historical rationale.
 
 Source:
 [lib/auth/auth.ml:106](https://github.com/jeong-sik/masc/blob/aea8424926ea79f110315eec5ab429ac51043598/lib/auth/auth.ml#L106-L164).

@@ -1,0 +1,30 @@
+{
+  "source_head": "79a67ae11076e2dc7c493f3b77b565c9a0d2f3ec",
+  "base": "71eab08bb9a8040371fd9927a7f9d211fbc813d3",
+  "files": {
+    "lib/server/server_dashboard_http_runtime_info.ml": "a92412315f9bef49881c6b537545718674e9bc7161949feec1abddfe948c5f5b",
+    "lib/server/server_dashboard_http_runtime_info.mli": "bd5db2809c333ab238fdfa22fd3547100acba84e10070a693430ee20ebbdcd2d",
+    "test/test_runtime_provider_auth_headers.ml": "03d4d7f23b6c72c75c9c3a1cf08943b9bd472dc5646cc2c8791dce5f719a6fb2",
+    "lib/runtime/runtime_instance.ml": "aff8fb5e633c16365b57a2a4b1a2dc8fc34f0de17c962dc75d852c0f05f53749",
+    "lib/runtime/runtime_instance.mli": "4687e0f66e1f3e8af3dbfd8a56fd94eab52ea660bfa249eb96a0e104e56eaaf4",
+    "lib/runtime/runtime_credential_selection.ml": "7d5671012ad719af00f03082455324e22551871cd2dc723eb126b6f52867c1c7",
+    "lib/runtime/runtime_credential_selection.mli": "4fffd5a0235bdc5cdeb7bcc1976c7daa476e4939d3d5d45a326c18ceb1485156",
+    "lib/runtime/runtime_adapter.ml": "a28e9976a120efdf85c4ffb85709814d4b918af32021b4d541000f0932d8d4be",
+    "lib/runtime/runtime_adapter.mli": "4aed83e35f4870b51aa706fc495512c2a5cd3965bf065f0505a986b74ea789da",
+    "packages/agent_core/lib/llm_provider/provider_config.ml": "1237ca5c758be1c5578e980f5233b8c9da4bcf7063751746387e6a032b9979ab",
+    "packages/agent_core/lib/llm_provider/provider_config.mli": "428a764fadea44e2dd5c2a3fb3a2661d0375adfe1603610cbedbc14778cf288d",
+    ".github/workflows/test.yml": "99286b2989de40ea72ad184b6c8335da64e9213e289e260a4afc16bd3bd8bb6d",
+    "scripts/ci-run-targeted-tests.sh": "7391426895132a2c027aea2d6c85bfcae18a038fd4e9640cc3c0b9fa66a8ca72",
+    "scripts/ci-run-test-suite.sh": "b23ec43af13276b375e3c234b0a3d088225350f3a4983b5c10fdff30f4525426",
+    "test/dune": "a24ea53fdbee08ac26b85d21750a4a798bb91531c99175637bb2b19a42e86b7d",
+    "test/test_dashboard_cache.ml": "291c3921d3032945b3ec5f038c52414420cc466c95f0a8748105918a7c65679d",
+    "test/test_dashboard_runtime_probe_nonblocking.ml": "94f7ce395d534f8f7973c85aa04468aab2868593cc71630b1925d1f0cb0d6cfa"
+  },
+  "git_tree_inputs": {
+    "lib": "baf10e7d34c06327b5caa16ae671cfe34ef3dd28",
+    "test": "045f5c1fd72ad1c4036d1eff5c3c0ba57a0ce672",
+    "packages/agent_core": "c5f14ade4405b58e7ddbd95b65ef4f42376f3e42",
+    "config": "783ac78ba6a516006c5e20d58c1fed0019a0ca5b"
+  },
+  "not_exhaustive_build_dependency_manifest": true
+}

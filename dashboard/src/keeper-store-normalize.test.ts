@@ -260,11 +260,12 @@ describe('normalizeKeepers lifecycle metrics', () => {
         },
         current_gate: {
           kind: 'approval_required',
-          source: 'audit_approvals',
+          source: 'approval_queue',
           tool: 'Write',
           turn_id: 178,
           at: '2026-06-06T02:49:01Z',
         },
+        approval_queue_state: { state: 'ready' },
       },
     ])
 
@@ -277,10 +278,35 @@ describe('normalizeKeepers lifecycle metrics', () => {
     })
     expect(keeper?.current_gate).toMatchObject({
       kind: 'approval_required',
-      source: 'audit_approvals',
+      source: 'approval_queue',
       tool: 'Write',
       turn_id: 178,
     })
+    expect(keeper?.approval_queue_state).toEqual({ state: 'ready' })
+  })
+
+  it('preserves unavailable approval authority instead of confirming an empty queue', () => {
+    const unavailable = {
+      state: 'unavailable' as const,
+      code: 'reset_required' as const,
+      title: 'fixture queue unavailable',
+      operator_detail: 'fixture durable queue read failed',
+      severity: 'bad' as const,
+      icon: '!' as const,
+    }
+    const [keeper] = normalizeKeepers([{
+      name: 'queue-unavailable', current_gate: null, approval_queue_state: unavailable,
+    }])
+    expect(keeper?.current_gate).toBeNull()
+    expect(keeper?.approval_queue_state).toEqual(unavailable)
+  })
+
+  it('retains a typed observation error for a malformed supplied queue state', () => {
+    const [keeper] = normalizeKeepers([{
+      name: 'invalid-queue-state', current_gate: null,
+      approval_queue_state: { state: 'ready', extra: true },
+    }])
+    expect(keeper?.approval_queue_state?.state).toBe('observation_error')
   })
 
   it('normalizes a producer-shaped metrics series row', () => {

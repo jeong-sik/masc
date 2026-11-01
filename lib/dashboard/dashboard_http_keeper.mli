@@ -71,7 +71,15 @@ val keepers_dashboard_json :
     [~compact:true] (default [false]), per-keeper
     payloads drop the deep history / memory-bank /
     metrics-series sections and keep only the high-level
-    summary row used by the lightweight overview pane. *)
+     summary row used by the lightweight overview pane.
+
+     [current_gate] comes from one lock-consistent workspace approval-queue
+     snapshot, selecting the Keeper's newest pending admission by sequence.
+     Audit rows remain historical observations and cannot reopen a resolved
+     request. An unavailable or partially unreadable queue publishes a null
+     [current_gate] with an unavailable [approval_queue_state]; a confirmed
+     empty queue publishes the ready state. [approval_audit_state] separately
+     reports whether the historical audit read succeeded. *)
 
 val execution_trust_dashboard_json : Workspace.config -> Yojson.Safe.t
 (** Renders the execution-trust dashboard surface.  Folds
@@ -119,6 +127,12 @@ val keeper_config_json :
     request path off the keeper-meta mutex (#3335). *)
 
 module For_test : sig
+  val current_gate_fields_for_workspace :
+    base_path:string -> keeper_name:string -> now_ts:float ->
+    (string * Yojson.Safe.t) list
+  (** The same current Gate projection used by {!keepers_dashboard_json},
+      reading the actual workspace queue snapshot. *)
+
   val keeper_row_after_worker_failure :
     Workspace.config -> name:string -> error:string -> Yojson.Safe.t
   (** The row a keeper gets in [keepers_dashboard_json] and

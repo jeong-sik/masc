@@ -98,6 +98,11 @@ val replay_call_with_outcome :
   Keeper_tool_execution.t
 (** Spend one approval by running the approved call from its stored input.
 
+    A missing provider and an unreadable declaration both refuse the replay
+    before consuming its grant or contacting the provider. An unreadable
+    declaration retains its provider id and the declaration reader's problem;
+    it is not reported as an absent provider.
+
     The stored input goes back through the same Gate on the same lane, so
     the exact match consumes the durable one-shot grant and a mismatch
     follows the ordinary Gate. Effect disposition is honest about the wire:

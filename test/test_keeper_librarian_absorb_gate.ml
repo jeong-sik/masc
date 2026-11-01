@@ -2572,6 +2572,95 @@ let require_replay = function
   | Error error -> Alcotest.fail (Gate.replay_error_to_string error)
 ;;
 
+let test_completed_captured_replay_does_not_acquire_clock () =
+  let facts, absorbed = replay_inputs () in
+  let _, _, evaluations = record_gate_evaluations ~facts ~absorbed
+      ~respond:(replay_response ~forward:"mergeable" ~reverse:0.9) in
+  let expected = restore_gate ~facts ~absorbed evaluations |> require_replay in
+  let actual = Gate.continue_captured
+      ~request_clock:(fun () -> Alcotest.fail "completed replay acquired a clock")
+      ~keeper_id:"captured-clock" ~authority:(Gate.Gate_available (replay_destination, []))
+      ~live_authority:None ~evaluations
+      ~before_evaluate:(fun ~direction:_ ~destinations:_ ~state:_ ~questions:_ ->
+        Alcotest.fail "completed replay began another request")
+      ~after_evaluate:(fun ~evaluation_id:_ _ -> Alcotest.fail "completed replay recorded an answer")
+      ~on_evaluation_aborted:(fun ~evaluation_id:_ _ -> Alcotest.fail "completed replay aborted a request")
+      ~new_observations:[] ~facts ~new_claims:[merged] ~superseding:[] ~absorbed ()
+    |> require_replay in
+  Alcotest.(check bool) "the original judgment is preserved" true
+    (Yojson.Safe.equal (Gate.run_result_to_yojson expected) (Gate.run_result_to_yojson actual))
+;;
+
+let test_a_new_captured_question_needs_a_clock_before_its_intent () =
+  Eio_main.run @@ fun _env ->
+  let facts, absorbed = replay_inputs () in
+  Masc_test_deps.with_process_env "TYPESAFEAI_API_KEY" (Some "synthetic-jev-key") @@ fun () ->
+  Masc_test_deps.with_typesafeai_policy
+    { Runtime_schema.default_typesafeai with absorb_gate=true;
+      destinations=({endpoint=replay_destination.destination_uri; model=replay_destination.model;
+        api_key_env="TYPESAFEAI_API_KEY"}, []) } @@ fun () ->
+  let live_authority = Gate.resolve ~keeper_id:"captured-clock" in
+  let clock_reads = ref 0 and intents = ref 0 in
+  let result = Gate.continue_captured
+      ~request_clock:(fun () -> incr clock_reads; Error "fixture clock is absent")
+      ~keeper_id:"captured-clock" ~authority:(Gate.replay_authority live_authority)
+      ~live_authority:(Some live_authority) ~evaluations:[]
+      ~before_evaluate:(fun ~direction:_ ~destinations:_ ~state:_ ~questions:_ -> incr intents)
+      ~after_evaluate:(fun ~evaluation_id:_ _ -> Alcotest.fail "clock failure recorded an answer")
+      ~on_evaluation_aborted:(fun ~evaluation_id:_ _ -> Alcotest.fail "an undispatched request was aborted")
+      ~new_observations:[] ~facts ~new_claims:[merged] ~superseding:[] ~absorbed () in
+  (match result with
+   | Error (Gate.Clock_unavailable {detail; _}) ->
+     Alcotest.(check string) "typed clock failure" "fixture clock is absent" detail
+   | Ok _ | Error _ -> Alcotest.fail "a new question ran without its request clock");
+  Alcotest.(check int) "only the new question acquires the clock" 1 !clock_reads;
+  Alcotest.(check int) "no new intent or provider admission" 0 !intents
+;;
+
+let test_an_inflight_captured_question_needs_no_clock_or_resend () =
+  let facts, absorbed = replay_inputs () in
+  let _, _, records = record_gate_evaluations ~facts ~absorbed
+      ~respond:(replay_response ~forward:"mergeable" ~reverse:0.9) in
+  let first = match records with first::_ -> {first with Gate.returned=None}
+    | [] -> Alcotest.fail "the original made no request" in
+  let result = Gate.continue_captured
+      ~request_clock:(fun () -> Alcotest.fail "inflight request acquired a clock")
+      ~keeper_id:"captured-clock" ~authority:(Gate.Gate_available (replay_destination, []))
+      ~live_authority:None ~evaluations:[first]
+      ~before_evaluate:(fun ~direction:_ ~destinations:_ ~state:_ ~questions:_ ->
+        Alcotest.fail "inflight request was repeated")
+      ~after_evaluate:(fun ~evaluation_id:_ _ -> Alcotest.fail "inflight request gained an answer")
+      ~on_evaluation_aborted:(fun ~evaluation_id:_ _ -> Alcotest.fail "inflight request was aborted")
+      ~new_observations:[] ~facts ~new_claims:[merged] ~superseding:[] ~absorbed () in
+  match result with
+  | Error (Gate.Incomplete_evaluation _) -> ()
+  | Ok _ | Error _ -> Alcotest.fail "the waiting original was not preserved"
+;;
+
+let test_cancellation_precedes_an_unavailable_captured_clock () =
+  Eio_main.run @@ fun _env ->
+  let facts, absorbed = replay_inputs () in
+  Masc_test_deps.with_process_env "TYPESAFEAI_API_KEY" (Some "synthetic-jev-key") @@ fun () ->
+  Masc_test_deps.with_typesafeai_policy
+    { Runtime_schema.default_typesafeai with absorb_gate=true;
+      destinations=({endpoint=replay_destination.destination_uri; model=replay_destination.model;
+        api_key_env="TYPESAFEAI_API_KEY"}, []) } @@ fun () ->
+  let live_authority = Gate.resolve ~keeper_id:"captured-clock" in
+  let cancelled = ref false in
+  (try Eio.Cancel.sub (fun context ->
+     Eio.Cancel.cancel context Exit;
+     ignore (Gate.continue_captured
+       ~request_clock:(fun () -> Error "fixture clock is absent")
+       ~keeper_id:"captured-clock" ~authority:(Gate.replay_authority live_authority)
+       ~live_authority:(Some live_authority) ~evaluations:[]
+       ~before_evaluate:(fun ~direction:_ ~destinations:_ ~state:_ ~questions:_ -> ())
+       ~after_evaluate:(fun ~evaluation_id:_ _ -> Alcotest.fail "cancelled request gained an answer")
+       ~on_evaluation_aborted:(fun ~evaluation_id:_ _ -> ())
+       ~new_observations:[] ~facts ~new_claims:[merged] ~superseding:[] ~absorbed ()))
+   with Eio.Cancel.Cancelled Exit -> cancelled := true);
+  Alcotest.(check bool) "clock unavailability does not hide cancellation" true !cancelled
+;;
+
 let refuse_replay label = function
   | Error _ -> ()
   | Ok result -> Alcotest.failf "%s unexpectedly admitted: %s" label
@@ -2897,6 +2986,16 @@ let () =
             test_persisted_evaluation_request_survives_restart
         ; Alcotest.test_case "invalid answers record failed evaluations and measured elapsed" `Quick
             test_invalid_answer_records_failed_evaluation_and_elapsed
+        ] )
+    ; ( "captured continuation"
+      , [ Alcotest.test_case "completed replay needs no clock" `Quick
+            test_completed_captured_replay_does_not_acquire_clock
+        ; Alcotest.test_case "a new question needs its clock before recording intent" `Quick
+            test_a_new_captured_question_needs_a_clock_before_its_intent
+        ; Alcotest.test_case "an inflight question needs no clock or resend" `Quick
+            test_an_inflight_captured_question_needs_no_clock_or_resend
+        ; Alcotest.test_case "cancellation precedes an unavailable clock" `Quick
+            test_cancellation_precedes_an_unavailable_captured_clock
         ] )
     ; ( "reverse"
       , [ Alcotest.test_case "a claim its sources convey is not applied" `Quick

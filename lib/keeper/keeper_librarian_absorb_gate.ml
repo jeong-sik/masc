@@ -943,6 +943,7 @@ type replay_error =
   | Incomplete_evaluation of int
   | Missing_evaluation of int
   | Extra_evaluations of int
+  | Clock_unavailable of { index : int; detail : string }
 
 let replay_error_to_string = function
   | Invalid_evidence { index; detail } ->
@@ -950,6 +951,8 @@ let replay_error_to_string = function
   | Incomplete_evaluation index -> Printf.sprintf "absorb gate evaluation %d has not returned" index
   | Missing_evaluation index -> Printf.sprintf "absorb gate evaluation %d is missing" index
   | Extra_evaluations count -> Printf.sprintf "absorb gate has %d surplus evaluations" count
+  | Clock_unavailable { index; detail } ->
+    Printf.sprintf "absorb gate evaluation %d has no request clock: %s" index detail
 ;;
 
 let response_evidence_to_yojson (response : Typesafeai_types.eval_response) =
@@ -1534,7 +1537,9 @@ let run_captured
     ~new_observations ~facts ~new_claims ~superseding ~absorbed ()
 ;;
 
-let continue_captured ~keeper_id ~authority ~live_authority ~evaluations
+type request_clock = unit -> (float Eio.Time.clock_ty Eio.Resource.t, string) result
+
+let continue_captured ~(request_clock : request_clock) ~keeper_id ~authority ~live_authority ~evaluations
     ~before_evaluate ~after_evaluate ~on_evaluation_aborted
     ~new_observations ~facts ~new_claims ~superseding ~absorbed () =
   let missing index ~direction ~destinations ~state ~questions =
@@ -1549,11 +1554,15 @@ let continue_captured ~keeper_id ~authority ~live_authority ~evaluations
     let armed = match live.armed_destinations with
       | Ok armed -> armed
       | Error _ -> Replay.reject index "original available gate has no live destinations" in
+    Eio.Fiber.check ();
+    let clock = match request_clock () with
+      | Ok clock -> clock
+      | Error detail -> raise (Replay.Rejected (Clock_unavailable { index; detail })) in
     let evaluation_id = before_evaluate ~direction ~destinations ~state ~questions in
     let result =
       try
         Eio.Fiber.check ();
-        Typesafeai_client.evaluate ~destinations:armed ~state ~questions ()
+        Typesafeai_client.evaluate ~clock ~destinations:armed ~state ~questions ()
       with
       | Eio.Cancel.Cancelled _ as exn ->
         let backtrace = Printexc.get_raw_backtrace () in

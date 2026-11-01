@@ -146,7 +146,7 @@ let valid_prefix authority input transcript =
   | Ok result -> Ok (Some result)
   | Error (Gate.Missing_evaluation index) when index = List.length transcript.evaluations -> Ok None
   | Error (Gate.Incomplete_evaluation index) when index + 1 = List.length transcript.evaluations -> Ok None
-  | Error ((Gate.Invalid_evidence _ | Incomplete_evaluation _ | Missing_evaluation _
+  | Error ((Gate.Invalid_evidence _ | Clock_unavailable _ | Incomplete_evaluation _ | Missing_evaluation _
       | Extra_evaluations _) as error) -> Error (Gate.replay_error_to_string error)
 let transcript_step previous next =
   let* () = require (Option.is_none previous.aborted) "An aborted gate cannot continue" in
@@ -597,7 +597,7 @@ let retain ~store ~owner ~capture ~parent ~proposal ~request_id ~authority ~pred
 
 type result = Pending of Owner.retained | Complete of Gate.run_result * Owner.retained
 exception Journal_error of string
-let resume ~store ~owner ~capture ~record ~live_authority ~before_dispatch =
+let resume ~request_clock ~store ~owner ~capture ~record ~live_authority ~before_dispatch =
   let* restored = Systhread_host.run (fun () ->
     let* parent=owned (Owner.load ~store ~scope:(Capture.scope owner) ~request_id:(Capture.request_id capture)) in
     let* parent=Option.to_result ~none:"Original gate execution parent is absent" parent in
@@ -650,14 +650,14 @@ let resume ~store ~owner ~capture ~record ~live_authority ~before_dispatch =
         publish (Progress.Execution_observed (Outcome_unknown (transcript_json next)));
         transcript:=next in
       try
-        match Gate.continue_captured ~keeper_id:(Capture.keeper_id owner) ~authority:restored.authority
+        match Gate.continue_captured ~request_clock ~keeper_id:(Capture.keeper_id owner) ~authority:restored.authority
           ~live_authority ~evaluations:restored.transcript.evaluations
           ~before_evaluate ~after_evaluate ~on_evaluation_aborted
           ~new_observations:restored.input.observations ~facts:restored.input.facts
           ~new_claims:restored.input.new_claims ~superseding:restored.input.superseding
           ~absorbed:restored.input.absorbed () with
         | Error (Gate.Missing_evaluation _ | Incomplete_evaluation _) -> Ok (Pending !current)
-        | Error ((Gate.Invalid_evidence _ | Extra_evaluations _) as error) ->
+        | Error ((Gate.Invalid_evidence _ | Clock_unavailable _ | Extra_evaluations _) as error) ->
           Error (Gate.replay_error_to_string error)
         | Ok result ->
           let* confirmed = match restore_result restored.authority restored.input (!transcript).evaluations with

@@ -113,7 +113,8 @@ let judge_by_fresh_reads ~store ~step ~(record : Owner.retained)
          | Some _, Some Input_capacity_exceeded | None, (Some Input_capacity_exceeded | Some Evaluation_failed | None) ->
            Ok latest)
       | None, (None | Some _) | Some _, None -> Ok latest in
-    let* result = Journal.resume ~store ~owner ~capture:step ~record:next ~live_authority
+    let* result = Journal.resume ~request_clock:Eio_context.get_clock
+      ~store ~owner ~capture:step ~record:next ~live_authority
       ~before_dispatch:fresh_authority in
     (match result with
      | Journal.Pending _ -> pending "Original floor step absorption judgment is pending"

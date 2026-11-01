@@ -192,7 +192,8 @@ let gate_result ~store ~config ~reserved ~owner ~inventory part original proposa
   let live=match fresh_authority ~config ~reserved owner capture with
     | Ok () -> Some (Gate.resolve ~keeper_id:(Capture.keeper_id owner))
     | Error _ -> None in
-  let resume record=Gate_journal.resume ~store ~owner ~capture ~record ~live_authority:live
+  let resume record=Gate_journal.resume ~request_clock:Eio_context.get_clock
+    ~store ~owner ~capture ~record ~live_authority:live
     ~before_dispatch:(fun () -> fresh_authority ~config ~reserved owner capture) in
   let* completed=resume record in
   let apply gate record =

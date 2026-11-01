@@ -294,6 +294,7 @@ type replay_error =
   | Incomplete_evaluation of int
   | Missing_evaluation of int
   | Extra_evaluations of int
+  | Clock_unavailable of { index : int; detail : string }
 
 val replay_error_to_string : replay_error -> string
 
@@ -397,8 +398,13 @@ val run_captured
     use {!restore} with original transcripts rather than resolving a new live
     authority to repeat an uncertain evaluation. *)
 
+type request_clock = unit -> (float Eio.Time.clock_ty Eio.Resource.t, string) result
+(** The caller's clock authority, read only when a new HTTP evaluation is
+    needed. Completed replay does not require a clock. *)
+
 val continue_captured
-  : keeper_id:string
+  : request_clock:request_clock
+  -> keeper_id:string
   -> authority:replay_authority
   -> live_authority:live_authority option
   -> evaluations:retained_evaluation list
@@ -418,8 +424,12 @@ val continue_captured
     request without a returned answer refuses without another provider call.
     Every new question requires the original Keeper and exactly matching
     captured live/replay authority. With no needed new question, no live handle
-    or configuration is required. Hooks retain requests before dispatch and
-    protect terminal/aborted recording exactly as run_captured does. *)
+    or configuration is required. The required [request_clock] supplier is
+    consulted only for a new evaluation, before its intent is recorded or
+    HTTP is admitted. An unavailable clock returns [Clock_unavailable] without
+    changing the transcript. With a clock, the client's existing request time
+    limit applies. Hooks retain requests before dispatch and protect
+    terminal/aborted recording exactly as run_captured does. *)
 
 val run
   :  ?observe:(observation -> unit)

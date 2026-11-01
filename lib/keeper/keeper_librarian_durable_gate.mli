@@ -33,7 +33,8 @@ val retain : store:Lane_addon_store.t -> owner:Keeper_librarian_durable_request.
     Uncertainty never permits a replacement attempt. *)
 type result = Pending of Lane_addon_tool_request_owner.retained
   | Complete of Keeper_librarian_absorb_gate.run_result * Lane_addon_tool_request_owner.retained
-val resume : store:Lane_addon_store.t -> owner:Keeper_librarian_durable_request.owner ->
+val resume : request_clock:Keeper_librarian_absorb_gate.request_clock ->
+  store:Lane_addon_store.t -> owner:Keeper_librarian_durable_request.owner ->
   capture:Keeper_librarian_durable_request.t -> record:Lane_addon_tool_request_owner.retained ->
   live_authority:Keeper_librarian_absorb_gate.live_authority option ->
   before_dispatch:(unit -> (unit, string) Stdlib.result) -> (result, string) Stdlib.result
@@ -42,6 +43,9 @@ val resume : store:Lane_addon_store.t -> owner:Keeper_librarian_durable_request.
     question without an intent can execute, using a live handle whose captured
     authority is exactly the original one. Pending/aborted requests remain
     unknown. Complete replay and terminal publication require no live config.
+    The clock supplier is consumed only for a new evaluation, before its intent
+    or HTTP dispatch. An error preserves the original; completed replay does
+    not consult the supplier.
     No Memory save, candidate ACK, partition or automatic new attempt occurs. *)
 val validate : store:Lane_addon_store.t -> owner:Keeper_librarian_durable_request.owner ->
   capture:Keeper_librarian_durable_request.t -> record:Lane_addon_tool_request_owner.retained ->

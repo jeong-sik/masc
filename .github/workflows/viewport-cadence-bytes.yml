@@ -34,7 +34,7 @@ jobs:
       AFTER_REF: ${{ inputs.after_ref }}
     steps:
       - name: Checkout the requested harness revision
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 

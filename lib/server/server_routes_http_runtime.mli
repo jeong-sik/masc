@@ -246,6 +246,12 @@ val invalidate_full_health_snapshot : unit -> unit
     A worker invalidated during its scan cannot certify a current snapshot.
     The wake is coalesced and also works when the caller is outside Eio. *)
 
+val invalidate_full_health_snapshot_for_registry_change :
+  base_path:string -> Keeper_registry.state_change -> unit
+(** Keep lifecycle phase invalidations global. Failure reason changes invalidate
+    only the matching canonical workspace, or globally before server state is
+    published. *)
+
 val fleet_stream_hub_for_scope :
   state:Mcp_server.server_state -> scope:Mcp_server.workspace_scope -> Fleet_stream_hub.t option
 (** The hub for the current workspace generation. A new generation starts

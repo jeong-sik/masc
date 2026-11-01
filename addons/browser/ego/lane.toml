@@ -25,7 +25,24 @@ max_reply_bytes = 4194304
 [interface]
 binding_schema = '''{
   "type": "object",
-  "properties": {"sources": {"type": "array", "items": {"type": "object", "properties": {}, "additionalProperties": false}, "maxItems": 0}, "space": {"oneOf": [{"type": "string"}, {"type": "integer"}]}},
-  "required": ["sources"],
-  "additionalProperties": false
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {"sources": {"type": "array", "items": {"type": "object", "properties": {}, "additionalProperties": false}, "maxItems": 0}},
+      "required": ["sources"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {"sources": {"type": "array", "items": {"type": "object", "properties": {}, "additionalProperties": false}, "maxItems": 0}, "space": {"type": "string"}},
+      "required": ["sources", "space"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {"sources": {"type": "array", "items": {"type": "object", "properties": {}, "additionalProperties": false}, "maxItems": 0}, "space": {"type": "integer"}},
+      "required": ["sources", "space"],
+      "additionalProperties": false
+    }
+  ]
 }'''

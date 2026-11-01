@@ -2120,8 +2120,9 @@ standalone diagnostic suite moves to the public HTTP streaming scenario suite. P
 
 **Give Board post completion an explicit dispatch and commit outcome**
 
-The first server publication-evidence layer is in progress against campaign parent
-`ca50b0da7d09ae45db1941071ff516995a28b4c1`. It moves the existing effect-proof
+The first server publication-evidence layer is implemented in
+[#47145](https://github.com/jeong-sik/masc/pull/47145) against parent
+`d6770ea9b9781d75bd2b5110415d94618d0c4320`. It moves the existing effect-proof
 vocabulary to the shared core without changing its wire values, gives Board
 creation failures an opaque owner, and retains the exact immutable `post_creation`
 only after the append and full state/index/count/cache commit. An attempted append

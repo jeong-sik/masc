@@ -2101,6 +2101,7 @@
   masc_tui_press
   masc_tui_frame
   masc_tui_message_layout
+  masc_tui_markdown
   masc_tui_markdown_theme
   masc_tui_terminal_palette
   masc

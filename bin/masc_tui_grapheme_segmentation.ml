@@ -154,9 +154,19 @@ type display_piece = {
   ansi : bool;
 }
 
-let scalar_pieces text start_offset end_offset reversed =
-  let rec loop offset reversed =
-    if offset >= end_offset then reversed
+let iter_scalar_pieces text start_offset end_offset ~piece ~ascii =
+  let rec after_ascii offset =
+    if offset < end_offset && printable_ascii text.[offset] then
+      after_ascii (offset + 1)
+    else offset
+  in
+  let rec loop offset =
+    if offset >= end_offset then ()
+    else if printable_ascii text.[offset] then begin
+      let next = after_ascii (offset + 1) in
+      ascii offset next;
+      loop next
+    end
     else
       let decoded = String.get_utf_8_uchar text offset in
       let valid = Uchar.utf_decode_is_valid decoded in
@@ -165,15 +175,10 @@ let scalar_pieces text start_offset end_offset reversed =
       let width =
         if valid then scalar_cell_width (Uchar.utf_decode_uchar decoded) else 1
       in
+      piece offset next width false;
       loop next
-        ({ start_offset = offset;
-           end_offset = next;
-           cell_width = width;
-           ansi = false;
-         }
-        :: reversed)
   in
-  loop start_offset reversed
+  loop start_offset
 
 (* [String.is_valid_utf_8] wants a string of its own, and taking one meant
    copying the run before a single width was read. This asks the same question
@@ -198,15 +203,14 @@ let valid_utf_8_range text start_offset end_offset =
    measured. The segmenter is driven directly here and the spans are read off
    [text]. The width is the same fold [grapheme_cell_width] did over the
    cluster, run as the scalars arrive. *)
-let grapheme_pieces text start_offset end_offset reversed =
-  if start_offset >= end_offset then reversed
+let iter_grapheme_pieces text start_offset end_offset ~piece ~ascii =
+  if start_offset >= end_offset then ()
   else if printable_ascii_range text start_offset end_offset then
-    scalar_pieces text start_offset end_offset reversed
+    ascii start_offset end_offset
   else if not (valid_utf_8_range text start_offset end_offset) then
-    scalar_pieces text start_offset end_offset reversed
+    iter_scalar_pieces text start_offset end_offset ~piece ~ascii
   else begin
     let segmenter = Uuseg.create `Grapheme_cluster in
-    let pieces = ref reversed in
     let cluster_start = ref start_offset in
     let cluster_end = ref start_offset in
     let width = ref 0 in
@@ -227,13 +231,7 @@ let grapheme_pieces text start_offset end_offset reversed =
           else if !hangul_l && !hangul_vt then !widest
           else !width
         in
-        pieces :=
-          { start_offset = !cluster_start;
-            end_offset = !cluster_end;
-            cell_width = cells;
-            ansi = false;
-          }
-          :: !pieces;
+        piece !cluster_start !cluster_end cells false;
         cluster_start := !cluster_end;
         width := 0;
         widest := 0;
@@ -295,7 +293,7 @@ let grapheme_pieces text start_offset end_offset reversed =
           let last = after_ascii next - 1 in
           if next < last then begin
             close_cluster ();
-            pieces := scalar_pieces text next last !pieces;
+            ascii next last;
             cluster_start := last;
             cluster_end := last;
             feed last
@@ -304,11 +302,10 @@ let grapheme_pieces text start_offset end_offset reversed =
         end
         else feed next
     in
-    feed start_offset;
-    !pieces
+    feed start_offset
   end
 
-let segment_display_pieces text =
+let iter_display_pieces text ~piece ~ascii =
   let length = String.length text in
   (* Only an escape can open a sequence, so the scan jumps to the next escape
      rather than asking at every byte of every rendered line. *)
@@ -322,19 +319,35 @@ let segment_display_pieces text =
           | Some next -> Some (escape, next)
           | None -> find_ansi (escape + 1))
   in
-  let rec loop offset reversed =
+  let rec loop offset =
     match find_ansi offset with
-    | None -> List.rev (grapheme_pieces text offset length reversed)
+    | None -> iter_grapheme_pieces text offset length ~piece ~ascii
     | Some (ansi_start, ansi_end) ->
-        let reversed =
-          grapheme_pieces text offset ansi_start reversed
-        in
+        iter_grapheme_pieces text offset ansi_start ~piece ~ascii;
+        piece ansi_start ansi_end 0 true;
         loop ansi_end
-          ({ start_offset = ansi_start;
-             end_offset = ansi_end;
-             cell_width = 0;
-             ansi = true;
-           }
-          :: reversed)
   in
-  loop 0 []
+  loop 0
+
+let segment_display_pieces text =
+  let reversed = ref [] in
+  let piece start_offset end_offset cell_width ansi =
+    reversed := {start_offset; end_offset; cell_width; ansi} :: !reversed
+  in
+  let ascii start_offset end_offset =
+    for offset = start_offset to end_offset - 1 do
+      piece offset (offset + 1) 1 false
+    done
+  in
+  iter_display_pieces text ~piece ~ascii;
+  List.rev !reversed
+
+(* Measure without retaining a piece for every byte in a long ASCII run. *)
+let widest_display_piece text =
+  let widest = ref 0 in
+  let piece _ _ cells _ = widest := Int.max !widest cells in
+  let ascii start_offset end_offset =
+    if start_offset < end_offset then widest := Int.max !widest 1
+  in
+  iter_display_pieces text ~piece ~ascii;
+  !widest

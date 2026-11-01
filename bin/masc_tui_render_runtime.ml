@@ -1139,13 +1139,38 @@ let provider_history_lines ~cols ~rows (state : state) =
                       (String.length scope_id)))
         | Some account -> Overview_providers.scope_name account
       in
-      let width = max 1 (framed_inner_width cols - 3) in
+      let frame_width = max 1 (framed_inner_width cols) in
+      (* Drop the card before its border would split every daily date. *)
+      let card_chrome = 4 in
+      let minimum_content = String.length "0000-00-00" in
+      let indent = min 3 (max 0 (frame_width - card_chrome - minimum_content)) in
+      let width = frame_width - indent in
       let text = Overview_providers.text_for_viewport ~columns:width ~rows in
       let minimum_card_cells = max 64 (7 + days * 2 + 4) in
       let paired = width >= 2 * minimum_card_cells + 2 in
       let card_width = if paired then (width - 2) / 2 else width in
-      let inner = max 1 (card_width - 4) in
+      let bare = card_width < card_chrome + minimum_content in
+      let inner = if bare then card_width else card_width - card_chrome in
       let wrap text = Message_layout.wrap_words ~max_cells:inner text in
+      (* Keep the reported value round-trippable without filling the usual
+         short decimals with binary noise or multiplying a fraction to overflow. *)
+      let float_text value =
+        let short = Printf.sprintf "%.12g" value in
+        if Float.equal (float_of_string short) value then short
+        else Printf.sprintf "%.17g" value in
+      let daily_value = function
+        | None -> "no window sample"
+        | Some { Masc_tui_usage_trend.report = Reported_no_windows; _ } ->
+            "reported no windows"
+        | Some { report = Measured (value, _); _ } ->
+            match value with
+            | Masc.Tui_decode_usage.Utilization_fraction value ->
+                float_text value ^ " of limit"
+            | Utilization_percent value -> Printf.sprintf "%d%%" value
+            | Utilization_usd { used; limit = Some limit } ->
+                Printf.sprintf "$%s / $%s" (float_text used) (float_text limit)
+            | Utilization_usd { used; limit = None } ->
+                Printf.sprintf "$%s (uncapped)" (float_text used) in
       let chart (row : Masc_tui_usage_trend.row) =
         let account = List.find_opt (fun account ->
           String.equal (Overview_providers.scope_id account) row.scope_id) scopes in
@@ -1157,38 +1182,49 @@ let provider_history_lines ~cols ~rows (state : state) =
           | Some sample ->
             let time = Unix.gmtime sample.observed_at in
             Printf.sprintf "Latest report %s · %02d-%02d %02d:%02d UTC"
-              (match sample.report with
-               | Masc_tui_usage_trend.Measured (value, _) -> Overview_providers.utilization_text value
-               | Masc_tui_usage_trend.Reported_no_windows -> "reported no windows")
+              (daily_value (Some sample))
               (time.Unix.tm_mon + 1) time.Unix.tm_mday time.Unix.tm_hour time.Unix.tm_min in
         let name = text (label row.scope_id) in
         let full_name =
-          if Message_layout.display_width name <= inner then []
+          if not bare && Message_layout.display_width name <= inner then []
           else wrap name
         in
+        let daily =
+          if not bare && not (Masc_tui_usage_trend.compact ~width:inner row) then []
+          else
+            "Daily values (UTC)" ::
+            List.map (fun (day, sample) ->
+              Printf.sprintf "%04d-%02d-%02d %s"
+                (day.Unix.tm_year + 1900) (day.Unix.tm_mon + 1) day.Unix.tm_mday
+                (daily_value sample))
+              (Masc_tui_usage_trend.dated_samples trend row)
+            |> List.concat_map wrap in
         let body = full_name @ wrap (Terminal_text.single_line limit ^ Terminal_text.single_line row.kind)
           @ (match email with None -> [] | Some email -> wrap email)
           @ wrap latest
           @ Masc_tui_usage_trend.plot ~width:inner trend row
+          @ daily
           @ wrap (Printf.sprintf "%d/%d UTC days reported" row.reported_days days) in
         let heading = Message_layout.truncate_middle inner name in
         let line text = Theme.recede () ^ Ansi.box_v ^ Ansi.reset ^ " "
           ^ Message_layout.fit_width text inner ^ " " ^ Theme.recede () ^ Ansi.box_v ^ Ansi.reset in
-        (Theme.info () ^ Ansi.box_tl ^ " " ^ Ansi.bold ^ heading ^ Ansi.reset ^ Theme.info ()
-         ^ " " ^ draw_hline (max 0 (card_width - Message_layout.display_width heading - 4))
-         ^ Ansi.box_tr ^ Ansi.reset)
-        :: List.map line body
-        @ [Theme.recede () ^ Ansi.box_bl ^ draw_hline (max 0 (card_width - 2)) ^ Ansi.box_br ^ Ansi.reset]
+        if bare then body else
+          (Theme.info () ^ Ansi.box_tl ^ " " ^ Ansi.bold ^ heading ^ Ansi.reset ^ Theme.info ()
+           ^ " " ^ draw_hline (max 0 (card_width - Message_layout.display_width heading - 4))
+           ^ Ansi.box_tr ^ Ansi.reset)
+          :: List.map line body
+          @ [Theme.recede () ^ Ansi.box_bl ^ draw_hline (max 0 (card_width - 2)) ^ Ansi.box_br ^ Ansi.reset]
       in
+      let prefix = String.make indent ' ' in
       let rec arrange = function
         | [] -> []
         | left :: right :: rest when paired ->
           let left = chart left and right = chart right in
           let height = max (List.length left) (List.length right) in
           let row lines index = Option.value ~default:(String.make card_width ' ') (List.nth_opt lines index) in
-          List.init height (fun index -> "   " ^ row left index ^ "  " ^ row right index)
+          List.init height (fun index -> prefix ^ row left index ^ "  " ^ row right index)
           @ [""] @ arrange rest
-        | row :: rest -> List.map (fun line -> "   " ^ line) (chart row) @ [""] @ arrange rest in
+        | row :: rest -> List.map (fun line -> prefix ^ line) (chart row) @ [""] @ arrange rest in
       let first = Unix.gmtime (trend.generated_at -. float_of_int (days - 1) *. 86400.0) in
       (Printf.sprintf
          " Quota scope trend (%d UTC days) · latest report per day · as of %02d-%02d %02d:%02d UTC"

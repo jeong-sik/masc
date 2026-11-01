@@ -1068,6 +1068,16 @@ let fusion_detail_pane (state : state) ~rows ~cols run_id buf =
         Some detail
     | Some _ | None -> None
   in
+  let stale =
+    match state.fusion_mode with
+    | Fusion_historical_detail reference ->
+        state.fusion_historical_detail_stale
+        && Option.exists (fun original ->
+          original.fhd_reference.fhe_post_id = reference.fhe_post_id
+          && original.fhd_reference.fhe_run_id = reference.fhe_run_id)
+             state.fusion_historical_detail
+    | Fusion_list | Fusion_detail _ -> state.fusion_detail_stale && Option.is_some detail
+  in
   let header =
     detail_heading ~cols ~lead:(Lead_text (screen_title fusion_title ^ "  "))
       ~id:run_id ~after:"" ~tail:(connection_badge state)
@@ -1075,14 +1085,18 @@ let fusion_detail_pane (state : state) ~rows ~cols run_id buf =
   box_top buf cols;
   box_line buf cols header;
   box_divider buf cols;
+  if stale then
+    box_line_styled buf cols ~style:(Theme.warn ()) "  Fusion reading may be out of date";
   (match state.fusion_detail_error with
    | None -> ()
    | Some error ->
        box_line_styled buf cols ~style:(Theme.bad ())
-         ("  " ^ Keeper_chat.terminal_safe_text error);
-       box_divider buf cols);
+         ("  " ^ Keeper_chat.terminal_safe_text error));
+  if stale || Option.is_some state.fusion_detail_error then box_divider buf cols;
   let chrome_rows =
-    if Option.is_some state.fusion_detail_error then 7 else 5
+    5 + (if stale then 1 else 0)
+      + (if Option.is_some state.fusion_detail_error then 1 else 0)
+      + (if stale || Option.is_some state.fusion_detail_error then 1 else 0)
   in
   let content_height = max 1 (rows - chrome_rows) in
   let lines =
@@ -1091,7 +1105,7 @@ let fusion_detail_pane (state : state) ~rows ~cols run_id buf =
         (match state.fusion_historical_detail with
          | Some original when original.fhd_reference.fhe_post_id = reference.fhe_post_id
                               && original.fhd_reference.fhe_run_id = reference.fhe_run_id ->
-             (if Option.is_some state.fusion_detail_error then [ Theme.warn (), "  Previous Board reading retained" ] else [])
+             (if stale || Option.is_some state.fusion_detail_error then [ Theme.warn (), "  Previous Board reading retained" ] else [])
              @ fusion_historical_lines ~width:(max 1 (framed_inner_width cols - 4))
                  ~frame_width:(framed_inner_width cols) original
          | Some _ | None ->

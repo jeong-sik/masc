@@ -123,11 +123,11 @@ let clear state = { state with status = Status_absent }
 
 let invalidate ~reason state =
   let status = match state.status with
-    | Status_ready (request, value) | Status_stale (request, value, _) ->
-        Status_stale (request, value, reason)
-    | Status_refreshing (request, value, _) ->
+    | Status_ready (request, value) -> Status_stale (request, value, reason)
+    | Status_refreshing (request, value, None) ->
         Status_refreshing (request, value, Some reason)
-    | (Status_absent | Status_loading _ | Status_retrying _ | Status_failed _) as status -> status
+    | (Status_absent | Status_loading _ | Status_retrying _ | Status_failed _
+      | Status_stale _ | Status_refreshing (_, _, Some _)) as status -> status
   in
   { state with status }
 

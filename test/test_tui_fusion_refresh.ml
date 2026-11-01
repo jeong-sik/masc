@@ -29,6 +29,11 @@ let detail run : Decode.fusion_detail =
   { fud_generated_at = "now"; fud_run = run
   ; fud_evidence_status = Fusion_evidence_pending; fud_evidence = None }
 
+let historical_detail : Decode.fusion_historical_detail =
+  { fhd_reference = reference; fhd_author = "author"; fhd_title = "evidence"
+  ; fhd_body = "original"; fhd_observations = Ok (None, None)
+  ; fhd_evidence = Error "no structured evidence" }
+
 let check_completion label expected actual =
   let name = function Updates.Applied -> "applied" | Reread -> "reread"
     | Await_observer -> "await observer" | Obsolete -> "obsolete" in
@@ -71,35 +76,93 @@ let test_list_change_during_read () =
 let test_detail_change_during_read () =
   let state = fresh () in
   state.fusion_mode <- Types.Fusion_detail "a";
+  state.fusion_detail <- Some (detail (run "a" Decode.Fusion_stage_accepted));
   state.fusion_detail_error <- Some "held";
   let old = require (Updates.begin_detail state ~demand:Share ~run_id:"a") in
   ignore (Updates.begin_detail state ~demand:After_change ~run_id:"a");
   ignore (Updates.begin_detail state ~demand:After_change ~run_id:"a");
+  Alcotest.(check bool) "retained detail is stale before the old read returns" true state.fusion_detail_stale;
+  Alcotest.(check (option string)) "repeated events do not overwrite the previous failure" (Some "held") state.fusion_detail_error;
   check_completion "detail was invalidated while reading" Reread
     (Updates.detail_loaded state ~generation:old ~run_id:"a" (Error "old"));
-  Alcotest.(check (option string)) "old detail is marked stale"
-    (Some "Fusion changed while reading; refreshing (last read: old)") state.fusion_detail_error;
+  Alcotest.(check (option string)) "old failure remains visible" (Some "old") state.fusion_detail_error;
   let current = require (Updates.begin_detail state ~demand:Share ~run_id:"a") in
   check_completion "late old detail cannot settle new owner" Obsolete
     (Updates.detail_loaded state ~generation:old ~run_id:"a" (Error "late"));
   check_completion "new detail settles" Applied
     (Updates.detail_loaded state ~generation:current ~run_id:"a" (Error "fresh"));
-  Alcotest.(check (option string)) "new result is displayed" (Some "fresh") state.fusion_detail_error
+  Alcotest.(check (option string)) "new result is displayed" (Some "fresh") state.fusion_detail_error;
+  Alcotest.(check bool) "failed reread keeps retained detail stale" true state.fusion_detail_stale;
+  let recovered = require (Updates.begin_detail state ~demand:Share ~run_id:"a") in
+  check_completion "successful retry settles without another demand" Applied
+    (Updates.detail_loaded state ~generation:recovered ~run_id:"a" (Ok (detail (run "a" Decode.Fusion_stage_accepted))));
+  Alcotest.(check bool) "successful retry makes detail fresh" false state.fusion_detail_stale
 
 let test_historical_change_during_read () =
   let state = fresh () in
   state.fusion_mode <- Types.Fusion_historical_detail reference;
+  state.fusion_historical_detail <- Some historical_detail;
   state.fusion_detail_error <- Some "held";
   let old = require (Updates.begin_historical state ~demand:Share ~reference) in
   ignore (Updates.begin_historical state ~demand:After_change ~reference);
+  ignore (Updates.begin_historical state ~demand:After_change ~reference);
+  Alcotest.(check bool) "Board original is stale before the old read returns" true state.fusion_historical_detail_stale;
+  Alcotest.(check (option string)) "previous error is preserved" (Some "held") state.fusion_detail_error;
   check_completion "historical detail was invalidated" Reread
     (Updates.historical_detail_loaded state ~generation:old ~reference (Error "old"));
-  Alcotest.(check (option string)) "old detail is marked stale"
-    (Some "Fusion changed while reading; refreshing (last read: old)") state.fusion_detail_error;
+  Alcotest.(check (option string)) "old failure remains visible" (Some "old") state.fusion_detail_error;
   let current = require (Updates.begin_historical state ~demand:Share ~reference) in
   check_completion "new historical detail settles" Applied
     (Updates.historical_detail_loaded state ~generation:current ~reference (Error "fresh"));
-  Alcotest.(check (option string)) "new result is displayed" (Some "fresh") state.fusion_detail_error
+  Alcotest.(check (option string)) "new result is displayed" (Some "fresh") state.fusion_detail_error;
+  Alcotest.(check bool) "failure leaves the Board original stale" true state.fusion_historical_detail_stale;
+  let recovered = require (Updates.begin_historical state ~demand:Share ~reference) in
+  check_completion "Board retry settles without another demand" Applied
+    (Updates.historical_detail_loaded state ~generation:recovered ~reference (Ok historical_detail));
+  Alcotest.(check bool) "successful retry makes Board original fresh" false state.fusion_historical_detail_stale
+
+let test_list_is_stale_immediately () =
+  let state = fresh () in
+  let first = require (Updates.begin_runs state ~demand:Share) in
+  check_completion "initial list" Applied (Updates.runs_loaded state first (Ok empty_snapshot));
+  let old = require (Updates.begin_runs state ~demand:Share) in
+  Alcotest.(check bool) "ordinary refresh retains a fresh value" true
+    (match Fetched.view_for ~equal:Unit.equal state.fusion_runs ~key:() with
+     | Fetched.Ready _ -> true | _ -> false);
+  Alcotest.(check bool) "events coalesce with the existing request" true
+    (Option.is_none (Updates.begin_runs state ~demand:After_change)
+     && Option.is_none (Updates.begin_runs state ~demand:After_change));
+  Alcotest.(check bool) "list becomes stale before old request settles" true
+    (match Fetched.view_for ~equal:Unit.equal state.fusion_runs ~key:() with
+     | Fetched.Stale (_, _) -> true | _ -> false);
+  check_completion "old request schedules one reread" Reread
+    (Updates.runs_loaded state old (Error "old failure"));
+  let current = require (Updates.begin_runs state ~demand:Share) in
+  check_completion "failed reread is settled once" Applied
+    (Updates.runs_loaded state current (Error "fresh failure"));
+  Alcotest.(check bool) "failed reread retains data and cause" true
+    (match Fetched.view_for ~equal:Unit.equal state.fusion_runs ~key:() with
+     | Fetched.Stale (_, "fresh failure") -> true | _ -> false);
+  let retry = require (Updates.begin_runs state ~demand:After_change) in
+  Alcotest.(check bool) "starting a new read preserves the previous failure" true
+    (match Fetched.view_for ~equal:Unit.equal state.fusion_runs ~key:() with
+     | Fetched.Stale (_, "fresh failure") -> true | _ -> false);
+  check_completion "successful retry makes the list fresh" Applied
+    (Updates.runs_loaded state retry (Ok empty_snapshot));
+  Alcotest.(check bool) "no hidden reread remains" false state.fusion_runs_reread_pending;
+  let after_change = require (Updates.begin_runs state ~demand:After_change) in
+  Alcotest.(check bool) "a newly started post-change read also marks held rows stale" true
+    (match Fetched.view_for ~equal:Unit.equal state.fusion_runs ~key:() with
+     | Fetched.Stale (_, _) -> true | _ -> false);
+  check_completion "the new read settles normally" Applied
+    (Updates.runs_loaded state after_change (Ok empty_snapshot));
+  Alcotest.(check bool) "no retained value means no invented stale value" true
+    (let empty = fresh () in
+     let pending = require (Updates.begin_runs empty ~demand:Share) in
+     ignore (Updates.begin_runs empty ~demand:After_change);
+     let still_loading = match Fetched.view_for ~equal:Unit.equal empty.fusion_runs ~key:() with
+       | Fetched.Loading -> true | _ -> false in
+     still_loading && Updates.runs_loaded empty pending (Error "unavailable") = Updates.Reread)
 
 let authorize state =
   let path = Masc.Tui_decode.Canonical_path.of_path in
@@ -177,6 +240,46 @@ let test_read_settles_before_observer_opened () =
   in
   trial (Types.Observer_live { session_id = "session"; since = 1.; events = 0 });
   trial (Types.Observer_closed_before_answer { reason = "unavailable"; at = 1. })
+
+let test_repeated_observer_failures_do_not_multiply_reads () =
+  let state = fresh () in
+  authorize state;
+  state.view <- Types.Fusion;
+  state.fusion_mode <- Types.Fusion_detail "a";
+  let a = run "a" Decode.Fusion_stage_accepted in
+  let old_list = require (Updates.begin_runs state ~demand:Share) in
+  let old_detail = require (Updates.begin_detail state ~demand:Share ~run_id:"a") in
+  state.observer <- Types.Observer_opening;
+  state.observer <- Types.Observer_closed_before_answer { reason = "refused"; at = 1. };
+  let runs = ref 0 and details = ref 0 and next_list = ref None and next_detail = ref None in
+  let failed () = Updates.observer_failed state
+    ~runs:(fun () -> incr runs; next_list := Updates.begin_runs state ~demand:Share)
+    ~detail:(fun id -> incr details; next_detail := Updates.begin_detail state ~demand:Share ~run_id:id)
+    ~historical:(fun _ -> Alcotest.fail "unexpected historical read") in
+  List.iter (fun () -> failed ()) [ (); (); () ];
+  Alcotest.(check (pair int int)) "failed reconnect shares existing reads" (0, 0) (!runs, !details);
+  check_completion "existing list settles" Applied
+    (Updates.runs_loaded state old_list (Ok (snapshot [ a ])));
+  check_completion "existing detail settles" Applied
+    (Updates.detail_loaded state ~generation:old_detail ~run_id:"a" (Ok (detail a)));
+  failed ();
+  Alcotest.(check (pair int int)) "idle failure alone schedules nothing" (0, 0) (!runs, !details);
+  state.observer <- Types.Observer_opening;
+  let waiting_list = require (Updates.begin_runs state ~demand:Share) in
+  let waiting_detail = require (Updates.begin_detail state ~demand:Share ~run_id:"a") in
+  check_completion "list settled while opening" Await_observer
+    (Updates.runs_loaded state waiting_list (Ok (snapshot [ a ])));
+  check_completion "detail settled while opening" Await_observer
+    (Updates.detail_loaded state ~generation:waiting_detail ~run_id:"a" (Ok (detail a)));
+  state.observer <- Types.Observer_closed_before_answer { reason = "refused again"; at = 2. };
+  List.iter (fun () -> failed ()) [ (); (); () ];
+  Alcotest.(check (pair int int)) "one read per actually waiting projection" (1, 1) (!runs, !details);
+  check_completion "resumed list settles" Applied
+    (Updates.runs_loaded state (require !next_list) (Ok (snapshot [ a ])));
+  check_completion "resumed detail settles" Applied
+    (Updates.detail_loaded state ~generation:(require !next_detail) ~run_id:"a" (Ok (detail a)));
+  failed ();
+  Alcotest.(check (pair int int)) "no follow-up loop after settling" (1, 1) (!runs, !details)
 
 let test_superseded_selection () =
   let setup () =
@@ -319,8 +422,8 @@ let test_continuous_multi_run_changes_make_progress () =
      | Fetched.Stale ({ fus_runs = [ _; run ]; _ }, _) -> run.fur_stage = a2.fur_stage
      | _ -> false);
   Alcotest.(check bool) "detail also progresses and remains marked stale" true
-    (match state.fusion_detail, state.fusion_detail_error with
-     | Some detail, Some _ -> detail.fud_run.fur_stage = a2.fur_stage
+    (match state.fusion_detail, state.fusion_detail_stale with
+     | Some detail, true -> detail.fud_run.fur_stage = a2.fur_stage
      | _ -> false);
   Alcotest.(check bool) "reordering preserves the open run and its cursor" true
     (state.fusion_mode = Types.Fusion_detail "a" && state.fusion_cursor = 1);
@@ -332,18 +435,20 @@ let test_continuous_multi_run_changes_make_progress () =
     (Updates.detail_loaded state ~generation:final_detail ~run_id:"a" (Ok (detail a2)));
   Alcotest.(check bool) "final list and detail are no longer stale" true
     (match Fetched.view_for ~equal:Unit.equal state.fusion_runs ~key:(), state.fusion_detail_error with
-     | Fetched.Ready _, None -> true | _ -> false)
+     | Fetched.Ready _, None -> not state.fusion_detail_stale | _ -> false)
 
 let () =
   Alcotest.run "tui_fusion_refresh"
     [ "demand", [
         Alcotest.test_case "batch retains open run" `Quick test_batch_preserves_open_run;
         Alcotest.test_case "list changes during read" `Quick test_list_change_during_read;
+        Alcotest.test_case "list becomes stale immediately" `Quick test_list_is_stale_immediately;
         Alcotest.test_case "detail changes during read" `Quick test_detail_change_during_read;
         Alcotest.test_case "historical changes during read" `Quick test_historical_change_during_read;
         Alcotest.test_case "observer opens and authority" `Quick test_observer_open_and_authority;
         Alcotest.test_case "workspace withdrawal" `Quick test_workspace_withdrawal_retires_requests;
         Alcotest.test_case "read before observer outcome" `Quick test_read_settles_before_observer_opened;
+        Alcotest.test_case "observer failures coalesce" `Quick test_repeated_observer_failures_do_not_multiply_reads;
         Alcotest.test_case "superseded selection" `Quick test_superseded_selection;
         Alcotest.test_case "surface re-entry" `Quick test_reentry_queues_reads;
         Alcotest.test_case "detail opened during list read" `Quick test_open_detail_after_list_read_starts;

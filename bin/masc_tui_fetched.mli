@@ -64,7 +64,7 @@ val refresh : equal:('k -> 'k -> bool) -> ('k, 'a, 'error) source -> key:'k -> (
     existing same-key sharing behavior. This does not launch any work. *)
 val invalidate : reason:'error -> ('k, 'a, 'error) source -> ('k, 'a, 'error) source
 (** Mark a retained value stale after a change without retiring its owner.
-    A source with no retained value is unchanged. *)
+    Preserve an existing stale reason; a source without a value is unchanged. *)
 val suspend_with : reason:'error -> ('k, 'a, 'error) source -> ('k, 'a, 'error) source
 (** Typed suspension with the same retirement and retention policy. *)
 

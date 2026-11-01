@@ -10548,6 +10548,7 @@ type state = {
   mutable fusion_runs: (unit, Masc.Tui_decode_fusion.fusion_snapshot) Masc_tui_fetched.t;
   (* A change observed after the current list read started needs one later read. *)
   mutable fusion_runs_reread_pending: bool;
+  mutable fusion_runs_awaiting_observer: bool;
   mutable fusion_runs_open_at_start: string option;
   (* Why the launch form could not open. Not a reading of the run list, so it
      is not folded into that list's failure; the next list answer clears it. *)
@@ -10557,6 +10558,7 @@ type state = {
   mutable fusion_mode: fusion_mode;
   mutable fusion_detail: Masc.Tui_decode_fusion.fusion_detail option;
   mutable fusion_detail_error: string option;
+  mutable fusion_detail_stale: bool;
   (* A detail GET captures this generation. A late response for a run the
      operator already left cannot replace the exact run now on screen. *)
   mutable fusion_detail_generation: int;
@@ -10565,9 +10567,12 @@ type state = {
      request immediately, whose pair replaces this marker. *)
   mutable fusion_detail_inflight: (int * string) option;
   mutable fusion_detail_reread_pending: bool;
+  mutable fusion_detail_awaiting_observer: bool;
   mutable fusion_historical_detail: Masc.Tui_decode_fusion.fusion_historical_detail option;
+  mutable fusion_historical_detail_stale: bool;
   mutable fusion_historical_inflight: (int * Masc.Tui_decode_fusion.fusion_historical_evidence) option;
   mutable fusion_historical_reread_pending: bool;
+  mutable fusion_historical_awaiting_observer: bool;
   mutable fusion_launch: fusion_launch option;
   (* The read or the submit the form is waiting on. A key that closes the
      form bumps it, so the answer to a read the operator left cannot open
@@ -14025,6 +14030,7 @@ let suspend_workspace_readings state =
   state.code_location_offer <- None;
   state.fusion_runs <- Masc_tui_fetched.suspend state.fusion_runs;
   state.fusion_runs_reread_pending <- false;
+  state.fusion_runs_awaiting_observer <- false;
   state.fusion_runs_open_at_start <- None;
   (match state.goal_confirmation with
    | Masc_tui_planning_detail.Inspecting reading ->
@@ -14072,8 +14078,10 @@ let suspend_workspace_readings state =
   state.verification_refresh_after_inflight <- false;
   state.fusion_detail_inflight <- None;
   state.fusion_detail_reread_pending <- false;
+  state.fusion_detail_awaiting_observer <- false;
   state.fusion_historical_inflight <- None;
   state.fusion_historical_reread_pending <- false;
+  state.fusion_historical_awaiting_observer <- false;
   state.lane_runs_loading <- false;
   state.schedule_wake_history_inflight <- None;
   state.keeper_turns_inflight <- false;
@@ -14739,14 +14747,19 @@ let withdraw_fusion_workspace (state : state) =
   ignore (abandon_fusion_launch state);
   state.fusion_runs <- Masc_tui_fetched.clear state.fusion_runs;
   state.fusion_runs_reread_pending <- false;
+  state.fusion_runs_awaiting_observer <- false;
   state.fusion_runs_open_at_start <- None;
   state.fusion_detail_generation <- state.fusion_detail_generation + 1;
   state.fusion_detail_inflight <- None;
   state.fusion_detail_reread_pending <- false;
+  state.fusion_detail_awaiting_observer <- false;
   state.fusion_historical_inflight <- None;
   state.fusion_historical_reread_pending <- false;
+  state.fusion_historical_awaiting_observer <- false;
   state.fusion_detail <- None;
+  state.fusion_detail_stale <- false;
   state.fusion_historical_detail <- None;
+  state.fusion_historical_detail_stale <- false;
   state.fusion_detail_error <- None;
   state.fusion_launch_error <- None;
   state.fusion_mode <- Fusion_list;
@@ -19056,6 +19069,7 @@ let create_state
   harness_detail_scroll = 0;
   fusion_runs = Masc_tui_fetched.initial;
   fusion_runs_reread_pending = false;
+  fusion_runs_awaiting_observer = false;
   fusion_runs_open_at_start = None;
   fusion_launch_error = None;
   fusion_cursor = 0;
@@ -19063,12 +19077,16 @@ let create_state
   fusion_mode = Fusion_list;
   fusion_detail = None;
   fusion_detail_error = None;
+  fusion_detail_stale = false;
   fusion_detail_generation = 0;
   fusion_detail_inflight = None;
   fusion_detail_reread_pending = false;
+  fusion_detail_awaiting_observer = false;
   fusion_historical_detail = None;
+  fusion_historical_detail_stale = false;
   fusion_historical_inflight = None;
   fusion_historical_reread_pending = false;
+  fusion_historical_awaiting_observer = false;
   fusion_launch = None;
   fusion_launch_generation = 0;
   observer = Observer_off;

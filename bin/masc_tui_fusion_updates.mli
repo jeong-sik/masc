@@ -27,8 +27,13 @@ val revalidate_visible :
   Masc_tui_types.state -> runs:(unit -> unit) -> detail:(string -> unit) ->
   historical:(Masc.Tui_decode_fusion.fusion_historical_evidence -> unit) -> unit
 (** Revalidate visible readings when the current server identity authorizes
-    reads. Called after subscription (including reconnects, resets and gaps)
-    and if an opening subscription fails. *)
+    reads. Called after subscription, including reconnects, resets and gaps. *)
+
+val observer_failed :
+  Masc_tui_types.state -> runs:(unit -> unit) -> detail:(string -> unit) ->
+  historical:(Masc.Tui_decode_fusion.fusion_historical_evidence -> unit) -> unit
+(** Resume only readings that settled while the failed subscription was
+    opening. Existing reads and ordinary cadence are not invalidated. *)
 
 val runs_loaded :
   Masc_tui_types.state -> unit Masc_tui_fetched.request ->

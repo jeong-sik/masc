@@ -364,10 +364,10 @@ let test_new_preview_uses_public_plan_without_writing () =
 let test_tui_source_selection_is_the_request_target () =
   let sources = ["workspace"; "personal"] in
   let cursor = match Masc_tui_pick_list.apply ~page:2 ~label:Fun.id sources
-      Masc_tui_pick_list.closed (Move Next) with
+      Masc_tui_pick_list.closed (Masc_tui_pick_list.Move Masc_tui_pick_list.Next) with
     | Masc_tui_pick_list.Stay cursor -> cursor
     | _ -> fail "source selection did not move" in
-  let selected = match Masc_tui_pick_list.apply ~page:2 ~label:Fun.id sources cursor Choose with
+  let selected = match Masc_tui_pick_list.apply ~page:2 ~label:Fun.id sources cursor Masc_tui_pick_list.Choose with
     | Masc_tui_pick_list.Chosen source -> source
     | _ -> fail "source selection did not choose" in
   let body = Masc_tui_editor_wire.skill_editor_create_body ~composition:true
@@ -482,7 +482,7 @@ let test_saved_but_unpublished_is_explicit () =
      check string "failure is preserved" "injected publication failure" reason;
      let wire = Editor.save_outcome_to_yojson outcome in
      (match Masc_tui_editor_wire.decode_skill_editor_save_receipt wire with
-      | Ok { ses_status = Skill_saved_but_unpublished actual; _ } ->
+      | Ok { ses_status = Masc_tui_editor_wire.Skill_saved_but_unpublished actual; _ } ->
         check string "TUI retains the actual publication failure" reason actual
       | Ok _ -> fail "TUI save decoder changed the outcome"
       | Error detail -> fail detail);

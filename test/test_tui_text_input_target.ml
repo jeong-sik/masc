@@ -413,12 +413,12 @@ let test_skill_source_paging_chooses_the_windowed_item () =
     ; ssp_identity = state.server_identity; ssp_port = state.port };
   let page = Masc_tui_render_tools.skill_source_picker_page state ~terminal_rows:20 in
   let cursor = match Masc_tui_pick_list.apply ~page ~label:Fun.id sources
-      Masc_tui_pick_list.closed (Move Page_next) with
+      Masc_tui_pick_list.closed (Masc_tui_pick_list.Move Masc_tui_pick_list.Page_next) with
     | Masc_tui_pick_list.Stay cursor -> cursor | _ -> fail "page did not move" in
-  let view = Masc_tui_pick_list.view ~page ~window:Opens_at_cursor ~label:Fun.id sources cursor in
+  let view = Masc_tui_pick_list.view ~page ~window:Masc_tui_pick_list.Opens_at_cursor ~label:Fun.id sources cursor in
   let shown_selection = match view.selected_row with
     | Some index -> List.nth view.rows index | None -> fail "selection missing" in
-  match Masc_tui_pick_list.apply ~page ~label:Fun.id sources cursor Choose with
+  match Masc_tui_pick_list.apply ~page ~label:Fun.id sources cursor Masc_tui_pick_list.Choose with
   | Masc_tui_pick_list.Chosen source ->
     check string "page movement selects the next page's exact source" (List.nth sources page) source;
     check string "the request target is the presented semantic selection" shown_selection source

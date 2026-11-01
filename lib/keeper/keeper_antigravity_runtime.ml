@@ -36,14 +36,13 @@ let runtime_error_to_core_error = function
              (Runtime_antigravity.noncompletion_status_to_string evidence.status)
          ; detail = Runtime_antigravity.noncompletion_result_to_json evidence |> Yojson.Safe.to_string
          })
-  (* A file-table safety kill, not a spawn failure: refiring the same turn
-     re-kills it, so report it as the provider's terminal failure rather
-     than an unavailable provider that invites blind retries. *)
+  (* A file-table safety kill, not a spawn failure. The typed terminal must
+     survive the candidate walk even before init has observed any effect. *)
   | Runtime_antigravity.Child_fd_ceiling_exceeded { count; ceiling } ->
     Agent_core.Error.Provider
-      (Llm_provider.Error.ProviderReportedError
+      (Llm_provider.Error.ProviderTerminal
          { provider = "antigravity_cli"
-         ; error_type = Some "child_fd_ceiling_exceeded"
+         ; kind = Llm_provider.Http_client.Other "child_fd_ceiling_exceeded"
          ; detail =
              (match count with
               | Some count ->

@@ -85,11 +85,11 @@ let tool_completed =
 ;;
 
 let agent_completed =
-  {|{"jsonrpc":"2.0","method":"item/completed","params":{"sessionId":"s-1","viewCursor":"v:8","item":{"itemId":"m-1","kind":"agentMessage","turnId":"t-1","revision":2,"status":"completed","text":"MASC_MUSE_OK"}}}|}
+  {|{"jsonrpc":"2.0","method":"item/completed","params":{"sessionId":"s-1","viewCursor":"agent-final","item":{"itemId":"m-1","kind":"agentMessage","turnId":"t-1","revision":2,"status":"completed","text":"MASC_MUSE_OK"}}}|}
 ;;
 
 let turn_completed =
-  {|{"jsonrpc":"2.0","method":"turn/completed","params":{"sessionId":"s-1","turnId":"t-1","terminal":"completed","viewCursor":"v:9","usage":{"inputTokens":100,"outputTokens":7,"cachedTokens":50,"reasoningTokens":3}}}|}
+  {|{"jsonrpc":"2.0","method":"turn/completed","params":{"sessionId":"s-1","turnId":"t-1","terminal":"completed","viewCursor":"terminal-final","usage":{"inputTokens":100,"outputTokens":7,"cachedTokens":50,"reasoningTokens":3}}}|}
 ;;
 
 let turn_auth_failed =
@@ -114,6 +114,23 @@ let handshake_and_session ~granted =
 
 let script_text ~capture steps =
   let buffer = Buffer.create 1024 in
+  let durable = ref [] in
+  let retain frame =
+    match Yojson.Safe.from_string frame with
+    | `Assoc fields ->
+      (match List.assoc_opt "method" fields, List.assoc_opt "params" fields with
+       | Some (`String method_), Some (`Assoc params)
+         when List.mem method_ ["turn/started"; "item/completed"; "item/updated"; "session/tokenUsage"] ->
+         let position = `Assoc ["id", `String "fixture-record"; "sequence", `Int 1] in
+         let source_range = `Assoc ["first", position; "last", position;
+           "stream", `Assoc ["kind", `String "run"; "id", `String "fixture-run"]] in
+         let event = `Assoc ["method", `String method_;
+           "params", `Assoc (("sourceRange", source_range) :: List.remove_assoc "sourceRange" params)] in
+         if not (List.mem event !durable) then durable := event :: !durable
+       | _ -> ())
+    | _ -> ()
+    | exception Yojson.Json_error _ -> ()
+  in
   let line text =
     Buffer.add_string buffer text;
     Buffer.add_char buffer '\n'
@@ -124,7 +141,9 @@ let script_text ~capture steps =
       | Read ->
         line "IFS= read -r request || exit 98";
         line (Printf.sprintf "printf '%%s\\n' \"$request\" >> %s" (shell_quote capture))
-      | Write frame -> line (Printf.sprintf "printf '%%s\\n' %s" (shell_quote frame))
+      | Write frame ->
+        retain frame;
+        line (Printf.sprintf "printf '%%s\\n' %s" (shell_quote frame))
       | Stderr text -> line (Printf.sprintf "printf '%%s\\n' %s >&2" (shell_quote text))
       | Exit_with code -> line (Printf.sprintf "exit %d" code)
       | Mark_spawned path -> line (Printf.sprintf "touch %s" (shell_quote path))
@@ -159,7 +178,22 @@ let script_text ~capture steps =
           line "[ \"$2\" = --disable-shell ] || exit 95")
         else line "[ \"$#\" = 0 ] || exit 95")
     steps;
-  line "while IFS= read -r ignored; do :; done";
+  let page_host = {|import json, sys
+events = json.loads(sys.argv[1])
+for line in sys.stdin:
+    request = json.loads(line)
+    with open(sys.argv[2], "a") as capture:
+        capture.write(line)
+    assert request["method"] == "view/page", request
+    assert request["params"]["direction"] == "backward", request
+    assert request["params"]["limit"] == 1000, request
+    selected = [event for event in events if event["params"]["sessionId"] == request["params"]["sessionId"]]
+    print(json.dumps({"jsonrpc": "2.0", "id": request["id"],
+                      "result": {"events": selected, "nextCursor": None}}), flush=True)
+|} in
+  line ("exec python3 -c " ^ shell_quote page_host ^ " "
+        ^ shell_quote (Yojson.Safe.to_string (`List (List.rev !durable))) ^ " "
+        ^ shell_quote capture);
   Buffer.contents buffer
 ;;
 
@@ -740,7 +774,8 @@ let test_resumed_session_model_is_selected_before_admission () =
           Yojson.Safe.Util.(json |> member "method" |> to_string_option)) requests in
         check (list (option string)) "selection, then approval mode, then the turn"
           [Some "initialize"; Some "initialized"; Some "session/resume";
-           Some "session/setModel"; Some "session/setApprovalMode"; Some "turn/start"]
+           Some "session/setModel"; Some "session/setApprovalMode"; Some "turn/start";
+           Some "view/page"]
           methods))
     [ `String host_default, [model_changed; set_model_ack ~status:"accepted"]
     ; `String host_default, [set_model_ack ~status:"accepted"]
@@ -791,7 +826,7 @@ let test_call_usage_is_counted_once_in_its_turn () =
       (`Assoc ["jsonrpc", `String "2.0"; "method", `String "turn/completed";
         "params", `Assoc
           (["sessionId", `String "s-1"; "turnId", `String "t-1";
-            "terminal", `String "completed"] @ usage)]) in
+            "terminal", `String "completed"; "viewCursor", `String "terminal"] @ usage)]) in
   let terminal_sum = ["usage", `Assoc
       [ "inputTokens", `Int 200; "outputTokens", `Int 14
       ; "cachedTokens", `Int 100; "reasoningTokens", `Int 6 ]] in
@@ -832,11 +867,11 @@ let test_view_gap_does_not_fabricate_a_turn_total () =
   let completed aggregate = Yojson.Safe.to_string (`Assoc
     [ "jsonrpc", `String "2.0"; "method", `String "turn/completed"
     ; "params", `Assoc (["sessionId", `String "s-1"; "turnId", `String "t-1";
-                         "terminal", `String "completed"] @
+                         "terminal", `String "completed"; "viewCursor", `String "terminal"] @
         if aggregate then ["usage", `Assoc ["inputTokens", `Int 200;
           "outputTokens", `Int 14; "cachedTokens", `Int 100; "reasoningTokens", `Int 6]]
         else []) ]) in
-  List.iter (fun (session, before_ack, aggregate, complete) ->
+  List.iter (fun (session, before_ack, aggregate) ->
     let reports = ref [] in
     let handshake = handshake_and_session ~granted:[] in
     let steps = if before_ack then
@@ -850,51 +885,51 @@ let test_view_gap_does_not_fabricate_a_turn_total () =
       (fun result _ -> match result with
         | Error error -> fail (Serve.error_to_string error)
         | Ok turn ->
-          check bool "only proven turn totals are emitted" (aggregate || complete)
+          check bool "durable calls prove the complete turn total" true
             (Option.is_some turn.usage);
-          check int "usage stream matches turn result"
-            (if aggregate || complete then 1 else 0) (List.length !reports);
+          check int "usage stream matches turn result" 1 (List.length !reports);
           Option.iter (fun (usage : Msp.token_usage) ->
             check int "terminal raw input is preserved" 200 usage.input_tokens;
-            check (option int) "gap never enriches terminal aggregate from partial calls"
-              (if complete then Some 300 else None) usage.prompt_tokens) turn.usage))
-    [ Some (`String "s-1"), false, false, false
-    ; None, false, false, false
-    ; Some `Null, false, false, false
-    ; Some (`String "s-1"), true, false, false
-    ; Some (`String "s-1"), false, true, false
-    ; None, true, true, false
-    ; Some (`String "another-session"), false, false, true
-    ; Some (`String "another-session"), true, true, true
+            check (option int) "durable counted-once prompts are recovered"
+              (Some 300) usage.prompt_tokens) turn.usage))
+    [ Some (`String "s-1"), false, false
+    ; None, false, false
+    ; Some `Null, false, false
+    ; Some (`String "s-1"), true, false
+    ; Some (`String "s-1"), false, true
+    ; None, true, true
+    ; Some (`String "another-session"), false, false
+    ; Some (`String "another-session"), true, true
     ];
-  List.iter (fun (turn_id, aggregate, complete) ->
+  List.iter (fun (turn_id, aggregate) ->
     let reports = ref [] in
     let handshake = handshake_and_session ~granted:[] in
     run_scripted ~on_stream_event:(function
       | Serve.Usage_reported {usage; _} -> reports := usage :: !reports
       | _ -> ())
-      (List.take 6 handshake @ [Write (frame ~turn_id "v:3")]
+      (List.take 6 handshake @ [Write turn_started; Write (frame ~turn_id "v:3")]
        @ List.drop 6 handshake
        @ [Write (frame "v:5"); Write (frame "v:8");
           Write agent_completed; Write (completed aggregate)])
       (fun result _ -> match result with
         | Error error -> fail (Serve.error_to_string error)
         | Ok turn ->
-          check bool "discarded pre-ack usage never becomes a partial turn total"
-            (aggregate || complete) (Option.is_some turn.usage);
-          check int "no partial usage event escapes"
-            (if aggregate || complete then 1 else 0) (List.length !reports);
+          check bool "durable pre-ack calls are recovered for this turn" true
+            (Option.is_some turn.usage);
+          check int "one authoritative usage event escapes" 1 (List.length !reports);
           Option.iter (fun (usage : Msp.token_usage) ->
-            check int "authoritative raw terminal is retained" 200 usage.input_tokens;
-            check (option int) "discarded pre-ack usage prevents enrichment"
-              (if complete then Some 300 else None) usage.prompt_tokens) turn.usage))
-    [ "t-1", false, false; "t-1", true, false
-    ; "another-turn", false, true; "another-turn", true, true ]
+            let calls = if turn_id = "t-1" then 3 else 2 in
+            check int "explicit aggregate remains authoritative"
+              (if aggregate then 200 else calls * 100) usage.input_tokens;
+            check (option int) "only a matching aggregate gains counted-once prompts"
+              (if aggregate && calls = 3 then None else Some (calls * 150)) usage.prompt_tokens) turn.usage))
+    [ "t-1", false; "t-1", true
+    ; "another-turn", false; "another-turn", true ]
 ;;
 
 (* The turn keeps its newest call's own counts: that request's counted-once
    prompt is the context it carried. Another session's frame is not the
-   turn's, and a view gap after the newest call may hide a later one. *)
+   turn's. Durable history recovers the newest call across live delivery gaps. *)
 let test_turn_keeps_its_newest_call_usage () =
   let frame ?(session = "s-1") ~cursor ~prompt ~output () = Yojson.Safe.to_string
       (`Assoc ["jsonrpc", `String "2.0"; "method", `String "session/tokenUsage";
@@ -935,9 +970,9 @@ let test_turn_keeps_its_newest_call_usage () =
       ; frame ~cursor:"v:8" ~prompt:400 ~output:9 ()
       ; frame ~cursor:"v:5" ~prompt:150 ~output:7 () ],
       Some (400, 9)
-    ; "a gap after the newest call hides it",
+    ; "durable history proves the newest call despite a live gap",
       [ frame ~cursor:"v:5" ~prompt:150 ~output:7 (); gap ],
-      None
+      Some (150, 7)
     ; "a call after the gap is the newest",
       [ frame ~cursor:"v:5" ~prompt:150 ~output:7 (); gap
       ; frame ~cursor:"v:9" ~prompt:500 ~output:11 () ],
@@ -1270,15 +1305,15 @@ let test_completed_message_presence () =
     [[], None; [Write blank], Some ""]
 ;;
 
-let phased_message ~item_id ?phase text =
+let phased_message ~item_id ?phase ?(truncated = false) text =
   let phase =
     match phase with
     | None -> ""
     | Some phase -> Printf.sprintf {|,"messagePhase":%S|} phase
   in
   Printf.sprintf
-    {|{"jsonrpc":"2.0","method":"item/completed","params":{"sessionId":"s-1","viewCursor":"v:8","item":{"itemId":%S,"kind":"agentMessage","turnId":"t-1","revision":2,"status":"completed","text":%S%s}}}|}
-    item_id text phase
+    {|{"jsonrpc":"2.0","method":"item/completed","params":{"sessionId":"s-1","viewCursor":%S,"item":{"itemId":%S,"kind":"agentMessage","turnId":"t-1","revision":2,"status":"completed","text":%S%s,"truncated":%b}}}|}
+    ("item-" ^ item_id) item_id text phase truncated
 ;;
 
 (* Muse 1.4.11 declares each agent message's phase; the phase, not the
@@ -1307,6 +1342,12 @@ let test_message_phase_marks_the_answer () =
     , None
     ; "the answer after narration", [ narration; answer ], Some "Suite passed."
     ; "the answer before trailing narration", [ answer; narration ], Some "Suite passed."
+    ; "truncated narration cannot hide a full answer"
+    , [ phased_message ~item_id:"m-c" ~phase:"commentary" ~truncated:true "Checking"; answer ]
+    , Some "Suite passed."
+    ; "a truncated older answer cannot hide the full latest answer"
+    , [ narration; phased_message ~item_id:"m-old" ~truncated:true "Earlier"; answer ]
+    , Some "Suite passed."
     ; "an unrecognized phase reads as an answer"
     , [ narration; phased_message ~item_id:"m-r" ~phase:"recap" "Recap." ]
     , Some "Recap."
@@ -1339,6 +1380,29 @@ let test_stream_callback_preserves_reserved_controls () =
   (* Ordinary callback failures stay isolated: the turn continues. *)
   Serve.emit_stream_event (Some (fun _ -> raise (Failure "buggy observer"))) event;
   Serve.emit_stream_event None event
+;;
+
+let test_history_failure_usage_observer_preserves_reserved_controls () =
+  List.iter (fun (name, reserved) ->
+    let usage_seen = ref false in
+    (match run_scripted
+       ~on_stream_event:(function
+         | Serve.Usage_reported _ -> usage_seen := true; raise reserved
+         | _ -> ())
+       (handshake_and_session ~granted:[]
+        @ [Write agent_completed; Write turn_completed; Read;
+           Write {|{"jsonrpc":"2.0","id":4,"error":{"code":-32040,"message":"history unavailable"}}|}])
+       (fun _ _ -> fail "reserved aggregate observer control was swallowed") with
+     | () -> fail "reserved aggregate observer returned"
+     | exception observed ->
+       check bool ("same aggregate observer " ^ name ^ " propagates") true (observed == reserved));
+    check bool "known aggregate reaches the observer despite failed history" true !usage_seen)
+    [ "operator interrupt", Keeper_operator_interrupt.Operator_interrupt
+    ; "timeout", Eio.Time.Timeout
+    ; "cancellation", Eio.Cancel.Cancelled (Failure "aggregate observer cancelled")
+    ; "out of memory", Out_of_memory
+    ; "stack overflow", Stack_overflow
+    ; "break", Sys.Break ]
 ;;
 
 (* The owner is cancelled while the host is still exiting after its turn ended.
@@ -1585,6 +1649,8 @@ let () =
         ; test_case "message phase marks the answer" `Quick test_message_phase_marks_the_answer
         ; test_case "stream callback preserves reserved controls" `Quick
             test_stream_callback_preserves_reserved_controls
+        ; test_case "history failure aggregate observer preserves reserved controls" `Quick
+            test_history_failure_usage_observer_preserves_reserved_controls
         ; test_case "native-only tool completion keeps status, arguments and output" `Quick
             test_native_tool_completion_preserves_vendor_evidence
         ; test_case "turn with tool and approval" `Quick test_turn_with_tool_and_approval

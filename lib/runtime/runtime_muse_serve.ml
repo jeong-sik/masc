@@ -615,11 +615,12 @@ let terminate_spawned_process ~sw ~clock proc stdin_w =
    measured; the owner can still cancel the turn. *)
 type receive_phase =
   | Awaiting_admission
+  | Awaiting_history
   | Model_turn
   | Tool_item_running
 
 let window_for_phase config = function
-  | Awaiting_admission -> Some config.admission_timeout_s
+  | Awaiting_admission | Awaiting_history -> Some config.admission_timeout_s
   | Model_turn -> config.timeout_s
   | Tool_item_running -> None
 ;;
@@ -630,7 +631,7 @@ let window_for_phase config = function
    before it, the line was not complete and nothing started. *)
 let turn_written = function
   | Awaiting_admission -> false
-  | Model_turn | Tool_item_running -> true
+  | Awaiting_history | Model_turn | Tool_item_running -> true
 ;;
 
 type io =
@@ -911,38 +912,7 @@ type turn_state =
   ; last_call_usage : Msp.token_usage option
     (** The newest reported call's own counts. A view gap after it means a
         later call may be missing, so the gap clears it. *)
-  ; message_gap : bool
-    (** A view gap for this session arrived during this turn, so an agent
-        message may have been dropped. Turn-local, unlike [observed_usage]. *)
   }
-
-(* A turn that completes with no completed final-answer message is how the
-   host says the model gave no answer, and MASC may settle that as a quiet
-   final; narration the model committed on the way does not change that.
-   The reading holds only when MASC saw the whole turn: a view gap can drop
-   the message's [item/completed], and an agent message still open at the
-   terminal never delivered its text. MSP offers no way to re-read dropped
-   events, so such a turn fails instead of settling as silence. *)
-let unobserved_final_message state =
-  match state.final_text with
-  | Some _ -> None
-  | None ->
-    let open_message =
-      List.exists
-        (fun (_, kind) ->
-           match (kind : Msp.item_kind) with
-           | Msp.Agent_message -> true
-           | Msp.User_message | Msp.Reasoning | Msp.Tool_call | Msp.User_shell
-           | Msp.Subagent | Msp.Workflow | Msp.Reminder_child | Msp.Compaction
-           | Msp.Unrecognized_item_kind _ -> false)
-        state.open_items
-    in
-    (match state.message_gap, open_message with
-     | false, false -> None
-     | true, _ ->
-       Some "a view gap may have dropped the final agent message before the turn completed"
-     | false, true -> Some "the turn completed while an agent message was still open")
-;;
 
 (* Per-completion counts are turn-local, never the session's cumulative
    counters. Preserve unknown cache splits across the sum. *)
@@ -985,6 +955,130 @@ let item_in_turn ~turn_id (item : Msp.item) =
   match item.Msp.turn_id with
   | Some item_turn -> String.equal item_turn turn_id
   | None -> false
+;;
+
+module View_cursors = Set.Make (String)
+
+type durable_turn =
+  { durable_final_text : string option
+  ; durable_usage : Msp.token_usage option
+  ; durable_last_call : Msp.token_usage option
+  ; durable_models : call_model list
+  }
+
+(* Only a contiguous durable range can certify the final answer. A gap rides
+   another queue and may arrive after the terminal, so live delivery alone
+   cannot prove either that its newest answer was seen or that it was quiet.
+   Replay is data here: never re-emit tools, usage, approvals or their effects. *)
+let durable_turn_of_events ~turn_id ~open_items events =
+  let collect result (event : Msp.view_event) =
+    let* messages = result in
+    let update completed (item : Msp.item) =
+      match List.assoc_opt item.item_id messages with
+      | Some (previous, _, _) when item.revision < previous.Msp.revision -> Ok messages
+      | Some (previous, was_completed, truncated) when item.revision = previous.Msp.revision ->
+        if item <> previous then protocol_error "view/page" "conflicting agent item revision"
+        else Ok (List.map (fun (id, value) ->
+          if String.equal id item.item_id
+          then id, (item, completed || was_completed, truncated || event.item_truncated)
+          else id, value) messages)
+      | Some (_, was_completed, _) ->
+        Ok (List.map (fun (id, value) ->
+          if String.equal id item.item_id
+          then id, (item, completed || was_completed, event.item_truncated)
+          else id, value) messages)
+      | None ->
+        Ok ((item.item_id, (item, completed, event.item_truncated))
+            :: List.remove_assoc item.item_id messages)
+    in
+    match event.notification with
+    | Msp.Item_completed { item; _ }
+      when item.kind = Msp.Agent_message && item_in_turn ~turn_id item -> update true item
+    | Msp.Item_updated { item; _ }
+      when item.kind = Msp.Agent_message && item_in_turn ~turn_id item ->
+      if item.status <> Msp.In_progress
+      then protocol_error "view/page" "agent item update is terminal"
+      else update false item
+    | Msp.Item_started { item; _ }
+      when item.kind = Msp.Agent_message && item_in_turn ~turn_id item -> update false item
+    | Msp.Item_started _ | Msp.Item_updated _ | Msp.Item_completed _
+    | Msp.Turn_started _ | Msp.Turn_completed _ | Msp.Item_delta _
+    | Msp.Usage_changed _ | Msp.View_gap _ | Msp.Model_usage_reported _
+    | Msp.Unhandled_notification _ -> Ok messages
+  in
+  let* messages = List.fold_left collect (Ok []) events in
+  let* () =
+    if List.exists (fun (id, kind) -> kind = Msp.Agent_message && not (List.mem_assoc id messages)) open_items
+       || List.exists (fun (_, (item, completed, _)) ->
+         not completed || item.Msp.status = Msp.In_progress) messages
+    then protocol_error "view/page" "an agent message has no durable terminal completion"
+    else Ok () in
+  let* durable_final_text = List.fold_left (fun result (_, (item, completed, truncated)) ->
+    let* chosen = result in
+    match chosen, item.Msp.message_phase with
+    | Some _, (None | Some (Msp.Commentary | Msp.Final_answer | Msp.Unrecognized_message_phase _))
+    | None, Some Msp.Commentary -> Ok chosen
+    | None, (None | Some (Msp.Final_answer | Msp.Unrecognized_message_phase _)) ->
+      if not completed || item.status <> Msp.Item_completed_status || truncated
+      then protocol_error "view/page" "latest final agent message is incomplete or truncated"
+      else match item.text with
+      | Some text -> Ok (Some text)
+      | None -> protocol_error "view/page" "completed final agent message has no text") (Ok None) messages
+  in
+  let durable_usage, durable_last_call, durable_models =
+    List.fold_left (fun ((sum, _, models) as previous) (event : Msp.view_event) ->
+      match event.notification with
+      | Msp.Model_usage_reported { turn_id = reported; model_id; usage; _ }
+        when String.equal reported turn_id ->
+        let sum = Some (match sum with None -> usage | Some sum -> add_usage sum usage) in
+        let call = match model_id with Some model -> Named model | None -> Unnamed in
+        let models = match models with
+          | previous :: _ when same_call previous call -> models
+          | [] | _ :: _ -> call :: models in
+        sum, Some usage, models
+      | Msp.Model_usage_reported _ | Msp.Turn_started _ | Msp.Turn_completed _
+      | Msp.Item_started _ | Msp.Item_updated _ | Msp.Item_completed _ | Msp.Item_delta _
+      | Msp.Usage_changed _ | Msp.View_gap _ | Msp.Unhandled_notification _ ->
+        previous) (None, None, []) events
+  in
+  Ok { durable_final_text; durable_usage; durable_last_call; durable_models }
+;;
+
+let read_durable_turn io ~session_id ~turn_id ~terminal_cursor ~open_items =
+  io.set_receive_phase Awaiting_history;
+  let rec read ~cursor ~seen ~later =
+    let* result = request io ~method_:"view/page" (fun ~id ->
+      Msp.view_page_backward_request ~id ~session_id ~cursor) in
+    let* page = lift (Msp.parse_view_page_result result) in
+    let* seen = List.fold_left (fun result (event : Msp.view_event) ->
+      let* seen = result in
+      if not (String.equal event.session_id session_id)
+      then protocol_error "view/page" "event belongs to another session"
+      else if View_cursors.mem event.view_cursor seen
+      then protocol_error "view/page" "exclusive page repeated an observed cursor"
+      else Ok (View_cursors.add event.view_cursor seen)) (Ok seen) page.events in
+    let rec boundary kept = function
+      | [] -> None
+      | (event : Msp.view_event) :: rest ->
+        (match event.notification with
+         | Msp.Turn_started { session_id = sid; turn_id = started }
+           when String.equal sid session_id && String.equal started turn_id -> Some kept
+         | Msp.Turn_started _ | Msp.Turn_completed _ | Msp.Item_started _
+         | Msp.Item_updated _ | Msp.Item_completed _ | Msp.Item_delta _
+         | Msp.Usage_changed _ | Msp.View_gap _ | Msp.Model_usage_reported _
+         | Msp.Unhandled_notification _ -> boundary (event :: kept) rest)
+    in
+    match boundary [] (List.rev page.events) with
+    | Some current -> durable_turn_of_events ~turn_id ~open_items (current @ later)
+    | None ->
+      (match page.events, page.next_cursor with
+       | (first : Msp.view_event) :: _, Some next
+         when String.equal next first.view_cursor ->
+         read ~cursor:next ~seen ~later:(page.events @ later)
+       | [], (Some _ | None) | _ :: _, None | _ :: _, Some _ ->
+         protocol_error "view/page" "history ended before the current turn's start boundary")
+  in
+  read ~cursor:terminal_cursor ~seen:(View_cursors.singleton terminal_cursor) ~later:[]
 ;;
 
 let tool_completion (status : Msp.item_status) : Runtime_native_tools.completion =
@@ -1148,7 +1242,6 @@ let rec await_terminal io (config : config) ~mcp_servers ~session_id ~turn_id ~o
            { state with
              observed_usage = Usage_gap
            ; last_call_usage = None
-           ; message_gap = true
            })
        else continue state
      (* The session's selection is what MASC asked for; the model a call ran
@@ -1186,31 +1279,74 @@ let rec await_terminal io (config : config) ~mcp_servers ~session_id ~turn_id ~o
           | Named _, (Some _ | None) | Unnamed, None -> ());
          emit (Model_call_reported { session_id; turn_id; model = model_id });
          continue { state with call_models = call :: state.call_models })
-     | Msp.Turn_completed { session_id = sid; turn_id = completed; terminal; usage; _ }
+     | Msp.Turn_completed { session_id = sid; turn_id = completed; view_cursor; terminal; usage; _ }
        when ours sid && String.equal completed turn_id ->
        emit (Turn_terminal_received terminal);
-       let usage = terminal_usage ~observed:state.observed_usage ~terminal:usage in
-       Option.iter (fun usage -> emit (Usage_reported { session_id; turn_id; usage })) usage;
-       (match terminal with
-        | Msp.Terminal_completed ->
-          (match unobserved_final_message state with
-           | None -> Ok (state, usage)
-           | Some detail -> protocol_error "turn/completed" detail)
-        | Msp.Terminal_failed ({ quota = Some _; _ } as turn_error) ->
-          Error (Turn_failed turn_error)
-        | Msp.Terminal_failed { kind = Msp.Auth_required; message; quota = None; _ } ->
-          Error (Auth_required message)
-        | Msp.Terminal_failed
-            ({ kind =
-                 ( Msp.Step_limit | Msp.Config_error | Msp.Projection_error | Msp.Log_error
-                 | Msp.Workflow_launch_error | Msp.Environment_error | Msp.Model_error
-                 | Msp.Launch_error | Msp.Unrecognized_error_kind _ )
-             ; _
-             } as turn_error) -> Error (Turn_failed turn_error)
-        | Msp.Terminal_host_died { reason } -> Error (host_died_error ~reason)
-        | Msp.Terminal_cancelled -> Error Turn_cancelled
-        | Msp.Unrecognized_terminal terminal ->
-          protocol_error "turn/completed" ("unrecognized terminal " ^ terminal))
+       let usage_reported = ref false in
+       let report_usage usage =
+         usage_reported := true;
+         emit (Usage_reported { session_id; turn_id; usage }) in
+       let preserve_aggregate () =
+         (* An authoritative provider aggregate survives even when history
+            cannot certify the answer or its owner cancels that RPC. *)
+         if not !usage_reported then
+           Eio.Cancel.protect (fun () -> Option.iter (fun usage ->
+             emit (Model_call_reported {session_id; turn_id; model=None});
+             report_usage usage) usage) in
+       let complete () =
+           let* state = match terminal with
+             | Msp.Terminal_completed ->
+               let* witness = read_durable_turn io ~session_id ~turn_id
+                   ~terminal_cursor:view_cursor ~open_items:state.open_items in
+               (match witness.durable_models, state.call_models with
+                | call :: _, previous :: _ when same_call call previous -> ()
+                | (Named model :: _), ([] | _ :: _) ->
+                  emit (Model_call_reported {session_id; turn_id; model=Some model})
+                | (Unnamed :: _), ([] | _ :: _) ->
+                  emit (Model_call_reported {session_id; turn_id; model=None})
+                | [], ([] | _ :: _) -> ());
+               Ok {state with final_text=witness.durable_final_text;
+                 observed_usage=Observing_usage witness.durable_usage;
+                 last_call_usage=witness.durable_last_call; call_models=witness.durable_models}
+             | Msp.Terminal_failed _ | Msp.Terminal_host_died _
+             | Msp.Terminal_cancelled | Msp.Unrecognized_terminal _ -> Ok state in
+           let usage = match terminal with
+             | Msp.Terminal_completed -> terminal_usage ~observed:state.observed_usage ~terminal:usage
+             | Msp.Terminal_failed _ | Msp.Terminal_host_died _
+             | Msp.Terminal_cancelled | Msp.Unrecognized_terminal _ ->
+               (* Counts are authoritative; live delivery cannot certify which
+                  model made the newest call without a durable witness. *)
+               Option.iter (fun _ ->
+                 emit (Model_call_reported {session_id; turn_id; model=None})) usage;
+               usage in
+           Option.iter report_usage usage;
+           (match terminal with
+            | Msp.Terminal_completed ->
+              Ok (state, usage)
+            | Msp.Terminal_failed ({ quota = Some _; _ } as turn_error) ->
+              Error (Turn_failed turn_error)
+            | Msp.Terminal_failed { kind = Msp.Auth_required; message; quota = None; _ } ->
+              Error (Auth_required message)
+            | Msp.Terminal_failed
+                ({ kind =
+                     ( Msp.Step_limit | Msp.Config_error | Msp.Projection_error | Msp.Log_error
+                     | Msp.Workflow_launch_error | Msp.Environment_error | Msp.Model_error
+                     | Msp.Launch_error | Msp.Unrecognized_error_kind _ )
+                 ; _
+                 } as turn_error) -> Error (Turn_failed turn_error)
+            | Msp.Terminal_host_died { reason } -> Error (host_died_error ~reason)
+            | Msp.Terminal_cancelled -> Error Turn_cancelled
+            | Msp.Unrecognized_terminal terminal ->
+              protocol_error "turn/completed" ("unrecognized terminal " ^ terminal)) in
+       (match complete () with
+        | result -> preserve_aggregate (); result
+        | exception exn ->
+          let backtrace = Printexc.get_raw_backtrace () in
+          (* [Fun.protect] wraps a finalizer's reserved control. Observe outside
+             it, preserving the original exception if observation also raises. *)
+          (match preserve_aggregate () with
+           | () -> Printexc.raise_with_backtrace exn backtrace
+           | exception _ -> Printexc.raise_with_backtrace exn backtrace))
      | Msp.Turn_started _
      | Msp.Turn_completed _
      | Msp.Item_started _
@@ -1424,14 +1560,12 @@ let run_protocol
      that follows adopts the declared idle policy. *)
   io.set_receive_phase Model_turn;
   let observed_usage = ref (Observing_usage None) in
-  let message_gap = ref false in
   let discarded_usage_turns = ref [] in
   let* ack =
     match await_response
       ~on_view_gap:(fun sid ->
         if gap_applies ~session_id sid then (
           observed_usage := Usage_gap;
-          message_gap := true;
           emit_stream_event on_stream_event View_gap_observed))
       ~on_model_usage:(fun ~session_id:sid ~turn_id ->
         if String.equal sid session_id then
@@ -1483,7 +1617,6 @@ let run_protocol
         ; usage_cursors = []
         ; observed_usage = !observed_usage
         ; last_call_usage = None
-        ; message_gap = !message_gap
         ; tool_calls = 0
         ; approvals = 0
         ; pending_decisions = []

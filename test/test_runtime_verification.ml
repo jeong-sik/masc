@@ -1278,8 +1278,19 @@ def emit(frame):
 def reply(request, result):
     emit({"jsonrpc": "2.0", "id": request["id"], "result": result})
 
+retained_events = []
+durable_cursors = {"turn/started": "readiness-turn-start", "item/completed": "readiness-message",
+                   "turn/completed": "readiness-terminal"}
+
 def notify(method, **params):
-    emit({"jsonrpc": "2.0", "method": method, "params": {"sessionId": "s-readiness", "viewCursor": "v:1", **params}})
+    params = {"sessionId": "s-readiness", "viewCursor": durable_cursors.get(method, "v:1"), **params}
+    event = {"method": method, "params": params}
+    if method in ("turn/started", "item/completed", "session/tokenUsage"):
+        position = {"id": "readiness-record-%d" % (len(retained_events) + 1), "sequence": len(retained_events) + 1}
+        params["sourceRange"] = {"stream": {"kind": "run", "id": "readiness-run"},
+                                 "first": position, "last": position}
+        retained_events.append(event)
+    emit({"jsonrpc": "2.0", **event})
 
 request = read()
 assert request["method"] == "initialize"
@@ -1373,7 +1384,12 @@ else:
         "revision": 1, "status": "completed", "text": text})
     notify("turn/completed", turnId="t-readiness", terminal="completed")
 for line in sys.stdin:
-    pass
+    request = json.loads(line)
+    if request.get("method") == "view/page":
+        assert request["params"] == {"sessionId": "s-readiness", "cursor": "readiness-terminal",
+                                     "direction": "backward", "limit": 1000}
+        assert mode not in ("muse-auth", "muse-auth-retryable", "muse-retryable", "muse-rejected")
+        reply(request, {"events": retained_events, "nextCursor": None})
 |}
 
 (* A Muse host that fails the readiness turn with a modelError and answers

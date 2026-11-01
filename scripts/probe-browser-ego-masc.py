@@ -53,6 +53,11 @@ def utc_now():
     return datetime.now(timezone.utc).isoformat()
 
 
+def require(condition, observation):
+    if not condition:
+        raise RuntimeError(str(observation))
+
+
 def decode_rpc(raw):
     text = raw.decode()
     if text.lstrip().startswith('{'):
@@ -74,6 +79,7 @@ class Client:
         self.session = None
         self.sequence = 0
         self.calls = []
+        self.opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
         self.rpc('initialize', {'protocolVersion': '2024-11-05', 'capabilities': {},
                  'clientInfo': {'name': 'masc-ego-acceptance', 'version': '1'}})
         self.rpc('notifications/initialized', {}, notification=True)
@@ -88,7 +94,7 @@ class Client:
             headers['Mcp-Session-Id'] = self.session
         request = urllib.request.Request(self.endpoint, headers=headers,
                   data=json.dumps(payload).encode(), method='POST')
-        with urllib.request.urlopen(request, timeout=120) as response:
+        with self.opener.open(request, timeout=120) as response:
             self.session = response.headers.get('Mcp-Session-Id', self.session)
             raw = response.read()
         return decode_rpc(raw) if raw else None
@@ -220,11 +226,11 @@ def main():
         client.call('masc_browser_interact', {**target, 'action': 'workflow', 'expectedUrl': url, 'steps': steps})
         with server.gate:
             records = list(server.records)
-        assert len(records) == 1, 'Server must receive exactly one save'
+        require(len(records) == 1, 'Server must receive exactly one save')
         saved = records[0]
-        assert saved['name'] == 'Ego 한글 😀' and saved['priority'] == 'high', saved
-        assert saved['trusted'] and len(saved['pastes']) == 1 and saved['pastes'][0]['trusted'], saved
-        assert '<b>Native browser record</b>' in saved['rich'], saved
+        require(saved['name'] == 'Ego 한글 😀' and saved['priority'] == 'high', saved)
+        require(saved['trusted'] and len(saved['pastes']) == 1 and saved['pastes'][0]['trusted'], saved)
+        require('<b>Native browser record</b>' in saved['rich'], saved)
         proof['saved_record'] = saved
         pointer_steps = [
             {'method': 'click', 'selector': 'loc=role:button[name="Shadow action"]'},
@@ -238,10 +244,10 @@ def main():
                                        'expectedUrl': url, 'steps': pointer_steps}))
         evaluations = [x for x in values_named(pointer, 'receipt')
                        if isinstance(x, dict) and 'frameClicks' in x]
-        assert len(evaluations) == 1, 'No native browser state receipt'
+        require(len(evaluations) == 1, 'No native browser state receipt')
         observed = evaluations[0]
-        assert observed['frameClicks'] == observed['shadowClicks'] == observed['offscreenClicks'] == [True], observed
-        assert observed['frameValues'] == ['Native frame'], observed
+        require(observed['frameClicks'] == observed['shadowClicks'] == observed['offscreenClicks'] == [True], observed)
+        require(observed['frameValues'] == ['Native frame'], observed)
         proof['pointer_state'] = observed
         # Wrong initial URL must reject this workflow before its click. The
         # server ledger independently proves that it did not submit twice.
@@ -249,32 +255,32 @@ def main():
                     'expectedUrl': url + 'wrong', 'steps': [steps[4]]}, expect_error=True)
         proof['wrong_url_refusal'] = structured(refused)
         failures = list(values_named(refused, 'io.github.jeong-sik/masc.lane.failure'))
-        assert any(x.get('effect') == 'proven_pre_effect' and x.get('class') == 'workflow_rejection'
-                   for x in failures), 'Wrong-URL result is not a typed pre-effect refusal'
-        assert 'not_started' in values_named(refused, 'effectPhase'), 'Wrong-URL result lacks effect phase'
+        require(any(x.get('effect') == 'proven_pre_effect' and x.get('class') == 'workflow_rejection'
+                    for x in failures), 'Wrong-URL result is not a typed pre-effect refusal')
+        require('not_started' in values_named(refused, 'effectPhase'), 'Wrong-URL result lacks effect phase')
         with server.gate:
-            assert len(server.records) == 1, 'Rejected workflow sent another save'
+            require(len(server.records) == 1, 'Rejected workflow sent another save')
         screenshot = client.call('masc_browser_read', {**target, 'mode': 'screenshot',
                                  'screenshotOptions': {'fullPage': True}})
         images = []
         for index, item in enumerate(screenshot.get('content', [])):
             if item.get('type') == 'image':
-                assert item.get('mimeType') == 'image/png', 'Expected native PNG'
+                require(item.get('mimeType') == 'image/png', 'Expected native PNG')
                 data = base64.b64decode(item['data'], validate=True)
-                assert len(data) >= 24 and data[:8] == b'\x89PNG\r\n\x1a\n', 'Invalid PNG'
+                require(len(data) >= 24 and data[:8] == b'\x89PNG\r\n\x1a\n', 'Invalid PNG')
                 filename = f'masc-browser-{index}.png'
                 (output / filename).write_bytes(data)
                 images.append({'file': filename, 'sha256': hashlib.sha256(data).hexdigest(),
                                'bytes': len(data), 'width': int.from_bytes(data[16:20], 'big'),
                                'height': int.from_bytes(data[20:24], 'big')})
-        assert images, 'No image returned by native screenshot'
+        require(images, 'No image returned by native screenshot')
         proof['screenshots'] = images
         client.call('masc_browser_read', {**target, 'mode': 'snapshot', 'snapshotScope': 'full_page'})
         close_attempted = True
         client.call('masc_browser_act', {**target, 'action': 'close_tab'})
         with server.gate:
             final_count = len(server.records)
-        assert final_count == 1, 'Final server ledger must still contain exactly one save'
+        require(final_count == 1, 'Final server ledger must still contain exactly one save')
         proof.update(completed=True, closed_test_tab=True, tab_state='closed', save_count=final_count)
     except Exception as error:
         proof['failure'] = {'type': type(error).__name__, 'message': str(error)}

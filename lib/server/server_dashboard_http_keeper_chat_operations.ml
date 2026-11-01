@@ -774,5 +774,9 @@ module For_testing = struct
       parse_empty "cancel" body
       |> Result.map (fun () -> None)
       |> Result.map_error (fun (error : api_error) -> error.code)
+    | Retry_preparation ->
+      parse_preparation_retry body
+      |> Result.map (fun (_expected_revision, _execution_digest) -> None)
+      |> Result.map_error (fun (error : api_error) -> error.code)
   ;;
 end

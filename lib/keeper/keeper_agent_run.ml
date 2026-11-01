@@ -656,7 +656,9 @@ let run_turn
           ~operation_id:binding.operation_id ~execution_digest:binding.execution_digest
         |> Result.map_error (fun error -> Agent_core.Error.Internal
             (Keeper_owner_registry.command_error_to_string error)))
-    | _ -> None in
+    | Some (Gate_continuation _ | Runtime_continuation _), _
+    | Some (Checkpoint_continuation _), Some _
+    | None, _ | Some _, None -> None in
   (* Restore the whole native context before prompt/tool setup closes over
      it. The same object must reach Core so new load receipts, repetition
      observations and injector updates are persisted together. *)

@@ -1,7 +1,7 @@
 (test
  (name test_keeper_muse_runtime)
  (modules test_keeper_muse_runtime)
- (deps ../config/prompts/keeper.md)
+ (deps (source_tree ../config/prompts))
  (libraries masc masc_test_deps masc.keeper_chat_operations masc.keeper_execution_scope
   masc.keeper_checkpoint_ref masc.keeper_registry))
 

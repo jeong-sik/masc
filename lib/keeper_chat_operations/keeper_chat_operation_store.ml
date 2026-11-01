@@ -2326,7 +2326,11 @@ let direct_preparation_wait store ~operation_id =
   Ok (match execution with
     | Some {Semantic.phase=Semantic.Preparation_wait waiting;revision;_} ->
       Some {revision;execution_digest=operation.execution_digest;waiting}
-    | Some _ | None -> None)
+    | Some {Semantic.phase=Semantic.Preparing | Semantic.Ready | Semantic.Running
+            | Semantic.Preparing_checkpoint _ | Semantic.Resuming_runtime_retry _
+            | Semantic.Resuming_gate _ | Semantic.Recovering _
+            | Semantic.Suspended _ | Semantic.Settled _; _}
+    | None -> None)
 ;;
 
 let direct_runtime_retry store ~operation_id =
@@ -2678,7 +2682,12 @@ let wait_direct_preparation store ~now ~operation_id ~execution_digest ~observed
         when String.equal execution_digest waiting.execution_digest
           && Semantic.equal_gate_checkpoint observed (Semantic.Official_client waiting.waiting.checkpoint)
           && String.equal detail waiting.waiting.detail -> Ok operation
-    | _ -> Error (Integrity_error "preparation wait commit is not confirmed") in
+    | (Operation.Queued | Operation.Running _ | Operation.Succeeded _
+       | Operation.Failed _ | Operation.Cancelled _), None
+    | (Operation.Running _ | Operation.Succeeded _ | Operation.Failed _
+       | Operation.Cancelled _), Some _
+    | Operation.Queued, Some _ ->
+      Error (Integrity_error "preparation wait commit is not confirmed") in
   let result = with_transaction store (fun () ->
     let* operation = operation_or_unknown store.db operation_id in
     if not (String.equal operation.execution_digest execution_digest)
@@ -2698,8 +2707,13 @@ let wait_direct_preparation store ~now ~operation_id ~execution_digest ~observed
   match result with
   | Ok _ -> read_confirmed ()
   | Error (Store_unavailable _ as error) ->
-    (match read_confirmed () with Ok operation -> Ok operation | Error _ -> Error error)
-  | Error _ as error -> error
+    (match read_confirmed () with
+     | Ok operation -> Ok operation
+     | Error (Invalid_input _ | Unknown_operation _ | Not_queued _ | Not_running _
+              | Idempotency_conflict _ | Store_unavailable _ | Integrity_error _
+              | Native_call_unsettled) -> Error error)
+  | Error (Invalid_input _ | Unknown_operation _ | Not_queued _ | Not_running _
+           | Idempotency_conflict _ | Integrity_error _ | Native_call_unsettled) as error -> error
 ;;
 
 (* [Preparing_checkpoint] is a positive durable exclusion of client entry:
@@ -2710,7 +2724,13 @@ let block_preparing_with_db store ~now ~detail operation execution =
     let* next = semantic_transition ~now (Semantic.Wait_preparation {observed;detail}) expected in
     let* () = update_semantic store ~expected next in
     requeue_continuation_with_db store.db operation |> Result.map Option.some
-  | _, _ -> Ok None
+  | (Operation.Queued | Operation.Succeeded _ | Operation.Failed _ | Operation.Cancelled _), _
+  | Operation.Running _,
+    (None
+    | Some {Semantic.phase=Semantic.Preparing | Semantic.Ready | Semantic.Running
+            | Semantic.Resuming_runtime_retry _ | Semantic.Resuming_gate _
+            | Semantic.Recovering _ | Semantic.Preparation_wait _
+            | Semantic.Suspended _ | Semantic.Settled _; _}) -> Ok None
 ;;
 
 let block_preparing_checkpoint store ~now ~operation_id ~detail =
@@ -2723,7 +2743,11 @@ let block_preparing_checkpoint store ~now ~operation_id ~detail =
       let* operation = operation_or_unknown store.db operation_id in
       let* execution = direct_execution_with_db store.db operation in
       block_preparing_with_db store ~now ~detail operation execution)
-  | Some _ | None -> Ok None
+  | Some {Semantic.phase=Semantic.Preparing | Semantic.Ready | Semantic.Running
+          | Semantic.Resuming_runtime_retry _ | Semantic.Resuming_gate _
+          | Semantic.Recovering _ | Semantic.Preparation_wait _
+          | Semantic.Suspended _ | Semantic.Settled _; _}
+  | None -> Ok None
 ;;
 
 let block_preparing_operations store ~now =
@@ -2738,7 +2762,11 @@ let block_preparing_operations store ~now =
         let* _ = direct_execution_with_db store.db operation in
         block_preparing_with_db store ~now ~detail:"official checkpoint preparation interrupted before dispatch admission"
           operation (Some execution) |> Result.map (fun _ -> ())
-      | _, _ -> Ok ()) (Ok ()) executions)
+      | (Semantic.Preparing | Semantic.Ready | Semantic.Running
+         | Semantic.Resuming_runtime_retry _ | Semantic.Resuming_gate _
+         | Semantic.Recovering _ | Semantic.Preparation_wait _
+         | Semantic.Suspended _ | Semantic.Settled _), _
+      | Semantic.Preparing_checkpoint _, None -> Ok ()) (Ok ()) executions)
 ;;
 
 let enter_direct_preparation store ~now ~operation_id ~execution_digest =
@@ -2757,8 +2785,13 @@ let enter_direct_preparation store ~now ~operation_id ~execution_digest =
          update_semantic store ~expected next
        | Some {Semantic.phase=Semantic.Running;_} -> Ok ()
        | None -> Error (Invalid_input "official preparation has no semantic checkpoint")
-       | Some _ -> Error (Invalid_input "official preparation no longer owns dispatch admission"))
-    | _ -> Error (Not_running operation_id))
+       | Some {Semantic.phase=Semantic.Preparing | Semantic.Ready
+               | Semantic.Resuming_runtime_retry _ | Semantic.Resuming_gate _
+               | Semantic.Recovering _ | Semantic.Preparation_wait _
+               | Semantic.Suspended _ | Semantic.Settled _; _} ->
+         Error (Invalid_input "official preparation no longer owns dispatch admission"))
+    | Operation.Queued | Operation.Succeeded _ | Operation.Failed _ | Operation.Cancelled _ ->
+      Error (Not_running operation_id))
 ;;
 
 let retry_direct_preparation store ~now ~operation_id ~expected_revision ~execution_digest =
@@ -2777,7 +2810,11 @@ let retry_direct_preparation store ~now ~operation_id ~expected_revision ~execut
         let* next = semantic_transition ~now (Semantic.Retry_preparation waiting) expected in
         let* () = update_semantic store ~expected next in
         Ok operation
-      | Some _ | None -> Error (Invalid_input "preparation retry revision or state changed"))
+      | Some {Semantic.phase=Semantic.Preparing | Semantic.Ready | Semantic.Running
+              | Semantic.Preparing_checkpoint _ | Semantic.Resuming_runtime_retry _
+              | Semantic.Resuming_gate _ | Semantic.Recovering _ | Semantic.Preparation_wait _
+              | Semantic.Suspended _ | Semantic.Settled _; _}
+      | None -> Error (Invalid_input "preparation retry revision or state changed"))
 ;;
 
 let direct_gate_state store ~operation_id =

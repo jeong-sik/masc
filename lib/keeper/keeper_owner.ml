@@ -1668,7 +1668,9 @@ let start
         (match preparation with
          | Error error -> Error (record_operation_error t error)
          | Ok (Some _) ->
-           (match !(t.operation_error) with Some (Operation_availability_failure _) -> t.operation_error := None | _ -> ());
+           (match !(t.operation_error) with
+            | Some (Operation_availability_failure _) -> t.operation_error := None
+            | Some (Operation_integrity_failure _ | Operation_reconciliation_required _) | None -> ());
            (match read_operation_projection t.operation_store ~now:(t.now ()) with
             | Error error -> Error (record_operation_error t error)
             | Ok projection -> publish_operation_projection t projection; Ok ())
@@ -2002,7 +2004,10 @@ let start
               run_operation_command t ~label:"admit official checkpoint dispatch" (fun () ->
                 Chat_operation_store.enter_direct_preparation t.operation_store ~now:(t.now ()) ~operation_id ~execution_digest)
               |> Result.map fst
-            | _ -> Error (Operation_rejected (Chat_operation_store.Invalid_input
+            | (Some {lane=Autonomous;_} | Some {lane=Maintenance;_}), _
+            | Some {lane=Chat_operation;_}, Some _
+            | None, _ | Some _, None ->
+              Error (Operation_rejected (Chat_operation_store.Invalid_input
                 "official dispatch admission requires its exact executing child")) in
           Eio.Promise.resolve resolve response;
           loop state
@@ -2021,7 +2026,12 @@ let start
                 Chat_operation_store.wait_direct_preparation t.operation_store ~now:(t.now ())
                   ~operation_id ~execution_digest ~observed ~detail)
               |> Result.map fst
-            | _ -> Error (Operation_rejected (Chat_operation_store.Invalid_input
+            | None, _, _
+            | Some _, None, _
+            | Some _, Some _, None
+            | Some _, (Some {lane=Autonomous;_} | Some {lane=Maintenance;_}), _
+            | Some _, Some {lane=Chat_operation;_}, Some _ ->
+              Error (Operation_rejected (Chat_operation_store.Invalid_input
                 "preparation wait requires its exact executing child and a pre-dispatch preparation failure")) in
           Eio.Promise.resolve resolve response;
           loop state

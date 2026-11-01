@@ -529,8 +529,24 @@ let apply ~now action current =
     let reject () = Error (Invalid_transition ("action is not admitted in " ^ phase_name current.phase)) in
     let* () = match current.phase, action with
       | Preparing_checkpoint _, (Enter_official_checkpoint | Wait_preparation _ | Settle Cancelled) -> Ok ()
-      | Preparing_checkpoint _, _ -> reject ()
-      | _ -> Ok () in
+      | (Preparing | Ready | Running | Resuming_runtime_retry _ | Resuming_gate _ | Recovering _
+         | Preparation_wait _ | Suspended _ | Settled _),
+        (Confirm_sources | Begin_execution | Resume_checkpoint _ | Resume_official_checkpoint _
+         | Wait_preparation _ | Enter_official_checkpoint | Retry_preparation _
+         | Require_reconciliation _ | Suspend _ | Suspend_official_checkpoint _
+         | Suspend_runtime_retry _ | Resume_runtime_retry _ | Update_runtime_retry_wait _
+         | Suspend_gate_reconciliation _ | Suspend_gate _ | Suspend_input _
+         | Prepare_input_response _ | Resolve_input _ | Resolve_input_branch _
+         | Advance_input_branch _ | Reconcile_gate_binding _ | Resolve_gate _
+         | Resume_gate _ | Discharge_gate _ | Settle _) -> Ok ()
+      | Preparing_checkpoint _,
+        (Confirm_sources | Begin_execution | Resume_checkpoint _ | Resume_official_checkpoint _
+         | Retry_preparation _ | Require_reconciliation _ | Suspend _
+         | Suspend_official_checkpoint _ | Suspend_runtime_retry _ | Resume_runtime_retry _
+         | Update_runtime_retry_wait _ | Suspend_gate_reconciliation _ | Suspend_gate _
+         | Suspend_input _ | Prepare_input_response _ | Resolve_input _ | Resolve_input_branch _
+         | Advance_input_branch _ | Reconcile_gate_binding _ | Resolve_gate _
+         | Resume_gate _ | Discharge_gate _ | Settle (Completed | Failed _)) -> reject () in
     let* phase = match action with
       | Confirm_sources ->
           (match current.phase with
@@ -577,7 +593,8 @@ let apply ~now action current =
       | Enter_official_checkpoint ->
           (match current.phase with
            | Preparing_checkpoint _ -> unchanged Running
-           | _ -> reject ())
+           | Preparing | Ready | Running | Resuming_runtime_retry _ | Resuming_gate _
+           | Recovering _ | Preparation_wait _ | Suspended _ | Settled _ -> reject ())
       | Retry_preparation observed ->
           (match current.phase with
            | Preparation_wait expected when expected = observed ->
@@ -653,7 +670,7 @@ let apply ~now action current =
            | Recovering {origin=Input_wait waiting;_}
                when equal_input_wait waiting intent.waiting
                  && Option.is_some (Scope_id.direct_operation_id current.id)
-                 && Option.fold ~none:true ~some:(fun branch ->
+                 && Option.fold ~none:true ~some:(fun (branch : input_branch) ->
                    Keeper_checkpoint_ref.equal branch.checkpoint waiting.checkpoint) current.input_branch
                  && (Option.is_none current.input_branch || intent.destination = Operation_input)
                  && Option.fold ~none:true ~some:(fun previous -> continues_input_response_intent ~previous ~next:intent) current.input_response_intent ->
@@ -687,7 +704,7 @@ let apply ~now action current =
                  && intent.destination = Operation_input
                  && Keeper_checkpoint_ref.equal checkpoint intent.candidate
                  && Option.is_some (Scope_id.direct_operation_id current.id)
-                 && Option.fold ~none:true ~some:(fun branch ->
+                 && Option.fold ~none:true ~some:(fun (branch : input_branch) ->
                    Keeper_checkpoint_ref.equal branch.checkpoint observed.checkpoint) current.input_branch ->
              unchanged (Suspended checkpoint)
            | (Preparing | Ready | Running | Preparing_checkpoint _ | Resuming_runtime_retry _ | Resuming_gate _
@@ -768,7 +785,11 @@ let apply ~now action current =
                  | Running | Resuming_runtime_retry _ | Resuming_gate _ ->
                    if current.gate_obligations = [] then unchanged (Settled terminal) else reject ()
                  | Preparing | Ready | Preparing_checkpoint _ | Recovering _ | Preparation_wait _ | Suspended _ | Settled _ -> reject ())
-            | Failed _ when (match current.phase with Preparing_checkpoint _ -> true | _ -> false) -> reject ()
+            | Failed _ when (match current.phase with
+                              | Preparing_checkpoint _ -> true
+                              | Preparing | Ready | Running | Resuming_runtime_retry _
+                              | Resuming_gate _ | Recovering _ | Preparation_wait _
+                              | Suspended _ | Settled _ -> false) -> reject ()
             | Cancelled | Failed _ ->
                 (match current.phase with
                  | Preparing | Ready | Running | Preparing_checkpoint _ | Resuming_runtime_retry _ | Resuming_gate _ | Recovering _ | Preparation_wait _ | Suspended _ -> unchanged (Settled terminal)
@@ -829,12 +850,12 @@ let apply ~now action current =
       | Suspend_runtime_retry _ | Resume_runtime_retry _ | Update_runtime_retry_wait _
       | Suspend_gate_reconciliation _ | Suspend_gate _ | Suspend_input _ | Reconcile_gate_binding _
       | Advance_input_branch _ | Resolve_gate _ | Resume_gate _ | Discharge_gate _ -> current.input_response_intent in
-    let input_branch = match action with
+    let input_branch : input_branch option = match action with
       | Resolve_input_branch {observed;checkpoint} ->
         let origin = match current.input_branch with None -> observed | Some branch -> branch.origin in
         Some {origin;checkpoint}
       | Advance_input_branch {checkpoint;_} ->
-        Option.map (fun branch -> {branch with checkpoint}) current.input_branch
+        Option.map (fun (branch : input_branch) -> {branch with checkpoint}) current.input_branch
       | Settle _ -> None
       | Enter_official_checkpoint | Wait_preparation _ | Retry_preparation _ | Confirm_sources | Begin_execution | Resume_checkpoint _ | Resume_official_checkpoint _
       | Require_reconciliation _ | Suspend _ | Suspend_official_checkpoint _

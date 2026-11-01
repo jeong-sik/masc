@@ -4256,8 +4256,7 @@ supports_native_streaming = true
 
 # api.kimi.com takes temperature 0.6 only at effort=none and 1.0 otherwise,
 # so AGENT_CORE leaves temperature out and the endpoint picks it.
-# Only the none/not-none difference (reasoning_content present or absent) is
-# verified. The stream carries reasoning text on delta.reasoning_content
+# The stream carries reasoning text on delta.reasoning_content
 # (raw chunk 2026-09-16T14:53Z: `"delta":{"reasoning_content":"Let"}`). Left
 # undeclared, the reasoning_effort dialect default "reasoning" is read instead,
 # the first chunk fails the stream, and history replays under that name too.
@@ -4266,6 +4265,11 @@ supports_native_streaming = true
 # 2026-11-01). Preserve the complete assistant reasoning across turns, as
 # required by the Kimi K3 multi-turn and tool-call contract:
 # https://platform.kimi.ai/docs/guide/kimi-k3-quickstart.
+# The Coding Plan documents low/high/max, default high for K3 and max for
+# kimi-for-coding (K2.8 Preview). Omitted effort stays omitted. An explicit
+# disable is accepted as none, which routes to K2.8 Preview without thinking;
+# it does not preserve K3 model identity. Checked 2026-11-01:
+# https://www.kimi.com/code/docs/en/kimi-code/models.html.
 [[models]]
 model_id = "k3"
 provider_name = "kimi_coding"
@@ -4274,10 +4278,10 @@ max_context_tokens = 1048576
 supports_tools = true
 supports_tool_choice = false
 supports_reasoning = true
-thinking_control_format = "reasoning_effort"
+thinking_control_format = "reasoning_effort_default_on"
 reasoning_streaming_format = "delta:reasoning_content"
 reasoning_replay = "preserve_always"
-accepted_reasoning_efforts = ["none"]
+accepted_reasoning_efforts = ["none", "low", "high", "max"]
 supports_image_input = true
 supports_multimodal_inputs = true
 supports_native_streaming = true
@@ -4287,9 +4291,8 @@ ignored_sampling_parameters = ["temperature"]
 # context_length 262144 and otherwise the same metadata as k3 (reasoning,
 # image and video input, dynamic tools, efforts low/high/max). Provider-scoped
 # lookup is an exact id match, so k3's row does not answer for it. Not called
-# that day: the plan's weekly quota was spent. The controls copy k3's row,
-# which claims only the none/not-none difference it has verified, not the
-# listed ladder.
+# that day: the plan's weekly quota was spent. The current official effort
+# contract above applies to both windows.
 [[models]]
 model_id = "k3-256k"
 provider_name = "kimi_coding"
@@ -4298,10 +4301,10 @@ max_context_tokens = 262144
 supports_tools = true
 supports_tool_choice = false
 supports_reasoning = true
-thinking_control_format = "reasoning_effort"
+thinking_control_format = "reasoning_effort_default_on"
 reasoning_streaming_format = "delta:reasoning_content"
 reasoning_replay = "preserve_always"
-accepted_reasoning_efforts = ["none"]
+accepted_reasoning_efforts = ["none", "low", "high", "max"]
 supports_image_input = true
 supports_multimodal_inputs = true
 supports_native_streaming = true
@@ -4325,8 +4328,10 @@ max_output_tokens = 131072
 supports_tools = true
 supports_tool_choice = false
 supports_reasoning = true
+thinking_control_format = "reasoning_effort_default_on"
 reasoning_streaming_format = "delta:reasoning_content"
 reasoning_replay = "preserve_always"
+accepted_reasoning_efforts = ["none", "low", "high", "max"]
 supports_response_format_json = true
 supports_structured_output = true
 supports_native_streaming = true

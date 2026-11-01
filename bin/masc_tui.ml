@@ -6093,8 +6093,9 @@ let launch_browser_lane state ~mailbox operation =
         read_view = Browser_lane_view.read_view_for_operation operation view.read_view;
         refresh_pending =
           if operation_is_refresh operation then Some generation else view.refresh_pending } in
-      (* The picker that asks for the list again shows nothing of the read
-         before it. Every other request leaves what the last discovery said. *)
+      (* The picker withholds the previous list and host while asking again.
+         Its dated startup recovery evidence remains until a successful list answers.
+         Every other request leaves what the last discovery said. *)
       state.browser_lane <- Some (match operation with
         | Discover Choose_client -> Browser_lane_view.withdraw_discovery launched
         | Discover Read_after_discovery | Read | Read_refresh | Open_session | Close_session | Goto _

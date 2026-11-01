@@ -682,6 +682,61 @@ let test_unified_browser_picker () =
   expect "stale discovery cannot overwrite explicit selection"
     (accept_clients ~generation:90 (Ok (found [firefox])) live = (live, false))
 
+let test_failed_discovery_retains_startup_observation () =
+  let conflict = Masc.Browser_addon_observation.Ego_user_owned_name {space="masc";observed_at=42.} in
+  let unavailable = decode_unavailable
+      (Some (`List [Masc.Browser_addon_observation.unavailable_to_json conflict])) in
+  let observed = { (pinned ()) with unavailable; selected_tab=Some 2; scroll=9;
+    url_draft=Some "https://example.org/draft"; pending_open=true } in
+  let waiting purpose =
+    let pending = {observed with load=Loading (42, Discover purpose)} in
+    match purpose with Choose_client -> withdraw_discovery pending | Read_after_discovery -> pending in
+  List.iter (fun purpose ->
+    let pending = waiting purpose in
+    expect "a pending list retains the original startup observation"
+      (pending.unavailable=unavailable);
+    expect "pending discovery preserves its original list-admission boundary"
+      (match purpose with
+       | Choose_client -> pending.clients=None && pending.bidi_host=Host_not_reported
+           && pending.inventory_report=Inventory_not_reported && pending.automatic=None
+           && not (selected_client_available pending)
+       | Read_after_discovery -> pending.clients=observed.clients);
+    let failed, read = accept_clients ~generation:42 (Error "connection refused") pending in
+    expect "a failed list retains the same recovery scope and observation time"
+      (failed.unavailable=unavailable);
+    expect "failure remains a failure without an automatic continuation"
+      (failed.load=Failed "connection refused" && not read && not failed.pending_open
+       && failed.clients=None && failed.bidi_host=Host_not_reported
+       && failed.inventory_report=Inventory_not_reported && failed.automatic=None
+       && not (selected_client_available failed));
+    expect "the failed list cannot replace the selected connection or operator draft"
+      (failed.selected_client=observed.selected_client && failed.selected_tab=observed.selected_tab
+       && failed.reading=observed.reading && failed.url_draft=observed.url_draft && failed.scroll=observed.scroll);
+    expect "a stale failure cannot retire current request ownership"
+      (accept_clients ~generation:41 (Error "stale failure") pending=(pending,false));
+    expect "a stale success cannot replace recovery evidence"
+      (accept_clients ~generation:41 (Ok (found [firefox])) pending=(pending,false)))
+    [Choose_client;Read_after_discovery];
+  let next = Masc.Browser_addon_observation.Ego_user_owned_name {space="different";observed_at=84.} in
+  let next_observation = decode_unavailable
+      (Some (`List [Masc.Browser_addon_observation.unavailable_to_json next])) in
+  List.iter (fun replacement ->
+    let fresh, _ = accept_clients ~generation:42
+        (Ok {(found [firefox]) with unavailable=replacement}) (waiting Choose_client) in
+    expect "each successful list replaces the previous backend observation"
+      (fresh.unavailable=replacement && fresh.clients=Some [firefox] && fresh.load=Idle))
+    [next_observation;Backends_unavailable [];Backends_not_reported;
+     decode_unavailable (Some (`String "invalid"))];
+  let never_observed, read = accept_clients ~generation:42 (Error "offline")
+      {(create ()) with load=Loading (42, Discover Choose_client)} in
+  expect "a first failed list cannot invent a startup observation"
+    (never_observed.unavailable=Backends_not_reported && not read);
+  let unreadable = decode_unavailable (Some (`String "invalid")) in
+  let failed, _ = accept_clients ~generation:42 (Error "offline")
+      (withdraw_discovery {observed with unavailable=unreadable;load=Loading (42,Discover Choose_client)}) in
+  expect "a previously unreadable report also retains its original provenance"
+    (failed.unavailable=unreadable)
+
 let test_bidi_host_discovery () =
   let row id = `Assoc ["clientId", `String id; "browser", `String "firefox";
                        "interactions", `List []; "lastActivities", `List []; "transport", `String "web_extension";"space",`Null;"spaceObservation",`Null] in
@@ -1105,6 +1160,7 @@ let () =
      "inventory issues guard recommendations", test_inventory_issues_guard_automatic_recommendations;
      "inventory completeness summary contract", test_inventory_summary_contract;
      "unified browser picker", test_unified_browser_picker;
+     "failed discovery retains startup recovery", test_failed_discovery_retains_startup_observation;
      "the BiDi host report rides the connection list", test_bidi_host_discovery;
      "raw refresh scroll identity", test_raw_refresh_scroll_identity;
      "scoped refresh failure and region recovery", test_scoped_refresh_failure_retains_read_intent;

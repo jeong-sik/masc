@@ -135,6 +135,8 @@ let test_an_attested_stream_is_read_to_its_end env =
        Alcotest.failf "the stream was refused (%d): %s" status detail
      | Error (Http.Execute_unattested { status; detail }) ->
        Alcotest.failf "the stream was unattested (%d): %s" status detail
+     | Error (Http.Execute_invalid_response { status; detail }) ->
+       Alcotest.failf "the stream response was invalid (%d): %s" status detail
      | Error (Http.Execute_transport_failed detail) ->
        Alcotest.failf "the transport failed: %s" detail);
     Alcotest.(check string) "the bytes the server wrote" frames (Buffer.contents received);
@@ -168,6 +170,8 @@ let test_a_stream_without_the_receipt_is_refused_before_a_byte_is_read env =
            Alcotest.(check int) (label ^ ": nothing was read") 0 !chunks
          | Error (Http.Execute_http_refused { status; detail }) ->
            Alcotest.failf "%s: ordinary HTTP refusal %d: %s" label status detail
+         | Error (Http.Execute_invalid_response { status; detail }) ->
+           Alcotest.failf "%s: invalid response %d: %s" label status detail
          | Error (Http.Execute_transport_failed detail) ->
            Alcotest.failf "%s: the transport failed instead: %s" label detail
          | Ok () -> Alcotest.failf "%s: the stream was accepted" label))
@@ -175,6 +179,27 @@ let test_a_stream_without_the_receipt_is_refused_before_a_byte_is_read env =
     ; "another value", [ receipt_name, "matched-v0" ]
     ; "the receipt twice", [ receipt; receipt ]
     ]
+;;
+
+let test_execute_rejects_invalid_sse_responses_before_reading env =
+  let cases =
+    [ "JSON body", `OK, [ "application/json" ], 200
+    ; "missing media type", `OK, [], 200
+    ; "duplicate media types", `OK, [ "text/event-stream"; "text/event-stream" ], 200
+    ; "no content", `No_content, [ "text/event-stream" ], 204
+    ]
+  in
+  List.iter (fun (label, status, content_types, expected_status) ->
+    let handler = stream_response ~status ~content_types ~receipts:[ receipt ]
+        [ "data: {}\n\n" ] in
+    with_server env ~handler (fun ~port ->
+      let chunks = ref 0 in
+      (match observe env ~port ~on_chunk:(fun _ -> incr chunks) () with
+       | Error (Http.Execute_invalid_response { status; _ }) ->
+         Alcotest.(check int) (label ^ ": status") expected_status status
+       | Error _ -> Alcotest.failf "%s: wrong error" label
+       | Ok () -> Alcotest.failf "%s: response was accepted" label);
+      Alcotest.(check int) (label ^ ": no body chunks") 0 !chunks)) cases
 ;;
 
 let test_a_workspace_mismatch_is_refused_with_its_status env =
@@ -195,6 +220,8 @@ let test_a_workspace_mismatch_is_refused_with_its_status env =
       Alcotest.(check int) "nothing was read" 0 !chunks
     | Error (Http.Execute_unattested { status; detail }) ->
       Alcotest.failf "unexpected unattested status %d: %s" status detail
+    | Error (Http.Execute_invalid_response { status; detail }) ->
+      Alcotest.failf "unexpected invalid response %d: %s" status detail
     | Error (Http.Execute_transport_failed detail) ->
       Alcotest.failf "the transport failed instead: %s" detail
     | Ok () -> Alcotest.fail "a refusal was read as a stream")
@@ -241,7 +268,7 @@ let with_raw_peer env ~status ~attest ~truncate body =
       skip_headers ();
       Eio.Flow.copy_string
         (Printf.sprintf "HTTP/1.1 %d Test\r\nContent-Length: 1000000\r\n%s\r\n"
-          status (if attest then "x-masc-workspace-read: matched-v1\r\n" else "")) flow;
+          status (if attest then "x-masc-workspace-read: matched-v1\r\nContent-Type: text/event-stream\r\n" else "")) flow;
       if truncate then (
         Eio.Flow.copy_string "partial" flow;
         Eio.Flow.close flow
@@ -289,6 +316,8 @@ let test_refusal_body_disconnect_keeps_the_status env =
     | Error (Http.Execute_http_refused { status; _ }) -> Alcotest.failf "wrong status: %d" status
     | Error (Http.Execute_unattested { status; detail }) ->
       Alcotest.failf "unexpected unattested status %d: %s" status detail
+    | Error (Http.Execute_invalid_response { status; detail }) ->
+      Alcotest.failf "unexpected invalid response %d: %s" status detail
     | Error (Http.Execute_transport_failed detail) -> Alcotest.failf "lost status: %s" detail
     | Ok () -> Alcotest.fail "a refusal was accepted")
 ;;
@@ -307,6 +336,8 @@ let test_dribbling_refusal_has_a_whole_body_deadline env =
            (String_util.contains_substring detail "did not finish in time")
        | Error (Http.Execute_unattested { status; detail }) ->
          Alcotest.failf "unexpected unattested status %d: %s" status detail
+       | Error (Http.Execute_invalid_response { status; detail }) ->
+         Alcotest.failf "unexpected invalid response %d: %s" status detail
        | Error (Http.Execute_transport_failed detail) -> Alcotest.failf "lost status: %s" detail
        | Ok () -> Alcotest.fail "a refusal was accepted");
       Alcotest.(check bool) "the body was still making progress" true (!writes >= 2);
@@ -327,7 +358,7 @@ let test_the_refusal_deadline_does_not_end_a_successful_stream env =
      with
      | `Timeout -> ()
      | `Result (Ok ()) -> Alcotest.fail "the server did not close the stream"
-     | `Result (Error (Http.Execute_http_refused { detail; _ } | Http.Execute_unattested { detail; _ } | Http.Execute_transport_failed detail)) ->
+     | `Result (Error (Http.Execute_http_refused { detail; _ } | Http.Execute_unattested { detail; _ } | Http.Execute_invalid_response { detail; _ } | Http.Execute_transport_failed detail)) ->
        Alcotest.failf "healthy stream ended at refusal deadline: %s" detail);
     Alcotest.(check bool) "stream continued past the refusal deadline" true (!writes >= 5 && !chunks > 0);
     wait_for_peer_close env closed)
@@ -342,7 +373,7 @@ let test_cancelling_a_refusal_body_still_cancels_the_request env =
      with
      | `Timeout -> ()
      | `Result (Ok ()) -> Alcotest.fail "a refusal was accepted"
-     | `Result (Error (Http.Execute_http_refused _ | Http.Execute_unattested _ | Http.Execute_transport_failed _)) ->
+     | `Result (Error (Http.Execute_http_refused _ | Http.Execute_unattested _ | Http.Execute_invalid_response _ | Http.Execute_transport_failed _)) ->
        Alcotest.fail "cancellation was reported as a stream outcome");
     wait_for_peer_close env closed)
 ;;
@@ -704,6 +735,8 @@ let () =
       , [ case
             "a stream without the receipt is refused before a byte is read"
             test_a_stream_without_the_receipt_is_refused_before_a_byte_is_read
+        ; case "execute rejects invalid SSE responses before reading"
+            test_execute_rejects_invalid_sse_responses_before_reading
         ; case
             "a workspace mismatch is refused with its status"
             test_a_workspace_mismatch_is_refused_with_its_status

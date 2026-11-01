@@ -1405,6 +1405,7 @@ reply(request, {"serverInfo": {"name": "muse-session-server", "version": "1.4.0"
 assert read()["method"] == "initialized"
 request = read()
 if request["method"] == "usage/read":
+    assert mode not in ["muse-quota-typed", "muse-quota-typed-retryable"], "typed quota needs no usage/read"
     spent = mode == "muse-quota-spent"
     now_ms = time.time_ns() // 1_000_000
     reply(request, {"usage": {"observedAtMs": now_ms, "tier": "fixture",
@@ -1421,8 +1422,11 @@ assert request["method"] == "turn/start"
 reply(request, {"commandId": request["params"]["commandId"], "status": "accepted", "turnId": "t-quota",
     "startedNewTurn": True, "disposition": "started"})
 notify("turn/started", turnId="t-quota", commandId=request["params"]["commandId"])
-notify("turn/completed", turnId="t-quota", terminal="failed",
-    error={"kind": "modelError", "message": "fixture provider failure", "retryable": False})
+error = {"kind": "modelError", "message": "fixture provider failure", "retryable": False}
+if mode in ["muse-quota-typed", "muse-quota-typed-retryable"]:
+    error["retryable"] = mode == "muse-quota-typed-retryable"
+    error["quota"] = {"limitKind": "tierLimit", "resetsAtMs": time.time_ns() // 1_000_000 + 3_600_000}
+notify("turn/completed", turnId="t-quota", terminal="failed", error=error)
 sys.stdin.read()
 |}
 
@@ -1540,7 +1544,8 @@ tools-support = true
            ~scope:(Runtime_instance.quota_scope_of_runtime selected) ~now:(Time_compat.now ()));
       Runtime_quota_window.reset_for_testing ();
       Unix.unlink script)
-      ["muse-quota-spent", "quota_exhausted"; "muse-quota-open", "provider_rejected"];
+      ["muse-quota-spent", "quota_exhausted"; "muse-quota-open", "provider_rejected";
+       "muse-quota-typed", "quota_exhausted"; "muse-quota-typed-retryable", "quota_exhausted"];
     Unix.unlink source;
     let result = Verify.verify ~secure_random:env#secure_random ~sw ~net:env#net
       ~mgr ~clock:env#clock ~cwd:Eio.Path.(env#fs / directory)

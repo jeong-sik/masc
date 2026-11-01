@@ -169,7 +169,7 @@ module For_testing : sig
       opens and closes with the MASC tool blocks and is released when the
       held blocks reach the stream. *)
 
-  val runtime_error_to_core_error : Runtime_muse_serve.error -> Agent_core.Error.t
+  val runtime_error_to_core_error : ?now:float -> Runtime_muse_serve.error -> Agent_core.Error.t
 
   val recovery_failure_of_runtime_error : ?current:Keeper_official_client_session_store.recovery_failure ->
     Runtime_muse_serve.error -> Keeper_official_client_session_store.recovery_failure

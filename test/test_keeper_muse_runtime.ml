@@ -366,7 +366,7 @@ let test_refusals_of_the_session_start_fresh_next () =
     ; "returned an unsafe approval mode", Serve.Session_approval_mode_mismatch
         {requested=Msp.Prompt_unmatched; reported=Some Msp.Allow_all}
     ; "terminal nonretryable failure", Serve.Turn_failed
-        {Msp.kind=Msp.Step_limit; message="fixture refusal"; retryable=false}
+        {Msp.kind=Msp.Step_limit; message="fixture refusal"; retryable=false; quota=None}
     ];
   (match Adapter.runtime_error_to_core_error lease_held with
    | Agent_core.Error.Provider
@@ -379,6 +379,16 @@ let test_refusals_of_the_session_start_fresh_next () =
 ;;
 
 let test_error_projection () =
+  List.iter (fun retryable ->
+    let error = Serve.Turn_failed
+        {Msp.kind=Msp.Model_error; message="fixture failure"; retryable;
+         quota=Some {limit_kind="tierLimit"; resets_at_ms=500500}} in
+    match Adapter.runtime_error_to_core_error ~now:100. error with
+    | Agent_core.Error.Provider
+        (Llm_provider.Error.HardQuota {provider="muse_serve"; retry_after; _}) ->
+      check (option (float 0.001)) "typed reset becomes retry delay" (Some 400.5) retry_after
+    | error -> failf "quota must not become generic availability: %s" (Agent_core.Error.to_string error))
+    [true; false];
   (match Adapter.runtime_error_to_core_error (Serve.Auth_required "run muse login") with
    | Agent_core.Error.Provider (Llm_provider.Error.AuthError { detail = "run muse login"; _ }) -> ()
    | error -> failf "auth: %s" (Agent_core.Error.to_string error));
@@ -409,14 +419,14 @@ let test_error_projection () =
      the failure is the provider's availability, not its verdict. *)
   (match
      Adapter.runtime_error_to_core_error
-       (Serve.Turn_failed { Msp.kind = Msp.Model_error; message = "overloaded"; retryable = true })
+       (Serve.Turn_failed { Msp.kind = Msp.Model_error; message = "overloaded"; retryable = true; quota = None })
    with
    | Agent_core.Error.Provider
        (Llm_provider.Error.ProviderUnavailable { provider = "muse_serve"; _ }) -> ()
    | error -> failf "retryable turn failure: %s" (Agent_core.Error.to_string error));
   match
     Adapter.runtime_error_to_core_error
-      (Serve.Turn_failed { Msp.kind = Msp.Step_limit; message = "too many steps"; retryable = false })
+      (Serve.Turn_failed { Msp.kind = Msp.Step_limit; message = "too many steps"; retryable = false; quota = None })
   with
   | Agent_core.Error.Provider
       (Llm_provider.Error.ProviderReportedError { error_type = Some "stepLimit"; _ }) -> ()
@@ -672,13 +682,20 @@ with open(os.path.join(HERE, mode + "-prompt.txt"), "w") as handle:
 with open(os.path.join(HERE, mode + "-turn-id.txt"), "w") as handle:
     handle.write(turn_id)
 
+def start_view_gap(timing):
+    if mode == "start" and FIXTURE.get("start_view_gap") == timing:
+        notify("view/gap", {"sessionId": FIXTURE.get("view_gap_session", SESSION),
+                            "after": "v:0", "next": "v:9"})
+
 def acknowledge(disposition="started"):
+    start_view_gap("before_ack")
     send({"jsonrpc": "2.0", "id": turn["id"], "result": {
         "commandId": turn_id, "status": "accepted", "turnId": turn_id,
         "startedNewTurn": disposition == "started", "disposition": disposition}})
     if disposition == "started":
         notify("turn/started", {"sessionId": SESSION, "turnId": turn_id,
                                 "commandId": turn_id})
+        start_view_gap("after_ack")
         if mode == "start" and ("start_compaction" in FIXTURE or "compaction_metadata" in FIXTURE):
             metadata = FIXTURE.get("compaction_metadata", {
                 "trigger": "auto", "outcome": FIXTURE.get("start_compaction")})
@@ -783,6 +800,8 @@ if SCENARIO in ["turn_failed", "turn_failed_with_usage", "read_only_tool_failure
     terminal = {"sessionId": SESSION, "turnId": turn_id, "terminal": "failed",
                 "error": {"kind": "modelError", "message": "provider returned 503",
                           "retryable": True}}
+    if "turn_error" in FIXTURE:
+        terminal["error"] = FIXTURE["turn_error"]
     if SCENARIO == "turn_failed_with_usage":
         terminal["usage"] = {"inputTokens": 10, "outputTokens": 2,
                              "cachedTokens": 0, "reasoningTokens": 0}
@@ -902,6 +921,7 @@ let declare_keeper ~base_path profile_lines =
 
 type observed_run =
   { outcome : Keeper_muse_runtime.attempt_outcome
+  ; adapter_result : (Runtime_agent.run_result, Agent_core.Error.t) result
   ; events : Agent_core.Types.sse_event list
   ; reports : Keeper_client_usage_report.t list
   ; transmitted : Keeper_official_client_host.transmitted_model_input list
@@ -979,9 +999,10 @@ let run_turn_with ?raw_trace ?composed_context ?goal_blocks ?(accepts_image_inpu
       ~config
       ()
   in
-  (* This direct adapter fixture is its caller: accept the returned result
-     before consuming the opaque durable result set. The routed Keeper test
-     separately exercises a rejecting caller predicate. *)
+  (* Native stop/session assertions observe the adapter result separately.
+     The caller still applies acceptance before consuming durable results;
+     a repeated-tool stop is settled by the adapter and rejected by the caller. *)
+  let adapter_result = outcome.result in
   let result = Result.bind outcome.result (fun result ->
     Result.bind
       (Keeper_turn_driver.For_testing.apply_official_client_accept ~runtime_id
@@ -996,6 +1017,7 @@ let run_turn_with ?raw_trace ?composed_context ?goal_blocks ?(accepts_image_inpu
         | Ok () -> Ok result | Error detail -> Error (Agent_core.Error.Internal detail))) in
   let outcome = {outcome with result} in
   { outcome
+  ; adapter_result
   ; events = List.rev !events
   ; reports = List.rev !reports
   ; transmitted = List.rev !transmitted
@@ -1462,6 +1484,32 @@ let test_subscription_exhaustion_is_account_scoped () =
       Runtime_quota_window.reset_for_testing ())
 ;;
 
+let test_typed_quota_rests_only_the_selected_account () =
+  Runtime_quota_window.reset_for_testing ();
+  with_scripted_host
+    ~fixture:["scenario", `String "turn_failed"; "turn_error", `Assoc
+      ["kind", `String "modelError"; "message", `String "fixture failure";
+       "retryable", `Bool false; "requestDenied", `Bool true;
+       "quota", `Assoc ["limitKind", `String "tierLimit"; "resetsAtMs", `Int 500500]]]
+    ~after:(fun ~base_path ->
+      check bool "typed quota needs no independent usage/read" false
+        (Sys.file_exists (Filename.concat base_path "usage-read.log"));
+      Runtime_quota_window.reset_for_testing ())
+    (fun ~base_path ->
+      let run = run_turn ~base_path ~tool:(masc_probe_tool (ref `Null)) in
+      check bool "failed turn stays failed" true (Result.is_error run.outcome.result);
+      check bool "request refusal cannot certify earlier tools were effect-free" true
+        (run.outcome.effect_disposition = Keeper_provider_attempt_effect.Observation_unavailable);
+      let scope = Runtime_quota_window.scope_of_muse_home (Filename.concat base_path "account-home") in
+      let other = Runtime_quota_window.scope_of_muse_home (Filename.concat base_path "other-account") in
+      check (option (float 0.001)) "failed terminal records the exact reset" (Some 500.5)
+        (Runtime_quota_window.active_until ~scope ~now:100.);
+      check bool "other account remains available" false
+        (Runtime_quota_window.is_exhausted ~scope:other ~now:100.);
+      check string "failed model turn was not replayed" "start\n"
+        (read_text (Filename.concat base_path "sessions.log")))
+;;
+
 let test_muse_usage_read_rests_only_the_selected_account () =
   let usage = `Assoc
     [ "observedAtMs", `Int 100000
@@ -1580,6 +1628,22 @@ let check_effect label expected (outcome : Keeper_muse_runtime.attempt_outcome) 
   check string label
     (Keeper_provider_attempt_effect.to_string expected)
     (Keeper_provider_attempt_effect.to_string outcome.effect_disposition)
+;;
+
+let check_repeated_stop_rejected ~base_path (run : observed_run) =
+  (match run.outcome.result with
+   | Error error ->
+     (match Keeper_internal_error.classify_masc_internal_error error with
+      | Some (Keeper_internal_error.Host_stopped_turn
+          {runtime_id = observed_runtime; stop = Repeated_tool_call}) ->
+        check string "caller rejection names the runtime" runtime_id observed_runtime
+      | Some _ | None -> failf "repeated stop lost its caller rejection: %s"
+          (Agent_core.Error.to_string error))
+   | Ok _ -> fail "the caller accepted a repeated-tool stop");
+  let retained = Keeper_client_tool_outbox.load ~base_path ~keeper_name
+      |> function Ok retained -> retained | Error detail -> fail detail in
+  check int "rejected stop keeps its completed tool result" 1
+    (List.length (Keeper_client_tool_outbox.receipt_ids retained))
 ;;
 
 let started_turn_id ~base_path = read_text (Filename.concat base_path "start-turn-id.txt")
@@ -1754,7 +1818,8 @@ let test_a_stop_before_the_turn_start_answer_settles () =
         ~tool:(masc_probe_tool (ref `Null))
         ()
     in
-    (match run.outcome.result with
+    check_repeated_stop_rejected ~base_path run;
+    (match run.adapter_result with
      | Ok { Runtime_agent.stop_reason =
               Runtime_agent.Yielded_after_repeated_tool_call { tool_name; repeated_count; _ }; _ } ->
        check string "stopped tool" "masc_probe" tool_name;
@@ -2214,10 +2279,10 @@ let test_compaction_trace_failure_preserves_provider_result () =
     ; "break", Sys.Break ]
 ;;
 
-let check_resume_recall_blocks ~compaction ~resend_after_start () =
+let check_resume_recall_blocks ?(fixture = []) ~compaction ~resend_after_start () =
   let fixture = match compaction with
-    | None -> []
-    | Some outcome -> [ "start_compaction", `String outcome ] in
+    | None -> fixture
+    | Some outcome -> ("start_compaction", `String outcome) :: fixture in
   with_scripted_host ~fixture (fun ~base_path ->
     let tool = masc_probe_tool (ref `Null) in
     List.iteri (fun index recall ->
@@ -2258,6 +2323,25 @@ let test_resume_restores_recall_after_compaction () =
 
 let test_resume_keeps_recall_after_noop_compaction () =
   check_resume_recall_blocks ~compaction:(Some "noop") ~resend_after_start:false ()
+;;
+
+let test_resume_restores_recall_after_view_gap () =
+  List.iter
+    (fun timing ->
+       check_resume_recall_blocks
+         ~fixture:["start_view_gap", `String timing]
+         ~compaction:None ~resend_after_start:true ())
+    ["before_ack"; "after_ack"]
+;;
+
+let test_other_session_view_gap_keeps_held_recall () =
+  List.iter
+    (fun timing ->
+       check_resume_recall_blocks
+         ~fixture:["start_view_gap", `String timing;
+                   "view_gap_session", `String "another-session"]
+         ~compaction:None ~resend_after_start:false ())
+    ["before_ack"; "after_ack"]
 ;;
 
 let test_call_usage_survives_missing_terminal_aggregate () =
@@ -2395,6 +2479,22 @@ let test_an_unobserved_final_message_is_not_silence () =
       check_effect (name ^ ": effects unknown")
         Keeper_provider_attempt_effect.Observation_unavailable run.outcome))
     [ "gap_no_message"; "open_message" ]
+;;
+
+let test_gap_before_ack_cannot_settle_lost_response_as_silence () =
+  List.iter (fun other_session ->
+    let fixture = scenario "no_message" @ ["start_view_gap", `String "before_ack"]
+        @ (if other_session then ["view_gap_session", `String "another-session"] else []) in
+    with_scripted_host ~fixture (fun ~base_path ->
+      let run = run_turn ~base_path ~tool:(masc_probe_tool (ref `Null)) in
+      match other_session, run.outcome.result with
+      | true, Ok result -> check int "unrelated gap permits a quiet turn" 0 (List.length result.response.content)
+      | false, Error _ ->
+        check_effect "lost response keeps effect uncertainty"
+          Keeper_provider_attempt_effect.Observation_unavailable run.outcome
+      | true, Error error -> fail (Agent_core.Error.to_string error)
+      | false, Ok _ -> fail "a gap before acknowledgement settled as silence"))
+    [false; true]
 ;;
 
 let test_a_message_completed_after_a_gap_is_kept () =
@@ -2611,7 +2711,8 @@ let test_a_host_stopped_turns_context_stays_held_whatever_the_host_counted () =
         ~on_official_client_tool_boundary:(fun ~tool_name:_ ->
           Ok (Some (Keeper_official_client_host.Repeated_tool_call
             { tool_name = "masc_probe"; repeated_count = 3 }))) in
-    (match stopped.outcome.result with
+    check_repeated_stop_rejected ~base_path stopped;
+    (match stopped.adapter_result with
      | Ok { Runtime_agent.stop_reason = Runtime_agent.Yielded_after_repeated_tool_call _; _ } -> ()
      | Ok _ -> fail "the host stop lost its cause"
      | Error error -> fail (Agent_core.Error.to_string error));
@@ -2688,10 +2789,13 @@ let test_owner_cancellation_after_completion_keeps_recovery () =
 ;;
 
 let test_owner_cancellation_after_retryable_terminal_retains_turn () =
+  List.iter (fun (extra_fixture, expected_quota_reset) ->
+  Runtime_quota_window.reset_for_testing ();
+  Fun.protect ~finally:Runtime_quota_window.reset_for_testing (fun () ->
   with_scripted_host (fun ~base_path ->
     let tool = masc_probe_tool (ref `Null) in
     ignore (settle_first_turn ~base_path ~tool);
-    write_fixture ~base_path (scenario "turn_failed_with_usage");
+    write_fixture ~base_path (scenario "turn_failed_with_usage" @ extra_fixture);
     let usage_seen = ref false in
     (match Eio.Switch.run (fun turn_sw ->
        Eio.Fiber.fork ~sw:turn_sw (fun () ->
@@ -2704,6 +2808,12 @@ let test_owner_cancellation_after_retryable_terminal_retains_turn () =
      | () -> fail "terminal usage cancellation was swallowed"
      | exception exn when Keeper_registry_types.is_operator_interrupt exn -> ());
     check bool "terminal usage callback reached" true !usage_seen;
+    let scope = Runtime_quota_window.scope_of_muse_home (Filename.concat base_path "account-home") in
+    let other = Runtime_quota_window.scope_of_muse_home (Filename.concat base_path "other-account") in
+    check (option (float 0.001)) "terminal quota remains observed during owner cancellation"
+      expected_quota_reset (Runtime_quota_window.active_until ~scope ~now:100.);
+    check bool "owner cancellation does not rest another account" false
+      (Runtime_quota_window.is_exhausted ~scope:other ~now:100.);
     let after = Store.load ~base_path ~keeper_name |> Result.get_ok |> Option.get in
     check int "retryable terminal ordinal preserved" 2 after.turn_count;
     (match after.phase, after.last_transient_release with
@@ -2715,7 +2825,13 @@ let test_owner_cancellation_after_retryable_terminal_retains_turn () =
     write_fixture ~base_path [];
     match (run_turn_with ~base_path ~tool ()).outcome.result with
     | Ok result -> check (option bool) "matching failed history still resumes" (Some true) result.session_resumed
-    | Error error -> fail (Agent_core.Error.to_string error))
+    | Error error -> fail (Agent_core.Error.to_string error))))
+    [ [], None
+    ; ["turn_error", `Assoc
+        ["kind", `String "authRequired"; "message", `String "fixture quota denial";
+         "retryable", `Bool true;
+         "quota", `Assoc ["limitKind", `String "tierLimit"; "resetsAtMs", `Int 500500]]],
+      Some 500.5 ]
 ;;
 
 (* A host stop settles the turn before the host reports its terminal. A
@@ -2730,7 +2846,8 @@ let test_host_stop_resume_admits_either_ending_of_the_stopped_turn () =
         ~on_official_client_tool_boundary:(fun ~tool_name:_ ->
           Ok (Some (Keeper_official_client_host.Repeated_tool_call
             { tool_name = "masc_probe"; repeated_count = 3 }))) () in
-      (match stopped.outcome.result with
+      check_repeated_stop_rejected ~base_path stopped;
+      (match stopped.adapter_result with
        | Ok { Runtime_agent.stop_reason =
                 Runtime_agent.Yielded_after_repeated_tool_call { tool_name; repeated_count; _ }; _ } ->
          check string "stopped tool" "masc_probe" tool_name;
@@ -3278,6 +3395,8 @@ let () =
             test_subscription_exhaustion_is_account_scoped
         ; test_case "usage read rests the exhausted Muse account without a turn" `Quick
             test_muse_usage_read_rests_only_the_selected_account
+        ; test_case "typed quota rests selected account without usage read or replay" `Quick
+            test_typed_quota_rests_only_the_selected_account
         ; test_case "failed Muse turn reads typed usage without replay" `Quick
             test_failed_muse_turn_reads_typed_usage_without_replay
         ; test_case "prepared hook tool surface controls session binding" `Quick test_hook_tool_surface_controls_session_binding
@@ -3287,6 +3406,8 @@ let () =
         ; test_case "commentary is never the reply" `Quick test_commentary_is_never_the_reply
         ; test_case "an unobserved final message is not silence" `Quick
             test_an_unobserved_final_message_is_not_silence
+        ; test_case "gap before acknowledgement cannot turn a lost response into silence" `Quick
+            test_gap_before_ack_cannot_settle_lost_response_as_silence
         ; test_case "a message completed after a gap is kept" `Quick
             test_a_message_completed_after_a_gap_is_kept
         ; test_case "later unstreamed message reaches live consumers" `Quick test_later_unstreamed_message_reaches_live_consumers
@@ -3343,6 +3464,8 @@ let () =
         ; test_case "compaction trace failure preserves provider result" `Quick test_compaction_trace_failure_preserves_provider_result
         ; test_case "recall restored after host compaction" `Quick test_resume_restores_recall_after_compaction
         ; test_case "noop compaction preserves held recall" `Quick test_resume_keeps_recall_after_noop_compaction
+        ; test_case "view gap redelivers held recall" `Quick test_resume_restores_recall_after_view_gap
+        ; test_case "another session's view gap preserves held recall" `Quick test_other_session_view_gap_keeps_held_recall
         ; test_case "hook nudge identity and carried context" `Quick test_hook_nudges_bind_the_session_but_carried_context_does_not
         ; test_case "per-call usage survives missing terminal aggregate" `Quick test_call_usage_survives_missing_terminal_aggregate
         ; test_case "effective system override starts fresh" `Quick test_effective_system_override_starts_fresh

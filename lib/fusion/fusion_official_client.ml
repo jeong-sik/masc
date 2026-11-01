@@ -783,11 +783,14 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
            | Runtime_muse_serve.Usage_reported {usage; _} -> on_usage (muse_usage usage)
            | Runtime_muse_serve.Subscription_usage_observed usage ->
              Runtime_muse_usage.observe ~scope:quota_scope Runtime_muse_usage.Usage_changed usage
+           | Runtime_muse_serve.Turn_terminal_received terminal ->
+             Runtime_muse_usage.observe_terminal ~scope:quota_scope terminal
            | Runtime_muse_serve.Turn_started _ | Runtime_muse_serve.Text_delta _
            | Runtime_muse_serve.Text_completed _ | Runtime_muse_serve.Native_tool_started _
            | Runtime_muse_serve.Native_tool_finished _ | Runtime_muse_serve.Approval_decided _
-           | Runtime_muse_serve.Compaction_observed _ | Runtime_muse_serve.Model_call_reported _
-           | Runtime_muse_serve.Turn_terminal_received _ | Runtime_muse_serve.Turn_finished _ -> ())
+           | Runtime_muse_serve.Compaction_observed _ | Runtime_muse_serve.View_gap_observed
+           | Runtime_muse_serve.Model_call_reported _
+           | Runtime_muse_serve.Turn_finished _ -> ())
          ~mgr
          ~clock
          ~cwd:Eio.Path.(Eio.Stdenv.fs env / workspace_root)

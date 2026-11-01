@@ -682,6 +682,8 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
            Error (Unavailable (Client_not_started "The Muse executable could not be started"))
          | Error (Client_error (Runtime_muse_serve.Invalid_config detail)) ->
            Error (Unavailable (Invalid_configuration detail))
+         | Error (Client_error (Runtime_muse_serve.Turn_failed {quota=Some _; _} as error)) ->
+           Error (Quota_exhausted (Runtime_muse_serve.error_to_string error))
          | Error (Client_error (Runtime_muse_serve.Auth_required _
              | Runtime_muse_serve.Turn_failed {kind=Runtime_muse_msp.Auth_required; _})) ->
            Error (Unavailable (Client_not_authenticated "The selected Muse account requires sign-in"))
@@ -694,7 +696,7 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
            Error (Provider_overloaded (Runtime_muse_serve.error_to_string error))
          | Error (Client_error (Runtime_muse_serve.Turn_failed
              {kind=Runtime_muse_msp.Model_error; retryable=false; _} as error)) ->
-           (* MSP's modelError carries free text only. The account's typed
+           (* Without a quota detail, modelError carries free text. The account's typed
               usage/read says whether a subscription window is spent. *)
            let detail = Runtime_muse_serve.error_to_string error in
            if muse_account_spent ~mgr ~clock ~cwd

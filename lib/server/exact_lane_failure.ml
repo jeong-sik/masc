@@ -161,6 +161,10 @@ let muse_error = function
   | Runtime_muse_serve.Session_approval_mode_mismatch _
   | Runtime_muse_serve.Unsupported_server_request _ -> Configuration_refused
   | Runtime_muse_serve.Auth_required _ -> Auth_refused
+  | Runtime_muse_serve.Turn_failed { quota = Some quota; _ } ->
+    if float_of_int quota.resets_at_ms /. 1000. > Time_compat.now ()
+    then Transient
+    else Configuration_refused
   | Runtime_muse_serve.Turn_failed error ->
     if error.Runtime_muse_msp.retryable then Transient else Configuration_refused
   | Runtime_muse_serve.Spawn_failed _

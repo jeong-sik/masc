@@ -1241,7 +1241,7 @@ let test_ollama_chat_template_token_uses_catalog_token () =
   with_catalog_toml
     {|
 [[models]]
-model_id = "local-token-model"
+model_id = "local-token-model:latest"
 base = "ollama"
 supports_reasoning = true
 thinking_control_format = "chat_template_token"
@@ -1397,22 +1397,29 @@ let test_anthropic_opus_5_5_sends_effort_alone () =
     (json |> member "output_config" |> member "effort" |> to_string)
 ;;
 
-let test_anthropic_agent_llm_alias_uses_adaptive_effort () =
-  let config =
-    anthropic_config
-      ~enable_thinking:true
-      ~reasoning_effort:RE.Medium
-      "claude-sonnet-5-20260101"
-  in
-  let json = BAN.build_request ~config ~messages:[ user_msg "hi" ] () |> json_of_body in
-  let thinking = json |> member "thinking" in
-  check string "thinking type" "adaptive" (thinking |> member "type" |> to_string);
-  check_member_absent "budget_tokens" thinking;
-  check
-    string
-    "effort"
-    "medium"
-    (json |> member "output_config" |> member "effort" |> to_string)
+let test_anthropic_declared_policy_uses_adaptive_effort () =
+  let undeclared = anthropic_config ~enable_thinking:true
+      ~reasoning_effort:RE.Medium "claude-sonnet-5-20260101" in
+  check bool "an undeclared lookalike does not acquire a thinking policy" true
+    (Result.is_error (BAN.validate_nonexact_thinking_controls undeclared));
+  with_catalog_toml
+    {|
+[[models]]
+model_id = "adaptive-policy-fixture"
+base = "anthropic"
+supports_reasoning = true
+anthropic_thinking_control = "adaptive_default"
+accepted_reasoning_efforts = ["medium"]
+|}
+    (fun () ->
+      let config = anthropic_config ~enable_thinking:true
+          ~reasoning_effort:RE.Medium "adaptive-policy-fixture" in
+      let json = BAN.build_request ~config ~messages:[ user_msg "hi" ] () |> json_of_body in
+      let thinking = json |> member "thinking" in
+      check string "thinking type" "adaptive" (thinking |> member "type" |> to_string);
+      check_member_absent "budget_tokens" thinking;
+      check string "effort" "medium"
+        (json |> member "output_config" |> member "effort" |> to_string))
 ;;
 
 let test_anthropic_sonnet5_defaults_to_adaptive () =
@@ -1521,24 +1528,69 @@ let test_gemini_reasoning_dialect_uses_thinking_config () =
 ;;
 
 let test_gemini_declared_ignored_sampling_drops_fields () =
-  let config =
-    PC.make
-      ~kind:Gemini
-      ~model_id:"gemini-4-argon-high"
-      ~base_url:"https://generativelanguage.googleapis.com/v1beta"
-      ~temperature:0.7
-      ~top_p:0.9
-      ~top_k:40
-      ()
-  in
-  let gen_config =
-    BG.build_request ~config ~messages:[ user_msg "hi" ] ()
-    |> json_of_body
-    |> member "generationConfig"
-  in
-  check_member_absent "temperature" gen_config;
-  check_member_absent "topP" gen_config;
-  check_member_absent "topK" gen_config
+  with_catalog_toml
+    {|
+[[models]]
+model_id = "ignored-sampling-fixture"
+base = "gemini"
+ignored_sampling_parameters = ["temperature", "top_p", "top_k"]
+|}
+    (fun () ->
+      let config =
+        PC.make
+          ~kind:Gemini
+          ~model_id:"ignored-sampling-fixture"
+          ~base_url:"https://generativelanguage.googleapis.com/v1beta"
+          ~temperature:0.7
+          ~top_p:0.9
+          ~top_k:40
+          ()
+      in
+      let gen_config =
+        BG.build_request ~config ~messages:[ user_msg "hi" ] ()
+        |> json_of_body
+        |> member "generationConfig"
+      in
+      check_member_absent "temperature" gen_config;
+      check_member_absent "topP" gen_config;
+      check_member_absent "topK" gen_config)
+;;
+
+let test_openrouter_reasoning_enabled_responses_request () =
+  let module Complete = Llm_provider.Complete_common in
+  let model_id = "nvidia/nemotron-3.5-super-vl:free" in
+  List.iter (fun enable_thinking ->
+    let config = PC.make ~kind:OpenAI_compat ~provider_id:"openrouter" ~model_id
+        ~base_url:"https://openrouter.ai/api/v1" ~request_path:"/responses"
+        ~max_tokens:128 ?enable_thinking () in
+    let caps = catalog_capabilities ~provider_id:"openrouter" model_id in
+    check bool "exact scoped row declares boolean reasoning" true
+      (caps.thinking_control_format = CAP.Reasoning_enabled);
+    let serialized = Result.bind (Complete.validate_all config) (fun () ->
+      Complete.serialize_http_request ~stream:false ~config
+        ~messages:[user_msg "Explain the evidence."] ~tools:[]) in
+    let artifact = match serialized with
+      | Ok artifact -> artifact
+      | Error (Llm_provider.Http_client.AcceptRejected {reason}) -> fail reason
+      | Error _ -> fail "OpenRouter Responses serialization failed" in
+    check bool "admitted request uses the Responses codec" true
+      (artifact.http_codec = Llm_provider.Provider_http_codec.Openai_responses);
+    let json = json_of_body artifact.body in
+    check string "exact API model survives serialization" model_id
+      (json |> member "model" |> to_string);
+    let expected = match enable_thinking with
+      | None -> `Null
+      | Some enabled -> `Assoc ["enabled", `Bool enabled] in
+    check bool "only an explicit toggle creates a reasoning field"
+      (Option.is_some enable_thinking) (List.mem_assoc "reasoning" (to_assoc json));
+    check bool "omission and explicit boolean controls reach Responses unchanged" true
+      (member "reasoning" json = expected);
+    check bool "boolean reasoning invents no categorical effort" false
+      (List.mem_assoc "reasoning_effort" (to_assoc json));
+    check_member_absent "messages" json;
+    check int "Responses carries the actual input" 1
+      (json |> member "input" |> to_list |> List.length))
+    [None; Some true; Some false]
 ;;
 
 let test_gemini_default_keeps_sampling_fields () =
@@ -1728,9 +1780,9 @@ let () =
               `Quick
               test_anthropic_opus_5_5_sends_effort_alone
           ; test_case
-              "anthropic claude alias uses adaptive effort"
+              "anthropic declared policy uses adaptive effort"
               `Quick
-              test_anthropic_agent_llm_alias_uses_adaptive_effort
+              test_anthropic_declared_policy_uses_adaptive_effort
           ; test_case
               "anthropic sonnet 5 defaults to adaptive"
               `Quick
@@ -1755,6 +1807,10 @@ let () =
               "gemini declared ignored sampling drops fields"
               `Quick
               test_gemini_declared_ignored_sampling_drops_fields
+          ; test_case
+              "OpenRouter boolean reasoning reaches Responses"
+              `Quick
+              test_openrouter_reasoning_enabled_responses_request
           ; test_case
               "gemini default keeps sampling fields"
               `Quick

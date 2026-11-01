@@ -1,0 +1,83 @@
+let sentinel = "private-source-sentinel"
+let row id = `Assoc ["id",`String id;"text",`String (id ^ String.make 256 'x')]
+let make_payload n = `Assoc ["status",`String "selected";"selection_id",`String "s";
+  "selected",`List (List.init n (fun i -> row (string_of_int i)))]
+
+let differential () =
+  let random = Random.State.make [|2026;10;30;2|] in
+  for _batch = 1 to 500 do
+    let valid = ref true and durable = ref true in
+    let left_events = ref [] and right_events = ref [] in
+    let validate events payload =
+      events := ("validate",payload) :: !events;
+      if !valid then Ok () else Error "source changed" in
+    let retain events ~reason ~payload =
+      events := (reason,payload) :: !events;
+      if !durable then Ok () else Error "receipt failed" in
+    let payload = make_payload (1 + Random.State.int random 8) in
+    let old = Old_host.make_prepared ~payload ~validate:(validate left_events) ~retain:(retain left_events) in
+    let fresh = New_host.make_prepared ~payload ~validate:(validate right_events) ~retain:(retain right_events) in
+    for _step = 1 to 30 do
+      valid := Random.State.int random 5 <> 0;
+      durable := Random.State.int random 5 <> 0;
+      (match Random.State.int random 2 with
+       | 0 ->
+           let left = Old_host.render_prepared old in
+           let right = New_host.render_prepared fresh in
+           if left <> right then failwith "different render"
+       | _ ->
+           let left = Old_host.defer_for_capacity old ~refusal:"capacity" in
+           let right = New_host.defer_for_capacity fresh ~refusal:"capacity" in
+           if left <> right then failwith "different reduction");
+      if !left_events <> !right_events then failwith "different validation or receipt"
+    done
+  done;
+  print_endline "differential: 15000 normal observations passed"
+
+let exception_case () =
+  let payload = `Assoc ["status",`String "selected";"selection_id",`String "s";
+    "selected",`List [`String sentinel]] in
+  let run make render =
+    let calls = ref 0 and validated = ref `Null in
+    let validate payload =
+      incr calls; validated := payload;
+      if !calls = 1 then Error "changed" else Ok () in
+    let prepared = make ~payload ~validate ~retain:(fun ~reason:_ ~payload:_ -> Ok ()) in
+    Prompt_registry.fail_next := true;
+    (match render prepared with
+     | _ -> failwith "injected render failure did not fire"
+     | exception Prompt_registry.Injected_failure -> ());
+    let text = render prepared in
+    !validated,text in
+  let old_payload,old_text = run Old_host.make_prepared Old_host.render_prepared in
+  let new_payload,new_text = run New_host.make_prepared New_host.render_prepared in
+  if Yojson.Safe.Util.member "status" old_payload <> `String "unavailable"
+     || not (String_util.contains_substring old_text sentinel) then
+    failwith "baseline did not expose the synthetic mismatch";
+  if Yojson.Safe.Util.member "status" new_payload <> `String "selected"
+     || not (String_util.contains_substring new_text sentinel) then
+    failwith "candidate failed to preserve the original complete projection";
+  print_endline "injected rendering exception: baseline validates unavailable but returns old text; candidate retains original pair"
+
+let sink = ref 0
+let bench path =
+  let oc = open_out path in
+  Fun.protect ~finally:(fun () -> close_out oc) (fun () ->
+    output_string oc "case,variant,n,cpu_seconds,wall_seconds,allocated_bytes\n";
+    let payload = make_payload 4 in
+    let old = Old_host.make_prepared ~payload ~validate:(fun _ -> Ok ()) ~retain:(fun ~reason:_ ~payload:_ -> Ok ()) in
+    let fresh = New_host.make_prepared ~payload ~validate:(fun _ -> Ok ()) ~retain:(fun ~reason:_ ~payload:_ -> Ok ()) in
+    let sample variant f =
+      Gc.full_major ();
+      let allocated = Gc.allocated_bytes () and cpu = Sys.time () and wall = Unix.gettimeofday () in
+      for _ = 1 to 500_000 do sink := !sink + String.length (f ()) done;
+      Printf.fprintf oc "valid_render,%s,500000,%.9f,%.9f,%.0f\n%!" variant
+        (Sys.time () -. cpu) (Unix.gettimeofday () -. wall) (Gc.allocated_bytes () -. allocated) in
+    for round = 0 to 6 do
+      let old () = sample "old" (fun () -> Old_host.render_prepared old) in
+      let fresh () = sample "new" (fun () -> New_host.render_prepared fresh) in
+      if round mod 2 = 0 then (old (); fresh ()) else (fresh (); old ())
+    done);
+  Printf.printf "benchmark sink %d\n%!" !sink
+
+let () = differential (); exception_case (); bench Sys.argv.(1)

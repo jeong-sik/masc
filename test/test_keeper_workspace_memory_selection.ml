@@ -481,6 +481,42 @@ let test_provider_capacity_projection_keeps_whole_records_and_receipts () =
   (match Host.defer_for_capacity prepared ~refusal with
    | Ok Unchanged -> () | _ -> Alcotest.fail "empty evidence projection authorized another retry")
 
+let test_failed_revalidation_and_receipt_keep_unavailable_projection () =
+  Prompt_registry.set_markdown_dir (Masc_test_deps.source_path "config/prompts");
+  let module Host = Masc.Keeper_workspace_memory_host_recall in
+  let payload = `Assoc ["status",`String "selected";"selection_id",`String "selection-fixture";
+    "selected",`List [`Assoc ["id",`String "private-source-sentinel"]]] in
+  let seen = ref [] and retained = ref [] in
+  let validate payload =
+    seen := payload :: !seen;
+    match Yojson.Safe.Util.member "status" payload with
+    | `String "selected" -> Error "source changed"
+    | _ -> Ok () in
+  let retain ~reason ~payload =
+    retained := (reason,payload) :: !retained;
+    Error "receipt unavailable" in
+  let prepared = Host.For_testing.prepare_projection ~payload ~validate ~retain in
+  let unavailable = Host.render_prepared prepared in
+  Alcotest.(check bool) "old selection is not rendered" false
+    (String_util.contains_substring unavailable "private-source-sentinel");
+  Alcotest.(check bool) "both failures are reported" true
+    (String_util.contains_substring unavailable "source revalidation and projection receipt unavailable");
+  Alcotest.(check string) "subsequent render uses the retained unavailable text"
+    unavailable (Host.render_prepared prepared);
+  (match !seen, !retained with
+   | [current; original], [(reason,attempted)] ->
+     Alcotest.(check bool) "original selection was validated first" true (original = payload);
+     Alcotest.(check string) "receipt reason" "source_revalidation_failed" reason;
+     Alcotest.(check bool) "failed receipt attempted the source failure projection" true
+       (Yojson.Safe.Util.member "reason" attempted = `String "source changed");
+     Alcotest.(check bool) "next validation receives the same unavailable selection" true
+       (Yojson.Safe.Util.member "status" current = `String "unavailable"
+        && Yojson.Safe.Util.member "selection_id" current = `String "selection-fixture"
+        && Yojson.Safe.Util.member "reason" current =
+             `String "source revalidation and projection receipt unavailable")
+   | _ -> Alcotest.fail "unexpected validation or receipt calls")
+;;
+
 let () = Alcotest.run "purpose-specific workspace memory selection"
   ["selection",[
     Alcotest.test_case "resolved first assessment sees full lineage" `Quick
@@ -513,4 +549,6 @@ let () = Alcotest.run "purpose-specific workspace memory selection"
     Alcotest.test_case "capacity split retains peers and singleton uncertainty" `Quick
       test_capacity_split_preserves_rows_and_singleton_failure;
     Alcotest.test_case "provider capacity projects whole records only after durable receipt" `Quick
-      test_provider_capacity_projection_keeps_whole_records_and_receipts]]
+      test_provider_capacity_projection_keeps_whole_records_and_receipts;
+    Alcotest.test_case "failed revalidation and receipt stay unavailable" `Quick
+      test_failed_revalidation_and_receipt_keep_unavailable_projection]]

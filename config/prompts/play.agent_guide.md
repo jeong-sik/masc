@@ -59,7 +59,8 @@ the frame is the only way to read them. 409 means no program is loaded.
 Each move is a POST whose JSON body is the arguments of the MASC tool of the
 same name, checked against the schema shown. The answer is
 `{ok, message, data}`: 200 when the move ran, 400 when it was refused and
-nothing ran.
+nothing ran. A 503 means the worker is unavailable or the outcome is unknown;
+inspect the machine before sending more input and never automatically replay it.
 
     curl -s -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '<arguments>' <move URL>
 
@@ -111,12 +112,16 @@ right now.
 
 ## When no program is loaded
 
-`machine` is false when nothing is loaded: someone ejected the program, it
-exited or faulted, or the server could not resume its last save after a
-restart. Every move then answers 400 and the screen answers 409. An
-invitation cannot load or restore a program; Keepers and the operator can.
-Ask in the public room below, then read the seat again later. A refusal that
-names `masc_dos_load` or `masc_dos_restore` names their tools, not yours.
+When the seat answers `machine:false`, the worker's last completed observation
+reports no loaded program. A refused move answers 400; a screen request with
+no loaded program answers 409. An invitation cannot load or restore a program;
+Keepers and the operator can. Ask in the public room below, then read the seat
+again later. A refusal that names `masc_dos_load` or `masc_dos_restore` names
+their tools, not yours.
+
+If the seat instead answers 503 `machine_unavailable`, its observation cannot
+be read. That does not establish that no program is loaded. Read the seat
+again later before asking for a load or sending input.
 
 ## Public game conversation
 

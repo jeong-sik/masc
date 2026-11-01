@@ -430,6 +430,7 @@ let test_core_checkpoint_survives_codex_guidance_failure () =
             ~store:{replace=(fun _ -> Ok ());remove=(fun _ -> Ok ())}
             ~operation_store_path:(Filename.concat base_path "operations.sqlite3")
             ~session_root:(Filename.concat base_path "traces") ~now:(fun () -> 42.)
+            ~on_turn_slot_released:None
             ~operation_runner:(Some Owner.{ready=(fun ~keeper_name:_ -> true);execute;
               on_execution_settled=(fun ~keeper_name:_ ~claimed_operation_id:_ ~operations:_ ~execution:_ ->
                 if !attempts=2 then Eio.Promise.resolve publish_blocked ()

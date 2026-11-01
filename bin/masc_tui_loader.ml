@@ -21,17 +21,30 @@ let read_map read items =
    from. A 304 answers with the very object the last pass decoded, so the
    typed decode runs only when a fresh body arrived. Decoders here are pure,
    so an identical input answers identically -- success or failure. Input and
-   result share one slot, so concurrent readers always see a consistent pair. *)
-type 'a json_memo = { mutable memo_slot : (Yojson.Safe.t * 'a) option }
+   result share one immutable list reference, so concurrent readers always see a
+   consistent pair and multi-page loaders (such as connector directory pages)
+   retain every kept page across passes without thrashing a single slot. *)
+let json_memo_capacity = 32
 
-let json_memo () = { memo_slot = None }
+type 'a json_memo = { mutable memo_entries : (Yojson.Safe.t * 'a) list }
+
+let json_memo () = { memo_entries = [] }
+
+let rec take_at_most n = function
+  | [] -> []
+  | _ when n <= 0 -> []
+  | head :: tail -> head :: take_at_most (n - 1) tail
 
 let decode_memoized memo decode json =
-  match memo.memo_slot with
-  | Some (previous, result) when previous == json -> result
-  | _ ->
+  match List.find_opt (fun (previous, _) -> previous == json) memo.memo_entries with
+  | Some (_, result) -> result
+  | None ->
       let result = decode json in
-      memo.memo_slot <- Some (json, result);
+      let remaining =
+        List.filter (fun (previous, _) -> previous != json) memo.memo_entries
+        |> take_at_most (json_memo_capacity - 1)
+      in
+      memo.memo_entries <- (json, result) :: remaining;
       result
 
 (* A dashboard GET decode: skipped when the kept answer did not move, run on

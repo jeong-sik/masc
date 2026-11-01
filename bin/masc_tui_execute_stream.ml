@@ -139,14 +139,24 @@ let decode_active json =
 let read_json _name value = Ok value
 
 (* The rows of a snapshot are the ones the server still keeps, so each is
-   numbered between the oldest number kept and the last one logged. A snapshot
-   that says otherwise cannot anchor the numbers the events after it must
-   follow. *)
+   numbered between the oldest number kept and the last one logged, in strictly
+   increasing order. A snapshot that says otherwise cannot anchor the numbers
+   the events after it must follow or the monotonic queue head trim relies on. *)
+let rec rows_strictly_increasing = function
+  | [] | [ _ ] -> true
+  | (first : line) :: ((second : line) :: _ as rest) ->
+    first.seq < second.seq && rows_strictly_increasing rest
+;;
+
 let check_snapshot_numbers ~rows ~first_retained ~last =
-  if first_retained > last + 1
+  if first_retained < 1
+  then Error "first_retained_seq must be positive"
+  else if first_retained > last + 1
   then Error "first_retained_seq is past last_seq"
   else if List.exists (fun (row : line) -> row.seq < first_retained || row.seq > last) rows
   then Error "a row is numbered outside first_retained_seq and last_seq"
+  else if not (rows_strictly_increasing rows)
+  then Error "snapshot rows are not in strictly increasing seq order"
   else Ok ()
 ;;
 
@@ -331,9 +341,10 @@ let take_row t line =
 
 let take_opened t ~id ~task =
   become_observing t;
+  let already_active = List.exists (fun active -> active.id = id) t.active in
   t.active
   <- List.filter (fun active -> active.id <> id) t.active @ [ { id; task; command = "" } ];
-  t.active_count <- t.active_count + 1;
+  if not already_active then t.active_count <- t.active_count + 1;
   t.closed <- false
 ;;
 

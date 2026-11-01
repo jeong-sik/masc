@@ -266,12 +266,40 @@ let test_completion_refreshes_the_open_post () =
     (0, [])
     (run ~mode:(Board_read "p-1") on_comment (Error "refused"))
 
+(* Multi-page loaders (such as connector directory pages) decode several kept
+   JSON bodies per refresh pass through one shared [json_memo]. Verify that
+   kept bodies from the previous pass hit the memo without re-running the
+   decoder, while eviction stays bounded at [json_memo_capacity]. *)
+let test_json_memo_retains_multiple_kept_pages () =
+  let memo = Masc_tui_loader.json_memo () in
+  let decode_calls = ref 0 in
+  let decode json =
+    incr decode_calls;
+    Yojson.Safe.to_string json
+  in
+  let pages =
+    List.init 12 (fun i ->
+      `Assoc [ "connector", `String "slack"; "page", `Int i ])
+  in
+  let first_pass =
+    List.map (Masc_tui_loader.decode_memoized memo decode) pages
+  in
+  Alcotest.(check int) "first pass decodes every page once" 12 !decode_calls;
+  let second_pass =
+    List.map (Masc_tui_loader.decode_memoized memo decode) pages
+  in
+  Alcotest.(check int) "second pass with 304 kept bodies skips decode" 12
+    !decode_calls;
+  Alcotest.(check (list string)) "memoized results match" first_pass second_pass
+
 let () =
   Alcotest.run "Board comment votes"
     [ ( "decode"
       , [ Alcotest.test_case "both vote counts" `Quick test_decoder_reads_both_counts
         ; Alcotest.test_case "missing counts are refused" `Quick
             test_decoder_refuses_missing_counts
+        ; Alcotest.test_case "json_memo retains multiple kept pages across passes"
+            `Quick test_json_memo_retains_multiple_kept_pages
         ] )
     ; ( "cursor"
       , [ Alcotest.test_case "walks the drawn order" `Quick

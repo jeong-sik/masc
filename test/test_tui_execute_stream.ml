@@ -489,9 +489,46 @@ let test_a_snapshot_whose_numbers_do_not_fit_is_refused _env =
   refused "a row past the last number" (snapshot_frame ~row_seqs:[ 9 ] ());
   refused "a row before the oldest kept" (snapshot_frame ~first_retained:3 ~last:5 ~row_seqs:[ 2 ] ());
   refused "an oldest number past the last" (snapshot_frame ~first_retained:5 ~last:2 ~row_seqs:[] ());
+  refused "a non-positive oldest number" (snapshot_frame ~first_retained:0 ~last:2 ~row_seqs:[ 2 ] ());
+  refused "duplicate row numbers" (snapshot_frame ~first_retained:1 ~last:5 ~row_seqs:[ 3; 3 ] ());
+  refused "decreasing row numbers" (snapshot_frame ~first_retained:1 ~last:5 ~row_seqs:[ 4; 2 ] ());
   (* One past the last number is how an empty log looks. *)
   feed (new_reader ()) (snapshot_frame ~first_retained:3 ~last:2 ~row_seqs:[] ());
   feed (new_reader ()) (snapshot_frame ~first_retained:3 ~last:5 ~row_seqs:[ 3; 5 ] ())
+;;
+
+let test_reopening_an_already_active_stream_id_does_not_inflate_active_count _env =
+  let reader = new_reader () in
+  feed reader (snapshot_frame ~first_retained:1 ~last:1 ~row_seqs:[] ());
+  let opened ~seq ~id =
+    sse_data
+      (Printf.sprintf
+         {|{"type":"task_opened","keeper":"alpha","seq":%d,"stream_id":%d,"task_id":null}|}
+         seq
+         id)
+  in
+  let cmd_row ~seq ~id ~text =
+    sse_data
+      (Printf.sprintf
+         {|{"type":"line","keeper":"alpha","seq":%d,"stream_id":%d,"task_id":null,"line":{"seq":%d,"stream_id":%d,"task_id":null,"stream":"cmd","text":%S,"ansi":false,"ts_ms":0}}|}
+         seq
+         id
+         seq
+         id
+         text)
+  in
+  feed reader (opened ~seq:2 ~id:7);
+  feed reader (cmd_row ~seq:3 ~id:7 ~text:"first");
+  Alcotest.(check int) "one active command" 1 (observed reader).active_count;
+  feed reader (opened ~seq:4 ~id:7);
+  feed reader (cmd_row ~seq:5 ~id:7 ~text:"second");
+  let reading = observed reader in
+  Alcotest.(check int) "replaced stream id does not double-count" 1 reading.active_count;
+  match reading.active with
+  | [ active ] ->
+    Alcotest.(check int) "stream id" 7 active.id;
+    Alcotest.(check string) "updated command" "second" active.command
+  | other -> Alcotest.failf "expected one active command, got %d" (List.length other)
 ;;
 
 (* The question this file asks, put to a log long enough for the server's ring
@@ -625,6 +662,9 @@ let () =
         ; case
             "rows the server's ring has dropped are not held"
             test_rows_the_servers_ring_has_dropped_are_not_held
+        ; case
+            "reopening an already active stream id does not inflate active_count"
+            test_reopening_an_already_active_stream_id_does_not_inflate_active_count
         ] )
     ; ( "losing the thread"
       , [ case

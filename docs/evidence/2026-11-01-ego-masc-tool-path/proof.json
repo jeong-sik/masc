@@ -1,0 +1,93 @@
+{
+  "started_at": "2026-11-01T01:48:33.006869+00:00",
+  "completed": true,
+  "fixture_url": "http://localhost:53678/",
+  "scope": "Installed MASC MCP/host/Addon/Ego tool path with owned fixture; operator-driven, not autonomous Keeper or full SDK parity.",
+  "driver_sha256": "e26c9df5a39b8f5556adb5b9393caadf666353f55b6440941dff968e8cb97a3c",
+  "tab_id": 5,
+  "saved_record": {
+    "name": "Ego 한글 😀",
+    "priority": "high",
+    "rich": "<b>Native browser record</b>",
+    "trusted": true,
+    "pastes": [
+      {
+        "trusted": true,
+        "html": "<b>Native browser record</b>"
+      }
+    ]
+  },
+  "pointer_state": {
+    "pastes": [
+      {
+        "trusted": true,
+        "html": "<b>Native browser record</b>"
+      }
+    ],
+    "shadowClicks": [
+      true
+    ],
+    "frameClicks": [
+      true
+    ],
+    "frameValues": [
+      "Native frame"
+    ],
+    "offscreenClicks": [
+      true
+    ]
+  },
+  "wrong_url_refusal": {
+    "_meta": {
+      "io.github.jeong-sik/masc.lane.failure": {
+        "class": "workflow_rejection",
+        "effect": "proven_pre_effect"
+      }
+    },
+    "structuredContent": {
+      "reply": "issue",
+      "answer": {
+        "status": "answered",
+        "payload": {
+          "ok": false,
+          "error": "the tab is at http://localhost:53678/, not at expectedUrl; read it again; read the same tab before continuing; never replay the workflow",
+          "effectPhase": "not_started"
+        }
+      },
+      "browserSelection": {
+        "lane": "live",
+        "clientId": "7609b739-7eb9-4051-b663-025ffc487506",
+        "reason": "explicit_browser"
+      },
+      "browserConnection": {
+        "clientId": "7609b739-7eb9-4051-b663-025ffc487506",
+        "transport": "ego_task_space",
+        "browserSpace": {
+          "id": 6,
+          "name": "masc-keepers"
+        }
+      }
+    },
+    "isError": true,
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"reply\":\"issue\",\"answer\":{\"status\":\"answered\",\"payload\":{\"ok\":false,\"error\":\"the tab is at http://localhost:53678/, not at expectedUrl; read it again; read the same tab before continuing; never replay the workflow\",\"effectPhase\":\"not_started\"}},\"browserSelection\":{\"lane\":\"live\",\"clientId\":\"7609b739-7eb9-4051-b663-025ffc487506\",\"reason\":\"explicit_browser\"},\"browserConnection\":{\"clientId\":\"7609b739-7eb9-4051-b663-025ffc487506\",\"transport\":\"ego_task_space\",\"browserSpace\":{\"id\":6,\"name\":\"masc-keepers\"}}}"
+      }
+    ]
+  },
+  "screenshots": [
+    {
+      "file": "masc-browser-1.png",
+      "sha256": "1ff9a229abd4d90904caff0c0bef75cfdf7944ea576b75c496b4b588204cce43",
+      "bytes": 33665,
+      "width": 1536,
+      "height": 1896
+    }
+  ],
+  "closed_test_tab": true,
+  "tab_state": "closed",
+  "save_count": 1,
+  "finished_at": "2026-11-01T01:48:39.088513+00:00",
+  "tool_calls": 8
+}

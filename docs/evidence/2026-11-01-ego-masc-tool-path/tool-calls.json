@@ -1,0 +1,750 @@
+[
+  {
+    "at": "2026-11-01T01:48:33.038751+00:00",
+    "tool": "masc_browser_act",
+    "arguments": {
+      "lane": "live",
+      "clientId": "7609b739-7eb9-4051-b663-025ffc487506",
+      "action": "open_tab",
+      "url": "http://localhost:53678/"
+    },
+    "state": "returned",
+    "response": {
+      "jsonrpc": "2.0",
+      "id": 3,
+      "result": {
+        "_meta": {
+          "io.modelcontextprotocol/serverInfo": {
+            "name": "masc",
+            "title": "MASC MCP Server",
+            "version": "0.66.0"
+          },
+          "com.github.yousleepwhen.masc/call": {
+            "envelope": {
+              "kind": "tool_call",
+              "summary": "{\"source\":\"live\",\"lane\":\"live\",\"browserSelection\":{\"lane\":\"live\",\"clientId\":\"7609b739-7eb9-4051-b663-025ffc487506\",\"reason\":\"explicit_browser\"},\"clientId\":\"7609b739-7eb9-4051-b663-025ffc487506\",\"transport\":\"ego_task_space\",\"browserSpace\":{\"id\":6,\"name\":\"masc-keepers\"},\"inputReadiness\":\"command_settled\",\"tabId\":5,\"action\":\"open_tab\",\"created\":true,\"url\":\"http://localhost:53678/\",\"title\":\"MASC Ego acceptance\",\"active\":true}",
+              "status": "ok",
+              "tool": "masc_browser_act"
+            },
+            "trace_id": "3",
+            "agent_id": "codex-mcp-client",
+            "tool": "masc_browser_act",
+            "duration_ms": 309,
+            "attempts": 1,
+            "timestamp": "2026-11-01T01:48:33Z"
+          }
+        },
+        "resultType": "complete",
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"source\":\"live\",\"lane\":\"live\",\"browserSelection\":{\"lane\":\"live\",\"clientId\":\"7609b739-7eb9-4051-b663-025ffc487506\",\"reason\":\"explicit_browser\"},\"clientId\":\"7609b739-7eb9-4051-b663-025ffc487506\",\"transport\":\"ego_task_space\",\"browserSpace\":{\"id\":6,\"name\":\"masc-keepers\"},\"inputReadiness\":\"command_settled\",\"tabId\":5,\"action\":\"open_tab\",\"created\":true,\"url\":\"http://localhost:53678/\",\"title\":\"MASC Ego acceptance\",\"active\":true}"
+          }
+        ],
+        "isError": false,
+        "structuredContent": {
+          "source": "live",
+          "lane": "live",
+          "browserSelection": {
+            "lane": "live",
+            "clientId": "7609b739-7eb9-4051-b663-025ffc487506",
+            "reason": "explicit_browser"
+          },
+          "clientId": "7609b739-7eb9-4051-b663-025ffc487506",
+          "transport": "ego_task_space",
+          "browserSpace": {
+            "id": 6,
+            "name": "masc-keepers"
+          },
+          "inputReadiness": "command_settled",
+          "tabId": 5,
+          "action": "open_tab",
+          "created": true,
+          "url": "http://localhost:53678/",
+          "title": "MASC Ego acceptance",
+          "active": true
+        }
+      }
+    },
+    "seconds": 0.31389279098948464
+  },
+  {
+    "at": "2026-11-01T01:48:33.352874+00:00",
+    "tool": "masc_browser_read",
+    "arguments": {
+      "lane": "live",
+      "clientId": "7609b739-7eb9-4051-b663-025ffc487506",
+      "tabId": 5,
+      "mode": "snapshot",
+      "snapshotScope": "full_page"
+    },
+    "state": "returned",
+    "response": {
+      "jsonrpc": "2.0",
+      "id": 4,
+      "result": {
+        "_meta": {
+          "io.modelcontextprotocol/serverInfo": {
+            "name": "masc",
+            "title": "MASC MCP Server",
+            "version": "0.66.0"
+          },
+          "com.github.yousleepwhen.masc/call": {
+            "envelope": {
+              "kind": "tool_call",
+              "summary": "{\"source\":\"live\",\"lane\":\"live\",\"browserSelection\":{\"lane\":\"live\",\"clientId\":\"7609b739-7eb9-4051-b663-025ffc487506\",\"reason\":\"explicit_browser\"},\"clientId\":\"7609b739-7eb9-4051-b663-025ffc487506\",\"transport\":\"ego_task_space\",\"browserSpace\":{\"id\":6,\"name\":\"masc-keepers\"},\"inputReadiness\":\"command_settled\",\"tabId\":5,\"url\":\"http://localhost:53678/\",\"title\":\"MASC Ego acceptance\",\"scope\":\"full_page\",\"snapshot\":\"[p5 \\\"MASC Ego acceptance\\\" | space \\\"masc-keepers\\\"(6): 2 managed, 0 untracked \u2014 p1 \\\"\uc0c8 \ud0ed\\\", p5* \\\"MASC Ego acceptance\\\"]\\nroot\\n  heading\\n    text \\\"MASC Ego acceptance\\\"\\n  container\\n    text \\\"Name\\\"\\n    textbox [ref=1]\\n  container\\n    text \\\"Priority\\\"\\n    combobox [ref=2]\\n      text \\\"Normal\\\"\\n  textfield \\\"Rich editor\\\" [ref=3]\\n  button [ref=4]\\n    text \\\"Save record\\\"\\n  output [ref=5]\\n    text \\\"Unsaved\\\"\\n  button [ref=6]\\n    text \\\"Shadow action\\\"\\n  iframe [ref=7]\\n    root\\n      container\\n        text \\\"Frame editor\\\"\\n        textbox [ref=8]\\n      button [ref=9]\\n        text \\\"Frame action\\\"\\n  button [ref=10]\\n    text \\\"Offscreen action\\\"\\n\",\"truncated\":false,\"chars\":623}",
+              "status": "ok",
+              "tool": "masc_browser_read"
+            },
+            "trace_id": "4",
+            "agent_id": "codex-mcp-client",
+            "tool": "masc_browser_read",
+            "duration_ms": 12,
+            "attempts": 1,
+            "timestamp": "2026-11-01T01:48:33Z"
+          }
+        },
+        "resultType": "complete",
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"source\":\"live\",\"lane\":\"live\",\"browserSelection\":{\"lane\":\"live\",\"clientId\":\"7609b739-7eb9-4051-b663-025ffc487506\",\"reason\":\"explicit_browser\"},\"clientId\":\"7609b739-7eb9-4051-b663-025ffc487506\",\"transport\":\"ego_task_space\",\"browserSpace\":{\"id\":6,\"name\":\"masc-keepers\"},\"inputReadiness\":\"command_settled\",\"tabId\":5,\"url\":\"http://localhost:53678/\",\"title\":\"MASC Ego acceptance\",\"scope\":\"full_page\",\"snapshot\":\"[p5 \\\"MASC Ego acceptance\\\" | space \\\"masc-keepers\\\"(6): 2 managed, 0 untracked \u2014 p1 \\\"\uc0c8 \ud0ed\\\", p5* \\\"MASC Ego acceptance\\\"]\\nroot\\n  heading\\n    text \\\"MASC Ego acceptance\\\"\\n  container\\n    text \\\"Name\\\"\\n    textbox [ref=1]\\n  container\\n    text \\\"Priority\\\"\\n    combobox [ref=2]\\n      text \\\"Normal\\\"\\n  textfield \\\"Rich editor\\\" [ref=3]\\n  button [ref=4]\\n    text \\\"Save record\\\"\\n  output [ref=5]\\n    text \\\"Unsaved\\\"\\n  button [ref=6]\\n    text \\\"Shadow action\\\"\\n  iframe [ref=7]\\n    root\\n      container\\n        text \\\"Frame editor\\\"\\n        textbox [ref=8]\\n      button [ref=9]\\n        text \\\"Frame action\\\"\\n  button [ref=10]\\n    text \\\"Offscreen action\\\"\\n\",\"truncated\":false,\"chars\":623}"
+          }
+        ],
+        "isError": false,
+        "structuredContent": {
+          "source": "live",
+          "lane": "live",
+          "browserSelection": {
+            "lane": "live",
+            "clientId": "7609b739-7eb9-4051-b663-025ffc487506",
+            "reason": "explicit_browser"
+          },
+          "clientId": "7609b739-7eb9-4051-b663-025ffc487506",
+          "transport": "ego_task_space",
+          "browserSpace": {
+            "id": 6,
+            "name": "masc-keepers"
+          },
+          "inputReadiness": "command_settled",
+          "tabId": 5,
+          "url": "http://localhost:53678/",
+          "title": "MASC Ego acceptance",
+          "scope": "full_page",
+          "snapshot": "[p5 \"MASC Ego acceptance\" | space \"masc-keepers\"(6): 2 managed, 0 untracked \u2014 p1 \"\uc0c8 \ud0ed\", p5* \"MASC Ego acceptance\"]\nroot\n  heading\n    text \"MASC Ego acceptance\"\n  container\n    text \"Name\"\n    textbox [ref=1]\n  container\n    text \"Priority\"\n    combobox [ref=2]\n      text \"Normal\"\n  textfield \"Rich editor\" [ref=3]\n  button [ref=4]\n    text \"Save record\"\n  output [ref=5]\n    text \"Unsaved\"\n  button [ref=6]\n    text \"Shadow action\"\n  iframe [ref=7]\n    root\n      container\n        text \"Frame editor\"\n        textbox [ref=8]\n      button [ref=9]\n        text \"Frame action\"\n  button [ref=10]\n    text \"Offscreen action\"\n",
+          "truncated": false,
+          "chars": 623
+        }
+      }
+    },
+    "seconds": 0.016623167000943795
+  },
+  {
+    "at": "2026-11-01T01:48:33.369764+00:00",
+    "tool": "masc_browser_interact",
+    "arguments": {
+      "lane": "live",
+      "clientId": "7609b739-7eb9-4051-b663-025ffc487506",
+      "tabId": 5,
+      "action": "workflow",
+      "expectedUrl": "http://localhost:53678/",
+      "steps": [
+        {
+          "method": "fill",
+          "selector": "loc=role:textbox[name=\"Name\"]",
+          "text": "Ego \ud55c\uae00 \ud83d\ude00"
+        },
+        {
+          "method": "selectOption",
+          "selector": "loc=role:combobox[name=\"Priority\"]",
+          "selectionJson": "{\"value\": \"high\"}"
+        },
+        {
+          "method": "focus",
+          "selector": "loc=role:textbox[name=\"Rich editor\"]"
+        },
+        {
+          "method": "keyboard.paste",
+          "text": "Native browser record",
+          "html": "<b>Native browser record</b>"
+        },
+        {
+          "method": "click",
+          "selector": "loc=role:button[name=\"Save record\"]"
+        },
+        {
+          "method": "waitForFunction",
+          "source": "document.querySelector(\"#status\").textContent === \"Saved record\""
+        }
+      ]
+    },
+    "state": "returned",
+    "response": {
+      "jsonrpc": "2.0",
+      "id": 5,
+      "result": {
+        "_meta": {
+          "io.modelcontextprotocol/serverInfo": {
+            "name": "masc",
+            "title": "MASC MCP Server",
+            "version": "0.66.0"
+          },
+          "com.github.yousleepwhen.masc/call": {
+            "envelope": {
+              "kind": "tool_call",
+              "summary": "{\"source\":\"live\",\"lane\":\"live\",\"browserSelection\":{\"lane\":\"live\",\"clientId\":\"7609b739-7eb9-4051-b663-025ffc487506\",\"reason\":\"explicit_browser\"},\"clientId\":\"7609b739-7eb9-4051-b663-025ffc487506\",\"transport\":\"ego_task_space\",\"browserSpace\":{\"id\":6,\"name\":\"masc-keepers\"},\"inputReadiness\":\"command_settled\",\"tabId\":5,\"action\":\"workflow\",\"completed\":[{\"index\":0,\"method\":\"fill\",\"receipt\":{}},{\"index\":1,\"method\":\"selectOption\",\"receipt\":[\"high\"]},{\"index\":2,\"method\":\"focus\",\"receipt\":{}},{\"index\":3,\"method\":\"keyboard.paste\",\"receipt\":{}},{\"index\":4,\"method\":\"click\",\"receipt\":{}},{\"index\":5,\"method\":\"waitForFunction\",\"receipt\":true}],\"effectStarted\":true,\"completedEffect\":true,\"inputReleased\":true,\"failure\":null,\"urlBefore\":\"http://localhost:53678/\",\"url\":\"http://localhost:53678/\",\"title\":\"MASC Ego acceptance\",\"snapshot\":\"[p5 \\\"MASC Ego acceptance\\\" | space \\\"masc-keepers\\\"(6): 2 managed, 0 untracked \u2014 p1 \\\"\uc0c8 \ud0ed\\\", p5* \\\"MASC Ego acceptance\\\"]\\nroot\\n  heading\\n    text \\\"MASC Ego acceptance\\\"\\n  container\\n    text \\\"Name\\\"\\n    textbox [ref=1]\\n      text \\\"Ego \ud55c\uae00 \ud83d\ude00\\\"\\n  container\\n    text \\\"Priority\\\"\\n    combobox [ref=2]\\n      text \\\"High\\\"\\n  textfield \\\"Rich editor\\\" [ref=3]\\n    text \\\"Native browser record\\\"\\n  button [ref=4]\\n    text \\\"Save record\\\"\\n  output [ref=5]\\n    text \\\"Saved record\\\"\\n  button [ref=6]\\n    text \\\"Shadow action\\\"\\n  iframe [ref=7]\\n    root\\n      container\\n        text \\\"Frame editor\\\"\\n        textbox [ref=8]\\n      button [ref=9]\\n        text \\\"Frame action\\\"\\n[more content below the viewport: scrollY=0, viewport 978 / page 1896 px; scroll or use snapshot({ scope: \\\"full_page\\\" })]\",\"truncated\":false,\"chars\":757}",
+              "status": "ok",
+              "tool": "masc_browser_interact"
+            },
+            "trace_id": "5",
+            "agent_id": "codex-mcp-client",
+            "tool": "masc_browser_interact",
+            "duration_ms": 1186,
+            "attempts": 1,
+            "timestamp": "2026-11-01T01:48:34Z"
+          }
+        },
+        "resultType": "complete",
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"source\":\"live\",\"lane\":\"live\",\"browserSelection\":{\"lane\":\"live\",\"clientId\":\"7609b739-7eb9-4051-b663-025ffc487506\",\"reason\":\"explicit_browser\"},\"clientId\":\"7609b739-7eb9-4051-b663-025ffc487506\",\"transport\":\"ego_task_space\",\"browserSpace\":{\"id\":6,\"name\":\"masc-keepers\"},\"inputReadiness\":\"command_settled\",\"tabId\":5,\"action\":\"workflow\",\"completed\":[{\"index\":0,\"method\":\"fill\",\"receipt\":{}},{\"index\":1,\"method\":\"selectOption\",\"receipt\":[\"high\"]},{\"index\":2,\"method\":\"focus\",\"receipt\":{}},{\"index\":3,\"method\":\"keyboard.paste\",\"receipt\":{}},{\"index\":4,\"method\":\"click\",\"receipt\":{}},{\"index\":5,\"method\":\"waitForFunction\",\"receipt\":true}],\"effectStarted\":true,\"completedEffect\":true,\"inputReleased\":true,\"failure\":null,\"urlBefore\":\"http://localhost:53678/\",\"url\":\"http://localhost:53678/\",\"title\":\"MASC Ego acceptance\",\"snapshot\":\"[p5 \\\"MASC Ego acceptance\\\" | space \\\"masc-keepers\\\"(6): 2 managed, 0 untracked \u2014 p1 \\\"\uc0c8 \ud0ed\\\", p5* \\\"MASC Ego acceptance\\\"]\\nroot\\n  heading\\n    text \\\"MASC Ego acceptance\\\"\\n  container\\n    text \\\"Name\\\"\\n    textbox [ref=1]\\n      text \\\"Ego \ud55c\uae00 \ud83d\ude00\\\"\\n  container\\n    text \\\"Priority\\\"\\n    combobox [ref=2]\\n      text \\\"High\\\"\\n  textfield \\\"Rich editor\\\" [ref=3]\\n    text \\\"Native browser record\\\"\\n  button [ref=4]\\n    text \\\"Save record\\\"\\n  output [ref=5]\\n    text \\\"Saved record\\\"\\n  button [ref=6]\\n    text \\\"Shadow action\\\"\\n  iframe [ref=7]\\n    root\\n      container\\n        text \\\"Frame editor\\\"\\n        textbox [ref=8]\\n      button [ref=9]\\n        text \\\"Frame action\\\"\\n[more content below the viewport: scrollY=0, viewport 978 / page 1896 px; scroll or use snapshot({ scope: \\\"full_page\\\" })]\",\"truncated\":false,\"chars\":757}"
+          }
+        ],
+        "isError": false,
+        "structuredContent": {
+          "source": "live",
+          "lane": "live",
+          "browserSelection": {
+            "lane": "live",
+            "clientId": "7609b739-7eb9-4051-b663-025ffc487506",
+            "reason": "explicit_browser"
+          },
+          "clientId": "7609b739-7eb9-4051-b663-025ffc487506",
+          "transport": "ego_task_space",
+          "browserSpace": {
+            "id": 6,
+            "name": "masc-keepers"
+          },
+          "inputReadiness": "command_settled",
+          "tabId": 5,
+          "action": "workflow",
+          "completed": [
+            {
+              "index": 0,
+              "method": "fill",
+              "receipt": {}
+            },
+            {
+              "index": 1,
+              "method": "selectOption",
+              "receipt": [
+                "high"
+              ]
+            },
+            {
+              "index": 2,
+              "method": "focus",
+              "receipt": {}
+            },
+            {
+              "index": 3,
+              "method": "keyboard.paste",
+              "receipt": {}
+            },
+            {
+              "index": 4,
+              "method": "click",
+              "receipt": {}
+            },
+            {
+              "index": 5,
+              "method": "waitForFunction",
+              "receipt": true
+            }
+          ],
+          "effectStarted": true,
+          "completedEffect": true,
+          "inputReleased": true,
+          "failure": null,
+          "urlBefore": "http://localhost:53678/",
+          "url": "http://localhost:53678/",
+          "title": "MASC Ego acceptance",
+          "snapshot": "[p5 \"MASC Ego acceptance\" | space \"masc-keepers\"(6): 2 managed, 0 untracked \u2014 p1 \"\uc0c8 \ud0ed\", p5* \"MASC Ego acceptance\"]\nroot\n  heading\n    text \"MASC Ego acceptance\"\n  container\n    text \"Name\"\n    textbox [ref=1]\n      text \"Ego \ud55c\uae00 \ud83d\ude00\"\n  container\n    text \"Priority\"\n    combobox [ref=2]\n      text \"High\"\n  textfield \"Rich editor\" [ref=3]\n    text \"Native browser record\"\n  button [ref=4]\n    text \"Save record\"\n  output [ref=5]\n    text \"Saved record\"\n  button [ref=6]\n    text \"Shadow action\"\n  iframe [ref=7]\n    root\n      container\n        text \"Frame editor\"\n        textbox [ref=8]\n      button [ref=9]\n        text \"Frame action\"\n[more content below the viewport: scrollY=0, viewport 978 / page 1896 px; scroll or use snapshot({ scope: \"full_page\" })]",
+          "truncated": false,
+          "chars": 757
+        }
+      }
+    },
+    "seconds": 1.2285275409958558
+  },
+  {
+    "at": "2026-11-01T01:48:34.603385+00:00",
+    "tool": "masc_browser_interact",
+    "arguments": {
+      "lane": "live",
+      "clientId": "7609b739-7eb9-4051-b663-025ffc487506",
+      "tabId": 5,
+      "action": "workflow",
+      "expectedUrl": "http://localhost:53678/",
+      "steps": [
+        {
+          "method": "click",
+          "selector": "loc=role:button[name=\"Shadow action\"]"
+        },
+        {
+          "method": "fill",
+          "selector": "loc=role:textbox[name=\"Frame editor\"]",
+          "text": "Native frame"
+        },
+        {
+          "method": "click",
+          "selector": "loc=role:button[name=\"Frame action\"]"
+        },
+        {
+          "method": "waitForFunction",
+          "source": "observed.frameClicks.length === 1"
+        },
+        {
+          "method": "click",
+          "selector": "loc=role:button[name=\"Offscreen action\"]"
+        },
+        {
+          "method": "evaluate",
+          "source": "observed"
+        }
+      ]
+    },
+    "state": "returned",
+    "response": {
+      "jsonrpc": "2.0",
+      "id": 6,
+      "result": {
+        "_meta": {
+          "io.modelcontextprotocol/serverInfo": {
+            "name": "masc",
+            "title": "MASC MCP Server",
+            "version": "0.66.0"
+          },
+          "com.github.yousleepwhen.masc/call": {
+            "envelope": {
+              "kind": "tool_call",
+              "summary": "{\"source\":\"live\",\"lane\":\"live\",\"browserSelection\":{\"lane\":\"live\",\"clientId\":\"7609b739-7eb9-4051-b663-025ffc487506\",\"reason\":\"explicit_browser\"},\"clientId\":\"7609b739-7eb9-4051-b663-025ffc487506\",\"transport\":\"ego_task_space\",\"browserSpace\":{\"id\":6,\"name\":\"masc-keepers\"},\"inputReadiness\":\"command_settled\",\"tabId\":5,\"action\":\"workflow\",\"completed\":[{\"index\":0,\"method\":\"click\",\"receipt\":{}},{\"index\":1,\"method\":\"fill\",\"receipt\":{}},{\"index\":2,\"method\":\"click\",\"receipt\":{}},{\"index\":3,\"method\":\"waitForFunction\",\"receipt\":true},{\"index\":4,\"method\":\"click\",\"receipt\":{}},{\"index\":5,\"method\":\"evaluate\",\"receipt\":{\"pastes\":[{\"trusted\":true,\"html\":\"<b>Native browser record</b>\"}],\"shadowClicks\":[true],\"frameClicks\":[true],\"frameValues\":[\"Native frame\"],\"offscreenClicks\":[true]}}],\"effectStarted\":true,\"completedEffect\":true,\"inputReleased\":true,\"failure\":null,\"urlBefore\":\"http://localhost:53678/\",\"url\":\"http://localhost:53678/\",\"title\":\"MASC Ego acceptance\",\"snapshot\":\"[p5 \\\"MASC Ego acceptance\\\" | space \\\"masc-keepers\\\"(6): 2 managed, 0 untracked \u2014 p1 \\\"\uc0c8 \ud0ed\\\", p5* \\\"MASC Ego acceptance\\\"]\\nroot\\n  button [ref=10]\\n    text \\\"Offscreen action\\\"\\n[more content above the viewport: scrollY=918, viewport 978 / page 1896 px; scroll or use snapshot({ scope: \\\"full_page\\\" })]\",\"truncated\":false,\"chars\":289}",
+              "status": "ok",
+              "tool": "masc_browser_interact"
+            },
+            "trace_id": "6",
+            "agent_id": "codex-mcp-client",
+            "tool": "masc_browser_interact",
+            "duration_ms": 2654,
+            "attempts": 1,
+            "timestamp": "2026-11-01T01:48:37Z"
+          }
+        },
+        "resultType": "complete",
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"source\":\"live\",\"lane\":\"live\",\"browserSelection\":{\"lane\":\"live\",\"clientId\":\"7609b739-7eb9-4051-b663-025ffc487506\",\"reason\":\"explicit_browser\"},\"clientId\":\"7609b739-7eb9-4051-b663-025ffc487506\",\"transport\":\"ego_task_space\",\"browserSpace\":{\"id\":6,\"name\":\"masc-keepers\"},\"inputReadiness\":\"command_settled\",\"tabId\":5,\"action\":\"workflow\",\"completed\":[{\"index\":0,\"method\":\"click\",\"receipt\":{}},{\"index\":1,\"method\":\"fill\",\"receipt\":{}},{\"index\":2,\"method\":\"click\",\"receipt\":{}},{\"index\":3,\"method\":\"waitForFunction\",\"receipt\":true},{\"index\":4,\"method\":\"click\",\"receipt\":{}},{\"index\":5,\"method\":\"evaluate\",\"receipt\":{\"pastes\":[{\"trusted\":true,\"html\":\"<b>Native browser record</b>\"}],\"shadowClicks\":[true],\"frameClicks\":[true],\"frameValues\":[\"Native frame\"],\"offscreenClicks\":[true]}}],\"effectStarted\":true,\"completedEffect\":true,\"inputReleased\":true,\"failure\":null,\"urlBefore\":\"http://localhost:53678/\",\"url\":\"http://localhost:53678/\",\"title\":\"MASC Ego acceptance\",\"snapshot\":\"[p5 \\\"MASC Ego acceptance\\\" | space \\\"masc-keepers\\\"(6): 2 managed, 0 untracked \u2014 p1 \\\"\uc0c8 \ud0ed\\\", p5* \\\"MASC Ego acceptance\\\"]\\nroot\\n  button [ref=10]\\n    text \\\"Offscreen action\\\"\\n[more content above the viewport: scrollY=918, viewport 978 / page 1896 px; scroll or use snapshot({ scope: \\\"full_page\\\" })]\",\"truncated\":false,\"chars\":289}"
+          }
+        ],
+        "isError": false,
+        "structuredContent": {
+          "source": "live",
+          "lane": "live",
+          "browserSelection": {
+            "lane": "live",
+            "clientId": "7609b739-7eb9-4051-b663-025ffc487506",
+            "reason": "explicit_browser"
+          },
+          "clientId": "7609b739-7eb9-4051-b663-025ffc487506",
+          "transport": "ego_task_space",
+          "browserSpace": {
+            "id": 6,
+            "name": "masc-keepers"
+          },
+          "inputReadiness": "command_settled",
+          "tabId": 5,
+          "action": "workflow",
+          "completed": [
+            {
+              "index": 0,
+              "method": "click",
+              "receipt": {}
+            },
+            {
+              "index": 1,
+              "method": "fill",
+              "receipt": {}
+            },
+            {
+              "index": 2,
+              "method": "click",
+              "receipt": {}
+            },
+            {
+              "index": 3,
+              "method": "waitForFunction",
+              "receipt": true
+            },
+            {
+              "index": 4,
+              "method": "click",
+              "receipt": {}
+            },
+            {
+              "index": 5,
+              "method": "evaluate",
+              "receipt": {
+                "pastes": [
+                  {
+                    "trusted": true,
+                    "html": "<b>Native browser record</b>"
+                  }
+                ],
+                "shadowClicks": [
+                  true
+                ],
+                "frameClicks": [
+                  true
+                ],
+                "frameValues": [
+                  "Native frame"
+                ],
+                "offscreenClicks": [
+                  true
+                ]
+              }
+            }
+          ],
+          "effectStarted": true,
+          "completedEffect": true,
+          "inputReleased": true,
+          "failure": null,
+          "urlBefore": "http://localhost:53678/",
+          "url": "http://localhost:53678/",
+          "title": "MASC Ego acceptance",
+          "snapshot": "[p5 \"MASC Ego acceptance\" | space \"masc-keepers\"(6): 2 managed, 0 untracked \u2014 p1 \"\uc0c8 \ud0ed\", p5* \"MASC Ego acceptance\"]\nroot\n  button [ref=10]\n    text \"Offscreen action\"\n[more content above the viewport: scrollY=918, viewport 978 / page 1896 px; scroll or use snapshot({ scope: \"full_page\" })]",
+          "truncated": false,
+          "chars": 289
+        }
+      }
+    },
+    "seconds": 2.6640358330041636
+  },
+  {
+    "at": "2026-11-01T01:48:37.268088+00:00",
+    "tool": "masc_browser_interact",
+    "arguments": {
+      "lane": "live",
+      "clientId": "7609b739-7eb9-4051-b663-025ffc487506",
+      "tabId": 5,
+      "action": "workflow",
+      "expectedUrl": "http://localhost:53678/wrong",
+      "steps": [
+        {
+          "method": "click",
+          "selector": "loc=role:button[name=\"Save record\"]"
+        }
+      ]
+    },
+    "state": "returned",
+    "response": {
+      "jsonrpc": "2.0",
+      "id": 7,
+      "result": {
+        "_meta": {
+          "io.modelcontextprotocol/serverInfo": {
+            "name": "masc",
+            "title": "MASC MCP Server",
+            "version": "0.66.0"
+          },
+          "com.github.yousleepwhen.masc/call": {
+            "envelope": {
+              "kind": "tool_call",
+              "summary": "Browser command failed; inspect its original receipt before further input. {\"reply\":\"issue\",\"answer\":{\"status\":\"answered\",\"payload\":{\"ok\":false,\"error\":\"the tab is at http://localhost:53678/, not at expectedUrl; read it again; read the same tab before continuing; never replay the workflow\",\"effectPhase\":\"not_started\"}},\"browserSelection\":{\"lane\":\"live\",\"clientId\":\"7609b739-7eb9-4051-b663-025ffc487506\",\"reason\":\"explicit_browser\"},\"browserConnection\":{\"clientId\":\"7609b739-7eb9-4051-b663-025ffc487506\",\"transport\":\"ego_task_space\",\"browserSpace\":{\"id\":6,\"name\":\"masc-keepers\"}}}",
+              "status": "error",
+              "tool": "masc_browser_interact"
+            },
+            "trace_id": "7",
+            "agent_id": "codex-mcp-client",
+            "tool": "masc_browser_interact",
+            "duration_ms": 8,
+            "attempts": 1,
+            "timestamp": "2026-11-01T01:48:37Z",
+            "failure_class": "workflow_rejection",
+            "metadata": {
+              "io.github.jeong-sik/masc.lane.failure": {
+                "class": "workflow_rejection",
+                "effect": "proven_pre_effect"
+              }
+            }
+          }
+        },
+        "resultType": "complete",
+        "content": [
+          {
+            "type": "text",
+            "text": "Browser command failed; inspect its original receipt before further input. {\"reply\":\"issue\",\"answer\":{\"status\":\"answered\",\"payload\":{\"ok\":false,\"error\":\"the tab is at http://localhost:53678/, not at expectedUrl; read it again; read the same tab before continuing; never replay the workflow\",\"effectPhase\":\"not_started\"}},\"browserSelection\":{\"lane\":\"live\",\"clientId\":\"7609b739-7eb9-4051-b663-025ffc487506\",\"reason\":\"explicit_browser\"},\"browserConnection\":{\"clientId\":\"7609b739-7eb9-4051-b663-025ffc487506\",\"transport\":\"ego_task_space\",\"browserSpace\":{\"id\":6,\"name\":\"masc-keepers\"}}}"
+          }
+        ],
+        "isError": true,
+        "structuredContent": {
+          "_meta": {
+            "io.github.jeong-sik/masc.lane.failure": {
+              "class": "workflow_rejection",
+              "effect": "proven_pre_effect"
+            }
+          },
+          "structuredContent": {
+            "reply": "issue",
+            "answer": {
+              "status": "answered",
+              "payload": {
+                "ok": false,
+                "error": "the tab is at http://localhost:53678/, not at expectedUrl; read it again; read the same tab before continuing; never replay the workflow",
+                "effectPhase": "not_started"
+              }
+            },
+            "browserSelection": {
+              "lane": "live",
+              "clientId": "7609b739-7eb9-4051-b663-025ffc487506",
+              "reason": "explicit_browser"
+            },
+            "browserConnection": {
+              "clientId": "7609b739-7eb9-4051-b663-025ffc487506",
+              "transport": "ego_task_space",
+              "browserSpace": {
+                "id": 6,
+                "name": "masc-keepers"
+              }
+            }
+          },
+          "isError": true,
+          "content": [
+            {
+              "type": "text",
+              "text": "{\"reply\":\"issue\",\"answer\":{\"status\":\"answered\",\"payload\":{\"ok\":false,\"error\":\"the tab is at http://localhost:53678/, not at expectedUrl; read it again; read the same tab before continuing; never replay the workflow\",\"effectPhase\":\"not_started\"}},\"browserSelection\":{\"lane\":\"live\",\"clientId\":\"7609b739-7eb9-4051-b663-025ffc487506\",\"reason\":\"explicit_browser\"},\"browserConnection\":{\"clientId\":\"7609b739-7eb9-4051-b663-025ffc487506\",\"transport\":\"ego_task_space\",\"browserSpace\":{\"id\":6,\"name\":\"masc-keepers\"}}}"
+            }
+          ]
+        }
+      }
+    },
+    "seconds": 0.013766917007160373
+  },
+  {
+    "at": "2026-11-01T01:48:37.282172+00:00",
+    "tool": "masc_browser_read",
+    "arguments": {
+      "lane": "live",
+      "clientId": "7609b739-7eb9-4051-b663-025ffc487506",
+      "tabId": 5,
+      "mode": "screenshot",
+      "screenshotOptions": {
+        "fullPage": true
+      }
+    },
+    "state": "returned",
+    "response": {
+      "jsonrpc": "2.0",
+      "id": 8,
+      "result": {
+        "_meta": {
+          "io.modelcontextprotocol/serverInfo": {
+            "name": "masc",
+            "title": "MASC MCP Server",
+            "version": "0.66.0"
+          },
+          "com.github.yousleepwhen.masc/call": {
+            "envelope": {
+              "kind": "tool_call",
+              "summary": "{\"scope\":\"page\",\"captureOptions\":{\"fullPage\":true},\"source\":\"live\",\"browserSelection\":{\"lane\":\"live\",\"clientId\":\"7609b739-7eb9-4051-b663-025ffc487506\",\"reason\":\"explicit_browser\"},\"clientId\":\"7609b739-7eb9-4051-b663-025ffc487506\",\"transport\":\"ego_task_space\",\"browserSpace\":{\"id\":6,\"name\":\"masc-keepers\"},\"tabId\":5,\"title\":\"MASC Ego acceptance\",\"url\":\"http://localhost:53678/\",\"mimeType\":\"image/png\",\"elapsed_ms\":1108.615042}",
+              "status": "ok",
+              "tool": "masc_browser_read"
+            },
+            "trace_id": "8",
+            "agent_id": "codex-mcp-client",
+            "tool": "masc_browser_read",
+            "duration_ms": 1110,
+            "attempts": 1,
+            "timestamp": "2026-11-01T01:48:38Z"
+          }
+        },
+        "resultType": "complete",
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"scope\":\"page\",\"captureOptions\":{\"fullPage\":true},\"source\":\"live\",\"browserSelection\":{\"lane\":\"live\",\"clientId\":\"7609b739-7eb9-4051-b663-025ffc487506\",\"reason\":\"explicit_browser\"},\"clientId\":\"7609b739-7eb9-4051-b663-025ffc487506\",\"transport\":\"ego_task_space\",\"browserSpace\":{\"id\":6,\"name\":\"masc-keepers\"},\"tabId\":5,\"title\":\"MASC Ego acceptance\",\"url\":\"http://localhost:53678/\",\"mimeType\":\"image/png\",\"elapsed_ms\":1108.615042}"
+          },
+          {
+            "type": "image",
+            "mimeType": "image/png",
+            "data": "iVBORw0KGgoAAAANSUhEUgAABgAAAAdoCAIAAAB9XJK/AAABJ2lDQ1BfAAB4nJWQP0vDQBjGf5aCf6iD6OiQsYtSFbqoSxWLTlIrWJ3SNE2FJoYkpQhufgE/hODsKEJnBwVBcBQ/gji4xicJki4dfI/37nfPPdzd+0JhBkWxAq4XBY16zThpnRrTn0xppGFaoc/kkOvnPfO+rfD/mO3YoaX1S9kJ9LiubIqXnIx7Cbczvkp4GPmR+CbhoNnYEd+Ky84Yt8fY8oPE/yzecvsDK/83Jds7PtK6p1xml3NCfPqYXGJwyIbmunYuAyLxUI6IniikoZOaqEkghyeliy0m6V/2xPUHbI/iOH7MtYMR3Fdh7iHXypuwUIKnl1zLe+qbgZlKRWWh24XvO5hvweKr7jn7a+SE2oy0tjoXGo5qs6Xs678Wq6J1KqxR/QUglE37tILJPAAAEABJREFUeJzs/QeYVOX9+H/PLk2pKkVAFFAUxA4qWAMqIvaGvaNRoyS22GKsiRpNYkPsvSR2VKzYRVQUElGKiIAgUgRUkF72+fz2PJn/fHeXstjg9vW6cs115p5zzpw5O1zJvHNK1ZKSkhwAAAAA6SrOAQAAAJA0AQgAAAAgcQIQAAAAQOIEIAAAAIDECUAAAAAAiROAAAAAABInAAEAAAAkTgACAAAASJwABAAAAJA4AQgAAAAgcQIQAAAAQOIEIAAAAIDECUAAAAAAiROAAAAAABInAAEAAAAkTgACAAAASJwABAAAAJA4AQgAAAAgcQIQAAAAQOIEIAAAAIDECUAAAAAAiROAAAAAABInAAEAAAAkTgACAAAASJwABAAAAJA4AQgAAAAgcVWX/vLTTz/9/PPPF44cffTRO+6445Lmf//99+++++7Ckc6dOx922GG5JbvgggumT5+eTW+88cZnnHFGbln+85//PPDAAyNHjhw+fPjo0aPr1KlTr169TTbZpFOnTkccccR66623pAXnzp372GOPDR06dMSIEbFsrKFRo0bNmjVbd911u3TpctBBBzVu3HiZ715+nyxJrHD33XfPAQAAAPyiikpKSpby8llnnXXdddcVjkRheeihh5Y0/29/+9s77rijcOT3v//9DTfcsKT5hw0bFuGmcOS7776rW7fukuafNm3aueeeW6YxldG3b9+99tqr/HifPn169uz55ZdfLmXZTz75pMz2lFd+nyxJzLY8PYuf1IIFCxYtWhQTRUVFNWrUyAEAAMCvT6VPAXv44YfnzJlT4UvxS/vf//53rjLKz//MM88saeZoVccff/zS60+YPXt2mZHp06fvuuuuBxxwwNLrT5g/f36OhMybN6969eqrl2rYsGEOAAAAfpWq5irvtddeq/AQm7fffnvmzJm55bZo0aLbbrutzOCDDz541FFHVTj/fffd9+yzzxaORNNp3rz5tGnTJkyYMHLkyAr7TjSdgw466I033igz3q5du+xgn1j2k08+mTJlSm6FtG3bdkkvNWjQIMcvKjv2BwAAAH7lViQAPfnkkxUGoKeeeipXGf379y+fXV566aWJEyc2adKk/Px9+vTJT0d2iQ619tprF87w2WefRSHacsstCwdvueWWMvXnggsuuOiii2rWrFk4+PHHH7/88sstWrTIVUYUqNgbOQAAAICV2IoEoMceeyyqSvXq1QsHFy1a9Oijj+Yq44EHHqhwPJLKaaedVn580KBB+ekrr7yyTP0JG2644VlnnVU4Mnv27D//+c+FIxGYKrww82alcj+9yFtffPHF+PHj582b16hRo8aNG5dJUQ0aNFhjjTXKLPXtt9+OKLX66qtvvPHGrVq1KrPUcpozZ87w4cOnT58+bdq02IB492htbdq0qVat2lKWKikpic2OvjZq1KgaNWrEIs2aNWvduvUPn3nx4sWxK4YNGxbbs/7668dfsMITteLv+NVXX2XTMUO9evXig8RbxIJz587daKONYv3169cvXOT777+fNGlSmfMBY5OyiapVq5aJfbEB8er0UvF0nXXWic2O/Vx+Y6ZOnRp/jmy6efPmseviU4wbNy7+OvEYf74YbNeuXVFRUW4JfopdBAAAAEuxIgFo5syZb7311m677VY4+P777+cP56lTp84yzwWLX+Z33XVXNt22bdttt9323nvvzZ7ed9995QNQBKbCM7yW8+yq119/vXBLunfv/gveluvtt9++6qqrXnjhhaXP1rt371NPPTX/dMCAASeddFL8/i8zW5cuXSLDbbDBBrnlE3ki6liF7x714fzzz483LS4ue02oSBUPP/xwLFj+WK34q/Xq1atz584rNvPChQtvvPHGSy+9tMxXJTYmvhhl/kw33HDDhRdemE1ff/31EYOuueaaMm/xxz/+8ZJLLqlVq1b29OWXXz7o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5XKlh/Y0bNhwjz32qFu3bjSLwrOEunTpkk189dVXhYs3adKk/DrXW2+9/HT5m6ZVaPbs2VETXnzxxcJbsFWocIXl72X+Q2YurDPx2QtveF9emf2wFIW7qMwFmJZHvNEdd9wRX5V33nkn9xNYGXYRAAAAv2aVvijyvvvum5/+97//HY/5K54cccQRy7z10qJFiwovZ3P55ZdvXuCoo44qnLnCY3zy4r0iA910003jx48vvEV9yCeqDTfcMD/4Qw4M+YEiT7z00kv5p5GrHnvssbvuuquw/sSHzaeBwrPYcuWOJ8qsscYa+envv/8+tyzvvfdeRLHTTjttmfUnfPPNN/np1VZb7UeceXk2Na/wTnNLV7t27dyKij/EOuusc+mll/5E9Se3cuwiAAAAfs0qfQTQZptttv7662fnfMVjhIx8bTnooIOWufibb75ZWD2W7r777rv55puXee2eevXq3XHHHdE18scB5U+iadWqVeGc8Qs/fz3dn1lhAigj6tUZZ5xReGGXMof8TJs2rfwViCdNmpSfLuxcFYo17LfffmWONmrXrl280euvv154DFf5DVjmJXUqNXPhJXIaNWpUeBO08gqPnFq6wvP7Ci+/vUwDBgw48cQTC0cOOeSQKGVNmza97rrrfqxouDLsIgAAAH7NKh2AcqW368pfqadHjx758fKna5VXeMmb5dG3b99DDz10mbPVrFkzIkj+0kLz5s3LJsoEoH/84x+/SACKUhY7LZvu169f+/bts9uxR2WIX/hlrnMU1lxzzTp16uR71pdfflk+AI0bNy4/vfHGG+eWqk+fPvn6E/2uf//++STx7bfflg9Ahfst3n3u3LlLOW6lUjPHu+enY5NOOumk6tWr536wwmshLzOHFbrlllvy01Hibr/99nxwfPDBB3+sALQy7CIAAAB+zSp9CljYb7/98tP5SHHAAQcs8zScWbNm3X333fmnQ4YMmVCRwisBLWcwmjNnTr7+hDZt2mQTu+22W+GdxZ566qmXX34597MrfNPzzjvvuuuui7AVg/fee+8111xz/fXXP/LII2Xu5LXlllvmp59//vkyK4zPG00n/3SZAeijjz7KT59wwgkVXlSoUHYb9bzCu7b9wFVYAswAABAASURBVJlbtGhR+DT2Q+4HW7hwYWHDKgwoyzRw4MD89CmnnPIT3SruF99FAAAA/MqtSADaeuutGzVqVGawe/fuy1yw8Ooz3bp122yzzZpWJApF4SJff/11rvTKvoccckiEkhkzZpRZbdSQnj17Fo7kA9Dqq68eeaXwpa5du1555ZXlr5wyatSoGC+899aPqPCuTxGqrrjiij8VOPPMMw877LDIXrvuumv+mr6Fd7u/6qqrytztOxJS/oieOnXqLPOwptmzZ+enC88dK6OoqCibWG211QrXGdGqMJRkvvnmm0GDBlV25ho1ahTesv24446r8ArWkydPfvDBB3MVyd+rPu+uu+7K34cubLvttvnpwntyRawsU9lyld8zK+Zn3kUAAABQxoqcAhY/qo888sj8fc0ze+yxxzIXvP/++/PTRx999JJmi5Z0zjnn5J8++eSTJ5988ty5cx8rFSMdO3Zs0aJF8+bNa9Wq9eWXXxae3xTatWsXaSn/9MADD9xpp53efvvt/EiWXWIlW2655eLFi8eMGRNdINYTL916660xnltur7zyylIuwhKx6c9//nOu9GZnUbUKj36q0GuvvRa//CNCVatW7Q9/+EPv3r2zrYpysfHGG//1r3+NDY5M8Pjjjz/wwAP5pW688ca11lpr6WvedNNN89O9evWK7YnYFO3j5Zdf/sc//pF/qaSkJD9900035e8vHhsQi8SfLDYg3iv22NChQ5944okYyf6mlZo53jGfAmPmqHXROLbffvsmTZrEpxs3blx0kKeeeioiY5mLgmcih8Vu2XPPPeM7EHHw6aefjgCUf/WUU04pPIIsykusJ//1OOmkk4455ph58+bFVsX+jD641VZbZTs5/OUvf6ldu3ZsfGS42NTCa0IX7pkV83PuIgAAAChjRQJQ2H///QsDULdu3dZcc82lLxI/ql944YX807333ntJc6633nqdOnV64403sqcROyIAFc7wXqklLX7fffcVXlWnqKgoystBBx2Uv1j18qxkOcWP86XcOip/LlI+MSzT4MGDP/nkk6gSNWvWvPnmm/Nn28Ub/f73vy8/f+yoKBrLXO0uu+xS+HQp9S0vtuHMM88s/Cs/UOqHz7zhhhtefPHFl19+eX7k3lK55baUlV9yySVlRmIX5W9U906pbPrSSy+NALTXXnvlU0t8Q6Ir5X4aP/MuAgAAgEIrcgpY2H777evUqZN/evDBBy9zkezgncxRRx1VuHh5hVEjfrGPHj26bt265c87K2OjjTZ66aWXCo92ybRq1erDDz/861//mluWxo0b535sgwYNatGiRXb4T9u2bT/66KOSAgsXLnz99dcL5//444+ziX333Tc+e3yoJa35sssue/HFFwvPclqSzTff/JprrqnwpTJtqNC1117bu3fvpfylmjZtumIzx5Y//vjjS/+DHnnkkbnK6NixY7Sz8n/Bv//970vZqpNOOikaUIUvRTnK/ah+8V0EAADAr9YyjgCKcHDIIYdk04XH+FStWjV6Sv/+/bOnZQ7n2W677apUqZJNd+7cOZuYPXt2flWnnnpqbqn233//SBv5p999991WW2311VdfxTs++uijI0aMGDt2bP6yL7GRrVu33m233Y4//vhq1apVuMIYv/DCCw888MAXXnhh6NChQ4YM+eCDD3Klt9lu3rx5y5Ytu3XrdsABB9SrVy+3LIX7ZOk6dOiQKw0Q+ZE///nPhdcDCrGjIjTEYP4ApTXWWCP/aoS2//73v/fff39koyGlYgu32WabLbfcMnZRmVUt3R//+MeddtrpuuuuixWOHDkyUlSsZ4899jj00ENjv82ZMydX7mLSsW3xl4o3uueee4YPH55tQLNmzTbZZJOYMype+/btV2zmcNBBB0V7euihh4YNGxbhJrZq9dVXj79jBK/YtiOOOGJJMS5eatKkycCBAz/99NPY7E1K7bjjjkcffXT+W1do3XXX/fzzz6O8vPvuu+PHj19ttdWyP3d2vefIZ08//XTUyXvvvTe+GPFNi726xRZbxNriu3HBBRdkK2nQoEF+hTvvvHP+30LDhg3LvF0sm/96lIl3P9suAgAAgDKKfvjFTX4pseXz5s2rUaPGil2gNzsAZ3kOn/mBok3kTzuKCFX+QKTnnnuusKBF51rmXbp+ba666qrYddn0JZdccumll+YAAACA5baC1wBaGUT3WW211XIrqqhU7qe3yy675APQlVde+fjjj++6664NGjRYsGDBtGnT3nzzzZEjR+ZnXp57tAMAAABUyiocgFYVv/vd71588cXsjLMwslSFc+6111633nprDgAAAOBH9ZOfAEXjxo3feOON6667bik3mO/evfvbb7/dt2/fJV3DCAAAAGCFrcLXAFoVffPNN5MnT54+ffq0adOKi4ubNm3apEmThg0bVnj1YvI+/vjjt956K5tu3779UlIaAAAAUJ4ABAAAAJA4p4ABAAAAJE4AAgAAAEicAAQAAACQOAEIAAAAIHECEAAAAEDiBCAAAACAxAlAAAAAAIkTgAAAAAASJwABAAAAJE4AAgAAAEicAAQAAACQOAEIAAAAIHECEAAAAEDiBCAAAACAxAlAAAAAAIkTgAAAAAASJwABAAAAJE4AAgAAAEicAAQAAACQOAEIAAAAIHECEAAAAEDiBCAAAACAxAlAAAAAAIkTgAAAAAASJwABAAAAJE4AAgAAAEhc1dzKZNKkSU888cS4ceNyrCLWW2+9gw46qHHjxjkAAABgZVVUUlKSW2ncfPPN7du379ixY24VVFKyuGTxgsUL55QsWlBUXK242upFRdWKihM/xuq9994bNGjQaaedllu5rXJtUVkDAADgR7RyHQEUv89X/pRQXjS0+d+MnTPlnaJFYyP7FFertnjBgvmzS3JVW9RouP1qa7UsKsqlKmrdU089lVtR0R9nz55ds2bNosrso3nz5sVjjRo1ln+RqD/RFlehb1eUtdjmVfGfAwAAACuhpR2fcvDBB8fP8gEDBhQOxsgzzzyT43+i/sz8/JXZY3vVaTSp3ia71Fz/yNXWPbbm+ketsemuddaeOmds7xmfvbwyHWX1c7j55puL/qdu3bq77757mW9R3hdffFG7du033ngjVxmRRbp06ZJNRwz67rvvlrlItMVV68iy2FrnQgIAAPBjWdoRQAsXLozHnj17Dhw4sEqVKvnxleqsscr6+OOP33rrrWz6t7/9bbVq1aZMmbLddtsNHTp0tdVWi8GZM2fGdPkF69Sps8kmm5QZjD0x/dN+NeY9Urfdb3K5dXKL5pWUfFFUVKWkZFFR0eIqa266VvsGsz5+4tuRuXobdikuTvdAoP9r8eLF8fjOO+/ExIQJE6688soddthh7NixzZs3LzNn/fr177777tatW+cq49hjj50xY0Y23bt370suuST/FAAAAChvGaeAbbTRRoMHD37ggQeOO+64Jc0TPWhJ5+8UvrSk2ZY0vmjRoiOOOKJ8bHr44YerVl3xM9e++eab0aNH5986HufPnx8j+TcaNWrUpZdeWmapMWPGNGvW7NVXXy0zPnvK6IVj/7Xm9uuXzJ9bVO2zXJVquQVFEX9yVUr+339K5pfML16tefNZ7z0yr36r1Rusn/s12X777bOJRo0a7bLLLn369PnDH/5QZp7Iascff3yZwaV8ozI77bRT7of561//usYaaxSeYPX444+/+eabN91007hx484555zoSg0aNKhw2fi3cOKJJ+644445AAAAWEUs4xLF8Rs+fu6ed9555Y+wWLx48THHHNO6devi4uI99tijb9++2fj5559/5JFHnnzyyWuvvXa8dOqppz722GPxazmm27dv/9xzz2WzxQp79uxZt27dGO/cuXP5g26iAjz66KMx23r/V25FTZ8+/fDDD7/lllu++p9jjz327LPPLjPbVltt9WI5J5xwQq1atcrugYULZ3/xRp263y6eM6tk7phJn3/8+eD3ShZ+kasyYeHcsZ998O60ccMXzxtTMntGnbozZox+fXHpEVW/Qh06dMiVnoQVjzvvvPPVV18d35D4eowYMWLSpElbbLHFf/7zn2zOe+65Z5NNNomvRHyv/vnPf0YEjMGxY8fG0zvvvHP33XffYIMNYuSKK66IL1hMXHnllbG2mTNnxkriOxZ/05gzSlP+ra+55ppYqvwmRev58MMPC0fiG/j888/nSg98i3dcuOQ/1pNPPvnll1/mAAAAYNWx7ENp/vrXv957773xMzt+bBeOFxUVbbfddoceemj8/O7du3ePHj0mTJhQtWrVeHz22Wf/+Mc/3n333fGLOl4aMGBAlJczzjgjfo1ffPHFe+21VyweSeXtt9+OkTp16sSaIyF9/vnn5d/9qFIVblh25M7666+fZYLVV189G588efK8efPWXXfdMkeRRMHJDjaZM2fOmDFjohRUqVKlfNapUPzgb9asWZnBRQtmz//qvdrrFC2e/XWuuMqb//pw9NCpJ/yl89qtGkz4bMK/rurfrtN63Y7cbPGsBUVVcwvGvbtwk4OqV10j9+uT1b34i8Tjf//73/i7n3vuuf/4xz/WWWed7777bsiQIVlevOuuu0488cTDDjvsuuuui8Foc3Pnzr3wwgvjrzly5MjLLrvs9NNP/93vfhdzRuiJkZjo2rVrVKQoPhdddFF895o2bdqwYcP4yu2///650kYZ7xLrzFVG8+bN+/XrV69evezpkr5msc3xVd9www1/yPFoAAAA8PNY9m/X+FF91VVXXXDBBZF4suMvMpFXTj311Gy6cePGnTt3Hjx48LbbbhtPO3Xq9Oc//zlXeqpO/BqPGJRFnPg9f/TRR8+ePXv8+PFPPPHECy+8EN0nV5pm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kDgBCAAAACBxAhAAAABA4gQgAAAAgMQJQAAAAACJE4AAAAAAEicAAQAAACROAAIAAABInAAEAAAAkDgBCAAAACBxAhAAAABA4gQgAAAAgMQJQAAAAACJE4AAAAAAErdqBKBvvvlmwoQJc+bMyf1gb7311mWXXda/f/8clfTGG2/YdQAAALAq+gkD0Iknnti+ffsjjzyypKQkP7jddtt17tx5mcsuXLhw0aJF+afHHntss2bNXnnlldwPNmDAgEsvvTRaRo5KivQTu+7999/PAQAAAKuUnzAADR06dPDgwQ8//PDjjz+eH3zvvfcGDRq09AXfeeedatWqHXTQQfmRrbfeulu3bg0bNswBAAAAUElVcz+9008/fa+99qpZs+Zyzr9w4cIyIxdffHHuJ1BSUlJUVPRTzLxSqXDLfyWfHQAAAMj9DNcAqlOnzpQpU/7+97+Xf+mFF17Yf//911133bp16x544IGPPfZYDMbjUUcdFRNPP/1069atzz777Jju2bNnTL/55ptfffVVTGyyySazZs3KVvLKK6/EyPnnnx/Tc+bMufzyy+Np1IqYp3fv3osXL65wq/r377/jjjsWFxfHW//+97/P1vbRRx/FsieeeGKsLSYefPDBGPz6669PPvnk2MiYeYsttrjllluyc9OuuOKKmKdXr17ZCs8888x4GmuI6Zihffv2sf6YHjhw4M477xzbE2+07bbbZudPRU/597//HfPE+AYbbBDLzpw5c0kbkBdLxYeKpe66665Y1amnnrr0jxxr23fffeN9Y8tjhhdffDEGFyxYcPXVV8fTGIy3jt07Y8aMbP7f/va3MX777bfvsccesaoYiVXdcccd2cxrr732Aw88kAMAAABWQT95ALrhhhvi8ZJLLhk7dmyZl8aPHx/hY/vtt2/ZsuVTTz11yCGHDBs2bK211mrWrFm82qhRo4033rhx48Yx/cUXX4wcOXL27NlNmzatXbt2zBbxKFtJVJJ4KastJ5xwQrxRTBx33HGx8tNOO+3++++vcKteeumlKCPt2rWLDbjpppuypSIDxaoir/ztb3+bOHFijMydOzfWHE0kpmPzhgwZ8rvf/e6vf/1rPN1oo41i5ieeeCJXeshSLBVP+/btG09jtsGDB7dq1SqmI9O8/fbb3bt3j02qVavWmDFjYjCqyuGHH/7ZZ5/16NEjnl5//fVRuCrcgDLig8eaoxB98MEH1apVW8pHHjFixJZbbvnss8/G9GGHHVavXr2PP/44V1p5LrjggniXqGzff//9P//5z/322y+7SFP8gWI8alfsnKpVq2bbGfPHYNeuXffcc88KNwkAAABY+f3kAWjXXXeNABET5557bpmXIi68+uqrjzzyyEcffbT55pvnSi8bFPNfffXVudLLRffp0+ePf/xjmaVOOumkePz3v/8dj5GE7rvvvjp16uy+++4ROGIw4lGs7Z577omMEjP07t27wq264oornn/++UGDBj3zzDPx9B//+Ef+StVt27aNzvLdd99FInnggQcif2yzzTYRbmI7o+zkSmNWvG9sZ670xlgx/f7772eH8Dz99NO50huNxeMee+zx+eefR69Zf/31Y9kbb7zx9ddfj10Rb3TOOefEDBFx7rzzzshDMR2fIltDmQ2ocOP79+8/f/78WOFSPvJll10Wj0ccccS0adP+9a9/DRw48Oyzz47V3nvvvbnSw5rio8WHisoWHyHbhsx11103Y8aM7FCm7My7fv36vfjii7H+8n9BAAAAYJXwc1wD6O9//3t0iscee6z8vbeiNbz00ktRIrLr/pS/+k953bt3P/XUU5944olIJNGPcqW3G6tevXrEo5iOiQsvvDAmpk6dmis9EGbpa+vWrVs2MWnSpGwiO/Iom458E4/77rtvdkTMZpttFq9OmTIlyk5Md+zY8b333ov6E2UnXt1pp52ipMR6sq3aZZddGjRoEHVm9OjRrVq1Ouigg3r06NG6desvv/wyaz233XZb4ZaMHz++/AZUqEOHDtn2LOUjR/HJld49LTtQKBQXF2cBq1OnTrFhMVGzZs34+NGeYj0777xzNlu7du0iqMXEt99+G580V5rwcgAAAMCq7OcIQOuss040oHPOOee0004rHL/hhhvOOOOMXOnpVMt/elH9+vWjAUVO6tu3b3bETXakTASLXOmxLf3798/m3GabbSKOLH1tVapUySYK7zqfN23atHjcYIMN8iPZCrNrBu29994RgN56662oUV27dj3ssMMiAD3//PPPPvtsvHV0nFzpJY0uv/zyF1544dpS//rXvzbddNNsVYXbmSu9xE+ukpbykWMwHrMT6PK++eabeNxwww3zIzVq1IjH/MFH5T97xCCXfwYAAIBV3U9+ClimZ8+eUXmGDRuWH4mG8uc//zn6QqSfTz/99JBDDln+tR177LHxeMstt0Readu2bbt27eJpixYt4rFNmzYDC+TLyJKMGzcum2jar8jdmgAAEABJREFUtGn5V7P0M3LkyOzp+PHjv/zyy/z47rvvHo933nlnfK599903GlCu9ASxXGkbyhbp2LFjJKHp06dfcMEF8fT+++9v3rx59tJLL71UuKnZdZcrZSkfOQbj8eWXXy4/f+Ff4ZVXXsmVBrjyK8+uxBRtKDuwCAAAAFh1/UwBqHr16mUuxxMBaGapmIjE8Pnnn+dfql+/fjy+++67AwYMyM5aKiPKS5Sjd955J1d6/lc2uN1228XgBx98cPLJJ0fXGDFixNNPP72kawBF9/niiy9ef/317IpCPXr0KC6uYFfss88+udIrBEW4+fDDD7Nr93Tp0qVhw4a5/50tlSWhbt26NWnSJHJP9jRrQzEdCw4fPjwCUHbSVrxLLJKdd3bwwQdHwIr49cYbb2R5qLKW8pH322+/eLz22mtj4wcPHvzMM8/06dMnNi/bb1dccUXs2Msvv3z06NEx8pvf/Kb8ymvUqNGpU6eYOOaYY2JHxbtkZ7oBAAAAq5yfKQDlSi8lU3iYT6NGjY444oiYaNWqVfSUQYMG5V/adNNNo61MmTJlhx12OP3008uvqlq1aqeccko2feihh2YT9erVe/LJJyNn3H777dFoNt544/333/+TTz6pcGPuuOOOFi1a7LLLLv369dtpp52uuuqqCmfbfvvt//KXv0SlOvbYY7fZZptHH3108803z24Klis9fezAAw/MlV62uWXLljGRPY1t2HrrrXOlZ1HFgvFqfMZoLrnSu8XH48033xzree2112KHtGnTpnPnzrHmXOUt5SOfffbZe+21V+zDiFbt27ePHjRw4MA111zzkUceifkvvvjiLbbY4pJLLonpWEOMV7j+Xr16xZ/phRdeiB217bbbRgPKAQAAAKugoiVdeqaoqGgFrkpT6M033/zmm2923333mjVrZiPRIwYMGBD5JtpEPF28ePGHpTYqNXjw4EgV6667bq70/uvvvvvu+PHjowRFD3rvvfcmTZq04447ZlcvDl999VUUjdq1a++2226FbxrvGDOPHj16jTXWiCCSnR1WaNasWREyPvvss++++y4CSvSXWG12mZvoNW+//Xa8RXZT+bxRo0bFRk6fPr1169Y777xz/rLK2UsRXNZbb73sjbIPWL9+/YhKhcvGe2222WaRkPLLLly48J133hk5cmRxcfEGG2wQqSteWtIG5PXp0ydXenRP4XV5lvKR33///WHDhs2fPz92b2x5dsGjqVOnxr4dN25cbHa871prrZXNHNvz9ddfF+7kXOllhl566aXYsPjssfLY55Gu1l9//RwAP5kf/l/BAABQxk8YgACAFeC/ggEA+NH9fKeAAQAAAPCLEIAAAAAAEicAAQAAACROAAIAAABInAAEAAAAkDgBCAAAACBxAhAAAABA4gQgAAAAgMQJQAAAAACJE4AAAAAAEicAAQAAACROAAIAAABInAAEAAAAkDgBCAAAACBxAhAAAABA4gQgAAAAgMQJQAAAAACJE4AAAAAAEicAAQAAACROAAIAAABInAAEAAAAkDgBCAAAACBxAhAAAABA4qou5bXLLrssBwAAAMAqrqikpKT86LRp03r16pUDAH4Jl1xySQ4AAH48FQeg8Prrr3/yySctW7TI/VqNGTt2k0022WWXXXIAAAAAq7IlngL28ssvn3nmmdWrV8/9Wm3bocN1110nAAEAAACruiVeBHrx4sW/5voT4uPHTsg//eabb7766quFCxfmfkpPP/30Oeeck1tpXH311XfffXcOAAAAWJW5C9iyDRgwoHXr1muttdY666xTrVq1nj175n4yH3/88SOPPJJbabz00kvx8XMAAADAqkwAWoZZs2YdcMABtWvXfv7550eNGvXCCy80btw4BwAAALDqqJqrvEWLFt1zzz2vv/76hAkTNtlkk+gju+22W27VNHTo0L///e933HFH1aoV74phw4ZNmTIlZujWrVs83WCDDfbYY4/CGUpKSoqKinLLbUnzL168uLi40j1uKe9e4UvLv7Urtj0AAADASmhFfuGfeeaZl112Wf369ffff/+II927d3/44Ydzq6apU6f26dOn8Fo/ZdSoUSMeV1tttfIvRTnadttto5K0b98+pnOl1wlq3br1Qw89lJ/nwQcfjFcXLFgQb9GrV6/oRzF/VLOnn346myHGe/fuHeNVqlRZd911H3vssQo34/zzzz/11FPPO++8mPPee++NkVGjRu29996xtrp16x533HHx1tmc48aNO/zww2MwXtpiiy0GDhwYg3PmzIk1xPpjMLb5hRdeyGZ+8sknt9tuu9tvvz028sQTT4yRmTNn/uEPf1h77bVje2Iw+lcOAAAAWMVVOgBFSnjggQcuueSSG2+88Ywzzohgsfvuu0fCyM8wd+7ckSNHfvnll4sWLcrmD/lX582bl386f/78mHPatGnl3yWWnTFjxsKFCz///PP8jeojNn322WdlLsMcASUGY7VlNrJwzgrXNmHChKg/uWXZbLPNmjVrFvHl2WefLfPWzZs3P/fccyPlbLXVVn/84x8//fTTNddcM9LJnXfemZ/n1ltv3XLLLatVq3bLLbf07NnzmGOOifVExIl2FvPHDHfddddpp512yCGHvPLKK9dee+2SNiO2NlY1ceLEiy66aMcdd5w1a9YOO+zw7bffxv6/9NJLo+NEtYnZZs+e3blz59dee+2CCy7o16/fscce+/3338f4b3/727/97W9HHHFEvBTbs+eee/bv3z9XWqzee++9qFQ9evTIAtApp5xyzz33xDpjzhgp/NsBAAAAq6hKnwJWvXr12rVrv/322wcccED9+vVj5KabbooSkb0aCePKK6/Mplu1avXMM888+uijN99887Bhw7JzrI477ri6devedtttffr0iSCS5YnIHzfccEPhUTZDhw79zW9+s/POO7/11luRmX7/+99HmHj55ZfjpXj3hx56KF6K6RdffPGkk07KVnLmmWdefPHFEYkuu+yy7IikmDNaxm677VZ+bQcffPDgwYNjng4dOiz98xYVFfXt2zcazb777lunTp2rrroq3jG7P1r37t2zeXbZZZfoODFb69atTzjhhOOPPz56zTrrrDN27Nh33nnniiuuiHkuv/zy888/P8JZ9qaNGjV6/PHH//SnP8X40UcfHavNVjVq1KjYORVuSbdu3e6///5s+u67745POnz48LXWWiueRm677rrrIjzF3h49enT8dSISxXh2al6sMxLPP/7xj7POOiuedurU6b///e8111yTzRNit2QTX3zxRey6WHl8hHgaLSlWmAMAAABWcZU+AqhKlSq9e/eOshN9p0uXLlEuokRstNFG8dKQIUOi/kRzmTp1av/+/aM7PPHEE1FJvv766+x4k5gzks2hhx46ZsyYSAxRUsaPHx8l6Pnnn7/11lvLv1fUjX79+sWc0VD+85//vPnmm7HOWOGRRx753XffRV45/PDDe/ToEdniqaeeigLy4YcfnnfeeQMGDIilPv3000g2MfPkyZPLrO3ss8+eNWvW+++/H3Pm09VSbLHFFpFIXnvttegpp59++nbbbbdgwYLspYkTJz799NPZOVnz58+Px+hi8RjbE49RTyL0RHiaNm1afPbPP//88lK33HJLrrS2zJ49O9pN9KNcJUXSihrVq1evbIURfbKNidAW4x07diycOTuNq2vXrtnTSFrxh4v9WX61n332WTzutNNOOQAAACAhK3INoH322SdKwc0339ysWbOIQdELbrrpphhv3br1wIED99hjj+HDh3/88ccNGzacMWNG06ZNo5tkl7aJbBSDEUQipsTT6BQfffRR1apVt99++2effbb8G5122mlbb731euutF4v/5je/mTlz5ogRI2Lx77//PlrPoEGDYp6ePXvWrVu3U6dOr7/+esuWLSMnRRWKpaK8ZAe8vPPOO4VrW3fddSMDRYSKaLXxxhvHzMvzkYuLizt37vzkk0/eeOONgwcPjnhUUlJy9NFHx6e7+uqrY2Pyc9arV++oo47KDtW56667TjnllEhmkaviacSmL/8n4te2226bXbgnkk2ukrJulV9bfNjsuKQoTW3atClzQevs3WPn5Edq1KiRDZaRnY5Xu3btHAAAAJCQSp8CNnny5FGjRu2www5HlJo3b94ll1xy8cUXH3nkkauvvvo111zz+OOPR0GIppMrvedUPEYQOe6446699toHH3zw+OOPjzwRzSLGY6n8arNTmcqIvJIrvSxxFJ8333wzolI2HqVp1qxZn3/+ecyQnYYWttxyy+yaPu3atctG1l9//XicPn164dqiucTaNtlkk2wwP/Ny2m677bJ1vvvuu/FxXn311ez4nfxllUOEoa5du0a0GjlyZBaYopTF4/777/+73/2ucG3ZZZLGjh2bq6Ss5kR9K9N6WrRoEe+7cOHCwvEoaLnSA44ieGUjsbX5PVBm8VzpZaTd6h4AAABSUukjgIYOHbr33nuPGTMme1qjRo3IQDExadKkCCJRf/r16xdF45FHHqlWrVoWOPbYY49IQr169froo48OOeSQGFlnnXXi8bnnnnuv1O23337ppZdWsHGltyGvU6dOLB7vks0cJShmjhATkeKrr776+uuvs5mvuOKK7Jig7L5XYcSIEbnSSxEVri1KU6wtf8xOPiotyZAhQ7L15EpTVHaqWpSUKVOmxESDBg1ypde9LrxYciShRo0a9ejRY5tttmnTpk2u9MJJ++yzz1VXXTVgwIBsn8RmR8CqUqVKpKLoONmniJeWMwZ169YtNiYKWrbg4sWL33///Zjo0qVLjF900UXZ+OzZs+MvFZEru3pRhKFIci+//HLsxuwPUUbbtm1jzr///e/Z6WyxquxjAgAAAKu0SgegHXbYoWHDhtGA+vTp8+mnn77xxhtnnnlmixYtoolkhaV+/fqRD2644YaoM9nNuSISZdc57tChwwYbbJD738WJL7vssgkTJvz3v//da6+9Iuss5U27d+9+1113Rbn45ptvLrnkkpNOOqmoqKhz58650nuxT548+cknn/znP/+5/vrrH3rooQ899NBrr702evToa665JlrPFltsUWZt0T5inmgxEaTyl1VekkhF8dHWXnvt9u3b161bNzbjwgsv3HDDDffcc8+oPDvuuGPkrebNmxcuUrVq1eOPPz7qyQknnJAfvP7662Px2HtNmzZt3bp1LPvBBx9k499//33slp133jleWs6LLsfGXHnllbFLYz2bbLLJGmuskWW4jh07RhX629/+lo3XqlXr6aefjqbz8MMPP/DAAy1btowcFslpv/32K3MsUibmjA/42GOPrbvuuvHRotONHz8+BwAAAKziivK3RS/jvPPOu+CCCyp8adKkST179nzllVeyp7vuumuvXr0aN248Y8aMSB6vvvpqrjTxRHyZOHHiiy++GE8jtXTq1Onmm2/OOkWu9AZev//977/++uuYbd999+AlXw8AABAASURBVI18E50o/xZDhw6NABGBKUJGrvQqNmeddVZUnlzpJZkvuuiiLCE9//zzJ598cgSUSCcxQ48ePaZPn/6HP/yhb9++udIzxW6//fbNN9+8zNrmzp176qmnRsCK6eg4sZIpU6ZUq1at/CeNwhIxJRaMDBSfes0119x6661jhdmrc+bMif4VHyHCVuSeevXqRRjK76JBgwbttNNOEX3ya4v3jer0+eefR6/Zaqut8ocmxafr16/ft99+GxscJWjYsGHZpyv0n//8J2pamas7jxo1Kt4lPn4EuEhL+duojRgxIjZ4wYIFscLtttsuYlmu9BLR7777brxL27Zt8+uJvjNkyJAIcIWrHTt27Ntvv50rzUyLFi1auHBhbG0OAAAAWGWtSADKLF68OLrJWmutld0TPS8SQ8SUWrVq5ZbD5MmT69evX+ZCNksSAWXWrFn5i/5kYvtjM6LsZJkjM3v27Ji5wusK5UWyqVKlSs2aNZcyTxaAcgAAAACrskpfBDqvuLi4wksFr7HGGrnltvbaay//zKuVKjMY3af8SmqWWurKVuTeWwAAAACrohW5DTwAAAAAqxABCAAAACBxSwxA66677uDBg3O/YvHxYyfkAAAAAFZxS7wI9KRJkx5//PFf813Ao/4cfPDBFV7nCAAAAGAVIgD9OIqLi7t06bLLLrvkAAAAAFYyS7wLWNSftm3bHnXUUTmWw/z58x955JHGjRvHTssBAAAArEyWeA2g8ePHt2vXLsfyqV69essWLb6aMCEHAAAAsJJxFzAAAACAxAlAAAAAAIlbkQC0aNGiO++888gjj+zUqdNpp532yiuvZOPjx48//vjjp0+fnquk+fPnx4LDhw/P/YwmTZqUXeL6jTfeOPfcc3MAAAAAiVqRAHTmmWdedtll9evX33///adMmdK9e/eHH344xmfOnNmnT5+5c+fmKmnx4sWx4LRp03I/o2222eaTTz6JiRkzZkycODEHAAAAkKhKB6A5c+Y88MADl1xyyY033njGGWc89thju+++e+/evQvnmTx58tixYwtHFi5cGCOfffbZvHnzCse//fbbL774ovyt6KMrffnll9l4LDJr1qxsfMGCBdFrsulFixZFciq/hVGgRo4cGYvHDIXjEyZMiLfLpmOF33//fXyWWOEee+xx2223FX7A2M7Y4Py7ZO/49ddfjx49usw6AQAAAFZ+lQ5A1atXr1279ttvv50/YOemm266++678zOcfvrpbdq02WqrrXbcccdsnpdeeqlly5Yxsu2227Zq1eqtt97KlR7107NnzxjfcsstDzjggPzigwcP7t69e+vWrTfbbLOddtopmssTTzzRrFmzKDXZezVv3jyaUUz37du3bdu2+VKTufbaa5s0adKhQ4dYvGPHjtmhPWPGjNlmm2023XTTeLtYeRSirl27xniPHj169er10EMP7bDDDrnS6nTaaac1bdo0tjPmzE5t+/TTT+MdTznllI022qh9+/YxZ8yWAwAAAFh1VDoAValSpXfv3s8880yknC5dulx11VURRCKO5GeoU6dOBJc33nhj6NChzz777Lx580488cRjjjlm0qRJI0aM2GCDDW6++eaY7b777nvwwQefeuqpKCzRXLJl58yZc9hhh1WtWvWjjz565513YuKkk07aZZddcqVhKB5ffvnleHz33Xez6X333Tfmyb/1kCFDrrzyynvuuWfq1Kn9+/cfNWpUxKOSkpJDDjkkIk6sMzYpHm+//fZ4NeZ/+OGHzzzzzFzpRYji8bzzzhswYEC/fv1ik2LNkYomT56crTlmGDZsWLxvvBTrzAEAAACsOlbkGkD77LPPZ599Fh2nWbNmEYN22mmnm266Kf/q73//+zXWWGOLLbbYeuutv/jii2rVqkVtOf/88ydMmDBw4MCaNWtmV4l+7bXXOnfu3KlTp0aNGv3ud7/Llo1A8/XXX5922mnrrbde27Zto/5E94mCE6t68803Z8yY8f777++6665vvfXWwoULI0LtueeehRvWunXreIs99thj+PDhH3/8ccOGDWOReN8oQT169Ih1Rml67rnnDjzwwPIfKlbYp0+fww8/PN4rNumss86KwYhQ2atnnHFGkyZN2rRp06FDB0cAAQAAAKuWSgegyZMnRxZp0KDBEUcccc8990RbOfnkky+++OL8zb8aN26cTUQGWrBgQXFx8VNPPRXxpX379tGMZs+enb06fvz4zTffPJvebLPN8iuPx/x4VKR4nDZtWiSnl1566d13323RosXRRx/9yiuvRBj6/vvvox8VbtvixYuvueaaKDXdunWLN42RiEfZ1Yg22WSTbJ4NN9wwulX5z5VdHqhdu3bZ0/XXXz8e8x+qfv362UTt2rVzAAAAAKuUSgegoUOH7r333mPGjMme1qhRI0pQrvSu6tlIUVFR4fxDhgy57LLLrrvuuokTJ7744osRdyLT5EpDTP74mmHDhmUTa6+9du5/Z3uFDz74IFfaYnbfffcYfPzxx7t06bL99tt//fXXscI999yzVq1ahe/14IMPxjz9+vWL6PPII49Uq1Zt0aJF2To//vjjbJ5HH320zCWrM5Gr4nHgwIHZ0xEjRsRjq1atKvxQAAAAAKuQSgegHXbYoWHDhtGA+vTp8+mnn77xxhtnnnlmixYtNt544wrnr1KlSjyuueaaVatWffXVVx944IHsll7dunX78MMPI8eMGzfuxhtvzGbebLPNYlURdyIJRYu57bbbdtxxx5o1a7Zp0ybGI+7svPPO8e6bbLJJtKS99tqr7Icp/n8fp379+vPnz7/hhhu++uqrefPmtWzZsnXr1rfeeuvIkSM/+eSTs88+O2s9tWvXjjg1derUbNnYvEMPPfShhx567bXXRo8efc0118QM2SFIAAAAAKu0SgegGjVqvPXWW23btj3++OM7dux4wAEHRNx54YUXikrl/u/BMlF/ItacfPLJxx13XISb888//w9/+ENko5kzZx544IEXXnhh5JiILNl5YZFvYuUPPvjg5MmTIzN17dp13XXXjWCUrWq//faLx+222y4eu3Tpkn8s1L1791133bVdu3ZNmzbt37///vvvP2jQoCg799133zfffNOhQ4eoTocffvghhxwSMx988MFXX331lVdemV88pmPZgw46qH379sOHD3/uuefio5X/UAAAAACrlqKSkpIKXzjvvPMuuOCCpSy5ePHiKVOmrLXWWtWrV88ty7x58yL6NGjQoMz4ggULZsyYkb/CTt60adNq1qy5+uqr5yrv22+/rVatWpmzw7J11q5dOxpTfmTOnDkxZ+F9xELUqLlz58bnylVS/7ffXm211XYrl6UAAAAAfllVcyuquLg4f73nZapRqvx49Jfy9SdXcNHlFZCd4bU866wwMNUslQMAAABIxYrcBh4AAACAVYgABAAAAJC4JQag4uLi+fPn51hus+fMqV7RaW4AAAAAv6wlXgOoS5cujzzySMsWLXIsh6g/n44Y0bVr1xwAAADASqbiu4DNmzfvlVf6zZo1u9jtz5dPlapVmjRpsjw3RIPKWm211du2bZsDAACAFVXxEUA1atT46quJOSpj6tRpOfixNWzY8De/+U0OAAAAfoCKA9C8efOyifbt2+WAX07LluvnAAAA4IdZ4hFA2US7du1zwC/nm2++yQEAAMAP4zbwAAAAAIkTgAAAAAASJwABAAAAJE4AAgAAAEicAAQAAACQOAEIAAAAIHECEAAAAEDiBCAAAACAxAlAAAAAAIkTgAAAAAASJwABAAAAJE4AAgAAAEicAAQAAACQOAEIAAAAIHECEAAAAEDiBCAAAACAxAlAAAAAAIkTgAAAAAASJwABAAAAJE4AAgAAAEicAAQAAACQOAEIAAAAIHECEAAAAEDiBCAAAACAxAlAAAAAAIkTgAAAAAASJwABAAAAJE4AAgAAAEicAAQAAACQOAEIAAAAIHECEAAAAEDiBCAAAACAxAlAAAAAAIkTgAAAAAASJwABAAAAJE4AAgAAAEicAAQAAACQOAEIAAAAIHECEAAAAEDiBCAAAACAxAlAAAAAAIkTgAAAAAASJwABAAAAJE4AAgAAAEicAAQAAACQOAEIAAAAIHECEAAAAEDiBCAAAACAxAlAAAAAAIkTgAAAAAASJwABAAAAJE4AAgAAAEicAAQAAACQOAEIAAAAIHECEAAAAEDiBCAAAACAxAlAAAAAAIkTgAAAAAASJwABAAAAJE4AAgAAAEicAAQAAACQOAEIAAAAIHECEAAAAEDiBCAAAACAxAlAAAAAAIkTgAAAAAASJwABAAAAJE4AAgAAAEicAAQAAACQOAEIAAAAIHECEAAAAEDiBCAAAACAxAlAAAAAAIkTgAAAAAASJwABAAAAJE4AAgAAAEicAAQAAACQOAEIAAAAIHECEAAAAEDiBCAAAACAxAlAAAAAAIkTgAAAAAASJwABAAAAJE4AAgAAAEicAAQAAACQOAEIAAAAIHECEAAAAEDiBCAAAACAxAlAAAAAAIkTgAAAAAASJwABAAAAJE4AAgAAAEicAAQAAACQOAEIAAAAIHECEAAAAEDiBCAAAACAxAlAAAAAAIkTgAAAAAASJwABAAAAJE4AAgAAAEicAAQAAACQOAEIAAAAIHECEAAAAEDiBCAAAACAxAlAAAAAAIkTgAAAAAASJwABAAAAJE4AAgAAAEicAAQAAACQOAEIAAAAIHECEAAAAEDiBCAAAACAxAlAAAAAAIkTgAAAAAASJwABAAAAJE4AAgAAAEicAAQAAACQOAEIAAAAIHECEAAAAEDiBCAAAACAxAlAAAAAAIkTgAAAAAASJwABAAAAJE4AAgAAAEicAAQAAACQOAEIAAAAIHECEAAAAEDiBCAAAACAxAlAAAAAAIkTgAAAAAASJwABAAAAJE4AAgAAAEicAAQAAACQOAEIAAAAIHECEAAAAEDiBCAAAACAxAlAAAAAAIkTgAAAAAASJwABAAAAJE4AAgAAAEicAAQAAACQOAEIAAAAIHECEAAAAEDiBCAAAACAxAlAAAAAAIkTgAAAAAASJwABAAAAJE4AAgAAAEhc1QpHS0pK4nHttdeeO2dODgAAAIBVWcUBqKioqGHDhjvttNOcuXNzAAAAAKzKirKDfcqIwXnSD6wEFi5cGI+169TJAQAAwIqqOAABAAAAkAwXgQYAAABInAAEAAAAkDgBCAAAACBxAhAAAABA4gQgAAAAgMQJQAAAAACJE4AAAAAAEicAAQAAACROAAIAAABInAAEAAAAkDgBCAAAACBxAhAAAABA4gQgAAAAgMQJQAAAAACJE4AAAAAAEicAAQAAACROAAIAAABInAAEAAAAkDgBCAAAACBxAhAAAABA4gQgAAAAgMQJQAAAAACJE4AAAAAAEicAAQAAACROAAIAAABInAAEAAAAkDgBCAAAACBxAhAAAABA4gQgAAADXNv0AAAQAElEQVQAgMQJQAAAAACJE4AAAAAAEicAAQAAACROAAIAAABInAAEAAAAkDgBCAAAACBxAhAAAABA4gQgAAAAgMQJQAAAAACJE4AAAAAAEicAAQAAACROAAIAAABInAAEAAAAkDgBCAAAACBxAhAAAABA4gQgAAAAgMQJQAAAAACJE4AAAAAAEicAAQAAACROAAIAAABInAAEAAAAkDgBCAAAACBxAhAAAABA4gQgAAAAgMQJQAAAAACJE4AAAAAAEicAAQAAACROAAIAAABInAAEAAAAkDgBCAAAACBxAhAAAABA4gQgAAAAgMQJQAAAAACJE4AAAAAAEicAAQAAACROAAIAAABInAAEAAAAkDgBCAAAACBxAhAAAABA4gQgAAAAgMQJQAAAAACJE4AAAAAAEicAAQAAACROAAIAAABInAAEAAAAkDgBCAAAACBxAhAAAABA4gQgAAAAgMQJQAAAAACJE4AAAAAAEicAAQAAACROAAIAAABInAAEAAAAkDgBCAAAACBxAhAAAABA4gQgAAAAgMQJQAAAAACJE4AAAAAAEicAAQAAACROAAIAAABInAAEAAAAkDgBCAAAACBxAhAAAABA4gQgAAAAgMQJQAAAAACJE4AAAAAAEicAAQAAACROAAIAAABInAAEAAAAkDgBCAAAACBxAhAAAABA4gQgAAAAgMQJQAAAAACJE4AAAAAAEicAAQAAACROAAIAAABInAAEAAAAkDgBCAAAACBxAhAAAABA4gQgAAAAgMQJQAAAAACJE4AAAAAAEicAAQAAACROAAIAAABInAAEAAAAkDgBCAAAACBxAhAAAABA4gQgAAAAgMQJQAAAAACJE4AAAAAAEicAAQAAACROAAIAAABInAAEAAAAkDgBCAAAACBxAhAAAABA4gQgAAAAgMQJQAAAAACJE4AAAAAAEicAAQAAACROAAIAAABInAAEAAAAkDgBCAAAACBxAhAAAABA4gQgAAAAgMQJQAAAAACJE4AAAAAAEicAAQAAACROAAIAAABInAAEAAAAkDgBCAAAACBxAhAAAABA4gQgAAAAgMQJQAAAAACJE4AAAAAAEicAAQAAACROAAIAAABInAAEAAAAkDgBCAAAACBxAhAAAABA4gQgAAAAgMQJQAAAAACJE4AAAAAAEicAAQAAACROAAIAAABInAAEAAAAkDgBCAAAACBxAhAAAABA4gQgAAAAgMQJQAAAAACJE4AAAAAAEicAAQAAACROAAIAAABInAAEAAAAkDgBCAAAACBxAhAAAABA4gQgAAAAgMQJQAAAAACJE4AAAAAAEicAAQAAACROAAIAAABInAAEAAAAkDgBCAAAACBxAhAAAABA4gQgAAAAgMQJQAAAAACJE4AAAAAAEicAAQAAACROAAIAAABInAAEAAAAkDgBCAAAACBxAhAAAABA4gQgAAAAgMQJQAAAAACJE4AAAAAAEicAAQAAACROAAIAAABInAAEAAAAkDgBCAAAACBxAhAAAABA4gQgAAAAgMQJQAAAAACJE4AAAAAAEicAAQAAACROAAIAAABInAAEAAAAkDgBCAAAACBxAhAAAABA4gQgAAAAgMQJQAAAAACJE4AAAAAAEicAAQAAACROAAIAAABInAAEAAAAkDgBCAAAACBxAhAAAABA4gQgAAAAgMQJQAAAAACJE4AAAAAAEicAAQAAACROAAIAAABInAAEAAAAkDgBCAAAACBxAhAAAABA4gQgAAAAgMQJQAAAAACJE4AAAAAAEicAAQAAACROAAIAAABInAAEAAAAkDgBCAAAACBxAhAAAABA4gQgAAAAgMQJQAAAAACJE4AAAAAAEicAAQAAACROAAIAAABInAAEAAAAkDgBCAAAACBxAhAAAABA4gQgAAAAgMQJQAAAAACJE4AAAAAAEicAAQAAACROAAIAAABInAAEAAAAkDgBCAAAACBxAhAAAABA4gQgAAAAgMQJQAAAAACJE4AAAAAAEicAAQAAACROAAIAAABInAAEAAAAkDgBCAAAACBxAhAAAABA4gQgAAAAgMQJQAAAAACJE4AAAAAAEicAAQAAACROAAIAAABInAAEAAAAkDgBCAAAACBxAhAAAABA4gQgAAAAgMQJQAAAAACJE4AAAAAAEicAAQAAACROAAIAAABInAAEAAAAkDgBCAAAACBxAhAAAABA4gQgAAAAgMQJQAAAAACJE4AAAAAAEicAAQAAACROAAIAAABInAAEAAAAkDgBCAAAACBxAhAAAABA4gQgAAAAgMQJQAAAAACJE4AAAAAAEicAAQAAACROAAIAAABInAAEAAAAkDgBCAAAACBxAhAAAABA4gQgAAAAgMQJQAAAAACJE4AAAAAAEicAAQAAACROAAIAAABInAAEAAAAkDgBCAAAACBxAhAAAABA4gQgAAAAgMQJQAAAAACJE4AAAAAAEicAAQAAACROAAIAAABInAAEAAAAkDgBCAAAACBxAhAAAABA4gQgAAAAgMQJQAAAAACJE4AAAAAAEicAAQAAACROAAIAAABInAAEAAAAkDgBCAAAACBxAhAAAABA4gQgAAAAgMQJQAAAAACJE4AAAAAAEicAAQAAACROAAIAAABInAAEAAAAkDgBCAAAACBxAhAAAABA4gQgAAAAgMQJQAAAAACJE4AAAAAAEicAAQAAACROAAIAAABInAAEAAAAkDgBCAAAACBxAhAAAABA4gQgAAAAgMQJQAAAAACJE4AAAAAAEicAAQAAACROAAIAAABInAAEAAAAkDgBCAAAACBxAhAAAABA4gQgAAAAgMQJQAAAAACJE4AAAAAAEicAAQAAACROAAIAAABInAAEAAAAkDgBCAAAACBxAhAAAABA4gQgAAAAgMQJQAAAAACJE4AAAAAAEicAAQAAACROAAIAAABInAAEAAAAkDgBCAAAACBxAhAAAABA4gQgAAAAgMQJQAAAAACJE4AAAAAAEicAAQAAACROAAIAAABInAAEAAAAkDgBCAAAACBxAhAAAABA4gQgAAAAgMQJQAAAAACJE4AAAAAAEicAAQAAACROAAIAAABInAAEAAAAkDgBCAAAACBxAhAAAABA4gQgAAAAgMQJQAAAAACJE4AAAAAAEicAAQAAACROAAIAAABInAAEAAAAkDgBCAAAACBxAhAAAABA4gQgAAAAgMQJQAAAAACJE4AAAAAAEicAAQAAACROAAIAAABInAAEAAAAkDgBCAAAACBxAhAAAABA4gQgAAAAgMQJQAAAAACJE4AAAAAAEicAAQAAACROAAIAAABInAAEAAAAkDgBCAAAACBxAhAAAABA4gQgAAAAgMQJQAAAAACJE4AAAAAAEicAAQAAACROAAIAAABInAAEAAAAkDgBCAAAACBxAhAAAABA4gQgAAAAgMQJQAAAAACJE4AAAAAAEicAAQAAACROAAIAAABInAAEAAAAkDgBCAAAACBxAhAAAABA4gQgAAAAgMQJQAAAAACJE4AAAAAAEicAAQAAACROAAIAAABInAAEAAAAkDgBCAAAACBxAhAAAABA4gQgAAAAgMQJQAAAAACJE4AAAAAAEicAAQAAACROAAIAAABInAAEAAAAkDgBCAAAACBxAhAAAABA4gQgAAAAgMQJQAAAAACJE4AAAAAAEicAAQAAACROAAIAAABInAAEAAAAkDgBCAAAACBxAhAAAABA4gQgAAAAgMQJQAAAAACJE4AAAAAAEicAAQAAACROAAIAAABInAAEAAAAkDgBCAAAACBxAhAAAABA4gQgAAAAgMQJQAAAAACJE4AAAAAAEicAAQAAACROAAIAAABInAAEAAAAkDgBCAAAACBxAhAAAABA4gQgAAAAgMQJQAAAAACJE4AAAAAAEicAAQAAACROAAIAAABInAAEAAAAkDgBCAAAACBxAhAAAABA4gQgAAAAgMQJQAAAAACJE4AAAAAAEicAAQAAACROAAIAAABInAAEAAAAkDgBCAAAACBxAhAAAABA4gQgAAAAgMQJQAAAAACJE4AAAAAAEicAAQAAACROAAIAAABInAAEAAAAkDgBCAAAgP8fe3cac1dVKGD4A0FRmcUBlVFBBhlMqAaIzEQGJUg0QBQVkVFxAIMRFIkaDFgSRBERAmqMTEKIIP5gUkSDA2oQEVtQmZOSVmoLtgzlrnBym4ZL771Fo/DmeX6c7G/ttfZwfr7ZZ39AnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAxTvxRQAAEABJREFUAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAAABAnAAEAAAAECcAAQAAAMQJQAAAAABxAhAAMAUAQJsABAAAABAnAAEAAADECUAAAAAAcQIQAAAAQJwABAAAABAnAAEAAADECUAAAAAAcQIQAAAAQJwABAAAABAnAAEAAADECUAAAAAAcQIQAAAAQJwABAAAABAnAAEAAADECUAAAAAAcQIQAAAAQJwABAAAABAnAAEAAADECUAAAAAAcQIQAAAAQJwABAAAABAnAAEAAADECUAAAAAAcQIQAAAAQJwABAAAABAnAAEAAADECUAAAAAAcQIQAAAAQJwABAAAABAnAAEAAADECUAAAAAAcQIQAAAAQJwABAAAABAnAAEAAADECUAAAAAAcQIQAAAAQJwABAAAABAnAAEAAADECUAAAAAAcQIQAAAAQJwABAAAABAnAAEAAADECUAAAAAAcQIQAAAAQKRJU58AABAASURBVJwABAAAABAnAAEAAADECUAAAAAAcQIQAAAAQJwABAAAABAnAAEAAADECUAAAAAAcQIQAAAAQJwABAAAABAnAAEAAADECUAAAAAAcQIQAAAAQJwABAAAABAnAAEAAADECUAAAAAAcQIQAAAAQJwABAAAABAnAAEAAADECUAAAAAAcQIQAAAAQJwABAAAABAnAAEAAADECUAAAAAAcQIQAAAAQJwABAAAABAnAAEAAADECUAAAAAAcQIQAAAAQJwABAAAABAnAAEAAADECUAAAAAAcQIQAAAAQJwABAAAABAnAAEAAADECUAAAAAAcQIQAAAAQJwABAAAABAnAAEAAADECUAAAAAAcQIQAAAAQJwABAAAABAnAAEAAADECUAAAAAAcQIQAAAAQJwABAAAABAnAAEAAADECUAAAAAAcQIQAAAAQJwABAAAABAnAAEAAADECUAAAAAAcQIQAAAAQJwABAAAABAnAAEAAADECUAAAAAAcQIQAAAAQJwABAAAABAnAAEAAADECUAAAAAAcQIQAAAAQJwABAAAABAnAAEAAADECUAAAAAAcQIQAAAAQJwABAAAABAnAAEAAADECUAAAAAAcQIQAAAAQJwABAAAABAnAAEAAADECUAAAAAAcQIQAAAAQJwABAAAABAnAAEAAADECUAAAAAAcQIQAAAAQJwABAAAABAnAAEAAADECUAAAAAAcQIQAAAAQJwABAAAABAnAAEAAADECUAAAAAAcQIQAAAAQJwABAAAABAnAAEAAADECUAAAAAAcQIQAAAAQJwABAAAABAnAAEAAADECUAAAAAAcQIQAAAAQJwABAAAABAnAAEAAADECUAAAAAAcQIQAAAAQJwABAAAABAnAAEAAADECUAAAAAAcQIQAAAAQJwABAAAABAnAAEAAADECUAAAAAAcQIQAAAAQJwABAAAABAnAAEAAADECUAAAAAAcQIQAAAAQJwABAAAABAnAAEAAADECUAAAAAAcQIQAAAAQJwABAAAABAnAAEAAADECUAAAAAAcQIQAAAAQJwABAAAABAnAAEAAADECUAAAAAAcQIQAAAAQJwABAAAABAnAAEAAADECUAAAAAAcQIQAAAAQJwABAAAABAnAAEAAADECUAAAAAAcQIQAAAAQJwABAAAABAnAAEAAADECUAAAAAAcQIQAAAAQJwABAAAABAnAAEAAADECUAAAAAAcQIQAAAAQJwABAAAABAnAAEAAADECUAAAAAAcQIQAAAAQJwABAAAABAnAAEAAADECUAAAAAAcQIQAAAAQJwABAAAABAnAAEAAADECUAAAAAAcQIQAAAAQJwABAAAABAnAAEAAADECUAAAAAAcQIQAAAAQJwABAAAABAnAAEAAADECUAAAAAAcQIQAAAAQJwABAAAABAnAAEAAADECUAAAAAAcQIQAAAAQJwABAAAABAnAAEAAADECUAAAAAAcQIQAAAAQJwABAAAABAnAAEAAADECUAAAAAAcQIQAAAAQJwABAAAABAnAAEAAADECUAAAAAAcQIQAAAAQJwABAAAABAnAAEAAADECUAAAAAAcQIQAAAAQJwABAAAABAnAAEAAADECUAAAAAAcQIQAAAAQJwABAAAABAnAAEAAADECUAAAAAAcQIQAAAAQJwABAAAABAnAAEAAADECUAAAAAAcQIQAAAAQJwABAAAABAnAAEAAADECUAAAAAAcQIQAAAAQJwABAAAABAnAAEAAADECUAAAAAAcQIQAAAAQJwABAAAABAnAAEAAADECUAAAAAAcQIQAAAAQJwABAAAABAnAAEAAADECUAAAAAAcQIQAAAAQJwABAAAABAnAAEAAADECUAAAAAAcQIQAAAAQJwABAAAABAnAAEAAADECUAAAAAAcQIQAAAAQJwABAAAABAnAAEAAADECUAAAAAAcQIQAAAAQJwABAAAABAnAAEAAADECUAAAAAAcQIQAAAAQJwABAAAABAnAAEAAADECUAAAAAAcQIQAAAAQJwABAAAABAnAAEAAADECUAAAAAAcQIQAAAAQJwABAAAABAnAAEAAADECUAAAAAAcQIQAAAAQJwABAAAABAnAAEAAADECUAAAAAAcQIQAAAAQJwABAAAABAnAAEAAADECUAAAAAAcQIQAAAAQJwABAAAABAnAAEAAADECUAAAAAAcQIQAAAAQJwABAAAABAnAAEAAADECUAAAAAAcQIQAAAAQJwABAAAABAnAAEAAADECUAAAAAAcQIQAAAAQJwABAAAABAnAAEAAADECUAAAAAAcQIQAAAAQJwABAAAABAnAAEAAADECUAAAAAAcQIQAAAAQJwABAAAABAnAAEAAADECUAAAAAAcQIQAAAAQJwABAAAABAnAAEAAADECUAAAAAAcQIQAAAAQJwABAAAABAnAAEAAADECUAAAAAAcQIQAAAAQJwABAAAABAnAAEAAADECUAAAAAAcQIQAAAAQJwABAAAABAnAAEAAADECUAAAAAAcQIQAAAAQJwABAAAABAnAAEAAADECUAAAAAAcQIQAAAAQJwABAAAABAnAAEAAADECUAAAAAAcQIQAAAAQJwABAAAABAnAAEAAADECUAAAAAAcQIQAAAAQJwABAAAABAnAAEAAADECUAAAAAAcQIQAAAAQJwABAAAABAnAAEAAADECUAAAAAAcQIQAAAAQJwABAAAABC3wtJ2XHjhhb/61a822WSTKf5pt99++7Rp0w444IApAAAAgH+75Z588sln3LHffvtNnz59pZVWmuKftmDBgk9+8pOXXXbZFAAAAMC/3VKfAFq0aJH6868yvsnxfU4BAAAA/Cd4BxAAAABAnAAEAAAAEPcsA9DcuXNPO+2097znPe94xzumT5/+m9/8ZvGuWbNmfeQjH9ltt91+9KMfXXTRRfvuu++BBx449byyYMGCW2+9dWzcd999hx9++Jw5c6YAAAAAnreeTQC68847d9hhh+985zvTpk17+9vf/stf/nJkoKuuumqy95xzzrn66qs/8IEPrLPOOsccc8x666130EEHTT2vfPzjH7/00kvHxuOPP37vvfeOzykAAACA561lDkBPPvnkpz/96TXXXPPGG28coeTwww+/+OKLDznkkEMPPfS22277xz/+cc899+y0004jDE3+v9jBBx+82267jY2HH3749ttvnz179tMOeP/998+dO3ey/dhjj40jzJ8/fwxORhYtWnTXXXeNCvO0/1Y25vzpT38akxePzJs3b0x+5JFHZsyYsXDhwme8+JFyxtFGwHr00UeXHB/zx+DkFAsWLBiHmlzJa1/72gsvvPAVr3jF4plj+ZIPBI05jz9l5syZf//736cAAAAAnnuWOQCNUPKzn/3s+OOPX2WVVRYPnnjiiSuvvPL111//iU984oorrrjyyis333zzPfbYY+zae++9zz333Msvv3zjjTfeddddt9xyy4MOOmgSbkZMeetb3zpt2rTNNttsDI7y8t3vfnevvfbafvvtx+C11177xz/+cccdd9xuu+3e8pa37LnnniMtTT1VoE4++eQ3vOENu+yyy+tf//pzzjlncg3bbLPNCFIbbbTRzjvvPM7y61//+mlXfs0114yrGkfbYYcdtthii3EXk/Evf/nLG2644Rjceuutf/jDH06fPv3HP/7x+eef/8EPfnBknU022WRSo8YtjJI1lo+1RxxxxOhZU089K/ShD31oHHY0r0033fRb3/rWFAAAAMBzzDIHoFFtxueIHUsOrrDCCqO/3Hzzzd/4xjfe9a53HXDAAffdd98NN9wwdv385z8/6qijPve5zx1zzDF33333yDrXXXfdGBwd573vfe+666570003jVhzyy23jOYy5s+YMePQQw+95JJL3vzmNx922GHrr7/+OOxPfvKTlVZa6bjjjhsTfvCDH5x55pmj+9xxxx2nnnrqSSedtLj1/Pa3v7366qtvu+22DTbY4Gtf+9qSV7hw4cIPf/jDBx544F/+8pcxbUw4++yzx/hoVaeffvpZZ5315z//+eCDDx4X+bGPfWyEqnHqCy64YLJ2XOo45li+++67jyY1KtVIXWecccZk7zjjWD4uZiw/4YQTnnjiiSkAAACA55JlDkDz588fn0s+/jPxspe97KGHHlraqhF6Lr300vPOO2/FFVe85557RmG5//77R3N5//vfv84666y99tqXXXbZPvvsM5l85JFHbrfddvfee++YsO22245k8+CDD26//fajKI2zX3XVVRtuuOEaa6zxu9/9bmystdZa11xzzWThSDCbbbbZaquttttuu40lS17AOO8oNccee+w47whGL3nJS/72t7+N8Z/+9KcjZo1Tv+hFLxqh6qKLLnrhC1/4P69/FKjxefTRR6+66qo777zzHnvsccUVV0x2ve1tb9tll11e/OIXj43x5yOPPDIFAAAA8FyywtQyeuMb3zg+//rXv2611VZLjs+YMWPHHXdc2qpvfvObp5566vTp00866aQRXM4+++xZs2ZNLfEk0ete97rJxnrrrfeCF7xgbDzwwAPj84ILLrjkkksmuzbeeOM5c+aMMDTWHn/88ZPBNddcc9GiRZPtEaEmGyPHPO1JnOWXX34km5NPPnlsT5s2bcGCBSMJje2ZM2duvfXWkzkj/SzefppxMVtsscXIRpM/3/SmN33/+9+fbC9+Q9A46dRTjwtNAQAAADyXLPMTQJOHbs4666wlB2+88cbf//73I6w845JHH330tttuO+GEE/7whz9ceOGFDz744OhBL3/5y8euMTKZc+mll07e5jOpP8Paa689Pkcwuv4p3/ve90488cRXvepVr3nNazbYYIPr/9vnP//5/ffff+r/cuutt476c8opp9x5552XX375yFiTbPTqV7/65ptvnsyZN2/epz71qTHhfy4f5x03OCZM/rzpppuWdrMAAAAAzzXLHICWW265b3/721dcccVHP/rRW2655a677rrgggsOOeSQ973vfbvuuuszn2P55b/4xS9+4QtfeOihh9ZZZ50VV1xx9dVXX3/99TfeeONzzz135syZIw8df/zxq6222pKrNtpooxGbTj/99FFe7r///iOPPPLMM88ca/fee+8xcv7554+jjWx0wAEHTB4m+t9NutIaa6yxwgorjGw0rnnyW60999xzxowZF1100ezZs7/yla9ce+2166677qqrrnrHHXdM3jk9sfvuu4/PU0899YEHHrjyyivH7e+8885TAAAAAM8HyxyAhq233nqUl/nz5496st122339618//PDDR+IZbWjqqUI02Zg0l7E9msspp5wykspWW221/fbbb7rppkccccQYPPvss0fE2Wmnnd75zne++93v3m+//ZY8y5hw3nnnPfbYY3vssce0adNWWWWV0047bRxtn332Oe644z7zmc9svvnmX/rSlz772c9uu+22kyWT8z6jcdI0uF1UAAABo0lEQVRRqQ477LD11lvvxBNPPOqoo0b3mTdv3l577XXssccec8wxW2655S9+8YszzjhjNKZxSdddd93+++8/0tVk+ahR42ovvvjibbbZZsw/9NBDjz766CVvFgAAAOA5a7mlvbNm3333HWXnf1886szDDz+8+uqrT/3/zJ07d+SVxW/SmZgzZ87KK6/8jK9eXrxqxKCXvvSlSw4+/vjjs2fPfuUrXzm1LBYuXDi61eJXBS15tJGi1lprrcUj49aeeOKJlVZaaclp47uaNWvWWD6uZ2oZjeR0+eWXTwEAAAD82y1zyFjS5Mdc///5T/uR18Saa675LFaNBLOs9Wd40VOe8WhL1p+pp25t8pboJS233HLP4qQAAAAA/1nP5idgAAAAADyPCEAAAAAAcUsNQBtttNENN9wwxb/C+CbH9zkFAAAA8J+w1JdA33333V/96ldnzpw5xT9t1J+jjz563XXXnQIAAAD4t1tqAAIAAACgwTuAAAAAAOIEIAAAAIA4AQgAAAAgTgACAAAAiBOAAAAAAOIEIAAAAIA4AQgAAAAg7r8AAAD//4Vr168AAAAGSURBVAMAX0DixzzePycAAAAASUVORK5CYII="
+          }
+        ],
+        "isError": false,
+        "structuredContent": {
+          "scope": "page",
+          "captureOptions": {
+            "fullPage": true
+          },
+          "source": "live",
+          "browserSelection": {
+            "lane": "live",
+            "clientId": "7609b739-7eb9-4051-b663-025ffc487506",
+            "reason": "explicit_browser"
+          },
+          "clientId": "7609b739-7eb9-4051-b663-025ffc487506",
+          "transport": "ego_task_space",
+          "browserSpace": {
+            "id": 6,
+            "name": "masc-keepers"
+          },
+          "tabId": 5,
+          "title": "MASC Ego acceptance",
+          "url": "http://localhost:53678/",
+          "mimeType": "image/png",
+          "elapsed_ms": 1108.615042
+        }
+      }
+    },
+    "seconds": 1.116969666996738
+  },
+  {
+    "at": "2026-11-01T01:48:38.400287+00:00",
+    "tool": "masc_browser_read",
+    "arguments": {
+      "lane": "live",
+      "clientId": "7609b739-7eb9-4051-b663-025ffc487506",
+      "tabId": 5,
+      "mode": "snapshot",
+      "snapshotScope": "full_page"
+    },
+    "state": "returned",
+    "response": {
+      "jsonrpc": "2.0",
+      "id": 9,
+      "result": {
+        "_meta": {
+          "io.modelcontextprotocol/serverInfo": {
+            "name": "masc",
+            "title": "MASC MCP Server",
+            "version": "0.66.0"
+          },
+          "com.github.yousleepwhen.masc/call": {
+            "envelope": {
+              "kind": "tool_call",
+              "summary": "{\"source\":\"live\",\"lane\":\"live\",\"browserSelection\":{\"lane\":\"live\",\"clientId\":\"7609b739-7eb9-4051-b663-025ffc487506\",\"reason\":\"explicit_browser\"},\"clientId\":\"7609b739-7eb9-4051-b663-025ffc487506\",\"transport\":\"ego_task_space\",\"browserSpace\":{\"id\":6,\"name\":\"masc-keepers\"},\"inputReadiness\":\"command_settled\",\"tabId\":5,\"url\":\"http://localhost:53678/\",\"title\":\"MASC Ego acceptance\",\"scope\":\"full_page\",\"snapshot\":\"[p5 \\\"MASC Ego acceptance\\\" | space \\\"masc-keepers\\\"(6): 2 managed, 0 untracked \u2014 p1 \\\"\uc0c8 \ud0ed\\\", p5* \\\"MASC Ego acceptance\\\"]\\nroot\\n  heading\\n    text \\\"MASC Ego acceptance\\\"\\n  container\\n    text \\\"Name\\\"\\n    textbox [ref=1]\\n      text \\\"Ego \ud55c\uae00 \ud83d\ude00\\\"\\n  container\\n    text \\\"Priority\\\"\\n    combobox [ref=2]\\n      text \\\"High\\\"\\n  textfield \\\"Rich editor\\\" [ref=3]\\n    text \\\"Native browser record\\\"\\n  button [ref=4]\\n    text \\\"Save record\\\"\\n  output [ref=5]\\n    text \\\"Saved record\\\"\\n  button [ref=6]\\n    text \\\"Shadow action\\\"\\n  iframe [ref=7]\\n    root\\n      container\\n        text \\\"Frame editor\\\"\\n        textbox [ref=8]\\n          text \\\"Native frame\\\"\\n      button [ref=9]\\n        text \\\"Frame action\\\"\\n  button [ref=10]\\n    text \\\"Offscreen action\\\"\\n\",\"truncated\":false,\"chars\":712}",
+              "status": "ok",
+              "tool": "masc_browser_read"
+            },
+            "trace_id": "9",
+            "agent_id": "codex-mcp-client",
+            "tool": "masc_browser_read",
+            "duration_ms": 9,
+            "attempts": 1,
+            "timestamp": "2026-11-01T01:48:38Z"
+          }
+        },
+        "resultType": "complete",
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"source\":\"live\",\"lane\":\"live\",\"browserSelection\":{\"lane\":\"live\",\"clientId\":\"7609b739-7eb9-4051-b663-025ffc487506\",\"reason\":\"explicit_browser\"},\"clientId\":\"7609b739-7eb9-4051-b663-025ffc487506\",\"transport\":\"ego_task_space\",\"browserSpace\":{\"id\":6,\"name\":\"masc-keepers\"},\"inputReadiness\":\"command_settled\",\"tabId\":5,\"url\":\"http://localhost:53678/\",\"title\":\"MASC Ego acceptance\",\"scope\":\"full_page\",\"snapshot\":\"[p5 \\\"MASC Ego acceptance\\\" | space \\\"masc-keepers\\\"(6): 2 managed, 0 untracked \u2014 p1 \\\"\uc0c8 \ud0ed\\\", p5* \\\"MASC Ego acceptance\\\"]\\nroot\\n  heading\\n    text \\\"MASC Ego acceptance\\\"\\n  container\\n    text \\\"Name\\\"\\n    textbox [ref=1]\\n      text \\\"Ego \ud55c\uae00 \ud83d\ude00\\\"\\n  container\\n    text \\\"Priority\\\"\\n    combobox [ref=2]\\n      text \\\"High\\\"\\n  textfield \\\"Rich editor\\\" [ref=3]\\n    text \\\"Native browser record\\\"\\n  button [ref=4]\\n    text \\\"Save record\\\"\\n  output [ref=5]\\n    text \\\"Saved record\\\"\\n  button [ref=6]\\n    text \\\"Shadow action\\\"\\n  iframe [ref=7]\\n    root\\n      container\\n        text \\\"Frame editor\\\"\\n        textbox [ref=8]\\n          text \\\"Native frame\\\"\\n      button [ref=9]\\n        text \\\"Frame action\\\"\\n  button [ref=10]\\n    text \\\"Offscreen action\\\"\\n\",\"truncated\":false,\"chars\":712}"
+          }
+        ],
+        "isError": false,
+        "structuredContent": {
+          "source": "live",
+          "lane": "live",
+          "browserSelection": {
+            "lane": "live",
+            "clientId": "7609b739-7eb9-4051-b663-025ffc487506",
+            "reason": "explicit_browser"
+          },
+          "clientId": "7609b739-7eb9-4051-b663-025ffc487506",
+          "transport": "ego_task_space",
+          "browserSpace": {
+            "id": 6,
+            "name": "masc-keepers"
+          },
+          "inputReadiness": "command_settled",
+          "tabId": 5,
+          "url": "http://localhost:53678/",
+          "title": "MASC Ego acceptance",
+          "scope": "full_page",
+          "snapshot": "[p5 \"MASC Ego acceptance\" | space \"masc-keepers\"(6): 2 managed, 0 untracked \u2014 p1 \"\uc0c8 \ud0ed\", p5* \"MASC Ego acceptance\"]\nroot\n  heading\n    text \"MASC Ego acceptance\"\n  container\n    text \"Name\"\n    textbox [ref=1]\n      text \"Ego \ud55c\uae00 \ud83d\ude00\"\n  container\n    text \"Priority\"\n    combobox [ref=2]\n      text \"High\"\n  textfield \"Rich editor\" [ref=3]\n    text \"Native browser record\"\n  button [ref=4]\n    text \"Save record\"\n  output [ref=5]\n    text \"Saved record\"\n  button [ref=6]\n    text \"Shadow action\"\n  iframe [ref=7]\n    root\n      container\n        text \"Frame editor\"\n        textbox [ref=8]\n          text \"Native frame\"\n      button [ref=9]\n        text \"Frame action\"\n  button [ref=10]\n    text \"Offscreen action\"\n",
+          "truncated": false,
+          "chars": 712
+        }
+      }
+    },
+    "seconds": 0.014015833003213629
+  },
+  {
+    "at": "2026-11-01T01:48:38.414699+00:00",
+    "tool": "masc_browser_act",
+    "arguments": {
+      "lane": "live",
+      "clientId": "7609b739-7eb9-4051-b663-025ffc487506",
+      "tabId": 5,
+      "action": "close_tab"
+    },
+    "state": "returned",
+    "response": {
+      "jsonrpc": "2.0",
+      "id": 10,
+      "result": {
+        "_meta": {
+          "io.modelcontextprotocol/serverInfo": {
+            "name": "masc",
+            "title": "MASC MCP Server",
+            "version": "0.66.0"
+          },
+          "com.github.yousleepwhen.masc/call": {
+            "envelope": {
+              "kind": "tool_call",
+              "summary": "{\"source\":\"live\",\"lane\":\"live\",\"browserSelection\":{\"lane\":\"live\",\"clientId\":\"7609b739-7eb9-4051-b663-025ffc487506\",\"reason\":\"explicit_browser\"},\"clientId\":\"7609b739-7eb9-4051-b663-025ffc487506\",\"transport\":\"ego_task_space\",\"browserSpace\":{\"id\":6,\"name\":\"masc-keepers\"},\"inputReadiness\":\"command_settled\",\"tabId\":5,\"action\":\"close_tab\",\"closed\":true}",
+              "status": "ok",
+              "tool": "masc_browser_act"
+            },
+            "trace_id": "10",
+            "agent_id": "codex-mcp-client",
+            "tool": "masc_browser_act",
+            "duration_ms": 57,
+            "attempts": 1,
+            "timestamp": "2026-11-01T01:48:38Z"
+          }
+        },
+        "resultType": "complete",
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"source\":\"live\",\"lane\":\"live\",\"browserSelection\":{\"lane\":\"live\",\"clientId\":\"7609b739-7eb9-4051-b663-025ffc487506\",\"reason\":\"explicit_browser\"},\"clientId\":\"7609b739-7eb9-4051-b663-025ffc487506\",\"transport\":\"ego_task_space\",\"browserSpace\":{\"id\":6,\"name\":\"masc-keepers\"},\"inputReadiness\":\"command_settled\",\"tabId\":5,\"action\":\"close_tab\",\"closed\":true}"
+          }
+        ],
+        "isError": false,
+        "structuredContent": {
+          "source": "live",
+          "lane": "live",
+          "browserSelection": {
+            "lane": "live",
+            "clientId": "7609b739-7eb9-4051-b663-025ffc487506",
+            "reason": "explicit_browser"
+          },
+          "clientId": "7609b739-7eb9-4051-b663-025ffc487506",
+          "transport": "ego_task_space",
+          "browserSpace": {
+            "id": 6,
+            "name": "masc-keepers"
+          },
+          "inputReadiness": "command_settled",
+          "tabId": 5,
+          "action": "close_tab",
+          "closed": true
+        }
+      }
+    },
+    "seconds": 0.06210870899667498
+  }
+]

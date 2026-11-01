@@ -567,7 +567,11 @@ let inspect_object prepared expected_id json =
           Some (Yojson.Safe.from_string (String.sub option_ (split + 1) (String.length option_ - split - 1)))
         | _ -> None) security in
       require (match policies with [actual] -> same_json actual expected.policy | _ -> false) "container seccomp policy changed");
-    let tmpfs = fields (field "Tmpfs" host) |> List.map (fun (target, options) -> target, string options) |> List.sort compare in
+    let compare_tmpfs_pair (target_a, opts_a) (target_b, opts_b) =
+      let cmp = String.compare target_a target_b in
+      if cmp <> 0 then cmp else String.compare opts_a opts_b
+    in
+    let tmpfs = fields (field "Tmpfs" host) |> List.map (fun (target, options) -> target, string options) |> List.sort compare_tmpfs_pair in
     require (tmpfs = prepared.tmpfs) "container private tmpfs footprint changed";
     let mounts = list fields (field "Mounts" root) in
     let bind_count = List.fold_left (fun bind_count mount ->

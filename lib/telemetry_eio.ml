@@ -249,39 +249,60 @@ type agent_activity = {
   last_seen: float;
 }
 
+module Agent_map = Map.Make (String)
+
 let summarize_agent_activity ?fs config ~since : agent_activity list =
   let records = read_all_events ?fs config in
-  let by_agent : (string, agent_activity) Hashtbl.t = Hashtbl.create 16 in
-  List.iter (fun (record : event_record) ->
-    if record.timestamp >= since then
-      match record.event with
-      | Tool_called { agent_id = Some aid; success; _ } ->
-          let current =
-            match Hashtbl.find_opt by_agent aid with
-            | Some a -> a
-            | None -> { agent_id = aid; tool_calls = 0; success_count = 0;
-                        failure_count = 0; first_seen = record.timestamp;
-                        last_seen = record.timestamp }
-          in
-          Hashtbl.replace by_agent aid
-            { current with
-              tool_calls = current.tool_calls + 1;
-              success_count = current.success_count + (if success then 1 else 0);
-              failure_count = current.failure_count + (if success then 0 else 1);
-              first_seen = min current.first_seen record.timestamp;
-              last_seen = max current.last_seen record.timestamp;
-            }
-      | Tool_called { agent_id = None; _ } -> ()
-      | Agent_session_bound { agent_id; _ } ->
-          if not (Hashtbl.mem by_agent agent_id) then
-            Hashtbl.replace by_agent agent_id
-              { agent_id; tool_calls = 0; success_count = 0; failure_count = 0;
-                first_seen = record.timestamp; last_seen = record.timestamp }
-      | Agent_unbound _ | Task_started _ | Task_completed _ | Error_occurred _
-      | Tool_assigned _ -> ()
-  ) records;
-  Hashtbl.fold (fun _ v acc -> v :: acc) by_agent []
-  |> List.sort (fun a b -> compare b.tool_calls a.tool_calls)
+  let by_agent =
+    List.fold_left
+      (fun acc (record : event_record) ->
+        if record.timestamp < since then acc
+        else
+          match record.event with
+          | Tool_called { agent_id = Some aid; success; _ } ->
+              let current =
+                match Agent_map.find_opt aid acc with
+                | Some a -> a
+                | None ->
+                  { agent_id = aid
+                  ; tool_calls = 0
+                  ; success_count = 0
+                  ; failure_count = 0
+                  ; first_seen = record.timestamp
+                  ; last_seen = record.timestamp
+                  }
+              in
+              Agent_map.add
+                aid
+                { current with
+                  tool_calls = current.tool_calls + 1
+                ; success_count = current.success_count + (if success then 1 else 0)
+                ; failure_count = current.failure_count + (if success then 0 else 1)
+                ; first_seen = min current.first_seen record.timestamp
+                ; last_seen = max current.last_seen record.timestamp
+                }
+                acc
+          | Tool_called { agent_id = None; _ } -> acc
+          | Agent_session_bound { agent_id; _ } ->
+              if Agent_map.mem agent_id acc then acc
+              else
+                Agent_map.add
+                  agent_id
+                  { agent_id
+                  ; tool_calls = 0
+                  ; success_count = 0
+                  ; failure_count = 0
+                  ; first_seen = record.timestamp
+                  ; last_seen = record.timestamp
+                  }
+                  acc
+          | Agent_unbound _ | Task_started _ | Task_completed _ | Error_occurred _
+          | Tool_assigned _ -> acc)
+      Agent_map.empty
+      records
+  in
+  Agent_map.fold (fun _ v acc -> v :: acc) by_agent []
+  |> List.sort (fun a b -> Int.compare b.tool_calls a.tool_calls)
 
 let tool_usage_fields summary tool_name =
   let stats =

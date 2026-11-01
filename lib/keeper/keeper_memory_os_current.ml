@@ -318,21 +318,44 @@ let consumed_candidate = function
   | Atom_range _ | Official_range _ -> None
 ;;
 
+module Candidate_request_set = Set.Make (struct
+    type t = string * string
+
+    let compare (gen_a, req_a) (gen_b, req_b) =
+      let cmp = String.compare gen_a gen_b in
+      if cmp <> 0 then cmp else String.compare req_a req_b
+  end)
+
+module Candidate_sequence_set = Set.Make (struct
+    type t = string * int
+
+    let compare (gen_a, seq_a) (gen_b, seq_b) =
+      let cmp = String.compare gen_a gen_b in
+      if cmp <> 0 then cmp else Int.compare seq_a seq_b
+  end)
+
 (* Identity coordinates, not payload equality, determine whether an input was
    consumed. A changed digest or moved sequence never makes a reused ID new. *)
 let validate_unique_explicit_candidates candidates =
-  let requests = Hashtbl.create 16 and sequences = Hashtbl.create 16 in
-  List.fold_left (fun result (candidate : explicit_candidate_id) ->
-    let* () = result in
-    let request = candidate.queue_generation, candidate.request_id in
-    let sequence = candidate.queue_generation, candidate.sequence in
-    if Hashtbl.mem requests request || Hashtbl.mem sequences sequence then
-      Error (Printf.sprintf "explicit candidate identity conflict generation=%s request_id=%s sequence=%d"
-        candidate.queue_generation candidate.request_id candidate.sequence)
-    else (
-      Hashtbl.add requests request ();
-      Hashtbl.add sequences sequence ();
-      Ok ())) (Ok ()) candidates
+  let rec loop requests sequences = function
+    | [] -> Ok ()
+    | (candidate : explicit_candidate_id) :: rest ->
+      let request = candidate.queue_generation, candidate.request_id in
+      let sequence = candidate.queue_generation, candidate.sequence in
+      if Candidate_request_set.mem request requests
+         || Candidate_sequence_set.mem sequence sequences
+      then
+        Error
+          (Printf.sprintf
+             "explicit candidate identity conflict generation=%s request_id=%s sequence=%d"
+             candidate.queue_generation candidate.request_id candidate.sequence)
+      else
+        loop
+          (Candidate_request_set.add request requests)
+          (Candidate_sequence_set.add sequence sequences)
+          rest
+  in
+  loop Candidate_request_set.empty Candidate_sequence_set.empty candidates
 ;;
 
 (* Each source kind names its own mutually exclusive receipt identity field. *)

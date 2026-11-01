@@ -264,9 +264,17 @@ let decode_record json =
   let* recorded_at=timestamp (field fields "recorded_at") in
   let* observation=Task.of_json (field fields "observation")
       |> Result.map_error (fun e -> Invalid_observation e) in Ok {seq;recorded_at;observation}
+module Uuid_set = Set.Make (String)
+module Receiver_set = Set.Make (struct
+    type t = receiver
+
+    let compare (a : receiver) (b : receiver) =
+      let cmp = String.compare a.receiver_generation b.receiver_generation in
+      if cmp <> 0 then cmp else String.compare a.session_id b.session_id
+  end)
+
 let validate_rows (scope:scope) (cursor:cursor) rows =
-  let uuids=Hashtbl.create 16 in
-  let rec loop previous = function
+  let rec loop uuids previous = function
     | [] -> (match previous with
         | None -> Ok ()
         | Some seq -> if seq=cursor.after_sequence then Ok () else Error Sequence_mismatch)
@@ -275,12 +283,12 @@ let validate_rows (scope:scope) (cursor:cursor) rows =
         if origin.keeper_name<>scope.keeper_name
            || origin.invocation.receiver_generation<>scope.receiver.receiver_generation
            || origin.invocation.session_id<>scope.receiver.session_id then Error Scope_mismatch
-        else if Hashtbl.mem uuids row.observation.uuid then Error Duplicate_event_uuid
+        else if Uuid_set.mem row.observation.uuid uuids then Error Duplicate_event_uuid
         else if row.seq>cursor.after_sequence
              || (match previous with None -> false | Some seq -> row.seq<>seq+1)
         then Error Sequence_mismatch
-        else (Hashtbl.add uuids row.observation.uuid ();loop (Some row.seq) rest) in
-  loop None rows
+        else loop (Uuid_set.add row.observation.uuid uuids) (Some row.seq) rest in
+  loop Uuid_set.empty None rows
 let decode_records json =
   let* fields=object_fields
     ["schema";"keeper_name";"receiver_generation";"session_id";"records";"validation";"next_cursor";
@@ -322,13 +330,12 @@ let decode_receivers json =
   let* ()=unknown fields in
   let* keeper_name=nonempty (field fields "keeper_name") in
   let* receivers=list decode_entry (field fields "receivers") in
-  let seen=Hashtbl.create 16 in
-  let rec unique = function
+  let rec unique seen = function
     | [] -> Ok ()
     | (entry:entry)::rest ->
-        if Hashtbl.mem seen entry.receiver then Error Duplicate_receiver
-        else (Hashtbl.add seen entry.receiver (); unique rest) in
-  let* ()=unique receivers in
+        if Receiver_set.mem entry.receiver seen then Error Duplicate_receiver
+        else unique (Receiver_set.add entry.receiver seen) rest in
+  let* ()=unique Receiver_set.empty receivers in
   let* cleanup_failures=decode_cleanup (field fields "cleanup_failures") in
   let* health=decode_health (field fields "observed_persistence_health") in
   Ok (Receivers {keeper_name;receivers;cleanup_failures;health})
@@ -353,13 +360,12 @@ let decode_hints json =
           Ok (Unchecked {store_id;after_sequence})
       | _ -> decode_error_code json |> Result.map (fun error -> Hint_failed error) in
     Ok {receiver;hint}) (field fields "hints") in
-  let seen=Hashtbl.create 16 in
-  let rec unique = function
+  let rec unique seen = function
     | [] -> Ok ()
     | (entry:hint_entry)::rest ->
-        if Hashtbl.mem seen entry.receiver then Error Duplicate_receiver
-        else (Hashtbl.add seen entry.receiver ();unique rest) in
-  let* ()=unique hints in
+        if Receiver_set.mem entry.receiver seen then Error Duplicate_receiver
+        else unique (Receiver_set.add entry.receiver seen) rest in
+  let* ()=unique Receiver_set.empty hints in
   let* cleanup_failures=decode_cleanup (field fields "cleanup_failures") in
   let* health=decode_health (field fields "observed_persistence_health") in
   Ok (Hints {keeper_name;hints;cleanup_failures;health})

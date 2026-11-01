@@ -84,6 +84,8 @@ let allowed_trace_id_set trace_ids =
    and the turn's steps stay available in full from the raw-trace surface. *)
 let chat_trace_steps_per_turn = 200
 
+module String_map = Map.Make (String)
+
 let chat_trace_block_by_turn_ref ~max_lines
     ~(config : Workspace.config)
     ~(keeper_name : string)
@@ -91,13 +93,13 @@ let chat_trace_block_by_turn_ref ~max_lines
   =
   let allowed_trace_ids = Json_util.dedupe_keep_order allowed_trace_ids in
   let allowed = allowed_trace_id_set allowed_trace_ids in
-  let cache = Hashtbl.create (max 1 (List.length allowed_trace_ids)) in
+  let cache = ref String_map.empty in
   let masc_root = Workspace.masc_dir config in
   let lines_for_trace_id trace_id =
     if not (Set_util.StringSet.mem trace_id allowed)
     then None
     else (
-      match Hashtbl.find_opt cache trace_id with
+      match String_map.find_opt trace_id !cache with
       | Some lines -> Some lines
       | None ->
         let trajectory_lines =
@@ -105,7 +107,7 @@ let chat_trace_block_by_turn_ref ~max_lines
             ~max_lines
         in
         let all_lines = dedupe_thinking_lines trajectory_lines in
-        Hashtbl.replace cache trace_id all_lines;
+        cache := String_map.add trace_id all_lines !cache;
         Some all_lines)
   in
   let block_for_turn_ref turn_ref =
@@ -141,13 +143,13 @@ let chat_trace_block_by_turn_ref ~max_lines
   (* A render can ask for the same turn more than once. The trace-file cache
      above already defines this request's observation; reuse its projection
      too, including an absent block, without decoding nested JSON again. *)
-  let blocks = Hashtbl.create 16 in
+  let blocks = ref String_map.empty in
   fun turn_ref ->
     let key = Ids.Turn_ref.to_string turn_ref in
-    match Hashtbl.find_opt blocks key with
+    match String_map.find_opt key !blocks with
     | Some block -> block
     | None ->
       let block = block_for_turn_ref turn_ref in
-      Hashtbl.add blocks key block;
+      blocks := String_map.add key block !blocks;
       block
 ;;

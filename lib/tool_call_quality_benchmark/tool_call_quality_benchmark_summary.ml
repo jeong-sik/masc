@@ -33,51 +33,77 @@ let percentile95_int_option values =
 
 let model_label (run : evidence_run) = run.provider ^ ":" ^ run.model
 
+module String_set = Set.Make (String)
+module String_map = Map.Make (String)
+
+module Summary_key = struct
+  type t = string option * string option * string option
+
+  let compare (p1, m1, k1) (p2, m2, k2) =
+    let c = Option.compare String.compare p1 p2 in
+    if c <> 0 then c
+    else
+      let c = Option.compare String.compare m1 m2 in
+      if c <> 0 then c
+      else Option.compare String.compare k1 k2
+end
+
+module Summary_key_map = Map.Make (Summary_key)
+
+module Repeated_key = struct
+  type t = (string option * string option * string option) * string
+
+  let compare (sk1, c1) (sk2, c2) =
+    let c = Summary_key.compare sk1 sk2 in
+    if c <> 0 then c else String.compare c1 c2
+end
+
+module Repeated_key_map = Map.Make (Repeated_key)
+
 let normalize_filter_set values =
-  let table = Hashtbl.create 8 in
   values
   |> Json_util.normalize_string_list
-  |> List.iter (fun value -> Hashtbl.replace table value ());
-  table
+  |> List.fold_left (fun acc value -> String_set.add value acc) String_set.empty
 
-let keep_run ?model_filters ?keeper_filters (run : evidence_run) =
+let keep_run ?model_filter_set ?keeper_filter_set (run : evidence_run) =
   let model_ok =
-    match model_filters with
-    | None | Some [] -> true
-    | Some filters -> Hashtbl.mem (normalize_filter_set filters) (model_label run)
+    match model_filter_set with
+    | None -> true
+    | Some set -> String_set.mem (model_label run) set
   in
   let keeper_ok =
-    match keeper_filters with
-    | None | Some [] -> true
-    | Some filters -> Hashtbl.mem (normalize_filter_set filters) run.keeper_profile
+    match keeper_filter_set with
+    | None -> true
+    | Some set -> String_set.mem run.keeper_profile set
   in
   model_ok && keeper_ok
 
 let group_scores_by_case grouped_scores =
-  let grouped = Hashtbl.create 8 in
-  List.iter
-    (fun score ->
-      let current = Hashtbl.find_opt grouped score.case_id |> Option.value ~default:[] in
-      Hashtbl.replace grouped score.case_id (score :: current))
-    grouped_scores;
-  grouped
+  List.fold_left
+    (fun acc score ->
+      let current = String_map.find_opt score.case_id acc |> Option.value ~default:[] in
+      String_map.add score.case_id (score :: current) acc)
+    String_map.empty
+    grouped_scores
 
 let modal_ratio values =
   match values with
   | [] -> None
   | _ ->
-      let counts = Hashtbl.create (List.length values) in
-      List.iter
-        (fun value ->
-          let next =
-            match Hashtbl.find_opt counts value with
-            | Some count -> count + 1
-            | None -> 1
-          in
-          Hashtbl.replace counts value next)
-        values;
+      let counts =
+        List.fold_left
+          (fun acc value ->
+            let next =
+              match String_map.find_opt value acc with
+              | Some count -> count + 1
+              | None -> 1
+            in
+            String_map.add value next acc)
+          String_map.empty
+          values
+      in
       let best =
-        Hashtbl.fold (fun _ count acc -> max acc count) counts 0
+        String_map.fold (fun _ count acc -> max acc count) counts 0
       in
       Some (Stdlib.Float.of_int best /. Stdlib.Float.of_int (List.length values))
 
@@ -97,19 +123,29 @@ let summary_key_of_score view (score : case_score) =
   | By_provider_model -> (Some score.provider, Some score.model, None)
   | By_keeper_profile -> (None, None, Some score.keeper_profile)
 
+let is_run_status (a : run_status) (b : run_status) =
+  match a, b with
+  | Run_ok, Run_ok
+  | Run_unsupported, Run_unsupported
+  | Run_runtime_unreachable, Run_runtime_unreachable -> true
+  | (Run_ok | Run_unsupported | Run_runtime_unreachable),
+    (Run_ok | Run_unsupported | Run_runtime_unreachable) -> false
+
 let repeated_metrics_for_view view runs =
-  let grouped = Hashtbl.create 16 in
-  List.iter
-    (fun run ->
-      if (=) run.status Run_ok then
-        let (provider, model, keeper_profile) = summary_key_of_run view run in
-        let key = (provider, model, keeper_profile, run.case_id) in
-        let current = Hashtbl.find_opt grouped key |> Option.value ~default:[] in
-        Hashtbl.replace grouped key (run :: current))
-    runs;
-  Hashtbl.fold
-    (fun (provider, model, keeper_profile, _case_id)
-         (grouped_runs : evidence_run list) acc ->
+  let grouped =
+    List.fold_left
+      (fun acc run ->
+        if is_run_status run.status Run_ok then
+          let sk = summary_key_of_run view run in
+          let key = (sk, run.case_id) in
+          let current = Repeated_key_map.find_opt key acc |> Option.value ~default:[] in
+          Repeated_key_map.add key (run :: current) acc
+        else acc)
+      Repeated_key_map.empty
+      runs
+  in
+  Repeated_key_map.fold
+    (fun (sk, _case_id) (grouped_runs : evidence_run list) acc ->
       if List.length grouped_runs < 2 then acc
       else
         let tool_sequence_ratio =
@@ -134,18 +170,20 @@ let repeated_metrics_for_view view runs =
           |> List.filter_map (fun value -> value)
           |> avg_float
         in
-        ((provider, model, keeper_profile), (stability, tool_sequence_ratio, prompt_ratio, pass_ratio))
+        (sk, (stability, tool_sequence_ratio, prompt_ratio, pass_ratio))
         :: acc)
     grouped []
 
 let collapse_repeated_metrics metrics =
-  let grouped = Hashtbl.create 8 in
-  List.iter
-    (fun (key, values) ->
-      let current = Hashtbl.find_opt grouped key |> Option.value ~default:[] in
-      Hashtbl.replace grouped key (values :: current))
-    metrics;
-  Hashtbl.fold
+  let grouped =
+    List.fold_left
+      (fun acc (key, values) ->
+        let current = Summary_key_map.find_opt key acc |> Option.value ~default:[] in
+        Summary_key_map.add key (values :: current) acc)
+      Summary_key_map.empty
+      metrics
+  in
+  Summary_key_map.fold
     (fun key values acc ->
       let stability_values, tool_values, prompt_values, pass_values =
         List.fold_left
@@ -156,58 +194,67 @@ let collapse_repeated_metrics metrics =
             , (match pa with Some value -> value :: pa_acc | None -> pa_acc) ))
           ([], [], [], []) values
       in
-      ( key
-      , ( avg_float stability_values
+      Summary_key_map.add
+        key
+        ( avg_float stability_values
         , (match tool_values with [] -> None | _ -> Some (avg_float tool_values))
         , (match prompt_values with [] -> None | _ -> Some (avg_float prompt_values))
         , (match pass_values with [] -> None | _ -> Some (avg_float pass_values))
-        , List.length values ) )
-      :: acc)
-    grouped []
+        , List.length values )
+        acc)
+    grouped
+    Summary_key_map.empty
 
 let build_summary_rows view runs scores =
   let repeated_metrics =
     repeated_metrics_for_view view runs |> collapse_repeated_metrics
-    |> List.to_seq |> Hashtbl.of_seq
   in
-  let scores_by_key = Hashtbl.create 16 in
-  List.iter
-    (fun score ->
-      let key = summary_key_of_score view score in
-      let current = Hashtbl.find_opt scores_by_key key |> Option.value ~default:[] in
-      Hashtbl.replace scores_by_key key (score :: current))
-    scores;
-  Hashtbl.fold
+  let runs_by_key =
+    List.fold_left
+      (fun acc run ->
+        let key = summary_key_of_run view run in
+        let current = Summary_key_map.find_opt key acc |> Option.value ~default:[] in
+        Summary_key_map.add key (run :: current) acc)
+      Summary_key_map.empty
+      runs
+  in
+  let scores_by_key =
+    List.fold_left
+      (fun acc score ->
+        let key = summary_key_of_score view score in
+        let current = Summary_key_map.find_opt key acc |> Option.value ~default:[] in
+        Summary_key_map.add key (score :: current) acc)
+      Summary_key_map.empty
+      scores
+  in
+  Summary_key_map.fold
     (fun (provider, model, keeper_profile as key)
          (grouped_scores : case_score list) acc ->
       let grouped_runs =
-        runs
-        |> List.filter (fun run ->
-               let run_key = summary_key_of_run view run in
-               (=) run_key key)
+        Summary_key_map.find_opt key runs_by_key |> Option.value ~default:[]
       in
       let grouped_scores_by_case = group_scores_by_case grouped_scores in
       let unsupported_runs =
         grouped_runs
-        |> List.filter (fun run -> (=) run.status Run_unsupported)
+        |> List.filter (fun run -> is_run_status run.status Run_unsupported)
         |> List.length
       in
       let runtime_unreachable_runs =
         grouped_runs
-        |> List.filter (fun run -> (=) run.status Run_runtime_unreachable)
+        |> List.filter (fun run -> is_run_status run.status Run_runtime_unreachable)
         |> List.length
       in
       let stability_score, tool_sequence_consistency_rate,
           prompt_fingerprint_consistency_rate, pass_consistency_rate,
           repeated_case_groups =
-        match Hashtbl.find_opt repeated_metrics key with
+        match Summary_key_map.find_opt key repeated_metrics with
         | Some (stability, tool_rate, prompt_rate, pass_rate, group_count) ->
             (Some stability, tool_rate, prompt_rate, pass_rate, group_count)
         | None -> (None, None, None, None, 0)
       in
-      let cases_total = Hashtbl.length grouped_scores_by_case in
+      let cases_total = String_map.cardinal grouped_scores_by_case in
       let cases_passed =
-        Hashtbl.fold
+        String_map.fold
           (fun _ scores_for_case count ->
             if List.for_all (fun score -> score.passed) scores_for_case then count + 1
             else count)
@@ -275,28 +322,43 @@ let build_summary_rows view runs scores =
          | cmp -> cmp)
 
 let summarize ~cases ~runs ?model_filters ?keeper_filters () =
+  let model_filter_set =
+    match model_filters with
+    | None | Some [] -> None
+    | Some filters -> Some (normalize_filter_set filters)
+  in
+  let keeper_filter_set =
+    match keeper_filters with
+    | None | Some [] -> None
+    | Some filters -> Some (normalize_filter_set filters)
+  in
   let filtered_runs =
     runs
-    |> List.filter (fun run -> keep_run ?model_filters ?keeper_filters run)
+    |> List.filter (fun run ->
+           keep_run ?model_filter_set ?keeper_filter_set run)
   in
   let score_results =
     filtered_runs
     |> List.filter_map (Tool_call_quality_benchmark_scoring.score_run ~cases)
   in
-  let unsupported_runs =
-    filtered_runs |> List.filter (fun run -> (=) run.status Run_unsupported) |> List.length
+  let case_id_set =
+    List.fold_left
+      (fun acc case -> String_set.add case.id acc)
+      String_set.empty
+      cases
   in
-  let runtime_unreachable_runs =
-    filtered_runs
-    |> List.filter (fun run -> (=) run.status Run_runtime_unreachable)
-    |> List.length
-  in
-  let unknown_case_runs =
-    filtered_runs
-    |> List.filter (fun run ->
-           (=) run.status Run_ok
-           && not (List.exists (fun case -> String.equal case.id run.case_id) cases))
-    |> List.length
+  let unsupported_runs, runtime_unreachable_runs, unknown_case_runs =
+    List.fold_left
+      (fun (unsupported, unreachable, unknown_case) (run : evidence_run) ->
+        match run.status with
+        | Run_unsupported -> unsupported + 1, unreachable, unknown_case
+        | Run_runtime_unreachable -> unsupported, unreachable + 1, unknown_case
+        | Run_ok ->
+          if String_set.mem run.case_id case_id_set
+          then unsupported, unreachable, unknown_case
+          else unsupported, unreachable, unknown_case + 1)
+      (0, 0, 0)
+      filtered_runs
   in
   {
     cases_total = List.length cases;

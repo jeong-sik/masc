@@ -296,7 +296,7 @@ let filter_by_task_id (requests : listed list)
 
 let sort_desc (requests : listed list) : listed list =
   List.sort (fun (a : listed) b ->
-    compare b.listed_created_at a.listed_created_at) requests
+    Float.compare b.listed_created_at a.listed_created_at) requests
 
 let take = List.take
 

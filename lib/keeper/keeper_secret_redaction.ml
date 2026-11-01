@@ -215,15 +215,11 @@ let values_of_source ~(redact_identity_scalars : bool) { source_path; extraction
            add_mapping_scalar_values ~redact_identity_scalars value acc)
 
 let dedupe values =
-  let tbl = Hashtbl.create 32 in
-  values
-  |> List.filter (fun value ->
-       if Hashtbl.mem tbl value then false
-       else (
-         Hashtbl.add tbl value ();
-         true))
-  |> List.sort (fun a b ->
-       compare (String.length b, b) (String.length a, a))
+  List.sort_uniq
+    (fun a b ->
+       let len_cmp = Int.compare (String.length b) (String.length a) in
+       if len_cmp <> 0 then len_cmp else String.compare b a)
+    values
 
 let compile_exact_values values =
   let patterns = List.map (fun value -> Re.compile (Re.str value)) values in

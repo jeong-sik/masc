@@ -61,27 +61,21 @@ let compare_recommendation left right =
 
 let generated_at_utc () = Masc_domain.now_iso ()
 
+module Profile_map = Map.Make (String)
+
 let build_manifest ?source_summary_path
     (summary : Tool_call_quality_benchmark.benchmark_summary) : manifest =
-  let grouped = Hashtbl.create 8 in
-  summary.grouped_by_provider_model_keeper
-  |> List.filter_map row_to_recommendation
-  |> List.iter (fun recommendation ->
-         let current =
-           Hashtbl.find_opt grouped recommendation.keeper_profile
-         in
-         match current with
-         | Some best when compare_recommendation recommendation best >= 0 -> ()
-         | _ ->
-             Hashtbl.replace grouped recommendation.keeper_profile recommendation);
-  let recommendations =
-    Hashtbl.to_seq_values grouped
-    |> List.of_seq
-    |> List.sort (fun left right ->
-           match String.compare left.keeper_profile right.keeper_profile with
-           | 0 -> compare_recommendation left right
-           | cmp -> cmp)
+  let grouped =
+    summary.grouped_by_provider_model_keeper
+    |> List.filter_map row_to_recommendation
+    |> List.fold_left
+         (fun acc recommendation ->
+            match Profile_map.find_opt recommendation.keeper_profile acc with
+            | Some best when compare_recommendation recommendation best >= 0 -> acc
+            | _ -> Profile_map.add recommendation.keeper_profile recommendation acc)
+         Profile_map.empty
   in
+  let recommendations = Profile_map.bindings grouped |> List.map snd in
   {
     version = 1;
     generated_at = generated_at_utc ();

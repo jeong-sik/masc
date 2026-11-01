@@ -595,7 +595,7 @@ let latest_run runs =
        | None -> Some run
        | Some current when run.started_at > current.started_at
                             || (Float.equal run.started_at current.started_at
-                                && Stdlib.compare run.observation_id current.observation_id > 0) -> Some run
+                                && Int64.compare run.observation_id current.observation_id > 0) -> Some run
        | Some _ -> latest)
     None
     runs
@@ -614,28 +614,30 @@ let latest_terminal_run terminal_runs =
     | None -> Some candidate
     | Some (current,current_terminal)
         when let order = Float.compare (terminal_order run terminal) (terminal_order current current_terminal) in
-          order > 0 || (order = 0 && Stdlib.compare run.observation_id current.observation_id > 0) -> Some candidate
+          order > 0 || (order = 0 && Int64.compare run.observation_id current.observation_id > 0) -> Some candidate
     | Some _ -> latest) None terminal_runs
 ;;
 
+module Slot_map = Map.Make (String)
+
 let slot_counts runs =
-  let counts = Hashtbl.create 8 in
-  List.iter
-    (fun run ->
-       match run.status with
-       | Running -> ()
-       | Terminal { answered_by = Vendor_system_one | Closed_by_restart | No_slot; _ } -> ()
-       | Terminal { answered_by = Slot slot_id; _ } ->
-         let previous_count =
-           match Hashtbl.find_opt counts slot_id with
-           | None -> 0
-           | Some count -> count
-         in
-         Hashtbl.replace counts slot_id (1 + previous_count))
-    runs;
-  Hashtbl.to_seq counts
-  |> List.of_seq
-  |> List.sort (fun (left, _) (right, _) -> String.compare left right)
+  let counts =
+    List.fold_left
+      (fun acc run ->
+         match run.status with
+         | Running -> acc
+         | Terminal { answered_by = Vendor_system_one | Closed_by_restart | No_slot; _ } -> acc
+         | Terminal { answered_by = Slot slot_id; _ } ->
+           let previous_count =
+             match Slot_map.find_opt slot_id acc with
+             | None -> 0
+             | Some count -> count
+           in
+           Slot_map.add slot_id (1 + previous_count) acc)
+      Slot_map.empty
+      runs
+  in
+  Slot_map.bindings counts
 ;;
 
 (* The finished runs [slot_counts] leaves out, by why. With the slot counts

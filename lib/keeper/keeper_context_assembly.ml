@@ -138,7 +138,12 @@ let dynamic_context_sections assembly =
            section.Keeper_context_layers.section_source)
         sections
     in
-    if List.length (List.sort_uniq compare sources) = List.length sources
+    let compare_source a b =
+      String.compare
+        (Keeper_context_layers.source_name a)
+        (Keeper_context_layers.source_name b)
+    in
+    if List.length (List.sort_uniq compare_source sources) = List.length sources
     then Some sections
     else None
 ;;

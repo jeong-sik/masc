@@ -17,23 +17,24 @@ type 'recipient resolution =
    lookup.  Both lists are built reversed and turned once at the end.  An
    [Error] ends the walk where it stands: the lists built so far are dropped
    with the frame, so a failed lookup leaves no partial resolution to use. *)
+module Spelling_set = Set.Make (String)
+
 let resolve ~equal ~declared candidates =
-  let asked = Hashtbl.create 16 in
-  let rec walk recipients unresolved = function
+  let rec walk asked recipients unresolved = function
     | [] -> Ok { recipients = List.rev recipients; unresolved = List.rev unresolved }
     | candidate :: rest ->
       let spelling = Candidate.to_string candidate in
-      if Hashtbl.mem asked spelling
-      then walk recipients unresolved rest
+      if Spelling_set.mem spelling asked
+      then walk asked recipients unresolved rest
       else (
-        Hashtbl.replace asked spelling ();
+        let asked = Spelling_set.add spelling asked in
         match declared candidate with
         | Error failure -> Error failure
-        | Ok None -> walk recipients (spelling :: unresolved) rest
+        | Ok None -> walk asked recipients (spelling :: unresolved) rest
         | Ok (Some recipient) ->
           if List.exists (equal recipient) recipients
-          then walk recipients unresolved rest
-          else walk (recipient :: recipients) unresolved rest)
+          then walk asked recipients unresolved rest
+          else walk asked (recipient :: recipients) unresolved rest)
   in
-  walk [] [] candidates
+  walk Spelling_set.empty [] [] candidates
 ;;

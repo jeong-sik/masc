@@ -935,6 +935,7 @@ let heartbeat_event_intake_with_priority
     (* Defer the one Connector snapshot until admission reaches a Connector.
        Index once, then select the first readable conversation and withdraw
        missing pointers in one linear pass without per-pointer reconciliation. *)
+    let module Connector_item_map = Map.Make (String) in
     let connector_snapshot = ref None in
     let ask_snapshot = ref None in
     let admitted_scope = ref None in
@@ -945,9 +946,10 @@ let heartbeat_event_intake_with_priority
       let loaded = Keeper_external_attention.recorded_items_by_event_ids
         ~base_path ~keeper_name ~event_ids
         |> Result.map (fun pairs ->
-          let items = Hashtbl.create (List.length pairs) in
-          List.iter (fun (id, item) -> Hashtbl.replace items id item) pairs;
-          items) in
+          List.fold_left
+            (fun acc (id, item) -> Connector_item_map.add id item acc)
+            Connector_item_map.empty
+            pairs) in
       connector_snapshot := Some loaded;
       match loaded with
       | Error _ -> selections, None
@@ -959,7 +961,7 @@ let heartbeat_event_intake_with_priority
           (fun (selection : Keeper_event_queue_state.pending_selection) ->
             match connector_attention_event_id selection.source with
             | None -> true
-            | Some event_id when not (Hashtbl.mem items event_id) ->
+            | Some event_id when not (Connector_item_map.mem event_id items) ->
               incr missing_count;
               (match !first_missing with
                | None -> first_missing := Some (selection, Connector_item_missing event_id)
@@ -1042,7 +1044,7 @@ let heartbeat_event_intake_with_priority
              | None -> None
              | Some event_id ->
                Option.map (Result.map (fun items ->
-                 match Hashtbl.find_opt items event_id with
+                 match Connector_item_map.find_opt event_id items with
                  | None -> [] | Some item -> [event_id, item])) !connector_snapshot
            in
            let retain_ask error =
@@ -1264,10 +1266,25 @@ let heartbeat_event_intake_with_priority
     | None, Some (_, error) -> Some error
     | None, None -> None
   in
+  let event_queue_trigger_rank = function
+    | Keeper_world_observation.Bootstrap_stimulus -> 0
+    | Keeper_world_observation.Tool_result_ready_stimulus -> 1
+    | Keeper_world_observation.Scheduled_automation_stimulus -> 2
+    | Keeper_world_observation.Connector_attention_stimulus -> 3
+    | Keeper_world_observation.Ask_answered_stimulus -> 4
+    | Keeper_world_observation.Hitl_resolved_stimulus -> 5
+    | Keeper_world_observation.Completion_authority_rejection_stimulus -> 6
+    | Keeper_world_observation.Task_outcome_stimulus -> 7
+    | Keeper_world_observation.Task_cancellation_stimulus -> 8
+    | Keeper_world_observation.Workspace_message_stimulus -> 9
+  in
+  let compare_event_queue_trigger a b =
+    Int.compare (event_queue_trigger_rank a) (event_queue_trigger_rank b)
+  in
   let event_queue_triggers =
     List.filter_map event_queue_trigger_of_stimulus
       (Keeper_heartbeat_source_batch.stimuli source_batch)
-    |> List.sort_uniq compare
+    |> List.sort_uniq compare_event_queue_trigger
   in
   let pending_board_events =
     List.fold_left

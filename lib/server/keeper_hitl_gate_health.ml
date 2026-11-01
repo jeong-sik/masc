@@ -197,7 +197,7 @@ let section_fields ~counts_complete ~status ~status_reasons
       Some
         (List.hd
            (List.sort
-              (fun left right -> compare left.asked_at right.asked_at)
+              (fun left right -> Float.compare left.asked_at right.asked_at)
               candidates))
   in
   `Assoc

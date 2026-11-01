@@ -52,6 +52,8 @@ type message_start =
   ; provider_message_id : string option
   }
 
+type message_presence = Message_unseen | Message_open | Message_closed
+
 type t = {
   mutable blocks : (int * open_block) list;
   (* A conflicting start makes the whole provider block untrustworthy.  Keep
@@ -67,8 +69,7 @@ type t = {
       list;
   mutable current_stream_scope : int;
   mutable current_message_start : message_start option;
-  mutable message_open : bool;
-  mutable message_seen : bool;
+  mutable message_presence : message_presence;
   mutable current_scope_progress_seen : bool;
   mutable stream_phase : stream_phase;
   mutable invalid_scopes : int list;
@@ -91,8 +92,7 @@ let create () =
   ; protocol_errors = []
   ; current_stream_scope = 0
   ; current_message_start = None
-  ; message_open = false
-  ; message_seen = false
+  ; message_presence = Message_unseen
   ; current_scope_progress_seen = false
   ; stream_phase = Accepting_content
   ; invalid_scopes = []
@@ -148,8 +148,7 @@ let advance_to_empty_scope t =
   discard_open_scope t t.current_stream_scope;
   t.current_stream_scope <- t.current_stream_scope + 1;
   t.current_message_start <- None;
-  t.message_open <- false;
-  t.message_seen <- false;
+  t.message_presence <- Message_unseen;
   t.current_scope_progress_seen <- false;
   t.stream_phase <- Accepting_content;
   t.invalid_indices <- []
@@ -245,7 +244,7 @@ let prepare_message_start t ~id ~model ~usage =
     && current_message_start_equal t ~id ~model ~usage
   in
   if
-    t.message_seen
+    t.message_presence <> Message_unseen
     && t.stream_phase = Accepting_content
     && not t.current_scope_progress_seen
     && not exact_open_replay
@@ -264,17 +263,16 @@ let prepare_message_start t ~id ~model ~usage =
 let start_message_scope t ~id ~model ~usage =
   if
     t.stream_phase = Accepting_content
-    && t.message_seen
+    && t.message_presence <> Message_unseen
     && current_message_start_equal t ~id ~model ~usage
   then
     (* Exact prelude replay within one still-open producer call. *)
-    t.message_open <- true
-  else if not t.message_seen
+    t.message_presence <- Message_open
+  else if t.message_presence = Message_unseen
   then (
     let provider_message_id = if String.trim id = "" then None else Some id in
     t.current_message_start <- Some {raw_id=id;model;usage;provider_message_id};
-    t.message_open <- true;
-    t.message_seen <- true)
+    t.message_presence <- Message_open)
   else
     (* A provider-call boundary is established only after the current scope is
        sealed by Agent Core. Any other MessageStart in this unsealed scope is
@@ -284,19 +282,22 @@ let start_message_scope t ~id ~model ~usage =
        ~kind:Keeper_chat_events.Tool_message_start_conflict
        ~detail:"different MessageStart superseded an open tool occurrence";
      invalidate_current_scope t;
-     t.message_open <- false)
+     t.message_presence <- Message_closed)
 ;;
 
 let ensure_message_scope t =
-  if t.message_open
-  then ()
-  else if not t.message_seen
-  then (
-    t.message_open <- true;
-    t.message_seen <- true)
-  else if t.stream_phase = Accepting_content
-  then t.message_open <- true
-  else invalidate_current_scope t
+  match t.message_presence with
+  | Message_open -> ()
+  | Message_unseen -> t.message_presence <- Message_open
+  | Message_closed when t.stream_phase = Accepting_content ->
+    t.message_presence <- Message_open
+  | Message_closed -> invalidate_current_scope t
+;;
+
+let close_message_scope t =
+  match t.message_presence with
+  | Message_unseen -> ()
+  | Message_open | Message_closed -> t.message_presence <- Message_closed
 ;;
 
 let finalized_at_current_index t index =
@@ -898,7 +899,7 @@ let on_event t (evt : Agent_core.Types.sse_event) =
         then discard_scope_tools t t.current_stream_scope
         else finalize_open_blocks t);
        t.stream_phase <- Stop_reason_seen stop_reason;
-       t.message_open <- false
+       close_message_scope t
      | Stop_reason_seen _, None -> ()
      | Stop_reason_seen recorded, Some replay when recorded = replay -> ()
      | Stop_reason_seen _, Some _
@@ -1076,12 +1077,12 @@ let on_event t (evt : Agent_core.Types.sse_event) =
      | Message_stopped -> ()
      | Accepting_content ->
        finalize_open_blocks t;
-       t.message_open <- false;
+       close_message_scope t;
        t.stream_phase <- Message_stopped;
        invalidate_current_scope t
      | Stop_reason_seen _ ->
        finalize_open_blocks t;
-       t.message_open <- false;
+       close_message_scope t;
        t.stream_phase <- Message_stopped)
   | Agent_core.Types.SSEError _
   | Agent_core.Types.NDJSONError _

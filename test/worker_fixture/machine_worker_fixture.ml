@@ -126,6 +126,17 @@ max_reply_bytes = %d
           match R.tool_export_reading ~config ~access:Masc.Lane_addon_sources.Unauthenticated ~reserved:[] with
           | Ok reading when List.length reading.exports = List.length names -> () | _ -> Eio.Time.sleep clock 0.001; ready () in
         ready ();
+        (* Export listing precedes the first completed observation, and machine
+           routes read a completed one: readiness must cover both, or the
+           first seat read races the observation cycle. *)
+        (match names with
+         | [] -> ()
+         | name :: _ ->
+           let rec observed () =
+             match R.observation_for_export ~config ~access:Masc.Lane_addon_sources.Unauthenticated ~name with
+             | Ok (Some _) -> ()
+             | _ -> Eio.Time.sleep clock 0.001; observed () in
+           observed ());
         let invoke ~principal ~controller ~name ~arguments =
           call Lane_addon_call_context.tool_name
             (Lane_addon_call_context.to_json_with_controller ~companion:None ~controller ~principal ~tool:name ~arguments) in

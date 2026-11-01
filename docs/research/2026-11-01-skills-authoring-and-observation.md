@@ -54,7 +54,7 @@ the first implementation unit.
 | Requirement | Required evidence | Current state |
 | --- | --- | --- |
 | Explain applicable prior art and concrete adaptations | Official-source comparison linked to actual changes | Comparison above; implementation in progress |
-| Create instruction Skills and compositions through clear, validated flows | Real create/preview/publish/readback with source choice, diagnostics and publication outcomes | Guided Dashboard candidate implemented; 107 Dashboard checks passed; server execution, TUI authoring and actual screen proof pending |
+| Create instruction Skills and compositions through clear, validated flows | Real create/preview/publish/readback with source choice, diagnostics and publication outcomes | Guided Dashboard and TUI candidates implemented; server preview/create/publish checks passed; missing-source discovery repair and actual screen proof pending |
 | Compose existing capabilities with explicit inputs, dependencies and outputs | Parser/executor-backed preparation and execution; inspectable flow and resulting records | Existing foundation; experience improvements incomplete |
 | Count original runs and asynchronous use honestly | Producer-to-store-to-read-model tests, exact revision and coverage consistency | Candidates #47036/#47041: focused retained-run and async usage checks passed; installed/runtime proof pending |
 | Make statistics interpretable | Sample sizes, populations, units, recorded-time bounds, empty/unavailable distinction, duration distributions | First candidate implemented and tested; rendered/runtime proof pending |
@@ -80,3 +80,17 @@ migration. No statistics, ledger facts or UI diagnostics become execution gates.
 
 The remaining requirements above continue after this unit; their completion
 must be established independently rather than inferred from a passing test.
+
+## Discovery and first-package creation
+
+Writable source discovery now includes declared read-write roots that are
+missing. Enumeration remains read-only; the existing create authority validates
+the candidate before initializing the root. Read-only, non-directory, unavailable
+and unresolved roots remain excluded. This makes the existing first-package
+writer reachable from either interface without exposing host paths.
+
+Dashboard filters combine source identity, parser-derived kind and text in the
+name, description or source. Counts describe matching versus all published
+Skills, and zero matches differs from an empty snapshot. Filtering hides an
+expanded editor while retaining its exact-reference owner and unsaved bytes;
+clearing the filter restores that draft without a write.

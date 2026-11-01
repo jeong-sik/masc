@@ -648,10 +648,13 @@ let writable_sources ~base_path =
     (snapshot
      |> Skill_catalog_snapshot.sources
      |> List.filter_map (fun (source_scan : Skill_catalog_snapshot.source_scan) ->
-       match source_scan.source.source.access, ready_source_root source_scan with
-       | Skill_source_config.Read_write, Ok _ ->
+       match source_scan.source.source.access, source_scan.observation with
+       | (Skill_source_config.Read_write,
+          (Skill_catalog_snapshot.Source_ready _ | Source_missing _)) ->
          Some { source_id = source_scan.source.source.id }
-       | Read_only, _ | _, Error _ -> None))
+       | Read_only, _
+       | Read_write, (Source_not_directory _ | Source_unavailable _ | Source_unresolved _) ->
+         None))
 ;;
 
 let find_writable_source snapshot source_id =

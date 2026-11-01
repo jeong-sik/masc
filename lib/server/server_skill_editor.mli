@@ -217,8 +217,9 @@ val save :
   refresh:(unit -> (Skill_catalog_snapshot_service.publication, string) result) ->
   (save_outcome, error) result
 
-(** Writable, ready source identities only. Resolved host paths never leave
-    this authority boundary. *)
+(** Writable source identities whose roots are ready or missing. Discovery
+    never creates a root; [create] owns initialization after validation.
+    Resolved host paths never leave this authority boundary. *)
 val writable_sources : base_path:string -> (writable_source list, error) result
 
 (** Create one new package directory and SKILL.md without overwriting. *)

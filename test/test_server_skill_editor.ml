@@ -502,6 +502,73 @@ let test_saved_but_unpublished_is_explicit () =
   check string "write is not hidden" edited persisted
 ;;
 
+let test_missing_writable_source_is_discoverable_without_initializing_it () =
+  with_workspace @@ fun base_path ->
+  Unix.mkdir (Filename.concat base_path "ready") 0o700;
+  write_file (Filename.concat base_path "file") "not a directory";
+  Unix.symlink "loop" (Filename.concat base_path "loop");
+  let config_text =
+    "[skills]\nresource-read-max-bytes = 16384\n\n"
+    ^ String.concat "\n"
+        (List.map
+           (fun (id, anchor, path, access) ->
+             Printf.sprintf
+               "[[skills.sources]]\nid = %S\nanchor = %S\npath = %S\naccess = %S\n"
+               id anchor path access)
+           [ "ready", "base-path", "ready", "read-write"
+           ; "first", "base-path", "future/skills", "read-write"
+           ; "read-only", "base-path", "read-only", "read-only"
+           ; "file", "base-path", "file", "read-write"
+           ; "unavailable", "base-path", "loop/skills", "read-write"
+           ; "unresolved", "user-home", "skills", "read-write"
+           ])
+  in
+  let workspace = match Service.workspace_of_base_path ~base_path with
+    | Ok workspace -> workspace | Error _ -> fail "workspace fixture was rejected" in
+  let refresh () =
+    Ok (Service.refresh ~workspace ~user_home:None
+      ~read_config:(fun () -> { Service.path = "/fixture/runtime.toml"; source_text = config_text })) in
+  (match refresh () with
+   | Ok (Service.Published _ | Unchanged _) -> ()
+   | Ok Workspace_retired | Error _ -> fail "snapshot fixture was not published");
+  let snapshot = match Service.current ~workspace with
+    | Some snapshot -> snapshot | None -> fail "fixture snapshot disappeared" in
+  check (list string) "fixture covers each source observation"
+    [ "ready"; "missing"; "missing"; "not_directory"; "unavailable"; "unresolved" ]
+    (List.map (fun (source : Snapshot.source_scan) -> match source.observation with
+       | Source_ready _ -> "ready" | Source_missing _ -> "missing"
+       | Source_not_directory _ -> "not_directory" | Source_unavailable _ -> "unavailable"
+       | Source_unresolved _ -> "unresolved") (Snapshot.sources snapshot));
+  let sources = match Editor.writable_sources ~base_path with
+    | Ok sources -> sources | Error error -> fail (Editor.error_to_string error) in
+  check (list string) "only ready and initializable sources are offered"
+    [ "ready"; "first" ]
+    (List.map (fun (source : Editor.writable_source) ->
+       Skill_source_config.source_id_to_string source.source_id) sources);
+  let future = Filename.concat base_path "future" in
+  check bool "discovery leaves missing ancestors untouched" false (Sys.file_exists future);
+  check bool "read-only root stays missing" false
+    (Sys.file_exists (Filename.concat base_path "read-only"));
+  let source_id = match Skill_source_config.source_id_of_string "first" with
+    | Ok source_id -> source_id | Error detail -> fail detail in
+  let descriptors = Ok (Masc.Keeper_tool_descriptor.all_descriptors ()) in
+  (match Editor.create ~expected_kind:(Some Editor.Instruction_kind) ~descriptors
+    ~base_path ~source_id ~package_id:"first-skill" ~source_text:"invalid" ~refresh with
+   | Error (Editor.Validation_failed _) -> ()
+   | Error error -> fail (Editor.error_to_string error)
+   | Ok _ -> fail "invalid source initialized a package");
+  check bool "validation precedes source initialization" false (Sys.file_exists future);
+  let source_text = named_skill_text "first-skill" "The first procedure." "# Check evidence" in
+  (match Editor.create ~expected_kind:(Some Editor.Instruction_kind) ~descriptors
+    ~base_path ~source_id ~package_id:"first-skill" ~source_text ~refresh with
+   | Ok (Editor.Created_and_published { preview; _ }) ->
+     (match Editor.load ~base_path preview.profile.reference with
+      | Ok loaded -> check string "first package is readable by exact reference" source_text loaded.source_text
+      | Error error -> fail (Editor.error_to_string error))
+   | Ok (Created_but_shadowed _ | Created_but_unpublished _) -> fail "first package was not published"
+   | Error error -> fail (Editor.error_to_string error))
+;;
+
 let test_create_publishes_without_host_path_input () =
   with_workspace @@ fun base_path ->
   let _, _, _, refresh = setup base_path ~access:"read-write" in
@@ -1413,6 +1480,8 @@ let () =
             test_saved_but_unpublished_is_explicit
         ; test_case "create publishes without host path input" `Quick
             test_create_publishes_without_host_path_input
+        ; test_case "missing writable source discovery and first package" `Quick
+            test_missing_writable_source_is_discoverable_without_initializing_it
         ; test_case "create behind an earlier source names the winner" `Quick
             test_create_behind_an_earlier_source_names_the_winner
         ; test_case "delete exact reference and publish" `Quick

@@ -511,6 +511,58 @@ describe('labels', () => {
 })
 
 describe('SkillsPanel rejection observability', () => {
+  it('combines discovery filters and distinguishes no match from an empty snapshot', async () => {
+    const other = entry('other-check', { source_id: 'team' })
+    editorApiMocks.fetchSkills.mockResolvedValue(decodeSkillsResponse(
+      readyPayload([priorArt, intake, broken, other], [...surfaces, instructionSurface(other)]),
+    ))
+    editorApiMocks.fetchAsyncRequestObservation.mockResolvedValue({
+      schema: 'masc.async-request-observation/v1', status: 'unavailable', error: {}, startup_recovery: null,
+    })
+    const view = render(html`<${SkillsPanel} />`)
+    await view.findByText('4 of 4 published Skills')
+    fireEvent.change(view.getByLabelText('Source'), { target: { value: 'workspace' } })
+    fireEvent.change(view.getByLabelText('Kind'), { target: { value: 'instruction' } })
+    fireEvent.input(view.getByLabelText('Find Skill'), { target: { value: 'ABOUT WORK-INTAKE' } })
+    await view.findByText('1 of 4 published Skills')
+    expect(view.getByTestId('skill-row-work-intake')).toBeTruthy()
+    expect(view.queryByRole('button', { name: 'Read instructions for other-check' })).toBeNull()
+    expect(view.queryByRole('button', { name: 'Read instructions for prior-art' })).toBeNull()
+    fireEvent.input(view.getByLabelText('Find Skill'), { target: { value: 'missing-purpose' } })
+    await view.findByText('No published Skills match these filters.')
+    expect(view.getByText('0 of 4 published Skills')).toBeTruthy()
+    expect(view.queryByText('The published snapshot lists no skills.')).toBeNull()
+    fireEvent.click(view.getByRole('button', { name: 'Clear filters' }))
+    await view.findByText('4 of 4 published Skills')
+    fireEvent.change(view.getByLabelText('Kind'), { target: { value: 'unavailable' } })
+    await view.findByText('1 of 4 published Skills')
+    expect(view.getByTestId('skill-row-broken')).toBeTruthy()
+  })
+
+  it('retains an unsaved exact-revision editor draft while its row is filtered', async () => {
+    editorApiMocks.fetchSkills.mockResolvedValue(decodeSkillsResponse(
+      readyPayload([intake], [instructionSurface(intake)]),
+    ))
+    editorApiMocks.fetchAsyncRequestObservation.mockResolvedValue({
+      schema: 'masc.async-request-observation/v1', status: 'unavailable', error: {}, startup_recovery: null,
+    })
+    editorApiMocks.readSkillSource.mockResolvedValue({
+      status: 'ready', reference: reference(intake), snapshot_revision: 'snapshot-revision',
+      source_text: 'original source', access: 'read_write',
+    })
+    const view = render(html`<${SkillsPanel} />`)
+    fireEvent.click(await view.findByRole('button', { name: 'Read instructions for work-intake' }))
+    fireEvent.click(view.getByRole('button', { name: 'Edit source' }))
+    const draft = await view.findByTestId('skill-source-draft')
+    fireEvent.input(draft, { target: { value: 'unsaved authored source' } })
+    fireEvent.input(view.getByLabelText('Find Skill'), { target: { value: 'not-this-skill' } })
+    await view.findByText('No published Skills match these filters.')
+    expect(view.queryByRole('button', { name: 'Edit source' })).toBeNull()
+    fireEvent.click(view.getByRole('button', { name: 'Clear filters' }))
+    expect((view.getByTestId('skill-source-draft') as HTMLTextAreaElement).value).toBe('unsaved authored source')
+    expect(editorApiMocks.saveSkillSource).not.toHaveBeenCalled()
+  })
+
   it('creates the first Skill from a ready empty catalog through the editor API', async () => {
     const created = entry('first-skill')
     editorApiMocks.fetchSkills

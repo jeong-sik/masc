@@ -28,6 +28,7 @@ type t =
   | Skipped of Typesafeai_config.unavailable_reason
   | Context_unavailable
   | Question_unavailable of string
+  | Clock_unavailable
   | Evaluated of
       { reference : Skill_reference.t
       ; body_sha256 : string
@@ -39,10 +40,11 @@ let assess ?clock ~keeper_id ~context ~reference ~body () =
   match Typesafeai_config.skill_applicability_destinations ~keeper_id with
   | Error reason -> Skipped reason
   | Ok ((first, rest) as armed) ->
-    (match context, choices with
-     | None, _ -> Context_unavailable
-     | Some _, Error reason -> Question_unavailable reason
-     | Some context, Ok choices ->
+    (match context, choices, clock with
+     | None, _, _ -> Context_unavailable
+     | Some _, Error reason, _ -> Question_unavailable reason
+     | Some _, Ok _, None -> Clock_unavailable
+     | Some context, Ok choices, Some clock ->
        let requested_models =
          List.map (fun (destination : Client.destination) -> destination.model) (first :: rest)
        in
@@ -69,7 +71,7 @@ let assess ?clock ~keeper_id ~context ~reference ~body () =
        in
        observe [ "status", `String "started" ];
        let outcome =
-         match Client.evaluate ?clock ~destinations:armed ~state ~questions () with
+         match Client.evaluate ~clock ~destinations:armed ~state ~questions () with
          | Error failure -> Failed failure
          | Ok evaluated ->
            let decoded =
@@ -116,6 +118,8 @@ let to_yojson = function
       [ "status", `String "unavailable"; "reason", `String "turn_context_unavailable" ]
   | Question_unavailable reason -> `Assoc
       [ "status", `String "unavailable"; "reason", `String reason ]
+  | Clock_unavailable -> `Assoc
+      [ "status", `String "unavailable"; "reason", `String "clock_unavailable" ]
   | Evaluated { reference; body_sha256; requested_models; outcome } ->
     let fields = match outcome with
       | Failed failure ->
@@ -142,7 +146,7 @@ let to_yojson = function
 
 let model_advice = function
   | Skipped _ -> None
-  | Context_unavailable | Question_unavailable _ -> None
+  | Context_unavailable | Question_unavailable _ | Clock_unavailable -> None
   | Evaluated { outcome; _ } ->
     Some (match outcome with
       | Failed failure ->

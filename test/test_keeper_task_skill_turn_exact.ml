@@ -1391,6 +1391,47 @@ let test_pin_into_unconfigured_source_reads_as_deleted () =
    | _ -> fail "a pin into an unconfigured source is not one identity-not-found row")
 ;;
 
+let test_jev_unavailable_clock_sends_no_request_and_preserves_policy_precedence () =
+  let open Masc in
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio.Stdenv.net env and clock = Eio.Stdenv.clock env in
+  Masc_http_client.with_scoped_pool ~sw ~env @@ fun () ->
+  let value = function Ok value -> value | Error _ -> fail "invalid fixture identity" in
+  let body = "The frozen Skill procedure remains available without applicability advice." in
+  let identity = Reference.make_identity
+      ~source_id:(value (Skill_source_config.source_id_of_string "fixture"))
+      ~package_id:(value (Reference.package_id_of_directory "guide")) ~name:"guide" in
+  let reference = Reference.make ~identity
+      ~content_revision:(Reference.content_revision_of_source_text body) in
+  let server = Exact_output_fixture.start_server ~sw ~net ~clock
+      (Exact_output_fixture.Reply
+         {|{"model":"fixture-jev","answers":{"applicability":{"type":"choice","choice":"applicable","confidence":1,"probabilities":{"applicable":1,"not_applicable":0,"insufficient_context":0}}}}|}) in
+  let policy = { Runtime_schema.default_typesafeai with skill_applicability = true;
+      destinations = ({ Runtime_schema.typesafe_destination with endpoint = server.base_url }, []) } in
+  Masc_test_deps.with_process_env "TYPESAFEAI_API_KEY" (Some "synthetic-skill-key") @@ fun () ->
+  let assess context = Typesafeai_skill_applicability.assess ~keeper_id:"skill-fixture"
+      ~context ~reference ~body () in
+  let inspect ~status ~reason assessment =
+    let open Yojson.Safe.Util in
+    let observed = Typesafeai_skill_applicability.to_yojson assessment in
+    check string "assessment remains explicit" status (observed |> member "status" |> to_string);
+    check string "the owning unavailable reason is preserved" reason (observed |> member "reason" |> to_string);
+    check bool "no invented model advice" true
+      (Option.is_none (Typesafeai_skill_applicability.model_advice assessment));
+    check int "unavailable assessment sends no HTTP request" 0 (Exact_output_fixture.post_count server)
+  in
+  Masc_test_deps.with_typesafeai_policy policy (fun () ->
+    inspect ~status:"unavailable" ~reason:"clock_unavailable"
+      (assess (Some (`Assoc [ "request", `String "inspect the current task" ])));
+    inspect ~status:"unavailable" ~reason:"turn_context_unavailable" (assess None));
+  List.iter (fun (policy, reason) ->
+    Masc_test_deps.with_typesafeai_policy policy (fun () ->
+      inspect ~status:"skipped" ~reason (assess None)))
+    [ { policy with skill_applicability = false }, "skill_applicability_disabled"
+    ; { policy with excluded_keepers = [ "skill-fixture" ] }, "keeper_excluded" ]
+;;
+
 let test_jev_advice_reaches_the_model_without_selecting_or_authorizing () =
   let open Masc in
   Eio_main.run @@ fun env ->
@@ -1893,6 +1934,8 @@ let () =
             test_resource_is_read_only_when_exact_file_is_requested
         ; test_case "JEV advice reaches model without changing selection" `Quick
             test_jev_advice_reaches_the_model_without_selecting_or_authorizing
+        ; test_case "unavailable JEV clock sends nothing and preserves policy" `Quick
+            test_jev_unavailable_clock_sends_no_request_and_preserves_policy_precedence
         ; test_case "stale revision pin does not stop resolution" `Quick
             test_stale_revision_pin_does_not_stop_resolution
         ; test_case "current pin still projects" `Quick

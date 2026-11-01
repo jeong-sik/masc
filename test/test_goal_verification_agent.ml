@@ -2480,7 +2480,9 @@ tools-support = true
                 | `Proof -> Goal_verification.verifications_path config in
               let original = Fs_compat.load_file path in
               let unavailable = "{unavailable-during-dated-retry" in
-              Fs_compat.save_file_atomic path unavailable;
+              (match Fs_compat.save_file_atomic path unavailable with
+               | Ok () -> ()
+               | Error detail -> fail detail);
               let damaged = ref true in
               let restore () =
                 (* Mock advance queues a due fiber. Restore synchronously

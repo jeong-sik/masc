@@ -550,9 +550,11 @@ let store_cached_segment ~root ~relative (seg : cached_segment) =
       | Some existing ->
         existing.device <> seg.device
         || existing.inode <> seg.inode
-        || seg.scanned_to > existing.scanned_to
-        || seg.scanned_from < existing.scanned_from
-        || (seg.scanned_to - seg.scanned_from) >= (existing.scanned_to - existing.scanned_from)
+        || not (Fs_compat.equal_owned_regular_file_snapshot existing.snapshot seg.snapshot)
+        || (seg.scanned_from <= existing.scanned_from
+            && seg.scanned_to >= existing.scanned_to)
+        || (seg.scanned_to > existing.scanned_to
+            && (seg.scanned_to - seg.scanned_from) >= (existing.scanned_to - existing.scanned_from))
     in
     if replace then (
       if Hashtbl.length segment_cache >= max_cached_files
@@ -915,16 +917,25 @@ let read ~config ~task_id ~max_events ?cursor () =
                            in
                            if not start_ok then Ok `Invalidated
                            else
-                             let* line_opt = read_line_at_bounded reader ~limit:cached.scanned_to off in
+                             let* line_opt = read_line_at_bounded reader ~limit:before off in
                              match line_opt with
                              | None -> Ok `Invalidated
                              | Some line ->
-                               match classify_row ~source:file.source line with
-                               | Row_task { task_id = row_tid; json } when String.equal row_tid task_id ->
-                                 let event = event_envelope ~file ~offset:off json in
-                                 materialize (event :: collected) (count + 1) line more
-                               | Row_task _ | Row_unrelated | Row_conflicting _ | Row_invalid ->
-                                 Ok `Invalidated
+                               let line_end = off + String.length line in
+                               let* end_ok =
+                                 if line_end >= before then Ok false
+                                 else
+                                   let* term = byte reader line_end in
+                                   Ok (term = '\n')
+                               in
+                               if not end_ok then Ok `Invalidated
+                               else
+                                 match classify_row ~source:file.source line with
+                                 | Row_task { task_id = row_tid; json } when String.equal row_tid task_id ->
+                                   let event = event_envelope ~file ~offset:off json in
+                                   materialize (event :: collected) (count + 1) line more
+                                 | Row_task _ | Row_unrelated | Row_conflicting _ | Row_invalid ->
+                                   Ok `Invalidated
                        in
                        let* mat_result = materialize collected count "" taken in
                        match mat_result with

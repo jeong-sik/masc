@@ -1901,6 +1901,8 @@ let test_task_history_buffered_sources () = with_workspace (fun _env _sw base_pa
   check bool "original stored prefix exhausted" true (Option.is_none tail.next_cursor);
   let after_append=History.read ~config ~task_id ~max_events:10 () |> require "fresh history after append" in
   check int "fresh read includes appended and cached rows" 4 (List.length after_append.events);
+  let middle_after_append=get ~cursor:(Option.get top.next_cursor) () in
+  check_row "large" (String.length first+1) middle_after_append;
   check int "unrelated task warm read returns zero rows" 0
     (List.length ((History.read ~config ~task_id:"absent-task" ~max_events:10 () |> require "warm absent task").events));
   let inplace=Unix.openfile path [Unix.O_WRONLY] 0o600 in

@@ -146,14 +146,27 @@ let decode_connector_connection ~status ~available ~connected =
            available connected)
 
 (* Telegram's native gateway emits its int64 bot ID as a JSON number. Other
-   connectors emit strings, so keep their stricter wire contract. *)
+   connectors emit strings, so keep their stricter wire contract. Telegram user
+   and bot IDs are positive 64-bit integers. *)
 let optional_bot_user_id ~connector_id json =
   match connector_id, member "bot_user_id" json with
-  | "telegram", `Int value -> Ok (Some (string_of_int value))
+  | "telegram", `Int value ->
+      if value > 0 then Ok (Some (string_of_int value))
+      else Error "field 'bot_user_id' must be a positive int64"
   | "telegram", `Intlit raw -> (
       match Int64.of_string_opt raw with
-      | Some value -> Ok (Some (Int64.to_string value))
-      | None -> Error "field 'bot_user_id' must fit in an int64")
+      | Some value when value > 0L && String.equal (Int64.to_string value) raw ->
+          Ok (Some raw)
+      | Some _ | None -> Error "field 'bot_user_id' must be a positive int64")
+  | "telegram", `String raw -> (
+      let trimmed = String.trim raw in
+      if String.equal trimmed "" then Ok None
+      else
+        match Int64.of_string_opt trimmed with
+        | Some value
+          when value > 0L && String.equal (Int64.to_string value) trimmed ->
+            Ok (Some trimmed)
+        | Some _ | None -> Error "field 'bot_user_id' must be a positive int64")
   | _ -> optional_string_field json "bot_user_id"
 
 let decode_connector json =

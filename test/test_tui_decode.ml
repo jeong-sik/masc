@@ -4326,9 +4326,16 @@ let test_decode_connector_telegram_numeric_bot_id () =
   expect_id "Telegram int64 maximum" "telegram"
     (`Intlit "9223372036854775807") (Some "9223372036854775807");
   expect_id "Telegram string" "telegram" (`String "4242") (Some "4242");
+  expect_id "Telegram blank string" "telegram" (`String "   ") None;
   expect_id "Telegram null" "telegram" `Null None;
   expect_id "Slack string" "slack" (`String "U123") (Some "U123");
   expect_refused "Slack integer" "slack" (`Int 4242);
+  expect_refused "Telegram zero integer" "telegram" (`Int 0);
+  expect_refused "Telegram negative integer" "telegram" (`Int (-42));
+  expect_refused "Telegram zero string" "telegram" (`String "0");
+  expect_refused "Telegram negative string" "telegram" (`String "-42");
+  expect_refused "Telegram non-numeric string" "telegram" (`String "not-a-bot-id");
+  expect_refused "Telegram leading-zero string" "telegram" (`String "0042");
   expect_refused "Telegram float" "telegram" (`Float 1.5);
   expect_refused "Telegram int64 overflow" "telegram"
     (`Intlit "9223372036854775808")

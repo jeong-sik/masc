@@ -1926,7 +1926,79 @@ let test_task_history_buffered_sources () = with_workspace (fun _env _sw base_pa
   (match History.read ~config ~task_id ~max_events:1 () with
    | Error (History.Invalid_event {offset;_}) ->
      check int "unterminated captured tail" (String.length newest+String.length "unfinished"-1) offset
-   | Ok _ | Error _ -> fail "unterminated original history tail was accepted"))
+   | Ok _ | Error _ -> fail "unterminated original history tail was accepted");
+  (* Validator parity between Task.History_page (fast scanner + fallback) and Decode.history *)
+  let module Decode = Masc.Tui_decode_task_inspection in
+  write path newest;
+  let act_dir=Filename.concat (Workspace.masc_dir config) "activity-events/2099-12" in
+  Fs_compat.mkdir_p act_dir;
+  let act_path=Filename.concat act_dir "31.jsonl" in
+  let parity_cases = [
+    "standard integer seq/ts_ms", true,
+    {|{"seq":1,"ts_ms":1793000000001,"ts_iso":"2026-10-27T00:00:01Z","kind":"task.started","actor":{"kind":"agent","id":"k"},"subject":{"kind":"task","id":"buffered-history-task"},"payload":{"task_id":"buffered-history-task"},"tags":["task"]}|};
+    "float seq and numeric string ts_ms", true,
+    {|{"seq":2.0,"ts_ms":" 1793000000002 ","ts_iso":"2026-10-27T00:00:02Z","kind":"task.started","actor":{"kind":"agent","id":"k"},"subject":{"kind":"task","id":"buffered-history-task"},"payload":{"task_id":"buffered-history-task"},"tags":["task"]}|};
+    "escaped key and escaped task_id", true,
+    {|{"\u0073eq":3,"ts_ms":1793000000003,"ts_iso":"2026-10-27T00:00:03Z","kind":"task.started","actor":{"kind":"agent","id":"k"},"subject":{"kind":"task","id":"buffered-\u0068istory-task"},"payload":{"task_id":"buffered-history-task"},"tags":["task"]}|};
+    "duplicate root key", false,
+    {|{"seq":4,"seq":4,"ts_ms":1793000000004,"ts_iso":"2026-10-27T00:00:04Z","kind":"task.started","actor":{"kind":"agent","id":"k"},"subject":{"kind":"task","id":"buffered-history-task"},"payload":{"task_id":"buffered-history-task"},"tags":["task"]}|};
+    "duplicate nested payload key", false,
+    {|{"seq":5,"ts_ms":1793000000005,"ts_iso":"2026-10-27T00:00:05Z","kind":"task.started","actor":{"kind":"agent","id":"k"},"subject":{"kind":"task","id":"buffered-history-task"},"payload":{"task_id":"buffered-history-task","note":"a","note":"b"},"tags":["task"]}|};
+    "unknown root field", false,
+    {|{"seq":6,"ts_ms":1793000000006,"ts_iso":"2026-10-27T00:00:06Z","kind":"task.started","actor":{"kind":"agent","id":"k"},"subject":{"kind":"task","id":"buffered-history-task"},"payload":{"task_id":"buffered-history-task"},"tags":["task"],"extra":1}|};
+    "non-string tag element", false,
+    {|{"seq":7,"ts_ms":1793000000007,"ts_iso":"2026-10-27T00:00:07Z","kind":"task.started","actor":{"kind":"agent","id":"k"},"subject":{"kind":"task","id":"buffered-history-task"},"payload":{"task_id":"buffered-history-task"},"tags":["task",123]}|};
+    "subject + payload.task_id=null conflict", false,
+    {|{"seq":8,"ts_ms":1793000000008,"ts_iso":"2026-10-27T00:00:08Z","kind":"task.started","actor":{"kind":"agent","id":"k"},"subject":{"kind":"task","id":"buffered-history-task"},"payload":{"task_id":null},"tags":["task"]}|};
+  ] in
+  List.iter (fun (label, expect_ok, raw_line) ->
+    write act_path (raw_line ^ "\n");
+    let envelope =
+      `Assoc [
+        "source", `String "activity-events";
+        "file", `String "activity-events/2099-12/31.jsonl";
+        "offset", `Int 0;
+        "event", Yojson.Safe.from_string raw_line;
+      ]
+    in
+    let decode_res = Decode.history ~task_id (`List [envelope]) in
+    let read_res = History.read ~config ~task_id ~max_events:5 () in
+    match expect_ok, read_res, decode_res with
+    | true, Ok p, Ok decoded ->
+      check int ("parity valid count: " ^ label) 1 (List.length decoded);
+      (match Decode.history ~task_id (`List p.events) with
+       | Ok page_events ->
+         check int ("parity page event count: " ^ label) 2 (List.length page_events);
+         check bool ("parity page includes activity row: " ^ label) true
+           (List.exists
+              (fun (ev : Types.task_history_event) ->
+                ev.th_origin
+                = Some
+                    {
+                      Types.tho_source = Types.Task_activity;
+                      tho_file = "activity-events/2099-12/31.jsonl";
+                      tho_offset = 0;
+                    })
+              page_events)
+       | Error err -> fail ("parity page decode failed on " ^ label ^ ": " ^ err))
+    | false, Error (History.Invalid_event {file="activity-events/2099-12/31.jsonl"; offset=0}), Error _ -> ()
+    | _ -> fail ("validator parity mismatch on " ^ label)
+  ) parity_cases;
+  (* High-cardinality task table resize (>1024 distinct task IDs with colliding suffixes) *)
+  let many_buf = Buffer.create (1300 * 64) in
+  for idx = 0 to 1299 do
+    Buffer.add_string many_buf
+      (Printf.sprintf {|{"type":"task_transition","task_id":"task-%04d","n":%d}|} idx idx);
+    Buffer.add_char many_buf '\n'
+  done;
+  write act_path "";
+  write path (Buffer.contents many_buf);
+  (match History.read ~config ~task_id:"task-0007" ~max_events:5 () with
+   | Ok p -> check int "task-0007 found in >1024 task table" 1 (List.length p.events)
+   | Error _ -> fail "failed reading from >1024 distinct task table");
+  (match History.read ~config ~task_id:"task-1297" ~max_events:5 () with
+   | Ok p -> check int "task-1297 found in warm >1024 task table" 1 (List.length p.events)
+   | Error _ -> fail "failed reading warm >1024 distinct task table"))
 
 let () = match Array.to_list Sys.argv with
   | [_; "--resume-child"; base_path; run_id] -> child_resume base_path run_id

@@ -182,26 +182,30 @@ async function mcpPost(
   binding: McpRequestBinding,
   timeoutMs = DEFAULT_MCP_TIMEOUT_MS,
   actorName?: string | null,
+  consumeWithinTimeout = false,
 ): Promise<string> {
   assertBinding(binding)
   const request = currentRequest(body)
-  return fetchWithTimeout('/mcp', {
+  const init = {
     method: 'POST',
     headers: mcpHeadersForActor(binding, request.method, request.name, actorName),
     body: JSON.stringify(request.body),
-  }, timeoutMs, async res => {
+  }
+  const consume = async (res: Response) => {
     assertBinding(binding)
     if (!res.ok) {
       if (res.status === 403) {
         blockedAuthRevision = binding.authRevision
         throw new Error(MCP_BLOCKED_MESSAGE)
       }
-      throw await apiRequestErrorFromResponse('POST', '/mcp', res, true)
+      throw await apiRequestErrorFromResponse('POST', '/mcp', res, consumeWithinTimeout)
     }
     const text = await res.text()
     assertBinding(binding)
     return text
-  })
+  }
+  if (consumeWithinTimeout) return fetchWithTimeout('/mcp', init, timeoutMs, consume)
+  return consume(await fetchWithTimeout('/mcp', init, timeoutMs))
 }
 
 async function ensureBinding(): Promise<McpRequestBinding> {
@@ -234,6 +238,7 @@ export function resetMcpClientState(): void {
 // --- MCP over HTTP helper ---
 
 interface McpCallResponse {
+  id?: unknown
   result?: {
     content?: Array<{ type?: string; text?: string }>
     isError?: boolean
@@ -317,20 +322,65 @@ function structuredAuthErrorCode(value: unknown): unknown {
   return (value as Record<string, unknown>).auth_error_code
 }
 
-function parseMcpHttpResponse(raw: string): McpCallResponse {
-  const line = raw.split('\n').find(l => l.startsWith('data: '))
-  const payload = line ? line.slice(6).trim() : raw.trim()
-  return JSON.parse(payload) as McpCallResponse
+function parseMcpHttpResponse(raw: string, expectedId?: string): McpCallResponse {
+  const text = raw.trim()
+  const payloads: string[] = []
+  if (text.startsWith('{') || text.startsWith('[')) {
+    payloads.push(text)
+  } else {
+    // An SSE response may contain progress notifications before its result.
+    // Multiple data fields in one event form a single newline-separated body.
+    let data: string[] = []
+    const finishEvent = () => {
+      if (data.length > 0) payloads.push(data.join('\n'))
+      data = []
+    }
+    for (const line of raw.split(/\r\n|\r|\n/)) {
+      if (line === '') finishEvent()
+      else if (line === 'data') data.push('')
+      else if (line.startsWith('data:')) {
+        const value = line.slice(5)
+        data.push(value.startsWith(' ') ? value.slice(1) : value)
+      }
+    }
+    finishEvent()
+  }
+
+  let response: McpCallResponse | null = null
+  for (const payload of payloads) {
+    const value: unknown = JSON.parse(payload)
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+      throw new Error('Invalid MCP response')
+    }
+    const message = value as Record<string, unknown>
+    const hasResult = Object.hasOwn(message, 'result')
+    const hasError = Object.hasOwn(message, 'error')
+    if (!hasResult && !hasError && typeof message.method === 'string') continue
+    if (hasResult === hasError || response !== null) throw new Error('Invalid MCP response')
+    if (expectedId !== undefined && message.id !== expectedId) {
+      throw new Error('MCP response does not match the request')
+    }
+    response = message as McpCallResponse
+  }
+  if (response === null) throw new Error('MCP response has no result')
+  return response
 }
 
 function extractMcpText(res: McpCallResponse): string {
-  if (res.error?.message) {
+  if (res.error !== undefined) {
+    if (typeof res.error !== 'object' || res.error === null || typeof res.error.message !== 'string') {
+      throw new Error('Invalid MCP error response')
+    }
     throw new McpProtocolError(
       res.error.message,
       typeof res.error.code === 'number' ? res.error.code : null,
     )
   }
-  if (res.result?.isError) {
+  if (typeof res.result !== 'object' || res.result === null || Array.isArray(res.result)
+    || (res.result.isError !== undefined && typeof res.result.isError !== 'boolean')) {
+    throw new Error('Invalid MCP result')
+  }
+  if (res.result.isError) {
     const err = res.result.content?.[0]?.text ?? 'MCP tool call failed'
     throw new McpToolCallError(
       err,
@@ -338,7 +388,7 @@ function extractMcpText(res: McpCallResponse): string {
       res.result.structuredContent,
     )
   }
-  return res.result?.content?.[0]?.text ?? ''
+  return res.result.content?.[0]?.text ?? ''
 }
 
 async function callMcpToolInternal(
@@ -381,8 +431,8 @@ async function callMcpToolInternal(
         arguments: toolArgs,
       },
       id: requestId,
-    }, binding, DEFAULT_MCP_TIMEOUT_MS, actor)
-    const parsed = parseMcpHttpResponse(text)
+    }, binding, DEFAULT_MCP_TIMEOUT_MS, actor, expectedIdentity !== undefined)
+    const parsed = parseMcpHttpResponse(text, expectedIdentity ? requestId : undefined)
     return extractMcpText(parsed)
   } catch (err) {
     const authErrorCode = err instanceof McpToolCallError

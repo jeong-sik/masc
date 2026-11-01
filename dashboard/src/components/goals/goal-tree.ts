@@ -637,11 +637,14 @@ function GoalLifecycleActionPanel({ node }: { node: GoalTreeNode }) {
           ...(completionBinding === null ? {} : { expected_verification: completionBinding }),
         }, { revision: owner.authRevision, actor: actorId })
         const retry = action === 'request_complete' && node.phase === 'verifying'
-        let reconciled = false
-        try {
-          const parsed: unknown = JSON.parse(response)
-          reconciled = typeof parsed === 'object' && parsed !== null && 'reconciled' in parsed && parsed.reconciled === true
-        } catch { /* An older server may return non-JSON text. */ }
+        const parsed: unknown = JSON.parse(response)
+        if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)
+          || !('status' in parsed) || parsed.status !== 'ok'
+          || !('goal_id' in parsed) || parsed.goal_id !== node.id
+          || !('action' in parsed) || parsed.action !== action) {
+          throw new Error('Goal transition response does not match the request')
+        }
+        const reconciled = 'reconciled' in parsed && parsed.reconciled === true
         const message = reconciled ? 'Existing verification reconciled'
           : retry ? 'Verification retry requested' : `${GOAL_TRANSITION_LABELS[action]} applied`
         if (goalActionReceipts.value[ownerKey]?.ticket !== ticket) return

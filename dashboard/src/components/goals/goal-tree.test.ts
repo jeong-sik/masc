@@ -87,6 +87,10 @@ const measurementFixture = JSON.parse(readFileSync(
   resolve(__dirname, '../../api/fixtures/goal-measurement-tree.json'), 'utf8',
 ))
 
+function transitionResponse(goalId: string, action: string, reconciled = false): string {
+  return JSON.stringify({ status: 'ok', goal_id: goalId, action, ...(reconciled ? { reconciled } : {}) })
+}
+
 function emptySummary(): DashboardGoalsTreeResponse['summary'] {
   return {
     total_goals: 0,
@@ -283,7 +287,7 @@ describe('GoalTree', () => {
     }
     mocks.fetchDashboardGoalsTree.mockResolvedValue(treePayload)
     mocks.fetchDashboardGoalDetail.mockResolvedValue(detailPayload)
-    mocks.callMcpTool.mockResolvedValue('{"ok":true}')
+    mocks.callMcpTool.mockResolvedValue(transitionResponse('goal-ready', 'request_complete'))
 
     render(html`<${GoalTree} />`)
 
@@ -319,7 +323,7 @@ describe('GoalTree', () => {
     mocks.fetchDashboardGoalDetail.mockResolvedValue({
       goal, linked_tasks: [], linked_keepers: [], approvals: [], execution_receipts: [], timeline: [],
     })
-    mocks.callMcpTool.mockResolvedValue('{"ok":true}')
+    mocks.callMcpTool.mockResolvedValue(transitionResponse('goal-drop', 'drop'))
     render(html`<${GoalTree} />`)
     await waitFor(() => expect(screen.getByRole('button', { name: 'Drop' })).toBeTruthy())
 
@@ -349,8 +353,8 @@ describe('GoalTree', () => {
   })
 
   it.each([
-    ['{"ok":true}', 'Verification retry requested'],
-    ['{"ok":true,"reconciled":true}', 'Existing verification reconciled'],
+    [transitionResponse('goal-verifying-retry', 'request_complete'), 'Verification retry requested'],
+    [transitionResponse('goal-verifying-retry', 'request_complete', true), 'Existing verification reconciled'],
   ])('shows the server outcome for a verifying Goal: %s', async (response, status) => {
     const goal: GoalTreeNode = {
       ...makeGoal('goal-verifying-retry', 'Goal awaiting verification'), phase: 'verifying',
@@ -381,6 +385,30 @@ describe('GoalTree', () => {
     }))
     await waitFor(() => expect(screen.getByTestId('goal-lifecycle-action-status').textContent)
       .toContain(status))
+  })
+
+  it.each([
+    ['empty object', '{}'],
+    ['wrong Goal', transitionResponse('another-goal', 'request_complete')],
+    ['wrong action', transitionResponse('goal-untrusted-response', 'pause')],
+    ['non-JSON', 'accepted'],
+  ])('keeps a %s transition response as an unknown outcome', async (_description, response) => {
+    const goal = makeGoal('goal-untrusted-response', 'Untrusted response goal')
+    mocks.fetchDashboardGoalsTree.mockResolvedValue({
+      approval_queue_state: { state: 'ready' }, tree: [goal],
+      summary: { ...emptySummary(), total_goals: 1, active_goals: 1 },
+    })
+    mocks.fetchDashboardGoalDetail.mockResolvedValue({
+      goal, linked_tasks: [], linked_keepers: [], approvals: [], execution_receipts: [], timeline: [],
+    })
+    mocks.mcpCallFailureDisposition.mockReturnValue('outcome_unknown')
+    mocks.callMcpTool.mockResolvedValue(response)
+    render(html`<${GoalTree} />`)
+    fireEvent.click(await screen.findByRole('button', { name: 'Request completion' }))
+    expect((await screen.findByTestId('goal-lifecycle-action-error')).textContent)
+      .toContain('요청 결과를 확인하지 못했습니다')
+    expect(screen.queryByTestId('goal-lifecycle-action-status')).toBeNull()
+    expect(mocks.callMcpTool).toHaveBeenCalledTimes(1)
   })
 
   it('does not claim a retry when the original execution is unresolved', async () => {
@@ -449,7 +477,7 @@ describe('GoalTree', () => {
     mocks.fetchDashboardGoalDetail.mockResolvedValue({
       goal, linked_tasks: [], linked_keepers: [], approvals: [], execution_receipts: [], timeline: [],
     })
-    mocks.callMcpTool.mockRejectedValueOnce(new Error('original outcome unknown')).mockResolvedValueOnce('{"ok":true}')
+    mocks.callMcpTool.mockRejectedValueOnce(new Error('original outcome unknown')).mockResolvedValueOnce(transitionResponse('goal-history', 'pause'))
     render(html`<${GoalTree} />`)
     fireEvent.click(await screen.findByRole('button', { name: 'Retry verification' }))
     await screen.findByTestId('goal-lifecycle-action-error')
@@ -481,7 +509,7 @@ describe('GoalTree', () => {
     fireEvent.click(screen.getByRole('button', { name: /Selected goal/ }))
     await waitFor(() => expect(screen.getByTestId('goal-detail-panel').getAttribute('data-selected-goal-id')).toBe(second.id))
     const firstReads = mocks.fetchDashboardGoalDetail.mock.calls.filter(([id]) => id === first.id).length
-    if (outcome === 'success') resolveAction('{"ok":true}')
+    if (outcome === 'success') resolveAction(transitionResponse(first.id, 'request_complete'))
     else rejectAction(new Error('original outcome is unknown'))
     await waitFor(() => expect(showToast).toHaveBeenCalledWith(
       outcome === 'success' ? 'Goal goal-origin: Request completion applied' : expect.stringContaining('Goal goal-origin: original outcome is unknown'),
@@ -514,7 +542,7 @@ describe('GoalTree', () => {
     await waitFor(() => expect(mocks.fetchDashboardGoalDetail).toHaveBeenCalledWith(goal.id,
       { basePath: '/workspace-b', mascRoot: '/workspace-b/.masc' }))
     const reads = mocks.fetchDashboardGoalDetail.mock.calls.length
-    resolveAction('{"ok":true}')
+    resolveAction(transitionResponse(goal.id, 'request_complete'))
     await waitFor(() => expect(showToast).toHaveBeenCalledWith(
       'Goal goal-same-id: 이전 연결에서 요청 결과가 도착했습니다. 해당 workspace에서 상태를 확인하세요.', 'warning',
     ))
@@ -653,7 +681,7 @@ describe('GoalTree', () => {
     mocks.currentDashboardActor.mockReturnValue('alice')
     setCanonicalDashboardActor('alice')
     await waitFor(() => expect((screen.getByRole('button', { name: 'Request completion' }) as HTMLButtonElement).disabled).toBe(true))
-    resolveAction('{"ok":true}')
+    resolveAction(transitionResponse(goal.id, 'request_complete'))
     await waitFor(() => expect(screen.getByTestId('goal-lifecycle-action-status').textContent).toContain('Request completion applied'))
   })
 
@@ -801,7 +829,7 @@ describe('GoalTree', () => {
     await waitFor(() => expect(mocks.fetchDashboardGoalsTree).toHaveBeenCalledWith(
       { basePath: '/workspace-a', mascRoot: '/root-b' }))
     await waitFor(() => expect((screen.getByRole('button', { name: 'Request completion' }) as HTMLButtonElement).disabled).toBe(false))
-    resolveAction('{"ok":true}')
+    resolveAction(transitionResponse(goal.id, 'request_complete'))
     await waitFor(() => expect(showToast).toHaveBeenCalledWith(
       'Goal goal-root-swap: 이전 연결에서 요청 결과가 도착했습니다. 해당 workspace에서 상태를 확인하세요.', 'warning',
     ))
@@ -828,7 +856,7 @@ describe('GoalTree', () => {
     setStoredToken('test-dev-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
     ;(executionWorkspaceAuthority as { value: unknown }).value =
       { epoch: 'fixture-a', workspaceRoot: '/workspace-a', connectionGeneration: 2 }
-    resolveAction('{"ok":true}')
+    resolveAction(transitionResponse(goal.id, 'request_complete'))
     await waitFor(() => expect(showToast).toHaveBeenCalledWith(expect.stringContaining('이전 연결에서 요청 결과'), 'warning'))
     expect(screen.queryByTestId('goal-lifecycle-action-status')).toBeNull()
     expect(screen.queryByTestId('goal-lifecycle-previous-connection')).toBeNull()
@@ -844,7 +872,7 @@ describe('GoalTree', () => {
     mocks.fetchDashboardGoalDetail.mockResolvedValue({
       goal, linked_tasks: [], linked_keepers: [], approvals: [], execution_receipts: [], timeline: [],
     })
-    mocks.callMcpTool.mockResolvedValue('{"ok":true}')
+    mocks.callMcpTool.mockResolvedValue(transitionResponse(goal.id, 'request_complete'))
     render(html`<${GoalTree} />`)
     await screen.findByText(/workspace를 확인할 수 없습니다/)
     expect(screen.queryByRole('button', { name: 'Request completion' })).toBeNull()
@@ -901,7 +929,7 @@ describe('GoalTree', () => {
     mocks.fetchDashboardGoalDetail.mockResolvedValue({
       goal, linked_tasks: [], linked_keepers: [], approvals: [], execution_receipts: [], timeline: [],
     })
-    mocks.callMcpTool.mockResolvedValue('{"ok":true}')
+    mocks.callMcpTool.mockResolvedValue(transitionResponse(goal.id, action))
     render(html`<${GoalTree} />`)
     await waitFor(() => expect(screen.getByRole('button', { name: label })).toBeTruthy())
     expect(document.querySelector('[data-goal-resume-phase]')?.textContent).toContain('재개 시')

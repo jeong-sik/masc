@@ -151,13 +151,47 @@ describe('MCP 2026-07-28 dashboard client', () => {
   })
 
   it('allows a bound bearer when only the actor hint changes before dispatch', async () => {
-    fetchWithTimeout.mockResolvedValueOnce(okToolResponse())
+    fetchWithTimeout.mockImplementationOnce((_path: string, init: RequestInit) => {
+      const { id } = JSON.parse(String(init.body))
+      return Promise.resolve(new Response(JSON.stringify({ id, result: { content: [{ type: 'text', text: 'ok' }] } })))
+    })
     const { callMcpToolAtIdentity } = await import('./mcp')
     const result = callMcpToolAtIdentity('masc_goal_transition', {}, { revision: 0, actor: 'dashboard' })
     currentDashboardActor.mockReturnValue('alice')
     await expect(result).resolves.toBe('ok')
     expect(fetchWithTimeout).toHaveBeenCalledTimes(1)
     expect(fetchWithTimeout.mock.calls[0]![0]).toBe('/mcp')
+  })
+
+  it('reads the final SSE result after progress and preserves a tool refusal', async () => {
+    fetchWithTimeout.mockImplementationOnce((_path: string, init: RequestInit) => {
+      const { id } = JSON.parse(String(init.body))
+      const progress = JSON.stringify({ jsonrpc: '2.0', method: 'notifications/progress', params: { progress: 1 } })
+      const body = `: keepalive\r\ndata: ${progress}\r\n\r\nevent: message\r\ndata: {"id":${JSON.stringify(id)},\r\ndata: "result":{"isError":true,"content":[{"type":"text","text":"original outcome unknown"}]}}\r\n\r\n`
+      return Promise.resolve(new Response(body, { status: 200 }))
+    })
+    const { callMcpToolAtIdentity, mcpCallFailureDisposition } = await import('./mcp')
+    const error: unknown = await callMcpToolAtIdentity('masc_goal_transition', {},
+      { revision: 0, actor: 'dashboard' }).catch(error => error)
+    expect(error).toMatchObject({ message: 'original outcome unknown' })
+    expect(mcpCallFailureDisposition(error)).toBe('known_tool_response')
+  })
+
+  it.each([
+    ['missing result', () => '{}'],
+    ['progress without result', () => 'data: {"method":"notifications/progress"}\n\n'],
+    ['wrong request id', () => JSON.stringify({ id: 'another-request', result: {} })],
+    ['multiple results', (id: string) => `data: ${JSON.stringify({ id, result: {} })}\n\ndata: ${JSON.stringify({ id, result: {} })}\n\n`],
+  ])('treats %s as an unknown Goal outcome', async (_description, body) => {
+    fetchWithTimeout.mockImplementationOnce((_path: string, init: RequestInit) => {
+      const { id } = JSON.parse(String(init.body))
+      return Promise.resolve(new Response(body(id), { status: 200 }))
+    })
+    const { callMcpToolAtIdentity, mcpCallFailureDisposition } = await import('./mcp')
+    const error: unknown = await callMcpToolAtIdentity('masc_goal_transition', {},
+      { revision: 0, actor: 'dashboard' }).catch(error => error)
+    expect(error).toBeInstanceOf(Error)
+    expect(mcpCallFailureDisposition(error)).toBe('outcome_unknown')
   })
 
   it('does not dispatch a Goal action under a credential installed by bootstrap', async () => {
@@ -634,9 +668,12 @@ describe('MCP 2026-07-28 dashboard client', () => {
     setStoredToken.mockImplementation(next => { token = next; revision++ })
     fetchWithTimeout
       .mockResolvedValueOnce(new Response(JSON.stringify({ token, actor: 'dashboard', role: 'admin' }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(`data: ${JSON.stringify({ result: { isError: true,
-        content: [{ type: 'text', text: 'authentication rejected' }],
-        structuredContent: { auth_error_code: 'actor_mismatch' } } })}\n`, { status: 200 }))
+      .mockImplementationOnce((_path: string, init: RequestInit) => {
+        const { id } = JSON.parse(String(init.body))
+        return Promise.resolve(new Response(`data: ${JSON.stringify({ id, result: { isError: true,
+          content: [{ type: 'text', text: 'authentication rejected' }],
+          structuredContent: { auth_error_code: 'actor_mismatch' } } })}\n`, { status: 200 }))
+      })
       .mockResolvedValueOnce(new Response(JSON.stringify({ token: 'fresh-dev-token', actor: 'dashboard', role: 'admin' }), { status: 200 }))
     const { callMcpToolAtIdentity, mcpIdentityRequiresGoalRefresh } = await import('./mcp')
     const error: unknown = await callMcpToolAtIdentity('masc_goal_transition', {},

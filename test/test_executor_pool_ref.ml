@@ -18,10 +18,14 @@ let test_job_runs_on_the_tuned_minor_heap () =
             (Domain.self () :> int), (Gc.get ()).Gc.minor_heap_size))
       in
       check bool "the job ran off the main domain" true (where <> main_domain);
-      check bool
-        (Printf.sprintf "the worker's minor heap is the tuned size, got %d words" words)
-        true
-        (words >= tuned_words)))
+      (* The shared policy preserves a present operator runtime setting. *)
+      match Sys.getenv_opt "OCAMLRUNPARAM" with
+      | Some _ -> ()
+      | None ->
+        check bool
+          (Printf.sprintf "the worker's minor heap is the tuned size, got %d words" words)
+          true
+          (words >= tuned_words)))
 ;;
 
 let () =

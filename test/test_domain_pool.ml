@@ -136,10 +136,15 @@ let test_pool_work_runs_on_the_tuned_minor_heap () =
           (Domain.self () :> int), (Gc.get ()).Gc.minor_heap_size)
       in
       check bool "the job did run off the main domain" true (where <> main_domain);
-      check bool
-        (Printf.sprintf "the worker's minor heap is the tuned size, got %d words" words)
-        true
-        (words >= 4 * 1024 * 1024)))
+      (* A present runtime configuration owns the heap size. The default
+         floor is only the policy when no operator setting was supplied. *)
+      match Sys.getenv_opt "OCAMLRUNPARAM" with
+      | Some _ -> ()
+      | None ->
+        check bool
+          (Printf.sprintf "the worker's minor heap is the tuned size, got %d words" words)
+          true
+          (words >= 4 * 1024 * 1024)))
 ;;
 
 let test_jobs_run_on_worker_domains () =

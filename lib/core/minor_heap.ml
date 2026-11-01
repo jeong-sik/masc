@@ -24,7 +24,10 @@
 let tuned_words = 4 * 1024 * 1024
 
 let tune () =
-  let control = Gc.get () in
-  if control.Gc.minor_heap_size < tuned_words
-  then Gc.set { control with Gc.minor_heap_size = tuned_words }
+  match Sys.getenv_opt "OCAMLRUNPARAM" with
+  | Some _ -> ()
+  | None ->
+    let control = Gc.get () in
+    if control.Gc.minor_heap_size < tuned_words
+    then Gc.set { control with Gc.minor_heap_size = tuned_words }
 ;;

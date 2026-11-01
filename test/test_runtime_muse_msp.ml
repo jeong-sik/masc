@@ -738,6 +738,33 @@ let test_durable_view_page_contract () =
       (`Assoc ["events", `List []; "nextCursor", `Null])) in
   check bool "end of durable history is explicit" true
     (empty.events = [] && empty.next_cursor = None);
+  let source_range stream first last = `Assoc
+      ["stream", stream; "first", first; "last", last] in
+  let stream = `Assoc ["id", `String "raw-stream"; "kind", `String "future-stream-kind"] in
+  let with_range range = page
+      (("sourceRange", range) :: List.remove_assoc "sourceRange" params) `Null in
+  ignore (ok_or_fail (Msp.parse_view_page_result
+    (with_range (source_range stream position position))));
+  List.iter (fun range ->
+    check bool "malformed provenance is refused" true
+      (Result.is_error (Msp.parse_view_page_result (with_range range))))
+    [ `Assoc []
+    ; `Assoc ["stream", stream; "first", position]
+    ; `Assoc ["stream", stream; "last", position]
+    ; `Assoc ["first", position; "last", position]
+    ; source_range (`Assoc ["id", `String "raw-stream"]) position position
+    ; source_range (`Assoc ["kind", `String "run"]) position position
+    ; source_range (`Assoc ["id", `Bool true; "kind", `String "run"]) position position
+    ; source_range (`Assoc ["id", `String "raw-stream"; "kind", `Int 1]) position position
+    ; source_range stream (`Assoc []) position
+    ; source_range stream position (`Assoc ["id", `String "record"])
+    ; source_range stream (`Assoc ["id", `String "record"; "sequence", `String "1"]) position
+    ; source_range stream position (`Assoc ["id", `String "record"; "sequence", `Float 1.5]) ];
+  check bool "a push gap is not a durable history record" true
+    (Result.is_error (Msp.parse_view_page_result (`Assoc
+      ["events", `List [`Assoc ["method", `String "view/gap";
+        "params", `Assoc (("after", `String "opaque-before") :: ("next", `String "opaque-after")
+          :: List.remove_assoc "item" params)]]; "nextCursor", `Null])));
   List.iter (fun malformed ->
     check bool "malformed durable witness is refused" true
       (Result.is_error (Msp.parse_view_page_result malformed)))

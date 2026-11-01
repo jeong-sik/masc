@@ -582,6 +582,14 @@ def drain():
         size = min(params["limit"], FIXTURE.get("history_page_size", params["limit"]))
         page = events[-size:]
         next_cursor = page[0]["params"]["viewCursor"] if len(events) > size else None
+        if page and (FIXTURE.get("history_bad_source_range") or FIXTURE.get("history_push_gap")):
+            # Deliberately malformed page responses, not canonical durable records.
+            page = json.loads(json.dumps(page))
+            if FIXTURE.get("history_bad_source_range"):
+                page[-1]["params"]["sourceRange"] = {}
+            if FIXTURE.get("history_push_gap"):
+                page[-1]["method"] = "view/gap"
+                page[-1]["params"].update(after="opaque-before", next="opaque-after")
         send({"jsonrpc": "2.0", "id": request["id"],
               "result": {"events": page, "nextCursor": next_cursor}})
     sys.exit(0)
@@ -824,6 +832,12 @@ if SCENARIO == "later_unstreamed":
     notify("turn/completed", {"sessionId": SESSION, "turnId": turn_id, "terminal": "completed"})
     drain()
 if SCENARIO == "lost_latest":
+    if "open_agent_phase" in FIXTURE:
+        unfinished = {"itemId": "unfinished", "kind": "agentMessage", "turnId": turn_id,
+                      "revision": 1, "status": "inProgress", "text": "",
+                      "messagePhase": FIXTURE["open_agent_phase"]}
+        item("item/started", unfinished)
+        item("item/updated", dict(unfinished, revision=2))
     older = {"sessionId": SESSION, "item": {
         "itemId": "answer-a", "kind": "agentMessage", "turnId": turn_id,
         "revision": 1, "status": "completed", "text": "OLDER_ANSWER"}}
@@ -902,8 +916,12 @@ if SCENARIO in ["gap_no_message", "gap_then_message"]:
     notify("turn/completed", {"sessionId": SESSION, "turnId": turn_id, "terminal": "completed"})
     drain()
 if SCENARIO == "open_message":
-    item("item/started", {"itemId": "m-1", "kind": "agentMessage", "turnId": turn_id,
-                          "revision": 1, "status": "inProgress", "text": ""})
+    unfinished = {"itemId": "m-1", "kind": "agentMessage", "turnId": turn_id,
+                  "revision": 1, "status": "inProgress", "text": ""}
+    if "open_phase" in FIXTURE:
+        unfinished["messagePhase"] = FIXTURE["open_phase"]
+    item("item/started", unfinished)
+    item("item/updated", dict(unfinished, revision=2))
     notify("item/delta", {"sessionId": SESSION, "itemId": "m-1", "field": "text", "delta": "partial"})
     notify("turn/completed", {"sessionId": SESSION, "turnId": turn_id, "terminal": "completed"})
     drain()
@@ -2588,9 +2606,18 @@ let test_an_unobserved_final_message_is_not_silence () =
        | Ok result ->
          failf "%s settled with %d content blocks instead of failing" name
            (List.length result.response.content));
+      check bool "unfinished history cannot settle the native session" true
+        (Option.is_none run.outcome.settled_session);
+      check bool "unfinished history grants no receipt ACK" true
+        (Option.is_none run.outcome.pending_result_receipts);
+      check bool "unfinished history grants no EndTurn" false
+        (List.exists (function
+          | Agent_core.Types.MessageDelta {stop_reason=Some EndTurn; _} -> true
+          | _ -> false) run.events);
       check_effect (name ^ ": effects unknown")
         Keeper_provider_attempt_effect.Observation_unavailable run.outcome))
-    [ "gap_no_message", ["history_error", `Bool true]; "open_message", [] ]
+    [ "gap_no_message", ["history_error", `Bool true]; "open_message", []
+    ; "open_message", ["open_phase", `String "commentary"] ]
 ;;
 
 let test_gap_before_ack_reconciles_quiet_completion () =
@@ -3475,6 +3502,12 @@ let test_durable_view_reconciles_answer_before_result_ack () =
         ["inputTokens", `Int 40; "outputTokens", `Int 6;
          "cachedTokens", `Int 0; "reasoningTokens", `Int 0]], false
     ; ["history_missing_boundary", `Bool true], false
+    ; ["history_bad_source_range", `Bool true], false
+    ; ["history_push_gap", `Bool true; "terminal_usage", `Assoc
+        ["inputTokens", `Int 40; "outputTokens", `Int 6;
+         "cachedTokens", `Int 0; "reasoningTokens", `Int 0]], false
+    ; ["open_agent_phase", `String "finalAnswer"], false
+    ; ["open_agent_phase", `String "commentary"], false
     ; ["truncated_answer", `Bool true], false ]
 ;;
 

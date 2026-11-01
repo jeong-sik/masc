@@ -1009,7 +1009,9 @@ let durable_turn_of_events ~turn_id ~open_items events =
   let* messages = List.fold_left collect (Ok []) events in
   let* () =
     if List.exists (fun (id, kind) -> kind = Msp.Agent_message && not (List.mem_assoc id messages)) open_items
-    then protocol_error "view/page" "an open agent message has no durable completion"
+       || List.exists (fun (_, (item, completed, _)) ->
+         not completed || item.Msp.status = Msp.In_progress) messages
+    then protocol_error "view/page" "an agent message has no durable terminal completion"
     else Ok () in
   let* durable_final_text = List.fold_left (fun result (_, (item, completed, truncated)) ->
     let* chosen = result in

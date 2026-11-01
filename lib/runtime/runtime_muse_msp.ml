@@ -1338,6 +1338,24 @@ let view_page_backward_request ~id ~session_id ~cursor =
     ; "direction", `String "backward"; "limit", `Int 1000 ]
 ;;
 
+let validate_source_range stage json =
+  let* fields = assoc_at stage json in
+  let* stream = required_member stage "stream" fields in
+  let* stream = assoc_at stage stream in
+  (* Provenance stays opaque: validate its published shape, without freezing
+     stream vocabulary or interpreting positions across records or streams. *)
+  let* _ = required_text stage "id" stream in
+  let* _ = required_text stage "kind" stream in
+  let position name =
+    let* position = required_member stage name fields in
+    let* position = assoc_at stage position in
+    let* _ = required_text stage "id" position in
+    let* _ = required_int stage "sequence" position in
+    Ok () in
+  let* () = position "first" in
+  position "last"
+;;
+
 let parse_view_page_result json =
   let stage = "view/page" in
   let* fields = assoc_at stage json in
@@ -1358,7 +1376,7 @@ let parse_view_page_result json =
     let* session_id = required_string stage "sessionId" params_fields in
     let* view_cursor = required_string stage "viewCursor" params_fields in
     let* source_range = required_member stage "sourceRange" params_fields in
-    let* _ = assoc_at stage source_range in
+    let* () = validate_source_range stage source_range in
     let* item_fields = optional_assoc stage "item" params_fields in
     let* item_truncated =
       match Option.bind item_fields (List.assoc_opt "truncated") with
@@ -1366,6 +1384,11 @@ let parse_view_page_result json =
       | Some (`Bool value) -> Ok value
       | Some _ -> fail stage "item.truncated must be a boolean" in
     let* notification = parse_notification ~method_ params in
+    let* () = match notification with
+      | View_gap _ -> fail stage "a push-delivery gap cannot certify durable history"
+      | Turn_started _ | Turn_completed _ | Item_started _ | Item_updated _
+      | Item_completed _ | Item_delta _ | Usage_changed _ | Model_usage_reported _
+      | Unhandled_notification _ -> Ok () in
     Ok { session_id; view_cursor; notification; item_truncated }) events in
   Ok { events; next_cursor }
 ;;

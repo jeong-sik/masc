@@ -6,4 +6,4 @@
 (test
  (name test_fleet_stream_server_wiring)
  (modules test_fleet_stream_server_wiring)
- (libraries masc masc_server alcotest yojson eio eio_main))
+ (libraries masc masc_server masc_test_deps alcotest yojson eio eio_main))

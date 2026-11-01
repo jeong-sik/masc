@@ -175,9 +175,10 @@ val decode : Yojson.Safe.t -> (event, decode_error) result
 
 `Fleet_stream_hub`(서버, `lib/server/`)가 현재 값 하나(`revision`, `measured_at`, `fleet`)를 들고 있다.
 
-- 입력은 기존 `full_health_snapshot` 갱신 루프가 결과를 저장하는 두 함수다. 성공은 `store_successful_full_health_snapshot_locked`, 실패와 시간 초과는 `mark_full_health_snapshot_failure_locked` 이고, 동기 갱신·worker·기다리는 쪽의 시간 초과가 모두 이 둘을 지난다(`lib/server/server_routes_http_runtime.ml:958`, `:965`). 허브는 자기 락만 잡고 서버 락을 부르지 않으므로 서버 락 안에서 불러도 순서가 뒤집히지 않는다. 새 스캔, 새 타이머, 새 무효화 신호를 만들지 않는다.
+- 입력은 기존 `full_health_snapshot` 갱신 루프가 결과를 저장하는 두 함수다. 성공은 `store_successful_full_health_snapshot_locked`, 실패와 시간 초과는 `mark_full_health_snapshot_failure_locked` 이고, 동기 갱신·worker·기다리는 쪽의 시간 초과가 모두 이 둘을 지난다(`lib/server/server_routes_http_runtime.ml`). 허브는 자기 락만 잡고 서버 락을 부르지 않으므로 서버 락 안에서 불러도 순서가 뒤집히지 않는다. 별도 스캐너나 타이머는 만들지 않는다. 첫 측정이 없는 구독은 기존 갱신을 요청하거나 진행 중인 같은 세대의 갱신에 합류한다.
 - 새 값이 지금 값과 같으면(`measured_at` 제외) 이벤트를 내지 않는다. 무효화가 9번이어도 값이 같으면 0건이다.
 - 갱신이 시간 안에 끝나지 않거나 실패하면 첫 읽기 전에는 `Unavailable_snapshot`, 읽은 뒤에는 `Degraded` 를 한 번만 낸다(처음 실패한 순간, `since` 는 그 시각으로 고정). 다음에 성공하면 값이 같아도 `Changed` 가 나가면서 풀린다. 그 뒤에 연결하는 구독자는 읽은 값이 있으면 `Snapshot` 의 `degraded` 로, 없으면 `Unavailable_snapshot` 으로 안다.
+- 첫 읽기가 이전 workspace 세대의 공유 갱신 작업을 기다리다가 그 갱신이 실패하거나 시간 초과된 경우에도 `Unavailable_snapshot`을 낸다. 이 상태는 현재 세대의 스캔이 이미 시작됐다는 뜻은 아니다.
 - 값이 `fleet_safety` 로 만들어지지 못했을 때 준비 중이면 기다린다. section 의 오류·시간 초과나 읽을 수 없는 결과는 실패로 전달하고, 처음 실패하면 `Unavailable_snapshot` 을 보낸다.
 - 지금 스캔은 JSON 으로 값을 내므로, 서버가 그 JSON 구간을 `Fleet_stream_health_section.fleet_of_health_fields`(코덱과 다른 모듈, 한 함수)로 읽어서 허브에 넘긴다. 이 함수는 스캔의 필드 이름과 스트림의 필드 이름을 둘 다 아는 유일한 곳이다. 스캔이 타입 있는 값을 직접 내게 바꾸는 일은 이 RFC 밖이고, 바뀌면 이 함수가 사라진다.
 

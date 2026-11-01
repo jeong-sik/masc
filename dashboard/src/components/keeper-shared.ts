@@ -2,7 +2,7 @@ import { keeperStreamContract } from '../keeper-stream-contract'
 import { html } from 'htm/preact'
 import { AgentFailure, failureTypeFromDiagnostic } from './common/agent-failure'
 import { Markdown } from "./common/markdown"
-import { useEffect, useMemo, useState } from 'preact/hooks'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { keeperDirectChatAccess } from '../lib/keeper-chat-access'
 import { dashboardAuthAccess } from '../lib/dashboard-auth-access'
 import { isInFlightDelivery } from '../lib/keeper-delivery'
@@ -408,40 +408,61 @@ function KeeperQueueControlPanel({
 }) {
   const [operations, setOperations] = useState<readonly KeeperChatOperation[]>([])
   const [error, setError] = useState<string | null>(null)
-  const [pendingAction, setPendingAction] = useState<string | null>(null)
+  const [pendingActions, setPendingActions] = useState<ReadonlySet<string>>(() => new Set())
+  // Retire this panel's callbacks; submitted operations still settle on the server.
+  const owner = useMemo(() => new AbortController(), [])
+  const currentRead = useRef<symbol | null>(null)
 
-  const load = async (clearError = true) => {
+  const load = useCallback(async (clearError = true) => {
+    if (owner.signal.aborted) return
+    const read = Symbol()
+    currentRead.current = read
     try {
       if (clearError) setError(null)
-      setOperations(await listQueuedKeeperChatOperations(keeperName))
+      const queued = await listQueuedKeeperChatOperations(keeperName)
+      if (!owner.signal.aborted && currentRead.current === read) setOperations(queued)
     } catch (cause) {
+      if (owner.signal.aborted || currentRead.current !== read) return
       setOperations([])
       if (clearError) setError(cause instanceof Error ? cause.message : String(cause))
     }
-  }
+  }, [keeperName, owner])
 
   useEffect(() => {
     void load()
-    return registerKeeperWaitingInventoryRefresh(changedKeeper => {
+    const unsubscribe = registerKeeperWaitingInventoryRefresh(changedKeeper => {
       if (changedKeeper === keeperName) void load(false)
     })
-  }, [keeperName])
+    return () => {
+      owner.abort()
+      currentRead.current = null
+      unsubscribe()
+    }
+  }, [keeperName, load, owner])
 
   const mutateChat = async (
     operationId: string,
     action: () => Promise<unknown>,
   ) => {
-    setPendingAction(operationId)
+    if (owner.signal.aborted) return
+    setPendingActions(previous => new Set(previous).add(operationId))
     try {
       await action()
+      if (owner.signal.aborted) return
       await Promise.all([load(), refreshKeeperWaitingInventory(keeperName)])
     } catch (cause) {
+      if (owner.signal.aborted) return
       const message = cause instanceof Error ? cause.message : String(cause)
       await Promise.allSettled([load(false), refreshKeeperWaitingInventory(keeperName)])
+      if (owner.signal.aborted) return
       setError(message)
       showToast(message, 'error')
     } finally {
-      setPendingAction(null)
+      if (!owner.signal.aborted) setPendingActions(previous => {
+        const pending = new Set(previous)
+        pending.delete(operationId)
+        return pending
+      })
     }
   }
 
@@ -472,11 +493,11 @@ function KeeperQueueControlPanel({
             ? html`
                 <button
                   type="button"
-                  disabled=${pendingAction === 'interrupt-current-turn'}
+                  disabled=${pendingActions.has('interrupt-current-turn')}
                   class="rounded-[var(--r-0)] border border-[var(--danger-20)] bg-[var(--danger-10)] px-2 py-1 text-2xs text-[var(--color-status-err)] disabled:opacity-50"
                   onClick=${() => void mutateChat('interrupt-current-turn', async () => {
                     const cancelled = await interruptKeeperTurn(keeperName)
-                    showToast(
+                    if (!owner.signal.aborted) showToast(
                       cancelled ? '현재 턴을 중단했습니다' : '중단할 실행 중인 턴 없음',
                       cancelled ? 'success' : 'warning',
                     )
@@ -503,7 +524,7 @@ function KeeperQueueControlPanel({
           채팅 대기열 ${operations.length}
         </div>
         ${operations.map((operation, index) => {
-          const busy = pendingAction === operation.operationId
+          const busy = pendingActions.has(operation.operationId)
           return html`
             <div
               class="grid gap-1 rounded-[var(--r-0)] border border-[var(--color-border-subtle)] p-2"
@@ -824,6 +845,7 @@ export function KeeperConversationPanel({
   const queueControlPanel = queueControlOpen && queueControlAccess.allowed
     ? html`
         <${KeeperQueueControlPanel}
+          key=${keeperName}
           keeperName=${keeperName}
           keeper=${inventoryEntry}
           onClose=${() => setQueueControlOpen(false)}

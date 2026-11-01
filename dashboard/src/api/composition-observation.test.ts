@@ -16,7 +16,7 @@ const manifestMime = 'application/vnd.masc.tool-result-manifest+json'
 function result() {
   return { composition_run_id: runId, nested_scopes: [{
     scope: { alias: activation.invocation.scope.alias, reference, arguments: { kind: 'fixed', value: {} },
-      scope: { kind: 'inline', mapping: [['observe', 'child/observe']] }, exports: [{ name: 'value', node: 'child/observe', pointer: '/value' }] },
+      scope: { kind: 'inline', node_mapping: [{ source: 'observe', expanded: 'child/observe' }] }, exports: [{ name: 'value', node: 'child/observe', pointer: '/value' }] },
     admission: { skill_tool_use_id: activation.skill_tool_use_id, activation, activation_frame_sha256: frame },
     disposition: 'completed', cause: null,
     nodes: [{ node_id: 'child/observe', source: 'observe', settled: true, disposition: 'completed',

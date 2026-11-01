@@ -56,9 +56,14 @@ function asyncSource(result: AsyncRequestStatus): NestedSource | null {
 function originalSource(result: OriginalToolResult): NestedSource | null {
   return result.state === 'body' ? { source: JSON.stringify([result.source_id, result.body_sha256]), reading: result.nested } : null
 }
+function originalRefreshFailure(result: OriginalToolResult): string | null {
+  return result.state === 'body' ? null
+    : `Original result ${result.state}${result.state === 'unavailable' ? `: ${result.reason}` : ''}`
+}
 
 function useOwnedObservation<T>(identity: string, fetcher: (signal: AbortSignal) => Promise<T>,
-  project: (result: T) => NestedSource | null, isCurrent?: () => boolean) {
+  project: (result: T) => NestedSource | null, isCurrent?: () => boolean,
+  refreshFailure?: (result: T) => string | null) {
   const authRevision = storedTokenRevision.value
   const authority = executionWorkspaceAuthority.value
   const owner = useMemo(() => ({ identity, authRevision, authority }), [identity, authRevision, authority])
@@ -85,6 +90,10 @@ function useOwnedObservation<T>(identity: string, fetcher: (signal: AbortSignal)
     try {
       const result = await fetcher(requested.signal)
       if (current() && !requested.signal.aborted && token === generation.current) {
+        const failure = refreshFailure?.(result)
+        // An initial pending/unavailable response remains visible as-is. Once
+        // an exact source was verified, either state is a failed refresh.
+        if (failure != null && previous?.result != null && project(previous.result) !== null) throw new Error(failure)
         const source = project(result)
         const retained = source?.reading.kind === 'observed' ? { source: source.source, reading: source.reading }
           : source?.reading.kind === 'invalid' && good?.source === source.source ? good : null
@@ -100,7 +109,7 @@ function useOwnedObservation<T>(identity: string, fetcher: (signal: AbortSignal)
           stale: !changed && good !== null, resultStale: !changed && previous?.result != null }
       }
     }
-  }, [owner, fetcher, project, state])
+  }, [owner, fetcher, project, refreshFailure, state])
   return { load, available: authority !== null, state: state.value?.owner === owner ? state.value : null }
 }
 
@@ -135,7 +144,7 @@ export function AsyncRequestDetails({ identity, isCurrent }: { identity: AsyncRe
 
 export function OriginalToolResultInspector({ keeper, executionId }: { keeper: string; executionId: string }) {
   const fetcher = useCallback((signal: AbortSignal) => fetchOriginalToolResult(keeper, executionId, { signal }), [keeper, executionId])
-  const observation = useOwnedObservation(JSON.stringify([keeper, executionId]), fetcher, originalSource)
+  const observation = useOwnedObservation(JSON.stringify([keeper, executionId]), fetcher, originalSource, undefined, originalRefreshFailure)
   const result = observation.state?.result
   return html`<section class="mt-2 rounded border border-[var(--color-border)] p-2" aria-label="Original tool result">
     <div class="mono text-3xs">Original execution ${executionId}</div>

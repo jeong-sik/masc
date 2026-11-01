@@ -134,6 +134,32 @@ describe('actual nested result views', () => {
     expect(screen.getByTestId('nested-execution-child')).toBeTruthy()
   })
 
+  it.each(['pending', 'unavailable'] as const)('retains verified body and children after original refresh state %s', async state => {
+    render(html`<${OriginalToolResultInspector} keeper="observer" executionId="exec-exact" />`)
+    fireEvent.click(screen.getByRole('button', { name: 'Read original result' }))
+    await screen.findByTestId('nested-execution-child')
+    api.fetchOriginalToolResult.mockResolvedValueOnce(state === 'pending' ? { state }
+      : { state, reason: 'original trace unavailable' })
+    fireEvent.click(screen.getByRole('button', { name: 'Read original result' }))
+    await screen.findByRole('alert')
+    expect(screen.getByText('retained original body')).toBeTruthy()
+    expect(screen.getByTestId('nested-execution-child')).toBeTruthy()
+    expect(screen.getByText(/Showing last verified nested evidence/)).toBeTruthy()
+    expect(screen.getByText('The retained original-result snapshot is stale.')).toBeTruthy()
+  })
+
+  it.each(['pending', 'unavailable'] as const)('shows initial original state %s without inventing a prior verified body', async state => {
+    api.fetchOriginalToolResult.mockResolvedValueOnce(state === 'pending' ? { state }
+      : { state, reason: 'no raw trace retained' })
+    render(html`<${OriginalToolResultInspector} keeper="observer" executionId="exec-exact" />`)
+    fireEvent.click(screen.getByRole('button', { name: 'Read original result' }))
+    await screen.findByText(state === 'pending' ? 'Original result pending' : 'Original result unavailable: no raw trace retained')
+    expect(screen.queryByTestId('nested-execution-child')).toBeNull()
+    expect(screen.queryByText(/Showing last verified nested evidence/)).toBeNull()
+    expect(screen.queryByText('The retained original-result snapshot is stale.')).toBeNull()
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
   it.each(['same', 'source_id', 'body_sha256'] as const)('retains invalid nested refresh only for the %s original source', async change => {
     render(html`<${OriginalToolResultInspector} keeper="observer" executionId="exec-exact" />`)
     fireEvent.click(screen.getByRole('button', { name: 'Read original result' }))
@@ -146,6 +172,13 @@ describe('actual nested result views', () => {
     expect(screen.getByText('latest physical body')).toBeTruthy()
     expect(screen.queryByTestId('nested-execution-child') !== null).toBe(change === 'same')
     expect(screen.queryByText(/Showing last verified nested evidence/) !== null).toBe(change === 'same')
+    if (change !== 'same') {
+      api.fetchOriginalToolResult.mockResolvedValueOnce({ state: 'pending' })
+      fireEvent.click(screen.getByRole('button', { name: 'Read original result' }))
+      await screen.findByText('Original result pending')
+      expect(screen.queryByTestId('nested-execution-child')).toBeNull()
+      expect(screen.getByText('latest physical body')).toBeTruthy()
+    }
   })
 
   it('shows first-time invalid nested evidence alongside its actual physical original body', async () => {

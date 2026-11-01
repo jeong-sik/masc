@@ -334,8 +334,7 @@ let test_cancellation_retains_unknown_after_real_upstream_commit () = with_fixtu
             start state results;
             Eio.Promise.await observed;
             Eio.Cancel.cancel context Stop_board_request;
-            Eio.Fiber.await_cancel ())));
-        false
+            Eio.Fiber.await_cancel ())))
       with Eio.Cancel.Cancelled Stop_board_request -> true in
     check bool "the original cancellation propagates" true propagated;
     let outcome = take_outcome results in

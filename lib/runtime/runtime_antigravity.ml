@@ -803,6 +803,10 @@ let context_submission_to_json write =
     ]
 ;;
 
+let child_fd_sampler_key : (unit -> Runtime_cli_spawn_gate.child_fds) Eio.Fiber.key =
+  Eio.Fiber.create_key ()
+;;
+
 let run_spawned ?home_dir ?before_spawn ?on_spawned ?on_prompt_sent ?on_context_submission ~mgr ~clock ~cwd config ~conversation_mode
     ~prompt ~on_conversation_ready ~on_stream_event ~on_terminal_received =
   Eio.Switch.run (fun sw ->
@@ -890,7 +894,9 @@ let run_spawned ?home_dir ?before_spawn ?on_spawned ?on_prompt_sent ?on_context_
             clock
             Runtime_cli_spawn_gate.child_fd_probe_timeout_s
             (fun () ->
-              Ok (Runtime_cli_spawn_gate.sample_child_fds ~mgr ~cwd ~pid))
+              Ok (match Eio.Fiber.get child_fd_sampler_key with
+                | Some sample -> sample ()
+                | None -> Runtime_cli_spawn_gate.sample_child_fds ~mgr ~cwd ~pid))
         with
         | Ok sample -> sample
         | Error `Timeout ->
@@ -1133,4 +1139,5 @@ let run_turn ?(conversation_mode = Start) ?home_dir ?before_spawn ?on_spawned ?o
 
 module For_testing = struct
   let tool_step_timeout_s config = timeout_s_for_phase config Tool_step_running
+  let with_child_fd_sampler sample f = Eio.Fiber.with_binding child_fd_sampler_key sample f
 end

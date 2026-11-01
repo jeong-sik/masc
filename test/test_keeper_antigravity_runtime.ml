@@ -1238,6 +1238,10 @@ assert not pathlib.Path("native-effect.txt").exists()|}, "read\n"
         None, "raise SystemExit(17)\n", Some (Runtime_antigravity.Process_exited "exit code 17")
       | `Idle_timeout ->
         Some 1.0, "import threading\nthreading.Event().wait()\n", Some (Runtime_antigravity.Timeout 1.0)
+      | `Fd_abort count ->
+        None, "import threading\nthreading.Event().wait()\n",
+        Some (Runtime_antigravity.Child_fd_ceiling_exceeded
+          { count; ceiling = Runtime_cli_spawn_gate.child_fd_ceiling })
     in
     let base_path = temp_workspace () |> Unix.realpath in
     let runtime_snapshot = Runtime.For_testing.snapshot () in
@@ -1268,6 +1272,7 @@ assert not pathlib.Path("native-effect.txt").exists()|}, "read\n"
           (Masc_test_deps.antigravity_oauth_fixture "operator-oauth-fixture");
         let native_effect_path = Filename.concat base_path "native-effect-count" in
         let fallback_path = Filename.concat base_path "fallback-dispatched" in
+        let first_launch_path = Filename.concat base_path "first-dispatched" in
         let fixture name ~admitted terminal marker_path =
           let path = Filename.concat base_path name in
           let script = Printf.sprintf {|#!/usr/bin/env python3
@@ -1281,15 +1286,20 @@ def emit(event, value):
     print(json.dumps({"event": event, event: value}) if event != "init" else json.dumps({"event": "init", "conversation_id": "builtin-conversation", "init": value}), flush=True)
 %s
 emit("init", {"model": "gemini-fixture", "cwd": cwd, "tools": [%s], "permission_mode": "always-proceed"})
-%s%s
+%s%s%s
 # External fixture bookkeeping records the operation once; it is not a native tool.
 with open(%s, "a") as output:
     output.write(%s)
 %s%s|} permission_check
     (if admitted then "" else match ending with
       | `Result _ -> terminal ^ "raise SystemExit(0)"
-      | `Process_exit | `Idle_timeout -> "raise SystemExit(17)")
-    (Yojson.Safe.to_string (`String tool_name)) started operation
+      | `Process_exit | `Idle_timeout -> "raise SystemExit(17)"
+      | `Fd_abort _ -> Printf.sprintf
+          "with open(%s, 'a') as output:\n    output.write('launched\\n')\n"
+          (Yojson.Safe.to_string (`String first_launch_path)))
+    (Yojson.Safe.to_string (`String tool_name))
+    (if not admitted then match ending with `Fd_abort _ -> terminal | _ -> "" else "")
+    started operation
     (Yojson.Safe.to_string (`String marker_path)) (Yojson.Safe.to_string (`String marker))
     finished terminal in
           write_file ~mode:0o700 path script;
@@ -1327,9 +1337,10 @@ candidates = ["antigravity.gemini", "antigravity_fallback.gemini"]
               let attempted = ref [] in
               let unfenced_noncompletion = match ending with
                 | `Result _ -> posture <> `Full || not admitted
-                | `Process_exit | `Idle_timeout -> false in
+                | `Process_exit | `Idle_timeout | `Fd_abort _ -> false in
               let events = ref [] in
-              let outcome = Keeper_turn_driver.run_named
+              let fd_samples = ref 0 in
+              let run () = Keeper_turn_driver.run_named
                   ~input_source:(Keeper_request_source.Keeper_history { trace_id = "antigravity-native-incomplete" })
                   ~walk_owner:Keeper_turn_driver.One_shot_walk ~runtime_id:"antigravity_incomplete"
                   ~keeper_name:"antigravity-fixture" ~base_path
@@ -1341,12 +1352,28 @@ candidates = ["antigravity.gemini", "antigravity_fallback.gemini"]
                   ~attempt_continuation:(fun ~dispatch:_ _ -> Runtime_attempt_dispatch.Next_may_dispatch)
                   ~on_runtime_attempt:(fun (attempt : Keeper_turn_driver.runtime_attempt) ->
                     attempted := attempt.runtime_id :: !attempted)
-                  ~sw ~net:(Eio.Stdenv.net env) ()
+                  ~sw ~net:(Eio.Stdenv.net env) () in
+              let outcome = (match ending with
+                | `Fd_abort count ->
+                  Runtime_antigravity.For_testing.with_child_fd_sampler
+                    (fun () ->
+                      incr fd_samples;
+                      if !fd_samples <> 1 then Runtime_cli_spawn_gate.Fd_count 0
+                      else match count with
+                        | Some count -> Runtime_cli_spawn_gate.Fd_count count
+                        | None -> Runtime_cli_spawn_gate.Fds_pressured)
+                    run
+                | `Result _ | `Process_exit | `Idle_timeout -> run ())
                 |> Result.map (fun selected -> selected.Keeper_turn_driver.run_result) in
               let retries = match ending with
-                | `Result _ -> false
+                | `Result _ | `Fd_abort _ -> false
                 | `Process_exit | `Idle_timeout -> posture <> `Full || not admitted in
-              check (list string) "candidate walk follows native effect eligibility"
+              let walk_label = match ending with
+                | `Fd_abort _ -> Printf.sprintf "FD abort walk (fallback marker=%b; completed=%b)"
+                    (Sys.file_exists fallback_path)
+                    (match outcome with Ok result -> keeper_response_text result = "fallback reply" | Error _ -> false)
+                | `Result _ | `Process_exit | `Idle_timeout -> "candidate walk follows native effect eligibility" in
+              check (list string) walk_label
                 (if retries then
                    ["antigravity_fallback.gemini"; "antigravity.gemini"] else ["antigravity.gemini"]) !attempted;
               check bool "only an admitted first client runs its native operation" admitted
@@ -1395,9 +1422,41 @@ candidates = ["antigravity.gemini", "antigravity_fallback.gemini"]
                        (if admitted then Some "builtin-conversation" else None)
                        recovery.observed_session_id
                    | _ -> fail "a noncompleted candidate settled its session")
-                | Error error, (`Result _ | `Process_exit | `Idle_timeout) -> fail (Agent_core.Error.to_string error)
-                | Ok _, (`Result _ | `Process_exit | `Idle_timeout) ->
+                | Error error, (`Result _ | `Process_exit | `Idle_timeout | `Fd_abort _) -> fail (Agent_core.Error.to_string error)
+                | Ok _, (`Result _ | `Process_exit | `Idle_timeout | `Fd_abort _) ->
                   fail "read noncompletion lost its typed terminal"
+              ) else if (match ending with `Fd_abort _ -> true | _ -> false) then (
+                check int "only the first candidate is sampled" 1 !fd_samples;
+                check string "first client launches exactly once" "launched\n"
+                  (Fs_compat.load_file first_launch_path);
+                check bool "FD abort precedes session and completion callbacks" false
+                  (List.exists (function
+                    | Agent_core.Types.MessageStart _
+                    | MessageDelta {stop_reason = Some EndTurn; _} -> true
+                    | _ -> false) !events);
+                match outcome with
+                | Error (Agent_core.Error.Provider (Llm_provider.Error.ProviderTerminal
+                    {provider; kind = Llm_provider.Http_client.Other kind; detail}) as error) ->
+                  check string "FD provider" "antigravity_cli" provider;
+                  check string "FD terminal kind" "child_fd_ceiling_exceeded" kind;
+                  check bool "FD abort is nonretryable" false (Agent_core.Error.is_retryable error);
+                  let expected = Option.get expected_error
+                    |> Keeper_antigravity_runtime.For_testing.runtime_error_to_core_error in
+                  check string "walk preserves the FD diagnostic"
+                    (Agent_core.Error.to_string expected) (Agent_core.Error.to_string error);
+                  check bool "FD diagnostic is present" true (detail <> "");
+                  let session = Keeper_official_client_session_store.load
+                      ~base_path ~keeper_name:"antigravity-fixture" |> Result.get_ok |> Option.get in
+                  (match session.phase with
+                   | Keeper_official_client_session_store.Recovery_required recovery ->
+                     check (option string) "FD abort cannot admit init identity" None recovery.observed_session_id;
+                     check string "durable FD diagnostic survives" (Agent_core.Error.to_string error) recovery.detail;
+                     check bool "FD abort recovery remains ambiguous" true
+                       (recovery.failure = Transport_interrupted
+                        && Keeper_official_client_session_store.failure_disposition recovery.failure = Ambiguous)
+                   | _ -> fail "FD abort lost its recovery fence")
+                | Error error -> fail (Agent_core.Error.to_string error)
+                | Ok _ -> fail "FD abort was replayed on the fallback"
               ) else match outcome with
               | Error error ->
                 (match Keeper_internal_error.classify_masc_internal_error error with
@@ -1420,6 +1479,16 @@ candidates = ["antigravity.gemini", "antigravity_fallback.gemini"]
                       fail "native process failure was replaced by a MASC error")
                  | _ -> fail (Agent_core.Error.to_string error))
               | Ok _ -> fail "a failed native turn was replayed on the fallback"))))
+;;
+
+let test_fd_count_abort_stops_candidate_walk () =
+  run_native_effect_without_mcp_fixture ~admitted:false ~step_delivery:`Unreported
+    (`Fd_abort (Some (Runtime_cli_spawn_gate.child_fd_ceiling + 1)))
+;;
+
+let test_fd_pressure_abort_stops_candidate_walk () =
+  run_native_effect_without_mcp_fixture ~admitted:false ~step_delivery:`Unreported
+    (`Fd_abort None)
 ;;
 
 let test_noncompletion_without_mcp_cannot_rotate_candidates () =
@@ -2252,21 +2321,20 @@ let test_child_fd_ceiling_reports_and_recovers () =
   let pressured =
     Runtime_antigravity.Child_fd_ceiling_exceeded { count = None; ceiling = 16000 }
   in
-  let check_reported error =
+  let check_terminal error expected_detail =
     match runtime_error_to_core_error error with
     | Agent_core.Error.Provider
-        (Llm_provider.Error.ProviderReportedError { provider; error_type; detail }) ->
+        (Llm_provider.Error.ProviderTerminal
+          { provider; kind = Llm_provider.Http_client.Other kind; detail }) ->
       check string "provider" "antigravity_cli" provider;
-      check
-        (option string)
-        "error type"
-        (Some "child_fd_ceiling_exceeded")
-        error_type;
-      check bool "detail names the ceiling" true (detail <> "")
-    | core -> fail ("expected ProviderReportedError, got " ^ Agent_core.Error.to_string core)
+      check string "terminal kind" "child_fd_ceiling_exceeded" kind;
+      check string "exact FD diagnostic" expected_detail detail
+    | core -> fail ("expected ProviderTerminal, got " ^ Agent_core.Error.to_string core)
   in
-  check_reported counted;
-  check_reported pressured;
+  check_terminal counted
+    "CLI held 45000 open files past the 16000 ceiling; clean the workspace and retry (#43259)";
+  check_terminal pressured
+    "CLI file usage unobservable under fd pressure at the 16000-file ceiling; retry after pressure passes (#43259)";
   check bool "counted recovery"
     (recovery_failure_of_runtime_error counted
     = Keeper_official_client_session_store.Transport_interrupted)
@@ -2711,6 +2779,10 @@ let () =
               "noncompletion retains durable identity and effect fence"
               `Quick
               test_noncompletion_preserves_durable_identity_and_effect_fence
+          ; test_case "FD count abort stops candidate walk before init" `Quick
+              test_fd_count_abort_stops_candidate_walk
+          ; test_case "FD pressure abort stops candidate walk before init" `Quick
+              test_fd_pressure_abort_stops_candidate_walk
           ; test_case "noncompletion without MCP cannot rotate candidates" `Quick
               test_noncompletion_without_mcp_cannot_rotate_candidates
           ; test_case "native effect then process exit cannot rotate candidates" `Quick

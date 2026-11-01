@@ -1,0 +1,120 @@
+import { html } from 'htm/preact'
+import { signal } from '@preact/signals'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/preact'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { ExecutionWorkspaceAuthority } from '../store'
+import type { NestedReading, OriginalToolResult } from '../api/composition-observation'
+const api = vi.hoisted(() => ({ fetchAsyncRequestStatus: vi.fn(), fetchOriginalToolResult: vi.fn() }))
+const workspace = vi.hoisted(() => ({ current: null as unknown as ReturnType<typeof signal<ExecutionWorkspaceAuthority | null>> }))
+vi.mock('../store', async () => {
+  const { signal } = await import('@preact/signals')
+  workspace.current = signal<ExecutionWorkspaceAuthority | null>(null)
+  return { executionWorkspaceAuthority: workspace.current }
+})
+vi.mock('../api/composition-observation', async original => ({ ...await original<typeof import('../api/composition-observation')>(), ...api }))
+import { clearStoredToken, setStoredToken } from '../api/core'
+import { AsyncRequestDetails, OriginalToolResultInspector, NestedExecutionView } from './composition-observation-view'
+
+const authority = () => ({ epoch: 'fixture', workspaceRoot: '/workspace', connectionGeneration: 1 })
+const reference = { identity: { source_id: 'workspace', package_id: 'child', name: 'child' }, content_revision: 'd'.repeat(64) }
+const nested: NestedReading = { kind: 'observed', children: [{ alias: 'actual-child', reference, execution: 'async',
+  arguments: { kind: 'fixed', value: { argument: 'declared' } }, admission: { kind: 'not_attempted' },
+  disposition: 'partially_settled', cause: { kind: 'upstream_failed' }, nodes: [
+    { node_id: 'submit', origin: { phase: 'submission' }, disposition: 'deferred', tool_use_id: 'submit-once', effect_disposition: 'effect_outcome_unknown', validation_error: null },
+    { node_id: 'result', origin: { phase: 'result' }, disposition: null, tool_use_id: null, effect_disposition: null, validation_error: null },
+  ], exports: [{ name: 'final', node_id: 'result', pointer: '/value', value: { available: false, error: { kind: 'producer_unavailable' } } }] }] }
+function original(content: string): OriginalToolResult {
+  return { state: 'body', source_id: 'a'.repeat(64), body_sha256: 'b'.repeat(64), recorded_bytes: content.length, is_error: false, content, nested }
+}
+function pending<T>() {
+  let resolve!: (value: T) => void, reject!: (error: Error) => void
+  const promise = new Promise<T>((ok, fail) => { resolve = ok; reject = fail })
+  return { promise, resolve, reject }
+}
+const lookup = { submitted_by: 'original-submitter', request_id: 'retained-request', keeper_name: 'observer' }
+beforeEach(() => {
+  workspace.current.value = authority()
+  setStoredToken('credential-a')
+  api.fetchOriginalToolResult.mockReset(); api.fetchAsyncRequestStatus.mockReset()
+  api.fetchOriginalToolResult.mockResolvedValue(original('retained original body'))
+  api.fetchAsyncRequestStatus.mockResolvedValue({ status: 'observed', request: { ...lookup, status: 'done' }, nested })
+})
+afterEach(() => { cleanup(); clearStoredToken() })
+
+describe('actual nested result views', () => {
+  it('renders observed settlement, occurrence, cause and unavailable exports without treating a declaration as success', () => {
+    render(html`<${NestedExecutionView} reading=${nested} />`)
+    expect(screen.getByTestId('nested-execution-child').textContent).toContain('partially_settled')
+    expect(screen.getByText(/occurrence submit-once/)).toBeTruthy()
+    expect(screen.getByText(/Effect evidence: effect_outcome_unknown/)).toBeTruthy()
+    expect(screen.getAllByText(/producer_unavailable/).length).toBeGreaterThan(0)
+    expect(screen.getByText(/not settled/)).toBeTruthy()
+  })
+
+  it('waits for an explicit original read and never displays a ledger preview as original evidence', async () => {
+    render(html`<${OriginalToolResultInspector} keeper="observer" executionId="exec-exact" />`)
+    expect(api.fetchOriginalToolResult).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Read original result' }))
+    await screen.findByText('retained original body')
+    expect(api.fetchOriginalToolResult).toHaveBeenCalledWith('observer', 'exec-exact', { signal: expect.any(AbortSignal) })
+    expect(screen.getByTestId('nested-execution-child')).toBeTruthy()
+  })
+
+  it.each(['success', 'failure'])('rejects late original %s across auth A to B to A', async outcome => {
+    const old = pending<OriginalToolResult>(), fresh = pending<OriginalToolResult>()
+    api.fetchOriginalToolResult.mockReturnValueOnce(old.promise).mockReturnValueOnce(fresh.promise)
+    render(html`<${OriginalToolResultInspector} keeper="observer" executionId="exec-exact" />`)
+    fireEvent.click(screen.getByRole('button', { name: 'Read original result' }))
+    await waitFor(() => expect(api.fetchOriginalToolResult).toHaveBeenCalledTimes(1))
+    const oldSignal = api.fetchOriginalToolResult.mock.calls[0]![2].signal as AbortSignal
+    await act(async () => { setStoredToken('credential-b'); setStoredToken('credential-a') })
+    expect(screen.queryByText('Reading and verifying original result…')).toBeNull()
+    await waitFor(() => expect(oldSignal.aborted).toBe(true))
+    fireEvent.click(screen.getByRole('button', { name: 'Read original result' }))
+    await act(async () => fresh.resolve(original('fresh original')))
+    await screen.findByText('fresh original')
+    await act(async () => {
+      if (outcome === 'success') old.resolve(original('retired original body'))
+      else old.reject(new Error('retired source error'))
+    })
+    expect(screen.queryByText(/retired source error/)).toBeNull()
+    expect(screen.queryByText('retired original body')).toBeNull()
+    expect(screen.getByText('fresh original')).toBeTruthy()
+  })
+
+  it('withdraws original bytes when the workspace authority changes even if fields compare equal', async () => {
+    render(html`<${OriginalToolResultInspector} keeper="observer" executionId="exec-exact" />`)
+    fireEvent.click(screen.getByRole('button', { name: 'Read original result' }))
+    await screen.findByText('retained original body')
+    await act(async () => { workspace.current.value = authority() })
+    expect(screen.queryByText('retained original body')).toBeNull()
+    await act(async () => { workspace.current.value = null })
+    expect(screen.queryByRole('button', { name: 'Read original result' })).toBeNull()
+    expect(api.fetchOriginalToolResult).toHaveBeenCalledTimes(1)
+  })
+
+  it('cancels an old execution read and ignores its late body after selecting another execution', async () => {
+    const old = pending<OriginalToolResult>()
+    api.fetchOriginalToolResult.mockReturnValueOnce(old.promise)
+    const view = render(html`<${OriginalToolResultInspector} keeper="observer" executionId="old-execution" />`)
+    fireEvent.click(screen.getByRole('button', { name: 'Read original result' }))
+    const oldSignal = api.fetchOriginalToolResult.mock.calls[0]![2].signal as AbortSignal
+    view.rerender(html`<${OriginalToolResultInspector} keeper="observer" executionId="new-execution" />`)
+    await waitFor(() => expect(oldSignal.aborted).toBe(true))
+    await act(async () => old.resolve(original('retired execution body')))
+    expect(screen.queryByText('retired execution body')).toBeNull()
+    expect(screen.queryByTestId('nested-execution-child')).toBeNull()
+  })
+
+  it('binds async status to the exact original triple and cancels it on workspace withdrawal', async () => {
+    const old = pending<unknown>()
+    api.fetchAsyncRequestStatus.mockReturnValueOnce(old.promise)
+    render(html`<${AsyncRequestDetails} identity=${lookup} isCurrent=${() => true} />`)
+    await waitFor(() => expect(api.fetchAsyncRequestStatus).toHaveBeenCalledWith(lookup, { signal: expect.any(AbortSignal) }))
+    const signal = api.fetchAsyncRequestStatus.mock.calls[0]![1].signal as AbortSignal
+    await act(async () => { workspace.current.value = null })
+    await waitFor(() => expect(signal.aborted).toBe(true))
+    await act(async () => old.resolve({ status: 'observed', request: { status: 'done' }, nested }))
+    expect(screen.queryByTestId('nested-execution-child')).toBeNull()
+  })
+})

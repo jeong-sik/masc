@@ -27,7 +27,7 @@ let fake_model sources =
        ["Answer the user's progress question"; "Continue the campaign once"]]
 
 let rendered_json inp =
-  let rendered = Option.get (Context.render inp) in
+  let rendered = Option.get (ok (Context.render inp)) in
   let start = String.index rendered '[' in
   Yojson.Safe.from_string (String.sub rendered start (String.length rendered - start))
 
@@ -71,7 +71,7 @@ let test_partial_observation_and_cas () = with_store @@ fun keepers_dir ->
     ~expected_version:(Some (Context.version second)) ~sources:[] []) in
   check int "authoritative settled event observation prunes derived history" 1 (List.length third.pockets);
   let unknown : Context.input = {sources = []; previous = Some third; unavailable = ["store unavailable"]; execution_basis = None} in
-  check bool "unknown observation still exposes historical context" true (Option.is_some (Context.render unknown));
+  check bool "unknown observation still exposes historical context" true (Option.is_some (ok (Context.render unknown)));
   let fourth = ok (Context.commit ~keepers_dir ~keeper_id ~expected_version:(Some (Context.version third))
     ~sources:unknown.sources []) in
   check int "unknown empty observation does not erase pockets" 1 (List.length fourth.pockets)
@@ -513,7 +513,9 @@ let test_unchanged_capture_needs_no_second_queue_pass () = with_store @@ fun kee
   check bool "another writer's version falls back to the stored references" true
     (needed {recaptured with previous = Some other})
 
-let () = run "Librarian working contexts"
+let () =
+  Prompt_registry.set_markdown_dir (Masc_test_deps.source_path "config/prompts");
+  run "Librarian working contexts"
   ["scenarios", [
     test_case "source reassignment preserves distinct context identities" `Quick test_source_reassignment_does_not_collide_with_merged_identity;
     test_case "split source does not collide with an untouched context" `Quick test_split_source_does_not_collide_with_untouched_context;

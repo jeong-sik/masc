@@ -2735,10 +2735,13 @@ const page = {
   evaluate: async () => {seen.push('evaluate');interrupt();},
   click: async () => {seen.push('click');interrupt();},
   fill: async () => {seen.push('fill');return {};},
-  info: async () => {seen.push('info');return {};},
+  info: async () => {seen.push('info');return {
+    url:'https://app.slack.com/',title:'Slack',w:800,h:600,sx:0,sy:0,pw:800,ph:600};},
+  waitForEvent: () => new Promise(() => {}),
   snapshot: async () => {seen.push('snapshot');return 'must not reach';}
 };
-const taskSpace = async () => ({ownership:'agent',page:()=>page});
+const taskSpace = async () => ({ownership:'agent',
+  tabs:async () => [{label:'p1',targetId:'T1',openedBy:'agent'}],page:()=>page});
 |js} stage in
     let run ~window_s script = match (sent_of ~window_s script).step with
       | "space.open" -> answered (obj ["spaceId",`Int 51;"name",str "SDK Space";"ownership",str "agent"])
@@ -2791,8 +2794,8 @@ const taskSpace = async () => ({ownership:'agent',page:()=>page});
       | [line] -> Yojson.Safe.from_string (after ~prefix line)
       | _ -> fail "missing SDK stand-in call receipt" in
     check bool "no follow-up read, step or replay after interruption" true
-      (calls=`List (List.map str (if stage="initialUrl" then ["url"]
-        else ["url"] @ (if prior then ["fill"] else []) @ [stage])));
+      (calls=`List (List.map str (["info"] @ (if stage="initialUrl" then ["url"]
+        else ["url"] @ (if prior then ["fill"] else []) @ [stage]))));
     check int "one workflow dispatch" 1 !native_calls)
     ["initialUrl",false;"evaluate",false;"evaluate",true;"click",false]
 

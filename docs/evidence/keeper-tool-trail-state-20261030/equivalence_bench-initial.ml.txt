@@ -1,0 +1,139 @@
+module Events = Keeper_chat_events
+
+let occurrence scope block message =
+  { Events.stream_scope = scope; block_index = block; provider_message_id = message }
+let start occurrence call name =
+  Events.Tool_call_start {occurrence; tool_call_id=call; tool_call_name=name}
+let delta occurrence call text =
+  Events.Tool_call_args {occurrence; tool_call_id=call; delta=text}
+let snapshot occurrence call text =
+  Events.Tool_call_args_snapshot {occurrence; tool_call_id=call; snapshot=text}
+let admit occurrence call provider name =
+  Events.Tool_call_admitted {occurrence; tool_call_id=call; provider_tool_name=provider; tool_call_name=name}
+
+let fuzz () =
+  let random = Random.State.make [|2026;10;30;46881|] in
+  let pick array = array.(Random.State.int random (Array.length array)) in
+  let names = [|"Read"; "Execute"; "resolved"; "다른 도구"|] in
+  let pieces = [|""; "{"; "}"; ":"; ","; "\"file_path\":\"lib/"; "x.ml\"";
+                 "한"; "\xed"; "\x95\x9c"; "\000"; "\027[31m"; " ";
+                 "{\"argv\":[\"pwd\"]}"; "sk-test-public-fixture"|] in
+  let identities = [|None; Some "id-a"; Some "id-b"|] in
+  let count = ref 0 in
+  for sequence = 1 to 1000 do
+    let old = Old_trail.create () and newer = New_trail.create () in
+    for step = 1 to 80 do
+      let o = occurrence (Random.State.int random 3) (Random.State.int random 5) (pick identities) in
+      let id = pick identities in
+      let event = match Random.State.int random 8 with
+        | 0 | 1 -> start o id (pick names)
+        | 2 | 3 | 4 -> delta o id (pick pieces)
+        | 5 -> snapshot o id (pick pieces)
+        | 6 -> admit o id (pick names) (pick names)
+        | _ -> Events.Agent_core_stream_ping in
+      Old_trail.on_event old event; New_trail.on_event newer event;
+      let max_rows = Random.State.int random 11 - 1 in
+      let same = Old_trail.call_count old = New_trail.call_count newer
+        && Old_trail.render ~max_rows old = New_trail.render ~max_rows newer
+        && Old_trail.append_to ~max_rows old ~text:"answer" = New_trail.append_to ~max_rows newer ~text:"answer"
+        && Old_trail.append_to old ~text:"" = New_trail.append_to newer ~text:"" in
+      if not same then failwith (Printf.sprintf "result diverged at sequence %d step %d" sequence step);
+      incr count
+    done
+  done;
+  Printf.printf "PASS: %d seeded interleaved events, equal rendered rows/call counts/append results after each event\n%!" !count
+
+let fixture n shape =
+  let o = occurrence 0 0 (Some "message") in
+  let id = Some "call" in
+  let prefix = start o id "Read" in
+  let body = String.make 64 'x' in
+  Array.init (n+1) (fun i ->
+    if i=0 then prefix
+    else if shape="snapshot-final" then snapshot o id ("{\"file_path\":\"" ^ body ^ "\"}")
+    else
+      let text =
+        (if i=1 then "{\"file_path\":\"" else "") ^ body ^ (if i=n then "\"}" else "")
+      in
+      delta o id text)
+
+let old_once events each =
+  let trail = Old_trail.create () in
+  Array.iter (fun event ->
+    Old_trail.on_event trail event;
+    if each then ignore (Sys.opaque_identity (Old_trail.render trail))) events;
+  ignore (Sys.opaque_identity (Old_trail.render trail))
+let new_once events each =
+  let trail = New_trail.create () in
+  Array.iter (fun event ->
+    New_trail.on_event trail event;
+    if each then ignore (Sys.opaque_identity (New_trail.render trail))) events;
+  ignore (Sys.opaque_identity (New_trail.render trail))
+
+let sample csv shape n iterations version run =
+  Gc.full_major ();
+  let allocated = Gc.allocated_bytes () and cpu = Sys.time () and wall = Unix.gettimeofday () in
+  for _ = 1 to iterations do run () done;
+  let wall = Unix.gettimeofday () -. wall and cpu = Sys.time () -. cpu in
+  let allocated = Gc.allocated_bytes () -. allocated in
+  Printf.fprintf csv "%s,%d,%d,%s,%.9f,%.9f,%.0f\n%!" shape n iterations version cpu wall allocated
+
+let benchmark output =
+  let csv = open_out output in
+  output_string csv "shape,fragments,iterations,version,cpu_s,wall_s,allocated_bytes\n";
+  let cases = [
+    "delta-final",0,2000; "delta-final",1,2000; "delta-final",16,500;
+    "delta-final",256,30; "delta-final",1024,4; "delta-final",4096,1;
+    "snapshot-final",1,2000; "snapshot-final",16,500; "snapshot-final",256,30;
+    "delta-each-render",16,200; "delta-each-render",256,4
+  ] in
+  List.iter (fun (shape,n,iterations) ->
+    let events = fixture n shape in
+    let each = shape="delta-each-render" in
+    let old () = old_once events each and newer () = new_once events each in
+    for i = 0 to 6 do
+      if i mod 2=0 then (sample csv shape n iterations "old" old; sample csv shape n iterations "new" newer)
+      else (sample csv shape n iterations "new" newer; sample csv shape n iterations "old" old)
+    done) cases;
+  close_out csv;
+  Printf.printf "Wrote seven alternating samples for %d workloads to %s\n%!" (List.length cases) output
+
+(* This models an event source that drops each fragment after delivering it.
+   Keep the trail alive over a full collection; neither peak heap nor RSS is
+   measured. *)
+let live_words create feed n =
+  Gc.full_major ();
+  let before = (Gc.stat ()).Gc.live_words in
+  let trail = create () in
+  let o = occurrence 0 0 (Some "message") in
+  let id = Some "call" in
+  feed trail (start o id "Read");
+  for i = 1 to n do
+    let body = String.make 64 (Char.chr (97 + i mod 26)) in
+    feed trail (delta o id body)
+  done;
+  Gc.full_major ();
+  let after = (Gc.stat ()).Gc.live_words in
+  ignore (Sys.opaque_identity trail);
+  after - before
+
+let retained output =
+  let csv = open_out output in
+  output_string csv "fragments,version,live_words_delta\n";
+  let old n = live_words Old_trail.create Old_trail.on_event n in
+  let newer n = live_words New_trail.create New_trail.on_event n in
+  List.iter (fun n ->
+    for i = 0 to 6 do
+      let sample version f = Printf.fprintf csv "%d,%s,%d\n%!" n version (f n) in
+      if i mod 2=0 then (sample "old" old; sample "new" newer)
+      else (sample "new" newer; sample "old" old)
+    done) [0;1;16;256;1024;4096];
+  close_out csv;
+  Printf.printf "Wrote seven alternating live-heap samples to %s\n%!" output
+
+let () =
+  fuzz ();
+  if Array.length Sys.argv = 2 then begin
+    benchmark Sys.argv.(1);
+    retained (Filename.concat (Filename.dirname Sys.argv.(1)) "retained.csv")
+  end

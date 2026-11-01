@@ -16,11 +16,16 @@ const RecordSchema = Schema.Struct({ id: Schema.String, revision: Schema.String,
 export type DiscussionInput = typeof DiscussionInputSchema.Type
 export type DiscussionLocalValue = typeof ValueSchema.Type
 export type DiscussionLocalRecord = typeof RecordSchema.Type & { persisted: boolean; storedRevision: string | null }
+/** A successful own write names the revisions removed for record.id. Failed
+ *  storage or cleanup needs a fresh recovery reading before projecting rows. */
+export type DiscussionLocalRetention =
+  | { kind: 'stored'; record: DiscussionLocalRecord; removedRevisions: readonly string[] }
+  | { kind: 'needs_reread'; record: DiscussionLocalRecord }
 const prefix = 'masc.artifact-discussion-local.v1:'
 const memory = new Map<string, DiscussionLocalRecord>()
 const storageKey = (record: Pick<DiscussionLocalRecord,'id'|'revision'>) => `${prefix}${record.id}:${record.revision}`
 export function retainDiscussionLocal(id: string, workspace: ArtifactWorkspace, target: typeof ArtifactDraftTargetSchema.Type,
-  actor: string, value: DiscussionLocalValue): DiscussionLocalRecord {
+  actor: string, value: DiscussionLocalValue): DiscussionLocalRetention {
   const previous = memory.get(id)
   const data = structuredClone({ id, workspace, target, actor, value, revision: crypto.randomUUID(), at: new Date().toISOString() })
   const record: DiscussionLocalRecord = { ...data, persisted: false, storedRevision: previous?.storedRevision ?? null }
@@ -30,13 +35,22 @@ export function retainDiscussionLocal(id: string, workspace: ArtifactWorkspace, 
     localStorage.setItem(storageKey(record),JSON.stringify(data))
     record.persisted = true; record.storedRevision = record.revision
   } catch { /* In-page recovery survives owner changes. */ }
+  const removedRevisions: string[] = []
+  let cleanupComplete = true
   if(record.persisted && previous) {
     try {
       localStorage.removeItem(storageKey(previous))
-      if(previous.storedRevision) localStorage.removeItem(storageKey({...previous,revision:previous.storedRevision}))
-    } catch { /* Extra immutable copies can be offered again. */ }
+      removedRevisions.push(previous.revision)
+      if(previous.storedRevision) {
+        localStorage.removeItem(storageKey({...previous,revision:previous.storedRevision}))
+        removedRevisions.push(previous.storedRevision)
+      }
+    } catch { cleanupComplete = false /* Extra immutable copies can be offered again. */ }
   }
-  memory.set(id,record); return record
+  memory.set(id,record)
+  return record.persisted && cleanupComplete
+    ? { kind: 'stored', record, removedRevisions }
+    : { kind: 'needs_reread', record }
 }
 // A late ACK or stale recovery view cannot delete a newer copy in another tab.
 export function discardDiscussionLocal(record: DiscussionLocalRecord): void {

@@ -37,14 +37,14 @@ function fixture(actor = 'human') {
   function Host() {
     const [state,setState]=useState(session.snapshot);changed=setState
     useEffect(()=>{void session.connect()},[])
-    return html`<${ArtifactDiscussionPanel} session=${session} state=${state} onPending=${()=>{}} onReveal=${reveal} />`
+    return html`<${ArtifactDiscussionPanel} session=${session} state=${state} onPending=${onPending} onReveal=${reveal} />`
   }
-  const reveal=vi.fn()
+  const reveal=vi.fn(), onPending=vi.fn()
   const mount=()=>render(html`<${Host} />`)
   const ack=(request:ArtifactDiscussionRequest,receiptActor=actor,applied:ArtifactThread['position']|null=null)=>{
     sequence++;receipts=[...receipts,{request,actor:receiptActor,at,applied}];return snapshot()
   }
-  return {session,authority,snapshot,mount,ack,reveal,setThreads:(value:readonly ArtifactThread[])=>{threads=value;sequence++;session.acceptServerView(snapshot())},retire:()=>{current=false},restore:()=>{current=true}}
+  return {session,authority,snapshot,mount,ack,reveal,onPending,setThreads:(value:readonly ArtifactThread[])=>{threads=value;sequence++;session.acceptServerView(snapshot())},retire:()=>{current=false},restore:()=>{current=true}}
 }
 async function start(f:ReturnType<typeof fixture>,mode:'source'|'html_text'='source') {
   f.mount()
@@ -59,6 +59,100 @@ const submitted=()=>{
   if(call.action!=='discuss')throw new Error('discussion missing')
   return call.request
 }
+it('updates retained discussion input without rescanning unrelated local copies',async()=>{
+  const value={kind:'input' as const,input:{kind:'reply' as const,operationId:target.generation,threadId:target.generation,body:'another retained input'}}
+  const scopes=[
+    {workspace,target,id:'another-operation'},
+    {workspace,target:{...target,artifact_id:`artifact-${'f'.repeat(32)}`},id:'another-document'},
+    {workspace:{...workspace,mascRoot:'/another-runtime'},target,id:'another-workspace'},
+  ]
+  const copies=scopes.map(scope=>{
+    retainDiscussionLocal(scope.id,scope.workspace,scope.target,'human',value)
+    return discussionLocals(scope.workspace,scope.target.artifact_id).find(record=>record.id===scope.id)!
+  })
+  try {
+    const f=fixture();await start(f)
+    const previous=pending().find(record=>!scopes.some(scope=>scope.id===record.id))!
+    const key=(record:{id:string;revision:string})=>`masc.artifact-discussion-local.v1:${record.id}:${record.revision}`
+    const storage=localStorage, originalCopies=copies.map(record=>storage.getItem(key(record)))
+    const counts={enumeratedKeys:0,readValues:0,storedValues:0,removedValues:0}
+    vi.stubGlobal('localStorage',{
+      get length(){return storage.length},
+      key(index:number){counts.enumeratedKeys++;return storage.key(index)},
+      getItem(name:string){counts.readValues++;return storage.getItem(name)},
+      setItem(name:string,value:string){counts.storedValues++;storage.setItem(name,value)},
+      removeItem(name:string){counts.removedValues++;storage.removeItem(name)},
+    })
+    fireEvent.input(screen.getByLabelText('댓글 내용'),{target:{value:'updated and retained once'}})
+    const observed={...counts}
+    vi.unstubAllGlobals()
+    const current=pending().find(record=>record.id===previous.id)!
+    expect(current.value.kind==='input'&&current.value.input.body).toBe('updated and retained once')
+    expect(current.value.kind==='input'&&current.value.input.operationId)
+      .toBe(previous.value.kind==='input'&&previous.value.input.operationId)
+    expect(current.revision).not.toBe(previous.revision)
+    expect(JSON.parse(storage.getItem(key(current))!).value).toEqual(current.value)
+    expect(storage.getItem(key(previous))).toBeNull()
+    expect(copies.map(record=>storage.getItem(key(record)))).toEqual(originalCopies)
+    console.info('discussion-input-storage',JSON.stringify(observed))
+    expect(observed.storedValues).toBe(1)
+    expect(observed.enumeratedKeys).toBe(0)
+    expect(observed.readValues).toBe(0)
+  } finally {
+    vi.unstubAllGlobals();copies.forEach(discardDiscussionLocal)
+  }
+})
+it.each(['write','remove'] as const)('rereads recovery copies when an own %s fails',async failure=>{
+  const f=fixture();await start(f)
+  const previous=pending()[0]!, storage=localStorage
+  const key=(record:{id:string;revision:string})=>`masc.artifact-discussion-local.v1:${record.id}:${record.revision}`
+  const previousBytes=storage.getItem(key(previous))
+  let enumeratedKeys=0
+  vi.stubGlobal('localStorage',{
+    get length(){return storage.length},
+    key(index:number){enumeratedKeys++;return storage.key(index)},
+    getItem:storage.getItem.bind(storage),
+    setItem(name:string,value:string){if(failure==='write')throw new DOMException('full','QuotaExceededError');storage.setItem(name,value)},
+    removeItem(name:string){if(failure==='remove')throw new Error('storage removal failed');storage.removeItem(name)},
+  })
+  fireEvent.input(screen.getByLabelText('댓글 내용'),{target:{value:'input survives storage failure'}})
+  const observedKeys=enumeratedKeys
+  vi.unstubAllGlobals()
+  const records=pending(), current=records.find(record=>record.id===previous.id&&record.revision!==previous.revision)!
+  expect(current.value.kind==='input'&&current.value.input.body).toBe('input survives storage failure')
+  expect(current.persisted).toBe(failure==='remove')
+  expect(storage.getItem(key(previous))).toBe(previousBytes)
+  expect(observedKeys).toBeGreaterThan(0)
+  expect(records.some(record=>record.revision===previous.revision)).toBe(failure==='remove')
+  vi.stubGlobal('confirm',vi.fn(()=>true))
+  fireEvent.click(screen.getByRole('button',{name:'작성 취소'}))
+  expect(f.onPending).toHaveBeenLastCalledWith(failure==='remove')
+  if(failure==='remove') {
+    fireEvent.click(screen.getByRole('button',{name:'복구본 지우기'}))
+    expect(storage.getItem(key(previous))).toBeNull()
+    expect(f.onPending).toHaveBeenLastCalledWith(false)
+  }
+})
+it('keeps an externally observed recovery actionable while editing and rereads external deletion',async()=>{
+  const f=fixture();await start(f)
+  const previous=pending()[0]!, storage=localStorage
+  const previousKey=`masc.artifact-discussion-local.v1:${previous.id}:${previous.revision}`
+  const external={...JSON.parse(storage.getItem(previousKey)!),id:crypto.randomUUID(),revision:crypto.randomUUID()}
+  const key=`masc.artifact-discussion-local.v1:${external.id}:${external.revision}`
+  storage.setItem(key,JSON.stringify(external))
+  fireEvent(window,new Event('storage'))
+  fireEvent.input(screen.getByLabelText('댓글 내용'),{target:{value:'own input after external recovery'}})
+  vi.stubGlobal('confirm',vi.fn(()=>true))
+  fireEvent.click(screen.getByRole('button',{name:'복구본 지우기'}))
+  expect(storage.getItem(key)).toBeNull()
+  const remaining=pending()
+  expect(remaining).toHaveLength(1)
+  expect(remaining[0]!.value.kind==='input'&&remaining[0]!.value.input.body).toBe('own input after external recovery')
+  storage.setItem(key,JSON.stringify(external));fireEvent(window,new Event('storage'))
+  storage.removeItem(key);fireEvent(window,new Event('storage'))
+  fireEvent.click(screen.getByRole('button',{name:'작성 취소'}))
+  expect(f.onPending).toHaveBeenLastCalledWith(false)
+})
 it('anchors a blurred rendered sentence and sends literal text as an escaped proposal without editing the source',async()=>{
   const f=fixture();await start(f,'html_text')
   fireEvent.click(screen.getByRole('checkbox'))
@@ -295,7 +389,7 @@ it('preserves unsent input across an authority remount and restores it only afte
 it('offers a different generation for download only and hides records from another runtime root',async()=>{
   const value={kind:'input' as const,input:{kind:'reply' as const,operationId:target.generation,threadId:target.generation,body:'이전 세대'}}
   retainDiscussionLocal('old-generation',workspace,{...target,generation:'019f0000-0000-7000-8000-000000000001'},'human',value)
-  const hidden=retainDiscussionLocal('other-root',{...workspace,mascRoot:'/other'},target,'human',{...value,input:{...value.input,body:'다른 루트'}})
+  const hidden=retainDiscussionLocal('other-root',{...workspace,mascRoot:'/other'},target,'human',{...value,input:{...value.input,body:'다른 루트'}}).record
   const f=fixture();f.mount()
   await screen.findByText('다른 세대의 원고입니다. 다운로드할 수만 있습니다.')
   expect((screen.getByRole('button',{name:'원고와 댓글 입력 복구'}) as HTMLButtonElement).disabled).toBe(true)

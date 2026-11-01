@@ -5519,23 +5519,38 @@ type tools_async_task_request =
 type 'key task_history_request =
   { thr_ticket : 'key Masc_tui_fetched.request
   ; thr_reading : unit ref; thr_job : unit ref
-  ; thr_page : Masc.Tui_decode_task_inspection.history_request }
+  ; thr_page : Masc.Tui_decode_task_inspection.history_request
+  ; thr_followup_limit : int option }
 
 (* A continuation captures the immutable prefix before it enters the worker.
    Refresh replaces that prefix; an older read can only extend a known cursor. *)
-let begin_history_page ~task_id ~limit ~older ~equal ~key ~authority fetched =
+let begin_history_page ?(progressive=false) ~task_id ~limit ~older ~equal ~key ~authority fetched =
   let module History = Masc.Tui_decode_task_inspection in
+  let previous = Masc_tui_fetched.value (Masc_tui_fetched.view_for ~equal fetched ~key) in
+  (* A first observation can appear as soon as its newest event is known.
+     A cursor then continues the very same captured prefix in the background. *)
+  let followup_limit =
+    if progressive && not older && limit > 1 && Option.is_none previous
+    then Some (limit - 1) else None in
+  let page_limit = if Option.is_some followup_limit then 1 else limit in
   if older && Masc_tui_fetched.in_flight fetched then None else
   let page = if older then
-      Option.bind (Masc_tui_fetched.value (Masc_tui_fetched.view_for ~equal fetched ~key))
+      Option.bind previous
         (History.history_earlier ~task_id ~limit)
-    else Some (History.history_first ~task_id ~limit) in
+    else Some (History.history_first ~task_id ~limit:page_limit) in
   Option.bind page (fun thr_page ->
     let start=if older then Masc_tui_fetched.start else Masc_tui_fetched.refresh in
     match start ~equal fetched ~key with
     | Already_loading -> None
     | Started (reading,thr_ticket) ->
-      Some (reading,{thr_ticket;thr_reading=authority;thr_job=ref ();thr_page}))
+      Some (reading,{thr_ticket;thr_reading=authority;thr_job=ref ();thr_page;
+                     thr_followup_limit=followup_limit}))
+
+let history_followup_limit request
+    (result : (Masc.Tui_decode_task_inspection.history, string) result) =
+  match request.thr_followup_limit,result with
+  | Some limit,Ok history when Option.is_some history.history_next_cursor -> Some limit
+  | Some _,Ok _ | Some _,Error _ | None,_ -> None
 
 let equal_tools_async_task_source a b =
   Masc.Tui_decode_async_request.equal_source a.ats_request b.ats_request
@@ -17980,19 +17995,25 @@ let complete_goal_timeline_read (state : state) request result =
       Error (Masc_tui_planning_detail.timeline_unavailability_detail failure)) in
   state.goal_timeline <- Masc_tui_fetched.complete ~equal:String.equal state.goal_timeline request result
 
-let begin_task_history_read ?(older=false) (state : state) ~task_id ~limit =
-  match begin_history_page ~task_id ~limit ~older ~equal:String.equal ~key:task_id
+let begin_task_history_read ?(older=false) ?(progressive=false) (state : state) ~task_id ~limit =
+  match begin_history_page ~progressive ~task_id ~limit ~older ~equal:String.equal ~key:task_id
     ~authority:state.workspace_read_authority state.task_history with
   | None -> None
   | Some (reading,request) ->
     state.task_history <- reading;
     state.task_history_request <- Some request;Some request
 
-let complete_task_history_read (state : state) request result =
-  if request.thr_reading==state.workspace_read_authority
+let task_history_request_current (state : state) request =
+  request.thr_reading==state.workspace_read_authority
     && Option.exists (fun current -> current==request) state.task_history_request
     && Masc_tui_fetched.is_current ~equal:String.equal state.task_history request.thr_ticket
-  then begin
+
+let task_history_followup state request result =
+  if task_history_request_current state request
+  then history_followup_limit request result else None
+
+let complete_task_history_read (state : state) request result =
+  if task_history_request_current state request then begin
     state.task_history_request <- None;
     (match result with Ok _ -> state.task_history_last_reading <- Some request.thr_reading
      | Error _ -> ());
@@ -20210,6 +20231,21 @@ let same_task_detail_owner a b =
 
 let task_detail_owner_current state owner =
   Option.exists (same_task_detail_owner owner) (task_detail_owner state)
+
+let task_history_request_in_scope state request =
+  let task_id = Masc_tui_fetched.request_key request.thr_ticket in
+  state.view = Planning && state.planning_mode = Planning_list
+  && Masc_tui_overview_tasks.is_focused state.task_focus
+  && state.task_detail_id = Some task_id
+  && state.workspace_read_authority == request.thr_reading
+  (* An unavailable or degraded local read cannot prove Task removal. A
+     recovered backup can omit newer Tasks; unrelated archive errors also make
+     this conservative, but must never turn an uncertain absence into fact. *)
+  && match state.task_reading,state.tasks_error with
+     | (Masc_tui_overview_tasks.Rows_unread | Rows_unavailable _),_ -> true
+     | Rows_read _,Some _ -> true
+     | Rows_read _,None -> Option.exists (fun owner -> owner.tdo_task_id = task_id)
+         (task_detail_owner state)
 
 let task_detail_following_end state =
   Option.exists (task_detail_owner_current state) state.task_detail_follow_end

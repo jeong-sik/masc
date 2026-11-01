@@ -34,7 +34,7 @@ let history_rows = function
                     | None -> []))
               events
 
-let history_status_lines ~width ~(view : Masc.Tui_decode_task_inspection.history Masc_tui_fetched.view) ~in_flight =
+let history_status_lines ~width ~(view : Masc.Tui_decode_task_inspection.history Masc_tui_fetched.view) ~in_flight ~continuing =
   let header =
     Masc_tui_text_block.rows ~max_cells:width "[ 4. 상태 전환 이력 (HISTORY) ]"
     |> List.map (fun line -> "  " ^ line)
@@ -53,12 +53,15 @@ let history_status_lines ~width ~(view : Masc.Tui_decode_task_inspection.history
   let pending =
     if not in_flight then []
     else match view with
-      | Masc_tui_fetched.Ready _ | Masc_tui_fetched.Stale _ -> [ "    reading history; previous observation" ]
+      | Masc_tui_fetched.Ready _ | Masc_tui_fetched.Stale _ ->
+          [ if continuing then "    reading earlier history; showing observed prefix"
+            else "    reading history; previous observation" ]
       | Masc_tui_fetched.Failed _ -> [ "    retrying; previous failure remains" ]
       | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading -> [] in
   let boundary=match Masc_tui_fetched.value view with
     | None -> []
     | Some history -> [match history.history_next_cursor with
+        | Some _ when in_flight && continuing -> "    r:start a fresh prefix"
         | Some _ -> "    H:read earlier stored history · r:start a fresh prefix"
         | None -> "    observed stored prefix exhausted · r:read latest history"] in
   let sources=match Masc_tui_fetched.value view with

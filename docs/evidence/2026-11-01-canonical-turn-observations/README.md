@@ -75,6 +75,8 @@ windows. Reopening the same-process reader is not an OS restart.
 [manifest.json](manifest.json) records source hashes and exact decoded-log and
 retained-derivative hashes separately. Complete decoded logs remain in ignored
 artifacts/issues-oldest-20261101 in the primary checkout. Retained selected text
-strips ANSI and selects checkout, suite, assertion result and summary lines, with
-one final newline. Such a derivative does not replace the original capture hash.
+strips ANSI and selects checkout, suite, assertion result and summary lines,
+strips trailing whitespace per line and retains one final newline. Earlier
+retained digests are preserved when that whitespace cleanup changes a file.
+Such a derivative does not replace the original capture hash.
 Subsequent evidence-only commits do not retroactively become executed heads.

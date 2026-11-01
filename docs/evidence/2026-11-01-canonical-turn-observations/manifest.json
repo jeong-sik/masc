@@ -64,16 +64,18 @@
       "retained_path": "docs/evidence/2026-11-01-canonical-turn-observations/baseline-41260927530-selected.txt",
       "retained_bytes": 10557,
       "retained_sha256": "249c7863b77154c128b73c04ba1f7347704058d087a52ba419545a4a47148a4a",
-      "retained_transform": "ANSI stripping and selected checkout, suite, case-result, failure and summary lines; normalized final newline"
+      "retained_transform": "ANSI stripping and selected checkout, suite, case-result, failure and summary lines; normalized final newline; trailing whitespace stripped per line"
     },
     {
       "path": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/issues-oldest-20261101/turn-interim-41261604985-job124715840649.txt",
       "bytes": 206473,
       "sha256": "d157e0ee24ccd6855b4633a0cec1051cb61a77ea74dbea889074700ac34030d4",
       "retained_path": "docs/evidence/2026-11-01-canonical-turn-observations/interim-41261604985-selected.txt",
-      "retained_bytes": 18228,
-      "retained_sha256": "34626d95cde9e8b967023f09cd16d2014e2951a35a8ea9a190dd48d9bc9f35bb",
-      "retained_transform": "ANSI stripping and selected checkout, suite, case-result, failure and summary lines; normalized final newline"
+      "retained_bytes": 18226,
+      "retained_sha256": "80b58f9c0e254cf7f5d54e581c6c053e03dccf6280b5c0e4a455890bebbd61f4",
+      "retained_transform": "ANSI stripping and selected checkout, suite, case-result, failure and summary lines; normalized final newline; trailing whitespace stripped per line",
+      "retained_sha256_before_whitespace_cleanup": "34626d95cde9e8b967023f09cd16d2014e2951a35a8ea9a190dd48d9bc9f35bb",
+      "retained_bytes_before_whitespace_cleanup": 18228
     },
     {
       "path": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/issues-oldest-20261101/turn-capture-41261750963-job124716258779.txt",
@@ -82,34 +84,40 @@
       "retained_path": "docs/evidence/2026-11-01-canonical-turn-observations/fixture-initialization-41261750963-selected.txt",
       "retained_bytes": 11243,
       "retained_sha256": "c42d799c6ded9da4496e9cddf00bee364eecd669e36728e649a36ebec1c0782f",
-      "retained_transform": "ANSI stripping and selected checkout, suite, case-result, failure and summary lines; normalized final newline"
+      "retained_transform": "ANSI stripping and selected checkout, suite, case-result, failure and summary lines; normalized final newline; trailing whitespace stripped per line"
     },
     {
       "path": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/issues-oldest-20261101/turn-capture-41261826065-job124716483308.txt",
       "bytes": 84860,
       "sha256": "19f3ba85467c43a5567f416d4fd876cf78e060d62cfda7c96cd63a02743413b5",
       "retained_path": "docs/evidence/2026-11-01-canonical-turn-observations/parent-telemetry-41261826065-selected.txt",
-      "retained_bytes": 2820,
-      "retained_sha256": "0a871054d53aaaf7f79d37693c33f9e811b53224b0abf0a97977e7aa236308d3",
-      "retained_transform": "ANSI stripping and selected checkout, suite, case-result, failure and summary lines; normalized final newline"
+      "retained_bytes": 2818,
+      "retained_sha256": "108c9e3b48702543a1f52e69f4bd77f0f15417e5ce0e1ad9be0d34d41cabe4f3",
+      "retained_transform": "ANSI stripping and selected checkout, suite, case-result, failure and summary lines; normalized final newline; trailing whitespace stripped per line",
+      "retained_sha256_before_whitespace_cleanup": "0a871054d53aaaf7f79d37693c33f9e811b53224b0abf0a97977e7aa236308d3",
+      "retained_bytes_before_whitespace_cleanup": 2820
     },
     {
       "path": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/issues-oldest-20261101/turn-capture-41261888709-job124716660376.txt",
       "bytes": 214803,
       "sha256": "b53ef6431dc3793995f8e819ee3fe0930c8bd136b8848c70307664a175bec6aa",
       "retained_path": "docs/evidence/2026-11-01-canonical-turn-observations/writer-fix-fixture-initialization-41261888709-selected.txt",
-      "retained_bytes": 23448,
-      "retained_sha256": "8fb971f6436ad64a5c2527a41d0b9fd58480451dbcd83f6fedd67a1033528a00",
-      "retained_transform": "ANSI stripping and selected checkout, suite, assertion, case-result, failure and summary lines; normalized final newline"
+      "retained_bytes": 23447,
+      "retained_sha256": "10d0cc7b291c22c1e6b07f4320f93c643315cb03e497c197b0094be37a683a38",
+      "retained_transform": "ANSI stripping and selected checkout, suite, assertion, case-result, failure and summary lines; normalized final newline; trailing whitespace stripped per line",
+      "retained_sha256_before_whitespace_cleanup": "8fb971f6436ad64a5c2527a41d0b9fd58480451dbcd83f6fedd67a1033528a00",
+      "retained_bytes_before_whitespace_cleanup": 23448
     },
     {
       "path": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/issues-oldest-20261101/turn-capture-41262022423-job124717060943.txt",
       "bytes": 210286,
       "sha256": "e2b35f2b21b9b8205c2109d23265d8308e4b1e2622735abff313ece625c14394",
       "retained_path": "docs/evidence/2026-11-01-canonical-turn-observations/final-41262022423-selected.txt",
-      "retained_bytes": 23181,
-      "retained_sha256": "a4eb927b0fa747a01711b07fbceeaee4c48c1d63d8e3eca05a5c550a77464dab",
-      "retained_transform": "ANSI stripping and selected checkout, suite, assertion, case-result, failure and summary lines; normalized final newline"
+      "retained_bytes": 23180,
+      "retained_sha256": "290b3c688836d15da9f4a926469a6e443d3ba663250bf30206aca416f6861f3f",
+      "retained_transform": "ANSI stripping and selected checkout, suite, assertion, case-result, failure and summary lines; normalized final newline; trailing whitespace stripped per line",
+      "retained_sha256_before_whitespace_cleanup": "a4eb927b0fa747a01711b07fbceeaee4c48c1d63d8e3eca05a5c550a77464dab",
+      "retained_bytes_before_whitespace_cleanup": 23181
     }
   ],
   "candidate_source_head": "233f57232ef4690488adb5c7a3564dcc662d03e3",

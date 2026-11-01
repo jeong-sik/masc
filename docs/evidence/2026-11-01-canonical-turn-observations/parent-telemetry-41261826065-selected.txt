@@ -9,8 +9,8 @@
 2026-11-01T01:38:26.8504228Z   TARGET_SUITES: packages/agent_core/test/test_telemetry_pipeline
 2026-11-01T01:38:26.8688179Z   TARGET_SUITES: packages/agent_core/test/test_telemetry_pipeline
 2026-11-01T01:38:26.9160760Z [targeted] EIO_BACKEND=<unset> timeout=600s per suite
-2026-11-01T01:38:26.9528096Z [targeted] dune build packages/agent_core/test/test_telemetry_pipeline.exe 
-2026-11-01T01:38:44.6640258Z [targeted] packages/agent_core/test/test_telemetry_pipeline: stanza env 
+2026-11-01T01:38:26.9528096Z [targeted] dune build packages/agent_core/test/test_telemetry_pipeline.exe
+2026-11-01T01:38:44.6640258Z [targeted] packages/agent_core/test/test_telemetry_pipeline: stanza env
 2026-11-01T01:38:44.6667918Z [targeted] packages/agent_core/test/test_telemetry_pipeline: start 2026-11-01T01:38:44Z
 2026-11-01T01:38:44.7085744Z   [FAIL]        emit          0   run_stream emits telemetry via pipeline.
 2026-11-01T01:38:44.7090978Z   [OK]          emit          1   run_stream skips telemetry without event_bus.

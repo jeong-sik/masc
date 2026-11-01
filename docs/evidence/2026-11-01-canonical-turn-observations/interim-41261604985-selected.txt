@@ -149,8 +149,8 @@
 2026-11-01T01:36:11.0635094Z   [OK]          real runtime         10   non-positive domain count is typed.
 2026-11-01T01:36:11.0635859Z Test Successful in 0.013s. 11 tests run.
 2026-11-01T01:36:11.0858169Z [targeted] @@packages/agent_core/test/runtest-test_execution_codec_executor: OK in 2s
-2026-11-01T01:36:11.1214126Z [targeted] dune build packages/agent_core/test/test_telemetry_pipeline.exe 
-2026-11-01T01:36:12.7965581Z [targeted] packages/agent_core/test/test_telemetry_pipeline: stanza env 
+2026-11-01T01:36:11.1214126Z [targeted] dune build packages/agent_core/test/test_telemetry_pipeline.exe
+2026-11-01T01:36:12.7965581Z [targeted] packages/agent_core/test/test_telemetry_pipeline: stanza env
 2026-11-01T01:36:12.7992842Z [targeted] packages/agent_core/test/test_telemetry_pipeline: start 2026-11-01T01:36:12Z
 2026-11-01T01:36:12.8396825Z   [FAIL]        emit          0   run_stream emits telemetry via pipeline.
 2026-11-01T01:36:12.8402676Z   [OK]          emit          1   run_stream skips telemetry without event_bus.

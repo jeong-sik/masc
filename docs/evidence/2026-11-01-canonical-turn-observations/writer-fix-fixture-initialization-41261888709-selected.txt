@@ -184,7 +184,7 @@
 2026-11-01T01:40:16.5130846Z   [OK]          real runtime         10   non-positive domain count is typed.
 2026-11-01T01:40:16.5131322Z Test Successful in 0.012s. 11 tests run.
 2026-11-01T01:40:16.5382752Z [targeted] @@packages/agent_core/test/runtest-test_execution_codec_executor: OK in 1s
-2026-11-01T01:40:16.5691342Z [targeted] dune build test/test_keeper_execution_join.exe 
+2026-11-01T01:40:16.5691342Z [targeted] dune build test/test_keeper_execution_join.exe
 2026-11-01T01:44:02.2169437Z [targeted] test/test_keeper_execution_join: stanza env MASC_BASE_PATH= ZAI_API_KEY= TYPESAFEAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
 2026-11-01T01:44:02.2197304Z [targeted] test/test_keeper_execution_join: start 2026-11-01T01:44:02Z
 2026-11-01T01:44:02.2768686Z   [OK]          join_table               0   record/take roundtrip.

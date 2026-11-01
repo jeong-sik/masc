@@ -281,18 +281,19 @@ submission times, not review IDs. Missing times or a tie for an account's latest
 formal review leave ordering unavailable; a replacement must be strictly later
 than its request.
 Existing CRs and comment verdicts do not prevent recording a new independent
-approval from a different account. At merge/receipt consumption, each account's
-unresolved FAIL/HOLD still blocks: a PASS from another account, including the PR
-author, cannot clear it.
+approval from a different account. At merge/receipt consumption, unresolved
+FAIL/HOLD still blocks: a PASS from another account, including the PR author, or
+from a differently claimed Keeper on the same account cannot clear it.
 Keeper names are claims, not authenticated identities; sharing a GitHub login
 does not add an independent formal reviewer. The guard never dismisses another
 account's request. All head, diff, identity and Release CI checks remain;
 ordinary source publication does
 not wait for selected CI, while merge admission retains the CI pin check.
 
-The ownership check above covers GitHub change-request reviews. Structured
-FAIL/HOLD comments are still reduced by GitHub account, so the separate comment
-path does not verify which Keeper authored a shared account's decision.
+Structured FAIL/HOLD comments are reduced by both GitHub account and the exact
+claimed Keeper name. A missing or malformed name remains a blocker; investigate
+and correct the originating record before relying on a later PASS. These claims
+do not authenticate which Keeper actually wrote a shared account's decision.
 
 The ordinary source-review verdict uses actual values:
 

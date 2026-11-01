@@ -64,12 +64,11 @@ let opened ?(capture_directory=capture_directory ()) ?(downloads=no_downloads) ?
   | Ok peer -> peer
   | Error detail -> failf "the space did not open: %s" detail
 
-(* A row as the listing script writes it: [dialog] is what page.info()
-   named on a managed page, [dialogUnread] why it could not be read. *)
-let tab_row ?(dialog=`Null) ?(unread=`Null) ?origin ~label ~target ~title ~url ~active () =
+(* Native inventory carries Page metadata without a Page.info read. *)
+let tab_row ?origin ~label ~target ~title ~url ~active () =
   let origin=match origin,label with Some value,_ -> value | None,`Null -> "unknown" | None,_ -> "agent" in
-  obj ["label",label;"targetId",str target;"openedBy",str origin;"title",str title;"url",str url;"active",`Bool active;
-    "dialog",dialog;"dialogUnread",unread]
+  obj ["label",label;"targetId",str target;"openedBy",str origin;"title",str title;"url",str url;"active",`Bool active]
+
 let tabs = `List [
   tab_row ~label:(str "p1") ~target:"T1" ~title:"Slack" ~url:"https://app.slack.com/" ~active:true ();
   tab_row ~label:`Null ~target:"T9" ~title:"Mail" ~url:"https://mail.example/" ~active:false ();
@@ -1061,6 +1060,7 @@ let test_the_peer_serves_what_the_lane_table_says () =
     | "page.activate" -> answered (obj ["spaceId",`Int 51;"label",str "p1";"targetId",str "T1";
         "urlBefore",str "https://app.slack.com/";"url",str "https://app.slack.com/";"title",str "Slack";
         "active",`Bool true;"window",obj ["windowId",`Int 7;"stateBefore",str "normal";"stateAfter",str "normal";"restored",`Bool false]])
+    | "page.context" -> answered (obj ["dialog",`Null])
     | "page.open" -> answered (obj ["label",str "p4";"error",`Null;"tab",obj ["url",str "https://example.test/new";"title",str "New";"active",`Bool true]])
     | "page.goto" | "page.history" -> answered (obj ["error",`Null;"tab",obj ["url",str "https://example.test/next";"title",str "Next"]])
     | "page.stop_loading" -> answered (obj ["spaceId",`Int 51;"label",str "p1";"targetId",str "T1";
@@ -1111,6 +1111,7 @@ let test_the_peer_serves_what_the_lane_table_says () =
     | Tab_navigation -> Page_goto {url="https://example.test/next";tab_id=Some 1}
     | Tab_activation -> interact Activate_tab
     | Tab_creation -> Page_act (Action.Open_tab "https://example.test/new")
+    | Dialog_read -> Page_context {tab_id=1;frame_path=[];mode=`Dialog}
     | Dialog_answer -> Page_act (Action.On_tab {tab_id=1;frame_path=[];interaction=Action.Dismiss_dialog})
     | Frame_read -> Page_context {tab_id=1;frame_path=[];mode=`Frames}
     | Operator_handoff -> Page_act (Action.Control Action.Hand_off)
@@ -1914,104 +1915,69 @@ let test_history_moves_one_entry () =
   check string "the operator's tab" "before effect" (failure_kind (on_tab ~tab_id:2 Lane.Action.Back));
   check int "ran no script" before (List.length !steps)
 
-(* A managed page's row names the dialog blocking it, and an agent page's
-   dialog is answered with a receipt that names it. *)
-let test_dialogs_are_listed_and_answered () =
-  let asked = ref [] and listing = ref tabs and reply = ref (fun (_ : sent) -> fail "no reply set") in
+(* Inventory stays usable when an explicit dialog read fails. Answers use
+   native boolean evidence, never a prerequisite metadata read. *)
+let test_dialog_inventory_and_answers_do_not_require_info () =
+  let asked = ref [] and reply = ref (fun (_ : sent) -> fail "no reply set") in
   let peer = opened (fun sent ->
     asked := sent :: !asked;
-    match sent.step with "tabs.list" -> answered !listing | _ -> !reply sent) in
-  ignore (dispatch peer Live.Tabs_list (obj []));
-  let runs () = List.length !asked and last () = List.hd !asked in
+    match sent.step with "tabs.list" -> answered tabs | _ -> !reply sent) in
+  let listed ()=match dispatch peer Live.Tabs_list (obj []) with
+    | Ok (`List rows) -> rows | Ok _|Error _ -> fail "bare inventory failed" in
+  let rows=listed () in
+  check int "all native tabs remain usable" 3 (List.length rows);
+  check bool "inventory makes no clean-dialog claim" true
+    (List.for_all (fun row -> field "dialogObservation" row=str "unobserved" && field "dialog" row=`Null) rows);
+  let selected=Result.get_ok (Masc.Browser_surface.inventory_tab ~tab_id:1 (`List rows)) in
+  check string "unknown dialog coverage does not invalidate selection" "https://app.slack.com/" selected.url;
+  let runs ()=List.length !asked and last ()=List.hd !asked in
+  let context= obj ["tabId",`Int 1;"mode",str "dialog";"framePath",`List []] in
+  let read ()=dispatch peer Live.Page_context context in
+  let prompt=ego_dialog ~default:"def" "prompt" "name?" in
+  reply := (fun _ -> answered (obj ["dialog",prompt]));
+  (match read () with
+   | Ok value -> check bool "explicit read observes the native dialog" true
+       (field "dialogObservation" value=str "observed" && field "dialog" value=
+        obj ["type",str "prompt";"message",str "name?";"defaultValue",str "def"])
+   | Error _ -> fail "explicit dialog read failed");
+  check string "existing context verb carries the read" "page.context" (last ()).step;
+  reply := (fun _ -> answered (obj ["dialog",`Null]));
+  (match read () with
+   | Ok value -> check bool "native successful read alone can observe none" true
+       (field "dialogObservation" value=str "observed" && field "dialog" value=`Null)
+   | Error _ -> fail "native no-dialog read failed");
+  reply := (fun _ -> failed "CDP request timed out: Runtime.evaluate");
+  check string "native metadata failure stays a read failure" "CDP request timed out: Runtime.evaluate"
+    (before_effect "explicit dialog read" (read ()));
+  check bool "failed metadata cannot erase inventory" true (listed ()=rows);
   let act ?(tab_id=1) interaction = dispatch peer Live.Page_act (act_args (Lane.Action.On_tab {tab_id;frame_path=[];interaction})) in
-  let prompt = ego_dialog ~default:"def" "prompt" "name?" and alert = ego_dialog "alert" "saved" in
-  reply := (fun _ -> answered (obj ["answered",`Bool true;"dialog",prompt]));
+  reply := (fun _ -> answered (obj ["answered",`Bool true]));
   (match act (Lane.Action.Accept_dialog (Some "Vincent")) with
-   | Ok receipt -> check string "the answer names the dialog"
-       {|{"inputReadiness":"command_settled","tabId":1,"action":"accept_dialog","answered":true,"dialog":{"type":"prompt","message":"name?","defaultValue":"def"}}|}
-       (Yojson.Safe.to_string receipt)
-   | other -> failf "the accept was %s" (failure_kind other));
-  check string "on the page's label" "p1" (text (field "label" (last ()).args));
-  check bool "accepts" true (field "accept" (last ()).args = `Bool true);
-  check string "with the text" "Vincent" (text (field "text" (last ()).args));
-  check bool "within the action window" true ((last ()).window_s
-    < Lane.reply_timeout_sec (Lane.Page_act (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Accept_dialog None})));
-  ignore (act (Lane.Action.Accept_dialog None));
-  check bool "no text is no text" true (field "text" (last ()).args = `Null);
-  reply := (fun _ -> answered (obj ["answered",`Bool true;"dialog",alert]));
-  (match act Lane.Action.Dismiss_dialog with
-   | Ok receipt -> check string "the dismissal names the dialog"
-       {|{"inputReadiness":"command_settled","tabId":1,"action":"dismiss_dialog","answered":true,"dialog":{"type":"alert","message":"saved"}}|} (Yojson.Safe.to_string receipt)
-   | other -> failf "the dismissal was %s" (failure_kind other));
-  check bool "dismisses" true (field "accept" (last ()).args = `Bool false);
-  reply := (fun _ -> answered (obj ["answered",`Bool true;"dialog",ego_dialog "modal" "?"]));
-  (match act Lane.Action.Dismiss_dialog with
-   | Ok receipt -> check string "a dialog it cannot read is left out" {|{"inputReadiness":"command_settled","tabId":1,"action":"dismiss_dialog","answered":true}|} (Yojson.Safe.to_string receipt)
-   | other -> failf "an answer to an unreadable dialog was %s" (failure_kind other));
+   | Ok receipt -> check bool "native true answers without invented metadata" true
+       (field "answered" receipt=`Bool true && field "dialogObservation" receipt=str "unobserved" && field "dialog" receipt=`Null)
+   | Error _ -> fail "native true answer failed");
+  check string "on the observed Page label" "p1" (text (field "label" (last ()).args));
+  check bool "same numeric Space bound before answer" true (field "spaceId" (last ()).args=`Int 51);
+  check bool "accepts exact prompt text" true
+    (field "accept" (last ()).args=`Bool true && field "text" (last ()).args=str "Vincent");
+  ignore (act Lane.Action.Dismiss_dialog);
+  check bool "dismissal stays a distinct native method" true (field "accept" (last ()).args=`Bool false);
   List.iter (fun malformed ->
     reply := (fun _ -> answered malformed);
     match act Lane.Action.Dismiss_dialog with
     | Error (Live.Outcome_unknown _) -> ()
-    | other -> failf "a missing native true receipt was %s" (failure_kind other))
-    [obj [];obj ["answered",`Null];obj ["answered",`Bool false];
-     obj ["answered",str "true"];obj ["answered",`Int 1]];
+    | other -> failf "missing native true receipt was %s" (failure_kind other))
+    [obj [];obj ["answered",`Null];obj ["answered",`Bool false];obj ["answered",str "true"];obj ["answered",`Int 1]];
   reply := (fun _ -> refused "no dialog is open in this tab");
-  check string "none open" "no dialog is open in this tab" (before_effect "an answer with none open" (act Lane.Action.Dismiss_dialog));
+  check string "native false refuses before effect" "no dialog is open in this tab"
+    (before_effect "no dialog" (act Lane.Action.Dismiss_dialog));
   reply := (fun _ -> failed "Target closed");
   (match act Lane.Action.Dismiss_dialog with
-   | Error (Live.Outcome_unknown detail | Live.Observed_failure {disposition=Live.Uncertain;message=detail;_}) ->
-     check bool "may have been answered" true (String_util.contains_substring detail "may have been answered")
-   | other -> failf "a failed answer was %s" (failure_kind other));
-  let before = runs () in
-  check string "the operator's tab" "before effect" (failure_kind (act ~tab_id:2 Lane.Action.Dismiss_dialog));
-  check int "ran no script" before (runs ());
-  (* The rows: a managed page's dialog, read now; an operator tab has none. *)
-  listing := `List [
-    tab_row ~dialog:prompt ~label:(str "p1") ~target:"T1" ~title:"Slack" ~url:"https://app.slack.com/" ~active:true ();
-    tab_row ~label:`Null ~target:"T9" ~title:"Mail" ~url:"https://mail.example/" ~active:false ();
-    tab_row ~dialog:alert ~label:(str "p2") ~target:"T2" ~title:"" ~url:"about:blank" ~active:false ()];
-  (match dispatch peer Live.Tabs_list (obj []) with
-   | Ok rows -> check bool "each managed page names the dialog blocking it" true
-       (List.map (field "dialog") (Yojson.Safe.Util.to_list rows)
-        = [obj ["type",str "prompt";"message",str "name?";"defaultValue",str "def"];`Null;
-           obj ["type",str "alert";"message",str "saved"]])
-   | Error _ -> fail "the listing failed");
-  (* A page whose dialog state ego could not read, or named in a shape this
-     connection cannot read, is listed as BiDi lists a tab it could not read. *)
-  listing := `List [
-    tab_row ~label:(str "p1") ~target:"T1" ~title:"Slack" ~url:"https://app.slack.com/" ~active:true ();
-    tab_row ~unread:(str "Not attached to an active page") ~label:(str "p2") ~target:"T2" ~title:"" ~url:"about:blank" ~active:false ();
-    tab_row ~dialog:(ego_dialog "modal" "?") ~label:(str "p3") ~target:"T3" ~title:"X" ~url:"https://x.test/" ~active:false ()];
-  (match dispatch peer Live.Tabs_list (obj []) with
-   | Ok rows ->
-     check bool "an unread dialog state makes the inventory partial" false
-       (Yojson.Safe.Util.to_bool (field "complete" rows));
-     let unavailable=Yojson.Safe.Util.to_list (field "unavailableTabs" rows) in
-     check (list int) "unread tabs retain their numbers" [3;4]
-       (List.map (fun row -> Yojson.Safe.Util.to_int (field "id" row)) unavailable);
-     check (list string) "unread tabs retain their reason"
-       ["ego did not read whether a dialog blocks this page: Not attached to an active page";
-        "ego reported a JavaScript dialog of unknown type \"modal\""]
-       (List.map (fun row -> text (field "error" row)) unavailable);
-     check bool "unread tabs retain their native Page context" true
-       (List.map (field "egoPage") unavailable = List.map (fun (label,target) ->
-          obj ["label",str label;"targetId",str target;"openedBy",str "agent"])
-          ["p2","T2";"p3","T3"]);
-     let module Surface=Masc.Browser_surface in
-     let plan=Result.get_ok (Surface.prepare_read ~tab_id:None rows) in
-     let client_id=Result.get_ok (Lane.client_id_of_string "10000000-0000-4000-8000-000000000021") in
-     let selected : Masc.Browser_selection.selected = {route=Lane.Live_route (Some client_id);reason=Explicit_browser} in
-     let info : Lane.client_info = {client_id;browser=Ego_lite;version="fixture";engine_version="fixture";
-       transport=Ego_task_space;space=Some (Peer.space peer)} in
-     let binding=Masc.Browser_binding.of_browser selected (Masc.Browser_selection.Connected info) in
-     let page=obj ["url",str "https://app.slack.com/";"title",str "Slack";"text",str "observed";
-       "chars",`Int 8;"truncated",`Bool false] in
-     let projected=Result.get_ok (Surface.project_read plan ~binding ~started:0L ~page:(Some page)) in
-     check bool "document projection keeps unavailable Page contexts" true
-       (field "unavailableTabs" projected=field "unavailableTabs" rows)
-   | Error _ -> fail "the partial listing failed");
-  listing := `List [obj ["label",str "p1";"targetId",str "T1";"openedBy",str "agent";"title",str "Slack";"url",str "https://app.slack.com/";"active",`Bool true]];
-  check bool "a row without its dialog state is refused" true (Result.is_error (dispatch peer Live.Tabs_list (obj [])))
+   | Error (Live.Outcome_unknown _ | Live.Observed_failure {disposition=Live.Uncertain;_}) -> ()
+   | other -> failf "lost native answer was %s" (failure_kind other));
+  let before=runs () in
+  ignore (before_effect "unmanaged Page" (act ~tab_id:2 Lane.Action.Dismiss_dialog));
+  check int "unmanaged Page is never answered" before (runs ())
 
 (* An input whose page opened a dialog answers with it; a page already
    blocked is refused before any input. *)
@@ -2054,6 +2020,7 @@ const canned = %s;
 const seen = [];
 process.on("exit", () => console.log("seen " + JSON.stringify(seen)));
 const page = {
+  spaceId: 51, label: "p1", targetId: "T1", openedBy: "agent",
   info: async () => { seen.push("info"); return open === null ? {url: "https://app.slack.com/", title: "Slack", w: 800, h: 600, sx: 0, sy: 0, pw: 800, ph: 600} : {dialog: open}; },
   evaluate: async () => {
     seen.push("evaluate");
@@ -2071,8 +2038,8 @@ const page = {
   close: async () => { seen.push("close"); },
 };
 const taskSpace = async () => ({
-  ownership: "agent",
-  tabs: async () => [{label: "p1", openedBy: "agent", url: "https://app.slack.com/", title: "Slack", targetId: "T1", active: true}],
+  spaceId: 51, ownership: "agent",
+  tabs: async () => [{label: "p1", page, openedBy: "agent", url: "https://app.slack.com/", title: "Slack", targetId: "T1", active: true}],
   page: () => page,
 });
 |js} (Yojson.Safe.to_string open_) (Yojson.Safe.to_string opening) opens_on (Yojson.Safe.to_string canned)
@@ -2109,16 +2076,16 @@ let test_dialog_scripts_in_node () =
   (match dispatch peer Live.Tabs_list (obj []) with
    | Ok rows ->
      let row=match Yojson.Safe.Util.to_list rows with [row] -> row | _ -> fail "expected one listed page" in
-     check bool "listed with its dialog" true
-       (field "dialog" row=obj ["type",str "prompt";"message",str "name?";"defaultValue",str "def"]);
+     check bool "bare inventory does not read an open dialog" true
+       (field "dialogObservation" row=str "unobserved" && field "dialog" row=`Null);
      check bool "dialog inventory retains its native Page provenance" true
        (field "egoPage" row=obj ["label",str "p1";"targetId",str "T1";"openedBy",str "agent"])
    | Error _ -> fail "the listing failed");
   (match act (Lane.Action.Accept_dialog (Some "Vincent")) with
    | Ok receipt -> check string "the answer"
-       {|{"inputReadiness":"command_settled","tabId":1,"action":"accept_dialog","answered":true,"dialog":{"type":"prompt","message":"name?","defaultValue":"def"}}|} (Yojson.Safe.to_string receipt)
+       {|{"inputReadiness":"command_settled","tabId":1,"action":"accept_dialog","answered":true,"dialogObservation":"unobserved"}|} (Yojson.Safe.to_string receipt)
    | other -> failf "the accept was %s" (failure_kind other));
-  check (list string) "read, then answered with the text" ["info";"accept Vincent"] (seen ());
+  check (list string) "answered without a metadata prerequisite" ["accept Vincent"] (seen ());
   List.iter (fun value ->
     native_answer := Some value;
     match act Lane.Action.Dismiss_dialog with
@@ -2131,7 +2098,7 @@ let test_dialog_scripts_in_node () =
   native_answer := None;
   scenario := (`Null, `Null, "");
   check string "none open" "no dialog is open in this tab" (before_effect "a dismissal with none open" (act Lane.Action.Dismiss_dialog));
-  check (list string) "and nothing was answered" ["info"] (seen ());
+  check (list string) "native false is checked by the method" ["dismiss"] (seen ());
   scenario := (`Null, ego_dialog "confirm" "sure?", "click");
   (match interact (Lane.Click_node {document_id="d1";node_id="send"}) with
    | Ok receipt -> check string "the click and its dialog"
@@ -3076,6 +3043,7 @@ let test_operator_input_recovery () =
     | Error _ as result -> failf "%s: %s" label (failure_kind result) in
   let issued=ref 0 and scripts=ref 0 and input_commands=ref [] and recovery_peer=ref None in
   let dialog=ego_dialog "alert" "check" in
+  let dialog_reply=ref (answered (obj ["answered",`Bool true])) in
   let completed steps ~has_effect ~snapshot = answered (obj [
     "completed",`List steps;"effectStarted",`Bool has_effect;"completedEffect",`Bool has_effect;
     "inputReleased",`Bool true;"failure",`Null;"urlBefore",str "https://app.slack.com/";
@@ -3083,7 +3051,8 @@ let test_operator_input_recovery () =
     "chars",`Int (String.length snapshot);"truncated",`Bool false]) in
   let peer=opened (fun sent -> incr scripts;match sent.step with
     | "tabs.list" -> answered tabs
-    | "page.dialog" -> answered (obj ["answered",`Bool true;"dialog",dialog])
+    | "page.dialog" -> !dialog_reply
+    | "page.context" -> failed "CDP request timed out: Runtime.evaluate"
     | "page.native_workflow" ->
       incr issued;
       check bool "recovery workflows stay in the original Space/Page" true
@@ -3128,6 +3097,16 @@ let test_operator_input_recovery () =
     (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Accept_dialog None}))) in
   check string "a result read while input is pending says so" "release_uncertain"
     Yojson.Safe.Util.(accepted |> member "inputReadiness" |> to_string);
+  check bool "native true leaves the exact pending generation untouched" true (Peer.input_status peer=Input.Uncertain pending);
+  List.iter (fun response ->
+    dialog_reply := response;
+    ignore (dispatch peer Live.Page_act (Lane.Action.to_json
+      (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Dismiss_dialog})));
+    check bool "false, malformed and lost dialog answers preserve exact pending" true (Peer.input_status peer=Input.Uncertain pending))
+    [refused "no dialog is open in this tab";answered (obj ["answered",`Null]);failed "Target closed"];
+  ignore (before_effect "unavailable dialog metadata" (dispatch peer Live.Page_context
+    (obj ["tabId",`Int 1;"mode",str "dialog";"framePath",`List []])));
+  check bool "failed native read preserves exact pending" true (Peer.input_status peer=Input.Uncertain pending);
   ignore (before_effect "dialog answer is not input-reset authority" (dispatch peer Live.Page_native_workflow (args [])));
   let connection:Operator.connection={client_id="original-client";space=Peer.space peer;recovery={
     status=(fun () -> Peer.input_status peer);busy=(fun () -> Peer.input_busy peer);
@@ -3507,7 +3486,7 @@ let () =
       test_case "effects answer what happened" `Quick test_effects_answer_what_happened;
       test_case "history moves one entry and waits for it" `Quick test_history_moves_one_entry;
       test_case "a snapshot reads ego's own tree" `Quick test_a_snapshot_reads_egos_own_tree;
-      test_case "dialogs are listed and answered" `Quick test_dialogs_are_listed_and_answered;
+      test_case "dialog inventory and answers do not require info" `Quick test_dialog_inventory_and_answers_do_not_require_info;
       test_case "an input that opens a dialog answers with it" `Quick test_an_input_that_opens_a_dialog_answers_with_it;
       test_case "the dialog scripts run against a stand-in in node" `Quick test_dialog_scripts_in_node;
       test_case "a snapshot target is found by ego and checked first" `Quick test_a_snapshot_target_is_found_by_ego_and_checked_first;

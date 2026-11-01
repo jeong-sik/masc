@@ -242,6 +242,9 @@ let test_list_windows_table () =
    effect on a page says that the operator's tabs in the space are refused. *)
 let test_ego_table () =
   let backend = Cap.Connected Lane.Ego_task_space in
+  (match Cap.support backend Cap.Read_dialog with
+   | Cap.Conditional {invocation={tool=Read;mode=Some "dialog";action=None};_} -> ()
+   | Cap.Available _|Cap.Conditional _|Cap.Unsupported _ -> fail "Ego dialog metadata must use its explicit read mode");
   let reachable = List.filter (fun operation -> match Cap.support backend operation with
     | Cap.Available _ | Cap.Conditional _ -> true | Cap.Unsupported _ -> false) Cap.operations in
   check (list string) "reads, capture, the tab list, its own tabs, their history, input, frames, dialogs, uploads and downloads on them, and the space handed to the operator and back"

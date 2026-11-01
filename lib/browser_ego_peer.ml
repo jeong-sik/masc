@@ -300,7 +300,7 @@ let retirement_settlement t = match t.finish_state with
    would leave the dialog's answer to the browser. Reads, moves and input
    are refused before any effect; closing the tab and answering the dialog
    are not. ego's page.info() names the open dialog. *)
-let dialog_blocked = "is blocked on a JavaScript dialog; list the tabs to read it, and answer it with accept_dialog or dismiss_dialog before another step"
+let dialog_blocked = "is blocked on a JavaScript dialog; read mode=dialog on this tab if metadata is needed (it can be unavailable after SDK-session replacement), and answer with accept_dialog or dismiss_dialog before another step"
 let open_dialog page = "(await " ^ page ^ ".info()).dialog ?? null"
 
 (* The dialog ego's page.info() names: CDP's javascriptDialogOpening, with
@@ -316,23 +316,19 @@ let ego_dialog json : (Browser_surface.dialog, string) result =
      | None, (None | Some _) -> Error (Printf.sprintf "ego reported a JavaScript dialog of unknown type %S" kind))
   | _ -> Error "ego reported a JavaScript dialog without its type or message"
 
-(* A listing is the space's tabs now: a number whose page is no longer
-   listed is dropped, so a read of it is refused before any run. Each page
-   the space manages says whether a JavaScript dialog blocks it, as a BiDi
-   row does; a page whose dialog state could not be read is listed among
-   the unavailable tabs with why, as BiDi lists a tab it could not read. *)
-type listed_tab = Listed of { page : page; title : string; url : string; active : bool;
-    dialog : Browser_surface.dialog option; provenance : Browser_surface.ego_page }
-  | Unread of { page : page; url : string; reason : string; provenance : Browser_surface.ego_page }
+(* Native inventory is independent of renderer-backed Page.info. A modal
+   retained across SDK-session replacement must not hide its Page identity. *)
+let tab_inventory_script = {js|async function(task) {
+  return (await task.tabs()).map(tab => ({
+    label: tab.label ?? null, targetId: tab.targetId, openedBy: tab.openedBy,
+    title: tab.title, url: tab.url, active: tab.active
+  }));
+}|js}
+type listed_tab = { page : page; title : string; url : string; active : bool;
+  provenance : Browser_surface.ego_page }
 let tab_rows t =
-  let* listed = ask t ~step:"tabs.list" ~args:`Null (String.concat "\n" [
-      "  const rows = [];";
-      "  for (const tab of await task.tabs()) {";
-      "    const row = {label: tab.label ?? null, targetId: tab.targetId, openedBy: tab.openedBy, title: tab.title, url: tab.url, active: tab.active, dialog: null, dialogUnread: null};";
-      "    if (tab.label) { try { row.dialog = " ^ open_dialog "task.page(tab.label)" ^ "; } catch (error) { row.dialogUnread = String(error && error.message || error); } }";
-      "    rows.push(row);";
-      "  }";
-      "  emit({ok: true, value: rows});" ]) in
+  let* listed = ask t ~step:"tabs.list" ~args:`Null
+      ("  emit({ok: true, value: await (" ^ tab_inventory_script ^ ")(task)});") in
   let row json =
     let* ()=match json with
       | `Assoc fields when List.length fields=List.length (List.sort_uniq String.compare (List.map fst fields)) -> Ok ()
@@ -344,14 +340,7 @@ let tab_rows t =
     let page=match provenance.label with Some label -> Managed label | None -> Unmanaged provenance.target_id in
     match field "title" json, field "url" json, field "active" json with
     | Some (`String title), Some (`String url), Some (`Bool active) ->
-      (match field "dialog" json, field "dialogUnread" json with
-       | Some `Null, Some `Null -> Ok (Listed {page; title; url; active; dialog = None;provenance})
-       | Some (`Assoc _ as dialog), Some `Null ->
-         (match ego_dialog dialog with
-          | Ok dialog -> Ok (Listed {page; title; url; active; dialog = Some dialog;provenance})
-          | Error reason -> Ok (Unread {page; url; reason;provenance}))
-       | Some `Null, Some (`String reason) -> Ok (Unread {page; url; provenance;reason = "ego did not read whether a dialog blocks this page: " ^ reason})
-       | _ -> Error "ego listed a tab without its dialog state")
+        Ok {page;title;url;active;provenance}
     | _ -> Error "ego listed a tab without its title, URL or active state" in
   let* rows = match listed with
     | `List rows ->
@@ -360,21 +349,12 @@ let tab_rows t =
         | json :: rest -> let* row = row json in collect (row :: acc) rest in
       collect [] rows
     | _ -> Error "ego answered a tab list that is not a list" in
-  let page_of = function Listed {page; _} | Unread {page; _} -> page in
-  let numbered = List.map (fun row -> remember t (page_of row), row) rows in
-  t.pages <- List.filter (fun (page, _) -> List.exists (fun row -> page_of row = page) rows) t.pages;
-  let tabs, unavailable = List.fold_left (fun (tabs, unavailable) (index, (id, row)) -> match row with
-    | Listed {title; url; active; dialog; provenance; _} ->
-      obj (["id",`Int id;"index",`Int index;"url",str url;"title",str title;"active",`Bool active;
-        "egoPage",Browser_surface.ego_page_to_json provenance]
-        @ match dialog with Some dialog -> ["dialog",Browser_surface.dialog_json dialog] | None -> []) :: tabs, unavailable
-    | Unread {url; reason; provenance; _} ->
-      tabs, obj ["id",`Int id;"index",`Int index;"error",str reason;"url",str url;
-        "egoPage",Browser_surface.ego_page_to_json provenance] :: unavailable)
-    ([], []) (List.mapi (fun index row -> index, row) numbered) in
-  Ok (match unavailable with
-    | [] -> `List (List.rev tabs)
-    | _ :: _ -> obj ["tabs",`List (List.rev tabs);"complete",`Bool false;"unavailableTabs",`List (List.rev unavailable)])
+  let numbered = List.map (fun row -> remember t row.page, row) rows in
+  t.pages <- List.filter (fun (page, _) -> List.exists (fun row -> row.page=page) rows) t.pages;
+  Ok (`List (List.mapi (fun index (id,row) ->
+    obj (["id",`Int id;"index",`Int index;"url",str row.url;"title",str row.title;"active",`Bool row.active;
+      "egoPage",Browser_surface.ego_page_to_json row.provenance]
+      @ Browser_surface.dialog_observation_fields Unobserved)) numbered))
 
 let unmanaged_refused = "is unmanaged in the ego task space; this connection reads only the pages the space manages"
 
@@ -901,43 +881,82 @@ let close_tab t id =
     t.pages <- List.filter (fun (_, known) -> known <> id) t.pages;
     Ok (obj ["tabId",`Int id;"action",str "close_tab";"closed",`Bool true])
 
-(* A dialog is answered on a native managed Page in this Ego Space.
-   The dialog is read before it is
-   answered, since the answer closes it, and the receipt says which one was
-   answered; ego answers false when none is open, and nothing happened. A
-   dialog ego reported in a shape this connection cannot read is left out
-   of the receipt, as BiDi leaves out one it did not track. Prompt text
-   reaches ego as given, as BiDi passes userText. *)
-let no_dialog_refused = "no dialog is open in this tab"
+(* Both explicit dialog reads and answers bind the same canonical Page from
+   fresh native inventory. Neither resolves it through renderer-backed info. *)
+let dialog_page_script = {js|async function(task, args) {
+  const rows = await task.tabs();
+  if (!Array.isArray(rows)) return {error: "native tab inventory is not an array"};
+  const matches = rows.filter(row => row && row.label === args.label);
+  if (matches.length !== 1) return {error: "managed Page is absent or ambiguous in native inventory"};
+  const row = matches[0], page = row.page;
+  if (task.spaceId !== args.spaceId || typeof row.targetId !== "string" || row.targetId.trim() === ""
+      || (row.openedBy !== "agent" && row.openedBy !== "unknown")
+      || !page || page.spaceId !== args.spaceId || page.label !== args.label
+      || page.targetId !== row.targetId || page.openedBy !== row.openedBy)
+    return {error: "native dialog Page identity or origin changed"};
+  return {page};
+}|js}
+let dialog_read_script = {js|async function(task, args, resolve) {
+  const resolved = await resolve(task, args);
+  if (resolved.error) return {ok: false, before: true, error: resolved.error};
+  const info = await resolved.page.info();
+  if (info === null || typeof info !== "object" || Array.isArray(info))
+    return {ok: false, before: true, error: "native Page.info returned invalid state"};
+  if (Object.hasOwn(info, "dialog")) {
+    if (info.dialog === null || typeof info.dialog !== "object" || Array.isArray(info.dialog))
+      return {ok: false, before: true, error: "native Page.info returned invalid dialog state"};
+    return {ok: true, value: {dialog: info.dialog}};
+  }
+  if (typeof info.url !== "string" || typeof info.title !== "string"
+      || !["w", "h", "sx", "sy", "pw", "ph"].every(key => typeof info[key] === "number" && Number.isFinite(info[key])))
+    return {ok: false, before: true, error: "native Page.info omitted its dialog and document observation"};
+  return {ok: true, value: {dialog: null}};
+}|js}
+let dialog_answer_script = {js|async function(task, args, resolve, watchDownloads) {
+  const resolved = await resolve(task, args);
+  if (resolved.error) return {ok: false, before: true, error: resolved.error};
+  const page = resolved.page;
+  watchDownloads(page, args.label);
+  const answered = !args.accept ? await page.dismissDialog()
+    : args.text === null ? await page.acceptDialog() : await page.acceptDialog(args.text);
+  if (answered === false) return {ok: false, before: true, error: "no dialog is open in this tab"};
+  if (answered === true) return {ok: true, value: {answered: true}};
+  return {ok: false, error: "native dialog answer did not return a boolean"};
+}|js}
+let dialog_args t id label = ["spaceId",`Int t.space.id;"label",str label;"tabId",`Int id]
+let dialog_read t args =
+  let* id=match field "tabId" args with Some (`Int id) -> Ok id | _ -> Error "an observed tabId is required" in
+  let* frame_path=Browser_lane.Action.parse_frame_path args in
+  let* ()=match field "mode" args,frame_path with
+    | Some (`String "dialog"),[] -> Ok ()
+    | (None|Some _),([]|_::_) -> Error "an ego contextual read serves mode dialog without framePath only" in
+  let* label=label_of t id |> Result.map_error (function
+    | Live.Before_effect detail|Outcome_unknown detail -> detail
+    | Partial_failure {message;_}|Observed_failure {message;_} -> message) in
+  let* value=ask t ~step:"page.context" ~args:(obj (dialog_args t id label))
+      ("  emit(await (" ^ dialog_read_script ^ ")(task, args, " ^ dialog_page_script ^ ")); ") in
+  let* observation=match field "dialog" value with
+    | Some `Null -> Ok (Browser_surface.Observed None)
+    | Some dialog -> ego_dialog dialog |> Result.map (fun dialog -> Browser_surface.Observed (Some dialog))
+    | None -> Error "native dialog read omitted its observation" in
+  Ok (obj (("tabId",`Int id)::Browser_surface.dialog_observation_fields observation))
 let answer_dialog t id ~accept text =
   let* label = label_of t id in
   let action, interaction = if accept then "accept_dialog", Browser_lane.Action.Accept_dialog text
     else "dismiss_dialog", Browser_lane.Action.Dismiss_dialog in
   match run_step t ~window_s:(tab_window id interaction) ~step:"page.dialog"
-          ~args:(obj ["label",str label;"tabId",`Int id;"accept",`Bool accept;
-            "text",(match text with Some text -> str text | None -> `Null)]) (String.concat "\n" [
-      managed_page;
-      "    const page = task.page(args.label);";
-      "    const open = " ^ open_dialog "page" ^ ";";
-      "    if (open === null) emit({ok: false, before: true, error: " ^ Yojson.Safe.to_string (str no_dialog_refused) ^ "});";
-      "    else {";
-      "      const answered = !args.accept ? await page.dismissDialog() : args.text === null ? await page.acceptDialog() : await page.acceptDialog(args.text);";
-      "      if (answered === false) emit({ok: false, before: true, error: " ^ Yojson.Safe.to_string (str no_dialog_refused) ^ "});";
-      "      else if (answered === true) emit({ok: true, value: {answered: true, dialog: open}});";
-      "      else emit({ok: false, error: \"native dialog answer did not return a boolean\"});";
-      "    }";
-      "  }" ]) with
+          ~args:(obj (dialog_args t id label @ ["accept",`Bool accept;
+            "text",(match text with Some text -> str text | None -> `Null)])) (String.concat "\n" [
+      download_watch;
+      "  emit(await (" ^ dialog_answer_script ^ ")(task, args, " ^ dialog_page_script ^ ", watchDownloads));" ]) with
   | Error failure ->
     Error (effect_failure ~unknown:(Printf.sprintf "the dialog of tab %d may have been answered: list this connection's tabs" id) failure)
   | Ok value ->
     if field "answered" value <> Some (`Bool true) then
       Error (Live.Outcome_unknown (Printf.sprintf
         "the dialog of tab %d may have been answered: native boolean receipt is missing or invalid; list this connection's tabs" id))
-    else
-      let dialog = match field "dialog" value with
-        | Some dialog -> (match ego_dialog dialog with Ok dialog -> ["dialog",Browser_surface.dialog_json dialog] | Error _ -> [])
-        | None -> [] in
-      Ok (obj (["tabId",`Int id;"action",str action;"answered",`Bool true] @ dialog))
+    else Ok (obj (["tabId",`Int id;"action",str action;"answered",`Bool true]
+      @ Browser_surface.dialog_observation_fields Unobserved))
 
 (* ego shows a mouse step's [label] beside its own cursor highlight. It says
    who acts and what, from the same pieces as the BiDi connection's overlay
@@ -1773,7 +1792,7 @@ let dispatch_raw ?actor t ~verb args =
   | Page_scene -> pre (scene t args)
   | Page_capture -> pre (capture t args)
   | Page_goto -> goto t args
-  | Page_context -> Error (Live.Before_effect "framePath reads are not supported on an ego connection")
+  | Page_context -> pre (dialog_read t args)
   | Page_snapshot -> pre (snapshot t args)
   | Page_downloads -> pre (downloads t args)
   | Page_act -> act ?actor t args

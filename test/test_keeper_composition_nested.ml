@@ -803,6 +803,8 @@ let test_public_nested_prepare_run_records_only_admitted_children ?(execution=Ma
      | Invalid _ -> true | _ -> false);
   let envelope_fields = ["artifact_manifest",Tool_output.normalized_artifact_ref_to_json manifest_reference;
     "structured_content",result] in
+  check bool "inline envelope waits for its exact retained manifest" true
+    (Observation.of_data (`Assoc envelope_fields) = Stored manifest_reference);
   check bool "duplicate structured content is refused" true
     (match Observation.of_data (`Assoc (("structured_content",`Assoc []) :: envelope_fields)) with
      | Invalid _ -> true | _ -> false);

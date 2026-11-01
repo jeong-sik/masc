@@ -30,7 +30,8 @@ type child =
 type reading = Absent | Observed of child list | Stored of Tool_output.artifact_ref | Invalid of string
 val of_data : Yojson.Safe.t -> reading
 (** Direct canonical async result data or an exact structured-result envelope.
-    Only the reserved root metadata is read; user output is not searched. *)
+    Only reserved root metadata is read; user output is not searched. An inline
+    envelope's referenced manifest remains [Stored] until its bytes are verified. *)
 val of_content : string -> reading
 (** Complete original ToolResult bytes, never a ledger preview. A manifest
     marker stays [Stored] until its exact bytes have been retrieved. *)

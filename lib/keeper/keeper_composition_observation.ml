@@ -157,9 +157,8 @@ let of_data json =
          (match fields ["artifact_manifest";"structured_content"] ["content"] json with
           | Ok envelope ->
             let reference=List.assoc "artifact_manifest" envelope in
-            let data=List.assoc "structured_content" envelope in
             (match Tool_output.normalized_artifact_ref_of_json reference with
-             | Decoded_normalized_artifact_ref reference when reference.mime=Tool_output.artifact_manifest_mime -> direct data
+             | Decoded_normalized_artifact_ref reference when reference.mime=Tool_output.artifact_manifest_mime -> Stored reference
              | Decoded_normalized_artifact_ref _ | Not_normalized_artifact_ref
              | Invalid_normalized_artifact_ref _ -> Invalid "Invalid structured result manifest reference")
           | Error detail -> Invalid detail)

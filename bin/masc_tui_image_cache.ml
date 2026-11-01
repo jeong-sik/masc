@@ -150,12 +150,14 @@ let subprocess_changed = Condition.create ()
 let subprocess_stopping = ref false
 let subprocesses : (int * bool Atomic.t) list ref = ref []
 
-let () = at_exit (fun () ->
+let stop_subprocesses () =
   Mutex.lock subprocess_mutex;
   subprocess_stopping := true;
   List.iter (fun (_,cancelled) -> Atomic.set cancelled true) !subprocesses;
   while !subprocesses <> [] do Condition.wait subprocess_changed subprocess_mutex done;
-  Mutex.unlock subprocess_mutex)
+  Mutex.unlock subprocess_mutex
+
+let () = at_exit stop_subprocesses
 
 let run_bounded ~deadline_seconds command =
   (* Standard input, output and error are the null device: a decoder that

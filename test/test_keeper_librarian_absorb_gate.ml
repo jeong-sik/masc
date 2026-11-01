@@ -2591,6 +2591,7 @@ let test_completed_captured_replay_does_not_acquire_clock () =
       ~respond:(replay_response ~forward:"mergeable" ~reverse:0.9) in
   let expected = restore_gate ~facts ~absorbed evaluations |> require_replay in
   let actual = Gate.continue_captured
+      ~guidance:(guidance ())
       ~request_clock:(fun () -> Alcotest.fail "completed replay acquired a clock")
       ~keeper_id:"captured-clock" ~authority:(Gate.Gate_available (replay_destination, []))
       ~live_authority:None ~evaluations
@@ -2615,6 +2616,7 @@ let test_a_new_captured_question_needs_a_clock_before_its_intent () =
   let live_authority = Gate.resolve ~keeper_id:"captured-clock" in
   let clock_reads = ref 0 and intents = ref 0 in
   let result = Gate.continue_captured
+      ~guidance:(guidance ())
       ~request_clock:(fun () -> incr clock_reads; Error "fixture clock is absent")
       ~keeper_id:"captured-clock" ~authority:(Gate.replay_authority live_authority)
       ~live_authority:(Some live_authority) ~evaluations:[]
@@ -2637,6 +2639,7 @@ let test_an_inflight_captured_question_needs_no_clock_or_resend () =
   let first = match records with first::_ -> {first with Gate.returned=None}
     | [] -> Alcotest.fail "the original made no request" in
   let result = Gate.continue_captured
+      ~guidance:(guidance ())
       ~request_clock:(fun () -> Alcotest.fail "inflight request acquired a clock")
       ~keeper_id:"captured-clock" ~authority:(Gate.Gate_available (replay_destination, []))
       ~live_authority:None ~evaluations:[first]
@@ -2663,6 +2666,7 @@ let test_cancellation_precedes_an_unavailable_captured_clock () =
   (try Eio.Cancel.sub (fun context ->
      Eio.Cancel.cancel context Exit;
      ignore (Gate.continue_captured
+       ~guidance:(guidance ())
        ~request_clock:(fun () -> Error "fixture clock is absent")
        ~keeper_id:"captured-clock" ~authority:(Gate.replay_authority live_authority)
        ~live_authority:(Some live_authority) ~evaluations:[]
@@ -2927,6 +2931,7 @@ let test_replay_uses_captured_policy_after_override () =
     (* A complete prefix needs no live destination. Requiring it to match new
        wording here would invalidate otherwise complete original evidence. *)
     Gate.continue_captured ~guidance:restored_guidance ~keeper_id:"original-policy-owner"
+      ~request_clock:(fun () -> Alcotest.fail "a completed original acquired a request clock")
       ~authority:(Gate.Gate_available (replay_destination,[])) ~live_authority:(Some live)
       ~evaluations ~new_observations:[] ~facts ~new_claims:[merged] ~superseding:[] ~absorbed
       ~before_evaluate:(fun ~direction:_ ~destinations:_ ~state:_ ~questions:_ ->
@@ -2976,6 +2981,7 @@ let test_continuation_uses_original_policy_with_current_live_destinations () =
     let guidance=Gate.guidance_of_yojson serialized |> (function
       | Ok value -> value | Error detail -> Alcotest.fail detail) in
     let result=Gate.continue_captured ~guidance ~keeper_id
+      ~request_clock:(fun () -> Ok clock)
       ~authority:(Gate.replay_authority original) ~live_authority:(Some live)
       ~evaluations:!evaluations ~new_observations:[] ~facts ~new_claims:[merged;other]
       ~superseding:[] ~absorbed ~before_evaluate:before ~after_evaluate:after

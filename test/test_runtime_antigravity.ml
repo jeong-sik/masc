@@ -86,6 +86,7 @@ let fixture_script
     ?(sleep_s = 0.0)
     ?capture_prompt
     ?capture_pid
+    ?capture_stdout
     ?(stdin = Read_to_end)
     ?line_delay_s
     ?(line_delays = [])
@@ -166,7 +167,13 @@ let fixture_script
            (fun seconds ->
               output_string output (Printf.sprintf "sleep %.3f &\n" seconds))
            pipe_holder_s;
-       output_string output ("printf '%s\\n' " ^ shell_quote line ^ "\n"))
+       let print = "printf '%s\\n' " ^ shell_quote line in
+       output_string output print;
+       Option.iter (fun path ->
+         (* Journal only a successful stdout write, never a planned event. *)
+         output_string output (" && " ^ print ^ " >>" ^ shell_quote path ^ " || exit 91"))
+         capture_stdout;
+       output_char output '\n')
     lines;
   (* The second #28912 shutdown shape: the CLI itself stalling before exit. *)
   Option.iter
@@ -178,7 +185,7 @@ let fixture_script
   path
 ;;
 
-let with_fixture ?require_resume ?required_home ?sleep_s ?capture_prompt ?capture_pid ?stdin ?line_delay_s
+let with_fixture ?require_resume ?required_home ?sleep_s ?capture_prompt ?capture_pid ?capture_stdout ?stdin ?line_delay_s
     ?line_delays ?line_gates ?pipe_holder_s ?exit_delay_s ?stderr_line ?exit_code lines f =
   let path =
     fixture_script
@@ -187,6 +194,7 @@ let with_fixture ?require_resume ?required_home ?sleep_s ?capture_prompt ?captur
       ?sleep_s
       ?capture_prompt
       ?capture_pid
+      ?capture_stdout
       ?stdin
       ?line_delay_s
       ?line_delays
@@ -928,24 +936,30 @@ let test_incomplete_prompt_is_not_reported () =
 let test_a_cli_that_answers_without_reading_the_prompt_does_not_hold_the_turn () =
   (* The CLI never reads stdin and lingers after answering, so a prompt past
      the pipe buffer is still in the pipe when the answer arrives. The turn
-     ends on the lane's own admission window; before it covered the write, it
-     ended only when the CLI finally left. 1.5 s leaves room for spawning the
-     fixture and the first-event [lsof] child-fd sample before the blocked
-     stdin writer expires (#43596), while staying well inside [exit_delay_s]. *)
-  let ready = ref false in
-  with_fixture ~stdin:Leave_unread ~exit_delay_s:5.0 [ init (); result () ] (fun path ->
+     ends on the lane's own admission window. The child's write journal proves
+     the answer independently of the first-event FD probe, which can outlast
+     that window before the init callback runs. *)
+  let journal = Filename.temp_file "masc-antigravity-unread-" ".jsonl" in
+  Fun.protect ~finally:(fun () -> Sys.remove journal) @@ fun () ->
+  let frames = [ init (); result () ] in
+  let sent = ref 0 in
+  let receipts = ref 0 in
+  with_fixture ~stdin:Leave_unread ~capture_stdout:journal ~exit_delay_s:5.0 frames (fun path ->
     match
       run_fixture
         ~prompt:(String.make 1_100_000 'x')
         ~admission_timeout_s:1.5
         ~timeout_s:5.0
-        ~on_conversation_ready:(fun ~conversation_id:_ ->
-          ready := true;
-          Ok ())
+        ~on_prompt_sent:(fun () -> incr sent)
+        ~on_context_submission:(fun _ -> incr receipts)
         path
     with
     | Error (Runtime_antigravity.Timeout seconds) ->
-      check bool "the CLI had answered while the prompt was still in the pipe" true !ready;
+      check string "the child wrote the exact init and terminal frames to stdout"
+        (String.concat "\n" frames ^ "\n")
+        (In_channel.with_open_bin journal In_channel.input_all);
+      check int "the unread prompt never completed transmission" 0 !sent;
+      check int "the unread prompt has no complete-write receipt" 0 !receipts;
       check (float 0.001) "the window is the lane's admission window" 1.5 seconds
     | Error error ->
       fail
@@ -1865,7 +1879,14 @@ let test_response_replay_preserves_the_running_tool_phase () =
 let test_idle_window_rearms_when_the_tool_step_ends () =
   List.iter
     (fun final_state ->
+       let gate = Filename.temp_file "masc-antigravity-tool-ended-" ".ready" in
+       Sys.remove gate;
+       Fun.protect ~finally:(fun () -> if Sys.file_exists gate then Sys.remove gate) @@ fun () ->
+       let finished = ref None in
        with_fixture
+         (* Start the silence only after the consumer observed the tool end;
+            first-event FD sampling cannot consume this producer-side gap. *)
+         ~line_gates:[ 3, gate ]
          ~line_delays:[ 3, tool_step_gap_s ]
          [ init ()
          ; step ~index:1 ~state:"ACTIVE" ~step_type:"tool" ()
@@ -1877,9 +1898,20 @@ let test_idle_window_rearms_when_the_tool_step_ends () =
               run_fixture
                 ~timeout_s:tool_step_idle_window_s
                 ~admission_timeout_s:tool_step_admission_s
+                ~on_stream_event:(function
+                  | Runtime_antigravity.Native_tool_finished {observation; completion} ->
+                    finished := Some (observation.identity, completion.outcome);
+                    Out_channel.with_open_bin gate (fun _ -> ())
+                  | _ -> ())
                 path
             with
             | Error (Runtime_antigravity.Timeout seconds) ->
+              let outcome = if final_state = "DONE" then Runtime_native_tools.Completion_reported
+                else Runtime_native_tools.Error_reported in
+              check bool (final_state ^ ": matching terminal tool update observed") true
+                (!finished = Some (Some (Runtime_native_tools.Provider_step
+                  {conversation_id="conversation-1";step_index=1}), outcome));
+              check bool "the observed tool end released the result's delay" true (Sys.file_exists gate);
               check
                 (float 0.001)
                 (final_state ^ ": the idle window fired")

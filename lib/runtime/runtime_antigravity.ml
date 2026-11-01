@@ -4,6 +4,8 @@
     tools. MASC owns argv construction, environment admission, process
     lifetime, strict stream-json decoding, and durable conversation identity. *)
 
+module Protocol = Runtime_antigravity_protocol
+
 type effort =
   | Low
   | Medium
@@ -110,7 +112,7 @@ let default_config ~cwd ~model =
    spawn slot forever (#43259): 2h of total event silence is past any
    plausible healthy tool, and the kill is a typed, visible Timeout rather
    than a hang. The owner retains cancellation authority throughout. *)
-type read_phase =
+type read_phase = Protocol.read_phase =
   | Awaiting_admission
   | Model_turn
   | Tool_step_running
@@ -123,11 +125,11 @@ let timeout_s_for_phase config = function
   | Tool_step_running -> Some tool_step_idle_timeout_s
 ;;
 
-type conversation_mode =
+type conversation_mode = Protocol.conversation_mode =
   | Start
   | Resume of { conversation_id : string }
 
-type usage =
+type usage = Protocol.usage =
   { input_tokens : int
   ; output_tokens : int
   ; thinking_tokens : int
@@ -141,7 +143,7 @@ type usage =
    after 110 turns in one hour (#28008). Adding that member leaves the
    next one to do it again, so an unseen mode is carried rather than rejected.
    [step_type] took the same route in #28027. *)
-type permission_mode =
+type permission_mode = Protocol.permission_mode =
   | Always_proceed
   | Request_review
   | Unrecognized_permission_mode of string
@@ -160,9 +162,9 @@ type turn_result =
   ; wall_duration_s : float
   }
 
-type response_ending = Response_done | Response_error
+type response_ending = Protocol.response_ending = Response_done | Response_error
 
-type stream_event =
+type stream_event = Protocol.stream_event =
   | Turn_started of
       { conversation_id : string
       ; model : string
@@ -195,7 +197,7 @@ let emit_stream_event on_stream_event event =
          (Printexc.to_string exn))
 ;;
 
-type error =
+type error = Protocol.error =
   | Invalid_config of string
   | Spawn_failed of string
   | Protocol_error of
@@ -298,7 +300,7 @@ let parse_usage stage fields =
   else Ok { input_tokens; output_tokens; thinking_tokens; cache_read_tokens; total_tokens }
 ;;
 
-type wire_event =
+type wire_event = Protocol.wire_event =
   | Init of
       { conversation_id : string
       ; model : string
@@ -330,12 +332,12 @@ type wire_event =
       ; usage : usage
       }
 
-and step_state =
+and step_state = Protocol.step_state =
   | Active
   | Done
   | Step_error
 
-and step_type =
+and step_type = Protocol.step_type =
   | Agent_response
   | System_message
   | Tool
@@ -344,7 +346,7 @@ and step_type =
   | Checkpoint
   | Unrecognized of string
 
-and result_status =
+and result_status = Protocol.result_status =
   | Success
   | Result_error
 
@@ -698,106 +700,18 @@ let terminate_spawned_process ~sw ~clock proc stdin_w =
       proc)
 ;;
 
-type protocol_state =
-  { init : (string * string * permission_mode) option
-  ; result : (result_status * string * string option * int * usage) option
-  ; tool_steps : int
-  ; tool_errors : int
-  ; last_step : (step_type * step_state) option
-    (* The step the CLI reported last; [read_phase] is its only reader. *)
-  ; closed_responses : (int * (response_ending * string option)) list
-  ; text_streamed : bool
-    (* Whether any step update carried a piece of the answer. The result
-       event repeats the whole response, so forwarding it again would show
-       the answer twice; it is forwarded only when nothing was streamed,
-       which keeps a CLI that reports only a result readable. *)
-  }
-
-let initial_protocol_state =
-  { init = None
-  ; result = None
-  ; tool_steps = 0
-  ; tool_errors = 0
-  ; last_step = None
-  ; closed_responses = []
-  ; text_streamed = false
-  }
-;;
-
-(* Only a tool step's ACTIVE update opens the exemption. Every other step
-   type, seen or unseen (agy's subagent steps carry a step_type the docs do
-   not name), keeps the idle window armed, which is what every step got
-   before, and a later step update of any type re-arms it. *)
-let read_phase state =
-  match state.init with
-  | None -> Awaiting_admission
-  | Some _ ->
-    (match state.last_step with
-     | Some (Tool, Active) -> Tool_step_running
-     | None
-     | Some (Tool, (Done | Step_error))
-     | Some
-         ( ( Agent_response
-           | System_message
-           | User_input
-           | Internal
-           | Checkpoint
-           | Unrecognized _ )
-         , (Active | Done | Step_error) ) -> Model_turn)
-;;
-
-let expected_conversation_id = function
-  | Start -> None
-  | Resume { conversation_id } -> Some conversation_id
-;;
-
-let verify_identity ~stage ~expected actual =
-  match expected with
-  | Some value when not (String.equal value actual) ->
-    protocol_error
-      stage
-      (Printf.sprintf "conversation identity mismatch: expected %S, got %S" value actual)
-  | None | Some _ -> Ok ()
-;;
-
-(* A restatement the CLI left blank makes no claim, so there is nothing to
-   contradict -- and the id the turn carries comes from the init event either
-   way. Requiring it non-empty turned a value nothing consumes into a terminal
-   parse error: 110 turns over five days died at attempt=1 with
-   [field "conversation_id" must not be empty], across three keepers. This is
-   the shape #28010 closed for [step_index] and #28008/#28027 closed for
-   [permission_mode] and [step_type]. *)
-let verify_restatement ~stage ~expected = function
-  | None -> Ok ()
-  | Some actual -> verify_identity ~stage ~expected:(Some expected) actual
-;;
-
+(* Protocol proposals contain no callbacks. Apply the ordered obligations
+   under the driver's existing callback deadline, then publish the candidate.
+   Readiness, terminal and stream callbacks retain their distinct failure
+   policies; a candidate itself is no evidence that an obligation happened. *)
 let apply_event (config : config) ~conversation_mode ~on_conversation_ready
-    ~on_stream_event ~on_terminal_received state = function
-  | Init { conversation_id; model; cwd; permission_mode } ->
-    let stage = "init event" in
-    if Option.is_some state.init
-    then protocol_error stage "received more than one init event"
-    else if Option.is_some state.result
-    then protocol_error stage "received init after result"
-    else
-      let* () =
-        verify_identity
-          ~stage
-          ~expected:(expected_conversation_id conversation_mode)
-          conversation_id
-      in
-      if not (String.equal model config.model)
-      then
-        protocol_error
-          stage
-          (Printf.sprintf "model mismatch: expected %S, got %S" config.model model)
-      else if not (String.equal cwd config.cwd)
-      then
-        protocol_error
-          stage
-          (Printf.sprintf "cwd mismatch: expected %S, got %S" config.cwd cwd)
-      else
+    ~on_stream_event ~on_terminal_received state event =
+  let* transition = Protocol.advance
+      ~expected_model:config.model ~expected_cwd:config.cwd
+      ~conversation_mode state event in
+  let rec interpret = function
+    | [] -> Ok ()
+    | Protocol.Admit_conversation { conversation_id } :: rest ->
         let callback_result =
           try on_conversation_ready ~conversation_id with
           | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
@@ -807,143 +721,16 @@ let apply_event (config : config) ~conversation_mode ~on_conversation_ready
         in
         (match callback_result with
          | Error detail -> Error (State_callback_failed detail)
-         | Ok () ->
-           emit_stream_event
-             on_stream_event
-             (Turn_started { conversation_id; model });
-           Ok { state with init = Some (conversation_id, model, permission_mode) })
-  | Step_update
-      { conversation_id
-      ; step_index
-      ; state = step_state
-      ; step_type
-      ; tool_name
-      ; text_delta
-      } ->
-    let stage = "step_update event" in
-    (match state.init with
-     | None -> protocol_error stage "received step_update before init"
-     | Some (expected, _, _) ->
-       let* () = verify_restatement ~stage ~expected conversation_id in
-       if Option.is_some state.result
-       then protocol_error stage "received step_update after result"
-       else
-         let ending = match step_type, step_state with
-           | Agent_response, Done -> Some Response_done
-           | Agent_response, Step_error -> Some Response_error
-           | Agent_response, Active
-           | (System_message | Tool | User_input | Internal | Checkpoint | Unrecognized _), _ -> None in
-         let* replay = match Option.bind step_index (fun index -> List.assoc_opt index state.closed_responses) with
-           | None -> Ok false
-           | Some (previous_ending, previous_delta) ->
-               (match ending with
-                | Some ending when ending = previous_ending
-                    && (text_delta = previous_delta || text_delta = None || text_delta = Some "") -> Ok true
-                | Some _ | None -> protocol_error stage "response content changed after its step ended") in
-         if replay then Ok state
-         else
-         (* The answer reaches the reader as the model writes it. An empty
-            delta says nothing, so it is not forwarded; [text_streamed]
-            records that the result event has nothing left to add. *)
-         let streamed =
-           match text_delta with
-           | Some text when text <> "" ->
-             emit_stream_event on_stream_event (Text_delta { step_index; text });
-             true
-           | Some _ | None -> false
-         in
-         let closed_responses = match step_index, ending with
-           | Some step_index, Some ending ->
-               emit_stream_event on_stream_event (Text_completed {step_index; ending});
-               (step_index, (ending, text_delta)) :: state.closed_responses
-           | (Some _ | None), None | None, Some _ -> state.closed_responses in
-         let is_tool = step_type = Tool in
-         if is_tool
-         then (
-           let observation : Runtime_native_tools.observation =
-             { identity =
-                 Option.map
-                   (fun step_index ->
-                      Runtime_native_tools.Provider_step
-                        { conversation_id = expected; step_index })
-                   step_index
-             ; tool_name
-             ; origin =
-                 (match tool_name with
-                  | Some "call_mcp_tool" -> Runtime_native_tools.Mcp_wrapper
-                  | Some _ | None -> Runtime_native_tools.Built_in)
-             }
-           in
-           match step_state with
-           | Active ->
-             emit_stream_event on_stream_event (Native_tool_started observation)
-           | Done ->
-             emit_stream_event on_stream_event
-               (Native_tool_finished {observation;
-                 completion={outcome=Runtime_native_tools.Completion_reported; exit_code=None}})
-           | Step_error ->
-             emit_stream_event on_stream_event
-               (Native_tool_finished {observation;
-                 completion={outcome=Runtime_native_tools.Error_reported; exit_code=None}}));
-         Ok
-           { state with
-             closed_responses;
-             tool_steps =
-               state.tool_steps
-               + if is_tool && step_state = Active then 1 else 0
-           ; tool_errors =
-               state.tool_errors
-               + if is_tool && step_state = Step_error then 1 else 0
-           ; last_step = Some (step_type, step_state)
-           ; text_streamed = state.text_streamed || streamed
-           })
-  | Result { conversation_id; status; response; error; num_turns; usage } ->
-    let stage = "result event" in
-    (match state.init, status with
-     (* A rejected invocation is a well-formed stream, not a broken one: the
-        CLI emits one result event carrying its own account of the refusal and
-        never opens a conversation, so there is no init to match against.
-        Reporting a protocol error here would discard the only description of
-        what went wrong — a missing --effort read as "conversation_id must not
-        be empty" (2026-08-25, gemini-3.7-flash). *)
-     | None, Result_error ->
-       Error
-         (Turn_failed
-            (match error with
-             | Some detail -> detail
-             | None -> "status=ERROR before init"))
-     | None, Success -> protocol_error stage "received result before init"
-     | Some (expected, model, _), _ ->
-       let* () = verify_restatement ~stage ~expected conversation_id in
-       if Option.is_some state.result
-       then protocol_error stage "received more than one result event"
-       else (
-         on_terminal_received ();
-         (* The result repeats the whole response the step updates already
-            carried, so it is forwarded only when none of them did. *)
-         (if state.text_streamed
-          then ()
-          else
-            match status with
-            | Success ->
-              emit_stream_event
-                on_stream_event
-                (Text_delta { step_index = None; text = response })
-            | Result_error ->
-              if Agent_core.Response_shape.has_deliverable_content
-                   (Agent_core.Response_shape.summarize_blocks
-                      [ Llm_provider.Types.Text response ])
-              then
-                emit_stream_event
-                  on_stream_event
-                  (Text_delta { step_index = None; text = response }));
-         (* The result event is the only usage the CLI reports, and it comes
-            on a failed turn too. It is reported here, before the turn is
-            judged, so a turn that ends in an error still reports it. *)
-         emit_stream_event
-           on_stream_event
-           (Usage_reported { conversation_id = expected; model; num_turns; usage });
-         Ok { state with result = Some (status, response, error, num_turns, usage) }))
+         | Ok () -> interpret rest)
+    | Protocol.Terminal_received :: rest ->
+        on_terminal_received ();
+        interpret rest
+    | Protocol.Stream event :: rest ->
+        emit_stream_event on_stream_event event;
+        interpret rest
+  in
+  let* () = interpret (Protocol.obligations transition) in
+  Ok (Protocol.next_state transition)
 ;;
 
 let status_to_string = function
@@ -1087,15 +874,15 @@ let run_spawned ?home_dir ?before_spawn ?on_spawned ?on_prompt_sent ?on_context_
        [settle_failed_process] before leaving the switch. *)
     Eio.Switch.on_release sw (fun () ->
       if not !process_settled then signal_spawned_process proc stdin_w);
-    let state = ref initial_protocol_state in
+    let state = ref Protocol.initial in
     (try
        (* The result event completes the protocol — nothing after it is
           attribution or content (apply_event rejects post-result events).
           EOF cannot be the completion contract: the CLI's own shutdown can
           hang while a child process keeps stdout open (#28912), which
           turned already-served turns into idle timeouts. *)
-       while Option.is_none !state.result do
-         let phase = read_phase !state in
+       while Option.is_none (Protocol.terminal !state) do
+         let phase = Protocol.read_phase !state in
          let read_timeout_s =
            timeout_s_for_phase config phase
          in
@@ -1233,73 +1020,51 @@ let run_turn ?(conversation_mode = Start) ?home_dir ?before_spawn ?on_spawned ?o
   in
   let* status, state, stderr = run_result in
   let wall_duration_s = max 0.0 (Eio.Time.now clock -. started_at) in
-  match status, state.init, state.result with
-  (* A parsed Success result is the completion contract regardless of how
-     the process ended: the reply is already durable in the CLI's own
-     conversation store, and the exit status only describes the CLI's
-     shutdown (which can hang and get reaped, #28912). *)
-  | _, Some (_, model, _), Some (Success, text, _, _, _)
-    when not
-           (Agent_core.Response_shape.has_deliverable_content
-              (Agent_core.Response_shape.summarize_blocks
-                 [ Llm_provider.Types.Text text ])) ->
-    Error
-      (Turn_failed
-         (empty_success_detail ~model ~tool_steps:state.tool_steps stderr))
-  | _, Some (conversation_id, model, permission_mode),
-    Some (Success, text, _, num_turns, usage) ->
-    emit_stream_event on_stream_event (Turn_finished { text });
+  let complete (terminal : Protocol.terminal) ~trajectory_error =
+    emit_stream_event on_stream_event (Turn_finished { text = terminal.response });
     Ok
-      { conversation_id
-      ; model
-      ; text
-      ; num_turns
-      ; usage
-      ; permission_mode
-      ; tool_steps = state.tool_steps
-      ; tool_errors = state.tool_errors
-      ; trajectory_error = None
+      { conversation_id = terminal.conversation_id
+      ; model = terminal.model
+      ; text = terminal.response
+      ; num_turns = terminal.num_turns
+      ; usage = terminal.usage
+      ; permission_mode = terminal.permission_mode
+      ; tool_steps = terminal.tool_steps
+      ; tool_errors = terminal.tool_errors
+      ; trajectory_error
       ; resumed =
           (match conversation_mode with
            | Start -> false
            | Resume _ -> true)
       ; wall_duration_s
       }
-  (* The CLI reports status=ERROR whenever any step of the trajectory
-     errored, including a tool call the model already corrected and went
-     on from. A reply was still produced, so the turn completed; the step
-     error is carried as [trajectory_error] and counted in [tool_errors]. *)
-  | _, Some (conversation_id, model, permission_mode),
-    Some (Result_error, text, error, num_turns, usage)
-    when Agent_core.Response_shape.has_deliverable_content
-           (Agent_core.Response_shape.summarize_blocks
-              [ Llm_provider.Types.Text text ]) ->
-    emit_stream_event on_stream_event (Turn_finished { text });
-    Ok
-      { conversation_id
-      ; model
-      ; text
-      ; num_turns
-      ; usage
-      ; permission_mode
-      ; tool_steps = state.tool_steps
-      ; tool_errors = state.tool_errors
-      ; trajectory_error =
-          Some (match error with Some detail -> detail | None -> "status=ERROR")
-      ; resumed =
-          (match conversation_mode with
-           | Start -> false
-           | Resume _ -> true)
-      ; wall_duration_s
-      }
-  | _, Some _, Some (Result_error, _, error, _, _) ->
-    let detail = match error with Some detail -> detail | None -> "status=ERROR" in
-    Error (Turn_failed detail)
-  | _, None, Some _ ->
-    Error (Protocol_error { stage = "process completion"; detail = "missing init event" })
-  | `Exited 0, _, None ->
+  in
+  match status, Protocol.terminal state with
+  | _, Some terminal ->
+    (* The parsed result completes the protocol regardless of how the CLI
+       shut down. The core guarantees its original admitted identity exists.
+       Final interpretation and Turn_finished remain after process drain. *)
+    let deliverable =
+      Agent_core.Response_shape.has_deliverable_content
+        (Agent_core.Response_shape.summarize_blocks
+           [ Llm_provider.Types.Text terminal.response ]) in
+    (match terminal.status with
+     | Success ->
+         if deliverable then complete terminal ~trajectory_error:None
+         else Error (Turn_failed
+           (empty_success_detail ~model:terminal.model
+              ~tool_steps:terminal.tool_steps stderr))
+     | Result_error ->
+         let detail = match terminal.error with
+           | Some detail -> detail
+           | None -> "status=ERROR" in
+         (* A corrected trajectory can report ERROR with a real reply.
+            Prior streamed text cannot rescue an empty terminal response. *)
+         if deliverable then complete terminal ~trajectory_error:(Some detail)
+         else Error (Turn_failed detail))
+  | `Exited 0, None ->
     Error (Protocol_error { stage = "process completion"; detail = "missing result event" })
-  | (`Exited _ | `Signaled _), _, None ->
+  | (`Exited _ | `Signaled _), None ->
     let exit = status_to_string status in
     let stderr = redact_stderr_tail stderr in
     Error (Process_exited (if stderr = "" then exit else exit ^ ": " ^ stderr))

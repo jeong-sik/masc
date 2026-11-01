@@ -182,6 +182,8 @@ let goal_ids events =
        | Candle_event.Snapshot { goal_id; _ }
        | Candle_event.Payout_owed { goal_id; _ }
        | Candle_event.Candidates { goal_id; _ }
+       | Candle_event.Candidates_fenced { goal_id; _ }
+       | Candle_event.Candidate_window_held { goal_id; _ }
        | Candle_event.Unattributed { goal_id; _ }
        | Candle_event.Payout_failed { goal_id; _ } -> Some goal_id
        | Candle_event.Paid p -> Some p.identity.goal_id

@@ -6,8 +6,9 @@
     Keeper to pay is finished right there with [Unattributed], without a model
     call. Otherwise the payout stays waiting for the appraiser.
 
-    Nothing is written unless every linked Task reads. A read that fails is
-    reported and tried again on the next pass. *)
+    Candidate decisions require every linked Task to read. When a partial read
+    observes a boundary ambiguity, the known facts and unknown entries are
+    retained as a hold; a missing Task alone is retried on the next pass. *)
 
 type outcome =
   | Wrote_candidates of { goal_id : string }
@@ -18,6 +19,13 @@ type outcome =
       (** [Candidates] was already there and names a Keeper. Nothing written. *)
   | Superseded of { goal_id : string }
       (** The ledger changed while the Tasks were read, so nothing was written. *)
+  | Held_window of { goal_id : string; issues : Candle_payout.window_issue list; recorded : bool }
+      (** The payout cannot decide a complete candidate set from the retained
+          observation. [recorded] is true only when this pass wrote the hold.
+          No appraisal or terminal payout should be started. *)
+  | Waiting_task of { goal_id : string; issues : Candle_payout.window_issue list }
+      (** Task sources did not yield a complete observation. A later read can
+          recover; no candidate set or terminal payout is written. *)
   | Retry_later of { goal_id : string; detail : string }
       (** The payout could not be prepared now. *)
 
@@ -34,11 +42,14 @@ val real_sources : Workspace_utils_backend_setup.config -> sources
 val drain_with :
   sources:sources
   -> now:(unit -> float)
-  -> base_path:string
+  -> config:Workspace_utils_backend_setup.config
   -> (outcome list, string) result
 (** One pass over every waiting payout, in the order they were first owed. One
-    payout failing does not stop the others. Off or disabled Candle answers
-    [Ok []]. [Error] when the ledger cannot be read. *)
+    payout failing does not stop the others. Off, invalid configuration or
+    unavailable initial ledger recovery answers [Ok []]. An unavailable
+    appraiser does not prevent retaining Task observations. A new observation
+    and its single ledger append attempt run under the backlog lease fence.
+    [Error] when the recovered ledger cannot be read. *)
 
 val drain_once :
   now:(unit -> float) -> Workspace_utils_backend_setup.config -> (outcome list, string) result

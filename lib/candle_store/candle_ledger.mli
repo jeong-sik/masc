@@ -13,7 +13,8 @@
     rules ({!Candle_payout.validate_record}); a read judges a stored settlement
     by the Candidates list recorded when it was written
     ({!Candle_payout.validate_replay}), so changing the eligibility window does
-    not make an old row unreadable. *)
+    not make an old row unreadable. Candidate-window hold facts are validated
+    and retained before any later payout can be admitted. *)
 
 val path : base_path:string -> string
 
@@ -62,6 +63,16 @@ type 'error update_error =
           append. Nothing was written. *)
 
 val update_error_to_string : ('error -> string) -> 'error update_error -> string
+
+type 'a update_attempt = Updated of 'a | Changed
+
+val update_once :
+  base_path:string
+  -> (view -> (Candle_event.t list * 'result, 'error) result)
+  -> ('result update_attempt, 'error update_error) result
+(** One read/decide/append attempt. [Changed] means another writer changed the
+    cursor before this append, and no events from this attempt were written.
+    The caller can release other locks and retry later. *)
 
 val update :
   base_path:string

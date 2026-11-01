@@ -6,9 +6,9 @@ let identity (w : Candle_payout.waiting) : A.identity =
   {goal_id=w.goal_id;request_id=w.request_id;verification_run_id=w.verification_run_id}
 let candidate_tasks (w : Candle_payout.waiting) events =
   List.find_map (fun (event : E.t) -> match event.body with
-    | E.Candidates c when c.goal_id = w.goal_id && c.request_id = w.request_id
+    | (E.Candidates c | E.Candidates_fenced c) when c.goal_id = w.goal_id && c.request_id = w.request_id
         && c.verification_run_id = w.verification_run_id -> Some c.tasks
-    | E.Half_life_set _ | E.Candidates _ | E.Snapshot _ | E.Payout_owed _ | E.Unattributed _ | E.Paid _ | E.Equipped _ | E.Purchased _ | E.Granted _ | E.Gifted _ | E.Gifted_item _ | E.Payout_failed _ -> None) events
+    | E.Half_life_set _ | E.Candidates _ | E.Candidates_fenced _ | E.Candidate_window_held _ | E.Snapshot _ | E.Payout_owed _ | E.Unattributed _ | E.Paid _ | E.Equipped _ | E.Purchased _ | E.Granted _ | E.Gifted _ | E.Gifted_item _ | E.Payout_failed _ -> None) events
 let call ~(appraise : A.runner) ~identity request =
   let* answer = appraise ~identity request in
   let* decision = A.decode request (A.decision_json answer.decision) |> Result.map_error (fun detail -> A.Invalid_response detail) in
@@ -29,7 +29,7 @@ let relations ~appraise ~identity goal tasks ids =
          (match answer.decision with
           | A.Relation_decided relation -> loop ({A.task_id;relation;trace=answer.trace} :: accumulated) rest
           | A.Grade_decided _ | A.Weights_decided _ -> Error (A.Invalid_response "appraiser returned the wrong stage"))
-       | Some E.Deleted | None -> Error (A.Transport_unavailable ("candidate task is absent: " ^ task_id))) in
+       | Some (E.Deleted | E.Unobserved | E.Found_uncertain _) | None -> Error (A.Transport_unavailable ("candidate task is absent: " ^ task_id))) in
   loop [] ids
 let related_tasks tasks task_keepers relations =
   List.filter_map (fun (r : A.task_relation) ->
@@ -37,7 +37,7 @@ let related_tasks tasks task_keepers relations =
     | A.Related, Some (E.Found {title;_}), Some (Some keeper) ->
       Some {A.task_id=r.task_id;title;keeper}
     | A.Unrelated, _, _
-    | A.Related, (Some E.Deleted | None), _
+    | A.Related, (Some (E.Deleted | E.Unobserved | E.Found_uncertain _) | None), _
     | A.Related, Some (E.Found _), (Some None | None) -> None) relations
 let overdue_hours_of (pass : Candle_payout.pass) (waiting : Candle_payout.waiting) =
   match Goal_due.read pass.due_date with
@@ -67,7 +67,8 @@ let validate_due_date (waiting : Candle_payout.waiting) events body =
     | E.Payout_failed _, Ok _ ->
       Error "Payout_failed cannot settle a Snapshot with a readable due_date"
     | (E.Half_life_set _ | E.Equipped _ | E.Purchased _ | E.Granted _
-      | E.Gifted _ | E.Gifted_item _ | E.Snapshot _ | E.Payout_owed _ | E.Candidates _), _ ->
+      | E.Gifted _ | E.Gifted_item _ | E.Snapshot _ | E.Payout_owed _ | E.Candidates _ | E.Candidates_fenced _
+      | E.Candidate_window_held _), _ ->
       Error "settlement does not name the confirmed verifier run"
 let decide ~appraise ~(policy : Candle_config.payout_policy) events (waiting : Candle_payout.waiting) =
   let identity = identity waiting in
@@ -168,7 +169,7 @@ let settle ~now ~appraise ~policy ~base_path events (waiting : Candle_payout.wai
         |> Result.map_error (fun detail -> A.Invalid_response detail) in
       let credit = match body with
         | E.Paid payment -> Candle_balance.credit prepared.balance ~at payment |> Result.map (fun _ -> ())
-        | E.Half_life_set _ | E.Unattributed _ | E.Equipped _ | E.Purchased _ | E.Granted _ | E.Gifted _ | E.Gifted_item _ | E.Payout_failed _ | E.Snapshot _ | E.Payout_owed _ | E.Candidates _ -> Ok () in
+        | E.Half_life_set _ | E.Unattributed _ | E.Equipped _ | E.Purchased _ | E.Granted _ | E.Gifted _ | E.Gifted_item _ | E.Payout_failed _ | E.Snapshot _ | E.Payout_owed _ | E.Candidates _ | E.Candidates_fenced _ | E.Candidate_window_held _ -> Ok () in
       (match credit, current_policy.half_life with
        | Ok (), (Candle_decay.Off | Candle_decay.Hours _) ->
          Ok (prepared.policy_events @ [{E.at;body}], Settled waiting.goal_id)

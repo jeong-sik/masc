@@ -55,13 +55,80 @@ type pass =
 (** What the payout of a [Waiting] Goal takes from its [Snapshot]. *)
 
 val pass_of : waiting -> Candle_event.t list -> pass option
-(** The [Snapshot] of the same Goal, request, verifier run and pass time as the payout. *)
+(** The first [Snapshot] of the same Goal, request, verifier run and pass time;
+    used when replaying previously settled history. *)
+
+val current_pass_of : waiting -> Candle_event.t list -> (pass, string) result
+(** The confirmed Snapshot for a new decision. Identical repeated facts are
+    accepted; conflicting Snapshots with the same run and pass time are refused. *)
 
 type candidates =
   { candidate_task_ids : string list
   ; candidate_keepers : string list
   ; candidate_task_keepers : (string * string option) list
   }
+
+type boundary = Goal_created | Human_confirmed
+
+type window_issue =
+  | Same_second of { task_id : string; boundary : boundary; completed_at : Candle_time.t }
+  | Task_missing of { task_id : string }
+  | Task_unobserved of { task_id : string }
+  | Unfenced_nonterminal of { task_id : string }
+  | Reversed_window of { goal_created_at : Candle_time.t; confirmed_at : Candle_time.t }
+
+val window_issues :
+  goal_created_at:Candle_time.t
+  -> confirmed_at:Candle_time.t
+  -> (string * Candle_event.task_lookup) list
+  -> window_issue list
+(** A whole-second completion equal to either applicable endpoint has no
+    recoverable ordering. A missing Task's status and completion are unknown.
+    A reversed Goal window has no trustworthy ordering. None of these facts
+    proves a contribution or its absence. *)
+
+val window_issue_to_string : window_issue -> string
+
+type observation_provenance = Unfenced | Backlog_fenced
+
+val observation_issues :
+  provenance:observation_provenance
+  -> goal_created_at:Candle_time.t
+  -> confirmed_at:Candle_time.t
+  -> (string * Candle_event.task_lookup) list
+  -> window_issue list
+(** Also refuses historical nonterminal observations whose order against Task
+    commits was not protected by the backlog fence. *)
+
+type held_window =
+  { passed_at : Candle_time.t
+  ; confirmed_at : Candle_time.t
+  ; tasks : (string * Candle_event.task_lookup) list
+  ; task_keepers : (string * Candle_event.keeper_observation) list
+  }
+
+val held_window_of : waiting -> Candle_event.t list -> held_window option
+(** The frozen observation for an unresolved payout window, if one exists. *)
+
+val candidate_observations_of :
+  waiting -> Candle_event.t list -> ((string * Candle_event.task_lookup) list * observation_provenance) option
+(** Task observations in an existing [Candidates] row. *)
+
+val classify_keepers :
+  is_keeper:(string -> bool) option
+  -> (string * Candle_event.task_lookup) list
+  -> (string * Candle_event.keeper_observation) list
+(** Freeze the Keeper decision for each observation, including Tasks whose
+    eligibility has not yet been decided. [None] preserves an unavailable
+    Keeper registry as unknown rather than guessing that an assignee is not a
+    Keeper. *)
+
+val classify_fragments :
+  is_keeper:(string -> bool) option
+  -> (string * Candle_event.task_lookup) list
+  -> (string * Candle_event.task_lookup) list
+(** Preserve the Keeper classification for every identifiable partial row,
+    without turning conflicting rows into a definite Task assignee. *)
 
 val candidates_of : waiting -> Candle_event.t list -> candidates option
 (** What the [Candidates] row written for the payout's request and verifier run decided. *)
@@ -79,11 +146,11 @@ val validate_settlement : waiting -> Candle_event.t list -> Candle_event.body ->
     atomic append. *)
 
 val validate_record : Candle_event.t list -> Candle_event.body -> (unit, string) result
-(** Admit a new settlement against preceding rows in file order, under today's
-    rules. A settlement requires an open obligation, its matching Snapshot, and
-    durable Candidates whose candidate list equals today's eligible subset.
-    Non-settlement records do not change this admission policy. Call it when a
-    row is written. *)
+(** Admit a new settlement or candidate-window observation against preceding
+    rows in file order, under today's rules. A hold must match the open payout
+    and complete linked-Task observations; later Candidates, replacement
+    obligations and settlements for that Goal are refused. A settlement otherwise requires a matching Snapshot
+    and durable Candidates whose list equals today's eligible subset. *)
 
 val validate_replay : Candle_event.t list -> Candle_event.body -> (unit, string) result
 (** Read a stored settlement back against preceding rows in file order. It
@@ -92,15 +159,17 @@ val validate_replay : Candle_event.t list -> Candle_event.body -> (unit, string)
     when the row was written, and re-deciding it under a later rule would make
     one old row unreadable for every Goal. The list must still name observed,
     Snapshot-linked tasks, and the open obligation, durable Candidates, relation
-    coverage, recipient eligibility and weights are checked as before. *)
+    coverage, recipient eligibility and weights are checked as before. A prior
+    held-window fact is never bypassed by replay. *)
 
 val decide_candidates :
   goal_created_at:Candle_time.t
   -> confirmed_at:Candle_time.t
   -> is_keeper:(string -> bool)
   -> (string * Candle_event.task_lookup) list
-  -> candidates
+  -> (candidates, window_issue list) result
 (** A candidate Task was found, is [done], and was completed after the Goal was
-    created and no later than the confirmation. A candidate keeper is a name
+    created and no later than the confirmation. Returns all unresolved window
+    issues rather than deciding a partial set. A candidate keeper is a name
     that [is_keeper] accepts among the candidate Tasks' assignees, listed once,
     in name order. *)

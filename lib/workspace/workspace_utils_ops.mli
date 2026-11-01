@@ -168,6 +168,13 @@ val with_file_lock : config -> string -> (unit -> 'a) -> 'a
 val with_file_lock_r :
   config -> string -> (unit -> 'a) -> ('a, masc_error) result
 
+type 'a try_file_lock = Lock_acquired of 'a | Lock_contended | Lock_unavailable of string
+
+val try_with_file_lock : config -> string -> (unit -> 'a) -> 'a try_file_lock
+(** Attempt a backend lock once without waiting. The acquired body owns the
+    ordinary workspace lease; callers that publish under it must still use
+    {!commit_under_held_lease} to fence lease expiry. *)
+
 (** Why a publication under a held lease did not run.
 
     Each distributed-lock acquisition owns its lease under a token of its

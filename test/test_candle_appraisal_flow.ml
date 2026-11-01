@@ -21,7 +21,8 @@ let funding_rows (at : Candle_time.t) (payment : Candle_payment.t) : Candle_even
        verification_run_id=identity.verification_run_id;
        tasks=List.map (fun id -> id, Candle_event.Found
          {title="Completed contribution";assignee=Some keeper;
-          status=Candle_event.Done {completed_at=at}}) task_ids;
+          status=Candle_event.Done {completed_at=(match Candle_time.of_rfc3339 "2026-09-20T00:00:00Z" with
+            | Ok value -> value | Error detail -> Alcotest.fail detail)}}) task_ids;
        candidate_task_ids=task_ids;candidate_keepers=[keeper];
        candidate_task_keepers=List.map (fun id -> id, Some keeper) task_ids}}
   ; {Candle_event.at;body=Candle_event.Paid payment}
@@ -118,7 +119,7 @@ let prepare ?(keepers = ["keeper-a";"keeper-b"]) config =
   let sources : Candle_candidates.sources =
     {task_lookups=(fun ~goal_id:_ ids -> Ok (List.map (fun id -> id, List.assoc id task_rows) ids));
      is_keeper=(fun () -> Ok (fun name -> List.mem name keepers))} in
-  Candle_candidates.drain_with ~sources ~now ~base_path:config.Workspace.base_path |> ok
+  Candle_candidates.drain_with ~sources ~now ~config |> ok
 
 let prepared ?request ?run ?due_date config goal_id =
   let waiting, rows = obligation ?request ?run ?due_date goal_id in
@@ -129,7 +130,7 @@ let prepared ?request ?run ?due_date config goal_id =
 let paid config goal_id =
   List.filter_map (fun (event : E.t) -> match event.body with
     | E.Paid payment when payment.identity.goal_id = goal_id -> Some payment
-    | E.Half_life_set _ | E.Paid _ | E.Snapshot _ | E.Payout_owed _ | E.Candidates _
+    | E.Half_life_set _ | E.Paid _ | E.Snapshot _ | E.Payout_owed _ | E.Candidates _ | E.Candidates_fenced _ | E.Candidate_window_held _
     | E.Unattributed _ | E.Equipped _ | E.Purchased _ | E.Granted _ | E.Gifted _ | E.Gifted_item _ | E.Payout_failed _ -> None) (events config)
 
 let one_payment config goal_id = match paid config goal_id with
@@ -222,10 +223,12 @@ let test_equal_task_titles_keep_distinct_retained_appraisals () =
     task_lookups=(fun ~goal_id:_ ids -> Ok (List.map (fun id ->
       let lookup = match List.assoc id task_rows with
         | E.Found task -> E.Found {task with title="Same contribution title"}
-        | E.Deleted -> E.Deleted in
+        | E.Deleted -> E.Deleted
+        | E.Found_uncertain task -> E.Found_uncertain task
+        | E.Unobserved -> E.Unobserved in
       id, lookup) ids));
     is_keeper=(fun () -> Ok (fun name -> List.mem name ["keeper-a";"keeper-b"]))} in
-  ignore (Candle_candidates.drain_with ~sources ~now ~base_path:config.base_path |> ok);
+  ignore (Candle_candidates.drain_with ~sources ~now ~config |> ok);
   let calls = ref [] and relations = ref [] in
   let appraise ~identity request =
     (match request with
@@ -528,14 +531,14 @@ let test_settlement_requires_complete_snapshot_candidates () =
     (Result.is_ok (Candle_payout.validate_settlement waiting original (E.Paid full)));
   List.iter (fun keepers ->
     let modified = List.map (fun (event : E.t) -> match event.body with
-      | E.Candidates c -> {event with body=E.Candidates {c with candidate_keepers=keepers}}
+      | E.Candidates_fenced c -> {event with body=E.Candidates_fenced {c with candidate_keepers=keepers}}
       | _ -> event) original in
     let forged = payment ["task-a";"task-b";"external"] (List.map (fun keeper -> keeper, 1) keepers) in
     check bool "changing only durable Keeper set cannot redirect payout" true
       (Result.is_error (Candle_payout.validate_settlement waiting modified (E.Paid forged))))
     [["keeper-a";"keeper-b";"external-operator"];["keeper-a"]];
   let mixed_eligibility = List.map (fun (event : E.t) -> match event.body with
-    | E.Candidates c -> {event with body=E.Candidates {c with
+    | E.Candidates_fenced c -> {event with body=E.Candidates_fenced {c with
         tasks=List.map (fun (id, task) -> id, (match task with
           | E.Found task when id="task-b" -> E.Found {task with assignee=Some "keeper-a"}
           | _ -> task)) c.tasks;
@@ -551,7 +554,7 @@ let test_settlement_requires_complete_snapshot_candidates () =
     (Result.is_error (Candle_payout.validate_settlement waiting mixed_eligibility (E.Paid ineligible_payment)));
   List.iter (fun (omit_observation,omit_candidate) ->
     let modified=List.map (fun (event : E.t) -> match event.body with
-      | E.Candidates c -> {event with body=E.Candidates {c with
+      | E.Candidates_fenced c -> {event with body=E.Candidates_fenced {c with
           tasks=(if omit_observation then List.remove_assoc "task-b" c.tasks else c.tasks);
           candidate_task_ids=(if omit_candidate then List.filter ((<>) "task-b") c.candidate_task_ids else c.candidate_task_ids);
           candidate_keepers=(if omit_candidate then List.filter ((<>) "keeper-b") c.candidate_keepers else c.candidate_keepers)}}
@@ -561,10 +564,35 @@ let test_settlement_requires_complete_snapshot_candidates () =
       (Result.is_error (Candle_payout.validate_settlement waiting modified (E.Paid forged))))
     [false,true;true,false;true,true];
   let missing_ineligible=List.map (fun (event : E.t) -> match event.body with
-    | E.Candidates c -> {event with body=E.Candidates {c with tasks=List.remove_assoc "pending" c.tasks}}
+    | E.Candidates_fenced c -> {event with body=E.Candidates_fenced {c with tasks=List.remove_assoc "pending" c.tasks}}
     | _ -> event) original in
   check bool "Snapshot coverage also requires ineligible task observations" true
     (Result.is_error (Candle_payout.validate_settlement waiting missing_ineligible (E.Paid full)))
+
+let test_legacy_boundary_candidates_do_not_dispatch_an_appraiser () =
+  with_workspace @@ fun _env config ->
+  let waiting, rows = obligation "legacy-boundary" in
+  let tasks = List.map (fun (id, lookup) -> id,
+    if id = "task-a" then found "Store the ledger" "keeper-a"
+      (E.Done {completed_at=at "2026-09-20T00:00:00Z"})
+    else lookup) task_rows in
+  let candidate : E.t = {at=confirmed_at;body=E.Candidates
+    {goal_id=waiting.goal_id;request_id=waiting.request_id;
+     verification_run_id=waiting.verification_run_id;tasks;
+     candidate_task_ids=["task-a";"task-b";"external"];
+     candidate_keepers=["keeper-a";"keeper-b"];
+     candidate_task_keepers=["task-a",Some "keeper-a";"task-b",Some "keeper-b";"external",None]}} in
+  append config (rows @ [candidate]);
+  let calls = ref 0 in
+  let runner ~identity:_ _ = incr calls; Error (A.Transport_unavailable "unexpected dispatch") in
+  (match Candle_appraise.settle_one ~now ~appraise:runner ~base_path:config.base_path waiting with
+   | Candle_appraise.Rejected _ -> ()
+   | _ -> fail "legacy boundary evidence must not be appraised");
+  check int "the appraiser was never called" 0 !calls;
+  check int "no payment was written" 0 (List.length (paid config waiting.goal_id));
+  check bool "the obligation remains waiting" true
+    (match Candle_payout.state ~goal_id:waiting.goal_id (events config) with
+     | Candle_payout.Waiting _ -> true | _ -> false)
 
 let test_disable_during_appraisal_preserves_the_obligation () =
   List.iter (fun remove_file ->
@@ -971,6 +999,8 @@ let () =
       ;test_case "related work done by no Keeper closes as no_related_keepers" `Quick test_related_work_done_by_no_keeper_closes_as_no_related_keepers
       ;test_case "failed due date waits for a new corrected pass" `Quick test_unreadable_due_date_fails_once_and_a_new_pass_can_repair_it
       ;test_case "settlement requires complete Snapshot candidates" `Quick test_settlement_requires_complete_snapshot_candidates
+      ;test_case "legacy boundary candidates never dispatch an appraiser" `Quick
+          test_legacy_boundary_candidates_do_not_dispatch_an_appraiser
       ;test_case "valid arithmetic cannot authorize an outsider" `Quick test_arithmetic_alone_cannot_authorize_an_outsider
       ;test_case "disable during model call preserves waiting" `Quick test_disable_during_appraisal_preserves_the_obligation
       ;test_case "disable before ledger decision preserves waiting" `Quick test_disable_before_ledger_decision_preserves_the_obligation

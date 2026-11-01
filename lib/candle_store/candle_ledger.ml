@@ -108,7 +108,8 @@ let record_goal (event : Candle_event.t) =
   match event.body with
   | Candle_event.Snapshot s -> Some s.goal_id
   | Candle_event.Payout_owed p -> Some p.goal_id
-  | Candle_event.Candidates c -> Some c.goal_id
+  | Candle_event.Candidates c | Candle_event.Candidates_fenced c -> Some c.goal_id
+  | Candle_event.Candidate_window_held held -> Some held.goal_id
   | Candle_event.Paid p -> Some p.identity.goal_id
   | Candle_event.Unattributed u -> Some u.goal_id
   | Candle_event.Payout_failed f -> Some f.goal_id
@@ -137,7 +138,9 @@ type admission =
    their file order without rescanning unrelated payouts and purchases. *)
 let validate_record ~admission records (event : Candle_event.t) =
   let verdict = match event.body with
-    | Candle_event.Paid _ | Candle_event.Unattributed _ | Candle_event.Payout_failed _ ->
+    | Candle_event.Paid _ | Candle_event.Unattributed _ | Candle_event.Payout_failed _
+    | Candle_event.Candidates _ | Candle_event.Candidates_fenced _ | Candle_event.Candidate_window_held _
+    | Candle_event.Payout_owed _ ->
       let preceding = match record_goal event with
         | None -> []
         | Some goal_id ->
@@ -146,7 +149,7 @@ let validate_record ~admission records (event : Candle_event.t) =
       (match admission with
        | Append -> Candle_payout.validate_record preceding event.body
        | Replay -> Candle_payout.validate_replay preceding event.body)
-    | Candle_event.Snapshot _ | Candle_event.Payout_owed _ | Candle_event.Candidates _
+    | Candle_event.Snapshot _
     | Candle_event.Half_life_set _ | Candle_event.Equipped _ | Candle_event.Purchased _
     | Candle_event.Granted _ | Candle_event.Gifted _ | Candle_event.Gifted_item _ -> Ok () in
   Result.map (fun () -> remember records event) verdict
@@ -245,7 +248,8 @@ let encode ~preceding events =
     | (event : Candle_event.t) :: rest ->
       let arithmetic = match event.body with
         | Candle_event.Paid payment -> Candle_payment.validate_for_append payment
-        | Candle_event.Snapshot _ | Candle_event.Payout_owed _ | Candle_event.Candidates _
+        | Candle_event.Snapshot _ | Candle_event.Payout_owed _ | Candle_event.Candidates _ | Candle_event.Candidates_fenced _
+        | Candle_event.Candidate_window_held _
         | Candle_event.Unattributed _ | Candle_event.Payout_failed _
         | Candle_event.Half_life_set _ | Candle_event.Purchased _ | Candle_event.Equipped _
         | Candle_event.Granted _ | Candle_event.Gifted _ | Candle_event.Gifted_item _ -> Ok () in
@@ -257,21 +261,30 @@ let encode ~preceding events =
   go (List.fold_left remember Goal_records.empty preceding) [] events
 ;;
 
-let rec update ~base_path decide =
+type 'a update_attempt = Updated of 'a | Changed
+
+let update_once ~base_path decide =
   let path = path ~base_path in
   match view_of_outcome ~path (read_outcome ~path) with
   | Error error -> Error (Read_failed error)
   | Ok view ->
     (match decide view with
      | Error error -> Error (Refused error)
-     | Ok ([], result) -> Ok result
+     | Ok ([], result) -> Ok (Updated result)
      | Ok ((_ :: _ as events), result) ->
        (match encode ~preceding:view.events events with
         | Error detail -> Error (Event_unwritable detail)
         | Ok suffix ->
           (match append ~path view.cursor suffix with
-           | Appended -> Ok result
-           | Appended_after_another_writer -> update ~base_path decide
+           | Appended -> Ok (Updated result)
+           | Appended_after_another_writer -> Ok Changed
            | Append_locked -> Error (Write_locked { path })
            | Append_failed detail -> Error (Write_failed { path; detail }))))
+;;
+
+let rec update ~base_path decide =
+  match update_once ~base_path decide with
+  | Ok (Updated result) -> Ok result
+  | Ok Changed -> update ~base_path decide
+  | Error error -> Error error
 ;;

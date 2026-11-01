@@ -239,6 +239,29 @@ let test_commit_refused_after_takeover () =
     check (option string) "the new holder keeps the lease" (Some "holder-b")
       (lease_owner backend key))
 
+let test_nonwaiting_acquire_returns_while_fence_is_held () =
+  with_eio_backends (fun backend clock rival ->
+    let key = make_unique_key "lease_try_fence" in
+    acquire_ok backend ~key ~owner:"holder-a" ~ttl_seconds:60;
+    let entered, signal_entered = Eio.Promise.create () in
+    let resume, signal_resume = Eio.Promise.create () in
+    Eio.Switch.run (fun sw ->
+      let holder = Eio.Fiber.fork_promise ~sw (fun () ->
+        Backend.FileSystem.commit_under_lease backend ~key ~owner:"holder-a" ~ttl_seconds:60
+          (fun () -> Eio.Promise.resolve signal_entered (); Eio.Promise.await resume)) in
+      Fun.protect ~finally:(fun () -> ignore (Eio.Promise.try_resolve signal_resume ())) (fun () ->
+        Eio.Promise.await entered;
+        let result = Eio.Time.with_timeout clock 1. (fun () ->
+          Backend.FileSystem.try_acquire_lock (rival ()) ~key ~owner:"holder-b" ~ttl_seconds:60) in
+        (match result with
+         | Ok (Ok false) -> ()
+         | Ok (Ok true) -> fail "rival took a held lease"
+         | Ok (Error error) -> fail (Backend.show_error error)
+         | Error `Timeout -> fail "nonwaiting acquisition blocked on the fence"));
+      match Eio.Promise.await_exn holder with
+      | Ok (Ok ()) -> () | Ok (Error _) -> fail "holder lost its own lease"
+      | Error error -> fail (Backend.show_error error)))
+
 (* The holder A is stopped inside its commit after reading itself as owner
    and before renewing, with a lease that has already expired, so a rival may
    take it over. [rival] tries the takeover right then. It must wait until A
@@ -459,6 +482,8 @@ let () =
         test_case "lock_info json roundtrip" `Quick test_lock_info_roundtrip;
       ];
       "lease fence", [
+        test_case "nonwaiting acquire returns while fence is held" `Quick
+          test_nonwaiting_acquire_returns_while_fence_is_held;
         test_case "commit refused after takeover" `Quick
           test_commit_refused_after_takeover;
         test_case "takeover waits between owner read and renewal" `Quick

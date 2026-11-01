@@ -73,6 +73,10 @@ val backend_acquire_lock :
   config -> key:string -> ttl_seconds:int -> owner:string ->
   (bool, Backend_types.error) result
 
+val backend_try_acquire_lock :
+  config -> key:string -> ttl_seconds:int -> owner:string ->
+  (bool, Backend_types.error) result
+
 val backend_release_lock :
   config -> key:string -> owner:string ->
   (bool, Backend_types.error) result

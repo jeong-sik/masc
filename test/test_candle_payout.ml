@@ -252,12 +252,18 @@ let found ?(assignee = Some "keeper-a") ?(status = done_at "2026-09-25T00:00:00Z
   E.Found { title = "t"; assignee; status }
 ;;
 
-let decide ?(keepers = [ "keeper-a"; "keeper-b" ]) tasks =
+let decide_result ?(keepers = [ "keeper-a"; "keeper-b" ]) tasks =
   Candle_payout.decide_candidates
     ~goal_created_at:(at "2026-09-20T01:00:00Z")
     ~confirmed_at:(at "2026-09-29T05:00:00Z")
     ~is_keeper:(fun name -> List.mem name keepers)
     tasks
+;;
+
+let decide ?keepers tasks =
+  match decide_result ?keepers tasks with
+  | Ok decided -> decided
+  | Error issues -> Alcotest.fail (String.concat "; " (List.map Candle_payout.window_issue_to_string issues))
 ;;
 
 let ids (decided : Candle_payout.candidates) = decided.candidate_task_ids
@@ -269,15 +275,38 @@ let test_a_candidate_task_was_done_between_the_goal_and_the_confirmation () =
   in
   check_candidate "well inside" [ "task-1" ] "2026-09-25T00:00:00Z";
   check_candidate "the second after the Goal was created" [ "task-1" ] "2026-09-20T01:00:01Z";
-  check_candidate "at the Goal's creation" [] "2026-09-20T01:00:00Z";
   check_candidate "before the Goal existed" [] "2026-09-19T00:00:00Z";
-  check_candidate "at the confirmation" [ "task-1" ] "2026-09-29T05:00:00Z";
   check_candidate "after the confirmation" [] "2026-09-29T05:00:01Z"
+;;
+
+let test_same_second_or_missing_task_never_decides_a_partial_set () =
+  let check_issue label expected tasks =
+    match decide_result tasks with
+    | Ok _ -> Alcotest.fail (label ^ ": unexpectedly decided candidates")
+    | Error issues -> Alcotest.(check bool) label true (List.exists expected issues) in
+  let inside = "inside", found () in
+  check_issue "creation boundary"
+    (function Candle_payout.Same_second {task_id="creation"; boundary=Goal_created; _} -> true | _ -> false)
+    [ inside; "creation", found ~status:(done_at "2026-09-20T01:00:00Z") () ];
+  check_issue "confirmation boundary"
+    (function Candle_payout.Same_second {task_id="confirmation"; boundary=Human_confirmed; _} -> true | _ -> false)
+    [ inside; "confirmation", found ~status:(done_at "2026-09-29T05:00:00Z") () ];
+  check_issue "missing Task"
+    (function Candle_payout.Task_missing {task_id="missing"} -> true | _ -> false)
+    [ inside; "missing", E.Deleted ];
+  let instant = at "2026-09-29T05:00:00Z" in
+  let issues = Candle_payout.window_issues ~goal_created_at:instant ~confirmed_at:instant
+      [ "both", found ~status:(done_at "2026-09-29T05:00:00Z") () ] in
+  Alcotest.(check int) "both boundaries are retained" 2 (List.length issues);
+  let reversed = Candle_payout.window_issues
+      ~goal_created_at:(at "2026-09-29T05:00:01Z") ~confirmed_at:instant [ inside ] in
+  Alcotest.(check bool) "reversed clock is a separate issue" true
+    (List.exists (function Candle_payout.Reversed_window _ -> true | _ -> false) reversed)
 ;;
 
 let test_only_a_done_task_found_in_a_store_is_a_candidate () =
   Alcotest.(check (list string))
-    "every other status, deleted, done"
+    "every other status and done"
     [ "task-7" ]
     (ids
        (decide
@@ -286,7 +315,6 @@ let test_only_a_done_task_found_in_a_store_is_a_candidate () =
           ; "task-3", found ~status:E.In_progress ()
           ; "task-4", found ~status:E.Awaiting_verification ()
           ; "task-5", found ~status:E.Cancelled ()
-          ; "task-6", E.Deleted
           ; "task-7", found ()
           ]))
 ;;
@@ -516,6 +544,8 @@ let () =
     ; ( "decide_candidates"
       , [ Alcotest.test_case "a candidate task was done between the goal and the confirmation" `Quick
             test_a_candidate_task_was_done_between_the_goal_and_the_confirmation
+        ; Alcotest.test_case "same-second or missing Task never decides a partial set" `Quick
+            test_same_second_or_missing_task_never_decides_a_partial_set
         ; Alcotest.test_case "only a done task found in a store is a candidate" `Quick
             test_only_a_done_task_found_in_a_store_is_a_candidate
         ; Alcotest.test_case "candidate keepers are the keepers among the candidate assignees" `Quick

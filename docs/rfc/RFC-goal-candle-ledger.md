@@ -26,6 +26,22 @@ related: ["every-lane-is-one-row-in-one-registry", "exact-lane-walks-one-slot-li
 
 저장 순서의 참고 사례로 [SQLite의 원자적 커밋과 복구 저널](https://www.sqlite.org/atomiccommit.html)은 변경 전에 복구 정보를 보존한다. MASC의 확인·원장·phase는 별도 쓰기이므로 이 변경은 세 쓰기가 하나의 원자적 트랜잭션이라고 주장하지 않는다.
 
+### 2026-11-01: 후보 시각이 불명확한 지급
+
+Task 완료와 Goal 생성 또는 사람 확정이 같은 초로 기록되면 두 사건의 실제 순서는 알 수 없다. Goal 생성 시각이 확정 시각보다 늦게 기록된 창도 마찬가지다. 연결 Task 에서 이런 사실을 발견하면 `candidate_window_held` 에 원래 관측과 각 담당자의 Keeper 판정(판정 불가 포함)을 남기고, 후보 결정·모델 호출·지급 종료를 보류한다. 다른 Task 를 읽을 수 없었다면 해당 id 를 관측 불가로 남겨 이미 확인한 경계 사실을 보존한다. 다른 Goal 은 계속 처리한다. 이미 기록된 `Candidates` 에 경계 시각이나 관측 불가 Task 가 있으면 그 기록만으로 보류한다. 이미 끝난 과거 지급은 기록 당시의 후보를 기준으로 계속 읽는다. Task 원본이 없다는 사실만으로 완료하지 않았다고 단정하지 않으며, 그 경우에는 새 보류 행을 쓰지 않고 이후 원본을 다시 읽을 수 있다.
+
+새 후보 관측은 확정된 지급 의무가 생긴 뒤 backlog 잠금을 잡고, 그 소유권을 fence 안에서 재확인한 상태로 Task 를 읽어 원장에 한 번만 덧붙인다. 후보 기록의 `observation: backlog_fenced` 는 이 순서를 구분한다. 후보 기록과 Task 완료 커밋은 같은 backlog 잠금으로 직렬화되므로, 확정 후 관측에서 비종단인 Task 의 이후 완료는 확정 뒤의 일이다. 여기서 완료 순서는 완료 시각 채번이 아니라 backlog 의 지속된 커밋을 뜻한다. 원장 cursor 가 그 사이 바뀌면 잠금을 풀고 다음 깨움에서 다시 읽는다. 구형 `Candidates` 에 비종단 Task 가 있다면 이 순서의 증거가 없으므로 새 정산을 보류한다. 이미 끝난 과거 정산은 그대로 재생한다.
+
+Keeper 디렉터리는 backlog 잠금 전에 관측한다. 둘은 원자적인 스냅샷이 아니며, 보류 행은 그때 확인한 각 이름의 분류 또는 분류 불가를 보존한다. 그 사이 Keeper 설정이 생기거나 사라지면 다른 시점의 Task 와 분류가 결합되어, 오래된 비 Keeper 판정으로 지급이 종료될 수도 있다. 설정 세대와 Task 관측을 같은 기준으로 검증하는 후속 작업이 필요하다. 잠금이 사용 중이면 기다리지 않고 그 Goal 을 다음 깨움에 다시 확인한다. 연결된 Task 가 없는 Goal 은 backlog 잠금이 필요 없다.
+
+**남은 순서 한계:** Goal 생성과 사람 확정은 Task 완료 커밋과 같은 잠금이나 지속된 순서 기록을 공유하지 않는다. 예를 들어 Task 완료 시각을 채번한 뒤 backlog 커밋 전에 사람이 확정하면, 기록된 완료 시각은 확정보다 이르지만 지속된 Task 완료는 확정 뒤일 수 있다. Goal 생성 경계에도 같은 차이가 있다. 지금의 fence 는 확정 이후 후보 관측과 Task 커밋의 경합만 다루므로, 이 변경만으로 모든 지급의 실제 선후나 공정성을 증명하지 못한다. 기존 기록에는 이 순서를 복원할 증거가 없다.
+
+같은 Goal·요청·실행·통과 초에 서로 다른 `Snapshot` 이 있으면 새 지급은 어느 쪽도 고르지 않는다. 같은 입력이 중복된 경우는 허용한다. 이를 근거로 어느 Snapshot 이 실제 검증 결과에 대응했는지 복원하지는 못한다. Task 하나라도 읽기에 실패하면 후보 결정은 기록되지 않으며, 저장소 세 곳을 하나의 시점으로 읽는 트랜잭션은 없다. 오래된 archive 만 남은 완료 Task 의 이력도 완전하다고 증명하지 못한다. 시계 보정으로 초 단위 시각의 대소 관계 자체가 뒤집힌 경우에는 실제 순서가 추가로 불명확할 수 있다.
+
+이 단계에는 보류를 해제하거나 운영자 근거를 받아 재판정하는 명령과 화면이 없다. 기존 외부 모델 호출이 이미 시작됐다면 취소되었다는 증거도 없다. Task·Keeper 정보가 사라지기 전에 원장에 관측이 남을 가능성을 높이지만 항상 남는다고 보장하지 않는다.
+
+`candidate_window_held` 와 새 `Candidates` 의 `observation` 필드는 이전 reader 가 해석하지 못하는 원장 형식이다. 일반 후보 준비만으로도 새 필드가 기록된다. 운영 적용 전에는 원장에 접근하는 서버·도구·독립 프로세스의 모든 writer 를 멈추고 reader/writer 전체를 이 형식을 이해하는 버전으로 올린 뒤 예전 프로세스의 재시작과 롤백을 막아야 한다. 특히 위의 기록 실패와 Off 구분 변경이 없는 서버는 새 행을 읽지 못한 초기 복구 실패를 Off 처럼 취급해 다른 Goal 의 Snapshot 이나 PayoutOwed 를 누락할 수 있다. 순차 배포나 일부 구버전 혼용을 안전하다고 가정하지 않는다.
+
 ## 용어
 
 | 말 | 뜻 |
@@ -105,6 +121,7 @@ related: ["every-lane-is-one-row-in-one-registry", "exact-lane-walks-one-slot-li
 | `Snapshot` | 검증기의 통과 결과를 검증 원장에 커밋하기 직전 | goal_id, 검증 요청 id, 검증 실행 id(`verification_run_id`), criterion revision, 검증 통과 시각, Goal 생성 시각, 그때의 기한(Goal 이 들고 있던 그대로. 없을 수 있다), 제목·metric·target, 그때 연결된 Task 의 id 목록 |
 | `PayoutOwed` | 사람이 확정할 때. 확정 기록을 저장한 다음, Goal phase 를 저장하기 전에(3.2) | goal_id, 검증 요청 id, 검증 실행 id(`verification_run_id`), 검증 통과 시각, 확정 시각 |
 | `Candidates` | 일꾼이 Task 를 읽은 뒤, 모델을 부르기 전에 | goal_id, 검증 요청 id, 검증 실행 id(`verification_run_id`), `Snapshot` 의 Task 마다 상태(찾음, 삭제됨)와 찾은 Task 의 제목·담당자·상태·끝난 시각, 후보 Task 와 후보 keeper 목록 |
+| `CandidateWindowHeld` | 완전하게 읽은 관측에서 후보 기간의 순서를 정할 수 없을 때 | 확정된 요청·실행·통과·확정 시각, 연결 Task 전체의 관측, Task 별 Keeper·비 Keeper·담당자 없음·미확인 판정 |
 | `PayoutFailed` | 다시 시도해도 결과가 같은 이유가 생겼을 때(지금은 기한을 읽을 수 없음 하나) | goal_id, 검증 요청 id, 검증 실행 id(`verification_run_id`), 이유 |
 | `Paid` | 지급할 때. 한 줄에 전부 적는다 | goal_id, 검증 요청 id, 검증 실행 id(`verification_run_id`), 등급, 총액, 답한 lane 슬롯(모델) id(없을 수 있다), 후보 Task 마다 관계 판정, keeper 별 가중치·몫·감액 계수·지급액, 감액에 쓴 값(기준 시각, 기한, 감액률, 바닥) |
 | `Unattributed` | 받을 keeper 가 없어 지급 없이 끝낼 때 | goal_id, 검증 요청 id, 검증 실행 id(`verification_run_id`), 이유(후보 없음, 관계있는 Task 없음) |
@@ -157,7 +174,7 @@ related: ["every-lane-is-one-row-in-one-registry", "exact-lane-walks-one-slot-li
    - `Snapshot` 을 쓰지 못하거나 설정·원장 복구를 사용할 수 없으면 그 전이를 거절한다. 검증기는 거절된 커밋을 남겨 두고 멈춘다. 이것은 기존 Goal 전이가 검증 원장 기록을 phase 쓰기보다 먼저 하고, 그 기록이 실패하면 phase 쓰기를 막는 순서와 같다. 명시적 Off 에서는 Snapshot 을 쓰지 않고 진행한다.
    - `Snapshot` 에 넣는 Task 정보는 연결 파일의 id 목록뿐이다. 원본만 읽는 함수(`read_goal_task_links_authoritative_r`)로 읽고, 읽지 못하면 쓰지 않고 전이를 거절한다.
    - 잠금 순서는 Goal, backlog, links 다음에 원장이다(2장). 원장 잠금은 덧붙이는 동안만 잡고 그 안에서 다른 잠금을 잡지 않는다.
-   - 전이가 그 뒤에 실패하면 쓸모없는 `Snapshot` 이 남고, 같은 요청이 다시 오면 하나 더 남는다. 지급은 확정된 통과의 `Snapshot`(Goal id·검증 요청 id·검증 실행 id와 통과 시각이 같은 것)만 따른다. 서로 다른 검증 실행은 같은 초에도 실행 id로 구분한다. 같은 실행을 같은 초에 다시 커밋하면서 링크가 바뀐 경우에는 그 id와 시각만으로 두 Snapshot의 순서와 올바른 입력을 구분할 수 없으며 별도 처리가 필요하다.
+   - 전이가 그 뒤에 실패하면 쓸모없는 `Snapshot` 이 남고, 같은 요청이 다시 오면 하나 더 남는다. 지급은 확정된 통과의 `Snapshot`(Goal id·검증 요청 id·검증 실행 id와 통과 시각이 같은 것)만 따른다. 서로 다른 검증 실행은 같은 초에도 실행 id로 구분한다. 같은 실행을 같은 초에 다시 커밋하면서 지급 입력이 바뀌었다면 올바른 입력을 구분할 수 없으므로 새 지급을 보류한다.
 2. **사람의 확정.** `confirm_completion` 은 Goal 잠금을 잡은 채 세 가지를 차례로 저장한다. (가) 검증 원장의 확정 기록. (나) Candle 원장의 `PayoutOwed`. (다) Goal phase `Completed`. 셋은 다른 파일이라 한꺼번에 일어나지 않는다. 잠금이 막는 것은 그 사이에 다른 요청이 끼어드는 것뿐이다. 지급 의무는 (나)를 쓴 순간에 생긴다. (나)는 확정된 결과와 Goal id·검증 요청 id·검증 실행 id, 통과 시각이 같은 `Snapshot` 이 있고, 지급 상태(3.1)가 새 `PayoutOwed` 를 쓸 수 있을 때만 쓴다. Candle 이 켜지기 전에 통과한 Goal 처럼 `Snapshot` 이 없으면 쓰지 않는다. (나)를 쓰지 못하면 (다)를 하지 않고 그 확정을 거절한다. 이미 `Completed` 인 Goal 에 확정이 다시 와도 같은 조건으로 판단한다.
    - 순서의 이유. (가) 다음에 (나)를 쓴다. 확정하지 않은 통과에 지급 의무가 남는 일이 없게 하려는 것이다. (나) 다음에 (다)를 저장한다. 기존 Goal 전이가 기록을 phase 쓰기보다 먼저 하는 순서와 같다(`lib/workspace_goals.ml:409-416`).
    - 잠금의 이유. 재오픈은 같은 Goal 잠금 안에서 검증 원장의 확정 기록을 지우고(`lib/goal/goal_verification.ml:426-465`), drop 은 같은 잠금 안에서 phase 를 쓴다(`lib/goal/goal_store.ml:622-648`). 잠금이 없으면 (가)와 (나) 사이에 재오픈이 끼어들어 확정 기록이 지워진 채 (나)가 쓰일 수 있다.
@@ -224,11 +241,11 @@ Task 제목은 keeper 가 쓴 글이다. 등급 요청은 Task 를 보지 못해
 **후보 Task 와 후보 keeper.** 일꾼이 `Snapshot` 의 Task id 마다 backlog 와 `tasks-archive.json` 에서 Task 를 읽고 `Candidates` 를 쓴다.
 
 - Task 마다 상태는 셋이다. 찾음, 삭제됨, 못 읽음.
-  - backlog 나 archive 에 있으면 찾음이다.
-  - 둘 다 없고 Goal 연결도 남아 있지 않으면 삭제됨이다. Task 삭제가 연결도 함께 지우기 때문이다(2장).
+  - backlog 에 있는 Task 나 신뢰할 수 있는 완료 archive 행을 읽는다. 중복 행, 삭제 영수증이 있는 복사본, archive 에만 남은 비종단 행은 현재 상태를 증명하지 못한다.
+  - 둘 다 없고 Goal 연결도 남아 있지 않으면 원본이 관측되지 않는다. 삭제됨은 과거 완료 여부의 근거가 아니므로 후보를 확정하지 않고 다시 읽는다.
   - 둘 다 없는데 연결은 남아 있으면 못 읽음이다. archive 가 깨졌거나, 예전 GC 가 backlog 를 쓴 뒤 archive 에 붙이기 전에 죽으면서 잃은 Task 일 수 있다(2장).
   - 못 읽음이 하나라도 있으면 `Candidates` 를 쓰지 않고 다음에 다시 한다(3.2). 이 일꾼이 쓰는 archive reader 는 새로 만든 엄격한 것이다. 모양이 다르거나 못 읽는 행을 빈 목록이나 건너뛰기로 바꾸지 않고 못 읽음으로 돌려준다.
-- 후보 Task 는 찾음 상태이고 `done` 이며 끝난 시각이 Goal 생성 시각보다 늦고 확정 시각 이전인 Task 다. Goal 이 만들어지기 전에 끝난 옛 Task 를 나중에 붙여서 몫을 얻는 것을 막으려는 조건이다. 검증 통과 때 `AwaitingVerification` 이던 Task 가 확정 전에 끝났으면 후보가 된다. 완료를 요청하는 시점을 골라서 다른 keeper 의 Task 를 후보에서 빼는 일을 막으려는 것이다. 끝난 시각과 담당자는 `done` 상태에 적힌 값이라서 일꾼이 언제 읽어도 같다.
+- 후보 Task 는 찾음 상태이고 `done` 이며 끝난 시각이 Goal 생성 시각보다 늦고 확정 시각보다 이른 Task 다. 양 끝과 같은 초는 순서가 불명확하여 후보를 결정하지 않는다. Goal 이 만들어지기 전에 끝난 옛 Task 를 나중에 붙여서 몫을 얻는 것을 막으려는 조건이다. 검증 통과 때 `AwaitingVerification` 이던 Task 가 확정 전에 끝났으면 후보가 된다. 완료를 요청하는 시점을 골라서 다른 keeper 의 Task 를 후보에서 빼는 일을 막으려는 것이다.
 - 후보 keeper 는 후보 Task 담당자 가운데 keeper 인 사람이다. 담당자 이름을 `Keeper_id.Keeper_name.of_string`(`lib/keeper_registry/keeper_id.mli`)으로 파싱하고, 통과한 이름에 keeper 설정 파일(`Config_dir_resolver.keeper_toml_path_for_base_path` 가 가리키는 `<이름>.toml`)이 있어야 한다. `Keeper_identity.Keeper_id.of_string` 은 소문자로 바꾸고 빈 문자열만 거절하는 함수라서 파일 경로를 만들기 전에 쓰지 않는다(`lib/keeper/keeper_identity.ml:15-45`). 설정 폴더를 읽지 못한 것과 파일이 없는 것은 다른 결과다.
 - `candidate_task_keepers` 는 후보 Task id마다 당시 Keeper로 확인한 담당자 이름 또는 `null`을 기록한다. 정산은 이 목록이 모든 후보 Task를 한 번씩 포함하고, 이름이 해당 Task 담당자와 일치하며, `candidate_keepers`가 그 이름들의 정확한 집합인지 확인한다. 나중의 Keeper 설정으로 과거 판정을 다시 만들지 않는다.
 - `Candidates` 는 모델을 부르기 전에 쓴다. 대기 중에 설정 파일이 바뀌어도 후보는 그대로다. 지금 Goal 에 연결된 done Task 9건은 모두 Goal 생성 뒤에 끝났다.

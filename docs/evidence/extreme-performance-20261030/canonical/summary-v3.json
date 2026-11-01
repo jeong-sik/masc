@@ -1,0 +1,277 @@
+{
+  "scope": "Medians of per-batch means, not per-call latency percentiles. Single process, one domain; no I/O or product module integration.",
+  "behavior": {
+    "behavioral_cases": 25016,
+    "all_identical": true,
+    "outcome_counts": {
+      "accepted": 9814,
+      "error:non-finite JSON number": 4960,
+      "error:duplicate object member": 7705,
+      "error:Line 1, bytes 0-7:\nInvalid token 'invalid'": 2537
+    },
+    "fixed_negative_outcomes": [
+      {
+        "name": "duplicate before non-finite child",
+        "expected": "error:duplicate object member",
+        "actual": "error:duplicate object member"
+      },
+      {
+        "name": "unsorted child error order",
+        "expected": "error:non-finite JSON number",
+        "actual": "error:non-finite JSON number"
+      },
+      {
+        "name": "sorted child error order",
+        "expected": "error:non-finite JSON number",
+        "actual": "error:non-finite JSON number"
+      },
+      {
+        "name": "nested duplicate",
+        "expected": "error:duplicate object member",
+        "actual": "error:duplicate object member"
+      }
+    ]
+  },
+  "rows": [
+    {
+      "case": "long-prefix-sorted-300",
+      "batch_means_median": {
+        "before": {
+          "wall_ns_per_call": 61958.1875,
+          "cpu_ns_per_call": 57487.999999999985,
+          "allocated_bytes_per_call": 202352.09866666666
+        },
+        "after": {
+          "wall_ns_per_call": 10632.875,
+          "cpu_ns_per_call": 9451.500000000035,
+          "allocated_bytes_per_call": 67416.09866666667
+        }
+      },
+      "change_percent": {
+        "wall_ns_per_call": -82.83862806671031,
+        "cpu_ns_per_call": -83.55917756749228,
+        "allocated_bytes_per_call": -66.68376601434672
+      }
+    },
+    {
+      "case": "long-prefix-nearly-300",
+      "batch_means_median": {
+        "before": {
+          "wall_ns_per_call": 61425.625,
+          "cpu_ns_per_call": 57034.499999999876,
+          "allocated_bytes_per_call": 202352.09866666666
+        },
+        "after": {
+          "wall_ns_per_call": 69066.40966666667,
+          "cpu_ns_per_call": 63016.83333333318,
+          "allocated_bytes_per_call": 202392.09866666666
+        }
+      },
+      "change_percent": {
+        "wall_ns_per_call": 12.439083308743992,
+        "cpu_ns_per_call": 10.488973048476492,
+        "allocated_bytes_per_call": 0.019767524163860628
+      }
+    },
+    {
+      "case": "early-child-error-300",
+      "batch_means_median": {
+        "before": {
+          "wall_ns_per_call": 13979.2521,
+          "cpu_ns_per_call": 12620.750000000047,
+          "allocated_bytes_per_call": 83272.0296
+        },
+        "after": {
+          "wall_ns_per_call": 2266.53755,
+          "cpu_ns_per_call": 1993.400000000012,
+          "allocated_bytes_per_call": 12224.0296
+        }
+      },
+      "change_percent": {
+        "wall_ns_per_call": -83.78641765820933,
+        "cpu_ns_per_call": -84.2053760671909,
+        "allocated_bytes_per_call": -85.32036548320181
+      }
+    },
+    {
+      "case": "nearly-sorted-300",
+      "batch_means_median": {
+        "before": {
+          "wall_ns_per_call": 28159.388833333334,
+          "cpu_ns_per_call": 25742.166666666402,
+          "allocated_bytes_per_call": 202352.09866666666
+        },
+        "after": {
+          "wall_ns_per_call": 30723.9375,
+          "cpu_ns_per_call": 27678.166666666708,
+          "allocated_bytes_per_call": 202392.09866666666
+        }
+      },
+      "change_percent": {
+        "wall_ns_per_call": 9.10725968466657,
+        "cpu_ns_per_call": 7.520734462912304,
+        "allocated_bytes_per_call": 0.019767524163860628
+      }
+    },
+    {
+      "case": "rejected-300",
+      "batch_means_median": {
+        "before": {
+          "wall_ns_per_call": 13521.1042,
+          "cpu_ns_per_call": 12589.800000000028,
+          "allocated_bytes_per_call": 71320.0296
+        },
+        "after": {
+          "wall_ns_per_call": 15352.806250000001,
+          "cpu_ns_per_call": 13639.750000000018,
+          "allocated_bytes_per_call": 71328.0296
+        }
+      },
+      "change_percent": {
+        "wall_ns_per_call": 13.546985681835078,
+        "cpu_ns_per_call": 8.339687683680342,
+        "allocated_bytes_per_call": 0.011217045260458747
+      }
+    },
+    {
+      "case": "sorted-3",
+      "batch_means_median": {
+        "before": {
+          "wall_ns_per_call": 125.0275,
+          "cpu_ns_per_call": 84.7033333333395,
+          "allocated_bytes_per_call": 1448.0019733333334
+        },
+        "after": {
+          "wall_ns_per_call": 70.6075,
+          "cpu_ns_per_call": 48.040000000000305,
+          "allocated_bytes_per_call": 888.0019733333334
+        }
+      },
+      "change_percent": {
+        "wall_ns_per_call": -43.52642418667894,
+        "cpu_ns_per_call": -43.2844043918026,
+        "allocated_bytes_per_call": -38.673980444299204
+      }
+    },
+    {
+      "case": "sorted-30",
+      "batch_means_median": {
+        "before": {
+          "wall_ns_per_call": 2419.1151,
+          "cpu_ns_per_call": 1738.9875000000332,
+          "allocated_bytes_per_call": 16160.0074
+        },
+        "after": {
+          "wall_ns_per_call": 550.5255125,
+          "cpu_ns_per_call": 438.0875000000062,
+          "allocated_bytes_per_call": 6936.0074
+        }
+      },
+      "change_percent": {
+        "wall_ns_per_call": -77.24269041601204,
+        "cpu_ns_per_call": -74.80789827413955,
+        "allocated_bytes_per_call": -57.079181783047936
+      }
+    },
+    {
+      "case": "sorted-300",
+      "batch_means_median": {
+        "before": {
+          "wall_ns_per_call": 30236.5542,
+          "cpu_ns_per_call": 25894.100000000188,
+          "allocated_bytes_per_call": 202352.0592
+        },
+        "after": {
+          "wall_ns_per_call": 5339.4874,
+          "cpu_ns_per_call": 4617.100000000108,
+          "allocated_bytes_per_call": 67416.0592
+        }
+      },
+      "change_percent": {
+        "wall_ns_per_call": -82.34095272668338,
+        "cpu_ns_per_call": -82.16929725304192,
+        "allocated_bytes_per_call": -66.6837790203224
+      }
+    },
+    {
+      "case": "reversed-30",
+      "batch_means_median": {
+        "before": {
+          "wall_ns_per_call": 1784.9993166666666,
+          "cpu_ns_per_call": 1694.8000000000482,
+          "allocated_bytes_per_call": 16160.009866666667
+        },
+        "after": {
+          "wall_ns_per_call": 1935.9708166666667,
+          "cpu_ns_per_call": 1763.916666666591,
+          "allocated_bytes_per_call": 16200.009866666667
+        }
+      },
+      "change_percent": {
+        "wall_ns_per_call": 8.457790352655504,
+        "cpu_ns_per_call": 4.0781606482499955,
+        "allocated_bytes_per_call": 0.24752460134636056
+      }
+    },
+    {
+      "case": "reversed-300",
+      "batch_means_median": {
+        "before": {
+          "wall_ns_per_call": 26975.666666666664,
+          "cpu_ns_per_call": 24845.66666666706,
+          "allocated_bytes_per_call": 202352.09866666666
+        },
+        "after": {
+          "wall_ns_per_call": 27565.555500000002,
+          "cpu_ns_per_call": 25503.000000001088,
+          "allocated_bytes_per_call": 202392.09866666666
+        }
+      },
+      "change_percent": {
+        "wall_ns_per_call": 2.1867442262780257,
+        "cpu_ns_per_call": 2.645665910892636,
+        "allocated_bytes_per_call": 0.019767524163860628
+      }
+    },
+    {
+      "case": "nested-30",
+      "batch_means_median": {
+        "before": {
+          "wall_ns_per_call": 19626.923499999997,
+          "cpu_ns_per_call": 18757.83333333203,
+          "allocated_bytes_per_call": 214440.09866666666
+        },
+        "after": {
+          "wall_ns_per_call": 8277.403,
+          "cpu_ns_per_call": 7779.999999999751,
+          "allocated_bytes_per_call": 117880.09866666667
+        }
+      },
+      "change_percent": {
+        "wall_ns_per_call": -57.82628387989589,
+        "cpu_ns_per_call": -58.523994420107385,
+        "allocated_bytes_per_call": -45.02889179793574
+      }
+    },
+    {
+      "case": "nested-300",
+      "batch_means_median": {
+        "before": {
+          "wall_ns_per_call": 318119.5833333334,
+          "cpu_ns_per_call": 280665.0000000014,
+          "allocated_bytes_per_call": 2136840.986666667
+        },
+        "after": {
+          "wall_ns_per_call": 150486.45666666667,
+          "cpu_ns_per_call": 138311.6666666654,
+          "allocated_bytes_per_call": 1174120.9866666666
+        }
+      },
+      "change_percent": {
+        "wall_ns_per_call": -52.695003844204294,
+        "cpu_ns_per_call": -50.72001615211561,
+        "allocated_bytes_per_call": -45.0534225993943
+      }
+    }
+  ]
+}

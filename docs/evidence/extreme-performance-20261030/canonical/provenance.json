@@ -1,0 +1,56 @@
+{
+  "recorded_at": "2026-10-30T01:35:30.832690+00:00",
+  "metadata_scope": "Assembled after observations; mtimes are file retention times, not synchronized request-start anchors.",
+  "baseline_commit": "0b18418111a533b3dc10c33b8811b1d058f136fe",
+  "before_full_source_sha256": "be57259ef9b0f9e7eef5ae318d8213f9abd53a44111fa0a780b904b6b6dd6f08",
+  "after_full_source_sha256": "b5998338c46bf6b24265cc04a65e603e55ab6729b988aad86d7a6970bed3bf69",
+  "compiler": "5.5.1",
+  "os": "macOS-26.6.1-arm64-arm-64bit-Mach-O",
+  "cpu_count": 16,
+  "libraries": {
+    "yojson": "3.0.0",
+    "mtime.clock": "2.1.0"
+  },
+  "command": "ocamlfind ocamlopt -package yojson,mtime.clock,unix -linkpkg -w +4+32+69 -warn-error +a -o canonical-bench before.ml after.ml bench.ml",
+  "source_extraction": "let ( let* ) = Result.bind followed by exact source span from let object_ = through immediately before let input_digest json =. Full product module is not compiled by this experiment.",
+  "files": [
+    {
+      "retained": "bench-v1.ml",
+      "original_sha256": "171c3b7b8e666642e59fbb85101464a128e5322ea3a4328da17e790d15c6bbd8",
+      "original_mtime_ns": 1793323794214530847
+    },
+    {
+      "retained": "observations-v1.jsonl",
+      "original_sha256": "fc116aa10459ae8e86929cdf4aba35fea0236c87e75ff003ff88946f48671caf",
+      "original_mtime_ns": 1793323805071355448
+    },
+    {
+      "retained": "bench-v2.ml",
+      "original_sha256": "a18372d2398f81ce3c32f4f3fe277c1e6b14adea2df30a1295f75fec7959193d",
+      "original_mtime_ns": 1793323882233728471
+    },
+    {
+      "retained": "observations-v2.jsonl",
+      "original_sha256": "8cf4e75f55dc1e513f69df4c849496724270b598d6866ca72a995e6f6b949b17",
+      "original_mtime_ns": 1793323903398869681
+    },
+    {
+      "retained": "bench-v3.ml",
+      "original_sha256": "97dfe977c6d769cd0522e92d15657386dad4c036c70ca8041b6730a7cada2cb4",
+      "original_mtime_ns": 1793324014360299000
+    },
+    {
+      "retained": "observations-v3.jsonl",
+      "original_sha256": "69874b332c378551fddbfadba87b379a32077d125baf76d3ede3296d2360912a",
+      "original_mtime_ns": 1793324044254632596
+    },
+    {
+      "retained": "before.ml",
+      "original_sha256": "249482fafc27abe23d60fc7b779f91048f8c099cf52b87d9e08e95bc0616f4e4"
+    },
+    {
+      "retained": "after.ml",
+      "original_sha256": "96a4d7f2be8cbcd9f7b3022a7a3cfdf603e48342366bd9850389b40a36afef46"
+    }
+  ]
+}

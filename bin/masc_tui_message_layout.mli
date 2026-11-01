@@ -464,6 +464,13 @@ val with_isolated_pieces_cache : (unit -> 'a) -> 'a
     domain. The callback is pure wrapping work and must not yield between
     fibers. This does not change the separate UI-only chat row-count cache. *)
 
+val iter_display_pieces :
+  string -> piece:(int -> int -> int -> bool -> unit) ->
+  ascii:(int -> int -> unit) -> unit
+(** Walk the same grapheme and ANSI boundaries used by [display_width]. The
+    [piece] callback receives byte start, byte end, cell width and whether it
+    is ANSI; [ascii] receives a run whose bytes each occupy one cell. *)
+
 val display_width : string -> int
 (** Approximate the display cells of a terminal that draws extended grapheme
     clusters as indivisible layout pieces. Renderer-owned ANSI CSI and

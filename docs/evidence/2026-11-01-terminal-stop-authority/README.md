@@ -1,5 +1,17 @@
 # Persisted stop reason owns terminal recovery
 
+The executions below are historical evidence for `c3d7d202c2abad5a9b5fa173757fe621fcc797e0`
+and its source-identical `665fe430a9b189702a18c42713cad398adaac57f` publication.
+They do not execute the later canonical-response persistence repair or its
+expanded palette-change fixture. That follow-up moves the response snapshot
+after admission and before AfterTurn/checkpoint publication; recovery uses
+the exact stored canonical response instead of the resumed agent's tools.
+The intermediate `356a1e02ce3637668c357cf4467d738243c51fe9` commit is preserved
+in history. Its current-palette re-admission and invalid `-1` fixture suffix
+were found by two independent source reviews; no execution at that head is
+claimed here. The follow-up uses the valid numeric suffix and adds actual
+durable producer checks plus tool-removal/AfterTurn-addition recovery cases.
+
 PR [#47059](https://github.com/jeong-sik/masc/pull/47059) now uses the persisted
 stop reason at both active and successfully settled recovery boundaries.
 MaxTokens and other terminal reasons preserve their exact response, including

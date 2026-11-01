@@ -208,6 +208,7 @@ let stage_collect
       ~turn
       ~provider_config
       ~context_message
+      ~execution
       agent
       (response : Llm_provider.Types.api_response)
   =
@@ -247,6 +248,13 @@ let stage_collect
            ~content:admission.Agent_tools.admitted
            ~retained_indices:admission.Agent_tools.retained_content_indices response
          |> Result.map_error (fun detail -> Error.Internal detail)
+       in
+       (* Freeze admission before hooks can widen the tools and before the
+          collected checkpoint becomes durable. Recovery consumes this exact
+          response rather than reinterpreting the raw provider blocks with a
+          later tool palette. The raw trace above retains the wire blocks. *)
+       let* () =
+         Pipeline_execution_scope.record_provider_response execution response
        in
        (match admission.Agent_tools.rejected_names with
         | [] -> ()
@@ -786,13 +794,9 @@ let run_new_turn
          | Guardrails_async.Fail { validator_name; reason } ->
            Error (Error.Agent (GuardrailViolation { validator = validator_name; reason }))
          | Guardrails_async.Pass ->
-           let* () =
-             Pipeline_execution_scope.record_provider_response execution response
-             |> tag_error "response"
-           in
            let* response, rejected_tool_calls =
              stage_collect ?raw_trace_run ?clock ~turn ~provider_config
-               ~context_message:prep.Agent_turn.context_message agent response
+               ~context_message:prep.Agent_turn.context_message ~execution agent response
              |> tag_error "collect"
            in
            (match Pipeline_execution_scope.provider execution with

@@ -43,6 +43,10 @@ val record_provider_request_provenance
   -> Llm_provider.Completion_outcome.request_provenance
   -> (unit, Error.t) result
 
+(** Persist the canonical response after tool-name admission and before
+    AfterTurn or checkpoint publication. History and recovery consume this
+    same immutable response; recovery never repeats admission with new tools.
+    Optional raw tracing owns the original provider blocks separately. *)
 val record_provider_response
   :  t
   -> Llm_provider.Types.api_response

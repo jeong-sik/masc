@@ -19,7 +19,7 @@ val frontier_ordinal : frontier -> int
 (** Dispatch one pipeline turn against the restored durable-execution scope under
     the identity {!resolve} produced: an in-progress turn/provider is resumed, an
     already-settled turn boundary is replayed ([tools_settled] for a completed
-    tool turn, [terminal] receiving the admitted persisted response), and no
+    tool turn, [terminal] receiving the exact persisted canonical response), and no
     resume runs [fresh]. [tools_settled_before_checkpoint] repairs only the
     crash window where invocation results settled before the Agent checkpoint;
     its invocation and result authority comes exclusively from the journal.
@@ -38,6 +38,8 @@ val frontier_ordinal : frontier -> int
     boundaries. Terminal reasons, including [MaxTokens], preserve any admitted
     ToolUse content without executing it. Unknown and unmatched stops remain
     rejected, even when the restored message contains tool blocks.
+    Admission is frozen by the response producer before its checkpoint;
+    recovery does not reinterpret it with the resumed agent's tool palette.
     Any persisted invocation, content mismatch or stale terminal counter is
     rejected. Fails closed on inconsistent restored topology. Terminal validation
     materializes restored media; unavailable or invalid bytes fail. It compares

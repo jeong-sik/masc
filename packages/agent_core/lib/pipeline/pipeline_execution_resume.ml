@@ -191,19 +191,6 @@ let validate_collected_counter agent ~turn =
          "restored checkpoint turn counter differs from the owning durable turn")
 ;;
 
-let admit_terminal_response agent (response : Types.api_response) =
-  let admission =
-    Agent_tools.admit_tool_use_names
-      (Agent_tools.build_index (Tool_set.to_list agent.Agent_types.tools))
-      response.content
-  in
-  Types.retain_response_content
-    ~content:admission.Agent_tools.admitted
-    ~retained_indices:admission.Agent_tools.retained_content_indices
-    response
-  |> Result.map_error (fun detail -> Error.Internal detail)
-;;
-
 let validate_terminal_checkpoint
       agent
       ~(response : Types.api_response)
@@ -216,7 +203,6 @@ let validate_terminal_checkpoint
       (Error.Internal
          "durable execution resume terminal turn contains persisted tool invocations")
   | [] ->
-    let* response = admit_terminal_response agent response in
     let* restored_content = wire_blocks agent message.content in
     (* Materialization checks that restored media exist and match their
        references. Compare byte identity because valid base64 spellings can
@@ -228,7 +214,7 @@ let validate_terminal_checkpoint
     let* response_content = reference response.content in
     let* restored_content = reference restored_content in
     if response_content = restored_content
-    then Ok response
+    then Ok ()
     else
       Error
         (Error.Internal
@@ -264,7 +250,7 @@ let run_settled agent boundary ~turn ~all_pre_tool_use_blocked ~tools_settled ~t
     outcome
   | Replay_terminal message ->
     let* invocations = Pipeline_execution_scope.settled_invocations boundary in
-    let* response = validate_terminal_checkpoint agent ~response message invocations in
+    let* () = validate_terminal_checkpoint agent ~response message invocations in
     let outcome = terminal response in
     let+ () = Pipeline_execution_scope.finalize_settled boundary in
     outcome
@@ -293,7 +279,7 @@ let run
              "durable execution resume terminal turn has no restored assistant message")
        | Some message ->
          let* invocations = Pipeline_execution_scope.invocations execution in
-         let* response = validate_terminal_checkpoint agent ~response message invocations in
+         let* () = validate_terminal_checkpoint agent ~response message invocations in
          (match Pipeline_execution_scope.provider execution with
           | Some provider ->
             Execution_context.with_provider_attempt provider

@@ -3823,7 +3823,16 @@ let test_active_terminal_resumes_committed_checkpoint
 
 type terminal_stop_window = Stop_provider_open | Stop_provider_closed | Stop_turn_closed
 
-let test_terminal_stop_reason_owns_tool_content ?(only_unregistered_tools=false) ~stop_reason ~window entry () =
+type terminal_surface_change =
+  | Keep_terminal_surface
+  | Remove_terminal_surface
+  | Extend_terminal_surface
+
+let test_terminal_stop_reason_owns_tool_content
+      ?(only_unregistered_tools=false)
+      ?(canonical_only=false)
+      ?(surface_change=Keep_terminal_surface)
+      ~stop_reason ~window entry () =
   with_execution_test_dir "agent-core-terminal-tool-content-"
   @@ fun ~env ~sw ~runtime ~dir ->
   let scope_ok = function
@@ -3845,13 +3854,17 @@ let test_terminal_stop_reason_owns_tool_content ?(only_unregistered_tools=false)
   let binding = match Internal_binding.of_provider_config ~transport:Internal_binding.Injected provider_config with
     | Ok value -> value | Error detail -> Alcotest.fail detail in
   let raw_content, admitted_content =
-    if only_unregistered_tools then
+    if canonical_only then
+      let content = [Llm_provider.Types.Text "terminal with tool content";
+        ToolUse {id="not-a-tool-turn";name="must_not_execute";input=`Assoc []}] in
+      content, content
+    else if only_unregistered_tools then
       [Llm_provider.Types.Text "terminal with tool content";
         ToolUse {id="dropped-unknown-tool";name="unregistered_terminal_tool";input=`Assoc []}],
       [Llm_provider.Types.Text "terminal with tool content"]
     else
       [Llm_provider.Types.Text "terminal with tool content";
-        ToolUse {id="not-a-tool-turn";name="must_not_execute-1";input=`Assoc []};
+        ToolUse {id="not-a-tool-turn";name="must_not_execute1";input=`Assoc []};
         ToolUse {id="dropped-unknown-tool";name="unregistered_terminal_tool";input=`Assoc []}],
       [Llm_provider.Types.Text "terminal with tool content";
         ToolUse {id="not-a-tool-turn";name="must_not_execute";input=`Assoc []}] in
@@ -3865,18 +3878,38 @@ let test_terminal_stop_reason_owns_tool_content ?(only_unregistered_tools=false)
   let transport = Llm_provider.Llm_transport.custom
     {complete_sync=(fun _->{Llm_provider.Llm_transport.response=next ();latency_ms=None});
      complete_stream=(fun ?on_telemetry:_ ~on_event:_ _->next ())} in
+  let active_agent = ref None in
+  let extra_tools = List.map (fun name ->
+      Tool.create ~name ~description:"Added after response admission" ~parameters:[]
+        (fun _ -> incr effect_count;
+          Ok {Types.content="unintended added effect";content_blocks=None;_meta=None}))
+      ["must_not_execute1";"unregistered_terminal_tool"] in
   let options = {Agent.default_options with transport=Some transport;provider_config=Some provider_config;
     hooks={Hooks.empty with
       on_stop=Some (function
         | Hooks.OnStop {response=stop_response;_} ->
           incr on_stops; on_stop_responses := stop_response :: !on_stop_responses; Hooks.Continue
         | _ -> Hooks.Continue);
-      after_turn=Some (fun _->incr after_turns;Hooks.Continue)}} in
+      after_turn=Some (fun _->
+        incr after_turns;
+        (match surface_change, !active_agent with
+         | Extend_terminal_surface, Some agent -> Agent.extend_tools agent extra_tools
+         | Extend_terminal_surface, None -> Alcotest.fail "AfterTurn lost its agent"
+         | (Keep_terminal_surface | Remove_terminal_surface), (Some _ | None) -> ());
+        Hooks.Continue)}} in
   let media_store = Agent_core.History.Memory_store.create () in
-  let create () = Agent.create ~media_store ~net:env#net ~tools ~config ~options () in
+  let create () =
+    let agent = Agent.create ~media_store ~net:env#net ~tools ~config ~options () in
+    active_agent := Some agent;
+    agent in
   (* Establish the fresh public pipeline behavior before constructing a crash. *)
   let fresh = create () in
-  (match Agent.run ~sw fresh "finish this request" with
+  let fresh_dir = Eio.Path.(dir / "fresh") in
+  Eio.Path.mkdirs ~exists_ok:false ~perm:0o700 fresh_dir;
+  let fresh_locator = ref None in
+  let fresh_store = Agent.execution_store ~runtime ~dir:fresh_dir
+      ~on_scope_ready:(fun value -> fresh_locator:=Some value;Ok ()) () in
+  (match Agent.run ~sw ~execution_store:fresh_store fresh "finish this request" with
    | Ok actual when accepted ->
      Alcotest.(check bool) "fresh output keeps terminal stop and admitted tool content" true
        (actual=admitted_response);
@@ -3889,12 +3922,31 @@ let test_terminal_stop_reason_owns_tool_content ?(only_unregistered_tools=false)
   Alcotest.(check int) "fresh terminal content never invokes the registered tool" 0 !effect_count;
   Alcotest.(check int) "fresh output invokes OnStop only for accepted terminal reasons"
     (if accepted then 1 else 0) !on_stops;
+  if accepted then (
+    let projection = Agent.open_execution_projection ~runtime ~dir:fresh_dir
+        (Option.get !fresh_locator) |> Result.get_ok in
+    let page = Agent.Execution_projection.read_page projection
+        ~after:(Agent.Execution_projection.beginning_cursor projection) ~limit:1024 ()
+      |> Result.get_ok in
+    let responses = List.filter_map (fun (event:Agent.Execution_projection.event) ->
+        match event.payload with
+        | Node_updated {update=Provider_response_snapshot stored;_} -> Some (event.seq,stored)
+        | _ -> None) page.events in
+    match responses with
+    | [(response_seq,stored)] ->
+      Alcotest.(check bool) "durable response freezes the actual admission result" true
+        (stored=admitted_response);
+      Alcotest.(check bool) "response authority precedes the collected checkpoint" true
+        (List.exists (fun (event:Agent.Execution_projection.event) -> match event.payload with
+           | Node_updated {update=Checkpoint_snapshot snapshot;_} ->
+             Checkpoint_snapshot.stage snapshot=After_assistant_collected && response_seq<event.seq
+           | _ -> false) page.events)
+    | _ -> Alcotest.fail "fresh execution did not persist one provider response");
   provider_calls:=0;after_turns:=0;on_stops:=0;on_stop_responses:=[];
-  let original = create () in
   let usage = Types.add_usage Types.empty_usage (Option.get response.usage) in
-  Agent.set_state original {provider_binding=None;config;turn_count=8;usage;
+  Agent.set_state fresh {provider_binding=None;config;turn_count=8;usage;
     messages=(Agent.state fresh).messages};
-  let checkpoint = Agent.checkpoint original in
+  let checkpoint = Agent.checkpoint fresh in
   let writer_runtime = match Internal_runtime.create ~sw ~domain_mgr:env#domain_mgr ~domain_count:1 with
     | Ok value -> value | Error error -> Alcotest.fail (Internal_runtime.create_error_to_string error) in
   let locator_json = ref None in
@@ -3903,7 +3955,7 @@ let test_terminal_stop_reason_owns_tool_content ?(only_unregistered_tools=false)
     locator_json:=Some (Internal_scope.scope_locator_to_yojson (Internal_scope.scope_locator scope));
     let turn = scope_ok (Internal_scope.open_turn scope ~ordinal:7) in
     let provider = scope_ok (Internal_scope.open_provider_attempt turn ~ordinal:0 binding) in
-    record_durable_provider_response provider response;
+    record_durable_provider_response provider admitted_response;
     let fact = match Checkpoint_snapshot.create ~stage:After_assistant_collected checkpoint with
       | Ok value -> value | Error error -> Alcotest.fail (Checkpoint_snapshot.error_to_string error) in
     scope_ok (Internal_scope.record_checkpoint scope fact);
@@ -3916,7 +3968,11 @@ let test_terminal_stop_reason_owns_tool_content ?(only_unregistered_tools=false)
        | Stop_provider_open | Stop_provider_closed -> ())) with
    | Ok () -> () | Error error -> Alcotest.fail (Internal_writer.scope_failure_to_string error));
   let locator = Agent.execution_locator_of_yojson (Option.get !locator_json) |> Result.get_ok in
-  let agent = match Agent.resume ~media_store ~net:env#net ~tools ~checkpoint ~config ~options () with
+  let resume_tools = match surface_change with
+    | Remove_terminal_surface -> []
+    | Keep_terminal_surface -> tools
+    | Extend_terminal_surface -> tools @ extra_tools in
+  let agent = match Agent.resume ~media_store ~net:env#net ~tools:resume_tools ~checkpoint ~config ~options () with
     | Ok value -> value | Error error -> Alcotest.fail (Agent_checkpoint.resume_error_to_string error) in
   let store = Agent.execution_store ~runtime ~dir ~resume:locator () in
   let result = match entry with
@@ -5315,7 +5371,20 @@ let () =
                  ~stop_reason:Refusal
                  ~window:Stop_turn_closed
                  Resume_regular)
-          ])
+          ]
+        @ List.concat_map (fun (label,window) ->
+            [ Alcotest.test_case (label ^ " canonical terminal survives tool removal") `Quick
+                (test_terminal_stop_reason_owns_tool_content
+                   ~canonical_only:true ~surface_change:Remove_terminal_surface
+                   ~stop_reason:Refusal ~window Resume_regular)
+            ; Alcotest.test_case (label ^ " admission survives AfterTurn tool additions") `Quick
+                (test_terminal_stop_reason_owns_tool_content
+                   ~surface_change:Extend_terminal_surface
+                   ~stop_reason:MaxTokens ~window Resume_regular)
+            ])
+            ["active",Stop_provider_open;
+             "provider-closed",Stop_provider_closed;
+             "turn-closed",Stop_turn_closed])
     ; ( "mock_responses"
       , [ Alcotest.test_case "text response" `Quick test_mock_text_response
         ; Alcotest.test_case "tool use response" `Quick test_mock_tool_use_response

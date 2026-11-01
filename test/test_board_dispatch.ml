@@ -2471,7 +2471,7 @@ let test_fusion_creation_emits_the_recorded_audience () =
    | Error error -> Alcotest.fail (Board.Post_publication_failure.to_string error));
   (match
      Board_dispatch.create_post_once_by_fusion_run_id ~fusion_run_id:"run-audience"
-       ~author:"fusion-keeper" ~content:"fusion result headline @first-reader"
+       ~author:"other-keeper" ~content:"fusion result headline @first-reader"
        ~post_kind:Board.System_post ~visibility:Board.Unlisted ~ttl_hours:1
        ~origin:{ origin with fusion_producer = Some "other-keeper" } ()
    with

@@ -2292,15 +2292,15 @@ let test_transient_goal_retry ~drop () =
           let actual_clock = Option.get !workspace_clock in
           let await f = match Eio.Time.with_timeout actual_clock hung_review_wait_s (fun () -> f (); Ok ()) with
             | Ok () -> () | Error `Timeout -> fail "verifier retry did not progress" in
-          (* Yield until the real scheduling owner has registered its timer. *)
+          (* Wait until the real scheduling owner has registered its timer. *)
           await (fun () ->
             let rec advance () =
               if Eio_mock.Clock.try_advance clock then ()
-              else (Eio.Fiber.yield (); advance ())
+              else (Eio.Time.sleep actual_clock idle_tick_s; advance ())
             in
             let rec scheduled () =
               if Agent.retry_pending ~goal_id then ()
-              else (Eio.Fiber.yield (); scheduled ()) in
+              else (Eio.Time.sleep actual_clock idle_tick_s; scheduled ()) in
             scheduled ();
             if drop then
               ignore (must_succeed "drop waiting proof" (transition ctx goal_id "drop"));
@@ -2440,7 +2440,10 @@ tools-support = true
             | Ok value -> value
             | Error `Timeout -> fail (label ^ " did not happen; " ^ diagnostic_state ())
           in
-          let rec until condition = if condition () then () else (Eio.Fiber.yield (); until condition) in
+          let rec until condition =
+            if condition () then ()
+            else (Eio.Time.sleep actual_clock idle_tick_s; until condition)
+          in
           await "the retry being armed" (fun () -> until (fun () -> Agent.retry_pending ~goal_id));
           await "the stall notice" (fun () -> until (fun () -> goal_stall_posts ~goal_id ~request_id <> []));
           (match goal_stall_posts ~goal_id ~request_id with

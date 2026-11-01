@@ -3111,9 +3111,7 @@ let test_next_task_number_rejects_unreadable_or_broken_event_history () =
       "after restoring readability and removing broken entry, high-water mark is 102"
       102
       (Workspace.next_task_number config (Workspace.read_backlog config));
-    Unix.unlink path;
-    Unix.rmdir month_dir;
-    Unix.rmdir events_dir;
+    Fs_compat.remove_tree events_dir;
     Fs_compat.save_file events_dir "corrupted non-directory events root\n";
     Fun.protect
       ~finally:(fun () ->

@@ -37,4 +37,3 @@ export function SkillFlowView({ profile }: { profile: SkillSurfaceProfile }) {
     </div>
   `
 }
-

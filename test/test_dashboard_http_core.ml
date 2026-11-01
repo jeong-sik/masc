@@ -5210,7 +5210,7 @@ let test_tools_routes_serve_prepared_http_representations () =
         Yojson.Safe.Util.(json |> member "effective_keeper_surface" |> member "reason" |> to_string);
       check bool (protocol ^ " exact Keeper does not receive default snapshot decoration") false
         (String_util.contains_substring body "final-decoration"))
-      [ "H1", tools_h1_wire_response ~router; "H2", tools_h2_wire_response ~handler:h2_handler ];
+      [ "H1", tools_h1_wire_response ?body:None ~router; "H2", tools_h2_wire_response ~handler:h2_handler ];
     (* Start from fresh address keys: a previously used bucket may refill during
        the request, so comparing consecutive reads of it is timing-dependent. *)
     let check_first_h2_charge label headers target expected_status =

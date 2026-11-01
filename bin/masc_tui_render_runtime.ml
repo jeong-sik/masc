@@ -1348,19 +1348,21 @@ let usage_lines ~cols ~rows (state : state) =
   let wrap_evidence lines =
     (* Wrap before the scroll window is counted. Coverage and missing samples
        remain reachable rows on narrow terminals. *)
+    let width = max 1 (framed_inner_width cols) in
     List.concat_map
       (fun line ->
         if String.equal line "" then [ "" ]
-        else if Message_layout.display_width line <= framed_inner_width cols then [line]
+        else if Message_layout.display_width line <= width then [line]
         else
           let rec leading index =
             if index < String.length line && Char.equal line.[index] ' '
             then leading (index + 1) else index in
           let indent_cells = leading 0 in
-          let indent = String.make indent_cells ' ' in
+          (* Do not let decoration consume the cells needed by a wide glyph. *)
+          let indent = String.make (min indent_cells (max 0 (width - 2))) ' ' in
           let body = String.sub line indent_cells (String.length line - indent_cells) in
           Message_layout.split_styled_cells
-            ~max_cells:(max 1 (framed_inner_width cols - indent_cells)) body
+            ~max_cells:(max 1 (width - String.length indent)) body
           |> List.map (fun text -> indent ^ text))
       lines
   in
@@ -1377,12 +1379,12 @@ let usage_lines ~cols ~rows (state : state) =
         let missing = match state.overview_providers, account with
           | Providers_read _, None -> ["Account absent from the current inventory; selection retained."]
           | Providers_read _, Some _ | (Providers_unread | Providers_failed _), _ -> [] in
-        Masc_tui_text_block.rows ~max_cells:(max 1 (framed_inner_width cols - 2))
+        Masc_tui_text_block.rows ~max_cells:(max 1 (framed_inner_width cols))
           (String.concat "\n" (("Account · " ^ label ^ " · f:choose · a:all accounts") :: missing))
         @ [""] in
   match state.usage_section with
   (* Plan cards already have a cell-sized border and wrapped contents. *)
-  | Usage_plan -> selection_lines @ scopes
+  | Usage_plan -> selection_lines @ wrap_evidence scopes
   | Usage_trend -> selection_lines @ wrap_evidence (provider_history_lines ~cols ~rows state)
   | Usage_keepers ->
       let currency = match Masc_tui_candle.summary_lines state.candle_observation with

@@ -558,6 +558,10 @@ let account_email ~account_emails (account : Masc.Tui_decode_usage.provider_usag
 let indent = " "
 let indent_cells = 1
 
+(* A continuation normally spends the indent and a separator. Leave room
+   for a two-cell terminal grapheme after them, or stack the entry instead. *)
+let minimum_inline_cells = indent_cells + 1 + 2
+
 (* "100%" is the widest reading a gauge normally shows. *)
 let percent_cells = 4
 
@@ -969,6 +973,23 @@ let rec separated = function
   | [ block ] -> block
   | block :: rest -> block @ ("" :: separated rest)
 
+let draw_stacked_entry ~width ~tone entry =
+  let wrap tone text =
+    Masc_tui_message_layout.wrap_words ~max_cells:(max 1 width) text
+    |> List.map (style tone) in
+  let name =
+    Masc_tui_message_layout.wrap_words ~max_cells:(max 1 width) entry.de_name
+    |> List.map (fun text -> Ansi.bold ^ tone ^ text ^ Ansi.reset) in
+  let body = match entry.de_body with
+    | State_text text -> wrap None text
+    | Window_lines lines ->
+        List.map (fun line ->
+          wrap line.tone line.label @ wrap line.tone line.percent
+          @ wrap line.detail_tone line.detail) lines |> separated in
+  name @ body
+  @ Option.fold ~none:[] ~some:(fun tag -> wrap (Some (Theme.bad ())) ("Catalogue · " ^ tag)) entry.de_tag
+  @ Option.fold ~none:[] ~some:(wrap (Some (Theme.recede ()))) entry.de_email
+
 let draw_groups ~show_limit_exhausted ~width groups =
   let entries = List.concat_map snd groups in
   let layout = layout_for ~show_names:true ~width entries in
@@ -979,6 +1000,8 @@ let draw_groups ~show_limit_exhausted ~width groups =
     | At_limit_or_exhausted | Other_windows | No_windows ->
         let tone = section_tone section in
         let draw entry =
+          if width < minimum_inline_cells then draw_stacked_entry ~width ~tone entry
+          else
           let label_overflows =
             match entry.de_body with
             | State_text _ -> false
@@ -1113,8 +1136,38 @@ let counts ~runtimes (accounts : Masc.Tui_decode_usage.provider_usage_account li
 
 let title_text () = Printf.sprintf " %sPlan usage%s" Ansi.bold Ansi.reset
 
+(* Find the formerly visible prefix without segmenting a potentially huge
+   error tail. Grow the UTF-8 sample only until the next grapheme establishes
+   the cut; a single long grapheme may itself need the whole sample. *)
+let error_visible_prefix ~width text =
+  let length = String.length text in
+  let rec find sample_bytes =
+    let sample =
+      if sample_bytes >= length then text
+      else String_util.utf8_prefix ~max_bytes:sample_bytes text in
+    let visible, remaining = Masc_tui_message_layout.split_at_cells sample width in
+    (* The final sampled grapheme can still change width when its next scalar
+       arrives, so a cut is stable only once its following boundary is seen. *)
+    let stable_cut =
+      not (String.equal remaining "")
+      && List.exists (fun boundary ->
+           boundary > String.length visible && boundary < String.length sample)
+           (Masc_tui_message_layout.input_boundaries sample) in
+    if stable_cut || sample_bytes >= length then visible
+    else
+      let next = if sample_bytes > length / 2 then length else sample_bytes * 2 in
+      find next in
+  find (min length (4 * (max 1 width + 1)))
+
 let section_with ~draw ~bound ~(providers : Types.overview_providers_reading) ~runtimes
-    ~account_emails ~now ~width =
+    ~account_emails ~now ~width ~rows =
+  let detail text =
+    let text = Terminal_text.single_line text in
+    (* Keep everything the old single row could show, even a grapheme with
+       more bytes than the viewport bound. Bound only the newly exposed tail. *)
+    let visible = error_visible_prefix ~width:(max 1 width) text in
+    let tail = String.sub text (String.length visible) (String.length text - String.length visible) in
+    visible ^ text_for_viewport ~columns:(max 20 width) ~rows tail in
   match providers with
   | Types.Providers_unread -> None
   | Types.Providers_failed reason ->
@@ -1122,7 +1175,7 @@ let section_with ~draw ~bound ~(providers : Types.overview_providers_reading) ~r
         { title = title_text ()
         ; lines =
             [ Printf.sprintf " %susage data unavailable: %s%s" (Theme.warn ())
-                (Terminal_text.single_line reason) Ansi.reset
+                (detail reason) Ansi.reset
             ]
         }
   | Types.Providers_read { Masc.Tui_decode_usage.puws_since = _; puws_accounts } ->
@@ -1135,7 +1188,7 @@ let section_with ~draw ~bound ~(providers : Types.overview_providers_reading) ~r
         match (runtimes : Types.overview_quota_reading) with
         | Types.Quota_failed reason ->
             [ Printf.sprintf " %sexhausted tags unread: %s%s" (Theme.warn ())
-                (Terminal_text.single_line reason) Ansi.reset
+                (detail reason) Ansi.reset
             ]
         | Types.Quota_unread | Types.Quota_read _ -> []
       in
@@ -1145,7 +1198,7 @@ let section_with ~draw ~bound ~(providers : Types.overview_providers_reading) ~r
         match (account_emails : Types.overview_account_emails_reading) with
         | Types.Account_emails_failed reason ->
             [ Printf.sprintf " %saccount emails unread: %s%s" (Theme.warn ())
-                (Terminal_text.single_line reason) Ansi.reset
+                (detail reason) Ansi.reset
             ]
         | Types.Account_emails_read { unreadable_rows; _ } when unreadable_rows > 0 ->
             [ Printf.sprintf " %saccount emails: %d rows this build cannot read%s" (Theme.warn ())
@@ -1195,11 +1248,11 @@ let bound_groups ~width ~rows groups =
 
 let section ~providers ~runtimes ~account_emails ~now ~show_limit_exhausted ~width ~rows =
   section_with ~draw:(draw_groups ~show_limit_exhausted ~width) ~bound:(bound_groups ~width ~rows)
-    ~providers ~runtimes ~account_emails ~now ~width
+    ~providers ~runtimes ~account_emails ~now ~width ~rows
 
 let section_cards ~providers ~runtimes ~account_emails ~now ~show_limit_exhausted ~width ~rows =
   let draw =
     if cards_fit ~width then draw_cards ~show_limit_exhausted ~width
     else draw_groups ~show_limit_exhausted ~width
   in
-  section_with ~draw ~bound:(bound_groups ~width ~rows) ~providers ~runtimes ~account_emails ~now ~width
+  section_with ~draw ~bound:(bound_groups ~width ~rows) ~providers ~runtimes ~account_emails ~now ~width ~rows

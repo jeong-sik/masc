@@ -6749,13 +6749,12 @@ let launch_harness_load state ~mailbox =
   end
   end
 
-let launch_fusion_runs_load state ~mailbox =
+let launch_fusion_runs_load ?(demand = Masc_tui_fusion_updates.Share) state ~mailbox =
   let enqueue_async = workspace_enqueue state in
   if server_authority_ready state then
-  match Masc_tui_fetched.start ~equal:Unit.equal state.fusion_runs ~key:() with
-  | Masc_tui_fetched.Already_loading -> ()
-  | Masc_tui_fetched.Started (fusion_runs, request) ->
-      state.fusion_runs <- fusion_runs;
+  match Masc_tui_fusion_updates.begin_runs state ~demand with
+  | None -> ()
+  | Some request ->
       let host = server_peer_host in
       let port = state.port in
       let run () =
@@ -6776,20 +6775,12 @@ let launch_fusion_runs_load state ~mailbox =
              (Fusion_runs_loaded
                 (request, Error "Eio switch is unavailable")))
 
-let launch_fusion_detail_load state ~mailbox ~run_id =
+let launch_fusion_detail_load ?(demand = Masc_tui_fusion_updates.Share) state ~mailbox ~run_id =
   if server_authority_ready state then begin
   let enqueue_async = workspace_enqueue state in
-  let already_loading =
-    match state.fusion_detail_inflight with
-    | Some (generation, loading_run_id) ->
-        generation = state.fusion_detail_generation
-        && String.equal loading_run_id run_id
-    | None -> false
-  in
-  if not already_loading then begin
-    state.fusion_detail_generation <- state.fusion_detail_generation + 1;
-    let generation = state.fusion_detail_generation in
-    state.fusion_detail_inflight <- Some (generation, run_id);
+  match Masc_tui_fusion_updates.begin_detail state ~demand ~run_id with
+  | None -> ()
+  | Some generation ->
     let host = server_peer_host in
     let port = state.port in
     Masc_tui_async_read.launch
@@ -6797,22 +6788,13 @@ let launch_fusion_detail_load state ~mailbox ~run_id =
         enqueue_async mailbox (Fusion_detail_loaded (generation, run_id, result)))
       (fun () -> Masc_tui_loader.load_fusion_detail ~host ~port ~run_id)
   end
-  end
 
-let launch_fusion_historical_detail_load state ~mailbox ~reference =
+let launch_fusion_historical_detail_load ?(demand = Masc_tui_fusion_updates.Share) state ~mailbox ~reference =
   if server_authority_ready state then begin
   let enqueue_async = workspace_enqueue state in
-  let already_loading =
-    match state.fusion_historical_inflight with
-    | Some (generation, loading_reference) ->
-        generation = state.fusion_detail_generation
-        && loading_reference = reference
-    | None -> false
-  in
-  if not already_loading then begin
-    state.fusion_detail_generation <- state.fusion_detail_generation + 1;
-    let generation = state.fusion_detail_generation in
-    state.fusion_historical_inflight <- Some (generation, reference);
+  match Masc_tui_fusion_updates.begin_historical state ~demand ~reference with
+  | None -> ()
+  | Some generation ->
     let host = server_peer_host in
     let port = state.port in
     Masc_tui_async_read.launch
@@ -6821,7 +6803,13 @@ let launch_fusion_historical_detail_load state ~mailbox ~reference =
       (fun () -> Masc_tui_loader.load_fusion_historical_detail ~host ~port ~reference)
   end
 
-  end
+let revalidate_visible_fusion state ~mailbox =
+  let demand = Masc_tui_fusion_updates.After_change in
+  Masc_tui_fusion_updates.revalidate_visible state
+    ~runs:(fun () -> launch_fusion_runs_load ~demand state ~mailbox)
+    ~detail:(fun run_id -> launch_fusion_detail_load ~demand state ~mailbox ~run_id)
+    ~historical:(fun reference ->
+      launch_fusion_historical_detail_load ~demand state ~mailbox ~reference)
 
 (* The server's reading of which Keepers the memory recall judgment reaches,
    asked when the [m] form opens and drawn in it. Each open takes a new
@@ -7820,13 +7808,14 @@ let launch_surface_reads state ~mailbox (surface : surface) =
   | Verification | Planning -> launch_verification_load state ~mailbox
   | Harness -> launch_harness_load state ~mailbox
   | Fusion ->
-      launch_fusion_runs_load state ~mailbox;
+      let demand = Masc_tui_fusion_updates.After_change in
+      launch_fusion_runs_load ~demand state ~mailbox;
       (match state.fusion_mode with
        | Fusion_list -> ()
        | Fusion_detail run_id ->
-           launch_fusion_detail_load state ~mailbox ~run_id
+           launch_fusion_detail_load ~demand state ~mailbox ~run_id
        | Fusion_historical_detail reference ->
-           launch_fusion_historical_detail_load state ~mailbox ~reference)
+           launch_fusion_historical_detail_load ~demand state ~mailbox ~reference)
   | Memory -> launch_memory_health_load state ~mailbox
   | Repositories -> launch_repositories_load state ~mailbox
   | Changes -> (
@@ -14383,7 +14372,9 @@ let revoke_detail_readings state =
   state.keeper_schedules_error <- None;
   state.keeper_schedules_page <- None;
   state.keeper_schedules_pending <- None;
-  state.fusion_runs <- Masc_tui_fetched.clear state.fusion_runs
+  state.fusion_runs <- Masc_tui_fetched.clear state.fusion_runs;
+  state.fusion_runs_reread_pending <- false;
+  state.fusion_runs_open_at_start <- None
 
 let same_currency_workspace source current =
   match source, current with
@@ -15763,7 +15754,8 @@ let launch_detail_tab_reading state ~mailbox (keeper : keeper) =
        | Some _ | None -> state.keeper_schedules <- None);
       state.keeper_schedules_error <- None;
       launch_keeper_schedules_load state ~mailbox ~keeper_name:keeper.k_name
-  | Detail_runs -> launch_fusion_runs_load state ~mailbox
+  | Detail_runs ->
+      launch_fusion_runs_load ~demand:Masc_tui_fusion_updates.After_change state ~mailbox
   | Detail_terminal ->
       (* The tab follows the Keeper's output over a stream that
          [reconcile_keeper_logs] opens on the next pass of the loop. *)
@@ -15787,7 +15779,7 @@ let refresh_visible_detail_after_authority_recovery state ~mailbox ~previous_aut
     | Keepers Keeper_detail, _, Some keeper ->
         launch_detail_tab_reading state ~mailbox keeper
     | Connectors, _, _ -> launch_connectors_load state ~mailbox
-    | Fusion, _, _ -> launch_fusion_runs_load state ~mailbox
+    | Fusion, _, _ -> revalidate_visible_fusion state ~mailbox
     | (Keepers (Keeper_detail), (Detail_info | (Detail_sandbox | (Detail_instructions | (Detail_secrets | (Detail_github | (Detail_identity | (Detail_channels | (Detail_automation | (Detail_runs | Detail_terminal))))))))), None)
     | (Keepers (Keeper_list | (Keeper_logs | (Keeper_calls | (Keeper_message | Keeper_runtime_pick)))), _, _)
     | ((Overview | (Acting | (Metrics | (Memory | (Lanes | (Clients | (Board | (Approvals | (Planning | (Schedules | (Verification | (Harness | (Repositories | (Code | (Changes | (Runtime | (Config | (Resources | (Tools | System_logs))))))))))))))))))), _, _) -> ()
@@ -18412,13 +18404,15 @@ let open_fusion_detail state ~mailbox =
       state.fusion_scroll <- 0;
       state.fusion_historical_detail <- None;
       state.fusion_detail_error <- None;
-      launch_fusion_historical_detail_load state ~mailbox ~reference:evidence
+      launch_fusion_historical_detail_load ~demand:Masc_tui_fusion_updates.After_change
+        state ~mailbox ~reference:evidence
   | Some (Masc.Tui_decode_fusion.Fusion_retained_run run) ->
       state.fusion_mode <- Fusion_detail run.fur_run_id;
       state.fusion_scroll <- 0;
       state.fusion_detail <- None;
       state.fusion_detail_error <- None;
-      launch_fusion_detail_load state ~mailbox ~run_id:run.fur_run_id
+      launch_fusion_detail_load ~demand:Masc_tui_fusion_updates.After_change
+        state ~mailbox ~run_id:run.fur_run_id
 
 let open_selected_system_log state =
   match
@@ -20152,7 +20146,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
       state.observer <-
         Observer_live { session_id; since = Unix.gettimeofday (); events = 0 };
       add_event state "observer" (observer_replay_description state.observer_replay);
-      add_event state "observer" "runtime event feed open"
+      add_event state "observer" "runtime event feed open";
+      revalidate_visible_fusion state ~mailbox
   | Observer_received (instance_id, decoded) ->
       let received = Unix.gettimeofday () in
       (* One reload per batch, however many turns it carries: the pane
@@ -20175,11 +20170,13 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
           open_chat_stream_frames := (source, highest) :: List.remove_assoc source !open_chat_stream_frames
         end
       in
-      (* Same shape as [open_chat_gained_turn]: remember that a fusion run
-         pushed a status, decide once per batch after the loop. The run id
-         rides along so an open detail only refetches when it is the run
-         that moved. *)
-      let fusion_status_seen = ref None in
+      (* Retain whether any run changed and whether the open one changed;
+         a later unrelated event in this batch must not erase the latter. *)
+      let fusion_open_run_id = match state.fusion_mode with
+        | Fusion_detail run_id -> Some run_id
+        | Fusion_historical_detail reference -> Some reference.fhe_run_id
+        | Fusion_list -> None in
+      let fusion_status_seen = ref Masc_tui_fusion_updates.no_changed_runs in
       (* Same shape again for the pane's Changes tab: a tool call the
          selected keeper completed may have written a file, so the tab
          asks once per batch. Agent-core events name their lane; the
@@ -20240,7 +20237,9 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
                    ());
               (match event with
                | Masc_tui_observer.Fusion_run_status { run_id; _ } ->
-                   fusion_status_seen := Some run_id
+                   fusion_status_seen :=
+                     Masc_tui_fusion_updates.note_run_changed
+                       ~open_run_id:fusion_open_run_id !fusion_status_seen ~run_id
                | Masc_tui_observer.Keeper_tool_call _
                | Masc_tui_observer.Agent_core { kind = Masc_tui_observer.Tool_completed; _ }
                  when acted_by_pane_keeper event ->
@@ -20351,27 +20350,28 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
                      [ (source, started_at, since_seq) ])
              (List.rev !open_chat_stream_frames)
        | None -> ());
-      (* A fusion push reloads only the surface that shows it. The event
-         says a run moved; HTTP says what it is now -- the same
-         trigger/SSOT split the dashboard applies (sse-store). Both loaders
-         are inflight-guarded, so a run that pushes several stage frames
-         collapses to one fetch, and a missed frame is healed by the
-         cadence reload the Fusion view already runs. *)
-      (match !fusion_status_seen with
-       | None -> ()
-       | Some run_id -> (
-           match state.view with
-           | Fusion -> (
-               launch_fusion_runs_load state ~mailbox;
-               match state.fusion_mode with
-               | Fusion_detail open_id when String.equal run_id open_id ->
-                   launch_fusion_detail_load state ~mailbox ~run_id
-               | Fusion_detail _ | Fusion_historical_detail _ | Fusion_list -> ())
-           | Overview | Acting | Metrics | Keepers _ | Memory | Lanes | Clients | Board
-           | Approvals | Planning | Schedules | Verification | Harness
-           | Repositories | Code | Changes | Connectors | Runtime | Config
-           | Resources | Tools | System_logs ->
-               ()))
+      (* The notification is a change signal; the HTTP read remains the
+         source of the projection. A signal during a read queues one follow-up. *)
+      (if (!fusion_status_seen).any then
+         let demand = Masc_tui_fusion_updates.After_change in
+         match state.view with
+         | Fusion ->
+             launch_fusion_runs_load ~demand state ~mailbox;
+             if (!fusion_status_seen).open_run then
+               (match state.fusion_mode with
+                | Fusion_detail run_id ->
+                    launch_fusion_detail_load ~demand state ~mailbox ~run_id
+                | Fusion_historical_detail reference ->
+                    launch_fusion_historical_detail_load ~demand state ~mailbox ~reference
+                | Fusion_list -> ())
+         | Keepers Keeper_detail when state.detail_tab = Detail_runs ->
+             launch_fusion_runs_load ~demand state ~mailbox
+         | Keepers (Keeper_detail | Keeper_list | Keeper_logs | Keeper_calls
+                   | Keeper_message | Keeper_runtime_pick)
+         | Overview | Acting | Metrics | Memory | Lanes | Clients | Board
+         | Approvals | Planning | Schedules | Verification | Harness
+         | Repositories | Code | Changes | Connectors | Runtime | Config
+         | Resources | Tools | System_logs -> ())
   | Original_task_history_done (request,result) ->
       ignore (complete_original_history_inspection state request result)
   | Original_task_evidence_done (request,result) ->
@@ -20405,6 +20405,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
               report_action state "error" (Printf.sprintf "task creation outcome for %s is unconfirmed: %s; use /task-inspect before /task-recover"
                 intent.keeper detail)))
   | Observer_closed outcome ->
+      let was_opening = state.observer = Observer_opening in
       let reason =
         match outcome with
         | Ok () -> "the server closed the stream"
@@ -20428,7 +20429,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
          | Observer_off | Observer_opening | Observer_closed_before_answer _
          | Observer_closed_after_live _ ->
            Observer_closed_before_answer { reason; at });
-      add_event state "observer" ("runtime event feed closed: " ^ reason)
+      add_event state "observer" ("runtime event feed closed: " ^ reason);
+      if was_opening then revalidate_visible_fusion state ~mailbox
   | Fleet_stream_view view ->
       (* A view from a job that is no longer followed has no screen to go to. *)
       (match state.fleet_stream_reader with
@@ -23942,18 +23944,29 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
                end)
       | Error detail -> state.harness_error <- Some detail)
   | Fusion_runs_loaded (request, result) ->
-      Masc_tui_fusion_updates.runs_loaded state request result
+      (match Masc_tui_fusion_updates.runs_loaded state request result with
+       | Reread when state.view = Fusion
+                     || (state.view = Keepers Keeper_detail && state.detail_tab = Detail_runs) ->
+           launch_fusion_runs_load state ~mailbox
+       | Reread | Applied | Await_observer | Obsolete -> ())
   | Fusion_detail_loaded (generation, run_id, result) ->
-      Masc_tui_fusion_updates.detail_loaded state ~generation ~run_id result
+      (match Masc_tui_fusion_updates.detail_loaded state ~generation ~run_id result with
+       | Reread when state.view = Fusion ->
+           launch_fusion_detail_load state ~mailbox ~run_id
+       | Reread | Applied | Await_observer | Obsolete -> ())
   | Fusion_historical_detail_loaded (generation, reference, result) ->
-      Masc_tui_fusion_updates.historical_detail_loaded state ~generation ~reference result
+      (match Masc_tui_fusion_updates.historical_detail_loaded state ~generation ~reference result with
+       | Reread when state.view = Fusion ->
+           launch_fusion_historical_detail_load state ~mailbox ~reference
+       | Reread | Applied | Await_observer | Obsolete -> ())
   | Fusion_launch_options_loaded (generation, result) ->
       Masc_tui_fusion_updates.launch_options_loaded state ~generation
         ~report:(report_action state "system") result
   | Fusion_launched (generation, result) ->
       Masc_tui_fusion_updates.launched state ~generation
         ~report:(report_action state "system")
-        ~refresh:(fun () -> launch_fusion_runs_load state ~mailbox) result
+        ~refresh:(fun () -> launch_fusion_runs_load
+          ~demand:Masc_tui_fusion_updates.After_change state ~mailbox) result
   | Memory_recall_standing_loaded (generation, result) ->
       Masc_tui_types.finish_memory_recall_standing_read state ~generation
         (match result with
@@ -32126,7 +32139,8 @@ Use relative paths for resources already held in the package. -->
                 state.fusion_scroll <- 0;
                 state.fusion_detail <- None;
                 state.fusion_detail_error <- None;
-                launch_fusion_detail_load state ~mailbox:async_messages ~run_id:run.fur_run_id)
+                launch_fusion_detail_load ~demand:Masc_tui_fusion_updates.After_change
+                  state ~mailbox:async_messages ~run_id:run.fur_run_id)
        | Some "a" when state.view = Fusion && state.fusion_mode = Fusion_list ->
            launch_fusion_launch_options_load state ~mailbox:async_messages
        | Some "K" when state.view = Fusion
@@ -33791,7 +33805,10 @@ Use relative paths for resources already held in the package. -->
                      state.schedule_wake_history_error <- None;
                      launch_schedule_wake_history_load state
                        ~mailbox:async_messages ~schedule_id
-                 | Link.Fusion_run, Fusion, Some run_id -> state.fusion_mode <- Fusion_detail run_id
+                 | Link.Fusion_run, Fusion, Some run_id ->
+                     state.fusion_mode <- Fusion_detail run_id;
+                     launch_fusion_detail_load ~demand:Masc_tui_fusion_updates.After_change
+                       state ~mailbox:async_messages ~run_id
                  | Link.Keeper, Keepers _, Some keeper_name ->
                      (* The roster is a cursor, not an id, so this puts the
                         cursor on the named keeper and leaves it there. A name

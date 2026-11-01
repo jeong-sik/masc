@@ -380,10 +380,12 @@ let test_core_checkpoint_survives_codex_guidance_failure () =
           |> function Ok value -> value | Error _ -> fail "original Core checkpoint fixture" in
         let checkpoint = Semantic.Agent_core reference in
         let input = `Assoc ["message",`String "Return the fixture marker";
-          "instructions",`String "original operation authority"] in
+          "instructions",`String "original operation authority"]
+          |> Operation.canonical_json |> Result.get_ok in
         let owner_p, publish_owner = Eio.Promise.create () in
         let blocked, publish_blocked = Eio.Promise.create () in
         let finished, publish_finished = Eio.Promise.create () in
+        let require_settlement = function Ok () -> () | Error detail -> fail detail in
         let attempts = ref 0 and entries = ref 0 and transmissions = ref 0 in
         let assert_original owner =
           let original = Owner.exact_operation owner id |> require |> Option.get in
@@ -432,13 +434,23 @@ let test_core_checkpoint_survives_codex_guidance_failure () =
             ~session_root:(Filename.concat base_path "traces") ~now:(fun () -> 42.)
             ~on_turn_slot_released:None
             ~operation_runner:(Some Owner.{ready=(fun ~keeper_name:_ -> true);execute;
-              on_execution_settled=(fun ~keeper_name:_ ~claimed_operation_id:_ ~operations:_ ~execution:_ ->
-                if !attempts=2 then Eio.Promise.resolve publish_blocked ()
-                else if !attempts=3 then Eio.Promise.resolve publish_finished ())}) |> require in
+              on_execution_settled=(fun ~keeper_name:_ ~claimed_operation_id:_ ~operations:_ ~execution ->
+                match !attempts,execution with
+                | 1,Operation_deferred -> ()
+                | 2,Operation_deferred -> Eio.Promise.resolve publish_blocked (Ok ())
+                | 3,Operation_succeeded _ -> Eio.Promise.resolve publish_finished (Ok ())
+                | attempt,execution ->
+                  let detail = match execution with
+                    | Operation_failed {detail;_} -> detail
+                    | Operation_deferred -> "unexpected checkpoint deferral"
+                    | Operation_succeeded _ -> "unexpected operation success" in
+                  Eio.Promise.resolve
+                    (if attempt < 3 then publish_blocked else publish_finished)
+                    (Error (Printf.sprintf "Codex checkpoint attempt %d failed: %s" attempt detail)))}) |> require in
         Eio.Promise.resolve publish_owner owner;
         Owner.submit_operation owner ~operation_id:id ~source:(`Assoc ["surface",`String "test"])
           ~input |> require |> ignore;
-        Eio.Promise.await blocked;
+        Eio.Promise.await blocked |> require_settlement;
         let waiting = Owner.direct_preparation_wait owner ~operation_id:id |> require |> Option.get in
         assert_original owner;
         check bool "waiting checkpoint keeps its Core identity" true
@@ -448,7 +460,7 @@ let test_core_checkpoint_survives_codex_guidance_failure () =
         Prompt_registry.set_markdown_dir original_prompt_dir;
         Owner.retry_direct_preparation owner ~operation_id:id ~expected_revision:waiting.revision
           ~execution_digest:waiting.execution_digest |> require |> ignore;
-        Eio.Promise.await finished;
+        Eio.Promise.await finished |> require_settlement;
         check int "explicit retry enters Codex once" 1 !entries;
         check int "explicit retry transmits the original operation once" 1 !transmissions;
         check int "only one explicit retry ran" 3 !attempts;

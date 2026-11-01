@@ -25,8 +25,9 @@ val list_reactions_batch :
   ?user_id:string ->
   unit ->
   ((reaction_target_type * string) * reaction_summary list) list
-(** One scan produces a row for each distinct requested target, including
-    unknown targets with an empty summary. Row order is unspecified. *)
+(** One scan produces a row for each distinct requested target, in unspecified
+    order. A target with no matching reaction rows receives an empty summary;
+    target existence is not checked. *)
 
 val toggle_reaction :
   store ->

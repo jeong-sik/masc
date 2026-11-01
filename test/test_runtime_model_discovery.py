@@ -9,7 +9,7 @@ import tempfile
 import threading
 import unittest
 
-BINARY = None
+BINARY = ''
 if len(sys.argv) > 2 and sys.argv[1] == '--binary':
     BINARY = str(Path(sys.argv.pop(2)).resolve())
     sys.argv.pop(1)
@@ -69,8 +69,12 @@ class NativeDiscovery(unittest.TestCase):
     def test_exact_native_provider_model_inherits_its_catalog_base(self):
         self.respond = lambda path: (200, {}, {'data': [
             dict(id='claude-sonnet-5-5'), dict(id='gpt-6.1-sol'), dict(id='unreported-model')]})
-        result = self.invoke_catalog_fixture(provider_id='claude')
+        result = self.invoke(choice='messages', provider_id='claude',
+                             credential_file=str(self.fixture_key))
         self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual([path for path, _ in self.calls], ['/v1/models'])
+        self.assertEqual(self.calls[0][1].get('x-api-key'), 'local-discovery-fixture-key')
+        self.assertNotIn('local-discovery-fixture-key', result.stdout + result.stderr)
         models = {row['id']: row.get('supports_image_input')
                   for row in json.loads(result.stdout)['models']}
         self.assertIs(models['claude-sonnet-5-5'], True)
@@ -103,7 +107,7 @@ class NativeDiscovery(unittest.TestCase):
                 self.end_headers()
                 self.wfile.write(payload)
 
-            def log_message(self, *args):
+            def log_message(self, format: str, *args: object) -> None:
                 pass
 
             def do_POST(self):
@@ -128,9 +132,9 @@ class NativeDiscovery(unittest.TestCase):
         self.respond = lambda path: (200, {}, {'data': []})
         self.respond_post = lambda path, body: (200, {})
 
-    def invoke(self, **fields):
+    def invoke(self, choice: str = 'openai_compatible', **fields):
         spec = Path(self.home.name, 'connection.json')
-        spec.write_text(json.dumps(dict(choice='openai_compatible', endpoint=self.endpoint, **fields)))
+        spec.write_text(json.dumps(dict(choice=choice, endpoint=self.endpoint, **fields)))
         env = dict(os.environ, HOME=self.home.name, XDG_CONFIG_HOME=self.home.name + '/config')
         for key in list(env):
             if key.startswith('MASC_') or key.startswith('AGENT_CORE_') or key in ('OPENAI_API_KEY', 'OLLAMA_CLOUD_API_KEY', 'OLLAMA_API_KEY'):

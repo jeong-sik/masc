@@ -1450,52 +1450,15 @@ let add_routes ~sw ~clock router =
              let usage_for_reference reference =
                usage_ledgers
                |> List.filter_map (fun (keeper_name, ledger) ->
-                 let matching =
-                   Keeper_skill_activation_ledger.activations ledger
-                   |> List.filter
-                        (fun (activation : Keeper_skill_activation_ledger.activation) ->
-                     let observed =
-                       Skill_reference.make
-                         ~identity:activation.identity
-                         ~content_revision:activation.content_revision
-                     in
-                     Skill_reference.equal reference observed)
-                 in
-                 match matching with
-                 | [] -> None
-                 | activations ->
-                   let delivered =
-                     List.fold_left
-                       (fun count
-                            (activation : Keeper_skill_activation_ledger.activation) ->
-                          if Option.is_some activation.delivery then count + 1 else count)
-                       0
-                       activations
-                   in
-                   let actions =
-                     List.fold_left
-                       (fun count
-                            (activation : Keeper_skill_activation_ledger.activation) ->
-                          count + List.length activation.actions)
-                       0
-                       activations
-                   in
-                   let last_used_at =
-                     List.fold_left
-                       (fun latest
-                            (activation : Keeper_skill_activation_ledger.activation) ->
-                          max latest activation.activated_at)
-                       ""
-                       activations
-                   in
-                   Some
-                     (`Assoc
-                        [ "keeper", `String keeper_name
-                        ; "invocations", `Int (List.length activations)
-                        ; "deliveries", `Int delivered
-                        ; "actions", `Int actions
-                        ; "last_used_at", `String last_used_at
-                        ]))
+                 Keeper_skill_activation_ledger.usage_for_reference ledger reference
+                 |> Option.map (fun (usage : Keeper_skill_activation_ledger.catalog_usage) ->
+                   `Assoc
+                     [ "keeper", `String keeper_name
+                     ; "invocations", `Int usage.invocations
+                     ; "deliveries", `Int usage.received_invocations
+                     ; "actions", `Int usage.observed_actions
+                     ; "last_used_at", `String usage.last_activated_at
+                     ]))
              in
              let surface_profile_json reference skill =
                match

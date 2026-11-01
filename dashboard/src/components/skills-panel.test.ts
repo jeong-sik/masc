@@ -474,7 +474,7 @@ describe('labels', () => {
     }
     expect(capabilityLabel(profiled)).toBe('async · 4 nodes · 2 batches · parallel ×3')
     expect(usageLabel(profiled)).toBe(
-      'rondo 9×/9 delivered/134 actions · last 2026-08-27T01:00:00Z',
+      'rondo 9 invoked / 9 received / 134 observed actions · last activation 2026-08-27T01:00:00Z',
     )
   })
 

@@ -306,6 +306,23 @@ val summarize : t -> summary
 val summary_to_yojson : summary -> Yojson.Safe.t
 val task_id_set_of_list : Keeper_id.Task_id.t list -> (task_id_set, decode_error) result
 val task_id_set_to_list : task_id_set -> Keeper_id.Task_id.t list
+type catalog_usage = private
+  { invocations : int
+  ; received_invocations : int
+  ; observed_actions : int
+  ; last_activated_at : string
+  }
+
+val usage_for_reference : t -> Skill_reference.t -> catalog_usage option
+(** Pure exact-revision projection from this immutable ledger. Each invocation
+    received at an original or async provider/client boundary is counted once;
+    async action occurrences use the canonical summary's deduplication per
+    activation. One physical action linked to several invocations contributes
+    once to each invocation, not once to the whole reference population. None
+    means no matching retained activation, not an unreadable ledger or proof of
+    never being used. The timestamp is the latest activation instant, not the
+    latest async handoff/action timestamp. *)
+
 val summarize_by_scope : t -> scoped_summary list
 val scoped_summary_to_yojson : scoped_summary -> Yojson.Safe.t
 val activation_to_yojson : activation -> Yojson.Safe.t

@@ -121,3 +121,29 @@ it('preserves evidence read errors without inventing performance statistics', as
   expect((await screen.findByRole('alert')).textContent).toContain('retained evidence read failed')
   expect(screen.queryByText(/retained runs/)).toBeNull()
 })
+
+it('shows result publication failure while retaining completed node evidence', async () => {
+  api.fetchSkills.mockResolvedValue(catalog('composition'))
+  const node = { node_id: 'probe', execution_id: '01a045f2-cd8b-7000-a3f7-1d718a712205',
+    execution_origin: 'fresh_dispatch', tool_name: 'keeper_lane_status', input: {},
+    schedule: { planned_index: 0, batch_index: 0, batch_size: 1, execution_mode: 'serial' },
+    result: { disposition: 'completed', duration_ms: 0, data: { found: true }, tool_name: 'keeper_lane_status' },
+    tool_use_id: 'probe-call', failure_effect_disposition: null, deferred_kind: null, result_bytes: 14, truncated_to: null }
+  api.fetchSkillEvidence.mockResolvedValue(decodeSkillEvidenceResponse({ ...evidence, status: 'observed',
+    composition: { ...composition, executor_settlements: [node], result: { disposition: 'failed',
+      duration_ms: 0, data: null, tool_name: 'keeper_compose_proof',
+      message: 'Could not publish the result manifest after node execution',
+      failure_class: 'runtime_failure', effect_disposition: 'effect_outcome_unknown' } },
+    coverage: { ...coverage, composition_runs_observed: 1 },
+    composition_statistics: { ...emptyStats, records: 1, recorded_window: { first_recorded_at: 1, last_recorded_at: 1 },
+      failed: duration(1, 0) },
+  }))
+  await loadEvidence()
+  const failure = within(screen.getByRole('note', { name: 'Composition failure' }))
+  expect(failure.getByText(/Could not publish the result manifest/)).toBeTruthy()
+  expect(failure.getByText(/runtime_failure.*effect_outcome_unknown/)).toBeTruthy()
+  expect(screen.getByText(/1 typed node settlements/)).toBeTruthy()
+  const nodes = within(screen.getByRole('region', { name: 'Observed composition nodes' }))
+  expect(nodes.getByText('probe')).toBeTruthy()
+  expect(nodes.getByText(/keeper_lane_status.*completed/)).toBeTruthy()
+})

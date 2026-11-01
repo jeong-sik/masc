@@ -35,3 +35,14 @@
 - 영향 받는 영역: fresh skill-evidence/v8 계약과 두 소비자, retained-run 계산, 오래된 reader 제거.
 - 제약/배제: 새 workflow engine, 숫자 임계값 제어, 통계 기반 실행 Gate, 저장된 기록 migration, 기존 runtime 파일 삭제를 추가하지 않는다. 보존 결과의 관측은 전체 과거 실행 관측이나 업무 성공을 증명하지 않는다.
 - 롤백 조건: 현재 head의 실제 타입·기능 검사에서 결함이 확인되면 공개 계약과 두 소비자를 함께 고친다. 이전 wire schema를 조용히 받아들이는 호환 reader는 추가하지 않는다.
+
+## 첫 후보 검사 및 후속 관측 수정
+
+- 출처: https://github.com/jeong-sik/masc/pull/47036, https://github.com/jeong-sik/masc/actions/runs/41263263036, 작업 worktree의 dashboard-tests-unit2.log 및 eslint-unit2.log
+- 확인일시: 2026-11-01T02:09:02.893001+00:00
+- 신뢰도: High
+- 첫 후보: 7a53f1d16d80576ca3e293699f7687f11d8c1c76, branch feat/skills-observability-20261101, Test workflow, TARGET_SUITES=test_keeper_skill_composition_evidence,test_tui_decode,test_dashboard_http_core, minimal=true, completed/success. 5 + 376 + 171 = 552개 테스트 통과. 현재 head의 독립 소스 검토도 PASS이며 GitHub 공식 승인과는 별개다.
+- 후속 변경: 목록의 delivered는 결과를 받은 원래 invocation 수다. 원래 턴과 비동기 전달 경계가 둘 다 있어도 같은 invocation을 한 번만 센다. 후속 actions는 canonical activation summary의 중복 제거를 그대로 사용한다. 마지막 activation은 RFC3339 문자열 순서 대신 실제 시각을 비교한다.
+- 표시 수정: 최상위 실패의 message, failure_class, effect_disposition을 두 화면에 표시한다. 노드 실행은 완료됐으나 결과 게시가 실패한 사례의 실제 실패 사유와 완료된 노드 증거가 함께 남는다.
+- 후속 검증: Dashboard 4개 파일 99개 검사, TypeScript typecheck 및 touched-file ESLint 통과. 실제 비동기 전달·후속 도구 시나리오의 검사도 확장했으며 그 OCaml 실행은 아직 미확인이다.
+- 한계: 이 결과는 설치나 운영 화면 검증이 아니다. 생성·조합 UX와 실행 탐색, 실제 후보 화면 검증 등 전체 #47033 요구는 계속 진행 중이다.

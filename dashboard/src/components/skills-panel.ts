@@ -150,7 +150,7 @@ export function usageLabel(surface: SkillSurface | null): string {
   if (surface?.usage === undefined) return 'Usage observation unavailable'
   if (usage.length === 0) return 'No invocation observed in retained sessions'
   return usage
-    .map(row => `${row.keeper} ${row.invocations}×/${row.deliveries} delivered/${row.actions} actions · last ${row.last_used_at}`)
+    .map(row => `${row.keeper} ${row.invocations} invoked / ${row.deliveries} received / ${row.actions} observed actions · last activation ${row.last_used_at}`)
     .join(' · ')
 }
 
@@ -384,6 +384,12 @@ function SkillEvidenceView({ result, io }: { result: SkillEvidenceResponse | nul
             · ${composition.keeper}
           </div>
           <div class="ss-muted mono">${composition.composition_run_id} · ${compositionNodeCount} typed node settlements</div>
+          ${composition.result.disposition === 'failed' ? html`
+            <div class="mt-2 rounded border border-[var(--color-status-err)] p-2" role="note" aria-label="Composition failure">
+              <strong>Composition failed</strong>
+              <pre class="whitespace-pre-wrap text-3xs">${runField(composition.result, 'message')}</pre>
+              <div class="ss-muted text-3xs">Failure class: ${runField(composition.result, 'failure_class')} · effect evidence: ${runField(composition.result, 'effect_disposition')}</div>
+            </div>` : null}
           <div class="mt-2 font-semibold">Composition output</div>
           <pre class="mt-2 max-h-56 overflow-auto whitespace-pre-wrap rounded bg-[var(--color-surface-raised)] p-2 text-3xs">${runOutput(output)}</pre>
           <${SkillNodeEvidenceView} nodes=${composition.executor_settlements} />
@@ -959,10 +965,20 @@ function SkillsObservationPanel({ owner, onMutation }: {
           ? html` · ${res.snapshot.rejections.length} rejected`
           : null}
       </div>
+      <div class="ss-muted my-2" data-testid="skill-usage-coverage">
+        Usage scope: exact revision · retained current Keeper sessions.
+        ${res.usage_coverage ? html`
+          ${res.usage_coverage.ledgers_loaded} ledgers read · ${res.usage_coverage.unavailable.length} unavailable.
+          ${res.usage_coverage.unavailable.length > 0 ? html`<details class="text-[var(--color-status-warn)]"><summary>Incomplete session coverage</summary>
+            ${res.usage_coverage.unavailable.map(detail => html`<div key=${detail}>${detail}</div>`)}
+          </details>` : null}
+        ` : html`Coverage unavailable; displayed users cannot establish fleet-wide usage.`}
+        Received counts invocations handed to a provider/client, including asynchronous results. Actions are counted per Skill invocation; one tool call may contribute to several invocations. An observed action does not imply completion.
+      </div>
       ${rows.length > 0 ? html`<table class="ss-table" data-testid="skills-table">
         <thead>
           <tr>
-            <th>skill</th><th>capability</th><th>context</th><th>current users</th><th>source</th>
+            <th>skill</th><th>capability</th><th>context</th><th>Session usage</th><th>source</th>
           </tr>
         </thead>
         <tbody>

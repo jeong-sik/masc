@@ -5638,6 +5638,12 @@ let test_nested_skill_job_continuation ?(fault_after_acceptance=false) ?(dynamic
        (List.length evidence.async_evidence.action_observations)
    | Masc.Keeper_skill_activation_discovery.Not_observed
    | Masc.Keeper_skill_activation_discovery.Most_recent_observed_timestamp_tie _ -> fail "fresh retained async Skill detail is missing");
+  let usage = Ledger.usage_for_reference (ledger ()) reference
+    |> Option.get in
+  check int "catalog counts a received invocation once across provider/client boundaries" 1
+    usage.received_invocations;
+  check int "catalog retains unique async actions, not causal link count" 7
+    usage.observed_actions;
   let detail = Server_skill_evidence.project ~config reference in
   let evidence = detail |> member "activation" |> member "evidence" in
   check string "detail uses required async evidence contract" "masc.skill-evidence/v8"

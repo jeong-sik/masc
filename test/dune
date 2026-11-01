@@ -5163,6 +5163,7 @@
   masc
   masc.keeper_registry
   masc.masc_types
+  masc.skill_reference
   masc.skill_snapshot
   masc.skill_config
   unix

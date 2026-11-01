@@ -365,7 +365,7 @@ type admission_preparation = {
   rendered_prompt : string;
   output_schema : Yojson.Safe.t;
   admission_prompt : Prompt_registry.prompt_resolution;
-  retirement_prompt : Prompt_registry.prompt_resolution;
+  retirement_prompt : Prompt_registry.prompt_resolution option;
 }
 let admission_schema () = Keeper_memory_admission_judgment.output_schema
   ~memory_schema:Keeper_structured_output_schema.librarian_current_output_schema
@@ -373,10 +373,16 @@ let admission_suffix ~admission_prompt ~retirement_prompt ~batch ~retirement =
   let open Result.Syntax in
   let* admission=Prompt_registry.render_resolved_prompt_template
     Prompt_names.librarian_admission_policy admission_prompt [] in
-  let+ historical=Prompt_registry.render_resolved_prompt_template
-    Prompt_names.librarian_retirement_policy retirement_prompt [] in
-  Keeper_memory_admission_judgment.prompt_suffix ~instructions:admission ~batch ^
-  Keeper_memory_admission_judgment.retirement_prompt_suffix ~instructions:historical ~batch retirement
+  let* historical=match retirement_prompt with
+    | None ->
+      if Keeper_memory_admission_judgment.retirement_prompt_needed ~batch retirement
+      then Error "Original admission requires captured retirement policy"
+      else Ok ""
+    | Some prompt ->
+      let+ instructions=Prompt_registry.render_resolved_prompt_template
+        Prompt_names.librarian_retirement_policy prompt [] in
+      Keeper_memory_admission_judgment.retirement_prompt_suffix ~instructions ~batch retirement in
+  Ok (Keeper_memory_admission_judgment.prompt_suffix ~instructions:admission ~batch ^ historical)
 let validate_resolution (resolution : Prompt_registry.prompt_resolution) =
   let source,effective=match resolution.override_value,resolution.file_value with
     | Some value,_ -> Prompt_registry.Override,value
@@ -504,7 +510,7 @@ let validate_admission_preparation ~batch ~retirement ~input preparation =
   let* ()=validate_resolution preparation.rule_prompt in
   let* ()=validate_resolution preparation.prompt in
   let* ()=validate_resolution preparation.admission_prompt in
-  let* ()=validate_resolution preparation.retirement_prompt in
+  let* ()=match preparation.retirement_prompt with None -> Ok () | Some prompt -> validate_resolution prompt in
   let* suffix=admission_suffix ~admission_prompt:preparation.admission_prompt
     ~retirement_prompt:preparation.retirement_prompt ~batch ~retirement in
   let* rule=Prompt_registry.render_resolved_prompt_template
@@ -535,8 +541,11 @@ let prepare_admission ~batch ~retirement input =
   let* prompt,rendered=Prompt_registry.resolve_and_render_prompt_template Prompt_names.librarian variables in
   let* admission_prompt,_=Prompt_registry.resolve_and_render_prompt_template
     Prompt_names.librarian_admission_policy [] in
-  let* retirement_prompt,_=Prompt_registry.resolve_and_render_prompt_template
-    Prompt_names.librarian_retirement_policy [] in
+  let* retirement_prompt=
+    if Keeper_memory_admission_judgment.retirement_prompt_needed ~batch retirement then
+      let+ prompt,_=Prompt_registry.resolve_and_render_prompt_template
+        Prompt_names.librarian_retirement_policy [] in Some prompt
+    else Ok None in
   let* suffix=admission_suffix ~admission_prompt ~retirement_prompt ~batch ~retirement in
   let preparation={policy;rule_prompt;prompt;admission_prompt;retirement_prompt;variables;
     rendered_prompt=rendered ^ suffix;output_schema=admission_schema ()} in

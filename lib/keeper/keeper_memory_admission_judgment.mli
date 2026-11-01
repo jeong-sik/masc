@@ -58,6 +58,11 @@ type retirement_evidence =
   | Unavailable of string
 (** Read-only historical evidence; unavailable history is never an empty archive. *)
 
+val retirement_prompt_needed :
+  batch:Keeper_memory_admission_queue.batch -> retirement_evidence -> bool
+(** The suffix needs policy for unavailable history or at least one exact
+    candidate identity match. Shares the formatter's payload derivation. *)
+
 val retirement_prompt_suffix :
   instructions:string -> batch:Keeper_memory_admission_queue.batch -> retirement_evidence -> string
 (** Frame the supplied managed retirement policy with originals that have

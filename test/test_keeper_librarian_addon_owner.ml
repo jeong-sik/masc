@@ -890,6 +890,11 @@ let with_absorb_guidance_gap ~empty f =
     Prompt_registry.clear_prompt_override Prompt_names.librarian_absorb_forward;
     with_missing_librarian_fragment ~empty "absorb_forward" f)
 
+let with_retirement_guidance_gap ~empty f =
+  with_policy_overrides [Prompt_names.librarian_retirement_policy] (fun () ->
+    Prompt_registry.clear_prompt_override Prompt_names.librarian_retirement_policy;
+    with_missing_librarian_fragment ~empty "retirement_policy" f)
+
 let retain_gate_payload (fixture:fixture) ~owner ~(parent:Owner.retained) ~request_id ~request =
   io (fun () ->
     let store=Store.create ~root:(Filename.concat fixture.base_path "decoder-gate-payload") in
@@ -909,8 +914,8 @@ let test_admission_capture_keeps_original_policy ()=with_fixture (fun ~sw:_ fixt
     let prepared=member "preparation" (Capture.to_json capture) in
     check json "admission policy is captured with the original request" (`String "Original admission policy")
       (member "effective" (member "admission_prompt" prepared));
-    check json "retirement policy is captured even when no matching archive exists" (`String "Original retirement policy")
-      (member "effective" (member "retirement_prompt" prepared));
+    check json "no matching archive captures explicit unused-policy absence" `Null
+      (member "retirement_prompt" prepared);
     Prompt_registry.set_override admission "Changed admission policy" |> get;
     Prompt_registry.set_override retirement "Changed retirement policy" |> get;
     let restored=match observed_originals fixture with [_,capture] -> capture
@@ -937,6 +942,12 @@ let test_admission_capture_keeps_original_policy ()=with_fixture (fun ~sw:_ fixt
     refuse "capture-without-admission-policy" "Original Librarian capture has unknown, missing or repeated fields"
       (`Assoc (("preparation",`Assoc (List.remove_assoc "admission_prompt" prepared_fields))::
       List.remove_assoc "preparation" fields));
+    refuse "capture-without-retirement-field" "Original Librarian capture has unknown, missing or repeated fields"
+      (`Assoc (("preparation",`Assoc (List.remove_assoc "retirement_prompt" prepared_fields))::
+      List.remove_assoc "preparation" fields));
+    refuse "capture-with-malformed-unused-policy" "Original Librarian capture has unknown, missing or repeated fields"
+      (`Assoc (("preparation",`Assoc (("retirement_prompt",`Assoc [])::
+        List.remove_assoc "retirement_prompt" prepared_fields))::List.remove_assoc "preparation" fields));
     refuse "capture-with-old-schema" "Unknown original Librarian execution schema/kind"
       (`Assoc (("schema",`Int 1)::List.remove_assoc "schema" fields))))
 
@@ -947,6 +958,115 @@ let test_missing_admission_policy_refuses_before_capture ()=with_fixture (fun ~s
     check int "missing policy sends no provider request" posts (F.post_count fixture.server);
     check int "missing policy retains no original execution capture" 0 (List.length (observed_originals fixture));
     check int "every pending candidate remains available" 2 (io (fun () -> List.length (pending_rows fixture.keepers_dir)))))
+
+let retire_fixture_fact (fixture:fixture) (original:Types.fact) =
+  memory_action fixture (fun () -> io (fun () ->
+    Current.replace ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name ~expected_revision:None
+      ~now:100. ~source:{Current.kind=Current.Explicit_write;trace_id="retirement-policy-fixture"}
+      ~facts:[original] () |> get |> ignore;
+    match Current.retract_fact ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name ~now:200.
+      ~source:{Current.kind=Current.Explicit_retract;trace_id="retirement-policy-fixture"}
+      ~memory_id:(Types.memory_id original) ~reason:"Retained original retirement reason" () with
+    | Ok _ -> () | Error _ -> fail "the retirement fixture could not retract its source"))
+
+let test_unused_retirement_policy_does_not_block_admission ()=
+  List.iter (fun (empty,unrelated_archive) -> with_fixture (fun ~sw:_ fixture ->
+    if unrelated_archive then retire_fixture_fact fixture (fact "An unrelated historical identity.");
+    with_retirement_guidance_gap ~empty (fun () ->
+      let _,capture,_=retained_answer_before_gate fixture in
+      check json "no matching retirement captures explicit policy absence" `Null
+        (member "retirement_prompt" (member "preparation" (Capture.to_json capture)));
+      if unrelated_archive then (
+        let archive=io (fun () -> Current.read_dropped ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name
+          ~current_facts:[]) |> get in
+        check int "the no-match archive is genuinely nonempty" 1 (List.length archive);
+        check bool "nonempty unrelated history needs no policy" false
+          (Keeper_memory_admission_judgment.retirement_prompt_needed ~batch:(Capture.batch capture)
+            (Keeper_memory_admission_judgment.Available archive)));
+      let original=Capture.request capture |> get in
+      let restored=match observed_originals fixture with [_,restored] -> restored | _ -> fail "one original expected" in
+      check json "missing current policy cannot alter the captured request"
+        (Lane_addon_exact.request_to_json original) (Lane_addon_exact.request_to_json (Capture.request restored |> get));
+      drive_until fixture settled |> assert_settled;
+      check int "the same original provider answer settles admission" 1 (F.post_count fixture.server);
+      check int "durable no-suffix replay ACKs both candidates" 0
+        (io (fun () -> List.length (pending_rows fixture.keepers_dir))))))
+    [false,false;true,false;false,true;true,true]
+
+let retirement_record (original:Types.fact) : Current.archived_fact =
+  {original;removal={Current.removed_in_revision=2;removed_at=200.;
+    removed_by={Current.kind=Current.Explicit_retract;trace_id="retirement-policy-fixture"};
+    removed_origin=Types.Authored;drop_reason=Some "Original retirement reason"}}
+
+let test_retirement_policy_is_required_only_for_its_suffix ()=with_fixture (fun ~sw:_ fixture ->
+  let _,capture,_=retained_answer_before_gate fixture in
+  let batch=Capture.batch capture and input=Capture.input capture in
+  let matching=retirement_record ((List.hd (Queue.candidates batch)).fact)
+  and unrelated=retirement_record (fact "An unrelated archived identity.") in
+  List.iter (fun empty -> with_retirement_guidance_gap ~empty (fun () ->
+    List.iter (fun (retirement,needed) ->
+      match Keeper_librarian_runtime.prepare_admission ~batch ~retirement input with
+      | Error detail ->
+        check bool "only a needed retirement suffix refuses missing policy" true needed;
+        check bool "the error names the retirement policy" true
+          (String_util.contains_substring detail Prompt_names.librarian_retirement_policy)
+      | Ok preparation ->
+        check bool "unused retirement policy is not resolved" false needed;
+        check bool "unused policy has typed absence" true (preparation.retirement_prompt=None);
+        Keeper_librarian_runtime.validate_admission_preparation ~batch ~retirement ~input preparation |> get)
+      [Keeper_memory_admission_judgment.Available [],false;
+       Keeper_memory_admission_judgment.Available [unrelated],false;
+       Keeper_memory_admission_judgment.Available [matching],true;
+       Keeper_memory_admission_judgment.Unavailable "original archive read failed",true])) [false;true];
+  check int "preparation never dispatches another provider request" 1 (F.post_count fixture.server))
+
+let test_used_retirement_policy_survives_current_policy_changes ()=with_fixture (fun ~sw:_ fixture ->
+  let candidate=io (fun () -> (List.hd (pending_rows fixture.keepers_dir)).fact) in
+  retire_fixture_fact fixture candidate;
+  let key=Prompt_names.librarian_retirement_policy in
+  with_policy_overrides [key] (fun () ->
+    Prompt_registry.set_override key "Original captured retirement policy" |> get;
+    let record,capture,_=retained_answer_before_gate fixture in
+    let owner=io (fun () -> original_owner fixture.base_path fixture.keepers_dir) in
+    let batch=Capture.batch capture and input=Capture.input capture in
+    let retirement=Keeper_memory_admission_judgment.Unavailable "original archive read failed" in
+    let preparation=Keeper_librarian_runtime.prepare_admission ~batch ~retirement input |> get in
+    let unavailable=Capture.create ~request_id:(Capture.fresh_request_id owner)
+      ~parent_part_id:(Capture.parent_part_id capture) ~owner ~destination:(Capture.destination capture)
+      ~batch ~input ~expected_revision:(Capture.expected_revision capture) ~now:(Capture.now capture)
+      ~retirement ~preparation |> get in
+    let inventory=io (fun () -> Parts.discover ~store:fixture.store ~owner
+      ~restore_gate:(Gate.restore_size_evidence ~store:fixture.store ~owner) |> get) in
+    let restore name original request=io (fun () ->
+      let store=Store.create ~root:(Filename.concat fixture.base_path name) in
+      let scope=Capture.scope owner and request_id=Capture.request_id original in
+      Owner.retain ~store ~scope ~request_id ~installation_id:record.installation_id
+        ~package_id:record.package_id ~tool:record.tool ~summary:`Null ~request |> owned;
+      let retained=Owner.load ~store ~scope ~request_id |> owned |> Option.get in
+      Capture.restore ~owner ~load_parent:(Parts.load_parent inventory) retained) in
+    Prompt_registry.set_override key "Changed current retirement policy" |> get;
+    List.iter (fun (name,original) ->
+      let captured=Capture.to_json original in
+      let expected=Capture.request original |> get |> Lane_addon_exact.request_to_json in
+      let prepared=member "preparation" captured in
+      check json "a used retirement policy is captured" (`String "Original captured retirement policy")
+        (member "effective" (member "retirement_prompt" prepared));
+      let unchanged=restore (name ^ "-changed-policy") original captured |> get in
+      check json "override changes cannot alter the frozen used policy" expected
+        (Capture.request unchanged |> get |> Lane_addon_exact.request_to_json);
+      List.iter (fun empty -> with_retirement_guidance_gap ~empty (fun () ->
+        let restored=restore (name ^ "-missing-policy") original captured |> get in
+        check json "required policy replays without any current asset" expected
+          (Capture.request restored |> get |> Lane_addon_exact.request_to_json))) [false;true];
+      let prepared_fields=Yojson.Safe.Util.to_assoc prepared in
+      let missing=`Assoc (("preparation",`Assoc (("retirement_prompt",`Null)::
+        List.remove_assoc "retirement_prompt" prepared_fields))::
+        List.remove_assoc "preparation" (Yojson.Safe.Util.to_assoc captured)) in
+      check (result unit string) "needed retirement policy cannot decode as null"
+        (Error "Original admission requires captured retirement policy")
+        (restore (name ^ "-null-policy") original missing |> Result.map (fun _ -> ())))
+      ["matched-retirement",capture;"unavailable-retirement",unavailable];
+    check int "durable policy replay makes no new provider request" 1 (F.post_count fixture.server)))
 
 let test_missing_absorb_policy_refuses_before_preparation ()=List.iter (fun empty ->
   with_fixture (fun ~sw:_ fixture ->
@@ -1316,6 +1436,9 @@ let () =
     test_configuration_wake_completes_before_concurrent_settle (); exit 0);
   run "Actual Addon Librarian explicit-candidate owner" ["production",[
   test_case "captured admission and retirement policy survive override changes" `Quick test_admission_capture_keeps_original_policy;
+  test_case "unused retirement policy cannot block capture or ACK" `Quick test_unused_retirement_policy_does_not_block_admission;
+  test_case "retirement policy is required only for its actual suffix" `Quick test_retirement_policy_is_required_only_for_its_suffix;
+  test_case "used retirement policy stays frozen across current policy changes" `Quick test_used_retirement_policy_survives_current_policy_changes;
   test_case "missing admission policy refuses before capture or dispatch" `Quick test_missing_admission_policy_refuses_before_capture;
   test_case "missing absorb policy refuses before root publication" `Quick test_missing_absorb_policy_refuses_before_preparation;
   test_case "off and excluded gates capture and replay without unused policy" `Quick test_unused_absorb_policy_is_captured_and_replayed;

@@ -95,8 +95,11 @@ persisted bindings, not just the first failed file.
 Store label: `lane-addon tool request owners`, decoder `consumer original
 request payload`. A readable generic owner envelope and matching body digest
 do not establish that this build can read the Librarian payload. Admission
-executions require schema 2 with captured admission and retirement policy;
-all admission, completed-history and message-floor absorption gate requests
+executions require schema 2 with captured admission policy. Retirement policy
+may be explicitly null only when the captured batch and retirement evidence
+produce no suffix; matching or unavailable history requires captured policy.
+Non-null retirement policy always uses the strict decoder and captured render.
+All admission, completed-history and message-floor absorption gate requests
 require version 3 with captured guidance when evaluation is needed. Unavailable
 authority or a validated original proposal with no absorptions may explicitly
 capture `guidance: null`; neither needs unused prompt assets. Available

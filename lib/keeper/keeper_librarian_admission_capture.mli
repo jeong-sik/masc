@@ -58,8 +58,8 @@ val create : request_id:string -> parent_part_id:string -> owner:owner ->
   input:Keeper_librarian.input -> expected_revision:int option -> now:float ->
   retirement:Keeper_memory_admission_judgment.retirement_evidence ->
   preparation:Keeper_librarian_runtime.admission_preparation -> (t, string) result
-(** Original input and complete prompt preparation, including both managed
-    admission and retirement policies, are checked together.
+(** Original input and complete prompt preparation, including managed admission
+    policy and retirement policy when its suffix is needed, are checked together.
     This purpose requires the actual pending-candidate input: no conversation,
     historical spans, tools, counterparts or working-context sources. Those
     fields are retained explicitly and nonempty values refuse; another pass's

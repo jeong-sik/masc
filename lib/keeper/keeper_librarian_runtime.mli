@@ -462,7 +462,7 @@ type admission_preparation = {
   rendered_prompt : string;
   output_schema : Yojson.Safe.t;
   admission_prompt : Prompt_registry.prompt_resolution;
-  retirement_prompt : Prompt_registry.prompt_resolution;
+  retirement_prompt : Prompt_registry.prompt_resolution option;
 }
 type admission_proposal = Deferred | Accepted of accepted
 val prepare_admission : batch:Keeper_memory_admission_queue.batch ->
@@ -470,7 +470,8 @@ val prepare_admission : batch:Keeper_memory_admission_queue.batch ->
   Keeper_librarian.input -> (admission_preparation, string) result
 (** Resolve the current template/fragments on the caller fiber; the host
     retains this complete preparation and original substitution bytes before
-    dispatch. It is not a grant to a worker. *)
+    dispatch. Retirement policy is absent when the captured batch/evidence
+    produces no retirement suffix. It is not a grant to a worker. *)
 val validate_admission_preparation : batch:Keeper_memory_admission_queue.batch ->
   retirement:Keeper_memory_admission_judgment.retirement_evidence ->
   input:Keeper_librarian.input -> admission_preparation -> (unit, string) result

@@ -156,9 +156,9 @@ type retirement_evidence =
   | Available of Keeper_memory_os_current.archived_fact list
   | Unavailable of string
 
-let retirement_prompt_suffix ~instructions ~batch evidence =
+let retirement_prompt_payload ~batch evidence =
   let evidence_kind = "evidence_kind", `String "exact_identity_retirement_history" in
-  let payload = match evidence with
+  match evidence with
     | Unavailable detail -> Some (`Assoc [evidence_kind;
         "status", `String "unavailable"; "detail", `String detail])
     | Available archive ->
@@ -191,8 +191,13 @@ let retirement_prompt_suffix ~instructions ~batch evidence =
       match matches with
       | [] -> None
       | _ :: _ -> Some (`Assoc [evidence_kind; "status", `String "available";
-          "matches", `List matches]) in
-  match payload with
+          "matches", `List matches])
+
+let retirement_prompt_needed ~batch evidence =
+  Option.is_some (retirement_prompt_payload ~batch evidence)
+
+let retirement_prompt_suffix ~instructions ~batch evidence =
+  match retirement_prompt_payload ~batch evidence with
   | None -> ""
   | Some payload ->
     "\n\n" ^ instructions ^ "\n" ^

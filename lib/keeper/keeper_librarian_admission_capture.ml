@@ -216,7 +216,7 @@ let preparation_json (prepared:Runtime.admission_preparation) = `Assoc [
     "category_cap",`Int prepared.policy.category_cap;"facts_per_category_cap",`Int prepared.policy.facts_per_category_cap];
   "rule_prompt",prompt_json prepared.rule_prompt;"prompt",prompt_json prepared.prompt;
   "admission_prompt",prompt_json prepared.admission_prompt;
-  "retirement_prompt",prompt_json prepared.retirement_prompt;
+  "retirement_prompt",optional prompt_json prepared.retirement_prompt;
   "variables",`List (List.map (fun (key,value) -> `Assoc ["key",`String key;"value",`String value]) prepared.variables);
   "rendered_prompt",`String prepared.rendered_prompt;"output_schema",prepared.output_schema]
 let preparation_of_json json =
@@ -229,7 +229,7 @@ let preparation_of_json json =
   let* rule_prompt=prompt_of_json (value "rule_prompt" fields) in
   let* prompt=prompt_of_json (value "prompt" fields) in
   let* admission_prompt=prompt_of_json (value "admission_prompt" fields) in
-  let* retirement_prompt=prompt_of_json (value "retirement_prompt" fields) in
+  let* retirement_prompt=option prompt_of_json (value "retirement_prompt" fields) in
   let* variables=list (fun json -> let* fields=object_fields ["key";"value"] json in
     let* key=nonblank (value "key" fields) in let+ value=text (value "value" fields) in key,value)
     (value "variables" fields) in

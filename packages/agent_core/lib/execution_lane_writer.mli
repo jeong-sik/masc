@@ -3,6 +3,9 @@
     Construction returns before filesystem initialization finishes. Semantic
     mutations are accepted as typed journal transactions, committed by the
     actor, and acknowledged only after the journal authority is durable.
+    One canonical writer lease covers the actor's entire lifetime, including
+    journal reopen epochs and explicit reconciliation-wake waits. Epoch
+    cleanup cannot make a live actor appear ownerless.
 
     This module is private to AGENT_CORE. It owns no product policy and exposes no
     storage primitive or raw-event append path. *)

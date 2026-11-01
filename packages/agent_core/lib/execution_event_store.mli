@@ -11,12 +11,19 @@
     {!Execution_journal} remains the semantic reducer and topology authority.
 
     The directory is caller-owned and dedicated to one execution scope. The
-    implementation acquires an exclusive writer lock for the lifetime of the
-    supplied {!Eio.Switch.t}. Store and writer capabilities are switch-bound;
+    self-owned operations acquire an exclusive writer lock for the lifetime
+    of the supplied {!Eio.Switch.t}; borrowed operations retain their actor's
+    longer-lived lease. Store and writer capabilities are switch-bound;
     after release, every operation that depends on live resources returns
     [Store_released] rather than touching a closed descriptor. The injected
     codec service borrows an {!Execution_runtime.t}; that runtime's
-    application-owned switch must be outside and outlive every store switch. *)
+    application-owned switch must be outside and outlive every store switch.
+
+    Canonical format 3 binds native execution ownership to the actor-lifetime
+    writer lease, including reconciliation epochs and waits. Earlier formats
+    are rejected with [Unsupported_store_version], including their terminal
+    histories; retained bytes are never migrated, deleted or rewritten by a
+    read. Their operators must reconcile using the original evidence. *)
 
 module Scope_id : sig
   type t
@@ -119,6 +126,18 @@ val error_to_string : error -> string
 
 type t
 type writer
+type writer_lease
+
+(** Acquire the same writer authority for an entire actor lifetime. The lease
+    keeps its canonical-path claim and OS lock across every store epoch and
+    reconciliation wait. Only one live store may borrow it at a time; borrowing
+    another directory or a released lease is rejected. The owning switch must
+    outlive its borrowing store switches. Lease release fences later borrowed
+    operations and waits for admitted physical operations before unlocking. *)
+val acquire_writer_lease
+  :  sw:Eio.Switch.t
+  -> dir:Eio.Fs.dir_ty Eio.Path.t
+  -> (writer_lease, error) result
 
 type opened = private
   { store : t
@@ -151,6 +170,22 @@ val read_only_snapshot
   -> unit
   -> (read_only_snapshot, error) result
 
+type 'a writer_observation =
+  | Writer_active
+  | Writer_absent of 'a
+
+(** Observe writer absence using the existing canonical-path claim and OS lock.
+    A busy claim (including another observation) conservatively returns
+    [Writer_active] without opening the lock file. Otherwise, [read] runs once
+    while both authorities exclude writer admission; its result is returned
+    only after successful cleanup. The existing lock file is never created or
+    replaced, and this operation performs no journal recovery or mutation.
+    I/O, cleanup and cancellation failures never establish writer absence. *)
+val with_writer_absent
+  :  dir:Eio.Fs.dir_ty Eio.Path.t
+  -> (unit -> 'a)
+  -> ('a writer_observation, error) result
+
 (** [create ~sw ~codec ~dir ()] creates a new store inside an existing caller-owned
     directory. It never creates the directory, opens an existing WAL, or
     truncates committed data. The initial metadata frame and matching commit
@@ -161,6 +196,17 @@ val create
   :  sw:Eio.Switch.t
   -> codec:Execution_codec_executor.t
   -> dir:Eio.Fs.dir_ty Eio.Path.t
+  -> ?correlation_id:Execution_event.Correlation_id.t
+  -> unit
+  -> (t * initialization, error) result
+
+(** Create one epoch by borrowing an actor's lease. Epoch cleanup releases
+    only its WAL and borrow; it cannot release the actor's writer authority. *)
+val create_with_lease
+  :  sw:Eio.Switch.t
+  -> codec:Execution_codec_executor.t
+  -> dir:Eio.Fs.dir_ty Eio.Path.t
+  -> lease:writer_lease
   -> ?correlation_id:Execution_event.Correlation_id.t
   -> unit
   -> (t * initialization, error) result
@@ -178,6 +224,15 @@ val open_existing
   -> dir:Eio.Fs.dir_ty Eio.Path.t
   -> (opened, error) result
 
+(** Reopen one epoch under the same live actor lease. Recovery and canonical
+    format validation are identical to [open_existing]. *)
+val open_existing_with_lease
+  :  sw:Eio.Switch.t
+  -> codec:Execution_codec_executor.t
+  -> dir:Eio.Fs.dir_ty Eio.Path.t
+  -> lease:writer_lease
+  -> (opened, error) result
+
 val scope_id : t -> Scope_id.t
 val correlation_id : t -> Execution_event.Correlation_id.t
 val last_seq : t -> (int, error) result
@@ -188,7 +243,8 @@ val current_cursor : t -> (cursor, error) result
     idempotent with the owning switch's later cleanup and exists only so a
     higher-level atomic constructor cannot leak the writer claim on replay or
     semantic initialization failure. Published stores must remain owned by
-    their switch. *)
+    their switch. A borrowed store releases only its epoch resources and
+    borrow; the actor lease stays owned by its original switch. *)
 val release_unpublished : t -> (unit, error) result
 
 (** Mint the store's sole semantic append capability. A store can be attached

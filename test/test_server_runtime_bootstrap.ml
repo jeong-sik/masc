@@ -4024,6 +4024,115 @@ let test_full_health_refresh_worker_survives_waiter_cancellation () =
       Alcotest.(check bool) "late worker publishes current result" true snapshot_present;
       Alcotest.(check bool) "settled result needs no retry" false refresh_requested)
 
+let test_full_health_refresh_worker_settles_on_owner_switch_cancellation () =
+  let module Refresh = Server_routes_http_runtime.For_testing in
+  let exception Worker_switch_cancelled in
+  Refresh.reset_full_health_snapshot ();
+  Fun.protect ~finally:Refresh.reset_full_health_snapshot (fun () ->
+      Server_routes_http_runtime.invalidate_full_health_snapshot ();
+      Eio.Switch.run (fun outer_sw ->
+          let worker_started, resolve_worker_started = Eio.Promise.create () in
+          let blocked, _ = Eio.Promise.create () in
+          let joined_outcome, resolve_joined_outcome = Eio.Promise.create () in
+          let owner_cancelled =
+            try
+              Eio.Switch.run (fun worker_sw ->
+                  Eio.Fiber.fork ~sw:outer_sw (fun () ->
+                      Eio.Promise.await worker_started;
+                      let outcome =
+                        try
+                          Refresh.run_full_health_refresh_worker ~sw:outer_sw
+                            ~compute:(fun () ->
+                              Alcotest.fail "joined waiter started a second worker");
+                          `Completed
+                        with Eio.Cancel.Cancelled _ | Worker_switch_cancelled ->
+                          `Cancelled
+                      in
+                      Eio.Promise.resolve resolve_joined_outcome outcome);
+                  Eio.Fiber.fork ~sw:worker_sw (fun () ->
+                      Eio.Promise.await worker_started;
+                      Eio.Fiber.yield ();
+                      Eio.Switch.fail worker_sw Worker_switch_cancelled);
+                  Refresh.run_full_health_refresh_worker ~sw:worker_sw
+                    ~compute:(fun () ->
+                      Eio.Promise.resolve resolve_worker_started ();
+                      Eio.Promise.await blocked;
+                      Ok []));
+              false
+            with Worker_switch_cancelled -> true
+          in
+          Alcotest.(check bool) "worker switch cancellation propagates" true owner_cancelled;
+          Alcotest.(check bool) "joined waiter is released on worker cancellation" true
+            (Eio.Promise.await joined_outcome = `Cancelled);
+          let submissions, joins, active, _, snapshot_present, requested =
+            Refresh.full_health_refresh_worker_stats ()
+          in
+          Alcotest.(check int) "cancelled worker submitted once" 1 submissions;
+          Alcotest.(check int) "joined waiter counted once" 1 joins;
+          Alcotest.(check bool) "cancelled worker clears active ownership" false active;
+          Alcotest.(check bool) "cancelled worker publishes no snapshot" false snapshot_present;
+          Alcotest.(check bool) "cancelled worker preserves prior refresh request" true requested;
+          Refresh.run_full_health_refresh_worker ~sw:outer_sw
+            ~compute:(fun () -> Ok []);
+          let submissions, _, active, _, snapshot_present, requested =
+            Refresh.full_health_refresh_worker_stats ()
+          in
+          Alcotest.(check int) "successor worker submits cleanly" 2 submissions;
+          Alcotest.(check bool) "successor worker settles" false active;
+          Alcotest.(check bool) "successor worker publishes snapshot" true snapshot_present;
+          Alcotest.(check bool) "successor worker clears request flag" false requested))
+
+let test_full_health_refresh_state_preserves_independent_direct_and_worker_flight () =
+  let module Refresh_state = Server_full_health_refresh_state in
+  let state = Refresh_state.empty |> Refresh_state.request in
+  let plan =
+    match Refresh_state.admit state with
+    | Refresh_state.Start plan -> plan
+    | Refresh_state.Join _ -> Alcotest.fail "expected cold start plan"
+  in
+  let state_with_worker, worker =
+    Refresh_state.start ~now:10.0 ~completion:() plan
+  in
+  let state_both_in_flight =
+    Refresh_state.begin_direct ~now:25.0 state_with_worker
+  in
+  let after_direct_cancel =
+    Refresh_state.cancel_direct ~was_requested:false state_both_in_flight
+  in
+  (match after_direct_cancel.flight with
+   | Refresh_state.In_flight (Some started_at) ->
+       Alcotest.(check (float 0.0001))
+         "cancel_direct restores active worker started_at"
+         10.0
+         started_at
+   | Refresh_state.In_flight None | Refresh_state.Idle ->
+       Alcotest.fail "expected active worker flight timestamp after direct cancel");
+  let after_worker_cancel, dirty =
+    match Refresh_state.cancel_worker ~id:worker.id state_both_in_flight with
+    | Some result -> result
+    | None -> Alcotest.fail "expected active worker cancellation to succeed"
+  in
+  Alcotest.(check bool) "uninvalidated worker is not dirty" false dirty;
+  Alcotest.(check bool)
+    "worker cancel restores pre-existing request flag"
+    true
+    after_worker_cancel.requested;
+  (match after_worker_cancel.flight with
+   | Refresh_state.In_flight (Some started_at) ->
+       Alcotest.(check (float 0.0001))
+         "cancel_worker preserves concurrent direct refresh started_at"
+         25.0
+         started_at
+   | Refresh_state.In_flight None | Refresh_state.Idle ->
+       Alcotest.fail "expected direct refresh flight timestamp after worker cancel");
+  let after_both_cancel =
+    Refresh_state.cancel_direct ~was_requested:false after_worker_cancel
+  in
+  (match after_both_cancel.flight with
+   | Refresh_state.Idle -> ()
+   | Refresh_state.In_flight _ ->
+       Alcotest.fail "expected Idle flight after both worker and direct cancel")
+
 let test_full_health_refresh_worker_publishes_dirty_observation ~has_last_good =
   let module Refresh = Server_routes_http_runtime.For_testing in
   let open Yojson.Safe.Util in
@@ -7002,6 +7111,12 @@ let () =
           Alcotest.test_case
             "full health worker survives waiter cancellation" `Quick
             test_full_health_refresh_worker_survives_waiter_cancellation;
+          Alcotest.test_case
+            "full health worker settles on owner switch cancellation" `Quick
+            test_full_health_refresh_worker_settles_on_owner_switch_cancellation;
+          Alcotest.test_case
+            "full health refresh state preserves direct and worker flight" `Quick
+            test_full_health_refresh_state_preserves_independent_direct_and_worker_flight;
           Alcotest.test_case "dirty success after waiter timeout retains stale observation" `Quick
             test_full_health_dirty_success_after_wait_timeout;
           Alcotest.test_case

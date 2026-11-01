@@ -7,9 +7,11 @@ type freshness =
 
 type 'completion worker = private
   { id : int
+  ; started_at : float
   ; completion : 'completion
   ; freshness : freshness
   ; failure_reported : bool
+  ; was_requested : bool
   }
 
 type flight =
@@ -21,6 +23,7 @@ type flight =
 
 type 'completion t = private
   { flight : flight
+  ; direct_flight : float option
   ; requested : bool
   ; active_worker : 'completion worker option
   ; next_worker_id : int
@@ -32,6 +35,10 @@ type 'completion t = private
 val empty : 'completion t
 val request : 'completion t -> 'completion t
 val begin_direct : now:float -> 'completion t -> 'completion t
+val cancel_direct : was_requested:bool -> 'completion t -> 'completion t
+(** Restore flight metadata when a direct refresh is cancelled before
+    completing, preserving any active shared worker's original start timestamp
+    and retaining whether a refresh was requested before or during the attempt. *)
 val complete : refresh_requested:bool -> 'completion t -> 'completion t
 (** Clear flight metadata and set the requested flag without removing a shared
     worker. The matching worker's ownership is settled by [take_worker]. *)
@@ -62,6 +69,14 @@ val take_worker :
 (** [None] means no matching active worker; its completion must be ignored.
     A match removes only worker ownership and returns its freshness and
     once-only failure evidence unchanged. *)
+
+val cancel_worker :
+  id:int -> 'completion t -> ('completion t * bool) option
+(** Settle a cancelled shared worker by removing its ownership, restoring any
+    concurrent direct refresh's in-flight metadata (or [Idle] if none is in
+    flight), and restoring any pre-existing or invalidation-triggered refresh
+    request. The returned boolean is [true] when the worker was invalidated
+    while active. *)
 
 val note_wait_failure : 'completion t -> 'completion t option
 (** Mark the active worker's first waiter failure. [None] means no active

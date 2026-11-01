@@ -1854,6 +1854,94 @@ let test_released_codec_fails_before_store_mutation () =
       check int "replay remains empty" 0 (List.length opened.replay_events)))
 ;;
 
+let test_batch_validation_enforces_header_capacity_and_completion_bounds () =
+  let module Validation = Internal.Execution_batch_validation in
+  let correlation_id = fresh Event.Correlation_id.fresh in
+  let events = make_four_events correlation_id in
+  let first_event =
+    match events with
+    | first :: _ -> first
+    | [] -> fail "expected at least one event"
+  in
+  let second_event =
+    match events with
+    | _ :: second :: _ -> second
+    | _ -> fail "expected at least two events"
+  in
+  let valid_header : Validation.header =
+    { batch_id = "batch-bounds"
+    ; expected_next_seq = 1
+    ; count = 1
+    ; events_sha256 = "digest-placeholder"
+    }
+  in
+  (* Align continuation so zero is rejected by the positivity bound,
+     independently of the diagnostic wording. *)
+  (match
+     Validation.start
+       ~offset:10L
+       ~committed_seq:(-1)
+       ~correlation_id
+       { valid_header with expected_next_seq = 0 }
+   with
+   | Error { offset = 10L; _ } -> ()
+   | Ok _ | Error _ -> fail "expected non-positive expected_next_seq failure at offset 10");
+  (match
+     Validation.start
+       ~offset:12L
+       ~committed_seq:0
+       ~correlation_id
+       { valid_header with count = 0 }
+   with
+   | Error { offset = 12L; _ } -> ()
+   | Ok _ | Error _ -> fail "expected non-positive count failure at offset 12");
+  let progress =
+    match Validation.start ~offset:20L ~committed_seq:0 ~correlation_id valid_header with
+    | Ok progress -> progress
+    | Error { detail; _ } -> fail detail
+  in
+  check int "initial remaining count" 1 (Validation.remaining progress);
+  check int "initial next_seq" 1 (Validation.next_seq progress);
+  (match
+     Validation.finish
+       progress
+       ~offset:24L
+       ~digest:"digest-placeholder"
+       { batch_id = "batch-bounds"
+       ; first_seq = 1
+       ; last_seq = 1
+       ; count = 1
+       ; events_sha256 = "digest-placeholder"
+       }
+   with
+   | Error { offset = 24L; _ } -> ()
+   | Ok _ | Error _ -> fail "expected incomplete batch failure at offset 24");
+  let progress_after_first =
+    match Validation.accept_event progress ~offset:28L first_event with
+    | Ok next -> next
+    | Error { detail; _ } -> fail detail
+  in
+  check int "remaining after accepting sole event" 0 (Validation.remaining progress_after_first);
+  check int "next_seq after accepting sole event" 2 (Validation.next_seq progress_after_first);
+  (match Validation.accept_event progress_after_first ~offset:32L second_event with
+   | Error { offset = 32L; _ } -> ()
+   | Ok _ | Error _ -> fail "expected over-capacity event failure at offset 32");
+  match
+    Validation.finish
+      progress_after_first
+      ~offset:36L
+      ~digest:"digest-placeholder"
+      { batch_id = "batch-bounds"
+      ; first_seq = 1
+      ; last_seq = 1
+      ; count = 1
+      ; events_sha256 = "digest-placeholder"
+      }
+  with
+  | Ok validated -> check int "validated last_seq" 1 (Validation.last_seq validated)
+  | Error { detail; _ } -> fail detail
+;;
+
 let () =
   run
     "Execution event store"
@@ -1994,6 +2082,10 @@ let () =
             "released codec fails before store mutation"
             `Quick
             test_released_codec_fails_before_store_mutation
+        ; test_case
+            "batch validation enforces header capacity and completion bounds"
+            `Quick
+            test_batch_validation_enforces_header_capacity_and_completion_bounds
         ] )
     ]
 ;;

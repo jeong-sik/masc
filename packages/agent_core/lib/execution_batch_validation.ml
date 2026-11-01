@@ -29,7 +29,11 @@ type in_progress =
 type validated = Validated of int
 
 let start ~offset ~committed_seq ~correlation_id (header : header) =
-  if header.expected_next_seq <> committed_seq + 1
+  if header.expected_next_seq <= 0
+  then Error { offset; detail = "batch sequence must be positive" }
+  else if header.count <= 0
+  then Error { offset; detail = "batch count must be positive" }
+  else if header.expected_next_seq <> committed_seq + 1
   then
     Error
       { offset
@@ -47,26 +51,39 @@ let next_seq (progress : in_progress) =
   progress.header.expected_next_seq + progress.accepted_count
 
 let accept_event (progress : in_progress) ~offset event =
-  let expected_seq = next_seq progress in
-  if Event.seq event <> expected_seq
+  if remaining progress <= 0
+  then Error { offset; detail = "batch accepted event count exceeded header count" }
+  else
+    let expected_seq = next_seq progress in
+    if Event.seq event <> expected_seq
+    then
+      Error
+        { offset
+        ; detail =
+            Printf.sprintf
+              "event sequence %d does not match expected sequence %d"
+              (Event.seq event)
+              expected_seq
+        }
+    else if
+      not (Event.Correlation_id.equal (Event.correlation_id event) progress.correlation_id)
+    then Error { offset; detail = "event correlation mismatch" }
+    else Ok { progress with accepted_count = progress.accepted_count + 1 }
+
+let finish (progress : in_progress) ~offset ~digest (footer : footer) =
+  let header = progress.header in
+  let expected_last = header.expected_next_seq + header.count - 1 in
+  if remaining progress <> 0
   then
     Error
       { offset
       ; detail =
           Printf.sprintf
-            "event sequence %d does not match expected sequence %d"
-            (Event.seq event)
-            expected_seq
+            "batch accepted %d of %d declared events"
+            progress.accepted_count
+            header.count
       }
-  else if
-    not (Event.Correlation_id.equal (Event.correlation_id event) progress.correlation_id)
-  then Error { offset; detail = "event correlation mismatch" }
-  else Ok { progress with accepted_count = progress.accepted_count + 1 }
-
-let finish (progress : in_progress) ~offset ~digest (footer : footer) =
-  let header = progress.header in
-  let expected_last = header.expected_next_seq + header.count - 1 in
-  if not (String.equal footer.batch_id header.batch_id)
+  else if not (String.equal footer.batch_id header.batch_id)
   then Error { offset; detail = "batch commit identity mismatch" }
   else if
     footer.first_seq <> header.expected_next_seq

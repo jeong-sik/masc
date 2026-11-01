@@ -1020,10 +1020,19 @@ let mark_full_health_refresh_wait_failure failure =
 
 let compute_full_health_snapshot_for_refresh ?(listener = "http/1.1")
     ~request_authority request =
-  with_full_health_snapshot_lock (fun () ->
-      full_health_refresh :=
-        Health_refresh.begin_direct ~now:(Unix.gettimeofday ()) !full_health_refresh);
-  compute_full_health_snapshot ~listener ~request_authority request
+  let was_requested =
+    with_full_health_snapshot_lock (fun () ->
+        let prior_requested = (!full_health_refresh).requested in
+        full_health_refresh :=
+          Health_refresh.begin_direct ~now:(Unix.gettimeofday ()) !full_health_refresh;
+        prior_requested)
+  in
+  try compute_full_health_snapshot ~listener ~request_authority request with
+  | Eio.Cancel.Cancelled _ as exn ->
+      with_full_health_snapshot_lock (fun () ->
+          full_health_refresh :=
+            Health_refresh.cancel_direct ~was_requested !full_health_refresh);
+      raise exn
 
 let refresh_full_health_snapshot_sync ?(listener = "http/1.1")
     ~request_authority request =
@@ -1032,8 +1041,9 @@ let refresh_full_health_snapshot_sync ?(listener = "http/1.1")
 
 let finish_full_health_refresh_worker
     (worker : unit Eio.Promise.or_exn Health_refresh.worker)
+    resolver
     (outcome : (Health_observation.snapshot, exn) result) =
-  let enqueue_follow_up =
+  let settled, enqueue_follow_up =
     with_full_health_snapshot_lock (fun () ->
         match Health_refresh.take_worker ~id:worker.id !full_health_refresh with
         | Some (refresh, active) ->
@@ -1074,19 +1084,53 @@ let finish_full_health_refresh_worker
                         Health_refresh.complete ~refresh_requested:true !full_health_refresh;
                       Option.iter publish_fleet_stream_reading state.snapshot)
              | Error exn -> finish_failure (Proactive_refresh.Raised exn));
-            dirty
-        | None -> false)
+            true, dirty
+        | None -> false, false)
   in
-  if enqueue_follow_up then begin
-    Log.Dashboard.debug
-      "full_health_snapshot requests a successor after worker %d was invalidated"
-      worker.id;
-    signal_full_health_refresh_wakeup ()
+  if settled then begin
+    Eio.Promise.resolve resolver
+      (match outcome with
+       | Ok _ -> Ok ()
+       | Error exn -> Error exn);
+    if enqueue_follow_up then begin
+      Log.Dashboard.debug
+        "full_health_snapshot requests a successor after worker %d was invalidated"
+        worker.id;
+      signal_full_health_refresh_wakeup ()
+    end
+  end
+
+let cancel_full_health_refresh_worker
+    (worker : unit Eio.Promise.or_exn Health_refresh.worker)
+    resolver
+    exn =
+  let settled, enqueue_follow_up =
+    with_full_health_snapshot_lock (fun () ->
+        match Health_refresh.cancel_worker ~id:worker.id !full_health_refresh with
+        | Some (refresh, dirty) ->
+            full_health_refresh := refresh;
+            true, dirty
+        | None -> false, false)
+  in
+  if settled then begin
+    Eio.Promise.resolve_error resolver exn;
+    if enqueue_follow_up then begin
+      Log.Dashboard.debug
+        "full_health_snapshot requests a successor after cancelled worker %d was invalidated"
+        worker.id;
+      match Fs_compat.execution_context () with
+      | Fs_compat.Eio_fiber ->
+          (try Eio.Cancel.protect signal_full_health_refresh_wakeup
+           with _ -> ())
+      | Non_eio -> ()
+    end
   end
 
 let await_full_health_refresh_worker ~sw ~compute =
+  Eio.Switch.check sw;
   let action =
     with_full_health_snapshot_lock (fun () ->
+        Eio.Switch.check sw;
         match Health_refresh.admit !full_health_refresh with
         | Health_refresh.Join (refresh, worker) ->
             full_health_refresh := refresh;
@@ -1107,18 +1151,36 @@ let await_full_health_refresh_worker ~sw ~compute =
           worker.id;
         worker
     | `Start (worker, resolver) ->
-        Eio.Fiber.fork ~sw (fun () ->
-            let outcome =
-              try Ok (compute ()) with
-              | Eio.Cancel.Cancelled _ as exn -> raise exn
-              | exn -> Error exn
-            in
-            finish_full_health_refresh_worker worker outcome;
-            Eio.Promise.resolve resolver
-              (match outcome with
-               | Ok _ -> Ok ()
-               | Error exn -> Error exn));
-        worker
+        (try
+           Eio.Switch.check sw;
+           let hook =
+             Eio.Switch.on_release_cancellable sw (fun () ->
+               let exn =
+                 match Eio.Switch.get_error sw with
+                 | Some exn -> exn
+                 | None -> Eio.Cancel.Cancelled Exit
+               in
+               cancel_full_health_refresh_worker worker resolver exn)
+           in
+           (try
+              Eio.Fiber.fork ~sw (fun () ->
+                  Fun.protect ~finally:(fun () -> Eio.Switch.remove_hook hook)
+                    (fun () ->
+                      let outcome =
+                        try Ok (compute ()) with
+                        | Eio.Cancel.Cancelled _ as exn ->
+                            cancel_full_health_refresh_worker worker resolver exn;
+                            raise exn
+                        | exn -> Error exn
+                      in
+                      finish_full_health_refresh_worker worker resolver outcome));
+              worker
+            with exn ->
+              Eio.Switch.remove_hook hook;
+              raise exn)
+         with exn ->
+           cancel_full_health_refresh_worker worker resolver exn;
+           raise exn)
   in
   Eio.Promise.await_exn worker.completion
 

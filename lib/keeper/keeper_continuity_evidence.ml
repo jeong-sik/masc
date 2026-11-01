@@ -9,6 +9,30 @@ let unavailable ?(fields = []) reason =
 
 let member name = function `Assoc fields -> List.assoc_opt name fields | _ -> None
 
+let valid_v3_row json =
+  let is_object = function `Assoc _ -> true | _ -> false in
+  let is_non_empty_string = function `String s -> String.trim s <> "" | _ -> false in
+  is_non_empty_string (Option.value ~default:`Null (member "runtime_id" json))
+  && member "evidence" json = Some (`String "pre_dispatch_projection_and_selection")
+  && is_object (Option.value ~default:`Null (member "wire" json))
+  && is_object (Option.value ~default:`Null (member "unread" json))
+  && is_object (Option.value ~default:`Null (member "selection" json))
+  &&
+  match member "association" json, member "binding" json, member "bounded_range" json with
+  | Some (`String "projection_associated"), Some (`String "capture_identified"), Some (`Assoc range_fields) ->
+    (match
+       List.assoc_opt "origin" range_fields,
+       List.assoc_opt "first_atom" range_fields,
+       List.assoc_opt "total_atoms" range_fields,
+       List.assoc_opt "custom_projection_changed" range_fields
+     with
+     | Some (`Assoc _), Some (`Int first), Some (`Int total), Some (`Bool _) ->
+       first >= 0 && total >= 0
+     | _ -> false)
+  | Some (`String "projection_unavailable"), Some (`String ("capture_identified" | "unbound")), Some `Null ->
+    true
+  | _ -> false
+
 let completed_boundary ~config ~keeper ~turn_ref =
   let module B = Keeper_turn_boundaries in
   match B.read ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id:keeper with
@@ -71,8 +95,11 @@ let requests ~config ~keeper ~turn_ref =
               match Ids.Turn_ref.of_yojson value with
               | Error _ -> stop "malformed continuity request turn identity"
               | Ok reference when Ids.Turn_ref.equal reference turn_ref ->
-                rows := json :: !rows;
-                None
+                if not (valid_v3_row json) then
+                  stop "malformed continuity request row"
+                else (
+                  rows := json :: !rows;
+                  None)
               | Ok reference
                 when !rows <> []
                      || (String.equal

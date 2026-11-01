@@ -25,6 +25,10 @@ from typing import Any
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/harness/workload/keeper_temporal_continuity.py"
 
+# The chain digest of the boundary and the saved summary that covers it. The
+# acceptance path compares digests, not just generation and atom count.
+BOUNDARY_DIGEST = "b" * 64
+
 
 @contextlib.contextmanager
 def fixture(
@@ -536,7 +540,11 @@ class CaptureProtocol(unittest.TestCase):
                             "record": {
                                 "kind": "turn_ended",
                                 "turn_ref": target["turn_ref"],
-                                "position": {"kind": "atom_history", "end_atom": 5},
+                                "position": {
+                                    "kind": "atom_history",
+                                    "end_atom": 5,
+                                    "last_atom_digest": BOUNDARY_DIGEST,
+                                },
                             },
                         },
                     }
@@ -562,6 +570,7 @@ class CaptureProtocol(unittest.TestCase):
                             "trace_id": "fixture-trace",
                             "history_start_boundary_line": 1,
                             "end_atom": 5,
+                            "last_atom_digest": BOUNDARY_DIGEST,
                             "unread_messages": [],
                         },
                     }
@@ -570,6 +579,7 @@ class CaptureProtocol(unittest.TestCase):
                         "history_start_boundary_line": 1,
                         "boundary_line": 2,
                         "end_atom": 5,
+                        "last_atom_digest": BOUNDARY_DIGEST,
                     }
                     source["scenario"]["steps"].extend(
                         [
@@ -754,6 +764,7 @@ class RetiredPrefixProtocol(unittest.TestCase):
                     "trace_id": "trace",
                     "history_start_boundary_line": 1,
                     "end_atom": 5,
+                    "last_atom_digest": BOUNDARY_DIGEST,
                     "unread_messages": [],
                 },
                 "bounded_range": {"first_atom": 5, "custom_projection_changed": False},
@@ -772,7 +783,11 @@ class RetiredPrefixProtocol(unittest.TestCase):
                         "record": {
                             "kind": "turn_ended",
                             "turn_ref": "trace#1",
-                            "position": {"kind": "atom_history", "end_atom": 5},
+                            "position": {
+                                "kind": "atom_history",
+                                "end_atom": 5,
+                                "last_atom_digest": BOUNDARY_DIGEST,
+                            },
                         },
                     },
                 }

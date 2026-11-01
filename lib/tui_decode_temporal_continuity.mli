@@ -10,6 +10,8 @@ type judgment = { criterion_id : string; scope : scope; result : judgment_result
 type request_range = { capture_id : string; body_sha256 : string; first_atom : int; summary_end_atom : int option }
 type omission_detail = { target_end_atom : int; requests : request_range list }
 type omission = Not_requested | Omission_unavailable of string | Not_observed of string * omission_detail | Observed of omission_detail
+type summary_readiness = Readiness_not_available | Covered of { end_atom : int; last_atom_digest : string }
+type memory_readiness = Memory_unavailable | Memory_operations of (string * string) list
 type step = {
   id : string;
   kind : step_kind;
@@ -22,6 +24,7 @@ type step = {
   omission : omission;
   target_end_atom : int option;
   judgments : judgment list;
+  readiness : summary_readiness option;
 }
 type t = {
   keeper : string;
@@ -36,6 +39,7 @@ type t = {
   source_capture_sha256 : string option;
   binary_commit : string option;
   executable_sha256 : string option;
+  memory_readiness : memory_readiness option;
   timeline : step list;
 }
 val schema : string

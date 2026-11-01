@@ -626,7 +626,7 @@ let load_events_file_index ~verify_content path =
          read, so swallowing every exception here would convert a cancel into
          a silent miss. *)
       (match Fs_compat.load_file path with
-       | exception Eio.Cancel.Cancelled cancelled -> raise cancelled
+       | exception (Eio.Cancel.Cancelled _ as cancelled) -> raise cancelled
        | exception _ -> None
        | content ->
          let cached_opt =

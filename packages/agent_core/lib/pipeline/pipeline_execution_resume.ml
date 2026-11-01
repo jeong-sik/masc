@@ -246,13 +246,19 @@ let run
   =
   let outcome =
     let* response = Pipeline_execution_scope.provider_response execution in
-    match last_tool_turn agent.Agent_types.state.messages with
-    | None ->
-      (match last_assistant_message agent.state.messages with
-       | None ->
-         Error
-           (Error.Internal
-              "durable execution resume terminal turn has no restored assistant message")
+    (* Branch on the persisted stop reason — the same authority
+       [Pipeline.stage_output] applies on the fresh path. The restored message
+       shape alone is not authoritative: an injected response can carry
+       ToolUse blocks with a terminal reason (fresh path: Complete) or an
+       unmatched shape the fresh path rejects. MaxTokens is the one terminal
+       reason whose fresh path still collects admitted ToolUse, so a restored
+       ToolUse checkpoint under MaxTokens resumes the tool turn. *)
+    let restore_terminal () =
+      match last_assistant_message agent.Agent_types.state.messages with
+      | None ->
+        Error
+          (Error.Internal
+             "durable execution resume terminal turn has no restored assistant message")
        | Some message ->
          let* invocations = Pipeline_execution_scope.invocations execution in
          let* () = validate_terminal_checkpoint agent ~response message invocations in
@@ -262,8 +268,9 @@ let run
               (fun () -> pending_terminal ~turn response)
           | None ->
             Error
-              (Error.Internal "durable execution resume lost its provider authority")))
-    | Some (tool_blocks, expected_ids, messages_after) ->
+              (Error.Internal "durable execution resume lost its provider authority"))
+    in
+    let restore_tool_turn (tool_blocks, expected_ids, messages_after) =
       let* tool_blocks = wire_blocks agent tool_blocks in
       let* () =
         Pipeline_terminal_tool.validate_response_tool_uses
@@ -348,6 +355,30 @@ let run
            (Error.Internal
               "durable execution resume ToolResult identities differ from the restored \
                ToolUse checkpoint"))
+    in
+    match response.Types.stop_reason with
+    | Types.UnmatchedToolCalls | Types.Unknown _ ->
+      Error
+        (Error.Agent
+           (Error.UnrecognizedStopReason
+              { reason = Types.stop_reason_to_string response.Types.stop_reason }))
+    | Types.StopToolUse ->
+      (match last_tool_turn agent.Agent_types.state.messages with
+       | Some restored -> restore_tool_turn restored
+       | None ->
+         Error
+           (Error.Agent
+              (Error.UnrecognizedStopReason
+                 { reason =
+                     "StopToolUse resume checkpoint restored no ToolUse message" })))
+    | Types.MaxTokens ->
+      (match last_tool_turn agent.Agent_types.state.messages with
+       | Some restored -> restore_tool_turn restored
+       | None -> restore_terminal ())
+    | Types.EndTurn | Types.StopSequence | Types.Refusal | Types.ContentFilter
+    | Types.RepetitionTruncation | Types.PauseTurn | Types.Compaction
+    | Types.ContextWindowExceeded ->
+      restore_terminal ()
   in
   match outcome with
   | Error _ as error -> error

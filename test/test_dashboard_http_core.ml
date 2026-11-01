@@ -5680,7 +5680,7 @@ let test_execution_routes_serve_prepared_http_representations () =
       check string (protocol ^ " 304 empty body") "" cached_body;
       check (option string) (protocol ^ " 304 omits length") None
         (List.assoc_opt "content-length" cached_headers)) [ "identity"; "gzip"; "zstd" ])
-    [ "H1", tools_h1_wire_response ~router; "H2", tools_h2_wire_response ~handler ];
+    [ "H1", tools_h1_wire_response ?body:None ~router; "H2", tools_h2_wire_response ~handler ];
   let hit = execution_payload ~state ~sw ~clock (request_with_headers path request_headers) in
   check bool "wire reads reuse the published encodings" true (first.encoded == hit.encoded)
 

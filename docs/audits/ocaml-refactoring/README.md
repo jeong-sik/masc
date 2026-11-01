@@ -2217,7 +2217,8 @@ successfully at `3ac145916e09f7317ff61f2cf6a647ec971f49f0` on
 `fix/board-publication-proof-main-20261101`, with the six selected Board/Fusion suites.
 It does not validate this later TUI layer.
 
-The policy-admission prerequisite moves sub-board CRUD into the private
+The policy-admission prerequisite [#47178](https://github.com/jeong-sik/masc/pull/47178)
+moves sub-board CRUD into the private
 `Board_sub_boards` owner. Ordinary post creation checks current policy under the
 store's persistence mutex before attempting append; runtime sub-board creation,
 updates and deletion take that same mutex before the state mutex. A rejected

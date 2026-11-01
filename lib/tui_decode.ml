@@ -1280,9 +1280,9 @@ let decode_goal_proof json =
     Proof_unreadable (Some "no verification block on the goal")
 ;;
 
-(* Required and nullable: the server writes [null] for every goal the latest
-   verifier scan settled, so a missing key is a wire mismatch, not a goal the
-   verifier is fine with. *)
+(* Required and nullable: [null] reports no failure for this row, and can
+   also mean that no scan has reported yet. It does not prove that the verifier
+   ran or settled the goal. A missing key is a wire mismatch. *)
 let decode_verifier_unreconciled json =
   match Json_util.assoc_member_opt "verifier_unreconciled" json with
   | None -> Error "missing required field 'verifier_unreconciled'"

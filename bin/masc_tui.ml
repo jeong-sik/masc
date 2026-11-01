@@ -27278,14 +27278,16 @@ Use relative paths for resources already held in the package. -->
       invalidate_frame_for_resize frame_presenter render_schedule
     end
   in
-  let worker_geometry_current cached =
+  let make_worker_geometry_current () =
     let module Size = Render_schedule.Terminal_size_cache in
-    match Size.verify_for_work ~cached
-        ~resize_pending:(fun () -> Atomic.get resize_requested)
-        ~probe:Masc_tui_ansi.probe_terminal_size with
-    | Size.Current -> true
-    | Size.Resize_pending -> false
-    | Size.Resize_detected -> request_full_repaint Sys.sigwinch; false
+    let generation = Atomic.get resize_generation in
+    fun cached ->
+      match Size.verify_for_work ~cached
+          ~resize_changed:(fun () -> Atomic.get resize_requested
+            || Atomic.get resize_generation <> generation)
+          ~probe:Masc_tui_ansi.probe_terminal_size with
+      | Size.Current -> true
+      | Size.Resize_interrupted | Size.Resize_detected -> false
   in
   let share_interrupt_barrier = ref false in
   let run_loop () =
@@ -27474,7 +27476,8 @@ Use relative paths for resources already held in the package. -->
           ~frame_presenter ~render_schedule async_messages
       then Render_schedule.request render_schedule Render_schedule.Background;
       prepare_resource_diagrams state ~mailbox:async_messages;
-      prepare_inspected_frame state ~mailbox:async_messages ~worker_geometry_current;
+      prepare_inspected_frame state ~mailbox:async_messages
+        ~worker_geometry_current:(make_worker_geometry_current ());
       (* A prepared editor may not replace a quit or recovery notice before
          the covered surface has actually returned to the terminal. *)
       let editor_waits_for_frame =

@@ -207,10 +207,10 @@ let test_work_geometry_checks_resize_before_admission () =
   let pending = ref false and probes = ref 0 and physical = ref (Some (24, 80)) in
   let probe () = incr probes; !physical in
   let check_geometry () = Size.verify_for_work ~cached:(24,80)
-      ~resize_pending:(fun () -> !pending) ~probe in
+      ~resize_changed:(fun () -> !pending) ~probe in
   check bool "current geometry may be admitted" true (check_geometry () = Size.Current);
   pending := true;
-  check bool "pending resize prevents admission" true (check_geometry () = Size.Resize_pending);
+  check bool "pending resize prevents admission" true (check_geometry () = Size.Resize_interrupted);
   check int "pending resize avoids probing" 1 !probes;
   pending := false;
   physical := Some (25,80);
@@ -219,8 +219,15 @@ let test_work_geometry_checks_resize_before_admission () =
   check bool "unavailable probe retains cached geometry" true (check_geometry () = Size.Current);
   let pending_during_probe () = pending := true; Some (24,80) in
   check bool "resize during probe prevents admission" true
-    (Size.verify_for_work ~cached:(24,80) ~resize_pending:(fun () -> !pending)
-       ~probe:pending_during_probe = Size.Resize_pending)
+    (Size.verify_for_work ~cached:(24,80) ~resize_changed:(fun () -> !pending)
+       ~probe:pending_during_probe = Size.Resize_interrupted);
+  pending := false;
+  let generation = ref 0 in
+  let resized_and_consumed () = incr generation; Some (24,80) in
+  check bool "consumed resize still prevents admission" true
+    (Size.verify_for_work ~cached:(24,80)
+       ~resize_changed:(fun () -> !pending || !generation <> 0)
+       ~probe:resized_and_consumed = Size.Resize_interrupted)
 
 let test_interrupted_input_wait_retries_until_deadline () =
   let now = ref 0L in

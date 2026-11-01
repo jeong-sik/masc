@@ -16,14 +16,12 @@ let wrap_value_line ~max_cells text =
   let max_cells = max 1 max_cells in
   let current = Buffer.create 128 in
   let current_cells = ref 0 in
-  let has_word = ref false in
   let rows = ref [] in
   let flush () =
     if Buffer.length current > 0 then begin
       rows := Buffer.contents current :: !rows;
       Buffer.clear current;
-      current_cells := 0;
-      has_word := false
+      current_cells := 0
     end
   in
   let add_space () =
@@ -32,48 +30,31 @@ let wrap_value_line ~max_cells text =
     incr current_cells
   in
   let add_word word =
-    if not (String.equal word "") then begin
-      let cells = Message_layout.display_width word in
-      if !current_cells + cells <= max_cells then begin
-        Buffer.add_string current word;
-        current_cells := !current_cells + cells;
-        has_word := true
-      end else begin
-        if !has_word then flush ();
-        (* If a row holds only indentation, fill the rest of it before
-           continuing the word. Otherwise the indentation would be drawn on
-           a row of its own and detached from the source it belongs to. *)
-        let prefix, chunks =
-          Message_layout.split_cells_after_prefix
-            ~prefix_cells:(max_cells - !current_cells) ~max_cells word
-        in
-        if not (String.equal prefix "") then begin
-          Buffer.add_string current prefix;
-          has_word := true
-        end;
-        (match chunks with
-         | [] ->
-           current_cells := !current_cells + Message_layout.display_width prefix
-         | _ ->
-           flush ();
-           let rec add_chunks = function
-             | [] -> ()
-             | [ last ] ->
-               Buffer.add_string current last;
-               current_cells := Message_layout.display_width last;
-               has_word := true
-             | chunk :: rest ->
-               rows := chunk :: !rows;
-               add_chunks rest
-           in
-           add_chunks chunks)
-      end
+    let cells = Message_layout.display_width_for_wrapping word in
+    if !current_cells + cells <= max_cells then begin
+      Buffer.add_string current word;
+      current_cells := !current_cells + cells
+    end else begin
+      (* Start a long word at the same boundary as the ordinary wrapper, so
+         retaining indentation does not introduce new cuts in visible control
+         escapes inside that word. *)
+      flush ();
+      let _, chunks =
+        Message_layout.split_cells_after_prefix ~prefix_cells:0 ~max_cells word
+      in
+      let rec add_chunks = function
+        | [] -> ()
+        | [ last ] ->
+          Buffer.add_string current last;
+          current_cells := Message_layout.display_width_for_wrapping last
+        | chunk :: rest ->
+          rows := chunk :: !rows;
+          add_chunks rest
+      in
+      add_chunks chunks
     end
   in
-  String.split_on_char ' ' text
-  |> List.iteri (fun index word ->
-       if index > 0 then add_space ();
-       add_word word);
+  Message_layout.iter_words_and_spaces text ~word:add_word ~space:add_space;
   flush ();
   List.rev !rows
 
@@ -141,7 +122,7 @@ let of_fields ~width fields =
     && String.trim value <> ""
     && label_cells
        + String.length value_indent
-       + Message_layout.display_width value
+       + Message_layout.display_width_for_wrapping value
        <= width
   in
   List.concat_map

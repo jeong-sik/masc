@@ -559,6 +559,38 @@ let test_fleet_pending_uses_owner_and_exact_durable_queue () =
     ]
 ;;
 
+let test_nonscheduled_collision_makes_schedule_witness_ambiguous () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "collision-pending" in
+  let base = schedule_due_stimulus ~schedule_id:"collide" () in
+  let wake = match base.payload with
+    | Keeper_event_queue.Schedule_due wake -> wake
+    | _ -> failf "fixture must build a scheduled stimulus" in
+  let scheduled =
+    { base with
+      post_id = "board:collide"
+    ; payload = Keeper_event_queue.Schedule_due { wake with occurrence_id = "board:collide" } } in
+  let board = board_stimulus ~post_id:"collide" () in
+  List.iter
+    (fun stimulus ->
+      Keeper_reaction_ledger.record_event_queue_stimulus ~base_path ~keeper_name stimulus;
+      Keeper_registry_event_queue.enqueue ~base_path keeper_name stimulus)
+    [ scheduled; board ];
+  let fleet = Keeper_reaction_ledger.fleet_summary_json
+    ~base_path ~keeper_names:[keeper_name]
+    ~owner_lifecycle:owner_not_observed ~limit_per_keeper:10 in
+  let summary = fleet |> member "keepers" |> to_list |> List.hd in
+  check bool
+    "a colliding non-scheduled selection keeps the keeper operator-visible"
+    true
+    (fleet |> member "operator_action_required" |> to_bool);
+  check int
+    "the collision is not a benignly scheduled pending"
+    1
+    (fleet |> member "attention_required_stimulus_count" |> to_int);
+  check_member_string "the collision degrades the keeper" "degraded" "status" summary
+;;
+
 let test_fleet_paused_missing_queue_still_requires_attention () =
   with_temp_base @@ fun base_path ->
   let keeper_name = "paused-without-queue-witness" in
@@ -2597,6 +2629,10 @@ let () =
             "repeated turn reactions advance recorded_at timestamps"
             `Quick
             test_repeated_turn_reactions_advance_recorded_at_timestamps
+        ; test_case
+            "non-scheduled collision makes the schedule witness ambiguous"
+            `Quick
+            test_nonscheduled_collision_makes_schedule_witness_ambiguous
         ] )
     ]
 ;;

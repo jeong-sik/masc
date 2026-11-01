@@ -1803,7 +1803,15 @@ let fleet_summary_json ~base_path ~keeper_names ~owner_lifecycle ~limit_per_keep
                   | Ask_answered _ | Completion_authority_rejected _ | Task_outcome _
                   | Task_cancelled _ | Workspace_message _ | Delegate_completed _
                   | Composition_completed _ | Tool_result_ready _ | Owned_job_completed _
-                  | Addon_operation_changed _ -> ids, seen, ambiguous)
+                  | Addon_operation_changed _ ->
+                    (* A non-scheduled selection can carry the same canonical
+                       ledger ID as a scheduled one; its presence makes the
+                       schedule witness ambiguous either way. *)
+                    let id = stimulus_id_of_event_queue selection.source in
+                    ids, Event_id_set.add id seen,
+                    (if Event_id_set.mem id seen
+                     then Event_id_set.add id ambiguous
+                     else ambiguous))
                 (Event_id_set.empty, Event_id_set.empty, Event_id_set.empty)
                 health.selections
             in

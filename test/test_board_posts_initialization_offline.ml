@@ -128,6 +128,59 @@ let test_same_process_owner ~root ~base ~run:_ =
     (intent alias B.Bootstrap_required);
   check_exit 0 (Offline.bootstrap ~base_path:alias ~expected_intent_sha256)
 
+let child_flag = "--hold-configured-base-path-lease"
+
+let hold_configured_lease base =
+  with_lease base (fun () ->
+    output_char stdout 'R'; flush stdout;
+    let byte = Bytes.create 1 in
+    ignore (Unix.read Unix.stdin byte 0 1))
+
+let rec wait_child pid =
+  match Unix.waitpid [] pid with
+  | _, status -> status
+  | exception Unix.Unix_error (Unix.EINTR, _, _) -> wait_child pid
+
+let test_other_process_owner ~root:_ ~base ~run:_ =
+  let expected_intent_sha256 = intent base B.Bootstrap_required in
+  let ready_read, ready_write = Unix.pipe ~cloexec:true () in
+  let release_read, release_write = Unix.pipe ~cloexec:true () in
+  let executable = Unix.realpath Sys.executable_name in
+  let pid =
+    try Unix.create_process executable [|executable; child_flag; base|]
+      release_read ready_write Unix.stderr
+    with exception_ ->
+      let backtrace = Printexc.get_raw_backtrace () in
+      List.iter Unix.close [ready_read; ready_write; release_read; release_write];
+      Printexc.raise_with_backtrace exception_ backtrace in
+  Unix.close ready_write; Unix.close release_read;
+  let release = Unix.out_channel_of_descr release_write in
+  let reaped = ref false in
+  Fun.protect ~finally:(fun () ->
+    Unix.close ready_read;
+    close_out_noerr release;
+    if not !reaped then ignore (wait_child pid))
+    (fun () ->
+      let ready = Bytes.create 1 in
+      check int "fresh exec acquired its configured lease" 1
+        (Unix.read ready_read ready 0 1);
+      check char "actual acquisition acknowledgement" 'R' (Bytes.get ready 0);
+      let response = Offline.bootstrap ~base_path:base ~expected_intent_sha256 in
+      check_exit 1 response;
+      check string "another process excludes the actual adapter" "workspace_in_use"
+        (refusal_kind response);
+      check string "observed owner is an actual other process" "recorded"
+        Yojson.Safe.Util.(Offline.response_to_yojson response |> member "refusal"
+          |> member "owner_kind" |> to_string);
+      check bool "contended request did not publish posts" true (absent (posts base));
+      check bool "contended request did not publish guard" true (absent (guard base));
+      (* EOF releases the fresh child; no forked Eio state or kill/replay. *)
+      close_out release;
+      let status = wait_child pid in
+      reaped := true;
+      check bool "owner released and exited normally" true (status = Unix.WEXITED 0));
+  check_exit 0 (Offline.bootstrap ~base_path:base ~expected_intent_sha256)
+
 let test_invalid_intent ~root:_ ~base ~run =
   let response = Offline.bootstrap ~base_path:base ~expected_intent_sha256:"INVALID" in
   check_exit 1 response;
@@ -171,12 +224,16 @@ let test_real_execution_context ~root:_ ~base ~run:_ =
   check string "raw Domain obtained actual empty posts without Eio effects" "" (read (posts base))
 
 let () =
-  let case name test = test_case name `Quick (with_workspace test) in
-  run "board_posts_initialization_offline" ["actual configured ownership", [
+  if Array.length Sys.argv = 3 && String.equal Sys.argv.(1) child_flag then
+    hold_configured_lease Sys.argv.(2)
+  else
+    let case name test = test_case name `Quick (with_workspace test) in
+    run "board_posts_initialization_offline" ["actual configured ownership", [
     case "inspection never accesses the lease" test_inspect;
     case "bootstrap and repeated request preserve current guard" test_bootstrap;
     case "adopt real producer bytes without unrelated-family health" test_adopt;
     case "same-process and canonical aliases contend" test_same_process_owner;
+    case "fresh exec owner excludes the adapter until normal release" test_other_process_owner;
     case "invalid intent refuses before metadata effects" test_invalid_intent;
     case "empty root never selects cwd" test_empty_base_path;
     case "lexical parent alias refuses before acquisition" test_parent_alias;

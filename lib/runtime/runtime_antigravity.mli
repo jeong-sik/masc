@@ -120,6 +120,17 @@ type turn_result =
 
 type response_ending = Response_done | Response_error
 
+type noncompletion_status =
+  | Canceled
+  | Interrupted
+  | Invalid
+  | Waiting
+  | Running
+(** Documented result states that do not prove a completed turn. None grants
+    replay or successful session settlement, even when a partial reply exists. *)
+
+val noncompletion_status_to_string : noncompletion_status -> string
+
 type stream_event =
   | Turn_started of
       { conversation_id : string
@@ -154,6 +165,21 @@ type stream_event =
           still reports it. *)
   | Turn_finished of { text : string }
 
+type noncompletion_result =
+  { status : noncompletion_status
+  ; conversation_id : string option
+  ; response : string
+  ; error : string option
+  ; num_turns : int
+  ; usage : usage
+  }
+(** Raw result evidence, including unbound pre-init counts. These fields do not
+    grant session admission, usage attribution or successful completion. *)
+
+val noncompletion_result_to_json : noncompletion_result -> Yojson.Safe.t
+(** Diagnostic evidence with [completed=false] and [partial_response], never a
+    completed assistant reply. Usage retains the CLI's exclusive raw counts. *)
+
 type error =
   | Invalid_config of string
   | Spawn_failed of string
@@ -163,6 +189,10 @@ type error =
       }
   | State_callback_failed of string
   | Turn_failed of string
+  | Result_not_completed of noncompletion_result
+      (** The exact documented result state and any partial reply. The identity
+          is the matching [init] identity when present; before [init] it is only
+          the result's unbound restatement and does not admit a session. *)
   | Process_exited of string
   | Unhandled_exception of string
       (** An exception nothing in the runtime expected, caught as the turn
@@ -208,7 +238,8 @@ val run_turn :
   ?on_context_submission:(Runtime_official_client_write.t -> unit) ->
   ?on_terminal_received:(unit -> unit) ->
     (** Pure observer after the matching result is decoded, before stream or
-        usage callbacks and process draining; not a consumption ACK. *)
+        usage callbacks and process draining; not successful completion or a
+        consumption ACK. Includes non-completed result states. *)
   mgr:_ Eio.Process.mgr ->
   clock:_ Eio.Time.clock ->
   cwd:Eio.Fs.dir_ty Eio.Path.t ->

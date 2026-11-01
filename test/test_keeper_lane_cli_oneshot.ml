@@ -336,6 +336,20 @@ let test_muse_binding_rest_requires_typed_quota () =
     ]
 ;;
 
+let test_antigravity_noncompletion_is_not_quota_or_input_refusal () =
+  List.iter (fun status ->
+    let cause = Masc.Fusion_official_client.Antigravity_failure
+        (Runtime_antigravity.Result_not_completed
+           { status; conversation_id = Some "interrupted-conversation"
+           ; response = "partial reply"; error = Some "quota context input words are not evidence"
+           ; num_turns = 1
+           ; usage = {input_tokens=1;output_tokens=1;thinking_tokens=0;cache_read_tokens=0;total_tokens=2} }) in
+    let failed = Cli_oneshot.Execution_failed { runtime_id = "agy.fixture"; cause } in
+    check bool "does not rest an account" false (Cli_oneshot.refused_for_binding_rest failed);
+    check bool "does not authorize input shrinking" false (Cli_oneshot.refused_for_input_size failed))
+    [ Runtime_antigravity.Canceled; Interrupted; Invalid; Waiting; Running ]
+;;
+
 (* These fixtures drive the actual Claude stream adapter and Antigravity
    result adapter through the default runner. A string-only runner cannot
    prove that a typed provider rejection reaches the shared quota table. *)
@@ -1263,6 +1277,8 @@ let () =
             "Muse Code account rest requires typed quota"
             `Quick
             test_muse_binding_rest_requires_typed_quota
+        ; test_case "Antigravity noncompletion is not quota or input refusal" `Quick
+            test_antigravity_noncompletion_is_not_quota_or_input_refusal
         ] )
     ]
 ;;

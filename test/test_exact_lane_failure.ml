@@ -75,10 +75,25 @@ let test_cli_failures () =
     (F.cli_failure
        (Masc.Keeper_lane_cli_oneshot.Execution_failed { runtime_id = "r"; cause = Masc.Fusion_official_client.Missing_reply }))
 
+let test_antigravity_noncompletion_is_not_transient () =
+  List.iter (fun status ->
+      let cause = Runtime_antigravity.Result_not_completed
+          { status; conversation_id = Some "interrupted-conversation"
+          ; response = "partial reply"; error = None; num_turns = 1
+          ; usage = {input_tokens=1;output_tokens=1;thinking_tokens=0;cache_read_tokens=0;total_tokens=2} } in
+      let classified = F.cli_failure
+          (Masc.Keeper_lane_cli_oneshot.Execution_failed
+             { runtime_id = "agy.fixture"; cause = Masc.Fusion_official_client.Antigravity_failure cause }) in
+      check failure "non-completed answer is unusable" F.Output_unusable classified;
+      check bool "no safe transient replay" false (F.is_transient classified))
+    [ Runtime_antigravity.Canceled; Interrupted; Invalid; Waiting; Running ]
+
 let () =
   run "exact lane failure"
     [ ( "classes"
       , [ test_case "provider refusals" `Quick test_provider_refusals
         ; test_case "answers that cannot be used" `Quick test_answers_that_cannot_be_used
         ; test_case "completion failures" `Quick test_completion_failures
-        ; test_case "cli failures" `Quick test_cli_failures ] ) ]
+        ; test_case "cli failures" `Quick test_cli_failures
+        ; test_case "Antigravity noncompletion is not transient" `Quick
+            test_antigravity_noncompletion_is_not_transient ] ) ]

@@ -1,7 +1,7 @@
 # Official client and provider continuity audit — 2026-11-01
 
-Five concrete contract defects were found and repaired in draft Native Stack #47014,
-whose top layer is [PR #47022](https://github.com/jeong-sik/masc/pull/47022). The review followed current
+Eight concrete contract defects were found and repaired in seven draft PRs in Native Stack #47014,
+whose top layer is [PR #47026](https://github.com/jeong-sik/masc/pull/47026). The review followed current
 source, installed client help/schema, primary documentation and read-only runtime
 evidence. It does not establish that every provider is free of bugs or that the
 repairs are installed.
@@ -13,11 +13,38 @@ repairs are installed.
 | [#47013](https://github.com/jeong-sik/masc/pull/47013) | GLM cleared the current tool exchange's reasoning together with past user turns | Source-stamped reasoning → checkpoint codec → semantic user boundary → next HTTP request |
 | [#47019](https://github.com/jeong-sik/masc/pull/47019) | Visible-text cleanup corrupted or removed a native inline carrier while keeping its exact replay witness | Provider parser → Keeper finalization → disk checkpoint → restored original request bytes |
 | [#47022](https://github.com/jeong-sik/masc/pull/47022) | Scoped Kimi Coding declarations did not inherit the native Kimi replay contract; the alias also omitted streamed reasoning | Shipped runtime binding → scoped capabilities → sync/SSE parsing → source identity → disk checkpoint → tool continuation/new user request |
+| [#47024](https://github.com/jeong-sik/masc/pull/47024) | Kimi Coding rejected documented low/high/max effort requests | Shipped binding → typed default-on contract → admission → serialized effort; omitted defaults remain omitted |
+| [#47025](https://github.com/jeong-sik/masc/pull/47025) | GLM preservation with an omitted default-enabled thinking toggle lost history and omitted its requested wire field | Provider parser → stable provenance → disk checkpoint → effective default and explicit controls → next user request |
+| [#47026](https://github.com/jeong-sik/masc/pull/47026) | Antigravity rejected five documented non-completed states as unknown protocol strings | Exact status/init identity → ambiguous durable recovery; no successful turn ACK or candidate replay of uncertain native effects |
 
 The Kimi change deliberately uses the three shipped model bindings. It does not
 guess capabilities for arbitrary operator-created model IDs. Its six fixture
 cases retain synthetic reasoning carriers through production code; they do not
 certify a provider-reported model identity or live account access.
+
+Kimi effort admission is a separate repair from replay. Explicit disable emits
+`none`; the provider documents routing this control to non-thinking K2.8 Preview.
+The repair does not certify that disabling thinking preserves K3 model identity.
+
+## Continuity paths inspected
+
+```mermaid
+flowchart TD
+  M[Selected Memory and durable tool results] --> P[Typed model input projection]
+  P --> N[Native official client: session and turn]
+  P --> A[HTTP API: stamped reasoning and tool messages]
+  N --> E{Provider outcome and effect evidence}
+  E -->|Completed and caller accepted| S[Persist session and acknowledge exact receipts]
+  E -->|Gap or compaction| R[Invalidate held Memory and redeliver on resume]
+  E -->|Interrupted or uncertain effects| F[Retain recovery evidence and fence candidate replay]
+  R --> P
+  A --> C[Keeper finalization and checkpoint save]
+  C --> D[Disk restore with original reasoning witness]
+  D --> A
+```
+
+The diagram names boundaries examined in code and fixtures. It is not a record
+of live end-to-end execution across every provider.
 
 ## Source and runtime evidence
 
@@ -41,6 +68,14 @@ to the evidence record's [tool-call error reference](https://www.kimi.com/code/d
 They were read on 2026-11-01; confidence is High for the documented contract and
 source comparison. Actual provider behavior was not newly measured.
 
+The [GLM API reference](https://docs.z.ai/api-reference/llm/chat-completion)
+also establishes the omitted thinking toggle's enabled default. The repair keeps
+entirely omitted thinking requests unchanged. Antigravity's five documented
+non-completed states retain partial responses as error evidence, never as a
+completed answer. Independent review caught that nonretryable provider errors
+could still trigger candidate fanout; the final repair marks unobserved native
+effects as unavailable before projection, while preserving known effects.
+
 ## Verification boundaries
 
 Changed OCaml syntax, embedded fixture syntax, TOML syntax, changelog fragments
@@ -62,6 +97,19 @@ scope. Other exact-head run IDs, selected suites, conclusions and review state
 are recorded in the PR descriptions as they become available; a queued run is
 not a pass.
 
+| Test run | Exact tested head | Observed evidence |
+| --- | --- | --- |
+| [41259848104](https://github.com/jeong-sik/masc/actions/runs/41259848104) | `4b388f51316ab5ed9fbce1260454f048a68f1fb8` | SUCCESS: OpenAI codec and Keeper disk checkpoint suites, 93 cases. Later lower-layer changes are test-only Muse repairs. |
+| [41259801045](https://github.com/jeong-sik/masc/actions/runs/41259801045) | `a39f630e47f69be2d1ff0a85a58d0b2a4e267d2c` | FAILURE: six selected suites passed, 127 cases; three Muse stop assertions failed before resume. This was baseline fixture drift: caller acceptance rejects a repeated-tool stop while the fixture expected the adapter's intermediate result. |
+| [41261288235](https://github.com/jeong-sik/masc/actions/runs/41261288235) | `5e3b61b848e1e9e4403b8ccf4a9768e547e712df` | Requested rerun of the failed Muse suite after keeping adapter settlement separate and asserting caller rejection plus retained tool receipt. Production stop/effect guards are unchanged. Conclusion is recorded in PR #47008. |
+| [41260409586](https://github.com/jeong-sik/masc/actions/runs/41260409586) | `d7139136cf45c4744bf75228ee6eeedd3151cb1d` | FAILURE: two exact recorded-Memory wire cases failed; nine suites reported success, 500 cases (Kimi 6, reasoning 58, streaming 42, retention 20, outbox 12, Codex 196, Claude 103, Antigravity 23, session store 40). A Codex callback assertion was logged despite the suite's successful exit; that fixture cannot certify the affected assertion until repaired. |
+| [41261854222](https://github.com/jeong-sik/masc/actions/runs/41261854222) | `7cb26cc755ae4e801b390ca190373b1d7a334bbb` | Requested thirteen explicit suites for the final Antigravity, GLM default-thinking, Kimi effort and checkpoint repairs. Conclusion is recorded in PR #47026. Later changes to this report do not alter the tested code. |
+
+Independent source reviews passed the integrated Muse head `5e3b61b848e1e9e4403b8ccf4a9768e547e712df`,
+the final Antigravity layer `7cb26cc755ae4e801b390ca190373b1d7a334bbb`,
+and the original GLM/Kimi/inline deltas. Those statements cover the recorded
+source differences, not compilation, formal GitHub approval or live execution.
+
 The selected verification paths include actual protocol fixtures, scoped runtime
 materialization, Memory redelivery, receipt retention/ACK, checkpoint disk restore
 and the next request serializer. They do not replace full regression, installed
@@ -71,9 +119,9 @@ changed by this audit.
 
 ## Remaining findings
 
-- [#47010](https://github.com/jeong-sik/masc/issues/47010): Antigravity's decoder accepts only two of the documented result statuses.
-- [#47011](https://github.com/jeong-sik/masc/issues/47011): Explicit GLM full-history preserved thinking with an omitted thinking toggle needs effective-default reconciliation.
-- [#47021](https://github.com/jeong-sik/masc/issues/47021): Live custom Kimi API IDs differ from documented IDs, unknown-model replay is unproven, and explicit effort declarations need reconciliation. Shipped K3 defaults omit the effort field; they do not force the `none` value.
+- [#47010](https://github.com/jeong-sik/masc/issues/47010) and [#47011](https://github.com/jeong-sik/masc/issues/47011) now have source repairs in #47026 and #47025. They remain open until the draft stack is reviewed and merged.
+- [#47021](https://github.com/jeong-sik/masc/issues/47021): Live custom Kimi API IDs differ from documented IDs and unknown-model replay is unproven. The tracked effort declaration is repaired in #47024. Operator-owned model IDs and actual served identity were not changed or verified.
+- [#47028](https://github.com/jeong-sik/masc/issues/47028): Generic/operator-defined Anthropic HTTP configurations do not represent account/linkage identity in durable reasoning source equivalence. Sonnet/Haiku 5.5 blocks can be dropped by an unrelated account while the request succeeds. Existing transformation logging is a partial mitigation; the shipped bindings use Claude Code instead. This P2 needs trusted account or provider-transformation evidence; no deployed incident or safe account-policy repair was established.
 
 These issues include symptoms, reproduction conditions, suspected causes and the
 checks performed. The runtime observations are retained independently from the

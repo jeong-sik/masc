@@ -28,6 +28,13 @@ let runtime_error_to_core_error = function
          ; error_type = Some "turn_failed"
          ; detail
          })
+  | Runtime_antigravity.Result_not_completed evidence ->
+    Agent_core.Error.Provider
+      (Llm_provider.Error.ProviderReportedError
+         { provider = "antigravity_cli"
+         ; error_type = Some (Runtime_antigravity.noncompletion_status_to_string evidence.status)
+         ; detail = Runtime_antigravity.noncompletion_result_to_json evidence |> Yojson.Safe.to_string
+         })
   (* A file-table safety kill, not a spawn failure: refiring the same turn
      re-kills it, so report it as the provider's terminal failure rather
      than an unavailable provider that invites blind retries. *)
@@ -78,7 +85,12 @@ let recovery_failure_of_runtime_error = function
     (* Killed mid-turn for file-table safety: Ambiguous, needs a look —
        a sick workspace (operator cleans) or system pressure (passes). *)
     Session_store.Transport_interrupted
-  | Runtime_antigravity.Process_exited _ | Runtime_antigravity.Timeout _ ->
+  | Runtime_antigravity.Process_exited _
+  | Runtime_antigravity.Timeout _ ->
+    Session_store.Transport_interrupted
+  | Runtime_antigravity.Result_not_completed _ ->
+    (* A result state is not a safe resume or replay witness. Retain the
+       admitted identity under the existing ambiguous recovery fence. *)
     Session_store.Transport_interrupted
   | Runtime_antigravity.Invalid_config _
   | Runtime_antigravity.Protocol_error _ ->
@@ -387,7 +399,7 @@ let run_without_lifecycle ~result_scope ~input_source ~argument_source ~official
     ~system_prompt ~tools ~loading_plan ~initial_messages ~model_input_projection
     ~on_transmitted_model_input ~hooks
     ~context_injector ~context ~terminal_effect_state ~event_bus ~raw_trace ~on_event
-    ~observe_effect_attempted
+    ~observe_effect_attempted ~observe_result_not_completed
     ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action ~on_native_tool_completion
     ~on_usage_report ~on_tool_execution ~(config : Runtime_execution.antigravity_cli) =
   on_results_ready None;
@@ -1093,6 +1105,17 @@ let run_without_lifecycle ~result_scope ~input_source ~argument_source ~official
             client_result
             |> Result.map (fun turn -> `Completed turn)
             |> Result.map_error (fun error ->
+              (match error with
+               | Runtime_antigravity.Result_not_completed _ -> observe_result_not_completed ()
+               | Runtime_antigravity.Invalid_config _
+               | Runtime_antigravity.Spawn_failed _
+               | Runtime_antigravity.Protocol_error _
+               | Runtime_antigravity.State_callback_failed _
+               | Runtime_antigravity.Turn_failed _
+               | Runtime_antigravity.Process_exited _
+               | Runtime_antigravity.Unhandled_exception _
+               | Runtime_antigravity.Child_fd_ceiling_exceeded _
+               | Runtime_antigravity.Timeout _ -> ());
               recovery_failure := recovery_failure_of_runtime_error error;
               runtime_error_to_core_error error)
           | `Abort stop -> Ok (`Stopped stop))
@@ -1299,6 +1322,13 @@ let run ~input_source ?argument_source ?official_task_reference ?composed_contex
   let observe_effect_attempted () =
     Atomic.set effect_disposition Keeper_provider_attempt_effect.Effect_attempted
   in
+  let observe_result_not_completed () =
+    (* The CLI may have executed built-in tools outside the MCP observer. A
+       non-completed result cannot prove this attempt is safe to replay. *)
+    ignore (Atomic.compare_and_set effect_disposition
+      Keeper_provider_attempt_effect.No_effect_observed
+      Keeper_provider_attempt_effect.Observation_unavailable)
+  in
   let result =
     Eio.Switch.run (fun result_scope ->
     Host.with_run_lifecycle_events ~event_bus ~keeper_name (fun () ->
@@ -1331,7 +1361,7 @@ let run ~input_source ?argument_source ?official_task_reference ?composed_contex
         ~event_bus
         ~raw_trace
         ~on_event
-        ~observe_effect_attempted
+        ~observe_effect_attempted ~observe_result_not_completed
         ~config))
   in
   { result

@@ -86,6 +86,34 @@ compute_scope() {
 }
 read_current_pr
 [ "$source_receipt" -eq 0 ] || [ "$review_policy" = source ] || refuse "source receipts cannot admit a release"
+# A reviewer's GitHub account must be distinct from every linked content
+# author and committer. An unlinked role is unknown, not an independent user.
+# The comparison is pinned to the same frozen base/head as the reviewed diff.
+read_commit_accounts() {
+  python3 "$here/review-commit-accounts.py" --repo "$repo" --base "$pr_base_sha" --head "$head" --gh "$GH"
+}
+read_author_id() {
+  local person login id
+  person=$(ci_gh_object "repos/$repo/pulls/$pr" '.user') || return 1
+  login=$(printf '%s' "$person" | jq -r '.login // empty') || return 1
+  id=$(printf '%s' "$person" | jq -er 'select((.id | type) == "number" and .id > 0 and .id == (.id | floor)) | .id') || {
+    echo "approve-guard: PR author account identity unavailable" >&2; return 1;
+  }
+  [ "$login" = "$pr_author" ] || refuse "PR author changed during identity read"
+  printf '%s' "$id"
+}
+account_in_commits() {
+  printf '%s' "$commit_accounts" | jq -e --argjson id "$1" 'any(.accounts[]; .[1] == $id)' >/dev/null
+}
+recheck_commit_accounts() {
+  local after author_after
+  after=$(read_commit_accounts) || return $?
+  [ "$after" = "$commit_accounts" ] || refuse "commit account identities changed during review"
+  author_after=$(read_author_id) || return $?
+  [ "$author_after" = "$pr_author_id" ] || refuse "PR author identity changed during review"
+}
+pr_author_id=$(read_author_id) || exit $?
+commit_accounts=$(read_commit_accounts) || exit $?
 current_diff=$(python3 "$here/review-diff.py" --repo "$repo" --base "$pr_base_sha" --head "$head") || {
   echo "approve-guard: complete review diff unavailable" >&2; exit 1;
 }
@@ -100,9 +128,13 @@ fi
 # Read-only candidate admission uses repository review evidence; Actions
 # installation tokens cannot query /user. Review/check paths still require
 # the caller identity for self-approval and owned change-request rules.
-me=""
+me=""; me_id=""
 if [ "$merge_check" -eq 0 ] && [ "$source_receipt" -eq 0 ]; then
-  me=$(ci_gh_object user '.login')
+  me_json=$(ci_gh_object user '.')
+  me=$(printf '%s' "$me_json" | jq -r '.login // empty')
+  me_id=$(printf '%s' "$me_json" | jq -er 'select((.id | type) == "number" and .id > 0 and .id == (.id | floor)) | .id') || {
+    echo "approve-guard: reviewer account identity unavailable" >&2; exit 1;
+  }
   [ -n "$me" ] || exit 1
 fi
 # Neither GitHub commit_id nor a footer alone supplies immutable head binding.
@@ -117,7 +149,7 @@ review_rows() {
     sort -t "$(printf '\t')" -k1,1 -k2,2nr
 }
 check_reviews() {
-  local all_rows rows who rid state bound scope_status review_json admit_status replacement_id owned_state
+  local all_rows rows who rid state bound scope_status review_json admit_status replacement_id owned_state actor_id
   # A read failure must leave one named line, not a bare exit 1 swallowed by
   # set -e into an unreadable evidence_read_failed (run 39404586810).
   all_rows=$(review_rows) || { echo "approve-guard: review rows read failed: repos/$repo/pulls/$pr/reviews" >&2; return 1; }
@@ -143,6 +175,16 @@ check_reviews() {
     fi
     if [ "$state" = APPROVED ] && [ "$who" != "$pr_author" ]; then
       review_json=$(ci_gh_object "repos/$repo/pulls/$pr/reviews/$rid" '.') || { echo "approve-guard: review read failed: repos/$repo/pulls/$pr/reviews/$rid" >&2; return 1; }
+      actor_id=$(printf '%s' "$review_json" | jq -er --arg who "$who" '.user | select(.login == $who and (.id | type) == "number" and .id > 0 and .id == (.id | floor)) | .id') || {
+        refusal_detail="$refusal_detail  review $rid by $who: reviewer account identity unavailable
+"
+        continue
+      }
+      if [ "$actor_id" = "$pr_author_id" ] || account_in_commits "$actor_id"; then
+        refusal_detail="$refusal_detail  review $rid by $who: reviewer is a PR author or content commit account
+"
+        continue
+      fi
       admit_status=0
       bound=$(admit_review "$review_json") || admit_status=$?
       [ "$admit_status" -le 1 ] || return 1
@@ -164,7 +206,7 @@ $(printf '%s\n' "$bound" | sed 's/^/    - /')
         fi
         [ "$scope_status" -eq 0 ] || return 1
         approvals="$approvals $bound"
-        [ "$who" != "$me" ] || own_approval="$bound"
+        [ "$actor_id" != "$me_id" ] || own_approval="$bound"
       fi
     fi
   done <<<"$rows"
@@ -214,13 +256,18 @@ if [ "$merge_check" -eq 1 ] || [ "$source_receipt" -eq 1 ]; then
   check_reviews
   [ -n "$approvals" ] || refuse "approval changed after final diff read"
   check_verdict
+  recheck_commit_accounts || exit $?
+  read_current_pr
   if [ "$receipt_json" -eq 1 ] || [ "$source_receipt" -eq 1 ]; then
     python3 -c 'import json,sys; print(json.dumps({"pr":int(sys.argv[1]),"head":sys.argv[2],"approval_ids":[int(x) for x in sys.argv[3].split()],"scope":json.loads(sys.argv[4]),"policy":sys.argv[5]}))' "$pr" "$head" "$approvals" "$(compute_scope)" "$review_policy"
   else echo "MERGE-CHECK PASS #$pr head $head approvals:$approvals"; fi
   exit 0
 fi
 check_publication_policy
-[ "$me" != "$pr_author" ] || refuse "the PR author cannot approve their own change"
+[ "$me_id" != "$pr_author_id" ] || refuse "the PR author cannot approve their own change"
+if account_in_commits "$me_id"; then
+  refuse "a content commit author or committer cannot independently approve"
+fi
 if [ "$check_only" -eq 0 ] || [ -n "$review_base" ] || [ -n "$review_diff" ]; then
   [[ "$review_base" =~ ^[0-9a-f]{40}$ && "$review_diff" =~ ^[0-9a-f]{64}$ ]] ||
     refuse "supply the base and complete diff identity captured during source review (--review-base/--review-diff)"
@@ -275,7 +322,11 @@ check_verdict
 if [ -n "$pending_requests" ]; then
   echo "APPROVAL ONLY #$pr: other CHANGES_REQUESTED remain merge blockers:$pending_requests" >&2
 fi
-if [ "$check_only" -eq 1 ]; then echo "WOULD APPROVE #$pr head $head policy $review_policy"; exit 0; fi
+if [ "$check_only" -eq 1 ]; then
+  recheck_commit_accounts || exit $?
+  read_current_pr
+  echo "WOULD APPROVE #$pr head $head policy $review_policy"; exit 0
+fi
 # Bind the reviewed base and native stack position to the approval itself.
 # Main may advance later when the reviewed diff base remains identical.
 scope=$(compute_scope)
@@ -285,6 +336,8 @@ if [ -n "$own_approval" ]; then
   own_verdict=$(verdict_for "$pr" "$head" "" "$me") || { echo "approve-guard: own verdict read failed" >&2; exit 1; }
   read -r own_state _ <<<"$own_verdict"
   if [ "$previous_scope" = "review-scope: $scope" ] && [ "$own_state" = PASS ]; then
+    recheck_commit_accounts || exit $?
+    read_current_pr
     echo "SKIP #$pr: $me already APPROVED this head and scope (review $own_approval)"
     exit 0
   fi
@@ -292,6 +345,8 @@ fi
 [ -z "$release_run" ] || footer="$footer · release run $release_run"
 [ -z "$replaced" ] || footer="$footer · replaces own CHANGES_REQUESTED $replaced"
 footer="$footer$(printf ' · reviewed base `%s` · diff sha256 `%s`' "$review_base" "$review_diff")"
+recheck_commit_accounts || exit $?
+read_current_pr
 if ! response=$( { printf '%s' "$review_body"; printf '%s' "$footer"; } | "$GH" api -X POST "repos/$repo/pulls/$pr/reviews" -f event=APPROVE -f "commit_id=$head" -F body=@- --jq '[(.id|tostring), .state, .commit_id] | @tsv'); then
   echo "approval submission outcome is unknown; inspect reviews before retry" >&2
   exit 1
@@ -310,8 +365,26 @@ back_author=$(printf '%s' "$back_json" | jq -r '.user.login // ""') || {
 [ "$back_author" = "$me" ] || {
   echo "approval review $rid was posted by ${back_author:-unknown}, expected $me; inspect it before retry" >&2; exit 1;
 }
+back_author_id=$(printf '%s' "$back_json" | jq -er 'select((.user.id | type) == "number" and .user.id > 0 and .user.id == (.user.id | floor)) | .user.id') || {
+  echo "approval review $rid was posted but its account identity is unavailable; inspect it before retry" >&2; exit 1;
+}
+[ "$back_author_id" = "$me_id" ] || {
+  echo "approval review $rid was posted by an unexpected account id; inspect it before retry" >&2; exit 1;
+}
 read_current_pr || {
   echo "approval review $rid was posted but the PR identity could not be verified; inspect it before retry" >&2; exit 1;
+}
+post_accounts=$(read_commit_accounts) || {
+  echo "approval review $rid was posted but commit identities could not be rechecked; inspect it before retry" >&2; exit 1;
+}
+post_author_id=$(read_author_id) || {
+  echo "approval review $rid was posted but author identity could not be rechecked; inspect it before retry" >&2; exit 1;
+}
+if [ "$post_accounts" != "$commit_accounts" ] || [ "$post_author_id" != "$pr_author_id" ]; then
+  echo "approval review $rid was posted but account identities changed; inspect it before retry" >&2; exit 1
+fi
+read_current_pr || {
+  echo "approval review $rid was posted but the PR identity moved; inspect it before retry" >&2; exit 1;
 }
 admit_review "$back_json" >/dev/null || {
   echo "approval review $rid was posted but readback is not admitted for this head; inspect it before retry" >&2; exit 1;

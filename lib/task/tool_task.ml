@@ -542,11 +542,11 @@ let evict_oldest_events_file () =
 
 (* The caller holds the cache lock. *)
 let evict_events_file_cache_if_needed () =
-  while Hashtbl.length events_file_cache >= max_cached_event_files
-        || !events_file_cache_retained_bytes > max_cached_event_bytes
+  while Hashtbl.length events_file_cache > 0
+        && (Hashtbl.length events_file_cache > max_cached_event_files
+            || !events_file_cache_retained_bytes > max_cached_event_bytes)
   do
-    if Hashtbl.length events_file_cache = 0 then ()
-    else evict_oldest_events_file ()
+    evict_oldest_events_file ()
   done
 
 let add_event_for_task_key by_task key json =
@@ -707,6 +707,15 @@ let load_events_file_index ~verify_content path =
             | _ | exception Unix.Unix_error _ -> ());
          Some by_task)
 
+let compare_month_entries_desc a b =
+  match
+    Dated_jsonl.Layout.year_and_month_of_directory_name a,
+    Dated_jsonl.Layout.year_and_month_of_directory_name b
+  with
+  | Some _, Some _ | None, None -> String.compare b a
+  | Some _, None -> -1
+  | None, Some _ -> 1
+
 let read_matching_task_events config ~task_id ~limit =
   if limit <= 0 then []
   else
@@ -716,7 +725,7 @@ let read_matching_task_events config ~task_id ~limit =
       let month_dirs =
         Sys.readdir events_dir
         |> Array.to_list
-        |> List.sort (fun a b -> String.compare b a)
+        |> List.sort compare_month_entries_desc
       in
       let collected = ref [] in
       let remaining = ref limit in
@@ -724,11 +733,15 @@ let read_matching_task_events config ~task_id ~limit =
       let add_file_events path =
         if !remaining <= 0 then ()
         else
+          let is_day_file =
+            Option.is_some
+              (Dated_jsonl.Layout.day_file_parts (Filename.basename path))
+          in
           let verify_content = !is_first_file in
-          is_first_file := false;
           match load_events_file_index ~verify_content path with
           | None -> ()
           | Some by_task ->
+            if is_day_file then is_first_file := false;
             (match Hashtbl.find_opt by_task task_id with
              | None -> ()
              | Some events ->
@@ -751,7 +764,8 @@ let read_matching_task_events config ~task_id ~limit =
                let files =
                  Sys.readdir month_path
                  |> Array.to_list
-                 |> List.sort (fun a b -> String.compare b a)
+                 |> List.sort (fun a b ->
+                      Dated_jsonl.Layout.compare_day_files b a)
                in
                List.iter
                  (fun file ->

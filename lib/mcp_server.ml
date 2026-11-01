@@ -279,51 +279,69 @@ let int_query_param uri key ~default =
   | None -> default
   | Some s -> Safe_ops.int_of_string_with_default ~default s
 
+let compare_month_entries_desc a b =
+  match
+    Dated_jsonl.Layout.year_and_month_of_directory_name a,
+    Dated_jsonl.Layout.year_and_month_of_directory_name b
+  with
+  | Some _, Some _ | None, None -> String.compare b a
+  | Some _, None -> -1
+  | None, Some _ -> 1
+
 (** Read recent event log lines from .masc/events *)
 let read_event_lines config ~limit =
-  let events_dir = Filename.concat (Workspace.masc_dir config) "events" in
-  if not (Sys.file_exists events_dir) then []
+  if limit <= 0 then []
   else
-    let month_dirs =
-      Sys.readdir events_dir |> Array.to_list |> List.sort compare |> List.rev
-    in
-    let collected = ref [] in
-    let remaining = ref limit in
-    let read_lines path =
-      let content = Fs_compat.load_file path in
-      String.split_on_char '\n' content
-      |> List.filter (fun s -> s <> "")
-    in
-    let add_lines path =
-      if !remaining <= 0 then ()
-      else
-        let lines = read_lines path in
-        let rec take rev_lines =
-          match rev_lines with
-          | [] -> ()
-          | line :: rest ->
-              if !remaining > 0 then begin
-                collected := line :: !collected;
-                decr remaining;
-                take rest
-              end
-        in
-        take (List.rev lines)
-    in
-    List.iter (fun month ->
-      if !remaining > 0 then
-        let month_path = Filename.concat events_dir month in
-        if Sys.file_exists month_path && Sys.is_directory month_path then
-          let files =
-            Sys.readdir month_path |> Array.to_list |> List.sort compare |> List.rev
+    let events_dir = Filename.concat (Workspace.masc_dir config) "events" in
+    if not (Sys.file_exists events_dir) then []
+    else
+      let month_dirs =
+        Sys.readdir events_dir
+        |> Array.to_list
+        |> List.sort compare_month_entries_desc
+      in
+      let collected = ref [] in
+      let remaining = ref limit in
+      let read_lines path =
+        let content = Fs_compat.load_file path in
+        String.split_on_char '\n' content
+        |> List.filter (fun s -> s <> "")
+      in
+      let add_lines path =
+        if !remaining <= 0 then ()
+        else
+          let lines = read_lines path in
+          let rec take rev_lines =
+            match rev_lines with
+            | [] -> ()
+            | line :: rest ->
+                if !remaining > 0 then begin
+                  collected := line :: !collected;
+                  decr remaining;
+                  take rest
+                end
           in
-          List.iter (fun file ->
-            if !remaining > 0 then
-              let path = Filename.concat month_path file in
-              if Sys.file_exists path then add_lines path
-          ) files
-    ) month_dirs;
-    List.rev !collected
+          take (List.rev lines)
+      in
+      List.iter (fun month ->
+        if !remaining > 0 then
+          let month_path = Filename.concat events_dir month in
+          if Sys.file_exists month_path && Sys.is_directory month_path then
+            let files =
+              Sys.readdir month_path
+              |> Array.to_list
+              |> List.sort (fun a b ->
+                   Dated_jsonl.Layout.compare_day_files b a)
+            in
+            List.iter (fun file ->
+              if !remaining > 0 then
+                let path = Filename.concat month_path file in
+                match Unix.stat path with
+                | st when st.st_kind = Unix.S_REG -> add_lines path
+                | _ | exception Unix.Unix_error _ -> ()
+            ) files
+      ) month_dirs;
+      List.rev !collected
 
 type owner_identity_projection =
   | Owner_identity_projection_pending

@@ -3457,6 +3457,48 @@ let () = test "task_history_events_json_cache_append_and_inplace_edit" (fun () -
   assert (actions_of "task-202" = [ "done"; "both-same"; "start"; "claim" ])
 )
 
+let () = test "task_history_events_json_orders_rotated_day_files_and_skips_foreign_entries" (fun () ->
+  let ctx = make_test_ctx () in
+  let rec mkdir_p path =
+    if path = "" || path = "." || path = "/" then ()
+    else if Sys.file_exists path then ()
+    else begin
+      mkdir_p (Filename.dirname path);
+      Unix.mkdir path 0o755
+    end
+  in
+  let events_dir = Filename.concat (Workspace.masc_dir ctx.config) "events" in
+  let month_dir = Filename.concat events_dir "2026-11" in
+  let foreign_month_dir = Filename.concat events_dir "z_foreign" in
+  mkdir_p month_dir;
+  mkdir_p foreign_month_dir;
+  let line_for task_id action =
+    Yojson.Safe.to_string
+      (`Assoc
+        [ ("task_id", `String task_id)
+        ; ("action", `String action)
+        ])
+    ^ "\n"
+  in
+  Fs_compat.save_file (Filename.concat foreign_month_dir "99.jsonl")
+    (line_for "task-303" "foreign");
+  Fs_compat.save_file (Filename.concat month_dir "01.999.jsonl")
+    (line_for "task-303" "seq-999");
+  Fs_compat.save_file (Filename.concat month_dir "01.1000.jsonl")
+    (line_for "task-303" "seq-1000");
+  Fs_compat.save_file (Filename.concat month_dir "01.jsonl")
+    (line_for "task-303" "current");
+  let actions ~limit =
+    match Task.Tool.task_history_events_json ctx.config ~task_id:"task-303" ~limit with
+    | `List rows ->
+      List.map
+        (fun row -> Yojson.Safe.Util.(row |> member "action" |> to_string))
+        rows
+    | _ -> failwith "expected JSON list"
+  in
+  assert (actions ~limit:3 = [ "current"; "seq-1000"; "seq-999" ])
+)
+
 let () =
   ensure_test_runtime ();
   Alcotest.run "Task.Tool"

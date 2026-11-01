@@ -1,0 +1,17 @@
+{
+  "command": [
+    "node",
+    "--test",
+    "tools/alphatex/test/terminal-style.test.mjs"
+  ],
+  "started_at_unix": 1793340656.782167,
+  "ended_at_unix": 1793340657.2777028,
+  "returncode": 0,
+  "stdout": "\u2714 a cut line closes every style it opened (6.131667ms)\n\u2714 segment text cannot write terminal control sequences (0.280708ms)\n\u2714 adjacent cells with the same styles share one segment (5.843542ms)\n\u2714 a line that is not a segment list is drawn as its text, as before (0.184833ms)\n\u2139 tests 4\n\u2139 suites 0\n\u2139 pass 4\n\u2139 fail 0\n\u2139 cancelled 0\n\u2139 skipped 0\n\u2139 todo 0\n\u2139 duration_ms 222.249833\n",
+  "stderr": "",
+  "product_sha256": {
+    "tools/alphatex/terminal-style.mjs": "b7d476b711e35d00119b222f63eb5ca8bfabfa77e7d936b46d1d7d0c2d6df009",
+    "tools/alphatex/sequencer-tui.mjs": "c1fe3b27272c3b4814da0c09311b388c7b506387dfcc42d66c63237429c477ab"
+  },
+  "scope": "Existing focused checks only. No new screen/layout tests were added. Not actual TUI/audio or full regression proof."
+}

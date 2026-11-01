@@ -1,0 +1,25 @@
+{
+  "scope": "Extracted actual piano-roll loop. String replaces Tonal pitch labels; explicit synthetic arguments. Header/harmony/editor projection, scheduling, fit/output construction, terminal writes, audio/MIDI and actual display are outside this component. No layout/text expectations or physical flicker test. Candidate grouping arrays/maps are per-call, not persistent mutable UI caches. Second counterfactual also compares style arrays directly in the private cell coalescer. Both source callers supply arrays of SGR parameter strings; no new output expectations are asserted. All v1 observations remain retained separately.",
+  "git_source": "5297349b101d61bb901b3729d43c4dec8bb30ec4",
+  "node_version": "v26.3.0",
+  "source_file": "tools/alphatex/sequencer-tui.mjs",
+  "source_sha256": "4703fc129be917f680d1a9eacfba3400cb489f3af169da4ac4deacd48a577a62",
+  "fragment_sha256": "5465b74e6d0023b0e4ffd8ba6f63931e4acbfdf3c289f71984895d8e453c9f00",
+  "created_at_unix": 1793340409.279259,
+  "files": {
+    "candidate-terminal-style.mjs": "7037021a2a8909e847ef1a79db67e8be00d503f5a867d49a1b6435ea67de89ef",
+    "terminal-style.mjs": "107342838265b95bd85598987ab32dd2d89658072cf7bb8831a82461cb848575",
+    "before.mjs": "57d921432d2f7cc80101c2c1848b6ed2c4820a13f6aca1db05d1c8d076c09ad9",
+    "bench.mjs": "880d904a715a5a245c5198f254991393af4aba65e869088d3a9928dc465de120",
+    "group-visible.mjs": "3c603c4e51110d8d70226d31fda9bd8402e281e353dcf0808fa15b1e4b13a5fe",
+    "terminal.mjs": "9eaad04739b5c85e8e60a8a53c377aee19cfd4fd8700b370594e59e09030bcb2",
+    "before-fragment.mjs.txt": "5465b74e6d0023b0e4ffd8ba6f63931e4acbfdf3c289f71984895d8e453c9f00",
+    "combined.mjs": "49ed15f20cbfc03da5a06c62927a9fc44e2dc58f6efe36a5af5d59f6d3012528",
+    "styles-only.mjs": "84033d21f13f20341da1737b8761022f50c3514cb78223efd64173da6593a57a"
+  },
+  "node_executable_sha256": "56694c81b093cc8da273fa017cf91765b3653e5f64f16727976ffaa87b2b6b31",
+  "argv": [
+    "node",
+    "artifacts/extreme-perf-20261030/daw-piano-roll-v2/bench.mjs"
+  ]
+}

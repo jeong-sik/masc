@@ -784,7 +784,7 @@ default = "muse.fixture"
            "muse-missing", `Missing; "muse-blank", `Blank;
            "muse-called-missing", `Called;
            "muse-failed", `Rejected (Runtime_muse_serve.Turn_failed
-             {kind=Runtime_muse_msp.Model_error; message="synthetic failure"; retryable=false});
+             {kind=Runtime_muse_msp.Model_error; message="synthetic failure"; retryable=false; quota=None});
            "muse-cancelled", `Rejected Runtime_muse_serve.Turn_cancelled];
         check bool "probe workspace released after child exit" false
           (Array.exists (String.starts_with ~prefix:"muse-readiness-") (Sys.readdir base_path));

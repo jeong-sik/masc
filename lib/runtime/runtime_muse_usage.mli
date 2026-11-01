@@ -11,6 +11,11 @@ type origin =
   | Usage_changed  (** [usage/changed], pushed while a session runs. *)
   | Usage_read  (** The answer to [usage/read]. *)
 
+val observe_quota :
+  scope:Runtime_quota_window.scope -> Runtime_muse_msp.quota_detail -> unit
+(** Record the reset reported by a failed turn's typed quota detail, even
+    when no subscription usage snapshot was emitted. *)
+
 val report :
   origin ->
   Runtime_muse_msp.subscription_usage ->

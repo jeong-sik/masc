@@ -7,6 +7,11 @@ type origin =
   | Usage_changed
   | Usage_read
 
+let observe_quota ~scope (quota : Runtime_muse_msp.quota_detail) =
+  Runtime_quota_window.note_exhausted ~scope
+    ~resets_at:(float_of_int quota.resets_at_ms /. 1000.)
+;;
+
 let method_name = function
   | Usage_changed -> "usage/changed"
   | Usage_read -> "usage/read"

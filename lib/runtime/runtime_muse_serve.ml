@@ -1194,7 +1194,9 @@ let rec await_terminal io (config : config) ~mcp_servers ~session_id ~turn_id ~o
           (match unobserved_final_message state with
            | None -> Ok (state, usage)
            | Some detail -> protocol_error "turn/completed" detail)
-        | Msp.Terminal_failed { kind = Msp.Auth_required; message; _ } ->
+        | Msp.Terminal_failed ({ quota = Some _; _ } as turn_error) ->
+          Error (Turn_failed turn_error)
+        | Msp.Terminal_failed { kind = Msp.Auth_required; message; quota = None; _ } ->
           Error (Auth_required message)
         | Msp.Terminal_failed
             ({ kind =

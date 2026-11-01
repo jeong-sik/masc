@@ -366,7 +366,7 @@ let test_refusals_of_the_session_start_fresh_next () =
     ; "returned an unsafe approval mode", Serve.Session_approval_mode_mismatch
         {requested=Msp.Prompt_unmatched; reported=Some Msp.Allow_all}
     ; "terminal nonretryable failure", Serve.Turn_failed
-        {Msp.kind=Msp.Step_limit; message="fixture refusal"; retryable=false}
+        {Msp.kind=Msp.Step_limit; message="fixture refusal"; retryable=false; quota=None}
     ];
   (match Adapter.runtime_error_to_core_error lease_held with
    | Agent_core.Error.Provider
@@ -379,6 +379,16 @@ let test_refusals_of_the_session_start_fresh_next () =
 ;;
 
 let test_error_projection () =
+  List.iter (fun retryable ->
+    let error = Serve.Turn_failed
+        {Msp.kind=Msp.Model_error; message="fixture failure"; retryable;
+         quota=Some {limit_kind="tierLimit"; resets_at_ms=500500}} in
+    match Adapter.runtime_error_to_core_error ~now:100. error with
+    | Agent_core.Error.Provider
+        (Llm_provider.Error.HardQuota {provider="muse_serve"; retry_after; _}) ->
+      check (option (float 0.001)) "typed reset becomes retry delay" (Some 400.5) retry_after
+    | error -> failf "quota must not become generic availability: %s" (Agent_core.Error.to_string error))
+    [true; false];
   (match Adapter.runtime_error_to_core_error (Serve.Auth_required "run muse login") with
    | Agent_core.Error.Provider (Llm_provider.Error.AuthError { detail = "run muse login"; _ }) -> ()
    | error -> failf "auth: %s" (Agent_core.Error.to_string error));
@@ -409,14 +419,14 @@ let test_error_projection () =
      the failure is the provider's availability, not its verdict. *)
   (match
      Adapter.runtime_error_to_core_error
-       (Serve.Turn_failed { Msp.kind = Msp.Model_error; message = "overloaded"; retryable = true })
+       (Serve.Turn_failed { Msp.kind = Msp.Model_error; message = "overloaded"; retryable = true; quota = None })
    with
    | Agent_core.Error.Provider
        (Llm_provider.Error.ProviderUnavailable { provider = "muse_serve"; _ }) -> ()
    | error -> failf "retryable turn failure: %s" (Agent_core.Error.to_string error));
   match
     Adapter.runtime_error_to_core_error
-      (Serve.Turn_failed { Msp.kind = Msp.Step_limit; message = "too many steps"; retryable = false })
+      (Serve.Turn_failed { Msp.kind = Msp.Step_limit; message = "too many steps"; retryable = false; quota = None })
   with
   | Agent_core.Error.Provider
       (Llm_provider.Error.ProviderReportedError { error_type = Some "stepLimit"; _ }) -> ()
@@ -783,6 +793,8 @@ if SCENARIO in ["turn_failed", "turn_failed_with_usage", "read_only_tool_failure
     terminal = {"sessionId": SESSION, "turnId": turn_id, "terminal": "failed",
                 "error": {"kind": "modelError", "message": "provider returned 503",
                           "retryable": True}}
+    if "turn_error" in FIXTURE:
+        terminal["error"] = FIXTURE["turn_error"]
     if SCENARIO == "turn_failed_with_usage":
         terminal["usage"] = {"inputTokens": 10, "outputTokens": 2,
                              "cachedTokens": 0, "reasoningTokens": 0}
@@ -1460,6 +1472,32 @@ let test_subscription_exhaustion_is_account_scoped () =
       check (option (float 0.)) "pre-ack quota survives the rejected turn" (Some 500.)
         (Runtime_quota_window.active_until ~scope ~now:100.);
       Runtime_quota_window.reset_for_testing ())
+;;
+
+let test_typed_quota_rests_only_the_selected_account () =
+  Runtime_quota_window.reset_for_testing ();
+  with_scripted_host
+    ~fixture:["scenario", `String "turn_failed"; "turn_error", `Assoc
+      ["kind", `String "modelError"; "message", `String "fixture failure";
+       "retryable", `Bool false; "requestDenied", `Bool true;
+       "quota", `Assoc ["limitKind", `String "tierLimit"; "resetsAtMs", `Int 500500]]]
+    ~after:(fun ~base_path ->
+      check bool "typed quota needs no independent usage/read" false
+        (Sys.file_exists (Filename.concat base_path "usage-read.log"));
+      Runtime_quota_window.reset_for_testing ())
+    (fun ~base_path ->
+      let run = run_turn ~base_path ~tool:(masc_probe_tool (ref `Null)) in
+      check bool "failed turn stays failed" true (Result.is_error run.outcome.result);
+      check bool "request refusal cannot certify earlier tools were effect-free" true
+        (run.outcome.effect_disposition = Keeper_provider_attempt_effect.Observation_unavailable);
+      let scope = Runtime_quota_window.scope_of_muse_home (Filename.concat base_path "account-home") in
+      let other = Runtime_quota_window.scope_of_muse_home (Filename.concat base_path "other-account") in
+      check (option (float 0.001)) "failed terminal records the exact reset" (Some 500.5)
+        (Runtime_quota_window.active_until ~scope ~now:100.);
+      check bool "other account remains available" false
+        (Runtime_quota_window.is_exhausted ~scope:other ~now:100.);
+      check string "failed model turn was not replayed" "start\n"
+        (read_text (Filename.concat base_path "sessions.log")))
 ;;
 
 let test_muse_usage_read_rests_only_the_selected_account () =
@@ -3278,6 +3316,8 @@ let () =
             test_subscription_exhaustion_is_account_scoped
         ; test_case "usage read rests the exhausted Muse account without a turn" `Quick
             test_muse_usage_read_rests_only_the_selected_account
+        ; test_case "typed quota rests selected account without usage read or replay" `Quick
+            test_typed_quota_rests_only_the_selected_account
         ; test_case "failed Muse turn reads typed usage without replay" `Quick
             test_failed_muse_turn_reads_typed_usage_without_replay
         ; test_case "prepared hook tool surface controls session binding" `Quick test_hook_tool_surface_controls_session_binding

@@ -676,10 +676,16 @@ type turn_error_kind =
   | Auth_required
   | Unrecognized_error_kind of string
 
+type quota_detail =
+  { limit_kind : string
+  ; resets_at_ms : int
+  }
+
 type turn_error =
   { kind : turn_error_kind
   ; message : string
   ; retryable : bool
+  ; quota : quota_detail option
   }
 
 type terminal =
@@ -719,7 +725,16 @@ let parse_turn_error stage fields =
   let* kind = required_string stage "kind" fields in
   let* message = required_text stage "message" fields in
   let* retryable = required_bool stage "retryable" fields in
-  Ok ({ kind = turn_error_kind_of_string kind; message; retryable } : turn_error)
+  let* quota_fields = optional_assoc stage "quota" fields in
+  let* quota =
+    match quota_fields with
+    | None -> Ok None
+    | Some fields ->
+      let* limit_kind = required_string stage "limitKind" fields in
+      let* resets_at_ms = required_int stage "resetsAtMs" fields in
+      Ok (Some { limit_kind; resets_at_ms })
+  in
+  Ok ({ kind = turn_error_kind_of_string kind; message; retryable; quota } : turn_error)
 ;;
 
 (* A "failed" terminal carries [error] (tdd SS4.5.1), except the one the host

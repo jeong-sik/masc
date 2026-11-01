@@ -299,6 +299,30 @@ let test_provider_failure_turn () =
   | _ -> fail "expected a retryable model failure, then a completed turn"
 ;;
 
+let test_typed_quota_failure () =
+  let fields = ["kind", `String "modelError"; "message", `String "fixture failure";
+                "retryable", `Bool false] in
+  let parse error = Msp.parse_notification ~method_:"turn/completed"
+      (`Assoc ["sessionId", `String "s-quota"; "turnId", `String "t-quota";
+               "viewCursor", `String "v:1"; "terminal", `String "failed";
+               "error", `Assoc error]) in
+  let quota = `Assoc ["limitKind", `String "futureLimit"; "resetsAtMs", `Int 500500] in
+  (match ok_or_fail (parse (("quota", quota) :: fields)) with
+   | Msp.Turn_completed {terminal=Msp.Terminal_failed
+       {quota=Some {limit_kind; resets_at_ms}; retryable=false; _}; _} ->
+     check string "open limit kind retained" "futureLimit" limit_kind;
+     check int "epoch milliseconds retained" 500500 resets_at_ms
+   | _ -> fail "typed quota detail was lost");
+  (match ok_or_fail (parse fields) with
+   | Msp.Turn_completed {terminal=Msp.Terminal_failed {quota=None; _}; _} -> ()
+   | _ -> fail "unclassified failure acquired quota");
+  List.iter (fun quota ->
+    check bool "malformed quota is refused" true
+      (Result.is_error (parse (("quota", quota) :: fields))))
+    [`String "spent"; `Assoc ["limitKind", `String "tierLimit"];
+     `Assoc ["limitKind", `String "tierLimit"; "resetsAtMs", `String "500500"]]
+;;
+
 let test_unknown_item_kind_is_kept () =
   let kinds =
     List.filter_map
@@ -679,6 +703,7 @@ let () =
         ; test_case "capability handshake" `Quick test_capability_handshake
         ; test_case "codec fingerprint is the corpus stable bundle" `Quick
             test_codec_fingerprint_is_the_corpus_stable_bundle
+        ; test_case "typed quota failure" `Quick test_typed_quota_failure
         ; test_case "host session durability follows v1 wire contract" `Quick
             test_session_durability_follows_v1_wire_contract
         ; test_case "approval round trip" `Quick test_approval_round_trip

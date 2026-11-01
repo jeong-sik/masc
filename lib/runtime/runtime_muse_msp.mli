@@ -349,10 +349,17 @@ type turn_error_kind =
 
 val turn_error_kind_to_string : turn_error_kind -> string
 
+type quota_detail =
+  { limit_kind : string  (** Open provider enum, retained for diagnostics. *)
+  ; resets_at_ms : int  (** Provider reset instant in epoch milliseconds. *)
+  }
+
 type turn_error =
   { kind : turn_error_kind
   ; message : string
   ; retryable : bool  (** The host's judgment that the same input may succeed. *)
+  ; quota : quota_detail option
+      (** Present iff the stopping failure was quota exhaustion. *)
   }
 
 type terminal =

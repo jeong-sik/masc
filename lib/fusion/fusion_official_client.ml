@@ -783,6 +783,9 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
            | Runtime_muse_serve.Usage_reported {usage; _} -> on_usage (muse_usage usage)
            | Runtime_muse_serve.Subscription_usage_observed usage ->
              Runtime_muse_usage.observe ~scope:quota_scope Runtime_muse_usage.Usage_changed usage
+           | Runtime_muse_serve.Turn_terminal_received
+               (Runtime_muse_msp.Terminal_failed { quota = Some quota; _ }) ->
+             Runtime_muse_usage.observe_quota ~scope:quota_scope quota
            | Runtime_muse_serve.Turn_started _ | Runtime_muse_serve.Text_delta _
            | Runtime_muse_serve.Text_completed _ | Runtime_muse_serve.Native_tool_started _
            | Runtime_muse_serve.Native_tool_finished _ | Runtime_muse_serve.Approval_decided _

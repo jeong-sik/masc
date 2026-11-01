@@ -72,7 +72,7 @@ let resolve_native_posture ~base_path ~keeper_name ~required_native_posture =
    shape: an exited process and the host's own interrupt are typed MASC
    values, and an idle stream after [turn/start] was written stays off the
    rotation chain because the host may still be running the turn. *)
-let runtime_error_to_core_error (error : Serve.error) =
+let runtime_error_to_core_error ?(now = Time_compat.now ()) (error : Serve.error) =
   match error with
   | Serve.Invalid_config detail -> config_error ~field:provider_name detail
   | Serve.Session_not_durable -> config_error ~field:"session_durability" (Serve.error_to_string error)
@@ -121,15 +121,22 @@ let runtime_error_to_core_error (error : Serve.error) =
          ; error_type = Some "session_approval_mode_mismatch"
          ; detail = Serve.error_to_string error
          })
+  | Serve.Turn_failed { Msp.quota = Some quota; _ } ->
+    Agent_core.Error.Provider
+      (Llm_provider.Error.HardQuota
+         { provider = provider_name
+         ; retry_after = Some (max 0. (float_of_int quota.resets_at_ms /. 1000. -. now))
+         ; detail = Serve.error_to_string error
+         })
   | Serve.Auth_required detail
-  | Serve.Turn_failed { Msp.kind = Msp.Auth_required; message = detail; retryable = _ } ->
+  | Serve.Turn_failed { Msp.kind = Msp.Auth_required; message = detail; quota = None; _ } ->
     Agent_core.Error.Provider
       (Llm_provider.Error.AuthError { provider = provider_name; detail })
   (* [retryable] is the host's judgment that resubmitting the same input may
      succeed (msp.d.ts, [TurnError.retryable]); the provider-failure corpus
      answers a [modelError] 503 with it and then runs the next turn on the
-     same session. MSP names no quota failure, so nothing here is typed
-     [HardQuota]. *)
+     same session. A typed quota detail above takes precedence over this
+     availability judgment; error prose supplies no classification. *)
   | Serve.Turn_failed
       { Msp.kind =
           ( Msp.Step_limit
@@ -143,6 +150,7 @@ let runtime_error_to_core_error (error : Serve.error) =
           | Msp.Unrecognized_error_kind _ ) as kind
       ; message = _
       ; retryable
+      ; quota = None
       } ->
     if retryable
     then
@@ -689,7 +697,11 @@ let stream_projection ~quota_scope ~keeper_name ~runtime_id ~configured_model ~r
           Option.iter (fun scope ->
             Runtime_muse_usage.observe ~scope Runtime_muse_usage.Usage_changed usage)
             quota_scope
-        | Serve.Turn_terminal_received _ -> ()
+        | Serve.Turn_terminal_received (Msp.Terminal_failed { quota = Some quota; _ }) ->
+          Option.iter (fun scope -> Runtime_muse_usage.observe_quota ~scope quota) quota_scope
+        | Serve.Turn_terminal_received
+            (Msp.Terminal_completed | Msp.Terminal_failed { quota = None; _ }
+            | Msp.Terminal_host_died _ | Msp.Terminal_cancelled | Msp.Unrecognized_terminal _) -> ()
         (* The usage this turn reports belongs to the model its calls ran
            on, when the host names it, rather than the session's selection. *)
         | Serve.Model_call_reported { model; _ } -> reported_model := model
@@ -1522,10 +1534,10 @@ let run_without_lifecycle ~result_scope ~media_store ~input_source ~argument_sou
           |> Result.map (fun turn -> `Completed turn)
           |> Result.map_error (fun error ->
             (match error with
-             | Serve.Turn_failed { Msp.kind = Msp.Model_error; _ }
+             | Serve.Turn_failed { Msp.kind = Msp.Model_error; quota = None; _ }
                when not (Runtime_quota_window.is_exhausted
                            ~scope:quota_scope ~now:(Time_compat.now ())) ->
-               (* MSP's modelError gives only free text and retryable. The
+               (* Without a typed quota detail, modelError gives free text and retryable. The
                   account's typed usage/read can identify a spent window;
                   never infer it from the error sentence or replay this turn. *)
                (match Runtime_provider_usage_read.read_muse_in_background

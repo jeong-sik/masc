@@ -504,10 +504,7 @@ type async_msg =
   | Listen_prepared of listen_request * (Masc_tui_attachment_action.prepared, string) result
   | Resource_diagram_ready of Masc_tui_resource_diagrams.request * string * (string, string) result
   | Sent_image_ready of {
-      generation : int;
-      view : surface;
-      keeper_name : string option;
-      name : string;
+      request : sent_image_read;
       skill_reference : Skill_reference.t option;
       result : (Masc_tui_image_cache.presentation * Masc_tui_pele.scene option, string) result;
     }

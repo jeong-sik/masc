@@ -514,10 +514,7 @@ type async_msg =
   | Listen_prepared of listen_request * (Masc_tui_attachment_action.prepared, string) result
   | Resource_diagram_ready of Masc_tui_resource_diagrams.request * string * (string, string) result
   | Sent_image_ready of {
-      generation : int;
-      view : surface;
-      keeper_name : string option;
-      name : string;
+      request : sent_image_read;
       skill_reference : Skill_reference.t option;
       result : (Masc_tui_image_cache.presentation * Masc_tui_pele.scene option, string) result;
     }
@@ -1131,7 +1128,7 @@ let rec message_waits_for_input ~resource_read ~recovery_loaded = function
         ~recovery_loaded:(fun _ -> false) message
   | Resource_read (request, _, _) -> resource_read request
   | Resource_share_recovery_loaded (request, _) -> recovery_loaded request
-  | Sent_image_ready {view;_} -> view = Board
+  | Sent_image_ready _ | Image_render_ready _ -> true
   | Board_attachment_saved (_, result) ->
       (match result with
        | Error _ -> false
@@ -1179,7 +1176,7 @@ let rec message_waits_for_input ~resource_read ~recovery_loaded = function
   | Tools_async_task_history_loaded _ | Runtime_lane_slots_written _ | Runtime_catalog_loaded _
   | Runtime_assignment_changed _ | Keeper_chat_approval_answered _
   | Keeper_tool_approvals_loaded _ | Listen_prepared _ | Resource_diagram_ready _
-  | Image_render_ready _ | Keeper_turns_loaded _
+  | Keeper_turns_loaded _
   | Keeper_chat_control_received _ | Gate_snapshot_loaded _ | Gate_approval_resolved _
   | Gate_auto_judge_retried _ | Gate_mode_set _ | Surface_tool_approval_answered _
   | Keeper_gate_settings_loaded _ | Keeper_tool_modes_loaded _ | Keeper_tool_mode_set _

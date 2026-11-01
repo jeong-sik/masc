@@ -11650,42 +11650,24 @@ let prepare_remote_image_bytes url =
    browser instead. *)
 let launch_image_render state ~mailbox ~notice ~title ~caption ~page_url image_url =
   state.image_request_generation <- state.image_request_generation + 1;
-  state.sent_image_read <- None;
-  if !terminal_draws_images = Some false then
-    let url =
-      Masc_tui_browser.browser_url { Masc_tui_browser.title; page_url; image_url }
-    in
-    match Masc_tui_browser.open_url url with
-    | Ok opener ->
-        notice ~kind:Notice_reply
-          (Printf.sprintf "Opened in browser (%s): %s" opener url)
-    | Error err ->
-        notice ~kind:Notice_failure (Printf.sprintf "Could not open browser: %s" err)
-  else begin
-    let view = state.view in
-    let request = {sir_generation=state.image_request_generation; sir_view=view;
-      sir_keeper=(if view = Resources then None else state.msg_target_keeper_name);
-      sir_name=title; sir_owner=Remote_url_image_read state.workspace_authority;
-      sir_resource=None;
-      sir_purpose=Open_image} in
-    state.sent_image_read <- Some request;
+  let view = state.view in
+  let request = {sir_generation=state.image_request_generation; sir_view=view;
+    sir_keeper=(if view = Resources then None else state.msg_target_keeper_name);
+    sir_name=title; sir_owner=Remote_url_image_read state.workspace_authority;
+    sir_resource=None;
+    sir_purpose=Open_image} in
+  state.sent_image_read <- Some request;
+  let unsupported = !terminal_draws_images = Some false in
+  if not unsupported then
     notice ~kind:Notice_reply (Printf.sprintf "Loading image: %s" image_url);
-    let run () =
-      let result =
+  Masc_tui_workspace_result.launch_session ~results:mailbox.workspace_results
+    ~boundary_error:Fun.id
+    ~deliver:(fun result -> Image_render_ready {request;title;caption;page_url;image_url;result})
+    (fun () ->
+      if unsupported then Error "terminal does not support inline images"
+      else
         Eio_guard.run_in_systhread ~label:"tui-remote-image-bytes" (fun () ->
-            prepare_remote_image_bytes image_url)
-      in
-      enqueue_async mailbox
-        (Image_render_ready { request; title; caption; page_url; image_url; result })
-    in
-    match Eio_context.get_switch_opt () with
-    | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
-    | None ->
-        enqueue_async mailbox
-          (Image_render_ready
-             { request; title; caption; page_url; image_url;
-               result = Error "Eio switch unavailable" })
-  end
+            prepare_remote_image_bytes image_url))
 
 let image_request_is_active state entry =
   let matches request =
@@ -11803,6 +11785,14 @@ let cancel_board_image_read state =
             | Draft_image_read _ | Peer_image_read _ -> ()))
   | None -> ()
 
+let withdraw_pending_image_open state =
+  match Masc_tui_types.withdraw_image_open state with
+  | Some {sir_owner=Board_image_read (_,_,job);_} ->
+      Masc_tui_workspace_job.cancel_observation state ~key:job
+  | Some {sir_owner=(Local_file_image_read _ | Remote_url_image_read _
+                    | Draft_image_read _ | Peer_image_read _);_}
+  | None -> ()
+
 (* Settle the exact interrupted preview without replacing a newer selection. *)
 let settle_retired_sent_image state =
   match state.sent_image_read with
@@ -11882,10 +11872,11 @@ let open_preview_image ?skill_reference ?board_subject state ~mailbox ~notice ~n
     let keeper_name = if state.view = Resources || state.view = Board then None else state.msg_target_keeper_name in
     let generation = state.image_request_generation in
     let view = state.view in
-    state.sent_image_read <- Some {sir_generation=generation; sir_view=view;
+    let request = {sir_generation=generation; sir_view=view;
       sir_keeper=keeper_name; sir_name=name; sir_owner=owner;
       sir_resource=(if view = Resources then state.resource_content else None);
-      sir_purpose=Open_image};
+      sir_purpose=Open_image} in
+    state.sent_image_read <- Some request;
     (* When the terminal supplies no pixel geometry, use the half-em advance
        of Pele's 16px default font as a logical layout width. The existing
        image presenter still fits the resulting PNG to the actual cells. *)
@@ -11916,8 +11907,7 @@ let open_preview_image ?skill_reference ?board_subject state ~mailbox ~notice ~n
       Masc_tui_image_requests.load ~host:server_peer_host ~port
         ~cache_dir:ensure_img_cache_dir ~diagram_width ~diagram_height ~diagram_font_size
         ~diagram_colors ~board_worker ~run ~display source in
-    let completion result =
-      Sent_image_ready { generation; view; keeper_name; name; skill_reference; result } in
+    let completion result = Sent_image_ready { request; skill_reference; result } in
     (match owner, source with
      | Board_image_read (_,_,job), Masc_tui_image_requests.Board_artifact _ ->
          (* The actual binary GET, not a separate health probe, carries the
@@ -11992,8 +11982,7 @@ let prepare_inspected_frame state ~mailbox =
              match pending.sir_owner with
              | Board_image_read _ -> Masc_tui_board_preview_work.run board_preview_worker render
              | Local_file_image_read _ | Remote_url_image_read _ | Draft_image_read _ | Peer_image_read _ -> render ()) in
-           deliver mailbox (Sent_image_ready {generation;view=pending.sir_view;
-             keeper_name=pending.sir_keeper;name=pending.sir_name;skill_reference=None;result});
+           deliver mailbox (Sent_image_ready {request=pending;skill_reference=None;result});
            `Stop_daemon)
        end
      | (Some _ | None), (Some _ | None), (Some _ | None) -> ())
@@ -22615,14 +22604,10 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
                      | Ok () -> notice ~kind:Notice_reply "/music midi: returned from the MIDI editor"
                      | Error detail -> notice ~kind:Notice_failure ("/music midi: " ^ detail))
       end
-  | Sent_image_ready { generation; view; keeper_name; name; skill_reference; result } ->
-      let pending = match state.sent_image_read with
-       | Some pending when pending.sir_generation = generation
-           && pending.sir_view = view && pending.sir_keeper = keeper_name
-           && pending.sir_name = name ->
-         state.sent_image_read <- None;
-         if image_reading_is_current state pending then Some pending else None
-       | Some _ | None -> None in
+  | Sent_image_ready { request; skill_reference; result } ->
+      let {sir_generation=generation; sir_view=view; sir_keeper=keeper_name;
+           sir_name=name;_} = request in
+      let pending = Masc_tui_types.take_image_read state request in
       let same_skill = match skill_reference with
         | None -> true
         | Some reference ->
@@ -22667,14 +22652,12 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
       end
        | Some {sir_purpose=(Open_image | Inspect_image _);_} | None -> ())
   | Image_render_ready { request; title; caption; page_url; image_url; result } ->
-      let current = match state.sent_image_read with
-        | Some pending when pending == request ->
-          state.sent_image_read <- None;
+      let current = match Masc_tui_types.take_image_read state request with
+        | Some _ ->
           not state.msx_open && request.sir_generation = state.image_request_generation
           && request.sir_view = state.view
           && (request.sir_view = Resources || request.sir_keeper = state.msg_target_keeper_name)
-          && image_reading_is_current state request
-        | Some _ | None -> false in
+        | None -> false in
       if current then begin
       let notice = image_notice state ~view:request.sir_view ~keeper_name:request.sir_keeper in
       (match result with
@@ -27190,6 +27173,8 @@ Use relative paths for resources already held in the package. -->
            raise Break
        | (Masc_tui_exit_signals.Interrupt_armed
          | Masc_tui_exit_signals.Interrupt_again) as interrupt ->
+           withdraw_pending_image_open state;
+           state.board_reader <- Masc_tui_board_reader.withdraw_original_open state.board_reader;
            share_interrupt_barrier := true;
            state.resource_copy_pending <- None;
            state.resource_copy_ready <- None;
@@ -27458,6 +27443,9 @@ Use relative paths for resources already held in the package. -->
             Option.iter (observe_input_received input_reader) input;
             input)
       in
+      (* Retire the old preview before a frame barrier or paste recovery can
+         consume the event. Protocol replies do not represent operator input. *)
+      if Option.exists is_operator_input input then withdraw_pending_image_open state;
       (* SIGWINCH can arrive while [read_input] is waiting. Consume it before
          this input sees the old frame; the next loop would be one key too
          late. *)
@@ -30853,7 +30841,9 @@ Use relative paths for resources already held in the package. -->
                 | Error error -> report_action state "error" error)
             | "s" -> use_board_read state ~mailbox:async_messages ~action:Save_board_original
             | "o" ->
-                if Option.exists (fun (_,_,kind) -> kind = Ak_image) state.board_reader_owner then
+                if !share_interrupt_barrier || Masc_tui_exit_signals.pending_signal exit_signals then
+                  report_action state "system" "Image opening interrupted; use the key again when ready."
+                else if Option.exists (fun (_,_,kind) -> kind = Ak_image) state.board_reader_owner then
                   use_board_read state ~mailbox:async_messages ~action:Open_board_image
             | "j" | "down" | "wheel-down" | "k" | "up" | "wheel-up"
             | "pagedown" | "pageup" | "home" | "g" | "end" | "G" ->
@@ -37168,6 +37158,8 @@ Use relative paths for resources already held in the package. -->
 
       (* A signal can precede already-buffered keys, including after a
          graphics reply. Keep the share barrier until that input is drained. *)
+      if !share_interrupt_barrier || Masc_tui_exit_signals.pending_signal exit_signals then
+        withdraw_pending_image_open state;
       if !share_interrupt_barrier
          && not (input_reader_has_unsettled_input input_reader)
          && Queue.is_empty hangul_latin_queue

@@ -40,6 +40,9 @@ val saved_source : t -> (request * key * string) option
 val begin_original_open : t -> t * (unit ref * request * key * string) option
 (** Admit one original-image open through its final receipt. *)
 val owns_original_open : t -> request -> unit ref -> bool
+val withdraw_original_open : t -> t
+(** Retire a not-yet-started opener or retry without asserting that an
+    already-started external process was stopped. *)
 val finish_original_open : t -> request -> unit ref -> t
 (** A stale request or attempt cannot release the current opening. *)
 val owns : t -> request -> bool

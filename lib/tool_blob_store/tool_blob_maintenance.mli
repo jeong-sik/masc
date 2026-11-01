@@ -16,6 +16,11 @@
     opaque to history-media recognition, including inside nested lists. Their
     ordinary [type="stored"] data are not media ownership. Reserved artifact
     markers and [_blob] references remain authoritative in those payloads.
+    These are field-ownership projections, not complete validation of each
+    result or call-log row. Sibling [content] and [content_blocks] remain
+    independently traversed; a recognized malformed media reference there
+    still aborts. A call's execution or wire outcome does not change ownership
+    of its arbitrary input.
     Unrecognized envelopes retain the generic reference scan. A reference that
     its existing codec recognizes as malformed still aborts before deletion;
     this is not complete validation of every durable-owner schema.

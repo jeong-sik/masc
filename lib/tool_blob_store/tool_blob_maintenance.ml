@@ -228,8 +228,9 @@ let captured_tool_payload_fields fields =
   | Some "tool_result"
     when exact_fields ["kind";"tool_use_id";"content";"outcome";"json";"content_blocks"] fields
          && is_string_field "tool_use_id" fields && is_string_field "content" fields ->
-    (* Keeper_librarian_input_capture's complete block codec. [json] carries
-       []/[value] to preserve Some Null; only [content_blocks] carries media. *)
+    (* This projects the capture codec's arbitrary field, not the validity of
+       its sibling blocks. [json] carries []/[value] to preserve Some Null;
+       [content_blocks] is still independently scanned for media below. *)
     let json_valid = match List.assoc "json" fields with
       | `List [] | `List [_] -> true | _ -> false in
     let blocks_valid = match List.assoc "content_blocks" fields with
@@ -272,8 +273,9 @@ let history_tool_payload_fields fields =
 ;;
 
 let tool_receipt_payload_fields fields =
-  (* Keeper_tool_call_log.log_call writes this required receipt envelope and
-     optional evidence siblings. Only its input is arbitrary tool JSON. *)
+  (* Keeper_tool_call_log.log_call writes this input/output projection beside
+     typed outcomes and evidence. Its arbitrary input owns no history media,
+     regardless of the call's execution or wire outcome. *)
   let number name = match List.assoc_opt name fields with
     | Some (`Float _ | `Int _) -> true | _ -> false in
   let output_valid = match List.assoc_opt "output" fields with
@@ -312,7 +314,8 @@ let official_message fields =
 
 let official_tool_result fields =
   (* Keeper_official_client_context_codec.content_block_to_json, reached only
-     through that codec's versioned message envelope. *)
+     through that codec's versioned message envelope. This identifies only the
+     arbitrary structured_content field; content remains a separate scan. *)
   let required = ["type";"tool_use_id";"content";"is_error"] in
   let allowed = required @ ["structured_content";"failure_kind";"error_class"] in
   let provenance_valid = match List.assoc_opt "is_error" fields with

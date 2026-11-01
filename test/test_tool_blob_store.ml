@@ -1094,10 +1094,24 @@ let save_maintenance_source base_path relative json =
   path
 ;;
 
-let tool_receipt_with_input input =
-  `Assoc ["ts",`Float 1.;"record_kind",`String "tool_call";"keeper",`String "reviewer";
-    "tool",`String "fixture";"input",input;"output",`String "ok";
-    "duration_ms",`Float 0.;"runtime_contract",`Null]
+let write_maintenance_tool_receipts ~base_path input =
+  let module Calls = Masc.Keeper_tool_call_log in
+  (* This executable otherwise leaves the call-log owner unconfigured. Fail
+     before changing it if a fixture acquires that owner in the future. *)
+  Alcotest.(check bool) "call-log fixture starts without another owner" true
+    (Option.is_none (Calls.store ()) && Option.is_none (Calls.configured_masc_root ()));
+  Fun.protect ~finally:Calls.reset_for_testing (fun () ->
+    Calls.init ~base_path ();
+    let committed = ref 0 in
+    List.iter (fun wire_outcome ->
+      Calls.log_call ~keeper_name:"reviewer" ~tool_name:"fixture" ~input
+        ~output_text:"ok" ~duration_ms:0. ~wire_outcome
+        ~on_committed:(fun () -> incr committed) ())
+      [Tool_result.Ok;Tool_result.Error;Tool_result.Unknown];
+    Alcotest.(check int) "all wire outcomes commit real producer rows" 3 !committed;
+    match Calls.read_recent ~n:3 () with
+    | Ok rows -> Alcotest.(check int) "the durable producer rows can be reread" 3 (List.length rows)
+    | Error (Calls.Index_unavailable detail) -> Alcotest.fail detail)
 ;;
 
 let test_maintenance_distinguishes_tool_payloads_from_media_owners () =
@@ -1134,8 +1148,7 @@ let test_maintenance_distinguishes_tool_payloads_from_media_owners () =
         Masc.Keeper_librarian_input_capture.message_json assistant;
         Masc.Keeper_librarian_input_capture.message_json tool;
         Masc.Keeper_official_client_context_codec.to_json official_tool]));
-    ignore (save_maintenance_source base_path "tool_calls/2026-11/01.jsonl"
-      (tool_receipt_with_input payload));
+    write_maintenance_tool_receipts ~base_path payload;
     let first = maintenance_ok ~base_path ~mode:M.Delete_previous_candidates in
     Alcotest.(check int) "first complete scan only records the dead candidate" 0 first.deleted;
     let second = maintenance_ok ~base_path ~mode:M.Delete_previous_candidates in
@@ -1189,11 +1202,46 @@ let test_maintenance_opaque_payloads_preserve_fail_closed_boundaries () =
     let bytes () = In_channel.with_open_bin snapshot_path In_channel.input_all in
     let before = bytes () in
     let malformed_source = `Assoc ["type",`String "stored";"sha256",`String survivor.sha256] in
+    let result_message ?content_blocks ?(payload = malformed_source) () =
+      Agent_core.Types.make_message ~role:Tool
+        [Agent_core.Types.ToolResult {tool_use_id="call";content="data";
+          outcome=Tool_succeeded;json=Some payload;content_blocks}] in
     let official_result () =
       Masc.Keeper_official_client_context_codec.to_json
-        (Agent_core.Types.make_message ~role:Tool
-           [Agent_core.Types.ToolResult {tool_use_id="call";content="data";
-             outcome=Tool_succeeded;json=Some malformed_source;content_blocks=None}]) in
+        (result_message ()) in
+    let malformed_media_sibling = function
+      | `Assoc fields ->
+        `Assoc (List.remove_assoc "source" fields @ ["source",malformed_source])
+      | _ -> Alcotest.fail "invalid media fixture" in
+    let malformed_result_sibling result =
+      let source_name = match shape with
+        | `Captured_media_sibling -> "content_blocks"
+        | `Official_media_sibling -> "content"
+        | `Media | `Artifact | `Unknown_tool | `Unknown_receipt
+        | `Duplicate_official | `Unknown_failure_kind | `Unknown_error_class ->
+          Alcotest.fail "not a media sibling fixture" in
+      match result with
+      | `Assoc fields ->
+        let media = match List.assoc source_name fields with
+          | `List [media] -> malformed_media_sibling media
+          | _ -> Alcotest.fail "invalid result media fixture" in
+        `Assoc (List.remove_assoc source_name fields @
+          [source_name,`List [media]])
+      | _ -> Alcotest.fail "invalid result fixture" in
+    let malformed_message_sibling block_key = function
+      | `Assoc fields ->
+        let result = match List.assoc block_key fields with
+          | `List [result] -> malformed_result_sibling result
+          | _ -> Alcotest.fail "invalid result message fixture" in
+        `Assoc (List.remove_assoc block_key fields @ [block_key,`List [result]])
+      | _ -> Alcotest.fail "invalid message fixture" in
+    let media_message () =
+      let stored = Agent_core.History.stored_of_raw "preserve until owners are valid" in
+      (* Keep the arbitrary payload well formed: the only malformed reference
+         in these two cases is the media-bearing sibling. *)
+      result_message ~content_blocks:[Agent_core.Types.Image {media_type="image/png";
+        source=Stored stored}]
+        ~payload:(Agent_core.History.stored_source_to_json ~media_type:"image/png" stored) () in
     let corrupt_official_result fields =
       match official_result () with
       | `Assoc envelope ->
@@ -1221,7 +1269,18 @@ let test_maintenance_opaque_payloads_preserve_fail_closed_boundaries () =
       | `Unknown_error_class ->
         corrupt_official_result ["is_error",`Bool true;
           "failure_kind",Agent_core.Types.tool_failure_kind_to_yojson Reported_tool_error;
-          "error_class",`String "unknown-class"] in
+          "error_class",`String "unknown-class"]
+      | `Captured_media_sibling ->
+        Masc.Keeper_librarian_input_capture.message_json (media_message ())
+        |> malformed_message_sibling "content"
+      | `Official_media_sibling ->
+        (match Masc.Keeper_official_client_context_codec.to_json (media_message ()) with
+         | `Assoc envelope ->
+           let message = List.assoc "message" envelope
+             |> malformed_message_sibling "content_blocks" in
+           `Assoc (List.remove_assoc "message" envelope @
+             ["message",message])
+         | _ -> Alcotest.fail "invalid official fixture envelope") in
     ignore (save_maintenance_source base_path "keepers/reviewer/refused.json" source);
     (match M.run ~base_path ~board_posts_file ~mode:M.Delete_previous_candidates with
      | Error (M.Malformed_structured_artifact_reference _) -> ()
@@ -1230,7 +1289,8 @@ let test_maintenance_opaque_payloads_preserve_fail_closed_boundaries () =
     Alcotest.(check string) "failed scan preserves candidate snapshot" before (bytes ());
     Alcotest.(check (option string)) "failed scan preserves candidate blob"
       (Some "preserve until owners are valid") (fetch_ok store ~sha256:survivor.sha256)))
-    [`Media;`Artifact;`Unknown_tool;`Unknown_receipt;`Duplicate_official;`Unknown_failure_kind;`Unknown_error_class]
+    [`Media;`Artifact;`Unknown_tool;`Unknown_receipt;`Duplicate_official;`Unknown_failure_kind;`Unknown_error_class;
+     `Captured_media_sibling;`Official_media_sibling]
 ;;
 
 let media_error =

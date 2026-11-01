@@ -779,7 +779,7 @@ let save_tool_request_body t ~scope ~request_digest bytes =
   protect (fun () -> with_tool_request_owner_serialization t ~scope (fun () ->
     write_with ~sync_parent:sync_parent_directory t (tool_request_body_path ~scope ~request_digest) bytes))
 (* Settled originals: each record and the body it names, under the date its
-   chain began. Only the startup body sweep lists and reads it, and only when a
+   chain began. Only the startup body inventory lists and reads it, and only when a
    live body is not protected by a live record. *)
 let tool_request_archive_directory = "tool-request-owners-settled"
 (* A day names a directory, so only [YYYY-MM-DD] is accepted. *)
@@ -1064,13 +1064,6 @@ let tool_request_body_inventory_all t =
       Ok result) |> owned_result in
     let* result = result in
     match result with None -> Ok [] | Some value -> Ok value)
-
-let remove_inventoried_tool_request_body t entry =
-  inventory_blocking ~label:"addon-original-body-remove" (fun () ->
-    let* relative = Fs_compat.owned_relative_path [Filename.basename t.root;
-      tool_request_bodies_directory;entry.scope_directory;entry.request_digest ^ ".json"] in
-    Fs_compat.with_owned_inventory_root (Filename.dirname t.root) (fun anchor ->
-      Fs_compat.remove_owned_inventory_regular_file ~expected:entry.snapshot anchor relative) |> owned_result)
 
 let host_result_path ~instance_id ~request_id =
   Filename.concat "host-results" (Filename.concat (digest instance_id) (digest request_id ^ ".json"))

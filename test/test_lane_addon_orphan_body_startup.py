@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise cleanup and lease contention in isolated stdio and HTTP owners."""
+"""Exercise body preservation and lease contention in isolated stdio and HTTP owners."""
 
 import hashlib
 import http.client
@@ -62,6 +62,14 @@ def stop(process):
             process.wait(timeout=5)
 
 
+def wait_for_log(path, expected, process):
+    deadline = time.monotonic() + 30
+    while expected not in path.read_text():
+        assert process.poll() is None, "owner exited before inventory log: " + path.read_text()[-3000:]
+        assert time.monotonic() < deadline, "inventory log did not arrive: " + path.read_text()[-3000:]
+        time.sleep(0.05)
+
+
 with tempfile.TemporaryDirectory(prefix="masc-orphan-startup-") as tmp:
     base = Path(tmp)
     cfg = base / ".masc/config"
@@ -83,19 +91,24 @@ with tempfile.TemporaryDirectory(prefix="masc-orphan-startup-") as tmp:
            "MASC_KEEPER_AUTONOMOUS_ENABLED": "false"}
 
     first = orphan(base, "before-stdio")
+    first_bytes = first.read_bytes()
     stdio_log = base / "stdio.log"
     with stdio_log.open("wb") as log:
         process = subprocess.Popen([str(stdio_binary), "--base-path", tmp],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=log, env=env, cwd=repo)
         try:
             initialize(process, stdio_log)
-            assert not first.exists(), "stdio initialized without collecting its startup orphan"
+            assert first.read_bytes() == first_bytes, "stdio changed an unowned startup body"
+            expected = f"live_unprotected_files=1 live_unprotected_logical_bytes={len(first_bytes)}"
+            assert expected in stdio_log.read_text(), "stdio did not report its inventory"
             second = orphan(base, "while-stdio-owns-base")
+            second_bytes = second.read_bytes()
             contender = subprocess.run([str(stdio_binary), "--base-path", tmp],
                 stdin=subprocess.DEVNULL, capture_output=True, env=env, cwd=repo, timeout=30)
             assert contender.returncode != 0, "another stdio owner acquired the same lease"
             assert b"stdio runtime cannot start" in contender.stdout + contender.stderr, contender.stderr
-            assert second.exists(), "lease-rejected process touched the active owner's body"
+            assert first.read_bytes() == first_bytes and second.read_bytes() == second_bytes, (
+                "lease-rejected process changed original bodies")
         finally:
             stop(process)
 
@@ -125,7 +138,10 @@ with tempfile.TemporaryDirectory(prefix="masc-orphan-startup-") as tmp:
                     pass
                 assert time.monotonic() < deadline, "HTTP owner not ready: " + server_log.read_text()[-3000:]
                 time.sleep(0.1)
-            assert not second.exists(), "HTTP initialized without collecting its startup orphan"
+            assert first.read_bytes() == first_bytes and second.read_bytes() == second_bytes, (
+                "HTTP startup changed unowned bodies")
+            expected = f"live_unprotected_files=2 live_unprotected_logical_bytes={len(first_bytes) + len(second_bytes)}"
+            wait_for_log(server_log, expected, server)
         finally:
             if server.poll() is None:
                 os.killpg(server.pid, signal.SIGTERM)
@@ -135,4 +151,4 @@ with tempfile.TemporaryDirectory(prefix="masc-orphan-startup-") as tmp:
                     os.killpg(server.pid, signal.SIGKILL)
                     server.wait(timeout=5)
 
-print("isolated stdio and HTTP orphan startup: PASS")
+print("isolated stdio and HTTP original-body inventory: PASS")

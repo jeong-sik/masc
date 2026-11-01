@@ -256,10 +256,6 @@ val tool_request_body_inventory_all : t -> (tool_request_body_entry list, string
     parsed. Incomplete owned regular atomic staging entries are preserved.
     A malformed name, digest mismatch or unsafe or changing entry rejects the
     entire inventory. *)
-val remove_inventoried_tool_request_body : t -> tool_request_body_entry -> (unit, string) result
-(** Remove an unchanged inventory entry through a held parent and fsync it.
-    The caller must exclude every original writer across the inventory and
-    effect. An error can follow removal and does not prove the body remains. *)
 val save_sampling_request : t -> instance_id:string -> request_id:string ->
   Yojson.Safe.t -> (unit, string) result
 val save_sampling_outcome : t -> instance_id:string -> request_id:string ->

@@ -10,17 +10,18 @@ let stalled_after_s = stalled_after_ping_intervals *. ping_interval_s
 (* Httpun adds no Content-Length to a streaming body, so closing the writer is
    the only end of the response; advertising keep-alive would make a client
    wait for an end that cannot be framed (same as [keeper_chat_stream_headers]). *)
-let response_headers =
+let response_headers () =
   Httpun.Headers.of_list
-    [ "content-type", "text/event-stream"
+    (Http_server_eio.Response.scoped_headers ()
+     @ [ "content-type", "text/event-stream"
     ; "cache-control", "no-cache"
     ; "connection", "close"
     ; "x-accel-buffering", "no"
-    ]
+    ])
 ;;
 
 let serve ~sw ~clock ~subscribe ~ping_interval_s ~stalled_after_s ~max_queued_events reqd =
-  let response = Httpun.Response.create ~headers:response_headers `OK in
+  let response = Httpun.Response.create ~headers:(response_headers ()) `OK in
   let writer =
     Httpun.Reqd.respond_with_streaming ~flush_headers_immediately:true reqd response
   in

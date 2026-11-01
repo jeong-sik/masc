@@ -30,7 +30,7 @@ let source_in_workspace ~run_id =
 let source_owned_by ~keeper (post : Board.post) =
   match post.origin with
   | Some {fusion_producer=Some producer; _} when String.trim producer <> "" ->
-    String.equal producer keeper
+    String.equal (String.trim producer) keeper
   | Some _ | None ->
     String.equal (Board.Agent_id.to_string post.author) keeper
 

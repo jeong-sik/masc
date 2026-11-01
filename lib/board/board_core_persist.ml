@@ -887,16 +887,19 @@ let create_post_once_by_fusion_run_id
       when String.equal origin_run_id fusion_run_id && String.trim producer <> "" ->
       (match
          Agent_id.of_string author,
+         Agent_id.of_string producer,
          normalize_post_payload ~content ~post_kind ?meta_json ()
        with
-       | Error error, _ -> pre_effect error
-       | _, Error (Meta_not_assoc payload) ->
+       | Error error, _, _ -> pre_effect error
+       | _, Error error, _ -> pre_effect error
+       | _, _, Error (Meta_not_assoc payload) ->
          pre_effect
            (Validation_error
               (Printf.sprintf
                  "Malformed meta_json: expected JSON object, got %s"
                  (Yojson.Safe.to_string payload)))
-       | Ok author_id, Ok (title, body, post_kind, meta_json) ->
+       | Ok author_id, Ok producer_id, Ok (title, body, post_kind, meta_json) ->
+         let origin = { origin with fusion_producer = Some (Agent_id.to_string producer_id) } in
          if String.equal body ""
          then pre_effect (Validation_error "Content cannot be empty")
          else

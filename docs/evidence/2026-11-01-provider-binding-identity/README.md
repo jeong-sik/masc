@@ -56,8 +56,10 @@ the explicit strict check with no diagnostic after the correction.
 SHA256 values for each source head, the requested suites and actual run
 results, and capture digests. The three retained `*-selected.txt` files are
 bounded derivatives: ANSI color was removed and checkout, selection,
-assertion/failure and summary lines were selected. These are not full raw job
-logs. The separately hashed decoded job-log captures remain in the campaign's
+assertion/failure and summary lines were selected. Retained copies normalize
+surplus trailing blank lines; their separate `retained_sha256` and byte counts
+do not replace the original captured derivative digests. These are not full raw
+job logs. The separately hashed decoded job-log captures remain in the campaign's
 local `artifacts/` directory; those hashes describe captured UTF-8 text, not
 the original HTTP response bytes.
 

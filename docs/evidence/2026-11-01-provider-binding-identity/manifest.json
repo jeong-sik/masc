@@ -42,7 +42,10 @@
       "path": "baseline-41259248934-selected.txt",
       "bytes": 8448,
       "sha256": "20f2476146d463b1b0f4984da32ba61980f63b77011c1a1796370d85c8415725",
-      "retained": true
+      "retained": true,
+      "retained_bytes": 8447,
+      "retained_sha256": "03212aaabf5881b93c43344c40393c12a6f908d0735cb889c663ad151a251ae0",
+      "retained_transform": "Normalize trailing blank lines to one final newline; original capture digest remains unchanged."
     },
     {
       "path": "corrected-41259487017-decoded.log",
@@ -54,7 +57,10 @@
       "path": "corrected-41259487017-selected.txt",
       "bytes": 4049,
       "sha256": "9d862b430ccafebc2069695b4df64c60725a62f21aa044d6f659a65499408ff4",
-      "retained": true
+      "retained": true,
+      "retained_bytes": 4048,
+      "retained_sha256": "4715c377cc81910064b2e33b95b3c921b39764335fde4872d7154e4e4f2998a2",
+      "retained_transform": "Normalize trailing blank lines to one final newline; original capture digest remains unchanged."
     },
     {
       "path": "final-41259789315-decoded.log",
@@ -66,7 +72,10 @@
       "path": "final-41259789315-selected.txt",
       "bytes": 4049,
       "sha256": "9c963fc9ee96d25395fe4aea02c38096e9050bb5aeda4c2909f8cab9f76b5a68",
-      "retained": true
+      "retained": true,
+      "retained_bytes": 4048,
+      "retained_sha256": "9b0a516f7fa568a3c4d934efa27ce9622dde0db8a222968e3374677654854f5f",
+      "retained_transform": "Normalize trailing blank lines to one final newline; original capture digest remains unchanged."
     }
   ],
   "runs": [

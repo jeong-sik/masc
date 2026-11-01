@@ -144,6 +144,13 @@ let of_json ?home_dir = function
     let* named_provider = if not named then Ok None else (
       let* () = if List.mem_assoc "existing_provider_id" fields then invalid "provider selection" else Ok () in
       let* id = required fields "provider_id" in
+      (* Account matching is exact, while binding lookup is case-insensitive
+         and alias-aware. Resolve the typed id to its canonical binding id so
+         a differently-cased or aliased spelling cannot save a second
+         [provider.model] section next to the existing account. *)
+      let* id = match Agent_core.Provider_runtime_binding.find id with
+        | Some binding -> Ok binding.Agent_core.Provider_runtime_binding.id
+        | None -> Ok id in
       let* display_name = required fields "provider_display_name" in
       let* model_key = required fields "model_key" in
       let* declared = bool fields "provider_declared" in
@@ -483,8 +490,14 @@ let matches_existing_selection spec (config:Runtime_schema.config) =
           && binding.max_context=Some spec.context
           && (spec.choice<>Ollama || binding.num_ctx=Some spec.context)
           && model.api_name=spec.model && model.tools_support=spec.tools
-          && model.streaming=spec.streaming && model.reasoning_effort=named.reasoning_effort
-          && Option.bind model.capabilities (fun caps -> caps.Runtime_schema.supports_image_input)=spec.supports_image_input))
+          && model.streaming=spec.streaming
+          (* An unspecified operator setting reuses the saved value rather
+             than refusing the match, as the interface documents. *)
+          && (named.reasoning_effort=None
+              || model.reasoning_effort=named.reasoning_effort)
+          && (spec.supports_image_input=None
+              || Option.bind model.capabilities (fun caps ->
+                  caps.Runtime_schema.supports_image_input)=spec.supports_image_input)))
 let render_json value = `Assoc ["runtime_id",`String value.runtime_id;"runtime_toml",`String value.runtime_toml]
 
 let model_id spec = spec.model

@@ -1394,7 +1394,7 @@ let run_turn
         error
       | Ok projected_messages as result ->
         let prompt_context_present =
-          Option.is_some acc.Keeper_run_tools.extra_system_context_size
+          Option.is_some (Keeper_run_tools_hook_accumulator.extra_system_context_receipt acc)
         in
         let provider_content =
           Keeper_agent_prompt_metrics.provider_content_messages
@@ -1436,7 +1436,7 @@ let run_turn
            | Error detail -> failwith detail)
         | Some (Checkpoint_continuation _ | Runtime_continuation _) | None -> () in
       let prompt_context_present =
-        Option.is_some acc.Keeper_run_tools.extra_system_context_size
+        Option.is_some (Keeper_run_tools_hook_accumulator.extra_system_context_receipt acc)
       in
       let provider_content =
         match transmitted with
@@ -1827,7 +1827,8 @@ let run_turn
                              | Some (Ok _), Some messages ->
                                Some (Keeper_agent_prompt_metrics.provider_content_of_transmitted
                                  ~prompt_context_present:
-                                   (Option.is_some acc.Keeper_run_tools.extra_system_context_size)
+                                   (Option.is_some
+                                      (Keeper_run_tools_hook_accumulator.extra_system_context_receipt acc))
                                  ~messages)
                              | Some (Error _ as failure), _ -> Some failure
                              | None, _ | Some (Ok _), None -> None

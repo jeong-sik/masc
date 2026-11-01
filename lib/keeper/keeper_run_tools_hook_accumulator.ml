@@ -31,8 +31,6 @@ type hook_accumulator =
        [operator_disposition] can replace the [goal_ids = []] proxy. [None]
        until the contract-status write site sets it. *)
   ; mutable prompt_blocks : Turn_record.prompt_block list
-  ; mutable extra_system_context_digest : string option
-  ; mutable extra_system_context_size : int option
   ; mutable extra_system_context_assembly : Keeper_context_assembly.t option
     (** The renderer-issued proof from the latest assembly. [None] means the
         assembly hook has not produced a value yet. Prefix coverage and empty
@@ -52,11 +50,14 @@ let create ~meta ~tool_surface =
       Keeper_execution_receipt.Completion_observation_unknown
   ; receipt_actionable_signal = None
   ; prompt_blocks = []
-  ; extra_system_context_digest = None
-  ; extra_system_context_size = None
   ; extra_system_context_assembly = None
   ; wire_prompt_tokens = None
   }
+;;
+
+let extra_system_context_receipt (acc : hook_accumulator) =
+  Option.bind acc.extra_system_context_assembly
+    (fun assembly -> assembly.Keeper_context_assembly.receipt)
 ;;
 
 let record_requested_tool_names (acc : hook_accumulator) requested =

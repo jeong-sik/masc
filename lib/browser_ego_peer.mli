@@ -187,10 +187,13 @@ val assert_input_reset : t -> generation:string -> (unit, string) result
     connection's overlay does. Native input checks the observed URL before calling ego; this is not an
     atomic navigation guard. Ego owns its locator/actionability waits; a method
     failure is uncertain, including a missing or stale target. Re-read a snapshot after page changes or input and on a native
-    stale/unknown ref refusal. Selector drags without waypoints use native [dragAndDrop]. A native drag
-    failure adds no synthetic mouse-up; a dialog or missing release proof preserves
-    the same release-uncertain state as raw drag, and only an object receipt
-    without a dialog settles it. Coordinate and scene drags retain the observed
+    stale/unknown ref refusal. Native selector and snapshot-target clicks and
+    double-clicks, and selector drags without waypoints using [dragAndDrop],
+    hold input until their declared SDK receipt proves release. A failure adds
+    no synthetic mouse-up; a dialog or missing release proof preserves the same
+    release-uncertain state as raw drag. Only a declared object receipt without
+    a dialog settles the input. A refusal before the native action restores the
+    previous readiness, including its operator provenance. Coordinate and scene drags retain the observed
     waypoint contract and require zero duration. They attempt the release in the
     same run, but the mouse calls answer void, so the release is never confirmed:
     the result is an unknown outcome and the input stays pending until the

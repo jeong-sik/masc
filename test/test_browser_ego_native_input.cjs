@@ -48,3 +48,20 @@ test('a dialog receipt keeps native drag release unconfirmed', async()=>{
   assert.equal(result.receipt,receipt);
   assert.equal(f.calls.length,1);
 });
+for (const [action, method] of [['click', 'click'], ['double_click', 'dblclick']]) {
+  test(`a native ${action} preserves the SDK dialog receipt without replay or release`, async()=>{
+    // Page.#runActionBoundary returns this receipt when PageDialogOpenedError
+    // unwinds clickInPage, including a dialog opened during mousePressed.
+    const receipt={dialog:{type:'alert',message:'mousedown interrupted',defaultPrompt:''}};
+    const calls=[];
+    const page={
+      url:async()=>{calls.push('url');return initial;},
+      [method]:async()=>{calls.push(method);return receipt;},
+      mouse:{up:async()=>{calls.push('up');}},
+    };
+    const result=await run(page,{...args,action});
+    assert.equal(result.receipt,receipt);
+    assert.equal(result.error,null);
+    assert.deepEqual(calls,['url',method]);
+  });
+}

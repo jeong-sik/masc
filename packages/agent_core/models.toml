@@ -3795,6 +3795,7 @@ supports_parallel_tool_calls = true
 # [max, high, low, none] for this exact id (checked 2026-11-01).
 # https://openrouter.ai/docs/guides/best-practices/reasoning-tokens defines
 # these as the model's accepted efforts; other depths are not declared here.
+# Its default_enabled=true satisfies explicit enable without choosing a depth.
 [[models]]
 model_id = "deepseek/deepseek-v4.1-flash-1017"
 provider_name = "openrouter"
@@ -3807,7 +3808,7 @@ reasoning_output_format = "split_reasoning_fields"
 reasoning_streaming_format = "delta_details:reasoning"
 reasoning_replay = "drop_without_tool"
 accepted_reasoning_efforts = ["none", "low", "high", "max"]
-thinking_control_format = "reasoning_effort"
+thinking_control_format = "reasoning_effort_default_on"
 supports_seed = true
 supports_parallel_tool_calls = false
 

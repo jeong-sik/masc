@@ -1174,8 +1174,9 @@ let test_openrouter_rows_retain_measured_effort_evidence () =
 ;;
 
 (* GET /api/v1/models, checked 2026-11-01: DeepSeek 1017 exposes four accepted
-   efforts. Nemotron exposes no depth selection; its retained 2026-10-28 probe
-   verifies only disable. Neither row needs a synthetic effort for omission. *)
+   efforts and default_enabled=true. Nemotron exposes neither depth selection
+   nor a declared default; its retained 2026-10-28 probe verifies only disable.
+   Neither row needs a synthetic effort for omission. *)
 let test_openrouter_refreshed_efforts_reach_the_wire () =
   let module Config = Llm_provider.Provider_config in
   let module Effort = Llm_provider.Reasoning_effort in
@@ -1185,7 +1186,7 @@ let test_openrouter_refreshed_efforts_reach_the_wire () =
   with_clean_model_catalog_override (fun () ->
     Model_catalog.set_global catalog;
     List.iter
-      (fun (model_id, accepted) ->
+      (fun (model_id, accepted, default_enabled) ->
          let config ?enable_thinking ?reasoning_effort () =
            Config.make ~kind:OpenAI_compat ~provider_id:"openrouter" ~model_id
              ~base_url:"https://openrouter.ai/api/v1" ~max_tokens:1024
@@ -1219,11 +1220,24 @@ let test_openrouter_refreshed_efforts_reach_the_wire () =
          let omitted = body (config ()) in
          check bool (model_id ^ " leaves omitted effort absent") false
            (List.mem_assoc "reasoning_effort" (Yojson.Safe.Util.to_assoc omitted));
+         let enabled = config ~enable_thinking:true () in
+         (if default_enabled then
+            let request = body enabled in
+            check bool (model_id ^ " enables through its default without a depth") false
+              (List.mem_assoc "reasoning_effort" (Yojson.Safe.Util.to_assoc request))
+          else begin
+            let caps, _ = Config.resolve_request_capabilities enabled in
+            check bool (model_id ^ " has no declared thinking default") true
+              (Llm_provider.Complete_common.thinking_control_request_rejection ~caps enabled
+               = Some Llm_provider.Complete_common.Enable_not_encodable);
+            check bool (model_id ^ " refuses enable without a declared depth or default") true
+              (Result.is_error (Llm_provider.Complete_common.validate_all enabled))
+          end);
          let disabled = body (config ~enable_thinking:false ~reasoning_effort:Effort.High ()) in
          check string (model_id ^ " explicit disable overrides depth") "none"
            Yojson.Safe.Util.(disabled |> member "reasoning_effort" |> to_string))
-      [ "deepseek/deepseek-v4.1-flash-1017", [Effort.None_; Effort.Low; Effort.High; Effort.Max]
-      ; "nvidia/nemotron-3.5-super-vl:free", [Effort.None_]
+      [ "deepseek/deepseek-v4.1-flash-1017", [Effort.None_; Effort.Low; Effort.High; Effort.Max], true
+      ; "nvidia/nemotron-3.5-super-vl:free", [Effort.None_], false
       ])
 ;;
 

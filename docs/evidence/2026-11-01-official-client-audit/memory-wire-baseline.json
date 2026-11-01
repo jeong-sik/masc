@@ -1,0 +1,27 @@
+{
+  "checked_at": "2026-11-01T01:47:03Z",
+  "confidence": "High",
+  "scope": "Offline exact-byte witness; not a live Memory judgment",
+  "baseline": "dbd032511fea4e3d04687448275c0f41abff56cc",
+  "audit_source": "7cb26cc755ae4e801b390ca190373b1d7a334bbb",
+  "failed_run": 41260409586,
+  "existing_issue": "https://github.com/jeong-sik/masc/issues/44154#issuecomment-6303936847",
+  "corpus_path": "test/fixtures/event_genealogy_replay/actual.json",
+  "corpus_sha256": "0497f24bcf3690c5e71759ae9254f578cf182ece70fd31296f653dd096545c6c",
+  "old_request_bytes": 32242,
+  "current_request_bytes": 32269,
+  "delta_bytes": 27,
+  "old_request_sha256": "9a1cf49b70e6d9d2418ecdfd00fbd6d55a1d39800c90772f641bf26c57de332f",
+  "current_request_sha256": "bf3bfe0a6ab967bab77cdd2a397c91c9a6cc08bad2910155dc667761af858dd7",
+  "only_change": "state.candidates[5].source_detail.successor_witnesses[0].ordered_program_steps = []",
+  "unchanged_source_paths": [
+    "test/test_keeper_memory_select_provider_wire.ml",
+    "test/fixtures/event_genealogy_replay/actual.json",
+    "lib/keeper/keeper_memory_successor_selection.ml",
+    "lib/keeper/keeper_memory_select.ml",
+    "lib/keeper/keeper_workspace_memory_selection.ml",
+    "lib/keeper/keeper_workspace_memory_selection_io.ml"
+  ],
+  "corpus_rewritten": false,
+  "live_recapture": false
+}

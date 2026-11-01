@@ -60,8 +60,8 @@ let text_for_viewport ~columns ~rows text =
     in
     let regional_floor = match parity with None -> after_regional_run 0 | Some _ -> 0 in
     (* An initial extender can belong to a cluster whose base is outside the
-       bounded context. ASCII resets the segmenter's emoji and Indic context;
-       omit up to that anchor if the missing base makes the suffix ambiguous. *)
+       bounded context. Omit through a scalar that resets the segmenter's
+       emoji, regional-indicator and Indic context before retaining the tail. *)
     let needs_anchor =
       if String.length suffix = 0 then false
       else
@@ -71,12 +71,19 @@ let text_for_viewport ~columns ~rows text =
             | `EX | `EM | `SM | `ZWJ -> true
             | _ -> false)
     in
-    let rec after_ascii_anchor offset =
+    let rec after_reset_anchor offset =
       if offset >= String.length suffix then String.length suffix
-      else if suffix.[offset] >= ' ' && suffix.[offset] <= '~' then offset + 1
-      else after_ascii_anchor (offset + 1)
+      else
+        let decoded = String.get_utf_8_uchar suffix offset in
+        let next = min (String.length suffix) (offset + max 1 (Uchar.utf_decode_length decoded)) in
+        if not (Uchar.utf_decode_is_valid decoded) then after_reset_anchor next
+        else
+          let scalar = Uchar.utf_decode_uchar decoded in
+          match Uucp.Break.grapheme_cluster scalar, Uucp.Break.indic_conjunct_break scalar with
+          | (`EX | `ZWJ | `RI), _ | _, (`Extend | `Linker) -> after_reset_anchor next
+          | _ -> next
     in
-    let anchor_floor = if needs_anchor then after_ascii_anchor 0 else 0 in
+    let anchor_floor = if needs_anchor then after_reset_anchor 0 else 0 in
     let suffix_floor = max regional_floor anchor_floor in
     let regional_context = match parity with Some true -> "🇦" | _ -> "" in
     let context_bytes = String.length regional_context in

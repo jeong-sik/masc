@@ -20147,6 +20147,11 @@ let current_task_detail_presented state =
   | Some shown when task_detail_owner_current state shown.tdp_owner -> Some shown
   | Some _ | None -> None
 
+let task_detail_viewport_changed state ~count ~height =
+  match current_task_detail_presented state with
+  | None -> true
+  | Some shown -> count <> shown.tdp_count || height <> shown.tdp_height
+
 let reconcile_task_detail_scroll state =
   if not (task_detail_following_end state) then state.task_detail_follow_end <- None;
   if Option.is_none (current_task_detail_presented state) then

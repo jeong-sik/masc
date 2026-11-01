@@ -4767,6 +4767,10 @@ let test_task_detail_end_respects_presented_input () =
     | Some request -> request | None -> Alcotest.fail "history read did not start" in
   complete_task_scroll_documents state ~cols (sync_task_documents state ~cols);
   task_detail_presented_frame state ~task_id ~count:23 ~height:16 ~offset:0 ~cols;
+  Alcotest.(check bool) "unchanged bounds need no new presentation" false
+    (task_detail_viewport_changed state ~count:23 ~height:16);
+  Alcotest.(check bool) "new bounds require presentation even when the visible rows are unchanged" true
+    (task_detail_viewport_changed state ~count:116 ~height:16);
   task_detail_select_end state ~cols;
   Alcotest.(check int) "End uses the emitted viewport" 7 state.task_detail_scroll;
   Alcotest.(check bool) "End waits for this history" true (task_detail_following_end state);

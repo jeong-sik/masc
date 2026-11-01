@@ -25196,7 +25196,10 @@ let main
         !presented_change_authority change_authority) in
     let task_detail_needs_present =
       String.equal frame.Frame_presenter.surface_key "task-detail"
-      && (Option.is_none (current_task_detail_presented state)
+      && ((match reader with
+           | Some (Task_detail (_, Some (count, height))) ->
+             task_detail_viewport_changed state ~count ~height
+           | _ -> Option.is_none (current_task_detail_presented state))
           || (task_detail_following_end state
               && match state.task_detail_id with
                  | None -> false

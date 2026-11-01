@@ -3,14 +3,16 @@ open Llm_provider
 
 let get = function Ok value -> value | Error detail -> Alcotest.fail detail
 
-let catalog ?(priced = true) ?(bare = false) multiplier =
+let catalog ?(priced = true) ?(bare = false) ?cache multiplier =
   let row model input output =
     Printf.sprintf
       "[[models]]\nmodel_id = %S\n%sbase = \"openai_chat\"\nmax_context_tokens = 4096\n%s"
       model
       (if bare then "" else "provider_name = \"pricing-provider\"\n")
-      (if priced then Printf.sprintf "input_per_million = %.1f\noutput_per_million = %.1f\n"
+      ((if priced then Printf.sprintf "input_per_million = %.1f\noutput_per_million = %.1f\n"
           (input *. multiplier) (output *. multiplier) else "")
+       ^ (match cache with None -> "" | Some (write, read) ->
+           Printf.sprintf "cache_write_multiplier = %.2f\ncache_read_multiplier = %.2f\n" write read))
   in
   let source = {|
 [[providers]]
@@ -151,6 +153,37 @@ let test_fresh_selection () =
       ~config:{selected with Provider_config.base_url = "https://rotated.invalid"}
       ~before_response:(fun () -> ()) (response ())))
 
+let test_missing_cache_price () =
+  with_catalog (catalog 1.0) (fun () ->
+    let response = response () in
+    let usage = match response.usage with
+      | Some usage -> {usage with cache_read_input_tokens = 10}
+      | None -> Alcotest.fail "fixture usage missing" in
+    check_cost None (complete ~stream:false ~config:(raw_config ())
+      ~before_response:(fun () -> Model_catalog.set_global (catalog ~cache:(1.25, 0.1) 10.0))
+      {response with usage = Some usage}))
+
+let test_agent_run_missing_price () =
+  let original = catalog ~priced:false 1.0 in
+  with_catalog original (fun () ->
+    let provider_config = config (binding original) in
+    Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+      let transport = transport ~before_response:(fun () -> Model_catalog.set_global (catalog 10.0))
+          (response ()) in
+      let options = {Agent.default_options with provider_config = Some provider_config;
+        transport = Some transport} in
+      let agent = Agent.create ~net:env#net ~media_store:(History.Memory_store.create ())
+          ~config:(Agent_core.Types.default_config ~model:"request-model") ~options () in
+      (match Agent.run ~sw agent "answer" with
+       | Ok response -> check_cost None response
+       | Error error -> Alcotest.fail (Agent_core.Error.to_string error));
+      let usage = (Agent.state agent).usage in
+      Alcotest.(check int) "actual Agent counts the completed request" 1 usage.api_calls;
+      Alcotest.(check (float 1e-9)) "actual Agent keeps an unknown price out of its subtotal"
+        0.0 usage.estimated_cost_usd;
+      Alcotest.(check bool) "actual Agent retains the pricing gap" true
+        (usage.pricing_gap = Some (Agent_core.Types.Pricing_unavailable "request-model")))))
+
 let () = Alcotest.run "request pricing snapshot"
   ["price authority", List.map (fun (name, run) -> Alcotest.test_case name `Quick run)
     ["selection before config conversion", test_selected_before_config;
@@ -162,4 +195,6 @@ let () = Alcotest.run "request pricing snapshot"
      "Agent fallback uses selected authority", test_agent_fallback;
      "provider charge and zero retain precedence", test_provider_reported_cost;
      "provider overlay cannot regain seed bare permission", test_overlay_permission;
-     "fresh selection and endpoint rotation", test_fresh_selection]]
+     "fresh selection and endpoint rotation", test_fresh_selection;
+     "cache rate absence remains unknown", test_missing_cache_price;
+     "actual Agent preserves missing selected pricing", test_agent_run_missing_price]]

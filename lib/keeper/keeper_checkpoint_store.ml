@@ -894,8 +894,14 @@ let canonical_message_count ~(session_dir : string) ~(session_id : string)
     | None ->
       (match
          protect_summary_read ~on_exception:canonical_read_exception (fun () ->
+           let identity_before = canonical_identity_opt canonical_path in
            Result.bind (read_checkpoint_bytes ~session_dir canonical_path) (fun bytes ->
-             head_of_bytes_off_scheduler bytes |> Result.map_error classify_objects_error))
+             head_of_bytes_off_scheduler bytes
+             |> Result.map_error classify_objects_error
+             |> Result.map (fun head ->
+                  publish_summary_after_parse ~canonical_path ~identity_before
+                    ~objects:Objects_unchecked head;
+                  head)))
        with
        | Ok head -> Ok (Some (Objects.message_count head.history))
        | Error Not_found -> Ok None

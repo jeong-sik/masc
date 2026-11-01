@@ -270,6 +270,44 @@ let while_unreadable path f =
   Unix.chmod path 0o000;
   Fun.protect ~finally:(fun () -> Unix.chmod path 0o600) f
 
+let test_a_cold_count_keeps_only_the_same_head () = with_session (fun session_dir ->
+  let checkpoint = make_checkpoint ~session_id:"session" ~turn_count:1 ~marker:"cold" in
+  save_plain ~session_dir checkpoint;
+  let cold_dir = Filename.concat (Filename.dirname session_dir) "cold" in
+  Unix.mkdir cold_dir 0o700;
+  let path = canonical_path cold_dir in
+  let install bytes =
+    let staged = Filename.concat cold_dir "next.json" in
+    write_file staged bytes;
+    Unix.rename staged path in
+  install (read_file (canonical_path session_dir));
+  let count label expected =
+    match Store.canonical_message_count ~session_dir:cold_dir ~session_id:"session" with
+    | Ok actual -> check (option int) label expected actual
+    | Error error -> failf "%s: %s" label (Store.checkpoint_load_error_to_string error) in
+  count "a cold head supplies its count" (Some 2);
+  while_unreadable path (fun () -> count "the same head is not read again" (Some 2));
+  (* No object was copied. Counting a head must not turn that observation
+     into permission to load a checkpoint whose objects are absent. *)
+  (match Store.load_agent_core ~session_dir:cold_dir ~session_id:"session" with
+   | Error (Store.Objects_invalid _) -> ()
+   | Error error -> failf "full load failed with the wrong class: %s"
+       (Store.checkpoint_load_error_to_string error)
+   | Ok _ -> fail "a head-only count was treated as a validated checkpoint");
+  save_plain ~session_dir
+    { checkpoint with turn_count = 2; messages = checkpoint.messages @ checkpoint.messages };
+  install (read_file (canonical_path session_dir));
+  count "a replaced canonical supplies the new count" (Some 4);
+  while_unreadable path (fun () -> count "the replacement also supplies a summary" (Some 4));
+  install "{";
+  (match Store.canonical_message_count ~session_dir:cold_dir ~session_id:"session" with
+   | Error (Store.Parse_error _) -> ()
+   | Error error -> failf "malformed head failed with the wrong class: %s"
+       (Store.checkpoint_load_error_to_string error)
+   | Ok _ -> fail "a malformed replacement reused the old count");
+  Sys.remove path;
+  count "a removed canonical is absent" None)
+
 (* A configured root re-pointed while the process runs. The save that follows
    resolves the root afresh and lands under the new target; the lookups and
    the forget through the configured spelling follow that save rather than
@@ -320,6 +358,8 @@ let () =
     ; ( "summary key"
       , [ test_case "a linked canonical is not answered from its target" `Quick
             test_a_linked_canonical_is_not_answered_from_its_target
+        ; test_case "a cold count keeps only the same head" `Quick
+            test_a_cold_count_keeps_only_the_same_head
         ; test_case "a re-pointed root moves lookups with the save" `Quick
             test_a_repointed_root_moves_lookups_with_the_save
         ] )

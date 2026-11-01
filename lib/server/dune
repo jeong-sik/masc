@@ -5,6 +5,7 @@
  (public_name masc.server)
  (wrapped false)
  (private_modules
+  server_dashboard_json_cache_state
   server_full_health_refresh_state
   server_full_health_observation
   keeper_stream_media_state

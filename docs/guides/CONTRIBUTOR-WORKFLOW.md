@@ -252,11 +252,36 @@ not add a Core build or full CI admission requirement to every ordinary PR.
 ## 5. Review and integrate
 
 Choose work using [review routing](../../config/prompts/pr-review-routing.md).
-GitHub user/team review requests are the shared assignment record; they do not
-prove work has started or finished. Use `scripts/review/review-worklist.py` with
-an explicit `--reviewer LOGIN` pool to plan missing requests, and add `--request`
-to publish them. Recheck directly messaged PRs are still open. Changed-head CRs
-return to their actual account owners.
+For MASC review requests, confirm the current code-review specialist Keepers and
+their roles, then deliver the request to each intended Keeper through MASC Board,
+Broadcast or a direct message exposed to the caller. Keeper callers use
+`masc_keeper_delegate` with `target={kind:"keeper",name:"<Keeper>"}` and `prompt`;
+operator or external clients can use `masc_keeper_msg` with `name` and `message`
+when their tool surface exposes it. Check the caller's current capabilities.
+Include the PR links, current head/base and Native Stack scope, requested review
+perspective, verification evidence and remaining limits. A common Board packet
+can hold that scope; if delivery to its intended Keepers is unconfirmed, send
+each a direct message through the caller's available path, referring to the
+packet. Read back the Board post or use `masc_keeper_delegate_status` with the
+original target and operation ID, and record the target and receipt.
+Acceptance or `queued` state proves submission, not review completion or approval.
+
+For Broadcast, inspect and record the structured response's `request_id`, `seq`,
+`mention`, `mention_delivery` and `fanout_state`. One broadcast routes one mention;
+other `@` text does not prove delivery to every named Keeper. Count only the exact
+target with `mention_delivery.kind=accepted` or `already_accepted` as accepted.
+Keep passive, pending, deferred and rejected outcomes distinct; `ok=true` or
+`fanout_state=finished` alone does not prove individual acceptance. When using a
+broadcast as a common announcement, confirm each Keeper's request through a direct
+message operation and its readback. Check existing effects before resending an
+uncertain request.
+
+GitHub user/team review requests also record account assignments; they do not
+replace delivery to the intended Keepers or prove work has started or finished.
+Use `scripts/review/review-worklist.py` with an explicit `--reviewer LOGIN` pool
+to plan missing account requests, and add `--request` to publish them. Recheck
+directly messaged PRs are still open. Changed-head CRs return to the Keepers who
+actually wrote them, including when they share a GitHub account.
 
 Review the contract and current-head diff from independent function, logic and
 code-cleanliness perspectives. Approve when no P0/P1/P2 issue remains and collect

@@ -4949,9 +4949,9 @@ let context_exact_input_lines ~cols ~scale state ~response ~response_parts
                 request%s"
                Ansi.dim
                (Masc_tui_token_scale.format_estimate scale retained)
-               (Inspector.format_bytes retained)
+               (Inspector.exact_bytes retained)
                (Masc_tui_token_scale.format_estimate scale input.wire.body_bytes)
-               (Inspector.format_bytes input.wire.body_bytes)
+               (Inspector.exact_bytes input.wire.body_bytes)
                Ansi.reset
            ]
          else [])
@@ -5185,7 +5185,7 @@ let context_input_map_detail_lines ~width ~scale ~part_of
   ; Ansi.bold ^ Inspector.input_component_label row.component ^ Ansi.reset
   ; Printf.sprintf "%s tok (%s)  ·  %s"
       (Masc_tui_token_scale.format_estimate scale row.bytes)
-      (Inspector.format_bytes row.bytes)
+      (Inspector.exact_bytes row.bytes)
       (Inspector.input_source_label row.source)
   ; Ansi.dim ^ digest ^ Ansi.reset
   ; ""
@@ -5233,7 +5233,7 @@ let context_input_map_lines ~cols ~scale state (record : Turn_record.t)
                (Inspector.input_component_label row.component)
                Ansi.reset
                (Masc_tui_token_scale.format_estimate scale row.bytes)
-               (Inspector.format_bytes row.bytes)
+               (Inspector.exact_bytes row.bytes)
                (Inspector.input_source_label row.source)
                (context_evidence_badge row.evidence)
            in

@@ -535,6 +535,18 @@ let test_late_pending_snapshot_cannot_erase_progress () =
   check bool "another source does not inherit original input" true
     (Option.is_none (Inspector.observed_input changed))
 
+let test_exact_bytes_preserves_distinct_sizes_and_digit_order () =
+  check string "zero bytes" "0 B" (Inspector.exact_bytes 0);
+  check string "negative clamps to zero" "0 B" (Inspector.exact_bytes (-7));
+  check string "below one thousand" "999 B" (Inspector.exact_bytes 999);
+  check string "one thousand" "1,000 B" (Inspector.exact_bytes 1_000);
+  check string "125,705 stays distinct from 125,780" "125,705 B"
+    (Inspector.exact_bytes 125_705);
+  check string "125,780 keeps group order" "125,780 B"
+    (Inspector.exact_bytes 125_780);
+  check string "nine digits keep group order" "123,456,789 B"
+    (Inspector.exact_bytes 123_456_789)
+
 let () =
   run "tui_context_inspector"
     [ ( "decode"
@@ -568,5 +580,7 @@ let () =
             test_pinned_unattributed_record_stays_exact
         ; test_case "late pending snapshots preserve progress" `Quick
             test_late_pending_snapshot_cannot_erase_progress
+        ; test_case "exact_bytes preserves distinct sizes and digit order" `Quick
+            test_exact_bytes_preserves_distinct_sizes_and_digit_order
         ] )
     ]

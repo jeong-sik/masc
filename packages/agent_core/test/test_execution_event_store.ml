@@ -290,6 +290,9 @@ let test_append_reopen_idempotency_and_paging () =
       (match Store.append_batch writer ~expected_next_seq:1 [ first ] with
        | Ok Store.Already_committed -> ()
        | _ -> fail "byte-identical retry was not idempotent");
+      let initial = require_store (Store.read_only_snapshot ~codec ~dir ()) in
+      check int "initial read-only watermark" 2 initial.last_seq;
+      check_events "initial read-only event order" [ first; second ] initial.appended_events;
       let page =
         require_store
           (Store.read_page store ~after:(Store.beginning_cursor store) ~limit:1 ())
@@ -301,6 +304,11 @@ let test_append_reopen_idempotency_and_paging () =
       check (option int) "earliest retained sequence" (Some 1) page.earliest_available_seq;
       first_cursor := Some page.next_cursor;
       ignore (require_store (Store.append_batch writer ~expected_next_seq:3 remaining));
+      let suffix =
+        require_store (Store.read_only_snapshot ~codec ~dir ~previous:initial ())
+      in
+      check int "incremental read-only watermark" 4 suffix.last_seq;
+      check_events "incremental read-only suffix order" remaining suffix.appended_events;
       let frozen =
         require_store
           (Store.read_page
@@ -321,12 +329,17 @@ let test_append_reopen_idempotency_and_paging () =
       match Store.append_batch writer ~expected_next_seq:1 [ other ] with
       | Error (Store.Committed_content_conflict { first_seq = 1; last_seq = 1 }) -> ()
       | _ -> fail "different bytes reused a committed sequence");
+    let complete = require_store (Store.read_only_snapshot ~codec ~dir ()) in
+    check int "fresh read-only watermark after writer release" 4 complete.last_seq;
+    check_events "fresh read-only event order" !expected complete.appended_events;
     Eio.Switch.run (fun sw ->
-      let store, recovery = require_store (open_store ~codec ~sw ~dir) in
-      (match recovery with
+      let opened = require_store (Store.open_existing ~codec ~sw ~dir) in
+      let store = opened.store in
+      (match opened.recovery with
        | Store.Clean -> ()
        | _ -> fail "clean WAL reported recovery");
       check int "recovered sequence" 4 (require_store (Store.last_seq store));
+      check_events "reopen replay event order" !expected opened.replay_events;
       check_events "full replay" !expected (require_store (read_all store));
       let after = Option.get !first_cursor in
       let page = require_store (Store.read_page store ~after ~limit:8 ()) in

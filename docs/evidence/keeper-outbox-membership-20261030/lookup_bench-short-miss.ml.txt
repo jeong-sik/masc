@@ -1,0 +1,40 @@
+module type LOOKUP = sig
+  type snapshot
+  val make : string list -> snapshot
+  val receipt_ids : snapshot -> string list
+  val contains_receipt : snapshot -> receipt_id:string -> bool
+end
+let names count = List.init count (fun n -> String.make 60 'a' ^ Printf.sprintf "%04d" n)
+let path id = Filename.concat "/workspace/undelivered-tools" (id^".json")
+let sink=ref 0
+let sample (type a) label role (module L:LOOKUP with type snapshot=a) (snap:a) id count =
+  Gc.full_major ();
+  let bytes=Gc.allocated_bytes () and cpu=Sys.time () and wall=Unix.gettimeofday () in
+  for _=1 to count do if L.contains_receipt snap ~receipt_id:id then incr sink done;
+  Printf.printf "%s,%s,%d,%.6f,%.6f,%.0f\n%!" label role count (Sys.time ()-.cpu) (Unix.gettimeofday ()-.wall) (Gc.allocated_bytes ()-.bytes)
+let () =
+  let rng=Random.State.make [|20261030;46877|] in
+  let corpus=[|"";"a";".hidden";"a.b";"/";"/tmp/a.json";"/tmp/.hidden";"가.json";"a\000b.json";"relative/../x.tar.gz"|] in
+  for _=1 to 10000 do
+    let paths=List.init (Random.State.int rng 25) (fun _ -> corpus.(Random.State.int rng (Array.length corpus))) in
+    let old=Old_lookup.make paths and new_=New_lookup.make paths in
+    let id=corpus.(Random.State.int rng (Array.length corpus)) in
+    if Old_lookup.receipt_ids old <> New_lookup.receipt_ids new_
+       || Old_lookup.contains_receipt old ~receipt_id:id <> New_lookup.contains_receipt new_ ~receipt_id:id
+    then failwith "lookup mismatch"
+  done;
+  Printf.eprintf "10,000 randomized snapshots: identities and membership match\n%!";
+  Printf.printf "scenario,implementation,count,cpu_s,wall_s,allocated_bytes\n%!";
+  List.iter (fun (n,repeats) ->
+    let ids=names n in let paths=List.map path ids in
+    let old=Old_lookup.make paths and new_=New_lookup.make paths in
+    let first=if n=0 then "absent" else List.hd ids in
+    let last=if n=0 then "absent" else List.hd (List.rev ids) in
+    List.iter (fun (place,id) ->
+      let label=Printf.sprintf "n%d_%s" n place in
+      for i=0 to 6 do
+        if i mod 2=0 then (sample label "old" (module Old_lookup) old id repeats; sample label "new" (module New_lookup) new_ id repeats)
+        else (sample label "new" (module New_lookup) new_ id repeats; sample label "old" (module Old_lookup) old id repeats)
+      done) ["first",first;"last",last;"missing","absent"])
+    [0,10000;1,10000;16,2000;256,200;1024,40];
+  ignore (Sys.opaque_identity !sink)

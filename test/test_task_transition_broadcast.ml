@@ -314,6 +314,156 @@ let test_auto_start_claim_and_idempotent_in_progress_retry () =
       (List.length successes))
 ;;
 
+(* Deterministic interleaving test for current_task_id projection:
+   1. A claim reads task-23 as owned by [owner], then pauses before applying
+      [Set_current_task].
+   2. While paused, a concurrent release commits to the backlog and completes
+      its own owner reconciliation (clearing [current_task_id] to [None]).
+   3. When the paused claim projection resumes, its stale revision is detected
+      and reconciled against the released backlog, leaving [current_task_id] as
+      [None] rather than restoring task-23.
+   4. If the authoritative backlog read fails, [sync_keeper_meta_current_task]
+      preserves the existing owner binding instead of falling back to the
+      unverified [task_id]. *)
+let test_current_task_projection_interleaved_release_and_read_failure () =
+  with_test_env (fun config ~baseline_seq:_ ->
+    Eio.Switch.run @@ fun sw ->
+    let task_id = "task-23" in
+    let task_id_typed =
+      match Keeper_id.Task_id.of_string task_id with
+      | Ok id -> id
+      | Error msg -> Alcotest.fail msg
+    in
+    let meta =
+      match
+        Masc_test_deps.meta_of_json_fixture
+          (`Assoc
+             [ "name", `String owner
+             ; "trace_id", `String "trace-interleaved-projection"
+             ; "current_task_id", `String task_id
+             ])
+      with
+      | Ok m -> m
+      | Error msg -> Alcotest.fail ("meta_of_json_fixture: " ^ msg)
+    in
+    (match Keeper_meta_store.replace_snapshot config meta with
+     | Ok () -> ()
+     | Error msg -> Alcotest.fail ("replace_snapshot: " ^ msg));
+    (match
+       Keeper_owner_registry.install_from_store
+         ~sw
+         ~operation_runner:None
+         ~on_turn_slot_released:None
+         config
+     with
+     | Ok _ -> ()
+     | Error err ->
+       Alcotest.fail (Keeper_owner_registry.install_error_to_string err));
+    ignore
+      (Keeper_registry.For_testing.register
+         ~base_path:config.base_path
+         owner
+         meta);
+    let read_persisted_current_task () =
+      match Keeper_meta_store.read_meta config owner with
+      | Ok (Some persisted) ->
+        Option.map Keeper_id.Task_id.to_string persisted.current_task_id
+      | Ok None -> Alcotest.fail "keeper metadata missing"
+      | Error msg -> Alcotest.fail ("read_meta: " ^ msg)
+    in
+    let read_registry_current_task () =
+      match Keeper_registry.get ~base_path:config.base_path owner with
+      | Some entry ->
+        Option.map Keeper_id.Task_id.to_string entry.meta.current_task_id
+      | None -> Alcotest.fail "keeper registry entry missing"
+    in
+    Fun.protect
+      ~finally:(fun () ->
+        Atomic.set
+          Keeper_current_task_reconcile.between_ownership_read_and_apply_hook
+          ignore;
+        Keeper_registry.For_testing.unregister
+          ~base_path:config.base_path
+          owner)
+      (fun () ->
+        seed config (make_task ~id:task_id ~status:D.Todo);
+        (match
+           Workspace.claim_task_with_details_r
+             config
+             ~agent_name:owner
+             ~task_id
+             ~auto_start:true
+             ()
+         with
+         | Ok _ -> ()
+         | Error err ->
+           Alcotest.fail (D.masc_error_to_string err));
+        let hook_fired = ref false in
+        Atomic.set
+          Keeper_current_task_reconcile.between_ownership_read_and_apply_hook
+          (fun () ->
+            Atomic.set
+              Keeper_current_task_reconcile.between_ownership_read_and_apply_hook
+              ignore;
+            hook_fired := true;
+            let handoff : D.task_handoff_context =
+              { summary = "concurrent release before claim projection"
+              ; reason = Some "interleaved release"
+              ; next_step = None
+              ; failure_mode = None
+              ; reclaim_policy = None
+              ; evidence_refs = []
+              ; updated_at = None
+              ; updated_by = None
+              }
+            in
+            check_ok
+              "concurrent release"
+              (Workspace.release_task_r
+                 config
+                 ~agent_name:owner
+                 ~task_id
+                 ~handoff_context:handoff
+                 ());
+            Keeper_current_task_reconcile.sync_current_task_id_for_agent_name
+              ~config
+              ~agent_name:owner;
+            Alcotest.(check (option string))
+              "release reconciliation clears persisted current_task_id while claim is paused"
+              None
+              (read_persisted_current_task ()));
+        Keeper_tool_task_runtime.sync_keeper_meta_current_task
+          ~config
+          ~meta:{ meta with current_task_id = Some task_id_typed }
+          ~task_id;
+        Alcotest.(check bool)
+          "interleaving hook ran after claim ownership read"
+          true
+          !hook_fired;
+        Alcotest.(check (option string))
+          "resumed stale claim projection does not restore released task in persisted meta"
+          None
+          (read_persisted_current_task ());
+        Alcotest.(check (option string))
+          "resumed stale claim projection does not restore released task in registry"
+          None
+          (read_registry_current_task ());
+        (* Corrupt primary and recovery backlog files: read failure must not
+           fall back to asserting the unverified task_id. *)
+        let primary_path = Workspace_backlog.backlog_path config in
+        let recovery_path = Workspace_backlog.backlog_recovery_path config in
+        Fs_compat.save_file primary_path "corrupt backlog json";
+        if Sys.file_exists recovery_path then Unix.unlink recovery_path;
+        Keeper_tool_task_runtime.sync_keeper_meta_current_task
+          ~config
+          ~meta:{ meta with current_task_id = None }
+          ~task_id;
+        Alcotest.(check (option string))
+          "failed backlog read preserves existing current_task_id instead of asserting old claim"
+          None
+          (read_persisted_current_task ())))
+;;
+
 (* Submission publishes the request, its criteria, and its evidence refs to
    Board. A message row would restate a poorer version of that post, so the
    transition stays silent here on purpose. *)
@@ -711,6 +861,10 @@ let () =
         ; Alcotest.test_case "claim and start" `Quick test_claim_and_start_broadcast
         ; Alcotest.test_case "auto_start claim and idempotent in_progress retry" `Quick
             test_auto_start_claim_and_idempotent_in_progress_retry
+        ; Alcotest.test_case
+            "interleaved release and backlog read failure preserve current_task_id authority"
+            `Quick
+            test_current_task_projection_interleaved_release_and_read_failure
         ; Alcotest.test_case "submit defers to its Board post" `Quick
             test_submit_defers_to_board
         ; Alcotest.test_case "release wrapper carries its handoff reason" `Quick

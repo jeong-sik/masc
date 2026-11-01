@@ -59,7 +59,29 @@ val sync_current_task_id_for_agent_name :
   unit
 
 (** Reconcile and return the same authoritative selection, including read failure.
-    No second backlog read is performed. *)
+    No second backlog read is performed when the snapshot matches. *)
 val sync_current_task_id_with_observation :
   config:Workspace.config -> Keeper_meta_contract.keeper_meta ->
   Keeper_meta_contract.keeper_meta * (Keeper_id.Task_id.t option, string) result
+
+(** Apply a [Set_current_task] projection guarded by the authoritative backlog
+    revision. Under the per-Keeper reconciliation lock, re-verifies
+    [backlog_revision] and [desired] against the current prepared backlog; on a
+    concurrent revision or ownership change, recomputes and applies the latest
+    authoritative selection so an earlier claim projection cannot overwrite a
+    later release or cancellation. Returns [Error] without mutating metadata
+    when the authoritative backlog cannot be read. *)
+val apply_current_task_if_revision :
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
+  ?preferred_task_id:Keeper_id.Task_id.t ->
+  backlog_revision:int ->
+  desired:Keeper_id.Task_id.t option ->
+  ( Keeper_id.Task_id.t option
+    * (Keeper_meta_contract.keeper_meta option, Keeper_owner_registry.command_error) result
+  , string ) result
+
+(** Test seam: invoked between an initial ownership read and the serialized
+    revision check + owner [Set_current_task] application in
+    {!apply_current_task_if_revision}. Production leaves it at [ignore]. *)
+val between_ownership_read_and_apply_hook : (unit -> unit) Atomic.t

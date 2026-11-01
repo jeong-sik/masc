@@ -142,67 +142,94 @@ let sync_keeper_meta_current_task
     ~(meta : keeper_meta)
     ~(task_id : string)
   =
-  (* Reconcile against authoritative backlog ownership so a concurrent release
-     or cancellation cannot be overwritten by an earlier claim outcome. *)
-  let authoritative_task_id =
-    match Workspace.read_prepared_backlog_r config with
-    | Ok prepared ->
-      (match
-         Workspace_backlog.Task_id_map.find_opt
-           task_id
-           prepared.active_assignees_by_task_id
-       with
-       | Some assignee
-         when Workspace.same_task_actor config assignee meta.name ->
-         Some task_id
-       | Some _ | None ->
-         List.nth_opt
-           (Workspace.active_owned_task_ids_for_agent
-              config
-              ~agent_name:meta.name
-              prepared.backlog)
-           0)
-    | Error _ -> Some task_id
-  in
-  let parsed_task_id =
-    match authoritative_task_id with
-    | None -> Ok None
-    | Some active_id ->
-      Result.map Option.some (Keeper_id.Task_id.of_string active_id)
-  in
-  match parsed_task_id with
+  (* Reconcile against authoritative backlog ownership with revision verification
+     at the owner boundary so a concurrent release or cancellation cannot be
+     overwritten by a delayed claim projection, and never assert the old claim
+     when the authoritative backlog read fails. *)
+  match Keeper_id.Task_id.of_string task_id with
   | Error msg ->
     Log.Keeper.warn ~keeper_name:meta.name
       "could not sync claimed task %s into current_task_id: %s"
       task_id msg
-  | Ok current_task_id ->
-    (match
-       Keeper_owner_registry.apply_meta
-         ~base_path:config.base_path
-         ~keeper_name:meta.name
-         (Keeper_owner_reducer.Set_current_task
-            { task_id = current_task_id; updated_at = now_iso () })
-     with
-     | Ok (Some _) -> ()
-     | Ok None ->
+  | Ok preferred_task_id ->
+    (match Workspace.read_prepared_backlog_r config with
+     | Error msg ->
        Otel_metric_store.inc_counter
-         Keeper_metrics.(to_string WriteMetaFailures)
-         ~labels:[ "keeper", meta.name; "phase", "claim_task_id" ]
+         Keeper_metrics.(to_string ReconcileFailures)
+         ~labels:[ "keeper", meta.name; "phase", "claim_task_id_read" ]
          ();
        Log.Keeper.warn
          ~keeper_name:meta.name
-         "owner removed metadata while syncing claimed current_task_id=%s"
+         "skipping current_task_id sync for claimed task %s because backlog read failed: %s"
          task_id
-     | Error error ->
-       Otel_metric_store.inc_counter
-         Keeper_metrics.(to_string WriteMetaFailures)
-         ~labels:[ "keeper", meta.name; "phase", "claim_task_id" ]
-         ();
-       Log.Keeper.warn
-         ~keeper_name:meta.name
-         "failed to persist claimed current_task_id=%s: %s"
-         task_id
-         (Keeper_owner_registry.command_error_to_string error))
+         msg
+     | Ok prepared ->
+       let authoritative_task_id =
+         match
+           Workspace_backlog.Task_id_map.find_opt
+             task_id
+             prepared.active_assignees_by_task_id
+         with
+         | Some assignee
+           when Workspace.same_task_actor config assignee meta.name ->
+           Ok (Some preferred_task_id)
+         | Some _ | None ->
+           (match
+              List.nth_opt
+                (Workspace.active_owned_task_ids_for_agent
+                   config
+                   ~agent_name:meta.name
+                   prepared.backlog)
+                0
+            with
+            | None -> Ok None
+            | Some active_id ->
+              Result.map Option.some (Keeper_id.Task_id.of_string active_id))
+       in
+       match authoritative_task_id with
+       | Error msg ->
+         Log.Keeper.warn ~keeper_name:meta.name
+           "could not sync claimed task %s into current_task_id: %s"
+           task_id msg
+       | Ok desired ->
+         (match
+            Keeper_current_task_reconcile.apply_current_task_if_revision
+              ~config
+              ~meta
+              ~preferred_task_id
+              ~backlog_revision:prepared.backlog.version
+              ~desired
+          with
+          | Error msg ->
+            Otel_metric_store.inc_counter
+              Keeper_metrics.(to_string ReconcileFailures)
+              ~labels:[ "keeper", meta.name; "phase", "claim_task_id_recheck" ]
+              ();
+            Log.Keeper.warn
+              ~keeper_name:meta.name
+              "skipping current_task_id sync for claimed task %s because backlog recheck failed: %s"
+              task_id
+              msg
+          | Ok (_effective_desired, Ok (Some _)) -> ()
+          | Ok (_effective_desired, Ok None) ->
+            Otel_metric_store.inc_counter
+              Keeper_metrics.(to_string WriteMetaFailures)
+              ~labels:[ "keeper", meta.name; "phase", "claim_task_id" ]
+              ();
+            Log.Keeper.warn
+              ~keeper_name:meta.name
+              "owner removed metadata while syncing claimed current_task_id=%s"
+              task_id
+          | Ok (_effective_desired, Error error) ->
+            Otel_metric_store.inc_counter
+              Keeper_metrics.(to_string WriteMetaFailures)
+              ~labels:[ "keeper", meta.name; "phase", "claim_task_id" ]
+              ();
+            Log.Keeper.warn
+              ~keeper_name:meta.name
+              "failed to persist claimed current_task_id=%s: %s"
+              task_id
+              (Keeper_owner_registry.command_error_to_string error)))
 ;;
 
 (* Row shape of a [Tasks_list] page. [Compact] is the default: identity,

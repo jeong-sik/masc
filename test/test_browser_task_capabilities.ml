@@ -237,11 +237,14 @@ let test_list_windows_table () =
     ["the extension",Cap.Connected Lane.Web_extension;"the owned Firefox",Cap.Owned_gecko;
      "Stagehand",Cap.Owned_chromium;"Safari",Cap.Safari_unavailable]
 
-(* The catalog claims on an ego connection only what its peer does
-   (Browser_lane.live_transport_serves Ego_task_space), and every read and
-   effect on a page says that the operator's tabs in the space are refused. *)
+(* The catalog claims on an Ego connection only what its peer does
+   (Browser_lane.live_transport_serves Ego_task_space). Page operations retain
+   explicit conditions; the peer tests exercise their actual admission. *)
 let test_ego_table () =
   let backend = Cap.Connected Lane.Ego_task_space in
+  (match Cap.support backend Cap.Close_tab with
+   | Cap.Conditional {invocation={tool=Act;mode=None;action=Some "close_tab"};_} -> ()
+   | Cap.Available _|Cap.Conditional _|Cap.Unsupported _ -> fail "Ego closing must use its explicit close_tab action");
   (match Cap.support backend Cap.Read_dialog with
    | Cap.Conditional {invocation={tool=Read;mode=Some "dialog";action=None};_} -> ()
    | Cap.Available _|Cap.Conditional _|Cap.Unsupported _ -> fail "Ego dialog metadata must use its explicit read mode");
@@ -253,10 +256,9 @@ let test_ego_table () =
      "fill";"press_key";"key_chord";"select_option";"read_frames";"frame_interaction";"read_dialog";"accept_dialog";"dismiss_dialog";"hand_off";"take_over";"space_status";"finish_space";"wait_for_control";"adopt_tab";"release_tab";"upload_file";"list_downloads"]
     (List.map Cap.operation_name reachable);
   List.iter (fun operation -> match Cap.support backend operation with
-    | Cap.Conditional {constraints;_} ->
-      check bool (Cap.operation_name operation ^ " names the operator's tabs") true
-        (List.exists (fun constraint_ -> String_util.contains_substring constraint_ "operator opened") constraints)
-    | Cap.Available _ | Cap.Unsupported _ -> failf "%s is not conditional on ego" (Cap.operation_name operation))
+    | Cap.Conditional {constraints=_::_;_} -> ()
+    | Cap.Conditional {constraints=[];_} | Cap.Available _ | Cap.Unsupported _ ->
+      failf "%s needs explicit Ego Page conditions" (Cap.operation_name operation))
     (* Space metadata, completion and the control wait act on the Space, not on
        a page; adopting or releasing a page manages an unmanaged tab the
        operator opened on purpose. *)

@@ -425,22 +425,26 @@ let test_creation_commits_before_releasing_persistence () =
   Alcotest.(check (list int)) "all three creations survive snapshot and reload"
     [1; 1; 1] (counts reloaded)
 
-let test_uninitialized_dispatch_proves_no_publication () =
-  Board_dispatch.reset_for_test ();
+let test_dispatch_preparation_failure_proves_no_publication () =
+  let preparation_calls = ref 0 in
+  let persistence_calls = ref 0 in
+  let expected_exception = Failure "flusher startup observer failed" in
   let check_pre_effect label = function
-    | Ok _ -> Alcotest.fail (label ^ " must fail when Board_dispatch is uninitialized")
+    | Ok _ -> Alcotest.fail (label ^ " must report the backend preparation failure")
     | Error failure ->
       check_effect (label ^ " did not begin publication")
         Failure_effect.Proven_pre_effect failure;
       Alcotest.(check bool) (label ^ " has no committed receipt") true
-        (Option.is_none (Board.Post_publication_failure.committed failure))
+        (Option.is_none (Board.Post_publication_failure.committed failure));
+      (match Board.Post_publication_failure.cause failure with
+       | Board.Post_publication_failure.Raised exn ->
+         Alcotest.(check bool) (label ^ " retains the preparation exception") true
+           (exn == expected_exception)
+       | Board.Post_publication_failure.Board_error _ ->
+         Alcotest.fail (label ^ " lost the preparation exception"))
   in
-  check_pre_effect "create_post_with_unresolved"
-    (Board_dispatch.create_post_with_unresolved
-       ~author:"uninit-author" ~content:"never started"
-       ~post_kind:Board.Human_post ());
-  check_pre_effect "create_post_once_by_fusion_run_id"
-    (Board_dispatch.create_post_once_by_fusion_run_id
+  let create_fusion () =
+    Board_dispatch.create_post_once_by_fusion_run_id
        ~fusion_run_id:"fusion-uninit-1" ~author:"uninit-author"
        ~content:"never started" ~post_kind:Board.Automation_post
        ~visibility:Board.Internal ~ttl_hours:0
@@ -450,8 +454,50 @@ let test_uninitialized_dispatch_proves_no_publication () =
          ; fusion_run_id = Some "fusion-uninit-1"
          ; fusion_producer = Some "uninit-author"
          }
-       ());
-  Board_dispatch.init_jsonl ~recipient_lookup:Recipient_lookup.none_declared ()
+       ()
+  in
+  let saved_context = Eio_context.snapshot_state () in
+  Fun.protect ~finally:(fun () -> Eio_context.restore_state saved_context) (fun () ->
+    Eio.Switch.run (fun sw ->
+      Eio_context.set_switch sw;
+      let finished = Eio.Switch.run (fun inner -> inner) in
+      Board_dispatch.reset_for_test ();
+      (* As in test_board_dispatch, a finished turn switch refuses the
+         flusher fork. Its existing observer then fails inside backend (),
+         before either Board creation function is entered. *)
+      with_observer
+        { noop_observer with
+          observe_persist_lock_acquire_sec = (fun _ -> incr persistence_calls)
+        ; inc_dispatch_flusher_start_outcome = (fun ~outcome ->
+            match outcome with
+            | Board_metrics_hooks.Switch_finished ->
+              incr preparation_calls;
+              raise expected_exception)
+        }
+        (fun () -> Eio_context.with_turn_switch finished (fun () ->
+          check_pre_effect "create_post_with_unresolved"
+            (Board_dispatch.create_post_with_unresolved
+               ~author:"uninit-author" ~content:"never started"
+               ~post_kind:Board.Human_post ());
+          check_pre_effect "create_post_once_by_fusion_run_id" (create_fusion ())));
+      Alcotest.(check int) "both calls reached the failing preparation observer"
+        2 !preparation_calls;
+      Alcotest.(check int) "neither call entered persistence" 0 !persistence_calls;
+      Alcotest.(check int) "neither call published a post" 0
+        (List.length (Board_dispatch.list_posts ()));
+      Alcotest.(check int) "neither call appended a WAL row" 0 (List.length (post_rows ()));
+      (* The auto-initialized backend remains usable; do not replace it or
+         install a lookup to make these unaddressed publications succeed. *)
+      ignore (create_post_exn ~author:"uninit-author" ~content:"healthy after preparation failure");
+      (match create_fusion () with
+       | Ok (Board.Post_created _) -> ()
+       | Ok (Board.Post_already_present _) ->
+         Alcotest.fail "the failed preparation must not reserve the fusion publication"
+       | Error failure -> Alcotest.fail (Board.Post_publication_failure.to_string failure));
+      Alcotest.(check int) "both healthy publications reached the same store" 2
+        (List.length (Board_dispatch.list_posts ()));
+      Alcotest.(check int) "both healthy publications reached the WAL" 2
+        (List.length (post_rows ()))))
 
 let () =
   Alcotest.run "board_comment_post_write_ahead"
@@ -462,8 +508,8 @@ let () =
             (with_eio test_held_observer_failure_keeps_the_committed_receipt);
           Alcotest.test_case "acquire observer failure proves no publication" `Quick
             (with_eio test_acquire_observer_failure_proves_no_publication);
-          Alcotest.test_case "uninitialized dispatch failure proves no publication" `Quick
-            (with_eio test_uninitialized_dispatch_proves_no_publication);
+          Alcotest.test_case "dispatch preparation failure proves no publication" `Quick
+            (with_eio test_dispatch_preparation_failure_proves_no_publication);
           Alcotest.test_case "creations commit before persistence unlock" `Quick
             (with_eio test_creation_commits_before_releasing_persistence);
           Alcotest.test_case

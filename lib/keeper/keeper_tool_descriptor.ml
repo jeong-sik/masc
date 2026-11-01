@@ -3230,6 +3230,11 @@ let internal_descriptors : t list =
      workspace (a 09-20 call removed 3,462 messages). *)
   ; masc_misc_descriptor ~keeper_model_projection:Operator_only "gc" "masc_gc"
       ~readonly:false
+  (* Same tier as masc_gc: Tool_catalog holds it at CanAdmin, and the
+     operator reads the report before any execute deletes volumes. *)
+  ; masc_misc_descriptor ~keeper_model_projection:Operator_only
+       "sandbox_volume_gc" "masc_sandbox_volume_gc"
+       ~readonly:false
   (* The ask chain — store, operator surfaces, answer→wake — was reachable
      only from the MCP lane: nothing in this registry named the tools, so the
      agent-core lane never advertised them and could not dispatch a call.

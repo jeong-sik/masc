@@ -1846,6 +1846,7 @@ let handle_masc_misc_with_outcome ~(config : Workspace.config) ~(meta : keeper_m
    | (Some (Tool_schemas_misc.Misc_ask_withdraw), None)
    | (Some (Tool_schemas_misc.Misc_config), None) | (Some (Tool_schemas_misc.Misc_dashboard), None)
    | (Some (Tool_schemas_misc.Misc_gc), None)
+   | (Some (Tool_schemas_misc.Misc_sandbox_volume_gc), None)
    | (Some (Tool_schemas_misc.Misc_keeper_waiting_inventory), None)
    | (Some (Tool_schemas_misc.Misc_tool_help), None)
    | (Some (Tool_schemas_misc.Misc_web_fetch), None)

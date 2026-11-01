@@ -407,6 +407,9 @@ let test_registered_cluster_model_projections_are_explicit () =
       (* CanAdmin in Tool_catalog with no handler-level owner check: a Keeper
          call swept the whole workspace on 09-20. *)
     ; "masc_gc"
+    ; (* Same tier and the same reason: volume reclamation deletes retired
+         keepers' disks, and only the operator reads the report first. *)
+      "masc_sandbox_volume_gc"
     ];
   List.iter
     (fun (name, projected_by) ->

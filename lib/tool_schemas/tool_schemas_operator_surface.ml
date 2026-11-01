@@ -35,6 +35,7 @@ let broadcast = schema_of_name "masc_broadcast"
 let config = schema_of_name "masc_config"
 let dashboard = schema_of_name "masc_dashboard"
 let gc = schema_of_name "masc_gc"
+let sandbox_volume_gc = schema_of_name "masc_sandbox_volume_gc"
 let keeper_waiting_inventory = schema_of_name "masc_keeper_waiting_inventory"
 let messages = schema_of_name "masc_messages"
 let pause = schema_of_name "masc_pause"
@@ -50,5 +51,5 @@ let tool_help = schema_of_name "masc_tool_help"
    pause_status are absent from it by design — they are Operator_only, reached
    as individual values rather than through the Keeper-visible list. *)
 let schemas : Masc_domain.tool_schema list =
-  [ ask; ask_status; ask_withdraw; broadcast; config; dashboard; gc; keeper_waiting_inventory; messages; plan_clear_task; plan_get_task; plan_set_task; start; tool_help ]
+  [ ask; ask_status; ask_withdraw; broadcast; config; dashboard; gc; sandbox_volume_gc; keeper_waiting_inventory; messages; plan_clear_task; plan_get_task; plan_set_task; start; tool_help ]
 ;;

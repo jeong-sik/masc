@@ -18,6 +18,7 @@ let bindings : (string * Masc_domain.tool_schema) list =
   ; "masc_config", config
   ; "masc_dashboard", dashboard
   ; "masc_gc", gc
+  ; "masc_sandbox_volume_gc", sandbox_volume_gc
   ; "masc_keeper_waiting_inventory", keeper_waiting_inventory
   ; "masc_messages", messages
   ; "masc_pause", pause
@@ -43,6 +44,7 @@ let expected =
   ; "masc_config"
   ; "masc_dashboard"
   ; "masc_gc"
+  ; "masc_sandbox_volume_gc"
   ; "masc_keeper_waiting_inventory"
   ; "masc_messages"
   ; "masc_pause"
@@ -57,8 +59,8 @@ let expected =
 ;;
 
 let test_every_tool_the_generator_owned_is_declared () =
-  check int "14 tools pinned here" 14 (List.length expected);
-  check int "14 tools bound in the module" 14 (List.length bindings)
+  check int "15 tools pinned here" 15 (List.length expected);
+  check int "15 tools bound in the module" 15 (List.length bindings)
 ;;
 
 (* Three checks that lived in test_tool_descriptors_gen and have nothing to do

@@ -1,0 +1,30 @@
+name = "masc_sandbox_volume_gc"
+description = """
+Report retired keepers' Apple sandbox volumes and, with execute, reclaim \
+the ones no evidence protects: no container references the keeper, no \
+workspace claims the work volume, and the keeper is not registered in this \
+workspace. Default is report only."""
+additional_properties = false
+defer_loading = true
+
+[[params]]
+name = "image"
+type = "string"
+description = """
+Image reference for the one-shot claims read helper, e.g. a promoted \
+masc-sandbox tag from `masc sandbox-image`. Omit to judge without claim \
+evidence: unowned keepers are then reported unverified and nothing is \
+reclaimed."""
+
+[[params]]
+name = "execute"
+type = "boolean"
+description = """
+Delete the reclaim candidates' work and build volumes after the report's \
+judgement. Omit or false to only report."""
+
+[[params]]
+name = "timeout_sec"
+type = "number"
+exclusive_minimum = 0.0
+description = "Explicit CLI timeout in seconds."

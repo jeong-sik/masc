@@ -776,6 +776,17 @@ val add_apple_work_volume_claim :
     occurred. A fresh Apple guest does not proceed when this returns [Error].
     [Ok] requires the helper's exact [added] or [present] report. *)
 
+val apple_keeper_owner_containers :
+  run:(timeout_sec:float -> string list -> Unix.process_status * string * string)
+  -> timeout_sec:float
+  -> keeper_name:string
+  -> (string list, string) result
+(** Every observed container that references [keeper_name]: guests by their
+    scoping label, and the trim, repair and claims helpers by their stable
+    names. An unreadable listing is [Error]; unlabelled rows prove nothing
+    and are not owners. Reclamation uses this before touching a volume, and
+    so does a claim release. *)
+
 type apple_volume_claim_release =
   | Kept_for_claimants of string list
   | Kept_for_containers of string list

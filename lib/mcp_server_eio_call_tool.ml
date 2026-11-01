@@ -397,7 +397,8 @@ let retain_runtime_mcp_observation ~keeper_entry ~tool_name ~arguments ~start_ti
           | Misc_lane_attach | Misc_lane_inspect | Misc_lane_observe | Misc_lane_slice
           | Misc_lane_detach | Misc_lane_evidence | Misc_lane_act | Misc_lane_action_status
           | Misc_ask | Misc_ask_status | Misc_ask_withdraw | Misc_config | Misc_dashboard
-          | Misc_gc | Misc_keeper_waiting_inventory | Misc_tool_help | Misc_web_fetch
+          | Misc_gc | Misc_sandbox_volume_gc
+          | Misc_keeper_waiting_inventory | Misc_tool_help | Misc_web_fetch
           | Misc_web_search | Misc_browser_tabs | Misc_browser_session | Misc_browser_goto
           | Misc_browser_act | Misc_browser_interact | Misc_browser_instruct | Misc_msx _
           | Misc_portrait_read | Misc_candle_balance | Misc_candle_catalog

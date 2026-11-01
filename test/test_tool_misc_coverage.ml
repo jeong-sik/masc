@@ -277,6 +277,19 @@ let () = test "dispatch_web_search_requires_query" (fun () ->
   | None -> failwith "dispatch returned None"
 )
 
+(* The image argument is validated before any CLI call, so a value that is
+   neither a catalog name nor a reference refuses the tool without touching
+   the container runtime. *)
+let () = test "dispatch_sandbox_volume_gc_rejects_a_non_image" (fun () ->
+  let ctx = make_test_ctx () in
+  let args = `Assoc [("image", `String "not an image")] in
+  match Tool_misc.dispatch ctx ~name:"masc_sandbox_volume_gc" ~args with
+  | Some result ->
+      assert (not (Tool_result.is_success result));
+      assert (str_contains (Tool_result.message result) "neither a catalog name")
+  | None -> failwith "dispatch returned None"
+)
+
 let () = test "validate_web_search_preserves_opaque_query" (fun () ->
   match
     Tool_misc_web_search.validate_query

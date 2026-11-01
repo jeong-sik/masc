@@ -46,7 +46,7 @@ let domain_of_tool name =
     is "masc_run" || is "masc_fusion" || is "masc_start" || is "masc_pause"
     || is "masc_resume" || is "masc_gc"
   then Some "run"
-  else if is "masc_keeper" then Some "keeper ops"
+  else if is "masc_keeper" || is "masc_sandbox_volume_gc" then Some "keeper ops"
   else if
     is "tool_read_file" || is "tool_edit_file" || is "tool_write_file"
     || is "tool_search_files" || is "keeper_memory" || is "keeper_voice"

@@ -137,6 +137,7 @@ type misc_operation =
   | Misc_config
   | Misc_dashboard
   | Misc_gc
+  | Misc_sandbox_volume_gc
   | Misc_keeper_waiting_inventory
   | Misc_tool_help
   | Misc_web_fetch
@@ -196,7 +197,8 @@ let dos_tool_of_operation : misc_operation -> Machine_controller_contract.dos_to
   | Misc_lane_observe | Misc_lane_slice | Misc_lane_detach
   | Misc_lane_evidence | Misc_lane_act | Misc_lane_action_status | Misc_ask
   | Misc_ask_status | Misc_ask_withdraw | Misc_config | Misc_dashboard
-  | Misc_gc | Misc_keeper_waiting_inventory | Misc_tool_help | Misc_web_fetch
+  | Misc_gc | Misc_sandbox_volume_gc | Misc_keeper_waiting_inventory
+  | Misc_tool_help | Misc_web_fetch
   | Misc_web_search | Misc_browser_tabs | Misc_browser_read
   | Misc_browser_session | Misc_browser_goto | Misc_browser_act
   | Misc_browser_interact | Misc_browser_instruct | Misc_msx _
@@ -233,6 +235,7 @@ let misc_tool_name = function
   | Misc_config -> "masc_config"
   | Misc_dashboard -> "masc_dashboard"
   | Misc_gc -> "masc_gc"
+  | Misc_sandbox_volume_gc -> "masc_sandbox_volume_gc"
   | Misc_keeper_waiting_inventory -> "masc_keeper_waiting_inventory"
   | Misc_tool_help -> "masc_tool_help"
   | Misc_web_fetch -> "masc_web_fetch"
@@ -336,6 +339,7 @@ let misc_registered_schema operation : tool_schema option =
   | Misc_config
   | Misc_dashboard
   | Misc_gc
+  | Misc_sandbox_volume_gc
   | Misc_keeper_waiting_inventory
   | Misc_tool_help ->
     let name = misc_tool_name operation in

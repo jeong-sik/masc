@@ -568,6 +568,7 @@ type skill_json_projection =
 
 let skill_schema_projection = ref None
 let skill_settlements_projection = ref None
+let skill_final_result_projection = ref None
 
 let cached_skill_json projection ~cols ~render json =
   let generation = Masc_tui_terminal_palette.(snapshot_generation (snapshot ())) in
@@ -1127,12 +1128,6 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
                            | Some (`String "failed") -> "✗ failed"
                            | Some _ | None -> "unknown"
                          in
-                         let output =
-                           match json_assoc_member_opt "data" result with
-                           | Some (`String value) -> value
-                           | Some value -> Yojson.Safe.to_string value
-                           | None -> "no output"
-                         in
                          let settlement_count =
                            match
                              json_assoc_member_opt
@@ -1174,7 +1169,12 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
                               ; Ansi.dim, "       failure class=" ^ field "failure_class"
                                 ^ " · effect evidence=" ^ field "effect_disposition" ]
                             | _ -> [])
-                         @ [ Ansi.dim, "       " ^ Terminal_text.single_line output ]
+                         @ (match json_assoc_member_opt "data" result with
+                            | Some output ->
+                              (Ansi.bold, "       Final result data")
+                              :: cached_skill_json skill_final_result_projection ~cols
+                                   ~render:(skill_json_lines ~cols ~indent:9) output
+                            | None -> [Ansi.dim, "       no output"])
                        | Some _ | None ->
                          [ Theme.bad (), "     Composition evidence is malformed" ])
                     | None -> []

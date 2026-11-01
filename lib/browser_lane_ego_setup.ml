@@ -27,6 +27,7 @@ type error =
   | Ego_unstartable of { path : string; detail : string }
   | Table_refused of string
   | Space_held_by_operator of { space : Browser_configuration.ego_space; space_id : int }
+  | Existing_space_missing of int
   | Spaces_unanswered of { path : string; space : Browser_configuration.ego_space; detail : string }
   | Spaces_unreadable of { path : string; space : Browser_configuration.ego_space; detail : string }
   | Configuration_changed
@@ -70,6 +71,11 @@ let error_message = function
       "The ego task space %s (id %d) belongs to the operator, and masc does not take over a \
        space the operator made. Name another with --ego-space."
       (space_label space) space_id
+  | Existing_space_missing space_id ->
+    Printf.sprintf
+      "The configured ego task space id %d was not listed, so it cannot be resumed. \
+       Choose an existing ID in runtime.toml or name a new space with --ego-space."
+      space_id
   | Spaces_unanswered { path; space; detail } ->
     Printf.sprintf
       "The ego-browser at %s did not list ego lite's task spaces, so whether the operator \
@@ -159,8 +165,8 @@ let named path =
     | Browser_runtime_dependencies.Failed { detail; _ } -> Error (Ego_unusable { path; detail })
     | Browser_runtime_dependencies.Started { output; _ } -> versions_of ~path output
 
-(* The worker opens its space by name, and ego refuses a name the operator's
-   space holds; the worker would then fail to start. Every plan checks the
+(* The worker opens a name or resumes an existing ID, and ego refuses a space
+   the operator owns or an absent ID. Every plan checks the
    space of the table it leaves, written or kept: a kept table may name a
    space the operator made after it was written. The spaces are listed by
    the ego-browser the table names; opening the space instead would make it. *)
@@ -185,7 +191,11 @@ let space_is_free ~(table : Browser_configuration.live_ego) =
         | Error (Browser_ego_peer.Spaces_failed detail) -> unanswered detail
         | Error (Browser_ego_peer.Spaces_malformed detail) ->
           Error (Spaces_unreadable { path = table.command; space = table.space; detail })
-        | Ok spaces ->
+        | Ok [] ->
+          (match table.space with
+           | Browser_configuration.Existing_space id -> Error (Existing_space_missing id)
+           | Named_space _ -> Ok ())
+        | Ok (_ :: _ as spaces) ->
           (match
              List.find_map
                (fun (space_id, owner) ->

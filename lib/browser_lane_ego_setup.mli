@@ -57,6 +57,10 @@ type error =
       (** A task space of the name the table would write is the
           operator's: ego would refuse the worker that opens it by that
           name, and masc does not take it over. *)
+  | Existing_space_missing of int
+      (** The successful native inventory contains no matching numeric ID.
+          The plan cannot resume it and leaves the configuration unchanged.
+          An absent name can still be created by the SDK. *)
   | Spaces_unanswered of { path : string; space : Browser_configuration.ego_space; detail : string }
       (** The ego-browser at [path] did not list ego's task spaces, so
           whether the operator holds [space] is unknown. *)
@@ -89,7 +93,8 @@ val installed_ego : unit -> Browser_runtime_dependencies.check
     can be refused without writing: a [runtime.toml] that does not load, no
     [ego-browser] to name, one that does not name its versions, a table that
     would not load or would load as another one, a space the table would
-    hold that the operator holds, and a space that cannot be checked.
+    hold that the operator holds, an existing numeric ID absent from the
+    successful inventory, and a space that cannot be checked.
     Nothing is written.
 
     The space the table holds once the plan is applied, written or kept, is

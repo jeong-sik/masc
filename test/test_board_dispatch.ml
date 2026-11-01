@@ -509,12 +509,12 @@ let test_identical_content_creates_two_posts () =
   let first =
     match create () with
     | Ok post -> post
-    | Error e -> Alcotest.fail (Board.show_board_error e)
+    | Error e -> Alcotest.fail (Board.Post_publication_failure.to_string e)
   in
   let second =
     match create () with
     | Ok post -> post
-    | Error e -> Alcotest.fail (Board.show_board_error e)
+    | Error e -> Alcotest.fail (Board.Post_publication_failure.to_string e)
   in
   Alcotest.(check bool)
     "identical content yields a distinct post"
@@ -2842,7 +2842,7 @@ let test_sub_board_delete_clears_orphan_hearth () =
   in
   let post_id =
     match post_result with
-    | Error e -> Alcotest.fail (Board.show_board_error e)
+    | Error e -> Alcotest.fail (Board.Post_publication_failure.to_string e)
     | Ok post -> Board.Post_id.to_string post.id
   in
   (match Board_dispatch.get_post ~post_id with

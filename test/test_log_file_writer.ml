@@ -292,6 +292,61 @@ let test_later_emit_reopens_after_write_failure ~queued ~large_message ~partial_
           (file_messages dir))
 ;;
 
+let test_readerless_fifo_does_not_block_the_next_open ~queued () =
+  silence_console ();
+  let previous_sigpipe = Sys.signal Sys.sigpipe Sys.Signal_ignore in
+  let reader = ref None in
+  Fun.protect
+    ~finally:(fun () ->
+      Log.Ring.stop_writer ();
+      Option.iter Unix.close !reader;
+      Sys.set_signal Sys.sigpipe previous_sigpipe)
+    (fun () ->
+      let dir = Filename.temp_dir "masc-log-readerless-" "" in
+      Log.Ring.init_file_sink ~identity_recheck_interval_s:0.0 dir;
+      let path = sink_file dir in
+      Unix.rename path (Filename.concat dir "previous-sink");
+      Unix.mkfifo path 0o600;
+      let pipe_reader = Unix.openfile path [ Unix.O_RDONLY; Unix.O_NONBLOCK ] 0 in
+      reader := Some pipe_reader;
+      if queued then Log.Ring.start_writer ();
+      (* Prime the FIFO while a reader exists, then drop the reader so the
+         next append fails EPIPE and retires the sink. *)
+      emit "fifo-prime";
+      Unix.close pipe_reader;
+      reader := None;
+      (* A large message fails inside [output_string] in both modes: a small
+         one may sit in the channel buffer in queued mode and never reach
+         the vanished reader. *)
+      emit ("fifo-failure " ^ String.make (1024 * 1024) 'x');
+      (* Give the queued writer a moment to drain the failed append; the
+         readerless reopen below is what must not hang, and the rotate
+         warnings already show retirement and retry without blocking. *)
+      Thread.delay 0.2;
+      (* The readerless FIFO stays in place. The next emit reopens it: a
+         blocking write-open would park this emit (synchronous) or the
+         writer (queued) under the sink lock; the nonblocking open fails
+         ENXIO at once, the sink stays retired and the record waits in the
+         ring. *)
+      (* The readerless FIFO stays in place. The next emit reopens it: a
+         blocking write-open would park the emit (synchronous) or the
+         writer (queued) under the sink lock; the nonblocking open fails
+         ENXIO at once — logged as a rotate warning — and control returns.
+         The emit returning inside the bound is itself the no-hang proof;
+         the summary's enabled flag differs between modes and is not part
+         of this claim. *)
+      bounded 5.0 "the readerless FIFO open fails instead of hanging" (fun () ->
+        emit "into-a-readerless-fifo");
+      Thread.delay 0.2;
+      (* A later regular sink recovers the pipeline and keeps later records. *)
+      Unix.unlink path;
+      Out_channel.with_open_bin path (fun oc -> output_string oc "");
+      emit "after-readerless-fifo";
+      Log.Ring.stop_writer ();
+      check (list string) "the later record reaches the recovered sink"
+        ["after-readerless-fifo"] (file_messages dir))
+;;
+
 let test_failed_reconfiguration_retries_intended_directory ~queued () =
   silence_console ();
   let previous = Filename.temp_dir "masc-log-previous-" "" in
@@ -366,6 +421,10 @@ let () =
             (test_later_emit_reopens_after_write_failure ~queued:false ~large_message:true ~partial_tail:true)
         ; test_case "queued reopen preserves and seals a partial tail" `Quick
             (test_later_emit_reopens_after_write_failure ~queued:true ~large_message:true ~partial_tail:true)
+        ; test_case "synchronous readerless FIFO does not block the next open" `Quick
+            (test_readerless_fifo_does_not_block_the_next_open ~queued:false)
+        ; test_case "queued readerless FIFO does not block the next open" `Quick
+            (test_readerless_fifo_does_not_block_the_next_open ~queued:true)
         ; test_case "synchronous failed reconfiguration retries intended directory" `Quick
             (test_failed_reconfiguration_retries_intended_directory ~queued:false)
         ; test_case "queued failed reconfiguration retries intended directory" `Quick

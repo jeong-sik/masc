@@ -341,7 +341,19 @@ module Ring = struct
     ensure_dir dir;
     let date = date_string () in
     let path = log_file_path dir date in
-    let oc = open_out_gen [Open_append; Open_creat; Open_wronly] 0o644 path in
+    (* [O_NONBLOCK] is only for the open: a write-only FIFO open without a
+       reader fails ENXIO at once instead of blocking under the sink lock.
+       Clear it again so writes keep their normal semantics — a full pipe
+       still applies backpressure and a vanished reader still raises EPIPE.
+       Regular files ignore the flag either way. An open failure reaches
+       [try_open_channel]'s guard, which keeps the previous channel and
+       retries later. *)
+    let fd =
+      Unix.openfile path
+        [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_APPEND; Unix.O_NONBLOCK ]
+        0o644 in
+    Unix.clear_nonblock fd;
+    let oc = Unix.out_channel_of_descr fd in
     match seal_regular_file_tail path oc with
     | () -> (oc, date)
     | exception exn ->

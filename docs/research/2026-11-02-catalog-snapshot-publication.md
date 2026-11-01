@@ -56,7 +56,9 @@ absence, default reset, pure admission, rejected-pair preservation, raw removed
 aliases, revoked bare permissions, requested-alias price precedence and exact
 token scope. Bootstrap covers publication after admission and preservation
 after rejection. Existing fixture setup and cleanup now construct complete
-pairs and restore whole captured values.
+pairs and either restore captured whole values or explicitly reset/publish a
+complete fixture selection. A fixture that saves its prior selection restores
+both sources, including any earlier JSON overlay.
 
 The old native/batch negative fixtures installed an invalid global catalog.
 That state cannot be represented by this opaque public publication API. Their

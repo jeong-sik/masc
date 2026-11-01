@@ -1096,7 +1096,6 @@ let captured_binding catalog providers =
 ;;
 
 let test_selection_survives_model_replacement ~before_construction =
-  let module M = Llm_provider.Model_catalog in
   let module C = Llm_provider.Provider_config in
   let original = captured_catalog ~reasoning:false ~bare:false in
   let replacement = captured_catalog ~reasoning:true ~bare:false in

@@ -90,17 +90,12 @@ let fixture_int_field fields key =
   | Some value -> value
   | None -> Alcotest.failf "fixture field %S is not an int" key
 
-let restore_model_catalog = function
-  | Some catalog -> (Llm_provider.Catalog_snapshot.publish (Masc_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None)))
-  | None -> (Llm_provider.Catalog_snapshot.reset ())
-;;
-
 let with_model_catalog_content content f =
   let path = Filename.temp_file "runtime-thinking-agent_core-models" ".toml" in
-  let previous = (Llm_provider.Catalog_snapshot.models (Llm_provider.Catalog_snapshot.current ())) in
+  let previous = Llm_provider.Catalog_snapshot.current () in
   Fun.protect
     ~finally:(fun () ->
-      restore_model_catalog previous;
+      Llm_provider.Catalog_snapshot.publish previous;
       try Sys.remove path with
       | _ -> ())
     (fun () ->

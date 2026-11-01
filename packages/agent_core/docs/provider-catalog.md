@@ -13,22 +13,28 @@ generic provider/runtime facts.
 
 ## Loading
 
-Load a JSON file and install the parsed catalog explicitly during application
-bootstrap:
+Load both explicit input catalogs, admit the complete pair, then publish it
+once during application bootstrap:
 
 ```ocaml
-let catalog =
-  match Provider_catalog.load_file "/home/app/.config/agent_core/providers.json" with
-  | Ok catalog -> catalog
-  | Error message -> failwith message
-in
-Provider_catalog.set_global catalog
+let ( let* ) = Result.bind
+
+let install_provider_catalog path =
+  let* models = Model_catalog.load_default () in
+  let* providers = Provider_catalog.load_file path in
+  let* snapshot =
+    Catalog_snapshot.of_catalogs ~models:(Some models) ~providers:(Some providers)
+    |> Result.map_error Catalog_snapshot.error_to_string
+  in
+  Catalog_snapshot.publish snapshot;
+  Ok ()
 ```
 
-Resolution order:
-
-1. Explicit overlay installed with `Provider_catalog.set_global`
-2. Embedded agent_core `models.toml` provider rows
+The JSON overlay replaces a whole same canonical seed id, including its old
+aliases. Other id/alias collisions reject admission. Failed parsing or admission
+leaves the previous publication intact. Provider and model catalogs have no
+individual global setters. Captured selections retain their complete old value;
+new selections read one complete current publication.
 
 The agent_core-owned `models.toml` also carries shareable provider identity rows under
 `[[providers]]`. Those rows are data, not OCaml vendor branches: agent_core embeds that
@@ -40,9 +46,14 @@ Linked applications need no catalog file beside their executable.
 agent_core never discovers a provider or model catalog from the process environment.
 File selection, reload policy, and parse-error handling belong to the embedding
 application. A caller that needs a custom file loads it explicitly with
-`Provider_catalog.load_file` and installs it with `Provider_catalog.set_global`.
+`Provider_catalog.load_file`, supplies its chosen model catalog explicitly to
+`Catalog_snapshot.of_catalogs`, then publishes that successfully admitted value.
+Use `providers=None` to select no JSON overlay and `models=None` to capture
+explicitly absent model facts. `Catalog_snapshot.reset ()` selects the immutable
+embedded default; explicit absence does not select a fallback.
 
-Catalog entries overwrite embedded provider ids when exact ids collide.
+Admission replaces embedded providers only for the same canonical id under
+ASCII case equality; it does not merge the replaced provider's fields.
 `Provider_registry` registers only the declared `id`; aliases remain selector
 names at the catalog/runtime-binding boundary.
 
@@ -51,7 +62,8 @@ names at the catalog/runtime-binding boundary.
 | Surface | Collision rule |
 |---|---|
 | `Provider_catalog.of_entries` / `of_json` | **Reject the whole catalog.** Ids and aliases share one case-insensitive identity namespace. |
-| `Provider_registry` overlay (catalog vs. embedded) | **Catalog overwrites embedded data** by id when registered (`Hashtbl.replace`). The catalog overlay is applied last in `Provider_registry.default ()`. |
+| `Catalog_snapshot.of_catalogs` (JSON vs. model seeds) | Replace the same canonical provider completely, then reject every remaining id/alias collision. |
+| `Provider_registry.default ()` | Project one already admitted complete publication. Aliases remain selection names, not registry keys. |
 
 `Provider_catalog.lookup` remains a catalog-local, case-insensitive id/alias
 query. `Provider_registry.find` is deliberately different: it accepts a
@@ -198,7 +210,7 @@ The `capabilities` object accepts the same capability field names used by
 - `emits_usage_tokens`, `supported_models`
 
 Model-specific facts should live in the embedded/explicit model catalog or an
-explicitly installed `Capability_manifest`. Provider catalog capabilities
+`Capability_manifest` composed into that immutable model catalog. Provider catalog capabilities
 should describe runtime/provider defaults.
 
 Accepted `thinking_control_format` values are:

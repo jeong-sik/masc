@@ -79,7 +79,6 @@ let identity_catalog ~auth ~scope =
 ;;
 
 let with_identity_catalog f =
-  let module Catalog = Llm_provider.Provider_catalog in
   let previous = Llm_provider.Catalog_snapshot.current () in
   Fun.protect
     ~finally:(fun () -> Llm_provider.Catalog_snapshot.publish previous)
@@ -88,7 +87,6 @@ let with_identity_catalog f =
 
 let test_selected_identity_retains_auth_scope ~replace_before_construction () =
   with_identity_catalog (fun () ->
-    let module Catalog = Llm_provider.Provider_catalog in
     let original = identity_catalog
       ~auth:(`Assoc ["type",`String "setup_token_env";"env",`String "CAPTURED_IDENTITY_TOKEN"])
       ~scope:"original-account" in
@@ -145,7 +143,6 @@ let test_selected_identity_retains_auth_scope ~replace_before_construction () =
 
 let test_unselected_identity_does_not_acquire_catalog_facts () =
   with_identity_catalog (fun () ->
-    let module Catalog = Llm_provider.Provider_catalog in
     (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Llm_provider.Catalog_snapshot.models (Llm_provider.Catalog_snapshot.current ())) ~providers:(None)));
     let config = PC.make ~kind:PC.OpenAI_compat
       ~provider_id:"captured-identity-alias" ~model_id:"identity-model"

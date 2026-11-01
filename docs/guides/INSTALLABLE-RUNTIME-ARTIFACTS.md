@@ -1,7 +1,8 @@
 # Installable macOS runtime artifacts
 
 The manual `installable-runtime-macos-arm64` target builds the canonical local
-installer's complete default target list, including TUI, deployment preflight,
+installer's complete default target list through `scripts/dune-local.sh build`
+with the same default profile, including TUI, deployment preflight,
 SSH bootstrap and every browser Add-on program. The candidate must contain
 `install-local-build.sh --print-build-targets` and the artifact packaging helper.
 The separate `ego-runtime-macos-arm64` target builds only the server, browser
@@ -25,25 +26,42 @@ gh run download RUN_ID --repo jeong-sik/masc \
   --dir artifacts/runtime-download/UNUSED_RUN
 ```
 
-From the download directory, check the outer archive and extract into an empty
-directory. The tar archive retains executable permissions that Actions ZIP
-downloads discard. Then verify every member against the receipt and the
-independently read source, workflow head, run and attempt:
+Use an independently trusted checkout at the exact candidate commit. Obtain it
+through your trusted repository remote, independently of the downloaded bundle.
+Run the verifier from that checkout, never from the download. From the download
+directory, safely extract into a new directory and verify against the trusted
+Git objects and the independently read workflow head, run and attempt:
 
 ```sh
-shasum -a 256 -c SHA256SUMS
-mkdir runtime
-tar -xzf installable-runtime.tar.gz -C runtime
-python3 runtime/scripts/ci/runtime-install-artifact.py verify \
+candidate_repo=/absolute/path/to/independently-trusted-candidate-checkout
+python3 "$candidate_repo/scripts/ci/runtime-install-artifact.py" extract \
+  --trusted-repo "$candidate_repo" --archive installable-runtime.tar.gz \
   --directory runtime --source FULL_SOURCE_SHA --workflow-head FULL_WORKFLOW_SHA \
   --run-id RUN_ID --attempt ATTEMPT
 ```
 
+The extraction operation preflights every archive member before writing any:
+it rejects links, traversal, absolute paths, duplicate members, special files,
+unsafe permissions and an existing destination. It creates regular files itself
+and preserves their executable permissions. It never calls `tar -x` or executes
+code from the download. Failed verification preserves the extracted evidence.
+
+Verification requires the trusted checkout's HEAD to equal the candidate and
+checks its source files against that commit's Git blobs and modes. The receipt's
+source tree must equal the actual Git tree; all bundled installer, preflight and
+verifier bytes and Git modes must match before any installer query. Only the
+validated trusted installer's `--print-build-targets` query runs. Results state
+`trusted_candidate_installer_queried=true`, `downloaded_code_executed=false` and
+`candidate_binaries_executed=false`. Querying source is not a native runtime
+behavior measurement. To verify an already extracted directory, use the same
+trusted verifier's `verify` operation with `--trusted-repo` and the same identities.
+
+The receipt and outer `SHA256SUMS` are downloaded records, not independent source
+authority. Continue to require the independently observed successful GitHub run;
+source-file binding alone does not prove that native binaries were built in it.
 Verification rejects missing, changed, extra or nonregular files and lost
-executable permissions. The bundle contains the exact candidate's canonical
-installer, its preflight gate and the `.exe` layout it requires. Install with
-an explicit workspace base path; the existing preflight and browser refresh
-procedures still apply:
+executable permissions. After it succeeds, the existing canonical installer and
+browser refresh procedures apply, with an explicit workspace base path:
 
 ```sh
 bash runtime/scripts/install-local-build.sh --skip-build \

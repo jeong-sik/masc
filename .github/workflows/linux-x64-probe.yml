@@ -761,11 +761,12 @@ jobs:
             bash scripts/install-local-build.sh --print-build-targets > "$RUNNER_TEMP/ego-runtime-probe/build-targets.txt"
             targets=()
             while IFS= read -r target; do targets+=("$target"); done < "$RUNNER_TEMP/ego-runtime-probe/build-targets.txt"
+            scripts/dune-local.sh build --root "$PWD" "${targets[@]}" 2>&1 | tee "$RUNNER_TEMP/ego-runtime-probe/build.log"
           else
             targets=(bin/main_eio.exe bin/masc_browser_addon_worker.exe bin/masc_native_addon_launcher.exe)
             printf '%s\n' "${targets[@]}" > "$RUNNER_TEMP/ego-runtime-probe/build-targets.txt"
+            opam exec -- dune build --release "${targets[@]}" 2>&1 | tee "$RUNNER_TEMP/ego-runtime-probe/build.log"
           fi
-          opam exec -- dune build --release "${targets[@]}" 2>&1 | tee "$RUNNER_TEMP/ego-runtime-probe/build.log"
           git diff --exit-code HEAD --
       - name: Record exact candidate bytes and dependencies
         env:

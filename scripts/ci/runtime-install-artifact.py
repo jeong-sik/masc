@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Package or verify the exact inputs of install-local-build.sh --skip-build.
 
-Verification binds downloaded bytes to independently read source/workflow/run
-identities. It does not execute the binaries, install, or establish relocatability.
+Run this verifier from an independently trusted candidate checkout. Verification
+binds bundled source bytes and Git modes to that checkout's exact Git objects
+before querying the trusted installer's target list. It executes no downloaded
+code or candidate binaries, installs nothing, and establishes no relocatability.
 """
 import argparse
 import hashlib
@@ -11,6 +13,7 @@ from pathlib import Path, PurePosixPath
 import shutil
 import stat
 import subprocess
+import tarfile
 
 
 SOURCES = ("scripts/install-local-build.sh", "scripts/check-runtime-deployment-preflight.sh",
@@ -55,14 +58,42 @@ def describe(path):
     require(stat.S_ISREG(mode), "payload must be a regular file: " + str(path))
     data = path.read_bytes()
     require(data, "payload is empty: " + str(path))
+    executable = bool(mode & stat.S_IXUSR)
     return dict(bytes=len(data), sha256=hashlib.sha256(data).hexdigest(),
-                executable=bool(mode & 0o111))
+                executable=executable, git_mode="100755" if executable else "100644")
+
+
+def trusted_source(repo, source):
+    """Read Git objects and validate the checkout before any source query runs."""
+    repo = repo.resolve()
+    def git(*arguments):
+        return subprocess.check_output(["git", "-C", str(repo), *arguments])
+    require(git("rev-parse", "HEAD").decode().strip() == commit(source),
+            "trusted checkout HEAD differs from the candidate source")
+    tree = git("rev-parse", source + "^{tree}").decode().strip()
+    sources = {}
+    for name in SOURCES:
+        entry = git("ls-tree", "-z", source, "--", name)
+        metadata, filename = entry.rstrip(b"\0").split(b"\t")
+        mode, kind, blob = metadata.decode().split()
+        require(filename.decode() == name and kind == "blob" and mode in ("100644", "100755"),
+                "candidate source is not one regular Git file: " + name)
+        data = git("cat-file", "blob", blob)
+        expected = dict(bytes=len(data), sha256=hashlib.sha256(data).hexdigest(),
+                        executable=mode == "100755", git_mode=mode)
+        path = repo / name
+        for parent in path.parents:
+            if parent == repo:
+                break
+            require(stat.S_ISDIR(parent.lstat().st_mode), "trusted source has a nonregular parent")
+        require(describe(path) == expected, "trusted checkout source bytes or Git mode changed: " + name)
+        sources[name] = expected
+    return repo, tree, sources
 
 
 def pack(args):
-    repo, directory = args.repo.resolve(), args.directory
-    source = subprocess.check_output(["git", "-C", str(repo), "rev-parse", "HEAD"], text=True).strip()
-    require(source == commit(args.source), "candidate source identity changed")
+    repo, tree, _sources = trusted_source(args.repo, args.source)
+    directory, source = args.directory, args.source
     subprocess.run(["git", "-C", str(repo), "diff", "--exit-code", "HEAD", "--"], check=True)
     expected = targets(repo)
     recorded = [name.removeprefix("./") for name in
@@ -81,27 +112,28 @@ def pack(args):
         shutil.copy2(source_path, destination)
         files[name] = describe(destination)
     receipt = dict(schema_version=1, target="installable-runtime-macos-arm64", platform="macos-arm64",
-                   source_commit=source, source_tree=subprocess.check_output(
-                       ["git", "-C", str(repo), "rev-parse", "HEAD^{tree}"], text=True).strip(),
+                   source_commit=source, source_tree=tree,
                    workflow_head=commit(args.workflow_head), run_id=args.run_id, run_attempt=args.attempt,
                    build_targets=expected, build_directory="bin", files=files,
                    **{key: False for key in FLAGS})
     (directory / "build-receipt.json").write_text(json.dumps(receipt, indent=2) + "\n")
-    return verify(args)
+    return verify(argparse.Namespace(**{**vars(args), "trusted_repo": repo}))
 
 
 def verify(args):
+    repo, tree, sources = trusted_source(args.trusted_repo, args.source)
     directory = args.directory
     require(stat.S_ISDIR(directory.lstat().st_mode), "artifact root must be a directory")
     receipt_path = directory / "build-receipt.json"
     require(stat.S_ISREG(receipt_path.lstat().st_mode), "receipt must be regular")
     receipt = json.loads(receipt_path.read_text(), object_pairs_hook=unique)
-    require(receipt["schema_version"] == 1 and receipt["target"] == "installable-runtime-macos-arm64"
+    require(type(receipt["schema_version"]) is int and receipt["schema_version"] == 1
+            and receipt["target"] == "installable-runtime-macos-arm64"
             and receipt["platform"] == "macos-arm64" and receipt["build_directory"] == "bin",
             "wrong installable runtime artifact scope")
     for key, expected in (("source_commit", args.source), ("workflow_head", args.workflow_head)):
         require(receipt[key] == commit(expected), "artifact identity mismatch: " + key)
-    commit(receipt["source_tree"])
+    require(receipt["source_tree"] == tree, "artifact source tree differs from the trusted candidate")
     require(receipt["run_id"] == args.run_id and receipt["run_attempt"] == args.attempt,
             "artifact differs from the independently read run/attempt")
     require(all(receipt[key] is False for key in FLAGS), "build receipt claims additional execution")
@@ -118,7 +150,11 @@ def verify(args):
         require(not path.is_absolute() and name == path.as_posix()
                 and all(part not in (".", "..") for part in path.parts), "unsafe artifact path")
         require(describe(directory / name) == expected, "artifact bytes or mode changed: " + name)
-    expected = targets(directory)
+    # A matching self-described manifest is not source authority. Validate all
+    # bundled source files against Git before querying even the trusted copy.
+    for name, expected in sources.items():
+        require(files.get(name) == expected, "bundled source bytes or Git mode differ: " + name)
+    expected = targets(repo)
     require(receipt["build_targets"] == expected, "manifest differs from the installer contract")
     require(set(files) == set(expected) | set(SOURCES) | set(RECORDS), "installer input missing")
     for name in expected + list(SOURCES[:2]):
@@ -126,14 +162,59 @@ def verify(args):
     return dict(source_commit=args.source, workflow_head=args.workflow_head, run_id=args.run_id,
                 run_attempt=args.attempt, verified_files=len(files), build_directory="bin",
                 receipt_sha256=hashlib.sha256(receipt_path.read_bytes()).hexdigest(),
-                github_completion_independently_required=True, candidate_executed=False,
+                github_completion_independently_required=True, downloaded_code_executed=False,
+                candidate_binaries_executed=False, trusted_candidate_installer_queried=True,
                 installed=False, relocatable_runtime_verified=False)
+
+
+def extract(args):
+    """Preflight the whole archive, then create new files without link extraction."""
+    trusted_source(args.trusted_repo, args.source)
+    require(not args.directory.exists() and not args.directory.is_symlink(),
+            "extraction destination must not exist; refusing overwrite")
+    with tarfile.open(args.archive, "r:gz") as archive:
+        entries = {}
+        for member in archive.getmembers():
+            require(member.isdir() or member.isreg(), "archive contains a link or nonregular entry")
+            name = member.name
+            if name.startswith("./"):
+                name = name[2:]
+            if name in ("", "."):
+                require(member.isdir(), "archive root must be a directory")
+                name = "."
+            else:
+                if member.isdir() and name.endswith("/"):
+                    name = name[:-1]
+                path = PurePosixPath(name)
+                require(not path.is_absolute() and name == path.as_posix()
+                        and all(part not in (".", "..") for part in path.parts),
+                        "unsafe archive path")
+            require(name not in entries, "duplicate archive member: " + name)
+            require(member.mode >= 0 and not member.mode & ~0o777, "unsafe archive permissions")
+            entries[name] = member
+        for name, member in entries.items():
+            for parent in PurePosixPath(name).parents:
+                if parent.as_posix() in entries:
+                    require(entries[parent.as_posix()].isdir(), "archive file is also a parent directory")
+        args.directory.mkdir(parents=True, mode=0o700, exist_ok=False)
+        for name, member in entries.items():
+            if name == ".":
+                continue
+            destination = args.directory / name
+            if member.isdir():
+                destination.mkdir(parents=True, exist_ok=True)
+            else:
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                with archive.extractfile(member) as source, destination.open("xb") as output:
+                    shutil.copyfileobj(source, output)
+                destination.chmod(member.mode)
+    return {**verify(args), "archive_safely_extracted": True}
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
-    for name in ("pack", "verify"):
+    for name in ("pack", "verify", "extract"):
         command = subparsers.add_parser(name)
         command.add_argument("--directory", type=Path, required=True)
         command.add_argument("--source", required=True)
@@ -143,10 +224,15 @@ def main():
         if name == "pack":
             command.add_argument("--repo", type=Path, required=True)
             command.add_argument("--records", type=Path, required=True)
+        else:
+            command.add_argument("--trusted-repo", type=Path, required=True,
+                                 help="Independently trusted checkout at the exact source commit")
+        if name == "extract":
+            command.add_argument("--archive", type=Path, required=True)
     args = parser.parse_args()
     try:
-        print(json.dumps((pack if args.command == "pack" else verify)(args), indent=2))
-    except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as error:
+        print(json.dumps({"pack": pack, "verify": verify, "extract": extract}[args.command](args), indent=2))
+    except (OSError, ValueError, KeyError, TypeError, tarfile.TarError, subprocess.SubprocessError) as error:
         parser.exit(1, str(error) + "\n")
 
 

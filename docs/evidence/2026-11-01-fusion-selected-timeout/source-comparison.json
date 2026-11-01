@@ -1,0 +1,23 @@
+{
+  "baseline": "b7c46bd1c0b00c92e4b3bed524912013d394940c",
+  "candidate": "a5e59a3573f51802d4c75c62adde4f397ea51382",
+  "pair_delta": [
+    "lib/fusion/fusion_official_client.ml",
+    "lib/fusion/fusion_official_client.mli",
+    "test/test_fusion_official_client_panel.ml"
+  ],
+  "complete_selected_fixture_and_runner_inputs_identical": {
+    "test/test_fusion_selected_timeout.ml": "f209c0bc732dd0ac0d6ced8f250e113e6719236b9a30e6e4ec5280e966a597c2",
+    "test/dune": "17a28ed85be21d9db0a32e6444582729b065a5a5e4ed1063f1a6fd7b0e589e97",
+    "test/deps/masc_test_deps.ml": "867eacb8cdfc177eb05804a06fcf6f8c162f25a49be8b64e969f6e6cdd86002b",
+    ".github/workflows/test.yml": "99286b2989de40ea72ad184b6c8335da64e9213e289e260a4afc16bd3bd8bb6d",
+    "scripts/ci-run-targeted-tests.sh": "7391426895132a2c027aea2d6c85bfcae18a038fd4e9640cc3c0b9fa66a8ca72"
+  },
+  "candidate_production_reference": "07854855a9c9665f68490c735738ce3bba3b7dc6",
+  "reference_delta": "Only an unused runtime_id binding is removed after switching every timeout consumer to the selected declaration. Original candidate CI reported warning26 as a compile failure.",
+  "whole_test_tree_identical": false,
+  "test_tree_only_delta": [
+    "test/test_fusion_official_client_panel.ml"
+  ],
+  "limits": "Observed targeted baseline24=12PASS/12FAIL and candidate33=33PASS/0FAIL. Common24 are separate from candidate-only9 Claude effort controls. No full regression, live provider, installed runtime, restart, integration or whole-issue acceptance."
+}

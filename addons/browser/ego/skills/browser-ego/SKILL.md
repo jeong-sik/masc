@@ -3,6 +3,15 @@ name: browser-ego
 description: Observe and operate an ego lite task space through its snapshots, refs and native workflows.
 ---
 
+For assigned Task work, first call `BrowserTabs {}` without `mode`, `lane` or
+`clientId`. Automatic initial discovery consults the current Task's Goal binding
+when present. Retain the returned `browserSelection.lane` and `clientId` for
+subsequent calls, and preserve `browserGoal` when returned. `BrowserTabs`
+`mode = "connections"` is global connection diagnostics; it does not select the
+current Task's Goal. Never pick its first listed client as a substitute for
+Task-aware discovery. An intentional advanced `lane`/`clientId` override selects
+that browser instead of consulting the Task's Goal.
+
 When the selected client's transport is `ego_task_space`, start with
 `BrowserRead` `mode = "snapshot"` (`snapshotScope = "viewport"`, the default),
 and reuse its refs or observed Ego locators for input. Ego owns locator

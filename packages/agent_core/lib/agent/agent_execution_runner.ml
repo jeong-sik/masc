@@ -260,8 +260,8 @@ let settle_success_after_run scope on_terminal_disposition value =
 
 let with_scope ?on_terminal_disposition ~event_bus scope run =
   let observer=match Execution_context.bus_observer () with
-    | Some observer -> observer
-    | None -> Agent_bus_observer.create ~publish:Event_bus.publish scope in
+    | Some observer when observer.owns_journal scope -> observer
+    | Some _ | None -> Agent_bus_observer.create ~publish:Event_bus.publish scope in
   observer.register ~run_id:(Execution_agent_scope.scope_locator_run_id
       (Execution_agent_scope.scope_locator scope)) ~event_bus;
   Execution_context.with_bus_observer observer (fun () ->

@@ -2048,6 +2048,8 @@ let test_nested_execution_stores_use_their_own_bus_observers () =
         provider_config=Some (Provider_mock.to_provider_config ())} () in
   let child = make_agent "independent-child" child_bus child_calls Hooks.empty in
   let hooks = {Hooks.empty with after_turn=Some (fun _ ->
+    Alcotest.(check bool) "hook child has no shared-journal factory" true
+      (Option.is_none (Internal.Execution_context.child_scope_factory ()));
     match Agent.run ~sw ~execution_store:child_store child "child" with
     | Ok _ -> Hooks.Continue
     | Error error -> Alcotest.fail (Error.to_string error))} in

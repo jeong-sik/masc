@@ -141,6 +141,10 @@ val resume_current_turn : t -> (turn_resume, error) result
 
 val turn_ordinal : turn -> int
 
+(** Whether both scopes use the exact same live writer authority. Separate
+    journal opens do not share a live observer or acknowledgement cursor. *)
+val shares_writer : t -> t -> bool
+
 (** Record the exact prepared tool names before dispatch. Repeating the same
     preparation at a provider-free resume frontier is idempotent; a changed
     preparation is rejected. *)

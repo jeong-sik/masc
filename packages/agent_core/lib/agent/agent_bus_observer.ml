@@ -60,4 +60,4 @@ let create ~publish scope =
       (match Llm_provider.Reserved_exn.reraise_if_reserved exn with
        | () -> report (Printexc.to_string exn)
        | exception reserved -> Printexc.raise_with_backtrace reserved backtrace) in
-  {Execution_context.register;settled_observers;flush}
+  {Execution_context.owns_journal=Scope.shares_writer scope;register;settled_observers;flush}

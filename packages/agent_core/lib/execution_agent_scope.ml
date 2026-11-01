@@ -263,6 +263,8 @@ let open_turn scope ~ordinal =
 
 let turn_ordinal turn = turn.ordinal
 
+let shares_writer left right = left.writer == right.writer
+
 let record_turn_ready (turn:turn) ~tool_names =
   match Writer.find_node turn.scope.writer turn.node with
   | Error error -> Error (Scope_unavailable error)

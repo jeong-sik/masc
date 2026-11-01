@@ -18,7 +18,8 @@ val with_resume_once : (unit -> 'a) -> 'a
 val take_resume_once : unit -> bool
 
 type bus_observer =
-  { register : run_id:Execution_event.Run_id.t -> event_bus:Event_bus.t option -> unit
+  { owns_journal : Execution_agent_scope.t -> bool
+  ; register : run_id:Execution_event.Run_id.t -> event_bus:Event_bus.t option -> unit
   ; settled_observers : Tool_contract.Occurrence.t -> unit
   ; flush : unit -> unit
   }

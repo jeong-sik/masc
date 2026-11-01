@@ -2251,7 +2251,8 @@ loaded. Cached append behavior, row formats, write durability, snapshot failure
 policy and retry obligations are unchanged. The producer, startup and lookup
 scenarios and their execution status are recorded separately with the layer.
 
-The pure codec preparation gives post, comment and persisted-audience JSON one
+The pure codec preparation [#47212](https://github.com/jeong-sik/masc/pull/47212)
+gives post, comment and persisted-audience JSON one
 private `Board_content_json` owner below Core. Its immutable decoded result keeps
 the optional value and typed diagnostics together, including nested rejections
 when an outer row fails. `Board_core_json` emits the existing warnings and Agent ID

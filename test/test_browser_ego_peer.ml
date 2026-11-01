@@ -3073,6 +3073,109 @@ let test_operator_input_recovery () =
     ["original-input-command","#dialog";"continued-input-command","#continue"] (List.rev !input_commands);
   check int "only original, empty observation and new input workflows were issued" 3 !issued
 
+let test_popup_workflow_identity_and_scope () =
+  let module Input=Masc.Browser_ego_input in
+  let answer label = function Ok value -> value | other -> failf "%s: %s" label (failure_kind other) in
+  let source_url="https://fixture.test/opener" and child_url="https://fixture.test/child" in
+  let identity label target=obj ["spaceId",`Int 51;"label",str label;"targetId",str target;"openedBy",str "agent"] in
+  let source=identity "p1" "T1" and child=identity "p2" "T2" in
+  let pages=obj ["source",source;"current",child;"transitions",`List [obj [
+    "index",`Int 0;"source",source;"popup",child;"selected",`Bool true]]] in
+  let popup=obj ["method",str "clickAndWaitForPopup";"selector",str "a[target=_blank]"] in
+  let args ~tab_id ~expected_url steps=obj ["tabId",`Int tab_id;"expectedUrl",str expected_url;
+    "steps",`List steps;"maxChars",`Int 1000] in
+  let progress={|{"index":0,"method":"clickAndWaitForPopup","receipt":{}}|} |> Yojson.Safe.from_string in
+  let successful url completed extra=obj (extra @ ["completed",`List completed;"effectStarted",`Bool (completed<>[]);
+    "completedEffect",`Bool (completed<>[]);"inputReleased",`Bool true;"failure",`Null;
+    "urlBefore",str url;"url",str (if completed=[] then url else child_url);"title",str "Owned fixture";
+    "snapshot",str "root";"chars",`Int 4;"truncated",`Bool false]) in
+  let observed=ref [] in
+  let peer=opened (fun sent -> match sent.step with
+    | "tabs.list" -> answered (`List [tab_row ~label:(str "p1") ~target:"T1" ~title:"Owned source" ~url:source_url ~active:true ()])
+    | "page.native_workflow" ->
+      observed:=text (field "label" sent.args)::!observed;
+      if field "steps" sent.args=`List [] then answered (successful (text (field "expectedUrl" sent.args)) [] [])
+      else answered (successful source_url [progress] ["pages",pages])
+    | other -> failf "unexpected popup fixture step %s" other) in
+  ignore (dispatch peer Live.Tabs_list (obj []));
+  let first=answer "popup workflow" (dispatch peer Live.Page_native_workflow (args ~tab_id:1 ~expected_url:source_url [popup])) in
+  let child_tab=Yojson.Safe.Util.to_int (field "tabId" first) in
+  check int "source ID stays separately bound" 1 (Yojson.Safe.Util.to_int (field "sourceTabId" first));
+  check bool "child receives a distinct stable MASC ID" true (child_tab<>1);
+  ignore (answer "later exact child workflow" (dispatch peer Live.Page_native_workflow (args ~tab_id:child_tab ~expected_url:child_url [])));
+  ignore (answer "later original source workflow" (dispatch peer Live.Page_native_workflow (args ~tab_id:1 ~expected_url:source_url [])));
+  check (list string) "popup identity never overwrites source routing" ["p1";"p2";"p1"] (List.rev !observed);
+  let issued=ref 0 in
+  let peer=opened (fun sent -> match sent.step with
+    | "tabs.list" -> answered (`List [tab_row ~label:(str "p1") ~target:"T1" ~title:"Owned source" ~url:source_url ~active:true ()])
+    | "page.native_workflow" -> incr issued; answered (obj ["pages",pages;"completed",`List [progress];
+      "effectStarted",`Bool true;"completedEffect",`Bool true;"inputReleased",`Bool false;
+      "failure",obj ["index",`Int 1;"method",str "keyboard.type";"message",str "native void cannot prove release"]])
+    | other -> failf "unexpected popup input fixture step %s" other) in
+  ignore (dispatch peer Live.Tabs_list (obj []));
+  let typed=obj ["method",str "keyboard.type";"text",str "child input"] in
+  (match dispatch peer Live.Page_native_workflow (args ~tab_id:1 ~expected_url:source_url [popup;typed]) with
+   | Error (Live.Partial_failure {tab_id;receipt;_}) ->
+     check bool "uncertain child retains its exact partial Page identity" true
+       (tab_id<>1 && field "tabId" receipt=`Int tab_id && field "sourceTabId" receipt=`Int 1)
+   | other -> failf "expected typed popup partial failure, got %s" (failure_kind other));
+  (match Peer.input_status peer with
+   | Input.Uncertain pending -> check bool "lost multi-Page input is scoped to the original Space without guessing a Page" true
+       (pending.scope=Input.Space_scope && pending.tab_id=1)
+   | Ready _ -> fail "popup child input was incorrectly released");
+  ignore (before_effect "connection-wide uncertainty blocks new popup input"
+    (dispatch peer Live.Page_native_workflow (args ~tab_id:1 ~expected_url:source_url [popup])));
+  check int "unknown child input was never replayed" 1 !issued
+
+let test_popup_workflow_source_binding () =
+  let source_url="https://fixture.test/opener" and child_url="https://fixture.test/child" in
+  let identity ?(origin="agent") label target=obj ["spaceId",`Int 51;"label",str label;
+    "targetId",str target;"openedBy",str origin] in
+  let source=identity "p1" "T1" and child=identity "p2" "T2" in
+  let popup=obj ["method",str "clickAndWaitForPopup";"selector",str "a[target=_blank]"] in
+  let args=obj ["tabId",`Int 1;"expectedUrl",str source_url;"steps",`List [popup];"maxChars",`Int 1000] in
+  List.iter (fun changed ->
+    let issued=ref 0 and inventories=ref 0 in
+    let peer=opened (fun sent -> match sent.step with
+      | "tabs.list" -> incr inventories;
+        answered (`List [tab_row ~label:(str "p1") ~target:"T1" ~title:"Owned source" ~url:source_url ~active:true ()])
+      | "page.native_workflow" ->
+        incr issued;
+        check bool "host fixes complete source identity before dispatch" true (field "expectedSourcePage" sent.args=source);
+        check bool "host supplies the receipt parser's own field contract" true
+          (field "inputReceiptContract" sent.args=Masc.Browser_ego_release.receipt_contract);
+        let pages=obj ["source",changed;"current",child;"transitions",`List [obj ["index",`Int 0;
+          "source",changed;"popup",child;"selected",`Bool true]]] in
+        answered (obj ["pages",pages;"completed",`List [obj ["index",`Int 0;"method",str "clickAndWaitForPopup";"receipt",obj []]];
+          "effectStarted",`Bool true;"completedEffect",`Bool true;"inputReleased",`Bool true;"failure",`Null;
+          "urlBefore",str source_url;"url",str child_url;"title",str "Child";"snapshot",str "root";"chars",`Int 4;"truncated",`Bool false])
+      | other -> failf "unexpected source-binding step %s" other) in
+    ignore (dispatch peer Live.Tabs_list (obj []));
+    (match dispatch peer Live.Page_native_workflow args with
+     | Error (Live.Outcome_unknown _) -> ()
+     | other -> failf "changed source target/origin was accepted: %s" (failure_kind other));
+    check int "popup source was freshly observed before execution" 2 !inventories;
+    (match Peer.input_status peer with
+     | Masc.Browser_ego_input.Uncertain _ -> ()
+     | Ready _ -> fail "changed source identity incorrectly settled input");
+    ignore (before_effect "source mismatch cannot authorize another input" (dispatch peer Live.Page_native_workflow args));
+    check int "changed-source operation was not replayed" 1 !issued)
+    [identity "p1" "replacement";identity ~origin:"unknown" "p1" "T1"];
+  let issued=ref 0 and inventories=ref 0 in
+  let peer=opened (fun sent -> match sent.step with
+    | "tabs.list" ->
+      incr inventories;
+      let row=tab_row ~label:(str "p1") ~target:"T1" ~title:"Owned source" ~url:source_url ~active:true () in
+      answered (`List (if !inventories=1 then [row] else [row;row]))
+    | "page.native_workflow" -> incr issued; fail "ambiguous native source must refuse before execution"
+    | other -> failf "unexpected source-inventory step %s" other) in
+  ignore (dispatch peer Live.Tabs_list (obj []));
+  ignore (before_effect "ambiguous source inventory refuses before input" (dispatch peer Live.Page_native_workflow args));
+  check int "no workflow was dispatched on an ambiguous native source" 0 !issued;
+  match Peer.input_status peer with
+  | Masc.Browser_ego_input.Ready _ -> ()
+  | Uncertain _ -> fail "source preflight failure manufactured an input hold"
+
 let test_native_space_status () =
   let ownership=ref "agentDelegatedToUser" and invalid=ref false and unavailable=ref false and duplicate=ref false in
   let calls=ref 0 and output=ref "" in
@@ -3225,10 +3328,13 @@ let test_loading_recovery_receipt_requires_original_page () =
      obj (("ready",`Bool true)::fields)]
 
 let test_loading_recovery_preserves_original_input_hold () =
-  let calls = ref 0 in
+  let calls = ref 0 and original_calls = ref 0 in
   let peer = opened (fun sent -> match sent.step with
     | "tabs.list" -> answered tabs
-    | "page.target_input" -> Error (Peer.Unobserved "original click result lost")
+    | "page.target_input" ->
+      incr original_calls;
+      check string "the original native input holds a drag" "drag_to" (text (field "action" sent.args));
+      Error (Peer.Unobserved "original drag result lost")
     | "page.stop_loading" ->
       incr calls;
       check string "recovery stays on the original managed Page" "p1" (text (field "label" sent.args));
@@ -3236,11 +3342,14 @@ let test_loading_recovery_preserves_original_input_hold () =
         "openedBy",str "agent";"method",str "Page.stopLoading";"returned",`Bool true])
     | other -> failf "recovery must not require an observation: %s" other) in
   ignore (dispatch peer Live.Tabs_list (obj []));
-  ignore (Peer.dispatch ~command_id:"original-lost-click" peer ~verb:Live.Page_interact
-    (interact_args (Lane.Click_target (Lane.Target_ref 12))));
+  let original = Peer.dispatch ~command_id:"original-lost-drag" peer ~verb:Live.Page_interact
+    (interact_args (Lane.Drag_to {source=Lane.Selector "#source";destination=Lane.Selector "#destination";
+      via=[];duration_ms=0})) in
+  check string "the original holding input has an unknown outcome" "unknown" (failure_kind original);
+  check int "the original holding input reached native exactly once" 1 !original_calls;
   let pending = Peer.input_status peer in
   check bool "fixture retains the original lost input generation" true
-    (match pending with Masc.Browser_ego_input.Uncertain value -> value.command_id="original-lost-click"
+    (match pending with Masc.Browser_ego_input.Uncertain value -> value.command_id="original-lost-drag"
      | Ready _ -> false);
   let action tab_id = obj ["action",str "stop_loading";"tabId",`Int tab_id] in
   (match dispatch peer Live.Page_act (action 1) with
@@ -3265,6 +3374,8 @@ let () =
     "ego", [
       test_case "loading recovery requires the original native Page acknowledgement" `Quick test_loading_recovery_receipt_requires_original_page;
       test_case "loading recovery keeps exact Page authority and unknown input" `Quick test_loading_recovery_preserves_original_input_hold;
+      test_case "popup workflow preserves Page routing and Space input uncertainty" `Quick test_popup_workflow_identity_and_scope;
+      test_case "popup workflow binds the full pre-effect source and fails closed on changed identity" `Quick test_popup_workflow_source_binding;
       test_case "Space status reads native metadata without Page or control effects" `Quick test_native_space_status;
       test_case "production workflow envelope preserves special JSON header keys" `Quick test_native_workflow_json_headers;
       test_case "first evaluation timeout preserves unknown native receipt" `Quick test_first_evaluation_timeout_preserves_unknown_native_receipt;

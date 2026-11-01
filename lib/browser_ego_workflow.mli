@@ -19,18 +19,27 @@ type navigation_timeout = {
 }
 (** [url] and [ready_state] are absent when the SDK supplied no observation;
     absence is never replaced by an empty string or inferred page state. *)
+type popup_event_error = { name : string option; code : string option; timeout_ms : float option }
 type native_error = Evaluation_timed_out of evaluation_timeout
-  | Navigation_timed_out of navigation_timeout
+  | Navigation_timed_out of navigation_timeout | Popup_event_failed of popup_event_error
 (** Native SDK diagnostics, preserved as observations. Stopped execution may
     still have late effects, and committed navigation may not have reached the
     requested lifecycle. These fields never authorize replay, release held
     input, or replace workflow progress with an inferred completion. *)
 
+type page_identity = { space_id : int; label : string; target_id : string;
+  opened_by : Browser_surface.ego_page_origin }
+type transition = { index : int; source : page_identity; popup : page_identity; selected : bool }
+type pages = { source : page_identity; current : page_identity; transitions : transition list }
+(** Canonical native inventory identities. A raw popup event handle can expose
+    only Space and label; its target and origin come from the unique same-Space
+    inventory row. These observations do not grant input or close authority. *)
+
 type outcome =
-  | Completed of { reply : Yojson.Safe.t; input : Browser_ego_release.settled }
+  | Completed of { reply : Yojson.Safe.t; input : Browser_ego_release.settled; pages : pages option }
   | Stopped of { receipt : Yojson.Safe.t; message : string;
       effect_started : bool; completed_effect : bool; input : Browser_ego_release.t;
-      native_error : native_error option }
+      native_error : native_error option; pages : pages option }
 
 (** Validates step indices/methods, native observation receipt types,
     saving-Fetch provenance/download ID/filename and native Download cancel

@@ -1,6 +1,6 @@
 #!/bin/sh
 # Standalone component execution: real codec/receipt sources and interfaces,
-# with library-name aliases only. This does not type-check the host integration.
+# with library-name aliases and the exact production Page-provenance codec slice. This does not type-check the host integration.
 set -eu
 # Resolve a proof path in the caller's directory before entering the scratch build.
 if { [ "${1-}" = --proof ] || [ "${1-}" = --page-proof ]; } && [ "$#" -eq 2 ]; then
@@ -14,11 +14,17 @@ cp "$repo_dir/lib/browser_lane/browser_native_workflow.ml" "$repo_dir/lib/browse
 cp "$repo_dir/lib/browser_ego_release.ml" "$repo_dir/lib/browser_ego_release.mli" "$check_dir/"
 cp "$repo_dir/lib/browser_ego_workflow.ml" "$repo_dir/lib/browser_ego_workflow.mli" "$check_dir/"
 cp "$repo_dir/test/test_browser_native_workflow.ml" "$check_dir/"
+# Browser_surface's Page provenance codec has no dependency on its later UI types.
+# Keep the real declarations/implementation; this remains a component check.
+awk '/^type ego_page_origin / {copy=1} /^type tab / {copy=0} copy' \
+  "$repo_dir/lib/browser_surface.ml" > "$check_dir/browser_surface.ml"
+awk '/^type ego_page_origin / {copy=1} copy {print} /^val ego_page_of_json / {exit}' \
+  "$repo_dir/lib/browser_surface.mli" > "$check_dir/browser_surface.mli"
 printf '%s\n' 'module Native_workflow = Browser_native_workflow' > "$check_dir/browser_lane.ml"
 printf '%s\n' 'module Browser_ego_workflow = Browser_ego_workflow' 'module Browser_ego_release = Browser_ego_release' > "$check_dir/masc.ml"
 cd "$check_dir"
 ocamlfind ocamlc -w +4+32+69 -warn-error +a -package yojson,uri,uuidm,alcotest -linkpkg \
   browser_native_workflow.mli browser_native_workflow.ml browser_lane.ml \
-  browser_ego_release.mli browser_ego_release.ml browser_ego_workflow.mli browser_ego_workflow.ml masc.ml \
+  browser_ego_release.mli browser_ego_release.ml browser_surface.mli browser_surface.ml browser_ego_workflow.mli browser_ego_workflow.ml masc.ml \
   test_browser_native_workflow.ml -o check
 ./check "$@"

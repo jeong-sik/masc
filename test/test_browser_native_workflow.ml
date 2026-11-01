@@ -229,7 +229,7 @@ let complete () =
   let value=obj (snapshot @ result ~started:true ~completed_effect:true
     ~completed:[clicked 0;entry 1 "waitForURL"] ~failure:`Null) in
   match ok (R.decode (request [click;wait]) value) with
-  | R.Completed {reply;input=Rel.Released (Rel.Released_by_receipts proven)} ->
+  | R.Completed {reply;input=Rel.Released (Rel.Released_by_receipts proven);_} ->
     check bool "native final URL and snapshot returned" true (reply=value);
     check (list int) "the click is the holding step the receipts prove" [0] proven
   | R.Completed {input=Rel.No_hold;_} | R.Stopped _ -> fail "a complete sequence did not release its click"
@@ -341,7 +341,7 @@ let evaluation_timeouts () =
       (result ~started:true ~completed_effect:false ~completed:[]
         ~failure:(obj (["index",`Int 0;"method",str method_;"message",str "native timeout"] @ native)))) in
   let detail = function Some (R.Evaluation_timed_out value) -> value
-    | None | Some (R.Navigation_timed_out _) -> fail "native evaluation diagnostics are absent" in
+    | None | Some (R.Navigation_timed_out _ | R.Popup_event_failed _) -> fail "native evaluation diagnostics are absent" in
   List.iter (fun fields ->
     let value=receipt "evaluate" ["nativeError",obj fields] in
     match ok (R.decode expected value) with
@@ -393,7 +393,7 @@ let navigation_timeouts () =
       | R.Stopped {native_error;receipt=original;effect_started;completed_effect;input;_} ->
         let observed=match native_error with
           | Some (R.Navigation_timed_out value) -> value
-          | None|Some (R.Evaluation_timed_out _) -> fail "native navigation diagnostics are absent" in
+          | None|Some (R.Evaluation_timed_out _ | R.Popup_event_failed _) -> fail "native navigation diagnostics are absent" in
         check bool "navigation diagnostics retain original receipt" true (original=value);
         check bool "committed is an observation" (List.assoc "committed" fields=`Bool true) observed.committed;
         check bool "requested lifecycle is preserved" true (observed.wait_until=kind);
@@ -611,9 +611,60 @@ let page_proof path =
     | R.Completed _ | R.Stopped _ -> fail "a failed Page call lost its uncertain-effect boundary")
     ["blockedRequest","blocked";"timeoutRequest","timedOut"];
   print_endline "Real CORS and predicate-timeout receipts retain uncertain effects and exact progress"
-let () = if Array.length Sys.argv=3 && Sys.argv.(1)="--proof" then proof Sys.argv.(2)
+let popup_progress () =
+  let popup=step "clickAndWaitForPopup" ["selector",str "a[target=_blank]";"popupOptions",obj ["timeout",`Int 0]] in
+  let wanted=request [popup;step "fill" ["selector",str "input";"text",str "child"]] in
+  check bool "popup options retain native omission/zero without a new host budget" true
+    (W.of_json (W.to_json wanted)=Ok wanted);
+  List.iter (fun options -> refused "popup options are strict native event options"
+    (W.of_json (obj (base [step "clickAndWaitForPopup" ["selector",str "a";"popupOptions",options]]))))
+    [obj ["label",str "invented"];obj ["timeout",`Int (-1)];obj ["timeout",`Int 1;"timeout",`Int 2]];
+  List.iter (fun key -> refused "internal source/receipt contracts cannot be supplied by callers"
+    (W.of_json (obj ((key,obj [])::base [popup])))) ["expectedSourcePage";"inputReceiptContract"];
+  let identity ?(space_id=51) label target=obj ["spaceId",`Int space_id;"label",str label;
+    "targetId",str target;"openedBy",str "agent"] in
+  let source=identity "p1" "T1" and child=identity "p2" "T2" in
+  let transition ?(popup=child) selected=obj ["index",`Int 0;"source",source;"popup",popup;"selected",`Bool selected] in
+  let pages current transitions=obj ["source",source;"current",current;"transitions",`List transitions] in
+  let completed=obj (("pages",pages child [transition true])::snapshot @
+    result ~started:true ~completed_effect:true ~completed:[entry ~receipt:(obj []) 0 "clickAndWaitForPopup";entry 1 "fill"] ~failure:`Null) in
+  (match ok (R.decode wanted completed) with
+   | R.Completed {pages=Some pages;input=Rel.Released (Rel.Released_by_receipts proven);_} ->
+     check string "final Page is the child" "p2" pages.current.label;
+     check string "opener identity is retained" "p1" pages.source.label;
+     check (list int) "native trigger receipt alone proves its input release" [0] proven
+   | R.Completed {pages=None;input=Rel.Released (Rel.Released_by_receipts _);_}
+   | R.Completed {input=Rel.No_hold;_}|R.Stopped _ -> fail "popup completion lost its typed Page/input observations");
+  let pending_reply receipt released = obj (("pages",pages source [])::
+    ("pendingAction",obj ["index",`Int 0;"method",str "clickAndWaitForPopup";"receipt",receipt])::
+    with_claim released (result ~started:true ~completed_effect:true ~completed:[]
+      ~failure:(obj ["index",`Int 0;"method",str "popupWait";"message",str "native wait failed";
+        "eventError",obj ["name",str "TimeoutError";"code",str "native-code";"timeoutMs",`Int 9]]))) in
+  (match ok (R.decode wanted (pending_reply (obj []) true)) with
+   | R.Stopped {completed_effect=true;input;native_error=Some (R.Popup_event_failed error);_} ->
+     check bool "a failed popup wait retains the returned trigger and release proof" true (seen_input input=`Released [0]);
+     check bool "native event diagnostics are data, not fabricated Page success" true
+       (error.code=Some "native-code" && error.timeout_ms=Some 9.)
+   | R.Stopped {native_error=None|Some (R.Evaluation_timed_out _|R.Navigation_timed_out _);_}
+   | R.Stopped {completed_effect=false;native_error=Some (R.Popup_event_failed _);_}
+   | R.Completed _ -> fail "pending popup click was erased or called completed");
+  stopped "void trigger never manufactures key release" (not_released 0 Rel.Void_answer)
+    (R.decode wanted (pending_reply `Null false));
+  List.iter (fun value -> refused "foreign/missing/inconsistent Page transitions are refused"
+    (R.decode wanted value))
+    [obj (snapshot @ result ~started:true ~completed_effect:true
+      ~completed:[entry ~receipt:(obj []) 0 "clickAndWaitForPopup";entry 1 "fill"] ~failure:`Null);
+     obj (("pages",pages child [transition ~popup:(identity ~space_id:52 "p2" "T2") true])::snapshot @
+       result ~started:true ~completed_effect:true ~completed:[entry ~receipt:(obj []) 0 "clickAndWaitForPopup";entry 1 "fill"] ~failure:`Null);
+     obj (("pages",pages child [transition false])::snapshot @
+       result ~started:true ~completed_effect:true ~completed:[entry ~receipt:(obj []) 0 "clickAndWaitForPopup";entry 1 "fill"] ~failure:`Null)]
+
+let () = if Array.length Sys.argv=2 && Sys.argv.(1)="--receipt-contract" then
+    print_endline (Yojson.Safe.to_string Rel.receipt_contract)
+  else if Array.length Sys.argv=3 && Sys.argv.(1)="--proof" then proof Sys.argv.(2)
   else if Array.length Sys.argv=3 && Sys.argv.(1)="--page-proof" then page_proof Sys.argv.(2)
   else run "native_browser_workflow" ["SDK contract",[
+  test_case "popup acquisition retains identity, partial trigger and input guarantees" `Quick popup_progress;
   test_case "native methods preserve values" `Quick roundtrip;
   test_case "Download cancellation binds identity and exact effect progress" `Quick download_cancel;
   test_case "URL matcher forms preserve native syntax and reject ambiguous input" `Quick url_matchers;

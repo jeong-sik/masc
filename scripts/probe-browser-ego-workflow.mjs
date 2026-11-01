@@ -3,14 +3,17 @@
 import assert from 'node:assert/strict';
 import {readFileSync,writeFileSync,mkdirSync} from 'node:fs';
 import {createServer} from 'node:http';
-import {spawn} from 'node:child_process';
+import {spawn,execFileSync} from 'node:child_process';
 import {once} from 'node:events';
 import {join,resolve} from 'node:path';
 import {createHash} from 'node:crypto';
+import {fileURLToPath} from 'node:url';
 const [executable,output,space]=process.argv.slice(2);
 assert(executable&&output&&space,'expected ego executable, output directory and continuing space id');
 mkdirSync(output,{recursive:true});
 const source=readFileSync(new URL('../lib/browser_ego_workflow.ml',import.meta.url),'utf8').split('let script = {js|')[1].split('|js}')[0];
+const inputReceiptContract=JSON.parse(execFileSync(fileURLToPath(new URL('./check-browser-native-workflow-codec.sh',import.meta.url)),['--receipt-contract'],{encoding:'utf8'}));
+writeFileSync(join(output,'input-receipt-contract.json'),JSON.stringify(inputReceiptContract,null,2)+'\n');
 const server=createServer((req,res)=>{
  const url=new URL(req.url,'http://fixture');res.setHeader('Content-Type','text/html');
  if(url.pathname==='/done')res.end('<!doctype html><title>Native workflow done</title><h1 id="done">Completed native workflow</h1><pre id="state"></pre><script>document.querySelector("pre").textContent=JSON.stringify(Object.fromEntries(new URLSearchParams(location.search)))</script>');
@@ -37,9 +40,11 @@ try {
  ],snapshotScope:'full_page',maxChars:10000};
  const code=`const task=await taskSpace(${JSON.stringify(Number(space))});const page=task.page('p1');
 await page.goto(${JSON.stringify(url)});${source}
+const inputReceiptContract=${JSON.stringify(inputReceiptContract)};
+const invokeWorkflow=request=>nativeWorkflow(page,{...request,inputReceiptContract});
 const assert=(await import('node:assert/strict')).default;
 const inputRequest=${JSON.stringify(inputRequest)};
-const inputResult=await nativeWorkflow(page,{...inputRequest,cursor:'MASC rich input workflow proof'});
+const inputResult=await invokeWorkflow({...inputRequest,cursor:'MASC rich input workflow proof'});
 assert.equal(inputResult.failure,null,JSON.stringify(inputResult));
 assert.equal(inputResult.completed.length,inputRequest.steps.length);
 const inputState=await page.evaluate(()=>({text:document.querySelector('#editor').value,
@@ -55,22 +60,22 @@ const dialogRequest={...inputRequest,steps:[
  {method:'keyboard.insertText',text:'dialog input'},
  {method:'click',selector:'loc=css:#submit'},
 ]};
-const dialogResult=await nativeWorkflow(page,{...dialogRequest,cursor:'MASC keyboard dialog proof'});
+const dialogResult=await invokeWorkflow({...dialogRequest,cursor:'MASC keyboard dialog proof'});
 assert(dialogResult.failure,JSON.stringify(dialogResult));
 assert.equal(dialogResult.completed.some(step=>step.method==='click'),false);
 assert.equal((await page.info()).dialog.message,'Keyboard input dialog');
 await page.dismissDialog();assert.equal(await page.url(),inputRequest.expectedUrl);
 const request=${JSON.stringify(request)};
-const result=await nativeWorkflow(page,{...request,cursor:'MASC native workflow proof'});
+const result=await invokeWorkflow({...request,cursor:'MASC native workflow proof'});
 assert.equal(result.failure,null,JSON.stringify(result));assert.equal(result.completed.length,request.steps.length);
 assert.equal(result.url,${JSON.stringify(origin+'/done?value=native%20workflow&choice=b')});
 assert(result.snapshot.includes('Completed native workflow'));assert(result.snapshot.includes('native workflow'));
 const state=await page.evaluate(()=>Object.fromEntries(new URLSearchParams(location.search)));
 assert.deepEqual(state,{value:'native workflow',choice:'b'});
 await page.screenshot({path:${JSON.stringify(join(resolve(output),'native-workflow.png'))}});
-const refused=await nativeWorkflow(page,{...request,expectedUrl:request.expectedUrl});
+const refused=await invokeWorkflow({...request,expectedUrl:request.expectedUrl});
 assert.equal(refused.effectStarted,false);assert.equal(refused.completed.length,0);
-const stopped=await nativeWorkflow(page,{...request,expectedUrl:result.url,steps:[
+const stopped=await invokeWorkflow({...request,expectedUrl:result.url,steps:[
  {method:'hover',selector:'loc=css:#done'},
  {method:'waitForSelector',selector:'loc=css:#never',state:'visible',options:{timeout:1}},
  {method:'goto',url:request.expectedUrl}

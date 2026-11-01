@@ -1,4 +1,5 @@
-type pending = {generation:string;command_id:string;tab_id:int;page_label:string;operation:string}
+type scope = Page_scope | Space_scope
+type pending = {generation:string;command_id:string;tab_id:int;page_label:string;operation:string;scope:scope}
 type readiness = Command_settled | Operator_reset_asserted of {pending:pending;at:float}
 type status = Ready of readiness | Uncertain of pending
 type state = Available of readiness | Pending of {pending:pending;previous:readiness}
@@ -14,13 +15,13 @@ let within_command t ~command_id work =
   | None ->
     t.command_id <- Some command_id;
     Fun.protect ~finally:(fun () -> t.command_id <- None) (fun () -> Ok (work ()))
-let begin_holding t ~tab_id ~page_label ~operation =
+let begin_holding t ~scope ~tab_id ~page_label ~operation =
   match t.command_id,t.state with
   | None,(Available _|Pending _) -> Error "input requires its original command scope"
   | Some _,Pending _ -> Error refusal
   | Some command_id,Available previous ->
     let generation=Uuidm.(to_string (v4_gen (Random.State.make_self_init ()) ())) in
-    t.state <- Pending {pending={generation;command_id;tab_id;page_label;operation};previous};
+    t.state <- Pending {pending={generation;command_id;tab_id;page_label;operation;scope};previous};
     Ok ()
 let command_settled t (_ : Browser_ego_release.proof) = match t.state with
   | Available _ -> ()

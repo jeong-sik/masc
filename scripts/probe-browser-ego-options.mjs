@@ -7,10 +7,13 @@ import {spawn,execFileSync} from 'node:child_process';
 import {once} from 'node:events';
 import {join,resolve} from 'node:path';
 import {createHash} from 'node:crypto';
+import {fileURLToPath} from 'node:url';
 const [executable,output,space]=process.argv.slice(2);
 assert(executable&&output&&/^\d+$/.test(space),'expected executable, output directory, continuing Space id');
 mkdirSync(output,{recursive:true});
 const source=readFileSync(new URL('../lib/browser_ego_workflow.ml',import.meta.url),'utf8').split('let script = {js|')[1].split('|js}')[0];
+const inputReceiptContract=JSON.parse(execFileSync(fileURLToPath(new URL('./check-browser-native-workflow-codec.sh',import.meta.url)),['--receipt-contract'],{encoding:'utf8'}));
+writeFileSync(join(output,'input-receipt-contract.json'),JSON.stringify(inputReceiptContract,null,2)+'\n');
 const posts=[];
 const html=`<!doctype html><meta charset="utf-8"><title>MASC · Ego native options verification</title>
 <style>body{font:20px system-ui;background:#10202e;color:#e6eff7;margin:28px}h1{font-size:28px}input,select,button{font:20px system-ui;margin:8px;padding:10px}#targets{display:flex;gap:24px;margin:16px}#source,#target{padding:22px;background:#294b62;border:2px solid #85cee8;min-width:180px}#scroll{height:140px;overflow:auto;border:2px solid #85cee8;width:650px;padding:8px}#result{color:#91f5ba;white-space:pre-wrap}#status{font-weight:bold;color:#ffd778}</style>
@@ -37,6 +40,8 @@ try {
 const task=await taskSpace(${JSON.stringify(Number(space))}),page=task.page('p1');
 await page.goto(${JSON.stringify(url)});console.log(await page.snapshot());
 ${source}
+const inputReceiptContract=${JSON.stringify(inputReceiptContract)};
+const invokeWorkflow=request=>nativeWorkflow(page,{...request,inputReceiptContract});
 const expectedUrl=${JSON.stringify(url)};
 const request={tabId:1,expectedUrl,steps:[
  {method:'goto',url:expectedUrl,options:{waitUntil:'commit',referer:expectedUrl+'?from=fixture'}},
@@ -62,7 +67,7 @@ const request={tabId:1,expectedUrl,steps:[
  {method:'dragAndDrop',selector:'loc=css:#source',destination:'loc=css:#target',options:{button:'left',sourcePosition:{x:15,y:15},targetPosition:{x:15,y:15},force:false,timeout:3000,label:'Drag into fixture target'}},
  {method:'fetch',url:'/api',options:{method:'POST',body:'native relative fetch',headers:{'X-Fixture':'native-options'},timeout:3000}},
 ],snapshotScope:'full_page',maxChars:14000};
-const result=await nativeWorkflow(page,{...request,cursor:'MASC options proof'});
+const result=await invokeWorkflow({...request,cursor:'MASC options proof'});
 assert.equal(result.failure,null,JSON.stringify(result));assert.equal(result.inputReleased,true);
 assert.equal(result.completed[10].receipt,'b');
 assert.deepEqual(result.completed[14].receipt,['a','b','c']);
@@ -77,7 +82,7 @@ const mouseRequest={tabId:1,expectedUrl,steps:[
  {method:'mouse.wheel',x:0,y:180,options:{label:'Scroll observed fixture panel'}},
  {method:'waitForFunction',source:'document.querySelector("#scroll").scrollTop > 0',options:{timeout:3000,polling:10}},
 ],snapshotScope:'full_page',maxChars:14000};
-const mouseResult=await nativeWorkflow(page,{...mouseRequest,cursor:'MASC options proof'});
+const mouseResult=await invokeWorkflow({...mouseRequest,cursor:'MASC options proof'});
 assert.equal(mouseResult.failure,null,JSON.stringify(mouseResult));assert.equal(mouseResult.inputReleased,true);
 const final=await page.evaluate(()=>({editor:document.querySelector('#editor').value,scrollTop:document.querySelector('#scroll').scrollTop,events}));
 assert(final.scrollTop>0);assert(final.events.some(e=>e.type==='input'&&e.trusted));

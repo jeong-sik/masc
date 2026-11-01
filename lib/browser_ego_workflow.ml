@@ -1,5 +1,43 @@
-let script = {js|async function nativeWorkflow(page, args) {
+let script = {js|async function nativeWorkflow(page, args, task, watchPage) {
   const completed = [];
+  let pages = null, pendingAction = null;
+  const hasPopup = args.steps.some(step => step.method === 'clickAndWaitForPopup');
+  // The lightweight event/task.page handle can lack targetId/openedBy. Only
+  // the unique native inventory row supplies the canonical enriched Page.
+  const canonicalPage = async observed => {
+    if (!task || observed?.spaceId !== task.spaceId
+        || typeof observed.label !== 'string' || observed.label.trim() === '')
+      throw new Error('popup Page is not a managed handle in the bound Space');
+    const matches = (await task.tabs()).filter(row => row.label === observed.label);
+    if (matches.length !== 1) throw new Error('native Page label is absent or ambiguous');
+    const row = matches[0], canonical = row.page;
+    if (typeof row.targetId !== 'string' || row.targetId.trim() === ''
+        || !['agent','unknown'].includes(row.openedBy)
+        || !canonical || canonical.spaceId !== task.spaceId
+        || canonical.label !== observed.label || canonical.targetId !== row.targetId
+        || canonical.openedBy !== row.openedBy
+        || (observed.targetId !== undefined && observed.targetId !== row.targetId)
+        || (observed.openedBy !== undefined && observed.openedBy !== row.openedBy))
+      throw new Error('native Page inventory identity disagrees with the observed handle');
+    return {page:canonical, identity:{spaceId:task.spaceId,label:row.label,
+      targetId:row.targetId,openedBy:row.openedBy}};
+  };
+  // Fixed host data comes from the same field lists as the OCaml receipt parser.
+  // It is validation data, never evidence of release by itself.
+  const cleanReceipt = answer => {
+    const contract = args.inputReceiptContract;
+    if (answer === null || typeof answer !== 'object' || Array.isArray(answer)
+        || typeof answer.toJSON === 'function' || !contract) return false;
+    if (!Object.keys(answer).every(key => contract.declaredMembers.includes(key))
+        || Object.hasOwn(answer, 'dialog')) return false;
+    if (!Object.hasOwn(answer, 'popups')) return true;
+    return Array.isArray(answer.popups) && answer.popups.every(popup =>
+      popup !== null && typeof popup === 'object' && !Array.isArray(popup)
+      && typeof popup.toJSON !== 'function'
+      && Object.keys(popup).every(key => contract.popupMembers.includes(key))
+      && contract.requiredPopupStringMembers.every(key =>
+        Object.hasOwn(popup, key) && typeof popup[key] === 'string' && popup[key] !== ''));
+  };
   // These strings are evaluated only by the SDK's browser Page channel.
   // Never eval, import, or compile a caller's source in this Node process.
   const pageExpression = step => step.argumentJson === undefined ? step.source
@@ -8,6 +46,7 @@ let script = {js|async function nativeWorkflow(page, args) {
   let inputReleased = true;
   const failure = (index, method, error, extra = {}) => {
     const nativeError = (() => {
+      if (method === 'popupWait') return undefined;
       switch (error?.code) {
         case 'EGO_PAGE_EVALUATION_TIMED_OUT': return {
           code: error.code, timeoutMs: error.timeoutMs,
@@ -26,8 +65,15 @@ let script = {js|async function nativeWorkflow(page, args) {
     })();
     return {
       completed, effectStarted, completedEffect, inputReleased,
+      ...(pages === null ? {} : {pages}),
+      ...(pendingAction === null ? {} : {pendingAction}),
       failure: {index, method, message: String(error?.message ?? error),
-        ...(nativeError === undefined ? {} : {nativeError}), ...extra}
+        ...(nativeError === undefined ? {} : {nativeError}),
+        ...(method !== 'popupWait' ? {} : {eventError:{
+          ...(typeof error?.name === 'string' ? {name:error.name} : {}),
+          ...(typeof error?.code === 'string' ? {code:error.code} : {}),
+          ...(typeof error?.timeoutMs === 'number' && Number.isFinite(error.timeoutMs) && error.timeoutMs >= 0
+            ? {timeoutMs:error.timeoutMs} : {})}}), ...extra}
     };
   };
   let initialUrl;
@@ -35,6 +81,16 @@ let script = {js|async function nativeWorkflow(page, args) {
   catch (error) { return failure(0, 'initialUrl', error); }
   if (initialUrl !== args.expectedUrl)
     return failure(0, 'initialUrl', 'the tab is at ' + initialUrl + ', not at expectedUrl; read it again');
+  if (hasPopup) {
+    try {
+      if (typeof watchPage !== 'function') throw new Error('popup workflow requires its fixed managed-Page download observer');
+      const original = await canonicalPage(page), expected = args.expectedSourcePage;
+      if (!expected || ['spaceId','label','targetId','openedBy'].some(key => original.identity[key] !== expected[key]))
+        throw new Error('native source Page changed since the host inventory observation');
+      page = original.page;
+      pages = {source:original.identity,current:original.identity,transitions:[]};
+    } catch (error) { return failure(0, 'pageIdentity', error); }
+  }
   for (let index = 0; index < args.steps.length; index++) {
     const step = args.steps[index];
     const options = step.options ?? {};
@@ -42,6 +98,43 @@ let script = {js|async function nativeWorkflow(page, args) {
     let receipt = null, effect = false, pageResult = false, holdingInput = false;
     try {
       switch (step.method) {
+        case 'clickAndWaitForPopup': {
+          // Always consume the SDK waiter, including trigger failure. There is
+          // no documented cancellation API and no host timeout/race is added.
+          let waiter;
+          try {
+            waiter = page.waitForEvent('popup', step.popupOptions);
+          } catch (error) { return failure(index, 'popupPreflight', error); }
+          const event = Promise.resolve(waiter).then(
+            popup => ({ok:true,popup}), error => ({ok:false,error}));
+          let triggerError;
+          holdingInput = effect = effectStarted = true; inputReleased = false;
+          try {
+            receipt = await page.click(step.selector, pointerOptions);
+            pendingAction = {index,method:step.method,receipt:receipt ?? null};
+            completedEffect = true;
+            inputReleased = cleanReceipt(receipt);
+          } catch (error) { triggerError = error; }
+          const observed = await event;
+          let acquired, identityError;
+          if (observed.ok) {
+            try {
+              acquired = await canonicalPage(observed.popup);
+              pages.transitions.push({index,source:pages.current,popup:acquired.identity,selected:false});
+            } catch (error) { identityError = error; }
+          }
+          if (triggerError) return failure(index, step.method, triggerError);
+          if (!inputReleased) return failure(index, step.method,
+            'the popup trigger did not confirm input release; never replay it',
+            receipt?.dialog ? {dialog:receipt.dialog} : {});
+          if (!observed.ok) return failure(index, 'popupWait', observed.error);
+          if (identityError) return failure(index, 'popupIdentity', identityError);
+          watchPage(acquired.page, acquired.identity.label);
+          pages.transitions[pages.transitions.length - 1].selected = true;
+          pages.current = acquired.identity; page = acquired.page;
+          pendingAction = null;
+          break;
+        }
         case 'click':
           holdingInput = effect = effectStarted = true; inputReleased = false;
           receipt = await page.click(step.selector, pointerOptions); break;
@@ -118,7 +211,7 @@ let script = {js|async function nativeWorkflow(page, args) {
           const registry = globalThis.mascDownloads ??= {
             since: new Date().toISOString(), rows: [], watched: new Set()
           };
-          const row = {id, label: args.label, source: 'fetch', url: step.url,
+          const row = {id, label: pages === null ? args.label : pages.current.label, source: 'fetch', url: step.url,
             suggestedFilename: options.saveAs, state: 'pending', path: null, reason: null};
           registry.rows.push(row);
           try {
@@ -146,10 +239,10 @@ let script = {js|async function nativeWorkflow(page, args) {
         }
         case 'download.cancel': {
           const registry = globalThis.mascDownloads;
-          const row = registry?.rows.find(row => row.id === step.downloadId && row.label === args.label
+          const row = registry?.rows.find(row => row.id === step.downloadId && row.label === (pages === null ? args.label : pages.current.label)
             && row.source === 'native_download' && row.state === 'pending');
           const handle = registry?.handles?.get(step.downloadId);
-          if (row === undefined || handle === undefined || handle.label !== args.label)
+          if (row === undefined || handle === undefined || handle.label !== (pages === null ? args.label : pages.current.label))
             return failure(index, 'downloadPreflight', 'no pending native Download handle on this Page; re-read downloads');
           effect = effectStarted = pageResult = true;
           await handle.download.cancel();
@@ -200,7 +293,11 @@ let script = {js|async function nativeWorkflow(page, args) {
           'Ego returned no native action receipt; input release remains unconfirmed. Inspect this Space and use its private operator input-reset confirmation before another input. Never replay this step.',
           dialog ? {dialog} : {});
       }
-      inputReleased = !receipt.dialog;
+      inputReleased = cleanReceipt(receipt);
+      if (!inputReleased && !(Object.hasOwn(receipt, 'dialog') && receipt.dialog !== null
+          && typeof receipt.dialog === 'object' && !Array.isArray(receipt.dialog)))
+        return failure(index, step.method,
+          'Ego returned an undeclared native action receipt; input release remains unconfirmed. Never replay this step.');
     }
     completedEffect ||= effect;
     completed.push({index, method: step.method, receipt: receipt ?? null});
@@ -223,6 +320,7 @@ let script = {js|async function nativeWorkflow(page, args) {
         && snapshot.charCodeAt(end) <= 0xDFFF) end--;
     const url = await page.url(), title = await page.title();
     return {completed, effectStarted, completedEffect, inputReleased, failure: null, urlBefore: initialUrl, url, title,
+      ...(pages === null ? {} : {pages}),
       snapshot: snapshot.slice(0, end), truncated: end < snapshot.length, chars: snapshot.length};
   } catch (error) { return failure(args.steps.length, 'snapshot', error); }
 }|js}
@@ -241,14 +339,19 @@ type navigation_timeout = {
   ready_state : string option;
   wait_until : navigation_wait;
 }
+type popup_event_error = { name : string option; code : string option; timeout_ms : float option }
 type native_error = Evaluation_timed_out of evaluation_timeout
-  | Navigation_timed_out of navigation_timeout
+  | Navigation_timed_out of navigation_timeout | Popup_event_failed of popup_event_error
 module Release = Browser_ego_release
+type page_identity = { space_id : int; label : string; target_id : string;
+  opened_by : Browser_surface.ego_page_origin }
+type transition = { index : int; source : page_identity; popup : page_identity; selected : bool }
+type pages = { source : page_identity; current : page_identity; transitions : transition list }
 type outcome =
-  | Completed of { reply : Yojson.Safe.t; input : Release.settled }
+  | Completed of { reply : Yojson.Safe.t; input : Release.settled; pages : pages option }
   | Stopped of { receipt : Yojson.Safe.t; message : string;
       effect_started : bool; completed_effect : bool; input : Release.t;
-      native_error : native_error option }
+      native_error : native_error option; pages : pages option }
 open Result.Syntax
 let object_fields allowed = function
   | `Assoc fields when List.for_all (fun (key,_) -> List.mem key allowed) fields
@@ -271,7 +374,15 @@ let optional_text key fields = match List.assoc_opt key fields with
   | None -> Ok None
   | Some (`String value) -> Ok (Some value)
   | Some _ -> Error ("invalid native " ^ key ^ " observation")
-let native_error fields = match List.assoc_opt "nativeError" fields with
+let native_error fields = match List.assoc_opt "eventError" fields,List.assoc_opt "nativeError" fields with
+  | Some value,None ->
+    let* fields=object_fields ["name";"code";"timeoutMs"] value in
+    let* name=optional_text "name" fields in let* code=optional_text "code" fields in
+    let* timeout_ms=match List.assoc_opt "timeoutMs" fields with
+      | None -> Ok None | Some _ -> timeout_ms fields |> Result.map Option.some in
+    Ok (Some (Popup_event_failed {name;code;timeout_ms}))
+  | Some _,Some _ -> Error "popup event failure cannot claim another native error"
+  | None,value -> match value with
   | None -> Ok None
   | Some value ->
     let* code=match value with `Assoc fields -> text "code" fields
@@ -323,15 +434,69 @@ let observation_receipt (step:Browser_lane.Native_workflow.step) value =
        | Ok fields -> List.length fields=3 && List.assoc_opt "downloadId" fields=Some (`String id)
            && List.assoc_opt "source" fields=Some (`String "native_download")
            && List.assoc_opt "cancelReturned" fields=Some (`Bool true))
-    | Click _|Double_click _|Hover _|Drag_and_drop _|Mouse_click _|Mouse_move _|Mouse_wheel _
+    | Click _|Click_and_wait_for_popup _|Double_click _|Hover _|Drag_and_drop _|Mouse_click _|Mouse_move _|Mouse_wheel _
     | Fill _|Press _|Focus _|Reload|Keyboard_type _|Keyboard_insert_text _|Keyboard_paste _|Keyboard_press _
     | Select_option _|Goto _|Wait_for_url _|Wait_for_selector _|Wait_for_load_state _
     | Evaluate _|Wait_for_function _|Fetch _ -> true in
   if valid then Ok () else Error ("invalid native " ^ W.method_name step.action ^ " observation receipt")
+let page_identity_of_json value =
+  let* fields=object_fields ["spaceId";"label";"targetId";"openedBy"] value in
+  let* space_id=integer "spaceId" fields in
+  let* page=Browser_surface.ego_page_of_json (`Assoc (List.remove_assoc "spaceId" fields)) in
+  match page.label with
+  | Some label -> Ok {space_id;label;target_id=page.target_id;opened_by=page.opened_by}
+  | None -> Error "workflow Page must remain managed"
+let popup_step (step:Browser_lane.Native_workflow.step) = match step.action with
+  | Click_and_wait_for_popup _ -> true
+  | Click _|Double_click _|Hover _|Drag_and_drop _|Mouse_click _|Mouse_move _|Mouse_wheel _
+  | Fill _|Press _|Focus _|Reload|Keyboard_type _|Keyboard_insert_text _|Keyboard_paste _|Keyboard_press _
+  | Select_option _|Goto _|Wait_for_url _|Wait_for_selector _|Wait_for_load_state _
+  | Evaluate _|Wait_for_function _|Fetch _|Cancel_download _|Url|Title|Info|Snapshot|Events|Wait_for_timeout _ -> false
+let popup_at (request:Browser_lane.Native_workflow.t) index =
+  match List.nth_opt request.steps index with Some step -> popup_step step | None -> false
+let pages_of_json (request:Browser_lane.Native_workflow.t) ~count fields =
+  match List.assoc_opt "pages" fields with
+  | None -> Ok None
+  | Some value ->
+    let* ()=if List.exists popup_step request.steps then Ok () else Error "workflow declared unrequested Page transitions" in
+    let* fields=object_fields ["source";"current";"transitions"] value in
+    let page key=let* value=get key fields in page_identity_of_json value in
+    let* source=page "source" in let* current=page "current" in
+    let* rows=get "transitions" fields in
+    let* rows=match rows with `List rows -> Ok rows | _ -> Error "workflow Page transitions must be an array" in
+    let rec decode previous active acc = function
+      | [] -> if active=current then Ok (List.rev acc) else Error "workflow current Page disagrees with its transitions"
+      | value::rest ->
+        let* fields=object_fields ["index";"source";"popup";"selected"] value in
+        let* index=integer "index" fields in let* selected=bool "selected" fields in
+        let* raw=get "source" fields in let* observed=page_identity_of_json raw in
+        let* raw=get "popup" fields in let* popup=page_identity_of_json raw in
+        let* ()=if index>previous && popup_at request index && observed=active
+            && popup.space_id=source.space_id && popup.label<>active.label
+            && popup.target_id<>active.target_id
+            && (if selected then index<count else index=count && rest=[])
+          then Ok () else Error "workflow popup identity or progress does not match the request" in
+        let transition={index;source=observed;popup;selected} in
+        decode index (if selected then popup else active) (transition::acc) rest in
+    let* transitions=decode (-1) source [] rows in
+    let* ()=if List.mapi (fun index step -> index,step) request.steps |> List.for_all (fun (index,step) ->
+        index>=count || not (popup_step step) || List.exists (fun transition -> transition.index=index && transition.selected) transitions)
+      then Ok () else Error "completed popup step has no canonical Page transition" in
+    Ok (Some {source;current;transitions})
+let pending_action (request:Browser_lane.Native_workflow.t) ~count fields =
+  match List.assoc_opt "pendingAction" fields with
+  | None -> Ok None
+  | Some value ->
+    let* fields=object_fields ["index";"method";"receipt"] value in
+    let* index=integer "index" fields in let* method_=text "method" fields in
+    let* receipt=get "receipt" fields in
+    if index=count && method_="clickAndWaitForPopup" && popup_at request index
+    then Ok (Some (index,Release.answer_of_json receipt))
+    else Error "pending popup trigger does not match the request"
 let receipts_do_not_show reason =
   "workflow reports a released input that its receipts do not show: " ^ Release.describe reason
 let decode (request : Browser_lane.Native_workflow.t) receipt =
-  let* fields=object_fields ["completed";"effectStarted";"completedEffect";"inputReleased";"failure";"urlBefore";"url";"title";"snapshot";"truncated";"chars"] receipt in
+  let* fields=object_fields ["completed";"effectStarted";"completedEffect";"inputReleased";"failure";"urlBefore";"url";"title";"snapshot";"truncated";"chars";"pages";"pendingAction"] receipt in
   let* started=bool "effectStarted" fields in let* completed_effect=bool "completedEffect" fields in
   let* input_released=bool "inputReleased" fields in
   let* ()=if input_released || (started && List.exists (fun (step : Browser_lane.Native_workflow.step) ->
@@ -360,12 +525,16 @@ let decode (request : Browser_lane.Native_workflow.t) receipt =
             then (index,Release.answer_of_json receipt)::answers else answers in
           progress (index+1) (has_effect || Browser_lane.Native_workflow.is_effect step.action) answers steps rest in
   let* count,has_effect,answers,remaining=progress 0 false [] request.steps completed in
-  let* ()=if completed_effect=has_effect && (not has_effect || started) then Ok ()
+  let* pending=pending_action request ~count fields in
+  let* pages=pages_of_json request ~count fields in
+  let* ()=if (not started || not (List.exists popup_step request.steps) || Option.is_some pages) then Ok ()
+    else Error "started popup workflow omitted its source Page identity" in
+  let* ()=if completed_effect=(has_effect || Option.is_some pending) && (not completed_effect || started) then Ok ()
     else Error "workflow effect flags do not match completed steps" in
   let* failure=get "failure" fields in
   match failure with
   | `Null ->
-    let* ()=if remaining=[] && started=has_effect && input_released then Ok () else Error "workflow success omitted requested steps or input release" in
+    let* ()=if remaining=[] && pending=None && started=has_effect && input_released then Ok () else Error "workflow success omitted requested steps or input release" in
     let* input=match Release.judge answers with
       | Release.Settled settled -> Ok settled
       | Release.Unconfirmed reason -> Error (receipts_do_not_show reason) in
@@ -374,21 +543,25 @@ let decode (request : Browser_lane.Native_workflow.t) receipt =
     let* _=text "url" fields in let* _=text "title" fields in let* _=text "snapshot" fields in
     let* truncated=bool "truncated" fields in let* chars=integer "chars" fields in
     let* ()=if truncated=(chars>request.max_chars) then Ok () else Error "workflow snapshot cut flags disagree" in
-    Ok (Completed {reply=receipt; input})
+    Ok (Completed {reply=receipt; input;pages})
   | `Assoc _ ->
-    let* failed=object_fields ["index";"method";"message";"dialog";"nativeError"] failure in
+    let* failed=object_fields ["index";"method";"message";"dialog";"nativeError";"eventError"] failure in
     let* index=integer "index" failed in let* method_=text "method" failed in let* message=text "message" failed in
+    let* ()=if not (List.mem_assoc "eventError" failed) || method_="popupWait" then Ok ()
+      else Error "popup event diagnostics do not match the failed operation" in
     let* native_error=native_error failed in
     (* [entered]: when the failed step holds input, what the SDK did not give for it: no answer, or a dialog. *)
     let* expected_started,entered=match method_ with
-      | "initialUrl" when index=0 && count=0 -> Ok (false,None)
+      | ("initialUrl"|"pageIdentity") when index=0 && count=0 && pending=None -> Ok (false,None)
+      | "popupPreflight" when index=count && pending=None && popup_at request index -> Ok (has_effect,None)
+      | ("popupWait"|"popupIdentity") when index=count && Option.is_some pending && popup_at request index -> Ok (true,None)
       | "downloadPreflight" when index=count ->
         (match remaining with
          | [] -> Error "workflow download preflight is outside the request"
          | step :: _ ->
            match step.action with
            | Browser_lane.Native_workflow.Cancel_download _ -> Ok (has_effect,None)
-           | Click _ | Double_click _ | Hover _ | Drag_and_drop _ | Mouse_click _
+           | Click _ | Click_and_wait_for_popup _ | Double_click _ | Hover _ | Drag_and_drop _ | Mouse_click _
            | Mouse_move _ | Mouse_wheel _ | Fill _ | Press _ | Focus _ | Reload
            | Keyboard_type _ | Keyboard_insert_text _ | Keyboard_paste _ | Keyboard_press _
            | Select_option _ | Goto _ | Wait_for_url _ | Wait_for_selector _
@@ -401,7 +574,7 @@ let decode (request : Browser_lane.Native_workflow.t) receipt =
          | step :: _ ->
            match step.action with
            | Browser_lane.Native_workflow.Press _ -> Ok (has_effect,None)
-           | Click _ | Double_click _ | Hover _ | Drag_and_drop _ | Mouse_click _
+           | Click _ | Click_and_wait_for_popup _ | Double_click _ | Hover _ | Drag_and_drop _ | Mouse_click _
            | Mouse_move _ | Mouse_wheel _ | Fill _ | Focus _ | Reload
            | Keyboard_type _ | Keyboard_insert_text _ | Keyboard_paste _ | Keyboard_press _
            | Select_option _ | Goto _ | Wait_for_url _ | Wait_for_selector _
@@ -416,18 +589,18 @@ let decode (request : Browser_lane.Native_workflow.t) receipt =
         else if index=count then
           (match remaining with
            | step::_ -> Ok (has_effect || Browser_lane.Native_workflow.is_effect step.action,
-               if Browser_lane.Native_workflow.holds_input step.action then Some (index,Release.of_unreleased Release.Never_returned) else None)
+               if Browser_lane.Native_workflow.holds_input step.action && pending=None then Some (index,Release.of_unreleased Release.Never_returned) else None)
            | [] -> Error "workflow failed step is outside request")
         else if index+1=count && List.mem_assoc "dialog" failed then
           Ok (has_effect,if holds_at index then Some (index,Release.of_unreleased Release.Receipt_with_dialog) else None)
         else Error "workflow failure index does not match progress" in
     let* ()=if started=expected_started then Ok () else Error "workflow failed-step effect flag disagrees" in
     (* The failed step is one more answer for the same rule as the completed ones. *)
-    let judged=Release.judge (answers @ Option.to_list entered) in
+    let judged=Release.judge (answers @ Option.to_list pending @ Option.to_list entered) in
     let* input=match input_released,judged with
       | true,Release.Settled _ -> Ok judged
       | true,Release.Unconfirmed reason -> Error (receipts_do_not_show reason)
       | false,Release.Unconfirmed _ -> Ok judged
       | false,Release.Settled _ -> Ok (Release.Unconfirmed Release.Held_by_script_report) in
-    Ok (Stopped {receipt;message;effect_started=started;completed_effect;input;native_error})
+    Ok (Stopped {receipt;message;effect_started=started;completed_effect;input;native_error;pages})
   | _ -> Error "workflow failure must be null or an object"

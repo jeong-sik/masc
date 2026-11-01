@@ -69,6 +69,30 @@ let with_browser ?unavailable tabs f =
   f read reads
 let read_ok read tab_id = match read tab_id with Ok data -> data | Error detail -> fail detail
 let selection data = Yojson.Safe.Util.member "selection" data
+let test_exact_inventory_tab () =
+  let provenance=`Assoc ["label",`String "p1";"targetId",`String "owned-source";"openedBy",`String "agent"] in
+  let source=match tab 41 "https://example.org/source" false with
+    | `Assoc fields -> `Assoc (fields @ ["egoPage",provenance])
+    | `Null|`Bool _|`Int _|`Intlit _|`Float _|`String _|`List _ -> fail "fixture tab must be an object" in
+  let other=tab 7 "https://example.org/active" true in
+  (match Surface.inventory_tab ~tab_id:41 (`List [other;source]) with
+   | Ok observed ->
+     check int "requested source is preserved instead of the active tab" 41 observed.id;
+     check string "source URL is retained" "https://example.org/source" observed.url;
+     check bool "canonical Page provenance is retained" true
+       (Option.map Surface.ego_page_to_json observed.ego_page=Some provenance)
+   | Error detail -> fail detail);
+  let unavailable=`Assoc ["id",`Int 41;"error",`String "native Page metadata unavailable"] in
+  let partial rows=`Assoc ["tabs",`List rows;"complete",`Bool false;"unavailableTabs",`List [unavailable]] in
+  List.iter (fun (description,inventory) ->
+    match Surface.inventory_tab ~tab_id:41 inventory with
+    | Error _ -> ()
+    | Ok _ -> fail (description ^ " must refuse the source before input"))
+    ["duplicate source",`List [source;source];
+     "absent source",`List [other];
+     "unreadable source",partial [other];
+     "source listed as both visible and unreadable",partial [other;source]]
+
 let test_partial_inventory_preserves_requested_work () =
   let unavailable = [`Assoc ["id",`Int 12;"error",`String "unsupported operation"]] in
   with_browser ~unavailable [tab 41 "https://example.org/page" true] (fun read reads ->
@@ -402,6 +426,7 @@ let () = run "browser surface" ["behavior",[
   test_case "a snapshot read is checked before any browser" `Quick test_a_snapshot_read_is_checked_before_any_browser;
   test_case "a snapshot target is checked before any browser" `Quick test_a_snapshot_target_is_checked_before_any_browser;
   test_case "a hand-off is checked before any browser" `Quick test_a_hand_off_is_checked_before_any_browser;
+  test_case "an exact inventory source never substitutes ambiguous or unreadable Pages" `Quick test_exact_inventory_tab;
   test_case "unreadable tabs do not block the requested readable tab" `Quick test_partial_inventory_preserves_requested_work;
   test_case "partial inventories remain incomplete without unavailable tabs" `Quick test_partial_inventory_without_unavailable_tabs;
   test_case "a tab keeps its window and a malformed one is refused" `Quick test_tab_window_is_kept_and_checked;

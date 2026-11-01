@@ -157,7 +157,11 @@ val assert_input_reset : t -> generation:string -> (unit, string) result
     acting is [Before_effect], a load that failed
     after it started is a [Partial_failure] with where the tab is now, and a
     run that was stopped or failed where the script cannot say is
-    [Outcome_unknown]. [page.downloads] lists the downloads and native Fetch
+    [Outcome_unknown]. Popup workflows bind the full original canonical Page
+    identity from a fresh native inventory before execution. A fixed internal
+    expected identity is checked before SDK effects and against the returned
+    source before input settlement; callers cannot supply that authority.
+    [page.downloads] lists the downloads and native Fetch
     saves an agent page started in this SDK process: each step that acts on such
     a page starts watching it, and a row says pending, completed or
     interrupted as {!Browser_downloads} does, a completed file once

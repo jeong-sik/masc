@@ -80,7 +80,7 @@ local Space is visible or that its login is complete.
 | `Page.screenshot` | `BrowserRead` screenshot / `page.capture` forwards native fullPage, clip (including clip scale), scale="css" and raw; broker owns the output path and Vision size limit. Explicit options produce a page image artifact without pointer-frame geometry | Real SDK options execution and installed MASC/Keeper route unverified |
 | `Page.url` | Native workflow url returns the SDK value as a step receipt | Installed MASC/Keeper route unverified |
 | `Page.waitForURL` | Native workflow string/glob or `urlRegex {source, flags?}`; native RegExp construction and SDK matching/polling, without a second host matcher | Function matcher not exposed; actual SDK and installed MASC/Keeper route unverified |
-| `Page.waitForEvent` | Internal download watch | General event waits and typed handle lifecycle |
+| `Page.waitForEvent` | Internal download watch; typed clickAndWaitForPopup pre-arms the native popup wait and continues on its canonically reconciled same-Space Page, retaining source/current identities and partial trigger evidence | General event waits/conditional flows remain unsupported; installed MASC popup acceptance is separate |
 | `Page.waitForTimeout` | Native workflow explicit finite nonnegative milliseconds | Real SDK/installed-route proof; elapsed time is not state verification |
 | `Page.title` | Native workflow title returns the SDK value as a step receipt | Installed MASC/Keeper route unverified |
 | `Page.info` | Native workflow info returns native state; dialog stops following steps | Installed MASC/Keeper route unverified |

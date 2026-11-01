@@ -8,6 +8,11 @@ type unconfirmed =
 type t = Settled of settled | Unconfirmed of unconfirmed
 let declared_members = ["popups"; "dialog"]
 let popup_members = ["label"; "targetId"]
+let popup_required_string_members = ["label"; "targetId"]
+let receipt_contract =
+  let strings values = `List (List.map (fun value -> `String value) values) in
+  `Assoc ["declaredMembers",strings declared_members;"popupMembers",strings popup_members;
+    "requiredPopupStringMembers",strings popup_required_string_members]
 let distinct_members fields =
   let names = List.map fst fields in
   List.length (List.sort_uniq String.compare names) = List.length names
@@ -18,7 +23,7 @@ let popup_declared = function
   | `Assoc fields ->
     distinct_members fields
     && List.for_all (fun (member, _) -> List.mem member popup_members) fields
-    && nonempty_string_member "label" fields && nonempty_string_member "targetId" fields
+    && List.for_all (fun key -> nonempty_string_member key fields) popup_required_string_members
   | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> false
 let popups_declared fields = match List.assoc_opt "popups" fields with
   | None -> true

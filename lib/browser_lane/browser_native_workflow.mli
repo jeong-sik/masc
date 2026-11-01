@@ -14,8 +14,11 @@ type url_matcher = Glob of string | Regexp of { source : string; flags : string 
 (** Validated SDK options for their exact method, excluding caller host paths.
     Fetch [saveAs] names an artifact file; the worker supplies the private path. *)
 type native_options
+type popup_wait_options
+(** Native waitForEvent options. Omission preserves the SDK default. *)
 type action =
   | Click of string | Double_click of string | Hover of string
+  | Click_and_wait_for_popup of { selector : string; popup_options : popup_wait_options option }
   | Drag_and_drop of { selector : string; destination : string }
   | Mouse_click of { x : float; y : float }
   | Mouse_move of { x : float; y : float }

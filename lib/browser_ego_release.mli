@@ -35,6 +35,11 @@ type unreleased =
     Only [answer_of_json] builds it. *)
 type answer = private Receipt_without_dialog | Unreleased of unreleased
 
+val receipt_contract : Yojson.Safe.t
+(** Fixed field data for validating SDK input receipts before another action.
+    Constructed from the same lists used by [answer_of_json]; it carries no
+    input-release or operator authority. The host supplies it internally. *)
+
 val answer_of_json : Yojson.Safe.t -> answer
 (** Reads the answer an SDK call returned. It never yields [Never_returned];
     callers use [of_unreleased] when a step gave no answer. *)

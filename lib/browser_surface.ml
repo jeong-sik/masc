@@ -9,10 +9,11 @@ let dialog_kind_of_wire = function
   | "beforeunload" -> Some Beforeunload | _ -> None
 type ego_page_origin = Agent_created | Unknown_origin
 type ego_page = { label : string option; target_id : string; opened_by : ego_page_origin }
-let ego_page_to_json page = `Assoc [
+let ego_page_fields page = [
   "label",(match page.label with None -> `Null | Some label -> `String label);
   "targetId",`String page.target_id;
   "openedBy",`String (match page.opened_by with Agent_created -> "agent" | Unknown_origin -> "unknown")]
+let ego_page_to_json page = `Assoc (ego_page_fields page)
 let ego_page_of_json = function
   | `Assoc fields when List.sort String.compare (List.map fst fields)=["label";"openedBy";"targetId"] ->
     (match List.assoc_opt "label" fields,List.assoc_opt "targetId" fields,List.assoc_opt "openedBy" fields with
@@ -148,6 +149,11 @@ let prepare_read ~tab_id raw_tabs =
      caller receiving whichever tab the browser listed first. *)
   let* selection = select ~tab_id tabs in
   Ok {inventory;selection}
+let inventory_tab ~tab_id raw_tabs =
+  let* plan = prepare_read ~tab_id:(Some tab_id) raw_tabs in
+  match List.filter (fun (tab:tab) -> tab.id=tab_id) plan.inventory.tabs with
+  | [tab] -> Ok tab
+  | [] | _::_ -> Error "requested tab is absent or ambiguous in the browser inventory"
 let selected_tab plan=match plan.selection with
   | None_active -> None | Requested tab|Active tab -> Some tab
 let project_read plan ~binding ~started ~page =

@@ -192,6 +192,23 @@ val authoring_descriptors :
 val load : base_path:string -> Skill_reference.t -> (loaded, error) result
 val preview : descriptors:(Keeper_tool_descriptor.t list, string) result -> base_path:string -> Skill_reference.t -> source_text:string -> (preview, error) result
 
+type expected_kind = Instruction_kind | Composition_kind
+
+(** Parse a new package without writing files or publishing a snapshot. This
+    validates content against the current authoring descriptors; it does not
+    reserve the package name or establish source write availability.
+    A guided author supplies the selected kind; [None] is for source-first
+    publication, where the document itself expresses the author's intent. *)
+val preview_new :
+  expected_kind:expected_kind option ->
+  descriptors:(Keeper_tool_descriptor.t list, string) result ->
+  source_id:Skill_source_config.source_id -> package_id:string -> string ->
+  (preview, error) result
+
+(** Discovery projection of the same descriptor names accepted by composition
+    plans. This grants no execution capability; preview/create revalidate. *)
+val authoring_tools_to_yojson : Keeper_tool_descriptor.t list -> Yojson.Safe.t
+
 val save :
   descriptors:(Keeper_tool_descriptor.t list, string) result ->
   base_path:string ->
@@ -206,6 +223,7 @@ val writable_sources : base_path:string -> (writable_source list, error) result
 
 (** Create one new package directory and SKILL.md without overwriting. *)
 val create :
+  expected_kind:expected_kind option ->
   descriptors:(Keeper_tool_descriptor.t list, string) result ->
   base_path:string ->
   source_id:Skill_source_config.source_id ->

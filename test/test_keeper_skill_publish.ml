@@ -577,7 +577,7 @@ let test_refusal_names_the_path_and_why () =
   in
   let error =
     match
-      Server_skill_editor.create ~descriptors:(Ok (Keeper_tool_descriptor.all_descriptors ()))
+      Server_skill_editor.create ~expected_kind:None ~descriptors:(Ok (Keeper_tool_descriptor.all_descriptors ()))
         ~base_path
         ~source_id
         ~package_id:"blocked"

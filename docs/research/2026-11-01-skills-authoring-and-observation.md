@@ -54,9 +54,9 @@ the first implementation unit.
 | Requirement | Required evidence | Current state |
 | --- | --- | --- |
 | Explain applicable prior art and concrete adaptations | Official-source comparison linked to actual changes | Comparison above; implementation in progress |
-| Create instruction Skills and compositions through clear, validated flows | Real create/preview/publish/readback with source choice, diagnostics and publication outcomes | Incomplete |
+| Create instruction Skills and compositions through clear, validated flows | Real create/preview/publish/readback with source choice, diagnostics and publication outcomes | Guided Dashboard candidate implemented; 107 Dashboard checks passed; server execution, TUI authoring and actual screen proof pending |
 | Compose existing capabilities with explicit inputs, dependencies and outputs | Parser/executor-backed preparation and execution; inspectable flow and resulting records | Existing foundation; experience improvements incomplete |
-| Count original runs and asynchronous use honestly | Producer-to-store-to-read-model tests, exact revision and coverage consistency | First candidate #47036: focused checks passed; async correction in progress |
+| Count original runs and asynchronous use honestly | Producer-to-store-to-read-model tests, exact revision and coverage consistency | Candidates #47036/#47041: focused retained-run and async usage checks passed; installed/runtime proof pending |
 | Make statistics interpretable | Sample sizes, populations, units, recorded-time bounds, empty/unavailable distinction, duration distributions | First candidate implemented and tested; rendered/runtime proof pending |
 | Explain actual failures and nested execution | Failure reasons, parent/child/node identities and outcomes visible in both clients | Incomplete |
 | Remove obsolete UI and compatibility paths | Call-site inventory and replacement behavior; no parallel authorities | Obsolete evidence reader removal in progress; broader UI work pending |

@@ -475,6 +475,28 @@ let authoring_descriptors ~config ~access =
     static @ List.map Keeper_lane_addon_descriptor.create reading.exports)
 ;;
 
+let authoring_tools_to_yojson descriptors =
+  let tools = List.concat_map (fun (descriptor : Keeper_tool_descriptor.t) ->
+    let output = match descriptor.composable_output with
+      | Keeper_tool_descriptor.Opaque_output -> `Assoc [ "kind", `String "opaque" ]
+      | Keeper_tool_descriptor.Json_output { schema } ->
+        `Assoc [ "kind", `String "json"; "schema", schema ] in
+    let execution = match descriptor.execution with
+      | Keeper_tool_descriptor.Ordinary Keeper_tool_descriptor.Serial -> "serial"
+      | Keeper_tool_descriptor.Ordinary Keeper_tool_descriptor.Concurrent -> "concurrent"
+      | Keeper_tool_descriptor.Terminal -> "terminal" in
+    Keeper_tool_descriptor.keeper_model_names descriptor
+    |> List.map (fun name -> name, `Assoc
+      [ "name", `String name
+      ; "description", `String descriptor.description
+      ; "input_schema", descriptor.input_schema
+      ; "output", output
+      ; "execution", `String execution ])) descriptors
+    |> List.sort (fun (left, _) (right, _) -> String.compare left right) in
+  `Assoc [ "schema", `String "masc.skill-authoring-tools/v1"
+         ; "tools", `List (List.map snd tools) ]
+;;
+
 let validate_source ~descriptors ~directory source_text =
   let* descriptors = Result.map_error (fun detail -> Validation_failed detail) descriptors in
   Keeper_skill_catalog.validate_authored_source ~descriptors ~directory source_text
@@ -650,13 +672,22 @@ let find_writable_source snapshot source_id =
        Ok source_root)
 ;;
 
-let preview_new ~descriptors ~source_id ~package_id source_text =
+type expected_kind = Instruction_kind | Composition_kind
+
+let preview_new ~expected_kind ~descriptors ~source_id ~package_id source_text =
   let* parsed_package_id =
     Skill_reference.package_id_of_directory package_id
     |> Result.map_error (fun error ->
       Invalid_package_id (Skill_reference.package_id_error_to_string error))
   in
   let* skill = validate_source ~descriptors ~directory:package_id source_text in
+  let* () = match expected_kind, skill.surface with
+    | None, _ | Some Instruction_kind, Keeper_skill_catalog.Instruction
+    | Some Composition_kind, Keeper_skill_catalog.Composition _ -> Ok ()
+    | Some Instruction_kind, Keeper_skill_catalog.Composition _ ->
+      Error (Validation_failed "Instruction selected, but the document declares an executable composition. Escape examples in an outer code fence or select Composition.")
+    | Some Composition_kind, Keeper_skill_catalog.Instruction ->
+      Error (Validation_failed "Composition selected, but the document has no executable composition declaration.") in
   let identity =
     Skill_reference.make_identity
       ~source_id
@@ -740,9 +771,9 @@ let with_missing_source_root_created ~base_path ~refresh snapshot source_id =
         | Ok (_ : Skill_catalog_snapshot_service.publication) -> current_snapshot ~base_path))
 ;;
 
-let create ~descriptors ~base_path ~source_id ~package_id ~source_text ~refresh =
+let create ~expected_kind ~descriptors ~base_path ~source_id ~package_id ~source_text ~refresh =
   let* snapshot = current_snapshot ~base_path in
-  let* preview = preview_new ~descriptors ~source_id ~package_id source_text in
+  let* preview = preview_new ~expected_kind ~descriptors ~source_id ~package_id source_text in
   let* snapshot = with_missing_source_root_created ~base_path ~refresh snapshot source_id in
   let* source_root = find_writable_source snapshot source_id in
   let package_dir = Filename.concat source_root package_id in

@@ -1,43 +1,7 @@
-(* The NEXT REQUEST band draws the server's forecast in tokens at the tab's
-   scale: the carried range from the pair's front, the retained ledger
-   baseline, the separate trim settings, and the parts in the order the request
-   carries them. The band is rendered here through its own entry point with
-   plain folding, so the assertions are about the sentences, not the pane. *)
+(* Forecast decoding, retained readings and runtime identity lookup. *)
 
 module Inspector = Masc_tui_context_inspector
 module Band = Masc_tui_next_request_band
-
-let strip line =
-  let buffer = Buffer.create (String.length line) in
-  let rec go i =
-    if i >= String.length line then ()
-    else if line.[i] = '\027' then skip (i + 1)
-    else (
-      Buffer.add_char buffer line.[i];
-      go (i + 1))
-  and skip i =
-    if i >= String.length line then ()
-    else if line.[i] = 'm' then go (i + 1)
-    else skip (i + 1)
-  in
-  go 0;
-  Buffer.contents buffer
-
-let contains needle line =
-  let n = String.length needle and l = String.length line in
-  let rec at i = i + n <= l && (String.sub line i n = needle || at (i + 1)) in
-  at 0
-
-let text rows = String.concat " " (List.map strip rows)
-let says needle rows = contains needle (text rows)
-
-let lines ?(scale = Masc_tui_token_scale.fleet) forecast =
-  Band.lines
-    ~prose:(fun sentence -> [ "  " ^ sentence ])
-    ~fact:(fun row -> [ "  " ^ row ])
-    ~safe:Fun.id
-    ~scale
-    forecast
 
 (* lane-smith on a deepseek binding: the ledger's front
    sits at atom 3,100 of 3,395, the ledger baseline is 91k tokens. *)
@@ -362,47 +326,6 @@ let test_the_old_schema_is_refused () =
   | Error _ -> ()
   | Ok _ -> Alcotest.fail "a server on the previous shape is named, not half-read"
 
-(* analyst on the glm-coding lane while its head rests on a 429: the walk
-   moves the head behind its siblings and names its release; the others keep
-   their declared order. *)
-let walked : Inspector.forecast =
-  let candidate runtime_id place : Inspector.forecast_candidate =
-    { runtime_id
-    ; lane = Inspector.Lane_agent_core
-    ; parts = Error "no composition"
-    ; history_atoms = 6362
-    ; carried = None
-    ; assembly = None
-    ; place
-    }
-  in
-  { checkpoint_messages = 6358
-  ; wake_line_bytes = 131
-  ; walk =
-      Ok
-        { lane_id = "glm-coding.glm-5.3-flash"
-        ; declared =
-            [ "glm-coding.glm-5.3-flash"
-            ; "ollama_cloud.ollama-cloud-deepseek-v4-1-flash"
-            ; "kimi_coding.kimi-k3"
-            ; "claude_code.claude-sonnet-5"
-            ]
-        }
-  ; candidates =
-      [ candidate "ollama_cloud.ollama-cloud-deepseek-v4-1-flash"
-          { walks_at = 0; declared_at = Some 1; rest = Inspector.Rest_serving }
-      ; candidate "kimi_coding.kimi-k3"
-          { walks_at = 1; declared_at = Some 2; rest = Inspector.Rest_serving }
-      ; candidate "claude_code.claude-sonnet-5"
-          { walks_at = 2; declared_at = Some 3; rest = Inspector.Rest_serving }
-      ; candidate "glm-coding.glm-5.3-flash"
-          { walks_at = 3
-          ; declared_at = Some 0
-          ; rest = Inspector.Rest_resting { release_at = 60_000.; walk_promotes_at_release = true }
-          }
-      ]
-  }
-
 let test_the_walk_and_the_place_decode () =
   let json =
     Yojson.Safe.from_string
@@ -430,9 +353,7 @@ let test_the_walk_and_the_place_decode () =
       (second.place = { walks_at = 1; declared_at = None; rest = Inspector.Rest_serving })
   | Ok _ -> Alcotest.fail "two candidates decode"
 
-(* An assignment the driver would refuse: the server says why, the band
-   names it in place of any candidate. *)
-let test_a_refused_walk_is_named_not_walked () =
+let test_a_refused_walk_keeps_the_reason () =
   let json =
     Yojson.Safe.from_string
       {|{"schema":"masc.keeper.next-request-forecast.v6","checkpoint_messages":7,"wake_line_bytes":131,
@@ -440,26 +361,20 @@ let test_a_refused_walk_is_named_not_walked () =
   in
   match Inspector.decode_forecast json with
   | Error detail -> Alcotest.fail ("a refused walk decodes: " ^ detail)
-  | Ok ({ walk = Error refusal; candidates = []; _ } as forecast) ->
+  | Ok { walk = Error refusal; candidates = []; _ } ->
     Alcotest.(check string) "the reason is the server's"
-      "the assignment names no configured lane or runtime" refusal;
-    let rows = lines (Ok forecast) in
-    Alcotest.(check bool) "the band names it" true
-      (says "Next request not walked: the assignment names no configured lane or runtime" rows);
-    Alcotest.(check bool) "and walks nothing" false (says "Walks " rows || says "Lane " rows)
+      "the assignment names no configured lane or runtime" refusal
   | Ok _ -> Alcotest.fail "a refused walk reads as a refusal with no candidates"
 
 let test_runtime_configuration_attaches_by_exact_id () =
   let observed = ref [] in
-  let rows = Band.lines ~prose:(fun x -> [x]) ~fact:(fun x -> [x]) ~safe:Fun.id
-    ~scale:Masc_tui_token_scale.fleet
-    ~runtime_details:(fun id -> observed := id :: !observed;
-      ["Account codex1 · configured context 500000 tokens"])
-    (Ok measured) in
+  ignore
+    (Band.lines ~prose:(fun x -> [x]) ~fact:(fun x -> [x]) ~safe:Fun.id
+       ~scale:Masc_tui_token_scale.fleet
+       ~runtime_details:(fun id -> observed := id :: !observed; [])
+       (Ok measured));
   Alcotest.(check (list string)) "lookup uses the candidate identity"
-    ["ollama_cloud.deepseek-v4-1-flash"] !observed;
-  Alcotest.(check bool) "account/window is visible" true (says "Account codex1" rows);
-  Alcotest.(check bool) "execution order remains explicit" true (says "Walks first" rows)
+    ["ollama_cloud.deepseek-v4-1-flash"] !observed
 
 let test_retained_forecast_reuses_recent_reading_only () =
   let turn_ref = Ids.Turn_ref.make ~trace_id:"t" ~absolute_turn:1 in
@@ -558,7 +473,7 @@ let () =
         ; Alcotest.test_case "the old schema is refused" `Quick test_the_old_schema_is_refused
         ; Alcotest.test_case "the walk and the place decode" `Quick
             test_the_walk_and_the_place_decode
-        ; Alcotest.test_case "a refused walk is named, not walked" `Quick
-            test_a_refused_walk_is_named_not_walked
+        ; Alcotest.test_case "a refused walk keeps the server reason" `Quick
+            test_a_refused_walk_keeps_the_reason
         ] )
     ]

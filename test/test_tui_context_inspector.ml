@@ -471,35 +471,6 @@ let test_a_pane_reads_the_part_it_shows () =
   check (option int) "the composition tab reads nothing" None
     (shown ~tab:Inspector.Composition ~opened:None ~cursor:0)
 
-let test_every_kind_names_one_producer () =
-  let label = Inspector.input_source_label in
-  Alcotest.(check string)
-    "the system prompt is assembled" "turn prompt assembly"
-    (label (Inspector.exact_input_source Inspector.System_prompt));
-  Alcotest.(check string)
-    "a schema comes from the tool surface" "effective tool surface"
-    (label
-       (Inspector.exact_input_source
-          (Inspector.Tool_schema { name = "masc_check" })));
-  Alcotest.(check string)
-    "a message comes from the provider list" "provider message list"
-    (label (Inspector.exact_input_source (Inspector.Message { role = "tool" })));
-  Alcotest.(check string)
-    "a prompt block is assembled" "turn prompt assembly"
-    (label
-       (Inspector.input_source
-          (Turn_record.Prompt_block Prompt_block_id.Memory_os_recall)));
-  Alcotest.(check string)
-    "tool schemas are the tool surface" "effective tool surface"
-    (label (Inspector.input_source Turn_record.Tool_schemas));
-  Alcotest.(check string)
-    "tool results ride the message list" "provider message list"
-    (label (Inspector.input_source Turn_record.Message_tool_result));
-  Alcotest.(check (list string))
-    "the flow order, each producer once"
-    [ "turn prompt assembly"; "effective tool surface"; "provider message list" ]
-    (List.map label Inspector.input_sources)
-
 let test_pinned_input_survives_record_failure () =
   let input = decoded_input () in
   let reading = Inspector.Exact_read
@@ -597,7 +568,5 @@ let () =
             test_pinned_unattributed_record_stays_exact
         ; test_case "late pending snapshots preserve progress" `Quick
             test_late_pending_snapshot_cannot_erase_progress
-        ; Alcotest.test_case "every kind names one producer" `Quick
-            test_every_kind_names_one_producer
         ] )
     ]

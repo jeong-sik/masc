@@ -2283,14 +2283,15 @@ let add_routes ~sw ~clock router =
                reqd)
   |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/skills/evidence" (fun state _agent_name req reqd ->
            Http.Request.read_body_async reqd (fun body_str ->
-             match parse_skill_editor_body body_str with
+             match Server_skill_evidence.request_of_string body_str with
              | Error message ->
                respond_dashboard_error ~status:`Bad_request ~request:req reqd message
-             | Ok { reference; source_text = _; confirmed = _ } ->
+             | Ok (reference, composition_run_id) ->
                Http.Response.json_value
                  ~compress:true
                  ~request:req
                  (Server_skill_evidence.project
+                    ?composition_run_id
                     ~config:(Mcp_server.workspace_config state)
                     reference)
                  reqd))

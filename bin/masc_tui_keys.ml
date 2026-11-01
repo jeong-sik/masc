@@ -462,6 +462,14 @@ let fusion_board_key = b Navigate "B" "Board evidence"
 
 let keeper_navigation_hints = "Up/Down:move  Enter:open  Right/Esc:back"
 
+let tools_bracket_binding ~pane =
+  let label = match pane with
+    | Tools_surface -> "run"
+    | Tools_async | Tools_activations | Tools_usage | Tools_catalog -> "Keeper"
+  in
+  b Navigate "[ / ]" label
+    ~help:"in Available, older/newer retained original run; in other panes, previous/next Keeper"
+
 let for_surface = function
   | Overview ->
       [ b Navigate "Left" "Keepers" ~help:"open the Keeper list; Enter opens a chat; Right or Esc returns"
@@ -1147,7 +1155,7 @@ let for_surface = function
          cannot carry Enter -- the fitter never drops it -- so advertising it
          here squeezed the action diagnosis out of the 98-cell row and broke
          the sheet-only contract (test_tui_keys, tools_async_bindings). *)
-      ; b Navigate "[ / ]" "Keeper" ~help:"change the effective Keeper surface"
+      ; tools_bracket_binding ~pane:Tools_surface
       ; b Act "c / C" "new Skill"
           ~help:"open $EDITOR on a template for a new Skill; c starts an \
                  instruction Skill, C starts a composition Skill"
@@ -1223,6 +1231,13 @@ let answers_in_state ?detail_open binding =
 let footer_hints ?detail_open surface =
   hints_of_bindings
     (List.filter (answers_in_state ?detail_open) (for_surface surface))
+
+let footer_hints_tools ~pane =
+  let bracket = tools_bracket_binding ~pane in
+  hints_of_bindings
+    (List.map (fun (binding : binding) ->
+       if String.equal binding.key bracket.key then bracket else binding)
+       (for_surface Tools))
 
 type approvals_footer =
   | Approval_browsing

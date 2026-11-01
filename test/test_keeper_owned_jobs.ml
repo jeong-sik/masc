@@ -5646,7 +5646,7 @@ let test_nested_skill_job_continuation ?(fault_after_acceptance=false) ?(dynamic
     usage.observed_actions;
   let detail = Server_skill_evidence.project ~config reference in
   let evidence = detail |> member "activation" |> member "evidence" in
-  check string "detail uses required async evidence contract" "masc.skill-evidence/v8"
+  check string "detail uses required async evidence contract" "masc.skill-evidence/v9"
     (detail |> member "schema" |> to_string);
   check_json "detail returns the original Task and admission frame"
     (Ledger.activation_to_yojson original_activation) (evidence |> member "activation");

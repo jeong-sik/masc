@@ -252,7 +252,23 @@ let test_same_reference_runs_do_not_overlap () =
        let open Yojson.Safe.Util in
        Alcotest.(check string) "latest still selects the newest run"
          (Keeper_tool_plan.Composition_run_id.to_string second)
-         (loaded |> member "composition_run_id" |> to_string))
+         (loaded |> member "composition_run_id" |> to_string);
+       save (make_evidence reference settlements first ~recorded_at:200.0);
+       let tied = Keeper_skill_composition_evidence.load_observation config reference |> Result.get_ok in
+       let ids = List.map (fun evidence ->
+         (Keeper_skill_composition_evidence.run_summary evidence).run_id
+         |> Keeper_tool_plan.Composition_run_id.to_string) tied.runs in
+       Alcotest.(check (list string)) "equal timestamps use descending original ID order"
+         (List.sort (fun a b -> String.compare b a)
+           [Keeper_tool_plan.Composition_run_id.to_string first; Keeper_tool_plan.Composition_run_id.to_string second]) ids;
+       save (make_evidence reference settlements first ~recorded_at:300.0);
+       let updated = Keeper_skill_composition_evidence.load_observation config reference |> Result.get_ok in
+       Alcotest.(check int) "a replacement result keeps one original run" 2 updated.statistics.records;
+       Alcotest.(check int) "history and samples share original-run deduplication" 2 (List.length updated.runs);
+       Alcotest.(check string) "updated result is first in retained history"
+         (Keeper_tool_plan.Composition_run_id.to_string first)
+         ((Keeper_skill_composition_evidence.run_summary (List.hd updated.runs)).run_id
+          |> Keeper_tool_plan.Composition_run_id.to_string))
 ;;
 
 let test_only_run_partition_is_authoritative () =
@@ -386,8 +402,17 @@ let test_duration_statistics () =
   Alcotest.(check (option (float 0.00001))) "p95 distinguishes tail from maximum" (Some 18.) tail.completed.p95_ms;
   Alcotest.(check (option (float 0.00001))) "outlier remains visible" (Some 1000.) tail.completed.max_ms;
   Alcotest.(check (option (float 0.00001))) "zero is measured" (Some 0.) tail.completed.min_ms;
-  let before_epoch = change ~disposition:"completed" ~duration:10. ~recorded_at:(-100.5) first
-    |> fun evidence -> E.statistics [evidence] in
+  let before_epoch_evidence = change ~disposition:"completed" ~duration:10. ~recorded_at:(-100.5) first in
+  let summary = E.run_summary before_epoch_evidence |> E.run_summary_to_yojson in
+  Alcotest.(check bool) "pre-epoch summary round-trips through its public codec" true
+    ((E.run_summary_of_yojson summary |> Result.map E.run_summary_to_yojson) = Ok summary);
+  List.iter (fun value ->
+    let fields = Yojson.Safe.Util.to_assoc summary in
+    Alcotest.(check bool) "nonfinite summary time is refused" true
+      (E.run_summary_of_yojson (`Assoc (("recorded_at", `Float value)
+        :: List.remove_assoc "recorded_at" fields)) |> Result.is_error))
+    [nan; infinity; neg_infinity];
+  let before_epoch = E.statistics [before_epoch_evidence] in
   Alcotest.(check (option (float 0.00001))) "finite pre-epoch record starts the window"
     (Some (-100.5)) before_epoch.first_recorded_at;
   Alcotest.(check (option (float 0.00001))) "finite pre-epoch record ends the window"

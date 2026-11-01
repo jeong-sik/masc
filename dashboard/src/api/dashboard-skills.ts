@@ -252,12 +252,28 @@ export interface SkillDurationStatistics {
   max_ms: number | null
 }
 
+export interface SkillCompositionRun {
+  composition_run_id: string
+  keeper: string
+  composition_execution: 'inline' | 'async'
+  request_id: string | null
+  disposition: 'completed' | 'deferred' | 'failed'
+  duration_ms: number
+  recorded_at: number
+}
+
+export type SkillCompositionSelection =
+  | { mode: 'latest_retained' }
+  | { mode: 'exact_run'; composition_run_id: string }
+
 export interface SkillEvidenceResponse {
-  schema: 'masc.skill-evidence/v8'
+  schema: 'masc.skill-evidence/v9'
   status: 'observed' | 'not_observed_in_retained_coverage'
   reference: SkillReference
   activation: SkillActivationSelection | null
   composition: SkillCompositionEvidence | null
+  composition_selection: SkillCompositionSelection
+  composition_runs: readonly SkillCompositionRun[] | null
   composition_statistics: {
     scope: 'exact_reference_retained_runs'
     duration_scope: 'stored_executor_result'
@@ -636,9 +652,22 @@ const SkillDurationStatisticsSchema = Schema.Struct({
 })
 
 const SkillEvidenceResponseSchema = Schema.Struct({
-  schema: Schema.Literal('masc.skill-evidence/v8'),
+  schema: Schema.Literal('masc.skill-evidence/v9'),
   status: Schema.Literal('observed', 'not_observed_in_retained_coverage'),
   reference: SkillReferenceSchema,
+  composition_selection: Schema.Union(
+    Schema.Struct({ mode: Schema.Literal('latest_retained') }),
+    Schema.Struct({ mode: Schema.Literal('exact_run'), composition_run_id: Schema.NonEmptyString }),
+  ),
+  composition_runs: Schema.NullOr(Schema.Array(Schema.Struct({
+    composition_run_id: Schema.NonEmptyString,
+    keeper: Schema.NonEmptyString,
+    composition_execution: Schema.Literal('inline', 'async'),
+    request_id: Schema.NullOr(Schema.NonEmptyString),
+    disposition: Schema.Literal('completed', 'deferred', 'failed'),
+    duration_ms: Schema.Number,
+    recorded_at: Schema.Number,
+  }))),
   activation: Schema.NullOr(Schema.Union(
     Schema.Struct({
       selection: Schema.Literal('most_recent_observed'),
@@ -1437,7 +1466,50 @@ export function decodeSkillEvidenceResponse(raw: unknown): SkillEvidenceResponse
     || !isLowerHexRevision(decoded.reference.content_revision)) {
     contractError('invalid_response', 'skill evidence reference is invalid')
   }
-  const observed = decoded.activation !== null || decoded.composition !== null
+  const runs = decoded.composition_runs
+  const selection = decoded.composition_selection
+  const rawEnvelope = raw as Record<string, unknown>
+  if (!hasExactKeys(rawEnvelope.composition_selection as Record<string, unknown>,
+    selection.mode === 'latest_retained' ? ['mode'] : ['mode', 'composition_run_id'])
+    || (runs !== null && !(rawEnvelope.composition_runs as Record<string, unknown>[]).every(run =>
+      hasExactKeys(run, ['composition_run_id', 'keeper', 'composition_execution', 'request_id',
+        'disposition', 'duration_ms', 'recorded_at'])))) {
+    contractError('invalid_response', 'retained run history or selection carries unknown fields')
+  }
+  const validRunId = (value: string) => isUuid(value) && uuidVersion(value) === 7
+  if (selection.mode === 'exact_run' && !validRunId(selection.composition_run_id)) {
+    contractError('invalid_response', 'selected composition_run_id must be UUIDv7')
+  }
+  if (runs !== null) {
+    const ids = new Set<string>()
+    for (let index = 0; index < runs.length; index += 1) {
+      const run = runs[index]!
+      const previous = runs[index - 1]
+      if (!validRunId(run.composition_run_id) || ids.has(run.composition_run_id)
+        || run.keeper.trim() === '' || !Number.isFinite(run.duration_ms) || run.duration_ms < 0
+        || !Number.isFinite(run.recorded_at)
+        || (run.composition_execution === 'inline' ? run.request_id !== null : !run.request_id?.trim())
+        || (previous !== undefined && (previous.recorded_at < run.recorded_at
+          || (previous.recorded_at === run.recorded_at && previous.composition_run_id <= run.composition_run_id)))) {
+        contractError('invalid_response', 'retained run history violates identity, numeric or ordering invariants')
+      }
+      ids.add(run.composition_run_id)
+    }
+  }
+  const selectedRun = selection.mode === 'latest_retained' ? runs?.[0]
+    : runs?.find(run => run.composition_run_id === selection.composition_run_id)
+  const composition = decoded.composition
+  if (selectedRun === undefined ? composition !== null
+    : composition === null || selectedRun.composition_run_id !== composition.composition_run_id
+      || selectedRun.keeper !== composition.keeper
+      || selectedRun.composition_execution !== composition.composition_execution
+      || selectedRun.request_id !== composition.request_id
+      || selectedRun.disposition !== composition.result.disposition
+      || selectedRun.duration_ms !== composition.result.duration_ms
+      || selectedRun.recorded_at !== composition.recorded_at) {
+    contractError('invalid_response', 'composition detail disagrees with retained selection')
+  }
+  const observed = decoded.activation !== null || (runs?.length ?? 0) > 0
   if ((decoded.status === 'observed') !== observed) {
     contractError('invalid_response', 'skill evidence status disagrees with its observations')
   }
@@ -1546,14 +1618,23 @@ export function decodeSkillEvidenceResponse(raw: unknown): SkillEvidenceResponse
     const { first_recorded_at: first, last_recorded_at: last } = statistics.recorded_window
     const validWindow = statistics.records === 0 ? first === null && last === null
       : first !== null && last !== null && Number.isFinite(first) && Number.isFinite(last)
-        && first <= last && last === decoded.composition?.recorded_at
+        && first <= last && last === runs?.[0]?.recorded_at
+        && first === runs?.at(-1)?.recorded_at
     if (!validWindow) contractError('invalid_response', 'composition recorded window disagrees with retained evidence')
+    if (runs === null
+      || statistics.completed.samples !== runs.filter(run => run.disposition === 'completed').length
+      || statistics.failed.samples !== runs.filter(run => run.disposition === 'failed').length
+      || statistics.deferred !== runs.filter(run => run.disposition === 'deferred').length) {
+      contractError('invalid_response', 'composition samples disagree with retained run history')
+    }
   }
   const { composition_scope: scope, composition_runs_observed: read } = decoded.coverage
   const coverageAgrees = scope === 'exact_reference_retained_runs'
-    ? (decoded.composition === null ? read === 0 : read > 0)
+    ? runs !== null && runs.length === read
+      && statistics !== null
       && decoded.coverage.composition_unavailable.length === 0
     : decoded.composition === null
+      && runs === null && statistics === null
       && read === 0
       && decoded.coverage.composition_unavailable.length > 0
   if (!coverageAgrees) {
@@ -1589,9 +1670,18 @@ export function decodeSkillEvidenceResponse(raw: unknown): SkillEvidenceResponse
   return {...decoded, activation: {...selected, evidence}}
 }
 
-export async function fetchSkillEvidence(reference: SkillReference): Promise<SkillEvidenceResponse> {
-  const raw = await post<unknown>('/api/v1/skills/evidence', { reference })
-  return decodeSkillEvidenceResponse(raw)
+export async function fetchSkillEvidence(reference: SkillReference, runId?: string): Promise<SkillEvidenceResponse> {
+  const raw = await post<unknown>('/api/v1/skills/evidence', {
+    reference, ...(runId === undefined ? {} : { composition_run_id: runId }),
+  })
+  const evidence = decodeSkillEvidenceResponse(raw)
+  const selection = evidence.composition_selection
+  if (referenceKey(reference) !== referenceKey(evidence.reference)
+    || (runId === undefined ? selection.mode !== 'latest_retained'
+      : selection.mode !== 'exact_run' || selection.composition_run_id !== runId)) {
+    contractError('invalid_response', 'evidence response disagrees with requested reference or selection')
+  }
+  return evidence
 }
 
 export function decodeAsyncRequestObservation(raw: unknown): AsyncRequestObservation {

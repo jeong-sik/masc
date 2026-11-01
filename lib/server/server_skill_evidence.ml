@@ -8,15 +8,47 @@ let composition_scope_to_string = function
   | `Unavailable -> "unavailable"
 ;;
 
-let composition_evidence ~config reference =
+let request_of_string body =
+  let open Result.Syntax in
+  try
+    match Yojson.Safe.from_string body with
+    | `Assoc fields ->
+      let names = List.map fst fields in
+      if List.length names <> List.length (List.sort_uniq String.compare names)
+         || not (List.for_all (fun name -> List.mem name [ "reference"; "composition_run_id" ]) names)
+      then Error "evidence request has duplicate or unknown fields"
+      else
+        let* reference = match List.assoc_opt "reference" fields with
+          | Some json -> Skill_reference.of_yojson json |> Result.map_error (fun _ -> "exact Skill reference required")
+          | None -> Error "exact Skill reference required" in
+        let* run_id = match List.assoc_opt "composition_run_id" fields with
+          | None -> Ok None
+          | Some (`String value) ->
+            Keeper_tool_plan.Composition_run_id.of_string value
+            |> Result.map Option.some
+            |> Result.map_error (fun _ -> "composition_run_id must be UUIDv7")
+          | Some _ -> Error "composition_run_id must be UUIDv7" in
+        Ok (reference, run_id)
+    | _ -> Error "JSON object body required"
+  with Yojson.Json_error detail -> Error ("invalid json: " ^ detail)
+;;
+
+let composition_evidence ~config ~composition_run_id reference =
   match Keeper_skill_composition_evidence.load_observation config reference with
   | Error error ->
-    ( None, None
+    ( None, None, None
     , { scope = `Unavailable; runs_observed = 0 }
     , [ Keeper_skill_composition_evidence.error_to_string error ] )
   | Ok observation ->
-    ( Option.map Keeper_skill_composition_evidence.to_yojson observation.latest
+    let selected = match composition_run_id with
+      | None -> observation.latest
+      | Some run_id -> List.find_opt (fun run ->
+          Keeper_tool_plan.Composition_run_id.equal run_id
+            (Keeper_skill_composition_evidence.run_summary run).run_id) observation.runs in
+    ( Option.map Keeper_skill_composition_evidence.to_yojson selected
     , Some (Keeper_skill_composition_evidence.statistics_to_yojson observation.statistics)
+    , Some (List.map (fun run -> Keeper_skill_composition_evidence.run_summary run
+        |> Keeper_skill_composition_evidence.run_summary_to_yojson) observation.runs)
     , { scope = `Exact_reference_retained_runs;
         runs_observed = observation.statistics.records }
     , [] )
@@ -244,8 +276,10 @@ let activation_scope_to_string = function
 
 let to_yojson
       ~reference
+      ~composition_run_id
       ~composition
       ~composition_statistics
+      ~composition_runs
       ~composition_coverage
       ~composition_unavailable
       ~activation
@@ -254,15 +288,20 @@ let to_yojson
       ~activation_ledgers_loaded
       ~activation_gaps
       ~activation_owner_gap_count =
-  let observed = Option.is_some activation || Option.is_some composition in
+  let observed = Option.is_some activation || composition_coverage.runs_observed > 0 in
   `Assoc
-    [ "schema", `String "masc.skill-evidence/v8"
+    [ "schema", `String "masc.skill-evidence/v9"
     ; ( "status"
       , `String
           (if observed then "observed" else "not_observed_in_retained_coverage") )
     ; "reference", Skill_reference.to_yojson reference
     ; "activation", Option.value ~default:`Null activation
     ; "composition", Option.value ~default:`Null composition
+    ; "composition_selection", (match composition_run_id with
+        | None -> `Assoc [ "mode", `String "latest_retained" ]
+        | Some run_id -> `Assoc [ "mode", `String "exact_run"
+            ; "composition_run_id", `String (Keeper_tool_plan.Composition_run_id.to_string run_id) ])
+    ; "composition_runs", Option.fold ~none:`Null ~some:(fun runs -> `List runs) composition_runs
     ; "composition_statistics", Option.value ~default:`Null composition_statistics
     ; ( "coverage"
       , `Assoc
@@ -285,18 +324,20 @@ let to_yojson
     ]
 ;;
 
-let project ~config reference =
+let project ?composition_run_id ~config reference =
   let discovery = Keeper_skill_activation_discovery.discover config reference in
   let activation, activation_owner_gap_count =
     activation_projection ~config discovery
   in
-  let composition, composition_statistics, composition_coverage, composition_unavailable =
-    composition_evidence ~config reference
+  let composition, composition_statistics, composition_runs, composition_coverage, composition_unavailable =
+    composition_evidence ~config ~composition_run_id reference
   in
   to_yojson
     ~reference
+    ~composition_run_id
     ~composition
     ~composition_statistics
+    ~composition_runs
     ~composition_coverage
     ~composition_unavailable
     ~activation
@@ -322,7 +363,15 @@ module For_testing = struct
         ~activation_owner_gap_count =
     to_yojson
       ~reference
+      ~composition_run_id:None
       ~composition
+      ~composition_runs:(match composition_scope, composition with
+        | `Unavailable, _ -> None
+        | `Exact_reference_retained_runs, None -> Some []
+        | `Exact_reference_retained_runs, Some json ->
+          let evidence = Keeper_skill_composition_evidence.of_yojson json |> Result.get_ok in
+          Some [Keeper_skill_composition_evidence.run_summary evidence
+            |> Keeper_skill_composition_evidence.run_summary_to_yojson])
       ~composition_statistics:(
         match composition with
         | None when composition_scope = `Unavailable -> None

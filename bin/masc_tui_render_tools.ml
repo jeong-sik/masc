@@ -617,10 +617,41 @@ let skill_settlement_lines composition =
            (Terminal_text.single_line (field "node_id")) (Terminal_text.single_line (field "tool_name"))
            (Terminal_text.single_line (field "execution_origin"));
          Ansi.dim, Printf.sprintf "       output bytes=%s · truncated_to=%s"
-           (Terminal_text.single_line (field "result_bytes")) (Terminal_text.single_line (field "truncated_to"))]
+           (Terminal_text.single_line (field "result_bytes")) (Terminal_text.single_line (field "truncated_to"));
+         Ansi.dim, "       execution=" ^ Terminal_text.single_line (field "execution_id")
+           ^ " · tool use=" ^ Terminal_text.single_line (field "tool_use_id")]
         @ content "Observed input" (value "input")
         @ content "Observed result (disposition, duration, output)" (value "result")) settlements
   | Some _ | None -> []
+;;
+
+let skill_run_history_lines state (evidence : Masc.Tui_decode_skill_evidence.skill_evidence) =
+  match evidence.se_composition_runs with
+  | None -> [Theme.warn (), "     Run history unavailable; storage gaps cannot establish absence"]
+  | Some runs ->
+    let selected_id = match evidence.se_composition_selection with
+      | Latest_retained -> Option.map
+          (fun (run : Masc.Keeper_skill_composition_evidence.run_summary) -> run.run_id)
+          (List.nth_opt runs 0)
+      | Exact_run run_id -> Some run_id in
+    let index = Option.bind selected_id (fun run_id ->
+      List.find_index (fun (run : Masc.Keeper_skill_composition_evidence.run_summary) ->
+        Masc.Keeper_tool_plan.Composition_run_id.equal run_id run.run_id) runs) in
+    [Ansi.bold, Printf.sprintf "     Original runs: %s/%d · [: older · ]: newer · Enter: latest"
+       (Option.fold ~none:"—" ~some:(fun index -> string_of_int (index + 1)) index) (List.length runs);
+     Ansi.dim, "       Each run's latest retained result; earlier transitions may be replaced"]
+    @ (match evidence.se_composition_selection, index with
+       | Exact_run run_id, None ->
+         [Theme.warn (), "       Requested run absent in this revision's retained coverage: "
+           ^ Masc.Keeper_tool_plan.Composition_run_id.to_string run_id;
+          Ansi.dim, "       No other run substituted; statistics still cover all retained runs"]
+       | Latest_retained, (None | Some _) | Exact_run _, Some _ -> [])
+    @ List.filter_map (fun (label, delta) ->
+        adjacent_skill_evidence_run state ~reference:evidence.se_reference
+          ~selection:evidence.se_composition_selection ~runs:evidence.se_composition_runs ~delta
+        |> Option.map (fun run_id ->
+          Ansi.dim, "       " ^ label ^ ": " ^ Masc.Keeper_tool_plan.Composition_run_id.to_string run_id))
+        ["older", 1; "newer", -1]
 ;;
 
 let tools_selection_line ~cols state =
@@ -1014,7 +1045,7 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
                          in
                          [ Ansi.bold,
                            Printf.sprintf
-                             "     Original activation: %s · owner=%s(%s) · original-actions=%d · at=%s"
+                             "     Latest independent activation: %s · owner=%s(%s) · original-actions=%d · at=%s"
                              delivered
                              (Terminal_text.single_line item.sea_owner_status)
                              (Terminal_text.single_line keepers)
@@ -1082,6 +1113,18 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
                              (Terminal_text.single_line
                                 (string_field "composition_run_id" Masc_tui_theme.Glyph.no_value))
                              settlement_count
+                         ; Ansi.dim, Printf.sprintf "       recorded=%s · %s · request=%s"
+                             (match json_assoc_member_opt "recorded_at" composition with
+                              | Some (`Float value) ->
+                                (try Time_codec.rfc3339_of_unix value with
+                                 | Unix.Unix_error _ | Invalid_argument _ -> Printf.sprintf "%.3f Unix seconds" value)
+                              | _ -> "unavailable")
+                             (string_field "composition_execution" "unavailable")
+                             (Terminal_text.single_line (string_field "request_id" "inline"))
+                         ; Ansi.dim, Printf.sprintf "       parent tool use=%s · turn=%s · planned index=%s"
+                             (Terminal_text.single_line (string_field "parent_tool_use_id" ""))
+                             (match json_assoc_member_opt "parent_turn" composition with Some value -> Yojson.Safe.to_string value | None -> "unavailable")
+                             (match json_assoc_member_opt "parent_planned_index" composition with Some value -> Yojson.Safe.to_string value | None -> "unavailable")
                          ]
                          @ (match json_assoc_member_opt "disposition" result with
                             | Some (`String "failed") ->
@@ -1136,7 +1179,7 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
                let statistics_lines = match profile.esp_io with
                  | Masc.Tui_decode_tools.Model_orchestrated -> []
                  | Composition_io _ -> skill_statistics_lines ~cols evidence.se_composition_statistics in
-               statistics_lines, evidence_lines
+               statistics_lines, skill_run_history_lines state evidence @ evidence_lines
                @ Option.fold ~none:[] ~some:skill_settlement_lines evidence.se_composition
                @ coverage_lines)
              | Some _ | None ->
@@ -1188,7 +1231,7 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
             (byte_count ets_skill_tool_surface_bytes)
             (byte_count ets_tool_surface_bytes);
           Ansi.bold,
-          "   Skills — J/K select · Enter evidence · Ctrl-O graph · e edit · c normal · C composition";
+          "   Skills — J/K select · Enter latest · [/] runs · Ctrl-O graph · e edit · c/C create";
           Ansi.dim, "   digest=" ^ Terminal_text.single_line digest ]
         @ skill_profile_lines
         @ (match selected_tools_skill_profile state with
@@ -1196,7 +1239,9 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
         @ selected_skill_flow_lines
         @ (match state.tools_evidence_reference, state.tools_evidence_request, selected_tools_skill_profile state with
            | Some reference, Some _, Some profile when Skill_reference.equal reference profile.esp_reference ->
-               [Ansi.dim, "     Retained evidence: loading exact revision · previous observation retained"]
+               [Ansi.dim, "     Loading requested run "
+                 ^ Option.fold ~none:"latest" ~some:Masc.Keeper_tool_plan.Composition_run_id.to_string state.tools_evidence_run_id
+                 ^ " · previous observation retained"]
            | _ -> [])
         @ selected_skill_evidence_lines
         (* Said on this surface because this is the one that answers "what can

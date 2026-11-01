@@ -3791,12 +3791,19 @@ let post_skill_editor_create ~host ~port ~composition ~source_id ~package_id ~so
     |> Result.map_error (fun detail -> Skill_write_unconfirmed detail)
 ;;
 
-let post_skill_evidence ~host ~port reference =
-  post_json
-    ~host
-    ~port
-    ~path:"/api/v1/skills/evidence"
-    ~body:(skill_editor_body reference None)
+let post_skill_evidence ?composition_run_id ~host ~port reference =
+  let open Result.Syntax in
+  let body = `Assoc ([ "reference", Skill_reference.to_yojson reference ]
+    @ Option.fold ~none:[] ~some:(fun run_id ->
+      [ "composition_run_id", `String (Masc.Keeper_tool_plan.Composition_run_id.to_string run_id) ]) composition_run_id) in
+  let* json = post_json ~host ~port ~path:"/api/v1/skills/evidence" ~body:(Yojson.Safe.to_string body) in
+  let* evidence = Masc.Tui_decode_skill_evidence.decode_skill_evidence json in
+  let matches = match composition_run_id, evidence.se_composition_selection with
+    | None, Latest_retained -> true
+    | Some expected, Exact_run actual -> Masc.Keeper_tool_plan.Composition_run_id.equal expected actual
+    | None, Exact_run _ | Some _, Latest_retained -> false in
+  if Skill_reference.equal reference evidence.se_reference && matches then Ok json
+  else Error "evidence response disagrees with requested reference or selection"
 ;;
 
 let fetch_async_request_observation ~host ~port =

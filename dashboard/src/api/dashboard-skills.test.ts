@@ -348,6 +348,35 @@ const compositionEvidence = {
   recorded_at: 1,
 }
 
+function runMetadata(composition: typeof compositionEvidence) {
+  return { composition_run_id: composition.composition_run_id, keeper: composition.keeper,
+    composition_execution: composition.composition_execution, request_id: composition.request_id,
+    disposition: composition.result.disposition, duration_ms: composition.result.duration_ms,
+    recorded_at: composition.recorded_at }
+}
+
+// Baseline envelopes use zero or one retained run; mutations below stay raw.
+function evidenceFixture<T extends { composition: unknown; composition_statistics?: unknown;
+  coverage: { composition_scope: string } }>(fields: T) {
+  const composition = fields.composition as typeof compositionEvidence | null
+  const unavailable = fields.coverage.composition_scope === 'unavailable'
+  const samples = (outcome: string) => composition?.result.disposition === outcome ? 1 : 0
+  const duration = (samples: number) => ({ samples,
+    ...Object.fromEntries(['mean_ms', 'min_ms', 'p50_ms', 'p95_ms', 'max_ms']
+      .map(key => [key, samples === 0 ? null : composition!.result.duration_ms])) })
+  return {
+    composition_selection: { mode: 'latest_retained' },
+    composition_runs: unavailable ? null : composition === null ? [] : [runMetadata(composition)],
+    ...fields,
+    composition_statistics: unavailable ? null : fields.composition_statistics ?? {
+      scope: 'exact_reference_retained_runs', duration_scope: 'stored_executor_result', percentile_method: 'nearest_rank',
+      records: composition === null ? 0 : 1,
+      recorded_window: { first_recorded_at: composition?.recorded_at ?? null, last_recorded_at: composition?.recorded_at ?? null },
+      completed: duration(samples('completed')), failed: duration(samples('failed')), deferred: samples('deferred'),
+    },
+  }
+}
+
 const activationPayload = {
   identity: reference.identity,
   content_revision: reference.content_revision,
@@ -388,13 +417,13 @@ describe('current composition evidence wire fields', () => {
       const failure = { disposition: 'failed', effect_disposition, failure_class: 'runtime_failure',
         message: 'failed original execution', data: { error: 'failed original execution' },
         tool_name: compositionNode.tool_name, duration_ms: 5 }
-      const response = { schema: 'masc.skill-evidence/v8', status: 'observed', reference,
+      const response = evidenceFixture({ schema: 'masc.skill-evidence/v9', status: 'observed', reference,
         activation: null, composition_statistics: null,
         coverage: { ...coverage, composition_runs_observed: 1 },
         composition: { ...compositionEvidence,
           result: { ...failure, tool_name: compositionEvidence.composition_tool },
           executor_settlements: [{ ...compositionNode, result: failure,
-            schedule: { ...compositionNode.schedule, batch_index: 4, batch_size: 1, execution_mode: 'serial' } }] } }
+            schedule: { ...compositionNode.schedule, batch_index: 4, batch_size: 1, execution_mode: 'serial' } }] } })
       expect(decodeSkillEvidenceResponse(response).composition?.result.effect_disposition).toBe(effect_disposition)
       const { effect_disposition: _omitted, ...missingEffect } = failure
       expect(() => decodeSkillEvidenceResponse({ ...response, composition: { ...response.composition,
@@ -406,11 +435,11 @@ describe('current composition evidence wire fields', () => {
     const invocation = { kind: 'composition', origin: { kind: 'session_composition' },
       execution_id: 'exec-root', tool_name: 'keeper_compose_proof' }
     for (const execution_origin of ['fresh_dispatch', 'retained_completion', 'dispatch_refused']) {
-      const response = { schema: 'masc.skill-evidence/v8', status: 'observed', reference,
+      const response = evidenceFixture({ schema: 'masc.skill-evidence/v9', status: 'observed', reference,
         activation: { selection: 'most_recent_observed', evidence: { ...activationEvidence,
           activation: { ...activationPayload, invocation } } },
         composition: { ...compositionEvidence, executor_settlements: [{ ...compositionNode, execution_origin }] },
-        composition_statistics: null, coverage: { ...coverage, composition_runs_observed: 1 } }
+        composition_statistics: null, coverage: { ...coverage, composition_runs_observed: 1 } })
       const decoded = decodeSkillEvidenceResponse(response)
       expect(decoded.composition?.executor_settlements[0]?.execution_origin).toBe(execution_origin)
       const waiting = decodeSkillEvidenceResponse({ ...response, composition: { ...response.composition,
@@ -427,8 +456,8 @@ describe('current composition evidence wire fields', () => {
 
 function sharedAsyncSkillEvidence() {
   const activation = sharedAsyncActionLedger.activations[0]!
-  return {
-    schema: 'masc.skill-evidence/v8',
+  return evidenceFixture({
+    schema: 'masc.skill-evidence/v9',
     composition_statistics: null, status: 'observed',
     reference: {identity: activation.identity, content_revision: activation.content_revision},
     activation: {selection: 'most_recent_observed', evidence: {
@@ -440,14 +469,18 @@ function sharedAsyncSkillEvidence() {
     }},
     composition: null,
     coverage: {...coverage, activation_sessions_inspected: 1, activation_ledgers_loaded: 1},
-  }
+  })
 }
 
 describe('stored composition duration statistics', () => {
   it('rejects fabricated zero means and mismatched sample totals', () => {
-    const raw = {
-      schema: 'masc.skill-evidence/v8', status: 'observed',
-      reference, activation: null, composition: compositionEvidence,
+    const raw = evidenceFixture({
+      schema: 'masc.skill-evidence/v9', status: 'observed',
+      reference, activation: null, composition: { ...compositionEvidence, result: { ...compositionEvidence.result, duration_ms: 30 } },
+      composition_runs: [
+        { ...runMetadata(compositionEvidence), duration_ms: 30 },
+        { ...runMetadata(compositionEvidence), composition_run_id: '01a045f2-cd8b-7000-a3f7-1d718a712203', duration_ms: 10 },
+      ],
       coverage: { ...coverage, composition_runs_observed: 2 },
       composition_statistics: {
         scope: 'exact_reference_retained_runs', duration_scope: 'stored_executor_result',
@@ -456,15 +489,47 @@ describe('stored composition duration statistics', () => {
         records: 2, completed: { samples: 2, mean_ms: 20, min_ms: 10, p50_ms: 10, p95_ms: 30, max_ms: 30 },
         failed: { samples: 0, mean_ms: null, min_ms: null, p50_ms: null, p95_ms: null, max_ms: null }, deferred: 0,
       },
-    }
+    })
     expect(decodeSkillEvidenceResponse(raw).composition_statistics?.completed.mean_ms).toBe(20)
     const beforeEpoch = { ...raw,
+      composition_runs: raw.composition_runs.map(run => ({ ...run, recorded_at: -100.5 })),
       composition: { ...raw.composition, recorded_at: -100.5 },
       composition_statistics: { ...raw.composition_statistics,
         recorded_window: { first_recorded_at: -100.5, last_recorded_at: -100.5 } },
     }
     expect(decodeSkillEvidenceResponse(beforeEpoch).composition_statistics?.recorded_window)
       .toEqual({ first_recorded_at: -100.5, last_recorded_at: -100.5 })
+    const crossingEpoch = { ...raw,
+      composition_runs: raw.composition_runs.map((run, index) => ({ ...run,
+        recorded_at: index === 0 ? run.recorded_at : -100.5 })),
+      composition_statistics: { ...raw.composition_statistics,
+        recorded_window: { first_recorded_at: -100.5, last_recorded_at: raw.composition.recorded_at } },
+    }
+    expect(decodeSkillEvidenceResponse(crossingEpoch).composition_runs?.at(-1)?.recorded_at).toBe(-100.5)
+    for (const recorded_at of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+      expect(() => decodeSkillEvidenceResponse({ ...beforeEpoch,
+        composition_runs: beforeEpoch.composition_runs.map(run => ({ ...run, recorded_at })),
+      })).toThrow(SkillsContractError)
+    }
+    const older = { ...compositionEvidence, composition_run_id: raw.composition_runs[1]!.composition_run_id,
+      result: { ...compositionEvidence.result, duration_ms: 10 } }
+    const exact = { ...raw, composition_selection: { mode: 'exact_run', composition_run_id: older.composition_run_id }, composition: older }
+    expect(decodeSkillEvidenceResponse(exact).composition?.result.duration_ms).toBe(10)
+    expect(decodeSkillEvidenceResponse(exact).composition_statistics?.records).toBe(2)
+    const absent = { ...raw, composition_selection: { mode: 'exact_run', composition_run_id: '01a045f2-cd8b-7000-a3f7-1d718a712207' }, composition: null }
+    expect(decodeSkillEvidenceResponse(absent).composition).toBeNull()
+    expect(decodeSkillEvidenceResponse(absent).composition_statistics?.records).toBe(2)
+    for (const contradiction of [
+      { ...absent, composition: raw.composition },
+      { ...exact, composition: raw.composition },
+      { ...raw, composition_runs: [...raw.composition_runs].reverse() },
+      { ...raw, composition_runs: [raw.composition_runs[0], raw.composition_runs[0]] },
+      { ...raw, composition_runs: null },
+      { ...raw, composition_statistics: null },
+      { ...raw, composition_selection: { mode: 'exact_run', composition_run_id: 'invalid' } },
+      { ...raw, composition_selection: { mode: 'latest_retained', composition_run_id: older.composition_run_id } },
+      { ...raw, composition_runs: [{ ...raw.composition_runs[0], unknown: true }, raw.composition_runs[1]] },
+    ]) expect(() => decodeSkillEvidenceResponse(contradiction)).toThrow(SkillsContractError)
     expect(() => decodeSkillEvidenceResponse({ ...raw,
       status: 'not_observed_in_retained_coverage', composition: null, coverage,
     })).toThrow(SkillsContractError)
@@ -499,6 +564,20 @@ describe('stored composition duration statistics', () => {
 })
 
 describe('skill evidence contract', () => {
+  it('rejects a valid envelope for a different requested revision or run selection', async () => {
+    const response = sharedAsyncSkillEvidence()
+    const fetch = vi.fn(async () => Response.json(response))
+    vi.stubGlobal('fetch', fetch)
+    await expect(fetchSkillEvidence({ ...response.reference, content_revision: 'f'.repeat(64) }))
+      .rejects.toThrow('evidence response disagrees with requested reference or selection')
+    const runId = '01a045f2-cd8b-7000-a3f7-1d718a712207'
+    await expect(fetchSkillEvidence(response.reference, runId))
+      .rejects.toThrow('evidence response disagrees with requested reference or selection')
+    expect(fetch.mock.calls[1]).toEqual(['/api/v1/skills/evidence', expect.objectContaining({
+      method: 'POST', body: JSON.stringify({ reference: response.reference, composition_run_id: runId }),
+    })])
+  })
+
   it('fetches retained SDK results and native starts with their original Task frame', async () => {
     const response = sharedAsyncSkillEvidence()
     vi.stubGlobal('crypto', {})
@@ -560,14 +639,14 @@ describe('skill evidence contract', () => {
       kind: 'nested_composition', origin: { kind: 'session_composition' },
       tool_name: 'keeper_compose_review', scope,
     }
-    const response = {
-      schema: 'masc.skill-evidence/v8',
+    const response = evidenceFixture({
+      schema: 'masc.skill-evidence/v9',
       composition_statistics: null, status: 'observed', reference,
       activation: { selection: 'most_recent_observed', evidence: {
         ...activationEvidence, activation: { ...activationPayload, invocation },
       } },
       composition: null, coverage,
-    }
+    })
     expect(decodeSkillEvidenceResponse(response).activation).toEqual(response.activation)
     for (const badScope of [
       { ...scope, composition_run_id: 'not-a-run' },
@@ -596,8 +675,8 @@ describe('skill evidence contract', () => {
   })
 
   it('keeps instruction activation and composition result in one exact envelope', () => {
-    const decoded = decodeSkillEvidenceResponse({
-      schema: 'masc.skill-evidence/v8',
+    const decoded = decodeSkillEvidenceResponse(evidenceFixture({
+      schema: 'masc.skill-evidence/v9',
       composition_statistics: null,
       status: 'observed',
       reference,
@@ -607,15 +686,15 @@ describe('skill evidence contract', () => {
       },
       composition: compositionEvidence,
       coverage: { ...coverage, composition_runs_observed: 1 },
-    })
+    }))
 
     expect(decoded.activation?.selection).toBe('most_recent_observed')
     expect(decoded.composition?.executor_settlements).toHaveLength(1)
   })
 
   it('rejects async evidence without its durable request identity', () => {
-    expect(() => decodeSkillEvidenceResponse({
-      schema: 'masc.skill-evidence/v8',
+    expect(() => decodeSkillEvidenceResponse(evidenceFixture({
+      schema: 'masc.skill-evidence/v9',
       composition_statistics: null,
       status: 'observed',
       reference,
@@ -626,12 +705,12 @@ describe('skill evidence contract', () => {
         request_id: null,
       },
       coverage: { ...coverage, composition_runs_observed: 1 },
-    })).toThrow(SkillsContractError)
+    }))).toThrow(SkillsContractError)
   })
 
   it('rejects impossible node batch size and truncation invariants', () => {
-    expect(() => decodeSkillEvidenceResponse({
-      schema: 'masc.skill-evidence/v8',
+    expect(() => decodeSkillEvidenceResponse(evidenceFixture({
+      schema: 'masc.skill-evidence/v9',
       composition_statistics: null,
       status: 'observed',
       reference,
@@ -645,24 +724,24 @@ describe('skill evidence contract', () => {
         }],
       },
       coverage: { ...coverage, composition_runs_observed: 1 },
-    })).toThrow(SkillsContractError)
+    }))).toThrow(SkillsContractError)
   })
 
   it('rejects observed status without any observed evidence', () => {
-    expect(() => decodeSkillEvidenceResponse({
-      schema: 'masc.skill-evidence/v8',
+    expect(() => decodeSkillEvidenceResponse(evidenceFixture({
+      schema: 'masc.skill-evidence/v9',
       composition_statistics: null,
       status: 'observed',
       reference,
       activation: null,
       composition: null,
       coverage,
-    })).toThrow(SkillsContractError)
+    }))).toThrow(SkillsContractError)
   })
 
   it('keeps partial ledger coverage visible when nothing was observed', () => {
-    const decoded = decodeSkillEvidenceResponse({
-      schema: 'masc.skill-evidence/v8',
+    const decoded = decodeSkillEvidenceResponse(evidenceFixture({
+      schema: 'masc.skill-evidence/v9',
       composition_statistics: null,
       status: 'not_observed_in_retained_coverage',
       reference,
@@ -678,7 +757,7 @@ describe('skill evidence contract', () => {
           detail: 'permission denied',
         }],
       },
-    })
+    }))
 
     expect(decoded.coverage.activation_gaps).toHaveLength(1)
   })
@@ -687,8 +766,8 @@ describe('skill evidence contract', () => {
     'exact_reference_retained_runs',
     'unavailable',
   ] as const)('accepts the declared composition scope %s', (composition_scope) => {
-    const decoded = decodeSkillEvidenceResponse({
-      schema: 'masc.skill-evidence/v8',
+    const decoded = decodeSkillEvidenceResponse(evidenceFixture({
+      schema: 'masc.skill-evidence/v9',
       composition_statistics: null,
       status: 'not_observed_in_retained_coverage',
       reference,
@@ -697,14 +776,14 @@ describe('skill evidence contract', () => {
       coverage: composition_scope === 'unavailable'
         ? { ...coverage, composition_scope, composition_unavailable: ['index unreadable'] }
         : { ...coverage, composition_scope },
-    })
+    }))
 
     expect(decoded.coverage.composition_scope).toBe(composition_scope)
   })
 
   it('rejects a timestamp tie with duplicate traces or different times', () => {
-    expect(() => decodeSkillEvidenceResponse({
-      schema: 'masc.skill-evidence/v8',
+    expect(() => decodeSkillEvidenceResponse(evidenceFixture({
+      schema: 'masc.skill-evidence/v9',
       composition_statistics: null,
       status: 'observed',
       reference,
@@ -720,12 +799,12 @@ describe('skill evidence contract', () => {
       },
       composition: null,
       coverage,
-    })).toThrow(SkillsContractError)
+    }))).toThrow(SkillsContractError)
   })
 
   it('rejects unknown activation gap codes', () => {
-    expect(() => decodeSkillEvidenceResponse({
-      schema: 'masc.skill-evidence/v8',
+    expect(() => decodeSkillEvidenceResponse(evidenceFixture({
+      schema: 'masc.skill-evidence/v9',
       composition_statistics: null,
       status: 'not_observed_in_retained_coverage',
       reference,
@@ -736,12 +815,12 @@ describe('skill evidence contract', () => {
         activation_scope: 'incomplete_retained_trace_snapshot',
         activation_gaps: [{ code: 'hologram' }],
       },
-    })).toThrow(SkillsContractError)
+    }))).toThrow(SkillsContractError)
   })
 
   it('rejects a known activation gap without its variant fields', () => {
-    expect(() => decodeSkillEvidenceResponse({
-      schema: 'masc.skill-evidence/v8',
+    expect(() => decodeSkillEvidenceResponse(evidenceFixture({
+      schema: 'masc.skill-evidence/v9',
       composition_statistics: null,
       status: 'not_observed_in_retained_coverage',
       reference,
@@ -752,12 +831,12 @@ describe('skill evidence contract', () => {
         activation_scope: 'incomplete_retained_trace_snapshot',
         activation_gaps: [{ code: 'ledger_unreadable' }],
       },
-    })).toThrow(SkillsContractError)
+    }))).toThrow(SkillsContractError)
   })
 
   it('accepts a timestamp tie expressed with different RFC3339 offsets', () => {
-    const decoded = decodeSkillEvidenceResponse({
-      schema: 'masc.skill-evidence/v8',
+    const decoded = decodeSkillEvidenceResponse(evidenceFixture({
+      schema: 'masc.skill-evidence/v9',
       composition_statistics: null,
       status: 'observed',
       reference,
@@ -778,13 +857,13 @@ describe('skill evidence contract', () => {
       },
       composition: null,
       coverage,
-    })
+    }))
     expect(decoded.activation?.selection).toBe('most_recent_observed_timestamp_tie')
   })
 
   it('accepts a leap-second tie with the next civil minute', () => {
-    const decoded = decodeSkillEvidenceResponse({
-      schema: 'masc.skill-evidence/v8',
+    const decoded = decodeSkillEvidenceResponse(evidenceFixture({
+      schema: 'masc.skill-evidence/v9',
       composition_statistics: null,
       status: 'observed',
       reference,
@@ -811,13 +890,13 @@ describe('skill evidence contract', () => {
       },
       composition: null,
       coverage,
-    })
+    }))
     expect(decoded.activation?.selection).toBe('most_recent_observed_timestamp_tie')
   })
 
   it('rejects an invalid reference without an activation', () => {
-    expect(() => decodeSkillEvidenceResponse({
-      schema: 'masc.skill-evidence/v8',
+    expect(() => decodeSkillEvidenceResponse(evidenceFixture({
+      schema: 'masc.skill-evidence/v9',
       composition_statistics: null,
       status: 'not_observed_in_retained_coverage',
       reference: {
@@ -827,7 +906,7 @@ describe('skill evidence contract', () => {
       activation: null,
       composition: null,
       coverage,
-    })).toThrow(SkillsContractError)
+    }))).toThrow(SkillsContractError)
   })
 
   it('rejects activation semantics that the canonical ledger rejects', () => {
@@ -858,8 +937,8 @@ describe('skill evidence contract', () => {
       },
     ]
     for (const activation of invalidActivations) {
-      expect(() => decodeSkillEvidenceResponse({
-        schema: 'masc.skill-evidence/v8',
+      expect(() => decodeSkillEvidenceResponse(evidenceFixture({
+        schema: 'masc.skill-evidence/v9',
         composition_statistics: null,
         status: 'observed',
         reference,
@@ -869,7 +948,7 @@ describe('skill evidence contract', () => {
         },
         composition: null,
         coverage,
-      })).toThrow(SkillsContractError)
+      }))).toThrow(SkillsContractError)
     }
   })
 
@@ -878,8 +957,8 @@ describe('skill evidence contract', () => {
       ...reference,
       identity: { source_id: '../workspace', package_id: '..', name: 'Bad--Name' },
     }
-    expect(() => decodeSkillEvidenceResponse({
-      schema: 'masc.skill-evidence/v8',
+    expect(() => decodeSkillEvidenceResponse(evidenceFixture({
+      schema: 'masc.skill-evidence/v9',
       composition_statistics: null,
       status: 'observed',
       reference: invalidReference,
@@ -892,12 +971,12 @@ describe('skill evidence contract', () => {
       },
       composition: null,
       coverage,
-    })).toThrow(SkillsContractError)
+    }))).toThrow(SkillsContractError)
   })
 
   it('rejects an RFC3339 offset outside the canonical Ptime range', () => {
-    expect(() => decodeSkillEvidenceResponse({
-      schema: 'masc.skill-evidence/v8',
+    expect(() => decodeSkillEvidenceResponse(evidenceFixture({
+      schema: 'masc.skill-evidence/v9',
       composition_statistics: null,
       status: 'observed',
       reference,
@@ -913,12 +992,12 @@ describe('skill evidence contract', () => {
       },
       composition: null,
       coverage,
-    })).toThrow(SkillsContractError)
+    }))).toThrow(SkillsContractError)
   })
 
   it('accepts the fractional Ptime maximum boundary', () => {
-    const decoded = decodeSkillEvidenceResponse({
-      schema: 'masc.skill-evidence/v8',
+    const decoded = decodeSkillEvidenceResponse(evidenceFixture({
+      schema: 'masc.skill-evidence/v9',
       composition_statistics: null,
       status: 'observed',
       reference,
@@ -934,13 +1013,13 @@ describe('skill evidence contract', () => {
       },
       composition: null,
       coverage,
-    })
+    }))
     expect(decoded.activation?.selection).toBe('most_recent_observed')
   })
 
   it('rejects activation candidates not backed by loaded ledgers', () => {
-    expect(() => decodeSkillEvidenceResponse({
-      schema: 'masc.skill-evidence/v8',
+    expect(() => decodeSkillEvidenceResponse(evidenceFixture({
+      schema: 'masc.skill-evidence/v9',
       composition_statistics: null,
       status: 'observed',
       reference,
@@ -951,12 +1030,12 @@ describe('skill evidence contract', () => {
         activation_sessions_inspected: 0,
         activation_ledgers_loaded: 0,
       },
-    })).toThrow(SkillsContractError)
+    }))).toThrow(SkillsContractError)
   })
 
   it('rejects trace-store-unavailable with observed sessions', () => {
-    expect(() => decodeSkillEvidenceResponse({
-      schema: 'masc.skill-evidence/v8',
+    expect(() => decodeSkillEvidenceResponse(evidenceFixture({
+      schema: 'masc.skill-evidence/v9',
       composition_statistics: null,
       status: 'not_observed_in_retained_coverage',
       reference,
@@ -972,7 +1051,7 @@ describe('skill evidence contract', () => {
           detail: 'permission denied',
         }],
       },
-    })).toThrow(SkillsContractError)
+    }))).toThrow(SkillsContractError)
   })
 })
 

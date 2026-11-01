@@ -53,13 +53,13 @@ the first implementation unit.
 
 | Requirement | Required evidence | Current state |
 | --- | --- | --- |
-| Explain applicable prior art and concrete adaptations | Official-source comparison linked to actual changes | Comparison above; implementation in progress |
+| Explain applicable prior art and concrete adaptations | Official-source comparison linked to actual changes | Comparison above; adaptations described below and in the stacked PRs |
 | Create instruction Skills and compositions through clear, validated flows | Real create/preview/publish/readback with source choice, diagnostics and publication outcomes | Guided Dashboard and TUI candidates implemented; server preview/create/publish checks passed; missing-source discovery repair and actual screen proof pending |
-| Compose existing capabilities with explicit inputs, dependencies and outputs | Parser/executor-backed preparation and execution; inspectable flow and resulting records | Existing foundation; experience improvements incomplete |
+| Compose existing capabilities with explicit inputs, dependencies and outputs | Parser/executor-backed preparation and execution; inspectable flow and resulting records | Guided canonical-plan authoring and parser-backed preview implemented; focused server checks passed; candidate screen proof pending |
 | Count original runs and asynchronous use honestly | Producer-to-store-to-read-model tests, exact revision and coverage consistency | Candidates #47036/#47041: focused retained-run and async usage checks passed; installed/runtime proof pending |
 | Make statistics interpretable | Sample sizes, populations, units, recorded-time bounds, empty/unavailable distinction, duration distributions | First candidate implemented and tested; rendered/runtime proof pending |
-| Explain actual failures and nested execution | Failure reasons, parent/child/node identities and outcomes visible in both clients | Incomplete |
-| Remove obsolete UI and compatibility paths | Call-site inventory and replacement behavior; no parallel authorities | Obsolete evidence reader removal in progress; broader UI work pending |
+| Explain actual failures and nested execution | Failure reasons, parent/child/node identities and outcomes visible in both clients | Top-level failure/effect and node evidence visible; exact-run history and parent/request identities implemented; final OCaml and screen proof pending |
+| Remove obsolete UI and compatibility paths | Call-site inventory and replacement behavior; no parallel authorities | Obsolete single-file evidence reader, fixed executable starter and silent first-source choice removed; v9 has no prior-version reader |
 | Verify TUI and Dashboard behavior | Candidate source checks, focused behavioral tests, actual rendered captures and runtime observations with provenance | Incomplete |
 | Deliver independently reviewed changes | Current-head review, checks, PR integration; installed/runtime evidence separately | Incomplete |
 
@@ -94,3 +94,27 @@ name, description or source. Counts describe matching versus all published
 Skills, and zero matches differs from an empty snapshot. Filtering hides an
 expanded editor while retaining its exact-reference owner and unsaved bytes;
 clearing the filter restores that draft without a write.
+
+## Retained execution history
+
+Fresh `masc.skill-evidence/v9` adds payload-free run metadata and an explicit
+latest-retained or exact-original-ID selection. The owner reads and deduplicates
+one exact-reference partition, orders it by recorded-result time and original
+ID, and derives history, selected detail and all-retained statistics together.
+The outcome projection reuses `Tool_result.disposition`. There is no additional
+store, executor, retry or admission gate.
+
+An unknown ID, including an ID stored under another revision, has no selected
+body. It never substitutes the latest result and does not erase other retained
+runs or their statistics. Unavailable storage remains different from an empty
+successful read. Each run's latest retained result can replace an earlier
+deferred result; this view does not promise every transition.
+
+Dashboard filters run metadata by outcome, Keeper and original ID. Selection
+exposes the chosen result, node inputs/outputs and parent/request identity;
+filters do not change the statistics population. TUI moves between original
+runs with `[`/`]` and returns to latest with Enter. Both bind replies to the
+requested reference and selector. Dashboard generations reject late replies;
+TUI's existing request owner does so and continuous navigation follows its
+pending target rather than stale displayed detail. Latest independent Skill
+activation remains separately labelled from the selected composition run.

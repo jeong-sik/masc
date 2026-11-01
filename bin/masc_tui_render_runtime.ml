@@ -1102,7 +1102,7 @@ let render_tools (state : state) =
       (Printf.sprintf "  [rows %s]" (Masc_tui_scroll.window_text ~scroll ~height:content_height drawable));
   box_bottom buf cols;
   Buffer.add_string buf
-    (footer_line state ~max_cells:cols ~hints:(Masc_tui_keys.footer_hints state.view));
+    (footer_line state ~max_cells:cols ~hints:(Masc_tui_keys.footer_hints_tools ~pane:state.tools_pane));
   finish_surface state ~surface_key:"tools" ~rows:terminal_rows ~cols buf
 
 

@@ -56,10 +56,17 @@ type composition_statistics =
   ; scst_last_recorded_at : float option
   }
 
+type composition_selection =
+  | Latest_retained
+  | Exact_run of Keeper_tool_plan.Composition_run_id.t
+
 type skill_evidence =
-  { se_status : skill_evidence_status
+  { se_reference : Skill_reference.t
+  ; se_status : skill_evidence_status
   ; se_activation : skill_evidence_activation option
   ; se_composition : Yojson.Safe.t option
+  ; se_composition_selection : composition_selection
+  ; se_composition_runs : Keeper_skill_composition_evidence.run_summary list option
   ; se_composition_statistics : composition_statistics option
   ; se_coverage : skill_evidence_coverage
   }

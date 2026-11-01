@@ -24,12 +24,16 @@ const duration = (samples: number, value: number | null) =>
   ({ samples, mean_ms: value, min_ms: value, p50_ms: value, p95_ms: value, max_ms: value })
 const emptyStats = { percentile_method: 'nearest_rank', recorded_window: { first_recorded_at: null, last_recorded_at: null }, scope: 'exact_reference_retained_runs', duration_scope: 'stored_executor_result', records: 0,
   completed: duration(0, null), failed: duration(0, null), deferred: 0 }
-const evidence = { schema: 'masc.skill-evidence/v8', status: 'not_observed_in_retained_coverage', reference,
-  activation: null, composition: null, composition_statistics: emptyStats, coverage }
+const evidence = { schema: 'masc.skill-evidence/v9', status: 'not_observed_in_retained_coverage', reference,
+  activation: null, composition: null, composition_selection: { mode: 'latest_retained' }, composition_runs: [],
+  composition_statistics: emptyStats, coverage }
 const composition = { schema: 'masc.skill-composition-evidence/v1', reference,
   composition_run_id: '01a045f2-cd8b-7000-a3f7-1d718a712204', parent_tool_use_id: '', parent_turn: 7, parent_planned_index: 0,
   request_id: null, keeper: 'rondo', composition_tool: 'keeper_compose_proof', composition_execution: 'inline',
   result: { disposition: 'completed', duration_ms: 0, data: { actions: [] }, tool_name: 'keeper_compose_proof' }, executor_settlements: [], recorded_at: 1 }
+const run = { composition_run_id: composition.composition_run_id, keeper: composition.keeper,
+  composition_execution: composition.composition_execution, request_id: composition.request_id,
+  disposition: composition.result.disposition, duration_ms: 0, recorded_at: 1 }
 function catalog(mode: 'normal' | 'composition' | 'unavailable' = 'normal'): SkillsResponse {
   return { schema: 'masc.skill-snapshot/v1', state: 'ready', snapshot,
     surfaces: [mode === 'unavailable' ? { reference, kind: 'unavailable', error: 'profile unavailable' }
@@ -72,25 +76,25 @@ it('preserves Composition empty means as unobserved', async () => {
 })
 it('preserves a real zero-duration Composition result and retained evidence', async () => {
   api.fetchSkills.mockResolvedValue(catalog('composition'))
-  api.fetchSkillEvidence.mockResolvedValue(decodeSkillEvidenceResponse({ ...evidence, status: 'observed', composition,
+  api.fetchSkillEvidence.mockResolvedValue(decodeSkillEvidenceResponse({ ...evidence, status: 'observed', composition, composition_runs: [run],
     coverage: { ...coverage, composition_runs_observed: 1 },
     composition_statistics: { ...emptyStats, records: 1, recorded_window: { first_recorded_at: 1, last_recorded_at: 1 }, completed: duration(1, 0) } }))
   await loadEvidence()
   expect(screen.getByText('0.0ms · n=1')).toBeTruthy()
-  expect(screen.getByText(composition.composition_run_id, { exact: false })).toBeTruthy()
+  expect(screen.getAllByText(composition.composition_run_id, { exact: false }).length).toBeGreaterThan(0)
   expect(screen.queryByText(/N\/A/)).toBeNull()
 })
 it('keeps retained executor results even if the selected declaration is model-orchestrated', async () => {
-  api.fetchSkillEvidence.mockResolvedValue(decodeSkillEvidenceResponse({ ...evidence, status: 'observed', composition,
+  api.fetchSkillEvidence.mockResolvedValue(decodeSkillEvidenceResponse({ ...evidence, status: 'observed', composition, composition_runs: [run],
     coverage: { ...coverage, composition_runs_observed: 1 },
     composition_statistics: { ...emptyStats, records: 1, recorded_window: { first_recorded_at: 1, last_recorded_at: 1 }, completed: duration(1, 0) } }))
   await loadEvidence()
   expect(screen.getByText(/N\/A/)).toBeTruthy()
   expect(screen.getByText('0.0ms · n=1')).toBeTruthy()
-  expect(screen.getByText(composition.composition_run_id, { exact: false })).toBeTruthy()
+  expect(screen.getAllByText(composition.composition_run_id, { exact: false }).length).toBeGreaterThan(0)
 })
 it('keeps unavailable retained coverage distinct from applicability', async () => {
-  api.fetchSkillEvidence.mockResolvedValue(decodeSkillEvidenceResponse({ ...evidence, composition_statistics: null,
+  api.fetchSkillEvidence.mockResolvedValue(decodeSkillEvidenceResponse({ ...evidence, composition_statistics: null, composition_runs: null,
     coverage: { ...coverage, coverage_complete: false, composition_scope: 'unavailable', composition_unavailable: ['retained store unreadable'] } }))
   await loadEvidence()
   expect(screen.getByText(/N\/A/)).toBeTruthy()
@@ -110,7 +114,7 @@ it('preserves Normal activation evidence alongside the N/A executor explanation'
     coverage: { ...coverage, activation_sessions_inspected: 1, activation_ledgers_loaded: 1 } }))
   await loadEvidence()
   expect(screen.getByText(/N\/A/)).toBeTruthy()
-  expect(screen.getByText(/Original activation/)).toBeTruthy()
+  expect(screen.getByText(/Latest independent activation/)).toBeTruthy()
   expect(screen.getByText(/skill-call-1/)).toBeTruthy()
 })
 it('preserves evidence read errors without inventing performance statistics', async () => {
@@ -130,6 +134,7 @@ it('shows result publication failure while retaining completed node evidence', a
     result: { disposition: 'completed', duration_ms: 0, data: { found: true }, tool_name: 'keeper_lane_status' },
     tool_use_id: 'probe-call', failure_effect_disposition: null, deferred_kind: null, result_bytes: 14, truncated_to: null }
   api.fetchSkillEvidence.mockResolvedValue(decodeSkillEvidenceResponse({ ...evidence, status: 'observed',
+    composition_runs: [{ ...run, disposition: 'failed' }],
     composition: { ...composition, executor_settlements: [node], result: { disposition: 'failed',
       duration_ms: 0, data: null, tool_name: 'keeper_compose_proof',
       message: 'Could not publish the result manifest after node execution',

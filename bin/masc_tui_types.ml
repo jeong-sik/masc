@@ -10199,6 +10199,7 @@ type state = {
   mutable tools_skill_evidence: (string * Yojson.Safe.t) option;
   mutable tools_evidence_request: unit ref option;
   mutable tools_evidence_reference: Skill_reference.t option;
+  mutable tools_evidence_run_id: Masc.Keeper_tool_plan.Composition_run_id.t option;
   mutable tools_async_observation: Tui_decode.async_request_observation option;
   mutable tools_async_observation_error: string option;
   (* CanAdmin async reads have their own owner, independent of both the
@@ -14362,6 +14363,30 @@ let tools_skill_profiles (state : state) =
 
 let selected_tools_skill_profile (state : state) =
   List.nth_opt (tools_skill_profiles state) state.tools_skill_cursor
+
+let adjacent_skill_evidence_run (state : state) ~reference ~selection ~runs ~delta =
+  let selection = match state.tools_evidence_request, state.tools_evidence_reference with
+    | Some _, Some pending when Skill_reference.equal reference pending ->
+      (match state.tools_evidence_run_id with
+       | None -> Masc.Tui_decode_skill_evidence.Latest_retained
+       | Some run_id -> Exact_run run_id)
+    | _ -> selection in
+  match runs with
+  | None -> None
+  | Some runs ->
+    let selected = match selection with
+      | Latest_retained -> Option.map
+          (fun (run : Masc.Keeper_skill_composition_evidence.run_summary) -> run.run_id)
+          (List.nth_opt runs 0)
+      | Exact_run run_id -> Some run_id in
+    Option.bind selected (fun run_id ->
+      let index = List.find_index (fun (run : Masc.Keeper_skill_composition_evidence.run_summary) ->
+        Masc.Keeper_tool_plan.Composition_run_id.equal run_id run.run_id) runs in
+      Option.bind index (fun index ->
+          let next = index + delta in
+          if next < 0 then None
+          else List.nth_opt runs next
+            |> Option.map (fun (run : Masc.Keeper_skill_composition_evidence.run_summary) -> run.run_id)))
 
 (* Which field a typed character lands in.
 
@@ -18635,6 +18660,7 @@ let create_state
   tools_skill_evidence = None;
   tools_evidence_request = None;
   tools_evidence_reference = None;
+  tools_evidence_run_id = None;
   tools_async_observation = None;
   tools_async_observation_error = None;
   tools_async_request_generation = 0;

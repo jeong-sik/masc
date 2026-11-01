@@ -12619,8 +12619,10 @@ let test_verification_evidence_defective_bodies_are_named () =
      = Masc.Tui_decode.Defect_not_an_image)
 
 let skill_evidence_fixture () =
+  let duration = `Assoc [ "samples", `Int 0; "mean_ms", `Null; "min_ms", `Null;
+    "p50_ms", `Null; "p95_ms", `Null; "max_ms", `Null ] in
   `Assoc
-    [ "schema", `String "masc.skill-evidence/v8"
+    [ "schema", `String "masc.skill-evidence/v9"
     ; "status", `String "not_observed_in_retained_coverage"
     ; ( "reference"
       , `Assoc
@@ -12634,7 +12636,13 @@ let skill_evidence_fixture () =
           ] )
     ; "activation", `Null
     ; "composition", `Null
-    ; "composition_statistics", `Null
+    ; "composition_selection", `Assoc [ "mode", `String "latest_retained" ]
+    ; "composition_runs", `List []
+    ; "composition_statistics", `Assoc [
+        "scope", `String "exact_reference_retained_runs";
+        "duration_scope", `String "stored_executor_result"; "percentile_method", `String "nearest_rank";
+        "records", `Int 0; "completed", duration; "failed", duration; "deferred", `Int 0;
+        "recorded_window", `Assoc ["first_recorded_at", `Null; "last_recorded_at", `Null] ]
     ; ( "coverage"
       , `Assoc
           [ "composition_scope", `String "exact_reference_retained_runs"
@@ -12650,7 +12658,7 @@ let skill_evidence_fixture () =
     ]
 ;;
 
-let test_decode_skill_evidence_reads_exact_v7_coverage () =
+let test_decode_skill_evidence_reads_exact_v9_coverage () =
   let replace field value = function
     | `Assoc fields -> `Assoc ((field, value) :: List.remove_assoc field fields)
     | _ -> Alcotest.fail "fixture object" in
@@ -12664,9 +12672,15 @@ let test_decode_skill_evidence_reads_exact_v7_coverage () =
     "composition_execution", `String "inline"; "executor_settlements", `List []; "recorded_at", `Float 1.;
     "result", `Assoc ["disposition", `String "completed"; "duration_ms", `Float 20.;
       "tool_name", `String "keeper_compose_proof"; "data", `Assoc []]] in
+  let summary = Keeper_skill_composition_evidence.of_yojson composition |> Result.get_ok
+    |> Keeper_skill_composition_evidence.run_summary
+    |> Keeper_skill_composition_evidence.run_summary_to_yojson in
+  let earlier_summary = summary |> replace "composition_run_id"
+    (`String "019ffc2b-0a41-7ba2-bf58-598e0e7f711a") in
   let with_statistics value = base
     |> replace "status" (`String "observed")
     |> replace "composition" composition
+    |> replace "composition_runs" (`List [summary; earlier_summary])
     |> replace "coverage" (Tui_decode_fields.member "coverage" base |> replace "composition_runs_observed" (`Int 2))
     |> replace "composition_statistics" value in
   let duration samples value = `Assoc (List.map (fun name -> name, value)
@@ -12684,6 +12698,8 @@ let test_decode_skill_evidence_reads_exact_v7_coverage () =
    | Ok _ -> Alcotest.fail "missing statistics"
    | Error detail -> Alcotest.fail detail);
   let before_epoch = with_statistics (statistics 2 (`Float 20.))
+    |> replace "composition_runs" (`List (List.map
+      (replace "recorded_at" (`Float (-100.5))) [summary; earlier_summary]))
     |> replace "composition" (composition |> replace "recorded_at" (`Float (-100.5)))
     |> replace "composition_statistics" (statistics 2 (`Float 20.)
       |> replace "recorded_window" (`Assoc [
@@ -12694,6 +12710,30 @@ let test_decode_skill_evidence_reads_exact_v7_coverage () =
          (Some (-100.5)) stats.scst_first_recorded_at
    | Ok _ -> Alcotest.fail "missing pre-epoch statistics"
    | Error detail -> Alcotest.fail detail);
+  let observed = with_statistics (statistics 2 (`Float 20.)) in
+  let exact run_id = `Assoc ["mode", `String "exact_run"; "composition_run_id", `String run_id] in
+  let older_id = "019ffc2b-0a41-7ba2-bf58-598e0e7f711a" in
+  let older = observed
+    |> replace "composition_selection" (exact older_id)
+    |> replace "composition" (composition |> replace "composition_run_id" (`String older_id)) in
+  Alcotest.(check bool) "older selected result keeps the complete retained population" true
+    (Result.is_ok (Tui_decode_skill_evidence.decode_skill_evidence older));
+  let absent = observed
+    |> replace "composition_selection" (exact "019ffc2b-0a41-7ba2-bf58-598e0e7f711f")
+    |> replace "composition" `Null in
+  Alcotest.(check bool) "a missing exact ID can coexist with retained runs" true
+    (Result.is_ok (Tui_decode_skill_evidence.decode_skill_evidence absent));
+  List.iter (fun json -> Alcotest.(check bool) "contradictory history or selection is refused" true
+    (Result.is_error (Tui_decode_skill_evidence.decode_skill_evidence json)))
+    [ absent |> replace "composition" composition
+    ; older |> replace "composition" composition
+    ; observed |> replace "composition_runs" (`List [summary; summary])
+    ; observed |> replace "composition_runs" (`List [earlier_summary; summary])
+    ; observed |> replace "composition_runs" `Null
+    ; observed |> replace "composition_statistics" `Null
+    ; observed |> replace "composition_selection" (`Assoc ["mode", `String "latest_retained"; "composition_run_id", `String older_id])
+    ; observed |> replace "composition_runs" (`List [summary |> replace "extra" (`Bool true); earlier_summary])
+    ; observed |> replace "schema" (`String "masc.skill-evidence/v8") ];
   let contradictory = base |> replace "composition_statistics" (statistics 2 (`Float 20.)) in
   Alcotest.(check bool) "positive samples require retained evidence" true
     (Result.is_error (Tui_decode_skill_evidence.decode_skill_evidence contradictory));
@@ -12730,7 +12770,9 @@ let test_decode_skill_evidence_accepts_declared_composition_scopes () =
       `Assoc
         (List.map
            (fun (name, value) ->
-              if name = "coverage"
+              if (name = "composition_runs" || name = "composition_statistics") && String.equal scope "unavailable"
+              then name, `Null
+              else if name = "coverage"
               then
                 ( name
                 , match value with
@@ -12805,7 +12847,7 @@ let test_decode_skill_evidence_requires_observation_fields () =
           |> without
           |> Tui_decode_skill_evidence.decode_skill_evidence
           |> Result.is_error))
-    [ "activation"; "composition" ]
+    [ "activation"; "composition"; "composition_selection"; "composition_runs"; "composition_statistics" ]
 ;;
 
 let test_decode_skill_evidence_requires_every_coverage_field () =
@@ -14281,8 +14323,8 @@ let () =
           test_blame_block_at_names_the_run_and_its_first_line
       ] );
     ( "skill_evidence",
-      [ Alcotest.test_case "reads exact v6 coverage" `Quick
-          test_decode_skill_evidence_reads_exact_v7_coverage
+      [ Alcotest.test_case "reads exact v9 coverage" `Quick
+          test_decode_skill_evidence_reads_exact_v9_coverage
       ; Alcotest.test_case "accepts declared composition scopes" `Quick
           test_decode_skill_evidence_accepts_declared_composition_scopes
       ; Alcotest.test_case "rejects v1 and status disagreement" `Quick

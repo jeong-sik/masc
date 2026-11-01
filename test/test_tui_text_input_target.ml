@@ -425,6 +425,41 @@ let test_skill_source_paging_chooses_the_windowed_item () =
   | _ -> fail "source was not chosen"
 ;;
 
+let test_skill_run_navigation_follows_the_pending_request () =
+  let module Run = Masc.Keeper_tool_plan.Composition_run_id in
+  let module Evidence = Masc.Keeper_skill_composition_evidence in
+  let state = fresh_state () in
+  let reference = Skill_reference.of_yojson (`Assoc [
+    "identity", `Assoc ["source_id", `String "workspace"; "package_id", `String "proof"; "name", `String "proof"];
+    "content_revision", `String (String.make 64 'a')]) |> Result.get_ok in
+  let newest = "019ffc2b-0a41-7ba2-bf58-598e0e7f711c" in
+  let middle = "019ffc2b-0a41-7ba2-bf58-598e0e7f711b" in
+  let oldest = "019ffc2b-0a41-7ba2-bf58-598e0e7f711a" in
+  let runs = List.mapi (fun index id -> Evidence.run_summary_of_yojson (`Assoc [
+    "composition_run_id", `String id; "keeper", `String "proof";
+    "composition_execution", `String "inline"; "request_id", `Null;
+    "disposition", `String "completed"; "duration_ms", `Float 1.;
+    "recorded_at", `Float (float_of_int (3 - index))]) |> Result.get_ok) [newest; middle; oldest] in
+  let next delta = Tui_types.adjacent_skill_evidence_run state ~reference
+    ~selection:Masc.Tui_decode_skill_evidence.Latest_retained ~runs:(Some runs) ~delta
+    |> Option.map Run.to_string in
+  check (option string) "older from displayed newest" (Some middle) (next 1);
+  state.tools_evidence_request <- Some (ref ());
+  state.tools_evidence_reference <- Some reference;
+  state.tools_evidence_run_id <- Some (Run.of_string middle |> Result.get_ok);
+  check (option string) "a second older input follows pending middle" (Some oldest) (next 1);
+  check (option string) "newer reverses pending middle before it answers" (Some newest) (next (-1));
+  state.tools_evidence_run_id <- None;
+  check (option string) "pending latest is its own cursor" (Some middle) (next 1);
+  state.tools_evidence_run_id <- Some (Run.of_string oldest |> Result.get_ok);
+  state.tools_evidence_reference <- Some (Skill_reference.make ~identity:reference.identity
+    ~content_revision:(Skill_reference.content_revision_of_string (String.make 64 'b') |> Result.get_ok));
+  check (option string) "another revision's pending cursor cannot redirect input" (Some middle) (next 1);
+  state.tools_evidence_reference <- Some reference;
+  state.tools_evidence_request <- None;
+  check (option string) "retired request fields are not a cursor owner" (Some middle) (next 1)
+;;
+
 let test_skill_drafts_are_suspended_by_original_workspace () =
   let state = fresh_state () in
   let identity root =
@@ -884,6 +919,8 @@ let () =
             test_skill_source_paging_chooses_the_windowed_item;
           test_case "authored Skill drafts stay owned through workspace uncertainty" `Quick
             test_skill_drafts_are_suspended_by_original_workspace;
+          test_case "run navigation follows the pending exact request" `Quick
+            test_skill_run_navigation_follows_the_pending_request;
           test_case "a drop reason claims typing on its Goal detail" `Quick
             test_a_drop_reason_claims_typing_on_its_goal_detail;
           test_case "the Fusion launch form claims while open" `Quick

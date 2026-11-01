@@ -6,6 +6,7 @@ import { SkillSourceInspector } from './skill-source-inspector'
 import { SkillAsyncEvidenceView } from './skill-async-evidence-view'
 import { SkillNodeEvidenceView } from './skill-node-evidence-view'
 import { SkillFlowView } from './skill-flow-view'
+import { SkillRunHistory } from './skill-run-history'
 import { SkillCreateForm, createReceiptMessage } from './skill-create-form'
 import {
   classifySkillEditorError,
@@ -320,7 +321,7 @@ function SkillEvidenceView({ result, io }: { result: SkillEvidenceResponse | nul
         const ownerClaims = item.owner.claims.map(claim => claim.keeper).join(', ') || 'unclaimed'
         return html`
           <div key=${JSON.stringify([item.trace_id, runField(activation, 'skill_tool_use_id')])}>
-            <div class="font-semibold">Original activation · ${delivered ? '✓ delivered' : '◌ invoked'} · ${ownerClaims} · ${actions} original-turn actions${activationEvidence.length > 1 ? ` · equal-time candidate ${index + 1}/${activationEvidence.length}` : ''}</div>
+            <div class="font-semibold">Latest independent activation · ${delivered ? '✓ delivered' : '◌ invoked'} · ${ownerClaims} · ${actions} original-turn actions${activationEvidence.length > 1 ? ` · equal-time candidate ${index + 1}/${activationEvidence.length}` : ''}</div>
             <div class="ss-muted mono">${runField(activation, 'activated_at')} · tool use ${runField(activation, 'skill_tool_use_id')} · trace ${item.trace_id} · owner ${item.owner.status}</div>
             <div class="ss-muted mono">original ${runField(activation, 'turn_ref')} · runtime ${runField(activation, 'runtime_id')}</div>
             <${SkillAsyncEvidenceView} evidence=${item} />
@@ -335,6 +336,8 @@ function SkillEvidenceView({ result, io }: { result: SkillEvidenceResponse | nul
             · ${composition.keeper}
           </div>
           <div class="ss-muted mono">${composition.composition_run_id} · ${compositionNodeCount} typed node settlements</div>
+          <div class="ss-muted mono text-3xs">Recorded result ${recordedTimestamp(composition.recorded_at)} · ${composition.composition_execution} · request ${composition.request_id ?? 'inline'}
+            · parent tool use ${composition.parent_tool_use_id || '(empty)'} · turn ${composition.parent_turn} · planned index ${composition.parent_planned_index}</div>
           ${composition.result.disposition === 'failed' ? html`
             <div class="mt-2 rounded border border-[var(--color-status-err)] p-2" role="note" aria-label="Composition failure">
               <strong>Composition failed</strong>
@@ -727,29 +730,32 @@ function SkillEvidenceLoader({ reference, io, isCurrent }: {
   const error = useSignal<string | null>(null)
   const loading = useSignal(false)
   const active = useRef(true)
-  useEffect(() => () => { active.current = false }, [])
+  const requestGeneration = useRef(0)
+  useEffect(() => () => { active.current = false; requestGeneration.current += 1 }, [])
+  const load = async (runId?: string) => {
+    if (!active.current || !isCurrent()) return
+    const generation = ++requestGeneration.current
+    loading.value = true
+    error.value = null
+    try {
+      const evidence = await fetchSkillEvidence(reference, runId)
+      if (!active.current || !isCurrent() || generation !== requestGeneration.current) return
+      result.value = evidence
+    } catch (cause) {
+      if (active.current && isCurrent() && generation === requestGeneration.current) {
+        error.value = cause instanceof Error ? cause.message : String(cause)
+      }
+    } finally {
+      if (active.current && isCurrent() && generation === requestGeneration.current) loading.value = false
+    }
+  }
   return html`<div>
     <div class="mb-2 flex items-center justify-between"><strong>Retained evidence</strong>
-      <button class="ss-btn" type="button" disabled=${loading.value} onClick=${async () => {
-        if (!active.current || !isCurrent() || loading.value) return
-        loading.value = true
-        error.value = null
-        try {
-          const evidence = await fetchSkillEvidence(reference)
-          if (!active.current || !isCurrent()) return
-          if (referenceKey(evidence.reference.identity, evidence.reference.content_revision)
-              !== referenceKey(reference.identity, reference.content_revision)) {
-            throw new Error('Returned evidence does not match the selected Skill revision.')
-          }
-          result.value = evidence
-        } catch (cause) {
-          if (active.current && isCurrent()) error.value = cause instanceof Error ? cause.message : String(cause)
-        } finally {
-          if (active.current && isCurrent()) loading.value = false
-        }
-      }}>${loading.value ? 'Loading…' : 'Load'}</button>
+      <button class="ss-btn" type="button" disabled=${loading.value} onClick=${() => { void load() }}>${loading.value ? 'Loading…' : 'Load'}</button>
     </div>
+    ${loading.value && result.value ? html`<p role="status">Loading requested selection; previous observation retained.</p>` : null}
     ${error.value ? html`<div role="alert" class="text-[var(--color-status-err)]">${error.value}</div>` : null}
+    ${result.value ? html`<${SkillRunHistory} result=${result.value} onSelect=${(runId?: string) => { void load(runId) }} />` : null}
     <${SkillEvidenceView} result=${result.value} io=${io} />
   </div>`
 }
@@ -927,7 +933,7 @@ function SkillsObservationPanel({ owner, onMutation }: {
                 <tr hidden=${filtered} key=${`${rowKey}-detail`}><td colspan="5">
                   ${row.surface ? html`<${SkillSourceInspector} reference=${row.surface.reference} />`
                     : html`<p role="status">Exact source unavailable: this Skill has no published source reference.</p>`}
-                  <div class="grid gap-3 p-2 lg:grid-cols-[minmax(0,2fr)_minmax(18rem,1fr)]">
+                  <div class="grid min-w-0 gap-3 p-2">
                     <div><strong>Execution flow</strong>${row.surface && row.surface.kind !== 'unavailable' ? html`<${SkillFlowView} profile=${row.surface.profile} /><${SkillIoView} profile=${row.surface.profile} />` : html`<div class="ss-muted">No profile</div>`}</div>
                     ${row.surface ? html`<${SkillEvidenceLoader} key=${rowKey}
                       reference=${row.surface.reference} io=${row.surface.kind === 'unavailable' ? null : row.surface.profile.io} isCurrent=${current} />` : null}

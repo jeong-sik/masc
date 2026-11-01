@@ -125,6 +125,9 @@ val footer_hints : ?detail_open:bool -> Masc_tui_types.surface -> string
     behaviour from before this argument existed, and the one
     {!has_detail_scoped_keys} exists to catch. *)
 
+val footer_hints_tools : pane:Masc_tui_types.tools_pane -> string
+(** Tools' bracket keys select retained runs in Available and Keepers in other panes. *)
+
 val footer_hints_metrics : telemetry:bool -> string
 (** Usage footer, showing only the keys for the visible Usage or Telemetry
     reading. *)

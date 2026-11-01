@@ -8535,7 +8535,7 @@ let test_skill_evidence_joins_activation_and_composition () =
       ~activation_owner_gap_count:0
   in
   let open Yojson.Safe.Util in
-  check string "evidence schema" "masc.skill-evidence/v8"
+  check string "evidence schema" "masc.skill-evidence/v9"
     (json |> member "schema" |> to_string);
   check string "observed status" "observed" (json |> member "status" |> to_string);
   check string "activation keeper" "delta"
@@ -8573,21 +8573,23 @@ let test_skill_evidence_joins_activation_and_composition () =
     "not_observed_in_retained_coverage"
     (not_observed |> member "status" |> to_string);
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
-  let save recorded_at result =
+  let save ?(reference = reference) recorded_at result =
     let fields = to_assoc composition in
     let fields = List.filter (fun (name, _) ->
-      not (List.mem name ["composition_run_id"; "recorded_at"; "result"])) fields in
+      not (List.mem name ["composition_run_id"; "recorded_at"; "result"; "reference"])) fields in
+    let run_id = Lib.Keeper_tool_plan.Composition_run_id.fresh () in
     let value = `Assoc
-      (("composition_run_id", `String (Lib.Keeper_tool_plan.Composition_run_id.fresh ()
-          |> Lib.Keeper_tool_plan.Composition_run_id.to_string))
+      (("composition_run_id", `String (Lib.Keeper_tool_plan.Composition_run_id.to_string run_id))
+       :: ("reference", Skill_reference.to_yojson reference)
        :: ("recorded_at", `Float recorded_at) :: ("result", Tool_result.to_json result) :: fields)
       |> Composition.of_yojson |> Result.get_ok in
-    Composition.save_latest config value |> Result.get_ok |> ignore in
+    Composition.save_latest config value |> Result.get_ok |> ignore;
+    run_id in
   let tool_name = "keeper_compose_release-checklist" in
-  save 100. (completed tool_name (`Assoc []));
-  save 200. (Tool_result.make_deferred ~tool_name ~start_time:(Tool_timing.start ()) ());
-  save 300. (Tool_result.make_err ~tool_name ~class_:Runtime_failure
-    ~start_time:(Tool_timing.start ()) "result publication failed");
+  let completed_run = save (-100.5) (completed tool_name (`Assoc [])) in
+  let _deferred_run = save 0. (Tool_result.make_deferred ~tool_name ~start_time:(Tool_timing.start ()) ()) in
+  let _failed_run = save 100.5 (Tool_result.make_err ~tool_name ~class_:Runtime_failure
+    ~start_time:(Tool_timing.start ()) "result publication failed") in
   let observed = Server_skill_evidence.project ~config reference in
   check int "coverage counts all original retained runs" 3
     (observed |> member "coverage" |> member "composition_runs_observed" |> to_int);
@@ -8598,7 +8600,46 @@ let test_skill_evidence_joins_activation_and_composition () =
   check int "deferred results remain separate" 1
     (observed |> member "composition_statistics" |> member "deferred" |> to_int);
   check string "latest authority includes actual failure, not only completed runs" "failed"
-    (observed |> member "composition" |> member "result" |> member "disposition" |> to_string)
+    (observed |> member "composition" |> member "result" |> member "disposition" |> to_string);
+  check int "history is the same retained population" 3
+    (observed |> member "composition_runs" |> to_list |> List.length);
+  check (float 0.00001) "negative record survives storage and projection" (-100.5)
+    (observed |> member "composition_statistics" |> member "recorded_window"
+     |> member "first_recorded_at" |> to_float);
+  let selected = Server_skill_evidence.project ~composition_run_id:completed_run ~config reference in
+  check string "an older run is selected by original identity" "completed"
+    (selected |> member "composition" |> member "result" |> member "disposition" |> to_string);
+  check bool "selection does not filter all-run statistics" true
+    (member "composition_statistics" selected = member "composition_statistics" observed);
+  let assert_client json = match Lib.Tui_decode_skill_evidence.decode_skill_evidence json with
+    | Ok _ -> () | Error detail -> fail detail in
+  assert_client observed;
+  assert_client selected;
+  let other_reference = Skill_reference.make ~identity:reference.identity
+    ~content_revision:(Skill_reference.content_revision_of_string (String.make 64 'c') |> Result.get_ok) in
+  let other_run = save ~reference:other_reference 400. (completed tool_name (`Assoc [])) in
+  List.iter (fun run_id ->
+    let absent = Server_skill_evidence.project ~composition_run_id:run_id ~config reference in
+    check bool "unknown or other-revision ID never falls back" true (member "composition" absent = `Null);
+    check int "selection miss preserves retained population" 3
+      (absent |> member "coverage" |> member "composition_runs_observed" |> to_int);
+    assert_client absent)
+    [other_run; Lib.Keeper_tool_plan.Composition_run_id.fresh ()];
+  let request_fields = ["reference", Skill_reference.to_yojson reference;
+    "composition_run_id", `String (Lib.Keeper_tool_plan.Composition_run_id.to_string completed_run)] in
+  (match Server_skill_evidence.request_of_string (`Assoc request_fields |> Yojson.Safe.to_string) with
+   | Ok (actual_reference, Some actual_run) ->
+     check bool "request owns exact reference" true (Skill_reference.equal reference actual_reference);
+     check bool "request owns exact original run" true
+       (Lib.Keeper_tool_plan.Composition_run_id.equal completed_run actual_run)
+   | Ok (_, None) -> fail "explicit selection was lost" | Error detail -> fail detail);
+  List.iter (fun fields -> check bool "invalid selection is refused instead of ignored" true
+    (Server_skill_evidence.request_of_string (`Assoc fields |> Yojson.Safe.to_string) |> Result.is_error))
+    [ ("composition_run_id", `String "bad-id") :: List.remove_assoc "composition_run_id" request_fields
+    ; ("composition_run_id", `Null) :: List.remove_assoc "composition_run_id" request_fields
+    ; ("composition_run_id", `String "bad-id") :: request_fields
+    ; ("run_id", `String "ignored-typo") :: request_fields
+    ; ("reference", Skill_reference.to_yojson reference) :: request_fields ]
 ;;
 
 let () =

@@ -2,6 +2,7 @@ open Result_syntax
 module Event = Execution_event
 module Codec = Execution_codec_executor
 module Sha256 = Agent_core_sha256
+module Batch_validation = Execution_batch_validation
 
 let reverse_append_cooperatively values tail =
   let rec loop reversed = function
@@ -936,14 +937,9 @@ let metadata_of_string ~offset payload =
   else Error (Corrupt_store { offset; detail = "metadata bytes are not canonical" })
 ;;
 
-type batch_header =
-  { batch_id : string
-  ; expected_next_seq : int
-  ; count : int
-  ; events_sha256 : string
-  }
+type batch_header = Batch_validation.header
 
-let batch_begin_to_string header =
+let batch_begin_to_string (header : batch_header) =
   Yojson.Safe.to_string
     (`Assoc
         [ "batch_id", `String header.batch_id
@@ -1177,21 +1173,17 @@ let batch_begin_of_string ~offset payload =
   else if count <= 0
   then Error (Corrupt_store { offset; detail = "batch count must be positive" })
   else (
-    let header = { batch_id; expected_next_seq; count; events_sha256 } in
+    let header : batch_header =
+      { Batch_validation.batch_id = batch_id; expected_next_seq; count; events_sha256 }
+    in
     if String.equal payload (batch_begin_to_string header)
     then Ok header
     else Error (Corrupt_store { offset; detail = "batch begin bytes are not canonical" }))
 ;;
 
-type batch_footer =
-  { batch_id : string
-  ; first_seq : int
-  ; last_seq : int
-  ; count : int
-  ; events_sha256 : string
-  }
+type batch_footer = Batch_validation.footer
 
-let batch_commit_to_string footer =
+let batch_commit_to_string (footer : batch_footer) =
   Yojson.Safe.to_string
     (`Assoc
         [ "batch_id", `String footer.batch_id
@@ -1231,7 +1223,9 @@ let batch_commit_of_string ~offset payload =
   let* count = int_field "count" in
   let* events_sha256 = string_field "events_sha256" in
   let* events_sha256 = validate_sha256 ~offset events_sha256 in
-  let footer = { batch_id; first_seq; last_seq; count; events_sha256 } in
+  let footer : batch_footer =
+    { Batch_validation.batch_id = batch_id; first_seq; last_seq; count; events_sha256 }
+  in
   if String.equal payload (batch_commit_to_string footer)
   then Ok footer
   else Error (Corrupt_store { offset; detail = "batch commit bytes are not canonical" })
@@ -1256,24 +1250,11 @@ let decode_located_payload codec located =
       (Corrupt_store { offset = located.offset; detail = "event bytes are not canonical" })
 ;;
 
-let validate_scanned_event correlation_id ~expected_seq located event =
-  Eio.Fiber.check ();
-  if Event.seq event <> expected_seq
-  then
-    Error
-      (Corrupt_store
-         { offset = located.offset
-         ; detail =
-             Printf.sprintf
-               "event sequence %d does not match expected sequence %d"
-               (Event.seq event)
-               expected_seq
-         })
-  else if not (Event.Correlation_id.equal (Event.correlation_id event) correlation_id)
-  then
-    Error
-      (Corrupt_store { offset = located.offset; detail = "event correlation mismatch" })
-  else Ok ()
+let batch_validation_result result =
+  Result.map_error
+    (fun (failure : Batch_validation.failure) ->
+       Corrupt_store { offset = failure.offset; detail = failure.detail })
+    result
 ;;
 
 type scan_mode =
@@ -1311,121 +1292,97 @@ let scan_committed_batches
         (Corrupt_store { offset; detail = "committed batch begin frame is incomplete" })
     | Complete_frame { kind = Batch_begin; payload; next_offset; _ } ->
       let* header = batch_begin_of_string ~offset payload in
-      if header.expected_next_seq <> committed_seq + 1
-      then
-        Error
-          (Corrupt_store
-             { offset
-             ; detail =
-                 Printf.sprintf
-                   "batch starts at sequence %d after committed sequence %d"
-                   header.expected_next_seq
-                   committed_seq
-             })
-      else (
-        let rec scan_events event_offset ordinal digest_context locations_rev events_rev =
-          if ordinal = header.count
-          then
-            let* commit_frame = decode_frame file ~file_size event_offset in
-            match commit_frame with
-            | End_of_store | Incomplete_frame ->
-              Error
-                (Corrupt_store
-                   { offset = event_offset
-                   ; detail = "committed batch commit frame is incomplete"
-                   })
-            | Complete_frame { kind = Batch_commit; payload; next_offset; _ } ->
-              let* footer = batch_commit_of_string ~offset:event_offset payload in
-              let digest = finish_payload_digest digest_context in
-              let expected_last = header.expected_next_seq + header.count - 1 in
-              if not (String.equal footer.batch_id header.batch_id)
-              then
-                Error
-                  (Corrupt_store
-                     { offset = event_offset; detail = "batch commit identity mismatch" })
-              else if
-                footer.first_seq <> header.expected_next_seq
-                || footer.last_seq <> expected_last
-                || footer.count <> header.count
-              then
-                Error
-                  (Corrupt_store
-                     { offset = event_offset; detail = "batch commit range mismatch" })
-              else if
-                (not (String.equal header.events_sha256 digest))
-                || not (String.equal footer.events_sha256 digest)
-              then
-                Error
-                  (Corrupt_store
-                     { offset = event_offset; detail = "batch event digest mismatch" })
-              else (
-                let locations = reverse_cooperatively locations_rev in
-                let events = reverse_cooperatively events_rev in
-                Ok (next_offset, expected_last, locations, events))
-            | Complete_frame { kind = Metadata | Batch_begin | Event_record; _ } ->
-              Error
-                (Corrupt_store
-                   { offset = event_offset; detail = "batch is missing its commit frame" })
-          else
-            let* event_frame = decode_frame file ~file_size event_offset in
-            match event_frame with
-            | End_of_store | Incomplete_frame ->
-              Error
-                (Corrupt_store
-                   { offset = event_offset
-                   ; detail = "committed event frame is incomplete"
-                   })
-            | Complete_frame
-                ({ kind = Event_record; payload; payload_offset; next_offset; _ } as
-                 event_frame) ->
-              let expected_seq = header.expected_next_seq + ordinal in
-              let located = { offset = event_offset; payload } in
-              let* event = decode_located_payload codec located in
-              let* () =
-                validate_scanned_event correlation_id ~expected_seq located event
-              in
-              let locations_rev =
-                match mode with
-                | Read_only_events -> locations_rev
-                | Rebuild_durable_index ->
-                  { seq = expected_seq
-                  ; payload_offset
-                  ; payload_length = String.length payload
-                  ; frame = frame_guard event_offset event_frame
-                  }
-                  :: locations_rev
-              in
-              Eio.Fiber.yield ();
-              scan_events
-                next_offset
-                (ordinal + 1)
-                (feed_payload_digest digest_context payload)
-                locations_rev
-                (event :: events_rev)
-            | Complete_frame { kind = Metadata | Batch_begin | Batch_commit; _ } ->
-              Error
-                (Corrupt_store
-                   { offset = event_offset; detail = "batch contains a non-event frame" })
-        in
-        let* next_offset, last_seq, batch_locations, batch_events =
-          scan_events next_offset 0 Sha256.empty [] []
-        in
-        let locations =
-          match mode with
-          | Read_only_events -> accumulator.locations
-          | Rebuild_durable_index ->
-            List.fold_left
-              (fun locations location ->
-                 Eio.Fiber.yield ();
-                 Sequence_map.add location.seq location locations)
-              accumulator.locations
-              batch_locations
-        in
-        let events_rev =
-          reverse_append_cooperatively batch_events accumulator.events_rev
-        in
-        let next_accumulator : committed_scan_accumulator = { locations; events_rev } in
-        scan_batches next_offset last_seq next_accumulator)
+      let* progress =
+        Batch_validation.start ~offset ~committed_seq ~correlation_id header
+        |> batch_validation_result
+      in
+      let rec scan_events event_offset progress digest_context locations_rev events_rev =
+        if Batch_validation.remaining progress = 0
+        then
+          let* commit_frame = decode_frame file ~file_size event_offset in
+          match commit_frame with
+          | End_of_store | Incomplete_frame ->
+            Error
+              (Corrupt_store
+                 { offset = event_offset
+                 ; detail = "committed batch commit frame is incomplete"
+                 })
+          | Complete_frame { kind = Batch_commit; payload; next_offset; _ } ->
+            let* footer = batch_commit_of_string ~offset:event_offset payload in
+            let digest = finish_payload_digest digest_context in
+            let* validated =
+              Batch_validation.finish progress ~offset:event_offset ~digest footer
+              |> batch_validation_result
+            in
+            let locations = reverse_cooperatively locations_rev in
+            let events = reverse_cooperatively events_rev in
+            Ok (next_offset, Batch_validation.last_seq validated, locations, events)
+          | Complete_frame { kind = Metadata | Batch_begin | Event_record; _ } ->
+            Error
+              (Corrupt_store
+                 { offset = event_offset; detail = "batch is missing its commit frame" })
+        else
+          let* event_frame = decode_frame file ~file_size event_offset in
+          match event_frame with
+          | End_of_store | Incomplete_frame ->
+            Error
+              (Corrupt_store
+                 { offset = event_offset
+                 ; detail = "committed event frame is incomplete"
+                 })
+          | Complete_frame
+              ({ kind = Event_record; payload; payload_offset; next_offset; _ } as
+               event_frame) ->
+            let expected_seq = Batch_validation.next_seq progress in
+            let located = { offset = event_offset; payload } in
+            let* event = decode_located_payload codec located in
+            Eio.Fiber.check ();
+            let* progress =
+              Batch_validation.accept_event progress ~offset:event_offset event
+              |> batch_validation_result
+            in
+            let locations_rev =
+              match mode with
+              | Read_only_events -> locations_rev
+              | Rebuild_durable_index ->
+                { seq = expected_seq
+                ; payload_offset
+                ; payload_length = String.length payload
+                ; frame = frame_guard event_offset event_frame
+                }
+                :: locations_rev
+            in
+            Eio.Fiber.yield ();
+            scan_events
+              next_offset
+              progress
+              (feed_payload_digest digest_context payload)
+              locations_rev
+              (event :: events_rev)
+          | Complete_frame { kind = Metadata | Batch_begin | Batch_commit; _ } ->
+            Error
+              (Corrupt_store
+                 { offset = event_offset; detail = "batch contains a non-event frame" })
+      in
+      let* next_offset, last_seq, batch_locations, batch_events =
+        scan_events next_offset progress Sha256.empty [] []
+      in
+      let locations =
+        match mode with
+        | Read_only_events -> accumulator.locations
+        | Rebuild_durable_index ->
+          List.fold_left
+            (fun locations location ->
+               Eio.Fiber.yield ();
+               Sequence_map.add location.seq location locations)
+            accumulator.locations
+            batch_locations
+      in
+      let events_rev =
+        reverse_append_cooperatively batch_events accumulator.events_rev
+      in
+      let next_accumulator : committed_scan_accumulator = { locations; events_rev } in
+      scan_batches next_offset last_seq next_accumulator
     | Complete_frame { kind = Metadata | Event_record | Batch_commit; _ } ->
       Error (Corrupt_store { offset; detail = "expected a batch begin frame" })
   in
@@ -2228,11 +2185,21 @@ let append_new_batch store ~expected_next_seq ~count payloads =
   let last_seq = expected_next_seq + count - 1 in
   let digest = events_digest payloads in
   let begin_payload =
-    batch_begin_to_string { batch_id; expected_next_seq; count; events_sha256 = digest }
+    batch_begin_to_string
+      { Batch_validation.batch_id = batch_id
+      ; expected_next_seq
+      ; count
+      ; events_sha256 = digest
+      }
   in
   let commit_payload =
     batch_commit_to_string
-      { batch_id; first_seq = expected_next_seq; last_seq; count; events_sha256 = digest }
+      { Batch_validation.batch_id = batch_id
+      ; first_seq = expected_next_seq
+      ; last_seq
+      ; count
+      ; events_sha256 = digest
+      }
   in
   let committed = with_read store (fun () -> store.committed) in
   let offset = committed.committed_offset in

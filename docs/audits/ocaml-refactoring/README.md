@@ -93,7 +93,7 @@ runtime gates. Source-review completion alone leaves a Draft item in review.
 
 The queue now contains **30 concrete candidates**: 24 from the first semantic pass, A1
 from the Agent Core follow-up, T1 from the integrated TUI investigation, E1/E2 from
-Exec, M1 from multimodal/media, and J1 from the Schedule investigation. Twenty-two are
+Exec, M1 from multimodal/media, and J1 from the Schedule investigation. Twenty-three are
 implemented as PRs; their source-review evidence is recorded on each PR: `S1` in
 [#43367](https://github.com/jeong-sik/masc/pull/43367) isolates provider usage
 acceptance; `K1` in [#43370](https://github.com/jeong-sik/masc/pull/43370) preserves
@@ -138,10 +138,11 @@ through HTTP aggregation and removes redundant TUI connector fields. S7 in
 [#47080](https://github.com/jeong-sik/masc/pull/47080) replaces ingress scheduling
 flags with an explicit lane phase. D6 in
 [#47083](https://github.com/jeong-sik/masc/pull/47083) shares immutable snapshot work
-and retry classification between Board deletion and flush. Eight candidates remain
-unfinished, including K6: its first accumulator stage is in
-[#47084](https://github.com/jeong-sik/masc/pull/47084), while the batch-validation
-boundary remains pending. This ordering does not waive their coverage.
+and retry classification between Board deletion and flush. K6 in
+[#47084](https://github.com/jeong-sik/masc/pull/47084) and
+[#47091](https://github.com/jeong-sik/masc/pull/47091) gives committed-batch scans
+immutable accumulation and a private semantic-validation owner. Seven candidates
+remain unfinished. This ordering does not waive their coverage.
 
 | ID | Priority | Status | Refactoring point |
 | --- | --- | --- | --- |
@@ -150,7 +151,7 @@ boundary remains pending. This ordering does not waive their coverage.
 | [K3](#k3) | next | in review | Represent Board contention rearm tickets with one explicit phase |
 | [K4](#k4) | later | candidate | Make request-evidence reset and projection ownership explicit per attempt |
 | [K5](#k5) | later | source reviewed; execution unverified | Separate approval restart replay decisions from recovery effects |
-| [K6](#k6) | investigate | partially implemented; execution unverified | Make Agent Core committed-batch scanning an explicit returned state |
+| [K6](#k6) | investigate | implemented; execution unverified | Make Agent Core committed-batch scanning an explicit returned state |
 | [K7](#k7) | later | candidate | Separate Memory receipt reconciliation selection from its durable plan |
 | [D1](#d1) | next | in review | Return an explicit task commit receipt instead of a cross-scope notification ref |
 | [D2](#d2) | next | in review | Make Goal upsert a typed immutable transaction decision |
@@ -584,9 +585,30 @@ The codec runtime still outlives every store/snapshot scope. Existing corruption
 and tail scenarios remain; direct scan-cancellation coverage is not claimed from
 the append/writer cancellation scenarios. Syntax/source evidence is recorded on
 the PR, without builds, typechecking or behavior execution. No performance gain
-or existing visibility defect is claimed. This completes only the first accumulator
-stage; the broader grammar/validation boundary remains pending, so K6 stays among
-the unfinished candidates.
+or existing visibility defect is claimed. That PR completed the first accumulator
+stage; the subsequent validation boundary is recorded below.
+
+Current-source continuation (2026-11-01, parent
+`216229e743f7a47818482ca18043716df417a1fd`):
+[#47091](https://github.com/jeong-sik/masc/pull/47091) moves already-decoded header,
+event and footer validation to private `Execution_batch_validation`. The module
+owns header/footer record types once, opaque immutable progress and an opaque
+structural validation result. Progress replaces the driver's ordinal arithmetic;
+it does not introduce a second counter or phase machine. Codecs establish header
+validity, while the driver accepts events until the declared count is reached.
+The validation result establishes structural agreement, never atomic authority.
+
+Header continuation, sequence-before-correlation and footer identity-before-range-
+before-digest checks retain their offsets and diagnostic details. Framing, codecs,
+digest calculation, cancellation checks, cooperative yields/reversals, index
+publication, authority, writer claims, fencing, fsync and tail handling remain
+with the driver. Writer serialization uses the same owned record types and keeps
+canonical field order. The new public-store scenario reframes a footer identity
+with a valid checksum, then requires both read-only snapshot and reopen to refuse
+at the exact footer offset while preserving the entire WAL and authority bytes.
+It does not assert human error prose or claim validation-precedence coverage.
+Source and any requested execution evidence are recorded separately on the PR;
+implementation does not establish runtime, integration or whole-campaign completion.
 
 ### K7
 

@@ -567,6 +567,104 @@ let test_committed_corruption_is_rejected_without_truncation () =
       (Optint.Int63.to_int64 (Eio.Path.stat ~follow:true wal).size))
 ;;
 
+let reframe_final_footer_identity contents =
+  let bytes = Bytes.of_string contents in
+  (* Wire fields written by Execution_event_store.encode_frame_header_with_digest:
+     magic, uint16 version, uint8 kind, uint8 reserved, int64 payload length,
+     then the raw SHA-256 digest. Walk declared frame boundaries, not JSON text. *)
+  let magic_bytes = String.length "MACE" in
+  let version_bytes = 2 in
+  let kind_bytes = 1 in
+  let reserved_bytes = 1 in
+  let payload_length_bytes = 8 in
+  let kind_offset = magic_bytes + version_bytes in
+  let length_offset = kind_offset + kind_bytes + reserved_bytes in
+  let digest_offset = length_offset + payload_length_bytes in
+  let header_bytes = digest_offset + Agent_core_sha256.digest_size in
+  let rec final_frame frame_offset =
+    let payload_offset = frame_offset + header_bytes in
+    if payload_offset > Bytes.length bytes then fail "fixture has an incomplete frame";
+    let payload_length =
+      Bytes.get_int64_be bytes (frame_offset + length_offset) |> Int64.to_int
+    in
+    let next_offset = payload_offset + payload_length in
+    if next_offset = Bytes.length bytes
+    then frame_offset, payload_offset, payload_length
+    else if next_offset >= payload_offset && next_offset < Bytes.length bytes
+    then final_frame next_offset
+    else fail "fixture frame length is outside the WAL"
+  in
+  let frame_offset, payload_offset, payload_length = final_frame 0 in
+  (* Batch_commit is wire kind 4; only that final footer is reframed. *)
+  check int "fixture ends with a commit footer" 4
+    (Char.code (Bytes.get bytes (frame_offset + kind_offset)));
+  let payload = Bytes.sub_string bytes payload_offset payload_length in
+  let fields =
+    match Yojson.Safe.from_string payload with
+    | `Assoc fields -> fields
+    | _ -> fail "fixture commit footer is not an object"
+  in
+  let batch_id =
+    match List.assoc_opt "batch_id" fields with
+    | Some (`String value) when String.length value > 0 -> Bytes.of_string value
+    | Some _ | None -> fail "fixture commit footer has no batch identity"
+  in
+  Bytes.set batch_id 0 (if Bytes.get batch_id 0 = '0' then '1' else '0');
+  (* Preserve the writer's canonical field order and every other footer value. *)
+  let reframed_payload =
+    `Assoc
+      (List.map
+         (function
+           | "batch_id", _ -> "batch_id", `String (Bytes.to_string batch_id)
+           | field -> field)
+         fields)
+    |> Yojson.Safe.to_string
+  in
+  check int "reframed footer preserves its encoded length" payload_length
+    (String.length reframed_payload);
+  let digest =
+    Agent_core_sha256.(to_raw_string (digest_string reframed_payload))
+  in
+  Bytes.blit_string reframed_payload 0 bytes payload_offset payload_length;
+  Bytes.blit_string digest 0 bytes (frame_offset + digest_offset)
+    Agent_core_sha256.digest_size;
+  Int64.of_int frame_offset, Bytes.to_string bytes
+;;
+
+let test_semantic_footer_corruption_preserves_authoritative_bytes () =
+  Eio_main.run
+  @@ fun env ->
+  with_temp_dir env (fun codec dir ->
+    Eio.Switch.run (fun sw ->
+      let store = create_store ~codec ~sw ~dir in
+      let writer = attach_store store in
+      let events = make_four_events (Store.correlation_id store) in
+      ignore (require_store (Store.append_batch writer ~expected_next_seq:1 events)));
+    let wal = Eio.Path.(dir / "events.v1.wal") in
+    let authority = Eio.Path.(dir / "events.v1.commit") in
+    let authority_before = Eio.Path.load authority in
+    let footer_offset, corrupted = reframe_final_footer_identity (Eio.Path.load wal) in
+    Eio.Path.with_open_out ~create:(`Or_truncate 0o600) wal (fun file ->
+      Eio.Flow.copy_string corrupted file;
+      Eio.File.sync file);
+    let require_footer_corruption = function
+      | Error (Store.Corrupt_store { offset; _ }) ->
+        check int64 "corruption identifies the exact footer offset" footer_offset offset
+      | Error error -> fail (Store.error_to_string error)
+      | Ok _ -> fail "mismatched committed footer identity was accepted"
+    in
+    let unchanged label =
+      check string (label ^ " leaves WAL bytes unchanged") corrupted (Eio.Path.load wal);
+      check string (label ^ " leaves authority bytes unchanged") authority_before
+        (Eio.Path.load authority)
+    in
+    require_footer_corruption (Store.read_only_snapshot ~codec ~dir ());
+    unchanged "read-only snapshot";
+    Eio.Switch.run (fun sw ->
+      require_footer_corruption (Store.open_existing ~codec ~sw ~dir));
+    unchanged "reopen")
+;;
+
 let test_authoritative_incomplete_frame_is_not_truncated () =
   Eio_main.run
   @@ fun env ->
@@ -1784,6 +1882,10 @@ let () =
             "committed corruption is rejected"
             `Quick
             test_committed_corruption_is_rejected_without_truncation
+        ; test_case
+            "semantic footer corruption preserves authoritative bytes"
+            `Quick
+            test_semantic_footer_corruption_preserves_authoritative_bytes
         ; test_case
             "authoritative incomplete frame is not truncated"
             `Quick

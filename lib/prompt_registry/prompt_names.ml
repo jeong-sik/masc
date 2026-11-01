@@ -203,9 +203,6 @@ let keeper_world_frame_held_rows_sections = "keeper.world.frame.held_rows_sectio
    recent-conversation rows in the turn context. *)
 let keeper_world_transcript_header = "keeper.world.transcript.header"
 let keeper_world_transcript_intro = "keeper.world.transcript.intro"
-(* The two blocks of the recall judgment (RFC-keeper-recall-reaches-the-turn
-   section 4.4): the status line a judged turn always carries, and the body of
-   the memories the judgment carried. *)
 (* Managed recall instructions and external criterion policy. *)
 let keeper_recall_candidate = "keeper.memory.recall.candidate"
 let keeper_recall_candidate_possibly_needed = "keeper.memory.recall.candidate.possibly_needed"
@@ -218,6 +215,9 @@ let keeper_recall_turn_yes = "keeper.memory.recall.turn.yes"
 let keeper_recall_turn_no = "keeper.memory.recall.turn.no"
 let keeper_recall_turn_unsure = "keeper.memory.recall.turn.unsure"
 
+(* The two blocks of the recall judgment (RFC-keeper-recall-reaches-the-turn
+   section 4.4): the status line a judged turn always carries, and the body of
+   the memories the judgment carried. *)
 let keeper_recall_status_selected = "keeper.recall.status.selected"
 let keeper_recall_status_selected_ids = "keeper.recall.status.selected_ids"
 let keeper_recall_status_none_found_needed = "keeper.recall.status.none_found_needed"

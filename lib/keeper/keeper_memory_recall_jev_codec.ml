@@ -29,7 +29,10 @@ type 'a answer =
   | Answered of 'a Types.decoded_choice
   | Not_decoded of string
 
-(* Decoding depends only on the closed protocol labels. Criterion descriptions
+(* Question (a) keeps the TWO_WAY wording measured in layer 0 by
+   scripts/keeper-recall-jev-probe.py, now in
+   config/prompts/keeper.memory.recall.md. Do not change it without measuring.
+   Decoding depends only on the closed protocol labels. Criterion descriptions
    are external policy captured separately by [load_guidance]. *)
 let candidate_choices =
   Types.choice_set ~options:Judgment.all_of_candidate_decision
@@ -73,7 +76,15 @@ let load_guidance ~question_ids =
     (function Judgment.Needs_knowledge -> Some yes | Needs_no_knowledge -> Some no | Unsure -> Some unsure) in
   let* turn_instructions = prompt Prompt_names.keeper_recall_turn in
   let render_questions key choices =
-    let resolution = Prompt_registry.resolve_prompt key in
+    let* resolution = match Prompt_registry.resolve_prompt key with
+      | resolution -> Ok resolution
+      | exception Sys_error detail ->
+        Error (Guidance_unavailable
+          (Printf.sprintf "Prompt '%s' could not be resolved: %s" key detail))
+      | exception Unix.Unix_error (error, operation, path) ->
+        Error (Guidance_unavailable
+          (Printf.sprintf "Prompt '%s' could not be resolved: %s (%s %s)"
+            key (Unix.error_message error) operation path)) in
     List.fold_left (fun result id ->
       let* questions = result in
       let* instructions = Prompt_registry.render_resolved_prompt_template key resolution ["question_id",id]

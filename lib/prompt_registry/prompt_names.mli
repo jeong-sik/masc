@@ -225,10 +225,6 @@ val keeper_world_transcript_intro : string
 (** Durable direct-conversation transcript block, prepended to the quoted
     recent-conversation rows in the turn context. *)
 
-(** The two blocks of the recall judgment (RFC-keeper-recall-reaches-the-turn
-    section 4.4): the status line a judged turn always carries, and the body of
-    the memories the judgment carried. *)
-
 (** Managed recall instructions and external criterion policy. *)
 val keeper_recall_candidate : string
 val keeper_recall_candidate_possibly_needed : string
@@ -241,6 +237,9 @@ val keeper_recall_turn_yes : string
 val keeper_recall_turn_no : string
 val keeper_recall_turn_unsure : string
 
+(** The two blocks of the recall judgment (RFC-keeper-recall-reaches-the-turn
+    section 4.4): the status line a judged turn always carries, and the body of
+    the memories the judgment carried. *)
 val keeper_recall_status_selected : string
 val keeper_recall_status_selected_ids : string
 val keeper_recall_status_none_found_needed : string

@@ -82,7 +82,10 @@ module For_testing : sig
 
   val completed_turn_response
     :  latency_ms:int
-    -> Runtime_claude_code.turn_result
+    -> turn_id:string
+    -> model:string
+    -> text:string
+    -> turn_total:Runtime_claude_code.turn_usage option
     -> Agent_core.Types.api_response
 end
 

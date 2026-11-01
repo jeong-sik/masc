@@ -548,21 +548,21 @@ let reported_cache_usage_of_turn_usage (usage : Runtime_claude_code.turn_usage)
   }
 ;;
 
-let completed_turn_response ~latency_ms (turn : Runtime_claude_code.turn_result)
+let completed_turn_response ~latency_ms ~turn_id ~model ~text ~turn_total
   : Agent_core.Types.api_response
   =
-  { Agent_core.Types.id = turn.turn_id
-  ; model = turn.model
+  { Agent_core.Types.id = turn_id
+  ; model
   ; stop_reason = EndTurn
-  ; content = [ Text turn.text ]
-  ; usage = Option.map api_usage_of_turn_usage turn.usage.turn_total
+  ; content = [ Text text ]
+  ; usage = Option.map api_usage_of_turn_usage turn_total
   ; telemetry =
       Some
         { Agent_core.Types.default_inference_telemetry with
           request_latency_ms = Some latency_ms
-        ; canonical_model_id = Some turn.model
+        ; canonical_model_id = Some model
         ; reported_cache_usage =
-            Option.map reported_cache_usage_of_turn_usage turn.usage.turn_total
+            Option.map reported_cache_usage_of_turn_usage turn_total
         }
   }
 ;;
@@ -1533,7 +1533,14 @@ let run_without_lifecycle ~result_scope ~media_store ~official_task_reference ~c
            let request_context =
              Option.map request_context_of_request_input turn.usage.latest_request_input
            in
-           let response = completed_turn_response ~latency_ms turn in
+           let response =
+             completed_turn_response
+               ~latency_ms
+               ~turn_id:turn.turn_id
+               ~model:turn.model
+               ~text:turn.text
+               ~turn_total:turn.usage.turn_total
+           in
            let* () =
              Host.invoke_turn_completion_hooks
                ~runtime_label

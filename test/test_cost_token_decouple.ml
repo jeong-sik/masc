@@ -757,39 +757,23 @@ let test_unreported_wire_cache_is_null_not_zero () =
     (int_field muse_zero_payload "cache_miss_input_tokens");
   check int "muse explicit zero cache yields 120 non-cached" 120
     (int_field muse_zero_payload "non_cached_input_tokens");
-  let claude_turn ?cache_creation ?cache_read () : Runtime_claude_code.turn_result =
-    { session_id = "sess-claude"
-    ; turn_id = "turn-claude"
-    ; model = "claude-sonnet-4-6"
-    ; text = "ok"
-    ; dynamic_tool_calls = 0
-    ; subscription =
-        { logged_in = true
-        ; auth_method = Some "claude.ai"
-        ; subscription_type = Some "max"
-        ; api_provider = Some "firstParty"
-        }
-    ; rate_limit = None
-    ; resumed = false
-    ; usage =
-        { latest_request_input = None
-        ; turn_total =
-            Some
-              { input_tokens = 120
-              ; output_tokens = 30
-              ; cache_creation_input_tokens = Option.value cache_creation ~default:0
-              ; cache_read_input_tokens = Option.value cache_read ~default:0
-              ; reported_cache_creation_input_tokens = cache_creation
-              ; reported_cache_read_input_tokens = cache_read
-              }
-        }
-    }
-  in
-  let claude_unreported_resp =
+  let claude_turn_resp ?cache_creation ?cache_read () =
     Masc.Keeper_claude_code_runtime.For_testing.completed_turn_response
       ~latency_ms:10
-      (claude_turn ())
+      ~turn_id:"turn-claude"
+      ~model:"claude-sonnet-4-6"
+      ~text:"ok"
+      ~turn_total:
+        (Some
+           { Runtime_claude_code.input_tokens = 120
+           ; output_tokens = 30
+           ; cache_creation_input_tokens = Option.value cache_creation ~default:0
+           ; cache_read_input_tokens = Option.value cache_read ~default:0
+           ; reported_cache_creation_input_tokens = cache_creation
+           ; reported_cache_read_input_tokens = cache_read
+           })
   in
+  let claude_unreported_resp = claude_turn_resp () in
   let claude_unreported_usage = Option.get claude_unreported_resp.usage in
   check int "claude accounting input stays 120 when cache is omitted" 120
     claude_unreported_usage.input_tokens;
@@ -816,11 +800,7 @@ let test_unreported_wire_cache_is_null_not_zero () =
   check_null_field claude_unreported_payload "cache_read_tokens";
   check_null_field claude_unreported_payload "cache_miss_input_tokens";
   check_null_field claude_unreported_payload "non_cached_input_tokens";
-  let claude_zero_resp =
-    Masc.Keeper_claude_code_runtime.For_testing.completed_turn_response
-      ~latency_ms:10
-      (claude_turn ~cache_creation:0 ~cache_read:0 ())
-  in
+  let claude_zero_resp = claude_turn_resp ~cache_creation:0 ~cache_read:0 () in
   let claude_zero_usage = Option.get claude_zero_resp.usage in
   let claude_zero_payload =
     H.cost_event_payload
@@ -848,9 +828,7 @@ let test_unreported_wire_cache_is_null_not_zero () =
   check int "claude explicit zero cache yields 120 miss" 120
     (int_field claude_zero_payload "cache_miss_input_tokens");
   let claude_positive_resp =
-    Masc.Keeper_claude_code_runtime.For_testing.completed_turn_response
-      ~latency_ms:10
-      (claude_turn ~cache_creation:10 ~cache_read:40 ())
+    claude_turn_resp ~cache_creation:10 ~cache_read:40 ()
   in
   let claude_positive_usage = Option.get claude_positive_resp.usage in
   check int "claude inclusive accounting input adds cache write and read" 170

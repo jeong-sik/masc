@@ -650,39 +650,23 @@ let test_provider_usage_distinguishes_unreported_cache_from_reported_zero () =
   check string "muse explicit zero renders 0"
     "Provider usage (client turn total) · input 120 · cache read 0 · cache created 0"
     (Inspector.provider_usage_summary muse_zero_usage);
-  let claude_turn ?cache_creation ?cache_read () : Runtime_claude_code.turn_result =
-    { session_id = "sess-claude"
-    ; turn_id = "turn-claude"
-    ; model = "claude-sonnet-4-6"
-    ; text = "ok"
-    ; dynamic_tool_calls = 0
-    ; subscription =
-        { logged_in = true
-        ; auth_method = Some "claude.ai"
-        ; subscription_type = Some "max"
-        ; api_provider = Some "firstParty"
-        }
-    ; rate_limit = None
-    ; resumed = false
-    ; usage =
-        { latest_request_input = None
-        ; turn_total =
-            Some
-              { input_tokens = 120
-              ; output_tokens = 30
-              ; cache_creation_input_tokens = Option.value cache_creation ~default:0
-              ; cache_read_input_tokens = Option.value cache_read ~default:0
-              ; reported_cache_creation_input_tokens = cache_creation
-              ; reported_cache_read_input_tokens = cache_read
-              }
-        }
-    }
-  in
-  let claude_unreported_resp =
+  let claude_turn_resp ?cache_creation ?cache_read () =
     Masc.Keeper_claude_code_runtime.For_testing.completed_turn_response
       ~latency_ms:10
-      (claude_turn ())
+      ~turn_id:"turn-claude"
+      ~model:"claude-sonnet-4-6"
+      ~text:"ok"
+      ~turn_total:
+        (Some
+           { Runtime_claude_code.input_tokens = 120
+           ; output_tokens = 30
+           ; cache_creation_input_tokens = Option.value cache_creation ~default:0
+           ; cache_read_input_tokens = Option.value cache_read ~default:0
+           ; reported_cache_creation_input_tokens = cache_creation
+           ; reported_cache_read_input_tokens = cache_read
+           })
   in
+  let claude_unreported_resp = claude_turn_resp () in
   let claude_unreported_usage =
     Turn_record.usage_of_reported_counts
       ~scope:Runtime_usage_scope.Turn_total
@@ -694,11 +678,7 @@ let test_provider_usage_distinguishes_unreported_cache_from_reported_zero () =
   check string "claude unreported renders unreported without fabricated 0"
     "Provider usage (client turn total) · input 120 · cache read unreported"
     (Inspector.provider_usage_summary claude_unreported_usage);
-  let claude_zero_resp =
-    Masc.Keeper_claude_code_runtime.For_testing.completed_turn_response
-      ~latency_ms:10
-      (claude_turn ~cache_creation:0 ~cache_read:0 ())
-  in
+  let claude_zero_resp = claude_turn_resp ~cache_creation:0 ~cache_read:0 () in
   let claude_zero_usage =
     Turn_record.usage_of_reported_counts
       ~scope:Runtime_usage_scope.Turn_total

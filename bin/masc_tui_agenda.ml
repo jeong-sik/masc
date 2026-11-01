@@ -388,7 +388,9 @@ let overlay ~now ~localtime ~cols t =
         (fun (row : stalled) ->
            { tone = Quiet
            ; goes_to = Stuck_task row.task_id
-           ; text = two_column ~cols row.what ("since " ^ row.since_iso)
+           ; text = two_column ~cols
+               (Masc.Tui_terminal_text.preview_line row.what)
+               ("since " ^ row.since_iso)
            })
         rows
   in

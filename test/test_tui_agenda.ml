@@ -258,6 +258,20 @@ let test_a_task_route_is_not_an_operator_request () =
   check int "and takes no row above the composer" 0 (Agenda.rows_taken t)
 ;;
 
+let test_task_route_text_cannot_control_the_terminal () =
+  let task_id = "task-control" in
+  let raw = "title\rnext\nline\tend\027[31m\127\194\155" in
+  let lines = overlay_of ~cols:160 (with_stuck [ stuck ~task_id raw ]) in
+  match List.find_opt (fun (line : Agenda.line) ->
+      line.goes_to = Agenda.Stuck_task task_id) lines with
+  | None -> fail "the task remains reachable"
+  | Some line ->
+      check bool "external control bytes do not reach the terminal" false
+        (String.exists (fun c -> Char.code c < 32 || Char.code c = 127) line.text);
+      check bool "a UTF-8 C1 control does not reach the terminal" false
+        (contains ~needle:"\194\155" line.text)
+;;
+
 let test_the_stuck_section_draws_every_row () =
   let rows =
     List.init 9 (fun index ->
@@ -780,6 +794,8 @@ let () =
     ; ( "task owner routes"
       , [ test_case "a task route is not an operator request" `Quick
             test_a_task_route_is_not_an_operator_request
+        ; test_case "task route text cannot control the terminal" `Quick
+            test_task_route_text_cannot_control_the_terminal
         ; test_case "the section draws every row" `Quick
             test_the_stuck_section_draws_every_row
         ; test_case "only rows that lead somewhere take the cursor" `Quick

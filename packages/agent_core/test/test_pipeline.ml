@@ -3298,7 +3298,19 @@ let test_agent_run_resumes_settled_closed_turn_boundary =
 (* The same durable crash window as the tool fixture above, with no ToolUse
    turn: the provider answer and turn are closed, but the root is Running.
    Replay must retain the persisted frontier, not depend on a new AfterTurn. *)
-let test_advanced_replays_nonzero_settled_terminal_ordinal () =
+type settled_terminal_expectation =
+  | Exact_terminal_replay
+  | Refused_terminal_content
+  | Refused_terminal_base64
+  | Refused_terminal_missing_media
+
+let check_advanced_settled_terminal_replay
+      ?(content = [Llm_provider.Types.Text "persisted terminal answer"])
+      ?restored_content
+      ?(forget_media = false)
+      ?(expected = Exact_terminal_replay)
+      ()
+  =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun runtime_sw ->
   let domain_mgr = Eio.Stdenv.domain_mgr env in
@@ -3318,6 +3330,7 @@ let test_advanced_replays_nonzero_settled_terminal_ordinal () =
       | Ok value -> value | Error detail -> Alcotest.fail detail in
     let persisted = {(Provider_mock.text_response "persisted terminal answer" []) with
       Types.id="persisted-turn-seven";
+      content;
       usage=Some {Types.input_tokens=17;output_tokens=23;cache_creation_input_tokens=5;
         cache_read_input_tokens=7;cost_usd=Some 0.125}} in
     let locator_json = ref None in
@@ -3346,27 +3359,78 @@ let test_advanced_replays_nonzero_settled_terminal_ordinal () =
     let hooks = {Hooks.empty with after_turn=Some (fun _ -> incr after_turns; Hooks.Continue)} in
     let options = {Agent.default_options with transport=Some transport;
       provider_config=Some provider_config;hooks} in
-    let media_store = Agent_core.History.Memory_store.create () in
-    let agent = Agent.create ~media_store ~net:(Eio.Stdenv.net env) ~config ~tools:[] ~options () in
+    let retained_media_store = Agent_core.History.Memory_store.create () in
     let persisted_content =
-      Agent_core.History.of_wire_blocks media_store persisted.content |> Result.get_ok in
+      Agent_core.History.of_wire_blocks retained_media_store
+        (Option.value restored_content ~default:content) |> Result.get_ok in
+    let media_store = if forget_media then Agent_core.History.Memory_store.create ()
+      else retained_media_store in
+    let agent = Agent.create ~media_store ~net:(Eio.Stdenv.net env) ~config ~tools:[] ~options () in
     Agent.set_state agent { provider_binding = None;config;messages=[Types.user_msg "finish this request";
       Types.make_message ~role:Types.Assistant persisted_content];turn_count=8;usage=Types.empty_usage};
     let execution_store = Agent.execution_store ~runtime ~dir ~resume:locator () in
-    (match Agent.Advanced.run_blocks ~sw:runtime_sw ~execution_store ~api_strategy:Agent.Sync
-       ~on_tool_boundary:(fun _ -> Alcotest.fail "text replay reached a tool boundary")
+    (match expected, Agent.Advanced.run_blocks ~sw:runtime_sw ~execution_store ~api_strategy:Agent.Sync
+       ~on_tool_boundary:(fun _ -> Alcotest.fail "terminal replay reached a tool boundary")
        agent [Types.Text "finish this request"] with
-     | Ok (Agent.Advanced.Completed completed) ->
+     | Exact_terminal_replay, Ok (Agent.Advanced.Completed completed) ->
        Alcotest.(check int) "replay returns the original nonzero provider ordinal" 7 completed.provider_turn_ordinal;
        Alcotest.(check bool) "persisted response identity, content and usage remain exact" true
          (completed.response=persisted)
-     | Ok (Agent.Advanced.Yielded _ | Agent.Advanced.Terminal_tool_completed _) ->
-       Alcotest.fail "text replay changed the terminal outcome kind"
-     | Error error -> Alcotest.fail (Error.to_string error));
+     | Refused_terminal_content, Error (Error.Internal _)
+     | Refused_terminal_base64, Error (Error.Media (Agent_core.History.Invalid_base64 _))
+     | Refused_terminal_missing_media, Error (Error.Media (Agent_core.History.Missing_bytes _)) -> ()
+     | (Refused_terminal_content | Refused_terminal_base64 | Refused_terminal_missing_media),
+       Ok (Agent.Advanced.Completed _) -> Alcotest.fail "inconsistent terminal replay succeeded"
+     | _, Ok (Agent.Advanced.Yielded _ | Agent.Advanced.Terminal_tool_completed _) ->
+       Alcotest.fail "terminal replay changed the terminal outcome kind"
+     | _, Error error -> Alcotest.fail (Error.to_string error));
     Alcotest.(check int) "settled terminal replay makes no provider call" 0 !provider_calls;
     Alcotest.(check int) "settled terminal replay invokes no new AfterTurn" 0 !after_turns;
     Alcotest.(check int) "restored turn count stays distinct and is not advanced again" 8
       (Agent.state agent).turn_count)
+;;
+
+let test_advanced_replays_nonzero_settled_terminal_ordinal () =
+  check_advanced_settled_terminal_replay ()
+;;
+
+let settled_terminal_media_content encoded =
+  [ Llm_provider.Types.Text "persisted terminal answer"
+  ; Llm_provider.Types.Image {media_type="image/png";source=Base64 encoded}
+  ; Llm_provider.Types.Document {media_type="application/pdf";source=Base64 encoded}
+  ; Llm_provider.Types.Audio {media_type="audio/wav";source=Base64 encoded}
+  ]
+;;
+
+let test_settled_terminal_replay_compares_media_bytes () =
+  List.iter (fun encoded ->
+    check_advanced_settled_terminal_replay ~content:(settled_terminal_media_content encoded) ())
+    ["AA==";"AB=="]
+;;
+
+let test_settled_terminal_replay_keeps_content_exact () =
+  let content = settled_terminal_media_content "AB==" in
+  List.iter (fun restored_content ->
+    check_advanced_settled_terminal_replay ~content ~restored_content
+      ~expected:Refused_terminal_content ())
+    [ settled_terminal_media_content "AQ=="
+    ; Llm_provider.Types.Text "different answer" :: List.tl content
+    ; List.rev content
+    ; [ Llm_provider.Types.Text "persisted terminal answer"
+      ; Llm_provider.Types.Image {media_type="image/jpeg";source=Base64 "AA=="}
+      ; Llm_provider.Types.Document {media_type="application/pdf";source=Base64 "AA=="}
+      ; Llm_provider.Types.Audio {media_type="audio/wav";source=Base64 "AA=="}
+      ]
+    ]
+;;
+
+let test_settled_terminal_replay_refuses_invalid_or_missing_media () =
+  check_advanced_settled_terminal_replay
+    ~content:(settled_terminal_media_content "abc")
+    ~restored_content:(settled_terminal_media_content "AA==")
+    ~expected:Refused_terminal_base64 ();
+  check_advanced_settled_terminal_replay ~content:(settled_terminal_media_content "AA==")
+    ~forget_media:true ~expected:Refused_terminal_missing_media ()
 ;;
 
 let test_agent_run_resumes_terminal_after_descriptor_drift () =
@@ -4798,6 +4862,18 @@ let () =
             "Advanced settled terminal replay retains nonzero ordinal without provider or AfterTurn"
             `Quick
             test_advanced_replays_nonzero_settled_terminal_ordinal
+        ; Alcotest.test_case
+            "settled terminal replay compares media bytes across base64 spellings"
+            `Quick
+            test_settled_terminal_replay_compares_media_bytes
+        ; Alcotest.test_case
+            "settled terminal replay keeps bytes text order and MIME exact"
+            `Quick
+            test_settled_terminal_replay_keeps_content_exact
+        ; Alcotest.test_case
+            "settled terminal replay refuses malformed and unavailable media"
+            `Quick
+            test_settled_terminal_replay_refuses_invalid_or_missing_media
         ; Alcotest.test_case
             "terminal resume ignores current descriptor drift"
             `Quick

@@ -28,7 +28,12 @@ val frontier_ordinal : frontier -> int
     nodes; that typed path never enters terminal recovery. [execute] and
     [fresh] receive the resolved turn identity ([turn]); no continuation
     re-derives it from mutable agent state. Fails closed on inconsistent
-    restored topology. *)
+    restored topology. Terminal replay still materializes the restored media;
+    unavailable or invalid bytes fail. It compares the complete content through
+    {!History.reference_of_wire_blocks}, so equivalent valid base64 spellings
+    compare by their raw-byte digest and length. Text, block order, media type,
+    tool data and provenance remain exact, and [terminal] receives the untouched
+    persisted response. *)
 val dispatch
   :  Agent_types.t
   -> frontier

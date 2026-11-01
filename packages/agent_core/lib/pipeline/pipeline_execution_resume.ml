@@ -196,7 +196,17 @@ let run_settled agent boundary ~turn ~all_pre_tool_use_blocked ~tools_settled ~t
             "durable execution resume terminal turn contains persisted tool invocations")
      | [] ->
        let* restored_content = wire_blocks agent message.content in
-       if response.content <> restored_content
+       (* Materialization above still checks that the restored media exist and
+          match their reference. Equality follows the history codec's byte
+          identity, because [to_wire] may choose a different base64 spelling
+          from the original provider response. All other block data stay exact. *)
+       let reference blocks =
+         History.reference_of_wire_blocks blocks
+         |> Result.map_error (fun error -> Error.Media error)
+       in
+       let* response_content = reference response.content in
+       let* restored_content = reference restored_content in
+       if response_content <> restored_content
        then
          Error
            (Error.Internal

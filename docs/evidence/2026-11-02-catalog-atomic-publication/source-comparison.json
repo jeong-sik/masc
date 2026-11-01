@@ -1,0 +1,138 @@
+{
+  "initial_head": "1546b54953269fedb15d7e6d8f1a02c344585219",
+  "executed_corrected_head": "e3d6f3bef78da14a0a89e1faca6929cd3f1dc5d3",
+  "evidence_parent": "e3d6f3bef78da14a0a89e1faca6929cd3f1dc5d3",
+  "named_inputs_per_phase": 108,
+  "identical_named_inputs": 105,
+  "changed_named_inputs": [
+    "packages/agent_core/test/test_provider_failure_attribution.ml",
+    "packages/agent_core/test/test_provider_runtime_binding.ml",
+    "test/test_runtime_per_keeper_routing.ml"
+  ],
+  "trees": {
+    "packages/agent_core": {
+      "initial": "ea2df42e9f0f1b75c4e4a891c1d81193bce4de9d",
+      "corrected": "d8f697ebb3f22e85a7bda011fbe257d6c62b5039",
+      "identical": false
+    },
+    "lib": {
+      "initial": "6d78a8772c1ceaf7fcda9c00e87ee92115c45188",
+      "corrected": "6d78a8772c1ceaf7fcda9c00e87ee92115c45188",
+      "identical": true
+    },
+    "test": {
+      "initial": "5fc44be40e134034171b58e1b0224afa874d9eb7",
+      "corrected": "fbdf71d48cca4b1b2ea274d33daab77235b262ab",
+      "identical": false
+    },
+    "config": {
+      "initial": "783ac78ba6a516006c5e20d58c1fed0019a0ca5b",
+      "corrected": "783ac78ba6a516006c5e20d58c1fed0019a0ca5b",
+      "identical": true
+    }
+  },
+  "corrected_inputs_and_four_trees_preserved_at_evidence_parent": true,
+  "same_fixture_product_pair": false,
+  "production_delta": {
+    "initial_head": "1546b54953269fedb15d7e6d8f1a02c344585219",
+    "corrected_head": "e3d6f3bef78da14a0a89e1faca6929cd3f1dc5d3",
+    "changed_paths": [
+      "docs/research/2026-11-02-catalog-snapshot-publication.md",
+      "packages/agent_core/docs/capability-manifest.md",
+      "packages/agent_core/docs/custom-providers.md",
+      "packages/agent_core/docs/provider-catalog.md",
+      "packages/agent_core/test/test_provider_failure_attribution.ml",
+      "packages/agent_core/test/test_provider_runtime_binding.ml",
+      "test/test_runtime_per_keeper_routing.ml"
+    ],
+    "unchanged_production_paths": {
+      "bin/lane_fusion_container_probe.ml": {
+        "state": "present",
+        "sha256": "05db6020ef3279f3ebd53a48e4e67a0f4e724fefb525a54a38e7f5b0957aff77"
+      },
+      "lib/runtime/runtime_adapter.ml": {
+        "state": "present",
+        "sha256": "59c3cb859f29a2d45d2d422eaabb89a124a959c63228e3a2823cc5fcc13cad49"
+      },
+      "lib/runtime/runtime_wizard_inventory.ml": {
+        "state": "present",
+        "sha256": "4d10be7e7818eba622b7cfcc473354a8ce17960d201eb8a1c65a5264b501d0b6"
+      },
+      "lib/server/server_runtime_bootstrap.ml": {
+        "state": "present",
+        "sha256": "893e4a04df379ce24945e55a28dce5dfa67ad50c191fa39ebcd9978827d9bbf6"
+      },
+      "lib/server/server_runtime_bootstrap.mli": {
+        "state": "present",
+        "sha256": "69e049eefe5f86cd130de047034721132714f2723e14e8b7ef25916db8430ea4"
+      },
+      "packages/agent_core/lib/llm_provider/capabilities.ml": {
+        "state": "present",
+        "sha256": "049455117464f86df6a5a3e7b9927082fc09744fab28a403bcd5b043de464280"
+      },
+      "packages/agent_core/lib/llm_provider/capabilities.mli": {
+        "state": "present",
+        "sha256": "9eef8a39b7c725dc6bbb694bee7b54f0e847c0891b6d028f3d1a53c2ba8fb270"
+      },
+      "packages/agent_core/lib/llm_provider/catalog_snapshot.ml": {
+        "state": "present",
+        "sha256": "409832bd95d7bf4a51f02bafee02dbdc456e37efc14a6702139f65a2cc256f82"
+      },
+      "packages/agent_core/lib/llm_provider/catalog_snapshot.mli": {
+        "state": "present",
+        "sha256": "7a07158c7b5d3ca3b7ac508ca29e7cbf8ab7b27ed2435a032109156b9992af67"
+      },
+      "packages/agent_core/lib/llm_provider/model_catalog.ml": {
+        "state": "present",
+        "sha256": "462ebe21a54167f381feca265f2524ce4a16be8710944ca36a89275ccae50d77"
+      },
+      "packages/agent_core/lib/llm_provider/model_catalog.mli": {
+        "state": "present",
+        "sha256": "35e72c924540398d9822524c2ec0641459af8d7e535e73befc5d917181ee1c4f"
+      },
+      "packages/agent_core/lib/llm_provider/pricing.ml": {
+        "state": "present",
+        "sha256": "bf39fd900edd87afa404f8e9b6b1204b7208087b01d9837bad350bcc9a69c485"
+      },
+      "packages/agent_core/lib/llm_provider/pricing.mli": {
+        "state": "present",
+        "sha256": "cabbad9b41e2956abba3e08c0193c21dc7003787f1787f29d1a9e778f95f7187"
+      },
+      "packages/agent_core/lib/llm_provider/provider_catalog.ml": {
+        "state": "present",
+        "sha256": "e25e32e0fc96aa3f7fa08aaa94a6aafc9b3c09e668591fbad777672015f2801c"
+      },
+      "packages/agent_core/lib/llm_provider/provider_catalog.mli": {
+        "state": "present",
+        "sha256": "024810633fccb76a32fb26cb08e1f0cf1a23290260b99c14f8890ad014deaa10"
+      },
+      "packages/agent_core/lib/llm_provider/provider_declarations.ml": {
+        "state": "absent_at_both_heads"
+      },
+      "packages/agent_core/lib/llm_provider/provider_declarations.mli": {
+        "state": "absent_at_both_heads"
+      },
+      "packages/agent_core/lib/llm_provider/provider_registry.ml": {
+        "state": "present",
+        "sha256": "6c91d474e543a4c0b2aa89fec1e74cf59d242556635c87541e60948fee1bc354"
+      },
+      "packages/agent_core/lib/llm_provider/provider_registry.mli": {
+        "state": "present",
+        "sha256": "dac8c156ab7baaee39530ca0a595aaee988fbd55f5657217338292b18d117705"
+      },
+      "packages/agent_core/lib/provider_runtime_binding.ml": {
+        "state": "present",
+        "sha256": "00b1680304fa0bbe0f6c88c73f486fe84ad341aa4f35ba056a056cd18dae4415"
+      },
+      "packages/agent_core/lib/provider_runtime_binding.mli": {
+        "state": "present",
+        "sha256": "31fba50865a9b9083471dec852693c30c18caac413a808a26b0f8480add8979c"
+      }
+    },
+    "present_production_inputs": 19,
+    "absent_production_paths": 2,
+    "same_fixture_product_pair": false,
+    "limits": "Fixture setup, unused aliases, current guides and research changed. Existing tuple assertions are retained; production publication behavior did not change between these requests. The 21 unchanged production paths include two removed facade paths, not 21 existing source inputs."
+  },
+  "limits": "Initial and corrected executions have different fixture setup. The initial failure is retained; new corrected-only per-keeper routing cases are separate. No addition to historical profile461, Batch298 or Media146. No whole-stack integration, real-provider/account or installed-runtime proof."
+}

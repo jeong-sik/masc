@@ -1,0 +1,273 @@
+{
+  "metadata_derivative": "Raw paths made repository-relative and selected paths mapped to retained files; original byte digests kept. Initial complete capture retains three skipped rows omitted by the original selection, whose original receipt/digest is retained separately. No original capture is relabeled.",
+  "runs": {
+    "initial": {
+      "name": "snapshot-initial-complete",
+      "workflow": "Test",
+      "run_id": 41329452881,
+      "job_id": 124916276365,
+      "url": "https://github.com/jeong-sik/masc/actions/runs/41329452881",
+      "head": "1546b54953269fedb15d7e6d8f1a02c344585219",
+      "ref": "fix/catalog-publication-authority-core-20261102",
+      "status": "completed",
+      "conclusion": "failure",
+      "checkout_head": "1546b54953269fedb15d7e6d8f1a02c344585219",
+      "raw_capture": "artifacts/issues-oldest-20261101/catalog-publication-20261102/snapshot-candidate-124916276365.raw.log",
+      "raw_bytes": 1019044,
+      "raw_sha256": "d537e26b0b3d1745082175fbf8084ca8b1ecfa4a83ef629391353efddeda7a99",
+      "selected_capture": "initial.txt",
+      "selected_bytes": 116358,
+      "selected_sha256": "9fdf35cabef68effc358a3337538435d5324c805d3e04807e10057c60b8c4be9",
+      "actual_pass": 980,
+      "actual_fail": 1,
+      "actual_skip": 3,
+      "retained_case_pass": 980,
+      "retained_case_fail": 1,
+      "retained_case_skip": 3,
+      "summaries": [
+        "2026-11-01T17:04:59.9234225Z Test Successful in 0.030s. 124 tests run.",
+        "2026-11-01T17:05:00.8122575Z Test Successful in 0.018s. 17 tests run.",
+        "2026-11-01T17:05:02.7162587Z Test Successful in 0.463s. 142 tests run.",
+        "2026-11-01T17:05:03.7610548Z Test Successful in 0.021s. 45 tests run.",
+        "2026-11-01T17:05:05.1397830Z 1 failure! in 0.145s. 34 tests run.",
+        "2026-11-01T17:05:06.7269355Z Test Successful in 0.344s. 27 tests run.",
+        "2026-11-01T17:05:07.8011721Z Test Successful in 0.017s. 11 tests run.",
+        "2026-11-01T17:05:08.9518258Z Test Successful in 0.022s. 51 tests run.",
+        "2026-11-01T17:05:10.1269918Z Test Successful in 0.030s. 19 tests run.",
+        "2026-11-01T17:05:11.4330833Z Test Successful in 0.021s. 18 tests run.",
+        "2026-11-01T17:12:02.4185822Z Test Successful in 19.212s. 132 tests run.",
+        "2026-11-01T17:12:15.9347811Z Test Successful in 0.019s. 24 tests run.",
+        "2026-11-01T17:12:16.9696475Z Test Successful in 0.903s. 178 tests run.",
+        "2026-11-01T17:12:17.0801651Z Test Successful in 0.022s. 6 tests run.",
+        "2026-11-01T17:12:17.1905102Z Test Successful in 0.025s. 12 tests run.",
+        "2026-11-01T17:12:17.4208790Z Test Successful in 0.101s. 89 tests run.",
+        "2026-11-01T17:12:17.5432972Z Test Successful in 0.035s. 36 tests run.",
+        "2026-11-01T17:12:17.6459815Z Test Successful in 0.022s. 16 tests run."
+      ],
+      "original_selected_capture": "snapshot-initial-complete.txt",
+      "dispatch": {
+        "minimal": true,
+        "suite": "packages/agent_core/test/test_catalog_snapshot,packages/agent_core/test/test_capabilities,packages/agent_core/test/test_provider_catalog_coverage,packages/agent_core/test/test_provider_config,packages/agent_core/test/test_provider_registry,packages/agent_core/test/test_provider_runtime_binding,packages/agent_core/test/test_model_catalog_default,packages/agent_core/test/test_model_catalog_composition,packages/agent_core/test/test_thinking_control_dialects,packages/agent_core/test/test_request_pricing_snapshot,packages/agent_core/test/test_provider_failure_attribution,test/test_runtime_config_validity,test/test_runtime_construction_snapshot,test/test_runtime_batch_construction_snapshot,test/test_runtime_provider_auth_headers,test/test_server_runtime_bootstrap,test/test_runtime_model_label_binding,test/test_runtime_setup_spec",
+        "suite_timeout_sec": 600,
+        "requested_at": "2026-11-01T17:03:12.996459+00:00"
+      },
+      "per_suite": {
+        "packages/agent_core/test/test_capabilities.ml": {
+          "OK": 124
+        },
+        "packages/agent_core/test/test_catalog_snapshot.ml": {
+          "OK": 24
+        },
+        "packages/agent_core/test/test_model_catalog_composition.ml": {
+          "OK": 11
+        },
+        "packages/agent_core/test/test_model_catalog_default.ml": {
+          "OK": 27
+        },
+        "packages/agent_core/test/test_provider_catalog_coverage.ml": {
+          "OK": 17
+        },
+        "packages/agent_core/test/test_provider_config.ml": {
+          "OK": 142
+        },
+        "packages/agent_core/test/test_provider_failure_attribution.ml": {
+          "OK": 18
+        },
+        "packages/agent_core/test/test_provider_registry.ml": {
+          "OK": 45
+        },
+        "packages/agent_core/test/test_provider_runtime_binding.ml": {
+          "OK": 33,
+          "FAIL": 1
+        },
+        "packages/agent_core/test/test_request_pricing_snapshot.ml": {
+          "OK": 19
+        },
+        "packages/agent_core/test/test_thinking_control_dialects.ml": {
+          "OK": 51
+        },
+        "test/test_runtime_batch_construction_snapshot.ml": {
+          "OK": 12
+        },
+        "test/test_runtime_config_validity.ml": {
+          "OK": 178
+        },
+        "test/test_runtime_construction_snapshot.ml": {
+          "OK": 6
+        },
+        "test/test_runtime_model_label_binding.ml": {
+          "OK": 36
+        },
+        "test/test_runtime_provider_auth_headers.ml": {
+          "OK": 89
+        },
+        "test/test_runtime_setup_spec.ml": {
+          "OK": 16
+        },
+        "test/test_server_runtime_bootstrap.ml": {
+          "OK": 132,
+          "SKIP": 3
+        }
+      },
+      "case_key_sha256": "c4ff5eb74c13dbbeb0508e1af6763cd190c1c80fdafb2797390deae408a37b53"
+    },
+    "corrected": {
+      "name": "snapshot-fixed",
+      "workflow": "Test",
+      "run_id": 41359944826,
+      "job_id": 125007994262,
+      "url": "https://github.com/jeong-sik/masc/actions/runs/41359944826",
+      "head": "e3d6f3bef78da14a0a89e1faca6929cd3f1dc5d3",
+      "ref": "fix/catalog-publication-authority-core-20261102",
+      "status": "completed",
+      "conclusion": "success",
+      "checkout_head": "e3d6f3bef78da14a0a89e1faca6929cd3f1dc5d3",
+      "raw_capture": "artifacts/issues-oldest-20261101/catalog-publication-20261102/snapshot-fixed-125007994262.raw.log",
+      "raw_bytes": 1055813,
+      "raw_sha256": "e24552abbdca988c535a1cd1e6d9146f6580dcc60e7e68dc7ddc8e981ead14b6",
+      "selected_capture": "corrected.txt",
+      "selected_bytes": 127979,
+      "selected_sha256": "ff2e54926ccdff2ad2e6f5ff4de450df5ca52ad37c2f4c0ffcf56d223d714c22",
+      "actual_pass": 1082,
+      "actual_fail": 0,
+      "actual_skip": 3,
+      "retained_case_pass": 1082,
+      "retained_case_fail": 0,
+      "retained_case_skip": 3,
+      "summaries": [
+        "2026-11-01T23:02:23.5341402Z Test Successful in 0.029s. 124 tests run.",
+        "2026-11-01T23:02:24.3753527Z Test Successful in 0.018s. 17 tests run.",
+        "2026-11-01T23:02:26.2405545Z Test Successful in 0.477s. 142 tests run.",
+        "2026-11-01T23:02:27.4815226Z Test Successful in 0.023s. 45 tests run.",
+        "2026-11-01T23:02:28.5856145Z Test Successful in 0.021s. 34 tests run.",
+        "2026-11-01T23:02:30.0421832Z Test Successful in 0.349s. 27 tests run.",
+        "2026-11-01T23:02:31.0179763Z Test Successful in 0.018s. 11 tests run.",
+        "2026-11-01T23:02:32.1452906Z Test Successful in 0.021s. 51 tests run.",
+        "2026-11-01T23:02:33.2615908Z Test Successful in 0.032s. 19 tests run.",
+        "2026-11-01T23:02:34.4745735Z Test Successful in 0.020s. 18 tests run.",
+        "2026-11-01T23:09:32.1422128Z Test Successful in 19.867s. 132 tests run.",
+        "2026-11-01T23:09:47.4827480Z Test Successful in 0.020s. 24 tests run.",
+        "2026-11-01T23:09:48.5887200Z Test Successful in 0.967s. 178 tests run.",
+        "2026-11-01T23:09:48.7078297Z Test Successful in 0.023s. 6 tests run.",
+        "2026-11-01T23:09:48.8254191Z Test Successful in 0.027s. 12 tests run.",
+        "2026-11-01T23:09:49.0631176Z Test Successful in 0.101s. 89 tests run.",
+        "2026-11-01T23:09:49.1912055Z Test Successful in 0.037s. 36 tests run.",
+        "2026-11-01T23:09:49.2987954Z Test Successful in 0.024s. 16 tests run.",
+        "2026-11-01T23:09:49.7175837Z Test Successful in 0.263s. 101 tests run."
+      ],
+      "original_selected_capture": "snapshot-fixed.txt",
+      "dispatch": {
+        "minimal": true,
+        "suite": "packages/agent_core/test/test_catalog_snapshot,packages/agent_core/test/test_capabilities,packages/agent_core/test/test_provider_catalog_coverage,packages/agent_core/test/test_provider_config,packages/agent_core/test/test_provider_registry,packages/agent_core/test/test_provider_runtime_binding,packages/agent_core/test/test_model_catalog_default,packages/agent_core/test/test_model_catalog_composition,packages/agent_core/test/test_thinking_control_dialects,packages/agent_core/test/test_request_pricing_snapshot,packages/agent_core/test/test_provider_failure_attribution,test/test_runtime_config_validity,test/test_runtime_construction_snapshot,test/test_runtime_batch_construction_snapshot,test/test_runtime_provider_auth_headers,test/test_server_runtime_bootstrap,test/test_runtime_model_label_binding,test/test_runtime_setup_spec,test/test_runtime_per_keeper_routing",
+        "suite_timeout_sec": 600,
+        "requested_at": "2026-11-01T23:00:38.340399+00:00"
+      },
+      "per_suite": {
+        "packages/agent_core/test/test_capabilities.ml": {
+          "OK": 124
+        },
+        "packages/agent_core/test/test_catalog_snapshot.ml": {
+          "OK": 24
+        },
+        "packages/agent_core/test/test_model_catalog_composition.ml": {
+          "OK": 11
+        },
+        "packages/agent_core/test/test_model_catalog_default.ml": {
+          "OK": 27
+        },
+        "packages/agent_core/test/test_provider_catalog_coverage.ml": {
+          "OK": 17
+        },
+        "packages/agent_core/test/test_provider_config.ml": {
+          "OK": 142
+        },
+        "packages/agent_core/test/test_provider_failure_attribution.ml": {
+          "OK": 18
+        },
+        "packages/agent_core/test/test_provider_registry.ml": {
+          "OK": 45
+        },
+        "packages/agent_core/test/test_provider_runtime_binding.ml": {
+          "OK": 34
+        },
+        "packages/agent_core/test/test_request_pricing_snapshot.ml": {
+          "OK": 19
+        },
+        "packages/agent_core/test/test_thinking_control_dialects.ml": {
+          "OK": 51
+        },
+        "test/test_runtime_batch_construction_snapshot.ml": {
+          "OK": 12
+        },
+        "test/test_runtime_config_validity.ml": {
+          "OK": 178
+        },
+        "test/test_runtime_construction_snapshot.ml": {
+          "OK": 6
+        },
+        "test/test_runtime_model_label_binding.ml": {
+          "OK": 36
+        },
+        "test/test_runtime_per_keeper_routing.ml": {
+          "OK": 101
+        },
+        "test/test_runtime_provider_auth_headers.ml": {
+          "OK": 89
+        },
+        "test/test_runtime_setup_spec.ml": {
+          "OK": 16
+        },
+        "test/test_server_runtime_bootstrap.ml": {
+          "OK": 132,
+          "SKIP": 3
+        }
+      },
+      "case_key_sha256": "10cdc1a53116072d9277a4891f250a35d4bf8f90e73946b0f591ff8b4a2d5e8a"
+    }
+  },
+  "initial_original_selection": {
+    "name": "snapshot-candidate",
+    "workflow": "Test",
+    "run_id": 41329452881,
+    "job_id": 124916276365,
+    "url": "https://github.com/jeong-sik/masc/actions/runs/41329452881",
+    "head": "1546b54953269fedb15d7e6d8f1a02c344585219",
+    "ref": "fix/catalog-publication-authority-core-20261102",
+    "status": "completed",
+    "conclusion": "failure",
+    "checkout_head": "1546b54953269fedb15d7e6d8f1a02c344585219",
+    "raw_capture": "artifacts/issues-oldest-20261101/catalog-publication-20261102/snapshot-candidate-124916276365.raw.log",
+    "raw_bytes": 1019044,
+    "raw_sha256": "d537e26b0b3d1745082175fbf8084ca8b1ecfa4a83ef629391353efddeda7a99",
+    "selected_capture": "initial-original-selection.txt",
+    "selected_bytes": 116028,
+    "selected_sha256": "9dedb271085dff360f1d1900ecd0ae62fa5ba4a1767dc0ddcaf818bdf701a51e",
+    "actual_pass": 980,
+    "actual_fail": 1,
+    "retained_case_pass": 980,
+    "retained_case_fail": 1,
+    "summaries": [
+      "2026-11-01T17:04:59.9234225Z Test Successful in 0.030s. 124 tests run.",
+      "2026-11-01T17:05:00.8122575Z Test Successful in 0.018s. 17 tests run.",
+      "2026-11-01T17:05:02.7162587Z Test Successful in 0.463s. 142 tests run.",
+      "2026-11-01T17:05:03.7610548Z Test Successful in 0.021s. 45 tests run.",
+      "2026-11-01T17:05:05.1397830Z 1 failure! in 0.145s. 34 tests run.",
+      "2026-11-01T17:05:06.7269355Z Test Successful in 0.344s. 27 tests run.",
+      "2026-11-01T17:05:07.8011721Z Test Successful in 0.017s. 11 tests run.",
+      "2026-11-01T17:05:08.9518258Z Test Successful in 0.022s. 51 tests run.",
+      "2026-11-01T17:05:10.1269918Z Test Successful in 0.030s. 19 tests run.",
+      "2026-11-01T17:05:11.4330833Z Test Successful in 0.021s. 18 tests run.",
+      "2026-11-01T17:12:02.4185822Z Test Successful in 19.212s. 132 tests run.",
+      "2026-11-01T17:12:15.9347811Z Test Successful in 0.019s. 24 tests run.",
+      "2026-11-01T17:12:16.9696475Z Test Successful in 0.903s. 178 tests run.",
+      "2026-11-01T17:12:17.0801651Z Test Successful in 0.022s. 6 tests run.",
+      "2026-11-01T17:12:17.1905102Z Test Successful in 0.025s. 12 tests run.",
+      "2026-11-01T17:12:17.4208790Z Test Successful in 0.101s. 89 tests run.",
+      "2026-11-01T17:12:17.5432972Z Test Successful in 0.035s. 36 tests run.",
+      "2026-11-01T17:12:17.6459815Z Test Successful in 0.022s. 16 tests run."
+    ],
+    "original_selected_capture": "snapshot-candidate.txt"
+  },
+  "case_identity": "phase/source/emitted_group/index/fixture_sha256; emitted group and display text can be ellipsized; all keys unique per phase",
+  "skips": "SKIP rows are not passes and are excluded from executed-case counts."
+}

@@ -9,8 +9,8 @@
 
     [run body] runs [body ~runtime_sw sw] and then ends the session switch
     [sw] by failing it. An exception [body] raises propagates, and the switch
-    fails the same way. [runtime_sw] owns the execution codec workers and
-    outlives all session fibers and release handlers, so their final journal
-    saves finish before the workers are cancelled. *)
+    fails the same way. When the session body returns or raises, [sw] and its
+    release handlers settle before [runtime_sw] stops its execution codec
+    workers. Cancellation of an ancestor scope still cancels both switches. *)
 
 val run : (runtime_sw:Eio.Switch.t -> Eio.Switch.t -> unit) -> unit

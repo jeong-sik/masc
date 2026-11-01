@@ -4197,6 +4197,49 @@ let test_full_health_returned_failure_after_wait_timeout () =
         (Proactive_refresh.failure_message timeout)
         (metadata |> member "error" |> to_string))
 
+let test_full_health_critical_failure_edge_and_recovery () =
+  let module Refresh = Server_routes_http_runtime.For_testing in
+  Refresh.reset_full_health_snapshot ();
+  Fun.protect ~finally:Refresh.reset_full_health_snapshot (fun () ->
+      let threshold = Env_config_runtime.Dashboard.full_health_critical_failure_threshold in
+      let critical_total () =
+        Otel_metric_store.metric_value_or_zero
+          "masc_full_health_refresh_critical_total"
+          ~labels:[ "reason", "consecutive_failures" ] ()
+      in
+      let before = critical_total () in
+      let check_alerts label expected =
+        Alcotest.(check (float 0.)) label expected (critical_total () -. before)
+      in
+      let failure = Proactive_refresh.Raised (Failure "critical refresh outage") in
+      let timeout = Proactive_refresh.Timed_out
+        { label = "full_health_snapshot"; phase = Proactive_refresh.Refresh;
+          timeout_s = 16.0; elapsed_s = 17.0 }
+      in
+      Eio.Switch.run (fun sw ->
+          let fail_refresh () =
+            Refresh.run_full_health_refresh_worker ~sw ~compute:(fun () -> Error failure)
+          in
+          Refresh.run_full_health_refresh_worker ~sw ~compute:(fun () ->
+              Refresh.mark_full_health_refresh_wait_failure timeout;
+              Refresh.mark_full_health_refresh_wait_failure timeout;
+              Error failure);
+          check_alerts "waiter and late failure count as one failed attempt"
+            (if threshold = 1 then 1. else 0.);
+          for _ = 2 to threshold - 1 do fail_refresh () done;
+          if threshold > 1 then begin
+            check_alerts "no critical alert before the configured edge" 0.;
+            fail_refresh ()
+          end;
+          check_alerts "one critical alert at the configured edge" 1.;
+          fail_refresh ();
+          check_alerts "further outage failures do not repeat the alert" 1.;
+          Refresh.run_full_health_refresh_worker ~sw ~compute:(fun () -> Ok []);
+          for _ = 1 to threshold - 1 do fail_refresh () done;
+          check_alerts "success starts a new failure streak" 1.;
+          fail_refresh ();
+          check_alerts "a later outage has its own critical edge" 2.))
+
 let test_full_health_dirty_success_after_wait_timeout () =
   let module Refresh = Server_routes_http_runtime.For_testing in
   let open Yojson.Safe.Util in
@@ -6981,6 +7024,8 @@ let () =
                 ~has_last_good:true ~dirty:true);
           Alcotest.test_case "returned failure after waiter timeout is recorded once" `Quick
             test_full_health_returned_failure_after_wait_timeout;
+          Alcotest.test_case "full health critical edge resets after recovery" `Quick
+            test_full_health_critical_failure_edge_and_recovery;
           Alcotest.test_case
             "full health refresh timeout preserves last snapshot" `Quick
             test_full_health_refresh_timeout_preserves_last_snapshot;

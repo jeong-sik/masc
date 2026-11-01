@@ -1449,7 +1449,14 @@ Current-source continuation (2026-11-01): the
 current events and test surfaces. The older proposal omitted dirty-success
 publication, stream effects under the publication lock, and synchronous refresh
 without an active async worker. These are required inputs to the next immutable
-state design. S5 remains unimplemented; the audit is source evidence only.
+state design. The observation boundary is implemented in
+[#47068](https://github.com/jeong-sik/masc/pull/47068): canonical snapshots and
+consecutive-failure evidence now share a private immutable owner. Publication,
+clocks, cold-placeholder acquisition and metrics remain under the existing shell
+lock. The added public-coordinator scenario covers repeated waiter reports plus
+late failure, exact configured alert crossing, recovery reset and a second outage.
+Coordinator consolidation remains the next layer. Syntax-only parsing and
+independent source review are separate from unexecuted builds and behavior suites.
 
 ### S6
 

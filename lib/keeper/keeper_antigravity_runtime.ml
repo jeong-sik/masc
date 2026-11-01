@@ -1216,6 +1216,11 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~input_source ~arg
                   { Agent_core.Types.default_inference_telemetry with
                     request_latency_ms = Some latency_ms
                   ; canonical_model_id = Some turn.model
+                  ; reported_cache_usage =
+                      Some
+                        { Agent_core.Types.cache_creation_input_tokens = None
+                        ; cache_read_input_tokens = Some usage.cache_read_input_tokens
+                        }
                   }
             }
           in

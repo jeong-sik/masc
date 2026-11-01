@@ -910,7 +910,7 @@ let usage_of_reported_counts
     | Some { reported_cache_usage = Some reported; _ } ->
         reported.cache_creation_input_tokens, reported.cache_read_input_tokens
     | Some { reported_cache_usage = None; _ } | None ->
-        Some usage.cache_creation_input_tokens, Some usage.cache_read_input_tokens
+        None, None
   in
   { input_tokens = Some usage.input_tokens
   ; output_tokens = Some usage.output_tokens

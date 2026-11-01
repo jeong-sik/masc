@@ -83,10 +83,23 @@ let assemble_cost_event_payload
   let reported_cache_creation, reported_cache_read =
     if usage_missing then None, None
     else
-      match telemetry with
-      | Some { reported_cache_usage = Some reported; _ } ->
+      match telemetry, usage_projection with
+      | Some { reported_cache_usage = Some reported; _ }, Cost_ledger.Raw_observation _ ->
           reported.cache_creation_input_tokens, reported.cache_read_input_tokens
-      | Some { reported_cache_usage = None; _ } | None ->
+      | Some { reported_cache_usage = Some reported; _ },
+        (Cost_ledger.Resolved_delta | Cost_ledger.Resolved_attempt_delta _) ->
+          let resolved_creation =
+            match reported.cache_creation_input_tokens with
+            | Some _ -> cache_creation_input_tokens
+            | None -> None
+          in
+          let resolved_read =
+            match reported.cache_read_input_tokens with
+            | Some _ -> cache_read_input_tokens
+            | None -> None
+          in
+          resolved_creation, resolved_read
+      | (Some { reported_cache_usage = None; _ } | None), _ ->
           cache_creation_input_tokens, cache_read_input_tokens
   in
   let usage_for_trust : Agent_core.Types.api_usage =

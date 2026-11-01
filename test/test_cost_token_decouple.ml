@@ -655,7 +655,108 @@ let test_unreported_wire_cache_is_null_not_zero () =
   check int "reported zero cache read yields 100 miss" 100
     (int_field openai_zero_payload "cache_miss_input_tokens");
   check int "reported zero cache read yields 100 non-cached" 100
-    (int_field openai_zero_payload "non_cached_input_tokens")
+    (int_field openai_zero_payload "non_cached_input_tokens");
+  let muse_turn ?prompt_tokens ?cache_read_tokens ?cache_write_tokens ()
+      : Runtime_muse_serve.turn_result =
+    { session_id = "s-muse"
+    ; turn_id = "t-muse"
+    ; model = Some "claude-sonnet-4"
+    ; text = Some "ok"
+    ; usage =
+        Some
+          { Runtime_muse_msp.input_tokens = 120
+          ; output_tokens = 30
+          ; cached_tokens = 0
+          ; reasoning_tokens = 0
+          ; prompt_tokens
+          ; cache_read_tokens
+          ; cache_write_tokens
+          }
+    ; last_call_usage = None
+    ; tool_calls = 0
+    ; approvals_decided = 0
+    ; call_models = []
+    ; resumed = false
+    ; server_version = "1.4.0"
+    }
+  in
+  let muse_unreported_resp =
+    Masc.Keeper_muse_runtime.For_testing.completed_turn_response
+      ~runtime_id:"muse.test"
+      ~configured_model:None
+      ~latency_ms:10
+      (muse_turn ~prompt_tokens:120 ())
+  in
+  let muse_unreported_usage = Option.get muse_unreported_resp.usage in
+  let muse_unreported_payload =
+    H.cost_event_payload
+      ~agent_name:"keeper"
+      ~task_id:None
+      ~trace_id:"trace-muse"
+      ~keeper_turn_id:3
+      ~agent_core_turn_ordinal:0
+      ~model:muse_unreported_resp.model
+      ~usage_projection:(Cost_ledger.Raw_observation Runtime_usage_scope.Turn_total)
+      ~input_tokens:muse_unreported_usage.input_tokens
+      ~output_tokens:muse_unreported_usage.output_tokens
+      ~cost_usd:0.0
+      ?cache_creation_input_tokens:
+        (Agent_core.Types.reported_cache_creation_input_tokens muse_unreported_resp)
+      ?cache_read_input_tokens:
+        (Agent_core.Types.reported_cache_read_input_tokens muse_unreported_resp)
+      ?telemetry:muse_unreported_resp.telemetry
+      ()
+  in
+  check_null_field muse_unreported_payload "cache_creation_tokens";
+  check_null_field muse_unreported_payload "cache_read_tokens";
+  check_null_field muse_unreported_payload "cache_miss_input_tokens";
+  check_null_field muse_unreported_payload "non_cached_input_tokens";
+  let muse_terminal_only_resp =
+    Masc.Keeper_muse_runtime.For_testing.completed_turn_response
+      ~runtime_id:"muse.test"
+      ~configured_model:None
+      ~latency_ms:10
+      (muse_turn ~cache_read_tokens:40 ~cache_write_tokens:10 ())
+  in
+  check (option int) "terminal-only muse cache creation is None" None
+    (Agent_core.Types.reported_cache_creation_input_tokens muse_terminal_only_resp);
+  check (option int) "terminal-only muse cache read is None" None
+    (Agent_core.Types.reported_cache_read_input_tokens muse_terminal_only_resp);
+  let muse_zero_resp =
+    Masc.Keeper_muse_runtime.For_testing.completed_turn_response
+      ~runtime_id:"muse.test"
+      ~configured_model:None
+      ~latency_ms:10
+      (muse_turn ~prompt_tokens:120 ~cache_read_tokens:0 ~cache_write_tokens:0 ())
+  in
+  let muse_zero_usage = Option.get muse_zero_resp.usage in
+  let muse_zero_payload =
+    H.cost_event_payload
+      ~agent_name:"keeper"
+      ~task_id:None
+      ~trace_id:"trace-muse"
+      ~keeper_turn_id:4
+      ~agent_core_turn_ordinal:0
+      ~model:muse_zero_resp.model
+      ~usage_projection:(Cost_ledger.Raw_observation Runtime_usage_scope.Turn_total)
+      ~input_tokens:muse_zero_usage.input_tokens
+      ~output_tokens:muse_zero_usage.output_tokens
+      ~cost_usd:0.0
+      ?cache_creation_input_tokens:
+        (Agent_core.Types.reported_cache_creation_input_tokens muse_zero_resp)
+      ?cache_read_input_tokens:
+        (Agent_core.Types.reported_cache_read_input_tokens muse_zero_resp)
+      ?telemetry:muse_zero_resp.telemetry
+      ()
+  in
+  check int "muse explicit zero cache creation stays 0" 0
+    (int_field muse_zero_payload "cache_creation_tokens");
+  check int "muse explicit zero cache read stays 0" 0
+    (int_field muse_zero_payload "cache_read_tokens");
+  check int "muse explicit zero cache yields 120 miss" 120
+    (int_field muse_zero_payload "cache_miss_input_tokens");
+  check int "muse explicit zero cache yields 120 non-cached" 120
+    (int_field muse_zero_payload "non_cached_input_tokens")
 ;;
 
 let () =

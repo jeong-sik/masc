@@ -1663,6 +1663,14 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
                { Agent_core.Types.default_inference_telemetry with
                  request_latency_ms = Some latency_ms
                ; canonical_model_id = Some turn.model
+               ; reported_cache_usage =
+                   Option.map
+                     (fun (u : Agent_core.Types.api_usage) ->
+                        { Agent_core.Types.cache_creation_input_tokens =
+                            Some u.cache_creation_input_tokens
+                        ; cache_read_input_tokens = Some u.cache_read_input_tokens
+                        })
+                     spend
                }
          }
        in

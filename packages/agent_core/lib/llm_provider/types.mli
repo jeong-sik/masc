@@ -866,14 +866,12 @@ type api_response =
 val reported_cache_creation_input_tokens : api_response -> int option
 (** Return the wire-reported [cache_creation_input_tokens] when usage was
     reported: [None] if usage is absent or the wire parser recorded no
-    cache-creation field, [Some n] when the wire reported [n] (or when a
-    synthetic [api_response] has [usage] without parser cache provenance). *)
+    cache-creation field, [Some n] when the wire explicitly reported [n]. *)
 
 val reported_cache_read_input_tokens : api_response -> int option
 (** Return the wire-reported [cache_read_input_tokens] when usage was
     reported: [None] if usage is absent or the wire parser recorded no
-    cache-read field, [Some n] when the wire reported [n] (or when a
-    synthetic [api_response] has [usage] without parser cache provenance). *)
+    cache-read field, [Some n] when the wire explicitly reported [n]. *)
 
 (** Retain admitted response occurrences and remap both replay witnesses.
     Tool admission supplies exact source indices; no structural identity guess. *)

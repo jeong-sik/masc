@@ -1233,25 +1233,17 @@ type api_response =
 [@@deriving show]
 
 let reported_cache_creation_input_tokens (resp : api_response) =
-  match resp.usage with
-  | None -> None
-  | Some usage ->
-    (match resp.telemetry with
-     | Some { reported_cache_usage = Some reported; _ } ->
-       reported.cache_creation_input_tokens
-     | Some { reported_cache_usage = None; _ } | None ->
-       Some usage.cache_creation_input_tokens)
+  match resp.usage, resp.telemetry with
+  | Some _, Some { reported_cache_usage = Some reported; _ } ->
+    reported.cache_creation_input_tokens
+  | None, _ | Some _, (Some { reported_cache_usage = None; _ } | None) -> None
 ;;
 
 let reported_cache_read_input_tokens (resp : api_response) =
-  match resp.usage with
-  | None -> None
-  | Some usage ->
-    (match resp.telemetry with
-     | Some { reported_cache_usage = Some reported; _ } ->
-       reported.cache_read_input_tokens
-     | Some { reported_cache_usage = None; _ } | None ->
-       Some usage.cache_read_input_tokens)
+  match resp.usage, resp.telemetry with
+  | Some _, Some { reported_cache_usage = Some reported; _ } ->
+    reported.cache_read_input_tokens
+  | None, _ | Some _, (Some { reported_cache_usage = None; _ } | None) -> None
 ;;
 
 let retain_response_content ~retained_indices ~content (response : api_response) =

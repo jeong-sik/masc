@@ -589,7 +589,67 @@ let test_provider_usage_distinguishes_unreported_cache_from_reported_zero () =
     openai_turn_usage.cache_creation_input_tokens;
   check string "reported zero renders 0 (0.0% of input)"
     "Provider usage (last reported request in this turn) · input 100 · cache read 0 (0.0% of input)"
-    (Inspector.provider_usage_summary openai_turn_usage)
+    (Inspector.provider_usage_summary openai_turn_usage);
+  let muse_turn ?prompt_tokens ?cache_read_tokens ?cache_write_tokens ()
+      : Runtime_muse_serve.turn_result =
+    { session_id = "s-muse"
+    ; turn_id = "t-muse"
+    ; model = Some "claude-sonnet-4"
+    ; text = Some "ok"
+    ; usage =
+        Some
+          { Runtime_muse_msp.input_tokens = 120
+          ; output_tokens = 30
+          ; cached_tokens = 0
+          ; reasoning_tokens = 0
+          ; prompt_tokens
+          ; cache_read_tokens
+          ; cache_write_tokens
+          }
+    ; last_call_usage = None
+    ; tool_calls = 0
+    ; approvals_decided = 0
+    ; call_models = []
+    ; resumed = false
+    ; server_version = "1.4.0"
+    }
+  in
+  let muse_terminal_only_resp =
+    Masc.Keeper_muse_runtime.For_testing.completed_turn_response
+      ~runtime_id:"muse.test"
+      ~configured_model:None
+      ~latency_ms:10
+      (muse_turn ~cache_read_tokens:40 ~cache_write_tokens:10 ())
+  in
+  let muse_terminal_only_usage =
+    Turn_record.usage_of_reported_counts
+      ~scope:Runtime_usage_scope.Turn_total
+      ~usage:(Option.get muse_terminal_only_resp.usage)
+      ~telemetry:muse_terminal_only_resp.telemetry
+  in
+  check (option int) "terminal-only muse cache read stays None" None
+    muse_terminal_only_usage.cache_read_input_tokens;
+  check string "terminal-only muse renders unreported without fabricated 0"
+    "Provider usage (client turn total) · input 120 · cache read unreported"
+    (Inspector.provider_usage_summary muse_terminal_only_usage);
+  let muse_zero_resp =
+    Masc.Keeper_muse_runtime.For_testing.completed_turn_response
+      ~runtime_id:"muse.test"
+      ~configured_model:None
+      ~latency_ms:10
+      (muse_turn ~prompt_tokens:120 ~cache_read_tokens:0 ~cache_write_tokens:0 ())
+  in
+  let muse_zero_usage =
+    Turn_record.usage_of_reported_counts
+      ~scope:Runtime_usage_scope.Turn_total
+      ~usage:(Option.get muse_zero_resp.usage)
+      ~telemetry:muse_zero_resp.telemetry
+  in
+  check (option int) "muse explicit zero cache read stays Some 0" (Some 0)
+    muse_zero_usage.cache_read_input_tokens;
+  check string "muse explicit zero renders 0"
+    "Provider usage (client turn total) · input 120 · cache read 0 · cache created 0"
+    (Inspector.provider_usage_summary muse_zero_usage)
 
 let () =
   run "tui_context_inspector"

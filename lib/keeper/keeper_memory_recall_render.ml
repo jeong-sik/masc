@@ -82,21 +82,22 @@ let status ~memory_search_available ~turn_ref (judged : Flow.judged) =
 
 let unavailable_status ~memory_search_available ~turn_ref ~reason =
   let turn_ref = Ids.Turn_ref.to_string turn_ref in
-  try
-    let main = fragment Prompt_names.keeper_recall_status_unavailable
-        ["turn_ref", turn_ref; "reason", reason] in
-    if memory_search_available
-    then main ^ " " ^ fragment Prompt_names.keeper_recall_status_search_hint_unavailable []
-    else main
-  with
-  | (Sys_error _ | Unix.Unix_error _) as error ->
-    Log.Keeper.warn "memory recall unavailable prompt could not be read turn=%s reason=%s: %s"
-      turn_ref reason (Printexc.to_string error);
-    let main = Printf.sprintf "%s: turn_ref=%s reason=%s"
-        Prompt_names.keeper_recall_status_unavailable turn_ref reason in
-    if memory_search_available
-    then main ^ " " ^ Prompt_names.keeper_recall_status_search_hint_unavailable
-    else main
+  let render key vars ~unavailable =
+    match Prompt_registry.render_prompt_template key vars with
+    | Ok text -> text
+    | Error detail ->
+      Log.Keeper.warn "memory recall unavailable prompt could not be rendered turn=%s reason=%s: %s"
+        turn_ref reason detail;
+      unavailable
+  in
+  let main = render Prompt_names.keeper_recall_status_unavailable
+      ["turn_ref", turn_ref; "reason", reason]
+      ~unavailable:(Printf.sprintf "%s: turn_ref=%s reason=%s"
+        Prompt_names.keeper_recall_status_unavailable turn_ref reason) in
+  if memory_search_available
+  then main ^ " " ^ render Prompt_names.keeper_recall_status_search_hint_unavailable []
+      ~unavailable:Prompt_names.keeper_recall_status_search_hint_unavailable
+  else main
 
 (* ---- the body ---- *)
 

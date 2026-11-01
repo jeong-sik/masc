@@ -59,6 +59,7 @@ let load_batch_instructions ~question_id () =
   let* instructions = load_instructions () in
   let* choices = load_choices () in
   let+ scope_prompt, _ = Prompt_registry.resolve_and_render_prompt_template
+    ~required_variables:["question_id"]
     Prompt_names.keeper_memory_selection_candidate ["question_id", question_id]
     |> Result.map_error instruction_error in
   instructions, choices, scope_prompt

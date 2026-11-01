@@ -773,10 +773,27 @@ let test_missing_guidance_defers_before_evaluation () =
       | Deferred {reason=Evaluation_failed _;_} -> ()
       | _ -> Alcotest.fail "missing policy became a selection or omission")
 
+let test_candidate_scope_is_required_before_dispatch () =
+  with_prompt_override Prompt_names.keeper_memory_selection_candidate
+    "All candidates are relevant" @@ fun () ->
+  let evaluate ~state:_ ~questions:_ = Alcotest.fail "unscoped candidate reached evaluation" in
+  let resolve ~id:_ = Alcotest.fail "unscoped candidate reached source resolution" in
+  let candidates = [candidate; {candidate with id="second"}] in
+  List.iter (fun outcomes ->
+    Alcotest.(check int) "every original candidate remains visible" 2 (List.length outcomes);
+    Alcotest.(check bool) "missing scope defers every candidate before dispatch" true
+      (List.for_all (function Selection.Deferred {reason=Evaluation_failed _;_} -> true
+        | _ -> false) outcomes))
+    [Selection.select_many ~evaluate ~resolve ~purpose candidates;
+     Selection.select_resolved_many ~evaluate ~purpose
+       (List.map (fun candidate -> candidate,source) candidates)]
+
 let () = Alcotest.run "purpose-specific workspace memory selection"
   ["selection",[
     Alcotest.test_case "missing managed policy defers before dispatch" `Quick
       test_missing_guidance_defers_before_evaluation;
+    Alcotest.test_case "candidate scope is required before dispatch" `Quick
+      test_candidate_scope_is_required_before_dispatch;
     Alcotest.test_case "resolved first assessment sees full lineage" `Quick
       test_resolved_sources_are_present_before_any_omission;
     Alcotest.test_case "resolved inspection and partial answers remain unresolved" `Quick

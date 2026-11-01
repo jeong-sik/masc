@@ -39,7 +39,7 @@ let browser_lane_connection_rows (view : Browser_lane_view.t) =
           Theme.info (), "  Agent "
             ^ Terminal_text.single_line (Option.value work.actor ~default:"MASC") ^ " · " ^ phase
             ^ " · " ^ Terminal_text.single_line work.action
-            ^ (match work.tab_id with Some id -> " · tab " ^ string_of_int id | None -> " · space")
+            ^ (match work.tab_id with Some id -> " · tab " ^ string_of_int id | None -> "")
             ^ " (at last connection read)") client.interactions in
         let settled = List.map (fun (settled : Browser_lane.settled_activity) ->
           let work=settled.work in
@@ -51,7 +51,7 @@ let browser_lane_connection_rows (view : Browser_lane_view.t) =
           style, "  Last · "
             ^ Terminal_text.single_line (Option.value work.actor ~default:"MASC")
             ^ " · " ^ Terminal_text.single_line work.action ^ " · " ^ outcome
-            ^ (match work.tab_id with Some id -> " · tab " ^ string_of_int id | None -> " · space"))
+            ^ (match work.tab_id with Some id -> " · tab " ^ string_of_int id | None -> ""))
           client.last_activities in
         metadata @ pending @ settled in
   let inventory = match view.inventory_report with

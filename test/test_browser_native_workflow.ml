@@ -392,7 +392,7 @@ let evaluation_timeouts () =
       (result ~started:true ~completed_effect:false ~completed:[]
         ~failure:(obj (["index",`Int 0;"method",str method_;"message",str "native timeout"] @ native)))) in
   let detail = function Some (R.Evaluation_timed_out value) -> value
-    | None | Some (R.Navigation_timed_out _ | R.Popup_event_failed _) -> fail "native evaluation diagnostics are absent" in
+    | None | Some (R.Navigation_timed_out _ | R.Popup_event_failed _ | R.Page_dialog_opened _) -> fail "native evaluation diagnostics are absent" in
   List.iter (fun fields ->
     let value=receipt "evaluate" ["nativeError",obj fields] in
     match ok (R.decode expected value) with
@@ -444,7 +444,7 @@ let navigation_timeouts () =
       | R.Stopped {native_error;receipt=original;effect_started;completed_effect;input;_} ->
         let observed=match native_error with
           | Some (R.Navigation_timed_out value) -> value
-          | None|Some (R.Evaluation_timed_out _ | R.Popup_event_failed _) -> fail "native navigation diagnostics are absent" in
+          | None|Some (R.Evaluation_timed_out _ | R.Popup_event_failed _ | R.Page_dialog_opened _) -> fail "native navigation diagnostics are absent" in
         check bool "navigation diagnostics retain original receipt" true (original=value);
         check bool "committed is an observation" (List.assoc "committed" fields=`Bool true) observed.committed;
         check bool "requested lifecycle is preserved" true (observed.wait_until=kind);
@@ -696,7 +696,7 @@ let popup_progress () =
      check bool "a failed popup wait retains the returned trigger and release proof" true (seen_input input=`Released [0]);
      check bool "native event diagnostics are data, not fabricated Page success" true
        (error.code=Some "native-code" && error.timeout_ms=Some 9.)
-   | R.Stopped {native_error=None|Some (R.Evaluation_timed_out _|R.Navigation_timed_out _);_}
+   | R.Stopped {native_error=None|Some (R.Evaluation_timed_out _|R.Navigation_timed_out _|R.Page_dialog_opened _);_}
    | R.Stopped {completed_effect=false;native_error=Some (R.Popup_event_failed _);_}
    | R.Completed _ -> fail "pending popup click was erased or called completed");
   stopped "void trigger never manufactures key release" (not_released 0 Rel.Void_answer)

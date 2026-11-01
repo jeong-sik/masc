@@ -10998,6 +10998,14 @@ let queue_panel_fixed_rows ~items panel =
   1 + (match panel.qp_receipt with Some _ -> 1 | None -> 0)
     + (match queue_panel_selection_note ~items panel with Some _ -> 1 | None -> 0)
 
+let queue_panel_window_height ~count ~budget =
+  let budget = max 0 budget in
+  if count > budget then max 0 (budget - 1) else budget
+
+let queue_panel_list_height ~items ~budget panel =
+  queue_panel_window_height ~count:(List.length items)
+    ~budget:(budget - queue_panel_fixed_rows ~items panel)
+
 let queue_panel_scroll ~items ~height panel =
   let count = List.length items in
   let scroll = Masc_tui_scroll.normalize ~count ~height panel.qp_scroll in
@@ -11006,7 +11014,7 @@ let queue_panel_scroll ~items ~height panel =
   | Some _ | None -> scroll
 
 let queue_panel_move ~items ~budget ~direction panel =
-  let height = max 0 (budget - queue_panel_fixed_rows ~items panel) in
+  let height = queue_panel_list_height ~items ~budget panel in
   if height = 0 then panel
   else
     let count = List.length items in
@@ -11024,7 +11032,7 @@ let queue_panel_move ~items ~budget ~direction panel =
     match target, selected with
     | Some (_, id), _ ->
       let next = {panel with qp_selected=Some id; qp_scroll=scroll} in
-      let next_height = max 0 (budget - queue_panel_fixed_rows ~items next) in
+      let next_height = queue_panel_list_height ~items ~budget next in
       if next_height = 0 then {panel with qp_scroll=scroll}
       else {next with qp_scroll=queue_panel_scroll ~items ~height:next_height next}
     | None, Some _ -> {panel with qp_scroll=scroll}

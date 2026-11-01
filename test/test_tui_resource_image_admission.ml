@@ -284,9 +284,13 @@ let test_board_preview_input_barrier () =
     {ba_kind=Ak_image;ba_source=As_url "https://example.invalid/image.png";ba_name=None} in
   let prepared=match Masc_tui_attachment_action.prepare ~fetch:(fun ~sha256:_ -> Error "unused") attachment with
     | Ok prepared -> prepared | Error _ -> fail "URL preparation failed" in
-  let open_ready=Protocol.Board_attachment_saved (request, Ok (Protocol.Board_image_open_ready prepared)) in
+  let attempt=ref () in
+  let open_ready=Protocol.Board_attachment_saved (request, Ok (Protocol.Board_image_open_ready (attempt,prepared))) in
   check bool "external open waits for pending input" true
-    (Protocol.board_preview_waits_for_input (scoped (Protocol.Workspace_operation open_ready)))
+    (Protocol.board_preview_waits_for_input (scoped (Protocol.Workspace_operation open_ready)));
+  let retry=Protocol.Board_attachment_saved (request, Ok (Protocol.Board_image_open_retry {attempt;prepared;opener="open"})) in
+  check bool "fallback opener also waits for pending input" true
+    (Protocol.board_preview_waits_for_input (scoped retry))
 
 let test_board_svg_and_original_reader () =
   let module Payload = Masc_tui_image_payload in
@@ -316,7 +320,31 @@ let test_board_svg_and_original_reader () =
   check bool "image source is not expanded as text" true (Result.is_error (Reader.source reader));
   (match Reader.saved_source reader with
    | Some (_,_,bytes) -> check string "verified original remains saveable" svg bytes
-   | None -> fail "verified original image is unavailable for saving")
+   | None -> fail "verified original image is unavailable for saving");
+  let reader,opened=Reader.begin_original_open reader in
+  let first_attempt=match opened with Some (attempt,_,_,_) -> attempt | None -> fail "original open did not start" in
+  let reader,duplicate=Reader.begin_original_open reader in
+  check bool "repeated input cannot duplicate preparation" true (Option.is_none duplicate);
+  let reader=Reader.finish_original_open reader request first_attempt in
+  let reader,opened_again=Reader.begin_original_open reader in
+  let next_attempt=match opened_again with Some (attempt,_,_,_) -> attempt | None -> fail "second open did not start" in
+  let reader=Reader.finish_original_open reader request first_attempt in
+  check bool "late retry from the previous attempt has no authority" false
+    (Reader.owns_original_open reader request first_attempt);
+  let reader,stale_attempt=Reader.begin_original_open reader in
+  check bool "late completion cannot release a newer attempt on the same read" true (Option.is_none stale_attempt);
+  check bool "new attempt retains ownership" true (Reader.owns_original_open reader request next_attempt);
+  let reopened,new_request=Reader.open_read ~content_kind:Image_bytes ~key reader in
+  let new_request=match new_request with Some request -> request | None -> fail "fresh read did not start" in
+  let reopened=Reader.complete reopened new_request (Reader.validate key svg) in
+  let reopened,opened=Reader.begin_original_open reopened in
+  let newest_attempt=match opened with Some (attempt,_,_,_) -> attempt | None -> fail "new reader open did not start" in
+  let reopened=Reader.finish_original_open reopened request next_attempt in
+  let reopened,stale_release=Reader.begin_original_open reopened in
+  check bool "old completion cannot release the new opening" true (Option.is_none stale_release);
+  let reopened=Reader.finish_original_open reopened new_request newest_attempt in
+  let _,next=Reader.begin_original_open reopened in
+  check bool "current completion permits a later open" true (Option.is_some next)
 
 let test_board_worker_and_png_boundary () =
   let module Work=Masc_tui_board_preview_work in
@@ -329,6 +357,11 @@ let test_board_worker_and_png_boundary () =
   check bool "first worker completes" true (Result.is_ok first);
   (try ignore (Work.run worker (fun () -> failwith "worker exception")) with Failure _ -> ());
   check bool "worker releases its slot even on exception" true (Result.is_ok (Work.run worker (fun () -> Ok ())));
+  check bool "a child opener acquires its slot" true (Work.try_acquire worker);
+  check bool "a second opener is refused until the first is reaped" false (Work.try_acquire worker);
+  Work.release worker;
+  check bool "a reaped opener releases the slot" true (Work.try_acquire worker);
+  Work.release worker;
   check bool "truncated PNG magic does not reach the terminal" false
     (Masc_tui_image_cache.has_png_structure "\137PNG");
   let header="\137PNG\r\n\026\n\000\000\000\rIHDR\000\000\000\001\000\000\000\001" in
@@ -344,13 +377,16 @@ let test_board_pele_deadline () =
   let directory=Filename.temp_dir "board pele test " "" in
   let executable=Filename.concat directory "masc-pele" in
   let opener=Filename.concat directory "open" in
+  let fallback=Filename.concat directory "xdg-open" in
   let previous=Option.value ~default:"" (Sys.getenv_opt "PATH") in
   Out_channel.with_open_text executable (fun out -> Out_channel.output_string out "#!/bin/sh\nexec sleep 30\n");
-  Out_channel.with_open_text opener (fun out -> Out_channel.output_string out "#!/bin/sh\nexec sleep 30\n");
+  Out_channel.with_open_text opener (fun out -> Out_channel.output_string out "#!/bin/sh\nexit 3\n");
+  Out_channel.with_open_text fallback (fun out -> Out_channel.output_string out "#!/bin/sh\nexec sleep 30\n");
   Unix.chmod executable 0o700;
   Unix.chmod opener 0o700;
+  Unix.chmod fallback 0o700;
   Fun.protect ~finally:(fun () ->
-    Unix.putenv "PATH" previous; Unix.unlink executable; Unix.unlink opener; Unix.rmdir directory) (fun () ->
+    Unix.putenv "PATH" previous; Unix.unlink executable; Unix.unlink opener; Unix.unlink fallback; Unix.rmdir directory) (fun () ->
     Unix.putenv "PATH" (directory ^ ":" ^ previous);
     let slot=Masc_tui_board_preview_work.create () in
     let run=Masc_tui_image_cache.run_bounded ~deadline_seconds:0.2 in
@@ -362,14 +398,87 @@ let test_board_pele_deadline () =
     check bool "hung renderer is terminated" true (Result.is_error result);
     check bool "renderer return releases its slot" true
       (Result.is_ok (Masc_tui_board_preview_work.run slot (fun () -> Ok ())));
-    let _,pid=match Masc_tui_browser.spawn_url "image with spaces.png" with
+    let first,pid=match Masc_tui_browser.spawn_url "image with spaces.png" with
       | Ok started -> started | Error error -> fail error in
+    check bool "first opener failure is observable" true
+      (match Masc_tui_image_cache.wait_bounded ~deadline_seconds:0.2 pid with
+       | Unix.WEXITED 3 -> true | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> false);
+    let second,pid=match Masc_tui_browser.spawn_url ~after:first "image with spaces.png" with
+      | Ok started -> started | Error error -> fail error in
+    check string "failed opener advances to the next executable" "xdg-open" second;
     check bool "hung external opener is reaped at its deadline" true
       (match Masc_tui_image_cache.wait_bounded ~deadline_seconds:0.2 pid with
        | Unix.WSIGNALED signal -> signal=Sys.sigkill
-       | Unix.WEXITED _ | Unix.WSTOPPED _ -> false))
+       | Unix.WEXITED _ | Unix.WSTOPPED _ -> false);
+    let _,pid=match Masc_tui_browser.spawn_url ~after:first "image with spaces.png" with
+      | Ok started -> started | Error error -> fail error in
+    let cancelled=Atomic.make false and status=ref None in
+    let thread=Thread.create (fun () ->
+      status := Some (Masc_tui_image_cache.wait_bounded
+        ~cancelled:(fun () -> Atomic.get cancelled) ~deadline_seconds:30. pid)) () in
+    Atomic.set cancelled true;
+    Thread.join thread;
+    check bool "shutdown cancellation kills and reaps the opener" true
+      (match !status with Some (Unix.WSIGNALED signal) -> signal=Sys.sigkill
+       | Some (Unix.WEXITED _ | Unix.WSTOPPED _) | None -> false);
+    check bool "cancelled child cannot be reaped a second time" true
+      (match Unix.waitpid [Unix.WNOHANG] pid with
+       | exception Unix.Unix_error (Unix.ECHILD,_,_) -> true
+       | _ -> false))
 
-let () = run "resource image admission" ["stored source",[
+let test_renderer_shutdown () =
+  let directory=Filename.temp_dir "board renderer shutdown " "" in
+  let executable=Filename.concat directory "renderer" and marker=Filename.concat directory "pid" in
+  let partial=marker ^ ".tmp" in
+  Fun.protect ~finally:(fun () ->
+    List.iter (fun name -> if Sys.file_exists name then Unix.unlink name) [executable;marker;partial];
+    Unix.rmdir directory) (fun () ->
+    Out_channel.with_open_text executable (fun out ->
+      Printf.fprintf out "#!/bin/sh\nprintf '%%s' \"$$\" > %s && mv %s %s && exec sleep 30\n"
+        (Filename.quote partial) (Filename.quote partial) (Filename.quote marker));
+    Unix.chmod executable 0o700;
+    let test_executable=Unix.realpath Sys.executable_name in
+    let null=Unix.openfile "/dev/null" [Unix.O_RDWR] 0 in
+    let child=Fun.protect ~finally:(fun () -> Unix.close null) (fun () ->
+      Unix.create_process test_executable
+        [|test_executable;"--board-renderer-shutdown-probe";executable;marker|] null null null) in
+    let started=Mtime_clock.elapsed_ns () in
+    let rec wait_probe () = match Unix.waitpid [Unix.WNOHANG] child with
+      | 0,_ when Int64.sub (Mtime_clock.elapsed_ns ()) started < 5_000_000_000L ->
+          Unix.sleepf 0.01; wait_probe ()
+      | 0,_ ->
+          (* The probe owns this process group while it is alive. Kill the
+             entire fixture before reaping its leader on a timeout. *)
+          (try Unix.kill (-child) Sys.sigkill with Unix.Unix_error (Unix.ESRCH,_,_) -> ());
+          (try Unix.kill child Sys.sigkill with Unix.Unix_error (Unix.ESRCH,_,_) -> ());
+          let rec reap () = match Unix.waitpid [] child with
+            | _ -> ()
+            | exception Unix.Unix_error (Unix.EINTR,_,_) -> reap () in
+          reap (); false
+      | _,status -> status = Unix.WEXITED 0
+      | exception Unix.Unix_error (Unix.EINTR,_,_) -> wait_probe () in
+    check bool "process shutdown reaps its renderer" true (wait_probe ());
+    let pid=In_channel.with_open_text marker In_channel.input_all |> int_of_string in
+    check bool "renderer did not survive its parent" true
+      (match Unix.kill pid 0 with
+       | exception Unix.Unix_error (Unix.ESRCH,_,_) -> true
+       | () -> false))
+
+let renderer_shutdown_probe executable marker =
+  ignore (Unix.setsid ());
+  let _thread=Thread.create (fun () ->
+    ignore (Masc_tui_image_cache.run_bounded ~deadline_seconds:30. (Filename.quote executable))) () in
+  let started=Mtime_clock.elapsed_ns () in
+  let rec wait () =
+    if Sys.file_exists marker then exit 0
+    else if Int64.sub (Mtime_clock.elapsed_ns ()) started >= 3_000_000_000L then exit 1
+    else (Unix.sleepf 0.01; wait ()) in
+  wait ()
+
+let () =
+  match Array.to_list Sys.argv with
+  | [_;"--board-renderer-shutdown-probe";executable;marker] -> renderer_shutdown_probe executable marker
+  | _ -> run "resource image admission" ["stored source",[
   test_case "protocol replies are not cancellation input" `Quick test_operator_protocol_boundary;
   test_case "Board post and comment diagram ownership" `Quick test_board_diagram_ownership;
   test_case "Board attachment ownership" `Quick test_board_attachment_ownership;
@@ -377,6 +486,7 @@ let () = run "resource image admission" ["stored source",[
   test_case "Board SVG and original-image reader" `Quick test_board_svg_and_original_reader;
   test_case "Board worker and PNG header boundary" `Quick test_board_worker_and_png_boundary;
   test_case "Board Pele deadline releases worker" `Quick test_board_pele_deadline;
+  test_case "Board renderer shutdown reaps child" `Quick test_renderer_shutdown;
   test_case "workspace suspension retires diagram preparation" `Quick test_suspended_diagram_preparation;
   test_case "original SVG and multipart admission" `Quick test_original_admission;
   test_case "wrong pending URI" `Quick test_wrong_pending;

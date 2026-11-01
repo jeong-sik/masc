@@ -12,9 +12,9 @@ type preparation_request = preparation owned_request
 type t = { opened : key option; source : (key,content) F.t;
   read_request : request option; preparation_request : preparation_request option;
   preparation : (preparation,D.row list) F.t; presentation : presentation;
-  content_kind : content_kind; document : D.t }
+  content_kind : content_kind; original_open_pending : unit ref option; document : D.t }
 let initial = {opened=None;source=F.initial;preparation=F.initial;presentation=Source;
-  read_request=None;preparation_request=None;content_kind=Document;
+  read_request=None;preparation_request=None;content_kind=Document;original_open_pending=None;
   document=D.create ~title:"Board attachment" []}
 let request_job (request : request)=request.job
 let preparation_job (request : preparation_request)=request.job
@@ -29,7 +29,7 @@ let equal_preparation a b=equal_key a.key b.key && a.content==b.content
 let pending t=if F.in_flight t.source then t.read_request else None
 let pending_preparation t=if F.in_flight t.preparation then t.preparation_request else None
 let close t={t with opened=None;source=F.clear t.source;preparation=F.clear t.preparation;
-  read_request=None;preparation_request=None;content_kind=Document;
+  read_request=None;preparation_request=None;content_kind=Document;original_open_pending=None;
   document=D.create ~title:"Board attachment" []}
 let title key=Option.value key.name ~default:"Board attachment"
 let notice key body=D.create ~title:(title key) [{D.heading="Attachment";body}]
@@ -137,3 +137,14 @@ let source t=match ready t with
 let saved_source t=match t.read_request,ready t with
   | Some request,Some (key,content) -> Some (request,key,content.original)
   | None,_ | _,None -> None
+let begin_original_open t =
+  if Option.is_some t.original_open_pending then t,None else
+  match saved_source t with
+  | None -> t,None
+  | Some (request,key,bytes) ->
+      let attempt=ref () in
+      {t with original_open_pending=Some attempt},Some (attempt,request,key,bytes)
+let owns_original_open t request attempt =
+  owns t request && Option.exists (fun current -> current == attempt) t.original_open_pending
+let finish_original_open t request attempt =
+  if owns_original_open t request attempt then {t with original_open_pending=None} else t

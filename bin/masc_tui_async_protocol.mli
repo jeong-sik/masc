@@ -208,7 +208,10 @@ type resume_confirmation =
 
 type board_attachment_action_result =
   | Board_saved_original of string
-  | Board_image_open_ready of Masc_tui_attachment_action.prepared
+  | Board_image_open_ready of unit ref * Masc_tui_attachment_action.prepared
+  | Board_image_open_failed of unit ref * string
+  | Board_image_open_finished of unit ref * string
+  | Board_image_open_retry of {attempt : unit ref; prepared : Masc_tui_attachment_action.prepared; opener : string}
 
 type async_msg =
   | Chat_search_finished of int * bool * Masc_tui_render_chat.chat_search_plan

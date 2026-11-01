@@ -37,4 +37,9 @@ val source : t -> (string, string) result
 (** Exact original UTF-8 bytes for explicit copy; binary content is refused. *)
 val saved_source : t -> (request * key * string) option
 (** Original verified bytes, including binary, for an explicit save. *)
+val begin_original_open : t -> t * (unit ref * request * key * string) option
+(** Admit one original-image open through its final receipt. *)
+val owns_original_open : t -> request -> unit ref -> bool
+val finish_original_open : t -> request -> unit ref -> t
+(** A stale request or attempt cannot release the current opening. *)
 val owns : t -> request -> bool

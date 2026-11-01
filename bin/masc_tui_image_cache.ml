@@ -121,15 +121,19 @@ let decode_failure_text = function
    the caller is a loader thread with nothing else to do. *)
 let run_poll_interval_seconds = 0.02
 
-let wait_bounded ~deadline_seconds pid =
-  let deadline = Unix.gettimeofday () +. deadline_seconds in
+let wait_bounded ?(cancelled = fun () -> false) ~deadline_seconds pid =
+  let started_ns = Mtime_clock.elapsed_ns () in
+  let rec reap () =
+    match Unix.waitpid [] pid with
+    | _, status -> status
+    | exception Unix.Unix_error (Unix.EINTR, _, _) -> reap () in
   let rec wait () =
     match Unix.waitpid [ Unix.WNOHANG ] pid with
     | 0, _ ->
-      if Unix.gettimeofday () >= deadline
+      if cancelled () || Int64.to_float (Int64.sub (Mtime_clock.elapsed_ns ()) started_ns) /. 1e9 >= deadline_seconds
       then begin
         (try Unix.kill pid Sys.sigkill with Unix.Unix_error (Unix.ESRCH, _, _) -> ());
-        snd (Unix.waitpid [] pid)
+        reap ()
       end
       else begin
         Unix.sleepf run_poll_interval_seconds;
@@ -138,6 +142,20 @@ let wait_bounded ~deadline_seconds pid =
     | _, status -> status
     | exception Unix.Unix_error (Unix.EINTR, _, _) -> wait () in
   wait ()
+
+(* A renderer's system thread can outlive its Eio observer. Serialize spawning
+   with normal process shutdown so a late worker cannot leave a child behind. *)
+let subprocess_mutex = Mutex.create ()
+let subprocess_changed = Condition.create ()
+let subprocess_stopping = ref false
+let subprocesses : (int * bool Atomic.t) list ref = ref []
+
+let () = at_exit (fun () ->
+  Mutex.lock subprocess_mutex;
+  subprocess_stopping := true;
+  List.iter (fun (_,cancelled) -> Atomic.set cancelled true) !subprocesses;
+  while !subprocesses <> [] do Condition.wait subprocess_changed subprocess_mutex done;
+  Mutex.unlock subprocess_mutex)
 
 let run_bounded ~deadline_seconds command =
   (* Standard input, output and error are the null device: a decoder that
@@ -148,10 +166,31 @@ let run_bounded ~deadline_seconds command =
     ~finally:(fun () -> Unix.close null)
     (fun () ->
        (* exec: the shell becomes the decoder, so the kill below reaches it. *)
-       let pid =
-         Unix.create_process "/bin/sh" [| "sh"; "-c"; "exec " ^ command |] null null null
-       in
-       wait_bounded ~deadline_seconds pid)
+       let child =
+         Mutex.lock subprocess_mutex;
+         Fun.protect ~finally:(fun () -> Mutex.unlock subprocess_mutex) (fun () ->
+           if !subprocess_stopping then None else
+           let pid = Unix.create_process "/bin/sh" [| "sh"; "-c"; "exec " ^ command |] null null null in
+           let cancelled = Atomic.make false in
+           subprocesses := (pid,cancelled) :: !subprocesses;
+           Some (pid,cancelled)) in
+       match child with
+       | None -> Unix.WSIGNALED Sys.sigkill
+       | Some (pid,cancelled) ->
+           Fun.protect ~finally:(fun () ->
+             Mutex.lock subprocess_mutex;
+             subprocesses := List.filter (fun (_,other) -> other != cancelled) !subprocesses;
+             Condition.broadcast subprocess_changed;
+             Mutex.unlock subprocess_mutex) (fun () ->
+             try wait_bounded ~cancelled:(fun () -> Atomic.get cancelled) ~deadline_seconds pid
+             with exn ->
+               (try Unix.kill pid Sys.sigkill with Unix.Unix_error _ -> ());
+               let rec reap () = match Unix.waitpid [] pid with
+                 | _ -> ()
+                 | exception Unix.Unix_error (Unix.EINTR,_,_) -> reap ()
+                 | exception Unix.Unix_error (Unix.ECHILD,_,_) -> () in
+               (try reap () with Unix.Unix_error _ -> ());
+               raise exn))
 
 let discard path = try Sys.remove path with Sys_error _ -> ()
 

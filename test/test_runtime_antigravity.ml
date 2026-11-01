@@ -212,6 +212,7 @@ let run_fixture
     ?on_conversation_ready
     ?on_prompt_sent
     ?on_context_submission
+    ?on_terminal_received
     ?on_spawned
     ?before_spawn
     ?on_stream_event
@@ -235,6 +236,7 @@ let run_fixture
       ?on_conversation_ready
       ?on_prompt_sent
       ?on_context_submission
+      ?on_terminal_received
       ?on_spawned
       ?before_spawn
       ?on_stream_event
@@ -1096,15 +1098,31 @@ let test_conversation_callback_precedes_terminal_result () =
 ;;
 
 let test_conversation_callback_failure_is_typed () =
-  with_fixture [ init (); result () ] (fun path ->
-    match
-      run_fixture
-        ~on_conversation_ready:(fun ~conversation_id:_ -> failwith "fixture callback")
-        path
-    with
-    | Error (Runtime_antigravity.State_callback_failed _) -> ()
-    | Error error -> fail (Runtime_antigravity.error_to_string error)
-    | Ok _ -> fail "callback exception was admitted as a successful turn")
+  let rejected on_conversation_ready =
+    let admitted = ref [] in
+    let events = ref [] in
+    let terminals = ref 0 in
+    with_fixture [ init (); result () ] (fun path ->
+      (match
+         run_fixture
+           ~on_conversation_ready:(fun ~conversation_id ->
+             admitted := conversation_id :: !admitted;
+             on_conversation_ready ~conversation_id)
+           ~on_terminal_received:(fun () -> incr terminals)
+           ~on_stream_event:(fun event -> events := event :: !events)
+           path
+       with
+       | Error (Runtime_antigravity.State_callback_failed _) -> ()
+       | Error error -> fail (Runtime_antigravity.error_to_string error)
+       | Ok _ -> fail "callback failure was admitted as a successful turn");
+      check (list string) "matching identity reaches admission once"
+        [ "conversation-1" ] !admitted;
+      check int "rejected admission emits no start, text, usage or completion"
+        0 (List.length !events);
+      check int "rejected admission never observes the buffered result" 0 !terminals)
+  in
+  rejected (fun ~conversation_id:_ -> Error "fixture callback");
+  rejected (fun ~conversation_id:_ -> failwith "fixture callback")
 ;;
 
 (* #39768: an exception raised where the runtime expects none -- the spawn
@@ -1664,6 +1682,72 @@ let test_tool_step_outlasting_the_idle_window_completes () =
        | Error error -> fail (Runtime_antigravity.error_to_string error))
 ;;
 
+(* A closed response can be replayed while a different, real tool step is
+   active. The replay says nothing new: it must not replace the active tool
+   as the last step and re-arm the model-turn idle window before tool DONE. *)
+let test_response_replay_preserves_the_running_tool_phase () =
+  let events = ref [] in
+  let closed_response = step ~index:1 ~text_delta:"before tool\n" () in
+  let expected_tool : Runtime_native_tools.observation =
+    { identity =
+        Some
+          (Runtime_native_tools.Provider_step
+             { conversation_id = "conversation-1"; step_index = 2 })
+    ; tool_name = Some "run_command"
+    ; origin = Runtime_native_tools.Built_in
+    }
+  in
+  with_fixture
+    ~line_delays:[ 4, tool_step_gap_s ]
+    [ init ()
+    ; closed_response
+    ; step ~index:2 ~state:"ACTIVE" ~step_type:"tool" ~tool_name:"run_command" ()
+    ; closed_response
+    ; step ~index:2 ~state:"DONE" ~step_type:"tool" ~tool_name:"run_command" ()
+    ; result ~response:"before tool\n" ()
+    ]
+    (fun path ->
+       match
+         run_fixture
+           ~timeout_s:tool_step_idle_window_s
+           ~admission_timeout_s:tool_step_admission_s
+           ~on_stream_event:(fun event -> events := event :: !events)
+           path
+       with
+       | Error error -> fail (Runtime_antigravity.error_to_string error)
+       | Ok turn ->
+         check string "terminal reply survives tool silence" "before tool\n" turn.text;
+         check int "only the real tool ACTIVE counts" 1 turn.tool_steps;
+         check int "the real tool completed without error" 0 turn.tool_errors;
+         match List.rev !events with
+         | [ Runtime_antigravity.Turn_started
+               { conversation_id = "conversation-1"; model = "gemini-fixture" }
+           ; Text_delta { step_index = Some 1; text = "before tool\n" }
+           ; Text_completed { step_index = 1; ending = Response_done }
+           ; Native_tool_started started
+           ; Native_tool_finished
+               { observation = finished
+               ; completion =
+                   { outcome = Runtime_native_tools.Completion_reported; exit_code = None }
+               }
+           ; Usage_reported
+               { conversation_id = "conversation-1"
+               ; model = "gemini-fixture"
+               ; num_turns = 1
+               ; usage =
+                   { input_tokens = 100; output_tokens = 7; thinking_tokens = 3
+                   ; cache_read_tokens = 50; total_tokens = 107
+                   }
+               }
+           ; Turn_finished { text = "before tool\n" }
+           ] ->
+           check bool "native start retains the actual tool identity" true
+             (started = expected_tool);
+           check bool "native completion retains the actual tool identity" true
+             (finished = expected_tool)
+         | _ -> fail "response replay changed the real ordered stream observations")
+;;
+
 (* The same gap after the tool step has ended, whichever way it ended, is
    silence from the model turn again and the idle window ends it. *)
 let test_idle_window_rearms_when_the_tool_step_ends () =
@@ -2014,6 +2098,10 @@ let () =
             "tool step outlasting the idle window completes"
             `Quick
             test_tool_step_outlasting_the_idle_window_completes
+        ; test_case
+            "closed response replay preserves the running tool phase"
+            `Quick
+            test_response_replay_preserves_the_running_tool_phase
         ; test_case
             "idle window re-arms when the tool step ends"
             `Quick

@@ -669,13 +669,14 @@ let full_health_refresh : unit Eio.Promise.or_exn Health_refresh.t ref =
    shape that exhausted the heap in #10777 when its consumer fiber stalled. *)
 let full_health_refresh_wakeup = Eio.Stream.create 1
 
-(* Makes the is_empty check and the add atomic. Without it two invalidations
-   can both see an empty stream and the second blocks on the full one, which
-   would stall whichever hot path called it. *)
-let full_health_refresh_wakeup_mu = Eio.Mutex.create ()
+(* Every producer takes this short, non-yielding lock around the empty check
+   and add. The stream has capacity one and only this function writes it, so
+   add cannot wait for space. A standard mutex also admits invalidations from
+   outside an Eio fiber without waiting for the periodic refresh. *)
+let full_health_refresh_wakeup_mu = Stdlib.Mutex.create ()
 
 let signal_full_health_refresh_wakeup () =
-  Eio.Mutex.use_rw ~protect:true full_health_refresh_wakeup_mu (fun () ->
+  Stdlib.Mutex.protect full_health_refresh_wakeup_mu (fun () ->
       if Eio.Stream.is_empty full_health_refresh_wakeup
       then Eio.Stream.add full_health_refresh_wakeup ())
 ;;
@@ -1332,13 +1333,9 @@ let invalidate_full_health_snapshot () =
       full_health_observation :=
         Health_observation.invalidate ~now !full_health_observation);
   (* The state above is the invalidation; the wake only brings the refresh
-     forward. Observers call this after their own change is committed (a Skill
-     publication past its CAS), so cancellation must not interrupt it. Outside
-     Eio there is no scheduler to wake, and Eio.Mutex would raise there and
-     poison the wakeup mutex; the loop refreshes at its next interval. *)
-  match Fs_compat.execution_context () with
-  | Fs_compat.Eio_fiber -> Eio.Cancel.protect signal_full_health_refresh_wakeup
-  | Non_eio -> ()
+     forward. Its bounded stream write does not yield, including when the
+     observer is a non-Eio domain. *)
+  signal_full_health_refresh_wakeup ()
 
 let full_health_snapshot_state () =
   with_full_health_snapshot_lock (fun () ->
@@ -1405,6 +1402,11 @@ let start_full_health_snapshot_refresh_loop ~sw ~clock ~request_authority =
     ~on_result:Fun.id
 
 module For_testing = struct
+  let take_full_health_wakeup () = Eio.Stream.take full_health_refresh_wakeup
+  let take_full_health_wakeup_nonblocking () =
+    Option.is_some (Eio.Stream.take_nonblocking full_health_refresh_wakeup)
+  let full_health_wakeup_stream () = full_health_refresh_wakeup
+
   let reset_full_health_snapshot () =
     with_full_health_snapshot_lock (fun () ->
         full_health_observation := Health_observation.empty;

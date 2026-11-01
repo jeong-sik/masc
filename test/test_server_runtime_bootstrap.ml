@@ -5322,8 +5322,8 @@ let test_create_server_state_invalidates_health_on_skill_publication () =
         true
         (full_health_invalidation_generation () > before))
 
-(* An observer can fire outside Eio (a test, a systhread). The invalidation
-   still lands there, and the Eio wakeup it skips stays usable. *)
+(* An observer can fire outside Eio (a test, a systhread). Its invalidation
+   and a subsequent Eio invalidation both retain their generation. *)
 let test_full_health_invalidation_outside_eio_keeps_the_wakeup () =
   let before = full_health_invalidation_generation () in
   Server_routes_http_runtime.invalidate_full_health_snapshot ();

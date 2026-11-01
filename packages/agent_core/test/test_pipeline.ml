@@ -1884,6 +1884,66 @@ let test_trace_finalization_preserves_committed_success diagnostic_fault () =
 
 exception Checkpoint_authority_refused
 
+let test_durable_turn_bus_uses_canonical_facts ~caller_checkpoint () =
+  with_execution_test_dir "agent_core-turn-observation-"
+  @@ fun ~env ~sw ~runtime ~dir ->
+  let bus = Event_bus.create () in
+  let subscription = Event_bus.subscribe bus
+      ~config:(Result.get_ok (Event_bus.subscription_config
+        ~capacity:16 ~overflow:Event_bus.Drop_newest)) in
+  let provider_calls = ref 0 and locator = ref None in
+  let response =
+    { (Provider_mock.text_response "done" []) with
+      telemetry = Some {Types.default_inference_telemetry with
+        provider_kind = Some Llm_provider.Provider_kind.OpenAI_compat} } in
+  let next () = incr provider_calls; Ok response in
+  let transport = Llm_provider.Llm_transport.custom
+    { complete_sync = (fun _ -> {Llm_provider.Llm_transport.response = next (); latency_ms = None})
+    ; complete_stream = (fun ?on_telemetry:_ ~on_event:_ _ -> next ()) } in
+  let checkpoint_sink = if caller_checkpoint then Some (fun _ -> Ok ()) else None in
+  let agent = Agent.create ~media_store:(Agent_core.History.Memory_store.create ())
+      ~net:(Eio.Stdenv.net env) ?checkpoint_sink
+      ~config:{(Types.default_config ~model:"test-model") with name="canonical-turn-bus"}
+      ~options:{Agent.default_options with transport=Some transport; event_bus=Some bus;
+        provider_config=Some (Provider_mock.to_provider_config ())} () in
+  let store = Agent.execution_store ~runtime ~dir
+      ~on_scope_ready:(fun value -> locator := Some value; Ok ()) () in
+  (match Agent.run ~sw ~execution_store:store agent "observe the provider turn" with
+   | Ok _ -> () | Error error -> Alcotest.fail (Error.to_string error));
+  Alcotest.(check int) "provider dispatch once" 1 !provider_calls;
+  let observations = Event_bus.drain subscription |> List.filter (fun (event:Event_bus.event) ->
+    match event.payload with
+    | TurnStarted _ | TurnReady _ | TurnCompleted _ | InferenceTelemetry _ -> true
+    | AgentStarted _ | AgentCompleted _ | AgentYielded _ | AgentInputRequired _ | AgentFailed _
+    | ToolCalled _ | ToolCompleted _ | HandoffRequested _ | HandoffCompleted _
+    | ElicitationCompleted _ | ToolApprovalCompleted _ | Custom _ -> false) in
+  Alcotest.(check int) "one observation per provider turn boundary" 4 (List.length observations);
+  let projection = match Agent.open_execution_projection ~runtime ~dir (Option.get !locator) with
+    | Ok projection -> projection
+    | Error error -> Alcotest.fail (Agent.Execution_projection.error_to_string error) in
+  let page = match Agent.Execution_projection.read_page projection
+      ~after:(Agent.Execution_projection.beginning_cursor projection) ~limit:1024 () with
+    | Ok page -> page
+    | Error error -> Alcotest.fail (Agent.Execution_projection.error_to_string error) in
+  List.iter (fun (observation:Event_bus.event) ->
+    let source = List.find_opt (fun (source:Agent.Execution_projection.event) ->
+      String.equal observation.meta.event_id
+        (Agent.Execution_projection.Event_id.to_string source.event_id)) page.events in
+    match source with
+    | None -> Alcotest.fail "durable turn observation has no committed source event"
+    | Some source ->
+      Alcotest.(check (option int)) "turn observation keeps committed sequence"
+        (Some source.seq) observation.meta.seq;
+      Alcotest.(check string) "turn observation keeps committed run"
+        (Agent.Execution_projection.Run_id.to_string source.run_id) observation.meta.run_id;
+      Alcotest.(check string) "turn observation keeps committed correlation"
+        (Agent.Execution_projection.Correlation_id.to_string source.correlation_id)
+        observation.meta.correlation_id;
+      Alcotest.(check (option string)) "turn observation keeps committed parent"
+        (Option.map Agent.Execution_projection.Event_id.to_string source.parent_event_id)
+        observation.meta.parent_event_id) observations
+;;
+
 let test_durable_tool_bus_uses_canonical_facts ?(delivery_fault=false) ?checkpoint_failure () =
   with_execution_test_dir "agent_core-tool-observation-"
   @@ fun ~env ~sw ~runtime ~dir ->
@@ -4934,6 +4994,10 @@ let () =
             "completion callback diagnostic preserves committed success"
             `Quick
             (test_trace_finalization_preserves_committed_success Callback_diagnostic_failed)
+        ; Alcotest.test_case "durable turn observations keep committed identity" `Quick
+            (test_durable_turn_bus_uses_canonical_facts ~caller_checkpoint:false)
+        ; Alcotest.test_case "caller-owned checkpoint preserves canonical turn observations" `Quick
+            (test_durable_turn_bus_uses_canonical_facts ~caller_checkpoint:true)
         ; Alcotest.test_case
             "durable tool bus uses canonical committed facts"
             `Quick

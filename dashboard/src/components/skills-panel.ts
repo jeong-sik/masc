@@ -933,7 +933,7 @@ function SkillsObservationPanel({ owner, onMutation }: {
                 <tr hidden=${filtered} key=${`${rowKey}-detail`}><td colspan="5">
                   ${row.surface ? html`<${SkillSourceInspector} reference=${row.surface.reference} />`
                     : html`<p role="status">Exact source unavailable: this Skill has no published source reference.</p>`}
-                  <div class="grid gap-3 p-2 lg:grid-cols-[minmax(0,2fr)_minmax(18rem,1fr)]">
+                  <div class="grid min-w-0 gap-3 p-2">
                     <div><strong>Execution flow</strong>${row.surface && row.surface.kind !== 'unavailable' ? html`<${SkillFlowView} profile=${row.surface.profile} /><${SkillIoView} profile=${row.surface.profile} />` : html`<div class="ss-muted">No profile</div>`}</div>
                     ${row.surface ? html`<${SkillEvidenceLoader} key=${rowKey}
                       reference=${row.surface.reference} io=${row.surface.kind === 'unavailable' ? null : row.surface.profile.io} isCurrent=${current} />` : null}

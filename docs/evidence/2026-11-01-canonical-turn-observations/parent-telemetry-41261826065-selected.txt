@@ -1,0 +1,29 @@
+2026-11-01T01:37:13.8246575Z   ref: 5c86eb8c9d09b9d6aa25d4dab4be82baef0d32ce
+2026-11-01T01:37:14.6137174Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin 5c86eb8c9d09b9d6aa25d4dab4be82baef0d32ce
+2026-11-01T01:37:23.9447579Z  * branch              5c86eb8c9d09b9d6aa25d4dab4be82baef0d32ce -> FETCH_HEAD
+2026-11-01T01:37:23.9456668Z [command]/usr/bin/git rev-parse --verify --quiet 5c86eb8c9d09b9d6aa25d4dab4be82baef0d32ce^{object}
+2026-11-01T01:37:23.9486640Z 5c86eb8c9d09b9d6aa25d4dab4be82baef0d32ce
+2026-11-01T01:37:23.9585846Z [command]/usr/bin/git checkout --progress --force 5c86eb8c9d09b9d6aa25d4dab4be82baef0d32ce
+2026-11-01T01:37:26.8960202Z Note: switching to '5c86eb8c9d09b9d6aa25d4dab4be82baef0d32ce'.
+2026-11-01T01:37:26.9156730Z 5c86eb8c9d09b9d6aa25d4dab4be82baef0d32ce
+2026-11-01T01:38:26.8504228Z   TARGET_SUITES: packages/agent_core/test/test_telemetry_pipeline
+2026-11-01T01:38:26.8688179Z   TARGET_SUITES: packages/agent_core/test/test_telemetry_pipeline
+2026-11-01T01:38:26.9160760Z [targeted] EIO_BACKEND=<unset> timeout=600s per suite
+2026-11-01T01:38:26.9528096Z [targeted] dune build packages/agent_core/test/test_telemetry_pipeline.exe 
+2026-11-01T01:38:44.6640258Z [targeted] packages/agent_core/test/test_telemetry_pipeline: stanza env 
+2026-11-01T01:38:44.6667918Z [targeted] packages/agent_core/test/test_telemetry_pipeline: start 2026-11-01T01:38:44Z
+2026-11-01T01:38:44.7085744Z   [FAIL]        emit          0   run_stream emits telemetry via pipeline.
+2026-11-01T01:38:44.7090978Z   [OK]          emit          1   run_stream skips telemetry without event_bus.
+2026-11-01T01:38:44.7109240Z   [OK]          emit          2   checkpoint after assistant collect.
+2026-11-01T01:38:44.7118351Z   [OK]          emit          3   checkpoint after tool feedback.
+2026-11-01T01:38:44.7153930Z   [OK]          emit          4   context checkpoints follow reported updates.
+2026-11-01T01:38:44.7156664Z   [OK]          emit          5   checkpoint sink failure fails turn.
+2026-11-01T01:38:44.7159100Z   [OK]          emit          6   checkpoint sink preserves intervening state.
+2026-11-01T01:38:44.7174297Z   [OK]          emit          7   post-hook failure commits tool result befor...
+2026-11-01T01:38:44.7180315Z   [OK]          emit          8   context injection failure keeps base tool r...
+2026-11-01T01:38:44.7182149Z │ [FAIL]        emit          0   run_stream emits telemetry via pipeline.     │
+2026-11-01T01:38:44.7184591Z FAIL telemetry events received
+2026-11-01T01:38:44.7184984Z    Expected: `1'
+2026-11-01T01:38:44.7185307Z    Received: `0'
+2026-11-01T01:38:44.7201973Z 1 failure! in 0.037s. 9 tests run.
+2026-11-01T01:38:44.7225365Z [targeted] packages/agent_core/test/test_telemetry_pipeline: FAIL exit 1 in 0s

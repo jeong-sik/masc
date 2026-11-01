@@ -1,0 +1,167 @@
+{
+  "scope": "#27890 bounded durable Turn and Inference bus migration",
+  "runs": [
+    {
+      "workflow": "Test",
+      "run_id": 41260927530,
+      "job_id": 124713858572,
+      "head": "15597edb51a7ef7ec34198d4f518a689d9d3a052",
+      "ref": "fix/canonical-turn-observations-20261101",
+      "role": "original identity defect",
+      "conclusion": "failure"
+    },
+    {
+      "workflow": "Test",
+      "run_id": 41261604985,
+      "job_id": 124715840649,
+      "head": "ebb7a30bafdaa7f4a5ac7fd17ec85a97ccd2679b",
+      "ref": "fix/canonical-turn-observations-20261101",
+      "role": "first correction before writer ownership review repair",
+      "conclusion": "failure"
+    },
+    {
+      "workflow": "Test",
+      "run_id": 41261750963,
+      "job_id": 124716258779,
+      "head": "a5ef905a7db9733f6ac237c30470fd09242620be",
+      "ref": "fix/canonical-turn-observations-20261101",
+      "role": "fixture-initialization",
+      "conclusion": "failure"
+    },
+    {
+      "workflow": "Test",
+      "run_id": 41261826065,
+      "job_id": 124716483308,
+      "head": "5c86eb8c9d09b9d6aa25d4dab4be82baef0d32ce",
+      "ref": "fix/provider-binding-identity-20261101",
+      "role": "parent-telemetry",
+      "conclusion": "failure"
+    },
+    {
+      "workflow": "Test",
+      "run_id": 41261888709,
+      "job_id": 124716660376,
+      "head": "98220fc8ee4c48e0c64be69df96c49d20dd238f0",
+      "ref": "fix/canonical-turn-observations-20261101",
+      "role": "writer-fix-fixture-initialization",
+      "conclusion": "failure"
+    },
+    {
+      "workflow": "Test",
+      "run_id": 41262022423,
+      "job_id": 124717060943,
+      "head": "233f57232ef4690488adb5c7a3564dcc662d03e3",
+      "ref": "fix/canonical-turn-observations-20261101",
+      "role": "final",
+      "conclusion": "success"
+    }
+  ],
+  "captures": [
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/issues-oldest-20261101/turn-baseline-41260927530-job124713858572.txt",
+      "bytes": 150286,
+      "sha256": "575f773d545cc7e45f8c40fdb1186028c83e912eb8f77855b4a69cdb4e9287f0",
+      "retained_path": "docs/evidence/2026-11-01-canonical-turn-observations/baseline-41260927530-selected.txt",
+      "retained_bytes": 10557,
+      "retained_sha256": "249c7863b77154c128b73c04ba1f7347704058d087a52ba419545a4a47148a4a",
+      "retained_transform": "ANSI stripping and selected checkout, suite, case-result, failure and summary lines; normalized final newline"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/issues-oldest-20261101/turn-interim-41261604985-job124715840649.txt",
+      "bytes": 206473,
+      "sha256": "d157e0ee24ccd6855b4633a0cec1051cb61a77ea74dbea889074700ac34030d4",
+      "retained_path": "docs/evidence/2026-11-01-canonical-turn-observations/interim-41261604985-selected.txt",
+      "retained_bytes": 18228,
+      "retained_sha256": "34626d95cde9e8b967023f09cd16d2014e2951a35a8ea9a190dd48d9bc9f35bb",
+      "retained_transform": "ANSI stripping and selected checkout, suite, case-result, failure and summary lines; normalized final newline"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/issues-oldest-20261101/turn-capture-41261750963-job124716258779.txt",
+      "bytes": 158008,
+      "sha256": "705824be424b17673cc7af56be6cea81976215cd6f66b23e0ac97b76daa158cd",
+      "retained_path": "docs/evidence/2026-11-01-canonical-turn-observations/fixture-initialization-41261750963-selected.txt",
+      "retained_bytes": 11243,
+      "retained_sha256": "c42d799c6ded9da4496e9cddf00bee364eecd669e36728e649a36ebec1c0782f",
+      "retained_transform": "ANSI stripping and selected checkout, suite, case-result, failure and summary lines; normalized final newline"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/issues-oldest-20261101/turn-capture-41261826065-job124716483308.txt",
+      "bytes": 84860,
+      "sha256": "19f3ba85467c43a5567f416d4fd876cf78e060d62cfda7c96cd63a02743413b5",
+      "retained_path": "docs/evidence/2026-11-01-canonical-turn-observations/parent-telemetry-41261826065-selected.txt",
+      "retained_bytes": 2820,
+      "retained_sha256": "0a871054d53aaaf7f79d37693c33f9e811b53224b0abf0a97977e7aa236308d3",
+      "retained_transform": "ANSI stripping and selected checkout, suite, case-result, failure and summary lines; normalized final newline"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/issues-oldest-20261101/turn-capture-41261888709-job124716660376.txt",
+      "bytes": 214803,
+      "sha256": "b53ef6431dc3793995f8e819ee3fe0930c8bd136b8848c70307664a175bec6aa",
+      "retained_path": "docs/evidence/2026-11-01-canonical-turn-observations/writer-fix-fixture-initialization-41261888709-selected.txt",
+      "retained_bytes": 23448,
+      "retained_sha256": "8fb971f6436ad64a5c2527a41d0b9fd58480451dbcd83f6fedd67a1033528a00",
+      "retained_transform": "ANSI stripping and selected checkout, suite, assertion, case-result, failure and summary lines; normalized final newline"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/issues-oldest-20261101/turn-capture-41262022423-job124717060943.txt",
+      "bytes": 210286,
+      "sha256": "e2b35f2b21b9b8205c2109d23265d8308e4b1e2622735abff313ece625c14394",
+      "retained_path": "docs/evidence/2026-11-01-canonical-turn-observations/final-41262022423-selected.txt",
+      "retained_bytes": 23181,
+      "retained_sha256": "a4eb927b0fa747a01711b07fbceeaee4c48c1d63d8e3eca05a5c550a77464dab",
+      "retained_transform": "ANSI stripping and selected checkout, suite, assertion, case-result, failure and summary lines; normalized final newline"
+    }
+  ],
+  "candidate_source_head": "233f57232ef4690488adb5c7a3564dcc662d03e3",
+  "base": "5c86eb8c9d09b9d6aa25d4dab4be82baef0d32ce",
+  "candidate_source_hashes": {
+    "packages/agent_core/lib/agent/agent_bus_observer.ml": "c0e3d51b0d6879fbabaa23dc0c86ec0dbdc91e69b22e6773e894e19199bec993",
+    "packages/agent_core/lib/agent/agent_bus_observer.mli": "702d98c0f63122db755a8afa2ff39ecf0aba9118b74a42e93d9f6688acf96a4b",
+    "packages/agent_core/lib/agent/agent_execution_projection.ml": "a7ca8fd306b49b41f830d15f80895112d9d9311f191ab1580d2f3a96dd41c1b6",
+    "packages/agent_core/lib/agent/agent_execution_projection_intf.mli": "f2b3788a3e1cbe13e22af2a0ee6afbf4d9af1c9b4975b0a1e0ac146a49365ac6",
+    "packages/agent_core/lib/agent/agent_execution_runner.ml": "32863fb52a8deaa8cd5ff5edea4f4fbe98b00489ae30b55038fcb081e7a82657",
+    "packages/agent_core/lib/agent/agent_tools.ml": "223142309eb7cdb31989d6429978980058920f33496f75abd674107cf94b9da0",
+    "packages/agent_core/lib/dune": "eeed706f0112dc802b783feb21a630e3cfbe5960bd4e340c78e21d686c899f49",
+    "packages/agent_core/lib/event_bus.mli": "d5166fb3218f1a56495643aceaa3ed625b503cb70255939e27e7d315133a3dd7",
+    "packages/agent_core/lib/execution_agent_scope.ml": "6f064f851713996f51ab3c67aefc1fa0a6b2582b25b952f599d174b30c0c8f72",
+    "packages/agent_core/lib/execution_agent_scope.mli": "af512612d0ff8ce2256fef8a4d37867b2c42254e5b170d6796befdc9f9238ddd",
+    "packages/agent_core/lib/execution_bus_observation.ml": "f3666bfa831cc012b59c09d68f68c567feb3043f9b8551c30402d290ce172ca8",
+    "packages/agent_core/lib/execution_bus_observation.mli": "980d31e4538b59cd616811fa14964fd2abe6634e2740a698ac7b22986cc41809",
+    "packages/agent_core/lib/execution_context.ml": "210eb59bebb8e64368ad42f1c5048d77bdd2a7efed0a4d6234d0df41acdebd43",
+    "packages/agent_core/lib/execution_context.mli": "bc448c4da115b28d4167f9ce2a38cc987be8b0cf51ef6ec97cf4d6821ed1bc16",
+    "packages/agent_core/lib/execution_event.ml": "905630a485cf9f4e60625d1692ba7ae4737ab0240c279abd64aa3f420ea2cc97",
+    "packages/agent_core/lib/execution_event.mli": "96002be60d420732a7a1ed1fdf5c01ef4a750c3622f0dd85826858ef07512f6e",
+    "packages/agent_core/lib/execution_journal.ml": "216828ce7e641f88fe89ea024c79bad2a874f7ab26aad02713a28504435d256a",
+    "packages/agent_core/lib/pipeline/pipeline.ml": "a8160c381a8235b297d84940fb7022a2fa1c6e198de99d99de4883bbd5b0a4df",
+    "packages/agent_core/lib/pipeline/pipeline_common.ml": "5239bf5a85050b81f594200158b732d0963cbcf720f811fb08a2ce43b0085946",
+    "packages/agent_core/lib/pipeline/pipeline_execution_scope.ml": "85f01053779e7e37065f8128a28e3e67b7478b46cb540c77c7e13aa26b0b89f6",
+    "packages/agent_core/lib/pipeline/pipeline_execution_scope.mli": "6e53b204b5a588989da328f7eee660a715c22bbecff3b09f2210bee604139f10",
+    "packages/agent_core/lib/pipeline/pipeline_stage_prepare.ml": "1b716b748a80ca3a0d57a9481570c5ef4aa10666db9251a24aa8ab503a74ef12",
+    "packages/agent_core/test/test_execution_journal.ml": "c6dc6d677417392c8a1855175c573051726cbb6224014f31da7d03a6ef14cf2a",
+    "packages/agent_core/test/test_execution_projection.ml": "130e090d47d1cb3c633c86df8dc72bc124ca48386daca126ec03a5e47689ede4",
+    "packages/agent_core/test/test_pipeline.ml": "ffb6dc35e5ad4a0b1a910689a6c99a6a9ba6aa7259726ddf725e898f7cfca9e6"
+  },
+  "source_review": {
+    "kind": "independent source review; not formal approval",
+    "head": "233f57232ef4690488adb5c7a3564dcc662d03e3",
+    "full_diff_sha256": "c3cf7d872b978169cefb8c37d48eb49abe17735781b6e179303f308444a711f0",
+    "result": "no unresolved P0-P2 source findings"
+  },
+  "final_result": {
+    "workflow": "Test",
+    "run_id": 41262022423,
+    "head": "233f57232ef4690488adb5c7a3564dcc662d03e3",
+    "ref": "fix/canonical-turn-observations-20261101",
+    "conclusion": "success",
+    "actual_passes": 158,
+    "actual_failures": 0,
+    "suites": {
+      "packages/agent_core/test/test_pipeline": 87,
+      "packages/agent_core/test/test_execution_journal": 21,
+      "packages/agent_core/test/test_execution_projection": 9,
+      "packages/agent_core/test/test_execution_codec_executor": 11,
+      "test_keeper_execution_join": 30
+    },
+    "full_regression": false
+  }
+}

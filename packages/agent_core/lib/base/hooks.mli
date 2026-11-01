@@ -129,6 +129,10 @@ type hook_event =
       { reason : Types.stop_reason
       ; response : Types.api_response
       }
+  (** Runs after assistant collection, before successful provider close.
+      Durable recovery can repeat this callback if interrupted before that
+      close; callbacks must tolerate replay. A successfully closed provider
+      reuses the completed decision. *)
   | OnError of
       { invocation : Tool_contract.Invocation.t option
         (** [Some] for an error attributable to one exact tool occurrence;

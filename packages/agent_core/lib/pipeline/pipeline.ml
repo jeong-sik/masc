@@ -866,6 +866,9 @@ let run_turn
     ~all_pre_tool_use_blocked:(ToolsExecuted After_tool_results_appended)
     ~tools_settled_before_checkpoint:(replay_settled_before_checkpoint agent)
     ~tools_settled:Pipeline_terminal_tool.recovered_outcome
+    ~pending_terminal:(fun ~turn response ->
+      stage_output ?raw_trace_run ?before_tool_execution ~turn
+        ~rejected_tool_calls:[] agent response)
     ~terminal:(fun response -> Complete response)
     ~fresh:(fun ~turn ->
       run_new_turn

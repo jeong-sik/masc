@@ -2,10 +2,9 @@
 
 type t
 
-(** A [Closed Succeeded] turn found at the resume frontier under a still-[Running]
-    run: an idempotent completed boundary left by a crash between the provider
-    close, the turn close, and the root finish. Opaque to the driver, which only
-    threads it back through {!finalize_settled}. *)
+(** A successful provider attempt found at the resume frontier under a
+    still-[Running] root. Its owning turn can still be open, or already closed
+    successfully. The boundary retains its canonical turn identity. *)
 type settled_boundary
 
 (** Total classification of what a resume found at the durable turn frontier.
@@ -27,6 +26,9 @@ val resume_current : Execution_agent_scope.t option -> (resumed, Error.t) result
     still-open turn when the crash landed between the provider close and the turn
     close. A fully-closed turn boundary needs no further journal write. *)
 val finalize_settled : settled_boundary -> (unit, Error.t) result
+
+(** The ordinal of the owning journal turn, independent of restored counters. *)
+val settled_turn_ordinal : settled_boundary -> int
 
 val turn_ordinal : t -> int
 val record_turn_ready : t -> tool_names:string list -> (unit, Error.t) result

@@ -159,6 +159,45 @@ let classify_settled agent =
              message"))
 ;;
 
+let validate_collected_counter agent ~turn =
+  if agent.Agent_types.state.turn_count = turn + 1
+  then Ok ()
+  else
+    Error
+      (Error.Internal
+         "restored checkpoint turn counter differs from the owning durable turn")
+;;
+
+let validate_terminal_checkpoint
+      agent
+      ~(response : Types.api_response)
+      (message : Types.message)
+      invocations
+  =
+  match invocations with
+  | _ :: _ ->
+    Error
+      (Error.Internal
+         "durable execution resume terminal turn contains persisted tool invocations")
+  | [] ->
+    let* restored_content = wire_blocks agent message.content in
+    (* Materialization checks that restored media exist and match their
+       references. Compare byte identity because valid base64 spellings can
+       differ while all other block data must stay exact. *)
+    let reference blocks =
+      History.reference_of_wire_blocks blocks
+      |> Result.map_error (fun error -> Error.Media error)
+    in
+    let* response_content = reference response.content in
+    let* restored_content = reference restored_content in
+    if response_content = restored_content
+    then Ok ()
+    else
+      Error
+        (Error.Internal
+           "persisted provider response content differs from the restored terminal checkpoint")
+;;
+
 (* Idempotent completed boundary: the turn is already [Closed Succeeded] under a
    still-[Running] root (crash between the provider close, the turn close, and the
    root finish of a fully-settled turn). Complete any interrupted [close_success]
@@ -189,33 +228,10 @@ let run_settled agent boundary ~turn ~all_pre_tool_use_blocked ~tools_settled ~t
   | Replay_terminal message ->
     let* response = Pipeline_execution_scope.settled_response boundary in
     let* invocations = Pipeline_execution_scope.settled_invocations boundary in
-    (match invocations with
-     | _ :: _ ->
-       Error
-         (Error.Internal
-            "durable execution resume terminal turn contains persisted tool invocations")
-     | [] ->
-       let* restored_content = wire_blocks agent message.content in
-       (* Materialization above still checks that the restored media exist and
-          match their reference. Equality follows the history codec's byte
-          identity, because [to_wire] may choose a different base64 spelling
-          from the original provider response. All other block data stay exact. *)
-       let reference blocks =
-         History.reference_of_wire_blocks blocks
-         |> Result.map_error (fun error -> Error.Media error)
-       in
-       let* response_content = reference response.content in
-       let* restored_content = reference restored_content in
-       if response_content <> restored_content
-       then
-         Error
-           (Error.Internal
-              "persisted provider response content differs from the restored terminal \
-               checkpoint")
-       else (
-         let outcome = terminal response in
-         let+ () = Pipeline_execution_scope.finalize_settled boundary in
-         outcome))
+    let* () = validate_terminal_checkpoint agent ~response message invocations in
+    let outcome = terminal response in
+    let+ () = Pipeline_execution_scope.finalize_settled boundary in
+    outcome
 ;;
 
 let run
@@ -226,15 +242,27 @@ let run
       ~settled_before_checkpoint
       ~all_pre_tool_use_blocked
       ~already_settled
+      ~pending_terminal
   =
   let outcome =
     let* response = Pipeline_execution_scope.provider_response execution in
     match last_tool_turn agent.Agent_types.state.messages with
     | None ->
-      Error
-        (Error.Internal
-           "durable execution resume found an open provider attempt without a restored \
-            ToolUse checkpoint")
+      (match last_assistant_message agent.state.messages with
+       | None ->
+         Error
+           (Error.Internal
+              "durable execution resume terminal turn has no restored assistant message")
+       | Some message ->
+         let* invocations = Pipeline_execution_scope.invocations execution in
+         let* () = validate_terminal_checkpoint agent ~response message invocations in
+         (match Pipeline_execution_scope.provider execution with
+          | Some provider ->
+            Execution_context.with_provider_attempt provider
+              (fun () -> pending_terminal ~turn response)
+          | None ->
+            Error
+              (Error.Internal "durable execution resume lost its provider authority")))
     | Some (tool_blocks, expected_ids, messages_after) ->
       let* tool_blocks = wire_blocks agent tool_blocks in
       let* () =
@@ -340,8 +368,8 @@ let frontier_ordinal frontier = frontier.turn
 (* The one place the provider turn ordinal is produced. [Fresh] reads the turn
    about to run from agent state; [Active] reads the durable turn the crashed
    run opened, so the resumed turn is traced under the exact ordinal that run
-   used (#2709); [Settled] names the turn the collect stage already closed,
-   which is the one before the restored counter. Consumes the one-shot resume
+   used (#2709); [Settled] also reads the owning turn's canonical ordinal.
+   Consumes the one-shot resume
    flag, so the caller resolves exactly once per turn, before any span or
    record names the turn. Fails closed on inconsistent restored topology. *)
 let resolve agent =
@@ -356,14 +384,8 @@ let resolve agent =
       Ok (Agent_turn.provider_turn_ordinal agent.Agent_types.state)
     | Pipeline_execution_scope.Active execution ->
       Ok (Pipeline_execution_scope.turn_ordinal execution)
-    | Pipeline_execution_scope.Settled _ ->
-      let turn = agent.Agent_types.state.turn_count - 1 in
-      if turn < 0
-      then
-        Error
-          (Error.Internal
-             "durable execution resume settled turn has an invalid turn counter")
-      else Ok turn
+    | Pipeline_execution_scope.Settled boundary ->
+      Ok (Pipeline_execution_scope.settled_turn_ordinal boundary)
   in
   { resumed; turn }
 ;;
@@ -380,11 +402,13 @@ let dispatch
       ~tools_settled_before_checkpoint
       ~tools_settled
       ~all_pre_tool_use_blocked
+      ~pending_terminal
       ~terminal
       ~fresh
   =
   match resumed with
   | Pipeline_execution_scope.Active execution ->
+    let* () = validate_collected_counter agent ~turn in
     run
       agent
       execution
@@ -393,7 +417,9 @@ let dispatch
       ~settled_before_checkpoint:tools_settled_before_checkpoint
       ~all_pre_tool_use_blocked
       ~already_settled:tools_settled
+      ~pending_terminal
   | Pipeline_execution_scope.Settled boundary ->
+    let* () = validate_collected_counter agent ~turn in
     run_settled agent boundary ~turn ~all_pre_tool_use_blocked ~tools_settled ~terminal
   | Pipeline_execution_scope.Fresh -> fresh ~turn
 ;;

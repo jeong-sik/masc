@@ -1,7 +1,8 @@
 # Official client and provider continuity audit — 2026-11-01
 
-Eight concrete contract defects were found and repaired in seven draft PRs in Native Stack #47014,
-whose top layer is [PR #47026](https://github.com/jeong-sik/masc/pull/47026). The review followed current
+Eight client/provider contract defects were repaired and a Codex fixture guard was
+strengthened in eight draft PRs in Native Stack #47014,
+whose top layer is [PR #47030](https://github.com/jeong-sik/masc/pull/47030). The review followed current
 source, installed client help/schema, primary documentation and read-only runtime
 evidence. It does not establish that every provider is free of bugs or that the
 repairs are installed.
@@ -16,6 +17,7 @@ repairs are installed.
 | [#47024](https://github.com/jeong-sik/masc/pull/47024) | Kimi Coding rejected documented low/high/max effort requests | Shipped binding → typed default-on contract → admission → serialized effort; omitted defaults remain omitted |
 | [#47025](https://github.com/jeong-sik/masc/pull/47025) | GLM preservation with an omitted default-enabled thinking toggle lost history and omitted its requested wire field | Provider parser → stable provenance → disk checkpoint → effective default and explicit controls → next user request |
 | [#47026](https://github.com/jeong-sik/masc/pull/47026) | Antigravity rejected five documented non-completed states as unknown protocol strings | Exact status/init identity → ambiguous durable recovery; no successful turn ACK or candidate replay of uncertain native effects |
+| [#47030](https://github.com/jeong-sik/masc/pull/47030) | Codex fixture assertions could be logged and swallowed by production stream-observer isolation | Snapshot the first delta once, assert after cleanup and rethrow ordinary observer failures; preserve cancellation/interruption and final serial-order assertions |
 
 The Kimi change deliberately uses the three shipped model bindings. It does not
 guess capabilities for arbitrary operator-created model IDs. Its six fixture
@@ -101,14 +103,23 @@ not a pass.
 | --- | --- | --- |
 | [41259848104](https://github.com/jeong-sik/masc/actions/runs/41259848104) | `4b388f51316ab5ed9fbce1260454f048a68f1fb8` | SUCCESS: OpenAI codec and Keeper disk checkpoint suites, 93 cases. Later lower-layer changes are test-only Muse repairs. |
 | [41259801045](https://github.com/jeong-sik/masc/actions/runs/41259801045) | `a39f630e47f69be2d1ff0a85a58d0b2a4e267d2c` | FAILURE: six selected suites passed, 127 cases; three Muse stop assertions failed before resume. This was baseline fixture drift: caller acceptance rejects a repeated-tool stop while the fixture expected the adapter's intermediate result. |
-| [41261288235](https://github.com/jeong-sik/masc/actions/runs/41261288235) | `5e3b61b848e1e9e4403b8ccf4a9768e547e712df` | Requested rerun of the failed Muse suite after keeping adapter settlement separate and asserting caller rejection plus retained tool receipt. Production stop/effect guards are unchanged. Conclusion is recorded in PR #47008. |
+| [41261288235](https://github.com/jeong-sik/masc/actions/runs/41261288235) | `5e3b61b848e1e9e4403b8ccf4a9768e547e712df` | SUCCESS: all 78 Muse cases after keeping adapter settlement separate and asserting caller rejection plus retained tool receipt. Production stop/effect guards are unchanged. |
 | [41260409586](https://github.com/jeong-sik/masc/actions/runs/41260409586) | `d7139136cf45c4744bf75228ee6eeedd3151cb1d` | FAILURE: two exact recorded-Memory wire cases failed; nine suites reported success, 500 cases (Kimi 6, reasoning 58, streaming 42, retention 20, outbox 12, Codex 196, Claude 103, Antigravity 23, session store 40). A Codex callback assertion was logged despite the suite's successful exit; that fixture cannot certify the affected assertion until repaired. |
-| [41261854222](https://github.com/jeong-sik/masc/actions/runs/41261854222) | `7cb26cc755ae4e801b390ca190373b1d7a334bbb` | Requested thirteen explicit suites for the final Antigravity, GLM default-thinking, Kimi effort and checkpoint repairs. Conclusion is recorded in PR #47026. Later changes to this report do not alter the tested code. |
+| [41261854222](https://github.com/jeong-sik/masc/actions/runs/41261854222) | `7cb26cc755ae4e801b390ca190373b1d7a334bbb` | FAILURE: four suites passed, 220 cases (Kimi replay/effort 9, provider config 142, reasoning replay 58, GLM coverage 11). Two OpenRouter catalog assertions failed. Native-test compilation then stopped at two new fixture references to the nonexistent Masc.Runtime_antigravity facade export; these were corrected to the directly linked Runtime_antigravity module. Unexecuted native suites are not passes. |
+| [41262679047](https://github.com/jeong-sik/masc/actions/runs/41262679047) | `a52c4d149a9f6545401c3e07becc5a5dc12420d3` | Requested the corrected Codex protocol suite, including observer-failure propagation and operator interruption. Conclusion is recorded in PR #47030. |
 
 Independent source reviews passed the integrated Muse head `5e3b61b848e1e9e4403b8ccf4a9768e547e712df`,
 the final Antigravity layer `7cb26cc755ae4e801b390ca190373b1d7a334bbb`,
+the Codex fixture delta `0ae2947cedf260bea4deab07db8aa8dbf43ed74f`,
 and the original GLM/Kimi/inline deltas. Those statements cover the recorded
 source differences, not compilation, formal GitHub approval or live execution.
+
+The Codex warning was a pre-existing fixture mistake: its first delta opened the
+release gate correctly, but its later completion delta repeated a pre-settlement
+assertion after all three tool responses were already read. The final serial
+order was correct. The fixture now retains ordinary observer failures through
+cleanup, while explicit operator interruption and Eio cancellation retain their
+production semantics. No scheduling defect was established by that warning.
 
 The selected verification paths include actual protocol fixtures, scoped runtime
 materialization, Memory redelivery, receipt retention/ACK, checkpoint disk restore
@@ -122,6 +133,7 @@ changed by this audit.
 - [#47010](https://github.com/jeong-sik/masc/issues/47010) and [#47011](https://github.com/jeong-sik/masc/issues/47011) now have source repairs in #47026 and #47025. They remain open until the draft stack is reviewed and merged.
 - [#47021](https://github.com/jeong-sik/masc/issues/47021): Live custom Kimi API IDs differ from documented IDs and unknown-model replay is unproven. The tracked effort declaration is repaired in #47024. Operator-owned model IDs and actual served identity were not changed or verified.
 - [#47028](https://github.com/jeong-sik/masc/issues/47028): Generic/operator-defined Anthropic HTTP configurations do not represent account/linkage identity in durable reasoning source equivalence. Sonnet/Haiku 5.5 blocks can be dropped by an unrelated account while the request succeeds. Existing transformation logging is a partial mitigation; the shipped bindings use Claude Code instead. This P2 needs trusted account or provider-transformation evidence; no deployed incident or safe account-policy repair was established.
+- [#44154](https://github.com/jeong-sik/masc/issues/44154#issuecomment-6303936847): The recorded Memory wire fixture predates baseline #43810's `ordered_program_steps` field. The [offline byte witness](../evidence/2026-11-01-official-client-audit/memory-wire-baseline.json) reproduces the exact failed request digest by adding only the missing empty-list field, 27 bytes. Relevant producers, test and historical corpus are unchanged by this audit. Fresh real provider evidence is required for the new request; historical responses and exact-wire assertions are preserved. Memory semantic success is not established by that failing suite.
 
 These issues include symptoms, reproduction conditions, suspected causes and the
 checks performed. The runtime observations are retained independently from the

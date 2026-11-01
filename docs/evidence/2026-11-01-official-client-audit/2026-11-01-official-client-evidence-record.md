@@ -40,6 +40,7 @@ The recently retained [context audit](../../audits/2026-09-29-repeated-runtime-c
 - 1차: Opened the primary documentation above and compared relevant fields to current source. Exported the installed Muse schema without a model call.
 - 2차: Captured the installed client versions/help; server reported release 0.66.0 and binary commit `dbd032511fea4e3d04687448275c0f41abff56cc`, effective runtime root confirmed from health (host-specific path omitted).
 - 3차: Added production-adapter fixtures for quota/account/effect propagation and four-turn Memory redelivery; stack layers add GLM/MiniMax/Kimi disk-restore/request regressions, Kimi effort admission, and actual Antigravity session and two-candidate effect-fence fixtures. Focused CI results are recorded separately in the report and PRs.
+- 4차: `memory-wire-baseline.json` programmatically reproduces the current failed Memory request digest from the retained historical request by adding only the baseline `ordered_program_steps: []` member (+27 bytes). Its source paths are unchanged by the audit. The existing #44154 diagnosis predates this work; no recorded provider response was reassigned to a changed request.
 - 재현 결과: Source and parser checks establish the defects and well-formed changed source. Behavioral success requires completion of the selected CI suites; syntax checks are not type or behavior proof.
 
 The log capture covers 367557 complete JSONL lines across October 30, October 31 and the November 1 prefix at capture time. `runtime-summary.json` contains counts, first/last timestamps and coordinates, prefix byte lengths and capture-time digests. These are message counts, not deduplicated request counts. Raw private conversations, authentication and account identifiers are excluded. The summary is a derivative; the private log bytes are not published.
@@ -59,6 +60,7 @@ The Muse context-overflow logs motivated the continuity checks; they do not prov
 - 미확인 항목: New-head behavior CI, post-install live multi-turn execution, quota reset expiry in a live account, and long-duration failover across every named service.
 - 영향: A source or fixture result cannot establish deployment or absence of all provider bugs. Native clients may compact opaque state outside MASC's observations.
 - 추가 확인 필요: Read exact-head CI results and test logs; after installation, observe real subsequent turns and durable receipts. Keep unrelated contract gaps as linked issues.
+- 기존 검사 실패: #44154's historical Memory corpus needs a fresh real capture for the current wire. A Codex callback assertion could be swallowed by observer isolation; #47030 repairs the test boundary, with source review and behavioral execution recorded separately.
 
 ## 적용범위 (Scope)
 

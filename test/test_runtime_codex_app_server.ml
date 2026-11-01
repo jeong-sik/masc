@@ -389,7 +389,16 @@ let run_fixture ?account_home ?(worker_pool = false) ?isolated_home ?(dynamic_to
     ?on_thread_ready ?on_thread_ready_delay_s ?on_turn_started_delay_s ?on_stream_event
     ?on_prompt_sent ?on_context_submission ?on_context_submission_delay_s ?on_reasoning_effort_resolved ?await_handoff ?on_undelivered_tool_result ?(prompt = "Return the fixture marker")
     ?(images = []) ?output_schema ?(native = Runtime_native_tools.codex_default) path =
-  Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+  let observer_failure = ref None in
+  let on_stream_event = Option.map (fun callback event ->
+    try callback event with
+    | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn ->
+      let backtrace = Printexc.get_raw_backtrace () in
+      if Option.is_none !observer_failure then observer_failure := Some (exn, backtrace);
+      Printexc.raise_with_backtrace exn backtrace) on_stream_event in
+  let result = Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
     let previous_pool = Domain_pool_ref.get () in
     Eio.Switch.on_release sw (fun () ->
       match previous_pool with
@@ -445,7 +454,12 @@ let run_fixture ?account_home ?(worker_pool = false) ?isolated_home ?(dynamic_to
       ?await_handoff
       config
       ~prompt
-      ~images))
+      ~images)) in
+  (* Runtime stream observers are isolated from the provider turn. Fixture
+     assertions still belong to the test, even when the adapter logs them. *)
+  match !observer_failure with
+  | None -> result
+  | Some (exn, backtrace) -> Printexc.raise_with_backtrace exn backtrace
 ;;
 
 let dispatch_request index step =
@@ -690,6 +704,8 @@ let test_serial_tool_fences_concurrent_calls () =
   let started, signal_started = Eio.Promise.create () in
   let release, signal_release = Eio.Promise.create () in
   let order = ref [] in
+  let before_first_settlement = ref None in
+  let text_deltas = ref [] in
   let tool = dispatch_tool
     ~execution_mode:(fun input ->
       if Yojson.Safe.Util.(input |> member "step" |> to_int) = 2
@@ -709,15 +725,68 @@ let test_serial_tool_fences_concurrent_calls () =
     (fun path ->
       before_fixture_terminal path 3;
       let on_stream_event = function
-        | Runtime_codex_app_server.Text_delta _ ->
-          Eio.Promise.await started;
-          check (list string) "no successor has run before the first settles" [] !order;
-          Eio.Promise.resolve signal_release ()
+        | Runtime_codex_app_server.Text_delta { delta; _ } ->
+          text_deltas := delta :: !text_deltas;
+          (match !before_first_settlement with
+           | Some _ -> ()
+           | None ->
+             Eio.Promise.await started;
+             before_first_settlement := Some !order;
+             Eio.Promise.resolve signal_release ())
         | _ -> () in
       match run_fixture ~dynamic_tools:[tool] ~on_stream_event path with
       | Error error -> fail (Runtime_codex_app_server.error_to_string error)
-      | Ok _ -> check (list string) "serial fence orders both sides"
+      | Ok _ ->
+        check (option (list string)) "no successor has run before the first settles"
+          (Some []) !before_first_settlement;
+        check (list string) "completion emits a later response fragment"
+          ["MASC_"; "SUBSCRIPTION_OK"] (List.rev !text_deltas);
+        check (list string) "serial fence orders both sides"
           ["call-1"; "call-2"; "call-3"] (List.rev !order))
+;;
+
+let test_fixture_exposes_stream_observer_failure () =
+  let finished = ref false in
+  let failure = Failure "expected fixture stream observer failure" in
+  with_fixture [init_result; account_chatgpt; thread_result; turn_result;
+    agent_message_delta; item_completed; turn_completed] (fun path ->
+    let on_stream_event = function
+      | Runtime_codex_app_server.Turn_started _ -> raise failure
+      | Turn_finished _ -> finished := true
+      | _ -> () in
+    check_raises "fixture rethrows an isolated observer failure" failure
+      (fun () -> ignore (run_fixture ~on_stream_event path));
+    check bool "production turn completes despite observer failure" true !finished)
+;;
+
+let test_fixture_preserves_stream_observer_interrupt () =
+  with_fixture [init_result; account_chatgpt; thread_result; turn_result;
+    item_completed; turn_completed] (fun path ->
+    check_raises "stream observer interrupt leaves the runtime unchanged"
+      Keeper_registry_types.Operator_interrupt
+      (fun () -> ignore (run_fixture path ~on_stream_event:(function
+        | Runtime_codex_app_server.Turn_started _ -> raise Keeper_registry_types.Operator_interrupt
+        | _ -> ()))))
+;;
+
+let test_fixture_preserves_stream_observer_cancellation () =
+  let started = ref false in
+  let finished = ref false in
+  let reason = Failure "stream observer cancellation fixture" in
+  with_fixture [init_result; account_chatgpt; thread_result; turn_result;
+    item_completed; turn_completed] (fun path ->
+    (try
+       ignore (run_fixture path ~on_stream_event:(function
+         | Runtime_codex_app_server.Turn_started _ ->
+           started := true;
+           raise (Eio.Cancel.Cancelled reason)
+         | Turn_finished _ -> finished := true
+         | _ -> ()));
+       fail "stream observer cancellation was converted or swallowed"
+     with Eio.Cancel.Cancelled observed ->
+       check bool "the original cancellation reason propagates" true (observed == reason));
+    check bool "cancellation originated in the stream observer" true !started;
+    check bool "cancellation never emits a completed turn" false !finished)
 ;;
 
 let run_undelivered_fixture ?(queued_effect = false) ?(provider_error = false) ?(retry_progress = false) ~eof ~retain () =
@@ -1237,6 +1306,7 @@ let test_scheduling_handoff_preserves_active_protocol ?(terminal_second = false)
 let test_scheduling_handoff_wakes_idle_before_first_tool () =
   let capture_path = Filename.temp_file "codex-idle-handoff-" ".jsonl" in
   let progress, signal_progress = Eio.Promise.create () in
+  let progress_signaled = ref false in
   Fun.protect ~finally:(fun () -> Sys.remove capture_path) (fun () ->
     with_fixture [init_result; account_chatgpt; thread_result; turn_result;
       agent_message_delta; item_completed; turn_completed] (fun path ->
@@ -1252,7 +1322,8 @@ let test_scheduling_handoff_wakes_idle_before_first_tool () =
         |> String.concat "\n" in
       Out_channel.with_open_bin path (fun out -> output_string out instrumented);
       let on_stream_event = function
-        | Runtime_codex_app_server.Text_delta _ ->
+        | Runtime_codex_app_server.Text_delta _ when not !progress_signaled ->
+          progress_signaled := true;
           Eio.Promise.resolve signal_progress ()
         | _ -> ()
       in
@@ -10085,6 +10156,12 @@ let () =
             test_outer_protocol_error_survives_tool_drain
         ; test_case "serial tool fences concurrent calls" `Quick
             test_serial_tool_fences_concurrent_calls
+        ; test_case "fixture exposes isolated stream observer failure" `Quick
+            test_fixture_exposes_stream_observer_failure
+        ; test_case "fixture preserves stream observer interrupt" `Quick
+            test_fixture_preserves_stream_observer_interrupt
+        ; test_case "fixture preserves stream observer cancellation" `Quick
+            test_fixture_preserves_stream_observer_cancellation
         ; test_case "completed vendor turn retains pending tool receipt" `Quick
             (test_ended_turn_retains_tool_result ~eof:false)
         ; test_case "provider terminal drains tools and retry progress stays live" `Quick

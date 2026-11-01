@@ -1,3 +1,4 @@
+import { ArtifactDraftSessionProvider, useArtifactDraftSession, type ArtifactDraftSession } from './artifact-draft-session'
 import { artifactPublicationOutcomes } from '../../lib/artifact-publication-outcomes'
 import { html } from 'htm/preact'
 import type { Signal } from '@preact/signals'
@@ -5,7 +6,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { ApiRequestError, apiRequestErrorFromResponse, clearStoredToken, get, getPublic, getWithResponse, post, setStoredToken } from '../../api/core'
 import type { ExecutionWorkspaceAuthority } from '../../store'
-import { route } from '../../router'
+import { route, navigate } from '../../router'
 import { ArtifactsSurface } from './artifacts-surface'
 
 const workspace = vi.hoisted(() => ({ current: null as unknown as Signal<ExecutionWorkspaceAuthority | null> }))
@@ -29,6 +30,10 @@ const original = { artifact, content: '# 원고\r\n한글 😀', revisions: [art
 const list = '/api/v1/published-artifacts'
 const health = { paths: { effective_base_path: '/workspace-a', effective_masc_root: '/runtime-a' } }
 const workspaceHeaders = { 'x-masc-expected-base-path': '/workspace-a', 'x-masc-expected-masc-root': '/runtime-a' }
+function DraftSessionProbe({ observe }: { observe: (session: ArtifactDraftSession) => void }) {
+  observe(useArtifactDraftSession())
+  return null
+}
 function deferred<T = unknown>() {
   let resolve!: (value: T) => void
   const promise = new Promise<T>(ok => { resolve = ok })
@@ -39,7 +44,7 @@ function publication(title: string, revision = 3) {
 }
 async function edit(waitForWorkspace = true) {
   route.value = { tab: 'workspace', params: { section: 'artifacts', artifact: id }, postId: null }
-  render(html`<${ArtifactsSurface} />`)
+  render(html`<${ArtifactDraftSessionProvider}><${ArtifactsSurface} /><//>`)
   const reader = within(await screen.findByRole('dialog'))
   fireEvent.click(await reader.findByRole('button', { name: '문서 편집' }))
   if (waitForWorkspace) await waitFor(() => expect((reader.getByRole('button', { name: '새 버전 저장' }) as HTMLButtonElement).disabled).toBe(false))
@@ -63,6 +68,128 @@ beforeEach(() => {
   })
 })
 afterEach(() => { cleanup(); clearStoredToken(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
+
+it.each(['same', 'replacement'] as const)('retains unsent file bytes through a section change under %s authority', async authority => {
+  const observed = { current: null as ArtifactDraftSession | null }
+  const originAuthority = workspace.current.peek()
+  function RoutedSurface() {
+    return route.value.params.section === 'artifacts' ? html`<${ArtifactsSurface} />` : null
+  }
+  render(html`<${ArtifactDraftSessionProvider}><${DraftSessionProbe} observe=${(session: ArtifactDraftSession) => { observed.current = session }} /><${RoutedSurface} /><//>`)
+  fireEvent.click(screen.getByRole('button', { name: '파일 가져오기' }))
+  const imported = '\uFEFF<!doctype html>\r\n<main>가져온 원고 😀</main>'
+  const file = new File([imported], 'report.HTML', { type: 'text/html' })
+  Object.defineProperty(file, 'arrayBuffer', { value: async () => new TextEncoder().encode(imported).buffer })
+  fireEvent.change(screen.getByLabelText('가져올 문서 파일'), { target: { files: [file] } })
+  const body = await screen.findByLabelText('문서 본문')
+  const edited = '\uFEFF<!doctype html>\n<main>아직 보내지 않은 수정 😀</main>'
+  fireEvent.input(body, { target: { value: edited } })
+  await waitFor(() => expect(observed.current?.drafts).toHaveLength(1))
+  const originOwner = observed.current!.drafts[0]!.owner
+  const blobs: Blob[] = []
+  vi.spyOn(URL, 'createObjectURL').mockImplementation(blob => { blobs.push(blob as Blob); return 'blob:retained-file' })
+  vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
+  vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+  await act(() => navigate('workspace', { section: 'repositories' }))
+  expect(navigate).toHaveBeenLastCalledWith('workspace', { section: 'repositories' })
+  if (authority === 'replacement') await act(() => {
+    setStoredToken('credential-b')
+    workspace.current.value = { epoch: 'replacement', workspaceRoot: '/workspace-b', connectionGeneration: 2 }
+  })
+  await act(() => navigate('workspace', { section: 'artifacts' }))
+  await screen.findByRole('button', { name: '파일 가져오기' })
+  await waitFor(() => expect(observed.current!.drafts[0]?.detached).toBe(true))
+  const retained = observed.current!.drafts[0]!
+  expect(retained.owner).toBe(originOwner)
+  expect(retained.owner.authority).toBe(originAuthority)
+  expect(retained.snapshot.base).toBeUndefined()
+  expect(retained.snapshot.value).toMatchObject({ title: 'report.HTML', format: 'html', content: edited })
+  screen.queryAllByRole('button', { name: '원고 다운로드' }).forEach(button => fireEvent.click(button))
+  expect(post).not.toHaveBeenCalled()
+  const downloaded = await Promise.all(blobs.map(async blob => Array.from(new Uint8Array(await blob.arrayBuffer()))))
+  expect(downloaded).toEqual([Array.from(new TextEncoder().encode(edited))])
+  console.info('artifact-file-session', JSON.stringify({ authority, ownerRoot: retained.owner.authority?.workspaceRoot,
+    originalOwner: retained.owner === originOwner, detached: retained.detached, downloaded, publicationRequests: vi.mocked(post).mock.calls.length }))
+})
+
+it('retains a released reader manuscript under its same owner when selection changes', async () => {
+  const observed = { current: null as ArtifactDraftSession | null }
+  route.value = { tab: 'workspace', params: { section: 'artifacts', artifact: id }, postId: null }
+  render(html`<${ArtifactDraftSessionProvider}><${DraftSessionProbe} observe=${(session: ArtifactDraftSession) => { observed.current = session }} /><${ArtifactsSurface} /><//>`)
+  const reader = within(await screen.findByRole('dialog'))
+  fireEvent.click(await reader.findByRole('button', { name: '문서 편집' }))
+  const content = '# unsent reader source 😀\n'
+  fireEvent.input(reader.getByLabelText('문서 본문'), { target: { value: content } })
+  await waitFor(() => expect(observed.current?.drafts).toHaveLength(1))
+  const before = observed.current!.drafts[0]!
+  const secondId = `artifact-${'b'.repeat(32)}`
+  const fallback = vi.mocked(get).getMockImplementation()!
+  const second = { ...artifact, id: secondId, revision: 1 }
+  vi.mocked(get).mockImplementation((path, options) => path === `${list}/${secondId}`
+    ? Promise.resolve({ artifact: second, content: 'another document', revisions: [second] }) : fallback(path, options))
+  await act(() => navigate('workspace', { section: 'artifacts', artifact: secondId }))
+  await waitFor(() => expect(observed.current!.drafts[0]?.detached).toBe(true))
+  const retained = observed.current!.drafts[0]!
+  expect(retained.owner).toBe(before.owner)
+  expect(retained.snapshot.identity).toBe(before.snapshot.identity)
+  expect(retained.snapshot.base).toEqual({ id, revision: 2 })
+  expect(retained.snapshot.value.content).toBe(content)
+  const blobs: Blob[] = []
+  vi.spyOn(URL, 'createObjectURL').mockImplementation(blob => { blobs.push(blob as Blob); return 'blob:released-reader' })
+  vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
+  vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+  fireEvent.click(screen.getByRole('button', { name: '원고 다운로드' }))
+  expect(Array.from(new Uint8Array(await blobs[0]!.arrayBuffer()))).toEqual(Array.from(new TextEncoder().encode(content)))
+  expect(post).not.toHaveBeenCalled()
+  console.info('artifact-reader-release', JSON.stringify({ sameOwner: retained.owner === before.owner,
+    base: retained.snapshot.base, content: retained.snapshot.value.content, detached: retained.detached, publicationRequests: vi.mocked(post).mock.calls.length }))
+})
+
+it.each([
+  { editor: 'reader', outcome: 'discard' }, { editor: 'reader', outcome: 'save' },
+  { editor: 'import', outcome: 'discard' }, { editor: 'import', outcome: 'save' },
+] as const)('never revives a $editor draft released after confirmed $outcome', async ({ editor, outcome }) => {
+  const observed = { current: null as ArtifactDraftSession | null }
+  route.value = { tab: 'workspace', params: editor === 'reader' ? { section: 'artifacts', artifact: id } : { section: 'artifacts' }, postId: null }
+  render(html`<${ArtifactDraftSessionProvider}><${DraftSessionProbe} observe=${(session: ArtifactDraftSession) => { observed.current = session }} /><${ArtifactsSurface} /><//>`)
+  if (editor === 'reader') {
+    const reader = within(await screen.findByRole('dialog'))
+    fireEvent.click(await reader.findByRole('button', { name: '문서 편집' }))
+  } else {
+    fireEvent.click(screen.getByRole('button', { name: '파일 가져오기' }))
+    const file = new File(['imported source'], 'unsent.md')
+    Object.defineProperty(file, 'arrayBuffer', { value: async () => new TextEncoder().encode('imported source').buffer })
+    fireEvent.change(screen.getByLabelText('가져올 문서 파일'), { target: { files: [file] } })
+  }
+  const content = '# finished reader source 😀\n'
+  fireEvent.input(await screen.findByLabelText('문서 본문'), { target: { value: content } })
+  await waitFor(() => expect(observed.current?.drafts).toHaveLength(1))
+  if (outcome === 'discard') {
+    vi.stubGlobal('confirm', vi.fn(() => true))
+    fireEvent.click(screen.getByRole('button', { name: '편집 닫기' }))
+  } else {
+    const value = observed.current!.drafts[0]!.snapshot.value
+    const saved = { ...artifact, title: value.title, summary: value.summary, format: value.format,
+      id: editor === 'reader' ? id : `artifact-${'c'.repeat(32)}`, revision: editor === 'reader' ? 3 : 1,
+      task_id: value.task_id ?? null, goal_id: value.goal_id ?? null }
+    const receipt = { schema: 'masc.published_artifact.v1', artifact: saved, revision_url: '/dashboard' }
+    vi.mocked(post).mockResolvedValue(receipt)
+    const fallback = vi.mocked(get).getMockImplementation()!
+    vi.mocked(get).mockImplementation((path, options) => path === `${list}/${saved.id}?revision=${saved.revision}`
+      ? Promise.resolve({ artifact: receipt.artifact, content, revisions: editor === 'reader' ? [receipt.artifact, artifact] : [receipt.artifact] }) : fallback(path, options))
+    const save = screen.getByRole('button', { name: editor === 'reader' ? '새 버전 저장' : '아티팩트 등록' })
+    await waitFor(() => expect((save as HTMLButtonElement).disabled).toBe(false))
+    fireEvent.click(save)
+    await waitFor(() => expect(post).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(navigate).toHaveBeenLastCalledWith('workspace', { section: 'artifacts', artifact: saved.id, revision: String(saved.revision) }))
+  }
+  await waitFor(() => expect(observed.current?.drafts).toHaveLength(0))
+  await act(() => setStoredToken('credential-b'))
+  expect(observed.current!.drafts).toHaveLength(0)
+  if (outcome === 'discard') expect(post).not.toHaveBeenCalled()
+  console.info('artifact-draft-settled', JSON.stringify({ editor, outcome, remaining: observed.current!.drafts.length,
+    publicationRequests: vi.mocked(post).mock.calls.length, navigation: vi.mocked(navigate).mock.calls.at(-1) }))
+})
 
 it('saves the exact edited source against its captured revision, preserving task and goal links, then reads that revision', async () => {
   const reader = await edit()
@@ -127,7 +254,7 @@ it.each([
     saveName = '새 버전 저장'
     fireEvent.input(editor.getByLabelText('문서 본문'), { target: { value: source } })
   } else {
-    render(html`<${ArtifactsSurface} />`)
+    render(html`<${ArtifactDraftSessionProvider}><${ArtifactsSurface} /><//>`)
     fireEvent.click(screen.getByRole('button', { name: '파일 가져오기' }))
     const file = new File([source], 'report.md')
     Object.defineProperty(file, 'arrayBuffer', { value: async () => new TextEncoder().encode(source).buffer })
@@ -188,7 +315,7 @@ it('keeps a document read-only when the server reports a different workspace', a
     ? Promise.resolve({ paths: { effective_base_path: '/workspace-b', effective_masc_root: '/runtime-b' } })
     : fallback(path, options))
   route.value = { tab: 'workspace', params: { section: 'artifacts', artifact: id }, postId: null }
-  render(html`<${ArtifactsSurface} />`)
+  render(html`<${ArtifactDraftSessionProvider}><${ArtifactsSurface} /><//>`)
   const reader = within(await screen.findByRole('dialog'))
   expect(reader.getByText('작업 공간 미확인 · 읽기 전용')).toBeTruthy()
   expect(reader.queryByRole('button', { name: '문서 편집' })).toBeNull()
@@ -201,7 +328,7 @@ it.each(['credential', 'workspace'] as const)('does not send when %s authority c
   vi.mocked(get).mockImplementation((path, options) => path === '/health?full=1'
     ? pending.promise : fallback(path, options))
   route.value = { tab: 'workspace', params: { section: 'artifacts', artifact: id }, postId: null }
-  render(html`<${ArtifactsSurface} />`)
+  render(html`<${ArtifactDraftSessionProvider}><${ArtifactsSurface} /><//>`)
   const reader = within(await screen.findByRole('dialog'))
   expect(reader.queryByRole('button', { name: '문서 편집' })).toBeNull()
   await act(async () => {
@@ -218,7 +345,7 @@ it('does not offer editing after a failed initial workspace capture', async () =
   vi.mocked(get).mockImplementation((path, options) => path === '/health?full=1'
     ? Promise.reject(new Error('workspace identity unavailable')) : fallback(path, options))
   route.value = { tab: 'workspace', params: { section: 'artifacts', artifact: id }, postId: null }
-  render(html`<${ArtifactsSurface} />`)
+  render(html`<${ArtifactDraftSessionProvider}><${ArtifactsSurface} /><//>`)
   const reader = within(await screen.findByRole('dialog'))
   expect(reader.getByText('작업 공간 미확인 · 읽기 전용')).toBeTruthy()
   expect(reader.queryByRole('button', { name: '문서 편집' })).toBeNull()
@@ -228,7 +355,7 @@ it('does not offer editing after a failed initial workspace capture', async () =
 
 it('retains the draft origin if the server switches MASC roots under the same base before save', async () => {
   route.value = { tab: 'workspace', params: { section: 'artifacts', artifact: id }, postId: null }
-  render(html`<${ArtifactsSurface} />`)
+  render(html`<${ArtifactDraftSessionProvider}><${ArtifactsSurface} /><//>`)
   const reader = within(await screen.findByRole('dialog'))
   const editButton = await reader.findByRole('button', { name: '문서 편집' })
   const fallback = vi.mocked(get).getMockImplementation()!
@@ -322,7 +449,7 @@ it('keeps an open draft when the route leaves and returns before the next render
 })
 
 it('reads an explicitly selected UTF-8 HTML file without running it or publishing before confirmation', async () => {
-  render(html`<${ArtifactsSurface} />`)
+  render(html`<${ArtifactDraftSessionProvider}><${ArtifactsSurface} /><//>`)
   fireEvent.click(screen.getByRole('button', { name: '파일 가져오기' }))
   const content = '\uFEFF<!doctype html>\r\n<script>window.shouldNotRun = true</script><p>한글 😀</p>'
   const file = new File([content], 'report.html', { type: 'text/html' })
@@ -337,7 +464,7 @@ it('reads an explicitly selected UTF-8 HTML file without running it or publishin
 })
 
 it('refuses invalid UTF-8 instead of replacing source bytes silently', async () => {
-  render(html`<${ArtifactsSurface} />`)
+  render(html`<${ArtifactDraftSessionProvider}><${ArtifactsSurface} /><//>`)
   fireEvent.click(screen.getByRole('button', { name: '파일 가져오기' }))
   const file = new File([], 'report.md')
   Object.defineProperty(file, 'arrayBuffer', { value: async () => new Uint8Array([0xff, 0xff]).buffer })
@@ -383,7 +510,7 @@ it.each(['credential', 'workspace', 'withdrawal', 'same-root'] as const)('recove
 
 
 it('recovers imported source before allowing another import after an authority change', async () => {
-  render(html`<${ArtifactsSurface} />`)
+  render(html`<${ArtifactDraftSessionProvider}><${ArtifactsSurface} /><//>`)
   const importFile = async (name: string, content: string) => {
     fireEvent.click(screen.getByRole('button', { name: '파일 가져오기' }))
     const file = new File([content], name)

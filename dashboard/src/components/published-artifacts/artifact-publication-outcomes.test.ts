@@ -1,3 +1,4 @@
+import { ArtifactDraftSessionProvider } from './artifact-draft-session'
 import { html } from 'htm/preact'
 import type { Signal } from '@preact/signals'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/preact'
@@ -69,7 +70,7 @@ beforeEach(() => {
 afterEach(() => { cleanup(); clearStoredToken(); artifactPublicationOutcomes.clear(); vi.unstubAllGlobals() })
 
 async function publishWithCheckpointPending() {
-  render(html`<${ArtifactsSurface} />`)
+  render(html`<${ArtifactDraftSessionProvider}><${ArtifactsSurface} /><//>`)
   const reader = within(await screen.findByRole('dialog'))
   fireEvent.click(await reader.findByRole('button', { name: '공동 편집' }))
   fireEvent.click(await reader.findByRole('button', { name: '완료된 게시 열기' }))
@@ -98,7 +99,7 @@ it('retains an unconfirmed checkpoint after the artifact surface unmounts', asyn
   await publishWithCheckpointPending()
   cleanup()
   await act(() => shared.finish!('unconfirmed'))
-  render(html`<${ArtifactsSurface} />`)
+  render(html`<${ArtifactDraftSessionProvider}><${ArtifactsSurface} /><//>`)
   const reader = within(await screen.findByRole('dialog'))
   const result = await reader.findByRole('region', { name: '문서 저장 요청 결과' })
   expect(result.textContent).toContain('갱신 결과 미확인')
@@ -107,7 +108,7 @@ it('retains an unconfirmed checkpoint after the artifact surface unmounts', asyn
 })
 
 it.each(['workspace', 'digest'] as const)('does not open a different publication after a %s change', async change => {
-  render(html`<${ArtifactsSurface} />`)
+  render(html`<${ArtifactDraftSessionProvider}><${ArtifactsSurface} /><//>`)
   let reader = within(await screen.findByRole('dialog'))
   fireEvent.click(await reader.findByRole('button', { name: '공동 편집' }))
   const prior = vi.mocked(getWithResponse).getMockImplementation()!

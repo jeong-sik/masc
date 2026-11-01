@@ -11,6 +11,7 @@
 // previous shell — only the rendered DOM changed.
 
 import { html } from 'htm/preact'
+import { ArtifactDraftSessionProvider } from './components/published-artifacts/artifact-draft-session'
 import { useEffect } from 'preact/hooks'
 import { lazy, Suspense } from 'preact/compat'
 import { signal } from '@preact/signals'
@@ -306,6 +307,7 @@ export function App() {
   const cols = isMobile || compactChromeMode ? 'minmax(0,1fr)' : '58px minmax(0,1fr)'
 
   return html`
+    <${ArtifactDraftSessionProvider}>
     <div
       class="v2-app"
       data-surface=${currentTab}
@@ -393,6 +395,7 @@ export function App() {
         `
         : null}
     </div>
+    <//>
   `
 }
 

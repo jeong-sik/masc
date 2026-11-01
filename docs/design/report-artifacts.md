@@ -65,15 +65,17 @@ same base. A failed identity read preserves the draft but blocks saving until th
 editor is reopened; it never automatically recaptures or publishes the draft.
 
 Credential or workspace-authority retirement closes the old editor but retains
-its latest source and metadata under that original owner in the artifact surface.
+its latest source and metadata under that original owner for the app session.
 The inert **이전 접근 상태의 원고** section offers source download and explicit,
 confirmed discard; it cannot publish or reopen the draft with replacement
 credentials. Imported source is retained before its first edit too. If another
 reader is open, close it to access that section. Late publication receipts remain
 separate and do not erase a retired draft. Only confirmed readback or an explicit
-discard clears the active draft. This retention is in memory while the artifact
-surface stays mounted: download before navigating away, reloading, or closing
-the browser. It is not durable storage or a shared draft.
+discard clears the active draft. Leaving a section or switching readers releases
+the editor but preserves its latest copy for inert download or explicit discard
+when the artifact surface is shown again. The app owns this single in-memory
+collection across routes; download before reloading or closing the browser.
+It is not durable storage or a shared draft.
 
 Saving uses the existing publication API once and then reads the returned fixed
 revision to compare its body and metadata with the submitted draft. The response

@@ -1,3 +1,4 @@
+import { ArtifactDraftSessionProvider } from './artifact-draft-session'
 import { artifactPublicationOutcomes } from '../../lib/artifact-publication-outcomes'
 import { html } from 'htm/preact'
 import { render, fireEvent, cleanup, waitFor, within, act } from '@testing-library/preact'
@@ -92,7 +93,7 @@ describe('artifact library user flow', () => {
       return { check }
     })
     route.value = { tab: 'workspace', params: { section: 'artifacts', artifact: firstId }, postId: null }
-    const view = render(html`<${ArtifactsSurface} />`)
+    const view = render(html`<${ArtifactDraftSessionProvider}><${ArtifactsSurface} /><//>`)
     const reader = within(await view.findByRole('dialog'))
     const unchecked = await reader.findByRole('button', { name: '○ 미확인' })
     expect(await view.findByText('오늘 미확인 1개')).toBeTruthy()
@@ -116,7 +117,7 @@ describe('artifact library user flow', () => {
     const fallback = vi.mocked(get).getMockImplementation()!
     vi.mocked(get).mockImplementation(async (path, options) => path === '/api/v1/published-artifact-checks'
       ? { checks: [], diagnostics: [{ file: 'damaged-check.json', error: 'invalid JSON' }] } : fallback(path, options))
-    const view = render(html`<${ArtifactsSurface} />`)
+    const view = render(html`<${ArtifactDraftSessionProvider}><${ArtifactsSurface} /><//>`)
     expect(await view.findByText(/damaged-check.json/)).toBeTruthy()
     const controls = view.getAllByRole('button', { name: '확인 상태 알 수 없음' }) as HTMLButtonElement[]
     expect(controls.every(button => button.disabled)).toBe(true)
@@ -129,7 +130,7 @@ describe('artifact library user flow', () => {
     let finish: ((value: unknown) => void) | undefined
     vi.mocked(post).mockImplementation(() => new Promise(resolve => { finish = resolve }))
     route.value = { tab: 'workspace', params: { section: 'artifacts', artifact: firstId }, postId: null }
-    const view = render(html`<${ArtifactsSurface} />`)
+    const view = render(html`<${ArtifactDraftSessionProvider}><${ArtifactsSurface} /><//>`)
     const reader = within(await view.findByRole('dialog'))
     fireEvent.click(await reader.findByRole('button', { name: '○ 미확인' }))
     await waitFor(() => expect(finish).toBeDefined())
@@ -160,7 +161,7 @@ describe('artifact library user flow', () => {
       throw new Error('confirmation conflict')
     })
     route.value = { tab: 'workspace', params: { section: 'artifacts', artifact: firstId }, postId: null }
-    const view = render(html`<${ArtifactsSurface} />`)
+    const view = render(html`<${ArtifactDraftSessionProvider}><${ArtifactsSurface} /><//>`)
     const reader = within(await view.findByRole('dialog'))
     fireEvent.click(await reader.findByRole('button', { name: '○ 미확인' }))
     await waitFor(() => expect(within(view.getByRole('dialog')).getByRole('button', { name: '✓ 확인함' })).toBeTruthy())
@@ -175,7 +176,7 @@ describe('artifact library user flow', () => {
       if (path === '/api/v1/published-artifact-checks' && unavailable) throw new Error('checks unavailable')
       return fallback(path, options)
     })
-    const view = render(html`<${ArtifactsSurface} />`)
+    const view = render(html`<${ArtifactDraftSessionProvider}><${ArtifactsSurface} /><//>`)
     const filter = await view.findByRole('button', { name: '미확인만' }) as HTMLButtonElement
     await waitFor(() => expect(filter.disabled).toBe(false))
     fireEvent.click(filter)
@@ -193,7 +194,7 @@ describe('artifact library user flow', () => {
   })
 
   it('lists, searches and opens a stored report, preserving source and revision links', async () => {
-    const view = render(html`<${ArtifactsSurface} />`)
+    const view = render(html`<${ArtifactDraftSessionProvider}><${ArtifactsSurface} /><//>`)
     fireEvent.click(await view.findByRole('button', { name: /주간 조사 보고서/ }))
     expect(await view.findByRole('heading', { name: first.title })).toBeTruthy()
     fireEvent.click(view.getByText('보고서 정보'))
@@ -215,7 +216,7 @@ describe('artifact library user flow', () => {
 
   it('reopens a direct version link without needing the catalog selection', async () => {
     route.value = { tab: 'workspace', params: { section: 'artifacts', artifact: firstId, revision: '1' }, postId: null }
-    const view = render(html`<${ArtifactsSurface} />`)
+    const view = render(html`<${ArtifactDraftSessionProvider}><${ArtifactsSurface} /><//>`)
     expect(await view.findByRole('heading', { name: '조사 초안' })).toBeTruthy()
     expect((view.getByLabelText('문서 버전') as HTMLSelectElement).value).toBe('1')
     fireEvent(view.getByRole('dialog'), new Event('cancel', { cancelable: true }))
@@ -225,7 +226,7 @@ describe('artifact library user flow', () => {
 
   it('opens HTML in an opaque sandbox with a restrictive resource policy', async () => {
     route.value = { tab: 'workspace', params: { section: 'artifacts', artifact: secondId }, postId: null }
-    const view = render(html`<${ArtifactsSurface} />`)
+    const view = render(html`<${ArtifactDraftSessionProvider}><${ArtifactsSurface} /><//>`)
     await waitFor(() => expect(view.getByTitle(second.title).getAttribute('sandbox')).toBe('allow-scripts'))
     const frame = view.getByTitle(second.title)
     expect(frame.getAttribute('srcdoc')).toContain("connect-src 'none'")
@@ -234,7 +235,7 @@ describe('artifact library user flow', () => {
   })
 
   it('reads only an explicitly previewed HTML revision and keeps its preview inert', async () => {
-    const view = render(html`<${ArtifactsSurface} />`)
+    const view = render(html`<${ArtifactDraftSessionProvider}><${ArtifactsSurface} /><//>`)
     fireEvent.click(await view.findByRole('button', { name: 'HTML 미리보기' }))
     const frame = await view.findByTitle(`${second.title} 빠른 미리보기`)
     expect(vi.mocked(get).mock.calls.some(([path]) => path === `/api/v1/published-artifacts/${secondId}?revision=2`)).toBe(true)
@@ -253,7 +254,7 @@ describe('artifact library user flow', () => {
       ? { checks: [], diagnostics: [] } : path === '/api/v1/published-artifacts'
         ? { artifacts: [first, second], diagnostics: [] }
         : new Promise(resolve => { finish = resolve }))
-    const view = render(html`<${ArtifactsSurface} />`)
+    const view = render(html`<${ArtifactDraftSessionProvider}><${ArtifactsSurface} /><//>`)
     fireEvent.click(await view.findByRole('button', { name: 'HTML 미리보기' }))
     await waitFor(() => expect(finish).toBeDefined())
     const options = vi.mocked(get).mock.calls.find(([path]) => path.includes(secondId))?.[1]
@@ -265,7 +266,7 @@ describe('artifact library user flow', () => {
 
   it('shows copy success inside the reader and copies the selected version link', async () => {
     route.value = { tab: 'workspace', params: { section: 'artifacts', artifact: firstId, revision: '1' }, postId: null }
-    const view = render(html`<${ArtifactsSurface} />`)
+    const view = render(html`<${ArtifactDraftSessionProvider}><${ArtifactsSurface} /><//>`)
     const dialog = within(await view.findByRole('dialog'))
     fireEvent.click(dialog.getByRole('button', { name: '링크 복사' }))
     await waitFor(() => expect(dialog.getByRole('status').textContent)
@@ -277,7 +278,7 @@ describe('artifact library user flow', () => {
 
   it('pins the version currently shown when copying from the latest route', async () => {
     route.value = { tab: 'workspace', params: { section: 'artifacts', artifact: firstId }, postId: null }
-    const view = render(html`<${ArtifactsSurface} />`)
+    const view = render(html`<${ArtifactDraftSessionProvider}><${ArtifactsSurface} /><//>`)
     const dialog = within(await view.findByRole('dialog'))
     fireEvent.click(dialog.getByRole('button', { name: '링크 복사' }))
     await waitFor(() => expect(copyToClipboard).toHaveBeenCalledWith(
@@ -289,7 +290,7 @@ describe('artifact library user flow', () => {
   it('shows clipboard failure inside the reader', async () => {
     vi.mocked(copyToClipboard).mockResolvedValue(false)
     route.value = { tab: 'workspace', params: { section: 'artifacts', artifact: firstId }, postId: null }
-    const view = render(html`<${ArtifactsSurface} />`)
+    const view = render(html`<${ArtifactDraftSessionProvider}><${ArtifactsSurface} /><//>`)
     const dialog = within(await view.findByRole('dialog'))
     fireEvent.click(dialog.getByRole('button', { name: '링크 복사' }))
     await waitFor(() => expect(dialog.getByRole('status').textContent).toBe('링크를 복사하지 못했습니다.'))
@@ -298,7 +299,7 @@ describe('artifact library user flow', () => {
   it('keeps loading, empty and inaccessible catalogs distinct', async () => {
     let resolve: ((value: unknown) => void) | undefined
     vi.mocked(get).mockImplementationOnce(() => new Promise(r => { resolve = r }))
-    const view = render(html`<${ArtifactsSurface} />`)
+    const view = render(html`<${ArtifactDraftSessionProvider}><${ArtifactsSurface} /><//>`)
     expect(view.getByRole('status').textContent).toContain('목록을 불러오고')
     resolve?.({ artifacts: [], diagnostics: [] })
     expect(await view.findByText(/아직 게시된 아티팩트가 없습니다/)).toBeTruthy()
@@ -315,7 +316,7 @@ describe('artifact library user flow', () => {
       if (path.includes(firstId)) return new Promise(r => { resolve = r })
       return { artifact: second, content: '<h1>second</h1>', revisions: [second] }
     })
-    const view = render(html`<${ArtifactsSurface} />`)
+    const view = render(html`<${ArtifactDraftSessionProvider}><${ArtifactsSurface} /><//>`)
     fireEvent.click(await view.findByRole('button', { name: /주간 조사 보고서/ }))
     await waitFor(() => expect(resolve).toBeDefined())
     fireEvent.click(view.getByRole('button', { name: /동작하는 차트/ }))
@@ -329,7 +330,7 @@ describe('artifact library user flow', () => {
     vi.mocked(get).mockImplementation(async path => path === '/api/v1/published-artifact-checks'
       ? { checks: [], diagnostics: [] } : path === '/api/v1/published-artifacts'
         ? { artifacts: [first], diagnostics: [{ id: 'unreadable', error: 'invalid metadata' }] } : document)
-    const view = render(html`<${ArtifactsSurface} />`)
+    const view = render(html`<${ArtifactDraftSessionProvider}><${ArtifactsSurface} /><//>`)
     expect(await view.findByText(/요청한 문서와 저장된 문서의 식별자가 다릅니다/)).toBeTruthy()
     expect(view.getByText(/일부 문서를 읽지 못했습니다/).textContent).toContain('invalid metadata')
   })

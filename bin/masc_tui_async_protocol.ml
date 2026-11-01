@@ -526,6 +526,8 @@ type async_msg =
           converted to PNG off the render loop. [request] is the exact pending
           image owner captured before dispatch; a superseded or dismissed
           request cannot paint, notify another pane, or open its fallback.
+          An explicit remote URL belongs to its workspace, independently of
+          unrelated peer resource readings.
           [result] is the PNG bytes
           ready to draw, or why they could not be produced. [title] is what
           the screen shows: [v] indents a display title, /image passes the URL

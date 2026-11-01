@@ -11624,8 +11624,8 @@ let launch_image_render state ~mailbox ~notice ~title ~caption ~page_url image_u
     let view = state.view in
     let request = {sir_generation=state.image_request_generation; sir_view=view;
       sir_keeper=(if view = Resources then None else state.msg_target_keeper_name);
-      sir_name=title; sir_owner=Peer_image_read state.workspace_read_authority;
-      sir_resource=(if view = Resources then state.resource_content else None);
+      sir_name=title; sir_owner=Remote_url_image_read state.workspace_authority;
+      sir_resource=None;
       sir_purpose=Open_image} in
     state.sent_image_read <- Some request;
     notice ~kind:Notice_reply (Printf.sprintf "Loading image: %s" image_url);
@@ -11834,7 +11834,8 @@ let prepare_inspected_frame state ~mailbox =
          let raster = {Masc_tui_pele.width=window.columns*cw;
            height=window.rows*ch;crop=Some crop} in
          let deliver = match pending.sir_owner with
-           | Local_file_image_read _ | Draft_image_read _ -> enqueue_async
+           | Local_file_image_read _ | Remote_url_image_read _
+           | Draft_image_read _ -> enqueue_async
            | Peer_image_read _ -> workspace_enqueue state in
          draw_inspected_image ~fresh:false state inspected;
          Eio.Fiber.fork_daemon ~sw (fun () ->

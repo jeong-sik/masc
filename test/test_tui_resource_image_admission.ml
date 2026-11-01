@@ -149,6 +149,22 @@ let test_local_sources_on_resources () =
   state.resource_content_error <- None;
   check_owners ()
 
+let test_remote_url_resource_independence () =
+  let state = state () in
+  state.view <- Types.Resources;
+  let remote = pending state (Types.Remote_url_image_read state.workspace_authority) in
+  check bool "URL needs no peer resource" true
+    (Types.image_reading_is_current state remote);
+  state.resource_content <- Some (uri, parts ());
+  state.resource_pending_key <- Some uri;
+  state.resource_content_error <- Some (uri, "unrelated read failed");
+  state.workspace_read_authority <- ref ();
+  check bool "URL keeps its workspace through peer resource refresh" true
+    (Types.image_reading_is_current state remote);
+  state.workspace_authority <- Types.Workspace_authority 1;
+  check bool "URL cannot cross workspaces" false
+    (Types.image_reading_is_current state remote)
+
 let test_suspended_diagram_preparation () =
   let state = state () in
   let original = parts () in
@@ -180,4 +196,5 @@ let () = run "resource image admission" ["stored source",[
   test_case "local draft and peer withdrawal" `Quick test_local_peer_loss;
   test_case "local draft replacement and workspace" `Quick test_local_draft_replacement;
   test_case "peer resource owner" `Quick test_peer_resource_owner;
+  test_case "remote URL workspace owner" `Quick test_remote_url_resource_independence;
   test_case "local sources on Resources" `Quick test_local_sources_on_resources]]

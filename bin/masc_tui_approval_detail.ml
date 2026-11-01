@@ -9,6 +9,74 @@ type line =
    into the width every continuation line gets. *)
 let value_indent = "  "
 
+(* Unlike conversation prose, an approval can contain code whose spaces are
+   part of the request. Keep them, including those at a wrap boundary, and
+   prefer to move a whole word to the next row when it will fit there. *)
+let wrap_value_line ~max_cells text =
+  let max_cells = max 1 max_cells in
+  let current = Buffer.create 128 in
+  let current_cells = ref 0 in
+  let has_word = ref false in
+  let rows = ref [] in
+  let flush () =
+    if Buffer.length current > 0 then begin
+      rows := Buffer.contents current :: !rows;
+      Buffer.clear current;
+      current_cells := 0;
+      has_word := false
+    end
+  in
+  let add_space () =
+    if !current_cells >= max_cells then flush ();
+    Buffer.add_char current ' ';
+    incr current_cells
+  in
+  let add_word word =
+    if not (String.equal word "") then begin
+      let cells = Message_layout.display_width word in
+      if !current_cells + cells <= max_cells then begin
+        Buffer.add_string current word;
+        current_cells := !current_cells + cells;
+        has_word := true
+      end else begin
+        if !has_word then flush ();
+        (* If a row holds only indentation, fill the rest of it before
+           continuing the word. Otherwise the indentation would be drawn on
+           a row of its own and detached from the source it belongs to. *)
+        let prefix, chunks =
+          Message_layout.split_cells_after_prefix
+            ~prefix_cells:(max_cells - !current_cells) ~max_cells word
+        in
+        if not (String.equal prefix "") then begin
+          Buffer.add_string current prefix;
+          has_word := true
+        end;
+        (match chunks with
+         | [] ->
+           current_cells := !current_cells + Message_layout.display_width prefix
+         | _ ->
+           flush ();
+           let rec add_chunks = function
+             | [] -> ()
+             | [ last ] ->
+               Buffer.add_string current last;
+               current_cells := Message_layout.display_width last;
+               has_word := true
+             | chunk :: rest ->
+               rows := chunk :: !rows;
+               add_chunks rest
+           in
+           add_chunks chunks)
+      end
+    end
+  in
+  String.split_on_char ' ' text
+  |> List.iteri (fun index word ->
+       if index > 0 then add_space ();
+       add_word word);
+  flush ();
+  List.rev !rows
+
 let value_rows ~width value =
   let budget = max 1 (width - String.length value_indent) in
   match String.split_on_char '\n' value with
@@ -16,8 +84,8 @@ let value_rows ~width value =
   | lines ->
     List.concat_map
       (fun line ->
-        match Message_layout.wrap_words ~max_cells:budget line with
-        (* [wrap_words] answers nothing for an empty line; the blank is part
+        match wrap_value_line ~max_cells:budget line with
+        (* The wrapper answers nothing for an empty line; the blank is part
            of how the ask was written, so it is kept. *)
         | [] -> [ { label = None; text = value_indent } ]
         | wrapped ->

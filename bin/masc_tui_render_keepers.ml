@@ -548,10 +548,12 @@ let render_keeper_list (state : state) =
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
   let inner = max 1 (framed_inner_width cols) in
-  let readings = List.map (keeper_reading state) state.keepers in
   let model_rows = keeper_list_rows state in
+  (* Selection already follows this ordered model in list mode. Reuse it in
+     this synchronous draw rather than rebuilding it through selected_keeper. *)
   let selected_reading =
-    Option.map (keeper_reading state) (selected_keeper state)
+    Option.map (fun (row : Keeper_list_model.row) -> row.reading)
+      (List.nth_opt model_rows state.keeper_cursor)
   in
   let keepers_error = Terminal_text.optional_single_line state.keepers_error in
 
@@ -696,16 +698,17 @@ let render_keeper_list (state : state) =
      columns do not move while a reader scrolls. *)
   let has_failing_keeper =
     List.exists
-      (fun (reading : Keeper_control.reading) ->
-        match Keeper_control.health reading with
+      (fun (row : Keeper_list_model.row) ->
+        match Keeper_control.health row.reading with
         | Some value ->
             Tui_decode.keeper_health_reading value = Tui_decode.Health_failing
         | None -> false)
-      readings
+      model_rows
   in
   let widest_runtime =
     List.fold_left
-      (fun widest (reading : Keeper_control.reading) ->
+      (fun widest (row : Keeper_list_model.row) ->
+        let reading = row.reading in
         let runtime =
           match reading.Keeper_control.liveness with
           | Keeper_control.Present row -> Some row
@@ -719,7 +722,7 @@ let render_keeper_list (state : state) =
           | None | Some _ -> 0
         in
         max widest (max failure_context_width (keeper_runtime_cells runtime)))
-      0 readings
+      0 model_rows
   in
   let columns =
     Render_schedule.allocate_keeper_columns

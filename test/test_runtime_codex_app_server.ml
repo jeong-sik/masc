@@ -391,7 +391,10 @@ let run_fixture ?account_home ?(worker_pool = false) ?isolated_home ?(dynamic_to
     ?(images = []) ?output_schema ?(native = Runtime_native_tools.codex_default) path =
   let observer_failure = ref None in
   let on_stream_event = Option.map (fun callback event ->
-    try callback event with exn ->
+    try callback event with
+    | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn ->
       let backtrace = Printexc.get_raw_backtrace () in
       if Option.is_none !observer_failure then observer_failure := Some (exn, backtrace);
       Printexc.raise_with_backtrace exn backtrace) on_stream_event in
@@ -754,6 +757,16 @@ let test_fixture_exposes_stream_observer_failure () =
     check_raises "fixture rethrows an isolated observer failure" failure
       (fun () -> ignore (run_fixture ~on_stream_event path));
     check bool "production turn completes despite observer failure" true !finished)
+;;
+
+let test_fixture_preserves_stream_observer_interrupt () =
+  with_fixture [init_result; account_chatgpt; thread_result; turn_result;
+    item_completed; turn_completed] (fun path ->
+    check_raises "stream observer interrupt leaves the runtime unchanged"
+      Keeper_registry_types.Operator_interrupt
+      (fun () -> ignore (run_fixture path ~on_stream_event:(function
+        | Runtime_codex_app_server.Turn_started _ -> raise Keeper_registry_types.Operator_interrupt
+        | _ -> ()))))
 ;;
 
 let run_undelivered_fixture ?(queued_effect = false) ?(provider_error = false) ?(retry_progress = false) ~eof ~retain () =
@@ -10125,6 +10138,8 @@ let () =
             test_serial_tool_fences_concurrent_calls
         ; test_case "fixture exposes isolated stream observer failure" `Quick
             test_fixture_exposes_stream_observer_failure
+        ; test_case "fixture preserves stream observer interrupt" `Quick
+            test_fixture_preserves_stream_observer_interrupt
         ; test_case "completed vendor turn retains pending tool receipt" `Quick
             (test_ended_turn_retains_tool_result ~eof:false)
         ; test_case "provider terminal drains tools and retry progress stays live" `Quick

@@ -1,4 +1,5 @@
 module Native_workflow = Browser_native_workflow
+module Native_input = Browser_native_input_contract
 (** Browser_lane — the in-process state of the masc ↔ browser lanes
     (docs/design/browser-lane.md, task-1382).
 
@@ -72,6 +73,25 @@ type interaction = Activate_tab | Click of string | Fill of { selector : string;
   | Follow_link of node_ref | Click_node of node_ref | Fill_node of { target : node_ref; text : string }
   | Click_target of snapshot_target | Fill_target of { target : snapshot_target; text : string }
   | Hover_target of snapshot_target | Double_click_target of snapshot_target
+
+(* Only the Ego adapter consumes this classification. Other backends retain
+   their own native input contracts and dispatch paths. *)
+let ego_input_contract = function
+  | Type_text _ -> Native_input.contract Native_input.Keyboard_type
+  | Drag _ -> Native_input.contract Native_input.Raw_pointer_drag
+  | Drag_to {source;destination;via;_} ->
+      (match source,destination,via with
+       | Selector _,Selector _,[] -> Native_input.contract Native_input.Drag_and_drop
+       | Selector _,Selector _,_::_
+       | Scene_node _,(Selector _|Scene_node _),([]|_::_)
+       | Selector _,Scene_node _,([]|_::_) -> Native_input.contract Native_input.Raw_pointer_drag)
+  | Click _ | Click_node _ | Click_target _ -> Native_input.contract Native_input.Click
+  | Double_click _ | Double_click_target _ -> Native_input.contract Native_input.Double_click
+  | Click_at _ | Double_click_at _ -> Native_input.contract Native_input.Mouse_click
+  | Press_key _ -> Native_input.contract Native_input.Keyboard_press
+  | Activate_tab | Fill _ | Select_option _ | Set_zoom _ | Set_viewport _
+  | Scroll _ | Hover _ | Hover_at _ | Tap_at _ | Swipe _ | Scroll_at _
+  | Follow_link _ | Fill_node _ | Fill_target _ | Hover_target _ -> Native_input.No_hold
 
 (* Whether an interaction acts on an ego snapshot target, which only an ego
    connection serves. *)

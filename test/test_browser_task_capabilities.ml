@@ -247,7 +247,7 @@ let test_ego_table () =
   check (list string) "reads, capture, the tab list, its own tabs, their history, input, frames, dialogs, uploads and downloads on them, and the space handed to the operator and back"
     ["list_tabs";"open_tab";"close_tab";"activate_tab";"navigate";"follow_link";"back";"forward";"reload";"stop_loading";"read_text";"read_elements";"read_scene";"read_regions";"read_snapshot";"screenshot";"native_workflow";"click_snapshot_target";"fill_snapshot_target";
      "hover_snapshot_target";"double_click_snapshot_target";"click";"double_click";"right_click";"middle_click";"hover";"pointer_drag";"scroll_page";"scroll_at";
-     "fill";"type_text";"press_key";"key_chord";"select_option";"read_frames";"frame_interaction";"read_dialog";"accept_dialog";"dismiss_dialog";"hand_off";"take_over";"space_status";"finish_space";"wait_for_control";"adopt_tab";"release_tab";"upload_file";"list_downloads"]
+     "fill";"press_key";"key_chord";"select_option";"read_frames";"frame_interaction";"read_dialog";"accept_dialog";"dismiss_dialog";"hand_off";"take_over";"space_status";"finish_space";"wait_for_control";"adopt_tab";"release_tab";"upload_file";"list_downloads"]
     (List.map Cap.operation_name reachable);
   List.iter (fun operation -> match Cap.support backend operation with
     | Cap.Conditional {constraints;_} ->
@@ -292,6 +292,36 @@ let test_snapshot_table () =
      Cap.Owned_chromium, "Stagehand Chromium", false;
      Cap.Safari_unavailable, "Safari", false]
 
+let test_native_input_admission_surface () =
+  let schema=Tool_schemas_misc_toml.browser_interact in
+  let methods=Yojson.Safe.Util.(schema.input_schema |> member "properties" |> member "steps"
+    |> member "items" |> member "properties" |> member "method" |> member "enum"
+    |> to_list |> List.map to_string) in
+  check bool "unattestable raw type is not an executable model method" false (List.mem "keyboard.type" methods);
+  List.iter (fun name -> check bool (name ^ " remains explicit") true (List.mem name methods))
+    ["fill";"keyboard.insertText";"keyboard.paste";"keyboard.press";"dragAndDrop"];
+  (match Cap.support (Cap.Connected Lane.Ego_task_space) Cap.Type_text with
+   | Cap.Unsupported _ -> ()
+   | Available _ | Conditional _ -> fail "Ego must not advertise raw type_text");
+  List.iter (fun backend -> check bool "other native backends retain type_text" true
+    (match Cap.support backend Cap.Type_text with Cap.Available _|Conditional _->true|Unsupported _->false))
+    [Cap.Connected Lane.Webdriver_bidi;Cap.Owned_gecko;Cap.Owned_chromium];
+  let config=Masc.Workspace.default_config
+    (Filename.concat (Filename.get_temp_dir_name ()) "masc-browser-raw-input-no-workspace") in
+  let invoke steps=Tools.handle ~config ~access:Masc.Lane_addon_sources.Operator_configuration
+    ~principal:(Lane_addon_call_context.Host_actor "browser-input-contract-tester") ~reserved:[]
+    ~keeper_name:None ~tool:Cap.Interact ~tool_name:"BrowserInteract" ~start_time:(Tool_timing.start ())
+    (`Assoc ["lane",`String "live";"clientId",`String "0c000000-0000-4000-8000-000000000001";
+      "action",`String "workflow";"tabId",`Int 1;"expectedUrl",`String "https://fixture.test/";
+      "steps",`List steps]) in
+  let fill=`Assoc ["method",`String "fill";"selector",`String "#editor";"text",`String "earlier effect"] in
+  let raw=`Assoc ["method",`String "keyboard.type";"text",`String "raw"] in
+  let safe=`Assoc ["method",`String "keyboard.insertText";"text",`String "literal"] in
+  check bool "whole-workflow refusal happens before looking for a browser Add-on" true
+    (Tool_result.failure_class (invoke [fill;raw])=Some Tool_result.Policy_rejection);
+  check bool "the explicit native alternative reaches ordinary Add-on lookup" true
+    (Tool_result.failure_class (invoke [fill;safe])=Some Tool_result.Dependency_unavailable)
+
 let () = run "task-aware browser choice" ["scenarios",[
   test_case "a bound request is not reselected by required actions" `Quick test_bound_request_keeps_its_browser;
   test_case "HTML5, frames/downloads, hover/typing and zoom choose their browser" `Quick test_task_choice;
@@ -309,4 +339,5 @@ let () = run "task-aware browser choice" ["scenarios",[
   test_case "an ego connection is claimed only for what its peer does" `Quick test_ego_table;
   test_case "native loading recovery is exposed only by Ego" `Quick test_loading_recovery_table;
   test_case "the ego snapshot is claimed by the ego connection alone" `Quick test_snapshot_table;
+  test_case "native input availability is truthful and preflights the entire workflow" `Quick test_native_input_admission_surface;
   test_case "discovery schemas list every operation" `Quick test_required_actions_schema_lists_every_operation]]

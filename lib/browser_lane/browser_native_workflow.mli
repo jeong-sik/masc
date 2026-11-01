@@ -88,6 +88,21 @@ val fetch_save_name : step -> string option
 (** Requested artifact filename for a saving Fetch; [None] for every other
     step. This is display metadata and never a caller-selected host path. *)
 val is_effect : action -> bool
+val input_contract : action -> Browser_native_input_contract.t
+(** The typed native input contract. [Keyboard_insert_text] is [No_hold]: it
+    invokes native Input.insertText without key-down/up. It never provides a
+    released-input proof. *)
+
+type unavailable_input = {
+  index : int;
+  action : action;
+  reason : Browser_native_input_contract.unavailable;
+}
+val validate_input_contract : t -> (unit, unavailable_input) result
+(** Check the whole workflow before executing any step. Decoding native SDK
+    data does not make an unattestable raw holding method executable. *)
+val unavailable_input_message : unavailable_input -> string
+
 (** May leave a pointer button or key held when the SDK result is lost or
     interrupted by a dialog. Paste uses the SDK's ControlOrMeta+V sequence. *)
 val holds_input : action -> bool

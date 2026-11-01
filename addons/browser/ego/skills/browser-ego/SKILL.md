@@ -19,6 +19,13 @@ resolution, actionability, automatic scrolling and frame/shadow traversal; do
 not resolve a native target to coordinates or add a separate selector wait.
 After page changes or a stale ref, read a fresh snapshot on the same page.
 
+Use native `fill` on an observed input, textarea or contenteditable editor to
+replace its contents. For literal insertion at an already observed/focused
+editor, explicitly choose `keyboard.insertText`; it creates no key-down/up
+state. Use `keyboard.paste` when native paste semantics or text/HTML are wanted.
+These are different actions: select the intended one rather than silently
+substituting for an input that already ran.
+
 For actions already determined from that observation, use one `BrowserInteract`
 `action = "workflow"` with `tabId`, initial `expectedUrl` and `steps`. Each step
 names a native `method` such as `fill`, `click`, `waitForURL` or
@@ -27,18 +34,18 @@ sequence and returns one final snapshot. Split the call when intermediate
 results require a new decision. Retain `completed` progress on failure and
 never replay the sequence after uncertain effects.
 
-The current SDK's `keyboard.type` returns no action receipt, including after
-some dialog interruptions. A native workflow stops at that step, excludes it
-from `completed` and leaves input release unconfirmed even when no dialog is
-visible. Use the private operator recovery described below before a distinct
-next input. Do not repeat typing or silently substitute another input method.
+The current SDK's raw `keyboard.type` returns no action receipt, including after
+some dialog interruptions. MASC refuses an entire workflow containing it before
+any step, and refuses the Ego `type_text` route before input. Full raw typing
+parity requires a native SDK completion contract. A new pre-effect refusal
+requires no input reset; previously uncertain input still follows the private
+operator recovery below and must never be replayed.
 
 A `drag` between observed points, and a `drag_to` with waypoints or scene nodes,
-use the SDK's mouse calls, which return no receipt. Even a clean run leaves input
-release unconfirmed, so the connection refuses the next input until the operator
-confirms it as below. A `drag_to` between two selectors without waypoints uses the
-SDK's `dragAndDrop`, which returns a receipt, and releases the input when that
-receipt shows no dialog.
+use raw mouse calls with no release receipt. MASC refuses them before input.
+A `drag_to` between two selectors without waypoints, with `durationMs = 0`, uses
+the SDK's `dragAndDrop`, which returns a receipt. Its no-dialog receipt settles
+the command, while application drop acceptance still requires observation.
 
 Uploads use `BrowserAct` `action = "upload"` on the live ego connection
 (`lane = "live"` with its observed `clientId`) and the observed `tabId`. The

@@ -58,9 +58,10 @@ val account
   -> base_path:string
   -> keeper:Keeper_id.Keeper_name.t
   -> (account, error) result
-(** The keeper's account through {!Candle_status.current_view}, which publishes
-    a changed half-life before answering. Read-only surfaces read
-    {!Candle_status.observed_view} instead. *)
+(** Read the keeper's account through {!Candle_status.observed_view}. Amounts
+    follow recorded half-life boundaries; reading a changed configuration does
+    not publish a new policy fact or start a new decay interval. The ledger's
+    transaction synchronization still protects the committed observation. *)
 
 val catalog : now:(unit -> float) -> base_path:string -> (catalog_entry list, error) result
 

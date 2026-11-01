@@ -115,7 +115,7 @@ let status_error = function
 
 let account ~now ~base_path ~keeper =
   let* (view : Candle_status.view) =
-    Candle_status.current_view ~now ~base_path |> Result.map_error status_error
+    Candle_status.observed_view ~now ~base_path |> Result.map_error status_error
   in
   Ok
     (account_of

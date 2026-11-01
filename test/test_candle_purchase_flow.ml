@@ -661,26 +661,27 @@ let test_policy_intervals_preserve_purchase_and_equipped_ownership () =
       | Error error -> fail (Candle_shop.error_to_string error) in
     let shop = "\n[shop.prices_milli]\nglasses = 400\n" in
     write_config_half_life config ~half_life:"2" shop;
+    let before_read = bytes config in
     check int "old Off interval preserves the original funding" 1000 (account ()).balance_milli;
-    let synchronized = bytes config in
+    check string "a balance read does not publish the requested decay policy" before_read (bytes config);
     clock := start +. 3600.;
-    ignore (account () : Candle_shop.account);
-    check string "an intermediate display creates no monetary rounding event" synchronized (bytes config);
+    check int "displaying a balance does not start decay" 1000 (account ()).balance_milli;
+    check string "an intermediate display creates no monetary rounding event" before_read (bytes config);
     clock := start +. 7200.;
     let item = match Item.of_id "glasses" with Some item -> item | None -> fail "missing canonical glasses" in
     let receipt = match Candle_shop.purchase ~now ~base_path ~keeper ~item with
       | Ok receipt -> receipt
       | Error error -> fail (Candle_shop.error_to_string error) in
-    check int "purchase spends the decayed amount at its own instant" 100 receipt.account.balance_milli;
+    check int "purchase starts the new policy at its own instant" 600 receipt.account.balance_milli;
     check bool "the purchased item is owned" true (List.mem item receipt.account.owned_items);
     clock := start +. 10800.;
     (match Candle_equipment.equip ~now ~base_path ~keeper ~slot:(Item.slot item) ~choice:(E.Item item) with
      | Ok receipt -> check bool "owned item changes equipment" true receipt.changed
      | Error error -> fail (Candle_equipment.error_to_string error));
     clock := start +. 14400.;
-    check int "equipment did not split the monetary interval" 50 (account ()).balance_milli;
+    check int "equipment did not split the monetary interval" 300 (account ()).balance_milli;
     let observation = Candle_observe.read ~now ~base_path in
-    check (option string) "one response uses the same current wallet" (Some "50")
+    check (option string) "one response uses the same current wallet" (Some "300")
       (Candle_observe.balance observation ~keeper:"keeper-a");
     (match Candle_observe.equipment observation ~keeper:"keeper-a" with
      | Ok equipment -> check bool "portrait retains the purchased equipment" true
@@ -694,9 +695,13 @@ let test_policy_intervals_preserve_purchase_and_equipped_ownership () =
      | Error detail -> fail detail);
     check string "rollback portrait read preserves ledger bytes" before_portrait (bytes config);
     write_config config shop;
-    check int "Off closes the preceding decaying interval" 50 (account ()).balance_milli;
+    check int "a read still follows the recorded decay interval" 300 (account ()).balance_milli;
+    check string "a requested Off policy is not published by a read" before_portrait (bytes config);
+    (match Candle_equipment.equip ~now ~base_path ~keeper ~slot:(Item.slot item) ~choice:E.Default with
+     | Ok receipt -> check bool "an explicit equipment write closes the old policy interval" true receipt.changed
+     | Error error -> fail (Candle_equipment.error_to_string error));
     clock := start +. 28800.;
-    check int "explicit Off preserves the money after its fact" 50 (account ()).balance_milli;
+    check int "explicit Off preserves the money after its fact" 300 (account ()).balance_milli;
     let policy_facts = events config |> List.filter_map (fun (event : E.t) -> match event.body with
       | E.Half_life_set policy -> Some policy
       | E.Snapshot _ | E.Payout_owed _ | E.Candidates _ | E.Unattributed _ | E.Paid _
@@ -787,9 +792,12 @@ rounding = "down"
     check string "tool json decayed_milli" "0" U.(member "decayed_milli" initial_tool_json |> to_string);
     check int "tool json half_life" 1 U.(member "half_life" initial_tool_json |> to_int);
     check bool "tool json last_event_at is null" true (U.member "last_event_at" initial_tool_json = `Null);
-    (* Fund keeper-a with 400 milli-Candles at t=start (deflationary relative to target 1000),
-       then synchronize the configured 1h half-life at t=start. *)
-    credit config ~goal:"deflation-goal" ~keeper:"keeper-a" 400;
+    (* A real money write starts the configured decay interval at t=start;
+       reading the account above did not publish it. *)
+    (match Candle_grant.grant ~now ~base_path ~keeper:keeper_a
+        ~amount_milli:400 ~reason:"deflation funding" with
+     | Ok _ -> ()
+     | Error error -> fail (Candle_grant.error_to_string error));
     let funded_acct = match Candle_shop.account ~now ~base_path ~keeper:keeper_a with
       | Ok a -> a | Error e -> fail (Candle_shop.error_to_string e) in
     check int "funded balance 400" 400 funded_acct.balance_milli;
@@ -866,7 +874,10 @@ rounding = "down"
     (* Close the decaying interval at t = start + 3600 so the wall-clock tool call
        sees the 3399 balance (2.0x cap) without decaying across real calendar days. *)
     write_config config shop;
-    ignore (Candle_shop.account ~now ~base_path ~keeper:keeper_a);
+    (match Candle_equipment.equip ~now ~base_path ~keeper:keeper_a ~slot:(Item.slot crown)
+        ~choice:(E.Item crown) with
+     | Ok _ -> ()
+     | Error error -> fail (Candle_equipment.error_to_string error));
     rejected
       "price_changed"
       (call

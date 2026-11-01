@@ -104,7 +104,12 @@ val assemble_model_tool_surface :
   model_tool_surface
 (** Internal bundle projection data assembly. This constructor grants no tool
     authority and is not an operator policy setting. The bundle supplies its
-    already captured admission and the views selected under that same value. *)
+    already captured admission and the views selected under that same value.
+    The caller owns consistency: nothing here checks that [tools] matches
+    [image_admission] (a native image reader may accompany
+    [Image_input_unavailable], and [Image_input_admitted] may arrive without
+    one), so only the bundle's capture path — which derives both from the
+    same runtime observation — should build production surfaces. *)
 
 type tool_bundle =
   { tools : Agent_core.Tool.t list

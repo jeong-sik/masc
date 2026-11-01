@@ -403,38 +403,53 @@ let notify_post_creation (creation : Board.post_creation) =
       (Board.Post_publication_failure.after_commit creation
          (Board.Post_publication_failure.Raised exn))
 
-let create_post_with_unresolved ~author ~content ?title ?body ~post_kind ?meta_json
-    ?visibility ?ttl_hours ?hearth ?thread_id ?origin () =
+let resolve_post_dispatch_context () =
   try
-  match backend () with
-  | Jsonl store ->
-    (match
-       Board.create_post_with_audience
-         store
-         ~lookup:(recipient_lookup ())
-         ~author
-         ~content
-         ?title
-         ?body
-         ~post_kind
-         ?meta_json
-         ?visibility
-         ?ttl_hours
-         ?hearth
-         ?thread_id
-         ?origin
-         ()
-     with
-     | Ok creation -> notify_post_creation creation
-     | Error _ as error -> error)
+    let Jsonl store = backend () in
+    let lookup = recipient_lookup () in
+    Ok (store, lookup)
   with
   | (Eio.Cancel.Cancelled _ | Eio.Time.Timeout | Out_of_memory
     | Stack_overflow | Sys.Break) as exn ->
     Printexc.raise_with_backtrace exn (Printexc.get_raw_backtrace ())
   | exn ->
     Error
-      (Board.Post_publication_failure.unknown
+      (Board.Post_publication_failure.before_effect
          (Board.Post_publication_failure.Raised exn))
+
+let create_post_with_unresolved ~author ~content ?title ?body ~post_kind ?meta_json
+    ?visibility ?ttl_hours ?hearth ?thread_id ?origin () =
+  match resolve_post_dispatch_context () with
+  | Error _ as error -> error
+  | Ok (store, lookup) ->
+    (try
+       match
+         Board.create_post_with_audience
+           store
+           ~lookup
+           ~author
+           ~content
+           ?title
+           ?body
+           ~post_kind
+           ?meta_json
+           ?visibility
+           ?ttl_hours
+           ?hearth
+           ?thread_id
+           ?origin
+           ()
+       with
+       | Ok creation -> notify_post_creation creation
+       | Error _ as error -> error
+     with
+     | (Eio.Cancel.Cancelled _ | Eio.Time.Timeout | Out_of_memory
+       | Stack_overflow | Sys.Break) as exn ->
+       Printexc.raise_with_backtrace exn (Printexc.get_raw_backtrace ())
+     | exn ->
+       Error
+         (Board.Post_publication_failure.unknown
+            (Board.Post_publication_failure.Raised exn)))
 
 let create_post ~author ~content ?title ?body ~post_kind ?meta_json
     ?visibility ?ttl_hours ?hearth ?thread_id ?origin () =
@@ -444,26 +459,27 @@ let create_post ~author ~content ?title ?body ~post_kind ?meta_json
 
 let create_post_once_by_fusion_run_id ~fusion_run_id ~author ~content ~post_kind
     ?meta_json ~visibility ~ttl_hours ~origin () =
-  try
-  match backend () with
-  | Jsonl store ->
-    (match
-       Board.create_post_once_by_fusion_run_id store
-         ~lookup:(recipient_lookup ()) ~fusion_run_id ~author
-         ~content ~post_kind ?meta_json ~visibility ~ttl_hours ~origin ()
+  match resolve_post_dispatch_context () with
+  | Error _ as error -> error
+  | Ok (store, lookup) ->
+    (try
+       match
+         Board.create_post_once_by_fusion_run_id store
+           ~lookup ~fusion_run_id ~author
+           ~content ~post_kind ?meta_json ~visibility ~ttl_hours ~origin ()
+       with
+       | Ok (Board.Post_created creation as outcome) ->
+         notify_post_creation creation |> Result.map (fun _ -> outcome)
+       | Ok (Board.Post_already_present _ as outcome) -> Ok outcome
+       | Error _ as error -> error
      with
-     | Ok (Board.Post_created creation as outcome) ->
-       notify_post_creation creation |> Result.map (fun _ -> outcome)
-     | Ok (Board.Post_already_present _ as outcome) -> Ok outcome
-     | Error _ as error -> error)
-  with
-  | (Eio.Cancel.Cancelled _ | Eio.Time.Timeout | Out_of_memory
-    | Stack_overflow | Sys.Break) as exn ->
-    Printexc.raise_with_backtrace exn (Printexc.get_raw_backtrace ())
-  | exn ->
-    Error
-      (Board.Post_publication_failure.unknown
-         (Board.Post_publication_failure.Raised exn))
+     | (Eio.Cancel.Cancelled _ | Eio.Time.Timeout | Out_of_memory
+       | Stack_overflow | Sys.Break) as exn ->
+       Printexc.raise_with_backtrace exn (Printexc.get_raw_backtrace ())
+     | exn ->
+       Error
+         (Board.Post_publication_failure.unknown
+            (Board.Post_publication_failure.Raised exn)))
 
 let update_post_with_unresolved ~post_id ~editor ~content ?title ?body ?new_author () =
   match backend () with

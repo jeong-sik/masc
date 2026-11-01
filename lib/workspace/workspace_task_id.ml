@@ -371,6 +371,15 @@ let load_event_file_max_task_id ~verify_content (st : Unix.stats) path =
          | _ | exception Unix.Unix_error _ -> ());
       max_task_id
 
+let compare_month_entries_desc a b =
+  match
+    Dated_jsonl.Layout.year_and_month_of_directory_name a,
+    Dated_jsonl.Layout.year_and_month_of_directory_name b
+  with
+  | Some _, Some _ | None, None -> String.compare b a
+  | Some _, None -> -1
+  | None, Some _ -> 1
+
 let event_history_max_task_id config =
   let events_dir = Filename.concat (masc_dir config) "events" in
   match Unix.stat events_dir with
@@ -379,15 +388,19 @@ let event_history_max_task_id config =
     let month_dirs =
       Sys.readdir events_dir
       |> Array.to_list
-      |> List.sort (fun a b -> String.compare b a)
+      |> List.sort compare_month_entries_desc
     in
     let is_first_file = ref true in
     let max_id = ref 0 in
     let visit_file path =
       let st = Unix.stat path in
       if st.st_kind <> Unix.S_DIR then begin
+        let is_day_file =
+          Option.is_some
+            (Dated_jsonl.Layout.day_file_parts (Filename.basename path))
+        in
         let verify_content = !is_first_file in
-        is_first_file := false;
+        if is_day_file then is_first_file := false;
         let file_max = load_event_file_max_task_id ~verify_content st path in
         if file_max > !max_id then max_id := file_max
       end
@@ -399,7 +412,7 @@ let event_history_max_task_id config =
          if st.st_kind = Unix.S_DIR then
            Sys.readdir month_path
            |> Array.to_list
-           |> List.sort (fun a b -> String.compare b a)
+           |> List.sort (fun a b -> Dated_jsonl.Layout.compare_day_files b a)
            |> List.iter (fun file -> visit_file (Filename.concat month_path file))
          else visit_file month_path)
       month_dirs;

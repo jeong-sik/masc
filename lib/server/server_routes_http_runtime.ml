@@ -657,6 +657,7 @@ type full_health_completion =
   ; admitted_epoch : Mcp_server.Workspace_scope_epoch.t option
   ; started_epoch : Mcp_server.Workspace_scope_epoch.t option option Atomic.t
   ; mutable fleet_failure_epoch : Mcp_server.Workspace_scope_epoch.t option
+  ; mutable health_failure_epoch : Mcp_server.Workspace_scope_epoch.t option option
   ; mutable last_failure :
       (Mcp_server.Workspace_scope_epoch.t option * float * Proactive_refresh.failure) option
   ; mutable waiting_scope : (Mcp_server.Workspace_scope_epoch.t * Fleet_stream_hub.t) option
@@ -909,10 +910,9 @@ let current_workspace_epoch () =
     (current_server_state_opt ())
 
 let unchanged_workspace_epoch before =
-  match before, current_workspace_epoch () with
-  | Some before, Some after when Mcp_server.Workspace_scope_epoch.equal before after ->
-      Some before
-  | (None | Some _), (None | Some _) -> None
+  if Health_observation.same_scope before (current_workspace_epoch ())
+  then before, true
+  else None, false
 
 let compute_full_health_snapshot ?(listener = "http/1.1")
     ?(on_workspace_epoch = fun _ -> ()) ~request_authority
@@ -927,8 +927,10 @@ let compute_full_health_snapshot ?(listener = "http/1.1")
         (make_health_json ~listener ~section_timings_ref ~request_authority request)
     in
     let finished_at = Unix.gettimeofday () in
+    let workspace_epoch, scope_consistent = unchanged_workspace_epoch workspace_epoch in
     {
-      workspace_epoch = unchanged_workspace_epoch workspace_epoch;
+      workspace_epoch;
+      scope_consistent;
       fields;
       computed_at = finished_at;
       duration_ms = duration_ms ~started_at ~finished_at;
@@ -943,8 +945,10 @@ let compute_full_health_snapshot ?(listener = "http/1.1")
       let finished_at = Unix.gettimeofday () in
       let failure = Proactive_refresh.Raised exn in
       let error = Proactive_refresh.failure_message failure in
+      let workspace_epoch, scope_consistent = unchanged_workspace_epoch workspace_epoch in
       {
-        workspace_epoch = unchanged_workspace_epoch workspace_epoch;
+        workspace_epoch;
+        scope_consistent;
         fields = full_health_placeholder_fields ~error ~status:"error" ();
         computed_at = finished_at;
         duration_ms = duration_ms ~started_at ~finished_at;
@@ -1075,21 +1079,33 @@ let mark_full_health_snapshot_failure_locked ~workspace_epoch ~worker_active fai
     | Proactive_refresh.Timed_out _ -> true
     | Proactive_refresh.Raised _ -> false
   in
-  let state = !full_health_observation in
-  let cold_fields =
-    match state.snapshot with
-    | Some snapshot -> snapshot.fields
-    | None ->
-      let status = if timed_out then "timeout" else "error" in
-      full_health_placeholder_fields ~error ~component_timed_out:timed_out ~status ()
+  let same_workspace =
+    Health_observation.same_scope workspace_epoch (current_workspace_epoch ())
   in
-  let state, critical_edge =
-    Health_observation.fail ~now ~failure ~cold_fields
-      ~critical_threshold:full_health_critical_failure_threshold state
+  let requested = (!full_health_refresh).requested in
+  let critical_edge =
+    if not same_workspace
+    then false
+    else
+      let state = Health_observation.for_scope ~workspace_epoch !full_health_observation in
+      let cold_fields =
+        match state.snapshot with
+        | Some snapshot -> snapshot.fields
+        | None ->
+          let status = if timed_out then "timeout" else "error" in
+          full_health_placeholder_fields ~error ~component_timed_out:timed_out ~status ()
+      in
+      let state, critical_edge =
+        Health_observation.fail ~workspace_epoch ~now ~failure ~cold_fields
+          ~critical_threshold:full_health_critical_failure_threshold state
+      in
+      full_health_observation := state;
+      critical_edge
   in
-  full_health_observation := state;
   full_health_refresh :=
     Health_refresh.note_failure ~worker_active !full_health_refresh;
+  if not same_workspace && requested then
+    full_health_refresh := Health_refresh.request !full_health_refresh;
   note_fleet_stream_failure ~workspace_epoch ~since:now failure;
   if critical_edge then
     Otel_metric_store.inc_counter
@@ -1101,7 +1117,12 @@ let mark_full_health_snapshot_failure_locked ~workspace_epoch ~worker_active fai
    through the failure transition before publishing, so sync refresh and the
    worker preserve the last measurement and consecutive-failure evidence. *)
 let store_full_health_snapshot_locked (snapshot : Health_observation.snapshot) ~refresh_requested =
-  match snapshot.failure with
+  if not snapshot.scope_consistent
+     || not (Health_observation.same_scope snapshot.workspace_epoch (current_workspace_epoch ()))
+  then
+    let refresh_requested = refresh_requested || (!full_health_refresh).requested in
+    full_health_refresh := Health_refresh.complete ~refresh_requested !full_health_refresh
+  else match snapshot.failure with
   | None ->
       store_successful_full_health_snapshot_locked snapshot ~refresh_requested
   | Some failure ->
@@ -1127,13 +1148,18 @@ let mark_full_health_refresh_wait_failure failure =
         let workspace_epoch = full_health_failure_epoch worker.completion in
         let since = Unix.gettimeofday () in
         worker.completion.last_failure <- Some (workspace_epoch, since, failure);
-        (match Health_refresh.note_wait_failure !full_health_refresh with
-         | Some refresh ->
-          full_health_refresh := refresh;
+        let already_reported =
+          Option.exists (Health_observation.same_scope workspace_epoch)
+            worker.completion.health_failure_epoch
+        in
+        if already_reported then
+          note_worker_fleet_failure_once worker.completion ~workspace_epoch failure
+        else begin
           mark_full_health_snapshot_failure_locked ~workspace_epoch ~worker_active:true failure;
+          if Health_observation.same_scope workspace_epoch (current_workspace_epoch ()) then
+            worker.completion.health_failure_epoch <- Some workspace_epoch;
           remember_worker_fleet_failure worker.completion workspace_epoch
-         | None ->
-          note_worker_fleet_failure_once worker.completion ~workspace_epoch failure);
+        end;
         note_waiting_scope_failure_if_unmeasured worker.completion
           ~failed_epoch:workspace_epoch ~since failure)
 
@@ -1171,19 +1197,36 @@ let finish_full_health_refresh_worker
               | Health_refresh.Invalidated_during_refresh _ -> true
             in
             full_health_refresh := refresh;
-            let finish_failure ~workspace_epoch failure =
+            let finish_failure ?(scope_consistent = true) ~workspace_epoch failure =
               let since = Unix.gettimeofday () in
               worker.completion.last_failure <- Some (workspace_epoch, since, failure);
-              (* A waiter timeout already recorded this worker's failed
-                 attempt. Its eventual failed result must not count twice. *)
-              if active.failure_reported then
+              (* A wait failure counts once per workspace generation, not once
+                 per worker: the worker can begin after its admitted scope was
+                 replaced. A later failure in that new scope is its first. *)
+              let same_workspace =
+                Health_observation.same_scope workspace_epoch (current_workspace_epoch ())
+              in
+              let preserve_request () =
+                (not scope_consistent || not same_workspace)
+                && (!full_health_refresh).requested
+              in
+              let already_reported =
+                Option.exists (Health_observation.same_scope workspace_epoch)
+                  worker.completion.health_failure_epoch
+              in
+              if not scope_consistent then
+                full_health_refresh :=
+                  Health_refresh.complete ~refresh_requested:(preserve_request ()) !full_health_refresh
+              else if already_reported then
                 (full_health_refresh :=
-                   Health_refresh.complete ~refresh_requested:false !full_health_refresh;
+                   Health_refresh.complete ~refresh_requested:(preserve_request ()) !full_health_refresh;
                  note_worker_fleet_failure_once worker.completion ~workspace_epoch failure)
               else (
                 mark_full_health_snapshot_failure_locked
                   ~workspace_epoch
                   ~worker_active:false failure;
+                if same_workspace then
+                  worker.completion.health_failure_epoch <- Some workspace_epoch;
                 remember_worker_fleet_failure worker.completion workspace_epoch);
               note_waiting_scope_failure_if_unmeasured worker.completion
                 ~failed_epoch:workspace_epoch ~since failure;
@@ -1194,7 +1237,8 @@ let finish_full_health_refresh_worker
              | Ok snapshot ->
                  (match snapshot.failure, active.freshness with
                   | Some failure, _ ->
-                      finish_failure ~workspace_epoch:snapshot.workspace_epoch failure
+                      finish_failure ~scope_consistent:snapshot.scope_consistent
+                        ~workspace_epoch:snapshot.workspace_epoch failure
                   | None, Health_refresh.Current_generation ->
                       store_full_health_snapshot_locked snapshot
                         ~refresh_requested:false
@@ -1203,19 +1247,23 @@ let finish_full_health_refresh_worker
                          from certifying freshness. Without this, a busy cold
                          runtime can discard every successful observation.
                          Only a current scan ends the continuous stale period. *)
-                      let state =
-                        Health_observation.publish_dirty ~since snapshot
-                          !full_health_observation
-                      in
-                      full_health_observation := state;
+                      if snapshot.scope_consistent && Health_observation.same_scope snapshot.workspace_epoch
+                           (current_workspace_epoch ())
+                      then begin
+                        let state =
+                          Health_observation.publish_dirty ~since snapshot
+                            !full_health_observation
+                        in
+                        full_health_observation := state;
+                        Option.iter publish_fleet_stream_reading state.snapshot
+                      end;
                       full_health_refresh :=
-                        Health_refresh.complete ~refresh_requested:true !full_health_refresh;
-                      Option.iter publish_fleet_stream_reading state.snapshot)
+                        Health_refresh.complete ~refresh_requested:true !full_health_refresh)
              | Error exn ->
                  finish_failure
                    ~workspace_epoch:(full_health_failure_epoch worker.completion)
                    (Proactive_refresh.Raised exn));
-            true, dirty
+            true, dirty || (!full_health_refresh).requested
         | None -> false, false)
   in
   if settled then begin
@@ -1273,6 +1321,7 @@ let await_full_health_refresh_worker ~sw ~compute =
               ; admitted_epoch = current_workspace_epoch ()
               ; started_epoch = Atomic.make None
               ; fleet_failure_epoch = None
+              ; health_failure_epoch = None
               ; last_failure = None
               ; waiting_scope = None
               }
@@ -1465,8 +1514,30 @@ let full_health_snapshot_metadata ~now (view : full_health_state_view) =
     ]
 
 let mark_full_health_refresh_requested () =
-  with_full_health_snapshot_lock (fun () ->
-      full_health_refresh := Health_refresh.request !full_health_refresh)
+  let wake, refresh =
+    with_full_health_snapshot_lock (fun () ->
+      let epoch = current_workspace_epoch () in
+      let refresh = !full_health_refresh in
+      let worker_matches =
+        Option.exists (fun (worker : full_health_completion Health_refresh.worker) ->
+          Health_observation.same_scope epoch (full_health_failure_epoch worker.completion))
+          refresh.active_worker
+      in
+      let foreign_worker = Option.is_some refresh.active_worker && not worker_matches in
+      let foreign_snapshot =
+        Option.exists (fun (snapshot : Health_observation.snapshot) ->
+          not snapshot.scope_consistent
+          || not (Health_observation.same_scope epoch snapshot.workspace_epoch))
+          (!full_health_observation).snapshot
+      in
+      let requested = Health_refresh.request refresh in
+      full_health_refresh := requested;
+      (not worker_matches
+       && (foreign_worker || foreign_snapshot
+           || Option.is_none (!full_health_observation).snapshot)), requested)
+  in
+  if wake then signal_full_health_refresh_wakeup ();
+  refresh
 
 let invalidate_full_health_snapshot_locked () =
   let now = Unix.gettimeofday () in
@@ -1522,20 +1593,26 @@ let fleet_stream_hub_for_scope ~state ~scope =
 
 let full_health_snapshot_state () =
   with_full_health_snapshot_lock (fun () ->
-      { observation = !full_health_observation; refresh = !full_health_refresh })
+      { observation =
+          Health_observation.for_scope ~workspace_epoch:(current_workspace_epoch ())
+            !full_health_observation
+      ; refresh = !full_health_refresh })
 
-let make_cached_full_health_json ?timing ?(listener = "http/1.1") ~request_authority
-    request =
+let make_cached_full_health_json_with ~after_selection ?timing ?(listener = "http/1.1")
+    ~request_authority request =
   let now = Unix.gettimeofday () in
-  let snapshot = (full_health_snapshot_state ()).observation.snapshot in
+  let view = full_health_snapshot_state () in
+  let snapshot = view.observation.snapshot in
+  after_selection ();
   let needs_refresh =
     match snapshot with
     | None -> true
     | Some snapshot -> snapshot_is_stale ~now snapshot
   in
-  if needs_refresh then mark_full_health_refresh_requested ();
-  let view = full_health_snapshot_state () in
-  let snapshot = view.observation.snapshot in
+  let view =
+    if needs_refresh then { view with refresh = mark_full_health_refresh_requested () }
+    else view
+  in
   let fields =
     match snapshot with
     | Some snapshot -> snapshot.fields
@@ -1549,6 +1626,10 @@ let make_cached_full_health_json ?timing ?(listener = "http/1.1") ~request_autho
          ( "full_health_snapshot",
            full_health_snapshot_metadata ~now view );
        ])
+
+let make_cached_full_health_json ?timing ?listener ~request_authority request =
+  make_cached_full_health_json_with ~after_selection:(fun () -> ())
+    ?timing ?listener ~request_authority request
 
 let start_full_health_snapshot_refresh_loop ~sw ~clock ~request_authority =
   let request = Httpun.Request.create `GET "/health?full=1" in
@@ -1585,6 +1666,9 @@ let start_full_health_snapshot_refresh_loop ~sw ~clock ~request_authority =
     ~on_result:Fun.id
 
 module For_testing = struct
+  let make_cached_full_health_json_after_selection ~after_selection ~request_authority request =
+    make_cached_full_health_json_with ~after_selection ~request_authority request
+
   let fleet_stream_hub_for_scope_before_registration ~before_registration ~state ~scope =
     fleet_stream_hub_for_scope_with ~before_registration ~state ~scope
 
@@ -1636,7 +1720,9 @@ module For_testing = struct
               Some failure
         in
         let computed_at = Unix.gettimeofday () in
-        { workspace_epoch = unchanged_workspace_epoch workspace_epoch;
+        let workspace_epoch, scope_consistent = unchanged_workspace_epoch workspace_epoch in
+        { workspace_epoch;
+          scope_consistent;
           fields;
           computed_at;
           duration_ms = duration_ms ~started_at ~finished_at:computed_at;
@@ -1658,6 +1744,12 @@ module For_testing = struct
           refresh.invalidation_generation,
           Option.is_some (!full_health_observation).snapshot,
           refresh.requested ))
+  ;;
+
+  let full_health_observation_failures () =
+    with_full_health_snapshot_lock (fun () ->
+      (Health_observation.for_scope ~workspace_epoch:(current_workspace_epoch ())
+         !full_health_observation).consecutive_failures)
   ;;
 end
 

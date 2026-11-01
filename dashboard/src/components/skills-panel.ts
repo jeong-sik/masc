@@ -54,6 +54,15 @@ export interface SkillRow {
   surface: SkillSurface | null
 }
 
+type NameSelection =
+  | { kind: 'effective' }
+  | { kind: 'shadowed'; winner: SkillIdentity }
+  | { kind: 'unavailable' }
+
+function identityKey(identity: SkillIdentity): string {
+  return JSON.stringify([identity.source_id, identity.package_id, identity.name])
+}
+
 function referenceKey(identity: SkillIdentity, contentRevision: string): string {
   return [identity.source_id, identity.package_id, identity.name, contentRevision].join('\u0000')
 }
@@ -773,6 +782,7 @@ function SkillsObservationPanel({ owner, onMutation }: {
   const search = useSignal('')
   const sourceFilter = useSignal('')
   const kindFilter = useSignal('')
+  const nameSelectionFilter = useSignal('')
   const createOpen = useSignal(false)
   const createMounted = useSignal(false)
   const editorNotice = useSignal<string | null>(null)
@@ -838,12 +848,22 @@ function SkillsObservationPanel({ owner, onMutation }: {
   if (res.state !== 'ready') {
     return html`<${EmptyState} message=${stateMessage(res.state)} />`
   }
-  const rows = sortSkillRows(mergeSkillRows(res.snapshot.skills, res.surfaces))
+  const effectiveIdentities = new Set(res.snapshot.effective_skills.map(identityKey))
+  const winners = new Map(res.snapshot.shadows.map(shadow => [identityKey(shadow.shadowed), shadow.winner]))
+  const rows = sortSkillRows(mergeSkillRows(res.snapshot.skills, res.surfaces)).map(row => {
+    const key = identityKey(row.identity)
+    const winner = winners.get(key)
+    const effective = effectiveIdentities.has(key)
+    const selection: NameSelection = effective && !winner ? { kind: 'effective' }
+      : !effective && winner ? { kind: 'shadowed', winner } : { kind: 'unavailable' }
+    return { ...row, selection }
+  })
   const sourceIds = [...new Set(rows.map(row => row.identity.source_id))]
   const query = search.value.trim().toLocaleLowerCase()
   const visibleRows = rows.filter(row =>
     (!sourceFilter.value || row.identity.source_id === sourceFilter.value)
     && (!kindFilter.value || (row.surface?.kind ?? 'unavailable') === kindFilter.value)
+    && (!nameSelectionFilter.value || row.selection.kind === nameSelectionFilter.value)
     && (!query || [row.name, row.description, row.source]
       .some(value => value.toLocaleLowerCase().includes(query))),
   )
@@ -899,8 +919,14 @@ function SkillsObservationPanel({ owner, onMutation }: {
           <option value="">All kinds</option><option value="instruction">Instruction</option>
           <option value="composition">Composition</option><option value="unavailable">Surface unavailable</option>
         </select></label>
-        <button class="ss-btn" type="button" onClick=${() => { search.value = ''; sourceFilter.value = ''; kindFilter.value = '' }}>Clear filters</button>
+        <label>Name selection<select class="ss-input" value=${nameSelectionFilter.value}
+          onChange=${(event: Event) => { nameSelectionFilter.value = (event.currentTarget as HTMLSelectElement).value }}>
+          <option value="">All name selections</option><option value="effective">Effective by name</option>
+          <option value="shadowed">Shadowed</option><option value="unavailable">Selection unavailable</option>
+        </select></label>
+        <button class="ss-btn" type="button" onClick=${() => { search.value = ''; sourceFilter.value = ''; kindFilter.value = ''; nameSelectionFilter.value = '' }}>Clear filters</button>
         <span role="status">${visibleRows.length} of ${rows.length} published Skills</span>
+        <div class="ss-muted text-3xs">Name selection follows catalog source precedence. Keeper configuration can further limit activation.</div>
       </div>` : null}
       ${rows.length > 0 ? html`<table hidden=${visibleRows.length === 0} class="ss-table" data-testid="skills-table">
         <thead>
@@ -917,6 +943,9 @@ function SkillsObservationPanel({ owner, onMutation }: {
               <tr hidden=${filtered} key=${rowKey} data-testid=${`skill-row-${row.name}`}>
                 <td>
                   <button class="text-left" type="button" aria-expanded=${isExpanded} aria-label=${`Read instructions for ${row.name}`} onClick=${() => { expanded.value = isExpanded ? null : rowKey }}><strong>${isExpanded ? '▾' : '▸'} ${row.name}</strong><span class="ss-muted ml-2">Read instructions</span></button><div class="ss-muted">${row.description}</div>
+                  ${row.selection.kind === 'effective' ? html`<div class="ss-muted text-3xs">Effective by name</div>`
+                    : row.selection.kind === 'shadowed' ? html`<div class="text-3xs text-[var(--color-status-warn)]">Shadowed by ${row.selection.winner.source_id}/${row.selection.winner.package_id}</div>`
+                      : html`<div class="text-3xs text-[var(--color-status-warn)]">Name selection unavailable</div>`}
                   ${row.diagnostics.map(
                     diagnostic => html`<div class="mt-1 text-3xs text-[var(--color-status-warn)]">⚠ ${diagnostic}</div>`,
                   )}

@@ -98,7 +98,7 @@ export interface SkillSnapshot {
   sources: readonly unknown[]
   skills: readonly SkillSnapshotEntry[]
   effective_skills: readonly SkillIdentity[]
-  shadows: readonly unknown[]
+  shadows: readonly { winner: SkillIdentity; shadowed: SkillIdentity }[]
   rejections: readonly SkillSnapshotRejection[]
 }
 
@@ -1068,7 +1068,10 @@ const SkillSnapshotSchema = Schema.Struct({
   sources: Schema.Array(Schema.Unknown),
   skills: Schema.Array(SkillSnapshotEntrySchema),
   effective_skills: Schema.Array(SkillIdentitySchema),
-  shadows: Schema.Array(Schema.Unknown),
+  shadows: Schema.Array(Schema.Struct({
+    winner: SkillIdentitySchema,
+    shadowed: SkillIdentitySchema,
+  })),
   rejections: Schema.Array(SkillSnapshotRejectionSchema),
 })
 

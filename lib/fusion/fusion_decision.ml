@@ -70,7 +70,7 @@ let read_events ~config ~run_id = protect (fun () ->
       let directory = Filename.concat root month in
       if Sys.is_directory directory then (
         let files = Sys.readdir directory in
-        Array.sort String.compare files;
+        Array.sort Dated_jsonl.Layout.compare_day_files files;
         Array.iter (fun name ->
           if Filename.check_suffix name ".jsonl" then
             Fs_compat.load_file (Filename.concat directory name)

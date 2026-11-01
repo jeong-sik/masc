@@ -2465,7 +2465,25 @@ let test_fusion_creation_emits_the_recorded_audience () =
    | Error (Board.Post_publication_failure.Board_error (Board.Already_exists _)) -> ()
    | Ok _ -> Alcotest.fail "mismatched fusion_producer was treated as an exact replay"
    | Error error -> Alcotest.fail (Board.Post_publication_failure.to_string error));
-  Alcotest.(check int) "an exact replay emits nothing" 1 (List.length !seen)
+  (match
+     Board_dispatch.create_post_once_by_fusion_run_id ~fusion_run_id:"run-no-producer"
+       ~author:"fusion-keeper" ~content:"fusion result headline @first-reader"
+       ~post_kind:Board.System_post ~visibility:Board.Unlisted ~ttl_hours:1
+       ~origin:{ origin with fusion_run_id = Some "run-no-producer"; fusion_producer = None } ()
+   with
+   | Ok (Board.Post_created _) -> ()
+   | Ok (Board.Post_already_present _) -> Alcotest.fail "first run-no-producer creation was a replay"
+   | Error error -> Alcotest.fail (Board.Post_publication_failure.to_string error));
+  (match
+     Board_dispatch.create_post_once_by_fusion_run_id ~fusion_run_id:"run-no-producer"
+       ~author:"fusion-keeper" ~content:"fusion result headline @first-reader"
+       ~post_kind:Board.System_post ~visibility:Board.Unlisted ~ttl_hours:1
+       ~origin:{ origin with fusion_run_id = Some "run-no-producer"; fusion_producer = Some "fusion-keeper" } ()
+   with
+   | Error (Board.Post_publication_failure.Board_error (Board.Already_exists _)) -> ()
+   | Ok _ -> Alcotest.fail "replay adding fusion_producer to a None-producer post was treated as exact"
+   | Error error -> Alcotest.fail (Board.Post_publication_failure.to_string error));
+  Alcotest.(check int) "an exact replay emits nothing" 2 (List.length !seen)
 
 let test_post_audience_survives_edit_and_restart () =
   let get = function

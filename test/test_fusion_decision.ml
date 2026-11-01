@@ -244,6 +244,8 @@ let test_read_source_ownership_and_no_adoption () = with_fixture (fun config _ _
   let _transferred =
     Board_dispatch.update_post
       ~post_id:(Board.Post_id.to_string workspace_source.id)
+      ~editor:"fusion-keeper"
+      ~content:workspace_source.body
       ~new_author:"peer" ()
     |> Result.map_error Board.show_board_error
     |> require "transfer source author"

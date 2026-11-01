@@ -303,10 +303,10 @@ let find_static_credential_by_token config ~token : (agent_credential, masc_erro
        require_live_credential ~now:(Time_compat.now ()) first)
 ;;
 
-let find_static_credential_in_index index ~token =
+let find_static_credential_with_lookup ~lookup ~token =
   let ( let* ) = Result.bind in
   let token_hash = sha256_hash token in
-  match Hashtbl.find_opt index token_hash with
+  match lookup token_hash with
   | None | Some [] -> Error (Auth (Auth_error.InvalidToken "Token mismatch"))
   | Some (first :: rest) ->
     let* () = check_credential_collisions
@@ -318,7 +318,7 @@ let find_static_credential_in_transaction ?(leaf_policy = Owned_regular_only) tr
   let ( let* ) = Result.bind in
   let* snapshot = credential_store_snapshot_in_transaction ~leaf_policy transaction in
   let index = build_token_index (List.map snd snapshot.current_credentials) in
-  find_static_credential_in_index index ~token
+  find_static_credential_with_lookup ~lookup:(Hashtbl.find_opt index) ~token
 ;;
 
 (** Resolve either an OAuth access token or the existing static bearer.

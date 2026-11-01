@@ -8,6 +8,8 @@ open Masc_domain
 include Auth_credential_base
 include Auth_credential_token
 
+module Credential_batch = Auth_credential_batch_projection
+
 let keeper_credential_write_authority config ~credentials ~agent_name stored
     (credential : agent_credential) =
   let open Result.Syntax in
@@ -107,46 +109,25 @@ let ensure_keeper_credentials config ~agent_names =
   with_credential_transaction config (fun transaction ->
     let open Result.Syntax in
     let* snapshot = credential_store_snapshot_in_transaction ~leaf_policy:Follow_regular_symlink transaction in
-    let credentials = List.map snd snapshot.current_credentials in
-    let index = build_token_index credentials in
-    let initially_shared = Hashtbl.fold (fun token owners hashes ->
-      if List.length owners > 1 then token :: hashes else hashes) index [] in
-    let find_token ~token =
-      if List.mem (sha256_hash token) initially_shared then
-        Error (Auth (Auth_error.InvalidToken "Credential bearer was shared at batch admission"))
-      else find_static_credential_in_index index ~token in
-    let by_name = Hashtbl.create (List.length credentials) in
-    List.iter (fun (credential : agent_credential) ->
-      Hashtbl.replace by_name credential.agent_name credential) credentials;
-    let update (credential : agent_credential) =
-      (match Hashtbl.find_opt by_name credential.agent_name with
-       | None -> ()
-       | Some previous ->
-         (match Hashtbl.find_opt index previous.token with
-          | None -> ()
-          | Some entries -> Hashtbl.replace index previous.token
-              (List.filter (fun (entry : agent_credential) ->
-                not (String.equal entry.agent_name credential.agent_name)) entries)));
-      let entries = match Hashtbl.find_opt index credential.token with
-        | None -> [] | Some entries -> entries in
-      Hashtbl.replace index credential.token (credential :: entries);
-      Hashtbl.replace by_name credential.agent_name credential in
-    let rec sync ownership = function
+    let admitted_shared, current = Credential_batch.admit snapshot.current_credentials in
+    let rec sync current = function
       | [] -> []
       | agent_name :: rest ->
+        let find_token ~token =
+          if Credential_batch.was_shared admitted_shared (sha256_hash token) then
+            Error (Auth (Auth_error.InvalidToken "Credential bearer was shared at batch admission"))
+          else find_static_credential_with_lookup
+              ~lookup:(Credential_batch.owners_for_hash current) ~token in
         let result = ensure_keeper_credential_in_transaction transaction ~agent_name
-            ~credentials:ownership
+            ~credentials:(Credential_batch.ownership current)
             ~find_token in
         (agent_name, result) ::
         (match result with
          | Ok (_, credential) ->
-             update credential;
              let stored = match credential.id with
                | None -> Stored_credential credential
                | Some id -> Stored_redirect (credential_uuid_file config id) in
-             let ownership = (stored, credential) :: List.filter (fun (_, owner) ->
-               not (String.equal owner.agent_name credential.agent_name)) ownership in
-             sync ownership rest
+             sync (Credential_batch.published current ~stored credential) rest
          | Error _ ->
              (* Preflight failures leave other Keepers independent. After any
                 failure, re-read admitted authority before deciding whether
@@ -154,10 +135,8 @@ let ensure_keeper_credentials config ~agent_names =
              (match credential_store_snapshot_in_transaction ~leaf_policy:Follow_regular_symlink transaction with
               | Error error -> List.map (fun name -> name, Error error) rest
               | Ok snapshot ->
-                  Hashtbl.clear index; Hashtbl.clear by_name;
-                  List.iter (fun (_, credential) -> update credential) snapshot.current_credentials;
-                  sync snapshot.current_credentials rest)) in
-    Ok (sync snapshot.current_credentials agent_names))
+                  sync (Credential_batch.refreshed snapshot.current_credentials) rest)) in
+    Ok (sync current agent_names))
   |> Result.join
 ;;
 

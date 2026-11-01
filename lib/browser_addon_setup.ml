@@ -246,11 +246,15 @@ let read_inventory ~lane_directory =
    source. With none enabled, the first disabled one stands for the
    operator's choice to keep the Add-on detached, and nothing is declared. *)
 let browser_declaration backend (snapshot : Lane_addon_config.snapshot) =
-  let declared =
-    List.filter
-      (fun declared -> Lane_addon_config.browser_source declared = Some backend)
-      snapshot.declarations
-  in
+  let declared = List.filter (fun declared -> Lane_addon_config.browser_source declared=Some backend) snapshot.declarations in
+  let declared=match backend with
+    | Browser_lane.Backend.Ego ->
+        let defaults=List.filter (fun (declared:Lane_addon_config.declaration) ->
+          Browser_ego_installation.target declared.binding=Ok Browser_ego_installation.Workspace_default) declared in
+        (match defaults with
+         | _::_ -> defaults
+         | [] -> List.filter (fun (declared:Lane_addon_config.declaration) -> declared.id=package_name backend) declared)
+    | Automation|Stagehand|Owned_firefox|External_host -> declared in
   match List.filter (fun (d : Lane_addon_config.declaration) -> d.enabled) declared with
   | [ enabled ] -> Ok (Some enabled)
   | _ :: _ :: _ as enabled ->

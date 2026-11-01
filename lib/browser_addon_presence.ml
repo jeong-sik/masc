@@ -86,13 +86,8 @@ let published_or_not = function
        | Ok published -> Published published
        | Error detail -> Withheld (Observation_unreadable detail))
 
-(* One lane reads the installations of its sources, one observation per
-   source: two installations of one source arrive as one ambiguous
-   observation. A source whose observation is withheld leaves out only what
-   it would publish, since the host cannot reach it either, and the lane
-   reads the others. Only when none of them published is the lane
-   unavailable, for the first withheld reason; the other lanes are read as
-   usual. *)
+(* Each installation supplies its own observation. Live identities are merged
+   only after duplicate client/Space checks; owned backends stay unambiguous. *)
 let lane reading lane =
   let read = List.filter_map (fun (observed : Lane_addon_runtime.browser_observation) ->
     if Browser_lane.Backend.lane observed.backend = lane

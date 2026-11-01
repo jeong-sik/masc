@@ -506,9 +506,9 @@ module For_testing : sig
     | Several_browser_services
   val document_route_services :
     services:'service list -> backend:('service -> Browser_lane.Backend.t) ->
-    lists:('service -> Browser_lane.client_id -> bool) -> Browser_lane.route -> ('service list, string) result
+    clients:('service -> Browser_lane.client_info list) -> Browser_lane.route -> ('service list, string) result
   (** The browser services a [browser_document] read on a route may go to;
-      a client of a live source two services serve is refused. *)
+      duplicate client IDs and conflicting native Space controllers are refused. *)
   val choose_document_service :
     visibility:visibility -> ('service * visibility) list -> 'service document_service
   (** Which browser Add-on a [browser_document] source reads: only one whose
@@ -642,10 +642,9 @@ type browser_observation = {
 }
 val browser_observations : config:Workspace.config -> access:Lane_addon_sources.access ->
   browser_observation list
-(** The cached observations of the browser installations the caller may
-    read, found by their package's service and read per source they serve,
-    as {!observation_for_export} reads one export: two installations of one
-    source are [Ambiguous_installations] for that source only. A released
+(** The cached observations of each browser installation the caller may
+    read, found by its package's service. Each installation keeps its own
+    producer identity; live clients are merged only after identity checks. A released
     installation is left out, and a detaching incarnation gives way to its
     replacement. Runs on the Lane
     Add-on owner domain and waits for no browser command. *)

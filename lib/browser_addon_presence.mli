@@ -56,8 +56,7 @@ val read :
 (** The lane as the installations of its sources say: their observations
     merged ({!Browser_addon_observation.merge}), the way the host uses them,
     or why there is none. A source whose observation is refused or
-    unreadable, including one two installations serve
-    ({!Lane_addon_runtime.Ambiguous_installations}), leaves out only what it
+    unreadable leaves out only what it
     would publish, and its own package row says why. The lane is unavailable
     only when none of them published, for the first refusal or unreadable
     observation. With nothing published and nothing withheld, the

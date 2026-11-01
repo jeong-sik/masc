@@ -43,9 +43,6 @@ let refused ?because name ~issue route=match issue route with
       && match because with None -> true | Some reason -> String_util.string_contains_substring ~needle:reason (Tool_result.message result))
   | Ok _,_ -> fail (name ^ ": the command must be refused")
   | Error _,_::_ -> fail (name ^ ": a refused command reached a worker")
-(* The reason a command is refused when a client's live source is doubled;
-   without it the client is refused only as one the choice does not list. *)
-let doubled_live="served by more than one attached browser Add-on"
 let ids clients=List.sort compare (List.map (fun (c:B.client_info) -> B.client_id_to_string c.client_id) clients)
 let snapshot host=match Browser_addon_host.selection_snapshot host with
   | Ok (published,_) -> published
@@ -94,15 +91,32 @@ let a_doubled_source_fails_alone () =
         (Result.is_error (Browser_addon_host.snapshot host ~backend:B.Backend.Automation));
       check bool "and is unobserved in the choice" false (snapshot host).automation.registered)
 
-(* A client does not say which live source it came from, so no client of a
-   worker serving a doubled live source is used, though that worker lists it. *)
-let a_doubled_live_source_leaves_its_clients_unused () =
-  run_with [one Ego [ego];one Ego [];one External_host [extension]]
+let independent_ego_spaces_route_exact_clients () =
+  let first={ego with space=Some {B.id=51;name="First Goal"}} in
+  let second={ego with client_id=(client 5 B.Ego_lite B.Ego_task_space).client_id;
+    space=Some {B.id=52;name="Second Goal"}} in
+  run_with [one Ego [first];one Ego [second];one External_host [extension]]
+    (fun ~config ~host ~issue ~attached ->
+      reaches "first Space reaches exactly its publisher" ~issue (live first) B.Backend.Ego;
+      reaches "second Space reaches exactly its publisher" ~issue (live second) B.Backend.Ego;
+      check (list string) "all distinct live clients remain visible" (ids [first;second;extension]) (ids (snapshot host).clients);
+      let goal=match Goal_store.upsert_goal config ~title:"Second Space routing" ~metric:"verified" ~target_value:"1" () with
+        | Ok (goal,_) -> goal.id | Error error -> fail (Goal_store.write_error_to_string error) in
+      let bound=match Browser_addon_host.bind_goal_space host ~goal_id:goal ~client_id:second.client_id with
+        | Ok commit -> commit.binding | Error error -> fail (Browser_goal_space.error_message error) in
+      let second_instance=(List.nth attached 1).F.instance_id in
+      check string "Goal pin records the actual second publisher" second_instance bound.addon_instance_id;
+      check bool "a bound initial browse dispatches on that exact Space" true
+        (Result.is_ok (Browser_addon_host.issue ~goal_space:bound host ~preference:Browser_selection.Automatic B.Tabs_list));
+      check bool "unbound automatic browse never guesses among clients" true
+        (Result.is_error (Browser_addon_host.issue host ~preference:Browser_selection.Automatic B.Tabs_list)));
+  let conflicting={second with space=first.space} in
+  run_with [one Ego [first];one Ego [conflicting];one External_host [extension]]
     (fun ~config:_ ~host ~issue ~attached:_ ->
-      refused "a client of a live source two workers serve is refused for that reason" ~because:doubled_live
-        ~issue (live ego);
-      reaches "a client of another live source is served" ~issue (live extension) B.Backend.External_host;
-      check (list string) "the choice lists only the usable clients" (ids [extension]) (ids (snapshot host).clients))
+      refused "first controller of duplicate native Space is refused" ~because:"multiple browser controllers" ~issue (live first);
+      refused "second controller of duplicate native Space is refused" ~because:"multiple browser controllers" ~issue (live conflicting);
+      reaches "unrelated client remains usable" ~issue (live extension) B.Backend.External_host;
+      check (list string) "duplicate native controllers are excluded from choices" (ids [extension]) (ids (snapshot host).clients))
 
 (* A service that advertises no browser command still serves its source:
    it is counted, so the source is not given to another, and a command to it
@@ -149,7 +163,7 @@ let () = run "browser backend routes" ["one worker per source",[
   test_case "every source reaches its own worker" `Slow every_source_reaches_its_own_worker;
   test_case "a missing source fails alone" `Slow a_missing_source_fails_alone;
   test_case "a doubled source fails alone" `Slow a_doubled_source_fails_alone;
-  test_case "a doubled live source leaves its clients unused" `Slow a_doubled_live_source_leaves_its_clients_unused;
+  test_case "independent Ego Spaces route exact clients and reject duplicate controllers" `Slow independent_ego_spaces_route_exact_clients;
   test_case "a service without its command still counts" `Slow a_service_without_its_command_still_counts;
   test_case "a client two workers list is refused" `Slow a_client_two_workers_list_is_refused;
   test_case "a first native poll needs the one external host worker" `Slow

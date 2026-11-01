@@ -243,6 +243,23 @@ let test_an_existing_declaration_of_a_source_is_left_as_it_is () =
       (Sys.file_exists (declaration_path base B.Automation));
     check string "the operator's file is unchanged" text (read own))
 
+let test_distinct_ego_installations_preserve_workspace_declaration () =
+  with_workspace (fun base ->
+    let manifest_path=copy_package base B.Ego in
+    let original=Filename.concat (lane_directory base) "ego-default.toml" in
+    let target=Filename.concat (lane_directory base) "ego-goal.toml" in
+    let original_text=declaration_text ~id:"ego-default" ~manifest_path () in
+    let target_text=declaration_text ~id:"ego-goal" ~manifest_path () ^ "space=\"Own Goal\"\n" in
+    write original original_text;write target target_text;
+    let installed=installed_one base B.Ego in
+    (match installed.declaration with
+     | S.Present {path;_} -> check string "setup retains the workspace-default installation" original path
+     | S.Created _ -> fail "setup created another default");
+    check string "default declaration unchanged" original_text (read original);
+    check string "Goal declaration unchanged" target_text (read target);
+    check bool "deployment does not blanket-disable multiple Ego Spaces" true
+      (Masc.Browser_addon_preflight.doubled_sources ~base_path:base=[]))
+
 let test_two_enabled_declarations_of_one_source_are_refused () =
   with_workspace (fun base ->
     let manifest_path = copy_package base B.Automation in
@@ -411,6 +428,8 @@ let () =
             test_a_changed_package_file_is_rewritten_and_the_declaration_kept
         ; test_case "an existing declaration of a source is left as it is" `Quick
             test_an_existing_declaration_of_a_source_is_left_as_it_is
+        ; test_case "distinct Ego installations preserve the workspace default" `Quick
+            test_distinct_ego_installations_preserve_workspace_declaration
         ; test_case "two enabled declarations of one source are refused" `Quick
             test_two_enabled_declarations_of_one_source_are_refused
         ; test_case "a disabled declaration beside the enabled one is not counted" `Quick

@@ -1,9 +1,10 @@
 (** Public host admission for the installed browser Add-ons. The caller
     supplies verified host authority; model arguments cannot select an
     installation. One handle retains every serving browser service, with its
-    own advertised tool when it has one, across a workflow. Each source is served by exactly
-    one of them: a source no service serves, or two do, is unusable alone,
-    and the others are still chosen. Calls never retry or fall back to the
+    own advertised tool when it has one, across a workflow. Live clients route
+    to their unique publishing service; duplicate client or native Space
+    controllers are refused. Owned backends still require one service.
+    Calls never retry or fall back to the
     core browser queue. *)
 type t
 val connect : config:Workspace.config -> access:Lane_addon_sources.access ->
@@ -28,8 +29,8 @@ type snapshot_failure = Snapshot_unavailable of string | Snapshot_unreadable of 
 (** The worker gave no snapshot, or gave one the host cannot decode. *)
 val selection_snapshot : t -> (Browser_addon_observation.published * Browser_selection.snapshot, snapshot_failure) result
 (** Every service's [Snapshot] reply, asked side by side, merged as the host
-    chooses from it: the live clients of the services that serve a live
-    source no other service serves, and automation and Stagehand as their own
+    chooses from it: nonconflicting live clients of every live service,
+    and automation and Stagehand as their own
     service answered. A
     service that did not answer is left out of this choice only; no answer
     at all is the failure. A worker answers only while it serves, so a live
@@ -60,8 +61,11 @@ val issue : ?goal_space:Browser_goal_space.t -> ?upload_paths:string list -> ?re
     Choose the browser from the services' snapshots, invoke the advertised
     tool of the service that serves it once on that route, and decode its
     success receipt. Only the services the preference can reach are asked
-    for a snapshot. A client that two services list is refused, and so is a
-    client of a live source two services serve. An explicit owned
+    for a snapshot. Duplicate client IDs and multiple controllers of one
+    native Ego Space are refused. A handle cannot silently ignore a newly
+    visible live service; reacquire it after service topology changes.
+    Incomplete live observations never authorize an automatic fallback.
+    An explicit owned
     route without [required_actions] needs no snapshot. The receipt names the
     browser the host chose; the worker states no identity. A worker refusal
     after the snapshot (the client left, the lane turned off) is returned as

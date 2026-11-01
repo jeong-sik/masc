@@ -113,13 +113,21 @@ type gathered = {
   published : Browser_addon_observation.published;
   selection : Browser_selection.snapshot;
   holders : (string * served) list;
-  doubled : string list;
-      (** Clients listed by a service whose live source another serves too. *)
+  conflicts : Browser_addon_observation.live_conflict list;
+  listed : Browser_lane.client_info list;
+  incomplete : bool;
 }
 (* [reach] names the services a request can go to; only those are asked, so
    a slow worker of another source does not hold the request up. Whether a
    live client is usable is judged among every service. *)
 let gather t ~reach =
+  let current=R.browser_services ~config:t.config ~access:t.access in
+  let* ()=if List.exists (fun (service:R.browser_service) ->
+    Browser_addon_observation.serves_live service.backend && not (List.exists (fun (served:served) ->
+      served.service.instance_id=service.instance_id
+      && Lane_addon_tool_export.equal_owner served.service.owner service.owner) t.services)) current
+    then Error (Snapshot_unavailable "live browser services changed; reacquire the browser handle before selecting a Page")
+    else Ok () in
   let among=List.map (fun (served:served) -> served.service.backend) t.services in
   match List.filter reach t.services with
   | [] -> Error (Snapshot_unavailable "no attached browser Add-on serves the requested browser")
@@ -133,20 +141,21 @@ let gather t ~reach =
       served.service.backend,Result.to_option answer) answers) in
     let live=List.filter_map (fun ((served:served),answer) -> match answer with
       | Ok (listed:Browser_addon_observation.published)
-        when Browser_addon_observation.lists_usable_clients ~among served.service.backend -> Some (served,listed)
+        when Browser_addon_observation.serves_live served.service.backend -> Some (served,listed)
       | Ok _|Error _ -> None) answers in
-    let doubled=List.concat_map (fun ((served:served),answer) -> match answer with
-      | Ok (listed:Browser_addon_observation.published)
-        when Browser_addon_observation.serves_live served.service.backend
-          && not (Browser_addon_observation.lists_usable_clients ~among served.service.backend) ->
-          List.map (fun (client:Browser_lane.client_info) -> Browser_lane.client_id_to_string client.client_id) listed.clients
-      | Ok _|Error _ -> []) answers in
-    Ok {published;doubled;
+    let listed=List.concat_map (fun (_, (published:Browser_addon_observation.published)) -> published.clients) live in
+    let conflicts=Browser_addon_observation.live_conflicts listed in
+    let incomplete=List.exists (fun (_,answer) -> Result.is_error answer) answers in
+    Ok {published;conflicts;listed;incomplete;
         selection={live_activity=(match live with [] -> Browser_lane.Unobserved | _::_ -> Browser_lane.Enabled);
           live_clients=published.clients;live_space_presence=published.space_presence;automation=published.automation;stagehand=published.stagehand};
         holders=List.concat_map (fun (served,(listed:Browser_addon_observation.published)) ->
           List.map (fun (client:Browser_lane.client_info) ->
             Browser_lane.client_id_to_string client.client_id,served) listed.clients) live}
+let client_conflict gathered id =
+  List.find_map (fun (client:Browser_lane.client_info) -> if client.client_id<>id then None else
+    List.find_opt (Browser_addon_observation.conflicts_with client) gathered.conflicts) gathered.listed
+
 let selection_snapshot t = gather t ~reach:(fun _ -> true) |> Result.map (fun gathered -> gathered.published,gathered.selection)
 (* The service a chosen browser is run on. A client two services list cannot
    be told apart, so it is refused rather than sent to one of them. *)
@@ -172,15 +181,16 @@ let bind_goal_space t ~goal_id ~client_id =
   let id=Browser_lane.client_id_to_string client_id in
   let holders=List.filter_map (fun (holder,(served:served)) ->
     if String.equal holder id then Some served else None) gathered.holders in
+  let* ()=match client_conflict gathered client_id with
+    | Some conflict -> Error (Browser_goal_space.Conflict (Browser_addon_observation.conflict_message conflict))
+    | None -> Ok () in
   match List.find_opt (fun (client:Browser_lane.client_info) -> client.client_id=client_id) gathered.published.clients with
   | None -> Error (Browser_goal_space.Unavailable "clientId is not an observed browser connection")
   | Some {transport=Ego_task_space;space=None;_}
   | Some {transport=(Web_extension|Webdriver_bidi);_} ->
       Error (Browser_goal_space.Invalid "Goal Space binding requires an observed Ego Space connection")
   | Some {transport=Browser_lane.Ego_task_space;space=Some space;_} ->
-    if List.mem id gathered.doubled then
-      Error (Browser_goal_space.Conflict "the live source of that browser is served by more than one attached browser Add-on, so it is not used until one is detached")
-    else match holders with
+    match holders with
       | [served] ->
           Browser_goal_space.bind t.config ~goal_id ~addon_instance_id:served.service.instance_id
             ~space ~actor:(Lane_addon_call_context.actor_label t.principal)
@@ -260,9 +270,14 @@ let resolve ?goal_space ~required_actions t ~preference verb ~start_time =
             ~effect_disposition:Tool_result.Proven_pre_effect
             ("browser snapshot is unreadable; no browser command was dispatched: " ^ detail) in
       let published=gathered.published and snapshot=gathered.selection in
+      let* ()=match preference,goal_space with
+        | Browser_selection.Automatic,None when gathered.incomplete ->
+            fail ~class_:Tool_result.Dependency_unavailable ~effect_disposition:Tool_result.Proven_pre_effect
+              "browser worker observations are incomplete; no automatic browser fallback was dispatched"
+        | (Automatic|Exact (Browser_lane.Live_route _|Automation_route|Stagehand_route)),(None|Some _) -> Ok () in
       (* A Goal Space resolves only among the connections the service of its
          own installation lists; the chosen client then meets the same
-         doubled-source refusal as an explicit one. *)
+         native identity conflict refusal as an explicit one. *)
       let* preference=match goal_space with
         | None -> Ok preference
         | Some (binding:Browser_goal_space.t) ->
@@ -271,7 +286,7 @@ let resolve ?goal_space ~required_actions t ~preference verb ~start_time =
           let listed=List.filter (fun (client:Browser_lane.client_info) ->
             let id=Browser_lane.client_id_to_string client.client_id in
             List.exists (fun (holder,(served:served)) -> String.equal holder id
-              && String.equal served.service.instance_id binding.addon_instance_id) gathered.holders) published.clients in
+              && String.equal served.service.instance_id binding.addon_instance_id) gathered.holders) gathered.listed in
           (match owner with
            | None -> Error (Browser_goal_space.Unavailable
                "the browser Add-on that published the Goal's Ego Space is not attached; no browser command was dispatched")
@@ -282,10 +297,15 @@ let resolve ?goal_space ~required_actions t ~preference verb ~start_time =
               ~class_:Tool_result.Workflow_rejection ~effect_disposition:Tool_result.Proven_pre_effect
               (Browser_goal_space.error_message error)) in
       let* ()=match preference with
-        | Exact (Browser_lane.Live_route (Some id))
-          when List.mem (Browser_lane.client_id_to_string id) gathered.doubled ->
-            refuse "the live source of that browser is served by more than one attached browser Add-on, so it is not used until one is detached"
-        | Automatic|Exact (Browser_lane.Live_route _|Automation_route|Stagehand_route) -> Ok () in
+        | Exact (Browser_lane.Live_route (Some id)) ->
+            (match client_conflict gathered id with
+             | Some conflict -> refuse (Browser_addon_observation.conflict_message conflict)
+             | None -> Ok ())
+        | Automatic ->
+            (match gathered.conflicts with
+             | conflict::_ -> refuse (Browser_addon_observation.conflict_message conflict)
+             | [] -> Ok ())
+        | Exact (Browser_lane.Live_route None|Automation_route|Stagehand_route) -> Ok () in
       let* selected=Browser_selection.choose ~required_actions ~verb ~bound:(Browser_selection.bound verb) ~snapshot preference
         |> Result.fold ~ok:Result.ok ~error:(unchosen ~clients:published.clients) in
       let* browser=Browser_selection.target ~verb ~snapshot selected.route

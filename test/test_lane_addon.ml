@@ -424,36 +424,34 @@ let test_a_document_read_goes_to_the_service_of_its_source () =
   let module B = Browser_lane in
   let client n = match B.client_id_of_string (Printf.sprintf "0c000000-0000-4000-8000-%012d" n) with
     | Ok id -> id | Error detail -> fail detail in
-  let ego = client 1 and extension = client 2 in
-  (* A service: its name, the sources it serves and the clients its last
-     observation lists. *)
-  let service name backend listed = name, backend, listed in
-  let read services route = T.document_route_services ~services ~backend:(fun (_, backend, _) -> backend)
-      ~lists:(fun (_, _, listed) client -> List.mem client listed) route
-    |> Result.map (List.map (fun (name, _, _) -> name)) in
-  let automation = service "automation" B.Backend.Automation []
-  and stagehand = service "stagehand" B.Backend.Stagehand []
-  and ego_worker = service "ego" B.Backend.Ego [ego]
-  and native = service "native" B.Backend.External_host [extension] in
-  let all = [automation; stagehand; ego_worker; native] in
-  let is_refused = function Error _ -> true | Ok _ -> false in
-  check bool "automation reads on its own service" true (read all B.Automation_route = Ok ["automation"]);
-  check bool "Stagehand reads on its own service" true (read all B.Stagehand_route = Ok ["stagehand"]);
-  check bool "a live client reads on the service that lists it" true
-    (read all (B.Live_route (Some ego)) = Ok ["ego"]);
-  check bool "and another on its own" true (read all (B.Live_route (Some extension)) = Ok ["native"]);
-  check bool "the one live service there is reads a client its observation does not list yet" true
-    (read [automation; service "ego" B.Backend.Ego []] (B.Live_route (Some ego)) = Ok ["ego"]);
-  let doubled = [ego_worker; service "second ego" B.Backend.Ego []; native] in
-  check bool "a client of a doubled live source is refused" true
-    (is_refused (read doubled (B.Live_route (Some ego))));
-  check bool "a client of another live source still reads" true
-    (read doubled (B.Live_route (Some extension)) = Ok ["native"]);
-  check bool "a client no doubled service lists yet is not sent to the other live service" true
-    (read [service "ego" B.Backend.Ego []; service "second ego" B.Backend.Ego []; native]
-       (B.Live_route (Some ego)) = Ok []);
-  check bool "a read that names no client is refused while a live source is doubled" true
-    (is_refused (read [ego_worker; service "second ego" B.Backend.Ego []] (B.Live_route None)))
+  let info id space : B.client_info = {client_id=id;browser=B.Ego_lite;version="fixture";engine_version="fixture";
+    transport=B.Ego_task_space;space=Some {id=space;name="fixture"}} in
+  let ego=info (client 1) 51 and second=info (client 3) 52 in
+  let extension={ego with client_id=client 2;browser=B.Zen;transport=B.Web_extension;space=None} in
+  let service name backend listed = name,backend,listed in
+  let read services route = T.document_route_services ~services ~backend:(fun (_,backend,_) -> backend)
+      ~clients:(fun (_,_,listed) -> listed) route |> Result.map (List.map (fun (name,_,_) -> name)) in
+  let automation=service "automation" B.Backend.Automation []
+  and stagehand=service "stagehand" B.Backend.Stagehand []
+  and ego_worker=service "ego" B.Backend.Ego [ego]
+  and second_worker=service "second ego" B.Backend.Ego [second]
+  and native=service "native" B.Backend.External_host [extension] in
+  let all=[automation;stagehand;ego_worker;second_worker;native] in
+  let route client=B.Live_route (Some client.B.client_id) in
+  check bool "automation reads on its own service" true (read all B.Automation_route=Ok ["automation"]);
+  check bool "Stagehand reads on its own service" true (read all B.Stagehand_route=Ok ["stagehand"]);
+  check bool "first Ego publisher is exact" true (read all (route ego)=Ok ["ego"]);
+  check bool "second Ego publisher is exact" true (read all (route second)=Ok ["second ego"]);
+  check bool "another live source remains exact" true (read all (route extension)=Ok ["native"]);
+  check bool "unknown client is never assigned to the only worker" true
+    (read [automation;service "empty ego" B.Backend.Ego []] (route ego)=Ok []);
+  check bool "duplicate client is refused" true
+    (Result.is_error (read [ego_worker;service "copy" B.Backend.Ego [ego]] (route ego)));
+  let same_space={second with space=ego.space} in
+  check bool "distinct client UUIDs cannot hide duplicate native Space" true
+    (Result.is_error (read [ego_worker;service "copy" B.Backend.Ego [same_space]] (route same_space)));
+  check bool "a read without a client cannot choose between workers" true
+    (Result.is_error (read all (B.Live_route None)))
 
 (* A failed DOS installation may still hold the controller in its state, so a
    release is not reported as done, and a shared call names the installation. *)

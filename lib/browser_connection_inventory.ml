@@ -5,12 +5,15 @@ type issue =
   | Source_unreadable of {instance_id:string; message:string}
   | Source_unready of {instance_id:string; message:string}
   | Duplicate_client of {client_id:B.client_id; instances:string list}
+  | Duplicate_ego_space of {space_id:int; instances:string list}
 let issue_message = function
   | Source_unavailable {instance_id;message} | Source_unreadable {instance_id;message}
   | Source_unready {instance_id;message} -> "Browser worker " ^ instance_id ^ ": " ^ message
   | Duplicate_client {client_id;instances} ->
       "Browser client " ^ B.client_id_to_string client_id ^ " is reported by multiple workers: "
       ^ String.concat ", " instances
+  | Duplicate_ego_space {space_id;instances} ->
+      Printf.sprintf "Ego Space %d is reported by conflicting browser controllers: %s" space_id (String.concat ", " instances)
 let issue_to_json issue =
   let source kind instance_id message = `Assoc ["kind",`String kind;
     "instanceId",`String instance_id;"message",`String message] in
@@ -21,6 +24,8 @@ let issue_to_json issue =
   | Duplicate_client {client_id;instances} -> `Assoc ["kind",`String "duplicate_client";
       "clientId",`String (B.client_id_to_string client_id);
       "instances",`List (List.map (fun id -> `String id) instances)]
+  | Duplicate_ego_space {space_id;instances} -> `Assoc ["kind",`String "duplicate_ego_space";
+      "spaceId",`Int space_id;"instances",`List (List.map (fun id -> `String id) instances)]
 let issues_to_json issues = `List (List.map issue_to_json issues)
 open Result.Syntax
 let issue_of_json value =
@@ -30,6 +35,14 @@ let issue_of_json value =
   let text key=match List.assoc_opt key fields with
     | Some (`String value) when String.trim value<>"" -> Ok value
     | None|Some _ -> Error ("invalid inventory issue " ^ key) in
+  let instances ()=match List.assoc_opt "instances" fields with
+    | Some (`List values) ->
+      let rec decode acc = function
+        | [] -> Ok (List.rev acc)
+        | `String value::rest when String.trim value<>"" && not (List.mem value acc) -> decode (value::acc) rest
+        | _::_ -> Error "invalid or duplicate inventory issue instances" in
+      decode [] values
+    | None|Some _ -> Error "invalid inventory issue instances" in
   let* kind=text "kind" in
   match kind with
   | "unavailable"|"unreadable"|"unready" ->
@@ -43,17 +56,20 @@ let issue_of_json value =
   | "duplicate_client" ->
       let* ()=exact ["kind";"clientId";"instances"] in
       let* raw=text "clientId" in let* client_id=B.client_id_of_string raw in
-      let* instances=match List.assoc_opt "instances" fields with
-        | Some (`List values) ->
-          let rec decode acc = function
-            | [] -> Ok (List.rev acc)
-            | `String value::rest when String.trim value<>"" && not (List.mem value acc) -> decode (value::acc) rest
-            | _::_ -> Error "invalid or duplicate inventory issue instances" in
-          decode [] values
-        | None|Some _ -> Error "invalid inventory issue instances" in
+      let* instances=instances () in
       (match instances with _::_::_ -> Ok (Duplicate_client {client_id;instances})
        | []|[_] -> Error "duplicate client issue requires multiple instances")
+  | "duplicate_ego_space" ->
+      let* ()=exact ["kind";"spaceId";"instances"] in
+      let* space_id=match List.assoc_opt "spaceId" fields with
+        | Some (`Int id) ->
+            Browser_configuration.validate_ego_space (Browser_configuration.Existing_space id) |> Result.map (fun () -> id)
+        | None|Some _ -> Error "invalid inventory issue Space ID" in
+      let* instances=instances () in
+      (match instances with _::_ -> Ok (Duplicate_ego_space {space_id;instances})
+       | [] -> Error "duplicate Space issue requires controller instances")
   | _ -> Error "unknown inventory issue kind"
+
 let issues_of_json = function
   | `List values ->
       let rec decode acc = function
@@ -64,7 +80,6 @@ let issues_of_json = function
 type observation = {instance_id:string; published:Browser_addon_observation.published}
 type decision = Selected of S.selected | Refused of S.error | Incomplete | Worker_scope_required
 type t = {client_rows:Yojson.Safe.t list; issues:issue list; browse:decision; work:decision}
-module Client_map = Map.Make (struct type t=B.client_id let compare=compare end)
 module Instance_set = Set.Make (String)
 let snapshot (published:Browser_addon_observation.published) : S.snapshot =
   {live_activity=B.Enabled;live_clients=published.clients;live_space_presence=published.space_presence;automation=published.automation;stagehand=published.stagehand}
@@ -81,15 +96,16 @@ let build ~observations ~issues =
     | None -> pairs,Source_unreadable {instance_id=observation.instance_id;
         message="client metadata and row inventory do not match"}::issues) ([],List.rev issues) observations in
   let pairs=List.rev pairs and issues=List.rev issues in
-  let owners=List.fold_left (fun owners (instance_id,(client:B.client_info),_) ->
-    Client_map.update client.client_id (function
-      | None -> Some (Instance_set.singleton instance_id)
-      | Some instances -> Some (Instance_set.add instance_id instances)) owners) Client_map.empty pairs in
-  let duplicate_ids=Client_map.filter (fun _ instances -> Instance_set.cardinal instances>1) owners in
-  let duplicate_issues=Client_map.bindings duplicate_ids |> List.map (fun (client_id,instances) ->
-    Duplicate_client {client_id;instances=Instance_set.elements instances}) in
+  let conflicts=Browser_addon_observation.live_conflicts (List.map (fun (_,client,_) -> client) pairs) in
+  let duplicate_issues=List.map (fun conflict ->
+    let instances=List.fold_left (fun owners (instance_id,client,_) ->
+      if Browser_addon_observation.conflicts_with client conflict then Instance_set.add instance_id owners else owners)
+      Instance_set.empty pairs |> Instance_set.elements in
+    match conflict with
+    | Browser_addon_observation.Duplicate_client client_id -> Duplicate_client {client_id;instances}
+    | Duplicate_ego_space space_id -> Duplicate_ego_space {space_id;instances}) conflicts in
   let issues=issues @ duplicate_issues in
-  let pairs=List.filter (fun (_, (client:B.client_info),_) -> not (Client_map.mem client.client_id duplicate_ids)) pairs in
+  let pairs=List.filter (fun (_,client,_) -> not (List.exists (Browser_addon_observation.conflicts_with client) conflicts)) pairs in
   let browse,work=match issues,observations with
     | _::_,_ -> Incomplete,Incomplete
     | [],[observation] ->

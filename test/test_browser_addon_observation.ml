@@ -156,8 +156,7 @@ let unavailable_reads_back () =
     | `Assoc fields -> `Assoc (("unavailable",`List [`Assoc ["backend",`String "ego"]]) :: List.remove_assoc "unavailable" fields)
     | _ -> assert false in
   check bool "an incomplete unavailable reason is not accepted" true (Result.is_error (Observation.decode_snapshot malformed))
-(* Per-source workers (#46395): the Ego worker that answers for the live lane
-   brings its unavailability; a doubled source answers for nothing. *)
+(* Distinct live workers retain their source observations. *)
 let merge_keeps_the_live_workers_unavailability () =
   let unavailable = Observation.Ego_user_owned_name {space="masc";observed_at=42.} in
   let published unavailable =
@@ -167,7 +166,7 @@ let merge_keeps_the_live_workers_unavailability () =
   let merged = Observation.merge ~among:[B.Ego; B.Owned_firefox] [B.Ego, Some ego; B.Owned_firefox, Some firefox] in
   check bool "the live Ego worker's unavailability survives the merge" true (merged.unavailable=[unavailable]);
   let doubled = Observation.merge ~among:[B.Ego; B.Ego] [B.Ego, Some ego] in
-  check bool "a doubled live source publishes no unavailability" true (doubled.unavailable=[])
+  check bool "another live worker does not suppress known unavailability" true (doubled.unavailable=[unavailable])
 let ()=run "browser addon observation" ["publication",[
   test_case "native inventory distinguishes missing and observation unknown" `Quick native_space_presence;
   test_case "typed Space presence reaches cached host observations" `Quick published_space_presence;

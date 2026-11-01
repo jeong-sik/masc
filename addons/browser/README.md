@@ -36,8 +36,9 @@ once that table is written.
   (`<base-path>/.masc/config/lane-addons/`, or the one under
   `MASC_CONFIG_DIR`). An existing declaration is left as it is; setup reports
   it, and names the `manifest_path` line to use when it points at another copy.
-  Two enabled declarations of one source are refused, because the server would
-  attach both and use neither for that source.
+  Owned and external-host sources require one enabled declaration. Ego
+  installations may name independent Spaces in `binding.space`; setup retains
+  the workspace-default declaration instead of replacing a Goal installation.
 
 Setup attaches nothing. The server attaches the declared Add-ons when it starts
 and on its maintenance pass. Set `enabled = false` in a declaration to keep
@@ -47,11 +48,49 @@ that source detached. `browser-lane-setup --no-addon` makes a mode other than
 The deployment preflight (`scripts/check-runtime-deployment-preflight.sh`) refuses a
 workspace that has a browser lane host installed and no enabled declaration of
 `browser-external`, because that server answers every native host poll with
-HTTP 503 (`no_browser_addon`). It also refuses two enabled declarations of one
-source. `scripts/install-local-build.sh` runs it with
+HTTP 503 (`no_browser_addon`). It also refuses duplicate owned/external-host
+source declarations. Distinct Ego installations are routed by their observed
+client and native Space identities. `scripts/install-local-build.sh` runs it with
 `--browser-addon-declared-by-caller` when it installs the Add-on, because the
 setup step above writes the declaration after the check. With
 `--no-browser-addon` the check applies.
+
+An Ego installation can select its own Space without changing the workspace's
+`[browser.live.ego]` table:
+
+```toml
+id = "browser-ego-own-goal"
+run_id = "own-goal"
+manifest_path = "/absolute/path/to/workspace/.masc/packages/browser-ego/lane.toml"
+
+[binding]
+sources = []
+space = "unique-own-goal-space"
+```
+
+`space` is a nonblank native name to create/resume, or a nonnegative
+JavaScript-safe integer to resume that exact existing Space. Numeric text is a
+name. Omission uses the existing workspace Space; an invalid explicit value
+never falls back. The host still chooses the configured Ego executable. This
+setting participates in the installation revision and grants no claim, adoption
+or takeover of a user-owned Space. Declaration save and manual attach validate
+it before worker allocation.
+
+Discover the resulting live clients and retain the exact client UUID/Space.
+Distinct Spaces on distinct workers remain visible; an automatic ambiguous
+choice is refused. A UUID advertised by multiple controllers, or two controllers
+of the same native Space ID, is refused before Page dispatch. Space IDs are
+interpreted inside the single Ego native runtime this workspace serves; separate
+Ego runtimes need a distinct namespace before they can share this registry.
+
+`masc_browser_session action=bind_goal` can select an already observed Space for
+an existing Goal. It is selection metadata, not an ACL or a provisioning receipt.
+Keeper initial automatic discovery uses its current Task's Goal; later calls
+retain the selected lane/client. A reconnect may change the client UUID but must
+resolve the same installation and numeric Space. Replacement installations do
+not inherit a binding silently. Task completion requires a confirmed native
+`finish_space` receipt for only the owned Space before detaching that installation;
+retirement alone preserves an active Space, and an unknown finish is never replayed.
 
 The worker exports `browser_command` to its host only. A browser service's
 exports are not public tools, so Keeper tool lists and MCP `tools/list` leave

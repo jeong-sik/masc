@@ -115,21 +115,49 @@ let read (output : Lane_addon_types.output) = match output.rows with
 let unobserved : Browser_selection.work_browser =
   {activity=Browser_lane.Unobserved;registered=false;session=Browser_lane.Browser_unknown;locate=false}
 let serves_live backend = Browser_lane.Backend.lane backend = Browser_lane.Lane_name.Live
-(* What a worker publishes does not say which worker of its source it came
-   from, so when two workers serve one source neither answers for its lane. *)
-let answers_for ~among lane backend =
-  Browser_lane.Backend.lane backend = lane
-  && List.length (List.filter (fun other -> other = backend) among) < 2
-let lists_usable_clients ~among backend = answers_for ~among Browser_lane.Lane_name.Live backend
+type live_conflict = Duplicate_client of Browser_lane.client_id | Duplicate_ego_space of int
+module Client_map = Map.Make (struct type t=Browser_lane.client_id let compare=compare end)
+module Space_map = Map.Make (Int)
+let ego_space_id (client:Browser_lane.client_info) = match client.transport,client.space with
+  | Browser_lane.Ego_task_space,Some space -> Some space.id
+  | (Ego_task_space|Web_extension|Webdriver_bidi),(None|Some _) -> None
+let live_conflicts clients =
+  let duplicate = function None -> Some false | Some _ -> Some true in
+  let client_counts,space_counts=List.fold_left (fun (client_counts,space_counts) (client:Browser_lane.client_info) ->
+    let client_counts=Client_map.update client.client_id duplicate client_counts in
+    let space_counts=match ego_space_id client with None -> space_counts
+      | Some id -> Space_map.update id duplicate space_counts in
+    client_counts,space_counts) (Client_map.empty,Space_map.empty) clients in
+  (Client_map.bindings client_counts |> List.filter_map (fun (id,duplicate) ->
+    if duplicate then Some (Duplicate_client id) else None)) @
+  (Space_map.bindings space_counts |> List.filter_map (fun (id,duplicate) ->
+    if duplicate then Some (Duplicate_ego_space id) else None))
+let conflicts_with (client:Browser_lane.client_info) = function
+  | Duplicate_client id -> client.client_id=id
+  | Duplicate_ego_space id -> ego_space_id client=Some id
+let conflict_message = function
+  | Duplicate_client id -> "Browser client " ^ Browser_lane.client_id_to_string id ^ " is advertised by multiple browser controllers"
+  | Duplicate_ego_space id -> Printf.sprintf "Ego Space %d is advertised by multiple browser controllers; no input was dispatched" id
 let merge ~among workers =
-  let live = List.filter_map (fun (backend, published) ->
-    if lists_usable_clients ~among backend then published else None) workers in
-  let owned source pick = match List.filter (fun (backend, _) -> backend = source) workers with
-    | [ (_, Some published) ] -> pick published
-    | [ (_, None) ] | [] | _ :: _ :: _ -> unobserved in
-  { clients = List.concat_map (fun published -> published.clients) live;
-    space_presence = List.concat_map (fun published -> published.space_presence) live;
-    client_rows = List.concat_map (fun published -> published.client_rows) live;
-    unavailable = List.concat_map (fun published -> published.unavailable) live;
-    automation = owned Browser_lane.Backend.Automation (fun published -> published.automation);
-    stagehand = owned Browser_lane.Backend.Stagehand (fun published -> published.stagehand) }
+  let live=List.filter_map (fun (backend,published) -> if serves_live backend then published else None) workers in
+  let clients=List.concat_map (fun published -> published.clients) live in
+  let conflicts=live_conflicts clients in
+  let usable client=not (List.exists (conflicts_with client) conflicts) in
+  let clients=List.filter usable clients in
+  let has_id id=List.exists (fun (client:Browser_lane.client_info) -> client.client_id=id) clients in
+  let rows published =
+    let rec align acc clients rows = match clients,rows with
+      | [],[] -> List.rev acc
+      | client::clients,row::rows -> align (if usable client then row::acc else acc) clients rows
+      | [],_::_ | _::_,[] -> [] in
+    align [] published.clients published.client_rows in
+  let owned source pick =
+    match List.filter ((=) source) among,List.filter (fun (backend,_) -> backend=source) workers with
+    | [_],[_,Some published] -> pick published
+    | ([]|_::_),([]|_::_) -> unobserved in
+  { clients;
+    space_presence=List.concat_map (fun published -> List.filter (fun (id,_) -> has_id id) published.space_presence) live;
+    client_rows=List.concat_map rows live;
+    unavailable=List.concat_map (fun published -> published.unavailable) live;
+    automation=owned Browser_lane.Backend.Automation (fun published -> published.automation);
+    stagehand=owned Browser_lane.Backend.Stagehand (fun published -> published.stagehand) }

@@ -648,23 +648,7 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
            string_list rollup.Server_health_rollup.overall_status_reasons );
        ])
 
-(* [stale_since_ts] records the wall-clock time of the FIRST invalidation or
-   refresh failure since the last successful current-generation refresh.
-   It is preserved across failures and successful scans invalidated while
-   running, and cleared only when a successful scan certifies the current
-   generation. Consumers can therefore distinguish the uninterrupted stale
-   horizon from [computed_at], which records when the served observation
-   completed. A successful dirty scan updates that measurement timestamp
-   without restarting the stale horizon; a failed refresh preserves both. *)
-type full_health_snapshot = {
-  fields : (string * Yojson.Safe.t) list;
-  computed_at : float;
-  duration_ms : int;
-  failure : Proactive_refresh.failure option;
-  stale_since_ts : float option;
-  last_good_available : bool;
-  section_timings : (string * int) list;
-}
+module Health_observation = Server_full_health_observation
 
 type full_health_refresh_freshness =
   | Current_generation
@@ -678,7 +662,7 @@ type full_health_refresh_worker = {
 }
 
 let full_health_snapshot_mu = Stdlib.Mutex.create ()
-let full_health_snapshot = ref None
+let full_health_observation = ref Health_observation.empty
 let full_health_refresh_in_flight = ref false
 let full_health_refresh_started_at = ref None
 let full_health_refresh_requested = ref false
@@ -705,13 +689,6 @@ let full_health_active_worker = ref None
 let full_health_next_worker_id = ref 0
 let full_health_worker_submissions = ref 0
 let full_health_worker_joins = ref 0
-(* Consecutive [/health?full=1] refresh failures (timeouts or
-   exceptions).  Reset to 0 on every successful
-   [store_full_health_snapshot]; incremented inside
-   [mark_full_health_snapshot_failure].  Guarded by
-   [full_health_snapshot_mu] like every other piece of refresh
-   bookkeeping. *)
-let full_health_consecutive_failures = ref 0
 let full_health_refresh_timeout_sec =
   Env_config_runtime.Dashboard.full_health_refresh_timeout_sec
 ;;
@@ -921,7 +898,7 @@ let duration_ms ~started_at ~finished_at =
   max 0 (int_of_float ((finished_at -. started_at) *. 1000.))
 
 let compute_full_health_snapshot ?(listener = "http/1.1") ~request_authority
-    request =
+    request : Health_observation.snapshot =
   let started_at = Unix.gettimeofday () in
   let section_timings_ref = ref [] in
   try
@@ -967,7 +944,7 @@ let fleet_stream_hub =
 (* A scan that produced a reading tells the hub. A fleet section that cannot be
    read is a fault in the server: it is logged, and the hub keeps the last
    reading it has. *)
-let publish_fleet_stream_reading snapshot =
+let publish_fleet_stream_reading (snapshot : Health_observation.snapshot) =
   match Fleet_stream_health_section.fleet_of_health_fields snapshot.fields with
   | Ok fleet ->
       Fleet_stream_hub.observe fleet_stream_hub ~measured_at:snapshot.computed_at fleet
@@ -988,11 +965,10 @@ let note_fleet_stream_failure ~since failure =
   Fleet_stream_hub.note_degraded fleet_stream_hub ~since reason
 
 let store_successful_full_health_snapshot_locked snapshot ~refresh_requested =
-  full_health_snapshot := Some snapshot;
+  full_health_observation := Health_observation.publish snapshot !full_health_observation;
   full_health_refresh_in_flight := false;
   full_health_refresh_started_at := None;
   full_health_refresh_requested := refresh_requested;
-  full_health_consecutive_failures := 0;
   publish_fleet_stream_reading snapshot
 
 let mark_full_health_snapshot_failure_locked ~worker_active failure =
@@ -1003,90 +979,35 @@ let mark_full_health_snapshot_failure_locked ~worker_active failure =
     | Proactive_refresh.Timed_out _ -> true
     | Proactive_refresh.Raised _ -> false
   in
-  (* Partial degradation: preserve the last successful snapshot's
-         per-component [fields] and overwrite only the [failure] /
-         [stale_since_ts] / refresh-bookkeeping signals.  If we have
-         no prior snapshot (warm path on cold boot), fall back to the
-         all-error placeholder so the field set stays well-typed. *)
-      let preserved_fields, preserved_computed_at, preserved_duration_ms,
-          prior_stale_since, last_good_available, preserved_section_timings =
-        match !full_health_snapshot with
-        | Some s when s.last_good_available ->
-            (* A last-good payload exists — keep its component fields
-               and preserve [computed_at] so [snapshot_age_ms]
-               remains the age of the payload rather than the age of
-               the failed refresh attempt. *)
-            (s.fields, s.computed_at, s.duration_ms, s.stale_since_ts, true,
-             s.section_timings)
-        | Some s ->
-            (* Previous snapshot was already an error placeholder —
-               keep whatever [fields] it had (which may itself be
-               preserved last-good data from an even earlier
-               success) and DO NOT overwrite the [stale_since_ts]
-               timestamp.  This pins [stale_since_ts] to the FIRST
-               failure of the current outage. *)
-            ( s.fields,
-              s.computed_at,
-              s.duration_ms,
-              s.stale_since_ts,
-              s.last_good_available,
-              s.section_timings )
-        | None ->
-            (* Cold boot — no prior snapshot.  Fall back to the
-               original placeholder shape, but classify refresh
-               timeouts as [timeout] instead of generic [error] so
-               operators can distinguish "no last-good payload yet"
-               from a stale last-good fallback. *)
-            let status = if timed_out then "timeout" else "error" in
-            ( full_health_placeholder_fields ~error
-                ~component_timed_out:timed_out ~status (),
-              now,
-              0,
-              None,
-              false,
-              [] )
-      in
-      let stale_since_ts =
-        match prior_stale_since with
-        | Some t -> Some t
-        | None -> Some now
-      in
-      full_health_snapshot :=
-        Some
-          {
-            fields = preserved_fields;
-            computed_at = preserved_computed_at;
-            duration_ms = preserved_duration_ms;
-            failure = Some failure;
-            stale_since_ts;
-            last_good_available;
-            section_timings = preserved_section_timings;
-          };
-      full_health_refresh_in_flight := worker_active;
-      if not worker_active then begin
-        full_health_refresh_started_at := None;
-        full_health_refresh_requested := false
-      end;
-      (* Increment the consecutive-failure counter and emit the
-         Otel_metric_store critical-edge signal ONLY when we cross the
-         configured threshold on this exact failure.  Subsequent
-         failures past the threshold do not re-emit — operators
-         get one structural alert per outage, not a noisy stream
-         scaling with the failure count. *)
-      note_fleet_stream_failure ~since:now failure;
-      incr full_health_consecutive_failures;
-      if !full_health_consecutive_failures
-         = full_health_critical_failure_threshold
-      then
-        Otel_metric_store.inc_counter
-          "masc_full_health_refresh_critical_total"
-          ~labels:[ "reason", "consecutive_failures" ]
-          ()
+  let state = !full_health_observation in
+  let cold_fields =
+    match state.snapshot with
+    | Some snapshot -> snapshot.fields
+    | None ->
+      let status = if timed_out then "timeout" else "error" in
+      full_health_placeholder_fields ~error ~component_timed_out:timed_out ~status ()
+  in
+  let state, critical_edge =
+    Health_observation.fail ~now ~failure ~cold_fields
+      ~critical_threshold:full_health_critical_failure_threshold state
+  in
+  full_health_observation := state;
+  full_health_refresh_in_flight := worker_active;
+  if not worker_active then begin
+    full_health_refresh_started_at := None;
+    full_health_refresh_requested := false
+  end;
+  note_fleet_stream_failure ~since:now failure;
+  if critical_edge then
+    Otel_metric_store.inc_counter
+      "masc_full_health_refresh_critical_total"
+      ~labels:[ "reason", "consecutive_failures" ]
+      ()
 
 (* A compute can return a failed observation without throwing. Route it
    through the failure transition before publishing, so sync refresh and the
    worker preserve the last measurement and consecutive-failure evidence. *)
-let store_full_health_snapshot_locked snapshot ~refresh_requested =
+let store_full_health_snapshot_locked (snapshot : Health_observation.snapshot) ~refresh_requested =
   match snapshot.failure with
   | None ->
       store_successful_full_health_snapshot_locked snapshot ~refresh_requested
@@ -1123,7 +1044,7 @@ let refresh_full_health_snapshot_sync ?(listener = "http/1.1")
   compute_full_health_snapshot_for_refresh ~listener ~request_authority request
   |> store_full_health_snapshot
 
-let finish_full_health_refresh_worker worker outcome =
+let finish_full_health_refresh_worker worker (outcome : (Health_observation.snapshot, exn) result) =
   let enqueue_follow_up =
     with_full_health_snapshot_lock (fun () ->
         match !full_health_active_worker with
@@ -1156,14 +1077,15 @@ let finish_full_health_refresh_worker worker outcome =
                          from certifying freshness. Without this, a busy cold
                          runtime can discard every successful observation.
                          Only a current scan ends the continuous stale period. *)
-                      let stale_since = match !full_health_snapshot with
-                        | Some { stale_since_ts = Some previous; _ } ->
-                            Float.min previous since
-                        | Some { stale_since_ts = None; _ } | None -> since
+                      let state =
+                        Health_observation.publish_dirty ~since snapshot
+                          !full_health_observation
                       in
-                      store_full_health_snapshot_locked
-                        { snapshot with stale_since_ts = Some stale_since }
-                        ~refresh_requested:true)
+                      full_health_observation := state;
+                      full_health_refresh_in_flight := false;
+                      full_health_refresh_started_at := None;
+                      full_health_refresh_requested := true;
+                      Option.iter publish_fleet_stream_reading state.snapshot)
              | Error exn -> finish_failure (Proactive_refresh.Raised exn));
             dirty
         | Some _ | None -> false)
@@ -1222,11 +1144,11 @@ let await_full_health_refresh_worker ~sw ~compute =
   in
   Eio.Promise.await_exn worker.completion
 
-let snapshot_is_stale ~now snapshot =
+let snapshot_is_stale ~now (snapshot : Health_observation.snapshot) =
   Option.is_some snapshot.stale_since_ts
   || now -. snapshot.computed_at > full_health_snapshot_ttl_sec
 
-let full_health_snapshot_stale_reason ~now snapshot =
+let full_health_snapshot_stale_reason ~now (snapshot : Health_observation.snapshot option) =
   match snapshot with
   | None -> None
   | Some snapshot ->
@@ -1241,7 +1163,7 @@ let full_health_snapshot_stale_reason ~now snapshot =
        | None when snapshot_is_stale ~now snapshot -> Some "ttl_expired"
        | None -> None)
 
-let full_health_snapshot_stale_age_ms ~now snapshot =
+let full_health_snapshot_stale_age_ms ~now (snapshot : Health_observation.snapshot option) =
   let stale_started_at =
     match snapshot with
     | None -> None
@@ -1259,7 +1181,7 @@ let full_health_snapshot_stale_age_ms ~now snapshot =
 
 let full_health_snapshot_metadata ~now ~refresh_in_flight ~refresh_started_at
     ~refresh_requested ~worker_active ~worker_submissions ~worker_joins
-    ~invalidation_generation snapshot =
+    ~invalidation_generation (snapshot : Health_observation.snapshot option) =
   let component_timed_out =
     match (refresh_in_flight, refresh_started_at) with
     | true, Some started_at ->
@@ -1363,13 +1285,8 @@ let invalidate_full_health_snapshot () =
                  { worker with freshness = Invalidated_during_refresh now }
              | Invalidated_during_refresh _ -> worker)
           !full_health_active_worker;
-      full_health_snapshot :=
-        Option.map
-          (fun snapshot ->
-            match snapshot.stale_since_ts with
-            | Some _ -> snapshot
-            | None -> { snapshot with stale_since_ts = Some now })
-          !full_health_snapshot;
+      full_health_observation :=
+        Health_observation.invalidate ~now !full_health_observation;
       full_health_refresh_requested := true);
   (* The state above is the invalidation; the wake only brings the refresh
      forward. Observers call this after their own change is committed (a Skill
@@ -1382,7 +1299,7 @@ let invalidate_full_health_snapshot () =
 
 let full_health_snapshot_state () =
   with_full_health_snapshot_lock (fun () ->
-      ( !full_health_snapshot,
+      ( (!full_health_observation).snapshot,
         !full_health_refresh_in_flight,
         !full_health_refresh_started_at,
         !full_health_refresh_requested,
@@ -1461,11 +1378,10 @@ let start_full_health_snapshot_refresh_loop ~sw ~clock ~request_authority =
 module For_testing = struct
   let reset_full_health_snapshot () =
     with_full_health_snapshot_lock (fun () ->
-        full_health_snapshot := None;
+        full_health_observation := Health_observation.empty;
         full_health_refresh_in_flight := false;
         full_health_refresh_started_at := None;
         full_health_refresh_requested := false;
-        full_health_consecutive_failures := 0;
         full_health_invalidation_generation := 0;
         full_health_active_worker := None;
         full_health_next_worker_id := 0;
@@ -1522,7 +1438,7 @@ module For_testing = struct
           !full_health_worker_joins,
           Option.is_some !full_health_active_worker,
           !full_health_invalidation_generation,
-          Option.is_some !full_health_snapshot,
+          Option.is_some (!full_health_observation).snapshot,
           !full_health_refresh_requested ))
   ;;
 end

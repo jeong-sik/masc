@@ -98,7 +98,7 @@ type error =
   | Invocation_locator_mismatch
   | Resume_topology_mismatch of string
   | Invalid_tool_result
-  | Tool_observation_failed of Execution_tool_observation.error
+  | Bus_observation_failed of Execution_bus_observation.error
   | Settlement_failed of Settlement.error
 
 let settlement_error_to_string = function
@@ -129,7 +129,7 @@ let error_to_string = function
   | Invocation_locator_mismatch ->
     "execution invocation locator does not match durable topology"
   | Resume_topology_mismatch detail -> "execution resume topology mismatch: " ^ detail
-  | Tool_observation_failed error -> Execution_tool_observation.error_to_string error
+  | Bus_observation_failed error -> Execution_bus_observation.error_to_string error
   | Invalid_tool_result -> "execution settlement returned an invalid ToolResult"
   | Settlement_failed error -> settlement_error_to_string error
 ;;
@@ -262,6 +262,26 @@ let open_turn scope ~ordinal =
 ;;
 
 let turn_ordinal turn = turn.ordinal
+
+let record_turn_ready (turn:turn) ~tool_names =
+  match Writer.find_node turn.scope.writer turn.node with
+  | Error error -> Error (Scope_unavailable error)
+  | Ok None -> Error (Resume_topology_mismatch "turn node disappeared before preparation")
+  | Ok (Some view) ->
+    let ready = List.find_map (fun (update:Event.node_update Journal.event_record) ->
+      match update.value with
+      | Event.Turn_ready names -> Some names
+      | Event.Checkpoint_snapshot _ | Event.Provider_event _
+      | Event.Provider_request_snapshot _ | Event.Provider_response_snapshot _
+      | Event.Output_delta _ | Event.Output_snapshot _ | Event.Tool_input_delta _
+      | Event.Tool_input_snapshot _ | Event.Tool_progress _ | Event.Tool_result _ -> None) view.updates in
+    (match ready with
+     | Some names when List.equal String.equal names tool_names -> Ok ()
+     | Some _ -> Error (Resume_topology_mismatch "prepared tools differ from the committed turn")
+     | None ->
+       transact turn.scope.writer (Tx.update_node ~node:turn.node (Event.Turn_ready tool_names))
+       |> Result.map ignore)
+;;
 
 let resume_turn scope ~ordinal =
   match Writer.find_node scope.writer (Journal.run_root scope.run) with
@@ -918,26 +938,26 @@ let provider_response provider =
       (Resume_topology_mismatch "provider attempt has an incompatible materialized state")
 ;;
 
-type tool_observation = {run_id:Event.Run_id.t;event:Event_bus.event;through:Journal.cursor}
-type tool_observation_page =
-  { observations:tool_observation list
+type bus_observation = {run_id:Event.Run_id.t;event:Event_bus.event;through:Journal.cursor}
+type bus_observation_page =
+  { observations:bus_observation list
   ; next_cursor:Journal.cursor
   ; high_watermark:Journal.cursor
   ; has_more:bool
   }
-let tool_observation_cursor scope =
+let bus_observation_cursor scope =
   Writer.current_cursor scope.writer |> Result.map_error (fun error -> Scope_unavailable error)
 
-let read_tool_observations scope ~after ~limit =
+let read_bus_observations scope ~after ~limit =
   let open Result_syntax in
   let* page=Writer.read_page scope.writer ~after ~limit ()
       |> Result.map_error (fun error -> Scope_unavailable error) in
   let rec project acc = function
     | [] -> Ok (List.rev acc)
     | source::rest ->
-      let* observation=Execution_tool_observation.project
+      let* observation=Execution_bus_observation.project
           ~find_node:(Journal.snapshot_find_node page.snapshot) source
-          |> Result.map_error (fun error -> Tool_observation_failed error) in
+          |> Result.map_error (fun error -> Bus_observation_failed error) in
       (match observation with
        | None -> project acc rest
        | Some event ->

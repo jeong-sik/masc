@@ -63,7 +63,7 @@ type error =
   | Invocation_locator_mismatch
   | Resume_topology_mismatch of string
   | Invalid_tool_result
-  | Tool_observation_failed of Execution_tool_observation.error
+  | Bus_observation_failed of Execution_bus_observation.error
   | Settlement_failed of Execution_tool_settlement.error
 
 val error_to_string : error -> string
@@ -140,6 +140,11 @@ val resume_turn : t -> ordinal:int -> (turn_resume, error) result
 val resume_current_turn : t -> (turn_resume, error) result
 
 val turn_ordinal : turn -> int
+
+(** Record the exact prepared tool names before dispatch. Repeating the same
+    preparation at a provider-free resume frontier is idempotent; a changed
+    preparation is rejected. *)
+val record_turn_ready : turn -> tool_names:string list -> (unit, error) result
 
 (** Materialize the exact binding selected for provider dispatch. *)
 val open_provider_attempt
@@ -278,21 +283,21 @@ val terminal_recovery_action : t -> (recovery_action, error) result
 
 (** Read-only committed Tool attempt/result observations, across the complete
     recursive journal. Each observation includes its exact source cursor. *)
-type tool_observation =
+type bus_observation =
   { run_id : Execution_event.Run_id.t
   ; event : Event_bus.event
   ; through : Execution_journal.cursor
   }
-type tool_observation_page =
-  { observations : tool_observation list
+type bus_observation_page =
+  { observations : bus_observation list
   ; next_cursor : Execution_journal.cursor
   ; high_watermark : Execution_journal.cursor
   ; has_more : bool
   }
-val tool_observation_cursor : t -> (Execution_journal.cursor, error) result
-val read_tool_observations :
+val bus_observation_cursor : t -> (Execution_journal.cursor, error) result
+val read_bus_observations :
   t -> after:Execution_journal.cursor -> limit:int ->
-  (tool_observation_page, error) result
+  (bus_observation_page, error) result
 
 (** Commit an immutable checkpoint on this exact open Agent root. A returned
     success is durable acceptance, before any optional projection sink. *)

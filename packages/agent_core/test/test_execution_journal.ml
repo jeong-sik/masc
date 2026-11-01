@@ -1794,6 +1794,7 @@ let test_request_snapshot_single_assignment () =
    | Event.Provider_request_snapshot restored ->
      check bool "request snapshot codec roundtrip" true
        (Llm_provider.Completion_outcome.equal_request_provenance fact restored)
+   | Event.Turn_ready _
    | Event.Checkpoint_snapshot _ | Event.Provider_event _ | Event.Provider_response_snapshot _ | Event.Output_delta _
    | Event.Output_snapshot _ | Event.Tool_input_delta _ | Event.Tool_input_snapshot _
    | Event.Tool_progress _ | Event.Tool_result _ -> fail "request snapshot changed kind");
@@ -1814,11 +1815,52 @@ let test_request_snapshot_single_assignment () =
     | Error _ -> () | Ok _ -> fail "malformed persisted request fact was admitted") malformed
 ;;
 
+let test_turn_progress_boundaries () =
+  Eio_main.run @@ fun _env ->
+  let journal = require_ok (Journal.create ()) in
+  let run = require_started_run (Journal.start_run journal ~agent_name:"turn-progress") in
+  let turn = require_opened_node (Journal.open_node journal ~run
+      ~parent:(Journal.run_root run) ~kind:(Event.Agent_turn {ordinal=0})) in
+  let reject node update =
+    let before = Journal.events journal in
+    (match Journal.update_node journal ~node update with
+     | Error _ -> () | Ok _ -> fail "invalid turn progress was committed");
+    check bool "refusal preserves the committed prefix" true (before=Journal.events journal) in
+  let ready = Event.Turn_ready ["inspect";"write"] in
+  reject (Journal.run_root run) ready;
+  reject turn (Event.Turn_ready [" "]);
+  let ready_event = require_ok (Journal.update_node journal ~node:turn ready) in
+  reject turn ready;
+  let provider = require_opened_node (Journal.open_node journal ~run ~parent:turn
+      ~kind:(provider_attempt 0)) in
+  reject provider ready;
+  ignore (require_ok (Journal.update_node journal ~node:provider
+      (Event.Provider_response_snapshot (provider_response ()))));
+  List.iter (fun event ->
+    let restored = require_codec_ok (Event.of_json_string (Event.to_json_string event)) in
+    check bool "turn progress keeps its envelope through durable codec" true (Event.equal event restored))
+    [ready_event];
+  let unprepared = require_opened_node (Journal.open_node journal ~run
+      ~parent:(Journal.run_root run) ~kind:(Event.Agent_turn {ordinal=1})) in
+  ignore (require_opened_node (Journal.open_node journal ~run ~parent:unprepared
+      ~kind:(provider_attempt 0)));
+  reject unprepared ready;
+  List.iter (fun wire -> match Event.node_update_of_yojson wire with
+    | Error _ -> () | Ok _ -> fail "malformed turn progress decoded")
+    [`Assoc ["type",`String "turn_ready";"value",`List [`Int 1]];
+     `Assoc ["type",`String "turn_ready";"value",`String "inspect"]];
+  check_contiguous (Journal.events journal)
+;;
+
 let () =
   run
     "Execution journal"
     [ ( "topology"
       , [ test_case
+            "turn progress rejects wrong ownership and duplicate boundaries"
+            `Quick
+            test_turn_progress_boundaries
+        ; test_case
             "recursive runs retain hierarchy and order"
             `Quick
             test_recursive_tree_and_global_sequence

@@ -1884,23 +1884,28 @@ let test_trace_finalization_preserves_committed_success diagnostic_fault () =
 
 exception Checkpoint_authority_refused
 
-let test_durable_turn_bus_uses_canonical_facts ~caller_checkpoint () =
+let test_durable_turn_bus_uses_canonical_facts
+    ?(delivery_fault=false) ?(refuse_checkpoint=false) ~caller_checkpoint () =
   with_execution_test_dir "agent_core-turn-observation-"
   @@ fun ~env ~sw ~runtime ~dir ->
   let bus = Event_bus.create () in
   let subscription = Event_bus.subscribe bus
       ~config:(Result.get_ok (Event_bus.subscription_config
         ~capacity:16 ~overflow:Event_bus.Drop_newest)) in
-  let provider_calls = ref 0 and locator = ref None in
+  let provider_calls = ref 0 and locator = ref None and during_dispatch = ref [] in
   let response =
     { (Provider_mock.text_response "done" []) with
       telemetry = Some {Types.default_inference_telemetry with
         provider_kind = Some Llm_provider.Provider_kind.OpenAI_compat} } in
-  let next () = incr provider_calls; Ok response in
+  let next () =
+    during_dispatch := Event_bus.drain subscription;
+    incr provider_calls; Ok response in
   let transport = Llm_provider.Llm_transport.custom
     { complete_sync = (fun _ -> {Llm_provider.Llm_transport.response = next (); latency_ms = None})
     ; complete_stream = (fun ?on_telemetry:_ ~on_event:_ _ -> next ()) } in
-  let checkpoint_sink = if caller_checkpoint then Some (fun _ -> Ok ()) else None in
+  let checkpoint_sink = if caller_checkpoint then Some (fun (snapshot:Agent.checkpoint_snapshot) ->
+    if refuse_checkpoint && snapshot.stage=After_assistant_collected
+    then Error "assistant collection checkpoint refused" else Ok ()) else None in
   let agent = Agent.create ~media_store:(Agent_core.History.Memory_store.create ())
       ~net:(Eio.Stdenv.net env) ?checkpoint_sink
       ~config:{(Types.default_config ~model:"test-model") with name="canonical-turn-bus"}
@@ -1908,16 +1913,60 @@ let test_durable_turn_bus_uses_canonical_facts ~caller_checkpoint () =
         provider_config=Some (Provider_mock.to_provider_config ())} () in
   let store = Agent.execution_store ~runtime ~dir
       ~on_scope_ready:(fun value -> locator := Some value; Ok ()) () in
-  (match Agent.run ~sw ~execution_store:store agent "observe the provider turn" with
-   | Ok _ -> () | Error error -> Alcotest.fail (Error.to_string error));
+  let outcome = if not delivery_fault then
+      Agent.run ~sw ~execution_store:store agent "observe the provider turn"
+    else
+      let internal_runtime = match Internal_runtime.create ~sw
+          ~domain_mgr:env#domain_mgr ~domain_count:1 with
+        | Ok runtime -> runtime
+        | Error error -> Alcotest.fail (Internal_runtime.create_error_to_string error) in
+      match Internal_writer.run ~codec:(Internal_codec.of_runtime internal_runtime) ~dir
+        (fun ~sw:_ writer ->
+          let scope = match Internal_scope.start ~writer ~agent_name:"canonical-turn-bus" with
+            | Ok scope -> scope | Error error -> Alcotest.fail (Internal_scope.error_to_string error) in
+          locator := Some (match Agent.execution_locator_of_yojson
+              (Internal_scope.scope_locator_to_yojson (Internal_scope.scope_locator scope)) with
+            | Ok locator -> locator | Error detail -> Alcotest.fail detail);
+          let first = ref true in
+          let observer = Internal.Agent_bus_observer.create ~publish:(fun bus event ->
+            Event_bus.publish bus event;
+            match event.Event_bus.payload with
+            | TurnReady _ when !first -> first := false; failwith "accepted ready without acknowledgement"
+            | TurnStarted _ | TurnReady _ | TurnCompleted _ | InferenceTelemetry _
+            | AgentStarted _ | AgentCompleted _ | AgentYielded _ | AgentInputRequired _ | AgentFailed _
+            | ToolCalled _ | ToolCompleted _ | HandoffRequested _ | HandoffCompleted _
+            | ElicitationCompleted _ | ToolApprovalCompleted _ | Custom _ -> ()) scope in
+          observer.register ~run_id:(Internal_scope.scope_locator_run_id
+            (Internal_scope.scope_locator scope)) ~event_bus:(Some bus);
+          let result = Internal.Execution_context.with_bus_observer observer (fun () ->
+            Internal.Execution_context.with_agent_scope scope (fun () ->
+              Agent.run ~sw agent "observe the provider turn")) in
+          (match Internal_scope.finish scope Internal.Execution_event.Succeeded with
+           | Ok () -> () | Error error -> Alcotest.fail (Internal_scope.error_to_string error));
+          result) with
+      | Ok result -> result
+      | Error error -> Alcotest.fail (Internal_writer.scope_failure_to_string error) in
+  (match outcome with
+   | Error _ when refuse_checkpoint -> ()
+   | Ok _ when not refuse_checkpoint -> ()
+   | Ok _ -> Alcotest.fail "required checkpoint refusal did not stop continuation"
+   | Error error -> Alcotest.fail (Error.to_string error));
   Alcotest.(check int) "provider dispatch once" 1 !provider_calls;
-  let observations = Event_bus.drain subscription |> List.filter (fun (event:Event_bus.event) ->
+  let deliveries = (!during_dispatch @ Event_bus.drain subscription) |> List.filter (fun (event:Event_bus.event) ->
     match event.payload with
     | TurnStarted _ | TurnReady _ | TurnCompleted _ | InferenceTelemetry _ -> true
     | AgentStarted _ | AgentCompleted _ | AgentYielded _ | AgentInputRequired _ | AgentFailed _
     | ToolCalled _ | ToolCompleted _ | HandoffRequested _ | HandoffCompleted _
     | ElicitationCompleted _ | ToolApprovalCompleted _ | Custom _ -> false) in
-  Alcotest.(check int) "one observation per provider turn boundary" 4 (List.length observations);
+  Alcotest.(check int) "only unacknowledged source delivery repeats"
+    ((if refuse_checkpoint then 3 else 4) + if delivery_fault then 1 else 0) (List.length deliveries);
+  let observations = List.fold_left (fun events (event:Event_bus.event) ->
+    if List.exists (fun (seen:Event_bus.event) -> seen.meta.event_id=event.meta.event_id) events
+    then events else events @ [event]) [] deliveries in
+  Alcotest.(check bool) "ready observation precedes provider dispatch" true
+    (List.exists (fun (event:Event_bus.event) -> match event.payload with
+      | TurnReady {tool_names=[];turn=0;agent_name="canonical-turn-bus"} -> true
+      | _ -> false) !during_dispatch);
   let projection = match Agent.open_execution_projection ~runtime ~dir (Option.get !locator) with
     | Ok projection -> projection
     | Error error -> Alcotest.fail (Agent.Execution_projection.error_to_string error) in
@@ -1941,7 +1990,36 @@ let test_durable_turn_bus_uses_canonical_facts ~caller_checkpoint () =
         observation.meta.correlation_id;
       Alcotest.(check (option string)) "turn observation keeps committed parent"
         (Option.map Agent.Execution_projection.Event_id.to_string source.parent_event_id)
-        observation.meta.parent_event_id) observations
+        observation.meta.parent_event_id;
+      Alcotest.(check bool) "payload derives from its exact committed boundary" true
+        (match observation.payload, source.payload with
+         | TurnStarted _, Node_opened {kind=Agent_turn {ordinal=0};_} -> true
+         | TurnReady {tool_names;_}, Node_updated {update=Turn_ready names;_} -> tool_names=names
+         | TurnCompleted _, Node_closed {terminal=Succeeded;_} -> true
+         | InferenceTelemetry {model;prompt_ms;decode_ms;decode_tok_s;_},
+             Node_updated {update=Provider_response_snapshot response;_} ->
+           model=response.model && prompt_ms=None && decode_ms=None && decode_tok_s=None
+         | _ -> false)) observations;
+  let read projection after limit = match Agent.Execution_projection.read_bus_observations projection
+      ~after ~through:page.high_watermark ~limit () with
+    | Ok page -> page | Error error -> Alcotest.fail (Agent.Execution_projection.error_to_string error) in
+  let rec catch_up after acc =
+    let next = read projection after 1 in
+    let acc = List.rev_append next.observations acc in
+    if next.has_more then catch_up next.next_cursor acc else List.rev acc in
+  let replay = catch_up (Agent.Execution_projection.beginning_cursor projection) [] in
+  Alcotest.(check bool) "cursor catch-up matches deduplicated live observations" true
+    (List.map (fun (o:Agent.Execution_projection.bus_observation)->o.event) replay=observations);
+  let first = List.hd replay in
+  let reopened = match Agent.open_execution_projection ~runtime ~dir (Option.get !locator) with
+    | Ok projection -> projection
+    | Error error -> Alcotest.fail (Agent.Execution_projection.error_to_string error) in
+  let retry = read reopened first.through 1024 in
+  Alcotest.(check bool) "reopened acknowledgement skips only accepted observation" true
+    (List.map (fun (o:Agent.Execution_projection.bus_observation)->o.event) retry.observations
+     = List.tl observations);
+  Alcotest.(check int) "acknowledged catch-up has no repeat" 0
+    (List.length (read reopened retry.next_cursor 1024).observations)
 ;;
 
 let test_durable_tool_bus_uses_canonical_facts ?(delivery_fault=false) ?checkpoint_failure () =
@@ -2000,12 +2078,19 @@ let test_durable_tool_bus_uses_canonical_facts ?(delivery_fault=false) ?checkpoi
               (Internal_scope.scope_locator_to_yojson (Internal_scope.scope_locator scope)) with
             | Ok locator->locator |Error detail->Alcotest.fail detail);
           let first=ref true in
-          let observer=Internal.Agent_tool_observer.create ~publish:(fun bus event ->
+          let observer=Internal.Agent_bus_observer.create ~publish:(fun bus event ->
             Event_bus.publish bus event;
-            if !first then (first:=false;raise (Failure "accepted delivery without acknowledgement"))) scope in
+            match event.Event_bus.payload with
+            | ToolCalled _ when !first ->
+              first:=false;raise (Failure "accepted delivery without acknowledgement")
+            | ToolCalled _ | ToolCompleted _
+            | AgentStarted _ | AgentCompleted _ | AgentYielded _ | AgentInputRequired _ | AgentFailed _
+            | TurnStarted _ | TurnReady _ | TurnCompleted _ | InferenceTelemetry _
+            | HandoffRequested _ | HandoffCompleted _ | ElicitationCompleted _
+            | ToolApprovalCompleted _ | Custom _ -> ()) scope in
           observer.register ~run_id:(Internal_scope.scope_locator_run_id (Internal_scope.scope_locator scope))
             ~event_bus:(Some bus);
-          let result=Internal.Execution_context.with_tool_observer observer (fun () ->
+          let result=Internal.Execution_context.with_bus_observer observer (fun () ->
             Internal.Execution_context.with_agent_scope scope (fun () -> Agent.run ~sw agent "observe the effect")) in
           (match Internal_scope.finish scope Internal.Execution_event.Succeeded with
            | Ok ()->() |Error error->Alcotest.fail (Internal_scope.error_to_string error));
@@ -3247,10 +3332,14 @@ let test_agent_run_resumes_settled_closed_turn
               incr effect_count;
               Ok { Types.content = "duplicate"; content_blocks = None; _meta = None })
        in
+       let bus = Event_bus.create () in
+       let subscription = Event_bus.subscribe bus
+           ~config:(Result.get_ok (Event_bus.subscription_config ~capacity:32 ~overflow:Drop_newest)) in
        let options =
          { Agent.default_options with
            transport = Some transport
          ; provider_config = Some (Provider_mock.to_provider_config ())
+         ; event_bus = Some bus
          }
        in
        let agent =
@@ -3338,6 +3427,26 @@ let test_agent_run_resumes_settled_closed_turn
           | Window_provider_closed | Window_turn_closed ->
             if expect_terminal then 0 else 1)
          !provider_call_count;
+       let projection = match Agent.open_execution_projection ~runtime ~dir locator with
+         | Ok projection -> projection
+         | Error error -> Alcotest.fail (Agent.Execution_projection.error_to_string error) in
+       let observations = match Agent.Execution_projection.read_bus_observations projection
+           ~after:(Agent.Execution_projection.beginning_cursor projection) ~limit:1024 () with
+         | Ok page -> page.observations
+         | Error error -> Alcotest.fail (Agent.Execution_projection.error_to_string error) in
+       let completed_zero event = match event.Event_bus.payload with
+         | TurnCompleted {turn=0;_} -> true | _ -> false in
+       let durable = List.filter (fun (o:Agent.Execution_projection.bus_observation)->completed_zero o.event)
+           observations in
+       Alcotest.(check int) "resumed completed turn has one canonical close observation"
+         (match window with Window_turn_failed -> 0 | Window_provider_closed | Window_turn_closed -> 1)
+         (List.length durable);
+       let live = List.filter completed_zero (Event_bus.drain subscription) in
+       Alcotest.(check int) "live subscription emits only newly committed resume close"
+         (match window with Window_provider_closed -> 1 | Window_turn_closed | Window_turn_failed -> 0)
+         (List.length live);
+       List.iter (fun event -> Alcotest.(check bool) "resume completion keeps canonical source identity" true
+         (List.exists (fun (o:Agent.Execution_projection.bus_observation) -> o.event=event) durable)) live;
        match window with
        | Window_provider_closed | Window_turn_closed ->
          check_terminal_disposition
@@ -4667,6 +4776,9 @@ let test_nested_tool_observation_audiences audience ~concurrent () =
     | Ok config->config |Error _->Alcotest.fail "invalid audience fixture" in
     Event_bus.subscribe ~config ~filter:Event_bus.filter_tools_only bus in
   let root_sub=subscribe root_bus and child_sub=subscribe child_bus in
+  let subscribe_all bus = Event_bus.subscribe bus
+      ~config:(Result.get_ok (Event_bus.subscription_config ~capacity:128 ~overflow:Drop_newest)) in
+  let root_all = subscribe_all root_bus and child_all = subscribe_all child_bus in
   let child_target=match audience with Shared_tool_bus->Some root_bus
     | Distinct_tool_bus->Some child_bus |No_child_tool_bus->None in
   let parent_calls=ref 0 and child_calls=ref 0 in
@@ -4751,7 +4863,31 @@ let test_nested_tool_observation_audiences audience ~concurrent () =
   let delivered=root_events@child_events in
   List.iter (fun (event:Event_bus.event)->
     Alcotest.(check bool) "audience event is the exact committed source observation" true
-      (List.exists (fun (source:Agent.Execution_projection.tool_observation)->source.event=event) page.observations)) delivered
+      (List.exists (fun (source:Agent.Execution_projection.tool_observation)->source.event=event) page.observations)) delivered;
+  let canonical event = match event.Event_bus.payload with
+    | TurnStarted _ | TurnReady _ | TurnCompleted _ | InferenceTelemetry _ | ToolCalled _ | ToolCompleted _ -> true
+    | AgentStarted _ | AgentCompleted _ | AgentYielded _ | AgentInputRequired _ | AgentFailed _
+    | HandoffRequested _ | HandoffCompleted _ | ElicitationCompleted _ | ToolApprovalCompleted _ | Custom _ -> false in
+  let name event = match event.Event_bus.payload with
+    | TurnStarted {agent_name;_} | TurnReady {agent_name;_} | TurnCompleted {agent_name;_}
+    | InferenceTelemetry {agent_name;_} | ToolCalled {agent_name;_} | ToolCompleted {agent_name;_} -> agent_name
+    | _ -> Alcotest.fail "expected canonical bus projection" in
+  let all = match Agent.Execution_projection.read_bus_observations projection
+      ~after:(Agent.Execution_projection.beginning_cursor projection) ~limit:1024 () with
+    | Ok page -> List.map (fun (source:Agent.Execution_projection.bus_observation) -> source.event) page.observations
+    | Error error -> Alcotest.fail (Agent.Execution_projection.error_to_string error) in
+  let root_all = List.filter canonical (Event_bus.drain root_all)
+  and child_all = List.filter canonical (Event_bus.drain child_all) in
+  let expected_root = match audience with
+    | Shared_tool_bus -> all
+    | Distinct_tool_bus | No_child_tool_bus -> List.filter (fun event -> name event="root-audience") all in
+  let expected_child = match audience with
+    | Distinct_tool_bus -> List.filter (fun event -> name event="child-audience") all
+    | Shared_tool_bus | No_child_tool_bus -> [] in
+  Alcotest.(check bool) "turn and tool observations share ordered root audience" true
+    (root_all=expected_root && ordered root_all);
+  Alcotest.(check bool) "turn and tool observations preserve explicit child audience" true
+    (child_all=expected_child && ordered child_all)
 ;;
 
 let test_unattempted_tool_has_no_bus_execution_observation () =
@@ -4998,6 +5134,10 @@ let () =
             (test_durable_turn_bus_uses_canonical_facts ~caller_checkpoint:false)
         ; Alcotest.test_case "caller-owned checkpoint preserves canonical turn observations" `Quick
             (test_durable_turn_bus_uses_canonical_facts ~caller_checkpoint:true)
+        ; Alcotest.test_case "turn publication failure retries source without provider redispatch" `Quick
+            (test_durable_turn_bus_uses_canonical_facts ~delivery_fault:true ~caller_checkpoint:false)
+        ; Alcotest.test_case "checkpoint refusal does not publish assistant collection" `Quick
+            (test_durable_turn_bus_uses_canonical_facts ~refuse_checkpoint:true ~caller_checkpoint:true)
         ; Alcotest.test_case
             "durable tool bus uses canonical committed facts"
             `Quick

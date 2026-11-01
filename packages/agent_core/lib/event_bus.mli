@@ -91,6 +91,9 @@ type payload =
       { agent_name : string
       ; turn : int
       }
+  (** For durable execution, the owning turn has committed [Succeeded], including
+      its tool/output settlement. The envelope is that canonical close event.
+      Store-free execution reports successful assistant collection instead. *)
   | HandoffRequested of
       { from_agent : string
       ; to_agent : string
@@ -133,9 +136,10 @@ type payload =
       ; decode_ms : float option
       ; decode_tok_s : float option
       }
-  (** Per-turn inference timings & token usage. Emitted alongside
-          {!TurnCompleted} when the provider reported native timings
-          (currently Ollama via [prompt_eval_*] / [eval_*] fields).
+  (** Per-turn inference timings and token usage when provider identity is known.
+          Durable execution projects the committed provider response before
+          tool/output settlement; store-free execution emits after collection.
+          Missing native timing and usage fields remain [None].
 
           [decode_tok_s] is decode-only throughput, computed as
           [completion_tokens / (decode_ms / 1000)] when both are

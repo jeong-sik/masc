@@ -839,9 +839,15 @@ let test_reserved_publication_replays_after_unlock interrupt =
         |> Result.map_error (fun _ -> "invalid fixture subscription") |> value in
     let subscription = Event_bus.subscribe ~config ~filter:Event_bus.filter_tools_only bus in
     let first = ref true and interrupt_publication = ref (fun () -> ()) in
-    let observer = Internal.Agent_tool_observer.create ~publish:(fun bus event ->
+    let observer = Internal.Agent_bus_observer.create ~publish:(fun bus event ->
       Event_bus.publish bus event;
-      if !first then (first := false; !interrupt_publication ())) scope in
+      match event.Event_bus.payload with
+      | ToolCalled _ when !first -> first := false; !interrupt_publication ()
+      | ToolCalled _ | ToolCompleted _
+      | AgentStarted _ | AgentCompleted _ | AgentYielded _ | AgentInputRequired _ | AgentFailed _
+      | TurnStarted _ | TurnReady _ | TurnCompleted _ | InferenceTelemetry _
+      | HandoffRequested _ | HandoffCompleted _ | ElicitationCompleted _
+      | ToolApprovalCompleted _ | Custom _ -> ()) scope in
     observer.register
       ~run_id:(Scope.scope_locator_run_id (Scope.scope_locator scope)) ~event_bus:(Some bus);
     let turn = scope_value (Scope.open_turn scope ~ordinal:1) in

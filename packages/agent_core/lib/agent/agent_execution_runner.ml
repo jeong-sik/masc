@@ -259,12 +259,12 @@ let settle_success_after_run scope on_terminal_disposition value =
 ;;
 
 let with_scope ?on_terminal_disposition ~event_bus scope run =
-  let observer=match Execution_context.tool_observer () with
+  let observer=match Execution_context.bus_observer () with
     | Some observer -> observer
-    | None -> Agent_tool_observer.create ~publish:Event_bus.publish scope in
+    | None -> Agent_bus_observer.create ~publish:Event_bus.publish scope in
   observer.register ~run_id:(Execution_agent_scope.scope_locator_run_id
       (Execution_agent_scope.scope_locator scope)) ~event_bus;
-  Execution_context.with_tool_observer observer (fun () ->
+  Execution_context.with_bus_observer observer (fun () ->
     Execution_context.with_agent_scope scope (fun () ->
       match (let result=run () in observer.flush ();result) with
       | Ok value -> settle_success_after_run scope on_terminal_disposition value

@@ -1978,11 +1978,8 @@ let clear_thinking_capabilities preserve_thinking_control_format =
   }
 ;;
 
-(* Pins the resolved replay policy for one config per provider kind, plus every
-   clear-thinking knob combination. The same matrix was captured from the
-   pre-refactor tree and compared byte for byte; a regression in dialect
-   resolution now shows up here as a changed constructor rather than as a silent
-   history drop in production. *)
+(* Pins provider replay policies and the distinction between a cleared user
+   turn and the interleaved reasoning still needed by an active tool exchange. *)
 let test_provider_replay_policy_matrix_pinned () =
   let cfg
         ?request_path
@@ -2069,16 +2066,20 @@ let test_provider_replay_policy_matrix_pinned () =
        let label suffix = Printf.sprintf "glm/%s %s" model_id suffix in
        check
          (label "default")
-         Reasoning_replay_contract.No_replay
+         Reasoning_replay_contract.Tool_call_assistant_messages_latest_user_turn
          (cfg ~kind:Provider_config.Glm ~model_id ~base_url ());
        check
          (label "enable_thinking only")
-         Reasoning_replay_contract.No_replay
+         Reasoning_replay_contract.Tool_call_assistant_messages_latest_user_turn
          (cfg ~enable_thinking:true ~kind:Provider_config.Glm ~model_id ~base_url ());
        check
          (label "preserve only")
-         Reasoning_replay_contract.No_replay
+         Reasoning_replay_contract.Tool_call_assistant_messages_latest_user_turn
          (cfg ~preserve_thinking:true ~kind:Provider_config.Glm ~model_id ~base_url ());
+       check
+         (label "thinking disabled")
+         Reasoning_replay_contract.No_replay
+         (cfg ~enable_thinking:false ~kind:Provider_config.Glm ~model_id ~base_url ());
        check
          (label "enable + preserve")
          Reasoning_replay_contract.All_assistant_messages
@@ -2099,7 +2100,60 @@ let test_provider_replay_policy_matrix_pinned () =
             ~model_id
             ~base_url
             ()))
-    [ "glm-5"; "glm-5.2"; "glm-4-flash"; "glm-4v"; "glm-4"; "glm-unlisted" ]
+    [ "glm-5"; "glm-5.2"; "glm-unlisted" ]
+;;
+
+let test_clear_thinking_replay_requires_catalog_reasoning_support () =
+  let previous = Model_catalog.global () in
+  let restore () = match previous with
+    | Some catalog -> Model_catalog.set_global catalog
+    | None -> Model_catalog.clear_global () in
+  let catalog = match Model_catalog.load_default () with
+    | Ok catalog -> catalog
+    | Error detail -> Alcotest.fail detail in
+  Fun.protect ~finally:restore (fun () ->
+    Model_catalog.set_global catalog;
+    List.iter (fun (model_id, supports_reasoning) ->
+      let config = Provider_config.make
+          ~kind:Glm ~provider_id:"glm" ~model_id ~base_url:"https://api.z.ai"
+          () in
+      let caps = match Provider_config.capabilities_for_config_model config with
+        | Some caps -> caps
+        | None -> Alcotest.failf "missing catalog row for glm/%s" model_id in
+      check_bool (model_id ^ " declares reasoning support") supports_reasoning
+        caps.supports_reasoning;
+      check_bool (model_id ^ " declares the clear-thinking wire") true
+        (caps.preserve_thinking_control_format = Thinking_object_clear_thinking);
+      let source = source_for_config config in
+      let messages =
+        [ message User [Text "question"]
+        ; with_source source Assistant
+            [ Thinking {content="catalog reasoning"; signature=None}
+            ; ToolUse {id="catalog-call";name="inspect";input=`Assoc []} ]
+        ; message Tool [tool_result "catalog-call"] ]
+        |> List.map reload_through_checkpoint in
+      List.iter (fun (label, config) ->
+        let wire = Backend_glm.build_request ~config ~messages ()
+          |> Yojson.Safe.from_string in
+        let open Yojson.Safe.Util in
+        let wire_messages = wire |> member "messages" |> to_list in
+        let reasoning = wire_messages |> List.filter_map (fun item ->
+          match member "reasoning_content" item with
+          | `String value -> Some value
+          | _ -> None) in
+        Alcotest.(check (list string)) (model_id ^ " " ^ label)
+          (if supports_reasoning then ["catalog reasoning"] else []) reasoning;
+        Alcotest.(check string) "capability gating retains the tool call" "catalog-call"
+          (List.nth wire_messages 1 |> member "tool_calls" |> to_list |> List.hd
+           |> member "id" |> to_string);
+        Alcotest.(check string) "capability gating retains the tool result" "catalog-call"
+          (List.nth wire_messages 2 |> member "tool_call_id" |> to_string))
+        [ "default thinking", config
+        ; "explicit thinking", {config with enable_thinking=Some true}
+        ; "explicit preservation",
+          {config with enable_thinking=Some true; preserve_thinking=Some true} ])
+      ["glm-4-flash",false;"glm-4v",false;"glm-4",false;
+       "glm-5.2",true;"glm-5.3-flash",true])
 ;;
 
 (* The preserved-thinking replay gate is selected by the declared
@@ -2139,10 +2193,10 @@ let test_clear_thinking_gate_is_capability_not_identity () =
     (resolved_replay_policy (preserved Provider_config.OpenAI_compat declared)
      = Reasoning_replay_contract.All_assistant_messages);
   check_bool
-    "non-GLM kind declaring the wire honours the clear_thinking default"
+    "non-GLM kind declaring the wire keeps the active tool exchange by default"
     true
     (resolved_replay_policy (cleared Provider_config.OpenAI_compat declared)
-     = Reasoning_replay_contract.No_replay);
+     = Reasoning_replay_contract.Tool_call_assistant_messages_latest_user_turn);
   check_bool
     "GLM kind without the declared wire does not get the gate"
     true
@@ -2153,6 +2207,99 @@ let test_clear_thinking_gate_is_capability_not_identity () =
     true
     (resolved_replay_policy (preserved Provider_config.Glm declared)
      = Reasoning_replay_contract.All_assistant_messages)
+;;
+
+let test_glm_clear_thinking_retains_active_tool_exchange () =
+  let config =
+    Provider_config.make
+      ~kind:Provider_config.Glm
+      ~provider_id:"glm-coding"
+      ~model_id:"glm-5.3-flash"
+      ~base_url:"https://api.z.ai/api/coding/paas/v4"
+      ~enable_thinking:true
+      ~preserve_thinking:false
+      ()
+  in
+  let source = source_for_config config in
+  let assistant id reasoning =
+    with_source source Assistant
+      [ Thinking { content = reasoning; signature = None }
+      ; ToolUse { id; name = "inspect"; input = `Assoc [] }
+      ]
+  in
+  let messages =
+    [ message User [ Text "Previous question" ]
+    ; assistant "old-call" "OLD_REASONING"
+    ; message Tool [ tool_result "old-call" ]
+    ; message Assistant [ Text "Previous answer" ]
+    ; message User [ Text "Current question" ]
+    ; assistant "current-call" "CURRENT_REASONING\n  kept exactly  "
+    ; message Tool [ tool_result "current-call" ]
+    ; message ~origin:System_context User [ Text "World State changed" ]
+    ]
+  in
+  let messages = List.map reload_through_checkpoint messages in
+  let tools =
+    [ `Assoc
+        [ "name", `String "inspect"
+        ; "description", `String "Inspect a value"
+        ; "input_schema", `Assoc [ "type", `String "object" ]
+        ]
+    ]
+  in
+  let body config messages =
+    Backend_glm.build_request ~config ~messages ~tools ()
+    |> Yojson.Safe.from_string
+  in
+  let open Yojson.Safe.Util in
+  let reasoning_values body =
+    body |> member "messages" |> to_list
+    |> List.filter_map (fun item ->
+      match member "reasoning_content" item with
+      | `String text -> Some text
+      | _ -> None)
+  in
+  let check_reasoning label expected config messages =
+    Alcotest.(check (list string)) label expected
+      (body config messages |> reasoning_values)
+  in
+  let active = [ "CURRENT_REASONING\n  kept exactly  " ] in
+  let cleared = body config messages in
+  Alcotest.(check bool) "cross-turn thinking is cleared on the wire" true
+    (cleared |> member "thinking" |> member "clear_thinking" |> to_bool);
+  check_reasoning "clearing past turns preserves active tool reasoning"
+    active config messages;
+  check_reasoning "default thinking preserves active tool reasoning"
+    active { config with enable_thinking = None } messages;
+  check_reasoning "explicit clear overrides full-history preservation"
+    active { config with preserve_thinking = Some true; clear_thinking = Some true }
+    messages;
+  check_reasoning "preserved thinking includes completed user turns"
+    ("OLD_REASONING" :: active) { config with preserve_thinking = Some true }
+    messages;
+  check_reasoning "explicit retained thinking overrides the preserve flag"
+    ("OLD_REASONING" :: active) { config with clear_thinking = Some false }
+    messages;
+  check_reasoning "disabled thinking does not replay reasoning"
+    [] { config with enable_thinking = Some false } messages;
+  check_reasoning "plain assistant reasoning is not an active tool exchange"
+    [] config
+    [ message User [ Text "Current question" ]
+    ; with_source source Assistant
+        [ Thinking { content = "PLAIN_REASONING"; signature = None }; Text "Answer" ]
+    ];
+  check_reasoning "a new caller closes the old tool exchange"
+    [] config (messages @ [ message User [ Text "Next question" ] ]);
+  let wire = cleared |> member "messages" |> to_list in
+  let calls = wire |> List.concat_map (fun item ->
+    match member "tool_calls" item with `List calls -> calls | _ -> []) in
+  Alcotest.(check (list string)) "tool calls survive reasoning selection"
+    [ "old-call"; "current-call" ]
+    (List.map (fun call -> call |> member "id" |> to_string) calls);
+  let results = wire |> List.filter (fun item -> member "role" item = `String "tool") in
+  Alcotest.(check (list string)) "tool results retain their call identities"
+    [ "old-call"; "current-call" ]
+    (List.map (fun item -> item |> member "tool_call_id" |> to_string) results)
 ;;
 
 (* ── Agent Core contract S3.1: the rotation drop is a declared policy ── *)
@@ -2612,9 +2759,17 @@ let () =
             `Quick
             test_provider_replay_policy_matrix_pinned
         ; Alcotest.test_case
+            "clear-thinking replay requires catalog reasoning support"
+            `Quick
+            test_clear_thinking_replay_requires_catalog_reasoning_support
+        ; Alcotest.test_case
             "clear-thinking gate is capability not identity"
             `Quick
             test_clear_thinking_gate_is_capability_not_identity
+        ; Alcotest.test_case
+            "GLM cleared thinking retains its active tool exchange"
+            `Quick
+            test_glm_clear_thinking_retains_active_tool_exchange
         ; Alcotest.test_case
             "rotation policy declared per dialect"
             `Quick

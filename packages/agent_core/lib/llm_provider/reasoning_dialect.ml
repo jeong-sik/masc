@@ -627,11 +627,11 @@ let base_for_provider_config (config : Provider_config.t) =
      | None -> provider_capabilities_of_kind config.kind |> of_capabilities)
 ;;
 
-(* Replay activation for the [Thinking_object_clear_thinking] preserve wire.
-   That wire declares that the provider only echoes prior-turn reasoning under
-   "preserved thinking": thinking active AND [clear_thinking = false]. Under the
-   wire default [clear_thinking = true] the server discards prior reasoning, so
-   sending it back violates the contract and grows the request every turn.
+(* [clear_thinking] controls reasoning across completed user turns. Interleaved
+   tool calls still return their assistant reasoning with the tool results when
+   thinking is enabled; clearing completed turns must not clear that exchange.
+   Preserved Thinking additionally replays all prior assistant reasoning.
+   Ref: https://docs.z.ai/guides/capabilities/thinking-mode (2026-11-01).
 
    Agent Core contract S1.1/S3.1: the branch predicate is the typed capability the
    catalog row declares, exactly like the [Thinking_object] arm of
@@ -640,14 +640,19 @@ let base_for_provider_config (config : Provider_config.t) =
 let apply_clear_thinking_replay_gate (config : Provider_config.t) dialect =
   match dialect.preserve_wire with
   | Thinking_object_clear_thinking ->
+    let caps, _ = Provider_config.resolve_request_capabilities config in
     { dialect with
       replay_policy =
-        (if
+        (if not caps.supports_reasoning
+         then No_replay
+         else if
            Provider_config.preserved_thinking_active
              ~enable_thinking:config.enable_thinking
              ~clear_thinking:config.clear_thinking
              ~preserve_thinking:config.preserve_thinking
          then All_assistant_messages
+         else if thinking_enabled ~enable_thinking:config.enable_thinking
+         then Tool_call_assistant_messages_latest_user_turn
          else No_replay)
     }
   | No_preserve_thinking_control

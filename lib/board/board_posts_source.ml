@@ -191,13 +191,17 @@ let rec definitely_not_written = function
      | Sync_rewrite_parent | Inspect_rewritten_data | Truncate_transaction_data
      | Sync_transaction_data | Remove_transaction_data | Sync_removal_parent -> false)
 
+(* A prewrite nonregular obstruction cannot authorize a write. Retain the old
+   expectation so an applied deletion can retry after the original file is
+   restored: Fs must still compare its exact identity and bytes. A real read
+   failure remains a refusal through [publish_read]. *)
 let rec contradicts_observation = function
   | Fs_compat.Cursor_mismatch _ | Transaction_content_changed _
   | Transaction_path_binding_changed _ | Incomplete_transaction_tail _
-  | Ambiguous_transaction_file_identity _ | Unexpected_transaction_file_kind _ -> true
+  | Ambiguous_transaction_file_identity _ -> true
   | Transaction_settlement_failed { primary = Transaction_failed error; _ } -> contradicts_observation error
   | Stable_lock_contended _ | Unexpected_stable_lock_permissions _ | Invalid_stable_lock_state _
-  | Invalid_transaction_suffix | Private_jsonl_operation_failed _
+  | Unexpected_transaction_file_kind _ | Invalid_transaction_suffix | Private_jsonl_operation_failed _
   | Rewrite_stage_failed _ | Rewrite_published_durability_unknown _
   | Transaction_settlement_failed { primary = Transaction_succeeded _; _ }
   | Transaction_append_failed _ -> false

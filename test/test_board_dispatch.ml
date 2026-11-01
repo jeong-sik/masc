@@ -2542,26 +2542,48 @@ let test_fusion_creation_emits_the_recorded_audience () =
        (Option.bind post.origin (fun o -> o.Board.fusion_producer))
    | Ok (Board.Post_created _) -> Alcotest.fail "whitespace-padded producer replay created a second post"
    | Error error -> Alcotest.fail (Board.Post_publication_failure.to_string error));
+  let pre_effect_board_error label = function
+    | Ok _ -> Alcotest.failf "%s: expected a pre-effect refusal" label
+    | Error failure ->
+      Alcotest.(check bool) (label ^ ": refused before publication") true
+        (Board.Post_publication_failure.effect_disposition failure =
+         Failure_effect.Proven_pre_effect);
+      Alcotest.(check bool) (label ^ ": no committed receipt") true
+        (Option.is_none (Board.Post_publication_failure.committed failure));
+      (match Board.Post_publication_failure.cause failure with
+       | Board.Post_publication_failure.Board_error error -> error
+       | Board.Post_publication_failure.Raised _ ->
+         Alcotest.fail (label ^ ": " ^ Board.Post_publication_failure.to_string failure))
+  in
   (match
-     Board_dispatch.create_post_once_by_fusion_run_id ~fusion_run_id:"run-audience"
-       ~author:"other-keeper" ~content:"fusion result headline @first-reader"
-       ~post_kind:Board.System_post ~visibility:Board.Unlisted ~ttl_hours:1
-       ~origin:{ origin with fusion_producer = Some "other-keeper" } ()
+     pre_effect_board_error "another producer cannot replay the existing run"
+       (Board_dispatch.create_post_once_by_fusion_run_id ~fusion_run_id:"run-audience"
+          ~author:"other-keeper" ~content:"fusion result headline @first-reader"
+          ~post_kind:Board.System_post ~visibility:Board.Unlisted ~ttl_hours:1
+          ~origin:{ origin with fusion_producer = Some "other-keeper" } ())
    with
-   | Error failure when
-       (match Board.Post_publication_failure.cause failure with
-        | Board.Post_publication_failure.Board_error (Board.Already_exists _) -> true
-        | Board.Post_publication_failure.Board_error _
-        | Board.Post_publication_failure.Raised _ -> false) -> ()
-   | Ok _ -> Alcotest.fail "mismatched fusion_producer was treated as an exact replay"
-   | Error error -> Alcotest.fail (Board.Post_publication_failure.to_string error));
-  List.iter
-    (fun fusion_producer ->
-      expect_validation_error "invalid Fusion producer origin"
-        (Board_dispatch.create_post_once_by_fusion_run_id ~fusion_run_id:"run-no-producer"
+   | Board.Already_exists _ -> ()
+   | error -> Alcotest.fail (Board.show_board_error error));
+  (match
+     pre_effect_board_error "producer must match the requesting author"
+       (Board_dispatch.create_post_once_by_fusion_run_id ~fusion_run_id:"run-audience"
           ~author:"fusion-keeper" ~content:"fusion result headline @first-reader"
           ~post_kind:Board.System_post ~visibility:Board.Unlisted ~ttl_hours:1
-          ~origin:{ origin with fusion_run_id = Some "run-no-producer"; fusion_producer } ()))
+          ~origin:{ origin with fusion_producer = Some "other-keeper" } ())
+   with
+   | Board.Validation_error _ -> ()
+   | error -> Alcotest.fail (Board.show_board_error error));
+  List.iter
+    (fun fusion_producer ->
+      match
+        pre_effect_board_error "invalid Fusion producer origin"
+          (Board_dispatch.create_post_once_by_fusion_run_id ~fusion_run_id:"run-no-producer"
+             ~author:"fusion-keeper" ~content:"fusion result headline @first-reader"
+             ~post_kind:Board.System_post ~visibility:Board.Unlisted ~ttl_hours:1
+             ~origin:{ origin with fusion_run_id = Some "run-no-producer"; fusion_producer } ())
+      with
+      | Board.Validation_error _ -> ()
+      | error -> Alcotest.fail (Board.show_board_error error))
     [ None; Some "   "; Some "bad/producer" ];
   Alcotest.(check int) "an exact replay emits nothing" 1 (List.length !seen)
 
@@ -3022,6 +3044,33 @@ let test_initialization_preserves_captured_workspace_and_lookup () =
         Eio_main.run @@ fun env ->
         Eio.Switch.run @@ fun sw ->
         Fs_compat.set_fs (Eio.Stdenv.fs env);
+        (try
+           Eio.Switch.run (fun init_sw ->
+             Eio_context.with_test_env ~net:(Eio.Stdenv.net env)
+               ~clock:(Eio.Stdenv.clock env) ~mono_clock:(Eio.Stdenv.mono_clock env)
+               ~sw:init_sw (fun () ->
+                 let absent_base = fresh_test_base_path () in
+                 Board.reset_global_for_test ();
+                 Board_dispatch.reset_for_test ();
+                 let expected_root = Fs_compat.realpath_lenient
+                     (Common.masc_dir_from_base_path ~base_path:absent_base) in
+                 let original_cwd = Sys.getcwd () in
+                 let relative_root = Common.masc_dir_from_base_path
+                     ~base_path:(Filename.basename absent_base) in
+                 Fun.protect ~finally:(fun () -> Unix.chdir original_cwd) (fun () ->
+                   Unix.chdir (Filename.dirname absent_base);
+                   Alcotest.(check bool) "fresh initialization request is relative" true
+                     (Filename.is_relative relative_root);
+                   Alcotest.(check bool) "relative initialization target is absent at init" false
+                     (Sys.file_exists relative_root);
+                   Result.get_ok (Board_dispatch.init_jsonl ~workspace_masc_dir:relative_root
+                     ~recipient_lookup:every_name_declared ()));
+                 Alcotest.(check string) "absent relative init captures the absolute workspace"
+                   expected_root (Board.global ()).Board.workspace_masc_dir;
+                 Alcotest.(check bool) "isolated initialization starts its scoped flusher" true
+                   (Board_dispatch.flusher_started_for_test ());
+                 Eio.Switch.fail init_sw Exit))
+         with Exit -> ());
         Eio_context.with_test_env ~net:(Eio.Stdenv.net env)
           ~clock:(Eio.Stdenv.clock env) ~mono_clock:(Eio.Stdenv.mono_clock env) ~sw
           (fun () ->
@@ -3078,8 +3127,6 @@ let test_initialization_preserves_captured_workspace_and_lookup () =
               Unix.chdir (Filename.dirname base_a);
               Alcotest.(check bool) "initialization request is relative" true
                 (Filename.is_relative relative_root_a);
-              Alcotest.(check bool) "relative initialization target is still absent" false
-                (Sys.file_exists relative_root_a);
               Result.get_ok (Board_dispatch.init_jsonl ~workspace_masc_dir:relative_root_a
                 ~recipient_lookup:original_lookup ()));
             check_mismatch "active A refuses init B"

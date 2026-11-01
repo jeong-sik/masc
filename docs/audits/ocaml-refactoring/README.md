@@ -2281,6 +2281,11 @@ Posts, Comments, Votes, Reactions order, selected empty snapshots and independen
 retry obligations. Other file families retain their existing protocols; a Board
 deletion is still not a four-file atomic transaction.
 
+A definite prewrite nonregular-file obstruction retains the previous exact
+expectation so an applied deletion can retry after the original file is restored.
+The retry still compares full bytes and file identity; changed content, cursor,
+binding or tail remains a refusal, and an unknown write remains latched.
+
 A known fsynced primary write advances the source; the creation receipt becomes
 committed after the model and origin indexes are published. Descriptor diagnostics
 follow that publication. Reserved cleanup and observer exceptions leave state,

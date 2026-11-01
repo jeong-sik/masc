@@ -112,6 +112,12 @@ let row_has_post_id post_id rows =
        | _ -> false)
     rows
 
+let check_post_deleted label post_id =
+  match Board_dispatch.get_post ~post_id with
+  | Error (Board.Post_not_found _) -> ()
+  | Error error -> Alcotest.fail (label ^ ": " ^ Board.show_board_error error)
+  | Ok _ -> Alcotest.fail (label ^ ": the applied deletion was lost")
+
 let test_delete_rewrite_failure_keeps_resurrection_scheduled () =
   let doomed = create_post_exn ~content:"deleted while the disk is broken" in
   let survivor = create_post_exn ~content:"stays and gets re-marked dirty" in
@@ -174,7 +180,9 @@ let test_individual_snapshot_failure path () =
        (Board_dispatch.toggle_reaction ~target_type:Board.Reaction_post
           ~target_id:post_id ~user_id:"reactor" ~emoji:"👍"));
   flush ();
+  let active = store () in
   let path = path (store ()) in
+  let posts_obstructed = String.equal path (Board.persist_path active) in
   let backup = path ^ ".before-delete" in
   Unix.rename path backup;
   Unix.mkdir path 0o700;
@@ -188,7 +196,17 @@ let test_individual_snapshot_failure path () =
          Alcotest.fail "one failed snapshot must refuse durable deletion");
       Alcotest.(check bool) "failed final snapshot stays scheduled" true
         ((store ()).Board.dirty_posts || (store ()).Board.dirty_comments));
+  Alcotest.(check bool) "retry retains the original store" true (active == store ());
+  check_post_deleted "deletion remains applied before retry" post_id;
+  if posts_obstructed then
+    Alcotest.(check bool) "restored old posts file still contains the doomed row" true
+      (row_has_post_id post_id (post_rows ()));
   flush ();
+  Alcotest.(check bool) "successful retry uses the original store" true (active == store ());
+  check_post_deleted "retry does not reload the doomed post" post_id;
+  Alcotest.(check bool) "retry removes the doomed row from the actual posts file" false
+    (row_has_post_id post_id (post_rows ()));
+  Alcotest.(check bool) "successful retry clears posts work" false active.Board.dirty_posts;
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
   Result.get_ok (Board_dispatch.init_jsonl
@@ -218,6 +236,7 @@ let test_multiple_snapshot_failures_keep_healthy_writes_and_retry () =
     (List.length (Fs_compat.load_jsonl (Board.comments_path (Board.global ()))));
   Alcotest.(check int) "reaction is on disk before deletion" 1
     (List.length (Fs_compat.load_jsonl (Board.reactions_path (Board.global ()))));
+  let active = store () in
   let with_blocked_path path f =
     let backup = path ^ ".before-delete" in
     Unix.rename path backup;
@@ -240,7 +259,19 @@ let test_multiple_snapshot_failures_keep_healthy_writes_and_retry () =
         (Fs_compat.load_file (Board.comments_path (Board.global ())));
       Alcotest.(check string) "reactions are removed before repair" ""
         (Fs_compat.load_file (Board.reactions_path (Board.global ())))));
+  Alcotest.(check bool) "multiple failures retain the original store" true
+    (active == store ());
+  check_post_deleted "multiple failures keep deletion applied before retry" post_id;
+  Alcotest.(check bool) "restored posts still contain the pending-deletion row" true
+    (row_has_post_id post_id (post_rows ()));
   flush ();
+  Alcotest.(check bool) "multiple-failure retry uses the original store" true
+    (active == store ());
+  check_post_deleted "multiple-failure retry does not reload the doomed post" post_id;
+  Alcotest.(check bool) "multiple-failure retry removes the actual doomed row" false
+    (row_has_post_id post_id (post_rows ()));
+  Alcotest.(check bool) "multiple-failure retry clears posts work" false
+    active.Board.dirty_posts;
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
   Result.get_ok (Board_dispatch.init_jsonl
@@ -252,6 +283,85 @@ let test_multiple_snapshot_failures_keep_healthy_writes_and_retry () =
   Alcotest.(check int) "restart has no deleted replies" 0 (Hashtbl.length restored.comments);
   Alcotest.(check int) "restart has no deleted votes" 0 (Hashtbl.length restored.vote_log);
   Alcotest.(check int) "restart has no deleted reactions" 0 (Hashtbl.length restored.reactions)
+
+let test_obstructed_delete_retry_refuses_changed_same_cursor_bytes () =
+  let doomed = create_post_exn ~content:"body-aaaa" in
+  let post_id = Board.Post_id.to_string doomed.id in
+  flush ();
+  let active = store () in
+  let path = Board.persist_path active in
+  let before = In_channel.with_open_bin path In_channel.input_all in
+  let original_stat = Unix.stat path in
+  let changed_row = Board.post_to_yojson { doomed with body = "body-bbbb" } in
+  let changed = Yojson.Safe.to_string changed_row ^ "\n" in
+  Alcotest.(check int) "external edit keeps the accepted source length"
+    (String.length before) (String.length changed);
+  Alcotest.(check bool) "external edit changes actual source bytes" false
+    (String.equal before changed);
+  let backup = path ^ ".before-delete" in
+  Fs_compat.invalidate_cached_writer path;
+  Unix.rename path backup;
+  Unix.mkdir path 0o700;
+  Fun.protect
+    ~finally:(fun () ->
+      Fs_compat.invalidate_cached_writer path;
+      Unix.rmdir path;
+      Unix.rename backup path)
+    (fun () ->
+      (match Board_dispatch.delete_post ~post_id with
+       | Ok (Board.Deletion_persistence_pending _) -> ()
+       | Error error -> Alcotest.fail (Board.show_board_error error)
+       | Ok Board.Durable_deletion ->
+         Alcotest.fail "the obstructed posts snapshot must remain pending");
+      check_post_deleted "deletion applies while the source is obstructed" post_id;
+      Alcotest.(check bool) "obstructed deletion leaves real retry work" true
+        active.Board.dirty_posts;
+      (* Change the real saved file without replacing its inode or extending
+         it. Restoring the path therefore defeats cursor-only validation. *)
+      Out_channel.with_open_gen [Open_wronly; Open_binary] 0o600 backup
+        (fun out -> output_string out changed));
+  let restored_stat = Unix.stat path in
+  Alcotest.(check (pair int int)) "restoration retains the exact source inode"
+    (original_stat.Unix.st_dev, original_stat.Unix.st_ino)
+    (restored_stat.Unix.st_dev, restored_stat.Unix.st_ino);
+  Alcotest.(check int) "restoration retains the exact source length"
+    original_stat.Unix.st_size restored_stat.Unix.st_size;
+  (match post_rows () with
+   | [row] ->
+     (match Board.post_of_yojson row with
+      | Some saved ->
+        Alcotest.(check string) "restored row is a valid edit of the actual doomed post"
+          post_id (Board.Post_id.to_string saved.id);
+        Alcotest.(check string) "restored row contains the changed body"
+          "body-bbbb" saved.body
+      | None -> Alcotest.fail "the external edit must remain a valid current post row")
+   | rows -> Alcotest.failf "expected one real restored post row, got %d" (List.length rows));
+  check_post_deleted "restoration does not reload the pending-deleted model" post_id;
+  flush ();
+  (* Observe the actual flush refusal through the public opaque snapshot/save
+     contract, without setting a health cell or adopting the changed source. *)
+  let retry = Board.with_persist_lock active (fun () ->
+    let snapshot = Board.with_lock active (fun () -> Board.capture_posts_snapshot active) in
+    Board.save_posts_snapshot active snapshot) in
+  (match retry with
+   | Board.Posts_not_written
+       (Board.Posts_transaction_failed (Fs_compat.Transaction_content_changed _)) -> ()
+   | Board.Posts_not_written _ | Board.Posts_write_unknown _ | Board.Posts_written _ ->
+     Alcotest.fail "retry must retain the real exact-byte CAS refusal");
+  Alcotest.(check bool) "refused retry retains the original store" true (active == store ());
+  check_post_deleted "refused CAS preserves the applied deletion" post_id;
+  Alcotest.(check int) "refused CAS does not adopt any restored row" 0
+    (Hashtbl.length active.posts);
+  Alcotest.(check bool) "refused CAS retains pending deletion work" true
+    active.Board.dirty_posts;
+  Alcotest.(check string) "refused CAS preserves every changed disk byte" changed
+    (In_channel.with_open_bin path In_channel.input_all);
+  flush ();
+  check_post_deleted "another flush cannot reload the doomed post" post_id;
+  Alcotest.(check bool) "another refused flush retains pending work" true
+    active.Board.dirty_posts;
+  Alcotest.(check string) "another refused flush cannot overwrite changed bytes" changed
+    (In_channel.with_open_bin path In_channel.input_all)
 
 let test_unreadable_snapshot_refuses_before_transition () =
   let post = create_post_exn ~content:"unreadable source cannot authorize deletion" in
@@ -428,6 +538,8 @@ let () =
             (with_eio (test_individual_snapshot_failure Board.reactions_path))
         ; Alcotest.test_case "multiple failed snapshots preserve healthy writes and retry" `Quick
             (with_eio test_multiple_snapshot_failures_keep_healthy_writes_and_retry)
+        ; Alcotest.test_case "obstructed delete retry refuses changed same-cursor bytes" `Quick
+            (with_eio test_obstructed_delete_retry_refuses_changed_same_cursor_bytes)
         ; Alcotest.test_case "unreadable snapshot refuses without a transition" `Quick
             (with_eio test_unreadable_snapshot_refuses_before_transition)
         ; Alcotest.test_case "MCP pending deletion is a post-effect failure" `Quick

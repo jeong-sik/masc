@@ -744,6 +744,15 @@ let render_keeper_list (state : state) =
          (Theme.warn () ^ "  turn/waiting observation: "
           ^ Terminal_text.single_line err ^ Ansi.reset)
    | None -> ());
+  (match state.keeper_waiting_error with
+   | Some err ->
+       box_line buf cols
+         (Theme.warn () ^ "  waiting refresh failed: " ^ Terminal_text.single_line err ^ Ansi.reset)
+   | None when Keeper_waiting_read.awaiting_change state.keeper_waiting_read ->
+       let detail = if Keeper_waiting_read.in_flight state.keeper_waiting_read
+         then "refreshing" else "refresh pending" in
+       box_line buf cols (Theme.warn () ^ "  waiting inventory: " ^ detail ^ Ansi.reset)
+   | None -> ());
   (match state.keeper_waiting_failure with
    | None -> ()
    | Some failure ->

@@ -890,6 +890,15 @@ let with_absorb_guidance_gap ~empty f =
     Prompt_registry.clear_prompt_override Prompt_names.librarian_absorb_forward;
     with_missing_librarian_fragment ~empty "absorb_forward" f)
 
+let retain_gate_payload (fixture:fixture) ~owner ~(parent:Owner.retained) ~request_id ~request =
+  io (fun () ->
+    let store=Store.create ~root:(Filename.concat fixture.base_path "decoder-gate-payload") in
+    let scope=Gate.scope owner in
+    Owner.retain ~store ~scope ~request_id ~installation_id:parent.installation_id
+      ~package_id:parent.package_id ~tool:parent.tool ~summary:`Null ~request |> owned;
+    Owner.load ~store ~scope ~request_id |> owned
+      |> Option.to_result ~none:"decoder fixture gate was not retained" |> get)
+
 let test_admission_capture_keeps_original_policy ()=with_fixture (fun ~sw:_ fixture ->
   let admission=Prompt_names.librarian_admission_policy and retirement=Prompt_names.librarian_retirement_policy in
   with_policy_overrides [admission;retirement] (fun () ->
@@ -945,14 +954,23 @@ let test_missing_absorb_policy_refuses_before_preparation ()=List.iter (fun empt
   let owner=io (fun () -> original_owner fixture.base_path fixture.keepers_dir) in
   let record=memory_action fixture (fun () -> retain_judgment fixture record final) in
   with_absorb_gate_policy ~enabled:true ~excluded:false (fun () ->
+  let intent=io (fun () -> Gate.prepare_root ~store:fixture.store ~owner ~capture ~parent:record
+    ~proposal:(match final with Lane_addon_exact.Call_final (Answered {output;_}) -> Lane_addon_exact.checked_json output
+      | _ -> fail "the fixture requires its original answer")
+    ~request_id:(Random_id.uuid_v7 ())
+    ~authority:(Keeper_librarian_absorb_gate.resolve ~keeper_id:keeper_name) |> get) in
   with_absorb_guidance_gap ~empty (fun () ->
     let authority=Keeper_librarian_absorb_gate.resolve ~keeper_id:keeper_name in
-    check bool "missing policy stays an explicit setup error" true
-      (Keeper_librarian_absorb_gate.guidance_of_authority authority |> Result.is_error);
+    let missing_policy=match Keeper_librarian_absorb_gate.guidance_of_authority authority with
+      | Error detail -> detail | Ok _ -> fail "missing policy must stay an explicit setup error" in
     let posts=F.post_count fixture.server in
-    check bool "missing policy cannot publish the first gate intent" true
+    check (result unit string) "missing policy cannot publish the first gate intent" (Error missing_policy)
       (memory_action fixture (fun () -> Commit.begin_gate ~store:fixture.store ~owner ~capture ~record
-        ~gate_root_id:(Random_id.uuid_v7 ()) ~authority |> Result.is_error));
+        ~gate_root_id:(Random_id.uuid_v7 ()) ~authority |> Result.map (fun _ -> ())));
+    check (result unit string) "nonempty admission retention requires guidance" (Error missing_policy)
+      (io (fun () -> Gate.retain ~store:fixture.store ~owner ~capture ~parent:record
+        ~proposal:(member "proposal" intent.request) ~request_id:intent.request_id ~authority ~predecessor:None)
+       |> Result.map (fun _ -> ()));
     let parent=io (fun () -> Owner.load ~store:fixture.store ~scope:record.scope ~request_id:record.request_id |> owned) in
     let parent=Option.to_result ~none:"original parent missing" parent |> get in
     check bool "the parent still has no gate preparation" true (Progress.preparation parent.progress=None);
@@ -964,18 +982,27 @@ let test_missing_absorb_policy_refuses_before_preparation ()=List.iter (fun empt
       ~before_evaluate:(fun ~direction:_ ~destinations:_ ~state:_ ~questions:_ -> fail "missing policy must not dispatch") () in
     check bool "missing guidance cannot be reported as a disabled gate" true
       (Keeper_librarian_absorb_gate.failure_kind gate=Some Keeper_librarian_absorb_gate.Evaluation_failed);
+    let request=`Assoc (("guidance",`Null)::List.remove_assoc "guidance" (Yojson.Safe.Util.to_assoc intent.request)) in
+    let forged=retain_gate_payload fixture ~owner ~parent:record ~request_id:intent.request_id ~request in
+    let rejected=io (fun () -> Gate.validate_payload ~owner ~capture ~parent:record ~record:forged
+      ~read:(fun ~scope:_ ~request_id:_ -> fail "missing guidance must refuse before ancestry lookup")
+      ~read_body:(fun ~scope:_ ~request_digest:_ -> fail "missing guidance must refuse before body lookup")) in
+    check (result unit string) "an enabled nonempty proposal cannot decode null guidance"
+      (Error "Available absorption gate has no captured guidance") rejected;
     check int "the already answered parent is never sent again" posts (F.post_count fixture.server))))) [false;true]
 
-let test_unused_absorb_policy_is_captured_and_replayed ()=
-  List.iter (fun (empty,excluded) -> with_fixture (fun ~sw:_ fixture ->
-    let record,capture,final=retained_absorbing_answer_before_gate fixture in
+let check_unused_absorb_policy ~empty ~excluded ~no_absorptions =
+  with_fixture (fun ~sw:_ fixture ->
+    let record,capture,final=(if no_absorptions then retained_answer_before_gate
+      else retained_absorbing_answer_before_gate) fixture in
     let owner=io (fun () -> original_owner fixture.base_path fixture.keepers_dir) in
     let record=memory_action fixture (fun () -> retain_judgment fixture record final) in
-    with_absorb_gate_policy ~enabled:excluded ~excluded (fun () ->
+    with_absorb_gate_policy ~enabled:(excluded || no_absorptions) ~excluded (fun () ->
     with_absorb_guidance_gap ~empty (fun () ->
       let authority=Keeper_librarian_absorb_gate.resolve ~keeper_id:keeper_name in
-      check bool "unavailable authority captures no unused policy" true
-        (Keeper_librarian_absorb_gate.guidance_of_authority authority=Ok None);
+      check bool "unused guidance retains its original availability" true
+        (if no_absorptions then Keeper_librarian_absorb_gate.guidance_of_authority authority |> Result.is_error
+         else Keeper_librarian_absorb_gate.guidance_of_authority authority=Ok None);
       let parent=memory_action fixture (fun () ->
         match Commit.begin_gate ~store:fixture.store ~owner ~capture ~record
           ~gate_root_id:(Random_id.uuid_v7 ()) ~authority |> get with
@@ -984,24 +1011,40 @@ let test_unused_absorb_policy_is_captured_and_replayed ()=
         | Some (Preparation_pending intended) -> intended
         | None | Some (Preparation_confirmed _) -> fail "pending gate preparation expected" in
       check json "absence is explicit in the durable preparation" `Null (member "guidance" intended.request);
+      if no_absorptions then (
+        let request=`Assoc (("guidance",`Assoc [])::List.remove_assoc "guidance" (Yojson.Safe.Util.to_assoc intended.request)) in
+        let malformed=retain_gate_payload fixture ~owner ~parent ~request_id:intended.request_id ~request in
+        check bool "an empty proposal still rejects malformed non-null guidance" true
+          (io (fun () -> Gate.validate_payload ~owner ~capture ~parent ~record:malformed
+            ~read:(fun ~scope:_ ~request_id:_ -> fail "malformed guidance must refuse before ancestry lookup")
+            ~read_body:(fun ~scope:_ ~request_digest:_ -> fail "malformed guidance must refuse before body lookup")) |> Result.is_error));
       let parent=memory_action fixture (fun () -> Gate.recover_root ~store:fixture.store ~owner ~capture |> get) in
       let gate=memory_action fixture (fun () -> Gate.retain ~store:fixture.store ~owner ~capture ~parent
         ~proposal:(member "proposal" intended.request) ~request_id:intended.request_id
         ~authority ~predecessor:None |> get) in
       let complete=memory_action fixture (fun () ->
         match Gate.resume ~store:fixture.store ~owner ~capture ~record:gate ~live_authority:None
-          ~request_clock:(fun () -> fail "unavailable authority acquired a request clock")
+          ~request_clock:(fun () -> fail "unused guidance acquired a request clock")
           ~before_dispatch:(fun () -> fail "unused guidance cannot dispatch") |> get with
         | Complete (result,_) -> result | Pending _ -> fail "unavailable gate must complete locally") in
-      check int "the off or excluded gate applies the original absorption" 1
+      check int "the original no-evaluation disposition is preserved" (if no_absorptions then 0 else 1)
         (List.length (Keeper_librarian_absorb_gate.absorbed_of_run complete));
+      if no_absorptions then check bool "the result names the validated empty proposal" true
+        (match complete with Keeper_librarian_absorb_gate.Skipped {reason=No_absorptions;absorbed=[]} -> true
+         | Skipped _ | Evaluated _ -> false);
       let replayed=io (fun () -> Gate.restore_size_evidence ~store:fixture.store ~owner
         ~parent_execution:capture ~gate_request_id:gate.request_id |> get) in
       check json "unavailable policy survives strict durable replay"
         (Keeper_librarian_absorb_gate.run_result_to_yojson complete)
         (Keeper_librarian_absorb_gate.run_result_to_yojson replayed);
-      check int "the original provider answer is never sent again" 1 (F.post_count fixture.server)))))
+      check int "the original provider answer is never sent again" 1 (F.post_count fixture.server))))
+
+let test_unused_absorb_policy_is_captured_and_replayed ()=
+  List.iter (fun (empty,excluded) -> check_unused_absorb_policy ~empty ~excluded ~no_absorptions:false)
     [false,false;true,false;false,true;true,true]
+
+let test_enabled_empty_absorptions_need_no_guidance ()=
+  List.iter (fun empty -> check_unused_absorb_policy ~empty ~excluded:false ~no_absorptions:true) [false;true]
 
 let test_mismatched_retained_judgment_cannot_borrow_host_proof ()=with_fixture (fun ~sw:_ fixture ->
   let record,capture,final=retained_answer_before_gate fixture in
@@ -1275,6 +1318,7 @@ let () =
   test_case "missing admission policy refuses before capture or dispatch" `Quick test_missing_admission_policy_refuses_before_capture;
   test_case "missing absorb policy refuses before root publication" `Quick test_missing_absorb_policy_refuses_before_preparation;
   test_case "off and excluded gates capture and replay without unused policy" `Quick test_unused_absorb_policy_is_captured_and_replayed;
+  test_case "enabled empty absorption captures and replays without unused policy" `Quick test_enabled_empty_absorptions_need_no_guidance;
   test_case "actual Memory lane, worker, HTTP, domain validation and receipt-backed ACK" `Quick test_actual_happy_path;
   test_case "unchanged semantic deferral preserves the same original" `Quick test_unchanged_deferred_does_not_remint;
   test_case "new tail rejudges the complete old sparse gap against current Memory" `Quick test_gap_and_new_tail_are_rejudged_together;

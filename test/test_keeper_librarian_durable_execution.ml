@@ -408,6 +408,92 @@ let gate_records fixture capture =
   let inventory=io (fun () -> Gate.Inventory.read ~store:fixture.store ~owner:(Capture.physical_owner capture)) |> get in
   List.concat_map (fun execution_id -> Gate.Inventory.execution_records inventory ~execution_id)
     (Gate.Inventory.executions inventory)
+let with_absorb_guidance_gap ~empty f =
+  let original=Prompt_registry.get_markdown_dir () |> Option.get in
+  let key=Prompt_names.librarian_absorb_forward in
+  let override=(Prompt_registry.resolve_prompt key).override_value in
+  let directory=io (fun () ->
+    let directory=Filename.temp_dir "history-absorb-policy-gap-" "" in
+    let text=Fs_compat.load_file (Filename.concat original "librarian.md") in
+    let _,lines=List.fold_left (fun (skipping,lines) line ->
+      if line="### absorb_forward" then true,(if empty then ""::line::lines else lines)
+      else if skipping && not (String.starts_with ~prefix:"### " line) then true,lines
+      else false,line::lines) (false,[]) (String.split_on_char '\n' text) in
+    write (Filename.concat directory "librarian.md") (String.concat "\n" (List.rev lines));directory) in
+  Fun.protect ~finally:(fun () ->
+    Prompt_registry.set_markdown_dir original;
+    (match override with None -> Prompt_registry.clear_prompt_override key
+     | Some text -> Prompt_registry.set_override key text |> get);
+    io (fun () -> Fs_compat.remove_tree directory)) (fun () ->
+    Prompt_registry.clear_prompt_override key;
+    Prompt_registry.set_markdown_dir directory;f ())
+let with_enabled_absorb_gate (fixture:fixture) f =
+  Masc_test_deps.with_process_env "TYPESAFEAI_API_KEY" (Some "unused-absorb-key") (fun () ->
+    Masc_test_deps.with_typesafeai_policy
+      {Runtime_schema.default_typesafeai with lane_enabled=true;absorb_gate=true;excluded_keepers=[];
+       destinations=({Runtime_schema.endpoint=fixture.server.base_url;model="unused-absorb-model";
+         api_key_env="TYPESAFEAI_API_KEY"},[])} f)
+let add_absorption (proposal:Yojson.Safe.t) =
+  let fields=Yojson.Safe.Util.to_assoc proposal in
+  let claims=List.assoc "new_claims" fields |> Yojson.Safe.Util.to_list in
+  let claims=match claims with
+    | `Assoc first::rest -> `Assoc (("absorbs",`List [`String "m1"])::List.remove_assoc "absorbs" first)::rest
+    | [] | _::_ -> fail "the absorbing fixture requires a new claim" in
+  `Assoc (("new_claims",`List claims)::List.remove_assoc "new_claims" fields)
+let seed_absorb_source (fixture:fixture) = memory_action fixture (fun () -> io (fun () ->
+  Current.replace ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name ~expected_revision:None
+    ~now:50. ~source:{Current.kind=Current.Librarian;trace_id="unused-absorb-policy"}
+    ~facts:[Types.observed ~claim:"Earlier complete source memory." ~category:Types.Fact ~now:50.
+      ~origin:{kind=Types.Authored;trace_id="unused-absorb-policy"}] () |> get |> ignore))
+let answered_proposal (record:Owner.retained) (request:Exact.request) =
+  let judgment=match Progress.phase record.progress with
+    | Judged judgment -> judgment | _ -> fail "expected an answered original before gate preparation" in
+  match Exact.final_of_json ~schema:(Option.get request.schema) judgment |> get with
+  | Call_final (Answered {output;_}) -> Exact.checked_json output
+  | _ -> fail "expected the original host-checked answer"
+let test_history_guidance_is_required_only_for_actual_absorptions () =
+  List.iter (fun (empty,absorbing) -> with_fixture (fun ~sw:_ fixture ->
+    seed_absorb_source fixture;
+    fixture.set_response (fun capture ->
+      let proposal=answer capture in `OK,F.openai_response (if absorbing then add_absorption proposal else proposal));
+    with_enabled_absorb_gate fixture (fun () -> with_absorb_guidance_gap ~empty (fun () ->
+      let before= !(fixture.deliveries) in
+      assert_pending (run_worker fixture);await_delivery fixture ~after:before;
+      if absorbing then check bool "nonempty history cannot prepare without guidance" true (Result.is_error (run_worker fixture))
+      else drive_advanced fixture;
+      let parent,capture=only_original fixture in
+      let owner=Capture.physical_owner capture in
+      let authority=Keeper_librarian_absorb_gate.resolve ~keeper_id:keeper_name in
+      let missing_policy=match Keeper_librarian_absorb_gate.guidance_of_authority authority with
+        | Error detail -> detail | Ok _ -> fail "enabled guidance must remain explicitly unavailable" in
+      if absorbing then (
+        let proposal=answered_proposal parent (Capture.request capture |> get) in
+        check bool "the host retained real nonempty absorption" true
+          ((Capture.validate_proposal capture proposal |> get).absorption.absorbed<>[]);
+        let request_id=Random_id.uuid_v7 () in
+        check (result unit string) "nonempty history root requires guidance" (Error missing_policy)
+          (io (fun () -> Gate.prepare_root ~store:fixture.store ~owner ~capture ~parent ~proposal ~request_id ~authority) |> Result.map (fun _ -> ()));
+        check (result unit string) "nonempty history retention requires guidance" (Error missing_policy)
+          (io (fun () -> Gate.retain ~store:fixture.store ~owner ~capture ~parent ~proposal ~request_id ~authority ~predecessor:None) |> Result.map (fun _ -> ()));
+        check int "no invalid history gate was retained" 0 (List.length (gate_records fixture capture)))
+      else (
+        let gate=match gate_records fixture capture with [gate] -> gate | _ -> fail "one empty history gate expected" in
+        check json "empty history captures explicit guidance absence" `Null (member "guidance" gate.request);
+        let parent=memory_action fixture (fun () -> io (fun () -> Gate.recover_root ~store:fixture.store ~owner ~capture) |> get) in
+        let gate=memory_action fixture (fun () -> io (fun () -> Gate.retain ~store:fixture.store ~owner ~capture ~parent
+          ~proposal:(member "proposal" gate.request) ~request_id:gate.request_id ~authority ~predecessor:None) |> get) in
+        let result=memory_action fixture (fun () -> Gate.resume ~store:fixture.store ~owner ~capture ~record:gate ~live_authority:None
+          ~request_clock:(fun () -> fail "empty history acquired a gate clock")
+          ~before_dispatch:(fun () -> fail "empty history dispatched a gate request") |> get) in
+        let result=match result with Gate.Complete (result,_) -> result | Pending _ -> fail "empty history must complete locally" in
+        check bool "empty history replays as No_absorptions" true
+          (match result with Keeper_librarian_absorb_gate.Skipped {reason=No_absorptions;absorbed=[]} -> true | _ -> false);
+        let replayed=io (fun () -> Gate.restore_size_evidence ~store:fixture.store ~owner ~parent_execution:capture
+          ~gate_request_id:gate.request_id) |> get in
+        check json "empty history survives strict replay" (Keeper_librarian_absorb_gate.run_result_to_yojson result)
+          (Keeper_librarian_absorb_gate.run_result_to_yojson replayed));
+      check int "only the original history provider was called" 1 (F.post_count fixture.server)))))
+    [false,false;true,false;false,true;true,true]
 let settled_on fixture ~date (record:Owner.retained) =
   io (fun () -> Owner.settled ~store:fixture.store ~scope:record.scope ~date ~request_id:record.request_id) |> owned
 let settle_only fixture ~date (record:Owner.retained) =
@@ -1443,6 +1529,60 @@ let candidate_and_request fixture =
   match candidate_of fixture with
   | Some candidate -> candidate,request
   | None -> fail "the refused original must be a floor candidate"
+let test_floor_guidance_is_required_only_for_actual_absorptions () =
+  let module Journal = Keeper_librarian_floor_step_gate in
+  let module Step = Keeper_librarian_floor_step_request in
+  List.iter (fun (empty,absorbing) -> with_fixture (fun ~sw:_ fixture ->
+    seed_absorb_source fixture;
+    provider_refuses_one_turn fixture size_refusal;
+    let candidate,request=candidate_and_request fixture in
+    let posts=F.post_count fixture.server in
+    let answers=ref 0 in
+    fixture.set_step_response (fun _ ->
+      incr answers;
+      let proposal=step_answer !answers in `OK,F.openai_response (if absorbing then add_absorption proposal else proposal));
+    with_enabled_absorb_gate fixture (fun () -> with_absorb_guidance_gap ~empty (fun () ->
+      let outcome=descend fixture candidate in
+      if absorbing then check bool "nonempty floor cannot prepare without guidance" true (Result.is_error outcome)
+      else ignore (finished outcome);
+      let owner=Capture.physical_owner request in
+      let steps=steps_of fixture request in
+      check int "each source message has exactly its original provider answer" (if absorbing then 1 else 2)
+        (F.post_count fixture.server-posts);
+      let authority=Keeper_librarian_absorb_gate.resolve ~keeper_id:keeper_name in
+      let missing_policy=match Keeper_librarian_absorb_gate.guidance_of_authority authority with
+        | Error detail -> detail | Ok _ -> fail "enabled floor guidance must remain explicitly unavailable" in
+      List.iter (fun ((parent:Owner.retained),_) ->
+        let step=io (fun () -> Step.restore ~owner parent) |> get in
+        let proposal=answered_proposal parent (Step.request step |> get) in
+        let validated:Keeper_librarian_runtime.durable_step_proposal=Step.validate_proposal step proposal |> get in
+        check bool "the original step retains its actual absorption shape" absorbing
+          (validated.proposal.absorption.absorbed<>[]);
+        if absorbing then (
+          let request_id=Random_id.uuid_v7 () in
+          check (result unit string) "nonempty floor root requires guidance" (Error missing_policy)
+            (io (fun () -> Journal.prepare_root ~store:fixture.store ~owner ~capture:step ~parent ~proposal ~request_id ~authority) |> Result.map (fun _ -> ()));
+          check (result unit string) "nonempty floor retention requires guidance" (Error missing_policy)
+            (io (fun () -> Journal.retain ~store:fixture.store ~owner ~capture:step ~parent ~proposal ~request_id ~authority ~predecessor:None) |> Result.map (fun _ -> ()));
+          check bool "no invalid floor gate was prepared" true (Progress.preparation parent.progress=None))
+        else (
+          let parent=memory_action fixture (fun () -> io (fun () -> Journal.recover_root ~store:fixture.store ~owner ~capture:step) |> get) in
+          let gate=io (fun () -> Journal.root ~store:fixture.store ~owner ~capture:step) |> get |> Option.get in
+          check json "empty floor captures explicit guidance absence" `Null (member "guidance" gate.request);
+          let gate=memory_action fixture (fun () -> io (fun () -> Journal.retain ~store:fixture.store ~owner ~capture:step ~parent
+            ~proposal ~request_id:gate.request_id ~authority ~predecessor:None) |> get) in
+          let result=memory_action fixture (fun () -> Journal.resume ~store:fixture.store ~owner ~capture:step ~record:gate
+            ~live_authority:None ~request_clock:(fun () -> fail "empty floor acquired a gate clock")
+            ~before_dispatch:(fun () -> fail "empty floor dispatched a gate request") |> get) in
+          let result=match result with Journal.Complete (result,_) -> result | Pending _ -> fail "empty floor must complete locally" in
+          check bool "empty floor replays as No_absorptions" true
+            (match result with Keeper_librarian_absorb_gate.Skipped {reason=No_absorptions;absorbed=[]} -> true | _ -> false);
+          let replayed=io (fun () -> Journal.restore_size_evidence ~store:fixture.store ~owner ~parent_execution:step
+            ~gate_request_id:gate.request_id) |> get in
+          check json "empty floor survives strict replay" (Keeper_librarian_absorb_gate.run_result_to_yojson result)
+            (Keeper_librarian_absorb_gate.run_result_to_yojson replayed))) steps;
+      check int "gate recovery and replay add no provider call" (if absorbing then 1 else 2)
+        (F.post_count fixture.server-posts))))) [false,false;true,false;false,true;true,true]
 let test_a_kept_size_refusal_of_one_turn_is_a_candidate () = with_fixture (fun ~sw:_ fixture ->
   fixture.set_response (fun _ -> size_refusal);
   narrow_next_read fixture;
@@ -2155,6 +2295,10 @@ let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured c
   test_case "a refusal the latest execution did not end in shows nothing" `Quick
     test_a_refusal_the_latest_execution_did_not_end_in_shows_nothing;
   test_case "actual original reaches Memory and source ACK" `Quick test_actual_completed_history_path;
+  test_case "history guidance is required only for actual absorptions" `Quick
+    test_history_guidance_is_required_only_for_actual_absorptions;
+  test_case "floor guidance is required only for actual absorptions" `Quick
+    test_floor_guidance_is_required_only_for_actual_absorptions;
   test_case "a settle stopped before its gate records finishes with the next original" `Quick
     test_stopped_settle_leaves_gates_for_the_next_original;
   test_case "one inventory observation reuses verified gate and parent bodies without effect authority" `Quick

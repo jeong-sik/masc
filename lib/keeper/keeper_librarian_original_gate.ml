@@ -169,11 +169,15 @@ let transcript_step previous next =
 
 type restored = {proposal:Yojson.Safe.t;authority:Gate.replay_authority;guidance:Gate.guidance option;
   input:inputs;transcript:transcript;complete:Gate.run_result option}
-let captured_guidance ~authority = function
+let guidance_for_input (input:inputs) authority =
+  match input.absorbed with
+  | [] -> Ok None
+  | _::_ -> Gate.guidance_of_authority authority
+let captured_guidance ~(input:inputs) ~authority = function
   | `Null ->
-    (match authority with
-     | Gate.Gate_unavailable _ -> Ok None
-     | Gate.Gate_available _ -> Error "Available absorption gate has no captured guidance")
+    (match input.absorbed,authority with
+     | [],_ | _::_,Gate.Gate_unavailable _ -> Ok None
+     | _::_,Gate.Gate_available _ -> Error "Available absorption gate has no captured guidance")
   | json -> Gate.guidance_of_yojson json |> Result.map Option.some
 let gate_request ~owner ~capture ~parent ~proposal ~request_id ~authority ~guidance ~predecessor =
   `Assoc ["version",`Int request_version;"kind",`String Capture.gate_kind;"request_id",`String request_id;
@@ -193,7 +197,7 @@ let request_payload ~owner ~capture ~(parent:Owner.retained) ~request_id request
   let proposal = value "proposal" members in
   let* input = inputs capture proposal in
   let* authority = Gate.replay_authority_of_yojson (value "authority" members) in
-  let* guidance = captured_guidance ~authority (value "guidance" members) in
+  let* guidance = captured_guidance ~input ~authority (value "guidance" members) in
   let* predecessor = optional_text (value "predecessor" members) in
   let+ () = equal request
     (gate_request ~owner ~capture ~parent ~proposal ~request_id ~authority ~guidance ~predecessor)
@@ -300,8 +304,9 @@ let validate_successor_request_with ~read ~store ~owner ~capture ~(prior:Owner.r
   let* prior_members = request_members prior.request in
   let* () = equal proposal (value "proposal" prior_members) "Gate successor changed the original proposal" in
   let* parent = load_parent_with ~read ~store ~owner ~capture ~proposal in
+  let* input = inputs capture proposal in
   let* authority = Gate.replay_authority_of_yojson (value "authority" members) in
-  let* guidance = captured_guidance ~authority (value "guidance" members) in
+  let* guidance = captured_guidance ~input ~authority (value "guidance" members) in
   equal request (gate_request ~owner ~capture ~parent ~proposal
     ~request_id:successor.request_id ~authority ~guidance ~predecessor:(Some prior.request_id))
     "Gate successor differs from its complete original request"
@@ -465,7 +470,6 @@ let restore_size_evidence ~store ~owner ~parent_execution ~gate_request_id =
   Option.to_result ~none:"Original gate has no completed terminal" restored.complete
 
 let prepare_root ~store ~owner ~capture ~(parent:Owner.retained) ~proposal ~request_id ~authority =
-  let* guidance = Gate.guidance_of_authority authority in
   let* () = require (Gate.keeper_of_authority authority=Capture.keeper_id owner)
     "Original gate live authority belongs to another Keeper" in
   let* current = load_parent ~store ~owner ~capture ~proposal in
@@ -473,7 +477,8 @@ let prepare_root ~store ~owner ~capture ~(parent:Owner.retained) ~proposal ~requ
     "Original gate preparation belongs to another parent" in
   let* () = require (String.trim request_id<>"" && request_id<>current.request_id)
     "Invalid original first gate identity" in
-  let* _ = inputs capture proposal in
+  let* input = inputs capture proposal in
+  let* guidance = guidance_for_input input authority in
   Ok {Progress.request_id;request=gate_request ~owner ~capture ~parent:current ~proposal ~request_id
     ~authority:(Gate.replay_authority authority) ~guidance ~predecessor:None}
 
@@ -491,8 +496,9 @@ let root_preparation_with ~read ~store ~owner ~capture =
   let* members = request_members intended.request in
   let proposal=value "proposal" members in
   let* current=load_parent_with ~read ~store ~owner ~capture ~proposal in
+  let* input=inputs capture proposal in
   let* authority=Gate.replay_authority_of_yojson (value "authority" members) in
-  let* guidance=captured_guidance ~authority (value "guidance" members) in
+  let* guidance=captured_guidance ~input ~authority (value "guidance" members) in
   let* ()=equal intended.request (gate_request ~owner ~capture ~parent:current ~proposal
     ~request_id:intended.request_id ~authority ~guidance ~predecessor:None) "Original gate publication intent differs" in
   let* child=read.load ~scope:(scope owner) ~request_id:intended.request_id in
@@ -628,13 +634,13 @@ let recover_root ~store ~owner ~capture =
   Ok parent
 
 let retain ~store ~owner ~capture ~parent ~proposal ~request_id ~authority ~predecessor =
-  let* guidance = Gate.guidance_of_authority authority in
   let* () = require (Gate.keeper_of_authority authority=Capture.keeper_id owner)
     "Original gate live authority belongs to another Keeper" in
   let* current = load_parent ~store ~owner ~capture ~proposal in
   let* () = require (parent.Owner.request_digest=current.request_digest
     && parent.request_id=current.request_id) "Gate parent identity changed before retention" in
-  let* _ = inputs capture proposal in
+  let* input = inputs capture proposal in
+  let* guidance = guidance_for_input input authority in
   let request = gate_request ~owner ~capture ~parent:current ~proposal ~request_id
     ~authority:(Gate.replay_authority authority) ~guidance ~predecessor in
   let* () = match predecessor with

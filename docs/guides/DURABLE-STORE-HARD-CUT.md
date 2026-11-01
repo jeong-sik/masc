@@ -97,10 +97,12 @@ request payload`. A readable generic owner envelope and matching body digest
 do not establish that this build can read the Librarian payload. Admission
 executions require schema 2 with captured admission and retirement policy;
 all admission, completed-history and message-floor absorption gate requests
-require version 3 with captured guidance for available authority. Unavailable
-authority may explicitly capture `guidance: null`; off and excluded gates do
-not depend on unused prompt assets. Available authority still requires the
-complete captured bundle. Execution schema 1 and gate version
+require version 3 with captured guidance when evaluation is needed. Unavailable
+authority or a validated original proposal with no absorptions may explicitly
+capture `guidance: null`; neither needs unused prompt assets. Available
+authority with actual absorptions still requires the complete captured bundle.
+Non-null captured guidance always goes through the strict decoder, including
+for an empty proposal. Execution schema 1 and gate version
 2 have no reader or automatic conversion in this build.
 
 The refusal names the owner record's full path, scope, request ID, request

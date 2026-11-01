@@ -47,7 +47,9 @@ module Make (Capture : Capture) : sig
     parent:Lane_addon_tool_request_owner.retained -> (unit, string) result
   (** Pure current-version payload, captured guidance, source proposal and
       parent/destination, root/predecessor and pending-publication binding
-      checks. The supplied originals must already
+      checks. Null guidance requires unavailable authority or a validated empty
+      absorption proposal. Non-null guidance always uses its strict decoder.
+      The supplied originals must already
       pass their strict body decoders. Does not observe live ownership, read
       host proofs, recover a chain or grant dispatch/commit authority. *)
   val prepare_root : store:Lane_addon_store.t -> owner:Capture.owner ->
@@ -55,8 +57,9 @@ module Make (Capture : Capture) : sig
     proposal:Yojson.Safe.t -> request_id:string -> authority:Keeper_librarian_absorb_gate.live_authority ->
     (Lane_addon_request_progress.preparation_intent, string) result
   (** Build and validate the full immutable first gate request before retaining
-      its parent preparation intent. The live handle's complete guidance bundle is
-      required and persisted here; missing policy refuses before publication.
+      its parent preparation intent. A validated empty absorption proposal
+      captures no guidance. Available authority with actual absorptions requires
+      its complete guidance bundle; missing policy refuses before publication.
       Does not publish or evaluate anything. *)
   val recover_root : store:Lane_addon_store.t -> owner:Capture.owner ->
     capture:Capture.t ->

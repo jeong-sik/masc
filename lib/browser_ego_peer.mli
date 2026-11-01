@@ -83,6 +83,10 @@ type downloads = { root : string; publish : string -> (Yojson.Safe.t, string) re
 (** Opens the agent task space called [space], or resumes it when this
     space already exists, or resumes the exact configured numeric Space ID.
     A missing ID is never retried by name or replaced with another Space.
+    A named reference requires the SDK response's exact name before a Peer is
+    constructed; an SDK taskId alias or numeric-string fallback is not name
+    authority. Existing IDs retain the SDK's observed name. This check follows
+    the SDK factory and does not undo work that factory already performed.
     Holds it from then on by the number ego gave
     it. A space of the same name that the operator owns is refused by ego.
     [version] is ego lite's version. Screenshots are written under

@@ -704,6 +704,15 @@ let panel_input_owner (state : state) ~terminal_rows =
   | `Queue _ | `Patch | `Link | `Client_detail _ | `Surface -> None
 
 let render ~home ~compact_recovery_notice (state : state) =
+  let fusion_detail_owned =
+    let detail = match state.fusion_mode with
+      | Fusion_detail _ | Fusion_historical_detail _ -> true
+      | Fusion_list -> false in
+    let unobscured = match state.fusion_launch with
+      | None | Some (Fusion_launch_started _) -> true
+      | Some (Fusion_launch_reading_presets _ | Fusion_launch_open _) -> false in
+    state.view = Fusion && detail && unobscured in
+  if not fusion_detail_owned then Masc_tui_render_fusion.clear_fusion_trace_projection ();
   (* Marks number the targets of this frame alone. *)
   Masc_tui_hit.reset press_marks;
   (* So do the panes: a frame that ends without recording any, the

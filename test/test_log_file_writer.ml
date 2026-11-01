@@ -224,7 +224,7 @@ let test_synchronous_after_stop () =
   check (list string) "the record is in the file when emit returns" [ "after-stop" ] (file_messages dir)
 ;;
 
-let test_later_emit_reopens_after_write_failure ~queued () =
+let test_later_emit_reopens_after_write_failure ~queued ~large_message ~partial_tail () =
   silence_console ();
   let previous_sigpipe = Sys.signal Sys.sigpipe Sys.Signal_ignore in
   let reader = ref None in
@@ -237,6 +237,8 @@ let test_later_emit_reopens_after_write_failure ~queued () =
       let dir = Filename.temp_dir "masc-log-reopen-" "" in
       Log.Ring.init_file_sink ~identity_recheck_interval_s:0.0 dir;
       let path = sink_file dir in
+      if partial_tail then emit "retained-before-failure";
+      let retained = In_channel.with_open_bin path In_channel.input_all in
       Unix.rename path (Filename.concat dir "previous-sink");
       Unix.mkfifo path 0o600;
       let pipe_reader = Unix.openfile path [ Unix.O_RDONLY; Unix.O_NONBLOCK ] 0 in
@@ -247,9 +249,9 @@ let test_later_emit_reopens_after_write_failure ~queued () =
       Unix.close pipe_reader;
       reader := None;
       if queued then Log.Ring.start_writer ();
-      (* Larger than the output-channel buffer: EPIPE is raised by
-         output_string, so the real append path drops its failed channel. *)
-      emit (String.make (1024 * 1024) 'x');
+      (* A large message fails in [output_string]; a small one reaches the
+         channel buffer and fails in [flush]. Both must retire the sink. *)
+      emit (if large_message then String.make (1024 * 1024) 'x' else "flush-failure");
       bounded 20.0 "the failed append closes its channel" (fun () ->
         let rec await_close () =
           let sink = Yojson.Safe.Util.member "file_sink" (Log.Ring.summary_json ()) in
@@ -260,11 +262,81 @@ let test_later_emit_reopens_after_write_failure ~queued () =
       (* The filesystem is healthy again while the queued writer, if any,
          remains running. Only the later emit may cause it to reopen. *)
       Unix.unlink path;
-      Out_channel.with_open_bin path (fun _ -> ());
+      let incomplete = "{\"failed-batch\":" in
+      Out_channel.with_open_bin path (fun oc ->
+        output_string oc retained;
+        if partial_tail then output_string oc incomplete);
       emit "after-write-failure";
       Log.Ring.stop_writer ();
-      check (list string) "the later record reaches the reopened file" [ "after-write-failure" ]
-        (file_messages dir))
+      if partial_tail then begin
+        let text = In_channel.with_open_bin path In_channel.input_all in
+        let prefix = retained ^ incomplete ^ "\n" in
+        check bool "complete rows and incomplete bytes are preserved" true
+          (String.starts_with ~prefix text);
+        (match lines_of text with
+         | [before; failed; after] ->
+             check string "the incomplete row is isolated" incomplete failed;
+             check (list string) "both complete rows decode"
+               ["retained-before-failure"; "after-write-failure"]
+               (our_messages [before; after])
+         | rows -> failf "expected two complete rows and one incomplete row, found %d" (List.length rows));
+        (* Exercise the production JSONL restore path: only the malformed
+           row is skipped, and the healthy later record survives a restart. *)
+        Log.Ring.init_file_sink dir;
+        check (list string) "restore keeps the complete records"
+          ["after-write-failure"; "retained-before-failure"]
+          (Log.Ring.recent ~limit:10 ~module_filter:module_name ()
+           |> List.map (fun (entry : Log.Ring.entry) -> entry.message))
+      end else
+        check (list string) "the later record reaches the reopened file" [ "after-write-failure" ]
+          (file_messages dir))
+;;
+
+let test_failed_reconfiguration_retries_intended_directory ~queued () =
+  silence_console ();
+  let previous = Filename.temp_dir "masc-log-previous-" "" in
+  Log.Ring.init_file_sink previous;
+  emit "previous-directory";
+  let previous_path = sink_file previous in
+  let previous_bytes = In_channel.with_open_bin previous_path In_channel.input_all in
+  let intended = Filename.temp_file "masc-log-intended-" "" in
+  (* A regular file in place of the directory is root-portably ENOTDIR.
+     Neither dated file exists, so loading succeeds but opening fails. *)
+  let failed =
+    try Log.Ring.init_file_sink intended; false with
+    | Sys_error _ | Unix.Unix_error _ -> true
+  in
+  check bool "opening the new directory failed" true failed;
+  Sys.remove intended;
+  Unix.mkdir intended 0o700;
+  if queued then Log.Ring.start_writer ();
+  Fun.protect ~finally:Log.Ring.stop_writer (fun () -> emit "intended-directory");
+  check string "later emits never resume the previous sink" previous_bytes
+    (In_channel.with_open_bin previous_path In_channel.input_all);
+  check (list string) "the later record reaches the intended sink"
+    ["intended-directory"] (file_messages intended)
+;;
+
+let test_failed_restore_disables_previous_directory () =
+  silence_console ();
+  let previous = Filename.temp_dir "masc-log-previous-" "" in
+  Log.Ring.init_file_sink previous;
+  emit "previous-directory";
+  let previous_path = sink_file previous in
+  let previous_bytes = In_channel.with_open_bin previous_path In_channel.input_all in
+  let rejected = Filename.temp_dir "masc-log-rejected-" "" in
+  let rejected_path = Filename.concat rejected (Filename.basename previous_path) in
+  Out_channel.with_open_bin rejected_path (fun oc -> output_string oc "{}\n");
+  let failed =
+    try Log.Ring.init_file_sink rejected; false with
+    | Log.Ring.Entry_decode_error _ -> true
+  in
+  check bool "a complete but invalid entry still fails strict decoding" true failed;
+  emit "after-rejected-restore";
+  check string "a rejected restore does not resume the previous sink" previous_bytes
+    (In_channel.with_open_bin previous_path In_channel.input_all);
+  let sink = Yojson.Safe.Util.member "file_sink" (Log.Ring.summary_json ()) in
+  check bool "no directory remains configured" true (Yojson.Safe.Util.member "dir" sink = `Null)
 ;;
 
 let () =
@@ -283,9 +355,23 @@ let () =
             test_a_stalled_file_makes_producers_wait_and_drops_nothing
         ; test_case "synchronous after stop" `Quick test_synchronous_after_stop
         ; test_case "synchronous later emit reopens after write failure" `Quick
-            (test_later_emit_reopens_after_write_failure ~queued:false)
+            (test_later_emit_reopens_after_write_failure ~queued:false ~large_message:true ~partial_tail:false)
         ; test_case "queued later emit reopens after write failure" `Quick
-            (test_later_emit_reopens_after_write_failure ~queued:true)
+            (test_later_emit_reopens_after_write_failure ~queued:true ~large_message:true ~partial_tail:false)
+        ; test_case "synchronous later emit reopens after flush failure" `Quick
+            (test_later_emit_reopens_after_write_failure ~queued:false ~large_message:false ~partial_tail:false)
+        ; test_case "queued later emit reopens after flush failure" `Quick
+            (test_later_emit_reopens_after_write_failure ~queued:true ~large_message:false ~partial_tail:false)
+        ; test_case "synchronous reopen preserves and seals a partial tail" `Quick
+            (test_later_emit_reopens_after_write_failure ~queued:false ~large_message:true ~partial_tail:true)
+        ; test_case "queued reopen preserves and seals a partial tail" `Quick
+            (test_later_emit_reopens_after_write_failure ~queued:true ~large_message:true ~partial_tail:true)
+        ; test_case "synchronous failed reconfiguration retries intended directory" `Quick
+            (test_failed_reconfiguration_retries_intended_directory ~queued:false)
+        ; test_case "queued failed reconfiguration retries intended directory" `Quick
+            (test_failed_reconfiguration_retries_intended_directory ~queued:true)
+        ; test_case "failed restore disables previous directory" `Quick
+            test_failed_restore_disables_previous_directory
         ] )
     ]
 ;;

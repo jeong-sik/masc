@@ -6,7 +6,7 @@ The retained pair uses the public Fusion entrypoint and controlled native protoc
 
 ## Actual executions
 
-All five executions are **Test** on `fix/fusion-selected-timeout-20261101`, `MINIMAL_BUILD=true`, targeted suites and the existing explicit 900-second CI guard. Each retained capture contains its exact checkout receipt. These are focused checks; full regression was not run.
+All five executions are **Test** on `fix/fusion-selected-timeout-20261101`, `minimal=true`, targeted suites and the existing explicit 900-second CI guard. Each retained capture contains its exact checkout receipt. These are focused checks; full regression was not run.
 
 - [41296985674](https://github.com/jeong-sik/masc/actions/runs/41296985674) at `6c1e7b08b58a5abc1600b5040bd88a3763e3ecdc`: FAILURE, zero executed cases. Bare `Fusion_types` lacked its direct Dune dependency.
 - [41297365380](https://github.com/jeong-sik/masc/actions/runs/41297365380) at `07854855a9c9665f68490c735738ce3bba3b7dc6`: FAILURE, zero executed cases. Same missing dependency, plus warning 26 for an unused production binding.

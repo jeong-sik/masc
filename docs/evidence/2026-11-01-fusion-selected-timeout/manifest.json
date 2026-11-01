@@ -185,8 +185,8 @@
   "source_pair": "source-comparison.json",
   "retained": {
     "README.md": {
-      "bytes": 4964,
-      "sha256": "86698928a3254979d1f362b38c181c16d5e974bd467731a1dc7ae0d748a096c0"
+      "bytes": 4958,
+      "sha256": "6fac11193fe8c6fb77f44fa6225546087af8b200b0bce9a40ad3bdaf538b72b6"
     },
     "baseline.txt": {
       "bytes": 606,

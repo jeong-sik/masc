@@ -3,7 +3,7 @@ import { appRequest, appRequestApplied, equalJson, readAppState, writeAppState, 
 import type { ArtifactWorkspace } from '../api/published-artifacts'
 import { frameInputs,type FrameInputs } from './artifact-app-frame'
 import { resourceOrigins } from './artifact-app-resources'
-import { retainAppInput,discardAppInput,appInputRecoveries,type AppRecovery } from './artifact-app-recovery'
+import { retainAppInput,discardAppInput,appInputRecoveries,type AppRecovery,type AppInputRetention } from './artifact-app-recovery'
 
 export type AppSessionMode='ready'|'saving'|'checking'|'unknown'|'retry'|'conflict'
 export type AppSessionSnapshot={mode:AppSessionMode;server:AppState;data:JsonObject;pending:boolean;recovery:AppRecovery|null;copies:readonly AppRecovery[]}
@@ -22,30 +22,42 @@ export class ArtifactAppSession {
   private frozen:Operation|null=null
   private recovery:AppRecovery|null=null
   private imported:AppRecovery[]=[]
+  private copies:readonly AppRecovery[]|null=null
   constructor(private readonly options:Options){this.server=options.initial;this.data=structuredClone(options.initial.data);frameInputs(this.data);resourceOrigins(this.data)}
   private current():boolean{return this.active&&this.options.current()}
   attachFrame(instance:string):void {
     if(!this.current()||instance===''||this.instance===instance)return
-    this.instance=instance;this.change=0
+    this.instance=instance;this.change=0;this.copies=null
+  }
+  private observed(copies:readonly AppRecovery[]):AppSessionSnapshot {
+    return {mode:this.mode,server:this.server,data:this.data,pending:this.frozen!==null||!equalJson(this.data,this.server.data),recovery:this.recovery,
+      copies}
   }
   snapshot():AppSessionSnapshot {
-    return {mode:this.mode,server:this.server,data:this.data,pending:this.frozen!==null||!equalJson(this.data,this.server.data),recovery:this.recovery,
-      copies:appInputRecoveries(this.options.workspace,this.server).filter(copy=>copy.id!==this.id)}
+    this.copies=appInputRecoveries(this.options.workspace,this.server).filter(copy=>copy.id!==this.id)
+    return this.observed(this.copies)
   }
-  private emit():void{if(this.current())this.options.changed(this.snapshot())}
+  private emit(copies?:readonly AppRecovery[]):void{if(this.current())this.options.changed(copies?this.observed(copies):this.snapshot())}
   refreshCopies():void{this.emit()}
-  private retain():void{this.recovery=retainAppInput(this.id,this.options.workspace,this.server,this.data,this.frozen?.request??null)}
+  private retain():AppInputRetention['copies'] {
+    const retained=retainAppInput(this.id,this.options.workspace,this.server,this.data,this.frozen?.request??null)
+    this.recovery=retained.record;return retained.copies
+  }
   input(inputs:FrameInputs,change:number,commit:boolean):boolean {
     if(!this.current()||this.instance===null||change<=this.change)return false
     this.change=change
     this.data=structuredClone({...this.data,forms:inputs.forms,app:inputs.app})
-    if(this.frozen||!equalJson(this.data,this.server.data))this.retain()
+    let copies:readonly AppRecovery[]|undefined
+    if(this.frozen||!equalJson(this.data,this.server.data)){
+      const retained=this.retain()
+      if(this.mode==='ready'&&!this.frozen&&retained==='unchanged')copies=this.copies??undefined
+    }
     else if(this.mode==='ready'&&this.recovery){discardAppInput(this.recovery);this.recovery=null}
     if(commit){
       if(this.mode==='ready'||this.mode==='saving')this.wanted=true
       else this.options.result(this.instance,change,'error')
     }
-    this.emit()
+    this.emit(copies)
     if(commit&&this.mode==='ready')void this.save()
     return true
   }

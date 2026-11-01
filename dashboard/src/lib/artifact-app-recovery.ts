@@ -7,17 +7,21 @@ const RecordSchema=Schema.Struct({id:Schema.String,revision:Schema.String,at:Sch
   workspace:Schema.Struct({basePath:Schema.String,mascRoot:Schema.String}),target:AppTargetSchema,actor:Schema.String,
   data:ObjectSchema,request:Schema.NullOr(AppRequestSchema)})
 export type AppRecovery=typeof RecordSchema.Type&{persisted:boolean;storedRevision:string|null}
+// A confirmed own write changes only this editor's immutable recovery. Failed
+// persistence or cleanup needs a fresh storage observation before reusing peers.
+export type AppInputRetention={record:AppRecovery;copies:'unchanged'|'needs_reread'}
 const prefix='masc.artifact-app-recovery.v1:',memory=new Map<string,AppRecovery>()
 const key=(record:Pick<AppRecovery,'id'|'revision'>)=>`${prefix}${record.id}:${record.revision}`
-export function retainAppInput(id:string,workspace:ArtifactWorkspace,state:AppState,data:JsonObject,request:AppRequest|null):AppRecovery {
+export function retainAppInput(id:string,workspace:ArtifactWorkspace,state:AppState,data:JsonObject,request:AppRequest|null):AppInputRetention {
   const previous=memory.get(id),value=structuredClone({id,revision:crypto.randomUUID(),at:new Date().toISOString(),workspace,target:state.target,actor:state.actor,data,request})
   const record:AppRecovery={...value,persisted:false,storedRevision:previous?.storedRevision??null}
   try{localStorage.setItem(key(record),JSON.stringify(value));record.persisted=true;record.storedRevision=record.revision}catch{/* Preserve the in-page copy and its durable predecessor. */}
+  let copies:AppInputRetention['copies']=record.persisted?'unchanged':'needs_reread'
   if(record.persisted&&previous)try{
     localStorage.removeItem(key(previous))
     if(previous.storedRevision)localStorage.removeItem(key({...previous,revision:previous.storedRevision}))
-  }catch{/* Extra immutable copies remain recoverable. */}
-  memory.set(id,record);return record
+  }catch{copies='needs_reread' /* Extra immutable copies remain recoverable. */}
+  memory.set(id,record);return {record,copies}
 }
 export function discardAppInput(record:AppRecovery):void {
   const current=memory.get(record.id)

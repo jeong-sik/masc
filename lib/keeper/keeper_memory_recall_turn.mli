@@ -62,7 +62,9 @@ val judge_with :
     [masc_keeper_memory_recall_total] by keeper and outcome (the status token),
     [masc_keeper_memory_recall_selected_total] by keeper for the candidates it
     carried, and [masc_keeper_memory_recall_judgment_seconds] by keeper from
-    the first request to the saved outcome. *)
+    the first request to the saved outcome, using a monotonic elapsed-time
+    counter. Calendar-clock adjustments do not change that duration; the
+    evaluation journal keeps Unix timestamps for its event times. *)
 
 val judge :
   clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->

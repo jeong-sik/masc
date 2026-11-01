@@ -71,13 +71,14 @@ let judge_with ~evaluate ~memo ~config ~keeper_id ~turn_ref ~purpose candidates 
      | Some judged -> Ok (Judged judged)
      | None ->
        let record = Evaluation.create ~config ~keeper_id ~turn_ref ~destinations in
-       let began = Time_compat.now () in
+       let began = Mtime_clock.counter () in
        (match Flow.run ~evaluate:(evaluate record) ~purpose candidates with
         | Error build_error -> Error build_error
         | Ok None -> Ok Nothing_to_judge
         | Ok (Some judged) ->
           let judged = Evaluation.retain_outcome record judged in
-          record_judgment ~keeper_id ~seconds:(Time_compat.now () -. began) judged;
+          record_judgment ~keeper_id
+            ~seconds:(Mtime.Span.to_float_ns (Mtime_clock.count began) /. 1e9) judged;
           if is_kept_for_its_turn judged then keep memo ~turn_ref judged;
           Ok (Judged judged)))
 

@@ -278,6 +278,39 @@ let first_line path =
   | line :: _ -> line
   | [] -> Alcotest.fail "no row"
 
+let test_calendar_adjustment_leaves_request_elapsed_time_monotonic direction adjusted () =
+  let keeper = "metrics-clock-" ^ direction in
+  with_keeper_journal keeper (fun journal ->
+    (* This executable leaves the process clock unset between cases. Do
+       not replace a clock owned by another fixture. *)
+    if Time_compat.has_clock () then Alcotest.fail "the calendar clock is already owned";
+    let clock = Eio_mock.Clock.make () in
+    Eio_mock.Clock.set_time clock now;
+    Time_compat.set_clock (clock :> float Eio.Time.clock_ty Eio.Resource.t);
+    Fun.protect ~finally:Time_compat.clear_clock (fun () ->
+      let call ~destinations ~state ~questions () =
+        Eio_mock.Clock.set_time clock adjusted;
+        accepted_call ~destinations ~state ~questions ()
+      in
+      let enclosing = Mtime_clock.counter () in
+      (match Eval.evaluate_with ~call journal (candidate_request ()) with
+       | Ok _ -> ()
+       | Error _ -> Alcotest.fail "the adjusted calendar interrupted the request");
+      let enclosing_seconds = Mtime.Span.to_float_ns (Mtime_clock.count enclosing) /. 1e9 in
+      let seconds = counter Keeper_metrics.(to_string MemoryRecallRequestSeconds)
+          [ "keeper", keeper; "kind", "candidates" ] in
+      Alcotest.(check bool) "the sample lies within its enclosing monotonic interval"
+        true (seconds >= 0.0 && seconds <= enclosing_seconds);
+      Alcotest.(check (float 0.0)) "the completed request contributes one sample" 1.0
+        (timed_requests ~keeper ~kind:"candidates");
+      match read_rows (Eval.journal_path journal) with
+      | [ started; received ] ->
+        Alcotest.(check (float 0.0)) "started remains a calendar timestamp" now
+          (U.to_float (field "recorded_at" started));
+        Alcotest.(check (float 0.0)) "received records the calendar adjustment" adjusted
+          (U.to_float (field "recorded_at" received))
+      | _ -> Alcotest.fail "the completed request must retain both event rows"))
+
 let test_a_request_is_counted_sized_and_timed () =
   let keeper = "metrics-answered" in
   with_keeper_journal keeper (fun journal ->
@@ -497,7 +530,11 @@ let () =
             test_an_exception_that_is_not_a_cancellation_leaves_the_request_open
         ] )
     ; ( "metrics"
-      , [ Alcotest.test_case "a request is counted, sized and timed" `Quick
+      , [ Alcotest.test_case "a backward calendar adjustment preserves request elapsed time" `Quick
+            (test_calendar_adjustment_leaves_request_elapsed_time_monotonic "backward" (now -. 86_400.0))
+        ; Alcotest.test_case "a forward calendar adjustment preserves request elapsed time" `Quick
+            (test_calendar_adjustment_leaves_request_elapsed_time_monotonic "forward" (now +. 86_400.0))
+        ; Alcotest.test_case "a request is counted, sized and timed" `Quick
             test_a_request_is_counted_sized_and_timed
         ; Alcotest.test_case "each question kind is counted on its own" `Quick
             test_each_question_kind_is_counted_on_its_own

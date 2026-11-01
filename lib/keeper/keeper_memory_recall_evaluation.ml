@@ -196,7 +196,7 @@ let evaluate_with ~call t (request : Codec.request) : (Types.eval_response, Flow
     Error Flow.Not_recorded
   | Ok started_bytes ->
     record_input_bytes t started_bytes;
-    let began = Time_compat.now () in
+    let began = Mtime_clock.counter () in
     let result =
       try call ~destinations:t.destinations ~state:request.state ~questions:request.questions () with
       | Eio.Cancel.Cancelled _ as exn ->
@@ -209,7 +209,8 @@ let evaluate_with ~call t (request : Codec.request) : (Types.eval_response, Flow
         record_request t ~kind Cancelled_request;
         Printexc.raise_with_backtrace exn backtrace
     in
-    record_request_seconds t ~kind (Time_compat.now () -. began);
+    record_request_seconds t ~kind
+      (Mtime.Span.to_float_ns (Mtime_clock.count began) /. 1e9);
     let completion =
       match result with
       | Error failure ->

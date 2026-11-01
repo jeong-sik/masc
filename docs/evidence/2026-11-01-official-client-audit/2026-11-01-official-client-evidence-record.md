@@ -33,7 +33,7 @@ The recently retained [context audit](../../audits/2026-09-29-repeated-runtime-c
 ## 검증 (Verification)
 
 - 1차: Opened the primary documentation above and compared relevant fields to current source. Exported the installed Muse schema without a model call.
-- 2차: Captured the installed client versions/help; server reported release 0.66.0 and binary commit `dbd032511fea4e3d04687448275c0f41abff56cc`, effective runtime root `/Users/dancer/me/.masc`.
+- 2차: Captured the installed client versions/help; server reported release 0.66.0 and binary commit `dbd032511fea4e3d04687448275c0f41abff56cc`, effective runtime root confirmed from health (host-specific path omitted).
 - 3차: Added actual production-adapter fixtures for quota/account/effect propagation and four-turn Memory redelivery; separate stack layers add GLM checkpoint/request and MiniMax disk-restore/request regressions. Focused CI results are recorded separately when available.
 - 재현 결과: Source and parser checks establish the defects and well-formed changed source. Behavioral success requires completion of the selected CI suites; syntax checks are not type or behavior proof.
 

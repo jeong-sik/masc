@@ -6,10 +6,7 @@
     "binary_commit": "dbd032511fea4e3d04687448275c0f41abff56cc",
     "runtime_instance_id": "01a19489-2a83-7000-9869-7048022414f7",
     "started_at": "2026-11-01T00:36:19Z",
-    "paths": {
-      "effective_base_path": "/Users/dancer/me",
-      "effective_masc_root": "/Users/dancer/me/.masc"
-    }
+    "effective_root_verified": true
   },
   "log_prefixes": [
     {

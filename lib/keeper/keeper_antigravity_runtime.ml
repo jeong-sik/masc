@@ -479,6 +479,11 @@ let run_without_lifecycle ~result_scope ~input_source ~argument_source ~official
         ~default:Runtime_native_tools.antigravity_default
         ~none_supported:(Runtime_execution.supports_native_none (Antigravity_cli config))
     in
+    let observe_native_effect_unavailable () =
+      match native_posture with
+      | Runtime_native_tools.Native_full -> observe_effect_unavailable ()
+      | Runtime_native_tools.Native_none | Runtime_native_tools.Native_read -> ()
+    in
     let runtime_root = Common.masc_dir_from_base_path ~base_path in
     let owner_leaf = Runtime_antigravity_home.keeper_owner_leaf
         ~keeper_name ~oauth_source:config.oauth_source in
@@ -910,7 +915,7 @@ let run_without_lifecycle ~result_scope ~input_source ~argument_source ~official
       let stream =
         stream_projection ?on_native_tool_completion ~keeper_name ~raw_trace_run ~turn_count ~on_native_action
           ~on_usage_report
-          ~observe_effect_unavailable
+          ~observe_effect_unavailable:observe_native_effect_unavailable
           ~receipts
           ~position:
             (match conversation_mode with
@@ -1082,6 +1087,9 @@ let run_without_lifecycle ~result_scope ~input_source ~argument_source ~official
                       ~clock
                       ~cwd:process_cwd
                       ~on_conversation_ready:(fun ~conversation_id ->
+                        (* A validated admission permits native effects that
+                           the CLI need not report before exiting or timing out. *)
+                        observe_native_effect_unavailable ();
                         let* () =
                           update_session "active transition" (fun expected ->
                             Session_store.mark_active
@@ -1113,17 +1121,6 @@ let run_without_lifecycle ~result_scope ~input_source ~argument_source ~official
             client_result
             |> Result.map (fun turn -> `Completed turn)
             |> Result.map_error (fun error ->
-              (match error with
-               | Runtime_antigravity.Result_not_completed _ -> observe_effect_unavailable ()
-               | Runtime_antigravity.Invalid_config _
-               | Runtime_antigravity.Spawn_failed _
-               | Runtime_antigravity.Protocol_error _
-               | Runtime_antigravity.State_callback_failed _
-               | Runtime_antigravity.Turn_failed _
-               | Runtime_antigravity.Process_exited _
-               | Runtime_antigravity.Unhandled_exception _
-               | Runtime_antigravity.Child_fd_ceiling_exceeded _
-               | Runtime_antigravity.Timeout _ -> ());
               recovery_failure := recovery_failure_of_runtime_error error;
               runtime_error_to_core_error error)
           | `Abort stop -> Ok (`Stopped stop))

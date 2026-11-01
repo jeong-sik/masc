@@ -1170,12 +1170,12 @@ let test_noncompletion_preserves_durable_identity_and_effect_fence () =
                  | Error error -> fail (Agent_core.Error.to_string error)
                  | Ok _ -> failf "%s settled as a completed turn" result_status);
                 check int "only the admitted fixture executes its MCP effect" (if before_init then 0 else 1) !called;
-                check bool "observed effect stays fenced" true
+                check bool "effect disposition follows the actual MCP call" true
                   (attempt.effect_disposition =
-                    (if before_init then Keeper_provider_attempt_effect.Observation_unavailable else Effect_attempted));
+                    (if before_init then Keeper_provider_attempt_effect.No_effect_observed else Effect_attempted));
                 check int "only matching init permits attributed usage" (if before_init then 0 else 1)
                   (List.length !usage_reports);
-                check bool "effect cannot grant replay" false
+                check bool "only the observed MCP effect closes the effect boundary" before_init
                   (Keeper_provider_attempt_effect.allows_same_turn_retry attempt.effect_disposition);
                 check bool "no completed session ACK" true (Option.is_none attempt.settled_session);
                 check bool "no successful receipt consumption" true (Option.is_none attempt.pending_result_receipts);
@@ -1198,14 +1198,29 @@ let test_noncompletion_preserves_durable_identity_and_effect_fence () =
       [ "CANCELED"; "INTERRUPTED"; "INVALID"; "WAITING"; "RUNNING" ])
 ;;
 
-let run_native_effect_without_mcp_fixture ?(step_delivery = `Active_done) ending =
-    let started, completed_state =
+let run_native_effect_without_mcp_fixture ?(step_delivery = `Active_done)
+    ?(posture = `Full) ?(admitted = true) ending =
+    let native_posture, tool_name, permission_check, operation, marker =
+      match posture with
+      | `Full -> Runtime_native_tools.Native_full, "write_file",
+        {|assert "write_file(" + cwd + ")" in settings["permissions"]["allow"]|},
+        {|pathlib.Path("native-effect.txt").write_text("native effect")|}, "effect\n"
+      | `Read -> Runtime_native_tools.Native_read, "read_file",
+        {|assert "read_file(" + cwd + ")" in settings["permissions"]["allow"]
+assert "write_file(*)" in settings["permissions"]["deny"]
+assert "command(*)" in settings["permissions"]["deny"]|},
+        {|list(pathlib.Path(cwd).iterdir())
+assert not pathlib.Path("native-effect.txt").exists()|}, "read\n"
+    in
+    let step state = Printf.sprintf
+        {|emit("step_update", {"conversation_id": "builtin-conversation", "step_index": 1, "state": %s, "step_type": "tool", "tool_name": %s})
+|} (Yojson.Safe.to_string (`String state)) (Yojson.Safe.to_string (`String tool_name)) in
+    let started, finished =
       match step_delivery with
-      | `Active_done ->
-        {|emit("step_update", {"conversation_id": "builtin-conversation", "step_index": 1, "state": "ACTIVE", "step_type": "tool", "tool_name": "write_file"})
-|}, "DONE"
-      | `Done_only -> "", "DONE"
-      | `Error_only -> "", "ERROR"
+      | `Active_done -> step "ACTIVE", step "DONE"
+      | `Done_only -> "", step "DONE"
+      | `Error_only -> "", step "ERROR"
+      | `Unreported -> "", ""
     in
     let turn_timeout_s, terminal, expected_error =
       match ending with
@@ -1240,29 +1255,35 @@ let run_native_effect_without_mcp_fixture ?(step_delivery = `Active_done) ending
           (Masc_test_deps.antigravity_oauth_fixture "operator-oauth-fixture");
         let native_effect_path = Filename.concat base_path "native-effect-count" in
         let fallback_path = Filename.concat base_path "fallback-dispatched" in
-        let fixture name terminal marker =
+        let fixture name ~admitted terminal marker_path =
           let path = Filename.concat base_path name in
           let script = Printf.sprintf {|#!/usr/bin/env python3
 import json, os, pathlib, sys
 sys.stdin.read()
+assert "--new-project" in sys.argv and "--conversation" not in sys.argv
 cwd = os.getcwd()
 settings = json.loads((pathlib.Path(os.environ["HOME"]) / ".gemini/antigravity-cli/settings.json").read_text())
-assert "write_file(" + cwd + ")" in settings["permissions"]["allow"]
+%s
 def emit(event, value):
     print(json.dumps({"event": event, event: value}) if event != "init" else json.dumps({"event": "init", "conversation_id": "builtin-conversation", "init": value}), flush=True)
-emit("init", {"model": "gemini-fixture", "cwd": cwd, "tools": ["write_file"], "permission_mode": "always-proceed"})
-%s# A built-in tool effect, with no call into MASC's MCP tool observer.
-pathlib.Path("native-effect.txt").write_text("native effect")
+%s
+emit("init", {"model": "gemini-fixture", "cwd": cwd, "tools": [%s], "permission_mode": "always-proceed"})
+%s%s
+# External fixture bookkeeping records the operation once; it is not a native tool.
 with open(%s, "a") as output:
-    output.write("effect\n")
-emit("step_update", {"conversation_id": "builtin-conversation", "step_index": 1, "state": %s, "step_type": "tool", "tool_name": "write_file"})
-%s|} started (Yojson.Safe.to_string (`String marker))
-    (Yojson.Safe.to_string (`String completed_state)) terminal in
+    output.write(%s)
+%s%s|} permission_check
+    (if admitted then "" else match ending with
+      | `Result _ -> terminal ^ "raise SystemExit(0)"
+      | `Process_exit | `Idle_timeout -> "raise SystemExit(17)")
+    (Yojson.Safe.to_string (`String tool_name)) started operation
+    (Yojson.Safe.to_string (`String marker_path)) (Yojson.Safe.to_string (`String marker))
+    finished terminal in
           write_file ~mode:0o700 path script;
           path
         in
-        let first_cli = fixture "first-agy" terminal native_effect_path in
-        let second_cli = fixture "fallback-agy"
+        let first_cli = fixture "first-agy" ~admitted terminal native_effect_path in
+        let second_cli = fixture "fallback-agy" ~admitted:true
           {|emit("result", {"conversation_id": "builtin-conversation", "status": "SUCCESS", "response": "fallback reply", "error": None, "num_turns": 1,
     "usage": {"input_tokens": 1, "output_tokens": 1, "thinking_tokens": 0, "cache_read_tokens": 0, "total_tokens": 2}})
 |} fallback_path in
@@ -1291,22 +1312,67 @@ candidates = ["antigravity.gemini", "antigravity_fallback.gemini"]
               check (option (float 0.0)) "declared model idle timeout"
                 turn_timeout_s (Runtime.turn_timeout_s_of_runtime_id "antigravity.gemini");
               let attempted = ref [] in
-              let outcome = Keeper_turn_driver.run_named
+              let direct_noncompletion = match ending with
+                | `Result _ -> posture = `Read || not admitted
+                | `Process_exit | `Idle_timeout -> false in
+              let outcome = if direct_noncompletion then (
+                let runtime = Runtime.get_runtime_by_id "antigravity.gemini" |> Option.get in
+                let config = match runtime.Runtime_instance.execution with
+                  | Runtime_execution.Antigravity_cli config -> config
+                  | _ -> fail "Antigravity runtime fixture did not resolve" in
+                let attempt = Keeper_antigravity_runtime.run
+                    ~input_source:(Keeper_request_source.Keeper_history {trace_id="read-noncompletion"})
+                    ~turn_start:(Keeper_carried_front.Turn_boundary {end_atom=0})
+                    ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input ~runtime)
+                    ~pre_tool_rejects:(ref []) ~runtime_id:"antigravity.gemini"
+                    ~keeper_name:"antigravity-fixture" ~base_path ~required_native_posture:native_posture
+                    ~goal:"Read once" ~goal_blocks:None ~system_prompt:"native read fixture"
+                    ~tools:[] ~initial_messages:[] ~model_input_projection:None
+                    ~on_transmitted_model_input:(fun _ -> ()) ~hooks:None ~context_injector:None
+                    ~context:None ~event_bus:None ~raw_trace:None ~on_event:None ~config () in
+                check bool "unadmitted or read-only noncompletion has no native effect uncertainty" true
+                  (attempt.effect_disposition = Keeper_provider_attempt_effect.No_effect_observed);
+                check bool "the effect boundary permits a safe retry" true
+                  (Keeper_provider_attempt_effect.allows_same_turn_retry attempt.effect_disposition);
+                attempt.result
+              ) else (Keeper_turn_driver.run_named
                   ~input_source:(Keeper_request_source.Keeper_history { trace_id = "antigravity-native-incomplete" })
                   ~walk_owner:Keeper_turn_driver.One_shot_walk ~runtime_id:"antigravity_incomplete"
                   ~keeper_name:"antigravity-fixture" ~base_path
                   ~media_store:(Tool_blob_media_store.of_base_path ~base_path)
                   ~goal:"Run a native tool once" ~system_prompt:"native interruption fixture"
-                  ~required_native_posture:Runtime_native_tools.Native_full
+                  ~required_native_posture:native_posture
                   ~tools:[] ~agent_core_tools:[] ~raw_trace:None
                   ~on_runtime_attempt:(fun (attempt : Keeper_turn_driver.runtime_attempt) ->
                     attempted := attempt.runtime_id :: !attempted)
-                  ~sw ~net:(Eio.Stdenv.net env) () in
-              check (list string) "walk stops at the first candidate"
-                [ "antigravity.gemini" ] !attempted;
-              check string "native effect ran exactly once" "effect\n" (Fs_compat.load_file native_effect_path);
-              check bool "fallback never ran" false (Sys.file_exists fallback_path);
-              match outcome with
+                  ~sw ~net:(Eio.Stdenv.net env) ()
+                |> Result.map (fun selected -> selected.Keeper_turn_driver.run_result)) in
+              let retries = match ending with
+                | `Result _ -> false
+                | `Process_exit | `Idle_timeout -> posture = `Read || not admitted in
+              check (list string) "candidate walk follows native effect eligibility"
+                (if direct_noncompletion then [] else if retries then
+                   ["antigravity_fallback.gemini"; "antigravity.gemini"] else ["antigravity.gemini"]) !attempted;
+              check bool "only an admitted first client runs its native operation" admitted
+                (Sys.file_exists native_effect_path);
+              if admitted then check string "first native operation ran exactly once"
+                  marker (Fs_compat.load_file native_effect_path);
+              check bool "only a safe transport failure dispatches the fallback" retries
+                (Sys.file_exists fallback_path);
+              if retries then (
+                check string "fallback ran once" marker (Fs_compat.load_file fallback_path);
+                match outcome with
+                | Ok result -> check string "fallback completes the request" "fallback reply" (keeper_response_text result)
+                | Error error -> fail (Agent_core.Error.to_string error)
+              ) else if direct_noncompletion then (
+                match outcome, ending with
+                | Error (Agent_core.Error.Provider (Llm_provider.Error.ProviderReportedError {error_type; _}) as error), `Result status ->
+                  check (option string) "provider terminal status remains exact" (Some status) error_type;
+                  check bool "provider terminal policy remains nonretryable" false (Agent_core.Error.is_retryable error)
+                | Error error, (`Result _ | `Process_exit | `Idle_timeout) -> fail (Agent_core.Error.to_string error)
+                | Ok _, (`Result _ | `Process_exit | `Idle_timeout) ->
+                  fail "read noncompletion lost its typed terminal"
+              ) else match outcome with
               | Error error ->
                 (match Keeper_internal_error.classify_masc_internal_error error with
                  | Some (Keeper_internal_error.Provider_attempt_effect_fenced
@@ -1347,6 +1413,32 @@ let test_finished_only_native_effect_cannot_rotate_candidates () =
   List.iter (fun step_delivery ->
     List.iter (run_native_effect_without_mcp_fixture ~step_delivery)
       [`Process_exit; `Idle_timeout]) [`Done_only; `Error_only]
+;;
+
+let test_unreported_native_effect_cannot_rotate_candidates () =
+  List.iter (run_native_effect_without_mcp_fixture ~step_delivery:`Unreported)
+    [`Process_exit; `Idle_timeout]
+;;
+
+let test_read_only_native_transport_failure_rotates_candidates () =
+  List.iter (fun step_delivery ->
+    List.iter (run_native_effect_without_mcp_fixture ~posture:`Read ~step_delivery)
+      [`Process_exit; `Idle_timeout]) [`Active_done; `Done_only; `Error_only; `Unreported]
+;;
+
+let test_read_only_noncompletion_keeps_native_effects_observed () =
+  List.iter (fun status -> run_native_effect_without_mcp_fixture ~posture:`Read (`Result status))
+    ["CANCELED"; "INTERRUPTED"; "INVALID"; "WAITING"; "RUNNING"]
+;;
+
+let test_unadmitted_full_native_failure_rotates_candidates () =
+  run_native_effect_without_mcp_fixture ~admitted:false ~step_delivery:`Unreported `Process_exit
+;;
+
+let test_unadmitted_full_native_noncompletion_has_no_effect_uncertainty () =
+  List.iter (fun status -> run_native_effect_without_mcp_fixture
+    ~admitted:false ~step_delivery:`Unreported (`Result status))
+    ["CANCELED"; "INTERRUPTED"; "INVALID"; "WAITING"; "RUNNING"]
 ;;
 
 let test_spawn_failure_is_pre_dispatch () =
@@ -2598,6 +2690,16 @@ let () =
               test_native_effect_then_idle_timeout_cannot_rotate_candidates
           ; test_case "finished-only native effects cannot rotate candidates" `Quick
               test_finished_only_native_effect_cannot_rotate_candidates
+          ; test_case "unreported native effect cannot rotate candidates" `Quick
+              test_unreported_native_effect_cannot_rotate_candidates
+          ; test_case "read-only native transport failure rotates candidates" `Quick
+              test_read_only_native_transport_failure_rotates_candidates
+          ; test_case "read-only noncompletion keeps native effects observed" `Quick
+              test_read_only_noncompletion_keeps_native_effects_observed
+          ; test_case "unadmitted full native failure rotates candidates" `Quick
+              test_unadmitted_full_native_failure_rotates_candidates
+          ; test_case "unadmitted full native noncompletion has no effect uncertainty" `Quick
+              test_unadmitted_full_native_noncompletion_has_no_effect_uncertainty
           ; test_case
               "spawn failure is pre-dispatch"
               `Quick

@@ -619,7 +619,7 @@ type async_msg =
     }
   | Board_vote_done of Masc_tui_types.board_vote_target * (string, string) result
   | Goal_transition_done of string * string * string * (string, string) result
-  | Goal_confirmation_submitted of string * string * string * (string, string) result
+  | Goal_confirmation_submitted of string * string * string * unit ref * (string, string) result
   | Goal_confirmation_loaded of
       string Masc_tui_fetched.request * (Masc_tui_planning_detail.confirmation, string) result
   | Schedules_loaded of schedule_page_request * (schedule_snapshot, string) result

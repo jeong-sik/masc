@@ -169,6 +169,7 @@ let test_a_narrow_pane_still_produces_rows () =
 
 let confirmation_fixture ?(goal_id = "goal-1") ?(revision = "revision-1")
     ?(metric = "passing scenarios") ?(run_id = "run-1") ?(confirmed = false) ?phase
+    ?(evidence = "10 scenarios passed\nObserved result retained")
     ?(submitted : Yojson.Safe.t list = []) () =
   let phase = match phase with
     | Some phase -> phase
@@ -180,7 +181,7 @@ let confirmation_fixture ?(goal_id = "goal-1") ?(revision = "revision-1")
     { outcome = Proven; request_id = "request-1"; criterion;
       verification_run_id = run_id;
       authority = Masc_domain.System_llm_agent { agent_run_id = run_id };
-      evidence = "10 scenarios passed\nObserved result retained";
+      evidence;
       recorded_at = "2026-09-19T08:00:00Z" } in
   let completion =
     if confirmed then Goal_verification.Human_confirmed
@@ -199,7 +200,8 @@ let confirmation_fixture ?(goal_id = "goal-1") ?(revision = "revision-1")
     | other -> other
   in
   `Assoc
-    [ "goal", `Assoc
+    [ "inspection_operator_id", `String "operator-current"
+    ; "goal", `Assoc
         [ "id", `String goal_id
         ; "phase", Goal_phase.to_yojson phase
         ; "title", `String "Harness"
@@ -231,8 +233,12 @@ let submitted_originals_json =
   ; `Assoc [ "kind", `String "hologram"; "anything", `Bool true ]
   ]
 
+let confirmation_workspace = Detail.{ base_path = "/workspace"; masc_root = "/workspace/.masc" }
+
+let confirmation_owner = ref ()
+
 let confirmation_exn json =
-  match Detail.decode_confirmation ~goal_id:"goal-1" json with
+  match Detail.decode_confirmation ~goal_id:"goal-1" ~workspace:confirmation_workspace ~credential_headers:[] ~credential_owner:confirmation_owner json with
   | Ok confirmation -> confirmation
   | Error detail -> Alcotest.fail detail
 
@@ -242,10 +248,24 @@ let test_confirmation_retains_the_displayed_proof () =
   check_bool "POST binds the inspected proof" true
     (sent = `Assoc
        [ "goal_id", `String "goal-1"; "criterion_revision", `String "revision-1";
-         "request_id", `String "request-1"; "verification_run_id", `String "run-1" ]);
+         "request_id", `String "request-1"; "verification_run_id", `String "run-1"; "expected_operator_id", `String "operator-current";
+         "expected_workspace", `Assoc ["base_path", `String "/workspace"; "masc_root", `String "/workspace/.masc"] ]);
   let newer = confirmation_exn (confirmation_fixture ~run_id:"run-2" ()) in
   check_bool "a newer verifier run cannot replace the inspected one" false
     (Detail.same_confirmation_binding read newer);
+  let changed = confirmation_exn (confirmation_fixture ~evidence:"different evidence" ()) in
+  check_bool "changed evidence cannot replace the inspected verdict" false
+    (Detail.same_confirmation_binding read changed);
+  let foreign = match Detail.decode_confirmation ~goal_id:"goal-1"
+      ~workspace:Detail.{base_path="/other"; masc_root="/other/.masc"} ~credential_headers:[] ~credential_owner:confirmation_owner (confirmation_fixture ()) with
+    | Ok value -> value | Error error -> Alcotest.fail error in
+  check_bool "identical proof in another workspace is not the same binding" false
+    (Detail.same_confirmation_binding read foreign);
+  let foreign_owner = match Detail.decode_confirmation ~goal_id:"goal-1"
+      ~workspace:confirmation_workspace ~credential_headers:[] ~credential_owner:(ref ()) (confirmation_fixture ()) with
+    | Ok value -> value | Error error -> Alcotest.fail error in
+  check_bool "identical proof under another credential owner is not the same binding" false
+    (Detail.same_confirmation_binding read foreign_owner);
   let confirmed = confirmation_exn (confirmation_fixture ~confirmed:true ()) in
   check_bool "the server confirmed the same binding" true
     (Detail.same_confirmation_binding read confirmed);
@@ -345,7 +365,7 @@ let test_confirmation_refuses_a_broken_original () =
     [ `Assoc [ "kind", `String "artifact"; "reference", `String "run.log" ] ] in
   check_bool "a present-but-broken item fails the read" true
     (Result.is_error
-       (Detail.decode_confirmation ~goal_id:"goal-1"
+       (Detail.decode_confirmation ~goal_id:"goal-1" ~workspace:confirmation_workspace ~credential_headers:[] ~credential_owner:confirmation_owner
           (confirmation_fixture ~submitted:broken ())))
 
 (* The server records a confirmation before it runs the caller's step and saves
@@ -363,7 +383,8 @@ let test_a_recorded_confirmation_that_did_not_complete_can_be_confirmed_again ()
     (Detail.confirmation_body recorded
      = `Assoc
          [ "goal_id", `String "goal-1"; "criterion_revision", `String "revision-1";
-           "request_id", `String "request-1"; "verification_run_id", `String "run-1" ]);
+           "request_id", `String "request-1"; "verification_run_id", `String "run-1"; "expected_operator_id", `String "operator-current";
+           "expected_workspace", `Assoc ["base_path", `String "/workspace"; "masc_root", `String "/workspace/.masc"] ]);
   let completed = confirmation_exn (confirmation_fixture ~confirmed:true ()) in
   check_bool "the completed answer binds the same proof" true
     (Detail.same_confirmation_binding recorded completed)
@@ -371,7 +392,7 @@ let test_a_recorded_confirmation_that_did_not_complete_can_be_confirmed_again ()
 let test_confirmation_refuses_unrelated_or_changed_proof () =
   List.iter
     (fun json -> check_bool "unrelated or changed proof refused" true
-      (Result.is_error (Detail.decode_confirmation ~goal_id:"goal-1" json)))
+      (Result.is_error (Detail.decode_confirmation ~goal_id:"goal-1" ~workspace:confirmation_workspace ~credential_headers:[] ~credential_owner:confirmation_owner json)))
     [ confirmation_fixture ~goal_id:"goal-2" ()
     ; confirmation_fixture ~revision:"revision-2" ()
     ; confirmation_fixture ~metric:"other criterion" ()
@@ -385,7 +406,7 @@ let test_confirmation_refuses_unrelated_or_changed_proof () =
         else key, value) fields)
     | _ -> Alcotest.fail "fixture must be an object" in
   check_bool "historical proof never arms confirmation" true
-    (Result.is_error (Detail.decode_confirmation ~goal_id:"goal-1" stale))
+    (Result.is_error (Detail.decode_confirmation ~goal_id:"goal-1" ~workspace:confirmation_workspace ~credential_headers:[] ~credential_owner:confirmation_owner stale))
 
 let test_confirmation_read_cannot_rearm_after_cancel () =
   let module Read = Masc_tui_fetched in
@@ -397,6 +418,22 @@ let test_confirmation_read_cannot_rearm_after_cancel () =
           (Ok (confirmation_exn (confirmation_fixture ()))) in
       check_bool "late evidence cannot rearm a cancelled confirmation" true
         (Read.view_for ~equal:String.equal late ~key:"goal-1" = Absent)
+
+let test_confirmation_read_suspension_withdraws_ready_proof () =
+  let module Read = Masc_tui_fetched in
+  match Read.start ~equal:String.equal Read.initial ~key:"goal-1" with
+  | Already_loading -> Alcotest.fail "initial read did not start"
+  | Started (loading, request) ->
+      let ready = Read.complete ~equal:String.equal loading request
+          (Ok (confirmation_exn (confirmation_fixture ()))) in
+      let suspended = Detail.suspend_confirmation_read ready in
+      check_bool "the original key survives for recovery" true (Read.current_key suspended = Some "goal-1");
+      check_bool "the old proof is no longer ready" true
+        (match Read.view_for ~equal:String.equal suspended ~key:"goal-1" with Stale _ -> true | _ -> false);
+      (match Read.start ~equal:String.equal suspended ~key:"goal-1" with
+       | Already_loading -> Alcotest.fail "recovery did not start"
+       | Started (refreshing, _) ->
+           check_bool "the replacement remains in flight" true (Read.in_flight refreshing))
 
 let () =
   Alcotest.run "tui_planning_detail"
@@ -431,5 +468,7 @@ let () =
             test_confirmation_refuses_unrelated_or_changed_proof
         ; Alcotest.test_case "cancelled confirmation ignores late read" `Quick
             test_confirmation_read_cannot_rearm_after_cancel
+        ; Alcotest.test_case "suspension withdraws ready confirmation" `Quick
+            test_confirmation_read_suspension_withdraws_ready_proof
         ] )
     ]

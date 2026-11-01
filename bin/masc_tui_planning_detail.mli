@@ -36,18 +36,27 @@ type submitted_original =
   | Original_unreadable of { reference : string option; reason : string }
   | Original_unknown of string
 
+type confirmation_workspace = { base_path : string; masc_root : string }
+
 type confirmation = {
   goal_id : string;
   phase : Goal_phase.t;
   verdict : Goal_verification.verdict;
   submitted : submitted_original list;
+  workspace : confirmation_workspace;
+  inspection_operator_id : string;
+  credential_headers : (string * string) list;
+  credential_owner : unit ref;
 }
 
 type confirmation_state =
   | Inspecting of (string, confirmation) Masc_tui_fetched.t
   | Submitting of string * (string, confirmation) Masc_tui_fetched.t
 
-val decode_confirmation : goal_id:string -> Yojson.Safe.t -> (confirmation, string) result
+val suspend_confirmation_read : (string, confirmation) Masc_tui_fetched.t -> (string, confirmation) Masc_tui_fetched.t
+(** Withdraw a proof's authority while retaining its key for a later reread. *)
+
+val decode_confirmation : goal_id:string -> workspace:confirmation_workspace -> credential_headers:(string * string) list -> credential_owner:unit ref -> Yojson.Safe.t -> (confirmation, string) result
 val confirmation_body : confirmation -> Yojson.Safe.t
 val same_confirmation_binding : confirmation -> confirmation -> bool
 val confirmation_lines : width:int -> ko:bool -> confirmation -> line list

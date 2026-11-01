@@ -10,6 +10,11 @@ const require = createRequire(new URL('../dashboard/package.json', import.meta.u
 const { chromium } = require('playwright')
 const [preview, head, backend, destination] = process.argv.slice(2)
 assert.ok(preview && head && backend && destination, 'PREVIEW HEAD BACKEND OUTPUT required')
+const healthResponse = await fetch(new URL('/health?full=1', backend))
+assert.ok(healthResponse.ok, 'backend health is required to bind fixture reads')
+const health = await healthResponse.json()
+const expectedWorkspace = { base_path: health.paths.effective_base_path, masc_root: health.paths.effective_masc_root }
+assert.ok(expectedWorkspace.base_path && expectedWorkspace.masc_root)
 const artifactRoot = resolve(preview), output = resolve(destination)
 const buildReceipt = JSON.parse(await readFile(resolve(artifactRoot, 'dashboard-build-receipt.json'), 'utf8'))
 assert.equal(buildReceipt.source_commit, head)
@@ -42,7 +47,8 @@ const verdict = { criterion, request_id: 'fixture-request-1', verification_run_i
 let completed = false, mode = 'success', readCount = 0
 const posts = [], reads = [], blocked = []
 function payload() {
-  return { goal: { id: 'fixture-goal', title: criterion.title, criterion_revision: criterion.revision,
+  return { inspection_operator_id: 'synthetic-operator', goal: { id: 'fixture-goal', title: criterion.title, metric: criterion.metric,
+      target_value: criterion.target_value, criterion_revision: criterion.revision,
       phase: completed ? 'completed' : 'awaiting_confirmation' },
     verification: { goal_id: 'fixture-goal', updated_at: '2026-09-10T00:00:00Z', completion: completed
       ? { state: 'human_confirmed', verdict, operator_id: 'synthetic-operator', confirmed_at: '2026-09-10T01:00:00Z' }
@@ -50,7 +56,7 @@ function payload() {
 }
 function goal() {
   const phase = completed ? 'completed' : 'awaiting_confirmation'
-  return { id: 'fixture-goal', title: criterion.title, phase, phase_color: '', priority: 3,
+  return { id: 'fixture-goal', title: criterion.title, criterion_revision: criterion.revision, phase, phase_color: '', priority: 3,
     goal_fsm: { state: phase, source: 'goal.phase', next_actions: [], activity_observation: 'goal_metadata' },
     metric: criterion.metric, target_value: criterion.target_value, due_date: null, tasks: [], task_count: 0, task_done_count: 0,
     timeline_events: [], children: [], child_count: 0, linked_keeper_names: [], pending_approval_count: 0,
@@ -68,20 +74,23 @@ try {
       if (req.method() === 'POST') {
         const binding = req.postDataJSON(); posts.push(binding)
         assert.deepEqual(binding, { goal_id: 'fixture-goal', criterion_revision: criterion.revision,
-          request_id: verdict.request_id, verification_run_id: verdict.verification_run_id })
+          request_id: verdict.request_id, verification_run_id: verdict.verification_run_id, expected_workspace: expectedWorkspace,
+          expected_operator_id: 'synthetic-operator' })
         completed = true
         return route.fulfill({ json: payload() })
       }
       readCount++; reads.push({ mode, completed })
+      assert.equal(url.searchParams.get('expected_base_path'), expectedWorkspace.base_path)
+      assert.equal(url.searchParams.get('expected_masc_root'), expectedWorkspace.masc_root)
       if (mode === 'denied') return route.fulfill({ status: 403, json: { error: 'synthetic operator permission denied' } })
       if (mode === 'readback-failed' && completed) return route.fulfill({ status: 503, json: { error: 'synthetic readback unavailable' } })
-      return route.fulfill({ json: payload() })
+      return route.fulfill({ headers: { 'x-masc-workspace-read': 'matched-v1' }, json: payload() })
     }
     if (!['GET', 'HEAD'].includes(req.method())) { blocked.push({ method: req.method(), path: url.pathname }); return route.abort() }
-    if (url.pathname === '/api/v1/dashboard/goals') return route.fulfill({ json: {
+    if (url.pathname === '/api/v1/dashboard/goals') return route.fulfill({ headers: { 'x-masc-workspace-read': 'matched-v1' }, json: {
       approval_queue_state: { state: 'ready' }, tree: [goal()], summary: { total_goals: 1, active_goals: 1,
         phase_counts: { [goal().phase]: 1 }, total_tasks: 0, done_tasks: 0, pending_approvals: 0 } } })
-    if (url.pathname === '/api/v1/dashboard/goals/detail') return route.fulfill({ json: {
+    if (url.pathname === '/api/v1/dashboard/goals/detail') return route.fulfill({ headers: { 'x-masc-workspace-read': 'matched-v1' }, json: {
       approval_queue_state: { state: 'ready' }, goal: goal(), linked_tasks: [], linked_keepers: [], approvals: [], execution_receipts: [], timeline: [] } })
     if (url.origin === new URL(backend).origin && url.pathname.startsWith('/dashboard/')) {
       const name = decodeURIComponent(url.pathname.slice('/dashboard/'.length)) || 'index.html'

@@ -593,10 +593,12 @@ let planning_summary_reading ~cols (state : state) =
          section (text "기준 대비 변화" "Change from baseline") change_rows;
          section (text "목록 밖 목표 이력" "Unlisted Goal history") history]
   in
-  let retired = List.rev state.goal_action_receipts |> List.map (fun (goal_id, ticket, workspace, result) ->
-    let answer = match result with
-      | Ok message -> text "응답: " "Response: " ^ Terminal_text.single_line message
-      | Error error -> text "오류: " "Error: " ^ Terminal_text.single_line error in
+  let retired = List.rev state.goal_action_receipts |> List.map (fun (goal_id, ticket, workspace, owner, result) ->
+    let answer = match owner, result with
+      | Some owner, _ when not (Masc_tui_http.credential_owner_is_current owner) ->
+          text "이전 인증의 결과" "Result belongs to an earlier credential"
+      | _, Ok message -> text "응답: " "Response: " ^ Terminal_text.single_line message
+      | _, Error error -> text "오류: " "Error: " ^ Terminal_text.single_line error in
     Printf.sprintf "%s · %s · %s · %s" (Terminal_text.single_line goal_id)
       (Terminal_text.single_line workspace) (Terminal_text.single_line ticket) answer) in
   let sections = sections @ (match retired with
@@ -1003,7 +1005,13 @@ let planning_measurement_lines (state : state) (goal : planning_goal) =
 let planning_confirmation_view (state : state) ~goal_id =
   match state.goal_confirmation with
   | Planning_detail.Inspecting read ->
-      `Inspect (Masc_tui_fetched.view_for ~equal:String.equal read ~key:goal_id)
+      let view = Masc_tui_fetched.view_for ~equal:String.equal read ~key:goal_id in
+      let view = match view with
+        | (Ready confirmation | Stale (confirmation, _))
+          when not (Masc_tui_http.credential_owner_is_current confirmation.credential_owner) ->
+            Masc_tui_fetched.Failed "Credential changed; read the proof again"
+        | Ready _ | Stale _ | Loading | Absent | Failed _ -> view in
+      `Inspect view
   | Planning_detail.Submitting (submitted_goal, _) when String.equal submitted_goal goal_id -> `Submitting
   | Planning_detail.Submitting _ -> `Inspect Absent
 
@@ -1084,11 +1092,13 @@ let planning_detail_lines (state : state) ~confirmation ~cols (goal : planning_g
        | Some error ->
          field ~tone:Planning_detail.Refused "Error" error
        | None -> [])
-    @ (state.goal_action_receipts |> List.filter_map (fun (goal_id, ticket, workspace, result) ->
+    @ (state.goal_action_receipts |> List.filter_map (fun (goal_id, ticket, workspace, owner, result) ->
          if not (String.equal goal_id goal.pg_id) then None
          else Some (field ~tone:Planning_detail.Unreadable "Request result"
            (Printf.sprintf "%s · %s · %s" workspace ticket
-             (match result with Ok message -> "response: " ^ message | Error error -> "error: " ^ error))))
+             (match owner, result with
+              | Some owner, _ when not (Masc_tui_http.credential_owner_is_current owner) -> "result belongs to an earlier credential"
+              | _, Ok message -> "response: " ^ message | _, Error error -> "error: " ^ error))))
        |> List.concat)
   in
   let linked_tasks = List.filter (fun (row : Tui_decode.task) -> List.mem goal.pg_id row.goal_ids) state.tasks in

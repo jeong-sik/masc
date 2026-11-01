@@ -495,6 +495,35 @@ let test_rename_table_of_an_absent_path_is_absent () =
   | Toml_line_editor.Table_renamed _ | Toml_line_editor.Table_rename_conflict ->
     Alcotest.fail "an absent table was renamed"
 
+let test_rename_table_ignores_target_header_inside_multiline_string () =
+  let source =
+    {|[autonomous]
+wake_prompt = """
+[runtime.lanes.pairing]
+"""
+
+|} ^ lanes_fixture
+  in
+  match
+    Toml_line_editor.rename_table source
+      ~path:{|runtime.lanes."a.one"|} ~to_path:"runtime.lanes.pairing"
+  with
+  | Toml_line_editor.Table_rename_absent -> Alcotest.fail "the header was not found"
+  | Toml_line_editor.Table_rename_conflict ->
+    Alcotest.fail "a non-structural line inside a multiline string was treated as a conflict"
+  | Toml_line_editor.Table_renamed out ->
+    Alcotest.(check bool) "the old header is gone" false
+      (has_line out {|[runtime.lanes."a.one"]|})
+
+let test_rename_table_absent_source_precedes_existing_target () =
+  match
+    Toml_line_editor.rename_table lanes_fixture ~path:"runtime.lanes.absent"
+      ~to_path:"runtime.lanes.coding"
+  with
+  | Toml_line_editor.Table_rename_absent -> ()
+  | Toml_line_editor.Table_renamed _ | Toml_line_editor.Table_rename_conflict ->
+    Alcotest.fail "an absent source path should report Table_rename_absent"
+
 let is_absent content ~path =
   match Toml_line_editor.remove_table content ~path with
   | Toml_line_editor.Table_absent -> true
@@ -1089,6 +1118,10 @@ let () =
             test_rename_table_refuses_a_name_the_file_declares
         ; Alcotest.test_case "rename_table of an absent path is absent" `Quick
             test_rename_table_of_an_absent_path_is_absent
+        ; Alcotest.test_case "rename_table ignores target header inside multiline string"
+            `Quick test_rename_table_ignores_target_header_inside_multiline_string
+        ; Alcotest.test_case "rename_table absent source precedes existing target"
+            `Quick test_rename_table_absent_source_precedes_existing_target
         ] )
     ; ( "keys the writer has to quote"
       , [ Alcotest.test_case "a key that is not bare is quoted" `Quick

@@ -1358,6 +1358,25 @@ let test_an_inline_lane_is_not_reported_removed () =
       Runtime.remove_runtime_lane ~runtime_config_path:path ~lane_id:"coding" ()))
 ;;
 
+(* An inline exact-output lane still has no structural header even if a
+   multiline string contains the header text on its own line. *)
+let test_an_inline_exact_lane_with_multiline_string_lookalike_is_refused () =
+  with_runtime_file (fun path ->
+    write_file path
+      (String.trim runtime_config
+       ^ "\n\n[turn]\n\
+          wake_prompt = \"\"\"\n\
+          [runtime.exact_output_lanes.verifier_exact]\n\
+          \"\"\"\n\n\
+          [runtime.exact_output_lanes]\n\
+          verifier_exact = { slots = [\"openai.gpt\"] }\n");
+    lane_write_refused "edit inline exact lane" ~path
+      ~names:[ "not written as its own [runtime.exact_output_lanes.verifier_exact] table" ]
+      (fun () ->
+         Runtime.set_exact_output_lane_slots ~runtime_config_path:path
+           ~lane:Runtime.Verifier ~slots:[ "openai.small" ] ()))
+;;
+
 (* Judgement admits a verifier_exact slot as a direct runtime
    ([Runtime.verifier_exact_slot_admission]) and dispatches that id alone. A
    slot naming a lane that is no runtime used to load and then fail at every
@@ -4358,6 +4377,10 @@ let () =
             "an inline lane is not reported removed"
             `Quick
             test_an_inline_lane_is_not_reported_removed
+        ; Alcotest.test_case
+            "an inline exact lane with a multiline-string lookalike is refused"
+            `Quick
+            test_an_inline_exact_lane_with_multiline_string_lookalike_is_refused
         ; Alcotest.test_case
             "a verifier slot naming a lane is refused"
             `Quick

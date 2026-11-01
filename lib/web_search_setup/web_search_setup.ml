@@ -311,7 +311,13 @@ let defined_without_a_header contents =
         doc
     in
     let lines, _ = Toml_line_editor.split_lines contents in
-    has_keys && not (List.exists (Toml_line_editor.is_table ~path:table) lines)
+    let has_header =
+      List.exists2
+        (fun line structural -> structural && Toml_line_editor.is_table ~path:table line)
+        lines
+        (Toml_line_editor.structural_lines lines)
+    in
+    has_keys && not has_header
 ;;
 
 (* The edited text has to read back as the requested settings before it is

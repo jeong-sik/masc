@@ -364,7 +364,15 @@ let test_an_inline_table_is_refused_not_half_written () =
 ;;
 
 let test_dotted_keys_at_the_root_are_refused_not_written_beside () =
-  let dotted = "turn.batch_limit = 3\n" ^ runtime_base in
+  let dotted =
+    {|turn.batch_limit = 3
+[autonomous]
+wake_prompt = """
+[turn]
+"""
+|}
+    ^ runtime_base
+  in
   with_config dotted (fun path ->
     match
       S.apply ~runtime_config_path:path [ parsed ~key:"turn.batch_limit" ~value:"5" ]

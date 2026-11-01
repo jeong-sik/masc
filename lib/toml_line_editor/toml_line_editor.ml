@@ -1128,17 +1128,16 @@ type table_rename =
    than left with the name twice, which would fail the whole load. *)
 let rename_table content ~path ~to_path =
   let lines, _trailing = split_lines content in
-  if List.exists (fun line -> is_table ~path:to_path line) lines
-  then Table_rename_conflict
-  else (
-    let renamed_header = Printf.sprintf "[%s]" to_path in
-    let rec loop acc ~renamed state = function
-      | [] -> List.rev acc, renamed
-      | line :: rest when is_structural state && is_table ~path line ->
-        loop (renamed_header :: acc) ~renamed:true (scan_line state line) rest
-      | line :: rest -> loop (line :: acc) ~renamed (scan_line state line) rest
-    in
-    match loop [] ~renamed:false outside lines with
-    | kept, true -> Table_renamed (join_lines kept ~trailing_newline:true)
-    | _, false -> Table_rename_absent)
+  let renamed_header = Printf.sprintf "[%s]" to_path in
+  let rec loop acc ~renamed state = function
+    | [] -> List.rev acc, renamed
+    | line :: rest when is_structural state && is_table ~path line ->
+      loop (renamed_header :: acc) ~renamed:true (scan_line state line) rest
+    | line :: rest -> loop (line :: acc) ~renamed (scan_line state line) rest
+  in
+  match loop [] ~renamed:false outside lines with
+  | _, false -> Table_rename_absent
+  | _, true when Option.is_some (find_structural_index (is_table ~path:to_path) lines) ->
+    Table_rename_conflict
+  | kept, true -> Table_renamed (join_lines kept ~trailing_newline:true)
 ;;

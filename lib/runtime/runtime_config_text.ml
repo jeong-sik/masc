@@ -28,62 +28,71 @@ let assignment_line ~keeper_name ~runtime_id =
 let is_runtime_assignments_header = Toml_line_editor.is_table ~path:(runtime_table ^ ".assignments")
 let is_runtime_header = Toml_line_editor.is_table ~path:runtime_table
 
+let find_structural_index pred lines =
+  let rec loop index = function
+    | [], _ | _, [] -> None
+    | line :: rest_lines, structural :: rest_structural ->
+      if structural && pred line
+      then Some index
+      else loop (index + 1) (rest_lines, rest_structural)
+  in
+  loop 0 (lines, Toml_line_editor.structural_lines lines)
+;;
+
 
 let replace_or_append_assignment section_lines ~keeper_name ~runtime_id =
   let line = assignment_line ~keeper_name ~runtime_id in
   let rec loop acc = function
-    | [] -> List.rev_append acc [ line ]
-    | existing :: rest ->
-      (match Toml_line_editor.key_of_line existing with
-       | Some key when String.equal key keeper_name ->
+    | [], _ | _, [] -> List.rev_append acc [ line ]
+    | existing :: rest, structural :: rest_structural ->
+      (match structural, Toml_line_editor.key_of_line existing with
+       | true, Some key when String.equal key keeper_name ->
          List.rev_append acc (line :: rest)
-       | _ -> loop (existing :: acc) rest)
+       | _ -> loop (existing :: acc) (rest, rest_structural))
   in
-    loop [] section_lines
+  loop [] (section_lines, Toml_line_editor.structural_lines section_lines)
 ;;
 
 let remove_assignment section_lines ~keeper_name =
-  List.filter
-    (fun existing ->
-      match Toml_line_editor.key_of_line existing with
-      | Some key when String.equal key keeper_name -> false
-      | _ -> true)
-    section_lines
+  List.combine section_lines (Toml_line_editor.structural_lines section_lines)
+  |> List.filter_map (fun (existing, structural) ->
+    match structural, Toml_line_editor.key_of_line existing with
+    | true, Some key when String.equal key keeper_name -> None
+    | _ -> Some existing)
 ;;
 
 let replace_or_append_runtime_scalar section_lines ~key ~runtime_id =
   let line = Toml_line_editor.scalar_line ~key ~value:runtime_id in
   let rec loop acc = function
-    | [] -> List.rev_append acc [ line ]
-    | existing :: rest ->
-      (match Toml_line_editor.key_of_line existing with
-       | Some existing_key when String.equal existing_key key ->
+    | [], _ | _, [] -> List.rev_append acc [ line ]
+    | existing :: rest, structural :: rest_structural ->
+      (match structural, Toml_line_editor.key_of_line existing with
+       | true, Some existing_key when String.equal existing_key key ->
          List.rev_append acc (line :: rest)
-       | _ -> loop (existing :: acc) rest)
+       | _ -> loop (existing :: acc) (rest, rest_structural))
   in
-  loop [] section_lines
+  loop [] (section_lines, Toml_line_editor.structural_lines section_lines)
 ;;
 
 let replace_or_append_runtime_string_array section_lines ~key ~values =
   let line = Toml_line_editor.string_array_line ~key ~values in
   let rec loop acc = function
-    | [] -> List.rev_append acc [ line ]
-    | existing :: rest ->
-      (match Toml_line_editor.key_of_line existing with
-       | Some existing_key when String.equal existing_key key ->
+    | [], _ | _, [] -> List.rev_append acc [ line ]
+    | existing :: rest, structural :: rest_structural ->
+      (match structural, Toml_line_editor.key_of_line existing with
+       | true, Some existing_key when String.equal existing_key key ->
          List.rev_append acc (line :: rest)
-       | _ -> loop (existing :: acc) rest)
+       | _ -> loop (existing :: acc) (rest, rest_structural))
   in
-  loop [] section_lines
+  loop [] (section_lines, Toml_line_editor.structural_lines section_lines)
 ;;
 
 let remove_runtime_scalar section_lines ~key =
-  List.filter
-    (fun existing ->
-      match Toml_line_editor.key_of_line existing with
-      | Some existing_key when String.equal existing_key key -> false
-      | _ -> true)
-    section_lines
+  List.combine section_lines (Toml_line_editor.structural_lines section_lines)
+  |> List.filter_map (fun (existing, structural) ->
+    match structural, Toml_line_editor.key_of_line existing with
+    | true, Some existing_key when String.equal existing_key key -> None
+    | _ -> Some existing)
 ;;
 
 let append_runtime_section lines ~key ~runtime_id =
@@ -115,7 +124,7 @@ let append_runtime_assignments_section lines ~keeper_name ~runtime_id =
 let update_runtime_assignment_text content ~keeper_name ~runtime_id =
   let lines, _trailing_newline = Toml_line_editor.split_lines content in
   let updated_lines =
-    match Toml_line_editor.find_index is_runtime_assignments_header lines with
+    match find_structural_index is_runtime_assignments_header lines with
     | None -> append_runtime_assignments_section lines ~keeper_name ~runtime_id
     | Some header_index ->
       let before, from_header = Toml_line_editor.split_at header_index lines in
@@ -123,7 +132,7 @@ let update_runtime_assignment_text content ~keeper_name ~runtime_id =
        | [] -> append_runtime_assignments_section lines ~keeper_name ~runtime_id
        | header :: after_header ->
          let section_lines, after_section =
-           match Toml_line_editor.find_index Toml_line_editor.is_table_header after_header with
+           match find_structural_index Toml_line_editor.is_table_header after_header with
            | None -> after_header, []
            | Some next_header_index -> Toml_line_editor.split_at next_header_index after_header
          in
@@ -187,7 +196,7 @@ let update_egress_allow_text content ~keeper_name ~allow =
   let lines, _trailing_newline = Toml_line_editor.split_lines content in
   let section = [ egress_keepers_header keeper_name; egress_allow_line allow ] in
   let updated_lines =
-    match Toml_line_editor.find_index (is_egress_keeper_header ~keeper_name) lines with
+    match find_structural_index (is_egress_keeper_header ~keeper_name) lines with
     | None ->
       (match List.rev lines with
        | [] -> section
@@ -199,7 +208,7 @@ let update_egress_allow_text content ~keeper_name ~allow =
        | [] -> lines @ section
        | _ :: after_header ->
          let _replaced, after_section =
-           match Toml_line_editor.find_index Toml_line_editor.is_table_header after_header with
+           match find_structural_index Toml_line_editor.is_table_header after_header with
            | None -> after_header, []
            | Some next -> Toml_line_editor.split_at next after_header
          in
@@ -211,7 +220,7 @@ let update_egress_allow_text content ~keeper_name ~allow =
 let remove_egress_allow_text content ~keeper_name =
   let lines, _trailing_newline = Toml_line_editor.split_lines content in
   let updated_lines =
-    match Toml_line_editor.find_index (is_egress_keeper_header ~keeper_name) lines with
+    match find_structural_index (is_egress_keeper_header ~keeper_name) lines with
     | None -> lines
     | Some header_index ->
       let before, from_header = Toml_line_editor.split_at header_index lines in
@@ -219,7 +228,7 @@ let remove_egress_allow_text content ~keeper_name =
        | [] -> lines
        | _ :: after_header ->
          let _dropped, after_section =
-           match Toml_line_editor.find_index Toml_line_editor.is_table_header after_header with
+           match find_structural_index Toml_line_editor.is_table_header after_header with
            | None -> after_header, []
            | Some next -> Toml_line_editor.split_at next after_header
          in
@@ -231,7 +240,7 @@ let remove_egress_allow_text content ~keeper_name =
 let update_runtime_scalar_text content ~key ~runtime_id =
   let lines, _trailing_newline = Toml_line_editor.split_lines content in
   let updated_lines =
-    match Toml_line_editor.find_index is_runtime_header lines, runtime_id with
+    match find_structural_index is_runtime_header lines, runtime_id with
     | None, None -> lines
     | None, Some runtime_id -> append_runtime_section lines ~key ~runtime_id
     | Some header_index, _ ->
@@ -243,7 +252,7 @@ let update_runtime_scalar_text content ~key ~runtime_id =
           | Some runtime_id -> append_runtime_section lines ~key ~runtime_id)
        | header :: after_header ->
          let section_lines, after_section =
-           match Toml_line_editor.find_index Toml_line_editor.is_table_header after_header with
+           match find_structural_index Toml_line_editor.is_table_header after_header with
            | None -> after_header, []
            | Some next_header_index -> Toml_line_editor.split_at next_header_index after_header
          in
@@ -260,7 +269,7 @@ let update_runtime_scalar_text content ~key ~runtime_id =
 let update_runtime_string_array_text content ~key ~values =
   let lines, _trailing_newline = Toml_line_editor.split_lines content in
   let updated_lines =
-    match Toml_line_editor.find_index is_runtime_header lines with
+    match find_structural_index is_runtime_header lines with
     | None -> append_runtime_string_array_section lines ~key ~values
     | Some header_index ->
       let before, from_header = Toml_line_editor.split_at header_index lines in
@@ -268,7 +277,7 @@ let update_runtime_string_array_text content ~key ~values =
        | [] -> append_runtime_string_array_section lines ~key ~values
        | header :: after_header ->
          let section_lines, after_section =
-           match Toml_line_editor.find_index Toml_line_editor.is_table_header after_header with
+           match find_structural_index Toml_line_editor.is_table_header after_header with
            | None -> after_header, []
            | Some next_header_index -> Toml_line_editor.split_at next_header_index after_header
          in
@@ -282,7 +291,7 @@ let update_runtime_string_array_text content ~key ~values =
 let remove_runtime_assignment_text content ~keeper_name =
   let lines, _trailing_newline = Toml_line_editor.split_lines content in
   let updated_lines =
-    match Toml_line_editor.find_index is_runtime_assignments_header lines with
+    match find_structural_index is_runtime_assignments_header lines with
     | None -> lines
     | Some header_index ->
       let before, from_header = Toml_line_editor.split_at header_index lines in
@@ -290,7 +299,7 @@ let remove_runtime_assignment_text content ~keeper_name =
        | [] -> lines
        | header :: after_header ->
          let section_lines, after_section =
-           match Toml_line_editor.find_index Toml_line_editor.is_table_header after_header with
+           match find_structural_index Toml_line_editor.is_table_header after_header with
            | None -> after_header, []
            | Some next_header_index -> Toml_line_editor.split_at next_header_index after_header
          in

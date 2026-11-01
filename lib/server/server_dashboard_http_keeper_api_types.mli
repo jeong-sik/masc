@@ -38,6 +38,9 @@ val keeper_suffix_shutdown : string
 val keeper_suffix_reset : string
 val keeper_suffix_clear : string
 val keeper_suffix_checkpoints : string
+val keeper_suffix_provider_input : string
+val keeper_suffix_provider_input_part : string
+val keeper_suffix_provider_input_continuity : string
 val keeper_suffix_runtime_trace : string
 val keeper_suffix_directive : string
 val keeper_suffix_paused_work : string

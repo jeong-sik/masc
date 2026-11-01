@@ -575,13 +575,37 @@ let test_counterpart_capture_retains_original_rows_and_dedup_frontier () =
   (match record ~base_path (item ~keeper_name ~dedupe_key:"capture-append" ~preview:"new tail" ~received_at:40. ()) with
    | `Recorded -> () | `Duplicate _ -> Alcotest.fail "unexpected appended duplicate"
    | `Error detail -> Alcotest.fail detail);
-  let tail = row ~id:"appended-chat" ~content:"new chat tail" ~ts:14. [] in
+  let tail = row ~id:"appended-chat" ~content:"new chat tail" ~ts:14.
+      ["conversation_id",`String future.conversation.conversation_id;
+       "external_message_id",`String "tail-future-message"] in
   write_file chat_path (duplicate ^ "\n" ^ direct ^ "\n" ^ tail ^ "\n");
   let fresh = Sources.capture_counterparts ~external_after:0 ~base_dir:base_path ~keeper_name
       ~after:None ~before:20. |> Result.map_error Sources.read_error_to_string |> get in
   Sources.snapshot_extends ~original:snapshot ~current:fresh |> get;
   Sources.validate_original_selection snapshot ~base_dir:base_path ~keeper_name
     |> Result.map_error Sources.read_error_to_string |> get;
+  let expected_digest = Sources.counterpart_observations_digest snapshot in
+  Alcotest.(check bool) "unacknowledged external cursor does not cover the original frontier" false
+    (Sources.counterparts_covered_at_frontier snapshot ~counterpart_digest:expected_digest
+       ~base_dir:base_path ~keeper_name ~acked_external_offset:0
+     |> Result.map_error Sources.read_error_to_string |> get);
+  Alcotest.(check bool) "acknowledged external cursor covers the intact original counterparts" true
+    (Sources.counterparts_covered_at_frontier snapshot ~counterpart_digest:expected_digest
+       ~base_dir:base_path ~keeper_name ~acked_external_offset:1
+     |> Result.map_error Sources.read_error_to_string |> get);
+  (match record ~base_path (item ~keeper_name ~dedupe_key:"capture-tail-dup" ~preview:"tail dup"
+           ~external_message:(external_message "tail-future-message") ~received_at:50. ()) with
+   | `Recorded -> () | `Duplicate _ -> Alcotest.fail "unexpected tail duplicate"
+   | `Error detail -> Alcotest.fail detail);
+  let fresh_digest = Sources.counterpart_observations_digest fresh in
+  Alcotest.(check bool) "unacknowledged future delivery that suppresses a selected chat row blocks frontier coverage" false
+    (Sources.counterparts_covered_at_frontier fresh ~counterpart_digest:fresh_digest
+       ~base_dir:base_path ~keeper_name ~acked_external_offset:1
+     |> Result.map_error Sources.read_error_to_string |> get);
+  Alcotest.(check bool) "acknowledging the suppressing future delivery restores frontier coverage" true
+    (Sources.counterparts_covered_at_frontier fresh ~counterpart_digest:fresh_digest
+       ~base_dir:base_path ~keeper_name ~acked_external_offset:5
+     |> Result.map_error Sources.read_error_to_string |> get);
   Alcotest.(check int) "accepted source tails never extend the original frontier" 1
     (Sources.external_through snapshot);
   write_file chat_path (row ~id:"replacement" ~content:"changed source" ~ts:13. [] ^ "\n");

@@ -37,12 +37,29 @@ let retained_stop ~store ~(record:Retained.retained) ~request =
        let* evidence=io (fun () -> Request.refusal_evidence ~store request final) in
        let report=Runtime.not_committed_of_failure ~detail:(detail final) evidence in
        (match Consumer.refused_original source [report] with
-        | Error refusal ->
+        | Error (Consumer.Counterpart_input_capacity_refused {counterpart_digest;_} as refusal) ->
           let* committed=io (fun () ->
-            let* past=Keeper_librarian_refusal_frontier.past_original request in
-            if past then Ok true else Keeper_librarian_durable_commit.receipt_state request) in
+            let* past=Keeper_librarian_refusal_frontier.past_original ~counterpart_digest request in
+            if past then Ok true else
+            let* receipt=Keeper_librarian_durable_commit.receipt_state request in
+            if not receipt then Ok false else
+            let owner=Request.physical_owner request in
+            let keeper_id=Request.keeper_id owner in
+            let* external_cursor=
+              Keeper_external_read_cursor.observe
+                ~runtime_keepers_dir:(Source.runtime_keepers_dir source)
+                ~keeper_name:keeper_id in
+            Keeper_librarian_input_sources.counterparts_covered_at_frontier
+              (Source.counterparts source)
+              ~counterpart_digest
+              ~base_dir:(Request.base_path owner)
+              ~keeper_name:keeper_id
+              ~acked_external_offset:(Keeper_external_read_cursor.observation_offset external_cursor)
+            |> Result.map_error Keeper_librarian_input_sources.read_error_to_string) in
           Ok (if committed then None else Some {request_id=record.request_id;
             destination=Request.destination request;refusal})
+        | Error refusal ->
+          Ok (Some {request_id=record.request_id;destination=Request.destination request;refusal})
         | Ok _ -> Ok None)
      | Call_final (Answered _ | Invalid_output _ | Input_refused Invalid_request | Output_limit_reached _)
      | Outcome_unknown | Not_allowed _ | Request_id_reused -> Ok None)

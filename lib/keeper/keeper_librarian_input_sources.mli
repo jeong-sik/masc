@@ -16,6 +16,7 @@ type counterpart_snapshot
 val capture_counterparts : external_after:int -> base_dir:string -> keeper_name:string ->
   after:float option -> before:float -> (counterpart_snapshot, read_error) result
 val counterpart_observations : counterpart_snapshot -> Keeper_counterpart_observation.t list
+val counterpart_observations_digest : counterpart_snapshot -> string
 val external_through : counterpart_snapshot -> int
 val counterpart_snapshot_matches_selection : counterpart_snapshot -> external_after:int ->
   after:float option -> before:float -> bool
@@ -24,6 +25,13 @@ val counterpart_snapshot_of_json : Yojson.Safe.t -> (counterpart_snapshot, strin
 val snapshot_extends : original:counterpart_snapshot -> current:counterpart_snapshot -> (unit, string) result
 val validate_original_selection : counterpart_snapshot -> base_dir:string -> keeper_name:string ->
   (unit, read_error) result
+val counterparts_covered_at_frontier :
+  counterpart_snapshot ->
+  counterpart_digest:string ->
+  base_dir:string ->
+  keeper_name:string ->
+  acked_external_offset:int ->
+  (bool, read_error) result
 (** Compare the original complete external log and selected raw chat rows as
     ordered prefixes under the same original interval/offset. Later appends do
     not extend the original frontier or recompute its dedup/projection. The

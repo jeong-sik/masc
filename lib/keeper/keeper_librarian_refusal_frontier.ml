@@ -36,12 +36,24 @@ let official_cuts_match lines (range:Current.official_range_id) =
          | No_atom_history -> Ids.Turn_ref.equal turn_ref actual
          | Atom_history _ | Empty_atom_history | Stale_noop -> false)
     | None | Some (Error _) -> false) range.turns
-let past_original request =
+let past_original ?counterpart_digest request =
   let source=Request.source request and owner=Request.physical_owner request in
   let keepers_dir=Request.keepers_dir owner and keeper_id=Request.keeper_id owner in
   let runtime_keepers_dir=Source.runtime_keepers_dir source in
+  let input_digest=Keeper_counterpart_observation.digest (Source.input source).counterpart_observations in
+  let expected_digest=Option.value ~default:input_digest counterpart_digest in
+  let* ()=if String.equal expected_digest input_digest then Ok ()
+    else Error "Refused counterpart digest differs from the captured original input" in
   let* external_cursor=External.observe ~runtime_keepers_dir ~keeper_name:keeper_id in
-  if External.observation_offset external_cursor<Keeper_librarian_input_sources.external_through (Source.counterparts source)
+  let* counterparts_covered=
+    Keeper_librarian_input_sources.counterparts_covered_at_frontier
+      (Source.counterparts source)
+      ~counterpart_digest:expected_digest
+      ~base_dir:(Request.base_path owner)
+      ~keeper_name:keeper_id
+      ~acked_external_offset:(External.observation_offset external_cursor)
+    |> Result.map_error Keeper_librarian_input_sources.read_error_to_string in
+  if not counterparts_covered
   then Ok false else
   let* atom=match Source.range_id source with
     | None -> Ok None

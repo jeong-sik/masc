@@ -1523,7 +1523,12 @@ let test_counterpart_only_provider_capacity_refusal_is_source_preserving () =
     check bool "the refused HTTP input retains both original counterparts" true
       (!provider_inputs=[0,0,List.sort Stdlib.compare expected]);
     (match run_worker fixture with
-     | Error (Consumer.Counterpart_input_capacity_refused {official_range;reports=[report];_}) ->
+     | Error (Consumer.Counterpart_input_capacity_refused {official_range;counterpart_digest;reports=[report];_} as refusal) ->
+       check bool "capacity refusal suspends later Memory phases of the wake" true
+         (Consumer.publication_unfinished refusal);
+       check string "the refusal binds the exact counterpart digest"
+         (Keeper_counterpart_observation.digest (Source.input (Capture.source (snd (only_original fixture)))).counterpart_observations)
+         counterpart_digest;
        check bool "the host receipt names its actual provider input refusal" true
          (report.provider_input_refusals=[Keeper_librarian_input_refusal.Request_body_refused]);
        check bool "the operator can locate both original official rows" true

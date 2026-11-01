@@ -86,6 +86,7 @@ type error =
       { turn_ref : Ids.Turn_ref.t
       ; atom_range : Keeper_memory_os_current.durable_range_id option
       ; official_range : Keeper_memory_os_current.official_range_id option
+      ; counterpart_digest : string
       ; observation_count : int
       ; observation_bytes : int
       ; reports : Keeper_librarian_runtime.not_committed list

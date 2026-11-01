@@ -286,7 +286,23 @@ let publish_with ~before_settlement ~store ~config ~request ~(original : Owner.r
   (* A historical Memory receipt proves an old effect, not that omitted
      counterpart observations may now be ACKed. Finished decoding stays pure;
      every new publication/settlement effect must satisfy the live policy. *)
-  let* ()=Keeper_librarian_runtime.require_counterpart_template (Request.preparation request) in
+  let* ()=
+    match Keeper_librarian_runtime.require_counterpart_template (Request.preparation request) with
+    | Ok () -> Ok ()
+    | Error detail ->
+      (match Progress.phase current.progress with
+       | Progress.Committing _ | Commit_unknown _ | Finished _ ->
+         let source=Request.source request in
+         let runtime_keepers_dir=Source.runtime_keepers_dir source in
+         let through=Keeper_librarian_input_sources.external_through (Source.counterparts source) in
+         let* settled=io (fun () ->
+           let* proved=receipt_state request in
+           if not proved then Ok false else
+           let* external_cursor=Cursor.observe ~runtime_keepers_dir ~keeper_name:keeper_id in
+           Ok (Cursor.observation_matches_preparation external_cursor ~after:through ~through ~atom:None ~official:None)) in
+         if settled then Ok () else Error detail
+       | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Conflicted _ | Rejected _
+       | Subdividing _ | Subdivided _ -> Error detail) in
   let* superseded=is_superseded ~request ~record:current in
   if superseded then Ok (Publication.Publication_superseded current) else
   let prepare current =

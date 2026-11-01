@@ -4238,7 +4238,12 @@ let test_counterpart_capacity_refusal_preserves_complete_source () =
   (match Consumer.consume_one ~config ~keeper_name ~commit:(fun value ->
        check_input value; Consumer.Memory_refused [report]) with
    | Error (Consumer.Counterpart_input_capacity_refused
-       { turn_ref; atom_range; official_range; observation_count; observation_bytes; reports }) ->
+       { turn_ref; atom_range; official_range; counterpart_digest; observation_count; observation_bytes; reports } as refusal) ->
+     check bool "capacity refusal suspends later Memory phases of the wake" true
+       (Consumer.publication_unfinished refusal);
+     check string "refusal binds the exact counterpart observations digest"
+       (Masc.Keeper_counterpart_observation.digest (Original.input (Option.get !original)).counterpart_observations)
+       counterpart_digest;
      check string "refusal names the exact source trace" trace_id (Ids.Turn_ref.trace_id turn_ref);
      check int "whole observation remains one source item" 1 observation_count;
      check bool "byte measurement includes the complete content and JSON envelope" true

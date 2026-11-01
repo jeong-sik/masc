@@ -133,7 +133,28 @@ let resume ~store ~config ~reserved ~(original:Owner.retained) ~request ~(call:c
     | Call_final (Invalid_output _ | Input_refused _ | Output_limit_reached _)
     | Outcome_unknown | Not_allowed _ | Request_id_reused -> Ok (Refusal (final,record)) in
   let publish_answer record proposal =
-    let* ()=Memory_runtime.require_counterpart_template (Request.preparation request) |> rejected in
+    let already_acked_commit =
+      match Progress.phase record.progress with
+      | Progress.Committing _ | Commit_unknown _ ->
+        let source = Request.source request and owner = Request.physical_owner request in
+        let keeper_id = Request.keeper_id owner in
+        let runtime_keepers_dir = Keeper_librarian_durable_capture.runtime_keepers_dir source in
+        let through =
+          Keeper_librarian_input_sources.external_through
+            (Keeper_librarian_durable_capture.counterparts source)
+        in
+        (match io (fun () -> Keeper_external_read_cursor.observe ~runtime_keepers_dir ~keeper_name:keeper_id) with
+         | Ok external_cursor ->
+           Keeper_external_read_cursor.observation_matches_preparation
+             external_cursor ~after:through ~through ~atom:None ~official:None
+         | Error _ -> false)
+      | Captured | Admission_wait _ | Dispatch_pending _ | Judged _
+      | Finished _ | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> false
+    in
+    let* () =
+      if already_acked_commit then Ok ()
+      else Memory_runtime.require_counterpart_template (Request.preparation request) |> rejected
+    in
     let* published=publish ~original:record ~request ~proposal in
     match published with
     | Publication_pending detail -> Ok (Publication_waiting detail)

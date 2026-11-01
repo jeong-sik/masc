@@ -53,6 +53,7 @@ type error =
       { turn_ref : Ids.Turn_ref.t
       ; atom_range : Keeper_memory_os_current.durable_range_id option
       ; official_range : Keeper_memory_os_current.official_range_id option
+      ; counterpart_digest : string
       ; observation_count : int
       ; observation_bytes : int
       ; reports : Keeper_librarian_runtime.not_committed list
@@ -80,12 +81,12 @@ type error =
       }
 
 let publication_unfinished = function
-  | Original_publication_blocked _ -> true
+  | Original_publication_blocked _ | Counterpart_input_capacity_refused _ -> true
   | Keeper_meta_absent | Source_capture_failed _ | Keeper_meta_unreadable _
   | Boundary_log_unreadable _ | Progress_unreadable _ | Checkpoint_unreadable _
   | Position_in_other_trace _ | Position_not_in_history _ | Range_stopped _
   | Range_end_boundary_missing _ | Progress_boundary_missing _ | Memory_snapshot_unreadable _
-  | Counterpart_interval_non_monotone _ | Counterpart_input_capacity_refused _
+  | Counterpart_interval_non_monotone _
   | Counterpart_observations_unreadable _
   | Progress_write_failed _ | Official_progress_unreadable _ | Official_progress_write_failed _
   | Official_progress_boundary_missing _ | Committed_official_range_mismatch
@@ -109,6 +110,7 @@ let refused_original original reports =
     { turn_ref = input.turn_ref
     ; atom_range = Capture.range_id original
     ; official_range = Capture.official_range_id original
+    ; counterpart_digest = Keeper_counterpart_observation.digest input.counterpart_observations
     ; observation_count = List.length input.counterpart_observations
     ; observation_bytes = String.length
         (Keeper_counterpart_observation.render_for_prompt input.counterpart_observations)
@@ -185,7 +187,7 @@ let error_to_string = function
       after before first_boundary_line end_boundary_line
       (show_bound atom_bound) (show_bound official_bound)
   | Counterpart_input_capacity_refused
-      { turn_ref; atom_range; official_range; observation_count; observation_bytes; reports } ->
+      { turn_ref; atom_range; official_range; counterpart_digest; observation_count; observation_bytes; reports } ->
     let atom = match atom_range with
       | None -> "none"
       | Some (range : Keeper_memory_os_current.durable_range_id) ->
@@ -198,9 +200,9 @@ let error_to_string = function
           (Yojson.Safe.to_string (`List (List.map (fun (line, turn_ref) ->
              `List [`Int line; Ids.Turn_ref.to_yojson turn_ref]) range.turns))) in
     Printf.sprintf
-      "counterpart-only input refused by input-capacity boundary: turn_ref=%s atom_range=(%s) official_range=(%s) observations=%d observation_bytes=%d; full source retained without truncation, cursors and external ACK unchanged; requires capacity for the complete original input: %s"
+      "counterpart-only input refused by input-capacity boundary: turn_ref=%s atom_range=(%s) official_range=(%s) counterpart_digest=%s observations=%d observation_bytes=%d; full source retained without truncation, cursors and external ACK unchanged; requires capacity for the complete original input: %s"
       (Yojson.Safe.to_string (Ids.Turn_ref.to_yojson turn_ref)) atom official
-      observation_count observation_bytes
+      counterpart_digest observation_count observation_bytes
       (String.concat "; " (List.map (fun (report : Keeper_librarian_runtime.not_committed) ->
          Printf.sprintf "%s; provider_input_refusals=[%s]" report.detail
            (String.concat "," (List.map Keeper_librarian_input_refusal.to_string

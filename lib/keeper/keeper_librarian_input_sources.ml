@@ -85,6 +85,9 @@ let counterpart_observations (snapshot : counterpart_snapshot) =
       else interleave (external_row :: acc) external_rest chats in
   interleave [] externals chats |> List.map snd
 
+let counterpart_observations_digest (snapshot : counterpart_snapshot) =
+  Keeper_counterpart_observation.digest (counterpart_observations snapshot)
+
 let capture_counterparts_read ?external_after ~base_dir ~keeper_name ~after ~before () =
   let* () = if Float.is_finite before && Option.fold ~none:true ~some:Float.is_finite after
     then Ok () else Error (External_cursor_failed "counterpart interval must be finite") in
@@ -153,10 +156,7 @@ let counterpart_snapshot_of_json value =
   else Ok snapshot
 
 let capture_counterparts ~external_after ~base_dir ~keeper_name ~after ~before =
-  let* snapshot = capture_counterparts_read ~external_after ~base_dir ~keeper_name ~after ~before () in
-  let* _ = counterpart_snapshot_of_json (counterpart_snapshot_to_json snapshot)
-    |> Result.map_error (fun detail -> External_cursor_failed detail) in
-  Ok snapshot
+  capture_counterparts_read ~external_after ~base_dir ~keeper_name ~after ~before ()
 
 let snapshot_extends ~(original : counterpart_snapshot) ~(current : counterpart_snapshot) =
   let rec prefix same original current = match original, current with
@@ -178,6 +178,40 @@ let validate_original_selection (original : counterpart_snapshot) ~base_dir ~kee
     let* current = capture_counterparts_read ?external_after:original.external_after
       ~base_dir ~keeper_name ~after:original.after ~before:original.before () in
     snapshot_extends ~original ~current |> Result.map_error (fun detail -> External_cursor_failed detail)
+
+let counterparts_covered_at_frontier
+      (original : counterpart_snapshot)
+      ~counterpart_digest
+      ~base_dir
+      ~keeper_name
+      ~acked_external_offset
+  =
+  if original.keeper_name <> keeper_name
+  then Error (External_cursor_failed "Original counterpart Keeper differs")
+  else if not (String.equal (counterpart_observations_digest original) counterpart_digest)
+  then Error (External_cursor_failed "Original counterpart digest differs from its snapshot")
+  else if acked_external_offset < external_through original
+  then Ok false
+  else
+    let* current =
+      capture_counterparts_read
+        ?external_after:original.external_after
+        ~base_dir
+        ~keeper_name
+        ~after:original.after
+        ~before:original.before
+        ()
+    in
+    let* () =
+      snapshot_extends ~original ~current
+      |> Result.map_error (fun detail -> External_cursor_failed detail)
+    in
+    if acked_external_offset > List.length current.external_log
+    then Error (External_cursor_failed "external log shrank behind its admission cursor")
+    else (
+      let unacknowledged_external = List.drop acked_external_offset current.external_log in
+      let effective = { original with external_log = original.external_log @ unacknowledged_external } in
+      Ok (String.equal (counterpart_observations_digest effective) counterpart_digest))
 
 let counterpart_observations_between ~base_dir ~keeper_name ~after ~before =
   capture_counterparts_read ~base_dir ~keeper_name ~after ~before ()

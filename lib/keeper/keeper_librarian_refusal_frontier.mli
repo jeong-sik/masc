@@ -1,4 +1,7 @@
-val past_original : Keeper_librarian_durable_request.t -> (bool, string) result
+val past_original :
+  ?counterpart_digest:string ->
+  Keeper_librarian_durable_request.t ->
+  (bool, string) result
 (** Read-only, blocking original-range relevance check, after strict owner and
     whole-inventory validation. The actual Memory-backed coverage and current
     read frontier must both reach the original end in its typed generation;

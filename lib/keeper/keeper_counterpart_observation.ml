@@ -114,3 +114,11 @@ let render_for_prompt observations =
   |> fun values -> `List values
   |> Yojson.Safe.to_string
 ;;
+
+let digest observations =
+  Agent_core_sha256.to_hex
+    (Agent_core_sha256.get
+       (Agent_core_sha256.feed_string
+          Agent_core_sha256.empty
+          (render_for_prompt observations)))
+;;

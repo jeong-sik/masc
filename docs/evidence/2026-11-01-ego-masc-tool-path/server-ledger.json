@@ -1,0 +1,14 @@
+[
+  {
+    "name": "Ego \ud55c\uae00 \ud83d\ude00",
+    "priority": "high",
+    "rich": "<b>Native browser record</b>",
+    "trusted": true,
+    "pastes": [
+      {
+        "trusted": true,
+        "html": "<b>Native browser record</b>"
+      }
+    ]
+  }
+]

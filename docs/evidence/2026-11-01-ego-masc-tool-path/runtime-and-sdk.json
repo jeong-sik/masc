@@ -1,0 +1,15 @@
+{
+  "runtime": {
+    "version": "0.66.0",
+    "binary_commit": "dbd032511fea4e3d04687448275c0f41abff56cc",
+    "runtime_instance_id": "01a19489-2a83-7000-9869-7048022414f7",
+    "executable_path": "/Users/dancer/.local/bin/masc",
+    "executable_sha256": "c6cbd11a4c153d197f8a38525a9fb8a0c871d5e1dbc15d2c235c94ff434b58d9",
+    "browser_worker_sha256": "c3a309851606c362878472a672e5438d0998c482953bf60e06053a62a46297c1",
+    "worker_source_commit": "not independently identified"
+  },
+  "native_reference": {
+    "version": "ego-browser 0.6.2.5\n  chromium 156.0.8078.74\n  node v24.22.1",
+    "guide_sha256": "935e626fff89889b4e4be61597fd1e43ef8de23a4c0eae31b6c7e6cc33c10049"
+  }
+}

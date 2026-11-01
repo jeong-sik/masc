@@ -150,8 +150,25 @@ let test_rename_drift () = with_root (fun root ->
   let path = Filename.concat root "posts.jsonl" and replacement = Filename.concat root "replacement" in
   write path "original\n";
   write replacement "replacement\n";
-  let result = fold path ~f:(fun acc row -> Unix.rename replacement path; row :: acc) in
-  require_error result |> check_binding_refusal (Fs.Transaction_path_binding_changed { path });
+  let before = Unix.lstat path and closed_stats = ref None in
+  check int "original fixture has one name" 1 before.Unix.st_nlink;
+  let io : Fs.private_jsonl_transaction_io_for_testing =
+    { before_sync_parent = (fun _ -> fail "read observation attempted parent sync")
+    ; close_fd = (fun fd ->
+        let stats = Fun.protect ~finally:(fun () -> Unix.close fd)
+            (fun () -> Unix.fstat fd) in
+        closed_stats := Some stats)
+    } in
+  let result = Fs.fold_private_jsonl_unique_regular_locked_with_io_for_testing
+      ~io path ~init:[] ~f:(fun acc row -> Unix.rename replacement path; row :: acc) in
+  let observed = match !closed_stats with
+    | Some stats -> stats
+    | None -> fail "actual reader descriptor was not settled" in
+  check int "reader retains the original device" before.Unix.st_dev observed.Unix.st_dev;
+  check int "reader retains the original inode" before.Unix.st_ino observed.Unix.st_ino;
+  check int "rename removed the old descriptor's final link" 0 observed.Unix.st_nlink;
+  require_error result |> check_binding_refusal
+    (Fs.Ambiguous_transaction_file_identity { path; link_count = observed.Unix.st_nlink });
   check string "new binding never overwritten" "replacement\n" (read path);
   check (list string) "no generated metadata" ["posts.jsonl"] (entries root))
 

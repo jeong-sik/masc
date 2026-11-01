@@ -1,0 +1,1 @@
+            | Error (Board.Invalid_id _) -> ()  (* expected after dele

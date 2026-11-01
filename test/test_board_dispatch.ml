@@ -2475,7 +2475,8 @@ let test_fusion_creation_emits_the_recorded_audience () =
        ~post_kind:Board.System_post ~visibility:Board.Unlisted ~ttl_hours:1
        ~origin:{ origin with fusion_producer = Some "other-keeper" } ()
    with
-   | Error (Board.Post_publication_failure.Board_error (Board.Already_exists _)) -> ()
+   | Error (Board.Post_publication_failure.Before_effect
+              (Board.Post_publication_failure.Board_error (Board.Already_exists _))) -> ()
    | Ok _ -> Alcotest.fail "mismatched fusion_producer was treated as an exact replay"
    | Error error -> Alcotest.fail (Board.Post_publication_failure.to_string error));
   List.iter

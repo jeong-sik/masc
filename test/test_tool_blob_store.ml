@@ -1132,7 +1132,7 @@ let test_maintenance_distinguishes_tool_payloads_from_media_owners () =
     let use = Agent_core.Types.ToolUse {id="call";name="fixture";input=payload} in
     let result = Agent_core.Types.ToolResult {tool_use_id="call";content="image result";
       outcome=Tool_succeeded;json=Some payload;
-      content_blocks=Some [Agent_core.Types.Image {media_type="image/png";source=Stored media}]} in
+      content_blocks=Some [Agent_core.Types.Image {media_type="image/png";source=Agent_core.Types.Stored media}]} in
     let assistant = Agent_core.Types.make_message ~role:Assistant [use] in
     let tool = Agent_core.Types.make_message ~role:Tool [result] in
     let official_tool = Agent_core.Types.make_message ~role:Tool

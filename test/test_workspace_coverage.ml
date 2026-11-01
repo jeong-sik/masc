@@ -3022,6 +3022,9 @@ let test_next_task_number_rejects_unreadable_or_broken_event_history () =
           ]
       ; last_updated = "2026-08-26T00:00:00Z"
       ; version = 1
+      ; pending_completion_rejections = []
+      ; delivered_completion_rejections = []
+      ; pending_completion_approvals = []
       ; task_deletion_receipts = []
       ; task_creation_receipts = []
       }

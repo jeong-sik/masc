@@ -32527,6 +32527,8 @@ Use relative paths for resources already held in the package. -->
                 | Lanes_measurement_detail _ | Lanes_inventory_detail _ ),
                 _,
                 _ ) -> ())
+       | Some "[" when state.view = Tools && state.tools_pane = Tools_surface -> handle_skill_run 1
+       | Some "]" when state.view = Tools && state.tools_pane = Tools_surface -> handle_skill_run (-1)
        | Some (("[" | "]") as bracket) when state.view = Tools ->
            cycle_tools_keeper state ~mailbox:async_messages
              ~delta:(if bracket = "]" then 1 else -1)
@@ -32681,8 +32683,6 @@ Use relative paths for resources already held in the package. -->
                 handle_skill_evidence ())
        | Some "J" when state.view = Tools -> move_tools_skill_cursor state 1
        | Some "K" when state.view = Tools -> move_tools_skill_cursor state (-1)
-       | Some "[" when state.view = Tools && state.tools_pane = Tools_surface -> handle_skill_run 1
-       | Some "]" when state.view = Tools && state.tools_pane = Tools_surface -> handle_skill_run (-1)
        | Some "\r" when state.view = Tools && state.tools_pane = Tools_async ->
            if Option.is_some state.tools_async_selection then begin
              state.tools_async_detail_open <- true;

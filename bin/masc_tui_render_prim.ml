@@ -1710,7 +1710,11 @@ let connection_badge (state : state) =
       connection ^ " " ^ (Theme.warn ()) ^ "[workspace unconfirmed]" ^ Ansi.reset
   | Masc_tui_types.Workspace_identity_unread
   | Masc_tui_types.Workspace_identity_match -> connection in
-  connection ^ refresh_progress_badge state
+  let source_loss =
+    if state.observer_source_loss then Theme.warn () ^ "[events lost] " ^ Ansi.reset
+    else ""
+  in
+  source_loss ^ connection ^ refresh_progress_badge state
 
 (* A header row of [lead], a bracketed [label] and [badge]. The badge says
    whether the screen can be trusted, so it is drawn whole and the label gives

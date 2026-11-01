@@ -2968,6 +2968,7 @@
 
 (include stanzas/test_tui_fleet_stream.inc)
 (include stanzas/test_tui_observer_handshake.inc)
+(include stanzas/test_tui_observer_loss.inc)
 
 (include stanzas/test_fs_atomic_orphan_sweep_10130.inc)
 

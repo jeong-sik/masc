@@ -1047,7 +1047,7 @@ type broadcast_payload =
   | Value of Yojson.Safe.t
   | Encoded of Sse_wire.encoded_json
 
-let broadcast_deliver ~buffer ~notify_external ~event_type target payload =
+let broadcast_deliver ~buffer ~notify_external ~event_type ~on_committed target payload =
   let t0 = Time_compat.now () in
   let json =
     match payload with
@@ -1145,6 +1145,10 @@ let broadcast_deliver ~buffer ~notify_external ~event_type target payload =
     failed;
   (* Remove failed connections *)
   List.iter (fun (session_id, _) -> unregister session_id) failed;
+  (* The replay buffer owns the delivery and every live queue was either
+     enqueued or unregistered. Later metrics and external subscribers do not
+     undo that publication. The callback is a non-yielding receipt. *)
+  Option.iter (fun notify -> notify ()) on_committed;
   (* Record broadcast duration for transport observability *)
   let elapsed = Time_compat.now () -. t0 in
   Transport_metrics.observe_broadcast_duration ~target:target_label elapsed;
@@ -1160,10 +1164,10 @@ let broadcast_deliver ~buffer ~notify_external ~event_type target payload =
       }
 
 let broadcast_impl ?(buffer = true) ?(notify_external = true)
-    ?(event_type = "message") target payload =
+    ?(event_type = "message") ?on_committed target payload =
   if broadcast_is_unobservable target ~buffer ~notify_external
   then Transport_metrics.inc_sse_broadcast_skipped_no_observer ()
-  else broadcast_deliver ~buffer ~notify_external ~event_type target payload
+  else broadcast_deliver ~buffer ~notify_external ~event_type ~on_committed target payload
 
 (** Broadcast event to all connected clients (backward-compatible). *)
 let broadcast json = broadcast_impl All (Value json)
@@ -1172,6 +1176,12 @@ let broadcast json = broadcast_impl All (Value json)
     - [All]: every session (same as [broadcast])
     - [Observers]: dashboard / read-only viewers only *)
 let broadcast_to target json = broadcast_impl target (Value json)
+
+let broadcast_to_with_commit target ~on_committed json =
+  match target with
+  | Presence_only -> invalid_arg "broadcast_to_with_commit: presence is not replayed"
+  | All | Observers | Runtime_observers _ ->
+      broadcast_impl ~on_committed target (Value json)
 
 let broadcast_encoded_to target encoded = broadcast_impl target (Encoded encoded)
 

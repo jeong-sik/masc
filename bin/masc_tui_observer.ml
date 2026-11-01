@@ -46,6 +46,7 @@ type agent_core_kind =
   | Agent_input_required of { elapsed_s : float; request_id : string; question : string }
   | Tool_approval_completed
   | Telemetry
+  | Relay_subscription_loss of { source_id : string; sequence : int; dropped_count : int }
   | Agent_core_other of string
 
 type agent_core = {
@@ -240,7 +241,15 @@ let read_payload ~event_type reader payload =
       Error (Printf.sprintf "%s payload: %s" event_type detail)
 
 let agent_core_kind ~event_type payload =
-  match event_type with
+  if String.equal event_type Masc.Keeper_event_bridge.subscription_loss_event_type then
+    match string_field payload "source_id", int_field payload "sequence",
+          int_field payload "dropped_count" with
+    | Some source_id, Some sequence, Some dropped_count
+      when String.trim source_id <> "" && sequence > 0 && dropped_count > 0 ->
+        Ok (Relay_subscription_loss { source_id; sequence; dropped_count })
+    | _, _, _ ->
+        Error "relay subscription loss needs a source, positive sequence and dropped_count"
+  else match event_type with
   | "tool_called" -> Ok Tool_called
   | "tool_completed" -> Ok Tool_completed
   | "turn_started" -> Ok Turn_started

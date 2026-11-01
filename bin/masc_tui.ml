@@ -818,6 +818,7 @@ let clear_keeper_history_projection state =
   state.msg_find_at <- None;
   state.msg_history_load_generation <- state.msg_history_load_generation + 1;
   state.msg_history_inflight <- None;
+  state.msg_history_loss_followup <- None;
   state.msg_copy_generation <- state.msg_copy_generation + 1;
     (* These readings belong to one conversation. Clear them at the shared
        target boundary before its replacement request can finish. *)
@@ -911,6 +912,7 @@ let leave_keeper_message state ~drain_queue =
   state.keeper_navigation_open <- false;
   save_message_draft state;
   state.msg_history_inflight <- None;
+  state.msg_history_loss_followup <- None;
   let target_registered =
     match state.msg_target_keeper_name with
     | Some keeper_name -> keeper_available_for_new_message state keeper_name
@@ -6550,22 +6552,25 @@ let launch_file_changes_load state ~mailbox ~keeper_name =
    the fetch helper, so a request already in flight is not repeated and an
    answer for another keeper is dropped on arrival. *)
 
-let launch_acting_pane_changes_load state ~mailbox ~keeper_name =
+let launch_acting_pane_changes_load ?(force = false) state ~mailbox ~keeper_name =
   if server_authority_ready state then begin
   let enqueue_async = workspace_enqueue state in
   let key = { apk_keeper = keeper_name
             ; apk_scope = state.workspace_authority, state.workspace_read_authority } in
   let start =
-    match Masc_tui_fetched.current_key state.acting_pane_changes with
-    | Some current when Masc_tui_fetched.in_flight state.acting_pane_changes
+    match force, Masc_tui_fetched.current_key state.acting_pane_changes with
+    | true, _ -> Masc_tui_fetched.refresh
+    | false, Some current when Masc_tui_fetched.in_flight state.acting_pane_changes
                         && not (same_acting_pane_key current key) -> Masc_tui_fetched.refresh
-    | Some _ | None -> Masc_tui_fetched.start
+    | false, (Some _ | None) -> Masc_tui_fetched.start
   in
   match
-    start ~equal:same_acting_pane_keeper state.acting_pane_changes ~key
+    start ~equal:(if force then same_acting_pane_key else same_acting_pane_keeper)
+      state.acting_pane_changes ~key
   with
   | Masc_tui_fetched.Already_loading -> ()
   | Masc_tui_fetched.Started (next, request) -> (
+      state.acting_pane_changes_loss_followup <- None;
       state.acting_pane_changes <- next;
       let host = server_peer_host in
       let port = state.port in
@@ -6600,10 +6605,10 @@ let acting_pane_changes_keeper (state : state) =
     | Masc_tui_acting_pane.Tab_changes ->
         Option.map (fun (keeper : keeper) -> keeper.k_name) (selected_keeper state)
 
-let refresh_acting_pane_changes state ~mailbox =
+let refresh_acting_pane_changes ?(force = false) state ~mailbox =
   match acting_pane_changes_keeper state with
   | None -> ()
-  | Some keeper_name -> launch_acting_pane_changes_load state ~mailbox ~keeper_name
+  | Some keeper_name -> launch_acting_pane_changes_load ~force state ~mailbox ~keeper_name
 
 let ensure_acting_pane_changes state ~mailbox =
   match acting_pane_changes_keeper state with
@@ -8120,6 +8125,12 @@ let launch_keeper_history_load ?(load_file_changes = true) ?(force = false) stat
   in
   if already_inflight && not force then ()
   else begin
+    (match state.msg_history_loss_followup with
+     | Some (name, pending_authority, reading)
+       when String.equal name keeper_name && pending_authority = authority
+            && reading == state.workspace_read_authority ->
+         state.msg_history_loss_followup <- None
+     | Some _ | None -> ());
     let host = server_peer_host in
     let port = state.port in
     state.msg_history_load_generation <- state.msg_history_load_generation + 1;
@@ -8194,6 +8205,20 @@ let launch_keeper_history_load ?(load_file_changes = true) ?(force = false) stat
   end
   end
   end
+
+let launch_pending_loss_history state ~mailbox =
+  match state.msg_history_loss_followup with
+  | None -> ()
+  | Some (keeper_name, authority, reading) ->
+      if authority <> state.workspace_authority || reading != state.workspace_read_authority
+         || state.msg_target_keeper_name <> Some keeper_name then
+        state.msg_history_loss_followup <- None
+      else if state.view = Keepers Keeper_message && state.msg_scroll = 0
+              && server_authority_ready state && keeper_available_for_new_message state keeper_name
+              && Option.is_none state.msg_history_inflight then begin
+        state.msg_history_loss_followup <- None;
+        launch_keeper_history_load ~load_file_changes:false ~force:true state ~mailbox ~keeper_name
+      end
 
 let enter_keeper_chat ?(return_to = Keeper_chat_return_detail) state
     ~mailbox ~keeper_name ~drain_queue =
@@ -14755,6 +14780,8 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.resource_text_cursor <- 0;
   state.observer_cursor <- None;
   state.observer_replay <- Observer_replay_unobserved;
+  state.observer_source_loss <- false;
+  state.observer_source_loss_sequences <- [];
   state.acting <- [];
   state.acting_dropped <- 0;
   state.acting_undecodable <- 0;
@@ -14823,6 +14850,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.github_token_save_status <- None;
   state.keeper_board_quarantines <- Masc_tui_fetched.clear state.keeper_board_quarantines;
   state.acting_pane_changes <- Masc_tui_fetched.clear state.acting_pane_changes;
+  state.acting_pane_changes_loss_followup <- None;
   state.acting_pane_changes_at <- None;
   state.workspace_activity <- Masc_tui_fetched.clear state.workspace_activity;
   state.changes_keeper <- None;
@@ -20165,7 +20193,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
            state.observer_replay <- Observer_replay_unavailable detail);
       state.observer <-
         Observer_live { session_id; since = Unix.gettimeofday (); events = 0 };
-      add_event state "observer" (observer_replay_description state.observer_replay);
+      add_event state "observer"
+        (observer_replay_description ~source_loss:state.observer_source_loss state.observer_replay);
       add_event state "observer" "runtime event feed open";
       revalidate_visible_fusion state ~mailbox
   | Observer_received (instance_id, decoded) ->
@@ -20197,6 +20226,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
         | Fusion_historical_detail reference -> Some reference.fhe_run_id
         | Fusion_list -> None in
       let fusion_status_seen = ref Masc_tui_fusion_updates.no_changed_runs in
+      let observer_source_loss_seen = ref false in
       (* Same shape again for the pane's Changes tab: a tool call the
          selected keeper completed may have written a file, so the tab
          asks once per batch. Agent-core events name their lane; the
@@ -20260,6 +20290,15 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
                    fusion_status_seen :=
                      Masc_tui_fusion_updates.note_run_changed
                        ~open_run_id:fusion_open_run_id !fusion_status_seen ~run_id
+               | Masc_tui_observer.Agent_core
+                   { kind = Masc_tui_observer.Relay_subscription_loss
+                       { source_id; sequence; _ }; _ } ->
+                   let fresh, sequences =
+                     note_observer_source_loss ~source_id ~sequence
+                       state.observer_source_loss_sequences in
+                   state.observer_source_loss <- true;
+                   state.observer_source_loss_sequences <- sequences;
+                   if fresh then observer_source_loss_seen := true
                | Masc_tui_observer.Keeper_tool_call _
                | Masc_tui_observer.Agent_core { kind = Masc_tui_observer.Tool_completed; _ }
                  when acted_by_pane_keeper event ->
@@ -20317,6 +20356,44 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
            | Masc_tui_observer.Undecodable _, _, _ -> ());
           end)
         decoded;
+      if !observer_source_loss_seen then begin
+        revalidate_visible_fusion state ~mailbox;
+        (match acting_pane_changes_keeper state with
+         | Some keeper_name when server_authority_ready state ->
+             state.acting_pane_changes <-
+               Masc_tui_fetched.invalidate ~reason:"Observer events were lost"
+                 state.acting_pane_changes;
+             let key = { apk_keeper = keeper_name
+                       ; apk_scope = state.workspace_authority, state.workspace_read_authority } in
+             (match Masc_tui_fetched.current_key state.acting_pane_changes with
+              | Some current when same_acting_pane_key current key
+                                  && Masc_tui_fetched.in_flight state.acting_pane_changes ->
+                  state.acting_pane_changes_loss_followup <- Some key
+              | Some _ | None ->
+                  launch_acting_pane_changes_load ~force:true state ~mailbox ~keeper_name)
+         | Some _ | None ->
+             (* A hidden pane must owe a read when it is next shown. Clearing
+                also retires any response that was in flight before the loss. *)
+             state.acting_pane_changes <- Masc_tui_fetched.clear state.acting_pane_changes;
+             state.acting_pane_changes_loss_followup <- None;
+             state.acting_pane_changes_at <- None);
+        (if state.view = Keepers Keeper_message then
+           match state.msg_target_keeper_name with
+           | Some keeper_name ->
+               state.msg_history_loss_followup <-
+                 Some (keeper_name, state.workspace_authority, state.workspace_read_authority);
+               launch_pending_loss_history state ~mailbox;
+               launch_keeper_chat_tool_details_load ~force:true state ~mailbox ~keeper_name
+           | None -> ());
+        (if state.view = Keepers Keeper_calls then
+           match selected_keeper state with
+           | Some keeper -> launch_keeper_calls_load ~force:true state ~mailbox keeper.k_name
+           | None -> ());
+        start_http_refresh state ~host:server_peer_host ~port:state.port ~intent:Revalidate
+          ~refresh_inflight:http_refresh_inflight
+          ~scoped_refresh_inflight:http_scoped_refresh_inflight
+          ~scoped_refresh_followup ~mailbox
+      end;
       if
         List.length state.acting
         > Masc_tui_types.acting_retained_entries
@@ -23749,10 +23826,12 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
                 snapshot.fcs_keeper key.apk_keeper)
           | Ok _ | Error _ -> result
         in
-        let landed =
+        let current =
           Masc_tui_fetched.is_current ~equal:same_acting_pane_key state.acting_pane_changes
-            request
-          && Result.is_ok result
+            request in
+        let followup = current && Option.exists (same_acting_pane_key key)
+            state.acting_pane_changes_loss_followup in
+        let landed = current && Result.is_ok result
         in
         let result = Result.map (fun snapshot ->
           let snapshot =
@@ -23768,7 +23847,20 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
         state.acting_pane_changes <-
           Masc_tui_fetched.complete ~equal:same_acting_pane_key state.acting_pane_changes
             request result;
-        if landed then state.acting_pane_changes_at <- Some (Unix.gettimeofday ())
+        if landed then state.acting_pane_changes_at <- Some (Unix.gettimeofday ());
+        if followup then begin
+          state.acting_pane_changes_loss_followup <- None;
+          match acting_pane_changes_keeper state with
+          | Some keeper_name when String.equal keeper_name key.apk_keeper
+                                  && server_authority_ready state ->
+              state.acting_pane_changes <-
+                Masc_tui_fetched.invalidate ~reason:"Observer events were lost"
+                  state.acting_pane_changes;
+              launch_acting_pane_changes_load ~force:true state ~mailbox ~keeper_name
+          | Some _ | None ->
+              state.acting_pane_changes <- Masc_tui_fetched.clear state.acting_pane_changes;
+              state.acting_pane_changes_at <- None
+        end
       end
   | File_changes_loaded (keeper_name, result) ->
       (* An answer for a keeper the surface has since left is not this
@@ -28632,6 +28724,7 @@ Use relative paths for resources already held in the package. -->
        last_loop_at_ns := now_ns);
       reconcile_chat_listen state;
       ensure_acting_pane_changes state ~mailbox:async_messages;
+      launch_pending_loss_history state ~mailbox:async_messages;
       (* The Fusion launch form outlives nothing: whatever moved the surface
          -- a key, the Activity pane's mouse handler, or an async message
          that jumps to a Keeper chat -- it is gone before this iteration

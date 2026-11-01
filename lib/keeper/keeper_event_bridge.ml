@@ -453,10 +453,18 @@ type relay_stage =
   | Append
   | Broadcast
 
+type relay_class =
+  | Source_event
+  | Subscription_loss
+
+let subscription_loss_event_type = "relay_subscription_loss"
+
 type pending_relay =
   { json : Yojson.Safe.t
   ; attempts : int
   ; appended : bool
+  ; broadcasted : bool
+  ; relay_class : relay_class
   }
 
 type relay_result =
@@ -477,10 +485,6 @@ let relay_event_type json =
      | None -> "unknown")
 ;;
 
-let broadcast_relay_json json =
-  Sse.broadcast_to All json
-;;
-
 let update_relay_queue_depth pending =
   Otel_metric_store.set_gauge
     Otel_metric_store.metric_agent_core_sse_relay_queue_depth
@@ -493,13 +497,18 @@ let emit_relay_retry_log
       ~(attempt : int)
       exn
   =
+  let attempt_label =
+    match pending.relay_class with
+    | Source_event -> Printf.sprintf "%d/%d" attempt relay_max_attempts
+    | Subscription_loss when not pending.broadcasted -> string_of_int attempt
+    | Subscription_loss -> Printf.sprintf "%d/%d" attempt relay_max_attempts
+  in
   Log.Misc.warn
-    "keeper_event_bridge: retrying event_type=%s stage=%s attempt=%d/%d correlation_id=%s \
+    "keeper_event_bridge: retrying event_type=%s stage=%s attempt=%s correlation_id=%s \
      run_id=%s error=%s"
     (relay_event_type pending.json)
     (relay_stage_to_string stage)
-    attempt
-    relay_max_attempts
+    attempt_label
     (Option.value ~default:"<none>" (Json_util.assoc_string_opt "correlation_id" pending.json))
     (Option.value ~default:"<none>" (Json_util.assoc_string_opt "run_id" pending.json))
     (Printexc.to_string exn)
@@ -568,33 +577,85 @@ let prepare_pending_event evt =
          retry queue so every retry uses the same sanitized payload. *)
     let json = Inference_utils.sanitize_json_utf8 json in
     emit_native_event_log evt json;
-    Some { json; attempts = 0; appended = false }
+    Some { json; attempts = 0; appended = false; broadcasted = false
+         ; relay_class = Source_event }
+;;
+
+let subscription_loss_notice ~source_id ~sequence count =
+  let json =
+    `Assoc
+      [ "type", `String ("agent_core:" ^ subscription_loss_event_type)
+      ; "event_type", `String subscription_loss_event_type
+      ; "ts_unix", `Float (Time_compat.now ())
+      ; "payload", `Assoc [ "dropped_count", `Int count
+                           ; "source_id", `String source_id
+                           ; "sequence", `Int sequence ]
+      ]
+  in
+  { json; attempts = 0; appended = false; broadcasted = false
+  ; relay_class = Subscription_loss }
 ;;
 
 let deliver_pending_with
       ~(append_json : Yojson.Safe.t -> unit)
-      ~(broadcast_json : Yojson.Safe.t -> unit)
+      ~(broadcast_json : on_committed:(unit -> unit) -> Yojson.Safe.t -> unit)
       (pending : pending_relay)
   =
-  let pending =
-    if pending.appended
-    then pending
-    else (
-      append_json pending.json;
-      { pending with appended = true })
+  let append pending =
+    if pending.appended then Ok pending
+    else
+      try
+        append_json pending.json;
+        Ok { pending with appended = true }
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Retryable_failure (pending, Append, exn))
   in
-  try
-    broadcast_json pending.json;
-    Delivered
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn -> Retryable_failure (pending, Broadcast, exn)
+  let broadcast pending =
+    if pending.broadcasted then Ok pending
+    else begin
+      let committed = ref false in
+      let confirmed () =
+        { pending with broadcasted = true
+                     ; attempts = (match pending.relay_class with
+                         | Subscription_loss -> 0
+                         | Source_event -> pending.attempts) }
+      in
+      try
+        broadcast_json ~on_committed:(fun () -> committed := true) pending.json;
+        Ok (confirmed ())
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn when pending.relay_class = Subscription_loss && !committed ->
+        (* The observer queues and replay buffer already own the notice.
+           External fanout is a separate boundary and may have failed. *)
+        Log.Misc.warn
+          "keeper_event_bridge: loss notice committed before external fanout failed: %s"
+          (Printexc.to_string exn);
+        Ok (confirmed ())
+      | exn -> Error (Retryable_failure (pending, Broadcast, exn))
+    end
+  in
+  (* A loss notice must reach live and replaying observers even if the
+     event-store append is failing. Publish it ahead of later relayed events.
+     Ordinary source events keep their append-before-broadcast contract. *)
+  let first, second =
+    match pending.relay_class with
+    | Source_event -> append, broadcast
+    | Subscription_loss -> broadcast, append
+  in
+  match first pending with
+  | Error failure -> failure
+  | Ok pending ->
+    (match second pending with
+     | Error failure -> failure
+     | Ok _ -> Delivered)
 ;;
 
 
 (* The reference keeps the location beside the handle so a failed append can
    open the same store again. *)
-let deliver_pending ?store_ref (pending : pending_relay) =
+let deliver_pending ?store_ref ~loss_target (pending : pending_relay) =
   let append_json =
     match store_ref with
     | None -> fun _json -> ()
@@ -607,7 +668,14 @@ let deliver_pending ?store_ref (pending : pending_relay) =
            store_ref := location, Dated_jsonl.open_store location;
            raise exn)
   in
-  try deliver_pending_with ~append_json ~broadcast_json:broadcast_relay_json pending with
+  let target = match pending.relay_class with
+    | Source_event -> Sse.All
+    | Subscription_loss -> loss_target
+  in
+  let broadcast_json ~on_committed json =
+    Sse.broadcast_to_with_commit target ~on_committed json
+  in
+  try deliver_pending_with ~append_json ~broadcast_json pending with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn -> Retryable_failure (pending, Append, exn)
 ;;
@@ -632,16 +700,30 @@ let report_subscription_loss = function
 
 let prepare_pending_events events = List.filter_map prepare_pending_event events
 
-let rec process_pending ?store_ref acc = function
+let rec process_pending ?store_ref ~loss_target acc = function
   | [] -> List.rev acc
   | pending :: rest ->
-    (match deliver_pending ?store_ref pending with
-     | Delivered -> process_pending ?store_ref acc rest
+    (match deliver_pending ?store_ref ~loss_target pending with
+     | Delivered -> process_pending ?store_ref ~loss_target acc rest
      | Retryable_failure (pending, stage, exn) ->
-       let attempt = pending.attempts + 1 in
+       let attempt = if pending.attempts = max_int then max_int else pending.attempts + 1 in
        Keeper_fd_pressure.note_exception ~site:"keeper_event_bridge.relay" exn;
        Keeper_disk_pressure.note_exception ~site:"keeper_event_bridge.relay" exn;
-       if attempt >= relay_max_attempts
+       if pending.relay_class = Subscription_loss && not pending.broadcasted then (
+         Otel_metric_store.inc_counter
+           Otel_metric_store.metric_agent_core_sse_relay_retries
+           ~labels:[ "stage", relay_stage_to_string stage ] ();
+         emit_relay_retry_log ~pending ~stage ~attempt exn;
+         List.rev_append acc ({ pending with attempts = attempt } :: rest))
+       else if pending.relay_class = Subscription_loss && attempt >= relay_max_attempts then (
+         (* Observers already have the notice. A persistently unavailable
+            debug store must not hold every later event indefinitely. *)
+         Otel_metric_store.inc_counter
+           Otel_metric_store.metric_agent_core_sse_relay_drops
+           ~labels:[ "stage", relay_stage_to_string stage ] ();
+         emit_relay_drop_log ~pending ~stage_label:(relay_stage_to_string stage) ~attempts:attempt;
+         process_pending ?store_ref ~loss_target acc rest)
+       else if attempt >= relay_max_attempts
        then (
          Otel_metric_store.inc_counter
            Otel_metric_store.metric_agent_core_sse_relay_drops
@@ -655,14 +737,14 @@ let rec process_pending ?store_ref acc = function
            ~pending
            ~stage_label:(relay_stage_to_string stage)
            ~attempts:attempt;
-         process_pending ?store_ref acc rest)
+         process_pending ?store_ref ~loss_target acc rest)
        else (
          Otel_metric_store.inc_counter
            Otel_metric_store.metric_agent_core_sse_relay_retries
            ~labels:[ "stage", relay_stage_to_string stage ]
            ();
          emit_relay_retry_log ~pending ~stage ~attempt exn;
-         process_pending ?store_ref ({ pending with attempts = attempt } :: acc) rest))
+         process_pending ?store_ref ~loss_target ({ pending with attempts = attempt } :: acc) rest))
 ;;
 
 let agent_core_event_store ~config =
@@ -676,6 +758,11 @@ let agent_core_event_store ~config =
 
 let start_impl ~interval_s ~sw ~clock ~(config : Workspace.config) ~bus =
   let store = ref (agent_core_event_store ~config) in
+  let loss_target =
+    Sse.Runtime_observers (Sse.runtime_authority_exn ~base_path:config.base_path)
+  in
+  let loss_source_id = ref (Random_id.uuid_v7 ()) in
+  let loss_sequence = ref 0 in
   let sub =
     Runtime_event_bus.subscribe
       ~capacity:256
@@ -692,13 +779,25 @@ let start_impl ~interval_s ~sw ~clock ~(config : Workspace.config) ~bus =
       let retry_iteration = ref false in
       let continue =
         try
-         pending := process_pending ~store_ref:store [] !pending;
+         pending := process_pending ~store_ref:store ~loss_target [] !pending;
          update_relay_queue_depth !pending;
          if should_drain_subscription !pending
          then (
            match Runtime_event_bus.await_reporting_drops sub with
            | Unsubscribed -> false
            | Batch { events; overflow_loss } ->
+           (* Install the loss notice before logging or converting the rest
+              of the drained batch, so it remains pending across retryable
+              failures. It is published before later events. *)
+           pending := (match overflow_loss with
+             | Runtime_event_bus.Nothing_dropped -> []
+             | Runtime_event_bus.Dropped count ->
+               if !loss_sequence = max_int then (
+                 loss_source_id := Random_id.uuid_v7 ();
+                 loss_sequence := 0);
+               incr loss_sequence;
+               [ subscription_loss_notice ~source_id:!loss_source_id
+                   ~sequence:!loss_sequence count ]);
            report_subscription_loss overflow_loss;
            (* A wake is optional, coalesced metadata. It never moves source
               bodies into this relay or waits for an Add-on to observe them. *)
@@ -735,8 +834,8 @@ let start_impl ~interval_s ~sw ~clock ~(config : Workspace.config) ~bus =
              | Agent_core.Event_bus.ToolApprovalCompleted _
              | Agent_core.Event_bus.InferenceTelemetry _ | Agent_core.Event_bus.Custom (_, _) -> None) events |> List.sort_uniq compare_activity in
            List.iter (fun activity -> Lane_addon_runtime.notify_activity ~config ~activity) activities;
-           pending := prepare_pending_events events;
-           pending := process_pending ~store_ref:store [] !pending;
+           pending := !pending @ prepare_pending_events events;
+           pending := process_pending ~store_ref:store ~loss_target [] !pending;
            update_relay_queue_depth !pending;
            true)
          else (

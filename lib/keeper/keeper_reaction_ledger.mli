@@ -293,7 +293,12 @@ val summary_for_keeper :
   base_path:string -> keeper_name:string -> limit:int -> Yojson.Safe.t
 (** Summarize the recent ledger rows for a keeper.  The summary is intentionally
     derived from the durable JSONL rows so an operator can see a stimulus that
-    has not yet produced a turn or terminal reaction. *)
+    has not yet produced a turn or terminal reaction.
+    ["latest_recorded_at_unix"] reports the maximum [recorded_at_unix] across
+    all valid rows in the window (including repeated turn reactions on an
+    existing stimulus), whereas ["latest_stimulus_id"] retains the stimulus
+    identity of the last first-observed event in the window so duplicate replay
+    rows cannot overwrite the stimulus watermark. *)
 
 val fleet_summary_json :
   base_path:string ->

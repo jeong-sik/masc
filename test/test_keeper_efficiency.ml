@@ -195,7 +195,14 @@ let month_tests =
           check int "after rewrite turns" 1
             ((keeper_row third "polisher" |> Option.get).KE.turns);
           check int "after rewrite calls" 1
-            ((keeper_row third "polisher" |> Option.get).KE.calls)) )
+            ((keeper_row third "polisher" |> Option.get).KE.calls);
+          (* Removal: deleting the day file invalidates the cached day
+             boundary and recomputes the day from the remaining files. *)
+          Sys.remove (today_day_file (Filename.concat root "costs"));
+          Sys.remove (today_day_file (Filename.concat root "tool_calls"));
+          let fourth = KE.read_month ~masc_root:root ~month:(today_month ()) |> Result.get_ok in
+          check int "after removal days_covered" 0 fourth.KE.days_covered;
+          check int "after removal keepers" 0 (List.length fourth.KE.keepers)) )
   ; ( "a corrupt cache rebuilds from the ledgers"
     , `Quick
     , fun () ->
@@ -204,13 +211,159 @@ let month_tests =
           Dated_jsonl.append costs
             (CL.to_json (cost_row ~agent:"polisher" ~turn:1 ~input_tokens:5
                            ~output_tokens:6 ~cost_usd:0.25 Resolved));
+          let tools = tool_store root in
+          Dated_jsonl.append tools (tool_row ~keeper:"polisher" ~duration_ms:10.0 ());
           let (_ : KE.month_view) = KE.read_month ~masc_root:root ~month:(today_month ()) |> Result.get_ok in
           let cache = KE.cache_path ~masc_root:root ~month:(today_month ()) |> Result.get_ok in
           Fs_compat.save_file cache "{ not json";
           let view = KE.read_month ~masc_root:root ~month:(today_month ()) |> Result.get_ok in
           let row = keeper_row view "polisher" |> Option.get in
           check int "rebuilt turns" 1 row.KE.turns;
-          check int "rebuilt input_tokens" 5 row.KE.input_tokens) )
+          check int "rebuilt input_tokens" 5 row.KE.input_tokens;
+          check int "rebuilt calls" 1 row.KE.calls;
+          (* A structurally partial cache (valid turn_ids and today's day, but
+             corrupted or missing cursor lists for a ledger whose totals are
+             present) must rebuild from zero rather than folding from offset 0
+             on top of the cached keeper totals. *)
+          let day_num = (Unix.gmtime (Unix.time ())).Unix.tm_mday in
+          let tool_path = today_day_file (Filename.concat root "tool_calls") in
+          let tool_size = (Unix.stat tool_path).Unix.st_size in
+          let broken_cursors =
+            Printf.sprintf
+              {|{"schema":"masc.keeper-efficiency-cache/v1","month":%S,"days":[{"day":%d,"section":{"day":%d,"costs_cursors":"corrupt","tool_cursors":[{"path":%S,"boundary":%d}],"turn_ids":[{"agent":"polisher","turn":1}],"keepers":[{"keeper":"polisher","turns":1,"input_tokens":5,"output_tokens":6,"cost_usd":0.25,"calls":1,"failed":0,"deferred":0,"tool_ms":10.0}]}}]}|}
+              (today_month ()) day_num day_num tool_path tool_size
+          in
+          Fs_compat.save_file cache broken_cursors;
+          let view_after_corrupt =
+            KE.read_month ~masc_root:root ~month:(today_month ()) |> Result.get_ok
+          in
+          let row_after_corrupt = keeper_row view_after_corrupt "polisher" |> Option.get in
+          check int "corrupt cursor does not double-count input_tokens" 5
+            row_after_corrupt.KE.input_tokens;
+          (* Missing only one ledger's cursor list while retaining both ledgers'
+             totals must also be rejected and rebuilt instead of replaying the
+             cursorless ledger on top of cached totals. *)
+          let missing_cost_cursor_only =
+            Printf.sprintf
+              {|{"schema":"masc.keeper-efficiency-cache/v1","month":%S,"days":[{"day":%d,"section":{"day":%d,"costs_cursors":[],"tool_cursors":[{"path":%S,"boundary":%d}],"turn_ids":[{"agent":"polisher","turn":1}],"keepers":[{"keeper":"polisher","turns":1,"input_tokens":5,"output_tokens":6,"cost_usd":0.25,"calls":1,"failed":0,"deferred":0,"tool_ms":10.0}]}}]}|}
+              (today_month ()) day_num day_num tool_path tool_size
+          in
+          Fs_compat.save_file cache missing_cost_cursor_only;
+          let view_after_missing_one =
+            KE.read_month ~masc_root:root ~month:(today_month ()) |> Result.get_ok
+          in
+          let row_after_missing_one =
+            keeper_row view_after_missing_one "polisher" |> Option.get
+          in
+          check int "empty cost cursor with cost state does not double-count" 5
+            row_after_missing_one.KE.input_tokens;
+          check int "tool calls stay single-counted" 1
+            row_after_missing_one.KE.calls;
+          (* A section with positive cost cursors and keepers[].turns = 1 whose
+             turn_ids were corrupted to [] must also be rejected and rebuilt so
+             a subsequent attempt for turn 1 does not double-count turns. *)
+          let cost_path = today_day_file (Filename.concat root "costs") in
+          let cost_size = (Unix.stat cost_path).Unix.st_size in
+          let empty_turn_ids_with_turn =
+            Printf.sprintf
+              {|{"schema":"masc.keeper-efficiency-cache/v1","month":%S,"days":[{"day":%d,"section":{"day":%d,"costs_cursors":[{"path":%S,"boundary":%d}],"tool_cursors":[{"path":%S,"boundary":%d}],"turn_ids":[],"keepers":[{"keeper":"polisher","turns":1,"input_tokens":5,"output_tokens":6,"cost_usd":0.25,"calls":1,"failed":0,"deferred":0,"tool_ms":10.0}]}}]}|}
+              (today_month ()) day_num day_num cost_path cost_size tool_path tool_size
+          in
+          Fs_compat.save_file cache empty_turn_ids_with_turn;
+          Dated_jsonl.append costs
+            (CL.to_json (cost_row ~agent:"polisher" ~turn:1
+                           ~input_tokens:3 ~output_tokens:4 ~cost_usd:0.15 Resolved_attempt));
+          let view_after_turn_id_mismatch =
+            KE.read_month ~masc_root:root ~month:(today_month ()) |> Result.get_ok
+          in
+          let row_after_turn_id_mismatch =
+            keeper_row view_after_turn_id_mismatch "polisher" |> Option.get
+          in
+          check int "rebuilt turn_ids deduplicates same turn across attempts" 1
+            row_after_turn_id_mismatch.KE.turns;
+          check int "both attempts' input_tokens summed" 8
+            row_after_turn_id_mismatch.KE.input_tokens;
+          (* Duplicate cursor paths ([boundary=0; boundary=size]) must be rejected
+             so fold_day_store does not use the first (0) boundary and replay
+             already-counted rows on top of cached totals. *)
+          let cost_size_now = (Unix.stat cost_path).Unix.st_size in
+          let dup_tool_cursors =
+            Printf.sprintf
+              {|{"schema":"masc.keeper-efficiency-cache/v1","month":%S,"days":[{"day":%d,"section":{"day":%d,"costs_cursors":[{"path":%S,"boundary":%d}],"tool_cursors":[{"path":%S,"boundary":0},{"path":%S,"boundary":%d}],"turn_ids":[{"agent":"polisher","turn":1}],"keepers":[{"keeper":"polisher","turns":1,"input_tokens":8,"output_tokens":10,"cost_usd":0.40,"calls":1,"failed":0,"deferred":0,"tool_ms":10.0}]}}]}|}
+              (today_month ()) day_num day_num cost_path cost_size_now
+              tool_path tool_path tool_size
+          in
+          Fs_compat.save_file cache dup_tool_cursors;
+          let view_after_dup =
+            KE.read_month ~masc_root:root ~month:(today_month ()) |> Result.get_ok
+          in
+          let row_after_dup = keeper_row view_after_dup "polisher" |> Option.get in
+          check int "duplicate tool cursor paths do not double-count calls" 1
+            row_after_dup.KE.calls;
+          (* A multi-file day (DD.001.jsonl + DD.jsonl) whose cached totals
+             already include both files (calls=2) but whose cache lost one cursor
+             must rebuild the day rather than replaying the untracked file into
+             calls=3. *)
+          let rotated_tool_path =
+            Filename.concat (Filename.dirname tool_path)
+              (Printf.sprintf "%02d.001.jsonl" day_num)
+          in
+          Fs_compat.save_file rotated_tool_path
+            (Yojson.Safe.to_string (tool_row ~keeper:"polisher" ~duration_ms:10.0 ()) ^ "\n");
+          let rotated_size = (Unix.stat rotated_tool_path).Unix.st_size in
+          let missing_second_tool_cursor =
+            Printf.sprintf
+              {|{"schema":"masc.keeper-efficiency-cache/v1","month":%S,"days":[{"day":%d,"section":{"day":%d,"costs_cursors":[{"path":%S,"boundary":%d}],"tool_cursors":[{"path":%S,"boundary":%d}],"turn_ids":[{"agent":"polisher","turn":1}],"keepers":[{"keeper":"polisher","turns":1,"input_tokens":8,"output_tokens":10,"cost_usd":0.40,"calls":2,"failed":0,"deferred":0,"tool_ms":20.0}]}}]}|}
+              (today_month ()) day_num day_num cost_path cost_size_now
+              rotated_tool_path rotated_size
+          in
+          Fs_compat.save_file cache missing_second_tool_cursor;
+          let view_after_multi_file =
+            KE.read_month ~masc_root:root ~month:(today_month ()) |> Result.get_ok
+          in
+          let row_after_multi_file =
+            keeper_row view_after_multi_file "polisher" |> Option.get
+          in
+          check int "multi-file missing cursor rebuilds to 2 calls instead of 3" 2
+            row_after_multi_file.KE.calls;
+          (* A dangling symlink replacing a day file must return Error and
+             preserve the cached file rather than folding 0 bytes and discarding
+             cached totals. *)
+          let saved_cache_before_symlink = Fs_compat.load_file cache in
+          Sys.remove rotated_tool_path;
+          Unix.symlink (Filename.concat root "missing-target.jsonl") rotated_tool_path;
+          Fun.protect
+            ~finally:(fun () -> try Unix.unlink rotated_tool_path with _ -> ())
+            (fun () ->
+               check bool "dangling day-file symlink returns Error" true
+                 (Result.is_error
+                    (KE.read_month ~masc_root:root ~month:(today_month ())));
+               check string "cache preserved across symlink error"
+                 saved_cache_before_symlink (Fs_compat.load_file cache))) )
+  ; ( "negative or overflowing tool duration is clamped so TUI decoder accepts month_view_to_json"
+    , `Quick
+    , fun () ->
+      with_masc_root (fun root ->
+          let tools = tool_store root in
+          Dated_jsonl.append tools (tool_row ~keeper:"polisher" ~duration_ms:(-25.0) ());
+          let view = KE.read_month ~masc_root:root ~month:(today_month ()) |> Result.get_ok in
+          let row = keeper_row view "polisher" |> Option.get in
+          near "negative duration clamped to 0" 0.0 row.KE.tool_ms;
+          check bool "TUI decoder accepts view json" true
+            (Result.is_ok
+               (Masc.Tui_decode_keeper_efficiency.of_json (KE.month_view_to_json view)));
+          Dated_jsonl.append tools (tool_row ~keeper:"polisher" ~duration_ms:1e308 ());
+          Dated_jsonl.append tools (tool_row ~keeper:"polisher" ~duration_ms:1e308 ());
+          let view_overflow =
+            KE.read_month ~masc_root:root ~month:(today_month ()) |> Result.get_ok
+          in
+          let row_overflow = keeper_row view_overflow "polisher" |> Option.get in
+          check bool "overflowing tool_ms saturates to finite float" true
+            (Float.is_finite row_overflow.KE.tool_ms);
+          check bool "TUI decoder accepts saturated view json" true
+            (Result.is_ok
+               (Masc.Tui_decode_keeper_efficiency.of_json
+                  (KE.month_view_to_json view_overflow)))) )
   ; ( "invalid month is an error; empty ledgers are an empty view"
     , `Quick
     , fun () ->

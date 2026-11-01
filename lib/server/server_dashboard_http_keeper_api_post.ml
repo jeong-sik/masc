@@ -1648,7 +1648,9 @@ let resume_result_json ~name
     | Applied phase ->
       true, Keeper_state_machine.phase_to_string phase, None
     | Committed_followup_failed failure ->
-      false, "committed_followup_failed", Some (resume_failure_message failure)
+      ( false
+      , Keeper_paused_work_operator.committed_followup_failed_projection
+      , Some (resume_failure_message failure) )
   in
   `Assoc
     ([ "ok", `Bool ok

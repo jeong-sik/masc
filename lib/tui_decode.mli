@@ -663,6 +663,15 @@ val keeper_phase_is_paused : keeper_phase -> bool
     this phase still has a live keepalive fiber sleeping on its condition, even
     though [keepalive_running] (turn admission) is [false]. *)
 
+val keeper_phase_is_transitioning : keeper_phase -> bool
+(** Whether the phase is a transient lifecycle transition ([Draining] or
+    [Restarting]) where starting or stopping a fiber must wait for the
+    in-progress transition to settle. *)
+
+val keeper_boot_phase_conflict_code : string
+(** Refusal ["code"] returned on HTTP 409 when [/boot] is requested while a
+    registry entry is in {!keeper_phase_is_transitioning}. *)
+
 type keeper_health
 (** A validated keeper health reading — whether the keeper's keepalive is
     running, whether it has turned yet, and whether its turns are failing.

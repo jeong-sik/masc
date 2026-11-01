@@ -310,13 +310,15 @@ let fusion_wrapped_block ~width ~indent text =
            |> List.map (fun line -> indent ^ line))
   |> List.map (fun line -> Ansi.reset, line)
 
-let fusion_markdown_block ~width ~indent text =
+let fusion_safe_markdown_block ~width ~indent text =
   let body_width = max 1 (width - Message_layout.display_width indent) in
+  document_markdown ~width:body_width text
+  |> List.map (fun line -> Ansi.reset, indent ^ line)
+
+let fusion_markdown_block ~width ~indent text =
   if String.equal (String.trim text) "" then [ Ansi.dim, indent ^ "(empty)" ]
-  else
-    document_markdown ~width:body_width
+  else fusion_safe_markdown_block ~width ~indent
       (Keeper_chat.terminal_safe_text ~preserve_newlines:true text)
-    |> List.map (fun line -> Ansi.reset, indent ^ line)
 
 let fusion_labeled_markdown ~width ~label text =
   (Ansi.bold, "  " ^ label)
@@ -334,32 +336,104 @@ let fusion_tool_agent_suffix actor agent_name =
   then ""
   else "  agent=" ^ Terminal_text.single_line agent_name
 
+type fusion_json_preview =
+  | Fusion_json_container of string
+  | Fusion_json_scalar of string
+
+let fusion_json_control_byte byte = byte < '\x20' || byte = '\x7f'
+
+(* Yojson.Raw keeps the original spelling of literals, including unescaped
+   controls accepted in a malformed string. Re-encode only those strings so
+   the terminal sanitizer cannot turn the controls into ordinary spaces. *)
+let rec fusion_json_escape_controls (json : Yojson.Raw.t) : Yojson.Raw.t =
+  match json with
+  | `Stringlit literal when String.exists fusion_json_control_byte literal ->
+    `Stringlit (Yojson.Safe.from_string literal |> Yojson.Safe.to_string)
+  | `Assoc fields ->
+    `Assoc (List.map (fun (key, value) -> key, fusion_json_escape_controls value) fields)
+  | `List values -> `List (List.map fusion_json_escape_controls values)
+  | `Null | `Bool _ | `Intlit _ | `Floatlit _ | `Stringlit _ -> json
+
 let fusion_tool_preview_lines ~width ~label preview =
   let size =
     if preview.ftp_truncated
     then Printf.sprintf "%d bytes; preview truncated" preview.ftp_bytes
     else Printf.sprintf "%d bytes" preview.ftp_bytes
   in
-  let payload_text =
-    if preview.ftp_truncated
-    then preview.ftp_text
+  let complete_json =
+    if preview.ftp_truncated then None
     else
       try
-        preview.ftp_text
-        |> Yojson.Safe.from_string
-        |> Yojson.Safe.pretty_to_string
-      with
-      | Yojson.Json_error _ -> preview.ftp_text
+        (* Preserve the old parser's acceptance boundary. Raw accepts some
+           malformed strings that Safe rejects, and formatting those would
+           silently discard comments from what was previously shown verbatim. *)
+        ignore (Yojson.Safe.from_string preview.ftp_text);
+        (* Keep numeric and string literals while formatting the container:
+           a float conversion can otherwise turn a large exponent into
+           Infinity or round a value before the operator reads it. *)
+        let raw = Yojson.Raw.from_string preview.ftp_text in
+        let has_controls = String.exists fusion_json_control_byte preview.ftp_text in
+        let json = if has_controls then fusion_json_escape_controls raw else raw in
+        match json with
+        | `Floatlit ("NaN" | "Infinity" | "-Infinity") -> None
+        | `Assoc _ | `List _ ->
+          Some (Fusion_json_container (Yojson.Raw.pretty_to_string json))
+        | `Stringlit literal ->
+          let literal_has_controls =
+            match raw with
+            | `Stringlit original -> String.exists fusion_json_control_byte original
+            | _ -> false
+          in
+          Some (Fusion_json_scalar (if literal_has_controls then literal else preview.ftp_text))
+        | `Null | `Bool _ | `Intlit _ | `Floatlit _ ->
+          (* A scalar can also be an arbitrary tool-output string. Preserve
+             its spelling, including exponent and string escapes. *)
+          Some (Fusion_json_scalar preview.ftp_text)
+      with Yojson.Json_error _ -> None
   in
-  let trimmed = String.trim payload_text in
-  let body =
-    if String.starts_with ~prefix:"{" trimmed
-       || String.starts_with ~prefix:"[" trimmed
-    then "```json\n" ^ payload_text ^ "\n```"
-    else payload_text
+  let direct_safe_json_rows safe =
+    let indent_cells = min 6 (max 0 (width - 1)) in
+    let indent = String.make indent_cells ' ' in
+    let body_width = max 1 (width - indent_cells) in
+    let palette =
+      { (Masc_tui_markdown_theme.palette ~closing:Ansi.reset) with code_gutter = "" } in
+    Masc_tui_code_lexer.rows_of_source ~language:(Some "json") safe
+    |> List.concat_map (fun pieces ->
+         match Masc_tui_markdown.render_lexed_line ~palette ~width:body_width pieces with
+         | [] -> [ "" ]
+         | rows -> rows)
+    |> List.map (fun line -> Ansi.reset, indent ^ line)
   in
-  [ Ansi.dim, Printf.sprintf "    %s (%s)" label size ]
-  @ fusion_markdown_block ~width ~indent:"      " body
+  let fenced_json_rows payload =
+    (* Choose a fence only after control characters have been made safe: that
+       pass can otherwise turn a line into a closing fence. *)
+    let safe = Keeper_chat.terminal_safe_text ~preserve_newlines:true payload in
+    let gutter =
+      Message_layout.display_width
+        (Masc_tui_markdown_theme.palette ~closing:Ansi.reset).code_gutter in
+    let indent_cells = min 6 (max 0 (width - gutter - 1)) in
+    let indent = String.make indent_cells ' ' in
+    match Masc_tui_markdown.non_colliding_fence_marker (String.split_on_char '\n' safe) with
+    | Some marker when width > gutter ->
+      let document = String.concat "\n" [ marker ^ "json"; safe; marker ] in
+      fusion_safe_markdown_block ~width ~indent document
+    | Some _ | None -> direct_safe_json_rows safe
+  in
+  let rows =
+    match complete_json with
+    | Some (Fusion_json_container payload) -> fenced_json_rows payload
+    | Some (Fusion_json_scalar payload) ->
+      direct_safe_json_rows (Keeper_chat.terminal_safe_text ~preserve_newlines:true payload)
+    | None ->
+      (* Keep the existing code reading for incomplete object and array
+         previews. They cannot be parsed or treated as complete JSON. *)
+      let trimmed = String.trim preview.ftp_text in
+      if String.starts_with ~prefix:"{" trimmed
+         || String.starts_with ~prefix:"[" trimmed
+      then fenced_json_rows preview.ftp_text
+      else fusion_markdown_block ~width ~indent:"      " preview.ftp_text
+  in
+  [ Ansi.dim, Printf.sprintf "    %s (%s)" label size ] @ rows
 
 let fusion_tool_event_lines ~width = function
   | Fusion_tool_called event ->

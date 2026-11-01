@@ -1,0 +1,34 @@
+{
+  "scope": "Instrumented observation, including tracing overhead. Wall-clock window containment is not exclusive CPU attribution or per-request trace synchronization.",
+  "started_at_unix": 1793328128.15842,
+  "ended_at_unix": 1793328496.197094,
+  "complete": true,
+  "readers": [
+    {
+      "name": "rtev_watch",
+      "returncode": 0,
+      "forced_kill": false,
+      "events": 22600112,
+      "lost": 0,
+      "ready_at_unix": 1793328128.148415,
+      "ended_at_unix": 1793328496.244826,
+      "covers_workload": true,
+      "binary_unchanged": true,
+      "error": null,
+      "complete": true
+    },
+    {
+      "name": "rtev_fibers",
+      "returncode": 0,
+      "forced_kill": false,
+      "events": 22600471,
+      "lost": 0,
+      "ready_at_unix": 1793328127.609324,
+      "ended_at_unix": 1793328496.246993,
+      "covers_workload": true,
+      "binary_unchanged": true,
+      "error": null,
+      "complete": true
+    }
+  ]
+}

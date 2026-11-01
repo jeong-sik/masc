@@ -1,0 +1,300 @@
+{
+  "scope": "Retained observations and sanitized diagnostic reports. Legacy reader receipt uses old weaker protocol; it is not certification under new causal stop/flush gates. Historical probes bind their recorded source hashes only.",
+  "files": [
+    {
+      "retained": "tools-v1/rtev_span.mli",
+      "source": "rtev-tools-v1/rtev_span.mli",
+      "source_sha256": "c958415a791d284363587a2ff2941148d0b21a3b0aa86901de836baffd45a641",
+      "retained_sha256": "c958415a791d284363587a2ff2941148d0b21a3b0aa86901de836baffd45a641",
+      "derivative": false
+    },
+    {
+      "retained": "tools-v1/rtev_span.ml",
+      "source": "rtev-tools-v1/rtev_span.ml",
+      "source_sha256": "1e02db51bf3669ee19f4875616041ee798c474aba595ae2280fee977f787f9f4",
+      "retained_sha256": "1e02db51bf3669ee19f4875616041ee798c474aba595ae2280fee977f787f9f4",
+      "derivative": false
+    },
+    {
+      "retained": "tools-v1/rtev_watch.ml",
+      "source": "rtev-tools-v1/rtev_watch.ml",
+      "source_sha256": "2c3ef06abf243ae67ece11b125fef675c7514e998d247bcba30895faaeaae150",
+      "retained_sha256": "2c3ef06abf243ae67ece11b125fef675c7514e998d247bcba30895faaeaae150",
+      "derivative": false
+    },
+    {
+      "retained": "tools-v1/rtev_fibers.ml",
+      "source": "rtev-tools-v1/rtev_fibers.ml",
+      "source_sha256": "9a1f62f4f64f42ef0588f7c3c58022d9729c38377dbf90fcc9bdde097cd8bdd4",
+      "retained_sha256": "9a1f62f4f64f42ef0588f7c3c58022d9729c38377dbf90fcc9bdde097cd8bdd4",
+      "derivative": false
+    },
+    {
+      "retained": "tools-v2/rtev_span.mli",
+      "source": "rtev-tools-v2/rtev_span.mli",
+      "source_sha256": "c958415a791d284363587a2ff2941148d0b21a3b0aa86901de836baffd45a641",
+      "retained_sha256": "c958415a791d284363587a2ff2941148d0b21a3b0aa86901de836baffd45a641",
+      "derivative": false
+    },
+    {
+      "retained": "tools-v2/rtev_span.ml",
+      "source": "rtev-tools-v2/rtev_span.ml",
+      "source_sha256": "1e02db51bf3669ee19f4875616041ee798c474aba595ae2280fee977f787f9f4",
+      "retained_sha256": "1e02db51bf3669ee19f4875616041ee798c474aba595ae2280fee977f787f9f4",
+      "derivative": false
+    },
+    {
+      "retained": "tools-v2/rtev_watch.ml",
+      "source": "rtev-tools-v2/rtev_watch.ml",
+      "source_sha256": "d240bfc04f218a3e3623f235eebeacfe49c1e3151dd025467b764728ecb767b2",
+      "retained_sha256": "d240bfc04f218a3e3623f235eebeacfe49c1e3151dd025467b764728ecb767b2",
+      "derivative": false
+    },
+    {
+      "retained": "tools-v2/rtev_fibers.ml",
+      "source": "rtev-tools-v2/rtev_fibers.ml",
+      "source_sha256": "0e1e790852fbff6b33828ee393a81a11ba7977340561e15092bc6683cab6165e",
+      "retained_sha256": "0e1e790852fbff6b33828ee393a81a11ba7977340561e15092bc6683cab6165e",
+      "derivative": false
+    },
+    {
+      "retained": "tools-v2/build-receipt.json",
+      "source": "rtev-tools-v2/build-receipt.json",
+      "source_sha256": "36bf95eb3cbe9bfe6bf2b74d3012dd82e14454fc87f60480f8b3f9a401b1bcf7",
+      "retained_sha256": "36bf95eb3cbe9bfe6bf2b74d3012dd82e14454fc87f60480f8b3f9a401b1bcf7",
+      "derivative": false
+    },
+    {
+      "retained": "legacy-300-rtev_watch.txt",
+      "source": "native-300-rtev-v1/runtime-events/rtev_watch/report.txt",
+      "source_sha256": "3ec3dd7198712debad636eb351bf9bff8e6449d26cd0ca6bb268bdcc1867017c",
+      "retained_sha256": "ff78aa773dff6012ef979ad0e7df8e708c9d278d6863cbfc82091e3199b36ff3",
+      "derivative": true,
+      "transform": "Replace owned-base path with marker and remove line-ending whitespace; ignored original bytes/digest retained."
+    },
+    {
+      "retained": "legacy-300-rtev_fibers.txt",
+      "source": "native-300-rtev-v1/runtime-events/rtev_fibers/report.txt",
+      "source_sha256": "e388eed0a7347c4f1de2f91857bdcfb6fbf86980ca636e8cd6c008f1e3f6f479",
+      "retained_sha256": "b2ffa0f49654a0f8baf559f8c4d74f6f7779fb5ef70aee8b09bad7badb416b5d",
+      "derivative": true,
+      "transform": "Replace owned-base path with marker and remove line-ending whitespace; ignored original bytes/digest retained."
+    },
+    {
+      "retained": "legacy-300-summary.json",
+      "source": "native-300-rtev-v1/summary.json",
+      "source_sha256": "5ab18f2837f4bfa82a405254a3d0b8caa8f3493e031163a5e27468ebb7f289b4",
+      "retained_sha256": "5ab18f2837f4bfa82a405254a3d0b8caa8f3493e031163a5e27468ebb7f289b4",
+      "derivative": false
+    },
+    {
+      "retained": "legacy-300-reader-receipt.json",
+      "source": "native-300-rtev-v1/runtime-events/receipt.json",
+      "source_sha256": "a5ff89ada3a47ea21da448f20f473a80a12a1eca3e9fd75a63a3f73cd0512498",
+      "retained_sha256": "a5ff89ada3a47ea21da448f20f473a80a12a1eca3e9fd75a63a3f73cd0512498",
+      "derivative": false
+    },
+    {
+      "retained": "native-2-v4-summary.json",
+      "source": "native-2-rtev-v4/summary.json",
+      "source_sha256": "cb42b7d44aedab911afa72dac9a91dd418ad6683b04ce37b23bd18c367572f85",
+      "retained_sha256": "cb42b7d44aedab911afa72dac9a91dd418ad6683b04ce37b23bd18c367572f85",
+      "derivative": false
+    },
+    {
+      "retained": "native-2-v4-reader-receipt.json",
+      "source": "native-2-rtev-v4/runtime-events/receipt.json",
+      "source_sha256": "787d5df936f0bd2cb0d63bb9f75153745ce694c5c0325a8460d78fb3c2b3f47f",
+      "retained_sha256": "787d5df936f0bd2cb0d63bb9f75153745ce694c5c0325a8460d78fb3c2b3f47f",
+      "derivative": false
+    },
+    {
+      "retained": "historical-write-failure-probe-v3.json",
+      "source": "trace-write-failure-probe-v3.json",
+      "source_sha256": "d04d95a4e15153f4efb3be12b59af7915fbaace1435784d0f9b28e4d23c063f8",
+      "retained_sha256": "d04d95a4e15153f4efb3be12b59af7915fbaace1435784d0f9b28e4d23c063f8",
+      "derivative": false
+    },
+    {
+      "retained": "historical-protocol-rejections.json",
+      "source": "trace-protocol-probe-v1/result.json",
+      "source_sha256": "8b12f33b1bda1ec78bf04d9631ad4194f6e154eb02e0838c133c98c54d2e261d",
+      "retained_sha256": "8b12f33b1bda1ec78bf04d9631ad4194f6e154eb02e0838c133c98c54d2e261d",
+      "derivative": false
+    },
+    {
+      "retained": "legacy-300-audit.json",
+      "source": "native-300-rtev-audit-v1/post-run-audit.json",
+      "source_sha256": "e5efa486c029f4c24e21bf19e8f779baacc4d343c82758b8651422424f5c2cac",
+      "retained_sha256": "af82f9b0963fb192334c786e8d47a8ba4a8a50699e87f97785f864f87edc965f",
+      "derivative": true
+    },
+    {
+      "retained": "tools-v3/rtev_span.mli",
+      "source": "rtev-tools-v3/rtev_span.mli",
+      "source_sha256": "c958415a791d284363587a2ff2941148d0b21a3b0aa86901de836baffd45a641",
+      "retained_sha256": "c958415a791d284363587a2ff2941148d0b21a3b0aa86901de836baffd45a641",
+      "derivative": false
+    },
+    {
+      "retained": "tools-v3/rtev_span.ml",
+      "source": "rtev-tools-v3/rtev_span.ml",
+      "source_sha256": "1e02db51bf3669ee19f4875616041ee798c474aba595ae2280fee977f787f9f4",
+      "retained_sha256": "1e02db51bf3669ee19f4875616041ee798c474aba595ae2280fee977f787f9f4",
+      "derivative": false
+    },
+    {
+      "retained": "tools-v3/rtev_watch.ml",
+      "source": "rtev-tools-v3/rtev_watch.ml",
+      "source_sha256": "1011c3a767371ce8af0f56de45a441da918a22ddeaa2999ab6699879de13e164",
+      "retained_sha256": "1011c3a767371ce8af0f56de45a441da918a22ddeaa2999ab6699879de13e164",
+      "derivative": false
+    },
+    {
+      "retained": "tools-v3/rtev_fibers.ml",
+      "source": "rtev-tools-v3/rtev_fibers.ml",
+      "source_sha256": "7e4a0c2ff4e29f2bfa6d4f9c02696c806dd385f7296be3cbdf4e21922601d332",
+      "retained_sha256": "7e4a0c2ff4e29f2bfa6d4f9c02696c806dd385f7296be3cbdf4e21922601d332",
+      "derivative": false
+    },
+    {
+      "retained": "tools-v3/build-receipt.json",
+      "source": "rtev-tools-v3/build-receipt.json",
+      "source_sha256": "13777f382664931eeedbbfa71d266bc54e3816cae797a5c1a64b13c8b78f0d3b",
+      "retained_sha256": "13777f382664931eeedbbfa71d266bc54e3816cae797a5c1a64b13c8b78f0d3b",
+      "derivative": false
+    },
+    {
+      "retained": "native-2-v5-summary.json",
+      "source": "native-2-rtev-v5/summary.json",
+      "source_sha256": "76f8c06a15f0197148add879f896afbc304d81fd9f1114af81b0c24a04653e17",
+      "retained_sha256": "76f8c06a15f0197148add879f896afbc304d81fd9f1114af81b0c24a04653e17",
+      "derivative": false
+    },
+    {
+      "retained": "native-2-v5-reader-receipt.json",
+      "source": "native-2-rtev-v5/runtime-events/receipt.json",
+      "source_sha256": "268492f46c9604832cd46a374df8984f172a7322001bb94b82b7cac8545a6501",
+      "retained_sha256": "268492f46c9604832cd46a374df8984f172a7322001bb94b82b7cac8545a6501",
+      "derivative": false
+    },
+    {
+      "retained": "owned-write-failure-result.json",
+      "source": "public-write-failure-probe-v1/result.json",
+      "source_sha256": "15395c101c5a1309cd24b3caf1449e32ba992232fda6f4c56efb4ca1591b06bc",
+      "retained_sha256": "15395c101c5a1309cd24b3caf1449e32ba992232fda6f4c56efb4ca1591b06bc",
+      "derivative": false
+    },
+    {
+      "retained": "reader-protocol-result.json",
+      "source": "public-protocol-probe-v1/result.json",
+      "source_sha256": "1d4c789a74babee3c9dbc60de151013b4535e181dfffa3a505e59cbbee15d993",
+      "retained_sha256": "1d4c789a74babee3c9dbc60de151013b4535e181dfffa3a505e59cbbee15d993",
+      "derivative": false
+    },
+    {
+      "retained": "late-provider-result.json",
+      "source": "public-late-provider-probe-v1/result.json",
+      "source_sha256": "9867e796c6b83c0c1b4e6f3a8021242a5aea67fb21b8e4a3d81f1019a715754f",
+      "retained_sha256": "9867e796c6b83c0c1b4e6f3a8021242a5aea67fb21b8e4a3d81f1019a715754f",
+      "derivative": false
+    },
+    {
+      "retained": "final-provider-duplicate.json",
+      "source": "provider-final-duplicate-v2/result.json",
+      "source_sha256": "e038b793af7b26fca39b72a32a0c8f0fe2feefd779601fb09b38676dedcf2fc2",
+      "retained_sha256": "e038b793af7b26fca39b72a32a0c8f0fe2feefd779601fb09b38676dedcf2fc2",
+      "derivative": false
+    },
+    {
+      "retained": "final-provider-malformed.json",
+      "source": "provider-final-malformed-v2/result.json",
+      "source_sha256": "baaded4816c405a13a9527964f25d64b19e20d87df2cbe6ee7b6eb43107a2e95",
+      "retained_sha256": "baaded4816c405a13a9527964f25d64b19e20d87df2cbe6ee7b6eb43107a2e95",
+      "derivative": false
+    },
+    {
+      "retained": "final-provider-http-method.json",
+      "source": "provider-final-http-method-v2/result.json",
+      "source_sha256": "d48779df877a1d9ed410594ad15d178d857aa465088681f60025a8de8ed97d9e",
+      "retained_sha256": "d48779df877a1d9ed410594ad15d178d857aa465088681f60025a8de8ed97d9e",
+      "derivative": false
+    },
+    {
+      "retained": "final-provider-outcome-write.json",
+      "source": "provider-final-outcome-write-v2/result.json",
+      "source_sha256": "c898f9e990c22529af42f080f6aa4eba45a21fb4353037faf499487038b59e2a",
+      "retained_sha256": "c898f9e990c22529af42f080f6aa4eba45a21fb4353037faf499487038b59e2a",
+      "derivative": false
+    },
+    {
+      "retained": "native-2-v7-summary.json",
+      "source": "native-2-rtev-v7/summary.json",
+      "source_sha256": "05d45885d6a1e49c6ea7527ffdbc389091d4b559f3c67770c62217e3c69f9c7f",
+      "retained_sha256": "05d45885d6a1e49c6ea7527ffdbc389091d4b559f3c67770c62217e3c69f9c7f",
+      "derivative": false
+    },
+    {
+      "retained": "native-2-v7-reader-receipt.json",
+      "source": "native-2-rtev-v7/runtime-events/receipt.json",
+      "source_sha256": "64d7056d65311697db7538f496048b258c8a24d57b346cd1c03cb50b59d73d79",
+      "retained_sha256": "64d7056d65311697db7538f496048b258c8a24d57b346cd1c03cb50b59d73d79",
+      "derivative": false
+    },
+    {
+      "retained": "owned-write-failure-v2-result.json",
+      "source": "public-write-failure-probe-v2/result.json",
+      "source_sha256": "364a3d0b090d6caef90e1187797aabd763071faed8ef934b04ed4e8b46185953",
+      "retained_sha256": "364a3d0b090d6caef90e1187797aabd763071faed8ef934b04ed4e8b46185953",
+      "derivative": false
+    },
+    {
+      "retained": "native-2-v7-audit.json",
+      "source": "native-2-rtev-audit-v7/post-run-audit.json",
+      "source_sha256": "3cf1d2d75a5af67809a801968805f46764c10f0191fb53085102fac497534760",
+      "retained_sha256": "d3d48446d0bb182147d8ab13265419dbd4e1779e04743d026f4015d64b3736e2",
+      "derivative": true,
+      "transform": "Replace private raw-artifacts root with marker; all original bytes remain ignored."
+    },
+    {
+      "retained": "native-2-v7-cleanup.json",
+      "source": "native-2-rtev-v7/cleanup.json",
+      "source_sha256": "d79fe34b207727344c209134a39a325bf3ba4164e9a0b6c6608ddd901e0bff8a",
+      "retained_sha256": "45d8ab5105c5d2b0adc23c26bbeb57d318200dcc32bf9227147c88e21f6432e8",
+      "derivative": true,
+      "transform": "Replace private raw-artifacts root with marker; all original bytes remain ignored."
+    }
+  ],
+  "v4_script_sha256": {
+    "keeper_scale_session.py": "668245eff8e4ce50130f54aea720044701df9d6894499f7a9267cd3aa1b5a5e4",
+    "keeper_scale_trace.py": "3dd78330c4922fd058b46644df8ea21dace0f8698ceb3f502c16b8add563b2dd"
+  },
+  "current_script_sha256": {
+    "keeper_scale_session.py": "3ce44e1d0e6f2288a60a0bf054d2bbb00d1de3ccb0bff900d469f6b8e37d61ee",
+    "keeper_scale_trace.py": "3dd78330c4922fd058b46644df8ea21dace0f8698ceb3f502c16b8add563b2dd"
+  },
+  "manual_probe_sha256": {
+    "probe-reader-protocol.py": "6cf78685cd7cee4a49e61f2b1a613987166c81e1c2dbf500b0747646827a8765",
+    "probe-owned-write-failures.py": "d4a744b39f7b2c3784765cc0e838ebf5fd55773e83797cbb46e8aa90997f14ea",
+    "probe-late-provider.py": "675fd8051fab5d1c834c1567d5478e6ac671117f8d3256a024387bb1f3939519"
+  },
+  "additional_derivatives": [
+    {
+      "retained": "daily-ledger-sizes.json",
+      "sha256": "1650f06ad297c6ec470d87199bda51538d7776e27770f3fbf29db9e6f5ccc2fd"
+    },
+    {
+      "retained": "source-identities.json",
+      "sha256": "eb5ae71f65346ddf05de585798c823223b47ac3dc50095a78b75106fa83f468f"
+    },
+    {
+      "retained": "prior-component-ci.json",
+      "sha256": "9056dbed2899caa27fe4362396ee96ae9b1f7c4c7e5cf83c420d12721bcec489"
+    }
+  ],
+  "v5_script_sha256": {
+    "keeper_scale_session.py": "668245eff8e4ce50130f54aea720044701df9d6894499f7a9267cd3aa1b5a5e4",
+    "keeper_scale_trace.py": "3dd78330c4922fd058b46644df8ea21dace0f8698ceb3f502c16b8add563b2dd"
+  },
+  "manual_probe_scope": "Hashes of current reproduction sources. Result records bind tested module bytes; execution-time helper bytes were not separately snapshotted."
+}

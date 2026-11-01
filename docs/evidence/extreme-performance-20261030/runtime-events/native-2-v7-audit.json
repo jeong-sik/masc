@@ -1,0 +1,301 @@
+{
+  "evidence_schema": "masc.keeper-scale-evidence.v3",
+  "packet": "native-2-rtev-v7",
+  "source": "d55ec56c6227e65a07f3fefffec28e6d425ac47b",
+  "binary_sha256": "71c11512a67643124f7236cc321a176de311a1b342d825d06c911bc7c68ecfb4",
+  "packet_auditor_sha256": "12a03598b96a4240597d7c8cc60100b9ec0385e5da75b2daab5463f8047e1875",
+  "runner_sha256": "3ce44e1d0e6f2288a60a0bf054d2bbb00d1de3ccb0bff900d469f6b8e37d61ee",
+  "original_run_failure_preserved": null,
+  "post_run_workload_validation": "PASS",
+  "overall_original_run_verdict": "PASS",
+  "inventory_final_segment_complete": true,
+  "keepers": 2,
+  "public_and_exact_owner_durable_succeeded_operations": 4,
+  "real_model_calls": 4,
+  "max_provider_requests_in_flight": 2,
+  "phase_windows": [
+    {
+      "phase": "submitting_model_held",
+      "start_ns": 483714123339708,
+      "end_ns": 483714861997083,
+      "duration_ms": 738.657375
+    },
+    {
+      "phase": "model_held_queue_observation",
+      "start_ns": 483714861997083,
+      "end_ns": 483715025450041,
+      "duration_ms": 163.452958
+    },
+    {
+      "phase": "running_model_released",
+      "start_ns": 483715025450041,
+      "end_ns": 483716630392625,
+      "duration_ms": 1604.942584
+    }
+  ],
+  "provider_release_to_response_end_ms": {
+    "count": 4,
+    "p50": 11.156458,
+    "p95": 921.998083,
+    "p99": 921.998083,
+    "max": 921.998083
+  },
+  "guard_classification_audit": {
+    "all_calls_were_denied_by_wrapper": true,
+    "read_only_inventory_by_exact_argv": {
+      "nerdctl_ps": 1,
+      "container_list": 1
+    },
+    "unclassified_calls": 0,
+    "inventory_coverage": {
+      "scope": "Observed coverage groups, not producer sweep IDs. A final unique known-volume subset is incomplete; missing volumes are unobserved coverage, not proven lost log records. Wrappers refuse126 by source authority, not per-attempt exit receipts. Spans include concurrency and scheduling, not isolated subprocess overhead.",
+      "expected_volumes_per_segment": 4,
+      "observed_inspection_commands": 0,
+      "complete_observed_segments": 0,
+      "final_partial_segment": null,
+      "sweeps": []
+    },
+    "scope": "Post-run classification only; original guard receipt and verdict unchanged. No daemon/guest executed or inspected."
+  },
+  "liveness_wire_ms_by_workload_phase": {
+    "submitting_model_held": {
+      "samples": 7,
+      "failures": 0,
+      "successful_wire_ms": {
+        "count": 7,
+        "p50": 0.659125,
+        "p95": 98.652958,
+        "p99": 98.652958,
+        "max": 98.652958
+      }
+    },
+    "model_held_queue_observation": {
+      "samples": 1,
+      "failures": 0,
+      "successful_wire_ms": {
+        "count": 1,
+        "p50": 0.687042,
+        "p95": 0.687042,
+        "p99": 0.687042,
+        "max": 0.687042
+      }
+    },
+    "running_model_released": {
+      "samples": 15,
+      "failures": 0,
+      "successful_wire_ms": {
+        "count": 15,
+        "p50": 0.927583,
+        "p95": 43.808959,
+        "p99": 43.808959,
+        "max": 43.808959
+      }
+    },
+    "settled": {
+      "samples": 9,
+      "failures": 0,
+      "successful_wire_ms": {
+        "count": 9,
+        "p50": 0.849208,
+        "p95": 2.252542,
+        "p99": 2.252542,
+        "max": 2.252542
+      }
+    }
+  },
+  "mcp_attempts_by_request_phase": {
+    "initialize": {
+      "attempts": 1,
+      "status_counts": {
+        "200": 1
+      },
+      "successful_wire_ms": {
+        "count": 1,
+        "p50": 1.469584,
+        "p95": 1.469584,
+        "p99": 1.469584,
+        "max": 1.469584
+      },
+      "failed_attempt_elapsed_ms": {
+        "count": 0,
+        "max": null
+      }
+    },
+    "create": {
+      "attempts": 2,
+      "status_counts": {
+        "200": 2
+      },
+      "successful_wire_ms": {
+        "count": 2,
+        "p50": 159.192417,
+        "p95": 197.861042,
+        "p99": 197.861042,
+        "max": 197.861042
+      },
+      "failed_attempt_elapsed_ms": {
+        "count": 0,
+        "max": null
+      }
+    },
+    "enqueue": {
+      "attempts": 4,
+      "status_counts": {
+        "200": 4
+      },
+      "successful_wire_ms": {
+        "count": 4,
+        "p50": 40.896542,
+        "p95": 131.344167,
+        "p99": 131.344167,
+        "max": 131.344167
+      },
+      "failed_attempt_elapsed_ms": {
+        "count": 0,
+        "max": null
+      }
+    },
+    "queue-held": {
+      "attempts": 4,
+      "status_counts": {
+        "200": 4
+      },
+      "successful_wire_ms": {
+        "count": 4,
+        "p50": 21.091167,
+        "p95": 46.567167,
+        "p99": 46.567167,
+        "max": 46.567167
+      },
+      "failed_attempt_elapsed_ms": {
+        "count": 0,
+        "max": null
+      }
+    },
+    "settlement": {
+      "attempts": 19,
+      "status_counts": {
+        "200": 19
+      },
+      "successful_wire_ms": {
+        "count": 19,
+        "p50": 44.872416,
+        "p95": 120.41325,
+        "p99": 120.41325,
+        "max": 120.41325
+      },
+      "failed_attempt_elapsed_ms": {
+        "count": 0,
+        "max": null
+      }
+    }
+  },
+  "read_only_observation_failures": [],
+  "http_429": 0,
+  "rate_limit_wait_s": 0,
+  "operation_wall_clock_ms": {
+    "created_to_completed_ms": {
+      "count": 4,
+      "p50": 1441.1711692810059,
+      "p95": 1955.4920196533203,
+      "p99": 1955.4920196533203,
+      "max": 1955.4920196533203
+    },
+    "created_to_started_ms": {
+      "count": 4,
+      "p50": 21.8961238861084,
+      "p95": 1254.194974899292,
+      "p99": 1254.194974899292,
+      "max": 1254.194974899292
+    },
+    "started_to_completed_ms": {
+      "count": 4,
+      "p50": 701.2970447540283,
+      "p95": 1419.2750453948975,
+      "p99": 1419.2750453948975,
+      "max": 1419.2750453948975
+    },
+    "admission_success_wire_ms": {
+      "count": 4,
+      "p50": 40.896542,
+      "p95": 131.344167,
+      "p99": 131.344167,
+      "max": 131.344167
+    },
+    "admission_first_attempt_to_accepted_ms": {
+      "count": 4,
+      "p50": 41.129333,
+      "p95": 134.933917,
+      "p99": 134.933917,
+      "max": 134.933917
+    }
+  },
+  "operation_wall_clock_ms_by_sequence": {
+    "1": {
+      "created_to_completed_ms": {
+        "count": 2,
+        "p50": 1400.7890224456787,
+        "p95": 1441.1711692810059,
+        "p99": 1441.1711692810059,
+        "max": 1441.1711692810059
+      },
+      "created_to_started_ms": {
+        "count": 2,
+        "p50": 1.7611980438232422,
+        "p95": 21.8961238861084,
+        "p99": 21.8961238861084,
+        "max": 21.8961238861084
+      },
+      "started_to_completed_ms": {
+        "count": 2,
+        "p50": 1399.0278244018555,
+        "p95": 1419.2750453948975,
+        "p99": 1419.2750453948975,
+        "max": 1419.2750453948975
+      }
+    },
+    "2": {
+      "created_to_completed_ms": {
+        "count": 2,
+        "p50": 1851.151943206787,
+        "p95": 1955.4920196533203,
+        "p99": 1955.4920196533203,
+        "max": 1955.4920196533203
+      },
+      "created_to_started_ms": {
+        "count": 2,
+        "p50": 1189.4440650939941,
+        "p95": 1254.194974899292,
+        "p99": 1254.194974899292,
+        "max": 1254.194974899292
+      },
+      "started_to_completed_ms": {
+        "count": 2,
+        "p50": 661.707878112793,
+        "p95": 701.2970447540283,
+        "p99": 701.2970447540283,
+        "max": 701.2970447540283
+      }
+    }
+  },
+  "cleanup_verified": {
+    "server_returncode": 0,
+    "server_reaped": true,
+    "forced_kill": false,
+    "sampler_stopped": true,
+    "model_server_stopped": true,
+    "base_retained": true,
+    "base_path": "<raw-artifacts>/native-2-rtev-v7/owned-base",
+    "provider_requests_drained": true,
+    "active_provider_requests": 0,
+    "provider_handler_threads": 0
+  },
+  "limits": [
+    "One admin producer; not independent HTTP actors.",
+    "Loopback scripted text model; no external model throughput claim.",
+    "First turns intentionally held until all owners called provider and both operation sets observed.",
+    "Operation lifetimes include hold, queue, scheduler, I/O and runtime work; not CPU-only execution latency.",
+    "Shared host, sequential one run per population; no causal scaling attribution.",
+    "No guest, Addon, TUI or browser execution proof."
+  ]
+}

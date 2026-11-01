@@ -1,0 +1,9 @@
+{
+  "post_run_workload_validation": "PASS",
+  "overall_original_run_verdict": "PASS",
+  "inventory_final_segment_complete": true,
+  "keepers": 300,
+  "public_and_exact_owner_durable_succeeded_operations": 600,
+  "real_model_calls": 600,
+  "max_provider_requests_in_flight": 300
+}

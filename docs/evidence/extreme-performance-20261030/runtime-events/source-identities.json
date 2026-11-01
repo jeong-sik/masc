@@ -1,0 +1,110 @@
+{
+  "native-300-rtev-v1": {
+    "server": {
+      "pid": 89041,
+      "source": "d55ec56c6227e65a07f3fefffec28e6d425ac47b",
+      "binary_sha256": "71c11512a67643124f7236cc321a176de311a1b342d825d06c911bc7c68ecfb4"
+    },
+    "scripts_sha256": {
+      "keeper_scale_session.py": "a5f1687d658e39b6cfb6a5d66e3d01876e119898da19d46b1e01fcfff7ef3442",
+      "keeper_scale_trace.py": "3587e38ecb38a158a03842d1d462a11e882f86e728312dacfcda7a66753ef2f0"
+    },
+    "readers": {
+      "rtev_watch": {
+        "pid": 89650,
+        "owned_server_pid": 89041,
+        "sha256": "0237f0dae5294f13919c9df6e297948dad03ea14eafaba174085775e7c9b1b64",
+        "ready_timeout_s": 15,
+        "maximum_observation_s": 4800.0
+      },
+      "rtev_fibers": {
+        "pid": 89653,
+        "owned_server_pid": 89041,
+        "sha256": "daf68ddccc18fecb82dd823e584b6acac55e06ced8b71f3af94b74fcd85fab27",
+        "ready_timeout_s": 15,
+        "maximum_observation_s": 4800.0
+      }
+    }
+  },
+  "native-2-rtev-v4": {
+    "server": {
+      "pid": 48627,
+      "source": "d55ec56c6227e65a07f3fefffec28e6d425ac47b",
+      "binary_sha256": "71c11512a67643124f7236cc321a176de311a1b342d825d06c911bc7c68ecfb4"
+    },
+    "scripts_sha256": {
+      "keeper_scale_session.py": "668245eff8e4ce50130f54aea720044701df9d6894499f7a9267cd3aa1b5a5e4",
+      "keeper_scale_trace.py": "3dd78330c4922fd058b46644df8ea21dace0f8698ceb3f502c16b8add563b2dd"
+    },
+    "readers": {
+      "rtev_watch": {
+        "pid": 48774,
+        "owned_server_pid": 48627,
+        "sha256": "aa54be4881f4720ae15ce3f0cbb67de5edee85c5498f3be0184f2250c79afbcc",
+        "ready_timeout_s": 15,
+        "maximum_observation_s": 480.0
+      },
+      "rtev_fibers": {
+        "pid": 48776,
+        "owned_server_pid": 48627,
+        "sha256": "7aa81b9c1a35ada41bbc0b92c4b7d4648f6c5c7376385de53e7e4c1b81e4d934",
+        "ready_timeout_s": 15,
+        "maximum_observation_s": 480.0
+      }
+    }
+  },
+  "native-2-rtev-v5": {
+    "server": {
+      "pid": 63884,
+      "source": "d55ec56c6227e65a07f3fefffec28e6d425ac47b",
+      "binary_sha256": "71c11512a67643124f7236cc321a176de311a1b342d825d06c911bc7c68ecfb4"
+    },
+    "scripts_sha256": {
+      "keeper_scale_session.py": "668245eff8e4ce50130f54aea720044701df9d6894499f7a9267cd3aa1b5a5e4",
+      "keeper_scale_trace.py": "3dd78330c4922fd058b46644df8ea21dace0f8698ceb3f502c16b8add563b2dd"
+    },
+    "readers": {
+      "rtev_watch": {
+        "pid": 64122,
+        "owned_server_pid": 63884,
+        "sha256": "2d745a8b0bcfd09d8a927da3a8f08f67c0bbbbae9d601d331ba555f1830b6e86",
+        "ready_timeout_s": 15,
+        "maximum_observation_s": 480.0
+      },
+      "rtev_fibers": {
+        "pid": 64131,
+        "owned_server_pid": 63884,
+        "sha256": "fa7b9728ab0b8dcf8158c3f7cc3f492cd8bfa3aedf3da6a5c5df331f8ce5ae27",
+        "ready_timeout_s": 15,
+        "maximum_observation_s": 480.0
+      }
+    }
+  },
+  "native-2-rtev-v7": {
+    "server": {
+      "pid": 98758,
+      "source": "d55ec56c6227e65a07f3fefffec28e6d425ac47b",
+      "binary_sha256": "71c11512a67643124f7236cc321a176de311a1b342d825d06c911bc7c68ecfb4"
+    },
+    "scripts_sha256": {
+      "keeper_scale_session.py": "3ce44e1d0e6f2288a60a0bf054d2bbb00d1de3ccb0bff900d469f6b8e37d61ee",
+      "keeper_scale_trace.py": "3dd78330c4922fd058b46644df8ea21dace0f8698ceb3f502c16b8add563b2dd"
+    },
+    "readers": {
+      "rtev_watch": {
+        "sha256": "2d745a8b0bcfd09d8a927da3a8f08f67c0bbbbae9d601d331ba555f1830b6e86",
+        "pid": 98949,
+        "owned_server_pid": 98758,
+        "ready_timeout_s": 15,
+        "maximum_observation_s": 480.0
+      },
+      "rtev_fibers": {
+        "sha256": "fa7b9728ab0b8dcf8158c3f7cc3f492cd8bfa3aedf3da6a5c5df331f8ce5ae27",
+        "pid": 98951,
+        "owned_server_pid": 98758,
+        "ready_timeout_s": 15,
+        "maximum_observation_s": 480.0
+      }
+    }
+  }
+}

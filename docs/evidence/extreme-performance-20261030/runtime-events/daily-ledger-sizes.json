@@ -1,0 +1,48 @@
+{
+  "scope": "Post-exit file sizes, not I/O durations or identification of a particular basename-only trace interval.",
+  "files": 1614,
+  "total_bytes": 24880003,
+  "largest": [
+    {
+      "path": "agent-core-events/2026-10/30.jsonl",
+      "bytes": 4748180
+    },
+    {
+      "path": "activity-events/2026-10/30.jsonl",
+      "bytes": 1517205
+    },
+    {
+      "path": "costs/2026-10/30.jsonl",
+      "bytes": 1333468
+    },
+    {
+      "path": "transition-audit/2026-10/30.jsonl",
+      "bytes": 1174168
+    },
+    {
+      "path": "telemetry/2026-10/30.jsonl",
+      "bytes": 610508
+    },
+    {
+      "path": "tool-events/2026-10/30.jsonl",
+      "bytes": 554336
+    },
+    {
+      "path": "audit/2026-10/30.jsonl",
+      "bytes": 442783
+    },
+    {
+      "path": "keeper-wake-payload/2026-10/30.jsonl",
+      "bytes": 196138
+    },
+    {
+      "path": "keepers/scale-keeper-0029/provider-inputs/2026-10/30.jsonl",
+      "bytes": 19141
+    },
+    {
+      "path": "keepers/scale-keeper-0008/provider-inputs/2026-10/30.jsonl",
+      "bytes": 19141
+    }
+  ],
+  "source_sha256": "5e12162e997bd696dee83651cb4e1abb80769c57739f500cc7faaeb2754ebf0f"
+}

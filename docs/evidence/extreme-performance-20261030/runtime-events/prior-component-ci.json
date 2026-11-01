@@ -1,0 +1,18 @@
+{
+  "scope": "Completed prior component verification, not runtime-events or product performance acceptance.",
+  "run_url": "https://github.com/jeong-sik/masc/actions/runs/40988314477",
+  "head_sha": "46608931662397bda4260327a9a0a8837116cc82",
+  "conclusion": "success",
+  "suite": "test_lane_addon_actions",
+  "tests_run": 18,
+  "log_sha256": "da7b13b3c07df8bc850aa01445d88df16aa9d13165618d4d460367eedbcbe3f4",
+  "selected_log_lines": [
+    "test suite\tTest\t2026-10-30T01:56:51.8020773Z   [OK]          canonical request identity          0   retained bytes, diges...",
+    "test suite\tTest\t2026-10-30T01:56:52.2765375Z Test Successful in 0.475s. 18 tests run.",
+    "test suite\tTest\t2026-10-30T01:56:52.2834967Z [targeted] test/test_lane_addon_actions: OK in 1s"
+  ],
+  "workflow": "Test",
+  "workflow_path": ".github/workflows/test.yml",
+  "head_ref": "perf/extreme-scale-baseline-20261030",
+  "status": "completed"
+}

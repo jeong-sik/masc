@@ -1,0 +1,10 @@
+{
+  "verdict": "PASS",
+  "scope": "Real isolated native 2-Keeper workload plus an intentional duplicate loopback provider request; not performance evidence.",
+  "rejection": "final model request coverage is missing or duplicated",
+  "before_model_calls": 4,
+  "final_model_calls": 5,
+  "server_reaped": true,
+  "model_socket_closed": true,
+  "tested_source_sha256": "668245eff8e4ce50130f54aea720044701df9d6894499f7a9267cd3aa1b5a5e4"
+}

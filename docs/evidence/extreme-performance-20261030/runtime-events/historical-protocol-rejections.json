@@ -1,0 +1,43 @@
+{
+  "scope": "Synthetic protocol and clock metadata, actual owned OS children. Not native runtime-events or performance evidence.",
+  "cases": [
+    {
+      "case": "missing_footer",
+      "rejected": true,
+      "reader": {
+        "name": "rtev_watch",
+        "returncode": 0,
+        "forced_kill": false,
+        "events": 1,
+        "lost": 0,
+        "ready_at_unix": 1793333751.336971,
+        "ended_at_unix": 1793333751.7834399,
+        "covers_workload": true,
+        "binary_unchanged": true,
+        "post_workload_stop_acknowledged": true,
+        "report_flush_acknowledged": false,
+        "error": null,
+        "complete": false
+      }
+    },
+    {
+      "case": "ended_before_stop",
+      "rejected": true,
+      "reader": {
+        "name": "rtev_watch",
+        "returncode": 0,
+        "forced_kill": false,
+        "events": 1,
+        "lost": 0,
+        "ready_at_unix": 1793333752.288287,
+        "ended_at_unix": 1793333752.479617,
+        "covers_workload": true,
+        "binary_unchanged": true,
+        "post_workload_stop_acknowledged": false,
+        "report_flush_acknowledged": true,
+        "error": null,
+        "complete": false
+      }
+    }
+  ]
+}

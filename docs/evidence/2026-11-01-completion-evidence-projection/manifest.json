@@ -1,0 +1,101 @@
+{
+  "kind": "focused native writer and shared Keeper unread checks",
+  "source_head": "a636084c8a77b989ba7b6d115965fbd935bf7207",
+  "pr_base": "737ce742f55b8c125ef502ad2d4ac3048c279dd1",
+  "records": [
+    {
+      "name": "baseline",
+      "workflow": "Test",
+      "run_id": 41284905852,
+      "job_id": 124784136827,
+      "url": "https://github.com/jeong-sik/masc/actions/runs/41284905852",
+      "head": "95fc86deba4db4c1bc2d17f5d3c3253f7626475a",
+      "ref": "fix/completion-evidence-projection-20261101",
+      "status": "completed",
+      "conclusion": "failure",
+      "checkout_head": "95fc86deba4db4c1bc2d17f5d3c3253f7626475a",
+      "raw_capture": "artifacts/issues-oldest-20261101/completion-evidence-projection/baseline-124784136827.raw.log",
+      "raw_bytes": 92399,
+      "raw_sha256": "4f977d11b8f3e858178042e92d40a308a4484155b1d1f9fddf5ab0ac293a5c98",
+      "selected_capture": "baseline.txt",
+      "selected_bytes": 1777,
+      "selected_sha256": "c9b466c5fed157362a8305dc63e4755766eda9aed2b41650ebc7c4d2367849ab",
+      "actual_pass": 1,
+      "actual_fail": 3,
+      "retained_case_pass": 1,
+      "retained_case_fail": 3,
+      "summaries": [
+        "2026-11-01T07:36:54.0225357Z 3 failures! in 4.056s. 4 tests run."
+      ],
+      "suites": {
+        "test_keeper_codex_completion_evidence": {
+          "pass": 1,
+          "fail": 3
+        }
+      }
+    },
+    {
+      "name": "candidate",
+      "workflow": "Test",
+      "run_id": 41285063692,
+      "job_id": 124784597860,
+      "url": "https://github.com/jeong-sik/masc/actions/runs/41285063692",
+      "head": "a636084c8a77b989ba7b6d115965fbd935bf7207",
+      "ref": "fix/completion-evidence-projection-20261101",
+      "status": "completed",
+      "conclusion": "success",
+      "checkout_head": "a636084c8a77b989ba7b6d115965fbd935bf7207",
+      "raw_capture": "artifacts/issues-oldest-20261101/completion-evidence-projection/candidate-124784597860.raw.log",
+      "raw_bytes": 88945,
+      "raw_sha256": "61f0bb9899837dba14214cfedebd5f3423b437d4d0bdc8ca2502fbcba12c6c88",
+      "selected_capture": "candidate.txt",
+      "selected_bytes": 2632,
+      "selected_sha256": "15a264c0f201829a48694d9dbeaaf47419888e08250fd31570aa6891664bbf2f",
+      "actual_pass": 11,
+      "actual_fail": 0,
+      "retained_case_pass": 11,
+      "retained_case_fail": 0,
+      "summaries": [
+        "2026-11-01T07:41:02.5106691Z Test Successful in 4.093s. 4 tests run.",
+        "2026-11-01T07:41:14.9862068Z Test Successful in 0.008s. 7 tests run."
+      ],
+      "suites": {
+        "test_keeper_codex_completion_evidence": {
+          "pass": 4,
+          "fail": 0
+        },
+        "test_keeper_librarian_request_unread": {
+          "pass": 7,
+          "fail": 0
+        }
+      }
+    }
+  ],
+  "comparison": {
+    "common_cases": 4,
+    "transitions": {
+      "PASS->PASS": 1,
+      "FAIL->PASS": 3,
+      "FAIL->FAIL": 0,
+      "PASS->FAIL": 0
+    },
+    "additional_candidate_unread_cases": 7,
+    "ordered_case_keys_sha256": "f08b4b0bce278ae9871d2a7c4960eb02878ea782fd0732ec0411a63ca56b4973"
+  },
+  "selection": "ANSI/BOM-normalized derivative with every timestamped actual OK/FAIL case row, checkout receipts, selected targets/runner boundaries, all failing assertions expected/received and suite summaries. SKIP rows for groups outside the explicit alias, decorative repetitions and routine build output are omitted. Raw and selected digests identify different byte streams.",
+  "baseline_production_parent_identical": {
+    "lib": true,
+    "packages/agent_core": true,
+    "config": true
+  },
+  "source_input_count": 20,
+  "source_tree_count": 4,
+  "full_regression": "not run",
+  "limits": [
+    "Only four selected Codex completion cases ran; other native context groups were skipped by the explicit alias.",
+    "Seven shared unread cases ran only on the candidate.",
+    "The whole earlier Codex context suite was not rerun, and its failed historical workflows remain FAILURE.",
+    "Native writer execution uses a controlled Codex process; other client call sites are source-verified, not measured as live native runs.",
+    "No real account/model entitlement, installed runtime, OS restart, integration, deployment or full original issue acceptance demonstrated."
+  ]
+}

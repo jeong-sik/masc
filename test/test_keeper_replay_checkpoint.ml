@@ -1127,12 +1127,78 @@ let test_native_response_groups_survive_visible_normalization () =
     (Option.is_none patched.working_context)
 ;;
 
+let test_inline_chat_carrier_survives_finalization_and_restore () =
+  let module Provider = Agent_core.Llm_provider in
+  let config = Provider.Provider_config.make
+      ~kind:OpenAI_compat ~provider_id:"minimax" ~model_id:"MiniMax-M3"
+      ~base_url:"https://api.minimax.io" ~request_path:"/v1/chat/completions"
+      ~max_tokens:128 () in
+  let caps = match Provider.Provider_config.capabilities_for_config_model config with
+    | Some caps -> caps
+    | None -> Alcotest.fail "native MiniMax model is absent" in
+  let media_store = Agent_core.History.Memory_store.create () in
+  let media_result result = result
+    |> Result.map_error (fun error -> Agent_core.Error.to_string (Agent_core.Error.Media error))
+    |> expect_ok in
+  List.iter (fun raw ->
+    let response = `Assoc
+        [ "id", `String "inline-replay-fixture"
+        ; "model", `String "MiniMax-M3"
+        ; "choices", `List [`Assoc
+            [ "message", `Assoc ["role", `String "assistant"; "content", `String raw]
+            ; "finish_reason", `String "stop"
+            ]]
+        ] in
+    let response = Provider.Backend_openai_parse.parse_openai_response_result_json
+        ~content_inline_reasoning:caps.content_inline_reasoning response
+      |> Result.map_error Provider.Backend_openai_parse.parse_error_to_string
+      |> expect_ok in
+    let response = Provider.Complete_common.patch_telemetry response ~config None in
+    let assistant = Agent_core.Types.assistant_message_of_response response
+      |> Result.map_error Agent_core.Types.show_assistant_message_error
+      |> expect_ok |> Agent_core.History.of_wire_message media_store |> media_result in
+    let history = [message Agent_core.Types.User [Agent_core.Types.Text "question"]] in
+    let original = checkpoint (history @ [assistant]) in
+    let patched, _ = Finalize.checkpoint_for_replay_persistence
+        ~stop_reason:(Runtime_agent.Completed {provider_turn_ordinal=17})
+        ~history_messages:history ~session_id:original.session_id
+        ~response_text:(Agent_core.Types.text_of_message assistant)
+        ~exclude_thought_from_replay:false original |> expect_ok in
+    with_temp_dir (fun session_dir ->
+      (match Masc.Keeper_checkpoint_store.save_agent_core_classified
+          ~boundary:Agent_core.Checkpoint_objects.Turn_closes
+          ~history_retained:(history_retained ()) ~session_dir patched |> expect_ok with
+       | Saved _ -> ()
+       | Stale_noop _ -> Alcotest.fail "fresh checkpoint was not saved");
+      let restored = Masc.Keeper_checkpoint_store.load_agent_core ~session_dir
+          ~session_id:patched.session_id
+        |> Result.map_error Masc.Keeper_checkpoint_store.checkpoint_load_error_to_string
+        |> expect_ok in
+      let messages = restored.messages
+        @ [message Agent_core.Types.User [Agent_core.Types.Text "next question"]]
+        |> Agent_core.History.to_wire_messages media_store |> media_result in
+      let wire = Provider.Backend_openai.build_request ~config ~messages ()
+        |> Yojson.Safe.from_string in
+      let open Yojson.Safe.Util in
+      let messages = wire |> member "messages" |> to_list in
+      Alcotest.(check int) "next request retains the complete conversation" 3
+        (List.length messages);
+      let assistant = List.nth messages 1 in
+      Alcotest.(check string) "native scalar content remains byte-exact" raw
+        (assistant |> member "content" |> to_string);
+      Alcotest.(check bool) "inline reasoning is not duplicated in a side channel" true
+        (member "reasoning_content" assistant = `Null)))
+    ["one<think>reason</think>two"; " \t "; " \n<think></think> "]
+;;
+
 let () =
   Alcotest.run
     "keeper replay checkpoint"
     [ ( "persistence"
       , [ Alcotest.test_case "native output groups preserve history" `Quick
             test_native_response_groups_survive_visible_normalization
+        ; Alcotest.test_case "inline Chat carrier survives finalization and disk restore" `Quick
+            test_inline_chat_carrier_survives_finalization_and_restore
         ; Alcotest.test_case
             "patch preserves typed reasoning"
             `Quick

@@ -73,6 +73,10 @@ let emit_wire_capture_response_suppressed_metrics ~keeper_name reasons =
 
 let is_trailing_blank_assistant (message : Agent_core.Types.message) =
   match message.role, message.content with
+  (* A native scalar carrier can be whitespace only and still own a replay row. *)
+  | Agent_core.Types.Assistant, _
+    when List.mem_assoc Agent_core.Types.Inline_content_replay.metadata_key message.metadata ->
+    false
   | Agent_core.Types.Assistant, [] -> true
   | Agent_core.Types.Assistant, blocks ->
     List.for_all

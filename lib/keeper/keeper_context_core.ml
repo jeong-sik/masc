@@ -275,8 +275,11 @@ let patch_checkpoint_last_assistant
          | Agent_core.Types.Audio _ as block) :: rest ->
           patch_content replaced (block :: acc) rest
     in
+    (* Native replay witnesses bind these exact content occurrences. A display
+       projection must not merge or remove the Text blocks they identify. *)
     let content =
       if List.mem_assoc Agent_core.Types.Response_replay.metadata_key msg.metadata
+         || List.mem_assoc Agent_core.Types.Inline_content_replay.metadata_key msg.metadata
       then msg.Agent_core.Types.content
       else patch_content false [] msg.Agent_core.Types.content
     in

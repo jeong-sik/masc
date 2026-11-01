@@ -46,7 +46,7 @@ let eio_ipaddr_is_private_or_reserved ip =
   | Ok parsed -> ipaddr_is_private_or_reserved parsed
   | Error _ -> true
 
-let validate_resolved_host ~net (uri : Uri.t) =
+let resolve_allowed_host ~net (uri : Uri.t) =
   try
     match Uri.host uri with
     | None -> Error "missing host"
@@ -63,14 +63,15 @@ let validate_resolved_host ~net (uri : Uri.t) =
         match addrs with
         | [] -> Error "dns resolution returned no addresses"
         | items ->
-            let blocked =
-              List.exists
-                (function
-                  | `Tcp (ip, _) -> eio_ipaddr_is_private_or_reserved ip
-                  | `Unix _ -> true)
-                items
+            let rec admit accumulated = function
+              | [] -> Ok (List.rev accumulated)
+              | `Unix _ :: _ -> Error "resolved address is not allowed"
+              | `Tcp (ip, _) :: rest ->
+                if eio_ipaddr_is_private_or_reserved ip then
+                  Error "resolved address is not allowed"
+                else admit (ip :: accumulated) rest
             in
-            if blocked then Error "resolved address is not allowed" else Ok ()
+            admit [] items
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn -> Error (Printf.sprintf "dns failure: %s" (Printexc.to_string exn))

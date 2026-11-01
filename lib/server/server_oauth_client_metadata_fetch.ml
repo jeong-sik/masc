@@ -3,17 +3,18 @@
 
 let ( let* ) = Result.bind
 
-(* Bounds connect, request and body. The name lookups (the address check,
-   then the client's own) run in system threads that cancellation cannot
-   stop, so the system resolver bounds those instead. *)
+(* Bounds connect, request and body. The one admitted name lookup
+   runs in a system thread that cancellation cannot
+   stop, so the system resolver bounds it instead. *)
 let fetch_timeout_sec = 5.0
 let request_headers = [ "Accept", "application/json" ]
 
 let fetch ~clock ~net url =
   let url = (url : Auth_oauth_client_metadata.document_url :> string) in
-  let* () = Server_outbound_address.validate_resolved_host ~net (Uri.of_string url) in
+  let* resolved_addresses = Server_outbound_address.resolve_allowed_host ~net (Uri.of_string url) in
   match
     Masc_http_client.get_response_sync
+      ~resolved_addresses
       ~clock
       ~timeout_sec:fetch_timeout_sec
       ~max_body_bytes:Auth_oauth_client_metadata.max_document_bytes

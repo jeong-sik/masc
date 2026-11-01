@@ -97,8 +97,9 @@ exception Client_scope_closed
 
 (* Piaf 0.2.0 resolves again and connects only the first address. Keep the
    successful probe address for construction, without replacing the URI
-   hostname used for Host and TLS verification. Later reconnects/redirects
-   resolve normally: Piaf retains this environment in the client. *)
+   hostname used for Host and TLS verification. Ordinary reconnects resolve
+   normally; caller-admitted requests retain the selected address throughout
+   their fresh client's lifetime. Piaf retains this environment in the client. *)
 module Selected_address_net = struct
   type tag = [ `Generic | `Unix ]
   type t = {
@@ -107,15 +108,20 @@ module Selected_address_net = struct
     service : string;
     address : Eio.Net.Sockaddr.stream;
     selecting : bool ref;
+    pinned : bool;
   }
 
   let getaddrinfo t ~service host =
-    if !(t.selecting) && String.equal service t.service
+    if (t.pinned || !(t.selecting)) && String.equal service t.service
        && String.equal (String.lowercase_ascii host) t.host then
       [ (t.address :> Eio.Net.Sockaddr.t) ]
+    else if t.pinned then []
     else Eio.Net.getaddrinfo t.net ~service host
 
-  let connect t ~sw address = Eio.Net.connect t.net ~sw address
+  let connect t ~sw address =
+    if t.pinned && address <> t.address then
+      invalid_arg "HTTP client attempted an address outside its admitted target";
+    Eio.Net.connect t.net ~sw address
   let getnameinfo t = Eio.Net.getnameinfo t.net
   let listen t ~reuse_addr ~reuse_port ~backlog ~sw address =
     Eio.Net.listen t.net ~reuse_addr ~reuse_port ~backlog ~sw address
@@ -123,14 +129,14 @@ module Selected_address_net = struct
     Eio.Net.datagram_socket t.net ~reuse_addr ~reuse_port ~sw address
 end
 
-let with_selected_address (env : Eio_unix.Stdenv.base) uri address f =
+let with_selected_address ?(pinned=false) (env : Eio_unix.Stdenv.base) uri address f =
   let key = Host_key.of_uri (Uri.canonicalize uri) in
   let selecting = ref true in
   let net = Eio.Resource.T
     ({ Selected_address_net.net = env#net;
        host = String.lowercase_ascii key.host;
        service = string_of_int key.port;
-       address; selecting },
+       address; selecting; pinned },
      Eio.Net.Pi.network (module Selected_address_net)) in
   let selected_env = object
     method net = net
@@ -582,7 +588,7 @@ let establish_connection ~clock ~timeout_seconds ~resolve ~connect ~create =
    or cancellation after the probe also releases its sockets. The probe
    retains separate DNS/TCP diagnostics; callers
    still receive cancellation without recording backoff (RFC-0106). *)
-let create_probed_client t key uri =
+let create_probed_client t ?resolved_addresses key uri =
   let net = Eio.Stdenv.net t.env in
   let clock = Eio.Stdenv.clock t.env in
   (* A cancellation from outside can arrive after create returned a client
@@ -593,14 +599,17 @@ let create_probed_client t key uri =
     let result = establish_connection ~clock
       ~timeout_seconds:t.config.connect_timeout_seconds
       ~resolve:(fun () ->
-        Eio.Net.getaddrinfo_stream net key.Host_key.host
-          ~service:(string_of_int key.Host_key.port))
+        match resolved_addresses with
+        | Some addresses -> List.map (fun ip -> `Tcp (ip, key.Host_key.port)) addresses
+        | None -> Eio.Net.getaddrinfo_stream net key.Host_key.host
+            ~service:(string_of_int key.Host_key.port))
       ~connect:(fun addr ->
         Eio.Switch.run (fun probe_sw ->
           let flow = Eio.Net.connect ~sw:probe_sw net addr in
           Eio.Flow.close flow))
       ~create:(fun address ->
-        match with_selected_address t.env uri address (fun env ->
+        match with_selected_address ~pinned:(Option.is_some resolved_addresses)
+          t.env uri address (fun env ->
           create_scoped_client ~sw:t.sw env uri) with
         | Ok client -> pending := Some client; Ok client
         | Error err -> Error (piaf_error_message (err :> Piaf.Error.t)))
@@ -618,7 +627,7 @@ let create_probed_client t key uri =
    connect-failure backoff and a TCP reachability probe (see
    [create_probed_client]). Returns [Result] mirroring piaf's API so
    callers can surface DNS/TCP/TLS failures distinctly. *)
-let create_fresh t key uri =
+let create_fresh t ?resolved_addresses key uri =
   let now = now_ts t in
   if connect_backoff_active t key ~now then
     Error
@@ -627,7 +636,7 @@ let create_fresh t key uri =
          (Host_key.to_string key)
          t.config.connect_failure_cooldown_seconds)
   else
-    match create_probed_client t key uri with
+    match create_probed_client t ?resolved_addresses key uri with
     | Ok c ->
       (try
          with_mu t (fun () ->
@@ -799,13 +808,16 @@ let request_body body =
 (* Wrap a single request: acquire-or-create client, send, release.
    Errors return [Error string]; the connection is dropped (close)
    on error, parked on success. *)
-let do_request t ?headers ?body ?max_body_bytes ~method_ uri : (response, string) result =
+let do_request t ?headers ?body ?max_body_bytes ?resolved_addresses ~method_ uri : (response, string) result =
   let key = Host_key.of_uri uri in
   let host_origin = Uri.with_uri ~path:(Some "") ~query:None uri in
   let acquired =
-    match try_acquire_idle t key ~now:(Eio.Time.now (Eio.Stdenv.clock t.env)) with
-    | Some c -> Ok c
-    | None -> create_fresh t key host_origin
+    match resolved_addresses with
+    | Some _ -> create_fresh t ?resolved_addresses key host_origin
+    | None ->
+      match try_acquire_idle t key ~now:(Eio.Time.now (Eio.Stdenv.clock t.env)) with
+      | Some c -> Ok c
+      | None -> create_fresh t key host_origin
   in
   match acquired with
   | Error e -> Error e
@@ -848,7 +860,7 @@ let do_request t ?headers ?body ?max_body_bytes ~method_ uri : (response, string
              release_once ~close_only:true;
              Error (piaf_error_message (err :> Piaf.Error.t))
            | Ok body_str ->
-             release_once ~close_only:false;
+             release_once ~close_only:(Option.is_some resolved_addresses);
              Ok { status; headers = headers_list; body = body_str }))
 
 (* The request's wall-clock window, when the caller gave one. The one
@@ -865,13 +877,16 @@ let with_optional_timeout
   | _ -> f ()
 
 let request t ?(clock : [> float Eio.Time.clock_ty ] Eio.Resource.t option)
-    ?timeout_seconds ?max_body_bytes ~method_ ~url ?headers ?body () =
+    ?timeout_seconds ?max_body_bytes ?resolved_addresses ~method_ ~url ?headers ?body () =
   match max_body_bytes with
   | Some limit when limit < 0 -> Error "max_body_bytes must be non-negative"
   | Some _ | None ->
+    match resolved_addresses with
+    | Some [] -> Error "resolved_addresses must not be empty"
+    | None | Some (_ :: _) ->
     with_optional_timeout ?clock ?timeout_seconds @@ fun () ->
     let uri = Uri.of_string url in
-    do_request t ?headers ?body ?max_body_bytes ~method_ uri
+    do_request t ?headers ?body ?max_body_bytes ?resolved_addresses ~method_ uri
 
 (* ── RFC-0129: idle-timeout request with streaming progress ────── *)
 

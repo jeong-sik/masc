@@ -96,6 +96,7 @@ val get_response_sync :
   ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
   ?timeout_sec:float ->
   ?max_body_bytes:int ->
+  ?resolved_addresses:Eio.Net.Ipaddr.v4v6 list ->
   url:string ->
   headers:(string * string) list ->
   unit ->
@@ -105,7 +106,9 @@ val get_response_sync :
     body for callers that need to inspect response headers (e.g.
     link-preview redirect handling). [max_body_bytes] is an optional receive
     limit, enforced before appending each body chunk; oversized responses
-    fail and their connection is closed. Omission adds no size limit. *)
+    fail and their connection is closed. Omission adds no size limit.
+    [resolved_addresses] uses the caller-admitted addresses through a fresh,
+    nonpooled client as {!Pool.request} specifies, retaining URI Host/TLS. *)
 
 val get_sync :
   ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->

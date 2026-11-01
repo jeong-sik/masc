@@ -166,10 +166,10 @@ let delete_sync ?clock ?timeout_sec ~url ~headers () =
   | Error e -> Error e
 
 (** GET with structured error handling. *)
-let get_response_sync ?clock ?timeout_sec ?max_body_bytes ~url ~headers () =
+let get_response_sync ?clock ?timeout_sec ?max_body_bytes ?resolved_addresses ~url ~headers () =
   let headers = ensure_default_headers headers in
   with_pool @@ fun pool ->
-  match Pool.request pool ?clock ?timeout_seconds:timeout_sec ?max_body_bytes
+  match Pool.request pool ?clock ?timeout_seconds:timeout_sec ?max_body_bytes ?resolved_addresses
           ~method_:`GET ~url ~headers () with
   | Ok { Pool.status; headers; body } ->
     Ok { status; headers; body }

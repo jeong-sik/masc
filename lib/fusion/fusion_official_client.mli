@@ -28,14 +28,14 @@ module For_testing : sig
       test driving the real globals could reach these arms in only one order. *)
 
   val resolved_timeout_s
-    :  runtime_id:string
+    :  turn_timeout_s:float option
     -> override_s:float option
     -> default_timeout_s:float
     -> float option
-  (** Resolve the same declared turn timeout used by each official-client
-      panel adapter. [override_s] (the preset group's declared deadline) wins
-      when present; otherwise the runtime's inferred turn timeout applies and
-      [turn-timeout-s = 0] produces [None]. *)
+  (** Apply the already selected model's declaration without an ID lookup.
+      [override_s] (the preset group's declared deadline) wins when present.
+      An absent model declaration keeps [default_timeout_s]; a non-positive
+      declaration removes the model-idle bound. Admission remains separate. *)
 
   val bounded_claude_probe_config
     :  fallback_timeout_s:float
@@ -81,10 +81,11 @@ val run_panelist
     output validation; provider-stated reset windows remain intact.
 
     [timeout_s] is the preset group's declared deadline. When present it wins
-    over the runtime-inferred turn timeout, because it is this request's
+    over the selected model's declared turn timeout, because it is this request's
     explicit statement while the runtime value is a default shared by every
-    consumer of that runtime. When absent the adapter resolves its own turn
-    timeout. It does not move [admission_timeout_s], which bounds waiting for
+    consumer of that runtime. When absent the adapter uses the selected model's
+    declaration, falling back to its captured admission value only when that
+    declaration is absent. It does not move [admission_timeout_s], which bounds waiting for
     admission rather than the answer.
 
     On every client the turn timeout is the longest silence allowed
@@ -187,8 +188,10 @@ val run_with_images
   -> (response, failure) result
 (** Stateless official-client turn using the same admission, quota accounting,
     deadlines and output-schema channels as [run_panelist]. Candidate and quota
-    observations belong to the supplied runtime object, including across catalog
-    reloads. An answer clears candidate evidence and undated quota before final
+    observations and the model-idle declaration belong to the supplied runtime
+    object, including across catalog reloads. A reload cannot replace a selected
+    declaration, its absence or its explicit unbounded value. An answer clears
+    candidate evidence and undated quota before final
     usage callbacks and caller validation; dated provider resets survive. Typed
     Codex rate refusals mark only this candidate, never sibling quota or a new
     Fleet failure recorder. Codex and Claude

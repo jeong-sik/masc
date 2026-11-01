@@ -2281,9 +2281,12 @@ Posts, Comments, Votes, Reactions order, selected empty snapshots and independen
 retry obligations. Other file families retain their existing protocols; a Board
 deletion is still not a four-file atomic transaction.
 
-A known fsynced primary write advances the source and memory before reporting a
-descriptor cleanup failure. Reserved cleanup exceptions leave both Board mutexes
-before propagating; an uncertain write remains blocked instead of being replayed.
+A known fsynced primary write advances the source; the creation receipt becomes
+committed after the model and origin indexes are published. Descriptor diagnostics
+follow that publication. Reserved cleanup and observer exceptions leave state,
+persistence and Fusion origin mutexes before propagating. A model-publication
+exception still leaves an uncertain product outcome, and uncertain writes remain
+blocked instead of being replayed.
 Actual producer/CAS/cleanup/unknown-parent-sync scenarios and validation status
 belong to the layer PR. This supplies no Board initialization guard, original
 operation receipt, historical absence proof or client reconciliation.

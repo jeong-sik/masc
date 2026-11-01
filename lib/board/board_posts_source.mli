@@ -21,6 +21,9 @@ val require_readable : store -> (unit, board_error) result
 val failure_to_board_error : posts_source_failure -> board_error
 val finish_write : posts_write_outcome -> (unit, board_error) result
 val finish_read : posts_source_read -> unit
+val reserved_exception :
+  exn * Printexc.raw_backtrace -> (exn * Printexc.raw_backtrace) option
+(** Classify reserved causes while retaining the original combined exception. *)
 val propagate_reserved : exn -> Printexc.raw_backtrace -> unit
 (** Reraise an exception containing a reserved cause, including nested Eio
     multiple failures, with the original exception and backtrace intact. *)

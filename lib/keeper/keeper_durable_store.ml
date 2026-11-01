@@ -76,34 +76,6 @@ let scan_files ~paths ~decode =
     paths
 ;;
 
-let scan_jsonl ~path ~decode =
-  if not (Fs_compat.file_exists path)
-  then empty_report
-  else (
-    let rows, malformed = Fs_compat.load_jsonl_diagnostics path in
-    let report =
-      List.fold_left
-        (fun report json -> count_row report (decode json))
-        empty_report
-        rows
-    in
-    if malformed = 0
-    then report
-    else
-      { rows = report.rows + malformed
-      ; refused = report.refused + malformed
-      ; first_refusal =
-          (match report.first_refusal with
-           | Some _ as refusal -> refusal
-           | None ->
-             Some
-               (Printf.sprintf
-                  "%s: %d malformed JSON row(s)"
-                  path
-                  malformed))
-      })
-;;
-
 let files_under dir ~keep =
   match Sys.readdir dir with
   | exception Sys_error _ -> []

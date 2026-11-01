@@ -246,7 +246,7 @@ let capture ?replacement store =
   let bytes = match replacement with
     | None -> Board_snapshot_rows.render ~rows:store.post_rows
         ~to_json:Board_content_json.post_to_yojson store.posts
-    | Some replacement ->
+    | Some (replacement : post) ->
       let buffer = Buffer.create 4096 in
       Hashtbl.iter (fun key (post : post) ->
         let post = if String.equal key (Post_id.to_string replacement.id) then replacement else post in

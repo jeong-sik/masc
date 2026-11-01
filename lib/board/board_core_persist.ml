@@ -215,6 +215,8 @@ let mark_dirty_comment store comment_id =
 
 (** {1 Eio-style Locking with Switch.on_release} *)
 
+exception Deferred_persist_observer of exn * Printexc.raw_backtrace
+
 let with_lock store f =
   let result = Eio.Mutex.use_rw ~protect:true store.mutex (fun () ->
     try Ok (f ()) with
@@ -259,6 +261,13 @@ let with_persist_lock_internal ~defer_settlement store f =
     if defer_settlement then raise (Board_posts_source.Reserved_settlement settlement)
     else Printexc.raise_with_backtrace settlement.exception_ settlement.backtrace
   | Error (exn, backtrace) | Ok (Ok _, Error (exn, backtrace)) ->
+    (* The observer ran outside mutation work, and [persist_mutex] is already
+       released. Fusion still owns its origin lock: carry reserved observer
+       failures through that lock too, without inventing a write receipt. *)
+    (match defer_settlement, Board_posts_source.reserved_exception (exn, backtrace) with
+     | true, Some (exception_, original_backtrace) ->
+       raise (Deferred_persist_observer (exception_, original_backtrace))
+     | true, None | false, _ -> ());
     Printexc.raise_with_backtrace exn backtrace
 ;;
 
@@ -921,6 +930,7 @@ let create_post_with_audience_internal
   Result.map_error (fun error -> failure (Post_publication_failure.Board_error error)) result
   with
   | Board_posts_source.Reserved_settlement _ as carrier -> raise carrier
+  | Deferred_persist_observer _ as carrier -> raise carrier
   | (Eio.Cancel.Cancelled _ | Eio.Time.Timeout
      | Out_of_memory | Stack_overflow | Sys.Break) as exn ->
     let backtrace = Printexc.get_raw_backtrace () in
@@ -1093,11 +1103,13 @@ let create_post_once_by_fusion_run_id
                  store ~lookup ~author ~content ~post_kind
                  ?meta_json ~visibility ~ttl_hours ~origin ()
                |> Result.map (fun creation -> Post_created creation))
-             with Board_posts_source.Reserved_settlement settlement -> Error settlement) in
+             with
+             | Board_posts_source.Reserved_settlement settlement ->
+               Error (settlement.exception_, settlement.backtrace)
+             | Deferred_persist_observer (exn, backtrace) -> Error (exn, backtrace)) in
            match result with
            | Ok result -> result
-           | Error settlement ->
-             Printexc.raise_with_backtrace settlement.exception_ settlement.backtrace)
+           | Error (exn, backtrace) -> Printexc.raise_with_backtrace exn backtrace)
     | Some origin_run_id, (None | Some _)
       when String.equal origin_run_id fusion_run_id ->
       pre_effect
@@ -1282,13 +1294,12 @@ let update_post_with_outcome
                             Hashtbl.replace store.posts key updated;
                             mark_dirty_post store key;
                             invalidate_post_caches store;
-                            let* () = finish_posts_write outcome in
-                            Ok
+                            finish_posts_write outcome |> Result.map (fun () ->
                               { edited = updated
                               ; recorded_audience = audience
                               ; unresolved
                               ; content_changed
-                              })
+                              }))
                    | Some _ | None -> `Replan existing)))
       in
       match outcome with

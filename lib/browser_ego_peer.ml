@@ -1091,41 +1091,14 @@ let motion_fields = function
   | Press {button; count} -> ["button",str (button_name button);"count",`Int count]
   | Wheel {x; y} -> ["dx",`Int x;"dy",`Int y]
 
-(* Native ego calls, not synthetic page events. A failed down may already
-   have pressed, so its finally block always attempts release. mouse.down,
-   move and up answer void and swallow a dialog interruption, so nothing here
-   declares that the button came up and the result claims nothing about it. *)
-let drag_input = {js|
-async function dragInput(page, path, label) {
-  let error = null;
-  const reason = failure => String(failure?.message ?? failure);
-  try {
-    await page.mouse.move(path[0].x, path[0].y, {label});
-    try {
-      await page.mouse.down({button:'left'});
-      for (const point of path.slice(1)) await page.mouse.move(point.x, point.y, {label});
-    } finally {
-      await page.mouse.up({button:'left'});
-    }
-  } catch (failure) { error = reason(failure); }
-  return {error};
-}
-|js}
-
 (* ego takes a chord as Playwright writes one: the modifiers, then the key,
    joined by "+". It presses the named keys and printable ASCII, up to "~";
-   ego 0.6.0.16 refused é, ß and € as an unknown key (2026-10-23). Its typing
-   takes any text. *)
+   ego 0.6.0.16 refused é, ß and € as an unknown key (2026-10-23). *)
 let last_pressable_character = 0x7e
-let press_refused = "an ego connection presses named keys and printable ASCII characters; type other text with type_text"
-type keys = Text of string | Chord of Browser_lane.Keyboard.t
-let keys_lines = function
-  | Text _ -> ["        await page.keyboard.type(args.keys);"]
-  | Chord _ -> ["        await page.keyboard.press(args.keys);"]
-let keys_fields = function
-  | Text text -> ["keys",str text]
-  | Chord chord -> ["keys",str (String.concat "+"
-      (List.map Browser_lane.Keyboard.modifier_name chord.modifiers @ [Browser_lane.Keyboard.key_text chord.key]))]
+let press_refused = "an ego connection presses named keys and printable ASCII characters; explicitly choose native workflow fill, keyboard.insertText or keyboard.paste for other text"
+let keys_fields (chord : Browser_lane.Keyboard.t) =
+  ["keys",str (String.concat "+"
+    (List.map Browser_lane.Keyboard.modifier_name chord.modifiers @ [Browser_lane.Keyboard.key_text chord.key]))]
 
 let receipt_of ~id ~verb = function
   | `Assoc fields -> Ok (obj (("tabId",`Int id) :: ("action",str verb) :: List.remove_assoc "action" fields))
@@ -1165,10 +1138,8 @@ let dialog_receipt ~id ~verb ~unknown value =
 (* One run: the guard script checks that the page is the observed one and
    refuses before any input if not, the input is sent, and the receipt script
    reads where the page is. *)
-let guarded_input ?(holds_button=false) t ~id ~label ~deadline ~verb ~step ~guard ~input ~lines ~fields =
+let guarded_input t ~id ~label ~deadline ~verb ~step ~guard ~input ~lines ~fields =
   let unknown = Printf.sprintf "read tab %d before another step" id in
-  let* ()=if holds_button then Input.begin_holding t.input ~scope:Input.Page_scope ~tab_id:id ~page_label:label ~operation:step
-    |> Result.map_error (fun detail -> Live.Before_effect detail) else Ok () in
   let response = run_step t ~window_s:(left t deadline) ~step
           ~args:(obj (["label",str label;"tabId",`Int id;"guard",str (page_function guard);
             "input",str (Yojson.Safe.to_string input);
@@ -1197,20 +1168,8 @@ let guarded_input ?(holds_button=false) t ~id ~label ~deadline ~verb ~step ~guar
       "      }";
       "    }";
       "  }" ])) in
-  (* A button held through raw mouse calls is never settled here: the SDK
-     declares no outcome for them, so the input stays unconfirmed until the
-     operator's reset. *)
-  if holds_button then (match response with
-    | Error (Refused _ | Unanswered (Unstarted _)) -> Input.not_started t.input
-    | Ok _ | Error (Unanswered (Exited _ | Signaled _ | Timed_out | Output_exceeded | Unobserved _)
-        | Unreadable _ | Failed _) -> ());
   match response with
   | Error failure -> Error (effect_failure ~unknown failure)
-  | Ok value when holds_button ->
-      let reported = match field "error" value with Some (`String error) -> head error ^ "; " | Some _ | None -> "" in
-      let opened = match field "dialog" value with
-        | Some (`Assoc _) -> "the page opened a JavaScript dialog; " | Some _ | None -> "" in
-      Error (Live.Outcome_unknown (reported ^ opened ^ "ego drag cannot confirm input release; " ^ unknown))
   | Ok value when (match field "dialog" value with Some (`Assoc _) -> true | Some _ | None -> false) ->
     dialog_receipt ~id ~verb ~unknown value
   | Ok value ->
@@ -1426,11 +1385,12 @@ let activate_tab t ~id ~label ~expected_url =
 
 let interact ?actor t args =
   let before result = Result.map_error (fun detail -> Live.Before_effect detail) result in
+  let unavailable_input reason = Error (Live.Before_effect (Browser_lane.Native_input.message reason)) in
   let* fields = before (match args with `Assoc fields -> Ok fields | _ -> Error "invalid interaction") in
   let* request = before (Browser_interaction.parse (obj (("lane",str Browser_lane.Lane_name.(to_wire Live)) :: fields))) in
   let* () = match Browser_lane.Native_input.unavailable (Browser_lane.ego_input_contract request.action) with
     | None -> Ok ()
-    | Some reason -> Error (Live.Before_effect (Browser_lane.Native_input.message reason)) in
+    | Some reason -> unavailable_input reason in
   let* () = match request.frame_path with
     | [] -> Ok ()
     | _ :: _ -> Error (Live.Before_effect frame_input_refused) in
@@ -1442,7 +1402,7 @@ let interact ?actor t args =
   let input ~expected_url action = Browser_lane.interaction_args ~tab_id:id ~frame_path:[] ~expected_url action in
   let* () = Input.admit t.input |> Result.map_error (fun detail -> Live.Before_effect detail) in
   let* () = match request.action with
-    | Browser_lane.Drag_to {duration_ms;_} | Browser_lane.Drag {duration_ms;_} when duration_ms <> 0 ->
+    | Browser_lane.Drag_to {duration_ms;_} when duration_ms <> 0 ->
         Error (Live.Before_effect "ego drag requires durationMs=0; movement timing is not exposed by its mouse API")
     | Browser_lane.Drag_to _ | Browser_lane.Drag _
     | Browser_lane.Activate_tab | Browser_lane.Fill _ | Browser_lane.Select_option _ | Browser_lane.Set_zoom _
@@ -1456,11 +1416,7 @@ let interact ?actor t args =
       | Browser_lane.Click _ -> false
       | Browser_lane.Hover target | Browser_lane.Double_click target ->
         (match target with Browser_lane.Selector _ -> false | Browser_lane.Scene_node _ -> true)
-      | Browser_lane.Drag_to {source;destination;via;_} ->
-        (match source,destination with
-         | Browser_lane.Selector _, Browser_lane.Selector _ -> (match via with [] -> false | _::_ -> true)
-         | Browser_lane.Scene_node _, (Browser_lane.Selector _ | Browser_lane.Scene_node _)
-         | Browser_lane.Selector _, Browser_lane.Scene_node _ -> true)
+      | Browser_lane.Drag_to _ -> false
       | Browser_lane.Activate_tab | Browser_lane.Fill _ | Browser_lane.Select_option _ | Browser_lane.Set_zoom _
       | Browser_lane.Set_viewport _ | Browser_lane.Type_text _ | Browser_lane.Press_key _
       | Browser_lane.Scroll _ | Browser_lane.Hover_at _
@@ -1478,18 +1434,9 @@ let interact ?actor t args =
     let x, y = Browser_lane.Pointer.viewport_pixels viewport point in
     guarded_input t ~id ~label ~deadline ~verb ~step:"page.pointer" ~guard:Browser_interaction.pointer_guard_script
       ~input:(input ~expected_url action) ~lines:(motion_lines motion) ~fields:(["x",`Int x;"y",`Int y;cursor] @ motion_fields motion) in
-  let keyboard keys =
+  let keyboard chord =
     guarded_input t ~id ~label ~deadline ~verb ~step:"page.keyboard" ~guard:Browser_interaction.keyboard_guard_script
-      ~input:(input ~expected_url action) ~lines:(keys_lines keys) ~fields:(keys_fields keys) in
-  let drag ~from ~to_ ~viewport ~via =
-    let pixels point =
-      let x,y = Browser_lane.Pointer.viewport_pixels viewport point in obj ["x",`Int x;"y",`Int y] in
-    let path = from :: (Browser_lane.Pointer.drag_waypoints ~start:from ~destination:to_ via @ [to_;to_]) in
-    guarded_input ~holds_button:true t ~id ~label ~deadline ~verb ~step:"page.drag"
-      ~guard:Browser_interaction.pointer_guard_script ~input:(input ~expected_url action)
-      ~lines:["        const outcome = await (" ^ drag_input ^ ")(page, args.path, args.cursor);";
-        "        if (outcome.error !== null) throw new Error(outcome.error);"]
-      ~fields:["path",`List (List.map pixels path);cursor] in
+      ~input:(input ~expected_url action) ~lines:["        await page.keyboard.press(args.keys);"] ~fields:(keys_fields chord) in
   let on_target ~target operation = match expected_url with
     | Some _ -> native_input t ~id ~label ~cursor:cursor_text ~expected_url
         ~locator:(ego_locator target) ~reference:["target",Browser_lane.snapshot_target_to_json target] ~operation
@@ -1510,20 +1457,20 @@ let interact ?actor t args =
         | [] -> native_input t ~id ~label ~cursor:cursor_text ~expected_url ~locator:source
             ~reference:["source",obj ["selector",str source];"destination",obj ["selector",str destination]]
             ~operation:(Target_drag destination)
-        | _::_ -> refused)
+        | _::_ -> unavailable_input Browser_lane.Native_input.Raw_pointer_drag_void)
      | Browser_lane.Scene_node _, (Browser_lane.Selector _ | Browser_lane.Scene_node _)
-     | Browser_lane.Selector _, Browser_lane.Scene_node _ -> refused)
+     | Browser_lane.Selector _, Browser_lane.Scene_node _ -> unavailable_input Browser_lane.Native_input.Raw_pointer_drag_void)
   | Browser_lane.Click_at {point; viewport; button} -> pointer viewport point (Press {button; count = 1})
   | Browser_lane.Double_click_at {point; viewport} -> pointer viewport point (Press {button = Browser_lane.Pointer.Primary; count = 2})
   | Browser_lane.Hover_at {point; viewport} -> pointer viewport point Move
   | Browser_lane.Scroll_at {point; viewport; x; y} -> pointer viewport point (Wheel {x; y})
-  | Browser_lane.Drag {from;to_;viewport;via;duration_ms=_} -> drag ~from ~to_ ~viewport ~via
-  | Browser_lane.Type_text {text; _} -> let* () = before (Browser_lane.Keyboard.validate_text text) in keyboard (Text text)
+  | Browser_lane.Drag _ -> unavailable_input Browser_lane.Native_input.Raw_pointer_drag_void
+  | Browser_lane.Type_text _ -> unavailable_input Browser_lane.Native_input.Keyboard_type_void
   | Browser_lane.Press_key {key; _} ->
     (match key.key with
      | Browser_lane.Keyboard.Character scalar when Uchar.to_int scalar > last_pressable_character ->
        Error (Live.Before_effect press_refused)
-     | Browser_lane.Keyboard.Character _ | Browser_lane.Keyboard.Named _ -> keyboard (Chord key))
+     | Browser_lane.Keyboard.Character _ | Browser_lane.Keyboard.Named _ -> keyboard key)
   | Browser_lane.Fill_node _ | Browser_lane.Scroll _ | Browser_lane.Follow_link _ ->
     dom_input t ~id ~label ~deadline ~verb (input ~expected_url action)
   | Browser_lane.Click_node _ | Browser_lane.Hover (Browser_lane.Scene_node _) | Browser_lane.Double_click (Browser_lane.Scene_node _) ->

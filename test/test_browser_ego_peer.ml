@@ -867,7 +867,6 @@ let test_chooser_upload_respects_uncertain_pointer_release () =
       asked := sent.step :: !asked;
       match sent.step with
       | "tabs.list" -> answered tabs
-      | "page.drag" -> input_answer ()
       | "page.target_input" -> answered (obj ["error",str "input release unconfirmed"])
       | "page.upload" -> answered (obj ["error",`Null;"dialog",`Null;"tab",`Null])
       | other -> failf "%s unexpectedly dispatched %s" name other) in
@@ -895,6 +894,8 @@ let state ~url ~width = in_page (obj ["url",str url;"title",str "Slack";
 let test_the_scripts_parse_as_modules () =
   let scripts = ref [] in
   let directory = capture_directory () in
+  let enter=match Lane.Keyboard.of_wire ~key:"Enter" ~modifiers:[] with
+    | Ok key -> key | Error message -> fail message in
   let upload_file = Filename.concat directory "note.txt" in
   Out_channel.with_open_bin upload_file (fun channel -> Out_channel.output_string channel "hello");
   let run ~window_s script =
@@ -910,7 +911,7 @@ let test_the_scripts_parse_as_modules () =
     | "space.finish" -> answered (obj ["spaceId",`Int 51;"closedSpace",`Bool true;
         "keptManagedLabels",`List [];"closedManagedLabels",`List [];"preservedUnmanagedCount",`Int 0])
     | "page.target" -> answered resolved
-    | "page.pointer" | "page.keyboard" | "page.drag" -> input_answer ()
+    | "page.pointer" | "page.keyboard" -> input_answer ()
     | "page.input" -> dom_answer (obj ["action",str "fill"])
     | "page.open" -> answered (obj ["label",str "p4";"error",`Null;"tab",obj ["url",str "https://example.test/";"title",str "New";"active",`Bool true]])
     | "page.goto" -> answered (obj ["error",`Null;"tab",obj ["url",str "https://example.test/";"title",str "Next"]])
@@ -941,7 +942,7 @@ let test_the_scripts_parse_as_modules () =
       Live.Page_interact, interact_args (Lane.Click_node {document_id="d1";node_id="send"});
       Live.Page_interact, interact_args (Lane.Hover_at {point={x=0.5;y=0.5};viewport});
       Live.Page_interact, interact_args (Lane.Scroll_at {point={x=0.5;y=0.5};viewport;x=0;y=120});
-      Live.Page_interact, interact_args (Lane.Type_text {document_id="d1";text="hi"});
+      Live.Page_interact, interact_args (Lane.Press_key {document_id="d1";key=enter});
       Live.Page_interact, interact_args (Lane.Fill_node {target={document_id="d1";node_id="message"};text="hi"});
       Live.Page_interact, interact_args (Lane.Fill_target {target=Lane.Target_ref 5;text="hi"});
       Live.Page_act, act_args (Lane.Action.On_tab {tab_id=3;frame_path=[];interaction=Lane.Action.Close_tab});
@@ -957,7 +958,7 @@ let test_the_scripts_parse_as_modules () =
   check (result unit string) "finish" (Ok ()) (Peer.finish peer);
   check (list string) "every step"
     ["space.open";"tabs.list";"page.read";"page.elements";"page.scene";"page.snapshot";"page.downloads";"page.capture";
-     "page.open";"page.goto";"page.target";"page.pointer";"page.pointer";"page.pointer";"page.input";"page.target_input";
+     "page.open";"page.goto";"page.target";"page.pointer";"page.pointer";"page.pointer";"page.keyboard";"page.input";"page.target_input";
      "page.close";"page.reload";"page.stop_loading";"page.history";"page.dialog";"page.dialog";"page.upload";"page.choose_files";"space.finish"]
     (List.rev_map fst !scripts);
   List.iter (fun (step, script) ->

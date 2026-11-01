@@ -4,6 +4,7 @@ type freshness =
 
 type 'completion worker =
   { id : int
+  ; started_at : float
   ; completion : 'completion
   ; freshness : freshness
   ; failure_reported : bool
@@ -16,6 +17,7 @@ type flight =
 
 type 'completion t =
   { flight : flight
+  ; direct_flight : float option
   ; requested : bool
   ; active_worker : 'completion worker option
   ; next_worker_id : int
@@ -26,6 +28,7 @@ type 'completion t =
 
 let empty =
   { flight = Idle
+  ; direct_flight = None
   ; requested = false
   ; active_worker = None
   ; next_worker_id = 0
@@ -37,18 +40,30 @@ let empty =
 let request state = { state with requested = true }
 
 let begin_direct ~now state =
-  { state with flight = In_flight (Some now); requested = false }
+  { state with
+    flight = In_flight (Some now)
+  ; direct_flight = Some now
+  ; requested = false
+  }
 
 let cancel_direct ~was_requested state =
   let flight =
     match state.active_worker with
-    | Some _ -> state.flight
+    | Some worker -> In_flight (Some worker.started_at)
     | None -> Idle
   in
-  { state with flight; requested = state.requested || was_requested }
+  { state with
+    flight
+  ; direct_flight = None
+  ; requested = state.requested || was_requested
+  }
 
 let complete ~refresh_requested state =
-  { state with flight = Idle; requested = refresh_requested }
+  { state with
+    flight = Idle
+  ; direct_flight = None
+  ; requested = refresh_requested
+  }
 
 let note_failure ~worker_active state =
   if worker_active then
@@ -75,6 +90,7 @@ let start ~now ~completion (Start_plan state) =
   let id = state.next_worker_id + 1 in
   let worker =
     { id
+    ; started_at = now
     ; completion
     ; freshness = Current_generation
     ; failure_reported = false
@@ -104,8 +120,13 @@ let cancel_worker ~id state =
       | Current_generation -> false
       | Invalidated_during_refresh _ -> true
     in
+    let flight =
+      match state.direct_flight with
+      | Some direct_started_at -> In_flight (Some direct_started_at)
+      | None -> Idle
+    in
     let requested = state.requested || worker.was_requested || dirty in
-    Some ({ state with flight = Idle; requested; active_worker = None }, dirty)
+    Some ({ state with flight; requested; active_worker = None }, dirty)
   | Some _ | None -> None
 
 let note_wait_failure state =

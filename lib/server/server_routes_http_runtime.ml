@@ -1088,16 +1088,16 @@ let finish_full_health_refresh_worker
         | None -> false, false)
   in
   if settled then begin
+    Eio.Promise.resolve resolver
+      (match outcome with
+       | Ok _ -> Ok ()
+       | Error exn -> Error exn);
     if enqueue_follow_up then begin
       Log.Dashboard.debug
         "full_health_snapshot requests a successor after worker %d was invalidated"
         worker.id;
       signal_full_health_refresh_wakeup ()
-    end;
-    Eio.Promise.resolve resolver
-      (match outcome with
-       | Ok _ -> Ok ()
-       | Error exn -> Error exn)
+    end
   end
 
 let cancel_full_health_refresh_worker
@@ -1113,16 +1113,17 @@ let cancel_full_health_refresh_worker
         | None -> false, false)
   in
   if settled then begin
+    Eio.Promise.resolve_error resolver exn;
     if enqueue_follow_up then begin
       Log.Dashboard.debug
         "full_health_snapshot requests a successor after cancelled worker %d was invalidated"
         worker.id;
       match Fs_compat.execution_context () with
       | Fs_compat.Eio_fiber ->
-          Eio.Cancel.protect signal_full_health_refresh_wakeup
+          (try Eio.Cancel.protect signal_full_health_refresh_wakeup
+           with _ -> ())
       | Non_eio -> ()
-    end;
-    Eio.Promise.resolve_error resolver exn
+    end
   end
 
 let await_full_health_refresh_worker ~sw ~compute =

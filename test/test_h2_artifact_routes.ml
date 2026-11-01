@@ -66,6 +66,9 @@ let with_gateway ?(runtime = false) ?resources ?(zero_window = false) run =
               if runtime then Process_eio.init ~cwd_default:(Eio.Stdenv.fs env)
                 ~proc_mgr:(Eio.Stdenv.process_mgr env) ~clock:(Eio.Stdenv.clock env);
               Fun.protect ~finally:(fun () -> if runtime then Process_eio.reset_for_testing ()) (fun () ->
+                if runtime then (
+                  Masc.Board.reset_global_for_test ();
+                  Masc.Board_dispatch.reset_for_test ());
                 let state = if runtime then Masc.Mcp_server.create_state_eio ~sw
                   ~proc_mgr:(Eio.Stdenv.process_mgr env) ~fs:(Eio.Stdenv.fs env)
                   ~clock:(Eio.Stdenv.clock env) ~mono_clock:(Eio.Stdenv.mono_clock env)

@@ -324,7 +324,7 @@ let add_comment_with_audience
      | Error _ as e -> e
      | Ok comment ->
         (match with_persist_lock store (fun () ->
-          match append_comment comment with
+          match append_comment store comment with
           | Error _ as e -> e
           | Ok () -> Ok (with_lock store (fun () ->
               (* Commit from a fresh read: the post can change or vanish
@@ -743,7 +743,7 @@ let toggle_reaction store ~target_type ~target_id ~user_id ~emoji
       with
       | Error _ as error -> error
       | Ok staged ->
-        (match save_reactions_jsonl_result staged.snapshot with
+        (match save_reactions_jsonl_result store staged.snapshot with
          | Error _ as error -> error
          | Ok () ->
            (match with_lock store (fun () -> commit_staged_reaction_unlocked store staged) with
@@ -752,7 +752,7 @@ let toggle_reaction store ~target_type ~target_id ~user_id ~emoji
               let current_snapshot =
                 with_lock store (fun () -> reactions_jsonl_unlocked store)
               in
-              (match save_reactions_jsonl_result current_snapshot with
+              (match save_reactions_jsonl_result store current_snapshot with
                | Ok () -> Error commit_error
                | Error persistence_error ->
                  (* The durable rollback write also failed, so [persistence_error]

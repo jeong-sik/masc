@@ -30,7 +30,10 @@ let with_fixture f = Eio_main.run @@ fun env ->
     (fun () ->
       let config = Workspace.default_config base in
       ignore (Workspace.init config ~agent_name:(Some "producer"));
-      Board_dispatch.init_jsonl ~recipient_lookup:every_name_declared ();
+      Result.get_ok (Board_dispatch.init_jsonl
+        ~workspace_masc_dir:(Common.masc_dir_from_base_path
+          ~base_path:(Env_config_core.base_path ()))
+        ~recipient_lookup:every_name_declared ());
       f config)
 let call surface name args = VAT.dispatch surface ~name ~args
 let read surface name args =

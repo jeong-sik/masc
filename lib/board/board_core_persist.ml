@@ -41,13 +41,16 @@ let persist_io_error ~where msg =
   Error (Io_error (Printf.sprintf "%s: %s" where msg))
 ;;
 
-let create_store () =
+let create_store ~workspace_masc_dir () =
+  if String.equal workspace_masc_dir "" then
+    invalid_arg "Board.create_store: workspace_masc_dir must not be empty";
+  let workspace_masc_dir = Fs_compat.realpath_lenient workspace_masc_dir in
   { posts_load_result = Ok ()
   ; comments_load_result = Ok ()
   ; votes_load_result = Ok ()
   ; reactions_load_result = Ok ()
   ; sub_boards_load_result = Ok ()
-  ; workspace_masc_dir = None
+  ; workspace_masc_dir
   ; posts = Hashtbl.create 1024
   ; comments = Hashtbl.create 4096
   ; vote_log = Hashtbl.create 2048
@@ -559,8 +562,8 @@ let save_posts_snapshot store content =
   | Error _ as refused -> refused
   | Ok () ->
     (try
-       ensure_masc_dir ();
-       let path = persist_path () in
+       ensure_masc_dir store;
+       let path = persist_path store in
        match Fs_compat.save_file_atomic path content with
        | Ok () -> Ok ()
        | Error msg -> persist_io_error ~where:"rewrite_posts" msg
@@ -584,8 +587,8 @@ let save_comments_snapshot store content =
   | Error _ as refused -> refused
   | Ok () ->
     (try
-       ensure_masc_dir ();
-       match Fs_compat.save_file_atomic (comments_path ()) content with
+       ensure_masc_dir store;
+       match Fs_compat.save_file_atomic (comments_path store) content with
        | Ok () -> Ok ()
        | Error msg -> persist_io_error ~where:"rewrite_comments" msg
      with
@@ -615,10 +618,10 @@ let reactions_jsonl_unlocked store =
     store.reactions;
   Buffer.contents buf
 ;;
-let save_reactions_jsonl_result content =
+let save_reactions_jsonl_result store content =
   try
-    ensure_masc_dir ();
-    let path = reactions_path () in
+    ensure_masc_dir store;
+    let path = reactions_path store in
     match Fs_compat.save_file_atomic path content with
     | Ok () -> Ok ()
     | Error msg -> persist_io_error ~where:"rewrite_reactions" msg
@@ -627,19 +630,19 @@ let save_reactions_jsonl_result content =
 ;;
 
 (** {1 Append Helpers}  RFC-0091: [append_post] / [append_comment] are *create-only fast paths*. *)
-let append_post (p : post) =
+let append_post store (p : post) =
   try
-    ensure_masc_dir ();
-    let path = persist_path () in
+    ensure_masc_dir store;
+    let path = persist_path store in
     Fs_compat.append_file path (Yojson.Safe.to_string (post_to_yojson p) ^ "\n");
     Ok ()
   with
   | Sys_error msg -> persist_io_error ~where:"append_post" msg
 ;;
-let append_comment (c : comment) =
+let append_comment store (c : comment) =
   try
-    ensure_masc_dir ();
-    let path = comments_path () in
+    ensure_masc_dir store;
+    let path = comments_path store in
     Fs_compat.append_file path (Yojson.Safe.to_string (comment_to_yojson c) ^ "\n");
     Ok ()
   with
@@ -879,7 +882,7 @@ let create_post_with_audience
           | Error _ as error -> error
           | Ok () ->
             phase := Append_started;
-            match append_post post with
+            match append_post store post with
             | Error _ as error -> error
             | Ok () ->
               with_lock store (fun () ->

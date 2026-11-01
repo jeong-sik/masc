@@ -395,6 +395,9 @@ let seed_prepared_recovery ~fs ~base_path ~owner ~operation_id =
 let create_runtime env sw ~base_path =
   let fs = Eio.Stdenv.fs env in
   Fs_compat.set_fs fs;
+  (* Independent runtime fixtures must not inherit a prior process's Board. *)
+  Masc.Board.reset_global_for_test ();
+  Masc.Board_dispatch.reset_for_test ();
   Mcp_eio.create_state_eio
     ~sw
     ~proc_mgr:(Eio.Stdenv.process_mgr env)

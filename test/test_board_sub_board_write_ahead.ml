@@ -30,17 +30,27 @@ let fresh_test_base_path () =
    [Sys_error] (ENOTDIR). Same fixture as
    [test_board_vote_persistence.ml], duplicated per that suite's
    per-file fixture convention. *)
-let block_board_masc_dir_with_file () =
-  let base =
-    Filename.concat
-      (Filename.get_temp_dir_name ())
-      (Printf.sprintf "masc-test-subboard-wa-blocked-%06x" (Random.bits ()))
-  in
-  Unix.putenv "MASC_BASE_PATH" base;
-  let masc_dir = Filename.dirname (Board.persist_path ()) in
+let with_blocked_board_masc_dir f =
+  let store = Board.global () in
+  let masc_dir = store.Board.workspace_masc_dir in
+  let backup = masc_dir ^ ".fixture-backup" in
+  if Sys.file_exists backup then Alcotest.fail "workspace fixture backup already exists";
   Fs_compat.mkdir_p (Filename.dirname masc_dir);
-  Fs_compat.save_file masc_dir "not a directory";
-  base
+  let paths =
+    [ Board.persist_path store; Board.comments_path store; Board.vote_log_path store
+    ; Board.reactions_path store; Board.sub_boards_path store ]
+  in
+  List.iter Fs_compat.invalidate_cached_writer paths;
+  let existed = Sys.file_exists masc_dir in
+  if existed then Unix.rename masc_dir backup;
+  Fun.protect
+    ~finally:(fun () ->
+      List.iter Fs_compat.invalidate_cached_writer paths;
+      if Sys.file_exists masc_dir then Sys.remove masc_dir;
+      if existed then Unix.rename backup masc_dir)
+    (fun () ->
+      Fs_compat.save_file masc_dir "not a directory";
+      f ())
 
 let with_eio f () =
   Eio_main.run @@ fun env ->
@@ -48,7 +58,10 @@ let with_eio f () =
   ignore (fresh_test_base_path ());
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  Board_dispatch.init_jsonl ~recipient_lookup:Recipient_lookup.none_declared ();
+  Result.get_ok (Board_dispatch.init_jsonl
+    ~workspace_masc_dir:(Common.masc_dir_from_base_path
+      ~base_path:(Env_config_core.base_path ()))
+    ~recipient_lookup:Recipient_lookup.none_declared ());
   f ()
 
 let create ~slug =
@@ -60,10 +73,7 @@ let find_by_slug slug =
   |> List.find_opt (fun (sb : Board.sub_board) -> String.equal sb.slug slug)
 
 let test_failed_append_commits_nothing () =
-  let working_base =
-    Sys.getenv_opt "MASC_BASE_PATH" |> Option.value ~default:""
-  in
-  ignore (block_board_masc_dir_with_file ());
+  with_blocked_board_masc_dir (fun () ->
   let before_errors = Board.persist_error_count () in
   (match create ~slug:"wa-blocked" with
    | Ok _ -> Alcotest.fail "create must not succeed when the append fails"
@@ -72,8 +82,8 @@ let test_failed_append_commits_nothing () =
      Alcotest.fail ("expected Io_error, got " ^ Board.show_board_error e));
   Alcotest.(check bool)
     "persist error counter incremented" true
-    (Board.persist_error_count () > before_errors);
-  Unix.putenv "MASC_BASE_PATH" working_base;
+    (Board.persist_error_count () > before_errors)
+  );
   (* Nothing was committed: the same slug is free once the disk is
      healthy again. *)
   (match create ~slug:"wa-blocked" with
@@ -92,7 +102,10 @@ let test_create_is_durable_across_restart () =
      across a restart. *)
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  Board_dispatch.init_jsonl ~recipient_lookup:Recipient_lookup.none_declared ();
+  Result.get_ok (Board_dispatch.init_jsonl
+    ~workspace_masc_dir:(Common.masc_dir_from_base_path
+      ~base_path:(Env_config_core.base_path ()))
+    ~recipient_lookup:Recipient_lookup.none_declared ());
   match find_by_slug "wa-durable" with
   | Some sb ->
     Alcotest.(check string) "slug survives restart" "wa-durable" sb.Board.slug

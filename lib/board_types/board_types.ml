@@ -801,7 +801,7 @@ type store = {
   mutable votes_load_result : (unit, string) result;
   mutable reactions_load_result : (unit, string) result;
   mutable sub_boards_load_result : (unit, string) result;
-  workspace_masc_dir: string option;
+  workspace_masc_dir: string;
   posts: (string, post) Hashtbl.t;
   comments: (string, comment) Hashtbl.t;
   (* #10086: value carries [(direction, cast_ts)] so

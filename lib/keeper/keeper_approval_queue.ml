@@ -618,21 +618,28 @@ let read_durable_unlocked ~base_path =
               , Some log ))))
 ;;
 
-let load_snapshot_unlocked ~base_path :
-    ( pending_approval SMap.t
-      * persisted_delivery SMap.t
-      * int
-      * storage_error list
-      * durable_state option
-    , storage_error )
-    result =
+type loaded_snapshot =
+  { loaded_pending : pending_approval SMap.t
+  ; loaded_deliveries : persisted_delivery SMap.t
+  ; loaded_next_sequence : int
+  ; loaded_read_errors : storage_error list
+  ; loaded_durable : durable_state option
+  }
+
+let load_snapshot_unlocked ~base_path : (loaded_snapshot, storage_error) result =
   let path = pending_store_path ~base_path in
   try
     if not (Sys.file_exists path)
     then
       (* A missing snapshot is a reset store. Rows left in the log describe
          nothing; they are dropped when the first write rewrites both. *)
-      Ok (SMap.empty, SMap.empty, first_sequence, [], None)
+      Ok
+        { loaded_pending = SMap.empty
+        ; loaded_deliveries = SMap.empty
+        ; loaded_next_sequence = first_sequence
+        ; loaded_read_errors = []
+        ; loaded_durable = None
+        }
     else (
       match Safe_ops.read_json_file_safe path with
       | Error reason ->
@@ -664,11 +671,15 @@ let load_snapshot_unlocked ~base_path :
              | Ok log -> Ok (log, generation, pending_entry_errors))
          with
          | Ok (log, loaded_generation, pending_entry_errors) ->
-           let loaded_pending = log.log_pending in
-           let loaded_deliveries = log.log_deliveries in
-           let loaded_next_sequence = log.log_next_sequence in
+           let plan =
+             plan_restart
+               ~pending_map:log.log_pending
+               ~delivery_map:log.log_deliveries
+               ~entry_errors:pending_entry_errors
+               ~partial_tail:log.partial_tail
+           in
            let pending_read_errors =
-             List.map (fun reason -> { path; reason }) pending_entry_errors
+             List.map (fun reason -> { path; reason }) plan.entry_errors
            in
            List.iter
              (fun (error : storage_error) ->
@@ -677,12 +688,9 @@ let load_snapshot_unlocked ~base_path :
                   ~path
                   ~detail:error.reason)
              pending_read_errors;
-           let pending_changed, loaded_pending =
-             classify_restarted_pending loaded_pending
-           in
-           let deliveries_changed, loaded_deliveries =
-             classify_restarted_deliveries loaded_deliveries
-           in
+           let loaded_pending = plan.pending_map in
+           let loaded_deliveries = plan.delivery_map in
+           let loaded_next_sequence = log.log_next_sequence in
            let durable =
              { durable_pending = loaded_pending
              ; durable_deliveries = loaded_deliveries
@@ -691,10 +699,16 @@ let load_snapshot_unlocked ~base_path :
              ; log_rows = log.rows_applied
              }
            in
-           if
-             pending_read_errors = []
-             && (pending_changed || deliveries_changed || log.partial_tail)
-           then (
+           let loaded loaded_durable =
+             { loaded_pending
+             ; loaded_deliveries
+             ; loaded_next_sequence
+             ; loaded_read_errors = pending_read_errors
+             ; loaded_durable
+             }
+           in
+           (match plan.rewrite with
+           | Rewrite { classification_changed; partial_tail } ->
              set_durable_state ~base_path durable;
              let write_snapshot ~generation =
                Result.map
@@ -706,7 +720,7 @@ let load_snapshot_unlocked ~base_path :
                     ~pending_map:loaded_pending
                     ~delivery_map:loaded_deliveries)
              in
-             match
+             (match
                compact_unlocked
                  ~write_snapshot
                  ~base_path
@@ -718,21 +732,10 @@ let load_snapshot_unlocked ~base_path :
                Log.Server.warn
                  "gate_pending restart rewrite workspace=%s classification=%b partial_log_tail=%b"
                  base_path
-                 (pending_changed || deliveries_changed)
-                 log.partial_tail;
-               Ok
-                 ( loaded_pending
-                 , loaded_deliveries
-                 , loaded_next_sequence
-                 , pending_read_errors
-                 , durable_state_for ~base_path ))
-           else
-             Ok
-               ( loaded_pending
-               , loaded_deliveries
-               , loaded_next_sequence
-               , pending_read_errors
-               , Some durable )
+                 classification_changed
+                 partial_tail;
+               Ok (loaded (durable_state_for ~base_path)))
+           | Retain -> Ok (loaded (Some durable)))
          | Error reason ->
            report_pending_read_drop
              ~reason:Read_drop_reason.Invalid_payload
@@ -2674,11 +2677,12 @@ let install_persistence_internal ~after_load ~after_pending_publish ~base_path =
         match load_snapshot_unlocked ~base_path with
         | Error _ as error -> error
         | Ok
-            ( loaded_pending
-            , loaded_deliveries
-            , loaded_next_sequence
-            , pending_read_errors
-            , loaded_durable ) ->
+            { loaded_pending
+            ; loaded_deliveries
+            ; loaded_next_sequence
+            ; loaded_read_errors = pending_read_errors
+            ; loaded_durable
+            } ->
           (match loaded_durable with
            | Some durable -> set_durable_state ~base_path durable
            | None -> drop_durable_state ~base_path);

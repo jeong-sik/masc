@@ -50,6 +50,12 @@ val unavailable_status :
     when that tool is available. It does not read another prompt in that fallback.
     Other exceptions, including cancellation, propagate. *)
 
+val capacity_deferred_status : turn_ref:Ids.Turn_ref.t -> (string, string) result
+(** The preceding request was refused for input capacity and this retry omits
+    the selected memory body. It does not blame memory for that refusal or
+    claim that selected facts were delivered. A managed-fragment error stays
+    an error, so it cannot authorize a smaller replacement. *)
+
 val unknown_day : string
 (** What a body item writes for a time that is not a representable date. *)
 

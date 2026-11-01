@@ -255,6 +255,7 @@ val keeper_recall_turn_unsure : string
     the memories the judgment carried. *)
 val keeper_recall_status_selected : string
 val keeper_recall_status_selected_ids : string
+val keeper_recall_status_capacity_deferred : string
 val keeper_recall_status_none_found_needed : string
 val keeper_recall_status_none_found_unsure : string
 val keeper_recall_status_none_needed : string

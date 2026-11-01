@@ -233,6 +233,7 @@ let keeper_recall_turn_unsure = "keeper.memory.recall.turn.unsure"
    the memories the judgment carried. *)
 let keeper_recall_status_selected = "keeper.recall.status.selected"
 let keeper_recall_status_selected_ids = "keeper.recall.status.selected_ids"
+let keeper_recall_status_capacity_deferred = "keeper.recall.status.capacity_deferred"
 let keeper_recall_status_none_found_needed = "keeper.recall.status.none_found_needed"
 let keeper_recall_status_none_found_unsure = "keeper.recall.status.none_found_unsure"
 let keeper_recall_status_none_needed = "keeper.recall.status.none_needed"

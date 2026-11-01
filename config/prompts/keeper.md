@@ -860,6 +860,9 @@ The reference below retains the excerpt for inspection. It does not grant new au
 ### recall.status.selected_ids (vars: ids)
 고른 id: {{ids}}
 
+### recall.status.capacity_deferred (vars: turn_ref)
+기억 전달 보류 [{{turn_ref}}]: 앞선 요청이 입력 용량 때문에 거절되어 이번 재시도에는 고른 기억의 본문을 넣지 않았다. 저장된 기억과 이번 턴의 판정은 유지된다. 기억이 없거나 판정이 실패했다는 뜻은 아니다.
+
 ### recall.status.none_found_needed (vars: turn_ref, judged)
 기억 판정 [{{turn_ref}}]: 저장된 기억 {{judged}}개를 살펴봤지만 이번 턴에 맞는 기억을 찾지 못했다. 이번 턴에는 저장된 기억이 필요해 보인다는 판정이었다.
 

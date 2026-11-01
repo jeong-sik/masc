@@ -274,55 +274,16 @@ let test_goal_space_default () =
     check bool "duplicate store is rejected on read" true (Result.is_error (G.find config ~goal_id:first));
     check bool "corrupt store never licenses a new assignment" true (Result.is_error (bind second {space with id=52}));
     check bool "corrupt evidence remains" true (Masc.Workspace.read_json_doc config store=Ok (Some corrupt));
-    let earlier_row=`Assoc [
+    let earlier=`Assoc ["bindings",`List [`Assoc [
       "goalId",`String first;"addonInstanceId",`String "previous-runtime-instance";
-      "space",Lane.ego_space_to_json space;"actor",`String "keeper:test"] in
-    let earlier=`Assoc ["bindings",`List [earlier_row]] in
-    Masc.Workspace.write_json config store earlier;
-    let legacy=Option.get (ok (G.find config ~goal_id:first)) in
-    check bool "earlier incarnation wire decodes as legacy owner without guessing installation" true
-      (legacy.owner=G.Legacy_addon_instance "previous-runtime-instance"
-       && G.to_json legacy=earlier_row);
-    check bool "legacy row refuses configured resolution" true
-      (Result.is_error (G.resolve legacy
-        ~installation:(Masc.Lane_addon_tool_request_owner.Configuration "previous-runtime-instance")
-        [original]));
-    check bool "legacy row refuses manual resolution" true
-      (Result.is_error (G.resolve legacy
-        ~installation:(Masc.Lane_addon_tool_request_owner.Manual "previous-runtime-instance")
-        [original]));
-    check bool "legacy row refuses silent overwrite on same Goal" true
-      (Result.is_error (bind first {space with id=53}));
-    check bool "legacy row refuses ambiguous Space sharing on another Goal" true
-      (Result.is_error (bind second space));
-    check bool "sibling Goal remains readable alongside legacy row" true
-      (ok (G.find config ~goal_id:second)=None);
-    let second_committed=ok (bind second {space with id=52}) in
-    check bool "sibling Goal binds another Space while preserving legacy row" true
-      (second_committed.created
-       && Masc.Workspace.read_json_doc config store
-          = Ok (Some (`Assoc ["bindings",`List [earlier_row; G.to_json second_committed.binding]])));
-    let second_unbound=ok (G.unbind config ~goal_id:second) in
-    check bool "sibling Goal unbinds while preserving legacy row" true
-      (second_unbound.removed=Some second_committed.binding
-       && Masc.Workspace.read_json_doc config store=Ok (Some earlier));
-    let legacy_unbound=ok (G.unbind config ~goal_id:first) in
-    check bool "legacy row can be explicitly unbound" true
-      (legacy_unbound.removed=Some legacy
-       && ok (G.find config ~goal_id:first)=None);
-    let rebound=ok (bind first space) in
-    check bool "after explicit unbind the Goal rebinds and resolves with typed installation" true
-      (rebound.created
-       && ok (G.resolve rebound.binding
-            ~installation:(Masc.Lane_addon_tool_request_owner.Configuration "addon-one")
-            [reconnected]) = reconnected.client_id);
-    let mixed_owner=`Assoc ["bindings",`List [`Assoc [
-      "goalId",`String first;
-      "installationId",`String (Masc.Lane_addon_tool_request_owner.installation_id (Configuration "addon-one"));
-      "addonInstanceId",`String "previous-runtime-instance";
       "space",Lane.ego_space_to_json space;"actor",`String "keeper:test"]]] in
-    check bool "row with both installationId and addonInstanceId is rejected" true
-      (Result.is_error (G.decode mixed_owner)))
+    Masc.Workspace.write_json config store earlier;
+    check bool "earlier incarnation wire cannot be inferred as an installation" true
+      (Result.is_error (G.find config ~goal_id:first));
+    check bool "unbind does not delete a store its current decoder cannot read" true
+      (Result.is_error (G.unbind config ~goal_id:first));
+    check bool "hard-cut evidence remains for its operator" true
+      (Masc.Workspace.read_json_doc config store=Ok (Some earlier)))
 
 let test_multi_worker_inventory () =
   let module I=Masc.Browser_connection_inventory in

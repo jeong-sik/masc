@@ -306,19 +306,14 @@ let resolve ?goal_space ~required_actions t ~preference verb ~start_time =
       let* preference=match goal_space with
         | None -> Ok preference
         | Some (binding:Browser_goal_space.t) ->
-          (match binding.owner with
-           | Browser_goal_space.Legacy_addon_instance _ ->
-             Browser_goal_space.resolve binding
-               ~installation:(Lane_addon_tool_request_owner.Manual "") []
-           | Installation installation ->
-             let* owner=goal_space_service t installation in
-             let listed=List.filter (fun (client:Browser_lane.client_info) ->
-               let id=Browser_lane.client_id_to_string client.client_id in
-               List.exists (fun (holder,(served:served)) -> String.equal holder id
-                 && String.equal served.service.instance_id owner.service.instance_id
-                 && Lane_addon_tool_export.equal_owner served.service.owner owner.service.owner)
-                 gathered.holders) gathered.listed in
-             Browser_goal_space.resolve binding ~installation:owner.service.installation listed)
+          (let* owner=goal_space_service t binding.installation in
+           let listed=List.filter (fun (client:Browser_lane.client_info) ->
+             let id=Browser_lane.client_id_to_string client.client_id in
+             List.exists (fun (holder,(served:served)) -> String.equal holder id
+               && String.equal served.service.instance_id owner.service.instance_id
+               && Lane_addon_tool_export.equal_owner served.service.owner owner.service.owner)
+               gathered.holders) gathered.listed in
+           Browser_goal_space.resolve binding ~installation:owner.service.installation listed)
           |> Result.map (fun client_id -> Browser_selection.Exact (Browser_lane.Live_route (Some client_id)))
           |> Result.map_error (fun error -> Tool_result.make_err
               ~tool_name:Browser_addon_tool.definition.name ~start_time

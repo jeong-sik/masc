@@ -91,13 +91,13 @@ let fixture_int_field fields key =
   | None -> Alcotest.failf "fixture field %S is not an int" key
 
 let restore_model_catalog = function
-  | Some catalog -> Llm_provider.Model_catalog.set_global catalog
-  | None -> Llm_provider.Model_catalog.clear_global ()
+  | Some catalog -> (Llm_provider.Catalog_snapshot.publish (Masc_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None)))
+  | None -> (Llm_provider.Catalog_snapshot.reset ())
 ;;
 
 let with_model_catalog_content content f =
   let path = Filename.temp_file "runtime-thinking-agent_core-models" ".toml" in
-  let previous = Llm_provider.Model_catalog.global () in
+  let previous = (Llm_provider.Catalog_snapshot.models (Llm_provider.Catalog_snapshot.current ())) in
   Fun.protect
     ~finally:(fun () ->
       restore_model_catalog previous;
@@ -108,7 +108,7 @@ let with_model_catalog_content content f =
       match Llm_provider.Model_catalog.load_file path with
       | Error msg -> Alcotest.failf "test AGENT_CORE model catalog should load: %s" msg
       | Ok catalog ->
-        Llm_provider.Model_catalog.set_global catalog;
+        (Llm_provider.Catalog_snapshot.publish (Masc_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None)));
         f ())
 ;;
 
@@ -4139,7 +4139,7 @@ let test_a_lane_named_after_its_head_still_wins () =
 let () =
   (match Llm_provider.Model_catalog.load_default () with
    | Error msg -> Alcotest.failf "packaged AGENT_CORE models.toml should load: %s" msg
-   | Ok catalog -> Llm_provider.Model_catalog.set_global catalog);
+   | Ok catalog -> (Llm_provider.Catalog_snapshot.publish (Masc_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None))));
   Alcotest.run
     "runtime_per_keeper_routing"
     [ ( "runtime-assignment routing"

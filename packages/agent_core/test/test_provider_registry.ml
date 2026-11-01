@@ -519,8 +519,8 @@ let with_provider_catalog json f =
   match Provider_catalog.of_json (Yojson.Safe.from_string json) with
   | Error msg -> fail msg
   | Ok catalog ->
-    Provider_catalog.set_global catalog;
-    Fun.protect ~finally:Provider_catalog.clear_global f
+    (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Llm_provider.Catalog_snapshot.models (Llm_provider.Catalog_snapshot.current ())) ~providers:(Some (catalog))));
+    Fun.protect ~finally:(fun () -> Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Llm_provider.Catalog_snapshot.models (Llm_provider.Catalog_snapshot.current ())) ~providers:(None))) f
 ;;
 
 let test_catalog_overlay_registers_exact_provider_id_only () =
@@ -874,8 +874,8 @@ let test_catalog_aliases_are_not_registry_keys () =
   match Provider_catalog.of_entries [ entry ] with
   | Error msg -> fail msg
   | Ok catalog ->
-    Provider_catalog.set_global catalog;
-    Fun.protect ~finally:Provider_catalog.clear_global (fun () ->
+    (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Llm_provider.Catalog_snapshot.models (Llm_provider.Catalog_snapshot.current ())) ~providers:(Some (catalog))));
+    Fun.protect ~finally:(fun () -> Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Llm_provider.Catalog_snapshot.models (Llm_provider.Catalog_snapshot.current ())) ~providers:(None))) (fun () ->
       let reg = Provider_registry.default () in
       check bool "id registered" true (Option.is_some (Provider_registry.find reg "host"));
       check

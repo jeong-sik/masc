@@ -962,8 +962,3 @@ let default_model_for_provider t provider_id =
   | Some entry -> entry.default_model
   | None -> None
 ;;
-
-let runtime_override : t option Atomic.t = Atomic.make None
-let set_global t = Atomic.set runtime_override (Some t)
-let clear_global () = Atomic.set runtime_override None
-let global () = Atomic.get runtime_override

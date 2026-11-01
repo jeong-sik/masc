@@ -1,11 +1,9 @@
 open Llm_provider
 
 let with_catalog f =
-  let previous = Model_catalog.global () in
+  let previous = Llm_provider.Catalog_snapshot.current () in
   let restore () =
-    match previous with
-    | Some catalog -> Model_catalog.set_global catalog
-    | None -> Model_catalog.clear_global ()
+    Llm_provider.Catalog_snapshot.publish previous
   in
   let path =
     match List.find_opt Sys.file_exists [ "models.toml"; "../models.toml" ] with
@@ -15,7 +13,7 @@ let with_catalog f =
   match Model_catalog.load_file path with
   | Error message -> Alcotest.fail message
   | Ok catalog ->
-    Model_catalog.set_global catalog;
+    (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None)));
     Fun.protect f ~finally:restore
 ;;
 

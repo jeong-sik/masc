@@ -36,22 +36,28 @@ let existing_file path =
     with
     | Sys_error _ -> None
 
-let install_runtime_model_catalog_override ~load_catalog ~set_catalog path =
+let install_runtime_model_catalog_override ~load_catalog ~publish_catalog path =
+  let refuse detail =
+    raise (Env_config_core.Config_error (Printf.sprintf "catalog %s: %s" path detail)) in
   match load_catalog path with
-  | Ok catalog -> set_catalog catalog
-  | Error detail ->
-    raise (Env_config_core.Config_error (Printf.sprintf "catalog %s: %s" path detail))
+  | Error detail -> refuse detail
+  | Ok catalog ->
+    (match Llm_provider.Catalog_snapshot.of_catalogs
+        ~models:(Some catalog) ~providers:None with
+     | Ok snapshot -> publish_catalog snapshot
+     | Error error -> refuse (Llm_provider.Catalog_snapshot.error_to_string error))
 
 let configure_agent_core_model_catalog_env
       ?env
-      ?(agent_core_catalog = Llm_provider.Model_catalog.global)
+      ?(agent_core_catalog = fun () ->
+        Llm_provider.Catalog_snapshot.models (Llm_provider.Catalog_snapshot.current ()))
       ?(load_catalog = Llm_provider.Model_catalog.load_file)
-      ?(set_catalog = Llm_provider.Model_catalog.set_global)
+      ?(publish_catalog = Llm_provider.Catalog_snapshot.publish)
       ()
   =
   match replacement_catalog_path ?env () with
   | Some path ->
-    install_runtime_model_catalog_override ~load_catalog ~set_catalog path;
+    install_runtime_model_catalog_override ~load_catalog ~publish_catalog path;
     Log.Misc.info
       "model_catalog: AGENT_CORE_MODEL_CATALOG=%s already configured and loaded"
       path;

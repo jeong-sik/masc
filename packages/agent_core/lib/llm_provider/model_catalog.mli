@@ -99,11 +99,6 @@ type provider_entry = Model_provider_catalog.entry =
 
 type t
 
-(** Raised by {!global} when the build-time generated catalog violates the
-    catalog syntax or schema. The generated catalog is an AGENT_CORE build invariant,
-    so there is no empty-catalog fallback. *)
-exception Invalid_embedded_catalog of string
-
 val empty : t
 val model_entries : t -> model_entry list
 val provider_entries : t -> provider_entry list
@@ -112,6 +107,11 @@ val without_providers : t -> t
 (** Retain every model row while removing provider declarations, aliases,
     defaults and bare-row permissions. Exact scoped model rows still answer
     for explicitly named custom providers. No global catalog is consulted. *)
+
+val with_provider_entry : t -> provider_entry -> t
+(** Retain all exact model rows with only the supplied provider declaration as
+    lookup authority. Its aliases and bare-row permissions replace the seeds.
+    This pure view neither admits nor publishes a process configuration. *)
 
 val with_model_overrides : t -> Capability_manifest.t -> t
 (** Compose a parsed JSON capability declaration into a new immutable catalog.
@@ -221,28 +221,3 @@ val model_entries_for_provider
     rows precede canonical scoped rows, then permitted bare rows; a row with
     the same whole id in an earlier scope shadows the later row. Model ids
     remain verbatim. Enumeration preserves declared exact identities. *)
-
-(** Return the active model catalog.
-
-    Resolution order:
-    - runtime override installed with {!set_global} (full replacement)
-    - build-time embedded AGENT_CORE [models.toml]
-
-    A provider or model fact is written in the embedded catalog and nowhere
-    else. A deployment names which rows it uses in its runtime configuration;
-    it does not restate what a row says. The second copy this module used to
-    accept disagreed with the first on tool support, on replay policy, and on
-    one model's window by a factor of five.
-
-    The embedded result is cached after first computation. Invalid generated
-    data raises {!Invalid_embedded_catalog}; it never becomes [None] or an
-    empty catalog. AGENT_CORE does not inspect an environment variable for an
-    alternate catalog. Callers that need a custom catalog must call
-    {!load_file} and {!set_global} explicitly.
-
-    {!clear_global} clears the runtime override and the cache. *)
-val global : unit -> t option
-
-val set_global : t -> unit
-
-val clear_global : unit -> unit

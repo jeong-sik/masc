@@ -518,11 +518,9 @@ let test_structured_extract () =
     let body = openai_text_response {|{"name":"test","age":25}|} in
     let url = start_multi ~sw ~net:env#net ~port:21016 [ body ] in
     let provider_id = "full-pipeline-structured-mock" in
-    let previous_provider_catalog = Llm_provider.Provider_catalog.global () in
+    let previous_provider_catalog = Llm_provider.Catalog_snapshot.current () in
     Eio.Switch.on_release sw (fun () ->
-      match previous_provider_catalog with
-      | Some catalog -> Llm_provider.Provider_catalog.set_global catalog
-      | None -> Llm_provider.Provider_catalog.clear_global ());
+      Llm_provider.Catalog_snapshot.publish previous_provider_catalog);
     let provider_capabilities =
       { Llm_provider.Capabilities.default_capabilities with
         supports_response_format_json = true
@@ -549,7 +547,7 @@ let test_structured_extract () =
       | Ok catalog -> catalog
       | Error msg -> fail msg
     in
-    Llm_provider.Provider_catalog.set_global provider_catalog;
+    (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Llm_provider.Catalog_snapshot.models (Llm_provider.Catalog_snapshot.current ())) ~providers:(Some (provider_catalog))));
     let schema : (string * int) Structured.schema =
       { params =
           [ { name = "name"

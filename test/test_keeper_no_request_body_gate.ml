@@ -37,15 +37,13 @@ let test_a_large_request_reaches_the_peer_and_a_refusal_moves_the_lane () =
   Eio.Switch.run @@ fun sw ->
   Masc_test_deps.init_eio_clock ~sw env;
   let runtime_snapshot = Runtime.For_testing.snapshot () in
-  let catalog_snapshot = Llm_provider.Model_catalog.global () in
+  let catalog_snapshot = Llm_provider.Catalog_snapshot.current () in
   let base_path = Filename.temp_file "keeper-no-body-gate-" "" in
   Unix.unlink base_path;
   Unix.mkdir base_path 0o700;
   Eio.Switch.on_release sw (fun () ->
     Runtime.For_testing.restore runtime_snapshot;
-    (match catalog_snapshot with
-     | None -> Llm_provider.Model_catalog.clear_global ()
-     | Some catalog -> Llm_provider.Model_catalog.set_global catalog);
+    (Llm_provider.Catalog_snapshot.publish catalog_snapshot);
     remove base_path);
   let response_without_usage =
     match
@@ -75,7 +73,7 @@ let test_a_large_request_reaches_the_peer_and_a_refusal_moves_the_lane () =
   write catalog_path (catalog_row "fixture" ^ catalog_row "overflow");
   (match Llm_provider.Model_catalog.load_file catalog_path with
    | Error detail -> fail detail
-   | Ok catalog -> Llm_provider.Model_catalog.set_global catalog);
+   | Ok catalog -> (Llm_provider.Catalog_snapshot.publish (Masc_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None))));
   let config_path = Filename.concat base_path "runtime.toml" in
   let config_text =
     Printf.sprintf {|[runtime]
@@ -219,15 +217,13 @@ let test_historical_tool_results ?(argument_seed = Completed_seed)
     | None -> Domain_pool_ref.clear_for_tests ()
     | Some previous -> Domain_pool_ref.set previous);
   let runtime_snapshot = Runtime.For_testing.snapshot () in
-  let catalog_snapshot = Llm_provider.Model_catalog.global () in
+  let catalog_snapshot = Llm_provider.Catalog_snapshot.current () in
   let base_path = Filename.temp_file "keeper-no-body-gate-demote-" "" in
   Unix.unlink base_path;
   Unix.mkdir base_path 0o700;
   Eio.Switch.on_release sw (fun () ->
     Runtime.For_testing.restore runtime_snapshot;
-    (match catalog_snapshot with
-     | None -> Llm_provider.Model_catalog.clear_global ()
-     | Some catalog -> Llm_provider.Model_catalog.set_global catalog);
+    (Llm_provider.Catalog_snapshot.publish catalog_snapshot);
     remove base_path);
   let historical_input = `Assoc ["command", `String (String.make 4000 'h')] in
   let active_input = `Assoc ["command", `String (String.make 4000 'a')] in
@@ -250,7 +246,7 @@ let test_historical_tool_results ?(argument_seed = Completed_seed)
   write catalog_path (catalog_row "fixture");
   (match Llm_provider.Model_catalog.load_file catalog_path with
    | Error detail -> fail detail
-   | Ok catalog -> Llm_provider.Model_catalog.set_global catalog);
+   | Ok catalog -> (Llm_provider.Catalog_snapshot.publish (Masc_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None))));
   let config_path = Filename.concat base_path "runtime.toml" in
   let config_text = Printf.sprintf {|[runtime]
 default = "fixture.sample"

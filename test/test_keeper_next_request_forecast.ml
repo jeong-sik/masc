@@ -1261,7 +1261,7 @@ let test_observed_boundary_forecast ~samples ~expected_front () =
   Masc_test_deps.init_eio_clock ~sw env;
   let module Ledger = Keeper_model_input_ledger in
   let runtime_snapshot = Runtime.For_testing.snapshot () in
-  let catalog_snapshot = Llm_provider.Model_catalog.global () in
+  let catalog_snapshot = Llm_provider.Catalog_snapshot.current () in
   let base_path = Filename.temp_file "forecast-boundary-" "" in
   Unix.unlink base_path;
   Unix.mkdir base_path 0o700;
@@ -1273,9 +1273,7 @@ let test_observed_boundary_forecast ~samples ~expected_front () =
   in
   Eio.Switch.on_release sw (fun () ->
     Runtime.For_testing.restore runtime_snapshot;
-    (match catalog_snapshot with
-     | None -> Llm_provider.Model_catalog.clear_global ()
-     | Some catalog -> Llm_provider.Model_catalog.set_global catalog);
+    (Llm_provider.Catalog_snapshot.publish catalog_snapshot);
     Ledger.Table.For_testing.reset ();
     remove base_path);
   let unwrap = function Ok value -> value | Error detail -> Alcotest.fail detail in
@@ -1288,7 +1286,7 @@ let test_observed_boundary_forecast ~samples ~expected_front () =
   write catalog_path
     "[[models]]\nmodel_id = \"forecast-model\"\nprovider_name = \"fixture\"\nbase = \"openai_chat\"\nmax_context_tokens = 4096\nmax_output_tokens = 128\nsupports_tools = true\n";
   Llm_provider.Model_catalog.load_file catalog_path |> unwrap
-  |> Llm_provider.Model_catalog.set_global;
+  |> (fun models -> Llm_provider.Catalog_snapshot.publish (Masc_test_deps.admit_catalogs ~models:(Some models) ~providers:(None)));
   let config_path = Filename.concat base_path "runtime.toml" in
   write config_path
     ("[runtime]\ndefault = \"fixture.sample\"\n[providers.fixture]\nprotocol = \"openai-compatible-http\"\nendpoint = \"http://127.0.0.1:1/v1\"\n[models.sample]\napi-name = \"forecast-model\"\nmax-context = 4096\n[fixture.sample]\n");

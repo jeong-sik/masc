@@ -15,7 +15,7 @@ let () =
   | None -> Alcotest.fail "models.toml not found for provider_complete tests"
   | Some path ->
     (match Llm_provider.Model_catalog.load_file path with
-     | Ok catalog -> Llm_provider.Model_catalog.set_global catalog
+     | Ok catalog -> (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None)))
      | Error msg -> Alcotest.failf "failed to load %s: %s" path msg)
 ;;
 
@@ -1598,7 +1598,7 @@ let test_standard_openai_request_without_toggle_is_unchanged () =
 ;;
 
 let with_model_catalog_toml contents f =
-  let original = Llm_provider.Model_catalog.global () in
+  let original = Llm_provider.Catalog_snapshot.current () in
   match
     Llm_provider.Model_catalog.of_toml_string
       ~source:"test_provider_complete provider pricing"
@@ -1606,12 +1606,10 @@ let with_model_catalog_toml contents f =
   with
   | Error message -> Alcotest.fail message
   | Ok catalog ->
-    Llm_provider.Model_catalog.set_global catalog;
+    (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None)));
     Fun.protect
       ~finally:(fun () ->
-        match original with
-        | Some catalog -> Llm_provider.Model_catalog.set_global catalog
-        | None -> Llm_provider.Model_catalog.clear_global ())
+        Llm_provider.Catalog_snapshot.publish original)
       f
 ;;
 
@@ -1797,7 +1795,7 @@ let test_annotate_response_cost () =
     ; telemetry = Some (Llm_provider.Types.with_reported_model ~model:"claude-sonnet-5" None)
     }
   in
-  let source = Llm_provider.Pricing.of_catalog ~catalog:(Llm_provider.Model_catalog.global ())
+  let source = Llm_provider.Pricing.of_catalog ~catalog:(Llm_provider.Catalog_snapshot.models (Llm_provider.Catalog_snapshot.current ()))
       ~provider:(Llm_provider.Model_catalog.Anonymous_wire Anthropic) in
   match Llm_provider.Pricing.annotate_response_cost ~source response with
   | { usage = Some { cost_usd = Some cost; _ }; _ } ->
@@ -1822,7 +1820,7 @@ let test_annotate_response_cost_keeps_missing_scoped_rates () =
     ; telemetry = Some (Llm_provider.Types.with_reported_model ~model:"gpt-5.5" None)
     }
   in
-  let source = Llm_provider.Pricing.of_catalog ~catalog:(Llm_provider.Model_catalog.global ())
+  let source = Llm_provider.Pricing.of_catalog ~catalog:(Llm_provider.Catalog_snapshot.models (Llm_provider.Catalog_snapshot.current ()))
       ~provider:(Llm_provider.Model_catalog.Declared_provider "openai") in
   match Llm_provider.Pricing.annotate_response_cost ~source response with
   | { usage = Some usage; _ } ->

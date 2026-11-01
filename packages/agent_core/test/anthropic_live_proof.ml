@@ -157,7 +157,7 @@ let () =
   in
   let model_id = if Array.length Sys.argv > 1 then Sys.argv.(1) else default_model_id in
   (match Model_catalog.load_default () with
-   | Ok catalog -> Model_catalog.set_global catalog
+   | Ok catalog -> (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None)))
    | Error detail ->
      Printf.eprintf "embedded catalog unavailable: %s\n" detail;
      exit 1);

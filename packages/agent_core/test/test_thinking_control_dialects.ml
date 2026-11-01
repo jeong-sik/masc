@@ -38,11 +38,10 @@ let with_manifest json f =
   match CM.of_json (Yojson.Safe.from_string json) with
   | Error msg -> fail ("manifest parse failed: " ^ msg)
   | Ok manifest ->
-    let previous=MC.global () in
-    let catalog=match previous with Some catalog->catalog | None->MC.empty in
-    Fun.protect ~finally:(fun () -> match previous with
-      | Some catalog->MC.set_global catalog | None->MC.clear_global ())
-      (fun () -> MC.set_global (MC.with_model_overrides catalog manifest); f ())
+    let previous = Llm_provider.Catalog_snapshot.current () in
+    let catalog=match Llm_provider.Catalog_snapshot.models previous with Some catalog -> catalog | None -> MC.empty in
+    Fun.protect ~finally:(fun () -> Llm_provider.Catalog_snapshot.publish previous)
+      (fun () -> (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some ((MC.with_model_overrides catalog manifest))) ~providers:(None))); f ())
 ;;
 
 let install_repository_catalog () =
@@ -51,11 +50,10 @@ let install_repository_catalog () =
 ;;
 
 let with_repository_catalog f =
-  let previous=MC.global () in
+  let previous = Llm_provider.Catalog_snapshot.current () in
   install_repository_catalog ();
   Fun.protect
-    ~finally:(fun () -> match previous with
-      | Some catalog->MC.set_global catalog | None->MC.clear_global ())
+    ~finally:(fun () -> Llm_provider.Catalog_snapshot.publish previous)
     f
 ;;
 
@@ -73,7 +71,7 @@ let with_catalog_toml contents f =
        match MC.load_file path with
        | Error msg -> fail ("custom catalog parse failed: " ^ msg)
        | Ok catalog ->
-         MC.set_global catalog;
+         (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None)));
          Fun.protect ~finally:install_repository_catalog f)
 ;;
 

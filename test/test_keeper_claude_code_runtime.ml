@@ -2359,10 +2359,9 @@ let test_selected_claude_inference_survives_catalog_reload
     ?(http_accepted = [Llm_provider.Reasoning_effort.None_; Minimal; Low; Medium; High; XHigh; Max; Ultra])
     ~selected ~replacement ~expected_effort ~expected_thinking () =
   let base_path = temp_workspace () in
-  let previous_catalog = Llm_provider.Model_catalog.global () in
+  let previous_catalog = Llm_provider.Catalog_snapshot.current () in
   Fun.protect ~finally:(fun () ->
-    (match previous_catalog with None -> Llm_provider.Model_catalog.clear_global ()
-     | Some catalog -> Llm_provider.Model_catalog.set_global catalog);
+    (Llm_provider.Catalog_snapshot.publish previous_catalog);
     cleanup_tree base_path) @@ fun () ->
   let marker = Filename.concat base_path "selected-argv.jsonl" in
   let install_http_catalog () =
@@ -2374,7 +2373,7 @@ accepted_reasoning_efforts = [%s]
         Printf.sprintf "%S" (Llm_provider.Reasoning_effort.to_string effort)) http_accepted)) in
     let catalog = Llm_provider.Model_catalog.of_toml_string
         ~source:"Claude selected-declaration fixture" source |> require_ok Fun.id in
-    Llm_provider.Model_catalog.set_global catalog;
+    (Llm_provider.Catalog_snapshot.publish (Masc_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None)));
     match Llm_provider.Capabilities.for_model_id "claude-fixture" with
     | Some caps -> check bool "the controlled HTTP ladder is actually loaded" true
         (caps.accepted_reasoning_efforts=Some http_accepted)

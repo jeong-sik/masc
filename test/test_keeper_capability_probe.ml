@@ -710,12 +710,10 @@ signal.signal(signal.SIGTERM, signal.SIG_IGN)
 let test_muse_probe_uses_actual_mcp_callback () =
   let base_path = Filename.temp_dir "muse-capability-probe-" "" |> Unix.realpath in
   let snapshot = Runtime.For_testing.snapshot () in
-  let previous_catalog = Llm_provider.Model_catalog.global () in
+  let previous_catalog = Llm_provider.Catalog_snapshot.current () in
   Fun.protect ~finally:(fun () ->
     Runtime.For_testing.restore snapshot;
-    (match previous_catalog with
-     | None -> Llm_provider.Model_catalog.clear_global ()
-     | Some catalog -> Llm_provider.Model_catalog.set_global catalog);
+    (Llm_provider.Catalog_snapshot.publish previous_catalog);
     Fs_compat.remove_tree base_path) (fun () ->
     let account_home = Filename.concat base_path "account" in
     Fs_compat.mkdir_p (Filename.concat account_home ".config/muse");
@@ -770,7 +768,7 @@ supports_reasoning = true
 accepted_reasoning_efforts = ["low"]
 |} with
            | Error detail -> fail detail
-           | Ok catalog -> Llm_provider.Model_catalog.set_global catalog);
+           | Ok catalog -> (Llm_provider.Catalog_snapshot.publish (Masc_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None))));
           (match Llm_provider.Capabilities.for_model_id "fixture-selected-model" with
            | Some caps -> check bool "capability probe has a conflicting HTTP ladder" true
                (caps.accepted_reasoning_efforts = Some [Llm_provider.Reasoning_effort.Low])

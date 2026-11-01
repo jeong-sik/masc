@@ -10,7 +10,7 @@ let with_workspace f =
   Unix.mkdir base_path 0o700;
   let config = Workspace.default_config base_path in
   let runtime_snapshot = Runtime.For_testing.snapshot () in
-  let catalog_snapshot = Llm_provider.Model_catalog.global () in
+  let catalog_snapshot = Llm_provider.Catalog_snapshot.current () in
   let path = Filename.concat base_path "runtime.toml" in
   let toml = {|[providers.codex]
 protocol = "codex-app-server"
@@ -26,8 +26,7 @@ default = "codex.codex"
   Fun.protect
     ~finally:(fun () ->
       Runtime.For_testing.restore runtime_snapshot;
-      (match catalog_snapshot with None -> Llm_provider.Model_catalog.clear_global ()
-       | Some catalog -> Llm_provider.Model_catalog.set_global catalog);
+      (Llm_provider.Catalog_snapshot.publish catalog_snapshot);
       Keeper_registry.For_testing.unregister ~base_path keeper_name;
       ignore (Workspace.reset config))
     (fun () -> Eio_main.run (fun env ->
@@ -203,7 +202,7 @@ result-owner = "http.http"
 |} in
     let catalog = get (Llm_provider.Model_catalog.of_toml_string ~source:"outbox-unavailable-route"
       "[[models]]\nmodel_id = \"unrelated-fixture\"\nbase = \"openai_chat\"\nmax_context_tokens = 8192\n") in
-    Llm_provider.Model_catalog.set_global catalog;
+    (Llm_provider.Catalog_snapshot.publish (Masc_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None)));
     Fs_compat.save_file path alternate_config;
     (match Runtime.init_default_degraded_report ~config_path:path with
      | Ok (Runtime.Initialized_degraded _) -> ()
@@ -277,7 +276,7 @@ let test_mixed_route_changes_can_consume_the_original_receipt () =
   with_workspace (fun config meta _ ->
     let catalog = get (Llm_provider.Model_catalog.of_toml_string ~source:"outbox-mixed-runtime-route"
       "[[models]]\nmodel_id = \"gpt-fixture\"\nprovider_name = \"http\"\nbase = \"openai_chat\"\nmax_context_tokens = 400000\nmax_output_tokens = 128\nsupports_native_streaming = false\n") in
-    Llm_provider.Model_catalog.set_global catalog;
+    (Llm_provider.Catalog_snapshot.publish (Masc_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None)));
     let path = Filename.concat config.Workspace.base_path "runtime.toml" in
     let original_config = Fs_compat.load_file path in
     let oauth_path = Filename.concat config.base_path "synthetic-antigravity-oauth" in

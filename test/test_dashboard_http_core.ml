@@ -7065,7 +7065,7 @@ let with_direct_assignment_model_catalog f =
   (* Assignment publication validates the configured provider/model against
      AGENT_CORE. Declare the synthetic model used by config_sync_runtime_toml
      for the whole fixture, including its Keeper fiber cleanup. *)
-  let previous = Catalog.global () in
+  let previous = Llm_provider.Catalog_snapshot.current () in
   let catalog =
     match
       Catalog.of_toml_string ~source:"direct-assignment-fixture"
@@ -7081,11 +7081,9 @@ max_context_tokens = 8192
   in
   Fun.protect
     ~finally:(fun () ->
-      match previous with
-      | Some catalog -> Catalog.set_global catalog
-      | None -> Catalog.clear_global ())
+      Llm_provider.Catalog_snapshot.publish previous)
     (fun () ->
-      Catalog.set_global catalog;
+      (Llm_provider.Catalog_snapshot.publish (Masc_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None)));
       f ())
 
 let test_direct_assignment_route_rejects_stale_revision_without_write () =

@@ -244,10 +244,10 @@ let test_runtime_json_not_in_repo_config () =
    embedded catalog, because nothing else answers. *)
 let with_deployment_agent_core_model_catalog f =
   Fun.protect
-    ~finally:Llm_provider.Model_catalog.clear_global
+    ~finally:Llm_provider.Catalog_snapshot.reset
     (fun () ->
-       Llm_provider.Model_catalog.clear_global ();
-       match Llm_provider.Model_catalog.global () with
+       (Llm_provider.Catalog_snapshot.reset ());
+       match (Llm_provider.Catalog_snapshot.models (Llm_provider.Catalog_snapshot.current ())) with
        | None -> fail "embedded catalog should load"
        | Some catalog -> f catalog)
 
@@ -3175,7 +3175,7 @@ let with_model_catalog_content content f =
   close_out oc;
   Fun.protect
     ~finally:(fun () ->
-       Llm_provider.Model_catalog.clear_global ();
+       (Llm_provider.Catalog_snapshot.reset ());
        (try Sys.remove path with
         | _ -> ())
        )
@@ -3183,7 +3183,7 @@ let with_model_catalog_content content f =
        match Llm_provider.Model_catalog.load_file path with
        | Error msg -> failf "provider-qualified AGENT_CORE model catalog should load: %s" msg
        | Ok catalog ->
-         Llm_provider.Model_catalog.set_global catalog;
+         (Llm_provider.Catalog_snapshot.publish (Masc_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None)));
          f ())
 
 (* Config edits now publish the same catalog-validated state as bootstrap.
@@ -3776,7 +3776,7 @@ let with_fake_runtime_model_catalog f =
   close_out oc;
   Fun.protect
     ~finally:(fun () ->
-       Llm_provider.Model_catalog.clear_global ();
+       (Llm_provider.Catalog_snapshot.reset ());
        (try Sys.remove path with
         | _ -> ())
        )
@@ -3784,7 +3784,7 @@ let with_fake_runtime_model_catalog f =
        match Llm_provider.Model_catalog.load_file path with
        | Error msg -> failf "fake AGENT_CORE model catalog should load: %s" msg
        | Ok catalog ->
-         Llm_provider.Model_catalog.set_global catalog;
+         (Llm_provider.Catalog_snapshot.publish (Masc_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None)));
          f ())
 
 let test_runtime_locality_uses_provider_schema () =
@@ -7389,10 +7389,8 @@ enabled = %b
 ;;
 
 let test_wizard_provider_models_share_catalog_authority () =
-  let previous = Llm_provider.Model_catalog.global () in
-  Fun.protect ~finally:(fun () -> match previous with
-    | Some catalog -> Llm_provider.Model_catalog.set_global catalog
-    | None -> Llm_provider.Model_catalog.clear_global ()) (fun () ->
+  let previous = Llm_provider.Catalog_snapshot.current () in
+  Fun.protect ~finally:(fun () -> Llm_provider.Catalog_snapshot.publish previous) (fun () ->
     let rows provider = match Runtime_wizard_inventory.provider_model_rows provider with
       | Ok value -> Yojson.Safe.Util.to_list value
       | Error detail -> failf "wizard model inventory: %s" detail in
@@ -7453,13 +7451,12 @@ default = "selection-provider.selected"
     | [binding] -> binding | _ -> fail "one runtime binding required" in
   let select () = match Runtime_instance.of_binding runtime binding with
     | Ok selected -> selected | Error _ -> fail "runtime binding must materialize" in
-  let previous = Catalog.global () in
-  Fun.protect ~finally:(fun () -> match previous with
-    | Some catalog -> Catalog.set_global catalog | None -> Catalog.clear_global ())
+  let previous = Llm_provider.Catalog_snapshot.current () in
+  Fun.protect ~finally:(fun () -> Llm_provider.Catalog_snapshot.publish previous)
     (fun () ->
-      Catalog.set_global (catalog ~known:initially_known ~scale:1.0);
+      (Llm_provider.Catalog_snapshot.publish (Masc_test_deps.admit_catalogs ~models:(Some ((catalog ~known:initially_known ~scale:1.0))) ~providers:(None)));
       let selected = select () in
-      Catalog.set_global (catalog ~known:true ~scale:10.0);
+      (Llm_provider.Catalog_snapshot.publish (Masc_test_deps.admit_catalogs ~models:(Some ((catalog ~known:true ~scale:10.0))) ~providers:(None)));
       let fresh = select () in
       match fact with
       | Context_window ->

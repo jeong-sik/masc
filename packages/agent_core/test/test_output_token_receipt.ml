@@ -10,7 +10,7 @@ module Responses = Backend_openai_responses
 
 let () =
   match Model_catalog.load_default () with
-  | Ok catalog -> Model_catalog.set_global catalog
+  | Ok catalog -> (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None)))
   | Error message -> Alcotest.failf "failed to load the default model catalog: %s" message
 ;;
 

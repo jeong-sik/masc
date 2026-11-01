@@ -42,15 +42,13 @@ let install_prompts base_path =
   Prompt_defaults.init ()
 
 let install_catalog ~sw =
-  let previous = Llm_provider.Model_catalog.global () in
-  Eio.Switch.on_release sw (fun () -> match previous with
-    | Some catalog -> Llm_provider.Model_catalog.set_global catalog
-    | None -> Llm_provider.Model_catalog.clear_global ());
+  let previous = Llm_provider.Catalog_snapshot.current () in
+  Eio.Switch.on_release sw (fun () -> Llm_provider.Catalog_snapshot.publish previous);
   let source = Printf.sprintf
       "[[models]]\nmodel_id = %S\nprovider_name = \"fixture\"\nbase = \"openai_chat\"\nmax_context_tokens = 8192\nmax_output_tokens = 128\nsupports_tools = true\nsupports_native_streaming = false\n"
       model_id in
   match Llm_provider.Model_catalog.of_toml_string ~source:"direct-goal-wire" source with
-  | Ok catalog -> Llm_provider.Model_catalog.set_global catalog
+  | Ok catalog -> (Llm_provider.Catalog_snapshot.publish (Masc_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None)))
   | Error detail -> fail detail
 
 let create_goal config =

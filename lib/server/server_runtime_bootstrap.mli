@@ -31,11 +31,12 @@ val configure_agent_core_model_catalog_env :
   ?env:(string -> string option) ->
   ?agent_core_catalog:(unit -> Llm_provider.Model_catalog.t option) ->
   ?load_catalog:(string -> (Llm_provider.Model_catalog.t, string) result) ->
-  ?set_catalog:(Llm_provider.Model_catalog.t -> unit) ->
+  ?publish_catalog:(Llm_provider.Catalog_snapshot.t -> unit) ->
   unit ->
   string option
-(** Install only an operator-supplied [AGENT_CORE_MODEL_CATALOG] as a full catalog
-    replacement. Without it, require AGENT_CORE's packaged catalog.
+(** Admit and publish only an operator-supplied [AGENT_CORE_MODEL_CATALOG] as a
+    complete replacement without a JSON provider overlay. Failed admission
+    retains the previous publication. Without it, require the selected catalog.
     Config-root and executable-parent full catalogs are deliberately not
     discovered. *)
 

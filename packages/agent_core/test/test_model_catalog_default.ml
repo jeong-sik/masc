@@ -12,8 +12,8 @@ let first_model_id ~suite catalog =
 ;;
 
 let with_clean_model_catalog_override f =
-  Model_catalog.clear_global ();
-  Fun.protect ~finally:Model_catalog.clear_global f
+  (Llm_provider.Catalog_snapshot.reset ());
+  Fun.protect ~finally:Llm_provider.Catalog_snapshot.reset f
 ;;
 
 (* Exact model declarations used by subscriptions. The second value records
@@ -97,7 +97,7 @@ let test_haiku_5_5_row_reaches_the_wire () =
   let model_id = "claude-haiku-5-5" in
   let catalog = Model_catalog_test_support.load_repo_model_catalog ~suite:"Haiku 5.5 wire" in
   with_clean_model_catalog_override (fun () ->
-    Model_catalog.set_global catalog;
+    (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None)));
     let messages = [ Llm_provider.Types.make_message ~role:User [ Text "hello" ] ] in
     let config ?temperature ?top_p ?top_k ?enable_thinking ?reasoning_effort () =
       Llm_provider.Provider_config.make
@@ -176,7 +176,7 @@ let test_haiku_prefill_admission () =
   let module P = Llm_provider in
   let catalog = Model_catalog_test_support.load_repo_model_catalog ~suite:"Haiku prefill" in
   with_clean_model_catalog_override (fun () ->
-    Model_catalog.set_global catalog;
+    (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None)));
     let user = P.Types.make_message ~role:User [ Text "hello" ] in
     let assistant = P.Types.make_message ~role:Assistant [ Text "Continue:" ] in
     let expected_refusal =
@@ -227,7 +227,7 @@ let test_documented_claude_prefill_exclusions () =
   let module P = Llm_provider in
   let catalog = Model_catalog_test_support.load_repo_model_catalog ~suite:"Claude prefill exclusions" in
   with_clean_model_catalog_override (fun () ->
-    Model_catalog.set_global catalog;
+    (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None)));
     let user = P.Types.make_message ~role:User [Text "hello"] in
     let assistant = P.Types.make_message ~role:Assistant [Text "Continue:"] in
     let prefill = [user; assistant] in
@@ -278,7 +278,7 @@ let test_sonnet_5_5_thinking_modes_reach_the_wire () =
   let module Effort = Llm_provider.Reasoning_effort in
   let catalog = Model_catalog_test_support.load_repo_model_catalog ~suite:"Sonnet 5.5 wire" in
   with_clean_model_catalog_override (fun () ->
-    Model_catalog.set_global catalog;
+    (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None)));
     let messages = [ Llm_provider.Types.make_message ~role:User [ Text "hello" ] ] in
     let config ?enable_thinking ?reasoning_effort () =
       Llm_provider.Provider_config.make
@@ -392,7 +392,7 @@ let test_responses_sol_rejects_codex_only_ultra () =
   let module Effort = Llm_provider.Reasoning_effort in
   let catalog = Model_catalog_test_support.load_repo_model_catalog ~suite:"Responses Sol effort" in
   with_clean_model_catalog_override (fun () ->
-    Model_catalog.set_global catalog;
+    (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None)));
     let config effort = Config.make ~kind:OpenAI_compat
       ~provider_id:"openai-responses" ~model_id:"gpt-6-sol"
       ~base_url:"https://api.openai.com/v1" ~reasoning_effort:effort () in
@@ -475,7 +475,7 @@ let test_claude_rows_keep_sampling_parameters_off_the_wire () =
     Model_catalog_test_support.load_repo_model_catalog ~suite:"Claude sampling"
   in
   with_clean_model_catalog_override (fun () ->
-    Model_catalog.set_global catalog;
+    (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None)));
     let messages = [ Llm_provider.Types.make_message ~role:User [ Text "hello" ] ] in
     List.iter
       (fun (model_id, _) ->
@@ -507,7 +507,7 @@ let test_claude_rows_state_forced_tool_choice_as_the_api_takes_it () =
     Model_catalog_test_support.load_repo_model_catalog ~suite:"Claude tool_choice"
   in
   with_clean_model_catalog_override (fun () ->
-    Model_catalog.set_global catalog;
+    (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None)));
     List.iter
       (fun (model_id, accepted) ->
          match Capabilities.for_model_id model_id with
@@ -682,7 +682,7 @@ let test_global_loads_default_catalog_for_capabilities () =
     | None ->
       failf
         "Capabilities.for_model_id should resolve %S through embedded/default \
-         Model_catalog.global"
+         Catalog_snapshot.current"
         model_id)
 ;;
 
@@ -768,7 +768,7 @@ let test_catalog_only_runtime_projects_serving_constraint () =
     |> Result.get_ok
   in
   with_clean_model_catalog_override (fun () ->
-    Model_catalog.set_global catalog;
+    (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None)));
     match
       Capabilities.for_provider_model_id
         ~wire:None
@@ -815,7 +815,7 @@ let test_glm_vision_rows_reach_a_runtime_lookup () =
     Model_catalog_test_support.load_repo_model_catalog ~suite:"glm vision runtime rows"
   in
   with_clean_model_catalog_override (fun () ->
-    Model_catalog.set_global catalog;
+    (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None)));
     List.iter
       (fun provider_label ->
         match
@@ -857,7 +857,7 @@ let test_kimi_coding_rows_leave_temperature_out () =
     Model_catalog_test_support.load_repo_model_catalog ~suite:"kimi coding sampling"
   in
   with_clean_model_catalog_override (fun () ->
-    Model_catalog.set_global catalog;
+    (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None)));
     List.iter
       (fun model_id ->
         match

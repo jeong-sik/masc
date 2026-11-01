@@ -186,8 +186,8 @@ let test_exact_frozen_contract () =
   check bool "GLM exact admission keeps the named wire fingerprint" false glm_raw_schema
 
 let () =
-  Model_catalog.set_global (get_ok "embedded catalog" (Model_catalog.load_default ()));
-  Provider_catalog.clear_global ();
+  (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some ((get_ok "embedded catalog" (Model_catalog.load_default ())))) ~providers:(None)));
+  (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Llm_provider.Catalog_snapshot.models (Llm_provider.Catalog_snapshot.current ())) ~providers:(None)));
   run "Cohere schema wire" [ "contract", [
     test_case "Complete sync/SSE reaches the peer with declared shape" `Quick test_complete_sync_and_sse;
     test_case "explicit override and provider isolation" `Quick test_explicit_override_and_provider_isolation;

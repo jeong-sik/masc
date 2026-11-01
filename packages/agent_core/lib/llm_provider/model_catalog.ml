@@ -94,8 +94,6 @@ type t =
        without scanning [models]. A catalog is never changed after [make]. *)
   }
 
-exception Invalid_embedded_catalog of string
-
 let normalize_label value = String.lowercase_ascii (String.trim value)
 
 let index_scoped_rows models =
@@ -196,6 +194,9 @@ let with_model_overrides catalog declarations =
     if Row_key_map.mem (Model_identifiers.Model_id.equality_key entry.model_id) seen
     then None else Some (replace None entry)) entries in
   make ~models:(List.rev_append models added) ~providers:catalog.providers
+;;
+
+let with_provider_entry t provider = { t with providers = [provider] }
 ;;
 
 let find_string_field ~entry_id key toml =
@@ -1071,7 +1072,7 @@ let lookup_model_for_provider t ~provider ~model_id =
 ;;
 
 let lookup_model_for_provider_entry t ~(provider : provider_entry) ~model_id =
-  let selected = { t with providers = [provider] } in
+  let selected = with_provider_entry t provider in
   lookup_model_for_provider selected ~provider:(Declared_provider provider.id) ~model_id
 ;;
 
@@ -1105,53 +1106,4 @@ let lookup_for_provider t ~provider_name ~model_id =
     | Some kind -> Anonymous_wire kind
     | None -> Declared_provider provider_name in
   lookup_for_provider_reference t ~provider ~model_id
-;;
-
-type default_cache =
-  | Unloaded
-  | Loaded of t
-
-let load_embedded_catalog () =
-  match load_default () with
-  | Ok catalog -> catalog
-  | Error msg ->
-    raise
-      (Invalid_embedded_catalog
-         (Printf.sprintf "invalid generated embedded model catalog: %s" msg))
-;;
-
-let embedded_catalog : default_cache Atomic.t = Atomic.make Unloaded
-
-let load_embedded_once () =
-  match Atomic.get embedded_catalog with
-  | Loaded value -> value
-  | Unloaded ->
-    let value = load_embedded_catalog () in
-    if Atomic.compare_and_set embedded_catalog Unloaded (Loaded value)
-    then value
-    else (
-      match Atomic.get embedded_catalog with
-      | Loaded value -> value
-      | Unloaded -> value)
-;;
-
-let runtime_override : t option Atomic.t = Atomic.make None
-
-let set_global t = Atomic.set runtime_override (Some t)
-
-let clear_global () =
-  Atomic.set runtime_override None;
-  Atomic.set embedded_catalog Unloaded
-;;
-
-let global () =
-  match Atomic.get runtime_override with
-  | Some _ as o -> o
-  | None ->
-    let embedded_value = load_embedded_once () in
-    (* Re-read: [set_global] may have landed while the embedded catalog loaded,
-       and a full replacement wins over the embedded rows. *)
-    (match Atomic.get runtime_override with
-     | Some _ as o -> o
-     | None -> Some embedded_value)
 ;;

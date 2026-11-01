@@ -23,6 +23,11 @@ val of_provider_entry :
 (** Preserve the effective selected provider declaration, including its exact
     permission to use bare model rows. Do not re-resolve it from a seed catalog. *)
 
+val of_snapshot :
+  snapshot:Catalog_snapshot.t -> provider:Model_catalog.provider_reference -> source
+(** Preserve the admitted provider authority in this whole selection. Removed
+    aliases cannot recover seed permissions. Exact custom scoped rows survive. *)
+
 val pricing_for_model : source -> string -> pricing option
 (** Read the exact reported model from the captured catalog. A different
     reported ID never inherits the requested model's rates. *)

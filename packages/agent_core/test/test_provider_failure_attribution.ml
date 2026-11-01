@@ -80,11 +80,9 @@ let identity_catalog ~auth ~scope =
 
 let with_identity_catalog f =
   let module Catalog = Llm_provider.Provider_catalog in
-  let previous = Catalog.global () in
+  let previous = Llm_provider.Catalog_snapshot.current () in
   Fun.protect
-    ~finally:(fun () -> match previous with
-      | Some catalog -> Catalog.set_global catalog
-      | None -> Catalog.clear_global ())
+    ~finally:(fun () -> Llm_provider.Catalog_snapshot.publish previous)
     f
 ;;
 
@@ -96,11 +94,11 @@ let test_selected_identity_retains_auth_scope ~replace_before_construction () =
       ~scope:"original-account" in
     let replacement = identity_catalog
       ~auth:(`Assoc ["type",`String "none"]) ~scope:"replacement-account" in
-    Catalog.set_global original;
+    (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Llm_provider.Catalog_snapshot.models (Llm_provider.Catalog_snapshot.current ())) ~providers:(Some (original))));
     let binding = match Provider_runtime_binding.find "captured-identity-alias" with
       | Some binding -> binding
       | None -> Alcotest.fail "original binding is absent" in
-    if replace_before_construction then Catalog.set_global replacement;
+    if replace_before_construction then (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Llm_provider.Catalog_snapshot.models (Llm_provider.Catalog_snapshot.current ())) ~providers:(Some (replacement))));
     let config = match Provider_runtime_binding.to_provider_config binding with
       | Ok config -> config
       | Error error -> Alcotest.fail (Error.to_string error) in
@@ -113,7 +111,7 @@ let test_selected_identity_retains_auth_scope ~replace_before_construction () =
       (Yojson.Safe.Util.member "auth_scheme" json |> Yojson.Safe.Util.to_string);
     check_string "selected credential scope is retained" "original-account"
       (Yojson.Safe.Util.member "credential_scope" json |> Yojson.Safe.Util.to_string);
-    Catalog.set_global replacement;
+    (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Llm_provider.Catalog_snapshot.models (Llm_provider.Catalog_snapshot.current ())) ~providers:(Some (replacement))));
     let replaced = identity () in
     check_bool "catalog replacement cannot change failure ownership" true
       (Binding_identity.equal first replaced);
@@ -128,7 +126,7 @@ let test_selected_identity_retains_auth_scope ~replace_before_construction () =
       ~transport:Binding_identity.Http next_config |> require_identity in
     check_bool "a fresh selection observes the changed account scope" false
       (Binding_identity.equal first next_identity);
-    Catalog.clear_global ();
+    (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Llm_provider.Catalog_snapshot.models (Llm_provider.Catalog_snapshot.current ())) ~providers:(None)));
     check_bool "removing declarations cannot change failure ownership" true
       (Binding_identity.equal first (identity ()));
     let altered_provider = {config with provider_id=Some "different-explicit-provider"} in
@@ -148,15 +146,15 @@ let test_selected_identity_retains_auth_scope ~replace_before_construction () =
 let test_unselected_identity_does_not_acquire_catalog_facts () =
   with_identity_catalog (fun () ->
     let module Catalog = Llm_provider.Provider_catalog in
-    Catalog.clear_global ();
+    (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Llm_provider.Catalog_snapshot.models (Llm_provider.Catalog_snapshot.current ())) ~providers:(None)));
     let config = PC.make ~kind:PC.OpenAI_compat
       ~provider_id:"captured-identity-alias" ~model_id:"identity-model"
       ~base_url:"https://identity.example.invalid" () |> PC.freeze_for_request in
     let identity () = Binding_identity.of_provider_config
       ~transport:Binding_identity.Http config |> require_identity in
     let original = identity () in
-    Catalog.set_global (identity_catalog
-      ~auth:(`Assoc ["type",`String "none"]) ~scope:"later-account");
+    (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Llm_provider.Catalog_snapshot.models (Llm_provider.Catalog_snapshot.current ())) ~providers:(Some ((identity_catalog
+      ~auth:(`Assoc ["type",`String "none"]) ~scope:"later-account")))));
     check_bool "an unselected config cannot acquire later declaration ownership" true
       (Binding_identity.equal original (identity ()));
     check_string "provider observation keeps the explicit identity"

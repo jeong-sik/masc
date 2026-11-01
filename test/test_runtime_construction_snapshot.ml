@@ -2,7 +2,6 @@ open Alcotest
 open Masc
 
 module Catalog = Llm_provider.Model_catalog
-module Providers = Llm_provider.Provider_catalog
 module Config = Llm_provider.Provider_config
 module Caps = Llm_provider.Capabilities
 
@@ -69,32 +68,27 @@ default = "construction.selected"
     | _ -> fail "construction fixture requires exactly one binding"
 
 let with_reload ~before ~after inspect =
-  let previous_models = Catalog.global () in
-  let previous_providers = Providers.global () in
+  let previous = Llm_provider.Catalog_snapshot.current () in
   let previous_fs = Fs_compat.get_fs_opt () in
   let path = Filename.temp_file "masc-construction-credential-" ".key" in
   Fun.protect
     ~finally:(fun () ->
       Unix.unlink path;
-      (match previous_models with Some value -> Catalog.set_global value
-       | None -> Catalog.clear_global ());
-      (match previous_providers with Some value -> Providers.set_global value
-       | None -> Providers.clear_global ());
+      Llm_provider.Catalog_snapshot.publish previous;
       match previous_fs with Some fs -> Fs_compat.set_fs fs
       | None -> Fs_compat.clear_fs ())
     (fun () ->
       Unix.chmod path 0o600;
       Out_channel.with_open_bin path (fun out ->
         output_string out "construction-fixture-key\n");
-      Providers.clear_global ();
-      Catalog.set_global (catalog before);
+      (Llm_provider.Catalog_snapshot.publish (Masc_test_deps.admit_catalogs ~models:(Some ((catalog before))) ~providers:(None)));
       let cfg, binding = configuration path in
       (* Warm the immutable declarations before forking. Every operation in
          the constructor before the owned File read is synchronous. Fork runs
          the child immediately; its first suspension is that real systhread
          read, leaving the parent ahead of the completion in the run queue.
          No sleep, retry, production hook or special credential file is used. *)
-      ignore (Llm_provider.Provider_declarations.current ());
+      ignore (Llm_provider.Catalog_snapshot.current ());
       Eio_main.run (fun env ->
         Fs_compat.set_fs (Eio.Stdenv.fs env);
         Eio.Switch.run (fun sw ->
@@ -105,7 +99,7 @@ let with_reload ~before ~after inspect =
           check bool "construction started before catalog reload" true !started;
           check bool "File materialization suspended before returning" true
             (Option.is_none (Eio.Promise.peek selected));
-          Catalog.set_global (catalog after);
+          (Llm_provider.Catalog_snapshot.publish (Masc_test_deps.admit_catalogs ~models:(Some ((catalog after))) ~providers:(None)));
           let selected = Eio.Promise.await_exn selected in
           check string "the real owned File credential was materialized"
             "construction-fixture-key" (selected.Config.api_key :> string);

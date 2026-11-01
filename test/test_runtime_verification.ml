@@ -872,14 +872,12 @@ for line in sys.stdin:
 let official_probes_preserve_selected_effort ~colliding_model ~stages cases () =
   let snapshot = Runtime.For_testing.snapshot () in
   let eio_state = Eio_context.snapshot_state () in
-  let catalog = Llm_provider.Model_catalog.global () in
+  let catalog = Llm_provider.Catalog_snapshot.current () in
   Fun.protect
     ~finally:(fun () ->
       Runtime.For_testing.restore snapshot;
       Eio_context.restore_state eio_state;
-      match catalog with
-      | None -> Llm_provider.Model_catalog.clear_global ()
-      | Some catalog -> Llm_provider.Model_catalog.set_global catalog)
+      Llm_provider.Catalog_snapshot.publish catalog)
     (fun () -> Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
       let directory = Filename.temp_dir "official-effort-probe-" "" |> Unix.realpath in
       Eio.Switch.on_release sw (fun () -> Fs_compat.remove_tree directory);
@@ -938,7 +936,7 @@ accepted_reasoning_efforts = ["low"]
 |} model in
          (match Llm_provider.Model_catalog.of_toml_string ~source:"Claude probe effort collision" source with
           | Error detail -> fail detail
-          | Ok catalog -> Llm_provider.Model_catalog.set_global catalog);
+          | Ok catalog -> (Llm_provider.Catalog_snapshot.publish (Masc_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None))));
          match Llm_provider.Capabilities.for_model_id model with
          | Some caps -> check bool "the conflicting HTTP ladder is loaded" true
              (caps.accepted_reasoning_efforts = Some [Llm_provider.Reasoning_effort.Low])
@@ -1572,10 +1570,8 @@ sys.stdin.read()
 |}
 
 let test_muse_private_tool_roundtrip () =
-  let previous_catalog = Llm_provider.Model_catalog.global () in
-  Fun.protect ~finally:(fun () -> match previous_catalog with
-    | None -> Llm_provider.Model_catalog.clear_global ()
-    | Some catalog -> Llm_provider.Model_catalog.set_global catalog) @@ fun () ->
+  let previous_catalog = Llm_provider.Catalog_snapshot.current () in
+  Fun.protect ~finally:(fun () -> Llm_provider.Catalog_snapshot.publish previous_catalog) @@ fun () ->
   (match Llm_provider.Model_catalog.of_toml_string ~source:"Muse readiness effort collision"
     {|[[models]]
 model_id = "fixture-selected-model"
@@ -1583,7 +1579,7 @@ supports_reasoning = true
 accepted_reasoning_efforts = ["low"]
 |} with
    | Error detail -> fail detail
-   | Ok catalog -> Llm_provider.Model_catalog.set_global catalog);
+   | Ok catalog -> (Llm_provider.Catalog_snapshot.publish (Masc_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None))));
   (match Llm_provider.Capabilities.for_model_id "fixture-selected-model" with
    | Some caps -> check bool "readiness has a conflicting HTTP ladder" true
        (caps.accepted_reasoning_efforts = Some [Llm_provider.Reasoning_effort.Low])

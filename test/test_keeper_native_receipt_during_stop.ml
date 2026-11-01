@@ -74,14 +74,12 @@ let rec mkdir_p path =
   if not (Sys.file_exists path) then (mkdir_p (Filename.dirname path); Unix.mkdir path 0o700)
 
 let install_fixture_catalog ~sw =
-  let previous_catalog = Llm_provider.Model_catalog.global () in
-  Eio.Switch.on_release sw (fun () -> match previous_catalog with
-    | None -> Llm_provider.Model_catalog.clear_global ()
-    | Some catalog -> Llm_provider.Model_catalog.set_global catalog);
+  let previous_catalog = Llm_provider.Catalog_snapshot.current () in
+  Eio.Switch.on_release sw (fun () -> Llm_provider.Catalog_snapshot.publish previous_catalog);
   let catalog = Printf.sprintf
       "[[models]]\nmodel_id = %S\nprovider_name = \"fixture\"\nbase = \"openai_chat\"\nmax_context_tokens = 8192\nmax_output_tokens = 128\nsupports_tools = true\nsupports_native_streaming = false\n" model_id in
   Llm_provider.Model_catalog.of_toml_string ~source:"native-stop-receipt-test" catalog
-    |> require "model catalog" |> Llm_provider.Model_catalog.set_global
+    |> require "model catalog" |> (fun models -> Llm_provider.Catalog_snapshot.publish (Masc_test_deps.admit_catalogs ~models:(Some models) ~providers:(None)))
 
 (* The repetition frame a direct operation's native checkpoints must carry. *)
 let context_for_operation () =

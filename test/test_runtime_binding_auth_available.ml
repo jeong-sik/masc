@@ -27,10 +27,10 @@ let make_binding ~auth ~available () : Binding.t =
        "capabilities_base",`String "anthropic"]]] in
     let providers = match Llm_provider.Provider_catalog.of_json json with
       | Ok catalog -> catalog | Error error -> fail error in
-    let declarations = match Llm_provider.Provider_declarations.of_catalogs
+    let declarations = match Llm_provider.Catalog_snapshot.of_catalogs
         ~models:None ~providers:(Some providers) with
       | Ok declarations -> declarations
-      | Error error -> fail (Llm_provider.Provider_declarations.error_to_string error) in
+      | Error error -> fail (Llm_provider.Catalog_snapshot.error_to_string error) in
     match Binding.find_in_declarations declarations "keyed-provider" with
     | Some binding -> binding | None -> fail "missing admitted auth binding")
 

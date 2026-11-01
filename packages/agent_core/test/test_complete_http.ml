@@ -1081,11 +1081,9 @@ let with_response_cache_server ?(response_body = anthropic_response "cached") f 
 ;;
 
 let with_response_cache_catalog f =
-  let previous = Model_catalog.global () in
+  let previous = Llm_provider.Catalog_snapshot.current () in
   Fun.protect ~finally:(fun () ->
-    match previous with
-    | Some catalog -> Model_catalog.set_global catalog
-    | None -> Model_catalog.clear_global ()) f
+    Llm_provider.Catalog_snapshot.publish previous) f
 ;;
 
 let response_cache_catalog ~ceiling ~replay =
@@ -1108,13 +1106,13 @@ let require_cached_response = function
 
 let test_response_cache_tracks_catalog_defaults () =
   with_response_cache_catalog @@ fun () ->
-  Model_catalog.set_global (response_cache_catalog ~ceiling:64 ~replay:"preserve_always");
+  (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some ((response_cache_catalog ~ceiling:64 ~replay:"preserve_always"))) ~providers:(None)));
   with_response_cache_server @@ fun ~sw ~net ~url ~cache ~bodies ->
   let config = Provider_config.make ~kind:Anthropic ~model_id:"response-cache-model"
       ~base_url:url ~request_path:"/v1/messages" () in
   let run () = (Complete.complete ~sw ~net ~config ~messages ~cache ()).Llm_provider.Completion_outcome.result |> require_cached_response in
   ignore (run ());
-  Model_catalog.set_global (response_cache_catalog ~ceiling:16 ~replay:"preserve_always");
+  (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some ((response_cache_catalog ~ceiling:16 ~replay:"preserve_always"))) ~providers:(None)));
   ignore (run ());
   ignore (run ());
   check int "changed resolved body misses; identical body hits" 2 (List.length !bodies);
@@ -1125,7 +1123,7 @@ let test_response_cache_tracks_catalog_defaults () =
 
 let test_response_cache_tracks_reasoning_source_projection () =
   with_response_cache_catalog @@ fun () ->
-  Model_catalog.set_global (response_cache_catalog ~ceiling:64 ~replay:"preserve_always");
+  (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some ((response_cache_catalog ~ceiling:64 ~replay:"preserve_always"))) ~providers:(None)));
   with_response_cache_server @@ fun ~sw ~net ~url ~cache ~bodies ->
   let config = Provider_config.make ~kind:Anthropic ~model_id:"response-cache-model"
       ~base_url:url ~request_path:"/v1/messages" ~max_tokens:64 () in
@@ -1170,14 +1168,14 @@ let test_response_cache_tracks_reasoning_source_projection () =
 
 let test_response_cache_does_not_restamp_cached_reasoning () =
   with_response_cache_catalog @@ fun () ->
-  Model_catalog.set_global (response_cache_catalog ~ceiling:64 ~replay:"preserve_always");
+  (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some ((response_cache_catalog ~ceiling:64 ~replay:"preserve_always"))) ~providers:(None)));
   let response_body = {|{"id":"cached-reasoning","type":"message","role":"assistant","model":"response-cache-model","content":[{"type":"thinking","thinking":"original reasoning","signature":"original-signature"},{"type":"text","text":"answer"}],"stop_reason":"end_turn","usage":{"input_tokens":10,"output_tokens":5}}|} in
   with_response_cache_server ~response_body @@ fun ~sw ~net ~url ~cache ~bodies ->
   let config = Provider_config.make ~kind:Anthropic ~model_id:"response-cache-model"
       ~base_url:url ~request_path:"/v1/messages" ~max_tokens:64 () in
   let run () = (Complete.complete ~sw ~net ~config ~messages ~cache ()).Llm_provider.Completion_outcome.result |> require_cached_response in
   let original = run () in
-  Model_catalog.set_global (response_cache_catalog ~ceiling:64 ~replay:"no_replay");
+  (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some ((response_cache_catalog ~ceiling:64 ~replay:"no_replay"))) ~providers:(None)));
   let current_source = Reasoning_dialect.reasoning_source_for_provider_config config |> Result.get_ok in
   let cached = run () in
   check int "unchanged effective body reuses the stored response" 1 (List.length !bodies);
@@ -1212,13 +1210,13 @@ let test_response_cache_does_not_restamp_cached_reasoning () =
 
 let test_response_cache_reuses_admitted_body_without_dispatch_on_hit () =
   with_response_cache_catalog @@ fun () ->
-  Model_catalog.set_global (response_cache_catalog ~ceiling:64 ~replay:"preserve_always");
+  (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some ((response_cache_catalog ~ceiling:64 ~replay:"preserve_always"))) ~providers:(None)));
   with_response_cache_server @@ fun ~sw ~net ~url ~cache ~bodies ->
   let config = Provider_config.make ~kind:Anthropic ~model_id:"response-cache-model"
       ~base_url:url ~request_path:"/v1/messages" () in
   let serialized = Complete.prepare_request ~config ~messages ()
       |> Complete.admit_request_body ~stream:false |> Result.get_ok in
-  Model_catalog.set_global (response_cache_catalog ~ceiling:16 ~replay:"no_replay");
+  (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some ((response_cache_catalog ~ceiling:16 ~replay:"no_replay"))) ~providers:(None)));
   let observations = ref [] in
   let observer observation = observations := observation :: !observations; Ok () in
   let run () = (Complete.complete_serialized ~sw ~net serialized ~cache
@@ -4832,11 +4830,10 @@ output_per_million = %.1f
 |} scale (2.0 *. scale) in
     match Model_catalog.of_toml_string ~source:"native HTTP pricing fixture" source with
     | Ok catalog -> catalog | Error detail -> fail detail in
-  let previous = Model_catalog.global () in
-  Fun.protect ~finally:(fun () -> match previous with
-    | Some catalog -> Model_catalog.set_global catalog | None -> Model_catalog.clear_global ())
+  let previous = Llm_provider.Catalog_snapshot.current () in
+  Fun.protect ~finally:(fun () -> Llm_provider.Catalog_snapshot.publish previous)
     (fun () ->
-      Model_catalog.set_global (catalog 1.0);
+      (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some ((catalog 1.0))) ~providers:(None)));
       let model = if reported then ["model", `String "priced-http-model"] else [] in
       let usage = `Assoc ["prompt_tokens", `Int 1_000_000; "completion_tokens", `Int 1_000_000] in
       let body = if stream then
@@ -4853,7 +4850,7 @@ output_per_million = %.1f
               ["role", `String "assistant"; "content", `String "ok"];
               "finish_reason", `String "stop"]]; "usage", usage] @ model)) in
       Eio_main.run (fun env -> try Eio.Switch.run (fun sw ->
-        let on_request () = Model_catalog.set_global (catalog 10.0) in
+        let on_request () = (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some ((catalog 10.0))) ~providers:(None))) in
         let base_url = if stream then start_sse_server ~sw ~net:env#net ~on_request body
           else start_mock_server ~sw ~net:env#net ~on_request body in
         let config = Provider_config.make ~kind:OpenAI_compat ~provider_id:"http-price"

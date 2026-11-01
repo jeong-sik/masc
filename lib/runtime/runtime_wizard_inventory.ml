@@ -106,8 +106,9 @@ let integrations_json ~include_credential_references (config : Runtime_schema.co
         match entry.default_model with
         | None -> entry.capabilities.task
         | Some model_id ->
-          (match Llm_provider.Capabilities.for_provider_model_id
-                   ~wire:(Some entry.kind) ~provider:(Llm_provider.Model_catalog.Declared_provider entry.id) ~model_id with
+          (match Llm_provider.Capabilities.resolve_snapshot_request_policy
+                   ~snapshot:entry.declarations ~wire:entry.kind ~provider_id:entry.id ~model_id
+                   |> Llm_provider.Capabilities.request_policy_capabilities with
            | None -> entry.capabilities.task
            | Some capabilities -> capabilities.task)
       in
@@ -319,15 +320,15 @@ let binding_for_provider (cfg : Runtime_schema.config)
    from the provider base still reports the capabilities it will actually run
    with. A row without a positive declared context is not wizard-offerable —
    the wizard writes a runtime entry that needs a context — and stays out of
-   the list. The loaded catalog is installed as the global before resolving
-   capabilities, so entries and capabilities provably read one catalog
-   whatever a caller left in the global before this call. *)
+   the list. Entries and capabilities use the same explicitly admitted
+   embedded snapshot; a concurrent global replacement cannot mix their facts. *)
 let provider_model_rows (provider_id : string) : (Yojson.Safe.t, string) result =
-  match Llm_provider.Model_catalog.load_default () with
-  | Error message -> Error message
-  | Ok catalog ->
-    Llm_provider.Model_catalog.set_global catalog;
-    let providers = Catalog_binding.all () in
+  let open Result.Syntax in
+  let* catalog = Llm_provider.Model_catalog.load_default () in
+  let* snapshot = Llm_provider.Catalog_snapshot.of_catalogs
+      ~models:(Some catalog) ~providers:None
+    |> Result.map_error Llm_provider.Catalog_snapshot.error_to_string in
+    let providers = Catalog_binding.all_from_declarations snapshot in
     let provider =
       providers
       |> List.find_opt (fun (entry : Catalog_binding.t) -> String.equal entry.id provider_id)
@@ -350,12 +351,12 @@ let provider_model_rows (provider_id : string) : (Yojson.Safe.t, string) result 
               match entry.max_context_tokens with
               | Some context when context > 0 ->
                 (match
-                   Llm_provider.Capabilities.for_provider_model_id
-                     ~wire:(Some provider.kind)
-                     ~provider:(Llm_provider.Model_catalog.Declared_provider provider.id)
+                   Llm_provider.Capabilities.resolve_snapshot_request_policy
+                     ~snapshot ~wire:provider.kind ~provider_id:provider.id
                      ~model_id:
                        (Llm_provider.Model_identifiers.Model_id.to_string
                           entry.model_id)
+                   |> Llm_provider.Capabilities.request_policy_capabilities
                  with
                  | None -> None
                  | Some capabilities ->

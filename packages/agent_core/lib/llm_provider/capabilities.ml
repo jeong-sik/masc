@@ -28,7 +28,7 @@ let anthropic_thinking_control_from_catalog ~catalog model_id =
 
 let anthropic_thinking_control_for_model_id model_id =
   with_model_id model_id
-    (anthropic_thinking_control_from_catalog ~catalog:(Model_catalog.global ()))
+    (anthropic_thinking_control_from_catalog ~catalog:(Catalog_snapshot.models (Catalog_snapshot.current ())))
 ;;
 
 let anthropic_thinking_control_for_provider_from_catalog ~catalog ~provider model_id =
@@ -36,12 +36,6 @@ let anthropic_thinking_control_for_provider_from_catalog ~catalog ~provider mode
     Option.bind (Model_catalog.lookup_model_for_provider catalog ~provider ~model_id)
       (fun entry -> Option.map anthropic_thinking_control_of_vocab_value
         entry.Model_catalog.anthropic_thinking_control))
-;;
-
-let anthropic_thinking_control_for_provider_model_id ~provider ~model_id =
-  with_model_id model_id
-    (anthropic_thinking_control_for_provider_from_catalog
-      ~catalog:(Model_catalog.global ()) ~provider)
 ;;
 
 (* ── Catalog capability projection ───────────────────── *)
@@ -479,10 +473,9 @@ let declared_image_input_for_provider_model ~catalog ~wire ~provider ~model_id =
 
 (** Look up capabilities for [model_id] in the loaded model catalog only.
 
-    The catalog itself is resolved by {!Model_catalog.global}: an explicit
-    runtime override installed via {!Model_catalog.set_global}, otherwise the
-    build-time embedded AGENT_CORE [models.toml]. AGENT_CORE performs no environment-based
-    catalog discovery.
+    Model facts come from one complete {!Catalog_snapshot.current} selection:
+    an explicit admitted publication or the immutable embedded default.
+    AGENT_CORE performs no environment-based catalog discovery.
 
     Returns [None] when no catalog is available or when the catalog has
     no entry whose [model_id] matches [model_id]. There is no in-code
@@ -499,7 +492,7 @@ let for_model_id_from_catalog catalog model_id =
 ;;
 
 let for_model_id model_id =
-  with_model_id model_id (for_model_id_from_catalog (Model_catalog.global ()))
+  with_model_id model_id (for_model_id_from_catalog (Catalog_snapshot.models (Catalog_snapshot.current ())))
 ;;
 
 let for_provider_reference_base ~catalog ~wire ~provider =
@@ -526,13 +519,6 @@ let for_provider_model_id_from_catalog ~catalog ~wire ~provider ~model_id =
     for_provider_reference_base ~catalog ~wire ~provider
 ;;
 
-let for_provider_model_id ~wire ~provider ~model_id =
-  with_model_id model_id (fun model_id ->
-    for_provider_model_id_from_catalog
-      ~catalog:(Model_catalog.global ())
-      ~wire ~provider ~model_id)
-;;
-
 type request_policy =
   { model_capabilities : capabilities option
   ; anthropic_thinking_control : anthropic_thinking_control option
@@ -555,11 +541,6 @@ let resolve_request_policy_from_catalog ~catalog ~wire ~provider ~model_id =
     | Provider_kind.Gemini | Provider_kind.Glm -> None
   in
   { model_capabilities; anthropic_thinking_control; pricing_source }
-;;
-
-let resolve_request_policy ~wire ~provider ~model_id =
-  resolve_request_policy_from_catalog ~catalog:(Model_catalog.global ())
-    ~wire ~provider ~model_id
 ;;
 
 let resolve_bound_request_policy ~catalog ~wire ~(provider : Model_catalog.provider_entry)
@@ -588,6 +569,38 @@ let resolve_bound_request_policy ~catalog ~wire ~(provider : Model_catalog.provi
     {model_capabilities;anthropic_thinking_control;pricing_source}
 ;;
 
+let resolve_snapshot_request_policy ~snapshot ~wire ~provider_id ~model_id =
+  match Catalog_snapshot.policy_provider snapshot provider_id with
+  | Some (entry, provider) ->
+    resolve_bound_request_policy ~catalog:(Catalog_snapshot.models snapshot)
+      ~wire ~provider ~capabilities:entry.capabilities ~model_id
+  | None ->
+    let catalog = Option.map Model_catalog.without_providers
+        (Catalog_snapshot.models snapshot) in
+    resolve_request_policy_from_catalog ~catalog ~wire
+      ~provider:(Model_catalog.Declared_provider provider_id) ~model_id
+;;
+
+let resolve_request_policy ~wire ~provider ~model_id =
+  let catalog = Catalog_snapshot.model_catalog_for_provider
+      (Catalog_snapshot.current ()) provider in
+  resolve_request_policy_from_catalog ~catalog ~wire ~provider ~model_id
+;;
+
+let for_provider_model_id ~wire ~provider ~model_id =
+  with_model_id model_id (fun model_id ->
+    let catalog = Catalog_snapshot.model_catalog_for_provider
+        (Catalog_snapshot.current ()) provider in
+    for_provider_model_id_from_catalog ~catalog ~wire ~provider ~model_id)
+;;
+
+let anthropic_thinking_control_for_provider_model_id ~provider ~model_id =
+  with_model_id model_id (fun model_id ->
+    let catalog = Catalog_snapshot.model_catalog_for_provider
+        (Catalog_snapshot.current ()) provider in
+    anthropic_thinking_control_for_provider_from_catalog ~catalog ~provider model_id)
+;;
+
 let request_policy_capabilities policy = policy.model_capabilities
 let request_policy_anthropic_thinking_control policy = policy.anthropic_thinking_control
 let request_policy_pricing_source policy = policy.pricing_source
@@ -599,20 +612,25 @@ let token_of_declared_format format =
   Option.bind format Capability_vocab.token_of_thinking_control_format
 ;;
 
-let thinking_control_token_for_provider_model_id
-      ~(provider_label : string)
-      ~(model_id : string)
-  =
+let thinking_control_token_for_provider_model_id ~provider_label ~model_id =
+  let provider = match Provider_kind.of_canonical_string
+      (String.lowercase_ascii (String.trim provider_label)) with
+    | Some kind -> Model_catalog.Anonymous_wire kind
+    | None -> Model_catalog.Declared_provider provider_label in
   with_model_id model_id (fun model_id ->
-    match Model_catalog.global () with
-    | None -> None
-    | Some catalog ->
-      (match Model_catalog.lookup_for_provider catalog ~provider_name:provider_label ~model_id with
-       | Some entry -> token_of_declared_format entry.Model_catalog.thinking_control_format
-       | None -> None))
+    Option.bind (Catalog_snapshot.model_catalog_for_provider
+      (Catalog_snapshot.current ()) provider) (fun catalog ->
+        Option.bind (Model_catalog.lookup_for_provider_reference catalog ~provider ~model_id)
+          (fun row -> token_of_declared_format row.Model_catalog.thinking_control_format)))
 ;;
 
 [@@@coverage off]
+
+let admit_fixture_catalogs ~models ~providers =
+  match Catalog_snapshot.of_catalogs ~models ~providers with
+  | Ok snapshot -> snapshot
+  | Error error -> failwith (Catalog_snapshot.error_to_string error)
+;;
 
 let%test "for_model_id glm-4.5 has reasoning" =
   match for_model_id "glm-4.5" with
@@ -687,7 +705,7 @@ let%test "for_model_id glm-4.5-flash has GLM-4.5 thinking limits" =
 ;;
 
 (* [for_model_id] tests below install an explicit catalog through
-   [Model_catalog.set_global] and restore the override afterwards, so they
+   [Catalog_snapshot.publish] and restore the whole selection afterwards, so they
    are insulated from any caller-installed model catalog. Inline tests that
    exercise the production catalog use the embedded default generated directly
    from the AGENT_CORE-owned [models.toml].
@@ -1176,8 +1194,8 @@ max_output_tokens = 32000
 (* Installs [test_catalog] as the runtime override for the duration of [f],
    then clears the override so subsequent lookups use the embedded catalog. *)
 let with_test_catalog f =
-  Model_catalog.set_global test_catalog;
-  Fun.protect ~finally:Model_catalog.clear_global f
+  Catalog_snapshot.publish (admit_fixture_catalogs ~models:(Some (test_catalog)) ~providers:(None));
+  Fun.protect ~finally:Catalog_snapshot.reset f
 ;;
 
 let%test "for_model_id qwen3 has extended thinking" =
@@ -1239,31 +1257,30 @@ let%test "for_model_id catalog miss returns None" =
 ;;
 
 let%test "for_model_id empty catalog returns None" =
-  Model_catalog.set_global Model_catalog.empty;
-  Fun.protect ~finally:Model_catalog.clear_global (fun () ->
+  Catalog_snapshot.publish (admit_fixture_catalogs ~models:(Some (Model_catalog.empty)) ~providers:(None));
+  Fun.protect ~finally:Catalog_snapshot.reset (fun () ->
     Option.is_none (for_model_id "qwen3-32b"))
 ;;
 
 let%test "Anthropic thinking policy resolves from the model catalog declaration" =
-  Model_catalog.set_global
-    (test_catalog_of_toml {|[[models]]
+  Catalog_snapshot.publish (admit_fixture_catalogs ~models:(Some ((test_catalog_of_toml {|[[models]]
 model_id = "declared-anthropic-model"
 anthropic_thinking_control = "adaptive_default"
-|});
-  Fun.protect ~finally:Model_catalog.clear_global (fun () ->
+|}))) ~providers:(None));
+  Fun.protect ~finally:Catalog_snapshot.reset (fun () ->
     anthropic_thinking_control_for_model_id "declared-anthropic-model"
     = Some Anthropic_adaptive_default)
 ;;
 
 let%test "Anthropic thinking policy reads composed JSON declaration" =
-  Model_catalog.set_global Model_catalog.empty;
+  Catalog_snapshot.publish (admit_fixture_catalogs ~models:(Some (Model_catalog.empty)) ~providers:(None));
   let manifest = Capability_manifest.of_json (Yojson.Safe.from_string
     {|{"schema_version":2,"models":[{"model_id":"manifest-anthropic-model","anthropic_thinking_control":"adaptive_disabled_through_high"}]}|})
     |> Result.get_ok in
-  Model_catalog.set_global (Model_catalog.with_model_overrides Model_catalog.empty manifest);
+  Catalog_snapshot.publish (admit_fixture_catalogs ~models:(Some ((Model_catalog.with_model_overrides Model_catalog.empty manifest))) ~providers:(None));
   Fun.protect
     ~finally:(fun () ->
-      Model_catalog.clear_global ())
+      Catalog_snapshot.reset ())
     (fun () ->
        anthropic_thinking_control_for_model_id "manifest-anthropic-model"
        = Some Anthropic_adaptive_disabled_through_high)
@@ -1274,13 +1291,12 @@ let%test "Anthropic thinking policy reads composed JSON declaration" =
    provider-aware variant must be the one that sees its policy, and the bare
    reading must stay blind to it. *)
 let%test "Anthropic thinking policy on a provider-qualified row resolves by provider label" =
-  Model_catalog.set_global
-    (test_catalog_of_toml {|[[models]]
+  Catalog_snapshot.publish (admit_fixture_catalogs ~models:(Some ((test_catalog_of_toml {|[[models]]
 model_id = "provider-scoped-anthropic-model"
 provider_name = "deepseek-anthropic"
 anthropic_thinking_control = "always_adaptive"
-|});
-  Fun.protect ~finally:Model_catalog.clear_global (fun () ->
+|}))) ~providers:(None));
+  Fun.protect ~finally:Catalog_snapshot.reset (fun () ->
     anthropic_thinking_control_for_provider_model_id
       ~provider:(Model_catalog.Declared_provider "deepseek-anthropic")
       ~model_id:"provider-scoped-anthropic-model"

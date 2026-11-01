@@ -23,6 +23,9 @@ type source =
 let of_catalog ~catalog ~provider = {catalog; scope = Provider_reference provider}
 let of_provider_entry ~catalog ~provider = {catalog; scope = Selected_provider provider}
 
+let of_snapshot ~snapshot ~provider =
+  of_catalog ~catalog:(Catalog_snapshot.model_catalog_for_provider snapshot provider) ~provider
+
 type cache_price_component =
   | Cache_creation
   | Cache_read
@@ -56,17 +59,15 @@ let pricing_for_model source model_id =
     Option.bind row pricing_of_catalog_entry
 ;;
 
-let catalog_entry_for_model catalog ?provider model_id =
-  match provider with
-  | None -> Model_catalog.lookup catalog model_id
-  | Some provider -> Model_catalog.lookup_model_for_provider catalog ~provider ~model_id
-;;
-
 let pricing_for_model_opt ?provider model_id =
-  match Model_catalog.global (), Model_identifiers.Model_id.of_string model_id with
-  | None, _ | _, Error _ -> None
-  | Some catalog, Ok model_id ->
-    Option.bind (catalog_entry_for_model catalog ?provider model_id) pricing_of_catalog_entry
+  let snapshot = Catalog_snapshot.current () in
+  match provider with
+  | Some provider -> pricing_for_model (of_snapshot ~snapshot ~provider) model_id
+  | None ->
+    (match Catalog_snapshot.models snapshot, Model_identifiers.Model_id.of_string model_id with
+     | None, _ | _, Error _ -> None
+     | Some catalog, Ok model_id ->
+       Option.bind (Model_catalog.lookup catalog model_id) pricing_of_catalog_entry)
 ;;
 
 let estimate_cost
@@ -151,6 +152,12 @@ let annotate_response_cost ~source (response : Types.api_response) =
 
 [@@@coverage off]
 
+let admit_fixture_catalogs ~models ~providers =
+  match Catalog_snapshot.of_catalogs ~models ~providers with
+  | Ok snapshot -> snapshot
+  | Error error -> failwith (Catalog_snapshot.error_to_string error)
+;;
+
 let close_enough a b = Float.abs (a -. b) < 1e-9
 
 let[@warning "-32"] option_close_enough expected = function
@@ -184,18 +191,16 @@ let[@warning "-32"] test_catalog_entry
 ;;
 
 let[@warning "-32"] with_catalog entries f =
-  let original = Model_catalog.global () in
+  let original = Catalog_snapshot.current () in
   let catalog =
     Model_catalog.of_toml_string ~source:"pricing inline fixture"
       (String.concat "\n" entries)
     |> Result.get_ok
   in
-  Model_catalog.set_global catalog;
+  Catalog_snapshot.publish (admit_fixture_catalogs ~models:(Some (catalog)) ~providers:(None));
   Fun.protect
     ~finally:(fun () ->
-      match original with
-      | Some catalog -> Model_catalog.set_global catalog
-      | None -> Model_catalog.clear_global ())
+      Catalog_snapshot.publish original)
     f
 ;;
 

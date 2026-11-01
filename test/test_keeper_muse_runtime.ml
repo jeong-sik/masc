@@ -1557,17 +1557,15 @@ default = "muse_fixture.fixture"
 |} (launcher ~base_path) (Filename.concat base_path "account-home") effort_line);
   (match Runtime.init_default ~config_path:runtime_path with
    | Ok () -> () | Error detail -> fail detail);
-  let previous_catalog = Llm_provider.Model_catalog.global () in
-  Fun.protect ~finally:(fun () -> match previous_catalog with
-    | None -> Llm_provider.Model_catalog.clear_global ()
-    | Some catalog -> Llm_provider.Model_catalog.set_global catalog) @@ fun () ->
+  let previous_catalog = Llm_provider.Catalog_snapshot.current () in
+  Fun.protect ~finally:(fun () -> Llm_provider.Catalog_snapshot.publish previous_catalog) @@ fun () ->
   let install_catalog accepted =
     let source = Printf.sprintf
       "[[models]]\nmodel_id = \"muse-fixture-1\"\nsupports_reasoning = true\naccepted_reasoning_efforts = [%S]\n"
       accepted in
     match Llm_provider.Model_catalog.of_toml_string ~source:"Muse effort collision" source with
     | Error detail -> fail detail
-    | Ok catalog -> Llm_provider.Model_catalog.set_global catalog in
+    | Ok catalog -> (Llm_provider.Catalog_snapshot.publish (Masc_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None))) in
   install_catalog (if replace_in_hook then "max" else "low");
   let hooks = { Agent_core.Hooks.empty with before_turn_params = Some (function
     | Agent_core.Hooks.BeforeTurnParams {current_params; _} ->
@@ -1612,10 +1610,8 @@ default = "muse_fixture.fixture"
 
 let test_muse_refuses_exact_none_without_replay () =
   with_scripted_host ~fixture:["scenario", `String "refuse_turn"] @@ fun ~base_path ->
-  let previous_catalog = Llm_provider.Model_catalog.global () in
-  Fun.protect ~finally:(fun () -> match previous_catalog with
-    | None -> Llm_provider.Model_catalog.clear_global ()
-    | Some catalog -> Llm_provider.Model_catalog.set_global catalog) @@ fun () ->
+  let previous_catalog = Llm_provider.Catalog_snapshot.current () in
+  Fun.protect ~finally:(fun () -> Llm_provider.Catalog_snapshot.publish previous_catalog) @@ fun () ->
   (match Llm_provider.Model_catalog.of_toml_string ~source:"Muse explicit none refusal"
     {|[[models]]
 model_id = "muse-fixture-1"
@@ -1623,7 +1619,7 @@ supports_reasoning = true
 accepted_reasoning_efforts = ["low"]
 |} with
    | Error detail -> fail detail
-   | Ok catalog -> Llm_provider.Model_catalog.set_global catalog);
+   | Ok catalog -> (Llm_provider.Catalog_snapshot.publish (Masc_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None))));
   let hooks = { Agent_core.Hooks.empty with before_turn_params=Some (function
     | Agent_core.Hooks.BeforeTurnParams {current_params; _} ->
       Agent_core.Hooks.AdjustParams

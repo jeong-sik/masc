@@ -993,23 +993,25 @@ let test_load_file_edges () =
        | Ok _ -> fail "missing file should fail")
 ;;
 
-let test_global_override_lifecycle () =
-  Provider_catalog.clear_global ();
-  let catalog =
-    catalog_of_string
-      {|{"schema_version":1,"providers":[{"id":"override","kind":"openai_compat","base_url":"https://provider.test/v1","request_path":"/v1/chat/completions"}]}|}
-  in
-  Provider_catalog.set_global catalog;
-  (match Provider_catalog.global () with
-   | Some loaded ->
-     check
-       bool
-       "override visible"
-       true
-       (Option.is_some (Provider_catalog.lookup loaded "override"))
-   | None -> fail "expected global override");
-  Provider_catalog.clear_global ();
-  check (option reject) "clear removes overlay" None (Provider_catalog.global ())
+let test_snapshot_overlay_lifecycle () =
+  let previous = Llm_provider.Catalog_snapshot.current () in
+  Fun.protect ~finally:(fun () -> Llm_provider.Catalog_snapshot.publish previous)
+    (fun () ->
+      let catalog = catalog_of_string
+        {|{"schema_version":1,"providers":[{"id":"override","kind":"openai_compat","base_url":"https://provider.test/v1","request_path":"/v1/chat/completions"}]}|} in
+      let selected = Agent_core_test_deps.admit_catalogs
+          ~models:None ~providers:(Some catalog) in
+      Llm_provider.Catalog_snapshot.publish selected;
+      check bool "admitted overlay visible" true
+        (Option.is_some (Llm_provider.Catalog_snapshot.find
+           (Llm_provider.Catalog_snapshot.current ()) "override"));
+      let absent = Agent_core_test_deps.admit_catalogs ~models:None ~providers:None in
+      Llm_provider.Catalog_snapshot.publish absent;
+      check bool "explicit absence removes overlay" true
+        (Option.is_none (Llm_provider.Catalog_snapshot.find
+           (Llm_provider.Catalog_snapshot.current ()) "override"));
+      check bool "captured selection retains overlay" true
+        (Option.is_some (Llm_provider.Catalog_snapshot.find selected "override")))
 ;;
 
 let () =
@@ -1070,7 +1072,7 @@ let () =
         ] )
     ; ( "load"
       , [ test_case "load_file edges" `Quick test_load_file_edges
-        ; test_case "global override lifecycle" `Quick test_global_override_lifecycle
+        ; test_case "global override lifecycle" `Quick test_snapshot_overlay_lifecycle
         ] )
     ]
 ;;

@@ -16,13 +16,13 @@
 
     @stability Internal *)
 
-module Declarations = Llm_provider.Provider_declarations
+module Declarations = Llm_provider.Catalog_snapshot
 module Provider_binding = Runtime_provider_binding
 
 type construction = Declarations.t Lazy.Mutexed.t
 
 let create_construction () =
-  (* Declaration capture only reads immutable/atomic catalogs and parses the
+  (* Snapshot selection only reads the atomic publication or admits the
      embedded source; it performs no I/O or fiber suspension. Mutexed lazy
      selects once across domains and also works outside Eio. Credential I/O
      happens after forcing, without holding this initialization lock. *)
@@ -711,7 +711,7 @@ let provider_config_from_declared_provider ?binding_max_context ?keep_alive ?num
     in
     (match provider_kind_for_http_provider ?declaration provider with
      | Ok kind ->
-       let request_policy = Declarations.request_policy declarations ~wire:kind
+       let request_policy = Llm_provider.Capabilities.resolve_snapshot_request_policy ~snapshot:declarations ~wire:kind
            ~provider_id:provider.id ~model_id:spec.api_name in
        let catalog_capabilities =
          Llm_provider.Capabilities.request_policy_capabilities request_policy in

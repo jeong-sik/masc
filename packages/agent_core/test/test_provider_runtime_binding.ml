@@ -17,8 +17,8 @@ let with_provider_catalog json f =
   match Llm_provider.Provider_catalog.of_json (Yojson.Safe.from_string json) with
   | Error msg -> Alcotest.fail msg
   | Ok catalog ->
-    Llm_provider.Provider_catalog.set_global catalog;
-    Fun.protect ~finally:Llm_provider.Provider_catalog.clear_global f
+    (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Llm_provider.Catalog_snapshot.models (Llm_provider.Catalog_snapshot.current ())) ~providers:(Some (catalog))));
+    Fun.protect ~finally:(fun () -> Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Llm_provider.Catalog_snapshot.models (Llm_provider.Catalog_snapshot.current ())) ~providers:(None))) f
 ;;
 
 let with_model_catalog toml f =
@@ -27,14 +27,14 @@ let with_model_catalog toml f =
   Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () -> output_string oc toml);
   Fun.protect
     ~finally:(fun () ->
-      Llm_provider.Model_catalog.clear_global ();
+      (Llm_provider.Catalog_snapshot.reset ());
       try Sys.remove path with
       | Sys_error _ -> ())
     (fun () ->
        match Llm_provider.Model_catalog.load_file path with
        | Error msg -> Alcotest.fail msg
        | Ok catalog ->
-         Llm_provider.Model_catalog.set_global catalog;
+         (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None)));
          f ())
 ;;
 
@@ -959,7 +959,7 @@ provider_name = "snapshot-provider"
 base = "openai_chat_extended"
 |} with
       | Ok catalog -> catalog | Error detail -> Alcotest.fail detail in
-    Llm_provider.Model_catalog.set_global replacement;
+    (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some (replacement)) ~providers:(None)));
     Alcotest.(check bool) "low-level policy retains its observed absence" true
       (Llm_provider.Provider_config.capabilities_for_config_model config = None);
     let actual = Provider_runtime_binding.capabilities_for_provider_config config in
@@ -991,7 +991,7 @@ let test_selected_binding_carries_provider_capabilities () =
     let config = expect_ok (Provider_runtime_binding.to_provider_config
       ~model:"unlisted-local-model" binding) in
     let config = Llm_provider.Provider_config.freeze_for_request config in
-    Llm_provider.Provider_catalog.clear_global ();
+    (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Llm_provider.Catalog_snapshot.models (Llm_provider.Catalog_snapshot.current ())) ~providers:(None)));
     let actual = Provider_runtime_binding.capabilities_for_provider_config config in
     let expected = Option.value
       (Llm_provider.Provider_config.capabilities_for_config_model config)
@@ -1087,10 +1087,10 @@ supports_required_tool_choice = %b
 ;;
 
 let captured_binding catalog providers =
-  let declarations = match Llm_provider.Provider_declarations.of_catalogs
+  let declarations = match Llm_provider.Catalog_snapshot.of_catalogs
       ~models:(Some catalog) ~providers with
     | Ok declarations -> declarations
-    | Error error -> Alcotest.fail (Llm_provider.Provider_declarations.error_to_string error) in
+    | Error error -> Alcotest.fail (Llm_provider.Catalog_snapshot.error_to_string error) in
   match Provider_runtime_binding.find_in_declarations declarations "captured-provider" with
   | Some binding -> binding | None -> Alcotest.fail "missing captured provider"
 ;;
@@ -1100,12 +1100,12 @@ let test_selection_survives_model_replacement ~before_construction =
   let module C = Llm_provider.Provider_config in
   let original = captured_catalog ~reasoning:false ~bare:false in
   let replacement = captured_catalog ~reasoning:true ~bare:false in
-  M.set_global original;
-  Fun.protect ~finally:M.clear_global (fun () ->
+  (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some (original)) ~providers:(None)));
+  Fun.protect ~finally:Llm_provider.Catalog_snapshot.reset (fun () ->
     let binding = captured_binding original None in
-    if before_construction then M.set_global replacement;
+    if before_construction then (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some (replacement)) ~providers:(None)));
     let config = expect_ok (Provider_runtime_binding.to_provider_config binding) in
-    M.set_global replacement;
+    (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some (replacement)) ~providers:(None)));
     let config = {config with base_url="https://override.example.invalid";
       tool_choice=Some Llm_provider.Types.Any} in
     let frozen = C.freeze_for_request config in
@@ -1126,8 +1126,8 @@ let test_overlay_removes_seed_bare_authority () =
       "auth":{"type":"none"},"default_model":"bare-model",
       "capabilities_base":"openai_chat","capabilities":{"supports_reasoning":false}}]}|}) with
     | Ok catalog -> catalog | Error error -> Alcotest.fail error in
-  Llm_provider.Model_catalog.set_global original;
-  Fun.protect ~finally:Llm_provider.Model_catalog.clear_global (fun () ->
+  (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some (original)) ~providers:(None)));
+  Fun.protect ~finally:Llm_provider.Catalog_snapshot.reset (fun () ->
     let binding = captured_binding original (Some overlay) in
     let config = expect_ok (Provider_runtime_binding.to_provider_config binding) in
     Alcotest.(check string) "selected replacement endpoint" "https://overlay.example.invalid" config.base_url;
@@ -1156,8 +1156,8 @@ base = "anthropic"
   let original = catalog "" in
   let replacement = catalog "anthropic_thinking_control = \"adaptive_default\"" in
   let binding = captured_binding original None in
-  Llm_provider.Model_catalog.set_global replacement;
-  Fun.protect ~finally:Llm_provider.Model_catalog.clear_global (fun () ->
+  (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some (replacement)) ~providers:(None)));
+  Fun.protect ~finally:Llm_provider.Catalog_snapshot.reset (fun () ->
     let config = expect_ok (Provider_runtime_binding.to_provider_config binding) in
     let frozen = Llm_provider.Provider_config.freeze_for_request config in
     Alcotest.(check bool) "absent captured thinking control remains absent" true

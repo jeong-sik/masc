@@ -170,5 +170,130 @@ candidates = ["native.no_tools", "binding.sample"]
   check bool "wrapper refusal never launched the native client" false
     (Sys.file_exists native_marker)
 
+let test_frozen_runtime_media_survives_registry_replacement () =
+  List.iter (fun (label,initial,replacement,present) ->
+    Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
+    Masc_test_deps.init_eio_clock ~sw env;
+    let previous=Runtime.For_testing.snapshot () in
+    let catalog=Llm_provider.Model_catalog.global () in
+    let root=Filename.temp_dir "keeper-frozen-media-" "" in
+    Eio.Switch.on_release sw (fun () ->
+      Runtime.For_testing.restore previous;
+      (match catalog with Some catalog -> Llm_provider.Model_catalog.set_global catalog
+       | None -> Llm_provider.Model_catalog.clear_global ());
+      Fs_compat.remove_tree root);
+    let expected=initial=Some true in
+    let tool_calls=ref 0 in
+    let image_tool=Agent_core.Tool.create
+      ~descriptor:(Agent_core.Tool.ordinary_descriptor Agent_core.Tool_contract.Concurrent)
+      ~name:"keeper_image_read" ~description:"Fixture image read" ~parameters:[]
+      (fun _ -> incr tool_calls;Ok {Agent_core.Types.content="image read";content_blocks=None;_meta=None}) in
+    let server=Exact_output_fixture.start_server ~sw ~net:env#net ~clock:env#clock
+      (Exact_output_fixture.Reply_with (fun index _ ->
+        if expected && index=0 then `OK,{|{"id":"read-image","model":"frozen-image-model","choices":[{"index":0,"message":{"role":"assistant","content":null,"tool_calls":[{"id":"image-read","type":"function","function":{"name":"keeper_image_read","arguments":"{}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}|}
+        else `OK,Exact_output_fixture.openai_response (`String "accepted"))) in
+    let catalog_text=String.concat "" (List.map (fun provider -> Printf.sprintf
+      "[[models]]\nmodel_id=\"frozen-image-model\"\nprovider_name=%S\nbase=\"openai_chat\"\nmax_context_tokens=200000\nmax_output_tokens=128\nsupports_tools=true\nsupports_native_streaming=false\n"
+      provider) ["image";"standby"]) in
+    (match Llm_provider.Model_catalog.of_toml_string ~source:label catalog_text with
+     | Ok catalog -> Llm_provider.Model_catalog.set_global catalog | Error error -> fail error);
+    let path=Filename.concat root "runtime.toml" in
+    let config_text image present =
+      Printf.sprintf "[runtime]\ndefault=%S\nmedia_failover=[]\n"
+        (if present then "image.sample" else "standby.sample")
+      ^ (if present then Printf.sprintf
+          "[providers.image]\nprotocol=\"openai-compatible-http\"\nendpoint=%S\n" server.base_url else "")
+      ^ Printf.sprintf "[providers.standby]\nprotocol=\"openai-compatible-http\"\nendpoint=%S\n" server.base_url
+      ^ "[models.sample]\napi-name=\"frozen-image-model\"\nmax-context=200000\ntools-support=true\nstreaming=false\n"
+      ^ (match image with None -> "" | Some value ->
+          "[models.sample.capabilities]\nsupports-image-input=" ^ string_of_bool value ^ "\n")
+      ^ (if present then "[image.sample]\n" else "") ^ "[standby.sample]\n" in
+    let reload image present =
+      write path (config_text image present);
+      match Runtime.init_default ~config_path:path with Ok () -> () | Error error -> fail error in
+    reload initial true;
+    let media_store=Agent_core.History.Memory_store.create () in
+    let image=Agent_core.Types.image_block ~media_type:"image/png"
+      ~source:(Agent_core.Types.Url "https://example.invalid/frozen-input.png") in
+    let selected=ref None and transformed=ref None in
+    let project_for_runtime ~runtime ~carried:_ =
+      selected:=Some runtime;
+      let accepts=Runtime_agent.runtime_accepts_image_input ~runtime in
+      check bool (label ^ ": tool projection captures the selected model") expected accepts;
+      let tools=if accepts then [image_tool] else [] in
+      Keeper_tools_agent_core.assemble_model_tool_surface
+        ~image_admission:(if accepts then Keeper_tools_agent_core.Image_input_admitted else Image_input_unavailable)
+        ~tools ~agent_core_tools:tools ~on_demand_tool_names:[] ~result_bounds:[]
+        ~listing:Keeper_tools_agent_core.No_listing in
+    let provider_config_transform (provider:Llm_provider.Provider_config.t) =
+      check bool "catalogued provider config does not carry the runtime media declarations" true
+        (Option.is_none provider.model_capabilities_override);
+      reload replacement present;
+      let provider={provider with temperature=Some 0.3125;max_tokens=Some 31;
+        response_format=Agent_core.Types.JsonMode} in
+      transformed:=Some provider;
+      Ok provider in
+    (match Keeper_turn_driver.run_named
+       ~input_source:(Keeper_request_source.Keeper_history {trace_id="frozen-media-proof"})
+       ~raw_trace:None ~walk_owner:Keeper_turn_driver.One_shot_walk
+       ~runtime_id:"image.sample" ~keeper_name:"frozen-media-proof" ~base_path:root ~media_store
+       ~system_prompt:"Keep the selected runtime's input contract."
+       ~goal:"Inspect the image." ~goal_blocks:[image] ~tools:[image_tool] ~agent_core_tools:[image_tool]
+       ~project_for_runtime ~provider_config_transform ~sw ~net:env#net () with
+     | Error error -> failf "%s: %s" label (Agent_core.Error.to_string error)
+     | Ok result -> check string "dispatch remains attributed to the selected runtime" "image.sample" result.selected_runtime_id);
+    let runtime=Option.get !selected in
+    check bool "the captured runtime retains its model after reload" expected
+      (Runtime_agent.runtime_accepts_image_input ~runtime);
+    check (option bool) "the live registry really changed or removed the same runtime"
+      (if present then Some (replacement=Some true) else None)
+      (Option.map (fun runtime -> Runtime_agent.runtime_accepts_image_input ~runtime)
+         (Runtime.get_runtime_by_id "image.sample"));
+    let bodies=Exact_output_fixture.request_bodies server in
+    check int "only an admitted image reader executes" (if expected then 1 else 0) !tool_calls;
+    check int "preflight reaches the fake provider with the frozen policy" (if expected then 2 else 1) (List.length bodies);
+    let rec has_image = function
+      | `Assoc fields -> List.assoc_opt "type" fields=Some (`String "image_url")
+        || List.exists (fun (_,value) -> has_image value) fields
+      | `List values -> List.exists has_image values
+      | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ -> false in
+    List.iter (fun body ->
+      let json=Yojson.Safe.from_string body in
+      check bool "frozen media projection and preflight agree on the actual wire" expected (has_image json);
+      check (float 0.0) "provider transform temperature survives" 0.3125
+        Yojson.Safe.Util.(json |> member "temperature" |> to_float);
+      check int "provider transform output budget survives" 31 Yojson.Safe.Util.(json |> member "max_tokens" |> to_int);
+      check bool "provider transform serialization format survives" true
+        (Yojson.Safe.Util.(json |> member "response_format" |> member "type")=`String "json_object")) bodies;
+    let first=Yojson.Safe.from_string (List.hd bodies) in
+    let offered=match Yojson.Safe.Util.member "tools" first with `List tools -> tools | _ -> [] in
+    check bool "only the frozen image-capable surface offers the native image reader" expected
+      (List.exists (fun tool -> Yojson.Safe.Util.(tool |> member "function" |> member "name")=`String "keeper_image_read") offered);
+    if not expected then (
+      let config=Runtime_agent.default_config ~media_store ~name:"direct-frozen-media"
+        ~provider_cfg:(Option.get !transformed) ~system_prompt:"Frozen preflight boundary" ~tools:[] in
+      let config={config with runtime_id=Some "image.sample";input_runtime=Some runtime} in
+      (match Runtime_agent.run_blocks ~sw ~net:env#net ~config [Agent_core.Types.Text "Inspect the image.";image] with
+       | Error (Agent_core.Error.Config (Agent_core.Error.InvalidConfig {field="multimodal_input";_})) -> ()
+       | Error error -> fail (Agent_core.Error.to_string error)
+       | Ok _ -> fail "a frozen false or unknown declaration was widened by the replacement");
+      check int "direct preflight refuses before any extra provider request" (List.length bodies)
+        (Exact_output_fixture.post_count server));
+    if initial=Some true && replacement=Some false && present then (
+      let config=Runtime_agent.default_config ~media_store ~name:"id-only-media"
+        ~provider_cfg:(Option.get !transformed) ~system_prompt:"Existing ID-only boundary" ~tools:[] in
+      let config={config with runtime_id=Some "image.sample"} in
+      (match Runtime_agent.run_blocks ~sw ~net:env#net ~config [Agent_core.Types.Text "Inspect the image.";image] with
+       | Error (Agent_core.Error.Config (Agent_core.Error.InvalidConfig {field="multimodal_input";_})) -> ()
+       | Error error -> fail (Agent_core.Error.to_string error)
+       | Ok _ -> fail "ID-only caller stopped honoring the live runtime declaration");
+      check int "ID-only refusal still precedes provider dispatch" (List.length bodies)
+        (Exact_output_fixture.post_count server)))
+    ["true to false",Some true,Some false,true;"true to unknown",Some true,None,true;
+     "true to removed",Some true,None,false;"false to true",Some false,Some true,true;
+     "unknown to true",None,Some true,true]
+
 let () = Alcotest.run "Required tool delivery across runtime candidates"
-  ["actual-dispatch",[test_case "skip unsupported owners and bindings before dispatch" `Quick test_required_candidate_delivery]]
+  ["actual-dispatch",[
+    test_case "skip unsupported owners and bindings before dispatch" `Quick test_required_candidate_delivery;
+    test_case "selected media and tool policy survives registry replacement" `Quick test_frozen_runtime_media_survives_registry_replacement]]

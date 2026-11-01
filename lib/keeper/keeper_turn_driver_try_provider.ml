@@ -405,6 +405,7 @@ let input_continuity = function
 type try_provider_ctx =
   { (* Runtime identity *)
     runtime_id : string
+  ; input_runtime : Runtime_instance.t option
   ; error_runtime_id : string
   ; (* Where the carried range starts when the process holds no ledger for
        this (keeper, runtime) pair: the range the newest completed Agent Core
@@ -2396,6 +2397,7 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
           ; description =
               Some (Printf.sprintf "runtime:%s/runtime" ctx.runtime_id)
           ; runtime_id = Some ctx.runtime_id
+          ; input_runtime = ctx.input_runtime
           ; execution_actor = (if String.trim ctx.keeper_name = "" then None else Some ctx.keeper_name)
           ; transport = ctx.transport_resolved
           ; checkpoint_sidecar = ctx.checkpoint_sidecar

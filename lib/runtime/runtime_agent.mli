@@ -125,6 +125,11 @@ type config = Runtime_agent_context.config = {
   runtime_id : string option;
       (** Typed catalog identity used by runtime logic. [None] means the caller
           did not supply a catalog identity, so [name] is used. *)
+  input_runtime : Runtime_instance.t option;
+      (** Selected immutable model/execution input contract. [Some] pins media
+          admission while composing it over the final [provider_cfg] capabilities;
+          registry replacement cannot change this call. [None] preserves runtime-ID
+          lookup and provider-only fallback for non-materialized callers. *)
   execution_actor : string option;
       (** Host-owned actor of tool invocations, independent of [name].
           Missing actor evidence stays unobserved. *)

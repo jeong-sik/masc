@@ -105,6 +105,7 @@ type config =
   session_id : string option;
   description : string option;
   runtime_id : string option;
+  input_runtime : Runtime_instance.t option;
   execution_actor : string option;
   initial_messages : Agent_core.Types.message list;
   media_store : Agent_core.History.media_store;
@@ -718,18 +719,22 @@ let apply_execution_input_capabilities execution
     ; supports_document_input = false
     }
 
+let input_capabilities_with_runtime caps (runtime : Runtime_instance.t) =
+  let model_caps =
+    Option.value
+      runtime.model.capabilities
+      ~default:Runtime_schema.model_capabilities_default in
+  apply_runtime_model_input_capabilities caps model_caps
+  |> apply_execution_input_capabilities runtime.execution
+
 let input_capabilities_for_config (config : config) =
   let caps = provider_caps_of_config config.provider_cfg in
-  match Runtime.get_runtime_by_id (runtime_id_of_config config) with
+  let runtime = match config.input_runtime with
+    | Some _ as runtime -> runtime
+    | None -> Runtime.get_runtime_by_id (runtime_id_of_config config) in
+  match runtime with
   | None -> caps
-  | Some runtime ->
-      let model_caps =
-        Option.value
-          runtime.model.capabilities
-          ~default:Runtime_schema.model_capabilities_default
-      in
-      apply_runtime_model_input_capabilities caps model_caps
-      |> apply_execution_input_capabilities runtime.execution
+  | Some runtime -> input_capabilities_with_runtime caps runtime
 
 (* Effective input capabilities of a materialized runtime (RFC-0265 reroute
    candidate scoring). Same composition as [input_capabilities_for_config]:
@@ -746,11 +751,7 @@ let input_capabilities_of_runtime (rt : Runtime_instance.t) =
     | Runtime_execution.Muse_serve _ ->
       Llm_provider.Capabilities.default_capabilities
   in
-  apply_runtime_model_input_capabilities
-    provider_caps
-    (Option.value rt.Runtime_instance.model.capabilities
-       ~default:Runtime_schema.model_capabilities_default)
-  |> apply_execution_input_capabilities rt.execution
+  input_capabilities_with_runtime provider_caps rt
 
 (* Tool-result media admission uses the materialized dispatch snapshot, so a
    concurrent configuration replacement cannot change the active client's

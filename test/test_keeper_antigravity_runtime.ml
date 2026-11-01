@@ -1108,7 +1108,9 @@ let test_noncompletion_preserves_durable_identity_and_effect_fence () =
             Eio_context.with_test_env ~net:(Eio.Stdenv.net env)
               ~clock:(Eio.Stdenv.clock env) ~mono_clock:(Eio.Stdenv.mono_clock env) ~sw
               (fun () ->
-                Runtime.init_default ~config_path:runtime_path |> Result.get_ok;
+                Runtime.init_default ~config_path:runtime_path
+                |> Result.map_error (fun detail -> fail detail)
+                |> Result.get_ok;
                 let runtime = Runtime.get_runtime_by_id "antigravity.gemini" |> Option.get in
                 let config = match runtime.Runtime_instance.execution with
                   | Runtime_execution.Antigravity_cli config -> config
@@ -1127,7 +1129,7 @@ let test_noncompletion_preserves_durable_identity_and_effect_fence () =
                     ~system_prompt:"noncompletion fixture system prompt" ~tools:[ tool ]
                     ~initial_messages:[] ~model_input_projection:None
                     ~on_transmitted_model_input:(fun _ -> ()) ~hooks:None ~context_injector:None
-                    ~context:None ~event_bus:None ~raw_trace:None
+                    ~context:(Some (Agent_core.Context.create ())) ~event_bus:None ~raw_trace:None
                     ~on_usage_report:(fun report -> usage_reports := report :: !usage_reports)
                     ~on_event:(Some (fun event -> events := event :: !events)) ~config ()
                 in
@@ -1241,6 +1243,7 @@ emit("result", {"conversation_id": "builtin-conversation", "status": %s, "respon
 protocol = "antigravity-cli"
 command = %S
 is-non-interactive = true
+timeout-s = 30.0
 credentials = { type = "file", path = %S }
 [antigravity_fallback.gemini]
 [runtime.lanes.antigravity_incomplete]
@@ -1252,7 +1255,9 @@ candidates = ["antigravity.gemini", "antigravity_fallback.gemini"]
           Eio_context.with_test_env ~net:(Eio.Stdenv.net env)
             ~clock:(Eio.Stdenv.clock env) ~mono_clock:(Eio.Stdenv.mono_clock env) ~sw
             (fun () ->
-              Runtime.init_default ~config_path:runtime_path |> Result.get_ok;
+              Runtime.init_default ~config_path:runtime_path
+              |> Result.map_error (fun detail -> fail detail)
+              |> Result.get_ok;
               let attempted = ref [] in
               let outcome = Keeper_turn_driver.run_named
                   ~input_source:(Keeper_request_source.Keeper_history { trace_id = "antigravity-native-incomplete" })

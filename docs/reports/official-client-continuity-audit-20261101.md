@@ -1,7 +1,7 @@
 # Official client and provider continuity audit — 2026-11-01
 
-Five concrete contract defects were found and repaired in draft Native Stack
-[47014](https://github.com/jeong-sik/masc/pull/47022). The review followed current
+Five concrete contract defects were found and repaired in draft Native Stack #47014,
+whose top layer is [PR #47022](https://github.com/jeong-sik/masc/pull/47022). The review followed current
 source, installed client help/schema, primary documentation and read-only runtime
 evidence. It does not establish that every provider is free of bugs or that the
 repairs are installed.

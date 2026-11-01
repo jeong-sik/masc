@@ -58,9 +58,10 @@ the frame is the only way to read them. 409 means no program is loaded.
 
 Each move is a POST whose JSON body is the arguments of the MASC tool of the
 same name, checked against the schema shown. The answer is
-`{ok, message, data}`: 200 when the move ran, 400 when it was refused and
-nothing ran. A 503 means the worker is unavailable or the outcome is unknown;
-inspect the machine before sending more input and never automatically replay it.
+`{ok, message, data}`: 200 when the move ran, 400 when it was refused or the
+worker reported a failure. A 503 means the worker is unavailable or the outcome
+is unknown. An error status alone does not prove that no input ran: inspect
+the machine before sending more input and never automatically replay uncertain input.
 
     curl -s -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '<arguments>' <move URL>
 

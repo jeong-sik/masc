@@ -211,6 +211,37 @@ let test_a_keeper_without_candidates_has_nothing_to_judge () =
 
 (* ---- the judgment ---- *)
 
+let test_calendar_adjustment_leaves_judgment_elapsed_time_monotonic direction adjusted () =
+  with_recall_setup (fun config ->
+    if Time_compat.has_clock () then Alcotest.fail "the calendar clock is already owned";
+    let clock = Eio_mock.Clock.make () in
+    Eio_mock.Clock.set_time clock now;
+    Time_compat.set_clock (clock :> float Eio.Time.clock_ty Eio.Resource.t);
+    Fun.protect ~finally:Time_compat.clear_clock (fun () ->
+      let first_call = ref true in
+      let call ~destinations ~state ~questions () =
+        if !first_call then (
+          first_call := false;
+          Eio_mock.Clock.set_time clock adjusted);
+        answering ~destinations ~state ~questions ()
+      in
+      let keeper_id = "judgment-clock-" ^ direction in
+      let enclosing = Mtime_clock.counter () in
+      let judged = judged_of (judge ~call ~memo:(Turn.create_memo ()) config ~keeper_id ()) in
+      let enclosing_seconds = Mtime.Span.to_float_ns (Mtime_clock.count enclosing) /. 1e9 in
+      let seconds = seconds_sum ~keeper:keeper_id in
+      Alcotest.(check string) "the judgment is still used" "selected" (J.status_token judged.status);
+      Alcotest.(check bool) "the sample lies within its enclosing monotonic interval"
+        true (seconds >= 0.0 && seconds <= enclosing_seconds);
+      Alcotest.(check (float 0.0)) "the completed judgment contributes one sample" 1.0
+        (timed ~keeper:keeper_id);
+      let saved = rows config ~keeper_id in
+      let first = List.hd saved and last = List.nth saved (List.length saved - 1) in
+      Alcotest.(check (float 0.0)) "the first request keeps its calendar timestamp" now
+        (U.to_float (U.member "recorded_at" first));
+      Alcotest.(check (float 0.0)) "the outcome records the calendar adjustment" adjusted
+        (U.to_float (U.member "recorded_at" last))))
+
 let test_a_judgment_is_saved_and_counted () =
   with_recall_setup (fun config ->
     let call, calls = counting answering in
@@ -369,7 +400,11 @@ let () =
             test_a_keeper_without_candidates_has_nothing_to_judge
         ] )
     ; ( "judgment"
-      , [ Alcotest.test_case "a judgment is saved and counted" `Quick test_a_judgment_is_saved_and_counted
+      , [ Alcotest.test_case "a backward calendar adjustment preserves judgment elapsed time" `Quick
+            (test_calendar_adjustment_leaves_judgment_elapsed_time_monotonic "backward" (now -. 86_400.0))
+        ; Alcotest.test_case "a forward calendar adjustment preserves judgment elapsed time" `Quick
+            (test_calendar_adjustment_leaves_judgment_elapsed_time_monotonic "forward" (now +. 86_400.0))
+        ; Alcotest.test_case "a judgment is saved and counted" `Quick test_a_judgment_is_saved_and_counted
         ; Alcotest.test_case "a judgment that carries two candidates counts both" `Quick
             test_a_judgment_that_carries_two_candidates_counts_both
         ; Alcotest.test_case "a judgment that carries nothing is counted without a selection" `Quick

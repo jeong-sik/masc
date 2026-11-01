@@ -26,8 +26,10 @@
 
     Each request is counted by Keeper, question kind and result
     ([masc_keeper_memory_recall_requests_total]) and timed from the call to its
-    result ([masc_keeper_memory_recall_request_seconds]). The size of its
-    [started] row, the state and the questions with the identity fields, is
+    result ([masc_keeper_memory_recall_request_seconds]), using a monotonic
+    elapsed-time counter. Calendar-clock adjustments do not change that
+    duration; journal [recorded_at] values remain Unix timestamps. The size of
+    its [started] row, the state and the questions with the identity fields, is
     added to [masc_keeper_memory_recall_input_bytes_total]. That is the size of
     the record, not of the body on the wire.
 

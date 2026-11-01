@@ -5574,6 +5574,15 @@ type task_detail_presented =
   ; tdp_count : int
   ; tdp_height : int
   ; tdp_waiting : bool }
+type tools_task_owner =
+  { tto_source : tools_async_task_source; tto_reading : unit ref; tto_visit : unit ref }
+type tools_task_frame =
+  { ttf_owner : tools_task_owner
+  ; ttf_count : int
+  ; ttf_height : int
+  ; ttf_offset : int
+  ; ttf_waiting : bool
+  ; ttf_cols : int }
 let initial_task_document_slot = {tds_reading=Masc_tui_fetched.initial;tds_request=None;tds_previous=None}
 let equal_task_document_target a b = match a,b with
    | Work_task_document a,Work_task_document b -> a=b
@@ -10170,6 +10179,9 @@ type state = {
   mutable skills_catalog: Masc.Tui_decode_tools.skills_catalog option;
   mutable skills_catalog_error: string option;
   mutable tools_scroll: int;
+  mutable tools_task_visit: unit ref;
+  mutable tools_task_follow_end: tools_task_owner option;
+  mutable tools_task_presented: tools_task_frame option;
   mutable tools_skill_cursor: int;
   mutable tools_skill_source_picker: skill_source_picker option;
   mutable tools_skill_create_drafts: skill_create_draft list;
@@ -13555,7 +13567,9 @@ let suspend_tools_async_task state =
   state.tools_async_task_body <- Masc_tui_fetched.suspend state.tools_async_task_body;
   state.tools_async_task_history <- Masc_tui_fetched.suspend state.tools_async_task_history;
   state.tools_async_task_body_request <- None;
-  state.tools_async_task_history_request <- None
+  state.tools_async_task_history_request <- None;
+  state.tools_task_visit <- ref ();
+  state.tools_task_follow_end <- None
 
 let suspend_tools_async_detail state =
   suspend_tools_async_task state;
@@ -13572,7 +13586,9 @@ let withdraw_tools_async_details state =
   state.tools_async_task_body <- Masc_tui_fetched.clear state.tools_async_task_body;
   state.tools_async_task_history <- Masc_tui_fetched.clear state.tools_async_task_history;
   state.tools_async_task_body_request <- None;
-  state.tools_async_task_history_request <- None
+  state.tools_async_task_history_request <- None;
+  state.tools_task_visit <- ref ();
+  state.tools_task_follow_end <- None
 
 let tools_async_source_task state =
   let module Detail = Masc.Tui_decode_async_request in
@@ -18680,6 +18696,9 @@ let create_state
   skills_catalog = None;
   skills_catalog_error = None;
   tools_scroll = 0;
+  tools_task_visit = ref ();
+  tools_task_follow_end = None;
+  tools_task_presented = None;
   tools_skill_cursor = 0;
   tools_skill_source_picker = None;
   tools_skill_create_drafts = [];
@@ -20284,11 +20303,7 @@ let reconcile_task_detail_scroll state =
   if Option.is_none (current_task_detail_presented state) then
     state.task_detail_presented <- None
 
-let task_detail_waiting state ~task_id ~cols =
-  let history =
-    Masc_tui_fetched.in_flight state.task_history
-    && Option.equal String.equal (Masc_tui_fetched.current_key state.task_history)
-         (Some task_id) in
+let task_documents_waiting state ~cols =
   let body, history_document = task_document_inputs state ~cols in
   let preparing part key = match key with
     | None -> false
@@ -20300,8 +20315,14 @@ let task_detail_waiting state ~task_id ~cols =
         Masc_tui_fetched.in_flight slot.tds_reading
         && Option.exists (equal_task_document_key key)
              (Masc_tui_fetched.current_key slot.tds_reading) in
-  history || preparing Masc_tui_task_document.Body body
+  preparing Masc_tui_task_document.Body body
   || preparing Masc_tui_task_document.History history_document
+
+let task_detail_waiting state ~task_id ~cols =
+  (Masc_tui_fetched.in_flight state.task_history
+   && Option.equal String.equal (Masc_tui_fetched.current_key state.task_history)
+        (Some task_id))
+  || task_documents_waiting state ~cols
 
 let task_detail_select_end state ~cols =
   match current_task_detail_presented state with
@@ -20361,6 +20382,105 @@ let reset_task_detail_scroll state =
   state.task_detail_scroll <- 0;
   state.task_detail_follow_end <- None;
   task_detail_forget_frame state
+
+let tools_task_display_owner state =
+  if state.view <> Tools || state.tools_pane <> Tools_async
+     || not state.tools_async_detail_open
+     || Option.is_some state.tools_skill_source_picker then None
+  else match state.tools_async_task_source, state.tools_async_selection with
+    | Some source, Some selection
+      when Masc.Tui_decode_async_request.equal_target selection source.ats_request.target ->
+      Some {tto_source=source; tto_reading=state.workspace_read_authority;
+            tto_visit=state.tools_task_visit}
+    | Some _, (Some _ | None) | None, (Some _ | None) -> None
+
+let tools_task_owner state =
+  if server_authority_ready state
+  then tools_task_display_owner state else None
+
+let same_tools_task_owner a b =
+  a.tto_reading == b.tto_reading
+  && a.tto_visit == b.tto_visit
+  && equal_tools_async_task_source a.tto_source b.tto_source
+
+let tools_task_owner_current state owner =
+  Option.exists (same_tools_task_owner owner) (tools_task_owner state)
+
+let tools_task_display_owner_current state owner =
+  Option.exists (same_tools_task_owner owner) (tools_task_display_owner state)
+
+let current_tools_task_presented state =
+  match state.tools_task_presented with
+  | Some frame when tools_task_display_owner_current state frame.ttf_owner -> Some frame
+  | Some _ | None -> None
+
+let tools_task_reader_withdrawn state =
+  Option.is_some state.tools_task_presented
+  && Option.is_none (current_tools_task_presented state)
+
+let reconcile_tools_task_scroll state =
+  if not (Option.exists (tools_task_owner_current state) state.tools_task_follow_end)
+  then state.tools_task_follow_end <- None
+
+let tools_task_waiting state ~source ~cols =
+  let pending reading =
+    Masc_tui_fetched.in_flight reading
+    && Option.exists (equal_tools_async_task_source source)
+         (Masc_tui_fetched.current_key reading) in
+  pending state.tools_async_task_body || pending state.tools_async_task_history
+  || task_documents_waiting state ~cols
+
+let tools_task_following_end state =
+  Option.exists (tools_task_owner_current state) state.tools_task_follow_end
+
+let tools_task_select_end state =
+  match tools_task_owner state with
+  | None -> false
+  | Some owner ->
+    Option.iter (fun frame ->
+      state.tools_scroll <- Masc_tui_scroll.maximum
+          ~count:frame.ttf_count ~height:frame.ttf_height)
+      (current_tools_task_presented state);
+    state.tools_task_follow_end <- Some owner;
+    true
+
+let tools_task_user_scroll state offset =
+  state.tools_task_follow_end <- None;
+  state.tools_scroll <- offset
+
+let tools_task_relative_scroll state offset =
+  if tools_task_following_end state
+     && Option.is_none (current_tools_task_presented state) then false
+  else begin tools_task_user_scroll state offset; true end
+
+let tools_task_presented_viewport state ~fallback =
+  match current_tools_task_presented state with
+  | Some frame -> frame.ttf_count, frame.ttf_height
+  | None -> fallback ()
+
+let tools_task_render_scroll state =
+  if tools_task_following_end state then clamped_scroll_end else state.tools_scroll
+
+let tools_task_viewport_changed state frame =
+  match current_tools_task_presented state with
+  | None -> true
+  | Some shown ->
+    not (same_tools_task_owner frame.ttf_owner shown.ttf_owner)
+    || frame.ttf_count <> shown.ttf_count || frame.ttf_height <> shown.ttf_height
+    || (shown.ttf_waiting && not frame.ttf_waiting
+        && state.tools_scroll <> frame.ttf_offset)
+
+let tools_task_presented_frame state frame =
+  if tools_task_display_owner_current state frame.ttf_owner then begin
+    state.tools_task_presented <- Some frame;
+    if tools_task_following_end state || not frame.ttf_waiting then
+      state.tools_scroll <- frame.ttf_offset;
+    if tools_task_following_end state && not frame.ttf_waiting
+       && not (tools_task_waiting state ~source:frame.ttf_owner.tto_source ~cols:frame.ttf_cols)
+    then state.tools_task_follow_end <- None
+  end else state.tools_task_presented <- Some frame
+
+let tools_task_forget_frame state = state.tools_task_presented <- None
 
 (* The strip above the composer: what fires next, and who is blocked on the
    operator. Both are already in the state and neither was readable from the

@@ -4759,6 +4759,141 @@ let task_scroll_history task_id =
        "events",`List []]) with
   | Ok history -> history | Error detail -> Alcotest.fail detail
 
+let tools_task_scroll_fixture () =
+  let open Masc_tui_types in
+  let module Async = Masc.Tui_decode_async_request in
+  let state = create_state ~workspace:"tools-task-scroll" ~port:0 ~refresh_interval:0. () in
+  let target : Async.target =
+    {submitted_by="operator"; request_id="request-1"; keeper_name="keeper"} in
+  let source : tools_async_task_source =
+    {ats_request={target; request_context=`Assoc ["composition_run_id", `String "run-1"]};
+     ats_run_id="run-1"; ats_task_id="task-scroll"; ats_observed_at=1.; ats_retained=false} in
+  state.view <- Tools;
+  state.tools_pane <- Tools_async;
+  state.tools_async_selection <- Some target;
+  state.tools_async_detail_open <- true;
+  state.tools_async_task_source <- Some source;
+  state.workspace_identity <- Workspace_identity_match;
+  state.server_identity <- Some (identity "/workspace/tools-task");
+  state, source
+
+let tools_task_frame state ~count ~height ~offset =
+  let open Masc_tui_types in
+  let owner = match tools_task_display_owner state with
+    | Some owner -> owner | None -> Alcotest.fail "no visible original Task owner" in
+  {ttf_owner=owner; ttf_count=count; ttf_height=height; ttf_offset=offset;
+   ttf_waiting=tools_task_waiting state ~source:owner.tto_source ~cols:72; ttf_cols=72}
+
+let test_tools_task_end_waits_for_both_reads_and_presentation () =
+  let open Masc_tui_types in
+  let state, source = tools_task_scroll_fixture () in
+  let body = Option.get (begin_tools_async_task_body state ~force:false) in
+  let history = Option.get (begin_tools_async_task_history state ~force:false ~limit:40) in
+  let shown = tools_task_frame state ~count:30 ~height:14 ~offset:0 in
+  tools_task_presented_frame state shown;
+  Alcotest.(check bool) "End selects this Task" true (tools_task_select_end state);
+  Alcotest.(check int) "the last displayed end is the input origin" 16 state.tools_scroll;
+  complete_tools_async_task_history state history (Ok (task_scroll_history source.ats_task_id));
+  Alcotest.(check bool) "unprepared History and pending body still wait" true
+    (tools_task_waiting state ~source ~cols:72);
+  let first_documents = sync_task_documents state ~cols:72 in
+  complete_task_scroll_documents state ~cols:72 first_documents;
+  tools_task_presented_frame state (tools_task_frame state ~count:100 ~height:14 ~offset:86);
+  Alcotest.(check bool) "the later body keeps End pending" true (tools_task_following_end state);
+  let detail = Masc.Tui_decode_task_inspection.detail ~task_id:source.ats_task_id (`Assoc [
+    "task", `Assoc ["id", `String source.ats_task_id; "title", `String "fixture";
+                    "description", `String "body"; "goal_id", `Null;
+                    "status", `String "todo"; "created_at", `String "2026-10-19T00:00:00Z"]]) in
+  let detail = match detail with Ok value -> value | Error error -> Alcotest.fail error in
+  complete_tools_async_task_body state body (Ok detail);
+  Alcotest.(check bool) "unprepared Body still waits" true (tools_task_waiting state ~source ~cols:72);
+  let last_documents = sync_task_documents state ~cols:72 in
+  complete_task_scroll_documents state ~cols:72 last_documents;
+  Alcotest.(check bool) "a ready result has not itself settled End" true (tools_task_following_end state);
+  let final = tools_task_frame state ~count:130 ~height:14 ~offset:116 in
+  Alcotest.(check bool) "building a candidate without presenting it leaves End pending" true
+    (tools_task_following_end state && state.tools_scroll=86);
+  tools_task_presented_frame state final;
+  Alcotest.(check bool) "the presented final frame settles End" true
+    (not (tools_task_following_end state) && state.tools_scroll=116);
+  ignore (begin_tools_async_task_body state ~force:true);
+  Alcotest.(check bool) "a later poll does not recreate End" false (tools_task_following_end state)
+
+let test_tools_task_end_respects_input_and_owner () =
+  let open Masc_tui_types in
+  let state, source = tools_task_scroll_fixture () in
+  ignore (begin_tools_async_task_history state ~force:false ~limit:40);
+  tools_task_presented_frame state (tools_task_frame state ~count:100 ~height:14 ~offset:86);
+  ignore (tools_task_select_end state);
+  let count, height = tools_task_presented_viewport state ~fallback:(fun () -> 1000, 2) in
+  let next = Masc_tui_scroll.page_up ~count ~height state.tools_scroll in
+  Alcotest.(check bool) "explicit page movement succeeds" true (tools_task_relative_scroll state next);
+  let moved = state.tools_scroll in
+  Alcotest.(check bool) "movement retires End" false (tools_task_following_end state);
+  tools_task_presented_frame state (tools_task_frame state ~count:100 ~height:14 ~offset:moved);
+  Alcotest.(check int) "later observations do not undo the movement" moved state.tools_scroll;
+  state.tools_scroll <- 86;
+  tools_task_presented_frame state (tools_task_frame state ~count:30 ~height:14 ~offset:16);
+  Alcotest.(check int) "temporary preparation does not discard the prior position" 86 state.tools_scroll;
+  let count,height = tools_task_presented_viewport state ~fallback:(fun () -> 1000, 2) in
+  ignore (tools_task_relative_scroll state (Masc_tui_scroll.up ~count ~height state.tools_scroll));
+  Alcotest.(check int) "Up moves from the actually presented placeholder" 15 state.tools_scroll;
+  ignore (tools_task_select_end state);
+  let old_frame = Option.get state.tools_task_presented in
+  suspend_tools_async_task state;
+  state.tools_async_task_source <- None;
+  state.tools_async_task_source <- Some source;
+  reconcile_tools_task_scroll state;
+  Alcotest.(check bool) "reopening the same Task retires the prior visit" true
+    (not (tools_task_following_end state) && tools_task_reader_withdrawn state);
+  tools_task_presented_frame state old_frame;
+  Alcotest.(check bool) "a late old frame cannot establish the new visit" true
+    (tools_task_reader_withdrawn state && not (tools_task_following_end state));
+  tools_task_presented_frame state (tools_task_frame state ~count:30 ~height:14 ~offset:0);
+  state.workspace_identity <- Workspace_identity_mismatch
+    {local_base_path="/local"; server_base_path="/workspace/tools-task"};
+  Alcotest.(check bool) "confirmed remote workspace supports End" true (tools_task_select_end state);
+  state.workspace_identity <- Workspace_identity_match_unconfirmed "temporarily unavailable";
+  suspend_tools_async_task state;
+  state.workspace_read_authority <- ref ();
+  reconcile_tools_task_scroll state;
+  Alcotest.(check bool) "unconfirmed identity retires the pending End" false (tools_task_following_end state);
+  tools_task_presented_frame state (tools_task_frame state ~count:30 ~height:14 ~offset:0);
+  Alcotest.(check bool) "retained Task remains the visible owner" false (tools_task_reader_withdrawn state);
+  withdraw_tools_async_details state;
+  Alcotest.(check bool) "withdrawal rejects input until a replacement frame" true (tools_task_reader_withdrawn state);
+  tools_task_forget_frame state;
+  Alcotest.(check bool) "a replacement frame retires the visible owner" false (tools_task_reader_withdrawn state)
+
+let test_tools_task_unpresented_frame_and_picker () =
+  let open Masc_tui_types in
+  let state, source = tools_task_scroll_fixture () in
+  let request = Option.get (begin_tools_async_task_history state ~force:false ~limit:40) in
+  state.tools_scroll <- 86;
+  let loading = tools_task_frame state ~count:30 ~height:14 ~offset:16 in
+  tools_task_presented_frame state loading;
+  Alcotest.(check int) "a temporary short frame retains the previous position" 86 state.tools_scroll;
+  complete_tools_async_task_history state request (Error "history unavailable");
+  let settled = tools_task_frame state ~count:30 ~height:14 ~offset:16 in
+  Alcotest.(check bool) "the ready transition needs a presented frame" true
+    (not settled.ttf_waiting && tools_task_viewport_changed state settled);
+  Alcotest.(check int) "an unpresented frame cannot clamp the position" 86 state.tools_scroll;
+  tools_task_presented_frame state settled;
+  Alcotest.(check int) "the presented failure frame settles its actual position" 16 state.tools_scroll;
+  state.tools_skill_source_picker <- Some
+    {ssp_sources=["one";"two"]; ssp_composition=false; ssp_list=Masc_tui_pick_list.closed;
+     ssp_authority=state.workspace_authority; ssp_identity=state.server_identity; ssp_port=state.port};
+  Alcotest.(check bool) "the picker is not an original Task frame" true
+    (Option.is_none (tools_task_display_owner state) && tools_task_reader_withdrawn state);
+  tools_task_forget_frame state;
+  state.tools_skill_source_picker <- None;
+  Alcotest.(check bool) "End can be requested before the first Task frame" true
+    (tools_task_select_end state && tools_task_following_end state);
+  Alcotest.(check bool) "relative input waits for a displayed Task frame" false
+    (tools_task_relative_scroll state 0);
+  Alcotest.(check bool) "declined movement retains the pending End" true
+    (tools_task_following_end state && source.ats_task_id="task-scroll")
+
 let test_task_history_progressive_read_keeps_owner_and_cursor () =
   let open Masc_tui_types in
   let module History = Masc.Tui_decode_task_inspection in
@@ -5851,6 +5986,12 @@ let () =
             test_reopened_history_document_follows_workspace_owner
         ; Alcotest.test_case "active history is not retained after an unconfirmed view closes" `Quick
             test_active_history_remains_until_its_unconfirmed_view_closes
+        ; Alcotest.test_case "Tools Task End waits for reads and presentation" `Quick
+            test_tools_task_end_waits_for_both_reads_and_presentation
+        ; Alcotest.test_case "Tools Task End respects input and owner" `Quick
+            test_tools_task_end_respects_input_and_owner
+        ; Alcotest.test_case "Tools Task settles only presented frames and excludes the picker" `Quick
+            test_tools_task_unpresented_frame_and_picker
         ; Alcotest.test_case "task detail End respects presented input" `Quick
             test_task_detail_end_respects_presented_input
         ; Alcotest.test_case "task detail End waits for its current read and frame" `Quick

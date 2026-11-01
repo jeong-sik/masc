@@ -180,8 +180,6 @@ let current state =
   | Status_retrying (request, error) | Status_failed (request, error) -> about request (Failed error)
 ;;
 
-let current_key state = Option.map fst (current state)
-
 let current_request state =
   match state.status with
   | Status_absent -> None
@@ -190,6 +188,8 @@ let current_request state =
   | Status_refreshing (request, _, _) | Status_stale (request, _, _)
   | Status_failed (request, _) -> Some request
 ;;
+
+let current_key state = Option.map request_key (current_request state)
 
 let view_for ~equal state ~key =
   let matches request = equal request.key key in

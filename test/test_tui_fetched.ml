@@ -27,6 +27,28 @@ let test_the_four_states_are_distinguishable () =
   check bool "failed" true (view failed ~key:"a" = F.Failed "it broke")
 ;;
 
+let test_current_key_tracks_every_request_state () =
+  let check_key label expected state =
+    check (option string) label expected (F.current_key state);
+    check (option string) (label ^ " agrees with the current request")
+      (Option.map F.request_key (F.current_request state)) (F.current_key state);
+    check (option string) (label ^ " agrees with the current reading")
+      (Option.map fst (F.current state)) (F.current_key state)
+  in
+  let loading, request = started (F.start ~equal F.initial ~key:"a") in
+  let ready = F.complete ~equal loading request (Ok "value") in
+  let failed = F.complete ~equal loading request (Error "failure") in
+  let retrying, _ = started (F.refresh ~equal failed ~key:"a") in
+  let refreshing, refresh = started (F.start ~equal ready ~key:"a") in
+  let stale = F.complete ~equal refreshing refresh (Error "stale") in
+  let refreshing_stale, _ = started (F.start ~equal stale ~key:"a") in
+  check_key "absent" None F.initial;
+  List.iter (fun (label, state) -> check_key label (Some "a") state)
+    [ "loading", loading; "ready", ready; "failed", failed; "retrying", retrying;
+      "refreshing", refreshing; "stale", stale; "refreshing stale", refreshing_stale ];
+  check_key "cleared" None (F.clear ready)
+;;
+
 let test_a_pane_asks_once_per_key () =
   let t, _ = started (F.start ~equal F.initial ~key:"a") in
   (* The pane redraws per keystroke, so asking again for what is already in
@@ -149,6 +171,7 @@ let () =
   run "tui_fetched"
     [ ( "states"
       , [ test_case "suspended reader retains its key" `Quick test_suspension_keeps_reader_key_and_refuses_retired_answers
+        ; test_case "current key tracks every request state" `Quick test_current_key_tracks_every_request_state
         ; test_case "cancelled refresh retains the existing observation" `Quick
             test_cancellation_keeps_the_existing_observation
         ; test_case "the four states are distinguishable" `Quick

@@ -329,8 +329,9 @@ val reasoning_effort_of_string : string -> reasoning_effort option
     request builders. *)
 
 (** [true] iff the request explicitly enables Preserved Thinking: thinking
-    active AND [clear_thinking] false. This enables reasoning across completed
-    user turns. It does not decide replay inside the active tool exchange;
+    active (the declared wire defaults an omitted toggle to enabled) AND
+    [clear_thinking] false. This enables reasoning across completed user turns.
+    It does not decide replay inside the active tool exchange;
     {!Reasoning_dialect} retains that interleaved reasoning separately. *)
 val preserved_thinking_active
   :  enable_thinking:bool option
@@ -340,9 +341,12 @@ val preserved_thinking_active
 
 (** Top-level [thinking.clear_thinking] request-field resolver, gated purely on
     the declared preserve wire. Rows with any other preserve wire omit the
-    field. No provider identity, endpoint, or model id participates. *)
+    field. An entirely omitted thinking request remains omitted; an explicit
+    preserve/clear request uses the wire's default enabled toggle when no
+    toggle is specified. No provider identity, endpoint, or model id participates. *)
 val clear_thinking_object_request_field
   :  preserve_thinking_control_format:Capabilities.preserve_thinking_control_format
+  -> enable_thinking:bool option
   -> clear_thinking:bool option
   -> preserve_thinking:bool option
   -> bool option

@@ -1191,6 +1191,107 @@ let test_inline_chat_carrier_survives_finalization_and_restore () =
     ["one<think>reason</think>two"; " \t "; " \n<think></think> "]
 ;;
 
+let test_default_thinking_preservation_survives_restore () =
+  let module Provider = Agent_core.Llm_provider in
+  List.iter (fun model_id ->
+    let config = Provider.Provider_config.make
+        ~kind:Glm ~provider_id:"glm-coding" ~model_id
+        ~base_url:"https://api.z.ai/api/coding/paas/v4" ~max_tokens:128 () in
+    let reasoning = "prior reasoning\n  kept exactly  " in
+    let response = `Assoc
+        [ "id", `String "default-thinking-fixture"
+        ; "model", `String model_id
+        ; "choices", `List [`Assoc
+            [ "message", `Assoc
+                ["role", `String "assistant"; "content", `String "prior answer"
+                ; "reasoning_content", `String reasoning]
+            ; "finish_reason", `String "stop"
+            ]]
+        ] |> Yojson.Safe.to_string in
+    let response = Provider.Backend_glm.parse_response_result response
+      |> Result.map_error Provider.Backend_openai_parse.parse_error_to_string
+      |> expect_ok in
+    let response = Provider.Complete_common.patch_telemetry response ~config None in
+    let media_store = Agent_core.History.Memory_store.create () in
+    let media_result result = result
+      |> Result.map_error (fun error -> Agent_core.Error.to_string (Agent_core.Error.Media error))
+      |> expect_ok in
+    let assistant = Agent_core.Types.assistant_message_of_response response
+      |> Result.map_error Agent_core.Types.show_assistant_message_error
+      |> expect_ok |> Agent_core.History.of_wire_message media_store |> media_result in
+    let history = [message Agent_core.Types.User [Agent_core.Types.Text "prior question"]] in
+    let original =
+      { (checkpoint (history @ [assistant])) with preserve_thinking = Some true }
+    in
+    let patched, _ = Finalize.checkpoint_for_replay_persistence
+        ~stop_reason:(Runtime_agent.Completed {provider_turn_ordinal=17})
+        ~history_messages:history ~session_id:original.session_id
+        ~response_text:"prior answer" ~exclude_thought_from_replay:false original
+      |> expect_ok in
+    with_temp_dir (fun session_dir ->
+      (match Masc.Keeper_checkpoint_store.save_agent_core_classified
+          ~boundary:Agent_core.Checkpoint_objects.Turn_closes
+          ~history_retained:(history_retained ()) ~session_dir patched |> expect_ok with
+       | Saved _ -> ()
+       | Stale_noop _ -> Alcotest.fail "fresh checkpoint was not saved");
+      let restored = Masc.Keeper_checkpoint_store.load_agent_core ~session_dir
+          ~session_id:patched.session_id
+        |> Result.map_error Masc.Keeper_checkpoint_store.checkpoint_load_error_to_string
+        |> expect_ok in
+      let messages = restored.messages
+        @ [message Agent_core.Types.User [Agent_core.Types.Text "next question"]]
+        |> Agent_core.History.to_wire_messages media_store |> media_result in
+      let body config = Provider.Backend_glm.build_request ~config ~messages ()
+        |> Yojson.Safe.from_string in
+      let open Yojson.Safe.Util in
+      let check label expected (config : Provider.Provider_config.t) =
+        let wire = body config in
+        let messages = wire |> member "messages" |> to_list in
+        Alcotest.(check int) (model_id ^ " keeps the conversation") 3
+          (List.length messages);
+        let actual = messages |> List.filter_map (fun item ->
+          match member "reasoning_content" item with
+          | `String text -> Some text
+          | _ -> None) in
+        Alcotest.(check (list string)) (model_id ^ " " ^ label) expected actual;
+        wire |> member "thinking"
+      in
+      List.iter (fun (label, config) ->
+        let thinking = check label [reasoning] config in
+        Alcotest.(check bool) (label ^ " retains thinking on the wire") false
+          (thinking |> member "clear_thinking" |> to_bool);
+        Alcotest.(check bool) (label ^ " leaves the default toggle omitted") true
+          (member "type" thinking = `Null))
+        [ "preserve with default thinking",
+          {config with enable_thinking = restored.enable_thinking;
+            preserve_thinking = restored.preserve_thinking}
+        ; "retain with default thinking", {config with clear_thinking = Some false}
+        ; "explicit retain overrides preserve=false",
+          {config with clear_thinking = Some false; preserve_thinking = Some false}
+        ];
+      let cleared = check "explicit clear overrides preserve=true" []
+          {config with clear_thinking = Some true; preserve_thinking = Some true} in
+      Alcotest.(check bool) "explicit clear reaches the wire" true
+        (cleared |> member "clear_thinking" |> to_bool);
+      let omitted = check "no preservation request excludes completed-turn reasoning" [] config in
+      Alcotest.(check bool) "entirely omitted thinking request stays omitted" true
+        (omitted = `Null);
+      match model_id with
+      | "glm-5.2" ->
+        let disabled = check "explicit disable overrides retained thinking" []
+            {config with enable_thinking = Some false; clear_thinking = Some false;
+              preserve_thinking = Some true} in
+        Alcotest.(check string) "disable reaches the supported toggle" "disabled"
+          (disabled |> member "type" |> to_string);
+        Alcotest.(check bool) "disable suppresses the preserve field" true
+          (member "clear_thinking" disabled = `Null)
+      | _ ->
+        Alcotest.(check bool) "forced thinking still rejects an explicit disable" true
+          (Option.is_some (Provider.Complete_common.thinking_control_request_rejection_reason
+             {config with enable_thinking = Some false; preserve_thinking = Some true}))))
+    ["glm-5.2"; "glm-5.3-flash"]
+;;
+
 let () =
   Alcotest.run
     "keeper replay checkpoint"
@@ -1199,6 +1300,8 @@ let () =
             test_native_response_groups_survive_visible_normalization
         ; Alcotest.test_case "inline Chat carrier survives finalization and disk restore" `Quick
             test_inline_chat_carrier_survives_finalization_and_restore
+        ; Alcotest.test_case "default thinking preservation survives disk restore" `Quick
+            test_default_thinking_preservation_survives_restore
         ; Alcotest.test_case
             "patch preserves typed reasoning"
             `Quick

@@ -397,18 +397,24 @@ let clear_thinking_value ~clear_thinking ~preserve_thinking =
 ;;
 
 let preserved_thinking_active ~enable_thinking ~clear_thinking ~preserve_thinking =
-  enable_thinking = Some true
+  (* The declared clear-thinking wire defaults [thinking.type] to [enabled].
+     An omitted toggle therefore still permits explicitly retained history.
+     Ref: https://docs.z.ai/api-reference/llm/chat-completion (2026-11-01). *)
+  enable_thinking <> Some false
   && not (clear_thinking_value ~clear_thinking ~preserve_thinking)
 ;;
 
 let clear_thinking_object_request_field
       ~(preserve_thinking_control_format : Capabilities.preserve_thinking_control_format)
+      ~enable_thinking
       ~clear_thinking
       ~preserve_thinking
   =
   match preserve_thinking_control_format with
   | Capabilities.Thinking_object_clear_thinking ->
-    Some (clear_thinking_value ~clear_thinking ~preserve_thinking)
+    (match enable_thinking, clear_thinking, preserve_thinking with
+     | None, None, None -> None
+     | _ -> Some (clear_thinking_value ~clear_thinking ~preserve_thinking))
   | Capabilities.No_preserve_thinking_control
   | Capabilities.Thinking_object_keep_all
   | Capabilities.Chat_template_kwargs_preserve_thinking

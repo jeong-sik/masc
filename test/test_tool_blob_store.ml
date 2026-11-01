@@ -1103,9 +1103,11 @@ let write_maintenance_tool_receipts ~base_path input =
   Fun.protect ~finally:Calls.reset_for_testing (fun () ->
     Calls.init ~base_path ();
     let committed = ref 0 in
+    let execution_evidence = `Assoc ["detail", input] in
+    let output_text = Yojson.Safe.to_string (`Assoc ["status", input]) in
     List.iter (fun wire_outcome ->
       Calls.log_call ~keeper_name:"reviewer" ~tool_name:"fixture" ~input
-        ~output_text:"ok" ~duration_ms:0. ~wire_outcome
+        ~execution_evidence ~output_text ~duration_ms:0. ~wire_outcome
         ~on_committed:(fun () -> incr committed) ())
       [Tool_result.Ok;Tool_result.Error;Tool_result.Unknown];
     Alcotest.(check int) "all wire outcomes commit real producer rows" 3 !committed;

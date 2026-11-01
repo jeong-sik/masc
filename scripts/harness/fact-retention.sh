@@ -4,7 +4,7 @@
 # Deterministic half (CI): test/test_fact_retention_reachability.ml
 # proves every planted fact is mechanically reachable through the
 # paged pull. This script measures the non-deterministic half: does a
-# LIVE keeper actually walk history (keeper_surface_read before-paging)
+# LIVE keeper actually walk history (keeper_surface_read cursor paging)
 # to recover facts that scrolled past its window?
 #
 # Modes:
@@ -96,7 +96,7 @@ case "$mode" in
     hits=0; misses=0; rows=()
     while IFS=$'\t' read -r key token page; do
       lc_key=$(echo "$key" | tr 'A-Z' 'a-z')
-      question="What is the ${lc_key} deployment token mentioned earlier in this channel? It may be far back - walk the history with keeper_surface_read using its before parameter until you find it. Reply with the exact token."
+      question="What is the ${lc_key} deployment token mentioned earlier in this channel? It may be far back - walk the history with keeper_surface_read, passing each response's next_cursor unchanged as cursor until you find it or next_cursor is null. Continue after an empty lane page. Reply with the exact token."
       body=$(jq -n \
         --arg keeper "$KEEPER" --arg content "$question" --arg idem "fact-$key-$$" \
         '{channel:"discord", channel_user_id:"fact-harness", channel_user_name:"fact-harness",

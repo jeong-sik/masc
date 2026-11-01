@@ -20,16 +20,19 @@ rows with a typed surface whose lane label matches are returned."""
 name = "limit"
 type = "integer"
 description = """
-Maximum messages or Discord members to return (default 20; messages: 1-100; \
-members: 1-1000). The local participant roster covers the whole loaded lane."""
+Maximum local transcript rows per page, Discord messages, or Discord members \
+to return (default 20; rows/messages: 1-100; members: 1-1000). A local page \
+can contain fewer matching lane rows; keep paging with next_cursor even when \
+messages is empty. The local participant roster covers the loaded lane rows."""
 
 [[params]]
-name = "before"
-type = "number"
+name = "cursor"
+type = "string"
 description = """
-Page backward: return messages strictly older than this ts (a message \
-timestamp from a previous call). Walk history by passing the oldest_ts of \
-the previous response; stop when has_more is false."""
+Opaque local history cursor returned as next_cursor by the previous response. \
+Omit for the newest page; pass it unchanged to read earlier rows in append \
+order, including after an empty lane page. Stop when next_cursor is null \
+(has_more is false). A stale cursor refuses the read; start again without it."""
 
 [[params]]
 name = "mode"

@@ -197,7 +197,9 @@ val handle_surface_read_with_outcome
   -> Keeper_tool_execution.t
 (** A refusal is a failed outcome whose class comes from its error code
     ({!Tool_args.failure_class_of_error_code}); a lane label the caller can
-    correct is a [Policy_rejection]. *)
+    correct is a [Policy_rejection]. Local pages use the chat store's physical
+    cursor and apply the existing row limit before reading. Invalid/stale
+    cursors and unreadable rows fail without publishing a next-page cursor. *)
 
 val discord_rest_error : Discord_rest_client.error -> Keeper_tool_execution.t
 (** Preserve the typed Discord REST cause in the error code and failed

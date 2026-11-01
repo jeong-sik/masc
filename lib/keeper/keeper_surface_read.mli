@@ -5,7 +5,7 @@
     participant roster by folding over the rows. No store of its own —
     the chat log is the only source, so the roster ages out with log
     retention (RFC-0223 §5: log-bounded by design, no separate person
-    store, no cursors). *)
+    store). Paging uses the chat store's physical cursor. *)
 
 (** One person seen on the lane, derived from user lines carrying a
     [speaker_id] (RFC-0223 P1). Keeper/assistant lines are the
@@ -22,6 +22,9 @@ type participant = {
 }
 
 val default_limit : int
+val normalize_limit : int -> int
+(** Apply the existing local page limit before loading the store page. The
+    limit bounds physical rows; a lane-filtered page can contain fewer rows. *)
 
 (** Binding knowledge the runtime can prove (task-1596): the keeper's
     bound channel ids/names per connector lane. When [respond] receives
@@ -30,35 +33,32 @@ val default_limit : int
     silent zero-row page: "slack"/"discord" when the keeper has no
     bound channels there (post's doctrine, mirrored on the read side),
     and any other non-core label absent from the loaded page's lane
-    labels when that page is the whole history (no [before] cursor and
-    no [has_more]) — the refusal names the labels the page does carry.
+    labels when that page is the whole history (no requested [cursor] and
+    no [next_cursor]) — the refusal names the labels the page does carry.
     On any other page such a label reads as an empty page. Core
     lanes (dashboard/agent/broadcast/webhook) always pass; absent
     bindings keep the projection pure and unverified. *)
 type connector_bindings = { slack : string list; discord : string list }
 
-(** [respond] filters [messages] to
+(** [respond] filters [page.history_messages] to
     rows whose typed [surface] ([Surface_ref.lane_label]) equals
     [surface] (trimmed, exact),
     returning a JSON object string: [{surface, messages, participants,
-    lane_row_count, returned, has_more, oldest_ts?}].
+    lane_row_count, returned, has_more, next_cursor}].
 
-    - [messages]: the last [limit] lane rows (chronological), each with
+    - [messages]: every matching row in [page], in append order, each with
       role/content/ts and speaker fields when present, plus a [source]
       response field holding the row's [Surface_ref.lane_label] — the
       same field vocabulary as the REST history endpoint.
-    - [participants]: roster folded over ALL loaded lane rows (not just
-      the returned slice), sorted by [last_seen] descending.
-    - [has_more] / [oldest_ts] (RFC-0228 P1): [oldest_ts] is the oldest
-      stamp across the whole loaded page — not just the lane — so
-      passing it as the next call's [before] always makes progress,
-      even through pages with no rows for this lane. Omitted when the
-      page carries no stamped rows.
-    - Rows without a typed surface never match. A row whose persisted
-      surface does not decode never reaches [messages]: the chat store
-      drops it on read (counted as a persistence read drop) rather than
-      reading it as unscoped.
-    - [before]: the cursor the page was loaded with; [None] for the
+    - [participants]: roster folded over all loaded lane rows, sorted by
+      [last_seen] descending.
+    - [next_cursor] is the store page's opaque cursor, or JSON null when
+      the prefix is exhausted. [has_more] is derived from its presence.
+      Pass it as the next call's [cursor], including after an empty lane
+      page. Neither timestamps nor the filtered rows reconstruct a cursor.
+    - Rows without a typed surface never match. A persisted surface that
+      does not decode refuses the store page rather than being read as unscoped.
+    - [cursor]: the cursor the page was loaded with; [None] for the
       newest page.
     - A blank [surface] is refused ([Error]), not read as a default lane.
     - With [~bindings] (task-1596) a provably wrong label is refused — see
@@ -69,11 +69,9 @@ type connector_bindings = { slack : string list; discord : string list }
 val respond :
   ?bindings:connector_bindings ->
   surface:string ->
-  limit:int ->
-  before:float option ->
-  has_more:bool ->
+  cursor:Keeper_chat_history_page.cursor option ->
   notes:(string * string) list ->
-  Keeper_chat_store.chat_message list ->
+  Keeper_chat_store.history_page ->
   (string, string) result
 (** [notes] (RFC-0229 P1) are keeper-scoped (not lane-scoped): they
     annotate matching roster entries, and a noted speaker absent from

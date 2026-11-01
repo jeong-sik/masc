@@ -705,16 +705,18 @@ let reserve_review (runtime : runtime) =
   loop ()
 ;;
 
-(* Mark an active claim in the same atomic state that releases it. A wake
-   racing with release is either retained here or sees an already free Goal
-   and is handled by the ordinary scan. No interval exists where both miss it. *)
+(* Retire this Goal's timers and mark its active claim in one atomic state.
+   Retry admission either precedes this wake and is cleared, or observes the
+   retained wake and cannot arm. A wake racing with release is retained here
+   or sees a free Goal and is handled by the ordinary scan. *)
 let retain_active_wake (runtime : runtime) ~goal_id =
   let rec loop () =
     let current = Atomic.get runtime.scheduling in
     let in_flight = List.map (fun claim ->
       { claim with requested = claim.requested || String.equal claim.work.goal_id goal_id })
       current.in_flight in
-    if Atomic.compare_and_set runtime.scheduling current {current with in_flight}
+    let retries = List.filter (fun (id, _, _) -> not (String.equal id goal_id)) current.retries in
+    if Atomic.compare_and_set runtime.scheduling current {current with in_flight; retries}
     then () else loop ()
   in loop ()
 ;;
@@ -957,7 +959,6 @@ let install_callback (runtime : runtime) =
        else if String.equal (String.trim goal_id) ""
        then Log.Misc.error "goal verifier rejected an empty goal id"
        else (
-         clear_retries runtime ~goal_id;
          retain_active_wake runtime ~goal_id;
          request_scan runtime;
          Log.Misc.info "goal verifier scheduled goal_id=%s" goal_id));

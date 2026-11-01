@@ -8,14 +8,14 @@ let intent =
   let parse text = match Agent_core_sha256.consistent_of_hex_opt text with
     | Some digest when String.equal text (Agent_core_sha256.to_hex digest) -> Ok text
     | Some _ | None -> Error (`Msg "expected 64 lowercase hexadecimal SHA256 characters") in
-  Cmdliner.Arg.Conv.make ~docv:"SHA256" ~parser:parse ~pp:Format.pp_print_string ()
+  Cmdliner.Arg.conv ~docv:"SHA256" (parse, Format.pp_print_string)
 
 let cmd ~base_path ~run =
   let open Cmdliner in
   let expected = Arg.(required & opt (some intent) None & info ["expected-intent-sha256"]
       ~docv:"SHA256" ~doc:"Require the exact root/action/content intent displayed by inspect.") in
   let leaf name doc action =
-    Cmd.make (Cmd.info name ~doc)
+    Cmd.v (Cmd.info name ~doc)
       Term.(const run $ (const (fun base_path action -> { base_path; action }) $ base_path $ action)) in
   Cmd.group (Cmd.info "board-posts" ~doc:"Inspect or explicitly initialize posts while offline; live startup guard enforcement is not enabled.")
     [leaf "inspect" "Observe existing posts initialization without creating files." (Term.const Inspect);

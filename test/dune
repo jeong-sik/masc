@@ -502,7 +502,7 @@
   test_keeper_turn_driver_failover
   test_keeper_rotation_eligibility_census
   test_keeper_codex_error_carriage
-  test_keeper_codex_effort_clamp
+  test_runtime_claude_effort_admission
   test_keeper_codex_write_path_note
   test_keeper_codex_blank_system_prompt
   test_workspace_message_seq_resume
@@ -856,7 +856,7 @@
   test_keeper_turn_driver_failover
   test_keeper_rotation_eligibility_census
   test_keeper_codex_error_carriage
-  test_keeper_codex_effort_clamp
+  test_runtime_claude_effort_admission
   test_keeper_codex_write_path_note
   test_keeper_codex_blank_system_prompt
   test_workspace_message_seq_resume

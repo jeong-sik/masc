@@ -338,11 +338,10 @@ let subscription_model_efforts =
   ; Some "openai-responses", "gpt-6-sol", [ "none"; "low"; "medium"; "high"; "xhigh"; "max" ]
   ; Some "openai-responses", "gpt-6-astra", [ "low"; "medium"; "high"; "xhigh"; "max" ]
   ; None, "gpt-5.3-codex-spark", [ "none"; "minimal"; "low"; "medium"; "high"; "xhigh" ]
-    (* The codex lane clamps a binding's effort to the bare row
-       (Keeper_official_client_host.clamp_reasoning_effort_to_catalog). Without
-       "max" here a codex max binding went out as xhigh, and gpt-5.5 fell to the
-       "gpt-5" row, which sent xhigh as high. The Codex cache (2026-09-30)
-       now lists low..ultra for Sol and Terra; gpt-5.5 keeps low..xhigh. *)
+    (* These bare rows belong to HTTP request capability validation.
+       Native Codex model/effort admission reads the client's advertisement;
+       native Claude uses its own CLI vocabulary. Neither consults these
+       unrelated HTTP ladders to choose its requested effort. *)
   ; None, "gpt-5.6-sol", [ "none"; "minimal"; "low"; "medium"; "high"; "xhigh"; "max"; "ultra" ]
   ; None, "gpt-5.6-terra", [ "none"; "minimal"; "low"; "medium"; "high"; "xhigh"; "max"; "ultra" ]
   ; None, "gpt-5.5", [ "low"; "medium"; "high"; "xhigh" ]

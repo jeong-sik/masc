@@ -3480,9 +3480,116 @@ let test_bench_anthropic_lane_sends_high_with_the_embedded_catalog () =
            |> Json.to_string)
   ) [ "claude-fable-5"; "claude-fable-5-1" ]
 
+type snapshot_auth = Snapshot_no_auth | Snapshot_api_key | Snapshot_unknown
+
+let snapshot_auth_catalog auth =
+  let source = match auth with
+    | Snapshot_unknown -> ""
+    | Snapshot_no_auth | Snapshot_api_key -> Printf.sprintf {|
+[[providers]]
+id = "dispatch-snapshot"
+kind = "openai_compat"
+base_url = "https://dispatch.invalid/v1"
+request_path = "/v1/chat/completions"
+auth = "%s"
+capabilities_base = "openai_chat"
+|} (match auth with Snapshot_no_auth -> "none" | Snapshot_api_key -> "api-key"
+       | Snapshot_unknown -> assert false) in
+  match Llm_provider.Model_catalog.of_toml_string ~source:"dispatch auth snapshot fixture" source with
+  | Ok catalog -> catalog | Error detail -> fail detail
+
+let with_snapshot_auth_catalog auth run =
+  let previous = Llm_provider.Model_catalog.global () in
+  Fun.protect ~finally:(fun () -> match previous with
+    | Some catalog -> Llm_provider.Model_catalog.set_global catalog
+    | None -> Llm_provider.Model_catalog.clear_global ())
+    (fun () -> Llm_provider.Model_catalog.set_global (snapshot_auth_catalog auth); run ())
+
+let snapshot_auth_runtime ?credential () =
+  let credential = match credential with
+    | None -> ""
+    | Some env -> Printf.sprintf
+        "[providers.dispatch-snapshot.credentials]\ntype = \"env\"\nvalue = %S\n" env in
+  let source = {|
+[providers.dispatch-snapshot]
+protocol = "openai-compatible-http"
+endpoint = "https://dispatch.invalid/v1"
+|} ^ credential ^ {|
+[models.selected]
+api-name = "dispatch-model"
+max-context = 4096
+[dispatch-snapshot.selected]
+[runtime]
+default = "dispatch-snapshot.selected"
+|} in
+  let cfg = match Runtime_toml.parse_string source with
+    | Ok cfg -> cfg | Error _ -> fail "dispatch auth fixture must parse" in
+  let binding = match cfg.Runtime_schema.bindings with
+    | [binding] -> binding | _ -> fail "one dispatch binding required" in
+  match Runtime_instance.of_binding cfg binding with
+  | Ok runtime -> runtime
+  | Error reason -> fail (Runtime_config_error.string_of_drop_reason reason)
+
+let check_snapshot_auth label expected runtime =
+  let provider_config = agent_core_provider_config_or_fail runtime in
+  let result = Runtime_instance.validate_dispatch_credential ~provider_config runtime in
+  match expected, result with
+  | (Snapshot_no_auth | Snapshot_unknown), Ok () -> ()
+  | Snapshot_api_key, Error (Runtime_instance.Undeclared_credential {provider_id}) ->
+    check string label "dispatch-snapshot" provider_id
+  | (Snapshot_no_auth | Snapshot_unknown), Error error ->
+    failf "%s: original binding was refused: %s" label
+      (Runtime_instance.dispatch_credential_error_to_string error)
+  | Snapshot_api_key, Ok () -> failf "%s: missing credential requirement was erased" label
+  | Snapshot_api_key, Error error ->
+    failf "%s: wrong credential refusal: %s" label
+      (Runtime_instance.dispatch_credential_error_to_string error)
+
+let test_dispatch_auth_catalog_snapshot ~before ~after () =
+  with_snapshot_auth_catalog before (fun () ->
+    let original = snapshot_auth_runtime () in
+    check_snapshot_auth "original selection before reload" before original;
+    Llm_provider.Model_catalog.set_global (snapshot_auth_catalog after);
+    check_snapshot_auth "original selection after reload" before original;
+    check_snapshot_auth "fresh selection after reload" after (snapshot_auth_runtime ()))
+
+let test_dispatch_auth_alias_snapshot () =
+  with_snapshot_auth_catalog Snapshot_api_key (fun () ->
+    with_env "OLLAMA_CLOUD_API_KEY" "" (fun () ->
+      with_env "OLLAMA_API_KEY" "original-reference-value" (fun () ->
+        let original = snapshot_auth_runtime ~credential:"OLLAMA_CLOUD_API_KEY" () in
+        let config = agent_core_provider_config_or_fail original in
+        check (option string) "materialized request uses the selected alias"
+          (Some "Bearer original-reference-value")
+          (normalized_header_value "authorization" (Llm_provider.Provider_config.auth_headers_for_config config));
+        let expected_scope = Runtime_quota_window.scope_of_credential ~provider_id:"dispatch-snapshot"
+          (Some (Runtime_schema.Env "OLLAMA_API_KEY")) in
+        Unix.putenv "OLLAMA_CLOUD_API_KEY" "replacement-reference-value";
+        Unix.putenv "OLLAMA_API_KEY" "";
+        check bool "quota attribution retains original alias" true
+          (Runtime_quota_window.scope_equal expected_scope (Runtime_instance.quota_scope_of_runtime original));
+        let empty = {config with Llm_provider.Provider_config.api_key = Llm_provider.Secret.of_string ""} in
+        match Runtime_instance.validate_dispatch_credential ~provider_config:empty original with
+        | Error (Runtime_instance.Required_env_credential_missing {provider_id;env_key}) ->
+          check string "missing credential belongs to selected provider" "dispatch-snapshot" provider_id;
+          check string "missing credential names original selected alias" "OLLAMA_API_KEY" env_key
+        | Error error -> fail (Runtime_instance.dispatch_credential_error_to_string error)
+        | Ok () -> fail "emptied required credential must be refused")))
+
 let () =
   run "runtime_provider_auth_headers"
-    [ ( "provider_config"
+    [ ( "selected dispatch credential"
+      , [ test_case "keyless selection survives a later keyed declaration" `Quick
+            (test_dispatch_auth_catalog_snapshot ~before:Snapshot_no_auth ~after:Snapshot_api_key)
+        ; test_case "keyed selection survives a later keyless declaration" `Quick
+            (test_dispatch_auth_catalog_snapshot ~before:Snapshot_api_key ~after:Snapshot_no_auth)
+        ; test_case "keyed selection survives catalog removal" `Quick
+            (test_dispatch_auth_catalog_snapshot ~before:Snapshot_api_key ~after:Snapshot_unknown)
+        ; test_case "unknown selection retains existing admission after keyed declaration" `Quick
+            (test_dispatch_auth_catalog_snapshot ~before:Snapshot_unknown ~after:Snapshot_api_key)
+        ; test_case "missing credential keeps the materialized alias" `Quick
+            test_dispatch_auth_alias_snapshot ] )
+    ; ( "provider_config"
       , [ test_case "parallel policy reaches fresh and resumed provider requests"
             `Quick test_parallel_policy_survives_fresh_resume_and_wire_serialization
         ; test_case "unsupported runtimes refuse parallel policy"

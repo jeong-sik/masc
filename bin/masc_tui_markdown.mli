@@ -182,22 +182,26 @@ val render_block_with_spans : palette:palette -> width:int -> string -> block_re
     offsets removed by heading/list/quote syntax and trimming. A document
     caller supplies the line's stable source identity. *)
 
+type table_cell_fragment = {
+  rendered_row : int;
+  rendered_start_cell : int;
+  visible_ranges : source_range list;
+}
+
 type table_cell_source = {
   table_row : int;
   table_column : int;
-  rendered_row : int;
   cell_text : string;
   source_positions : int option array;
-  rendered_start_cell : int;
-  visible_range : source_range;
+  fragments : table_cell_fragment list;
 }
-(** Zero-based semantic cell identity (header row is zero) and its exact
-    physical row, starting display cell and visible byte prefix. Each semantic
-    byte maps through [source_positions] to the complete input table's byte
-    offset. Inline delimiters and trimmed cell margins are excluded; spaces
-    inserted when overflow columns join have [None]. Borders, padding and cut
-    marks have no source range. The caller retains the table's document base.
-    [rendered_start_cell] counts terminal cells, not ANSI or UTF-8 bytes. *)
+(** Zero-based semantic cell identity (header row is zero), with one fragment
+    per physical line. Fragment ranges refer to [cell_text]; each semantic byte
+    maps through [source_positions] to the complete input table's byte offset.
+    Inline delimiters and trimmed cell margins are excluded; spaces inserted
+    when overflow columns join have [None]. Borders and padding have no source
+    range. The caller retains the table's document base. [rendered_start_cell]
+    counts terminal cells, not ANSI or UTF-8 bytes. *)
 
 type table_render = {
   table_rows : string list;
@@ -208,10 +212,11 @@ val render_table_with_spans : palette:palette -> width:int -> string -> table_re
 (** Render one complete table through the existing table grammar and geometry.
     Return [None] if the text is not exactly one table (apart from a synthetic
     trailing newline). Cell identity and canonical inline text survive width
-    changes; a narrower pane may expose only a prefix of a cell. Palette style
-    spans must contain only zero-width terminal controls (or be empty), as in
-    production; visible debugging tags change cell geometry and are not a
-    semantic-to-styled fit map. *)
+    changes; wrapped fragments retain their original semantic ranges. A
+    grapheme wider than the entire pane is cut without claiming a visible
+    source range. Palette style spans must contain only zero-width terminal
+    controls (or be empty), as in production; visible debugging tags change
+    cell geometry and are not a semantic-to-styled fit map. *)
 
 val render_lexed_line_with_spans :
   palette:palette -> width:int -> (string * string) list -> inline_render

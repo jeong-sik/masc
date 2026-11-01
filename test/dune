@@ -503,6 +503,7 @@
   test_keeper_rotation_eligibility_census
   test_keeper_codex_error_carriage
   test_runtime_claude_effort_admission
+  test_fusion_selected_timeout
   test_keeper_codex_write_path_note
   test_keeper_codex_blank_system_prompt
   test_workspace_message_seq_resume
@@ -857,6 +858,7 @@
   test_keeper_rotation_eligibility_census
   test_keeper_codex_error_carriage
   test_runtime_claude_effort_admission
+  test_fusion_selected_timeout
   test_keeper_codex_write_path_note
   test_keeper_codex_blank_system_prompt
   test_workspace_message_seq_resume

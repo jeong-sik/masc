@@ -4,6 +4,7 @@
  (name masc_board_handlers)
  (public_name masc.board_handlers)
  (wrapped true)
+ (private_modules board_vote_transition)
  (modules
   board
   board_audience

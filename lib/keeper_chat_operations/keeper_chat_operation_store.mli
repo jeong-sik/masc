@@ -433,6 +433,8 @@ module For_testing : sig
   val clear_commit_fault : unit -> unit
   val fail_next_runtime_retry_read : unit -> unit
   val clear_runtime_retry_read_fault : unit -> unit
+  val fail_next_preparation_retry_read : unit -> unit
+  val clear_preparation_retry_read_fault : unit -> unit
   val database_file : string
   val database_application_id : int64
   val table_column_counts : (string * int) list
@@ -517,7 +519,10 @@ val wait_direct_preparation : t -> now:float -> operation_id:Operation.Operation
 
 (** A lost commit acknowledgement succeeds only after the exact queued operation
     and expected semantic transition are read back. A rolled-back retry keeps
-    the original wait blocked. *)
+    the original wait blocked. [Store_unavailable] does not prove rollback when
+    confirmation also fails: a committed explicit retry already authorizes
+    normal admission of the same operation after storage recovery. Read the
+    operation and its preparation wait before deciding whether to retry. *)
 val retry_direct_preparation : t -> now:float -> operation_id:Operation.Operation_id.t ->
   expected_revision:int64 -> execution_digest:string -> (Operation.t, error) result
 

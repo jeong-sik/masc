@@ -43,7 +43,10 @@ let rec remove_tree path =
 let with_path f =
   let directory = Filename.temp_dir "keeper-semantic-store-" "" in
   Fun.protect
-    ~finally:(fun () -> Store.For_testing.clear_commit_fault (); remove_tree directory)
+    ~finally:(fun () ->
+      Store.For_testing.clear_commit_fault ();
+      Store.For_testing.clear_preparation_retry_read_fault ();
+      remove_tree directory)
     (fun () -> f (Filename.concat directory Store.database_file))
 let with_open path f =
   let store = Store.open_or_create ~path |> store_ok in
@@ -780,6 +783,62 @@ let test_preparation_wait_preserves_official_checkpoint ?retry_fault client_kind
       check bool "no duplicate invocation remains" true
         (Option.is_none (Store.claim_next store ~now:18. |> store_ok))))
 
+let test_uncertain_preparation_retry_reopens_by_original_identity () =
+  with_path (fun path ->
+    let operation_id = operation_id "uncertain-preparation-retry" in
+    let scope = Scope.direct_operation operation_id in
+    let frame = Frame.admit Frame.empty (Frame.Fresh scope) |> frame_ok in
+    let checkpoint = Execution.Official_client
+      {client_kind=Muse;runtime_id="official.uncertain";session_id="original-session";
+       turn_id="original-turn";tool_surface_sha256=hash "original tools";frame} in
+    let original, waiting = with_open path (fun store ->
+      submit store ~now:1. "uncertain-preparation-retry" fixture_input;
+      let original = claim store ~now:2. in
+      Store.defer_direct_checkpoint store ~now:3. ~operation_id
+        ~execution_digest:original.execution_digest ~checkpoint |> store_ok |> ignore;
+      ignore (claim store ~now:4.);
+      Store.resume_direct_checkpoint store ~now:5. ~operation_id ~observed:checkpoint |> store_ok;
+      Store.wait_direct_preparation store ~now:6. ~operation_id
+        ~execution_digest:original.execution_digest ~observed:checkpoint ~detail:"missing managed guidance"
+        |> store_ok |> ignore;
+      let waiting = Store.direct_preparation_wait store ~operation_id |> store_ok |> Option.get in
+      Store.For_testing.fail_next_commit Store.For_testing.Fail_after_commit;
+      Store.For_testing.fail_next_preparation_retry_read ();
+      (match Store.retry_direct_preparation store ~now:7. ~operation_id
+          ~expected_revision:waiting.revision ~execution_digest:waiting.execution_digest with
+       | Error (Store.Store_unavailable _) -> ()
+       | Ok _ | Error _ -> fail "failed retry confirmation was reported as a definite outcome");
+      original, waiting) in
+    with_open path (fun store ->
+      let retained = get store scope in
+      check bool "reopened uncertain retry keeps original input" true (retained.input=Some fixture_input);
+      check bool "reopened retry advances its exact predecessor once" true
+        (Int64.equal retained.revision (Int64.succ waiting.revision));
+      check bool "committed explicit retry retains the exact authorized checkpoint" true
+        (match retained.phase with
+         | Execution.Recovering {origin=Official_checkpointed observed;_} ->
+           Execution.equal_gate_checkpoint checkpoint (Execution.Official_client observed)
+         | _ -> false);
+      check bool "committed retry has no second preparation retry available" true
+        (Option.is_none (Store.direct_preparation_wait store ~operation_id |> store_ok));
+      assert_execution_error (Store.retry_direct_preparation store ~now:8. ~operation_id
+        ~expected_revision:waiting.revision ~execution_digest:waiting.execution_digest);
+      check bool "stale retry changes no admitted authority" true
+        (Execution.to_json (get store scope)=Execution.to_json retained);
+      check int "restart preserves the explicitly authorized retry" 0
+        (List.length (Store.settle_running_after_restart store ~now:9. |> store_ok));
+      let resumed = claim store ~now:10. in
+      check bool "normal admission selects the same operation and input" true
+        (Chat.Operation_id.equal resumed.operation_id original.operation_id
+         && resumed.execution_digest=original.execution_digest && resumed.input=Some fixture_input);
+      Store.resume_direct_checkpoint store ~now:11. ~operation_id ~observed:checkpoint |> store_ok;
+      Store.enter_direct_preparation store ~now:12. ~operation_id
+        ~execution_digest:original.execution_digest |> store_ok;
+      Store.succeed_running store ~now:13. ~operation_id ~outcome_ref:"original completed"
+        |> store_ok |> ignore;
+      check bool "no fresh operation was authorized" true
+        (Option.is_none (Store.claim_next store ~now:14. |> store_ok))))
+
 let () =
   run "keeper semantic execution store"
     [ "preparation wait", [
@@ -798,7 +857,9 @@ let () =
         test_case "retry rollback keeps the exact wait blocked" `Quick
           (test_preparation_wait_preserves_official_checkpoint ~retry_fault:Store.For_testing.Fail_before_commit Execution.Muse None);
         test_case "retry acknowledgement loss confirms exact committed transition" `Quick
-          (test_preparation_wait_preserves_official_checkpoint ~retry_fault:Store.For_testing.Fail_after_commit Execution.Muse None) ];
+          (test_preparation_wait_preserves_official_checkpoint ~retry_fault:Store.For_testing.Fail_after_commit Execution.Muse None);
+        test_case "lost retry acknowledgement and confirmation reopen the same authorization" `Quick
+          test_uncertain_preparation_retry_reopens_by_original_identity ];
       "offline preparation", [
         test_case "copy preserves original rows and unknown input" `Quick test_offline_copy_preserves_evidence_and_prior_uncertainty;
         test_case "occupied destinations and corrupt source are refused" `Quick test_offline_copy_refuses_nonempty_destination_and_corrupt_source;

@@ -166,6 +166,7 @@ type commit_fault =
 
 let next_commit_fault : commit_fault option Atomic.t = Atomic.make None
 let next_runtime_retry_read_fault = Atomic.make false
+let next_preparation_retry_read_fault = Atomic.make false
 
 let error_to_string = function
   | Invalid_input detail -> "invalid Keeper chat operation: " ^ detail
@@ -2784,6 +2785,8 @@ let retry_direct_preparation store ~now ~operation_id ~expected_revision ~execut
     match !expected_commit with
     | None -> Error (Integrity_error "preparation retry has no expected transition")
     | Some (operation, next) ->
+      let* () = if Atomic.exchange next_preparation_retry_read_fault false
+        then Error (Store_unavailable "injected preparation retry confirmation read failure") else Ok () in
       let* current = operation_or_unknown store.db operation_id in
       let* execution = direct_execution_with_db store.db current in
       (match execution with
@@ -3340,6 +3343,8 @@ module For_testing = struct
   let clear_commit_fault () = Atomic.set next_commit_fault None
   let fail_next_runtime_retry_read () = Atomic.set next_runtime_retry_read_fault true
   let clear_runtime_retry_read_fault () = Atomic.set next_runtime_retry_read_fault false
+  let fail_next_preparation_retry_read () = Atomic.set next_preparation_retry_read_fault true
+  let clear_preparation_retry_read_fault () = Atomic.set next_preparation_retry_read_fault false
   let database_file = database_file
   let database_application_id = database_application_id
   let owning_semantic_executions store =

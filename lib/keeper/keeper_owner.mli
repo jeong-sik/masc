@@ -676,6 +676,10 @@ val wait_direct_preparation : t -> operation_id:Chat_operation.Operation_id.t ->
   failure:Agent_core.Error.t -> (Chat_operation.t,error) result
 (** Requires the inherited exact executing child and a positive typed guidance
     preparation failure. No generic Config/transport failure grants this action. *)
+
+(** [Store_unavailable] can leave an explicitly authorized retry committed.
+    Storage recovery may admit that same operation; reread its state and
+    preparation wait before issuing another revision-checked retry. *)
 val retry_direct_preparation : t -> operation_id:Chat_operation.Operation_id.t ->
   expected_revision:int64 -> execution_digest:string -> (Chat_operation.t,error) result
 

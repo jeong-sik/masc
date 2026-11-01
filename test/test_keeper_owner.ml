@@ -6279,7 +6279,8 @@ let test_input_writer_is_bound_to_child_and_predecessor () =
   ignore (Owner.begin_stopping owner |> owner_ok)
 ;;
 
-let test_owner_preparation_wait_and_explicit_retry ?(generic_failure=false) ?retry_fault fault () =
+let test_owner_preparation_wait_and_explicit_retry ?(generic_failure=false)
+    ?(retry_readback_failure=false) ?retry_fault fault () =
   Eio_main.run @@ fun _env -> Eio.Switch.run @@ fun sw ->
   let id = operation_id "kmsg-preparation-owner" in
   let other = operation_id "kmsg-preparation-independent" in
@@ -6360,7 +6361,9 @@ let test_owner_preparation_wait_and_explicit_retry ?(generic_failure=false) ?ret
       Owner.Operation_succeeded {outcome_ref="independent finished"}) in
   let path = Filename.temp_file "keeper-owner-preparation-" ".sqlite3" in
   Unix.unlink path;
-  Eio.Switch.on_release sw (fun () -> if Sys.file_exists path then Unix.unlink path);
+  Eio.Switch.on_release sw (fun () ->
+    Keeper_chat_operation_store.For_testing.clear_preparation_retry_read_fault ();
+    if Sys.file_exists path then Unix.unlink path);
   let owner = Owner.start ~sw
       ~store:{replace=(fun _ -> Ok ());remove=(fun _ -> Ok ())}
       ~operation_store_path:path ~session_root:(Filename.concat (Filename.dirname path) "traces")
@@ -6400,10 +6403,11 @@ let test_owner_preparation_wait_and_explicit_retry ?(generic_failure=false) ?ret
       ~expected_revision:(Int64.pred waiting.revision) ~execution_digest:waiting.execution_digest with
    | Error _ -> () | Ok _ -> fail "stale retry was admitted");
   Option.iter Keeper_chat_operation_store.For_testing.fail_next_commit retry_fault;
+  if retry_readback_failure then Keeper_chat_operation_store.For_testing.fail_next_preparation_retry_read ();
   let retried = Owner.retry_direct_preparation owner ~operation_id:id
       ~expected_revision:waiting.revision ~execution_digest:waiting.execution_digest in
-  (match retry_fault,retried with
-   | Some Keeper_chat_operation_store.For_testing.Fail_before_commit, Error _ ->
+  (match retry_fault,retry_readback_failure,retried with
+   | Some Keeper_chat_operation_store.For_testing.Fail_before_commit, _, Error _ ->
      check bool "retry rollback keeps exact wait" true
        (Owner.direct_preparation_wait owner ~operation_id:id |> owner_ok = Some waiting);
      Owner.wake_operation_drain owner |> owner_ok;
@@ -6411,7 +6415,20 @@ let test_owner_preparation_wait_and_explicit_retry ?(generic_failure=false) ?ret
      check int "retry rollback cannot dispatch" 2 !attempts;
      Owner.retry_direct_preparation owner ~operation_id:id
        ~expected_revision:waiting.revision ~execution_digest:waiting.execution_digest |> owner_ok |> ignore
-   | _,result -> result |> owner_ok |> ignore);
+   | Some Keeper_chat_operation_store.For_testing.Fail_after_commit, true, Error (Owner.Store_unavailable _ as error) ->
+     check bool "public store failure preserves unknown acceptance" true
+       (Keeper_chat_public_error.pre_acceptance
+         (Keeper_chat_public_error.of_command_error (Owner_registry.Command_rejected error))
+        = Keeper_chat_public_error.Acceptance_unknown);
+     check int "unconfirmed response did not start another child" 2 !attempts;
+     check_original owner;
+     check bool "the committed retry exposes no second preparation wait" true
+       (Option.is_none (Owner.direct_preparation_wait owner ~operation_id:id |> owner_ok));
+     (match Owner.retry_direct_preparation owner ~operation_id:id
+         ~expected_revision:waiting.revision ~execution_digest:waiting.execution_digest with
+      | Error _ -> () | Ok _ -> fail "uncertainty authorized a fresh stale retry");
+     Owner.wake_operation_drain owner |> owner_ok
+   | _,_,result -> result |> owner_ok |> ignore);
   Eio.Promise.await finished;
   check int "explicit retry runs original operation exactly once" 3 !attempts;
   let terminal = Owner.exact_operation owner id |> owner_ok |> Option.get in
@@ -6435,7 +6452,10 @@ let () =
         test_case "retry rollback keeps the operation blocked" `Quick
           (test_owner_preparation_wait_and_explicit_retry ~retry_fault:Keeper_chat_operation_store.For_testing.Fail_before_commit None);
         test_case "retry commit acknowledgement loss starts the confirmed child once" `Quick
-          (test_owner_preparation_wait_and_explicit_retry ~retry_fault:Keeper_chat_operation_store.For_testing.Fail_after_commit None) ] )
+          (test_owner_preparation_wait_and_explicit_retry ~retry_fault:Keeper_chat_operation_store.For_testing.Fail_after_commit None);
+        test_case "retry acknowledgement and confirmation loss recover the same authorized child" `Quick
+          (test_owner_preparation_wait_and_explicit_retry ~retry_readback_failure:true
+            ~retry_fault:Keeper_chat_operation_store.For_testing.Fail_after_commit None) ] )
     ; ( "scheduled source handoff", [
         test_case "consumer termination releases additions and rejects late registration" `Quick
           (test_scheduled_source_handoff Ended_consumer_handoff)

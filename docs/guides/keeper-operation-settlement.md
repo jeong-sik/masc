@@ -70,6 +70,12 @@ digest or repeated request is rejected; read the operation again before deciding
 whether to retry. Success of this endpoint confirms retry admission, not completion
 of the unfinished work.
 
+A `store_unavailable` response can also leave retry admission committed when both
+the commit acknowledgement and its confirmation read fail. The same explicitly
+authorized operation can then continue after storage recovery. Read the exact
+operation and `preparation_wait` again before sending another retry; the error
+does not prove that admission was rejected, and a null wait grants no new retry.
+
 The official checkpoint remains retained while resume guidance is rendered.
 Client entry requires a confirmed dispatch-admission commit. An entered, partially
 written or unknown transport attempt retains its existing failure or reconciliation

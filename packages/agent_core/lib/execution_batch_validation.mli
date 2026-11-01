@@ -34,8 +34,7 @@ val start :
   correlation_id:Execution_event.Correlation_id.t ->
   header ->
   (in_progress, failure) result
-(** Check continuation after [committed_seq]. The caller has already decoded a
-    canonical header with a positive sequence/count and a valid digest string.
+(** Check positive sequence/count and continuation after [committed_seq].
     [offset] is the begin frame's offset. *)
 
 val remaining : in_progress -> int
@@ -46,9 +45,8 @@ val accept_event :
   offset:int64 ->
   Execution_event.t ->
   (in_progress, failure) result
-(** Check the next event's sequence, then correlation identity. The caller has
-    canonically decoded the event and established [remaining progress > 0].
-    [offset] is the event frame's offset. *)
+(** Check remaining event capacity, the next event's sequence, then correlation
+    identity. [offset] is the event frame's offset. *)
 
 type validated
 (** Structural agreement of the supplied decoded events/footer and digest with
@@ -60,9 +58,8 @@ val finish :
   digest:string ->
   footer ->
   (validated, failure) result
-(** The caller has established [remaining progress = 0], decoded the canonical
-    footer, then finished the digest over the original event payloads. Check
-    footer identity, range/count, then both header/footer digests, in that order.
-    [offset] is the footer frame's offset. *)
+(** Verify that all declared events have been accepted ([remaining progress = 0]),
+    then check footer identity, range/count, and both header/footer digests, in
+    that order. [offset] is the footer frame's offset. *)
 
 val last_seq : validated -> int

@@ -7,6 +7,7 @@ type 'completion worker =
   ; completion : 'completion
   ; freshness : freshness
   ; failure_reported : bool
+  ; was_requested : bool
   }
 
 type flight =
@@ -38,6 +39,14 @@ let request state = { state with requested = true }
 let begin_direct ~now state =
   { state with flight = In_flight (Some now); requested = false }
 
+let cancel_direct ~was_requested state =
+  let flight =
+    match state.active_worker with
+    | Some _ -> state.flight
+    | None -> Idle
+  in
+  { state with flight; requested = state.requested || was_requested }
+
 let complete ~refresh_requested state =
   { state with flight = Idle; requested = refresh_requested }
 
@@ -65,7 +74,12 @@ let admit state =
 let start ~now ~completion (Start_plan state) =
   let id = state.next_worker_id + 1 in
   let worker =
-    { id; completion; freshness = Current_generation; failure_reported = false }
+    { id
+    ; completion
+    ; freshness = Current_generation
+    ; failure_reported = false
+    ; was_requested = state.requested
+    }
   in
   ( { state with
       flight = In_flight (Some now)
@@ -80,6 +94,18 @@ let take_worker ~id state =
   match state.active_worker with
   | Some worker when worker.id = id ->
     Some ({ state with active_worker = None }, worker)
+  | Some _ | None -> None
+
+let cancel_worker ~id state =
+  match state.active_worker with
+  | Some worker when worker.id = id ->
+    let dirty =
+      match worker.freshness with
+      | Current_generation -> false
+      | Invalidated_during_refresh _ -> true
+    in
+    let requested = state.requested || worker.was_requested || dirty in
+    Some ({ state with flight = Idle; requested; active_worker = None }, dirty)
   | Some _ | None -> None
 
 let note_wait_failure state =

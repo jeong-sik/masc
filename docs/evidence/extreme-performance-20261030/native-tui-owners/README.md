@@ -49,7 +49,7 @@ Provider handlers drained to zero. Raw counts match diagnostic summary counts
 and ordinals, without reported cap omissions, malformed records or invalid
 native time windows. The 2/30/300 populations have 559/612/690 stage records.
 An independent source/data reviewer matched 4/60/600 unique admission, terminal
-and offline SQLite outcomes and each Keeper's `[1,2]` provider sequence. This is
+and SQLite snapshot-export outcomes and each Keeper's `[1,2]` provider sequence. This is
 an independent read-only assessment, not formal GitHub approval or another live
 execution.
 
@@ -107,8 +107,10 @@ callers to keep stages disjoint. That can understate unmeasured wall time.
 The analyzer independently unions recorded intervals per Build before
 subtraction. Its `uncovered_build_wall` means only Build wall not covered by
 those timers, including observation overhead, scheduling/GC and uninstrumented
-work. It is not a function cost or exclusive CPU attribution. Product diagnostic
-repair and narrower critical-path profiling remain follow-up work.
+work. It is not a function cost or exclusive CPU attribution. The
+[source-level diagnostic repair and copied-module replay](../frame-stage-union/README.md)
+are recorded separately; they are not a new native TUI run or an installation.
+Narrower critical-path profiling remains follow-up work.
 
 ## Observer corrections and retained negatives
 

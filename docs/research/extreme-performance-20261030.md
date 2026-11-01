@@ -132,9 +132,13 @@ follows from those different outliers.
 The visible Keeper window is already bounded in source. Next profiling should
 inspect repeated fleet-wide `keeper_reading`/model preparation and joins, rather
 than assuming all offscreen rows are rendered. UI loader/application cardinality
-and actual scroll state remain unobserved. The native residual diagnostic also
-subtracts nested stages twice; retained analysis uses interval unions and keeps
-the product diagnostic repair open. Union-uncovered wall is not exclusive CPU.
+and actual scroll state remain unobserved. In the measured source, the native
+residual diagnostic subtracts nested stages twice. The
+[diagnostic correction](../evidence/extreme-performance-20261030/frame-stage-union/README.md)
+uses immutable interval unions and matches an independent endpoint oracle on all
+287 recorded Builds. Seventeen focused copied-module tests passed; this is not a
+new native TUI execution or a frame-latency gain. Union-uncovered wall is not
+exclusive CPU.
 Native elapsed and Python perf-counter clocks remain separate, so input writes
 are not mapped to frames. The control native build at direct parent b004188
 completed and its downloaded TUI digest/embedded source were verified. That

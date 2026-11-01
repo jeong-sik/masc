@@ -100,7 +100,9 @@ let test_stages_keep_frame_and_outer_fetch_apart () =
     |> fun t -> Timing.Stage_samples.add t ~frame:(Some 16)
       ~name:"board.cache.cold" ~ms:None
     |> fun t -> Timing.Stage_samples.add t ~frame:(Some 1)
-      ~name:"overview.layout" ~ms:(Some 5.0)
+      ~name:"overview.layout.note" ~ms:None
+    |> fun t -> Timing.Stage_samples.add_timed t ~frame:(Some 1)
+      ~name:"overview.layout" ~started_ns:1000000L ~completed_ns:6000000L
     |> fun t -> Timing.Stage_samples.add t ~frame:(Some 2)
       ~name:"board.thread.wrap" ~ms:(Some 2.0)
     |> fun t -> Timing.Stage_samples.add t ~frame:(Some 3)
@@ -123,13 +125,14 @@ let test_stages_keep_frame_and_outer_fetch_apart () =
     (List.exists (fun line ->
        contains line "frame=16 name=board.cache.cold note") lines);
   let builds =
-    Timing.Samples.add Timing.Samples.empty Timing.Build
-      ~tag:(Some "board-read") ~ms:10.0
+    Timing.Samples.add_timed Timing.Samples.empty Timing.Build
+      ~tag:(Some "board-read") ~started_ns:0L ~completed_ns:10000000L
+      ~home_questions:None ~output:None
   in
-  let residual = Timing.Stage_samples.residual_lines stages builds in
-  Alcotest.(check bool) "residual excludes outside-Build fetch" true
-    (List.exists (fun line ->
-       contains line "frame=1 name=unattributed ms=5.000") residual)
+  let residual = Timing.Stage_samples.build_residuals stages builds in
+  Alcotest.(check (list (pair int int64))) "residual excludes outside-Build fetch"
+    [1, 5000000L]
+    (List.map (fun (row : Timing.Stage_samples.build_residual) -> row.frame, row.uncovered_ns) residual)
 ;;
 
 let test_opt_in_report_is_bounded () =
@@ -324,6 +327,86 @@ let test_raw_frame_and_stage_prefix_caps () =
     Yojson.Safe.Util.(json |> member "elapsed_ns" |> to_string)
 ;;
 
+let timed_build frames started_ns completed_ns =
+  Timing.Samples.add_timed frames Timing.Build ~tag:None
+    ~started_ns ~completed_ns ~home_questions:None ~output:None
+
+let timed_stage stages frame (started_ns, completed_ns) =
+  Timing.Stage_samples.add_timed stages ~frame:(Some frame) ~name:"measured"
+    ~started_ns ~completed_ns
+
+let residual_values stages frames =
+  Timing.Stage_samples.build_residuals stages frames
+  |> List.map (fun (row : Timing.Stage_samples.build_residual) -> row.frame, row.uncovered_ns)
+
+let test_residual_interval_union () =
+  let check windows expected =
+    let stages = List.fold_left (fun t window -> timed_stage t 1 window)
+      Timing.Stage_samples.empty windows in
+    Alcotest.(check (list (pair int int64))) "exact uncovered wall"
+      [1, expected] (residual_values stages (timed_build Timing.Samples.empty 100L 200L))
+  in
+  check [110L,190L; 120L,180L] 20L;
+  check [170L,180L; 110L,150L; 130L,170L] 30L;
+  check [110L,120L; 110L,120L; 180L,190L] 80L;
+  check [100L,200L; 110L,120L] 0L;
+  check [150L,150L] 100L;
+  let origin = Int64.sub Int64.max_int 100L in
+  let stages = timed_stage Timing.Stage_samples.empty 1
+    (Int64.add origin 10L, Int64.add origin 70L) in
+  Alcotest.(check (list (pair int int64))) "integer precision near signed clock bound"
+    [1, 40L] (residual_values stages
+      (timed_build Timing.Samples.empty origin Int64.max_int))
+
+let test_residual_rejects_incomplete_windows () =
+  let frames = timed_build Timing.Samples.empty 100L 200L in
+  let stage = timed_stage Timing.Stage_samples.empty 1 (110L,120L) in
+  let check stages = Alcotest.(check (list (pair int int64)))
+    "no fabricated residual" [] (residual_values stages frames) in
+  List.iter (fun window -> check (timed_stage stage 1 window))
+    [90L,110L; 190L,210L; 140L,130L; -1L,110L];
+  check (Timing.Stage_samples.add stage ~frame:(Some 1) ~name:"no-window" ~ms:(Some 1.0));
+  check (Timing.Stage_samples.add Timing.Stage_samples.empty ~frame:(Some 1) ~name:"note" ~ms:None);
+  List.iter (fun frames ->
+    Alcotest.(check (list (pair int int64))) "invalid or untimed Build omitted" []
+      (residual_values stage frames))
+    [timed_build Timing.Samples.empty (-1L) 200L;
+     timed_build Timing.Samples.empty 200L 100L;
+     Timing.Samples.add Timing.Samples.empty Timing.Build ~tag:None ~ms:1.0];
+  let stages = Timing.Stage_samples.add_timed stage ~frame:None ~name:"outside"
+    ~started_ns:0L ~completed_ns:1000L
+    |> fun t -> Timing.Stage_samples.add t ~frame:(Some 1) ~name:"note" ~ms:None in
+  let frames = timed_build frames 300L 400L in
+  Alcotest.(check (list (pair int int64))) "only complete matching Build contributes"
+    [1,90L] (residual_values stages frames);
+  let dropped_later = List.init Timing.max_stage_samples (fun _ -> ())
+    |> List.fold_left (fun t () -> timed_stage t 2 (310L,320L)) stages in
+  Alcotest.(check (list (pair int int64))) "dropped later frame preserves earlier residual"
+    [1,90L] (residual_values dropped_later frames);
+  let dropped_first = timed_stage stages 2 (310L,320L)
+    |> fun stages -> List.init Timing.max_stage_samples (fun _ -> ())
+      |> List.fold_left (fun t () -> timed_stage t 1 (110L,120L)) stages in
+  Alcotest.(check (list (pair int int64))) "drop withdraws that and later Build residuals"
+    [] (residual_values dropped_first frames)
+
+let test_residual_matches_cell_oracle () =
+  (* An independent occupancy oracle: each integer cell is covered if any
+     input interval contains it. No interval sorting or merging in the oracle. *)
+  let width = 12 in
+  let intervals = List.init (width+1) (fun first ->
+    List.init (width-first+1) (fun delta -> first, first+delta)) |> List.concat in
+  let frames = timed_build Timing.Samples.empty 1000L 1012L in
+  List.iter (fun left -> List.iter (fun right ->
+    let windows = [left;right] in
+    let expected = List.init width Fun.id |> List.fold_left (fun total cell ->
+      if List.exists (fun (first,last) -> first <= cell && cell < last) windows
+      then total else total+1) 0 in
+    let stages = List.fold_left (fun t (first,last) -> timed_stage t 1
+      (Int64.of_int (1000+first), Int64.of_int (1000+last))) Timing.Stage_samples.empty windows in
+    Alcotest.(check (list (pair int int64))) "occupancy oracle"
+      [1,Int64.of_int expected] (residual_values stages frames)
+  ) intervals) intervals
+
 let () =
   Alcotest.run
     "tui frame timing"
@@ -352,7 +435,13 @@ let () =
             test_reset_and_dropped_application_identity;
           Alcotest.test_case "stale reading retains snapshot identity" `Quick test_stale_reading_keeps_snapshot_identity;
           Alcotest.test_case "raw frame and stage prefix caps" `Quick
-            test_raw_frame_and_stage_prefix_caps
+            test_raw_frame_and_stage_prefix_caps;
+          Alcotest.test_case "nested and overlapping stage coverage" `Quick
+            test_residual_interval_union;
+          Alcotest.test_case "incomplete timer windows stay unknown" `Quick
+            test_residual_rejects_incomplete_windows;
+          Alcotest.test_case "coverage agrees with occupancy oracle" `Quick
+            test_residual_matches_cell_oracle
         ] )
     ]
 ;;

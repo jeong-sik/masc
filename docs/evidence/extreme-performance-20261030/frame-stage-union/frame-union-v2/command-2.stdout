@@ -1,0 +1,22 @@
+Testing `tui frame timing'.
+This run has ID `3UVWL8PE'.
+
+  [OK]          summary          0   phase line counts every sample.
+  [OK]          summary          1   tags sort by frame count.
+  [OK]          summary          2   worst frames name their surface.
+  [OK]          summary          3   unsampled phase prints nothing.
+  [OK]          summary          4   ordinals count per phase.
+  [OK]          summary          5   stages retain the Build frame.
+  [OK]          summary          6   opt-in report has a short-run cap.
+  [OK]          summary          7   output stays with its present.
+  [OK]          summary          8   presentation keeps callback semantics.
+  [OK]          summary          9   raw time and original owner identities.
+  [OK]          summary         10   reset and dropped identity.
+  [OK]          summary         11   stale reading retains snapshot identity.
+  [OK]          summary         12   raw frame and stage prefix caps.
+  [OK]          summary         13   nested and overlapping stage coverage.
+  [OK]          summary         14   incomplete timer windows stay unknown.
+  [OK]          summary         15   coverage agrees with occupancy oracle.
+
+Full test results in `~/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/frame-union-v2/build/_build/_tests/tui frame timing'.
+Test Successful in 0.034s. 16 tests run.

@@ -1,0 +1,2047 @@
+{
+  "scope": "Exact copied product module on retained native timer inputs; numeric endpoint-partition oracle. Not a new TUI run, CPU attribution or latency improvement.",
+  "results": [
+    {
+      "owners": 2,
+      "builds_checked": 85,
+      "underreported_builds": 50,
+      "maximum_underreported_ns": "87625",
+      "capture": "docs/evidence/extreme-performance-20261030/native-tui-owners/owners-2/tui-observer/frame-timing.txt",
+      "capture_sha256": "f36da71a892549edb7bb3b72472c3b4edfd477049cdf9ebffb107585289f63f4",
+      "replay_sha256": "a2d466a18280c629ccf4dd43032b5a242d5e9661fd14f208030bb4065ab5ba83",
+      "decisions": [
+        {
+          "frame": 1,
+          "surface": "overview",
+          "expected_ns": "70084",
+          "old_sum_residual_ns": "25792",
+          "underreported_ns": "44292"
+        },
+        {
+          "frame": 2,
+          "surface": "overview",
+          "expected_ns": "65875",
+          "old_sum_residual_ns": "22833",
+          "underreported_ns": "43042"
+        },
+        {
+          "frame": 3,
+          "surface": "overview",
+          "expected_ns": "72918",
+          "old_sum_residual_ns": "10751",
+          "underreported_ns": "62167"
+        },
+        {
+          "frame": 4,
+          "surface": "overview",
+          "expected_ns": "114874",
+          "old_sum_residual_ns": "72916",
+          "underreported_ns": "41958"
+        },
+        {
+          "frame": 5,
+          "surface": "overview",
+          "expected_ns": "61624",
+          "old_sum_residual_ns": "15332",
+          "underreported_ns": "46292"
+        },
+        {
+          "frame": 6,
+          "surface": "overview",
+          "expected_ns": "40916",
+          "old_sum_residual_ns": "7666",
+          "underreported_ns": "33250"
+        },
+        {
+          "frame": 7,
+          "surface": "overview",
+          "expected_ns": "50083",
+          "old_sum_residual_ns": "15749",
+          "underreported_ns": "34334"
+        },
+        {
+          "frame": 8,
+          "surface": "overview",
+          "expected_ns": "41542",
+          "old_sum_residual_ns": "2959",
+          "underreported_ns": "38583"
+        },
+        {
+          "frame": 9,
+          "surface": "overview",
+          "expected_ns": "45499",
+          "old_sum_residual_ns": "11791",
+          "underreported_ns": "33708"
+        },
+        {
+          "frame": 10,
+          "surface": "overview",
+          "expected_ns": "48042",
+          "old_sum_residual_ns": "13542",
+          "underreported_ns": "34500"
+        },
+        {
+          "frame": 11,
+          "surface": "overview",
+          "expected_ns": "41918",
+          "old_sum_residual_ns": "9252",
+          "underreported_ns": "32666"
+        },
+        {
+          "frame": 12,
+          "surface": "overview",
+          "expected_ns": "114626",
+          "old_sum_residual_ns": "52501",
+          "underreported_ns": "62125"
+        },
+        {
+          "frame": 13,
+          "surface": "keeper-list",
+          "expected_ns": "237418",
+          "old_sum_residual_ns": "237418",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 14,
+          "surface": "keeper-list",
+          "expected_ns": "120626",
+          "old_sum_residual_ns": "120626",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 15,
+          "surface": "keeper-list",
+          "expected_ns": "203375",
+          "old_sum_residual_ns": "203375",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 16,
+          "surface": "keeper-list",
+          "expected_ns": "220332",
+          "old_sum_residual_ns": "220332",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 17,
+          "surface": "keeper-list",
+          "expected_ns": "247166",
+          "old_sum_residual_ns": "247166",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 18,
+          "surface": "keeper-message",
+          "expected_ns": "638084",
+          "old_sum_residual_ns": "638084",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 19,
+          "surface": "keeper-message",
+          "expected_ns": "288917",
+          "old_sum_residual_ns": "288917",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 20,
+          "surface": "keeper-message",
+          "expected_ns": "987541",
+          "old_sum_residual_ns": "899916",
+          "underreported_ns": "87625"
+        },
+        {
+          "frame": 21,
+          "surface": "keeper-message",
+          "expected_ns": "143667",
+          "old_sum_residual_ns": "142125",
+          "underreported_ns": "1542"
+        },
+        {
+          "frame": 22,
+          "surface": "keeper-message",
+          "expected_ns": "189792",
+          "old_sum_residual_ns": "188000",
+          "underreported_ns": "1792"
+        },
+        {
+          "frame": 23,
+          "surface": "keeper-message",
+          "expected_ns": "160083",
+          "old_sum_residual_ns": "158541",
+          "underreported_ns": "1542"
+        },
+        {
+          "frame": 24,
+          "surface": "keeper-message",
+          "expected_ns": "463665",
+          "old_sum_residual_ns": "462999",
+          "underreported_ns": "666"
+        },
+        {
+          "frame": 25,
+          "surface": "keeper-message",
+          "expected_ns": "859748",
+          "old_sum_residual_ns": "857706",
+          "underreported_ns": "2042"
+        },
+        {
+          "frame": 26,
+          "surface": "keeper-message",
+          "expected_ns": "277210",
+          "old_sum_residual_ns": "275127",
+          "underreported_ns": "2083"
+        },
+        {
+          "frame": 27,
+          "surface": "keeper-message",
+          "expected_ns": "156834",
+          "old_sum_residual_ns": "155251",
+          "underreported_ns": "1583"
+        },
+        {
+          "frame": 28,
+          "surface": "keeper-message",
+          "expected_ns": "135293",
+          "old_sum_residual_ns": "135085",
+          "underreported_ns": "208"
+        },
+        {
+          "frame": 29,
+          "surface": "keeper-message",
+          "expected_ns": "353209",
+          "old_sum_residual_ns": "351001",
+          "underreported_ns": "2208"
+        },
+        {
+          "frame": 30,
+          "surface": "keeper-message",
+          "expected_ns": "570833",
+          "old_sum_residual_ns": "568750",
+          "underreported_ns": "2083"
+        },
+        {
+          "frame": 31,
+          "surface": "keeper-message",
+          "expected_ns": "229250",
+          "old_sum_residual_ns": "227459",
+          "underreported_ns": "1791"
+        },
+        {
+          "frame": 32,
+          "surface": "keeper-message",
+          "expected_ns": "467333",
+          "old_sum_residual_ns": "466958",
+          "underreported_ns": "375"
+        },
+        {
+          "frame": 33,
+          "surface": "keeper-message",
+          "expected_ns": "165084",
+          "old_sum_residual_ns": "163293",
+          "underreported_ns": "1791"
+        },
+        {
+          "frame": 34,
+          "surface": "keeper-message",
+          "expected_ns": "183167",
+          "old_sum_residual_ns": "181542",
+          "underreported_ns": "1625"
+        },
+        {
+          "frame": 35,
+          "surface": "keeper-message",
+          "expected_ns": "180167",
+          "old_sum_residual_ns": "178042",
+          "underreported_ns": "2125"
+        },
+        {
+          "frame": 36,
+          "surface": "keeper-message",
+          "expected_ns": "151585",
+          "old_sum_residual_ns": "149918",
+          "underreported_ns": "1667"
+        },
+        {
+          "frame": 37,
+          "surface": "keeper-message",
+          "expected_ns": "160541",
+          "old_sum_residual_ns": "158874",
+          "underreported_ns": "1667"
+        },
+        {
+          "frame": 38,
+          "surface": "keeper-message",
+          "expected_ns": "386583",
+          "old_sum_residual_ns": "383958",
+          "underreported_ns": "2625"
+        },
+        {
+          "frame": 39,
+          "surface": "keeper-message",
+          "expected_ns": "233708",
+          "old_sum_residual_ns": "231291",
+          "underreported_ns": "2417"
+        },
+        {
+          "frame": 40,
+          "surface": "keeper-message",
+          "expected_ns": "268917",
+          "old_sum_residual_ns": "266376",
+          "underreported_ns": "2541"
+        },
+        {
+          "frame": 41,
+          "surface": "keeper-message",
+          "expected_ns": "402789",
+          "old_sum_residual_ns": "400331",
+          "underreported_ns": "2458"
+        },
+        {
+          "frame": 42,
+          "surface": "keeper-message",
+          "expected_ns": "273542",
+          "old_sum_residual_ns": "271209",
+          "underreported_ns": "2333"
+        },
+        {
+          "frame": 43,
+          "surface": "keeper-message",
+          "expected_ns": "186583",
+          "old_sum_residual_ns": "185417",
+          "underreported_ns": "1166"
+        },
+        {
+          "frame": 44,
+          "surface": "keeper-message",
+          "expected_ns": "151626",
+          "old_sum_residual_ns": "150126",
+          "underreported_ns": "1500"
+        },
+        {
+          "frame": 45,
+          "surface": "keeper-message",
+          "expected_ns": "178375",
+          "old_sum_residual_ns": "176500",
+          "underreported_ns": "1875"
+        },
+        {
+          "frame": 46,
+          "surface": "keeper-message",
+          "expected_ns": "133166",
+          "old_sum_residual_ns": "131375",
+          "underreported_ns": "1791"
+        },
+        {
+          "frame": 47,
+          "surface": "keeper-message",
+          "expected_ns": "188624",
+          "old_sum_residual_ns": "186833",
+          "underreported_ns": "1791"
+        },
+        {
+          "frame": 48,
+          "surface": "keeper-message",
+          "expected_ns": "196458",
+          "old_sum_residual_ns": "194166",
+          "underreported_ns": "2292"
+        },
+        {
+          "frame": 49,
+          "surface": "keeper-message",
+          "expected_ns": "172666",
+          "old_sum_residual_ns": "170875",
+          "underreported_ns": "1791"
+        },
+        {
+          "frame": 50,
+          "surface": "keeper-message",
+          "expected_ns": "152833",
+          "old_sum_residual_ns": "151208",
+          "underreported_ns": "1625"
+        },
+        {
+          "frame": 51,
+          "surface": "keeper-message",
+          "expected_ns": "101833",
+          "old_sum_residual_ns": "100958",
+          "underreported_ns": "875"
+        },
+        {
+          "frame": 52,
+          "surface": "keeper-message",
+          "expected_ns": "199708",
+          "old_sum_residual_ns": "197499",
+          "underreported_ns": "2209"
+        },
+        {
+          "frame": 53,
+          "surface": "keeper-message",
+          "expected_ns": "166916",
+          "old_sum_residual_ns": "165249",
+          "underreported_ns": "1667"
+        },
+        {
+          "frame": 54,
+          "surface": "keeper-message",
+          "expected_ns": "144749",
+          "old_sum_residual_ns": "144749",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 55,
+          "surface": "keeper-message",
+          "expected_ns": "128543",
+          "old_sum_residual_ns": "128543",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 56,
+          "surface": "keeper-message",
+          "expected_ns": "246583",
+          "old_sum_residual_ns": "230416",
+          "underreported_ns": "16167"
+        },
+        {
+          "frame": 57,
+          "surface": "keeper-message",
+          "expected_ns": "193876",
+          "old_sum_residual_ns": "191918",
+          "underreported_ns": "1958"
+        },
+        {
+          "frame": 58,
+          "surface": "keeper-message",
+          "expected_ns": "167957",
+          "old_sum_residual_ns": "165999",
+          "underreported_ns": "1958"
+        },
+        {
+          "frame": 59,
+          "surface": "keeper-message",
+          "expected_ns": "164374",
+          "old_sum_residual_ns": "162874",
+          "underreported_ns": "1500"
+        },
+        {
+          "frame": 60,
+          "surface": "keeper-list",
+          "expected_ns": "324458",
+          "old_sum_residual_ns": "324458",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 61,
+          "surface": "keeper-list",
+          "expected_ns": "174332",
+          "old_sum_residual_ns": "174332",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 62,
+          "surface": "keeper-list",
+          "expected_ns": "127542",
+          "old_sum_residual_ns": "127542",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 63,
+          "surface": "keeper-list",
+          "expected_ns": "124792",
+          "old_sum_residual_ns": "124792",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 64,
+          "surface": "keeper-list",
+          "expected_ns": "146749",
+          "old_sum_residual_ns": "146749",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 65,
+          "surface": "metrics",
+          "expected_ns": "54791",
+          "old_sum_residual_ns": "54791",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 66,
+          "surface": "metrics",
+          "expected_ns": "41917",
+          "old_sum_residual_ns": "41917",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 67,
+          "surface": "metrics",
+          "expected_ns": "49749",
+          "old_sum_residual_ns": "49749",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 68,
+          "surface": "metrics",
+          "expected_ns": "80625",
+          "old_sum_residual_ns": "80625",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 69,
+          "surface": "metrics",
+          "expected_ns": "42709",
+          "old_sum_residual_ns": "42709",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 70,
+          "surface": "board-list",
+          "expected_ns": "77126",
+          "old_sum_residual_ns": "77126",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 71,
+          "surface": "board-list",
+          "expected_ns": "37249",
+          "old_sum_residual_ns": "37249",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 72,
+          "surface": "board-list",
+          "expected_ns": "44709",
+          "old_sum_residual_ns": "44709",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 73,
+          "surface": "board-list",
+          "expected_ns": "134459",
+          "old_sum_residual_ns": "134459",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 74,
+          "surface": "board-list",
+          "expected_ns": "56960",
+          "old_sum_residual_ns": "56960",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 75,
+          "surface": "board-list",
+          "expected_ns": "48458",
+          "old_sum_residual_ns": "48458",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 76,
+          "surface": "board-list",
+          "expected_ns": "133167",
+          "old_sum_residual_ns": "133167",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 77,
+          "surface": "board-list",
+          "expected_ns": "45623",
+          "old_sum_residual_ns": "45623",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 78,
+          "surface": "board-list",
+          "expected_ns": "73958",
+          "old_sum_residual_ns": "73958",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 79,
+          "surface": "board-list",
+          "expected_ns": "64666",
+          "old_sum_residual_ns": "64666",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 80,
+          "surface": "board-list",
+          "expected_ns": "55667",
+          "old_sum_residual_ns": "55667",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 81,
+          "surface": "board-list",
+          "expected_ns": "47833",
+          "old_sum_residual_ns": "47833",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 82,
+          "surface": "board-list",
+          "expected_ns": "87459",
+          "old_sum_residual_ns": "87459",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 83,
+          "surface": "board-list",
+          "expected_ns": "71997",
+          "old_sum_residual_ns": "71997",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 84,
+          "surface": "board-list",
+          "expected_ns": "171373",
+          "old_sum_residual_ns": "171373",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 85,
+          "surface": "board-list",
+          "expected_ns": "81414",
+          "old_sum_residual_ns": "81414",
+          "underreported_ns": "0"
+        }
+      ]
+    },
+    {
+      "owners": 30,
+      "builds_checked": 93,
+      "underreported_builds": 51,
+      "maximum_underreported_ns": "73332",
+      "capture": "docs/evidence/extreme-performance-20261030/native-tui-owners/owners-30/tui-observer/frame-timing.txt",
+      "capture_sha256": "39dc8e04661f0c11438420738c0148f4bd5c7d4f62b469948763eb97db476799",
+      "replay_sha256": "a2d466a18280c629ccf4dd43032b5a242d5e9661fd14f208030bb4065ab5ba83",
+      "decisions": [
+        {
+          "frame": 1,
+          "surface": "overview",
+          "expected_ns": "66791",
+          "old_sum_residual_ns": "24083",
+          "underreported_ns": "42708"
+        },
+        {
+          "frame": 2,
+          "surface": "overview",
+          "expected_ns": "50168",
+          "old_sum_residual_ns": "9001",
+          "underreported_ns": "41167"
+        },
+        {
+          "frame": 3,
+          "surface": "overview",
+          "expected_ns": "47126",
+          "old_sum_residual_ns": "8126",
+          "underreported_ns": "39000"
+        },
+        {
+          "frame": 4,
+          "surface": "overview",
+          "expected_ns": "73373",
+          "old_sum_residual_ns": "29331",
+          "underreported_ns": "44042"
+        },
+        {
+          "frame": 5,
+          "surface": "overview",
+          "expected_ns": "55833",
+          "old_sum_residual_ns": "8458",
+          "underreported_ns": "47375"
+        },
+        {
+          "frame": 6,
+          "surface": "overview",
+          "expected_ns": "51627",
+          "old_sum_residual_ns": "15752",
+          "underreported_ns": "35875"
+        },
+        {
+          "frame": 7,
+          "surface": "overview",
+          "expected_ns": "43957",
+          "old_sum_residual_ns": "9915",
+          "underreported_ns": "34042"
+        },
+        {
+          "frame": 8,
+          "surface": "overview",
+          "expected_ns": "71083",
+          "old_sum_residual_ns": "35708",
+          "underreported_ns": "35375"
+        },
+        {
+          "frame": 9,
+          "surface": "overview",
+          "expected_ns": "73332",
+          "old_sum_residual_ns": "0",
+          "underreported_ns": "73332"
+        },
+        {
+          "frame": 10,
+          "surface": "overview",
+          "expected_ns": "42749",
+          "old_sum_residual_ns": "7499",
+          "underreported_ns": "35250"
+        },
+        {
+          "frame": 11,
+          "surface": "overview",
+          "expected_ns": "49875",
+          "old_sum_residual_ns": "0",
+          "underreported_ns": "49875"
+        },
+        {
+          "frame": 12,
+          "surface": "overview",
+          "expected_ns": "44082",
+          "old_sum_residual_ns": "13332",
+          "underreported_ns": "30750"
+        },
+        {
+          "frame": 13,
+          "surface": "keeper-list",
+          "expected_ns": "707167",
+          "old_sum_residual_ns": "707167",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 14,
+          "surface": "keeper-list",
+          "expected_ns": "387166",
+          "old_sum_residual_ns": "387166",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 15,
+          "surface": "keeper-list",
+          "expected_ns": "453750",
+          "old_sum_residual_ns": "453750",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 16,
+          "surface": "keeper-list",
+          "expected_ns": "680458",
+          "old_sum_residual_ns": "680458",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 17,
+          "surface": "keeper-list",
+          "expected_ns": "564375",
+          "old_sum_residual_ns": "564375",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 18,
+          "surface": "keeper-message",
+          "expected_ns": "283419",
+          "old_sum_residual_ns": "283419",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 19,
+          "surface": "keeper-message",
+          "expected_ns": "300126",
+          "old_sum_residual_ns": "271793",
+          "underreported_ns": "28333"
+        },
+        {
+          "frame": 20,
+          "surface": "keeper-message",
+          "expected_ns": "292918",
+          "old_sum_residual_ns": "290793",
+          "underreported_ns": "2125"
+        },
+        {
+          "frame": 21,
+          "surface": "keeper-message",
+          "expected_ns": "206041",
+          "old_sum_residual_ns": "203874",
+          "underreported_ns": "2167"
+        },
+        {
+          "frame": 22,
+          "surface": "keeper-message",
+          "expected_ns": "172667",
+          "old_sum_residual_ns": "170834",
+          "underreported_ns": "1833"
+        },
+        {
+          "frame": 23,
+          "surface": "keeper-message",
+          "expected_ns": "167084",
+          "old_sum_residual_ns": "165292",
+          "underreported_ns": "1792"
+        },
+        {
+          "frame": 24,
+          "surface": "keeper-message",
+          "expected_ns": "249041",
+          "old_sum_residual_ns": "248375",
+          "underreported_ns": "666"
+        },
+        {
+          "frame": 25,
+          "surface": "keeper-message",
+          "expected_ns": "1058582",
+          "old_sum_residual_ns": "1055790",
+          "underreported_ns": "2792"
+        },
+        {
+          "frame": 26,
+          "surface": "keeper-message",
+          "expected_ns": "173916",
+          "old_sum_residual_ns": "171999",
+          "underreported_ns": "1917"
+        },
+        {
+          "frame": 27,
+          "surface": "keeper-message",
+          "expected_ns": "173415",
+          "old_sum_residual_ns": "171706",
+          "underreported_ns": "1709"
+        },
+        {
+          "frame": 28,
+          "surface": "keeper-message",
+          "expected_ns": "157376",
+          "old_sum_residual_ns": "157168",
+          "underreported_ns": "208"
+        },
+        {
+          "frame": 29,
+          "surface": "keeper-message",
+          "expected_ns": "156001",
+          "old_sum_residual_ns": "154501",
+          "underreported_ns": "1500"
+        },
+        {
+          "frame": 30,
+          "surface": "keeper-message",
+          "expected_ns": "181001",
+          "old_sum_residual_ns": "179209",
+          "underreported_ns": "1792"
+        },
+        {
+          "frame": 31,
+          "surface": "keeper-message",
+          "expected_ns": "179376",
+          "old_sum_residual_ns": "179126",
+          "underreported_ns": "250"
+        },
+        {
+          "frame": 32,
+          "surface": "keeper-message",
+          "expected_ns": "147915",
+          "old_sum_residual_ns": "146165",
+          "underreported_ns": "1750"
+        },
+        {
+          "frame": 33,
+          "surface": "keeper-message",
+          "expected_ns": "243459",
+          "old_sum_residual_ns": "241626",
+          "underreported_ns": "1833"
+        },
+        {
+          "frame": 34,
+          "surface": "keeper-message",
+          "expected_ns": "179209",
+          "old_sum_residual_ns": "177126",
+          "underreported_ns": "2083"
+        },
+        {
+          "frame": 35,
+          "surface": "keeper-message",
+          "expected_ns": "199833",
+          "old_sum_residual_ns": "197708",
+          "underreported_ns": "2125"
+        },
+        {
+          "frame": 36,
+          "surface": "keeper-message",
+          "expected_ns": "319957",
+          "old_sum_residual_ns": "317082",
+          "underreported_ns": "2875"
+        },
+        {
+          "frame": 37,
+          "surface": "keeper-message",
+          "expected_ns": "601417",
+          "old_sum_residual_ns": "598792",
+          "underreported_ns": "2625"
+        },
+        {
+          "frame": 38,
+          "surface": "keeper-message",
+          "expected_ns": "311084",
+          "old_sum_residual_ns": "308626",
+          "underreported_ns": "2458"
+        },
+        {
+          "frame": 39,
+          "surface": "keeper-message",
+          "expected_ns": "279250",
+          "old_sum_residual_ns": "276834",
+          "underreported_ns": "2416"
+        },
+        {
+          "frame": 40,
+          "surface": "keeper-message",
+          "expected_ns": "179750",
+          "old_sum_residual_ns": "177917",
+          "underreported_ns": "1833"
+        },
+        {
+          "frame": 41,
+          "surface": "keeper-message",
+          "expected_ns": "257041",
+          "old_sum_residual_ns": "254749",
+          "underreported_ns": "2292"
+        },
+        {
+          "frame": 42,
+          "surface": "keeper-message",
+          "expected_ns": "179500",
+          "old_sum_residual_ns": "178333",
+          "underreported_ns": "1167"
+        },
+        {
+          "frame": 43,
+          "surface": "keeper-message",
+          "expected_ns": "401625",
+          "old_sum_residual_ns": "398792",
+          "underreported_ns": "2833"
+        },
+        {
+          "frame": 44,
+          "surface": "keeper-message",
+          "expected_ns": "172707",
+          "old_sum_residual_ns": "171249",
+          "underreported_ns": "1458"
+        },
+        {
+          "frame": 45,
+          "surface": "keeper-message",
+          "expected_ns": "143542",
+          "old_sum_residual_ns": "142126",
+          "underreported_ns": "1416"
+        },
+        {
+          "frame": 46,
+          "surface": "keeper-message",
+          "expected_ns": "453875",
+          "old_sum_residual_ns": "451625",
+          "underreported_ns": "2250"
+        },
+        {
+          "frame": 47,
+          "surface": "keeper-message",
+          "expected_ns": "291999",
+          "old_sum_residual_ns": "289166",
+          "underreported_ns": "2833"
+        },
+        {
+          "frame": 48,
+          "surface": "keeper-message",
+          "expected_ns": "283290",
+          "old_sum_residual_ns": "280873",
+          "underreported_ns": "2417"
+        },
+        {
+          "frame": 49,
+          "surface": "keeper-message",
+          "expected_ns": "410832",
+          "old_sum_residual_ns": "408374",
+          "underreported_ns": "2458"
+        },
+        {
+          "frame": 50,
+          "surface": "keeper-message",
+          "expected_ns": "211707",
+          "old_sum_residual_ns": "210123",
+          "underreported_ns": "1584"
+        },
+        {
+          "frame": 51,
+          "surface": "keeper-message",
+          "expected_ns": "276000",
+          "old_sum_residual_ns": "273375",
+          "underreported_ns": "2625"
+        },
+        {
+          "frame": 52,
+          "surface": "keeper-message",
+          "expected_ns": "325252",
+          "old_sum_residual_ns": "322627",
+          "underreported_ns": "2625"
+        },
+        {
+          "frame": 53,
+          "surface": "keeper-message",
+          "expected_ns": "274666",
+          "old_sum_residual_ns": "272166",
+          "underreported_ns": "2500"
+        },
+        {
+          "frame": 54,
+          "surface": "keeper-message",
+          "expected_ns": "279832",
+          "old_sum_residual_ns": "279832",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 55,
+          "surface": "keeper-message",
+          "expected_ns": "217709",
+          "old_sum_residual_ns": "217709",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 56,
+          "surface": "keeper-message",
+          "expected_ns": "155583",
+          "old_sum_residual_ns": "155583",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 57,
+          "surface": "keeper-message",
+          "expected_ns": "170999",
+          "old_sum_residual_ns": "170999",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 58,
+          "surface": "keeper-message",
+          "expected_ns": "247999",
+          "old_sum_residual_ns": "238207",
+          "underreported_ns": "9792"
+        },
+        {
+          "frame": 59,
+          "surface": "keeper-message",
+          "expected_ns": "165458",
+          "old_sum_residual_ns": "163625",
+          "underreported_ns": "1833"
+        },
+        {
+          "frame": 60,
+          "surface": "keeper-message",
+          "expected_ns": "356333",
+          "old_sum_residual_ns": "354083",
+          "underreported_ns": "2250"
+        },
+        {
+          "frame": 61,
+          "surface": "keeper-message",
+          "expected_ns": "321125",
+          "old_sum_residual_ns": "318583",
+          "underreported_ns": "2542"
+        },
+        {
+          "frame": 62,
+          "surface": "keeper-list",
+          "expected_ns": "1638499",
+          "old_sum_residual_ns": "1638499",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 63,
+          "surface": "keeper-list",
+          "expected_ns": "1321749",
+          "old_sum_residual_ns": "1321749",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 64,
+          "surface": "keeper-list",
+          "expected_ns": "843460",
+          "old_sum_residual_ns": "843460",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 65,
+          "surface": "keeper-list",
+          "expected_ns": "1098209",
+          "old_sum_residual_ns": "1098209",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 66,
+          "surface": "keeper-list",
+          "expected_ns": "4282626",
+          "old_sum_residual_ns": "4282626",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 67,
+          "surface": "metrics",
+          "expected_ns": "113834",
+          "old_sum_residual_ns": "113834",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 68,
+          "surface": "metrics",
+          "expected_ns": "98708",
+          "old_sum_residual_ns": "98708",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 69,
+          "surface": "metrics",
+          "expected_ns": "73500",
+          "old_sum_residual_ns": "73500",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 70,
+          "surface": "metrics",
+          "expected_ns": "70664",
+          "old_sum_residual_ns": "70664",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 71,
+          "surface": "metrics",
+          "expected_ns": "79042",
+          "old_sum_residual_ns": "79042",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 72,
+          "surface": "metrics",
+          "expected_ns": "109001",
+          "old_sum_residual_ns": "109001",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 73,
+          "surface": "board-list",
+          "expected_ns": "196834",
+          "old_sum_residual_ns": "196834",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 74,
+          "surface": "board-list",
+          "expected_ns": "89458",
+          "old_sum_residual_ns": "89458",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 75,
+          "surface": "board-list",
+          "expected_ns": "76125",
+          "old_sum_residual_ns": "76125",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 76,
+          "surface": "board-list",
+          "expected_ns": "105415",
+          "old_sum_residual_ns": "105415",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 77,
+          "surface": "board-list",
+          "expected_ns": "56208",
+          "old_sum_residual_ns": "56208",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 78,
+          "surface": "board-list",
+          "expected_ns": "60750",
+          "old_sum_residual_ns": "60750",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 79,
+          "surface": "board-list",
+          "expected_ns": "51749",
+          "old_sum_residual_ns": "51749",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 80,
+          "surface": "board-list",
+          "expected_ns": "130833",
+          "old_sum_residual_ns": "130833",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 81,
+          "surface": "board-list",
+          "expected_ns": "67709",
+          "old_sum_residual_ns": "67709",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 82,
+          "surface": "board-list",
+          "expected_ns": "77791",
+          "old_sum_residual_ns": "77791",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 83,
+          "surface": "board-list",
+          "expected_ns": "73832",
+          "old_sum_residual_ns": "73832",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 84,
+          "surface": "board-list",
+          "expected_ns": "48832",
+          "old_sum_residual_ns": "48832",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 85,
+          "surface": "board-list",
+          "expected_ns": "144374",
+          "old_sum_residual_ns": "144374",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 86,
+          "surface": "board-list",
+          "expected_ns": "82624",
+          "old_sum_residual_ns": "82624",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 87,
+          "surface": "board-list",
+          "expected_ns": "78165",
+          "old_sum_residual_ns": "78165",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 88,
+          "surface": "board-list",
+          "expected_ns": "86000",
+          "old_sum_residual_ns": "86000",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 89,
+          "surface": "board-list",
+          "expected_ns": "141208",
+          "old_sum_residual_ns": "141208",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 90,
+          "surface": "board-list",
+          "expected_ns": "101208",
+          "old_sum_residual_ns": "101208",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 91,
+          "surface": "board-list",
+          "expected_ns": "78124",
+          "old_sum_residual_ns": "78124",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 92,
+          "surface": "board-list",
+          "expected_ns": "127209",
+          "old_sum_residual_ns": "127209",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 93,
+          "surface": "board-list",
+          "expected_ns": "56125",
+          "old_sum_residual_ns": "56125",
+          "underreported_ns": "0"
+        }
+      ]
+    },
+    {
+      "owners": 300,
+      "builds_checked": 109,
+      "underreported_builds": 61,
+      "maximum_underreported_ns": "57416",
+      "capture": "docs/evidence/extreme-performance-20261030/native-tui-owners/owners-300/tui-observer/frame-timing.txt",
+      "capture_sha256": "87d2652cba79eccbe209303f152e18007392b14b3eed68b7732c2cbb5a8b98c0",
+      "replay_sha256": "a2d466a18280c629ccf4dd43032b5a242d5e9661fd14f208030bb4065ab5ba83",
+      "decisions": [
+        {
+          "frame": 1,
+          "surface": "overview",
+          "expected_ns": "78919",
+          "old_sum_residual_ns": "30669",
+          "underreported_ns": "48250"
+        },
+        {
+          "frame": 2,
+          "surface": "overview",
+          "expected_ns": "52293",
+          "old_sum_residual_ns": "15543",
+          "underreported_ns": "36750"
+        },
+        {
+          "frame": 3,
+          "surface": "overview",
+          "expected_ns": "163375",
+          "old_sum_residual_ns": "125666",
+          "underreported_ns": "37709"
+        },
+        {
+          "frame": 4,
+          "surface": "overview",
+          "expected_ns": "77917",
+          "old_sum_residual_ns": "20501",
+          "underreported_ns": "57416"
+        },
+        {
+          "frame": 5,
+          "surface": "overview",
+          "expected_ns": "45500",
+          "old_sum_residual_ns": "2417",
+          "underreported_ns": "43083"
+        },
+        {
+          "frame": 6,
+          "surface": "overview",
+          "expected_ns": "42999",
+          "old_sum_residual_ns": "11416",
+          "underreported_ns": "31583"
+        },
+        {
+          "frame": 7,
+          "surface": "overview",
+          "expected_ns": "54082",
+          "old_sum_residual_ns": "18665",
+          "underreported_ns": "35417"
+        },
+        {
+          "frame": 8,
+          "surface": "overview",
+          "expected_ns": "46918",
+          "old_sum_residual_ns": "10960",
+          "underreported_ns": "35958"
+        },
+        {
+          "frame": 9,
+          "surface": "overview",
+          "expected_ns": "81208",
+          "old_sum_residual_ns": "39583",
+          "underreported_ns": "41625"
+        },
+        {
+          "frame": 10,
+          "surface": "overview",
+          "expected_ns": "43333",
+          "old_sum_residual_ns": "4958",
+          "underreported_ns": "38375"
+        },
+        {
+          "frame": 11,
+          "surface": "keeper-list",
+          "expected_ns": "4981832",
+          "old_sum_residual_ns": "4981832",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 12,
+          "surface": "keeper-list",
+          "expected_ns": "3103418",
+          "old_sum_residual_ns": "3103418",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 13,
+          "surface": "keeper-list",
+          "expected_ns": "3033167",
+          "old_sum_residual_ns": "3033167",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 14,
+          "surface": "keeper-list",
+          "expected_ns": "3420625",
+          "old_sum_residual_ns": "3420625",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 15,
+          "surface": "keeper-list",
+          "expected_ns": "3542667",
+          "old_sum_residual_ns": "3542667",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 16,
+          "surface": "keeper-message",
+          "expected_ns": "213042",
+          "old_sum_residual_ns": "213042",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 17,
+          "surface": "keeper-message",
+          "expected_ns": "264207",
+          "old_sum_residual_ns": "264207",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 18,
+          "surface": "keeper-message",
+          "expected_ns": "248251",
+          "old_sum_residual_ns": "227085",
+          "underreported_ns": "21166"
+        },
+        {
+          "frame": 19,
+          "surface": "keeper-message",
+          "expected_ns": "168999",
+          "old_sum_residual_ns": "167249",
+          "underreported_ns": "1750"
+        },
+        {
+          "frame": 20,
+          "surface": "keeper-message",
+          "expected_ns": "389542",
+          "old_sum_residual_ns": "387250",
+          "underreported_ns": "2292"
+        },
+        {
+          "frame": 21,
+          "surface": "keeper-message",
+          "expected_ns": "380875",
+          "old_sum_residual_ns": "375375",
+          "underreported_ns": "5500"
+        },
+        {
+          "frame": 22,
+          "surface": "keeper-message",
+          "expected_ns": "180208",
+          "old_sum_residual_ns": "178541",
+          "underreported_ns": "1667"
+        },
+        {
+          "frame": 23,
+          "surface": "keeper-message",
+          "expected_ns": "190000",
+          "old_sum_residual_ns": "188500",
+          "underreported_ns": "1500"
+        },
+        {
+          "frame": 24,
+          "surface": "keeper-message",
+          "expected_ns": "222042",
+          "old_sum_residual_ns": "220042",
+          "underreported_ns": "2000"
+        },
+        {
+          "frame": 25,
+          "surface": "keeper-message",
+          "expected_ns": "241791",
+          "old_sum_residual_ns": "239666",
+          "underreported_ns": "2125"
+        },
+        {
+          "frame": 26,
+          "surface": "keeper-message",
+          "expected_ns": "185501",
+          "old_sum_residual_ns": "183668",
+          "underreported_ns": "1833"
+        },
+        {
+          "frame": 27,
+          "surface": "keeper-message",
+          "expected_ns": "171794",
+          "old_sum_residual_ns": "171294",
+          "underreported_ns": "500"
+        },
+        {
+          "frame": 28,
+          "surface": "keeper-message",
+          "expected_ns": "186584",
+          "old_sum_residual_ns": "184834",
+          "underreported_ns": "1750"
+        },
+        {
+          "frame": 29,
+          "surface": "keeper-message",
+          "expected_ns": "295041",
+          "old_sum_residual_ns": "293082",
+          "underreported_ns": "1959"
+        },
+        {
+          "frame": 30,
+          "surface": "keeper-message",
+          "expected_ns": "186332",
+          "old_sum_residual_ns": "184416",
+          "underreported_ns": "1916"
+        },
+        {
+          "frame": 31,
+          "surface": "keeper-message",
+          "expected_ns": "196625",
+          "old_sum_residual_ns": "194417",
+          "underreported_ns": "2208"
+        },
+        {
+          "frame": 32,
+          "surface": "keeper-message",
+          "expected_ns": "234750",
+          "old_sum_residual_ns": "232791",
+          "underreported_ns": "1959"
+        },
+        {
+          "frame": 33,
+          "surface": "keeper-message",
+          "expected_ns": "351624",
+          "old_sum_residual_ns": "349624",
+          "underreported_ns": "2000"
+        },
+        {
+          "frame": 34,
+          "surface": "keeper-message",
+          "expected_ns": "199626",
+          "old_sum_residual_ns": "199376",
+          "underreported_ns": "250"
+        },
+        {
+          "frame": 35,
+          "surface": "keeper-message",
+          "expected_ns": "455500",
+          "old_sum_residual_ns": "452666",
+          "underreported_ns": "2834"
+        },
+        {
+          "frame": 36,
+          "surface": "keeper-message",
+          "expected_ns": "265000",
+          "old_sum_residual_ns": "262541",
+          "underreported_ns": "2459"
+        },
+        {
+          "frame": 37,
+          "surface": "keeper-message",
+          "expected_ns": "194626",
+          "old_sum_residual_ns": "192834",
+          "underreported_ns": "1792"
+        },
+        {
+          "frame": 38,
+          "surface": "keeper-message",
+          "expected_ns": "108457",
+          "old_sum_residual_ns": "108248",
+          "underreported_ns": "209"
+        },
+        {
+          "frame": 39,
+          "surface": "keeper-message",
+          "expected_ns": "210418",
+          "old_sum_residual_ns": "208418",
+          "underreported_ns": "2000"
+        },
+        {
+          "frame": 40,
+          "surface": "keeper-message",
+          "expected_ns": "229458",
+          "old_sum_residual_ns": "227458",
+          "underreported_ns": "2000"
+        },
+        {
+          "frame": 41,
+          "surface": "keeper-message",
+          "expected_ns": "235418",
+          "old_sum_residual_ns": "233584",
+          "underreported_ns": "1834"
+        },
+        {
+          "frame": 42,
+          "surface": "keeper-message",
+          "expected_ns": "259417",
+          "old_sum_residual_ns": "256584",
+          "underreported_ns": "2833"
+        },
+        {
+          "frame": 43,
+          "surface": "keeper-message",
+          "expected_ns": "207792",
+          "old_sum_residual_ns": "205792",
+          "underreported_ns": "2000"
+        },
+        {
+          "frame": 44,
+          "surface": "keeper-message",
+          "expected_ns": "246000",
+          "old_sum_residual_ns": "243917",
+          "underreported_ns": "2083"
+        },
+        {
+          "frame": 45,
+          "surface": "keeper-message",
+          "expected_ns": "187917",
+          "old_sum_residual_ns": "186209",
+          "underreported_ns": "1708"
+        },
+        {
+          "frame": 46,
+          "surface": "keeper-message",
+          "expected_ns": "216124",
+          "old_sum_residual_ns": "214583",
+          "underreported_ns": "1541"
+        },
+        {
+          "frame": 47,
+          "surface": "keeper-message",
+          "expected_ns": "410166",
+          "old_sum_residual_ns": "408041",
+          "underreported_ns": "2125"
+        },
+        {
+          "frame": 48,
+          "surface": "keeper-message",
+          "expected_ns": "186459",
+          "old_sum_residual_ns": "183792",
+          "underreported_ns": "2667"
+        },
+        {
+          "frame": 49,
+          "surface": "keeper-message",
+          "expected_ns": "376501",
+          "old_sum_residual_ns": "374834",
+          "underreported_ns": "1667"
+        },
+        {
+          "frame": 50,
+          "surface": "keeper-message",
+          "expected_ns": "203959",
+          "old_sum_residual_ns": "201959",
+          "underreported_ns": "2000"
+        },
+        {
+          "frame": 51,
+          "surface": "keeper-message",
+          "expected_ns": "208541",
+          "old_sum_residual_ns": "206708",
+          "underreported_ns": "1833"
+        },
+        {
+          "frame": 52,
+          "surface": "keeper-message",
+          "expected_ns": "175125",
+          "old_sum_residual_ns": "173334",
+          "underreported_ns": "1791"
+        },
+        {
+          "frame": 53,
+          "surface": "keeper-message",
+          "expected_ns": "266248",
+          "old_sum_residual_ns": "262915",
+          "underreported_ns": "3333"
+        },
+        {
+          "frame": 54,
+          "surface": "keeper-message",
+          "expected_ns": "322291",
+          "old_sum_residual_ns": "320208",
+          "underreported_ns": "2083"
+        },
+        {
+          "frame": 55,
+          "surface": "keeper-message",
+          "expected_ns": "180583",
+          "old_sum_residual_ns": "178708",
+          "underreported_ns": "1875"
+        },
+        {
+          "frame": 56,
+          "surface": "keeper-message",
+          "expected_ns": "204251",
+          "old_sum_residual_ns": "202001",
+          "underreported_ns": "2250"
+        },
+        {
+          "frame": 57,
+          "surface": "keeper-message",
+          "expected_ns": "233126",
+          "old_sum_residual_ns": "230918",
+          "underreported_ns": "2208"
+        },
+        {
+          "frame": 58,
+          "surface": "keeper-message",
+          "expected_ns": "220709",
+          "old_sum_residual_ns": "218584",
+          "underreported_ns": "2125"
+        },
+        {
+          "frame": 59,
+          "surface": "keeper-message",
+          "expected_ns": "222459",
+          "old_sum_residual_ns": "220626",
+          "underreported_ns": "1833"
+        },
+        {
+          "frame": 60,
+          "surface": "keeper-message",
+          "expected_ns": "2173583",
+          "old_sum_residual_ns": "2172374",
+          "underreported_ns": "1209"
+        },
+        {
+          "frame": 61,
+          "surface": "keeper-message",
+          "expected_ns": "2245999",
+          "old_sum_residual_ns": "2244083",
+          "underreported_ns": "1916"
+        },
+        {
+          "frame": 62,
+          "surface": "keeper-message",
+          "expected_ns": "212542",
+          "old_sum_residual_ns": "210458",
+          "underreported_ns": "2084"
+        },
+        {
+          "frame": 63,
+          "surface": "keeper-message",
+          "expected_ns": "187416",
+          "old_sum_residual_ns": "185166",
+          "underreported_ns": "2250"
+        },
+        {
+          "frame": 64,
+          "surface": "keeper-message",
+          "expected_ns": "329417",
+          "old_sum_residual_ns": "329417",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 65,
+          "surface": "keeper-message",
+          "expected_ns": "181333",
+          "old_sum_residual_ns": "181333",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 66,
+          "surface": "keeper-message",
+          "expected_ns": "160750",
+          "old_sum_residual_ns": "160750",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 67,
+          "surface": "keeper-message",
+          "expected_ns": "186168",
+          "old_sum_residual_ns": "186168",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 68,
+          "surface": "keeper-message",
+          "expected_ns": "580708",
+          "old_sum_residual_ns": "580708",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 69,
+          "surface": "keeper-message",
+          "expected_ns": "283750",
+          "old_sum_residual_ns": "274584",
+          "underreported_ns": "9166"
+        },
+        {
+          "frame": 70,
+          "surface": "keeper-message",
+          "expected_ns": "338957",
+          "old_sum_residual_ns": "337040",
+          "underreported_ns": "1917"
+        },
+        {
+          "frame": 71,
+          "surface": "keeper-message",
+          "expected_ns": "457999",
+          "old_sum_residual_ns": "455957",
+          "underreported_ns": "2042"
+        },
+        {
+          "frame": 72,
+          "surface": "keeper-message",
+          "expected_ns": "430125",
+          "old_sum_residual_ns": "428167",
+          "underreported_ns": "1958"
+        },
+        {
+          "frame": 73,
+          "surface": "keeper-message",
+          "expected_ns": "262831",
+          "old_sum_residual_ns": "261123",
+          "underreported_ns": "1708"
+        },
+        {
+          "frame": 74,
+          "surface": "keeper-list",
+          "expected_ns": "4304666",
+          "old_sum_residual_ns": "4304666",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 75,
+          "surface": "keeper-list",
+          "expected_ns": "3398960",
+          "old_sum_residual_ns": "3398960",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 76,
+          "surface": "keeper-list",
+          "expected_ns": "3582206",
+          "old_sum_residual_ns": "3582206",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 77,
+          "surface": "keeper-list",
+          "expected_ns": "4179709",
+          "old_sum_residual_ns": "4179709",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 78,
+          "surface": "keeper-list",
+          "expected_ns": "3859084",
+          "old_sum_residual_ns": "3859084",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 79,
+          "surface": "keeper-list",
+          "expected_ns": "10710917",
+          "old_sum_residual_ns": "10710917",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 80,
+          "surface": "keeper-list",
+          "expected_ns": "4258792",
+          "old_sum_residual_ns": "4258792",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 81,
+          "surface": "keeper-list",
+          "expected_ns": "3499290",
+          "old_sum_residual_ns": "3499290",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 82,
+          "surface": "keeper-list",
+          "expected_ns": "3560835",
+          "old_sum_residual_ns": "3560835",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 83,
+          "surface": "metrics",
+          "expected_ns": "54583",
+          "old_sum_residual_ns": "54583",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 84,
+          "surface": "metrics",
+          "expected_ns": "70041",
+          "old_sum_residual_ns": "70041",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 85,
+          "surface": "metrics",
+          "expected_ns": "85918",
+          "old_sum_residual_ns": "85918",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 86,
+          "surface": "metrics",
+          "expected_ns": "53000",
+          "old_sum_residual_ns": "53000",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 87,
+          "surface": "metrics",
+          "expected_ns": "42417",
+          "old_sum_residual_ns": "42417",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 88,
+          "surface": "metrics",
+          "expected_ns": "50211",
+          "old_sum_residual_ns": "50211",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 89,
+          "surface": "board-list",
+          "expected_ns": "85291",
+          "old_sum_residual_ns": "85291",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 90,
+          "surface": "board-list",
+          "expected_ns": "45000",
+          "old_sum_residual_ns": "45000",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 91,
+          "surface": "board-list",
+          "expected_ns": "60210",
+          "old_sum_residual_ns": "60210",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 92,
+          "surface": "board-list",
+          "expected_ns": "78876",
+          "old_sum_residual_ns": "78876",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 93,
+          "surface": "board-list",
+          "expected_ns": "50542",
+          "old_sum_residual_ns": "50542",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 94,
+          "surface": "board-list",
+          "expected_ns": "79793",
+          "old_sum_residual_ns": "79793",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 95,
+          "surface": "board-list",
+          "expected_ns": "92415",
+          "old_sum_residual_ns": "92415",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 96,
+          "surface": "board-list",
+          "expected_ns": "140707",
+          "old_sum_residual_ns": "140707",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 97,
+          "surface": "board-list",
+          "expected_ns": "86374",
+          "old_sum_residual_ns": "86374",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 98,
+          "surface": "board-list",
+          "expected_ns": "80749",
+          "old_sum_residual_ns": "80749",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 99,
+          "surface": "board-list",
+          "expected_ns": "89707",
+          "old_sum_residual_ns": "89707",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 100,
+          "surface": "board-list",
+          "expected_ns": "50792",
+          "old_sum_residual_ns": "50792",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 101,
+          "surface": "board-list",
+          "expected_ns": "66500",
+          "old_sum_residual_ns": "66500",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 102,
+          "surface": "board-list",
+          "expected_ns": "156959",
+          "old_sum_residual_ns": "156959",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 103,
+          "surface": "board-list",
+          "expected_ns": "65752",
+          "old_sum_residual_ns": "65752",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 104,
+          "surface": "board-list",
+          "expected_ns": "93542",
+          "old_sum_residual_ns": "93542",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 105,
+          "surface": "board-list",
+          "expected_ns": "54418",
+          "old_sum_residual_ns": "54418",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 106,
+          "surface": "board-list",
+          "expected_ns": "89625",
+          "old_sum_residual_ns": "89625",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 107,
+          "surface": "board-list",
+          "expected_ns": "50499",
+          "old_sum_residual_ns": "50499",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 108,
+          "surface": "board-list",
+          "expected_ns": "52668",
+          "old_sum_residual_ns": "52668",
+          "underreported_ns": "0"
+        },
+        {
+          "frame": 109,
+          "surface": "board-list",
+          "expected_ns": "72917",
+          "old_sum_residual_ns": "72917",
+          "underreported_ns": "0"
+        }
+      ]
+    }
+  ]
+}

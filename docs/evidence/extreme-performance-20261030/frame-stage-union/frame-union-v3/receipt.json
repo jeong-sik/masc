@@ -1,0 +1,58 @@
+{
+  "scope": "Standalone exact copied frame-timing module and focused existing/new numeric tests. No Dune or project/native TUI build; not physical display or performance proof.",
+  "source_sha256": {
+    "bin/masc_tui_frame_timing.mli": "11c3cefb87b5a1ea40ec03b9c97f0175f6b4a9cbd7a54dbccec65551a8e8021a",
+    "bin/masc_tui_frame_timing.ml": "3d11ec5363ba6d0cb2dc41b8be9c18044745567803cbcf833b058e665c58ff4a",
+    "test/test_tui_frame_timing.ml": "147b185c3cb7f15ed4060ebcaa1497259ee1333ffb0cddfb7adc018cb8e74a6a"
+  },
+  "commands": [
+    {
+      "command": [
+        "ocamlc",
+        "-version"
+      ],
+      "cwd": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/frame-union-v3/build",
+      "started_unix": 1793346250.5009978,
+      "completed_unix": 1793346250.850621,
+      "returncode": 0,
+      "stdout": "command-0.stdout",
+      "stderr": "command-0.stderr"
+    },
+    {
+      "command": [
+        "ocamlfind",
+        "ocamlopt",
+        "-w",
+        "+4+32+69",
+        "-warn-error",
+        "+a",
+        "-package",
+        "yojson,mtime.clock.os,unix,alcotest",
+        "-linkpkg",
+        "masc_tui_frame_timing.mli",
+        "masc_tui_frame_timing.ml",
+        "test_tui_frame_timing.ml",
+        "-o",
+        "test.exe"
+      ],
+      "cwd": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/frame-union-v3/build",
+      "started_unix": 1793346250.850629,
+      "completed_unix": 1793346252.558718,
+      "returncode": 0,
+      "stdout": "command-1.stdout",
+      "stderr": "command-1.stderr"
+    },
+    {
+      "command": [
+        "./test.exe",
+        "--color=never"
+      ],
+      "cwd": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/frame-union-v3/build",
+      "started_unix": 1793346252.558723,
+      "completed_unix": 1793346253.2963169,
+      "returncode": 0,
+      "stdout": "command-2.stdout",
+      "stderr": "command-2.stderr"
+    }
+  ]
+}

@@ -85,9 +85,10 @@ val finish_stage : name:string -> int64 option -> unit
     outside Build, such as Board fetch and decode, contribute one duration
     per call to their percentile population and are reported separately.
     A note records a branch such as a cold cache without claiming a duration.
-    Build residuals subtract every timed stage, so callers keep these intervals
-    disjoint: end a parent preparation interval before invoking a callback that
-    may record its own stages. Finish only after a successful return; a raising
+    Build residuals subtract the union of timed stage intervals, so nested or
+    overlapping stages are counted once. Individual stage totals still include
+    their nested work and must not be added as an exclusive decomposition.
+    Finish only after a successful return; a raising
     Build may retain earlier stages without a corresponding successful frame. *)
 
 val time_present :
@@ -168,7 +169,16 @@ module Stage_samples : sig
   (** Actual stage timers retain exact nanosecond windows; branch notes have
       no fabricated timer. The existing stage/frame caps and omissions apply. *)
   val summary_lines : t -> string list
+  type build_residual = { frame : int; uncovered_ns : int64 }
+  val build_residuals : t -> Samples.t -> build_residual list
+  (** In Build order, exact elapsed nanoseconds outside the union of its stage
+      windows. Requires a timed Build and at least one timed stage. Branch notes
+      and outside-Build stages do not contribute. Omit a Build if stage records
+      were dropped for it or an earlier Build, a measured stage has no window,
+      or any window is reversed, negative or outside that Build. All windows
+      must come from the same process clock; aggregate-only durations cannot
+      establish overlap. This is uncovered wall time, not exclusive CPU time. *)
   val residual_lines : t -> Samples.t -> string list
-  (** Build minus measured disjoint stages. It includes unmeasured work and
-      timing overhead, so it is not an overhead estimate by itself. *)
+  (** Format {!build_residuals}. Includes unmeasured work, observation overhead
+      and scheduling/GC delays; not an overhead estimate by itself. *)
 end

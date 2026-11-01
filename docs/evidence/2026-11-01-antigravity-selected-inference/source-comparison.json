@@ -51,13 +51,25 @@
     },
     "identical_trees": [
       "test",
-      "packages/agent_core",
       "config"
     ],
     "lib_tree_delta": [
       "lib/keeper/keeper_antigravity_runtime.mli"
     ],
-    "reason": "Remove unsupported AGY history-retry claim; no runtime implementation, val signature or fixture change.",
-    "limits": "No execution at the later publication head is claimed. The lib tree and MLI input are not byte-identical to the executed source."
+    "reason": "Narrow unsupported history-retry claim by MLI comment only; separately carry lower Core canonical response persistence repair and expanded terminal fixture.",
+    "limits": "No execution at the later publication head. The MLI input, lib tree and Core tree are not byte-identical to ed7; the historical Antigravity run does not execute the new Core repair.",
+    "changed_core_tree": {
+      "reference_tree": "c4b3002ea517ec584858ee05971ca84f0da15819",
+      "publication_tree": "352d2b8a2d2ef1a11c9f7c3f85fcbab7d3687fc0",
+      "identical": false,
+      "changed_paths": [
+        "packages/agent_core/lib/pipeline/pipeline.ml",
+        "packages/agent_core/lib/pipeline/pipeline_execution_resume.mli",
+        "packages/agent_core/lib/pipeline/pipeline_execution_scope.mli",
+        "packages/agent_core/test/test_pipeline.ml"
+      ]
+    },
+    "lower_core_repair_head": "8b33c1143c9551bc7cbf5624dfbd0566fb7bc836",
+    "preserved_external_core_commit": "356a1e02ce3637668c357cf4467d738243c51fe9"
   }
 }

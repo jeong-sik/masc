@@ -38,5 +38,26 @@
   "lower_parent_delta": "Eleven Fusion evidence files only; no lower production change.",
   "test_delta": "Only explicit required-argument migrations in two existing fixtures; selected new fixture and its build/runner inputs are byte-identical.",
   "execution_result": "Observed baseline Test41299786698 FAILURE3PASS/7FAIL and candidate Test41300307241 SUCCESS23PASS/0FAIL. Common10:3maintained7fixed0regression. Candidate-only13 controls are separate.",
-  "limits": "Three baseline reasoning cases stop at their first input-receipt assertion; later typed-error and resume assertions were not reached there. Candidate passes all10 cases. No full regression/live provider/installed runtime/restart/deployment/integration/whole-issue acceptance."
+  "limits": "Three baseline reasoning cases stop at their first input-receipt assertion; later typed-error and resume assertions were not reached there. Candidate passes all10 cases. No full regression/live provider/installed runtime/restart/deployment/integration/whole-issue acceptance.",
+  "publication_source_binding": {
+    "reference_head": "ed7c00c5922f1014faf052787923012689bef432",
+    "identical_named_inputs": 21,
+    "comment_only_input": {
+      "path": "lib/keeper/keeper_antigravity_runtime.mli",
+      "reference_sha256": "bc49c4ae064e85a9db544bbf948dad8f92f78f6b1d173ab15e2da6a7b8c5f08f",
+      "publication_sha256": "a16b63f19a5226b3e348d1a891a566e7c256bbad3cac658e9ba23735b199d709",
+      "old_comment": "selected model. They are not looked up again by [runtime_id], including\n    on resume or the driver's history retry. An absent idle declaration keeps",
+      "new_comment": "selected model. They are not looked up again by [runtime_id] on fresh or\n    resumed turns. An absent idle declaration keeps"
+    },
+    "identical_trees": [
+      "test",
+      "packages/agent_core",
+      "config"
+    ],
+    "lib_tree_delta": [
+      "lib/keeper/keeper_antigravity_runtime.mli"
+    ],
+    "reason": "Remove unsupported AGY history-retry claim; no runtime implementation, val signature or fixture change.",
+    "limits": "No execution at the later publication head is claimed. The lib tree and MLI input are not byte-identical to the executed source."
+  }
 }

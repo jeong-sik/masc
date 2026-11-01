@@ -79,8 +79,8 @@ val run :
     Antigravity turn's input attribution as zero (masc#32995).
 
     [configured_reasoning_effort] and [turn_timeout_s] come from the already
-    selected model. They are not looked up again by [runtime_id], including
-    on resume or the driver's history retry. An absent idle declaration keeps
+    selected model. They are not looked up again by [runtime_id] on fresh or
+    resumed turns. An absent idle declaration keeps
     the captured provider timeout; a nonpositive declaration removes the model
     idle bound. Native admission still uses the provider timeout.
     Generic reasoning intent is passed through host hooks and remains subject

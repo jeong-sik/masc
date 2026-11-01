@@ -123,7 +123,8 @@ val expand_home_prefix : string -> string
 
 val normalize_path_lexically : string -> string
 (** Trim and expand the home prefix, then reduce slash-separated empty, dot and
-    parent components without consulting the filesystem. Already normalized
+    parent components without consulting the filesystem. Relative paths retain
+    leading parent components; absolute paths stop at their root. Already normalized
     paths may reuse the immutable input string. *)
 
 val normalize_masc_base_path_input : string -> string

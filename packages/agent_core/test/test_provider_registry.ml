@@ -16,6 +16,12 @@ let with_env key value f =
 
 (* ── Registry CRUD ──────────────────────────────────── *)
 
+let provider_capabilities (entry : Provider_registry.entry) =
+  match entry.capabilities with
+  | Some capabilities -> capabilities
+  | None -> Alcotest.fail "fixture requires an explicit provider-wide capability declaration"
+;;
+
 let test_empty_registry () =
   let reg = Provider_registry.create () in
   check int "empty has 0 entries" 0 (List.length (Provider_registry.all reg));
@@ -33,7 +39,7 @@ let test_register_and_find () =
         ; requires_api_key = false
         }
     ; max_context = Some 128_000
-    ; capabilities = Capabilities.default_capabilities
+    ; capabilities = Some Capabilities.default_capabilities
     ; is_available = (fun () -> true)
     }
   in
@@ -55,7 +61,7 @@ let test_overwrite () =
         ; requires_api_key = false
         }
     ; max_context = Some 128_000
-    ; capabilities = Capabilities.default_capabilities
+    ; capabilities = Some Capabilities.default_capabilities
     ; is_available = (fun () -> true)
     }
   in
@@ -78,7 +84,7 @@ let test_unregister () =
         ; requires_api_key = false
         }
     ; max_context = Some 128_000
-    ; capabilities = Capabilities.default_capabilities
+    ; capabilities = Some Capabilities.default_capabilities
     ; is_available = (fun () -> true)
     }
   in
@@ -101,7 +107,7 @@ let test_concurrent_register_keeps_every_snapshot_update () =
           ; requires_api_key = false
           }
       ; max_context = Some 128_000
-      ; capabilities = Capabilities.default_capabilities
+      ; capabilities = Some Capabilities.default_capabilities
       ; is_available = (fun () -> true)
       }
     in
@@ -153,7 +159,7 @@ let test_available_filter () =
         ; requires_api_key = false
         }
     ; max_context = Some 128_000
-    ; capabilities = Capabilities.default_capabilities
+    ; capabilities = Some Capabilities.default_capabilities
     ; is_available = (fun () -> avail)
     }
   in
@@ -216,7 +222,7 @@ let test_find_capable_tools () =
         ; requires_api_key = false
         }
     ; max_context = Some 128_000
-    ; capabilities = caps
+    ; capabilities = Some caps
     ; is_available = (fun () -> true)
     }
   in
@@ -242,7 +248,7 @@ let test_find_capable_composite () =
         ; requires_api_key = false
         }
     ; max_context = Some 128_000
-    ; capabilities = caps
+    ; capabilities = Some caps
     ; is_available = (fun () -> true)
     }
   in
@@ -270,13 +276,13 @@ let test_default_capabilities () =
   let reg = Provider_registry.default () in
   (match Provider_registry.find reg "claude" with
    | Some e ->
-     check bool "claude has tools" true e.capabilities.supports_tools;
-     check bool "claude has reasoning" true e.capabilities.supports_reasoning
+     check bool "claude has tools" true (provider_capabilities e).supports_tools;
+     check bool "claude has reasoning" true (provider_capabilities e).supports_reasoning
    | None -> fail "claude should exist");
   match Provider_registry.find reg "nous" with
   | Some e ->
-    check bool "llama has tools" true e.capabilities.supports_tools;
-    check bool "llama has top_k" true e.capabilities.supports_top_k
+    check bool "llama has tools" true (provider_capabilities e).supports_tools;
+    check bool "llama has top_k" true (provider_capabilities e).supports_top_k
   | None -> fail "llama should exist"
 ;;
 
@@ -292,17 +298,17 @@ let test_default_ollama_cloud_entry () =
       bool
       "ollama_cloud uses ollama_cloud_capabilities"
       true
-      (e.capabilities.thinking_control_format = Capabilities.Ollama_think);
+      ((provider_capabilities e).thinking_control_format = Capabilities.Ollama_think);
     check
       bool
       "ollama_cloud does not support JSON mode"
       false
-      e.capabilities.supports_response_format_json;
+      (provider_capabilities e).supports_response_format_json;
     check
       bool
       "ollama_cloud does not support provider schema"
       false
-      e.capabilities.supports_structured_output
+      (provider_capabilities e).supports_structured_output
   | None -> fail "ollama_cloud should exist"
 ;;
 
@@ -340,13 +346,13 @@ let test_default_mimo_entry () =
       check bool "requires_api_key" true e.defaults.requires_api_key;
       check string "request_path" "/chat/completions" e.defaults.request_path;
       check (option int) "max_context" (Some 1_000_000) e.max_context;
-      check bool "has reasoning" true e.capabilities.supports_reasoning;
-      check bool "has JSON mode" true e.capabilities.supports_response_format_json;
+      check bool "has reasoning" true (provider_capabilities e).supports_reasoning;
+      check bool "has JSON mode" true (provider_capabilities e).supports_response_format_json;
       check
         bool
         "no native structured output"
         false
-        e.capabilities.supports_structured_output
+        (provider_capabilities e).supports_structured_output
     | None -> fail "mimo should exist")
 ;;
 
@@ -489,7 +495,7 @@ let test_default_max_context_matches_capabilities () =
     check
       (option int)
       (Printf.sprintf "%s registry context is capability declaration" entry.name)
-      entry.capabilities.max_context_tokens
+      (Option.bind entry.capabilities (fun capabilities -> capabilities.Capabilities.max_context_tokens))
       entry.max_context)
 ;;
 
@@ -551,8 +557,8 @@ let test_catalog_overlay_registers_exact_provider_id_only () =
         | Some e ->
           check string "base url" "http://127.0.0.1:8000" e.defaults.base_url;
           check (option int) "max context" (Some 131_072) e.max_context;
-          check bool "tools" true e.capabilities.supports_tools;
-          check bool "tool choice" true e.capabilities.supports_tool_choice
+          check bool "tools" true (provider_capabilities e).supports_tools;
+          check bool "tool choice" true (provider_capabilities e).supports_tool_choice
         | None -> fail "catalog provider should be registered");
        check
          bool

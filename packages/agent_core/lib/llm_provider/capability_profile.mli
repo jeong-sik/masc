@@ -270,10 +270,8 @@ val sampling_parameter_to_string : sampling_parameter -> string
     [gemini], [ollama], [glm] / [zhipu], [kimi],
     [xai], [mistral], [cohere], [mimo], [nvidia].
 
-    Canonical labels and aliases for the closed {!Provider_kind.t} space are
-    normalized to a typed kind first, then delegated to {!capabilities_of_kind}.
-    String-only presets that are not expressible as a provider kind stay at this
-    label boundary.
+    Labels decode through {!Capability_preset} before resolution. Provider ids
+    and wire kinds are not capability declarations.
 
     Returns [None] for labels outside this set. Intended for adapter
     layers that track provider kind as a string (e.g. config loaders,
@@ -283,14 +281,16 @@ val sampling_parameter_to_string : sampling_parameter -> string
     @since 0.170.9 *)
 val capabilities_for_provider_label : string -> capabilities option
 
+val capabilities_of_preset : Capability_preset.t -> capabilities
+(** Resolve an already decoded preset without provider identity, labels,
+    catalog lookup or a permissive fallback. *)
+
 (** Capabilities preset for a canonical {!Provider_kind.t}.
 
     Maps the closed variants directly to their presets without serialising
     the kind to a string and re-parsing it. Use this when the caller already
-    holds a typed {!Provider_kind.t}; {!capabilities_for_provider_label}
-    delegates canonical labels here and only keeps string-only presets (e.g.
-    ["openai_chat_extended"], ["ollama_cloud"], ["xai"], ["mistral"],
-    ["cohere"], ["mimo"], ["nvidia"]) at the label boundary.
+    holds a typed {!Provider_kind.t}. This is an explicit protocol baseline,
+    not a provider-identity lookup or a catalog admission fallback.
 
     @since 0.209.0 *)
 val capabilities_of_kind : Provider_kind.t -> capabilities

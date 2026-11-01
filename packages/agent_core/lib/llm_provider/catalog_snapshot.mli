@@ -17,12 +17,13 @@ type entry =
   ; default_model : string option
   ; discovery_timeout_s : float option
   ; max_context : int option
-  ; capabilities : Capability_profile.capabilities
+  ; capabilities : Capability_profile.capabilities option
+    (** [None] is an explicit models-only declaration. Unknown models acquire
+        no provider preset; it is never a missing-field fallback. *)
   ; credential_scope : string option
   }
 
 type error =
-  | Unknown_capability_base of { provider_id : string; label : string }
   | Conflicting_identity of { identity : string; provider_ids : string list }
 
 val error_to_string : error -> string
@@ -33,9 +34,10 @@ val of_catalogs :
   (t, error) result
 (** Admit the complete pair without reading or changing global state. An
     explicit provider overlay replaces the whole same canonical seed id,
-    including its old aliases. Reject all remaining identity collisions and
-    unknown capability bases. [models=None] explicitly captures absent model
-    facts; [providers=None] means no JSON overlay. Neither selects a fallback. *)
+    including its old aliases. Reject remaining identity collisions.
+    Capability declarations have already been decoded to closed presets or an
+    explicit models-only choice. [models=None] captures absent model facts;
+    [providers=None] means no JSON overlay. Neither selects a fallback. *)
 
 val models : t -> Model_catalog.t option
 val model_catalog_for_provider :

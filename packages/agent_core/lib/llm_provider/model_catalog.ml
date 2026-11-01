@@ -75,8 +75,8 @@ type provider_entry = Model_provider_catalog.entry =
   ; requires_api_key : bool
   ; default_model : string option
   ; discovery_timeout_s : float option
-  ; capabilities_base : string option
-  ; capabilities_base_by_identity_kind : (Provider_kind.t * string) list
+  ; capabilities_base : Capability_preset.declaration
+  ; capabilities_base_by_identity_kind : (Provider_kind.t * Capability_preset.t) list
   ; supports_parallel_tool_suppression : bool
   ; serves_bare_models : Model_identifiers.Model_id.t list
   }

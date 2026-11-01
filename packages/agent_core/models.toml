@@ -2838,6 +2838,7 @@ request_path = "/chat/completions"
 auth = "api-key"
 # No provider-wide capability preset: an unknown model must not inherit
 # structured output from GPT-4o, or reasoning controls from GPT-5.5.
+capabilities_base = "models_only"
 
 # Chat-specific exact identities, verified against the official model pages
 # and Chat/Structured Outputs references on 2026-10-16:

@@ -14,17 +14,14 @@ type entry =
   ; default_model : string option
   ; discovery_timeout_s : float option
   ; max_context : int option
-  ; capabilities : Capability_profile.capabilities
+  ; capabilities : Capability_profile.capabilities option
   ; credential_scope : string option
   }
 
 type error =
-  | Unknown_capability_base of { provider_id : string; label : string }
   | Conflicting_identity of { identity : string; provider_ids : string list }
 
 let error_to_string = function
-  | Unknown_capability_base {provider_id;label} ->
-    Printf.sprintf "provider %S declares unknown capability base %S" provider_id label
   | Conflicting_identity {identity;provider_ids} ->
     Printf.sprintf "provider identity %S is shared by %s" identity
       (String.concat ", " provider_ids)
@@ -42,15 +39,15 @@ let normalize s = String.trim s |> String.lowercase_ascii
 open Result.Syntax
 
 let of_model_entry (entry : Model_catalog.provider_entry) =
-  let label = Option.value entry.capabilities_base ~default:entry.id in
-  match Capability_profile.capabilities_for_provider_label label with
-  | None -> Error (Unknown_capability_base {provider_id=entry.id;label})
-  | Some capabilities -> Ok
-    { id=entry.id;aliases=entry.aliases;
-      kind=entry.kind;base_url=entry.base_url;request_path=entry.request_path;
-      authentication=(if entry.requires_api_key then Caller_api_key else No_auth);
-      default_model=entry.default_model;discovery_timeout_s=entry.discovery_timeout_s;
-      max_context=capabilities.max_context_tokens;capabilities;credential_scope=None }
+  let capabilities = match entry.capabilities_base with
+    | Capability_preset.Models_only -> None
+    | Preset preset -> Some (Capability_profile.capabilities_of_preset preset) in
+  { id=entry.id;aliases=entry.aliases;
+    kind=entry.kind;base_url=entry.base_url;request_path=entry.request_path;
+    authentication=(if entry.requires_api_key then Caller_api_key else No_auth);
+    default_model=entry.default_model;discovery_timeout_s=entry.discovery_timeout_s;
+    max_context=Option.bind capabilities (fun capabilities -> capabilities.Capability_profile.max_context_tokens);
+    capabilities;credential_scope=None }
 
 let of_provider_entry (entry : Provider_catalog.entry) =
   let authentication = match entry.auth with
@@ -62,7 +59,7 @@ let of_provider_entry (entry : Provider_catalog.entry) =
     authentication;default_model=entry.default_model;discovery_timeout_s=entry.discovery_timeout_s;
     max_context=(match entry.max_context with Some _ as value -> value
       | None -> entry.capabilities.max_context_tokens);
-    capabilities=entry.capabilities;credential_scope=entry.credential_scope }
+    capabilities=Some entry.capabilities;credential_scope=entry.credential_scope }
 
 let admit ~models ~source_providers ~policy_providers declared =
   let rec identities entry index = function
@@ -98,14 +95,14 @@ let of_catalogs ~models ~providers =
       ; requires_api_key=(match entry.authentication with No_auth -> false
           | Caller_api_key | Api_key_env _ | Setup_token_env _ -> true)
       ; default_model=entry.default_model;discovery_timeout_s=entry.discovery_timeout_s;
-        capabilities_base=None;capabilities_base_by_identity_kind=[]
+        capabilities_base=Capability_preset.Models_only;capabilities_base_by_identity_kind=[]
       ; supports_parallel_tool_suppression=false;serves_bare_models=[] } in
     Ids.add (normalize entry.id) provider index) policy_providers overlay in
   let rec project acc = function
     | [] -> admit ~models ~source_providers:providers ~policy_providers (List.rev acc @ overlay)
     | seed::rest ->
       if Ids.mem (normalize seed.Model_catalog.id) replaced then project acc rest
-      else let* entry = of_model_entry seed in project (entry::acc) rest in
+      else project (of_model_entry seed::acc) rest in
   project [] seeds
 
 let models t = t.models

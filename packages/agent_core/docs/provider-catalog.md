@@ -92,6 +92,24 @@ default_model = "mimo-v2.5-pro"
 capabilities_base = "mimo"
 ```
 
+Each TOML provider row requires `id`, `kind`, `base_url`, `request_path`, `auth`
+and `capabilities_base`. Capability policy is an explicit preset or
+`capabilities_base = "models_only"`. A missing field is rejected even when the
+provider id happens to name a known preset. Preset spellings decode into the
+closed `Capability_preset` type; wire kind and provider identity are separate.
+
+`models_only` gives unknown models no provider-wide policy. Exact admitted
+model rows still supply their own capabilities and prices. The packaged OpenAI
+Chat provider makes this choice explicitly. A model-only provider cannot also
+declare `capabilities_base_by_identity_kind` overrides. Registry and runtime
+binding metadata retain absent provider capabilities as `None`; capability
+predicates do not turn that absence into a preset.
+
+These required-field and model-only rules describe TOML provider rows. The JSON
+overlay decoder still has optional-field defaults; removing those defaults is
+remaining work in #27898. An admitted JSON overlay retains its explicitly
+resolved selected policy, while raw id lookup does not acquire that policy.
+
 `auth` states whether the endpoint takes an API key (`"api-key"` or `"none"`,
 exactly); the row never names where the key lives. Selection uses the row's
 exact `id` or alias and stores its canonical id in

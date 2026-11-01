@@ -739,69 +739,36 @@ let gemini_capabilities =
   |> with_declared_image_input true
 ;;
 
-(** Capabilities preset for a canonical {!Provider_kind.t}.
+let capabilities_of_preset (preset : Capability_preset.t) : capabilities =
+  match preset with
+  | Anthropic -> anthropic_capabilities
+  | Kimi -> kimi_capabilities
+  | Openai_chat -> openai_compat_chat_capabilities
+  | Ollama -> ollama_capabilities
+  | Gemini -> gemini_capabilities
+  | Glm -> glm_capabilities
+  | Openai_chat_extended -> openai_compat_chat_extended_capabilities
+  | Openrouter -> openrouter_capabilities
+  | Cohere -> { openai_compat_chat_capabilities with json_schema_dialect = Json_object_schema }
+  | Mimo -> mimo_capabilities
+  | Ollama_cloud -> ollama_cloud_capabilities
+  | Ollama_cloud_v1 -> ollama_cloud_v1_capabilities
+  | Nvidia -> provider_l_capabilities
+;;
 
-    Typed counterpart of {!capabilities_for_provider_label}: maps the closed
-    variants directly to their presets without serialising the kind to a string
-    and re-parsing it. Adding a new variant to {!Provider_kind.t} forces a
-    compile error here, instead of silently falling through the [_ -> None] arm
-    of the label classifier. This is the path callers that already hold a typed
-    [kind] should use, so the
-    [kind |> string_of_provider_kind |> capabilities_for_provider_label]
-    round-trip disappears.
-
-    Wire aliases and presets not expressible as a {!Provider_kind.t}
-    (e.g. ["claude"], ["zhipu"], ["openai_chat_extended"], ["ollama_cloud"],
-    ["nvidia"]) remain reachable only through {!capabilities_for_provider_label}
-    at the catalog/env parse boundary.
-
-    @since 0.209.0 *)
 let capabilities_of_kind (kind : Provider_kind.t) : capabilities =
-  match kind with
-  | Provider_kind.Anthropic -> anthropic_capabilities
-  | Provider_kind.Kimi -> kimi_capabilities
-  | Provider_kind.OpenAI_compat -> openai_compat_chat_capabilities
-  | Provider_kind.Ollama -> ollama_capabilities
-  | Provider_kind.Gemini -> gemini_capabilities
-  | Provider_kind.Glm -> glm_capabilities
+  let preset : Capability_preset.t = match kind with
+    | Anthropic -> Anthropic
+    | Kimi -> Kimi
+    | OpenAI_compat -> Openai_chat
+    | Ollama -> Ollama
+    | Gemini -> Gemini
+    | Glm -> Glm in
+  capabilities_of_preset preset
 ;;
 
-let provider_kind_alias_of_label label =
-  match Provider_kind.of_string label with
-  | Some kind -> Some kind
-  | None ->
-    (match label with
-     | "claude" -> Some Provider_kind.Anthropic
-     | "openai" | "openai_chat" -> Some Provider_kind.OpenAI_compat
-     | "zhipu" | "glm-coding" -> Some Provider_kind.Glm
-     | _ -> None)
-;;
-
-(** Lookup capabilities by provider label string.
-
-    Canonical labels and aliases for the closed {!Provider_kind.t} space are
-    normalized to a typed kind first, then delegated to {!capabilities_of_kind}.
-    String-only presets that are not expressible as a provider kind stay at this
-    label boundary. Returns [None] for labels outside the recognized set so
-    callers can fail closed rather than silently treating unknown providers as
-    having default capabilities. *)
 let capabilities_for_provider_label label =
-  let label = String.lowercase_ascii (String.trim label) in
-  match provider_kind_alias_of_label label with
-  | Some kind -> Some (capabilities_of_kind kind)
-  | None ->
-    (match label with
-     | "openai_compat_chat_extended" | "openai_chat_extended" ->
-       Some openai_compat_chat_extended_capabilities
-     | "openrouter" -> Some openrouter_capabilities
-     | "xai" | "mistral" -> Some openai_compat_chat_extended_capabilities
-     | "cohere" ->
-       Some { openai_compat_chat_capabilities with json_schema_dialect = Json_object_schema }
-     | "mimo" -> Some mimo_capabilities
-     | "ollama_cloud" -> Some ollama_cloud_capabilities
-     | "ollama_cloud_v1" -> Some ollama_cloud_v1_capabilities
-     | "nvidia" -> Some provider_l_capabilities
-     | _ -> None)
+  Option.map capabilities_of_preset (Capability_preset.of_string label)
 ;;
 
 let%test "capabilities_of_kind aliases the same presets as the label classifier" =

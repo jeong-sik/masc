@@ -2792,6 +2792,7 @@ let runtime_thinking_model_catalog =
 # This isolated inventory fixture declares its own provider contract; the
 # shipped Ollama provider remains undeclared and refuses suppression.
 [[providers]]
+capabilities_base = "ollama_cloud"
 id = "ollama_cloud"
 kind = "openai_compat"
 base_url = "https://ollama.example/v1"

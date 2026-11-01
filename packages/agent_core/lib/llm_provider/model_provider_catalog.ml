@@ -21,8 +21,8 @@ type entry =
   ; requires_api_key : bool
   ; default_model : string option
   ; discovery_timeout_s : float option
-  ; capabilities_base : string option
-  ; capabilities_base_by_identity_kind : (Provider_kind.t * string) list
+  ; capabilities_base : Capability_preset.declaration
+  ; capabilities_base_by_identity_kind : (Provider_kind.t * Capability_preset.t) list
   ; supports_parallel_tool_suppression : bool
   ; serves_bare_models : Model_identifiers.Model_id.t list
   }
@@ -52,24 +52,6 @@ let exact_non_empty_string_field ~entry_id key toml =
            entry_id
            key)
     else Ok (Some raw)
-;;
-
-let canonical_string_opt ~entry_id key ~allowed toml =
-  match find_string_field ~entry_id key toml with
-  | Error _ as e -> e
-  | Ok None -> Ok None
-  | Ok (Some raw) ->
-    let normalized = String.lowercase_ascii (String.trim raw) in
-    if List.mem normalized allowed
-    then Ok (Some raw)
-    else
-      Error
-        (Printf.sprintf
-           "provider entry %S field %S has unknown value %S (canonical: %s)"
-           entry_id
-           key
-           normalized
-           (String.concat ", " allowed))
 ;;
 
 let string_list_field ~entry_id key toml =
@@ -259,15 +241,11 @@ let capabilities_base_by_identity_kind_field ~entry_id ~identity_kinds toml =
                         "provider entry %S capability-base wire %S must not be padded"
                         entry_id
                         raw_kind)
-                 else if not (List.mem normalized Capability_vocab.base_label_values)
-                 then
-                   Error
-                     (Printf.sprintf
-                        "provider entry %S capability-base wire %S has unknown base %S"
-                        entry_id
-                        raw_kind
-                        base)
-                 else loop (kind :: seen) ((kind, normalized) :: acc) rest))
+                 else match Capability_preset.of_string normalized with
+                   | None -> Error (Printf.sprintf
+                       "provider entry %S capability-base wire %S has unknown base %S"
+                       entry_id raw_kind base)
+                   | Some preset -> loop (kind :: seen) ((kind, preset) :: acc) rest))
        in
        loop [] [] pairs)
 ;;
@@ -315,15 +293,22 @@ let parse_entry provider_toml =
   let* discovery_timeout_s =
     positive_finite_float_field ~entry_id:id "discovery_timeout_s" provider_toml
   in
+  let* raw_capabilities_base = required_string ~entry_id:id "capabilities_base" provider_toml in
   let* capabilities_base =
-    canonical_string_opt
-      ~entry_id:id
-      "capabilities_base"
-      ~allowed:Capability_vocab.base_label_values
-      provider_toml
+    match Capability_preset.declaration_of_string raw_capabilities_base with
+    | Some declaration -> Ok declaration
+    | None -> Error (Printf.sprintf
+        "provider entry %S field \"capabilities_base\" has unknown value %S; expected models_only or a declared preset"
+        id raw_capabilities_base)
   in
   let* capabilities_base_by_identity_kind =
     capabilities_base_by_identity_kind_field ~entry_id:id ~identity_kinds provider_toml
+  in
+  let* () = match capabilities_base, capabilities_base_by_identity_kind with
+    | Capability_preset.Models_only, _ :: _ ->
+      Error (Printf.sprintf
+        "provider entry %S declares models_only and cannot grant provider-wide wire capability overrides" id)
+    | Capability_preset.Models_only, [] | Preset _, _ -> Ok ()
   in
   let* supports_parallel_tool_suppression =
     match Otoml.find_opt provider_toml Otoml.get_boolean

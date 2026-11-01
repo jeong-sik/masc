@@ -406,6 +406,7 @@ let test_binding_and_enumeration_retain_catalog_owned_rows () =
   let catalog context =
     catalog_of_toml ~source:"binding owned rows"
       (Printf.sprintf {|[[providers]]
+capabilities_base = "models_only"
 id = "owner"
 kind = "anthropic"
 base_url = "https://example.invalid"
@@ -440,6 +441,7 @@ max_context_tokens = %d
 
 let test_exact_lookup_and_ownership_do_not_expand_names () =
   let owner = {|[[providers]]
+capabilities_base = "models_only"
 id = "owner"
 aliases = ["owner-alias"]
 kind = "anthropic"

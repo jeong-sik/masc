@@ -12,10 +12,11 @@ type entry =
   ; discovery_timeout_s : float option
     (** Caller-declared total deadline for one discovery HTTP request.
         [None] declares no deadline; it never grants an implicit unbounded one. *)
-  ; capabilities_base : string option
-  ; capabilities_base_by_identity_kind : (Provider_kind.t * string) list
+  ; capabilities_base : Capability_preset.declaration
+  ; capabilities_base_by_identity_kind : (Provider_kind.t * Capability_preset.t) list
     (** Wire-specific capability bases. Keys must also appear in
-        [identity_kinds]; absent keys inherit [capabilities_base]. *)
+        [identity_kinds]; absent keys inherit [capabilities_base]. A
+        [Models_only] declaration cannot carry provider-wide wire overrides. *)
   ; supports_parallel_tool_suppression : bool
     (** The provider documents a request control that limits a response to at
         most one tool call. Missing declarations are false; this is separate
@@ -28,3 +29,6 @@ type entry =
   }
 
 val parse_entry : Otoml.t -> (entry, string) result
+(** Identity, kind, endpoint, path, auth and capability declaration are required.
+    [capabilities_base = "models_only"] is the explicit model-only choice;
+    omission never derives a preset from the provider id or wire kind. *)

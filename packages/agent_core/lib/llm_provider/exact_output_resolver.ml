@@ -496,7 +496,7 @@ let canonical_catalog_evidence catalog model_entries target_declarations =
       ; provider.request_path
       ; if provider.requires_api_key then "api-key" else "none"
       ; option_string provider.default_model
-      ; option_string provider.capabilities_base
+      ; Capability_preset.declaration_to_string provider.capabilities_base
       ])
   in
   let models =

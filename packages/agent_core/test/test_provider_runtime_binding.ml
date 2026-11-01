@@ -153,7 +153,7 @@ let test_catalog_alias_default_and_capabilities () =
       "default model"
       (Some "local-model")
       binding.default_model;
-    Alcotest.(check bool) "supports tools" true binding.capabilities.supports_tools;
+    Alcotest.(check bool) "supports tools" true (Option.fold ~none:false ~some:(fun capabilities -> capabilities.Capabilities.supports_tools) binding.capabilities);
     Alcotest.(check (option string))
       "credential scope"
       (Some "test runtime")

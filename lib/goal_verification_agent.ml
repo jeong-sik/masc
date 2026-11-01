@@ -657,19 +657,19 @@ type claim =
   ; abandon : unit Eio.Promise.u
   }
 
-(* A queued identity is not a stored request or an execution grant. Keep its
-   removal and claim admission in one atomic state so a nested scan cannot
-   admit the same Goal while an earlier batch is being forked. *)
+(* A queued identity is not a stored request or an execution grant. Claims
+   and exact retry reservations share one CAS: a replacement claim cannot be
+   admitted between retiring an old timer and retaining that timer's wake. *)
 type scheduling =
   { ready : pending_work list
   ; in_flight : claim list
+  ; retries : (string * string * string) list
   }
 
 type runtime =
   { config : Workspace_utils_backend_setup.config
   ; sw : Eio.Switch.t
   ; clock : float Eio.Time.clock_ty Eio.Resource.t
-  ; retries : (string * string * string) list Atomic.t
   ; wake : Eio.Condition.t
   ; pending : bool Atomic.t
   ; scheduling : scheduling Atomic.t
@@ -692,13 +692,13 @@ let reserve_review (runtime : runtime) =
         let unavailable =
           List.exists (fun candidate -> pending_work_same_goal work candidate.work) current.in_flight
           || List.exists (fun (id, _, _) -> String.equal work.goal_id id)
-               (Atomic.get runtime.retries) in
+               current.retries in
         if unavailable then (
           ignore (Atomic.compare_and_set runtime.scheduling current {current with ready});
           loop ())
         else
           let claim = { work; requested = false; abandoned; abandon } in
-          let next = {ready; in_flight=claim :: current.in_flight} in
+          let next = {current with ready; in_flight=claim :: current.in_flight} in
           if Atomic.compare_and_set runtime.scheduling current next
           then Some claim else loop ()
   in
@@ -739,23 +739,34 @@ let request_scan (runtime : runtime) =
 
 let remove_retry (runtime : runtime) key =
   let rec loop () =
-    let current = Atomic.get runtime.retries in
-    if not (List.mem key current) then false
-    else if Atomic.compare_and_set runtime.retries current (List.filter ((<>) key) current)
+    let current = Atomic.get runtime.scheduling in
+    if not (List.mem key current.retries) then false
+    else if Atomic.compare_and_set runtime.scheduling current
+      {current with retries=List.filter ((<>) key) current.retries}
     then true else loop ()
   in loop ()
 ;;
 
 let clear_retries (runtime : runtime) ~goal_id =
-  Atomic.get runtime.retries |> List.iter (fun ((id, _, _) as key) ->
+  (Atomic.get runtime.scheduling).retries |> List.iter (fun ((id, _, _) as key) ->
     if String.equal id goal_id then ignore (remove_retry runtime key))
 ;;
 
+let finish_retry (runtime : runtime) ((goal_id, _, _) as key) =
+  let rec loop () =
+    let current = Atomic.get runtime.scheduling in
+    if not (List.mem key current.retries) then false
+    else
+      let in_flight = List.map (fun claim ->
+        {claim with requested=claim.requested || String.equal claim.work.goal_id goal_id})
+        current.in_flight in
+      let next = {current with in_flight; retries=List.filter ((<>) key) current.retries} in
+      if Atomic.compare_and_set runtime.scheduling current next then true else loop ()
+  in loop ()
+;;
+
 let schedule_retry (runtime : runtime) ~goal_id ~request_id deferral =
-  if List.exists (fun claim -> String.equal claim.work.goal_id goal_id && claim.requested)
-       (Atomic.get runtime.scheduling).in_flight
-  then Verification_protocol.No_retry_armed
-  else match deferral with
+  match deferral with
   | Not_reviewed {retryable_runtimes = _ :: _ as runtimes; _} ->
     (* [runtimes] is built at the walk: model-absence refusals (retired or
        unknown models) are classified permanent there and can never appear in
@@ -763,32 +774,36 @@ let schedule_retry (runtime : runtime) ~goal_id ~request_id deferral =
        failure could serve again. *)
     let key = goal_id, request_id, Random_id.uuid_v7 () in
     let rec admit () =
-      let current = Atomic.get runtime.retries in
-      if List.exists (fun (id, request, _) -> String.equal id goal_id && String.equal request request_id) current then false
-      else if Atomic.compare_and_set runtime.retries current (key :: current) then true
+      let current = Atomic.get runtime.scheduling in
+      if List.exists (fun claim -> String.equal claim.work.goal_id goal_id && claim.requested)
+           current.in_flight then `Wake_retained
+      else if List.exists (fun (id, request, _) -> String.equal id goal_id && String.equal request request_id)
+           current.retries then `Already_armed
+      else if Atomic.compare_and_set runtime.scheduling current
+           {current with retries=key :: current.retries} then `Admitted
       else admit ()
     in
-    if not (admit ()) then Verification_protocol.Retry_scheduled {delay=Shared_timer}
-    else (
+    (match admit () with
+    | `Wake_retained -> Verification_protocol.No_retry_armed
+    | `Already_armed -> Verification_protocol.Retry_scheduled {delay=Shared_timer}
+    | `Admitted ->
       let seconds = Verification_retry.delay
           ~retry_interval_sec:Env_config.Timeouts.maintenance_pulse_interval_sec
           ~now:(Eio.Time.now runtime.clock) runtimes in
       Eio.Fiber.fork_daemon ~sw:runtime.sw (fun () ->
         let rec reread_after delay =
           Eio.Time.sleep runtime.clock delay;
-          if List.mem key (Atomic.get runtime.retries) then
+          if List.mem key (Atomic.get runtime.scheduling).retries then
             match Goal_verification.bind_review runtime.config ~goal_id with
             | Ok (_, (current, _, _)) when String.equal current request_id ->
-              if remove_retry runtime key then (
-                retain_active_wake runtime ~goal_id;
-                request_scan runtime)
+              if finish_retry runtime key then request_scan runtime
             | Ok _ | Error (Goal_verification.No_current_review _) ->
               ignore (remove_retry runtime key)
             | Error (Goal_verification.Binding_unavailable detail) ->
               Log.Misc.warn
                 "goal verifier retry binding unavailable goal_id=%s request_id=%s; retaining retry: %s"
                 goal_id request_id detail;
-              if List.mem key (Atomic.get runtime.retries) then
+              if List.mem key (Atomic.get runtime.scheduling).retries then
                 reread_after Env_config.Timeouts.maintenance_pulse_interval_sec
         in
         reread_after seconds;
@@ -846,12 +861,11 @@ let process_goal_work (runtime : runtime) (claim : claim) =
 let enqueue_pending (runtime : runtime) work =
   let rec loop () =
     let current = Atomic.get runtime.scheduling in
-    let retries = Atomic.get runtime.retries in
     let fresh = List.fold_left (fun added item ->
       if List.exists (pending_work_same_goal item) current.ready
          || List.exists (pending_work_same_goal item) added
          || List.exists (fun claim -> pending_work_same_goal item claim.work) current.in_flight
-         || List.exists (fun (id, _, _) -> String.equal item.goal_id id) retries
+         || List.exists (fun (id, _, _) -> String.equal item.goal_id id) current.retries
       then added else item :: added) [] work in
     let next = {current with ready=current.ready @ List.rev fresh} in
     if Atomic.compare_and_set runtime.scheduling current next then () else loop ()
@@ -877,7 +891,7 @@ let requeue_unstarted (runtime : runtime) claims =
     let in_flight = List.filter (fun claim ->
       not (List.exists (same_claim claim) still_owned)) current.in_flight in
     let ready = List.map (fun claim -> claim.work) still_owned @ current.ready in
-    if Atomic.compare_and_set runtime.scheduling current {ready; in_flight}
+    if Atomic.compare_and_set runtime.scheduling current {current with ready; in_flight}
     then Eio.Condition.broadcast runtime.wake else loop ()
   in loop ()
 ;;
@@ -963,10 +977,9 @@ let start ~sw ~clock ~(config : Workspace_utils_backend_setup.config) =
     { config
     ; sw
     ; clock
-    ; retries = Atomic.make []
     ; wake = Eio.Condition.create ()
     ; pending = Atomic.make true
-    ; scheduling = Atomic.make {ready=[]; in_flight=[]}
+    ; scheduling = Atomic.make {ready=[]; in_flight=[]; retries=[]}
     }
   in
   let owner = Some runtime in
@@ -1002,7 +1015,7 @@ let start ~sw ~clock ~(config : Workspace_utils_backend_setup.config) =
       if Atomic.compare_and_set active_runtime owner None
       then (
         (* No scan runs after this, so its last list would read as current. *)
-        Atomic.set runtime.scheduling {ready=[]; in_flight=[]};
+        Atomic.set runtime.scheduling {ready=[]; in_flight=[]; retries=[]};
         (match reconciliation with
          | Some (root, _) when String.equal root (Workspace.masc_dir config) ->
            ignore (Atomic.compare_and_set last_unreconciled reconciliation None)
@@ -1021,7 +1034,8 @@ module For_testing = struct
   let retry_pending ~goal_id =
     match Atomic.get active_runtime with
     | None -> false
-    | Some runtime -> List.exists (fun (id, _, _) -> String.equal id goal_id) (Atomic.get runtime.retries)
+    | Some runtime -> List.exists (fun (id, _, _) -> String.equal id goal_id)
+        (Atomic.get runtime.scheduling).retries
 
   let scan_active_once () =
     match Atomic.get active_runtime with

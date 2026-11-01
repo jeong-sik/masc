@@ -2325,7 +2325,7 @@ let test_transient_goal_retry ~drop () =
    rest. The daemon arms a retry dated at the reset instead of stopping, and
    no scan reviews the Goal again before the reset. Only the injected clock
    advances. *)
-let test_a_goal_review_waits_out_a_stated_provider_rest () =
+let test_a_goal_review_waits_out_a_stated_provider_rest ?unavailable_store () =
   with_workspace @@ fun config ->
   let slot = "quota_slot.test_model" in
   let rest_sec = 2024.751 in
@@ -2471,7 +2471,47 @@ tools-support = true
               approvals [ slot, Stub_approve "quota reset, target measured" ]);
           check int "the replacement reviewer has not entered before the reset" 0 (List.length !approvals);
           check bool "the dated retry is still armed" true (Agent.retry_pending ~goal_id);
+          let restore =
+            match unavailable_store with
+            | None -> (fun () -> ())
+            | Some source ->
+              let path = match source with
+                | `Goals -> Goal_store.goals_path config
+                | `Proof -> Goal_verification.verifications_path config in
+              let original = Fs_compat.load_file path in
+              let unavailable = "{unavailable-during-dated-retry" in
+              Fs_compat.save_file_atomic path unavailable;
+              let damaged = ref true in
+              let restore () =
+                (* Mock advance queues a due fiber. Restore synchronously
+                   before yielding to its next authoritative read. *)
+                if !damaged then (
+                  Out_channel.with_open_bin path (fun out -> output_string out original);
+                  damaged := false)
+              in
+              restore
+          in
+          Fun.protect ~finally:restore (fun () ->
           check bool "the armed timer accepts one clock advance" true (Eio_mock.Clock.try_advance clock);
+          (match unavailable_store with
+           | None -> ()
+           | Some source ->
+             let path = match source with
+               | `Goals -> Goal_store.goals_path config
+               | `Proof -> Goal_verification.verifications_path config in
+             let advance_next_read label =
+               await label (fun () -> until (fun () -> Eio_mock.Clock.try_advance clock));
+               check bool "unavailable authority keeps its retry reservation" true
+                 (Agent.retry_pending ~goal_id);
+               check int "unavailable authority does not call the replacement reviewer" 0
+                 (List.length !approvals);
+               check int "unavailable authority does not repeat the refusal" 1 !refusals
+             in
+             advance_next_read "the first unavailable binding read retaining its timer";
+             check string "the failed read preserves authority bytes"
+               "{unavailable-during-dated-retry" (Fs_compat.load_file path);
+             advance_next_read "the second unavailable binding read retaining its timer";
+             restore ());
           (* The existing deadline covers both observable boundaries. Suspend
              while real retained-store I/O runs, rather than continuously
              advancing the mock clock until a model happens to answer. *)
@@ -2488,7 +2528,7 @@ tools-support = true
           check int "no refused review ran in between" 1 !refusals;
           await "the commit" (fun () -> Eio.Promise.await finished);
           check string "proof awaits human confirmation" "awaiting_confirmation"
-            (stored_phase config goal_id))))
+            (stored_phase config goal_id)))))
 ;;
 
 let test_pending_before_phase_waits_for_explicit_request () =
@@ -2714,7 +2754,11 @@ let () =
       , [test_case "provider recovery needs no new submission" `Quick (test_transient_goal_retry ~drop:false)
         ; test_case "drop invalidates an old retry" `Quick (test_transient_goal_retry ~drop:true)
         ; test_case "a stated provider rest dates the retry at its reset" `Quick
-            test_a_goal_review_waits_out_a_stated_provider_rest] )
+            (test_a_goal_review_waits_out_a_stated_provider_rest ?unavailable_store:None)
+        ; test_case "unavailable Goals during an armed retry recover without another refusal" `Quick
+            (test_a_goal_review_waits_out_a_stated_provider_rest ~unavailable_store:`Goals)
+        ; test_case "unavailable proof during an armed retry recovers without another refusal" `Quick
+            (test_a_goal_review_waits_out_a_stated_provider_rest ~unavailable_store:`Proof)] )
     ; ( "permanent refusal"
       , [ test_case "retired model candidate arms no retry" `Quick
             test_retired_model_candidate_arms_no_retry

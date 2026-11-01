@@ -27,7 +27,9 @@
     A provider retry whose authority read is unavailable retains its exact
     reservation and rereads at the maintenance interval, without dispatching
     a model. Only a confirmed current request wakes discovery; a confirmed
-    replacement or no-current-review observation retires that old retry. *)
+    replacement or no-current-review observation retires that old retry.
+    Retry reservations and admitted claims share one atomic scheduling state:
+    retiring a timer and retaining its wake cannot mark a replacement claim. *)
 
 val start :
   sw:Eio.Switch.t ->

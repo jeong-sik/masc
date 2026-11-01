@@ -1447,6 +1447,36 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
               h2_respond_json_value h2_reqd json ~status:(status :> H2.Status.t)
                 ~extra_headers:(("cache-control", "private, no-store") :: Server_dashboard_goal_candle.generation_headers @ workspace_headers @ cors)))
 
+      | `GET, "/api/v1/goals/confirmation" ->
+          h2_gate_actor h2_reqd (fun state operator_id ->
+            let config = Mcp_server.workspace_config state in
+            with_captured_read_workspace config (fun workspace_headers ->
+              let status, json =
+                Server_routes_http_routes_verification.read_goal_confirmation
+                  ~config ~operator_id httpun_request
+                |> Server_routes_http_routes_verification.goal_confirmation_response in
+              h2_respond_json_value h2_reqd json ~status:(status :> H2.Status.t)
+                ~compress:false
+                ~extra_headers:(("cache-control", "private, no-store") :: workspace_headers @ cors)))
+
+      | `POST, "/api/v1/goals/confirmation" ->
+          h2_gate_actor h2_reqd (fun state operator_id ->
+            h2_read_body h2_reqd (fun body ->
+              let config = Mcp_server.workspace_config state in
+              let status, json =
+                Server_routes_http_routes_verification.commit_goal_confirmation_body
+                  ~config ~operator_id body
+                |> Server_routes_http_routes_verification.goal_confirmation_response in
+              h2_respond_json_value h2_reqd json ~status:(status :> H2.Status.t)
+                ~compress:false
+                ~extra_headers:(("cache-control", "private, no-store") :: cors)))
+
+      | _, "/api/v1/goals/confirmation" ->
+          (match Lazy.force route_access with
+           | Error refusal -> h2_respond_gate_refusal h2_reqd refusal
+           | Ok _ -> h2_respond_text h2_reqd "405 Method Not Allowed"
+               ~status:`Method_not_allowed ~extra_headers:cors)
+
       | `GET, "/api/v1/dashboard/goals/detail" ->
           h2_gate_state h2_reqd (fun state ->
             let config = Mcp_server.workspace_config state in

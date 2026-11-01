@@ -28,6 +28,20 @@ type confirmation_error =
   | Confirmation_rejected of string
   | Goal_store_unavailable of Goal_store.unavailable
 
+(** These helpers do not authenticate requests. Each transport must run the
+    token-bound CanAdmin gate and validate the GET workspace precondition
+    before calling them. *)
+val read_goal_confirmation :
+  config:Workspace.config -> operator_id:string -> Httpun.Request.t ->
+  (Yojson.Safe.t, confirmation_error) result
+
+val commit_goal_confirmation_body :
+  config:Workspace.config -> operator_id:string -> string ->
+  (Yojson.Safe.t, confirmation_error) result
+
+val goal_confirmation_response :
+  (Yojson.Safe.t, confirmation_error) result -> Httpun.Status.t * Yojson.Safe.t
+
 val add_routes :
   Http_server_eio.Router.t -> Http_server_eio.Router.t
 

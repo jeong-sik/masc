@@ -97,6 +97,7 @@ let with_gateway ?(runtime = false) ?resources ?(zero_window = false) run =
                   |> Server_routes_http_routes_artifact_app_data.add_routes
                   |> Server_routes_http_routes_artifact_drafts.add_routes
                   |> Server_routes_http_routes_artifact_draft_live.add_routes
+                  |> Server_routes_http_routes_verification.add_routes
                   |> Server_routes_http_routes_dashboard.add_routes ~sw ~clock:(Eio.Stdenv.clock env) in
                 let handler = Server_h2_gateway.make_request_handler ~routes:router ~trust_policy ~sw
                   ~clock:(Eio.Stdenv.clock env) ~server_start_time:0. in
@@ -243,6 +244,122 @@ let test_goal_candle_access_and_fresh_read () =
       check string "corrupt ledger is unavailable" "unavailable" (member "ledger" (json reply) |> field_string "state");
       check string "corrupt row reason" "invalid_row" (member "ledger" (json reply) |> field_string "reason"))
       [after_h1; after_h2])
+
+let test_goal_confirmation_h1_h2 () =
+  with_gateway (fun ~base_path ~worker ~player ~admin gateway ->
+    (* The process may have its own Candle config outside this test workspace.
+       An empty existing config directory makes this fixture deterministically Off. *)
+    Masc_test_deps.with_process_env "MASC_CONFIG_DIR" (Some base_path) @@ fun () ->
+    let config = Masc.Workspace.default_config base_path in
+    let goal, _ = match Goal_store.upsert_goal config
+      ~title:"Transport parity" ~metric:"proof" ~target_value:"1" () with
+      | Ok goal -> goal | Error error -> fail (Goal_store.write_error_to_string error) in
+    let ctx : Masc.Tool_workspace.context = {config; agent_name = "planner"} in
+    (match Masc.Tool_workspace.dispatch ctx ~name:"masc_goal_transition"
+      ~args:(`Assoc ["goal_id", `String goal.id; "action", `String "request_complete"]) with
+     | Some result when Tool_result.is_success result -> ()
+     | Some result -> fail (Tool_result.message result)
+     | None -> fail "goal transition route missing");
+    let request_id, criterion = match Goal_verification.get_record_authoritative config ~goal_id:goal.id with
+      | Ok (Some {completion = Goal_verification.Proof_pending pending; _}) ->
+        pending.request_id, pending.criterion
+      | _ -> fail "missing pending proof" in
+    let proof = Masc.Workspace_goals.commit_verifier_decision
+      ~tool_name:"goal_verifier_commit" ~start_time:(Tool_timing.start ()) config
+      ~goal_id:goal.id ~request_id ~criterion
+      ~verification_run_id:"transport-test-run" ~decision:Masc.Workspace_goals.Proof_proven
+      ~evidence:"proof for both HTTP transports" in
+    if not (Tool_result.is_success proof) then fail (Tool_result.message proof);
+    let root = Filename.concat base_path ".masc" in
+    let path = "/api/v1/goals/confirmation?goal_id=" ^ Uri.pct_encode goal.id
+      ^ "&expected_base_path=" ^ Uri.pct_encode base_path
+      ^ "&expected_masc_root=" ^ Uri.pct_encode root in
+    let endpoint = "/api/v1/goals/confirmation" in
+    List.iter (fun (label, token, expected) ->
+      pair_status (label ^ " GET") expected (both gateway ?token path);
+      pair_status (label ^ " POST") expected (both gateway ?token ~meth:`POST ~body:"{}" endpoint))
+      ["anonymous", None, 401; "invalid token", Some "invalid", 401;
+       "worker", Some worker, 403; "player", Some player, 403];
+    let wrong_workspace = "/api/v1/goals/confirmation?goal_id=" ^ Uri.pct_encode goal.id
+      ^ "&expected_base_path=" ^ Uri.pct_encode base_path
+      ^ "&expected_masc_root=" ^ Uri.pct_encode (root ^ "-other") in
+    pair_status "wrong workspace" 409 (both gateway ~token:admin wrong_workspace);
+    pair_status "partial workspace" 400
+      (both gateway ~token:admin (endpoint ^ "?expected_base_path=" ^ Uri.pct_encode base_path));
+    pair_status "missing goal" 400 (both gateway ~token:admin endpoint);
+    pair_status "unsupported method" 405 (both gateway ~meth:`PUT endpoint);
+    List.iter (fun payload ->
+      let h1, h2 = both gateway ~token:admin ~meth:`POST ~body:payload endpoint in
+      pair_status "invalid confirmation body" 400 (h1, h2);
+      check_json "same body refusal" (json h1) (json h2))
+      ["{"; "{}"; "{\"goal_id\":\"x\",\"goal_id\":\"y\"}"];
+    let h1, h2 = both gateway ~token:admin ~headers:["origin", "http://localhost:8935"] path in
+    pair_status "proof read" 200 (h1, h2);
+    check_json "same proof on both transports" (json h1) (json h2);
+    List.iter (fun reply ->
+      check (option string) "workspace admission receipt" (Some "matched-v1")
+        (header "x-masc-workspace-read" reply);
+      check (option string) "response CORS" (Some "http://localhost:8935")
+        (header "access-control-allow-origin" reply);
+      check (option string) "credential-bound evidence is not stored" (Some "private, no-store")
+        (header "cache-control" reply);
+      check string "proof is attributed to authenticated operator" "admin"
+        (field_string "inspection_operator_id" (json reply))) [h1; h2];
+    let conditional_h1, conditional_h2 = both gateway ~token:admin ~headers:["if-none-match", "*"] path in
+    pair_status "confirmation always returns current proof" 200 (conditional_h1, conditional_h2);
+    check_json "conditional H1 still returns the proof" (json h1) (json conditional_h1);
+    check_json "conditional H2 still returns the proof" (json h2) (json conditional_h2);
+    let foreign_headers = ["origin", "https://untrusted.example"] in
+    let foreign_h1, foreign_h2 = both gateway ~token:admin ~headers:foreign_headers path in
+    pair_status "foreign-origin proof response" 200 (foreign_h1, foreign_h2);
+    List.iter (fun reply ->
+      check (option string) "foreign origin cannot read proof" None
+        (header "access-control-allow-origin" reply);
+      check (option string) "foreign origin is not granted credentials" None
+        (header "access-control-allow-credentials" reply)) [foreign_h1; foreign_h2];
+    let rejected_h1, rejected_h2 = both gateway ~token:admin ~headers:foreign_headers
+      ~meth:`POST ~body:"{}" endpoint in
+    pair_status "foreign-origin confirmation refusal" 400 (rejected_h1, rejected_h2);
+    List.iter (fun reply ->
+      check (option string) "foreign origin cannot read refusal" None
+        (header "access-control-allow-origin" reply)) [rejected_h1; rejected_h2];
+    let payload ?(operator = "admin") ?(workspace_root = root) ?(run = "transport-test-run") () =
+      body ["goal_id", `String goal.id; "criterion_revision", `String goal.criterion_revision;
+        "request_id", `String request_id; "verification_run_id", `String run;
+        "expected_operator_id", `String operator;
+        "expected_workspace", `Assoc ["base_path", `String base_path; "masc_root", `String workspace_root]] in
+    List.iter (fun (label, invalid) ->
+      let h1, h2 = both gateway ~token:admin ~meth:`POST ~body:invalid endpoint in
+      pair_status label 400 (h1, h2);
+      check_json (label ^ " same refusal") (json h1) (json h2))
+      ["different operator", payload ~operator:"someone-else" ();
+       "different workspace", payload ~workspace_root:(root ^ "-other") ();
+       "stale verification run", payload ~run:"another-run" ()];
+    let still_pending = request H2 gateway ~token:admin path in
+    check string "refusals did not confirm" "awaiting_confirmation"
+      (member "goal" (json still_pending) |> field_string "phase");
+    let allowed_origin = ["origin", "http://localhost:8935"] in
+    let first = request H2 gateway ~token:admin ~headers:allowed_origin ~meth:`POST ~body:(payload ()) endpoint in
+    check_status "H2 confirmation" 200 first;
+    check string "H2 completed the proof" "completed" (member "goal" (json first) |> field_string "phase");
+    let repeated = request H1 gateway ~token:admin ~headers:allowed_origin ~meth:`POST ~body:(payload ()) endpoint in
+    check_status "H1 same proof retry" 200 repeated;
+    List.iter (fun reply ->
+      check (option string) "allowed origin survives deferred POST body" (Some "http://localhost:8935")
+        (header "access-control-allow-origin" reply)) [first; repeated];
+    check_json "retry keeps original confirmation over either transport" (json first) (json repeated);
+    let after_h1, after_h2 = both gateway ~token:admin path in
+    check_json "both transports read same persisted completion" (json after_h1) (json after_h2);
+    check string "persisted completion" "completed" (member "goal" (json after_h2) |> field_string "phase");
+    Fs_compat.save_file (Goal_store.goals_path config) "unreadable primary";
+    List.iter (fun (label, replies) ->
+      let h1, h2 = replies in
+      pair_status label 503 (h1, h2);
+      check_json (label ^ " same unavailable envelope") (json h1) (json h2);
+      check string (label ^ " identifies Goal store") "goal_store_unavailable"
+        (field_string "error_code" (json h2)))
+      ["unavailable read", both gateway ~token:admin path;
+       "unavailable write", both gateway ~token:admin ~meth:`POST ~body:(payload ()) endpoint])
 
 let test_access_and_preconditions () = with_gateway (fun ~base_path ~worker ~player ~admin gateway ->
   let created = request H2 gateway ~token:admin ~meth:`POST ~body:(publication_body "version one") list in
@@ -933,7 +1050,8 @@ let () = if Filename.basename Sys.argv.(0) = "masc-artifact-document" then run_s
   run ~argv "H2 artifact gateway"
     ["access and workspace", ["H1/H2 parity, publication, body admission", `Quick, test_access_and_preconditions;
        "app input H1/H2 parity and actor/workspace ownership", `Quick, test_app_input_transport_parity;
-       "Goal Candle is admin and workspace bound with fresh ledger reads", `Quick, test_goal_candle_access_and_fresh_read];
+       "Goal Candle is admin and workspace bound with fresh ledger reads", `Quick, test_goal_candle_access_and_fresh_read;
+       "Goal confirmation shares H1 and H2 authority and completion", `Quick, test_goal_confirmation_h1_h2];
      "synthetic transformer transport", ["checkpoint and SSE reset", `Quick,
        (fun () -> with_synthetic_transformer test_live_checkpoint);
        "SSE response capacity exhaustion resets the stream", `Quick,

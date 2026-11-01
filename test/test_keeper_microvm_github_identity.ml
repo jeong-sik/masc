@@ -154,19 +154,42 @@ let test_inventory_unavailable () = with_fixture @@ fun f ->
   check bool "snapshot absent after failed inventory" false (Sys.file_exists (path f))
 
 let test_modes () = with_fixture @@ fun f ->
+  let rejected = function
+    | Error error -> check bool "observed invalid mode keeps rejection policy" true
+        (Store.classify_load_error error = Store.Rejected_snapshot)
+    | Ok _ -> fail "invalid snapshot mode was admitted" in
   let captured, _, _ = configured f in
   ignore (owner f (fun scope -> value (publish f scope captured)));
   let hosts = Filename.concat (path f) "hosts.yml" in
   Unix.chmod hosts 0o600;
-  check_refused (owner f (fun scope -> load f scope));
+  rejected (owner f (fun scope -> load f scope));
   Unix.chmod hosts 0o400;
   Unix.chmod (path f) 0o700;
-  check_refused (owner f (fun scope -> load f scope));
+  rejected (owner f (fun scope -> load f scope));
   Unix.chmod (path f) 0o500;
   let parent = Filename.dirname (path f) in
   Unix.chmod parent 0o755;
-  check_refused (owner f (fun scope -> load f scope));
+  rejected (owner f (fun scope -> load f scope));
   check int "no chmod repair" 0o755 (Unix.lstat parent).st_perm
+
+let test_unavailable_load_is_not_invalid_identity () =
+  let io = Unix.Unix_error (Unix.EIO, "read", "identity-fixture") in
+  let filesystem ?(close_failure = None) failure =
+    Store.Filesystem_unavailable {Fs_compat.failure; close_failure} in
+  let invalid = Fs_compat.Owned_path_writable_by_others
+      {path="identity-fixture"; permissions=0o777} in
+  let cases =
+    [ filesystem (Fs_compat.Owned_file_operation_failed
+        {path="identity-fixture"; operation=Fs_compat.Read_contents; cause=io})
+    ; filesystem (Fs_compat.Filesystem_identity_changed {path="identity-fixture"})
+    ; filesystem ~close_failure:(Some io) invalid
+    ; Store.Filesystem_operation_failed (io, Printexc.get_callstack 0)
+    ; Store.Scope_unavailable Lifecycle.Scope_closed ] in
+  List.iter (fun error -> check bool "unavailable observation cannot authorize replacement" true
+    (Store.classify_load_error error = Store.Observation_unavailable)) cases;
+  List.iter (fun error -> check bool "confirmed rejection keeps existing policy" true
+    (Store.classify_load_error error = Store.Rejected_snapshot))
+    [filesystem invalid; Store.Invalid_snapshot "noncanonical captured file set"]
 
 let test_shared_microvm_parent () = with_fixture @@ fun f ->
   let microvm = Filename.concat (Config_dir_resolver.masc_root ~base_path:f.base_path) "microvm" in
@@ -353,6 +376,7 @@ let () = run "microvm guest credential store"
     test_case "full inventory present before mutation" `Quick test_guest_present;
     test_case "failed inventory preserves missing snapshot" `Quick test_inventory_unavailable;
     test_case "exact file guest and parent modes" `Quick test_modes;
+    test_case "unavailable load is not invalid credential authority" `Quick test_unavailable_load_is_not_invalid_identity;
     test_case "existing0755 microvm and shim sibling are preserved" `Quick test_shared_microvm_parent;
     test_case "unknown entries and file symlinks refuse" `Quick test_unknown_and_links;
     test_case "parent symlink refuses" `Quick test_parent_link;

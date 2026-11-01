@@ -2582,8 +2582,13 @@ let start_apple_microvm_container ~fs ~scope ~timeout_sec (t : t) =
   let* () = check_apple_guest_observation ~base_path:t.config.base_path ~keeper_name:t.meta.name
       ~network_mode:t.network_mode ~container_name observation
     |> Result.map_error (fun detail -> Guest_ownership_unverified detail) in
-  let stored = Store.load ~fs ~coordinator:microvm_lifecycle ~scope
-      ~base_path:t.config.base_path ~keeper_name:t.meta.name ~backend ~network_mode:t.network_mode in
+  let* stored = match Store.load ~fs ~coordinator:microvm_lifecycle ~scope
+      ~base_path:t.config.base_path ~keeper_name:t.meta.name ~backend ~network_mode:t.network_mode with
+    | Error error as rejected ->
+      (match Store.classify_load_error error with
+       | Store.Observation_unavailable -> Error (Guest_identity_store_unavailable error)
+       | Store.Rejected_snapshot -> Ok rejected)
+    | Ok _ as observed -> Ok observed in
   let container_config_dir = Keeper_github_identity.container_config_dir
       ~container_masc_dir:(Keeper_sandbox_runtime_setup.container_masc_dir ~container_root:t.container_root)
       ~keeper_name:t.meta.name in

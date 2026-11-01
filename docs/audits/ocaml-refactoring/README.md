@@ -1402,6 +1402,24 @@ failure/recovery through this exact cache, but does not establish cancellation c
 This file is outside active PR 43355's HTTP/TUI transport files; do not use unrelated
 dashboard cache tests as proof for this implementation.
 
+Current-source continuation (2026-11-01, parent
+`3228c7565e6eeff4b392d2cf47c7dab154b5d99f`):
+[#47070](https://github.com/jeong-sik/masc/pull/47070) replaces mutable entry
+fields with `Server_dashboard_json_cache_state`. Immutable payload/error/time
+values have explicit idle/refreshing ownership. A generative opaque identity
+is allocated only at refresh admission and is never written; settlement and
+cancellation compare it against the current table entry under the cache lock.
+Evicted or replaced entries cannot be restored by late workers.
+
+Protected computation releases only its own reservation while propagating
+cancellation. Checks before admission and immediately before fork reject an
+already-cancelled switch; scheduling exceptions release the reservation.
+Cleanup uses only synchronous mutex/table operations. New existing-surface
+scenarios cover cancelled cold `sync_first` recovery and a rejected cancelled
+async switch followed by recovery. These scenarios were added, not executed.
+Source review and syntax parsing do not establish runtime reproduction or fix
+verification. The bounded shared cache module extraction follows in the next layer.
+
 ### S5
 
 **Consolidate full-health refresh bookkeeping into an immutable owned state machine**

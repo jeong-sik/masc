@@ -400,7 +400,15 @@ let provider_model_rows (provider_id : string) : (Yojson.Safe.t, string) result 
                              | Some rungs -> `List (List.map (fun rung -> `String rung) rungs)) )
                         ; ("default_reasoning_effort", default_effort)
                         ; ("supports_tools", `Bool capabilities.supports_tools)
-                        ; ("supports_image_input", `Bool capabilities.supports_image_input)
+                        ; ( "supports_image_input"
+                          , (* The installer writes supports-image-input only
+                               for a reported value, so send the catalog row's
+                               declared option: an unreported row stays absent
+                               instead of being persisted as an explicit
+                               false. *)
+                            (match entry.supports_image_input with
+                             | Some declared -> `Bool declared
+                             | None -> `Null) )
                         ; ("supports_streaming", `Bool capabilities.supports_native_streaming)
                         ]))
               | _ -> None)

@@ -1800,6 +1800,7 @@ streaming = true
 supports-image-input = true
 
 [glm-coding.glm-5-3-flash]
+max-concurrent = 4
 
 # The rest of the coding plan's text models (GET /coding/paas/v4/models,
 # 2026-09-22). All answered a plain and a tool-call completion that day;

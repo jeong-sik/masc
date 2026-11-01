@@ -188,6 +188,11 @@ val probe_official_client_invocation
     answer it by spawning their vendor client rather than by an HTTP
     completion.
 
+    The runtime is selected once for the call. Its model idle declaration and
+    reasoning intent remain selected across catalog reloads or removal during
+    the probe. An absent idle declaration keeps the captured execution default;
+    nonpositive declarations are unbounded. Native admission remains separate.
+
     Writes nothing under a keeper. The durable session those lanes own is a
     {i keeper-layer} construct: [Keeper_*_runtime] reads the previous
     settlement and asks for [Resume]. The runtime entry points take no keeper
@@ -224,6 +229,10 @@ val probe_antigravity_invocation
     the other two because MASC does not hand it a tool list: the client reads
     an MCP server URL from its own HOME, so the probe publishes a bridge
     advertising exactly the probed tool and then spawns the client.
+
+    The model idle declaration belongs to the selected runtime, including
+    across catalog reloads during bridge preparation. Provider native effort
+    and the independently bounded admission retain their captured values.
 
     Isolation is an owner leaf no keeper uses. {!Runtime_antigravity_home}
     already keys the HOME by owner, so a probe owner gets its own credential

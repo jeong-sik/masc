@@ -382,7 +382,15 @@ let test_an_inline_table_is_refused_not_half_written () =
    after them is invalid TOML 1.0 that Otoml still reads. Without the check the
    file would commit and then fail a strict reader. *)
 let test_dotted_keys_at_the_root_are_refused_not_written_beside () =
-  let dotted = "web_search.timeout_sec = 20\n" ^ runtime_base in
+  let dotted =
+    {|web_search.timeout_sec = 20
+[autonomous]
+wake_prompt = """
+[web_search]
+"""
+|}
+    ^ runtime_base
+  in
   with_config dotted (fun path ->
     match apply path [ Web_search_setup.Set_provider Web_search_provider.Brave ] with
     | Error Web_search_setup.Table_not_reachable ->

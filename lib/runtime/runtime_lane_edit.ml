@@ -214,9 +214,16 @@ let declared_exact_slots config lane =
    under. An absent declaration can acquire its own table. *)
 let exact_lane_editable ~content config lane =
   let lines, _trailing_newline = Toml_line_editor.split_lines content in
+  let has_header =
+    List.exists2
+      (fun line structural ->
+         structural && Toml_line_editor.is_table ~path:(exact_lane_table_path lane) line)
+      lines
+      (Toml_line_editor.structural_lines lines)
+  in
   match exact_lane_decl config lane with
   | None -> Ok ()
-  | Some _ when List.exists (Toml_line_editor.is_table ~path:(exact_lane_table_path lane)) lines -> Ok ()
+  | Some _ when has_header -> Ok ()
   | Some _ -> Error (Exact_lane_unaddressable lane)
 
 (* Unknown ids remain catalog candidates. Admission/materialization belongs to

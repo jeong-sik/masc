@@ -281,6 +281,72 @@ let test_an_array_of_tables_is_not_the_keepers_table () =
          errors)
 ;;
 
+let test_headers_inside_multiline_strings_are_ignored () =
+  let base =
+    {|[autonomous]
+wake_prompt = """
+[egress.keepers."alder"]
+allow = ["spoof.example"]
+[runtime.assignments]
+"alder" = "spoof.model"
+"""
+|}
+    ^ two_keepers ~alder_header:{|[egress.keepers."alder"]|}
+  in
+  let updated =
+    Runtime_config_text.update_egress_allow_text base ~keeper_name:"alder"
+      ~allow:[ "real.example" ]
+    |> Runtime_config_text.update_runtime_assignment_text ~keeper_name:"alder"
+         ~runtime_id:"deepseek.chat"
+  in
+  check (list string) "real allowlist updated outside multiline string"
+    [ "real.example" ] (allow_of updated ~keeper_name:"alder");
+  let removed =
+    Runtime_config_text.remove_egress_allow_text updated ~keeper_name:"alder"
+  in
+  check int "only alder2 allowlist remains after removing alder" 1
+    (List.length (parse removed).Runtime_schema.egress_allowlists);
+  let multiline_runtime =
+    {|[runtime]
+default = """
+deepseek.chat
+"""
+media_failover = [
+  "deepseek.chat",
+  "glm.flash"
+]
+
+[runtime.assignments]
+"alder" = """
+deepseek.chat
+"""
+|}
+  in
+  let rewritten_runtime =
+    Runtime_config_text.update_runtime_scalar_text multiline_runtime
+      ~key:"default" ~runtime_id:(Some "glm.flash")
+    |> Runtime_config_text.update_runtime_string_array_text
+         ~key:"media_failover" ~values:[ "glm.flash" ]
+    |> Runtime_config_text.update_runtime_assignment_text
+         ~keeper_name:"alder" ~runtime_id:"glm.flash"
+  in
+  let parsed_rewritten = parse rewritten_runtime in
+  check (option string) "multiline default scalar replaced cleanly"
+    (Some "glm.flash") parsed_rewritten.Runtime_schema.default_runtime_id;
+  check (list string) "multiline media_failover array replaced cleanly"
+    [ "glm.flash" ] parsed_rewritten.Runtime_schema.media_failover_runtime_ids;
+  let cleared_runtime =
+    Runtime_config_text.update_runtime_scalar_text multiline_runtime
+      ~key:"default" ~runtime_id:None
+    |> Runtime_config_text.remove_runtime_assignment_text ~keeper_name:"alder"
+  in
+  let parsed_cleared = parse cleared_runtime in
+  check (option string) "multiline default scalar removed cleanly"
+    None parsed_cleared.Runtime_schema.default_runtime_id;
+  check (list (pair string string)) "multiline assignment removed cleanly"
+    [] parsed_cleared.Runtime_schema.keeper_assignments
+;;
+
 let () =
   run "egress_allow_text"
     [ ( "write"
@@ -305,6 +371,8 @@ let () =
             test_a_dotted_name_header_is_rewritten_in_place
         ; test_case "an array of tables is not the keeper's table" `Quick
             test_an_array_of_tables_is_not_the_keepers_table
+        ; test_case "headers inside multiline strings are ignored" `Quick
+            test_headers_inside_multiline_strings_are_ignored
         ] )
     ; ( "remove"
       , [ test_case "removal drops only that table" `Quick

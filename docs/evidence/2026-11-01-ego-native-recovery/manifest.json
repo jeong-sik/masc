@@ -1,0 +1,34 @@
+{
+  "fixture.py": {
+    "sha256": "00d489234095286d832f77c5f06ec61e2accfca7850e0c498f1fc818c0ff7e63",
+    "bytes": 1717
+  },
+  "capture-provenance.json": {
+    "sha256": "d816457759d8acd1e51550e888fb5ce815e00a5e2abf91e70b4b2f5419029ace",
+    "bytes": 2964
+  },
+  "selected-result.sanitized.json": {
+    "sha256": "7d955a7a40b4ae0900f83c69581966e4749737a5071b32172eb6263c4e7ecfa1",
+    "bytes": 3326
+  },
+  "captured-helper.ml": {
+    "sha256": "aef4b6387d27b072b2f47ce1c9b3753174ef07994724cec228d6c28756d2cf4e",
+    "bytes": 2246
+  },
+  "README.md": {
+    "sha256": "c3d679864d82cc2409cc29589609e22bafcd1cac155456244a5777c653eb9839",
+    "bytes": 4000
+  },
+  "installed-version.txt": {
+    "sha256": "0bd9a969952b05cd10c62660730e6e832e4482d9ce53dc8c4a84ddf13f6bbac7",
+    "bytes": 61
+  },
+  "captured-helper.js": {
+    "sha256": "3bb0ac7340b735b11d0cc6865677226bff47f57148a32eeba3fb480b6f48ec84",
+    "bytes": 1140
+  },
+  "captured-probe.js": {
+    "sha256": "b9fa99253dd5b278d8416ca39864223b3ddeab2eda4afcba01393b094c2832ff",
+    "bytes": 4399
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "workflow": "Test",
+  "run_id": 41265918467,
+  "head": "7fd50df9ddb1079279f9ca295cb9a331e4f9fc01",
+  "ref": "fix/openrouter-effort-contract-audit-20261101",
+  "conclusion": "failure",
+  "selection": "12 explicit suites; minimal=true",
+  "successful_suite_cases": [
+    59,
+    28,
+    142,
+    9,
+    175,
+    8,
+    78,
+    69,
+    25,
+    199,
+    29
+  ],
+  "successful_suite_count": 11,
+  "successful_case_sum": 821,
+  "failed_suite": "packages/agent_core/test/test_thinking_control_dialects",
+  "failed_suite_cases": 51,
+  "failed_cases": 3,
+  "failures": [
+    "ollama/catalog token exact ID",
+    "anthropic/undeclared fixture alias",
+    "gemini/undeclared ignored-sampling fixture"
+  ],
+  "interpretation": "Targeted evidence only; subsequent self-review repairs are not certified by this run."
+}

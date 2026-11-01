@@ -1,8 +1,8 @@
 # Official client and provider continuity audit — 2026-11-01
 
 Client/provider contract repairs and protocol-fixture improvements are delivered
-in nine draft PRs in Native Stack #47014,
-whose top layer is [PR #47037](https://github.com/jeong-sik/masc/pull/47037). The review followed current
+in thirteen draft PRs in Native Stack #47014,
+whose top layer is [PR #47098](https://github.com/jeong-sik/masc/pull/47098). The review followed current
 source, installed client help/schema, primary documentation and read-only runtime
 evidence. It does not establish that every provider is free of bugs or that the
 repairs are installed.
@@ -20,6 +20,10 @@ repairs are installed.
 | [#47030](https://github.com/jeong-sik/masc/pull/47030) | Codex fixture assertions could be logged and swallowed by production stream-observer isolation | Snapshot the first delta once, assert after cleanup and rethrow ordinary observer failures; preserve cancellation/interruption and final serial-order assertions |
 | [#47030](https://github.com/jeong-sik/masc/pull/47030) | OpenRouter catalog tests used an old model ID/output limit and incomplete probe inventory | Exact 25-ID inventory with historical declared ladders separated from the two October 28 measured-disable rows |
 | [#47037](https://github.com/jeong-sik/masc/pull/47037) | Two OpenRouter rows admitted unsupported reasoning depths; the Nemotron seed requested an unsupported depth and DeepSeek's enabled default was undeclared | Shipped runtime → scoped catalog → typed completion admission → request JSON; DeepSeek 1017 accepts none/low/high/max and its enabled default, Nemotron uses explicit reasoning.enabled booleans without a depth; omission keeps the provider default |
+| [#47095](https://github.com/jeong-sik/masc/pull/47095) | An omitted GLM clear control let the Coding endpoint preserve history that the client had cleared | Resolved reasoning capabilities → explicit client clear policy on the wire; omitted thinking.type and non-reasoning requests remain omitted |
+| [#47096](https://github.com/jeong-sik/masc/pull/47096) | An observed Antigravity built-in action followed by process exit or idle could leave another candidate eligible | Typed native start/finish → effect uncertainty before observers → candidate replay fence, including DONE/ERROR without ACTIVE |
+| [#47097](https://github.com/jeong-sik/masc/pull/47097) | Muse terminal delivery could precede a gap hiding compaction or a newer final answer | Durable current-turn pages → final reply/usage/model witness → successful settlement; selected Memory is resent on resume until retention has durable proof |
+| [#47098](https://github.com/jeong-sik/masc/pull/47098) | Three unchanged dialect fixtures depended on undeclared local model contracts; Responses boolean coverage was missing | Explicit fixture contracts and real shipped Nemotron Responses admission → serialization for omitted/true/false controls |
 
 The Kimi change deliberately uses the three shipped model bindings. It does not
 guess capabilities for arbitrary operator-created model IDs. Its six fixture
@@ -38,8 +42,11 @@ flowchart TD
   P --> N[Native official client: session and turn]
   P --> A[HTTP API: stamped reasoning and tool messages]
   N --> E{Provider outcome and effect evidence}
-  E -->|Completed and caller accepted| S[Persist session and acknowledge exact receipts]
-  E -->|Gap or compaction| R[Invalidate held Memory and redeliver on resume]
+  E -->|Muse completed| V[Read durable current-turn range from terminal cursor]
+  V -->|Complete witness and caller accepted| S[Persist session and acknowledge exact receipts]
+  V -->|Missing or inconsistent witness| F
+  E -->|Other completed and caller accepted| S
+  S --> R[Resend selected Muse Memory on resume]
   E -->|Interrupted or uncertain effects| F[Retain recovery evidence and fence candidate replay]
   R --> P
   A --> C[Keeper finalization and checkpoint save]
@@ -73,12 +80,37 @@ They were read on 2026-11-01; confidence is High for the documented contract and
 source comparison. Actual provider behavior was not newly measured.
 
 The [GLM API reference](https://docs.z.ai/api-reference/llm/chat-completion)
-also establishes the omitted thinking toggle's enabled default. The repair keeps
-entirely omitted thinking requests unchanged. Antigravity's five documented
+establishes the omitted thinking toggle's enabled default. The [Thinking Mode guide](https://docs.z.ai/guides/capabilities/thinking-mode)
+distinguishes the Coding endpoint's default preservation from the standard API's
+default clearing. Strict review found that the initial omitted-clear behavior
+could disagree with the client's replay policy. #47095 explicitly sends that
+existing policy on a declared reasoning clear wire while leaving thinking.type
+absent; non-reasoning omission and explicit control precedence are preserved.
+These primary contracts were checked on 2026-11-01 with High confidence for source
+comparison, separately from live endpoint execution. Antigravity's five documented
 non-completed states retain partial responses as error evidence, never as a
 completed answer. Independent review caught that nonretryable provider errors
 could still trigger candidate fanout; the final repair marks unobserved native
 effects as unavailable before projection, while preserving known effects.
+#47096 additionally observes typed native start and finish before fallible
+observers, fencing replay after a transport exit or idle failure even when a
+finish event arrives without a start event.
+
+Strict review also found that live Muse push delivery cannot prove either final
+answer completeness or retained context. #47097 reads the contiguous durable
+current-turn range backward from the terminal's opaque cursor, folds it forward
+and requires the matching turn boundary before successful settlement. It derives
+the latest complete final answer and per-call usage/model facts from that same
+witness, without replaying tools or approvals. Missing or inconsistent proof
+retains uncertainty and receipts. The original reserved exception identity and
+known explicit terminal usage survive cleanup or history failure.
+
+Muse sessions are still reused, but unproved held-context certificates are no
+longer persisted or trusted. Selected current Memory/context is resent on resume.
+This increases input bytes and potentially tokens/latency, and durable completion
+adds one or more history RPCs. It does not cure historical overflow. The
+[strict-review evidence record](../evidence/2026-11-01-official-client-self-review/2026-11-01-official-client-self-review-evidence-record.md)
+records the installed/official schema contract, source-review scopes and limits.
 
 OpenRouter's [per-model reasoning options](https://openrouter.ai/docs/guides/best-practices/reasoning-tokens#discovering-per-model-reasoning-options)
 define an explicit `supported_efforts` array as the accepted values, `null` as
@@ -130,6 +162,7 @@ not a pass.
 | [41261854222](https://github.com/jeong-sik/masc/actions/runs/41261854222) | `7cb26cc755ae4e801b390ca190373b1d7a334bbb` | FAILURE: four suites passed, 220 cases (Kimi replay/effort 9, provider config 142, reasoning replay 58, GLM coverage 11). Two OpenRouter catalog assertions failed. Native-test compilation then stopped at two new fixture references to the nonexistent Masc.Runtime_antigravity facade export; these were corrected to the directly linked Runtime_antigravity module. Unexecuted native suites are not passes. |
 | [41262679047](https://github.com/jeong-sik/masc/actions/runs/41262679047) | `a52c4d149a9f6545401c3e07becc5a5dc12420d3` | SUCCESS: corrected Codex protocol suite, 198 cases, including ordinary observer-failure propagation and operator interruption. The later direct stream-observer cancellation fixture is a separate untested delta at this boundary. |
 | [41263657342](https://github.com/jeong-sik/masc/actions/runs/41263657342) | `16e345622b08347a2aac9090b877f1f9ded488b1` | FAILURE: eight suites passed, 234 cases (catalog 28, Antigravity runtime 69, CLI 24, exact lane 5, Fusion 33, verification 22, checkpoint 29, GLM thinking 24). Two of 25 Keeper Antigravity cases failed during setup: dynamic tools lacked a shared context and the fallback runtime lacked its required timeout. Both fixture setup errors are repaired; assertions and production guards are retained. |
+| [41265918467](https://github.com/jeong-sik/masc/actions/runs/41265918467) | `7fd50df9ddb1079279f9ca295cb9a331e4f9fc01` | FAILURE: eleven suites passed, 821 cases, including Codex 199 and Keeper Antigravity 25. Thinking dialects failed three of 51 cases because local Ollama/Anthropic/Gemini fixture contracts were undeclared or mismatched. #47098 repairs those fixtures; this older run does not test the four strict-review followups. |
 
 Independent source reviews passed the integrated Muse head `5e3b61b848e1e9e4403b8ccf4a9768e547e712df`,
 the final Antigravity layer `7cb26cc755ae4e801b390ca190373b1d7a334bbb`,
@@ -140,9 +173,19 @@ Review responses additionally preserve Muse quota-terminal recovery during
 cancellation, correct Kimi explicit-disable wire expectations, retain Antigravity
 partial responses and raw pre-init usage without admitting a session, and test
 the original cancellation reason through Codex's stream observer. These changes
-and the final OpenRouter dialect require a new exact-head CI run; earlier green
-runs are not promoted to evidence for the new source. The PR descriptions retain
-that run's exact SHA and observed status separately.
+were exercised by the twelve-suite run 41265918467, whose overall result remains
+FAILURE. Its eleven passing suites do not certify the four later strict-review
+layers. Their new selected CI run, exact SHA and observed status are retained in
+the followup PR descriptions; a requested run is not a pass.
+
+The strict-review source checks covered eight GLM, two Antigravity, seven Muse,
+three caller-fixture and one dialect-fixture OCaml files. All 21 parsed, and their
+integrated blobs match the authored review snapshots in the retained
+[source-equivalence record](../evidence/2026-11-01-official-client-self-review/source-equivalence.json).
+Peer source review found no remaining concrete P0–P2 within its recorded scopes.
+This is separate from type checking, behavior CI and formal GitHub approval. The
+original nine published heads were preserved; four followup layers carry these
+repairs. No external-session local Dune was run.
 
 The Codex warning was a pre-existing fixture mistake: its first delta opened the
 release gate correctly, but its later completion delta repeated a pre-settlement
@@ -161,6 +204,7 @@ changed by this audit.
 ## Remaining findings
 
 - [#47010](https://github.com/jeong-sik/masc/issues/47010) and [#47011](https://github.com/jeong-sik/masc/issues/47011) now have source repairs in #47026 and #47025. They remain open until the draft stack is reviewed and merged.
+- [#47081](https://github.com/jeong-sik/masc/issues/47081) and [#47082](https://github.com/jeong-sik/masc/issues/47082) record the strict-review native-effect and durable-Muse findings. Source repairs are in #47096 and #47097; merge, installation and live operation remain unverified.
 - [#47021](https://github.com/jeong-sik/masc/issues/47021): Live custom Kimi API IDs differ from documented IDs and unknown-model replay is unproven. The tracked effort declaration is repaired in #47024. Operator-owned model IDs and actual served identity were not changed or verified.
 - [#47028](https://github.com/jeong-sik/masc/issues/47028): Generic/operator-defined Anthropic HTTP configurations do not represent account/linkage identity in durable reasoning source equivalence. Sonnet/Haiku 5.5 blocks can be dropped by an unrelated account while the request succeeds. Existing transformation logging is a partial mitigation; the shipped bindings use Claude Code instead. This P2 needs trusted account or provider-transformation evidence; no deployed incident or safe account-policy repair was established.
 - [#44154](https://github.com/jeong-sik/masc/issues/44154#issuecomment-6303936847): The recorded Memory wire fixture predates baseline #43810's `ordered_program_steps` field. The [offline byte witness](../evidence/2026-11-01-official-client-audit/memory-wire-baseline.json) reproduces the exact failed request digest by adding only the missing empty-list field, 27 bytes. Relevant producers, test and historical corpus are unchanged by this audit. Fresh real provider evidence is required for the new request; historical responses and exact-wire assertions are preserved. Memory semantic success is not established by that failing suite.

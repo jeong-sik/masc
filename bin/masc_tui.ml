@@ -33021,14 +33021,11 @@ and is loaded on demand through keeper_skill.
                | Some "3" | None | Some _ -> Section_tools)
         | Some ("w" | "W")
           when state.view = Metrics && not state.usage_telemetry_open ->
-            state.usage_section <- Usage_trend;
-            state.provider_history_days <-
-              (match state.provider_history_days with
-               | 1 -> 7
-               | 7 -> 14
-               | 14 | _ -> 1);
-            state.provider_history <- Provider_history_unread;
-            state.metrics_scroll <- 0
+            let needs = cycle_usage_history_window state in
+            start_http_scoped_refresh state ~host:server_peer_host
+              ~port:state.port ~refresh_inflight:http_scoped_refresh_inflight
+              ~full_refresh_inflight:http_refresh_inflight ~scoped_refresh_followup
+              ~mailbox:async_messages ~needs
        (* In chat, printable keys normally belong to the draft. Keep [?] as
           the documented global Help key when the draft is empty; once a
           sentence has started it remains an ordinary question mark. This

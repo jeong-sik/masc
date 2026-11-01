@@ -8,10 +8,12 @@
     environment as it is: a runtime.toml edited on disk and not yet loaded
     changes nothing here.
 
-    Two limits. {!Judged} says the gate admits the Keeper. With no facts a
-    turn makes no texts; with no request clock it makes an unavailable status
-    without a memory body or a judgment. And a turn
-    asks the gate a second time inside {!Keeper_memory_recall_turn.judge},
+    Two limits. {!Judged} says the gate admits the Keeper. The turn checks
+    for a request clock before reading facts. Without one it makes an
+    unavailable status without a memory body or a judgment, even if the Keeper
+    has no facts. With a clock and a successful empty read, no texts are
+    produced unless this run reuses a judgment already kept for the same turn.
+    And a turn asks the gate a second time inside {!Keeper_memory_recall_turn.judge},
     without the environment switch, so a policy published between the two
     asks can answer differently. *)
 

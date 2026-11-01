@@ -1,0 +1,182 @@
+[
+  {
+    "keeper": "scale-keeper-0000",
+    "sequence": 1,
+    "operation_id": "kmsg-2adfd43fb717f05607654f2f01296925",
+    "original": {
+      "source": {
+        "schema": "masc.keeper_chat_operation.source.v2",
+        "submitted_by": "dashboard",
+        "thread_id": "keeper:scale-keeper-0000",
+        "continuation_channel": {
+          "kind": "dashboard",
+          "thread_id": "keeper:scale-keeper-0000"
+        },
+        "surface": {
+          "kind": "agent"
+        },
+        "channel": "agent",
+        "channel_user_id": "",
+        "channel_user_name": "",
+        "channel_workspace_id": "",
+        "conversation_id": null,
+        "external_message_id": null,
+        "workspace_id": null,
+        "extra_mentions": [],
+        "sender_keeper": null,
+        "user_row_origin": "needs_append"
+      },
+      "input": {
+        "schema": "masc.keeper_chat_operation.input.v1",
+        "message": "{\"keeper\": \"scale-keeper-0000\", \"marker\": \"682559ca6ccc4be1aa7fed9a629bd6f4\", \"schema\": \"masc.keeper-scale-input.v1\", \"sequence\": 1}",
+        "user_blocks": [],
+        "turn_instructions": null,
+        "surface_context": null,
+        "attachments": []
+      }
+    },
+    "admission": {
+      "operation_id": "kmsg-2adfd43fb717f05607654f2f01296925",
+      "state": "queued",
+      "queued_count": 1,
+      "existing": false
+    },
+    "admission_wire_ms": 7.551875,
+    "first_attempt_to_accepted_ms": 7.805875
+  },
+  {
+    "keeper": "scale-keeper-0001",
+    "sequence": 1,
+    "operation_id": "kmsg-a2606f032cff87c6a08efde9ec4b4ff9",
+    "original": {
+      "source": {
+        "schema": "masc.keeper_chat_operation.source.v2",
+        "submitted_by": "dashboard",
+        "thread_id": "keeper:scale-keeper-0001",
+        "continuation_channel": {
+          "kind": "dashboard",
+          "thread_id": "keeper:scale-keeper-0001"
+        },
+        "surface": {
+          "kind": "agent"
+        },
+        "channel": "agent",
+        "channel_user_id": "",
+        "channel_user_name": "",
+        "channel_workspace_id": "",
+        "conversation_id": null,
+        "external_message_id": null,
+        "workspace_id": null,
+        "extra_mentions": [],
+        "sender_keeper": null,
+        "user_row_origin": "needs_append"
+      },
+      "input": {
+        "schema": "masc.keeper_chat_operation.input.v1",
+        "message": "{\"keeper\": \"scale-keeper-0001\", \"marker\": \"682559ca6ccc4be1aa7fed9a629bd6f4\", \"schema\": \"masc.keeper-scale-input.v1\", \"sequence\": 1}",
+        "user_blocks": [],
+        "turn_instructions": null,
+        "surface_context": null,
+        "attachments": []
+      }
+    },
+    "admission": {
+      "operation_id": "kmsg-a2606f032cff87c6a08efde9ec4b4ff9",
+      "state": "queued",
+      "queued_count": 1,
+      "existing": false
+    },
+    "admission_wire_ms": 33.889333,
+    "first_attempt_to_accepted_ms": 34.104
+  },
+  {
+    "keeper": "scale-keeper-0000",
+    "sequence": 2,
+    "operation_id": "kmsg-c029871e03315f7236d2213371923b3b",
+    "original": {
+      "source": {
+        "schema": "masc.keeper_chat_operation.source.v2",
+        "submitted_by": "dashboard",
+        "thread_id": "keeper:scale-keeper-0000",
+        "continuation_channel": {
+          "kind": "dashboard",
+          "thread_id": "keeper:scale-keeper-0000"
+        },
+        "surface": {
+          "kind": "agent"
+        },
+        "channel": "agent",
+        "channel_user_id": "",
+        "channel_user_name": "",
+        "channel_workspace_id": "",
+        "conversation_id": null,
+        "external_message_id": null,
+        "workspace_id": null,
+        "extra_mentions": [],
+        "sender_keeper": null,
+        "user_row_origin": "needs_append"
+      },
+      "input": {
+        "schema": "masc.keeper_chat_operation.input.v1",
+        "message": "{\"keeper\": \"scale-keeper-0000\", \"marker\": \"682559ca6ccc4be1aa7fed9a629bd6f4\", \"schema\": \"masc.keeper-scale-input.v1\", \"sequence\": 2}",
+        "user_blocks": [],
+        "turn_instructions": null,
+        "surface_context": null,
+        "attachments": []
+      }
+    },
+    "admission": {
+      "operation_id": "kmsg-c029871e03315f7236d2213371923b3b",
+      "state": "queued",
+      "queued_count": 1,
+      "existing": false
+    },
+    "admission_wire_ms": 11.56275,
+    "first_attempt_to_accepted_ms": 11.907333
+  },
+  {
+    "keeper": "scale-keeper-0001",
+    "sequence": 2,
+    "operation_id": "kmsg-0460c5b95d4f4d299c6e21f33a8ecf3c",
+    "original": {
+      "source": {
+        "schema": "masc.keeper_chat_operation.source.v2",
+        "submitted_by": "dashboard",
+        "thread_id": "keeper:scale-keeper-0001",
+        "continuation_channel": {
+          "kind": "dashboard",
+          "thread_id": "keeper:scale-keeper-0001"
+        },
+        "surface": {
+          "kind": "agent"
+        },
+        "channel": "agent",
+        "channel_user_id": "",
+        "channel_user_name": "",
+        "channel_workspace_id": "",
+        "conversation_id": null,
+        "external_message_id": null,
+        "workspace_id": null,
+        "extra_mentions": [],
+        "sender_keeper": null,
+        "user_row_origin": "needs_append"
+      },
+      "input": {
+        "schema": "masc.keeper_chat_operation.input.v1",
+        "message": "{\"keeper\": \"scale-keeper-0001\", \"marker\": \"682559ca6ccc4be1aa7fed9a629bd6f4\", \"schema\": \"masc.keeper-scale-input.v1\", \"sequence\": 2}",
+        "user_blocks": [],
+        "turn_instructions": null,
+        "surface_context": null,
+        "attachments": []
+      }
+    },
+    "admission": {
+      "operation_id": "kmsg-0460c5b95d4f4d299c6e21f33a8ecf3c",
+      "state": "queued",
+      "queued_count": 1,
+      "existing": false
+    },
+    "admission_wire_ms": 15.9795,
+    "first_attempt_to_accepted_ms": 16.395875
+  }
+]

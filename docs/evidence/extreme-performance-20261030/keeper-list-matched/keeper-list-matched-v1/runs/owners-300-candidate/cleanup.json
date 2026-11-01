@@ -1,0 +1,12 @@
+{
+  "server_returncode": 0,
+  "server_reaped": true,
+  "forced_kill": false,
+  "sampler_stopped": true,
+  "model_server_stopped": true,
+  "base_retained": true,
+  "base_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-300-candidate/owned-base",
+  "provider_requests_drained": true,
+  "active_provider_requests": 0,
+  "provider_handler_threads": 0
+}

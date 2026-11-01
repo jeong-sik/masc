@@ -1,0 +1,731 @@
+{
+  "retained_at_unix": 1793351091.368362,
+  "scope": "Exact selected source/capture pairs read after execution. Digests bind these retained bytes and current local originals at retention; no capture-time timing hash or historical source-test binding is reconstructed. v1 remains the executed controller; v2 never ran this six-arm matrix.",
+  "credential_scan": {
+    "owned_token_values_checked": 18,
+    "selected_files": 120,
+    "matches": 0
+  },
+  "pairs": [
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/run.py",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/run.py",
+      "sha256": "d09fe905ce8d5fef395308f58e0fba067821dba1e674ca5baa4ce430f59b3d53",
+      "bytes": 2982
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/execution.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/execution.json",
+      "sha256": "e43d117cb8adb7c725c4178750375cabb04c002b8847e3d9a185864bfe1a3794",
+      "bytes": 18440
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/completed-arm-audit-v1.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/completed-arm-audit-v1.json",
+      "sha256": "8803865dd23892eea191e3d1bff4b40933135e5cc31aebfdf524dc86517e42b6",
+      "bytes": 846
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-2-control.execution.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-2-control.execution.json",
+      "sha256": "202500d83d2ddb20042dec27e9f9fa315ebfd8ace453005c4a8625bd08efcb5b",
+      "bytes": 2802
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-2-control/cleanup.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-2-control/cleanup.json",
+      "sha256": "30db7ce8cea8ca5c788c29c62d3d8d5d76f6c7f86fb11c4debc35b60b0fb39aa",
+      "bytes": 438
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-2-control/identity.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-2-control/identity.json",
+      "sha256": "66f07b3fa38a5e2b987629cd61d4e2116abe7d8b05d7d8382b89aaead79a8ab2",
+      "bytes": 1379
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-2-control/owned-process.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-2-control/owned-process.json",
+      "sha256": "bd22afbd15fdc221d69ff76c13375d53d163390ae81696a78f640d9ca62af354",
+      "bytes": 363
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-2-control/summary.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-2-control/summary.json",
+      "sha256": "9c221faea19e3225b7e1bc7a19dbe83921605eb45287f3f96be0dbf3e538bd0c",
+      "bytes": 1303
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-2-control/operations-admitted.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-2-control/operations-admitted.json",
+      "sha256": "6ade3d23c62b93d2358dc507631dfaa0b2a7d53bd6d27414a2498e058df74e85",
+      "bytes": 5806
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-2-control/terminal.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-2-control/terminal.json",
+      "sha256": "bea4ce213d94464f4fc917a6a7bc013a694aad49a139978b13f09da13d280194",
+      "bytes": 8754
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-2-control/durable-operations.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-2-control/durable-operations.json",
+      "sha256": "efb5634343fbc01301ff8269b2e185786026dba86934a97b4be58751194033ae",
+      "bytes": 9525
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-2-control/model-coverage.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-2-control/model-coverage.json",
+      "sha256": "838c9d0ec3ad2657366a88d71e7fbf60d0d24db5df8811fb52e3befce2bab0ee",
+      "bytes": 220
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-2-control/model-coverage-before-shutdown.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-2-control/model-coverage-before-shutdown.json",
+      "sha256": "838c9d0ec3ad2657366a88d71e7fbf60d0d24db5df8811fb52e3befce2bab0ee",
+      "bytes": 220
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-2-control/health-model-held.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-2-control/health-model-held.json",
+      "sha256": "404a4ed28aab504146cd64ef49accfa997a5f58f203cfa36eef9ab3089511832",
+      "bytes": 56014
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-2-control/workload-phases.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-2-control/workload-phases.json",
+      "sha256": "aba454c1bc363dc572b984cfc972228b64e9bc03428ffe3587ce566b419d95ac",
+      "bytes": 941
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-2-control/keeper_scale_session.py",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-2-control/keeper_scale_session.py",
+      "sha256": "2275c38094884418a88407aaecf9f40a2326e67535796df98cc4a1ba8683efe6",
+      "bytes": 62789
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-2-control/keeper_scale_trace.py",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-2-control/keeper_scale_trace.py",
+      "sha256": "3dd78330c4922fd058b46644df8ea21dace0f8698ceb3f502c16b8add563b2dd",
+      "bytes": 8629
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-2-control/tui_observer.py",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-2-control/tui_observer.py",
+      "sha256": "7ffa5657c998c9487f27feaee3b038b9ed77aa1459fce72d4e31ccb6b7cc3113",
+      "bytes": 13700
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-2-control/tui-observer/observation.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-2-control/tui-observer/observation.json",
+      "sha256": "73985d3d732a907ba3be8e0c532f3292c0129aa4cc1e03932c50a923bfd45273",
+      "bytes": 15010
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-2-control/tui-observer/frame-timing.txt",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-2-control/tui-observer/frame-timing.txt",
+      "sha256": "613ae84e8c80d4afc516134220f989c8d259a34b5df9346852683fc5cc436c7f",
+      "bytes": 119013
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-2-candidate.execution.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-2-candidate.execution.json",
+      "sha256": "7d99c21da63697f0537db1cd9f9d68192a19fefb6c22bdc2da6c27a15d0dadfb",
+      "bytes": 2811
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-2-candidate/cleanup.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-2-candidate/cleanup.json",
+      "sha256": "43b2676c7df30840fe6e20e4806fd68a8b015f9f9c7c943081c6cf3e5eb897aa",
+      "bytes": 440
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-2-candidate/identity.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-2-candidate/identity.json",
+      "sha256": "8d38f2efc1b909fbfc0346bc973ed7cab00f5037174d2e4f4c0736777cd15ff1",
+      "bytes": 1390
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-2-candidate/owned-process.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-2-candidate/owned-process.json",
+      "sha256": "213e23f8f6bd005339b61c7015334ddb335e61f8bc16e1a1a13fad650d736791",
+      "bytes": 365
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-2-candidate/summary.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-2-candidate/summary.json",
+      "sha256": "a9a3b2f254089d6715d3d0a693fb75eb8c5f5034b250dbbd95f1fd639edf243f",
+      "bytes": 1292
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-2-candidate/operations-admitted.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-2-candidate/operations-admitted.json",
+      "sha256": "bbef23f5c0edd76806ec2ec4f568a4840c866a20bb4ea09f68a759bf756a43db",
+      "bytes": 5803
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-2-candidate/terminal.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-2-candidate/terminal.json",
+      "sha256": "91b77ae64da0a63fe22780457e73f214f54be2c66146f054d5923421e4b5852c",
+      "bytes": 8752
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-2-candidate/durable-operations.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-2-candidate/durable-operations.json",
+      "sha256": "33af2ca9c8db81de4dc15e340b6feac94ad1f11b7a3e567a64e281ec98ccba24",
+      "bytes": 9531
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-2-candidate/model-coverage.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-2-candidate/model-coverage.json",
+      "sha256": "838c9d0ec3ad2657366a88d71e7fbf60d0d24db5df8811fb52e3befce2bab0ee",
+      "bytes": 220
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-2-candidate/model-coverage-before-shutdown.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-2-candidate/model-coverage-before-shutdown.json",
+      "sha256": "838c9d0ec3ad2657366a88d71e7fbf60d0d24db5df8811fb52e3befce2bab0ee",
+      "bytes": 220
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-2-candidate/health-model-held.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-2-candidate/health-model-held.json",
+      "sha256": "18efd395d34d0b8ea09fa2695974d528552d934e33f45e8f639badc0dbcd32fb",
+      "bytes": 56090
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-2-candidate/workload-phases.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-2-candidate/workload-phases.json",
+      "sha256": "dce2c3ee248c205479c02b5b183eed645ca06a433e172fc76121a8aed241a10a",
+      "bytes": 941
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-2-candidate/keeper_scale_session.py",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-2-candidate/keeper_scale_session.py",
+      "sha256": "2275c38094884418a88407aaecf9f40a2326e67535796df98cc4a1ba8683efe6",
+      "bytes": 62789
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-2-candidate/keeper_scale_trace.py",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-2-candidate/keeper_scale_trace.py",
+      "sha256": "3dd78330c4922fd058b46644df8ea21dace0f8698ceb3f502c16b8add563b2dd",
+      "bytes": 8629
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-2-candidate/tui_observer.py",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-2-candidate/tui_observer.py",
+      "sha256": "7ffa5657c998c9487f27feaee3b038b9ed77aa1459fce72d4e31ccb6b7cc3113",
+      "bytes": 13700
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-2-candidate/tui-observer/observation.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-2-candidate/tui-observer/observation.json",
+      "sha256": "dcaef0ed6b42391e53db650be033dfec1332923864f452890f4f5a424c828e82",
+      "bytes": 15054
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-2-candidate/tui-observer/frame-timing.txt",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-2-candidate/tui-observer/frame-timing.txt",
+      "sha256": "6d54e9a0f1300927eacb940fd40e3adc03e00d42563a44aa11369004d04d1344",
+      "bytes": 121843
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-30-candidate.execution.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-30-candidate.execution.json",
+      "sha256": "1d293e08c46376bcf476d47d66ba9a9b0580b4df572d5e9b0bbc6b16f7133576",
+      "bytes": 2710
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-30-candidate/cleanup.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-30-candidate/cleanup.json",
+      "sha256": "1bdda3f73d0ec8174b5d1e3ce52ef111e0f1d6c71c6efabf4102a365b8bc8f8c",
+      "bytes": 441
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-30-candidate/identity.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-30-candidate/identity.json",
+      "sha256": "7fb11aefbfe54cb6522059d08c7d79142d2ca814396fe3dc9bf6732f6f60fb7f",
+      "bytes": 1392
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-30-candidate/owned-process.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-30-candidate/owned-process.json",
+      "sha256": "56bcca8488e6161234b2572b174543d44ab0e84e33881022aa6a27332ed7eae5",
+      "bytes": 366
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-30-candidate/summary.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-30-candidate/summary.json",
+      "sha256": "2e3a7cdbcdfa05b9bf0edceb86f98ae909edcb4511b693c067b100630c711118",
+      "bytes": 1212
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-30-candidate/operations-admitted.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-30-candidate/operations-admitted.json",
+      "sha256": "708bacfabf750bb1ac117c11bf6d33412ff50b01b452e6cf0da61c18095826bf",
+      "bytes": 87056
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-30-candidate/terminal.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-30-candidate/terminal.json",
+      "sha256": "50228df7fc7b578a519503bee0ce96f0c19414a99e828636561ac5f0ecffa47c",
+      "bytes": 130393
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-30-candidate/durable-operations.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-30-candidate/durable-operations.json",
+      "sha256": "ebdb22211153aefb5903cec243643575fd1768307b2e6d151190f384a1ef893e",
+      "bytes": 142985
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-30-candidate/model-coverage.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-30-candidate/model-coverage.json",
+      "sha256": "1694d6a124390b8c092ca03db458f0f96ff7677cada10d58901f5884e71cb38c",
+      "bytes": 1650
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-30-candidate/model-coverage-before-shutdown.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-30-candidate/model-coverage-before-shutdown.json",
+      "sha256": "1694d6a124390b8c092ca03db458f0f96ff7677cada10d58901f5884e71cb38c",
+      "bytes": 1650
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-30-candidate/health-model-held.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-30-candidate/health-model-held.json",
+      "sha256": "fe7b5b820a08d342944c9090c465bd42d256d0d0259f7b64abafa4e50f598fad",
+      "bytes": 96674
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-30-candidate/workload-phases.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-30-candidate/workload-phases.json",
+      "sha256": "c7fcff1f0de00f19bae28ca90055a96fe91fac0df536b47fb7a497dd394caca2",
+      "bytes": 942
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-30-candidate/keeper_scale_session.py",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-30-candidate/keeper_scale_session.py",
+      "sha256": "2275c38094884418a88407aaecf9f40a2326e67535796df98cc4a1ba8683efe6",
+      "bytes": 62789
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-30-candidate/keeper_scale_trace.py",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-30-candidate/keeper_scale_trace.py",
+      "sha256": "3dd78330c4922fd058b46644df8ea21dace0f8698ceb3f502c16b8add563b2dd",
+      "bytes": 8629
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-30-candidate/tui_observer.py",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-30-candidate/tui_observer.py",
+      "sha256": "7ffa5657c998c9487f27feaee3b038b9ed77aa1459fce72d4e31ccb6b7cc3113",
+      "bytes": 13700
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-30-candidate/tui-observer/observation.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-30-candidate/tui-observer/observation.json",
+      "sha256": "91618b2fb243b78dfae9b8590583019342a0ca153d55220ee0ef6474766c4789",
+      "bytes": 29483
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-30-candidate/tui-observer/frame-timing.txt",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-30-candidate/tui-observer/frame-timing.txt",
+      "sha256": "8db85175d960fcbcb6cf43cf61a624d845652d2e518db4cd37c2ed47803712fb",
+      "bytes": 123489
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-30-control.execution.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-30-control.execution.json",
+      "sha256": "15713f2ebe0d97d73aec792ab9e5dae28cec305ae50b3333ee10eb00c59fe432",
+      "bytes": 2865
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-30-control/cleanup.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-30-control/cleanup.json",
+      "sha256": "a6d5b5ff67c47da9942a0668f53a8109928a9d98546bb299c267c2ae8c85aca5",
+      "bytes": 439
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-30-control/identity.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-30-control/identity.json",
+      "sha256": "e189f28f577b9f2655a04cc8a1f9e720ff8e49df9b9aef73d518ebe6505d1175",
+      "bytes": 1381
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-30-control/owned-process.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-30-control/owned-process.json",
+      "sha256": "f8a5a15648c9a48333c237ae4de33e49395c351933fc0d14c398058f9583b83b",
+      "bytes": 364
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-30-control/summary.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-30-control/summary.json",
+      "sha256": "0f6ec97817e7fbb5c10a364564b1d9edd85002da8d9df925fe82e07fd5dc9062",
+      "bytes": 1369
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-30-control/operations-admitted.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-30-control/operations-admitted.json",
+      "sha256": "4b7142b6dea370a156bd8d0743ff22594508f4f3839bfa50e3c311a171761d72",
+      "bytes": 87046
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-30-control/terminal.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-30-control/terminal.json",
+      "sha256": "4da188d9566d565705361b116f5642e2b4b22b19150da2ec718716e332d6dea5",
+      "bytes": 130395
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-30-control/durable-operations.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-30-control/durable-operations.json",
+      "sha256": "ebcd1b820d4787bbdb92aceb0a1f1b8cf0bb14260eea176dad2cff517016f10c",
+      "bytes": 142865
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-30-control/model-coverage.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-30-control/model-coverage.json",
+      "sha256": "1694d6a124390b8c092ca03db458f0f96ff7677cada10d58901f5884e71cb38c",
+      "bytes": 1650
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-30-control/model-coverage-before-shutdown.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-30-control/model-coverage-before-shutdown.json",
+      "sha256": "1694d6a124390b8c092ca03db458f0f96ff7677cada10d58901f5884e71cb38c",
+      "bytes": 1650
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-30-control/health-model-held.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-30-control/health-model-held.json",
+      "sha256": "e0cde51bb2ab05cc662053765ad97dfad82271a7a25c4c19ff2132011024edb6",
+      "bytes": 96627
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-30-control/workload-phases.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-30-control/workload-phases.json",
+      "sha256": "b515e94acc763c5df8174cf9748deef8755d9f56eb4a6c9755915db4d84668ec",
+      "bytes": 942
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-30-control/keeper_scale_session.py",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-30-control/keeper_scale_session.py",
+      "sha256": "2275c38094884418a88407aaecf9f40a2326e67535796df98cc4a1ba8683efe6",
+      "bytes": 62789
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-30-control/keeper_scale_trace.py",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-30-control/keeper_scale_trace.py",
+      "sha256": "3dd78330c4922fd058b46644df8ea21dace0f8698ceb3f502c16b8add563b2dd",
+      "bytes": 8629
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-30-control/tui_observer.py",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-30-control/tui_observer.py",
+      "sha256": "7ffa5657c998c9487f27feaee3b038b9ed77aa1459fce72d4e31ccb6b7cc3113",
+      "bytes": 13700
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-30-control/tui-observer/observation.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-30-control/tui-observer/observation.json",
+      "sha256": "8ae04a9c29c952a2ac05ea641045de99ea66b235b640cb21ce782c7ed933211d",
+      "bytes": 30089
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-30-control/tui-observer/frame-timing.txt",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-30-control/tui-observer/frame-timing.txt",
+      "sha256": "17cd257efcfbc2c90ec9aaccc6fcd0dd3b3f146e0f35367ad07e9d5e0058a63d",
+      "bytes": 133611
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-300-control.execution.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-300-control.execution.json",
+      "sha256": "e7c9aec3ad580dae90b4ba9524845e159405cd1ded2fee37dd655349ed9747d5",
+      "bytes": 2902
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-300-control/cleanup.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-300-control/cleanup.json",
+      "sha256": "faf6787f7cf6c57b23e4de7adc3660c2408eed5e98f9826cdb9849829c823df1",
+      "bytes": 440
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-300-control/identity.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-300-control/identity.json",
+      "sha256": "b67b3243d83b7af2f3306557f79d840c26a15cd39b8898fc311874547f5267df",
+      "bytes": 1383
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-300-control/owned-process.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-300-control/owned-process.json",
+      "sha256": "8c37cab2108841f0671d83012deb7d16beeaa84befc101dce7b3eaffb930c197",
+      "bytes": 365
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-300-control/summary.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-300-control/summary.json",
+      "sha256": "be1ef43a722611de4e99fc06b21387fb0235bea0c15861843840355c618a82d6",
+      "bytes": 1398
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-300-control/operations-admitted.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-300-control/operations-admitted.json",
+      "sha256": "fa9bd186d3bcdbb640077bd1b168a24762e92f5ea56db05a8e2dc7ff89c3f69d",
+      "bytes": 871044
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-300-control/terminal.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-300-control/terminal.json",
+      "sha256": "699064ca5c34a11d72d108d386609f3604736bbbcf0699fd9f7b9962f1bbf7a6",
+      "bytes": 1303911
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-300-control/durable-operations.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-300-control/durable-operations.json",
+      "sha256": "712e70f7547492931ec4465b9213ae32e1a78df0971291f292fb696cd95ba84a",
+      "bytes": 1429134
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-300-control/model-coverage.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-300-control/model-coverage.json",
+      "sha256": "41eb3d0fe23c30c9cc767846dab1d4a532df109f03e54c3c7b58d226ac61cf49",
+      "bytes": 15422
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-300-control/model-coverage-before-shutdown.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-300-control/model-coverage-before-shutdown.json",
+      "sha256": "41eb3d0fe23c30c9cc767846dab1d4a532df109f03e54c3c7b58d226ac61cf49",
+      "bytes": 15422
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-300-control/health-model-held.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-300-control/health-model-held.json",
+      "sha256": "c45626d538041f8b30ced1abeb847a41ceae9abb6b2eb1da5c10af7e33962eb9",
+      "bytes": 487467
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-300-control/workload-phases.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-300-control/workload-phases.json",
+      "sha256": "07b3c591caaf6a1b10e71846dee1790d76a6b10a3bfa0902493ad7aa9aee732d",
+      "bytes": 943
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-300-control/keeper_scale_session.py",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-300-control/keeper_scale_session.py",
+      "sha256": "2275c38094884418a88407aaecf9f40a2326e67535796df98cc4a1ba8683efe6",
+      "bytes": 62789
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-300-control/keeper_scale_trace.py",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-300-control/keeper_scale_trace.py",
+      "sha256": "3dd78330c4922fd058b46644df8ea21dace0f8698ceb3f502c16b8add563b2dd",
+      "bytes": 8629
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-300-control/tui_observer.py",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-300-control/tui_observer.py",
+      "sha256": "7ffa5657c998c9487f27feaee3b038b9ed77aa1459fce72d4e31ccb6b7cc3113",
+      "bytes": 13700
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-300-control/tui-observer/observation.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-300-control/tui-observer/observation.json",
+      "sha256": "87926e2885034c6f5f43d265e3d9e89bd34f275641af38bf280ed14316af0846",
+      "bytes": 34279
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-300-control/tui-observer/frame-timing.txt",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-300-control/tui-observer/frame-timing.txt",
+      "sha256": "a191eb5f304121366f5bb81e8f3b6dd21227d000f3fbb4481f39d8c8bb4787be",
+      "bytes": 162791
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-300-candidate.execution.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-300-candidate.execution.json",
+      "sha256": "8cdb36cb816038037d99bb462c0494acb476a13066d4cc673e4f81bb77f4bc45",
+      "bytes": 2927
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-300-candidate/cleanup.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-300-candidate/cleanup.json",
+      "sha256": "667d9c1c4ef16729693bb3f1d53a1f3e772ecc7c02864042cc5b303f6dc9fe59",
+      "bytes": 442
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-300-candidate/identity.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-300-candidate/identity.json",
+      "sha256": "fb7cdb519802752f99e40beb47c6a4986a17811a942e092eaa237c8b555c0fc4",
+      "bytes": 1394
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-300-candidate/owned-process.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-300-candidate/owned-process.json",
+      "sha256": "658838f05324f0cc82452cf6fd81ea1ceb1ad5a0995219ef14f5f2ab635b08dc",
+      "bytes": 367
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-300-candidate/summary.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-300-candidate/summary.json",
+      "sha256": "bbaf21553424a8de3760b4651428bc2fb561b81c66ff7e1733c60f2e79863499",
+      "bytes": 1400
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-300-candidate/operations-admitted.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-300-candidate/operations-admitted.json",
+      "sha256": "5d062fca98381038549407f67febbc4ff8e3ca2986b1411f28c400a24ab2fd31",
+      "bytes": 870933
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-300-candidate/terminal.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-300-candidate/terminal.json",
+      "sha256": "fd7ac5327f7def33e9badc03a120a253634b1631f7ff24f3b86cbc0815ebddcd",
+      "bytes": 1303945
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-300-candidate/durable-operations.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-300-candidate/durable-operations.json",
+      "sha256": "2163e74584a902a45e6b6260b620614237ea4609bc1d14a90ad84fef27ab4971",
+      "bytes": 1430382
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-300-candidate/model-coverage.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-300-candidate/model-coverage.json",
+      "sha256": "41eb3d0fe23c30c9cc767846dab1d4a532df109f03e54c3c7b58d226ac61cf49",
+      "bytes": 15422
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-300-candidate/model-coverage-before-shutdown.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-300-candidate/model-coverage-before-shutdown.json",
+      "sha256": "41eb3d0fe23c30c9cc767846dab1d4a532df109f03e54c3c7b58d226ac61cf49",
+      "bytes": 15422
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-300-candidate/health-model-held.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-300-candidate/health-model-held.json",
+      "sha256": "f4391949024cf253065d0891a9facee0c5d019275f11cf313f5af57fdf520217",
+      "bytes": 487502
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-300-candidate/workload-phases.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-300-candidate/workload-phases.json",
+      "sha256": "4768fb6573dc5414eb9407c0a67565cf2af44111783794b3f4b8b1bb537171e6",
+      "bytes": 943
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-300-candidate/keeper_scale_session.py",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-300-candidate/keeper_scale_session.py",
+      "sha256": "2275c38094884418a88407aaecf9f40a2326e67535796df98cc4a1ba8683efe6",
+      "bytes": 62789
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-300-candidate/keeper_scale_trace.py",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-300-candidate/keeper_scale_trace.py",
+      "sha256": "3dd78330c4922fd058b46644df8ea21dace0f8698ceb3f502c16b8add563b2dd",
+      "bytes": 8629
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-300-candidate/tui_observer.py",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-300-candidate/tui_observer.py",
+      "sha256": "7ffa5657c998c9487f27feaee3b038b9ed77aa1459fce72d4e31ccb6b7cc3113",
+      "bytes": 13700
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-300-candidate/tui-observer/observation.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-300-candidate/tui-observer/observation.json",
+      "sha256": "d7ed48d81324dd6359fca190c589488b5101857c5e755e9ce16b26377b979683",
+      "bytes": 32846
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-300-candidate/tui-observer/frame-timing.txt",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v1/runs/owners-300-candidate/tui-observer/frame-timing.txt",
+      "sha256": "85e3f2ff372ebb9e3fcb639c12c3295b9f4d91434d34ad3a5c08a9f5d9e0cf00",
+      "bytes": 150235
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v2/qualify.py",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v2/qualify.py",
+      "sha256": "41367c25229bd992ef46359c58c9e5bc01fb465d8493dd47576439045526fb7b",
+      "bytes": 9736
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v2/run.py",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v2/run.py",
+      "sha256": "7bfc6d0b60d9091506ea699db3ee9b1c94ca7b977106d38c61ec0bec815d8685",
+      "bytes": 3535
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v2/analyze.py",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v2/analyze.py",
+      "sha256": "db63f90baf6eedbe8ed19f6e34b1cd9e0c6e1b69b880f29e03da84a2c4f29d6e",
+      "bytes": 3732
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v2/validate-boundaries.py",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v2/validate-boundaries.py",
+      "sha256": "20b836f3e457dd2a573af3bb726c64b238966c99b2ad2fcdea5453184c38c96d",
+      "bytes": 12277
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v2/config-v2.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v2/config-v2.json",
+      "sha256": "aed1f8ed540004c94717f24b660ba6e8456eb4ac22e59981aee3fd3782b9fd50",
+      "bytes": 2708
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v2/analysis-v6.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v2/analysis-v6.json",
+      "sha256": "e894b684cda446ae2967d2fead02ce0702bd8bf8126d63bdaee62405ffe574b0",
+      "bytes": 29445
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v2/boundary-validation-v6.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v2/boundary-validation-v6.json",
+      "sha256": "a26fbe33e9337b3a81a21a26073c5ae07b2ab32f2ed02c6669725fc828e0a3c0",
+      "bytes": 1316
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v2/probe/keeper_scale_session.py",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v2/probe/keeper_scale_session.py",
+      "sha256": "2275c38094884418a88407aaecf9f40a2326e67535796df98cc4a1ba8683efe6",
+      "bytes": 62789
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v2/probe/keeper_scale_trace.py",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v2/probe/keeper_scale_trace.py",
+      "sha256": "3dd78330c4922fd058b46644df8ea21dace0f8698ceb3f502c16b8add563b2dd",
+      "bytes": 8629
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-matched-v2/probe/tui_observer.py",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/keeper-list-matched-v2/probe/tui_observer.py",
+      "sha256": "7ffa5657c998c9487f27feaee3b038b9ed77aa1459fce72d4e31ccb6b7cc3113",
+      "bytes": 13700
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-frame-native-boundary-v2.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/native/keeper-list-frame-native-boundary-v2.json",
+      "sha256": "8e71a71b8308777f6663d917ab3a7b0bc561528ecba0d144830962278b2e4b94",
+      "bytes": 536
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-frame-native-verified-v2.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/native/keeper-list-frame-native-verified-v2.json",
+      "sha256": "c6f548ffe685d6fae3a1978a1bd422c0304281d1da13e5250bbd1d3b8f0dc1a9",
+      "bytes": 3659
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-frame-native-download-v1.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/native/keeper-list-frame-native-download-v1.json",
+      "sha256": "16e9809863bb21664d87ef583c95fb5c3da59e7440bc98ddb5b5954c6ebfa3ae",
+      "bytes": 401
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/tui-prefix-native-v1/receipt.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/native/control-receipt.json",
+      "sha256": "1f81faa7bf021043799baf4c7d98f855bd961937c2436f1f5818e1bbd893ea34",
+      "bytes": 3560
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-frame-native-v1/receipt.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-list-matched/native/candidate-receipt.json",
+      "sha256": "b40eef93e31678d5e3bc48e771cfbaaaa43e50bff02ca04d6f7eb88c0a360e63",
+      "bytes": 2160
+    }
+  ]
+}

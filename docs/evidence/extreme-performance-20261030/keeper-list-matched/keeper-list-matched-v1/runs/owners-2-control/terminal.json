@@ -1,0 +1,225 @@
+{
+  "schema": "masc.keeper-scale-evidence.v3",
+  "operations": [
+    {
+      "keeper": "scale-keeper-0000",
+      "sequence": 1,
+      "operation_id": "kmsg-231a982eb63021ceb815e2b81cfdfc6f",
+      "status": {
+        "schema": "masc.keeper_chat_operation.v1",
+        "operation_id": "kmsg-231a982eb63021ceb815e2b81cfdfc6f",
+        "sequence": "0",
+        "created_at": 1793349789.213082,
+        "admission_digest": "bb4f622a01e28cbab6c4b09abf35cc922b2e1f0943912a5f3c9239bcf9c13f82",
+        "execution_digest": "31caa30100805ae21a8209f2757f5a0dbcc7ed3b0fc0210afaaf696440ca716b",
+        "source": {
+          "channel": "agent",
+          "channel_user_id": "",
+          "channel_user_name": "",
+          "channel_workspace_id": "",
+          "continuation_channel": {
+            "kind": "dashboard",
+            "thread_id": "keeper:scale-keeper-0000"
+          },
+          "conversation_id": null,
+          "external_message_id": null,
+          "extra_mentions": [],
+          "schema": "masc.keeper_chat_operation.source.v2",
+          "sender_keeper": null,
+          "submitted_by": "dashboard",
+          "surface": {
+            "kind": "agent"
+          },
+          "thread_id": "keeper:scale-keeper-0000",
+          "user_row_origin": "needs_append",
+          "workspace_id": null
+        },
+        "input": null,
+        "state": "Succeeded",
+        "completed_at": 1793349799.416714,
+        "outcome_ref": "trace-1793349789025-00000#1",
+        "completed_reply": {
+          "status": "available",
+          "turn_ref": "trace-1793349789025-00000#1",
+          "replies": [
+            {
+              "message_id": "msg-1793349799415482-2",
+              "text": "{\"keeper\": \"scale-keeper-0000\", \"marker\": \"ef8c952e21fb49ddbba657e8dae72573\", \"schema\": \"masc.keeper-scale-reply.v1\", \"sequences\": [1]}",
+              "blocks": [
+                {
+                  "t": "p",
+                  "html": "{&quot;keeper&quot;: &quot;scale-keeper-0000&quot;, &quot;marker&quot;: &quot;ef8c952e21fb49ddbba657e8dae72573&quot;, &quot;schema&quot;: &quot;masc.keeper-scale-reply.v1&quot;, &quot;sequences&quot;: [1]}"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "keeper": "scale-keeper-0001",
+      "sequence": 1,
+      "operation_id": "kmsg-93a66dd8fcc546eef227d2b5cc166c9b",
+      "status": {
+        "schema": "masc.keeper_chat_operation.v1",
+        "operation_id": "kmsg-93a66dd8fcc546eef227d2b5cc166c9b",
+        "sequence": "0",
+        "created_at": 1793349789.224196,
+        "admission_digest": "7cb6e3d10cbd968e9e7ae77e84d8d043fb4724d422dcffe2be977fec417eaeee",
+        "execution_digest": "2e92a3068dfe94205c9feda569ccb0fae9056880a85d5b774ec9f102c418f1f4",
+        "source": {
+          "channel": "agent",
+          "channel_user_id": "",
+          "channel_user_name": "",
+          "channel_workspace_id": "",
+          "continuation_channel": {
+            "kind": "dashboard",
+            "thread_id": "keeper:scale-keeper-0001"
+          },
+          "conversation_id": null,
+          "external_message_id": null,
+          "extra_mentions": [],
+          "schema": "masc.keeper_chat_operation.source.v2",
+          "sender_keeper": null,
+          "submitted_by": "dashboard",
+          "surface": {
+            "kind": "agent"
+          },
+          "thread_id": "keeper:scale-keeper-0001",
+          "user_row_origin": "needs_append",
+          "workspace_id": null
+        },
+        "input": null,
+        "state": "Succeeded",
+        "completed_at": 1793349799.447198,
+        "outcome_ref": "trace-1793349789075-00001#1",
+        "completed_reply": {
+          "status": "available",
+          "turn_ref": "trace-1793349789075-00001#1",
+          "replies": [
+            {
+              "message_id": "msg-1793349799445407-4",
+              "text": "{\"keeper\": \"scale-keeper-0001\", \"marker\": \"ef8c952e21fb49ddbba657e8dae72573\", \"schema\": \"masc.keeper-scale-reply.v1\", \"sequences\": [1]}",
+              "blocks": [
+                {
+                  "t": "p",
+                  "html": "{&quot;keeper&quot;: &quot;scale-keeper-0001&quot;, &quot;marker&quot;: &quot;ef8c952e21fb49ddbba657e8dae72573&quot;, &quot;schema&quot;: &quot;masc.keeper-scale-reply.v1&quot;, &quot;sequences&quot;: [1]}"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "keeper": "scale-keeper-0000",
+      "sequence": 2,
+      "operation_id": "kmsg-cb8e8f05790719af5253a792f4d1788b",
+      "status": {
+        "schema": "masc.keeper_chat_operation.v1",
+        "operation_id": "kmsg-cb8e8f05790719af5253a792f4d1788b",
+        "sequence": "1",
+        "created_at": 1793349789.268473,
+        "admission_digest": "6569a0ae9c9f938b41103d26d115409e2b1b2f9c8cbd80ebc14be5d46bf80fcd",
+        "execution_digest": "89108e39a199148e28365a9c06c505d807433f7d3c8256a671b4b511890b63c2",
+        "source": {
+          "channel": "agent",
+          "channel_user_id": "",
+          "channel_user_name": "",
+          "channel_workspace_id": "",
+          "continuation_channel": {
+            "kind": "dashboard",
+            "thread_id": "keeper:scale-keeper-0000"
+          },
+          "conversation_id": null,
+          "external_message_id": null,
+          "extra_mentions": [],
+          "schema": "masc.keeper_chat_operation.source.v2",
+          "sender_keeper": null,
+          "submitted_by": "dashboard",
+          "surface": {
+            "kind": "agent"
+          },
+          "thread_id": "keeper:scale-keeper-0000",
+          "user_row_origin": "needs_append",
+          "workspace_id": null
+        },
+        "input": null,
+        "state": "Succeeded",
+        "completed_at": 1793349799.552108,
+        "outcome_ref": "trace-1793349789025-00000#2",
+        "completed_reply": {
+          "status": "available",
+          "turn_ref": "trace-1793349789025-00000#2",
+          "replies": [
+            {
+              "message_id": "msg-1793349799550281-6",
+              "text": "{\"keeper\": \"scale-keeper-0000\", \"marker\": \"ef8c952e21fb49ddbba657e8dae72573\", \"schema\": \"masc.keeper-scale-reply.v1\", \"sequences\": [2]}",
+              "blocks": [
+                {
+                  "t": "p",
+                  "html": "{&quot;keeper&quot;: &quot;scale-keeper-0000&quot;, &quot;marker&quot;: &quot;ef8c952e21fb49ddbba657e8dae72573&quot;, &quot;schema&quot;: &quot;masc.keeper-scale-reply.v1&quot;, &quot;sequences&quot;: [2]}"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "keeper": "scale-keeper-0001",
+      "sequence": 2,
+      "operation_id": "kmsg-26ed30662c1723e40ce0d8dbb1f90189",
+      "status": {
+        "schema": "masc.keeper_chat_operation.v1",
+        "operation_id": "kmsg-26ed30662c1723e40ce0d8dbb1f90189",
+        "sequence": "1",
+        "created_at": 1793349789.291664,
+        "admission_digest": "3b9f153ac2e6654202aba7f42a2bb01907f94f24a7e1021c41d5107e318ca765",
+        "execution_digest": "71e9b0f32bf11406cc6d944c3bdf4d6628274054ec005f59396c33267ce4bea2",
+        "source": {
+          "channel": "agent",
+          "channel_user_id": "",
+          "channel_user_name": "",
+          "channel_workspace_id": "",
+          "continuation_channel": {
+            "kind": "dashboard",
+            "thread_id": "keeper:scale-keeper-0001"
+          },
+          "conversation_id": null,
+          "external_message_id": null,
+          "extra_mentions": [],
+          "schema": "masc.keeper_chat_operation.source.v2",
+          "sender_keeper": null,
+          "submitted_by": "dashboard",
+          "surface": {
+            "kind": "agent"
+          },
+          "thread_id": "keeper:scale-keeper-0001",
+          "user_row_origin": "needs_append",
+          "workspace_id": null
+        },
+        "input": null,
+        "state": "Succeeded",
+        "completed_at": 1793349799.629877,
+        "outcome_ref": "trace-1793349789075-00001#2",
+        "completed_reply": {
+          "status": "available",
+          "turn_ref": "trace-1793349789075-00001#2",
+          "replies": [
+            {
+              "message_id": "msg-1793349799628594-7",
+              "text": "{\"keeper\": \"scale-keeper-0001\", \"marker\": \"ef8c952e21fb49ddbba657e8dae72573\", \"schema\": \"masc.keeper-scale-reply.v1\", \"sequences\": [2]}",
+              "blocks": [
+                {
+                  "t": "p",
+                  "html": "{&quot;keeper&quot;: &quot;scale-keeper-0001&quot;, &quot;marker&quot;: &quot;ef8c952e21fb49ddbba657e8dae72573&quot;, &quot;schema&quot;: &quot;masc.keeper-scale-reply.v1&quot;, &quot;sequences&quot;: [2]}"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

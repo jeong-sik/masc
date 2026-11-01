@@ -157,13 +157,41 @@ binding to a particular render. No applied UI cardinality is measured.
 Source review independently identifies a renderer-local duplicate: selection
 rebuilds the same ordered model, and fleet health/width separately reread the
 roster. PR #46941 reuses the synchronous existing rows without a mutable cache.
-Exact-source candidate execution and speedup remain unverified.
+At that sampled-observation boundary, exact-source candidate execution and
+speedup remained unverified. The later unsampled pair below records candidate
+execution with a separate observer itinerary.
 
 The 300-owner overall workload failed at its settlement status deadline. Its API
 terminal receipt is empty. After harness-requested shutdown, SQLite exports show
 321 successes, 268 Turn_cancelled failures and 11 queued inputs; those are
 post-shutdown states, not 600 successful completions or proof of cancellation
 before shutdown. The server delay remains open, and the failed capture is kept.
+
+## Unsampled native row-reuse pair
+
+The [matched list-only bundle](../evidence/extreme-performance-20261030/keeper-list-matched/README.md)
+contains one native arm per source/population, with identical observer inputs.
+All six workloads completed 4/60/600 original durable operations. At 300 held
+owners, list Build p50/p95 changes from 4.256/7.670 to 3.533/4.570 ms. At 30,
+the candidate p95 rises from 1.246 to 1.775 ms. These are whole-binary observations
+under differing uncontrolled host load, with no UI-loaded row-count observation;
+they do not isolate the reuse change or establish stable fleet quantiles.
+
+The executed v1 controller had a cleanup transition gap. The final retained
+retrospective analysis confirms source, digests, native counts and direct owned
+cleanup for all six arms and predecessors. A separate v2 prospective controller
+repairs that gap and passes 27 resource/identity boundary cases. It did not run
+the retained native matrix. Original failed sampled runs remain intact.
+
+Even with successful 600-operation settlement, released-model health maxima
+remain 14.128/9.564 seconds. Server library source is identical between this
+pair, so those differences do not certify a server fix. The installed runtime
+and these isolated source-pinned native pairs are separate evidence scopes.
+
+Same-draw reuse removes a redundant model construction. Remaining row preparation
+still joins roster lists repeatedly. Measure immutable keyed projection within
+one preparation before considering retained mutable caches or broader producer
+snapshots; preserve duplicates, partial/invalid roster readings and ordering.
 
 ## Measurement matrix still required for completion
 
@@ -174,7 +202,7 @@ stale/partial/failed results and controlled 30/300 owner populations.
 
 | Boundary | Current evidence | Remaining proof |
 | --- | --- | --- |
-| TUI input decision, decode, state application, build, present | Candidate 5297349 native 2/30/300 owner phase samples; input application/scroll position unobserved | Real native requests/state decisions and phase timings, physical display scope separate |
+| TUI input decision, decode, state application, build, present | Native 5297349/5de2eb7 list-only pair at 2/30/300 held owners; 30-owner tail regression retained; input application/scroll position unobserved | Real native requests/state decisions and phase timings, physical display scope separate |
 | DAW edit/navigation, piano roll, playback and presentation | Paired extracted-loop wall/CPU; 4 existing style and 63 controller/editor checks | Real input/state timing, allocation, audio/MIDI deadlines and physical flicker |
 | HTTP and MCP | Limited live wire baseline; isolated health/status | Route-specific semantic/freshness predicates, aligned server stages, tails under controlled load |
 | Markdown/HTML/file I/O | Original-record allocation clues | Read/hash/parse/commit attribution, growth and replacement, durable before/after |

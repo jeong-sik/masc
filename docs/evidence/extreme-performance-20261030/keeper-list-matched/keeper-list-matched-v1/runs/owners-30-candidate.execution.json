@@ -1,0 +1,39 @@
+{
+  "population": 30,
+  "variant": "candidate",
+  "source_expected": "5de2eb7684f0e4fecee1c48caef50010c2f951fa",
+  "source_actual": "5de2eb7684f0e4fecee1c48caef50010c2f951fa",
+  "command": [
+    "/opt/homebrew/opt/python@3.14/bin/python3.14",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-list-only-probe-v1/keeper_scale_session.py",
+    "--binary",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-list-frame-native-v1/masc",
+    "--tui-binary",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-list-frame-native-v1/masc-tui",
+    "--repo",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030",
+    "--output",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-list-matched-v1/runs/owners-30-candidate",
+    "--keepers",
+    "30",
+    "--messages-per-keeper",
+    "2"
+  ],
+  "started_unix": 1793349816.7474601,
+  "ended_unix": 1793349839.959862,
+  "returncode": 0,
+  "stdout": "{\n  \"keepers\": 30,\n  \"messages\": 60,\n  \"succeeded_operations\": 60,\n  \"actual_model_calls\": 60,\n  \"max_provider_requests_in_flight\": 30,\n  \"latency_samples\": 156,\n  \"valid_latency_samples\": 156,\n  \"scope\": \"Pinned-native-source real Keeper turns with a loopback scripted text-only model, durable queued operations and offline SQLite reread. No guest/tool execution, browser/TUI or production throughput proof.\",\n  \"latency_by_phase\": {\n    \"submitting_model_held\": {\n      \"samples\": 19,\n      \"valid\": 19,\n      \"failures\": 0,\n      \"p50_ms\": 1.894458,\n      \"p95_ms\": 23.765,\n      \"max_ms\": 23.765\n    },\n    \"model_held_queue_observation\": {\n      \"samples\": 107,\n      \"valid\": 107,\n      \"failures\": 0,\n      \"p50_ms\": 1.02575,\n      \"p95_ms\": 1.589125,\n      \"max_ms\": 3.216083\n    },\n    \"running_model_released\": {\n      \"samples\": 30,\n      \"valid\": 30,\n      \"failures\": 0,\n      \"p50_ms\": 3.247833,\n      \"p95_ms\": 15.168375,\n      \"max_ms\": 48.8655\n    }\n  },\n  \"rejected_429_count\": 1,\n  \"rate_limit_wait_s\": 1.005076042,\n  \"rate_limit_wait_by_source_s\": {\n    \"client_fallback_no_retry_after\": 1.005076042\n  },\n  \"denied_read_only_inventory_attempts\": 2,\n  \"unexpected_guest_command_attempts\": 0\n}\n",
+  "stderr": "",
+  "capture_qualified": true,
+  "loadavg_before": [
+    16.42138671875,
+    17.16357421875,
+    22.08935546875
+  ],
+  "loadavg_after": [
+    16.2138671875,
+    17.05322265625,
+    21.90625
+  ],
+  "cpu_count": 16
+}

@@ -1,0 +1,112 @@
+{
+  "at_unix": 1793349550.97418,
+  "receipt": {
+    "source_sha": "5de2eb7684f0e4fecee1c48caef50010c2f951fa",
+    "workflow_sha": "06e43272be3f4bec7d2798f7d8d464774536895c",
+    "scenario": "workspace-files",
+    "platform": "macos-arm64",
+    "sha256": "5366682357b8c5ca6cc9f62cca3a87b9187acc527bdf7207566597324fafdadf",
+    "key_reference": {
+      "path": "key-reference.md",
+      "sha256": "072e320dcdef1de5cb257d3daa69476ba48835f9c9b3c2498165daa3771c3e46",
+      "producer": "bin/masc_tui_keys_doc_cli.exe"
+    },
+    "server_sha256": "70216f78f9171cb7eaa1b0a072ac6a365838e594c6a9e9ddd2f18c4c686ca4ad",
+    "native_addon_launcher": null,
+    "browser_addon_worker": null,
+    "build_targets": [
+      "bin/masc_tui.exe",
+      "bin/masc_tui_keys_doc_cli.exe",
+      "bin/main_eio.exe",
+      "test/test_repo_git.exe",
+      "test/test_tui_workspace_entries.exe",
+      "test/test_workspace_file_confidentiality.exe"
+    ],
+    "expected_tests": [
+      "test_repo_git",
+      "test_tui_workspace_entries",
+      "test_workspace_file_confidentiality"
+    ],
+    "executed_tests": [
+      "test_repo_git",
+      "test_tui_workspace_entries",
+      "test_workspace_file_confidentiality"
+    ],
+    "test_results": [
+      {
+        "suite": "test_repo_git",
+        "suite_exit_code": 0,
+        "log_exit_code": 0
+      },
+      {
+        "suite": "test_tui_workspace_entries",
+        "suite_exit_code": 0,
+        "log_exit_code": 0
+      },
+      {
+        "suite": "test_workspace_file_confidentiality",
+        "suite_exit_code": 0,
+        "log_exit_code": 0
+      }
+    ],
+    "test_invocations": [
+      {
+        "suite": "test_repo_git",
+        "arguments": []
+      },
+      {
+        "suite": "test_tui_workspace_entries",
+        "arguments": []
+      },
+      {
+        "suite": "test_workspace_file_confidentiality",
+        "arguments": []
+      }
+    ],
+    "expected_invocations": [
+      {
+        "suite": "test_repo_git",
+        "arguments": []
+      },
+      {
+        "suite": "test_tui_workspace_entries",
+        "arguments": []
+      },
+      {
+        "suite": "test_workspace_file_confidentiality",
+        "arguments": []
+      }
+    ],
+    "behavior_passed": true,
+    "installed_runtime_verified": false,
+    "visible_ui_verified": false,
+    "packaging": "native executable; see native-dependencies.txt for dynamic libraries"
+  },
+  "checks": [
+    {
+      "binary": "masc",
+      "arguments": [
+        "build-commit"
+      ],
+      "sha256_before": "70216f78f9171cb7eaa1b0a072ac6a365838e594c6a9e9ddd2f18c4c686ca4ad",
+      "sha256_after": "70216f78f9171cb7eaa1b0a072ac6a365838e594c6a9e9ddd2f18c4c686ca4ad",
+      "expected_sha256": "70216f78f9171cb7eaa1b0a072ac6a365838e594c6a9e9ddd2f18c4c686ca4ad",
+      "returncode": 0,
+      "embedded_commit": "5de2eb7684f0e4fecee1c48caef50010c2f951fa",
+      "stderr": "[2026-10-30 17:39:09] [INFO] [MCP] Tag registry initialized: 182 tools registered\n"
+    },
+    {
+      "binary": "masc-tui",
+      "arguments": [
+        "--build-commit"
+      ],
+      "sha256_before": "5366682357b8c5ca6cc9f62cca3a87b9187acc527bdf7207566597324fafdadf",
+      "sha256_after": "5366682357b8c5ca6cc9f62cca3a87b9187acc527bdf7207566597324fafdadf",
+      "expected_sha256": "5366682357b8c5ca6cc9f62cca3a87b9187acc527bdf7207566597324fafdadf",
+      "returncode": 0,
+      "embedded_commit": "5de2eb7684f0e4fecee1c48caef50010c2f951fa",
+      "stderr": ""
+    }
+  ],
+  "scope": "Exact downloaded native pair identity. Initial server flag validation used the wrong command; corrected identity check does not retroactively gate the already-completed separately self-checking owned two-Keeper probe."
+}

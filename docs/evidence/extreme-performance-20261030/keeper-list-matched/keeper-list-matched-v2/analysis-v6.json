@@ -1,0 +1,776 @@
+{
+  "scope": "One unsampled owned native arm per population/source, matched observer inputs; retrospective v1 qualification, not a prospective cleanup gate. Whole binaries differ; shared host not quiesced. No causal speedup, stable fleet quantile, UI row cardinality, key application, paint or 100us completion claim.",
+  "quantile": "Sorted values at int(q*(n-1)+0.5); exact raw integer nanoseconds.",
+  "matrix_execution_sha256": "e43d117cb8adb7c725c4178750375cabb04c002b8847e3d9a185864bfe1a3794",
+  "config_sha256": "aed1f8ed540004c94717f24b660ba6e8456eb4ac22e59981aee3fd3782b9fd50",
+  "records": [
+    {
+      "case": "owners-2-control",
+      "population": 2,
+      "variant": "control",
+      "source": "5297349b101d61bb901b3729d43c4dec8bb30ec4",
+      "qualification": {
+        "scope": "Direct owned resource receipts and recorded source/digests only; no global host quiescence, descendant absence, applied key, UI row cardinality or physical paint claim.",
+        "cleanup_ok": true,
+        "next_arm_safe": true,
+        "eligible": true,
+        "checks": {
+          "expected_pins_valid": true,
+          "qualifier_parser_source": true,
+          "main_cleanup_complete": true,
+          "no_cleanup_errors": true,
+          "cleanup_receipts_readable": true,
+          "fallback_consistent": true,
+          "failure_receipts_match_exit": true,
+          "execution_output_binding": true,
+          "owned_base_binding": true,
+          "source_identity": true,
+          "server_digest": true,
+          "owned_process_binding": true,
+          "tui_digest": true,
+          "server_before_identity": true,
+          "server_after_identity": true,
+          "same_runtime": true,
+          "probe_identity": true,
+          "tui_exit": true,
+          "capture_record": true,
+          "current_native_report_consistent": true,
+          "captured_probe_copies_match": true,
+          "list_builds_observed": true,
+          "workload": true,
+          "required_inputs_readable": true
+        },
+        "missing_or_invalid": [],
+        "native_list_builds": 61,
+        "inputs_sha256": {
+          "cleanup.json": "30db7ce8cea8ca5c788c29c62d3d8d5d76f6c7f86fb11c4debc35b60b0fb39aa",
+          "identity.json": "66f07b3fa38a5e2b987629cd61d4e2116abe7d8b05d7d8382b89aaead79a8ab2",
+          "owned-process.json": "bd22afbd15fdc221d69ff76c13375d53d163390ae81696a78f640d9ca62af354",
+          "tui-observer/observation.json": "73985d3d732a907ba3be8e0c532f3292c0129aa4cc1e03932c50a923bfd45273",
+          "summary.json": "9c221faea19e3225b7e1bc7a19dbe83921605eb45287f3f96be0dbf3e538bd0c",
+          "tui-observer/frame-timing.txt": "613ae84e8c80d4afc516134220f989c8d259a34b5df9346852683fc5cc436c7f",
+          "keeper_scale_session.py": "2275c38094884418a88407aaecf9f40a2326e67535796df98cc4a1ba8683efe6",
+          "tui_observer.py": "7ffa5657c998c9487f27feaee3b038b9ed77aa1459fce72d4e31ccb6b7cc3113",
+          "keeper_scale_trace.py": "3dd78330c4922fd058b46644df8ea21dace0f8698ceb3f502c16b8add563b2dd"
+        },
+        "prior_arms_cleanup_confirmed": true,
+        "sequential_execution_receipts": true,
+        "retrospectively_eligible": true
+      },
+      "list_build": {
+        "samples": 61,
+        "p50_ns": 209708,
+        "p95_ns": 527000,
+        "max_ns": 1637667
+      },
+      "all_present": {
+        "samples": 73,
+        "p50_ns": 14292,
+        "p95_ns": 89625,
+        "max_ns": 136500
+      },
+      "whole_tui_cpu_seconds": 0.342385,
+      "whole_tui_wall_seconds": 8.220647083,
+      "loadavg_before": [
+        17.6728515625,
+        17.34912109375,
+        22.32421875
+      ],
+      "loadavg_after": [
+        18.28173828125,
+        17.53466796875,
+        22.30517578125
+      ],
+      "cpu_count": 16,
+      "workload_summary": {
+        "keepers": 2,
+        "messages": 4,
+        "succeeded_operations": 4,
+        "actual_model_calls": 4,
+        "max_provider_requests_in_flight": 2,
+        "latency_samples": 102,
+        "valid_latency_samples": 102,
+        "scope": "Pinned-native-source real Keeper turns with a loopback scripted text-only model, durable queued operations and offline SQLite reread. No guest/tool execution, browser/TUI or production throughput proof.",
+        "latency_by_phase": {
+          "submitting_model_held": {
+            "samples": 2,
+            "valid": 2,
+            "failures": 0,
+            "p50_ms": 0.792875,
+            "p95_ms": 2.398625,
+            "max_ms": 2.398625
+          },
+          "model_held_queue_observation": {
+            "samples": 95,
+            "valid": 95,
+            "failures": 0,
+            "p50_ms": 0.896208,
+            "p95_ms": 2.434167,
+            "max_ms": 8.690334
+          },
+          "running_model_released": {
+            "samples": 4,
+            "valid": 4,
+            "failures": 0,
+            "p50_ms": 0.754125,
+            "p95_ms": 0.829917,
+            "max_ms": 0.829917
+          },
+          "settled": {
+            "samples": 1,
+            "valid": 1,
+            "failures": 0,
+            "p50_ms": 0.808666,
+            "p95_ms": 0.808666,
+            "max_ms": 0.808666
+          }
+        },
+        "rejected_429_count": 0,
+        "rate_limit_wait_s": 0,
+        "rate_limit_wait_by_source_s": {},
+        "denied_read_only_inventory_attempts": 2,
+        "unexpected_guest_command_attempts": 0
+      }
+    },
+    {
+      "case": "owners-2-candidate",
+      "population": 2,
+      "variant": "candidate",
+      "source": "5de2eb7684f0e4fecee1c48caef50010c2f951fa",
+      "qualification": {
+        "scope": "Direct owned resource receipts and recorded source/digests only; no global host quiescence, descendant absence, applied key, UI row cardinality or physical paint claim.",
+        "cleanup_ok": true,
+        "next_arm_safe": true,
+        "eligible": true,
+        "checks": {
+          "expected_pins_valid": true,
+          "qualifier_parser_source": true,
+          "main_cleanup_complete": true,
+          "no_cleanup_errors": true,
+          "cleanup_receipts_readable": true,
+          "fallback_consistent": true,
+          "failure_receipts_match_exit": true,
+          "execution_output_binding": true,
+          "owned_base_binding": true,
+          "source_identity": true,
+          "server_digest": true,
+          "owned_process_binding": true,
+          "tui_digest": true,
+          "server_before_identity": true,
+          "server_after_identity": true,
+          "same_runtime": true,
+          "probe_identity": true,
+          "tui_exit": true,
+          "capture_record": true,
+          "current_native_report_consistent": true,
+          "captured_probe_copies_match": true,
+          "list_builds_observed": true,
+          "workload": true,
+          "required_inputs_readable": true
+        },
+        "missing_or_invalid": [],
+        "native_list_builds": 63,
+        "inputs_sha256": {
+          "cleanup.json": "43b2676c7df30840fe6e20e4806fd68a8b015f9f9c7c943081c6cf3e5eb897aa",
+          "identity.json": "8d38f2efc1b909fbfc0346bc973ed7cab00f5037174d2e4f4c0736777cd15ff1",
+          "owned-process.json": "213e23f8f6bd005339b61c7015334ddb335e61f8bc16e1a1a13fad650d736791",
+          "tui-observer/observation.json": "dcaef0ed6b42391e53db650be033dfec1332923864f452890f4f5a424c828e82",
+          "summary.json": "a9a3b2f254089d6715d3d0a693fb75eb8c5f5034b250dbbd95f1fd639edf243f",
+          "tui-observer/frame-timing.txt": "6d54e9a0f1300927eacb940fd40e3adc03e00d42563a44aa11369004d04d1344",
+          "keeper_scale_session.py": "2275c38094884418a88407aaecf9f40a2326e67535796df98cc4a1ba8683efe6",
+          "tui_observer.py": "7ffa5657c998c9487f27feaee3b038b9ed77aa1459fce72d4e31ccb6b7cc3113",
+          "keeper_scale_trace.py": "3dd78330c4922fd058b46644df8ea21dace0f8698ceb3f502c16b8add563b2dd"
+        },
+        "prior_arms_cleanup_confirmed": true,
+        "sequential_execution_receipts": true,
+        "retrospectively_eligible": true
+      },
+      "list_build": {
+        "samples": 63,
+        "p50_ns": 204792,
+        "p95_ns": 418042,
+        "max_ns": 1079250
+      },
+      "all_present": {
+        "samples": 75,
+        "p50_ns": 11667,
+        "p95_ns": 85916,
+        "max_ns": 248000
+      },
+      "whole_tui_cpu_seconds": 0.36954,
+      "whole_tui_wall_seconds": 8.26216525,
+      "loadavg_before": [
+        18.28173828125,
+        17.53466796875,
+        22.30517578125
+      ],
+      "loadavg_after": [
+        16.42138671875,
+        17.16357421875,
+        22.08935546875
+      ],
+      "cpu_count": 16,
+      "workload_summary": {
+        "keepers": 2,
+        "messages": 4,
+        "succeeded_operations": 4,
+        "actual_model_calls": 4,
+        "max_provider_requests_in_flight": 2,
+        "latency_samples": 104,
+        "valid_latency_samples": 104,
+        "scope": "Pinned-native-source real Keeper turns with a loopback scripted text-only model, durable queued operations and offline SQLite reread. No guest/tool execution, browser/TUI or production throughput proof.",
+        "latency_by_phase": {
+          "submitting_model_held": {
+            "samples": 2,
+            "valid": 2,
+            "failures": 0,
+            "p50_ms": 0.663458,
+            "p95_ms": 0.742,
+            "max_ms": 0.742
+          },
+          "model_held_queue_observation": {
+            "samples": 97,
+            "valid": 97,
+            "failures": 0,
+            "p50_ms": 0.863958,
+            "p95_ms": 2.782333,
+            "max_ms": 4.691667
+          },
+          "running_model_released": {
+            "samples": 4,
+            "valid": 4,
+            "failures": 0,
+            "p50_ms": 0.6955,
+            "p95_ms": 1.767708,
+            "max_ms": 1.767708
+          },
+          "settled": {
+            "samples": 1,
+            "valid": 1,
+            "failures": 0,
+            "p50_ms": 0.66525,
+            "p95_ms": 0.66525,
+            "max_ms": 0.66525
+          }
+        },
+        "rejected_429_count": 0,
+        "rate_limit_wait_s": 0,
+        "rate_limit_wait_by_source_s": {},
+        "denied_read_only_inventory_attempts": 2,
+        "unexpected_guest_command_attempts": 0
+      }
+    },
+    {
+      "case": "owners-30-candidate",
+      "population": 30,
+      "variant": "candidate",
+      "source": "5de2eb7684f0e4fecee1c48caef50010c2f951fa",
+      "qualification": {
+        "scope": "Direct owned resource receipts and recorded source/digests only; no global host quiescence, descendant absence, applied key, UI row cardinality or physical paint claim.",
+        "cleanup_ok": true,
+        "next_arm_safe": true,
+        "eligible": true,
+        "checks": {
+          "expected_pins_valid": true,
+          "qualifier_parser_source": true,
+          "main_cleanup_complete": true,
+          "no_cleanup_errors": true,
+          "cleanup_receipts_readable": true,
+          "fallback_consistent": true,
+          "failure_receipts_match_exit": true,
+          "execution_output_binding": true,
+          "owned_base_binding": true,
+          "source_identity": true,
+          "server_digest": true,
+          "owned_process_binding": true,
+          "tui_digest": true,
+          "server_before_identity": true,
+          "server_after_identity": true,
+          "same_runtime": true,
+          "probe_identity": true,
+          "tui_exit": true,
+          "capture_record": true,
+          "current_native_report_consistent": true,
+          "captured_probe_copies_match": true,
+          "list_builds_observed": true,
+          "workload": true,
+          "required_inputs_readable": true
+        },
+        "missing_or_invalid": [],
+        "native_list_builds": 62,
+        "inputs_sha256": {
+          "cleanup.json": "1bdda3f73d0ec8174b5d1e3ce52ef111e0f1d6c71c6efabf4102a365b8bc8f8c",
+          "identity.json": "7fb11aefbfe54cb6522059d08c7d79142d2ca814396fe3dc9bf6732f6f60fb7f",
+          "owned-process.json": "56bcca8488e6161234b2572b174543d44ab0e84e33881022aa6a27332ed7eae5",
+          "tui-observer/observation.json": "91618b2fb243b78dfae9b8590583019342a0ca153d55220ee0ef6474766c4789",
+          "summary.json": "2e3a7cdbcdfa05b9bf0edceb86f98ae909edcb4511b693c067b100630c711118",
+          "tui-observer/frame-timing.txt": "8db85175d960fcbcb6cf43cf61a624d845652d2e518db4cd37c2ed47803712fb",
+          "keeper_scale_session.py": "2275c38094884418a88407aaecf9f40a2326e67535796df98cc4a1ba8683efe6",
+          "tui_observer.py": "7ffa5657c998c9487f27feaee3b038b9ed77aa1459fce72d4e31ccb6b7cc3113",
+          "keeper_scale_trace.py": "3dd78330c4922fd058b46644df8ea21dace0f8698ceb3f502c16b8add563b2dd"
+        },
+        "prior_arms_cleanup_confirmed": true,
+        "sequential_execution_receipts": true,
+        "retrospectively_eligible": true
+      },
+      "list_build": {
+        "samples": 62,
+        "p50_ns": 560083,
+        "p95_ns": 1774833,
+        "max_ns": 3567792
+      },
+      "all_present": {
+        "samples": 75,
+        "p50_ns": 36500,
+        "p95_ns": 189958,
+        "max_ns": 200459
+      },
+      "whole_tui_cpu_seconds": 0.471712,
+      "whole_tui_wall_seconds": 8.262538375,
+      "loadavg_before": [
+        16.42138671875,
+        17.16357421875,
+        22.08935546875
+      ],
+      "loadavg_after": [
+        16.2138671875,
+        17.05322265625,
+        21.90625
+      ],
+      "cpu_count": 16,
+      "workload_summary": {
+        "keepers": 30,
+        "messages": 60,
+        "succeeded_operations": 60,
+        "actual_model_calls": 60,
+        "max_provider_requests_in_flight": 30,
+        "latency_samples": 156,
+        "valid_latency_samples": 156,
+        "scope": "Pinned-native-source real Keeper turns with a loopback scripted text-only model, durable queued operations and offline SQLite reread. No guest/tool execution, browser/TUI or production throughput proof.",
+        "latency_by_phase": {
+          "submitting_model_held": {
+            "samples": 19,
+            "valid": 19,
+            "failures": 0,
+            "p50_ms": 1.894458,
+            "p95_ms": 23.765,
+            "max_ms": 23.765
+          },
+          "model_held_queue_observation": {
+            "samples": 107,
+            "valid": 107,
+            "failures": 0,
+            "p50_ms": 1.02575,
+            "p95_ms": 1.589125,
+            "max_ms": 3.216083
+          },
+          "running_model_released": {
+            "samples": 30,
+            "valid": 30,
+            "failures": 0,
+            "p50_ms": 3.247833,
+            "p95_ms": 15.168375,
+            "max_ms": 48.8655
+          }
+        },
+        "rejected_429_count": 1,
+        "rate_limit_wait_s": 1.005076042,
+        "rate_limit_wait_by_source_s": {
+          "client_fallback_no_retry_after": 1.005076042
+        },
+        "denied_read_only_inventory_attempts": 2,
+        "unexpected_guest_command_attempts": 0
+      }
+    },
+    {
+      "case": "owners-30-control",
+      "population": 30,
+      "variant": "control",
+      "source": "5297349b101d61bb901b3729d43c4dec8bb30ec4",
+      "qualification": {
+        "scope": "Direct owned resource receipts and recorded source/digests only; no global host quiescence, descendant absence, applied key, UI row cardinality or physical paint claim.",
+        "cleanup_ok": true,
+        "next_arm_safe": true,
+        "eligible": true,
+        "checks": {
+          "expected_pins_valid": true,
+          "qualifier_parser_source": true,
+          "main_cleanup_complete": true,
+          "no_cleanup_errors": true,
+          "cleanup_receipts_readable": true,
+          "fallback_consistent": true,
+          "failure_receipts_match_exit": true,
+          "execution_output_binding": true,
+          "owned_base_binding": true,
+          "source_identity": true,
+          "server_digest": true,
+          "owned_process_binding": true,
+          "tui_digest": true,
+          "server_before_identity": true,
+          "server_after_identity": true,
+          "same_runtime": true,
+          "probe_identity": true,
+          "tui_exit": true,
+          "capture_record": true,
+          "current_native_report_consistent": true,
+          "captured_probe_copies_match": true,
+          "list_builds_observed": true,
+          "workload": true,
+          "required_inputs_readable": true
+        },
+        "missing_or_invalid": [],
+        "native_list_builds": 71,
+        "inputs_sha256": {
+          "cleanup.json": "a6d5b5ff67c47da9942a0668f53a8109928a9d98546bb299c267c2ae8c85aca5",
+          "identity.json": "e189f28f577b9f2655a04cc8a1f9e720ff8e49df9b9aef73d518ebe6505d1175",
+          "owned-process.json": "f8a5a15648c9a48333c237ae4de33e49395c351933fc0d14c398058f9583b83b",
+          "tui-observer/observation.json": "8ae04a9c29c952a2ac05ea641045de99ea66b235b640cb21ce782c7ed933211d",
+          "summary.json": "0f6ec97817e7fbb5c10a364564b1d9edd85002da8d9df925fe82e07fd5dc9062",
+          "tui-observer/frame-timing.txt": "17cd257efcfbc2c90ec9aaccc6fcd0dd3b3f146e0f35367ad07e9d5e0058a63d",
+          "keeper_scale_session.py": "2275c38094884418a88407aaecf9f40a2326e67535796df98cc4a1ba8683efe6",
+          "tui_observer.py": "7ffa5657c998c9487f27feaee3b038b9ed77aa1459fce72d4e31ccb6b7cc3113",
+          "keeper_scale_trace.py": "3dd78330c4922fd058b46644df8ea21dace0f8698ceb3f502c16b8add563b2dd"
+        },
+        "prior_arms_cleanup_confirmed": true,
+        "sequential_execution_receipts": true,
+        "retrospectively_eligible": true
+      },
+      "list_build": {
+        "samples": 71,
+        "p50_ns": 607500,
+        "p95_ns": 1245917,
+        "max_ns": 1486292
+      },
+      "all_present": {
+        "samples": 83,
+        "p50_ns": 36791,
+        "p95_ns": 208500,
+        "max_ns": 2778458
+      },
+      "whole_tui_cpu_seconds": 0.46988399999999997,
+      "whole_tui_wall_seconds": 8.2868255,
+      "loadavg_before": [
+        16.2138671875,
+        17.05322265625,
+        21.90625
+      ],
+      "loadavg_after": [
+        14.82861328125,
+        16.6484375,
+        21.6181640625
+      ],
+      "cpu_count": 16,
+      "workload_summary": {
+        "keepers": 30,
+        "messages": 60,
+        "succeeded_operations": 60,
+        "actual_model_calls": 60,
+        "max_provider_requests_in_flight": 30,
+        "latency_samples": 155,
+        "valid_latency_samples": 155,
+        "scope": "Pinned-native-source real Keeper turns with a loopback scripted text-only model, durable queued operations and offline SQLite reread. No guest/tool execution, browser/TUI or production throughput proof.",
+        "latency_by_phase": {
+          "submitting_model_held": {
+            "samples": 20,
+            "valid": 20,
+            "failures": 0,
+            "p50_ms": 1.55375,
+            "p95_ms": 7.680208,
+            "max_ms": 16.662542
+          },
+          "model_held_queue_observation": {
+            "samples": 100,
+            "valid": 100,
+            "failures": 0,
+            "p50_ms": 0.914625,
+            "p95_ms": 1.977625,
+            "max_ms": 4.094625
+          },
+          "running_model_released": {
+            "samples": 34,
+            "valid": 34,
+            "failures": 0,
+            "p50_ms": 4.14175,
+            "p95_ms": 46.928459,
+            "max_ms": 67.438625
+          },
+          "settled": {
+            "samples": 1,
+            "valid": 1,
+            "failures": 0,
+            "p50_ms": 0.768,
+            "p95_ms": 0.768,
+            "max_ms": 0.768
+          }
+        },
+        "rejected_429_count": 1,
+        "rate_limit_wait_s": 1.001863708,
+        "rate_limit_wait_by_source_s": {
+          "client_fallback_no_retry_after": 1.001863708
+        },
+        "denied_read_only_inventory_attempts": 2,
+        "unexpected_guest_command_attempts": 0
+      }
+    },
+    {
+      "case": "owners-300-control",
+      "population": 300,
+      "variant": "control",
+      "source": "5297349b101d61bb901b3729d43c4dec8bb30ec4",
+      "qualification": {
+        "scope": "Direct owned resource receipts and recorded source/digests only; no global host quiescence, descendant absence, applied key, UI row cardinality or physical paint claim.",
+        "cleanup_ok": true,
+        "next_arm_safe": true,
+        "eligible": true,
+        "checks": {
+          "expected_pins_valid": true,
+          "qualifier_parser_source": true,
+          "main_cleanup_complete": true,
+          "no_cleanup_errors": true,
+          "cleanup_receipts_readable": true,
+          "fallback_consistent": true,
+          "failure_receipts_match_exit": true,
+          "execution_output_binding": true,
+          "owned_base_binding": true,
+          "source_identity": true,
+          "server_digest": true,
+          "owned_process_binding": true,
+          "tui_digest": true,
+          "server_before_identity": true,
+          "server_after_identity": true,
+          "same_runtime": true,
+          "probe_identity": true,
+          "tui_exit": true,
+          "capture_record": true,
+          "current_native_report_consistent": true,
+          "captured_probe_copies_match": true,
+          "list_builds_observed": true,
+          "workload": true,
+          "required_inputs_readable": true
+        },
+        "missing_or_invalid": [],
+        "native_list_builds": 95,
+        "inputs_sha256": {
+          "cleanup.json": "faf6787f7cf6c57b23e4de7adc3660c2408eed5e98f9826cdb9849829c823df1",
+          "identity.json": "b67b3243d83b7af2f3306557f79d840c26a15cd39b8898fc311874547f5267df",
+          "owned-process.json": "8c37cab2108841f0671d83012deb7d16beeaa84befc101dce7b3eaffb930c197",
+          "tui-observer/observation.json": "87926e2885034c6f5f43d265e3d9e89bd34f275641af38bf280ed14316af0846",
+          "summary.json": "be1ef43a722611de4e99fc06b21387fb0235bea0c15861843840355c618a82d6",
+          "tui-observer/frame-timing.txt": "a191eb5f304121366f5bb81e8f3b6dd21227d000f3fbb4481f39d8c8bb4787be",
+          "keeper_scale_session.py": "2275c38094884418a88407aaecf9f40a2326e67535796df98cc4a1ba8683efe6",
+          "tui_observer.py": "7ffa5657c998c9487f27feaee3b038b9ed77aa1459fce72d4e31ccb6b7cc3113",
+          "keeper_scale_trace.py": "3dd78330c4922fd058b46644df8ea21dace0f8698ceb3f502c16b8add563b2dd"
+        },
+        "prior_arms_cleanup_confirmed": true,
+        "sequential_execution_receipts": true,
+        "retrospectively_eligible": true
+      },
+      "list_build": {
+        "samples": 95,
+        "p50_ns": 4256459,
+        "p95_ns": 7670125,
+        "max_ns": 9837375
+      },
+      "all_present": {
+        "samples": 105,
+        "p50_ns": 40333,
+        "p95_ns": 451500,
+        "max_ns": 10856667
+      },
+      "whole_tui_cpu_seconds": 1.733041,
+      "whole_tui_wall_seconds": 8.420234583,
+      "loadavg_before": [
+        14.82861328125,
+        16.6484375,
+        21.6181640625
+      ],
+      "loadavg_after": [
+        39.81298828125,
+        28.04541015625,
+        25.2783203125
+      ],
+      "cpu_count": 16,
+      "workload_summary": {
+        "keepers": 300,
+        "messages": 600,
+        "succeeded_operations": 600,
+        "actual_model_calls": 600,
+        "max_provider_requests_in_flight": 300,
+        "latency_samples": 1445,
+        "valid_latency_samples": 1445,
+        "scope": "Pinned-native-source real Keeper turns with a loopback scripted text-only model, durable queued operations and offline SQLite reread. No guest/tool execution, browser/TUI or production throughput proof.",
+        "latency_by_phase": {
+          "submitting_model_held": {
+            "samples": 368,
+            "valid": 368,
+            "failures": 0,
+            "p50_ms": 3.052625,
+            "p95_ms": 25.792917,
+            "max_ms": 70.167291
+          },
+          "model_held_queue_observation": {
+            "samples": 362,
+            "valid": 362,
+            "failures": 0,
+            "p50_ms": 1.9115,
+            "p95_ms": 5.780041,
+            "max_ms": 246.252416
+          },
+          "running_model_released": {
+            "samples": 713,
+            "valid": 713,
+            "failures": 0,
+            "p50_ms": 1.912,
+            "p95_ms": 74.047291,
+            "max_ms": 14127.573375
+          },
+          "settled": {
+            "samples": 2,
+            "valid": 2,
+            "failures": 0,
+            "p50_ms": 0.682791,
+            "p95_ms": 0.866458,
+            "max_ms": 0.866458
+          }
+        },
+        "rejected_429_count": 40,
+        "rate_limit_wait_s": 40.140713043,
+        "rate_limit_wait_by_source_s": {
+          "client_fallback_no_retry_after": 40.140713043
+        },
+        "denied_read_only_inventory_attempts": 1202,
+        "unexpected_guest_command_attempts": 0
+      }
+    },
+    {
+      "case": "owners-300-candidate",
+      "population": 300,
+      "variant": "candidate",
+      "source": "5de2eb7684f0e4fecee1c48caef50010c2f951fa",
+      "qualification": {
+        "scope": "Direct owned resource receipts and recorded source/digests only; no global host quiescence, descendant absence, applied key, UI row cardinality or physical paint claim.",
+        "cleanup_ok": true,
+        "next_arm_safe": true,
+        "eligible": true,
+        "checks": {
+          "expected_pins_valid": true,
+          "qualifier_parser_source": true,
+          "main_cleanup_complete": true,
+          "no_cleanup_errors": true,
+          "cleanup_receipts_readable": true,
+          "fallback_consistent": true,
+          "failure_receipts_match_exit": true,
+          "execution_output_binding": true,
+          "owned_base_binding": true,
+          "source_identity": true,
+          "server_digest": true,
+          "owned_process_binding": true,
+          "tui_digest": true,
+          "server_before_identity": true,
+          "server_after_identity": true,
+          "same_runtime": true,
+          "probe_identity": true,
+          "tui_exit": true,
+          "capture_record": true,
+          "current_native_report_consistent": true,
+          "captured_probe_copies_match": true,
+          "list_builds_observed": true,
+          "workload": true,
+          "required_inputs_readable": true
+        },
+        "missing_or_invalid": [],
+        "native_list_builds": 88,
+        "inputs_sha256": {
+          "cleanup.json": "667d9c1c4ef16729693bb3f1d53a1f3e772ecc7c02864042cc5b303f6dc9fe59",
+          "identity.json": "fb7cdb519802752f99e40beb47c6a4986a17811a942e092eaa237c8b555c0fc4",
+          "owned-process.json": "658838f05324f0cc82452cf6fd81ea1ceb1ad5a0995219ef14f5f2ab635b08dc",
+          "tui-observer/observation.json": "d7ed48d81324dd6359fca190c589488b5101857c5e755e9ce16b26377b979683",
+          "summary.json": "bbaf21553424a8de3760b4651428bc2fb561b81c66ff7e1733c60f2e79863499",
+          "tui-observer/frame-timing.txt": "85e3f2ff372ebb9e3fcb639c12c3295b9f4d91434d34ad3a5c08a9f5d9e0cf00",
+          "keeper_scale_session.py": "2275c38094884418a88407aaecf9f40a2326e67535796df98cc4a1ba8683efe6",
+          "tui_observer.py": "7ffa5657c998c9487f27feaee3b038b9ed77aa1459fce72d4e31ccb6b7cc3113",
+          "keeper_scale_trace.py": "3dd78330c4922fd058b46644df8ea21dace0f8698ceb3f502c16b8add563b2dd"
+        },
+        "prior_arms_cleanup_confirmed": true,
+        "sequential_execution_receipts": true,
+        "retrospectively_eligible": true
+      },
+      "list_build": {
+        "samples": 88,
+        "p50_ns": 3532792,
+        "p95_ns": 4569708,
+        "max_ns": 7484625
+      },
+      "all_present": {
+        "samples": 97,
+        "p50_ns": 40125,
+        "p95_ns": 128958,
+        "max_ns": 688750
+      },
+      "whole_tui_cpu_seconds": 1.402502,
+      "whole_tui_wall_seconds": 8.36508175,
+      "loadavg_before": [
+        39.81298828125,
+        28.04541015625,
+        25.2783203125
+      ],
+      "loadavg_after": [
+        23.75244140625,
+        25.69384765625,
+        24.77685546875
+      ],
+      "cpu_count": 16,
+      "workload_summary": {
+        "keepers": 300,
+        "messages": 600,
+        "succeeded_operations": 600,
+        "actual_model_calls": 600,
+        "max_provider_requests_in_flight": 300,
+        "latency_samples": 1344,
+        "valid_latency_samples": 1344,
+        "scope": "Pinned-native-source real Keeper turns with a loopback scripted text-only model, durable queued operations and offline SQLite reread. No guest/tool execution, browser/TUI or production throughput proof.",
+        "latency_by_phase": {
+          "submitting_model_held": {
+            "samples": 292,
+            "valid": 292,
+            "failures": 0,
+            "p50_ms": 2.213375,
+            "p95_ms": 17.704166,
+            "max_ms": 127.032209
+          },
+          "model_held_queue_observation": {
+            "samples": 380,
+            "valid": 380,
+            "failures": 0,
+            "p50_ms": 1.78225,
+            "p95_ms": 5.729167,
+            "max_ms": 73.232542
+          },
+          "running_model_released": {
+            "samples": 670,
+            "valid": 670,
+            "failures": 0,
+            "p50_ms": 1.464666,
+            "p95_ms": 29.031375,
+            "max_ms": 9563.73475
+          },
+          "settled": {
+            "samples": 2,
+            "valid": 2,
+            "failures": 0,
+            "p50_ms": 0.786417,
+            "p95_ms": 0.870833,
+            "max_ms": 0.870833
+          }
+        },
+        "rejected_429_count": 49,
+        "rate_limit_wait_s": 49.171097415,
+        "rate_limit_wait_by_source_s": {
+          "client_fallback_no_retry_after": 49.171097415
+        },
+        "denied_read_only_inventory_attempts": 1202,
+        "unexpected_guest_command_attempts": 0
+      }
+    }
+  ]
+}

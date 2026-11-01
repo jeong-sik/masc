@@ -738,8 +738,6 @@ val volume_claims_of_output : string -> volume_claims_read
     anything else is [Claims_invalid]. No default for a shape this module
     did not write. *)
 
-val volume_claims_read_to_string : volume_claims_read -> string
-
 type apple_volume_claim_helper_report =
   | Claims_marker_absent
   | Claimant_not_present

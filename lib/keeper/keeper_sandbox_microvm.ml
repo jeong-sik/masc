@@ -2264,13 +2264,6 @@ let volume_claims_of_output output =
     | _ -> Claims_invalid "the claims marker is not a JSON array"
 ;;
 
-let volume_claims_read_to_string = function
-  | Marker_absent -> "no claims marker"
-  | Claims_read claimants ->
-    Printf.sprintf "%d claimant(s): %s" (List.length claimants) (String.concat ", " claimants)
-  | Claims_invalid detail -> "claims marker invalid: " ^ detail
-;;
-
 (* The release helper's stdout protocol: one outcome word, and for [kept]
    the marker content that remains. Pure, so the mapping is testable
    without a container runtime. *)

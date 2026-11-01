@@ -2,7 +2,8 @@
 # sweep-tool-error-signatures.sh — daily bucketing of tool-call failures
 # by (tool_name, error_signature) for RFC #8760 R4.
 #
-# Reads <base-path>/.masc/tool_calls/YYYY-MM/DD.jsonl and emits
+# Reads <base-path>/.masc/tool_calls/YYYY-MM/DD.jsonl and DD.NNN.jsonl segments;
+# merges each day's inputs before emitting
 # newline-delimited JSON records, one per (tool, signature) pair with count.
 #
 # Purpose: observe whether prompt/hint changes reduce per-class repeats
@@ -49,8 +50,9 @@ if [ ! -d "$TOOL_CALLS_DIR" ]; then
 fi
 
 emit_day() {
-  local date="$1" file="$2"
-  [ -f "$file" ] || return 0
+  local date="$1"
+  shift
+  [ "$#" -gt 0 ] || return 0
 
   jq -L "$SCRIPT_DIR/lib" -rc '
     include "recorded-tool-outcome";
@@ -61,7 +63,7 @@ emit_day() {
     select($err != null) |
     [$row.tool, ($err | tostring)]
     | @tsv
-  ' "$file" 2>/dev/null |
+  ' "$@" 2>/dev/null |
   awk -F'\t' -v d="$date" '
     function normalize(s,    r) {
       r = s
@@ -106,14 +108,25 @@ for i in $(seq 0 $((DAYS - 1))); do
     day_path=$(date -d "-${i} days" +%Y-%m/%d)
     day_iso=$(date -d "-${i} days" +%Y-%m-%d)
   fi
-  src="${TOOL_CALLS_DIR}/${day_path}.jsonl"
+  stem="${TOOL_CALLS_DIR}/${day_path}"
+  files=()
+  for src in "$stem".*.jsonl; do
+    [ -f "$src" ] || continue
+    sequence="${src%.jsonl}"
+    sequence="${sequence##*.}"
+    if [[ "$sequence" =~ ^(00[1-9]|0[1-9][0-9]|[1-9][0-9]{2,})$ ]]; then
+      files+=("$src")
+    fi
+  done
+  [ ! -f "${stem}.jsonl" ] || files+=("${stem}.jsonl")
+  # Bash 3.2 nounset needs guarded array expansion for a day with no files.
   if [ -n "$OUT_DIR" ]; then
     month_dir="${OUT_DIR}/$(printf '%s' "$day_iso" | cut -c1-7)"
     mkdir -p "$month_dir"
     dst="${month_dir}/$(printf '%s' "$day_iso" | cut -c9-10).jsonl"
-    emit_day "$day_iso" "$src" > "$dst"
+    emit_day "$day_iso" ${files[@]+"${files[@]}"} > "$dst"
     echo "wrote $(wc -l < "$dst" | tr -d ' ') records -> $dst" >&2
   else
-    emit_day "$day_iso" "$src"
+    emit_day "$day_iso" ${files[@]+"${files[@]}"}
   fi
 done

@@ -5782,6 +5782,7 @@
   ../scripts/lib/masc_base_path.py
   ../scripts/lib/keeper_store_layout.py
   ../scripts/lib/recorded_tool_outcome.py
+  ../scripts/lib/tool_call_log_paths.py
   ../scripts/analyze-keeper-execute-failures.sh
   ../scripts/audit-keeper-fleet-readiness.py
   ../scripts/bench-web-tools.py

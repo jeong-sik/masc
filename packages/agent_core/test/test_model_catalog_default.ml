@@ -115,7 +115,7 @@ let test_haiku_5_5_row_reaches_the_wire () =
     check (option bool) "top_k is not offered" (Some false)
       (Option.map
          (fun (caps : Capabilities.capabilities) -> caps.supports_top_k)
-         (Capabilities.for_model_id_catalog model_id));
+         (Capabilities.for_model_id model_id));
     check bool "default leaves adaptive choice to the provider" true
       (thinking (body (config ())) = `Null);
     check bool "thinking on asks for adaptive and binds its blocks" true
@@ -240,7 +240,7 @@ let test_documented_claude_prefill_exclusions () =
         model_id in
       check (option bool) (model_id ^ " catalog excludes prefill") (Some false)
         (Option.map (fun (caps : Capabilities.capabilities) -> caps.supports_assistant_prefill)
-           (Capabilities.for_model_id_catalog model_id));
+           (Capabilities.for_model_id model_id));
       List.iter (fun stream ->
         check bool (model_id ^ " refuses final assistant before dispatch") true
           (match P.Complete.inspect_serialized_request ~stream ~config ~messages:prefill () with
@@ -499,7 +499,7 @@ let test_claude_rows_keep_sampling_parameters_off_the_wire () =
            (Some false)
            (Option.map
               (fun (caps : Capabilities.capabilities) -> caps.supports_top_k)
-              (Capabilities.for_model_id_catalog model_id)))
+              (Capabilities.for_model_id model_id)))
       claude_rows_forced_tool_choice)
 ;;
 
@@ -511,7 +511,7 @@ let test_claude_rows_state_forced_tool_choice_as_the_api_takes_it () =
     Model_catalog.set_global catalog;
     List.iter
       (fun (model_id, accepted) ->
-         match Capabilities.for_model_id_catalog model_id with
+         match Capabilities.for_model_id model_id with
          | None -> failf "%s resolves to no capabilities" model_id
          | Some (caps : Capabilities.capabilities) ->
            check bool
@@ -678,11 +678,11 @@ let test_global_loads_default_catalog_for_capabilities () =
     first_model_id ~suite:"model catalog default production path" expected
   in
   with_clean_model_catalog_override (fun () ->
-    match Capabilities.for_model_id_catalog model_id with
+    match Capabilities.for_model_id model_id with
     | Some _ -> ()
     | None ->
       failf
-        "Capabilities.for_model_id_catalog should resolve %S through embedded/default \
+        "Capabilities.for_model_id should resolve %S through embedded/default \
          Model_catalog.global"
         model_id)
 ;;

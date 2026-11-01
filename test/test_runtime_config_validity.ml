@@ -965,7 +965,7 @@ let test_deployment_agent_core_model_catalog_modality_priorities_resolve () =
          let capabilities =
            match entry.provider_name with
            | None ->
-             Llm_provider.Capabilities.for_model_id_catalog
+             Llm_provider.Capabilities.for_model_id
                (Llm_provider.Model_identifiers.Model_id.to_string entry.model_id)
            | Some provider_label ->
              Llm_provider.Capabilities.for_provider_model_id

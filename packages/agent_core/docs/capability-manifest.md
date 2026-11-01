@@ -9,22 +9,26 @@ Provider connection metadata is handled separately by
 endpoint/auth/transport/default-model facts, and use this capability manifest
 for model-specific feature and limit facts.
 
-## Why
+## Compose one model catalog
 
-`Capabilities.for_model_id` resolves model facts from the model catalog first,
-then from the capability manifest. The manifest layer is still useful for
-custom deployments and local variants, but it cannot override an authoritative
-catalog row for the same exact model ID.
+JSON is an input format for the immutable model catalog. Parse the file and
+compose it with `Model_catalog.with_model_overrides` before selecting provider
+bindings or freezing requests. Capabilities, Anthropic thinking controls,
+request preparation and exact-output admission then read the same catalog row.
 
-## Priority
+An exact bare model identity in the JSON replaces that row's capability
+fields. Undeclared fields inherit the JSON declaration's preset/default.
+Pricing, cache multipliers, task, client suggestions and serving constraints
+remain those of the exact previous bare row. A new model has none of that
+metadata. Scoped rows retain precedence and are never replaced by a bare JSON
+entry. Exact identity uses ASCII case folding; no prefix or separator expansion
+is performed.
 
-```
-Explicit model catalog override or embedded agent_core model catalog row (exact match)
-    ↓ miss
-Explicitly installed manifest entry (exact model ID, ASCII case-insensitive)
-    ↓ miss
-No declaration (`Capabilities.for_model_id` returns `None`)
-```
+Provider declarations still own permission to use bare model rows. A declared
+provider must list the exact ID in `serves_bare_models`. Anonymous native wires
+can read bare rows; anonymous OpenAI-compatible endpoints cannot acquire them
+from their URL. Compose first, then select a provider from the resulting
+`Provider_declarations` snapshot.
 
 ## Quick Start
 
@@ -46,27 +50,21 @@ Create `~/.config/agent_core/caps.json` (or any path):
 }
 ```
 
-Load and install it during application bootstrap:
+Load and compose it during application bootstrap:
 
 ```ocaml
-let manifest =
-  match Capability_manifest.load_file "/home/app/.config/agent_core/caps.json" with
-  | Ok manifest -> manifest
-  | Error message -> failwith message
-in
-Capability_manifest.set_global manifest
+match Model_catalog.load_default () with
+| Error detail -> report_configuration_error detail
+| Ok catalog ->
+  match Capability_manifest.load_file caps_path with
+  | Error detail -> report_configuration_error detail
+  | Ok input -> Model_catalog.set_global (Model_catalog.with_model_overrides catalog input)
 ```
 
-The exact model `my-llama-q4` (ASCII case-insensitive) can use this declaration
-when no model catalog row matches. Other release or quantization IDs need their
-own explicit declarations.
-
-Installation makes the manifest available to the capability lookup APIs shown
-below. Provider-bound request resolution has its own authority contract:
-declared providers and anonymous OpenAI-compatible requests do not borrow the
-global manifest. Installing it alone does not change those request policies.
-Custom deployments can apply a validated entry explicitly through their
-provider configuration, or declare the exact model with its provider in the model catalog.
+`caps_path` and error handling belong to the embedding application. Install
+only the complete successfully parsed value. An existing selected binding or
+frozen request keeps its captured policy when a new catalog is installed;
+new selections see the new catalog. There is no separate global manifest.
 
 ## Schema Reference
 
@@ -132,8 +130,8 @@ are rejected when the manifest is parsed.
 
 | Label | Description |
 |-------|-------------|
-| `anthropic`, `claude` | Claude (1M ctx, extended thinking, caching) |
-| `gemini` | Gemini (1M ctx, audio/video, code execution) |
+| `anthropic`, `claude` | Anthropic Messages preset |
+| `gemini` | Gemini native preset |
 | `glm`, `zhipu`, `glm-coding` | GLM / ZhipuAI |
 | `kimi` | Kimi (262K ctx, reasoning) |
 | `openai_compat` | OpenAI-compatible base preset |
@@ -146,67 +144,51 @@ are rejected when the manifest is parsed.
 
 ## OCaml API
 
-### Direct manifest lookup
+To select a provider without changing process-global state:
 
 ```ocaml
-(* Load a manifest from a file *)
-let manifest = Capability_manifest.load_file "caps.json" |> Result.get_ok
-
-(* Look up a specific model *)
-let caps = Capabilities.for_model_id_with_manifest manifest "my-llama-q4"
+let select catalog input provider_id =
+  let catalog = Model_catalog.with_model_overrides catalog input in
+  match Provider_declarations.of_catalogs ~models:(Some catalog) ~providers:None with
+  | Error error -> Error (Provider_declarations.error_to_string error)
+  | Ok declarations ->
+    match Agent_core.Provider_runtime_binding.find_in_declarations declarations provider_id with
+    | None -> Error "provider is not declared"
+    | Some binding -> Ok binding
 ```
 
-### Process-wide manifest
+Convert the selected binding with `Provider_runtime_binding.to_provider_config`.
+That config carries the admitted model policy. Request preparation does not
+re-read the JSON input. Explicit provider JSON overlays remain a separate
+provider declaration input; pass that parsed value to `of_catalogs` instead of
+`None` when needed. Replacing a provider declaration cannot inherit the replaced
+seed's bare-model permissions.
+
+For read-only bare-model inspection from an explicit catalog:
 
 ```ocaml
-let manifest = Capability_manifest.load_file "caps.json" |> Result.get_ok in
-Capability_manifest.set_global manifest;
-
-(* for_model_id checks the embedded/explicit model catalog first, then this manifest *)
-let caps = Capabilities.for_model_id "my-llama-q4"
+let inspect catalog model_id =
+  match Model_identifiers.Model_id.of_string model_id with
+  | Error _ -> None
+  | Ok id ->
+    Model_catalog.lookup catalog id
+    |> Option.map (Capabilities.apply_catalog_entry ~provider_entry:None ~wire:None)
 ```
 
-### Apply a manifest entry directly
-
-```ocaml
-let manifest =
-  Capability_manifest.of_json (Yojson.Safe.from_string
-    {|{"schema_version":2,"models":[{"model_id":"my-model","base":"openai_chat","max_context_tokens":65536,"supports_tools":true}]}|})
-  |> Result.get_ok
-in
-let id = Model_identifiers.Model_id.of_string_exn "my-model" in
-let caps =
-  match Capability_manifest.lookup manifest id with
-  | Some entry -> Capabilities.apply_manifest_entry entry
-  | None -> invalid_arg "model is not declared"
-
-```
-
-## Bundling with a Model Deployment
-
-A deployment can bundle `caps.json` alongside model files. The embedding
-application loads it for its explicit capability lookup or applies the parsed
-capabilities to its request configuration. Installing globally only affects
-lookup paths that admit manifest authority:
-
-```ocaml
-let manifest = Capability_manifest.load_file "/models/caps.json" |> Result.get_ok in
-Capability_manifest.set_global manifest
-```
+`Capabilities.for_model_id` reads the installed model catalog for the same
+inspection use. Execution selects the provider explicitly rather than deriving
+provider ownership from a bare model name.
 
 ## Notes
 
-- Schema version 2 requires `model_id` on every entry and an explicit `models`
-  list at the root. `models: []` deliberately declares no overrides. Older
-  versions and `id_prefix` fields are rejected rather than converted.
-- Lookup uses the exact model ID with ASCII case-insensitive equality. Unknown
-  variants do not inherit a declaration. Every served quantization or release
-  ID needs its own entry. Duplicate normalized IDs are rejected; declaration
-  order cannot change which entry an exact model receives.
-- agent_core never discovers a manifest from the process environment. File selection,
-  reload policy, and error handling belong to the embedding application.
-- `load_file` returns an explicit `Result`; install only a successfully parsed
-  manifest with `set_global`.
-- Global `Capabilities.for_model_id` lookup keeps the model catalog primary.
-  The explicit `for_model_id_with_manifest` API instead checks the supplied
-  exact manifest entry first, then falls back to the catalog on a miss.
+- `schema_version = 2`, `model_id` and an explicit `models` list are required.
+  Empty `models` declares no overrides. Unknown fields, wrong types, blank or
+  padded identities, and duplicate normalized IDs are rejected.
+- Each served quantization or release ID needs an exact declaration.
+- File selection, reload policy and error handling belong to the embedding
+  application. Agent Core performs no environment-based file discovery.
+- JSON capability composition does not grant provider ownership or remove
+  serving evidence. The declared context window and evidence-backed serving
+  constraint remain distinct.
+- Pricing is read from the active model catalog. Capability snapshot tests do
+  not establish pricing immutability after a response.

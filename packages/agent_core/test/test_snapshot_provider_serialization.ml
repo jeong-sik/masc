@@ -386,7 +386,7 @@ let test_openai_parallel_disabled_by_capability () =
    emitted, so the wire is byte-identical before/after the
    de-anonymization. The
    actual proof that [deepseek-v4-flash] resolves to [Deepseek_v4_flash]
-   lives in the inline [let%test "for_model_id_catalog: specific model IDs
+   lives in the inline [let%test "for_model_id: specific model IDs
    get correct (not shadowed) capabilities"] in [capabilities.ml] and in
    [test_capabilities.ml]'s cloud-suffix route checks. *)
 let deepseek_auto_expected =

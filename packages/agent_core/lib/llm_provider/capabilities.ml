@@ -338,61 +338,29 @@ let with_model_id model_id f =
   | Error _ -> None
 ;;
 
-let anthropic_thinking_control_from_sources ~catalog ~manifest model_id =
-  let manifest_value () =
-    match manifest with
-    | None -> None
-    | Some manifest ->
-      (match
-         Capability_manifest.lookup manifest model_id
-       with
-       | Some entry ->
-         Option.map
-           anthropic_thinking_control_of_vocab_value
-           entry.anthropic_thinking_control
-       | None -> None)
-  in
-  match catalog with
-  | None -> manifest_value ()
-  | Some catalog ->
-    (match Model_catalog.lookup catalog model_id with
-     | Some entry ->
-       Option.map
-         anthropic_thinking_control_of_vocab_value
-         entry.anthropic_thinking_control
-     | None -> manifest_value ())
+let anthropic_thinking_control_from_catalog ~catalog model_id =
+  Option.bind catalog (fun catalog ->
+    Option.bind (Model_catalog.lookup catalog model_id) (fun entry ->
+      Option.map anthropic_thinking_control_of_vocab_value
+        entry.Model_catalog.anthropic_thinking_control))
 ;;
 
 let anthropic_thinking_control_for_model_id model_id =
   with_model_id model_id
-    (anthropic_thinking_control_from_sources
-       ~catalog:(Model_catalog.global ()) ~manifest:(Capability_manifest.global ()))
+    (anthropic_thinking_control_from_catalog ~catalog:(Model_catalog.global ()))
 ;;
 
-let anthropic_thinking_control_for_provider_from_sources
-      ~catalog ~manifest ~provider model_id =
-  let manifest_value () = match provider with
-    | Model_catalog.Anonymous_wire
-        (Provider_kind.Anthropic | Kimi | Ollama | Gemini | Glm) ->
-      anthropic_thinking_control_from_sources ~catalog:None ~manifest model_id
-    | Model_catalog.Anonymous_wire Provider_kind.OpenAI_compat
-    | Model_catalog.Declared_provider _ -> None in
-  match catalog with
-  | None -> manifest_value ()
-  | Some catalog ->
-    (match Model_catalog.lookup_model_for_provider catalog ~provider ~model_id with
-     | Some entry ->
-       Option.map
-         anthropic_thinking_control_of_vocab_value
-         entry.anthropic_thinking_control
-     | None -> manifest_value ())
+let anthropic_thinking_control_for_provider_from_catalog ~catalog ~provider model_id =
+  Option.bind catalog (fun catalog ->
+    Option.bind (Model_catalog.lookup_model_for_provider catalog ~provider ~model_id)
+      (fun entry -> Option.map anthropic_thinking_control_of_vocab_value
+        entry.Model_catalog.anthropic_thinking_control))
 ;;
 
 let anthropic_thinking_control_for_provider_model_id ~provider ~model_id =
-  with_model_id model_id (fun model_id ->
-    anthropic_thinking_control_for_provider_from_sources
-      ~catalog:(Model_catalog.global ()) ~manifest:(Capability_manifest.global ())
-      ~provider model_id)
+  with_model_id model_id
+    (anthropic_thinking_control_for_provider_from_catalog
+      ~catalog:(Model_catalog.global ()) ~provider)
 ;;
 
 let with_declared_image_input value capabilities =
@@ -921,16 +889,16 @@ let%test "unknown base label resolves to None, not a permissive default" =
 (** Merge Discovery ctx_size into capabilities. *)
 let with_context_size caps ~ctx_size = { caps with max_context_tokens = Some ctx_size }
 
-(* ── Capability manifest integration ───────────────────── *)
+(* ── Catalog capability projection ───────────────────── *)
 
-(** Apply a capability manifest entry on top of a base capabilities record.
+(** Apply admitted capability fields on top of a base capabilities record.
 
     [base_label] resolves to a provider preset via
     [capabilities_for_provider_label]; defaults to [default_capabilities]
     when absent or unrecognised.  Each [Some] field in [entry] overrides
     the corresponding field of the base; [None] fields are left unchanged. *)
 
-let preserve_thinking_control_format_of_manifest_string raw =
+let preserve_thinking_control_format_of_catalog_string raw =
   Capability_vocab.preserve_thinking_control_format_of_string raw
 ;;
 
@@ -1047,50 +1015,6 @@ type declarative_capability_overrides =
   ; reasoning_streaming_format : string option
   ; reasoning_replay : string option
   }
-
-let overrides_of_manifest_entry (entry : Capability_manifest.entry) =
-  { base_label = Option.map Capability_manifest.base_label_to_string entry.base_label
-  ; max_context_tokens = entry.max_context_tokens
-  ; serving_constraint = None
-  ; max_output_tokens = entry.max_output_tokens
-  ; supports_tools = entry.supports_tools
-  ; supports_tool_choice = entry.supports_tool_choice
-  ; supports_required_tool_choice = entry.supports_required_tool_choice
-  ; supports_named_tool_choice = entry.supports_named_tool_choice
-  ; supports_parallel_tool_calls = entry.supports_parallel_tool_calls
-  ; assistant_tool_content_format = entry.assistant_tool_content_format
-  ; chat_output_budget_field = entry.chat_output_budget_field
-  ; tool_schema_conformance = entry.tool_schema_conformance
-  ; supports_reasoning = entry.supports_reasoning
-  ; accepted_reasoning_efforts = entry.accepted_reasoning_efforts
-  ; supports_response_format_json = entry.supports_response_format_json
-  ; supports_structured_output = entry.supports_structured_output
-  ; json_schema_dialect = entry.json_schema_dialect
-  ; supports_multimodal_inputs = entry.supports_multimodal_inputs
-  ; supports_image_input = entry.supports_image_input
-  ; supports_audio_input = entry.supports_audio_input
-  ; supports_video_input = entry.supports_video_input
-  ; supports_document_input = entry.supports_document_input
-  ; modality_priority = entry.modality_priority
-  ; (* The JSON capability manifest carries no task field; task is
-       catalog-only vocabulary. *)
-    task = None
-  ; supports_native_streaming = entry.supports_native_streaming
-  ; supports_system_prompt = entry.supports_system_prompt
-  ; supports_assistant_prefill = entry.supports_assistant_prefill
-  ; supports_prompt_caching = entry.supports_prompt_caching
-  ; supports_top_k = entry.supports_top_k
-  ; supports_min_p = entry.supports_min_p
-  ; supports_seed = entry.supports_seed
-  ; ignored_sampling_parameters = entry.ignored_sampling_parameters
-  ; thinking_control_format = entry.thinking_control_format
-  ; preserve_thinking_control_format = entry.preserve_thinking_control_format
-  ; content_inline_reasoning = entry.content_inline_reasoning
-  ; reasoning_output_format = entry.reasoning_output_format
-  ; reasoning_streaming_format = entry.reasoning_streaming_format
-  ; reasoning_replay = entry.reasoning_replay
-  }
-;;
 
 let apply_declarative_capability_overrides ?(base=default_capabilities) overrides =
   let base =
@@ -1245,7 +1169,7 @@ let apply_declarative_capability_overrides ?(base=default_capabilities) override
   ; preserve_thinking_control_format =
       (match overrides.preserve_thinking_control_format with
        | Some s ->
-         (match preserve_thinking_control_format_of_manifest_string s with
+         (match preserve_thinking_control_format_of_catalog_string s with
           | Some t -> t
           | None ->
             warn_unknown_capability_value ~field:"preserve_thinking_control_format" s;
@@ -1294,85 +1218,6 @@ let apply_declarative_capability_overrides ?(base=default_capabilities) override
      support still invalidates it before native request validation. *)
   if capabilities.supports_reasoning then capabilities
   else { capabilities with accepted_reasoning_efforts = None }
-;;
-
-let apply_manifest_entry (entry : Capability_manifest.entry) : capabilities =
-  let capabilities =
-    entry |> overrides_of_manifest_entry |> apply_declarative_capability_overrides
-  in
-  (* [emits_usage_tokens] and [supported_models] are manifest-only overrides:
-     the shared declarative override record also serves the model catalog,
-     whose rows do not route these fields through it, so they are applied
-     here instead of widening the catalog path. *)
-  { capabilities with
-    emits_usage_tokens =
-      (match entry.emits_usage_tokens with
-       | Some emits -> emits
-       | None -> capabilities.emits_usage_tokens)
-  ; supported_models =
-      (match entry.supported_models with
-       | Some _ as models -> models
-       | None -> capabilities.supported_models)
-  }
-;;
-
-let%test "apply_manifest_entry applies thinking_control_format (Agent Core contract)" =
-  match
-    Capability_manifest.of_json
-      (Yojson.Safe.from_string
-         {|{"schema_version":2,"models":[{"model_id":"m","thinking_control_format":"chat_template_kwargs"}]}|})
-  |> Result.map Capability_manifest.entries
-  with
-  | Ok [ entry ] ->
-    (apply_manifest_entry entry).thinking_control_format = Chat_template_kwargs
-  | Ok _ | Error _ -> false
-;;
-
-let%test "apply_manifest_entry without thinking_control_format keeps base format" =
-  match
-    Capability_manifest.of_json
-      (Yojson.Safe.from_string {|{"schema_version":2,"models":[{"model_id":"m"}]}|})
-  |> Result.map Capability_manifest.entries
-  with
-  | Ok [ entry ] ->
-    (apply_manifest_entry entry).thinking_control_format = No_thinking_control
-  | Ok _ | Error _ -> false
-;;
-
-let%test "apply_manifest_entry applies reasoning_replay preserve_always" =
-  match
-    Capability_manifest.of_json
-      (Yojson.Safe.from_string
-         {|{"schema_version":2,"models":[{"model_id":"m","reasoning_replay":"preserve_always"}]}|})
-  |> Result.map Capability_manifest.entries
-  with
-  | Ok [ entry ] ->
-    (apply_manifest_entry entry).reasoning_replay_override = Force_preserve_always
-  | Ok _ | Error _ -> false
-;;
-
-let%test "apply_manifest_entry applies assistant_tool_content_format" =
-  match
-    Capability_manifest.of_json
-      (Yojson.Safe.from_string
-         {|{"schema_version":2,"models":[{"model_id":"m","assistant_tool_content_format":"empty_string"}]}|})
-  |> Result.map Capability_manifest.entries
-  with
-  | Ok [ entry ] ->
-    (apply_manifest_entry entry).assistant_tool_content_format
-    = Assistant_tool_content_empty_string
-  | Ok ([] | _ :: _ :: _) | Error _ -> false
-;;
-
-let%test "apply_manifest_entry without reasoning_replay keeps base default" =
-  match
-    Capability_manifest.of_json
-      (Yojson.Safe.from_string {|{"schema_version":2,"models":[{"model_id":"m"}]}|})
-  |> Result.map Capability_manifest.entries
-  with
-  | Ok [ entry ] ->
-    (apply_manifest_entry entry).reasoning_replay_override = Default_reasoning_replay
-  | Ok _ | Error _ -> false
 ;;
 
 let%test "reasoning_replay_override_of_catalog_string parses vocabulary" =
@@ -1440,6 +1285,9 @@ let provider_base_label ~catalog ~wire provider =
 
 let apply_catalog_entry ?base ~provider_entry ~wire
     (entry : Model_catalog.model_entry) : capabilities =
+  let base, provider_entry, wire = match entry.provider_name with
+    | None -> None, None, None
+    | Some _ -> base, provider_entry, wire in
   let overrides = overrides_of_catalog_entry entry in
   let wire_base = Option.bind provider_entry
     (fun (provider : Model_catalog.provider_entry) ->
@@ -1451,7 +1299,14 @@ let apply_catalog_entry ?base ~provider_entry ~wire
     | None, None -> Option.bind provider_entry
         (fun (provider : Model_catalog.provider_entry) -> provider.capabilities_base)
   in
-  apply_declarative_capability_overrides ?base { overrides with base_label }
+  let capabilities = apply_declarative_capability_overrides ?base
+      { overrides with base_label } in
+  { capabilities with
+    emits_usage_tokens = (match entry.emits_usage_tokens with
+      | Some emits -> emits | None -> capabilities.emits_usage_tokens)
+  ; supported_models = (match entry.supported_models with
+      | Some _ as models -> models | None -> capabilities.supported_models)
+  }
 ;;
 
 let declared_image_input_for_provider_model ~catalog ~wire ~provider ~model_id =
@@ -1489,48 +1344,8 @@ let for_model_id_from_catalog catalog model_id =
   | None -> None
 ;;
 
-let for_model_id_catalog model_id =
-  with_model_id model_id (for_model_id_from_catalog (Model_catalog.global ()))
-;;
-
-(** Look up capabilities for [model_id] against an explicit manifest,
-    falling back to the catalog lookup ({!for_model_id_catalog}) when no
-    manifest entry matches. *)
-let for_model_id_with_manifest_from_catalog ~catalog manifest model_id =
-  match Capability_manifest.lookup manifest model_id with
-  | Some entry -> Some (apply_manifest_entry entry)
-  | None -> for_model_id_from_catalog catalog model_id
-;;
-
-let for_model_id_with_manifest manifest model_id =
-  with_model_id model_id
-    (for_model_id_with_manifest_from_catalog ~catalog:(Model_catalog.global ()) manifest)
-;;
-
-(** Look up capabilities for [model_id].
-
-    Checks the globally loaded model catalog first, then the capability
-    manifest. Returns [None] when neither source has a matching entry;
-    there is no built-in fallback table. *)
-let for_model_id_from_sources ~catalog ~manifest model_id =
-  match catalog with
-  | Some catalog ->
-    (match Model_catalog.lookup catalog model_id with
-     | Some entry -> Some (apply_catalog_entry ~provider_entry:None ~wire:None entry)
-     | None ->
-       (match manifest with
-        | Some manifest -> for_model_id_with_manifest_from_catalog ~catalog:(Some catalog) manifest model_id
-        | None -> for_model_id_from_catalog (Some catalog) model_id))
-  | None ->
-    (match manifest with
-     | Some manifest -> for_model_id_with_manifest_from_catalog ~catalog:None manifest model_id
-     | None -> None)
-;;
-
 let for_model_id model_id =
-  with_model_id model_id
-    (for_model_id_from_sources
-       ~catalog:(Model_catalog.global ()) ~manifest:(Capability_manifest.global ()))
+  with_model_id model_id (for_model_id_from_catalog (Model_catalog.global ()))
 ;;
 
 let for_provider_reference_base ~catalog ~wire ~provider =
@@ -1542,7 +1357,7 @@ let for_provider_reference_base ~catalog ~wire ~provider =
       capabilities_for_provider_label
 ;;
 
-let for_provider_model_id_from_sources ~catalog ~manifest ~wire ~provider ~model_id =
+let for_provider_model_id_from_catalog ~catalog ~wire ~provider ~model_id =
   let row = Option.bind catalog (fun catalog ->
     Option.map (fun entry -> catalog, entry)
       (Model_catalog.lookup_model_for_provider catalog ~provider ~model_id)) in
@@ -1554,22 +1369,13 @@ let for_provider_model_id_from_sources ~catalog ~manifest ~wire ~provider ~model
        let provider_entry = Model_catalog.provider_entry_for_reference catalog provider in
        Some (apply_catalog_entry ~provider_entry ~wire entry))
   | None ->
-    let manifest_caps = match provider with
-      | Model_catalog.Anonymous_wire Provider_kind.OpenAI_compat
-      | Model_catalog.Declared_provider _ -> None
-      | Model_catalog.Anonymous_wire
-          (Provider_kind.Anthropic | Kimi | Ollama | Gemini | Glm) ->
-        for_model_id_from_sources ~catalog:None ~manifest model_id
-    in
-    (match manifest_caps with
-     | Some _ as caps -> caps
-     | None -> for_provider_reference_base ~catalog ~wire ~provider)
+    for_provider_reference_base ~catalog ~wire ~provider
 ;;
 
 let for_provider_model_id ~wire ~provider ~model_id =
   with_model_id model_id (fun model_id ->
-    for_provider_model_id_from_sources
-      ~catalog:(Model_catalog.global ()) ~manifest:(Capability_manifest.global ())
+    for_provider_model_id_from_catalog
+      ~catalog:(Model_catalog.global ())
       ~wire ~provider ~model_id)
 ;;
 
@@ -1583,14 +1389,13 @@ let resolve_request_policy ~wire ~provider ~model_id =
   | Error _ -> { model_capabilities = None; anthropic_thinking_control = None }
   | Ok model_id ->
   let catalog = Model_catalog.global () in
-  let manifest = Capability_manifest.global () in
-  let model_capabilities = for_provider_model_id_from_sources
-      ~catalog ~manifest ~wire:(Some wire) ~provider ~model_id in
+  let model_capabilities = for_provider_model_id_from_catalog
+      ~catalog ~wire:(Some wire) ~provider ~model_id in
   let anthropic_thinking_control =
     match wire with
     | Provider_kind.Anthropic ->
-      anthropic_thinking_control_for_provider_from_sources
-        ~catalog ~manifest ~provider model_id
+      anthropic_thinking_control_for_provider_from_catalog
+        ~catalog ~provider model_id
     | Provider_kind.Kimi | Provider_kind.OpenAI_compat | Provider_kind.Ollama
     | Provider_kind.Gemini | Provider_kind.Glm -> None
   in
@@ -1719,7 +1524,7 @@ let%test "for_model_id glm-4.5-flash has GLM-4.5 thinking limits" =
   | None -> false
 ;;
 
-(* [for_model_id_catalog] tests below install an explicit catalog through
+(* [for_model_id] tests below install an explicit catalog through
    [Model_catalog.set_global] and restore the override afterwards, so they
    are insulated from any caller-installed model catalog. Inline tests that
    exercise the production catalog use the embedded default generated directly
@@ -2213,9 +2018,9 @@ let with_test_catalog f =
   Fun.protect ~finally:Model_catalog.clear_global f
 ;;
 
-let%test "for_model_id_catalog qwen3 has extended thinking" =
+let%test "for_model_id qwen3 has extended thinking" =
   with_test_catalog (fun () ->
-    match for_model_id_catalog "qwen3-32b" with
+    match for_model_id "qwen3-32b" with
     | Some c ->
       c.supports_reasoning
       && c.supports_tools
@@ -2223,24 +2028,24 @@ let%test "for_model_id_catalog qwen3 has extended thinking" =
     | None -> false)
 ;;
 
-let%test "for_model_id_catalog qwen3.5 routes to Qwen_3 family" =
+let%test "for_model_id qwen3.5 routes to Qwen_3 family" =
   with_test_catalog (fun () ->
-    match for_model_id_catalog "qwen3.5" with
+    match for_model_id "qwen3.5" with
     | Some c -> c.max_output_tokens = Some 81_920
     | None -> false)
 ;;
 
-let%test "for_model_id_catalog qwen36 model routes to Qwen_3 family" =
+let%test "for_model_id qwen36 model routes to Qwen_3 family" =
   with_test_catalog (fun () ->
-    match for_model_id_catalog "qwen36-35b-a3b-mtp" with
+    match for_model_id "qwen36-35b-a3b-mtp" with
     | Some c ->
       c.thinking_control_format = Chat_template_kwargs
     | None -> false)
 ;;
 
-let%test "for_model_id_catalog glm-5-turbo has GLM-5 thinking limits" =
+let%test "for_model_id glm-5-turbo has GLM-5 thinking limits" =
   with_test_catalog (fun () ->
-    match for_model_id_catalog "glm-5-turbo" with
+    match for_model_id "glm-5-turbo" with
     | Some c ->
       c.supports_reasoning
       && c.max_context_tokens = Some 200_000
@@ -2248,33 +2053,33 @@ let%test "for_model_id_catalog glm-5-turbo has GLM-5 thinking limits" =
     | None -> false)
 ;;
 
-let%test "for_model_id_catalog glm-5.1 full model (reasoning + extended thinking)" =
+let%test "for_model_id glm-5.1 full model (reasoning + extended thinking)" =
   with_test_catalog (fun () ->
-    match for_model_id_catalog "glm-5.1" with
+    match for_model_id "glm-5.1" with
     | Some c ->
       c.supports_reasoning
       && c.max_output_tokens = Some 128_000
     | None -> false)
 ;;
 
-let%test "for_model_id_catalog bare glm-5 full model (reasoning + extended thinking)" =
+let%test "for_model_id bare glm-5 full model (reasoning + extended thinking)" =
   with_test_catalog (fun () ->
-    match for_model_id_catalog "glm-5" with
+    match for_model_id "glm-5" with
     | Some c ->
       c.supports_reasoning
       && c.max_output_tokens = Some 128_000
     | None -> false)
 ;;
 
-let%test "for_model_id_catalog catalog miss returns None" =
+let%test "for_model_id catalog miss returns None" =
   with_test_catalog (fun () ->
-    Option.is_none (for_model_id_catalog "totally-unknown-model-id"))
+    Option.is_none (for_model_id "totally-unknown-model-id"))
 ;;
 
-let%test "for_model_id_catalog empty catalog returns None" =
+let%test "for_model_id empty catalog returns None" =
   Model_catalog.set_global Model_catalog.empty;
   Fun.protect ~finally:Model_catalog.clear_global (fun () ->
-    Option.is_none (for_model_id_catalog "qwen3-32b"))
+    Option.is_none (for_model_id "qwen3-32b"))
 ;;
 
 let%test "Anthropic thinking policy resolves from the model catalog declaration" =
@@ -2288,16 +2093,15 @@ anthropic_thinking_control = "adaptive_default"
     = Some Anthropic_adaptive_default)
 ;;
 
-let%test "Anthropic thinking policy falls back to manifest when catalog has no row" =
+let%test "Anthropic thinking policy reads composed JSON declaration" =
   Model_catalog.set_global Model_catalog.empty;
   let manifest = Capability_manifest.of_json (Yojson.Safe.from_string
     {|{"schema_version":2,"models":[{"model_id":"manifest-anthropic-model","anthropic_thinking_control":"adaptive_disabled_through_high"}]}|})
     |> Result.get_ok in
-  Capability_manifest.set_global manifest;
+  Model_catalog.set_global (Model_catalog.with_model_overrides Model_catalog.empty manifest);
   Fun.protect
     ~finally:(fun () ->
-      Model_catalog.clear_global ();
-      Capability_manifest.clear_global ())
+      Model_catalog.clear_global ())
     (fun () ->
        anthropic_thinking_control_for_model_id "manifest-anthropic-model"
        = Some Anthropic_adaptive_disabled_through_high)
@@ -2489,11 +2293,11 @@ let%test "capabilities_for_provider_label: nvidia" =
 
 (* Exact declarations keep their capability fingerprints without inheritance. *)
 let%test
-    "for_model_id_catalog: specific model IDs get correct (not shadowed) capabilities"
+    "for_model_id: specific model IDs get correct (not shadowed) capabilities"
   =
   with_test_catalog (fun () ->
     let check model_id expected =
-      match for_model_id_catalog model_id with
+      match for_model_id model_id with
       | Some c -> expected c
       | None -> false
     in
@@ -2591,7 +2395,7 @@ let%test "undeclared model variants do not inherit catalog policies" =
   with_test_catalog (fun () ->
     List.for_all (fun (entry : Model_catalog.model_entry) ->
       let raw = Model_identifiers.Model_id.to_string entry.model_id in
-      List.for_all (fun variant -> Option.is_none (for_model_id_catalog variant))
+      List.for_all (fun variant -> Option.is_none (for_model_id variant))
         [raw ^ ".undeclared"; "undeclared-provider/" ^ raw]) (Model_catalog.model_entries test_catalog))
 ;;
 

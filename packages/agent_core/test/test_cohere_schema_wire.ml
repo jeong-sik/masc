@@ -187,7 +187,6 @@ let test_exact_frozen_contract () =
 
 let () =
   Model_catalog.set_global (get_ok "embedded catalog" (Model_catalog.load_default ()));
-  Capability_manifest.set_global Capability_manifest.empty;
   Provider_catalog.clear_global ();
   run "Cohere schema wire" [ "contract", [
     test_case "Complete sync/SSE reaches the peer with declared shape" `Quick test_complete_sync_and_sse;

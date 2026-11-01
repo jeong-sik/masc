@@ -73,6 +73,16 @@ Local validation is source parsing, dependency reading and whitespace checks
 only. Executed CI results and their exact checkout belong in a separate retained
 receipt when available; no local build or typecheck is claimed here.
 
+Initial [Test 41329452881](https://github.com/jeong-sik/masc/actions/runs/41329452881)
+checked out `1546b54953269fedb15d7e6d8f1a02c344585219` and failed with
+980 passed cases and one failure. The nested runtime-binding model fixture
+discarded its outer JSON overlay, so the existing exact provider/model test
+could not find its binding. Both fixture helpers now compose the complete pair
+from their captured parent selection and restore that whole selection. The
+behavioral assertions remain; this is a fixture setup repair, not a claim of a
+same-fixture production before/after reproduction. The initial 24 public
+snapshot controls and 132 bootstrap cases passed within that failed workflow.
+
 Strict missing-field admission, remaining high-level provider selection,
 startup/account and native implicit-HOME requirements from the original issue
 remain separate. Source review, focused execution, formal approval, Native Stack

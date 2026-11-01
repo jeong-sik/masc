@@ -14,27 +14,33 @@ let with_env name value f =
 ;;
 
 let with_provider_catalog json f =
+  let previous = Llm_provider.Catalog_snapshot.current () in
+  let models, _ = Llm_provider.Catalog_snapshot.sources previous in
   match Llm_provider.Provider_catalog.of_json (Yojson.Safe.from_string json) with
   | Error msg -> Alcotest.fail msg
   | Ok catalog ->
-    (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Llm_provider.Catalog_snapshot.models (Llm_provider.Catalog_snapshot.current ())) ~providers:(Some (catalog))));
-    Fun.protect ~finally:(fun () -> Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Llm_provider.Catalog_snapshot.models (Llm_provider.Catalog_snapshot.current ())) ~providers:(None))) f
+    Llm_provider.Catalog_snapshot.publish
+      (Agent_core_test_deps.admit_catalogs ~models ~providers:(Some catalog));
+    Fun.protect ~finally:(fun () -> Llm_provider.Catalog_snapshot.publish previous) f
 ;;
 
 let with_model_catalog toml f =
+  let previous = Llm_provider.Catalog_snapshot.current () in
+  let _, providers = Llm_provider.Catalog_snapshot.sources previous in
   let path = Filename.temp_file "agent_core-provider-runtime-binding-models" ".toml" in
   let oc = open_out path in
   Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () -> output_string oc toml);
   Fun.protect
     ~finally:(fun () ->
-      (Llm_provider.Catalog_snapshot.reset ());
+      Llm_provider.Catalog_snapshot.publish previous;
       try Sys.remove path with
       | Sys_error _ -> ())
     (fun () ->
        match Llm_provider.Model_catalog.load_file path with
        | Error msg -> Alcotest.fail msg
        | Ok catalog ->
-         (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None)));
+         Llm_provider.Catalog_snapshot.publish
+           (Agent_core_test_deps.admit_catalogs ~models:(Some catalog) ~providers);
          f ())
 ;;
 

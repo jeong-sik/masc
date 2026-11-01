@@ -1,5 +1,12 @@
-let available value = `Assoc ["kind", `String "available"; "value", value]
-let unavailable reason = `Assoc ["kind", `String "unavailable"; "reason", `String reason]
+let schema = "masc.keeper-continuity-evidence.v1"
+let max_request_scan_rows = 4096
+
+let available ?(fields = []) value =
+  `Assoc (("kind", `String "available") :: ("value", value) :: fields)
+
+let unavailable ?(fields = []) reason =
+  `Assoc (("kind", `String "unavailable") :: ("reason", `String reason) :: fields)
+
 let member name = function `Assoc fields -> List.assoc_opt name fields | _ -> None
 
 let completed_boundary ~config ~keeper ~turn_ref =
@@ -31,29 +38,62 @@ let requests ~config ~keeper ~turn_ref =
       ~keeper Dated_jsonl.Store.Keeper.Continuity_requests in
   let rows = ref [] in
   let failure = ref None in
+  let scanned_rows = ref 0 in
+  let skipped_unattributed_rows = ref 0 in
   let stop detail = failure := Some detail; Some () in
-  let scan = function
-    | Dated_jsonl.Malformed_json _ -> stop "unidentifiable continuity request row"
-    | Dated_jsonl.Parsed json ->
-      if member "schema" json <> Some (`String "masc.continuity-request.v3") then
-        stop "unsupported continuity request schema"
-      else match Option.bind (member "turn_ref" json) (fun value ->
-        match Ids.Turn_ref.of_yojson value with Ok reference -> Some reference | Error _ -> None) with
-      | None -> stop "continuity request lacks a turn identity"
-      | Some reference when Ids.Turn_ref.equal reference turn_ref ->
-        if member "keeper" json <> Some (`String keeper) then stop "continuity request owner mismatch"
-        else (rows := json :: !rows; None)
-      | Some reference when String.equal (Ids.Turn_ref.trace_id reference) (Ids.Turn_ref.trace_id turn_ref)
-          && Ids.Turn_ref.absolute_turn reference < Ids.Turn_ref.absolute_turn turn_ref -> Some ()
-      | Some _ -> None
+  let scan entry =
+    if !scanned_rows >= max_request_scan_rows then
+      stop "continuity request scan exceeded bounded lookback window"
+    else (
+      incr scanned_rows;
+      match entry with
+      | Dated_jsonl.Malformed_json _ -> stop "unidentifiable continuity request row"
+      | Dated_jsonl.Parsed json ->
+        match member "schema" json with
+        | Some (`String ("masc.continuity-request.v1" | "masc.continuity-request.v2")) ->
+          incr skipped_unattributed_rows;
+          if !rows <> [] then Some () else None
+        | Some (`String "masc.continuity-request.v3") ->
+          if member "keeper" json <> Some (`String keeper) then
+            stop "continuity request owner mismatch"
+          else (
+            match member "turn_ref" json with
+            | None | Some `Null ->
+              incr skipped_unattributed_rows;
+              None
+            | Some value ->
+              match Ids.Turn_ref.of_yojson value with
+              | Error _ -> stop "malformed continuity request turn identity"
+              | Ok reference when Ids.Turn_ref.equal reference turn_ref ->
+                rows := json :: !rows;
+                None
+              | Ok reference
+                when !rows <> []
+                     || (String.equal
+                           (Ids.Turn_ref.trace_id reference)
+                           (Ids.Turn_ref.trace_id turn_ref)
+                         && Ids.Turn_ref.absolute_turn reference
+                            < Ids.Turn_ref.absolute_turn turn_ref) ->
+                Some ()
+              | Ok _ -> None)
+        | _ -> stop "unsupported continuity request schema")
+  in
+  let diagnostics () =
+    [ "scanned_rows", `Int !scanned_rows
+    ; "skipped_unattributed_rows", `Int !skipped_unattributed_rows
+    ]
   in
   match Dated_jsonl.find_latest_entry_result (Dated_jsonl.open_store location) scan with
-  | Error error -> unavailable (Dated_jsonl.read_error_to_string error)
+  | Error error ->
+    unavailable ~fields:(diagnostics ()) (Dated_jsonl.read_error_to_string error)
   | Ok _ ->
     match !failure, !rows with
-    | Some detail, _ -> unavailable detail
-    | None, [] -> unavailable "no attributed serializations retained for this turn"
-    | None, rows -> available (`List rows)
+    | Some detail, _ -> unavailable ~fields:(diagnostics ()) detail
+    | None, [] ->
+      unavailable
+        ~fields:(diagnostics ())
+        "no attributed serializations retained for this turn"
+    | None, rows -> available ~fields:(diagnostics ()) (`List rows)
 
 let saved ~config ~keeper =
   match Keeper_librarian_continuity.read ~config ~keeper_name:keeper with
@@ -64,7 +104,7 @@ let saved ~config ~keeper =
 
 let read ~config ~keeper ~turn_ref =
   Result.map (fun manifest ->
-    `Assoc ["schema", `String "masc.keeper-continuity-evidence.v1";
+    `Assoc ["schema", `String schema;
       "keeper", `String keeper; "turn_ref", Ids.Turn_ref.to_yojson turn_ref;
       "wire", Llm_provider.Request_wire_observer.observation_to_yojson
         manifest.Keeper_provider_input_snapshot.mf_snapshot.wire;

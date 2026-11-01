@@ -864,6 +864,8 @@ class RetiredPrefixProtocol(unittest.TestCase):
                     self.assertEqual(len(observed["requests"]), 2)
                 else:
                     self.assertNotEqual(observed["status"], "observed")
+        with self.assertRaises(AttributeError):
+            namespace["prefix_omission"](None, original)
 
 
 class SemanticProtocol(unittest.TestCase):

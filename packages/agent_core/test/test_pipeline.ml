@@ -3717,7 +3717,7 @@ let test_active_terminal_resumes_committed_checkpoint entry () =
   let checkpoint = match Checkpoint_snapshot.checkpoint snapshot with
     | Ok value -> value | Error error -> Alcotest.fail (Checkpoint_snapshot.error_to_string error) in
   let agent = match Agent.resume ~media_store ~net:env#net ~checkpoint ~config ~options () with
-    | Ok value -> value | Error error -> Alcotest.fail (Agent.resume_error_to_string error) in
+    | Ok value -> value | Error error -> Alcotest.fail (Agent_checkpoint.resume_error_to_string error) in
   let store = Agent.execution_store ~runtime ~dir ~resume:locator () in
   let result = match entry with
     | Resume_regular -> Agent.run ~sw ~execution_store:store agent "finish this request"

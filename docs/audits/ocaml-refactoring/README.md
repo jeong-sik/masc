@@ -93,7 +93,7 @@ runtime gates. Source-review completion alone leaves a Draft item in review.
 
 The queue now contains **30 concrete candidates**: 24 from the first semantic pass, A1
 from the Agent Core follow-up, T1 from the integrated TUI investigation, E1/E2 from
-Exec, M1 from multimodal/media, and J1 from the Schedule investigation. Twenty-seven are
+Exec, M1 from multimodal/media, and J1 from the Schedule investigation. Twenty-eight are
 implemented as PRs; source review and execution evidence are recorded separately on each PR: `S1` in
 [#43367](https://github.com/jeong-sik/masc/pull/43367) isolates provider usage
 acceptance; `K1` in [#43370](https://github.com/jeong-sik/masc/pull/43370) preserves
@@ -149,7 +149,9 @@ with its existing local primary authority. K4 in
 [#47126](https://github.com/jeong-sik/masc/pull/47126) gives attempt-local request
 evidence one immutable owner. R1 in
 [#47131](https://github.com/jeong-sik/masc/pull/47131) separates frozen credential-batch
-admission evidence from current immutable ownership. Three candidates remain unfinished. This ordering
+admission evidence from current immutable ownership. R2 in
+[#47133](https://github.com/jeong-sik/masc/pull/47133) gives validated Fusion decision
+events one typed owner while retaining original journal JSON. Two candidates remain unfinished. This ordering
 does not waive their coverage.
 
 | ID | Priority | Status | Refactoring point |
@@ -177,7 +179,7 @@ does not waive their coverage.
 | [S7](#s7) | later | implemented; execution unverified | Replace connector ingress scheduling flag combinations with explicit lane lifecycle |
 | [S8](#s8) | next | in review | Separate durable provider-history decoding and daily projection from journal IO |
 | [R1](#r1) | later | implemented; execution unverified | Credential batch ownership projection |
-| [R2](#r2) | later | candidate | Fusion decision event ownership |
+| [R2](#r2) | later | implemented; execution unverified | Fusion decision event ownership |
 | [A1](#a1) | next | in review | Separate stream error projection from optional diagnostic file I/O |
 | [T1](#t1) | investigate | candidate | Preserve dispatch and commit knowledge in Board post completion |
 | [E1](#e1) | next | in review | Make token-budget state belong to one top-level parse while sharing it with nested substitutions |
@@ -1968,6 +1970,50 @@ focused execution before release.
 ### R2
 
 **Fusion decision event ownership**
+
+Implemented in [#47133](https://github.com/jeong-sik/masc/pull/47133) against
+parent `8b41d574fec0c5f7f27669583d259135151d1f61`. The bounded source/overlap
+audit at observed main `18f6eae84e5a2970ac425d381f95a2c43e887aa9`, followed
+by one 83-open-PR start refresh, found no competing decision-owner/direct-test
+change. Shared Dune and dashboard changes were inspected at their actual hunks
+and remain separate integration work.
+
+Private `Fusion_decision_event` belongs to root `lib/dune`, not the separate
+`masc.fusion_core` library. Its interface owns the canonical disposition and
+private proposal record plus opaque payload/event types. Caller parsing and
+selected-row validation retain their first-error order. Storage parses every
+nonblank JSON line before selecting the queried run; unrelated parsed rows
+still skip shape validation. Typed fields drive timestamp sorting, owner
+filtering and first-matching-ID retry comparison. Accepted Goal order and
+duplicates, one arbitrary notes value and nonblank string bytes are retained.
+
+Each validated event also retains its original parsed JSON and turn-reference
+wire value. Typed turn equality alone cannot replace exact wire equality:
+accepted `trace#07` and canonical `trace#7` remain different retry payloads.
+Read and idempotent record return the original parsed object, including notes
+and field order. Fresh encoding keeps the existing field order and schema.
+The public `Fusion_decision.mli` and all JSON consumers remain unchanged.
+
+Source/Task/Goal authority, identity/evidence hashing, backlog-then-event locks,
+full journal traversal, append-only timestamp reads, dated paths and all four
+durable append/cleanup outcomes remain in `Fusion_decision`. Cancellation and
+the existing exception set retain their original treatment. The extraction
+does not change newline-tail acceptance, add history recovery, deduplicate
+events or scan beyond the first sorted matching decision ID.
+
+The direct public suite adds a persisted-row scenario using its real Task and
+Fusion source: reordered fields, object-valued notes and a noncanonical turn
+spelling must survive readback; the canonical same-turn retry conflicts without
+changing journal bytes. Restoring only canonical spelling permits an idempotent
+retry that returns the same stored object without append or normalization.
+The fixture replaces only its known generated row and preserves other lines.
+It does not add a private codec hook or copied production callback.
+
+Syntax-only parsing and whitespace checks passed; no local Dune build,
+typecheck or test execution occurred. Exact-head independent source review and
+targeted execution are recorded separately on the PR. Full regression,
+concurrent append/cleanup faults, merge and installed runtime remain unverified.
+The original audit rationale below remains historical.
 
 Source:
 [lib/fusion/fusion_decision.ml:58](https://github.com/jeong-sik/masc/blob/aea8424926ea79f110315eec5ab429ac51043598/lib/fusion/fusion_decision.ml#L58-L186).

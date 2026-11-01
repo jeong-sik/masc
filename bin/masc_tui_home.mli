@@ -5,6 +5,7 @@ val home_request_of_approval : Masc_tui_approvals_model.approval_row -> Masc_tui
 val open_approvals : Masc_tui_types.state -> navigate:(Masc_tui_types.surface -> unit) -> unit
 (** Open the complete approval list and preserve the caller as its return
     destination. [navigate] performs the ordinary destination preparation. *)
+
 (** Immutable Home reading for one synchronous UI operation. Prepare again after
     source, selection or notice changes; never retain across an await. Pinning
     its resolved initial selection in the same Build preserves its reading.

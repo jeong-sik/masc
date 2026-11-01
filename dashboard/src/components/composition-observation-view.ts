@@ -4,8 +4,8 @@ import { useSignal } from '@preact/signals'
 import { currentStoredTokenRevision } from '../api/core'
 import { storedTokenRevision } from '../api/token-revision'
 import { executionWorkspaceAuthority } from '../store'
-import { fetchAsyncRequestStatus, fetchOriginalToolResult,
-  type AsyncRequestIdentity, type NestedReading } from '../api/composition-observation'
+import { asyncRequestSourceKey, fetchAsyncRequestStatus, fetchOriginalToolResult, ObservationReadError,
+  type AsyncRequestIdentity, type AsyncRequestStatus, type NestedReading, type OriginalToolResult } from '../api/composition-observation'
 
 const json = (value: unknown) => JSON.stringify(value, null, 2)
 
@@ -45,11 +45,25 @@ export function NestedExecutionView({ reading }: { reading: NestedReading }) {
 
 /** No global result cache: the exact target, access revision and accepted
  * workspace object own each request, including its later page/blob fetches. */
-function useOwnedObservation<T>(identity: string, fetcher: (signal: AbortSignal) => Promise<T>, isCurrent?: () => boolean) {
+type NestedSource = { source: string; reading: NestedReading }
+type VerifiedChildren = { source: string; reading: Extract<NestedReading, { kind: 'observed' }> }
+function asyncSource(result: AsyncRequestStatus): NestedSource | null {
+  if (result.status === 'unavailable' || result.status === 'rejected') {
+    throw new Error(`Request ${result.status}: ${result.status === 'unavailable' ? result.detail : result.reason}`)
+  }
+  return result.status === 'observed' ? { source: asyncRequestSourceKey(result), reading: result.nested } : null
+}
+function originalSource(result: OriginalToolResult): NestedSource | null {
+  return result.state === 'body' ? { source: JSON.stringify([result.source_id, result.body_sha256]), reading: result.nested } : null
+}
+
+function useOwnedObservation<T>(identity: string, fetcher: (signal: AbortSignal) => Promise<T>,
+  project: (result: T) => NestedSource | null, isCurrent?: () => boolean) {
   const authRevision = storedTokenRevision.value
   const authority = executionWorkspaceAuthority.value
   const owner = useMemo(() => ({ identity, authRevision, authority }), [identity, authRevision, authority])
-  const state = useSignal<{ owner: typeof owner; loading: boolean; result: T | null; error: string | null } | null>(null)
+  const state = useSignal<{ owner: typeof owner; loading: boolean; result: T | null; error: string | null;
+    good: VerifiedChildren | null; stale: boolean; resultStale: boolean } | null>(null)
   const controller = useRef<AbortController | null>(null)
   const generation = useRef(0)
   const parentCurrent = useRef(isCurrent)
@@ -64,24 +78,45 @@ function useOwnedObservation<T>(identity: string, fetcher: (signal: AbortSignal)
     const requested = new AbortController()
     controller.current = requested
     const token = ++generation.current
-    state.value = { owner, loading: true, result: null, error: null }
+    const previous = state.peek()?.owner === owner ? state.peek() : null
+    const good = previous?.good ?? null
+    state.value = { owner, loading: true, result: previous?.result ?? null, error: null,
+      good, stale: good !== null, resultStale: previous?.result != null }
     try {
       const result = await fetcher(requested.signal)
-      if (current() && !requested.signal.aborted && token === generation.current) state.value = { owner, loading: false, result, error: null }
+      if (current() && !requested.signal.aborted && token === generation.current) {
+        const source = project(result)
+        const retained = source?.reading.kind === 'observed' ? { source: source.source, reading: source.reading }
+          : source?.reading.kind === 'invalid' && good?.source === source.source ? good : null
+        state.value = { owner, loading: false, result, error: null, good: retained,
+          stale: source?.reading.kind === 'invalid' && retained !== null, resultStale: false }
+      }
     } catch (cause) {
-      if (current() && !requested.signal.aborted && token === generation.current) state.value = {
-        owner, loading: false, result: null, error: cause instanceof Error ? cause.message : String(cause),
+      if (current() && !requested.signal.aborted && token === generation.current) {
+        const previousSource = previous?.result == null ? null : project(previous.result)?.source
+        const changed = cause instanceof ObservationReadError && previousSource != null && cause.source !== previousSource
+        state.value = { owner, loading: false, result: changed ? null : previous?.result ?? null,
+          error: cause instanceof Error ? cause.message : String(cause), good: changed ? null : good,
+          stale: !changed && good !== null, resultStale: !changed && previous?.result != null }
       }
     }
-  }, [owner, fetcher, state])
+  }, [owner, fetcher, project, state])
   return { load, available: authority !== null, state: state.value?.owner === owner ? state.value : null }
+}
+
+function RetainedNestedView({ reading, good, stale }: { reading: NestedReading; good: VerifiedChildren | null; stale: boolean }) {
+  return html`
+    ${stale && good ? html`<p role="status">Showing last verified nested evidence for this exact source; the current read is pending, failed or invalid.</p>` : null}
+    ${stale && good && reading.kind === 'invalid' ? html`<${NestedExecutionView} reading=${reading} />` : null}
+    <${NestedExecutionView} reading=${stale && good ? good.reading : reading} />
+  `
 }
 
 export function AsyncRequestDetails({ identity, isCurrent }: { identity: AsyncRequestIdentity; isCurrent: () => boolean }) {
   const { submitted_by, request_id, keeper_name } = identity
   const fetcher = useCallback((signal: AbortSignal) => fetchAsyncRequestStatus({ submitted_by, request_id, keeper_name }, { signal }),
     [submitted_by, request_id, keeper_name])
-  const observation = useOwnedObservation(JSON.stringify([submitted_by, request_id, keeper_name]), fetcher, isCurrent)
+  const observation = useOwnedObservation(JSON.stringify([submitted_by, request_id, keeper_name]), fetcher, asyncSource, isCurrent)
   useEffect(() => { void observation.load() }, [observation.load])
   const result = observation.state?.result
   return html`<section class="mt-2 rounded border border-[var(--color-border)] p-2" aria-label="Exact async request">
@@ -90,16 +125,17 @@ export function AsyncRequestDetails({ identity, isCurrent }: { identity: AsyncRe
       <button type="button" class="ss-btn" disabled=${observation.state?.loading} onClick=${() => { void observation.load() }}>Refresh exact request</button>`}
     ${observation.state?.loading ? html`<p role="status">Loading exact request…</p>` : null}
     ${observation.state?.error ? html`<p role="alert">${observation.state.error}</p>` : null}
+    ${observation.state?.resultStale ? html`<p role="status">The retained physical request snapshot is stale.</p>` : null}
     ${result?.status === 'observed' ? html`<div>Request state: ${String(result.request.status)}</div>
       <details><summary>Canonical request and continuation</summary><pre class="overflow-auto whitespace-pre-wrap text-3xs">${json(result.request)}</pre></details>
-      <${NestedExecutionView} reading=${result.nested} />`
+      <${RetainedNestedView} reading=${result.nested} good=${observation.state?.good ?? null} stale=${observation.state?.stale ?? false} />`
       : result ? html`<p role="status">Request ${result.status}${result.status === 'unavailable' ? `: ${result.detail}` : result.status === 'rejected' ? `: ${result.reason}` : ''}</p>` : null}
   </section>`
 }
 
 export function OriginalToolResultInspector({ keeper, executionId }: { keeper: string; executionId: string }) {
   const fetcher = useCallback((signal: AbortSignal) => fetchOriginalToolResult(keeper, executionId, { signal }), [keeper, executionId])
-  const observation = useOwnedObservation(JSON.stringify([keeper, executionId]), fetcher)
+  const observation = useOwnedObservation(JSON.stringify([keeper, executionId]), fetcher, originalSource)
   const result = observation.state?.result
   return html`<section class="mt-2 rounded border border-[var(--color-border)] p-2" aria-label="Original tool result">
     <div class="mono text-3xs">Original execution ${executionId}</div>
@@ -107,9 +143,10 @@ export function OriginalToolResultInspector({ keeper, executionId }: { keeper: s
       <button type="button" class="ss-btn" disabled=${observation.state?.loading} onClick=${() => { void observation.load() }}>Read original result</button>`}
     ${observation.state?.loading ? html`<p role="status">Reading and verifying original result…</p>` : null}
     ${observation.state?.error ? html`<p role="alert">${observation.state.error}</p>` : null}
+    ${observation.state?.resultStale ? html`<p role="status">The retained original-result snapshot is stale.</p>` : null}
     ${result?.state === 'body' ? html`<div class="mono text-3xs">source ${result.source_id} · SHA256 ${result.body_sha256} · ${result.recorded_bytes} recorded bytes · error ${String(result.is_error)}</div>
       <details><summary>Verified retained original bytes</summary><pre class="overflow-auto whitespace-pre-wrap text-3xs">${result.content}</pre></details>
-      <${NestedExecutionView} reading=${result.nested} />`
+      <${RetainedNestedView} reading=${result.nested} good=${observation.state?.good ?? null} stale=${observation.state?.stale ?? false} />`
       : result ? html`<p role="status">Original result ${result.state}${result.state === 'unavailable' ? `: ${result.reason}` : ''}</p>` : null}
   </section>`
 }

@@ -91,7 +91,7 @@ describe('Skills observation owner', () => {
   it('retains the selected exact request after its active inventory row disappears', async () => {
     const timer = vi.spyOn(window, 'setInterval')
     exactRequests.fetchAsyncRequestStatus.mockResolvedValue({ status: 'observed',
-      request: { request_id: 'current-request', submitted_by: 'operator', keeper_name: 'owner', status: 'done' }, nested: { kind: 'absent' } })
+      request: { request_id: 'current-request', submitted_by: 'operator', keeper_name: 'owner', request_context: null, status: 'done' }, nested: { kind: 'absent' } })
     try {
       render(html`<${SkillsPanel} />`)
       fireEvent.click(await screen.findByRole('button', { name: 'Inspect exact request' }))

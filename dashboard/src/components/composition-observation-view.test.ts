@@ -13,6 +13,7 @@ vi.mock('../store', async () => {
 })
 vi.mock('../api/composition-observation', async original => ({ ...await original<typeof import('../api/composition-observation')>(), ...api }))
 import { clearStoredToken, setStoredToken } from '../api/core'
+import { asyncRequestSourceKey, ObservationReadError } from '../api/composition-observation'
 import { AsyncRequestDetails, OriginalToolResultInspector, NestedExecutionView } from './composition-observation-view'
 
 const authority = () => ({ epoch: 'fixture', workspaceRoot: '/workspace', connectionGeneration: 1 })
@@ -23,7 +24,7 @@ const nested: NestedReading = { kind: 'observed', children: [{ alias: 'actual-ch
     { node_id: 'submit', origin: { phase: 'submission' }, disposition: 'deferred', tool_use_id: 'submit-once', effect_disposition: 'effect_outcome_unknown', validation_error: null },
     { node_id: 'result', origin: { phase: 'result' }, disposition: null, tool_use_id: null, effect_disposition: null, validation_error: null },
   ], exports: [{ name: 'final', node_id: 'result', pointer: '/value', value: { available: false, error: { kind: 'producer_unavailable' } } }] }] }
-function original(content: string): OriginalToolResult {
+function original(content: string): Extract<OriginalToolResult, { state: 'body' }> {
   return { state: 'body', source_id: 'a'.repeat(64), body_sha256: 'b'.repeat(64), recorded_bytes: content.length, is_error: false, content, nested }
 }
 function pending<T>() {
@@ -37,7 +38,7 @@ beforeEach(() => {
   setStoredToken('credential-a')
   api.fetchOriginalToolResult.mockReset(); api.fetchAsyncRequestStatus.mockReset()
   api.fetchOriginalToolResult.mockResolvedValue(original('retained original body'))
-  api.fetchAsyncRequestStatus.mockResolvedValue({ status: 'observed', request: { ...lookup, status: 'done' }, nested })
+  api.fetchAsyncRequestStatus.mockResolvedValue({ status: 'observed', request: { ...lookup, request_context: null, status: 'done' }, nested })
 })
 afterEach(() => { cleanup(); clearStoredToken() })
 
@@ -116,5 +117,100 @@ describe('actual nested result views', () => {
     await waitFor(() => expect(signal.aborted).toBe(true))
     await act(async () => old.resolve({ status: 'observed', request: { status: 'done' }, nested }))
     expect(screen.queryByTestId('nested-execution-child')).toBeNull()
+  })
+
+  it('keeps the last verified original source explicitly stale while refresh is pending and after a transport failure', async () => {
+    render(html`<${OriginalToolResultInspector} keeper="observer" executionId="exec-exact" />`)
+    fireEvent.click(screen.getByRole('button', { name: 'Read original result' }))
+    await screen.findByTestId('nested-execution-child')
+    const refresh = pending<OriginalToolResult>()
+    api.fetchOriginalToolResult.mockReturnValueOnce(refresh.promise)
+    fireEvent.click(screen.getByRole('button', { name: 'Read original result' }))
+    expect(screen.getByTestId('nested-execution-child')).toBeTruthy()
+    expect(screen.getByText(/Showing last verified nested evidence/)).toBeTruthy()
+    await act(async () => refresh.reject(new Error('original read unavailable')))
+    expect(screen.getByText('original read unavailable')).toBeTruthy()
+    expect(screen.getByText('retained original body')).toBeTruthy()
+    expect(screen.getByTestId('nested-execution-child')).toBeTruthy()
+  })
+
+  it.each(['same', 'source_id', 'body_sha256'] as const)('retains invalid nested refresh only for the %s original source', async change => {
+    render(html`<${OriginalToolResultInspector} keeper="observer" executionId="exec-exact" />`)
+    fireEvent.click(screen.getByRole('button', { name: 'Read original result' }))
+    await screen.findByTestId('nested-execution-child')
+    const latest = { ...original('latest physical body'), nested: { kind: 'invalid' as const, detail: 'manifest no longer readable' } }
+    if (change !== 'same') latest[change] = 'e'.repeat(64)
+    api.fetchOriginalToolResult.mockResolvedValueOnce(latest)
+    fireEvent.click(screen.getByRole('button', { name: 'Read original result' }))
+    await screen.findByText(/manifest no longer readable/)
+    expect(screen.getByText('latest physical body')).toBeTruthy()
+    expect(screen.queryByTestId('nested-execution-child') !== null).toBe(change === 'same')
+    expect(screen.queryByText(/Showing last verified nested evidence/) !== null).toBe(change === 'same')
+  })
+
+  it('shows first-time invalid nested evidence alongside its actual physical original body', async () => {
+    api.fetchOriginalToolResult.mockResolvedValueOnce({ ...original('physical body with invalid metadata'), nested: { kind: 'invalid', detail: 'first manifest failed' } })
+    render(html`<${OriginalToolResultInspector} keeper="observer" executionId="exec-exact" />`)
+    fireEvent.click(screen.getByRole('button', { name: 'Read original result' }))
+    await screen.findByText('physical body with invalid metadata')
+    expect(screen.getByText(/first manifest failed/)).toBeTruthy()
+    expect(screen.queryByTestId('nested-execution-child')).toBeNull()
+    expect(screen.queryByText(/Showing last verified nested evidence/)).toBeNull()
+  })
+
+  it('preserves same-context async children through transport failure and canonical key reordering, but not a changed context', async () => {
+    const request = { ...lookup, status: 'done', request_context: { source: 'composition', nested: { x: 1, y: 2 } } }
+    api.fetchAsyncRequestStatus.mockResolvedValueOnce({ status: 'observed', request, nested })
+    render(html`<${AsyncRequestDetails} identity=${lookup} isCurrent=${() => true} />`)
+    await screen.findByTestId('nested-execution-child')
+    api.fetchAsyncRequestStatus.mockRejectedValueOnce(new Error('status lookup unavailable'))
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh exact request' }))
+    await screen.findByText('status lookup unavailable')
+    expect(screen.getByTestId('nested-execution-child')).toBeTruthy()
+    api.fetchAsyncRequestStatus.mockResolvedValueOnce({ status: 'observed', request: { ...request,
+      request_context: { nested: { y: 2, x: 1 }, source: 'composition' } }, nested: { kind: 'invalid', detail: 'nested refresh invalid' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh exact request' }))
+    await screen.findByText(/nested refresh invalid/)
+    expect(screen.getByTestId('nested-execution-child')).toBeTruthy()
+    expect(screen.getByText(/Showing last verified nested evidence/)).toBeTruthy()
+    api.fetchAsyncRequestStatus.mockResolvedValueOnce({ status: 'observed', request: { ...request,
+      request_context: { source: 'replacement' } }, nested: { kind: 'invalid', detail: 'replacement source invalid' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh exact request' }))
+    await screen.findByText(/replacement source invalid/)
+    expect(screen.queryByTestId('nested-execution-child')).toBeNull()
+    expect(screen.queryByText(/Showing last verified nested evidence/)).toBeNull()
+  })
+
+  it.each(['auth', 'workspace', 'target'])('never carries last-good children into another %s owner', async change => {
+    const view = render(html`<${OriginalToolResultInspector} keeper="observer" executionId="exec-exact" />`)
+    fireEvent.click(screen.getByRole('button', { name: 'Read original result' }))
+    await screen.findByTestId('nested-execution-child')
+    if (change === 'auth') await act(async () => { setStoredToken('credential-b'); setStoredToken('credential-a') })
+    if (change === 'workspace') await act(async () => { workspace.current.value = authority() })
+    if (change === 'target') view.rerender(html`<${OriginalToolResultInspector} keeper="observer" executionId="another-execution" />`)
+    expect(screen.queryByTestId('nested-execution-child')).toBeNull()
+    expect(screen.queryByText('retained original body')).toBeNull()
+  })
+
+  it('does not carry children after an original read reports a different source before a later page fails', async () => {
+    render(html`<${OriginalToolResultInspector} keeper="observer" executionId="exec-exact" />`)
+    fireEvent.click(screen.getByRole('button', { name: 'Read original result' }))
+    await screen.findByTestId('nested-execution-child')
+    api.fetchOriginalToolResult.mockRejectedValueOnce(new ObservationReadError('new source page corrupt', JSON.stringify(['e'.repeat(64), 'f'.repeat(64)])))
+    fireEvent.click(screen.getByRole('button', { name: 'Read original result' }))
+    await screen.findByText('new source page corrupt')
+    expect(screen.queryByTestId('nested-execution-child')).toBeNull()
+    expect(screen.queryByText('retained original body')).toBeNull()
+  })
+
+  it('does not carry prior-context children when a new context has an invalid physical or logical payload', async () => {
+    render(html`<${AsyncRequestDetails} identity=${lookup} isCurrent=${() => true} />`)
+    await screen.findByTestId('nested-execution-child')
+    const source = asyncRequestSourceKey({ status: 'observed', request: { ...lookup, request_context: { changed: true } }, nested: { kind: 'absent' } })
+    api.fetchAsyncRequestStatus.mockRejectedValueOnce(new ObservationReadError('changed context payload rejected', source))
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh exact request' }))
+    await screen.findByText('changed context payload rejected')
+    expect(screen.queryByTestId('nested-execution-child')).toBeNull()
+    expect(screen.queryByText(/Showing last verified nested evidence/)).toBeNull()
   })
 })

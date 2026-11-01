@@ -4,7 +4,7 @@ import { sha256 } from '@noble/hashes/sha2.js'
 import { bytesToHex } from '@noble/hashes/utils.js'
 import { fromByteArray } from 'base64-js'
 import ledger from '../../../test/fixtures/skill-ledger-async-actions.json'
-import { decodeNestedContent, decodeNestedData, fetchAsyncRequestStatus, fetchOriginalToolResult, resolveNestedReading } from './composition-observation'
+import { asyncRequestSourceKey, decodeNestedContent, decodeNestedData, fetchAsyncRequestStatus, fetchOriginalToolResult, resolveNestedReading } from './composition-observation'
 
 const encoder = new TextEncoder()
 const hash = (content: string | Uint8Array) => bytesToHex(sha256(typeof content === 'string' ? encoder.encode(content) : content))
@@ -204,5 +204,109 @@ describe('exact async status transport', () => {
   it.each([{ status: 'absent' }, { status: 'unavailable', detail: 'unreadable' }, { status: 'rejected', reason: 'caller_mismatch' }])('keeps $status explicit', async payload => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ schema: 'masc.async-request-status/v1', ...payload })))
     expect(await fetchAsyncRequestStatus(identity)).toEqual(payload)
+  })
+
+  const lookup = async (request: Record<string, unknown>) => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ schema: 'masc.async-request-status/v1', status: 'observed', request })))
+    return fetchAsyncRequestStatus(identity)
+  }
+  const active = () => ({ ...identity, request_context: null, status: 'running', submitted_at: 1,
+    elapsed_sec: 1, continuation: { kind: 'not_composition' } })
+  const dependency = { kind: 'owned_job', job_id: runId }
+
+  it.each(['queued', 'running', 'cancelling', 'waiting_for_dependencies', 'lost', 'cancelled', 'persistence_failed'])('accepts the producer %s phase with its actual physical boundary', async phase => {
+    const request: Record<string, unknown> = { ...active(), status: phase }
+    if (phase === 'waiting_for_dependencies') Object.assign(request,
+      { completed_at: 2, dependencies: [dependency], worker_released: true, result: { nested_scopes: [] } })
+    else if (phase !== 'queued' && phase !== 'running') {
+      request.ok = false; request.result = { reason: 'original physical outcome' }
+      if (phase !== 'cancelling') request.completed_at = 2
+    }
+    expect((await lookup(request)).status).toBe('observed')
+  })
+
+  it.each([
+    ['done reports false', { status: 'done', ok: false }],
+    ['error reports true', { status: 'error', ok: true }],
+    ['active carries completion', { status: 'running' }],
+    ['nonboolean outcome', { ok: 'true' }],
+    ['dependencies outside wait', { dependencies: [dependency] }],
+    ['worker release outside wait', { worker_released: true }],
+  ])('rejects an impossible physical record: %s', async (_label, patch) => {
+    await expect(lookup({ ...status().request, ...patch })).rejects.toThrow()
+  })
+
+  it.each(['ok', 'completed_at', 'result'])('requires terminal %s evidence', async field => {
+    const request: Record<string, unknown> = { ...status().request }
+    delete request[field]
+    await expect(lookup(request)).rejects.toThrow()
+  })
+
+  it.each([{ ok: true }, { result: {} }, { completed_at: 2 }])('rejects a nonterminal completed boundary %j', async patch => {
+    await expect(lookup({ ...active(), ...patch })).rejects.toThrow()
+  })
+
+  it.each([
+    ['empty', []], ['unknown', [{ kind: 'guessed' }]],
+    ['bad job identity', [{ kind: 'owned_job', job_id: 'not-a-job-id' }]],
+    ['duplicate', [dependency, dependency]],
+    ['extra fields', [{ ...dependency, guessed: true }]],
+    ['missing binding fields', [{ kind: 'composition_result', binding: { composition_run_id: runId } }]],
+  ])('rejects %s physical dependencies', async (_label, dependencies) => {
+    await expect(lookup({ ...active(), status: 'waiting_for_dependencies', completed_at: 2,
+      result: {}, worker_released: true, dependencies })).rejects.toThrow()
+  })
+
+  it.each([{ worker_released: false }, { ok: false }, { result: undefined }, { dependencies: undefined }])('rejects contradictory dependency wait %j', async patch => {
+    await expect(lookup({ ...active(), status: 'waiting_for_dependencies', completed_at: 2,
+      result: {}, worker_released: true, dependencies: [dependency], ...patch })).rejects.toThrow()
+  })
+
+  it('decodes the canonical exact composition-result dependency', async () => {
+    const binding = { request_id: 'child-request', composition_run_id: runId, skill_reference: reference,
+      composition_tool: 'skill__review', parent_tool_use_id: 'original-parent', source_turn: 4, source_task_id: 'task-A' }
+    const value = await lookup({ ...active(), status: 'waiting_for_dependencies', completed_at: 2,
+      result: {}, worker_released: true, dependencies: [{ kind: 'composition_result', binding }] })
+    expect(value.status === 'observed' && value.request.dependencies).toEqual([{ kind: 'composition_result', binding }])
+  })
+
+  const logical = () => ({ ...status().request, request_context: { composition_run_id: runId, source_task_id: 'task-A' },
+    continuation: { kind: 'observed', observation: { composition_run_id: runId, source_task_id: 'task-A',
+      owner: { request_id: 'current-logical-owner', generation: 2 }, journal_version: 'a'.repeat(64), observed_at: 3,
+      resolution: { owner: { request_id: 'current-logical-owner', generation: 2 }, decision: 'cancelled',
+        requested_by: 'operator', reason: 'original resolution', resolved_at: 3,
+        expected_version: 'b'.repeat(64), marker_version: 'c'.repeat(64) } } } })
+
+  it('binds logical run/Task/resolution while keeping a newer logical owner independent of the physical request', async () => {
+    const request = logical()
+    const value = await lookup(request)
+    expect(value.status === 'observed' && value.request.continuation).toEqual(request.continuation)
+    expect(request.continuation.observation.owner.request_id).not.toBe(identity.request_id)
+  })
+
+  it.each(['run', 'task', 'resolution_owner', 'resolution_generation', 'generation', 'version', 'decision', 'context'])('rejects an unbound logical %s', async mismatch => {
+    const request = logical()
+    const observation = request.continuation.observation
+    if (mismatch === 'run') observation.composition_run_id = '019ffc2b-0a41-7ba2-bf58-598e0e7f711c'
+    if (mismatch === 'task') observation.source_task_id = 'another-task'
+    if (mismatch === 'resolution_owner') observation.resolution.owner.request_id = 'another-owner'
+    if (mismatch === 'resolution_generation') observation.resolution.owner.generation = 1
+    if (mismatch === 'generation') observation.owner.generation = 0
+    if (mismatch === 'version') observation.journal_version = 'not-a-version'
+    if (mismatch === 'decision') observation.resolution.decision = 'guessed'
+    if (mismatch === 'context') request.request_context.composition_run_id = 'another-source'
+    await expect(lookup(request)).rejects.toThrow()
+  })
+
+  it('keeps an unavailable logical continuation independent of a valid physical result', async () => {
+    const value = await lookup({ ...status().request, continuation: { kind: 'unavailable', detail: 'journal unavailable' } })
+    expect(value.status === 'observed' && value.nested.kind).toBe('observed')
+  })
+
+  it('preserves the decoded new source on a later physical validation failure', async () => {
+    const request: Record<string, unknown> = { ...status().request, request_context: { replaced: true } }
+    delete request.continuation
+    const source = asyncRequestSourceKey({ status: 'observed', request, nested: { kind: 'absent' } })
+    await expect(lookup(request)).rejects.toMatchObject({ source })
   })
 })

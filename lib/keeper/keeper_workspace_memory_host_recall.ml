@@ -85,11 +85,17 @@ let collect ?(is_excluded = fun _ -> false) ~summary ~detail ~evaluate ~purpose 
     ~detail_snapshot:(fun () -> detail) ~evaluate ~purpose
 
 let render_payload payload =
-  match Prompt_registry.render_prompt_template
-      Prompt_names.keeper_context_workspace_memory_host_selected
-      ["payload",Yojson.Safe.to_string payload] with
-  | Ok text -> "\n\n" ^ text
-  | Error _ -> "\n\nShared memory host retrieval could not be rendered; availability is unknown."
+  let unavailable = "\n\nShared memory host retrieval could not be rendered; availability is unknown." in
+  try
+    match Prompt_registry.render_prompt_template
+        Prompt_names.keeper_context_workspace_memory_host_selected
+        ["payload",Yojson.Safe.to_string payload] with
+    | Ok text -> "\n\n" ^ text
+    | Error _ -> unavailable
+  with
+  | Sys_error detail ->
+    Log.Keeper.warn "workspace memory host recall prompt unavailable: %s" detail;
+    unavailable
 
 (* A rendered projection belongs to its payload. Each observation retains
    the exact pair it checked while validation and persistence can yield. *)

@@ -155,7 +155,7 @@ with its existing local primary authority. Five candidates remain unfinished. Th
 | [K4](#k4) | later | candidate | Make request-evidence reset and projection ownership explicit per attempt |
 | [K5](#k5) | later | source reviewed; execution unverified | Separate approval restart replay decisions from recovery effects |
 | [K6](#k6) | investigate | implemented; execution unverified | Make Agent Core committed-batch scanning an explicit returned state |
-| [K7](#k7) | later | implemented; targeted Current suite passed | Separate Memory receipt reconciliation selection from its durable plan |
+| [K7](#k7) | later | implemented; execution unverified | Separate Memory receipt reconciliation selection from its durable plan |
 | [D1](#d1) | next | in review | Return an explicit task commit receipt instead of a cross-scope notification ref |
 | [D2](#d2) | next | in review | Make Goal upsert a typed immutable transaction decision |
 | [D3](#d3) | later | in review | Isolate the Goal document codec and schema rejection contract |
@@ -417,9 +417,8 @@ Source:
 [lib/keeper/keeper_agent_run.ml:1910](https://github.com/jeong-sik/masc/blob/aea8424926ea79f110315eec5ab429ac51043598/lib/keeper/keeper_agent_run.ml#L1910-L2065),
 [lib/keeper/keeper_agent_run.ml:2545](https://github.com/jeong-sik/masc/blob/aea8424926ea79f110315eec5ab429ac51043598/lib/keeper/keeper_agent_run.ml#L2545-L2701).
 
-Problem: At refreshed source `f8bb999751a1cdde238b2b3f398915b251fd0de1`, request
-attribution, wire evidence and current provider content occupy three independently reset
-refs; projected messages already belong to wire evidence. The source comment documents
+Problem: Request attribution, wire evidence, projected provider content, and projected
+messages occupy four independently reset refs; the source comment explicitly documents
 that clearing only the final record cells lets a failed lane attempt leak its inputs
 into the next lane. Their updates and final projections are hundreds of lines apart.
 Turn-local model-input windows and last-response observations intentionally have
@@ -663,10 +662,8 @@ the exact unproven range at decoded index 1, a clean receipt WAL, unchanged proo
 snapshot and stable repeat reads. Canonical decoding is checked before
 reconciliation. It does not establish hook, scan-cancellation or fsync-failure
 coverage. Existing preparation, authority, quarantine and fixed-point scenarios
-remain. Completed targeted [Test 41273746640](https://github.com/jeong-sik/masc/actions/runs/41273746640)
-passed all 156 Current cases at `f8bb999751a1cdde238b2b3f398915b251fd0de1`, including
-the new scenario. This is scoped execution evidence, separate from source review,
-full regression, merge and installed runtime observation.
+remain. Syntax parsing and source review are distinct from execution; behavior
+is unverified until an actual targeted result is recorded on the PR.
 
 
 ### D1
@@ -904,9 +901,9 @@ review. The historical file-census and consulted-source counts are unchanged.
 **Publish Goal state through the shared local-authoritative writer**
 
 Implemented in [#47125](https://github.com/jeong-sik/masc/pull/47125).
-Code head `b24ff51c5f76678b8b481281744646c7aca78941`:
-[Goal store](https://github.com/jeong-sik/masc/blob/b24ff51c5f76678b8b481281744646c7aca78941/lib/goal/goal_store.ml#L217-L233),
-[public contract](https://github.com/jeong-sik/masc/blob/b24ff51c5f76678b8b481281744646c7aca78941/lib/goal/goal_store.mli#L204-L216).
+Code head `965ab21bc09051e0e6bce5940686af2877f54e94`:
+[Goal store](https://github.com/jeong-sik/masc/blob/965ab21bc09051e0e6bce5940686af2877f54e94/lib/goal/goal_store.ml#L217-L233),
+[public contract](https://github.com/jeong-sik/masc/blob/965ab21bc09051e0e6bce5940686af2877f54e94/lib/goal/goal_store.mli#L212-L217).
 
 The authority audit resolved the earlier candidate's question: `load_source` reads
 local `goals.json` for both supported workspace backends, FileSystem and Memory.

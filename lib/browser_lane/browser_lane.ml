@@ -522,6 +522,7 @@ type live_capability =
   | Tab_navigation
   | Tab_closing
   | Tab_creation
+  | Dialog_read
   | Dialog_answer
   | Frame_read
   | Operator_handoff
@@ -559,6 +560,7 @@ let live_capability_to_wire = function
   | Tab_navigation -> "tab_navigation"
   | Tab_closing -> "tab_closing"
   | Tab_creation -> "tab_creation"
+  | Dialog_read -> "dialog_read"
   | Dialog_answer -> "dialog_answer"
   | Frame_read -> "frame_read"
   | Download_listing -> "download_listing"
@@ -608,7 +610,8 @@ let live_capability = function
   | Page_act (Action.On_tab {interaction = (Action.Accept_dialog _ | Action.Dismiss_dialog); _}) -> Some Dialog_answer
   | Page_context { mode = (`Text _ | `Elements _ | `Frames); _ } -> Some Frame_read
   | Page_downloads _ -> Some Download_listing
-  | Page_context { mode = `Dialog; _ } | Page_console _ | Page_network _ | Page_cookies _ -> None
+  | Page_context { mode = `Dialog; _ } -> Some Dialog_read
+  | Page_console _ | Page_network _ | Page_cookies _ -> None
   (* The operator's browser owns itself, so it has no session to report on.
      Answering here would describe something the automation backend holds. *)
   | Page_act (Action.On_tab {interaction = Action.Upload _; _}) -> Some File_upload
@@ -766,17 +769,17 @@ let live_transport_serves transport capability =
   | Web_extension, Browser_zoom -> true
   | Web_extension, (Trusted_hover | Trusted_drag | Trusted_double_click | Trusted_button_click | Touch_input
                     | Trusted_keyboard | Tab_creation | Viewport_resize | Tab_history | Tab_navigation
-                    | Tab_closing | Dialog_answer | Frame_read | Accessibility_snapshot | Snapshot_target_input | Native_workflow | Page_recovery
+                    | Tab_closing | Dialog_read | Dialog_answer | Frame_read | Accessibility_snapshot | Snapshot_target_input | Native_workflow | Page_recovery
                     | Operator_handoff | Page_management | Download_listing | File_upload) -> false
   | Webdriver_bidi, (Trusted_hover | Trusted_drag | Trusted_double_click | Trusted_button_click | Touch_input
                     | Trusted_keyboard | Tab_creation | Viewport_resize | Tab_history | Tab_navigation
                     | Tab_closing | Dialog_answer | Frame_read) -> true
-  | Webdriver_bidi, (Browser_zoom | Accessibility_snapshot | Snapshot_target_input | Native_workflow | Page_recovery | Operator_handoff | Page_management | Download_listing
+  | Webdriver_bidi, (Dialog_read | Browser_zoom | Accessibility_snapshot | Snapshot_target_input | Native_workflow | Page_recovery | Operator_handoff | Page_management | Download_listing
                     | File_upload) -> false
   | Ego_task_space, (Tab_listing | Text_read | Element_inventory | Viewport_capture | Scene_read
                     | Tab_creation | Tab_navigation | Tab_closing | Dom_interaction | Point_click
                     | Point_scroll | Trusted_hover | Trusted_double_click | Trusted_button_click
-                    | Trusted_drag | Trusted_keyboard | Tab_history | Accessibility_snapshot | Dialog_answer
+                    | Trusted_drag | Trusted_keyboard | Tab_history | Accessibility_snapshot | Dialog_read | Dialog_answer
                     | Snapshot_target_input | Native_workflow | Page_recovery | Operator_handoff | Page_management | Download_listing | File_upload | Tab_activation) -> true
   | Ego_task_space, (Document_source | Touch_input | Browser_zoom | Viewport_resize
                     | Frame_read) -> false

@@ -91,6 +91,17 @@ another Space or automatic takeover replay. Confirm login with a fresh read
 of the intended managed Page. Explicit input/navigation/activation can
 then use an adopted native Page without changing its origin.
 
+Ego tab inventory uses native `task.tabs()` without waiting for Page info.
+`dialogObservation = "unobserved"` means the inventory does not establish whether
+an alert or prompt is open. To request dialog metadata explicitly, use
+`BrowserRead mode = "dialog"` on the same live client and observed `tabId`, with
+no `framePath`. This native read can be unavailable after SDK-session replacement;
+its failure does not invalidate the inventory. An observed dialog in an input
+receipt remains useful. `accept_dialog` and `dismiss_dialog` bind the same native
+managed Page and call its boolean method directly without first reading info;
+`answered = true` does not certify input release or identify unobserved dialog text.
+Never repeat an uncertain answer or infer a clean key/button state from it.
+
 If an Ego result says input release is unconfirmed, keep the original connection
 and do not replay its command. Answer any JavaScript dialog separately. Ask the
 operator to check/reset key and button state in that Space and use this Browser

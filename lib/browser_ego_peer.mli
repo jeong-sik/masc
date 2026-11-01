@@ -163,8 +163,13 @@ val assert_input_reset : t -> generation:string -> (unit, string) result
     [accept_dialog] and [dismiss_dialog] require the SDK boolean [true] and
     return [answered=true]. Native [false] refuses the action before an effect;
     a missing or malformed answer remains [Outcome_unknown] and never permits
-    replay. A listed row of a managed page carries the dialog
-    blocking it, and while one is open, reads, moves and input on that page
+    replay. Tab inventory uses native [task.tabs] without Page observation;
+    [dialogObservation=unobserved] never asserts that no dialog is open.
+    Explicit no-frame [page.context] [mode=dialog] reads native [Page.info]
+    once, independently of inventory and dialog answers. That SDK read can
+    fail after session replacement; it is never a prerequisite to answering.
+    Answers bind a fresh canonical managed Page and call the native boolean
+    method without [Page.info]. While a dialog is open, reads, moves and input on that page
     are refused before any effect. A pointer or key input that opens a
     dialog answers with it; a DOM input the dialog stopped is a
     [Partial_failure] with the dialog. A refusal the script makes before

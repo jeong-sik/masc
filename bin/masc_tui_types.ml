@@ -6320,6 +6320,7 @@ module Browser_lane_view = struct
     | Tab_closing -> "tab closing"
     | Tab_activation -> "tab switch"
     | Tab_creation -> "new tab"
+    | Dialog_read -> "dialog read"
     | Dialog_answer -> "dialog answer"
     | Frame_read -> "frame read"
     | Operator_handoff -> "hand to operator"

@@ -40,59 +40,63 @@ let find_structural_index pred lines =
 ;;
 
 
+let replace_or_append_line section_lines ~key ~line =
+  match
+    find_structural_index
+      (fun existing ->
+         match Toml_line_editor.key_of_line existing with
+         | Some existing_key -> String.equal existing_key key
+         | None -> false)
+      section_lines
+  with
+  | None -> section_lines @ [ line ]
+  | Some index ->
+    let before, from_key = Toml_line_editor.split_at index section_lines in
+    (match from_key with
+     | [] -> before @ [ line ]
+     | opening :: rest ->
+       before @ (line :: Toml_line_editor.skip_value ~opening rest))
+;;
+
+let remove_key_span section_lines ~key =
+  match
+    find_structural_index
+      (fun existing ->
+         match Toml_line_editor.key_of_line existing with
+         | Some existing_key -> String.equal existing_key key
+         | None -> false)
+      section_lines
+  with
+  | None -> section_lines
+  | Some index ->
+    let before, from_key = Toml_line_editor.split_at index section_lines in
+    (match from_key with
+     | [] -> before
+     | opening :: rest ->
+       before @ Toml_line_editor.skip_value ~opening rest)
+;;
+
 let replace_or_append_assignment section_lines ~keeper_name ~runtime_id =
   let line = assignment_line ~keeper_name ~runtime_id in
-  let rec loop acc = function
-    | [], _ | _, [] -> List.rev_append acc [ line ]
-    | existing :: rest, structural :: rest_structural ->
-      (match structural, Toml_line_editor.key_of_line existing with
-       | true, Some key when String.equal key keeper_name ->
-         List.rev_append acc (line :: rest)
-       | _ -> loop (existing :: acc) (rest, rest_structural))
-  in
-  loop [] (section_lines, Toml_line_editor.structural_lines section_lines)
+  replace_or_append_line section_lines ~key:keeper_name ~line
 ;;
 
 let remove_assignment section_lines ~keeper_name =
-  List.combine section_lines (Toml_line_editor.structural_lines section_lines)
-  |> List.filter_map (fun (existing, structural) ->
-    match structural, Toml_line_editor.key_of_line existing with
-    | true, Some key when String.equal key keeper_name -> None
-    | _ -> Some existing)
+  remove_key_span section_lines ~key:keeper_name
 ;;
 
 let replace_or_append_runtime_scalar section_lines ~key ~runtime_id =
   let line = Toml_line_editor.scalar_line ~key ~value:runtime_id in
-  let rec loop acc = function
-    | [], _ | _, [] -> List.rev_append acc [ line ]
-    | existing :: rest, structural :: rest_structural ->
-      (match structural, Toml_line_editor.key_of_line existing with
-       | true, Some existing_key when String.equal existing_key key ->
-         List.rev_append acc (line :: rest)
-       | _ -> loop (existing :: acc) (rest, rest_structural))
-  in
-  loop [] (section_lines, Toml_line_editor.structural_lines section_lines)
+  replace_or_append_line section_lines ~key ~line
 ;;
 
 let replace_or_append_runtime_string_array section_lines ~key ~values =
   let line = Toml_line_editor.string_array_line ~key ~values in
-  let rec loop acc = function
-    | [], _ | _, [] -> List.rev_append acc [ line ]
-    | existing :: rest, structural :: rest_structural ->
-      (match structural, Toml_line_editor.key_of_line existing with
-       | true, Some existing_key when String.equal existing_key key ->
-         List.rev_append acc (line :: rest)
-       | _ -> loop (existing :: acc) (rest, rest_structural))
-  in
-  loop [] (section_lines, Toml_line_editor.structural_lines section_lines)
+  replace_or_append_line section_lines ~key ~line
 ;;
 
 let remove_runtime_scalar section_lines ~key =
-  List.combine section_lines (Toml_line_editor.structural_lines section_lines)
-  |> List.filter_map (fun (existing, structural) ->
-    match structural, Toml_line_editor.key_of_line existing with
-    | true, Some existing_key when String.equal existing_key key -> None
-    | _ -> Some existing)
+  remove_key_span section_lines ~key
 ;;
 
 let append_runtime_section lines ~key ~runtime_id =

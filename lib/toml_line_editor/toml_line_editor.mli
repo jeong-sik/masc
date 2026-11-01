@@ -57,6 +57,10 @@ val structural_lines : string list -> bool list
     line. A header, key or comment is structure only on such a line: inside a
     triple-quoted string or a multi-line array the same text is data. *)
 
+val skip_value : opening:string -> string list -> string list
+(** Advance past the continuation lines of an assignment opened on [opening],
+    returning the remaining lines starting at the next structural line. *)
+
 val key_of_line : string -> string option
 (** Return the assignment key in a [key = value] line, if present. *)
 

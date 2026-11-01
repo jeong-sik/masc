@@ -305,7 +305,46 @@ allow = ["spoof.example"]
     Runtime_config_text.remove_egress_allow_text updated ~keeper_name:"alder"
   in
   check int "only alder2 allowlist remains after removing alder" 1
-    (List.length (parse removed).Runtime_schema.egress_allowlists)
+    (List.length (parse removed).Runtime_schema.egress_allowlists);
+  let multiline_runtime =
+    {|[runtime]
+default = """
+deepseek.chat
+"""
+media_failover = [
+  "deepseek.chat",
+  "glm.flash"
+]
+
+[runtime.assignments]
+"alder" = """
+deepseek.chat
+"""
+|}
+  in
+  let rewritten_runtime =
+    Runtime_config_text.update_runtime_scalar_text multiline_runtime
+      ~key:"default" ~runtime_id:(Some "glm.flash")
+    |> Runtime_config_text.update_runtime_string_array_text
+         ~key:"media_failover" ~values:[ "glm.flash" ]
+    |> Runtime_config_text.update_runtime_assignment_text
+         ~keeper_name:"alder" ~runtime_id:"glm.flash"
+  in
+  let parsed_rewritten = parse rewritten_runtime in
+  check (option string) "multiline default scalar replaced cleanly"
+    (Some "glm.flash") parsed_rewritten.Runtime_schema.default_runtime_id;
+  check (list string) "multiline media_failover array replaced cleanly"
+    [ "glm.flash" ] parsed_rewritten.Runtime_schema.media_failover_runtime_ids;
+  let cleared_runtime =
+    Runtime_config_text.update_runtime_scalar_text multiline_runtime
+      ~key:"default" ~runtime_id:None
+    |> Runtime_config_text.remove_runtime_assignment_text ~keeper_name:"alder"
+  in
+  let parsed_cleared = parse cleared_runtime in
+  check (option string) "multiline default scalar removed cleanly"
+    None parsed_cleared.Runtime_schema.default_runtime_id;
+  check (list (pair string string)) "multiline assignment removed cleanly"
+    [] parsed_cleared.Runtime_schema.keeper_assignments
 ;;
 
 let () =

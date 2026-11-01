@@ -202,10 +202,8 @@ let test_structured_response_states_never_accept_valid_vision_json () =
     ; Unknown "private-stop-description", Runtime_failure
     ]
 
-(* One User message [text query; image]; image data is base64 of the raw bytes
-   (NOT the raw bytes), media_type preserved, source_type "base64". The JSON
-   response contract is explicit prompt prose because the provider request has
-   [response_format = Off]. *)
+(* Run [f] with one managed prompt override in place, restoring the previous
+   override (or none) however [f] ends. *)
 let with_managed_prompt key value f =
   let previous = (Prompt_registry.resolve_prompt key).override_value in
   let set value = match Prompt_registry.set_override key value with
@@ -215,6 +213,11 @@ let with_managed_prompt key value f =
     | Some value -> set value
     | None -> Prompt_registry.clear_prompt_override key) f
 
+(* One User message [frozen prompt text; image]: the text is the managed
+   vision prompt, not the raw query. Image data is base64 of the raw bytes
+   (NOT the raw bytes), media_type preserved, source_type "base64". The JSON
+   response contract is explicit prompt prose because the provider request has
+   [response_format = Off]. *)
 let test_message_of_request () =
   let bytes = "\x89PNG\r\n\x1a\n\x00raw\xffbytes" in
   match

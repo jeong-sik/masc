@@ -216,6 +216,123 @@ let test_image_declaration_survives_native_save () =
           (Some 750000) model.max_context
       | _ -> Alcotest.fail "expected one saved model") [None; Some false; Some true]
 
+let test_catalog_image_declarations_survive_discovery_and_save () =
+  let module Catalog = Llm_provider.Model_catalog in
+  let module Discovery = Runtime_model_discovery in
+  let load declaration =
+    let source = {|
+[[providers]]
+id = "image-fixture"
+aliases = ["image-alias"]
+kind = "openai_compat"
+identity_kinds = ["openai_compat", "anthropic"]
+base_url = "https://fixture.invalid/v1"
+request_path = "/chat/completions"
+auth = "api-key"
+capabilities_base = "openai_chat"
+capabilities_base_by_identity_kind = { anthropic = "mimo" }
+serves_bare_models = ["bare", "shadowed"]
+
+[[models]]
+model_id = "omitted"
+provider_name = "image-fixture"
+base = "glm"
+|} ^ (match declaration with None -> "" | Some value ->
+      "supports_image_input = " ^ string_of_bool value ^ "\n") ^ {|
+[[models]]
+model_id = "provider-base"
+provider_name = "image-fixture"
+[[models]]
+model_id = "base-false"
+provider_name = "image-fixture"
+base = "mimo"
+[[models]]
+model_id = "row-false"
+provider_name = "image-fixture"
+base = "anthropic"
+supports_image_input = false
+[[models]]
+model_id = "row-true"
+provider_name = "image-fixture"
+base = "mimo"
+supports_image_input = true
+[[models]]
+model_id = "wire-base"
+provider_name = "image-fixture"
+base = "anthropic"
+[[models]]
+model_id = "bare"
+base = "anthropic"
+[[models]]
+model_id = "shadowed"
+base = "anthropic"
+[[models]]
+model_id = "shadowed"
+provider_name = "image-fixture"
+base = "glm"
+[[models]]
+model_id = "foreign"
+provider_name = "other-account"
+base = "anthropic"
+|} ^ String.concat "" (List.map (fun base ->
+      "\n[[models]]\nmodel_id = " ^ Yojson.Safe.to_string (`String base)
+      ^ "\nprovider_name = \"image-fixture\"\nbase = " ^ Yojson.Safe.to_string (`String base) ^ "\n")
+      ["openai_chat_extended";"openrouter";"ollama_cloud";"nvidia"]) in
+    match Catalog.of_toml_string ~source:"image-declaration-fixture" source with
+    | Ok catalog -> catalog | Error error -> Alcotest.fail error in
+  let original = Catalog.global () in
+  Fun.protect ~finally:(fun () -> match original with
+    | Some catalog -> Catalog.set_global catalog | None -> Catalog.clear_global ()) (fun () ->
+    Catalog.set_global (load None);
+    let discover ?(protocol=Discovery.Openai) provider rows =
+      let connection : Discovery.connection = {
+        protocol; provider; endpoint="https://fixture.invalid/v1"; credential=None } in
+      Discovery.discover_with ~get:(fun ~url:_ -> Ok (Yojson.Safe.to_string (`Assoc ["data",`List rows])))
+        connection |> Result.get_ok in
+    let names = ["omitted";"provider-base";"base-false";"row-false";"row-true";
+      "wire-base";"bare";"shadowed";"foreign";"unknown-model";
+      "openai_chat_extended";"openrouter";"ollama_cloud";"nvidia"] in
+    let rows = List.map (fun id -> `Assoc ["id",`String id]) names in
+    let image models id =
+      (List.find (fun (model:Discovery.model) -> model.id=id) models).supports_image_input in
+    let models = discover (Discovery.Named_provider "image-alias") rows in
+    let check message id expected = Alcotest.(check (option bool)) message expected (image models id) in
+    List.iter (fun id -> check "defaults and foreign or missing rows are not declarations" id None)
+      ["omitted";"shadowed";"foreign";"unknown-model"];
+    List.iter (fun id -> check "explicit base declarations survive inheritance" id (Some true))
+      ["provider-base";"wire-base";"bare";"openai_chat_extended";"openrouter";"ollama_cloud";"nvidia"];
+    List.iter (fun id -> check "explicit false survives base and row overrides" id (Some false))
+      ["base-false";"row-false"];
+    check "row true overrides base false" "row-true" (Some true);
+    let alternate = discover ~protocol:Discovery.Anthropic (Discovery.Named_provider "image-fixture") rows in
+    Alcotest.(check (option bool)) "wire base takes precedence over the row base"
+      (Some false) (image alternate "wire-base");
+    Alcotest.(check (option bool)) "wire base does not change an authorized bare row"
+      (Some true) (image alternate "bare");
+    Alcotest.(check (option bool)) "row override takes precedence over the wire base"
+      (Some true) (image alternate "row-true");
+    List.iter (fun provider ->
+      List.iter (fun (model:Discovery.model) -> Alcotest.(check (option bool))
+        "anonymous and unknown providers borrow no declaration" None model.supports_image_input)
+        (discover provider rows)) [Discovery.Anonymous_endpoint;Discovery.Named_provider "unknown-provider"];
+    let disabled = discover (Discovery.Named_provider "image-fixture")
+      [`Assoc ["id",`String "provider-base";"supports_image_input",`Bool false]] in
+    Alcotest.(check (option bool)) "endpoint false overrides catalog true"
+      (Some false) (image disabled "provider-base");
+    let fields = ["choice",`String "codex";"model",`String "omitted";
+      "max_context",`Int 8192;"tools",`Bool true;"streaming",`Bool true]
+      @ (match image models "omitted" with None -> [] | Some value -> ["supports_image_input",`Bool value]) in
+    let rendered = Runtime_setup_spec.of_json (`Assoc fields) |> Result.get_ok |> Runtime_setup_spec.render in
+    let saved = Runtime_toml.parse_string rendered.runtime_toml |> Result.get_ok in
+    let saved_image = Option.bind (List.hd saved.models).capabilities
+      (fun caps -> caps.Runtime_schema.supports_image_input) in
+    Alcotest.(check (option bool)) "saving an omitted declaration writes no false override" None saved_image;
+    Catalog.set_global (load (Some true));
+    let corrected = discover (Discovery.Named_provider "image-fixture") rows in
+    Alcotest.(check (option bool)) "a corrected catalog can supply the previously omitted declaration"
+      (Some true) (image corrected "omitted");
+    Alcotest.(check (option bool)) "the saved model still has no overriding declaration" None saved_image)
+
 let test_http_request_surface () =
   let parse path =
     Runtime_setup_spec.of_json (`Assoc (["choice", `String "openai_compatible";
@@ -452,6 +569,7 @@ let () = Alcotest.run "native runtime setup spec" ["contract",[
   Alcotest.test_case "existing and disabled account identity" `Quick test_configured_account_resolution;
   Alcotest.test_case "inventory groups existing account providers without renaming" `Quick test_inventory_groups_existing_account_providers;
   Alcotest.test_case "image declaration survives native save" `Quick test_image_declaration_survives_native_save;
+  Alcotest.test_case "catalog image declaration provenance survives discovery and save" `Quick test_catalog_image_declarations_survive_discovery_and_save;
   Alcotest.test_case "installer declarations survive rendering" `Quick test_installer_declarations;
   Alcotest.test_case "native fractional number identity" `Quick test_native_fractional_identity;
   Alcotest.test_case "typed input rejects incompatible declarations" `Quick test_rejects_invalid_transport_claims;

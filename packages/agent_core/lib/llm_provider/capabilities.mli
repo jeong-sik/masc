@@ -184,6 +184,12 @@ type capabilities =
   ; (* Input modalities *)
     supports_multimodal_inputs : bool
   ; supports_image_input : bool
+  ; declared_image_input : bool option
+    (** Image declaration provenance retained by capability presets and catalog
+        resolution. [None] means neither source declared the field, even when
+        effective admission defaults to false. This is not a configuration knob
+        or an admission flag; runtime record updates do not establish catalog
+        evidence. Use {!declared_image_input_for_provider_model} for catalog facts. *)
   ; supports_audio_input : bool
   ; supports_video_input : bool
   ; supports_document_input : bool
@@ -320,6 +326,20 @@ val for_provider_model_id
   -> provider:Model_catalog.provider_reference
   -> model_id:string
   -> capabilities option
+
+val declared_image_input_for_provider_model
+  :  catalog:Model_catalog.t
+  -> wire:Provider_kind.t option
+  -> provider:Model_catalog.provider_reference
+  -> model_id:Model_identifiers.Model_id.t
+  -> bool option
+(** Resolve declaration provenance from one immutable catalog and an exact
+    permitted model row. An explicit row value wins, followed by its selected
+    capability base's explicit declaration; absence remains [None]. The base
+    selection follows {!for_provider_model_id}, including wire overrides and
+    scoped-row shadowing. Bare rows use only their own base. Unknown providers,
+    anonymous endpoints and missing or foreign rows supply no borrowed facts.
+    Effective protocol defaults and the capability manifest are not sources. *)
 
 (** Immutable resolution for one request. Missing facts remain missing even
     if process catalogs are replaced later. *)

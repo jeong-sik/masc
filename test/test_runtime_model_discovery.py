@@ -44,24 +44,32 @@ class NativeDiscovery(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         models = {row['id']: row for row in json.loads(result.stdout)['models']}
         self.assertIs(models['glm-5.3-flash'].get('supports_image_input'), True)
+        self.assertIsNone(models['glm-5.3'].get('supports_image_input'))
+
+    def test_provider_catalog_preserves_explicit_inherited_image_declaration(self):
+        result = subprocess.run([BINARY, 'runtime-model-list', '--provider', 'claude'],
+                                capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        models = {row['id']: row for row in json.loads(result.stdout)['models']}
+        self.assertIs(models['claude-sonnet-5-5'].get('supports_image_input'), True)
 
     def test_named_provider_discovery_joins_only_its_exact_catalog_model(self):
         self.respond = lambda path: (200, {}, {'data': [
             dict(id='glm-5.3-flash'), dict(id='glm-5.3-flash-unknown'), dict(id='glm-5.3')]})
         for provider in (None, 'glm-coding', 'unknown-provider'):
             with self.subTest(provider=provider):
-                result = self.invoke(**({} if provider is None else dict(provider_id=provider)))
+                result = self.invoke_catalog_fixture(**({} if provider is None else dict(provider_id=provider)))
                 self.assertEqual(result.returncode, 0, result.stderr)
                 models = {row['id']: row.get('supports_image_input')
                           for row in json.loads(result.stdout)['models']}
                 self.assertEqual(models['glm-5.3-flash'], True if provider == 'glm-coding' else None)
                 self.assertIsNone(models['glm-5.3-flash-unknown'])
-                self.assertEqual(models['glm-5.3'], False if provider == 'glm-coding' else None)
+                self.assertIsNone(models['glm-5.3'])
 
     def test_exact_native_provider_model_inherits_its_catalog_base(self):
         self.respond = lambda path: (200, {}, {'data': [
             dict(id='claude-sonnet-5-5'), dict(id='gpt-6.1-sol'), dict(id='unreported-model')]})
-        result = self.invoke(provider_id='claude')
+        result = self.invoke_catalog_fixture(provider_id='claude')
         self.assertEqual(result.returncode, 0, result.stderr)
         models = {row['id']: row.get('supports_image_input')
                   for row in json.loads(result.stdout)['models']}
@@ -72,7 +80,7 @@ class NativeDiscovery(unittest.TestCase):
     def test_explicit_endpoint_image_disable_survives_catalog_join(self):
         self.respond = lambda path: (200, {}, {'data': [
             dict(id='glm-5.3-flash', supports_image_input=False)]})
-        result = self.invoke(provider_id='glm-coding')
+        result = self.invoke_catalog_fixture(provider_id='glm-coding')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIs(json.loads(result.stdout)['models'][0]['supports_image_input'], False)
 
@@ -114,6 +122,9 @@ class NativeDiscovery(unittest.TestCase):
         self.addCleanup(self.server.server_close)
         self.addCleanup(self.server.shutdown)
         self.endpoint = 'http://127.0.0.1:' + str(self.server.server_port)
+        self.fixture_key = Path(self.home.name, 'discovery-fixture-key')
+        self.fixture_key.write_text('local-discovery-fixture-key')
+        self.fixture_key.chmod(0o600)
         self.respond = lambda path: (200, {}, {'data': []})
         self.respond_post = lambda path, body: (200, {})
 
@@ -126,6 +137,14 @@ class NativeDiscovery(unittest.TestCase):
                 env.pop(key)
         return subprocess.run([BINARY, 'runtime-discover-models', '--spec', str(spec)],
                               capture_output=True, text=True, env=env, timeout=30)
+
+    def invoke_catalog_fixture(self, **fields):
+        self.calls.clear()
+        result = self.invoke(credential_file=str(self.fixture_key), **fields)
+        self.assertEqual([path for path, _ in self.calls], ['/models'])
+        self.assertEqual(self.calls[0][1].get('authorization'), 'Bearer local-discovery-fixture-key')
+        self.assertNotIn('local-discovery-fixture-key', result.stdout + result.stderr)
+        return result
 
     def test_malformed_credential_references_make_no_request(self):
         for fields in [dict(credential_file=12), dict(credential_file=''),

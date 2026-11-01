@@ -14,7 +14,8 @@ type model = {
   tools : bool option;
   supports_image_input : bool option;
   (** Explicit model-list metadata, otherwise the exact named provider/model's
-      catalog capability. Anonymous endpoints borrow no catalog facts.
+      declared catalog capability, including an explicit inherited base field.
+      Effective defaults are not declarations. Anonymous endpoints borrow no catalog facts.
       [None] means unreported, not unsupported. *)
   listed_at : Yojson.Safe.t option;
 }

@@ -40,7 +40,8 @@ val provider_model_rows : string -> (Yojson.Safe.t, string) result
 (** Catalog rows served by one named provider, for the setup wizard's named
     catalog sources: id, label, declared context, accepted reasoning efforts
     with a default rung, and capabilities resolved against the provider's own
-    wire kind. Scoped rows shadow permitted bare rows with the same whole id.
+    wire kind. Image input carries only an explicit row or inherited base
+    declaration; absent metadata stays null. Scoped rows shadow permitted bare rows with the same whole id.
     Bare rows require the provider's [serves_bare_models] declaration.
     Rows without a positive declared context are omitted — the
     wizard cannot pin a runtime entry for them. An unknown provider id is an

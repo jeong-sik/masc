@@ -126,15 +126,11 @@ let with_catalog_image_input (connection : connection) (model : model) =
       match Llm_provider.Model_catalog.global (),
             Llm_provider.Model_identifiers.Model_id.of_string model.id with
       | Some catalog, Ok model_id ->
-        (* Require an exact permitted row before resolving its declared base
-           and overrides. A provider-wide fallback without a model row cannot
-           establish that an unknown model accepts images. *)
-        Option.bind
-          (Llm_provider.Model_catalog.lookup_model_for_provider catalog ~provider ~model_id)
-          (fun _ ->
-            Option.map (fun (caps : Llm_provider.Capabilities.capabilities) -> caps.supports_image_input)
-              (Llm_provider.Capabilities.for_provider_model_id
-                 ~wire:None ~provider ~model_id:model.id))
+        let wire = match connection.protocol with
+          | Openai -> Llm_provider.Provider_kind.OpenAI_compat
+          | Anthropic -> Anthropic | Kimi -> Kimi | Ollama -> Ollama in
+        Llm_provider.Capabilities.declared_image_input_for_provider_model
+          ~catalog ~wire:(Some wire) ~provider ~model_id
       | None, _ | Some _, Error _ -> None
     in
     {model with supports_image_input = catalog_capability}

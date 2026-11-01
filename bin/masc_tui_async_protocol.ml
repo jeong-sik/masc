@@ -221,7 +221,10 @@ type resume_confirmation =
 
 type board_attachment_action_result =
   | Board_saved_original of string
-  | Board_image_open_ready of Masc_tui_attachment_action.prepared
+  | Board_image_open_ready of unit ref * Masc_tui_attachment_action.prepared
+  | Board_image_open_failed of unit ref * string
+  | Board_image_open_finished of unit ref * string
+  | Board_image_open_retry of {attempt : unit ref; prepared : Masc_tui_attachment_action.prepared; opener : string}
 
 type async_msg =
   | Chat_search_finished of int * bool * Masc_tui_render_chat.chat_search_plan
@@ -1125,7 +1128,7 @@ let rec board_preview_waits_for_input = function
   | Workspace_scoped (_, _, message) | Workspace_operation message ->
       board_preview_waits_for_input message
   | Sent_image_ready {view=Board;_} -> true
-  | Board_attachment_saved (_, Ok (Board_image_open_ready _)) -> true
+  | Board_attachment_saved (_, Ok (Board_image_open_ready _ | Board_image_open_retry _)) -> true
   | _ -> false
 
 let rec message_matches_share_input ~resource_read ~recovery_loaded = function

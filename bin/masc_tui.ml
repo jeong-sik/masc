@@ -4216,25 +4216,56 @@ let prepare_board_read state ~mailbox ~cols =
 
 type board_original_action = Save_board_original | Open_board_image
 
+let board_image_open_worker = Masc_tui_board_preview_work.create ()
+let board_image_prepare_worker = Masc_tui_board_preview_work.create ()
+let board_image_open_reaper : (bool Atomic.t * Thread.t) option ref = ref None
+
+(* The reaper owns the child even if its Eio observer is cancelled. On normal
+   process exit, request cancellation and join it before the runtime exits. *)
+let () = at_exit (fun () ->
+  Option.iter (fun (cancelled,thread) ->
+    Atomic.set cancelled true;
+    Thread.join thread) !board_image_open_reaper)
+
 let use_board_read state ~mailbox ~action =
-  match Masc_tui_board_reader.saved_source state.board_reader with
+  let source = match action with
+    | Save_board_original -> Masc_tui_board_reader.saved_source state.board_reader
+        |> Option.map (fun (request,key,bytes) -> None,request,key,bytes)
+    | Open_board_image when Masc_tui_board_preview_work.is_busy board_image_open_worker -> None
+    | Open_board_image ->
+        let reader,source=Masc_tui_board_reader.begin_original_open state.board_reader in
+        state.board_reader <- reader;
+        Option.map (fun (attempt,request,key,bytes) -> Some attempt,request,key,bytes) source in
+  match source with
   | None -> ()
-  | Some (request,key,bytes) ->
-    launch_workspace_result ~operation:true state ~mailbox ~boundary_error:Fun.id
-      ~deliver:(fun result -> Board_attachment_saved (request,result))
+  | Some (attempt,request,key,bytes) ->
+    let clear_pending () = Option.iter (fun attempt ->
+      state.board_reader <- Masc_tui_board_reader.finish_original_open state.board_reader request attempt) attempt in
+    let cancelled = Option.map (fun attempt ->
+      Board_attachment_saved (request,Ok (Board_image_open_failed (attempt,"Image opening cancelled")))) attempt in
+    launch_workspace_result ~operation:true ?cancelled ~on_not_run:clear_pending state ~mailbox ~boundary_error:Fun.id
+      ~deliver:(fun result ->
+        let result=match attempt,result with
+          | Some attempt,Error error -> Ok (Board_image_open_failed (attempt,error))
+          | (Some _ | None),_ -> result in
+        Board_attachment_saved (request,result))
       (fun () -> Eio_unix.run_in_systhread (fun () ->
-        let kind=match action with Save_board_original -> Ak_file | Open_board_image -> Ak_image in
+        let prepare () =
+        let kind=match attempt with None -> Ak_file | Some _ -> Ak_image in
         let attachment={ba_kind=kind;ba_source=As_artifact {sha256=key.sha256;bytes=key.bytes};ba_name=key.name} in
         match Masc_tui_attachment_action.prepare ~fetch:(fun ~sha256:_ -> Ok bytes) attachment with
         | Error outcome -> Error (Masc_tui_attachment_action.describe_outcome outcome)
-        | Ok prepared -> match action with
-          | Open_board_image -> Ok (Board_image_open_ready prepared)
-          | Save_board_original ->
+        | Ok prepared -> match attempt with
+          | Some attempt -> Ok (Board_image_open_ready (attempt,prepared))
+          | None ->
               let outcome=Masc_tui_attachment_action.perform prepared ~midi_soundfont:None in
               let description=Masc_tui_attachment_action.describe_outcome outcome in
               match outcome.result with
               | Failed _ -> Error description
-              | Saved _ | Played | Opened -> Ok (Board_saved_original description)))
+              | Saved _ | Played | Opened -> Ok (Board_saved_original description) in
+        match attempt with
+        | None -> prepare ()
+        | Some _ -> Masc_tui_board_preview_work.run board_image_prepare_worker prepare))
 
 let open_chat_call_reader ?execution_id state ~mailbox keeper_name =
   if state.view = Keepers Keeper_message
@@ -11926,6 +11957,10 @@ let prepare_inspected_frame state ~mailbox =
                    ~run:(Masc_tui_image_cache.run_bounded ~deadline_seconds:image_process_deadline_seconds))
                | Local_file_image_read _ | Draft_image_read _ | Peer_image_read _ -> None in
              let* png = Masc_tui_pele.render ~cache_dir:(ensure_img_cache_dir ()) ~raster ?runner scene in
+             let* () = match pending.sir_owner with
+               | Board_image_read _ when not (Masc_tui_image_cache.has_png_structure png) ->
+                   Error "image has an invalid or truncated PNG structure"
+               | Board_image_read _ | Local_file_image_read _ | Draft_image_read _ | Peer_image_read _ -> Ok () in
              let* prepared = Masc_tui_image_cache.prepare_presentation ~run:Unix.system
                ~cache_dir:(ensure_img_cache_dir ()) Masc_tui_image_cache.Pixel_graphics png in
              Ok (prepared,Some scene) in
@@ -21028,35 +21063,81 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
          Closing or retiring its read view cannot revoke a completed save. *)
       (match result with
        | Ok (Board_saved_original text) -> report_action state "system" text
-       | Ok (Board_image_open_ready prepared) ->
+       | Ok (Board_image_open_failed (attempt,error)) ->
+           if Masc_tui_board_reader.owns_original_open state.board_reader request attempt then begin
+             state.board_reader <- Masc_tui_board_reader.finish_original_open state.board_reader request attempt;
+             report_action state "error" error
+           end
+       | Ok (Board_image_open_finished (attempt,text)) ->
+           state.board_reader <- Masc_tui_board_reader.finish_original_open state.board_reader request attempt;
+           report_action state "system" text
+       | Ok ((Board_image_open_ready _ | Board_image_open_retry _) as opening) ->
+           let target = match opening with
+             | Board_image_open_ready (attempt,prepared) -> Some (attempt,prepared,None)
+             | Board_image_open_retry {attempt;prepared;opener} -> Some (attempt,prepared,Some opener)
+             | Board_image_open_failed _ | Board_image_open_finished _ | Board_saved_original _ -> None in
+           Option.iter (fun (attempt,prepared,after) ->
+           let finish () =
+             state.board_reader <- Masc_tui_board_reader.finish_original_open state.board_reader request attempt in
            if Option.is_some (current_board_reader state)
-              && Masc_tui_board_reader.owns state.board_reader request
+              && Masc_tui_board_reader.owns_original_open state.board_reader request attempt
               && (match state.board_reader_owner with Some (_,_,Ak_image) -> true | _ -> false) then
              (match Masc_tui_attachment_action.external_file prepared, Eio_context.get_switch_opt () with
               | Some (name,path), Some sw ->
-                  (match Masc_tui_browser.spawn_url path with
-                   | Error _ -> report_action state "system" (Printf.sprintf "saved %s · %s" name path)
-                   | Ok (_opener,pid) ->
+                  if not (Masc_tui_board_preview_work.try_acquire board_image_open_worker) then begin
+                    finish ();
+                    report_action state "system" "An image opener is already running"
+                  end else (match Masc_tui_browser.spawn_url ?after path with
+                   | Error _ ->
+                       Masc_tui_board_preview_work.release board_image_open_worker;
+                       finish ();
+                       report_action state "system" (Printf.sprintf "saved %s · %s" name path)
+                   | Ok (opener,pid) ->
                        let deliver=workspace_enqueue state in
-                       (try Eio.Fiber.fork_daemon ~sw (fun () ->
-                          let status=Eio_guard.run_in_systhread ~label:"tui-board-image-open" (fun () ->
-                            Masc_tui_image_cache.wait_bounded ~deadline_seconds:image_process_deadline_seconds pid) in
-                          let description=match status with
-                            | Unix.WEXITED 0 -> "opened " ^ name
-                            | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
-                                Printf.sprintf "saved %s · %s" name path in
-                          deliver mailbox (Board_attachment_saved (request,Ok (Board_saved_original description)));
-                          `Stop_daemon)
-                        with exn ->
-                          (try Unix.kill pid Sys.sigkill with Unix.Unix_error (Unix.ESRCH,_,_) -> ());
-                          ignore (Unix.waitpid [] pid);
-                          report_action state "error" (Printexc.to_string exn)))
+                       let kill_and_reap () =
+                         (try Unix.kill pid Sys.sigkill with Unix.Unix_error _ -> ());
+                         let rec reap () = match Unix.waitpid [] pid with
+                           | _ -> ()
+                           | exception Unix.Unix_error (Unix.EINTR,_,_) -> reap ()
+                           | exception Unix.Unix_error (Unix.ECHILD,_,_) -> () in
+                         reap () in
+                       let completed,resolve=Eio.Promise.create () in
+                       let cancelled=Atomic.make false in
+                       (match Thread.create (fun () ->
+                          let status=Fun.protect ~finally:(fun () ->
+                            Masc_tui_board_preview_work.release board_image_open_worker) (fun () ->
+                            try Ok (Masc_tui_image_cache.wait_bounded
+                              ~cancelled:(fun () -> Atomic.get cancelled)
+                              ~deadline_seconds:image_process_deadline_seconds pid)
+                            with exn ->
+                              (try kill_and_reap () with _ -> ());
+                              Error (Printexc.to_string exn)) in
+                          Eio.Promise.resolve resolve status) () with
+                        | exception exn ->
+                            (try kill_and_reap () with _ -> ());
+                            Masc_tui_board_preview_work.release board_image_open_worker;
+                            finish ();
+                            report_action state "error" (Printexc.to_string exn)
+                        | thread ->
+                            board_image_open_reaper := Some (cancelled,thread);
+                            (try Eio.Fiber.fork_daemon ~sw (fun () ->
+                               let status=Eio.Promise.await completed in
+                               let outcome=match status with
+                                 | Ok (Unix.WEXITED 0) -> Board_image_open_finished (attempt,"opened " ^ name)
+                                 | Ok (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) | Error _ ->
+                                     Board_image_open_retry {attempt;prepared;opener} in
+                               deliver mailbox (Board_attachment_saved (request,Ok outcome));
+                               `Stop_daemon)
+                             with exn -> finish (); report_action state "error" (Printexc.to_string exn))))
               | Some (name,path), None ->
+                  finish ();
                   report_action state "system" (Printf.sprintf "saved %s · %s" name path)
               | None, (Some _ | None) ->
+                  finish ();
                   let outcome=Masc_tui_attachment_action.perform
                     ~open_url:(fun _ -> Error "external opening is unavailable") prepared ~midi_soundfont:None in
                   report_action state "system" (Masc_tui_attachment_action.describe_outcome outcome))
+           else finish ()) target
        | Error error -> report_action state "error" error)
   | Chat_call_loaded (request, result) ->
       ignore (complete_chat_call_read state request result)

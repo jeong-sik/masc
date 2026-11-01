@@ -106,8 +106,9 @@ val run_bounded : deadline_seconds:float -> string -> Unix.process_status
     output, and killed with SIGKILL when it has not exited after
     [deadline_seconds]; the status is then [WSIGNALED Sys.sigkill]. *)
 
-val wait_bounded : deadline_seconds:float -> int -> Unix.process_status
-(** Reap an already-started child, killing it at the same deadline. *)
+val wait_bounded : ?cancelled:(unit -> bool) -> deadline_seconds:float -> int -> Unix.process_status
+(** Reap an already-started child, killing it at the same deadline or when
+    [cancelled] becomes true. *)
 
 val run_decoder :
   run:(string -> Unix.process_status) -> output_path:string -> string ->

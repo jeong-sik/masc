@@ -138,8 +138,10 @@ through HTTP aggregation and removes redundant TUI connector fields. S7 in
 [#47080](https://github.com/jeong-sik/masc/pull/47080) replaces ingress scheduling
 flags with an explicit lane phase. D6 in
 [#47083](https://github.com/jeong-sik/masc/pull/47083) shares immutable snapshot work
-and retry classification between Board deletion and flush. Eight candidates remain queued; this ordering
-does not waive their coverage.
+and retry classification between Board deletion and flush. Eight candidates remain
+unfinished, including K6: its first accumulator stage is in
+[#47084](https://github.com/jeong-sik/masc/pull/47084), while the batch-validation
+boundary remains pending. This ordering does not waive their coverage.
 
 | ID | Priority | Status | Refactoring point |
 | --- | --- | --- | --- |
@@ -148,7 +150,7 @@ does not waive their coverage.
 | [K3](#k3) | next | in review | Represent Board contention rearm tickets with one explicit phase |
 | [K4](#k4) | later | candidate | Make request-evidence reset and projection ownership explicit per attempt |
 | [K5](#k5) | later | source reviewed; execution unverified | Separate approval restart replay decisions from recovery effects |
-| [K6](#k6) | investigate | candidate | Make Agent Core committed-batch scanning an explicit returned state |
+| [K6](#k6) | investigate | partially implemented; execution unverified | Make Agent Core committed-batch scanning an explicit returned state |
 | [K7](#k7) | later | candidate | Separate Memory receipt reconciliation selection from its durable plan |
 | [D1](#d1) | next | in review | Return an explicit task commit receipt instead of a cross-scope notification ref |
 | [D2](#d2) | next | in review | Make Goal upsert a typed immutable transaction decision |
@@ -566,6 +568,25 @@ Ordering rationale: Useful separation at a durable authority boundary with exten
 corruption/recovery/cancellation scenarios. The current private mutable store and byte
 buffers are justified; no performance improvement is claimed, and a small
 accumulator-only slice should precede any larger grammar extraction.
+
+Current-source continuation (2026-11-01, parent
+`66fe45e49670b6ff9ace9ce49e173612a0617ff5`):
+[#47084](https://github.com/jeong-sik/masc/pull/47084) replaces the two outer refs
+with a private immutable `committed_scan_accumulator` passed through tail recursion.
+Its next value is constructed only after the existing event/footer checks succeed.
+The atomic authority remains the sole visibility source; a footer remains structural
+validation. Return tuples, callers, authority-bound file sizes, codec checks,
+validation order, event/index yields and cooperative reversals stay unchanged.
+
+The existing multi-batch paging scenario now compares exact event order for initial
+read-only, incremental suffix, fresh read-only, reopened replay and indexed reads.
+The codec runtime still outlives every store/snapshot scope. Existing corruption
+and tail scenarios remain; direct scan-cancellation coverage is not claimed from
+the append/writer cancellation scenarios. Syntax/source evidence is recorded on
+the PR, without builds, typechecking or behavior execution. No performance gain
+or existing visibility defect is claimed. This completes only the first accumulator
+stage; the broader grammar/validation boundary remains pending, so K6 stays among
+the unfinished candidates.
 
 ### K7
 

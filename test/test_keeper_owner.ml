@@ -144,7 +144,7 @@ let start_owner_with_executor_ready
   Unix.unlink path;
   Eio.Switch.on_release sw (fun () ->
     if Sys.file_exists path then Unix.unlink path);
-  Owner.start
+  Owner.start ~base_path:(Filename.dirname path)
     ~sw
     ~store
     ~operation_store_path:path ~session_root:(Filename.concat (Filename.dirname path) "traces")
@@ -1014,7 +1014,7 @@ let test_turn_slot_release_signals_availability () =
   in
   let owner =
     owner_ok
-      (Owner.start
+      (Owner.start ~base_path:(Filename.dirname path)
          ~sw
          ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
          ~operation_store_path:path ~session_root:(Filename.concat (Filename.dirname path) "traces")
@@ -1092,7 +1092,7 @@ let test_uncontested_turn_end_signals_nothing () =
     if Sys.file_exists path then Unix.unlink path);
   let owner =
     owner_ok
-      (Owner.start
+      (Owner.start ~base_path:(Filename.dirname path)
          ~sw
          ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
          ~operation_store_path:path ~session_root:(Filename.concat (Filename.dirname path) "traces")
@@ -1232,6 +1232,47 @@ let test_direct_waiter_returns_when_owner_closes () =
     ignore (owner_ok (Owner.exact_operation owner operation_id)));
   check bool "owner closure releases its direct waiter" false
     (Eio.Time.with_timeout_exn env#clock 2.0 (fun () -> Eio.Promise.await observed))
+;;
+
+let test_operation_waiting_event_is_scoped_to_owner_workspace () =
+  let base_path = Masc_test_deps.setup_test_workspace () in
+  let other_path = Filename.concat base_path "other-workspace" in
+  let matching_events = ref 0 and other_events = ref 0 in
+  let observe counter (event : Sse.external_event) =
+    if Json_util.assoc_string_opt "type" event.ext_payload
+       = Some "keeper_waiting_inventory_changed"
+    then incr counter
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      Sse.unsubscribe_external "owner-waiting-matching";
+      Sse.unsubscribe_external "owner-waiting-other";
+      Masc_test_deps.cleanup_test_workspace base_path)
+    (fun () ->
+      Unix.mkdir other_path 0o755;
+      let matching = Sse.runtime_authority_exn ~base_path in
+      let other = Sse.runtime_authority_exn ~base_path:other_path in
+      Sse.subscribe_external ~runtime_authority:matching ~id:"owner-waiting-matching"
+        ~callback:(observe matching_events) ();
+      Sse.subscribe_external ~runtime_authority:other ~id:"owner-waiting-other"
+        ~callback:(observe other_events) ();
+      Eio_main.run (fun _env ->
+        Eio.Switch.run (fun sw ->
+          let keeper_name = "scoped-owner" in
+          let owner =
+            Owner.start ~sw ~base_path
+              ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
+              ~operation_store_path:(Filename.concat base_path "operations.sqlite3")
+              ~session_root:(Filename.concat base_path "traces")
+              ~now:(fun () -> 42.0) ~operation_runner:None ~on_turn_slot_released:None
+              ~keeper_name ~initial_meta:(Some (make_meta keeper_name))
+            |> owner_ok in
+          ignore (owner_ok (Owner.submit_operation owner
+            ~operation_id:(operation_id "kmsg-scoped-owner")
+            ~source:operation_source ~input:(operation_input "queued")));
+          check bool "the owning workspace receives the committed change" true
+            (!matching_events > 0);
+          check int "another workspace receives no change" 0 !other_events)))
 ;;
 
 let test_operation_lifecycle_is_durable_and_projected () =
@@ -2731,7 +2772,7 @@ let test_chat_interrupt_during_settle_has_nothing_to_cancel () =
   Unix.unlink path;
   Eio.Switch.on_release sw (fun () ->
     if Sys.file_exists path then Unix.unlink path);
-  let owner = owner_ok (Owner.start ~sw
+  let owner = owner_ok (Owner.start ~base_path:(Filename.dirname path) ~sw
     ~keeper_name:"settle-stop"
     ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
     ~operation_store_path:path ~session_root:(Filename.concat (Filename.dirname path) "traces")
@@ -3264,7 +3305,7 @@ let test_startup_requeues_exact_native_call () =
       (Keeper_native_call.Bind {observed=Keeper_native_call.No_native_call; call}) |> Result.get_ok;
     Keeper_chat_operation_store.close seed |> Result.get_ok;
     Eio.Switch.run @@ fun sw ->
-    let owner = Owner.start ~sw
+    let owner = Owner.start ~base_path:(Filename.dirname path) ~sw
       ~store:{replace=(fun _ -> Ok ()); remove=(fun _ -> Ok ())}
       ~operation_store_path:path ~session_root:(Filename.concat (Filename.dirname path) "traces") ~now:(fun () -> 20.) ~operation_runner:None
       ~on_turn_slot_released:None ~keeper_name:"native-restart"
@@ -3330,7 +3371,7 @@ let test_startup_interrupts_running_without_requeue () =
        Eio.Switch.run @@ fun sw ->
        let owner =
          owner_ok
-           (Owner.start
+           (Owner.start ~base_path:(Filename.dirname path)
               ~sw
               ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
               ~operation_store_path:path ~session_root:(Filename.concat (Filename.dirname path) "traces")
@@ -3878,7 +3919,7 @@ let test_startup_queued_waits_for_runner_readiness () =
        Eio.Switch.run @@ fun sw ->
        let owner =
          owner_ok
-           (Owner.start
+           (Owner.start ~base_path:(Filename.dirname path)
               ~sw
               ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
               ~operation_store_path:path ~session_root:(Filename.concat (Filename.dirname path) "traces")
@@ -3934,7 +3975,7 @@ let test_a_read_under_a_failed_reopen_keeps_the_cause () =
     if Sys.file_exists path then Unix.unlink path);
   let owner =
     owner_ok
-      (Owner.start
+      (Owner.start ~base_path:(Filename.dirname path)
          ~sw
          ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
          ~operation_store_path:path ~session_root:(Filename.concat (Filename.dirname path) "traces")
@@ -4096,7 +4137,7 @@ let with_recovery_store ~sw ~keeper_name ~runner ~on_turn_slot_released f =
   let path = Filename.temp_file "keeper-owner-recovery-" ".sqlite3" in
   Unix.unlink path;
   Eio.Switch.on_release sw (fun () -> if Sys.file_exists path then Unix.unlink path);
-  let owner = owner_ok (Owner.start ~sw
+  let owner = owner_ok (Owner.start ~base_path:(Filename.dirname path) ~sw
     ~store:{replace=(fun _ -> Ok ()); remove=(fun _ -> Ok ())}
     ~operation_store_path:path ~session_root:(Filename.concat (Filename.dirname path) "traces") ~now:(fun () -> 42.)
     ~operation_runner:runner ~on_turn_slot_released ~keeper_name
@@ -4732,7 +4773,7 @@ let test_same_process_recreate_reopens_purged_operation_store () =
        let meta = make_meta keeper_name in
        let owner =
          owner_ok
-           (Owner.start
+           (Owner.start ~base_path:(Filename.dirname operation_store_path)
               ~sw
               ~store
               ~operation_store_path
@@ -5923,7 +5964,7 @@ let test_pending_chat_survives_repeated_autonomous_observations () =
   Unix.unlink path;
   Eio.Switch.on_release sw (fun () ->
     if Sys.file_exists path then Unix.unlink path);
-  let owner = owner_ok (Owner.start ~sw
+  let owner = owner_ok (Owner.start ~base_path:(Filename.dirname path) ~sw
     ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
     ~operation_store_path:path ~session_root:(Filename.concat (Filename.dirname path) "traces") ~now:(fun () -> 42.0)
     ~operation_runner:(Some Owner.
@@ -6090,7 +6131,7 @@ let test_scheduled_source_handoff case () =
     | Failed_chat_handoff | Unconfirmed_checkpoint_handoff | Paused_handoff
     | Ended_consumer_handoff | Replaced_consumer_handoff -> Some (fun () -> incr wakes; signal_settled ())
   in
-  let owner = Owner.start ~sw
+  let owner = Owner.start ~base_path:(Filename.dirname path) ~sw
     ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
     ~operation_store_path:path
     ~session_root:(Filename.concat (Filename.dirname path) "traces")
@@ -6193,7 +6234,7 @@ let test_scheduled_cohort_is_reserved_only_behind_a_direct_child () =
   let path = Filename.temp_file "keeper-owner-scheduled-observe-" ".sqlite3" in
   Unix.unlink path;
   Eio.Switch.on_release sw (fun () -> if Sys.file_exists path then Unix.unlink path);
-  let owner = Owner.start ~sw
+  let owner = Owner.start ~base_path:(Filename.dirname path) ~sw
     ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
     ~operation_store_path:path
     ~session_root:(Filename.concat (Filename.dirname path) "traces")
@@ -6364,7 +6405,7 @@ let test_owner_preparation_wait_and_explicit_retry ?(generic_failure=false)
   Eio.Switch.on_release sw (fun () ->
     Keeper_chat_operation_store.For_testing.clear_preparation_retry_read_fault ();
     if Sys.file_exists path then Unix.unlink path);
-  let owner = Owner.start ~sw
+  let owner = Owner.start ~base_path:(Filename.dirname path) ~sw
       ~store:{replace=(fun _ -> Ok ());remove=(fun _ -> Ok ())}
       ~operation_store_path:path ~session_root:(Filename.concat (Filename.dirname path) "traces")
       ~now:(fun () -> 42.) ~keeper_name:"preparation-owner"
@@ -6582,6 +6623,10 @@ let () =
             "operation lifecycle is durable and projected"
             `Quick
             test_operation_lifecycle_is_durable_and_projected
+        ; test_case
+            "operation waiting event stays in its workspace"
+            `Quick
+            test_operation_waiting_event_is_scoped_to_owner_workspace
         ; test_case
             "health observer tracks Owner projection mutations"
             `Quick

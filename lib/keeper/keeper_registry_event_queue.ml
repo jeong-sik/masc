@@ -9,6 +9,7 @@
 
 let notify_pending ~base_path name =
   Keeper_waiting_inventory_broadcast.changed
+    ~base_path
     ~keeper_name:name
     ~source:Event_queue;
   Keeper_librarian_queue_signal.changed ~base_path ~keeper_name:name

@@ -45,7 +45,7 @@ let admission ~alias ~reference ?run_id = function
           | Some value -> Ok value | None -> Error "Child activation has no original turn")
       | _ -> Error "Child activation is not an object" in
     let* turn_ref = Ids.Turn_ref.of_yojson turn_json in
-    let expected_trace_id = Keeper_id.Trace_id.of_string (Ids.Turn_ref.trace_id turn_ref) in
+    let* expected_trace_id = Keeper_id.Trace_id.of_string (Ids.Turn_ref.trace_id turn_ref) in
     let* activation = Ledger.activation_of_yojson ~expected_trace_id activation_json
         |> Result.map_error Ledger.decode_error_code in
     let* () = match activation.invocation with

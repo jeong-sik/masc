@@ -161,7 +161,7 @@ let task_detail_viewport (state : state) =
 
 let task_detail_pane (state : state) ~rows ~cols (task : Masc_domain.task) buf =
   let header = Printf.sprintf "%s  %s%s%s  %s"
-    (screen_title " MASC Task") Ansi.dim
+    (screen_title " MASC Task") (Theme.recede ())
     (bracketed ~max_cells:20 (Terminal_text.single_line task.id)) Ansi.reset
     (connection_badge state) in
   box_top buf cols;
@@ -175,7 +175,7 @@ let task_detail_pane (state : state) ~rows ~cols (task : Masc_domain.task) buf =
   for offset = 0 to height - 1 do
     match Rows.at window (scroll + offset) with
     | None -> box_empty buf cols
-    | Some line -> box_line_styled buf cols ~style:Ansi.dim line
+    | Some line -> box_line buf cols line
   done;
   Option.iter (box_line_styled buf cols ~style:(Theme.recede ()))
     (Masc_tui_scroll.position_row ~scroll ~height count);

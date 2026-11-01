@@ -126,6 +126,34 @@ let classify_restarted_deliveries map =
     (false, SMap.empty)
 ;;
 
+type restart_rewrite =
+  | Retain
+  | Rewrite of { classification_changed : bool; partial_tail : bool }
+
+type restart_plan =
+  { pending_map : pending_approval SMap.t
+  ; delivery_map : persisted_delivery SMap.t
+  ; entry_errors : string list
+  ; rewrite : restart_rewrite
+  }
+
+let plan_restart ~pending_map ~delivery_map ~entry_errors ~partial_tail =
+  let pending_changed, pending_map = classify_restarted_pending pending_map in
+  let deliveries_changed, delivery_map =
+    classify_restarted_deliveries delivery_map
+  in
+  let classification_changed = pending_changed || deliveries_changed in
+  let rewrite =
+    match entry_errors with
+    | _ :: _ -> Retain
+    | [] ->
+      if classification_changed || partial_tail
+      then Rewrite { classification_changed; partial_tail }
+      else Retain
+  in
+  { pending_map; delivery_map; entry_errors; rewrite }
+;;
+
 let validate_exact_attempt_candidate
       ~id
       ~input_hash

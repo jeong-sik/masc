@@ -4919,6 +4919,14 @@ let test_partial_pending_snapshot_preserves_readable_entries () =
            ~keeper_name:"queue-partial-read"
            ~input:(`Assoc [ "request", `String "readable" ])
        in
+       check_update
+         "mark readable entry pending"
+         true
+         (AQ.mark_summary_pending ~id:approval_id);
+       check_exact_update
+         "bind readable entry before restart"
+         true
+         (run_exact_transition AQ.bind_summary_exact_attempt (exact_identity approval_id));
        let snapshot =
          match read_pending_snapshot ~base_path with
          | `Assoc fields ->
@@ -4931,7 +4939,7 @@ let test_partial_pending_snapshot_preserves_readable_entries () =
          | _ -> Alcotest.fail "pending snapshot object expected"
        in
        write_pending_snapshot ~base_path snapshot;
-       let original = read_pending_snapshot_file ~base_path in
+       let original = read_pending_snapshot_bytes ~base_path in
        AQ.For_testing.reset_runtime_state ();
        let before =
          Masc.Otel_metric_store.metric_value_or_zero
@@ -4947,7 +4955,22 @@ let test_partial_pending_snapshot_preserves_readable_entries () =
            (AQ.list_pending_entries_with_read_errors_for_workspace ~base_path)
        in
        (match entries with
-        | [ entry ] -> Alcotest.(check string) "valid entry remains visible" approval_id entry.id
+        | [ entry ] ->
+          Alcotest.(check string) "valid entry remains visible" approval_id entry.id;
+          (match entry.exact_attempt with
+           | Rule_types.Exact_bound
+               { status = Rule_types.Exact_restart_quarantined; _ } -> ()
+           | Rule_types.Exact_unbound
+           | Rule_types.Exact_bound
+               { status =
+                   (Rule_types.Exact_dispatch_uncertain
+                   | Rule_types.Exact_released_before_dispatch
+                   | Rule_types.Exact_released_recovery_required
+                   | Rule_types.Exact_quarantined _
+                   | Rule_types.Exact_completed)
+               ; _
+               } ->
+             Alcotest.fail "readable entry was not classified on restart")
         | _ -> Alcotest.fail "expected exactly one readable pending entry");
        Alcotest.(check int)
          "one pending entry read error is exposed"
@@ -4964,10 +4987,10 @@ let test_partial_pending_snapshot_preserves_readable_entries () =
         with
         | Error _ -> ()
         | Ok _ -> Alcotest.fail "partially readable store must remain unavailable");
-       Alcotest.(check bool)
-         "partially readable source is preserved"
-         true
-         (Yojson.Safe.equal original (read_pending_snapshot_file ~base_path));
+       Alcotest.(check string)
+         "read errors veto rewriting even when restart classification changed"
+         original
+         (read_pending_snapshot_bytes ~base_path);
        let after =
          Masc.Otel_metric_store.metric_value_or_zero
            Masc.Otel_metric_store.metric_persistence_read_drops

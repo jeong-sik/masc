@@ -131,7 +131,7 @@ candidates remain queued; this ordering does not waive their coverage.
 | [K2](#k2) | next | in review | Give canonical child export selection a typed pure boundary |
 | [K3](#k3) | next | in review | Represent Board contention rearm tickets with one explicit phase |
 | [K4](#k4) | later | candidate | Make request-evidence reset and projection ownership explicit per attempt |
-| [K5](#k5) | later | candidate | Separate approval restart replay decisions from recovery effects |
+| [K5](#k5) | later | implemented; review pending | Separate approval restart replay decisions from recovery effects |
 | [K6](#k6) | investigate | candidate | Make Agent Core committed-batch scanning an explicit returned state |
 | [K7](#k7) | later | candidate | Separate Memory receipt reconciliation selection from its durable plan |
 | [D1](#d1) | next | in review | Return an explicit task commit receipt instead of a cross-scope notification ref |
@@ -487,6 +487,22 @@ Ordering rationale: Direct restart scenarios already cover sequence persistence,
 generation serialization, partial snapshots, row replay, and incomplete-tail recovery.
 The change reduces audit complexity at an authority boundary, but must preserve the
 current recovery/write ordering exactly.
+
+Current-source continuation (2026-11-01, parent
+`61b4d5531d44cb780dff64158fdbf7d641f1658f`): complete-row replay already
+lives in `Keeper_approval_queue_codec.replay_log_lines` and is also consumed
+by `Keeper_durable_store`; it remains the single reducer. The remaining
+restart decision now lives in `Keeper_approval_queue_state.plan_restart` as
+a private immutable plan. Read errors veto rewrite while retaining classified
+readable entries. The persistence shell retains tail recovery, generation,
+sequence, cursor, diagnostics, durable cache publication and compaction order.
+Its loaded result now names fields rather than returning a five-element tuple.
+
+The existing partial-snapshot public-store scenario now includes a bound uncertain
+attempt: installation must classify that readable entry, expose the malformed entry,
+reject mutation, and preserve the snapshot bytes despite the classification change.
+OCaml parsing and independent source review are recorded on the PR; Dune builds,
+behavior suites, runtime verification and integration are not claimed here.
 
 ### K6
 

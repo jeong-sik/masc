@@ -22,11 +22,26 @@ val delta_rows :
 (** Uses physical equality for unchanged immutable entries; pending rows precede
     delivery rows, each in map order. *)
 
-val classify_restarted_pending :
-  pending_approval Set_util.StringMap.t -> bool * pending_approval Set_util.StringMap.t
-val classify_restarted_deliveries :
-  persisted_delivery Set_util.StringMap.t -> bool * persisted_delivery Set_util.StringMap.t
-(** The boolean reports whether restart classification changed any entry. *)
+type restart_rewrite =
+  | Retain
+  | Rewrite of { classification_changed : bool; partial_tail : bool }
+
+type restart_plan = private
+  { pending_map : pending_approval Set_util.StringMap.t
+  ; delivery_map : persisted_delivery Set_util.StringMap.t
+  ; entry_errors : string list
+  ; rewrite : restart_rewrite
+  }
+
+val plan_restart :
+  pending_map:pending_approval Set_util.StringMap.t ->
+  delivery_map:persisted_delivery Set_util.StringMap.t ->
+  entry_errors:string list -> partial_tail:bool -> restart_plan
+(** Classify already replayed entries without effects. Read errors always veto
+    rewriting, while classified readable entries remain available for display.
+    [Rewrite] carries its causes for diagnostics; at least one is true.
+    The caller retains ownership of log recovery, generation, sequence, cursor,
+    durable writes and publication under the store lock. *)
 
 val find_pending_id_in_map :
   pending_approval Set_util.StringMap.t ->

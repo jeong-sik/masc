@@ -9,9 +9,11 @@ import subprocess
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[2]
-BASE = "61b4d5531d44cb780dff64158fdbf7d641f1658f"
-HEAD = "ea7f321488112e20f09edec5a229d817b320dd98"
-TOP = "74756f56e61a92d8d64250e9ed7552ad165645c4"
+BASELINE_COMMIT = "61b4d5531d44cb780dff64158fdbf7d641f1658f"
+PRODUCTION_SOURCE_COMMIT = "ea7f321488112e20f09edec5a229d817b320dd98"
+COMPARISON_COMMIT = "74756f56e61a92d8d64250e9ed7552ad165645c4"
+checkout_commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=REPO).decode().strip()
+captured_at_utc = datetime.now(timezone.utc).isoformat()
 parser = argparse.ArgumentParser()
 parser.add_argument("--output", type=Path, default=Path("artifacts/p3-feature-detail-20261101/usage-seam") /
     datetime.now(timezone.utc).strftime("run-%Y%m%dT%H%M%S.%fZ"))
@@ -31,8 +33,16 @@ def extract(commit, path, start, stop):
     first = original.index(start)
     last = original.index(stop, first)
     body = original[first:last]
-    manifest.append(dict(commit=commit, path=path, lines=[original[:first].count("\n")+1,
-        original[:last].count("\n")], sha256=sha(body), start=start, stop=stop))
+    entry = dict(commit=commit, path=path, lines=[original[:first].count("\n")+1,
+        original[:last].count("\n")], sha256=sha(body), start=start, stop=stop)
+    if commit == PRODUCTION_SOURCE_COMMIT:
+        for role, revision in [("comparison_commit", COMPARISON_COMMIT), ("checkout_commit", checkout_commit)]:
+            compared = source(revision, path)
+            begin = compared.index(start)
+            end = compared.index(stop, begin)
+            assert body == compared[begin:end], role + " changed the copied source span: " + start
+            entry["identical_at_" + role] = revision
+    manifest.append(entry)
     return body
 
 app = "bin/masc_tui.ml"
@@ -41,12 +51,9 @@ function_start = "let start_http_scoped_refresh state"
 function_stop = "\nlet start_scoped_refresh_followup"
 arm_start = '        | Some ("w" | "W")\n'
 arm_stop = "       (* In chat, printable keys"
-for start, stop in [(function_start, function_stop), (arm_start, arm_stop)]:
-    assert extract(HEAD, app, start, stop) == extract(TOP, app, start, stop), "TUI top changed the target seam"
-
 results = {}
 for variant in ["baseline", "candidate", "miswired-needs"]:
-    commit = BASE if variant == "baseline" else HEAD
+    commit = BASELINE_COMMIT if variant == "baseline" else PRODUCTION_SOURCE_COMMIT
     directory = OUT / variant
     directory.mkdir(exist_ok=True)
     foundation = (HERE / "types-prefix.ml").read_text()
@@ -91,7 +98,14 @@ for variant in ["baseline", "candidate", "miswired-needs"]:
         for name in ["masc_tui_types.ml", "seam.ml", "checks.ml"]}))
 
 (OUT / "source-manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
-(OUT / "result.json").write_text(json.dumps(dict(base=BASE, head=HEAD, top=TOP, exit_codes=results,
+(OUT / "result.json").write_text(json.dumps(dict(baseline_commit=BASELINE_COMMIT,
+    production_source_commit=PRODUCTION_SOURCE_COMMIT, comparison_commit=COMPARISON_COMMIT,
+    checkout_commit=checkout_commit, captured_at_utc=captured_at_utc,
+    checkout_source_span_count=len({(entry["path"], entry["start"], entry["stop"])
+        for entry in manifest if entry.get("identical_at_checkout_commit") == checkout_commit}),
+    helper_sha256={name:sha((HERE/name).read_text()) for name in
+        ["run.py", "types-prefix.ml", "state-adapter.ml", "seam-adapters.ml", "checks.ml"]},
+    exit_codes=results,
     expected={"baseline":1,"candidate":0,"miswired-needs":1}), indent=2) + "\n")
 print("Output:", OUT)
 raise SystemExit(0 if results == {"baseline":1,"candidate":0,"miswired-needs":1} else 1)

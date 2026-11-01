@@ -6,12 +6,15 @@ key arm's dispatch could leave it passing. This proof compiles the exact `w/W`
 match arm together with the **entire** `start_http_scoped_refresh` function.
 The retained change adds evidence only; no production API or behavior changed.
 
-The source head is `ea7f321488112e20f09edec5a229d817b320dd98`, the actual PR
-#47049 head read for this review. Its target seam is identical at full TUI top
-`74756f56e61a92d8d64250e9ed7552ad165645c4`. Baseline is
-`61b4d5531d44cb780dff64158fdbf7d641f1658f`.
+The pinned production-source commit used for extraction is
+`ea7f321488112e20f09edec5a229d817b320dd98`. The original comparison commit is
+full TUI top `74756f56e61a92d8d64250e9ed7552ad165645c4`; its target seam is
+identical. Baseline is `61b4d5531d44cb780dff64158fdbf7d641f1658f`.
+These are stable source roles, not the moving PR head or the checkout that
+executes this runner. The original evidence bundle was committed in
+`f9d32511b340bf54a229b6dfb5fd975a652db0ab` after its capture.
 
-At that source head, the copied key arm is `bin/masc_tui.ml:32841` and the full
+At that production-source commit, the copied key arm is `bin/masc_tui.ml:32841` and the full
 launch function is `bin/masc_tui.ml:16956`. Source hashes:
 
 - key arm: `41332cf22538abf4e3911e37b2dae3d4d9665cac9ea3ff39aefcefae35942487`
@@ -26,11 +29,19 @@ launch implementation.
 
 ## Reproduce
 
-With OCaml 5.5.1 and the three source commits available in the repository:
+With OCaml 5.5.1 and the three pinned source commits available in the repository:
 
 ```sh
 python3 docs/evidence/2026-11-01-tui-usage-refresh-seam/run.py
 ```
+
+Each rerun resolves its checkout commit with `git rev-parse HEAD`, records it
+separately from the source and comparison commits, and verifies that all ten
+copied candidate source spans match the resolved checkout and the pinned
+comparison commit. A changed span refuses the run.
+The result also records the actual runner/adapter hashes and capture time;
+uncommitted helper edits are therefore distinguishable from checkout source.
+This span comparison does not validate unrelated changes in that checkout.
 
 The runner writes a fresh timestamped directory under
 `artifacts/p3-feature-detail-20261101/usage-seam/`; it never writes new output
@@ -38,20 +49,26 @@ into this retained bundle. `--output artifacts/<new-run>` chooses another new
 directory. Missing Git objects are a visible failure; a shallow clone must
 obtain the pinned commits first. No Dune, external package or server is needed.
 
-The retained execution used:
+The original retained execution used:
 
 ```sh
 python3 docs/evidence/2026-11-01-tui-usage-refresh-seam/run.py --output artifacts/p3-feature-detail-20261101/usage-seam-retained-run
 ```
 
-`receipt.json` records the helper/source/output hashes, command, compiler
-version and observed output. The complete source manifest and generated
+`receipt.json` preserves that capture's helper/source/output hashes, command,
+compiler version and observed output. The original runner did not record its
+checkout commit; the receipt explicitly leaves that value unknown. Its raw
+result used `base`/`head`/`top` for baseline/source/comparison, not checkout or
+PR head. The original helper hashes bind the files in the original bundle
+commit, not the revised README or runner. This metadata correction does not
+relabel the original capture as execution of a later evidence revision.
+The complete source manifest and generated
 compilation/run outputs remain in that artifact directory. No binaries or
 generated source tree are included in this bundle.
 
 ## Observed result
 
-The current source compiled and passed **10 cases**:
+The pinned production source compiled and passed **10 cases** in that capture:
 
 - Both lowercase `w` and uppercase `W` reach the actual transport call with
   the newly selected days, a Navigation request, the provider-history-only

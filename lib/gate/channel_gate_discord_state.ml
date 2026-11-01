@@ -47,7 +47,6 @@ let binding_store =
     ~binding_audit_read_path ~guild_id_field:Store.Include_empty
 
 let read_bindings_result () = Store.read_bindings_result binding_store
-let binding_json = Store.binding_json
 let read_recent_audit ~limit = Store.read_recent_audit binding_store ~limit
 
 type binding_lookup_error =
@@ -225,9 +224,7 @@ type status = {
   audit_path : string;
   updated_at : string;
   directory : directory_observation;
-  binding_store_read_ok : bool;
-  binding_store_error : string option;
-  configured_bindings : binding list;
+  binding_read : (binding list, string) result;
   recent_audit : Yojson.Safe.t list;
   trigger_policy : Discord_gateway_state.trigger_policy;
   last_ready : ready_info option;
@@ -238,12 +235,11 @@ type status = {
 let read_status ~audit_limit =
   let binding_store_path = binding_store_read_path () in
   let audit_path = binding_audit_read_path () in
-  let configured_bindings_result = read_bindings_lookup_result () in
-  let configured_bindings = Result.value ~default:[] configured_bindings_result in
-  let binding_store_error =
-    match configured_bindings_result with
-    | Ok _ -> None
-    | Error error -> Some (binding_lookup_error_to_string error)
+  let binding_read =
+    read_bindings_lookup_result () |> Result.map_error binding_lookup_error_to_string
+  in
+  let binding_error =
+    match binding_read with Ok _ -> None | Error error -> Some error
   in
   let recent_audit = read_recent_audit ~limit:audit_limit in
   let gateway_state = Discord_gateway_client.connection_state () in
@@ -254,7 +250,7 @@ let read_status ~audit_limit =
     | Awaiting_hello | Identifying | Resuming | Connected _
     | Reconnect_pending _ | Failed _ -> true
   in
-  let available = transport_available && Result.is_ok configured_bindings_result in
+  let available = transport_available && Result.is_ok binding_read in
   (* NDT-OK: status_json is a dashboard observation boundary; this timestamp
      only reports gateway freshness and is not used for control flow. *)
   let updated_at = Gate_time_util.iso8601_of_unix (Unix.gettimeofday ()) in
@@ -268,7 +264,7 @@ let read_status ~audit_limit =
   in
   let error =
     [ (if String.equal gateway_error "" then None else Some gateway_error)
-    ; binding_store_error
+    ; binding_error
     ]
     |> List.filter_map Fun.id
     |> String.concat "; "
@@ -282,9 +278,7 @@ let read_status ~audit_limit =
     audit_path;
     updated_at;
     directory = Atomic.get directory_observation;
-    binding_store_read_ok = Result.is_ok configured_bindings_result;
-    binding_store_error;
-    configured_bindings;
+    binding_read;
     recent_audit;
     trigger_policy = Runtime_params.get Connector_trigger_params.discord;
     last_ready = Atomic.get last_ready;
@@ -293,12 +287,6 @@ let read_status ~audit_limit =
   }
 
 let status_connected status = gateway_connected status.gateway_state
-
-let status_label status =
-  (* The gateway state machine is the liveness source; it has no heartbeat
-     file that could age out, so it is never stale. *)
-  Channel_gate_connector.connector_state_label ~available:status.available
-    ~connected:(status_connected status) ~stale:false
 
 let last_ready_at status =
   (* The READY timestamp survives reconnect_pending/resuming dips, so
@@ -337,55 +325,43 @@ let gate_health_checked_at status = if status_connected status then status.updat
    connection status come from the gateway state. *)
 let pid status = if status.available then Unix.getpid () else 0
 
-(* The fields both views share, written once so a field added to one view
-   is in the other too. *)
-let status_fields status =
-  [
-    ("available", `Bool status.available);
-    ("connected", `Bool (status_connected status));
-    ("status", `String (status_label status));
-    ("error", `String status.error);
-    ("bot_token_present", `Bool status.token_present);
-    ("status_source", `String "in_process_gateway");
-    ("gateway_state", `String (gateway_state_label status.gateway_state));
-    ("trigger_policy",
-     `String (Discord_gateway_state.trigger_policy_to_string status.trigger_policy));
-    ("binding_store_path", `String status.binding_store_path);
-    ("audit_path", `String status.audit_path);
-    ("updated_at", `String status.updated_at);
-    ("last_ready_at", `String (last_ready_at status));
-    ("bot_user_name", `String (Option.value ~default:"" status.bot_user_name));
-    ("bot_user_id", `String (bot_user_id status));
-    ("guild_count", `Int status.guild_count);
-  ]
-  @ directory_fields status.directory
-  @ [
-    ("gate_base_url", `String "in-process");
-    ("gate_healthy", gate_healthy_json status);
-    ("gate_health_checked_at", `String (gate_health_checked_at status));
-    ("binding_source", `String "persisted");
-    ("binding_store_read_ok", `Bool status.binding_store_read_ok);
-    ( "binding_store_error",
-      `String (Option.value ~default:"" status.binding_store_error) );
-    ("runtime_bindings_count", `Int (List.length status.configured_bindings));
-    ("pid", `Int (pid status));
-    ( "configured_bindings",
-      `List (List.map binding_json status.configured_bindings) );
-    ("recent_audit", `List status.recent_audit);
-  ]
+let snapshot_of_status (status : status) : Channel_gate_connector.snapshot =
+  { available = status.available
+  ; connected = status_connected status
+  ; stale = false
+  ; error = status.error
+  ; binding_read = status.binding_read
+  ; binding_store_path = status.binding_store_path
+  ; audit_path = status.audit_path
+  ; recent_audit = status.recent_audit
+  ; updated_at = status.updated_at
+  ; details =
+      ([ "bot_token_present", `Bool status.token_present
+       ; "status_source", `String "in_process_gateway"
+       ; "gateway_state", `String (gateway_state_label status.gateway_state)
+       ; "trigger_policy", `String (Discord_gateway_state.trigger_policy_to_string status.trigger_policy)
+       ; "last_ready_at", `String (last_ready_at status)
+       ; "bot_user_name", `String (Option.value ~default:"" status.bot_user_name)
+       ; "bot_user_id", `String (bot_user_id status)
+       ; "guild_count", `Int status.guild_count
+       ] @ directory_fields status.directory
+       @ [ "gate_base_url", `String "in-process"
+         ; "gate_healthy", gate_healthy_json status
+         ; "gate_health_checked_at", `String (gate_health_checked_at status)
+         ; "pid", `Int (pid status)
+         ])
+  ; descriptor_details = [ "capabilities", Channel_gate_connector_capability.all_json ]
+  }
 
-let status_json ?(audit_limit = 10) () =
-  `Assoc (("channel", `String channel) :: status_fields (read_status ~audit_limit))
+let snapshot ?(audit_limit = 10) () =
+  snapshot_of_status (read_status ~audit_limit)
 
-let connector_json ?(audit_limit = 10) () =
-  `Assoc
-    ([
-       ("connector_id", `String connector_id);
-       ("display_name", `String display_name);
-       ("channel", `String channel);
-       ("capabilities", Channel_gate_connector_capability.all_json);
-     ]
-    @ status_fields (read_status ~audit_limit))
+let status_json ?audit_limit () =
+  Channel_gate_connector.snapshot_status_json ~channel (snapshot ?audit_limit ())
+
+let connector_json ?audit_limit () =
+  Channel_gate_connector.snapshot_connector_json ~connector_id ~display_name ~channel
+    (snapshot ?audit_limit ())
 
 let bind ~channel_id ~keeper_name ~actor_name =
   Store.bind binding_store ~channel_id ~keeper_name ~actor_name

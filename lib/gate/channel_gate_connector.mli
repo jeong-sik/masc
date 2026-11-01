@@ -18,6 +18,31 @@ type ready_info = {
   ready_at : string;
 }
 
+type snapshot = {
+  available : bool;
+  connected : bool;
+  stale : bool;
+  error : string;
+  binding_read : (Channel_gate_binding_store.binding list, string) result;
+  binding_store_path : string;
+  audit_path : string;
+  recent_audit : Yojson.Safe.t list;
+  updated_at : string;
+  details : (string * Yojson.Safe.t) list;
+  descriptor_details : (string * Yojson.Safe.t) list;
+}
+
+(** One immutable observation. Transport-specific fields stay in [details];
+    [descriptor_details] adds descriptor-only fields. Neither extension repeats
+    common fields or module identity. A binding read error remains explicit,
+    even though its wire projection displays an empty binding list. *)
+
+val snapshot_status_json : channel:string -> snapshot -> Yojson.Safe.t
+val snapshot_connector_json :
+  connector_id:string -> display_name:string -> channel:string -> snapshot -> Yojson.Safe.t
+(** Pure projections. Identity comes from the registered module's constants,
+    so an included module can override its descriptor identity independently. *)
+
 (** {1 Connector Module Type} *)
 
 module type S = sig
@@ -29,6 +54,10 @@ module type S = sig
 
   val channel : string
   (** Channel identifier used in gate message routing. *)
+
+  val snapshot : ?audit_limit:int -> unit -> snapshot
+  (** Read transport and binding observations once. Aggregate rendering and
+      active counts consume this same returned value without re-reading JSON. *)
 
   val status_json : ?audit_limit:int -> unit -> Yojson.Safe.t
   (** Runtime status snapshot for this connector. *)

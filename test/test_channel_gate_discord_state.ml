@@ -6,13 +6,25 @@ module Registry_test_connector_a = struct
   let connector_id = "registry-test-connector"
   let display_name = "Registry Test A"
   let channel = "registry-test"
-  let status_json ?(audit_limit = 10) () = ignore audit_limit; `Assoc []
-  let connector_json ?(audit_limit = 10) () =
+  let snapshot ?(audit_limit = 10) () : Channel_gate_connector.snapshot =
     ignore audit_limit;
-    `Assoc
-      [ "connector_id", `String connector_id
-      ; "display_name", `String display_name
-      ]
+    { available = false
+    ; connected = false
+    ; stale = false
+    ; error = ""
+    ; binding_read = Ok []
+    ; binding_store_path = "registry-test-bindings"
+    ; audit_path = "registry-test-audit"
+    ; recent_audit = []
+    ; updated_at = "registry-test-observation"
+    ; details = []
+    ; descriptor_details = []
+    }
+  let status_json ?(audit_limit = 10) () =
+    Channel_gate_connector.snapshot_status_json ~channel (snapshot ~audit_limit ())
+  let connector_json ?(audit_limit = 10) () =
+    Channel_gate_connector.snapshot_connector_json ~connector_id ~display_name
+      ~channel (snapshot ~audit_limit ())
   let bind ~channel_id:_ ~keeper_name:_ ~actor_name:_ =
     Ok (`Assoc [ "variant", `String "a" ])
   let unbind ~channel_id:_ ~actor_name:_ =
@@ -27,11 +39,8 @@ module Registry_test_connector_b = struct
 
   let display_name = "Registry Test B"
   let connector_json ?(audit_limit = 10) () =
-    ignore audit_limit;
-    `Assoc
-      [ "connector_id", `String connector_id
-      ; "display_name", `String display_name
-      ]
+    Channel_gate_connector.snapshot_connector_json ~connector_id ~display_name
+      ~channel (snapshot ~audit_limit ())
   let bind ~channel_id:_ ~keeper_name:_ ~actor_name:_ =
     Ok (`Assoc [ "variant", `String "b" ])
 end
@@ -74,9 +83,6 @@ let with_discord_paths dir f =
     with_env "MASC_DISCORD_BINDING_AUDIT_PATH" (Some audit_path) f)
 
 let test_bot_token_accessor_unset_and_whitespace () =
-  (* The supported OCaml 5.4 test runtime has no [Unix.unsetenv]; the
-     existing [with_env ... None] helper represents an unset variable with
-     an empty value, which the accessor must treat as absent. *)
   with_env "DISCORD_BOT_TOKEN" None (fun () ->
     check (option string) "unset token -> None" None
       (Env_config_discord.bot_token_opt ()));
@@ -281,6 +287,51 @@ let test_registry_register_replaces_and_all_snapshots () =
     check string "snapshot sees replacement" "Registry Test B" C.display_name
   | _ -> fail "unexpected registry snapshot"
 
+let test_connectors_json_uses_one_typed_observation () =
+  let reads = ref 0 in
+  let module Observed = struct
+    include Registry_test_connector_a
+
+    let display_name = "Single-read connector"
+    let channel = "single-read-channel"
+    let snapshot ?(audit_limit = 10) () =
+      incr reads;
+      { (Registry_test_connector_a.snapshot ~audit_limit ()) with
+        available = !reads mod 2 = 1
+      }
+    (* The inherited connector_json closes over A's identity and snapshot.
+       The registry must render this module's constants and typed observation. *)
+  end in
+  Fun.protect
+    ~finally:(fun () ->
+      Channel_gate_connector.register (module Registry_test_connector_b))
+    (fun () ->
+      Channel_gate_connector.register (module Observed);
+      let aggregate = Channel_gate_connector.connectors_json () in
+      let connectors = aggregate |> U.member "connectors" |> U.to_list in
+      let observed =
+        List.find
+          (fun json ->
+            json |> U.member "connector_id" |> U.to_string
+            |> String.equal Observed.connector_id)
+          connectors
+      in
+      check int "one observation supplies both descriptor and count" 1 !reads;
+      check string "descriptor uses the registered module's identity"
+        Observed.display_name (observed |> U.member "display_name" |> U.to_string);
+      check string "channel uses the registered module's identity"
+        Observed.channel (observed |> U.member "channel" |> U.to_string);
+      check bool "the first typed observation is rendered" true
+        (observed |> U.member "available" |> U.to_bool);
+      let rendered_active =
+        List.fold_left
+          (fun count json ->
+            if json |> U.member "available" |> U.to_bool then count + 1 else count)
+          0 connectors
+      in
+      check int "active count describes the rendered observations" rendered_active
+        (aggregate |> U.member "active_count" |> U.to_int))
+
 (* The audit wire shape keeps a constant-empty [guild_id] key for Discord
    rows: dashboards read that shape, and the sidecar that once resolved
    real guild ids is gone. *)
@@ -448,6 +499,8 @@ let () =
             test_connectors_json_advertises_gate_connector_descriptor;
           test_case "registry register replaces and all snapshots" `Quick
             test_registry_register_replaces_and_all_snapshots;
+          test_case "connector aggregate uses one typed observation" `Quick
+            test_connectors_json_uses_one_typed_observation;
         ] );
       ( "audit_wire",
         [

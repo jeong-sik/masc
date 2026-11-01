@@ -47,7 +47,6 @@ let binding_store =
 ;;
 
 let read_bindings_result () = Store.read_bindings_result binding_store
-let binding_json = Store.binding_json
 let read_recent_audit ~limit = Store.read_recent_audit binding_store ~limit
 
 (* ---- Reply routing ---- *)
@@ -168,9 +167,7 @@ type status =
   ; chat_db_readable : bool
   ; binding_store_path : string
   ; audit_path : string
-  ; binding_store_read_ok : bool
-  ; binding_store_error : string
-  ; configured_bindings : binding list
+  ; binding_read : (binding list, string) result
   ; recent_audit : Yojson.Safe.t list
   ; updated_at : string
   }
@@ -180,12 +177,12 @@ let read_status ~audit_limit =
   let startup_ok = Option.is_none startup_error in
   let poll_state = Atomic.get poll_state_ref in
   let self_chat_guid = Atomic.get self_chat_guid_ref in
-  let configured_bindings_result = read_bindings_result () in
-  let binding_store_read_ok = Result.is_ok configured_bindings_result in
-  let configured_bindings, binding_store_error =
-    match configured_bindings_result with
-    | Ok bindings -> bindings, ""
-    | Error error -> [], Store.binding_store_error_to_string error
+  let binding_read =
+    read_bindings_result () |> Result.map_error Store.binding_store_error_to_string
+  in
+  let binding_store_read_ok = Result.is_ok binding_read in
+  let binding_error =
+    match binding_read with Ok _ -> None | Error error -> Some error
   in
   let reply_mode_result = configured_reply_mode () in
   let reply_mode_error =
@@ -212,7 +209,7 @@ let read_status ~audit_limit =
     match startup_error with
     | Some message -> message
     | None ->
-      [ (if binding_store_read_ok then None else Some binding_store_error)
+      [ binding_error
       ; (if String.equal chat_db_error "" then None else Some chat_db_error)
       ; (if String.equal reply_mode_error "" then None else Some reply_mode_error)
       ; (if String.equal reply_target_error "" then None
@@ -233,61 +230,44 @@ let read_status ~audit_limit =
   ; chat_db_readable = String.equal chat_db_error ""
   ; binding_store_path = binding_store_path ()
   ; audit_path = binding_audit_path ()
-  ; binding_store_read_ok
-  ; binding_store_error
-  ; configured_bindings
+  ; binding_read
   ; recent_audit = read_recent_audit ~limit:audit_limit
   ; updated_at
   }
 ;;
 
-(* The fields both views share, written once so a field added to one view is
-   in the other too. *)
-let status_fields status =
-  [ "channel", `String channel
-  ; "capabilities", Channel_gate_connector_capability.all_json
-  ; "available", `Bool status.available
-  ; "connected", `Bool (poll_state_connected status.poll_state)
-  ; ( "status"
-    , `String
-        (* The poll loop is the liveness source. It publishes into memory on
-           every cycle, so there is no heartbeat that could age out and the
-           connector is never stale. *)
-        (Channel_gate_connector.connector_state_label
-           ~available:status.available
-           ~connected:(poll_state_connected status.poll_state)
-           ~stale:false) )
-  ; "error", `String status.error
-  ; "status_source", `String "in_process_gateway"
-  ; "poll_state", `String (poll_state_to_string status.poll_state)
-  ; "reply_mode", `String (reply_mode_to_string status.reply_mode)
-  ; ( "self_chat_guid"
-    , `String (Imessage_chat_db.redact_chat_guid status.self_chat_guid) )
-  ; "cursor_rowid", `Int status.cursor_rowid
-  ; "chat_db_path", `String status.chat_db_path
-  ; "chat_db_readable", `Bool status.chat_db_readable
-  ; "binding_store_path", `String status.binding_store_path
-  ; "audit_path", `String status.audit_path
-  ; "binding_source", `String "persisted"
-  ; "binding_store_read_ok", `Bool status.binding_store_read_ok
-  ; "binding_store_error", `String status.binding_store_error
-  ; "runtime_bindings_count", `Int (List.length status.configured_bindings)
-  ; "configured_bindings", `List (List.map binding_json status.configured_bindings)
-  ; "recent_audit", `List status.recent_audit
-  ; "updated_at", `String status.updated_at
-  ]
-;;
+let snapshot_of_status (status : status) : Channel_gate_connector.snapshot =
+  { available = status.available
+  ; connected = poll_state_connected status.poll_state
+  ; stale = false
+  ; error = status.error
+  ; binding_read = status.binding_read
+  ; binding_store_path = status.binding_store_path
+  ; audit_path = status.audit_path
+  ; recent_audit = status.recent_audit
+  ; updated_at = status.updated_at
+  ; details =
+      [ "capabilities", Channel_gate_connector_capability.all_json
+      ; "status_source", `String "in_process_gateway"
+      ; "poll_state", `String (poll_state_to_string status.poll_state)
+      ; "reply_mode", `String (reply_mode_to_string status.reply_mode)
+      ; "self_chat_guid", `String (Imessage_chat_db.redact_chat_guid status.self_chat_guid)
+      ; "cursor_rowid", `Int status.cursor_rowid
+      ; "chat_db_path", `String status.chat_db_path
+      ; "chat_db_readable", `Bool status.chat_db_readable
+      ]
+  ; descriptor_details = []
+  }
 
-let status_json ?(audit_limit = 10) () =
-  `Assoc (status_fields (read_status ~audit_limit))
-;;
+let snapshot ?(audit_limit = 10) () =
+  snapshot_of_status (read_status ~audit_limit)
 
-let connector_json ?(audit_limit = 10) () =
-  `Assoc
-    (("connector_id", `String connector_id)
-     :: ("display_name", `String display_name)
-     :: status_fields (read_status ~audit_limit))
-;;
+let status_json ?audit_limit () =
+  Channel_gate_connector.snapshot_status_json ~channel (snapshot ?audit_limit ())
+
+let connector_json ?audit_limit () =
+  Channel_gate_connector.snapshot_connector_json ~connector_id ~display_name ~channel
+    (snapshot ?audit_limit ())
 
 let bind ~channel_id ~keeper_name ~actor_name =
   Store.bind binding_store ~channel_id ~keeper_name ~actor_name

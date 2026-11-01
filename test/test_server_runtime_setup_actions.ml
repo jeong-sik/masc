@@ -74,10 +74,15 @@ elif args[0]=='runtime-verify':
         staged=tomllib.load(f)
     provider_id,model_key=args[3].split('.',1)
     provider=staged['providers'][provider_id]
+    credential_file=provider.get('credentials',{}).get('path')
     with open(os.path.join(os.path.dirname(__file__),'verified-provider.json'),'w') as f:
         json.dump({'runtime_id':args[3],'command':provider.get('command'),
           'account_home':provider.get('account-home'),
+          'credential_file':credential_file,
+          'credential_file_count':len(os.listdir(os.path.dirname(credential_file))) if credential_file else 0,
           'model':staged['models'][model_key]['api-name']},f)
+    if os.path.exists(os.path.join(os.path.dirname(__file__),'refuse-verification')):
+        sys.exit(3)
     # The shape Runtime_verification.to_json writes; of_json refuses any other key set.
     print(json.dumps({'schema':'masc.runtime_verification.v1','runtime_id':args[3],'model':'fixture-model',
       'observed_model':'fixture-model','status':'verified',
@@ -85,13 +90,140 @@ elif args[0]=='runtime-verify':
 else: raise AssertionError(args)
 |}); Unix.chmod binary 0o700;
   test base runtime binary (Eio.Stdenv.net env)))
-let request ?(context=1024) base source =
+let web_request base connections selection =
   let revision=Runtime_setup_batch.observe ~base_path:base |> Result.get_ok |> Runtime_setup_batch.revision_to_string in
   `Assoc ["revision",`String revision;
-    "connections",`List [`Assoc ["source",source;"models",`List [
-      `Assoc ["id",`String "selected-model";"context",`Int context;"streaming",`Bool true]]]];
-    "selection",`List [`Assoc ["connection",`Int 0;"model",`Int 0]]]
+    "connections",`List connections;"selection",`List selection]
+let request ?(context=1024) base source =
+  web_request base [`Assoc ["source",source;"models",`List [
+    `Assoc ["id",`String "selected-model";"context",`Int context;"streaming",`Bool true]]]]
+    [`Assoc ["connection",`Int 0;"model",`Int 0]]
 let source fields = `Assoc (["integration_id",`String "vllm";"endpoint",`String "http://127.0.0.1:19001/v1"] @ fields)
+let web_connection source models = `Assoc ["source",source;"models",`List (List.map (fun id ->
+  `Assoc ["id",`String id;"context",`Int 1024;"streaming",`Bool true]) models)]
+let web_selection connection model = `Assoc ["connection",`Int connection;"model",`Int model]
+let credential_paths (config:Runtime_schema.config) = List.filter_map (fun (provider:Runtime_schema.provider) ->
+  match provider.credentials with Some (Runtime_schema.File path) -> Some path | _ -> None) config.providers
+let test_repeated_web_source_shares_one_credential () =
+  List.iter (fun grouped -> fixture (fun base runtime binary _net ->
+    let original=Runtime_toml.parse_file runtime |> Result.get_ok in
+    let old_id=Option.get original.default_runtime_id in
+    let selected=source ["api_key",`String "shared-web-key"] in
+    let reordered=match selected with `Assoc fields -> `Assoc (List.rev fields)
+      | _ -> Alcotest.fail "fixture source must be an object" in
+    let connections=[web_connection selected (if grouped then ["first";"third"] else ["first"]);
+      web_connection reordered ["second"]] in
+    let selections=(if grouped then [web_selection 0 1] else [])
+      @ [web_selection 1 0;`Assoc ["runtime_id",`String old_id];web_selection 0 0] in
+    let receipt=get (Actions.save ~binary ~base_path:base (web_request base connections selections)) in
+    let config=Runtime_toml.parse_file runtime |> Result.get_ok in
+    Alcotest.(check int) "repeated web sources add one provider" (List.length original.providers+1)
+      (List.length config.providers);
+    let paths=credential_paths config in
+    Alcotest.(check int) "repeated web sources retain one private key" 1 (List.length paths);
+    let credential_path=List.hd paths in
+    Alcotest.(check int) "only the shared credential is retained in storage" 1
+      (Array.length (Sys.readdir (Filename.dirname credential_path)));
+    Alcotest.(check int) "the committed shared key remains private" 0o600 (Unix.stat credential_path).st_perm;
+    Alcotest.(check string) "the shared key survives request cleanup" "shared-web-key"
+      (In_channel.with_open_bin credential_path In_channel.input_all);
+    let open Yojson.Safe.Util in
+    let ids=receipt |> member "runtime_ids" |> to_list |> List.map to_string in
+    let names=List.map (fun id ->
+      let binding=List.find (fun binding -> Runtime_schema.binding_key binding=id) config.bindings in
+      (List.find (fun (model:Runtime_schema.model_spec) -> model.id=binding.model_id) config.models).api_name) ids in
+    Alcotest.(check (list string)) "connection/model indexes preserve the caller's selection order"
+      ((if grouped then ["third"] else []) @ ["second";"old";"first"]) names;
+    Alcotest.(check (list string)) "model preparation preserves original connection/model order"
+      ((if grouped then ["first";"third"] else ["first"]) @ ["second"])
+      (receipt |> member "models" |> to_list |> List.map to_string);
+    Alcotest.(check bool) "the public receipt never includes the key or its private path" false
+      (let text=Yojson.Safe.to_string receipt in
+       String_util.contains_substring text "shared-web-key" || String_util.contains_substring text credential_path))) [false;true]
+let test_distinct_web_sources_remain_separate () = fixture (fun base runtime binary _net ->
+  let original=Runtime_toml.parse_file runtime |> Result.get_ok in
+  let endpoint="http://127.0.0.1:19002/v1" in
+  let sources=[source ["api_key",`String "first-web-key"];
+    source ["api_key",`String "second-web-key"];
+    `Assoc ["integration_id",`String "vllm";"endpoint",`String endpoint;"api_key",`String "first-web-key"]] in
+  let connections=List.map (fun source -> web_connection source ["selected-model"]) sources in
+  ignore (get (Actions.save ~binary ~base_path:base
+    (web_request base connections [web_selection 0 0;web_selection 1 0;web_selection 2 0])));
+  let config=Runtime_toml.parse_file runtime |> Result.get_ok in
+  Alcotest.(check int) "changed keys and endpoints keep their providers" (List.length original.providers+3)
+    (List.length config.providers);
+  let paths=credential_paths config in
+  Alcotest.(check int) "distinct sources own distinct key files" 3 (List.length (List.sort_uniq String.compare paths));
+  Alcotest.(check (list string)) "key material is not confused between sources"
+    ["first-web-key";"first-web-key";"second-web-key"]
+    (List.map (fun path -> In_channel.with_open_bin path In_channel.input_all) paths |> List.sort String.compare))
+let test_distinct_web_account_references_remain_separate () = fixture (fun base runtime binary _net ->
+  let homes=List.map (fun name -> let path=Filename.concat base name in Unix.mkdir path 0o700;path)
+    ["web-account-one";"web-account-two"] in
+  let sources=List.map (fun account_home ->
+    let reference=Runtime_setup_accounts.register_home ~workspace:base ~integration_id:"codex" ~cli_path:"codex" ~account_home
+      |> Result.get_ok |> Runtime_setup_accounts.reference_to_string in
+    `Assoc ["integration_id",`String "codex";"account_ref",`String reference]) homes in
+  ignore (get (Actions.save ~binary ~base_path:base (web_request base
+    (List.map (fun source -> web_connection source ["selected-model"]) sources)
+    [web_selection 0 0;web_selection 1 0])));
+  let config=Runtime_toml.parse_file runtime |> Result.get_ok in
+  let selected=List.filter_map (fun (provider:Runtime_schema.provider) ->
+    match provider.account_home with Some home when List.mem home homes -> Some home | Some _ | None -> None) config.providers in
+  Alcotest.(check (list string)) "distinct account references keep their selected homes"
+    (List.sort String.compare homes) (List.sort String.compare selected))
+let test_repeated_web_source_rolls_back_shared_credential () = fixture (fun base runtime binary _net ->
+  let before=In_channel.with_open_bin runtime In_channel.input_all in
+  let selected=source ["api_key",`String "failed-shared-key"] in
+  save (Filename.concat base "refuse-verification") "";
+  let body=web_request base [web_connection selected ["first"];web_connection selected ["second"]]
+    [web_selection 0 0;web_selection 1 0] in
+  (match Actions.save ~binary ~base_path:base body with
+   | Error (Actions.Save_failed (Runtime_setup_batch.Verification_unreadable _)) -> ()
+   | Error error -> Alcotest.fail (Actions.error_message error)
+   | Ok _ -> Alcotest.fail "failed model verification must refuse the save");
+  let open Yojson.Safe.Util in
+  let verified=Yojson.Safe.from_file (Filename.concat base "verified-provider.json") in
+  let path=verified |> member "credential_file" |> to_string in
+  Alcotest.(check int) "one shared key existed during actual child verification" 1
+    (verified |> member "credential_file_count" |> to_int);
+  Alcotest.(check bool) "failed save removes the shared pending key" false (Sys.file_exists path);
+  Alcotest.(check int) "failed save leaves no unused key files" 0
+    (Array.length (Sys.readdir (Filename.dirname path)));
+  Alcotest.(check string) "failed verification preserves the original configuration" before
+    (In_channel.with_open_bin runtime In_channel.input_all))
+let test_repeated_web_source_cas_preserves_committed_credential () = fixture (fun base runtime binary _net ->
+  ignore (get (Actions.save ~binary ~base_path:base (request base (source ["api_key",`String "retained-web-key"]))));
+  let config=Runtime_toml.parse_file runtime |> Result.get_ok in
+  let path=List.hd (credential_paths config) in
+  let directory=Filename.dirname path in
+  let prior_files=Sys.readdir directory |> Array.to_list |> List.sort String.compare in
+  let selected=source ["api_key",`String "stale-shared-key"] in
+  let connections=[web_connection selected ["first"];web_connection selected ["second"]] in
+  let selections=[web_selection 0 0;web_selection 1 0] in
+  let stale=web_request base connections selections in
+  let moved=In_channel.with_open_bin runtime In_channel.input_all ^ "\n# another workspace writer\n" in
+  save runtime moved;
+  let calls=In_channel.with_open_bin (Filename.concat base "save-calls") In_channel.input_all in
+  (match Actions.save ~binary ~base_path:base stale with
+   | Error (Actions.Save_failed Runtime_setup_batch.Changed_configuration) -> ()
+   | Error error -> Alcotest.fail (Actions.error_message error)
+   | Ok _ -> Alcotest.fail "stale revision must refuse the save");
+  Alcotest.(check string) "CAS refusal preserves the other writer's configuration" moved
+    (In_channel.with_open_bin runtime In_channel.input_all);
+  Alcotest.(check (list string)) "CAS refusal removes only new pending credentials" prior_files
+    (Sys.readdir directory |> Array.to_list |> List.sort String.compare);
+  Alcotest.(check string) "CAS refusal preserves the previously committed key" "retained-web-key"
+    (In_channel.with_open_bin path In_channel.input_all);
+  Alcotest.(check string) "CAS refusal starts no native save child" calls
+    (In_channel.with_open_bin (Filename.concat base "save-calls") In_channel.input_all);
+  let malformed=match selected with `Assoc fields -> `Assoc (("api_key",`String "stale-shared-key")::fields)
+    | _ -> Alcotest.fail "fixture source must be an object" in
+  Alcotest.(check bool) "a repeated source with duplicate fields is never admitted from the cache" true
+    (Actions.save ~binary ~base_path:base (web_request base
+      [web_connection selected ["first"];web_connection malformed ["second"]] selections)=Error Actions.Invalid_request);
+  Alcotest.(check (list string)) "later parsing refusal also releases the shared preparation" prior_files
+    (Sys.readdir directory |> Array.to_list |> List.sort String.compare))
 let test_private_key () = fixture (fun base runtime binary _net ->
   let receipt=get (Actions.save ~binary ~base_path:base (request base (source ["api_key",`String "fixture-secret-key"]))) in
   let config=Runtime_toml.parse_file runtime |> Result.get_ok in
@@ -726,6 +858,11 @@ let test_status_of_error () =
   check "wrong discovery connection is 400" `Bad_request
     (Actions.Discovery_failed Runtime_model_discovery.Invalid_connection)
 let () = Alcotest.run "web setup actions" ["request boundary",[
+  Alcotest.test_case "repeated web sources share one provider and credential without changing indexes" `Quick test_repeated_web_source_shares_one_credential;
+  Alcotest.test_case "different web source keys and endpoints remain separate" `Quick test_distinct_web_sources_remain_separate;
+  Alcotest.test_case "different web account references remain separate" `Quick test_distinct_web_account_references_remain_separate;
+  Alcotest.test_case "failed web verification releases the shared credential" `Quick test_repeated_web_source_rolls_back_shared_credential;
+  Alcotest.test_case "web CAS refusal keeps committed keys and releases new preparations" `Quick test_repeated_web_source_cas_preserves_committed_credential;
   Alcotest.test_case "inline account variants preserve the provider while replacement keys stay separate" `Quick test_existing_inline_http_account;
   Alcotest.test_case "product alias reuses the configured account" `Quick test_alias_reuses_operator_account;
   Alcotest.test_case "disabled provider is preserved and refused" `Quick test_disabled_provider_refused;

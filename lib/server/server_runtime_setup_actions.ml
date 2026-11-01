@@ -78,9 +78,25 @@ let private_key ~sw pending secret =
     Eio.Switch.on_release sw (fun () -> Runtime_setup_credentials.remove_uncommitted key);
     Ok ["credential_file",`String (Runtime_setup_credentials.reference_path key)]
 type source_use = Observe_source | Save_source
-let source_template ?(use=Observe_source) ~sw ~pending ~workspace config request =
+type source = {
+  integration_id : string;
+  endpoint : string option;
+  api_key : string option;
+  account_ref : string option;
+}
+let source_of_json request =
   let* request = fields ["integration_id";"endpoint";"api_key";"account_ref"] ["integration_id"] request in
-  let* id = text (value "integration_id" request) in
+  let* integration_id = text (value "integration_id" request) in
+  let optional_string key = match List.assoc_opt key request with
+    | None -> Ok None
+    | Some (`String value) -> Ok (Some value)
+    | Some _ -> Error Invalid_request in
+  let* endpoint = optional_string "endpoint" in
+  let* api_key = optional_string "api_key" in
+  let* account_ref = optional_string "account_ref" in
+  Ok { integration_id; endpoint; api_key; account_ref }
+let source_template_of_source ?(use=Observe_source) ~sw ~pending ~workspace config source =
+  let id = source.integration_id in
   let inventory = Runtime_wizard_inventory.to_json config in
   let rows = match inventory with `Assoc fields -> (match value "integrations" fields with `List rows -> rows | _ -> []) | _ -> [] in
   let matches = List.filter_map (function `Assoc fields when value "id" fields = `String id -> Some fields | _ -> None) rows in
@@ -90,8 +106,8 @@ let source_template ?(use=Observe_source) ~sw ~pending ~workspace config request
   let* protocol = text (value "protocol" selected) in
   let* choice = choice config ~id ~protocol in
   let http = Runtime_setup_spec.http choice in
-  let* () = if not http && List.mem_assoc "endpoint" request then Error Invalid_request else Ok () in
-  let* endpoint = match List.assoc_opt "endpoint" request,List.assoc_opt "endpoint" selected with
+  let* () = if not http && Option.is_some source.endpoint then Error Invalid_request else Ok () in
+  let* endpoint = match Option.map (fun endpoint -> `String endpoint) source.endpoint,List.assoc_opt "endpoint" selected with
     | None,existing -> Ok existing
     | Some (`String supplied),None -> let* endpoint=text (`String supplied) in Ok (Some (`String endpoint))
     | Some supplied,Some existing when supplied=existing -> Ok (Some existing)
@@ -100,9 +116,9 @@ let source_template ?(use=Observe_source) ~sw ~pending ~workspace config request
   let transport = if http then ["endpoint", endpoint_val]
     else ["command",value "command" selected] in
   let metadata = if http then List.filter (fun (key,_) -> key="provider_kind" || key="request_path") selected else [] in
-  let* account = match List.assoc_opt "account_ref" request with
+  let* account = match source.account_ref with
     | None -> Ok None
-    | Some (`String reference) when not http && not (List.mem_assoc "api_key" request) ->
+    | Some reference when not http && Option.is_none source.api_key ->
       let* reference=Runtime_setup_accounts.reference_of_string reference |> Result.map_error (fun _ -> Credential_unavailable) in
       let* command=text (value "command" selected) in
       let* binding = Runtime_setup_accounts.resolve ~workspace ~integration_id:id ~cli_path:command reference
@@ -114,17 +130,17 @@ let source_template ?(use=Observe_source) ~sw ~pending ~workspace config request
       (* A disabled connection can still be the client template for an explicit
          new login. Its old account must remain disabled; only a changed account
          reference (or an explicitly supplied HTTP key) creates a new provider. *)
-      (match account, List.assoc_opt "api_key" request with
+      (match account, source.api_key with
        | Some (Runtime_setup_accounts.Native_home selected), None
          when not (Runtime_setup_spec.account_home_matches choice provider.account_home
            (Some selected.account_home)) -> Ok ()
        | Some (Runtime_setup_accounts.Antigravity_account selected), None
          when provider.credentials <> Some (Runtime_schema.File selected.credential_file) -> Ok ()
-       | None, Some (`String _) when http -> Ok ()
+       | None, Some _ when http -> Ok ()
        | Some (Runtime_setup_accounts.Native_home _ | Antigravity_account _), (None | Some _)
        | None, (None | Some _) -> Error Disabled_connection)
     | Some _ | None -> Ok () in
-  let existing_inline = match use, account, List.assoc_opt "api_key" request,
+  let existing_inline = match use, account, source.api_key,
       declared_provider config id with
     | Save_source, None, None, Some ({credentials=Some (Runtime_schema.Inline _); _} as provider)
       when http -> Some provider
@@ -132,7 +148,7 @@ let source_template ?(use=Observe_source) ~sw ~pending ~workspace config request
     | (Save_source, None, None, Some { credentials = None;_}) | (Save_source, None, None, None)
     | (Save_source, None, Some _, _) | (Save_source, Some _, _, _) | (Observe_source, _, _, _)
     | (Save_source, None, None, Some {credentials=Some (Inline _); _ }) -> None in
-  let* credentials = match account,List.assoc_opt "api_key" request with
+  let* credentials = match account,source.api_key with
     | Some (Runtime_setup_accounts.Antigravity_account account),None
       when choice=Runtime_setup_spec.Antigravity -> Ok ["credential_file",`String account.credential_file]
     | Some (Runtime_setup_accounts.Native_home _),None
@@ -141,7 +157,7 @@ let source_template ?(use=Observe_source) ~sw ~pending ~workspace config request
     | (Some (Runtime_setup_accounts.Antigravity_account _), Some _)
     | (Some (Runtime_setup_accounts.Native_home _), Some _) -> Error Invalid_request
 
-    | None,Some (`String secret) when http -> private_key ~sw pending secret
+    | None,Some secret when http -> private_key ~sw pending secret
     | None,Some _ -> Error Invalid_request
     | None,None ->
       (match declared_provider config id with
@@ -179,6 +195,9 @@ let source_template ?(use=Observe_source) ~sw ~pending ~workspace config request
       Error Invalid_request
     | (Ollama | Llama_cpp | Vllm | Openai_compatible | Messages | Antigravity),_ -> Ok [] in
   Ok (("choice",`String (Runtime_setup_spec.choice_name choice))::transport @ metadata @ credentials @ timeout @ account_home,id,choice,existing_inline)
+let source_template ?use ~sw ~pending ~workspace config request =
+  let* source = source_of_json request in
+  source_template_of_source ?use ~sw ~pending ~workspace config source
 let native_json ~binary args =
   match Process_eio.run_argv_with_status_split_or_refusal (binary::args) with
   | Ok (Unix.WEXITED 0,body,_) ->
@@ -519,11 +538,17 @@ let save ~binary ~base_path request =
     let* selection=list (value "selection" body) in
     let* config=config ~base_path in
     let pending=ref [] in
-    let rec prepare = function
+    let rec prepare sources = function
       | [] -> Ok []
       | connection::tail ->
         let* row=fields ["source";"models"] ["source";"models"] connection in
-        let* template,provider_id,choice,existing_inline=source_template ~use:Save_source ~sw ~pending ~workspace:base_path config (value "source" row) in
+        let* source=source_of_json (value "source" row) in
+        let* prepared_source,sources = match List.assoc_opt source sources with
+          | Some prepared -> Ok (prepared,sources)
+          | None ->
+            let* prepared=source_template_of_source ~use:Save_source ~sw ~pending ~workspace:base_path config source in
+            Ok (prepared,(source,prepared)::sources) in
+        let template,provider_id,choice,existing_inline=prepared_source in
         let* models=list (value "models" row) in
         let* ()=if models=[] then Error Invalid_request else Ok () in
         let native_client_models client =
@@ -553,8 +578,8 @@ let save ~binary ~base_path request =
             |> Result.map_error (fun _ -> Unsupported_connection) in
           let* tail=specs tail in Ok (spec::tail) in
         let* models=specs models in
-        let* tail=prepare tail in Ok (models::tail) in
-    let* prepared=prepare connections in
+        let* tail=prepare sources tail in Ok (models::tail) in
+    let* prepared=prepare [] connections in
     let select = function
       | `Assoc ["runtime_id",raw] -> text raw
       | `Assoc fields when List.length fields=2 ->

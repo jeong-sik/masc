@@ -33034,7 +33034,7 @@ Use relative paths for resources already held in the package. -->
                      navigate Planning;
                      state.planning_mode <- Planning_list;
                      state.task_detail_id <- Some task_id;
-                     reset_task_detail_scroll state;
+                     state.task_detail_scroll <- 0;
                      state.task_history <- Masc_tui_fetched.clear state.task_history;
                      state.task_focus <- Masc_tui_overview_tasks.land_on state.tasks ~task_id;
                      launch_task_history_load state ~mailbox:async_messages task_id)

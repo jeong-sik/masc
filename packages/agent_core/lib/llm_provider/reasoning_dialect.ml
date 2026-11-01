@@ -508,9 +508,9 @@ let request_control_fields
            in
            let fields =
              match control.enabled, clear_thinking_object with
-             | Some true, Some clear_thinking ->
+             | (Some true | None), Some clear_thinking ->
                fields @ [ "clear_thinking", `Bool clear_thinking ]
-             | (Some false | None), _ | Some true, None -> fields
+             | Some false, _ | (Some true | None), None -> fields
            in
            ( (match fields with
               | [] -> []
@@ -518,15 +518,15 @@ let request_control_fields
            , explicit_field_encoding )
          | Chat_completions, No_toggle ->
            (match clear_thinking_object, enable_thinking with
-            | Some clear_thinking, Some true ->
-              ( [ ( "thinking"
-                  , `Assoc
-                      [ "type", `String "enabled"
-                      ; "clear_thinking", `Bool clear_thinking
-                      ] )
-                ]
-              , explicit_field_encoding )
-            | Some _, (Some false | None) | None, _ -> [], None)
+            | Some clear_thinking, (Some true | None) ->
+              let fields = [ "clear_thinking", `Bool clear_thinking ] in
+              let fields =
+                match enable_thinking with
+                | Some true -> ("type", `String "enabled") :: fields
+                | Some false | None -> fields
+              in
+              [ "thinking", `Assoc fields ], explicit_field_encoding
+            | Some _, Some false | None, _ -> [], None)
          | Chat_completions, (Anthropic_thinking | Gemini_thinking_config) -> [], None
        in
        let output_fields =

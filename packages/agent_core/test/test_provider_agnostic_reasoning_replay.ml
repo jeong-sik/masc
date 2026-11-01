@@ -2074,8 +2074,17 @@ let test_provider_replay_policy_matrix_pinned () =
          (cfg ~enable_thinking:true ~kind:Provider_config.Glm ~model_id ~base_url ());
        check
          (label "preserve only")
-         Reasoning_replay_contract.Tool_call_assistant_messages_latest_user_turn
+         Reasoning_replay_contract.All_assistant_messages
          (cfg ~preserve_thinking:true ~kind:Provider_config.Glm ~model_id ~base_url ());
+       check
+         (label "clear_thinking=false with default thinking")
+         Reasoning_replay_contract.All_assistant_messages
+         (cfg ~clear_thinking:false ~kind:Provider_config.Glm ~model_id ~base_url ());
+       check
+         (label "disabled thinking overrides preservation")
+         Reasoning_replay_contract.No_replay
+         (cfg ~enable_thinking:false ~preserve_thinking:true
+            ~kind:Provider_config.Glm ~model_id ~base_url ());
        check
          (label "thinking disabled")
          Reasoning_replay_contract.No_replay
@@ -2191,6 +2200,12 @@ let test_clear_thinking_gate_is_capability_not_identity () =
     "non-GLM kind declaring the wire gets conditional replay"
     true
     (resolved_replay_policy (preserved Provider_config.OpenAI_compat declared)
+     = Reasoning_replay_contract.All_assistant_messages);
+  check_bool
+    "declared default thinking permits preservation without a provider identity"
+    true
+    (resolved_replay_policy
+       { (preserved Provider_config.OpenAI_compat declared) with enable_thinking = None }
      = Reasoning_replay_contract.All_assistant_messages);
   check_bool
     "non-GLM kind declaring the wire keeps the active tool exchange by default"

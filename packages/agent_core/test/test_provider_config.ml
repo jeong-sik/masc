@@ -1555,19 +1555,25 @@ let test_validate_reasoning_effort_fails_closed_without_declaration () =
 let test_clear_thinking_object_request_field () =
   let resolve
         ?(preserve_thinking_control_format = Capabilities.Thinking_object_clear_thinking)
+        ?enable_thinking
         ?clear_thinking
         ?preserve_thinking
         ()
     =
     Provider_config.clear_thinking_object_request_field
       ~preserve_thinking_control_format
+      ~enable_thinking
       ~clear_thinking
       ~preserve_thinking
   in
   Alcotest.(check (option bool))
-    "declared wire clears by default"
-    (Some true)
+    "entirely omitted thinking request stays omitted"
+    None
     (resolve ());
+  Alcotest.(check (option bool))
+    "explicit thinking uses the declared clear default"
+    (Some true)
+    (resolve ~enable_thinking:true ());
   Alcotest.(check (option bool))
     "preserve disables clear"
     (Some false)
@@ -1583,7 +1589,8 @@ let test_clear_thinking_object_request_field () =
        Alcotest.(check (option bool))
          label
          None
-         (resolve ~preserve_thinking_control_format ()))
+         (resolve ~preserve_thinking_control_format ~enable_thinking:true
+            ~preserve_thinking:true ()))
     [ "no preserve wire omits", Capabilities.No_preserve_thinking_control
     ; "thinking_object_keep_all omits", Capabilities.Thinking_object_keep_all
     ; "chat_template_kwargs omits", Capabilities.Chat_template_kwargs_preserve_thinking

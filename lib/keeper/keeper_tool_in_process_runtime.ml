@@ -1085,56 +1085,77 @@ let handle_surface_read_with_outcome ~config ~(meta : keeper_meta) ~args =
      | Ok (Discord_channel | Discord_messages | Discord_members | Discord_member as mode) ->
        handle_discord_surface_read ~meta ~args ~mode
      | Ok Local_lane ->
-       let surface = Safe_ops.json_string ~default:"" "surface" args in
-       let limit =
-         Safe_ops.json_int ~default:Keeper_surface_read.default_limit "limit" args
+       let cursor =
+         if Option.is_some (Json_util.assoc_member_opt "before" args) then
+           Error "local history uses cursor from the previous response, not before"
+         else
+           match strict_string_opt "cursor" args with
+           | Error _ as error -> error
+           | Ok None -> Ok None
+           | Ok (Some encoded) ->
+             Keeper_chat_history_page.cursor_of_string encoded
+             |> Result.map Option.some
+             |> Result.map_error Keeper_chat_history_page.error_to_string
        in
-       let before = Safe_ops.json_float_opt "before" args in
-       let page =
-         Keeper_chat_store.load_page
-           ~base_dir:config.Workspace.base_path
-           ~keeper_name:meta.name
-           ?before
-           ()
-       in
-       let notes =
-         Keeper_person_notes.notes
-           ~base_dir:config.Workspace.base_path
-           ~keeper_name:meta.name
-       in
-       (* Task-1596: hand the read the same binding knowledge post gets,
-          so an unbound connector label or a label matching no lane is
-          refused with an error instead of a silent zero-row page. A
-          binding-store lookup failure degrades to the unverified
-          projection — reads stay available, and only *provable* wrong
-          labels are refused (writes still fail hard on lookup errors). *)
-       let bindings =
-         match
-           Channel_gate_discord_state.bound_channels_result
+       (match cursor with
+       | Error message -> discord_tool_error ~code:Tool_args.Validation_error message
+       | Ok cursor ->
+         let surface = Safe_ops.json_string ~default:"" "surface" args in
+         let limit =
+           Safe_ops.json_int ~default:Keeper_surface_read.default_limit "limit" args
+           |> Keeper_surface_read.normalize_limit
+         in
+         (match
+           Keeper_chat_store.load_history_page_result
+             ~base_dir:config.Workspace.base_path
              ~keeper_name:meta.name
+             ?cursor
+             ~max_total:limit
+             ()
          with
-         | Error _ -> None
-         | Ok bound_discord_channels ->
+         | Error error ->
+           let code = match error with
+             | Keeper_chat_history_page.Invalid_cursor _ -> Tool_args.Validation_error
+             | Stale_cursor -> Tool_args.Precondition_failed
+             | Invalid_row _ | Row_exceeds_window | Io_error _ -> Tool_args.Internal_error
+           in
+           discord_tool_error ~code (Keeper_chat_history_page.error_to_string error)
+         | Ok page ->
+           let notes =
+             Keeper_person_notes.notes
+               ~base_dir:config.Workspace.base_path
+               ~keeper_name:meta.name
+           in
+           (* Task-1596: hand the read the same binding knowledge post gets,
+              so an unbound connector label or a label matching no lane is
+              refused with an error instead of a silent zero-row page. A
+              binding-store lookup failure degrades to the unverified
+              projection — reads stay available, and only *provable* wrong
+              labels are refused (writes still fail hard on lookup errors). *)
+           let bindings =
+             match
+               Channel_gate_discord_state.bound_channels_result
+                 ~keeper_name:meta.name
+             with
+             | Error _ -> None
+             | Ok bound_discord_channels ->
+               (match
+                  Channel_gate_slack_state.bound_channels ~keeper_name:meta.name
+                with
+                | Error _ -> None
+                | Ok bound_slack_channels ->
+                  Some
+                    { Keeper_surface_read.slack = bound_slack_channels;
+                      discord = bound_discord_channels })
+           in
            (match
-              Channel_gate_slack_state.bound_channels ~keeper_name:meta.name
+              Keeper_surface_read.respond ?bindings ~surface ~cursor ~notes page
             with
-            | Error _ -> None
-            | Ok bound_slack_channels ->
-              Some
-                { Keeper_surface_read.slack = bound_slack_channels;
-                  discord = bound_discord_channels })
-       in
-       (match
-          Keeper_surface_read.respond ?bindings ~surface ~limit ~before
-            ~has_more:page.Keeper_chat_store.has_more
-            ~notes
-            page.Keeper_chat_store.messages
-        with
-        | Ok body -> Keeper_tool_execution.success body
-        | Error refusal ->
-          Keeper_tool_execution.failure
-            ~class_:Tool_result.Policy_rejection
-            (Keeper_tool_shared_runtime.error_json refusal)))
+            | Ok body -> Keeper_tool_execution.success body
+            | Error refusal ->
+              Keeper_tool_execution.failure
+                ~class_:Tool_result.Policy_rejection
+                (Keeper_tool_shared_runtime.error_json refusal)))))
 ;;
 
 let handle_person_note_set_with_outcome ~config ~(meta : keeper_meta) ~args =

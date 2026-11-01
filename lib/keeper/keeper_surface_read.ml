@@ -12,6 +12,7 @@ type participant = {
 
 let default_limit = 20
 let max_limit = 100
+let normalize_limit limit = min max_limit (max 1 limit)
 
 let opt_string_field key = function
   | Some value when String.trim value <> "" -> [ (key, `String value) ]
@@ -99,28 +100,6 @@ let roster (lane : Store.chat_message list) : participant list =
          | Some _, None -> 1
          | None, Some _ -> -1
          | None, None -> compare a.id b.id)
-
-let take_last n items =
-  let len = List.length items in
-  if len <= n then items
-  else
-    let rec drop k = function
-      | rest when k <= 0 -> rest
-      | [] -> []
-      | _ :: rest -> drop (k - 1) rest
-    in
-    drop (len - n) items
-
-(* Oldest ts across the whole loaded page (not just the lane filter):
-   passing it back as the next [before] guarantees walk progress even
-   when a page holds no rows for the requested lane (RFC-0228 P1). *)
-let page_oldest_ts (messages : Store.chat_message list) : float option =
-  List.fold_left
-    (fun acc (m : Store.chat_message) ->
-      match acc with
-      | None -> Some m.ts
-      | Some oldest -> Some (Float.min oldest m.ts))
-    None messages
 
 (* RFC-0229 P1: notes are keeper-scoped deliberate memory. Union them
    into the roster — annotating people still present, and resurrecting
@@ -212,7 +191,7 @@ let unknown_label_hint = function
    the page itself is the only evidence: present -> a legitimate lane,
    absent -> unknown. A page is one window of the history, so an absence
    proves the label wrong only when that window is the whole history: no
-   [before] cursor (nothing newer was skipped) and no [has_more] (nothing
+   requested cursor (nothing newer was skipped) and no next cursor (nothing
    older remains). Otherwise a gate lane whose rows sit outside the window
    reads as an empty page, and the cursor keeps paging. Same trimmed-exact
    comparison as the filter. *)
@@ -229,44 +208,39 @@ let classify_surface ~bindings ~whole_history ~(page_labels : string list)
       if List.mem surface page_labels || not whole_history then None
       else Some (Unknown_label page_labels)
 
-let respond_unverified ~surface ~limit ~has_more ~notes
-    (messages : Store.chat_message list) : string =
-  (* Non-blank [surface] assumed — the blank rejection lives in
-     [respond], which routes here when nothing can be proven wrong. *)
-  let limit = min max_limit (max 1 limit) in
-    let lane =
-      List.filter
-        (fun (m : Store.chat_message) ->
-          match m.surface with
-          | Some typed_surface ->
-              String.equal
-                (Surface_ref.lane_label typed_surface |> String.trim)
-                surface
-          | None -> false)
-        messages
-    in
-    let shown = take_last limit lane in
-    Yojson.Safe.to_string
-      (`Assoc
-        ([
-           ("surface", `String surface);
-           ("messages", `List (List.map message_json shown));
-           ( "participants",
-            `List (List.map participant_json (with_notes notes (roster lane)))
-          );
-           ("lane_row_count", `Int (List.length lane));
-           ("returned", `Int (List.length shown));
-           ("has_more", `Bool has_more);
-         ]
-        @ opt_float_field "oldest_ts" (page_oldest_ts messages)))
+let respond_unverified ~surface ~notes (page : Store.history_page) : string =
+  (* The store applies the limit before the lane filter. Every matching row
+     must be returned before publishing that page's next cursor. *)
+  let lane =
+    List.filter
+      (fun (m : Store.chat_message) ->
+        match m.surface with
+        | Some typed_surface ->
+          String.equal
+            (Surface_ref.lane_label typed_surface |> String.trim)
+            surface
+        | None -> false)
+      page.history_messages
+  in
+  Yojson.Safe.to_string
+    (`Assoc
+      [ "surface", `String surface
+      ; "messages", `List (List.map message_json lane)
+      ; "participants", `List (List.map participant_json (with_notes notes (roster lane)))
+      ; "lane_row_count", `Int (List.length lane)
+      ; "returned", `Int (List.length lane)
+      ; "has_more", `Bool (Option.is_some page.next_cursor)
+      ; "next_cursor", (match page.next_cursor with
+          | Some cursor -> `String (Keeper_chat_history_page.cursor_to_string cursor)
+          | None -> `Null)
+      ])
 
 (* The tool entry: a blank surface is refused, then — only when the
    runtime supplied binding knowledge — a label that can be proven wrong is
    refused instead of answered with a silent zero-row page. Without
-   [bindings] the projection is exactly the pure one the tests and REST
-   reuse already pin down. *)
-let respond ?bindings ~surface ~limit ~before ~has_more ~notes
-    (messages : Store.chat_message list) : (string, string) result =
+   [bindings] the projection stays unverified. *)
+let respond ?bindings ~surface ~cursor ~notes
+    (page : Store.history_page) : (string, string) result =
   let surface = String.trim surface in
   if surface = "" then
     Error
@@ -275,15 +249,15 @@ let respond ?bindings ~surface ~limit ~before ~has_more ~notes
        not a connector-wide channel registry."
   else
     match bindings with
-    | None -> Ok (respond_unverified ~surface ~limit ~has_more ~notes messages)
+    | None -> Ok (respond_unverified ~surface ~notes page)
     | Some bindings ->
         (match
            classify_surface ~bindings
-             ~whole_history:(Option.is_none before && not has_more)
-             ~page_labels:(page_labels messages) surface
+             ~whole_history:(Option.is_none cursor && Option.is_none page.next_cursor)
+             ~page_labels:(page_labels page.history_messages) surface
          with
          | None ->
-             Ok (respond_unverified ~surface ~limit ~has_more ~notes messages)
+             Ok (respond_unverified ~surface ~notes page)
          | Some Unbound_connector ->
              Error
                (Printf.sprintf "surface %s is not connected: %s" surface

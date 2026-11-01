@@ -495,49 +495,59 @@ type cached_events_file = {
   st_ctime : float;
   ended_with_newline : bool;
   prefix_digest : Digest.t;
+  bytes : int;
   by_task : (string, Yojson.Safe.t list) Hashtbl.t;
   mutable last_access_tick : int;
 }
 
 let max_cached_event_files = 256
+(* A file-count bound alone does not bound memory: one entry retains the
+   parsed events of a whole file. Keep the retained working set under this
+   many bytes as well, evicting least-recently-touched files first. *)
+let max_cached_event_bytes = 64 * 1024 * 1024
 let events_file_cache : (string, cached_events_file) Hashtbl.t =
   Hashtbl.create 64
 let events_file_cache_mutex = Mutex.create ()
 let events_file_cache_tick = ref 0
-let events_file_scan_locks =
-  Array.init 64 (fun _ -> Mutex.create ())
+let events_file_cache_retained_bytes = ref 0
 
 let with_events_cache_lock f =
   Mutex.lock events_file_cache_mutex;
   Fun.protect ~finally:(fun () -> Mutex.unlock events_file_cache_mutex) f
 
-let with_events_file_scan_lock path f =
-  let m =
-    events_file_scan_locks.(
-      (Hashtbl.hash path land max_int) mod Array.length events_file_scan_locks)
-  in
-  Mutex.lock m;
-  Fun.protect ~finally:(fun () -> Mutex.unlock m) f
-
 let touch_events_cache_tick () =
   incr events_file_cache_tick;
   !events_file_cache_tick
 
-let evict_oldest_events_file_if_needed () =
-  if Hashtbl.length events_file_cache >= max_cached_event_files then begin
-    let oldest_key = ref None in
-    let oldest_tick = ref max_int in
-    Hashtbl.iter
-      (fun key (entry : cached_events_file) ->
-         if entry.last_access_tick < !oldest_tick then begin
-           oldest_tick := entry.last_access_tick;
-           oldest_key := Some key
-         end)
-      events_file_cache;
-    match !oldest_key with
-    | Some key -> Hashtbl.remove events_file_cache key
-    | None -> ()
-  end
+(* The caller holds the cache lock. *)
+let evict_oldest_events_file () =
+  let oldest_key = ref None in
+  let oldest_tick = ref max_int in
+  Hashtbl.iter
+    (fun key (entry : cached_events_file) ->
+       if entry.last_access_tick < !oldest_tick then begin
+         oldest_tick := entry.last_access_tick;
+         oldest_key := Some key
+       end)
+    events_file_cache;
+  match !oldest_key with
+  | Some key ->
+    (match Hashtbl.find_opt events_file_cache key with
+     | Some (entry : cached_events_file) ->
+       events_file_cache_retained_bytes :=
+         !events_file_cache_retained_bytes - entry.bytes
+     | None -> ());
+    Hashtbl.remove events_file_cache key
+  | None -> ()
+
+(* The caller holds the cache lock. *)
+let evict_events_file_cache_if_needed () =
+  while Hashtbl.length events_file_cache >= max_cached_event_files
+        || !events_file_cache_retained_bytes > max_cached_event_bytes
+  do
+    if Hashtbl.length events_file_cache = 0 then ()
+    else evict_oldest_events_file ()
+  done
 
 let add_event_for_task_key by_task key json =
   let existing = Option.value ~default:[] (Hashtbl.find_opt by_task key) in
@@ -608,76 +618,94 @@ let load_events_file_index ~verify_content path =
     | Some entry when not should_verify && same_stat_identity entry st ->
       Some entry.by_task
     | _ ->
-      with_events_file_scan_lock path (fun () ->
-        match check_stat_hit () with
-        | Some entry when not should_verify && same_stat_identity entry st ->
-          Some entry.by_task
-        | cached_opt ->
-          (match Fs_compat.load_file path with
-           | exception _ -> None
-           | content ->
-             let len = String.length content in
-             let full_digest = Digest.string content in
-             let by_task, was_exact_digest_hit =
-               match cached_opt with
-               | Some entry
-                 when entry.st_dev = st.st_dev
-                      && entry.st_ino = st.st_ino
-                      && entry.st_size = len
-                      && Digest.equal full_digest entry.prefix_digest ->
-                 entry.by_task, true
-               | Some entry
-                 when entry.st_dev = st.st_dev
-                      && entry.st_ino = st.st_ino
-                      && len > entry.st_size
-                      && entry.ended_with_newline
-                      && Digest.equal
-                           (Digest.substring content 0 entry.st_size)
-                           entry.prefix_digest ->
-                 let updated = Hashtbl.copy entry.by_task in
-                 index_events_content_range updated content
-                   ~start_pos:entry.st_size ~end_pos:len;
-                 updated, false
-               | _ ->
-                 let fresh = Hashtbl.create 64 in
-                 index_events_content_range fresh content ~start_pos:0 ~end_pos:len;
-                 fresh, false
-             in
-             let stat_unchanged =
-               match cached_opt with
-               | Some entry -> same_stat_identity entry st
-               | None -> false
-             in
-             if not (was_exact_digest_hit && stat_unchanged) then
-               (match Unix.stat path with
-                | st_after
-                  when st_after.st_kind = Unix.S_REG
-                       && st_after.st_dev = st.st_dev
-                       && st_after.st_ino = st.st_ino
-                       && st_after.st_size = len
-                       && Float.equal st_after.st_mtime st.st_mtime
-                       && Float.equal st_after.st_ctime st.st_ctime ->
-                  let ended_with_newline =
-                    len > 0 && Char.equal content.[len - 1] '\n'
-                  in
-                  with_events_cache_lock (fun () ->
-                    if not (Hashtbl.mem events_file_cache path) then
-                      evict_oldest_events_file_if_needed ();
-                    let tick = touch_events_cache_tick () in
-                    Hashtbl.replace events_file_cache path
-                      {
-                        st_dev = st.st_dev;
-                        st_ino = st.st_ino;
-                        st_size = len;
-                        st_mtime = st.st_mtime;
-                        st_ctime = st.st_ctime;
-                        ended_with_newline;
-                        prefix_digest = full_digest;
-                        by_task;
-                        last_access_tick = tick;
-                      })
-                | _ | exception Unix.Unix_error _ -> ());
-             Some by_task))
+      (* No stripe lock across the scan: reads, digests and index builds run
+         unlocked so a large scan cannot block another worker domain that
+         hashes to the same stripe. Concurrent first scans duplicate work and
+         the last publication wins — both idempotent. Cancellation must
+         propagate: the loader checks the cancel context after its systhread
+         read, so swallowing every exception here would convert a cancel into
+         a silent miss. *)
+      (match Fs_compat.load_file path with
+       | exception Eio.Cancel.Cancelled cancelled -> raise cancelled
+       | exception _ -> None
+       | content ->
+         let cached_opt =
+           with_events_cache_lock (fun () ->
+             match Hashtbl.find_opt events_file_cache path with
+             | Some entry ->
+               entry.last_access_tick <- touch_events_cache_tick ();
+               Some entry
+             | None -> None)
+         in
+         let len = String.length content in
+         let full_digest = Digest.string content in
+         let by_task, was_exact_digest_hit =
+           match cached_opt with
+           | Some entry
+             when entry.st_dev = st.st_dev
+                  && entry.st_ino = st.st_ino
+                  && entry.st_size = len
+                  && Digest.equal full_digest entry.prefix_digest ->
+             entry.by_task, true
+           | Some entry
+             when entry.st_dev = st.st_dev
+                  && entry.st_ino = st.st_ino
+                  && len > entry.st_size
+                  && entry.ended_with_newline
+                  && Digest.equal
+                       (Digest.substring content 0 entry.st_size)
+                       entry.prefix_digest ->
+             let updated = Hashtbl.copy entry.by_task in
+             index_events_content_range updated content
+               ~start_pos:entry.st_size ~end_pos:len;
+             updated, false
+           | _ ->
+             let fresh = Hashtbl.create 64 in
+             index_events_content_range fresh content ~start_pos:0 ~end_pos:len;
+             fresh, false
+         in
+         let stat_unchanged =
+           match cached_opt with
+           | Some entry -> same_stat_identity entry st
+           | None -> false
+         in
+         if not (was_exact_digest_hit && stat_unchanged) then
+           (match Unix.stat path with
+            | st_after
+              when st_after.st_kind = Unix.S_REG
+                   && st_after.st_dev = st.st_dev
+                   && st_after.st_ino = st.st_ino
+                   && st_after.st_size = len
+                   && Float.equal st_after.st_mtime st.st_mtime
+                   && Float.equal st_after.st_ctime st.st_ctime ->
+              let ended_with_newline =
+                len > 0 && Char.equal content.[len - 1] '\n'
+              in
+              with_events_cache_lock (fun () ->
+                (match Hashtbl.find_opt events_file_cache path with
+                 | Some (entry : cached_events_file) ->
+                   events_file_cache_retained_bytes :=
+                     !events_file_cache_retained_bytes - entry.bytes
+                 | None -> ());
+                let tick = touch_events_cache_tick () in
+                Hashtbl.replace events_file_cache path
+                  {
+                    st_dev = st.st_dev;
+                    st_ino = st.st_ino;
+                    st_size = len;
+                    st_mtime = st.st_mtime;
+                    st_ctime = st.st_ctime;
+                    ended_with_newline;
+                    prefix_digest = full_digest;
+                    bytes = len;
+                    by_task;
+                    last_access_tick = tick;
+                  };
+                events_file_cache_retained_bytes :=
+                  !events_file_cache_retained_bytes + len;
+                evict_events_file_cache_if_needed ())
+            | _ | exception Unix.Unix_error _ -> ());
+         Some by_task)
 
 let read_matching_task_events config ~task_id ~limit =
   if limit <= 0 then []

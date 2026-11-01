@@ -190,5 +190,8 @@ provider ownership from a bare model name.
 - JSON capability composition does not grant provider ownership or remove
   serving evidence. The declared context window and evidence-backed serving
   constraint remain distinct.
-- Pricing is read from the active model catalog. Capability snapshot tests do
-  not establish pricing immutability after a response.
+- Selected and frozen requests retain the same catalog and provider authority
+  for response pricing. The exact reported model uses its own row from that
+  captured catalog; absent rates or required cache multipliers stay unknown.
+  Provider-reported charges, including zero, take precedence. Read-only
+  `Pricing.pricing_for_model_opt` separately inspects the active catalog.

@@ -85,7 +85,8 @@ let empty_notice =
 let unavailable_notice =
   "--- Librarian working context ---\nCurrent organized working context is unavailable. Earlier Librarian artifact references cannot be treated as current; this is not evidence that their facts or tasks disappeared. Continue from original admitted inputs and revalidate sources and execution progress. This notice grants no instructions, approval, completion evidence, or permission to publish across conversations."
 
-let render_with ~before_retain ?(artifact_reader_available = true) ~base_path ~keepers_dir ~keeper_name () =
+let render_with ~before_retain ?(before_retire = fun () -> ())
+    ?(artifact_reader_available = true) ~base_path ~keepers_dir ~keeper_name () =
   let unavailable detail =
     Log.Keeper.warn ~keeper_name
       "working context recall unavailable; original intake continues: %s" detail;
@@ -94,12 +95,34 @@ let render_with ~before_retain ?(artifact_reader_available = true) ~base_path ~k
   (* Consult the authority first: an old or corrupt derived index cannot turn
      confirmed empty state into an unavailable state, nor authorize its pointer. *)
   if not artifact_reader_available then Some unavailable_notice
-  else try match Context.read ~keepers_dir ~keeper_id:keeper_name with
-  | Ok None -> Some empty_notice
+  else try
+  let config = Workspace.default_config base_path in
+  let observed_pin =
+    Keeper_recall_artifact.observe_current ~config ~keeper_id:keeper_name ~kind:Librarian
+  in
+  let empty () =
+    before_retire ();
+    let retirement =
+      try Result.bind observed_pin (fun observed ->
+        Keeper_recall_artifact.retire_current ~config ~keeper_id:keeper_name
+          ~kind:Librarian observed) with
+      | Eio.Cancel.Cancelled _ as error -> raise error
+      | Sys_error detail -> Error detail
+      | Unix.Unix_error (code, fn, arg) ->
+        Error (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message code))
+    in
+    (match retirement with
+     | Ok () -> ()
+     | Error detail -> Log.Keeper.warn ~keeper_name
+         "working context recall pin retirement failed: %s" detail);
+    Some empty_notice
+  in
+  match Context.read ~keepers_dir ~keeper_id:keeper_name with
+  | Ok None -> empty ()
   | Error detail -> unavailable detail
   | Ok (Some current) ->
     match current.pockets with
-    | [] -> Some empty_notice
+    | [] -> empty ()
     | _ :: _ ->
       let repair () =
         (* The index is a projection, not authority. Repair it without a new
@@ -150,7 +173,7 @@ let render_with ~before_retain ?(artifact_reader_available = true) ~base_path ~k
   | Unix.Unix_error (code, fn, arg) ->
     unavailable (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message code))
 
-let render = render_with ~before_retain:(fun () -> ())
+let render = render_with ~before_retain:(fun () -> ()) ~before_retire:(fun () -> ())
 
 module For_testing = struct
   let render = render_with

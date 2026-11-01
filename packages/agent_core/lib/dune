@@ -14,6 +14,7 @@
   execution_event
   execution_runtime
   execution_codec_executor
+  execution_batch_validation
   execution_event_store
   execution_journal
   execution_lane_writer

@@ -1351,7 +1351,7 @@ type block_layout = {
 }
 
 let render_streaming_internal ?on_block ?on_diagram ?on_semantic ?on_unmapped
-    ?on_clipped ~palette ~width text =
+    ?on_clipped ?on_width_sensitive_fence ~palette ~width text =
   let width = max 1 width in
   let rows = ref [] in
   let rendered_rows = ref 0 in
@@ -1450,6 +1450,11 @@ let render_streaming_internal ?on_block ?on_diagram ?on_semantic ?on_unmapped
                 reading=Source_order}) on_semantic)
         in
         emit_all [code_header ?on_language palette ~width label]) language;
+    (match language with
+     | Some "mermaid" -> Option.iter (fun notify -> notify ()) on_width_sensitive_fence
+     | Some tag when is_alphatex_tag tag ->
+         Option.iter (fun notify -> notify ()) on_width_sensitive_fence
+     | Some _ | None -> ());
     let prepared = match closed, language, on_diagram with
       | true, Some "mermaid", Some prepare -> prepare ~row:!rendered_rows (body_text ())
       | (true | false), (Some _ | None), (Some _ | None) -> None in
@@ -1657,11 +1662,21 @@ let render ~palette ~width text =
     block_rows palette ~width:(max 1 width) text
   else (render_streaming ~palette ~width text).rows
 
+type clipping_render = {
+  reading_rows : string list;
+  clipped : bool;
+  width_sensitive_fence : bool;
+}
+
 let render_with_clipping ~palette ~width text =
   if not (String.contains text '\n') && Option.is_none (fence_marker text) then
-    block_rows palette ~width:(max 1 width) text, false
+    { reading_rows = block_rows palette ~width:(max 1 width) text;
+      clipped = false; width_sensitive_fence = false }
   else
-    let clipped = ref false in
+    let clipped = ref false and width_sensitive_fence = ref false in
     let rendered = render_streaming_internal
-        ~on_clipped:(fun () -> clipped := true) ~palette ~width text in
-    rendered.rows, !clipped
+        ~on_clipped:(fun () -> clipped := true)
+        ~on_width_sensitive_fence:(fun () -> width_sensitive_fence := true)
+        ~palette ~width text in
+    { reading_rows = rendered.rows; clipped = !clipped;
+      width_sensitive_fence = !width_sensitive_fence }

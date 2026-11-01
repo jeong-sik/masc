@@ -209,7 +209,10 @@ let test_real_dispatch_freezes_unread_across_refusal () =
   check int "first request reached the refusing peer" 1 (Fixture.post_count refused);
   check int "second request reached the fallback peer" 1 (Fixture.post_count accepted);
   let frozen=Frozen.of_results ~snapshot:(Ok [original]) ~memory:(Ok [original]) in
-  let carrier=match Frozen.text frozen with Some text -> text | None -> fail "missing unread fixture" in
+  let carrier=match Frozen.text frozen with
+    | Ok (Some text) -> text
+    | Ok None -> fail "missing unread fixture"
+    | Error detail -> fail detail in
   let store=Dated_jsonl.open_store
     (Keeper_types_support.keeper_store_location config keeper_name Continuity_requests) in
   let evidence=Dated_jsonl.read_recent store 10 in

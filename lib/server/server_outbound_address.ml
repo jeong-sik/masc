@@ -5,6 +5,8 @@ let is_loopback_or_unspecified_host host =
   Masc_network_defaults.is_loopback_host host
   || Masc_network_defaults.is_unspecified_host host
 
+let ipv6_documentation_prefix = Ipaddr.V6.Prefix.of_string_exn "2001:db8::/32"
+
 let rec ipaddr_is_private_or_reserved = function
   | Ipaddr.V4 addr ->
       let octets = Ipaddr.V4.to_octets addr in
@@ -38,7 +40,7 @@ let rec ipaddr_is_private_or_reserved = function
           || String.starts_with ~prefix:"fea" text
           || String.starts_with ~prefix:"feb" text
           || String.starts_with ~prefix:"ff" text
-          || String.starts_with ~prefix:"2001:db8" text)
+          || Ipaddr.V6.Prefix.mem addr ipv6_documentation_prefix)
 
 let eio_ipaddr_is_private_or_reserved ip =
   let rendered = Fmt.str "%a" Eio.Net.Ipaddr.pp ip in

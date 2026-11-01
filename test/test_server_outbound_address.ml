@@ -24,6 +24,20 @@ let test_private_and_public_addresses () =
     ]
 ;;
 
+let test_ipv6_documentation_prefix_boundary () =
+  List.iter
+    (fun (raw, expected) ->
+      check bool raw expected
+        (Server_outbound_address.ipaddr_is_private_or_reserved (ip raw)))
+    [ "2001:db8::", true
+    ; "2001:db8:ffff:ffff:ffff:ffff:ffff:ffff", true
+    ; "2001:db7:ffff:ffff:ffff:ffff:ffff:ffff", false
+    ; "2001:db9::", false
+    ; "2001:db80::1", false
+    ; "2001:db8f::1", false
+    ]
+;;
+
 let with_net f = Eio_main.run (fun env -> f env)
 
 (* Address literals resolve without a DNS query, so these refusals need no
@@ -127,6 +141,8 @@ let () =
     "server_outbound_address"
     [ ( "address"
       , [ test_case "private and public addresses" `Quick test_private_and_public_addresses
+        ; test_case "IPv6 documentation prefix boundary" `Quick
+            test_ipv6_documentation_prefix_boundary
         ; test_case "refused hosts" `Quick test_refused_hosts
         ; test_case
             "document fetch refuses before connecting"

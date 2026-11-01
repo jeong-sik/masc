@@ -127,6 +127,29 @@ let with_fixture f =
                   ignore (reconcile config directory);
                   await clock (fun () -> live config=[])))))))))
 
+let test_invalid_ego_space_never_publishes_or_attaches () = with_fixture (fun _clock config directory root started ->
+  let manifest_path=Filename.concat root ".masc/package.toml" in
+  write manifest_path {|id="ego-declaration-test"
+revision="1"
+title="Ego declaration fixture"
+runtime="host_process"
+service="browser"
+browser_backend="ego"
+command=["masc-browser-addon-worker"]
+contributions=["observe"]
+[resources]
+max_reply_bytes=4096
+|};
+  let invalid=Printf.sprintf "id=\"invalid-ego\"\nrun_id=\"test\"\nmanifest_path=%S\n[binding]\nsources=[]\nspace=-1\n" manifest_path in
+  let response=Runtime.save_declaration ~config (request ~mode:"create" ~file_name:"invalid-ego.toml" invalid) in
+  check bool "invalid Space rejected before declaration write" true
+    (match response with Error {Editor.code=Editor.Invalid_declaration;_} -> true | Ok _|Error _ -> false);
+  check bool "invalid declaration never appeared" false (Sys.file_exists (Filename.concat directory "invalid-ego.toml"));
+  check bool "manual attach uses the same target validator before worker allocation" true
+    (Result.is_error (Runtime.dispatch ~config ~operation:Runtime.Attach (`Assoc ["manifest_path",`String manifest_path;
+      "run_id",`String "invalid-ego";"binding",`Assoc ["sources",`List [];"space",`Int (-1)]])));
+  check (Alcotest.list Alcotest.string) "neither path started a worker" [] !started)
+
 let test_keeper_create_operator_read_and_edit () = with_fixture (fun clock config directory _root started ->
   let bytes = declaration () in
   let created = keeper_call config "masc_lane_declaration_save" (request ~mode:"create" ~file_name:"observer.toml" bytes) in
@@ -454,6 +477,7 @@ let test_create_publication_collision_preserves_competing_bytes () = with_fixtur
   | Some path -> check bool "owned staging is cleaned after refused publication" false (Sys.file_exists path))
 
 let () = run "Lane declaration editing" ["shared TOML owner",[
+  test_case "invalid Ego Space never publishes or attaches" `Quick test_invalid_ego_space_never_publishes_or_attaches;
   test_case "shared and local saves do not claim private ownership" `Quick test_shared_saves_do_not_claim_keeper_ownership;
   test_case "Keeper cannot save another owner's Fusion capture" `Quick
       test_keeper_declaration_cannot_capture_another_fusion_owner;

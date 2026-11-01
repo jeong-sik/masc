@@ -16,7 +16,9 @@ val with_worker :
     owned automation and Stagehand sources, and the external hosts that list
     [clients], each of its own one-source package and answered by [respond].
     Owns attachment and confirmed detach of every one, and restores the prior
-    PATH. Owns the Eio test context and full environment for that lifetime.
+    PATH and Runtime snapshot. Owns the Eio test context, an inert browser
+    configuration and full environment for that lifetime; scripted workers
+    never invoke the configured browser executables.
     Callers must not already hold [Eio_context.with_test_env]'s non-reentrant
     global test lock.
     The invoking test declares the native launcher executable as a Dune dep.
@@ -31,9 +33,20 @@ val with_worker :
     [exports]. *)
 type worker = { serves : Browser_lane.Backend.t; clients : Browser_lane.client_info list; exports : bool }
 
-(** A worker as attached: its instance, and the client ids of the native
-    polls it answered. *)
-type attached = { serves : Browser_lane.Backend.t; instance_id : string; polled : unit -> string list }
+type snapshot_state = Snapshot_clients of Browser_lane.client_info list | Snapshot_unavailable
+(** [Snapshot_unavailable] returns an incorrect reply type without stopping
+    the serving worker, so its controller identity is unknown to the host. *)
+
+(** A worker as attached: its exact instance, answered polls, and every typed
+    command received before client admission. Snapshot controls do not issue
+    browser commands. *)
+type attached = {
+  serves : Browser_lane.Backend.t;
+  instance_id : string;
+  polled : unit -> string list;
+  commands : unit -> (Browser_lane.route * Browser_lane.verb) list;
+  set_snapshot : snapshot_state -> unit;
+}
 
 val with_workers :
   ?received:(serves:Browser_lane.Backend.t -> route:Browser_lane.route -> unit) ->

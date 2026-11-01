@@ -1724,7 +1724,9 @@ let backend ~store ~artifact_store () = match !override with
                        worker's IPC lifetime. Its configuration rides the
                        worker's arguments, not the cleanup descriptor. *)
                     | Browser_lane.Backend.Ego ->
-                      let* ego=table Browser_configuration.Live_ego in
+                      let* default=table Browser_configuration.Live_ego in
+                      let* target=Browser_ego_installation.target binding in
+                      let ego=Browser_ego_installation.resolve ~default target in
                       Ok (Browser_addon_socket.Ego,Some ego)
                     | Browser_lane.Backend.External_host -> Ok (Browser_addon_socket.External_host,None) in
                   Browser_addon_socket.context ~instance_id ~source
@@ -2103,10 +2105,9 @@ type browser_observation = {
   backend : Browser_lane.Backend.t;
   observation : (export_observation option, export_refusal) result;
 }
-(* Browser installations are found by their package's service, not by an
-   export name, and read per source they serve: two installations of one
-   source are ambiguous for that source only. A detaching incarnation gives
-   way to its replacement there, as [observation_of_entries] reads it. *)
+(* Read each installation separately. A detaching incarnation gives way to
+   that installation's replacement, never to an unrelated worker sharing its
+   backend. Live identity conflict reduction happens after these reads. *)
 let browser_observations ~config ~access = Eio_context.run_on_owner_domain (fun () ->
   let root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
   match Hashtbl.find_opt managers root with
@@ -2117,9 +2118,10 @@ let browser_observations ~config ~access = Eio_context.run_on_owner_domain (fun 
         | (Browser_service _ | Mcp_tools), Gone -> None
         | Browser_service backend, (Ready _ | Unready _) when can_read access e.visibility -> Some (backend, e)
         | Browser_service _, (Ready _ | Unready _) | Mcp_tools, (Ready _ | Unready _) -> None) in
-      List.sort_uniq compare (List.map fst browsers) |> List.map (fun backend ->
-        {backend; observation=observation_of_entries (List.filter_map (fun (served, e) ->
-          if served = backend then Some e else None) browsers)}))
+      let installations=List.sort_uniq compare (List.map (fun (backend,e) -> backend,installation_name e) browsers) in
+      List.map (fun (backend,installation) ->
+        {backend; observation=observation_of_entries (List.filter_map (fun (served,e) ->
+          if served=backend && installation_name e=installation then Some e else None) browsers)}) installations)
 
 let with_tool_call_owner work =
   let cancelled, signal_cancelled = Eio.Promise.create () in
@@ -2294,40 +2296,47 @@ let choose_document_service ~visibility candidates =
   | [service] -> Document_service service
   | _ :: _ :: _ -> Several_browser_services
   | [] -> (match candidates with [] -> No_browser_service | _ :: _ -> Browser_narrower_than_consumer)
-(* The services a document read on [route] may go to, among [services] with
-   the source [backend] says each serves. A live client is read on the
-   usable live service whose last observation lists it ([lists]), or on the
-   one live service there is, whose observation may lag a new client. A
-   client of a live source two services serve is not read: a client does not
-   say which of them it came from. *)
-let document_route_services ~services ~backend ~lists route =
-  let serving source service = backend service = source in
-  let among = List.map backend services in
-  let doubled_refusal =
-    "the live source of that browser is served by more than one attached browser Add-on, so the document source does not read it" in
+(* A live document read uses the exact observed publisher. The same native
+   identity conflict policy is used by public discovery and Page dispatch. *)
+let document_route_services ~services ~unready ~backend ~clients route =
+  let live=List.filter (fun service -> Browser_addon_observation.serves_live (backend service)) services in
+  let observed=List.map (fun service -> service,clients service) live in
+  let identities=List.map (fun (service,observation) -> backend service,observation) observed
+    @ List.map (fun backend -> backend,Browser_addon_observation.Unobserved_clients) unready in
+  let knowledge=Browser_addon_observation.ego_identity_knowledge identities in
   match route with
-  | Browser_lane.Automation_route -> Ok (List.filter (serving Browser_lane.Backend.Automation) services)
-  | Stagehand_route -> Ok (List.filter (serving Browser_lane.Backend.Stagehand) services)
-  | Live_route client ->
-      let usable, doubled = List.partition (fun service ->
-        Browser_addon_observation.lists_usable_clients ~among (backend service))
-        (List.filter (fun service -> Browser_addon_observation.serves_live (backend service)) services) in
-      (match client, usable, doubled with
-       | Some client, _, _ when List.exists (fun service -> lists service client) doubled -> Error doubled_refusal
-       | Some _, [_], [] -> Ok usable
-       | Some client, ([] | _ :: _), ([] | _ :: _) -> Ok (List.filter (fun service -> lists service client) usable)
-       | None, [], _ :: _ -> Error doubled_refusal
-       | None, ([] | _ :: _), ([] | _ :: _) -> Ok usable)
+  | Browser_lane.Automation_route -> Ok (List.filter (fun service -> backend service=Browser_lane.Backend.Automation) services)
+  | Stagehand_route -> Ok (List.filter (fun service -> backend service=Browser_lane.Backend.Stagehand) services)
+  | Live_route None -> (match knowledge,live with
+      | Browser_addon_observation.Unknown_ego_identities,_ ->
+          Error "live browser controller identities are incomplete; the document read requires an explicit observed non-Ego client"
+      | Known_ego_identities,([]|[_]) -> Ok live
+      | Known_ego_identities,_::_::_ -> Error "a live document read requires an explicit client when multiple workers are visible")
+  | Live_route (Some client_id) ->
+      let listed=List.concat_map (function
+        | _,Browser_addon_observation.Observed_clients clients -> clients
+        | _,Unobserved_clients -> []) observed in
+      let conflicts=Browser_addon_observation.live_conflicts listed in
+      (match List.find_opt (fun (client:Browser_lane.client_info) -> client.client_id=client_id) listed with
+       | Some client ->
+           let* ()=Browser_addon_observation.check_ego_identity knowledge client in
+           (match List.find_opt (Browser_addon_observation.conflicts_with client) conflicts with
+            | Some conflict -> Error (Browser_addon_observation.conflict_message conflict)
+            | None -> Ok (List.filter_map (function
+                | service,Browser_addon_observation.Observed_clients clients
+                  when List.exists (fun (client:Browser_lane.client_info) -> client.client_id=client_id) clients -> Some service
+                | _,(Observed_clients _|Unobserved_clients) -> None) observed))
+       | None -> Ok [])
 let document_services m (reading : browser_reading) route =
-  let lists (service : browser_service) client = match Hashtbl.find_opt m.entries service.instance_id with
-    | None -> false
+  let clients (service : browser_service) = match Hashtbl.find_opt m.entries service.instance_id with
+    | None -> Browser_addon_observation.Unobserved_clients
     | Some (e : entry) -> (match Browser_addon_observation.read e.output with
-        | Ok published -> List.exists (fun (listed : Browser_lane.client_info) ->
-            String.equal (Browser_lane.client_id_to_string listed.client_id) (Browser_lane.client_id_to_string client))
-            published.clients
-        | Error _ -> false) in
-  document_route_services ~services:reading.services ~backend:(fun (service : browser_service) -> service.backend)
-    ~lists route
+        | Ok published -> Browser_addon_observation.Observed_clients published.clients
+        | Error _ -> Browser_addon_observation.Unobserved_clients) in
+  let unready=List.filter_map (fun (source:Lane_addon_unready.t) -> match source.service with
+    | Browser_service backend -> Some backend | Mcp_tools -> None) reading.unready in
+  document_route_services ~services:reading.services ~unready ~backend:(fun (service : browser_service) -> service.backend)
+    ~clients route
 let read_browser_document m ~access ~visibility ~route ~tab_id =
   with_tool_call_owner (fun () ->
     let reading=browser_reading (live_reading m access) in
@@ -4303,6 +4312,7 @@ let dispatch ?caller ?(access = Lane_addon_sources.Unauthenticated) ~config ~ope
       let* () = request_result (match package.binding_schema with
         | None -> Ok ()
         | Some schema -> Lane_addon_action.validate_value ~schema ~name:"lane binding" binding |> Result.map (fun _ -> ())) in
+      let* () = request_result (Browser_ego_installation.validate package.worker_service binding) in
       let* sw = match Eio_context.get_root_switch_opt () with
         | Some sw -> Ok sw | None -> Error (Runtime_failed "server background owner unavailable") in
       Eio.Mutex.use_ro m.configuration_mutex (fun () ->

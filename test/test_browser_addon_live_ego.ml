@@ -45,6 +45,25 @@ let test_the_table_names_a_command_and_a_space () =
     (Result.is_error (configuration ("[browser.live.ego]\ncommand=\"/opt/ego-browser\"\nspace=" ^ reference ^ "\n"))))
     ["-1";"9007199254740992";"32.0";"true"]
 
+let test_installations_resolve_independent_spaces () =
+  let module I=Masc.Browser_ego_installation in
+  let default={Browser_configuration.command="/opt/ego-browser";space=Browser_configuration.Named_space "workspace"} in
+  let resolve fields=I.target (`Assoc fields)
+    |> Result.map (I.resolve ~default) in
+  check bool "omission alone keeps the workspace default" true (resolve []=Ok default);
+  check bool "first installation chooses its own named Space" true
+    (resolve ["space",`String "first Goal"]=Ok {default with space=Browser_configuration.Named_space "first Goal"});
+  check bool "second installation resumes only its numeric Space" true
+    (resolve ["space",`Int 52]=Ok {default with space=Browser_configuration.Existing_space 52});
+  check bool "numeric text remains a name" true
+    (resolve ["space",`String "52"]=Ok {default with space=Browser_configuration.Named_space "52"});
+  List.iter (fun value -> check bool "invalid explicit Space never resolves to default" true
+    (Result.is_error (resolve ["space",value])))
+    [`Null;`String " ";`Int (-1);`Int 9007199254740992;`Float 52.;`Bool true;`List []];
+  check bool "duplicate Space fields are refused" true
+    (Result.is_error (resolve ["space",`Int 51;"space",`Int 52]));
+  check bool "caller does not mutate configured default" true (default.space=Browser_configuration.Named_space "workspace")
+
 let failure_name = function
   | Peer.Exited {code; _} -> Printf.sprintf "exited %d" code
   | Peer.Signaled signal -> "signaled " ^ Process_eio.signal_name signal
@@ -621,6 +640,7 @@ let () =
   else run "browser_addon_live_ego" [
     "ego", [
       test_case "the table names a command and a space" `Quick test_the_table_names_a_command_and_a_space;
+      test_case "per-installation typed Spaces preserve the workspace default" `Quick test_installations_resolve_independent_spaces;
       test_case "a run answers both streams, or why not" `Quick test_a_run_answers_both_streams_or_why_not;
       test_case "a stopped run answers within the peer's window" `Quick test_a_stopped_run_answers_within_the_peers_window;
       test_case "one process runs the connection's commands" `Quick test_one_process_runs_the_connections_commands;

@@ -23,4 +23,4 @@ name = "binding"
 type = "object"
 required = true
 additional_properties = true
-description = "Package-defined explicit source and target bindings; preserve observed identities."
+description = "Package-defined explicit source and target bindings; preserve observed identities. Ego optionally accepts space as a native name or exact integer Space ID; omission uses the configured workspace default, without granting claim/adoption/takeover authority."

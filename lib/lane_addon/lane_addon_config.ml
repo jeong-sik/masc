@@ -157,6 +157,7 @@ let decode ~source_path ~source_revision ~id fields =
   let* () = match package.binding_schema with
     | None -> Ok ()
     | Some schema -> Lane_addon_action.validate_value ~schema ~name:"lane binding" binding |> Result.map (fun _ -> ()) in
+  let* () = Browser_ego_installation.validate package.worker_service binding in
   let manifest_path = Unix.realpath manifest_path in
   (* This revision names worker inputs. Desired activity is separate, so an
      accepting deployment does not replace unchanged workers and on/off does

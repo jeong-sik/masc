@@ -78,6 +78,23 @@ observation sampling은 해당 호스트 계약을 연결하기 전까지 거절
 유지 프로필은 패키지 상태와 별도인 브라우저 설정이다. 브라우저 실행기 분리와 검증 범위는
 [설계](../design/browser-addon-lifecycle.md)를 따른다.
 
+## Ego 설치별 Space
+
+Ego 설치는 `[binding]`의 `space`에 작업별 이름 또는 이미 관측한 숫자 Space ID를
+지정할 수 있다. 이름은 native create/resume, 정수는 정확한 기존 Space 재개이며,
+생략하면 기존 `[browser.live.ego]`의 기본 Space를 쓴다. 잘못된 값은 저장·Attach
+전에 거절하고 기본 Space로 바꾸지 않는다. 실행 파일은 기존 host 설정을 유지한다.
+서로 다른 Space의 연결은 함께 표시되며 정확한 `clientId`로 해당 worker에만 보낸다.
+같은 client 또는 같은 native Space를 여러 controller가 광고하면 입력 전에 거절한다.
+live publisher 관측이 실패했거나 아직 준비되지 않았으면 다른 Ego controller가
+숨겨져 있을 수 있으므로 명시한 Ego 연결·Goal 경로와 document read도 거절한다.
+Automation·Stagehand 관측 실패는 명시한 Ego 경로를 막지 않는다.
+Space ID는 이 workspace가 사용하는 단일 Ego native runtime 안의 식별자다.
+
+선언 예제와 Goal binding·종료 의미는 [Browser 패키지 안내](../../addons/browser/README.md)를
+따른다. `run_id`와 Goal binding은 격리 권한이나 ACL이 아니다. 자신의 새 Space를
+끝낼 때만 확인된 `finish_space` 영수증을 남기고 해당 설치를 detach한다.
+
 ## 도구 Hook 선택
 
 Browser 패키지는 `bash scripts/install-local-build.sh` 한 번으로 설치된다. 이 스크립트는

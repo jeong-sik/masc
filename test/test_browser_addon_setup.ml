@@ -122,6 +122,30 @@ let created (one : S.installed) =
   | S.Present { path; _ } ->
     failf "%s: a fresh workspace already had a declaration at %s" (B.to_wire one.backend) path
 
+let test_shipped_ego_binding_schema_accepts_all_targets () =
+  with_workspace (fun base ->
+    let one = installed_one base B.Ego in
+    let declared = match Config.load_file ~path:(created one) with
+      | Ok declared -> declared
+      | Error detail -> fail detail in
+    let schema = match declared.package.binding_schema with
+      | Some schema -> schema | None -> fail "the shipped Ego package needs a binding contract" in
+    let validate value = Masc.Lane_addon_action.validate_value ~schema ~name:"Ego binding" value in
+    let binding fields = `Assoc (("sources", `List []) :: fields) in
+    List.iter (fun (label, value) ->
+      check bool (label ^ ": actual shipped schema accepts the target") true
+        (Result.is_ok (validate value)))
+      ["shared", binding []; "name", binding ["space", `String "Owned fixture"];
+       "id", binding ["space", `Int 51]];
+    List.iter (fun value ->
+      check bool "the shipped binding contract stays strict" true
+        (Result.is_error (validate value)))
+      [binding ["space", `Null]; binding ["space", `Bool true];
+       binding ["space", `Float 51.5]; binding ["space", `List []];
+       binding ["space", `Assoc []]; binding ["unknown", `String "value"];
+       binding ["space", `String "first"; "space", `Int 51];
+       `Assoc []; `Assoc ["sources", `List [`Assoc []]]])
+
 (* A second copy of [backend]'s package somewhere else, as an operator's own
    declaration would point at it; returns its manifest. *)
 let copy_package base backend =
@@ -242,6 +266,23 @@ let test_an_existing_declaration_of_a_source_is_left_as_it_is () =
     check bool "no declaration of the automation package was written" false
       (Sys.file_exists (declaration_path base B.Automation));
     check string "the operator's file is unchanged" text (read own))
+
+let test_distinct_ego_installations_preserve_workspace_declaration () =
+  with_workspace (fun base ->
+    let manifest_path=copy_package base B.Ego in
+    let original=Filename.concat (lane_directory base) "ego-default.toml" in
+    let target=Filename.concat (lane_directory base) "ego-goal.toml" in
+    let original_text=declaration_text ~id:"ego-default" ~manifest_path () in
+    let target_text=declaration_text ~id:"ego-goal" ~manifest_path () ^ "space=\"Own Goal\"\n" in
+    write original original_text;write target target_text;
+    let installed=installed_one base B.Ego in
+    (match installed.declaration with
+     | S.Present {path;_} -> check string "setup retains the workspace-default installation" original path
+     | S.Created _ -> fail "setup created another default");
+    check string "default declaration unchanged" original_text (read original);
+    check string "Goal declaration unchanged" target_text (read target);
+    check bool "deployment does not blanket-disable multiple Ego Spaces" true
+      (Masc.Browser_addon_preflight.doubled_sources ~base_path:base=[]))
 
 let test_two_enabled_declarations_of_one_source_are_refused () =
   with_workspace (fun base ->
@@ -406,11 +447,15 @@ let () =
             test_each_requested_source_gets_its_package_and_declaration
         ; test_case "a source not requested is not written" `Quick
             test_a_source_not_requested_is_not_written
+        ; test_case "the shipped Ego binding contract accepts every target form" `Quick
+            test_shipped_ego_binding_schema_accepts_all_targets
         ; test_case "a second install changes nothing" `Quick test_a_second_install_changes_nothing
         ; test_case "a changed package file is rewritten and the declaration kept" `Quick
             test_a_changed_package_file_is_rewritten_and_the_declaration_kept
         ; test_case "an existing declaration of a source is left as it is" `Quick
             test_an_existing_declaration_of_a_source_is_left_as_it_is
+        ; test_case "distinct Ego installations preserve the workspace default" `Quick
+            test_distinct_ego_installations_preserve_workspace_declaration
         ; test_case "two enabled declarations of one source are refused" `Quick
             test_two_enabled_declarations_of_one_source_are_refused
         ; test_case "a disabled declaration beside the enabled one is not counted" `Quick

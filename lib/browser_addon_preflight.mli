@@ -45,9 +45,9 @@ val report : verdict -> (string, string) result
     declarations' ids. *)
 type doubled = { source : Browser_lane.Backend.t; ids : string list }
 
-(** Every browser source more than one enabled declaration serves. The host
-    uses no such source, whether or not a lane host is installed. Reads files
-    only, as {!judge} does. *)
+(** Owned and external-host sources more than one enabled declaration serves.
+    Ego installations select their own Spaces and are checked by actual
+    client/native Space identity after connection. Reads files only. *)
 val doubled_sources : base_path:string -> doubled list
 
 (** [Ok] when no source is doubled; otherwise the operator-facing refusal

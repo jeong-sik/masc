@@ -987,9 +987,34 @@ let ui_category_is_strict_display_metadata () = with_directory (fun _root packag
      | `Assoc fields -> not (List.mem_assoc "ui_category" fields)
      | _ -> false))
 
+let ego_installation_space_is_validated_and_revisioned () = with_directory (fun _root packages directory ->
+  let manifest=Filename.concat packages "lane.toml" in
+  write manifest {|id="ego-fixture"
+revision="1"
+title="Ego fixture"
+runtime="host_process"
+service="browser"
+browser_backend="ego"
+command=["masc-browser-addon-worker"]
+contributions=["observe"]
+[resources]
+max_reply_bytes=4096
+|};
+  let path=Filename.concat directory "ego.toml" in
+  let load space=Config.load_source ~source_path:path ~source_text:(declaration ("[binding]\nsources=[]\n" ^ space)) in
+  let workspace=unwrap (load "") and first=unwrap (load "space=\"first Goal\"\n")
+  and second=unwrap (load "space=52\n") in
+  check bool "Space is retained in declaration binding" true (Yojson.Safe.Util.member "space" second.binding=`Int 52);
+  check bool "two targets and default have distinct semantic revisions" true
+    (workspace.revision<>first.revision && first.revision<>second.revision && workspace.revision<>second.revision);
+  List.iter (fun space -> check bool "invalid Space fails declaration validation before publication" true
+    (Result.is_error (load ("space=" ^ space ^ "\n")))) ["\" \"";"-1";"9007199254740992";"52.0";"true"];
+  check bool "source validation wrote no declaration" false (Sys.file_exists path))
+
 let () = run "Lane Add-on declarative composition"
   ["configuration",
-    [test_case "UI category is strict metadata outside worker identity" `Quick ui_category_is_strict_display_metadata;
+    [test_case "Ego installation Space is typed before publication and revisioned" `Quick ego_installation_space_is_validated_and_revisioned;
+     test_case "UI category is strict metadata outside worker identity" `Quick ui_category_is_strict_display_metadata;
      test_case "browser service is explicit and names only supported capabilities" `Quick browser_service_is_explicit;
       test_case "native execution declares no container isolation" `Quick native_execution_has_no_container_claims;
       test_case "runtime resources name only enforceable limits" `Quick runtime_selects_enforceable_resources;

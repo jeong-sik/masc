@@ -3,6 +3,15 @@ module R = Lane_addon_runtime
 module B = Browser_lane
 module W = Browser_addon_wire
 type t = {stop:unit -> unit}
+type worker = { serves : B.Backend.t; clients : B.client_info list; exports : bool }
+type snapshot_state = Snapshot_clients of B.client_info list | Snapshot_unavailable
+type attached = {
+  serves : B.Backend.t;
+  instance_id : string;
+  polled : unit -> string list;
+  commands : unit -> (B.route * B.verb) list;
+  set_snapshot : snapshot_state -> unit;
+}
 let detach t=t.stop ()
 let require = function Ok value -> value | Error detail -> failwith detail
 let write path data =
@@ -16,6 +25,8 @@ let server={|import argparse,json,os,socket,sys,threading,time
 p=argparse.ArgumentParser()
 p.add_argument("root");p.add_argument("--socket");p.add_argument("--incarnation");p.add_argument("--max-message-bytes")
 p.add_argument("--backend",required=True)
+p.add_argument("--live-ego-command")
+space=p.add_mutually_exclusive_group();space.add_argument("--live-ego-space");space.add_argument("--live-ego-space-id")
 a=p.parse_args()
 s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM);s.bind(a.socket);s.listen()
 def control(conn):
@@ -38,6 +49,9 @@ def control(conn):
             conn.sendall((json.dumps({"reply":"poll","command":None,"state_id":"fixture"})+"\n").encode())
             return
         if op!="snapshot": raise RuntimeError("fixture exposes snapshot, poll, retirement and download grants only")
+        if os.path.exists(os.path.join(a.root,"snapshot-unavailable")):
+            conn.sendall((json.dumps({"reply":"receipt"})+"\n").encode())
+            return
         with open(os.path.join(a.root,"clients.json")) as src: clients=json.load(src)
         with open(os.path.join(a.root,"owned.json")) as src: owned=json.load(src)
         result={"reply":"snapshot","snapshot":{"state":"serving","clients":clients,"owned_backends":{"automation":{"activity":"enabled","registered":owned["automation"],"session":"closed","locate":False},"stagehand":{"activity":"enabled","registered":owned["stagehand"],"session":"unknown","locate":False}}}}
@@ -120,6 +134,10 @@ let with_env ~env ~config run =
     |> Unix.realpath in
   let bin=Filename.concat root "bin" in Unix.mkdir bin 0o700;
   Unix.symlink launcher (Filename.concat bin "masc-native-addon-launcher");
+  (* The scripted adapter never starts a browser child. A guardian lookup
+     nevertheless belongs to canonical launch preparation; accidental use of
+     this fixture-only stand-in must fail instead of opening a browser. *)
+  Unix.symlink "/bin/false" (Filename.concat bin "masc-browser-process-owner");
   Unix.putenv "PATH" (bin ^ ":" ^ Option.value ~default:"" previous);
   let settled=ref false in
   Fun.protect ~finally:(fun () ->
@@ -135,7 +153,34 @@ let with_env ~env ~config run =
            attaches, and the Lane Add-on store creates only its own root under
            it. Tests that start from a bare temp directory get the same. *)
         Fs_compat.mkdir_p (Workspace.masc_dir config);
-        run ~sw ~root ~settle:(fun () -> settled:=true))))
+        let saved=Runtime.For_testing.snapshot () in
+        Fun.protect ~finally:(fun () -> Runtime.For_testing.restore saved) (fun () ->
+          let profile=Filename.concat root "firefox-profile" in Unix.mkdir profile 0o700;
+          let path=Filename.concat root "runtime.toml" in
+          write path (Printf.sprintf {|[providers.codex]
+protocol = "codex-app-server"
+command = "/bin/false"
+is-non-interactive = true
+[models.codex]
+api-name = "gpt-fixture"
+max-context = 400000
+[codex.codex]
+[runtime]
+default = "codex.codex"
+[browser.automation]
+geckodriver = "/bin/false"
+[browser.stagehand]
+chrome = "/bin/false"
+extension = %S
+[browser.live.bidi]
+firefox = "/bin/false"
+profile = %S
+[browser.live.ego]
+command = "/bin/false"
+space = 0
+|} root profile);
+          require (Runtime.init_default ~config_path:path);
+          run ~sw ~root ~settle:(fun () -> settled:=true)))))
 let dispatch ~config operation fields=R.dispatch ~caller:"browser-fixture"
   ~access:Lane_addon_sources.Operator_configuration ~config ~operation (`Assoc fields)
   |> Result.map_error R.error_to_string |> require
@@ -156,12 +201,20 @@ let start ~sw ~env ~config ~root ~name ~backend ~exports ~owned:(automation,stag
   let requests=Filename.concat root "requests" and answers=Filename.concat root "answers" in
   Unix.mkdir requests 0o700;Unix.mkdir answers 0o700;
   let tool=Browser_addon_tool.definition in
-  write (Filename.concat root "clients.json")
+  let current_clients=ref clients and commands=ref [] in
+  let write_clients clients=write (Filename.concat root "clients.json")
     (Yojson.Safe.to_string (`List (List.map (fun client -> match W.client_to_json client with
        | `Assoc fields -> `Assoc (("interactions",`List [])::("lastActivities",`List [])::("spaceObservation",`Null)::("spacePresence",(match client.Browser_lane.space with
            | None -> `Null | Some space -> Browser_ego_space_observation.presence_to_json
              {space_id=space.id;observed_at=1.;state=Present}))::fields)
-       | value -> value) clients)));
+       | value -> value) clients))) in
+  write_clients clients;
+  let unavailable=Filename.concat root "snapshot-unavailable" in
+  let set_snapshot = function
+    | Snapshot_unavailable -> write unavailable "unavailable"
+    | Snapshot_clients clients ->
+        write_clients clients;current_clients:=clients;
+        if Sys.file_exists unavailable then Sys.remove unavailable in
   write (Filename.concat root "owned.json")
     (Yojson.Safe.to_string (`Assoc ["automation",`Bool automation;"stagehand",`Bool stagehand]));
   write (Filename.concat root "downloads.json")
@@ -195,9 +248,10 @@ max_reply_bytes = 2097152
       | `String "automation",`Null -> B.Automation_route
       | _ -> failwith "invalid fixture browser connection" in
     let verb=require (W.verb_of_json ~route (Yojson.Safe.Util.member "command" arguments)) in
+    commands:=(route,verb) :: !commands;
     received ~route;
     let known=match route with B.Live_route (Some id) ->
-        List.exists (fun (client:B.client_info) -> client.client_id=id) clients
+        List.exists (fun (client:B.client_info) -> client.client_id=id) !current_clients
       | Automation_route|Stagehand_route -> true | Live_route None -> false in
     let result=if known then response ~route verb (respond ~route verb)
       else
@@ -221,15 +275,17 @@ max_reply_bytes = 2097152
     (* Detach already awaits settlement. Never-created workers may leave no
        retained record, so another Inspect cannot confirm this cleanup. *)
     running:=false;settled:=true) in
-  id,stop
+  let polls=Filename.concat root "polls" in
+  {serves=backend;instance_id=id;commands=(fun () -> List.rev !commands);set_snapshot;
+    polled=(fun () -> if Sys.file_exists polls
+      then List.filter (fun line -> line<>"") (String.split_on_char '\n' (In_channel.with_open_bin polls In_channel.input_all))
+      else [])},stop
 let serving ~config id = match phase ~config id with
   | Lane_addon_types.Failed detail -> failwith ("scripted browser worker failed before readiness: " ^ detail)
   | Detaching | Detached -> failwith "scripted browser worker stopped before readiness"
   | Attached | Observing ->
     List.exists (fun (service:R.browser_service) -> service.instance_id=id)
       (R.browser_services ~config ~access:Lane_addon_sources.Operator_configuration)
-type worker = { serves : B.Backend.t; clients : B.client_info list; exports : bool }
-type attached = { serves : B.Backend.t; instance_id : string; polled : unit -> string list }
 (* Starts one scripted worker per entry, each of its own one-source package,
    and runs [run] once every one serves. Every worker that attached is
    detached, each on its own, and the root is removed only when all of them
@@ -245,16 +301,12 @@ let run_workers ~env ~config ~downloads ~received ~respond workers run =
     Fun.protect ~finally:stop (fun () ->
       List.iteri (fun index (worker:worker) ->
         let name=Printf.sprintf "worker-%d" index in
-        let id,stop=start ~sw ~env ~config ~root ~name ~backend:worker.serves ~exports:worker.exports
+        let attached,stop=start ~sw ~env ~config ~root ~name ~backend:worker.serves ~exports:worker.exports
           ~owned:(worker.serves=B.Backend.Automation,worker.serves=B.Backend.Stagehand)
           ~clients:worker.clients ~downloads
           ~received:(received ~serves:worker.serves) ~respond:(respond ~serves:worker.serves) in
-        started:=((worker.serves,id,name),stop) :: !started) workers;
-      let attached=List.rev_map (fun ((serves,instance_id,name),_) ->
-        let polls=Filename.concat (Filename.concat root name) "polls" in
-        {serves;instance_id;polled=(fun () -> if Sys.file_exists polls
-          then List.filter (fun line -> line<>"") (String.split_on_char '\n' (In_channel.with_open_bin polls In_channel.input_all))
-          else [])}) !started in
+        started:=(attached,stop) :: !started) workers;
+      let attached=List.rev_map fst !started in
       List.iter (fun (worker:attached) -> wait ~env (fun () -> serving ~config worker.instance_id)) attached;
       run ~stop attached))
 (* The owned automation and Stagehand sources, and the external hosts that

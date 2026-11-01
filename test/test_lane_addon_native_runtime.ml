@@ -717,6 +717,8 @@ hooks = ["validate_input", "validate_output"]
     (partial_data |> member "clients" |> Yojson.Safe.Util.to_list |> List.map (text "clientId"));
   check bool "a partial inventory never recommends automatic fallback" true
     (partial_data |> member "automatic" |> member "browse" |> member "error" |> member "code"=`String "browser_binding_required");
+  check bool "incomplete live observations refuse an actual automatic browse" true
+    (Tool_result.is_failed (public Browser_capabilities.Tabs []));
   Unix.unlink reject_snapshot;
   let before_recovery=inspect replacement |> member "observation_seq" |> Yojson.Safe.Util.to_int in
   ignore (dispatch config R.Observe ["instance_id",`String replacement]);

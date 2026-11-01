@@ -329,7 +329,17 @@ let test_multi_worker_inventory () =
   let issues=match I.issues_of_json (member "inventoryIssues" duplicated) with
     | Ok issues -> issues | Error detail -> fail detail in
   check bool "duplicate issue carries the original owners" true
-    (issues=[I.Duplicate_client {client_id=ego.client_id;instances=["duplicate";"first"]}]);
+    (issues=[I.Duplicate_client {client_id=ego.client_id;instances=["duplicate";"first"]};
+      I.Duplicate_ego_space {space_id=51;instances=["duplicate";"first"]}]);
+  let second_ego={(client "3" Lane.Ego_task_space) with browser=Lane.Ego_lite;space=Some {id=52;name="Second Goal"}} in
+  let independent=report [first;observation "second Goal" [second_ego]] in
+  check int "distinct Spaces retain both live clients" 2 (List.length (ids independent));
+  check bool "distinct Spaces still require automatic choice" true (code "browse" independent=`String "ambiguous_browsers");
+  let alias={second_ego with space=ego.space} in
+  let aliased=report [first;observation "alias" [alias]] in
+  check (list string) "native Space aliases exclude every conflicting client" [] (ids aliased);
+  check bool "native Space conflict carries producer identities and round trips" true
+    (I.issues_of_json (member "inventoryIssues" aliased)=Ok [I.Duplicate_ego_space {space_id=51;instances=["alias";"first"]}]);
   check bool "unready issue wire round trip" true
     (I.issues_of_json (I.issues_to_json [issue])=Ok [issue]);
   List.iter (fun value -> check bool "unreadable issue metadata is not valid success" true

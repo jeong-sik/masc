@@ -41,28 +41,33 @@ val unobserved : Browser_selection.work_browser
 (** A worker of this source serves a live connection. *)
 val serves_live : Browser_lane.Backend.t -> bool
 
-(** Whether a worker of [backend] answers for [lane], among the sources of
-    every serving worker [among] (itself included): its source is of that
-    lane and no other worker serves it. What a worker publishes does not say
-    which worker of its source it came from, so a doubled source leaves every
-    worker serving it out of that lane. *)
-val answers_for : among:Browser_lane.Backend.t list -> Browser_lane.Lane_name.t ->
-  Browser_lane.Backend.t -> bool
+type live_conflict = Duplicate_client of Browser_lane.client_id | Duplicate_ego_space of int
+val live_conflicts : Browser_lane.client_info list -> live_conflict list
+(** Conflicting client IDs or multiple controllers of one native Ego Space.
+    Space IDs are scoped to the single Ego native runtime served by this MASC
+    workspace; they are not globally unique across independent Ego runtimes. *)
+val conflicts_with : Browser_lane.client_info -> live_conflict -> bool
+val conflict_message : live_conflict -> string
 
-(** Whether a worker of [backend] lists clients the host may use: whether
-    it {!answers_for} the live lane. *)
-val lists_usable_clients : among:Browser_lane.Backend.t list -> Browser_lane.Backend.t -> bool
+type client_observation = Observed_clients of Browser_lane.client_info list | Unobserved_clients
+type ego_identity_knowledge = Known_ego_identities | Unknown_ego_identities
+val ego_identity_knowledge :
+  (Browser_lane.Backend.t * client_observation) list -> ego_identity_knowledge
+(** Every live-source publisher can report an Ego controller under the current
+    snapshot contract. An unreadable or unready live publisher can therefore
+    hide a conflicting controller. Owned Automation/Stagehand are unrelated. *)
+val check_ego_identity : ego_identity_knowledge -> Browser_lane.client_info -> (unit, string) result
+(** An Ego route requires all possible controllers' identities. Explicit
+    non-Ego clients remain usable when another publisher is unreadable. *)
 
 (** What several browser workers published, read as one, with each worker's
-    source: the clients and unavailable backends of every worker that
-    {!lists_usable_clients}, and the
+    source: unique live clients and unavailable backends of live workers, and the
     automation and Stagehand reports of the one worker that serves each, when
     exactly one does and it published; otherwise {!unobserved}. A worker that
     published nothing is [None] and still counts as serving its source. The
     host chooses from this, and the lane rows read it. *)
 val merge : among:Browser_lane.Backend.t list ->
   (Browser_lane.Backend.t * published option) list -> published
-(** [among] lists the source of every worker the caller counts as serving,
-    which may be more than the workers read here; a live source is doubled
-    when two of them serve it. The host counts its ready services; presence
-    counts one entry per source it reads. *)
+(** [among] counts every serving source for owned automation/Stagehand
+    uniqueness. Live workers coexist; only actual client/Space conflicts are
+    excluded, with metadata and presence filtered to the same client set. *)

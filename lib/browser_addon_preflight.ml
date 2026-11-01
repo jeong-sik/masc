@@ -59,15 +59,16 @@ let judge ~base_path =
 
 type doubled = { source : Browser_lane.Backend.t; ids : string list }
 
-(* A source two enabled declarations serve is used by neither: the host
-   cannot tell which one a request is for. *)
+(* Owned routes and native-host registration name a backend, so those
+   sources require one declaration. Ego routes retain their exact publisher. *)
 let doubled_sources ~base_path =
   let snapshot = Lane_addon_config.load ~directory:(declaration_directory ~base_path) in
   let browsers =
     List.filter_map
       (fun (declaration : Lane_addon_config.declaration) ->
         match declaration.enabled, Lane_addon_config.browser_source declaration with
-        | true, Some backend -> Some (declaration.id, backend)
+        | true, Some Browser_lane.Backend.Ego -> None
+        | true, Some (Automation|Stagehand|Owned_firefox|External_host as backend) -> Some (declaration.id, backend)
         | false, (Some _ | None) | true, None -> None)
       snapshot.Lane_addon_config.declarations
   in

@@ -2774,6 +2774,8 @@ let run_named
               on_request_attribution
           in
           Keeper_antigravity_runtime.run ~on_guidance_prepared ~input_source ?on_native_tool_completion
+            ~configured_reasoning_effort:runtime.model.reasoning_effort
+            ~turn_timeout_s:runtime.model.turn_timeout_s
             ?argument_source:official_argument_source
             ?on_tool_execution
             ?composed_context:official_client_composed_context

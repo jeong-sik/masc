@@ -55,7 +55,7 @@ let run_adapter client_kind ~base_path ~keeper_name ~runtime_id ~cli_path =
       { cli_path; model = "synthetic-model"; agent = None; effort = None
       ; oauth_source = Filename.concat base_path "absent-synthetic-oauth"
       ; timeout_s = 1.; add_dirs = [] } in
-    let outcome = Keeper_antigravity_runtime.run ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = keeper_name })
+    let outcome = Keeper_antigravity_runtime.run ~configured_reasoning_effort:None ~turn_timeout_s:None ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = keeper_name })
         ~turn_start:(Masc.Keeper_carried_front.Turn_boundary { end_atom = 0 }) ~accepts_image_input:false ~runtime_id ~keeper_name
         ~pre_tool_rejects:(ref []) ~base_path ~goal:"synthetic claim probe"
         ~goal_blocks:None ~system_prompt:"Synthetic claim probe."

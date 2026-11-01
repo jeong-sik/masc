@@ -315,7 +315,8 @@ let open_tab ?(kind="tab") t url =
         else ["navigationSent",`Bool false] in
       partial ~details (refusal_message refusal)
     | Rejected (Other_error _ | No_such_alert | Unexpected_alert_open) as refusal ->
-      partial (refusal_message refusal)
+      let details = if after_navigation then ["navigationConfirmed",`Bool true] else [] in
+      partial ~details (refusal_message refusal)
     | Rejected (Session_not_created | Invalid_session_id) | Unanswered _ | Unsent _ as refusal ->
       Outcome_unknown (message (refusal_message refusal) ^
         " This connection cannot be reused. Re-list connections and tabs, then use newly observed IDs to inspect it; the old tabId does not identify a tab on a replacement connection.") in

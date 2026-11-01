@@ -352,12 +352,24 @@ let is_effect = function
   | Keyboard_type _ | Keyboard_insert_text _ | Keyboard_paste _ | Keyboard_press _
   | Select_option _ | Goto _ | Evaluate _ | Wait_for_function _ | Fetch _ | Cancel_download _ | Events -> true
   | Wait_for_url _ | Wait_for_selector _ | Wait_for_load_state _|Url|Title|Info|Snapshot|Wait_for_timeout _ -> false
-let holds_input = function
-  | Click _|Click_and_wait_for_popup _|Double_click _|Mouse_click _|Drag_and_drop _|Press _|Keyboard_press _|Keyboard_type _|Keyboard_paste _ -> true
+module Input_contract = Browser_native_input_contract
+let input_contract = function
+  | Click _ | Click_and_wait_for_popup _ -> Input_contract.contract Input_contract.Click
+  | Double_click _ -> Input_contract.contract Input_contract.Double_click
+  | Mouse_click _ -> Input_contract.contract Input_contract.Mouse_click
+  | Drag_and_drop _ -> Input_contract.contract Input_contract.Drag_and_drop
+  | Press _ -> Input_contract.contract Input_contract.Press
+  | Keyboard_press _ -> Input_contract.contract Input_contract.Keyboard_press
+  | Keyboard_type _ -> Input_contract.contract Input_contract.Keyboard_type
+  | Keyboard_paste _ -> Input_contract.contract Input_contract.Keyboard_paste
+  | Keyboard_insert_text _ -> Input_contract.contract Input_contract.Keyboard_insert_text
   | Hover _|Mouse_move _|Mouse_wheel _|Fill _|Focus _|Reload
-  | Keyboard_insert_text _|Select_option _|Goto _
+  | Select_option _|Goto _
   | Wait_for_url _|Wait_for_selector _|Wait_for_load_state _|Evaluate _|Wait_for_function _|Fetch _|Cancel_download _
-  | Url|Title|Info|Snapshot|Events|Wait_for_timeout _ -> false
+  | Url|Title|Info|Snapshot|Events|Wait_for_timeout _ -> Input_contract.No_hold
+let holds_input action = match input_contract action with
+  | Input_contract.No_hold -> false
+  | Input_contract.Observed_receipt | Input_contract.Unattestable_raw_hold _ -> true
 let method_name = function
   | Click_and_wait_for_popup _ -> "clickAndWaitForPopup"
   | Click _ -> "click" | Double_click _ -> "dblclick" | Hover _ -> "hover" | Fill _ -> "fill"
@@ -372,6 +384,19 @@ let method_name = function
   | Url -> "url" | Title -> "title" | Info -> "info" | Snapshot -> "snapshot" | Events -> "events"
   | Wait_for_timeout _ -> "waitForTimeout"
   | Cancel_download _ -> "download.cancel"
+type unavailable_input = { index : int; action : action; reason : Input_contract.unavailable }
+let validate_input_contract request =
+  let rec check index = function
+    | [] -> Ok ()
+    | (step : step) :: rest ->
+      match Input_contract.unavailable (input_contract step.action) with
+      | None -> check (index + 1) rest
+      | Some reason -> Error {index;action=step.action;reason}
+  in
+  check 0 request.steps
+let unavailable_input_message {index;action;reason} =
+  validation_message {context=Step {index;method_=Some (method_name action)};
+    message=Input_contract.message reason}
 let string value = `String value
 let code_fields = function
   | Expression source -> ["source",string source]

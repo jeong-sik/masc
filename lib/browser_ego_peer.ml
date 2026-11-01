@@ -1428,6 +1428,9 @@ let interact ?actor t args =
   let before result = Result.map_error (fun detail -> Live.Before_effect detail) result in
   let* fields = before (match args with `Assoc fields -> Ok fields | _ -> Error "invalid interaction") in
   let* request = before (Browser_interaction.parse (obj (("lane",str Browser_lane.Lane_name.(to_wire Live)) :: fields))) in
+  let* () = match Browser_lane.Native_input.unavailable (Browser_lane.ego_input_contract request.action) with
+    | None -> Ok ()
+    | Some reason -> Error (Live.Before_effect (Browser_lane.Native_input.message reason)) in
   let* () = match request.frame_path with
     | [] -> Ok ()
     | _ :: _ -> Error (Live.Before_effect frame_input_refused) in
@@ -1721,6 +1724,8 @@ let workflow_source t ~tab_id ~label =
 let workflow ?actor t args =
   let pre result = Result.map_error (fun detail -> Live.Before_effect detail) result in
   let* request = pre (Browser_lane.Native_workflow.of_json args) in
+  let* () = Browser_lane.Native_workflow.validate_input_contract request
+    |> Result.map_error (fun reason -> Live.Before_effect (Browser_lane.Native_workflow.unavailable_input_message reason)) in
   let* _ = pre (Browser_page_script.text_cap (Some request.max_chars)) in
   let* label = label_of t request.tab_id in
   let* () = Input.admit t.input |> Result.map_error (fun detail -> Live.Before_effect detail) in

@@ -142,6 +142,8 @@ let prepare ~upload_paths tool json =
       let input=`Assoc (("maxChars",`Int max_chars)::List.filter (fun (key,_)->
         not (List.mem key ["lane";"clientId";"action";"maxChars"])) fields) in
       let* workflow=B.Native_workflow.of_json input in
+      let* ()=B.Native_workflow.validate_input_contract workflow
+        |> Result.map_error B.Native_workflow.unavailable_input_message in
       Ok {preference=request.route;required_actions=[];projection=Raw;verb=B.Page_native_workflow workflow}
      | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _) ->
       let* request=Browser_interaction.parse json in

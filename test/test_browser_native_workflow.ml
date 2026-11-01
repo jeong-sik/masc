@@ -68,6 +68,30 @@ let undeclared=[`Null,Rel.Void_answer;str "ok",Rel.Undeclared_answer;`Int 1,Rel.
 let declared_clean=[obj [];obj ["popups",`List []];
   obj ["popups",`List [obj ["label",str "p2";"targetId",str "T2"]]];
   obj ["popups",`List [obj ["label",str "p2";"targetId",str "T2"];obj ["label",str "p3";"targetId",str "T3"]]]]
+let native_input_admission () =
+  let module Contract=Browser_lane.Native_input in
+  let denied=request [step "fill" ["selector",str "#editor";"text",str "before"];
+    step "keyboard.type" ["text",str "unsafe"];click] in
+  (match W.validate_input_contract denied with
+   | Error reason ->
+     check int "preflight identifies the later step" 1 reason.index;
+     check bool "preflight retains the closed native gap" true (reason.reason=Contract.Keyboard_type_void);
+     check string "preflight identifies the native method" "keyboard.type" (W.method_name reason.action);
+     check bool "preflight message identifies method and position" true
+       (String.starts_with ~prefix:"native workflow step[1] (method \"keyboard.type\"):" (W.unavailable_input_message reason))
+   | Ok () -> fail "entire workflow must reject raw typing before its first step");
+  let admitted=request [step "fill" ["selector",str "#editor";"text",str "replace"];
+    step "keyboard.insertText" ["text",str "literal"];step "keyboard.paste" ["text",str "paste"];
+    step "keyboard.press" ["key",str "Enter"];click] in
+  check bool "explicit native alternatives remain executable" true
+    (W.validate_input_contract admitted=Ok ());
+  let insertion=request [step "keyboard.insertText" ["text",str "literal"]] in
+  (match insertion.steps with
+   | [step] -> check bool "insertText creates no down/up ownership or release proof" true
+       (W.input_contract step.action=Contract.No_hold && not (W.holds_input step.action))
+   | [] | _::_::_ -> fail "one requested insertion must remain one step");
+  check bool "retained native data still round-trips without admission" true
+    (W.of_json (W.to_json denied)=Ok denied)
 let roundtrip () =
   let calls=[click;step "dblclick" ["selector",str "loc=css:#row"];step "hover" ["selector",str "@3"];
     step "fill" ["selector",str "@4";"text",str ""];
@@ -692,6 +716,7 @@ let () = if Array.length Sys.argv=2 && Sys.argv.(1)="--receipt-contract" then
   else if Array.length Sys.argv=3 && Sys.argv.(1)="--page-proof" then page_proof Sys.argv.(2)
   else run "native_browser_workflow" ["SDK contract",[
   test_case "popup acquisition retains identity, partial trigger and input guarantees" `Quick popup_progress;
+  test_case "native input admission rejects the entire raw-typing workflow" `Quick native_input_admission;
   test_case "native methods preserve values" `Quick roundtrip;
   test_case "Download cancellation binds identity and exact effect progress" `Quick download_cancel;
   test_case "URL matcher forms preserve native syntax and reject ambiguous input" `Quick url_matchers;

@@ -66,7 +66,7 @@ selection; MASC preserves the requested selection forms.
 | `focus`, `selectOption`, `waitForURL`, `waitForSelector` | timeout |
 | `goto` | referer, timeout, waitUntil |
 | `reload` | timeout, waitUntil |
-| `keyboard.type`, `keyboard.press` | delay |
+| `keyboard.press` | delay |
 | `waitForLoadState` | timeout, idleMs |
 | `waitForFunction` | timeout, polling |
 | `fetch` | timeout, method, headers, body, cache, credentials, integrity, keepalive, mode, redirect, referrer, referrerPolicy |
@@ -108,9 +108,10 @@ its unconfirmed input state is resolved. A selector drag that returns normally
 unblocks input only when `dragAndDrop` answers with an object receipt that has
 no `dialog` (see below). Coordinate-path drag (`page.drag`) calls `mouse.down`,
 `mouse.move` and `mouse.up`, which return void and swallow a dialog interruption,
-so no SDK answer shows that the button came up. Once it ran, its result is an
-unknown outcome and it blocks further input until the operator's input reset. A
-guard that refuses it before any input leaves input usable. A lost key press/type/paste response also
+so no SDK answer shows that the button came up. Current admission refuses these
+raw drags before input. An already dispatched raw drag from an older session
+remains an unknown outcome and blocks further input until the operator's input
+reset; a new preflight refusal does not reset that prior uncertainty. A lost key press/type/paste response also
 keeps release unconfirmed without guessing a key-up sequence. `keyboard.paste`
 uses the SDK's `ControlOrMeta+V` sequence, so it can leave a modifier held.
 `press` is included because its key sequence may be held if
@@ -141,12 +142,26 @@ for them (`{}`, `{popups}`, or `{dialog}` when a dialog interrupts the action;
 so only `keyboard.type` is receipt-less among these three. The other keyboard calls
 `keyboard.insertText`, `keyboard.down` and `keyboard.up` also return void at that commit
 ([source](https://github.com/citrolabs/ego-lite/blob/aecc5831fc5a9ea01a078b632185992a3a7ac448/package/ego-browser/src/page-model.ts#L612-L643)),
-so they declare nothing either.
-The workflow therefore stops at a receipt-less holding step, leaves it outside
-the completed prefix and retains `inputReleased=false`; no later step or final
-snapshot runs. This also requires explicit recovery after ordinary void-returning
-typing. Keep the original command and inspect the page rather than typing it
-again. The original installation's private operator input-reset confirmation
+so none provides a release receipt. `keyboard.insertText` only invokes native
+`Input.insertText`, with no key-down/up, and is classified `No_hold`; it does not
+attest release or application success. Manual `down`/`up` are not exposed.
+
+The shared typed native input contract therefore refuses `keyboard.type` and
+ordinary Ego `type_text` before input. A workflow containing `keyboard.type` is
+refused as a whole before its first step, including any earlier fill, click or
+navigation. Native data decoding still recognizes that method for retained
+receipts; decoding is not execution admission. For new work explicitly select
+native `fill` to replace an observed input, textarea or contenteditable editor,
+`keyboard.insertText` to insert literal text at the observed focus, or
+`keyboard.paste` for text/HTML. MASC never silently substitutes a method.
+Coordinate, waypoint and scene-node drags are also refused before input; native
+selector-to-selector `drag_to` without `via` and with `durationMs=0`, and workflow
+`dragAndDrop`, keep their observed receipt boundary.
+
+A pre-effect refusal preserves previous input readiness; it does not reset an
+existing uncertain command. Already dispatched receipt-less holding input from
+an older session remains uncertain. Keep that original command and inspect the
+page rather than typing it again. The original installation's private operator input-reset confirmation
 permits a new distinct command after the operator has checked/reset that Space;
 it does not prove SDK cleanup. Automatic, fully settled `keyboard.type` workflows
 require an SDK contract that distinguishes the original input's completion from
@@ -177,7 +192,8 @@ and anyone may build them, so the type that names the first unreleased step cann
 hold the one answer that releases.
 
 The script turns a void or non-object answer of a holding step into a failure
-before it records the step, so a real `keyboard.type` decodes as `Never_returned`.
+before it records the step. Retained older `keyboard.type` failures therefore
+decode as `Never_returned`; current admission refuses them before execution.
 A `null` or non-object receipt (`Void_answer`, or `Undeclared_answer` for a
 non-object) therefore only comes from a reply the script did not produce. An object
 receipt with a member the SDK does not declare is recorded as it is and decodes as
@@ -210,7 +226,9 @@ such as `keyboard.type`, and `mouse.down`, `mouse.move` and `mouse.up`, swallow
 that error into void
 ([raw action](https://github.com/citrolabs/ego-lite/blob/aecc5831fc5a9ea01a078b632185992a3a7ac448/package/ego-browser/src/page-model.ts#L2674-L2687),
 [mouse](https://github.com/citrolabs/ego-lite/blob/aecc5831fc5a9ea01a078b632185992a3a7ac448/package/ego-browser/src/page-model.ts#L512-L568)),
-so a typed run never releases and the operator's input reset applies.
+so void is never release proof. Current admission refuses those raw holding
+methods before input; the operator's input reset still applies to already
+uncertain input from an older session.
 `Page.info()` and the Page's event buffer are samples of the page, not answers of
 the SDK, and `decode` does not use them as release evidence. The SDK documents no
 release acknowledgement, and a receipt does not prove that every key or button

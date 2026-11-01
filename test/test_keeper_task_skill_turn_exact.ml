@@ -1418,7 +1418,7 @@ let test_jev_unavailable_clock_sends_no_request_and_preserves_policy_precedence 
     check string "assessment remains explicit" status (observed |> member "status" |> to_string);
     check string "the owning unavailable reason is preserved" reason (observed |> member "reason" |> to_string);
     check bool "no invented model advice" true
-      (Option.is_none (Typesafeai_skill_applicability.model_advice assessment));
+      (Option.is_none (Result.get_ok (Typesafeai_skill_applicability.model_advice assessment)));
     check int "unavailable assessment sends no HTTP request" 0 (Exact_output_fixture.post_count server)
   in
   Masc_test_deps.with_typesafeai_policy policy (fun () ->

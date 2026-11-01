@@ -127,6 +127,13 @@ type undrawn =
   | Source_fragment of int * int
   | Requires_source
 
+(* A single break requires the whole source. Avoid recording another event
+   for every break in a long label. *)
+let source_on_break on_undrawn =
+  Option.map (fun emit ->
+    let reported = ref false in
+    fun () -> if not !reported then (reported := true; emit Requires_source)) on_undrawn
+
 (* How a state diagram's source writes a start or an end. *)
 let pseudo_state_mark = "[*]"
 
@@ -175,8 +182,9 @@ let strip_quotes text =
   if n >= 2 && text.[0] = '"' && text.[n - 1] = '"' then String.sub text 1 (n - 2)
   else text
 
-(* [<br>], [<br/>] and [<br />] are Mermaid's line break inside a label; a
-   box here is one row tall, so a break is a space. *)
+(* [<br>], [<br/>] and [<br />] are Mermaid's line breaks inside a label.
+   Parsing still normalizes them to spaces; a renderer that subscribes to
+   [on_break] keeps the source when it cannot draw the line break. *)
 type label_source_range = {
   start_byte : int;
   end_byte : int;
@@ -187,7 +195,7 @@ type mapped_label = {
   source_ranges : label_source_range array;
 }
 
-let replace_breaks ?on_span text =
+let replace_breaks ?on_span ?on_break text =
   let out = Buffer.create (String.length text) in
   let n = String.length text in
   let emit_char i =
@@ -200,6 +208,7 @@ let replace_breaks ?on_span text =
       match String.index_from_opt text i '>' with
       | Some close ->
           Buffer.add_char out ' ';
+          Option.iter (fun emit -> emit ()) on_break;
           Option.iter (fun emit -> emit {start_byte=i; end_byte=close + 1}) on_span;
           walk (close + 1)
       | None ->
@@ -209,7 +218,7 @@ let replace_breaks ?on_span text =
   walk 0;
   Buffer.contents out
 
-let normalize_label ?on_span raw =
+let normalize_label ?on_span ?on_break raw =
   let whitespace = function ' ' | '\t' | '\n' | '\r' | '\012' -> true | _ -> false in
   let limit = String.length raw in
   let rec left at = if at < limit && whitespace raw.[at] then left (at + 1) else at in
@@ -220,9 +229,9 @@ let normalize_label ?on_span raw =
     then start + 1, stop - 1 else start, stop in
   let on_span = Option.map (fun emit span ->
     emit {start_byte=start + span.start_byte; end_byte=start + span.end_byte}) on_span in
-  replace_breaks ?on_span (String.sub raw start (stop - start))
+  replace_breaks ?on_span ?on_break (String.sub raw start (stop - start))
 
-let label_text raw = normalize_label raw
+let label_text ?on_break raw = normalize_label ?on_break raw
 
 let label_with_source_ranges raw =
   let ranges = ref [] in
@@ -300,6 +309,7 @@ type cursor = {
   text : string;
   base_byte : int;
   trace_sources : bool;
+  on_break : (unit -> unit) option;
   mutable pos : int;
 }
 
@@ -367,7 +377,7 @@ let statement_kind line =
 (* [subgraph one], [subgraph one [Title]], [subgraph one ["Title"]]. With no
    bracket the whole text is both the name and the title, as Mermaid reads
    it; such a name may hold spaces, and then no edge can name it. *)
-let parse_group_header ?on_source ~source_start text =
+let parse_group_header ?on_source ?on_break ~source_start text =
   match String.index_opt text '[' with
   | None ->
       let start, id = trim_located source_start text in
@@ -384,11 +394,12 @@ let parse_group_header ?on_source ~source_start text =
       else
         let raw = String.sub rest 1 (n - 2) in
         Option.iter (fun emit -> emit (label_at (source_start + i + 1) raw)) on_source;
-        Ok (id, label_text raw)
+        Ok (id, label_text ?on_break raw)
 
 type declared = {
   mutable order : node_id list;  (* newest first *)
   on_label : (label_identity -> mapped_label option -> unit) option;
+  on_break : (unit -> unit) option;
   node_sources : (node_id, mapped_label option) Hashtbl.t option;
   table : (node_id, node) Hashtbl.t;
 }
@@ -443,7 +454,7 @@ let parse_node c declared =
                 | Some stop ->
                     let raw = String.sub c.text start (stop - start) in
                     let source = Option.map (fun _ -> label_at (c.base_byte + start) raw) declared.on_label in
-                    declare ?source declared (Named id) ~label:(label_text raw) ~shape ~explicit:true;
+                    declare ?source declared (Named id) ~label:(label_text ?on_break:c.on_break raw) ~shape ~explicit:true;
                     c.pos <- stop + String.length closer;
                     Ok (Named id)))
           else try_openers rest
@@ -481,7 +492,7 @@ let parse_arrow c =
         | Some stop ->
             let raw = String.sub c.text start (stop - start) in
             c.pos <- stop + 1;
-            Ok { arrow_style; arrow_directed = head; arrow_label = Some (label_text raw);
+            Ok { arrow_style; arrow_directed = head; arrow_label = Some (label_text ?on_break:c.on_break raw);
                  arrow_source = if c.trace_sources then Some (label_at (c.base_byte + start) raw) else None })
       else if (not head) && length = 2 then (
         (* "-- text -->": the label runs to the next arrow run. *)
@@ -503,7 +514,7 @@ let parse_arrow c =
               Ok
                 { arrow_style
                 ; arrow_directed = closing.[closing_length - 1] = '>'
-                ; arrow_label = Some (label_text raw)
+                ; arrow_label = Some (label_text ?on_break:c.on_break raw)
                 ; arrow_source = if c.trace_sources then Some (label_at (c.base_byte + start) raw) else None
                 })
       else Ok { arrow_style; arrow_directed = head; arrow_label = None; arrow_source = None }
@@ -518,7 +529,8 @@ let rec parse_group c declared =
   else Ok [ first ]
 
 let parse_statement ~source_start ~edge_count text declared edges =
-  let c = { text; pos = 0; base_byte=source_start; trace_sources=Option.is_some declared.on_label } in
+  let c = { text; pos = 0; base_byte=source_start; trace_sources=Option.is_some declared.on_label;
+            on_break=declared.on_break } in
   let* sources = parse_group c declared in
   let rec chain sources =
     skip_spaces c;
@@ -577,6 +589,7 @@ let split_statements lines =
    block boundary, a line that only styles, or else a message. *)
 type roster = {
   on_participant : (label_identity -> mapped_label option -> unit) option;
+  on_break : (unit -> unit) option;
   mutable roster_order : string list;  (* newest first *)
   roster_table : (string, participant) Hashtbl.t;
 }
@@ -630,7 +643,8 @@ let sequence_arrow c =
     Ok (style, head, activation)
 
 let parse_message ~source_start ~event_index line roster =
-  let c = { text = line; pos = 0; base_byte=source_start; trace_sources=Option.is_some roster.on_participant } in
+  let c = { text = line; pos = 0; base_byte=source_start; trace_sources=Option.is_some roster.on_participant;
+            on_break=roster.on_break } in
   let from = read_while c is_id_char in
   if from = "" then Error "expected a participant"
   else
@@ -654,7 +668,7 @@ let parse_message ~source_start ~event_index line roster =
           String.trim raw)
         else ""
       in
-      Ok (Message { m_from = from; m_to = target; m_text = replace_breaks text; m_style = style; m_head = head }, activation)
+      Ok (Message { m_from = from; m_to = target; m_text = replace_breaks ?on_break:roster.on_break text; m_style = style; m_head = head }, activation)
     end
 
 let parse_note ~source_start ~event_index rest roster =
@@ -696,7 +710,7 @@ let parse_note ~source_start ~event_index rest roster =
             Option.iter (fun emit -> emit (Event_label event_index)
               (Some (text_at (body_start + colon + 1)
                 (String.sub body (colon + 1) (String.length body - colon - 1))))) roster.on_participant;
-            Ok (Note { n_over = List.map snd names; n_text = replace_breaks (rest_after_colon body) }, undrawn_placement)
+            Ok (Note { n_over = List.map snd names; n_text = replace_breaks ?on_break:roster.on_break (rest_after_colon body) }, undrawn_placement)
           end)
 
 let parse_sequence_statement ?on_undrawn ~source_start ~event_index line roster =
@@ -704,14 +718,15 @@ let parse_sequence_statement ?on_undrawn ~source_start ~event_index line roster 
   let word, rest_start, rest = first_word_located source_start line in
   match word with
   | "participant" | "actor" ->
-      let c = { text = rest; pos = 0; base_byte=rest_start; trace_sources=Option.is_some roster.on_participant } in
+      let c = { text = rest; pos = 0; base_byte=rest_start; trace_sources=Option.is_some roster.on_participant;
+                on_break=roster.on_break } in
       let pid = read_while c is_id_char in
       if pid = "" then Error "expected a participant id"
       else begin
         skip_spaces c;
         let alias =
           if starts c "as " then
-            label_text (String.sub c.text (c.pos + 3) (String.length c.text - c.pos - 3))
+            label_text ?on_break:roster.on_break (String.sub c.text (c.pos + 3) (String.length c.text - c.pos - 3))
           else pid
         in
         let source = Option.map (fun _ ->
@@ -751,7 +766,8 @@ let parse_sequence_statement ?on_undrawn ~source_start ~event_index line roster 
       Ok (Some message)
 
 let parse_sequence ?on_label ?on_undrawn lines =
-  let roster = { roster_order = []; roster_table = Hashtbl.create 8; on_participant=on_label } in
+  let on_break = source_on_break on_undrawn in
+  let roster = { roster_order = []; roster_table = Hashtbl.create 8; on_participant=on_label; on_break } in
   let event_index = ref 0 in
   let events = ref [] in
   let depth = ref 0 in
@@ -1036,7 +1052,7 @@ let parse_state_statement ?on_undrawn ~source_start ~edge_count stack homes desc
           let label =
             match text with
             | Some (_, "") | None -> None
-            | Some (_, text) -> Some (label_text text)
+            | Some (_, text) -> Some (label_text ?on_break:declared.on_break text)
           in
           let rec transitions = function
             | (from_start, source) :: ((to_start, target) :: _ as more) -> (
@@ -1070,7 +1086,8 @@ let closes_note statement =
 
 let parse_state_diagram ?on_label ?on_undrawn ?(initial_dir = Top_down) lines =
   let node_sources = Option.map (fun _ -> Hashtbl.create 16) on_label in
-  let declared = { order = []; table = Hashtbl.create 16; on_label; node_sources } in
+  let on_break = source_on_break on_undrawn in
+  let declared = { order = []; table = Hashtbl.create 16; on_label; on_break; node_sources } in
   let edges = ref [] in
   let edge_count = ref 0 in
   let described_spans = Option.map (fun _ -> Hashtbl.create 16) on_undrawn in
@@ -1230,7 +1247,8 @@ let parse_internal ?on_label ?on_undrawn text =
             | _ ->
                 Error (Parse_error { line = header_line; what = "unreadable header " ^ header })
           in
-          let declared = { order = []; table = Hashtbl.create 16; on_label; node_sources=None } in
+          let on_break = source_on_break on_undrawn in
+          let declared = { order = []; table = Hashtbl.create 16; on_label; on_break; node_sources=None } in
           let edges = ref [] in
           let edge_count = ref 0 in
           let group_count = ref 0 in
@@ -1267,7 +1285,7 @@ let parse_internal ?on_label ?on_undrawn text =
                     let identity = Group_label !group_count in
                     incr group_count;
                     let on_source = Option.map (fun emit source -> emit identity (Some source)) on_label in
-                    match parse_group_header ?on_source ~source_start:(source_start + header_start) text with
+                    match parse_group_header ?on_source ?on_break ~source_start:(source_start + header_start) text with
                     | Error what -> fail what
                     | Ok (id, label) ->
                         if Hashtbl.mem declared.table (Named id) then

@@ -93,7 +93,7 @@ runtime gates. Source-review completion alone leaves a Draft item in review.
 
 The queue now contains **30 concrete candidates**: 24 from the first semantic pass, A1
 from the Agent Core follow-up, T1 from the integrated TUI investigation, E1/E2 from
-Exec, M1 from multimodal/media, and J1 from the Schedule investigation. Fifteen are
+Exec, M1 from multimodal/media, and J1 from the Schedule investigation. Seventeen are
 implemented as PRs; their source-review evidence is recorded on each PR: `S1` in
 [#43367](https://github.com/jeong-sik/masc/pull/43367) isolates provider usage
 acceptance; `K1` in [#43370](https://github.com/jeong-sik/masc/pull/43370) preserves
@@ -122,7 +122,10 @@ whole-envelope repair in [#43544](https://github.com/jeong-sik/masc/pull/43544) 
 canonical snapshot codec/projection ownership in
 [#43553](https://github.com/jeong-sik/masc/pull/43553). `D3` in
 [#43556](https://github.com/jeong-sik/masc/pull/43556) gives Goal document data and
-codecs one private owner while retaining source and transaction effects. Fifteen
+codecs one private owner while retaining source and transaction effects. K5 in
+[#47056](https://github.com/jeong-sik/masc/pull/47056) isolates immutable approval
+restart planning; D5 in [#47057](https://github.com/jeong-sik/masc/pull/47057) shares
+immutable Board vote transitions. Thirteen
 candidates remain queued; this ordering does not waive their coverage.
 
 | ID | Priority | Status | Refactoring point |
@@ -138,7 +141,7 @@ candidates remain queued; this ordering does not waive their coverage.
 | [D2](#d2) | next | in review | Make Goal upsert a typed immutable transaction decision |
 | [D3](#d3) | later | in review | Isolate the Goal document codec and schema rejection contract |
 | [D4](#d4) | investigate | candidate | Audit and retain typed Goal publication outcomes across the backend adapter |
-| [D5](#d5) | later | implemented; review pending | Extract the Board vote decision from post/comment mutation shells |
+| [D5](#d5) | later | source reviewed; execution unverified | Extract the Board vote decision from post/comment mutation shells |
 | [D6](#d6) | later | candidate | Represent Board snapshot flush work and retry obligations explicitly |
 | [D7](#d7) | next | in review | Preserve evidence transport decisions in the complete review request, then isolate snapshot projections |
 | [S1](#s1) | next | in review | Extract the provider usage acceptance/revocation reducer from the shared observation store |
@@ -1420,8 +1423,8 @@ execution in the shell.
 Preserve:
 
 - One active worker is shared by waiters and survives cancellation of an individual waiter.
-- A result computed before an invalidation cannot be published as current; schedule the
-  existing follow-up.
+- A successful dirty result publishes newer measured fields with the earliest stale
+  timestamp retained and requests the existing follow-up; it is not discarded.
 - Last-good payload time and first failure time remain distinct across repeated failures.
 - An active worker's timeout is reported once without pretending the worker stopped.
 - No lost wake on invalidation and no unbounded invalidation queue.
@@ -1437,9 +1440,16 @@ Scenarios:
 **Not executed in this audit.**
 
 Ordering rationale: The existing tests include worker survival after waiter
-cancellation, dirty-generation rejection and last-snapshot preservation. Mutation is
+cancellation, dirty-observation publication and last-snapshot preservation. Mutation is
 necessary for publication and resource ownership; the target is correlated state spread,
 not removal of synchronization.
+
+Current-source continuation (2026-11-01): the
+[full-health state boundary audit](full-health-state-boundary-20261101.md) records
+current events and test surfaces. The older proposal omitted dirty-success
+publication, stream effects under the publication lock, and synchronous refresh
+without an active async worker. These are required inputs to the next immutable
+state design. S5 remains unimplemented; the audit is source evidence only.
 
 ### S6
 

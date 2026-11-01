@@ -1189,6 +1189,12 @@ export function decodeSkillsResponse(raw: unknown): SkillsResponse {
     )
   }
   const decoded = decodeWithSchema(ReadySkillsResponseSchema, raw, 'ready_surfaces_invalid')
+  for (const { winner, shadowed } of decoded.snapshot.shadows) {
+    if (winner.name !== shadowed.name
+      || (winner.source_id === shadowed.source_id && winner.package_id === shadowed.package_id)) {
+      contractError('invalid_response', 'a shadow must pair distinct identities declaring the same name')
+    }
+  }
   validateSurfaceCoverage(decoded.snapshot, decoded.surfaces)
   return decoded
 }

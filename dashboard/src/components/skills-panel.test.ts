@@ -330,6 +330,14 @@ describe('published name selection', () => {
     ;(payload.snapshot as Record<string, unknown>).shadows = [{ shadowed: intake.identity }]
     expect(() => decodeSkillsResponse(payload)).toThrow(SkillsContractError)
   })
+
+  it('rejects shadow pairs with different names or one identity on both sides', () => {
+    for (const winner of [intake.identity, entry('unrelated').identity]) {
+      const payload = readyPayload([intake], [instructionSurface(intake)])
+      ;(payload.snapshot as Record<string, unknown>).shadows = [{ winner, shadowed: intake.identity }]
+      expect(() => decodeSkillsResponse(payload)).toThrow(SkillsContractError)
+    }
+  })
 })
 
 describe('decodeSkillsResponse', () => {

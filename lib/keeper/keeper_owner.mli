@@ -10,8 +10,13 @@ val mailbox_capacity : int
 
 val install_state_change_observer : (unit -> unit) -> unit
 (** Install the process-wide non-yielding observer invoked after a
-    health-visible operation, turn, or shutdown projection changes. Observer
-    failures are logged and never change the accepted Owner result. *)
+    health-visible metadata, operation, turn, or shutdown projection changes.
+    A metadata persistence failure or exception also notifies: the file may
+    have changed before durability became uncertain. Observer failures, including a
+    callback-raised cancellation when the Owner fiber is still live, are
+    logged and do not change the accepted result. Cancellation of the Owner
+    fiber itself propagates; if a persistence exception is already unwinding,
+    that original exception takes precedence over an observer exception. *)
 
 type store =
   { replace : Keeper_meta_contract.keeper_meta -> (unit, string) result
@@ -633,6 +638,11 @@ val error_to_string : error -> string
 val operation_error_kind : Keeper_chat_operation_store.error -> operation_error_kind
 
 module For_testing : sig
+  val commit_metadata_transition :
+    keeper_name:string -> store -> Keeper_owner_reducer.transition ->
+    (Keeper_owner_reducer.state, error) result
+  (** Exercise the Owner's persistence exception boundary without a mailbox. *)
+
   val observe_state_changes : sw:Eio.Switch.t -> (unit -> unit) -> unit
   (** Compose a non-yielding test observer with the installed observer until
       switch release. For serial test scopes; preserves the prior observer. *)

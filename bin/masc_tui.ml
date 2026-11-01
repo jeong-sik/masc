@@ -18920,9 +18920,13 @@ let handle_composer_key state ~base_path ~mailbox key =
          later roster cursor movement. Focus before the retarget's drain. *)
       state.msg_return <- Keeper_chat_return_detail;
       state.composer_focused <- true;
-      (if state.msg_target_keeper_name <> Some keeper_name then
+      (if state.msg_target_keeper_name <> Some keeper_name then begin
          open_message_for_keeper state keeper_name ~drain_queue:(fun () ->
-           drain_queued_message state ~base_path ~mailbox));
+           drain_queued_message state ~base_path ~mailbox);
+         (* Chat visits use the stored roster order; this surface may draw
+            a sorted/grouped roster and keeps its selection by name. *)
+         select_keeper_name state keeper_name
+       end);
       true
   | Composer.Start_listening keeper_name ->
       (* Pressing it while continuous mode is on turns the mode off. That is

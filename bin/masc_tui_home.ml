@@ -3,6 +3,11 @@
 open Masc_tui_types
 open Masc_tui_approvals_model
 
+let open_approvals state ~navigate =
+  let origin = state.view in
+  navigate Approvals;
+  state.followed_from <- Some (origin, None)
+
 let home_request_of_approval = function
   | Keeper_tool_row held ->
       Home_held_call { keeper = held.Tui_decode.kta_keeper; call_id = held.kta_tool_call_id }

@@ -750,6 +750,23 @@ let test_unread_questions_take_no_row_and_open_nothing () =
   check int "the failure has its row" 1
     (List.length (tones_of lines Agenda.Failed))
 
+let test_home_approval_list_preserves_its_caller () =
+  let open Masc_tui_types in
+  let state = agenda_state () in
+  state.view <- Overview;
+  state.followed_from <- Some (Board, Some "older-reference");
+  Masc_tui_message_input.insert state.msg_input "draft kept while reading requests";
+  let navigate destination =
+    state.view <- destination;
+    state.followed_from <- None
+  in
+  Masc_tui_home.open_approvals state ~navigate;
+  check bool "open the full request list" true (state.view = Approvals);
+  check bool "back belongs to the current caller" true
+    (state.followed_from = Some (Overview, None));
+  check string "navigation retains the operator's draft" "draft kept while reading requests"
+    (Masc_tui_message_input.contents state.msg_input)
+
 let () =
   run
     "tui agenda"
@@ -817,7 +834,9 @@ let () =
             test_unread_questions_take_no_row_and_open_nothing
         ] )
     ; ( "selection across refreshed agenda projections"
-      , [ test_case "Task Goal references preserve registry reading truth" `Quick
+      , [ test_case "Home approval list retains its caller" `Quick
+            test_home_approval_list_preserves_its_caller
+        ; test_case "Task Goal references preserve registry reading truth" `Quick
             test_task_goal_reading_preserves_source_truth
         ; test_case "Home retains tasks when supplemental sources fail" `Quick
             test_home_task_survives_supplemental_source_failure

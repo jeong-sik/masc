@@ -382,7 +382,7 @@ let reasoning_effort_of_string = Reasoning_effort.of_string
    thinking is active AND [clear_thinking] is false. The active tool exchange's
    interleaved reasoning has its own replay policy in [Reasoning_dialect].
    [clear_thinking] resolves from the explicit
-   field, else the inverse of [preserve_thinking], else the wire default [true].
+   field, else the inverse of [preserve_thinking], else the client default [true].
 
    Exposed on raw fields rather than on [t] because the request builders carry
    different config records ([Provider_config.t] vs [Types.agent_config]); both
@@ -406,6 +406,7 @@ let preserved_thinking_active ~enable_thinking ~clear_thinking ~preserve_thinkin
 
 let clear_thinking_object_request_field
       ~(preserve_thinking_control_format : Capabilities.preserve_thinking_control_format)
+      ~supports_reasoning
       ~enable_thinking
       ~clear_thinking
       ~preserve_thinking
@@ -413,7 +414,7 @@ let clear_thinking_object_request_field
   match preserve_thinking_control_format with
   | Capabilities.Thinking_object_clear_thinking ->
     (match enable_thinking, clear_thinking, preserve_thinking with
-     | None, None, None -> None
+     | None, None, None when not supports_reasoning -> None
      | _ -> Some (clear_thinking_value ~clear_thinking ~preserve_thinking))
   | Capabilities.No_preserve_thinking_control
   | Capabilities.Thinking_object_keep_all

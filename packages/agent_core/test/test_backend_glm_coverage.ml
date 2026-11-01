@@ -165,8 +165,11 @@ let test_build_request_thinking_modes_and_tool_stream () =
   let passthrough =
     K.build_request ~config:(glm_config ()) ~messages () |> Yojson.Safe.from_string
   in
-  check int "thinking omitted field count" 0 (field_count "thinking" passthrough);
-  check bool "thinking omitted" true (passthrough |> member "thinking" = `Null)
+  check int "clear policy field count" 1 (field_count "thinking" passthrough);
+  check bool "client clear policy is explicit" true
+    (passthrough |> member "thinking" |> member "clear_thinking" |> to_bool);
+  check bool "thinking toggle remains omitted" true
+    (passthrough |> member "thinking" |> member "type" = `Null)
 ;;
 
 let test_parse_response_extracts_reasoning_and_usage () =

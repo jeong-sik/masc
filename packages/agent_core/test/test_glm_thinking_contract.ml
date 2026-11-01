@@ -61,8 +61,9 @@ let test_hybrid provider model () =
     let reset = config ~enable_thinking:true ~preserve_thinking:false provider model in
     Alcotest.(check bool) "explicit history clear still travels" true
       (body reset |> field "thinking" |> field "clear_thinking" |> Yojson.Safe.Util.to_bool);
-    Alcotest.(check bool) "unspecified toggle preserves provider default" true
-      (body (config provider model) |> field "thinking" = `Null))
+    Alcotest.(check string) "omitted toggle still declares the client's clear policy"
+      {|{"clear_thinking":true}|}
+      (body (config provider model) |> field "thinking" |> Yojson.Safe.to_string))
 ;;
 
 let test_no_toggle provider model () =
@@ -99,6 +100,25 @@ let test_response_separation () =
     (Types.visible_text_of_response response)
 ;;
 
+let test_nonreasoning_default_omits_thinking model () =
+  with_catalog (fun () ->
+    List.iter (fun kind ->
+      let config = Provider_config.make ~kind ~provider_id:"glm" ~model_id:model
+          ~base_url:"https://api.z.ai/api/paas/v4" ~max_tokens:128 () in
+      let caps = Backend_openai_request.capabilities_of_config config in
+      Alcotest.(check bool) "catalog declares no reasoning" false caps.supports_reasoning;
+      let serialized = Result.bind (Complete_common.validate_all config) (fun () ->
+        Complete_common.serialize_http_request ~stream:false ~config
+          ~messages:[Types.user_msg "Return text."] ~tools:[]) in
+      let wire = match serialized with
+        | Ok artifact -> Yojson.Safe.from_string artifact.body
+        | Error (Http_client.AcceptRejected {reason}) -> Alcotest.fail reason
+        | Error _ -> Alcotest.fail "non-reasoning GLM request serialization failed" in
+      Alcotest.(check bool) "absent controls do not invent a thinking object" true
+        (field "thinking" wire = `Null))
+      [Provider_config.Glm; Provider_config.OpenAI_compat])
+;;
+
 let test_native_binding model can_disable () =
   with_catalog (fun () ->
     let disabled =
@@ -125,6 +145,9 @@ let () =
   Alcotest.run "GLM exact thinking contract"
     [ "documented hybrid", bindings [ "glm-5.2"; "glm-5.1"; "glm-5"; "glm-4.7"; "glm-4.6" ] test_hybrid
     ; "forced and undeclared", bindings [ "glm-5.3"; "glm-5.3-flash"; "unlisted-glm-model" ] test_no_toggle
+    ; "non-reasoning defaults", List.map (fun model ->
+        Alcotest.test_case model `Quick (test_nonreasoning_default_omits_thinking model))
+        ["glm-4"; "glm-4v"; "glm-4-flash"]
     ; "anonymous native", List.map (fun (model, can_disable) ->
         Alcotest.test_case model `Quick (test_native_binding model can_disable))
         [ "glm-5.1", true; "glm-4.6", true; "glm-5.3", false

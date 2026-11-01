@@ -279,7 +279,7 @@ let test_a_kept_space_the_operator_holds_is_refused () =
       (E.change (plan_ok (request fixture)) = E.Unchanged))
 
 let test_numeric_pin_is_preserved () =
-  with_fixture ~with_table:true (fun fixture ->
+  with_fixture ~with_table:true ~spaces:[ space 32 "agent" ] (fun fixture ->
     write fixture.runtime (Toml_line_editor.edit_table_int (read fixture.runtime)
       ~path:"browser.live.ego" ~key:"space" ~value:32);
     let before=read fixture.runtime in
@@ -291,6 +291,25 @@ let test_numeric_pin_is_preserved () =
     let named=plan_ok (request ~space:"32" fixture) in
     apply_ok named;
     check bool "an explicit numeric-looking name remains distinct" true ((configured fixture).space=C.Named_space "32"))
+
+let test_missing_numeric_pin_is_refused () =
+  List.iter (fun spaces ->
+    with_fixture ~with_table:true ~spaces (fun fixture ->
+      write fixture.runtime (Toml_line_editor.edit_table_int (read fixture.runtime)
+        ~path:"browser.live.ego" ~key:"space" ~value:32);
+      refused "an ID absent from the successful inventory"
+        (function E.Existing_space_missing 32 -> true | _ -> false)
+        fixture (request fixture) ();
+      check (list string) "one metadata lookup without replacement or retry" ["nodejs"] (runs fixture)))
+    [ []; [space ~name:"slack" 7 "agent"] ]
+
+let test_numeric_pin_preserves_ownership_checks () =
+  with_fixture ~with_table:true ~spaces:[space 32 "user";space 42 "agent"] (fun fixture ->
+    write fixture.runtime (Toml_line_editor.edit_table_int (read fixture.runtime)
+      ~path:"browser.live.ego" ~key:"space" ~value:32);
+    refused "an existing ID owned by the operator"
+      (function E.Space_held_by_operator {space=C.Existing_space 32;space_id=32} -> true | _ -> false)
+      fixture (request fixture) ())
 
 (* --- refused before any write ------------------------------------------ *)
 
@@ -386,6 +405,8 @@ let () =
     ; ( "a table that is there"
       , [ test_case "keeps its values" `Quick test_a_table_that_is_there_keeps_its_values
         ; test_case "keeps an exact numeric Space pin" `Quick test_numeric_pin_is_preserved
+        ; test_case "refuses a missing numeric Space pin" `Quick test_missing_numeric_pin_is_refused
+        ; test_case "numeric Space pin retains ownership checks" `Quick test_numeric_pin_preserves_ownership_checks
         ; test_case "a named key changes that key and no other" `Quick
             test_a_named_key_changes_that_key_and_no_other ] )
     ; ( "the space against ego's own"

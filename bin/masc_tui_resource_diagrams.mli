@@ -4,11 +4,11 @@ type request
 type image = private { png : string; key : string; width : int; height : int }
 type t
 type frame = {
-  mime_type : string option;
-  contents : Masc_tui_mcp.resource_content list;
-  width : int;
-  cell_pixels : int * int;
-  colors : (string * string) option;
+  frame_mime_type : string option;
+  frame_contents : Masc_tui_mcp.resource_content list;
+  frame_width : int;
+  frame_cell_pixels : int * int;
+  frame_colors : (string * string) option;
 }
 type admission = Admit | Retire | Ignore
 val create : mime_type:string option -> contents:Masc_tui_mcp.resource_content list ->

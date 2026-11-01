@@ -12,14 +12,19 @@ type peer_relation = {
   recipient : string;
   reply_to : string option;
 }
-type peer_snapshot = { queued_count : int; relations : peer_relation list }
+type peer_snapshot = {
+  queued_count : int;
+  relations : peer_relation list;
+  source_redacted_count : int;
+  source_unverified_count : int;
+}
 type peer_page = { snapshot : peer_snapshot; next_sequence : string option }
 
 val peer_snapshot : keeper_name:string -> Yojson.Safe.t -> (peer_snapshot, string) result
-(** One page for the exact recipient. Only the durable,
-    registered [sender_keeper] establishes a Keeper-to-Keeper edge; a
-    submitter's spelling alone is not identity. Running and completed work
-    are outside this observation. Repeated operation IDs are rejected. *)
+(** One page for the exact recipient. Only a durable [sender_keeper] in an
+    explicitly intact source establishes a Keeper-to-Keeper edge. A redacted
+    or unverified source remains counted but cannot name an edge. Running and
+    completed work are outside this observation. Repeated IDs are rejected. *)
 val read_peer_page :
   keeper_name:string -> after_sequence:string option ->
   read_page:(unit -> (Yojson.Safe.t, string) result) -> (peer_page, string) result

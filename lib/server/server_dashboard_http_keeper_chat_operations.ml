@@ -128,11 +128,59 @@ let api_error_of_command_error error =
   public_error kind (Registry.command_error_to_string error)
 ;;
 
+type source_integrity = Source_intact | Source_redacted | Source_unavailable
+
+(* Rendered equality alone is insufficient: a secret may itself spell the
+   replacement marker. The redactor's mapped pieces say whether it actually
+   masked a source byte; JSON key policies may also mask an entire subtree. *)
+let text_copied ~redaction text =
+  Keeper_secret_redaction.redact_text_mapped redaction text
+  |> List.for_all (function Secret_patterns.Copied _ -> true | Masked _ -> false)
+;;
+
+let rec json_copied ~redaction = function
+  | `String value -> text_copied ~redaction value
+  | `Assoc fields ->
+    List.for_all
+      (fun (key, value) ->
+         text_copied ~redaction key
+         && not (Secret_patterns.is_sensitive_key key || Secret_patterns.key_suggests_secret key)
+         && json_copied ~redaction value)
+      fields
+  | `List values -> List.for_all (json_copied ~redaction) values
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ -> true
+;;
+
+let source_integrity ~redaction ~original ~redacted =
+  match Keeper_chat_operation_payload.source_of_json original with
+  | Error _ -> Source_unavailable
+  | Ok source ->
+    let sender_copied = match source.sender_keeper with
+      | None -> true
+      | Some sender ->
+        text_copied ~redaction (Keeper_identity.Keeper_id.to_string sender) in
+    let reply_copied = match source.continuation_channel with
+      | Keeper_continuation_channel.Keeper { keeper_name } -> text_copied ~redaction keeper_name
+      | Dashboard _ | Discord _ | Slack _ | Telegram _ | Imessage _ | Unrouted _ -> true in
+    if sender_copied && reply_copied && json_copied ~redaction original && original = redacted
+    then Source_intact
+    else Source_redacted
+;;
+
+let source_integrity_json = function
+  | Source_intact -> `String "intact"
+  | Source_redacted -> `String "redacted"
+  | Source_unavailable -> `String "unavailable"
+;;
+
 let public_operation_json ~redaction (operation : Operation.t) =
   let redact_json = Keeper_secret_redaction.redact_json redaction in
-  Operation.to_public_json
-    { operation with source = redact_json operation.source
-    ; input = Option.map redact_json operation.input }
+  let source = redact_json operation.source in
+  let integrity = source_integrity ~redaction ~original:operation.source ~redacted:source in
+  match Operation.to_public_json
+    { operation with source; input = Option.map redact_json operation.input } with
+  | `Assoc fields -> `Assoc (("source_integrity", source_integrity_json integrity) :: fields)
+  | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) as json -> json
 ;;
 
 let operation_id raw =
@@ -646,6 +694,8 @@ let handle_mutation state request reqd route body =
 ;;
 
 module For_testing = struct
+  let public_operation_json = public_operation_json
+
   let invalid_input_response detail =
     let error = invalid_input detail in
     error.status, error_json error

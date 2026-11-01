@@ -711,6 +711,157 @@ let rec rm_rf path =
     else Sys.remove path
 ;;
 
+let test_public_operation_source_integrity_tracks_actual_redaction () =
+  let base_path = temp_base "keeper-source-integrity" in
+  Fun.protect ~finally:(fun () -> rm_rf base_path) (fun () ->
+    let secret_file = Filename.concat base_path "identity-secrets" in
+    Out_channel.with_open_bin secret_file (fun out ->
+      output_string out "orchid river seventy nine\n[redacted]\n");
+    let redaction = Keeper_secret_redaction.snapshot_with_additional_secret_files
+        ~redact_identity_scalars:true ~additional_secret_files:[secret_file]
+        ~base_path ~keeper_name:"receiver" in
+    let marker_secret_file = Filename.concat base_path "marker-secret" in
+    Out_channel.with_open_bin marker_secret_file (fun out ->
+      output_string out "[REDACTED]\n");
+    let marker_redaction = Keeper_secret_redaction.snapshot_with_additional_secret_files
+        ~redact_identity_scalars:true ~additional_secret_files:[marker_secret_file]
+        ~base_path ~keeper_name:"receiver" in
+    let source_with_reply ~sender ~submitted_by ~reply_to =
+      let sender_keeper = Keeper_identity.Keeper_id.of_string sender in
+      let continuation_channel = match Keeper_continuation_channel.keeper ~keeper_name:reply_to with
+        | Ok route -> route | Error detail -> fail detail in
+      match Keeper_chat_operation_payload.source_to_json ~submitted_by
+              ~thread_id:"keeper:receiver" ~continuation_channel
+              ~surface:Surface_ref.Agent ~channel:"agent" ~channel_user_id:""
+              ~channel_user_name:"" ~channel_workspace_id:"" ~conversation_id:None
+              ~external_message_id:None ~workspace_id:None ~extra_mentions:[]
+              ~sender_keeper ~user_row_origin:Keeper_chat_store.Needs_append with
+      | Ok source -> source | Error detail -> fail detail in
+    let source ~sender ~submitted_by =
+      source_with_reply ~sender ~submitted_by ~reply_to:"sender" in
+    let operation source : Keeper_owner.Chat_operation.t =
+      let operation_id = match Keeper_owner.Chat_operation.Operation_id.of_string "peer-integrity" with
+        | Ok id -> id | Error detail -> fail detail in
+      { operation_id; batch_membership=None; admission_digest="admission";
+        execution_digest="execution"; sequence=1L; source; input=None;
+        state=Queued; created_at=100. } in
+    let project ~redaction source =
+      Api.For_testing.public_operation_json ~redaction (operation source) in
+    let integrity json = Yojson.Safe.Util.(json |> member "source_integrity" |> to_string) in
+    let ordinary = source ~sender:"alice" ~submitted_by:"sender" in
+    check string "unmasked source has positive provenance" "intact"
+      (integrity (project ~redaction ordinary));
+    let masked = source ~sender:"orchid river seventy nine" ~submitted_by:"sender" in
+    let public = project ~redaction masked in
+    check string "masked sender cannot be treated as identity" "redacted" (integrity public);
+    check bool "projection does not expose the exact secret" false
+      (Astring.String.is_infix ~affix:"orchid river seventy nine" (Yojson.Safe.to_string public));
+    (* submitted_by is kept byte-for-byte, unlike Keeper_id which is lowered.
+       A secret exactly equal to the replacement yields identical source JSON,
+       so equality of the projected JSON cannot prove that no masking occurred. *)
+    let marker = source ~sender:"alice" ~submitted_by:"[REDACTED]" in
+    check string "a literal marker is safe when it was copied" "intact"
+      (integrity (project ~redaction:Keeper_secret_redaction.empty marker));
+    let masked_marker = project ~redaction:marker_redaction marker in
+    check bool "masked marker leaves the whole source unchanged" true
+      (field "source" masked_marker = marker);
+    check string "an unchanged projection can still contain a masked secret" "redacted"
+      (integrity masked_marker);
+    (* Older sources can retain a noncanonical sender spelling. The wire
+       projection remains unchanged, but decoding that sender lowercases it
+       to a secret and must not make the resulting Keeper identity trusted. *)
+    let legacy_marker = match ordinary with
+      | `Assoc fields ->
+        `Assoc (List.map (fun (key, value) ->
+          if String.equal key "sender_keeper" then key, `String "[REDACTED]"
+          else key, value) fields)
+      | _ -> fail "valid source is not an object" in
+    let decoded_sender =
+      match Keeper_chat_operation_payload.source_of_json legacy_marker with
+      | Ok { sender_keeper = Some sender; _ } -> Keeper_identity.Keeper_id.to_string sender
+      | Ok { sender_keeper = None; _ } -> fail "legacy sender missing"
+      | Error detail -> fail detail in
+    check string "legacy sender is normalized" "[redacted]" decoded_sender;
+    check string "normalized sender is a configured secret" "[REDACTED]"
+      (Keeper_secret_redaction.redact_text redaction decoded_sender);
+    let projected_legacy = project ~redaction legacy_marker in
+    check bool "legacy source projection itself is unchanged" true
+      (field "source" projected_legacy = legacy_marker);
+    check string "normalized masked sender is not trusted" "redacted"
+      (integrity projected_legacy);
+    let secret_reply = source_with_reply ~sender:"alice" ~submitted_by:"sender"
+        ~reply_to:"orchid river seventy nine" in
+    let public_reply = project ~redaction secret_reply in
+    check bool "sender remains visible when only the reply route is secret" true
+      (field "sender_keeper" (field "source" public_reply) = `String "alice");
+    check string "a masked reply route cannot be trusted" "redacted"
+      (integrity public_reply);
+    check bool "secret reply route is not exposed" false
+      (Astring.String.is_infix ~affix:"orchid river seventy nine"
+         (Yojson.Safe.to_string public_reply));
+    let marker_reply = source_with_reply ~sender:"alice" ~submitted_by:"sender"
+        ~reply_to:"[REDACTED]" in
+    let public_marker_reply = project ~redaction:marker_redaction marker_reply in
+    check bool "masked marker reply route leaves source unchanged" true
+      (field "source" public_marker_reply = marker_reply);
+    check string "an unchanged masked reply route is not trusted" "redacted"
+      (integrity public_marker_reply);
+    (* The gate address is an object in the wire source. The JSON key policy
+       masks its api_key independently of the configured exact secrets. *)
+    let imessage_source key value =
+      let continuation_channel =
+        match Keeper_continuation_channel.imessage ~chat_identifier:"conversation"
+                ~chat_guid:None ~user_id:"speaker" with
+        | Ok route -> route | Error detail -> fail detail in
+      match Keeper_chat_operation_payload.source_to_json ~submitted_by:"speaker"
+              ~thread_id:"keeper:receiver" ~continuation_channel
+              ~surface:(Surface_ref.Gate { label="imessage"; address=[key, value] })
+              ~channel:"imessage" ~channel_user_id:"speaker" ~channel_user_name:""
+              ~channel_workspace_id:"" ~conversation_id:None ~external_message_id:None
+              ~workspace_id:None ~extra_mentions:[] ~sender_keeper:None
+              ~user_row_origin:Keeper_chat_store.Needs_append with
+      | Ok source -> source | Error detail -> fail detail in
+    let key_value source =
+      field "api_key" (field "address" (field "surface" source)) in
+    let clear_key = imessage_source "api_key" "opaque-credential-value" in
+    let public_key = project ~redaction:Keeper_secret_redaction.empty clear_key in
+    check bool "JSON key policy actually masks the gate address" true
+      (key_value (field "source" public_key) = `String "[REDACTED]");
+    check string "a key-policy-redacted source is not trusted" "redacted"
+      (integrity public_key);
+    let marker_key = imessage_source "api_key" "[REDACTED]" in
+    let public_marker_key = project ~redaction:Keeper_secret_redaction.empty marker_key in
+    check bool "key policy can mask an already identical source" true
+      (field "source" public_marker_key = marker_key);
+    check string "unchanged key-policy masking is not trusted" "redacted"
+      (integrity public_marker_key);
+    let secret_key_name = imessage_source "[REDACTED]" "ordinary-value" in
+    check string "the literal gate key is copied with no configured secret" "intact"
+      (integrity (project ~redaction:Keeper_secret_redaction.empty secret_key_name));
+    let public_secret_key_name = project ~redaction:marker_redaction secret_key_name in
+    check bool "masked marker key leaves source unchanged" true
+      (field "source" public_secret_key_name = secret_key_name);
+    check string "an unchanged masked gate key is not trusted" "redacted"
+      (integrity public_secret_key_name);
+    let fragment_key = imessage_source "client_secret_v2" "opaque-credential-value" in
+    let public_fragment_key = project ~redaction:Keeper_secret_redaction.empty fragment_key in
+    check bool "fragment key policy masks its value" true
+      (field "client_secret_v2"
+         (field "address" (field "surface" (field "source" public_fragment_key)))
+       = `String "[REDACTED]");
+    let fragment_marker = imessage_source "client_secret_v2" "[REDACTED]" in
+    let public_fragment_marker = project ~redaction:Keeper_secret_redaction.empty fragment_marker in
+    check bool "fragment key policy can mask an identical source" true
+      (field "source" public_fragment_marker = fragment_marker);
+    check string "unchanged fragment-policy masking is not trusted" "redacted"
+      (integrity public_fragment_marker);
+    let masked_other_field = source ~sender:"alice" ~submitted_by:"orchid river seventy nine" in
+    check string "a redacted source is not asserted to be intact" "redacted"
+      (integrity (project ~redaction masked_other_field));
+    check string "malformed source is unavailable" "unavailable"
+      (integrity (project ~redaction (`Assoc []))))
+;;
+
 let test_http_journal_redacts_content_without_rewriting_native_identity () =
   let base_path = temp_base "keeper-http-redaction" in
   Fun.protect ~finally:(fun () -> rm_rf base_path) (fun () ->
@@ -982,6 +1133,8 @@ let () =
             "dashboard Worker permissions"
             `Quick
             test_dashboard_worker_permissions
+        ; test_case "operation source identity records actual redaction" `Quick
+            test_public_operation_source_integrity_tracks_actual_redaction
         ; test_case "exact operation routes" `Quick test_exact_routes
         ; test_case "unknown routes do not match" `Quick test_unknown_routes_do_not_match
         ; test_case "mutation bodies are closed" `Quick test_mutation_bodies_are_closed

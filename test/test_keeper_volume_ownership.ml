@@ -14,7 +14,7 @@ let ownership_case =
       | Kvo.Owned_by_this_workspace -> Fmt.string ppf "Owned_by_this_workspace"
       | Kvo.Unverified reason ->
         Fmt.pf ppf "Unverified(%s)" (Kvo.unverified_to_string reason)
-      | Kvo.Owned_by_another_workspace { Keeper_volume_ownership.recorded } ->
+      | Kvo.Owned_by_another_workspace { Kvo.recorded } ->
         Fmt.pf ppf "Owned_by_another_workspace(%s)" recorded)
   in
   (t, fun a b -> Fmt.str "%a" t a = Fmt.str "%a" t b)

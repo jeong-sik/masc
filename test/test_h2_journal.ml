@@ -1973,11 +1973,11 @@ let test_task_history_buffered_sources () = with_workspace (fun _env _sw base_pa
          check int ("parity page event count: " ^ label) 2 (List.length page_events);
          check bool ("parity page includes activity row: " ^ label) true
            (List.exists
-              (fun (ev : Types.task_history_event) ->
+              (fun (ev : Tui_decode.task_history_event) ->
                 ev.th_origin
                 = Some
                     {
-                      Types.tho_source = Types.Task_activity;
+                      Tui_decode.tho_source = Tui_decode.Task_activity;
                       tho_file = "activity-events/2099-12/31.jsonl";
                       tho_offset = 0;
                     })

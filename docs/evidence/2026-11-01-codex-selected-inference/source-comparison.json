@@ -15,6 +15,6 @@
   "fixture_delta_bytes": 4437,
   "fixture_delta_sha256": "f319978129c73aae0cb37f1810ef1a1041edff711402b26b2ceb4d1662a4d065",
   "test_tree_identical": false,
-  "case_execution_comparison": "pending actual completed captures",
+  "case_execution_comparison": "Completed comparison is retained in case-comparison.json: 40 common cases, 33 PASS maintained, 6 FAIL to PASS, 1 FAIL maintained, 0 regressions; candidate adds one public-driver PASS.",
   "source_fixture_change": "Two required selected-model arguments and one additional public driver callback case. No change to the nine existing selected inference case bodies or the native child script."
 }

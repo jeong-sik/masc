@@ -27,6 +27,8 @@ val reserved_exception :
 val reserved_transaction :
   Fs_compat.private_jsonl_transaction_error ->
   (exn * Printexc.raw_backtrace) option
+val definitely_not_written : Fs_compat.private_jsonl_transaction_error -> bool
+(** Shared conservative prepublication evidence classification. *)
 val propagate_reserved : exn -> Printexc.raw_backtrace -> unit
 (** Reraise an exception containing a reserved cause, including nested Eio
     multiple failures, with the original exception and backtrace intact. *)

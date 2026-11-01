@@ -6,6 +6,11 @@ open Masc
    with the shape of a Board identity stands for itself.  Which names are
    declared, and what the author is told about the others, is pinned in
    test_board_recipient_resolution. *)
+let get_created = function
+  | Ok value -> value
+  | Error failure ->
+    Alcotest.fail (Masc.Board.Post_publication_failure.to_string failure)
+
 let every_name_declared =
   Recipient_lookup.make (fun candidate ->
     Ok
@@ -106,7 +111,7 @@ let test_create_and_get_post () =
     Board_dispatch.create_post ~author:"test-agent" ~content:"dispatch test post"
       ~post_kind:Board.Human_post ()
   with
-  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Error e -> Alcotest.fail (Board.Post_publication_failure.to_string e)
   | Ok post ->
       let pid = Board.Post_id.to_string post.id in
       Alcotest.(check string) "author" "test-agent" (Board.Agent_id.to_string post.author);
@@ -118,7 +123,7 @@ let test_create_and_get_post () =
 
 let test_content_update_time_survives_activity_and_reload () =
   let get = function Ok value -> value | Error error -> Alcotest.fail (Board.show_board_error error) in
-  let post = get (Board_dispatch.create_post ~author:"content-owner"
+  let post = get_created (Board_dispatch.create_post ~author:"content-owner"
       ~title:"original title" ~body:"original body" ~content:"original body"
       ~post_kind:Board.Human_post ()) in
   let post_id = Board.Post_id.to_string post.id in
@@ -163,7 +168,7 @@ let test_content_update_time_survives_activity_and_reload () =
 
 let test_edit_emits_exact_signal_only_for_changed_content () =
   let get = function Ok value -> value | Error error -> Alcotest.fail (Board.show_board_error error) in
-  let post = get (Board_dispatch.create_post ~author:"editor" ~content:"initial body"
+  let post = get_created (Board_dispatch.create_post ~author:"editor" ~content:"initial body"
       ~title:"thread" ~body:"initial body" ~post_kind:Board.Human_post ()) in
   let post_id = Board.Post_id.to_string post.id in
   let signals = ref [] in
@@ -189,7 +194,7 @@ let test_edit_emits_exact_signal_only_for_changed_content () =
 
 let test_edit_rejects_invalid_audience_before_mutation () =
   let get = function Ok value -> value | Error error -> Alcotest.fail (Board.show_board_error error) in
-  let post = get (Board_dispatch.create_post ~author:"editor" ~content:"@reader private"
+  let post = get_created (Board_dispatch.create_post ~author:"editor" ~content:"@reader private"
       ~title:"private" ~body:"@reader private" ~visibility:Board.Direct ~post_kind:Board.Human_post ()) in
   let post_id = Board.Post_id.to_string post.id in
   let signals = ref 0 in
@@ -205,7 +210,7 @@ let test_edit_rejects_invalid_audience_before_mutation () =
 let test_edit_persistence_failure_emits_no_signal () =
   let post = match Board_dispatch.create_post ~author:"editor" ~content:"original"
       ~post_kind:Board.Human_post () with
-    | Ok post -> post | Error error -> Alcotest.fail (Board.show_board_error error) in
+    | Ok post -> post | Error error -> Alcotest.fail (Board.Post_publication_failure.to_string error) in
   let signals = ref 0 in
   Board_dispatch.set_board_signal_hook (fun _ -> incr signals);
   let original_base = Sys.getenv "MASC_BASE_PATH" in
@@ -232,7 +237,7 @@ let test_update_post_by_owner () =
     Board_dispatch.create_post ~author:"editor-agent"
       ~content:"original body before edit" ~post_kind:Board.Human_post ()
   with
-  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Error e -> Alcotest.fail (Board.Post_publication_failure.to_string e)
   | Ok post -> (
       let pid = Board.Post_id.to_string post.id in
       match
@@ -259,7 +264,7 @@ let test_update_post_rejects_non_owner () =
     Board_dispatch.create_post ~author:"owner-agent"
       ~content:"body owned by owner-agent" ~post_kind:Board.Human_post ()
   with
-  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Error e -> Alcotest.fail (Board.Post_publication_failure.to_string e)
   | Ok post -> (
       let pid = Board.Post_id.to_string post.id in
       match
@@ -282,7 +287,7 @@ let test_update_post_transfers_author_by_owner () =
     Board_dispatch.create_post ~author:"transfer-owner"
       ~content:"transfer original body" ~post_kind:Board.Human_post ()
   with
-  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Error e -> Alcotest.fail (Board.Post_publication_failure.to_string e)
   | Ok post -> (
       let pid = Board.Post_id.to_string post.id in
       match
@@ -307,7 +312,7 @@ let test_update_post_rejects_non_owner_transfer () =
     Board_dispatch.create_post ~author:"transfer-owner"
       ~content:"non-owner transfer original" ~post_kind:Board.Human_post ()
   with
-  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Error e -> Alcotest.fail (Board.Post_publication_failure.to_string e)
   | Ok post -> (
       let pid = Board.Post_id.to_string post.id in
       match
@@ -332,7 +337,7 @@ let test_update_post_rejects_invalid_new_author () =
     Board_dispatch.create_post ~author:"transfer-owner"
       ~content:"invalid transfer original" ~post_kind:Board.Human_post ()
   with
-  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Error e -> Alcotest.fail (Board.Post_publication_failure.to_string e)
   | Ok post -> (
       let pid = Board.Post_id.to_string post.id in
       match
@@ -368,7 +373,7 @@ let test_update_post_rejects_empty_content () =
     Board_dispatch.create_post ~author:"empty-edit-agent"
       ~content:"non-empty original" ~post_kind:Board.Human_post ()
   with
-  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Error e -> Alcotest.fail (Board.Post_publication_failure.to_string e)
   | Ok post -> (
       let pid = Board.Post_id.to_string post.id in
       match
@@ -389,7 +394,7 @@ let test_update_post_with_explicit_title_and_body () =
     Board_dispatch.create_post ~author:"titler-agent"
       ~content:"original" ~post_kind:Board.Human_post ()
   with
-  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Error e -> Alcotest.fail (Board.Post_publication_failure.to_string e)
   | Ok post -> (
       let pid = Board.Post_id.to_string post.id in
       match
@@ -423,13 +428,23 @@ let check_io_error ~where = function
   | Error e -> Alcotest.fail ("expected Io_error, got " ^ Board.show_board_error e)
   | Ok _ -> Alcotest.fail "expected Io_error"
 
+let check_publication_io_error ~where = function
+  | Error failure ->
+    (match Board.Post_publication_failure.cause failure with
+     | Board.Post_publication_failure.Board_error error ->
+       check_io_error ~where (Error error)
+     | Board.Post_publication_failure.Raised _ ->
+       Alcotest.fail ("expected Io_error, got " ^
+         Board.Post_publication_failure.to_string failure))
+  | Ok _ -> Alcotest.fail "expected publication Io_error"
+
 let test_update_post_preserves_meta_and_body () =
   match
     Board_dispatch.create_post ~author:"stateful-agent"
       ~content:"plain original body" ~post_kind:Board.Human_post
       ~meta_json:(`Assoc [ "source", `String "operator" ]) ()
   with
-  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Error e -> Alcotest.fail (Board.Post_publication_failure.to_string e)
   | Ok post -> (
       Alcotest.(check bool) "original metadata present" true
         (meta_has_source post.meta_json);
@@ -454,7 +469,7 @@ let test_keeper_signal_hook_failure_does_not_abort_create_post () =
       ~content:"post must survive keeper wake failure"
       ~post_kind:Board.Human_post ()
   with
-  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Error e -> Alcotest.fail (Board.Post_publication_failure.to_string e)
   | Ok post ->
       Alcotest.(check string) "content persisted despite hook failure"
         "post must survive keeper wake failure" post.body
@@ -494,12 +509,12 @@ let test_identical_content_creates_two_posts () =
   let first =
     match create () with
     | Ok post -> post
-    | Error e -> Alcotest.fail (Board.show_board_error e)
+    | Error e -> Alcotest.fail (Board.Post_publication_failure.to_string e)
   in
   let second =
     match create () with
     | Ok post -> post
-    | Error e -> Alcotest.fail (Board.show_board_error e)
+    | Error e -> Alcotest.fail (Board.Post_publication_failure.to_string e)
   in
   Alcotest.(check bool)
     "identical content yields a distinct post"
@@ -519,7 +534,7 @@ let test_create_post_persistence_failure_returns_error_without_fanout () =
     | _ -> ());
   ignore (block_board_masc_dir_with_file ());
   let before_errors = Board.persist_error_count () in
-  check_io_error
+  check_publication_io_error
     ~where:"append_post"
     (Board_dispatch.create_post
        ~author:"persist-fail-agent"
@@ -545,7 +560,7 @@ let test_structured_post_roundtrip () =
           ~post_kind:Board.Automation_post
           ~meta_json:meta
           () with
-  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Error e -> Alcotest.fail (Board.Post_publication_failure.to_string e)
   | Ok post ->
       let pid = Board.Post_id.to_string post.id in
       Alcotest.(check string) "title stored" "Explicit title" post.title;
@@ -573,7 +588,7 @@ let test_board_sse_post_created_includes_post_kind () =
        ~content:"sse post kind payload"
        ~post_kind:Board.Automation_post ()
    with
-   | Error e -> Alcotest.fail (Board.show_board_error e)
+   | Error e -> Alcotest.fail (Board.Post_publication_failure.to_string e)
    | Ok _ -> ());
   match !seen with
   | Some (Board_dispatch.Post_created { post_kind; _ }) ->
@@ -635,7 +650,7 @@ let test_first_board_observation_starts_at_current_head () =
              ()
          with
          | Ok post -> post
-         | Error error -> Alcotest.fail (Board.show_board_error error)
+         | Error error -> Alcotest.fail (Board.Post_publication_failure.to_string error)
        in
        let events, new_count, mention_count =
          Keeper_world_observation.collect_board_events ~base_path ~meta
@@ -667,7 +682,7 @@ let test_first_board_observation_starts_at_current_head () =
              ()
          with
          | Ok post -> post
-         | Error error -> Alcotest.fail (Board.show_board_error error)
+         | Error error -> Alcotest.fail (Board.Post_publication_failure.to_string error)
        in
        let snapshot () =
          Keeper_event_queue_persistence.load_result ~base_path ~keeper_name
@@ -715,7 +730,7 @@ let test_dashboard_projection_does_not_produce_attention_candidate () =
             ()
         with
         | Ok _ -> ()
-        | Error error -> Alcotest.fail (Board.show_board_error error));
+        | Error error -> Alcotest.fail (Board.Post_publication_failure.to_string error));
        ignore
          (Keeper_world_observation.collect_board_events_without_advancing_cursor
             ~base_path
@@ -775,7 +790,7 @@ let test_vote_returns_total_score_not_change () =
         ~content:"two voters separate a total from a change" ~post_kind:Board.Human_post ()
     with
     | Ok post -> post
-    | Error e -> Alcotest.fail (Board.show_board_error e)
+    | Error e -> Alcotest.fail (Board.Post_publication_failure.to_string e)
   in
   let post_id = Board.Post_id.to_string post.id in
   let vote_exn ~voter =
@@ -796,7 +811,7 @@ let test_recent_sort_bypasses_hot_cutoff () =
         ~post_kind:Board.Human_post ()
     with
     | Ok post -> post
-    | Error e -> Alcotest.fail (Board.show_board_error e)
+    | Error e -> Alcotest.fail (Board.Post_publication_failure.to_string e)
   in
   let vote_up_exn ~post_id ~voter =
     match Board_dispatch.vote ~voter ~post_id ~direction:Board.Up with
@@ -884,7 +899,7 @@ let test_list_posts_matches_comment_author () =
         ~post_kind:Board.Human_post ()
     with
     | Ok post -> post
-    | Error e -> Alcotest.fail (Board.show_board_error e)
+    | Error e -> Alcotest.fail (Board.Post_publication_failure.to_string e)
   in
   let other_post =
     match
@@ -893,7 +908,7 @@ let test_list_posts_matches_comment_author () =
         ~post_kind:Board.Human_post ()
     with
     | Ok post -> post
-    | Error e -> Alcotest.fail (Board.show_board_error e)
+    | Error e -> Alcotest.fail (Board.Post_publication_failure.to_string e)
   in
   let matching_post_id = Board.Post_id.to_string matching_post.id in
   let other_post_id = Board.Post_id.to_string other_post.id in
@@ -940,7 +955,7 @@ let test_recent_author_match_applies_before_limit () =
         ~post_kind:Board.Human_post ()
     with
     | Ok post -> post
-    | Error e -> Alcotest.fail (Board.show_board_error e)
+    | Error e -> Alcotest.fail (Board.Post_publication_failure.to_string e)
   in
   for index = 1 to 3 do
     ignore
@@ -979,7 +994,7 @@ let test_add_and_get_comments () =
     Board_dispatch.create_post ~author:"commenter" ~content:"post for comments"
       ~post_kind:Board.Human_post ()
   with
-  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Error e -> Alcotest.fail (Board.Post_publication_failure.to_string e)
   | Ok post ->
       let pid = Board.Post_id.to_string post.id in
       (match Board_dispatch.add_comment ~post_id:pid ~author:"responder" ~content:"nice post" () with
@@ -999,7 +1014,7 @@ let test_comment_signal_preserves_comment_and_parent_identity () =
         ~post_kind:Board.Human_post
         ()
     with
-    | Error error -> Alcotest.fail (Board.show_board_error error)
+    | Error error -> Alcotest.fail (Board.Post_publication_failure.to_string error)
     | Ok post -> post
   in
   let post_id = Board.Post_id.to_string post.id in
@@ -1054,7 +1069,7 @@ let test_comment_persists_post_reply_count () =
         ~content:"automation post for reply_count persistence"
         ~post_kind:Board.Automation_post ()
     with
-    | Error e -> Alcotest.fail (Board.show_board_error e)
+    | Error e -> Alcotest.fail (Board.Post_publication_failure.to_string e)
     | Ok post -> post
   in
   let post_id = Board.Post_id.to_string post.id in
@@ -1099,7 +1114,7 @@ let test_add_comment_persistence_failure_rolls_back_without_fanout () =
         ~post_kind:Board.Human_post
         ()
     with
-    | Error e -> Alcotest.fail (Board.show_board_error e)
+    | Error e -> Alcotest.fail (Board.Post_publication_failure.to_string e)
     | Ok post -> post
   in
   let post_id = Board.Post_id.to_string post.id in
@@ -1141,7 +1156,7 @@ let test_get_post_and_comments_atomic () =
     Board_dispatch.create_post ~author:"atomic-author"
       ~content:"atomic read body" ~post_kind:Board.Human_post ()
   with
-  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Error e -> Alcotest.fail (Board.Post_publication_failure.to_string e)
   | Ok post ->
       let pid = Board.Post_id.to_string post.id in
       (match
@@ -1199,7 +1214,7 @@ let test_vote_post () =
     Board_dispatch.create_post ~author:"voter-test" ~content:"vote me"
       ~post_kind:Board.Human_post ()
   with
-  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Error e -> Alcotest.fail (Board.Post_publication_failure.to_string e)
   | Ok post ->
       let pid = Board.Post_id.to_string post.id in
       match Board_dispatch.vote ~voter:"judge" ~post_id:pid ~direction:Board.Up with
@@ -1212,7 +1227,7 @@ let test_vote_dedup () =
     Board_dispatch.create_post ~author:"dedup-test" ~content:"dedup vote"
       ~post_kind:Board.Human_post ()
   with
-  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Error e -> Alcotest.fail (Board.Post_publication_failure.to_string e)
   | Ok post ->
       let pid = Board.Post_id.to_string post.id in
       ignore (Board_dispatch.vote ~voter:"same-voter" ~post_id:pid ~direction:Board.Up);
@@ -1226,7 +1241,7 @@ let test_vote_flip () =
     Board_dispatch.create_post ~author:"flip-test" ~content:"flip vote"
       ~post_kind:Board.Human_post ()
   with
-  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Error e -> Alcotest.fail (Board.Post_publication_failure.to_string e)
   | Ok post ->
       let pid = Board.Post_id.to_string post.id in
       ignore (Board_dispatch.vote ~voter:"flipper" ~post_id:pid ~direction:Board.Up);
@@ -1241,7 +1256,7 @@ let test_current_vote_lookup () =
     Board_dispatch.create_post ~author:"state-test" ~content:"state vote"
       ~post_kind:Board.Human_post ()
   with
-  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Error e -> Alcotest.fail (Board.Post_publication_failure.to_string e)
   | Ok post ->
       let pid = Board.Post_id.to_string post.id in
       (match Board_dispatch.current_vote_for_post ~voter:"reader" ~post_id:pid with
@@ -1331,7 +1346,7 @@ let test_vote_persisted_by_flusher_actor () =
             Board_dispatch.create_post ~author:"persist-test" ~content:"persist my vote"
               ~post_kind:Board.Human_post ()
           with
-          | Error e -> Alcotest.fail (Board.show_board_error e)
+          | Error e -> Alcotest.fail (Board.Post_publication_failure.to_string e)
           | Ok post -> Board.Post_id.to_string post.id
         in
         (match Board_dispatch.vote ~voter:"judge" ~post_id ~direction:Board.Up with
@@ -1362,7 +1377,7 @@ let test_reaction_toggle_and_summary () =
     Board_dispatch.create_post ~author:"reaction-author"
       ~content:"reactable post" ~post_kind:Board.Human_post ()
   with
-  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Error e -> Alcotest.fail (Board.Post_publication_failure.to_string e)
   | Ok post ->
       let post_id = Board.Post_id.to_string post.id in
       (match
@@ -1410,7 +1425,7 @@ let test_reaction_persistence_failure_returns_error_without_publish () =
         ()
     with
     | Ok post -> post
-    | Error error -> Alcotest.fail (Board.show_board_error error)
+    | Error error -> Alcotest.fail (Board.Post_publication_failure.to_string error)
   in
   let post_id = Board.Post_id.to_string post.id in
   let keeper_signals = ref 0 in
@@ -1451,7 +1466,7 @@ let test_comment_reaction_survives_restart () =
     Board_dispatch.create_post ~author:"reaction-author"
       ~content:"comment reaction parent" ~post_kind:Board.Human_post ()
   with
-  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Error e -> Alcotest.fail (Board.Post_publication_failure.to_string e)
   | Ok post ->
       let post_id = Board.Post_id.to_string post.id in
       let comment_id =
@@ -1493,7 +1508,7 @@ let test_reaction_summary_recent_user_ids () =
     Board_dispatch.create_post ~author:"reaction-author"
       ~content:"recent reactors parent" ~post_kind:Board.Human_post ()
   with
-  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Error e -> Alcotest.fail (Board.Post_publication_failure.to_string e)
   | Ok post ->
       let post_id = Board.Post_id.to_string post.id in
       List.iter
@@ -1533,7 +1548,7 @@ let test_reaction_summary_batch () =
     Board_dispatch.create_post ~author:"reaction-author"
       ~content:"batch reactors parent" ~post_kind:Board.Human_post ()
   with
-  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Error e -> Alcotest.fail (Board.Post_publication_failure.to_string e)
   | Ok post ->
       let post_id = Board.Post_id.to_string post.id in
       let comment_id =
@@ -1592,7 +1607,7 @@ let test_dashboard_detail_uses_authenticated_reaction_actor () =
         ()
     with
     | Ok post -> post
-    | Error error -> Alcotest.fail (Board.show_board_error error)
+    | Error error -> Alcotest.fail (Board.Post_publication_failure.to_string error)
   in
   let post_id = Board.Post_id.to_string post.id in
   (match
@@ -1631,7 +1646,7 @@ let test_dashboard_detail_uses_authenticated_reaction_actor () =
 let test_dashboard_comment_context_contains_page_and_focus_ancestors () =
   let post = match Board_dispatch.create_post ~author:"context-reader"
       ~content:"comment context" ~post_kind:Board.Human_post () with
-    | Ok post -> post | Error error -> Alcotest.fail (Board.show_board_error error) in
+    | Ok post -> post | Error error -> Alcotest.fail (Board.Post_publication_failure.to_string error) in
   let post_id = Board.Post_id.to_string post.id in
   let add ?parent_id content = match Board_dispatch.add_comment ~post_id
       ~author:"context-reader" ~content ?parent_id () with
@@ -1712,7 +1727,7 @@ let test_board_sse_reaction_changed () =
       Board_dispatch.create_post ~author:"reaction-author"
         ~content:"sse reaction parent" ~post_kind:Board.Human_post ()
     with
-    | Error e -> Alcotest.fail (Board.show_board_error e)
+    | Error e -> Alcotest.fail (Board.Post_publication_failure.to_string e)
     | Ok post -> Board.Post_id.to_string post.id
   in
   let seen = ref None in
@@ -1744,7 +1759,7 @@ let test_board_signal_reaction_changed_resolves_comment_parent () =
         ~content:"reaction parent content @keeper-alpha"
         ~post_kind:Board.Human_post ()
     with
-    | Error e -> Alcotest.fail (Board.show_board_error e)
+    | Error e -> Alcotest.fail (Board.Post_publication_failure.to_string e)
     | Ok post -> post
   in
   let post_id = Board.Post_id.to_string post.id in
@@ -1801,7 +1816,7 @@ let test_board_signal_vote_cast_on_post () =
       Board_dispatch.create_post ~author:"vote-author" ~title:"Vote parent"
         ~content:"vote parent content" ~post_kind:Board.Human_post ()
     with
-    | Error e -> Alcotest.fail (Board.show_board_error e)
+    | Error e -> Alcotest.fail (Board.Post_publication_failure.to_string e)
     | Ok post -> post
   in
   let post_id = Board.Post_id.to_string post.id in
@@ -1844,7 +1859,7 @@ let test_board_signal_vote_cast_on_comment_names_comment_author () =
       Board_dispatch.create_post ~author:"vote-post-author" ~title:"Comment vote parent"
         ~content:"comment vote parent content" ~post_kind:Board.Human_post ()
     with
-    | Error e -> Alcotest.fail (Board.show_board_error e)
+    | Error e -> Alcotest.fail (Board.Post_publication_failure.to_string e)
     | Ok post -> post
   in
   let post_id = Board.Post_id.to_string post.id in
@@ -1888,7 +1903,7 @@ let test_reaction_rejects_unsupported_emoji () =
     Board_dispatch.create_post ~author:"reaction-author"
       ~content:"unsupported reaction parent" ~post_kind:Board.Human_post ()
   with
-  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Error e -> Alcotest.fail (Board.Post_publication_failure.to_string e)
   | Ok post ->
       let post_id = Board.Post_id.to_string post.id in
       match
@@ -1945,7 +1960,7 @@ let test_whitespace_hearth_becomes_none () =
     Board_dispatch.create_post ~author:"hearth-ws" ~content:"whitespace hearth"
       ~hearth:"   " ~post_kind:Board.Human_post ()
   with
-  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Error e -> Alcotest.fail (Board.Post_publication_failure.to_string e)
   | Ok post ->
       Alcotest.(check (option string)) "whitespace-only hearth stored as None"
         None post.hearth
@@ -1955,7 +1970,7 @@ let test_set_thread_id () =
     Board_dispatch.create_post ~author:"thread-test" ~content:"link me"
       ~post_kind:Board.Human_post ()
   with
-  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Error e -> Alcotest.fail (Board.Post_publication_failure.to_string e)
   | Ok post ->
       let pid = Board.Post_id.to_string post.id in
       match Board_dispatch.set_thread_id ~post_id:pid ~thread_id:"thread-abc" with
@@ -1972,7 +1987,7 @@ let test_set_pinned () =
     Board_dispatch.create_post ~author:"pin-test" ~content:"pin me"
       ~post_kind:Board.Human_post ()
   with
-  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Error e -> Alcotest.fail (Board.Post_publication_failure.to_string e)
   | Ok post ->
       let pid = Board.Post_id.to_string post.id in
       Alcotest.(check bool) "post starts unpinned" false post.pinned;
@@ -2012,7 +2027,7 @@ let test_set_pinned_persistence_failure_rolls_back () =
         ~post_kind:Board.Human_post
         ()
     with
-    | Error e -> Alcotest.fail (Board.show_board_error e)
+    | Error e -> Alcotest.fail (Board.Post_publication_failure.to_string e)
     | Ok post -> post
   in
   let post_id = Board.Post_id.to_string post.id in
@@ -2045,7 +2060,7 @@ let test_write_hook_runs_after_each_write_that_raises_no_event () =
         ~post_kind:Board.Human_post ()
     with
     | Ok post -> post
-    | Error e -> Alcotest.fail (Board.show_board_error e)
+    | Error e -> Alcotest.fail (Board.Post_publication_failure.to_string e)
   in
   let post_id = Board.Post_id.to_string post.id in
   let ok label = function
@@ -2097,7 +2112,7 @@ let test_set_closed_and_reopen_round_trip () =
     Board_dispatch.create_post ~author:"close-test" ~content:"close me"
       ~post_kind:Board.Human_post ()
   with
-  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Error e -> Alcotest.fail (Board.Post_publication_failure.to_string e)
   | Ok post ->
       let pid = Board.Post_id.to_string post.id in
       Alcotest.(check bool) "post starts open" true (Option.is_none post.closed);
@@ -2159,8 +2174,12 @@ let test_empty_content () =
       ~post_kind:Board.Human_post ()
   with
   | Ok _ -> Alcotest.fail "Expected validation error for empty content"
-  | Error (Board.Validation_error _) -> ()
-  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Error failure when
+      (match Board.Post_publication_failure.cause failure with
+       | Board.Post_publication_failure.Board_error (Board.Validation_error _) -> true
+       | Board.Post_publication_failure.Board_error _
+       | Board.Post_publication_failure.Raised _ -> false) -> ()
+  | Error e -> Alcotest.fail (Board.Post_publication_failure.to_string e)
 
 let test_invalid_author () =
   match
@@ -2171,8 +2190,12 @@ let test_invalid_author () =
   | Error _ -> ()
 
 let expect_validation_error label = function
-  | Error (Board.Validation_error _) -> ()
-  | Error error -> Alcotest.failf "%s: %s" label (Board.show_board_error error)
+  | Error failure ->
+    (match Board.Post_publication_failure.cause failure with
+     | Board.Post_publication_failure.Board_error (Board.Validation_error _) -> ()
+     | Board.Post_publication_failure.Board_error _
+     | Board.Post_publication_failure.Raised _ ->
+       Alcotest.failf "%s: %s" label (Board.Post_publication_failure.to_string failure))
   | Ok _ -> Alcotest.failf "%s: expected Validation_error" label
 ;;
 
@@ -2318,7 +2341,7 @@ let test_write_boundary_emits_typed_audience () =
        ()
    with
    | Ok _ -> ()
-   | Error error -> Alcotest.fail (Board.show_board_error error));
+   | Error error -> Alcotest.fail (Board.Post_publication_failure.to_string error));
   match !seen with
   | None -> Alcotest.fail "typed Board signal was not emitted"
   | Some addressed ->
@@ -2389,7 +2412,7 @@ let test_system_post_with_address_text_is_written_unaddressed () =
        ()
    with
    | Ok _ -> ()
-   | Error error -> Alcotest.fail (Board.show_board_error error));
+   | Error error -> Alcotest.fail (Board.Post_publication_failure.to_string error));
   match !seen with
   | None -> Alcotest.fail "typed Board signal was not emitted"
   | Some addressed ->
@@ -2420,7 +2443,7 @@ let test_fusion_creation_emits_the_recorded_audience () =
     match create () with
     | Ok (Board.Post_created creation) -> creation
     | Ok (Board.Post_already_present _) -> Alcotest.fail "the first creation was a replay"
-    | Error error -> Alcotest.fail (Board.show_board_error error)
+    | Error error -> Alcotest.fail (Board.Post_publication_failure.to_string error)
   in
   Alcotest.(check (list string))
     "the first creation emits one signal, scoped to thread participants"
@@ -2432,7 +2455,7 @@ let test_fusion_creation_emits_the_recorded_audience () =
   (match create () with
    | Ok (Board.Post_already_present _) -> ()
    | Ok (Board.Post_created _) -> Alcotest.fail "an exact replay created a second post"
-   | Error error -> Alcotest.fail (Board.show_board_error error));
+   | Error error -> Alcotest.fail (Board.Post_publication_failure.to_string error));
   Alcotest.(check int) "an exact replay emits nothing" 1 (List.length !seen)
 
 let test_post_audience_survives_edit_and_restart () =
@@ -2445,7 +2468,7 @@ let test_post_audience_survives_edit_and_restart () =
     | Some (Board.Targets ids) -> List.map Board.Agent_id.to_string ids
     | _ -> Alcotest.fail "persisted target audience missing"
   in
-  let created = get (Board_dispatch.create_post ~author:"audience-owner"
+  let created = get_created (Board_dispatch.create_post ~author:"audience-owner"
       ~content:"@first-reader private evidence" ~visibility:Board.Direct
       ~post_kind:Board.Human_post ()) in
   let post_id = Board.Post_id.to_string created.id in
@@ -2493,7 +2516,7 @@ let test_comment_audience_survives_restart () =
     | Some (Board.Targets ids) -> List.map Board.Agent_id.to_string ids
     | _ -> Alcotest.fail "persisted target audience missing"
   in
-  let post = get (Board_dispatch.create_post ~author:"audience-owner"
+  let post = get_created (Board_dispatch.create_post ~author:"audience-owner"
       ~content:"thread root" ~visibility:Board.Internal ~post_kind:Board.Human_post ()) in
   let post_id = Board.Post_id.to_string post.id in
   let addressed = get (Board_dispatch.add_comment ~post_id ~author:"commenter"
@@ -2652,20 +2675,24 @@ let test_sub_board_members_only_post_policy () =
      Board_dispatch.create_post ~author:"agent-outsider" ~content:"nope"
        ~post_kind:Board.Human_post ~hearth:"policy-team" ()
    with
-   | Error (Board.Validation_error _) -> ()
-   | Error e -> Alcotest.fail ("unexpected error: " ^ Board.show_board_error e)
+   | Error failure when
+       (match Board.Post_publication_failure.cause failure with
+        | Board.Post_publication_failure.Board_error (Board.Validation_error _) -> true
+        | Board.Post_publication_failure.Board_error _
+        | Board.Post_publication_failure.Raised _ -> false) -> ()
+   | Error e -> Alcotest.fail ("unexpected error: " ^ Board.Post_publication_failure.to_string e)
    | Ok _ -> Alcotest.fail "expected members-only sub-board to reject outsider");
   (match
      Board_dispatch.create_post ~author:"agent-member" ~content:"allowed"
        ~post_kind:Board.Human_post ~hearth:" POLICY-TEAM " ()
    with
-   | Error e -> Alcotest.fail (Board.show_board_error e)
+   | Error e -> Alcotest.fail (Board.Post_publication_failure.to_string e)
    | Ok _ -> ());
   (match
      Board_dispatch.create_post ~author:"agent-owner" ~content:"owner allowed"
        ~post_kind:Board.Human_post ~hearth:"policy-team" ()
    with
-   | Error e -> Alcotest.fail (Board.show_board_error e)
+   | Error e -> Alcotest.fail (Board.Post_publication_failure.to_string e)
    | Ok _ -> ())
 
 let test_sub_board_owner_only_post_policy () =
@@ -2677,14 +2704,18 @@ let test_sub_board_owner_only_post_policy () =
      Board_dispatch.create_post ~author:"agent-member" ~content:"member denied"
        ~post_kind:Board.Human_post ~hearth:"owner-space" ()
    with
-   | Error (Board.Validation_error _) -> ()
-   | Error e -> Alcotest.fail ("unexpected error: " ^ Board.show_board_error e)
+   | Error failure when
+       (match Board.Post_publication_failure.cause failure with
+        | Board.Post_publication_failure.Board_error (Board.Validation_error _) -> true
+        | Board.Post_publication_failure.Board_error _
+        | Board.Post_publication_failure.Raised _ -> false) -> ()
+   | Error e -> Alcotest.fail ("unexpected error: " ^ Board.Post_publication_failure.to_string e)
    | Ok _ -> Alcotest.fail "expected owner-only sub-board to reject member");
   (match
      Board_dispatch.create_post ~author:"agent-owner" ~content:"owner allowed"
        ~post_kind:Board.Human_post ~hearth:"owner-space" ()
    with
-   | Error e -> Alcotest.fail (Board.show_board_error e)
+   | Error e -> Alcotest.fail (Board.Post_publication_failure.to_string e)
    | Ok _ -> ())
 
 (* Issue #16024 / task-314: PR #13490 enforced sub-board policy for
@@ -2699,7 +2730,7 @@ let post_in_sub_board ~author ~slug ~content =
     Board_dispatch.create_post ~author ~content
       ~post_kind:Board.Human_post ~hearth:slug ()
   with
-  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Error e -> Alcotest.fail (Board.Post_publication_failure.to_string e)
   | Ok post -> Board.Post_id.to_string post.id
 
 let test_sub_board_members_only_comment_policy () =
@@ -2811,7 +2842,7 @@ let test_sub_board_delete_clears_orphan_hearth () =
   in
   let post_id =
     match post_result with
-    | Error e -> Alcotest.fail (Board.show_board_error e)
+    | Error e -> Alcotest.fail (Board.Post_publication_failure.to_string e)
     | Ok post -> Board.Post_id.to_string post.id
   in
   (match Board_dispatch.get_post ~post_id with

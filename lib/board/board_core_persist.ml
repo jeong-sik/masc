@@ -2,6 +2,8 @@
 include Board_core_classify
 include Board_core_payload
 
+module Post_publication_failure = Board_post_publication_failure
+
 let flush_interval_sec = Env_config.Board.flush_interval_sec
 let flusher_inbox_capacity = Env_config.Board.flusher_inbox_capacity
 
@@ -138,16 +140,33 @@ let with_lock store f = Eio.Mutex.use_rw ~protect:true store.mutex (fun () -> f 
     acquiring [persist_mutex]. Acquire the persist lock before taking a state
     snapshot, and retain it until the snapshot has been written. *)
 let with_persist_lock store f =
+  let observe f =
+    try f (); Ok () with
+    | exn -> Error (exn, Printexc.get_raw_backtrace ())
+  in
   let started = Time_compat.now () in
-  Eio.Mutex.use_rw ~protect:true store.persist_mutex (fun () ->
-    let acquired = Time_compat.now () in
-    Board_metrics_hooks.observe_persist_lock_acquire_sec
-      (acquired -. started);
-    let result = f () in
-    let released = Time_compat.now () in
-    Board_metrics_hooks.observe_persist_lock_held_sec
-      (released -. acquired);
-    result)
+  let observed =
+    Eio.Mutex.use_rw ~protect:true store.persist_mutex (fun () ->
+      let acquired = Time_compat.now () in
+      match observe (fun () ->
+        Board_metrics_hooks.observe_persist_lock_acquire_sec
+          (acquired -. started)) with
+      | Error failure -> Error failure
+      | Ok () ->
+        (* Mutation exceptions still cross [use_rw] and poison an uncertain
+           store. Observer exceptions leave it normally before re-raising. *)
+        let result = f () in
+        let observation = observe (fun () ->
+          let released = Time_compat.now () in
+          Board_metrics_hooks.observe_persist_lock_held_sec
+            (released -. acquired))
+        in
+        Ok (result, observation))
+  in
+  match observed with
+  | Ok (result, Ok ()) -> result
+  | Error (exn, backtrace) | Ok (_, Error (exn, backtrace)) ->
+    Printexc.raise_with_backtrace exn backtrace
 ;;
 
 (** {1 Sweeper - Aggressive Cleanup} *)
@@ -617,6 +636,11 @@ let validate_sub_board_post_policy_unlocked store ~author_id ~hearth =
 ;;
 
 (** {1 Post Operations} *)
+type post_publication_phase =
+  | Before_append
+  | Append_started
+  | Post_committed of post_creation
+
 let create_post_with_audience
       store
       ~lookup
@@ -632,8 +656,17 @@ let create_post_with_audience
   ?thread_id
   ?origin
   ()
-  : (post_creation, board_error) Result.t
+  : (post_creation, Post_publication_failure.t) Result.t
   =
+  let phase = ref Before_append in
+  let failure cause =
+    match !phase with
+    | Before_append -> Post_publication_failure.before_effect cause
+    | Append_started -> Post_publication_failure.unknown cause
+    | Post_committed creation -> Post_publication_failure.after_commit creation cause
+  in
+  try
+  let result =
   maybe_sweep store;
   match Agent_id.of_string author with
   | Error e -> Error e
@@ -717,7 +750,9 @@ let create_post_with_audience
       match staged with
       | Error _ as e -> e
       | Ok post ->
+        let creation = { post; audience; unresolved } in
         (match with_persist_lock store (fun () ->
+           phase := Append_started;
            match append_post post with
            | Error _ as e -> e
            | Ok () -> Ok (with_lock store (fun () ->
@@ -734,11 +769,12 @@ let create_post_with_audience
                  index_post_origin store post;
                  Stdlib.incr store.post_count;
                  invalidate_post_caches store;
+                 phase := Post_committed creation;
                  Ok ()) )) with
          | Error _ as e -> e
          | Ok committed ->
            (match committed with
-            | Ok () -> Ok { post; audience; unresolved }
+            | Ok () -> Ok creation
             | Error e ->
               (* The appended row is an orphan on disk (the policy
                  flipped mid-append; the post never reached memory).
@@ -750,6 +786,14 @@ let create_post_with_audience
                  and the loader cannot tell it was never committed. *)
               rewrite_posts store;
               Error e))
+  in
+  Result.map_error (fun error -> failure (Post_publication_failure.Board_error error)) result
+  with
+  | (Eio.Cancel.Cancelled _ | Eio.Time.Timeout
+     | Out_of_memory | Stack_overflow | Sys.Break) as exn ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    Printexc.raise_with_backtrace exn backtrace
+  | exn -> Error (failure (Post_publication_failure.Raised exn))
 ;;
 
 let create_post store ~lookup ~author ~content ?title ?body ~post_kind ?meta_json
@@ -797,6 +841,10 @@ let create_post_once_by_fusion_run_id
       ~origin
       ()
   =
+  let pre_effect error =
+    Error (Post_publication_failure.before_effect
+      (Post_publication_failure.Board_error error))
+  in
   let option_equal equal left right =
     match left, right with
     | None, None -> true
@@ -829,9 +877,9 @@ let create_post_once_by_fusion_run_id
     | Direct, (Public | Unlisted | Internal) -> false
   in
   if String.equal fusion_run_id ""
-  then Error (Validation_error "fusion_run_id must not be empty")
+  then pre_effect (Validation_error "fusion_run_id must not be empty")
   else if ttl_hours < 0
-  then Error (Validation_error "ttl_hours must be non-negative")
+  then pre_effect (Validation_error "ttl_hours must be non-negative")
   else
     match origin.fusion_run_id with
     | Some origin_run_id when String.equal origin_run_id fusion_run_id ->
@@ -839,16 +887,16 @@ let create_post_once_by_fusion_run_id
          Agent_id.of_string author,
          normalize_post_payload ~content ~post_kind ?meta_json ()
        with
-       | Error error, _ -> Error error
+       | Error error, _ -> pre_effect error
        | _, Error (Meta_not_assoc payload) ->
-         Error
+         pre_effect
            (Validation_error
               (Printf.sprintf
                  "Malformed meta_json: expected JSON object, got %s"
                  (Yojson.Safe.to_string payload)))
        | Ok author_id, Ok (title, body, post_kind, meta_json) ->
          if String.equal body ""
-         then Error (Validation_error "Content cannot be empty")
+         then pre_effect (Validation_error "Content cannot be empty")
          else
            Eio.Mutex.use_rw ~protect:true store.origin_create_mutex (fun () ->
              maybe_sweep store;
@@ -876,7 +924,7 @@ let create_post_once_by_fusion_run_id
                if exact_replay
                then Ok (Post_already_present post)
                else
-                 Error
+                 pre_effect
                    (Already_exists
                       (Printf.sprintf
                          "conflicting Fusion Board projection for run_id=%S"
@@ -886,14 +934,14 @@ let create_post_once_by_fusion_run_id
                  ?meta_json ~visibility ~ttl_hours ~origin ()
                |> Result.map (fun creation -> Post_created creation)))
     | Some origin_run_id ->
-      Error
+      pre_effect
         (Validation_error
            (Printf.sprintf
               "fusion_run_id mismatch: argument=%S origin=%S"
               fusion_run_id
               origin_run_id))
     | None ->
-      Error
+      pre_effect
         (Validation_error
            "create_post_once_by_fusion_run_id requires typed fusion origin")
 ;;

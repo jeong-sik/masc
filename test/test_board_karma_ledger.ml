@@ -57,7 +57,7 @@ let create_post_exn ~author ~content =
     Board_dispatch.create_post ~author ~content ~post_kind:Board.Human_post ()
   with
   | Ok post -> post
-  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Error e -> Alcotest.fail (Board.Post_publication_failure.to_string e)
 
 (** Cast a vote and fail the test on error *)
 let vote_exn ~voter ~post_id ~direction =

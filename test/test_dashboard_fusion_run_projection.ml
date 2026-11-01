@@ -146,7 +146,7 @@ let test_detail_uses_exact_typed_board_origin () =
        ()
    with
    | Ok _ -> ()
-   | Error error -> fail (Board.show_board_error error));
+   | Error error -> fail (Board.Post_publication_failure.to_string error));
   let wrong_source_origin : Board.post_origin =
     { turn_ref = None
     ; source = Some "not-fusion"
@@ -163,7 +163,7 @@ let test_detail_uses_exact_typed_board_origin () =
        ()
    with
    | Ok _ -> ()
-   | Error error -> fail (Board.show_board_error error));
+   | Error error -> fail (Board.Post_publication_failure.to_string error));
   let pending_status, pending_json =
     Server_routes_http_routes_dashboard.For_testing.fusion_run_detail_response
       ~registry
@@ -239,7 +239,7 @@ let test_detail_uses_exact_typed_board_origin () =
         ()
     with
     | Ok post -> post
-    | Error error -> fail (Board.show_board_error error)
+    | Error error -> fail (Board.Post_publication_failure.to_string error)
   in
   Fusion_run_registry.mark_completed
     registry
@@ -300,13 +300,13 @@ let test_replay_failure_keeps_historical_evidence_readable () =
       ~content:"The original measured conclusion remains readable."
       ~post_kind:Board.System_post ~origin () with
     | Ok post -> post
-    | Error error -> fail (Board.show_board_error error) in
+    | Error error -> fail (Board.Post_publication_failure.to_string error) in
   (* A text mention and a different source must not become a history entry. *)
   let wrong_origin = { origin with source = Some "other";
                                   fusion_run_id = Some "wrong-source" } in
   (match Board_dispatch.create_post ~author:"caller" ~content:lost_id
       ~post_kind:Board.System_post ~origin:wrong_origin () with
-   | Ok _ -> () | Error error -> fail (Board.show_board_error error));
+   | Ok _ -> () | Error error -> fail (Board.Post_publication_failure.to_string error));
   let response = Server_routes_http_routes_dashboard.For_testing.fusion_run_list_response
       ~registry in
   let open Yojson.Safe.Util in

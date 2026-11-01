@@ -194,12 +194,12 @@ data: [DONE]
   Board_dispatch.init_jsonl ~recipient_lookup:every_name_declared ();
   (* Initialize at an existing head, then deliberately miss the live hook. *)
   ignore (Board_dispatch.create_post ~author:"synthetic-user" ~content:"cursor baseline"
-    ~post_kind:Board.Human_post ~visibility:Board.Internal () |> get Board.show_board_error);
+    ~post_kind:Board.Human_post ~visibility:Board.Internal () |> get Board.Post_publication_failure.to_string);
   ignore (Keeper_world_observation.collect_board_events ~base_path ~meta);
   Board_dispatch.set_board_signal_hook (fun _ -> ());
   let content = "@" ^ keeper_name ^ " Atlas staging uses PostgreSQL 15." in
   let post = Board_dispatch.create_post ~author:"synthetic-user" ~content
-    ~post_kind:Board.Human_post ~visibility:Board.Internal () |> get Board.show_board_error in
+    ~post_kind:Board.Human_post ~visibility:Board.Internal () |> get Board.Post_publication_failure.to_string in
   let post_id = Board.Post_id.to_string post.id in
   require (queue_count config keeper_name = 0) "disabled live hook unexpectedly delivered";
   let caught_up, _, _ = Keeper_world_observation.collect_board_events ~base_path ~meta in

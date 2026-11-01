@@ -6841,7 +6841,7 @@ let test_board_close_route_rejects_wrong_typed_decisions_without_closing () =
                 ~author:"close-route-test" ~content
                 ~post_kind:Lib.Board.Human_post () with
         | Ok post -> Lib.Board.Post_id.to_string post.id
-        | Error error -> fail (Lib.Board.show_board_error error)
+        | Error error -> fail (Lib.Board.Post_publication_failure.to_string error)
       in
       let post_id = create "thread" in
       let successor_id = create "successor" in

@@ -254,6 +254,8 @@ val update_post_with_outcome
     JSONL append and side-effect hooks are intentionally
     performed {b outside} the state lock to avoid blocking concurrent
     readers on filesystem writes. *)
+module Post_publication_failure = Board_core_persist.Post_publication_failure
+
 val create_post
   :  store
   -> lookup:Recipient_lookup.t
@@ -269,7 +271,7 @@ val create_post
   -> ?thread_id:string
   -> ?origin:post_origin
   -> unit
-  -> (post, board_error) Result.t
+  -> (post, Post_publication_failure.t) Result.t
 
 type create_post_once_result =
   | Post_created of post_creation
@@ -287,7 +289,7 @@ val create_post_once_by_fusion_run_id
   -> ttl_hours:int
   -> origin:post_origin
   -> unit
-  -> (create_post_once_result, board_error) Result.t
+  -> (create_post_once_result, Post_publication_failure.t) Result.t
 (** Exact typed-origin create. Replays return the existing normalized post;
     conflicting payloads return [Already_exists]. *)
 
@@ -306,9 +308,11 @@ val create_post_with_audience
   -> ?thread_id:string
   -> ?origin:post_origin
   -> unit
-  -> (post_creation, board_error) Result.t
+  -> (post_creation, Post_publication_failure.t) Result.t
 (** Create a post only after its routing audience has been validated, and
-    return the exact audience admitted with the write. *)
+    return the exact audience admitted with the write. Failures retain publication
+    evidence and expose a receipt only after the state commit. Cancellation,
+    [Eio.Time.Timeout], [Out_of_memory], [Stack_overflow] and [Sys.Break] propagate. *)
 
 val read_post : store -> post_id:string -> (post, board_read_error) Result.t
 (** The post with [post_id], read from the in-memory store. *)

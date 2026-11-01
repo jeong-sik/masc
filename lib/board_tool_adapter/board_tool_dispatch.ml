@@ -23,8 +23,7 @@ let handle_tool ~result_boundary name args : Tool_result.result =
       ~start_time
       (Printf.sprintf "Unknown tool: %s" name)
   | Some B.Board_post ->
-    Board_tool_format.with_yojson_boundary ~tool_name:name ~start_time (fun () ->
-      Board_tool_post.handle_post_create ~tool_name:name ~start_time args)
+    Board_tool_post.handle_post_create ~tool_name:name ~start_time args
   | Some B.Board_post_update ->
     Board_tool_format.with_yojson_boundary ~tool_name:name ~start_time (fun () ->
       Board_tool_post.handle_post_edit ~tool_name:name ~start_time args)

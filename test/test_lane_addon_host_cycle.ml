@@ -875,7 +875,7 @@ let read ?after ?since id source_id =
 let post ?(visibility = Board.Public) ?(body = "body") title =
   match Board_dispatch.create_post ~author:"operator" ~content:body ~title ~body ~post_kind:Board.Human_post ~visibility () with
   | Ok post -> Board.Post_id.to_string post.id
-  | Error error -> fail (Board.show_board_error error)
+  | Error error -> fail (Board.Post_publication_failure.to_string error)
 
 let result_of id worker =
   match List.find_opt (fun arguments -> text "request_id" arguments = id) !(worker.delivered) with

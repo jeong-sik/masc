@@ -2054,7 +2054,7 @@ let admission_post ~author ~title =
   match Board_dispatch.create_post ~author ~title ~content:"new research evidence"
       ~post_kind:Board.Human_post ~visibility:Board.Internal () with
   | Ok post -> post
-  | Error error -> Alcotest.fail (Board.show_board_error error)
+  | Error error -> Alcotest.fail (Board.Post_publication_failure.to_string error)
 ;;
 
 let admission_candidate config meta signal =

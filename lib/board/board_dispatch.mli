@@ -186,7 +186,7 @@ val create_post :
   ?thread_id:string ->
   ?origin:Board.post_origin ->
   unit ->
-  (Board.post, Board.board_error) Result.t
+  (Board.post, Board.Post_publication_failure.t) Result.t
 
 val create_post_with_unresolved :
   author:string ->
@@ -201,10 +201,13 @@ val create_post_with_unresolved :
   ?thread_id:string ->
   ?origin:Board.post_origin ->
   unit ->
-  (Board.post * string list, Board.board_error) Result.t
-(** {!create_post} that also returns the names in the text that look like
-    addresses but no Keeper declares, as the author wrote them.  They are for
-    the write response only; nothing stores them. *)
+  (Board.post_creation, Board.Post_publication_failure.t) Result.t
+(** The canonical creation receipt includes the resolved audience and names
+    that look like addresses but no Keeper declares. A failure retains the
+    store's publication evidence, including a committed receipt if subsequent
+    notification work fails. The new failure boundaries propagate cancellation,
+    caller timeout and fatal exceptions; the installed signal/SSE hooks retain
+    their existing exception isolation. *)
 
 val create_post_once_by_fusion_run_id :
   fusion_run_id:string ->
@@ -216,10 +219,11 @@ val create_post_once_by_fusion_run_id :
   ttl_hours:int ->
   origin:Board.post_origin ->
   unit ->
-  (Board.create_post_once_result, Board.board_error) Result.t
-(** Emit post-created hooks only for the durable first creation. Exact replays
+  (Board.create_post_once_result, Board.Post_publication_failure.t) Result.t
+(** Emit post-created hooks only for the first committed creation. Exact replays
     return the existing typed-origin post without a duplicate Board signal;
-    conflicting replays return [Already_exists]. *)
+    conflicting replays carry [Already_exists] in the publication failure.
+    Uncaught notification failures retain the committed first-creation receipt. *)
 
 (** Owner-gated in-place edit of an existing post's title/body.  Returns
     [Unauthorized] when [editor] does not own the post, [Post_not_found] for a

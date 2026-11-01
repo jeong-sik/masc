@@ -101,6 +101,46 @@ let error_of_board_error ~tool_name ~start_time e : Tool_result.result =
     (board_error_to_string e)
 ;;
 
+let type_error_value_max_bytes = 120
+
+let json_type_error_message msg bad_value =
+  let value_repr =
+    let s = Yojson.Safe.to_string bad_value in
+    if String.length s > type_error_value_max_bytes
+    then String_util.utf8_prefix ~max_bytes:type_error_value_max_bytes s ^ "…"
+    else s
+  in
+  Printf.sprintf
+    "JSON arg type error: %s. Offending value: %s. Likely cause: an \
+     optional field (sources / judgment / meta / hearth / title / body) \
+     was sent as a non-string JSON type. Send string-typed scalars only."
+    msg
+    value_repr
+;;
+
+let error_of_post_publication_failure ~tool_name ~start_time failure =
+  let module Failure = Board.Post_publication_failure in
+  let class_, message =
+    match Failure.cause failure with
+    | Failure.Board_error error ->
+      board_error_failure_class error, board_error_to_string error
+    | Failure.Raised (Yojson.Safe.Util.Type_error (msg, bad_value)) ->
+      Tool_result.Workflow_rejection, json_type_error_message msg bad_value
+    | Failure.Raised exn ->
+      Tool_result.classify_from_exception exn, Printexc.to_string exn
+  in
+  let data =
+    match Failure.committed failure with
+    | None -> `Null
+    | Some (creation : Board.post_creation) ->
+      `Assoc
+        [ "committed_post_id", `String (Board.Post_id.to_string creation.post.id) ]
+  in
+  Tool_result.make_err ~tool_name ~start_time ~class_ ~data
+    ~effect_disposition:(Failure.effect_disposition failure)
+    message
+;;
+
 (* A write answers with the names in its text that look like addresses but no
    Keeper declares, as the author wrote them.  Such a name reaches nobody, and
    this response is the only place the author learns it: the names are not
@@ -586,8 +626,6 @@ let provenance_arg args =
   | _ -> Ok (`Assoc [])
 ;;
 
-let type_error_value_max_bytes = 120
-
 (** {1 Yojson-error boundary}
 
     Convert a stray [Yojson.Safe.Util.Type_error] from a board-tool
@@ -600,12 +638,6 @@ let type_error_value_max_bytes = 120
 let with_yojson_boundary ~tool_name ~start_time handler : Tool_result.result =
   try handler () with
   | Yojson.Safe.Util.Type_error (msg, bad_value) ->
-    let value_repr =
-      let s = Yojson.Safe.to_string bad_value in
-      if String.length s > type_error_value_max_bytes
-      then String_util.utf8_prefix ~max_bytes:type_error_value_max_bytes s ^ "…"
-      else s
-    in
     (* RFC-0189 — JSON type error is caller-input shape violation.
        Workflow_rejection (not Runtime_failure) because the request itself
        was malformed at the JSON layer; retrying with the same args won't
@@ -614,10 +646,5 @@ let with_yojson_boundary ~tool_name ~start_time handler : Tool_result.result =
       ~tool_name
       ~class_:Tool_result.Workflow_rejection
       ~start_time
-      (Printf.sprintf
-         "JSON arg type error: %s. Offending value: %s. Likely cause: an \
-          optional field (sources / judgment / meta / hearth / title / body) \
-          was sent as a non-string JSON type. Send string-typed scalars only."
-         msg
-         value_repr)
+      (json_type_error_message msg bad_value)
 ;;

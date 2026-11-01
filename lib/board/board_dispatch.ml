@@ -390,8 +390,22 @@ let emit_post_created ~(audience : Board.audience) (post : Board.post) =
          content = post.body; post_kind = post.post_kind;
          hearth = post.hearth })
 
+let notify_post_creation (creation : Board.post_creation) =
+  try
+    emit_post_created ~audience:creation.audience creation.post;
+    Ok creation
+  with
+  | (Eio.Cancel.Cancelled _ | Eio.Time.Timeout | Out_of_memory
+    | Stack_overflow | Sys.Break) as exn ->
+    Printexc.raise_with_backtrace exn (Printexc.get_raw_backtrace ())
+  | exn ->
+    Error
+      (Board.Post_publication_failure.after_commit creation
+         (Board.Post_publication_failure.Raised exn))
+
 let create_post_with_unresolved ~author ~content ?title ?body ~post_kind ?meta_json
     ?visibility ?ttl_hours ?hearth ?thread_id ?origin () =
+  try
   match backend () with
   | Jsonl store ->
     (match
@@ -411,19 +425,26 @@ let create_post_with_unresolved ~author ~content ?title ?body ~post_kind ?meta_j
          ?origin
          ()
      with
-     | Ok creation ->
-       emit_post_created ~audience:creation.audience creation.post;
-       Ok (creation.post, creation.unresolved)
+     | Ok creation -> notify_post_creation creation
      | Error _ as error -> error)
+  with
+  | (Eio.Cancel.Cancelled _ | Eio.Time.Timeout | Out_of_memory
+    | Stack_overflow | Sys.Break) as exn ->
+    Printexc.raise_with_backtrace exn (Printexc.get_raw_backtrace ())
+  | exn ->
+    Error
+      (Board.Post_publication_failure.unknown
+         (Board.Post_publication_failure.Raised exn))
 
 let create_post ~author ~content ?title ?body ~post_kind ?meta_json
     ?visibility ?ttl_hours ?hearth ?thread_id ?origin () =
   create_post_with_unresolved ~author ~content ?title ?body ~post_kind ?meta_json
     ?visibility ?ttl_hours ?hearth ?thread_id ?origin ()
-  |> Result.map fst
+  |> Result.map (fun (creation : Board.post_creation) -> creation.post)
 
 let create_post_once_by_fusion_run_id ~fusion_run_id ~author ~content ~post_kind
     ?meta_json ~visibility ~ttl_hours ~origin () =
+  try
   match backend () with
   | Jsonl store ->
     (match
@@ -432,10 +453,17 @@ let create_post_once_by_fusion_run_id ~fusion_run_id ~author ~content ~post_kind
          ~content ~post_kind ?meta_json ~visibility ~ttl_hours ~origin ()
      with
      | Ok (Board.Post_created creation as outcome) ->
-       emit_post_created ~audience:creation.audience creation.post;
-       Ok outcome
+       notify_post_creation creation |> Result.map (fun _ -> outcome)
      | Ok (Board.Post_already_present _ as outcome) -> Ok outcome
      | Error _ as error -> error)
+  with
+  | (Eio.Cancel.Cancelled _ | Eio.Time.Timeout | Out_of_memory
+    | Stack_overflow | Sys.Break) as exn ->
+    Printexc.raise_with_backtrace exn (Printexc.get_raw_backtrace ())
+  | exn ->
+    Error
+      (Board.Post_publication_failure.unknown
+         (Board.Post_publication_failure.Raised exn))
 
 let update_post_with_unresolved ~post_id ~editor ~content ?title ?body ?new_author () =
   match backend () with

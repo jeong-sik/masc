@@ -46,6 +46,9 @@ val mark_dirty_post : store -> string -> unit
 val mark_dirty_comment : store -> string -> unit
 val with_lock : store -> (unit -> 'a) -> 'a
 val with_persist_lock : store -> (unit -> 'a) -> 'a
+(** Observer exceptions propagate only after unlocking, so an instrumentation
+    failure cannot poison this mutex. Exceptions from the mutation itself
+    retain the write lock's normal poisoning behavior. *)
 val sweep : store -> int * int
 val maybe_sweep : store -> unit
 val reset_sweep_schedule_for_test : store -> unit
@@ -91,6 +94,8 @@ val sub_board_with_post_count : (string, int) Hashtbl.t -> sub_board -> sub_boar
 val validate_sub_board_post_policy_unlocked :
   store -> author_id:Agent_id.t -> hearth:string option -> (unit, board_error) result
 
+module Post_publication_failure = Board_post_publication_failure
+
 val create_post :
   store ->
   lookup:Recipient_lookup.t ->
@@ -106,7 +111,7 @@ val create_post :
   ?thread_id:string ->
   ?origin:post_origin ->
   unit ->
-  (post, board_error) result
+  (post, Post_publication_failure.t) result
 
 type create_post_once_result =
   | Post_created of post_creation
@@ -124,7 +129,7 @@ val create_post_once_by_fusion_run_id :
   ttl_hours:int ->
   origin:post_origin ->
   unit ->
-  (create_post_once_result, board_error) result
+  (create_post_once_result, Post_publication_failure.t) result
 (** Serialize exact-origin create attempts with a fiber-aware store mutex.
     An exact normalized payload replay for the same typed Fusion run returns
     the committed post instead of appending another row. A conflicting replay
@@ -145,9 +150,12 @@ val create_post_with_audience :
   ?thread_id:string ->
   ?origin:post_origin ->
   unit ->
-  (post_creation, board_error) result
+  (post_creation, Post_publication_failure.t) result
 (** Validate and freeze the post audience before mutating or persisting the
-    Board, returning that same authority with the committed post. *)
+    Board, returning that same authority with the committed post. Failures retain
+    publication evidence and expose a receipt only after the state commit.
+    Cancellation, [Eio.Time.Timeout], [Out_of_memory], [Stack_overflow] and
+    [Sys.Break] propagate rather than becoming ordinary failures. *)
 
 (** Owner-gated in-place edit of an existing post's title/body.  Returns
     [Unauthorized] when [editor] does not own the post, [Post_not_found] for a

@@ -96,7 +96,7 @@ let test_loader_keeps_only_current_rows () =
     with
     | Ok post -> post
     | Error error ->
-      Alcotest.failf "create_post failed: %s" (Board.show_board_error error)
+      Alcotest.failf "create_post failed: %s" (Board.Post_publication_failure.to_string error)
   in
   let canonical = Board_core.post_to_yojson post in
   let path = Board.persist_path () in
@@ -216,7 +216,7 @@ let test_partial_load_never_rewrites_the_file () =
         ~post_kind:Board.Human_post ()
     with
     | Ok post -> post
-    | Error error -> Alcotest.failf "create_post failed: %s" (Board.show_board_error error)
+    | Error error -> Alcotest.failf "create_post failed: %s" (Board.Post_publication_failure.to_string error)
   in
   let make_comment ~post_id content =
     match

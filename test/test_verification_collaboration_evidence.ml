@@ -61,7 +61,7 @@ let post ~author ~visibility ?origin ?meta_json ?(post_kind=Board.System_post) c
   match Board_dispatch.create_post ~author ~content ~post_kind
     ~visibility ~ttl_hours:0 ?origin ?meta_json () with
   | Ok post -> post
-  | Error error -> failf "post: %s" (Board_tool.board_error_to_string error)
+  | Error error -> failf "post: %s" (Board.Post_publication_failure.to_string error)
 let post_args (post : Board.post) = `Assoc ["post_id", `String (Board.Post_id.to_string post.id)]
 let run_args id = `Assoc ["run_id", `String id]
 let metadata = `Assoc

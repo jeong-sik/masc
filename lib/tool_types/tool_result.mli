@@ -24,7 +24,7 @@ type tool_failure_class =
   | Operator_cancelled
       (** An operator interrupted the work (#28810). *)
 
-type failure_effect_disposition =
+type failure_effect_disposition = Failure_effect.t =
   | Proven_pre_effect
       (** The producer proves that the requested effect did not begin. *)
   | Proven_post_effect

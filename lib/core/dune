@@ -17,6 +17,7 @@
   exec_buffer
   validation
   failure_observation
+  failure_effect
   cross_context_mutex
   eio_guard
   pool_lane

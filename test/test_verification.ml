@@ -2248,7 +2248,7 @@ let test_system_llm_agent_uses_persisted_request_contract_snapshot () =
               ~content:collaboration_marker ~post_kind:Masc.Board.System_post
               ~visibility:Masc.Board.Internal ~ttl_hours:0 () with
             | Ok post -> post
-            | Error error -> Alcotest.fail (Masc.Board.show_board_error error)
+            | Error error -> Alcotest.fail (Masc.Board.Post_publication_failure.to_string error)
           in
           let post_id = Masc.Board.Post_id.to_string original_post.id in
           let board_reference = "board:" ^ post_id in

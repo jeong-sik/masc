@@ -1921,7 +1921,8 @@ class InstalledModelCatalog(unittest.TestCase):
         index=models.index(sonnet)+1
         with patch('sys.stdin',io.StringIO(str(index)+'\n')), contextlib.redirect_stderr(io.StringIO()) as terminal:
             selected=SETUP.select_model(BINARY,'claude_code')
-        self.assertEqual(selected,dict(model='claude-sonnet-5-5',max_context=1000000))
+        self.assertEqual(selected,dict(model='claude-sonnet-5-5',max_context=1000000,
+                                       supports_image_input=True))
         self.assertIn('No number to enter',terminal.getvalue())
         self.assertNotIn('Documented/configured context limit',terminal.getvalue())
 

@@ -824,19 +824,25 @@ let resolve_prompt key =
 (** Get a prompt value. Resolution: override > file > missing *)
 let get_prompt key = (resolve_prompt key).effective
 
-let render_resolved_prompt_template key resolved vars =
+let render_resolved_prompt_template ?(required_variables = []) key resolved vars =
   if String.trim resolved.effective = "" then
     Error (Printf.sprintf "Prompt '%s' is missing" key)
   else
-    render_template ~template_variables:(extract_variables resolved.effective)
-      ~template:resolved.effective ~vars ()
+    let template_variables = extract_variables resolved.effective in
+    let missing = List.filter (fun name -> not (List.mem name template_variables))
+      required_variables in
+    if missing <> [] then
+      Error (Printf.sprintf "Prompt '%s' omits required template variables: %s"
+        key (String.concat ", " missing))
+    else
+      render_template ~template_variables ~template:resolved.effective ~vars ()
 
-let resolve_and_render_prompt_template key vars =
+let resolve_and_render_prompt_template ?required_variables key vars =
   match prompt_file_values key with
   | file_path, file_value ->
     let resolved = resolve_prompt_with_file key ~file_path ~file_value in
     Result.map (fun rendered -> resolved, rendered)
-      (render_resolved_prompt_template key resolved vars)
+      (render_resolved_prompt_template ?required_variables key resolved vars)
   | exception Sys_error detail ->
     Error (Printf.sprintf "Prompt '%s' could not be resolved: %s" key detail)
   | exception Unix.Unix_error (error, operation, path) ->

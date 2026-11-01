@@ -94,6 +94,17 @@ val librarian_working_context : string
     [working_contexts_rule] variable, so the rule has one text. *)
 val librarian_working_contexts_rule : string
 
+val keeper_memory_selection : string
+val keeper_memory_selection_candidate : string
+val keeper_memory_selection_request_context : string
+val keeper_memory_successor_selection : string
+val keeper_memory_selection_current_decision : string
+val keeper_memory_selection_comparison : string
+val keeper_memory_selection_inspect_source : string
+val keeper_memory_selection_not_needed : string
+val keeper_memory_successor_applies_to_query : string
+val keeper_memory_successor_different_scope : string
+val keeper_memory_successor_uncertain : string
 val workspace_memory_curator : string
 val workspace_memory_briefing : string
 

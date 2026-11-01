@@ -1,12 +1,13 @@
 import * as Y from 'yjs'
 import { afterEach, expect, it } from 'vitest'
-import { mergeSharedUpdates, replaceSharedSelection, resolveSharedSelection, restoreSharedDocument,
+import { executeSharedDocumentOperation, replaceSharedSelection, resolveSharedSelection, restoreSharedDocument,
   seedSharedDocument, selectSharedSource, sharedSource, sharedState } from './artifact-shared-document'
 
 const docs: Y.Doc[] = []
 const keep = (doc: Y.Doc) => { docs.push(doc); return doc }
 const seed = (text: string) => keep(seedSharedDocument(text))
 const copy = (doc: Y.Doc) => keep(restoreSharedDocument(sharedState(doc)))
+const mergeSharedUpdates = (state: Uint8Array, updates: readonly Uint8Array[]) => executeSharedDocumentOperation({ kind: 'merge', state, updates })
 afterEach(() => { for (const doc of docs.splice(0)) doc.destroy() })
 
 it('converges concurrent human and Keeper edits in either delivery order and after duplicate delivery', () => {
@@ -77,6 +78,20 @@ it('refuses arbitrary client-controlled metadata or rich-text objects in a sourc
   const rich = seed('원고')
   rich.getText('content').format(0, 1, { bold: true })
   expect(() => sharedState(rich)).toThrow('본문 텍스트만')
+})
+
+it('revalidates each public mutable-document access after a same-root metadata update', () => {
+  const source = seed('safe text'), selection = selectSharedSource(source, { anchor: 0, head: 4 })
+  const remote = keep(new Y.Doc())
+  Y.applyUpdate(remote, sharedState(source))
+  remote.getMap('content').set('actor', 'trusted-keeper')
+  Y.applyUpdate(source, Y.encodeStateAsUpdate(remote))
+  for (const access of [
+    () => sharedSource(source), () => sharedState(source),
+    () => selectSharedSource(source, { anchor: 0, head: 4 }),
+    () => resolveSharedSelection(source, selection),
+    () => replaceSharedSelection(source, selection, 'safe', 'changed'),
+  ]) expect(access).toThrow('본문 텍스트만')
 })
 
 it.each(['actor', 'arbitrary metadata key', '__proto__'])('refuses same-root map metadata named %s from a genuine alternative view', key => {

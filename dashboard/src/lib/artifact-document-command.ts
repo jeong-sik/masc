@@ -1,7 +1,6 @@
 import { Schema } from 'effect'
 import { Buffer } from 'node:buffer'
-import { mergeSharedUpdates, replaceSharedSelection, resolveSharedSelection, restoreSharedDocument,
-  seedSharedDocument, selectSharedSource, sharedSource, sharedState, SharedDocumentError } from './artifact-shared-document'
+import { executeSharedDocumentOperation, SharedDocumentError, type SharedDocumentOperation } from './artifact-shared-document'
 
 const Base64 = Schema.String.pipe(Schema.pattern(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/))
 const Byte = Schema.Int.pipe(Schema.between(0, 255))
@@ -31,22 +30,14 @@ export function runArtifactDocumentCommand(input: unknown) {
   catch { return { ok: false as const, code: 'invalid_request', message: 'invalid artifact document command' } }
   try {
     if (request.kind === 'merge') {
-      const merged = mergeSharedUpdates(bytes(request.state), request.updates.map(bytes))
+      const merged = executeSharedDocumentOperation({ kind: 'merge', state: bytes(request.state), updates: request.updates.map(bytes) })
       return { ok: true as const, state: encoded(merged.state), content: merged.content }
     }
-    const doc = request.kind === 'seed' ? seedSharedDocument(request.content) : restoreSharedDocument(bytes(request.state))
-    try {
-      const selection = request.kind === 'select'
-        ? selectSharedSource(doc, request)
-        : request.kind === 'edit'
-          ? replaceSharedSelection(doc, mutableSelection(request.selection), request.expected, request.replacement)
-          : request.kind === 'resolve' ? mutableSelection(request.selection) : null
-      const range = selection === null ? null : resolveSharedSelection(doc, selection)
-      if (selection !== null && range === null) {
-        throw new SharedDocumentError('invalid_selection', '선택 영역을 현재 원고에서 찾지 못했습니다.')
-      }
-      return { ok: true as const, state: encoded(sharedState(doc)), content: sharedSource(doc), selection, range }
-    } finally { doc.destroy() }
+    const operation: SharedDocumentOperation = request.kind === 'seed' ? request
+      : request.kind === 'select' ? { ...request, state: bytes(request.state) }
+      : { ...request, state: bytes(request.state), selection: mutableSelection(request.selection) }
+    const result = executeSharedDocumentOperation(operation)
+    return { ok: true as const, state: encoded(result.state), content: result.content, selection: result.selection, range: result.range }
   } catch (error) {
     return { ok: false as const, code: error instanceof SharedDocumentError ? error.code : 'invalid_document',
       message: error instanceof SharedDocumentError ? error.message : 'invalid shared document state or update' }

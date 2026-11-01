@@ -1,8 +1,8 @@
 # Official client and provider continuity audit — 2026-11-01
 
-Eight client/provider contract defects were repaired and a Codex fixture guard was
-strengthened in eight draft PRs in Native Stack #47014,
-whose top layer is [PR #47030](https://github.com/jeong-sik/masc/pull/47030). The review followed current
+Client/provider contract repairs and protocol-fixture improvements are delivered
+in nine draft PRs in Native Stack #47014,
+whose top layer is [PR #47037](https://github.com/jeong-sik/masc/pull/47037). The review followed current
 source, installed client help/schema, primary documentation and read-only runtime
 evidence. It does not establish that every provider is free of bugs or that the
 repairs are installed.
@@ -18,6 +18,8 @@ repairs are installed.
 | [#47025](https://github.com/jeong-sik/masc/pull/47025) | GLM preservation with an omitted default-enabled thinking toggle lost history and omitted its requested wire field | Provider parser → stable provenance → disk checkpoint → effective default and explicit controls → next user request |
 | [#47026](https://github.com/jeong-sik/masc/pull/47026) | Antigravity rejected five documented non-completed states as unknown protocol strings | Exact status/init identity → ambiguous durable recovery; no successful turn ACK or candidate replay of uncertain native effects |
 | [#47030](https://github.com/jeong-sik/masc/pull/47030) | Codex fixture assertions could be logged and swallowed by production stream-observer isolation | Snapshot the first delta once, assert after cleanup and rethrow ordinary observer failures; preserve cancellation/interruption and final serial-order assertions |
+| [#47030](https://github.com/jeong-sik/masc/pull/47030) | OpenRouter catalog tests used an old model ID/output limit and incomplete probe inventory | Exact 25-ID inventory with historical declared ladders separated from the two October 28 measured-disable rows |
+| [#47037](https://github.com/jeong-sik/masc/pull/47037) | Two OpenRouter rows admitted unsupported reasoning depths; DeepSeek's enabled default was undeclared | Exact scoped catalog → typed completion admission → request JSON; DeepSeek 1017 accepts none/low/high/max and explicit enable without a guessed depth, Nemotron keeps only its measured disable rung; omission keeps the provider default |
 
 The Kimi change deliberately uses the three shipped model bindings. It does not
 guess capabilities for arbitrary operator-created model IDs. Its six fixture
@@ -77,6 +79,18 @@ non-completed states retain partial responses as error evidence, never as a
 completed answer. Independent review caught that nonretryable provider errors
 could still trigger candidate fanout; the final repair marks unobserved native
 effects as unavailable before projection, while preserving known effects.
+
+OpenRouter's [per-model reasoning options](https://openrouter.ai/docs/guides/best-practices/reasoning-tokens#discovering-per-model-reasoning-options)
+define an explicit `supported_efforts` array as the accepted values, `null` as
+all gateway efforts, and omission as no effort selection. The [selected public
+metadata rows](../evidence/2026-11-01-official-client-audit/openrouter-models-selected.json)
+were fetched without authentication at 2026-11-01T01:57:36Z and checked against the
+retained raw response digest. Metadata-supported depths and the October 28 real
+`none` probes are separate evidence. The earlier 23 ladder assertions include
+historical declared/router policy; they are not all complete wire measurements.
+DeepSeek's explicit enabled default uses the existing default-on dialect.
+Nemotron's missing default fact stays unknown; explicit enable without a
+declared depth remains rejected rather than asserting an unsupported control.
 
 ## Verification boundaries
 

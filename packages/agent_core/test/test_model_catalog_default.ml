@@ -1136,7 +1136,7 @@ let openrouter_disable_probe_rows =
   [ "deepseek/deepseek-v4.1-flash-1017"; "nvidia/nemotron-3.5-super-vl:free" ]
 ;;
 
-let test_openrouter_rows_retain_measured_effort_evidence () =
+let test_openrouter_rows_retain_effort_evidence () =
   let catalog =
     Model_catalog_test_support.load_repo_model_catalog ~suite:"OpenRouter efforts"
   in
@@ -1373,9 +1373,9 @@ let () =
             `Quick
             test_openrouter_rows_lower_contradicted_base_claims
         ; test_case
-            "OpenRouter rows retain measured effort evidence"
+            "OpenRouter rows retain effort evidence"
             `Quick
-            test_openrouter_rows_retain_measured_effort_evidence
+            test_openrouter_rows_retain_effort_evidence
         ; test_case
             "OpenRouter refreshed efforts reach the wire"
             `Quick

@@ -124,6 +124,28 @@ let test_inventory_still_excludes_foreign_runtimes () =
   in
   Alcotest.(check int) "runc rows stay excluded" 0 (List.length result)
 
+let test_name_observation_recognises_every_kata_vmm () =
+  let observe runtime =
+    M.kata_name_observation_of_json_lines ~guest_name:"vm-alpha"
+      (lines
+         [ `Assoc
+             [ ("name", `String "vm-alpha")
+             ; ("runtime", `String runtime)
+             ]
+         ])
+  in
+  List.iter
+    (fun runtime ->
+       Alcotest.(check bool)
+         (runtime ^ " is expected kata runtime")
+         true
+         (observe runtime = M.Kata_name_expected_runtime))
+    V.kata_runtime_ids;
+  Alcotest.(check bool) "firecracker stays other runtime" true
+    (observe "io.containerd.kata-fc.v2" = M.Kata_name_other_runtime);
+  Alcotest.(check bool) "runc stays other runtime" true
+    (observe "io.containerd.runc.v2" = M.Kata_name_other_runtime)
+
 let test_sweep_sees_per_vmm_orphans () =
   (* owner 41002 is dead per [alive]; a per-VMM guest must be a sweep
      candidate exactly like a default-shim guest. *)
@@ -156,5 +178,7 @@ let () =
     ; ( "inventory",
         [ case "inventory recognises every kata vmm" test_inventory_recognises_every_kata_vmm
         ; case "inventory excludes foreign runtimes" test_inventory_still_excludes_foreign_runtimes
+        ; case "name observation recognises every kata vmm"
+            test_name_observation_recognises_every_kata_vmm
         ] )
     ; ( "sweep", [ case "sweep sees per-vmm orphans" test_sweep_sees_per_vmm_orphans ] ) ]

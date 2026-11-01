@@ -2810,8 +2810,10 @@ let kata_name_observation_of_json_lines ~guest_name raw =
           | None | Some `Null | Some (`String "") -> Ok Kata_name_runtime_unreported
           | Some (`String runtime) ->
             if String.trim runtime = "" then Ok Kata_name_runtime_unreported
-            else if String.equal runtime Backend.kata_containerd_shim
-            then Ok Kata_name_expected_runtime else Ok Kata_name_other_runtime
+            else
+              (match Kata_vmm.classify_runtime_id runtime with
+               | Ours _ | Default_shim -> Ok Kata_name_expected_runtime
+               | Unknown_runtime _ -> Ok Kata_name_other_runtime)
           | Some _ -> Error () in
         Ok (name, runtime)
     | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) ->

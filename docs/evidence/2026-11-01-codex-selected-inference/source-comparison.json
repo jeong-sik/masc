@@ -1,0 +1,20 @@
+{
+  "baseline_head": "8602b0e1d906a633481411da013d64c7b6c63214",
+  "candidate_head": "cbf6196ffa5b2e9067548a8d5a7fc5db825dba6f",
+  "identical_inputs": 26,
+  "input_count": 33,
+  "changed_inputs": [
+    "lib/keeper/keeper_codex_runtime.ml",
+    "lib/keeper/keeper_codex_runtime.mli",
+    "lib/keeper/keeper_turn_driver.ml",
+    "test/test_keeper_codex_current_context.ml",
+    "test/test_keeper_codex_blank_system_prompt.ml",
+    "test/test_official_client_claim_cause.ml",
+    "test/test_keeper_tool_dispatch_runtime.ml"
+  ],
+  "fixture_delta_bytes": 4437,
+  "fixture_delta_sha256": "f319978129c73aae0cb37f1810ef1a1041edff711402b26b2ceb4d1662a4d065",
+  "test_tree_identical": false,
+  "case_execution_comparison": "pending actual completed captures",
+  "source_fixture_change": "Two required selected-model arguments and one additional public driver callback case. No change to the nine existing selected inference case bodies or the native child script."
+}

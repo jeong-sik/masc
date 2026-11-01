@@ -223,6 +223,52 @@ let test_suspended_diagram_preparation () =
   check bool "retained original response remains readable" true
     (saved state == original)
 
+let test_superseded_resource_diagram_worker () =
+  let module Diagrams=Masc_tui_resource_diagrams in
+  let module Work=Masc_tui_board_preview_work in
+  let contents = [{Mcp.rc_uri=None;rc_mime_type=Some "text/markdown";
+    rc_kind=Resource_text "```mermaid\ngraph TD; A-->B\n```\n\n```mermaid\ngraph TD; C-->D\n```\n"}] in
+  let frame = Diagrams.{mime_type=None;contents;width=640;cell_pixels=(8,16);colors=None} in
+  let old=Diagrams.create ~mime_type:None ~contents ~width:640 ~cell_pixels:(8,16) ~colors:None in
+  let next=Diagrams.create ~mime_type:None ~contents ~width:320 ~cell_pixels:(8,16) ~colors:None in
+  let request=Diagrams.request old in
+  let source=match Diagrams.sources request with [source;_] -> source | _ -> fail "expected two diagrams" in
+  let decide ~frame snapshot = Diagrams.admission request ~frame snapshot in
+  check bool "current frame may start" true
+    (decide ~frame:(Some frame) (Some old) = Diagrams.Admit);
+  check bool "leaving before the first source retires its request" true
+    (decide ~frame:None (Some old) = Diagrams.Retire);
+  check bool "the retired request can be recreated on return" true
+    (Option.is_none (Diagrams.retire request (Some old)));
+  let partially_done=Diagrams.settle request ~source (Error "first source finished") old in
+  check bool "first completion still owns the request" true
+    (Diagrams.progress partially_done = (1,2));
+  check bool "leaving between sources retires the remaining work" true
+    (decide ~frame:None (Some partially_done) = Diagrams.Retire);
+  check bool "the partially completed request is removed" true
+    (Option.is_none (Diagrams.retire request (Some partially_done)));
+  List.iter (fun changed ->
+    check bool "changed frame is not admitted" true
+      (decide ~frame:(Some changed) (Some old) = Diagrams.Retire))
+    [ {frame with width=320}; {frame with cell_pixels=(9,16)};
+      {frame with colors=Some ("#ffffff", "#000000")};
+      {frame with mime_type=Some "text/plain"};
+      {frame with contents=List.map Fun.id contents} ];
+  check bool "a replaced owner is ignored" true
+    (decide ~frame:(Some frame) (Some next) = Diagrams.Ignore);
+  check bool "retiring the old request preserves its replacement" true
+    (Diagrams.retire request (Some next) = Some next);
+  let worker=Work.create () in
+  check bool "the old physical worker starts" true (Work.try_acquire worker);
+  check bool "new width no longer matches the old request" false
+    (Diagrams.matches ~mime_type:None ~contents ~width:320 ~cell_pixels:(8,16) ~colors:None old);
+  check bool "a replacement waits while physical work remains" true (Option.is_none (Work.reserve worker));
+  let after_stale=Diagrams.settle request ~source (Error "old request") next in
+  check bool "old completion cannot change the replacement" true (after_stale == next);
+  Work.release worker;
+  check bool "the replacement can start after physical return" true
+    (Option.is_some (Work.try_run worker (fun () -> ())))
+
 let test_operator_protocol_boundary () =
   let module Reader = Masc_tui_input_reader in
   check bool "APC reply cannot withdraw an image request" false
@@ -845,6 +891,7 @@ let () =
   test_case "Board Pele deadline releases worker" `Quick test_board_pele_deadline;
   test_case "Board renderer shutdown reaps child" `Quick test_renderer_shutdown;
   test_case "workspace suspension retires diagram preparation" `Quick test_suspended_diagram_preparation;
+  test_case "superseded resource diagrams retain physical ownership" `Quick test_superseded_resource_diagram_worker;
   test_case "original SVG and multipart admission" `Quick test_original_admission;
   test_case "wrong pending URI" `Quick test_wrong_pending;
   test_case "failed and detached completion" `Quick test_failed_read;

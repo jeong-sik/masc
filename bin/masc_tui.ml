@@ -11743,14 +11743,17 @@ let conversation_image_sources state =
 
 let board_preview_worker = Masc_tui_board_preview_work.create ()
 let vector_inspection_worker = Masc_tui_board_preview_work.create ()
+let resource_diagram_worker = Masc_tui_board_preview_work.create ()
 
 let () = at_exit (fun () ->
   Masc_tui_board_preview_work.stop board_preview_worker;
   Masc_tui_board_preview_work.stop vector_inspection_worker;
+  Masc_tui_board_preview_work.stop resource_diagram_worker;
   Masc_tui_board_preview_work.stop board_image_prepare_worker;
   Masc_tui_image_cache.stop_subprocesses ();
   Masc_tui_board_preview_work.await_stopped board_preview_worker;
   Masc_tui_board_preview_work.await_stopped vector_inspection_worker;
+  Masc_tui_board_preview_work.await_stopped resource_diagram_worker;
   Masc_tui_board_preview_work.await_stopped board_image_prepare_worker)
 
 let image_notice (state : state) ~view ~keeper_name ~kind text =
@@ -12061,62 +12064,88 @@ let step_resource_image (state : state) ~delta =
   let count = List.length (current_resource_images state) in
   state.resource_image_cursor <- max 0 (min (count - 1) (state.resource_image_cursor + delta))
 
-let prepare_resource_diagrams state ~mailbox =
+let resource_diagram_frame state ~geometry_stable =
   match state.view, state.resource_focus, server_authority_ready state,
-      Masc_tui_portrait_view.current_display (), Masc_tui_resource_document.current state with
-  | Resources, Right_pane, true, Masc_tui_portrait_view.Pixels {cell_width;cell_height},
-      Some reading when not reading.requested && Option.is_none reading.error
-        && reading.presentation = Masc_tui_resource_catalog.Document ->
-    (match reading.contents, Eio_context.get_switch_opt () with
-     | Some contents, Some sw ->
-       let _,cols = get_terminal_size () in
-       let columns = max 1 (framed_inner_width (resource_content_cols state ~cols)-4) in
-       let width = columns*cell_width in
-       let cell_pixels = cell_width,cell_height in
-       let palette = Masc_tui_terminal_palette.snapshot () in
-       let hex color = Printf.sprintf "#%02x%02x%02x"
-         (Masc_tui_terminal_palette.red color) (Masc_tui_terminal_palette.green color)
-         (Masc_tui_terminal_palette.blue color) in
-       let colors = Option.map (fun palette ->
-         hex (Masc_tui_terminal_palette.foreground palette),
-         hex (Masc_tui_terminal_palette.background palette))
-         (Masc_tui_terminal_palette.snapshot_palette palette) in
-       let mime_type = (Masc_tui_resource_catalog.metadata reading.entry).mime_type in
-       let current = Option.exists (Masc_tui_resource_diagrams.matches
-         ~mime_type ~contents ~width ~cell_pixels ~colors) state.resource_diagrams in
-       if not current then begin
-         let diagrams = Masc_tui_resource_diagrams.create
-           ~mime_type ~contents ~width ~cell_pixels ~colors in
-         state.resource_diagrams <- Some diagrams;
-         let request = Masc_tui_resource_diagrams.request diagrams in
-         let deliver = workspace_enqueue state in
-         Eio.Fiber.fork_daemon ~sw (fun () ->
-           Eio.Fiber.yield ();
-           List.iter (fun source ->
-             let current = match state.resource_diagrams, state.resource_content with
-               | Some current, Some (_,contents) ->
-                   Masc_tui_resource_diagrams.request current == request
-                   && Masc_tui_resource_diagrams.owns contents current
-               | (Some _ | None), (Some _ | None) -> false in
-             if current then begin
-             let result = Eio_guard.run_in_systhread ~label:"tui-artifact-diagram" (fun () ->
-               let scene = Masc_tui_pele.scene ~format:Mermaid
-                 ~max_width:(Masc_tui_resource_diagrams.width request)
-                 ~font_size:(max 1 (cell_width*2))
-                 ~now_ms:(Int64.of_float (Unix.gettimeofday () *. 1000.))
-                 ~colors:(Masc_tui_resource_diagrams.colors request) source in
-               Masc_tui_pele.render ~cache_dir:(ensure_img_cache_dir ()) scene) in
-             deliver mailbox (Resource_diagram_ready (request,source,result))
-             end)
-             (Masc_tui_resource_diagrams.sources request);
-           `Stop_daemon)
-       end
-     | (Some _ | None), None | None, Some _ -> ())
+      Masc_tui_portrait_view.current_display () with
+  | Resources, Right_pane, true, Masc_tui_portrait_view.Pixels {cell_width;cell_height}
+      when geometry_stable () ->
+      (match Masc_tui_resource_document.current state with
+       | Some reading when not reading.requested && Option.is_none reading.error
+           && reading.presentation = Masc_tui_resource_catalog.Document ->
+           Option.map (fun contents ->
+             let _,cols = get_terminal_size () in
+             let columns = max 1 (framed_inner_width (resource_content_cols state ~cols)-4) in
+             let palette = Masc_tui_terminal_palette.snapshot () in
+             let hex color = Printf.sprintf "#%02x%02x%02x"
+               (Masc_tui_terminal_palette.red color) (Masc_tui_terminal_palette.green color)
+               (Masc_tui_terminal_palette.blue color) in
+             let colors = Option.map (fun palette ->
+               hex (Masc_tui_terminal_palette.foreground palette),
+               hex (Masc_tui_terminal_palette.background palette))
+               (Masc_tui_terminal_palette.snapshot_palette palette) in
+             Masc_tui_resource_diagrams.{
+               mime_type=(Masc_tui_resource_catalog.metadata reading.entry).mime_type;
+               contents; width=columns*cell_width; cell_pixels=(cell_width,cell_height); colors
+             }) reading.contents
+       | Some _ | None -> None)
   | (Overview | Keepers _ | Planning | Board | Acting | Metrics | Lanes | Clients | Schedules | Harness | Fusion
     | Verification | Approvals | Memory | Repositories | Changes | Connectors | Runtime
     | Config | Resources | Tools | Code | System_logs),
     (Left_pane | Right_pane), (true | false),
-    (Masc_tui_portrait_view.Pixels _ | Mosaic | No_picture), (Some _ | None) -> ()
+    (Masc_tui_portrait_view.Pixels _ | Mosaic | No_picture) -> None
+
+let prepare_resource_diagrams state ~mailbox ~geometry_stable =
+  let module Diagrams = Masc_tui_resource_diagrams in
+  let module Work = Masc_tui_board_preview_work in
+  let current_frame () = resource_diagram_frame state ~geometry_stable in
+  match current_frame (), Eio_context.get_switch_opt () with
+  | Some frame, Some sw ->
+      if not (Option.exists (Diagrams.matches_frame frame) state.resource_diagrams) then begin
+        (* A withdrawn projection does not free a physical renderer. *)
+        state.resource_diagrams <- None;
+        if not (Work.is_busy resource_diagram_worker) then begin
+          let diagrams = Diagrams.create ~mime_type:frame.mime_type ~contents:frame.contents
+            ~width:frame.width ~cell_pixels:frame.cell_pixels ~colors:frame.colors in
+          state.resource_diagrams <- Some diagrams;
+          let request = Diagrams.request diagrams in
+          let deliver = workspace_enqueue state in
+          let retire () = state.resource_diagrams <- Diagrams.retire request state.resource_diagrams in
+          Eio.Fiber.fork_daemon ~sw (fun () ->
+            Eio.Fiber.yield ();
+            let rec render_sources = function
+              | [] -> ()
+              | source :: rest ->
+                  (match Diagrams.admission request ~frame:(current_frame ()) state.resource_diagrams with
+                   | Diagrams.Ignore -> ()
+                   | Diagrams.Retire -> retire ()
+                   | Diagrams.Admit ->
+                       if not (geometry_stable ()) then retire ()
+                       else (match Work.reserve resource_diagram_worker with
+                        | None -> retire ()
+                        | Some admission ->
+                            let result = Fun.protect
+                              ~finally:(fun () -> Work.withdraw resource_diagram_worker admission)
+                              (fun () -> Eio_guard.run_in_systhread ~label:"tui-artifact-diagram" (fun () ->
+                                Work.run_reserved resource_diagram_worker admission (fun () ->
+                                  let cell_width,_ = frame.cell_pixels in
+                                  let scene = Masc_tui_pele.scene ~format:Mermaid
+                                    ~max_width:(Diagrams.width request)
+                                    ~font_size:(max 1 (cell_width*2))
+                                    ~now_ms:(Int64.of_float (Unix.gettimeofday () *. 1000.))
+                                    ~colors:(Diagrams.colors request) source in
+                                  let runner = Masc_tui_pele.command_runner
+                                    ~run:(Masc_tui_image_cache.run_bounded ~deadline_seconds:image_process_deadline_seconds) in
+                                  Masc_tui_pele.render ~cache_dir:(ensure_img_cache_dir ()) ~runner scene))) in
+                            (match result with
+                             | None -> retire ()
+                             | Some result ->
+                                 deliver mailbox (Resource_diagram_ready (request,source,result));
+                                 render_sources rest))) in
+            render_sources (Diagrams.sources request);
+            `Stop_daemon)
+        end
+      end
+  | (Some _ | None), (Some _ | None) -> ()
 
 let open_resource_image (state : state) ~mailbox =
   let notice = image_notice state ~view:Resources ~keeper_name:state.msg_target_keeper_name in
@@ -27378,9 +27407,12 @@ Use relative paths for resources already held in the package. -->
           ~http_scoped_refresh_inflight ~scoped_refresh_followup
           ~frame_presenter ~render_schedule async_messages
       then Render_schedule.request render_schedule Render_schedule.Background;
-      prepare_resource_diagrams state ~mailbox:async_messages;
-      prepare_inspected_frame state ~mailbox:async_messages
-        ~worker_geometry_current:(make_worker_geometry_current ());
+      let worker_geometry_current = make_worker_geometry_current () in
+      let diagram_geometry_stable () =
+        worker_geometry_current (Masc_tui_ansi.get_terminal_size ()) in
+      prepare_resource_diagrams state ~mailbox:async_messages
+        ~geometry_stable:diagram_geometry_stable;
+      prepare_inspected_frame state ~mailbox:async_messages ~worker_geometry_current;
       (match state.lane_addons with
        | Some view when view.editor_ready && not (input_not_yet_admissible ()) -> handle_lane_document_editor ()
        | Some _ | None -> ());

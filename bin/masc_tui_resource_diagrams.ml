@@ -9,6 +9,14 @@ type request = {
 type image = { png : string; key : string; width : int; height : int }
 type outcome = Pending | Ready of image | Failed of string
 type t = { request : request; entries : (string * outcome) list }
+type frame = {
+  mime_type : string option;
+  contents : Masc_tui_mcp.resource_content list;
+  width : int;
+  cell_pixels : int * int;
+  colors : (string * string) option;
+}
+type admission = Admit | Retire | Ignore
 module Sources = Set.Make (String)
 
 let create ~mime_type ~contents ~width ~cell_pixels ~colors =
@@ -35,6 +43,22 @@ let matches ~mime_type ~contents ~width ~cell_pixels ~colors t =
   t.request.contents == contents && t.request.width=width
   && t.request.mime_type=mime_type
   && t.request.cell_pixels=cell_pixels && t.request.colors=colors
+
+let matches_frame (frame : frame) t =
+  matches ~mime_type:frame.mime_type ~contents:frame.contents ~width:frame.width
+    ~cell_pixels:frame.cell_pixels ~colors:frame.colors t
+
+let admission request ~frame snapshot =
+  match snapshot with
+  | Some t when t.request == request ->
+      (match frame with
+       | Some frame when matches_frame frame t -> Admit
+       | Some _ | None -> Retire)
+  | Some _ | None -> Ignore
+
+let retire request = function
+  | Some t when t.request == request -> None
+  | snapshot -> snapshot
 
 let settle request ~source result t =
   if request != t.request then t

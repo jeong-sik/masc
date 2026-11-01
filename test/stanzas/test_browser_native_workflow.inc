@@ -11,3 +11,12 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_browser_ego_workflow)))
+
+(rule
+ (alias runtest-test_browser_ego_popup)
+ (deps test_browser_ego_popup.cjs ../lib/browser_ego_workflow.ml)
+ (action (run node %{dep:test_browser_ego_popup.cjs})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_browser_ego_popup)))

@@ -1167,7 +1167,7 @@ let dialog_receipt ~id ~verb ~unknown value =
    reads where the page is. *)
 let guarded_input ?(holds_button=false) t ~id ~label ~deadline ~verb ~step ~guard ~input ~lines ~fields =
   let unknown = Printf.sprintf "read tab %d before another step" id in
-  let* ()=if holds_button then Input.begin_holding t.input ~tab_id:id ~page_label:label ~operation:step
+  let* ()=if holds_button then Input.begin_holding t.input ~scope:Input.Page_scope ~tab_id:id ~page_label:label ~operation:step
     |> Result.map_error (fun detail -> Live.Before_effect detail) else Ok () in
   let response = run_step t ~window_s:(left t deadline) ~step
           ~args:(obj (["label",str label;"tabId",`Int id;"guard",str (page_function guard);
@@ -1342,7 +1342,7 @@ let native_input t ~id ~label ~cursor ~expected_url ~locator ~reference ~operati
   let unknown = Printf.sprintf "read tab %d before another step" id in
   let holds_button = match operation with Target_drag _ -> true
     | Target_click | Target_fill _ | Target_hover | Target_double_click | Target_select _ -> false in
-  let* ()=if holds_button then Input.begin_holding t.input ~tab_id:id ~page_label:label ~operation:"native_target_input"
+  let* ()=if holds_button then Input.begin_holding t.input ~scope:Input.Page_scope ~tab_id:id ~page_label:label ~operation:"native_target_input"
     |> Result.map_error (fun detail -> Live.Before_effect detail) else Ok () in
   let response = run_native_step t ~step:"page.target_input"
       ~args:(obj ["label",str label;"tabId",`Int id;"expectedUrl",(match expected_url with Some url -> str url | None -> `Null);"target",str locator;
@@ -1731,11 +1731,18 @@ let workflow ?actor t args =
     | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> args in
   let holds_input=List.exists (fun (step : Browser_lane.Native_workflow.step) ->
     Browser_lane.Native_workflow.holds_input step.action) request.steps in
-  let* ()=if holds_input then Input.begin_holding t.input ~tab_id:request.tab_id ~page_label:label ~operation:"native_workflow"
+  let scope=if List.exists (fun (step:Browser_lane.Native_workflow.step) -> match step.action with
+      | Click_and_wait_for_popup _ -> true
+      | Click _|Double_click _|Hover _|Drag_and_drop _|Mouse_click _|Mouse_move _|Mouse_wheel _
+      | Fill _|Press _|Focus _|Reload|Keyboard_type _|Keyboard_insert_text _|Keyboard_paste _|Keyboard_press _
+      | Select_option _|Goto _|Wait_for_url _|Wait_for_selector _|Wait_for_load_state _
+      | Evaluate _|Wait_for_function _|Fetch _|Cancel_download _|Url|Title|Info|Snapshot|Events|Wait_for_timeout _ -> false) request.steps
+    then Input.Space_scope else Input.Page_scope in
+  let* ()=if holds_input then Input.begin_holding t.input ~scope ~tab_id:request.tab_id ~page_label:label ~operation:"native_workflow"
     |> Result.map_error (fun detail -> Live.Before_effect detail) else Ok () in
   let result = run_native_step t ~step:"page.native_workflow" ~args:arguments
       (String.concat "\n" [Browser_ego_workflow.script;unblocked_managed_page;
-        "    const outcome = await nativeWorkflow(task.page(args.label), args);";
+        "    const outcome = await nativeWorkflow(task.page(args.label), args, task, watchDownloads);";
         "    emit({ok: true, value: outcome});";"  }"]) in
   match result with
   | Error error ->
@@ -1746,24 +1753,46 @@ let workflow ?actor t args =
   | Ok value ->
     let unknown detail = Live.Outcome_unknown (detail ^ "; read the same tab and do not replay the workflow") in
     let* outcome=Browser_ego_workflow.decode request value |> Result.map_error unknown in
+    let pages=match outcome with Browser_ego_workflow.Completed {pages;_}|Stopped {pages;_} -> pages in
+    let* ()=match pages with
+      | None -> Ok ()
+      | Some pages when pages.source.space_id=t.space.id && pages.source.label=label -> Ok ()
+      | Some _ -> Error (unknown "workflow source Page disagrees with the bound Space and original Page") in
+    let tab_of_page (identity:Browser_ego_workflow.page_identity) = remember t (Managed identity.label) in
+    let current_tab=match pages with None -> request.tab_id | Some pages -> tab_of_page pages.current in
     if holds_input then (match outcome with
       | Browser_ego_workflow.Completed {input;_}|Stopped {input=Browser_ego_release.Settled input;_} -> settle_input t input
       | Stopped {input=Browser_ego_release.Unconfirmed _;_} -> ());
     let receipt_of value=match value with
-      | `Assoc fields -> Ok (obj (("tabId",`Int request.tab_id)::("action",str "workflow")::fields))
+      | `Assoc fields ->
+        let fields=match pages with
+          | None -> fields
+          | Some pages ->
+            let page_json (identity:Browser_ego_workflow.page_identity) =
+              let `Assoc native=Browser_surface.ego_page_to_json
+                {label=Some identity.label;target_id=identity.target_id;opened_by=identity.opened_by} in
+              obj (("spaceId",`Int identity.space_id)::("tabId",`Int (tab_of_page identity))::native) in
+            let observed=obj ["source",page_json pages.source;"current",page_json pages.current;
+              "transitions",`List (List.map (fun (transition:Browser_ego_workflow.transition) -> obj [
+                "index",`Int transition.index;"source",page_json transition.source;
+                "popup",page_json transition.popup;"selected",`Bool transition.selected]) pages.transitions)] in
+            ("sourceTabId",`Int request.tab_id)::("pages",observed)::List.remove_assoc "pages" fields in
+        Ok (obj (("tabId",`Int current_tab)::("action",str "workflow")::fields))
       | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> Error (unknown "workflow receipt is not an object") in
     match outcome with
-    | Browser_ego_workflow.Completed {reply=value;input=_} -> receipt_of value
-    | Browser_ego_workflow.Stopped {receipt=value;message=detail;effect_started;completed_effect;input=_;native_error} ->
+    | Browser_ego_workflow.Completed {reply=value;input=_;pages=_} -> receipt_of value
+    | Browser_ego_workflow.Stopped {receipt=value;message=detail;effect_started;completed_effect;input=_;native_error;pages=_} ->
       let message=head detail ^ "; read the same tab before continuing; never replay the workflow" in
       if completed_effect then
-        let* receipt=receipt_of value in Error (Live.Partial_failure {tab_id=request.tab_id;receipt;message})
+        let* receipt=receipt_of value in Error (Live.Partial_failure {tab_id=current_tab;receipt;message})
       else match native_error with
         | Some _ ->
           let* receipt=receipt_of value in
           let disposition=if effect_started then Live.Uncertain else Live.Not_started in
           Error (Live.Observed_failure {disposition;message;receipt})
-        | None -> if effect_started then Error (Live.Outcome_unknown message)
+        | None -> if effect_started && Option.is_some pages then
+            let* receipt=receipt_of value in Error (Live.Observed_failure {disposition=Live.Uncertain;message;receipt})
+          else if effect_started then Error (Live.Outcome_unknown message)
           else Error (Live.Before_effect message)
 
 let dispatch_raw ?actor t ~verb args =

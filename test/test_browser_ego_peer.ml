@@ -3073,6 +3073,60 @@ let test_operator_input_recovery () =
     ["original-input-command","#dialog";"continued-input-command","#continue"] (List.rev !input_commands);
   check int "only original, empty observation and new input workflows were issued" 3 !issued
 
+let test_popup_workflow_identity_and_scope () =
+  let module Input=Masc.Browser_ego_input in
+  let answer label = function Ok value -> value | other -> failf "%s: %s" label (failure_kind other) in
+  let source_url="https://fixture.test/opener" and child_url="https://fixture.test/child" in
+  let identity label target=obj ["spaceId",`Int 51;"label",str label;"targetId",str target;"openedBy",str "agent"] in
+  let source=identity "p1" "T1" and child=identity "p2" "T2" in
+  let pages=obj ["source",source;"current",child;"transitions",`List [obj [
+    "index",`Int 0;"source",source;"popup",child;"selected",`Bool true]]] in
+  let popup=obj ["method",str "clickAndWaitForPopup";"selector",str "a[target=_blank]"] in
+  let args ~tab_id ~expected_url steps=obj ["tabId",`Int tab_id;"expectedUrl",str expected_url;
+    "steps",`List steps;"maxChars",`Int 1000] in
+  let progress={|{"index":0,"method":"clickAndWaitForPopup","receipt":{}}|} |> Yojson.Safe.from_string in
+  let successful url completed extra=obj (extra @ ["completed",`List completed;"effectStarted",`Bool (completed<>[]);
+    "completedEffect",`Bool (completed<>[]);"inputReleased",`Bool true;"failure",`Null;
+    "urlBefore",str url;"url",str (if completed=[] then url else child_url);"title",str "Owned fixture";
+    "snapshot",str "root";"chars",`Int 4;"truncated",`Bool false]) in
+  let observed=ref [] in
+  let peer=opened (fun sent -> match sent.step with
+    | "tabs.list" -> answered (`List [tab_row ~label:(str "p1") ~target:"T1" ~title:"Owned source" ~url:source_url ~active:true ()])
+    | "page.native_workflow" ->
+      observed:=text (field "label" sent.args)::!observed;
+      if field "steps" sent.args=`List [] then answered (successful (text (field "expectedUrl" sent.args)) [] [])
+      else answered (successful source_url [progress] ["pages",pages])
+    | other -> failf "unexpected popup fixture step %s" other) in
+  ignore (dispatch peer Live.Tabs_list (obj []));
+  let first=answer "popup workflow" (dispatch peer Live.Page_native_workflow (args ~tab_id:1 ~expected_url:source_url [popup])) in
+  let child_tab=Yojson.Safe.Util.to_int (field "tabId" first) in
+  check int "source ID stays separately bound" 1 (Yojson.Safe.Util.to_int (field "sourceTabId" first));
+  check bool "child receives a distinct stable MASC ID" true (child_tab<>1);
+  ignore (answer "later exact child workflow" (dispatch peer Live.Page_native_workflow (args ~tab_id:child_tab ~expected_url:child_url [])));
+  ignore (answer "later original source workflow" (dispatch peer Live.Page_native_workflow (args ~tab_id:1 ~expected_url:source_url [])));
+  check (list string) "popup identity never overwrites source routing" ["p1";"p2";"p1"] (List.rev !observed);
+  let issued=ref 0 in
+  let peer=opened (fun sent -> match sent.step with
+    | "tabs.list" -> answered (`List [tab_row ~label:(str "p1") ~target:"T1" ~title:"Owned source" ~url:source_url ~active:true ()])
+    | "page.native_workflow" -> incr issued; answered (obj ["pages",pages;"completed",`List [progress];
+      "effectStarted",`Bool true;"completedEffect",`Bool true;"inputReleased",`Bool false;
+      "failure",obj ["index",`Int 1;"method",str "keyboard.type";"message",str "native void cannot prove release"]])
+    | other -> failf "unexpected popup input fixture step %s" other) in
+  ignore (dispatch peer Live.Tabs_list (obj []));
+  let typed=obj ["method",str "keyboard.type";"text",str "child input"] in
+  (match dispatch peer Live.Page_native_workflow (args ~tab_id:1 ~expected_url:source_url [popup;typed]) with
+   | Error (Live.Partial_failure {tab_id;receipt;_}) ->
+     check bool "uncertain child retains its exact partial Page identity" true
+       (tab_id<>1 && field "tabId" receipt=`Int tab_id && field "sourceTabId" receipt=`Int 1)
+   | other -> failf "expected typed popup partial failure, got %s" (failure_kind other));
+  (match Peer.input_status peer with
+   | Input.Uncertain pending -> check bool "lost multi-Page input is scoped to the original Space without guessing a Page" true
+       (pending.scope=Input.Space_scope && pending.tab_id=1)
+   | Ready _ -> fail "popup child input was incorrectly released");
+  ignore (before_effect "connection-wide uncertainty blocks new popup input"
+    (dispatch peer Live.Page_native_workflow (args ~tab_id:1 ~expected_url:source_url [popup])));
+  check int "unknown child input was never replayed" 1 !issued
+
 let test_native_space_status () =
   let ownership=ref "agentDelegatedToUser" and invalid=ref false and unavailable=ref false and duplicate=ref false in
   let calls=ref 0 and output=ref "" in
@@ -3265,6 +3319,7 @@ let () =
     "ego", [
       test_case "loading recovery requires the original native Page acknowledgement" `Quick test_loading_recovery_receipt_requires_original_page;
       test_case "loading recovery keeps exact Page authority and unknown input" `Quick test_loading_recovery_preserves_original_input_hold;
+      test_case "popup workflow preserves Page routing and Space input uncertainty" `Quick test_popup_workflow_identity_and_scope;
       test_case "Space status reads native metadata without Page or control effects" `Quick test_native_space_status;
       test_case "production workflow envelope preserves special JSON header keys" `Quick test_native_workflow_json_headers;
       test_case "first evaluation timeout preserves unknown native receipt" `Quick test_first_evaluation_timeout_preserves_unknown_native_receipt;

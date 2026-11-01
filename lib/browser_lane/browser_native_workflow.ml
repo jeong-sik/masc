@@ -7,8 +7,10 @@ type clipboard_content = { text : string; html : string option }
 type page_code = Expression of string | Call of { source : string; argument : Yojson.Safe.t }
 type url_matcher = Glob of string | Regexp of { source : string; flags : string option }
 type native_options = Yojson.Safe.t
+type popup_wait_options = Yojson.Safe.t
 type action =
   | Click of string | Double_click of string | Hover of string
+  | Click_and_wait_for_popup of { selector : string; popup_options : popup_wait_options option }
   | Drag_and_drop of { selector : string; destination : string }
   | Mouse_click of { x : float; y : float }
   | Mouse_move of { x : float; y : float }
@@ -119,7 +121,7 @@ let selection_of_json = function
   | `Bool _|`Int _|`Intlit _|`Float _ -> Error "invalid native selectOption selection"
 let options_of_json action raw =
   let allowed=match action with
-    | Click _ -> Some ["button";"clickCount";"delay";"position";"force";"timeout";"label"]
+    | Click _|Click_and_wait_for_popup _ -> Some ["button";"clickCount";"delay";"position";"force";"timeout";"label"]
     | Double_click _ -> Some ["button";"delay";"position";"force";"timeout";"label"]
     | Hover _ -> Some ["position";"force";"timeout";"label"]
     | Drag_and_drop _ -> Some ["button";"sourcePosition";"targetPosition";"force";"timeout";"label"]
@@ -173,25 +175,39 @@ let options_of_json action raw =
   | Snapshot,Some (`String "subtree"),None -> Error "subtree snapshot requires root from the same Page"
   | Snapshot,(None|Some _),Some _ -> Error "snapshot root requires subtree scope"
   | Snapshot,(None|Some _),None -> Ok raw
-  | (Click _|Double_click _|Hover _|Drag_and_drop _|Mouse_click _|Mouse_move _|Mouse_wheel _
+  | (Click _|Click_and_wait_for_popup _|Double_click _|Hover _|Drag_and_drop _|Mouse_click _|Mouse_move _|Mouse_wheel _
     |Fill _|Press _|Focus _|Reload|Keyboard_type _|Keyboard_insert_text _|Keyboard_paste _|Keyboard_press _
     |Select_option _|Goto _|Wait_for_url _|Wait_for_selector _|Wait_for_load_state _
     |Evaluate _|Wait_for_function _|Fetch _|Cancel_download _|Url|Title|Info|Events|Wait_for_timeout _),_,_ -> Ok raw
 let fetch_save_name step = match step.action,step.options with
   | Fetch _,Some (`Assoc fields) ->
       (match List.assoc_opt "saveAs" fields with Some (`String value) -> Some value | None|Some _ -> None)
-  | (Click _|Double_click _|Hover _|Drag_and_drop _|Mouse_click _|Mouse_move _|Mouse_wheel _
+  | (Click _|Click_and_wait_for_popup _|Double_click _|Hover _|Drag_and_drop _|Mouse_click _|Mouse_move _|Mouse_wheel _
     |Fill _|Press _|Focus _|Reload|Keyboard_type _|Keyboard_insert_text _|Keyboard_paste _|Keyboard_press _
     |Select_option _|Goto _|Wait_for_url _|Wait_for_selector _|Wait_for_load_state _
     |Evaluate _|Wait_for_function _|Cancel_download _|Url|Title|Info|Snapshot|Events|Wait_for_timeout _),_
   | Fetch _,(None|Some (`Null|`Bool _|`Int _|`Intlit _|`Float _|`String _|`List _)) -> None
 let step_of_json value =
   let* fields = object_fields ["method";"selector";"destination";"x";"y";"text";"html";"key";"url";
-    "selectionJson";"state";"source";"argumentJson";"milliseconds";"options";"urlRegex";"downloadId"] value in
+    "selectionJson";"state";"source";"argumentJson";"milliseconds";"options";"urlRegex";"downloadId";"popupOptions"] value in
   let* method_ = text "method" fields in
   let arguments names = object_fields ("method" :: "options" :: names) value in
   let selector () = text "selector" fields in
   let* action = match method_ with
+    | "clickAndWaitForPopup" ->
+      let* _=arguments ["selector";"popupOptions"] in
+      let* selector=selector () in
+      let* popup_options=match List.assoc_opt "popupOptions" fields with
+        | None -> Ok None
+        | Some value ->
+          let* options=object_fields ["timeout"] value in
+          let* ()=match List.assoc_opt "timeout" options with
+            | None -> Ok ()
+            | Some value -> (match finite_number value with
+              | Some value when value>=0. -> Ok ()
+              | None|Some _ -> Error "popup timeout must be finite nonnegative milliseconds") in
+          Ok (Some value) in
+      Ok (Click_and_wait_for_popup {selector;popup_options})
     | "click" | "dblclick" | "hover" ->
       let* _ = arguments ["selector"] in let* selector = selector () in
       (match method_ with "click" -> Ok (Click selector) | "dblclick" -> Ok (Double_click selector)
@@ -298,18 +314,19 @@ let of_json value =
     | _ -> Error "steps must be a native Page call array" in
   Ok {tab_id;expected_url;steps;snapshot_scope;max_chars}
 let is_effect = function
-  | Click _ | Double_click _ | Hover _ | Drag_and_drop _ | Mouse_click _ | Mouse_move _ | Mouse_wheel _
+  | Click _ | Click_and_wait_for_popup _ | Double_click _ | Hover _ | Drag_and_drop _ | Mouse_click _ | Mouse_move _ | Mouse_wheel _
   | Fill _ | Press _ | Focus _ | Reload
   | Keyboard_type _ | Keyboard_insert_text _ | Keyboard_paste _ | Keyboard_press _
   | Select_option _ | Goto _ | Evaluate _ | Wait_for_function _ | Fetch _ | Cancel_download _ | Events -> true
   | Wait_for_url _ | Wait_for_selector _ | Wait_for_load_state _|Url|Title|Info|Snapshot|Wait_for_timeout _ -> false
 let holds_input = function
-  | Click _|Double_click _|Mouse_click _|Drag_and_drop _|Press _|Keyboard_press _|Keyboard_type _|Keyboard_paste _ -> true
+  | Click _|Click_and_wait_for_popup _|Double_click _|Mouse_click _|Drag_and_drop _|Press _|Keyboard_press _|Keyboard_type _|Keyboard_paste _ -> true
   | Hover _|Mouse_move _|Mouse_wheel _|Fill _|Focus _|Reload
   | Keyboard_insert_text _|Select_option _|Goto _
   | Wait_for_url _|Wait_for_selector _|Wait_for_load_state _|Evaluate _|Wait_for_function _|Fetch _|Cancel_download _
   | Url|Title|Info|Snapshot|Events|Wait_for_timeout _ -> false
 let method_name = function
+  | Click_and_wait_for_popup _ -> "clickAndWaitForPopup"
   | Click _ -> "click" | Double_click _ -> "dblclick" | Hover _ -> "hover" | Fill _ -> "fill"
   | Press _ -> "press" | Select_option _ -> "selectOption" | Goto _ -> "goto" | Wait_for_url _ -> "waitForURL"
   | Focus _ -> "focus" | Reload -> "reload"
@@ -338,6 +355,8 @@ let step_to_json {action;options} =
   let selector value = ["selector",string value] in
   let fields = match action with
     | Click s | Double_click s | Hover s | Focus s -> selector s
+    | Click_and_wait_for_popup {selector=s;popup_options} -> selector s
+      @ Option.to_list (Option.map (fun options -> "popupOptions",options) popup_options)
     | Drag_and_drop {selector=s;destination} -> selector s @ ["destination",string destination]
     | Mouse_click {x;y}|Mouse_move {x;y}|Mouse_wheel {x;y} -> ["x",`Float x;"y",`Float y]
     | Fill {selector=s;text} -> selector s @ ["text",string text]

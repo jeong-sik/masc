@@ -1,11 +1,13 @@
 (** Local input admission and human reset assertions. Operator confirmation is
     a distinct authority; it never proves the original SDK gesture released. *)
+type scope = Page_scope | Space_scope
 type pending = private {
   generation : string;
   command_id : string;
   tab_id : int;
   page_label : string;
   operation : string;
+  scope : scope;
 }
 type readiness = Command_settled | Operator_reset_asserted of { pending:pending; at:float }
 type status = Ready of readiness | Uncertain of pending
@@ -17,7 +19,10 @@ val within_command : t -> command_id:string -> (unit -> 'a) -> ('a, string) resu
 (** Reject overlapping scopes. Cancellation leaves unresolved input pending
     but releases only the local running marker. *)
 val admit : t -> (unit, string) result
-val begin_holding : t -> tab_id:int -> page_label:string -> operation:string -> (unit, string) result
+val begin_holding : t -> scope:scope -> tab_id:int -> page_label:string -> operation:string -> (unit, string) result
+(** Space_scope preserves the originating Page identity without claiming that
+    later input in a multi-Page workflow stayed on that Page. Neither scope
+    changes the connection-wide guard or operator reset authority. *)
 val command_settled : t -> Browser_ego_release.proof -> unit
 (** Settle the pending input. A proof comes only from [Browser_ego_release.judge]
     over answers that [Browser_ego_release.answer_of_json] read, so a flag a

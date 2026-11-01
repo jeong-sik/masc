@@ -395,6 +395,55 @@ explicit routing and UI limits. Installed MASC, Keeper dispatch and visible UI
 behavior for this extension remain unverified. See
 [the SDK inventory](ego-sdk-coverage.md) for evidence and remaining capabilities.
 
+## Popup continuation in one SDK process
+
+`clickAndWaitForPopup` arms native `Page.waitForEvent("popup")` before one
+`Page.click` call. It reconciles the returned handle's Space and permanent label
+against the unique native inventory row, then uses that row's canonical Page.
+The installed SDK's lightweight event handle may omit target ID and origin;
+those fields are never invented from that handle or used to adopt a tab.
+
+```json
+{
+  "action": "workflow",
+  "lane": "live",
+  "clientId": "<observed client>",
+  "tabId": 1,
+  "expectedUrl": "https://example.test/opener",
+  "steps": [
+    {"method": "clickAndWaitForPopup", "selector": "a[target=_blank]"},
+    {"method": "waitForURL", "url": "https://example.test/child"},
+    {"method": "fill", "selector": "input[name=title]", "text": "Owned result"}
+  ]
+}
+```
+
+Ordinary `options` are the native click options. Optional `popupOptions` accepts
+only the native event wait's `timeout`, in milliseconds; omission preserves the
+SDK default. A popup URL is not mandatory. Existing following `waitForURL` and
+`waitForLoadState` steps express the caller's desired result on the acquired
+Page. The final snapshot and top-level returned `tabId` identify that Page;
+`sourceTabId` and `pages.source` preserve the opener. `pages.current` and each
+transition preserve canonical native identity plus the stable MASC tab ID for a
+later explicit tool call. Source routing is not overwritten with the popup URL.
+
+A returned trigger whose popup wait or identity reconciliation fails appears as
+`pendingAction` with the exact native trigger receipt, outside the completed
+step prefix. The effect is not replayed. A popup observed after an uncertain
+trigger can be retained as an unselected transition without operating it. Native
+event failure diagnostics remain observations. No Page is fabricated or adopted
+on a failed/foreign/ambiguous event. The native popup waiter is consumed on both
+trigger success and failure; no host timeout, Promise.race or cancellation API is
+invented. SDK round disposal still owns interruption of an unfinished wait.
+
+Input uncertainty remains connection-wide. Because a lost reply can follow
+input on a different Page, the private reset view marks popup workflows as
+Space-scoped and retains the original source identity; it does not guess which
+Page holds input. Native receipt requirements, keyboard.type's void ambiguity
+and explicit operator reset authority remain unchanged. This one popup flow is
+not general conditional execution or arbitrary multi-Page scripting. Source,
+component SDK execution and installed MASC acceptance remain separate evidence.
+
 ## Goal-bound Space
 
 Goal Space binding is experimental: no installed Keeper has run Goal discovery

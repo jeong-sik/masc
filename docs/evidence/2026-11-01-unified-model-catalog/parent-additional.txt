@@ -1,0 +1,506 @@
+2026-11-01T02:56:44.0804812Z   ref: 27a4e3337466de8272e2055fd4035795f7ceebe8
+2026-11-01T02:56:44.5933582Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin 27a4e3337466de8272e2055fd4035795f7ceebe8
+2026-11-01T02:56:53.3436936Z  * branch              27a4e3337466de8272e2055fd4035795f7ceebe8 -> FETCH_HEAD
+2026-11-01T02:56:53.3446122Z [command]/usr/bin/git rev-parse --verify --quiet 27a4e3337466de8272e2055fd4035795f7ceebe8^{object}
+2026-11-01T02:56:53.3475288Z 27a4e3337466de8272e2055fd4035795f7ceebe8
+2026-11-01T02:56:53.3581449Z [command]/usr/bin/git checkout --progress --force 27a4e3337466de8272e2055fd4035795f7ceebe8
+2026-11-01T02:56:56.1869743Z Note: switching to '27a4e3337466de8272e2055fd4035795f7ceebe8'.
+2026-11-01T02:56:56.1873978Z HEAD is now at 27a4e333 docs(evidence): retain terminal resume regression and focused Test proof
+2026-11-01T02:56:56.2021930Z [command]/usr/bin/git log -1 --format=%H
+2026-11-01T02:56:56.2053647Z 27a4e3337466de8272e2055fd4035795f7ceebe8
+2026-11-01T02:57:51.6637209Z   TARGET_SUITES: packages/agent_core/test/test_model_catalog_default,packages/agent_core/test/test_snapshot_provider_serialization
+2026-11-01T02:57:51.6772771Z   TARGET_SUITES: packages/agent_core/test/test_model_catalog_default,packages/agent_core/test/test_snapshot_provider_serialization
+2026-11-01T02:57:51.7536179Z [targeted] EIO_BACKEND=<unset> timeout=600s per suite
+2026-11-01T02:57:51.7564043Z [targeted] @@packages/agent_core/test/runtest-test_model_catalog_default: start 2026-11-01T02:57:51Z (dune alias)
+2026-11-01T02:58:34.6243129Z Testing `model catalog default'.
+2026-11-01T02:58:34.6770152Z ASSERT embedded default is exactly the AGENT_CORE models.toml catalog
+2026-11-01T02:58:34.6771170Z   [OK]          embedded catalog          0   load_default.
+2026-11-01T02:58:34.7029122Z ASSERT claude-opus-5-5 prices cache writes
+2026-11-01T02:58:34.7030388Z ASSERT claude-opus-5-5 prices cache reads
+2026-11-01T02:58:34.7031084Z ASSERT claude-sonnet-5 prices cache writes
+2026-11-01T02:58:34.7031735Z ASSERT claude-sonnet-5 prices cache reads
+2026-11-01T02:58:34.7032396Z ASSERT claude-sonnet-5-5 prices cache writes
+2026-11-01T02:58:34.7033127Z ASSERT claude-sonnet-5-5 prices cache reads
+2026-11-01T02:58:34.7033775Z ASSERT claude-fable-5 prices cache writes
+2026-11-01T02:58:34.7034414Z ASSERT claude-fable-5 prices cache reads
+2026-11-01T02:58:34.7035068Z ASSERT claude-fable-5-1 prices cache writes
+2026-11-01T02:58:34.7035713Z ASSERT claude-fable-5-1 prices cache reads
+2026-11-01T02:58:34.7036593Z   [OK]          embedded catalog          1   anthropic rows price cache tokens.
+2026-11-01T02:58:34.7295344Z ASSERT claude-opus-5-5 does not send temperature
+2026-11-01T02:58:34.7296066Z ASSERT claude-opus-5-5 does not send top_p
+2026-11-01T02:58:34.7296711Z ASSERT claude-opus-5-5 does not send top_k
+2026-11-01T02:58:34.7297598Z ASSERT claude-opus-5-5 does not offer top_k
+2026-11-01T02:58:34.7304002Z ASSERT claude-sonnet-5 does not send temperature
+2026-11-01T02:58:34.7304690Z ASSERT claude-sonnet-5 does not send top_p
+2026-11-01T02:58:34.7305340Z ASSERT claude-sonnet-5 does not send top_k
+2026-11-01T02:58:34.7305995Z ASSERT claude-sonnet-5 does not offer top_k
+2026-11-01T02:58:34.7314682Z ASSERT claude-sonnet-5-5 does not send temperature
+2026-11-01T02:58:34.7315441Z ASSERT claude-sonnet-5-5 does not send top_p
+2026-11-01T02:58:34.7316116Z ASSERT claude-sonnet-5-5 does not send top_k
+2026-11-01T02:58:34.7316819Z ASSERT claude-sonnet-5-5 does not offer top_k
+2026-11-01T02:58:34.7323518Z ASSERT claude-fable-5 does not send temperature
+2026-11-01T02:58:34.7324177Z ASSERT claude-fable-5 does not send top_p
+2026-11-01T02:58:34.7324801Z ASSERT claude-fable-5 does not send top_k
+2026-11-01T02:58:34.7325446Z ASSERT claude-fable-5 does not offer top_k
+2026-11-01T02:58:34.7331947Z ASSERT claude-fable-5-1 does not send temperature
+2026-11-01T02:58:34.7332645Z ASSERT claude-fable-5-1 does not send top_p
+2026-11-01T02:58:34.7333297Z ASSERT claude-fable-5-1 does not send top_k
+2026-11-01T02:58:34.7333962Z ASSERT claude-fable-5-1 does not offer top_k
+2026-11-01T02:58:34.7340355Z ASSERT claude-haiku-5-5 does not send temperature
+2026-11-01T02:58:34.7341076Z ASSERT claude-haiku-5-5 does not send top_p
+2026-11-01T02:58:34.7341728Z ASSERT claude-haiku-5-5 does not send top_k
+2026-11-01T02:58:34.7342388Z ASSERT claude-haiku-5-5 does not offer top_k
+2026-11-01T02:58:34.7343268Z   [OK]          embedded catalog          2   Claude rows keep sampling param...
+2026-11-01T02:58:34.7569250Z ASSERT claude-opus-5-5 required tool_choice
+2026-11-01T02:58:34.7570195Z ASSERT claude-opus-5-5 named tool_choice
+2026-11-01T02:58:34.7571083Z ASSERT claude-sonnet-5 required tool_choice
+2026-11-01T02:58:34.7571955Z ASSERT claude-sonnet-5 named tool_choice
+2026-11-01T02:58:34.7572834Z ASSERT claude-sonnet-5-5 required tool_choice
+2026-11-01T02:58:34.7573680Z ASSERT claude-sonnet-5-5 named tool_choice
+2026-11-01T02:58:34.7574218Z ASSERT claude-fable-5 required tool_choice
+2026-11-01T02:58:34.7574742Z ASSERT claude-fable-5 named tool_choice
+2026-11-01T02:58:34.7575522Z ASSERT claude-fable-5-1 required tool_choice
+2026-11-01T02:58:34.7576060Z ASSERT claude-fable-5-1 named tool_choice
+2026-11-01T02:58:34.7576602Z ASSERT claude-haiku-5-5 required tool_choice
+2026-11-01T02:58:34.7577140Z ASSERT claude-haiku-5-5 named tool_choice
+2026-11-01T02:58:34.7578236Z   [OK]          embedded catalog          3   Claude rows state forced tool_c...
+2026-11-01T02:58:34.7823079Z ASSERT gemma4:31b-cloud capability base
+2026-11-01T02:58:34.7824132Z ASSERT gemma4:31b-cloud context
+2026-11-01T02:58:34.7825038Z ASSERT gemma4:31b-cloud tools
+2026-11-01T02:58:34.7825937Z ASSERT gemma4:31b-cloud reasoning
+2026-11-01T02:58:34.7827158Z ASSERT gemma4:31b-cloud leaves the thinking control to the wire
+2026-11-01T02:58:34.7828246Z ASSERT gemma4:31b-cloud json mode
+2026-11-01T02:58:34.7828741Z ASSERT gemma4:31b-cloud no native schema guarantee
+2026-11-01T02:58:34.7829289Z ASSERT gemma4:31b-cloud image input
+2026-11-01T02:58:34.7829964Z ASSERT gemma4:31b-cloud native streaming
+2026-11-01T02:58:34.7830638Z   [OK]          embedded catalog          4   Ollama Cloud v1 vendor rows pre...
+2026-11-01T02:58:34.8078773Z ASSERT no reasoning-capable ollama_cloud row states a thinking control
+2026-11-01T02:58:34.8080039Z   [OK]          embedded catalog          5   no Ollama Cloud row states a wire.
+2026-11-01T02:58:34.8080651Z ASSERT invalid field is diagnosed
+2026-11-01T02:58:34.8081289Z   [OK]          embedded catalog          6   invalid generated input fails c...
+2026-11-01T02:58:34.8583960Z   [OK]          embedded catalog          7   global uses embedded default.
+2026-11-01T02:58:34.8584855Z ASSERT accepted observation is admitted
+2026-11-01T02:58:34.8585830Z   [OK]          embedded catalog          8   serving constraint preserves ex...
+2026-11-01T02:58:34.8586854Z   [OK]          embedded catalog          9   stale serving evidence fails cl...
+2026-11-01T02:58:34.8588053Z   [OK]          embedded catalog         10   probe serving evidence requires...
+2026-11-01T02:58:34.8588827Z ASSERT resolved runtime preserves observed acceptance
+2026-11-01T02:58:34.8589590Z   [OK]          embedded catalog         11   catalog-only runtime projects s...
+2026-11-01T02:58:34.8590341Z ASSERT diagnostic identifies the grouped declaration
+2026-11-01T02:58:34.8591076Z   [OK]          embedded catalog         12   partial serving evidence fails ...
+2026-11-01T02:58:34.8844995Z ASSERT exact declaration
+2026-11-01T02:58:34.8846003Z ASSERT exact declaration
+2026-11-01T02:58:34.8846881Z ASSERT exact declaration
+2026-11-01T02:58:34.8848006Z ASSERT exact declaration
+2026-11-01T02:58:34.8848889Z ASSERT exact declaration
+2026-11-01T02:58:34.8849761Z ASSERT exact declaration
+2026-11-01T02:58:34.8850457Z ASSERT exact declaration
+2026-11-01T02:58:34.8850888Z ASSERT exact declaration
+2026-11-01T02:58:34.8851429Z ASSERT a runtime alias is not an API model declaration
+2026-11-01T02:58:34.8851973Z ASSERT exact declaration
+2026-11-01T02:58:34.8852379Z ASSERT exact declaration
+2026-11-01T02:58:34.8852769Z ASSERT exact declaration
+2026-11-01T02:58:34.8853161Z ASSERT exact declaration
+2026-11-01T02:58:34.8853552Z ASSERT exact declaration
+2026-11-01T02:58:34.8853957Z ASSERT exact declaration
+2026-11-01T02:58:34.8854468Z ASSERT a runtime alias is not an API model declaration
+2026-11-01T02:58:34.8855111Z ASSERT a runtime alias is not an API model declaration
+2026-11-01T02:58:34.8855735Z ASSERT a runtime alias is not an API model declaration
+2026-11-01T02:58:34.8856359Z ASSERT a runtime alias is not an API model declaration
+2026-11-01T02:58:34.8857221Z ASSERT a runtime alias is not an API model declaration
+2026-11-01T02:58:34.8858188Z ASSERT a runtime alias is not an API model declaration
+2026-11-01T02:58:34.8858833Z ASSERT a runtime alias is not an API model declaration
+2026-11-01T02:58:34.8859472Z ASSERT a runtime alias is not an API model declaration
+2026-11-01T02:58:34.8860030Z ASSERT a runtime alias is not an API model declaration
+2026-11-01T02:58:34.8860478Z ASSERT a runtime alias is not an API model declaration
+2026-11-01T02:58:34.8860911Z ASSERT a runtime alias is not an API model declaration
+2026-11-01T02:58:34.8861330Z ASSERT a runtime alias is not an API model declaration
+2026-11-01T02:58:34.8861759Z ASSERT a runtime alias is not an API model declaration
+2026-11-01T02:58:34.8862200Z ASSERT a runtime alias is not an API model declaration
+2026-11-01T02:58:34.8862633Z ASSERT a runtime alias is not an API model declaration
+2026-11-01T02:58:34.8863219Z ASSERT a runtime alias is not an API model declaration
+2026-11-01T02:58:34.8863671Z ASSERT a runtime alias is not an API model declaration
+2026-11-01T02:58:34.8864112Z ASSERT a runtime alias is not an API model declaration
+2026-11-01T02:58:34.8864547Z ASSERT a runtime alias is not an API model declaration
+2026-11-01T02:58:34.8865008Z ASSERT a runtime alias is not an API model declaration
+2026-11-01T02:58:34.8865447Z ASSERT a runtime alias is not an API model declaration
+2026-11-01T02:58:34.8865979Z   [OK]          embedded catalog         13   subscription models resolve the...
+2026-11-01T02:58:34.9109672Z ASSERT default leaves adaptive choice to the provider
+2026-11-01T02:58:34.9110586Z ASSERT lowest mode is between_tools on completion
+2026-11-01T02:58:34.9111402Z ASSERT token count shares the lowest thinking mode
+2026-11-01T02:58:34.9112203Z ASSERT explicit effort survives with between_tools
+2026-11-01T02:58:34.9113052Z ASSERT lowest mode is between_tools on completion
+2026-11-01T02:58:34.9113862Z ASSERT token count shares the lowest thinking mode
+2026-11-01T02:58:34.9114692Z ASSERT explicit effort survives with between_tools
+2026-11-01T02:58:34.9115501Z ASSERT lowest mode is between_tools on completion
+2026-11-01T02:58:34.9116315Z ASSERT token count shares the lowest thinking mode
+2026-11-01T02:58:34.9117132Z ASSERT explicit effort survives with between_tools
+2026-11-01T02:58:34.9118293Z ASSERT lowest mode is between_tools on completion
+2026-11-01T02:58:34.9119146Z ASSERT token count shares the lowest thinking mode
+2026-11-01T02:58:34.9119827Z ASSERT explicit effort survives with between_tools
+2026-11-01T02:58:34.9121291Z ASSERT higher efforts remain available with adaptive thinking
+2026-11-01T02:58:34.9122563Z ASSERT higher efforts remain available with adaptive thinking
+2026-11-01T02:58:34.9123728Z   [OK]          embedded catalog         14   Sonnet 5.5 thinking modes reach...
+2026-11-01T02:58:34.9382219Z ASSERT temperature is not sent
+2026-11-01T02:58:34.9382901Z ASSERT top_p is not sent
+2026-11-01T02:58:34.9383421Z ASSERT top_k is not sent
+2026-11-01T02:58:34.9383934Z ASSERT top_k is not offered
+2026-11-01T02:58:34.9384630Z ASSERT default leaves adaptive choice to the provider
+2026-11-01T02:58:34.9385482Z ASSERT thinking on asks for adaptive and binds its blocks
+2026-11-01T02:58:34.9386278Z ASSERT the binding field brings its beta header
+2026-11-01T02:58:34.9387079Z ASSERT a request without the binding sends no beta header
+2026-11-01T02:58:34.9388037Z ASSERT thinking off sends disabled
+2026-11-01T02:58:34.9388684Z ASSERT the disabled request names no effort
+2026-11-01T02:58:34.9389448Z ASSERT explicit low-high effort keeps disabled thinking
+2026-11-01T02:58:34.9390710Z ASSERT explicit effort reaches output config
+2026-11-01T02:58:34.9391496Z ASSERT explicit low-high effort keeps disabled thinking
+2026-11-01T02:58:34.9392279Z ASSERT explicit effort reaches output config
+2026-11-01T02:58:34.9393060Z ASSERT explicit low-high effort keeps disabled thinking
+2026-11-01T02:58:34.9393819Z ASSERT explicit effort reaches output config
+2026-11-01T02:58:34.9394548Z ASSERT explicit low-high effort keeps disabled thinking
+2026-11-01T02:58:34.9395290Z ASSERT explicit effort reaches output config
+2026-11-01T02:58:34.9396032Z ASSERT explicit low-high effort keeps disabled thinking
+2026-11-01T02:58:34.9396760Z ASSERT explicit effort reaches output config
+2026-11-01T02:58:34.9397724Z ASSERT explicit low-high effort keeps disabled thinking
+2026-11-01T02:58:34.9398466Z ASSERT explicit effort reaches output config
+2026-11-01T02:58:34.9399191Z ASSERT explicit low-high effort keeps disabled thinking
+2026-11-01T02:58:34.9400242Z ASSERT explicit effort reaches output config
+2026-11-01T02:58:34.9400993Z ASSERT explicit low-high effort keeps disabled thinking
+2026-11-01T02:58:34.9401710Z ASSERT explicit effort reaches output config
+2026-11-01T02:58:34.9402440Z ASSERT explicit low-high effort keeps disabled thinking
+2026-11-01T02:58:34.9403169Z ASSERT explicit effort reaches output config
+2026-11-01T02:58:34.9403807Z ASSERT thinking off at xhigh is refused
+2026-11-01T02:58:34.9404410Z ASSERT thinking off at max is refused
+2026-11-01T02:58:34.9404975Z ASSERT no flat price is stated
+2026-11-01T02:58:34.9405763Z   [OK]          embedded catalog         15   Haiku 5.5 row reaches the wire.
+2026-11-01T02:58:34.9657031Z ASSERT prefill rejected before ordinary/streaming request is emitted
+2026-11-01T02:58:34.9658327Z ASSERT user-ending history with previous assistant remains accepted
+2026-11-01T02:58:34.9659391Z ASSERT prefill rejected before ordinary/streaming request is emitted
+2026-11-01T02:58:34.9660411Z ASSERT user-ending history with previous assistant remains accepted
+2026-11-01T02:58:34.9661348Z ASSERT exact shared serializer artifact rejects the same prefill
+2026-11-01T02:58:34.9662190Z ASSERT counting cannot admit a refused completion
+2026-11-01T02:58:34.9663070Z ASSERT prefill rejected before ordinary/streaming request is emitted
+2026-11-01T02:58:34.9664075Z ASSERT user-ending history with previous assistant remains accepted
+2026-11-01T02:58:34.9665064Z ASSERT prefill rejected before ordinary/streaming request is emitted
+2026-11-01T02:58:34.9666109Z ASSERT user-ending history with previous assistant remains accepted
+2026-11-01T02:58:34.9667074Z ASSERT exact shared serializer artifact rejects the same prefill
+2026-11-01T02:58:34.9668144Z ASSERT counting cannot admit a refused completion
+2026-11-01T02:58:34.9669073Z ASSERT prefill rejected before ordinary/streaming request is emitted
+2026-11-01T02:58:34.9670281Z ASSERT user-ending history with previous assistant remains accepted
+2026-11-01T02:58:34.9671429Z ASSERT prefill rejected before ordinary/streaming request is emitted
+2026-11-01T02:58:34.9672829Z ASSERT user-ending history with previous assistant remains accepted
+2026-11-01T02:58:34.9673796Z ASSERT exact shared serializer artifact rejects the same prefill
+2026-11-01T02:58:34.9674649Z ASSERT counting cannot admit a refused completion
+2026-11-01T02:58:34.9675538Z ASSERT prefill rejected before ordinary/streaming request is emitted
+2026-11-01T02:58:34.9676852Z ASSERT user-ending history with previous assistant remains accepted
+2026-11-01T02:58:34.9678274Z ASSERT prefill rejected before ordinary/streaming request is emitted
+2026-11-01T02:58:34.9679648Z ASSERT user-ending history with previous assistant remains accepted
+2026-11-01T02:58:34.9683553Z ASSERT exact shared serializer artifact rejects the same prefill
+2026-11-01T02:58:34.9684392Z ASSERT counting cannot admit a refused completion
+2026-11-01T02:58:34.9688197Z ASSERT other model and Kimi continuation behavior is preserved
+2026-11-01T02:58:34.9691767Z ASSERT other model and Kimi continuation behavior is preserved
+2026-11-01T02:58:34.9693363Z ASSERT other model and Kimi continuation behavior is preserved
+2026-11-01T02:58:34.9695568Z ASSERT other model and Kimi continuation behavior is preserved
+2026-11-01T02:58:34.9696383Z ASSERT refusal never rewrites assistant content
+2026-11-01T02:58:34.9697277Z   [OK]          embedded catalog         16   Haiku final assistant admission.
+2026-11-01T02:58:34.9955902Z ASSERT claude-fable-5 catalog excludes prefill
+2026-11-01T02:58:34.9956826Z ASSERT claude-fable-5 refuses final assistant before dispatch
+2026-11-01T02:58:34.9958329Z ASSERT claude-fable-5 retains accepted user-ending history
+2026-11-01T02:58:34.9959287Z ASSERT claude-fable-5 refuses final assistant before dispatch
+2026-11-01T02:58:34.9960386Z ASSERT claude-fable-5 retains accepted user-ending history
+2026-11-01T02:58:34.9961198Z ASSERT claude-fable-5-1 catalog excludes prefill
+2026-11-01T02:58:34.9962046Z ASSERT claude-fable-5-1 refuses final assistant before dispatch
+2026-11-01T02:58:34.9964385Z ASSERT claude-fable-5-1 retains accepted user-ending history
+2026-11-01T02:58:34.9965356Z ASSERT claude-fable-5-1 refuses final assistant before dispatch
+2026-11-01T02:58:34.9966284Z ASSERT claude-fable-5-1 retains accepted user-ending history
+2026-11-01T02:58:34.9967071Z ASSERT claude-mythos-5 catalog excludes prefill
+2026-11-01T02:58:34.9968154Z ASSERT claude-mythos-5 refuses final assistant before dispatch
+2026-11-01T02:58:34.9969053Z ASSERT claude-mythos-5 retains accepted user-ending history
+2026-11-01T02:58:34.9969992Z ASSERT claude-mythos-5 refuses final assistant before dispatch
+2026-11-01T02:58:34.9970871Z ASSERT claude-mythos-5 retains accepted user-ending history
+2026-11-01T02:58:34.9971727Z ASSERT claude-mythos-preview catalog excludes prefill
+2026-11-01T02:58:34.9972645Z ASSERT claude-mythos-preview refuses final assistant before dispatch
+2026-11-01T02:58:34.9973626Z ASSERT claude-mythos-preview retains accepted user-ending history
+2026-11-01T02:58:34.9974624Z ASSERT claude-mythos-preview refuses final assistant before dispatch
+2026-11-01T02:58:34.9975589Z ASSERT claude-mythos-preview retains accepted user-ending history
+2026-11-01T02:58:34.9976423Z ASSERT claude-opus-5-5 catalog excludes prefill
+2026-11-01T02:58:34.9977231Z ASSERT claude-opus-5-5 refuses final assistant before dispatch
+2026-11-01T02:58:34.9978350Z ASSERT claude-opus-5-5 retains accepted user-ending history
+2026-11-01T02:58:34.9979277Z ASSERT claude-opus-5-5 refuses final assistant before dispatch
+2026-11-01T02:58:34.9980155Z ASSERT claude-opus-5-5 retains accepted user-ending history
+2026-11-01T02:58:34.9980952Z ASSERT claude-sonnet-5 catalog excludes prefill
+2026-11-01T02:58:34.9981769Z ASSERT claude-sonnet-5 refuses final assistant before dispatch
+2026-11-01T02:58:34.9982660Z ASSERT claude-sonnet-5 retains accepted user-ending history
+2026-11-01T02:58:34.9983542Z ASSERT claude-sonnet-5 refuses final assistant before dispatch
+2026-11-01T02:58:34.9984415Z ASSERT claude-sonnet-5 retains accepted user-ending history
+2026-11-01T02:58:34.9985226Z ASSERT claude-sonnet-5-5 catalog excludes prefill
+2026-11-01T02:58:34.9986077Z ASSERT claude-sonnet-5-5 refuses final assistant before dispatch
+2026-11-01T02:58:34.9986962Z ASSERT claude-sonnet-5-5 retains accepted user-ending history
+2026-11-01T02:58:34.9988423Z ASSERT claude-sonnet-5-5 refuses final assistant before dispatch
+2026-11-01T02:58:34.9989331Z ASSERT claude-sonnet-5-5 retains accepted user-ending history
+2026-11-01T02:58:34.9991125Z ASSERT claude-haiku-4-5 keeps existing default admission
+2026-11-01T02:58:34.9994650Z ASSERT unlisted-model keeps existing default admission
+2026-11-01T02:58:34.9995933Z   [OK]          embedded catalog         17   Documented Claude prefill exclu...
+2026-11-01T02:58:35.0268410Z ASSERT claude-opus-5-5 admits its declared reasoning efforts
+2026-11-01T02:58:35.0269357Z ASSERT gpt-5.6-sol admits its declared reasoning efforts
+2026-11-01T02:58:35.0270201Z ASSERT gpt-5.6-terra admits its declared reasoning efforts
+2026-11-01T02:58:35.0271119Z ASSERT gpt-5.6-luna admits its declared reasoning efforts
+2026-11-01T02:58:35.0271913Z ASSERT gpt-6-sol admits its declared reasoning efforts
+2026-11-01T02:58:35.0272729Z ASSERT gpt-6-astra admits its declared reasoning efforts
+2026-11-01T02:58:35.0273947Z ASSERT gpt-5.3-codex-spark admits its declared reasoning efforts
+2026-11-01T02:58:35.0274835Z ASSERT gpt-5.6-sol admits its declared reasoning efforts
+2026-11-01T02:58:35.0275675Z ASSERT gpt-5.6-terra admits its declared reasoning efforts
+2026-11-01T02:58:35.0276498Z ASSERT gpt-5.5 admits its declared reasoning efforts
+2026-11-01T02:58:35.0277514Z ASSERT claude-opus-5-5 admits its declared reasoning efforts
+2026-11-01T02:58:35.0278439Z ASSERT claude-sonnet-5-5 admits its declared reasoning efforts
+2026-11-01T02:58:35.0279331Z ASSERT claude-haiku-5-5 admits its declared reasoning efforts
+2026-11-01T02:58:35.0280163Z ASSERT gpt-6-sol admits its declared reasoning efforts
+2026-11-01T02:58:35.0280957Z ASSERT gpt-6.1-sol admits its declared reasoning efforts
+2026-11-01T02:58:35.0281756Z ASSERT gpt-6-astra admits its declared reasoning efforts
+2026-11-01T02:58:35.0282555Z ASSERT gpt-6-luna admits its declared reasoning efforts
+2026-11-01T02:58:35.0283405Z ASSERT gemini-4-argon admits its declared reasoning efforts
+2026-11-01T02:58:35.0284252Z ASSERT gemini-3.8-flash admits its declared reasoning efforts
+2026-11-01T02:58:35.0285131Z ASSERT gemini-3.7-flash admits its declared reasoning efforts
+2026-11-01T02:58:35.0285986Z ASSERT gemini-3.6-flash admits its declared reasoning efforts
+2026-11-01T02:58:35.0286964Z   [OK]          embedded catalog         18   subscription models admit their...
+2026-11-01T02:58:35.0533257Z ASSERT Responses Sol accepts its maximum supported effort
+2026-11-01T02:58:35.0534193Z ASSERT Responses Sol refusal retains Max in the admitted ladder
+2026-11-01T02:58:35.0535011Z ASSERT Responses Sol does not admit Codex Ultra
+2026-11-01T02:58:35.0535711Z ASSERT scoped Sol keeps the full context window
+2026-11-01T02:58:35.0536606Z   [OK]          embedded catalog         19   Responses Sol rejects Codex-onl...
+2026-11-01T02:58:35.0794181Z ASSERT glm-coding resolves glm-4.6v to its own output ceiling
+2026-11-01T02:58:35.0795061Z ASSERT glm-coding keeps glm-4.6v image-capable
+2026-11-01T02:58:35.0795820Z ASSERT glm resolves glm-4.6v to its own output ceiling
+2026-11-01T02:58:35.0796580Z ASSERT glm keeps glm-4.6v image-capable
+2026-11-01T02:58:35.0797723Z   [OK]          embedded catalog         20   glm vision rows reach a runtime...
+2026-11-01T02:58:35.1055153Z ASSERT kimi_coding.kimi-for-coding omits temperature (enable_thinking=unset)
+2026-11-01T02:58:35.1056025Z ASSERT kimi_coding.kimi-for-coding omits temperature (enable_thinking=true)
+2026-11-01T02:58:35.1056849Z ASSERT kimi_coding.kimi-for-coding omits temperature (enable_thinking=false)
+2026-11-01T02:58:35.1057981Z ASSERT kimi_coding.k3 omits temperature (enable_thinking=unset)
+2026-11-01T02:58:35.1059085Z ASSERT kimi_coding.k3 omits temperature (enable_thinking=true)
+2026-11-01T02:58:35.1059768Z ASSERT kimi_coding.k3 omits temperature (enable_thinking=false)
+2026-11-01T02:58:35.1060454Z ASSERT kimi_coding.k3-256k omits temperature (enable_thinking=unset)
+2026-11-01T02:58:35.1061158Z ASSERT kimi_coding.k3-256k omits temperature (enable_thinking=true)
+2026-11-01T02:58:35.1061853Z ASSERT kimi_coding.k3-256k omits temperature (enable_thinking=false)
+2026-11-01T02:58:35.1062625Z   [OK]          embedded catalog         21   kimi coding rows leave temperat...
+2026-11-01T02:58:35.1311195Z ASSERT glm-4.6v has the bare row and its two provider-scoped twins
+2026-11-01T02:58:35.1311922Z ASSERT bare output ceiling
+2026-11-01T02:58:35.1312405Z ASSERT bare context window
+2026-11-01T02:58:35.1312880Z ASSERT bare image input
+2026-11-01T02:58:35.1313355Z ASSERT bare multimodal inputs
+2026-11-01T02:58:35.1313892Z ASSERT glm-coding output ceiling
+2026-11-01T02:58:35.1314526Z ASSERT glm-coding context window
+2026-11-01T02:58:35.1314966Z ASSERT glm-coding image input
+2026-11-01T02:58:35.1315390Z ASSERT glm-coding multimodal inputs
+2026-11-01T02:58:35.1315810Z ASSERT glm output ceiling
+2026-11-01T02:58:35.1316187Z ASSERT glm context window
+2026-11-01T02:58:35.1316561Z ASSERT glm image input
+2026-11-01T02:58:35.1316932Z ASSERT glm multimodal inputs
+2026-11-01T02:58:35.1317845Z   [OK]          embedded catalog         22   glm vision rows agree.
+2026-11-01T02:58:35.1568348Z ASSERT anthropic/claude-opus-5 capability base
+2026-11-01T02:58:35.1569095Z ASSERT anthropic/claude-opus-5 context
+2026-11-01T02:58:35.1569754Z ASSERT anthropic/claude-opus-5 max output
+2026-11-01T02:58:35.1570419Z ASSERT anthropic/claude-opus-5 input price
+2026-11-01T02:58:35.1571082Z ASSERT anthropic/claude-opus-5 output price
+2026-11-01T02:58:35.1571827Z ASSERT anthropic/claude-opus-5 reasoning stream
+2026-11-01T02:58:35.1572562Z ASSERT anthropic/claude-opus-5 reasoning output
+2026-11-01T02:58:35.1573251Z ASSERT anthropic/claude-opus-5 reasoning replay
+2026-11-01T02:58:35.1573920Z ASSERT anthropic/claude-opus-5 image input
+2026-11-01T02:58:35.1574626Z ASSERT anthropic/claude-sonnet-5 capability base
+2026-11-01T02:58:35.1575293Z ASSERT anthropic/claude-sonnet-5 context
+2026-11-01T02:58:35.1575933Z ASSERT anthropic/claude-sonnet-5 max output
+2026-11-01T02:58:35.1576578Z ASSERT anthropic/claude-sonnet-5 input price
+2026-11-01T02:58:35.1577262Z ASSERT anthropic/claude-sonnet-5 output price
+2026-11-01T02:58:35.1578200Z ASSERT anthropic/claude-sonnet-5 reasoning stream
+2026-11-01T02:58:35.1578923Z ASSERT anthropic/claude-sonnet-5 reasoning output
+2026-11-01T02:58:35.1579643Z ASSERT anthropic/claude-sonnet-5 reasoning replay
+2026-11-01T02:58:35.1580392Z ASSERT anthropic/claude-sonnet-5 image input
+2026-11-01T02:58:35.1581032Z ASSERT openai/gpt-5.5 capability base
+2026-11-01T02:58:35.1581600Z ASSERT openai/gpt-5.5 context
+2026-11-01T02:58:35.1582136Z ASSERT openai/gpt-5.5 max output
+2026-11-01T02:58:35.1582685Z ASSERT openai/gpt-5.5 input price
+2026-11-01T02:58:35.1583232Z ASSERT openai/gpt-5.5 output price
+2026-11-01T02:58:35.1583804Z ASSERT openai/gpt-5.5 reasoning stream
+2026-11-01T02:58:35.1584407Z ASSERT openai/gpt-5.5 reasoning output
+2026-11-01T02:58:35.1585009Z ASSERT openai/gpt-5.5 reasoning replay
+2026-11-01T02:58:35.1585587Z ASSERT openai/gpt-5.5 image input
+2026-11-01T02:58:35.1586183Z ASSERT openai/gpt-5.6-sol capability base
+2026-11-01T02:58:35.1586787Z ASSERT openai/gpt-5.6-sol context
+2026-11-01T02:58:35.1587554Z ASSERT openai/gpt-5.6-sol max output
+2026-11-01T02:58:35.1588158Z ASSERT openai/gpt-5.6-sol input price
+2026-11-01T02:58:35.1589076Z ASSERT openai/gpt-5.6-sol output price
+2026-11-01T02:58:35.1589710Z ASSERT openai/gpt-5.6-sol reasoning stream
+2026-11-01T02:58:35.1590339Z ASSERT openai/gpt-5.6-sol reasoning output
+2026-11-01T02:58:35.1590949Z ASSERT openai/gpt-5.6-sol reasoning replay
+2026-11-01T02:58:35.1591542Z ASSERT openai/gpt-5.6-sol image input
+2026-11-01T02:58:35.1592183Z ASSERT google/gemini-3.8-flash capability base
+2026-11-01T02:58:35.1592830Z ASSERT google/gemini-3.8-flash context
+2026-11-01T02:58:35.1593437Z ASSERT google/gemini-3.8-flash max output
+2026-11-01T02:58:35.1594072Z ASSERT google/gemini-3.8-flash input price
+2026-11-01T02:58:35.1594720Z ASSERT google/gemini-3.8-flash output price
+2026-11-01T02:58:35.1595391Z ASSERT google/gemini-3.8-flash reasoning stream
+2026-11-01T02:58:35.1596082Z ASSERT google/gemini-3.8-flash reasoning output
+2026-11-01T02:58:35.1596779Z ASSERT google/gemini-3.8-flash reasoning replay
+2026-11-01T02:58:35.1597877Z ASSERT google/gemini-3.8-flash image input
+2026-11-01T02:58:35.1598518Z ASSERT x-ai/grok-4.6 capability base
+2026-11-01T02:58:35.1599068Z ASSERT x-ai/grok-4.6 context
+2026-11-01T02:58:35.1599568Z ASSERT x-ai/grok-4.6 max output
+2026-11-01T02:58:35.1600175Z ASSERT x-ai/grok-4.6 input price
+2026-11-01T02:58:35.1600740Z ASSERT x-ai/grok-4.6 output price
+2026-11-01T02:58:35.1601309Z ASSERT x-ai/grok-4.6 reasoning stream
+2026-11-01T02:58:35.1601895Z ASSERT x-ai/grok-4.6 reasoning output
+2026-11-01T02:58:35.1602472Z ASSERT x-ai/grok-4.6 reasoning replay
+2026-11-01T02:58:35.1603034Z ASSERT x-ai/grok-4.6 image input
+2026-11-01T02:58:35.1603619Z ASSERT moonshotai/kimi-k3 capability base
+2026-11-01T02:58:35.1604216Z ASSERT moonshotai/kimi-k3 context
+2026-11-01T02:58:35.1604781Z ASSERT moonshotai/kimi-k3 max output
+2026-11-01T02:58:35.1605382Z ASSERT moonshotai/kimi-k3 input price
+2026-11-01T02:58:35.1605990Z ASSERT moonshotai/kimi-k3 output price
+2026-11-01T02:58:35.1606614Z ASSERT moonshotai/kimi-k3 reasoning stream
+2026-11-01T02:58:35.1607256Z ASSERT moonshotai/kimi-k3 reasoning output
+2026-11-01T02:58:35.1608089Z ASSERT moonshotai/kimi-k3 reasoning replay
+2026-11-01T02:58:35.1608726Z ASSERT moonshotai/kimi-k3 image input
+2026-11-01T02:58:35.1609343Z ASSERT z-ai/glm-5.3-flash capability base
+2026-11-01T02:58:35.1609928Z ASSERT z-ai/glm-5.3-flash context
+2026-11-01T02:58:35.1610498Z ASSERT z-ai/glm-5.3-flash max output
+2026-11-01T02:58:35.1611077Z ASSERT z-ai/glm-5.3-flash input price
+2026-11-01T02:58:35.1611669Z ASSERT z-ai/glm-5.3-flash output price
+2026-11-01T02:58:35.1612287Z ASSERT z-ai/glm-5.3-flash reasoning stream
+2026-11-01T02:58:35.1612922Z ASSERT z-ai/glm-5.3-flash reasoning output
+2026-11-01T02:58:35.1613560Z ASSERT z-ai/glm-5.3-flash reasoning replay
+2026-11-01T02:58:35.1614161Z ASSERT z-ai/glm-5.3-flash image input
+2026-11-01T02:58:35.1614716Z ASSERT z-ai/glm-5.3 capability base
+2026-11-01T02:58:35.1615248Z ASSERT z-ai/glm-5.3 context
+2026-11-01T02:58:35.1615747Z ASSERT z-ai/glm-5.3 max output
+2026-11-01T02:58:35.1616259Z ASSERT z-ai/glm-5.3 input price
+2026-11-01T02:58:35.1616802Z ASSERT z-ai/glm-5.3 output price
+2026-11-01T02:58:35.1617568Z ASSERT z-ai/glm-5.3 reasoning stream
+2026-11-01T02:58:35.1618153Z ASSERT z-ai/glm-5.3 reasoning output
+2026-11-01T02:58:35.1618716Z ASSERT z-ai/glm-5.3 reasoning replay
+2026-11-01T02:58:35.1619259Z ASSERT z-ai/glm-5.3 image input
+2026-11-01T02:58:35.1619955Z ASSERT no openrouter row for deepseek/deepseek-v4.1-flash
+2026-11-01T02:58:35.1620928Z   [FAIL]        embedded catalog         23   OpenRouter rows preserve probe ...
+2026-11-01T02:58:35.1850932Z ASSERT anthropic/claude-fable-5.1 refuses required tool choice
+2026-11-01T02:58:35.1851869Z ASSERT anthropic/claude-fable-5.1 refuses named tool choice
+2026-11-01T02:58:35.1852671Z ASSERT qwen/qwen3.8-flash refuses required tool choice
+2026-11-01T02:58:35.1853442Z ASSERT qwen/qwen3.8-flash refuses named tool choice
+2026-11-01T02:58:35.1854210Z ASSERT glm-5.3-flashx is not offered structured_outputs
+2026-11-01T02:58:35.1854915Z ASSERT qwen refuses required tool choice
+2026-11-01T02:58:35.1855532Z ASSERT qwen refuses named tool choice
+2026-11-01T02:58:35.1856098Z ASSERT z-ai/glm-5.3 is text-only
+2026-11-01T02:58:35.1856719Z ASSERT deepseek/deepseek-v4-flash is text-only
+2026-11-01T02:58:35.1857624Z ASSERT deepseek/deepseek-v4-pro is text-only
+2026-11-01T02:58:35.1858565Z   [OK]          embedded catalog         24   OpenRouter rows lower contradic...
+2026-11-01T02:58:35.2113402Z ASSERT every OpenRouter row in the catalog has a measured ladder
+2026-11-01T02:58:35.2114739Z   [FAIL]        embedded catalog         25   OpenRouter rows declare their m...
+2026-11-01T02:58:35.2115571Z ASSERT reasoning_replay rejects ""
+2026-11-01T02:58:35.2116159Z ASSERT reasoning_replay rejects whitespace
+2026-11-01T02:58:35.2116793Z ASSERT assistant_tool_content_format rejects ""
+2026-11-01T02:58:35.2117747Z ASSERT assistant_tool_content_format rejects whitespace
+2026-11-01T02:58:35.2118443Z ASSERT chat_output_budget_field rejects ""
+2026-11-01T02:58:35.2119082Z ASSERT chat_output_budget_field rejects whitespace
+2026-11-01T02:58:35.2119702Z ASSERT tool_schema_conformance rejects ""
+2026-11-01T02:58:35.2120322Z ASSERT tool_schema_conformance rejects whitespace
+2026-11-01T02:58:35.2120930Z ASSERT reasoning_output_format rejects ""
+2026-11-01T02:58:35.2121555Z ASSERT reasoning_output_format rejects whitespace
+2026-11-01T02:58:35.2122191Z ASSERT content_inline_reasoning rejects ""
+2026-11-01T02:58:35.2122817Z ASSERT content_inline_reasoning rejects whitespace
+2026-11-01T02:58:35.2123396Z ASSERT strict loader names the key
+2026-11-01T02:58:35.2124173Z   [OK]          embedded catalog         26   empty capability vocab value is...
+2026-11-01T02:58:35.2126246Z │ [FAIL]        embedded catalog         23   OpenRouter rows preserve pro...  │
+2026-11-01T02:58:35.2128385Z FAIL no openrouter row for deepseek/deepseek-v4.1-flash
+2026-11-01T02:58:35.2137154Z │ [FAIL]        embedded catalog         25   OpenRouter rows declare thei...  │
+2026-11-01T02:58:35.2141117Z FAIL every OpenRouter row in the catalog has a measured ladder
+2026-11-01T02:58:35.2141847Z    Expected: `25'
+2026-11-01T02:58:35.2142176Z    Received: `24'
+2026-11-01T02:58:35.2147084Z 2 failures! in 0.587s. 27 tests run.
+2026-11-01T02:58:35.2437735Z [targeted] @@packages/agent_core/test/runtest-test_model_catalog_default: FAIL exit 1 in 44s
+2026-11-01T02:58:35.2464659Z [targeted] @@packages/agent_core/test/runtest-test_snapshot_provider_serialization: start 2026-11-01T02:58:35Z (dune alias)
+2026-11-01T02:58:36.6076463Z Testing `snapshot_provider_serialization'.
+2026-11-01T02:58:36.6077891Z ASSERT openai tool_choice=forced(Tool) snapshot
+2026-11-01T02:58:36.6078387Z ASSERT parallel_tool_calls:false present when disabled
+2026-11-01T02:58:36.6078784Z ASSERT role:tool present
+2026-11-01T02:58:36.6079127Z ASSERT forced tool_choice names the function
+2026-11-01T02:58:36.6079650Z   [OK]          openai                          0   tool_choice forced(Tool).
+2026-11-01T02:58:36.6080135Z ASSERT openai tool_choice=required(Any) snapshot
+2026-11-01T02:58:36.6080553Z ASSERT Any maps to tool_choice:"required"
+2026-11-01T02:58:36.6081034Z   [OK]          openai                          1   tool_choice required(Any).
+2026-11-01T02:58:36.6081506Z ASSERT openai tool_choice=none(None_) snapshot
+2026-11-01T02:58:36.6081877Z ASSERT None_ omits tool_choice field
+2026-11-01T02:58:36.6082205Z ASSERT None_ omits tools field
+2026-11-01T02:58:36.6082660Z   [OK]          openai                          2   tool_choice none(None_).
+2026-11-01T02:58:36.6083190Z ASSERT parallel_tool_calls:false follows provider capability
+2026-11-01T02:58:36.6083742Z   [OK]          openai                          3   parallel disabled by capa...
+2026-11-01T02:58:36.6349828Z ASSERT deepseek-v4-flash openai-compat tool_choice=auto snapshot
+2026-11-01T02:58:36.6351846Z ASSERT Auto maps to tool_choice:"auto"
+2026-11-01T02:58:36.6352945Z ASSERT Any-only required tool_choice is not emitted
+2026-11-01T02:58:36.6353865Z ASSERT model id is the real fleet id
+2026-11-01T02:58:36.6354885Z   [OK]          openai                          4   deepseek-v4-flash auto to...
+2026-11-01T02:58:36.6355944Z ASSERT required rejection provider
+2026-11-01T02:58:36.6356720Z ASSERT required rejection model
+2026-11-01T02:58:36.6357973Z   [OK]          openai                          5   deepseek-v4-flash rejects...
+2026-11-01T02:58:36.6359137Z ASSERT DeepSeek disabled reasoning sends thinking.disabled
+2026-11-01T02:58:36.6360140Z ASSERT disabled reasoning omits reasoning_effort
+2026-11-01T02:58:36.6361193Z   [OK]          openai                          6   deepseek-v4-flash disable...
+2026-11-01T02:58:36.6362296Z ASSERT DeepSeek enabled thinking sends thinking.enabled
+2026-11-01T02:58:36.6363458Z ASSERT explicit reasoning effort serialized
+2026-11-01T02:58:36.6364084Z   [OK]          openai                          7   deepseek-v4-flash explici...
+2026-11-01T02:58:36.6369620Z ASSERT generic compat omits GLM thinking object
+2026-11-01T02:58:36.6370271Z ASSERT generic compat does not replay GLM reasoning_content
+2026-11-01T02:58:36.6370849Z   [OK]          openai                          8   raw openai-compat does no...
+2026-11-01T02:58:36.6371539Z ASSERT native GLM replays reasoning_content under preserve thinking
+2026-11-01T02:58:36.6372227Z   [OK]          openai                          9   native-glm replays reason...
+2026-11-01T02:58:36.6377798Z ASSERT native GLM omits reasoning_content with default clear_thinking=true
+2026-11-01T02:58:36.6378410Z   [OK]          openai                         10   native-glm drops reasonin...
+2026-11-01T02:58:36.6383859Z ASSERT native GLM omits reasoning_content when thinking disabled
+2026-11-01T02:58:36.6384854Z   [OK]          openai                         11   native-glm drops reasonin...
+2026-11-01T02:58:36.6386015Z ASSERT anthropic tool_choice=forced(Tool) snapshot
+2026-11-01T02:58:36.6386816Z ASSERT disable_parallel_tool_use nested inside tool_choice
+2026-11-01T02:58:36.6387750Z ASSERT tool_use block present
+2026-11-01T02:58:36.6388305Z ASSERT tool_result block present
+2026-11-01T02:58:36.6388928Z ASSERT no top-level disable_parallel field
+2026-11-01T02:58:36.6389745Z   [OK]          anthropic                       0   tool_choice forced(Tool).
+2026-11-01T02:58:36.6390418Z ASSERT wire messages
+2026-11-01T02:58:36.6391033Z   [FAIL]        anthropic                       1   nudged tool turn merges f...
+2026-11-01T02:58:36.6393264Z ASSERT gemini tool_choice=Any snapshot
+2026-11-01T02:58:36.6393842Z ASSERT functionDeclarations present
+2026-11-01T02:58:36.6394246Z ASSERT functionCallingConfig present
+2026-11-01T02:58:36.6394650Z ASSERT no parallel_tool_calls on the wire (#1840)
+2026-11-01T02:58:36.6395345Z ASSERT no disable_parallel on the wire (#1840)
+2026-11-01T02:58:36.6396121Z   [OK]          gemini                          0   tool_choice Any.
+2026-11-01T02:58:36.6396806Z ASSERT wire contents
+2026-11-01T02:58:36.6397814Z   [FAIL]        gemini                          1   nudged tool turn merges f...
+2026-11-01T02:58:36.6398647Z ASSERT glm tool_choice=Any snapshot
+2026-11-01T02:58:36.6399386Z ASSERT parallel_tool_calls:false present when disabled
+2026-11-01T02:58:36.6400131Z ASSERT GLM coerces tool_choice Any to "auto"
+2026-11-01T02:58:36.6400827Z   [OK]          glm                             0   tool_choice Any.
+2026-11-01T02:58:36.6405277Z ASSERT ollama tool_choice=Any snapshot
+2026-11-01T02:58:36.6405971Z ASSERT ollama options carries temperature + num_predict
+2026-11-01T02:58:36.6406646Z ASSERT keep_alive pinned to -1
+2026-11-01T02:58:36.6407158Z ASSERT no tool_choice field
+2026-11-01T02:58:36.6408072Z   [OK]          ollama                          0   tool_choice Any.
+2026-11-01T02:58:36.6408888Z ASSERT ollama parallel tool-result correlation snapshot
+2026-11-01T02:58:36.6409778Z   [OK]          ollama                          1   parallel tool-result corr...
+2026-11-01T02:58:36.6410701Z ASSERT ollama emits output_schema under the [format] field
+2026-11-01T02:58:36.6411544Z ASSERT ollama [format] schema retains the declared required key
+2026-11-01T02:58:36.6412518Z   [OK]          structured_output_wire          0   ollama output_schema -> f...
+2026-11-01T02:58:36.6413421Z ASSERT anthropic emits [format] with type "json_schema"
+2026-11-01T02:58:36.6414282Z ASSERT anthropic [format] schema retains the declared required key
+2026-11-01T02:58:36.6415280Z   [OK]          structured_output_wire          1   anthropic output_schema -...
+2026-11-01T02:58:36.6416134Z ASSERT format.json_schema coexists with tools
+2026-11-01T02:58:36.6416767Z ASSERT tool declaration on the wire
+2026-11-01T02:58:36.6417579Z ASSERT tool input_schema on the wire
+2026-11-01T02:58:36.6418451Z   [OK]          structured_output_wire          2   anthropic tools coexist w...
+2026-11-01T02:58:36.6419619Z ASSERT response_format json_schema coexists with tools
+2026-11-01T02:58:36.6420321Z ASSERT tool declaration on the wire
+2026-11-01T02:58:36.6421146Z   [OK]          structured_output_wire          3   openai tools coexist with...
+2026-11-01T02:58:36.6423245Z │ [FAIL]        anthropic                       1   nudged tool turn merge...  │
+2026-11-01T02:58:36.6426160Z FAIL wire messages
+2026-11-01T02:58:36.6426619Z    Expected: `3'
+2026-11-01T02:58:36.6427024Z    Received: `4'
+2026-11-01T02:58:36.6436429Z │ [FAIL]        gemini                          1   nudged tool turn merge...  │
+2026-11-01T02:58:36.6439605Z FAIL wire contents
+2026-11-01T02:58:36.6440048Z    Expected: `3'
+2026-11-01T02:58:36.6440457Z    Received: `4'
+2026-11-01T02:58:36.6448488Z 2 failures! in 0.030s. 23 tests run.
+2026-11-01T02:58:36.6639216Z [targeted] @@packages/agent_core/test/runtest-test_snapshot_provider_serialization: FAIL exit 1 in 1s
+2026-11-01T02:58:36.6650117Z ##[error]Process completed with exit code 1.

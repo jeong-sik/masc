@@ -1,0 +1,1860 @@
+2026-11-01T02:49:25.7780738Z   ref: aace51ea47586a6403ba5aa344088dbec6a5e865
+2026-11-01T02:49:26.0931686Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin aace51ea47586a6403ba5aa344088dbec6a5e865
+2026-11-01T02:49:35.9454954Z  * branch              aace51ea47586a6403ba5aa344088dbec6a5e865 -> FETCH_HEAD
+2026-11-01T02:49:35.9462400Z [command]/usr/bin/git rev-parse --verify --quiet aace51ea47586a6403ba5aa344088dbec6a5e865^{object}
+2026-11-01T02:49:35.9489143Z aace51ea47586a6403ba5aa344088dbec6a5e865
+2026-11-01T02:49:35.9567411Z [command]/usr/bin/git checkout --progress --force aace51ea47586a6403ba5aa344088dbec6a5e865
+2026-11-01T02:49:37.9782406Z Note: switching to 'aace51ea47586a6403ba5aa344088dbec6a5e865'.
+2026-11-01T02:49:37.9786236Z HEAD is now at aace51ea refactor(provider): compose model declarations into one immutable catalog
+2026-11-01T02:49:37.9912558Z [command]/usr/bin/git log -1 --format=%H
+2026-11-01T02:49:37.9938696Z aace51ea47586a6403ba5aa344088dbec6a5e865
+2026-11-01T02:50:37.4091161Z   TARGET_SUITES: packages/agent_core/test/test_model_catalog_composition,packages/agent_core/test/test_capabilities,packages/agent_core/test/test_provider_config,packages/agent_core/test/test_exact_output_resolver_snapshot,packages/agent_core/test/test_thinking_control_dialects
+2026-11-01T02:50:37.4184402Z   TARGET_SUITES: packages/agent_core/test/test_model_catalog_composition,packages/agent_core/test/test_capabilities,packages/agent_core/test/test_provider_config,packages/agent_core/test/test_exact_output_resolver_snapshot,packages/agent_core/test/test_thinking_control_dialects
+2026-11-01T02:50:37.5416046Z [targeted] EIO_BACKEND=<unset> timeout=600s per suite
+2026-11-01T02:50:37.5439839Z [targeted] @@packages/agent_core/test/runtest-test_model_catalog_composition: start 2026-11-01T02:50:37Z (dune alias)
+2026-11-01T02:51:08.6278344Z Testing `Model catalog composition'.
+2026-11-01T02:51:08.6446229Z ASSERT catalog allow-list reaches the resolved policy
+2026-11-01T02:51:08.6447530Z   [OK]          resolution          0   bare catalog keeps model allow-list.
+2026-11-01T02:51:08.6448048Z ASSERT catalog allow-list reaches the resolved policy
+2026-11-01T02:51:08.6448536Z   [OK]          resolution          1   raw provider config keeps model allow...
+2026-11-01T02:51:08.6449018Z ASSERT catalog allow-list reaches the resolved policy
+2026-11-01T02:51:08.6449505Z   [OK]          resolution          2   selected provider keeps model allow-l...
+2026-11-01T02:51:08.6450073Z ASSERT provider-independent row has the same tools policy through selection
+2026-11-01T02:51:08.6450612Z ASSERT base-less bare model does not inherit provider tool support
+2026-11-01T02:51:08.6451128Z   [OK]          resolution          3   selected and raw bare-row bases agree.
+2026-11-01T02:51:08.6451622Z ASSERT all capability fields agree across selected and raw paths
+2026-11-01T02:51:08.6452046Z ASSERT JSON context reaches request policy
+2026-11-01T02:51:08.6452439Z ASSERT base-less JSON does not inherit provider tools
+2026-11-01T02:51:08.6452865Z ASSERT JSON usage declaration survives catalog projection
+2026-11-01T02:51:08.6453253Z ASSERT JSON model allow-list survives
+2026-11-01T02:51:08.6453633Z ASSERT JSON thinking control is read from the same row
+2026-11-01T02:51:08.6454001Z ASSERT original catalog remains immutable
+2026-11-01T02:51:08.6454437Z   [OK]          resolution          4   composed JSON agrees across request p...
+2026-11-01T02:51:08.6454944Z ASSERT exact row's serving evidence remains distinct from context
+2026-11-01T02:51:08.6455377Z ASSERT task and client suggestions are retained
+2026-11-01T02:51:08.6455760Z ASSERT complete price and cache multipliers are retained
+2026-11-01T02:51:08.6456099Z ASSERT new row has no invented price
+2026-11-01T02:51:08.6456420Z ASSERT new row borrows no unrelated metadata
+2026-11-01T02:51:08.6456977Z   [OK]          resolution          5   exact metadata and unknown prices sur...
+2026-11-01T02:51:08.6457365Z ASSERT scoped row shadows bare JSON
+2026-11-01T02:51:08.6457699Z ASSERT scoped absence does not borrow bare thinking
+2026-11-01T02:51:08.6458050Z ASSERT unowned bare row grants no capabilities
+2026-11-01T02:51:08.6458386Z ASSERT unowned bare row grants no capabilities
+2026-11-01T02:51:08.6458734Z ASSERT anonymous native retains explicit bare row
+2026-11-01T02:51:08.6459117Z ASSERT composition leaves provider permissions unchanged
+2026-11-01T02:51:08.6459568Z   [OK]          resolution          6   scoped shadowing and provider isolati...
+2026-11-01T02:51:08.6459993Z ASSERT admitted policy survives catalog replacement
+2026-11-01T02:51:08.6460367Z ASSERT admitted policy survives catalog replacement
+2026-11-01T02:51:08.6460731Z ASSERT new raw request sees composed replacement
+2026-11-01T02:51:08.6461101Z ASSERT new selected binding sees composed replacement
+2026-11-01T02:51:08.6461478Z ASSERT endpoint override preserves selected policy
+2026-11-01T02:51:08.6462124Z   [OK]          resolution          7   selected and frozen policies survive ...
+2026-11-01T02:51:08.6462592Z ASSERT replacement provider cannot borrow seed bare authorization
+2026-11-01T02:51:08.6463073Z   [OK]          resolution          8   provider overlay cannot inherit bare ...
+2026-11-01T02:51:08.6463520Z ASSERT invalid declaration is rejected before composition
+2026-11-01T02:51:08.6463918Z ASSERT invalid declaration is rejected before composition
+2026-11-01T02:51:08.6464322Z ASSERT invalid declaration is rejected before composition
+2026-11-01T02:51:08.6464708Z ASSERT TOML usage flag reaches the same projection
+2026-11-01T02:51:08.6465063Z ASSERT wrong TOML usage flag type is rejected
+2026-11-01T02:51:08.6465695Z   [OK]          resolution          9   strict JSON and TOML usage declarations.
+2026-11-01T02:51:08.6466107Z Test Successful in 0.018s. 10 tests run.
+2026-11-01T02:51:08.6704497Z [targeted] @@packages/agent_core/test/runtest-test_model_catalog_composition: OK in 31s
+2026-11-01T02:51:08.6726154Z [targeted] @@packages/agent_core/test/runtest-test_capabilities: start 2026-11-01T02:51:08Z (dune alias)
+2026-11-01T02:51:09.8703549Z Testing `Capabilities'.
+2026-11-01T02:51:09.8704003Z ASSERT no context limit
+2026-11-01T02:51:09.8704255Z ASSERT no output limit
+2026-11-01T02:51:09.8704482Z ASSERT no tools
+2026-11-01T02:51:09.8704732Z ASSERT system prompt default true
+2026-11-01T02:51:09.8705161Z   [OK]          defaults                           0   no limits.
+2026-11-01T02:51:09.8705499Z ASSERT no parallel tools
+2026-11-01T02:51:09.8705755Z ASSERT no structured output
+2026-11-01T02:51:09.8706021Z ASSERT no image input
+2026-11-01T02:51:09.8706255Z ASSERT no audio input
+2026-11-01T02:51:09.8706485Z ASSERT no video input
+2026-11-01T02:51:09.8706957Z   [OK]          defaults                           1   new fields false.
+2026-11-01T02:51:09.8707290Z ASSERT has tools
+2026-11-01T02:51:09.8707521Z ASSERT has parallel tools
+2026-11-01T02:51:09.8707757Z ASSERT has image
+2026-11-01T02:51:09.8707988Z ASSERT has structured output
+2026-11-01T02:51:09.8708231Z ASSERT no audio
+2026-11-01T02:51:09.8708455Z ASSERT supports top_k
+2026-11-01T02:51:09.8708681Z ASSERT no min_p
+2026-11-01T02:51:09.8708903Z ASSERT context 200K
+2026-11-01T02:51:09.8709229Z   [OK]          presets                            0   anthropic.
+2026-11-01T02:51:09.8709556Z ASSERT has structured output
+2026-11-01T02:51:09.8709811Z ASSERT has parallel tools
+2026-11-01T02:51:09.8710053Z ASSERT no reasoning
+2026-11-01T02:51:09.8710285Z ASSERT context unknown
+2026-11-01T02:51:09.8710596Z   [OK]          presets                            1   openai.
+2026-11-01T02:51:09.8710904Z ASSERT has reasoning
+2026-11-01T02:51:09.8711143Z ASSERT uses reasoning_effort
+2026-11-01T02:51:09.8711388Z ASSERT has top_k
+2026-11-01T02:51:09.8711602Z ASSERT has min_p
+2026-11-01T02:51:09.8711923Z   [OK]          presets                            2   openai extended.
+2026-11-01T02:51:09.8712242Z ASSERT has tools
+2026-11-01T02:51:09.8712478Z ASSERT accepts auto tool_choice
+2026-11-01T02:51:09.8712771Z ASSERT rejects named forced tool_choice
+2026-11-01T02:51:09.8713150Z   [OK]          presets                            3   kimi tool_choice.
+2026-11-01T02:51:09.8713474Z ASSERT context 1M
+2026-11-01T02:51:09.8713694Z ASSERT output 128K
+2026-11-01T02:51:09.8714191Z ASSERT has reasoning
+2026-11-01T02:51:09.8714436Z ASSERT uses thinking object only
+2026-11-01T02:51:09.8714686Z ASSERT has tools
+2026-11-01T02:51:09.8714904Z ASSERT has JSON mode
+2026-11-01T02:51:09.8715154Z ASSERT does not claim json_schema
+2026-11-01T02:51:09.8715463Z ASSERT preserves reasoning on tool turns only
+2026-11-01T02:51:09.8715788Z ASSERT provider label resolves MiMo preset
+2026-11-01T02:51:09.8716164Z   [OK]          presets                            4   mimo provider.
+2026-11-01T02:51:09.8716540Z ASSERT openai_chat_extended supports reasoning
+2026-11-01T02:51:09.8717061Z ASSERT openai_chat_extended has explicit reasoning control or preserve policy
+2026-11-01T02:51:09.8717571Z ASSERT kimi supports reasoning
+2026-11-01T02:51:09.8717915Z ASSERT kimi has explicit reasoning control or preserve policy
+2026-11-01T02:51:09.8718257Z ASSERT mimo supports reasoning
+2026-11-01T02:51:09.8718599Z ASSERT mimo has explicit reasoning control or preserve policy
+2026-11-01T02:51:09.8718965Z ASSERT mimo-v2.5-pro supports reasoning
+2026-11-01T02:51:09.8719363Z ASSERT mimo-v2.5-pro has explicit reasoning control or preserve policy
+2026-11-01T02:51:09.8719736Z ASSERT qwen3 supports reasoning
+2026-11-01T02:51:09.8720083Z ASSERT qwen3 has explicit reasoning control or preserve policy
+2026-11-01T02:51:09.8720460Z ASSERT deepseek-v4-flash supports reasoning
+2026-11-01T02:51:09.8720879Z ASSERT deepseek-v4-flash has explicit reasoning control or preserve policy
+2026-11-01T02:51:09.8721274Z ASSERT nvidia-ultra supports reasoning
+2026-11-01T02:51:09.8721672Z ASSERT nvidia-ultra has explicit reasoning control or preserve policy
+2026-11-01T02:51:09.8722145Z   [OK]          presets                            5   openai compat reasonin...
+2026-11-01T02:51:09.8722486Z ASSERT context 1M
+2026-11-01T02:51:09.8722715Z ASSERT output 128K
+2026-11-01T02:51:09.8723041Z   [OK]          model_lookup                       0   claude opus.
+2026-11-01T02:51:09.8723366Z ASSERT output 128K
+2026-11-01T02:51:09.8723595Z ASSERT parallel tools
+2026-11-01T02:51:09.8723926Z   [OK]          model_lookup                       1   claude sonnet.
+2026-11-01T02:51:09.8724257Z ASSERT context 1.05M
+2026-11-01T02:51:09.8724489Z ASSERT output 128K
+2026-11-01T02:51:09.8724722Z ASSERT structured output
+2026-11-01T02:51:09.8725002Z ASSERT gpt-5.4 accepted reasoning efforts
+2026-11-01T02:51:09.8725315Z ASSERT gpt-5 accepted reasoning efforts
+2026-11-01T02:51:09.8725674Z   [OK]          model_lookup                       2   gpt-5.
+2026-11-01T02:51:09.8725970Z ASSERT audio
+2026-11-01T02:51:09.8726171Z ASSERT video
+2026-11-01T02:51:09.8726390Z ASSERT structured output
+2026-11-01T02:51:09.8726810Z   [OK]          model_lookup                       3   gemini.
+2026-11-01T02:51:09.8727143Z ASSERT gemini-3-flash-preview ctx
+2026-11-01T02:51:09.8727426Z ASSERT gemini-3.1-pro-preview ctx
+2026-11-01T02:51:09.8727695Z ASSERT gemini-3.7-flash ctx
+2026-11-01T02:51:09.8728073Z   [OK]          model_lookup                       4   gemini catalog drives ...
+2026-11-01T02:51:09.8728432Z ASSERT native Kimi context 256K
+2026-11-01T02:51:09.8728699Z ASSERT native Kimi output 32K
+2026-11-01T02:51:09.8728950Z ASSERT native Kimi tools
+2026-11-01T02:51:09.8729249Z ASSERT native Kimi supports auto/none tool_choice
+2026-11-01T02:51:09.8729598Z ASSERT native Kimi rejects required tool_choice
+2026-11-01T02:51:09.8729933Z ASSERT native Kimi rejects named tool_choice
+2026-11-01T02:51:09.8730269Z ASSERT native Kimi reasoning
+2026-11-01T02:51:09.8730560Z ASSERT native Kimi ignores fixed sampling
+2026-11-01T02:51:09.8731029Z ASSERT native Kimi does not claim strict structured output
+2026-11-01T02:51:09.8731421Z ASSERT native latest Kimi has no thinking request toggle
+2026-11-01T02:51:09.8731801Z ASSERT native latest Kimi always preserves reasoning
+2026-11-01T02:51:09.8732133Z ASSERT bare native Kimi context 256K
+2026-11-01T02:51:09.8732419Z ASSERT bare native Kimi output 32K
+2026-11-01T02:51:09.8732690Z ASSERT bare native Kimi tools
+2026-11-01T02:51:09.8733067Z ASSERT bare native Kimi supports auto/none tool_choice
+2026-11-01T02:51:09.8733442Z ASSERT bare native Kimi rejects required tool_choice
+2026-11-01T02:51:09.8733798Z ASSERT bare native Kimi rejects named tool_choice
+2026-11-01T02:51:09.8734194Z ASSERT bare native Kimi reasoning
+2026-11-01T02:51:09.8734544Z ASSERT bare native Kimi does not claim strict structured output
+2026-11-01T02:51:09.8734963Z ASSERT bare native latest Kimi has no thinking request toggle
+2026-11-01T02:51:09.8735365Z ASSERT bare native latest Kimi always preserves reasoning
+2026-11-01T02:51:09.8735716Z ASSERT Kimi K2.6 has thinking object control
+2026-11-01T02:51:09.8736038Z ASSERT Kimi K2.6 supports thinking.keep all
+2026-11-01T02:51:09.8736407Z ASSERT Kimi K2.6 replays only tool-call reasoning by default
+2026-11-01T02:51:09.8736868Z ASSERT Kimi K2.5 has thinking object control
+2026-11-01T02:51:09.8737212Z ASSERT Kimi K2.5 does not expose preserved thinking
+2026-11-01T02:51:09.8737579Z ASSERT Kimi K2.5 does not replay historical reasoning
+2026-11-01T02:51:09.8737976Z ASSERT undeclared Kimi highspeed variant has no catalog row
+2026-11-01T02:51:09.8738369Z ASSERT provider-qualified Ollama Cloud Kimi context
+2026-11-01T02:51:09.8738804Z ASSERT provider-qualified Ollama Cloud Kimi rides the /v1 effort control
+2026-11-01T02:51:09.8739289Z   [OK]          model_lookup                       5   kimi-k2 native cloud s...
+2026-11-01T02:51:09.8739641Z ASSERT context 262K
+2026-11-01T02:51:09.8739861Z ASSERT tools
+2026-11-01T02:51:09.8740116Z ASSERT chat_template_kwargs thinking control
+2026-11-01T02:51:09.8740387Z ASSERT top_k
+2026-11-01T02:51:09.8740679Z   [OK]          model_lookup                       6   qwen3.
+2026-11-01T02:51:09.8741040Z ASSERT undeclared GGUF variant has no catalog row
+2026-11-01T02:51:09.8741363Z ASSERT qwen3.6 uses chat_template_kwargs
+2026-11-01T02:51:09.8741726Z ASSERT bare Qwen3.6 declares initial-system boundary lowering
+2026-11-01T02:51:09.8742150Z   [OK]          model_lookup                       7   qwen gguf name.
+2026-11-01T02:51:09.8742481Z ASSERT context 128K
+2026-11-01T02:51:09.8742697Z ASSERT tools
+2026-11-01T02:51:09.8742912Z ASSERT parallel tools
+2026-11-01T02:51:09.8743144Z ASSERT reasoning
+2026-11-01T02:51:09.8743468Z ASSERT explicit vllm-qwen3-mtp qwen3.6 uses chat_template_kwargs
+2026-11-01T02:51:09.8743847Z ASSERT vllm-qwen3-mtp reasoning delta field
+2026-11-01T02:51:09.8744181Z ASSERT vllm-qwen3-mtp scopes tool-call reasoning to the latest user turn
+2026-11-01T02:51:09.8744489Z ASSERT catalog resolves the initial-system latest-user replay policy
+2026-11-01T02:51:09.8744786Z ASSERT bare runtime row resolves the same initial-system replay policy
+2026-11-01T02:51:09.8745084Z   [OK]          model_lookup                       8   vllm-qwen3-mtp explici...
+2026-11-01T02:51:09.8745337Z ASSERT runpod_rtxa6000 gemma4 coder context 256K
+2026-11-01T02:51:09.8745545Z ASSERT runpod_rtxa6000 gemma4 coder tools
+2026-11-01T02:51:09.8745752Z ASSERT runpod_rtxa6000 gemma4 coder tool_choice
+2026-11-01T02:51:09.8745969Z ASSERT runpod_rtxa6000 gemma4 coder parallel tools
+2026-11-01T02:51:09.8746184Z ASSERT runpod_rtxa6000 gemma4 coder reasoning
+2026-11-01T02:51:09.8746529Z ASSERT runpod_rtxa6000 gemma4 coder chat_template_token thinking control
+2026-11-01T02:51:09.8746970Z ASSERT runpod_rtxa6000 gemma4 coder json response format
+2026-11-01T02:51:09.8747207Z ASSERT runpod_rtxa6000 gemma4 coder native streaming
+2026-11-01T02:51:09.8747420Z ASSERT runpod_rtxa6000 gemma4 coder top_k
+2026-11-01T02:51:09.8747613Z ASSERT runpod_rtxa6000 gemma4 coder seed
+2026-11-01T02:51:09.8747818Z ASSERT dot-qualified runtime id is not inferred
+2026-11-01T02:51:09.8748017Z ASSERT bare gemma4 coder context 256K
+2026-11-01T02:51:09.8748192Z ASSERT bare gemma4 coder tools
+2026-11-01T02:51:09.8748366Z ASSERT bare gemma4 coder tool_choice
+2026-11-01T02:51:09.8748638Z ASSERT bare gemma4 coder parallel tools
+2026-11-01T02:51:09.8748822Z ASSERT bare gemma4 coder reasoning
+2026-11-01T02:51:09.8749042Z ASSERT bare gemma4 coder chat_template_token thinking control
+2026-11-01T02:51:09.8749274Z ASSERT bare gemma4 coder json response format
+2026-11-01T02:51:09.8749474Z ASSERT bare gemma4 coder native streaming
+2026-11-01T02:51:09.8749655Z ASSERT bare gemma4 coder top_k
+2026-11-01T02:51:09.8749821Z ASSERT bare gemma4 coder seed
+2026-11-01T02:51:09.8750059Z   [OK]          model_lookup                       9   runpod rtxa6000 gemma4...
+2026-11-01T02:51:09.8750333Z ASSERT ollama Gemma4 E2B QAT via bare fallback context 128K
+2026-11-01T02:51:09.8750576Z ASSERT ollama Gemma4 E2B QAT via bare fallback tools
+2026-11-01T02:51:09.8750845Z ASSERT ollama Gemma4 E2B QAT via bare fallback forced tool_choice disabled
+2026-11-01T02:51:09.8751143Z ASSERT ollama Gemma4 E2B QAT via bare fallback named tool_choice disabled
+2026-11-01T02:51:09.8751413Z ASSERT ollama Gemma4 E2B QAT via bare fallback reasoning
+2026-11-01T02:51:09.8751699Z ASSERT ollama Gemma4 E2B QAT via bare fallback chat_template_token thinking control
+2026-11-01T02:51:09.8751986Z ASSERT ollama Gemma4 E2B QAT via bare fallback image input
+2026-11-01T02:51:09.8752229Z ASSERT ollama Gemma4 E2B QAT via bare fallback audio input
+2026-11-01T02:51:09.8752485Z ASSERT ollama Gemma4 E2B QAT via bare fallback multimodal inputs
+2026-11-01T02:51:09.8752758Z ASSERT ollama Gemma4 E2B QAT via bare fallback visual-first priority
+2026-11-01T02:51:09.8753027Z ASSERT ollama Gemma4 E2B QAT via bare fallback native streaming
+2026-11-01T02:51:09.8753271Z ASSERT ollama Gemma4 E2B QAT via bare fallback seed
+2026-11-01T02:51:09.8753503Z ASSERT scoped local Gemma4 does not grant a bare row
+2026-11-01T02:51:09.8753777Z   [OK]          model_lookup                      10   local ollama gemma4 e2...
+2026-11-01T02:51:09.8753998Z ASSERT context 1M
+2026-11-01T02:51:09.8754141Z ASSERT output 384K
+2026-11-01T02:51:09.8754284Z ASSERT tools
+2026-11-01T02:51:09.8754429Z ASSERT accepts auto tool_choice
+2026-11-01T02:51:09.8754610Z ASSERT rejects named forced tool_choice
+2026-11-01T02:51:09.8754779Z ASSERT reasoning
+2026-11-01T02:51:09.8754929Z ASSERT uses thinking object
+2026-11-01T02:51:09.8755156Z   [OK]          model_lookup                      11   deepseek v4 flash.
+2026-11-01T02:51:09.8755368Z ASSERT context 1M
+2026-11-01T02:51:09.8755508Z ASSERT output 384K
+2026-11-01T02:51:09.8755648Z ASSERT tools
+2026-11-01T02:51:09.8755794Z ASSERT accepts auto tool_choice
+2026-11-01T02:51:09.8755974Z ASSERT rejects named forced tool_choice
+2026-11-01T02:51:09.8756141Z ASSERT reasoning
+2026-11-01T02:51:09.8756293Z ASSERT uses thinking object
+2026-11-01T02:51:09.8756516Z   [OK]          model_lookup                      12   deepseek v4 pro.
+2026-11-01T02:51:09.8756849Z ASSERT has tools
+2026-11-01T02:51:09.8757101Z ASSERT omits explicit Chat tool_choice
+2026-11-01T02:51:09.8757298Z ASSERT rejects required forced tool_choice
+2026-11-01T02:51:09.8757493Z ASSERT rejects named forced tool_choice
+2026-11-01T02:51:09.8757658Z ASSERT reasoning
+2026-11-01T02:51:09.8757825Z ASSERT uses MiniMax adaptive thinking object
+2026-11-01T02:51:09.8758016Z ASSERT uses split reasoning fields
+2026-11-01T02:51:09.8758199Z ASSERT no Chat response_format json
+2026-11-01T02:51:09.8758375Z ASSERT no Chat structured output
+2026-11-01T02:51:09.8758536Z ASSERT multimodal
+2026-11-01T02:51:09.8758677Z ASSERT image input
+2026-11-01T02:51:09.8758836Z ASSERT complete assistant replay
+2026-11-01T02:51:09.8759070Z ASSERT toggle wire
+2026-11-01T02:51:09.8759217Z ASSERT replay policy
+2026-11-01T02:51:09.8759383Z ASSERT dialect emits reasoning split
+2026-11-01T02:51:09.8759583Z ASSERT dialect streams typed reasoning details
+2026-11-01T02:51:09.8759844Z   [OK]          model_lookup                      13   minimax m3 official ch...
+2026-11-01T02:51:09.8760060Z ASSERT context 1M
+2026-11-01T02:51:09.8760199Z ASSERT structured
+2026-11-01T02:51:09.8760340Z ASSERT reasoning
+2026-11-01T02:51:09.8760471Z ASSERT image
+2026-11-01T02:51:09.8760678Z   [OK]          model_lookup                      14   grok 4.3 1M context.
+2026-11-01T02:51:09.8772113Z ASSERT no image input
+2026-11-01T02:51:09.8772346Z ASSERT reasoning
+2026-11-01T02:51:09.8772588Z ASSERT structured output disabled
+2026-11-01T02:51:09.8772944Z   [OK]          model_lookup                      15   glm-5 text only.
+2026-11-01T02:51:09.8773234Z ASSERT has image input
+2026-11-01T02:51:09.8773389Z ASSERT multimodal
+2026-11-01T02:51:09.8773602Z   [OK]          model_lookup                      16   glm-5v vision.
+2026-11-01T02:51:09.8773818Z ASSERT has image input
+2026-11-01T02:51:09.8773967Z ASSERT multimodal
+2026-11-01T02:51:09.8774109Z ASSERT reasoning
+2026-11-01T02:51:09.8774321Z   [OK]          model_lookup                      17   glm-4.6v vision.
+2026-11-01T02:51:09.8774531Z ASSERT has image input
+2026-11-01T02:51:09.8774678Z ASSERT multimodal
+2026-11-01T02:51:09.8774817Z ASSERT no tools
+2026-11-01T02:51:09.8775030Z   [OK]          model_lookup                      18   glm-ocr vision.
+2026-11-01T02:51:09.8775264Z ASSERT glm-4 via declared glm: reasoning
+2026-11-01T02:51:09.8775474Z ASSERT glm-4 via anonymous glm wire: reasoning
+2026-11-01T02:51:09.8775680Z ASSERT glm-4v via declared glm: reasoning
+2026-11-01T02:51:09.8775891Z ASSERT glm-4v via anonymous glm wire: reasoning
+2026-11-01T02:51:09.8776106Z ASSERT glm-4-flash via declared glm: reasoning
+2026-11-01T02:51:09.8776331Z ASSERT glm-4-flash via anonymous glm wire: reasoning
+2026-11-01T02:51:09.8776607Z   [OK]          model_lookup                      19   legacy glm-4 rows stat...
+2026-11-01T02:51:09.8777028Z ASSERT deepseek-v4-pro context
+2026-11-01T02:51:09.8777203Z ASSERT deepseek-v4-pro vision
+2026-11-01T02:51:09.8777378Z ASSERT deepseek-v4-pro multimodal
+2026-11-01T02:51:09.8777557Z ASSERT nemotron-3-nano:30b context
+2026-11-01T02:51:09.8777738Z ASSERT nemotron-3-nano:30b vision
+2026-11-01T02:51:09.8777919Z ASSERT nemotron-3-nano:30b multimodal
+2026-11-01T02:51:09.8778100Z ASSERT nemotron-3-ultra context
+2026-11-01T02:51:09.8778271Z ASSERT nemotron-3-ultra vision
+2026-11-01T02:51:09.8778450Z ASSERT nemotron-3-ultra multimodal
+2026-11-01T02:51:09.8778623Z ASSERT gemma4:31b context
+2026-11-01T02:51:09.8778784Z ASSERT gemma4:31b vision
+2026-11-01T02:51:09.8778947Z ASSERT gemma4:31b multimodal
+2026-11-01T02:51:09.8779242Z ASSERT kimi-k2.7-code context
+2026-11-01T02:51:09.8779478Z ASSERT kimi-k2.7-code vision
+2026-11-01T02:51:09.8779647Z ASSERT kimi-k2.7-code multimodal
+2026-11-01T02:51:09.8779816Z ASSERT gpt-oss:20b context
+2026-11-01T02:51:09.8779979Z ASSERT gpt-oss:20b vision
+2026-11-01T02:51:09.8780147Z ASSERT gpt-oss:20b multimodal
+2026-11-01T02:51:09.8780310Z ASSERT kimi-k2.6 context
+2026-11-01T02:51:09.8780467Z ASSERT kimi-k2.6 vision
+2026-11-01T02:51:09.8780627Z ASSERT kimi-k2.6 multimodal
+2026-11-01T02:51:09.8780805Z ASSERT mistral-large-3:675b context
+2026-11-01T02:51:09.8780984Z ASSERT mistral-large-3:675b vision
+2026-11-01T02:51:09.8781245Z ASSERT mistral-large-3:675b multimodal
+2026-11-01T02:51:09.8781425Z ASSERT glm-5.2 context
+2026-11-01T02:51:09.8781583Z ASSERT glm-5.2 vision
+2026-11-01T02:51:09.8781738Z ASSERT glm-5.2 multimodal
+2026-11-01T02:51:09.8781901Z ASSERT gpt-oss:120b context
+2026-11-01T02:51:09.8782064Z ASSERT gpt-oss:120b vision
+2026-11-01T02:51:09.8782230Z ASSERT gpt-oss:120b multimodal
+2026-11-01T02:51:09.8782393Z ASSERT minimax-m3 context
+2026-11-01T02:51:09.8782552Z ASSERT minimax-m3 vision
+2026-11-01T02:51:09.8782714Z ASSERT minimax-m3 multimodal
+2026-11-01T02:51:09.8782877Z ASSERT minimax-m2.7 context
+2026-11-01T02:51:09.8783040Z ASSERT minimax-m2.7 vision
+2026-11-01T02:51:09.8783201Z ASSERT minimax-m2.7 multimodal
+2026-11-01T02:51:09.8783372Z ASSERT nemotron-3-super context
+2026-11-01T02:51:09.8783544Z ASSERT nemotron-3-super vision
+2026-11-01T02:51:09.8783721Z ASSERT nemotron-3-super multimodal
+2026-11-01T02:51:09.8783973Z   [OK]          model_lookup                      20   ollama cloud current c...
+2026-11-01T02:51:09.8784278Z ASSERT deepseek-v4-pro on ollama_cloud replays the active sequence only
+2026-11-01T02:51:09.8784581Z ASSERT deepseek-v4-pro on deepseek has full-history replay eligibility
+2026-11-01T02:51:09.8784888Z   [OK]          model_lookup                      21   deepseek replay contra...
+2026-11-01T02:51:09.8785118Z ASSERT gemma4:31b-cloud context
+2026-11-01T02:51:09.8785287Z ASSERT gemma4:31b-cloud tools
+2026-11-01T02:51:09.8785456Z ASSERT gemma4:31b-cloud reasoning
+2026-11-01T02:51:09.8785681Z ASSERT gemma4:31b-cloud reasoning rides the /v1 effort control
+2026-11-01T02:51:09.8785897Z ASSERT gemma4:31b-cloud json mode
+2026-11-01T02:51:09.8786102Z ASSERT gemma4:31b-cloud no native schema guarantee
+2026-11-01T02:51:09.8786303Z ASSERT gemma4:31b-cloud multimodal
+2026-11-01T02:51:09.8786488Z ASSERT gemma4:31b-cloud image input
+2026-11-01T02:51:09.8786984Z ASSERT gemma4:31b-cloud native streaming
+2026-11-01T02:51:09.8787241Z   [OK]          model_lookup                      22   ollama cloud v1 vendor...
+2026-11-01T02:51:09.8787468Z ASSERT gemma4:31b tools
+2026-11-01T02:51:09.8787632Z ASSERT gemma4:31b reasoning
+2026-11-01T02:51:09.8787803Z ASSERT gemma4:31b native streaming
+2026-11-01T02:51:09.8787990Z ASSERT gemma4:31b json response format
+2026-11-01T02:51:09.8788189Z ASSERT gemma4:31b uses Ollama native think
+2026-11-01T02:51:09.8788378Z ASSERT nemotron-3-ultra tools
+2026-11-01T02:51:09.8788551Z ASSERT nemotron-3-ultra reasoning
+2026-11-01T02:51:09.8788737Z ASSERT nemotron-3-ultra native streaming
+2026-11-01T02:51:09.8788941Z ASSERT nemotron-3-ultra json response format
+2026-11-01T02:51:09.8789158Z ASSERT nemotron-3-ultra uses Ollama native think
+2026-11-01T02:51:09.8789347Z ASSERT glm-5.2 tools
+2026-11-01T02:51:09.8789502Z ASSERT glm-5.2 reasoning
+2026-11-01T02:51:09.8789665Z ASSERT glm-5.2 native streaming
+2026-11-01T02:51:09.8789843Z ASSERT glm-5.2 json response format
+2026-11-01T02:51:09.8790126Z ASSERT glm-5.2 uses Ollama native think
+2026-11-01T02:51:09.8790304Z ASSERT gpt-oss:20b tools
+2026-11-01T02:51:09.8790465Z ASSERT gpt-oss:20b reasoning
+2026-11-01T02:51:09.8790644Z ASSERT gpt-oss:20b native streaming
+2026-11-01T02:51:09.8790832Z ASSERT gpt-oss:20b json response format
+2026-11-01T02:51:09.8791034Z ASSERT gpt-oss:20b uses Ollama native think
+2026-11-01T02:51:09.8791218Z ASSERT gpt-oss:120b tools
+2026-11-01T02:51:09.8791386Z ASSERT gpt-oss:120b reasoning
+2026-11-01T02:51:09.8791564Z ASSERT gpt-oss:120b native streaming
+2026-11-01T02:51:09.8791757Z ASSERT gpt-oss:120b json response format
+2026-11-01T02:51:09.8792032Z ASSERT gpt-oss:120b uses Ollama native think
+2026-11-01T02:51:09.8792298Z   [OK]          model_lookup                      23   ollama cloud grouped r...
+2026-11-01T02:51:09.8792530Z ASSERT kimi-k2.7-code reasoning
+2026-11-01T02:51:09.8792752Z ASSERT kimi-k2.7-code reasoning rides the /v1 effort control
+2026-11-01T02:51:09.8792966Z ASSERT minimax-m3 reasoning
+2026-11-01T02:51:09.8793177Z ASSERT minimax-m3 reasoning rides the /v1 effort control
+2026-11-01T02:51:09.8793389Z ASSERT deepseek-v4-pro reasoning
+2026-11-01T02:51:09.8793612Z ASSERT deepseek-v4-pro reasoning rides the /v1 effort control
+2026-11-01T02:51:09.8793900Z   [OK]          model_lookup                      24   ollama cloud kimi/deep...
+2026-11-01T02:51:09.8794175Z ASSERT kimi-k2.7-code /v1 wire carries the effort control
+2026-11-01T02:51:09.8794433Z ASSERT kimi-k2.7-code declares the ladder the endpoint accepts
+2026-11-01T02:51:09.8794686Z ASSERT minimax-m3 /v1 wire carries the effort control
+2026-11-01T02:51:09.8794933Z ASSERT minimax-m3 declares the ladder the endpoint accepts
+2026-11-01T02:51:09.8795192Z ASSERT deepseek-v4-pro /v1 wire carries the effort control
+2026-11-01T02:51:09.8795456Z ASSERT deepseek-v4-pro declares the ladder the endpoint accepts
+2026-11-01T02:51:09.8795746Z   [OK]          model_lookup                      25   ollama cloud /v1 wire ...
+2026-11-01T02:51:09.8796032Z ASSERT unknown model still uses the declared /v1 transport control
+2026-11-01T02:51:09.8796288Z ASSERT unknown model has no guessed context window
+2026-11-01T02:51:09.8796557Z   [OK]          model_lookup                      26   ollama cloud /v1 unkno...
+2026-11-01T02:51:09.8797009Z ASSERT row stays non-reasoning
+2026-11-01T02:51:09.8797221Z ASSERT non-reasoning row exposes no accepted effort values
+2026-11-01T02:51:09.8797504Z   [OK]          model_lookup                      27   ollama cloud /v1 non-r...
+2026-11-01T02:51:09.8797780Z ASSERT kimi-k2.7-code native wire matches an unspecified wire
+2026-11-01T02:51:09.8798039Z ASSERT minimax-m3 native wire matches an unspecified wire
+2026-11-01T02:51:09.8798297Z ASSERT deepseek-v4-pro native wire matches an unspecified wire
+2026-11-01T02:51:09.8798588Z   [OK]          model_lookup                      28   ollama cloud native wi...
+2026-11-01T02:51:09.8798824Z ASSERT kimi-k2.6 json response format
+2026-11-01T02:51:09.8799011Z ASSERT kimi-k2.6 structured output
+2026-11-01T02:51:09.8799205Z ASSERT kimi-k2.7-code json response format
+2026-11-01T02:51:09.8799407Z ASSERT kimi-k2.7-code structured output
+2026-11-01T02:51:09.8799602Z ASSERT minimax-m3 json response format
+2026-11-01T02:51:09.8799789Z ASSERT minimax-m3 structured output
+2026-11-01T02:51:09.8799991Z ASSERT deepseek-v4-pro json response format
+2026-11-01T02:51:09.8800197Z ASSERT deepseek-v4-pro structured output
+2026-11-01T02:51:09.8800386Z ASSERT glm-5.2 json response format
+2026-11-01T02:51:09.8800562Z ASSERT glm-5.2 structured output
+2026-11-01T02:51:09.8800842Z ASSERT gpt-oss:20b json response format
+2026-11-01T02:51:09.8801035Z ASSERT gpt-oss:20b structured output
+2026-11-01T02:51:09.8801228Z ASSERT gpt-oss:120b json response format
+2026-11-01T02:51:09.8801420Z ASSERT gpt-oss:120b structured output
+2026-11-01T02:51:09.8801618Z ASSERT nemotron-3-ultra json response format
+2026-11-01T02:51:09.8801826Z ASSERT nemotron-3-ultra structured output
+2026-11-01T02:51:09.8802084Z   [OK]          model_lookup                      29   ollama cloud grouped r...
+2026-11-01T02:51:09.8802330Z ASSERT Kimi Cloud preserves all reasoning
+2026-11-01T02:51:09.8802701Z   [OK]          model_lookup                      30   ollama cloud Kimi pres...
+2026-11-01T02:51:09.8802939Z ASSERT mistral-large-3:675b tools
+2026-11-01T02:51:09.8803140Z ASSERT mistral-large-3:675b json response format
+2026-11-01T02:51:09.8803377Z ASSERT mistral-large-3:675b structured output guarantee
+2026-11-01T02:51:09.8803594Z ASSERT mistral-large-3:675b no reasoning
+2026-11-01T02:51:09.8803824Z ASSERT mistral-large-3:675b no thinking control
+2026-11-01T02:51:09.8804085Z   [OK]          model_lookup                      31   ollama cloud structure...
+2026-11-01T02:51:09.8804354Z ASSERT bare GLM-5.2 keeps ZAI GLM thinking control
+2026-11-01T02:51:09.8804577Z ASSERT cloud GLM-5.2 uses Ollama native think
+2026-11-01T02:51:09.8804801Z ASSERT bare latest Kimi has no thinking request toggle
+2026-11-01T02:51:09.8805034Z ASSERT bare latest Kimi always preserves reasoning
+2026-11-01T02:51:09.8805254Z ASSERT cloud Kimi rides the /v1 effort control
+2026-11-01T02:51:09.8805448Z ASSERT bare Kimi native context
+2026-11-01T02:51:09.8805620Z ASSERT cloud Kimi official context
+2026-11-01T02:51:09.8805827Z ASSERT bare/cloud Kimi contexts intentionally differ
+2026-11-01T02:51:09.8806028Z ASSERT bare Kimi vision
+2026-11-01T02:51:09.8806183Z ASSERT cloud Kimi vision
+2026-11-01T02:51:09.8806416Z   [OK]          model_lookup                      32   ollama cloud preserves...
+2026-11-01T02:51:09.8806785Z ASSERT Xiaomi MiMo V2.5 supports tools
+2026-11-01T02:51:09.8806997Z ASSERT Xiaomi MiMo V2.5 supports reasoning
+2026-11-01T02:51:09.8807208Z ASSERT Xiaomi MiMo V2.5 supports native streaming
+2026-11-01T02:51:09.8807419Z ASSERT Xiaomi MiMo V2.5 no structured output
+2026-11-01T02:51:09.8807613Z ASSERT Xiaomi MiMo V2.5 replay policy
+2026-11-01T02:51:09.8807826Z ASSERT Xiaomi MiMo V2.5 drops plain-turn reasoning
+2026-11-01T02:51:09.8808060Z ASSERT Xiaomi MiMo V2.5 preserves tool-turn reasoning
+2026-11-01T02:51:09.8808303Z ASSERT Xiaomi MiMo V2.5 requires replay only on tool call
+2026-11-01T02:51:09.8808526Z ASSERT Xiaomi MiMo V2.5 reasoning delta field
+2026-11-01T02:51:09.8808726Z ASSERT DeepSeek V4 Pro supports tools
+2026-11-01T02:51:09.8808918Z ASSERT DeepSeek V4 Pro supports reasoning
+2026-11-01T02:51:09.8809127Z ASSERT DeepSeek V4 Pro supports native streaming
+2026-11-01T02:51:09.8809337Z ASSERT DeepSeek V4 Pro no structured output
+2026-11-01T02:51:09.8809559Z ASSERT DeepSeek V4 Pro supports response_format/json
+2026-11-01T02:51:09.8809770Z ASSERT DeepSeek V4 Pro replay policy
+2026-11-01T02:51:09.8809983Z ASSERT DeepSeek V4 Pro preserves plain-turn reasoning
+2026-11-01T02:51:09.8810219Z ASSERT DeepSeek V4 Pro preserves tool-turn reasoning
+2026-11-01T02:51:09.8810442Z ASSERT DeepSeek V4 Pro is not tool-only replay
+2026-11-01T02:51:09.8810665Z ASSERT DeepSeek V4 Pro reasoning delta field
+2026-11-01T02:51:09.8810862Z ASSERT DeepSeek V4 Flash supports tools
+2026-11-01T02:51:09.8811060Z ASSERT DeepSeek V4 Flash supports reasoning
+2026-11-01T02:51:09.8811373Z ASSERT DeepSeek V4 Flash supports native streaming
+2026-11-01T02:51:09.8811602Z ASSERT DeepSeek V4 Flash supports structured output
+2026-11-01T02:51:09.8811850Z ASSERT DeepSeek V4 Flash supports response_format/json_schema
+2026-11-01T02:51:09.8812074Z ASSERT DeepSeek V4 Flash replay policy
+2026-11-01T02:51:09.8812293Z ASSERT DeepSeek V4 Flash preserves plain-turn reasoning
+2026-11-01T02:51:09.8812537Z ASSERT DeepSeek V4 Flash preserves tool-turn reasoning
+2026-11-01T02:51:09.8812767Z ASSERT DeepSeek V4 Flash is not tool-only replay
+2026-11-01T02:51:09.8812980Z ASSERT DeepSeek V4 Flash reasoning delta field
+2026-11-01T02:51:09.8813212Z ASSERT MiniMax M3 native/openai-compatible supports tools
+2026-11-01T02:51:09.8813543Z ASSERT MiniMax M3 native/openai-compatible supports reasoning
+2026-11-01T02:51:09.8813821Z ASSERT MiniMax M3 native/openai-compatible supports native streaming
+2026-11-01T02:51:09.8814103Z ASSERT MiniMax M3 native/openai-compatible no structured output
+2026-11-01T02:51:09.8814363Z ASSERT MiniMax M3 native/openai-compatible replay policy
+2026-11-01T02:51:09.8814639Z ASSERT MiniMax M3 native/openai-compatible preserves plain-turn reasoning
+2026-11-01T02:51:09.8814941Z ASSERT MiniMax M3 native/openai-compatible preserves tool-turn reasoning
+2026-11-01T02:51:09.8815233Z ASSERT MiniMax M3 native/openai-compatible is not tool-only replay
+2026-11-01T02:51:09.8815512Z ASSERT MiniMax M3 native/openai-compatible reasoning details stream
+2026-11-01T02:51:09.8815745Z ASSERT OpenAI GPT-5.5 supports tools
+2026-11-01T02:51:09.8815934Z ASSERT OpenAI GPT-5.5 supports reasoning
+2026-11-01T02:51:09.8816144Z ASSERT OpenAI GPT-5.5 supports native streaming
+2026-11-01T02:51:09.8816360Z ASSERT OpenAI GPT-5.5 supports structured output
+2026-11-01T02:51:09.8816596Z ASSERT OpenAI GPT-5.5 supports response_format/json_schema
+2026-11-01T02:51:09.8816923Z ASSERT OpenAI GPT-5.5 does not replay plain-turn reasoning
+2026-11-01T02:51:09.8817173Z ASSERT OpenAI GPT-5.5 does not replay tool-turn reasoning
+2026-11-01T02:51:09.8817397Z ASSERT OpenAI GPT-5.5 reasoning delta field
+2026-11-01T02:51:09.8817596Z ASSERT OpenAI GPT-5.4 mini supports tools
+2026-11-01T02:51:09.8817800Z ASSERT OpenAI GPT-5.4 mini supports reasoning
+2026-11-01T02:51:09.8818023Z ASSERT OpenAI GPT-5.4 mini supports native streaming
+2026-11-01T02:51:09.8818257Z ASSERT OpenAI GPT-5.4 mini supports structured output
+2026-11-01T02:51:09.8818509Z ASSERT OpenAI GPT-5.4 mini supports response_format/json_schema
+2026-11-01T02:51:09.8818779Z ASSERT OpenAI GPT-5.4 mini does not replay plain-turn reasoning
+2026-11-01T02:51:09.8819046Z ASSERT OpenAI GPT-5.4 mini does not replay tool-turn reasoning
+2026-11-01T02:51:09.8819283Z ASSERT OpenAI GPT-5.4 mini reasoning delta field
+2026-11-01T02:51:09.8819484Z ASSERT Claude Sonnet 5 supports tools
+2026-11-01T02:51:09.8819676Z ASSERT Claude Sonnet 5 supports reasoning
+2026-11-01T02:51:09.8819888Z ASSERT Claude Sonnet 5 supports native streaming
+2026-11-01T02:51:09.8820106Z ASSERT Claude Sonnet 5 supports structured output
+2026-11-01T02:51:09.8820306Z ASSERT Claude Sonnet 5 replay policy
+2026-11-01T02:51:09.8820516Z ASSERT Claude Sonnet 5 preserves plain-turn reasoning
+2026-11-01T02:51:09.8820751Z ASSERT Claude Sonnet 5 preserves tool-turn reasoning
+2026-11-01T02:51:09.8820972Z ASSERT Claude Sonnet 5 is not tool-only replay
+2026-11-01T02:51:09.8821178Z ASSERT Claude Sonnet 5 reasoning delta field
+2026-11-01T02:51:09.8821373Z ASSERT Claude Sonnet 5 supports tools
+2026-11-01T02:51:09.8821566Z ASSERT Claude Sonnet 5 supports reasoning
+2026-11-01T02:51:09.8821772Z ASSERT Claude Sonnet 5 supports native streaming
+2026-11-01T02:51:09.8822080Z ASSERT Claude Sonnet 5 supports structured output
+2026-11-01T02:51:09.8822279Z ASSERT Claude Sonnet 5 replay policy
+2026-11-01T02:51:09.8822495Z ASSERT Claude Sonnet 5 preserves plain-turn reasoning
+2026-11-01T02:51:09.8822730Z ASSERT Claude Sonnet 5 preserves tool-turn reasoning
+2026-11-01T02:51:09.8822950Z ASSERT Claude Sonnet 5 is not tool-only replay
+2026-11-01T02:51:09.8823157Z ASSERT Claude Sonnet 5 reasoning delta field
+2026-11-01T02:51:09.8823353Z ASSERT Claude Opus 5.5 supports tools
+2026-11-01T02:51:09.8823543Z ASSERT Claude Opus 5.5 supports reasoning
+2026-11-01T02:51:09.8823749Z ASSERT Claude Opus 5.5 supports native streaming
+2026-11-01T02:51:09.8823966Z ASSERT Claude Opus 5.5 supports structured output
+2026-11-01T02:51:09.8824244Z ASSERT Claude Opus 5.5 replay policy
+2026-11-01T02:51:09.8824456Z ASSERT Claude Opus 5.5 preserves plain-turn reasoning
+2026-11-01T02:51:09.8824690Z ASSERT Claude Opus 5.5 preserves tool-turn reasoning
+2026-11-01T02:51:09.8824912Z ASSERT Claude Opus 5.5 is not tool-only replay
+2026-11-01T02:51:09.8825123Z ASSERT Claude Opus 5.5 reasoning delta field
+2026-11-01T02:51:09.8825333Z ASSERT Qwen3.6 RunPod/self-hosted supports tools
+2026-11-01T02:51:09.8825561Z ASSERT Qwen3.6 RunPod/self-hosted supports reasoning
+2026-11-01T02:51:09.8825806Z ASSERT Qwen3.6 RunPod/self-hosted supports native streaming
+2026-11-01T02:51:09.8826066Z ASSERT Qwen3.6 RunPod/self-hosted supports structured output
+2026-11-01T02:51:09.8826343Z ASSERT Qwen3.6 RunPod/self-hosted supports response_format/json_schema
+2026-11-01T02:51:09.8826596Z ASSERT Qwen3.6 RunPod/self-hosted replay policy
+2026-11-01T02:51:09.8826978Z ASSERT Qwen3.6 RunPod/self-hosted drops plain-turn reasoning
+2026-11-01T02:51:09.8827284Z ASSERT Qwen3.6 RunPod/self-hosted preserves a selected tool-call reasoning artifact
+2026-11-01T02:51:09.8827616Z ASSERT Qwen3.6 RunPod/self-hosted requires replay only on a selected tool call
+2026-11-01T02:51:09.8827895Z ASSERT Qwen3.6 RunPod/self-hosted reasoning delta field
+2026-11-01T02:51:09.8828115Z ASSERT Ollama Cloud Gemma4 supports tools
+2026-11-01T02:51:09.8828319Z ASSERT Ollama Cloud Gemma4 supports reasoning
+2026-11-01T02:51:09.8828542Z ASSERT Ollama Cloud Gemma4 supports native streaming
+2026-11-01T02:51:09.8828767Z ASSERT Ollama Cloud Gemma4 no structured output
+2026-11-01T02:51:09.8828972Z ASSERT Ollama Cloud Gemma4 replay policy
+2026-11-01T02:51:09.8829188Z ASSERT Ollama Cloud Gemma4 drops plain-turn reasoning
+2026-11-01T02:51:09.8829466Z ASSERT Ollama Cloud Gemma4 preserves a selected tool-call reasoning artifact
+2026-11-01T02:51:09.8829769Z ASSERT Ollama Cloud Gemma4 requires replay only on a selected tool call
+2026-11-01T02:51:09.8830045Z ASSERT Ollama Cloud Gemma4 reasoning delta field
+2026-11-01T02:51:09.8830266Z ASSERT Ollama Cloud Kimi K2.7 Code supports tools
+2026-11-01T02:51:09.8830495Z ASSERT Ollama Cloud Kimi K2.7 Code supports reasoning
+2026-11-01T02:51:09.8830739Z ASSERT Ollama Cloud Kimi K2.7 Code supports native streaming
+2026-11-01T02:51:09.8830988Z ASSERT Ollama Cloud Kimi K2.7 Code no structured output
+2026-11-01T02:51:09.8831216Z ASSERT Ollama Cloud Kimi K2.7 Code replay policy
+2026-11-01T02:51:09.8831462Z ASSERT Ollama Cloud Kimi K2.7 Code preserves plain-turn reasoning
+2026-11-01T02:51:09.8831736Z ASSERT Ollama Cloud Kimi K2.7 Code preserves tool-turn reasoning
+2026-11-01T02:51:09.8831999Z ASSERT Ollama Cloud Kimi K2.7 Code is not tool-only replay
+2026-11-01T02:51:09.8832244Z ASSERT Ollama Cloud Kimi K2.7 Code reasoning delta field
+2026-11-01T02:51:09.8832468Z ASSERT Ollama Cloud MiniMax M3 supports tools
+2026-11-01T02:51:09.8832683Z ASSERT Ollama Cloud MiniMax M3 supports reasoning
+2026-11-01T02:51:09.8833015Z ASSERT Ollama Cloud MiniMax M3 supports native streaming
+2026-11-01T02:51:09.8833254Z ASSERT Ollama Cloud MiniMax M3 no structured output
+2026-11-01T02:51:09.8833500Z ASSERT Ollama Cloud MiniMax M3 supports response_format/json
+2026-11-01T02:51:09.8833730Z ASSERT Ollama Cloud MiniMax M3 replay policy
+2026-11-01T02:51:09.8833960Z ASSERT Ollama Cloud MiniMax M3 drops plain-turn reasoning
+2026-11-01T02:51:09.8834252Z ASSERT Ollama Cloud MiniMax M3 preserves a selected tool-call reasoning artifact
+2026-11-01T02:51:09.8834569Z ASSERT Ollama Cloud MiniMax M3 requires replay only on a selected tool call
+2026-11-01T02:51:09.8834836Z ASSERT Ollama Cloud MiniMax M3 reasoning delta field
+2026-11-01T02:51:09.8835143Z ASSERT Ollama Cloud Nemotron 3 Ultra supports tools
+2026-11-01T02:51:09.8835381Z ASSERT Ollama Cloud Nemotron 3 Ultra supports reasoning
+2026-11-01T02:51:09.8835635Z ASSERT Ollama Cloud Nemotron 3 Ultra supports native streaming
+2026-11-01T02:51:09.8835894Z ASSERT Ollama Cloud Nemotron 3 Ultra no structured output
+2026-11-01T02:51:09.8836135Z ASSERT Ollama Cloud Nemotron 3 Ultra replay policy
+2026-11-01T02:51:09.8836385Z ASSERT Ollama Cloud Nemotron 3 Ultra drops plain-turn reasoning
+2026-11-01T02:51:09.8836828Z ASSERT Ollama Cloud Nemotron 3 Ultra preserves a selected tool-call reasoning artifact
+2026-11-01T02:51:09.8837172Z ASSERT Ollama Cloud Nemotron 3 Ultra requires replay only on a selected tool call
+2026-11-01T02:51:09.8837460Z ASSERT Ollama Cloud Nemotron 3 Ultra reasoning delta field
+2026-11-01T02:51:09.8837700Z ASSERT Ollama Cloud DeepSeek V4 Pro supports tools
+2026-11-01T02:51:09.8837938Z ASSERT Ollama Cloud DeepSeek V4 Pro supports reasoning
+2026-11-01T02:51:09.8838194Z ASSERT Ollama Cloud DeepSeek V4 Pro supports native streaming
+2026-11-01T02:51:09.8838448Z ASSERT Ollama Cloud DeepSeek V4 Pro no structured output
+2026-11-01T02:51:09.8838684Z ASSERT Ollama Cloud DeepSeek V4 Pro replay policy
+2026-11-01T02:51:09.8838928Z ASSERT Ollama Cloud DeepSeek V4 Pro drops plain-turn reasoning
+2026-11-01T02:51:09.8839238Z ASSERT Ollama Cloud DeepSeek V4 Pro preserves a selected tool-call reasoning artifact
+2026-11-01T02:51:09.8839571Z ASSERT Ollama Cloud DeepSeek V4 Pro requires replay only on a selected tool call
+2026-11-01T02:51:09.8839855Z ASSERT Ollama Cloud DeepSeek V4 Pro reasoning delta field
+2026-11-01T02:51:09.8840077Z ASSERT Ollama Cloud GLM 5.2 supports tools
+2026-11-01T02:51:09.8840288Z ASSERT Ollama Cloud GLM 5.2 supports reasoning
+2026-11-01T02:51:09.8840511Z ASSERT Ollama Cloud GLM 5.2 supports native streaming
+2026-11-01T02:51:09.8840737Z ASSERT Ollama Cloud GLM 5.2 no structured output
+2026-11-01T02:51:09.8840943Z ASSERT Ollama Cloud GLM 5.2 replay policy
+2026-11-01T02:51:09.8841166Z ASSERT Ollama Cloud GLM 5.2 drops plain-turn reasoning
+2026-11-01T02:51:09.8841443Z ASSERT Ollama Cloud GLM 5.2 preserves a selected tool-call reasoning artifact
+2026-11-01T02:51:09.8841746Z ASSERT Ollama Cloud GLM 5.2 requires replay only on a selected tool call
+2026-11-01T02:51:09.8842003Z ASSERT Ollama Cloud GLM 5.2 reasoning delta field
+2026-11-01T02:51:09.8842223Z ASSERT Ollama Cloud GPT-OSS 20B supports tools
+2026-11-01T02:51:09.8842441Z ASSERT Ollama Cloud GPT-OSS 20B supports reasoning
+2026-11-01T02:51:09.8842681Z ASSERT Ollama Cloud GPT-OSS 20B supports native streaming
+2026-11-01T02:51:09.8842922Z ASSERT Ollama Cloud GPT-OSS 20B no structured output
+2026-11-01T02:51:09.8843145Z ASSERT Ollama Cloud GPT-OSS 20B replay policy
+2026-11-01T02:51:09.8843380Z ASSERT Ollama Cloud GPT-OSS 20B drops plain-turn reasoning
+2026-11-01T02:51:09.8843680Z ASSERT Ollama Cloud GPT-OSS 20B preserves a selected tool-call reasoning artifact
+2026-11-01T02:51:09.8844091Z ASSERT Ollama Cloud GPT-OSS 20B requires replay only on a selected tool call
+2026-11-01T02:51:09.8844361Z ASSERT Ollama Cloud GPT-OSS 20B reasoning delta field
+2026-11-01T02:51:09.8844589Z ASSERT Ollama Cloud GPT-OSS 120B supports tools
+2026-11-01T02:51:09.8844814Z ASSERT Ollama Cloud GPT-OSS 120B supports reasoning
+2026-11-01T02:51:09.8845055Z ASSERT Ollama Cloud GPT-OSS 120B supports native streaming
+2026-11-01T02:51:09.8845297Z ASSERT Ollama Cloud GPT-OSS 120B no structured output
+2026-11-01T02:51:09.8845521Z ASSERT Ollama Cloud GPT-OSS 120B replay policy
+2026-11-01T02:51:09.8845755Z ASSERT Ollama Cloud GPT-OSS 120B drops plain-turn reasoning
+2026-11-01T02:51:09.8846135Z ASSERT Ollama Cloud GPT-OSS 120B preserves a selected tool-call reasoning artifact
+2026-11-01T02:51:09.8846465Z ASSERT Ollama Cloud GPT-OSS 120B requires replay only on a selected tool call
+2026-11-01T02:51:09.8846882Z ASSERT Ollama Cloud GPT-OSS 120B reasoning delta field
+2026-11-01T02:51:09.8847161Z   [OK]          model_lookup                      33   frontier grouped tool/...
+2026-11-01T02:51:09.8847385Z ASSERT context 1M
+2026-11-01T02:51:09.8847535Z ASSERT output 128K
+2026-11-01T02:51:09.8847684Z ASSERT has reasoning
+2026-11-01T02:51:09.8847845Z ASSERT uses thinking object only
+2026-11-01T02:51:09.8848007Z ASSERT has tools
+2026-11-01T02:51:09.8848152Z ASSERT has tool_choice
+2026-11-01T02:51:09.8848315Z ASSERT has response_format json
+2026-11-01T02:51:09.8848493Z ASSERT no native structured output
+2026-11-01T02:51:09.8848666Z ASSERT pro row is text-only
+2026-11-01T02:51:09.8848839Z ASSERT pro row has no image input
+2026-11-01T02:51:09.8849020Z ASSERT pro row has no audio input
+2026-11-01T02:51:09.8849193Z ASSERT pro row has no video input
+2026-11-01T02:51:09.8849366Z ASSERT uses split reasoning fields
+2026-11-01T02:51:09.8849555Z ASSERT streams reasoning_content deltas
+2026-11-01T02:51:09.8849762Z ASSERT preserves reasoning on tool turns only
+2026-11-01T02:51:09.8849951Z ASSERT has native streaming
+2026-11-01T02:51:09.8850174Z   [OK]          model_lookup                      34   mimo-v2.5-pro.
+2026-11-01T02:51:09.8850387Z ASSERT context 1M
+2026-11-01T02:51:09.8850533Z ASSERT output 128K
+2026-11-01T02:51:09.8850678Z ASSERT has reasoning
+2026-11-01T02:51:09.8850835Z ASSERT has response_format json
+2026-11-01T02:51:09.8851010Z ASSERT no native structured output
+2026-11-01T02:51:09.8851174Z ASSERT multimodal
+2026-11-01T02:51:09.8851316Z ASSERT image input
+2026-11-01T02:51:09.8851460Z ASSERT audio input
+2026-11-01T02:51:09.8851602Z ASSERT video input
+2026-11-01T02:51:09.8851823Z   [OK]          model_lookup                      35   mimo-v2.5 multimodal.
+2026-11-01T02:51:09.8852053Z ASSERT supports reasoning
+2026-11-01T02:51:09.8852232Z ASSERT qwen3 uses chat_template_kwargs
+2026-11-01T02:51:09.8852483Z   [OK]          model_lookup                      36   qwen3 thinking control.
+2026-11-01T02:51:09.8852709Z ASSERT unknown returns None
+2026-11-01T02:51:09.8852922Z   [OK]          model_lookup                      37   unknown.
+2026-11-01T02:51:09.8853128Z ASSERT uppercase matches
+2026-11-01T02:51:09.8853350Z   [OK]          model_lookup                      38   case insensitive.
+2026-11-01T02:51:09.8853614Z ASSERT normalized provider and case-folded model resolve
+2026-11-01T02:51:09.8853859Z ASSERT provider-scoped padded model id is rejected
+2026-11-01T02:51:09.8854101Z ASSERT provider-scoped model prefix extension is absent
+2026-11-01T02:51:09.8854341Z ASSERT bare exact lookup does not inherit variants
+2026-11-01T02:51:09.8854651Z ASSERT exact provider/model token resolves
+2026-11-01T02:51:09.8854894Z ASSERT provider token near-miss does not fall back to bare family
+2026-11-01T02:51:09.8855194Z   [OK]          model_lookup                      39   provider-scoped identi...
+2026-11-01T02:51:09.8855419Z ASSERT ctx_size set
+2026-11-01T02:51:09.8855579Z ASSERT other fields unchanged
+2026-11-01T02:51:09.8855806Z   [OK]          merge                              0   with_context_size.
+2026-11-01T02:51:09.8856025Z ASSERT manifest overrides ctx
+2026-11-01T02:51:09.8856190Z ASSERT manifest keeps tools
+2026-11-01T02:51:09.8856427Z   [OK]          manifest                           0   explicit manifest prec...
+2026-11-01T02:51:09.8856848Z ASSERT fallback ctx 1M
+2026-11-01T02:51:09.8857081Z   [OK]          manifest                           1   explicit manifest fall...
+2026-11-01T02:51:09.8857326Z ASSERT exact row owns its tool permission
+2026-11-01T02:51:09.8857536Z ASSERT other declared row remains independent
+2026-11-01T02:51:09.8857797Z ASSERT undeclared identity does not inherit: custom-exact-fixture-q8
+2026-11-01T02:51:09.8858110Z ASSERT undeclared identity does not inherit: custom-exact-fixture-q4-extra
+2026-11-01T02:51:09.8858430Z ASSERT undeclared identity does not inherit: vendor/custom-exact-fixture-q4
+2026-11-01T02:51:09.8858747Z ASSERT undeclared identity does not inherit: vendor:custom-exact-fixture-q4
+2026-11-01T02:51:09.8859003Z ASSERT exact row owns its tool permission
+2026-11-01T02:51:09.8859210Z ASSERT other declared row remains independent
+2026-11-01T02:51:09.8859464Z ASSERT undeclared identity does not inherit: custom-exact-fixture-q8
+2026-11-01T02:51:09.8859772Z ASSERT undeclared identity does not inherit: custom-exact-fixture-q4-extra
+2026-11-01T02:51:09.8860085Z ASSERT undeclared identity does not inherit: vendor/custom-exact-fixture-q4
+2026-11-01T02:51:09.8860398Z ASSERT undeclared identity does not inherit: vendor:custom-exact-fixture-q4
+2026-11-01T02:51:09.8860679Z ASSERT an explicitly declared qualified ID remains exact
+2026-11-01T02:51:09.8860944Z ASSERT qualified declaration does not grant bare identity
+2026-11-01T02:51:09.8861218Z   [OK]          manifest                           2   exact model identity a...
+2026-11-01T02:51:09.8861509Z   [OK]          manifest                           3   explicit v2 model iden...
+2026-11-01T02:51:09.8861739Z ASSERT unknown → None
+2026-11-01T02:51:09.8861962Z   [OK]          manifest                           4   unknown model → None.
+2026-11-01T02:51:09.8862230Z ASSERT malformed id is refused before manifest fallback
+2026-11-01T02:51:09.8862502Z   [OK]          manifest                           5   malformed model id doe...
+2026-11-01T02:51:09.8862722Z ASSERT custom ctx
+2026-11-01T02:51:09.8862876Z ASSERT openai_chat base: tools
+2026-11-01T02:51:09.8863052Z ASSERT openai_chat base: streaming
+2026-11-01T02:51:09.8863287Z   [OK]          manifest                           6   base openai_chat.
+2026-11-01T02:51:09.8863499Z ASSERT custom ctx 512K
+2026-11-01T02:51:09.8863711Z   [OK]          manifest                           7   base anthropic.
+2026-11-01T02:51:09.8863929Z ASSERT tools overridden true
+2026-11-01T02:51:09.8864094Z ASSERT ctx overridden
+2026-11-01T02:51:09.8864266Z ASSERT reasoning unchanged from default
+2026-11-01T02:51:09.8864516Z   [OK]          manifest                           8   base absent = default.
+2026-11-01T02:51:09.8864803Z   [OK]          manifest                           9   base label constructor...
+2026-11-01T02:51:09.8865029Z ASSERT canonical base label
+2026-11-01T02:51:09.8865357Z   [OK]          manifest                          10   base label constructor...
+2026-11-01T02:51:09.8865617Z ASSERT base label resolves for kimi-k2.7-code: kimi
+2026-11-01T02:51:09.8865854Z ASSERT base label resolves for gpt-4.1: openai_chat
+2026-11-01T02:51:09.8866092Z ASSERT base label resolves for glm-5.1: openai_chat
+2026-11-01T02:51:09.8866330Z ASSERT base label resolves for glm-5-turbo: openai_chat
+2026-11-01T02:51:09.8866563Z ASSERT base label resolves for glm-5: openai_chat
+2026-11-01T02:51:09.8866887Z ASSERT base label resolves for google/gemma-4-e2b: openai_chat
+2026-11-01T02:51:09.8867138Z ASSERT base label resolves for qwen3.5: openai_chat
+2026-11-01T02:51:09.8867459Z ASSERT base label resolves for qwen-local-35b-a3b: openai_chat
+2026-11-01T02:51:09.8867703Z ASSERT base label resolves for qwen: openai_chat
+2026-11-01T02:51:09.8867942Z ASSERT base label resolves for deepseek-v4-pro: openai_chat
+2026-11-01T02:51:09.8868211Z ASSERT base label resolves for deepseek-v4-flash: openai_chat
+2026-11-01T02:51:09.8868496Z   [OK]          manifest                          11   example base labels ar...
+2026-11-01T02:51:09.8868724Z ASSERT manifest disables reasoning
+2026-11-01T02:51:09.8868900Z ASSERT base openai_chat: tools
+2026-11-01T02:51:09.8869139Z   [OK]          manifest                          12   explicit exact manifes...
+2026-11-01T02:51:09.8869362Z ASSERT composed JSON context
+2026-11-01T02:51:09.8869530Z ASSERT composed JSON tools
+2026-11-01T02:51:09.8869705Z ASSERT composed JSON thinking format
+2026-11-01T02:51:09.8909408Z   [OK]          manifest                          13   global catalog precede...
+2026-11-01T02:51:09.8909768Z ASSERT tools matches base
+2026-11-01T02:51:09.8910016Z ASSERT ctx matches base
+2026-11-01T02:51:09.8910383Z   [OK]          manifest                          14   all-None entry matches...
+2026-11-01T02:51:09.8910835Z   [OK]          manifest                          15   wrong-type bool rejects.
+2026-11-01T02:51:09.8911288Z   [OK]          manifest                          16   wrong-type int rejects.
+2026-11-01T02:51:09.8911738Z   [OK]          manifest                          17   wrong-type string list...
+2026-11-01T02:51:09.8912190Z   [OK]          manifest                          18   empty model_id rejects.
+2026-11-01T02:51:09.8912638Z   [OK]          manifest                          19   padded model_id rejects.
+2026-11-01T02:51:09.8913090Z   [OK]          manifest                          20   duplicate root field r...
+2026-11-01T02:51:09.8913551Z   [OK]          manifest                          21   duplicate entry field ...
+2026-11-01T02:51:09.8914008Z   [OK]          manifest                          22   wrong-type base rejects.
+2026-11-01T02:51:09.8914462Z   [OK]          manifest                          23   wrong-type policy stri...
+2026-11-01T02:51:09.8914812Z ASSERT manifest ollama_think
+2026-11-01T02:51:09.8915208Z   [OK]          manifest                          24   ollama_think policy st...
+2026-11-01T02:51:09.8915582Z ASSERT token carried by the constructor
+2026-11-01T02:51:09.8915932Z   [OK]          manifest                          25   thinking_control_token...
+2026-11-01T02:51:09.8916221Z   [OK]          manifest                          26   tokenless chat_templat...
+2026-11-01T02:51:09.8916509Z   [OK]          manifest                          27   blank thinking_control...
+2026-11-01T02:51:09.8916946Z   [OK]          manifest                          28   padded thinking_contro...
+2026-11-01T02:51:09.8917314Z ASSERT manifest thinking_object_adaptive
+2026-11-01T02:51:09.8917565Z   [OK]          manifest                          29   thinking_object_adapti...
+2026-11-01T02:51:09.8917801Z ASSERT manifest split_reasoning_fields
+2026-11-01T02:51:09.8918048Z   [OK]          manifest                          30   reasoning_output_forma...
+2026-11-01T02:51:09.8918282Z ASSERT manifest delta reasoning stream
+2026-11-01T02:51:09.8918530Z   [OK]          manifest                          31   reasoning_streaming_fo...
+2026-11-01T02:51:09.8918759Z ASSERT ignored sampling parameters
+2026-11-01T02:51:09.8918999Z   [OK]          manifest                          32   ignored sampling param...
+2026-11-01T02:51:09.8919516Z   [OK]          manifest                          33   unknown ignored sampli...
+2026-11-01T02:51:09.8919977Z   [OK]          manifest                          34   unknown preserve_think...
+2026-11-01T02:51:09.8920388Z   [OK]          manifest                          35   unknown reasoning_outp...
+2026-11-01T02:51:09.8920675Z   [OK]          manifest                          36   unknown reasoning_stre...
+2026-11-01T02:51:09.8920961Z   [OK]          manifest                          37   unknown reasoning_repl...
+2026-11-01T02:51:09.8921244Z   [OK]          manifest                          38   retired reasoning_visi...
+2026-11-01T02:51:09.8921527Z   [OK]          manifest                          39   modality_priority appl...
+2026-11-01T02:51:09.8921758Z ASSERT anthropic base reports usage
+2026-11-01T02:51:09.8921968Z ASSERT manifest emits_usage_tokens overrides base
+2026-11-01T02:51:09.8922228Z   [OK]          manifest                          40   emits_usage_tokens app...
+2026-11-01T02:51:09.8922463Z ASSERT anthropic base has no allow-list
+2026-11-01T02:51:09.8922775Z ASSERT manifest supported_models overrides base
+2026-11-01T02:51:09.8923191Z   [OK]          manifest                          41   supported_models applied.
+2026-11-01T02:51:09.8923549Z ASSERT modality_priority inherited
+2026-11-01T02:51:09.8923745Z ASSERT emits_usage_tokens inherited
+2026-11-01T02:51:09.8923925Z ASSERT supported_models inherited
+2026-11-01T02:51:09.8924163Z   [OK]          manifest                          42   newer fields inherit b...
+2026-11-01T02:51:09.8924451Z   [OK]          manifest                          43   bad newer field values...
+2026-11-01T02:51:09.8924668Z ASSERT accepted subset
+2026-11-01T02:51:09.8924901Z   [OK]          manifest                          44   accepted reasoning eff...
+2026-11-01T02:51:09.8925186Z   [OK]          manifest                          45   unknown accepted reaso...
+2026-11-01T02:51:09.8925413Z ASSERT max_int intlit accepted
+2026-11-01T02:51:09.8925645Z   [OK]          manifest                          46   intlit in range accepted.
+2026-11-01T02:51:09.8926078Z   [OK]          manifest                          47   intlit out of range re...
+2026-11-01T02:51:09.8926530Z   [OK]          manifest                          48   missing manifest file ...
+2026-11-01T02:51:09.8927015Z   [OK]          manifest                          49   malformed manifest fil...
+2026-11-01T02:51:09.8927305Z   [OK]          manifest                          50   model catalog rejects ...
+2026-11-01T02:51:09.8927591Z   [OK]          manifest                          51   model catalog rejects ...
+2026-11-01T02:51:09.8940620Z   [OK]          manifest                          52   model catalog rejects ...
+2026-11-01T02:51:09.8943547Z   [OK]          manifest                          53   model catalog rejects ...
+2026-11-01T02:51:09.8946496Z   [OK]          manifest                          54   model catalog rejects ...
+2026-11-01T02:51:09.8949477Z   [OK]          manifest                          55   model catalog rejects ...
+2026-11-01T02:51:09.8952961Z   [OK]          manifest                          56   model catalog rejects ...
+2026-11-01T02:51:09.8955826Z   [OK]          manifest                          57   model catalog rejects ...
+2026-11-01T02:51:09.8958903Z   [OK]          manifest                          58   model catalog rejects ...
+2026-11-01T02:51:09.8962126Z   [OK]          manifest                          59   model catalog rejects ...
+2026-11-01T02:51:09.8964828Z   [OK]          manifest                          60   model catalog rejects ...
+2026-11-01T02:51:09.8967994Z   [OK]          manifest                          61   model catalog rejects ...
+2026-11-01T02:51:09.8970941Z   [OK]          manifest                          62   model catalog rejects ...
+2026-11-01T02:51:09.8973821Z   [OK]          manifest                          63   model catalog rejects ...
+2026-11-01T02:51:09.8975591Z ASSERT manifest/catalog common declarative overrides produce identical capabilities
+2026-11-01T02:51:09.8977455Z   [OK]          manifest                          64   manifest catalog commo...
+2026-11-01T02:51:09.8977844Z ASSERT exact row keeps its declared policy
+2026-11-01T02:51:09.8978208Z ASSERT an undeclared variant has no inherited policy
+2026-11-01T02:51:09.8978591Z ASSERT an undeclared variant has no inherited policy
+2026-11-01T02:51:09.8978966Z ASSERT an undeclared variant has no inherited policy
+2026-11-01T02:51:09.8979317Z ASSERT exact row keeps its declared policy
+2026-11-01T02:51:09.8979672Z ASSERT an undeclared variant has no inherited policy
+2026-11-01T02:51:09.8980044Z ASSERT an undeclared variant has no inherited policy
+2026-11-01T02:51:09.8980427Z ASSERT an undeclared variant has no inherited policy
+2026-11-01T02:51:09.8980777Z ASSERT exact row keeps its declared policy
+2026-11-01T02:51:09.8981118Z ASSERT an undeclared variant has no inherited policy
+2026-11-01T02:51:09.8981375Z ASSERT an undeclared variant has no inherited policy
+2026-11-01T02:51:09.8981605Z ASSERT an undeclared variant has no inherited policy
+2026-11-01T02:51:09.8981883Z ASSERT exact row keeps its declared policy
+2026-11-01T02:51:09.8982176Z ASSERT an undeclared variant has no inherited policy
+2026-11-01T02:51:09.8982439Z ASSERT an undeclared variant has no inherited policy
+2026-11-01T02:51:09.8982759Z ASSERT an undeclared variant has no inherited policy
+2026-11-01T02:51:09.8983046Z ASSERT exact row keeps its declared policy
+2026-11-01T02:51:09.8983264Z ASSERT an undeclared variant has no inherited policy
+2026-11-01T02:51:09.8983495Z ASSERT an undeclared variant has no inherited policy
+2026-11-01T02:51:09.8983726Z ASSERT an undeclared variant has no inherited policy
+2026-11-01T02:51:09.8984036Z ASSERT exact row keeps its declared policy
+2026-11-01T02:51:09.8984383Z ASSERT an undeclared variant has no inherited policy
+2026-11-01T02:51:09.8984756Z ASSERT an undeclared variant has no inherited policy
+2026-11-01T02:51:09.8985126Z ASSERT an undeclared variant has no inherited policy
+2026-11-01T02:51:09.8985587Z   [OK]          prefix_ordering                    0   shadow pairs all resol...
+2026-11-01T02:51:09.8986045Z ASSERT the row's own efforts reach the capabilities
+2026-11-01T02:51:09.8986480Z   [OK]          prefix_ordering                    1   a declared effort ladd...
+2026-11-01T02:51:09.8986992Z ASSERT the row says it does not reason
+2026-11-01T02:51:09.8987418Z ASSERT and so advertises no effort values
+2026-11-01T02:51:09.8987695Z   [OK]          prefix_ordering                    2   a non-reasoning row in...
+2026-11-01T02:51:09.8988110Z ASSERT bare row outranks provider base
+2026-11-01T02:51:09.8988543Z   [OK]          prefix_ordering                    3   a bare row outranks th...
+2026-11-01T02:51:09.8988983Z ASSERT scoped lookup does not borrow a bare row
+2026-11-01T02:51:09.8989432Z   [OK]          prefix_ordering                    4   a named provider still...
+2026-11-01T02:51:09.8989855Z ASSERT the fixture id has no declared policy
+2026-11-01T02:51:09.8990300Z ASSERT absent wire serializes no thinking block
+2026-11-01T02:51:09.8990651Z ASSERT absent wire with no toggle validates
+2026-11-01T02:51:09.8991092Z   [OK]          anthropic_thinking_wire            0   a row with no policy r...
+2026-11-01T02:51:09.8991804Z ASSERT request body carries no thinking field
+2026-11-01T02:51:09.8992262Z   [OK]          anthropic_thinking_wire            1   a row with no policy s...
+2026-11-01T02:51:09.8992812Z ASSERT enable_thinking=true on the absent wire is rejected
+2026-11-01T02:51:09.8993308Z ASSERT enable_thinking=true legacy validator agrees with the wire
+2026-11-01T02:51:09.8993805Z ASSERT enable_thinking=false on the absent wire is rejected
+2026-11-01T02:51:09.8994300Z ASSERT enable_thinking=false legacy validator agrees with the wire
+2026-11-01T02:51:09.8994846Z   [OK]          anthropic_thinking_wire            2   a row with no policy r...
+2026-11-01T02:51:09.8995340Z ASSERT claude-fable-5: the ladder is declared
+2026-11-01T02:51:09.8995804Z ASSERT claude-fable-5: the window is the model row's, not the base's
+2026-11-01T02:51:09.8996262Z ASSERT claude-opus-5-5: the ladder is declared
+2026-11-01T02:51:09.8996852Z ASSERT claude-opus-5-5: the window is the model row's, not the base's
+2026-11-01T02:51:09.8997302Z ASSERT claude-sonnet-5: the ladder is declared
+2026-11-01T02:51:09.8997720Z ASSERT claude-sonnet-5: the window is the model row's, not the base's
+2026-11-01T02:51:09.8998193Z ASSERT deepseek-anthropic does not take the Claude row's ladder
+2026-11-01T02:51:09.8998664Z ASSERT deepseek-anthropic does not take the Claude row's window
+2026-11-01T02:51:09.8999217Z   [OK]          provider serves bare rows          0   claude reads the Claud...
+2026-11-01T02:51:09.8999659Z ASSERT a declared alias retains its exact row
+2026-11-01T02:51:09.9000061Z ASSERT permission does not extend to an undeclared variant
+2026-11-01T02:51:09.9000489Z ASSERT request spelling cannot grant a broader original row
+2026-11-01T02:51:09.9000886Z ASSERT another vendor's bare row is not served
+2026-11-01T02:51:09.9001267Z ASSERT an explicit scoped row remains authoritative
+2026-11-01T02:51:09.9001676Z ASSERT enumeration uses the same original-row authority
+2026-11-01T02:51:09.9002122Z   [OK]          provider serves bare rows          1   served families bind o...
+2026-11-01T02:51:09.9002525Z Test Successful in 0.030s. 124 tests run.
+2026-11-01T02:51:09.9191666Z [targeted] @@packages/agent_core/test/runtest-test_capabilities: OK in 1s
+2026-11-01T02:51:09.9212819Z [targeted] @@packages/agent_core/test/runtest-test_provider_config: start 2026-11-01T02:51:09Z (dune alias)
+2026-11-01T02:51:11.3770607Z Testing `provider_config'.
+2026-11-01T02:51:11.3771210Z ASSERT model_id
+2026-11-01T02:51:11.3771453Z ASSERT base_url
+2026-11-01T02:51:11.3771946Z ASSERT api_key default empty
+2026-11-01T02:51:11.3772233Z ASSERT max_tokens default None
+2026-11-01T02:51:11.3772514Z ASSERT temperature None
+2026-11-01T02:51:11.3772771Z ASSERT top_p None
+2026-11-01T02:51:11.3772943Z ASSERT top_k None
+2026-11-01T02:51:11.3773095Z ASSERT min_p None
+2026-11-01T02:51:11.3773256Z ASSERT system_prompt None
+2026-11-01T02:51:11.3773431Z ASSERT enable_thinking None
+2026-11-01T02:51:11.3773623Z ASSERT preserve_thinking None
+2026-11-01T02:51:11.3773808Z ASSERT reasoning_effort None
+2026-11-01T02:51:11.3773987Z ASSERT clear_thinking None
+2026-11-01T02:51:11.3774160Z ASSERT tool_stream false
+2026-11-01T02:51:11.3774329Z ASSERT tool_choice None
+2026-11-01T02:51:11.3774613Z ASSERT no parallel tool use
+2026-11-01T02:51:11.3774791Z ASSERT response format off
+2026-11-01T02:51:11.3774969Z ASSERT no cache system prompt
+2026-11-01T02:51:11.3775250Z   [OK]          defaults                                        0   make defa...
+2026-11-01T02:51:11.3775524Z ASSERT provider id is ASCII-lowercased
+2026-11-01T02:51:11.3775732Z ASSERT empty provider id is rejected
+2026-11-01T02:51:11.3775936Z ASSERT padded provider id is rejected
+2026-11-01T02:51:11.3776200Z   [OK]          defaults                                        1   provider ...
+2026-11-01T02:51:11.3776442Z ASSERT 1 default header
+2026-11-01T02:51:11.3776614Z ASSERT Content-Type key
+2026-11-01T02:51:11.3776932Z ASSERT Content-Type val
+2026-11-01T02:51:11.3777174Z   [OK]          defaults                                        2   default h...
+2026-11-01T02:51:11.3777420Z ASSERT default connect timeout
+2026-11-01T02:51:11.3777671Z   [OK]          defaults                                        3   connect t...
+2026-11-01T02:51:11.3777907Z ASSERT explicit connect timeout
+2026-11-01T02:51:11.3778160Z   [OK]          defaults                                        4   connect t...
+2026-11-01T02:51:11.3778466Z ASSERT anthropic path
+2026-11-01T02:51:11.3778716Z   [OK]          request_path                                    0   anthropic.
+2026-11-01T02:51:11.3778953Z ASSERT kimi path
+2026-11-01T02:51:11.3779192Z   [OK]          request_path                                    1   kimi.
+2026-11-01T02:51:11.3779435Z ASSERT openai path
+2026-11-01T02:51:11.3779682Z   [OK]          request_path                                    2   openai.
+2026-11-01T02:51:11.3779914Z ASSERT gemini path
+2026-11-01T02:51:11.3780301Z   [OK]          request_path                                    3   gemini.
+2026-11-01T02:51:11.3780526Z ASSERT glm path
+2026-11-01T02:51:11.3780778Z   [OK]          request_path                                    4   glm.
+2026-11-01T02:51:11.3787514Z ASSERT ollama path
+2026-11-01T02:51:11.3787773Z   [OK]          request_path                                    5   ollama.
+2026-11-01T02:51:11.3788008Z ASSERT custom path
+2026-11-01T02:51:11.3788246Z   [OK]          request_path                                    6   override.
+2026-11-01T02:51:11.3788488Z ASSERT global endpoint
+2026-11-01T02:51:11.3788660Z ASSERT regional endpoint
+2026-11-01T02:51:11.3788855Z ASSERT resource path injection rejected
+2026-11-01T02:51:11.3789078Z ASSERT OAuth bearer is not a Gemini API key
+2026-11-01T02:51:11.3789334Z ASSERT token absent from persistent nonsecret headers
+2026-11-01T02:51:11.3789660Z ASSERT different authentication scheme partitions cached responses
+2026-11-01T02:51:11.3789911Z ASSERT native streaming resource
+2026-11-01T02:51:11.3790179Z   [OK]          auth_headers                                    0   Vertex en...
+2026-11-01T02:51:11.3790556Z ASSERT anthropic
+2026-11-01T02:51:11.3790707Z ASSERT kimi
+2026-11-01T02:51:11.3790862Z ASSERT openai_compat
+2026-11-01T02:51:11.3791025Z ASSERT ollama
+2026-11-01T02:51:11.3791170Z ASSERT gemini
+2026-11-01T02:51:11.3791311Z ASSERT glm
+2026-11-01T02:51:11.3791539Z   [OK]          auth_headers                                    1   kind/key ...
+2026-11-01T02:51:11.3791774Z ASSERT anthropic
+2026-11-01T02:51:11.3791920Z ASSERT kimi
+2026-11-01T02:51:11.3792069Z ASSERT openai_compat
+2026-11-01T02:51:11.3792224Z ASSERT ollama
+2026-11-01T02:51:11.3792366Z ASSERT gemini
+2026-11-01T02:51:11.3792509Z ASSERT glm
+2026-11-01T02:51:11.3792825Z   [OK]          auth_headers                                    2   kind/key ...
+2026-11-01T02:51:11.3793055Z ASSERT anthropic
+2026-11-01T02:51:11.3793210Z ASSERT kimi
+2026-11-01T02:51:11.3793361Z ASSERT openai_compat
+2026-11-01T02:51:11.3793516Z ASSERT ollama
+2026-11-01T02:51:11.3793656Z ASSERT gemini
+2026-11-01T02:51:11.3793796Z ASSERT glm
+2026-11-01T02:51:11.3794026Z   [OK]          auth_headers                                    3   empty sec...
+2026-11-01T02:51:11.3794258Z ASSERT api_key
+2026-11-01T02:51:11.3794411Z ASSERT max_tokens
+2026-11-01T02:51:11.3794571Z ASSERT temperature
+2026-11-01T02:51:11.3794730Z ASSERT top_p
+2026-11-01T02:51:11.3794875Z ASSERT top_k
+2026-11-01T02:51:11.3795017Z ASSERT min_p
+2026-11-01T02:51:11.3795167Z ASSERT system_prompt
+2026-11-01T02:51:11.3795337Z ASSERT enable_thinking
+2026-11-01T02:51:11.3795518Z ASSERT preserve_thinking
+2026-11-01T02:51:11.3795693Z ASSERT reasoning_effort
+2026-11-01T02:51:11.3795862Z ASSERT clear_thinking
+2026-11-01T02:51:11.3796025Z ASSERT tool_stream
+2026-11-01T02:51:11.3796197Z ASSERT disable_parallel
+2026-11-01T02:51:11.3796365Z ASSERT json schema mode
+2026-11-01T02:51:11.3796532Z ASSERT cache prompt
+2026-11-01T02:51:11.3797059Z   [OK]          explicit_values                                 0   all options.
+2026-11-01T02:51:11.3797319Z ASSERT 2 custom headers
+2026-11-01T02:51:11.3797567Z   [OK]          explicit_values                                 1   custom he...
+2026-11-01T02:51:11.3797844Z ASSERT default defers to downstream kind default
+2026-11-01T02:51:11.3798066Z ASSERT explicit override preserved
+2026-11-01T02:51:11.3798339Z   [OK]          explicit_values                                 2   connect t...
+2026-11-01T02:51:11.3798577Z ASSERT json mode
+2026-11-01T02:51:11.3798819Z   [OK]          explicit_values                                 3   json mode.
+2026-11-01T02:51:11.3799051Z ASSERT default
+2026-11-01T02:51:11.3799292Z   [OK]          explicit_values                                 4   connect t...
+2026-11-01T02:51:11.3799530Z ASSERT override
+2026-11-01T02:51:11.3799770Z   [OK]          explicit_values                                 5   connect t...
+2026-11-01T02:51:11.3800035Z ASSERT explicit OpenAI capability accepted
+2026-11-01T02:51:11.3800319Z   [OK]          output_schema                                   0   explicit ...
+2026-11-01T02:51:11.3948418Z ASSERT anonymous wire does not acquire model capability facts
+2026-11-01T02:51:11.3948698Z ASSERT capability source remains the protocol default
+2026-11-01T02:51:11.3948953Z ASSERT anonymous chat protocol admits json_schema
+2026-11-01T02:51:11.3949251Z   [OK]          output_schema                                   1   bare open...
+2026-11-01T02:51:11.4116900Z ASSERT anonymous wire does not acquire model capability facts
+2026-11-01T02:51:11.4117637Z ASSERT capability source remains the protocol default
+2026-11-01T02:51:11.4118044Z ASSERT anonymous chat protocol admits json_schema
+2026-11-01T02:51:11.4118517Z   [OK]          output_schema                                   2   unscoped ...
+2026-11-01T02:51:11.4119053Z ASSERT explicit gpt capability is independent of the compatible endpoint host
+2026-11-01T02:51:11.4119600Z   [OK]          output_schema                                   3   explicit ...
+2026-11-01T02:51:11.4120078Z ASSERT unknown declared OpenAI-compatible provider has no schema policy
+2026-11-01T02:51:11.4120536Z   [OK]          output_schema                                   4   unknown d...
+2026-11-01T02:51:11.4120885Z ASSERT rejection
+2026-11-01T02:51:11.4121130Z   [OK]          output_schema                                   5   ollama cl...
+2026-11-01T02:51:11.4121368Z ASSERT rejection
+2026-11-01T02:51:11.4121604Z   [OK]          output_schema                                   6   ollama cl...
+2026-11-01T02:51:11.4121835Z ASSERT rejection
+2026-11-01T02:51:11.4122101Z   [OK]          output_schema                                   7   native ol...
+2026-11-01T02:51:11.4122406Z ASSERT declared self-hosted OpenAI-compatible endpoint accepted
+2026-11-01T02:51:11.4122721Z   [OK]          output_schema                                   8   declared ...
+2026-11-01T02:51:11.4122953Z ASSERT rejection
+2026-11-01T02:51:11.4123192Z   [OK]          output_schema                                   9   ollama cl...
+2026-11-01T02:51:11.4123420Z ASSERT reason
+2026-11-01T02:51:11.4123657Z   [OK]          output_schema                                  10   ollama cl...
+2026-11-01T02:51:11.4123885Z ASSERT reason
+2026-11-01T02:51:11.4124119Z   [OK]          output_schema                                  11   native ol...
+2026-11-01T02:51:11.4124464Z ASSERT unknown model on a declared provider has no structured-output capability
+2026-11-01T02:51:11.4124800Z   [OK]          output_schema                                  12   unknown m...
+2026-11-01T02:51:11.4125109Z ASSERT explicit typed model capability rejects structured output
+2026-11-01T02:51:11.4125419Z   [OK]          output_schema                                  13   typed mod...
+2026-11-01T02:51:11.4125661Z ASSERT glm rejected
+2026-11-01T02:51:11.4125904Z   [OK]          output_schema                                  14   glm rejec...
+2026-11-01T02:51:11.4126145Z ASSERT kimi rejected
+2026-11-01T02:51:11.4126394Z   [OK]          output_schema                                  15   kimi reje...
+2026-11-01T02:51:11.4126830Z ASSERT no schema request bypasses provider restriction
+2026-11-01T02:51:11.4127135Z   [OK]          output_schema                                  16   unrequest...
+2026-11-01T02:51:11.4127407Z ASSERT response_format JsonSchema is validated
+2026-11-01T02:51:11.4127688Z   [OK]          output_schema                                  17   direct Js...
+2026-11-01T02:51:11.4127934Z ASSERT anthropic accepts schema
+2026-11-01T02:51:11.4128123Z ASSERT gemini accepts schema
+2026-11-01T02:51:11.4128383Z ASSERT ollama accepts schema only for models with a native SO guarantee
+2026-11-01T02:51:11.4128708Z   [OK]          output_schema                                  18   supported...
+2026-11-01T02:51:11.4129037Z ASSERT GLM kind is admitted when its declared capability is native json_schema
+2026-11-01T02:51:11.4129390Z ASSERT a non-GLM kind is denied when its declared capability is json_object-only
+2026-11-01T02:51:11.4129738Z   [OK]          output_schema                                  19   tier is c...
+2026-11-01T02:51:11.4130085Z ASSERT native+json admits
+2026-11-01T02:51:11.4130263Z ASSERT native only admits
+2026-11-01T02:51:11.4130445Z ASSERT json-object only denies
+2026-11-01T02:51:11.4130625Z ASSERT neither denies
+2026-11-01T02:51:11.4130886Z ASSERT off-catalog Anthropic model resolves to its native-schema base record
+2026-11-01T02:51:11.4131220Z   [OK]          output_schema                                  20   tier proj...
+2026-11-01T02:51:11.4131472Z ASSERT returns explanatory error
+2026-11-01T02:51:11.4131734Z   [OK]          output_schema                                  21   openai ca...
+2026-11-01T02:51:11.4287063Z ASSERT rejection reason
+2026-11-01T02:51:11.4287568Z   [OK]          output_schema                                  22   ollama cl...
+2026-11-01T02:51:11.4451768Z ASSERT gemma4:31b-cloud keeps json_object mode
+2026-11-01T02:51:11.4452270Z ASSERT gemma4:31b-cloud admits json_object without a schema
+2026-11-01T02:51:11.4452719Z ASSERT gemma4:31b-cloud rejects native json_schema
+2026-11-01T02:51:11.4453219Z   [OK]          output_schema                                  23   ollama cl...
+2026-11-01T02:51:11.4619184Z ASSERT rejection reason
+2026-11-01T02:51:11.4619712Z   [OK]          output_schema                                  24   ollama cl...
+2026-11-01T02:51:11.4783837Z ASSERT rejection reason
+2026-11-01T02:51:11.4784356Z   [OK]          output_schema                                  25   native ol...
+2026-11-01T02:51:11.4785008Z ASSERT endpoint host does not supply an unknown declared provider's schema policy
+2026-11-01T02:51:11.4785602Z   [OK]          output_schema                                  26   unknown p...
+2026-11-01T02:51:11.4951927Z ASSERT rejection reason
+2026-11-01T02:51:11.4952469Z   [OK]          output_schema                                  27   mimo json...
+2026-11-01T02:51:11.5120315Z ASSERT anonymous wire does not acquire model capability facts
+2026-11-01T02:51:11.5120812Z ASSERT capability source remains the protocol default
+2026-11-01T02:51:11.5121318Z ASSERT anonymous chat protocol admits json_schema
+2026-11-01T02:51:11.5121815Z   [OK]          output_schema                                  28   endpoint ...
+2026-11-01T02:51:11.5122348Z ASSERT raw compatibility config does not select bare Qwen capabilities
+2026-11-01T02:51:11.5122888Z   [OK]          output_schema                                  29   raw compa...
+2026-11-01T02:51:11.5123336Z ASSERT raw compatibility config does not select bare MiniMax capabilities
+2026-11-01T02:51:11.5123670Z   [OK]          output_schema                                  30   raw compa...
+2026-11-01T02:51:11.5124049Z ASSERT raw compatibility config does not select a bare tool capability
+2026-11-01T02:51:11.5124918Z   [OK]          output_schema                                  31   bare tool...
+2026-11-01T02:51:11.5126615Z ASSERT raw compatibility config does not select a bare template dialect
+2026-11-01T02:51:11.5128624Z   [OK]          output_schema                                  32   bare temp...
+2026-11-01T02:51:11.5130338Z ASSERT endpoint and model text do not infer the provider-scoped row
+2026-11-01T02:51:11.5130672Z ASSERT declared provider/model tuple keeps tools
+2026-11-01T02:51:11.5130936Z ASSERT declared provider/model tuple keeps reasoning
+2026-11-01T02:51:11.5131234Z ASSERT declared provider/model tuple uses chat template kwargs
+2026-11-01T02:51:11.5132070Z   [OK]          output_schema                                  33   declared ...
+2026-11-01T02:51:11.5133071Z ASSERT bare model alone does not invent a provider identity
+2026-11-01T02:51:11.5135741Z   [OK]          output_schema                                  34   bare mode...
+2026-11-01T02:51:11.5137385Z ASSERT dot-qualified model string does not synthesize provider identity
+2026-11-01T02:51:11.5140106Z   [OK]          output_schema                                  35   encoded m...
+2026-11-01T02:51:11.5141599Z ASSERT unscoped row is absent on RunPod
+2026-11-01T02:51:11.5142002Z ASSERT unscoped row is absent on an arbitrary remote host
+2026-11-01T02:51:11.5142389Z ASSERT unscoped row is absent on localhost
+2026-11-01T02:51:11.5143093Z   [OK]          output_schema                                  36   bare capa...
+2026-11-01T02:51:11.5143788Z ASSERT responses structured output accepted at path layer
+2026-11-01T02:51:11.5144282Z   [OK]          output_schema                                  37   responses...
+2026-11-01T02:51:11.5144759Z ASSERT responses json mode accepted at path layer
+2026-11-01T02:51:11.5145243Z   [OK]          output_schema                                  38   responses...
+2026-11-01T02:51:11.5145674Z ASSERT named forced tool_choice rejects
+2026-11-01T02:51:11.5146013Z ASSERT required forced tool_choice rejects
+2026-11-01T02:51:11.5146352Z ASSERT auto tool_choice accepted
+2026-11-01T02:51:11.5146819Z ASSERT none tool_choice accepted
+2026-11-01T02:51:11.5147252Z   [OK]          output_schema                                  39   kimi k2.7...
+2026-11-01T02:51:11.5147679Z ASSERT thinking + named forced tool_choice rejects
+2026-11-01T02:51:11.5148090Z ASSERT thinking + required forced tool_choice rejects
+2026-11-01T02:51:11.5148502Z ASSERT thinking + auto tool_choice accepted
+2026-11-01T02:51:11.5148870Z ASSERT thinking + none tool_choice accepted
+2026-11-01T02:51:11.5149283Z ASSERT non-thinking forced tool_choice remains accepted
+2026-11-01T02:51:11.5149801Z   [OK]          output_schema                                  40   anthropic...
+2026-11-01T02:51:11.5150227Z ASSERT loopback ip is local
+2026-11-01T02:51:11.5150652Z   [OK]          locality                                        0   loopback ip.
+2026-11-01T02:51:11.5151072Z ASSERT 127/8 loopback ip is local
+2026-11-01T02:51:11.5151502Z   [OK]          locality                                        1   127 range...
+2026-11-01T02:51:11.5151899Z ASSERT localhost is local
+2026-11-01T02:51:11.5152309Z   [OK]          locality                                        2   localhost.
+2026-11-01T02:51:11.5152719Z ASSERT ipv6 loopback is local
+2026-11-01T02:51:11.5153142Z   [OK]          locality                                        3   ipv6 loop...
+2026-11-01T02:51:11.5153557Z ASSERT full ipv6 loopback is local
+2026-11-01T02:51:11.5153995Z   [OK]          locality                                        4   full ipv6...
+2026-11-01T02:51:11.5154438Z ASSERT ipv4-mapped ipv6 loopback is local
+2026-11-01T02:51:11.5154897Z   [OK]          locality                                        5   ipv4-mapp...
+2026-11-01T02:51:11.5155339Z ASSERT ipv4-mapped ipv6 remote is not local
+2026-11-01T02:51:11.5155801Z   [OK]          locality                                        6   ipv4-mapp...
+2026-11-01T02:51:11.5156209Z ASSERT remote is not local
+2026-11-01T02:51:11.5156735Z   [OK]          locality                                        7   remote fa...
+2026-11-01T02:51:11.5157153Z ASSERT hostname boundary respected
+2026-11-01T02:51:11.5157586Z   [OK]          locality                                        8   host boun...
+2026-11-01T02:51:11.5157998Z ASSERT localhost query is local
+2026-11-01T02:51:11.5158576Z   [OK]          locality                                        9   localhost...
+2026-11-01T02:51:11.5158963Z ASSERT to wire
+2026-11-01T02:51:11.5159205Z ASSERT from wire
+2026-11-01T02:51:11.5159451Z ASSERT to wire
+2026-11-01T02:51:11.5159690Z ASSERT from wire
+2026-11-01T02:51:11.5159928Z ASSERT to wire
+2026-11-01T02:51:11.5160161Z ASSERT from wire
+2026-11-01T02:51:11.5160402Z ASSERT to wire
+2026-11-01T02:51:11.5160637Z ASSERT from wire
+2026-11-01T02:51:11.5160878Z ASSERT to wire
+2026-11-01T02:51:11.5161116Z ASSERT from wire
+2026-11-01T02:51:11.5161356Z ASSERT to wire
+2026-11-01T02:51:11.5161596Z ASSERT from wire
+2026-11-01T02:51:11.5161962Z ASSERT to wire
+2026-11-01T02:51:11.5162199Z ASSERT from wire
+2026-11-01T02:51:11.5162454Z ASSERT unknown wire
+2026-11-01T02:51:11.5162755Z ASSERT trimmed case-insensitive wire
+2026-11-01T02:51:11.5163210Z   [OK]          locality                                       10   reasoning...
+2026-11-01T02:51:11.5163625Z ASSERT explicit effort preserved
+2026-11-01T02:51:11.5164060Z   [OK]          locality                                       11   reasoning...
+2026-11-01T02:51:11.5164459Z ASSERT low accepted
+2026-11-01T02:51:11.5164858Z   [OK]          locality                                       12   reasoning...
+2026-11-01T02:51:11.5321491Z   [OK]          locality                                       13   xai/grok-...
+2026-11-01T02:51:11.5487257Z ASSERT mistral-small refuses high until chunk-list response parsing is verified
+2026-11-01T02:51:11.5487837Z   [OK]          locality                                       14   mistral-s...
+2026-11-01T02:51:11.5488334Z   [OK]          locality                                       15   reasoning...
+2026-11-01T02:51:11.5488778Z ASSERT a ladder with none admits the disable
+2026-11-01T02:51:11.5489221Z ASSERT a thinking_object row keeps its own toggle and its low effort
+2026-11-01T02:51:11.5489725Z   [OK]          locality                                       16   reasoning...
+2026-11-01T02:51:11.5490221Z   [OK]          locality                                       17   thinking ...
+2026-11-01T02:51:11.5490727Z   [OK]          locality                                       18   the route...
+2026-11-01T02:51:11.5491125Z ASSERT the rejection names the model
+2026-11-01T02:51:11.5491458Z ASSERT the declared off value is admitted
+2026-11-01T02:51:11.5491817Z ASSERT a declared thinking effort is admitted
+2026-11-01T02:51:11.5492246Z ASSERT a lane that says it rides the provider default is admitted
+2026-11-01T02:51:11.5492681Z ASSERT a model that does not reason needs no effort
+2026-11-01T02:51:11.5493098Z ASSERT an ordinary wire still admits an absent effort
+2026-11-01T02:51:11.5493580Z ASSERT the ollama /v1 preset declares that it enables reasoning on its own
+2026-11-01T02:51:11.5494040Z   [OK]          locality                                       19   an auto-e...
+2026-11-01T02:51:11.5494293Z ASSERT declared wire clears by default
+2026-11-01T02:51:11.5494491Z ASSERT preserve disables clear
+2026-11-01T02:51:11.5494678Z ASSERT explicit clear wins
+2026-11-01T02:51:11.5494857Z ASSERT no preserve wire omits
+2026-11-01T02:51:11.5495049Z ASSERT thinking_object_keep_all omits
+2026-11-01T02:51:11.5495249Z ASSERT chat_template_kwargs omits
+2026-11-01T02:51:11.5495437Z ASSERT always_preserved omits
+2026-11-01T02:51:11.5495691Z   [OK]          locality                                       20   clear_thi...
+2026-11-01T02:51:11.5495927Z ASSERT normalizes title
+2026-11-01T02:51:11.5496106Z ASSERT keeps hyphen underscore
+2026-11-01T02:51:11.5496489Z ASSERT blank title uses default
+2026-11-01T02:51:11.5496818Z ASSERT missing title uses default
+2026-11-01T02:51:11.5497031Z ASSERT non-object uses default
+2026-11-01T02:51:11.5497284Z   [OK]          locality                                       21   structure...
+2026-11-01T02:51:11.5656182Z ASSERT declared native price presence
+2026-11-01T02:51:11.5656533Z ASSERT declared native policy presence
+2026-11-01T02:51:11.5657032Z ASSERT declared native unset thinking override stays absent
+2026-11-01T02:51:11.5657433Z ASSERT native policy is always adaptive
+2026-11-01T02:51:11.5657765Z ASSERT declared proxy price presence
+2026-11-01T02:51:11.5658253Z ASSERT declared proxy policy presence
+2026-11-01T02:51:11.5658598Z ASSERT declared proxy unset thinking override stays absent
+2026-11-01T02:51:11.5658921Z ASSERT missing proxy price remains unknown
+2026-11-01T02:51:11.5659150Z ASSERT provider-observed cost is retained
+2026-11-01T02:51:11.5659551Z ASSERT unknown declared provider price presence
+2026-11-01T02:51:11.5659811Z ASSERT unknown declared provider policy presence
+2026-11-01T02:51:11.5660090Z ASSERT unknown declared provider unset thinking override stays absent
+2026-11-01T02:51:11.5660355Z ASSERT anonymous native price presence
+2026-11-01T02:51:11.5660564Z ASSERT anonymous native policy presence
+2026-11-01T02:51:11.5660814Z ASSERT anonymous native unset thinking override stays absent
+2026-11-01T02:51:11.5661087Z ASSERT proxy cannot claim an undeclared thinking control
+2026-11-01T02:51:11.5661342Z ASSERT unfrozen proxy sees later explicit policy
+2026-11-01T02:51:11.5661581Z ASSERT frozen absent proxy policy stays absent
+2026-11-01T02:51:11.5661880Z   [OK]          declared provider capability authority          0   native/pr...
+2026-11-01T02:51:11.5663198Z ASSERT scoped capabilities
+2026-11-01T02:51:11.5663521Z ASSERT missing scoped policy is authoritative
+2026-11-01T02:51:11.5663880Z ASSERT missing scoped price is authoritative
+2026-11-01T02:51:11.5664952Z   [OK]          declared provider capability authority          1   missing s...
+2026-11-01T02:51:11.5666012Z ASSERT declared wire-label alias can read permitted bare price
+2026-11-01T02:51:11.5666453Z ASSERT anonymous compat cannot inherit alias permission
+2026-11-01T02:51:11.5666982Z ASSERT anonymous native retains bare price
+2026-11-01T02:51:11.5667723Z   [OK]          declared provider capability authority          2   pricing p...
+2026-11-01T02:51:11.5835739Z ASSERT anonymous native retains manifest policy
+2026-11-01T02:51:11.5836156Z ASSERT non-authoritative manifest policy stays absent
+2026-11-01T02:51:11.5836576Z ASSERT non-authoritative manifest policy stays absent
+2026-11-01T02:51:11.5837004Z ASSERT non-authoritative manifest policy stays absent
+2026-11-01T02:51:11.5837261Z ASSERT non-authoritative manifest policy stays absent
+2026-11-01T02:51:11.5837573Z   [OK]          declared provider capability authority          3   thinking ...
+2026-11-01T02:51:11.6001799Z ASSERT declared native model context
+2026-11-01T02:51:11.6002148Z ASSERT model effort ladder
+2026-11-01T02:51:11.6002538Z ASSERT frozen request retains the resolved native facts
+2026-11-01T02:51:11.6002977Z ASSERT unfrozen request sees the replaced catalog
+2026-11-01T02:51:11.6003475Z   [OK]          declared provider capability authority          4   declared ...
+2026-11-01T02:51:11.6165813Z ASSERT declared native model context
+2026-11-01T02:51:11.6166200Z ASSERT native Kimi model thinking policy
+2026-11-01T02:51:11.6166580Z ASSERT native model omits unsupported sampling
+2026-11-01T02:51:11.6167362Z ASSERT frozen request retains the resolved native facts
+2026-11-01T02:51:11.6167776Z ASSERT unfrozen request sees the replaced catalog
+2026-11-01T02:51:11.6168277Z   [OK]          declared provider capability authority          5   declared ...
+2026-11-01T02:51:11.6168772Z ASSERT declared wire-name alias resolves canonical row
+2026-11-01T02:51:11.6169195Z ASSERT anonymous native wire still reads the bare row
+2026-11-01T02:51:11.6169642Z ASSERT anonymous compatible endpoint does not borrow bare facts
+2026-11-01T02:51:11.6170085Z ASSERT unknown declaration does not borrow a bare row
+2026-11-01T02:51:11.6170579Z   [OK]          declared provider capability authority          6   declared ...
+2026-11-01T02:51:11.6172243Z ASSERT anonymous exact scoped row retains precedence
+2026-11-01T02:51:11.6172513Z ASSERT declared verbatim row outranks canonical alias row
+2026-11-01T02:51:11.6172787Z ASSERT anonymous row does not acquire proxy reasoning base
+2026-11-01T02:51:11.6173045Z ASSERT anonymous row retains only its own base
+2026-11-01T02:51:11.6173292Z ASSERT declared identity resolves the provider base
+2026-11-01T02:51:11.6173710Z   [OK]          declared provider capability authority          7   anonymous...
+2026-11-01T02:51:11.6175338Z ASSERT anonymous exact scoped row retains precedence
+2026-11-01T02:51:11.6175610Z ASSERT declared verbatim row outranks canonical alias row
+2026-11-01T02:51:11.6175877Z ASSERT anonymous row does not acquire proxy reasoning base
+2026-11-01T02:51:11.6176124Z ASSERT anonymous row retains only its own base
+2026-11-01T02:51:11.6176895Z ASSERT declared identity resolves the provider base
+2026-11-01T02:51:11.6177218Z   [OK]          declared provider capability authority          8   anonymous...
+2026-11-01T02:51:11.6178809Z ASSERT anonymous native wire retains manifest facts
+2026-11-01T02:51:11.6179138Z ASSERT bare-row declaration does not grant manifest authority
+2026-11-01T02:51:11.6179512Z ASSERT unknown declared provider cannot borrow manifest facts
+2026-11-01T02:51:11.6179893Z ASSERT frozen missing policy remains missing
+2026-11-01T02:51:11.6180275Z ASSERT unfrozen request sees the new exact row
+2026-11-01T02:51:11.6180859Z   [OK]          declared provider capability authority          9   manifest ...
+2026-11-01T02:51:11.6181135Z ASSERT glm general
+2026-11-01T02:51:11.6181519Z   [OK]          provider_name                                   0   glm general.
+2026-11-01T02:51:11.6181874Z ASSERT glm coding wire kind
+2026-11-01T02:51:11.6182332Z   [OK]          provider_name                                   1   glm coding.
+2026-11-01T02:51:11.6182760Z ASSERT local openai compat resolves to neutral kind label
+2026-11-01T02:51:11.6183229Z   [OK]          provider_name                                   2   local ope...
+2026-11-01T02:51:11.6183617Z ASSERT openrouter uses explicit wire kind
+2026-11-01T02:51:11.6184035Z   [OK]          provider_name                                   3   openrouter.
+2026-11-01T02:51:11.6345540Z ASSERT canonical endpoint and model do not infer DeepSeek identity
+2026-11-01T02:51:11.6345879Z ASSERT canonical endpoint and model do not select a scoped row
+2026-11-01T02:51:11.6346161Z ASSERT explicit provider id is the capability identity
+2026-11-01T02:51:11.6346474Z ASSERT explicit DeepSeek/model tuple selects the DeepSeek thinking contract
+2026-11-01T02:51:11.6347050Z   [OK]          provider_name                                   4   deepseek ...
+2026-11-01T02:51:11.6347357Z ASSERT canonical endpoint and model do not infer Kimi identity
+2026-11-01T02:51:11.6347624Z ASSERT explicit provider id selects Kimi identity
+2026-11-01T02:51:11.6348268Z   [OK]          provider_name                                   5   kimi iden...
+2026-11-01T02:51:11.6511292Z ASSERT canonical endpoint and model do not infer MiMo identity
+2026-11-01T02:51:11.6511618Z ASSERT canonical endpoint and model do not select the MiMo row
+2026-11-01T02:51:11.6511890Z ASSERT explicit provider id selects MiMo identity
+2026-11-01T02:51:11.6512141Z ASSERT explicit MiMo/model tuple resolves reasoning
+2026-11-01T02:51:11.6512391Z ASSERT explicit MiMo/model tuple resolves JSON mode
+2026-11-01T02:51:11.6512691Z   [OK]          provider_name                                   6   mimo iden...
+2026-11-01T02:51:11.6512948Z ASSERT unmatched openai compat
+2026-11-01T02:51:11.6676762Z   [OK]          provider_name                                   7   unmatched...
+2026-11-01T02:51:11.6677151Z ASSERT unmatched endpoint ignores xai catalog provider
+2026-11-01T02:51:11.6677478Z   [OK]          provider_name                                   8   ignores x...
+2026-11-01T02:51:11.6839150Z ASSERT unmatched endpoint ignores mistral catalog provider
+2026-11-01T02:51:11.6839499Z   [OK]          provider_name                                   9   ignores m...
+2026-11-01T02:51:11.7007051Z ASSERT unmatched endpoint ignores cohere catalog provider
+2026-11-01T02:51:11.7173436Z   [OK]          provider_name                                  10   ignores c...
+2026-11-01T02:51:11.7173869Z ASSERT unmatched endpoint ignores mimo catalog provider
+2026-11-01T02:51:11.7174179Z   [OK]          provider_name                                  11   ignores m...
+2026-11-01T02:51:11.7174490Z ASSERT xai registered endpoint
+2026-11-01T02:51:11.7174747Z   [OK]          provider_name                                  12   xai regis...
+2026-11-01T02:51:11.7174999Z ASSERT mistral registered endpoint
+2026-11-01T02:51:11.7175274Z   [OK]          provider_name                                  13   mistral r...
+2026-11-01T02:51:11.7175517Z ASSERT cohere registered endpoint
+2026-11-01T02:51:11.7175777Z   [OK]          provider_name                                  14   cohere re...
+2026-11-01T02:51:11.7176015Z ASSERT mimo registered endpoint
+2026-11-01T02:51:11.7176267Z   [OK]          provider_name                                  15   mimo regi...
+2026-11-01T02:51:11.7340134Z ASSERT declared Chat schema passes preflight
+2026-11-01T02:51:11.7340402Z ASSERT declared Chat named tool passes preflight
+2026-11-01T02:51:11.7340785Z ASSERT exact row advertises tools
+2026-11-01T02:51:11.7341016Z ASSERT exact row advertises structured output
+2026-11-01T02:51:11.7341299Z ASSERT exact model reaches Chat body
+2026-11-01T02:51:11.7341644Z ASSERT Chat messages are present
+2026-11-01T02:51:11.7341953Z ASSERT Responses input is absent
+2026-11-01T02:51:11.7342238Z ASSERT Chat schema format
+2026-11-01T02:51:11.7342513Z ASSERT exact schema reaches wire
+2026-11-01T02:51:11.7342806Z ASSERT strict schema reaches wire
+2026-11-01T02:51:11.7342998Z ASSERT named function reaches wire
+2026-11-01T02:51:11.7343192Z ASSERT one actual function definition
+2026-11-01T02:51:11.7343396Z ASSERT stream field reflects this request
+2026-11-01T02:51:11.7343599Z ASSERT exact model reaches Chat body
+2026-11-01T02:51:11.7343788Z ASSERT Chat messages are present
+2026-11-01T02:51:11.7343972Z ASSERT Responses input is absent
+2026-11-01T02:51:11.7344146Z ASSERT Chat schema format
+2026-11-01T02:51:11.7344324Z ASSERT exact schema reaches wire
+2026-11-01T02:51:11.7344504Z ASSERT strict schema reaches wire
+2026-11-01T02:51:11.7344689Z ASSERT named function reaches wire
+2026-11-01T02:51:11.7345043Z ASSERT one actual function definition
+2026-11-01T02:51:11.7345249Z ASSERT stream field reflects this request
+2026-11-01T02:51:11.7345535Z   [OK]          openai_chat_catalog                             0   gpt-5.5 C...
+2026-11-01T02:51:11.7506081Z ASSERT declared Chat schema passes preflight
+2026-11-01T02:51:11.7506502Z ASSERT declared Chat named tool passes preflight
+2026-11-01T02:51:11.7506949Z ASSERT exact row advertises tools
+2026-11-01T02:51:11.7507282Z ASSERT exact row advertises structured output
+2026-11-01T02:51:11.7507627Z ASSERT exact model reaches Chat body
+2026-11-01T02:51:11.7507927Z ASSERT Chat messages are present
+2026-11-01T02:51:11.7508155Z ASSERT Responses input is absent
+2026-11-01T02:51:11.7508555Z ASSERT Chat schema format
+2026-11-01T02:51:11.7508736Z ASSERT exact schema reaches wire
+2026-11-01T02:51:11.7508919Z ASSERT strict schema reaches wire
+2026-11-01T02:51:11.7509117Z ASSERT named function reaches wire
+2026-11-01T02:51:11.7509311Z ASSERT one actual function definition
+2026-11-01T02:51:11.7509517Z ASSERT stream field reflects this request
+2026-11-01T02:51:11.7509719Z ASSERT exact model reaches Chat body
+2026-11-01T02:51:11.7509910Z ASSERT Chat messages are present
+2026-11-01T02:51:11.7510093Z ASSERT Responses input is absent
+2026-11-01T02:51:11.7510269Z ASSERT Chat schema format
+2026-11-01T02:51:11.7510444Z ASSERT exact schema reaches wire
+2026-11-01T02:51:11.7510629Z ASSERT strict schema reaches wire
+2026-11-01T02:51:11.7510814Z ASSERT named function reaches wire
+2026-11-01T02:51:11.7511006Z ASSERT one actual function definition
+2026-11-01T02:51:11.7511217Z ASSERT stream field reflects this request
+2026-11-01T02:51:11.7511509Z   [OK]          openai_chat_catalog                             1   gpt-5.4 C...
+2026-11-01T02:51:11.7675709Z ASSERT declared Chat schema passes preflight
+2026-11-01T02:51:11.7676155Z ASSERT declared Chat named tool passes preflight
+2026-11-01T02:51:11.7676502Z ASSERT exact row advertises tools
+2026-11-01T02:51:11.7677127Z ASSERT exact row advertises structured output
+2026-11-01T02:51:11.7677499Z ASSERT exact model reaches Chat body
+2026-11-01T02:51:11.7677826Z ASSERT Chat messages are present
+2026-11-01T02:51:11.7678136Z ASSERT Responses input is absent
+2026-11-01T02:51:11.7678443Z ASSERT Chat schema format
+2026-11-01T02:51:11.7678736Z ASSERT exact schema reaches wire
+2026-11-01T02:51:11.7679047Z ASSERT strict schema reaches wire
+2026-11-01T02:51:11.7679360Z ASSERT named function reaches wire
+2026-11-01T02:51:11.7679721Z ASSERT one actual function definition
+2026-11-01T02:51:11.7680069Z ASSERT stream field reflects this request
+2026-11-01T02:51:11.7680411Z ASSERT exact model reaches Chat body
+2026-11-01T02:51:11.7680736Z ASSERT Chat messages are present
+2026-11-01T02:51:11.7681048Z ASSERT Responses input is absent
+2026-11-01T02:51:11.7681346Z ASSERT Chat schema format
+2026-11-01T02:51:11.7681638Z ASSERT exact schema reaches wire
+2026-11-01T02:51:11.7681945Z ASSERT strict schema reaches wire
+2026-11-01T02:51:11.7682265Z ASSERT named function reaches wire
+2026-11-01T02:51:11.7682591Z ASSERT one actual function definition
+2026-11-01T02:51:11.7682937Z ASSERT stream field reflects this request
+2026-11-01T02:51:11.7683420Z   [OK]          openai_chat_catalog                             2   gpt-4o Ch...
+2026-11-01T02:51:11.7845565Z ASSERT declared Chat schema passes preflight
+2026-11-01T02:51:11.7846083Z ASSERT declared Chat named tool passes preflight
+2026-11-01T02:51:11.7846491Z ASSERT exact row advertises tools
+2026-11-01T02:51:11.7847016Z ASSERT exact row advertises structured output
+2026-11-01T02:51:11.7847653Z ASSERT exact model reaches Chat body
+2026-11-01T02:51:11.7847979Z ASSERT Chat messages are present
+2026-11-01T02:51:11.7848285Z ASSERT Responses input is absent
+2026-11-01T02:51:11.7848589Z ASSERT Chat schema format
+2026-11-01T02:51:11.7848884Z ASSERT exact schema reaches wire
+2026-11-01T02:51:11.7849195Z ASSERT strict schema reaches wire
+2026-11-01T02:51:11.7849510Z ASSERT named function reaches wire
+2026-11-01T02:51:11.7849834Z ASSERT one actual function definition
+2026-11-01T02:51:11.7850183Z ASSERT stream field reflects this request
+2026-11-01T02:51:11.7850528Z ASSERT exact model reaches Chat body
+2026-11-01T02:51:11.7850848Z ASSERT Chat messages are present
+2026-11-01T02:51:11.7851301Z ASSERT Responses input is absent
+2026-11-01T02:51:11.7851605Z ASSERT Chat schema format
+2026-11-01T02:51:11.7851894Z ASSERT exact schema reaches wire
+2026-11-01T02:51:11.7852207Z ASSERT strict schema reaches wire
+2026-11-01T02:51:11.7852522Z ASSERT named function reaches wire
+2026-11-01T02:51:11.7852852Z ASSERT one actual function definition
+2026-11-01T02:51:11.7853198Z ASSERT stream field reflects this request
+2026-11-01T02:51:11.7853682Z   [OK]          openai_chat_catalog                             3   gpt-4o-mi...
+2026-11-01T02:51:11.8012028Z ASSERT anonymous wire does not acquire model capability facts
+2026-11-01T02:51:11.8012553Z ASSERT capability source remains the protocol default
+2026-11-01T02:51:11.8012982Z ASSERT anonymous chat protocol admits json_schema
+2026-11-01T02:51:11.8013412Z ASSERT anonymous Chat named tool uses protocol defaults
+2026-11-01T02:51:11.8013904Z ASSERT anonymous wire does not acquire model capability facts
+2026-11-01T02:51:11.8014360Z ASSERT capability source remains the protocol default
+2026-11-01T02:51:11.8014792Z ASSERT anonymous chat protocol admits json_schema
+2026-11-01T02:51:11.8015217Z ASSERT anonymous Chat named tool uses protocol defaults
+2026-11-01T02:51:11.8177750Z   [OK]          openai_chat_catalog                             4   anonymous...
+2026-11-01T02:51:11.8178330Z ASSERT host or model text does not grant a scoped capability
+2026-11-01T02:51:11.8178791Z ASSERT undeclared schema is refused before dispatch
+2026-11-01T02:51:11.8179242Z ASSERT host or model text does not grant a scoped capability
+2026-11-01T02:51:11.8179694Z ASSERT undeclared schema is refused before dispatch
+2026-11-01T02:51:11.8180137Z ASSERT host or model text does not grant a scoped capability
+2026-11-01T02:51:11.8180607Z ASSERT undeclared schema is refused before dispatch
+2026-11-01T02:51:11.8181050Z ASSERT host or model text does not grant a scoped capability
+2026-11-01T02:51:11.8181519Z ASSERT undeclared schema is refused before dispatch
+2026-11-01T02:51:11.8182040Z   [OK]          openai_chat_catalog                             5   explicit ...
+2026-11-01T02:51:11.8342027Z ASSERT declared effort passes typed preflight
+2026-11-01T02:51:11.8342464Z ASSERT exact effort reaches Chat wire
+2026-11-01T02:51:11.8342858Z ASSERT reasoning budget uses max_completion_tokens
+2026-11-01T02:51:11.8343251Z ASSERT deprecated max_tokens is absent
+2026-11-01T02:51:11.8343627Z ASSERT declared effort passes typed preflight
+2026-11-01T02:51:11.8344004Z ASSERT exact effort reaches Chat wire
+2026-11-01T02:51:11.8344387Z ASSERT reasoning budget uses max_completion_tokens
+2026-11-01T02:51:11.8344769Z ASSERT deprecated max_tokens is absent
+2026-11-01T02:51:11.8345161Z ASSERT declared effort passes typed preflight
+2026-11-01T02:51:11.8345524Z ASSERT exact effort reaches Chat wire
+2026-11-01T02:51:11.8345896Z ASSERT reasoning budget uses max_completion_tokens
+2026-11-01T02:51:11.8346611Z ASSERT deprecated max_tokens is absent
+2026-11-01T02:51:11.8347109Z ASSERT declared effort passes typed preflight
+2026-11-01T02:51:11.8347460Z ASSERT exact effort reaches Chat wire
+2026-11-01T02:51:11.8347827Z ASSERT reasoning budget uses max_completion_tokens
+2026-11-01T02:51:11.8348194Z ASSERT deprecated max_tokens is absent
+2026-11-01T02:51:11.8348539Z ASSERT declared effort passes typed preflight
+2026-11-01T02:51:11.8348896Z ASSERT exact effort reaches Chat wire
+2026-11-01T02:51:11.8349270Z ASSERT reasoning budget uses max_completion_tokens
+2026-11-01T02:51:11.8349645Z ASSERT deprecated max_tokens is absent
+2026-11-01T02:51:11.8350204Z ASSERT unsupported minimal effort is refused
+2026-11-01T02:51:11.8350590Z ASSERT declared effort passes typed preflight
+2026-11-01T02:51:11.8350954Z ASSERT exact effort reaches Chat wire
+2026-11-01T02:51:11.8351321Z ASSERT reasoning budget uses max_completion_tokens
+2026-11-01T02:51:11.8351709Z ASSERT deprecated max_tokens is absent
+2026-11-01T02:51:11.8352074Z ASSERT declared effort passes typed preflight
+2026-11-01T02:51:11.8352430Z ASSERT exact effort reaches Chat wire
+2026-11-01T02:51:11.8352805Z ASSERT reasoning budget uses max_completion_tokens
+2026-11-01T02:51:11.8353180Z ASSERT deprecated max_tokens is absent
+2026-11-01T02:51:11.8353547Z ASSERT declared effort passes typed preflight
+2026-11-01T02:51:11.8353907Z ASSERT exact effort reaches Chat wire
+2026-11-01T02:51:11.8354279Z ASSERT reasoning budget uses max_completion_tokens
+2026-11-01T02:51:11.8354655Z ASSERT deprecated max_tokens is absent
+2026-11-01T02:51:11.8355028Z ASSERT declared effort passes typed preflight
+2026-11-01T02:51:11.8355386Z ASSERT exact effort reaches Chat wire
+2026-11-01T02:51:11.8355761Z ASSERT reasoning budget uses max_completion_tokens
+2026-11-01T02:51:11.8356137Z ASSERT deprecated max_tokens is absent
+2026-11-01T02:51:11.8356504Z ASSERT declared effort passes typed preflight
+2026-11-01T02:51:11.8356992Z ASSERT exact effort reaches Chat wire
+2026-11-01T02:51:11.8357363Z ASSERT reasoning budget uses max_completion_tokens
+2026-11-01T02:51:11.8357739Z ASSERT deprecated max_tokens is absent
+2026-11-01T02:51:11.8358107Z ASSERT unsupported minimal effort is refused
+2026-11-01T02:51:11.8358598Z   [OK]          openai_chat_catalog                             6   reasoning...
+2026-11-01T02:51:11.8520193Z ASSERT Chat declares its exact endpoint
+2026-11-01T02:51:11.8520630Z ASSERT Chat declares its exact base
+2026-11-01T02:51:11.8520995Z ASSERT registered Chat endpoint
+2026-11-01T02:51:11.8521303Z ASSERT registered Chat base
+2026-11-01T02:51:11.8521636Z ASSERT registered Chat requires credentials
+2026-11-01T02:51:11.8522043Z ASSERT registered Chat uses the declared codec
+2026-11-01T02:51:11.8522542Z   [OK]          openai_chat_catalog                             7   endpoint ...
+2026-11-01T02:51:11.8522945Z ASSERT roundtrip anthropic
+2026-11-01T02:51:11.8523252Z ASSERT roundtrip kimi
+2026-11-01T02:51:11.8523535Z ASSERT roundtrip openai_compat
+2026-11-01T02:51:11.8523834Z ASSERT roundtrip ollama
+2026-11-01T02:51:11.8524112Z ASSERT roundtrip gemini
+2026-11-01T02:51:11.8524389Z ASSERT roundtrip glm
+2026-11-01T02:51:11.8524811Z   [OK]          kind_of_string                                  0   roundtrip...
+2026-11-01T02:51:11.8525230Z ASSERT alias rejected claude
+2026-11-01T02:51:11.8525525Z ASSERT alias rejected openai
+2026-11-01T02:51:11.8525826Z ASSERT alias rejected nous
+2026-11-01T02:51:11.8526119Z ASSERT alias rejected claude
+2026-11-01T02:51:11.8526408Z ASSERT alias rejected openai
+2026-11-01T02:51:11.8527120Z ASSERT alias rejected llama
+2026-11-01T02:51:11.8527409Z ASSERT alias rejected zhipu
+2026-11-01T02:51:11.8527839Z   [OK]          kind_of_string                                  1   aliases r...
+2026-11-01T02:51:11.8528235Z ASSERT ANTHROPIC
+2026-11-01T02:51:11.8528493Z ASSERT OpenAI_Compat
+2026-11-01T02:51:11.8528745Z ASSERT Glm
+2026-11-01T02:51:11.8529115Z   [OK]          kind_of_string                                  2   case inse...
+2026-11-01T02:51:11.8529499Z ASSERT leading ws
+2026-11-01T02:51:11.8529755Z ASSERT trailing ws
+2026-11-01T02:51:11.8530002Z ASSERT both ws
+2026-11-01T02:51:11.8530548Z   [OK]          kind_of_string                                  3   whitespac...
+2026-11-01T02:51:11.8530946Z ASSERT empty string
+2026-11-01T02:51:11.8531205Z ASSERT misspelling
+2026-11-01T02:51:11.8531466Z ASSERT bare openrouter
+2026-11-01T02:51:11.8531735Z ASSERT json-ish
+2026-11-01T02:51:11.8532123Z   [OK]          kind_of_string                                  4   unknown r...
+2026-11-01T02:51:11.8532518Z ASSERT show = string_of
+2026-11-01T02:51:11.8532794Z ASSERT show = string_of
+2026-11-01T02:51:11.8533066Z ASSERT show = string_of
+2026-11-01T02:51:11.8533332Z ASSERT show = string_of
+2026-11-01T02:51:11.8533598Z ASSERT show = string_of
+2026-11-01T02:51:11.8533866Z ASSERT show = string_of
+2026-11-01T02:51:11.8534279Z   [OK]          kind_serializers                                0   show matc...
+2026-11-01T02:51:11.8534694Z ASSERT pp Anthropic
+2026-11-01T02:51:11.8535114Z   [OK]          kind_serializers                                1   pp uses l...
+2026-11-01T02:51:11.8535524Z ASSERT to_yojson wire form
+2026-11-01T02:51:11.8535809Z ASSERT to_yojson wire form
+2026-11-01T02:51:11.8536095Z ASSERT to_yojson wire form
+2026-11-01T02:51:11.8536382Z ASSERT to_yojson wire form
+2026-11-01T02:51:11.8536803Z ASSERT to_yojson wire form
+2026-11-01T02:51:11.8537079Z ASSERT to_yojson wire form
+2026-11-01T02:51:11.8537494Z   [OK]          kind_serializers                                2   to_yojson...
+2026-11-01T02:51:11.8537888Z ASSERT of_yojson roundtrip
+2026-11-01T02:51:11.8538162Z ASSERT of_yojson roundtrip
+2026-11-01T02:51:11.8538431Z ASSERT of_yojson roundtrip
+2026-11-01T02:51:11.8538706Z ASSERT of_yojson roundtrip
+2026-11-01T02:51:11.8538979Z ASSERT of_yojson roundtrip
+2026-11-01T02:51:11.8539256Z ASSERT of_yojson roundtrip
+2026-11-01T02:51:11.8539688Z   [OK]          kind_serializers                                3   of_yojson...
+2026-11-01T02:51:11.8540236Z   [OK]          kind_serializers                                4   of_yojson...
+2026-11-01T02:51:11.8540785Z   [OK]          kind_serializers                                5   of_yojson...
+2026-11-01T02:51:11.8541329Z   [OK]          kind_serializers                                6   of_yojson...
+2026-11-01T02:51:11.8541770Z ASSERT one entry per canonical variant
+2026-11-01T02:51:11.8542122Z ASSERT no duplicate canonical strings
+2026-11-01T02:51:11.8542585Z   [OK]          kind_enumeration                                0   all_provi...
+2026-11-01T02:51:11.8542998Z ASSERT parse anthropic
+2026-11-01T02:51:11.8543264Z ASSERT parse kimi
+2026-11-01T02:51:11.8543534Z ASSERT parse openai_compat
+2026-11-01T02:51:11.8543814Z ASSERT parse ollama
+2026-11-01T02:51:11.8544074Z ASSERT parse gemini
+2026-11-01T02:51:11.8544332Z ASSERT parse glm
+2026-11-01T02:51:11.8544736Z   [OK]          kind_enumeration                                1   all drive...
+2026-11-01T02:51:11.8545404Z ASSERT wire for anthropic contains "provider_kind":"anthropic"
+2026-11-01T02:51:11.8545931Z ASSERT wire for openai_compat contains "provider_kind":"openai_compat"
+2026-11-01T02:51:11.8546414Z ASSERT wire for ollama contains "provider_kind":"ollama"
+2026-11-01T02:51:11.8546974Z ASSERT wire for gemini contains "provider_kind":"gemini"
+2026-11-01T02:51:11.8547394Z ASSERT wire for glm contains "provider_kind":"glm"
+2026-11-01T02:51:11.8547871Z   [OK]          telemetry_wire_format                           0   kind emit...
+2026-11-01T02:51:11.8548347Z ASSERT None telemetry must not contain "\"anthropic\""
+2026-11-01T02:51:11.8548755Z ASSERT None telemetry must not contain "\"ollama\""
+2026-11-01T02:51:11.8549325Z ASSERT None telemetry must not contain "\"openai_compat\""
+2026-11-01T02:51:11.8549841Z   [OK]          telemetry_wire_format                           1   None kind...
+2026-11-01T02:51:11.8550309Z ASSERT unknown latency encoded as JSON null
+2026-11-01T02:51:11.8550656Z ASSERT unknown latency roundtrips
+2026-11-01T02:51:11.8551105Z   [OK]          telemetry_wire_format                           2   unknown l...
+2026-11-01T02:51:11.8551555Z ASSERT measured zero encoded as JSON zero
+2026-11-01T02:51:11.8551892Z ASSERT measured zero roundtrips
+2026-11-01T02:51:11.8552335Z   [OK]          telemetry_wire_format                           3   measured ...
+2026-11-01T02:51:11.8552889Z   [OK]          telemetry_wire_format                           4   record JS...
+2026-11-01T02:51:11.8702725Z ASSERT cloud endpoint does not override typed Ollama identity
+2026-11-01T02:51:11.8703285Z ASSERT explicit provider id selects Ollama Cloud identity
+2026-11-01T02:51:11.8703663Z ASSERT endpoint alone keeps the provider-independent MiniMax contract
+2026-11-01T02:51:11.8703983Z ASSERT explicit Ollama Cloud/model tuple selects its exact contract
+2026-11-01T02:51:11.8704351Z   [OK]          capability_provider_label                       0   ollama cl...
+2026-11-01T02:51:11.8704634Z ASSERT explicit max_context is the window
+2026-11-01T02:51:11.8704874Z ASSERT explicit max_context wins over the model row
+2026-11-01T02:51:11.8705121Z ASSERT model row window when nothing is explicit
+2026-11-01T02:51:11.8705378Z ASSERT no explicit value and no row window stays unknown
+2026-11-01T02:51:11.8705679Z   [OK]          context_window                                  0   explicit ...
+2026-11-01T02:51:11.8707443Z ASSERT telemetry window is the window the request was sized against
+2026-11-01T02:51:11.8707954Z   [OK]          context_window                                  1   response ...
+2026-11-01T02:51:11.8711316Z ASSERT raw model evidence survives both normalization passes
+2026-11-01T02:51:11.8711604Z ASSERT presentation fallback still serves its existing contract
+2026-11-01T02:51:11.8714373Z ASSERT raw model evidence survives both normalization passes
+2026-11-01T02:51:11.8714660Z ASSERT presentation fallback still serves its existing contract
+2026-11-01T02:51:11.8724922Z ASSERT raw model evidence survives both normalization passes
+2026-11-01T02:51:11.8725214Z ASSERT presentation fallback still serves its existing contract
+2026-11-01T02:51:11.8727987Z ASSERT raw model evidence survives both normalization passes
+2026-11-01T02:51:11.8732029Z ASSERT raw model evidence survives both normalization passes
+2026-11-01T02:51:11.8734258Z ASSERT old or injected fallback without raw capture remains unknown
+2026-11-01T02:51:11.8734770Z   [OK]          context_window                                  2   reported ...
+2026-11-01T02:51:11.8735218Z Test Successful in 0.494s. 142 tests run.
+2026-11-01T02:51:11.8939425Z [targeted] @@packages/agent_core/test/runtest-test_provider_config: OK in 2s
+2026-11-01T02:51:11.8962693Z [targeted] @@packages/agent_core/test/runtest-test_thinking_control_dialects: start 2026-11-01T02:51:11Z (dune alias)
+2026-11-01T02:51:13.0790290Z Testing `thinking_control_dialects'.
+2026-11-01T02:51:13.0790968Z ASSERT chat_template_kwargs absent
+2026-11-01T02:51:13.0791302Z ASSERT thinking absent
+2026-11-01T02:51:13.0791589Z ASSERT reasoning_effort absent
+2026-11-01T02:51:13.0792205Z ASSERT think absent
+2026-11-01T02:51:13.0792489Z ASSERT enable_thinking absent
+2026-11-01T02:51:13.0792966Z   [OK]          openai_compat          0   raw qwen does not infer chat_templ...
+2026-11-01T02:51:13.0793404Z ASSERT enable_thinking false
+2026-11-01T02:51:13.0793706Z ASSERT preserve_thinking true
+2026-11-01T02:51:13.0793996Z ASSERT thinking absent
+2026-11-01T02:51:13.0794283Z ASSERT reasoning_effort absent
+2026-11-01T02:51:13.0794584Z ASSERT enable_thinking absent
+2026-11-01T02:51:13.0795032Z   [OK]          openai_compat          1   declared qwen3.6 endpoint uses cha...
+2026-11-01T02:51:13.0795440Z ASSERT toggle wire
+2026-11-01T02:51:13.0795711Z ASSERT replay policy
+2026-11-01T02:51:13.0796137Z   [OK]          openai_compat          2   raw qwen3.6 dialect does not infer...
+2026-11-01T02:51:13.0796538Z ASSERT toggle wire
+2026-11-01T02:51:13.0796961Z ASSERT replay policy
+2026-11-01T02:51:13.0797266Z ASSERT no tool-call replay requirement
+2026-11-01T02:51:13.0797593Z ASSERT no ignored sampling params
+2026-11-01T02:51:13.0798046Z   [OK]          openai_compat          3   declared qwen3.6 dialect uses chat...
+2026-11-01T02:51:13.0798448Z ASSERT replay policy
+2026-11-01T02:51:13.0798763Z ASSERT plain assistant reasoning is omitted
+2026-11-01T02:51:13.0799145Z ASSERT assistant tool-call reasoning is retained
+2026-11-01T02:51:13.0799616Z   [OK]          openai_compat          4   declared qwen3.6 dialect keeps too...
+2026-11-01T02:51:13.0800007Z ASSERT toggle wire
+2026-11-01T02:51:13.0800265Z ASSERT replay policy
+2026-11-01T02:51:13.0800565Z ASSERT requires tool-call reasoning replay
+2026-11-01T02:51:13.0800877Z ASSERT thinking type
+2026-11-01T02:51:13.0801155Z ASSERT chat_template_kwargs absent
+2026-11-01T02:51:13.0801471Z ASSERT reasoning_effort absent
+2026-11-01T02:51:13.0801763Z ASSERT response_format type
+2026-11-01T02:51:13.0802052Z ASSERT json_schema absent
+2026-11-01T02:51:13.0802486Z   [OK]          openai_compat          5   mimo v2.5 uses thinking object and...
+2026-11-01T02:51:13.0802885Z ASSERT toggle wire
+2026-11-01T02:51:13.0803149Z ASSERT replay policy
+2026-11-01T02:51:13.0803427Z ASSERT typed preserve minimal
+2026-11-01T02:51:13.0803727Z ASSERT typed preserve high
+2026-11-01T02:51:13.0804016Z ASSERT typed preserve xhigh
+2026-11-01T02:51:13.0804305Z ASSERT typed preserve max
+2026-11-01T02:51:13.0804741Z   [OK]          openai_compat          6   openai reasoning dialect uses reas...
+2026-11-01T02:51:13.0805174Z ASSERT reasoning_effort
+2026-11-01T02:51:13.0805459Z ASSERT thinking absent
+2026-11-01T02:51:13.0805737Z ASSERT enable_thinking absent
+2026-11-01T02:51:13.0806049Z ASSERT chat_template_kwargs absent
+2026-11-01T02:51:13.0806498Z   [OK]          openai_compat          7   openai reasoning request uses reas...
+2026-11-01T02:51:13.0807302Z ASSERT explicit disable renders none
+2026-11-01T02:51:13.0807657Z ASSERT explicit enable keeps the row effort
+2026-11-01T02:51:13.0807984Z ASSERT thinking absent
+2026-11-01T02:51:13.0808265Z ASSERT enable_thinking absent
+2026-11-01T02:51:13.0808709Z   [OK]          openai_compat          8   openai reasoning request renders e...
+2026-11-01T02:51:13.0809168Z ASSERT rejection names the missing off value
+2026-11-01T02:51:13.0809637Z   [OK]          openai_compat          9   openai reasoning request rejects d...
+2026-11-01T02:51:13.0810038Z ASSERT thinking type
+2026-11-01T02:51:13.0810321Z ASSERT reasoning_effort absent
+2026-11-01T02:51:13.0810632Z ASSERT chat_template_kwargs absent
+2026-11-01T02:51:13.0811080Z ASSERT think absent
+2026-11-01T02:51:13.0811485Z   [OK]          openai_compat         10   deepseek uses thinking object.
+2026-11-01T02:51:13.0811899Z ASSERT enabled thinking type
+2026-11-01T02:51:13.0812207Z ASSERT enabled reasoning split
+2026-11-01T02:51:13.0812512Z ASSERT reasoning_effort absent
+2026-11-01T02:51:13.0812828Z ASSERT chat_template_kwargs absent
+2026-11-01T02:51:13.0813147Z ASSERT default reasoning split
+2026-11-01T02:51:13.0813449Z ASSERT disabled thinking type
+2026-11-01T02:51:13.0813746Z ASSERT reasoning_split absent
+2026-11-01T02:51:13.0814044Z ASSERT tool_choice absent
+2026-11-01T02:51:13.0814328Z ASSERT toggle wire
+2026-11-01T02:51:13.0814592Z ASSERT replay policy
+2026-11-01T02:51:13.0815023Z   [OK]          openai_compat         11   minimax m3 uses adaptive thinking ...
+2026-11-01T02:51:13.0815454Z ASSERT delta.reasoning parsed
+2026-11-01T02:51:13.0815764Z ASSERT reported response id
+2026-11-01T02:51:13.0816054Z ASSERT reported model
+2026-11-01T02:51:13.0816485Z   [OK]          openai_compat         12   ollama cloud openai-compat streams...
+2026-11-01T02:51:13.0817125Z ASSERT toggle wire
+2026-11-01T02:51:13.0817394Z ASSERT replay policy
+2026-11-01T02:51:13.0817813Z ASSERT plain assistant reasoning is eligible on tool-enabled requests
+2026-11-01T02:51:13.0818285Z ASSERT tool-call assistant reasoning must replay
+2026-11-01T02:51:13.0818722Z ASSERT eligibility is not restricted to tool-call messages
+2026-11-01T02:51:13.0819106Z ASSERT typed high stays high
+2026-11-01T02:51:13.0819408Z ASSERT typed max stays max
+2026-11-01T02:51:13.0819707Z ASSERT typed low is unsupported
+2026-11-01T02:51:13.0820014Z ASSERT typed minimal omitted
+2026-11-01T02:51:13.0820315Z ASSERT ignored sampling params
+2026-11-01T02:51:13.0820770Z   [OK]          openai_compat         13   deepseek reasoning dialect semantics.
+2026-11-01T02:51:13.0823287Z ASSERT temperature absent
+2026-11-01T02:51:13.0823569Z ASSERT top_p absent
+2026-11-01T02:51:13.0823996Z   [OK]          openai_compat         14   deepseek suppresses ignored sampli...
+2026-11-01T02:51:13.0824407Z ASSERT temperature
+2026-11-01T02:51:13.0824661Z ASSERT top_p
+2026-11-01T02:51:13.0825056Z   [OK]          openai_compat         15   deepseek disabled thinking keeps s...
+2026-11-01T02:51:13.0830104Z ASSERT reasoning_content absent
+2026-11-01T02:51:13.0830522Z ASSERT request tools retain prior assistant reasoning
+2026-11-01T02:51:13.0833179Z ASSERT reasoning_content absent
+2026-11-01T02:51:13.0833410Z ASSERT request tools retain prior assistant reasoning
+2026-11-01T02:51:13.0833727Z   [OK]          openai_compat         16   deepseek replay depends on current...
+2026-11-01T02:51:13.0833991Z ASSERT reasoning_content
+2026-11-01T02:51:13.0834261Z   [OK]          openai_compat         17   qwen preserve replays reasoning_co...
+2026-11-01T02:51:13.0834531Z ASSERT reasoning is not visible content
+2026-11-01T02:51:13.0834824Z   [OK]          openai_compat         18   declared reasoning_content accumul...
+2026-11-01T02:51:13.0835073Z ASSERT thinking type
+2026-11-01T02:51:13.0835245Z ASSERT thinking keep
+2026-11-01T02:51:13.0835423Z ASSERT chat_template_kwargs absent
+2026-11-01T02:51:13.0835627Z ASSERT preserve_thinking absent
+2026-11-01T02:51:13.0835896Z   [OK]          openai_compat         19   thinking_object_keep_all axis uses...
+2026-11-01T02:51:13.0836143Z ASSERT toggle wire
+2026-11-01T02:51:13.0836307Z ASSERT replay policy
+2026-11-01T02:51:13.0836496Z ASSERT no tool-call replay requirement
+2026-11-01T02:51:13.0836838Z ASSERT reasoning_content
+2026-11-01T02:51:13.0837101Z   [OK]          openai_compat         20   thinking_object_keep_all axis repl...
+2026-11-01T02:51:13.0837344Z ASSERT replay policy
+2026-11-01T02:51:13.0837519Z ASSERT requires tool-call replay
+2026-11-01T02:51:13.0839849Z ASSERT reasoning_content absent
+2026-11-01T02:51:13.0840036Z ASSERT tool reasoning_content
+2026-11-01T02:51:13.0840304Z   [OK]          openai_compat         21   thinking_object_keep_all axis defa...
+2026-11-01T02:51:13.0840553Z ASSERT toggle wire
+2026-11-01T02:51:13.0840713Z ASSERT replay policy
+2026-11-01T02:51:13.0840897Z ASSERT requires tool-call replay
+2026-11-01T02:51:13.0841090Z ASSERT ignored sampling params
+2026-11-01T02:51:13.0841268Z ASSERT thinking absent
+2026-11-01T02:51:13.0843564Z ASSERT reasoning_content absent
+2026-11-01T02:51:13.0843749Z ASSERT tool reasoning_content
+2026-11-01T02:51:13.0844013Z   [OK]          openai_compat         22   kimi k2.6 defaults to tool-call re...
+2026-11-01T02:51:13.0845510Z ASSERT temperature absent
+2026-11-01T02:51:13.0845688Z ASSERT top_p absent
+2026-11-01T02:51:13.0845944Z   [OK]          openai_compat         23   kimi k2.6 omits fixed sampling wit...
+2026-11-01T02:51:13.0846192Z ASSERT replay policy
+2026-11-01T02:51:13.0846356Z ASSERT thinking type
+2026-11-01T02:51:13.0846518Z ASSERT thinking keep
+2026-11-01T02:51:13.0846844Z ASSERT chat_template_kwargs absent
+2026-11-01T02:51:13.0847144Z   [OK]          openai_compat         24   kimi k2.6 preserve requests keep all.
+2026-11-01T02:51:13.0847387Z ASSERT replay policy
+2026-11-01T02:51:13.0847553Z ASSERT thinking type
+2026-11-01T02:51:13.0847712Z ASSERT keep absent
+2026-11-01T02:51:13.0847958Z   [OK]          openai_compat         25   kimi k2.5 does not emit keep all.
+2026-11-01T02:51:13.0848197Z ASSERT toggle wire
+2026-11-01T02:51:13.0848355Z ASSERT replay policy
+2026-11-01T02:51:13.0848527Z ASSERT ignored sampling params
+2026-11-01T02:51:13.0848705Z ASSERT thinking absent
+2026-11-01T02:51:13.0848881Z ASSERT chat_template_kwargs absent
+2026-11-01T02:51:13.0849071Z ASSERT preserve_thinking absent
+2026-11-01T02:51:13.0849252Z ASSERT reasoning_content
+2026-11-01T02:51:13.0849511Z   [OK]          openai_compat         26   kimi latest always-preserved omits...
+2026-11-01T02:51:13.0849752Z ASSERT toggle wire
+2026-11-01T02:51:13.0849909Z ASSERT replay policy
+2026-11-01T02:51:13.0850074Z ASSERT thinking absent
+2026-11-01T02:51:13.0850255Z ASSERT chat_template_kwargs absent
+2026-11-01T02:51:13.0850641Z   [OK]          openai_compat         27   kimi latest highspeed uses k2.7 se...
+2026-11-01T02:51:13.0852091Z ASSERT thinking absent
+2026-11-01T02:51:13.0852263Z ASSERT temperature absent
+2026-11-01T02:51:13.0852435Z ASSERT top_p absent
+2026-11-01T02:51:13.0852687Z   [OK]          openai_compat         28   kimi latest omits fixed sampling p...
+2026-11-01T02:51:13.0852929Z ASSERT think true
+2026-11-01T02:51:13.0853101Z ASSERT chat_template_kwargs absent
+2026-11-01T02:51:13.0853286Z ASSERT thinking absent
+2026-11-01T02:51:13.0853454Z ASSERT reasoning_effort absent
+2026-11-01T02:51:13.0853702Z   [OK]          ollama                 0   qwen uses native think bool.
+2026-11-01T02:51:13.0854035Z ASSERT think absent
+2026-11-01T02:51:13.0854262Z   [OK]          ollama                 1   qwen unset omits think.
+2026-11-01T02:51:13.0854478Z ASSERT model
+2026-11-01T02:51:13.0854628Z ASSERT think true
+2026-11-01T02:51:13.0854785Z ASSERT thinking absent
+2026-11-01T02:51:13.0854957Z ASSERT reasoning_content absent
+2026-11-01T02:51:13.0855141Z ASSERT reasoning_effort absent
+2026-11-01T02:51:13.0855318Z ASSERT tool_stream absent
+2026-11-01T02:51:13.0855483Z ASSERT toggle wire
+2026-11-01T02:51:13.0855724Z   [OK]          ollama                 2   cloud GLM uses native think not ZA...
+2026-11-01T02:51:13.0855959Z ASSERT think absent
+2026-11-01T02:51:13.0856203Z ASSERT system role
+2026-11-01T02:51:13.0856394Z ASSERT system prompt starts with think token
+2026-11-01T02:51:13.0856848Z   [OK]          ollama                 3   gemma4 enabled uses chat template ...
+2026-11-01T02:51:13.0857089Z ASSERT think absent
+2026-11-01T02:51:13.0996053Z   [FAIL]        ollama                 4   chat_template_token uses catalog t...
+2026-11-01T02:51:13.0997341Z ASSERT names the offending model_id
+2026-11-01T02:51:13.0997642Z ASSERT mentions the required token
+2026-11-01T02:51:13.1000638Z   [OK]          ollama                 5   chat_template_token without token ...
+2026-11-01T02:51:13.1001036Z ASSERT think false
+2026-11-01T02:51:13.1001306Z ASSERT system prompt unchanged
+2026-11-01T02:51:13.1001727Z   [OK]          ollama                 6   gemma4 disabled uses native think ...
+2026-11-01T02:51:13.1002119Z ASSERT toggle wire
+2026-11-01T02:51:13.1002394Z ASSERT replay policy
+2026-11-01T02:51:13.1002723Z ASSERT native tool-call thinking replay required
+2026-11-01T02:51:13.1003072Z ASSERT no ignored sampling params
+2026-11-01T02:51:13.1003508Z   [OK]          ollama                 7   gemma4 reasoning dialect uses temp...
+2026-11-01T02:51:13.1003899Z ASSERT toggle wire
+2026-11-01T02:51:13.1004163Z ASSERT replay policy
+2026-11-01T02:51:13.1004456Z ASSERT xhigh effort stays exact
+2026-11-01T02:51:13.1004762Z ASSERT max effort stays exact
+2026-11-01T02:51:13.1005184Z   [OK]          native                 0   anthropic reasoning dialect preser...
+2026-11-01T02:51:13.1005572Z ASSERT thinking absent
+2026-11-01T02:51:13.1005834Z ASSERT effort
+2026-11-01T02:51:13.1006214Z   [OK]          native                 1   anthropic opus 5.5 sends effort al...
+2026-11-01T02:51:13.1019360Z   [FAIL]        native                 2   anthropic claude alias uses adapti...
+2026-11-01T02:51:13.1019758Z ASSERT thinking type
+2026-11-01T02:51:13.1020029Z ASSERT budget_tokens absent
+2026-11-01T02:51:13.1020315Z ASSERT output_config absent
+2026-11-01T02:51:13.1020626Z   [OK]          native                 3   anthropic sonnet 5 defaults to ada...
+2026-11-01T02:51:13.1020865Z ASSERT effort
+2026-11-01T02:51:13.1021019Z ASSERT format type
+2026-11-01T02:51:13.1021263Z   [OK]          native                 4   anthropic output_config merges for...
+2026-11-01T02:51:13.1023924Z ASSERT temperature absent
+2026-11-01T02:51:13.1024179Z ASSERT top_p absent
+2026-11-01T02:51:13.1024429Z ASSERT top_k stays
+2026-11-01T02:51:13.1024826Z   [OK]          native                 5   anthropic declared ignored samplin...
+2026-11-01T02:51:13.1026931Z ASSERT temperature
+2026-11-01T02:51:13.1027172Z ASSERT top_p
+2026-11-01T02:51:13.1027574Z   [OK]          native                 6   anthropic default keeps sampling f...
+2026-11-01T02:51:13.1027951Z ASSERT toggle wire
+2026-11-01T02:51:13.1028202Z ASSERT replay policy
+2026-11-01T02:51:13.1028590Z   [OK]          native                 7   gemini reasoning dialect uses thin...
+2026-11-01T02:51:13.1028958Z ASSERT temperature absent
+2026-11-01T02:51:13.1029256Z   [FAIL]        native                 8   gemini declared ignored sampling d...
+2026-11-01T02:51:13.1029490Z ASSERT temperature
+2026-11-01T02:51:13.1029640Z ASSERT topP
+2026-11-01T02:51:13.1029779Z ASSERT topK
+2026-11-01T02:51:13.1030007Z   [OK]          native                 9   gemini default keeps sampling fields.
+2026-11-01T02:51:13.1030266Z ASSERT budget rides max_completion_tokens
+2026-11-01T02:51:13.1030584Z ASSERT max_tokens absent
+2026-11-01T02:51:13.1030967Z   [OK]          native                10   chat budget field max_completion_t...
+2026-11-01T02:51:13.1031368Z ASSERT budget rides classic max_tokens
+2026-11-01T02:51:13.1031688Z ASSERT max_completion_tokens absent
+2026-11-01T02:51:13.1032101Z   [OK]          native                11   chat budget field default is class...
+2026-11-01T02:51:13.1032465Z ASSERT one tool
+2026-11-01T02:51:13.1032703Z ASSERT enum gone
+2026-11-01T02:51:13.1032954Z ASSERT vocabulary survives
+2026-11-01T02:51:13.1033356Z   [OK]          native                12   conformant tool schema drops enum ...
+2026-11-01T02:51:13.1033727Z ASSERT enum stays
+2026-11-01T02:51:13.1034101Z   [OK]          native                13   rich tool schema keeps enum by def...
+2026-11-01T02:51:13.1035289Z │ [FAIL]        ollama                 4   chat_template_token uses catalo...  │
+2026-11-01T02:51:13.1036870Z FAIL think absent
+2026-11-01T02:51:13.1037126Z    Expected: `true'
+2026-11-01T02:51:13.1037367Z    Received: `false'
+2026-11-01T02:51:13.1042754Z │ [FAIL]        native                 2   anthropic claude alias uses ada...  │
+2026-11-01T02:51:13.1044020Z Backend_anthropic.build_request: model "claude-sonnet-5-20260101" has no catalog-declared Anthropic thinking-control policy; an explicit enable_thinking value cannot be encoded safely
+2026-11-01T02:51:13.1053357Z │ [FAIL]        native                 8   gemini declared ignored samplin...  │
+2026-11-01T02:51:13.1054508Z FAIL temperature absent
+2026-11-01T02:51:13.1054697Z    Expected: `true'
+2026-11-01T02:51:13.1054862Z    Received: `false'
+2026-11-01T02:51:13.1057672Z 3 failures! in 0.022s. 51 tests run.
+2026-11-01T02:51:13.1235115Z [targeted] @@packages/agent_core/test/runtest-test_thinking_control_dialects: FAIL exit 1 in 2s
+2026-11-01T02:51:13.1485811Z [targeted] dune build packages/agent_core/test/test_exact_output_resolver_snapshot.exe
+2026-11-01T02:51:14.3094396Z [targeted] packages/agent_core/test/test_exact_output_resolver_snapshot: stanza env
+2026-11-01T02:51:14.3118052Z [targeted] packages/agent_core/test/test_exact_output_resolver_snapshot: start 2026-11-01T02:51:14Z
+2026-11-01T02:51:14.3209640Z Testing `exact-output-resolver-snapshot'.
+2026-11-01T02:51:14.3211111Z ASSERT native target gets the declared bare context
+2026-11-01T02:51:14.3211321Z ASSERT native target gets the bare thinking policy
+2026-11-01T02:51:14.3387635Z ASSERT later snapshot does not change frozen bare binding
+2026-11-01T02:51:14.3388202Z   [OK]          resolver          0   native bare binding is frozen.
+2026-11-01T02:51:14.3389403Z ASSERT exact refusal target
+2026-11-01T02:51:14.3390709Z ASSERT exact refusal target
+2026-11-01T02:51:14.3392064Z ASSERT exact refusal target
+2026-11-01T02:51:14.3392259Z   [OK]          resolver          1   bare permission never relaxes exact mod...
+2026-11-01T02:51:14.3394021Z ASSERT scoped row wins
+2026-11-01T02:51:14.3394376Z ASSERT exact output does not borrow the shadowed bare policy
+2026-11-01T02:51:14.3394754Z   [OK]          resolver          2   scoped target absence shadows bare policy.
+2026-11-01T02:51:14.3396828Z ASSERT bare target never borrows provider tools support
+2026-11-01T02:51:14.3397339Z ASSERT exact and ordinary request use the same bare capabilities
+2026-11-01T02:51:14.3397605Z   [OK]          resolver          3   bare target does not inherit provider b...
+2026-11-01T02:51:14.3398276Z ASSERT exact miss
+2026-11-01T02:51:14.3398429Z ASSERT exact miss
+2026-11-01T02:51:14.3398550Z ASSERT exact miss
+2026-11-01T02:51:14.3402447Z   [OK]          resolver          4   exact id only.
+2026-11-01T02:51:14.3404409Z ASSERT first handle remains coherent after source overwrite
+2026-11-01T02:51:14.3408399Z ASSERT first handle remains coherent after source deletion
+2026-11-01T02:51:14.3408810Z ASSERT second handle remains coherent after source deletion
+2026-11-01T02:51:14.3409084Z ASSERT separately loaded file snapshots remain distinct
+2026-11-01T02:51:14.3409446Z ASSERT exact absence
+2026-11-01T02:51:14.3409592Z ASSERT exact absence
+2026-11-01T02:51:14.3409716Z ASSERT exact absence
+2026-11-01T02:51:14.3409837Z ASSERT exact absence
+2026-11-01T02:51:14.3410013Z   [OK]          resolver          5   full replacement path suppresses embedded.
+2026-11-01T02:51:14.3410247Z ASSERT missing replacement path is preserved
+2026-11-01T02:51:14.3410461Z   [OK]          resolver          6   invalid full replacement has no fallback.
+2026-11-01T02:51:14.3410935Z ASSERT strict target identity
+2026-11-01T02:51:14.3412127Z ASSERT excluded target is absent
+2026-11-01T02:51:14.3412369Z ASSERT typed rejected target
+2026-11-01T02:51:14.3412662Z   [OK]          resolver          7   unbound target policy is explicit and o...
+2026-11-01T02:51:14.3415171Z ASSERT pricing leaves generation unchanged
+2026-11-01T02:51:14.3415441Z ASSERT pricing leaves identity unchanged
+2026-11-01T02:51:14.3415951Z ASSERT pricing leaves plan fingerprint unchanged
+2026-11-01T02:51:14.3416239Z ASSERT pricing remains auditable evidence
+2026-11-01T02:51:14.3416528Z ASSERT TOML formatting leaves generation unchanged
+2026-11-01T02:51:14.3416941Z ASSERT TOML formatting leaves identity unchanged
+2026-11-01T02:51:14.3417136Z ASSERT TOML formatting preserves canonical evidence
+2026-11-01T02:51:14.3417357Z   [OK]          resolver          8   pricing and formatting nonfunctional.
+2026-11-01T02:51:14.3419372Z ASSERT supported_models order leaves generation unchanged
+2026-11-01T02:51:14.3419622Z ASSERT supported_models order leaves canonical evidence unchanged
+2026-11-01T02:51:14.3419858Z ASSERT supported_models value changes canonical evidence
+2026-11-01T02:51:14.3420076Z   [OK]          resolver          9   supported_models canonical order.
+2026-11-01T02:51:14.3421732Z ASSERT base URL changes functional generation
+2026-11-01T02:51:14.3423139Z ASSERT request path changes functional generation
+2026-11-01T02:51:14.3424376Z ASSERT connect timeout changes functional generation
+2026-11-01T02:51:14.3425614Z ASSERT body timeout changes functional generation
+2026-11-01T02:51:14.3426898Z ASSERT capability changes functional generation
+2026-11-01T02:51:14.3428299Z ASSERT document capability changes functional generation
+2026-11-01T02:51:14.3429571Z ASSERT audio capability changes functional generation
+2026-11-01T02:51:14.3430974Z ASSERT assistant prefill admission changes functional generation
+2026-11-01T02:51:14.3432221Z ASSERT supported models changes functional generation
+2026-11-01T02:51:14.3433449Z ASSERT codec changes functional generation
+2026-11-01T02:51:14.3434762Z ASSERT prefill admission changes canonical catalog evidence
+2026-11-01T02:51:14.3434990Z ASSERT prefill admission changes selected target identity
+2026-11-01T02:51:14.3435709Z ASSERT prefill admission change reaches plan fingerprint
+2026-11-01T02:51:14.3437560Z ASSERT functional target change reaches plan fingerprint
+2026-11-01T02:51:14.3437905Z   [OK]          resolver         10   functional projection sensitivity.
+2026-11-01T02:51:14.3440550Z ASSERT absent/disabled changes catalog evidence
+2026-11-01T02:51:14.3440849Z ASSERT absent/disabled changes target identity
+2026-11-01T02:51:14.3441142Z ASSERT absent/disabled changes catalog generation
+2026-11-01T02:51:14.3441498Z ASSERT absent/enabled changes catalog evidence
+2026-11-01T02:51:14.3441829Z ASSERT absent/enabled changes target identity
+2026-11-01T02:51:14.3442013Z ASSERT absent/enabled changes catalog generation
+2026-11-01T02:51:14.3442198Z ASSERT disabled/enabled changes catalog evidence
+2026-11-01T02:51:14.3442382Z ASSERT disabled/enabled changes target identity
+2026-11-01T02:51:14.3442575Z ASSERT disabled/enabled changes catalog generation
+2026-11-01T02:51:14.3442803Z ASSERT later target-policy snapshots do not mutate the old snapshot
+2026-11-01T02:51:14.3443050Z ASSERT non-boolean target enable_thinking is rejected exactly
+2026-11-01T02:51:14.3443292Z   [OK]          resolver         11   target thinking policy is typed and fro...
+2026-11-01T02:51:14.3452123Z ASSERT shared handle first Domain selected generation
+2026-11-01T02:51:14.3452685Z ASSERT shared handle first Domain provenance generation
+2026-11-01T02:51:14.3453031Z ASSERT shared handle first Domain receipt generation
+2026-11-01T02:51:14.3453349Z ASSERT shared handle first Domain selected evidence
+2026-11-01T02:51:14.3453686Z ASSERT shared handle first Domain provenance evidence
+2026-11-01T02:51:14.3454023Z ASSERT shared handle first Domain receipt evidence
+2026-11-01T02:51:14.3454356Z ASSERT shared handle first Domain provenance identity
+2026-11-01T02:51:14.3454685Z ASSERT shared handle first Domain receipt identity
+2026-11-01T02:51:14.3455015Z ASSERT shared handle second Domain selected generation
+2026-11-01T02:51:14.3455350Z ASSERT shared handle second Domain provenance generation
+2026-11-01T02:51:14.3455693Z ASSERT shared handle second Domain receipt generation
+2026-11-01T02:51:14.3456025Z ASSERT shared handle second Domain selected evidence
+2026-11-01T02:51:14.3456341Z ASSERT shared handle second Domain provenance evidence
+2026-11-01T02:51:14.3456600Z ASSERT shared handle second Domain receipt evidence
+2026-11-01T02:51:14.3457022Z ASSERT shared handle second Domain provenance identity
+2026-11-01T02:51:14.3457221Z ASSERT shared handle second Domain receipt identity
+2026-11-01T02:51:14.3457467Z ASSERT one freshly admitted handle yields identical immutable Domain observations
+2026-11-01T02:51:14.3457747Z   [OK]          resolver         12   one fresh handle is immutable across Do...
+2026-11-01T02:51:14.3460610Z ASSERT immutable handle A crosses a Domain without rebinding
+2026-11-01T02:51:14.3460978Z ASSERT immutable handle B crosses a Domain without rebinding
+2026-11-01T02:51:14.3461347Z ASSERT cross-Domain handles preserve distinct whole tuples
+2026-11-01T02:51:14.3469635Z ASSERT concurrent old selected generation
+2026-11-01T02:51:14.3469932Z ASSERT concurrent old provenance generation
+2026-11-01T02:51:14.3470226Z ASSERT concurrent old receipt generation
+2026-11-01T02:51:14.3470397Z ASSERT concurrent old selected evidence
+2026-11-01T02:51:14.3470573Z ASSERT concurrent old provenance evidence
+2026-11-01T02:51:14.3470740Z ASSERT concurrent old receipt evidence
+2026-11-01T02:51:14.3470905Z ASSERT concurrent old provenance identity
+2026-11-01T02:51:14.3471069Z ASSERT concurrent old receipt identity
+2026-11-01T02:51:14.3471234Z ASSERT concurrent new selected generation
+2026-11-01T02:51:14.3471489Z ASSERT concurrent new provenance generation
+2026-11-01T02:51:14.3471669Z ASSERT concurrent new receipt generation
+2026-11-01T02:51:14.3471833Z ASSERT concurrent new selected evidence
+2026-11-01T02:51:14.3471994Z ASSERT concurrent new provenance evidence
+2026-11-01T02:51:14.3472156Z ASSERT concurrent new receipt evidence
+2026-11-01T02:51:14.3472319Z ASSERT concurrent new provenance identity
+2026-11-01T02:51:14.3472543Z ASSERT concurrent new receipt identity
+2026-11-01T02:51:14.3472792Z ASSERT old selected/provenance/receipt tuple is exactly snapshot A
+2026-11-01T02:51:14.3473053Z ASSERT new selected/provenance/receipt tuple is exactly snapshot B
+2026-11-01T02:51:14.3473268Z ASSERT A and B whole tuples differ
+2026-11-01T02:51:14.3473478Z   [OK]          resolver         13   old/new whole-tuple Domain and fiber se...
+2026-11-01T02:51:14.3473769Z ASSERT malformed URL exact typed cause
+2026-11-01T02:51:14.3474220Z ASSERT URL control exact typed cause
+2026-11-01T02:51:14.3474471Z ASSERT URL userinfo exact typed cause
+2026-11-01T02:51:14.3474919Z ASSERT URL query exact typed cause
+2026-11-01T02:51:14.3476217Z ASSERT URL fragment exact typed cause
+2026-11-01T02:51:14.3477477Z ASSERT path dot traversal exact typed cause
+2026-11-01T02:51:14.3478541Z ASSERT path encoded traversal exact typed cause
+2026-11-01T02:51:14.3479753Z ASSERT path backslash exact typed cause
+2026-11-01T02:51:14.3481013Z ASSERT path repeated slash exact typed cause
+2026-11-01T02:51:14.3482044Z ASSERT path query exact typed cause
+2026-11-01T02:51:14.3483304Z ASSERT path fragment exact typed cause
+2026-11-01T02:51:14.3484392Z ASSERT path control exact typed cause
+2026-11-01T02:51:14.3485632Z ASSERT Gemini slash segment exact typed cause
+2026-11-01T02:51:14.3486970Z ASSERT Gemini encoded segment exact typed cause
+2026-11-01T02:51:14.3487313Z   [OK]          resolver         14   endpoint exact-cause table.
+2026-11-01T02:51:14.3488138Z ASSERT rejected caller-header diagnostic omits its value
+2026-11-01T02:51:14.3488495Z   [OK]          resolver         15   caller headers rejected.
+2026-11-01T02:51:14.3489439Z ASSERT target case shadow exact collision
+2026-11-01T02:51:14.3491185Z   [OK]          resolver         16   collision and input hardening.
+2026-11-01T02:51:14.3491562Z Test Successful in 0.028s. 17 tests run.
+2026-11-01T02:51:14.3530883Z [targeted] packages/agent_core/test/test_exact_output_resolver_snapshot: OK in 0s
+2026-11-01T02:51:14.3542200Z ##[error]Process completed with exit code 1.

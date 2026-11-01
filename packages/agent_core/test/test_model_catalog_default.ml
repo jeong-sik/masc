@@ -931,13 +931,14 @@ let test_glm_vision_rows_agree () =
     rows
 ;;
 
-(* Every number here was read from OpenRouter's own GET /api/v1/models
-   metadata or measured on the wire on 2026-09-10
-   (evidence/task-openrouter-support/) or 2026-09-22
-   (evidence/task-openrouter-new-models/). The 2026-10-28 refresh is retained
-   in evidence/2026-10-28-openrouter-bindings/; its two ids, windows and output
-   ceilings also match GET /api/v1/models on 2026-11-01. Provider-scoped lookup
-   is an exact id match, so each row is asserted on its own. *)
+(* Expected declarations from the admitted OpenRouter rows. Historical wire
+   observations are retained in evidence/task-openrouter-support/ and
+   evidence/task-openrouter-new-models/. The October 28 bindings bundle
+   records the exact replacement ids and disabled-reasoning probes, but no
+   listing evidence for the 393216 output ceiling. The November 1 selected
+   listing in evidence/2026-11-01-official-client-audit/ records both ids,
+   windows and output ceilings; it is metadata, not a generation limit test.
+   Provider-scoped lookup is exact, so each row is checked on its own. *)
 let openrouter_rows =
   (* id, context, max output, input $/1M, output $/1M, image input *)
   [ "anthropic/claude-opus-5", 1_000_000, 128_000, 5.0, 25.0, None

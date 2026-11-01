@@ -342,18 +342,6 @@ let failure_leaves_effects_unknown ~admission (error : Serve.error) =
      | Serve.Timeout _ -> false)
 ;;
 
-let msp_reasoning_effort : Llm_provider.Reasoning_effort.t -> Msp.reasoning_effort
-  = function
-  | Llm_provider.Reasoning_effort.None_ -> Msp.Effort_none
-  | Llm_provider.Reasoning_effort.Minimal -> Msp.Effort_minimal
-  | Llm_provider.Reasoning_effort.Low -> Msp.Effort_low
-  | Llm_provider.Reasoning_effort.Medium -> Msp.Effort_medium
-  | Llm_provider.Reasoning_effort.High -> Msp.Effort_high
-  | Llm_provider.Reasoning_effort.XHigh -> Msp.Effort_xhigh
-  | Llm_provider.Reasoning_effort.Max -> Msp.Effort_max
-  | Llm_provider.Reasoning_effort.Ultra -> Msp.Effort_ultra
-;;
-
 (* Only the host's counted-once prompt count normalizes the provider's cache
    convention. A terminal-only raw aggregate cannot establish that split. *)
 let api_usage_of_token_usage (usage : Msp.token_usage) : Agent_core.Types.api_usage =
@@ -1026,13 +1014,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~inpu
       | [], (true | false) | _ :: _, true -> Ok ()
     in
     let reasoning_effort =
-      Host.effective_reasoning_effort
-        ~runtime_label
-        ~keeper_name
-        ~runtime_id
-        ~model_id:config.model
-        ~requested:prepared.reasoning_effort
-      |> Option.map msp_reasoning_effort
+      Option.map Msp.reasoning_effort_of_requested prepared.reasoning_effort
     in
     let* prepared =
       if is_resume

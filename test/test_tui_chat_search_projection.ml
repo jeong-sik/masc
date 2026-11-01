@@ -207,6 +207,21 @@ let test_repeat_cursor_across_reflow () = at_sizes (fun origin ->
   check bool "diagram/source switching does not repeat any literal" true
     ((Render.keeper_message_find_scroll state ~keeper_name:"alpha" ~needle:"repeat" ~older_than:(Some oldest)).match_result=None))
 
+let test_search_wrapped_table_cell_after_resize () = at_sizes (fun origin ->
+  let set_cols columns = ignore (Masc_tui_render_schedule.Terminal_size_cache.refresh
+    Masc_tui_ansi.terminal_size_cache ~probe:(fun () -> Some (26, columns))) in
+  let state = state origin in
+  let needle = String.make 32 'Q' ^ "TARGET" ^ String.make 32 'Z' in
+  let cell = String.make 200 'x' ^ needle in
+  state.msg_loaded <- [row ~id:"wrapped-table" ~request_id:"wrapped-table" ~role:user
+    ~text:("| Header |\n| --- |\n| " ^ cell ^ " |") 1.];
+  set_cols 42;
+  let narrow = find state needle in
+  set_cols 160;
+  let wide = find state needle in
+  check int "wrapped match retains its original position after resize" 0
+    (Masc_tui_chat_search.compare_position narrow.matched_position wide.matched_position))
+
 let test_preview_and_journal_search_reflow () = at_sizes (fun origin ->
   let set_cols columns=ignore(Masc_tui_render_schedule.Terminal_size_cache.refresh
     Masc_tui_ansi.terminal_size_cache ~probe:(fun () -> Some(26,columns))) in
@@ -1589,6 +1604,8 @@ let () = run "chat search projection" [
     test_case "search freezes preview lookup across measurement" `Quick test_search_freezes_preview_lookup;
     test_case "preview and journal search survive reflow" `Quick test_preview_and_journal_search_reflow;
     test_case "source cursor survives actual layout reflow" `Quick test_repeat_cursor_across_reflow;
+    test_case "search retains a wrapped table cell source after resize" `Quick
+      test_search_wrapped_table_cell_after_resize;
     test_case "word wrapped matches include the whole phrase" `Quick
       test_word_wrapped_match_location;
     test_case "search matches rendered markup and presentation line boundaries" `Quick

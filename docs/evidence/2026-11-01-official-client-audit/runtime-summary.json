@@ -1,0 +1,203 @@
+{
+  "captured_at": "2026-11-01T00:59:32.647927+00:00",
+  "source_base": "dbd032511fea4e3d04687448275c0f41abff56cc",
+  "health": {
+    "version": "0.66.0",
+    "binary_commit": "dbd032511fea4e3d04687448275c0f41abff56cc",
+    "runtime_instance_id": "01a19489-2a83-7000-9869-7048022414f7",
+    "started_at": "2026-11-01T00:36:19Z",
+    "paths": {
+      "effective_base_path": "/Users/dancer/me",
+      "effective_masc_root": "/Users/dancer/me/.masc"
+    }
+  },
+  "log_prefixes": [
+    {
+      "source_file": "system_log_2026-10-30.jsonl",
+      "captured_prefix_bytes": 95922139,
+      "captured_prefix_sha256": "97cde0a6a92f4aa907e9fd6756857a72190c14e0a4edce973892f838d7f0534d",
+      "complete_lines": 260512,
+      "levels": {
+        "INFO": 210037,
+        "WARN": 49107,
+        "ERROR": 1368
+      },
+      "selected_message_counts": {
+        "old_agent_core_checkpoint": 1558,
+        "muse_schema_drift": 1053,
+        "provider_failure_capture_gap": 345,
+        "muse_input_overflow": 225
+      },
+      "first": {
+        "old_agent_core_checkpoint": {
+          "line": 33,
+          "ts": "2026-10-30T00:00:03Z"
+        },
+        "muse_schema_drift": {
+          "line": 39,
+          "ts": "2026-10-30T00:00:04Z"
+        },
+        "provider_failure_capture_gap": {
+          "line": 426,
+          "ts": "2026-10-30T00:02:54Z"
+        },
+        "muse_input_overflow": {
+          "line": 428,
+          "ts": "2026-10-30T00:02:54Z"
+        }
+      },
+      "last": {
+        "old_agent_core_checkpoint": {
+          "line": 259409,
+          "ts": "2026-10-30T23:57:22Z"
+        },
+        "muse_schema_drift": {
+          "line": 259484,
+          "ts": "2026-10-30T23:57:23Z"
+        },
+        "provider_failure_capture_gap": {
+          "line": 258733,
+          "ts": "2026-10-30T23:56:47Z"
+        },
+        "muse_input_overflow": {
+          "line": 243254,
+          "ts": "2026-10-30T21:40:31Z"
+        }
+      }
+    },
+    {
+      "source_file": "system_log_2026-10-31.jsonl",
+      "captured_prefix_bytes": 38817192,
+      "captured_prefix_sha256": "5ee19356323f3917f59a42a1c33c1ee74cf170578dc12c8303d6ac91139e512a",
+      "complete_lines": 100424,
+      "levels": {
+        "INFO": 69025,
+        "WARN": 30675,
+        "ERROR": 724
+      },
+      "selected_message_counts": {
+        "provider_failure_capture_gap": 153,
+        "muse_schema_drift": 327,
+        "old_agent_core_checkpoint": 478,
+        "muse_input_overflow": 20,
+        "antigravity_text_quota_refusal": 172,
+        "openrouter_payment_required": 80
+      },
+      "first": {
+        "provider_failure_capture_gap": {
+          "line": 59,
+          "ts": "2026-10-31T00:00:08Z"
+        },
+        "muse_schema_drift": {
+          "line": 70,
+          "ts": "2026-10-31T00:00:08Z"
+        },
+        "old_agent_core_checkpoint": {
+          "line": 71,
+          "ts": "2026-10-31T00:00:08Z"
+        },
+        "muse_input_overflow": {
+          "line": 7833,
+          "ts": "2026-10-31T00:47:02Z"
+        },
+        "antigravity_text_quota_refusal": {
+          "line": 36056,
+          "ts": "2026-10-31T13:01:03Z"
+        },
+        "openrouter_payment_required": {
+          "line": 87082,
+          "ts": "2026-10-31T21:06:47Z"
+        }
+      },
+      "last": {
+        "provider_failure_capture_gap": {
+          "line": 99867,
+          "ts": "2026-10-31T23:50:00Z"
+        },
+        "muse_schema_drift": {
+          "line": 100418,
+          "ts": "2026-10-31T23:59:55Z"
+        },
+        "old_agent_core_checkpoint": {
+          "line": 100414,
+          "ts": "2026-10-31T23:59:54Z"
+        },
+        "muse_input_overflow": {
+          "line": 47688,
+          "ts": "2026-10-31T14:43:55Z"
+        },
+        "antigravity_text_quota_refusal": {
+          "line": 98556,
+          "ts": "2026-10-31T23:32:24Z"
+        },
+        "openrouter_payment_required": {
+          "line": 99871,
+          "ts": "2026-10-31T23:50:00Z"
+        }
+      }
+    },
+    {
+      "source_file": "system_log_2026-11-01.jsonl",
+      "captured_prefix_bytes": 2463068,
+      "captured_prefix_sha256": "2303b0b243ee280d2500d04aa64205093661f5da9d0a6dee21d6d0f1efbcb81b",
+      "complete_lines": 6621,
+      "levels": {
+        "INFO": 4483,
+        "WARN": 2104,
+        "ERROR": 34
+      },
+      "selected_message_counts": {
+        "muse_schema_drift": 22,
+        "old_agent_core_checkpoint": 48,
+        "provider_failure_capture_gap": 24,
+        "antigravity_text_quota_refusal": 28,
+        "openrouter_payment_required": 60
+      },
+      "first": {
+        "muse_schema_drift": {
+          "line": 46,
+          "ts": "2026-11-01T00:00:08Z"
+        },
+        "old_agent_core_checkpoint": {
+          "line": 59,
+          "ts": "2026-11-01T00:00:09Z"
+        },
+        "provider_failure_capture_gap": {
+          "line": 79,
+          "ts": "2026-11-01T00:00:15Z"
+        },
+        "antigravity_text_quota_refusal": {
+          "line": 81,
+          "ts": "2026-11-01T00:00:15Z"
+        },
+        "openrouter_payment_required": {
+          "line": 410,
+          "ts": "2026-11-01T00:04:07Z"
+        }
+      },
+      "last": {
+        "muse_schema_drift": {
+          "line": 5047,
+          "ts": "2026-11-01T00:55:02Z"
+        },
+        "old_agent_core_checkpoint": {
+          "line": 6576,
+          "ts": "2026-11-01T00:58:59Z"
+        },
+        "provider_failure_capture_gap": {
+          "line": 6449,
+          "ts": "2026-11-01T00:58:26Z"
+        },
+        "antigravity_text_quota_refusal": {
+          "line": 3741,
+          "ts": "2026-11-01T00:37:49Z"
+        },
+        "openrouter_payment_required": {
+          "line": 4878,
+          "ts": "2026-11-01T00:53:04Z"
+        }
+      }
+    }
+  ],
+  "privacy": "Derived message-class counts and source coordinates only; raw private conversations and provider/account identifiers are not retained. Counts are log messages, not independent failed requests."
+}

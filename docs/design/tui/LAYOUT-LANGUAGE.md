@@ -90,9 +90,10 @@ or running operator actions remain global warnings.
 
 Plan usage keeps account names and window labels readable when the terminal
 narrows; a long label moves to its own row before the meter. Exceptionally large
-list labels retain their beginning and end with an omission mark, bounded by the
-viewport; the account chooser retains the full selected account name. The bar
-and percentage describe the provider's last report, and `other use` identifies
+list labels retain their ends where grapheme boundaries are known and mark
+omissions, bounded by the viewport; the account chooser retains the full
+selected account name. The bar and percentage describe the provider's last
+report, and `other use` identifies
 windows that do not block model calls without relying on colour alone.
 
 Keeper usage keeps the recorded amount, reporting coverage and comparison bar

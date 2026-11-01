@@ -30,9 +30,9 @@ type section = {
 }
 
 val text_for_viewport : columns:int -> rows:int -> string -> string
-(** Bound a displayed label to the current viewport's UTF-8 capacity,
-    preserving complete graphemes at both ends and marking an omitted middle.
-    The source is unchanged. *)
+(** Bound a displayed label to the current viewport's UTF-8 capacity and mark
+    omissions. Retain the ends where grapheme boundaries can be determined;
+    an ambiguous portion is omitted. The source is unchanged. *)
 
 (** What the runtime catalogue says about an account's quota scope. *)
 type observed =
@@ -172,8 +172,9 @@ val section_cards :
     holds two columns of them; below that it uses unboxed rows. A card is
     titled with the account's name and holds its windows, an observed
     exhaustion and its email, with the bars sized to the card. Labels larger
-    than the viewport described by [width] and [rows] keep their ends and an
-    omission mark instead of expanding an unbounded number of rows. The two
+    than the viewport described by [width] and [rows] retain the ends where
+    their boundaries are known and mark omissions instead of expanding an
+    unbounded number of rows. The two
     accounts of a row end on the same line. The headings, the summary and the
     notes are the same lines either way, and every row fits [width]. *)
 

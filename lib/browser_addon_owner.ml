@@ -50,10 +50,11 @@ let with_admission t incarnation run =
 let snapshot t = `Assoc ([
   "state",`String (match t.phase with Serving -> "serving" | Retired -> "retired");
   "clients",`List (List.map (fun (client : B.client_info) ->
-    let space_observation=match t.ego_input with
-      | Some (client_id,recovery) when client_id=client.client_id -> recovery.space_observation ()
-      | None|Some _ -> None in
-    Browser_addon_observation.publish_client client ~space_observation) (B.connected_clients ()));
+    let space_observation,space_presence=match t.ego_input with
+      | Some (client_id,recovery) when client_id=client.client_id ->
+        recovery.space_observation (),Some (recovery.space_presence ())
+      | None|Some _ -> None,None in
+    Browser_addon_observation.publish_client client ~space_observation ~space_presence) (B.connected_clients ()));
   "owned_backends",Browser_addon_inventory.owned_to_json (Browser_addon_inventory.observe ())]
   @ (match t.unavailable with [] -> [] | items ->
       ["unavailable",`List (List.map Browser_addon_observation.unavailable_to_json items)]))

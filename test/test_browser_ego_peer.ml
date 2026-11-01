@@ -3038,7 +3038,8 @@ let test_operator_input_recovery () =
   let connection:Operator.connection={client_id="original-client";space=Peer.space peer;recovery={
     status=(fun () -> Peer.input_status peer);busy=(fun () -> Peer.input_busy peer);
     assert_reset=(fun ~generation -> Peer.assert_input_reset peer ~generation);
-    space_observation=(fun () -> Peer.space_observation peer)}} in
+    space_observation=(fun () -> Peer.space_observation peer);
+        space_presence=(fun () -> Peer.space_presence peer)}} in
   let view=Operator.invoke (Some connection) (obj ["action",str "view";"arguments",obj []]) in
   let action=Yojson.Safe.Util.(view |> member "actions" |> to_list |> List.hd) in
   let fields=Yojson.Safe.Util.(action |> member "arguments") in
@@ -3073,7 +3074,7 @@ let test_operator_input_recovery () =
   check int "only original, empty observation and new input workflows were issued" 3 !issued
 
 let test_native_space_status () =
-  let ownership=ref "agentDelegatedToUser" and invalid=ref false and unavailable=ref false in
+  let ownership=ref "agentDelegatedToUser" and invalid=ref false and unavailable=ref false and duplicate=ref false in
   let calls=ref 0 and output=ref "" in
   let run ~window_s script =
     let sent=sent_of ~window_s script in
@@ -3092,8 +3093,8 @@ const forbidden=name=>{seen.push(name);throw new Error('unexpected '+name);};
 const takeOverTaskSpace=async()=>forbidden('takeOver');
 const claimTaskSpace=async()=>forbidden('claim');
 const taskSpace=async()=>forbidden('taskSpace');
-const listTaskSpaces=async()=>{seen.push('listTaskSpaces');return [{id:%d,name:'Renamed native Space',ownership:%s}];};
-|js} (if !invalid then 52 else 51) (Yojson.Safe.to_string (str !ownership)) in
+const listTaskSpaces=async()=>{seen.push('listTaskSpaces');const row={id:%d,name:'Renamed native Space',ownership:%s};return %s ? [row,row] : [row];};
+|js} (if !invalid then 52 else 51) (Yojson.Safe.to_string (str !ownership)) (string_of_bool !duplicate) in
       output:=in_node (shim ^ script);Ok !output
     | "space.hand_off" -> answered (obj ["spaceId",`Int 51;"spaceName",str "SDK Space"])
     | other -> failf "unexpected Space status fixture step %s" other in
@@ -3115,7 +3116,8 @@ const listTaskSpaces=async()=>{seen.push('listTaskSpaces');return [{id:%d,name:'
   let connection:Operator.connection={client_id="original-client";space=Peer.space peer;recovery={
     status=(fun () -> Peer.input_status peer);busy=(fun () -> Peer.input_busy peer);
     assert_reset=(fun ~generation -> Peer.assert_input_reset peer ~generation);
-    space_observation=(fun () -> Peer.space_observation peer)}} in
+    space_observation=(fun () -> Peer.space_observation peer);
+        space_presence=(fun () -> Peer.space_presence peer)}} in
   let before= !calls in
   let view=Operator.invoke (Some connection) (obj ["action",str "view";"arguments",obj []]) in
   check bool "operator form shows the actual native observation" true
@@ -3127,10 +3129,22 @@ const listTaskSpaces=async()=>{seen.push('listTaskSpaces');return [{id:%d,name:'
   invalid:=true;
   ignore (before_effect "foreign Space metadata is refused" (status ()));
   check bool "failed refresh invalidates the earlier cached observation" true (Option.is_none (Peer.space_observation peer));
+  check bool "native absence is retained as missing for the original binding" true
+    ((Peer.space_presence peer).state=Masc.Browser_ego_space_observation.Missing);
   invalid:=false;unavailable:=true;
   ignore (before_effect "metadata transport failure sends no Page effect" (status ()));
+  check bool "transport failure is unknown, not missing" true
+    (match (Peer.space_presence peer).state with
+     | Unknown (Transport_unavailable _) -> true | Present|Missing|Unknown _ -> false);
   unavailable:=false;
+  duplicate:=true;
+  ignore (before_effect "ambiguous native inventory sends no Page effect" (status ()));
+  check bool "ambiguous native inventory is unknown, not missing" true
+    ((Peer.space_presence peer).state=Masc.Browser_ego_space_observation.Unknown Ambiguous_inventory);
+  duplicate:=false;
   ignore (status ());
+  check bool "explicit refresh recovers the same binding without allocating" true
+    ((Peer.space_presence peer).state=Masc.Browser_ego_space_observation.Present);
   ignore (dispatch peer Live.Page_act (obj ["action",str "hand_off"]));
   check bool "control changes invalidate cached owner metadata" true (Option.is_none (Peer.space_observation peer))
 

@@ -453,6 +453,16 @@ ownership and input state. Keeper activity names the Space wait separately.
 observed `clientId` refreshes native metadata for the original numeric Space.
 It uses `listTaskSpaces`, without constructing a TaskSpace, navigating a Page
 or taking control. A missing Space is an error; no replacement is created.
+The connection row retains the same client and attachment ID and publishes a
+dated `spacePresence`: `present`, `missing`, or `unknown` with its observation
+failure reason. A failed inventory query cannot establish absence. Automatic
+browse selection excludes missing, unknown and unobserved Ego Spaces; an exact
+client can still run `space_status` to refresh that same binding. A later native
+inventory that contains the original ID restores its automatic eligibility.
+Transport disconnection remains a separate condition. Reading connections uses
+the cached presence and performs no native listing or Page call.
+Presence describes the native inventory at its observation time; command
+admission still checks the peer's ownership, input and completion state.
 
 The TUI Browser Lane selection and selected connection show the last SDK Space
 name, raw ownership value and SDK observation time. This is separate from the

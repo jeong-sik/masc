@@ -19,6 +19,7 @@ type work_browser =
     sentence actions also require it before discovery or session creation. *)
 type snapshot =
   { live_activity : Browser_lane.activity; live_clients : Browser_lane.client_info list
+  ; live_space_presence : (Browser_lane.client_id * Browser_ego_space_observation.presence) list
   ; automation : work_browser; stagehand : work_browser }
 (** What one browser worker reported in its [Snapshot] reply, read by the host
     when it chooses. Executor registration alone never establishes an open

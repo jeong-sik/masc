@@ -22,7 +22,7 @@ let test_required_actions_schema_lists_every_operation () =
 let test_bound_request_keeps_its_browser () =
   check bool "bound automatic request cannot be reselected by capabilities" true
     (Selection.choose ~required_actions:[Cap.Type_text] ~verb:Lane.Tabs_list ~bound:true
-       ~snapshot:{live_activity=Lane.Enabled;live_clients=[];
+       ~snapshot:{live_activity=Lane.Enabled;live_clients=[];live_space_presence=[];
          automation={activity=Lane.Enabled;registered=true;session=Lane.Browser_open;locate=true};
          stagehand={activity=Lane.Enabled;registered=true;session=Lane.Browser_open;locate=true}}
        Selection.Automatic

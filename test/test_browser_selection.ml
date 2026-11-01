@@ -2,7 +2,7 @@ open Alcotest
 module Selection = Masc.Browser_selection
 module Lane = Browser_lane
 let work session : Selection.work_browser = {activity=Lane.Enabled;registered=true;session;locate=false}
-let empty : Selection.snapshot = {live_activity=Lane.Enabled;live_clients=[];
+let empty : Selection.snapshot = {live_activity=Lane.Enabled;live_clients=[];live_space_presence=[];
   stagehand=work Lane.Browser_closed;automation=work Lane.Browser_closed}
 let client digit transport : Lane.client_info =
   let id="00000000-0000-4000-8000-00000000000" ^ digit in
@@ -13,6 +13,24 @@ let choose ?(verb=Lane.Tabs_list) ?(bound=false) snapshot = Selection.choose ~ve
 let selected (expected : Selection.selected) = function
   | Ok actual -> check bool "selected route and reason" true (actual=expected)
   | Error error -> fail (Selection.error_message error)
+let test_space_presence () =
+  let module O=Masc.Browser_ego_space_observation in
+  let ego=client "1" Lane.Ego_task_space in
+  let presence state : O.presence={space_id=51;observed_at=42.;state} in
+  let snapshot state={empty with live_clients=[ego];live_space_presence=[ego.client_id,presence state]} in
+  selected {route=route ego;reason=Selection.Existing_login} (choose (snapshot O.Present));
+  List.iter (fun state ->
+    let observed=snapshot state in
+    check bool "unavailable Space is excluded from automatic browse" true
+      (choose observed=Error Selection.No_available_browser);
+    check bool "missing/unknown Space preserves the connected transport identity" true
+      (Selection.target ~verb:Lane.Tabs_list ~snapshot:observed (route ego)=Ok (Selection.Connected ego));
+    selected {route=route ego;reason=Selection.Explicit_browser}
+      (Selection.choose ~verb:Lane.Tabs_list ~bound:false ~snapshot:observed (Selection.Exact (route ego))))
+    [O.Missing;O.Unknown (O.Transport_unavailable "offline")];
+  check bool "disconnection is a separate route error" true
+    (Selection.target ~verb:Lane.Tabs_list ~snapshot:empty (route ego)=Error (Lane.Selected_client_disconnected ego.client_id));
+  selected {route=route ego;reason=Selection.Existing_login} (choose (snapshot O.Present))
 let test_connections_and_sessions () =
   let bidi=client "1" Lane.Webdriver_bidi and extension=client "2" Lane.Web_extension in
   let opened={empty with stagehand=work Lane.Browser_open} in
@@ -259,8 +277,13 @@ let test_multi_worker_inventory () =
   let member=Yojson.Safe.Util.member in
   let off:Selection.work_browser={activity=Lane.Disabled;registered=false;session=Lane.Browser_closed;locate=false} in
   let observation instance_id clients : I.observation =
+    let space_presence=List.filter_map (fun (client:Lane.client_info) ->
+      Option.map (fun (space:Lane.ego_space) -> client.client_id,
+        {Masc.Browser_ego_space_observation.space_id=space.id;observed_at=42.;state=Present}) client.space) clients in
     {instance_id;published={Masc.Browser_addon_observation.clients;
-      client_rows=List.map (fun client -> Masc.Browser_addon_observation.publish_client client ~space_observation:None) clients;
+      space_presence;
+      client_rows=List.map (fun (client:Lane.client_info) -> Masc.Browser_addon_observation.publish_client client
+        ~space_observation:None ~space_presence:(List.assoc_opt client.client_id space_presence)) clients;
       automation=off;stagehand=off;unavailable=[]}} in
   let ego={(client "1" Lane.Ego_task_space) with browser=Lane.Ego_lite} and firefox=client "2" Lane.Webdriver_bidi in
   let first=observation "first" [ego] and second=observation "second" [firefox] in
@@ -278,6 +301,19 @@ let test_multi_worker_inventory () =
   check bool "one cross-worker live candidate retains its UUID" true
     (member "automatic" single |> member "browse" |> member "data" |> member "clientId"
       =`String (Lane.client_id_to_string ego.client_id));
+  List.iter (fun state ->
+    let presence={Masc.Browser_ego_space_observation.space_id=51;observed_at=43.;state} in
+    let published={first.published with space_presence=[ego.client_id,presence];
+      client_rows=[Masc.Browser_addon_observation.publish_client ego ~space_observation:None ~space_presence:(Some presence)]} in
+    let unavailable=report [{first with published}] in
+    check bool "missing or unknown Space is never advertised as automatically browseable" true
+      (member "automatic" unavailable |> member "browse" |> member "ok" = `Bool false);
+    check (list string) "unavailable Space retains the actual connected client row"
+      [Lane.client_id_to_string ego.client_id] (ids unavailable);
+    check bool "the host preserves the worker's typed presence evidence" true
+      (member "clients" unavailable |> Yojson.Safe.Util.to_list |> List.hd |> member "spacePresence"
+       =Masc.Browser_ego_space_observation.presence_to_json presence))
+    [Masc.Browser_ego_space_observation.Missing;Unknown (Transport_unavailable "offline")];
   let issue=I.Source_unready {instance_id="starting";message="worker has not started"} in
   let partial=report ~issues:[issue] [first] in
   check (list string) "a failed sibling does not erase valid manual choices" [Lane.client_id_to_string ego.client_id] (ids partial);
@@ -302,6 +338,7 @@ let test_multi_worker_inventory () =
      `List [`Assoc ["kind",`String "unready";"kind",`String "unready";"instanceId",`String "x";"message",`String "bad"]]]
 
 let () = run "browser selection" ["policy",[
+  test_case "native Space absence is distinct from transport disconnection" `Quick test_space_presence;
   test_case "multiple worker inventory preserves choices and uncertainty" `Quick test_multi_worker_inventory;
   test_case "Goal Space assignment and reconnect preserve browser identity" `Quick test_goal_space_default;
   test_case "connected login and actual owned sessions" `Quick test_connections_and_sessions;

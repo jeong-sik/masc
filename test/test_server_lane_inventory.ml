@@ -418,7 +418,7 @@ let browser_rows_read_the_addon_observation () =
   let work registered = `Assoc ["activity",`String "enabled";"registered",`Bool registered;
     "session",`String "closed";"locate",`Bool false] in
   let client id = `Assoc ["clientId",`String id;"browser",`String "firefox";"version",`String "158.0.1";
-    "engineVersion",`String "158.0.1";"transport",`String "web_extension";"space",`Null;"interactions",`List [];"lastActivities",`List [];"spaceObservation",`Null] in
+    "engineVersion",`String "158.0.1";"transport",`String "web_extension";"space",`Null;"interactions",`List [];"lastActivities",`List [];"spaceObservation",`Null;"spacePresence",`Null] in
   let output = match Browser_addon_observation.of_snapshot ~observed_at:1.
       (`Assoc ["state",`String "serving";
         "clients",`List [client "01a16363-ef67-7000-ad62-05bcd0320d99"; client "01a16363-ef68-7000-aee1-37e1be230202"];
@@ -489,7 +489,7 @@ let browser_lanes_read_their_own_sources () =
       | Web_extension | Webdriver_bidi -> Browser_lane.Firefox,None in
     let client : Browser_lane.client_info =
       {client_id;browser;version="158.0.1";engine_version="158.0.1";transport;space} in
-    Browser_addon_observation.publish_client client ~space_observation:None in
+    Browser_addon_observation.publish_client client ~space_observation:None ~space_presence:None in
   (* A worker answers its snapshot whatever its package serves; the host
      reads only the sources the package names. *)
   let published clients = match Browser_addon_observation.of_snapshot ~observed_at:1.

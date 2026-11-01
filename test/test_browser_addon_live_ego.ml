@@ -324,7 +324,7 @@ def run(script,answer):
         paths=[pathlib.Path(path) for path in args['paths']]
         (root/'uploaded').write_text(json.dumps([str(path) for path in paths]))
         answer({'error':None,'dialog':None,'tab':{'url':'https://fixture.test/','title':'Fixture'}})
-    elif step=='space.status':answer({'spaceId':51,'name':'Renamed native Space','ownership':'agent'})
+    elif step=='space.status':answer([{'spaceId':51,'name':'Renamed native Space','ownership':'agent'}])
     elif step=='space.finish':answer({'spaceId':51,'closedSpace':True,'keptManagedLabels':[],
         'closedManagedLabels':['p1','p2'],'preservedUnmanagedCount':0})
     else:answer(error='unexpected step '+step)

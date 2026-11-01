@@ -143,7 +143,7 @@ let gather t ~reach =
       | Ok _|Error _ -> []) answers in
     Ok {published;doubled;
         selection={live_activity=(match live with [] -> Browser_lane.Unobserved | _::_ -> Browser_lane.Enabled);
-          live_clients=published.clients;automation=published.automation;stagehand=published.stagehand};
+          live_clients=published.clients;live_space_presence=published.space_presence;automation=published.automation;stagehand=published.stagehand};
         holders=List.concat_map (fun (served,(listed:Browser_addon_observation.published)) ->
           List.map (fun (client:Browser_lane.client_info) ->
             Browser_lane.client_id_to_string client.client_id,served) listed.clients) live}

@@ -6,7 +6,7 @@ import { BrowserLaneConnections } from './browser-lane-connections'
 
 const work = { requestId: 'request-1', actor: 'keeper/research', action: 'page.native_workflow', tabId: 0, phase: 'running' }
 const client = { clientId: 'b932c512-51e0-45bc-9fcb-3fde7bd2767b', browser: 'ego_lite',
-  version: '0.6.1.11', engineVersion: 'chromium', transport: 'ego_task_space', space: { id: 32, name: 'Research' }, spaceObservation: null,
+  version: '0.6.1.11', engineVersion: 'chromium', transport: 'ego_task_space', space: { id: 32, name: 'Research' }, spaceObservation: null, spacePresence: null,
   interactions: [work, { ...work, requestId: 'request-2', actor: 'agent/helper', phase: 'queued', tabId: null }],
   lastActivities: [{ work: { ...work, requestId: 'previous', actor: 'operator' }, outcome: 'unknown' }] }
 const unavailable = { backend: 'ego', reason: 'user_owned_name', space: 'Research', observedAt: 42, recheck: 'worker_restart' }
@@ -26,6 +26,19 @@ function show(fields = row.fields, runtime_presence = 'live') {
 afterEach(cleanup)
 
 describe('browser caller observations', () => {
+  it('keeps native Space absence separate from unknown presence and the connected client identity', () => {
+    const missing = show({ ...row.fields, clients: [{ ...client,
+      spacePresence: { spaceId: 32, observedAt: 42, state: 'missing' } }] })
+    expect(missing.getByLabelText(`Browser client ${client.clientId}`)).toBeTruthy()
+    expect(missing.container.textContent).toContain('Original Space presence: missing')
+    expect(missing.container.textContent).toContain('Automatic browsing is unavailable')
+    missing.unmount()
+    const unknown = show({ ...row.fields, clients: [{ ...client,
+      spacePresence: { spaceId: 32, observedAt: 43, state: 'unknown',
+        reason: { kind: 'transport_unavailable', detail: 'offline' } } }] })
+    expect(unknown.container.textContent).toContain('Original Space presence: unknown')
+    expect(unknown.container.textContent).toContain('The native inventory could not be reached.')
+  })
   it('shows owned browser sessions beside personal browser callers without inventing login or caller identity', () => {
     const view = show({ ...row.fields, owned_backends: {
       automation: { activity: 'enabled', registered: true, session: 'open', locate: true },
@@ -52,6 +65,12 @@ describe('browser caller observations', () => {
     expect(view.getByLabelText('Stagehand browser session').textContent).toContain('Availability at observation: unobserved')
   })
   it.each([
+    ...[
+      { spaceId: 33, observedAt: 42, state: 'missing' },
+      { spaceId: 32, observedAt: Number.NaN, state: 'present' },
+      { spaceId: 32, observedAt: 42, state: 'unknown' },
+      { spaceId: 32, observedAt: 42, state: 'unknown', reason: { kind: 'unrecognized' } },
+    ].map(spacePresence => ({ ...client, spacePresence })),
     null, {}, { automation: {} },
     { automation: { activity: 'enabled', registered: true, session: 'ready', locate: true },
       stagehand: { activity: 'disabled', registered: false, session: 'closed', locate: false } },

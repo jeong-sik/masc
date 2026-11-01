@@ -121,7 +121,7 @@ let scenario ?(open_session=false) ?(refuse_delete=false) ?(wrong_profile=false)
       let automation,_=ok (Masc.Browser_addon_inventory.owned_of_json owned) in
       check bool "ready driver is registered" true automation.registered;
       check bool "driver readiness does not invent an open browser" true (automation.session=B.Browser_closed);
-      let snapshot={Browser_selection.live_activity=B.Enabled;live_clients=[];automation;
+      let snapshot={Browser_selection.live_activity=B.Enabled;live_clients=[];live_space_presence=[];automation;
         stagehand={activity=B.Disabled;registered=false;session=B.Browser_closed;locate=false}} in
       let selected=Browser_selection.choose ~verb:(B.Session_open {headless=Some true}) ~bound:false
         ~snapshot Browser_selection.Automatic |> Result.map_error Browser_selection.error_message |> ok in

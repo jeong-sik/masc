@@ -6,6 +6,14 @@ const spaceObservation = Schema.Struct({
   spaceId: id, spaceName: text, ownership: text,
   observedAt: Schema.Number.pipe(Schema.filter(Number.isFinite)),
 })
+const presenceCommon = { spaceId: id, observedAt: Schema.Number.pipe(Schema.filter(Number.isFinite)) }
+const spacePresence = Schema.Union(
+  Schema.Struct({ ...presenceCommon, state: Schema.Literal('present', 'missing') }),
+  Schema.Struct({ ...presenceCommon, state: Schema.Literal('unknown'), reason: Schema.Union(
+    Schema.Struct({ kind: Schema.Literal('transport_unavailable', 'invalid_inventory'), detail: Schema.String }),
+    Schema.Struct({ kind: Schema.Literal('ambiguous_inventory') }),
+  ) }),
+)
 const work = Schema.Struct({
   requestId: text, actor: Schema.NullOr(text), action: text, tabId: Schema.NullOr(id),
   phase: Schema.Literal('queued', 'running'),
@@ -21,8 +29,11 @@ const common = {
 const client = Schema.Union(
   Schema.Struct({ ...common, transport: Schema.Literal('ego_task_space'), space: Schema.Struct({ id, name: text }),
     spaceObservation: Schema.NullOr(spaceObservation),
-  }).pipe(Schema.filter(client => client.spaceObservation === null || client.spaceObservation.spaceId === client.space.id)),
-  Schema.Struct({ ...common, transport: Schema.Literal('web_extension', 'webdriver_bidi'), space: Schema.Null, spaceObservation: Schema.Null }),
+    spacePresence: Schema.NullOr(spacePresence),
+  }).pipe(Schema.filter(client => (client.spaceObservation === null || client.spaceObservation.spaceId === client.space.id)
+    && (client.spacePresence === null || client.spacePresence.spaceId === client.space.id))),
+  Schema.Struct({ ...common, transport: Schema.Literal('web_extension', 'webdriver_bidi'), space: Schema.Null,
+    spaceObservation: Schema.Null, spacePresence: Schema.Null }),
 )
 const unavailable = Schema.Struct({
   backend: Schema.Literal('ego'), reason: Schema.Literal('user_owned_name'),

@@ -158,7 +158,9 @@ let start ~sw ~env ~config ~root ~name ~backend ~exports ~owned:(automation,stag
   let tool=Browser_addon_tool.definition in
   write (Filename.concat root "clients.json")
     (Yojson.Safe.to_string (`List (List.map (fun client -> match W.client_to_json client with
-       | `Assoc fields -> `Assoc (("interactions",`List [])::("lastActivities",`List [])::("spaceObservation",`Null)::fields)
+       | `Assoc fields -> `Assoc (("interactions",`List [])::("lastActivities",`List [])::("spaceObservation",`Null)::("spacePresence",(match client.Browser_lane.space with
+           | None -> `Null | Some space -> Browser_ego_space_observation.presence_to_json
+             {space_id=space.id;observed_at=1.;state=Present}))::fields)
        | value -> value) clients)));
   write (Filename.concat root "owned.json")
     (Yojson.Safe.to_string (`Assoc ["automation",`Bool automation;"stagehand",`Bool stagehand]));

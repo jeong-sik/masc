@@ -113,6 +113,9 @@ val space : t -> Browser_lane.ego_space
 val space_observation : t -> Browser_ego_space_observation.t option
 (** Last SDK metadata read, dated at receipt. Control-changing commands and
     failed refreshes invalidate it; reading this cache never calls the SDK. *)
+val space_presence : t -> Browser_ego_space_observation.presence
+(** Last native inventory observation for the original numeric Space. It is
+    separate from transport connectivity and ownership metadata. *)
 val input_status : t -> Browser_ego_input.status
 val input_busy : t -> bool
 val assert_input_reset : t -> generation:string -> (unit, string) result

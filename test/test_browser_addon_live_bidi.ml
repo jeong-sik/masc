@@ -266,7 +266,7 @@ let scenario mode =
                 (match published.unavailable with
                  | [Masc.Browser_addon_observation.Ego_user_owned_name {space="masc";observed_at}] -> observed_at > 0.
                  | [] | _::_ -> false);
-              let snapshot : Masc.Browser_selection.snapshot = {live_activity=B.Enabled;live_clients=published.clients;
+              let snapshot : Masc.Browser_selection.snapshot = {live_activity=B.Enabled;live_clients=published.clients;live_space_presence=published.space_presence;
                 automation=published.automation;stagehand=published.stagehand} in
               check bool "unbound automatic selection chooses the remaining client" true
                 (match Masc.Browser_selection.choose ~verb:B.Tabs_list ~bound:false ~snapshot Automatic with

@@ -15,7 +15,7 @@ let observe () : Browser_selection.snapshot =
     let locate=match lane with B.Server_automation -> B.automation_locate_available ()
       | B.Server_stagehand -> B.stagehand_models_available () in
     {activity=observed.activity;registered;session=B.server_session_observation lane;locate} in
-  {live_activity=B.activity B.Lane_name.Live;live_clients=B.connected_clients ();
+  {live_activity=B.activity B.Lane_name.Live;live_clients=B.connected_clients ();live_space_presence=[];
    automation=work B.Server_automation;stagehand=work B.Server_stagehand}
 let owned_to_json (snapshot:Browser_selection.snapshot) = `Assoc [
   "automation",work_to_json snapshot.automation;"stagehand",work_to_json snapshot.stagehand]

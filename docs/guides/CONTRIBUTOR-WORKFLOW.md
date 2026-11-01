@@ -254,11 +254,16 @@ not add a Core build or full CI admission requirement to every ordinary PR.
 Choose work using [review routing](../../config/prompts/pr-review-routing.md).
 For MASC review requests, confirm the current code-review specialist Keepers and
 their roles, then deliver the request to each intended Keeper through MASC Board,
-Broadcast or `masc_keeper_msg`. Include the PR links, current head/base and Native
-Stack scope, requested review perspective, verification evidence and remaining
-limits. A common Board packet can hold that scope; if delivery to its intended
-Keepers is unconfirmed, send each a direct message referring to the packet.
-Read back the Board post or message operation and record the target and receipt.
+Broadcast or a direct message exposed to the caller. Keeper callers use
+`masc_keeper_delegate` with `target={kind:"keeper",name:"<Keeper>"}` and `prompt`;
+operator or external clients can use `masc_keeper_msg` with `name` and `message`
+when their tool surface exposes it. Check the caller's current capabilities.
+Include the PR links, current head/base and Native Stack scope, requested review
+perspective, verification evidence and remaining limits. A common Board packet
+can hold that scope; if delivery to its intended Keepers is unconfirmed, send
+each a direct message through the caller's available path, referring to the
+packet. Read back the Board post or use `masc_keeper_delegate_status` with the
+original target and operation ID, and record the target and receipt.
 Acceptance or `queued` state proves submission, not review completion or approval.
 
 GitHub user/team review requests also record account assignments; they do not

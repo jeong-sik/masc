@@ -6,8 +6,8 @@ const input: DiscussionLocalValue = { kind: 'input', input: { kind: 'reply', ope
 const key = (record: Pick<DiscussionLocalRecord,'id'|'revision'>) => `masc.artifact-discussion-local.v1:${record.id}:${record.revision}`
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); discussionLocals(workspace, target.artifact_id).forEach(discardDiscussionLocal); localStorage.clear() })
 it('preserves newer in-page and other-tab input when an earlier request is acknowledged', () => {
-  const old = retainDiscussionLocal('same', workspace, target, 'human', input)
-  const newer = retainDiscussionLocal('same', workspace, target, 'human', { ...input, input: { ...input.input, body: '새 입력' } })
+  const old = retainDiscussionLocal('same', workspace, target, 'human', input).record
+  const newer = retainDiscussionLocal('same', workspace, target, 'human', { ...input, input: { ...input.input, body: '새 입력' } }).record
   discardDiscussionLocal(old)
   expect(discussionLocals(workspace, target.artifact_id)).toEqual([newer])
   const external = { ...JSON.parse(localStorage.getItem(key(newer))!), revision: crypto.randomUUID(), value: { ...input, input: { ...input.input, body: '다른 탭' } } }
@@ -17,10 +17,10 @@ it('preserves newer in-page and other-tab input when an earlier request is ackno
   expect(discussionLocals(workspace, target.artifact_id)[0]?.value).toEqual(external.value)
 })
 it('retains a durable input if request storage exceeds quota, then clears it only after the matching acknowledgement', () => {
-  const saved = retainDiscussionLocal('quota', workspace, target, 'human', input)
+  const saved = retainDiscussionLocal('quota', workspace, target, 'human', input).record
   const storage = localStorage
   vi.stubGlobal('localStorage', { get length() { return storage.length }, key: storage.key.bind(storage), getItem: storage.getItem.bind(storage), removeItem: storage.removeItem.bind(storage), setItem() { throw new DOMException('full','QuotaExceededError') } })
-  const pending = retainDiscussionLocal('quota', workspace, target, 'human', { kind: 'request', request: { id: input.input.operationId, command: { kind: 'reply', thread_id: target.generation, body: '전송한 입력' } } })
+  const pending = retainDiscussionLocal('quota', workspace, target, 'human', { kind: 'request', request: { id: input.input.operationId, command: { kind: 'reply', thread_id: target.generation, body: '전송한 입력' } } }).record
   expect(pending.persisted).toBe(false)
   expect(pending.storedRevision).toBe(saved.revision)
   expect(discussionLocals(workspace, target.artifact_id)).toEqual([pending])
@@ -29,7 +29,7 @@ it('retains a durable input if request storage exceeds quota, then clears it onl
   expect(localStorage.getItem(key(saved))).toBeNull()
 })
 it('preserves another tab write interleaved with deletion itself, without depending on a localStorage lock', () => {
-  const old=retainDiscussionLocal('interleaved',workspace,target,'human',input)
+  const old=retainDiscussionLocal('interleaved',workspace,target,'human',input).record
   const storage=localStorage, remove=storage.removeItem.bind(storage)
   const external={...JSON.parse(storage.getItem(key(old))!),revision:crypto.randomUUID(),value:{...input,input:{...input.input,body:'동시에 쓴 새 입력'}}}
   vi.stubGlobal('localStorage',{get length(){return storage.length},key:storage.key.bind(storage),getItem:storage.getItem.bind(storage),setItem:storage.setItem.bind(storage),removeItem(storageKey:string){
@@ -42,21 +42,33 @@ it('preserves another tab write interleaved with deletion itself, without depend
   expect(discussionLocals(workspace,target.artifact_id)).toHaveLength(1)
 })
 it('can discard a separate old immutable copy while preserving newer memory and its quota fallback', () => {
-  const old=retainDiscussionLocal('discard-old',workspace,target,'human',input)
+  const old=retainDiscussionLocal('discard-old',workspace,target,'human',input).record
   const storage=localStorage
   const external={...JSON.parse(storage.getItem(key(old))!),revision:crypto.randomUUID()}
   storage.setItem(key(external),JSON.stringify(external))
   const copy=discussionLocals(workspace,target.artifact_id).find(record=>record.revision===external.revision)!
   vi.stubGlobal('localStorage',{get length(){return storage.length},key:storage.key.bind(storage),getItem:storage.getItem.bind(storage),removeItem:storage.removeItem.bind(storage),setItem(){throw new DOMException('full','QuotaExceededError')}})
-  const newer=retainDiscussionLocal(old.id,workspace,target,'human',{...input,input:{...input.input,body:'메모리의 새 입력'}})
-  discardDiscussionLocal(copy);discardDiscussionLocal(old)
+  const newer=retainDiscussionLocal(old.id,workspace,target,'human',{...input,input:{...input.input,body:'메모리의 새 입력'}}).record
+  expect(discardDiscussionLocal(copy)).toEqual({kind:'discarded'})
+  expect(discardDiscussionLocal(old)).toEqual({kind:'needs_reread'})
   expect(storage.getItem(key(copy))).toBeNull()
   expect(storage.getItem(key(old))).not.toBeNull()
   expect(discussionLocals(workspace,target.artifact_id)).toEqual([newer])
 })
+it('reports failed cleanup while leaving its durable copy available for recovery', () => {
+  const record=retainDiscussionLocal('failed-discard',workspace,target,'human',input).record
+  const storage=localStorage, bytes=storage.getItem(key(record))
+  vi.stubGlobal('localStorage',{removeItem(){throw new Error('cleanup failed')}})
+  expect(discardDiscussionLocal(record)).toEqual({kind:'needs_reread'})
+  vi.unstubAllGlobals()
+  expect(storage.getItem(key(record))).toBe(bytes)
+  expect(discussionLocals(workspace,target.artifact_id)).toEqual([record])
+  expect(discardDiscussionLocal(record)).toEqual({kind:'discarded'})
+  expect(storage.getItem(key(record))).toBeNull()
+})
 it('offers other generations separately while isolating canonical workspace roots', () => {
-  const original = retainDiscussionLocal('scope', workspace, target, 'human', input)
-  const older = retainDiscussionLocal('generation', workspace, { ...target, generation: '019f0000-0000-7000-8000-000000000001' }, 'human', input)
+  const original = retainDiscussionLocal('scope', workspace, target, 'human', input).record
+  const older = retainDiscussionLocal('generation', workspace, { ...target, generation: '019f0000-0000-7000-8000-000000000001' }, 'human', input).record
   expect(discussionLocals({ ...workspace, mascRoot: '/other' }, target.artifact_id)).toEqual([])
   expect(discussionLocals(workspace, target.artifact_id)).toEqual([original, older])
 })

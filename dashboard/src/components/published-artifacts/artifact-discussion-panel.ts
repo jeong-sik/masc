@@ -5,7 +5,7 @@ import { decodeHTML } from 'entities'
 import { artifactDiscussionRequest, matchArtifactDiscussionReceipt, sendArtifactDiscussion, type ArtifactDiscussionCommand, type ArtifactDiscussionRequest, type ArtifactThread } from '../../api/artifact-discussion'
 import { fetchArtifactDraft } from '../../api/artifact-drafts'
 import { sameDraftTarget } from '../../api/artifact-draft-live'
-import { discussionLocals, discardDiscussionLocal, retainDiscussionLocal, type DiscussionInput, type DiscussionLocalRecord } from '../../lib/artifact-discussion-local'
+import { discussionLocals, discardDiscussionLocal, retainDiscussionLocal, type DiscussionInput, type DiscussionLocalRecord, type DiscussionLocalRetention } from '../../lib/artifact-discussion-local'
 import { draftBytes, type ArtifactLiveSession, type ArtifactLiveState } from '../../lib/artifact-live-session'
 import { escapeArtifactHtmlText } from '../../lib/artifact-html-text'
 import { resolveSharedSelection, restoreSharedDocument, type SharedSelection } from '../../lib/artifact-shared-document'
@@ -43,20 +43,33 @@ export function ArtifactDiscussionPanel({ session, state, onPending, onReveal }:
   const tell = (text: string, error = false) => { if (visible()) setNotice({ text, error }) }
   const reportPending = () => onPending(Boolean(composerRef.current && meaningful(composerRef.current.input))
     || busyRef.current.size > 0 || recordsRef.current.length > 0)
-  const refresh = () => {
-    const current = discussionLocals(session.workspace, target.artifact_id)
+  const showRecords = (current: DiscussionLocalRecord[]) => {
     recordsRef.current = current; reportPending()
     if (visible()) setRecords(current)
   }
+  const refresh = () => showRecords(discussionLocals(session.workspace, target.artifact_id))
   const updateComposer = (next: Composer | null) => { composerRef.current = next; reportPending(); if (visible()) setComposer(next) }
   useLayoutEffect(() => { reportPending() }, [])
-  const discard = (copies: readonly DiscussionLocalRecord[]) => { copies.forEach(discardDiscussionLocal); refresh() }
+  const discardCopies = (copies: readonly DiscussionLocalRecord[]) => copies.filter(record => discardDiscussionLocal(record).kind === 'needs_reread')
+  const discard = (copies: readonly DiscussionLocalRecord[]) => { discardCopies(copies); refresh() }
   const preserve = (next: Composer) => {
+    const recovering = next.recoveredFrom.length !== 0
+    let retained: DiscussionLocalRetention | null = null
     if (meaningful(next.input)) {
-      next = { ...next, record: retainDiscussionLocal(next.id, session.workspace, target, next.actor, { kind: 'input', input: next.input }) }
-      if (next.record?.persisted) next.recoveredFrom.forEach(discardDiscussionLocal)
-    } else { discard([...(next.record ? [next.record] : []), ...next.recoveredFrom]); next = { ...next, record: null } }
-    updateComposer(next); refresh()
+      retained = retainDiscussionLocal(next.id, session.workspace, target, next.actor, { kind: 'input', input: next.input })
+      next = { ...next, record: retained.record }
+      if (next.record?.persisted) next = { ...next, recoveredFrom: discardCopies(next.recoveredFrom) }
+    } else {
+      if (next.record) discardDiscussionLocal(next.record)
+      next = { ...next, record: null, recoveredFrom: discardCopies(next.recoveredFrom) }
+    }
+    updateComposer(next)
+    if (retained?.kind === 'stored' && !recovering) {
+      const { record: stored, removedRevisions } = retained
+      const removed = new Set(removedRevisions)
+      showRecords([...recordsRef.current.filter(record =>
+        record.id !== stored.id || !removed.has(record.revision)), stored])
+    } else refresh()
   }
   const edit = (change: (input: DiscussionInput) => DiscussionInput) => {
     const current = composerRef.current
@@ -125,14 +138,14 @@ export function ArtifactDiscussionPanel({ session, state, onPending, onReveal }:
     if (!current || !canUseConnection() || actor !== current.actor || !current.input.body.trim()) return
     const request = { id: current.input.operationId, command: commandOf(current.input) }
     if (session.snapshot.pending && request.command.kind === 'comment') { tell('공유 원고가 저장된 뒤 보내 주세요.',true); return }
-    const record = retainDiscussionLocal(current.id,session.workspace,target,current.actor,{kind:'request',request})
+    const record = retainDiscussionLocal(current.id,session.workspace,target,current.actor,{kind:'request',request}).record
     transferred.current.set(record.id,current.recoveredFrom)
     if (record.persisted) current.recoveredFrom.forEach(discardDiscussionLocal)
     updateComposer(null); refresh(); void run(record,true)
   }
   const act = (command: ArtifactDiscussionCommand) => {
     if (!canUseConnection() || !actor) return
-    const record = retainDiscussionLocal(crypto.randomUUID(),session.workspace,target,actor,{kind:'request',request:artifactDiscussionRequest(command)})
+    const record = retainDiscussionLocal(crypto.randomUUID(),session.workspace,target,actor,{kind:'request',request:artifactDiscussionRequest(command)}).record
     refresh(); void run(record,true)
   }
   const recover = async (record: DiscussionLocalRecord) => {

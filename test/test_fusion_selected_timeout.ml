@@ -225,7 +225,7 @@ let test_selected_timeout ~client ~selected_timeout ~reload ~override_s ~expect_
   (match result with
    | Error failure when expect_timeout ->
      (match Masc.Fusion_official_client.panel_failure ~runtime_id:"native.fixture" failure with
-      | Masc.Fusion_types.Timeout -> ()
+      | Fusion_types.Timeout -> ()
       | _ -> fail (Masc.Fusion_official_client.failure_detail ~runtime_id:"native.fixture" failure))
    | Ok response when not expect_timeout ->
      check string "native terminal marker" "FUSION_SELECTED_TIMEOUT" response.text

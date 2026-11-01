@@ -1,0 +1,50 @@
+module B = Baseline_input
+module C = Candidate_input
+
+type action = Insert of string | Append of string | Append_separated of string * string | Left | Right | Backspace | Delete_word | Clear | Invalidate
+let corpus = [| ""; "a"; "Z"; " "; "\n"; "\t"; "\r"; "\r\n"; "a\nb";
+  "가"; "한글"; "e\xcc\x81"; "\xcc\x81"; "🙂"; "👩‍💻"; "\xe2\x80\x8d";
+  "🇰🇷"; "👍🏽"; "\x1b[31m"; "\x1b[0m"; "\x00"; "\x7f"; "\xff"; "\xc0\x80" |]
+let apply_b x = function
+  | Insert s -> B.insert x s | Append s -> B.append x s
+  | Append_separated (separator,s) -> if B.length x > 0 then B.append x separator; B.append x s
+  | Left -> B.move_left x
+  | Right -> B.move_right x | Backspace -> B.backspace x | Delete_word -> B.delete_word x
+  | Clear -> B.clear x | Invalidate -> B.invalidate_revision x
+let apply_c x = function
+  | Insert s -> C.insert x s | Append s -> C.append x s
+  | Append_separated (separator,s) -> C.append_separated x ~separator s
+  | Left -> C.move_left x
+  | Right -> C.move_right x | Backspace -> C.backspace x | Delete_word -> C.delete_word x
+  | Clear -> C.clear x | Invalidate -> C.invalidate_revision x
+let check sequence step x y revision_same =
+  if B.contents x <> C.contents y || B.cursor x <> C.cursor y
+     || B.length x <> C.length y || B.before_cursor x <> C.before_cursor y
+     || B.can_leave_left x <> C.can_leave_left y || not revision_same then
+    failwith (Printf.sprintf "diverged in sequence %d step %d: baseline=%S/%d candidate=%S/%d"
+      sequence step (B.contents x) (B.cursor x) (C.contents y) (C.cursor y))
+let () =
+  let allowed = Array.init 97 (fun i -> if i < 95 then Char.chr (i + 32) else if i = 95 then '\n' else '\t') in
+  Array.iter (fun a -> Array.iter (fun b ->
+    let s = String.init 2 (function 0 -> a | _ -> b) in
+    if Masc_tui_message_layout.input_boundaries s <> [0;1;2] then
+      failwith (Printf.sprintf "not one-byte boundaries: %S" s)) allowed) allowed;
+  let state = Random.State.make [|0x6d617363; 20261030|] in
+  let actions = ref 0 in
+  for sequence = 0 to 4999 do
+    let old = B.create () and new_ = C.create () in
+    for step = 0 to 79 do
+      let text () = corpus.(Random.State.int state (Array.length corpus)) in
+      let action = match Random.State.int state 14 with
+        | 0 | 1 | 2 -> Insert (text ()) | 3 | 4 -> Append (text ())
+        | 5 -> Left | 6 -> Right | 7 | 8 -> Backspace | 9 -> Delete_word
+        | 10 -> Clear | 11 | 12 -> Append_separated (text (), text ()) | _ -> Invalidate in
+      let prior_b = B.revision old and prior_c = C.revision new_ in
+      apply_b old action;
+      apply_c new_ action;
+      check sequence step old new_ (B.has_revision old prior_b = C.has_revision new_ prior_c);
+      incr actions
+    done;
+    Masc_tui_message_layout.begin_frame ()
+  done;
+  Printf.printf "ASCII pairs=%d; mixed action comparisons=%d; equal\n%!" (Array.length allowed * Array.length allowed) !actions

@@ -1,0 +1,30 @@
+module Old = struct
+  type state = {msg_input : Baseline_input.t}
+  let append_voice state text =
+        if Baseline_input.length state.msg_input > 0
+        then Baseline_input.append state.msg_input " ";
+        Baseline_input.append state.msg_input text;
+    ()
+end
+module New = struct
+  type state = {msg_input : Candidate_input.t}
+  let append_voice state text =
+        Candidate_input.append_separated state.msg_input ~separator:" " text;
+    ()
+end
+let () =
+  let cases = ref 0 in
+  List.iter (fun initial -> List.iter (fun text ->
+    let old=Baseline_input.create () and new_=Candidate_input.create () in
+    Baseline_input.insert old initial; Candidate_input.insert new_ initial;
+    Baseline_input.move_left old; Candidate_input.move_left new_;
+    let before_old=Baseline_input.revision old and before_new=Candidate_input.revision new_ in
+    Old.append_voice {Old.msg_input=old} text;
+    New.append_voice {New.msg_input=new_} text;
+    assert (Baseline_input.contents old = Candidate_input.contents new_);
+    assert (Baseline_input.cursor old = Candidate_input.cursor new_);
+    assert (not (Baseline_input.has_revision old before_old));
+    assert (not (Candidate_input.has_revision new_ before_new));
+    incr cases) ["";"abc";"가🙂";"\000\255";"\n"])
+    ["";"a";"abc";"가🙂";"\x1b[31m";"\xff"];
+  Printf.printf "source-extracted voice append: %d cases match\n%!" !cases

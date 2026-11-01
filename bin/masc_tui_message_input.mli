@@ -22,6 +22,9 @@ val insert_char : t -> char -> unit
 val append : t -> string -> unit
 (** Add text at the end of the whole draft and leave the cursor there.
     Voice transcripts keep this append contract even after cursor movement. *)
+val append_separated : t -> separator:string -> string -> unit
+(** Append [separator] when the draft is nonempty, then append the text, as
+    one edit. An empty text still receives the separator for a nonempty draft. *)
 val move_left : t -> unit
 val move_right : t -> unit
 val backspace : t -> unit

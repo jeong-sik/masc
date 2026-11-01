@@ -1,0 +1,14 @@
+let () =
+  let old = Baseline_input.create () and new_ = Candidate_input.create () in
+  Baseline_input.insert old "abc";
+  Candidate_input.insert new_ "abc";
+  let old_revision = Baseline_input.revision old and new_revision = Candidate_input.revision new_ in
+  Masc_tui_message_layout.raise_on_boundaries := true;
+  let failed f = try f (); false with Failure s -> String.equal s "injected segmentation failure" in
+  assert (failed (fun () -> Baseline_input.insert old "🙂"));
+  assert (failed (fun () -> Candidate_input.insert new_ "🙂"));
+  assert (not (Baseline_input.has_revision old old_revision));
+  assert (not (Candidate_input.has_revision new_ new_revision));
+  assert (Baseline_input.contents old = "abc🙂" && Baseline_input.cursor old = 3);
+  assert (Candidate_input.contents new_ = "abc" && Candidate_input.cursor new_ = 3);
+  print_endline "injected segmentation failure: baseline published partial text; candidate retained original text and invalidated the revision"

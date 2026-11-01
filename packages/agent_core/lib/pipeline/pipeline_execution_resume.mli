@@ -34,6 +34,10 @@ val frontier_ordinal : frontier -> int
     OnStop through the same output stage as a fresh response. The hook may
     repeat if interrupted before provider close; a successfully closed provider
     instead returns through [terminal] without repeating output.
+    The persisted stop reason decides tool versus terminal recovery at both
+    boundaries. Terminal reasons, including [MaxTokens], preserve any admitted
+    ToolUse content without executing it. Unknown and unmatched stops remain
+    rejected, even when the restored message contains tool blocks.
     Any persisted invocation, content mismatch or stale terminal counter is
     rejected. Fails closed on inconsistent restored topology. Terminal validation
     materializes restored media; unavailable or invalid bytes fail. It compares

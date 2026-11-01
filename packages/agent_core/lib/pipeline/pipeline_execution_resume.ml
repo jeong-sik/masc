@@ -105,6 +105,21 @@ let settled_tool_authority = function
   | invocations -> Durable_invocations invocations
 ;;
 
+type response_kind = Tool_response | Terminal_response
+
+let response_kind (response : Types.api_response) =
+  match response.stop_reason with
+  | Types.StopToolUse -> Ok Tool_response
+  | Types.UnmatchedToolCalls | Types.Unknown _ ->
+    Error
+      (Error.Agent
+         (Error.UnrecognizedStopReason
+            { reason = Types.stop_reason_to_string response.stop_reason }))
+  | Types.EndTurn | Types.MaxTokens | Types.StopSequence | Types.Refusal | Types.ContentFilter
+  | Types.RepetitionTruncation | Types.PauseTurn | Types.Compaction
+  | Types.ContextWindowExceeded -> Ok Terminal_response
+;;
+
 let last_assistant_message messages =
   List.fold_left
     (fun acc (message : Types.message) ->
@@ -123,33 +138,10 @@ let last_assistant_message messages =
    a terminal turn (final assistant response, no pending tool calls) completes the
    run. A tool turn whose recovered results do not match its restored ToolUse
    checkpoint stays an error (fail-closed on inconsistent topology). *)
-let classify_settled agent =
-  match last_tool_turn agent.Agent_types.state.messages with
-  | Some (tool_blocks, expected_ids, messages_after) ->
-    let* tool_blocks = wire_blocks agent tool_blocks in
-    let* tool_blocks =
-      match Nonempty.of_list tool_blocks with
-      | Some tool_blocks -> Ok tool_blocks
-      | None ->
-        Error
-          (Error.Internal
-             "durable execution resume settled tool turn restored no ToolUse blocks")
-    in
-    (match recovered_tool_results messages_after with
-     | Some tool_results when tool_result_ids tool_results = expected_ids ->
-       let+ tool_results = wire_blocks agent tool_results in
-       Replay_tools_settled { tool_uses = tool_blocks; tool_results }
-     | Some _ ->
-       Error
-         (Error.Internal
-            "durable execution resume settled turn ToolResult identities differ from the \
-             restored ToolUse checkpoint")
-     | None ->
-       Error
-         (Error.Internal
-            "durable execution resume settled tool turn is missing its recovered \
-             ToolResults"))
-  | None ->
+let classify_settled agent ~(response : Types.api_response) =
+  let* kind = response_kind response in
+  match kind with
+  | Terminal_response ->
     (match last_assistant_message agent.Agent_types.state.messages with
      | Some message -> Ok (Replay_terminal message)
      | None ->
@@ -157,6 +149,37 @@ let classify_settled agent =
          (Error.Internal
             "durable execution resume settled terminal turn has no restored assistant \
              message"))
+  | Tool_response ->
+    (match last_tool_turn agent.Agent_types.state.messages with
+     | None ->
+       Error
+         (Error.Agent
+            (Error.UnrecognizedStopReason
+               { reason = "StopToolUse resume checkpoint restored no ToolUse message" }))
+     | Some (tool_blocks, expected_ids, messages_after) ->
+       let* tool_blocks = wire_blocks agent tool_blocks in
+       let* tool_blocks =
+         match Nonempty.of_list tool_blocks with
+         | Some tool_blocks -> Ok tool_blocks
+         | None ->
+           Error
+             (Error.Internal
+                "durable execution resume settled tool turn restored no ToolUse blocks")
+       in
+       (match recovered_tool_results messages_after with
+        | Some tool_results when tool_result_ids tool_results = expected_ids ->
+          let+ tool_results = wire_blocks agent tool_results in
+          Replay_tools_settled { tool_uses = tool_blocks; tool_results }
+        | Some _ ->
+          Error
+            (Error.Internal
+               "durable execution resume settled turn ToolResult identities differ from the \
+                restored ToolUse checkpoint")
+        | None ->
+          Error
+            (Error.Internal
+               "durable execution resume settled tool turn is missing its recovered \
+                ToolResults")))
 ;;
 
 let validate_collected_counter agent ~turn =
@@ -207,10 +230,10 @@ let validate_terminal_checkpoint
    Failed. [tools_settled] is the completed-tool-turn outcome; [terminal] wraps
    the reconstructed final assistant response. *)
 let run_settled agent boundary ~turn ~all_pre_tool_use_blocked ~tools_settled ~terminal =
-  let* replay = classify_settled agent in
+  let* response = Pipeline_execution_scope.settled_response boundary in
+  let* replay = classify_settled agent ~response in
   match replay with
   | Replay_tools_settled { tool_uses; tool_results } ->
-    let* response = Pipeline_execution_scope.settled_response boundary in
     let* () =
       Pipeline_terminal_tool.validate_response_tool_uses
         ~response
@@ -226,7 +249,6 @@ let run_settled agent boundary ~turn ~all_pre_tool_use_blocked ~tools_settled ~t
     let+ () = Pipeline_execution_scope.finalize_settled boundary in
     outcome
   | Replay_terminal message ->
-    let* response = Pipeline_execution_scope.settled_response boundary in
     let* invocations = Pipeline_execution_scope.settled_invocations boundary in
     let* () = validate_terminal_checkpoint agent ~response message invocations in
     let outcome = terminal response in
@@ -246,13 +268,9 @@ let run
   =
   let outcome =
     let* response = Pipeline_execution_scope.provider_response execution in
-    (* Branch on the persisted stop reason — the same authority
-       [Pipeline.stage_output] applies on the fresh path. The restored message
-       shape alone is not authoritative: an injected response can carry
-       ToolUse blocks with a terminal reason (fresh path: Complete) or an
-       unmatched shape the fresh path rejects. MaxTokens is the one terminal
-       reason whose fresh path still collects admitted ToolUse, so a restored
-       ToolUse checkpoint under MaxTokens resumes the tool turn. *)
+    let* kind = response_kind response in
+    (* The persisted reason owns dispatch, as on the fresh output path.
+       ToolUse content in a terminal response does not authorize effects. *)
     let restore_terminal () =
       match last_assistant_message agent.Agent_types.state.messages with
       | None ->
@@ -356,13 +374,9 @@ let run
               "durable execution resume ToolResult identities differ from the restored \
                ToolUse checkpoint"))
     in
-    match response.Types.stop_reason with
-    | Types.UnmatchedToolCalls | Types.Unknown _ ->
-      Error
-        (Error.Agent
-           (Error.UnrecognizedStopReason
-              { reason = Types.stop_reason_to_string response.Types.stop_reason }))
-    | Types.StopToolUse ->
+    match kind with
+    | Terminal_response -> restore_terminal ()
+    | Tool_response ->
       (match last_tool_turn agent.Agent_types.state.messages with
        | Some restored -> restore_tool_turn restored
        | None ->
@@ -371,14 +385,6 @@ let run
               (Error.UnrecognizedStopReason
                  { reason =
                      "StopToolUse resume checkpoint restored no ToolUse message" })))
-    | Types.MaxTokens ->
-      (match last_tool_turn agent.Agent_types.state.messages with
-       | Some restored -> restore_tool_turn restored
-       | None -> restore_terminal ())
-    | Types.EndTurn | Types.StopSequence | Types.Refusal | Types.ContentFilter
-    | Types.RepetitionTruncation | Types.PauseTurn | Types.Compaction
-    | Types.ContextWindowExceeded ->
-      restore_terminal ()
   in
   match outcome with
   | Error _ as error -> error

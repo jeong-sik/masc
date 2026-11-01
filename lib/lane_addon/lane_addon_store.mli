@@ -185,14 +185,20 @@ val settle_tool_request : t -> scope:string -> date:string -> request_id:string 
     archive under [date], syncing both directories after each rename. The
     record leaves first, the reverse of publication, so an interrupted settle
     leaves a body no record names, never a record without its body. A file
-    already in the archive counts as moved, so settling again completes the
+    already in the archive counts as moved only after reconfirming both
+    directories' synchronization, so settling again completes an interrupted
     move; a file in neither place is an error. Only single-link regular files
     this process owns are moved. Same scope serializer as publication. The
     [check_record] checks the current record under the same scope serializer
     as the move; [false] moves nothing. The caller checks that no other record
     names the body. The store barrier is acquired before the scope serializer. *)
 val tool_request_settled : t -> scope:string -> date:string -> request_id:string -> (bool, string) result
-(** Whether the archive holds the record of [request_id] under [date]. *)
+(** Whether the archive holds the owned record of [request_id] under [date].
+    A positive observation synchronizes the archive directory and the live
+    record directory, or its nearest existing ancestor if that directory is
+    gone. A failed synchronization returns an error, so recovery cannot treat
+    an interrupted move as confirmed. This observes the record only; it does
+    not move or require the body's archival completion. *)
 val tool_request_owner_inventory : t -> scope:string -> ((string * Yojson.Safe.t) list, string) result
 (** Complete sorted published [.json] records in one scope, with filenames for
     the consumer's exact key/schema validation. Missing descendants under an

@@ -2356,6 +2356,7 @@ let test_blank_completion_rejected_without_losing_session () =
 let test_selected_claude_inference_survives_catalog_reload
     ?(remove_runtime = false) ?hook_effort ?(delay_s = 0.)
     ?(selected_timeout = None) ?(replacement_timeout = None)
+    ?(http_accepted = [Llm_provider.Reasoning_effort.None_; Minimal; Low; Medium; High; XHigh; Max; Ultra])
     ~selected ~replacement ~expected_effort ~expected_thinking () =
   let base_path = temp_workspace () in
   let previous_catalog = Llm_provider.Model_catalog.global () in
@@ -2364,19 +2365,19 @@ let test_selected_claude_inference_survives_catalog_reload
      | Some catalog -> Llm_provider.Model_catalog.set_global catalog);
     cleanup_tree base_path) @@ fun () ->
   let marker = Filename.concat base_path "selected-argv.jsonl" in
-  let install_unrestrictive_http_catalog () =
-    let source = {|[[models]]
+  let install_http_catalog () =
+    let source = Printf.sprintf {|[[models]]
 model_id = "claude-fixture"
 supports_reasoning = true
-accepted_reasoning_efforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"]
-|} in
+accepted_reasoning_efforts = [%s]
+|} (String.concat ", " (List.map (fun effort ->
+        Printf.sprintf "%S" (Llm_provider.Reasoning_effort.to_string effort)) http_accepted)) in
     let catalog = Llm_provider.Model_catalog.of_toml_string
         ~source:"Claude selected-declaration fixture" source |> require_ok Fun.id in
     Llm_provider.Model_catalog.set_global catalog;
-    let expected = Some [Llm_provider.Reasoning_effort.None_; Minimal; Low; Medium; High; XHigh; Max; Ultra] in
     match Llm_provider.Capabilities.for_model_id "claude-fixture" with
-    | Some caps -> check bool "HTTP catalog does not choose the tier in this fixture" true
-        (caps.accepted_reasoning_efforts=expected)
+    | Some caps -> check bool "the controlled HTTP ladder is actually loaded" true
+        (caps.accepted_reasoning_efforts=Some http_accepted)
     | None -> fail "controlled HTTP capability row was not loaded" in
   with_fixture ~argv_marker:marker
     [Pause delay_s; Emit (assistant ~turn_id:"selected" "CLAUDE_SELECTED_INTENT");
@@ -2399,7 +2400,7 @@ accepted_reasoning_efforts = ["none", "minimal", "low", "medium", "high", "xhigh
         check (option (float 0.000001)) "the live idle declaration really changed"
           (if remove_runtime then None else replacement_timeout)
           (Runtime.turn_timeout_s_of_runtime_id "claude.claude");
-        install_unrestrictive_http_catalog () in
+        install_http_catalog () in
       let hooks = Option.map (fun effort ->
         {Agent_core.Hooks.empty with before_turn_params=Some (function
            | Agent_core.Hooks.BeforeTurnParams {current_params; _} ->
@@ -6556,7 +6557,29 @@ let () =
   Prompt_registry.set_markdown_dir (Masc_test_deps.source_path "config/prompts");
   run
     "keeper_claude_code_runtime"
-    [ ( "selected inference",[
+    [ ( "native effort authority",
+        List.map (fun (name, selected, expected_effort, expected_thinking) ->
+          test_case name `Quick
+            (test_selected_claude_inference_survives_catalog_reload ~http_accepted:[Low]
+               ~selected ~replacement:selected ~expected_effort ~expected_thinking))
+          ["Keeper omission ignores a colliding HTTP ladder", None, None, None;
+           "Keeper explicit none ignores a colliding HTTP ladder", Some None_, None, Some "disabled";
+           "Keeper minimal keeps native low admission", Some Minimal, Some "low", None;
+           "Keeper low ignores a colliding HTTP ladder", Some Low, Some "low", None;
+           "Keeper medium ignores a colliding HTTP ladder", Some Medium, Some "medium", None;
+           "Keeper high ignores a colliding HTTP ladder", Some High, Some "high", None;
+           "Keeper xhigh ignores a colliding HTTP ladder", Some XHigh, Some "xhigh", None;
+           "Keeper max ignores a colliding HTTP ladder", Some Max, Some "max", None;
+           "Keeper ultra keeps native max admission", Some Ultra, Some "max", None]
+        @ [test_case "Keeper hook override ignores a colliding HTTP ladder" `Quick
+             (test_selected_claude_inference_survives_catalog_reload ~http_accepted:[Low]
+                ~hook_effort:(Some Ultra) ~selected:(Some High) ~replacement:(Some High)
+                ~expected_effort:(Some "max") ~expected_thinking:None);
+           test_case "Keeper hook clear leaves native effort absent" `Quick
+             (test_selected_claude_inference_survives_catalog_reload ~http_accepted:[Low]
+                ~hook_effort:None ~selected:(Some High) ~replacement:(Some High)
+                ~expected_effort:None ~expected_thinking:None)])
+    ; ( "selected inference",[
           test_case "selected high survives a replacement low" `Quick
             (test_selected_claude_inference_survives_catalog_reload
                ~selected:(Some High) ~replacement:(Some Low) ~expected_effort:(Some "high") ~expected_thinking:None);

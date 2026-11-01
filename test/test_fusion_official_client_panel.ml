@@ -674,6 +674,81 @@ let in_eio_context f =
         f))
 ;;
 
+let claude_effort_panel_fixture = {|#!/usr/bin/env python3
+import json, sys
+from pathlib import Path
+args = sys.argv[1:]
+def emit(frame):
+    print(json.dumps(frame), flush=True)
+if "auth" in args and "status" in args:
+    emit({"loggedIn": True, "authMethod": "claude.ai", "apiProvider": "firstParty", "subscriptionType": "max"})
+    sys.exit(0)
+Path(sys.argv[0]).with_suffix(".argv.json").write_text(json.dumps(args))
+session = next(arg.split("=", 1)[1] for arg in args if arg.startswith("--session-id="))
+model = args[args.index("--model") + 1]
+request = json.loads(sys.stdin.readline())
+assert request["type"] == "control_request" and request["request"]["subtype"] == "initialize"
+emit({"type": "control_response", "response": {"subtype": "success", "request_id": request["request_id"], "response": {}}})
+assert json.loads(sys.stdin.readline())["type"] == "user"
+emit({"type": "system", "subtype": "init", "session_id": session})
+emit({"type": "assistant", "parent_tool_use_id": None, "session_id": session, "uuid": "authority-assistant", "message": {
+    "role": "assistant", "model": model, "content": [{"type": "text", "text": "CLAUDE_PANEL_AUTHORITY"}]}})
+emit({"type": "result", "subtype": "success", "is_error": False, "session_id": session,
+    "uuid": "authority-result", "result": "CLAUDE_PANEL_AUTHORITY", "api_error_status": None})
+for line in sys.stdin:
+    pass
+|}
+;;
+
+let test_claude_panel_effort_ignores_http_catalog requested expected_effort expected_thinking () =
+  let base_dir = Filename.temp_dir "claude-panel-effort-" "" |> Unix.realpath in
+  let snapshot = Runtime.For_testing.snapshot () in
+  let eio_state = Eio_context.snapshot_state () in
+  let catalog = Llm_provider.Model_catalog.global () in
+  Fun.protect ~finally:(fun () ->
+    Runtime.For_testing.restore snapshot;
+    Eio_context.restore_state eio_state;
+    (match catalog with None -> Llm_provider.Model_catalog.clear_global ()
+     | Some catalog -> Llm_provider.Model_catalog.set_global catalog);
+    Fs_compat.remove_tree base_dir) @@ fun () ->
+  let cli_path = Filename.concat base_dir "claude-effort-fixture" in
+  write_file ~path:cli_path ~perm:0o700 claude_effort_panel_fixture;
+  with_initialized_runtime ~claude_cli:cli_path (fun () ->
+    let selected = match Runtime.get_runtime_by_id official_client_runtime with
+      | Some runtime -> {runtime with Runtime_instance.model =
+          {runtime.model with reasoning_effort=requested}}
+      | None -> fail "Claude panel fixture must resolve" in
+    let source = {|[[models]]
+model_id = "claude-sonnet-5"
+supports_reasoning = true
+accepted_reasoning_efforts = ["low"]
+|} in
+    (match Llm_provider.Model_catalog.of_toml_string ~source:"Claude Fusion effort collision" source with
+     | Error detail -> fail detail
+     | Ok catalog -> Llm_provider.Model_catalog.set_global catalog);
+    (match Llm_provider.Capabilities.for_model_id "claude-sonnet-5" with
+     | Some caps -> check bool "the conflicting HTTP ladder is loaded" true
+         (caps.accepted_reasoning_efforts=Some [Llm_provider.Reasoning_effort.Low])
+     | None -> fail "colliding HTTP model row missing");
+    (match in_eio_context (fun () -> Masc.Fusion_official_client.run_with_images
+       ~images:[] ~base_dir ~runtime:selected ~system_prompt:"Reply with the fixture marker."
+       ~prompt:"Return the fixture marker." ()) with
+     | Ok response -> check string "the actual native panel turn completed"
+         "CLAUDE_PANEL_AUTHORITY" response.text
+     | Error failure -> fail (Masc.Fusion_official_client.failure_detail
+         ~runtime_id:official_client_runtime failure));
+    let argv = Yojson.Safe.from_file (cli_path ^ ".argv.json")
+      |> Yojson.Safe.Util.to_list |> List.map Yojson.Safe.Util.to_string in
+    let rec flag key = function
+      | name :: value :: _ when String.equal name key -> Some value
+      | _ :: rest -> flag key rest
+      | [] -> None in
+    check (option string) "Fusion carries the selected effort through native admission"
+      expected_effort (flag "--effort" argv);
+    check (option string) "Fusion distinguishes explicit disabled thinking from omission"
+      expected_thinking (flag "--thinking" argv))
+;;
+
 (* A host that records where it runs, reads the initialize request and exits
    without answering it, so the panelist's call returns an error. *)
 let muse_failing_host_script =
@@ -2058,7 +2133,20 @@ let test_sweep_retains_orphaned_antigravity_process_group () =
 let () =
   run
     "fusion official-client panel"
-    [ ( "MSP reasoning authority"
+    [ ( "Claude native effort authority",
+        List.map (fun (name, requested, expected_effort, expected_thinking) ->
+          test_case name `Quick
+            (test_claude_panel_effort_ignores_http_catalog requested expected_effort expected_thinking))
+          ["panel omission keeps native defaults", None, None, None;
+           "panel explicit none disables native thinking", Some Llm_provider.Reasoning_effort.None_, None, Some "disabled";
+           "panel minimal keeps native low admission", Some Minimal, Some "low", None;
+           "panel low ignores a colliding HTTP ladder", Some Low, Some "low", None;
+           "panel medium ignores a colliding HTTP ladder", Some Medium, Some "medium", None;
+           "panel high ignores a colliding HTTP ladder", Some High, Some "high", None;
+           "panel xhigh ignores a colliding HTTP ladder", Some XHigh, Some "xhigh", None;
+           "panel max ignores a colliding HTTP ladder", Some Max, Some "max", None;
+           "panel ultra keeps native max admission", Some Ultra, Some "max", None])
+    ; ( "MSP reasoning authority"
       , List.map (fun requested ->
           let label = match requested with
             | None -> "omission"

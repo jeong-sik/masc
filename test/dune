@@ -1528,6 +1528,14 @@
   masc.masc_eio_context
   eio_main))
 
+(rule
+ (alias runtest-test_fusion_claude_effort_authority)
+ (action (run %{exe:test_fusion_official_client_panel.exe} test "Claude native effort authority")))
+
+(rule
+ (alias runtest-test_claude_probe_effort_authority)
+ (action (run %{exe:test_runtime_verification.exe} test "Claude native effort authority")))
+
 ; RFC-0284 — Fusion deliberation OTel metrics: label wiring + counter emission.
 
 (test

@@ -632,7 +632,10 @@ let with_host_prompt_io f =
           Prompt_names.keeper_context_workspace_memory_host_selected).file_path with
         | Some path -> path
         | None -> Alcotest.fail "the pinned host prompt has no source path" in
-      let write () = Out_channel.with_open_text path (fun out -> output_string out "{{payload}}") in
+      let write () =
+        Out_channel.with_open_text path (fun out ->
+          output_string out
+            "### context.workspace_memory.host_selected (vars: payload)\n{{payload}}") in
       let refuse () =
         if Sys.file_exists path then Sys.remove path;
         Unix.bind socket (Unix.ADDR_UNIX (Filename.concat dir "socket"));

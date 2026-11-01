@@ -96,10 +96,6 @@ let render_payload payload =
   | Sys_error detail ->
     Log.Keeper.warn "workspace memory host recall prompt unavailable: %s" detail;
     unavailable
-  | Unix.Unix_error (code, operation, path) ->
-    Log.Keeper.warn "workspace memory host recall prompt unavailable: %s(%s): %s"
-      operation path (Unix.error_message code);
-    unavailable
 
 (* A rendered projection belongs to its payload. Each observation retains
    the exact pair it checked while validation and persistence can yield. *)

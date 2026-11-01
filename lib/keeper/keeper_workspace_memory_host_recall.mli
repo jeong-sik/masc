@@ -13,7 +13,7 @@ val render_prepared : prepared -> string
     A change detected before publishing returns an explicit message without
     selected records. This does not bind the result to later dispatch.
 
-    A [Sys_error] or [Unix.Unix_error] while the prompt registry renders this
+    A [Sys_error] while the prompt registry renders this
     projection returns the existing unknown-availability message and logs the
     I/O detail. Other exceptions, including cancellation, propagate. This
     rendering boundary does not change source validation, retention or the

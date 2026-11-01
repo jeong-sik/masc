@@ -315,7 +315,7 @@ let test_confirmed_empty_context_releases_current_pin () =
     if remove_owner then Sys.remove (Context.path ~keepers_dir ~keeper_id:"keeper")
     else ignore (ok (Context.commit ~observed_sources:[] ~keepers_dir ~keeper_id:"keeper"
       ~expected_version:(Some (Context.version first)) ~sources:[] []));
-    ignore (Recall.render ~base_path ~keepers_dir ~keeper_name:"keeper" ());
+    ignore (render ~base_path ~keepers_dir ~keeper_name:"keeper" ());
     check bool "confirmed empty authority retires the current publication" true
       (Yojson.Safe.from_file (librarian_pin ~base_path) = `Null);
     sweep_blobs ~base_path;
@@ -333,12 +333,12 @@ let test_unavailable_context_preserves_current_pin () =
   let pin = librarian_pin ~base_path in
   let published = Fs_compat.load_file pin in
   let reference = artifact_of_index ~keepers_dir in
-  ignore (Recall.render ~artifact_reader_available:false
+  ignore (render ~artifact_reader_available:false
       ~base_path ~keepers_dir ~keeper_name:"keeper" ());
   check string "unavailable reader preserves the publication" published
     (Fs_compat.load_file pin);
   ok (Fs_compat.save_file_atomic (Context.path ~keepers_dir ~keeper_id:"keeper") "{");
-  ignore (Recall.render ~base_path ~keepers_dir ~keeper_name:"keeper" ());
+  ignore (render ~base_path ~keepers_dir ~keeper_name:"keeper" ());
   check string "unreadable authority preserves the publication" published
     (Fs_compat.load_file pin);
   expire_recall_history ~base_path;
@@ -362,7 +362,7 @@ let test_late_empty_read_preserves_same_artifact_publication () =
       ok (Recall.publish ~base_path ~keepers_dir ~keeper_name:"keeper" reopened);
       check string "new publication reuses the same artifact bytes" reference.sha256
         (artifact_of_index ~keepers_dir).sha256;
-      newer := Fs_compat.load_file pin) ());
+      newer := Fs_compat.load_file pin) () |> ok);
   check bool "same artifact publication has a fresh generation" true
     (original <> !newer);
   check string "late empty read cannot retire the newer publication" !newer
@@ -380,7 +380,7 @@ let test_invalid_pin_cannot_authorize_retirement () =
     ~expected_version:(Some (Context.version first)) ~sources:[] []));
   let pin = librarian_pin ~base_path in
   ok (Fs_compat.save_file_atomic pin "{");
-  ignore (Recall.render ~base_path ~keepers_dir ~keeper_name:"keeper" ());
+  ignore (render ~base_path ~keepers_dir ~keeper_name:"keeper" ());
   check string "unreadable publication grants no retirement authority" "{"
     (Fs_compat.load_file pin)
 

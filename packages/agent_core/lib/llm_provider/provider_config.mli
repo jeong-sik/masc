@@ -325,7 +325,7 @@ val reasoning_effort_to_string : reasoning_effort -> string
 val reasoning_effort_of_string : string -> reasoning_effort option
 
 (** Resolve the [thinking.clear_thinking] member: the explicit field, else the
-    inverse of [preserve_thinking], else the wire default [true]. SSOT for both
+    inverse of [preserve_thinking], else the client default [true]. SSOT for both
     request builders. *)
 
 (** [true] iff the request explicitly enables Preserved Thinking: thinking
@@ -339,13 +339,15 @@ val preserved_thinking_active
   -> preserve_thinking:bool option
   -> bool
 
-(** Top-level [thinking.clear_thinking] request-field resolver, gated purely on
-    the declared preserve wire. Rows with any other preserve wire omit the
-    field. An entirely omitted thinking request remains omitted; an explicit
-    preserve/clear request uses the wire's default enabled toggle when no
-    toggle is specified. No provider identity, endpoint, or model id participates. *)
+(** Top-level [thinking.clear_thinking] request-field resolver, gated on the
+    declared preserve wire. Reasoning rows explicitly send the client's clear
+    default even when all controls are omitted, so provider defaults cannot
+    disagree with replay selection. Non-reasoning rows omit an all-omitted
+    request. An omitted toggle leaves [thinking.type] absent. Other preserve
+    wires omit the field. No provider identity, endpoint, or model id participates. *)
 val clear_thinking_object_request_field
   :  preserve_thinking_control_format:Capabilities.preserve_thinking_control_format
+  -> supports_reasoning:bool
   -> enable_thinking:bool option
   -> clear_thinking:bool option
   -> preserve_thinking:bool option

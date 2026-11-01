@@ -1555,6 +1555,7 @@ let test_validate_reasoning_effort_fails_closed_without_declaration () =
 let test_clear_thinking_object_request_field () =
   let resolve
         ?(preserve_thinking_control_format = Capabilities.Thinking_object_clear_thinking)
+        ?(supports_reasoning = true)
         ?enable_thinking
         ?clear_thinking
         ?preserve_thinking
@@ -1562,14 +1563,19 @@ let test_clear_thinking_object_request_field () =
     =
     Provider_config.clear_thinking_object_request_field
       ~preserve_thinking_control_format
+      ~supports_reasoning
       ~enable_thinking
       ~clear_thinking
       ~preserve_thinking
   in
   Alcotest.(check (option bool))
-    "entirely omitted thinking request stays omitted"
-    None
+    "reasoning row explicitly sends the client's clear default"
+    (Some true)
     (resolve ());
+  Alcotest.(check (option bool))
+    "non-reasoning row keeps an all-omitted request absent"
+    None
+    (resolve ~supports_reasoning:false ());
   Alcotest.(check (option bool))
     "explicit thinking uses the declared clear default"
     (Some true)
@@ -1582,8 +1588,8 @@ let test_clear_thinking_object_request_field () =
     "explicit clear wins"
     (Some true)
     (resolve ~clear_thinking:true ~preserve_thinking:true ());
-  (* The field is gated on the declared preserve wire alone: every other wire
-     omits it, whatever the provider kind or model id is. *)
+  (* Every other preserve wire omits it, whatever the provider kind or model
+     id is. *)
   List.iter
     (fun (label, preserve_thinking_control_format) ->
        Alcotest.(check (option bool))

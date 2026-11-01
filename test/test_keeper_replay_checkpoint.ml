@@ -1193,10 +1193,10 @@ let test_inline_chat_carrier_survives_finalization_and_restore () =
 
 let test_default_thinking_preservation_survives_restore () =
   let module Provider = Agent_core.Llm_provider in
+  List.iter (fun (kind, provider_id, base_url) ->
   List.iter (fun model_id ->
     let config = Provider.Provider_config.make
-        ~kind:Glm ~provider_id:"glm-coding" ~model_id
-        ~base_url:"https://api.z.ai/api/coding/paas/v4" ~max_tokens:128 () in
+        ~kind ~provider_id ~model_id ~base_url ~max_tokens:128 () in
     let reasoning = "prior reasoning\n  kept exactly  " in
     let response = `Assoc
         [ "id", `String "default-thinking-fixture"
@@ -1241,8 +1241,15 @@ let test_default_thinking_preservation_survives_restore () =
       let messages = restored.messages
         @ [message Agent_core.Types.User [Agent_core.Types.Text "next question"]]
         |> Agent_core.History.to_wire_messages media_store |> media_result in
-      let body config = Provider.Backend_glm.build_request ~config ~messages ()
-        |> Yojson.Safe.from_string in
+      let body config =
+        let serialized = Result.bind (Provider.Complete_common.validate_all config)
+            (fun () -> Provider.Complete_common.serialize_http_request ~stream:false
+              ~config ~messages ~tools:[]) in
+        match serialized with
+        | Ok artifact -> Yojson.Safe.from_string artifact.body
+        | Error (Provider.Http_client.AcceptRejected {reason}) -> Alcotest.fail reason
+        | Error _ -> Alcotest.fail "GLM restored request serialization failed"
+      in
       let open Yojson.Safe.Util in
       let check label expected (config : Provider.Provider_config.t) =
         let wire = body config in
@@ -1274,8 +1281,10 @@ let test_default_thinking_preservation_survives_restore () =
       Alcotest.(check bool) "explicit clear reaches the wire" true
         (cleared |> member "clear_thinking" |> to_bool);
       let omitted = check "no preservation request excludes completed-turn reasoning" [] config in
-      Alcotest.(check bool) "entirely omitted thinking request stays omitted" true
-        (omitted = `Null);
+      Alcotest.(check bool) "client clear default reaches both endpoint families" true
+        (omitted |> member "clear_thinking" |> to_bool);
+      Alcotest.(check bool) "omitted toggle preserves the provider thinking default" true
+        (member "type" omitted = `Null);
       match model_id with
       | "glm-5.2" ->
         let disabled = check "explicit disable overrides retained thinking" []
@@ -1289,7 +1298,12 @@ let test_default_thinking_preservation_survives_restore () =
         Alcotest.(check bool) "forced thinking still rejects an explicit disable" true
           (Option.is_some (Provider.Complete_common.thinking_control_request_rejection_reason
              {config with enable_thinking = Some false; preserve_thinking = Some true}))))
-    ["glm-5.2"; "glm-5.3-flash"]
+    ["glm-5.2"; "glm-5.3-flash"])
+    [ Provider.Provider_config.Glm, "glm-coding", "https://api.z.ai/api/coding/paas/v4"
+    ; Provider.Provider_config.OpenAI_compat, "glm-coding", "https://api.z.ai/api/coding/paas/v4"
+    ; Provider.Provider_config.Glm, "glm", "https://api.z.ai/api/paas/v4"
+    ; Provider.Provider_config.OpenAI_compat, "glm", "https://api.z.ai/api/paas/v4"
+    ]
 ;;
 
 let () =

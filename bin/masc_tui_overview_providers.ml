@@ -12,6 +12,65 @@ type section = {
 
 let cells_of = Masc_tui_message_layout.display_width
 
+(* Bound the expansion of exceptionally large list labels using the current
+   screen area before grapheme layout. Keep both ends (including a scope id)
+   and mark the omitted middle. Four bytes is the maximum UTF-8 scalar size. *)
+let text_for_viewport ~columns ~rows text =
+  (* Even a one-row viewport can previously show both ends of a long emoji
+     name. Allow enough context for ordinary multi-scalar graphemes there. *)
+  let bytes = max 1 columns * max 4 rows * 4 in
+  if String.length text <= bytes then text
+  else
+    let left = bytes / 2 in
+    (* Segment bounded context on each side so neither cut lands inside a
+       combining or emoji cluster. A cluster larger than that context is
+       omitted rather than rendered as a partial glyph. *)
+    let prefix = String_util.utf8_prefix ~max_bytes:bytes text in
+    let prefix_end =
+      Masc_tui_message_layout.input_boundaries prefix
+      |> List.fold_left (fun last boundary ->
+           if boundary <= left && boundary < String.length prefix then boundary else last) 0
+    in
+    let suffix = String_util.utf8_suffix ~max_bytes:bytes text in
+    let suffix_offset = String.length text - String.length suffix in
+    (* Regional indicators pair from the start of their run. Recover that
+       parity before segmenting bounded suffix context, so the first retained
+       flag has the same members as in the source. *)
+    let is_regional_at offset =
+      let decoded = String.get_utf_8_uchar text offset in
+      Uchar.utf_decode_is_valid decoded
+      && Uucp.Func.is_regional_indicator (Uchar.utf_decode_uchar decoded)
+    in
+    let previous_scalar_start offset =
+      if offset <= 0 then None
+      else
+        let rec find i =
+          if i > 0 && (Char.code text.[i] land 0xC0) = 0x80 then find (i - 1)
+          else i
+        in
+        Some (find (offset - 1))
+    in
+    let rec regional_parity offset odd =
+      match previous_scalar_start offset with
+      | Some start when is_regional_at start -> regional_parity start (not odd)
+      | _ -> odd
+    in
+    let regional_context =
+      if suffix_offset < String.length text && is_regional_at suffix_offset
+         && regional_parity suffix_offset false
+      then "🇦" else ""
+    in
+    let context_bytes = String.length regional_context in
+    let target = String.length suffix - (bytes - left) in
+    let suffix_start =
+      Masc_tui_message_layout.input_boundaries (regional_context ^ suffix)
+      |> List.map (fun boundary -> boundary - context_bytes)
+      |> List.find_opt (fun boundary -> boundary > 0 && boundary >= target)
+      |> Option.value ~default:(String.length suffix)
+    in
+    String.sub prefix 0 prefix_end ^ "…"
+    ^ String.sub suffix suffix_start (String.length suffix - suffix_start)
+
 (* ---- meter ------------------------------------------------------------ *)
 
 let eighths_per_cell = 8
@@ -524,7 +583,7 @@ let role_tag = function
    it being full refuses no model call. A limit the server could not classify
    is drawn like one that gates, since nothing says it does not. *)
 let window_tone (window : Masc.Tui_decode_usage.provider_usage_window) =
-  if not (gates_model_calls window.puw_role) then Some Ansi.dim
+  if not (gates_model_calls window.puw_role) then Some (Theme.recede ())
   else if at_or_past_full window.puw_utilization then Some (Theme.bad ())
   else None
 
@@ -687,6 +746,7 @@ type layout = {
   name_cells : int;
   label_cells : int;
   bar_cells : int;
+  percent_cells : int;
   blank_name : string;
   continuation : string;
   continuation_cells : int;
@@ -704,12 +764,17 @@ let layout_for ~show_names ~width entries =
         match entry.de_body with Window_lines lines -> lines | State_text _ -> [])
       entries
   in
+  let percent_cells = max percent_cells (widest (fun line -> cells_of line.percent) window_lines) in
   let name_cells =
     if not show_names then 0
     else
+      let minimum_window =
+        1 + label_cells_min + 1 + bar_frame_cells + bar_cells_min + 1 + percent_cells
+      in
       min
         (widest (fun entry -> cells_of entry.de_name) entries)
-        (min name_cells_cap (max name_cells_min (budget / name_width_divisor)))
+        (min (max 0 (budget - minimum_window))
+           (min name_cells_cap (max name_cells_min (budget / name_width_divisor))))
   in
   let barred_lines =
     List.filter
@@ -722,20 +787,31 @@ let layout_for ~show_names ~width entries =
     budget - name_cells - 1 - 1 - gauge_cells_min - cells_of detail_gap - widest_base
   in
   let label_cells =
+    let available =
+      max 0 (budget - name_cells - 1 - 1 - bar_frame_cells - 1 - percent_cells)
+    in
     min
-      (widest (fun line -> cells_of line.label) window_lines)
-      (min label_cells_cap (max label_cells_min label_room))
+      available
+      (min
+         (widest (fun line -> cells_of line.label) window_lines)
+         (min label_cells_cap (max label_cells_min label_room)))
   in
   let head_cells_without_bar =
     name_cells + 1 + label_cells + 1 + bar_frame_cells + 1 + percent_cells
   in
   let detail_room = budget - head_cells_without_bar - cells_of detail_gap in
-  let bar_cells = max bar_cells_min (min bar_cells_default (detail_room - widest_base)) in
+  let available_bar =
+    max 0 (budget - name_cells - 1 - label_cells - 1 - bar_frame_cells - 1 - percent_cells)
+  in
+  let bar_cells =
+    min available_bar (max bar_cells_min (min bar_cells_default (detail_room - widest_base)))
+  in
   let blank_name = String.make name_cells ' ' in
   { width
   ; name_cells
   ; label_cells
   ; bar_cells
+  ; percent_cells
   ; blank_name
   ; continuation = indent ^ blank_name ^ " "
   ; continuation_cells = max 1 (budget - name_cells - 1)
@@ -749,13 +825,27 @@ let draw_entry layout tone entry =
   in
   let window_row tone ~first line =
     let name = match first with Some name -> name_cell tone name | None -> layout.blank_name in
-    let label = Text.fit_middle layout.label_cells line.label in
-    let gauge_width = layout.bar_cells + bar_frame_cells + 1 + percent_cells in
+    let label_overflows = cells_of line.label > layout.label_cells in
+    let label =
+      if label_overflows then String.make layout.label_cells ' '
+      else Text.fit_middle layout.label_cells line.label
+    in
+    let label_rows =
+      if not label_overflows then []
+      else
+        let prefix = indent ^ name ^ " " in
+        let continuation = indent ^ layout.blank_name ^ " " in
+        Text.wrap_words ~max_cells:(max 1 (layout.width - cells_of prefix)) line.label
+        |> List.mapi (fun index text ->
+             (if index = 0 then prefix else continuation) ^ style line.tone text)
+    in
+    let meter_name = if label_overflows then layout.blank_name else name in
+    let gauge_width = layout.bar_cells + bar_frame_cells + 1 + layout.percent_cells in
     let gauge =
       match line.share with
       | Some share ->
           meter_open ^ meter ~cells:layout.bar_cells share ^ meter_close ^ " "
-          ^ pad_left line.percent percent_cells
+          ^ pad_left line.percent layout.percent_cells
       | None -> String.make gauge_width ' '
     in
     (* A row with no bar has an empty gauge. When the detail does not fit
@@ -765,7 +855,7 @@ let draw_entry layout tone entry =
       | Some _ -> [ (label ^ " " ^ gauge, detail_gap) ]
       | None -> [ (label ^ " " ^ gauge, detail_gap); (label, " ") ]
     in
-    let head body = indent ^ name ^ " " ^ style line.tone body in
+    let head body = indent ^ meter_name ^ " " ^ style line.tone body in
     let placements =
       List.concat_map
         (fun (body, gap) ->
@@ -775,13 +865,28 @@ let draw_entry layout tone entry =
     let fits (body, gap, detail) =
       cells_of (head body) + cells_of gap + cells_of detail <= layout.width
     in
-    match List.find_opt fits placements with
-    | Some (body, gap, detail) -> [ head body ^ gap ^ style line.detail_tone detail ]
-    | None ->
-        head (rstrip_spaces (label ^ " " ^ gauge))
-        :: List.map
-             (fun wrapped -> layout.continuation ^ style line.detail_tone wrapped)
-             (Text.wrap_words ~max_cells:layout.continuation_cells line.detail)
+    let wrapped_detail () =
+      List.map
+        (fun wrapped -> layout.continuation ^ style line.detail_tone wrapped)
+        (Text.wrap_words ~max_cells:layout.continuation_cells line.detail)
+    in
+    if Option.is_some line.share
+       && cells_of (head (rstrip_spaces (label ^ " " ^ gauge))) > layout.width
+    then
+      let labels =
+        if label_overflows then label_rows
+        else [ indent ^ name ^ " " ^ style line.tone line.label ]
+      in
+      labels
+      @ List.map
+          (fun value -> layout.continuation ^ style line.tone value)
+          (Text.wrap_words ~max_cells:layout.continuation_cells line.percent)
+      @ wrapped_detail ()
+    else
+      label_rows
+      @ (match List.find_opt fits placements with
+         | Some (body, gap, detail) -> [ head body ^ gap ^ style line.detail_tone detail ]
+         | None -> head (rstrip_spaces (label ^ " " ^ gauge)) :: wrapped_detail ())
   in
   let note_lines ?tone text =
     List.map
@@ -833,8 +938,25 @@ let draw_groups ~show_unusable ~width groups =
     match section with
     | Unusable_now when not show_unusable -> [ hidden_unusable_heading section entries ]
     | Unusable_now | Usable | No_report ->
+        let tone = section_tone section in
+        let draw entry =
+          let label_overflows =
+            match entry.de_body with
+            | State_text _ -> false
+            | Window_lines lines ->
+                List.exists (fun line -> cells_of line.label > layout.label_cells) lines
+          in
+          if cells_of entry.de_name <= layout.name_cells && not label_overflows then
+            draw_entry layout tone entry
+          else
+            let heading =
+              Masc_tui_message_layout.wrap_words ~max_cells:(max 1 (width - 2)) entry.de_name
+              |> List.map (fun line -> indent ^ Ansi.bold ^ tone ^ line ^ Ansi.reset)
+            in
+            heading @ draw_entry (layout_for ~show_names:false ~width [ entry ]) tone entry
+        in
         group_heading section entries
-        :: separated (List.map (draw_entry layout (section_tone section)) entries)
+        :: separated (List.map draw entries)
   in
   List.map (clip width) (separated (List.map draw_group groups))
 
@@ -865,7 +987,13 @@ let account_card ~tone entry =
   { Masc_tui_card.title = entry.de_name
   ; body =
       (fun ~cells ->
-        draw_entry (layout_for ~show_names:false ~width:cells [ entry ]) tone entry)
+        let full_name =
+          if cells_of entry.de_name <= max 0 (cells - 1) then []
+          else
+            Masc_tui_message_layout.wrap_words ~max_cells:(max 1 cells) entry.de_name
+            |> List.map (fun line -> Ansi.bold ^ tone ^ line ^ Ansi.reset)
+        in
+        full_name @ draw_entry (layout_for ~show_names:false ~width:cells [ entry ]) tone entry)
   }
 
 (* Each pair of accounts is one row of cards that end on the same line; a lone
@@ -945,7 +1073,7 @@ let counts ~runtimes (accounts : Masc.Tui_decode_usage.provider_usage_account li
 
 let title_text () = Printf.sprintf " %sPlan usage%s" Ansi.bold Ansi.reset
 
-let section_with ~draw ~(providers : Types.overview_providers_reading) ~runtimes
+let section_with ~draw ~bound ~(providers : Types.overview_providers_reading) ~runtimes
     ~account_emails ~now ~width =
   match providers with
   | Types.Providers_unread -> None
@@ -959,14 +1087,14 @@ let section_with ~draw ~(providers : Types.overview_providers_reading) ~runtimes
         }
   | Types.Providers_read { Masc.Tui_decode_usage.puws_since = _; puws_accounts } ->
       let rows =
-        draw (drawn_groups ~now ~account_emails (plan ~now ~runtimes puws_accounts))
+        draw (bound (drawn_groups ~now ~account_emails (plan ~now ~runtimes puws_accounts)))
       in
       (* Without the runtime rows the exhausted tag cannot be drawn; the
          section says so instead of drawing every account untagged. *)
       let runtimes_note =
         match (runtimes : Types.overview_quota_reading) with
         | Types.Quota_failed reason ->
-            [ Printf.sprintf " %sexhausted tags unread: %s%s" Ansi.dim
+            [ Printf.sprintf " %sexhausted tags unread: %s%s" (Theme.warn ())
                 (Terminal_text.single_line reason) Ansi.reset
             ]
         | Types.Quota_unread | Types.Quota_read _ -> []
@@ -976,11 +1104,11 @@ let section_with ~draw ~(providers : Types.overview_providers_reading) ~runtimes
       let emails_note =
         match (account_emails : Types.overview_account_emails_reading) with
         | Types.Account_emails_failed reason ->
-            [ Printf.sprintf " %saccount emails unread: %s%s" Ansi.dim
+            [ Printf.sprintf " %saccount emails unread: %s%s" (Theme.warn ())
                 (Terminal_text.single_line reason) Ansi.reset
             ]
         | Types.Account_emails_read { unreadable_rows; _ } when unreadable_rows > 0 ->
-            [ Printf.sprintf " %saccount emails: %d rows this build cannot read%s" Ansi.dim
+            [ Printf.sprintf " %saccount emails: %d rows this build cannot read%s" (Theme.warn ())
                 unreadable_rows Ansi.reset
             ]
         | Types.Account_emails_unread | Types.Account_emails_read _ -> []
@@ -994,7 +1122,7 @@ let section_with ~draw ~(providers : Types.overview_providers_reading) ~runtimes
       let summary =
         [ Printf.sprintf "Accounts %d \xc2\xb7 Reporting %d \xc2\xb7 At limit (reported) %d \xc2\xb7 Blocked (observed) %s"
             counts.accounts counts.reporting counts.at_limit blocked
-        ; "Bar: share used at the last report \xc2\xb7 dim row: does not block model calls \xc2\xb7 v: Trend graphs" ]
+        ; "Bar: used at last report \xc2\xb7 other use does not block model calls \xc2\xb7 v: Trend" ]
         |> List.concat_map (Masc_tui_message_layout.wrap_words ~max_cells:width) in
       let notes = runtimes_note @ emails_note in
       match rows with
@@ -1009,13 +1137,27 @@ let section_with ~draw ~(providers : Types.overview_providers_reading) ~runtimes
             ; lines = summary @ ("" :: rows) @ notes
             }
 
-let section ~providers ~runtimes ~account_emails ~now ~show_unusable ~width =
-  section_with ~draw:(draw_groups ~show_unusable ~width) ~providers ~runtimes
-    ~account_emails ~now ~width
+let bound_groups ~width ~rows groups =
+  let text = text_for_viewport ~columns:width ~rows in
+  let bound_entry entry =
+    let body =
+      match entry.de_body with
+      | State_text _ as state -> state
+      | Window_lines lines ->
+          Window_lines (List.map (fun line ->
+            { line with label = text line.label }) lines)
+    in
+    { entry with de_name = text entry.de_name; de_body = body }
+  in
+  List.map (fun (section, entries) -> section, List.map bound_entry entries) groups
 
-let section_cards ~providers ~runtimes ~account_emails ~now ~show_unusable ~width =
+let section ~providers ~runtimes ~account_emails ~now ~show_unusable ~width ~rows =
+  section_with ~draw:(draw_groups ~show_unusable ~width) ~bound:(bound_groups ~width ~rows)
+    ~providers ~runtimes ~account_emails ~now ~width
+
+let section_cards ~providers ~runtimes ~account_emails ~now ~show_unusable ~width ~rows =
   let draw =
     if cards_fit ~width then draw_cards ~show_unusable ~width
     else draw_groups ~show_unusable ~width
   in
-  section_with ~draw ~providers ~runtimes ~account_emails ~now ~width
+  section_with ~draw ~bound:(bound_groups ~width ~rows) ~providers ~runtimes ~account_emails ~now ~width

@@ -2394,12 +2394,14 @@
  (modules masc_tui_overview_providers)
  (libraries
   masc
+  masc_string_util
   masc_tui_card
   masc_tui_types
   masc_tui_ansi
   masc_tui_theme
   masc_tui_message_layout
   masc_tui_usage_trend
+  uucp
   unix))
 
 ;; The last answer to each dashboard read, kept with its entity tag so the

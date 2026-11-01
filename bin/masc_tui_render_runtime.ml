@@ -1106,7 +1106,7 @@ let render_tools (state : state) =
   finish_surface state ~surface_key:"tools" ~rows:terminal_rows ~cols buf
 
 
-let provider_history_lines ~cols (state : state) =
+let provider_history_lines ~cols ~rows (state : state) =
   match usage_history_reading state with
   | Provider_history_unread ->
       [ Printf.sprintf " Quota scope trend (%d UTC days) · not observed"
@@ -1136,6 +1136,7 @@ let provider_history_lines ~cols (state : state) =
         | Some account -> Overview_providers.scope_name account
       in
       let width = max 1 (framed_inner_width cols - 3) in
+      let text = Overview_providers.text_for_viewport ~columns:width ~rows in
       let minimum_card_cells = max 64 (7 + days * 2 + 4) in
       let paired = width >= 2 * minimum_card_cells + 2 in
       let card_width = if paired then (width - 2) / 2 else width in
@@ -1156,12 +1157,17 @@ let provider_history_lines ~cols (state : state) =
                | Masc_tui_usage_trend.Measured (value, _) -> Overview_providers.utilization_text value
                | Masc_tui_usage_trend.Reported_no_windows -> "reported no windows")
               (time.Unix.tm_mon + 1) time.Unix.tm_mday time.Unix.tm_hour time.Unix.tm_min in
-        let body = wrap (Terminal_text.single_line limit ^ Terminal_text.single_line row.kind)
+        let name = text (label row.scope_id) in
+        let full_name =
+          if Message_layout.display_width name <= inner then []
+          else wrap name
+        in
+        let body = full_name @ wrap (Terminal_text.single_line limit ^ Terminal_text.single_line row.kind)
           @ (match email with None -> [] | Some email -> wrap email)
           @ wrap latest
           @ Masc_tui_usage_trend.plot ~width:inner trend row
           @ wrap (Printf.sprintf "%d/%d UTC days reported" row.reported_days days) in
-        let heading = Message_layout.truncate_middle inner (label row.scope_id) in
+        let heading = Message_layout.truncate_middle inner name in
         let line text = Theme.recede () ^ Ansi.box_v ^ Ansi.reset ^ " "
           ^ Message_layout.fit_width text inner ^ " " ^ Theme.recede () ^ Ansi.box_v ^ Ansi.reset in
         (Theme.info () ^ Ansi.box_tl ^ " " ^ Ansi.bold ^ heading ^ Ansi.reset ^ Theme.info ()
@@ -1195,14 +1201,15 @@ let provider_history_lines ~cols (state : state) =
                   else "   No reports recorded in this window"]
          | rows -> arrange rows)
 
-let usage_lines ~cols (state : state) =
+let usage_lines ~cols ~rows (state : state) =
   let open Masc.Tui_decode_usage in
+  let text = Overview_providers.text_for_viewport ~columns:(framed_inner_width cols) ~rows in
   let scopes =
     match Overview_providers.section_cards
             ~providers:(usage_providers_reading state) ~runtimes:state.overview_quota
             ~account_emails:state.overview_account_emails
             ~show_unusable:state.usage_show_unusable
-            ~now:(Unix.gettimeofday ()) ~width:(max 20 (framed_inner_width cols)) with
+            ~now:(Unix.gettimeofday ()) ~width:(max 20 (framed_inner_width cols)) ~rows with
     | Some section -> section.title :: section.lines
     (* [section] answers [None] only before the first read. *)
     | None -> [ " Plan usage · not observed" ]
@@ -1230,6 +1237,16 @@ let usage_lines ~cols (state : state) =
         let token_value row = Option.map float_of_int row.kur_tokens in
         let cost_value row = row.kur_cost_usd in
         let valid value = Float.is_finite value && value >= 0. in
+        let grouped_digits digits =
+          let start = if String.starts_with ~prefix:"-" digits then 1 else 0 in
+          let length = String.length digits in
+          let output = Buffer.create (length + length / 3) in
+          String.iteri (fun index digit ->
+            if index > start && (length - index) mod 3 = 0 then Buffer.add_char output ',';
+            Buffer.add_char output digit) digits;
+          Buffer.contents output
+        in
+        let count value = grouped_digits (string_of_int value) in
         let largest value = List.fold_left
             (fun highest row ->
               if readable row then
@@ -1247,38 +1264,53 @@ let usage_lines ~cols (state : state) =
           | None -> "unreported"
         in
         let width = max 1 (framed_inner_width cols - 3) in
-        let bar_cells = min 32 (max 1 (width - 2)) in
+        let tokens_text row = Option.fold ~none:"unreported" ~some:count row.kur_tokens in
+        let cost_text row =
+          Option.fold ~none:"unreported" ~some:(Printf.sprintf "$%.4f") row.kur_cost_usd in
+        let metric_text label value reported missing =
+          Printf.sprintf "%s %s · %s reported, %s missing" label value (count reported) (count missing)
+        in
+        let widest_metric = List.fold_left (fun widest row ->
+          let width_of label text reported missing value =
+            match value row with
+            | Some amount when readable row && valid amount ->
+                Message_layout.display_width (metric_text label text reported missing)
+            | _ -> 0
+          in
+          max widest (max
+            (width_of "Tokens" (tokens_text row) row.kur_tokens_reported row.kur_tokens_missing token_value)
+            (width_of "Cost" (cost_text row) row.kur_cost_reported row.kur_cost_missing cost_value)))
+          0 kuw_rows in
+        (* One width per metric set keeps the relative bars comparable. *)
+        let beside = width - widest_metric - 4 in
+        let bar_cells =
+          if beside >= Overview_providers.bar_cells_min then min 32 beside
+          else min 32 (max 1 (width - 2)) in
         let meter value highest row =
           match value row with
           | Some amount when readable row && valid amount ->
               let maximum = Option.value ~default:0. highest in
-              let filled = if maximum = 0. then 0
-                else min bar_cells (int_of_float (amount /. maximum *. float_of_int bar_cells)) in
-              "[" ^ String.concat "" (List.init bar_cells
-                (fun index -> if index < filled then "█" else "░")) ^ "]"
-              ^ (if amount = 0. then " 0" else "")
-          | _ -> "[unavailable · no comparison bar]"
+              let share = if maximum = 0. then 0. else amount /. maximum in
+              Some ("[" ^ Overview_providers.meter ~cells:bar_cells share ^ "]")
+          | _ -> None
         in
         let generated = Unix.gmtime kuw_generated_at in
-        [ Printf.sprintf " Keeper usage · last %dm · recorded turn metrics%s"
-            kuw_window_minutes freshness
+        [ Printf.sprintf " Keeper usage · last %s · recorded turn metrics%s"
+            (Overview_providers.minutes_label kuw_window_minutes) freshness
         ; Printf.sprintf " As of %04d-%02d-%02d %02d:%02d UTC"
             (generated.Unix.tm_year + 1900) (generated.Unix.tm_mon + 1)
             generated.Unix.tm_mday generated.Unix.tm_hour generated.Unix.tm_min
         ; " Bars compare read windows; each metric scales to its largest Keeper."
         ; " Partial windows have no comparison bar; missing metrics can understate totals; bars are not quota."
         ; Printf.sprintf " Scale: tokens %s · cost %s"
-            (scale token_value (Printf.sprintf "%.0f") token_max)
+            (scale token_value (fun value -> grouped_digits (Printf.sprintf "%.0f" value)) token_max)
             (scale cost_value (Printf.sprintf "$%.4f") cost_max)
         ; "" ]
         @ (if kuw_rows = [] then [ "   No Keepers in the returned roster" ]
             else List.concat_map
               (fun (row : Masc.Tui_decode_usage.keeper_usage_row) ->
-                let tokens =
-                  Option.fold ~none:"unreported" ~some:string_of_int row.kur_tokens in
-                let cost =
-                  Option.fold ~none:"unreported"
-                    ~some:(Printf.sprintf "$%.4f") row.kur_cost_usd in
+                let tokens = tokens_text row in
+                let cost = cost_text row in
                 let coverage =
                   match row.kur_coverage with
                   | Keeper_usage_complete -> "read"
@@ -1289,20 +1321,24 @@ let usage_lines ~cols (state : state) =
                       "unavailable: " ^ Terminal_text.single_line reason
                 in
                 let width = max 1 (framed_inner_width cols - 3) in
-                let heading = Masc_tui_message_layout.fit_middle width
-                    (Terminal_text.single_line row.kur_name) in
-                [ "   " ^ Theme.info () ^ Ansi.bold ^ heading ^ Ansi.reset ]
-                @ List.concat_map
+                let heading =
+                  Theme.info () ^ Ansi.bold ^ text (Terminal_text.single_line row.kur_name)
+                  ^ Ansi.reset ^ Printf.sprintf " · %s turns · %s" (count row.kur_turn_samples) coverage
+                in
+                let metric label value reported missing bar =
+                  metric_text label value reported missing
+                  ^ Option.fold ~none:"" ~some:(fun bar -> "  " ^ Theme.info () ^ bar ^ Ansi.reset) bar
+                in
+                List.concat_map
                     (fun line -> List.map (fun text -> "   " ^ text)
-                        (Masc_tui_message_layout.wrap_words ~max_cells:width line))
-                    [ Printf.sprintf "%d turns · %s" row.kur_turn_samples coverage
-                    ; Printf.sprintf "Tokens  %s · %d reported, %d missing"
-                        tokens row.kur_tokens_reported row.kur_tokens_missing
-                    ; meter token_value token_max row
-                    ; Printf.sprintf "Cost    %s · %d reported, %d missing"
-                        cost row.kur_cost_reported row.kur_cost_missing
-                    ; meter cost_value cost_max row
-                    ; "" ])
+                        (Masc_tui_message_layout.wrap_styled_words ~max_cells:width line))
+                    [ heading
+                    ; metric "Tokens" tokens row.kur_tokens_reported row.kur_tokens_missing
+                        (meter token_value token_max row)
+                    ; metric "Cost" cost row.kur_cost_reported row.kur_cost_missing
+                        (meter cost_value cost_max row)
+                    ]
+                @ [ "" ])
               kuw_rows)
   in
   let wrap_evidence lines =
@@ -1343,7 +1379,7 @@ let usage_lines ~cols (state : state) =
   match state.usage_section with
   (* Plan cards already have a cell-sized border and wrapped contents. *)
   | Usage_plan -> selection_lines @ scopes
-  | Usage_trend -> selection_lines @ wrap_evidence (provider_history_lines ~cols state)
+  | Usage_trend -> selection_lines @ wrap_evidence (provider_history_lines ~cols ~rows state)
   | Usage_keepers ->
       let currency = match Masc_tui_candle.summary_lines state.candle_observation with
         | [] -> []
@@ -1397,8 +1433,8 @@ let render_metrics (state : state) =
           c.push (pill Usage_plan "Plan" ^ "  " ^ pill Usage_trend "Trend"
                   ^ "  " ^ pill Usage_keepers "Keepers" ^ "   v:next view");
         if spacing_rows > 0 then c.push "";
-        let lines = usage_lines ~cols state in
         let content_budget = max 0 (budget - navigation_rows - spacing_rows) in
+        let lines = usage_lines ~cols ~rows:content_budget state in
         let overflow_rows = if content_budget >= 2 && List.length lines > content_budget then 1 else 0 in
         let height = content_budget - overflow_rows in
         let max_scroll = max 0 (List.length lines - height) in

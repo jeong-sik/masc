@@ -154,9 +154,10 @@ let schedule_dispatch_receipt_dashboard_json
 ;;
 
 module String_set = Set.Make (String)
+module String_map = Map.Make (String)
 
 type keeper_reaction_evidence_batch =
-  ( (string * Keeper_reaction_ledger.event_queue_reaction_evidence_outcome) list
+  ( Keeper_reaction_ledger.event_queue_reaction_evidence_outcome String_map.t
   , Keeper_reaction_ledger.event_queue_reaction_evidence_error )
   result
 
@@ -166,7 +167,7 @@ type schedule_evidence_snapshot =
                 Keeper_event_queue_persistence.snapshot_read_error list) result) Hashtbl.t
   ; disposition_by_occurrence :
       (string * string, (Server_schedule_consumers.resolved_occurrence_disposition, string) result) Hashtbl.t
-  ; reaction_by_keeper : (string, keeper_reaction_evidence_batch) Hashtbl.t
+  ; reaction_by_keeper : keeper_reaction_evidence_batch String_map.t
   }
 
 let schedule_keeper_receipt_identity (wake : Schedule_domain.wake_record option) =
@@ -204,7 +205,6 @@ let schedule_evidence_snapshot ~config wakes =
          Hashtbl.replace requested_stimulus_ids keeper_name requested)
     wakes;
   let queue_by_keeper = Hashtbl.create (Hashtbl.length requested_stimulus_ids) in
-  let reaction_by_keeper = Hashtbl.create (Hashtbl.length requested_stimulus_ids) in
   (* Resolve queue authority before ledger projection. Every callback reads
      fresh bytes, so an owner enters the resolver cache at the same instant as
      its observation. Pre-capturing a target outside that cache could conceal
@@ -234,13 +234,27 @@ let schedule_evidence_snapshot ~config wakes =
       if not (Hashtbl.mem queue_by_keeper keeper_name) then
         ignore (read_state ~base_path:config.Workspace_utils.base_path keeper_name))
     requested_stimulus_ids;
-  Hashtbl.iter
-    (fun keeper_name stimulus_ids ->
-       Hashtbl.add reaction_by_keeper keeper_name
-         (Keeper_reaction_ledger.event_queue_reaction_evidence_batch_result
-            ~base_path:config.Workspace_utils.base_path ~keeper_name
-            ~stimulus_ids:(String_set.elements stimulus_ids)))
-    requested_stimulus_ids;
+  let reaction_by_keeper =
+    Hashtbl.fold
+      (fun keeper_name stimulus_ids acc ->
+         let batch =
+           Keeper_reaction_ledger.event_queue_reaction_evidence_batch_result
+             ~base_path:config.Workspace_utils.base_path
+             ~keeper_name
+             ~stimulus_ids:(String_set.elements stimulus_ids)
+           |> Result.map (fun pairs ->
+                List.fold_left
+                  (fun map (id, outcome) ->
+                     if String_map.mem id map
+                     then map
+                     else String_map.add id outcome map)
+                  String_map.empty
+                  pairs)
+         in
+         String_map.add keeper_name batch acc)
+      requested_stimulus_ids
+      String_map.empty
+  in
   { queue_by_keeper; disposition_by_occurrence; reaction_by_keeper }
 ;;
 
@@ -252,11 +266,11 @@ type schedule_reaction_evidence_lookup =
   | Reaction_evidence_not_captured
 
 let schedule_reaction_evidence_lookup snapshot ~keeper_name ~stimulus_id =
-  match Hashtbl.find_opt snapshot.reaction_by_keeper keeper_name with
+  match String_map.find_opt keeper_name snapshot.reaction_by_keeper with
   | None -> Reaction_evidence_not_captured
   | Some (Error error) -> Reaction_evidence_failed error
   | Some (Ok evidence_by_id) ->
-    (match List.assoc_opt stimulus_id evidence_by_id with
+    (match String_map.find_opt stimulus_id evidence_by_id with
      | Some evidence -> Reaction_evidence_observed evidence
      | None -> Reaction_evidence_not_captured)
 ;;
@@ -1281,14 +1295,15 @@ let scheduled_automation_dashboard_page_json
     | None -> all_signal_rows
     | Some _ ->
       let selected_ids =
-        List.filter_map
-          (fun (request : Schedule_domain.schedule_request) ->
-             Some request.schedule_id)
+        List.fold_left
+          (fun acc (request : Schedule_domain.schedule_request) ->
+             String_set.add request.schedule_id acc)
+          String_set.empty
           schedules
       in
       List.filter
         (fun (signal : Schedule_runner.wake_signal) ->
-           List.exists (String.equal signal.schedule_id) selected_ids)
+           String_set.mem signal.schedule_id selected_ids)
         all_signal_rows
   in
   let base_fields_for signal_rows =

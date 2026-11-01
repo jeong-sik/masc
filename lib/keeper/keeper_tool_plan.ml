@@ -1054,12 +1054,19 @@ let exports plan = plan.exports
 
 let branch_failure_policy plan = plan.branch_failure_policy
 
+module Node_set = Set.Make (Node_id)
+
 let stable_unique_node_ids ids =
-  List.fold_left
-    (fun unique id ->
-       if List.exists (Node_id.equal id) unique then unique else unique @ [ id ])
-    []
-    ids
+  let _, rev_unique =
+    List.fold_left
+      (fun (seen, rev_acc) id ->
+         if Node_set.mem id seen
+         then seen, rev_acc
+         else Node_set.add id seen, id :: rev_acc)
+      (Node_set.empty, [])
+      ids
+  in
+  List.rev rev_unique
 ;;
 
 let dependencies node =

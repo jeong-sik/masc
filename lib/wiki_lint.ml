@@ -76,13 +76,43 @@ let line_of = function
   | Unreadable_page _ -> 0
 ;;
 
+module String_map = Map.Make (String)
+module Int_set = Set.Make (Int)
+
+let compare_finding_payload left right =
+  match left, right with
+  | Broken_link l, Broken_link r -> String.compare l.target r.target
+  | Unsupported_link l, Unsupported_link r ->
+    let c = String.compare l.form r.form in
+    if c <> 0 then c else String.compare l.target r.target
+  | Orphan l, Orphan r -> String.compare l.page r.page
+  | Orphan_unconfirmed l, Orphan_unconfirmed r -> String.compare l.page r.page
+  | Missing_sources l, Missing_sources r -> String.compare l.page r.page
+  | Hearsay_only l, Hearsay_only r -> String.compare l.page r.page
+  | Unreadable_page l, Unreadable_page r -> String.compare l.reason r.reason
+  | Revision_log_gap l, Revision_log_gap r ->
+    let c = Int.compare l.log_revision r.log_revision in
+    if c <> 0 then c else Int.compare l.page_revision r.page_revision
+  | Revision_log_hole l, Revision_log_hole r -> Int.compare l.missing r.missing
+  | ( ( Broken_link _
+      | Unsupported_link _
+      | Orphan _
+      | Orphan_unconfirmed _
+      | Missing_sources _
+      | Hearsay_only _
+      | Unreadable_page _
+      | Revision_log_gap _
+      | Revision_log_hole _ )
+    , _ ) -> String.compare (kind left) (kind right)
+;;
+
 let compare_findings left right =
   match String.compare (subject left) (subject right) with
   | 0 ->
     (match Int.compare (line_of left) (line_of right) with
      | 0 ->
        (match String.compare (kind left) (kind right) with
-        | 0 -> Stdlib.compare left right
+        | 0 -> compare_finding_payload left right
         | order -> order)
      | order -> order)
   | order -> order
@@ -129,13 +159,17 @@ let page_findings graph ~has_unreadable page =
    log would otherwise be reported four times. The highest revision the log
    records for the page is the one it must have reached. *)
 let log_gap_findings graph (log : Wiki_log.t) =
-  let highest = Hashtbl.create 16 in
-  List.iter
-    (fun (line : Wiki_log.line) ->
-       let seen = Option.value (Hashtbl.find_opt highest line.page) ~default:0 in
-       if line.revision > seen then Hashtbl.replace highest line.page line.revision)
-    log.lines;
-  Hashtbl.fold
+  let highest =
+    List.fold_left
+      (fun acc (line : Wiki_log.line) ->
+         let seen = Option.value (String_map.find_opt line.page acc) ~default:0 in
+         if line.revision > seen
+         then String_map.add line.page line.revision acc
+         else acc)
+      String_map.empty
+      log.lines
+  in
+  String_map.fold
     (fun page log_revision acc ->
        match Wiki_graph.revision_of graph page with
        | Some page_revision when page_revision < log_revision ->
@@ -170,26 +204,33 @@ let log_hole_findings graph (log : Wiki_log.t) =
   if log_hole_suppressed log
   then []
   else (
-    let seen = Hashtbl.create 16 in
-    List.iter
-      (fun (line : Wiki_log.line) ->
-         let revisions = Option.value (Hashtbl.find_opt seen line.page) ~default:[] in
-         Hashtbl.replace seen line.page (line.revision :: revisions))
-      log.lines;
-    Hashtbl.fold
+    let seen =
+      List.fold_left
+        (fun acc (line : Wiki_log.line) ->
+           let revisions =
+             Option.value
+               (String_map.find_opt line.page acc)
+               ~default:Int_set.empty
+           in
+           String_map.add line.page (Int_set.add line.revision revisions) acc)
+        String_map.empty
+        log.lines
+    in
+    String_map.fold
       (fun page revisions acc ->
-         let lowest = List.fold_left min max_int revisions in
-         let highest = List.fold_left max 0 revisions in
-         let rec first_missing k =
-           if k >= highest
-           then None
-           else if List.mem k revisions
-           then first_missing (k + 1)
-           else Some k
-         in
-         match (Wiki_graph.revision_of graph page, first_missing lowest) with
-         | Some _, Some missing -> Revision_log_hole { page; missing } :: acc
-         | Some _, None | None, _ -> acc)
+         match Int_set.min_elt_opt revisions, Int_set.max_elt_opt revisions with
+         | Some lowest, Some highest ->
+           let rec first_missing k =
+             if k >= highest
+             then None
+             else if Int_set.mem k revisions
+             then first_missing (k + 1)
+             else Some k
+           in
+           (match Wiki_graph.revision_of graph page, first_missing lowest with
+            | Some _, Some missing -> Revision_log_hole { page; missing } :: acc
+            | Some _, None | None, _ -> acc)
+         | None, _ | _, None -> acc)
       seen
       [])
 ;;

@@ -434,7 +434,7 @@ let select_all_message_names ~since_seq names =
        let seq = message_seq_of_filename name in
        if seq <= since_seq then None else Some (seq, name))
   |> List.sort (fun (seq_a, name_a) (seq_b, name_b) ->
-       let cmp = compare seq_a seq_b in
+       let cmp = Int.compare seq_a seq_b in
        if cmp <> 0 then cmp else String.compare name_a name_b)
   |> List.map snd
 
@@ -598,7 +598,7 @@ let list_tasks ?(include_done = false) ?(include_cancelled = false) ?status conf
     Buffer.add_string buf "Quest Board\n";
     Buffer.add_string buf "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n";
 
-    let sorted = List.sort (fun a b -> compare a.priority b.priority) tasks in
+    let sorted = List.sort (fun a b -> Int.compare a.priority b.priority) tasks in
     List.iter (fun task ->
       let status_icon = Masc_domain.task_status_icon task.task_status in
       let assignee = Masc_domain.task_display_assignee task.task_status in

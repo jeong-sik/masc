@@ -302,15 +302,16 @@ let take = List.take
 
 let fd_pressure_fields () = Keeper_fd_pressure.projection_fields ()
 
+module String_set = Set_util.StringSet
+
 (* Compute the request-listing projection from an already-loaded list.
    Factored out so [proof_compose] can share the disk scan between
    summary and request listing. *)
 let id_set (requests : listed list) =
-  let seen = Hashtbl.create (List.length requests) in
-  List.iter
-    (fun (r : listed) -> Hashtbl.replace seen r.listed_id ())
-    requests;
-  seen
+  List.fold_left
+    (fun acc (r : listed) -> String_set.add r.listed_id acc)
+    String_set.empty
+    requests
 
 (** Apply the view, and report what the join could not account for.
 
@@ -348,20 +349,22 @@ let filter_by_view ~limit (view : queue_view)
     (requests : listed list)
   : listed list * (string * Yojson.Safe.t) list =
   let join ~recovery (live : awaiting_task list) =
-    let wanted = Hashtbl.create (List.length live) in
-    List.iter
-      (fun (t : awaiting_task) -> Hashtbl.replace wanted t.request_id ())
-      live;
+    let wanted =
+      List.fold_left
+        (fun acc (t : awaiting_task) -> String_set.add t.request_id acc)
+        String_set.empty
+        live
+    in
     let kept =
       List.filter
-        (fun (r : listed) -> Hashtbl.mem wanted r.listed_id)
+        (fun (r : listed) -> String_set.mem r.listed_id wanted)
         requests
     in
     let present = id_set store in
     let unresolved =
       List.filter_map
         (fun (t : awaiting_task) ->
-          if Hashtbl.mem present t.request_id then None else Some t.request_id)
+          if String_set.mem t.request_id present then None else Some t.request_id)
         live
     in
     ( kept

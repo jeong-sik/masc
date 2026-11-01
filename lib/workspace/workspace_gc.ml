@@ -113,9 +113,17 @@ let archive_terminal_tasks config ~days () =
          a task. The ids about to be archived count as held: for each of them
          the backlog's row is the current one, and an archive copy with the
          same id is the stale one, not an obligation to bring back. *)
-      let backlog_ids = List.map (fun (t : task) -> t.id) backlog.tasks in
+      let backlog_ids =
+        List.fold_left
+          (fun acc (t : task) -> Workspace_backlog.Task_id_set.add t.id acc)
+          Workspace_backlog.Task_id_set.empty
+          backlog.tasks
+      in
       let restored =
-        List.filter (fun (t : task) -> not (List.mem t.id backlog_ids)) orphaned
+        List.filter
+          (fun (t : task) ->
+             not (Workspace_backlog.Task_id_set.mem t.id backlog_ids))
+          orphaned
       in
       let live_tasks_after_gc = kept_tasks @ restored in
 
@@ -147,10 +155,18 @@ let archive_terminal_tasks config ~days () =
          backlog's, and it is the row that now holds the task. Keep the backlog
          lock until cleanup finishes so another GC cannot replace a row that
          this pass is about to drop. *)
-      let archived_ids = List.map (fun (t : task) -> t.id) archived_tasks in
+      let archived_ids =
+        List.fold_left
+          (fun acc (t : task) -> Workspace_backlog.Task_id_set.add t.id acc)
+          Workspace_backlog.Task_id_set.empty
+          archived_tasks
+      in
       let stale_orphan_ids =
         List.filter_map
-          (fun (t : task) -> if List.mem t.id archived_ids then None else Some t.id)
+          (fun (t : task) ->
+             if Workspace_backlog.Task_id_set.mem t.id archived_ids
+             then None
+             else Some t.id)
           orphaned
       in
       let archive_drop = drop_archive_tasks config ~ids:stale_orphan_ids in

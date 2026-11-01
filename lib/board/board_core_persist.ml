@@ -665,9 +665,17 @@ let sub_board_post_counts_unlocked store =
 let sub_board_post_count_from_counts counts slug =
   Hashtbl.find_opt counts slug |> Option.value ~default:0
 ;;
+let sub_board_post_count_for_slug_unlocked store slug =
+  Hashtbl.fold
+    (fun _ (p : post) count ->
+       match p.hearth with
+       | Some post_slug when String.equal post_slug slug -> count + 1
+       | Some _ | None -> count)
+    store.posts
+    0
+;;
 let sub_board_with_post_count_unlocked store (sb : sub_board) =
-  let counts = sub_board_post_counts_unlocked store in
-  { sb with post_count = sub_board_post_count_from_counts counts sb.slug }
+  { sb with post_count = sub_board_post_count_for_slug_unlocked store sb.slug }
 ;;
 let sub_board_with_post_count counts (sb : sub_board) =
   { sb with post_count = sub_board_post_count_from_counts counts sb.slug }

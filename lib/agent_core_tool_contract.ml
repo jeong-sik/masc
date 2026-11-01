@@ -91,16 +91,19 @@ let agent_core_aliases_for_operation operation_id =
     (fun binding -> String.equal binding.canonical_operation operation_id)
     agent_core_bindings
 
+module String_set = Set.Make (String)
+
 let dedupe_strings values =
-  let seen = Hashtbl.create (List.length values) in
-  List.filter
-    (fun value ->
-      if Hashtbl.mem seen value then
-        false
-      else (
-        Hashtbl.add seen value true;
-        true))
-    values
+  let _, rev_values =
+    List.fold_left
+      (fun (seen, rev_acc) value ->
+         if String_set.mem value seen
+         then seen, rev_acc
+         else String_set.add value seen, value :: rev_acc)
+      (String_set.empty, [])
+      values
+  in
+  List.rev rev_values
 
 let core_remote_operation_names =
   dedupe_strings

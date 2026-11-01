@@ -30,12 +30,13 @@ let public_name_for_internal internal_name =
   | [] -> None
 ;;
 
+module String_set = Set.Make (String)
+
 let public_names_for_allowed_internal_names internal_names =
-  let allowed = Hashtbl.create (List.length internal_names) in
-  List.iter (fun internal_name -> Hashtbl.replace allowed internal_name ()) internal_names;
+  let allowed = String_set.of_list internal_names in
   Keeper_tool_descriptor.public_descriptors
   |> List.filter (fun (descriptor : Keeper_tool_descriptor.t) ->
-    Hashtbl.mem allowed descriptor.internal_name)
+    String_set.mem descriptor.internal_name allowed)
   |> List.concat_map Keeper_tool_descriptor.public_names_of_descriptor
   |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
 ;;

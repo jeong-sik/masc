@@ -120,12 +120,10 @@ let enqueue ~config ~keeper_name ~(cancellation : Keeper_event_queue.task_cancel
 ;;
 
 let notify_author ~config ~actor ~task_id =
-  match Workspace_backlog.read_backlog_r config with
+  match Workspace_backlog.read_prepared_backlog_r config with
   | Error detail -> Backlog_read_failed { detail }
-  | Ok backlog ->
-    (match
-       List.find_opt (fun (t : Masc_domain.task) -> String.equal t.id task_id) backlog.tasks
-     with
+  | Ok prepared ->
+    (match Workspace_backlog.Task_id_map.find_opt task_id prepared.tasks_by_id with
      | None ->
        (* The commit that triggered this wrote the task, so its absence is a
           backlog disagreement, not a missing addressee. *)

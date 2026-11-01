@@ -19,17 +19,32 @@ let capture ~config = function
     let goals =
       let* links = Workspace_goal_index.read_goal_task_links_authoritative_r config
         |> Result.map_error (fun detail -> Goal_links_unavailable detail) in
-      let ids = List.filter_map (fun (goal_id, tasks) ->
-          if List.mem (Keeper_id.Task_id.to_string task_id) tasks then Some goal_id else None) links in
+      let task_goal_map =
+        Workspace_goal_index.build_task_goal_map ~goal_task_links:links ()
+      in
+      let ids =
+        Workspace_goal_index.goals_for_task_in_map
+          task_goal_map
+          ~task_id:(Keeper_id.Task_id.to_string task_id)
+      in
       if ids = [] then Ok [] else
       let* goals_by_id = Goal_store.load_goals_by_id_result config
         |> Result.map_error (fun error -> Goal_source_unavailable error) in
-      List.fold_right (fun goal_id rest ->
-        let* rest = rest in
-        match Goal_store.Goal_id_map.find_opt goal_id goals_by_id with
-        | None -> Error (Linked_goal_missing goal_id)
-        | Some goal -> Ok ({ goal_id; phase = goal.phase;
-            criterion = Goal_store.criterion_of_goal goal } :: rest)) ids (Ok [])
+      let rec resolve acc = function
+        | [] -> Ok (List.rev acc)
+        | goal_id :: rest ->
+          (match Goal_store.Goal_id_map.find_opt goal_id goals_by_id with
+           | None -> Error (Linked_goal_missing goal_id)
+           | Some goal ->
+             resolve
+               ({ goal_id
+                ; phase = goal.phase
+                ; criterion = Goal_store.criterion_of_goal goal
+                }
+                :: acc)
+               rest)
+      in
+      resolve [] ids
     in
     Task { task_id; goals }
 

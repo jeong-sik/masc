@@ -4121,14 +4121,46 @@ let test_rate_limited_429_refusal_advances_once_to_successor () =
 (* The body can declare a provider condition even when the actual HTTP status
    is 200. The retained snapshot must not confuse those separate facts. *)
 let test_http_200_provider_reported_429_keeps_actual_status () =
-  assert_typed_capacity_refusal_advances_once
-    ~refused_kind:"openai_compat"
-    ~label:"http-200-provider-429"
-    ~first_response:(`OK, {|{"error":{"code":429,"message":"rate limited"}}|})
-    ~assert_cause:(function
-      | EO.Provider_response_refused { http_status = 429; refusal = EO.Rate_limited; _ } -> ()
-      | _ -> fail "the provider's declared 429 condition was not retained")
-    ()
+  let (result, replay, evidence, initial_snapshot, dispatches_before_replay), posts =
+    with_server ~response:{|{"error":{"code":429,"message":"rate limited"}}|}
+    @@ fun ~sw:_ ~net ~clock ~base_url ->
+    with_catalog
+      [ catalog_entry ~id:"http-200-provider-429" ~base_url ~native:true ~json:true () ]
+    @@ fun snapshot ->
+    let flow = start_flow (frozen_flow snapshot [ "http-200-provider-429" ]) in
+    let initial_snapshot = ref None in
+    let result =
+      execute_with_accepting_test_validator ~net ~clock
+        ~before_measurement_dispatch:(fun _ -> Ok ())
+        ~on_measurement_terminal:(fun _ -> Ok ())
+        ~before_dispatch:(fun _ ->
+          initial_snapshot := Some ((attempt_for (EO.flow_attempt_evidence flow)
+            "http-200-provider-429").receipt);
+          Ok ())
+        ~before_advance:(fun ~failed:_ ~next:_ -> Ok ()) flow
+    in
+    let evidence = EO.flow_attempt_evidence flow in
+    let dispatches_before_replay =
+      List.fold_left (fun count (attempt : EO.flow_attempt_snapshot) ->
+        count + EO.generation_receipt_snapshot_dispatch_count attempt.receipt) 0 evidence.attempts in
+    result, execute_ok ~net ~clock flow, evidence, !initial_snapshot, dispatches_before_replay
+  in
+  check int "one candidate makes one POST" 1 posts;
+  check int "same in-memory flow replay sends nothing" 0 (posts - dispatches_before_replay);
+  (match replay with
+   | Error (EO.Flow_attempt_already_started _) -> ()
+   | Ok _ | Error _ -> fail "same flow replay did not stop");
+  (match initial_snapshot with
+   | Some snapshot -> check (option int) "earlier snapshot stays without headers" None
+       (EO.generation_receipt_snapshot_http_status snapshot)
+   | None -> fail "initial snapshot was not published");
+  let attempt = attempt_for evidence "http-200-provider-429" in
+  check (option int) "wire HTTP status" (Some 200)
+    (EO.generation_receipt_snapshot_http_status attempt.receipt);
+  match result with
+  | Error (EO.Flow_exact_execution_failed { cause = { cause =
+      EO.Provider_response_refused { http_status = 429; refusal = EO.Rate_limited; _ }; _ }; _ }) -> ()
+  | Ok _ | Error _ -> fail "the provider's declared 429 condition was not retained"
 ;;
 
 (* The provider's own wait survives the collapsed refusal, so a caller that

@@ -3,28 +3,16 @@ open Server_utils
 
 module Http = Http_server_eio
 
-module Cache_state = Server_dashboard_json_cache_state
+module Cache = Server_dashboard_json_cache
 
-type dashboard_json_cache_entry = Cache_state.t
-
-let dashboard_metrics_cache_ttl_s = 60.0
-
-(* Per-cache entry ceiling. The [window]/[bucket_min] query params are folded
-   into the cache key unclamped (see [add_routes]), and these endpoints are
-   public reads, so distinct client-supplied values would otherwise grow each
-   table without bound (memory-exhaustion vector). The legitimate dashboard
-   uses a small fixed set of windows, so this ceiling is never reached in
-   normal operation; past it, the least-recently-refreshed entry is evicted. *)
-let dashboard_metrics_cache_max_entries = 128
-let dashboard_metrics_cache_mu = Stdlib.Mutex.create ()
-let dashboard_model_metrics_cache : (string, dashboard_json_cache_entry) Hashtbl.t = Hashtbl.create 8
-let dashboard_runtime_metrics_cache : (string, dashboard_json_cache_entry) Hashtbl.t = Hashtbl.create 8
-let dashboard_cost_latency_cache : (string, dashboard_json_cache_entry) Hashtbl.t = Hashtbl.create 8
-let dashboard_keeper_costs_cache : (string, dashboard_json_cache_entry) Hashtbl.t = Hashtbl.create 8
-let dashboard_provider_history_cache : (string, dashboard_json_cache_entry) Hashtbl.t = Hashtbl.create 8
-let dashboard_keeper_decisions_cache : (string, dashboard_json_cache_entry) Hashtbl.t = Hashtbl.create 8
-let dashboard_keeper_decisions_log_cache : (string, dashboard_json_cache_entry) Hashtbl.t = Hashtbl.create 8
-let dashboard_keeper_practice_cache : (string, dashboard_json_cache_entry) Hashtbl.t = Hashtbl.create 8
+let dashboard_model_metrics_cache = Cache.create ()
+let dashboard_runtime_metrics_cache = Cache.create ()
+let dashboard_cost_latency_cache = Cache.create ()
+let dashboard_keeper_costs_cache = Cache.create ()
+let dashboard_provider_history_cache = Cache.create ()
+let dashboard_keeper_decisions_cache = Cache.create ()
+let dashboard_keeper_decisions_log_cache = Cache.create ()
+let dashboard_keeper_practice_cache = Cache.create ()
 
 let cache_key parts = String.concat "\x1f" parts
 
@@ -46,27 +34,6 @@ let runtime_specification_json (runtime : Runtime_instance.t) =
     "provider_context", Json_util.int_opt_to_json runtime.provider.max_context;
     "binding_context", Json_util.int_opt_to_json runtime.binding.max_context ]
 
-let cache_metadata ~state ~generated_at ?age_s ?error () =
-  let optional_float name = function
-    | None -> []
-    | Some value -> [ name, `Float value ]
-  in
-  let optional_string name = function
-    | None -> []
-    | Some value -> [ name, `String value ]
-  in
-  `Assoc
-    ([ "state", `String (Dashboard_cache_wire.to_string state)
-     ; "generated_at", `Float generated_at
-     ]
-     @ optional_float "age_s" age_s
-     @ optional_string "last_error" error)
-
-let json_with_cache_metadata json metadata =
-  match json with
-  | `Assoc fields -> `Assoc (fields @ [ "cache", metadata ])
-  | other -> `Assoc [ "payload", other; "cache", metadata ]
-
 let redact_provider_history_cache_error = function
   | `Assoc fields ->
       `Assoc
@@ -83,129 +50,6 @@ let redact_provider_history_cache_error = function
              | field -> field)
            fields)
   | json -> json
-
-let cache_response ~now ~placeholder = function
-  | Cache_state.Fresh { json; age_s } ->
-      json_with_cache_metadata json
-        (cache_metadata ~state:Dashboard_cache_wire.Cache_fresh
-           ~generated_at:now ~age_s ())
-  | Cache_state.Stale { json; age_s; last_error } ->
-      json_with_cache_metadata json
-        (cache_metadata ~state:Dashboard_cache_wire.Cache_stale_refreshing
-           ~generated_at:now ~age_s ?error:last_error ())
-  | Cache_state.Warming { last_error } ->
-      json_with_cache_metadata placeholder
-        (cache_metadata ~state:Dashboard_cache_wire.Cache_warming
-           ~generated_at:now ?error:last_error ())
-
-let cached_dashboard_json_result ~now:clock ~sync_first ~sw ~cache ~key ~placeholder ~compute =
-  Eio.Switch.check sw;
-  let now = clock () in
-  let release owner =
-    Stdlib.Mutex.protect dashboard_metrics_cache_mu (fun () ->
-        match Hashtbl.find_opt cache key with
-        | None -> ()
-        | Some entry ->
-            Option.iter (Hashtbl.replace cache key) (Cache_state.cancel ~owner entry))
-  in
-  let run_compute_and_store ~background owner =
-    (* Cleanup is synchronous: it cannot mask cancellation with an Eio effect.
-       Successful settlement has already removed this exact owner. *)
-    Fun.protect ~finally:(fun () -> release owner) (fun () ->
-      let run () =
-        Eio.Switch.check sw;
-        let result =
-          (* These computes transitively take process-shared Eio mutexes.
-             Executor workers carry an Eio context; a bare systhread does not.
-             Keep the executor's worker-cancellation/join protocol intact. *)
-          try Executor_pool_ref.submit_or_inline ~name:__FUNCTION__ compute with
-          | Eio.Cancel.Cancelled _ as exn -> raise exn
-          | exn -> Error (Printexc.to_string exn)
-        in
-        let refreshed_at = clock () in
-        Stdlib.Mutex.protect dashboard_metrics_cache_mu (fun () ->
-            match Hashtbl.find_opt cache key with
-            | None -> ()
-            | Some entry ->
-                Option.iter (Hashtbl.replace cache key)
-                  (Cache_state.settle ~owner ~now:refreshed_at result entry));
-        (match result with
-         | Ok _ -> ()
-         | Error message ->
-             Log.Misc.warn "dashboard metrics cache refresh failed: %s" message);
-        result, refreshed_at
-      in
-      if background then Pool_lane.with_background run else run ())
-  in
-  let view, owner =
-    Stdlib.Mutex.protect dashboard_metrics_cache_mu (fun () ->
-        (* The supplied clock can cancel this scope after the initial check.
-           Refuse admission before lookup, eviction or insertion mutates it. *)
-        Eio.Switch.check sw;
-        let entry =
-          match Hashtbl.find_opt cache key with
-          | Some entry -> entry
-          | None ->
-              evict_oldest_if_full ~max_entries:dashboard_metrics_cache_max_entries
-                ~age_of:Cache_state.updated_at cache;
-              let entry = Cache_state.empty in
-              Hashtbl.add cache key entry;
-              entry
-        in
-        match Cache_state.admit ~now ~ttl_s:dashboard_metrics_cache_ttl_s entry with
-        | Cache_state.Reuse view -> view, None
-        | Cache_state.Refresh (view, plan) ->
-            let entry, owner = Cache_state.start plan in
-            Hashtbl.replace cache key entry;
-            view, Some owner)
-  in
-  let response = cache_response ~now ~placeholder view in
-  match owner with
-  | None -> response
-  | Some owner ->
-      let was_cold = match view with
-        | Cache_state.Warming _ -> true
-        | Cache_state.Fresh _ | Cache_state.Stale _ -> false
-      in
-      if sync_first && was_cold then
-        (match run_compute_and_store ~background:false owner with
-         | Ok json, refreshed_at ->
-             json_with_cache_metadata json
-               (cache_metadata ~state:Dashboard_cache_wire.Cache_fresh
-                  ~generated_at:refreshed_at ())
-         | Error _, _ -> response)
-      else
-        (* The switch retains fallback ownership cleanup until the child exits.
-           Remove completed hooks so a serving switch retains only live work;
-           exact-owner release makes worker and switch cleanup idempotent. *)
-        (try
-           Eio.Switch.check sw;
-           let hook =
-             Eio.Switch.on_release_cancellable sw (fun () -> release owner)
-           in
-           (try
-              Eio.Fiber.fork ~sw (fun () ->
-                  Fun.protect ~finally:(fun () -> Eio.Switch.remove_hook hook)
-                    (fun () ->
-                      ignore (run_compute_and_store ~background:true owner
-                        : (Yojson.Safe.t, string) result * float)));
-              response
-            with exn ->
-              Eio.Switch.remove_hook hook;
-              raise exn)
-         with exn ->
-           release owner;
-           raise exn)
-
-let cached_dashboard_json ~sync_first ~sw ~cache ~key ~placeholder ~compute =
-  cached_dashboard_json_result ~now:Unix.gettimeofday
-    ~sync_first ~sw ~cache ~key ~placeholder ~compute:(fun () -> Ok (compute ()))
-
-module For_testing = struct
-  type cache = (string, dashboard_json_cache_entry) Hashtbl.t
-  let create_cache () : cache = Hashtbl.create 1
-  let cached_json = cached_dashboard_json_result
-end
 
 let empty_model_metrics_json ~window ~bucket_min =
   `Assoc
@@ -250,7 +94,7 @@ let add_routes ~sw router =
              [ base_path; string_of_int window; string_of_int bucket_min ]
          in
          let json =
-           cached_dashboard_json_result ~now:Unix.gettimeofday ~sw ~sync_first:false
+           Cache.read_result ~now:Unix.gettimeofday ~sw ~sync_first:false
              ~cache:dashboard_model_metrics_cache ~key
              ~placeholder:(empty_model_metrics_json ~window ~bucket_min)
              ~compute:(fun () ->
@@ -270,7 +114,7 @@ let add_routes ~sw router =
   |> Server_route.get (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/runtime/metrics" (fun state _agent req reqd ->
          let base_path = (Mcp_server.workspace_config state).base_path in
          let window_minutes = 1440 in
-         let history = cached_dashboard_json ~sw ~sync_first:false
+         let history = Cache.read ~sw ~sync_first:false
            ~cache:dashboard_runtime_metrics_cache ~key:base_path
            ~placeholder:(`Assoc [ "state", `String "loading" ])
            ~compute:(fun () -> Model_inference_metrics.compute_runtime_metrics_json
@@ -293,7 +137,7 @@ let add_routes ~sw router =
          let config = (Mcp_server.workspace_config state) in
          let key = cache_key [ config.base_path; string_of_int window ] in
          let json =
-           cached_dashboard_json ~sw ~sync_first:false
+           Cache.read ~sw ~sync_first:false
              ~cache:dashboard_keeper_costs_cache ~key
              ~placeholder:
                (`Assoc [ "state", `String "loading"
@@ -344,7 +188,7 @@ let add_routes ~sw router =
                let days = Server_provider_usage_history.days_of_window window in
                let key = cache_key [ config.base_path; string_of_int days ] in
                let json =
-                 cached_dashboard_json ~sw ~sync_first:false
+                 Cache.read ~sw ~sync_first:false
                    ~cache:dashboard_provider_history_cache ~key
                    ~placeholder:(`Assoc [ "state", `String "loading" ])
                    ~compute:(fun () ->
@@ -378,7 +222,7 @@ let add_routes ~sw router =
          let window = int_query_param req "window" ~default:1440 in
          let base_path = (Mcp_server.workspace_config state).base_path in
          let json =
-           cached_dashboard_json_result ~now:Unix.gettimeofday ~sw ~sync_first:false
+           Cache.read_result ~now:Unix.gettimeofday ~sw ~sync_first:false
              ~cache:dashboard_cost_latency_cache
              ~key:(cache_key [ base_path; string_of_int window ])
              ~placeholder:(empty_cost_latency_json ~window)
@@ -394,7 +238,7 @@ let add_routes ~sw router =
          let config = (Mcp_server.workspace_config state) in
          let key = cache_key [ config.base_path; string_of_int limit ] in
          let json =
-           cached_dashboard_json ~sw ~sync_first:true
+           Cache.read ~sw ~sync_first:true
              ~cache:dashboard_keeper_decisions_cache ~key
              ~placeholder:
                (Dashboard_http_keeper.keeper_decisions_json ~config
@@ -424,7 +268,7 @@ let add_routes ~sw router =
          let config = (Mcp_server.workspace_config state) in
          let key = cache_key [ config.base_path; string_of_int limit ] in
          let json =
-           cached_dashboard_json ~sw ~sync_first:false
+           Cache.read ~sw ~sync_first:false
              ~cache:dashboard_keeper_decisions_log_cache ~key
              ~placeholder:
                (Dashboard_http_keeper.keeper_decisions_log_json ~config
@@ -454,7 +298,7 @@ let add_routes ~sw router =
          let config = (Mcp_server.workspace_config state) in
          let key = cache_key [ config.base_path; string_of_int limit ] in
          let json =
-           cached_dashboard_json ~sw ~sync_first:true
+           Cache.read ~sw ~sync_first:true
              ~cache:dashboard_keeper_practice_cache ~key
              ~placeholder:
                (Dashboard_http_keeper_practice.fleet_json ~config

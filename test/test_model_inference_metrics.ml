@@ -1955,14 +1955,14 @@ let test_existing_projections_refuse_partial_decisions () =
 
 let test_metrics_cache_retains_last_good () =
   Eio_main.run (fun _env ->
-    let module Cache = Server_routes_http_routes_provider_runs.For_testing in
+    let module Cache = Server_dashboard_json_cache in
     let base = test_dir () in
     Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
       let path = make_keeper_dir base "cached" in
       write_decisions path [success_entry ~model:"decision" ~ts:(now_unix ()) ()];
-      let cache = Cache.create_cache () and clock = ref 100. in
+      let cache = Cache.create () and clock = ref 100. in
       let read () = Eio.Switch.run (fun sw ->
-        Cache.cached_json ~now:(fun () -> !clock) ~sync_first:true ~sw
+        Cache.read_result ~now:(fun () -> !clock) ~sync_first:true ~sw
           ~cache ~key:"test" ~placeholder:(`Assoc ["state", `String "loading"])
           ~compute:(fun () -> M.compute ~base_path:base ~window_minutes:60
             |> Result.map M.to_json |> Result.map_error M.read_error_to_string)) in
@@ -1996,11 +1996,11 @@ let test_metrics_cache_retains_last_good () =
    pool. No pool is set here, so compute runs inline and sees its lane. *)
 let test_metrics_cache_refresh_runs_as_background () =
   Eio_main.run (fun _env ->
-    let module Cache = Server_routes_http_routes_provider_runs.For_testing in
-    let cache = Cache.create_cache () and clock = ref 100. and lanes = ref [] in
+    let module Cache = Server_dashboard_json_cache in
+    let cache = Cache.create () and clock = ref 100. and lanes = ref [] in
     let compute () = lanes := Pool_lane.current () :: !lanes; Ok (`Assoc []) in
     let read () = Eio.Switch.run (fun sw -> Pool_lane.with_read (fun () ->
-      Cache.cached_json ~now:(fun () -> !clock) ~sync_first:true ~sw
+      Cache.read_result ~now:(fun () -> !clock) ~sync_first:true ~sw
         ~cache ~key:"lane" ~placeholder:(`Assoc ["state", `String "loading"]) ~compute)) in
     ignore (read () : Yojson.Safe.t);
     clock := 200.;
@@ -2011,8 +2011,8 @@ let test_metrics_cache_refresh_runs_as_background () =
 let test_metrics_cache_cancelled_cold_fill_recovers () =
   Eio_main.run (fun _env ->
     Executor_pool_ref.For_testing.with_pool_option None (fun () ->
-      let module Cache = Server_routes_http_routes_provider_runs.For_testing in
-      let cache = Cache.create_cache () in
+      let module Cache = Server_dashboard_json_cache in
+      let cache = Cache.create () in
       let placeholder = `Assoc ["state", `String "loading"] in
       let entered, signal_entered = Eio.Promise.create () in
       let blocked, _ = Eio.Promise.create () in
@@ -2021,7 +2021,7 @@ let test_metrics_cache_cancelled_cold_fill_recovers () =
         Eio.Fiber.first
           (fun () -> Eio.Switch.run (fun sw ->
             try
-              ignore (Cache.cached_json ~now:(fun () -> 100.) ~sync_first:true
+              ignore (Cache.read_result ~now:(fun () -> 100.) ~sync_first:true
                 ~sw ~cache ~key:"cancelled-cold" ~placeholder
                 ~compute:(fun () ->
                   incr computes;
@@ -2038,7 +2038,7 @@ let test_metrics_cache_cancelled_cold_fill_recovers () =
        | `Returned -> fail "cold compute returned before cancellation");
       check bool "cached cold fill propagates request cancellation" true !cancellation_seen;
       let recovered = Eio.Switch.run (fun sw ->
-        Cache.cached_json ~now:(fun () -> 100.) ~sync_first:true ~sw ~cache
+        Cache.read_result ~now:(fun () -> 100.) ~sync_first:true ~sw ~cache
           ~key:"cancelled-cold" ~placeholder
           ~compute:(fun () -> incr computes; Ok (`Assoc ["measurement", `Int 2]))) in
       let open Yojson.Safe.Util in
@@ -2053,8 +2053,8 @@ let test_metrics_cache_cancelled_cold_fill_recovers () =
 let test_metrics_cache_cancelled_switch_does_not_reserve_refresh () =
   Eio_main.run (fun _env ->
     Executor_pool_ref.For_testing.with_pool_option None (fun () ->
-      let module Cache = Server_routes_http_routes_provider_runs.For_testing in
-      let cache = Cache.create_cache () in
+      let module Cache = Server_dashboard_json_cache in
+      let cache = Cache.create () in
       let placeholder = `Assoc ["state", `String "loading"] in
       let cancellation_seen = ref false and computes = ref 0 in
       let exception Cancel_metrics_scope in
@@ -2065,7 +2065,7 @@ let test_metrics_cache_cancelled_switch_does_not_reserve_refresh () =
               rather than rely on an incidental cancellation point. *)
            Eio.Cancel.protect (fun () ->
              try
-               ignore (Cache.cached_json ~now:(fun () -> 100.) ~sync_first:false
+               ignore (Cache.read_result ~now:(fun () -> 100.) ~sync_first:false
                  ~sw ~cache ~key:"cancelled-switch" ~placeholder
                  ~compute:(fun () -> incr computes; Ok (`Assoc [])) : Yojson.Safe.t)
              with Eio.Cancel.Cancelled _ -> cancellation_seen := true));
@@ -2074,7 +2074,7 @@ let test_metrics_cache_cancelled_switch_does_not_reserve_refresh () =
       check bool "an already-cancelled refresh switch is refused" true !cancellation_seen;
       check int "no compute was started on the cancelled switch" 0 !computes;
       let recovered = Eio.Switch.run (fun sw ->
-        Cache.cached_json ~now:(fun () -> 100.) ~sync_first:true ~sw ~cache
+        Cache.read_result ~now:(fun () -> 100.) ~sync_first:true ~sw ~cache
           ~key:"cancelled-switch" ~placeholder
           ~compute:(fun () -> incr computes; Ok (`Assoc ["measurement", `Int 1]))) in
       let open Yojson.Safe.Util in
@@ -2083,6 +2083,109 @@ let test_metrics_cache_cancelled_switch_does_not_reserve_refresh () =
         (recovered |> member "measurement" |> to_int);
       check string "the rejected reservation leaves no warming tombstone" "fresh"
         (recovered |> member "cache" |> member "state" |> to_string)))
+
+let test_metrics_cache_cancelled_admission_preserves_oldest () =
+  Eio_main.run (fun _env ->
+    Executor_pool_ref.For_testing.with_pool_option None (fun () ->
+      let module Cache = Server_dashboard_json_cache in
+      let cache = Cache.create () in
+      let placeholder = `Assoc ["state", `String "loading"] in
+      let open Yojson.Safe.Util in
+      Eio.Switch.run (fun sw ->
+        ignore (Cache.read_result ~now:(fun () -> 100.) ~sync_first:true
+          ~sw ~cache ~key:"oldest-retained" ~placeholder
+          ~compute:(fun () -> Ok (`Assoc ["measurement", `Int 1])) : Yojson.Safe.t);
+        (* This fills the public capacity exactly. The retained key has a
+           uniquely older successful timestamp, so a new admission would
+           evict it without depending on equal-age hash-table ordering. *)
+        for index = 1 to Cache.max_entries - 1 do
+          ignore (Cache.read_result ~now:(fun () -> 101.) ~sync_first:true
+            ~sw ~cache ~key:(Printf.sprintf "admission-fill-%d" index)
+            ~placeholder
+            ~compute:(fun () -> Ok (`Assoc ["entry", `Int index])) : Yojson.Safe.t)
+        done);
+      let cancellation_seen = ref false and computes = ref 0 in
+      let exception Cancel_admission_scope in
+      (try
+         Eio.Switch.run (fun sw ->
+           (* The clock cancels after the read's initial switch check.
+              Protect this caller so refusal must inspect the supplied
+              switch before cache admission, rather than wait for a yield. *)
+           Eio.Cancel.protect (fun () ->
+             try
+               ignore (Cache.read_result
+                 ~now:(fun () -> Eio.Switch.fail sw Cancel_admission_scope; 102.)
+                 ~sync_first:false ~sw ~cache ~key:"cancelled-admission"
+                 ~placeholder
+                 ~compute:(fun () -> incr computes; Ok (`Assoc [])) : Yojson.Safe.t)
+             with Eio.Cancel.Cancelled _ -> cancellation_seen := true));
+         fail "the cancelled admission scope returned"
+       with Cancel_admission_scope -> ());
+      check bool "cancellation after the clock is propagated" true !cancellation_seen;
+      check int "cancelled admission starts no compute" 0 !computes;
+      let retained = Eio.Switch.run (fun sw ->
+        Cache.read_result ~now:(fun () -> 102.) ~sync_first:true ~sw ~cache
+          ~key:"oldest-retained" ~placeholder
+          ~compute:(fun () -> fail "cancelled admission evicted retained data")) in
+      check int "cancelled admission retains the oldest measurement" 1
+        (retained |> member "measurement" |> to_int);
+      check string "the retained measurement remains fresh" "fresh"
+        (retained |> member "cache" |> member "state" |> to_string);
+      let recovered = Eio.Switch.run (fun sw ->
+        Cache.read_result ~now:(fun () -> 102.) ~sync_first:true ~sw ~cache
+          ~key:"cancelled-admission" ~placeholder
+          ~compute:(fun () -> incr computes; Ok (`Assoc ["measurement", `Int 2]))) in
+      check int "a live scope acquires the refused key" 1 !computes;
+      check int "the live scope publishes the new measurement" 2
+        (recovered |> member "measurement" |> to_int);
+      check string "the refused key leaves no warming reservation" "fresh"
+        (recovered |> member "cache" |> member "state" |> to_string)))
+
+
+let test_metrics_cache_eviction_ignores_late_refresh () =
+  Eio_main.run (fun _env ->
+    Executor_pool_ref.For_testing.with_pool_option None (fun () ->
+      let module Cache = Server_dashboard_json_cache in
+      let cache = Cache.create () in
+      let placeholder = `Assoc ["state", `String "loading"] in
+      let entered, signal_entered = Eio.Promise.create () in
+      let release_old, finish_old = Eio.Promise.create () in
+      let read ~sw ~sync_first ~key ~compute =
+        Cache.read_result ~now:(fun () -> 100.) ~sync_first ~sw ~cache ~key
+          ~placeholder ~compute
+      in
+      let open Yojson.Safe.Util in
+      Eio.Switch.run (fun sw ->
+        let first = read ~sw ~sync_first:false ~key:"evicted-owner"
+          ~compute:(fun () ->
+            Eio.Promise.resolve signal_entered ();
+            Eio.Promise.await release_old;
+            Ok (`Assoc ["measurement", `Int 1])) in
+        check string "the original async fill starts cold" "warming"
+          (first |> member "cache" |> member "state" |> to_string);
+        Eio.Promise.await entered;
+        (* The held cold entry has never been refreshed. Every completed fill
+           has a newer timestamp, so the capacity boundary evicts that entry
+           without relying on hash-table order among equal timestamps. *)
+        for index = 1 to Cache.max_entries do
+          ignore (read ~sw ~sync_first:true
+            ~key:(Printf.sprintf "eviction-fill-%d" index)
+            ~compute:(fun () -> Ok (`Assoc ["entry", `Int index])) : Yojson.Safe.t)
+        done;
+        let replacement = read ~sw ~sync_first:true ~key:"evicted-owner"
+          ~compute:(fun () -> Ok (`Assoc ["measurement", `Int 2])) in
+        check int "the evicted key admits a replacement fill" 2
+          (replacement |> member "measurement" |> to_int);
+        Eio.Promise.resolve finish_old ());
+      (* The owning switch waits for the released old worker to finish, so
+         this read observes its completed settlement rather than its compute. *)
+      let after = Eio.Switch.run (fun sw ->
+        read ~sw ~sync_first:true ~key:"evicted-owner"
+          ~compute:(fun () -> fail "late refresh removed the fresh replacement")) in
+      check int "late completion cannot overwrite the replacement incarnation" 2
+        (after |> member "measurement" |> to_int);
+      check string "the replacement remains fresh" "fresh"
+        (after |> member "cache" |> member "state" |> to_string)))
 
 let test_runtime_history_keeps_non_error_outcomes () =
   let base = test_dir () in
@@ -2201,6 +2304,8 @@ let () =
       test_case "metrics cache refresh runs as background work" `Quick test_metrics_cache_refresh_runs_as_background;
       test_case "cancelled cold cache fill can be retried" `Quick test_metrics_cache_cancelled_cold_fill_recovers;
       test_case "cancelled switch cannot reserve a cache refresh" `Quick test_metrics_cache_cancelled_switch_does_not_reserve_refresh;
+      test_case "cancelled cache admission preserves the oldest cached value" `Quick test_metrics_cache_cancelled_admission_preserves_oldest;
+      test_case "evicted refresh cannot overwrite its replacement" `Quick test_metrics_cache_eviction_ignores_late_refresh;
       test_case "runtime history preserves yielded non-error outcomes" `Quick test_runtime_history_keeps_non_error_outcomes;
       test_case "decision outcome validation" `Quick test_decision_outcome_validation;
       test_case "unrenderable timestamp is a typed invalid row" `Quick test_unrenderable_decision_timestamp;

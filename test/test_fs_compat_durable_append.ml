@@ -1843,7 +1843,7 @@ let test_private_jsonl_append_rejects_nonregular_and_hardlinked_targets () =
         | Fs_compat.Private_file_failed (Fs_compat.Existing_jsonl_refused detail) ->
           check bool "symlink refusal mentions kind" true
             (String.starts_with
-               ~prefix:"private JSONL store is not a regular file: symlink"
+               ~prefix:"private JSONL store is not a regular file: symbolic_link"
                detail)
         | _ -> fail "symbolic-link JSONL append target was accepted");
        check int "external target permissions unchanged" 0o644

@@ -6306,7 +6306,7 @@ let test_owner_preparation_wait_and_explicit_retry ?(generic_failure=false)
         (Owner.direct_checkpoint owner ~operation_id:id |> owner_ok)) in
   let execute ~sw:_ ~keeper_name:_ ~claim =
     let owner = Eio.Promise.await owner_p in
-    let operation = claim () |> owner_ok |> Option.get in
+    let operation : Chat_operation.t = claim () |> owner_ok |> Option.get in
     if Chat_operation.Operation_id.equal id operation.operation_id then (
       incr attempts;
       match !attempts with

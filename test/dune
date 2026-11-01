@@ -5307,6 +5307,7 @@
 
 (include stanzas/test_tui_fusion_refresh.inc)
 (include stanzas/test_tui_fusion_recovery.inc)
+(include stanzas/test_tui_fusion_sse.inc)
 
 (include stanzas/test_tui_fusion_workspace.inc)
 

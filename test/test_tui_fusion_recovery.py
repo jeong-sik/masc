@@ -39,14 +39,17 @@ DETAIL_PATH = LIST_PATH + "/a"
 
 class FixtureServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
     daemon_threads = True
+    request_queue_size = 128
 
     def __init__(self, base: str) -> None:
         super().__init__(("127.0.0.1", 0), FixtureHandler)
         self.base = base
         self.phase = "setup"
         self.requests: collections.Counter[tuple[str, str]] = collections.Counter()
+        self.responses: collections.Counter[tuple[str, str]] = collections.Counter()
         self.condition = threading.Condition()
         self.release_recovery = threading.Event()
+        self.release_recovery_health = threading.Event()
 
     def record(self, path: str) -> str:
         with self.condition:
@@ -63,6 +66,15 @@ class FixtureServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
         with self.condition:
             return self.requests[(phase, path)]
 
+    def responded(self, phase: str, path: str) -> None:
+        with self.condition:
+            self.responses[(phase, path)] += 1
+            self.condition.notify_all()
+
+    def response_count(self, phase: str, path: str) -> int:
+        with self.condition:
+            return self.responses[(phase, path)]
+
 
 class FixtureHandler(http.server.BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
@@ -72,18 +84,20 @@ class FixtureHandler(http.server.BaseHTTPRequestHandler):
 
     def respond(
         self, status: int, value: object, *, workspace_receipt: bool = False
-    ) -> None:
+    ) -> bool:
         data = json.dumps(value).encode()
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(data)))
-        if workspace_receipt:
-            self.send_header("x-masc-workspace-read", "matched-v1")
-        self.end_headers()
         try:
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            if workspace_receipt:
+                self.send_header("x-masc-workspace-read", "matched-v1")
+            self.end_headers()
             self.wfile.write(data)
+            self.wfile.flush()
         except (BrokenPipeError, ConnectionResetError):
-            pass
+            return False
+        return True
 
     def do_POST(self) -> None:
         self.rfile.read(int(self.headers.get("Content-Length", "0")))
@@ -95,11 +109,13 @@ class FixtureHandler(http.server.BaseHTTPRequestHandler):
         path = request.path
         phase = server.record(path)
         if path == "/health":
+            if phase == "recovery":
+                server.release_recovery_health.wait()
             if phase == "unconfirmed":
-                self.respond(503, {"error": "health unavailable"})
+                sent = self.respond(503, {"error": "health unavailable"})
             else:
                 base = server.base
-                self.respond(
+                sent = self.respond(
                     200,
                     {
                         "status": "ok",
@@ -112,6 +128,8 @@ class FixtureHandler(http.server.BaseHTTPRequestHandler):
                         "startup": {"state_ready": True},
                     },
                 )
+            if sent:
+                server.responded(phase, path)
         elif path in (LIST_PATH, DETAIL_PATH):
             expected = urllib.parse.parse_qs(request.query)
             base = os.path.realpath(server.base)
@@ -123,10 +141,10 @@ class FixtureHandler(http.server.BaseHTTPRequestHandler):
             # Hold both recovery reads so duplicate After_change demands must
             # queue a follow-up before either response is applied.
             if phase == "recovery":
-                server.release_recovery.wait(timeout=10)
+                server.release_recovery.wait()
             run = dict(RUN)
-            if phase == "recovery":
-                run["keeper"] = "fresh-list" if path == LIST_PATH else "fresh-detail"
+            if phase in ("setup", "recovery", "opened", "event"):
+                run["keeper"] = f"{phase}-{'list' if path == LIST_PATH else 'detail'}"
             if path == LIST_PATH:
                 body = {
                     "generated_at": "now",
@@ -141,7 +159,8 @@ class FixtureHandler(http.server.BaseHTTPRequestHandler):
                     "run": run,
                     "evidence": {"status": "pending", "post": None},
                 }
-            self.respond(200, body, workspace_receipt=True)
+            if self.respond(200, body, workspace_receipt=True):
+                server.responded(phase, path)
         elif path == "/api/v1/stream/fleet":
             self.respond(503, {"error": "fleet stream unavailable in fixture"})
         else:
@@ -165,10 +184,15 @@ class FusionRecoveryTest(unittest.TestCase):
             thread.start()
             master, slave = pty.openpty()
             fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 35, 140, 0, 0))
-            env = os.environ.copy()
-            for name in ("MASC_HTTP_BASE_URL", "MASC_TOKEN", "MASC_HTTP_AUTH_STRICT"):
-                env.pop(name, None)
-            env["TERM"] = "xterm-256color"
+            # The loopback peer is a fixture; do not pass live MASC credentials
+            # or the user's runtime configuration to the child process.
+            env = {
+                "HOME": base,
+                "TMPDIR": base,
+                "PATH": os.defpath,
+                "TERM": "xterm-256color",
+                "LANG": "C.UTF-8",
+            }
             process = subprocess.Popen(
                 [
                     self.binary,
@@ -193,10 +217,10 @@ class FusionRecoveryTest(unittest.TestCase):
             ) -> None:
                 deadline = time.monotonic() + timeout
                 while time.monotonic() < deadline:
-                    if predicate():
-                        return
                     if process.poll() is not None:
                         break
+                    if predicate():
+                        return
                     if select.select([master], [], [], 0.05)[0]:
                         try:
                             output.extend(os.read(master, 65536))
@@ -220,57 +244,53 @@ class FusionRecoveryTest(unittest.TestCase):
 
             try:
                 wait_until(
-                    lambda: (
-                        server.count("setup", "/health") >= 2
-                        and (
-                            b"HTTP [partial]" in output or b"HTTP [connected]" in output
-                        )
-                    ),
+                    lambda: server.response_count("setup", "/health") >= 2,
                     "initial workspace identity confirmed",
                 )
                 drain_for(1.0)
                 keys(":")
-                wait_until(
-                    lambda: b"MASC Command palette" in output, "command palette opened"
-                )
+                drain_for(0.3)
                 keys("fusion")
-                wait_until(lambda: b"go Fusion" in output, "Fusion command offered")
-                fusion_output = len(output)
+                drain_for(0.3)
                 keys("\r")
                 wait_until(
-                    lambda: b"MASC Fusion" in output[fusion_output:], "Fusion opened"
+                    lambda: b"setup-list" in output,
+                    "initial list fixture was not applied",
                 )
                 # If the initial probe's reading was withdrawn during startup,
                 # explicitly confirm the fixture before selecting a run.
                 keys("r")
                 wait_until(
-                    lambda: (
-                        server.count("setup", LIST_PATH) >= 1 and b"1 run" in output
-                    ),
+                    lambda: server.response_count("setup", LIST_PATH) >= 2,
                     "Fusion list ready",
                 )
+                drain_for(0.7)
                 keys("\r")
                 wait_until(
-                    lambda: (
-                        server.count("setup", DETAIL_PATH) >= 1
-                        and b"Evidence: pending" in output
-                    ),
-                    "Fusion detail ready",
+                    lambda: b"setup-detail" in output,
+                    "initial detail fixture was not applied",
                 )
 
                 server.set_phase("unconfirmed")
-                old_output = len(output)
                 keys("r")
                 wait_until(
-                    lambda: (
-                        b"[workspace unconfirmed]" in output[old_output:]
-                        and b"HTTP [refresh failed]" in output[old_output:]
-                    ),
-                    "the open detail lost workspace authority",
+                    lambda: server.response_count("unconfirmed", "/health") >= 1,
+                    "the open detail's workspace check failed",
                 )
+                drain_for(0.7)
 
                 server.set_phase("recovery")
                 keys("r")
+                wait_until(
+                    lambda: server.count("recovery", "/health") >= 1,
+                    "recovery workspace check did not start",
+                )
+                # The refresh key has reached the health check. If the 503
+                # did not revoke authority, it could read Fusion immediately.
+                drain_for(1.0)
+                self.assertEqual(server.count("recovery", LIST_PATH), 0)
+                self.assertEqual(server.count("recovery", DETAIL_PATH), 0)
+                server.release_recovery_health.set()
                 wait_until(
                     lambda: (
                         server.count("recovery", LIST_PATH) >= 1
@@ -278,14 +298,10 @@ class FusionRecoveryTest(unittest.TestCase):
                     ),
                     "recovery started both reads",
                 )
-                recovered_output = len(output)
                 server.release_recovery.set()
                 wait_until(
-                    lambda: (
-                        b"fresh-list" in output[recovered_output:]
-                        and b"fresh-detail" in output[recovered_output:]
-                    ),
-                    "both recovery responses reached the open surface",
+                    lambda: b"recovery-list" in output and b"recovery-detail" in output,
+                    "both recovery fixtures were not applied",
                 )
                 # A queued follow-up is emitted only after the blocked reads
                 # settle. The cadence is 1000 seconds and the observer refuses.
@@ -298,8 +314,10 @@ class FusionRecoveryTest(unittest.TestCase):
                     (1, 1),
                     "one authority recovery must not queue duplicate Fusion GETs",
                 )
+                self.assertIsNone(process.poll())
             finally:
                 server.release_recovery.set()
+                server.release_recovery_health.set()
                 if process.poll() is None:
                     process.terminate()
                 try:

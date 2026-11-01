@@ -12086,7 +12086,8 @@ let resource_diagram_frame state ~geometry_stable =
   match state.view, state.resource_focus, server_authority_ready state,
       Masc_tui_portrait_view.current_display () with
   | Resources, Right_pane, true, Masc_tui_portrait_view.Pixels {cell_width;cell_height}
-      when resource_surface_visible state && geometry_stable () ->
+      when resource_surface_visible state
+        && Masc_tui_resource_document.diagrams_allowed state && geometry_stable () ->
       (match Masc_tui_resource_document.current state with
        | Some reading when not reading.requested && Option.is_none reading.error
            && reading.presentation = Masc_tui_resource_catalog.Document ->

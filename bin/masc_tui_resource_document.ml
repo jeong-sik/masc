@@ -13,6 +13,10 @@ let recovery_preview_lead ~requested = Printf.sprintf
   "**%s all revisions**\n\n**! retries the original request; it may apply.**"
   (if requested then "ENABLE" else "REVOKE")
 
+let diagrams_allowed (state : state) =
+  Option.is_none state.resource_share_recovery_prompt
+  && Option.value state.search ~default:state.search_last = ""
+
 let current (state : state) =
   let entries = match visible_resources state with Some rows -> rows | None -> [] in
   let cursor = max 0 (min state.resources_cursor (List.length entries - 1)) in
@@ -60,12 +64,11 @@ let current (state : state) =
         ~image_cursor:state.resource_image_cursor ~text_cursor:state.resource_text_cursor
         ~revisions:state.resource_revision_history ~presentation:state.resource_presentation
         ~metadata_expanded:state.resource_metadata_expanded
-        ~diagrams:(if Option.is_some state.resource_share_recovery_prompt then None else
+        ~diagrams:(if not (diagrams_allowed state) then None else
           match state.resource_diagrams, contents, requested, error,
             state.resource_presentation with
           | Some diagrams, Some parts, false, None, Catalog.Document
-              when Masc_tui_resource_diagrams.owns parts diagrams
-                && Option.value state.search ~default:state.search_last = "" -> Some diagrams
+              when Masc_tui_resource_diagrams.owns parts diagrams -> Some diagrams
           | (Some _ | None), (Some _ | None), (true | false), (Some _ | None),
             (Catalog.Document | Source) -> None)
         ~confirmation:(match entry with Catalog.Mcp _ -> None

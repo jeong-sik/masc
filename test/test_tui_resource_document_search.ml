@@ -16,6 +16,25 @@ let state () =
     name="report";title=None;description=None;mime_type=Some "text/markdown";size=None}]; s
 let loaded () = let s=state () in s.resource_content<-Some(key,parts);s
 let available s = Option.is_some (Doc.search_rows ~cols:120 s)
+let test_diagram_preparation_follows_reading_visibility () =
+  let s = loaded () in
+  check bool "ordinary reading permits preparation" true (Doc.diagrams_allowed s);
+  s.search <- Some "needle";
+  check bool "active search withdraws preparation" false (Doc.diagrams_allowed s);
+  s.search <- None;
+  s.search_last <- "needle";
+  check bool "retained search withdraws preparation" false (Doc.diagrams_allowed s);
+  s.search <- Some "";
+  check bool "cleared current search permits preparation" true (Doc.diagrams_allowed s);
+  let request : Masc.Published_artifact_share.request = {
+    operation_id="01890e2a-4c8e-7b21-9f3c-000000000031"; expected_version=5;
+    requested=true; expected_artifact_revision=3; expected_artifact_sha256=String.make 64 'a' } in
+  let entry : Masc_tui_artifact_share_pending.entry = {
+    base_path="/workspace"; masc_root="/workspace/.masc"; artifact_id="artifact"; request } in
+  s.resource_share_recovery_prompt <- Some {
+    recovery_entry=entry; recovery_workspace=s.workspace_authority; recovery_key=key;
+    recovery_confirmation=Masc_tui_artifact_share_confirmation.create () };
+  check bool "recovery prompt withdraws preparation" false (Doc.diagrams_allowed s)
 let test_admitted () =
   let s=loaded () in
   check bool "admitted original can be searched" true (available s);
@@ -80,6 +99,7 @@ let test_explicit_landings_release_end () =
   check int "Home releases end after extent changes" 0
     (Position.offset ~count:300 ~height:20 s.resource_scroll)
 let () = run "resource document search decisions" (["admission",[
+  test_case "diagram preparation visibility" `Quick test_diagram_preparation_follows_reading_visibility;
   test_case "admitted original" `Quick test_admitted;
   test_case "unread" `Quick test_unread;
   test_case "pending other key" `Quick test_pending_other;

@@ -3077,7 +3077,42 @@ let test_next_task_number_rejects_unreadable_or_broken_event_history () =
     Alcotest.(check int)
       "after restoring readability and removing broken entry, high-water mark is 102"
       102
-      (Workspace.next_task_number config (Workspace.read_backlog config)))
+      (Workspace.next_task_number config (Workspace.read_backlog config));
+    Unix.unlink path;
+    Unix.rmdir month_dir;
+    Unix.rmdir events_dir;
+    Fs_compat.save_file events_dir "corrupted non-directory events root\n";
+    Fun.protect
+      ~finally:(fun () ->
+        (try Unix.unlink events_dir with Unix.Unix_error _ -> ()))
+      (fun () ->
+        let raised_on_non_dir_root =
+          try
+            ignore (Workspace.next_task_number config (Workspace.read_backlog config));
+            false
+          with
+          | Unix.Unix_error _ | Sys_error _ -> true
+        in
+        Alcotest.(check bool)
+          "non-directory .masc/events root propagates error instead of returning 0"
+          true
+          raised_on_non_dir_root;
+        (match
+           Workspace.add_task_with_result
+             config
+             ~title:"Must not allocate ID when .masc/events is a regular file"
+             ~priority:1
+             ~description:"non-directory .masc/events must abort task creation"
+         with
+         | Ok created ->
+           Alcotest.failf
+             "Expected task creation to fail when .masc/events is a regular file, got %s"
+             created.task_id
+         | Error _ -> ());
+        Alcotest.(check int)
+          "backlog unchanged when .masc/events is a regular file"
+          1
+          (List.length (Workspace.read_backlog config).tasks)))
 ;;
 
 (* ============================================================ *)

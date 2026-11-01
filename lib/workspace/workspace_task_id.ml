@@ -375,7 +375,6 @@ let event_history_max_task_id config =
   let events_dir = Filename.concat (masc_dir config) "events" in
   match Unix.stat events_dir with
   | exception Unix.Unix_error (Unix.ENOENT, _, _) -> 0
-  | st when st.st_kind <> Unix.S_DIR -> 0
   | _ ->
     let month_dirs =
       Sys.readdir events_dir

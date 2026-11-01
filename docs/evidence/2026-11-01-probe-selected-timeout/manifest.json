@@ -1,0 +1,142 @@
+{
+  "workflow": "Test",
+  "ref": "fix/probe-selected-timeout-20261101",
+  "executions": [
+    {
+      "name": "baseline",
+      "workflow": "Test",
+      "run_id": 41302158676,
+      "job_id": 124835201070,
+      "url": "https://github.com/jeong-sik/masc/actions/runs/41302158676",
+      "head": "116dd79de7b42b136d2dfa45180344b7a0869452",
+      "ref": "fix/probe-selected-timeout-20261101",
+      "status": "completed",
+      "conclusion": "failure",
+      "checkout_head": "116dd79de7b42b136d2dfa45180344b7a0869452",
+      "raw_capture": "/Users/dancer/me/workspace/yousleepwhen/masc-issues-oldest-20261101/artifacts/issues-oldest-20261101/probe-selected-timeout/baseline-124835201070.raw.log",
+      "raw_bytes": 99853,
+      "raw_sha256": "2806b22e73aa023480327b5e769c9edb330527a2de9f94d109694fa1a505eb25",
+      "selected_capture": "baseline.txt",
+      "selected_bytes": 1865,
+      "selected_sha256": "b29365a41c4eede4dab88ea2a80e97cd994808c7462a213a944291a0950e5ac7",
+      "actual_pass": 2,
+      "actual_fail": 4,
+      "retained_case_pass": 2,
+      "retained_case_fail": 4,
+      "summaries": [
+        "2026-11-01T11:42:12.0823058Z 4 failures! in 13.456s. 6 tests run."
+      ]
+    },
+    {
+      "name": "candidate",
+      "workflow": "Test",
+      "run_id": 41304451817,
+      "job_id": 124841877877,
+      "url": "https://github.com/jeong-sik/masc/actions/runs/41304451817",
+      "head": "3a8ef4d8f533aff349e10e50d49e9b93e9d6a47c",
+      "ref": "fix/probe-selected-timeout-20261101",
+      "status": "completed",
+      "conclusion": "success",
+      "checkout_head": "3a8ef4d8f533aff349e10e50d49e9b93e9d6a47c",
+      "raw_capture": "/Users/dancer/me/workspace/yousleepwhen/masc-issues-oldest-20261101/artifacts/issues-oldest-20261101/probe-selected-timeout/candidate-124841877877.raw.log",
+      "raw_bytes": 95649,
+      "raw_sha256": "f6257f64fbbed649e6c0226af49b94834950f7654f0352ec41f7b34a884dd003",
+      "selected_capture": "candidate.txt",
+      "selected_bytes": 2883,
+      "selected_sha256": "9a1a11392ad47ce6b1795b86a028575b173df028f0db70a695fa9405ef91831c",
+      "actual_pass": 16,
+      "actual_fail": 0,
+      "retained_case_pass": 16,
+      "retained_case_fail": 0,
+      "summaries": [
+        "2026-11-01T12:10:57.5816922Z Test Successful in 14.613s. 6 tests run.",
+        "2026-11-01T12:11:27.9880796Z Test Successful in 20.483s. 10 tests run."
+      ]
+    }
+  ],
+  "requests": [
+    {
+      "workflow": "Test",
+      "ref": "fix/probe-selected-timeout-20261101",
+      "head": "116dd79de7b42b136d2dfa45180344b7a0869452",
+      "minimal": true,
+      "suites": [
+        "test_capability_probe_selected_timeout"
+      ],
+      "suite_timeout_sec": 900,
+      "requested_at": "2026-11-01T11:30:12.271910+00:00",
+      "stdout": "https://github.com/jeong-sik/masc/actions/runs/41302158676\n",
+      "stderr": "",
+      "exit_code": 0,
+      "status": "requested_not_observed",
+      "run_id": 41302158676
+    },
+    {
+      "workflow": "Test",
+      "ref": "fix/probe-selected-timeout-20261101",
+      "head": "3a8ef4d8f533aff349e10e50d49e9b93e9d6a47c",
+      "minimal": true,
+      "suites": [
+        "test_capability_probe_selected_timeout",
+        "test_claude_probe_effort_authority"
+      ],
+      "suite_timeout_sec": 900,
+      "requested_at": "2026-11-01T12:01:03.583914+00:00",
+      "stdout": "https://github.com/jeong-sik/masc/actions/runs/41304451817\n",
+      "stderr": "",
+      "exit_code": 0,
+      "status": "requested_not_observed",
+      "reason": "Baseline executed4 idle failures; candidate source and unchanged fixture independently reviewed. Dispatch before lower-stack publication preserves a pure behavioral pair.",
+      "run_id": 41304451817
+    }
+  ],
+  "common_case_keys": {
+    "count": 6,
+    "sha256": "372c187376b51fc67ed41411a2c3a77daa523c72ecfc4288d2c9dd22d3839f8b"
+  },
+  "candidate_case_keys": {
+    "count": 16,
+    "sha256": "9f2d891f710609233032c997f28bfa6a4adb732fa565911d930512f67f2875b6"
+  },
+  "comparison": {
+    "maintained": 2,
+    "fixed": 4,
+    "regressed": 0,
+    "candidate_only_controls": 10
+  },
+  "actual_candidate_execution_order": [
+    "selected probe idle",
+    "Claude native effort authority"
+  ],
+  "source_head": "3a8ef4d8f533aff349e10e50d49e9b93e9d6a47c",
+  "source_snapshot": "source-sha256.json",
+  "full_regression": "not_run",
+  "formal_non_author_approval": false,
+  "issue_closed": false,
+  "retained": {
+    "README.md": {
+      "bytes": 3979,
+      "sha256": "1a60c3b76bde8b533cd34c59c257b8c13cc1d420a0138f137f60d6ed5cb4eb91"
+    },
+    "baseline.txt": {
+      "bytes": 1865,
+      "sha256": "b29365a41c4eede4dab88ea2a80e97cd994808c7462a213a944291a0950e5ac7"
+    },
+    "candidate.txt": {
+      "bytes": 2883,
+      "sha256": "9a1a11392ad47ce6b1795b86a028575b173df028f0db70a695fa9405ef91831c"
+    },
+    "cases.tsv": {
+      "bytes": 3466,
+      "sha256": "2a8eec75088492c6feb33d4b6c163fb9a8167122383613c3af5abd091d9c5a70"
+    },
+    "source-comparison.json": {
+      "bytes": 1976,
+      "sha256": "f371b9dd687e28546776c88763223c5c15aa4eff95e085e1b6dd72419d649dea"
+    },
+    "source-sha256.json": {
+      "bytes": 2471,
+      "sha256": "648c07b76b5c29018d38b2c1495c8770d604cb481f8a3870593aa8aa0fa5f58f"
+    }
+  }
+}

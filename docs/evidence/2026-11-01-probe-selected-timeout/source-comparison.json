@@ -1,0 +1,48 @@
+{
+  "baseline": "116dd79de7b42b136d2dfa45180344b7a0869452",
+  "candidate": "3a8ef4d8f533aff349e10e50d49e9b93e9d6a47c",
+  "complete_pair_delta": [
+    "changelog.d/47242.md",
+    "lib/keeper/keeper_capability_probe.ml",
+    "lib/keeper/keeper_capability_probe.mli"
+  ],
+  "baseline_production_reference": "2709c82231ad0d4c4e77d8dda2ab51edc3a0275d",
+  "unchanged_named_inputs": [
+    "lib/runtime/runtime_instance.ml",
+    "lib/runtime/runtime_instance.mli",
+    "lib/runtime/runtime_inference.ml",
+    "lib/runtime/runtime_inference.mli",
+    "lib/runtime/runtime_claude_code.ml",
+    "lib/runtime/runtime_claude_code.mli",
+    "lib/runtime/runtime_codex_app_server.ml",
+    "lib/runtime/runtime_codex_app_server.mli",
+    "lib/runtime/runtime_antigravity.ml",
+    "lib/runtime/runtime_antigravity.mli",
+    "lib/runtime/runtime_verification.ml",
+    "test/test_runtime_verification.ml",
+    "test/dune",
+    "test/deps/masc_test_deps.ml",
+    "test/deps/dune",
+    "scripts/ci-run-targeted-tests.sh",
+    "scripts/ci/stanza_env.py",
+    ".github/workflows/test.yml"
+  ],
+  "complete_test_tree_identical": true,
+  "pair_core_and_config_trees_identical": true,
+  "fixture_and_runner_inputs_identical": true,
+  "publication_source_binding": {
+    "reference_head": "3a8ef4d8f533aff349e10e50d49e9b93e9d6a47c",
+    "identical_named_inputs": 20,
+    "identical_trees": [
+      "test",
+      "config"
+    ],
+    "lib_tree_delta": [
+      "lib/keeper/keeper_antigravity_runtime.mli"
+    ],
+    "excluded_core_tree": "Later canonical-response producer repair and terminal fixture changes are separate from this historical probe execution.",
+    "core_production_repair_ancestor": "8b33c1143c9551bc7cbf5624dfbd0566fb7bc836",
+    "limits": "No later publication-head, Core repair, full regression, real provider or installed-runtime execution is implied."
+  },
+  "limits": "The new six-case public fixture covers Claude/Codex. Antigravity is a source-reviewed projection change only."
+}

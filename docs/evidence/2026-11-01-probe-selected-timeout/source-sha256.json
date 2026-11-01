@@ -1,0 +1,31 @@
+{
+  "head": "3a8ef4d8f533aff349e10e50d49e9b93e9d6a47c",
+  "files": {
+    "lib/keeper/keeper_capability_probe.ml": "c518dbff9395d5fc4ae0d86eef1bc1b1f2f16c29a4823423e1c75f1491d02426",
+    "lib/keeper/keeper_capability_probe.mli": "9f92eb8438c4c76c589ac85ff07b40ec16166153c89093190b2f211b453df936",
+    "lib/runtime/runtime_instance.ml": "aff8fb5e633c16365b57a2a4b1a2dc8fc34f0de17c962dc75d852c0f05f53749",
+    "lib/runtime/runtime_instance.mli": "4687e0f66e1f3e8af3dbfd8a56fd94eab52ea660bfa249eb96a0e104e56eaaf4",
+    "lib/runtime/runtime_inference.ml": "f27f2b85767e1db02b491d15c67a2651f555293eb119f87d81d6c17003dfb5b6",
+    "lib/runtime/runtime_inference.mli": "80c4cc3dca3a28f1f8bfa26209d9b2b6d753f26a4926b1e6b47f9f8cf4a36e75",
+    "lib/runtime/runtime_claude_code.ml": "0c4b491e51fd11b25bfe6ae13a0d16461721a7e856af16c930f47f04a91e6ebe",
+    "lib/runtime/runtime_claude_code.mli": "26cd12a4ebd641cdee58a9a70596949428424f2dae605de7f2cca31be752e60a",
+    "lib/runtime/runtime_codex_app_server.ml": "d772ca997dba5efbce718a04d54eb3eaf67deb6f4f969cdfe7cb8a6f585382fa",
+    "lib/runtime/runtime_codex_app_server.mli": "326ddb1cb485d9133ec80b57fd09c6bada008871509d7ed8943eb4cad1a76757",
+    "lib/runtime/runtime_antigravity.ml": "158cee3739d1be5c0b7734c0eee89fee45dd12a322d728f93dba40b30e35e3e2",
+    "lib/runtime/runtime_antigravity.mli": "d6816b33feb9bdeba46943615b58193cd5fae318d85275b72b9026e4fde52d89",
+    "lib/runtime/runtime_verification.ml": "1cb1c6164a3a33de45033bdfaf7fd7f4200d2269d7e799dc3f4382ba74fbb3f8",
+    "test/test_runtime_verification.ml": "702358c7c4216f50d7e2a05de7de54089949a94db0008fc9513e4b05c6c6c956",
+    "test/dune": "f392309ddbd2c35166042f508034d2f8647cf87c8fcb1b21ea20082e70349222",
+    "test/deps/masc_test_deps.ml": "867eacb8cdfc177eb05804a06fcf6f8c162f25a49be8b64e969f6e6cdd86002b",
+    "test/deps/dune": "67a195fc8b4d7c7858634e5cd05c2999d0bf2565c88220ab82dc2c692c503dd9",
+    "scripts/ci-run-targeted-tests.sh": "7391426895132a2c027aea2d6c85bfcae18a038fd4e9640cc3c0b9fa66a8ca72",
+    "scripts/ci/stanza_env.py": "8e6905e4009423ffdf2655176166444a9f52d584acb7654ef32e04f90819f35b",
+    ".github/workflows/test.yml": "99286b2989de40ea72ad184b6c8335da64e9213e289e260a4afc16bd3bd8bb6d"
+  },
+  "trees": {
+    "lib": "7af6cfda3330765dec02fe0c4d554dd8dbaa0bb9",
+    "test": "206a9649caca5b214aa34e95867fc7af32e08c26",
+    "packages/agent_core": "c4b3002ea517ec584858ee05971ca84f0da15819",
+    "config": "783ac78ba6a516006c5e20d58c1fed0019a0ca5b"
+  }
+}

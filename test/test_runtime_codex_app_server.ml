@@ -4997,8 +4997,51 @@ supports_native_streaming = false
           | [row] -> (match Turn_record.of_json row with
             | Ok record -> record | Error detail -> fail detail)
           | _ -> fail "expected one actual turn record" in
-        if reject_codex then check bool "B did not inherit A's wire attribution"
-          true (Option.is_none record.request_wire_observation);
+        check bool "the native attempt did not inherit HTTP wire bytes" true
+          (Option.is_none record.request_wire_observation);
+        (if reject_codex then (
+           check bool "refused claim has no earlier input-component attribution"
+             true (Option.is_none record.input_components);
+           check bool "refused claim has no earlier tool-surface reference"
+             true (Option.is_none record.tool_surface_ref);
+           check (option int) "an errored attempt has no context-window attribution"
+             None record.context_window
+         ) else
+           match result with
+           | Error error -> fail (Agent_core.Error.to_string error)
+           | Ok produced ->
+             let module Metrics = Keeper_agent_prompt_metrics in
+             check string "successful result belongs to the native runtime"
+               "codex.codex" produced.Keeper_agent_run.runtime_id;
+             check string "durable record belongs to that native runtime"
+               "codex.codex" record.runtime_profile;
+             check (option int) "the successful turn retains its shaping ceiling"
+               (Some produced.max_context) record.context_window;
+             check bool "the native request retained its observed tool surface"
+               true (Option.is_some record.tool_surface_ref);
+             (match produced.ctx_composition.attribution with
+              | Metrics.Attributed { runtime_profile; segments } ->
+                check string "byte attribution names its native producer"
+                  "codex.codex" runtime_profile;
+                (* This fresh Start transmits the fixture's nonempty history;
+                   it does not represent input held by a resumed session. *)
+                (match segments with
+                 | [] -> fail "fresh native fixture lost its transmitted input attribution"
+                 | _ :: _ -> ());
+                let expected_components =
+                  List.map
+                    (fun (component, (segment : Metrics.prompt_segment_metrics)) ->
+                       { Turn_record.component = component; bytes = segment.bytes })
+                    segments
+                in
+                check bool "durable components retain that same native observation"
+                  true (record.input_components = Some expected_components)
+              | Metrics.Not_measured Metrics.Dispatch_not_reached ->
+                fail "successful fresh native Start was recorded as not dispatched"
+              | Metrics.Not_measured Metrics.Client_session_holds_input ->
+                fail "fresh native Start unexpectedly claims client-held input"
+              | Metrics.Not_measured (Metrics.Input_provenance_unresolved _) ->
+                fail "fresh native fixture has unavailable input provenance"));
         (match record.response_observed_model_input with
          | Some observed when not reject_codex ->
            check string "response fact retains its own runtime"

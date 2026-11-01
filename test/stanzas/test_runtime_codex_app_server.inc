@@ -6,3 +6,7 @@
 (rule
  (alias runtest-test_runtime_codex_app_server_response_delivery)
  (action (run %{exe:test_runtime_codex_app_server.exe} test "response delivery")))
+
+(rule
+ (alias runtest-test_runtime_codex_app_server_last_projection)
+ (action (run %{exe:test_runtime_codex_app_server.exe} test "last projection")))

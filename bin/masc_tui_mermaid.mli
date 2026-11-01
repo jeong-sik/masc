@@ -8,8 +8,9 @@
     any other fenced block.
 
     What is drawn is a closed set. [graph] and [flowchart] in the four
-    directions, with rectangular, rounded and diamond nodes, solid, dotted
-    and thick edges, edge labels in both spellings, chains and [&] groups.
+    directions, with rectangular, rounded, diamond, hexagonal, asymmetric,
+    cylindrical, subroutine, stadium and circle nodes; solid, dotted and
+    thick edges; edge labels in both spellings, chains and [&] groups.
     [stateDiagram] and [stateDiagram-v2] in the four directions, with rounded
     state boxes, initial and terminal [[*]] pseudo-states, [-->] transitions
     and their labels, state descriptions, [<<choice>>] states drawn as a
@@ -46,13 +47,15 @@ type direction =
   | Right_left
 
 type shape =
-  | Rect  (** [id[label]], [id>label]] *)
+  | Rect  (** [id[label]] *)
   | Round  (** [id(label)] *)
-  | Diamond  (** [id{label}], [id{{label}}]; drawn as a box whose label wears ⟨ ⟩ *)
+  | Diamond  (** [id{label}]; drawn as a box whose label wears ⟨ ⟩ *)
+  | Hexagon  (** [id{{label}}] *)
+  | Asymmetric  (** [id>label]] *)
   | Database  (** [id[(label)]]; drawn as a cylinder box with ╓ ╖ ╙ ╜ corners and ║ sides *)
   | Subroutine  (** [id[[label]]]; drawn as a double-line box with ╔ ╗ ╚ ╝ corners and ║ ═ borders *)
   | Stadium  (** [id([label])]; drawn with rounded ends *)
-  | Circle  (** [id((label))]; drawn as a circle node *)
+  | Circle  (** [id((label))]; approximated by a three-row elliptical outline *)
   | Bar  (** a state diagram's [<<fork>>] or [<<join>>]; a thick line across the flow *)
 
 (** Where a state diagram's [[*]] was written: at the top of the diagram, or

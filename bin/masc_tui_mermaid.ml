@@ -10,6 +10,8 @@ type shape = Masc_tui_mermaid_grammar.shape =
   | Rect
   | Round
   | Diamond
+  | Hexagon
+  | Asymmetric
   | Database
   | Subroutine
   | Stadium
@@ -200,7 +202,7 @@ let parse_with_source_labels_internal text =
   (match diagram with
    | Graph graph ->
        List.iter (fun node -> match node.id, node.shape with
-         | Named _, (Rect | Round | Diamond | Subroutine | Database | Stadium | Circle) ->
+         | Named _, (Rect | Round | Diamond | Hexagon | Asymmetric | Subroutine | Database | Stadium | Circle) ->
              add (Node_label node.id) node.label
          | Named _, Bar | (Initial _ | Final _), _ -> ()) graph.nodes;
        List.iteri (fun index edge -> Option.iter (add (Edge_label index)) edge.label) graph.edges;
@@ -599,13 +601,15 @@ let ordering_sweeps = 4
 let bar_length = 7
 let bar_thickness = 1
 
-let shown_label node =
+(* Keep the former diamond geometry for hexagons, including the extra cells
+   around the label, so this shape change does not reroute adjacent edges. *)
+let layout_label node =
   match node.shape with
-  | Diamond -> "\xe2\x9f\xa8" ^ node.label ^ "\xe2\x9f\xa9"
-  | Rect | Round | Database | Subroutine | Stadium | Circle -> node.label
+  | Diamond | Hexagon -> "\xe2\x9f\xa8" ^ node.label ^ "\xe2\x9f\xa9"
+  | Rect | Round | Asymmetric | Database | Subroutine | Stadium | Circle -> node.label
   | Bar -> ""
 
-let box_width node = Layout.display_width (shown_label node) + (2 * box_pad)
+let box_width node = Layout.display_width (layout_label node) + (2 * box_pad)
 
 (* A subgraph already laid out: [c_rows] is its drawing, and the scope that
    holds it treats the whole thing as one box. *)
@@ -842,7 +846,7 @@ let rec layout_scope ~trace ~cols ~direction ~node_of ~nodes ~groups ~edges =
             match node.shape with
             (* Across the flow whichever way the flow runs. *)
             | Bar -> (bar_length, bar_thickness)
-            | Rect | Round | Diamond | Database | Subroutine | Stadium | Circle ->
+            | Rect | Round | Diamond | Hexagon | Asymmetric | Database | Subroutine | Stadium | Circle ->
                 across_and_along (box_width node, box_height))
         | Cluster c -> across_and_along (cluster_width c, cluster_height c)
         | Dummy -> across_and_along (1, 0)
@@ -1063,15 +1067,36 @@ let rec layout_scope ~trace ~cols ~direction ~node_of ~nodes ~groups ~edges =
                   done;
                   let identity = match node.id with Named _ -> Some (Node_label node.id)
                     | Initial _ | Final _ -> None in
-                  let prefix, suffix = if node.shape=Diamond then "⟨", "⟩" else "", "" in
+                  let prefix, suffix = match node.shape with
+                    | Diamond -> "⟨", "⟩"
+                    | Hexagon -> " ", " "
+                    | Rect | Round | Asymmetric | Database | Subroutine | Stadium | Circle | Bar -> "", "" in
                   put_parts canvas (top + 1) (lft + 2) [None,prefix;identity,node.label;None,suffix]
                 in
+                let glyph r c text = put_text ~placement:Generated_glyph canvas r c text in
+                let mid = (top + bottom) / 2 in
                 match node.shape with
                 (* One thick run, one cell deep, in the stroke a thick edge
                    uses; the edges meet it as they meet a border. *)
                 | Bar -> draw_line canvas ~style:Border_thick (r0, c0) (r1, c1)
-                | Round | Stadium | Circle -> box ~line:Border_solid ~round:true
+                | Round -> box ~line:Border_solid ~round:true
+                | Stadium ->
+                    box ~line:Border_solid ~round:true;
+                    glyph mid lft "("; glyph mid rgt ")"
+                | Circle ->
+                    box ~line:Border_solid ~round:true;
+                    glyph top lft "/"; glyph top rgt "\\";
+                    glyph mid lft "("; glyph mid rgt ")";
+                    glyph bottom lft "\\"; glyph bottom rgt "/"
                 | Rect | Diamond -> box ~line:Border_solid ~round:false
+                | Hexagon ->
+                    box ~line:Border_solid ~round:false;
+                    glyph top lft "/"; glyph top rgt "\\";
+                    glyph mid lft "‹"; glyph mid rgt "›";
+                    glyph bottom lft "\\"; glyph bottom rgt "/"
+                | Asymmetric ->
+                    box ~line:Border_solid ~round:false;
+                    glyph top lft "\\"; glyph mid lft "›"; glyph bottom lft "/"
                 | Subroutine -> box ~line:Border_double ~round:false
                 | Database -> box ~line:Border_cylinder ~round:false)
             | Cluster c ->

@@ -179,11 +179,12 @@ let test_styling_statements_change_nothing () =
 
 let test_node_shapes_database_subroutine_stadium () =
   let g =
-    parsed "flowchart TD\nDB[(Postgres)]\nSUB[[Worker]]\nST([Pill])\nCIR((Ring))\nREC[Box]"
+    parsed "flowchart TD\nDB[(Postgres)]\nSUB[[Worker]]\nST([Pill])\nCIR((Ring))\nREC[Box]\nHEX{{Six}}\nODD>Flag]"
   in
   let shapes = List.map (fun (n : Mermaid.node) -> n.shape) g.nodes in
   Alcotest.(check bool) "all shapes recognized" true
-    (shapes = [ Mermaid.Database; Mermaid.Subroutine; Mermaid.Stadium; Mermaid.Circle; Mermaid.Rect ])
+    (shapes = [ Mermaid.Database; Mermaid.Subroutine; Mermaid.Stadium; Mermaid.Circle; Mermaid.Rect;
+                Mermaid.Hexagon; Mermaid.Asymmetric ])
 
 let test_an_edge_that_crosses_a_subgraph_boundary_is_refused () =
   match failure "graph TD\nsubgraph One\nA --> B\nend\nB --> C" with

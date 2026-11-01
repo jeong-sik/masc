@@ -1,0 +1,26 @@
+2026-11-01T08:07:07.3567324Z 842685433e1142e9458a0f38674a31e283bf8965
+2026-11-01T08:07:10.2502274Z [command]/usr/bin/git log -1 --format=%H
+2026-11-01T08:07:10.2536146Z 842685433e1142e9458a0f38674a31e283bf8965
+2026-11-01T08:08:12.8721966Z   TARGET_SUITES: test_keeper_claude_selected_inference,test_official_client_claim_cause
+2026-11-01T08:08:12.8857863Z   TARGET_SUITES: test_keeper_claude_selected_inference,test_official_client_claim_cause
+2026-11-01T08:08:12.9331791Z [targeted] EIO_BACKEND=<unset> timeout=600s per suite
+2026-11-01T08:08:12.9359079Z [targeted] @runtest-test_keeper_claude_selected_inference: start 2026-11-01T08:08:12Z (dune alias)
+2026-11-01T08:18:09.2837742Z   [OK]          selected inference           0   selected high survives a rep...
+2026-11-01T08:18:13.1541503Z [targeted] @runtest-test_keeper_claude_selected_inference: TIMEOUT exit 124 after 601s
+2026-11-01T08:18:13.1839872Z [targeted] dune build test/test_official_client_claim_cause.exe
+2026-11-01T08:18:27.6234114Z [targeted] test/test_official_client_claim_cause: stanza env MASC_BASE_PATH= ZAI_API_KEY= TYPESAFEAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+2026-11-01T08:18:27.6260288Z [targeted] test/test_official_client_claim_cause: start 2026-11-01T08:18:27Z
+2026-11-01T08:18:27.7128434Z   [OK]          typed contract           0   strict codec.
+2026-11-01T08:18:27.7129478Z   [OK]          typed contract           1   remote fence stays distinct.
+2026-11-01T08:18:27.7191110Z   [OK]          typed contract           2   resolved recovery is not restore...
+2026-11-01T08:18:27.7216790Z   [OK]          typed contract           3   unreadable store preserves the r...
+2026-11-01T08:18:27.7270937Z   [OK]          actual adapters          0   codex/effect-fenced.
+2026-11-01T08:18:27.7315510Z   [OK]          actual adapters          1   codex/bootstrap-floor.
+2026-11-01T08:18:27.7372462Z   [OK]          actual adapters          2   claude/effect-fenced.
+2026-11-01T08:18:27.7433441Z   [OK]          actual adapters          3   claude/bootstrap-floor.
+2026-11-01T08:18:27.7478850Z   [OK]          actual adapters          4   antigravity/effect-fenced.
+2026-11-01T08:18:27.7530066Z   [OK]          actual adapters          5   antigravity/bootstrap-floor.
+2026-11-01T08:18:27.7574220Z   [OK]          actual adapters          6   muse/effect-fenced.
+2026-11-01T08:18:27.7628159Z   [OK]          actual adapters          7   muse/bootstrap-floor.
+2026-11-01T08:18:27.7628508Z Test Successful in 0.050s. 12 tests run.
+2026-11-01T08:18:27.7693917Z [targeted] test/test_official_client_claim_cause: OK in 0s

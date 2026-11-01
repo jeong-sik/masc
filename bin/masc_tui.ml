@@ -11607,7 +11607,9 @@ let prepare_remote_image_bytes url =
    rendering; the loading line is shown at once so the keypress is not silent.
    terminal_draws_images = false skips the download and opens the page in a
    browser instead. *)
-let launch_image_render _state ~mailbox ~notice ~title ~caption ~page_url image_url =
+let launch_image_render state ~mailbox ~notice ~title ~caption ~page_url image_url =
+  state.image_request_generation <- state.image_request_generation + 1;
+  state.sent_image_read <- None;
   if !terminal_draws_images = Some false then
     let url =
       Masc_tui_browser.browser_url { Masc_tui_browser.title; page_url; image_url }
@@ -11619,6 +11621,13 @@ let launch_image_render _state ~mailbox ~notice ~title ~caption ~page_url image_
     | Error err ->
         notice ~kind:Notice_failure (Printf.sprintf "Could not open browser: %s" err)
   else begin
+    let view = state.view in
+    let request = {sir_generation=state.image_request_generation; sir_view=view;
+      sir_keeper=(if view = Resources then None else state.msg_target_keeper_name);
+      sir_name=title; sir_owner=Remote_url_image_read state.workspace_authority;
+      sir_resource=None;
+      sir_purpose=Open_image} in
+    state.sent_image_read <- Some request;
     notice ~kind:Notice_reply (Printf.sprintf "Loading image: %s" image_url);
     let run () =
       let result =
@@ -11626,14 +11635,14 @@ let launch_image_render _state ~mailbox ~notice ~title ~caption ~page_url image_
             prepare_remote_image_bytes image_url)
       in
       enqueue_async mailbox
-        (Image_render_ready { title; caption; page_url; image_url; result })
+        (Image_render_ready { request; title; caption; page_url; image_url; result })
     in
     match Eio_context.get_switch_opt () with
     | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
     | None ->
         enqueue_async mailbox
           (Image_render_ready
-             { title; caption; page_url; image_url;
+             { request; title; caption; page_url; image_url;
                result = Error "Eio switch unavailable" })
   end
 
@@ -11825,7 +11834,8 @@ let prepare_inspected_frame state ~mailbox =
          let raster = {Masc_tui_pele.width=window.columns*cw;
            height=window.rows*ch;crop=Some crop} in
          let deliver = match pending.sir_owner with
-           | Local_file_image_read _ | Draft_image_read _ -> enqueue_async
+           | Local_file_image_read _ | Remote_url_image_read _
+           | Draft_image_read _ -> enqueue_async
            | Peer_image_read _ -> workspace_enqueue state in
          draw_inspected_image ~fresh:false state inspected;
          Eio.Fiber.fork_daemon ~sw (fun () ->
@@ -12123,6 +12133,7 @@ let withdraw_pending_music_editor state =
 (* Take the picture away and give the frame back. The terminal holds images in
    its own layer, so clearing the screen is not enough to remove one. *)
 let close_image state =
+  state.sent_image_read <- None;
   browser_pointer_press := None;
   browser_image_region := None;
   state.browser_viewport <- None;
@@ -22376,9 +22387,17 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
         | Ok (presentation,scene) -> draw_prepared_image ?scene ~origin state ~refuse ~title:name presentation
       end
        | Some {sir_purpose=(Open_image | Inspect_image _);_} | None -> ())
-  | Image_render_ready { title; caption; page_url; image_url; result } ->
-      if not state.msx_open then begin
-      let notice = chat_notice state ~keeper_name:state.msg_target_keeper_name in
+  | Image_render_ready { request; title; caption; page_url; image_url; result } ->
+      let current = match state.sent_image_read with
+        | Some pending when pending == request ->
+          state.sent_image_read <- None;
+          not state.msx_open && request.sir_generation = state.image_request_generation
+          && request.sir_view = state.view
+          && (request.sir_view = Resources || request.sir_keeper = state.msg_target_keeper_name)
+          && image_reading_is_current state request
+        | Some _ | None -> false in
+      if current then begin
+      let notice = image_notice state ~view:request.sir_view ~keeper_name:request.sir_keeper in
       (match result with
        | Ok data ->
            let refuse reason =

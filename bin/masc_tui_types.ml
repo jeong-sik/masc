@@ -8783,6 +8783,7 @@ type schedule_form_refusal =
 
 type image_read_owner =
   | Local_file_image_read of workspace_authority
+  | Remote_url_image_read of workspace_authority
   | Draft_image_read of workspace_authority * Masc_tui_keeper_chat_projection.attachment
   | Peer_image_read of unit ref
 
@@ -11124,12 +11125,13 @@ let restore_message_draft (state : state) keeper_name =
       state.msg_attachments_since <- draft.kcd_since;
       state.msg_recall_walk <- draft.kcd_recall
 
-(* A local draft survives peer reconfirmation but never a workspace/draft
-   replacement. Peer images retain the exact reading that acquired them.
+(* Local files, drafts and explicit remote URLs survive peer reconfirmation
+   but never a workspace replacement. Peer images retain their exact reading.
    Completion, retirement and footer projection use this same admission. *)
 let image_reading_is_current (state : state) (pending : sent_image_read) =
   match pending.sir_owner with
   | Local_file_image_read authority -> authority = state.workspace_authority
+  | Remote_url_image_read authority -> authority = state.workspace_authority
   | Draft_image_read (authority, attachment) ->
     authority = state.workspace_authority
     && List.exists (fun current -> current == attachment) state.msg_attachments

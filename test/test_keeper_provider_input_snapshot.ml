@@ -575,7 +575,23 @@ let test_continuity_export_keeps_every_attributed_request_and_exact_boundary () 
     check string "corrupt turn_ref fails closed" "unavailable"
       (after_corrupt |> member "requests" |> member "kind" |> to_string);
     check string "corrupt turn_ref reason" "malformed continuity request turn identity"
-      (after_corrupt |> member "requests" |> member "reason" |> to_string))
+      (after_corrupt |> member "requests" |> member "reason" |> to_string);
+    (* A v3 row with the turn_ref field entirely absent is corruption, not an
+       unattributed request: the observation must fail closed instead of
+       exporting a partial list as complete. The writer always records the
+       field, writing an explicit null when unattributed. *)
+    Dated_jsonl.append
+      request_store
+      (`Assoc
+         [ "schema", `String "masc.continuity-request.v3"
+         ; "keeper", `String keeper
+         ]);
+    let after_missing = match E.read ~config ~keeper ~turn_ref:reference with
+      | Ok value -> value | Error error -> fail (Snapshot.read_error_to_string error) in
+    check string "missing turn_ref field fails closed" "unavailable"
+      (after_missing |> member "requests" |> member "kind" |> to_string);
+    check string "missing turn_ref reason" "continuity request missing turn identity field"
+      (after_missing |> member "requests" |> member "reason" |> to_string))
 ;;
 
 let () =

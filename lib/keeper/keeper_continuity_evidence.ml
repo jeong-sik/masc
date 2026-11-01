@@ -58,9 +58,15 @@ let requests ~config ~keeper ~turn_ref =
             stop "continuity request owner mismatch"
           else (
             match member "turn_ref" json with
-            | None | Some `Null ->
+            | Some `Null ->
+              (* The writer records an explicit null for an unattributed
+                 request; only that shape is a legitimate skip. A v3 row
+                 missing the field entirely is corrupted: it cannot be
+                 attributed to any turn, so the observation must fail rather
+                 than return a partial list as complete. *)
               incr skipped_unattributed_rows;
               None
+            | None -> stop "continuity request missing turn identity field"
             | Some value ->
               match Ids.Turn_ref.of_yojson value with
               | Error _ -> stop "malformed continuity request turn identity"

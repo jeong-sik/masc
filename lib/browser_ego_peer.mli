@@ -132,6 +132,10 @@ val assert_input_reset : t -> generation:string -> (unit, string) result
     including an unmanaged Page. This is not current focus, adoption, input
     authority or login proof. An absent boundary Page stays absent. SDK waits
     are not wrapped in a host reply clock; a lost result is never replayed.
+    [wait_for_control] forwards its positive finite SDK interval and timeout
+    unchanged; an omitted option retains the SDK default. Its caller wait is
+    executor-owned and adds no host reply-window limit. This availability
+    observation neither takes over a user-held Space nor clears uncertain input.
     The peer does not create an Ask or verify an
     operator answer itself. Reads fail
     before any effect. [goto], [back], [forward], [reload] and

@@ -350,7 +350,7 @@ let support backend operation = match backend with
     | Wait_for_control -> (match backend with
       | Connected Browser_lane.Ego_task_space -> conditional ~action:"wait_for_control" Act
           ["Requires the exact observed clientId and an agent-owned Space. Native SDK wait only; never claims or takes over user control.";
-           "controlOptions accepts positive finite interval/timeout milliseconds. The timeout must fit this action's reply window: a longer one is refused before the wait starts, and an omitted one waits for that window; an omitted interval keeps the SDK default. Availability is an observation, not permission for later input or proof of input release."]
+           "controlOptions accepts positive finite interval/timeout milliseconds, forwarded unchanged; omitted options retain their SDK defaults. The SDK owns the polling deadline and the executor-owned caller adds no host reply-window limit. Availability is an observation, not permission for later input or proof of input release."]
       | Connected (Browser_lane.Web_extension|Browser_lane.Webdriver_bidi)|Owned_gecko|Owned_chromium|Safari_unavailable ->
           Unsupported "Only an ego connection provides the native Space control wait.")
     | Adopt_tab -> manage_page backend ~action:"adopt_tab"

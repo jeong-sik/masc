@@ -494,10 +494,9 @@ and `bind_goal` can record a different Space for the Goal.
 `masc_browser_act` with `action: "wait_for_control"`, the observed live
 `clientId` and optional `controlOptions: {interval, timeout}` invokes Ego's
 `TaskSpace.waitForControl()` inside the same agent-owned Space. Both options
-are positive finite milliseconds. The SDK owns polling and its deadline, and
-MASC adds no timer around that call, so the timeout must end inside the
-action's reply window: a longer one is refused before the wait starts, and an
-omitted one waits for that window. An omitted interval keeps the SDK default.
+are positive finite milliseconds and are forwarded unchanged. Omit either option
+to retain its SDK default. The SDK owns polling and its deadline; the
+executor-owned caller and native runner add no host reply-window limit.
 
 This is an in-place SDK availability observation. It does not complete a login
 handoff, reclaim a user-held Space, or clear uncertain input release. A handed-off

@@ -1123,22 +1123,23 @@ let rec workspace_message_is_read = function
     -> false
 
 
-(* Whether a pending share or copy makes this message stale: a read of the
-   document being copied, or the answer to the share recovery lookup. Every
-   other message is unaffected. *)
-let rec board_preview_waits_for_input = function
-  | Workspace_scoped (_, _, message) | Workspace_operation message ->
-      board_preview_waits_for_input message
-  | Sent_image_ready {view=Board;_} -> true
-  | Board_attachment_saved (_, Ok (Board_image_open_ready _ | Board_image_open_retry _)) -> true
-  | _ -> false
-
-let rec message_matches_share_input ~resource_read ~recovery_loaded = function
+(* Reads that may be withdrawn by pending input, and Board openings that must
+   wait for the input to select their still-current owner. *)
+let rec message_waits_for_input ~resource_read ~recovery_loaded = function
   | Workspace_scoped (_, _, message) ->
-      message_matches_share_input ~resource_read ~recovery_loaded message
+      message_waits_for_input ~resource_read ~recovery_loaded message
+  | Workspace_operation message ->
+      message_waits_for_input ~resource_read:(fun _ -> false)
+        ~recovery_loaded:(fun _ -> false) message
   | Resource_read (request, _, _) -> resource_read request
   | Resource_share_recovery_loaded (request, _) -> recovery_loaded request
-  | Chat_search_finished _ | Workspace_operation _ | Chat_command_read_completed _
+  | Sent_image_ready {view;_} -> view = Board
+  | Board_attachment_saved (_, result) ->
+      (match result with
+       | Error _ -> false
+       | Ok (Board_image_open_ready _ | Board_image_open_retry _) -> true
+       | Ok (Board_image_open_failed _ | Board_image_open_finished _ | Board_saved_original _) -> false)
+  | Chat_search_finished _ | Chat_command_read_completed _
   | Workspace_identity_unconfirmed _ | Schedule_form_authority_refused _
   | Lane_package_catalog_loaded _ | Lane_package_preview_loaded _
   | Keeper_queue_resume_confirmed _ | Keeper_queue_loaded _ | Lane_addons_loaded _
@@ -1180,7 +1181,7 @@ let rec message_matches_share_input ~resource_read ~recovery_loaded = function
   | Tools_async_task_history_loaded _ | Runtime_lane_slots_written _ | Runtime_catalog_loaded _
   | Runtime_assignment_changed _ | Keeper_chat_approval_answered _
   | Keeper_tool_approvals_loaded _ | Listen_prepared _ | Resource_diagram_ready _
-  | Sent_image_ready _ | Image_render_ready _ | Keeper_turns_loaded _
+  | Image_render_ready _ | Keeper_turns_loaded _
   | Keeper_chat_control_received _ | Gate_snapshot_loaded _ | Gate_approval_resolved _
   | Gate_auto_judge_retried _ | Gate_mode_set _ | Surface_tool_approval_answered _
   | Keeper_gate_settings_loaded _ | Keeper_tool_modes_loaded _ | Keeper_tool_mode_set _
@@ -1191,7 +1192,7 @@ let rec message_matches_share_input ~resource_read ~recovery_loaded = function
   | Schedule_wake_history_loaded _ | Keeper_schedules_loaded _ | System_logs_loaded _
   | Schedule_cancel_done _ | Verification_verdict_done _ | Harness_label_done _
   | Chat_call_loaded _ | Board_attachment_loaded _ | Board_attachment_prepared _
-  | Board_attachment_saved _ | Keeper_calls_loaded _ | Goal_timeline_loaded _
+  | Keeper_calls_loaded _ | Goal_timeline_loaded _
   | Task_history_loaded _ | Task_cancel_done _ | Verification_evidence_exported _
   | Verification_evidence_loaded _ | Keeper_settings_editor_loaded _
   | Keeper_config_view_loaded _ | Keeper_items_loaded _ | Keeper_sandbox_view_loaded _

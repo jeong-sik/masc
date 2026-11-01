@@ -622,7 +622,6 @@ let watch_managed_page = "    watchDownloads(task.page(args.label), args.label);
 let find_managed_tab = "  const tab = (await task.tabs()).find(item => item.label === args.label);"
 let managed_refusals = [
   "  if (tab === undefined) emit({ok: false, before: true, error: \"browser tab is no longer present\"});" ]
-let managed_page = String.concat "\n" (download_watch :: find_managed_tab :: managed_refusals @ ["  else {"; watch_managed_page])
 (* The installed SDK guide treats unknown-origin Pages as user-owned when
    deciding whether to close. Explicit adoption grants Page operations but
    does not change that disposition; release returns the tab without closing. *)

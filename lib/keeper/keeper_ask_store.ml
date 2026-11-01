@@ -331,6 +331,8 @@ let withdraw_with_interleaving ~before_append ~after_append
            | Ok snapshot ->
                let rows = match snapshot with Missing_log -> [] | Stored_rows rows -> rows in
                (match find_row rows ask_id with
+                (* Confirm the requested outcome, not a particular append.
+                   Concurrent callers may have recorded identical withdrawals. *)
                 | Some (_, Keeper_ask.Withdrawn_because canonical)
                   when String.equal canonical.reason reason && canonical.withdrawn_at = now -> Ok ()
                 | Some (_, Keeper_ask.Answered_by { answered_at; _ }) ->

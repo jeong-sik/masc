@@ -331,6 +331,59 @@ let a_racing_withdrawal_keeps_the_first_reason () =
   | Some (Keeper_ask.Open | Keeper_ask.Answered_by _) | None ->
       Alcotest.fail "the first withdrawal was lost"
 
+let identical_racing_withdrawals_confirm_the_same_outcome () =
+  let base_path = temp_dir () in
+  record base_path "ask-1";
+  let withdraw () = Keeper_ask_store.withdraw ~base_path ~keeper_name:keeper
+      ~ask_id:"ask-1" ~reason:"done elsewhere" ~now:1100. in
+  let before_append () = match withdraw () with
+    | Ok () -> ()
+    | Error error -> Alcotest.fail (Keeper_ask_store.withdraw_failure_to_string error) in
+  (match Keeper_ask_store.For_testing.withdraw_with_interleaving ~before_append
+      ~after_append:(fun () -> ()) ~base_path ~keeper_name:keeper ~ask_id:"ask-1"
+      ~reason:"done elsewhere" ~now:1100. with
+   | Ok () -> ()
+   | Error error -> Alcotest.fail (Keeper_ask_store.withdraw_failure_to_string error));
+  (match Keeper_ask_store.rows_result ~base_path ~keeper_name:keeper with
+   | Ok (Keeper_ask_store.Stored_rows [_, (_, Keeper_ask.Withdrawn_because {reason;withdrawn_at})]) ->
+       Alcotest.(check string) "one canonical outcome retains its reason" "done elsewhere" reason;
+       Alcotest.(check (float 0.)) "and its timestamp" 1100. withdrawn_at
+   | Ok _ | Error _ -> Alcotest.fail "matching withdrawals lost their canonical outcome");
+  let path = Keeper_ask_store.log_path ~base_path ~keeper_name:keeper in
+  let before = (Unix.stat path).Unix.st_size in
+  (match withdraw () with
+   | Error (Keeper_ask_store.Withdraw_already_withdrawn _) -> ()
+   | Ok () -> Alcotest.fail "a settled preflight was treated as an overlapping request"
+   | Error error -> Alcotest.fail (Keeper_ask_store.withdraw_failure_to_string error));
+  Alcotest.(check int) "settled preflight appends nothing" before (Unix.stat path).Unix.st_size
+
+let committed_withdrawal_without_a_terminal_row_is_unconfirmed ~missing () =
+  let base_path = temp_dir () in
+  record base_path "ask-1";
+  let path = Keeper_ask_store.log_path ~base_path ~keeper_name:keeper in
+  let saved = path ^ ".committed" in
+  let after_append () =
+    Unix.rename path saved;
+    if not missing then
+      Out_channel.with_open_bin path (fun out ->
+        output_string out (Yojson.Safe.to_string
+          (Keeper_ask.event_to_json (Keeper_ask.Asked (an_ask ~ask_id:"ask-1"))) ^ "\n")) in
+  Fun.protect
+    ~finally:(fun () ->
+      if Sys.file_exists saved then (
+        if Sys.file_exists path then Unix.unlink path;
+        Unix.rename saved path))
+    (fun () ->
+      match Keeper_ask_store.For_testing.withdraw_with_interleaving
+          ~before_append:(fun () -> ()) ~after_append ~base_path ~keeper_name:keeper
+          ~ask_id:"ask-1" ~reason:"done elsewhere" ~now:1100. with
+      | Error (Keeper_ask_store.Withdraw_recorded_unconfirmed _) -> ()
+      | Ok () -> Alcotest.fail "an absent canonical withdrawal became confirmed success"
+      | Error error -> Alcotest.fail (Keeper_ask_store.withdraw_failure_to_string error));
+  match Keeper_ask_store.rows_result ~base_path ~keeper_name:keeper with
+  | Ok (Keeper_ask_store.Stored_rows [_, (_, Keeper_ask.Withdrawn_because _)]) -> ()
+  | Ok _ | Error _ -> Alcotest.fail "confirmation failure changed the committed withdrawal"
+
 let committed_withdrawal_with_unreadable_outcome_is_explicit () =
   let base_path = temp_dir () in
   record base_path "ask-1";
@@ -472,6 +525,12 @@ let () =
             a_racing_answer_prevents_withdrawal_acknowledgement;
           Alcotest.test_case "a racing withdrawal retains the first reason" `Quick
             a_racing_withdrawal_keeps_the_first_reason;
+          Alcotest.test_case "identical racing withdrawals confirm the same outcome" `Quick
+            identical_racing_withdrawals_confirm_the_same_outcome;
+          Alcotest.test_case "a committed withdrawal with a missing canonical row is unconfirmed" `Quick
+            (committed_withdrawal_without_a_terminal_row_is_unconfirmed ~missing:true);
+          Alcotest.test_case "a committed withdrawal with an open canonical row is unconfirmed" `Quick
+            (committed_withdrawal_without_a_terminal_row_is_unconfirmed ~missing:false);
           Alcotest.test_case "committed withdrawal with unreadable outcome is explicit" `Quick
             committed_withdrawal_with_unreadable_outcome_is_explicit;
           Alcotest.test_case "withdrawal storage failures are runtime failures" `Quick

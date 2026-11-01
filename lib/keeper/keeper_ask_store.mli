@@ -9,8 +9,9 @@
     and withdrawal preflight remain optimistic: two surfaces can observe an
     open ask before either appends, so competing terminal rows may land. The
     fold chooses the first terminal event. {!answer} and {!withdraw} reread
-    that canonical fold before returning [Ok], and report a competing winner
-    or a committed-but-unconfirmed append explicitly. *)
+    that canonical fold before returning [Ok]. A matching canonical outcome
+    confirms the requested outcome, without identifying which append won;
+    a different competing winner or an unconfirmed append remains explicit. *)
 
 type answer_failure =
   | Ask_not_found of { ask_id : string }
@@ -91,7 +92,7 @@ val answer :
 (** Validates [submissions] against the recorded ask and appends [Answered].
     Rejects before writing when the ask is unknown, already resolved, or the
     submissions do not satisfy it. A successful append is reread from the
-    canonical store before acknowledging the first winner. *)
+    canonical store before acknowledging the requested outcome. *)
 
 val withdraw :
   base_path:string ->
@@ -101,9 +102,12 @@ val withdraw :
   now:float ->
   (unit, withdraw_failure) result
 (** Appends [Withdrawn]. Only the asking Keeper withdraws a question; nothing
-    withdraws one on its behalf after an interval. Success confirms that this
-    withdrawal is the canonical first terminal event; an earlier answer or
-    competing withdrawal is returned explicitly. *)
+    withdraws one on its behalf after an interval. After an append, success
+    confirms the canonical reason and timestamp match this request. Concurrent
+    callers that both observed Open may both succeed for an identical outcome;
+    success is not an append-identity receipt. A settled ask is refused at
+    preflight even for an identical outcome. An earlier answer or a different
+    canonical withdrawal is returned explicitly. *)
 
 val rows :
   base_path:string ->

@@ -173,9 +173,11 @@ val ignores_sampling_param
     all consume projections of this artifact. [clear_thinking_object] carries
     the resolved [thinking.clear_thinking] member for rows whose
     {!Capabilities.preserve_thinking_control_format} is
-    [Thinking_object_clear_thinking]: those rows have no ordinary thinking
-    control yet still accept a provider [thinking] object. The caller resolves
-    it from that typed capability, never from a provider identity.
+    [Thinking_object_clear_thinking]. The member can accompany an ordinary
+    thinking toggle or a wire with inherently enabled thinking. An omitted
+    toggle leaves [thinking.type] absent and uses the declared enabled default;
+    explicit preserve/clear requests still emit [clear_thinking]. The caller
+    resolves it from that typed capability, never from a provider identity.
 
     On the categorical wire ([toggle_wire = Reasoning_effort]) an explicit
     [enable_thinking = Some false] is rendered as [reasoning_effort = "none"]

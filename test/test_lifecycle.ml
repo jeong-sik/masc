@@ -218,7 +218,7 @@ let () = test "a parked lane does not hold the session switch" (fun () ->
   let parked, _never = Eio.Promise.create () in
   match
     Eio.Time.with_timeout clock 5. (fun () ->
-      Server_session_switch.run (fun sw ->
+      Server_session_switch.run (fun ~runtime_sw:_ sw ->
         Eio.Fiber.fork ~sw (fun () -> Eio.Promise.await parked));
       Ok ())
   with

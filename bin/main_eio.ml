@@ -395,16 +395,13 @@ let make_extended_handler ~trust_policy routes =
              | None -> try_internal_error_response reqd msg)))
 
 (** Main server loop *)
-let run_server ~sw ~env ~address ~port ~base_path ~input_base_path ~on_ready ~accept_store_quarantine =
-  (* Use the parent switch directly so that ALL fibers spawned by
-     Server_runtime_bootstrap (background maintenance, keeper loops,
-     dashboard refresh, etc.) are children of this switch.  Graceful
-     shutdown explicitly fails this switch after the signal handler
-     finishes its phases (see [Graceful_shutdown] below); failing the
-     switch propagates cancellation to every child fiber, preventing
-     the 10s force-exit timeout. *)
+let run_server ~sw ~runtime_sw ~env ~address ~port ~base_path ~input_base_path ~on_ready ~accept_store_quarantine =
+  (* Service fibers attach to the session switch. Graceful shutdown fails
+     that switch after the signal handler finishes its phases. Codec workers
+     belong to the outer runtime switch, so they remain available until every
+     cancelled service has finished its journal cleanup. *)
   try
-    Server_runtime_bootstrap.run ~sw ~env ~address ~port ~base_path
+    Server_runtime_bootstrap.run ~sw ~runtime_sw ~env ~address ~port ~base_path
       ~input_base_path ~on_ready ~accept_store_quarantine ~make_routes
       ~make_request_handler:make_extended_handler
       ~make_h2_request_handler:Server_h2_gateway.make_request_handler
@@ -874,7 +871,7 @@ let run_cmd ?schema_observation ?(record_default = false) ?(previous_owner = Ref
 
   let start () =
     (try
-      Eio.Switch.run @@ fun sw ->
+      Server_session_switch.run @@ fun ~runtime_sw sw ->
       let clock = Eio.Stdenv.clock env in
       let rec await_shutdown_signal () =
         match Atomic.exchange pending_shutdown_signal None with
@@ -971,6 +968,7 @@ let run_cmd ?schema_observation ?(record_default = false) ?(previous_owner = Ref
             (fun () ->
               run_server
                 ~sw
+                ~runtime_sw
                 ~env
                 ~address:bind_address
                 ~port

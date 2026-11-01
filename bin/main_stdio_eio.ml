@@ -45,7 +45,7 @@ let run_cmd cli_base_path =
   Crypto_rng.ensure_default ();
   Eio_guard.enable ();
   Time_compat.set_clock (Eio.Stdenv.clock env);
-  Server_session_switch.run @@ fun sw ->
+  Server_session_switch.run @@ fun ~runtime_sw sw ->
   let clock, mono_clock, net, domain_mgr, proc_mgr, fs =
     Server_runtime_bootstrap.init_runtime_context env
   in
@@ -91,6 +91,7 @@ let run_cmd cli_base_path =
     try
       Server_runtime_bootstrap.initialize_owner_state_blocking
         ~sw
+        ~runtime_sw
         ~env
         ~base_path
         ~input_base_path:workspace.Workspace_root.requested

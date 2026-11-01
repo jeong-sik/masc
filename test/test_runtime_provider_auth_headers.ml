@@ -3509,7 +3509,7 @@ let snapshot_auth_runtime ?credential () =
   let credential = match credential with
     | None -> ""
     | Some env -> Printf.sprintf
-        "[providers.dispatch-snapshot.credentials]\ntype = \"env\"\nvalue = %S\n" env in
+        "[providers.dispatch-snapshot.credentials]\ntype = \"env\"\nkey = %S\n" env in
   let source = {|
 [providers.dispatch-snapshot]
 protocol = "openai-compatible-http"

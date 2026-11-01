@@ -13,18 +13,6 @@ open Keeper_types_profile
 include Keeper_registry_types
 include Keeper_registry_setup
 
-let state_change_observer : (unit -> unit) Atomic.t = Atomic.make ignore
-let install_state_change_observer observer = Atomic.set state_change_observer observer
-
-let notify_state_change_observer () =
-  Cancel_safe.observe
-    ~on_exn:(fun exn ->
-      Log.Keeper.warn
-        "registry state-change observer failed: %s"
-        (Printexc.to_string exn))
-    (fun () -> (Atomic.get state_change_observer) ())
-;;
-
 let set_turn_phase ~observation_token ~base_path name (turn_phase : packed_turn_phase) =
   (* RFC-0072 Phase 4b + Phase 5: dispatch via [resolve_turn_phase_transition]
      (PR #14912) instead of the [validate_turn_phase_transition] call.
@@ -911,7 +899,7 @@ let rec dispatch_event_with_audit_internal
              full snapshot so the spec's "single writer, pull observers"
              invariant is preserved. *)
           broadcast_composite_changed ~name ~ts_unix:now;
-          notify_state_change_observer ();
+          notify_state_change_observer ~base_path:entry.base_path Lifecycle_phase_changed;
           Ok tr)
      | Ok tr ->
        (* No phase change — still update conditions *)

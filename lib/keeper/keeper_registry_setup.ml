@@ -19,6 +19,25 @@ module Orphan_drops = Keeper_registry_orphan_drops
 module Error_tracking = Keeper_registry_error_tracking
 module Turn_failure_streak_store = Keeper_turn_failure_streak_store
 
+type state_change = Lifecycle_phase_changed | Failure_reason_changed
+
+let state_change_observer : (base_path:string -> state_change -> unit) Atomic.t =
+  Atomic.make (fun ~base_path:_ _ -> ())
+let install_state_change_observer observer = Atomic.set state_change_observer observer
+
+let notify_state_change_observer ~base_path change =
+  Cancel_safe.observe
+    ~on_exn:(fun exn ->
+      Log.Keeper.warn
+        "registry state-change observer failed: %s"
+        (Printexc.to_string exn))
+    (fun () -> (Atomic.get state_change_observer) ~base_path change)
+;;
+
+let failure_reason_changed (before : registry_entry) (after : registry_entry) =
+  before.last_failure_reason <> after.last_failure_reason
+;;
+
 let registry_entry_validation_error_label = function
   | Healthy -> "healthy"
   | Lifecycle_transaction_reserved _ -> "lifecycle_transaction_reserved"
@@ -190,7 +209,8 @@ let unsafe_put_entry ~base_path name entry =
     health reason, emits [RegistryInvalidEntry] with [operation="update"], and
     leaves the original entry untouched.  Only CAS conflicts retry. *)
 let update_entry_internal ?lifecycle_token ~base_path name f =
-  Keeper_lifecycle_reservation.with_key_lock ~base_path ~keeper_name:name (fun () ->
+  let failure_reason_changed_after_commit = ref None in
+  let result = Keeper_lifecycle_reservation.with_key_lock ~base_path ~keeper_name:name (fun () ->
   match
     Keeper_lifecycle_reservation.authorize
       ?token:lifecycle_token
@@ -242,11 +262,17 @@ let update_entry_internal ?lifecycle_token ~base_path name f =
          let updated = StringMap.add key new_entry current in
          if Atomic.compare_and_set registry current updated
          then (
+           if failure_reason_changed entry new_entry then
+             failure_reason_changed_after_commit := Some entry.base_path;
            Orphan_drops.clear ~base_path name;
            Ok ())
          else loop ())
   in
-  loop ())
+  loop ()) in
+  Option.iter
+    (fun base_path -> notify_state_change_observer ~base_path Failure_reason_changed)
+    !failure_reason_changed_after_commit;
+  result
 ;;
 
 let update_entry ~base_path name f = update_entry_internal ~base_path name f
@@ -260,7 +286,8 @@ type exact_update_result =
 let update_entry_exact_internal ?lifecycle_token (expected : registry_entry) f =
   let base_path = expected.base_path in
   let name = expected.name in
-  Keeper_lifecycle_reservation.with_key_lock ~base_path ~keeper_name:name (fun () ->
+  let failure_reason_changed_after_commit = ref None in
+  let result = Keeper_lifecycle_reservation.with_key_lock ~base_path ~keeper_name:name (fun () ->
   match
     Keeper_lifecycle_reservation.authorize
       ?token:lifecycle_token
@@ -289,11 +316,17 @@ let update_entry_exact_internal ?lifecycle_token (expected : registry_entry) f =
          let updated = StringMap.add key new_entry current in
          if Atomic.compare_and_set registry current updated
          then (
+           if failure_reason_changed entry new_entry then
+             failure_reason_changed_after_commit := Some entry.base_path;
            Orphan_drops.clear ~base_path name;
            Exact_updated)
          else loop ())
   in
-  loop ())
+  loop ()) in
+  Option.iter
+    (fun base_path -> notify_state_change_observer ~base_path Failure_reason_changed)
+    !failure_reason_changed_after_commit;
+  result
 ;;
 
 let update_entry_exact expected f = update_entry_exact_internal expected f

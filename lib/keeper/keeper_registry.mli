@@ -18,10 +18,14 @@ open Keeper_types_profile
     [Keeper_registry.packed_turn_phase] etc. unchanged. *)
 include module type of Keeper_registry_types
 
-val install_state_change_observer : (unit -> unit) -> unit
-(** Install the process-wide non-yielding observer called after a successful
-    registry event CAS. Observer failures are logged and never roll back the
-    committed transition. *)
+type state_change = Lifecycle_phase_changed | Failure_reason_changed
+
+val install_state_change_observer : (base_path:string -> state_change -> unit) -> unit
+(** Install the process-wide non-yielding observer called after a committed
+    lifecycle phase transition or a failure reason change via an entry update.
+    The path is the committed entry's canonical workspace. Observer failures
+    are logged and do not roll back the committed change; Eio cancellation
+    propagates after the commit. *)
 
 
 

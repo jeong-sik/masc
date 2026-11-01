@@ -33,6 +33,79 @@ let test_non_eio_invalidation_wakes_waiter () =
     check bool "invalidation requested a refresh" true requested)
 ;;
 
+let test_committed_registry_failure_wakes_health () =
+  let module Registry = Masc.Keeper_registry in
+  let other_path = Masc_test_deps.setup_test_workspace () in
+  let base_path = Masc_test_deps.setup_test_workspace () in
+  let previous_state = Server_auth.For_testing.snapshot_server_state () in
+  let state = Masc.Mcp_server.For_testing.create_state ~base_path in
+  Server_auth.For_testing.restore_server_state (Some state);
+  Registry.For_testing.clear ();
+  let meta =
+    match Masc_test_deps.meta_of_json_fixture
+      (`Assoc [ "name", `String "health-observer"
+              ; "trace_id", `String "trace-health-observer"
+              ; "activation_mode", `String "manual" ]) with
+    | Ok meta -> meta
+    | Error error -> fail error
+  in
+  ignore (Registry.For_testing.register ~base_path meta.name meta);
+  ignore (Registry.For_testing.register ~base_path:other_path meta.name meta);
+  reset ();
+  Registry.install_state_change_observer
+    Runtime.invalidate_full_health_snapshot_for_registry_change;
+  Fun.protect
+    ~finally:(fun () ->
+      Registry.install_state_change_observer (fun ~base_path:_ _ -> ());
+      Registry.For_testing.clear ();
+      reset ();
+      Server_auth.For_testing.restore_server_state previous_state;
+      Masc_test_deps.cleanup_test_workspace other_path;
+      Masc_test_deps.cleanup_test_workspace base_path)
+    (fun () ->
+      Eio_main.run (fun _env ->
+        Eio.Switch.run (fun sw ->
+          Runtime.For_testing.run_full_health_refresh_worker ~sw
+            ~compute:(fun () -> Ok [ "workspace_marker", `String "current" ])));
+      let _, _, _, generation, has_snapshot, requested =
+        Runtime.For_testing.full_health_refresh_worker_stats () in
+      check bool "current workspace has a published snapshot" true has_snapshot;
+      check bool "published snapshot needs no refresh" false requested;
+      Registry.set_failure_reason ~base_path:other_path meta.name
+        (Some (Registry.Exception "other workspace"));
+      check bool "another workspace does not wake this health worker" false
+        (Runtime.For_testing.take_full_health_wakeup_nonblocking ());
+      let _, _, _, after_other, _, _ =
+        Runtime.For_testing.full_health_refresh_worker_stats () in
+      check int "another workspace does not invalidate the snapshot"
+        generation after_other;
+      Registry.set_failure_reason ~base_path meta.name
+        (Some (Registry.Turn_configuration_error
+          { code = "invalid"; field = None; detail = "test" }));
+      check bool "committed failure wakes the health worker" true
+        (Runtime.For_testing.take_full_health_wakeup_nonblocking ());
+      let _, _, _, _, _, requested =
+        Runtime.For_testing.full_health_refresh_worker_stats () in
+      check bool "committed failure invalidates the snapshot" true requested;
+      Registry.set_failure_reason ~base_path "missing" (Some Registry.Operator_interrupt);
+      check bool "missing keeper does not wake the worker" false
+        (Runtime.For_testing.take_full_health_wakeup_nonblocking ());
+      Eio_main.run (fun _env ->
+        Eio.Switch.run (fun sw ->
+          Runtime.For_testing.run_full_health_refresh_worker ~sw
+            ~compute:(fun () -> Ok [ "workspace_marker", `String "current" ])));
+      let _, _, _, _, has_snapshot, requested =
+        Runtime.For_testing.full_health_refresh_worker_stats () in
+      check bool "current workspace has a fresh snapshot before phase change" true
+        (has_snapshot && not requested);
+      (match Registry.dispatch_event ~base_path:other_path meta.name
+        (Keeper_state_machine.Turn_failed { consecutive = 1 }) with
+       | Ok _ -> ()
+       | Error _ -> fail "other workspace lifecycle transition was rejected");
+      check bool "lifecycle transition preserves global invalidation" true
+        (Runtime.For_testing.take_full_health_wakeup_nonblocking ()))
+;;
+
 let test_non_eio_wakes_coalesce_without_blocking () =
   Eio_main.run (fun env ->
     reset ();
@@ -122,5 +195,7 @@ let () =
             test_non_eio_wakes_coalesce_without_blocking
         ; test_case "non-Eio invalidation runs refresh worker" `Quick
             test_non_eio_invalidation_runs_refresh_worker
+        ; test_case "committed registry failure wakes health" `Quick
+            test_committed_registry_failure_wakes_health
         ]
       ])

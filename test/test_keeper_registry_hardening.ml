@@ -92,6 +92,130 @@ let test_update_entry_rejects_corrupted_result () =
   | Some e -> check string "original base_path preserved" original_base_path e.base_path
 ;;
 
+let test_failure_observer_sees_committed_updates_outside_lock () =
+  KR.For_testing.clear ();
+  let captured = register "alice" in
+  let observations = ref [] in
+  let observed_paths = ref [] in
+  let observed_changes = ref [] in
+  let reentry_succeeded = ref true in
+  KR.install_state_change_observer (fun ~base_path:observed_base_path change ->
+    observed_paths := observed_base_path :: !observed_paths;
+    observed_changes := change :: !observed_changes;
+    (match KR.get ~base_path "alice" with
+     | None -> observations := ("missing", None) :: !observations
+     | Some entry ->
+       let reason =
+         match entry.last_failure_reason with
+         | None -> "none"
+         | Some reason -> KR.failure_reason_to_string reason
+       in
+       observations := (reason, entry.last_error) :: !observations);
+    match KR.update_entry ~base_path "alice" (fun entry ->
+      { entry with restart_count = entry.restart_count + 1 }) with
+    | Ok () -> ()
+    | Error _ -> reentry_succeeded := false);
+  Fun.protect
+    ~finally:(fun () -> KR.install_state_change_observer (fun ~base_path:_ _ -> ()))
+    (fun () ->
+      KR.set_failure_reason ~base_path "alice" (Some (KR.Exception "boom"));
+      KR.set_failure_reason ~base_path "alice" (Some (KR.Exception "boom"));
+      (match KR.update_entry ~base_path "alice" (fun entry ->
+         { entry with last_failure_at = Some 1.0 }) with
+       | Ok () -> ()
+       | Error _ -> fail "failure time update was rejected");
+      (match KR.update_entry_exact captured (fun entry ->
+         { entry with last_failure_at = Some 2.0 }) with
+       | KR.Exact_updated -> ()
+       | _ -> fail "exact failure time update was rejected");
+      KR.set_last_error_entry ~base_path ~name:"alice" "detail";
+      KR.set_last_error_entry ~base_path ~name:"alice" "detail";
+      KR.clear_error ~base_path "alice";
+      KR.set_failure_reason ~base_path "alice" None;
+      check bool "observer can update the same keeper after the lock is released"
+        true !reentry_succeeded;
+      check (list string) "committed workspace accompanies each observation"
+        [ base_path; base_path ] (List.rev !observed_paths);
+      check bool "notifications identify failure reason changes" true
+        (List.for_all (( = ) KR.Failure_reason_changed) !observed_changes);
+      check (list (pair string (option string))) "observer reads committed values"
+        [ "exception(boom)", None
+        ; "none", None
+        ]
+        (List.rev !observations))
+;;
+
+let test_failure_observer_only_follows_successful_writes () =
+  KR.For_testing.clear ();
+  let captured = register "alice" in
+  let calls = ref 0 in
+  KR.install_state_change_observer (fun ~base_path:_ _ -> incr calls);
+  Fun.protect
+    ~finally:(fun () -> KR.install_state_change_observer (fun ~base_path:_ _ -> ()))
+    (fun () ->
+      KR.set_failure_reason ~base_path "missing" (Some (KR.Exception "missing"));
+      (match KR.update_entry ~base_path "alice" (fun entry ->
+         { entry with base_path = "wrong"; last_failure_reason = Some (KR.Exception "invalid") }) with
+       | Error (KR.Base_path_mismatch _) -> ()
+       | _ -> fail "invalid update was not rejected");
+      let token =
+        match Reservation.acquire ~base_path ~keeper_name:"alice"
+          ~purpose:Reservation.Paused_work_disposition with
+        | Ok token -> token
+        | Error _ -> fail "could not acquire lifecycle reservation"
+      in
+      Fun.protect
+        ~finally:(fun () -> ignore (Reservation.release token : Reservation.release_outcome))
+        (fun () ->
+          KR.set_failure_reason ~base_path "alice" (Some (KR.Exception "reserved"));
+          (match KR.update_entry_exact_for_lifecycle token captured (fun entry ->
+             { entry with last_failure_reason = Some (KR.Exception "owned") }) with
+           | KR.Exact_updated -> ()
+           | _ -> fail "reservation owner could not update its entry"));
+      check int "only the lifecycle owner's write notified" 1 !calls;
+      ignore (register "alice");
+      (match KR.update_entry_exact captured (fun entry ->
+         { entry with last_failure_reason = Some (KR.Exception "stale") }) with
+       | KR.Exact_update_replaced -> ()
+       | _ -> fail "stale lane was not rejected");
+      check int "stale lane did not notify" 1 !calls)
+;;
+
+let test_failure_observer_exception_preserves_commit () =
+  KR.For_testing.clear ();
+  ignore (register "alice");
+  KR.install_state_change_observer (fun ~base_path:_ _ -> failwith "injected observer failure");
+  Fun.protect
+    ~finally:(fun () -> KR.install_state_change_observer (fun ~base_path:_ _ -> ()))
+    (fun () ->
+      KR.set_failure_reason ~base_path "alice" (Some (KR.Exception "committed"));
+      match KR.get ~base_path "alice" with
+      | Some { last_failure_reason = Some (KR.Exception "committed"); _ } -> ()
+      | _ -> fail "observer exception lost the committed failure reason")
+;;
+
+let test_heartbeat_replacement_notifies_only_when_replaced () =
+  KR.For_testing.clear ();
+  let captured = register "alice" in
+  KR.set_failure_reason ~base_path "alice"
+    (Some (KR.Heartbeat_consecutive_failures 2));
+  let calls = ref 0 in
+  KR.install_state_change_observer (fun ~base_path:_ _ -> incr calls);
+  Fun.protect
+    ~finally:(fun () -> KR.install_state_change_observer (fun ~base_path:_ _ -> ()))
+    (fun () ->
+      check bool "heartbeat reason is cleared" true
+        (KR.replace_heartbeat_failure_reason captured None);
+      check int "clear notifies once" 1 !calls;
+      check bool "cleared reason is not replaced again" false
+        (KR.replace_heartbeat_failure_reason captured None);
+      check int "no-op replacement does not notify" 1 !calls;
+      KR.set_failure_reason ~base_path "alice" (Some (KR.Exception "newer"));
+      check bool "newer failure is retained" false
+        (KR.replace_heartbeat_failure_reason captured None);
+      check int "stale heartbeat recovery does not notify" 2 !calls)
+;;
+
 let test_unregister_exact_preserves_replacement_lane () =
   KR.For_testing.clear ();
   let old_entry = register "alice" in
@@ -872,6 +996,16 @@ let () =
             "exact update preserves replacement lane"
             `Quick
             test_update_entry_exact_preserves_replacement_lane
+        ] )
+    ; ( "failure_observer"
+      , [ test_case "reads committed writes outside the lock" `Quick
+            test_failure_observer_sees_committed_updates_outside_lock
+        ; test_case "notifies only for successful writes" `Quick
+            test_failure_observer_only_follows_successful_writes
+        ; test_case "observer exception preserves commit" `Quick
+            test_failure_observer_exception_preserves_commit
+        ; test_case "heartbeat replacement notifies only when changed" `Quick
+            test_heartbeat_replacement_notifies_only_when_replaced
         ] )
     ; ( "unregister_exact"
       , [ test_case

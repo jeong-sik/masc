@@ -80,6 +80,20 @@ type listing_placement =
             tool the Keeper uses is on the surface after all. *)
       }
 
+type image_admission = Image_input_admitted | Image_input_unavailable
+
+type model_tool_surface = private
+  { image_admission : image_admission
+  ; tools : Agent_core.Tool.t list
+  ; agent_core_tools : Agent_core.Tool.t list
+  ; on_demand_tool_names : string list
+  ; result_bounds : (string * int) list
+  ; listing : listing_placement
+  }
+(** One selected materialized runtime's model view. The admission is captured
+    from [Runtime_agent.runtime_accepts_image_input], without rereading a
+    mutable runtime table. Handler, sandbox and effect state stay bundle-owned. *)
+
 type tool_bundle =
   { tools : Agent_core.Tool.t list
     (** Every tool this turn can run, attached-service tools included as
@@ -105,6 +119,17 @@ type tool_bundle =
         service returned them. The Agent Core lane does not read it. *)
   ; listing : listing_placement
         (** What this turn put behind the listing, if it placed one. *)
+  ; project_for_runtime :
+      runtime:Runtime_instance.t ->
+      carried:Agent_core.Tool.t list ->
+      model_tool_surface
+        (** Construct the current candidate's schemas and deferred loader from
+            the same admitted set. [carried] is the preceding Agent Core view;
+            only canonical entries admitted now can be carried. Outstanding
+            loads retain their original receipts while withheld from a view.
+            Projection does not execute tools or replace their shared state.
+            Callers must use the captured admission for their execution hook.
+            The unprojected fields above remain the configured turn surface. *)
   ; cleanup : unit -> unit
   ; terminal_effect_state : unit -> terminal_effect_state
   ; gate_replay_delivery : gate_replay_delivery option

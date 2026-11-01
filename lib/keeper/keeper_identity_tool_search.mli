@@ -170,12 +170,26 @@ type placement =
             and that is the denominator. *)
   }
 
-val make : keeper_name:string -> surface -> placement option
+val make :
+  ?carried:Agent_core.Tool.t list ->
+  ?held_schemas:Agent_core.Types.tool_schema list ->
+  keeper_name:string -> surface -> placement option
 (** The listing tool for one turn, or [None] when nothing is deferred.
 
     Every deferred tool is held here and callable; what changes is that the
     model is shown a name and a line rather than an argument schema until it
     asks.
+
+    [carried] preserves a previous attempt's loaded schemas only when their
+    exact names still resolve to this view's canonical entries. The view's
+    filtered deferred set owns both advertisement and installation; prior
+    tool objects cannot widen it. Omission carries only history and receipts.
+
+    [held_schemas] bounds acknowledgment of tools already present in the agent
+    to exact names in this canonical view (including the listing's own schema).
+    An earlier attempt's broader agent
+    cannot advertise a withheld tool through the listing. Omission preserves
+    acknowledgment of any tool already held by the agent.
 
     A tool whose schema is not placed is not in the running agent's callable
     set either, so a call the model makes to it by name is dropped by

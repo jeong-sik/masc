@@ -9,6 +9,8 @@
 
 open Keeper_tools_agent_core
 
+type model_input_requirement = No_model_image | Model_image
+
 let terminal_externalization_failure
       state
       ({ kind; message } : Tool_bridge.externalization_error)
@@ -354,7 +356,7 @@ let make_tool_bundle_for_descriptors_with_policy
      exactly one projected Tool.schema.name is model-visible.
      the descriptor-owned typed translation reshapes the LLM's payload before dispatch;
      [descriptor.input_schema] provides the LLM-facing schema. *)
-  let descriptor_tools_with_loading =
+  let descriptor_tool_rows =
     List.concat_map
       (fun (descriptor : Keeper_tool_descriptor.t) ->
          let internal = descriptor.internal_name in
@@ -544,8 +546,22 @@ let make_tool_bundle_for_descriptors_with_policy
                 name ([BrowserRead] for [masc_browser_read]). Taken here, where
                 the descriptor is in hand, rather than looked up again by the
                 model name, which answered Always_loaded for every such tool. *)
-             , Keeper_tool_descriptor.declared_loading descriptor )))
+             , Keeper_tool_descriptor.declared_loading descriptor
+             , (if descriptor.runtime_handler = Keeper_tool_descriptor.Tool_read_image
+                then Model_image else No_model_image) )))
       descriptors
+  in
+  let descriptor_tools_with_loading =
+    List.map (fun (tool, loading, _) -> tool, loading) descriptor_tool_rows
+  in
+  (* Keep the actual canonical callable identities beside their typed owner.
+     No public name or description is used to classify a pixel-reading tool. *)
+  let image_tools =
+    List.filter_map
+      (function
+        | tool, _, Model_image -> Some tool
+        | _, _, No_model_image -> None)
+      descriptor_tool_rows
   in
   let descriptor_tools = List.map fst descriptor_tools_with_loading in
   let composition_tools_with_loading, task_required_tool_names =
@@ -734,7 +750,7 @@ let make_tool_bundle_for_descriptors_with_policy
       }
     , { Keeper_tool_load_receipts.source; schema = tool.Agent_core.Tool.schema } )
   in
-  let identity_listing =
+  let identity_listing_data =
     match identity_surface with
     | None -> None
     | Some surface ->
@@ -771,15 +787,26 @@ let make_tool_bundle_for_descriptors_with_policy
                | Some current -> Ok current.current_task_id))
           ~surface:receipt_surface
       in
-      Keeper_identity_tool_search.make
+      Some (surface, deferred, receipts)
+  in
+  let listings = ref [] in
+  let make_identity_listing ?held_schemas ~admitted ~carried () =
+    match identity_listing_data with
+    | None -> None
+    | Some (surface, deferred, receipts) ->
+      let listing = Keeper_identity_tool_search.make ~carried ?held_schemas
         ~keeper_name:meta.Keeper_meta_contract.name
-        { Keeper_identity_tool_search.deferred
+        { Keeper_identity_tool_search.deferred = List.filter
+            (fun (entry : Keeper_identity_tool_search.deferred) -> admitted entry.tool) deferred
         ; agent_cell = surface.Keeper_tools_agent_core.agent_cell
         ; history = surface.Keeper_tools_agent_core.history
         ; carry_window = Keeper_config.keeper_tool_carry_window ()
         ; receipts
-        }
+        } in
+      Option.iter (fun listing -> listings := listing :: !listings) listing;
+      listing
   in
+  let identity_listing = make_identity_listing ~admitted:(fun _ -> true) ~carried:[] () in
   (* The lanes that cannot widen a turn get every tool as a schema: holding
      one back there would name a tool nothing can load. *)
   let always_loaded = always_loaded_builtin_tools in
@@ -839,27 +866,7 @@ let make_tool_bundle_for_descriptors_with_policy
     | Keeper_tool_descriptor.Tool_masc_wiki_dispatch
     | Keeper_tool_descriptor.Tool_masc_local_runtime_dispatch
     | Keeper_tool_descriptor.Tool_analyze_image | Keeper_tool_descriptor.Tool_read_image -> ()) descriptors;
-  { tools
-  ; agent_core_tools =
-      always_loaded
-      @ (match identity_listing with
-         | None ->
-           (* Without a live agent cell there is no callable loader. Keep
-              these schemas available instead of advertising a search whose
-              extension can never be installed. *)
-           deferred_builtin_tools
-         | Some listing ->
-           (* Pending successful loads and recently used tools belong on the
-              first request of the next turn, before the agent exists. *)
-           listing.Keeper_identity_tool_search.tool
-           :: listing.Keeper_identity_tool_search.already_used)
-  ; on_demand_tool_names =
-      (* What an official client holds back: the same built-ins the Agent
-         Core lane puts behind its listing, and every attached-service tool. *)
-      List.map
-        (fun (tool : Agent_core.Tool.t) -> tool.Agent_core.Tool.schema.name)
-        (deferred_builtin_tools @ identity_agent_tools)
-  ; result_bounds =
+  let result_bounds =
       (* The bound each built-in result is held to on an official-client lane,
          read off the projection the bridge applies there: the descriptor's
          own (see [model_projection_for_call]). Every model name a descriptor
@@ -884,27 +891,56 @@ let make_tool_bundle_for_descriptors_with_policy
              ( tool.Agent_core.Tool.schema.name
              , Tool_output.inline_ceiling_bytes projection ))
           composition_tools_with_loading
-  ; listing =
-      (match identity_listing with
-       | None -> Keeper_tools_agent_core.No_listing
+  in
+  let agent_core_view ~admitted ~deferred listing =
+    List.filter admitted always_loaded
+    @ (match listing with
+       | None ->
+         (* Without a callable loader, keep every admitted schema eager. *)
+         deferred
        | Some listing ->
-         (* What is missing from the surface, not what declared itself. A tool
-            this conversation has run is placed with its schema again, so a
-            declared tool can be present after all -- and reporting the
-            declaration would have the projection check expect it gone. *)
-         let carried =
-           List.map
-             (fun (tool : Agent_core.Tool.t) -> tool.Agent_core.Tool.schema.name)
-             listing.Keeper_identity_tool_search.already_used
-         in
-         Keeper_tools_agent_core.Listing
-           { deferred_builtin_names =
-               List.filter_map
-                 (fun (tool : Agent_core.Tool.t) ->
-                    let name = tool.Agent_core.Tool.schema.name in
-                    if List.exists (String.equal name) carried then None else Some name)
-                 deferred_builtin_tools
-           })
+         listing.Keeper_identity_tool_search.tool :: listing.already_used)
+  in
+  let placement deferred = function
+    | None -> No_listing
+    | Some (listing : Keeper_identity_tool_search.placement) ->
+      let carried = List.map (fun (tool : Agent_core.Tool.t) -> tool.schema.name) listing.already_used in
+      Listing {
+        deferred_builtin_names = List.filter_map (fun (tool : Agent_core.Tool.t) ->
+          if List.mem tool.schema.name carried then None else Some tool.schema.name) deferred}
+  in
+  let project_for_runtime ~runtime ~carried : model_tool_surface =
+    let image_admission =
+      if Runtime_agent.runtime_accepts_image_input ~runtime
+      then Image_input_admitted else Image_input_unavailable
+    in
+    let admitted tool = match image_admission with
+      | Image_input_admitted -> true
+      | Image_input_unavailable -> not (List.exists (fun image -> image == tool) image_tools) in
+    let deferred = List.filter admitted deferred_builtin_tools in
+    let tools = List.filter admitted tools in
+    let held_schemas = List.map (fun (tool : Agent_core.Tool.t) -> tool.schema) tools in
+    let listing = make_identity_listing ~held_schemas ~admitted ~carried () in
+    let names = List.map (fun (tool : Agent_core.Tool.t) -> tool.schema.name) tools in
+    { image_admission
+    ; tools
+    ; agent_core_tools = agent_core_view ~admitted ~deferred listing
+    ; on_demand_tool_names = List.map (fun (tool : Agent_core.Tool.t) -> tool.schema.name)
+        (deferred @ identity_agent_tools)
+    ; result_bounds = List.filter (fun (name, _) -> List.mem name names) result_bounds
+    ; listing = placement deferred listing }
+  in
+  { tools
+  ; agent_core_tools = agent_core_view ~admitted:(fun _ -> true) ~deferred:deferred_builtin_tools identity_listing
+  ; on_demand_tool_names =
+      (* What an official client holds back: the same built-ins the Agent
+         Core lane puts behind its listing, and every attached-service tool. *)
+      List.map
+        (fun (tool : Agent_core.Tool.t) -> tool.Agent_core.Tool.schema.name)
+        (deferred_builtin_tools @ identity_agent_tools)
+  ; result_bounds
+  ; listing = placement deferred_builtin_tools identity_listing
+  ; project_for_runtime
   ; cleanup =
       (fun () ->
         Keeper_artifact_draft_scope.close artifact_draft_scope;
@@ -914,13 +950,13 @@ let make_tool_bundle_for_descriptors_with_policy
            Before the sandbox release rather than after: this reads two lists
            and writes a log line, and releasing a runtime can raise, which
            would take the reading with it. *)
-        Option.iter
+        List.iter
           (fun (listing : Keeper_identity_tool_search.placement) ->
              let (_ : Keeper_identity_tool_search.turn_discovery) =
                listing.Keeper_identity_tool_search.observe_turn ()
              in
              ())
-          identity_listing;
+          (List.rev !listings);
         Option.iter Keeper_sandbox_factory.cleanup turn_sandbox_factory)
   ; terminal_effect_state = (fun () -> Atomic.get terminal_effect_state)
   ; gate_replay_delivery

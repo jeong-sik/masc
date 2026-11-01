@@ -41,12 +41,23 @@ type listing_placement =
   | No_listing
   | Listing of { deferred_builtin_names : string list }
 
+type image_admission = Image_input_admitted | Image_input_unavailable
+type model_tool_surface =
+  { image_admission : image_admission
+  ; tools : Agent_core.Tool.t list
+  ; agent_core_tools : Agent_core.Tool.t list
+  ; on_demand_tool_names : string list
+  ; result_bounds : (string * int) list
+  ; listing : listing_placement
+  }
+
 type tool_bundle =
   { tools : Agent_core.Tool.t list
   ; agent_core_tools : Agent_core.Tool.t list
   ; on_demand_tool_names : string list
   ; result_bounds : (string * int) list
   ; listing : listing_placement
+  ; project_for_runtime : runtime:Runtime_instance.t -> carried:Agent_core.Tool.t list -> model_tool_surface
   ; cleanup : unit -> unit
   ; terminal_effect_state : unit -> terminal_effect_state
   ; gate_replay_delivery : gate_replay_delivery option

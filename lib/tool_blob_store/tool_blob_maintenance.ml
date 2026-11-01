@@ -171,12 +171,12 @@ let add_references ~path ~line references text =
            })
 ;;
 
-type reference_scan_context =
+type route_scan_context =
   | Durable_value
   | Route_evidence
   | Route_evidence_composable_output
 
-let child_reference_scan_context context key =
+let child_route_scan_context context key =
   match context, key with
   | Durable_value, "route_evidence" -> Route_evidence
   | Route_evidence, "composable_output" -> Route_evidence_composable_output
@@ -187,8 +187,170 @@ let child_reference_scan_context context key =
     Durable_value
 ;;
 
+type official_scan_context =
+  | Other_value
+  | Official_message
+  | Official_blocks
+
+type reference_scan_context =
+  { route : route_scan_context
+  ; history_media : bool
+  ; official : official_scan_context
+  }
+
+let durable_context =
+  { route = Durable_value; history_media = true; official = Other_value }
+;;
+
+let exact_fields names fields =
+  List.sort String.compare names = List.sort String.compare (List.map fst fields)
+;;
+
+let unique_fields fields =
+  let names = List.map fst fields in
+  List.length names = List.length (List.sort_uniq String.compare names)
+;;
+
+let string_field name fields =
+  match List.assoc_opt name fields with Some (`String text) -> Some text | _ -> None
+;;
+
+let is_string_field name fields = Option.is_some (string_field name fields)
+
+(* Keeper_librarian_input_capture.content_json owns these kind-tagged blocks;
+   its arbitrary ToolUse.input / ToolResult.json are not media containers. *)
+let captured_tool_payload_fields fields =
+  match string_field "kind" fields with
+  | Some "tool_use"
+    when exact_fields ["kind";"id";"name";"input"] fields
+         && is_string_field "id" fields && is_string_field "name" fields ->
+    ["input"]
+  | Some "tool_result"
+    when exact_fields ["kind";"tool_use_id";"content";"outcome";"json";"content_blocks"] fields
+         && is_string_field "tool_use_id" fields && is_string_field "content" fields ->
+    (* This projects the capture codec's arbitrary field, not the validity of
+       its sibling blocks. [json] carries []/[value] to preserve Some Null;
+       [content_blocks] is still independently scanned for media below. *)
+    let json_valid = match List.assoc "json" fields with
+      | `List [] | `List [_] -> true | _ -> false in
+    let blocks_valid = match List.assoc "content_blocks" fields with
+      | `Null | `List _ -> true | _ -> false in
+    let outcome_valid = match List.assoc "outcome" fields with
+      | `Assoc outcome ->
+        (match string_field "kind" outcome with
+         | Some "succeeded" -> exact_fields ["kind"] outcome
+         | Some "failed" ->
+           exact_fields ["kind";"failure_kind";"error_class"] outcome
+           && (match string_field "failure_kind" outcome with
+               | Some ("validation_error" | "recoverable_tool_error" | "non_retryable_tool_error"
+                 | "reported_tool_error" | "unattributed_tool_error") -> true
+               | Some _ | None -> false)
+           && (match List.assoc "error_class" outcome with
+               | `Null | `String ("transient" | "deterministic" | "unknown") -> true
+               | _ -> false)
+         | Some _ | None -> false)
+      | _ -> false in
+    if json_valid && blocks_valid && outcome_valid then ["json"] else []
+  | Some _ | None -> []
+;;
+
+let history_tool_payload_fields fields =
+  let decode fields =
+    Agent_core_base.History.content_block_of_json (`Assoc fields) in
+  let decoded = match string_field "type" fields with
+    | Some "tool_use" -> Some (decode fields)
+    | Some "tool_result" when unique_fields fields ->
+      (* The Keeper history codec keeps the ToolResult's arbitrary JSON in a
+         companion field outside the History codec. Strip only that field. *)
+      Some (decode (List.remove_assoc "tool_result_json" fields))
+    | Some _ | None -> None in
+  match decoded with
+  | Some (Ok (Agent_core_base.Types.ToolUse _)) -> ["input"]
+  | Some (Ok (Agent_core_base.Types.ToolResult _)) -> ["tool_result_json"]
+  | Some (Ok (Agent_core_base.Types.Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _
+       | Image _ | Document _ | Audio _))
+  | Some (Error _) | None -> []
+;;
+
+let tool_receipt_payload_fields fields =
+  (* Keeper_tool_call_log.log_call writes this input/output projection beside
+     typed outcomes and evidence. Its arbitrary input owns no history media,
+     regardless of the call's execution or wire outcome. *)
+  let number name = match List.assoc_opt name fields with
+    | Some (`Float _ | `Int _) -> true | _ -> false in
+  let output_valid = match List.assoc_opt "output" fields with
+    | Some (`String _) -> true
+    | Some json ->
+      (match Tool_output.normalized_artifact_ref_of_json json with
+       | Tool_output.Decoded_normalized_artifact_ref _
+       | Tool_output.Invalid_normalized_artifact_ref _ -> true
+       | Tool_output.Not_normalized_artifact_ref -> false)
+    | None -> false in
+  if unique_fields fields && number "ts" && number "duration_ms"
+     && is_string_field "keeper" fields && is_string_field "tool" fields
+     && List.mem_assoc "input" fields && List.mem_assoc "runtime_contract" fields
+     && output_valid
+     && (match string_field "record_kind" fields with
+         | Some ("tool_call" | "composition_run" | "lifecycle_event") -> true
+         | Some _ | None -> false)
+  then ["input"] else []
+;;
+
+let official_envelope fields =
+  exact_fields ["schema";"message"] fields
+  && string_field "schema" fields = Some "masc.official-client-context-message.v4"
+;;
+
+let official_message fields =
+  let optional_text name = match List.assoc_opt name fields with
+    | Some (`Null | `String _) -> true | _ -> false in
+  exact_fields ["role";"origin";"content_blocks";"name";"tool_call_id";"metadata"] fields
+  && Option.is_some (Option.bind (string_field "role" fields) Agent_core_base.Types.role_of_string)
+  && Option.is_some (Option.bind (string_field "origin" fields) Agent_core_base.Types.message_origin_of_string)
+  && optional_text "name" && optional_text "tool_call_id"
+  && (match List.assoc "metadata" fields with `Assoc _ -> true | _ -> false)
+  && (match List.assoc "content_blocks" fields with `List _ -> true | _ -> false)
+;;
+
+let official_tool_result fields =
+  (* Keeper_official_client_context_codec.content_block_to_json, reached only
+     through that codec's versioned message envelope. This identifies only the
+     arbitrary structured_content field; content remains a separate scan. *)
+  let required = ["type";"tool_use_id";"content";"is_error"] in
+  let allowed = required @ ["structured_content";"failure_kind";"error_class"] in
+  let provenance_valid = match List.assoc_opt "is_error" fields with
+    | Some (`Bool false) ->
+      not (List.mem_assoc "failure_kind" fields || List.mem_assoc "error_class" fields)
+    | Some (`Bool true) ->
+      (match List.assoc_opt "failure_kind" fields with
+       | Some json -> Result.is_ok (Agent_core_base.Types.tool_failure_kind_of_yojson json)
+       | None -> false)
+      && (match List.assoc_opt "error_class" fields with
+          | Some json -> Result.is_ok (Agent_core_base.Types.tool_error_class_of_yojson json)
+          | None -> true)
+    | Some _ | None -> false in
+  unique_fields fields && List.for_all (fun name -> List.mem_assoc name fields) required
+  && List.for_all (fun (name,_) -> List.mem name allowed) fields
+  && string_field "type" fields = Some "tool_result"
+  && is_string_field "tool_use_id" fields
+  && (match List.assoc "content" fields with `String _ | `List _ -> true | _ -> false)
+  && provenance_valid
+;;
+
+let child_reference_scan_context context fields payload_fields key =
+  let official = match context.official, key with
+    | Other_value, "message" when official_envelope fields -> Official_message
+    | Official_message, "content_blocks" when official_message fields -> Official_blocks
+    | Official_blocks, "content" when official_tool_result fields -> Official_blocks
+    | (Other_value | Official_message | Official_blocks), _ -> Other_value in
+  { route = child_route_scan_context context.route key
+  ; history_media = context.history_media && not (List.mem key payload_fields)
+  ; official
+  }
+;;
+
 let rec references_in_json
-          ?(context = Durable_value)
+          ?(context = durable_context)
           ~path
           ~line
           references
@@ -203,7 +365,9 @@ let rec references_in_json
          (Malformed_structured_artifact_reference
             { path; line; detail })
      | Tool_output.Not_normalized_artifact_ref ->
-       (match Agent_core_base.History.stored_source_of_json json with
+       (match (if context.history_media
+               then Agent_core_base.History.stored_source_of_json json
+               else Agent_core_base.History.Not_stored_source) with
         | Agent_core_base.History.Decoded_stored_source { stored; media_type = _ } ->
           Ok (Live_reference_set.add (History_media stored) references)
         | Agent_core_base.History.Invalid_stored_source error ->
@@ -214,9 +378,16 @@ let rec references_in_json
                ; detail = Agent_core_base.History.decode_error_to_string error
                })
         | Agent_core_base.History.Not_stored_source ->
+       let payload_fields =
+         if not context.history_media then []
+         else history_tool_payload_fields fields @ captured_tool_payload_fields fields
+              @ tool_receipt_payload_fields fields
+              @ (match context.official with
+                 | Official_blocks when official_tool_result fields -> ["structured_content"]
+                 | Other_value | Official_message | Official_blocks -> []) in
        List.fold_left
          (fun result (key, value) ->
-            match context, key with
+            match context.route, key with
             | Route_evidence_composable_output, "schema" -> result
             | ( Durable_value
               | Route_evidence
@@ -224,7 +395,7 @@ let rec references_in_json
               _ ->
               Result.bind result (fun current ->
                 references_in_json
-                  ~context:(child_reference_scan_context context key)
+                  ~context:(child_reference_scan_context context fields payload_fields key)
                   ~path
                   ~line
                   current
@@ -235,7 +406,7 @@ let rec references_in_json
     List.fold_left
       (fun result value ->
          Result.bind result (fun current ->
-           references_in_json ~path ~line current value))
+           references_in_json ~context:{context with route=Durable_value} ~path ~line current value))
       (Ok references)
       values
   | `Null

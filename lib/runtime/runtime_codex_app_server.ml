@@ -2021,6 +2021,14 @@ let with_turn_dispatch io ~await_handoff ~handoff ~terminal_tools_closed
             receive ()
       in
       let result = run { io with receive } in
+      (* An outer protocol error precedes the remaining drain, but an
+         already-settled failure may precede that protocol error too. *)
+      (match result with
+       | Ok _ -> ()
+       | Error error ->
+         stopped := Some (match !stopped with
+           | None -> error
+           | Some previous -> prefer_tool_error ~previous error));
       (* Any protocol terminal can return from the outer consumer, including
          a malformed frame or unsupported request. Settle admitted workers
          before releasing their turn scope, retaining results on every such

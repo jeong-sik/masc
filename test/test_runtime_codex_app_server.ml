@@ -618,6 +618,74 @@ let test_concurrent_handoff_stops_keep_authoritative_outcome () =
     (concurrent_handoff_stop_scenarios ())
 ;;
 
+let outer_protocol_drain_scenarios () =
+  let open Runtime_codex_app_server in
+  let stops : Runtime_codex_app_server.host_stop list =
+    [ Terminal_tool_boundary {tool_name="masc_probe";outcome=Terminal_completed}
+    ; Terminal_tool_boundary {tool_name="masc_probe";outcome=Durable_stimulus_deferred}
+    ; Repeated_tool_call {tool_name="masc_probe";repeated_count=2} ]
+    @ List.map (fun effect_disposition ->
+        Runtime_codex_app_server.Terminal_tool_boundary
+          {tool_name="masc_probe";outcome=Terminal_failed
+            {failure_class=Tool_result.Runtime_failure;effect_disposition;
+             detail=Keeper_terminal_effect_detail.Tool_failed
+               {internal_tool_name="masc_probe";message="peer settled after protocol failure"}}})
+        [Tool_result.Proven_pre_effect; Proven_post_effect; Effect_outcome_unknown] in
+  let failures =
+    [ {|{"id":"unsupported-request","method":"fixture/unsupported","params":{}}|},
+      Runtime_codex_app_server.Unsupported_server_request "fixture/unsupported"
+    ; {|{"id":99,"result":{}}|},
+      Runtime_codex_app_server.Protocol_error
+        {stage="turn";detail="received an unsolicited JSON-RPC response"} ] in
+  List.concat_map (fun (failure, expected) ->
+    List.map (fun stop -> failure, expected, stop) stops) failures
+;;
+
+let run_outer_protocol_error_survives_tool_drain ~failure ~expected ~stop () =
+    let started, signal_started = Eio.Promise.create () in
+    let closed, signal_closed = Eio.Promise.create () in
+    let handlers = ref 0 and response_writes = ref 0 and retained = ref [] in
+    let tool = dispatch_tool
+      ~execution_mode:(fun _ -> Agent_core.Tool_contract.Concurrent)
+      ~call_effect:(fun _ -> Agent_core.Tool.Effect_possible)
+      (fun ~call_id:_ _ ->
+        incr handlers;
+        Eio.Promise.resolve signal_started ();
+        Eio.Promise.await closed;
+        {(tool_response "original-after-protocol-failure") with abort_turn=Some stop;
+         success=not (Runtime_official_client_tool.host_stop_failed stop);
+         on_response_sent=Some (fun () -> incr response_writes)}) in
+    with_fixture ~await_dynamic_tools:false
+      [init_result; account_chatgpt; thread_result; turn_result;
+       dispatch_request 1 1; agent_message_delta; failure]
+      (fun path ->
+        let on_stream_event = function
+          | Runtime_codex_app_server.Text_delta _ -> Eio.Promise.await started
+          | Runtime_codex_app_server.Tool_delivery_closed _ -> Eio.Promise.resolve signal_closed ()
+          | _ -> () in
+        let result = run_fixture ~dynamic_tools:[tool] ~on_stream_event
+          ~on_undelivered_tool_result:(fun receipt -> retained := receipt :: !retained; Ok ()) path in
+        check int "original handler runs once before protocol failure" 1 !handlers;
+        check int "closed vendor receives no late response" 0 !response_writes;
+        (match !retained with
+         | [receipt] ->
+           check string "original identity retained once" "call-1"
+             receipt.Runtime_codex_app_server.call_id;
+           check string "original bytes retained after protocol failure" "original-after-protocol-failure"
+             Yojson.Safe.Util.(receipt.response |> member "result" |> member "contentItems"
+               |> to_list |> List.hd |> member "text" |> to_string)
+         | _ -> fail "protocol failure lost or duplicated the admitted result");
+        match result with
+        | Error actual -> check bool "earlier outer protocol error remains exact" true (actual = expected)
+        | Ok _ -> fail "protocol failure cannot become a successful turn")
+;;
+
+let test_outer_protocol_error_survives_tool_drain () =
+  List.iter (fun (failure, expected, stop) ->
+    run_outer_protocol_error_survives_tool_drain ~failure ~expected ~stop ())
+    (outer_protocol_drain_scenarios ())
+;;
+
 let test_serial_tool_fences_concurrent_calls () =
   let started, signal_started = Eio.Promise.create () in
   let release, signal_release = Eio.Promise.create () in
@@ -9970,6 +10038,8 @@ let () =
             test_concurrent_tool_stop_orderings
         ; test_case "handoff preserves completed peers in either settlement order" `Quick
             test_concurrent_handoff_stops_keep_authoritative_outcome
+        ; test_case "outer protocol failure survives pending tool drain" `Quick
+            test_outer_protocol_error_survives_tool_drain
         ; test_case "serial tool fences concurrent calls" `Quick
             test_serial_tool_fences_concurrent_calls
         ; test_case "completed vendor turn retains pending tool receipt" `Quick

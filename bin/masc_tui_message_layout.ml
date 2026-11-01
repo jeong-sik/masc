@@ -1025,7 +1025,7 @@ let wrapping_prefix ~prefix_cells pieces =
         if count = stop - start then take (used + count) stop rest
         else if count = 0 then cut, pieces
         else let cut = start + count in cut, Wrapping_ascii (cut, stop) :: rest
-    | pieces -> cut, pieces
+    | (Wrapping_piece _ :: _ as pieces) -> cut, pieces
   in
   if prefix_cells <= 0 then 0, pieces else take 0 0 pieces
 

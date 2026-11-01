@@ -330,10 +330,44 @@ let test_board_worker_and_png_boundary () =
   (try ignore (Work.run worker (fun () -> failwith "worker exception")) with Failure _ -> ());
   check bool "worker releases its slot even on exception" true (Result.is_ok (Work.run worker (fun () -> Ok ())));
   check bool "truncated PNG magic does not reach the terminal" false
-    (Masc_tui_image_cache.has_png_header "\137PNG");
+    (Masc_tui_image_cache.has_png_structure "\137PNG");
   let header="\137PNG\r\n\026\n\000\000\000\rIHDR\000\000\000\001\000\000\000\001" in
-  check bool "a complete positive-size PNG header is recognized" true
-    (Masc_tui_image_cache.has_png_header header)
+  check bool "a truncated IHDR does not reach the terminal" false
+    (Masc_tui_image_cache.has_png_structure header);
+  let png="\137PNG\r\n\026\n\000\000\000\rIHDR\000\000\000\001\000\000\000\001\b\006\
+    \000\000\000\031\021\196\137\000\000\000\nIDATx\156c\000\001\000\000\005\
+    \000\001\r\n-\180\000\000\000\000IEND\174B`\130" in
+  check bool "complete one-pixel PNG has the required structure" true
+    (Masc_tui_image_cache.has_png_structure png)
+
+let test_board_pele_deadline () =
+  let directory=Filename.temp_dir "board pele test " "" in
+  let executable=Filename.concat directory "masc-pele" in
+  let opener=Filename.concat directory "open" in
+  let previous=Option.value ~default:"" (Sys.getenv_opt "PATH") in
+  Out_channel.with_open_text executable (fun out -> Out_channel.output_string out "#!/bin/sh\nexec sleep 30\n");
+  Out_channel.with_open_text opener (fun out -> Out_channel.output_string out "#!/bin/sh\nexec sleep 30\n");
+  Unix.chmod executable 0o700;
+  Unix.chmod opener 0o700;
+  Fun.protect ~finally:(fun () ->
+    Unix.putenv "PATH" previous; Unix.unlink executable; Unix.unlink opener; Unix.rmdir directory) (fun () ->
+    Unix.putenv "PATH" (directory ^ ":" ^ previous);
+    let slot=Masc_tui_board_preview_work.create () in
+    let run=Masc_tui_image_cache.run_bounded ~deadline_seconds:0.2 in
+    let runner=Masc_tui_pele.command_runner ~run in
+    let scene=Masc_tui_pele.scene ~format:Mermaid ~max_width:100 ~font_size:12
+      ~now_ms:0L ~colors:None "graph TD; A-->B" in
+    let result=Masc_tui_board_preview_work.run slot (fun () ->
+      Masc_tui_pele.render ~cache_dir:directory ~runner scene) in
+    check bool "hung renderer is terminated" true (Result.is_error result);
+    check bool "renderer return releases its slot" true
+      (Result.is_ok (Masc_tui_board_preview_work.run slot (fun () -> Ok ())));
+    let _,pid=match Masc_tui_browser.spawn_url "image with spaces.png" with
+      | Ok started -> started | Error error -> fail error in
+    check bool "hung external opener is reaped at its deadline" true
+      (match Masc_tui_image_cache.wait_bounded ~deadline_seconds:0.2 pid with
+       | Unix.WSIGNALED signal -> signal=Sys.sigkill
+       | Unix.WEXITED _ | Unix.WSTOPPED _ -> false))
 
 let () = run "resource image admission" ["stored source",[
   test_case "protocol replies are not cancellation input" `Quick test_operator_protocol_boundary;
@@ -342,6 +376,7 @@ let () = run "resource image admission" ["stored source",[
   test_case "Board preview waits for input" `Quick test_board_preview_input_barrier;
   test_case "Board SVG and original-image reader" `Quick test_board_svg_and_original_reader;
   test_case "Board worker and PNG header boundary" `Quick test_board_worker_and_png_boundary;
+  test_case "Board Pele deadline releases worker" `Quick test_board_pele_deadline;
   test_case "workspace suspension retires diagram preparation" `Quick test_suspended_diagram_preparation;
   test_case "original SVG and multipart admission" `Quick test_original_admission;
   test_case "wrong pending URI" `Quick test_wrong_pending;

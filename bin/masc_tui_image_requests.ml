@@ -12,8 +12,8 @@ let load ~host ~port ~cache_dir ~diagram_width ~diagram_height ~diagram_font_siz
     | Some slot -> Masc_tui_board_preview_work.run slot f
     | None -> f () in
   let present ?scene result = Result.bind result (fun png ->
-    let valid_header = Option.is_none board_worker || Masc_tui_image_cache.has_png_header png in
-    if not valid_header then Error "image has an invalid or truncated PNG header"
+    let valid_structure = Option.is_none board_worker || Masc_tui_image_cache.has_png_structure png in
+    if not valid_structure then Error "image has an invalid or truncated PNG structure"
     else Masc_tui_image_cache.prepare_presentation ~run
       ~cache_dir:(cache_dir ()) display png
       |> Result.map (fun presentation -> presentation,scene)) in
@@ -25,7 +25,8 @@ let load ~host ~port ~cache_dir ~diagram_width ~diagram_height ~diagram_font_siz
       ~now_ms:(Int64.of_float (Unix.gettimeofday () *. 1000.))
       ~colors:diagram_colors bytes in
     let raster = {Masc_tui_pele.width=diagram_width;height=diagram_height;crop=None} in
-    present ~scene (Masc_tui_pele.render ~cache_dir:(cache_dir ()) ~raster scene) in
+    let runner = Option.map (fun _ -> Masc_tui_pele.command_runner ~run) board_worker in
+    present ~scene (Masc_tui_pele.render ~cache_dir:(cache_dir ()) ~raster ?runner scene) in
   let prepare_declared format bytes = match format with
     | Masc_tui_image_payload.Svg ->
       vector Svg bytes

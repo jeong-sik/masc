@@ -271,8 +271,8 @@ let month_tests =
           in
           Fs_compat.save_file cache empty_turn_ids_with_turn;
           Dated_jsonl.append costs
-            (CL.to_json (cost_row ~agent:"polisher" ~turn:1 ~attempt:1
-                           ~input_tokens:3 ~output_tokens:4 ~cost_usd:0.15 Resolved));
+            (CL.to_json (cost_row ~agent:"polisher" ~turn:1
+                           ~input_tokens:3 ~output_tokens:4 ~cost_usd:0.15 Resolved_attempt));
           let view_after_turn_id_mismatch =
             KE.read_month ~masc_root:root ~month:(today_month ()) |> Result.get_ok
           in

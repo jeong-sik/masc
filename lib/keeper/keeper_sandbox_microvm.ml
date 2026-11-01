@@ -2463,7 +2463,12 @@ let release_apple_work_volume_claim ~run ~timeout_sec ~keeper_name ~volume_name 
              (volume_claim_helper_name ~keeper_name)
              word
              (output_for_log ~stdout ~stderr))
-      | ((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) as status), _ ->
+      | ( ((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) as status)
+        , ( Claims_marker_absent
+          | Claimant_not_present
+          | Released_last_claim
+          | Kept_with_claimants _
+          | Report_unrecognized _ ) ) ->
         skipped
           (Printf.sprintf
              "microvm_volume_claim_helper_failed: %s (%s; %s)"

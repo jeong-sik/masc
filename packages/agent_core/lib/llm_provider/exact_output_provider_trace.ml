@@ -1,8 +1,12 @@
 module Exec = Exact_output_execution
 
-(* Everything the trace attests to is folded into [payload] and hashed into
-   [fingerprint]; [equal] compares fingerprints. *)
-type t = { fingerprint : string }
+(* The v1 fingerprint binds transport and raw-body evidence. The separately
+   retained parse observation is compared as well, but is not added to that
+   existing fingerprint contract. *)
+type t =
+  { fingerprint : string
+  ; responses_lifecycle : Backend_openai_responses.lifecycle_observation option
+  }
 
 type raw_response =
   { body : string
@@ -10,7 +14,10 @@ type raw_response =
   }
 
 let fingerprint trace = trace.fingerprint
-let equal left right = String.equal left.fingerprint right.fingerprint
+let equal left right =
+  String.equal left.fingerprint right.fingerprint
+  && Option.equal ( = ) left.responses_lifecycle right.responses_lifecycle
+let responses_lifecycle trace = trace.responses_lifecycle
 
 let raw_response (evidence : Exec.raw_response_evidence) =
   { body = evidence.raw_body; body_sha256 = evidence.raw_body_sha256 }
@@ -53,5 +60,5 @@ let of_evidence ?response receipt (evidence : Exec.raw_response_evidence) =
     |> Agent_core_sha256.digest_string
     |> Agent_core_sha256.to_hex
   in
-  { fingerprint }
+  { fingerprint; responses_lifecycle = evidence.responses_lifecycle }
 ;;

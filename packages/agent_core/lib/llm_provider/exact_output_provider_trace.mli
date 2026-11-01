@@ -15,4 +15,5 @@ val of_evidence
 
 val fingerprint : t -> string
 val equal : t -> t -> bool
+val responses_lifecycle : t -> Backend_openai_responses.lifecycle_observation option
 val raw_response : Exact_output_execution.raw_response_evidence -> raw_response

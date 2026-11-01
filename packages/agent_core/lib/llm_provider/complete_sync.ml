@@ -73,20 +73,24 @@ let provider_parse_failure ?parser message =
     [content_inline_reasoning] is the caller-resolved catalog contract for
     reasoning embedded in the content channel; it reaches the
     OpenAI-compatible and GLM chat codecs, whose sync parser can split it. *)
-let parse_sync_response
+let parse_sync_response_observed
       ?(content_inline_reasoning = Capabilities.No_content_inline_reasoning)
       ~http_codec
       ~provider_kind
       body
   =
+  let without_observation = function
+    | Ok response -> Ok (response, None)
+    | Error error -> Error (error, None)
+  in
   try
     match http_codec with
     | Provider_http_codec.Anthropic_messages ->
       let json = Yojson.Safe.from_string body in
       Backend_anthropic.observe_input_transformations json;
-      Ok (Backend_anthropic.parse_response json)
+      without_observation (Ok (Backend_anthropic.parse_response json))
     | Provider_http_codec.Ollama_chat ->
-      (match Backend_ollama.parse_ollama_response ~content_inline_reasoning body with
+      without_observation (match Backend_ollama.parse_ollama_response ~content_inline_reasoning body with
        | Ok response -> Ok response
        | Error message ->
          Error
@@ -94,13 +98,14 @@ let parse_sync_response
               { code = 400; body = Http_client.Received message; retry_after_header = None }))
     | Provider_http_codec.Openai_responses ->
       (match Backend_openai_responses.parse_response_result body with
-       | Ok { response; lifecycle = _ } -> Ok response
-       | Error { detail = message; lifecycle = _ } ->
+       | Ok { response; lifecycle } -> Ok (response, Some lifecycle)
+       | Error { detail = message; lifecycle } ->
          Error
-           (Http_client.HttpError
-              { code = 400; body = Http_client.Received message; retry_after_header = None }))
+           ( Http_client.HttpError
+               { code = 400; body = Http_client.Received message; retry_after_header = None }
+           , Some lifecycle ))
     | Provider_http_codec.Openai_chat ->
-      (match
+      without_observation (match
          Backend_openai_parse.parse_openai_response_result
            ~content_inline_reasoning
            body
@@ -154,9 +159,9 @@ let parse_sync_response
        | Error (Backend_openai_parse.Empty_completion empty) ->
          Error (Http_client.empty_completion_error ~stop_reason:empty.stop_reason))
     | Provider_http_codec.Gemini_generate_content ->
-      Ok (Backend_gemini.parse_response (Yojson.Safe.from_string body))
+      without_observation (Ok (Backend_gemini.parse_response (Yojson.Safe.from_string body)))
     | Provider_http_codec.Glm_chat ->
-      (match Backend_glm.parse_response_result ~content_inline_reasoning body with
+      without_observation (match Backend_glm.parse_response_result ~content_inline_reasoning body with
        | Ok response -> Ok response
        | Error (Backend_openai_parse.Empty_completion empty) ->
          Error (Http_client.empty_completion_error ~stop_reason:empty.stop_reason)
@@ -172,18 +177,18 @@ let parse_sync_response
   | Yojson.Json_error message
   | Yojson.Safe.Util.Type_error (message, _)
   | Yojson.Safe.Util.Undefined (message, _) ->
-    provider_parse_failure
+    without_observation (provider_parse_failure
       ~parser:(Provider_config.string_of_provider_kind provider_kind)
-      message
+      message)
   | Backend_gemini.Gemini_api_error message ->
-    Error
+    without_observation (Error
       (Http_client.HttpError
          { code = 400
          ; body = Http_client.Received ("Gemini API error: " ^ message)
          ; retry_after_header = None
-         })
+         }))
   | Backend_glm.Glm_api_error error ->
-    (match error.origin with
+    without_observation (match error.origin with
      | Backend_glm.Response_parse -> provider_parse_failure ~parser:"glm" error.message
      | Backend_glm.Provider_response ->
        (* agent-core boundary: an overflow or a quota exhaustion stays typed
@@ -209,12 +214,18 @@ let parse_sync_response
   | exn ->
     Reserved_exn.reraise_if_reserved exn;
     let message = Printexc.to_string exn in
-    Error
+    without_observation (Error
       (Http_client.HttpError
          { code = 500
          ; body = Http_client.Received ("Unexpected parsing exception: " ^ message)
          ; retry_after_header = None
-         })
+         }))
+;;
+
+let parse_sync_response ?content_inline_reasoning ~http_codec ~provider_kind body =
+  match parse_sync_response_observed ?content_inline_reasoning ~http_codec ~provider_kind body with
+  | Ok (response, _) -> Ok response
+  | Error (error, _) -> Error error
 ;;
 
 let%test "sync: an error finish without a provider condition is provider-reported" =

@@ -48,6 +48,7 @@ type snapshot =
   { phase : effect_phase
   ; dispatch_count : int
   ; http_status : int option
+  ; responses_lifecycle : Backend_openai_responses.lifecycle_observation option
   ; call_id : call_id
   ; plan_fingerprint : string
   ; request_body_sha256 : string
@@ -110,6 +111,10 @@ let provider_trace receipt =
   | Terminal_state terminal -> terminal.provider_trace
   | Response_received_state received -> received.provider_trace
   | Not_started_state | Before_dispatch_state | Dispatch_started_state -> None
+;;
+
+let responses_lifecycle receipt =
+  Option.bind (provider_trace receipt) Trace.responses_lifecycle
 ;;
 
 let plan_fingerprint (receipt : t) = receipt.plan_fingerprint
@@ -364,17 +369,19 @@ let rec record_provider_trace receipt provider_trace =
 
 let snapshot receipt =
   let state = Atomic.get receipt.state in
-  let phase, dispatch_count, http_status =
+  let phase, dispatch_count, http_status, provider_trace =
     match state with
-    | Not_started_state -> Not_started, 0, None
-    | Before_dispatch_state -> Before_dispatch, 0, None
-    | Dispatch_started_state -> Dispatch_started, 1, None
-    | Response_received_state { status; provider_trace = _ } -> Response_received, 1, status
-    | Terminal_state { status; provider_trace = _ } -> Terminal, 1, Some status
+    | Not_started_state -> Not_started, 0, None, None
+    | Before_dispatch_state -> Before_dispatch, 0, None, None
+    | Dispatch_started_state -> Dispatch_started, 1, None, None
+    | Response_received_state { status; provider_trace } ->
+      Response_received, 1, status, provider_trace
+    | Terminal_state { status; provider_trace } -> Terminal, 1, Some status, provider_trace
   in
   { phase
   ; dispatch_count
   ; http_status
+  ; responses_lifecycle = Option.bind provider_trace Trace.responses_lifecycle
   ; call_id = receipt.call_id
   ; plan_fingerprint = receipt.plan_fingerprint
   ; request_body_sha256 = receipt.request_body_sha256
@@ -388,6 +395,7 @@ let snapshot_dispatch_count (snapshot : snapshot) = snapshot.dispatch_count
    same receipt state. *)
 let snapshot_generation_dispatched (snapshot : snapshot) = snapshot.dispatch_count = 1
 let snapshot_http_status (snapshot : snapshot) = snapshot.http_status
+let snapshot_responses_lifecycle (snapshot : snapshot) = snapshot.responses_lifecycle
 let snapshot_call_id (snapshot : snapshot) = snapshot.call_id
 let snapshot_plan_fingerprint (snapshot : snapshot) = snapshot.plan_fingerprint
 let snapshot_request_body_sha256 (snapshot : snapshot) = snapshot.request_body_sha256

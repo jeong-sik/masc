@@ -4163,6 +4163,148 @@ let test_http_200_provider_reported_429_keeps_actual_status () =
   | Ok _ | Error _ -> fail "the provider's declared 429 condition was not retained"
 ;;
 
+let test_responses_lifecycle_is_captured_with_actual_status () =
+  let run ~label ~path ~status ~response ~expected_lifecycle ~expected_success =
+    let (result, evidence, initial_snapshot, result_snapshot), posts =
+      with_server ~status ~response
+      @@ fun ~sw:_ ~net ~clock ~base_url ->
+      with_catalog
+        [ catalog_entry ~id:label ~base_url ~request_path:path ~native:true ~json:true () ]
+      @@ fun snapshot ->
+      let flow = start_flow (frozen_flow snapshot [ label ]) in
+      let initial = ref None in
+      let result = execute_with_accepting_test_validator ~net ~clock
+        ~before_measurement_dispatch:(fun _ -> Ok ())
+        ~on_measurement_terminal:(fun _ -> Ok ())
+        ~before_dispatch:(fun _ ->
+          initial := Some ((attempt_for (EO.flow_attempt_evidence flow) label).receipt);
+          Ok ())
+        ~before_advance:(fun ~failed:_ ~next:_ -> Ok ()) flow in
+      let receipt = match result with
+        | Ok success -> (EO.flow_success_candidate success).receipt
+        | Error (EO.Flow_exact_execution_failed {candidate;_}) -> candidate.receipt
+        | Error _ -> fail (label ^ " did not reach the provider") in
+      result, EO.flow_attempt_evidence flow, !initial, EO.receipt_snapshot receipt
+    in
+    check int (label ^ " sends once") 1 posts;
+    let receipt = (attempt_for evidence label).receipt in
+    check (option int) (label ^ " actual HTTP status")
+      (Some (Cohttp.Code.code_of_status status))
+      (EO.generation_receipt_snapshot_http_status receipt);
+    check bool (label ^ " same-parse lifecycle") true
+      (EO.generation_receipt_snapshot_responses_lifecycle receipt = expected_lifecycle);
+    check (option int) (label ^ " result snapshot HTTP status")
+      (Some (Cohttp.Code.code_of_status status))
+      (EO.generation_receipt_snapshot_http_status result_snapshot);
+    check bool (label ^ " result snapshot lifecycle") true
+      (EO.generation_receipt_snapshot_responses_lifecycle result_snapshot = expected_lifecycle);
+    Option.iter (fun expected -> check bool (label ^ " result") expected (Result.is_ok result))
+      expected_success;
+    match initial_snapshot with
+    | Some snapshot -> check bool (label ^ " earlier snapshot remains unobserved") true
+        (EO.generation_receipt_snapshot_responses_lifecycle snapshot = None)
+    | None -> fail (label ^ " initial snapshot was not published")
+  in
+  let observed status = Some (Backend_openai_responses.Observed_status status) in
+  run ~label:"responses-completed" ~path:"/v1/responses" ~status:`OK
+    ~response:{|{"status":"completed","error":null,"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"{\"name\":\"accepted\"}"}]}]}|}
+    ~expected_lifecycle:(observed Responses_stop_reason.Completed) ~expected_success:(Some true);
+  run ~label:"responses-partial-refusal" ~path:"/v1/responses" ~status:`OK
+    ~response:{|{"status":"queued","output":[{"type":"message","role":"assistant","content":[{"type":"refusal","refusal":"not yet"}]}]}|}
+    ~expected_lifecycle:(observed Responses_stop_reason.Queued) ~expected_success:(Some false);
+  run ~label:"responses-invalid-output-item" ~path:"/v1/responses" ~status:`OK
+    ~response:{|{"status":"in_progress","output":[{"type":"function_call"}]}|}
+    ~expected_lifecycle:(observed Responses_stop_reason.In_progress) ~expected_success:(Some false);
+  run ~label:"responses-invalid-json" ~path:"/v1/responses" ~status:`OK
+    ~response:{|{"status":|}
+    ~expected_lifecycle:(Some Backend_openai_responses.Unreadable_json) ~expected_success:(Some false);
+  run ~label:"responses-duplicate-status" ~path:"/v1/responses" ~status:`OK
+    ~response:{|{"status":"completed","status":"queued","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"{\"name\":\"accepted\"}"}]}]}|}
+    ~expected_lifecycle:(Some Backend_openai_responses.Ambiguous_envelope) ~expected_success:None;
+  run ~label:"responses-actual-refusal" ~path:"/v1/responses"
+    ~status:(Cohttp.Code.status_of_code 429)
+    ~response:{|{"status":"completed","error":null,"output":[]}|}
+    ~expected_lifecycle:None ~expected_success:(Some false);
+  run ~label:"chat-completed" ~path:"/v1/chat/completions" ~status:`OK
+    ~response:(openai_response {|{"name":"accepted"}|}) ~expected_lifecycle:None
+    ~expected_success:(Some true)
+;;
+
+let test_responses_lifecycle_is_bound_to_each_visit () =
+  let (result, evidence), posts =
+    with_server
+      ~first_response:(Cohttp.Code.status_of_code 429, {|{"error":"rate limited"}|})
+      ~response:{|{"status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"{\"name\":\"accepted\"}"}]}]}|}
+    @@ fun ~sw:_ ~net ~clock ~base_url ->
+    with_catalog
+      [ catalog_entry ~id:"refused-visit" ~base_url ~request_path:"/v1/responses" ~native:true ~json:true ()
+      ; catalog_entry ~id:"answered-visit" ~base_url ~request_path:"/v1/responses" ~native:true ~json:true () ]
+    @@ fun snapshot ->
+    let flow = start_flow (frozen_flow snapshot [ "refused-visit"; "answered-visit" ]) in
+    let result = execute_ok ~net ~clock flow in
+    result, EO.flow_attempt_evidence flow
+  in
+  check int "both visits sent once" 2 posts;
+  check bool "the real-refusal successor answered" true (Result.is_ok result);
+  let refused = (attempt_for evidence "refused-visit").receipt in
+  let answered = (attempt_for evidence "answered-visit").receipt in
+  check (option int) "refusal wire status" (Some 429)
+    (EO.generation_receipt_snapshot_http_status refused);
+  check bool "refusal has no Responses body parse" true
+    (EO.generation_receipt_snapshot_responses_lifecycle refused = None);
+  check (option int) "answer wire status" (Some 200)
+    (EO.generation_receipt_snapshot_http_status answered);
+  check bool "answer observation belongs to the answer visit" true
+    (EO.generation_receipt_snapshot_responses_lifecycle answered
+     = Some (Backend_openai_responses.Observed_status Responses_stop_reason.Completed));
+  let (result, evidence), posts =
+    with_server
+      ~first_response:(`OK, {|{"status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"not-json"}]}]}|})
+      ~response:{|{"status":"queued","output":[]}|}
+    @@ fun ~sw:_ ~net ~clock ~base_url ->
+    with_catalog
+      [ catalog_entry ~id:"completed-visit" ~base_url ~request_path:"/v1/responses" ~native:true ~json:true ()
+      ; catalog_entry ~id:"queued-visit" ~base_url ~request_path:"/v1/responses" ~native:true ~json:true () ]
+    @@ fun snapshot ->
+    let flow = start_flow (frozen_flow snapshot [ "completed-visit"; "queued-visit" ]) in
+    let result = execute_ok ~net ~clock flow in
+    result, EO.flow_attempt_evidence flow
+  in
+  check int "both parsed responses sent once" 2 posts;
+  check bool "queued final visit did not yield an answer" true (Result.is_error result);
+  let completed = (attempt_for evidence "completed-visit").receipt in
+  let queued = (attempt_for evidence "queued-visit").receipt in
+  check bool "first parsed visit keeps completed" true
+    (EO.generation_receipt_snapshot_responses_lifecycle completed
+     = Some (Backend_openai_responses.Observed_status Responses_stop_reason.Completed));
+  check bool "second parsed visit keeps queued" true
+    (EO.generation_receipt_snapshot_responses_lifecycle queued
+     = Some (Backend_openai_responses.Observed_status Responses_stop_reason.Queued))
+;;
+
+let test_responses_incomplete_body_has_no_lifecycle () =
+  let (result, evidence), posts =
+    with_server ~first_stalled_response:(`OK, {|{"status":"queued"|}) ~response:"unused"
+    @@ fun ~sw:_ ~net ~clock ~base_url ->
+    with_catalog
+      [ catalog_entry ~body_timeout_s:(Some 1.0) ~id:"partial-responses"
+          ~base_url ~request_path:"/v1/responses" ~native:true ~json:true () ]
+    @@ fun snapshot ->
+    let flow = start_flow (frozen_flow snapshot [ "partial-responses" ]) in
+    let result = execute_ok ~net ~clock flow in
+    result, EO.flow_attempt_evidence flow
+  in
+  check int "partial response sent once" 1 posts;
+  (match result with
+   | Error (EO.Flow_exact_execution_failed {cause={cause=EO.Response_body_deadline_exceeded;_};_}) -> ()
+   | Ok _ | Error _ -> fail "incomplete body did not preserve its deadline result");
+  let receipt = (attempt_for evidence "partial-responses").receipt in
+  check (option int) "partial body kept its actual HTTP status" (Some 200)
+    (EO.generation_receipt_snapshot_http_status receipt);
+  check bool "partial body was not parsed into a lifecycle" true
+    (EO.generation_receipt_snapshot_responses_lifecycle receipt = None)
+;;
+
 (* The provider's own wait survives the collapsed refusal, so a caller that
    keeps per-binding rate-limit evidence rests the binding for as long as the
    provider asked instead of inventing a time. *)
@@ -5681,6 +5823,18 @@ let () =
             "HTTP 200 and provider-declared 429 remain distinct"
             `Quick
             test_http_200_provider_reported_429_keeps_actual_status
+        ; test_case
+            "Responses lifecycle stays with the observed HTTP status"
+            `Quick
+            test_responses_lifecycle_is_captured_with_actual_status
+        ; test_case
+            "Responses lifecycle remains bound to its visit"
+            `Quick
+            test_responses_lifecycle_is_bound_to_each_visit
+        ; test_case
+            "Responses incomplete body has no lifecycle observation"
+            `Quick
+            test_responses_incomplete_body_has_no_lifecycle
         ; test_case
             "HTTP 429 keeps the provider's Retry-After"
             `Quick

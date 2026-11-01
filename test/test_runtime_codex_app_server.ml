@@ -502,10 +502,11 @@ let test_concurrent_tool_does_not_block_status () =
           (List.rev !order))
 ;;
 
-let test_concurrent_tool_stops_keep_authoritative_outcome ~first ~second
+let test_concurrent_tool_stops_keep_authoritative_outcome ?(scheduling_handoff = false) ~first ~second
     ~(expected : Runtime_codex_app_server.host_stop option) () =
   let second_started, signal_second_started = Eio.Promise.create () in
   let first_written, signal_first_written = Eio.Promise.create () in
+  let handoff_ready, signal_handoff_ready = Eio.Promise.create () in
   let effects = ref [] and responses = ref [] in
   let tool = dispatch_tool
     ~execution_mode:(fun _ -> Agent_core.Tool_contract.Concurrent)
@@ -514,6 +515,7 @@ let test_concurrent_tool_stops_keep_authoritative_outcome ~first ~second
       let stop =
         if call_id = "call-1" then begin
           Eio.Promise.await second_started;
+          if scheduling_handoff then Eio.Promise.await handoff_ready;
           first
         end else begin
           Eio.Promise.resolve signal_second_started ();
@@ -532,9 +534,13 @@ let test_concurrent_tool_stops_keep_authoritative_outcome ~first ~second
     [init_result; account_chatgpt; thread_result; turn_result;
      dispatch_request 1 1; dispatch_request 2 2; item_completed; turn_completed]
     (fun path ->
-      before_fixture_terminal path 2;
-      let actual = run_fixture ~dynamic_tools:[tool] path in
-      check (list string) "both admitted effects execute once" ["call-1"; "call-2"]
+      before_fixture_terminal path (if scheduling_handoff then 3 else 2);
+      let await_handoff = if not scheduling_handoff then None else Some (fun () ->
+        Eio.Promise.await second_started;
+        Eio.Promise.resolve signal_handoff_ready ();
+        true) in
+      let actual = run_fixture ?await_handoff ~dynamic_tools:[tool] path in
+      check (list string) "both admitted tool handlers run once" ["call-1"; "call-2"]
         (List.rev !effects);
       check (list string) "both original responses are written once" ["call-1"; "call-2"]
         (List.rev !responses);
@@ -581,6 +587,35 @@ let test_concurrent_tool_stop_orderings () =
       ~first:(Some first) ~second:(Some second) ~expected:(Some expected) ())
     [deferred,completed,completed; completed,deferred,completed; deferred,deferred,deferred];
   test_concurrent_tool_stops_keep_authoritative_outcome ~first:None ~second:None ~expected:None ()
+;;
+
+let concurrent_handoff_stop_scenarios () =
+  let deferred : Runtime_codex_app_server.host_stop =
+    Terminal_tool_boundary {tool_name="masc_probe";outcome=Durable_stimulus_deferred} in
+  let completed : Runtime_codex_app_server.host_stop =
+    Terminal_tool_boundary {tool_name="masc_probe";outcome=Terminal_completed} in
+  let repeated : Runtime_codex_app_server.host_stop =
+    Repeated_tool_call {tool_name="masc_probe";repeated_count=2} in
+  let scenario first second expected = Some first, Some second, Some expected in
+  [ scenario deferred completed completed; scenario completed deferred completed
+  ; scenario repeated completed completed; scenario completed repeated completed
+  ; scenario deferred deferred deferred
+  ; None, Some completed, None ]
+  @ List.concat_map (fun effect_disposition ->
+      let failed : Runtime_codex_app_server.host_stop =
+        Terminal_tool_boundary {tool_name="masc_probe";outcome=Terminal_failed
+          {failure_class=Tool_result.Runtime_failure;effect_disposition;
+           detail=Keeper_terminal_effect_detail.Tool_failed
+             {internal_tool_name="masc_probe";message="original handoff peer failure"}}} in
+      [scenario completed failed failed; scenario failed completed failed])
+      [Tool_result.Proven_pre_effect; Proven_post_effect; Effect_outcome_unknown]
+;;
+
+let test_concurrent_handoff_stops_keep_authoritative_outcome () =
+  List.iter (fun (first, second, expected) ->
+    test_concurrent_tool_stops_keep_authoritative_outcome
+      ~scheduling_handoff:true ~first ~second ~expected ())
+    (concurrent_handoff_stop_scenarios ())
 ;;
 
 let test_serial_tool_fences_concurrent_calls () =
@@ -9933,6 +9968,8 @@ let () =
             test_concurrent_tool_does_not_block_status
         ; test_case "concurrent peer stops preserve authoritative Keeper outcomes" `Quick
             test_concurrent_tool_stop_orderings
+        ; test_case "handoff preserves completed peers in either settlement order" `Quick
+            test_concurrent_handoff_stops_keep_authoritative_outcome
         ; test_case "serial tool fences concurrent calls" `Quick
             test_serial_tool_fences_concurrent_calls
         ; test_case "completed vendor turn retains pending tool receipt" `Quick

@@ -561,4 +561,6 @@ val run_turn :
     failure cannot be hidden by an earlier completed or deferred host stop.
     Among host stops, failure takes priority over completion, then checkpoint
     yield; an earlier non-host failure remains authoritative. No tool effect
-    is replayed to make this decision. *)
+    is replayed to make this decision. During a scheduling handoff, a sole
+    completed tool may leave the natural vendor turn running. Its completion
+    still participates if an admitted peer stops, whichever settles first. *)

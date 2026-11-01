@@ -1779,6 +1779,7 @@ let with_turn_dispatch io ~await_handoff ~handoff ~terminal_tools_closed
       let vendor_terminal = ref None in
       let vendor_closed = ref false in
       let stopped = ref None in
+      let handoff_completion = ref None in
       let close_delivery () =
         if not !vendor_closed then begin
           vendor_closed := true;
@@ -1924,10 +1925,18 @@ let with_turn_dispatch io ~await_handoff ~handoff ~terminal_tools_closed
              | Some (Terminal_tool_boundary
                  {outcome = Durable_stimulus_deferred | Terminal_failed _; _})
              | Some (Repeated_tool_call _) | None -> false in
-           if not scheduling_terminal then
-             stopped := Some (match !stopped with
-               | None -> error
-               | Some previous -> prefer_tool_error ~previous error)
+           let previous = match !stopped with
+             | Some _ as stopped -> stopped
+             | None -> !handoff_completion in
+           let preferred = match previous with
+             | None -> error
+             | Some previous -> prefer_tool_error ~previous error in
+           if scheduling_terminal && Option.is_none !stopped then
+             (* The notice leaves queued input unclaimed. Preserve a sole
+                completion for arbitration without stopping the vendor's
+                progress reply; a later peer stop must still see it. *)
+             handoff_completion := Some preferred
+           else stopped := Some preferred
          | Ok () -> ())
       in
       let rec receive () =

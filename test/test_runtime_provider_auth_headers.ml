@@ -3647,9 +3647,152 @@ let test_dispatch_auth_selected_file_is_not_reopened () =
       | Error _ -> ()
       | Ok _ -> fail "fresh selection cannot load the removed credential file")
 
+let check_selected_dashboard_probe ?declared_auth_kind ?credential_required ?auth_present
+    ~authorization runtime =
+  let calls = ref 0 in
+  let json = with_dashboard_probe_http_get
+    (fun ~url:_ ~headers ~timeout_sec:_ ->
+      incr calls;
+      check bool "probe uses the retained runtime's selected credential" true
+        (Option.equal String.equal authorization
+          (normalized_header_value "authorization" headers));
+      Ok (200, ["content-type","application/json"], {|{"data":[]}|}))
+    (fun () ->
+      Server_dashboard_http_runtime_info.dashboard_runtime_probe_payload_json_of_runtimes
+        [runtime]) in
+  check int "one selected-account metadata request" 1 !calls;
+  let probe = first_provider_probe json in
+  check string "selected runtime probe reaches the provider" "reachable"
+    Yojson.Safe.Util.(member "status" probe |> to_string);
+  Option.iter (fun expected -> check string "auth kind remains the declared reference"
+    expected Yojson.Safe.Util.(member "auth_kind" probe |> to_string)) declared_auth_kind;
+  Option.iter (fun expected -> check bool "probe projects its selected requirement"
+    expected Yojson.Safe.Util.(member "credential_required" probe |> to_bool)) credential_required;
+  Option.iter (fun expected -> check bool "auth presence describes selected request headers"
+    expected Yojson.Safe.Util.(member "auth_present" probe |> to_bool)) auth_present
+
+let test_dashboard_probe_keeps_selected_env ~replacement () =
+  let env_key = "MASC_TEST_SELECTED_PROBE_KEY_D8A3" in
+  with_env env_key "fixture-original-probe-key" (fun () ->
+    let provider = {runpod_provider with credentials=Some (Runtime_schema.Env env_key)} in
+    let original = runtime_or_fail ~provider () in
+    Unix.putenv env_key replacement;
+    check_selected_dashboard_probe
+      ~authorization:(Some "Bearer fixture-original-probe-key") original;
+    if replacement <> "" then
+      check_selected_dashboard_probe ~authorization:(Some ("Bearer " ^ replacement))
+        (runtime_or_fail ~provider ()))
+
+let test_dashboard_probe_uses_selected_alias () =
+  with_env "OLLAMA_CLOUD_API_KEY" "" (fun () ->
+    with_env "OLLAMA_API_KEY" "fixture-fallback-probe-key" (fun () ->
+      let provider = {runpod_provider with credentials=Some (Runtime_schema.Env "OLLAMA_CLOUD_API_KEY")} in
+      check_selected_dashboard_probe ~declared_auth_kind:"env:OLLAMA_CLOUD_API_KEY"
+        ~authorization:(Some "Bearer fixture-fallback-probe-key")
+        (runtime_or_fail ~provider ())))
+
+let test_dashboard_probe_does_not_reopen_selected_file () =
+  let path = Filename.temp_file "runtime-selected-probe-" ".key" |> Unix.realpath in
+  Fun.protect ~finally:(fun () -> if Sys.file_exists path then Unix.unlink path)
+    (fun () ->
+      Unix.chmod path 0o600;
+      Out_channel.with_open_bin path (fun out -> output_string out "fixture-selected-probe-file-key");
+      let provider = {runpod_provider with credentials=Some (Runtime_schema.File path)} in
+      let original = runtime_or_fail ~provider () in
+      Unix.unlink path;
+      check_selected_dashboard_probe
+        ~authorization:(Some "Bearer fixture-selected-probe-file-key") original;
+      match Runtime_adapter.materialize_credentials ~provider_id:provider.id
+          ~credential:provider.credentials with
+      | Error _ -> ()
+      | Ok _ -> fail "fresh credential selection must not load a deleted File")
+
+let test_dashboard_probe_respects_selected_requirement () =
+  with_snapshot_auth_catalog Snapshot_api_key (fun () ->
+    let runtime = snapshot_auth_runtime () in
+    let calls = ref 0 in
+    let json = with_dashboard_probe_http_get
+      (fun ~url:_ ~headers:_ ~timeout_sec:_ -> incr calls; Ok (200, [], {|{"data":[]}|}))
+      (fun () -> Server_dashboard_http_runtime_info.dashboard_runtime_probe_payload_json_of_runtimes
+        [runtime]) in
+    check int "missing selected credential refuses before HTTP" 0 !calls;
+    let probe = first_provider_probe json in
+    check string "probe reports selected missing authentication" "missing_auth"
+      Yojson.Safe.Util.(member "status" probe |> to_string);
+    check bool "requirement comes from selected admission" true
+      Yojson.Safe.Util.(member "credential_required" probe |> to_bool))
+
+let test_dashboard_probe_refuses_missing_selection () =
+  let runtime = runtime_or_fail () in
+  let config = agent_core_provider_config_or_fail runtime in
+  check bool "negative control retains a nonempty selected key" false
+    (Llm_provider.Secret.is_empty config.api_key);
+  let calls = ref 0 in
+  let json = with_dashboard_probe_http_get
+    (fun ~url:_ ~headers:_ ~timeout_sec:_ -> incr calls; Ok (200, [], {|{"data":[]}|}))
+    (fun () -> Server_dashboard_http_runtime_info.dashboard_runtime_probe_payload_json_of_runtimes
+      [{runtime with credential_admission=None}]) in
+  check int "missing authority refuses before sending even a nonempty key" 0 !calls;
+  check string "missing authority cannot report a reachable account" "missing_auth"
+    Yojson.Safe.Util.(member "status" (first_provider_probe json) |> to_string)
+
+let test_dashboard_probe_uses_selected_header_fields () =
+  let provider = {runpod_provider with protocol="gemini-http";
+    api_format=Runtime_schema.Gemini_api;headers=Some ["X-Declared", "declaration"]} in
+  let runtime = runtime_or_fail ~provider () in
+  let config = agent_core_provider_config_or_fail runtime in
+  let config = {config with Llm_provider.Provider_config.auth_scheme=Bearer_token;
+    headers=["X-Selected", "selected-context"]} in
+  let runtime = {runtime with execution=Runtime_execution.Agent_core config} in
+  let calls = ref 0 in
+  let json = with_dashboard_probe_http_get
+    (fun ~url:_ ~headers ~timeout_sec:_ ->
+      incr calls;
+      check bool "selected scheme overrides the codec's default auth header" true
+        (Option.equal String.equal (Some "Bearer rp-test-token")
+          (normalized_header_value "authorization" headers));
+      check bool "selected bearer scheme does not also emit Gemini's API-key header" true
+        (Option.is_none (normalized_header_value "x-goog-api-key" headers));
+      check bool "selected non-auth headers reach the metadata request" true
+        (Option.equal String.equal (Some "selected-context")
+          (normalized_header_value "x-selected" headers));
+      check bool "old declaration headers do not replace the selected fields" true
+        (Option.is_none (normalized_header_value "x-declared" headers));
+      Ok (200, [], {|{"data":[]}|}))
+    (fun () -> Server_dashboard_http_runtime_info.dashboard_runtime_probe_payload_json_of_runtimes
+      [runtime]) in
+  check int "selected header fields produce one request" 1 !calls;
+  check string "selected static auth scheme reaches the provider" "reachable"
+    Yojson.Safe.Util.(member "status" (first_provider_probe json) |> to_string)
+
+let test_dashboard_probe_preserves_unrequired_selection ~auth () =
+  with_snapshot_auth_catalog auth (fun () ->
+    check_selected_dashboard_probe ~declared_auth_kind:"none"
+      ~credential_required:false ~auth_present:false ~authorization:None
+      (snapshot_auth_runtime ()))
+
 let () =
   run "runtime_provider_auth_headers"
-    [ ( "selected dispatch credential"
+    [ ( "selected dashboard probe"
+      , [ test_case "retained Env probe survives a changed value" `Quick
+            (test_dashboard_probe_keeps_selected_env ~replacement:"fixture-replacement-probe-key")
+        ; test_case "retained Env probe survives a cleared value" `Quick
+            (test_dashboard_probe_keeps_selected_env ~replacement:"")
+        ; test_case "probe uses the selected fallback alias" `Quick
+            test_dashboard_probe_uses_selected_alias
+        ; test_case "probe does not reopen a selected File" `Quick
+            test_dashboard_probe_does_not_reopen_selected_file
+        ; test_case "probe respects the selected credential requirement" `Quick
+            test_dashboard_probe_respects_selected_requirement
+        ; test_case "probe refuses missing selection despite a nonempty key" `Quick
+            test_dashboard_probe_refuses_missing_selection
+        ; test_case "probe uses selected static auth scheme and non-auth headers" `Quick
+            test_dashboard_probe_uses_selected_header_fields
+        ; test_case "probe preserves selected keyless admission" `Quick
+            (test_dashboard_probe_preserves_unrequired_selection ~auth:Snapshot_no_auth)
+        ; test_case "probe preserves selected unknown-provider admission" `Quick
+            (test_dashboard_probe_preserves_unrequired_selection ~auth:Snapshot_unknown) ] )
+    ; ( "selected dispatch credential"
       , [ test_case "keyless selection survives a later keyed declaration" `Quick
             (test_dispatch_auth_catalog_snapshot ~before:Snapshot_no_auth ~after:Snapshot_api_key)
         ; test_case "keyed selection survives a later keyless declaration" `Quick

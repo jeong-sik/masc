@@ -3114,30 +3114,40 @@ let test_guidance_captures_only_original_context () =
         Alcotest.(check string) "only the original context is tagged" context
           Yojson.Safe.Util.(member "context" serialized |> to_string);
         let facts,absorbed=replay_inputs () in
+        List.iter (fun forward ->
         let outcome,_,evaluations=record_gate_evaluations ~new_observations ~captured_guidance:captured
-          ~respond:(replay_response ~forward:"mergeable" ~reverse:0.) ~facts ~absorbed in
-        Alcotest.(check int) "every actual source can be judged with its selected policy"
-          (List.length absorbed) (List.length (judged outcome).absorbed);
-        Alcotest.(check bool) "forward and reverse both ran without the unused policy" true
-          (List.exists (fun (evaluation:Gate.retained_evaluation) ->
-            Yojson.Safe.Util.member "direction" evaluation.request=`String "forward") evaluations &&
-           List.exists (fun (evaluation:Gate.retained_evaluation) ->
-            Yojson.Safe.Util.member "direction" evaluation.request=`String "reverse") evaluations);
+          ~respond:(replay_response ~forward ~reverse:0.) ~facts ~absorbed in
+        Alcotest.(check int) "only positive consolidation applies the original sources"
+          (if forward="mergeable" then List.length absorbed else 0) (List.length (judged outcome).absorbed);
+        let has_direction direction=List.exists (fun (evaluation:Gate.retained_evaluation) ->
+          Yojson.Safe.Util.member "direction" evaluation.request=`String direction) evaluations in
+        Alcotest.(check bool) "the original forward questions ran without the unused policy" true
+          (has_direction "forward");
+        (* A claim with any applied absorption is excluded from copy checks.
+           The refused consolidation separately exercises reverse coverage. *)
+        Alcotest.(check bool) "reverse runs only for a claim with no applied absorption"
+          (forward="loses_knowledge") (has_direction "reverse");
+        let original=Gate.restore ~guidance:(Some captured) ~authority:(Gate.Gate_available (replay_destination,[]))
+          ~new_observations ~facts ~new_claims:[merged] ~superseding:[] ~absorbed ~evaluations |> require_replay in
         with_guidance_override selected (String.make Gate.request_bytes_limit 'x') (fun () ->
           let restored=Gate.guidance_of_yojson serialized |> (function
             | Ok value -> value | Error detail -> Alcotest.fail detail) in
-          Gate.continue_captured ~request_clock:(fun () -> Alcotest.fail "completed replay acquired a clock")
+          let continued=Gate.continue_captured ~request_clock:(fun () -> Alcotest.fail "completed replay acquired a clock")
             ~guidance:(Some restored) ~keeper_id:"selected-context"
             ~authority:(Gate.Gate_available (replay_destination,[])) ~live_authority:None ~evaluations
             ~before_evaluate:(fun ~direction:_ ~destinations:_ ~state:_ ~questions:_ -> Alcotest.fail "completed replay dispatched")
             ~after_evaluate:(fun ~evaluation_id:_ _ -> Alcotest.fail "no new evaluation")
             ~on_evaluation_aborted:(fun ~evaluation_id:_ _ -> Alcotest.fail "no new evaluation")
             ~new_observations ~facts ~new_claims:[merged] ~superseding:[] ~absorbed ()
-            |> require_replay |> ignore);
+            |> require_replay in
+          Alcotest.(check string) "current selected policy cannot change the completed original result"
+            (Gate.run_result_to_yojson original |> Yojson.Safe.to_string)
+            (Gate.run_result_to_yojson continued |> Yojson.Safe.to_string));
         let other_observations=if new_observations=[] then [`String "different original context"] else [] in
         Gate.restore ~guidance:(Some captured) ~authority:(Gate.Gate_available (replay_destination,[]))
           ~new_observations:other_observations ~facts ~new_claims:[merged] ~superseding:[] ~absorbed ~evaluations
-          |> refuse_replay "context must match the original input even with complete evidence");
+          |> refuse_replay "context must match the original input even with complete evidence")
+          ["mergeable";"loses_knowledge"]);
       with_absorb_guidance_gap ~key:selected ~marker:selected_marker ~empty (fun () ->
         match Gate.guidance_of_authority ~new_observations (Gate.resolve ~keeper_id:"selected-context") with
         | Error detail -> Alcotest.(check string) "selected policy stays required"

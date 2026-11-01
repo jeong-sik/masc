@@ -552,13 +552,14 @@ let with_librarian_payload f = with_lane_store (fun base root ->
   let judgment=Lane_addon_exact.final_to_json (Lane_addon_exact.Call_final
     (Lane_addon_exact.Answered {output=checked;slot="fixture";usage=None})) in
   let parent=advance_original store parent [Progress.Dispatch_intended;Progress.Judgment_retained judgment] in
-  let guidance=Absorb.resolve_guidance ~new_observations:[] () |> require in
   let gate_id="captured-gate" in
   let gate_request=`Assoc ["version",`Int 3;"kind",`String "librarian-admission-gate";
     "request_id",`String gate_id;"owner",Admission.owner_to_json owner;
     "execution_id",`String parent.request_id;"execution_digest",`String parent.request_digest;
     "proposal",proposal;"authority",Absorb.replay_authority_to_yojson (Absorb.Gate_unavailable Typesafeai_config.Absorb_gate_disabled);
-    "guidance",Absorb.guidance_to_yojson guidance;"predecessor",`Null] in
+    (* The original producer captures no guidance for this unavailable gate
+       and validated proposal without absorptions. *)
+    "guidance",`Null;"predecessor",`Null] in
   f {base;root;store;owner;capture;parent;gate_id;gate_request})
 let retain_gate fixture ~request_id request =
   Original.retain ~store:fixture.store ~scope:(Original_gate.scope fixture.owner) ~request_id

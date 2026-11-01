@@ -1168,7 +1168,7 @@ let test_enabled_empty_absorptions_need_no_guidance ()=
   List.iter (fun empty -> check_unused_absorb_policy ~empty ~excluded:false ~no_absorptions:true) [false;true]
 
 let test_absorbing_admission_requires_only_observed_context ()=
-  List.iter (fun empty -> with_fixture (fun ~sw fixture ->
+  List.iter (fun (empty,forward_verdict) -> with_fixture (fun ~sw fixture ->
     let module Absorb=Keeper_librarian_absorb_gate in
     let module T=Typesafeai_types in
     let record,capture,final=retained_absorbing_answer_before_gate fixture in
@@ -1177,12 +1177,15 @@ let test_absorbing_admission_requires_only_observed_context ()=
     let owner=io (fun () -> original_owner fixture.base_path fixture.keepers_dir) in
     let record=memory_action fixture (fun () -> retain_judgment fixture record final) in
     let net=Eio_context.get_net_opt () |> Option.to_result ~none:"fixture network missing" |> get in
+    let directions=ref [] in
     let jev=F.start_server ~sw ~net ~clock:fixture.clock (F.Reply_with (fun _ body ->
       let request=Yojson.Safe.from_string body in
-      let forward=match member "state" request with `Assoc _ -> true | _ -> false in
+      let forward=match member "state" request with
+        | `Assoc _ -> true | `String _ -> false | _ -> fail "unexpected evaluation state" in
+      directions:= !directions @ [forward];
       let answers=member "questions" request |> Yojson.Safe.Util.to_assoc |> List.map (fun (id,_) ->
-        let answer=if forward then T.Choice_answer {choice="mergeable";confidence=1.;
-          probabilities=List.map (fun label -> label,(if label="mergeable" then 1. else 0.))
+        let answer=if forward then T.Choice_answer {choice=forward_verdict;confidence=1.;
+          probabilities=List.map (fun label -> label,(if label=forward_verdict then 1. else 0.))
             ["mergeable";"different_context";"loses_knowledge";"uncertain"]}
           else T.Noul_answer {noul=0.} in id,T.answer_to_yojson answer) in
       `OK,Yojson.Safe.to_string (`Assoc ["model",`String "context-fixture";"answers",`Assoc answers]))) in
@@ -1220,16 +1223,19 @@ let test_absorbing_admission_requires_only_observed_context ()=
         let result=memory_action fixture (fun () -> match Gate.resume ~store:fixture.store ~owner ~capture ~record:gate
           ~live_authority:(Some authority) ~request_clock:(fun () -> Ok fixture.clock) ~before_dispatch:(fun () -> Ok ()) |> get with
           | Complete (result,_) -> result | Pending _ -> fail "the actual context evaluation must complete") in
-        check int "the observed absorption is evaluated despite missing unused pair policy" 1
+        check int "the observed absorption follows the actual verdict despite missing unused pair policy"
+          (if forward_verdict="mergeable" then 1 else 0)
           (List.length (Absorb.absorbed_of_run result));
         let requests=F.post_count jev in
-        check bool "both forward and reverse use the captured bundle" true (requests>=2);
+        check (list bool) "only an unapplied claim also needs the original reverse question"
+          (if forward_verdict="mergeable" then [true] else [true;false]) !directions;
         let replayed=io (fun () -> Gate.restore_size_evidence ~store:fixture.store ~owner
           ~parent_execution:capture ~gate_request_id:gate.request_id |> get) in
         check json "strict original replay retains the context and result" (Absorb.run_result_to_yojson result)
           (Absorb.run_result_to_yojson replayed);
         check int "strict replay sends no evaluation" requests (F.post_count jev);
-        check int "the original Librarian answer is sent once" 1 (F.post_count fixture.server))))))) [false;true];
+        check int "the original Librarian answer is sent once" 1 (F.post_count fixture.server)))))))
+    [false,"mergeable";true,"mergeable";false,"loses_knowledge";true,"loses_knowledge"];
   List.iter (fun empty -> with_fixture (fun ~sw:_ fixture ->
     let record,capture,final=retained_absorbing_answer_before_gate fixture in
     let proposal=match final with Lane_addon_exact.Call_final (Answered {output;_}) -> Lane_addon_exact.checked_json output

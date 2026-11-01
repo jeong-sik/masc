@@ -121,12 +121,12 @@ let test_repeated_web_source_shares_one_credential () =
       (List.length config.providers);
     let paths=credential_paths config in
     Alcotest.(check int) "repeated web sources retain one private key" 1 (List.length paths);
-    let path=List.hd paths in
+    let credential_path=List.hd paths in
     Alcotest.(check int) "only the shared credential is retained in storage" 1
-      (Array.length (Sys.readdir (Filename.dirname path)));
-    Alcotest.(check int) "the committed shared key remains private" 0o600 (Unix.stat path).st_perm;
+      (Array.length (Sys.readdir (Filename.dirname credential_path)));
+    Alcotest.(check int) "the committed shared key remains private" 0o600 (Unix.stat credential_path).st_perm;
     Alcotest.(check string) "the shared key survives request cleanup" "shared-web-key"
-      (In_channel.with_open_bin path In_channel.input_all);
+      (In_channel.with_open_bin credential_path In_channel.input_all);
     let open Yojson.Safe.Util in
     let ids=receipt |> member "runtime_ids" |> to_list |> List.map to_string in
     let names=List.map (fun id ->
@@ -139,7 +139,7 @@ let test_repeated_web_source_shares_one_credential () =
       (receipt |> member "models" |> to_list |> List.map to_string);
     Alcotest.(check bool) "the public receipt never includes the key or its private path" false
       (let text=Yojson.Safe.to_string receipt in
-       String_util.contains_substring text "shared-web-key" || String_util.contains_substring text path))) [false;true]
+       String_util.contains_substring text "shared-web-key" || String_util.contains_substring text credential_path))) [false;true]
 let test_distinct_web_sources_remain_separate () = fixture (fun base runtime binary _net ->
   let original=Runtime_toml.parse_file runtime |> Result.get_ok in
   let endpoint="http://127.0.0.1:19002/v1" in

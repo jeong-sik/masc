@@ -217,9 +217,11 @@ let find_goal config ~goal_id : lookup =
 let write_state_result config state =
   ensure_dirs config;
   let json = state_to_yojson state in
-  let* () = Workspace_utils.write_json_result config (goals_path config) json in
+  (* [load_source] reads the local primary for every workspace backend. Publish
+     to that same authority through the shared encoder and atomic writer. *)
+  let* () = Workspace_utils.write_json_local (goals_path config) json in
   Goal_projection_generation.advance ();
-  (match Workspace_utils.write_json_result config (goals_recovery_path config) json with
+  (match Workspace_utils.write_json_local (goals_recovery_path config) json with
    | Ok () -> ()
    | Error msg ->
      Log.Misc.warn

@@ -372,7 +372,50 @@ type flow_execution_terminal_kind =
   | Advanceable_candidates_exhausted
   | Non_advanceable_terminal
 
-type 'callback_error flow_step_failure =
+type responses_uncertainty =
+  | Response_headers_unobserved
+  | Response_informational
+  | Response_non_success_status
+  | Response_accepted_for_processing
+  | Response_partial_content
+  | Response_lifecycle_unobserved
+  | Response_queued
+  | Response_in_progress
+  | Response_status_unrecognized
+  | Response_envelope_ambiguous
+  | Response_json_unreadable
+  | Response_refusal_on_success_status
+
+type 'rejection unresolved_responses =
+  { candidate : flow_attempt_receipt
+  ; observation : generation_receipt_snapshot
+  ; reason : responses_uncertainty
+  ; execution_error : execution_error option
+  ; evidence : flow_evidence
+  ; prior_rejections : 'rejection semantic_rejection_receipt list
+  }
+
+type ('accepted, 'rejection, 'callback_error) guarded_flow_result =
+  | Guarded_finished of
+      ( ('accepted, 'rejection) validated_flow_success
+      , ('callback_error, 'rejection) validated_flow_error ) result
+  | Guarded_unresolved of 'rejection unresolved_responses
+
+type no_uncertainty = |
+type ('accepted, 'rejection, 'callback_error, 'uncertainty) internal_flow_result =
+  | Internal_finished of
+      ( ('accepted, 'rejection) validated_flow_success
+      , ('callback_error, 'rejection) validated_flow_error ) result
+  | Internal_unresolved of
+      { candidate : flow_attempt_receipt
+      ; observation : generation_receipt_snapshot
+      ; reason : 'uncertainty
+      ; execution_error : execution_error option
+      ; evidence : flow_evidence
+      ; prior_rejections : 'rejection semantic_rejection_receipt list
+      }
+
+type ('callback_error, 'uncertainty) flow_step_failure =
   | Flow_step_candidate_rejected of candidate_rejection_receipt
   | Flow_step_attempt_start_failed of flow_candidate_visit * start_attempt_error
   | Flow_step_measurement_start_failed of flow_candidate_visit * measurement_start_error
@@ -385,6 +428,8 @@ type 'callback_error flow_step_failure =
       { candidate : flow_attempt_receipt
       ; cause : execution_error
       }
+  | Flow_step_unresolved of
+      flow_attempt_receipt * generation_receipt_snapshot * 'uncertainty * execution_error option
 
 let make_flow_candidate ~id ~admitted_target =
   let id = String.trim id in
@@ -506,14 +551,17 @@ let same_attempt (left : flow_attempt_publication) (right : flow_attempt_publica
   String.equal (call_id_to_string left.call_id) (call_id_to_string right.call_id)
 ;;
 
-let publish_attempt_snapshot (flow : flow_attempt) (live : flow_attempt_receipt) =
+let publish_attempt_copy (flow : flow_attempt) (live : flow_attempt_receipt) snapshot =
   let publication : flow_attempt_publication =
     { call_id = receipt_call_id live.receipt
-    ; snapshot =
-        { visit = live.visit; receipt = Generation_receipt.snapshot live.receipt }
+    ; snapshot = { visit = live.visit; receipt = snapshot }
     }
   in
   Flow_state.publish_attempt flow.progress ~same:same_attempt publication
+;;
+
+let publish_attempt_snapshot (flow : flow_attempt) (live : flow_attempt_receipt) =
+  publish_attempt_copy flow live (Generation_receipt.snapshot live.receipt)
 ;;
 
 let receipt_phase = Generation_receipt.phase
@@ -1113,6 +1161,7 @@ let record_candidate_rejection (flow : flow_attempt) visit cause measurement =
 let execute_flow_candidate
       ~net
       ~clock
+      ~classify_uncertainty
       ~before_measurement_dispatch
       ~on_measurement_terminal
       ~before_dispatch
@@ -1219,27 +1268,69 @@ let execute_flow_candidate
                  { candidate = candidate_receipt; cause })
           in
           publish ();
-          match target.config.max_concurrent_requests, target.body_timeout_s with
-          | None, _ -> run ()
-          | Some _, None -> Provider_admission.with_admission ~config:target.config run
-          | Some _, Some timeout_s ->
-            (match
-               Provider_admission.with_admission_and_work_for
-                 ~clock
-                 ~timeout_s
-                 ~config:target.config
-                 run
-             with
-             | Ok result -> result
-             | Error Provider_admission.Permit_wait_expired ->
-               timeout_failure ~phase:Http_client.Queue
-                 "before a provider admission permit was granted"
-             | Error Provider_admission.Permit_granted_as_deadline_passed ->
-               timeout_failure ~phase:Http_client.Queue
-                 "as the provider admission permit was granted"
-             | Error Provider_admission.Work_expired ->
-               timeout_failure ~phase:Http_client.Wall_clock
-                 "during the provider round trip")))
+          let result =
+            match target.config.max_concurrent_requests, target.body_timeout_s with
+            | None, _ -> run ()
+            | Some _, None -> Provider_admission.with_admission ~config:target.config run
+            | Some _, Some timeout_s ->
+              (match
+                 Provider_admission.with_admission_and_work_for
+                   ~clock
+                   ~timeout_s
+                   ~config:target.config
+                   run
+               with
+               | Ok result -> result
+               | Error Provider_admission.Permit_wait_expired ->
+                 timeout_failure ~phase:Http_client.Queue
+                   "before a provider admission permit was granted"
+               | Error Provider_admission.Permit_granted_as_deadline_passed ->
+                 timeout_failure ~phase:Http_client.Queue
+                   "as the provider admission permit was granted"
+               | Error Provider_admission.Work_expired ->
+                 timeout_failure ~phase:Http_client.Wall_clock
+                   "during the provider round trip")
+          in
+          let observation = Generation_receipt.snapshot attempt.receipt in
+          let execution_error =
+            match result with
+            | Error (Flow_step_execution_failed { cause; _ }) -> Some cause
+            | Ok _ | Error _ -> None
+          in
+          (match classify_uncertainty observation execution_error with
+           | None -> result
+           | Some reason ->
+             publish_attempt_copy flow candidate_receipt observation;
+             Error
+               (Flow_step_unresolved
+                  (candidate_receipt, observation, reason, execution_error)))))
+;;
+
+let responses_uncertainty snapshot (execution_error : execution_error option) =
+  if Generation_receipt.snapshot_response_family snapshot <> Openai_responses_codec
+     || not (Generation_receipt.snapshot_generation_dispatched snapshot)
+  then None
+  else match Generation_receipt.snapshot_http_status snapshot with
+    | None -> Some Response_headers_unobserved
+    | Some status when status >= 100 && status < 200 -> Some Response_informational
+    | Some 202 -> Some Response_accepted_for_processing
+    | Some 206 -> Some Response_partial_content
+    | Some status when Http_client.is_success_status status ->
+      (match Generation_receipt.snapshot_responses_lifecycle snapshot with
+       | None -> Some Response_lifecycle_unobserved
+       | Some Backend_openai_responses.Ambiguous_envelope -> Some Response_envelope_ambiguous
+       | Some Backend_openai_responses.Unreadable_json -> Some Response_json_unreadable
+       | Some (Backend_openai_responses.Observed_status status) ->
+         (match status with
+          | Responses_stop_reason.Queued -> Some Response_queued
+          | In_progress -> Some Response_in_progress
+          | Other _ -> Some Response_status_unrecognized
+          | Completed | Failed | Incomplete | Cancelled ->
+            (match execution_error with
+             | Some { cause = Provider_response_refused _; _ } ->
+               Some Response_refusal_on_success_status
+             | None | Some _ -> None)))
+    | Some _ -> Some Response_non_success_status
 ;;
 
 let advanceable_flow_failure = function
@@ -1250,12 +1341,14 @@ let advanceable_flow_failure = function
   | Flow_step_measurement_start_failed _
   | Flow_step_before_measurement_dispatch_callback_failed _
   | Flow_step_measurement_terminal_callback_failed _
-  | Flow_step_before_dispatch_callback_failed _ -> None
+  | Flow_step_before_dispatch_callback_failed _
+  | Flow_step_unresolved _ -> None
 ;;
 
-let execute_flow_once
+let execute_flow_once_internal
       ~net
       ~clock
+      ~classify_uncertainty
       ~before_measurement_dispatch
       ~on_measurement_terminal
       ~before_dispatch
@@ -1271,6 +1364,7 @@ let execute_flow_once
         (execute_flow_candidate
            ~net
            ~clock
+           ~classify_uncertainty
            ~before_measurement_dispatch
            ~on_measurement_terminal
            ~before_dispatch
@@ -1295,15 +1389,15 @@ let execute_flow_once
   in
   let evidence = flow_attempt_evidence flow in
   let terminal prior_rejections cause =
-    Error (Flow_execution_terminal { cause; prior_rejections })
+    Internal_finished (Error (Flow_execution_terminal { cause; prior_rejections }))
   in
   match outcome with
   | Flow_state.Succeeded { accepted = accepted, transport_success; prior_rejections } ->
-    Ok { accepted; transport_success; prior_rejections }
+    Internal_finished (Ok { accepted; transport_success; prior_rejections })
   | Flow_state.Semantic_candidates_exhausted { first_rejection; rest_rejections } ->
-    Error
+    Internal_finished (Error
       (Flow_semantic_candidates_exhausted
-         { rejections = { first = first_rejection; rest = rest_rejections }; evidence })
+         { rejections = { first = first_rejection; rest = rest_rejections }; evidence }))
   | Flow_state.Attempt_already_started ->
     terminal [] (Flow_attempt_already_started evidence)
   | Flow_state.Before_advance_callback_failed
@@ -1313,24 +1407,45 @@ let execute_flow_once
       (Flow_before_advance_callback_failed
          { failed = failure; next = next_candidate.visit; cause; evidence })
   | Flow_state.Execution_failed { cause; prior_rejections; _ } ->
-    let cause =
-      match cause with
+    (match cause with
+      | Flow_step_unresolved (candidate, observation, reason, execution_error) ->
+        Internal_unresolved
+          { candidate; observation; reason; execution_error; evidence; prior_rejections }
       | Flow_step_candidate_rejected rejection ->
-        Flow_candidates_exhausted { rejection; evidence }
+        terminal prior_rejections (Flow_candidates_exhausted { rejection; evidence })
       | Flow_step_attempt_start_failed (candidate, cause) ->
-        Flow_attempt_start_failed { candidate; cause; evidence }
+        terminal prior_rejections (Flow_attempt_start_failed { candidate; cause; evidence })
       | Flow_step_measurement_start_failed (candidate, cause) ->
-        Flow_measurement_start_failed { candidate; cause; evidence }
+        terminal prior_rejections (Flow_measurement_start_failed { candidate; cause; evidence })
       | Flow_step_before_measurement_dispatch_callback_failed (measurement, cause) ->
-        Flow_before_measurement_dispatch_callback_failed { measurement; cause; evidence }
+        terminal prior_rejections (Flow_before_measurement_dispatch_callback_failed { measurement; cause; evidence })
       | Flow_step_measurement_terminal_callback_failed (measurement, cause) ->
-        Flow_measurement_terminal_callback_failed { measurement; cause; evidence }
+        terminal prior_rejections (Flow_measurement_terminal_callback_failed { measurement; cause; evidence })
       | Flow_step_before_dispatch_callback_failed (candidate, cause) ->
-        Flow_before_dispatch_callback_failed { candidate; cause; evidence }
+        terminal prior_rejections (Flow_before_dispatch_callback_failed { candidate; cause; evidence })
       | Flow_step_execution_failed { candidate; cause; _ } ->
-        Flow_exact_execution_failed { candidate; cause; evidence }
-    in
-    terminal prior_rejections cause
+        terminal prior_rejections (Flow_exact_execution_failed { candidate; cause; evidence }))
+;;
+
+let no_uncertainty _ _ : no_uncertainty option = None
+
+let execute_flow_once ~net ~clock ~before_measurement_dispatch ~on_measurement_terminal
+    ~before_dispatch ~before_advance ~validate flow =
+  match execute_flow_once_internal ~net ~clock ~classify_uncertainty:no_uncertainty
+      ~before_measurement_dispatch ~on_measurement_terminal ~before_dispatch ~before_advance ~validate flow with
+  | Internal_finished result -> result
+  | Internal_unresolved {reason;_} -> (match reason with _ -> .)
+;;
+
+let execute_flow_once_guarded ~net ~clock ~before_measurement_dispatch ~on_measurement_terminal
+    ~before_dispatch ~before_advance ~validate flow =
+  match execute_flow_once_internal ~net ~clock ~classify_uncertainty:responses_uncertainty
+      ~before_measurement_dispatch ~on_measurement_terminal ~before_dispatch ~before_advance ~validate flow with
+  | Internal_finished result -> Guarded_finished result
+  | Internal_unresolved
+      { candidate; observation; reason; execution_error; evidence; prior_rejections } ->
+    Guarded_unresolved
+      { candidate; observation; reason; execution_error; evidence; prior_rejections }
 ;;
 
 (* Text renderers for the exact-output error family (#27861). They exist so a

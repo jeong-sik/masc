@@ -162,7 +162,7 @@ let execute_once_with_evidence ~net ~clock ?on_phase plan =
           { status
           ; error = Http_client.TimeoutError { phase = Http_client.Wall_clock; _ }
           })
-     when Cohttp.Code.is_success status ->
+     when Http_client.is_success_status status ->
      (* The transport closes the incomplete response before returning this
         owned deadline. Non-success statuses retain their separate
         Not_received_in_window refusal contract. Observer exceptions are
@@ -197,8 +197,7 @@ let execute_once_with_evidence ~net ~clock ?on_phase plan =
             } ) as transport_error) ->
      let receipt, provider_error = transport_error_receipt transport_error in
      error receipt (Provider_error provider_error)
-   | Ok receipt
-     when receipt.response.status < 200 || receipt.response.status >= 300 ->
+   | Ok receipt when not (Http_client.is_success_status receipt.response.status) ->
      let raw = receipt.response in
      let raw_response =
        match receipt.body_receipt with
@@ -229,6 +228,10 @@ let execute_once_with_evidence ~net ~clock ?on_phase plan =
      in
      error ?raw_response (response_received_receipt raw.status)
        (Provider_error provider_error)
+   | Ok { response = raw; body_receipt = Http_client.Not_received_in_window; _ } ->
+     (* A successful status without its complete body cannot produce raw-body
+        evidence or a parsed lifecycle, even if a transport returned it. *)
+     error (response_received_receipt raw.status) Response_body_deadline_exceeded
    | Ok receipt ->
      let raw = receipt.response in
      let raw_response =

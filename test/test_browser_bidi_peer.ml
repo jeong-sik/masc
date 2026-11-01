@@ -2048,6 +2048,62 @@ let test_open_tab_failure_does_not_replay () =
     [Peer.Unanswered "lost reply";Peer.Unsent "closed";
      Peer.Rejected (Peer.error_code_of_wire "invalid session id")]
 
+let test_open_tab_observation_rejection_preserves_navigation ~kind ~after_navigation code () =
+  let calls = ref [] in
+  let request flow =
+    let request = read_client_message flow in
+    calls := method_of request :: !calls;
+    request in
+  let reject flow request =
+    send_server_message flow (obj ["type",`String "error";
+      "id",Yojson.Safe.Util.member "id" request;"error",`String code]) in
+  let outcome = with_scripted_firefox (fun flow ->
+    accept_session flow;
+    let create = request flow in
+    check string "creates the requested context kind" kind
+      Yojson.Safe.Util.(create |> member "params" |> member "type" |> to_string);
+    send_server_message flow (reply_to create (obj ["context",`String "created"]));
+    let navigate = request flow in
+    check string "navigation waits for completion" "complete"
+      Yojson.Safe.Util.(navigate |> member "params" |> member "wait" |> to_string);
+    if after_navigation then (
+      send_server_message flow (reply_to navigate (obj []));
+      reject flow (request flow))
+    else reject flow navigate;
+    let ending = request flow in
+    send_server_message flow (reply_to ending (obj [])))
+    (fun ~ended peer ->
+      (match metadata peer with Ok _ -> () | Error detail -> fail detail);
+      let action = "open_" ^ kind in
+      let result = Peer.dispatch peer ~verb:Peer.Page_act
+        (obj ["action",`String action;"url",`String "https://example.test/new"]) in
+      let receipt = match result with
+        | Error (Peer.Partial_failure {tab_id;receipt;_}) ->
+          check int "created context keeps its original tab ID" 1 tab_id;
+          receipt
+        | Ok _ | Error (Peer.Before_effect _ | Peer.Outcome_unknown _ | Peer.Observed_failure _) ->
+          fail "returned refusal must retain the created context" in
+      check bool "only completed navigation is confirmed" true
+        (Yojson.Safe.Util.member "navigationConfirmed" receipt =
+          if after_navigation then `Bool true else `Null);
+      check bool "returned RPC error is not an unsent observation" true
+        (Yojson.Safe.Util.member "postEffectObservation" receipt = `Null);
+      let payload = Masc.Browser_live_peer.payload result in
+      check bool "recipient receives the exact partial receipt" true
+        (Yojson.Safe.Util.member "data" payload = receipt);
+      check bool "recipient still sees failure" false
+        Yojson.Safe.Util.(payload |> member "ok" |> to_bool);
+      check string "recipient retains partial effect classification" "partial"
+        Yojson.Safe.Util.(payload |> member "effectPhase" |> to_string);
+      check bool "returned refusal does not fence the original connection" true
+        (Eio.Promise.peek ended = None);
+      ended_session peer) in
+  check (result unit string) "the original session ends" (Ok ()) outcome;
+  check (list string) "one creation and navigation, with no replay or close"
+    (["browsingContext.create";"browsingContext.navigate"]
+      @ (if after_navigation then ["script.callFunction"] else []) @ ["session.end"])
+    (List.rev !calls)
+
 let test_live_act_rejects_other_actions_before_effect () =
   let peer = peer_of (fun _ _ -> fail "invalid live action reached browser") in
   List.iter (fun args -> match Peer.dispatch peer ~verb:Peer.Page_act args with
@@ -2110,6 +2166,11 @@ let () = run "BiDi live peer" ["identity",[test_case "native keyboard release an
     test_case "dialogs are answered only on tabs this connection opened" `Quick test_dialogs_are_answered_only_on_tabs_this_connection_opened;
     test_case "open tab preserves existing context" `Quick test_open_tab_preserves_existing_context;
     test_case "open tab failure does not replay" `Quick test_open_tab_failure_does_not_replay;
+    test_case "returned observation refusals retain completed navigation" `Quick (fun () ->
+      List.iter (fun kind -> List.iter (fun code -> List.iter (fun after_navigation ->
+        test_open_tab_observation_rejection_preserves_navigation ~kind ~after_navigation code ())
+        [false;true]) ["unsupported operation";"no such alert";"unexpected alert open"])
+        ["tab";"window"]);
     test_case "partial semantic input retains its frame" `Quick test_partial_semantic_input_names_the_requested_frame;
     test_case "live act rejects other actions" `Quick test_live_act_rejects_other_actions_before_effect;
     test_case "semantic clicks use trusted native input" `Quick test_semantic_click_uses_native_input;

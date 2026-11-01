@@ -1,7 +1,9 @@
 (test
  (name test_keeper_muse_runtime)
  (modules test_keeper_muse_runtime)
- (libraries masc masc_test_deps))
+ (deps (source_tree ../config/prompts))
+ (libraries masc masc_test_deps masc.keeper_chat_operations masc.keeper_execution_scope
+  masc.keeper_checkpoint_ref masc.keeper_registry))
 
 (rule
  (alias runtest-test_keeper_muse_async_outbox)

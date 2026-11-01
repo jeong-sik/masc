@@ -19,3 +19,7 @@ module For_testing : sig
   val prepare_official_resume : observed:Keeper_semantic_execution.official_client_checkpoint ->
     expected:Keeper_official_client_session_store.t option -> (Keeper_semantic_execution.official_client_checkpoint, string) result
 end
+
+val wait_preparation : base_path:string -> keeper_name:string ->
+  operation_id:Keeper_chat_operation.Operation_id.t -> execution_digest:string ->
+  failure:Agent_core.Error.t -> admission -> (unit,string) result

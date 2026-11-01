@@ -48,6 +48,7 @@ type attempt_outcome =
     before user/tool code can run. *)
 
 val run :
+  ?on_guidance_prepared:(unit -> (unit,Agent_core.Error.t) result) ->
   input_source:Keeper_request_source.t ->
   media_store:Agent_core.History.media_store ->
   ?argument_source:Keeper_official_client_host.argument_source ->
@@ -174,7 +175,4 @@ module For_testing : sig
   val recovery_failure_of_runtime_error : ?current:Keeper_official_client_session_store.recovery_failure ->
     Runtime_muse_serve.error -> Keeper_official_client_session_store.recovery_failure
 
-  val native_posture_note : Runtime_native_tools.posture -> string list
-  (** What a start prompt's system section adds after the system prompt to
-      tell the model the session's posture. *)
 end

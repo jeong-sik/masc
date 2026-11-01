@@ -980,10 +980,20 @@ let run_keeper_invocation_turn_admitted_inner
                      Keeper_turn_outcome.turn_ref_wire_key, Ids.Turn_ref.to_yojson turn_ref;
                      "tool_call_evidence", `List []]) ())
             | Error err ->
+              let preparation_retained =
+                match Keeper_internal_error.guidance_preparation_failure err, direct_resume with
+                | Some _, Some (Keeper_agent_run.Checkpoint_continuation admission) ->
+                  Keeper_direct_checkpoint_continuation.wait_preparation
+                    ~base_path:ctx.config.base_path ~keeper_name:meta.name ~operation_id
+                    ~execution_digest:native_binding.execution_digest ~failure:err admission
+                | Some _, (None | Some (Keeper_agent_run.Gate_continuation _ | Runtime_continuation _))
+                | None, _ -> Ok () in
               let e_str = Agent_core.Error.to_string err in
-              let { Keeper_request_failure.cause } =
-                Keeper_request_failure.of_core_error err
-              in
+              let cause = match preparation_retained with
+                | Ok () -> (Keeper_request_failure.of_core_error
+                    (Keeper_internal_error.without_guidance_preparation_authority err)).cause
+                | Error detail -> Keeper_request_failure.Turn_continuation_unpersisted
+                    {stage=Keeper_request_failure.Checkpoint_retain;detail} in
               Keeper_turn_helpers.finalize_trajectory_acc
                 ~config:ctx.config ~keeper_name:meta.name trajectory_acc
                 (Trajectory.Failed e_str);

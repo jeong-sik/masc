@@ -1,9 +1,8 @@
 (** Token operations for MASC authentication.
 
-    This module is included by {!Auth} to provide token lookup, creation,
-    verification, and shared-token rotation. The public surface is mirrored
-    in {!Auth}; this interface exists to satisfy the library's structural
-    mli-coverage ratchet. *)
+    Auth includes these operations behind its own public signature. Admitted
+    transaction owners also use the read-only lookup helper below to share
+    bearer collision and expiry validation. *)
 
 open Masc_domain
 
@@ -56,10 +55,12 @@ val find_static_credential_by_token :
     after a cache rebuild; standalone UUID payloads are data, not independent
     bearer authority. *)
 
-val find_static_credential_in_index :
-  (string, agent_credential list) Hashtbl.t -> token:string ->
+val find_static_credential_with_lookup :
+  lookup:(string -> agent_credential list option) -> token:string ->
   (agent_credential, masc_error) result
-(** Only for an index owned by the caller's admitted transaction. *)
+(** Hash and validate a bearer against the caller's admitted, read-only owner
+    lookup. [None] or [Some []] means no match. Collision reporting and expiry
+    checks remain here; the lookup must not mutate or re-admit storage. *)
 
 val find_static_credential_in_transaction :
   ?leaf_policy:Auth_credential_base.credential_leaf_policy ->

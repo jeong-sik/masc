@@ -650,6 +650,88 @@ let test_batch_continues_after_raw_preflight_failure () =
        check_recoverable base_path "bbb"
    | _ -> fail "one raw preflight failure must not suppress the later Keeper")
 
+let test_batch_retains_admission_across_repair_and_reread () =
+  with_workspace @@ fun base_path ->
+  let module D = Masc_domain in
+  let require_ok message = function
+    | Ok value -> value
+    | Error _ -> fail message
+  in
+  let first_name = "batch-first" in
+  let blocked_name = "batch-blocked" in
+  let last_name = "batch-last" in
+  let seed_shared name =
+    require_ok "could not seed the shared fixture owner"
+      (Auth.save_file_backed_raw_token_credential base_path
+         ~agent_name:name ~role:D.Worker ~raw_token:shared)
+  in
+  let initial_first = seed_shared first_name in
+  let initial_last = seed_shared last_name in
+  check bool "shared fixtures have no UUID binding before Keeper repair" true
+    (Option.is_none initial_first.id && Option.is_none initial_last.id);
+  let blocked_raw, initial_blocked =
+    require_ok "could not seed the independent fixture owner"
+      (Auth.ensure_keeper_credential base_path ~agent_name:blocked_name)
+  in
+  check bool "the blocked owner starts independent of the shared pair" false
+    (String.equal blocked_raw shared);
+  let blocked_path = Auth.raw_token_file base_path blocked_name in
+  Unix.unlink blocked_path;
+  Unix.mkdir blocked_path 0o700;
+  let names = [ first_name; blocked_name; first_name; last_name ] in
+  let results =
+    require_ok "batch admission unexpectedly failed"
+      (Auth.ensure_keeper_credentials base_path ~agent_names:names)
+  in
+  check bool "batch results retain caller order and repeated names" true
+    (List.map fst results = names);
+  let check_pair name (raw, (issued : D.agent_credential)) =
+    check bool "returned credential is bound to the requested owner" true
+      (String.equal issued.agent_name name);
+    check bool "named storage retains the returned credential" true
+      (Auth.load_credential base_path name = Some issued);
+    check bool "raw storage retains the returned bearer" true
+      (Auth.load_raw_token base_path ~agent_name:name = Some raw);
+    check bool "stored hash matches its recoverable raw bearer" true
+      (String.equal issued.token (Auth.sha256_hash raw));
+    let verified =
+      require_ok "the returned bearer did not verify for its owner"
+        (Auth.verify_token base_path ~agent_name:name ~token:raw)
+    in
+    check bool "verification retains that exact owner and credential" true
+      (verified = issued)
+  in
+  (match List.map snd results with
+   | [ Ok ((first_raw, first) as first_pair)
+     ; Error (D.System (D.System_error.ValidationError _ | D.System_error.IoError _))
+     ; Ok ((repeated_raw, repeated) as repeated_pair)
+     ; Ok ((last_raw, last) as last_pair)
+     ] ->
+       check bool "the first shared owner was repaired" false
+         (String.equal first_raw shared);
+       check bool "the repeated owner reuses its first repaired bearer" true
+         (String.equal repeated_raw first_raw);
+       check bool "the repeated owner reuses its first repaired credential" true
+         (repeated = first);
+       check bool "the final initially shared owner still rotates after reread" false
+         (String.equal last_raw shared);
+       check bool "the first repair acquires a UUID and retains its agent binding" true
+         (Option.is_some first.id && first.agent_id = initial_first.agent_id);
+       check bool "the final repair acquires a UUID and retains its agent binding" true
+         (Option.is_some last.id && last.agent_id = initial_last.agent_id);
+       check_pair first_name first_pair;
+       check_pair first_name repeated_pair;
+       check_pair last_name last_pair
+   | _ -> fail "expected success, raw-path refusal, reuse and final repair");
+  check bool "the refused owner's credential is unchanged" true
+    (Auth.load_credential base_path blocked_name = Some initial_blocked);
+  check bool "the refused raw path remains blocked" true
+    ((Unix.lstat blocked_path).Unix.st_kind = Unix.S_DIR);
+  (match Auth.find_static_credential_by_token base_path ~token:shared with
+   | Error (D.Auth (D.Auth_error.InvalidToken _)) -> ()
+   | Error _ -> fail "original-bearer lookup failed outside bearer retirement"
+   | Ok _ -> fail "an original shared bearer still authenticates")
+
 let test_normalized_names_retain_bearer_authority () =
   with_workspace @@ fun base_path ->
   List.iteri (fun index name ->
@@ -726,6 +808,8 @@ let () =
       ; test_case "Keeper same-owner partial UUID retry" `Quick test_keeper_same_owner_partial_uuid_retry
       ; test_case "batch retires every initial shared bearer" `Quick test_batch_retires_every_initially_shared_bearer
       ; test_case "batch continues after raw preflight refusal" `Quick test_batch_continues_after_raw_preflight_failure
+      ; test_case "batch retains admission across repair and reread" `Quick
+          test_batch_retains_admission_across_repair_and_reread
       ; test_case "normalized names retain bearer authority" `Quick test_normalized_names_retain_bearer_authority
       ; test_case "normalized UUID names retain bearer authority" `Quick test_normalized_uuid_names_retain_bearer_authority
       ; test_case "minted bearer survives superseded payload cleanup failure" `Quick test_minted_bearer_survives_retirement_failure

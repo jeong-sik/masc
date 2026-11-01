@@ -1198,7 +1198,15 @@ let test_noncompletion_preserves_durable_identity_and_effect_fence () =
       [ "CANCELED"; "INTERRUPTED"; "INVALID"; "WAITING"; "RUNNING" ])
 ;;
 
-let run_native_effect_without_mcp_fixture ending =
+let run_native_effect_without_mcp_fixture ?(step_delivery = `Active_done) ending =
+    let started, completed_state =
+      match step_delivery with
+      | `Active_done ->
+        {|emit("step_update", {"conversation_id": "builtin-conversation", "step_index": 1, "state": "ACTIVE", "step_type": "tool", "tool_name": "write_file"})
+|}, "DONE"
+      | `Done_only -> "", "DONE"
+      | `Error_only -> "", "ERROR"
+    in
     let turn_timeout_s, terminal, expected_error =
       match ending with
       | `Result status ->
@@ -1243,13 +1251,13 @@ assert "write_file(" + cwd + ")" in settings["permissions"]["allow"]
 def emit(event, value):
     print(json.dumps({"event": event, event: value}) if event != "init" else json.dumps({"event": "init", "conversation_id": "builtin-conversation", "init": value}), flush=True)
 emit("init", {"model": "gemini-fixture", "cwd": cwd, "tools": ["write_file"], "permission_mode": "always-proceed"})
-emit("step_update", {"conversation_id": "builtin-conversation", "step_index": 1, "state": "ACTIVE", "step_type": "tool", "tool_name": "write_file"})
-# A built-in tool effect, with no call into MASC's MCP tool observer.
+%s# A built-in tool effect, with no call into MASC's MCP tool observer.
 pathlib.Path("native-effect.txt").write_text("native effect")
 with open(%s, "a") as output:
     output.write("effect\n")
-emit("step_update", {"conversation_id": "builtin-conversation", "step_index": 1, "state": "DONE", "step_type": "tool", "tool_name": "write_file"})
-%s|} (Yojson.Safe.to_string (`String marker)) terminal in
+emit("step_update", {"conversation_id": "builtin-conversation", "step_index": 1, "state": %s, "step_type": "tool", "tool_name": "write_file"})
+%s|} started (Yojson.Safe.to_string (`String marker))
+    (Yojson.Safe.to_string (`String completed_state)) terminal in
           write_file ~mode:0o700 path script;
           path
         in
@@ -1333,6 +1341,12 @@ let test_native_effect_then_process_exit_cannot_rotate_candidates () =
 
 let test_native_effect_then_idle_timeout_cannot_rotate_candidates () =
   run_native_effect_without_mcp_fixture `Idle_timeout
+;;
+
+let test_finished_only_native_effect_cannot_rotate_candidates () =
+  List.iter (fun step_delivery ->
+    List.iter (run_native_effect_without_mcp_fixture ~step_delivery)
+      [`Process_exit; `Idle_timeout]) [`Done_only; `Error_only]
 ;;
 
 let test_spawn_failure_is_pre_dispatch () =
@@ -2582,6 +2596,8 @@ let () =
               test_native_effect_then_process_exit_cannot_rotate_candidates
           ; test_case "native effect then idle timeout cannot rotate candidates" `Quick
               test_native_effect_then_idle_timeout_cannot_rotate_candidates
+          ; test_case "finished-only native effects cannot rotate candidates" `Quick
+              test_finished_only_native_effect_cannot_rotate_candidates
           ; test_case
               "spawn failure is pre-dispatch"
               `Quick

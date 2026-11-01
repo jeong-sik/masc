@@ -308,6 +308,9 @@ let stream_projection ?on_native_tool_completion ~keeper_name ~raw_trace_run ~tu
                  ; tool_name = observation.tool_name
                  })
           | Runtime_antigravity.Native_tool_finished {observation; completion} ->
+            (match observation.origin with
+             | Runtime_native_tools.Built_in -> observe_effect_unavailable ()
+             | Runtime_native_tools.Mcp_wrapper -> ());
             Host.record_raw_native_tool
               ~keeper_name
               ~raw_trace_run

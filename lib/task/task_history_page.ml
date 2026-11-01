@@ -548,13 +548,18 @@ let store_cached_segment ~root ~relative (seg : cached_segment) =
       match Hashtbl.find_opt segment_cache (root, relative) with
       | None -> true
       | Some existing ->
+        let range_covers_or_extends =
+          (seg.scanned_from <= existing.scanned_from
+           && seg.scanned_to >= existing.scanned_to)
+          || ((seg.scanned_to > existing.scanned_to
+               || seg.scanned_from < existing.scanned_from)
+              && (seg.scanned_to - seg.scanned_from)
+                 >= (existing.scanned_to - existing.scanned_from))
+        in
         existing.device <> seg.device
         || existing.inode <> seg.inode
-        || not (Fs_compat.equal_owned_regular_file_snapshot existing.snapshot seg.snapshot)
-        || (seg.scanned_from <= existing.scanned_from
-            && seg.scanned_to >= existing.scanned_to)
-        || (seg.scanned_to > existing.scanned_to
-            && (seg.scanned_to - seg.scanned_from) >= (existing.scanned_to - existing.scanned_from))
+        || (seg.snapshot.file_size >= existing.snapshot.file_size
+            && range_covers_or_extends)
     in
     if replace then (
       if Hashtbl.length segment_cache >= max_cached_files

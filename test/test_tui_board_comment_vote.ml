@@ -266,12 +266,65 @@ let test_completion_refreshes_the_open_post () =
     (0, [])
     (run ~mode:(Board_read "p-1") on_comment (Error "refused"))
 
+(* Multi-page loaders (such as connector directory pages) decode several kept
+   JSON bodies per refresh pass through one shared [json_memo]. Verify that
+   kept bodies from the previous pass hit the memo without re-running the
+   decoder, while eviction stays bounded at [json_memo_capacity]. *)
+let test_json_memo_retains_multiple_kept_pages () =
+  let capacity = Masc_tui_loader.json_memo_capacity in
+  let memo = Masc_tui_loader.json_memo () in
+  let decode_calls = ref 0 in
+  let decode json =
+    incr decode_calls;
+    Yojson.Safe.to_string json
+  in
+  let pages =
+    List.init capacity (fun i ->
+      `Assoc [ "connector", `String "slack"; "page", `Int i ])
+  in
+  let first_pass =
+    List.map (Masc_tui_loader.decode_memoized memo decode) pages
+  in
+  Alcotest.(check int) "first pass decodes every page once" capacity !decode_calls;
+  let second_pass =
+    List.map (Masc_tui_loader.decode_memoized memo decode) pages
+  in
+  Alcotest.(check int) "second pass with 304 kept bodies skips decode" capacity
+    !decode_calls;
+  Alcotest.(check (list string)) "memoized results match" first_pass second_pass;
+  let extra_page =
+    `Assoc [ "connector", `String "slack"; "page", `Int capacity ]
+  in
+  let extra_decoded =
+    Masc_tui_loader.decode_memoized memo decode extra_page
+  in
+  Alcotest.(check string) "extra page decodes"
+    (Yojson.Safe.to_string extra_page) extra_decoded;
+  Alcotest.(check int) "extra page increments decode count by one" (capacity + 1)
+    !decode_calls;
+  let retained_tail = List.tl pages in
+  let _ =
+    List.map (Masc_tui_loader.decode_memoized memo decode) retained_tail
+  in
+  Alcotest.(check int) "newer capacity-1 pages remain memoized after eviction"
+    (capacity + 1) !decode_calls;
+  let oldest_page = List.hd pages in
+  let oldest_redecoded =
+    Masc_tui_loader.decode_memoized memo decode oldest_page
+  in
+  Alcotest.(check string) "evicted oldest page re-decodes identically"
+    (List.hd first_pass) oldest_redecoded;
+  Alcotest.(check int) "evicted oldest page is decoded again at capacity boundary"
+    (capacity + 2) !decode_calls
+
 let () =
   Alcotest.run "Board comment votes"
     [ ( "decode"
       , [ Alcotest.test_case "both vote counts" `Quick test_decoder_reads_both_counts
         ; Alcotest.test_case "missing counts are refused" `Quick
             test_decoder_refuses_missing_counts
+        ; Alcotest.test_case "json_memo retains multiple kept pages across passes"
+            `Quick test_json_memo_retains_multiple_kept_pages
         ] )
     ; ( "cursor"
       , [ Alcotest.test_case "walks the drawn order" `Quick

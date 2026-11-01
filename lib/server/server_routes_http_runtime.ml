@@ -1258,7 +1258,7 @@ let full_health_snapshot_metadata ~now ~refresh_in_flight ~refresh_started_at
         `Int (int_of_float (full_health_refresh_timeout_sec *. 1000.)) );
       ("component_timed_out", `Bool component_timed_out);
       ("error", error);
-      ("last_good_available", `Bool (Option.fold ~none:false ~some:(fun s -> s.last_good_available) snapshot));
+      ("last_good_available", `Bool (Option.fold ~none:false ~some:(fun (s : Health_observation.snapshot) -> s.last_good_available) snapshot));
       ("section_timings", section_timings_json);
       (* [stale_since_ts] is the wall-clock of the FIRST invalidation or failure of
          the current outage; null when the snapshot is fresh. It

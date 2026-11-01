@@ -1812,6 +1812,60 @@ let test_private_jsonl_observed_append_matches_locked_bytes () =
     ["{\"row\":1}\n";"{\"row\":1}\n{\"row\":2"]
 ;;
 
+let test_private_jsonl_append_rejects_nonregular_and_hardlinked_targets () =
+  with_transaction_jsonl None @@ fun path ->
+  Unix.mkfifo path 0o644;
+  check_fifo_call_returns "durable append FIFO" (fun () ->
+    match Fs_compat.append_private_jsonl_durable_locked_result path "{\"row\":1}\n" with
+    | Fs_compat.Private_file_failed (Fs_compat.Existing_jsonl_refused detail) ->
+      String.starts_with ~prefix:"private JSONL store is not a regular file: fifo" detail
+    | Fs_compat.Private_file_succeeded _
+    | Fs_compat.Private_file_succeeded_with_cleanup_failure _
+    | Fs_compat.Private_file_failed _
+    | Fs_compat.Private_file_failed_with_cleanup_failure _ -> false);
+  check bool "durable append preserved FIFO kind" true
+    ((Unix.lstat path).Unix.st_kind = Unix.S_FIFO);
+  check int "durable append preserved FIFO permissions" 0o644
+    ((Unix.lstat path).Unix.st_perm land 0o777);
+  remove_if_present path;
+  let external_path =
+    Filename.temp_file "masc_private_jsonl_external_append_" ".jsonl"
+  in
+  let hardlink = path ^ ".hardlink" in
+  Fun.protect
+    ~finally:(fun () ->
+      remove_if_present external_path;
+      remove_if_present hardlink)
+    (fun () ->
+       Unix.chmod external_path 0o644;
+       Unix.symlink external_path path;
+       (match Fs_compat.append_private_jsonl_durable_locked_result path "{\"row\":1}\n" with
+        | Fs_compat.Private_file_failed (Fs_compat.Existing_jsonl_refused detail) ->
+          check bool "symlink refusal mentions kind" true
+            (String.starts_with
+               ~prefix:"private JSONL store is not a regular file: symbolic_link"
+               detail)
+        | _ -> fail "symbolic-link JSONL append target was accepted");
+       check int "external target permissions unchanged" 0o644
+         ((Unix.stat external_path).Unix.st_perm land 0o777);
+       check string "external target bytes unchanged" ""
+         (Fs_compat.load_file external_path);
+       remove_if_present path;
+       (match Fs_compat.append_private_jsonl_durable_locked_result path "{\"row\":1}\n" with
+        | Fs_compat.Private_file_succeeded () -> ()
+        | _ -> fail "initial regular JSONL append failed");
+       Unix.link path hardlink;
+       (match Fs_compat.append_private_jsonl_durable_locked_result path "{\"row\":2}\n" with
+        | Fs_compat.Private_file_failed (Fs_compat.Existing_jsonl_refused detail) ->
+          check bool "hardlink refusal mentions link count" true
+            (String.starts_with
+               ~prefix:"private JSONL store has ambiguous hard-link identity:"
+               detail)
+        | _ -> fail "hard-linked JSONL append target was accepted");
+       check string "hard-linked target bytes unchanged" "{\"row\":1}\n"
+         (Fs_compat.load_file path))
+;;
+
 let () =
   run
     "fs_compat durable append"
@@ -1939,6 +1993,10 @@ let () =
             "private JSONL slice rejects a FIFO without a writer"
             `Quick
             test_private_jsonl_slice_rejects_fifo_without_writer
+        ; test_case
+            "private JSONL append rejects nonregular and hardlinked targets"
+            `Quick
+            test_private_jsonl_append_rejects_nonregular_and_hardlinked_targets
         ; test_case
             "private JSONL purge removes data and retains its stable lock"
             `Quick

@@ -611,10 +611,13 @@ let split_acceptance_head (head : string) : acceptance_head =
        if is_acceptance_frame_prefix tail then Head_pending else Head_payload)
 
 (* The stream ended while [head] was still pending. A held tail that is a
-   prefix of a frame is what the wire cut off, not payload. *)
+   prefix of a frame starting within the acceptance bound is what the wire cut
+   off, not payload. *)
 let settle_acceptance_head (head : string) : string =
   match String.index_opt head rs with
-  | Some opening when is_acceptance_frame_prefix (String.sub head opening (String.length head - opening)) ->
+  | Some opening
+    when opening < acceptance_frame_max_bytes
+      && is_acceptance_frame_prefix (String.sub head opening (String.length head - opening)) ->
     String.sub head 0 opening
   | Some _ | None -> head
 

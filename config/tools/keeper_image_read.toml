@@ -4,7 +4,10 @@ description = """
 Read an image's original pixels into the current model, without calling another \
 model. Provide exactly one sandbox path or Keeper-local image artifact handle \
 returned by an image tool. An image attachment already present in the model input \
-needs no read call; its attachment ID or blob hash is not an artifact handle. \
+needs no read call. Image artifact handles are 64-character lowercase SHA-256 \
+content hashes. Reuse the exact returned artifact value; an attachment ID, \
+tool-blob reference or unrelated digest alone does not establish that the image \
+is present in this Keeper's image store. \
 For an unread artifact or path, use this tool when offered. A runtime whose \
 resolved capability excludes native image input may omit this tool; use \
 keeper_analyze_image in that case or after an explicit image-admission rejection. \

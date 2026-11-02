@@ -3011,6 +3011,7 @@
 (include stanzas/test_tui_observer_loss.inc)
 (include stanzas/test_tui_observer_session_log.inc)
 (include stanzas/test_tui_approval_readability.inc)
+(include stanzas/test_tui_observer_reopen_revalidate.inc)
 (include stanzas/test_tui_waiting_event.inc)
 (include stanzas/test_tui_task_event.inc)
 

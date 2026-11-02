@@ -42,7 +42,9 @@ val of_fields : width:int -> (string * string) list -> line list
     boundaries; unchanged values need no byte map. *)
 
 type gate_origin =
-  | Gate_key | Gate_key_continuation | Gate_string | Gate_json | Gate_unreadable
+  | Gate_key | Gate_key_with_bytes | Gate_key_continuation | Gate_key_with_bytes_continuation
+  | Gate_key_bytes | Gate_key_bytes_continuation
+  | Gate_string | Gate_json | Gate_unreadable
 
 type gate_line = private
   { gate_label : string option
@@ -53,9 +55,16 @@ type gate_line = private
 val prefix : gate_origin -> string
 (** A renderer-owned marker. It is never taken from a field key or value. *)
 
+val gate_key_bytes : string -> string
+(** A quoted ASCII byte literal: [\xHH] represents one byte and quotes and
+    backslashes are escaped. This describes a decoded key, not its JSON wire
+    spelling, and is not JSON. *)
+
 val of_gate_fields : width:int -> (string * Yojson.Safe.t) list -> gate_line list
 (** Keep object field order and distinguish string from other JSON values on
     every row. Each field's text is made terminal-safe before markers are
-    attached. If a field cannot fit at this width, the input is replaced by
+    attached. Ambiguous key text is marked with [key*] and followed by
+    its exact decoded byte literal.
+    If a field cannot fit at this width, the input is replaced by
     an unreadable status. This is a display projection of the decoded value,
     not the original wire bytes. *)

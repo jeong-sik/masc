@@ -111,8 +111,8 @@ let rec json_of_toml = function
       Error "value is not supported by the Keeper settings API"
 
 let parse_toml_editor text =
-  let* parsed = Otoml.Parser.from_string_result
-      (Keeper_toml_loader.normalize_source text) in
+  let* normalized = Keeper_toml_loader.normalize_editor_source text in
+  let* parsed = Otoml.Parser.from_string_result normalized in
   let* json = json_of_toml parsed in
   match json with
   | `Assoc fields ->

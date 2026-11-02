@@ -150,6 +150,17 @@ let test_error_line_after_initial_escape () =
         (String.starts_with ~prefix:"Syntax error on line 2," detail)
 ;;
 
+let test_editor_newline_validation_does_not_change_manifest_reader () =
+  let source = "[keeper]\ninstructions = \"first\\\n  second\"\n" in
+  check bool "editor refuses a malformed single-line string" true
+    (Result.is_error (L.normalize_editor_source source));
+  match L.parse_toml source with
+  | Error error -> fail error
+  | Ok doc ->
+      check (option string) "manifest reader keeps its existing behavior"
+        (Some "first  second") (L.toml_string_opt doc "keeper.instructions")
+;;
+
 let with_temp_toml content f =
   let path = Filename.temp_file "keeper-toml-loader" ".toml" in
   Fun.protect
@@ -251,6 +262,10 @@ let () =
             "parse errors retain source line numbers"
             `Quick
             test_error_line_after_initial_escape
+        ; test_case
+            "editor validation does not change manifest parsing"
+            `Quick
+            test_editor_newline_validation_does_not_change_manifest_reader
         ] )
     ]
 ;;

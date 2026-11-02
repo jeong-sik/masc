@@ -130,6 +130,44 @@ next"""|} in
     (Yojson.Safe.Util.member "instructions" basic = `String "line\000abcd\nnext"
      && Yojson.Safe.Util.member "instructions" literal = `String "\\u0000abcd")
 
+let test_toml_single_line_newlines_are_refused () =
+  let drafts =
+    [ "instructions = \"first\\\n  second\"\n"
+    ; "instructions = \"first\\  \t\n  second\"\n"
+    ; "instructions = \"first\\\r\n  second\"\r\n"
+    ; "instructions = \"first\nsecond\"\n"
+    ; "\"instruc\\\ntions\" = \"value\"\n"
+    ; "instructions = '\\\n   #\t'\n"
+    ; "instructions = '\\\r\n   #\t'\r\n"
+    ; "instructions = 'first\nsecond'\n"
+    ; "'instruc\ntions' = 'value'\n" ] in
+  List.iter
+    (fun draft ->
+      match parse_editor ~format:Toml draft with
+      | Ok _ -> Alcotest.fail "invalid single-line TOML was accepted"
+      | Error reason ->
+          let reopened = reopened_stem ~format:Toml ~reason draft in
+          Alcotest.(check bool) "the refused draft survives reopening" true
+            (String.ends_with ~suffix:draft reopened
+             && Result.is_error (parse_editor ~format:Toml reopened)))
+    drafts;
+  let examples =
+    [ "instructions = \"first\\nsecond\"\n", "first\nsecond"
+    ; "instructions = \"path\\\\name\"\n", "path\\name"
+    ; "instructions = 'path\\name'\n", "path\\name"
+    ; "instructions = \"\"\"first\\\n  second\"\"\"\n", "firstsecond"
+    ; "instructions = '''first\\\nsecond'''\n", "first\\\nsecond"
+    ; "# comment with \" and \\\r\ninstructions = \"\\u0041bc\"\r\n", "Abc" ] in
+  List.iter
+    (fun (text, expected) ->
+      let after = parse Toml text in
+      let sent = patch observed after in
+      Alcotest.(check bool) "valid TOML retains its instructions in the request" true
+        (Yojson.Safe.Util.member "instructions" sent = `String expected
+         && Yojson.Safe.Util.member "expected_config_revision" sent
+            = Yojson.Safe.Util.member "config_revision" observed))
+    examples
+
 let test_toml_other_field_roundtrip () =
   let before = observed
     |> replace_field "workspace" (`Assoc [
@@ -791,6 +829,8 @@ let () =
             test_toml_instruction_roundtrip_and_edit
         ; Alcotest.test_case "TOML explicit resets" `Quick test_toml_reset_contract
         ; Alcotest.test_case "TOML typed Unicode escapes" `Quick test_toml_typed_unicode_escapes
+        ; Alcotest.test_case "single-line TOML newlines are refused" `Quick
+            test_toml_single_line_newlines_are_refused
         ; Alcotest.test_case "TOML other fields preserve bytes" `Quick
             test_toml_other_field_roundtrip
         ; Alcotest.test_case "recovery across editor formats" `Quick

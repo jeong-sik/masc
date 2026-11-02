@@ -921,6 +921,11 @@ let notify_external_subscribers ~target event =
     Transport_metrics.observe_external_subscriber_fanout_duration
       (Time_compat.now () -. t0)
   in
+  let report_subscriber_failure (sub : external_subscriber) exn =
+    Transport_metrics.inc_external_subscriber_callback_failure ();
+    Log.Misc.warn "External subscriber %s failed: %s" sub.sub_id
+      (Printexc.to_string exn)
+  in
   try
     (* [Atomic.get] returns an immutable [SMap.t] snapshot — concurrent
        subscribe/unsubscribe builds a new map via [Lockfree_atomic.update_with_commit]
@@ -933,18 +938,20 @@ let notify_external_subscribers ~target event =
     let dead = ref [] in
     SMap.iter
       (fun _ (sub : external_subscriber) ->
-        if not (sub.is_alive ())
-        then dead := sub.sub_id :: !dead
-        else if external_matches_target target sub then
-          try sub.callback event with
-          | Eio.Cancel.Cancelled _ as e -> raise e
-          | exn ->
-              (* P1 silent-failure fix: previously only logged.  Increment a
-                 counter so dashboards distinguish "all subscribers healthy"
-                 from "subscribers exist but every callback throws." *)
-              Transport_metrics.inc_external_subscriber_callback_failure ();
-              Log.Misc.warn "External subscriber %s failed: %s" sub.sub_id
-                (Printexc.to_string exn))
+        try
+          if not (sub.is_alive ())
+          then dead := sub.sub_id :: !dead
+          else if external_matches_target target sub then sub.callback event
+        with
+        | Eio.Cancel.Cancelled _ as exn ->
+            (* A subscriber can raise its own cancellation even when the
+               publisher is still live. Do not skip later subscribers in
+               that case, but preserve cancellation of the publisher. *)
+            (match Fs_compat.execution_context () with
+             | Eio_fiber -> Eio.Fiber.check ()
+             | Non_eio -> ());
+            report_subscriber_failure sub exn
+        | exn -> report_subscriber_failure sub exn)
       subscribers;
     (* Remove dead subscribers *)
     if !dead <> [] then begin

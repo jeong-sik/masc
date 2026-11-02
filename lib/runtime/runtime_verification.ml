@@ -543,7 +543,7 @@ let claude_auth_status = function
    as a candidate rather than the account the operator looks at first. *)
 let claude_auth_refusal ~account_home ~status detail =
   let inherited =
-    if Runtime_claude_code.runs_on_environment_credential account_home
+    if Runtime_claude_code.runs_on_environment_credential (Runtime_official_account.Captured account_home)
     then
       " (this child inherited an environment credential, which Claude Code uses \
        before the signed-in account)"
@@ -902,7 +902,7 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
       | Runtime_execution.Claude_code execution ->
         let config =
           { (Runtime_claude_code.default_config ~cwd:cwd_path) with
-            account_home = execution.account_home;
+            account_home = Runtime_official_account.Captured execution.account_home;
             cli_path = execution.cli_path
           ; model = execution.model
           ; admission_timeout_s = Float.min timeout_s execution.timeout_s
@@ -994,7 +994,8 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
               | Runtime_claude_code.Unhandled_exception _ ) as error) ->
            Error (Provider_rejected (Runtime_claude_code.error_to_string error)))
       | Runtime_execution.Codex_app_server execution ->
-        (match Runtime_verification_codex_home.prepare ?source_home:execution.account_home ~directory:cwd_path () with
+        (match Runtime_verification_codex_home.prepare
+          ~source_home:(Runtime_official_account.home execution.account_home) ~directory:cwd_path () with
         | Error detail -> Error (Unavailable (Invalid_configuration detail))
         | Ok isolated_home ->
         (* Codex rejects Native_none. Native_read is its least supported
@@ -1003,6 +1004,7 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
         let config =
           { (Runtime_codex_app_server.default_config ()) with
             cli_path = execution.cli_path
+          ; account_home = Runtime_official_account.Captured execution.account_home
           ; isolated_home = Some isolated_home
           ; model = execution.model
           ; context_window = Some (Runtime_instance.max_context_of_runtime runtime)

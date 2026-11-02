@@ -313,10 +313,12 @@ let select_account ~base_path request =
       (fun provider -> provider.Runtime_schema.account_home) in
   let* home = match choice with
     | Runtime_setup_spec.Claude_code ->
-      (match Runtime_claude_code.effective_account_home configured with
+      (match (Runtime_official_account.resolve_home ~client:Claude_code ~declaration:configured
+        |> Result.to_option) with
        | Some home -> Ok home | None -> Error Credential_unavailable)
     | Codex ->
-      (match Runtime_codex_app_server.effective_account_home configured with
+      (match (Runtime_official_account.resolve_home ~client:Codex ~declaration:configured
+        |> Result.to_option) with
        | Some home -> Ok home | None -> Error Credential_unavailable)
     | Muse ->
       (match configured with Some home -> Ok home | None ->
@@ -385,8 +387,12 @@ let bound_model_names (config : Runtime_schema.config) template id choice =
   (* Resolve both sides with the same native-home rules used by inventory
      grouping; an omitted home can name the same account as an explicit one. *)
   let effective_home home = match choice with
-    | Runtime_setup_spec.Codex -> Runtime_codex_app_server.effective_account_home home
-    | Claude_code -> Runtime_claude_code.effective_account_home home
+    | Runtime_setup_spec.Codex ->
+      Runtime_official_account.resolve_home ~client:Codex ~declaration:home
+      |> Result.to_option
+    | Claude_code ->
+      Runtime_official_account.resolve_home ~client:Claude_code ~declaration:home
+      |> Result.to_option
     | Muse -> home
     | Antigravity | Ollama | Llama_cpp | Vllm | Openai_compatible | Messages -> None in
   let selected_home = effective_home

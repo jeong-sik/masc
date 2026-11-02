@@ -814,7 +814,8 @@ let test_bound_models_follow_account_home () = fixture (fun base runtime binary 
     Alcotest.check (Alcotest.list (Alcotest.pair Alcotest.string Alcotest.bool))
       "another account keeps its own model" isolated (flags other)))
 let test_bound_models_follow_effective_ambient_home () = fixture (fun base runtime binary net ->
-  let ambient = match Runtime_codex_app_server.effective_account_home None with
+  let ambient = match (Runtime_official_account.resolve_home ~client:Codex ~declaration:None
+        |> Result.to_option) with
     | Some home -> home | None -> Alcotest.fail "fixture needs an effective native home" in
   let other = Filename.concat base "different-native-account" in
   Unix.mkdir other 0o700;

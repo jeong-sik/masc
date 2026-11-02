@@ -1894,8 +1894,8 @@ tools-support = true
         (String.concat "; " (List.map (fun e -> e.Runtime_toml.message) errors)) in
   let homes = List.map (fun binding ->
     match execution_for_binding config binding with
-    | Ok (Runtime_execution.Claude_code execution) -> execution.account_home
-    | Ok (Runtime_execution.Codex_app_server execution) -> execution.account_home
+    | Ok (Runtime_execution.Claude_code execution) -> Some (Runtime_official_account.home execution.account_home)
+    | Ok (Runtime_execution.Codex_app_server execution) -> Some (Runtime_official_account.home execution.account_home)
     | Ok _ -> Alcotest.fail "expected an official client"
     | Error detail -> Alcotest.fail detail) config.Runtime_schema.bindings in
   Alcotest.(check (list (option string))) "each binding keeps its login home"
@@ -1973,7 +1973,7 @@ tools-support = true
         (match Runtime_instance.of_binding config (binding "codex") with
             | Error (Runtime_config_error.Execution_unbuildable reason) ->
               Alcotest.(check bool) "selected account needs a real home" true
-                (String_util.contains_substring reason "account-home")
+                (String_util.contains_substring reason "home")
             | Error _ | Ok _ ->
               Alcotest.fail "selected official client without HOME gained a shared scope");
         (match Runtime_instance.of_binding config (binding "http") with

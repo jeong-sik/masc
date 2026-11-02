@@ -129,12 +129,12 @@ let official_client_scope ~client ~env_name ~default_subdir account_home =
 
 let scope_of_claude_code_home =
   official_client_scope ~client:"claude-code" ~env_name:"CLAUDE_CONFIG_DIR"
-    ~default_subdir:".claude"
+    ~default_subdir:(Runtime_official_account.default_directory Claude_code)
 ;;
 
 let scope_of_codex_home =
   official_client_scope ~client:"codex-app-server" ~env_name:"CODEX_HOME"
-    ~default_subdir:".codex"
+    ~default_subdir:(Runtime_official_account.default_directory Codex)
 ;;
 
 let scope_of_muse_home home =

@@ -412,7 +412,7 @@ let run_fixture ?account_home ?(worker_pool = false) ?isolated_home ?(dynamic_to
       { (Runtime_codex_app_server.default_config ()) with
         cli_path = path
       ; model
-      ; account_home
+      ; account_home = Runtime_official_account.Current account_home
       ; isolated_home
       ; context_window
       ; native
@@ -2692,7 +2692,7 @@ let test_background_read_outlives_the_turn () =
           let clock = Eio.Stdenv.clock env in
           let cwd = Eio.Path.(Eio.Stdenv.fs env / "/tmp") in
           let codex =
-            ({ cli_path = path; account_home = None; model = None; timeout_s = 2.0 } : Runtime_execution.codex_app_server)
+            ({ cli_path = path; account_home = Masc_test_deps.codex_account (); model = None; timeout_s = 2.0 } : Runtime_execution.codex_app_server)
           in
           let recorded =
             Eio.Switch.run (fun root_sw ->
@@ -2762,7 +2762,7 @@ let read_after_spent_usage_refusal ~provider_id read_result =
         let clock = Eio.Stdenv.clock env in
         let cwd = Eio.Path.(Eio.Stdenv.fs env / "/tmp") in
         let codex =
-          ({ cli_path = path; account_home = None; model = None; timeout_s = 2.0 } : Runtime_execution.codex_app_server)
+          ({ cli_path = path; account_home = Masc_test_deps.codex_account (); model = None; timeout_s = 2.0 } : Runtime_execution.codex_app_server)
         in
         Runtime_quota_window.note_observed_exhausted ~scope;
         Eio.Switch.run (fun root_sw ->
@@ -2828,7 +2828,7 @@ let test_start_read_of_a_spent_account_rests_nothing () =
   with_fixture [init_result; account_chatgpt; codex_spent_window ~resets_at:(reset_a_week_ahead ()) ()] (fun path ->
     Eio_main.run (fun env ->
       let codex =
-        ({ cli_path = path; account_home = None; model = None; timeout_s = 2.0 } : Runtime_execution.codex_app_server)
+        ({ cli_path = path; account_home = Masc_test_deps.codex_account (); model = None; timeout_s = 2.0 } : Runtime_execution.codex_app_server)
       in
       match
         Runtime_provider_usage_read.read_codex ~mgr:(Eio.Stdenv.process_mgr env)

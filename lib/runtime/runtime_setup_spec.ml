@@ -290,8 +290,12 @@ let provider_id spec =
     choice_name spec.choice ^ "_" ^ answers_hash identity
 let account_home_matches choice left right =
   let effective = match choice with
-    | Claude_code -> Runtime_claude_code.effective_account_home
-    | Codex -> Runtime_codex_app_server.effective_account_home
+    | Claude_code -> (fun declaration ->
+      Runtime_official_account.resolve_home ~client:Claude_code ~declaration
+      |> Result.to_option)
+    | Codex -> (fun declaration ->
+      Runtime_official_account.resolve_home ~client:Codex ~declaration
+      |> Result.to_option)
     | Ollama | Llama_cpp | Vllm | Openai_compatible | Messages | Antigravity | Muse -> Fun.id in
   effective left = effective right
 let same_connection left right =

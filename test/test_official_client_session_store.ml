@@ -1557,7 +1557,8 @@ let test_tool_surface_fingerprint_is_canonical () =
          ~native_posture:Runtime_native_tools.Native_none [ alpha ])));
   let inherited_home value =
     Masc_test_deps.with_process_env "CLAUDE_CONFIG_DIR" (Some value) (fun () ->
-      Runtime_claude_code.effective_account_home None)
+      (Runtime_official_account.resolve_home ~client:Claude_code ~declaration:None
+        |> Result.to_option))
   in
   let first = inherited_home "relative-claude-one" in
   let second = inherited_home "relative-claude-two" in

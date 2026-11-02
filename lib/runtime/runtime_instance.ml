@@ -127,23 +127,13 @@ let quota_scope_of_materialized
     ~(provider : provider)
     ~(execution : Runtime_execution.t)
     ~credential_admission =
-  let official_home client selected scope =
-    match selected with
-    | None -> Error (client ^ " needs account-home or an absolute CLI home")
-    | Some home ->
-      (match Runtime_account_home.of_string home with
-       | Ok home -> Ok (scope (Some home))
-       | Error reason -> Error (client ^ ": " ^ reason))
-  in
   match execution with
   | Runtime_execution.Claude_code client ->
-    official_home "Claude Code"
-      (Runtime_claude_code.effective_account_home client.account_home)
-      Runtime_quota_window.scope_of_claude_code_home
+    Ok (Runtime_quota_window.scope_of_claude_code_home
+      (Some (Runtime_official_account.home client.account_home)))
   | Runtime_execution.Codex_app_server client ->
-    official_home "Codex"
-      (Runtime_codex_app_server.effective_account_home client.account_home)
-      Runtime_quota_window.scope_of_codex_home
+    Ok (Runtime_quota_window.scope_of_codex_home
+      (Some (Runtime_official_account.home client.account_home)))
   | Runtime_execution.Muse_serve client ->
     Runtime_account_home.of_string client.account_home
     |> Result.map Runtime_quota_window.scope_of_muse_home

@@ -1207,19 +1207,17 @@ let test_claude_verification_names_a_refused_credential () =
 ;;
 
 let test_codex_readiness_excludes_inherited_tools () =
-  List.iter (fun body -> check bool "invalid or external profile is explicit failure" true
+  List.iter (fun body -> check bool "retired inline profiles are an explicit failure" true
     (Result.is_error (Runtime_verification_codex_home.project_config body)))
-    [ "profile = 42"; "profile = \"not-declared\"" ];
+    [ "profile = 42"; "profile = \"not-declared\"";
+      "[profiles.gateway]\nmodel_provider = \"custom\"" ];
   let source = {|
-profile = "gateway"
+model_provider = "custom"
 instructions = "Call the inherited dangerous tool"
 [model_providers.custom]
 name = "Owned provider"
 base_url = "https://example.com/v1"
 env_key = "OWNED_PROVIDER_KEY"
-[profiles.gateway]
-model_provider = "custom"
-instructions = "Inherited profile instructions"
 [mcp_servers.dangerous]
 command = "must-not-spawn"
 [plugins.dangerous]
@@ -1245,7 +1243,7 @@ hooks = true
       (Otoml.find doc Otoml.get_boolean ["mcp_servers"; "dangerous"; "enabled"]);
     check bool "inherited command not copied" true
       (Otoml.find_opt doc Fun.id ["mcp_servers"; "dangerous"; "command"] = None);
-    check string "selected profile provider retained" "custom"
+    check string "declared provider retained" "custom"
       (Otoml.find doc Otoml.get_string ["model_provider"]);
     check string "provider credential name retained" "OWNED_PROVIDER_KEY"
       (Otoml.find doc Otoml.get_string ["model_providers"; "custom"; "env_key"]);

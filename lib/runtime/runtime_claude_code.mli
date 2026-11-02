@@ -18,11 +18,13 @@ type subscription = private
 val authentication_to_string : authentication -> string
 val api_provider_to_string : api_provider -> string
 
+type account = Runtime_official_account.claude_code Runtime_official_account.selection
+
 type config =
   { cli_path : string
-  ; account_home : string option
-    (** Selected CLI configuration and login directory. [None] inherits the
-        operator's ordinary Claude Code environment. *)
+  ; account_home : account
+    (** [Current None] selects the ordinary environment at call time.
+        [Captured] preserves the admitted home mode and credential environment. *)
   ; cwd : string
   ; model : string option
   ; system_prompt : string option
@@ -64,30 +66,21 @@ type config =
 
 val default_timeout_s : float
 val default_config : cwd:string -> config
-val client_environment : string option -> string array
-(** Selected-account child environment shared by execution and explicit login. *)
-val effective_account_home : string option -> string option
-(** The selected Claude Code configuration directory: explicit home,
-    CLAUDE_CONFIG_DIR, or the CLI's HOME/.claude default. An inherited relative
-    CLAUDE_CONFIG_DIR is resolved against the process cwd and passed to the
-    child; other inherited authentication variables are preserved. Explicit
-    paths keep their literal spelling for the client's credential identity. *)
-val account_file : string option -> string option
-(** The global config file that names the account signed in to a selected
-    home, or with none to the inherited one: the legacy [.config.json] in the
-    config directory while it exists, else [.claude.json] inside
-    CLAUDE_CONFIG_DIR when set, otherwise in HOME. A selected home runs as
-    CLAUDE_CONFIG_DIR. [None] when the environment names neither. *)
+val account_file : account -> string option
+(** Prefer the legacy [.config.json] in the captured configuration directory
+    while it exists. Otherwise directory modes use that directory's
+    [.claude.json], and inherited user-HOME mode uses captured HOME/.claude.json.
+    Current selections are observed at call time; an invalid one returns [None]. *)
 val environment_credential_names : string list
 (** The variables {!runs_on_environment_credential} reads: the cloud provider
     switches, then ANTHROPIC_AUTH_TOKEN, ANTHROPIC_API_KEY and
     CLAUDE_CODE_OAUTH_TOKEN. *)
-val runs_on_environment_credential : string option -> bool
+val runs_on_environment_credential : account -> bool
 (** Whether a child on this home is given a credential Claude Code uses before
     its /login account: a cloud provider switch that Claude Code reads as on
     ("1", "true", "yes" or "on"), or a non-empty ANTHROPIC_AUTH_TOKEN,
-    ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN. Only the inherited home
-    ([None]) passes them. *)
+    ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN. Captured selections inspect
+    their private environment; Current selections observe the declaration now. *)
 
 (** One image attached to a turn's user message. [base64_data] is the raw
     base64 payload with no data-URL prefix and no newlines, the shape the
@@ -492,6 +485,10 @@ type error =
   | Timeout of float
 
 val error_to_string : error -> string
+
+val client_environment : account -> (string array, error) result
+(** Shared child projection for execution/login. Captured input never reads
+    ambient credentials; Current input is selected and validated at call time. *)
 
 val validate_turn :
   ?dynamic_tools:dynamic_tool list ->

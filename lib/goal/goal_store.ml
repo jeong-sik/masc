@@ -348,11 +348,13 @@ type delete_goal_outcome =
 
 type delete_goal_error =
   | Unknown_goal of string
+  | Ambiguous_goal of string
   | Store_unavailable of unavailable
   | Persistence_failed of string
 
 let delete_goal_error_to_string = function
   | Unknown_goal msg -> msg
+  | Ambiguous_goal goal_id -> "goal ID has multiple rows: " ^ goal_id
   | Store_unavailable u -> unavailable_to_string u
   | Persistence_failed msg -> "goal persistence failed: " ^ msg
 
@@ -378,13 +380,22 @@ let write_error_to_string = function
   | Rejected detail -> detail
   | Persist_failed detail -> "goal persistence failed: " ^ detail
 
-(* The caller must hold the Goal lock. Decode still follows the document's
-   existing rules; this checks row identity, not duplicate JSON fields. *)
-let unique_goal_in goals goal_id =
+type goal_row_match = No_goal_row | One_goal_row of goal | Multiple_goal_rows
+
+(* Callers use this classification on the decoded Goal rows. Decode still
+   follows the document's existing rules, including for duplicate JSON fields. *)
+let classify_goal_rows goals goal_id =
   match List.filter (fun (goal : goal) -> String.equal goal.id goal_id) goals with
-  | [] -> Ok None
-  | [goal] -> Ok (Some goal)
-  | _ :: _ :: _ -> Error (Goal_identity_ambiguous goal_id)
+  | [] -> No_goal_row
+  | [goal] -> One_goal_row goal
+  | _ :: _ :: _ -> Multiple_goal_rows
+
+(* The caller must hold the Goal lock. *)
+let unique_goal_in goals goal_id =
+  match classify_goal_rows goals goal_id with
+  | No_goal_row -> Ok None
+  | One_goal_row goal -> Ok (Some goal)
+  | Multiple_goal_rows -> Error (Goal_identity_ambiguous goal_id)
 
 (* Goal membership and the dependent commit share the Goal lock. Callbacks
    may acquire backlog then link locks, never re-enter the Goal store. *)
@@ -511,9 +522,10 @@ let delete_goal config ~goal_id : (delete_goal_outcome, delete_goal_error) resul
         | Unavailable u -> Error (Store_unavailable u)
         | Uninitialized -> Error (Unknown_goal "Goal not found")
         | Available state ->
-          if not (List.exists (fun goal -> String.equal goal.id goal_id) state.goals) then
-            Error (Unknown_goal "Goal not found")
-          else (
+          (match classify_goal_rows state.goals goal_id with
+          | No_goal_row -> Error (Unknown_goal "Goal not found")
+          | Multiple_goal_rows -> Error (Ambiguous_goal goal_id)
+          | One_goal_row _ ->
             match
               write_state_result
                 config

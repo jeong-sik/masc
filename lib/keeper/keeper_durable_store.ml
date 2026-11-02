@@ -22,10 +22,13 @@ open Result.Syntax
    Every scan runs the production decoder. A fixture cannot go stale here
    because there is no fixture -- these are the rows on disk, read by the
    binary about to serve them. *)
+type pending_recovery = Memory_publication of { path : string }
+
 type report =
   { rows : int
   ; refused : int
   ; first_refusal : string option
+  ; pending_recovery : pending_recovery list
   }
 
 type store_scan =
@@ -34,7 +37,7 @@ type store_scan =
   ; scan : base_path:string -> (report, string) result
   }
 
-let empty_report = { rows = 0; refused = 0; first_refusal = None }
+let empty_report = { rows = 0; refused = 0; first_refusal = None; pending_recovery = [] }
 
 let read_optional_regular_file path =
   try
@@ -58,6 +61,7 @@ let count_row report = function
         (match report.first_refusal with
          | Some _ as kept -> kept
          | None -> Some detail)
+    ; pending_recovery = report.pending_recovery
     }
 ;;
 
@@ -137,27 +141,30 @@ let keeper_meta_store =
 let memory_os_current_store =
   { store = "memory OS current snapshot"
   ; on_refusal =
-      "recall logs a warning, counts the read error, and tells the keeper that \
-       Memory is unavailable; the next Memory commit for that keeper \
-       (keeper_memory_write, supersede, Librarian admission) moves the \
-       unreadable snapshot aside, logs a warning, and continues from no snapshot"
+      "a damaged publication or filesystem error can block Memory recovery; \
+       for a snapshot rejected by the decoder, recall reports unavailable \
+       Memory and a later Memory commit can move it aside and start from no snapshot"
   ; scan =
       (fun ~base_path ->
          let keepers_dir =
            Config_dir_resolver.keepers_dir_for_base_path ~base_path
          in
+         let* keeper_ids = Keeper_memory_os_current.list_preflight_keeper_ids ~keepers_dir in
          Ok
-           (Keeper_memory_os_current.list_keeper_ids_for_keepers_dir
-              ~keepers_dir
-            |> List.fold_left
+           (keeper_ids |> List.fold_left
                  (fun report keeper_id ->
                     match
-                      Keeper_memory_os_current.read_for_keepers_dir
+                      Keeper_memory_os_current.inspect_for_preflight
                         ~keepers_dir
                         ~keeper_id
                     with
-                    | Ok None -> report
-                    | Ok (Some _) -> count_row report (Ok ())
+                    | Ok Keeper_memory_os_current.Preflight_absent -> report
+                    | Ok Keeper_memory_os_current.Preflight_snapshot -> count_row report (Ok ())
+                    | Ok Keeper_memory_os_current.Preflight_publication_pending ->
+                      let path = Keeper_memory_os_current.publication_receipt_path
+                          ~keepers_dir ~keeper_id in
+                      { report with rows = report.rows + 1
+                      ; pending_recovery = Memory_publication {path} :: report.pending_recovery }
                     | Error detail ->
                       count_row report (Error (keeper_id ^ ": " ^ detail)))
                  empty_report))
@@ -299,7 +306,7 @@ let board_posts_store =
             | [] -> None
             | _ :: _ -> Some (Posts.posts_source_failure_to_board_error
                 (Board_types.Posts_rows_rejected errors) |> Board_types.show_board_error) in
-          Ok { rows = accepted_rows + refused; refused; first_refusal }
+          Ok { rows = accepted_rows + refused; refused; first_refusal; pending_recovery = [] }
         | Posts.Inspection_failed { error; _ } ->
           Error (Fs_compat.Private_jsonl_unique_fold.error_to_string error))
   }

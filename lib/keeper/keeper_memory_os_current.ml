@@ -42,8 +42,10 @@ let durable_range_receipt_path ~keepers_dir ~keeper_id =
 
 let unread_ledger_path = Keeper_librarian_unread_ledger.path
 
+let publication_receipt_suffix = ".memory-publication.json"
+
 let publication_receipt_path ~keepers_dir ~keeper_id =
-  Filename.concat keepers_dir (keeper_id ^ ".memory-publication.json")
+  Filename.concat keepers_dir (keeper_id ^ publication_receipt_suffix)
 ;;
 
 let epoch_path ~keepers_dir ~keeper_id =
@@ -837,6 +839,54 @@ let list_keeper_ids_for_keepers_dir ~keepers_dir =
     |> List.sort String.compare
 ;;
 
+(* The first publication can be interrupted before its snapshot exists. Keep
+   this inventory separate from snapshot-only consumers such as the dashboard. *)
+let rec missing_directory_or_broken_ancestor path =
+  match Unix.lstat path with
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
+    let parent = Filename.dirname path in
+    if String.equal path parent then Error (path ^ ": directory ancestry is absent")
+    else missing_directory_or_broken_ancestor parent
+  | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+  | exception ((Unix.Unix_error _ | Sys_error _) as exn) ->
+    Error (path ^ ": " ^ Printexc.to_string exn)
+  | _ ->
+    (match Unix.stat path with
+     | stat when stat.Unix.st_kind = Unix.S_DIR -> Ok ()
+     | _ -> Error (path ^ ": not a directory")
+     | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+     | exception ((Unix.Unix_error _ | Sys_error _) as exn) ->
+       Error (path ^ ": " ^ Printexc.to_string exn))
+;;
+
+let list_preflight_keeper_ids ~keepers_dir =
+  try
+    let stat = Unix.stat keepers_dir in
+    if stat.Unix.st_kind <> Unix.S_DIR then
+      Error (keepers_dir ^ ": not a directory")
+    else
+      Sys.readdir keepers_dir
+      |> Array.to_list
+      |> List.filter_map (fun filename ->
+           match Filename.chop_suffix_opt ~suffix filename with
+           | Some _ as id -> id
+           | None -> Filename.chop_suffix_opt ~suffix:publication_receipt_suffix filename)
+      |> List.sort_uniq String.compare
+      |> fun ids -> Ok ids
+  with
+  | Unix.Unix_error (Unix.ENOENT, _, _) ->
+    (match Unix.lstat keepers_dir with
+     | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
+       let+ () = missing_directory_or_broken_ancestor (Filename.dirname keepers_dir) in []
+     | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+     | exception ((Unix.Unix_error _ | Sys_error _) as exn) ->
+       Error (keepers_dir ^ ": " ^ Printexc.to_string exn)
+     | _ -> Error (keepers_dir ^ ": directory target is absent"))
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | (Unix.Unix_error _ | Sys_error _) as exn ->
+    Error (keepers_dir ^ ": " ^ Printexc.to_string exn)
+;;
+
 let list_durable_range_receipt_keeper_ids ~keepers_dir =
   if not (Sys.file_exists keepers_dir && Sys.is_directory keepers_dir)
   then []
@@ -1502,17 +1552,72 @@ let publication_of_json = function
      | _ -> Error "invalid publication target")
   | _ -> Error "publication receipt has unknown, duplicate, or missing fields"
 
+let parse_publication text =
+  match Yojson.Safe.from_string text with
+  | json -> publication_of_json json
+  | exception Yojson.Json_error detail -> Error ("publication receipt: " ^ detail)
+
 let read_publication ~keepers_dir ~keeper_id =
   let path = publication_receipt_path ~keepers_dir ~keeper_id in
   try match Fs_compat.load_file_opt path with
     | None -> Ok None
-    | Some text ->
-      (match Yojson.Safe.from_string text with
-       | json -> Result.map Option.some (publication_of_json json)
-       | exception Yojson.Json_error detail -> Error ("publication receipt: " ^ detail))
+    | Some text -> Result.map Option.some (parse_publication text)
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn -> Error ("publication receipt unreadable: " ^ Printexc.to_string exn)
+
+type preflight_observation =
+  | Preflight_absent
+  | Preflight_snapshot
+  | Preflight_publication_pending
+
+(* Open without blocking on special files and inspect the opened descriptor,
+   not a path that may be replaced between a stat and an open. *)
+let preflight_file path =
+  try
+    let fd = Unix.openfile path [Unix.O_RDONLY; Unix.O_NONBLOCK; Unix.O_CLOEXEC] 0 in
+    let channel = Unix.in_channel_of_descr fd in
+    Fun.protect ~finally:(fun () -> close_in_noerr channel) (fun () ->
+      if (Unix.fstat fd).Unix.st_kind <> Unix.S_REG then
+        Error (path ^ ": not a regular file")
+      else Ok (Some (In_channel.input_all channel)))
+  with
+  | Unix.Unix_error (Unix.ENOENT, _, _) ->
+    (match Unix.lstat path with
+     | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
+       (match Unix.stat (Filename.dirname path) with
+        | stat when stat.Unix.st_kind = Unix.S_DIR -> Ok None
+        | _ -> Error (Filename.dirname path ^ ": not a directory")
+        | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+        | exception ((Unix.Unix_error _ | Sys_error _) as exn) ->
+          Error (Filename.dirname path ^ ": " ^ Printexc.to_string exn))
+     | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+     | exception ((Unix.Unix_error _ | Sys_error _) as exn) ->
+       Error (path ^ ": " ^ Printexc.to_string exn)
+     | _ -> Error (path ^ ": file target is absent"))
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | (Unix.Unix_error _ | Sys_error _) as exn -> Error (path ^ ": " ^ Printexc.to_string exn)
+
+let inspect_for_preflight ~keepers_dir ~keeper_id =
+  let publication_path = publication_receipt_path ~keepers_dir ~keeper_id in
+  let publication () =
+    let* contents = preflight_file publication_path in
+    match contents with
+    | None -> Ok false
+    | Some text ->
+      let+ _ = parse_publication text
+        |> Result.map_error (fun detail -> publication_path ^ ": " ^ detail) in
+      true in
+  let* pending = publication () in
+  if pending then Ok Preflight_publication_pending
+  else
+    let path = path_for_keepers_dir ~keepers_dir ~keeper_id in
+    let* snapshot = preflight_file path in
+    let* pending = publication () in
+    if pending then Ok Preflight_publication_pending
+    else match snapshot with
+      | None -> Ok Preflight_absent
+      | Some text -> let+ _ = parse path text in Preflight_snapshot
 
 let write_publication ~keepers_dir ~keeper_id receipt =
   let json = publication_to_json receipt in

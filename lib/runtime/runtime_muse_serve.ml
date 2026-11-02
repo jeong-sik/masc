@@ -232,7 +232,7 @@ let error_to_string = function
       "Muse Code exited (%s): %s"
       (match status with
        | Some status -> exit_status_to_string status
-       | None -> "not reaped")
+       | None -> "exit status unavailable")
       detail
   | Timeout { seconds; _ } -> Printf.sprintf "Muse Code was silent for %.0fs" seconds
 ;;

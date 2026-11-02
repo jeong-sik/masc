@@ -2607,7 +2607,9 @@ type async_request_row =
   ; ar_submitted_by : string
   ; ar_keeper_name : string
   ; ar_phase : async_request_phase
-  ; ar_elapsed_sec : float option
+  ; ar_submitted_at : float
+      (** Epoch seconds. A screen works out the age itself: an age the server
+          worked out stops when the reading is not read again. *)
   ; ar_ownership : async_request_ownership
   }
 

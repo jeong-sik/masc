@@ -8092,7 +8092,9 @@ type async_request_row =
   ; ar_submitted_by : string
   ; ar_keeper_name : string
   ; ar_phase : async_request_phase
-  ; ar_elapsed_sec : float option
+  ; ar_submitted_at : float
+      (** Epoch seconds. A screen works out the age itself: an age the server
+          worked out stops when the reading is not read again. *)
   ; ar_ownership : async_request_ownership
   }
 
@@ -8163,12 +8165,14 @@ let decode_async_request_observation json =
         | "disk_only_ownership_unknown" -> Ok Async_ownership_unknown
         | _ -> Error (Printf.sprintf "unknown worker ownership %S" ownership)
       in
-      let* ar_elapsed_sec = optional_float_field json "elapsed_sec" in
-      let* () = match ar_elapsed_sec with
-        | Some value when not (Float.is_finite value) -> Error "elapsed_sec must be finite"
-        | Some _ | None -> Ok ()
+      let* ar_submitted_at =
+        match optional_float_field json "submitted_at" with
+        | Ok (Some value) when Float.is_finite value -> Ok value
+        | Ok (Some _) -> Error "submitted_at must be finite"
+        | Ok None -> Error "field 'submitted_at' is missing"
+        | Error _ as error -> error
       in
-      Ok { ar_request_id; ar_submitted_by; ar_keeper_name; ar_phase; ar_elapsed_sec; ar_ownership }
+      Ok { ar_request_id; ar_submitted_by; ar_keeper_name; ar_phase; ar_submitted_at; ar_ownership }
     in
     let* rows = required_list_field json "requests" in
     let* requests = decode_list "requests" decode_row rows in

@@ -820,8 +820,16 @@ let test_retained_answer_with_invalid_working_context_recovers () = with_fixture
   check bool "preflight examined the parent and gate" true (report.rows>=2);
   check int "preflight reads the host-shaped original parent and gate" 0 (List.length report.refusals);
   let fields=Yojson.Safe.Util.to_assoc gate.request in
-  let changed_gate={gate with request=`Assoc
-    (("proposal",answer capture)::List.remove_assoc "proposal" fields)} in
+  let changed_request=`Assoc
+    (("proposal",answer capture)::List.remove_assoc "proposal" fields) in
+  let changed_store=Store.create ~root:(Filename.concat fixture.base_path "changed-gate") in
+  let changed_gate=io (fun () ->
+    Owner.retain ~store:changed_store ~scope:gate.scope ~request_id:gate.request_id
+      ~installation_id:gate.installation_id ~package_id:gate.package_id ~tool:gate.tool
+      ~summary:gate.summary ~request:changed_request |> owned;
+    match Owner.load ~store:changed_store ~scope:gate.scope ~request_id:gate.request_id |> owned with
+    | Some record -> record
+    | None -> fail "the changed gate was not retained") in
   let rejected=io (fun () -> Gate.validate_payload ~owner:(Capture.physical_owner capture)
     ~capture ~parent:finished ~record:changed_gate
     ~read:(fun ~scope:_ ~request_id:_ -> fail "a changed proposal must refuse before ancestry lookup")

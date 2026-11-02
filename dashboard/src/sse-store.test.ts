@@ -1,5 +1,6 @@
 import { signal } from '@preact/signals'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { parseSSEMessage } from './schemas/sse'
 import type { BoardPost, BoardSortMode, RouteState } from './types'
 
 void vi
@@ -756,6 +757,24 @@ describe('setupServerPushReaction reconnect hydration', () => {
     expect(refreshQueue).toHaveBeenCalledTimes(1)
     expect(refreshQueue).toHaveBeenCalledWith('echo')
   })
+
+  it.each(['approval_count', 'approval_detail'])(
+    'parses and routes %s waiting-inventory changes', async queueKind => {
+      const { sseStore } = await loadSseStore()
+      const refreshQueue = vi.fn()
+      sseStore.registerKeeperWaitingInventoryRefresh(refreshQueue)
+      const event = parseSSEMessage({
+        type: 'keeper_waiting_inventory_changed',
+        keeper_name: 'echo',
+        queue_kind: queueKind,
+      })
+
+      expect(event).not.toBeNull()
+      if (event) sseStore.routeServerPushEvent(event)
+      expect(refreshQueue).toHaveBeenCalledOnce()
+      expect(refreshQueue).toHaveBeenCalledWith('echo')
+    },
+  )
 
   it('forwards RFC-0235 audio clips on keeper_chat_appended to the chat handler', async () => {
     const { sseStore } = await loadSseStore()

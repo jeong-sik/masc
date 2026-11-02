@@ -1100,15 +1100,17 @@ describe('SSEMessageSchema', () => {
     expect(r.success).toBe(false)
   })
 
-  it('accepts a typed Keeper waiting-inventory invalidation', () => {
-    const r = SSEMessageSchema.safeParse({
-      type: 'keeper_waiting_inventory_changed',
-      keeper_name: 'keeper-1',
-      queue_kind: 'chat_operation',
-      ts_unix: 1_712_000_000,
-    })
-    expect(r.success).toBe(true)
-  })
+  it.each(['chat_operation', 'event_queue', 'approval_count', 'approval_detail'])(
+    'accepts a typed Keeper waiting-inventory invalidation for %s', queueKind => {
+      const r = SSEMessageSchema.safeParse({
+        type: 'keeper_waiting_inventory_changed',
+        keeper_name: 'keeper-1',
+        queue_kind: queueKind,
+        ts_unix: 1_712_000_000,
+      })
+      expect(r.success).toBe(true)
+    },
+  )
 
   it('accepts the exact runtime telemetry sample envelope', () => {
     const r = SSEMessageSchema.safeParse({

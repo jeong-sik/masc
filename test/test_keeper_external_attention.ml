@@ -628,6 +628,138 @@ let test_counterpart_capture_retains_original_rows_and_dedup_frontier () =
    | _ -> Alcotest.fail "capture envelope missing")
 ;;
 
+let test_counterpart_witness_requires_selected_source_identity () =
+  with_temp_base "keeper-counterpart-witness" @@ fun base_path ->
+  let module Sources = Masc.Keeper_librarian_input_sources in
+  let module Chat = Masc.Keeper_chat_store in
+  let get = function Ok value -> value | Error detail -> Alcotest.fail detail in
+  let covers ~original ~witness = Sources.counterpart_selection_covers
+      ~original:(Sources.select_counterparts original) ~witness:(Sources.select_counterparts witness) in
+  let keeper_name = "witness-owner" in
+  let row ~id ~ts extra =
+    `Assoc (["id",`String id;"role",`String "user";"content",`String "same content";
+      "ts",`Float ts;"speaker_id",`String "speaker";"speaker_name",`String "Speaker";
+      "speaker_authority",`String "external"] @ extra) |> Yojson.Safe.to_string in
+  let original_row = row ~id:"original-row" ~ts:10.
+      ["conversation_id",`String "discord:guild-1:chan-1";
+       "external_message_id",`String "original-message"] in
+  let other_row = row ~id:"another-row" ~ts:30. [] in
+  let chat_path = Chat.chat_path ~base_dir:base_path ~keeper_name in
+  let capture before =
+    Sources.capture_counterparts ~external_after:0 ~base_dir:base_path ~keeper_name
+      ~after:None ~before |> Result.map_error Sources.read_error_to_string |> get in
+  write_file chat_path (original_row ^ "\n");
+  let original = capture 15. in
+  let changed_projection = match Sources.counterpart_snapshot_to_json original with
+    | `Assoc fields ->
+      let rows = match List.assoc "chat_rows" fields with
+        | `List [`Assoc row] ->
+          let projected = match List.assoc "projected_line" row with
+            | `String line -> (match Yojson.Safe.from_string line with
+              | `Assoc values -> `Assoc (List.map (fun (key,value) ->
+                  key, if key="content" then `String "another projection" else value) values)
+                  |> Yojson.Safe.to_string
+              | _ -> Alcotest.fail "projected chat row must be an object")
+            | _ -> Alcotest.fail "projected chat row must be a string" in
+          `List [`Assoc (List.map (fun (key,value) ->
+            key, if key="projected_line" then `String projected else value) row)]
+        | _ -> Alcotest.fail "fixture must retain one chat row" in
+      `Assoc (List.map (fun (key,value) -> key, if key="chat_rows" then rows else value) fields)
+      |> Sources.counterpart_snapshot_of_json |> get
+    | _ -> Alcotest.fail "fixture must retain a snapshot object" in
+  Alcotest.(check bool) "the same raw chat row with a different delivered projection is not a witness" false
+    (covers ~original ~witness:changed_projection);
+  let delivery = item ~keeper_name ~dedupe_key:"witness-delivery" ~received_at:20.
+      ~preview:"different delivery preview" ~external_message:(external_message "original-message") () in
+  (match record ~base_path delivery with
+   | `Recorded -> () | `Duplicate _ -> Alcotest.fail "unexpected delivery duplicate"
+   | `Error detail -> Alcotest.fail detail);
+  write_file chat_path (original_row ^ "\n" ^ other_row ^ "\n");
+  let witness = capture 40. in
+  let original_input = Sources.counterpart_observations original in
+  let witness_input = Sources.counterpart_observations witness in
+  Alcotest.(check int) "the original question contained one chat observation" 1 (List.length original_input);
+  Alcotest.(check bool) "a different row supplies the same projected value" true
+    (List.for_all (fun observation -> List.mem observation witness_input) original_input);
+  Alcotest.(check bool) "the deduplicated original is not selected by the witness" false
+    (covers ~original ~witness);
+  let current_original_window = capture 15. in
+  Sources.snapshot_extends ~original ~current:current_original_window |> get;
+  Alcotest.(check bool) "the old frontier can already be acknowledged" true
+    (Sources.counterparts_covered_at_frontier original
+       ~counterpart_digest:(Sources.counterpart_observations_digest original)
+       ~base_dir:base_path ~keeper_name ~acked_external_offset:1
+     |> Result.map_error Sources.read_error_to_string |> get)
+;;
+
+let test_counterpart_witness_requires_order_and_multiplicity () =
+  with_temp_base "keeper-counterpart-witness-order" @@ fun base_path ->
+  let module Sources = Masc.Keeper_librarian_input_sources in
+  let get = function Ok value -> value | Error detail -> Alcotest.fail detail in
+  let covers ~original ~witness = Sources.counterpart_selection_covers
+      ~original:(Sources.select_counterparts original) ~witness:(Sources.select_counterparts witness) in
+  let keeper_name = "ordered-witness" in
+  List.iter (fun incoming -> match record ~base_path incoming with
+    | `Recorded -> () | `Duplicate _ -> Alcotest.fail "unexpected delivery duplicate"
+    | `Error detail -> Alcotest.fail detail)
+    [item ~keeper_name ~dedupe_key:"first" ~preview:"same" ~received_at:1. ();
+     item ~keeper_name ~dedupe_key:"second" ~preview:"same" ~received_at:2. ();
+     item ~keeper_name ~dedupe_key:"later" ~preview:"later" ~received_at:3. ()];
+  let capture before = Sources.capture_counterparts ~external_after:0 ~base_dir:base_path
+      ~keeper_name ~after:None ~before |> Result.map_error Sources.read_error_to_string |> get in
+  let original = capture 2. and extended = capture 3. in
+  Alcotest.(check bool) "later selected events preserve a real ordered witness" true
+    (covers ~original ~witness:extended);
+  let reordered = match Sources.counterpart_snapshot_to_json extended with
+    | `Assoc fields ->
+      let entries = match List.assoc "external_log" fields with
+        | `List [first;second;later] -> `List [second;first;later]
+        | _ -> Alcotest.fail "fixture must retain three external rows" in
+      `Assoc (List.map (fun (key,value) -> key, if key="external_log" then entries else value) fields)
+      |> Sources.counterpart_snapshot_of_json |> get
+    | _ -> Alcotest.fail "fixture must retain a snapshot object" in
+  Alcotest.(check bool) "the two reordered event projections are identical" true
+    (Sources.counterpart_observations extended = Sources.counterpart_observations reordered);
+  Alcotest.(check bool) "equal projected values cannot hide reversed source order" false
+    (covers ~original ~witness:reordered);
+  let only_second = Sources.capture_counterparts ~external_after:1 ~base_dir:base_path
+      ~keeper_name ~after:None ~before:3. |> Result.map_error Sources.read_error_to_string |> get in
+  Alcotest.(check bool) "one equal event cannot stand in for two originals" false
+    (covers ~original ~witness:only_second)
+;;
+
+let test_counterpart_witness_distinguishes_external_occurrences () =
+  with_temp_base "keeper-counterpart-witness-offset" @@ fun base_path ->
+  let module Sources = Masc.Keeper_librarian_input_sources in
+  let get = function Ok value -> value | Error detail -> Alcotest.fail detail in
+  let covers ~original ~witness = Sources.counterpart_selection_covers
+      ~original:(Sources.select_counterparts original) ~witness:(Sources.select_counterparts witness) in
+  let keeper_name = "offset-witness" in
+  (match record ~base_path (item ~keeper_name ~dedupe_key:"same-event" ~received_at:1. ()) with
+   | `Recorded -> () | `Duplicate _ -> Alcotest.fail "unexpected initial duplicate"
+   | `Error detail -> Alcotest.fail detail);
+  let first = Sources.capture_counterparts ~external_after:0 ~base_dir:base_path ~keeper_name
+      ~after:None ~before:2. |> Result.map_error Sources.read_error_to_string |> get in
+  let repeated ~after = match Sources.counterpart_snapshot_to_json first with
+    | `Assoc fields ->
+      let log = match List.assoc "external_log" fields with
+        | `List [event] -> `List [event;event]
+        | _ -> Alcotest.fail "fixture must retain one external event" in
+      `Assoc (List.map (fun (key,value) -> key,
+        if key="external_log" then log
+        else if key="external_after" then `Int after
+        else if key="external_through" then `Int 2
+        else value) fields) |> Sources.counterpart_snapshot_of_json |> get
+    | _ -> Alcotest.fail "fixture must retain a snapshot object" in
+  let both = repeated ~after:0 and second = repeated ~after:1 in
+  Alcotest.(check bool) "identical event items have identical delivered projections" true
+    (Sources.counterpart_observations first=Sources.counterpart_observations second);
+  Alcotest.(check bool) "the same first append remains a valid witness" true
+    (covers ~original:first ~witness:both);
+  Alcotest.(check bool) "a later identical append cannot stand in for the first" false
+    (covers ~original:first ~witness:second)
+;;
+
 let test_cursor_observation_preserves_complete_preparation () =
   with_temp_base "keeper-cursor-observation" @@ fun base_path ->
   let module Cursor = Masc.Keeper_external_read_cursor in
@@ -685,6 +817,12 @@ let () =
         [
           Alcotest.test_case "counterpart capture preserves original rows and out-of-range dedup identities" `Quick
             test_counterpart_capture_retains_original_rows_and_dedup_frontier;
+          Alcotest.test_case "counterpart witness requires the selected source" `Quick
+            test_counterpart_witness_requires_selected_source_identity;
+          Alcotest.test_case "counterpart witness requires source order and multiplicity" `Quick
+            test_counterpart_witness_requires_order_and_multiplicity;
+          Alcotest.test_case "counterpart witness distinguishes repeated external occurrences" `Quick
+            test_counterpart_witness_distinguishes_external_occurrences;
           Alcotest.test_case "read-only cursor capture preserves complete original preparation" `Quick
             test_cursor_observation_preserves_complete_preparation;
           Alcotest.test_case "external cursor recovers only its committed Memory receipt" `Quick

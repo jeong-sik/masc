@@ -357,6 +357,10 @@ let rec consume_one ~config ~keeper_name ~wake =
     match validate_lineage originals with
     | Error detail -> error detail
     | Ok superseded ->
+    match io (fun () -> Refusal.inventory (match observed with
+      | None -> [] | Some (_,_,_,settled) -> settled)) with
+    | Error detail -> error ("Original history refusal inventory did not resolve: " ^ detail)
+    | Ok refusals ->
     let candidates=match observed with
       | None -> Ok []
       | Some (_,_,_,settled) -> floor_candidates ~store settled in
@@ -368,7 +372,7 @@ let rec consume_one ~config ~keeper_name ~wake =
       | Some (_,_,_,settled) ->
         List.fold_left (fun stops (record,request) ->
           let* stops=stops in
-          let* stop=Refusal.retained_stop ~store ~completed:settled ~record ~request in
+          let* stop=Refusal.retained_stop ~store ~completed:refusals ~record ~request in
           Ok (Option.fold ~none:stops ~some:(fun stop -> stop::stops) stop))
           (Ok []) settled in
     match stops with
@@ -385,9 +389,9 @@ let rec consume_one ~config ~keeper_name ~wake =
            the two never leaves a step without its original. *)
         let* steps=Floor_cleanup.cleanup ~store ~owner ~candidates ~settled in
         let* orphans=settle_orphan_gates ~store ~inventory ~scope originals in
-        let settled=List.filter (fun ((record,request) as original) ->
+        let settled=io (fun () -> List.filter (fun ((record,request) as original) ->
           not (is_candidate original || is_stopped original
-            || Refusal.preserves_completed ~settled ~record ~request)) settled in
+            || Refusal.preserves_completed ~settled:refusals ~record ~request)) settled) in
         let* chains=settle_chains ~store ~inventory (finished_chains ~settled ~superseded originals) in
         Ok (chains,orphans,steps) in
     match moved with

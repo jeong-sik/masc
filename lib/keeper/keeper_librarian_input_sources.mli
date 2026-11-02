@@ -16,6 +16,20 @@ type counterpart_snapshot
 val capture_counterparts : external_after:int -> base_dir:string -> keeper_name:string ->
   after:float option -> before:float -> (counterpart_snapshot, read_error) result
 val counterpart_observations : counterpart_snapshot -> Keeper_counterpart_observation.t list
+type counterpart_selection
+val select_counterparts : counterpart_snapshot -> counterpart_selection
+(** The selected source identities and their projections in the same order as
+    {!counterpart_observations}. It is immutable, may contain private source
+    data and grants no dispatch or acknowledgement authority. *)
+val counterpart_selection_covers :
+  original:counterpart_selection -> witness:counterpart_selection -> bool
+(** The witness must have selected every original source row, with its exact
+    delivered projection and in order. Chat rows require the same persisted
+    message ID and captured source bytes; external events require the same
+    absolute append offset, event ID and complete captured item. Deduplicated
+    rows do not count as selected. No chat/external identity is inferred. The
+    caller must separately establish that both selections belong to the same
+    physical source and owner epoch. *)
 val counterpart_observations_digest : counterpart_snapshot -> string
 val external_through : counterpart_snapshot -> int
 val counterpart_snapshot_matches_selection : counterpart_snapshot -> external_after:int ->

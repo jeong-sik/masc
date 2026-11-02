@@ -5,11 +5,27 @@ module Exact = Lane_addon_exact
 module Runtime = Keeper_librarian_runtime
 module Consumer = Keeper_librarian_durable_consumer
 module Source = Keeper_librarian_durable_capture
+module Sources = Keeper_librarian_input_sources
 module Edge = Keeper_librarian_durable_edge
 module Current = Keeper_memory_os_current
 open Result.Syntax
 let io f = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ f
 type t = {request_id:string;destination:Request.destination;refusal:Consumer.error}
+type retained = {record:Retained.retained;request:Request.t;
+  selection:Sources.counterpart_selection Lazy.Mutexed.t}
+type inventory = retained list
+let selection request = Lazy.Mutexed.from_fun (fun () ->
+  Sources.select_counterparts (Source.counterparts (Request.source request)))
+let inventory settled =
+  let module Ids=Set.Make(String) in
+  let* _=List.fold_left (fun result ((record:Retained.retained),request) ->
+    let* seen=result in
+    if Ids.mem record.request_id seen then Error "Duplicate original history request ID in inventory"
+    else let+ ()=Request.confirm_record request record in Ids.add record.request_id seen)
+    (Ok Ids.empty) settled in
+  Ok (List.map (fun (record,request) -> {record;request;selection=selection request}) settled)
+let member inventory ~record ~request =
+  List.find_opt (fun item -> item.record == record && item.request == request) inventory
 let detail = function
   | Exact.Call_final (Answered _) -> "Unexpected answered result in original history refusal"
   | Call_final (Invalid_output _ | Input_refused _ | Output_limit_reached _)
@@ -21,24 +37,7 @@ let report ~store request final =
   | Ok evidence -> Runtime.not_committed_of_failure ~detail evidence
   | Error why -> Runtime.not_committed_of_failure
       ~detail:(detail ^ "; reading less could not be judged: " ^ why) Keeper_exact_walk_failure.empty
-(* A later completed request has to contain each original observation, with
-   multiplicity. A delivery preview is not equal to the original chat text. *)
-let observations_cover original actual =
-  let rec remove_one value = function
-    | [] -> None
-    | first :: rest when first = value -> Some rest
-    | first :: rest -> Option.map (fun tail -> first :: tail) (remove_one value rest)
-  in
-  let rec contains remaining = function
-    | [] -> true
-    | first :: rest ->
-      match remove_one first remaining with
-      | None -> false
-      | Some remaining -> contains remaining rest
-  in
-  contains actual original
-
-let source_covers original actual =
+let source_covers ~original ~original_selection ~actual ~actual_selection =
   let atom = match Source.range_id original, Source.range_id actual with
     | None, (None | Some _) -> true
     | Some _, None -> false
@@ -56,17 +55,20 @@ let source_covers original actual =
       && List.for_all (fun turn -> List.mem turn newer.turns) old.turns
   in
   atom && official
-  && observations_cover (Source.input original).counterpart_observations
-       (Source.input actual).counterpart_observations
+  && Sources.counterpart_selection_covers ~original:(Lazy.Mutexed.force original_selection)
+       ~witness:(Lazy.Mutexed.force actual_selection)
 
 (* Inventory validation has checked the original host final, Gate and commit
    marker. Finished was recorded after the receipts and source positions settled;
    the current range receipt may now belong to a later completed input. *)
-let completed_covers ~original ((record : Retained.retained), candidate) =
+let completed_covers ~original ~original_selection {record;request=candidate;selection} =
   match Progress.phase record.progress with
   | Finished _ ->
-    source_covers original (Request.source candidate)
+    Yojson.Safe.equal (Request.owner_to_json (Request.physical_owner original))
+      (Request.owner_to_json (Request.physical_owner candidate))
     && Result.is_ok (Runtime.require_counterpart_template (Request.preparation candidate))
+    && source_covers ~original:(Request.source original) ~original_selection
+         ~actual:(Request.source candidate) ~actual_selection:selection
   | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _
   | Commit_unknown _ | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> false
 
@@ -78,20 +80,25 @@ let counterpart_only source =
    records one at a time, so the refusal must leave the live inventory before
    the finished execution it may still need is allowed to leave it. *)
 let preserves_completed ~settled ~(record:Retained.retained) ~request =
-  match Progress.phase record.progress with
-  | Finished _ ->
-    List.exists (fun ((refused : Retained.retained), original) ->
-      match Progress.phase refused.progress with
-      | Rejected {stage=Progress.Execution;_} ->
-        let source = Request.source original in
-        counterpart_only source && completed_covers ~original:source (record, request)
-      | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _
-      | Commit_unknown _ | Finished _ | Conflicted _ | Rejected {stage=Progress.Before_dispatch;_}
-      | Subdividing _ | Subdivided _ -> false) settled
-  | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _
-  | Commit_unknown _ | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> false
+  match member settled ~record ~request with
+  | None -> true
+  | Some candidate ->
+    (match Progress.phase record.progress with
+     | Finished _ ->
+       List.exists (fun original ->
+         match Progress.phase original.record.progress with
+         | Rejected {stage=Progress.Execution;_} ->
+           let source = Request.source original.request in
+           counterpart_only source && completed_covers ~original:original.request ~original_selection:original.selection candidate
+         | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _
+         | Commit_unknown _ | Finished _ | Conflicted _ | Rejected {stage=Progress.Before_dispatch;_}
+         | Subdividing _ | Subdivided _ -> false) settled
+     | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _
+     | Commit_unknown _ | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> false)
 
 let retained_stop ~store ~completed ~(record:Retained.retained) ~request =
+  let* original=Option.to_result ~none:"Refused original is absent from the validated inventory"
+    (member completed ~record ~request) in
   let source=Request.source request in
   match Progress.phase record.progress with
   | Rejected {stage=Progress.Execution;evidence} ->
@@ -110,7 +117,8 @@ let retained_stop ~store ~completed ~(record:Retained.retained) ~request =
         | Error (Consumer.Counterpart_input_capacity_refused {counterpart_digest;_} as refusal) ->
           let* committed=io (fun () ->
             let* past=Keeper_librarian_refusal_frontier.past_original ~counterpart_digest request in
-            Ok (past && List.exists (completed_covers ~original:source) completed)) in
+            if not past then Ok false else
+            Ok (List.exists (completed_covers ~original:request ~original_selection:original.selection) completed)) in
           Ok (if committed then None else Some {request_id=record.request_id;
             destination=Request.destination request;refusal})
         | Error ((Consumer.Keeper_meta_absent
@@ -143,7 +151,3 @@ let blocked ~config ~reserved = function
     match Edge.with_destination ~config ~reserved (fun current -> Ok (blocks_destination stops current)) with
     | Ok refusal -> refusal
     | Error _ -> Some first.refusal
-
-module For_testing = struct
-  let observations_cover = observations_cover
-end

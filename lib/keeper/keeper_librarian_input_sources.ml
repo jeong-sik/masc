@@ -37,16 +37,20 @@ let selected_chat ~after ~before (message : Chat.chat_message) =
   | Chat.Role.Assistant, _ | Chat.Role.Request_failure, _
   | Chat.Role.System, _ | Chat.Role.Tool, _ -> false
 
-let selected_external (snapshot : counterpart_snapshot) =
+let selected_external_with_offsets (snapshot : counterpart_snapshot) =
   match snapshot.external_after with
   | None ->
-    List.filter (fun (item : Attention.item) ->
-      in_interval ~after:snapshot.after ~before:snapshot.before item.received_at) snapshot.external_log
-    |> List.stable_sort (fun (left : Attention.item) (right : Attention.item) ->
+    List.mapi (fun offset item -> offset,item) snapshot.external_log
+    |> List.filter (fun (_, (item : Attention.item)) ->
+      in_interval ~after:snapshot.after ~before:snapshot.before item.received_at)
+    |> List.stable_sort (fun (_, (left : Attention.item)) (_, (right : Attention.item)) ->
       Float.compare left.received_at right.received_at)
   | Some cursor ->
     List.drop cursor snapshot.external_log
     |> List.take_while (fun (item : Attention.item) -> item.received_at <= snapshot.before)
+    |> List.mapi (fun index item -> cursor + index,item)
+
+let selected_external snapshot = List.map snd (selected_external_with_offsets snapshot)
 
 let external_through (snapshot : counterpart_snapshot) =
   match snapshot.external_after with
@@ -56,7 +60,19 @@ let external_through (snapshot : counterpart_snapshot) =
 let counterpart_snapshot_matches_selection (snapshot : counterpart_snapshot) ~external_after ~after ~before =
   snapshot.external_after = Some external_after && snapshot.after = after && snapshot.before = before
 
-let counterpart_observations (snapshot : counterpart_snapshot) =
+(* Keep each selected observation paired with the source that produced it.
+   The raw sources are retained only for local comparison; prompt rendering
+   continues to expose the same observation projection as before. *)
+type counterpart_source =
+  | External_event of int * Attention.item
+  | Chat_row of Chat.captured_row
+
+type counterpart_selection = {
+  selection_keeper : string;
+  selected : (counterpart_source * Keeper_counterpart_observation.t) list;
+}
+
+let select_counterparts (snapshot : counterpart_snapshot) =
   (* The complete original log supplies dedup identities, even outside this
      interval/frontier: a delivery and its chat projection can straddle it. *)
   let delivery_keys = List.filter_map (fun (item : Attention.item) ->
@@ -68,12 +84,13 @@ let counterpart_observations (snapshot : counterpart_snapshot) =
       List.exists (fun (conversation, id) ->
         String.equal conversation_id conversation && String.equal message_id id) delivery_keys
     | None, _ | _, None -> false in
-  let externals = selected_external snapshot |> List.map (fun (item : Attention.item) ->
-    item.received_at, Keeper_counterpart_observation.of_external_attention item) in
-  let chats = snapshot.chat_rows |> List.map Chat.captured_row_message
-    |> List.filter (fun message -> not (is_duplicate message))
-    |> List.filter_map (fun (message : Chat.chat_message) ->
-      Option.map (fun observation -> message.ts, observation)
+  let externals = selected_external_with_offsets snapshot |> List.map (fun (offset, (item : Attention.item)) ->
+    item.received_at, (External_event (offset,item), Keeper_counterpart_observation.of_external_attention item)) in
+  let chats = snapshot.chat_rows
+    |> List.filter_map (fun row ->
+      let message = Chat.captured_row_message row in
+      if is_duplicate message then None else
+      Option.map (fun observation -> message.ts, (Chat_row row, observation))
         (Keeper_counterpart_observation.of_chat_message message))
     |> List.stable_sort (fun (left, _) (right, _) -> Float.compare left right) in
   let rec interleave acc externals chats = match externals, chats with
@@ -83,7 +100,33 @@ let counterpart_observations (snapshot : counterpart_snapshot) =
       if Float.compare chat_ts external_ts < 0
       then interleave (chat :: acc) externals chat_rest
       else interleave (external_row :: acc) external_rest chats in
-  interleave [] externals chats |> List.map snd
+  {selection_keeper=snapshot.keeper_name;selected=interleave [] externals chats |> List.map snd}
+
+let counterpart_observations snapshot =
+  List.map snd (select_counterparts snapshot).selected
+
+(* A successful input covers an earlier one only if the same selected source
+   rows, with the same delivered projections, occur in the same order. A chat
+   row that a later capture deduplicated is not present in that later input. *)
+let counterpart_selection_covers ~original ~witness =
+  let same (left_source, left_observation) (right_source, right_observation) =
+    left_observation = right_observation &&
+    match left_source, right_source with
+    | External_event (left_offset,left), External_event (right_offset,right) ->
+      left_offset=right_offset && String.equal left.event_id right.event_id && left = right
+    | Chat_row left, Chat_row right ->
+      String.equal (Chat.captured_row_message left).id (Chat.captured_row_message right).id
+      && Chat.captured_row_same_source left right
+    | External_event _, Chat_row _ | Chat_row _, External_event _ -> false
+  in
+  let rec contains original witness = match original, witness with
+    | [], _ -> true
+    | _ :: _, [] -> false
+    | first :: rest, next :: tail ->
+      if same first next then contains rest tail else contains original tail
+  in
+  original.selection_keeper = witness.selection_keeper
+  && contains original.selected witness.selected
 
 let counterpart_observations_digest (snapshot : counterpart_snapshot) =
   Keeper_counterpart_observation.digest (counterpart_observations snapshot)

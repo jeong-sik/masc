@@ -1693,7 +1693,8 @@ let test_counterpart_only_provider_capacity_refusal_is_source_preserving () =
       io (fun () -> List.iter (fun (record,request) ->
         match Keeper_librarian_durable_commit.validate_inventory ~inventory ~store:fixture.store ~request ~record |> get with
         | Settled -> () | Unfinished -> fail "the complete inventory must be settled") current_originals);
-      Keeper_librarian_durable_refusal.retained_stop ~store:fixture.store ~completed:[later]
+      Keeper_librarian_durable_refusal.retained_stop ~store:fixture.store
+        ~completed:(io (fun () -> Keeper_librarian_durable_refusal.inventory [(rejected,original);later]) |> get)
         ~record:rejected ~request:original |> get) in
     check bool "the later incomplete input cannot replace the full-input witness" true
       (Option.is_some incomplete_stop);
@@ -1723,6 +1724,160 @@ let test_counterpart_only_provider_capacity_refusal_is_source_preserving () =
      | Ok _ -> fail "a future empty official range should advance under the restored configuration"
      | Error error -> fail (Consumer.error_to_string error));
     check int "past refused configuration does not block or redispatch a future range" 3 (F.post_count fixture.server))
+
+(* The same projected chat observation can come from a different source row.
+   The later delivery suppresses the refused row in the successful question's
+   deduplication, while another chat row supplies the same displayed content. *)
+let test_refusal_does_not_accept_a_different_equal_chat_row () =
+  with_fixture ~history_kind:Official (fun ~sw fixture ->
+    let module Sources = Keeper_librarian_input_sources in
+    let content = "identical projected counterpart content" in
+    let speaker : Keeper_chat_store.speaker =
+      {speaker_id=Some "external";speaker_name=Some "External";
+       speaker_authority=Keeper_chat_store.External} in
+    Keeper_chat_store.append_user_message ~base_dir:fixture.base_path ~keeper_name
+      ~conversation_id:"agent:source-identity" ~external_message_id:"original-message"
+      ~content ~speaker ();
+    io (fun () ->
+      official_empty_turn fixture.config ~turn:2 ~time:(Time_compat.now () +. 10.);
+      let session_dir=Keeper_fs.keeper_session_dir fixture.config trace_id in
+      let path file=Keeper_turn_fragments.path ~session_dir file in
+      write (path Keeper_turn_fragments.Main)
+        ({|{"ts_unix":1.0,"role":"user","content_blocks":[{"type":"text","text":"old"}]}|} ^ "\n");
+      write (path Keeper_turn_fragments.Internal) "");
+    fixture.set_response (fun _ ->
+      `Request_entity_too_large,
+      {|{"error":{"message":"fixture body too large","type":"invalid_request_error"}}|});
+    let deliveries= !(fixture.deliveries) in
+    assert_pending (run_worker fixture);
+    await_delivery fixture ~after:deliveries;
+    (match run_worker fixture with
+     | Error (Consumer.Counterpart_input_capacity_refused _) -> ()
+     | Error error -> fail (Consumer.error_to_string error)
+     | Ok _ -> fail "expected the original counterpart capacity refusal");
+    let rejected,original=only_original fixture in
+    let original_source=Capture.source original in
+    let original_snapshot=Source.counterparts original_source in
+    let before=Sources.counterpart_snapshot_to_json original_snapshot
+      |> member "before" |> Yojson.Safe.Util.to_float in
+    Keeper_chat_store.append_user_message ~base_dir:fixture.base_path ~keeper_name
+      ~content ~speaker ();
+    let delivery_time=before +. 1. in
+    let surface=Keeper_external_attention.Agent in
+    let delivery : Keeper_external_attention.item = {
+      event_id=Keeper_external_attention.event_id_of_dedupe_key "different-source-delivery";
+      dedupe_key="different-source-delivery";keeper_name;
+      conversation={conversation_id="agent:source-identity";surface};
+      external_message=Some {surface;message_id="original-message";reply_to_message_id=None};
+      source_label="agent";
+      actor={actor_id=Some "external";display_name=Some "External";authority=Keeper_chat_store.External};
+      urgency=Keeper_external_attention.Ambient;content_preview="separate delivery preview";
+      content_ref=None;received_at=delivery_time;metadata=[]} in
+    (match Keeper_external_attention.For_testing.record_with_clock
+       ~now:(fun () -> delivery_time) ~base_path:fixture.base_path delivery with
+     | `Recorded -> () | `Duplicate _ -> fail "the later delivery was not recorded"
+     | `Error detail -> fail detail);
+    io (fun () -> official_turn fixture.config ~turn:3 ~time:(delivery_time +. 10.));
+    let sent_observations=ref None in
+    fixture.set_response (fun capture ->
+      sent_observations:=Some (Source.input (Capture.source capture)).counterpart_observations;
+      `OK,F.openai_response (answer capture));
+    let configured_b=fixture.declaration true |> String.split_on_char '\n'
+      |> List.map (function "run_id=\"librarian-original-owner\"" -> "run_id=\"librarian-capacity-retry\"" | line -> line)
+      |> String.concat "\n" in
+    replace_actual_worker_configuration fixture ~sw configured_b;
+    drive_advanced fixture;
+    let witness,witness_capture=observed_originals fixture
+      |> List.filter (fun ((record:Owner.retained),_) -> record.request_id<>rejected.request_id)
+      |> function [original] -> original | _ -> fail "expected one completed witness" in
+    check bool "the later original really finished" true
+      (match Progress.phase witness.progress with Finished _ -> true
+       | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+       | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> false);
+    let witness_source=Capture.source witness_capture in
+    let witness_snapshot=Source.counterparts witness_source in
+    let original_input=(Source.input original_source).counterpart_observations in
+    let witness_input=(Source.input witness_source).counterpart_observations in
+    check bool "every old projected value occurs in the later input" true
+      (List.for_all (fun observation -> List.mem observation witness_input) original_input);
+    check bool "the same value does not establish the selected original row" false
+      (Sources.counterpart_selection_covers ~original:(Sources.select_counterparts original_snapshot)
+        ~witness:(Sources.select_counterparts witness_snapshot));
+    check bool "the provider received the later selected projections" true
+      (!sent_observations=Some witness_input);
+    let exact=Capture.request witness_capture |> get in
+    let rendered=Keeper_counterpart_observation.render_for_prompt witness_input in
+    check bool "the exact question includes those selected projections" true
+      (List.exists (fun (message:Exact.message) -> Astring.String.is_infix ~affix:rendered message.text)
+        exact.messages);
+    let cursor ()=io (fun () -> Keeper_external_read_cursor.observe
+      ~runtime_keepers_dir:(Workspace.keepers_runtime_dir fixture.config) ~keeper_name |> get) in
+    check int "the successful input acknowledged its later delivery" 2
+      (Keeper_external_read_cursor.observation_offset (cursor ()));
+    check bool "the original source frontier is otherwise past" true
+      (io (fun () -> Keeper_librarian_refusal_frontier.past_original original |> get));
+    let stopped=memory_action fixture (fun () ->
+      let inventory=io (fun () -> Gate.Inventory.read ~store:fixture.store
+        ~owner:(Capture.physical_owner original)) |> get in
+      io (fun () -> List.iter (fun (record,request) ->
+        match Keeper_librarian_durable_commit.validate_inventory ~inventory ~store:fixture.store ~request ~record |> get with
+        | Settled -> () | Unfinished -> fail "the test originals must be settled")
+          [rejected,original;witness,witness_capture]);
+      let module Refusal = Keeper_librarian_durable_refusal in
+      check bool "a record cannot be paired with another request" true
+        (Result.is_error (io (fun () -> Refusal.inventory [rejected,witness_capture])));
+      check bool "a duplicate request ID makes the inventory invalid" true
+        (Result.is_error (io (fun () -> Refusal.inventory [rejected,original;rejected,original])));
+      let changed,changed_request=io (fun () ->
+        let destination=Capture.destination original in
+        let destination={destination with source_revision=destination.source_revision ^ "-alternate"} in
+        let changed_request=Capture.create ~request_id:(Capture.request_id original)
+          ~owner:(Capture.physical_owner original) ~destination ~source:(Capture.source original)
+          ~preparation:(Capture.preparation original) () |> get in
+        let alternate=Store.create ~root:(Filename.concat fixture.base_path "alternate-owner-store") in
+        Owner.retain ~store:alternate ~scope:rejected.scope ~request_id:rejected.request_id
+          ~installation_id:rejected.installation_id ~package_id:rejected.package_id
+          ~tool:rejected.tool ~summary:rejected.summary ~request:(Capture.to_json changed_request) |> owned;
+        match Owner.load ~store:alternate ~scope:rejected.scope ~request_id:rejected.request_id |> owned with
+        | Some record -> record,changed_request | None -> fail "alternate original was not retained") in
+      check bool "the alternate record has the same ID and another digest" true
+        (changed.request_id=rejected.request_id && changed.request_digest<>rejected.request_digest);
+      check bool "the alternate record binds its own valid request" true
+        (Result.is_ok (io (fun () -> Refusal.inventory [changed,changed_request])));
+      check bool "the same ID with another request digest cannot bind the original" true
+        (Result.is_error (io (fun () -> Refusal.inventory [changed,original])));
+      check bool "different digests do not make duplicate IDs admissible" true
+        (Result.is_error (io (fun () -> Refusal.inventory [rejected,original;changed,changed_request])));
+      let only_original=io (fun () -> Refusal.inventory [rejected,original]) |> get in
+      check bool "another record with the same ID is not an inventory member" true
+        (Result.is_error (Refusal.retained_stop ~store:fixture.store ~completed:only_original
+          ~record:changed ~request:original));
+      check bool "an unbound same-ID record is preserved" true
+        (Refusal.preserves_completed ~settled:only_original ~record:changed ~request:original);
+      let only_witness=io (fun () -> Refusal.inventory [witness,witness_capture]) |> get in
+      check bool "a missing refused original cannot be released" true
+        (Result.is_error (Refusal.retained_stop ~store:fixture.store ~completed:only_witness
+          ~record:rejected ~request:original));
+      check bool "an unbound finished original must be preserved" true
+        (Refusal.preserves_completed ~settled:only_witness ~record:witness ~request:original);
+      Keeper_librarian_durable_refusal.retained_stop ~store:fixture.store
+        ~completed:(io (fun () -> Keeper_librarian_durable_refusal.inventory
+          [rejected,original;witness,witness_capture]) |> get)
+        ~record:rejected ~request:original |> get) in
+    check bool "the different source row does not release the original refusal" true (Option.is_some stopped);
+    replace_actual_worker_configuration fixture ~sw (fixture.declaration true);
+    let before_cursor=Keeper_external_read_cursor.observation_to_json (cursor ()) in
+    let calls=F.post_count fixture.server in
+    (match run_worker fixture with
+     | Error (Consumer.Counterpart_input_capacity_refused _) -> ()
+     | Error error -> fail (Consumer.error_to_string error)
+     | Ok _ -> fail "returning to the refused destination must stay blocked");
+    check json "holding the refusal does not acknowledge another delivery" before_cursor
+      (Keeper_external_read_cursor.observation_to_json (cursor ()));
+    check int "holding the refusal does not dispatch again" calls (F.post_count fixture.server);
+    check bool "the rejected original remains retained" true
+      (List.exists (fun ((record:Owner.retained),_) -> record.request_id=rejected.request_id)
+        (observed_originals fixture)))
 
 let test_purge_joins_unknown_then_worker_restart_does_not_resubmit history_kind () =
   with_fixture ~history_kind (fun ~sw fixture ->
@@ -3135,24 +3290,7 @@ let test_legacy_omitted_answer_blocks_judged_and_commit_publication () =
     check int "publication never replays the original provider request" 1 (F.post_count fixture.server);
     no_memory fixture))
 
-let test_refused_observations_need_complete_input () =
-  let observation content : Keeper_counterpart_observation.t =
-    {origin=Durable_chat;channel="direct";workspace_id=None;
-     user_id=Some "external";user_name=Some "External";
-     authority=External;content} in
-  let original = [observation "full message"; observation "other message"] in
-  let covers = Keeper_librarian_durable_refusal.For_testing.observations_cover original in
-  check bool "a separate delivery preview does not prove the original text" false
-    (covers [observation "preview"; observation "other message"]);
-  check bool "one completed input can include later observations" true
-    (covers [observation "other message"; observation "full message"; observation "later"]);
-  check bool "one observation cannot account for duplicate source rows" false
-    (Keeper_librarian_durable_refusal.For_testing.observations_cover
-       [observation "same"; observation "same"] [observation "same"])
-
 let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured completed-history",[
-  test_case "refusal coverage requires the complete original observations" `Quick
-    test_refused_observations_need_complete_input;
   test_case "proved original survives invalid working context on resume" `Quick
     test_retained_answer_with_invalid_working_context_recovers;
   test_case "retained source aliases preserve runtime physical-root checks" `Quick test_retained_source_root_alias;
@@ -3181,6 +3319,8 @@ let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured c
   test_case "actual mixed original reaches Memory and both receipt/position kinds" `Quick (test_actual_official_or_mixed_path Mixed);
   test_case "counterpart-only capacity refusal preserves source and ACK" `Quick
     test_counterpart_only_provider_capacity_refusal_is_source_preserving;
+  test_case "a different equal chat row cannot release the original refusal" `Quick
+    test_refusal_does_not_accept_a_different_equal_chat_row;
   test_case "ordinary counterpart refusals preserve narrowed source identities" `Quick
     test_counterpart_non_capacity_refusal_preserves_narrowed_sources;
   test_case "legacy omitted original blocks admission but observes pending" `Quick

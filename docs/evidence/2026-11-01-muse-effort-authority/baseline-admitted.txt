@@ -1,0 +1,92 @@
+2026-11-01T06:11:48.6017952Z 4912b2428aede0febe67db37094ecb9df7052b66
+2026-11-01T06:11:51.5036709Z [command]/usr/bin/git log -1 --format=%H
+2026-11-01T06:11:51.5064638Z 4912b2428aede0febe67db37094ecb9df7052b66
+2026-11-01T06:12:49.9285258Z   TARGET_SUITES: test_keeper_muse_runtime,test_fusion_official_client_panel,test_runtime_verification,test_keeper_capability_probe
+2026-11-01T06:12:49.9422040Z   TARGET_SUITES: test_keeper_muse_runtime,test_fusion_official_client_panel,test_runtime_verification,test_keeper_capability_probe
+2026-11-01T06:12:50.2447934Z [targeted] EIO_BACKEND=<unset> timeout=600s per suite
+2026-11-01T06:12:50.5181934Z [targeted] dune build test/test_keeper_muse_runtime.exe test/test_fusion_official_client_panel.exe test/test_runtime_verification.exe test/test_keeper_capability_probe.exe config/prompts/agent_core.md config/prompts/candle_appraiser_grade.md config/prompts/candle_appraiser_relation.md config/prompts/candle_appraiser_weights.md config/prompts/eval.calibration.few_shot.md config/prompts/exec_policy.md config/prompts/fusion.judge.md config/prompts/goal_verification.md config/prompts/judge.md config/prompts/keeper.autonomous.wake.txt config/prompts/keeper.md config/prompts/lane_cli_probe.md config/prompts/librarian.md config/prompts/mcp.md config/prompts/mcp.tool_help.md config/prompts/play.agent_guide.md config/prompts/pr-review-routing.md config/prompts/subset_rewrite.md config/prompts/tool_failure.md config/prompts/tool_guidance.md config/prompts/tool_help.md config/prompts/verification.md config/prompts/workspace_memory_briefing.md config/prompts/workspace_memory_curator.md
+2026-11-01T06:16:59.7796817Z [targeted] test/test_keeper_muse_runtime: stanza env MASC_BASE_PATH= ZAI_API_KEY= TYPESAFEAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+2026-11-01T06:16:59.7823551Z [targeted] test/test_keeper_muse_runtime: start 2026-11-01T06:16:59Z
+2026-11-01T06:17:01.9896288Z   [OK]          MSP reasoning authority          0   routed omission ignores ...
+2026-11-01T06:17:04.0859814Z   [FAIL]        MSP reasoning authority          1   routed none ignores a co...
+2026-11-01T06:17:06.1807378Z   [FAIL]        MSP reasoning authority          2   routed minimal ignores a...
+2026-11-01T06:17:08.2742251Z   [OK]          MSP reasoning authority          3   routed low ignores a col...
+2026-11-01T06:17:10.3709451Z   [FAIL]        MSP reasoning authority          4   routed medium ignores a ...
+2026-11-01T06:17:12.4680175Z   [FAIL]        MSP reasoning authority          5   routed high ignores a co...
+2026-11-01T06:17:14.5639143Z   [FAIL]        MSP reasoning authority          6   routed xhigh ignores a c...
+2026-11-01T06:17:16.6574857Z   [FAIL]        MSP reasoning authority          7   routed max ignores a col...
+2026-11-01T06:17:18.7540424Z   [FAIL]        MSP reasoning authority          8   routed ultra ignores a c...
+2026-11-01T06:17:20.8483908Z   [FAIL]        MSP reasoning authority          9   hook catalog replacement...
+2026-11-01T06:17:22.9512408Z   [FAIL]        MSP reasoning authority         10   hook effort override rea...
+2026-11-01T06:17:25.0404570Z   [FAIL]        MSP reasoning authority         11   host refusal of explicit...
+2026-11-01T06:19:13.4764132Z   [FAIL]        turn endings                     4   host stop resume admits ...
+2026-11-01T06:19:30.3218506Z [2026-11-01 06:19:30] [WARN] [runtime_agent] provider usage read failed for official:muse-serve:home:/tmp/masc-keeper-muse-b64b20/account-home: Muse Code exited (exit 1 (unhandled)): Traceback (most recent call last):\x0A  File "/tmp/masc-keeper-muse-b64b20/muse_host.py", line 50, in <module>\x0A    assert init["params"]["capabilities"]["requestedCapabilities"] == expected_capabilities, init\x0A           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\x0AAssertionError: {'jsonrpc': '2.0', 'id': 1, 'method': 'initialize', 'params': {'clientInfo': {'name': 'masc', 'version': 'dev'}, 'capabilities': {'requestedCapabilities': [], 'userInputDialogs': False}}}
+2026-11-01T06:19:36.4316002Z   [FAIL]        turn endings                     7   a host-stopped turn's co...
+2026-11-01T06:20:11.7507502Z [2026-11-01 06:20:11] [WARN] [runtime_agent] provider usage read failed for official:muse-serve:home:/tmp/masc-keeper-muse-9dc1a8/account-home: Muse Code exited (exit 1 (unhandled)): Traceback (most recent call last):\x0A  File "/tmp/masc-keeper-muse-9dc1a8/muse_host.py", line 50, in <module>\x0A    assert init["params"]["capabilities"]["requestedCapabilities"] == expected_capabilities, init\x0A           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\x0AAssertionError: {'jsonrpc': '2.0', 'id': 1, 'method': 'initialize', 'params': {'clientInfo': {'name': 'masc', 'version': 'dev'}, 'capabilities': {'requestedCapabilities': [], 'userInputDialogs': False}}}
+2026-11-01T06:20:14.0605650Z [2026-11-01 06:20:14] [WARN] [runtime_agent] provider usage read failed for official:muse-serve:home:/tmp/masc-keeper-muse-c48fdb/account-home: Muse Code exited (exit 1 (unhandled)): Traceback (most recent call last):\x0A  File "/tmp/masc-keeper-muse-c48fdb/muse_host.py", line 50, in <module>\x0A    assert init["params"]["capabilities"]["requestedCapabilities"] == expected_capabilities, init\x0A           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\x0AAssertionError: {'jsonrpc': '2.0', 'id': 1, 'method': 'initialize', 'params': {'clientInfo': {'name': 'masc', 'version': 'dev'}, 'capabilities': {'requestedCapabilities': [], 'userInputDialogs': False}}}
+2026-11-01T06:20:22.3001364Z   [FAIL]        turn endings                    14   a stop before the turn/s...
+2026-11-01T06:22:42.2800349Z FAIL MSP receives the exact requested tier, or no member
+2026-11-01T06:22:42.2801030Z    Expected: `Some "\"none\""'
+2026-11-01T06:22:42.2801501Z    Received: `Some "\"low\""'
+2026-11-01T06:22:42.2838604Z FAIL MSP receives the exact requested tier, or no member
+2026-11-01T06:22:42.2839386Z    Expected: `Some "\"minimal\""'
+2026-11-01T06:22:42.2839807Z    Received: `Some "\"low\""'
+2026-11-01T06:22:42.2872512Z FAIL MSP receives the exact requested tier, or no member
+2026-11-01T06:22:42.2872850Z    Expected: `Some "\"medium\""'
+2026-11-01T06:22:42.2873115Z    Received: `Some "\"low\""'
+2026-11-01T06:22:42.2899633Z FAIL MSP receives the exact requested tier, or no member
+2026-11-01T06:22:42.2900205Z    Expected: `Some "\"high\""'
+2026-11-01T06:22:42.2900679Z    Received: `Some "\"low\""'
+2026-11-01T06:22:42.2925412Z FAIL MSP receives the exact requested tier, or no member
+2026-11-01T06:22:42.2926053Z    Expected: `Some "\"xhigh\""'
+2026-11-01T06:22:42.2926621Z    Received: `Some "\"low\""'
+2026-11-01T06:22:42.2950311Z FAIL MSP receives the exact requested tier, or no member
+2026-11-01T06:22:42.2950646Z    Expected: `Some "\"max\""'
+2026-11-01T06:22:42.2950891Z    Received: `Some "\"low\""'
+2026-11-01T06:22:42.2972468Z FAIL MSP receives the exact requested tier, or no member
+2026-11-01T06:22:42.2972806Z    Expected: `Some "\"ultra\""'
+2026-11-01T06:22:42.2973053Z    Received: `Some "\"low\""'
+2026-11-01T06:22:42.2994805Z FAIL MSP receives the exact requested tier, or no member
+2026-11-01T06:22:42.2995133Z    Expected: `Some "\"max\""'
+2026-11-01T06:22:42.2995371Z    Received: `Some "\"low\""'
+2026-11-01T06:22:42.3017099Z FAIL MSP receives the exact requested tier, or no member
+2026-11-01T06:22:42.3017428Z    Expected: `Some "\"ultra\""'
+2026-11-01T06:22:42.3017673Z    Received: `Some "\"low\""'
+2026-11-01T06:22:42.3039431Z FAIL the refusing host received explicit none
+2026-11-01T06:22:42.3039740Z    Expected: `"none"'
+2026-11-01T06:22:42.3039965Z    Received: `"low"'
+2026-11-01T06:22:42.3061099Z FAIL Internal error: [masc_agent_core_error] {"kind":"host_stopped_turn","runtime_id":"muse_fixture.fixture","stop":"repeated_tool_call"}
+2026-11-01T06:22:42.3082518Z FAIL Internal error: [masc_agent_core_error] {"kind":"host_stopped_turn","runtime_id":"muse_fixture.fixture","stop":"repeated_tool_call"}
+2026-11-01T06:22:42.3121573Z FAIL Internal error: [masc_agent_core_error] {"kind":"host_stopped_turn","runtime_id":"muse_fixture.fixture","stop":"repeated_tool_call"}
+2026-11-01T06:22:42.3141094Z 13 failures! in 342.413s. 86 tests run.
+2026-11-01T06:22:42.3141957Z [targeted] test/test_keeper_muse_runtime: FAIL exit 1 in 343s
+2026-11-01T06:22:42.3992031Z [targeted] test/test_fusion_official_client_panel: stanza env MASC_BASE_PATH= ZAI_API_KEY= TYPESAFEAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+2026-11-01T06:22:42.4020123Z [targeted] test/test_fusion_official_client_panel: start 2026-11-01T06:22:42Z
+2026-11-01T06:22:44.5451461Z   [OK]          MSP reasoning authority          0   panel omission ignores a...
+2026-11-01T06:22:46.5754770Z   [FAIL]        MSP reasoning authority          1   panel none ignores a col...
+2026-11-01T06:22:48.6062502Z   [OK]          MSP reasoning authority          2   panel low ignores a coll...
+2026-11-01T06:22:50.6354373Z   [FAIL]        MSP reasoning authority          3   panel max ignores a coll...
+2026-11-01T06:23:43.8816841Z FAIL MSP receives the selected tier, or no member
+2026-11-01T06:23:43.8817387Z    Expected: `Some "\"none\""'
+2026-11-01T06:23:43.8817677Z    Received: `Some "\"low\""'
+2026-11-01T06:23:43.8825771Z FAIL MSP receives the selected tier, or no member
+2026-11-01T06:23:43.8826140Z    Expected: `Some "\"max\""'
+2026-11-01T06:23:43.8826685Z    Received: `Some "\"low\""'
+2026-11-01T06:23:43.8832731Z 2 failures! in 61.396s. 37 tests run.
+2026-11-01T06:23:43.8895940Z [targeted] test/test_fusion_official_client_panel: FAIL exit 1 in 61s
+2026-11-01T06:23:43.9963619Z [targeted] test/test_runtime_verification: stanza env MASC_BASE_PATH= ZAI_API_KEY= TYPESAFEAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+2026-11-01T06:23:43.9991815Z [targeted] test/test_runtime_verification: start 2026-11-01T06:23:43Z
+2026-11-01T06:23:44.3065864Z   [FAIL]        readiness          5   Muse private MCP readiness.
+2026-11-01T06:24:28.0853780Z FAIL muse-success verdict
+2026-11-01T06:24:28.0854127Z    Expected: `None'
+2026-11-01T06:24:28.0854458Z    Received: `Some "provider_rejected"'
+2026-11-01T06:24:28.0883370Z 1 failure! in 44.015s. 22 tests run.
+2026-11-01T06:24:28.0940606Z [targeted] test/test_runtime_verification: FAIL exit 1 in 44s
+2026-11-01T06:24:28.2007882Z [targeted] test/test_keeper_capability_probe: stanza env MASC_BASE_PATH= ZAI_API_KEY= TYPESAFEAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+2026-11-01T06:24:28.2036033Z [targeted] test/test_keeper_capability_probe: start 2026-11-01T06:24:28Z
+2026-11-01T06:24:28.4313840Z   [FAIL]        Muse actual MCP                                     0   callb...
+2026-11-01T06:24:28.4439853Z FAIL probe preserves exhausted selected scope through reload/terminal
+2026-11-01T06:24:28.4440477Z    Expected: `Some 500'
+2026-11-01T06:24:28.4440811Z    Received: `None'
+2026-11-01T06:24:28.4463421Z 1 failure! in 0.155s. 21 tests run.
+2026-11-01T06:24:28.4480993Z [targeted] test/test_keeper_capability_probe: FAIL exit 1 in 0s

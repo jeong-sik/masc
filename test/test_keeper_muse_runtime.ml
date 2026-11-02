@@ -712,6 +712,8 @@ def call_probe():
 
 turn = read()
 assert turn["method"] == "turn/start", turn
+with open(os.path.join(HERE, mode + "-turn-params.json"), "w") as handle:
+    json.dump(turn["params"], handle)
 turn_id = turn["params"]["commandId"]
 if "expected_effort" in FIXTURE:
     assert turn["params"]["reasoningEffort"] == FIXTURE["expected_effort"]
@@ -1527,6 +1529,121 @@ default = "reloaded.reloaded"
   check (option bool) "routed resume" (Some true) second.session_resumed;
   let _, _, second_count = settled_turn ~base_path in
   check int "routed second durable ordinal" 2 second_count
+;;
+
+(* A bare HTTP catalog row cannot choose the effort of a selected Muse turn.
+   Observe the actual MSP child after routing and hook preparation, including
+   the difference between the explicit [none] tier and an omitted request. *)
+let test_routed_muse_effort_ignores_http_catalog ?(replace_in_hook = false) ?hook_effort requested () =
+  with_scripted_host @@ fun ~base_path ->
+  let effort_line = match requested with
+    | None -> ""
+    | Some effort -> Printf.sprintf "reasoning-effort = %S\n"
+        (Llm_provider.Reasoning_effort.to_string effort) in
+  let runtime_path = Filename.concat base_path "runtime.toml" in
+  write_file ~mode:0o600 runtime_path (Printf.sprintf
+    {|[providers.muse_fixture]
+protocol = "muse-serve"
+command = %S
+account-home = %S
+is-non-interactive = true
+[models.fixture]
+api-name = "muse-fixture-1"
+max-context = 200000
+%stools-support = true
+[muse_fixture.fixture]
+[runtime]
+default = "muse_fixture.fixture"
+|} (launcher ~base_path) (Filename.concat base_path "account-home") effort_line);
+  (match Runtime.init_default ~config_path:runtime_path with
+   | Ok () -> () | Error detail -> fail detail);
+  let previous_catalog = Llm_provider.Model_catalog.global () in
+  Fun.protect ~finally:(fun () -> match previous_catalog with
+    | None -> Llm_provider.Model_catalog.clear_global ()
+    | Some catalog -> Llm_provider.Model_catalog.set_global catalog) @@ fun () ->
+  let install_catalog accepted =
+    let source = Printf.sprintf
+      "[[models]]\nmodel_id = \"muse-fixture-1\"\nsupports_reasoning = true\naccepted_reasoning_efforts = [%S]\n"
+      accepted in
+    match Llm_provider.Model_catalog.of_toml_string ~source:"Muse effort collision" source with
+    | Error detail -> fail detail
+    | Ok catalog -> Llm_provider.Model_catalog.set_global catalog in
+  install_catalog (if replace_in_hook then "max" else "low");
+  let hooks = { Agent_core.Hooks.empty with before_turn_params = Some (function
+    | Agent_core.Hooks.BeforeTurnParams {current_params; _} ->
+      check bool "hook receives the selected declaration" true
+        (current_params.reasoning_effort = requested);
+      if replace_in_hook then install_catalog "low";
+      (match Llm_provider.Capabilities.for_model_id "muse-fixture-1" with
+       | Some caps -> check bool "conflicting HTTP ladder is actually loaded" true
+           (caps.accepted_reasoning_efforts = Some [Llm_provider.Reasoning_effort.Low])
+       | None -> fail "the colliding bare catalog row is missing");
+      (match hook_effort with
+       | None -> Agent_core.Hooks.Continue
+       | Some effort -> Agent_core.Hooks.AdjustParams
+           {current_params with reasoning_effort=Some effort})
+    | _ -> fail "expected before_turn_params hook event") } in
+  let observed = ref `Null in
+  let tool = masc_probe_tool observed in
+  let env = match Eio_context.get_env_opt () with
+    | Some env -> env | None -> fail "fixture Eio environment is missing" in
+  let result = Eio.Switch.run (fun sw ->
+    Keeper_turn_driver.run_named
+      ~input_source:(Keeper_request_source.Keeper_history {trace_id=keeper_name})
+      ~raw_trace:None ~walk_owner:Keeper_turn_driver.One_shot_walk
+      ~runtime_id ~keeper_name ~base_path
+      ~media_store:(Tool_blob_media_store.of_base_path ~base_path)
+      ~goal:"Call masc_probe once" ~system_prompt:"MUSE_EFFORT_FIXTURE_SYSTEM" ~hooks
+      ~tools:[tool] ~agent_core_tools:[tool]
+      ~initial_messages:[user_message "MUSE_EFFORT_AUTHORITY"]
+      ~context:(Agent_core.Context.create ()) ~sw ~net:(Eio.Stdenv.net env) ()) in
+  (match result with
+   | Ok _ -> () | Error error -> fail (Agent_core.Error.to_string error));
+  let params = Yojson.Safe.from_file (Filename.concat base_path "start-turn-params.json") in
+  let fields = match params with `Assoc fields -> fields | _ -> fail "turn params are not an object" in
+  let effective = match hook_effort with None -> requested | Some effort -> Some effort in
+  let expected = Option.map (fun effort -> `String (Llm_provider.Reasoning_effort.to_string effort)) effective in
+  check (option string) "MSP receives the exact requested tier, or no member"
+    (Option.map Yojson.Safe.to_string expected)
+    (Option.map Yojson.Safe.to_string (List.assoc_opt "reasoningEffort" fields));
+  check string "the same routed turn invoked the MASC tool" {|{"marker":"from-muse"}|}
+    (Yojson.Safe.to_string !observed)
+;;
+
+let test_muse_refuses_exact_none_without_replay () =
+  with_scripted_host ~fixture:["scenario", `String "refuse_turn"] @@ fun ~base_path ->
+  let previous_catalog = Llm_provider.Model_catalog.global () in
+  Fun.protect ~finally:(fun () -> match previous_catalog with
+    | None -> Llm_provider.Model_catalog.clear_global ()
+    | Some catalog -> Llm_provider.Model_catalog.set_global catalog) @@ fun () ->
+  (match Llm_provider.Model_catalog.of_toml_string ~source:"Muse explicit none refusal"
+    {|[[models]]
+model_id = "muse-fixture-1"
+supports_reasoning = true
+accepted_reasoning_efforts = ["low"]
+|} with
+   | Error detail -> fail detail
+   | Ok catalog -> Llm_provider.Model_catalog.set_global catalog);
+  let hooks = { Agent_core.Hooks.empty with before_turn_params=Some (function
+    | Agent_core.Hooks.BeforeTurnParams {current_params; _} ->
+      Agent_core.Hooks.AdjustParams
+        {current_params with reasoning_effort=Some Llm_provider.Reasoning_effort.None_}
+    | _ -> fail "expected before_turn_params hook event") } in
+  let run = run_turn_with ~model:"muse-fixture-1" ~hooks ~base_path
+    ~tool:(masc_probe_tool (ref `Null)) () in
+  let params = Yojson.Safe.from_file (Filename.concat base_path "start-turn-params.json") in
+  check string "the refusing host received explicit none"
+    "none" Yojson.Safe.Util.(params |> member "reasoningEffort" |> to_string);
+  (match run.outcome.result with
+   | Error (Agent_core.Error.Provider
+       (Llm_provider.Error.ProviderReportedError {error_type=Some "rpc_error"; _})) -> ()
+   | Error error -> fail (Agent_core.Error.to_string error)
+   | Ok _ -> fail "the native refusal became success");
+  check bool "the refused turn stays effect-free" true
+    (run.outcome.effect_disposition = Keeper_provider_attempt_effect.No_effect_observed);
+  check (list string) "no substituted-effort child retry" ["start"]
+    (read_text (Filename.concat base_path "sessions.log")
+      |> String.split_on_char '\n' |> List.filter (fun line -> line <> ""))
 ;;
 
 (* What the operator surface holds for [scope]: source, window kind, used
@@ -3657,7 +3774,25 @@ let () =
   Prompt_registry.set_markdown_dir (Masc_test_deps.source_path "config/prompts");
   run
     "keeper_muse_runtime"
-    [ ( "async result outbox"
+    [ ( "MSP reasoning authority"
+      , List.map (fun requested ->
+          let label = match requested with
+            | None -> "omission"
+            | Some effort -> Llm_provider.Reasoning_effort.to_string effort in
+          test_case ("routed " ^ label ^ " ignores a colliding HTTP ladder") `Quick
+            (test_routed_muse_effort_ignores_http_catalog requested))
+          [None; Some Llm_provider.Reasoning_effort.None_; Some Minimal; Some Low;
+           Some Medium; Some High; Some XHigh; Some Max; Some Ultra]
+        @ [test_case "hook catalog replacement cannot change the routed effort" `Quick
+             (test_routed_muse_effort_ignores_http_catalog ~replace_in_hook:true
+               (Some Llm_provider.Reasoning_effort.Max))
+          ; test_case "hook effort override reaches MSP without a catalog clamp" `Quick
+              (test_routed_muse_effort_ignores_http_catalog
+                ~hook_effort:Llm_provider.Reasoning_effort.Ultra
+                (Some Llm_provider.Reasoning_effort.High))
+          ; test_case "host refusal of explicit none is preserved without replay" `Quick
+              test_muse_refuses_exact_none_without_replay] )
+    ; ( "async result outbox"
       , [test_case "original result crosses checkpoint and fresh-session delivery" `Quick
            test_original_result_crosses_checkpoint_and_fresh_session
         ; test_case "ordinary physical result survives failed completion acceptance" `Quick

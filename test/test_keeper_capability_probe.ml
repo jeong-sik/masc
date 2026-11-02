@@ -710,7 +710,13 @@ signal.signal(signal.SIGTERM, signal.SIG_IGN)
 let test_muse_probe_uses_actual_mcp_callback () =
   let base_path = Filename.temp_dir "muse-capability-probe-" "" |> Unix.realpath in
   let snapshot = Runtime.For_testing.snapshot () in
-  Fun.protect ~finally:(fun () -> Runtime.For_testing.restore snapshot; Fs_compat.remove_tree base_path) (fun () ->
+  let previous_catalog = Llm_provider.Model_catalog.global () in
+  Fun.protect ~finally:(fun () ->
+    Runtime.For_testing.restore snapshot;
+    (match previous_catalog with
+     | None -> Llm_provider.Model_catalog.clear_global ()
+     | Some catalog -> Llm_provider.Model_catalog.set_global catalog);
+    Fs_compat.remove_tree base_path) (fun () ->
     let account_home = Filename.concat base_path "account" in
     Fs_compat.mkdir_p (Filename.concat account_home ".config/muse");
     let auth = Filename.concat account_home ".config/muse/auth.json" in
@@ -757,6 +763,18 @@ default = "muse.fixture"
             ~cli_path ~model:"fixture-reloaded-model" ~effort:"low" ();
           let replacement = Runtime.For_testing.snapshot () in
           load_config ~cli_path ~model:"fixture-selected-model" ~effort:"high" ();
+          (match Llm_provider.Model_catalog.of_toml_string ~source:"Muse capability effort collision"
+            {|[[models]]
+model_id = "fixture-selected-model"
+supports_reasoning = true
+accepted_reasoning_efforts = ["low"]
+|} with
+           | Error detail -> fail detail
+           | Ok catalog -> Llm_provider.Model_catalog.set_global catalog);
+          (match Llm_provider.Capabilities.for_model_id "fixture-selected-model" with
+           | Some caps -> check bool "capability probe has a conflicting HTTP ladder" true
+               (caps.accepted_reasoning_efforts = Some [Llm_provider.Reasoning_effort.Low])
+           | None -> fail "the capability collision row is missing");
           let now () =
             (* Reload after the probe freezes its selected runtime. The
                account, effort and model still belong to that selection. *)

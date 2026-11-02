@@ -2251,6 +2251,19 @@ loaded. Cached append behavior, row formats, write durability, snapshot failure
 policy and retry obligations are unchanged. The producer, startup and lookup
 scenarios and their execution status are recorded separately with the layer.
 
+The pure codec preparation [#47212](https://github.com/jeong-sik/masc/pull/47212)
+gives post, comment and persisted-audience JSON one
+private `Board_content_json` owner below Core. Its immutable decoded result keeps
+the optional value and typed diagnostics together, including nested rejections
+when an outer row fails. `Board_core_json` emits the existing warnings and Agent ID
+rejection effects once; `Board_votes_json` and `Board_audience` keep their public
+codec names as aliases. Shared field readers are not duplicated, and the lower
+codec imports neither Core nor the persistence/loader shell. Existing row policy,
+field order and validation stages remain. Four public-codec scenarios inspect
+rejected values and validation-count deltas; their execution evidence belongs to
+the layer PR. This prepares the stable posts source owner without changing any
+writer protocol, source authority, guard, receipt or client behavior.
+
 T1 remains open: ordinary Board creation still lacks a persisted client operation
 identity and authoritative unknown-acknowledgement reconciliation. Session history
 does not survive restart, and unchanged-draft protection compares bytes rather than

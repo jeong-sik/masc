@@ -20658,7 +20658,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
       state.mcp_session <- Some session_id;
       (match state.workspace_identity with
        | Workspace_identity_match ->
-           let scoped = match handshake with Ok scoped -> scoped | Error _ -> None in
+           let scoped = handshake in
            state.observer_scope_binding <- note_observer_scope state.observer_scope_binding scoped
        | Workspace_identity_unread | Workspace_identity_match_unconfirmed _
        | Workspace_identity_mismatch _ -> ());

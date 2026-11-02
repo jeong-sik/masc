@@ -86,6 +86,23 @@ the bottom of each screen. System's identity row contains the server version,
 commit, port, age and workspace paths. Workspace/build disagreements and armed
 or running operator actions remain global warnings.
 
+## Usage
+
+Plan usage keeps account names and window labels readable when the terminal
+narrows; a long label moves to its own row before the meter. Exceptionally large
+list labels retain their ends where grapheme boundaries are known and mark
+omissions, bounded by the viewport; the account chooser retains the full
+selected account name. The bar and percentage describe the provider's last
+report, and `other use` identifies
+windows that do not block model calls without relying on colour alone.
+
+Keeper usage keeps the recorded amount, reporting coverage and comparison bar
+together when space allows. Each metric's bar is relative to its largest
+complete reading, not to a quota. Missing and partial readings remain explicit.
+Other-use windows use the terminal-aware receding token rather than forcing dim
+text. These choices follow the [GitHub CLI accessibility guidance](https://primer.style/accessibility/foundations/cli-accessibility/)
+and [Shopify CLI colour guidance](https://shopify.github.io/cli/cli-kit/ui-kit/guidelines.html).
+
 The [consistency ledger](CONSISTENCY-PROGRESS.md) tracks the remaining surfaces
 and separates source changes from observed executable behavior.
 

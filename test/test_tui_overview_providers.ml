@@ -212,7 +212,7 @@ let counts_t = pair (pair int int) (pair int (option int))
 let section_lines ?(runtimes = Types.Quota_unread) ?(account_emails = Types.Account_emails_unread)
     ~width accounts =
   match
-    Providers.section ~providers:(Types.Providers_read (decode_accounts accounts))
+    Providers.section ~rows:24 ~providers:(Types.Providers_read (decode_accounts accounts))
       ~runtimes ~account_emails ~now ~width ~show_unusable:true
   with
   | Some section -> section.lines
@@ -240,7 +240,7 @@ let test_section_draws_one_line_per_window () =
   in
   let section =
     match
-      Providers.section ~account_emails:Types.Account_emails_unread ~providers:(Types.Providers_read windows) ~runtimes ~now
+      Providers.section ~rows:24 ~account_emails:Types.Account_emails_unread ~providers:(Types.Providers_read windows) ~runtimes ~now
         ~width ~show_unusable:true
     with
     | Some section -> section
@@ -294,7 +294,7 @@ let test_silent_account_draws_only_its_exhaustion () =
     Types.Quota_read [ runtime ~scope:"provider:codex" ~exhausted:true "codex.gpt" ]
   in
   match
-    Providers.section ~account_emails:Types.Account_emails_unread ~providers:(Types.Providers_read windows) ~runtimes ~now ~width ~show_unusable:true
+    Providers.section ~rows:24 ~account_emails:Types.Account_emails_unread ~providers:(Types.Providers_read windows) ~runtimes ~now ~width ~show_unusable:true
   with
   | None -> fail "a read draws a section"
   | Some section ->
@@ -343,7 +343,7 @@ let reported_section ?(current = now) ?(kimi_observed_at = 1790170000.0)
       ]
   in
   match
-    Providers.section ~account_emails:Types.Account_emails_unread ~providers:(Types.Providers_read windows) ~runtimes ~now:current ~show_unusable:true
+    Providers.section ~rows:24 ~account_emails:Types.Account_emails_unread ~providers:(Types.Providers_read windows) ~runtimes ~now:current ~show_unusable:true
       ~width
   with
   | Some section -> List.map plain section.lines
@@ -389,7 +389,7 @@ let test_reset_clock_follows_local_dates () =
     let reading =
       decode_accounts [ account_json ~name:"a" [ percent_window ~id:"w" ~resets:resets_at 10 ] ]
     in
-    match Providers.section ~providers:(Types.Providers_read reading)
+    match Providers.section ~rows:24 ~providers:(Types.Providers_read reading)
             ~runtimes:Types.Quota_unread ~account_emails:Types.Account_emails_unread
             ~now:current ~width:160 ~show_unusable:true with
     | Some section -> String.concat "\n" (List.map plain section.lines)
@@ -497,7 +497,7 @@ let test_window_that_gates_nothing_is_not_an_alarm () =
   in
   let section =
     match
-      Providers.section ~account_emails:Types.Account_emails_unread ~providers:(Types.Providers_read windows)
+      Providers.section ~rows:24 ~account_emails:Types.Account_emails_unread ~providers:(Types.Providers_read windows)
         ~runtimes:Types.Quota_unread ~now ~width ~show_unusable:true
     with
     | Some section -> section
@@ -546,7 +546,7 @@ let test_account_emails_name_their_accounts () =
   in
   let section account_emails =
     match
-      Providers.section ~providers:(Types.Providers_read windows)
+      Providers.section ~rows:24 ~providers:(Types.Providers_read windows)
         ~runtimes:Types.Quota_unread ~account_emails ~now ~width ~show_unusable:true
     with
     | Some section -> section
@@ -721,7 +721,7 @@ let test_scope_id_is_the_servers () =
 let test_unread_catalogue_is_not_zero_blocked () =
   let windows = match Masc.Tui_decode_usage.decode_provider_usage_windows (resolved "reported") with
     | Ok windows -> windows | Error reason -> fail reason in
-  let section = match Providers.section
+  let section = match Providers.section ~rows:24
     ~providers:(Types.Providers_read windows) ~runtimes:Types.Quota_unread
     ~account_emails:Types.Account_emails_unread ~now ~width:80 ~show_unusable:true with
     | Some section -> section | None -> fail "expected plan rows" in
@@ -734,7 +734,7 @@ let test_plan_preserves_unknown_reports () =
   let windows = match decode_provider_usage_windows (resolved "reported") with
     | Ok value -> value | Error detail -> fail detail in
   let draw windows =
-    match Providers.section
+    match Providers.section ~rows:24
       ~providers:(Types.Providers_read windows) ~runtimes:Types.Quota_unread
       ~account_emails:Types.Account_emails_unread ~now ~width:100 ~show_unusable:true with
     | Some section -> String.concat "\n" (List.map plain section.lines)
@@ -780,7 +780,7 @@ let test_usd_rows_do_not_invent_a_percentage () =
   let reading = match Masc.Tui_decode_usage.decode_provider_usage_windows json with
     | Ok reading -> reading | Error detail -> fail detail in
   List.iter (fun width ->
-    let section = match Providers.section ~providers:(Types.Providers_read reading)
+    let section = match Providers.section ~rows:24 ~providers:(Types.Providers_read reading)
         ~runtimes:Types.Quota_unread ~account_emails:Types.Account_emails_unread ~now ~width ~show_unusable:true with
       | Some section -> section | None -> fail "USD accounts disappeared" in
     let lines = List.map plain section.lines in
@@ -1164,30 +1164,6 @@ let test_every_line_fits_the_width () =
         (section_lines ~width edge_accounts))
     [ 20; 24; 44; 60; 76; 80; 100; 120; 132 ]
 
-(* Lines from the first blank line on: the plan's rows, without the header. *)
-let plan_rows lines =
-  let rec after_blank = function
-    | [] -> []
-    | "" :: rest -> rest
-    | _ :: rest -> after_blank rest
-  in
-  after_blank (List.map plain lines)
-
-(* One window is one line down to the width of an 80-column terminal's
-   section (cols - 4): the screenshot fixture takes as many lines there as on
-   a wide screen. *)
-let test_one_window_is_one_line_down_to_76_columns () =
-  let wide = List.length (plan_rows (screenshot_section ~width:160 ())) in
-  List.iter
-    (fun width ->
-      check int
-        (Printf.sprintf "the plan takes the same lines at %d columns" width)
-        wide
-        (List.length (plan_rows (screenshot_section ~width ()))))
-    [ 100; 80; 76 ];
-  check int "one bar per window that has a cap" 6
-    (List.length (bar_rows (screenshot_section ~width:76 ())))
-
 let test_rows_follow_the_plan () =
   let raw = screenshot_section ~width:120 () in
   let lines = List.map plain raw in
@@ -1255,7 +1231,7 @@ let test_hidden_unusable_collapses_to_its_heading () =
   in
   let lines_of show_unusable =
     match
-      Providers.section ~providers:(Types.Providers_read accounts)
+      Providers.section ~rows:24 ~providers:(Types.Providers_read accounts)
         ~runtimes:Types.Quota_unread
         ~account_emails:Types.Account_emails_unread ~now ~width:100
         ~show_unusable
@@ -1377,7 +1353,7 @@ let card_lines ?(runtimes = Types.Quota_unread) ~width accounts =
   match
     Providers.section_cards
       ~providers:(Types.Providers_read (decode_accounts accounts))
-      ~runtimes ~account_emails:Types.Account_emails_unread ~now ~width
+      ~runtimes ~account_emails:Types.Account_emails_unread ~now ~width ~rows:24
       ~show_unusable:true
   with
   | Some section -> section.lines
@@ -1526,8 +1502,6 @@ let () =
         ; test_case "the observation is drawn once for a split account" `Quick
             test_the_observation_is_drawn_once_for_a_split_account
         ; test_case "the header counts are typed" `Quick test_the_header_counts_are_typed
-        ; test_case "one window is one line down to 76 columns" `Quick
-            test_one_window_is_one_line_down_to_76_columns
         ; test_case "the at-limit tone is the report's" `Quick
             test_the_at_limit_tone_is_the_reports_not_the_sections
         ; test_case "at limit is the header decision" `Quick

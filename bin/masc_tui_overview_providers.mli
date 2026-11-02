@@ -15,7 +15,7 @@
     threshold: a meter is drawn in the exhausted style only when the reported
     value is at or past the full value of its own unit and the server did not
     classify the window as counting something a model call does not need;
-    such a window is drawn dim whatever its value. A window that sits under
+    such a window is marked as other use whatever its value. A window that sits under
     [Unusable_now] only because the catalogue observed the account exhausted
     keeps the tone its own report earns. The one other fact
     drawn is the runtime catalogue's [quota_exhausted], as an
@@ -28,6 +28,11 @@ type section = {
   lines : string list;
       (** The section's rows in draw order, grouped as {!plan} orders them. *)
 }
+
+val text_for_viewport : columns:int -> rows:int -> string -> string
+(** Bound a displayed label to the current viewport's UTF-8 capacity and mark
+    omissions. Retain the ends where grapheme boundaries can be determined;
+    an ambiguous portion is omitted. The source is unchanged. *)
 
 (** What the runtime catalogue says about an account's quota scope. *)
 type observed =
@@ -125,6 +130,9 @@ val scope_id_cells : int
 
 val scope_name : Masc.Tui_decode_usage.provider_usage_account -> string
 
+val minutes_label : int -> string
+(** Format a reported duration in whole days, hours, or minutes. *)
+
 val account_email :
   account_emails:Masc_tui_types.overview_account_emails_reading ->
   Masc.Tui_decode_usage.provider_usage_account -> string option
@@ -137,6 +145,7 @@ val section :
   now:float ->
   show_unusable:bool ->
   width:int ->
+  rows:int ->
   section option
 (** [None] before the first read. Every known account is drawn under a
     section heading with its count, including an explicit state when no usage
@@ -157,11 +166,15 @@ val section_cards :
   now:float ->
   show_unusable:bool ->
   width:int ->
+  rows:int ->
   section option
 (** {!section} with each account drawn as a card, two to a row, when [width]
-    holds two columns of them; below that it is {!section} itself. A card is
+    holds two columns of them; below that it uses unboxed rows. A card is
     titled with the account's name and holds its windows, an observed
-    exhaustion and its email, with the bars sized to the card. The two
+    exhaustion and its email, with the bars sized to the card. Labels larger
+    than the viewport described by [width] and [rows] retain the ends where
+    their boundaries are known and mark omissions instead of expanding an
+    unbounded number of rows. The two
     accounts of a row end on the same line. The headings, the summary and the
     notes are the same lines either way, and every row fits [width]. *)
 
@@ -187,3 +200,6 @@ val meter : cells:int -> float -> string
     share above zero draws at least one eighth. The share is
     held to [0, 1] for drawing only; a share that is not a number draws an
     empty meter, and the row's value text still prints it as reported. *)
+
+val bar_cells_min : int
+(** Minimum preferred width of a comparison meter before moving it to another row. *)

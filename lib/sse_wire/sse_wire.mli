@@ -58,6 +58,17 @@ type observer_handshake = { instance_id : string; replay : observer_replay }
 (** [instance_id] is a nonempty HTTP token. The server changes it when its
     process or the observer's workspace scope changes. *)
 
+type observer_identity = { version : string; binary_commit : string option }
+(** A ready server's build fields from the same scoped Observer response. *)
+
+val observer_identity_headers : observer_identity -> (string * string) list
+(** Encode only valid header tokens. An invalid value advertises no identity. *)
+
+val decode_observer_identity :
+  (string * string) list -> (observer_identity option, string) result
+(** [None] means unadvertised. Partial, duplicate or unsafe headers are an error.
+    Authority also requires a validated replay handshake and workspace receipt. *)
+
 val observer_cursor_headers : observer_cursor option -> (string * string) list
 (** Send a numeric cursor only with the observer instance that delivered it. *)
 

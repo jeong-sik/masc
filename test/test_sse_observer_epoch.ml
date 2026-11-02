@@ -185,6 +185,33 @@ let test_a_gap_reaches_the_observer_headers () =
     (Wire.decode_observer_response (Wire.observer_response_headers after_gap) = Ok (Some after_gap))
 ;;
 
+let test_identity_receipt_rejects_ambiguous_headers () =
+  let identity = Wire.{ version = "0.66.0"; binary_commit = Some "abc123" } in
+  let encoded = Wire.observer_identity_headers identity in
+  check bool "identity receipt round-trips" true
+    (Wire.decode_observer_identity encoded = Ok (Some identity));
+  check bool "an absent receipt remains unknown" true
+    (Wire.decode_observer_identity [] = Ok None);
+  check (list (pair string string)) "unsafe producer value is not advertised" []
+    (Wire.observer_identity_headers {version="bad\r\nvalue"; binary_commit=None});
+  check bool "unknown binary commit remains unknown" true
+    (Wire.decode_observer_identity
+       (Wire.observer_identity_headers {version="0.66.0"; binary_commit=None})
+     = Ok (Some {version="0.66.0"; binary_commit=None}));
+  List.iter (fun headers ->
+    check bool "partial, duplicate or unsafe identity cannot authorize reads" true
+      (Result.is_error (Wire.decode_observer_identity headers)))
+    [ ["x-masc-observer-identity", "v1"]
+    ; ["x-masc-observer-version", "0.66.0"]
+    ; ["x-masc-observer-identity", "v2"; "x-masc-observer-version", "0.66.0"]
+    ; ["x-masc-observer-identity", "v1"; "x-masc-observer-version", "0.66.0"
+      ; "X-Masc-Observer-Version", "0.66.0"]
+    ; ["x-masc-observer-identity", "v1"; "x-masc-observer-version", "0.66.0\r\nInjected: yes"]
+    ; ["x-masc-observer-identity", "v1"; "x-masc-observer-version", "0.66.0"
+      ; "x-masc-observer-binary-commit", "one"; "X-Masc-Observer-Binary-Commit", "two"]
+    ]
+;;
+
 let test_missing_or_malformed_response () =
   check bool "absent capability is explicitly unavailable" true
     (Wire.decode_observer_response [] = Ok None);
@@ -245,6 +272,8 @@ let () =
           test_future_cursor_cannot_claim_resume
       ; test_case "missing capability differs from invalid metadata" `Quick
           test_missing_or_malformed_response
+      ; test_case "identity receipt rejects ambiguous headers" `Quick
+          test_identity_receipt_rejects_ambiguous_headers
       ]
     ; "replay gap",
       [ test_case "an event dropped by count is a gap" `Quick test_count_eviction_is_a_gap

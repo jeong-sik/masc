@@ -15839,7 +15839,11 @@ let apply_server_identity_reading state ~mailbox reading =
     match state.view, state.planning_mode with
     | Planning, Planning_detail goal_id when server_authority_ready state ->
       launch_goal_candle_load state ~mailbox goal_id
-    | _ -> ()
+    | Planning, (Planning_list | Planning_detail _)
+    | (Overview | Acting | Metrics | Keepers _ | Memory | Lanes | Clients | Board
+      | Approvals | Schedules | Verification | Harness | Fusion | Repositories
+      | Code | Changes | Connectors | Runtime | Config | Resources | Tools
+      | System_logs), (Planning_list | Planning_detail _) -> ()
   end
 
 let apply_refused_workspace_identity state ~mailbox ~detail latest =

@@ -180,7 +180,7 @@ let response_to_yojson result =
     | Refused error -> `Null, problem_json error in
   `Assoc ["schema", `String "masc.board_posts_offline.v1";
     "operation", `String operation; "read_only", `Bool (result.operation = Inspect);
-    "live_posts_guard_enforced", `Bool false; "result", body; "refusal", refusal;
+    "live_posts_guard_enforced", `Bool Board.live_guard_enforced; "result", body; "refusal", refusal;
     "lease_release", `String (if result.release_attempted then "attempted" else "not_acquired");
     "lease_release_failure", (match result.release_failure with None -> `Null
       | Some failure -> `String (Printexc.to_string failure.exception_))]

@@ -39,14 +39,11 @@ val create_store : base_path:string -> unit -> store
     directory or payload is created; a failed capture grants no write authority.
     Prepare the root before construction, then explicitly load sources. *)
 
-val create_store_with_posts_io_for_testing :
-  base_path:string ->
-  io:Fs_compat.private_jsonl_transaction_io_for_testing -> unit -> store
-(** The same production store and posts writer with an immutable, store-local
-    Fs descriptor-settlement seam. [io.before_sync_parent] covers stable-lock
-    initialization and the actual post-rename rewrite-parent sync; [close_fd]
-    covers descriptor settlement. Posts remain unobserved until explicit load. *)
-
+val create_store_with_source_io_for_testing :
+  base_path:string -> io:posts_source_io -> unit -> store
+(** Same production store with immutable, distinct guard/posts transaction IO.
+    Each None slot uses production IO. Faults must be armed after explicit
+    initialization; the constructor itself creates and admits nothing. *)
 
 val require_persisted_snapshot_readable :
   (unit, string) result -> (unit, board_error) result
@@ -80,9 +77,10 @@ val reactions_path : store -> string
 val sub_boards_path : store -> string
 val ensure_dir : string -> unit
 val ensure_masc_dir : where:string -> store -> (unit, board_error) result
-(** Checked directory preparation inside a persistence-protected writer.
-    [where] retains the requested operation in its error/log diagnostic.
-    A reserved precondition failure uses the existing deferred settlement carrier. *)
+(** Real initialized-guard precondition inside a persistence-protected writer.
+    This does not load posts, clear a posts refusal or bootstrap missing data.
+    [where] retains the requested operation in its one error/log diagnostic.
+    Reserved precondition failures use the existing deferred settlement carrier. *)
 
 type posts_snapshot
 (** Frozen candidate rows and their exact expected source observation. *)

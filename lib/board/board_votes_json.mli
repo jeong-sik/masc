@@ -38,23 +38,21 @@ val log_loaded :
     the outcome is [Error]. *)
 
 val load_persisted_posts : store -> (int, string * exn) result
-(** Explicit startup/quiescent reload under persist then state locks. Required
-    before posts persistence. An unsettled write cannot be settled by this read;
-    a prior observation/refusal cannot become a fresh Missing source. *)
-(** Load posts from disk into [store].  Returns [Ok loaded_count] on success
-    (including initially missing or still-missing sources: [Ok 0]).  Returns
-    [Error (path, cause)] when the file existed but could not be parsed or
-    read, or any nonempty line has invalid JSON/current row schema. Valid rows
-    still load for ordinary Board use; [store.posts_source] retains the
-    failed outcome for strict evidence readers until a successful reload;
-    a write with uncertain effects remains latched through ordinary reloads.
-    Valid expired rows do not count as malformed. Caller decides how to surface the failure — earlier behaviour
-    swallowed the exception inside this function, leaving a partially loaded
-    store undistinguishable from a clean one.  [Eio.Cancel.Cancelled] is
-    propagated unchanged. *)
+(** Explicit startup/quiescent reload under persist then state locks. Success
+    requires a physically valid initialization guard and a complete Present
+    posts source; an initialized empty file returns [Ok 0]. Missing never grants
+    posts authority. Repeated refusals retain the accepted guard history, and
+    ordinary reload cannot settle an unknown write.
+
+    Valid rows remain available for display after an ordinary guard refusal or
+    malformed row. Complete display replaces memory; partial display merges its
+    accepted rows. Display snapshots grant no negative evidence or write authority.
+    Valid expired rows remain source rows. Retained reserved causes propagate
+    unchanged after the current ordered diagnostic trace has been retained. *)
 
 val load_persisted_comments : store -> (int, string * exn) result
-(** See {!load_persisted_posts}. *)
+(** Missing comments are a legitimate empty source. Invalid rows retain the
+    partial-load failure until an explicit successful reload. *)
 
 val propagate_workspace_check :
   (unit, Board_workspace_binding.rejection) result -> unit

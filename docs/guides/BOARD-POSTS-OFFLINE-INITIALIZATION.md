@@ -50,8 +50,15 @@ exceptions are raised after structured output is attempted. Lease release is
 reported as attempted: the existing lease API does not certify release, and some
 acquisition rejections retain only a diagnostic string.
 
-`live_posts_guard_enforced` is false. This command does not enable startup guard
-admission or prevent disappearance in a running Board. Writers that bypass the
-BasePath lease remain outside its quiescence contract. Path checks describe
-observed boundaries; they do not make operations descriptor-relative or exclude
-same-UID path races.
+`live_posts_guard_enforced` is true: normal Board loads require an actual valid
+initialization guard and complete Present posts source before granting posts
+write authority. Posts and auxiliary writers freshly revalidate the accepted
+guard; guard-only observations do not authorize posts. A changed guard cannot
+replace retained initialization history through repeated failed loads. Unknown
+posts effects remain unsettled. This command performs only the explicitly
+requested offline action; it does not initialize a running store automatically.
+
+Writers that bypass the BasePath lease remain outside its quiescence contract.
+Guard and posts observations are separate transactions. Path checks describe
+observed boundaries; they do not make operations descriptor-relative, exclude
+same-UID path races, or certify earlier unknown durability.

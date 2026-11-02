@@ -15799,6 +15799,19 @@ let apply_confirmed_server_identity_reading state ~mailbox reading =
        before this function runs. *)
     ()
 
+(* The selected Goal id belongs to the Planning detail, regardless of whether
+   the latest Goal snapshot has arrived. *)
+let selected_planning_goal_id (state : state) =
+  match state.view with
+  | Planning ->
+      (match state.planning_mode with
+       | Planning_list -> None
+       | Planning_detail goal_id -> Some goal_id)
+  | Overview | Acting | Metrics | Keepers _ | Memory | Lanes | Clients | Board
+  | Approvals | Schedules | Verification | Harness | Fusion | Repositories
+  | Code | Changes | Connectors | Runtime | Config | Resources | Tools
+  | System_logs -> None
+
 (* A read that cannot say which workspace the server serves keeps the last
    match unconfirmed ([Masc_tui_types.next_workspace_identity]). The confirmed
    identity and everything it authorized stay; the state is no longer
@@ -15847,18 +15860,12 @@ let apply_server_identity_reading state ~mailbox reading =
     state.goal_confirmation_identity_refresh <-
       (match confirmation_key, previous_identity with
        | Some goal_id, Some identity ->
-           Some (goal_id, Goal_confirmation.{
-             base_path = Masc.Tui_decode.Canonical_path.to_string identity.sid_base_path;
-             masc_root = Masc.Tui_decode.Canonical_path.to_string identity.sid_masc_root })
+           Some (goal_id, Goal_confirmation.confirmation_workspace_of_identity identity)
        | (None, _ | _, None) -> None);
-    match state.view, state.planning_mode with
-    | Planning, Planning_detail goal_id when server_authority_ready state ->
+    match selected_planning_goal_id state with
+    | Some goal_id when server_authority_ready state ->
       launch_goal_candle_load state ~mailbox goal_id
-    | Planning, (Planning_list | Planning_detail _)
-    | (Overview | Acting | Metrics | Keepers _ | Memory | Lanes | Clients | Board
-      | Approvals | Schedules | Verification | Harness | Fusion | Repositories
-      | Code | Changes | Connectors | Runtime | Config | Resources | Tools
-      | System_logs), (Planning_list | Planning_detail _) -> ()
+    | Some _ | None -> ()
   end
 
 let apply_refused_workspace_identity state ~mailbox ~detail latest =
@@ -17361,9 +17368,7 @@ let launch_goal_confirmation_read state ~mailbox ~goal_id =
              state.goal_confirmation <- Goal_confirmation.Inspecting loading;
              state.goal_confirmation_presented <- None;
              let host = server_peer_host and port = state.port in
-             let workspace = Goal_confirmation.{
-               base_path = Masc.Tui_decode.Canonical_path.to_string expected_workspace.sid_base_path;
-               masc_root = Masc.Tui_decode.Canonical_path.to_string expected_workspace.sid_masc_root } in
+             let workspace = Goal_confirmation.confirmation_workspace_of_identity expected_workspace in
              launch_workspace_request state ~mailbox ~boundary_error:(fun detail -> Goal_confirmation.Read_failed (None, detail))
                ~deliver:(fun result -> Goal_confirmation_loaded (request, result))
                (fun () ->
@@ -17388,24 +17393,15 @@ let resume_goal_confirmation_identity_refresh state ~mailbox =
     let pending = state.goal_confirmation_identity_refresh in
     state.goal_confirmation_identity_refresh <- None;
     match pending, state.server_identity with
-    | Some (goal_id, workspace), Some (identity : Masc.Tui_decode.server_identity) ->
-        (match state.view with
-         | Planning ->
-             (match state.planning_mode with
-              | Planning_list -> ()
-              | Planning_detail selected ->
-                  (match state.goal_confirmation with
-                   | Goal_confirmation.Inspecting read
-                     when String.equal goal_id selected
-                          && String.equal workspace.base_path (Masc.Tui_decode.Canonical_path.to_string identity.sid_base_path)
-                          && String.equal workspace.masc_root (Masc.Tui_decode.Canonical_path.to_string identity.sid_masc_root)
-                          && Goal_confirmation_read.current_key read = Some goal_id ->
-                       launch_goal_confirmation_read state ~mailbox ~goal_id
-                   | Goal_confirmation.Inspecting _ | Goal_confirmation.Submitting _ -> ()))
-         | Overview | Acting | Metrics | Keepers _ | Memory | Lanes | Clients | Board
-         | Approvals | Schedules | Verification | Harness | Fusion | Repositories
-         | Code | Changes | Connectors | Runtime | Config | Resources | Tools
-         | System_logs -> ())
+    | Some (goal_id, workspace), Some identity ->
+        (match selected_planning_goal_id state, state.goal_confirmation with
+         | Some selected, Goal_confirmation.Inspecting read
+           when String.equal goal_id selected
+                && Goal_confirmation.same_confirmation_workspace workspace
+                     (Goal_confirmation.confirmation_workspace_of_identity identity)
+                && Goal_confirmation_read.current_key read = Some goal_id ->
+             launch_goal_confirmation_read state ~mailbox ~goal_id
+         | (Some _ | None), (Goal_confirmation.Inspecting _ | Goal_confirmation.Submitting _) -> ())
     | None, _ | Some _, None -> ()
   end
 
@@ -18817,9 +18813,9 @@ let handle_goal_confirmation_key state ~mailbox =
            report_action state "system" "Goal proof is being refreshed; wait for the current result"
        | Goal_confirmation.Inspecting read ->
       match Goal_confirmation_read.view_for ~equal:String.equal read ~key:goal_id with
-       | Ready confirmation when not (Option.exists (fun (identity : Masc.Tui_decode.server_identity) ->
-           String.equal confirmation.workspace.base_path (Masc.Tui_decode.Canonical_path.to_string identity.sid_base_path)
-           && String.equal confirmation.workspace.masc_root (Masc.Tui_decode.Canonical_path.to_string identity.sid_masc_root)
+       | Ready confirmation when not (Option.exists (fun identity ->
+           Goal_confirmation.same_confirmation_workspace confirmation.workspace
+             (Goal_confirmation.confirmation_workspace_of_identity identity)
            && identity.sid_runtime_instance_id = Some confirmation.runtime_instance_id) state.server_identity) ->
            state.goal_confirmation_presented <- None;
            report_action state "error" "Goal confirmation workspace or server changed; read the proof again";
@@ -21871,15 +21867,11 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
              ~scoped_refresh_followup ~mailbox
        | true, Error _ ->
            report_action state "error" (label ^ "confirmation outcome unconfirmed; inspect the current proof and request history"));
-      (match state.view, state.planning_mode with
-       | Planning, Planning_detail selected when String.equal selected goal_id ->
+      (match selected_planning_goal_id state with
+       | Some selected when String.equal selected goal_id ->
            state.goal_confirmation_identity_refresh <- Some (goal_id, authority.ra_workspace);
            resume_goal_confirmation_identity_refresh state ~mailbox
-       | (Overview | Acting | Metrics | Keepers _ | Memory | Lanes | Clients
-          | Board | Approvals | Planning | Schedules | Verification | Harness
-          | Fusion | Repositories | Code | Changes | Connectors | Runtime
-          | Config | Resources | Tools | System_logs),
-         (Planning_list | Planning_detail _) -> ())
+       | Some _ | None -> ())
   | Goal_confirmation_loaded (request, result) ->
       (match state.goal_confirmation with
        | Goal_confirmation.Inspecting read ->
@@ -21909,27 +21901,17 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
            (match result with Ok _ when current -> clear_goal_confirmation_revalidation state ~goal_id | Ok _ | Error _ -> ());
            state.goal_confirmation <- Goal_confirmation.Inspecting
              (Goal_confirmation_read.complete ~equal:String.equal read request result);
-           (match changed_owner, state.view, state.planning_mode with
-            | Some owner, Planning, Planning_detail selected when String.equal goal_id selected
+           (match changed_owner, selected_planning_goal_id state with
+            | Some owner, Some selected when String.equal goal_id selected
                 && take_goal_confirmation_revalidation state ~goal_id ~owner ->
               start_http_refresh state ~host:server_peer_host ~port:state.port ~intent:Revalidate
                 ~refresh_inflight:http_refresh_inflight ~scoped_refresh_inflight:http_scoped_refresh_inflight
                 ~scoped_refresh_followup ~mailbox
-            | (Some _ | None),
-              (Overview | Acting | Metrics | Keepers _ | Memory | Lanes | Clients
-               | Board | Approvals | Planning | Schedules | Verification | Harness
-               | Fusion | Repositories | Code | Changes | Connectors | Runtime
-               | Config | Resources | Tools | System_logs),
-              (Planning_list | Planning_detail _) -> ());
-           (match credential_changed, current, state.view, state.planning_mode with
-            | true, true, Planning, Planning_detail selected when String.equal goal_id selected ->
+            | (Some _ | None), (Some _ | None) -> ());
+           (match credential_changed, current, selected_planning_goal_id state with
+            | true, true, Some selected when String.equal goal_id selected ->
                 launch_goal_confirmation_read state ~mailbox ~goal_id
-            | _, _,
-              (Overview | Acting | Metrics | Keepers _ | Memory | Lanes | Clients
-               | Board | Approvals | Planning | Schedules | Verification | Harness
-               | Fusion | Repositories | Code | Changes | Connectors | Runtime
-               | Config | Resources | Tools | System_logs),
-              (Planning_list | Planning_detail _) -> ())
+            | _, _, (Some _ | None) -> ())
        | Goal_confirmation.Submitting _ -> ())
   | Verification_evidence_exported (request, result) ->
       let progress = Atomic.get request.vex_progress in
@@ -33917,10 +33899,7 @@ Use relative paths for resources already held in the package. -->
              ~set_cursor:(fun n -> state.harness_cursor <- n)
              ~reopen:(fun () -> open_harness_detail state)
        | Some (("[" | "]") as bracket)
-         when state.view = Planning
-              && (match state.planning_mode with
-                  | Planning_detail _ -> true
-                  | Planning_list -> false) ->
+         when Option.is_some (selected_planning_goal_id state) ->
            state.home_opened_request <- None;
            step_detail_cursor
              ~count:
@@ -35934,8 +35913,8 @@ Use relative paths for resources already held in the package. -->
                 report_action state "system"
                   (Printf.sprintf (if state.ui_language = Lang_ko then "D 를 한 번 더 누르면 %s 를 지웁니다" else "Press D again to delete %s") name)
               end)
-       | Some key when state.view = Planning && String.equal key Masc_tui_keys.goal_candle_refresh_key
-           && (match state.planning_mode with Planning_detail _ -> true | Planning_list -> false) ->
+       | Some key when Option.is_some (selected_planning_goal_id state)
+           && String.equal key Masc_tui_keys.goal_candle_refresh_key ->
            start_http_refresh state ~host:server_peer_host ~port:state.port ~intent:Revalidate
              ~refresh_inflight:http_refresh_inflight ~scoped_refresh_inflight:http_scoped_refresh_inflight
              ~scoped_refresh_followup ~mailbox:async_messages;

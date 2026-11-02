@@ -231,7 +231,30 @@ let submitted_originals_json =
   ; `Assoc [ "kind", `String "hologram"; "anything", `Bool true ]
   ]
 
-let confirmation_workspace = Detail.{ base_path = "/workspace"; masc_root = "/workspace/.masc" }
+let confirmation_base_path, confirmation_root_path =
+  let base = Filename.temp_file "masc-goal-base-" "" in
+  Fun.protect ~finally:(fun () -> Sys.remove base) (fun () ->
+    let root = Filename.temp_file "masc-goal-root-" "" in
+    Fun.protect ~finally:(fun () -> Sys.remove root) (fun () ->
+      Masc.Tui_decode.Canonical_path.of_path base,
+      Masc.Tui_decode.Canonical_path.of_path root))
+
+let confirmation_identity : Masc.Tui_decode.server_identity = {
+  sid_version = "test";
+  sid_binary_commit = "test";
+  sid_binary_commit_age_s = None;
+  sid_runtime_instance_id = Some "instance-1";
+  sid_base_path = confirmation_base_path;
+  sid_masc_root = confirmation_root_path;
+  sid_executable_in_worktree = None;
+  sid_state_ready = Some true;
+  sid_uptime = None;
+  sid_sse_clients = None;
+  sid_gc = None;
+  sid_scheduler = None;
+}
+
+let confirmation_workspace = Detail.confirmation_workspace_of_identity confirmation_identity
 
 let confirmation_owner = ref ()
 
@@ -248,18 +271,29 @@ let test_confirmation_retains_the_displayed_proof () =
        [ "goal_id", `String "goal-1"; "criterion_revision", `String "revision-1";
          "request_id", `String "request-1"; "verification_run_id", `String "run-1"; "expected_operator_id", `String "operator-current";
          "expected_runtime_instance_id", `String "instance-1";
-         "expected_workspace", `Assoc ["base_path", `String "/workspace"; "masc_root", `String "/workspace/.masc"] ]);
+         "expected_workspace", `Assoc
+           [ "base_path", `String (Masc.Tui_decode.Canonical_path.to_string confirmation_identity.sid_base_path)
+           ; "masc_root", `String (Masc.Tui_decode.Canonical_path.to_string confirmation_identity.sid_masc_root) ] ]);
   let newer = confirmation_exn (confirmation_fixture ~run_id:"run-2" ()) in
   check_bool "a newer verifier run cannot replace the inspected one" false
     (Detail.same_confirmation_binding read newer);
   let changed = confirmation_exn (confirmation_fixture ~evidence:"different evidence" ()) in
   check_bool "changed evidence cannot replace the inspected verdict" false
     (Detail.same_confirmation_binding read changed);
-  let foreign = match Detail.decode_confirmation ~goal_id:"goal-1" ~runtime_instance_id:"instance-1"
-      ~workspace:Detail.{base_path="/other"; masc_root="/other/.masc"} ~credential_headers:[] ~credential_owner:confirmation_owner (confirmation_fixture ()) with
+  let read_with_workspace workspace =
+    match Detail.decode_confirmation ~goal_id:"goal-1" ~runtime_instance_id:"instance-1"
+      ~workspace ~credential_headers:[] ~credential_owner:confirmation_owner (confirmation_fixture ()) with
     | Ok value -> value | Error error -> Alcotest.fail error in
+  let foreign = read_with_workspace Detail.{base_path=confirmation_identity.sid_masc_root;
+    masc_root=confirmation_identity.sid_base_path} in
   check_bool "identical proof in another workspace is not the same binding" false
     (Detail.same_confirmation_binding read foreign);
+  let foreign_base = read_with_workspace Detail.{confirmation_workspace with base_path=foreign.workspace.base_path} in
+  check_bool "another workspace base cannot retain the inspected binding" false
+    (Detail.same_confirmation_binding read foreign_base);
+  let foreign_root = read_with_workspace Detail.{confirmation_workspace with masc_root=foreign.workspace.masc_root} in
+  check_bool "another workspace root cannot retain the inspected binding" false
+    (Detail.same_confirmation_binding read foreign_root);
   let foreign_owner = match Detail.decode_confirmation ~goal_id:"goal-1" ~runtime_instance_id:"instance-1"
       ~workspace:confirmation_workspace ~credential_headers:[] ~credential_owner:(ref ()) (confirmation_fixture ()) with
     | Ok value -> value | Error error -> Alcotest.fail error in
@@ -278,6 +312,8 @@ let test_confirmation_retains_the_displayed_proof () =
   check_bool "different server cannot expose receipt detail" false (current ~instance:"instance-2" (Some read));
   check_bool "a failed or in-flight reread cannot expose receipt detail" false (current ~instance:"instance-1" None);
   check_bool "another workspace cannot expose receipt detail" false (current ~instance:"instance-1" (Some foreign));
+  check_bool "another workspace base cannot expose receipt detail" false (current ~instance:"instance-1" (Some foreign_base));
+  check_bool "another workspace root cannot expose receipt detail" false (current ~instance:"instance-1" (Some foreign_root));
   let other_operator = { read with Detail.inspection_operator_id = "different-operator" } in
   check_bool "the same credential reassigned to another operator cannot expose receipt detail" false
     (current ~instance:"instance-1" (Some other_operator));
@@ -431,7 +467,9 @@ let test_a_recorded_confirmation_that_did_not_complete_can_be_confirmed_again ()
          [ "goal_id", `String "goal-1"; "criterion_revision", `String "revision-1";
            "request_id", `String "request-1"; "verification_run_id", `String "run-1"; "expected_operator_id", `String "operator-current";
          "expected_runtime_instance_id", `String "instance-1";
-           "expected_workspace", `Assoc ["base_path", `String "/workspace"; "masc_root", `String "/workspace/.masc"] ]);
+           "expected_workspace", `Assoc
+             [ "base_path", `String (Masc.Tui_decode.Canonical_path.to_string confirmation_identity.sid_base_path)
+             ; "masc_root", `String (Masc.Tui_decode.Canonical_path.to_string confirmation_identity.sid_masc_root) ] ]);
   let completed = confirmation_exn (confirmation_fixture ~confirmed:true ()) in
   check_bool "the completed answer binds the same proof" true
     (Detail.same_confirmation_binding recorded completed)

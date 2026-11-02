@@ -3683,6 +3683,22 @@ type observer_replay_status =
   | Observer_replay_unavailable of string
   | Observer_replay_rejected of string
 
+(* Unlike the latest replay handshake, this is tied to the admitted workspace
+   authority. A later unscoped or different stream cannot replace its origin. *)
+type observer_scope_binding =
+  | Observer_scope_unbound
+  | Observer_scope_bound of string
+  | Observer_scope_retired
+
+let note_observer_scope binding handshake =
+  match binding, handshake with
+  | Observer_scope_unbound, None -> Observer_scope_unbound
+  | Observer_scope_unbound, Some handshake -> Observer_scope_bound handshake.Sse_wire.instance_id
+  | Observer_scope_bound previous, Some handshake
+    when String.equal previous handshake.Sse_wire.instance_id -> binding
+  | Observer_scope_bound _, (Some _ | None) | Observer_scope_retired, (Some _ | None) ->
+      Observer_scope_retired
+
 let observer_replay_description ?(source_loss = false) replay =
   let description = match replay with
   | Observer_replay_unobserved -> "Replay: not negotiated"
@@ -10690,6 +10706,7 @@ type state = {
   mutable observer: observer_status;
   mutable observer_retry_owner: unit ref option;
   mutable observer_recovery_owner: unit ref option;
+  mutable observer_scope_binding: observer_scope_binding;
   mutable mcp_session: string option;
       (** The MCP session the server issued, kept across streams: the server
           holds it after a stream closes, so reopening the feed and calling
@@ -19313,6 +19330,7 @@ let create_state
   observer = Observer_off;
   observer_retry_owner = None;
   observer_recovery_owner = None;
+  observer_scope_binding = Observer_scope_unbound;
   mcp_session = None;
   observer_cursor = None;
   observer_replay = Observer_replay_unobserved;

@@ -2163,21 +2163,51 @@ let test_observer_recovery_belongs_to_unconfirmed_workspace () =
   state.observer_recovery_owner <- Some owner;
   Alcotest.(check bool) "unconfirmed workspace owns recovery" true
     (Masc_tui_async_protocol.observer_recovery_owned state ~authority owner);
+  let expected = identity "/workspace/a" in
+  let live = ref true in
+  let first = Sse_wire.{instance_id="instance-a"; replay=Fresh} in
+  let next = Sse_wire.{instance_id="instance-b"; replay=Fresh} in
+  state.observer_scope_binding <- note_observer_scope Observer_scope_unbound (Some first);
+  let owns_identity () =
+    Masc_tui_async_protocol.observer_recovery_identity_owned state
+      ~authority ~owner ~live ~instance:"instance-a" ~expected in
+  Alcotest.(check bool) "live scoped stream owns its identity" true (owns_identity ());
+  state.observer_scope_binding <- note_observer_scope state.observer_scope_binding (Some first);
+  Alcotest.(check bool) "same epoch retains its authority" true (owns_identity ());
+  state.observer_scope_binding <- note_observer_scope state.observer_scope_binding (Some next);
+  Alcotest.(check bool) "different process or epoch rejects old workspace evidence" false (owns_identity ());
+  state.observer_scope_binding <- note_observer_scope state.observer_scope_binding (Some first);
+  Alcotest.(check bool) "old epoch cannot revive retired authority" false (owns_identity ());
+  state.observer_scope_binding <- Observer_scope_unbound;
+  Alcotest.(check bool) "unscoped prior connection cannot authorize recovery" false (owns_identity ());
+  state.observer_scope_binding <- note_observer_scope Observer_scope_unbound (Some first);
+  state.observer_scope_binding <- note_observer_scope state.observer_scope_binding None;
+  Alcotest.(check bool) "an unscoped successor retires prior evidence" false (owns_identity ());
+  state.observer_scope_binding <- note_observer_scope Observer_scope_unbound (Some first);
+  live := false;
+  Alcotest.(check bool) "closed stream cannot authorize identity" false (owns_identity ());
+  live := true;
+  state.server_identity <- Some (identity "/workspace/b");
+  Alcotest.(check bool) "a different workspace rejects old identity" false (owns_identity ());
+  state.server_identity <- Some expected;
   suspend_workspace_readings state;
   Alcotest.(check bool) "read suspension retains recovery owner" true
     (Masc_tui_async_protocol.observer_recovery_owned state ~authority owner);
   state.observer_recovery_owner <- Some (ref ());
   Alcotest.(check bool) "successor owner rejects stale recovery" false
     (Masc_tui_async_protocol.observer_recovery_owned state ~authority owner);
+  Alcotest.(check bool) "successor owner rejects stale identity" false (owns_identity ());
   state.observer_recovery_owner <- Some owner;
   let Workspace_authority generation = authority in
   state.workspace_authority <- Workspace_authority (generation + 1);
   Alcotest.(check bool) "successor workspace rejects stale recovery" false
     (Masc_tui_async_protocol.observer_recovery_owned state ~authority owner);
+  Alcotest.(check bool) "successor workspace rejects stale identity" false (owns_identity ());
   state.workspace_authority <- authority;
   state.workspace_identity <- Workspace_identity_match;
   Alcotest.(check bool) "confirmed workspace no longer owns recovery" false
-    (Masc_tui_async_protocol.observer_recovery_owned state ~authority owner)
+    (Masc_tui_async_protocol.observer_recovery_owned state ~authority owner);
+  Alcotest.(check bool) "confirmed workspace rejects late identity" false (owns_identity ())
 
 let test_archive_cache_does_not_cross_equal_stat_files () =
   let first = Filename.temp_file "tui-archive-source-a-" ".json" in

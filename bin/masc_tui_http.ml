@@ -1745,7 +1745,7 @@ let workspace_read_attested headers =
 (** Stream headers are delivered before body chunks. A transport disconnect
     and an explicit HTTP refusal remain distinct so a quiet connection does
     not invalidate an otherwise usable MCP session or scoped replay cursor. *)
-let observe_runtime_events ~clock ~(expected_workspace : Masc.Tui_decode.server_identity)
+let observe_runtime_events ~on_identity ~clock ~(expected_workspace : Masc.Tui_decode.server_identity)
     ~(host : string) ~(port : int)
     ~(session_id : string) ~(cursor : Sse_wire.observer_cursor option)
     ~on_open ~(on_chunk : string -> unit) : (unit, observer_error) result =
@@ -1769,7 +1769,14 @@ let observe_runtime_events ~clock ~(expected_workspace : Masc.Tui_decode.server_
            raise (Retry_observer_without_cursor (requested, detail))
        | Error (Sse_wire.Invalid_observer_response detail) ->
            raise (Invalid_sse_response detail)
-       | Ok handshake -> on_open handshake)
+       | Ok handshake ->
+           (match Sse_wire.decode_observer_identity headers, handshake with
+            | Error detail, _ -> raise (Invalid_sse_response detail)
+            | Ok (Some _), None ->
+                raise (Invalid_sse_response "observer identity has no scoped instance")
+            | Ok (Some identity), Some scoped -> on_identity (scoped, identity)
+            | Ok None, (Some _ | None) -> ());
+           on_open handshake)
     end
   in
   match

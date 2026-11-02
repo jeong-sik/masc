@@ -288,9 +288,6 @@ let load_source config : source =
   | `Unavailable u -> Unavailable u
   | `Available prepared -> Available prepared.state
 
-let find_goal_in goals id =
-  List.find_opt (fun goal -> String.equal goal.id id) goals
-
 let find_goal config ~goal_id : lookup =
   match load_prepared_source config with
   | `Uninitialized -> Goal_absent

@@ -511,9 +511,9 @@ let start_flow ~admission_class (ready : flow_snapshot) =
       }
 ;;
 
-let flow_success_candidate success = success.candidate
+let flow_success_candidate (success : flow_success) = success.candidate
 let flow_success_output success = success.success
-let flow_success_evidence success = success.evidence
+let flow_success_evidence (success : flow_success) = success.evidence
 let call_id_to_string (Call_id id) = id
 let flow_attempt_id (flow : flow_attempt) = flow.flow_id
 let attempt_receipt (attempt : attempt) = attempt.receipt
@@ -1295,7 +1295,12 @@ let execute_flow_candidate
           let execution_error =
             match result with
             | Error (Flow_step_execution_failed { cause; _ }) -> Some cause
-            | Ok _ | Error _ -> None
+            | Ok _
+            | Error (Flow_step_candidate_rejected _ | Flow_step_attempt_start_failed _
+                    | Flow_step_measurement_start_failed _
+                    | Flow_step_before_measurement_dispatch_callback_failed _
+                    | Flow_step_measurement_terminal_callback_failed _
+                    | Flow_step_before_dispatch_callback_failed _ | Flow_step_unresolved _) -> None
           in
           (match classify_uncertainty observation execution_error with
            | None -> result
@@ -1329,7 +1334,10 @@ let responses_uncertainty snapshot (execution_error : execution_error option) =
             (match execution_error with
              | Some { cause = Provider_response_refused _; _ } ->
                Some Response_refusal_on_success_status
-             | None | Some _ -> None)))
+             | None
+             | Some { cause = (Completion_failed _ | Response_body_deadline_exceeded
+                 | Output_limit_reached | Incomplete_output | Missing_output
+                 | Ambiguous_output _ | Unexpected_output_content | Invalid_json_output); _ } -> None)))
     | Some _ -> Some Response_non_success_status
 ;;
 
@@ -1434,7 +1442,7 @@ let execute_flow_once ~net ~clock ~before_measurement_dispatch ~on_measurement_t
   match execute_flow_once_internal ~net ~clock ~classify_uncertainty:no_uncertainty
       ~before_measurement_dispatch ~on_measurement_terminal ~before_dispatch ~before_advance ~validate flow with
   | Internal_finished result -> result
-  | Internal_unresolved {reason;_} -> (match reason with _ -> .)
+  | Internal_unresolved _ -> .
 ;;
 
 let execute_flow_once_guarded ~net ~clock ~before_measurement_dispatch ~on_measurement_terminal

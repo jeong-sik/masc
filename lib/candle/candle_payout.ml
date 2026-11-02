@@ -282,7 +282,8 @@ let unfenced_nonterminal_issues ~provenance tasks =
     | Unfenced -> List.filter_map (fun (task_id, lookup) -> match lookup with
         | Candle_event.Found {status=(Candle_event.Todo | Claimed | In_progress | Awaiting_verification);_} ->
           Some (Unfenced_nonterminal {task_id})
-        | Candle_event.Found _ | Candle_event.Found_uncertain _
+        | Candle_event.Found {status=(Candle_event.Done _ | Cancelled);_}
+        | Candle_event.Found_uncertain _
         | Candle_event.Deleted | Candle_event.Unobserved -> None) tasks
 ;;
 
@@ -517,7 +518,8 @@ let validate_hold (waiting : waiting) events ~passed_at ~confirmed_at tasks task
       | Some (Candle_event.Found {assignee=Some _; _}), Candle_event.Keeper_unknown -> false
       | Some (Candle_event.Found {assignee=None; _}), Candle_event.No_assignee
       | Some (Candle_event.Deleted | Candle_event.Unobserved | Candle_event.Found_uncertain _), Candle_event.Keeper_unknown -> false
-      | (None | Some _), _ -> true) task_keepers
+      | (None | Some (Candle_event.Found _ | Found_uncertain _ | Deleted | Unobserved)),
+        (Candle_event.Keeper_name _ | Not_keeper _ | No_assignee | Keeper_unknown) -> true) task_keepers
     then Error "held Keeper observation does not match its Task assignee"
     else Ok () in
   if List.exists (function Same_second _ | Reversed_window _ -> true
@@ -549,7 +551,8 @@ let validate_under ~rules events body =
      | Waiting waiting when Option.is_some (held_window_of waiting events) ->
        Error "candidate window is held"
      | Waiting _ | No_obligation | Failed _ | Settled -> Ok ())
-  | _ ->
+  | (Candle_event.Paid _ | Unattributed _ | Payout_failed _ | Snapshot _
+    | Half_life_set _ | Equipped _ | Purchased _ | Granted _ | Gifted _ | Gifted_item _) ->
   let goal_id = match body with
     | Candle_event.Paid p -> Some p.identity.goal_id
     | Candle_event.Unattributed u -> Some u.goal_id

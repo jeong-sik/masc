@@ -380,7 +380,8 @@ let fragment_of_json json =
     | Assigned name, "not_keeper", Some actual when name = actual -> Ok (Not_keeper name)
     | Assigned _, "unknown", None | Unreadable_assignee, "unknown", None -> Ok Keeper_unknown
     | Unassigned, "unassigned", None -> Ok No_assignee
-    | _ -> Error "uncertain task observation: Keeper classification does not match assignee" in
+    | (Assigned _ | Unassigned | Unreadable_assignee), _, _ ->
+        Error "uncertain task observation: Keeper classification does not match assignee" in
   Ok ({title; assignee; status; keeper} : task_fragment)
 ;;
 

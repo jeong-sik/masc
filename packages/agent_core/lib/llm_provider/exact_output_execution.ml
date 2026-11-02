@@ -232,7 +232,7 @@ let execute_once_with_evidence ~net ~clock ?on_phase plan =
      (* A successful status without its complete body cannot produce raw-body
         evidence or a parsed lifecycle, even if a transport returned it. *)
      error (response_received_receipt raw.status) Response_body_deadline_exceeded
-   | Ok receipt ->
+   | Ok ({ body_receipt = Http_client.Received _; _ } as receipt) ->
      let raw = receipt.response in
      let raw_response =
        raw_response_evidence raw receipt.response_header_evidence

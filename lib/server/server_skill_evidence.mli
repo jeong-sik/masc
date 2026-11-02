@@ -1,6 +1,10 @@
 (** Exact-revision Skill evidence joined from retained activation ledgers and
     producer-owned composition evidence. *)
 
+val activation_gap_to_yojson : Keeper_skill_activation_discovery.gap -> Yojson.Safe.t
+val activation_scope_to_string : Keeper_skill_activation_discovery.scope -> string
+(** Shared wire projection of retained-ledger scan coverage and its exact gaps. *)
+
 val request_of_string :
   string ->
   (Skill_reference.t * Keeper_tool_plan.Composition_run_id.t option, string) result

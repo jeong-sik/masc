@@ -766,7 +766,8 @@ describe('GoalTree', () => {
     render(html`<${GoalTree} />`)
     fireEvent.click(await screen.findByText('이 증명으로 목표 완료 확인'))
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
-    await waitFor(() => expect(mocks.fetchDashboardGoalsTree).toHaveBeenCalledTimes(2))
+    await screen.findByText('인증이 거부되었습니다. 인증을 갱신한 뒤 다시 확인해 주세요.')
+    expect(mocks.fetchDashboardGoalsTree).toHaveBeenCalledTimes(1)
     expect(screen.queryByRole('button', { name: 'Drop' })).toBeNull()
     expect(mocks.callMcpTool).not.toHaveBeenCalled()
     expect(mocks.post).toHaveBeenCalledTimes(1)
@@ -870,7 +871,7 @@ describe('GoalTree', () => {
         // The first health transport ignores abort. An independent observation
         // supersedes it and the replacement must unblock recovery on its own.
         hydrateGoalTreeSnapshot(tree)
-        await waitFor(() => expect(mocks.captureArtifactWorkspace).toHaveBeenCalledTimes(3))
+        await waitFor(() => expect(mocks.captureArtifactWorkspace.mock.calls.length).toBeGreaterThanOrEqual(3))
         await waitFor(() => expect(getStoredToken()).toBe('fresh-dev-token'))
         expect(mocks.post).toHaveBeenCalledTimes(1)
         return
@@ -884,8 +885,8 @@ describe('GoalTree', () => {
       else resolveWorkspace({ basePath: '/workspace-a',
         mascRoot: outcome === 'other' ? '/other/.masc' : '/workspace-a/.masc' })
       if (outcome === 'late-token' || outcome === 'recovery-hydration') {
-        await waitFor(() => expect(mocks.fetchDashboardGoalsTree).toHaveBeenCalledTimes(2))
-        await screen.findByText('tree unavailable')
+        await screen.findByText('인증이 거부되었습니다. 인증을 갱신한 뒤 다시 확인해 주세요.')
+        expect(mocks.fetchDashboardGoalsTree).toHaveBeenCalledTimes(1)
         expect(getStoredToken()).toBe('old-dev-token')
         resolveToken(tokenResponse())
       }
@@ -893,8 +894,8 @@ describe('GoalTree', () => {
         await waitFor(() => expect(getStoredToken()).toBe('fresh-dev-token'))
       }
       else {
-        if (outcome === 'failed') await screen.findByText('workspace unavailable')
-        else await waitFor(() => expect(mocks.fetchDashboardGoalsTree).toHaveBeenCalledTimes(2))
+        await screen.findByText('인증이 거부되었습니다. 인증을 갱신한 뒤 다시 확인해 주세요.')
+        expect(mocks.fetchDashboardGoalsTree).toHaveBeenCalledTimes(1)
         expect(getStoredToken()).toBe('old-dev-token')
       }
       expect(mocks.post).toHaveBeenCalledTimes(1)

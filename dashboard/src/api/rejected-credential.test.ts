@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   ApiRequestError,
   authHeaders,
+  currentStoredTokenRevision,
   fetchControlPlane,
   get,
   getStoredToken,
@@ -10,7 +11,7 @@ import {
   setStoredToken,
 } from './core'
 import { devTokenBootstrapStatus, ensureDevToken, installRejectedCredentialRecovery, recoverScopedRejectedCredential, resetDevTokenBootstrap } from './dev-token'
-import { setCanonicalDashboardActor } from '../lib/dashboard-session-actor'
+import { managedDashboardAuthRevision, managedDashboardRefusal, recordManagedCredentialRefusal, setCanonicalDashboardActor } from '../lib/dashboard-session-actor'
 
 /* #44189: a tab holding a pasted token the server had stopped accepting kept
    polling `/api/v1/dashboard/runtime-probe` and `/api/v1/board/reactions` with
@@ -113,6 +114,23 @@ describe('a credential the server refused', () => {
     await expectRecoveryStillDropsExpired()
   })
 
+  it('recovers a managed 401 after the same dashboard actor is hydrated', async () => {
+    setStoredToken('old-dev-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
+    let resolveOld!: (response: Response) => void
+    const fetchMock = vi.fn((requestPath: string) => requestPath === DEV_TOKEN_PATH
+      ? Promise.resolve(new Response(JSON.stringify({ token: 'fresh-dev-token', actor: 'dashboard', role: 'admin' }), {
+        status: 200, headers: { 'Content-Type': 'application/json' },
+      }))
+      : new Promise<Response>(resolve => { resolveOld = resolve }))
+    vi.stubGlobal('fetch', fetchMock)
+    const pending = get('/api/v1/board/reactions')
+    setCanonicalDashboardActor('dashboard')
+    resolveOld(refusal('token_expired'))
+    await expect(pending).rejects.toBeInstanceOf(ApiRequestError)
+    await vi.waitFor(() => expect(getStoredToken()).toBe('fresh-dev-token'))
+    expect(fetchMock.mock.calls.filter(([requestPath]) => requestPath === '/api/v1/board/reactions')).toHaveLength(1)
+  })
+
   it.each(['token', 'actor'] as const)('ignores a late refusal after %s changes and returns', async changed => {
     setStoredToken('token-a', { source: 'manual' })
     setCanonicalDashboardActor('actor-a')
@@ -177,6 +195,60 @@ describe('a credential the server refused', () => {
 })
 
 describe('a refusal owned by a Goal request', () => {
+  it('records one refusal and attempts one recovery for repeated typed 401s', async () => {
+    setStoredToken('old-dev-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
+    const revision = currentStoredTokenRevision()
+    const authRevision = managedDashboardAuthRevision.peek()
+    // A shell can first report a refusal without a recoverable error code.
+    recordManagedCredentialRefusal(revision)
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      token: 'old-dev-token', actor: 'dashboard', role: 'admin',
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    vi.stubGlobal('fetch', fetchMock)
+    const rejection = { token: 'old-dev-token', authErrorCode: 'token_expired', httpStatus: 401 }
+    await recoverScopedRejectedCredential(rejection, () => true)
+    setCanonicalDashboardActor('dashboard')
+    setCanonicalDashboardActor(null)
+    await recoverScopedRejectedCredential(rejection, () => true)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(managedDashboardRefusal.peek()).toBe(revision)
+    expect(managedDashboardAuthRevision.peek()).toBe(authRevision + 1)
+  })
+
+  it('does not classify a tool error or actor mismatch as a refused token', async () => {
+    setStoredToken('old-dev-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
+    const revision = currentStoredTokenRevision()
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 503 })))
+    await recoverScopedRejectedCredential({ token: 'old-dev-token', authErrorCode: 'invalid_token', httpStatus: 200 }, () => true)
+    await recoverScopedRejectedCredential({ token: 'old-dev-token', authErrorCode: 'actor_mismatch', httpStatus: 401 }, () => true)
+    expect(managedDashboardRefusal.peek()).not.toBe(revision)
+  })
+
+  it('does not cancel a newer bootstrap started by a refusal subscriber', async () => {
+    setStoredToken('old-dev-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
+    const rejectedRevision = currentStoredTokenRevision()
+    let resolveBootstrap!: (response: Response) => void
+    const fetchMock = vi.fn(() => new Promise<Response>(resolve => { resolveBootstrap = resolve }))
+    vi.stubGlobal('fetch', fetchMock)
+    let replacement: Promise<void> | null = null
+    const stop = managedDashboardRefusal.subscribe(revision => {
+      if (revision === rejectedRevision && replacement === null) {
+        setStoredToken('new-dev-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
+        replacement = ensureDevToken()
+      }
+    })
+    try {
+      await recoverScopedRejectedCredential({ token: 'old-dev-token', authErrorCode: 'token_expired', httpStatus: 401 }, () => true)
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+      expect(replacement).not.toBeNull()
+      resolveBootstrap(new Response(JSON.stringify({ token: 'fresh-dev-token', actor: 'dashboard', role: 'admin' }), {
+        status: 200, headers: { 'Content-Type': 'application/json' },
+      }))
+      await replacement
+      expect(getStoredToken()).toBe('fresh-dev-token')
+    } finally { stop() }
+  })
+
   it('clears a current expired manual credential', async () => {
     setStoredToken('manual-token', { source: 'manual' })
     await recoverScopedRejectedCredential({ token: 'manual-token', authErrorCode: 'token_expired' }, () => true)

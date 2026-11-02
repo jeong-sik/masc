@@ -5,8 +5,8 @@ import { h } from 'preact'
 import { createGoal, showGoalCreate, resetGoalCreateForm, goalCreateError, goalCreating, goalCreateOutcomes, _testResetGoalCreateOutcomes } from './goal-create-state'
 import { GoalCreateForm, resetGoalCreateFormLocal } from './goal-create-form'
 import { executionWorkspaceAuthority } from '../../store'
-import { clearStoredToken, setStoredToken } from '../../api/core'
-import { resetDashboardSessionActorForTests, setCanonicalDashboardActor } from '../../lib/dashboard-session-actor'
+import { clearStoredToken, currentStoredTokenRevision, setStoredToken } from '../../api/core'
+import { recordManagedCredentialRefusal, resetDashboardSessionActorForTests, setCanonicalDashboardActor } from '../../lib/dashboard-session-actor'
 
 const api = vi.hoisted(() => ({
   callMcpToolAtIdentity: vi.fn(),
@@ -163,7 +163,7 @@ describe('GoalCreateForm side panel', () => {
       expected_workspace: { base_path: '/workspace-a', masc_root: '/workspace-a/.masc' },
       title: 'No dropped events', metric: 'dropped event count in 24h',
       target_value: '0', priority: 2,
-    }), { revision: expect.any(Number), actor: expect.any(String) }, expect.any(Function))
+    }), { revision: expect.any(Number), actor: expect.any(String) }, expect.any(Function), expect.any(Function), expect.any(Function))
     expect(showGoalCreate.value).toBe(false)
     expect(goalCreating.value).toBe(false)
     showGoalCreate.value = true
@@ -193,7 +193,7 @@ describe('GoalCreateForm side panel', () => {
     expect(api.callMcpToolAtIdentity).toHaveBeenLastCalledWith('masc_goal_upsert', expect.objectContaining({
       title: 'Verify continuity', metric: 'successful ten-turn runs',
       target_value: '47 successful runs of ten turns each', priority: 3,
-    }), expect.any(Object), expect.any(Function))
+    }), expect.any(Object), expect.any(Function), expect.any(Function), expect.any(Function))
   })
 
   it('does not send if the workspace or source changes during capture', async () => {
@@ -243,7 +243,7 @@ describe('GoalCreateForm side panel', () => {
     expect(api.refreshGoals).not.toHaveBeenCalled()
   })
 
-  it('keeps the same draft blocked when the managed actor is hydrated during creation', async () => {
+  it('keeps the same managed creation current when its actor is hydrated', async () => {
     setStoredToken('dev-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
     let resolveCreate!: (value: string) => void
     let sentId = ''
@@ -258,13 +258,95 @@ describe('GoalCreateForm side panel', () => {
     fireEvent.click(screen.getByTestId('goal-create-submit'))
     await waitFor(() => expect(api.callMcpToolAtIdentity).toHaveBeenCalledTimes(1))
     setCanonicalDashboardActor('dashboard')
-    await screen.findByTestId('goal-create-earlier-outcome')
+    await screen.findByTestId('goal-create-outcome')
     expect(screen.getByTestId('goal-create-submit')).toBeDisabled()
-    expect(screen.getByTestId('goal-create-earlier-outcome')).not.toHaveTextContent(sentId)
+    expect(screen.getByTestId('goal-create-outcome')).toHaveTextContent(sentId)
     resolveCreate(JSON.stringify({ status: 'ok', action: 'created', goal_id: sentId, goal: { id: sentId } }))
     await waitFor(() => expect(goalCreating.value).toBe(false))
-    expect(screen.getByTestId('goal-create-submit')).toBeDisabled()
+    expect(showGoalCreate.value).toBe(false)
+    expect(api.refreshGoals).toHaveBeenCalledOnce()
     expect(api.callMcpToolAtIdentity).toHaveBeenCalledTimes(1)
+  })
+
+  it('continues a managed creation when its actor is hydrated during the workspace read', async () => {
+    setStoredToken('dev-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
+    let resolveWorkspace!: (workspace: { basePath: string; mascRoot: string }) => void
+    api.captureArtifactWorkspace.mockImplementationOnce(() => new Promise(resolve => { resolveWorkspace = resolve }))
+    render(h(GoalCreateForm, ownedWorkspace))
+    fillField('goal-create-title-input', 'Managed workspace read')
+    fillField('goal-create-metric', 'metric')
+    fillField('goal-create-target', 'target')
+    fireEvent.click(screen.getByTestId('goal-create-submit'))
+    await waitFor(() => expect(api.captureArtifactWorkspace).toHaveBeenCalledTimes(1))
+    setCanonicalDashboardActor('dashboard')
+    resolveWorkspace({ basePath: '/workspace-a', mascRoot: '/workspace-a/.masc' })
+    await waitFor(() => expect(api.callMcpToolAtIdentity).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(showGoalCreate.value).toBe(false))
+    expect(api.refreshGoals).toHaveBeenCalledOnce()
+  })
+
+  it.each(['unverified', 'verified'] as const)('retires a managed creation after a %s credential is refused', async initial => {
+    setStoredToken('dev-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
+    if (initial === 'verified') setCanonicalDashboardActor('dashboard')
+    let resolveCreate!: (value: string) => void
+    let sentId = ''
+    api.callMcpToolAtIdentity.mockImplementationOnce((_name, args) => {
+      sentId = args.id
+      return new Promise(resolve => { resolveCreate = resolve })
+    })
+    render(h(GoalCreateForm, ownedWorkspace))
+    fillField('goal-create-title-input', 'Refused owner')
+    fillField('goal-create-metric', 'metric')
+    fillField('goal-create-target', 'target')
+    fireEvent.click(screen.getByTestId('goal-create-submit'))
+    await waitFor(() => expect(api.callMcpToolAtIdentity).toHaveBeenCalledTimes(1))
+    setCanonicalDashboardActor(null, { tokenRevision: currentStoredTokenRevision(), rejected: true })
+    await screen.findByTestId('goal-create-earlier-outcome')
+    resolveCreate(JSON.stringify({ status: 'ok', action: 'created', goal_id: sentId, goal: { id: sentId } }))
+    await waitFor(() => expect(goalCreating.value).toBe(false))
+    expect(showGoalCreate.value).toBe(true)
+    expect(screen.getByTestId('goal-create-earlier-outcome')).not.toHaveTextContent(sentId)
+    expect(screen.getByTestId('goal-create-submit')).toBeDisabled()
+    expect(api.refreshGoals).not.toHaveBeenCalled()
+  })
+
+  it('does not dispatch a new draft with a refused managed credential', async () => {
+    setStoredToken('dev-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
+    recordManagedCredentialRefusal(currentStoredTokenRevision())
+    render(h(GoalCreateForm, ownedWorkspace))
+    fillField('goal-create-title-input', 'New draft')
+    fillField('goal-create-metric', 'metric')
+    fillField('goal-create-target', 'target')
+    expect(screen.getByTestId('goal-create-submit')).toBeDisabled()
+    await expect(createGoal({ title: 'New draft', metric: 'metric', targetValue: 'target', priority: 3 })).resolves.toBe(false)
+    expect(api.callMcpToolAtIdentity).not.toHaveBeenCalled()
+  })
+
+  it.each(['same', 'different', 'retired'] as const)('checks the %s workspace before recovering a refused creation', async result => {
+    setStoredToken('dev-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
+    let view: 'current' | 'unconfirmed' = 'current'
+    let recovered = false
+    api.captureArtifactWorkspace.mockResolvedValueOnce({ basePath: '/workspace-a', mascRoot: '/workspace-a/.masc' })
+      .mockImplementationOnce(async () => {
+        if (result === 'retired') {
+          ;(executionWorkspaceAuthority as { value: unknown }).value =
+            { epoch: 'fixture-b', workspaceRoot: '/workspace-b', connectionGeneration: 2 }
+        }
+        return { basePath: '/workspace-a', mascRoot: result === 'different' ? '/different/.masc' : '/workspace-a/.masc' }
+      })
+    api.callMcpToolAtIdentity.mockImplementationOnce(async (_name, _args, _identity, _canSend, recoveryCurrent, waitForRecoveryCurrent) => {
+      recordManagedCredentialRefusal(currentStoredTokenRevision())
+      view = 'unconfirmed'
+      expect(recoveryCurrent()).toBe(false)
+      recovered = await waitForRecoveryCurrent()
+      expect(recoveryCurrent()).toBe(result === 'same')
+      throw new Error('refused')
+    })
+    await createGoal({ title: 'Recovery', metric: 'metric', targetValue: 'target', priority: 3 }, () => false, () => view)
+    expect(recovered).toBe(result === 'same')
+    expect(api.callMcpToolAtIdentity).toHaveBeenCalledTimes(1)
+    expect(api.captureArtifactWorkspace).toHaveBeenCalledTimes(2)
+    expect(api.refreshGoals).not.toHaveBeenCalled()
   })
 
   it('does not send to the captured root after the view moves under the same connection', async () => {

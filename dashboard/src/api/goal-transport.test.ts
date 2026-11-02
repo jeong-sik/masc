@@ -4,6 +4,7 @@ import { fetchDashboardGoalDetail, fetchDashboardGoalsTree } from './dashboard-g
 import { devTokenBootstrapStatus, ensureDevToken, installRejectedCredentialRecovery, resetDevTokenBootstrap } from './dev-token'
 import { callMcpTool, callMcpToolAtIdentity, mcpCallFailureDisposition, resetMcpClientState } from './mcp'
 import { DEFAULT_GET_TIMEOUT_MS, DEFAULT_MCP_TIMEOUT_MS } from '../config/constants'
+import { setCanonicalDashboardActor } from '../lib/dashboard-session-actor'
 
 vi.mock('./tool-host-failure', () => ({
   // A stuck diagnostics endpoint must not hold the original operation receipt.
@@ -95,6 +96,50 @@ it('recovers a current Goal MCP 401 without replaying the write', async () => {
   expect(await result).toBeInstanceOf(ApiRequestError)
   expect(getStoredToken()).toBeNull()
   expect(fetchMock).toHaveBeenCalledTimes(1)
+})
+
+it('does not treat a Goal tool error inside HTTP 200 as a refused credential', async () => {
+  setStoredToken('manual-test-token', { source: 'manual' })
+  const fetchMock = vi.fn(async (_path: string, init: RequestInit) => {
+    const { id } = JSON.parse(String(init.body))
+    return new Response(JSON.stringify({ id, result: { isError: true,
+      structuredContent: { auth_error_code: 'token_expired' }, content: [{ type: 'text', text: 'tool failed' }] } }),
+    { status: 200, headers: { 'Content-Type': 'application/json' } })
+  })
+  vi.stubGlobal('fetch', fetchMock)
+  await expect(callMcpToolAtIdentity('masc_goal_transition', { goal_id: 'goal-1' },
+    { revision: currentStoredTokenRevision(), actor: 'dashboard' }, () => true)).rejects.toThrow('tool failed')
+  expect(getStoredToken()).toBe('manual-test-token')
+  expect(fetchMock).toHaveBeenCalledTimes(1)
+})
+
+it('recovers a Goal MCP refusal after the same managed actor is hydrated', async () => {
+  setStoredToken('old-dev-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
+  let resolvePost!: (response: Response) => void
+  let markPostStarted!: () => void
+  const postStarted = new Promise<void>(resolve => { markPostStarted = resolve })
+  let tokenRequests = 0
+  const fetchMock = vi.fn((requestPath: string) => {
+    if (requestPath === '/mcp') {
+      markPostStarted()
+      return new Promise<Response>(resolve => { resolvePost = resolve })
+    }
+    tokenRequests += 1
+    return Promise.resolve(new Response(JSON.stringify({ token: tokenRequests === 1 ? 'old-dev-token' : 'fresh-dev-token',
+      actor: 'dashboard', role: 'admin' }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+  })
+  vi.stubGlobal('fetch', fetchMock)
+  const request = callMcpToolAtIdentity('masc_goal_transition', { goal_id: 'goal-1' },
+    { revision: currentStoredTokenRevision(), actor: 'dashboard' }, () => true).catch(error => error)
+  await postStarted
+  setCanonicalDashboardActor('dashboard')
+  resolvePost(new Response(JSON.stringify({ error: 'refused', auth_error_code: 'token_expired' }), {
+    status: 401, headers: { 'Content-Type': 'application/json' },
+  }))
+  expect(await request).toBeInstanceOf(ApiRequestError)
+  expect(getStoredToken()).toBe('fresh-dev-token')
+  expect(fetchMock.mock.calls.filter(([requestPath]) => requestPath === '/mcp')).toHaveLength(1)
+  expect(tokenRequests).toBe(2)
 })
 
 it('does not replay a generic MCP write when another owner replaces the dev credential during refresh', async () => {

@@ -58,7 +58,7 @@ const errorStatus = (error: unknown) => error instanceof ApiRequestError ? error
 const recoverRefusal = (error: unknown, token: string | null, isCurrent: () => boolean,
   waitForCurrent?: () => Promise<boolean>) =>
   error instanceof ApiRequestError && error.status === 401 && token
-    ? recoverScopedRejectedCredential({ token, authErrorCode: error.authErrorCode }, isCurrent, waitForCurrent)
+    ? recoverScopedRejectedCredential({ token, authErrorCode: error.authErrorCode, httpStatus: 401 }, isCurrent, waitForCurrent)
     : Promise.resolve()
 
 function anotherRequestPending(owner: ConfirmationOwner): boolean {

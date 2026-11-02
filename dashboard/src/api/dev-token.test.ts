@@ -136,6 +136,13 @@ describe('ensureDevToken', () => {
     expect(setStoredToken).not.toHaveBeenCalled()
   })
 
+  it('does not request a loopback development token from a remote browser', async () => {
+    isRemoteAccess.mockReturnValue(true)
+    await ensureDevToken()
+    expect(fetchWithTimeout).not.toHaveBeenCalled()
+    expect(setStoredToken).not.toHaveBeenCalled()
+  })
+
   it('requires an explicit bootstrap call after the server warm-up payload', async () => {
     fetchWithTimeout
       .mockResolvedValueOnce(jsonResponse({

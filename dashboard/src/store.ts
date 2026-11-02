@@ -45,6 +45,7 @@ import { sanitizeDashboardActorName } from './lib/dashboard-actor'
 import {
   captureDashboardCredentialOwner,
   dashboardCredentialOwnerIsCurrent,
+  getStoredTokenMeta,
   type DashboardCredentialOwner,
 } from './api/core'
 import { recoverFromRejectedCredential } from './api/dev-token'
@@ -914,7 +915,9 @@ export function hydrateShellSnapshot(
     const previousActor = currentCanonicalDashboardActor()
     const nextActor = sanitizeDashboardActorName(normalizedAuth?.token_valid
       ? normalizedAuth.effective_agent ?? normalizedAuth.token_agent : null)
-    setCanonicalDashboardActor(nextActor)
+    const managedAuth = before.token !== null && getStoredTokenMeta()?.source === 'dev' && normalizedAuth?.token_present
+      ? { tokenRevision: before.tokenRevision, rejected: !normalizedAuth.token_valid } : undefined
+    setCanonicalDashboardActor(nextActor, managedAuth)
     const after = captureDashboardCredentialOwner()
     // The actor reset above belongs to this response. A separate token or
     // actor change triggered by a subscriber must not inherit its refusal.

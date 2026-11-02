@@ -13,7 +13,9 @@ import { goalStoreUnavailable } from '../../goal-tree-state'
 import { goalStoreUnavailableSummary } from '../../lib/goal-store-unavailable-labels'
 import type { ArtifactWorkspace } from '../../api/published-artifacts'
 import { storedTokenRevision } from '../../api/token-revision'
-import { dashboardActorRevision } from '../../lib/dashboard-session-actor'
+import { dashboardActorRevision, managedDashboardActorRevision, managedDashboardAuthRevision,
+  managedDashboardRefusal } from '../../lib/dashboard-session-actor'
+import { getStoredToken, getStoredTokenMeta } from '../../api/core'
 import { executionWorkspaceAuthority } from '../../store'
 import type { GoalStoreUnavailable } from '../../types/goal-store-unavailable'
 import {
@@ -116,14 +118,18 @@ export function GoalCreateForm({ source, isStoreUnavailableNow, currentWorkspace
     : source.kind === 'unavailable' ? source.unavailable : null
   // The actor revision triggers a render even when no other signal changes.
   void dashboardActorRevision.value
+  void managedDashboardActorRevision.value
+  void managedDashboardAuthRevision.value
   void executionWorkspaceAuthority.value
   void storedTokenRevision.value
   const outcomes = goalCreateOutcomes.value
   const visibleOutcomes = outcomes.filter(goalCreateOutcomeIsCurrent)
   const earlierDraftOutcomes = outcomes.filter(outcome => outcome.draft === currentGoalCreateDraft()
     && !goalCreateOutcomeIsCurrent(outcome))
+  const managedRefused = getStoredToken() !== null && getStoredTokenMeta()?.source === 'dev'
+    && managedDashboardRefusal.value === storedTokenRevision.value
   const isSubmitDisabled = goalCreating.value || isTitleEmpty || isMetricEmpty || isTargetEmpty
-    || sourceUnavailable !== null || goalCreateDraftHasOutcome(outcomes)
+    || sourceUnavailable !== null || goalCreateDraftHasOutcome(outcomes) || managedRefused
   const error = goalCreateError.value
   const visibleError = error?.kind === 'uncertain'
     && !visibleOutcomes.some(outcome => outcome.ticket === error.ticket) ? null : error
@@ -254,6 +260,7 @@ export function GoalCreateForm({ source, isStoreUnavailableNow, currentWorkspace
           </div>
         ` : null}
 
+        ${managedRefused ? html`<p role="alert">인증이 거부되었습니다. 인증을 확인한 뒤 다시 시도해 주세요.</p>` : null}
         ${visibleOutcomes.map(outcome => html`
           <div key=${outcome.ticket} class="wk-goal-create-sec" role="status" data-testid="goal-create-outcome">
             <p>${outcome.state === 'pending' ? '목표 생성 요청을 처리 중입니다.'

@@ -12,7 +12,8 @@ import {
   setStoredToken,
   type RejectedCredential,
 } from './core'
-import { currentCanonicalDashboardActor, currentDashboardActorName, dashboardActorRevision } from '../lib/dashboard-session-actor'
+import { currentCanonicalDashboardActor, currentDashboardActorName, dashboardActorRevision, managedDashboardActorRevision,
+  recordManagedCredentialRefusal } from '../lib/dashboard-session-actor'
 
 const DEV_TOKEN_FETCH_TIMEOUT_MS = 3000
 
@@ -20,19 +21,27 @@ type TokenOwner = { token: string | null; revision: number; actor: string; actor
 type OwnedPromise<T> = { owner: TokenOwner; promise: Promise<T> }
 let devTokenBootstrapPromise: OwnedPromise<void> | null = null
 let devTokenRefreshPromise: OwnedPromise<boolean> | null = null
+let managedRecoveryAttempt: number | null = null
 let bootstrapGeneration = 0
 let bootstrapApplication: { generation: number; before: TokenOwner; after: TokenOwner } | null = null
 
 function tokenOwner(): TokenOwner {
   const token = getStoredToken()
+  const managed = token !== null && getStoredTokenMeta()?.source === 'dev'
   return { token, revision: currentStoredTokenRevision(), actor: currentDashboardActor(),
-    actorRevision: dashboardActorRevision.peek(), managed: token !== null && getStoredTokenMeta()?.source === 'dev' }
+    actorRevision: managed ? managedDashboardActorRevision.peek() : dashboardActorRevision.peek(), managed }
 }
 
 function sameTokenOwner(left: TokenOwner, right: TokenOwner): boolean {
   return left.token === right.token && left.revision === right.revision
-    && left.actor === right.actor && left.managed === right.managed
-    && (left.managed || left.actorRevision === right.actorRevision)
+    && left.actor === right.actor && left.managed === right.managed && left.actorRevision === right.actorRevision
+}
+
+function claimManagedRecovery(owner: TokenOwner): boolean {
+  if (!owner.managed) return true
+  if (managedRecoveryAttempt === owner.revision) return false
+  managedRecoveryAttempt = owner.revision
+  return true
 }
 
 /**
@@ -198,7 +207,7 @@ export async function ensureDevToken(): Promise<void> {
           token !== currentToken
           || currentMeta?.source !== 'dev'
         ) {
-          const actorRevisionBeforeSet = dashboardActorRevision.peek()
+          const actorRevisionBeforeSet = managedDashboardActorRevision.peek()
           const actorReset = currentCanonicalDashboardActor() === null ? 0 : 1
           setStoredToken(token, {
             source: 'dev',
@@ -294,6 +303,8 @@ export async function recoverFromRejectedCredential(
 ): Promise<void> {
   const owner = tokenOwner()
   if (owner.token !== rejection.token) return
+  if (owner.managed && isCredentialRejectionCode(rejection.authErrorCode)
+    && !isRemoteAccess() && !claimManagedRecovery(owner)) return
   if (await refreshDevTokenAfterAuthError(rejection.authErrorCode)) return
   if (!isCredentialRejectionCode(rejection.authErrorCode)) return
   if (!sameTokenOwner(owner, tokenOwner())) return
@@ -325,10 +336,20 @@ export async function recoverScopedRejectedCredential(
     resetDevTokenBootstrap()
     return bootstrapGeneration === resetGeneration && current()
   }
-  if (!current() || owner.token !== rejection.token) return
+  if (owner.token !== rejection.token) return
+  if (!current()) {
+    if (!waitForCurrent) return
+    try { if (!await waitForCurrent() || !current()) return } catch { return }
+  }
+  if (owner.managed && rejection.httpStatus === 401 && isCredentialRejectionCode(rejection.authErrorCode)) {
+    recordManagedCredentialRefusal(owner.revision)
+    if (!current()) return
+  }
   const meta = getStoredTokenMeta()
   let scopedGeneration: number | null = null
   if (isRefreshableDashboardAuthCode(rejection.authErrorCode) && !isRemoteAccess() && shouldRefreshDevToken()) {
+    if (owner.managed && rejection.httpStatus === 401 && isCredentialRejectionCode(rejection.authErrorCode)
+      && !claimManagedRecovery(owner)) return
     // A prior unscoped bootstrap must not publish after this recovery starts.
     const generation = bootstrapGeneration + 1
     resetDevTokenBootstrap()

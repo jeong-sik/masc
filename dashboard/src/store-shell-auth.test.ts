@@ -229,6 +229,45 @@ describe('rejected shell credential recovery', () => {
     })
   })
 
+  it('retires a managed owner once per newly observed shell rejection', async () => {
+    const core = await import('./api/core')
+    const actor = await import('./lib/dashboard-session-actor')
+    const store = await import('./store')
+    core.setStoredToken('dev-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
+    const revision = actor.managedDashboardActorRevision.peek()
+    const authRevision = actor.managedDashboardAuthRevision.peek()
+    const hydrate = (auth: Record<string, unknown>) => store.hydrateShellSnapshot(shellBody(auth), {
+      light: true, sentToken: 'dev-token', authOwner: core.captureDashboardCredentialOwner(),
+    })
+    hydrate(rejected)
+    expect(actor.managedDashboardActorRevision.peek()).toBe(revision + 1)
+    hydrate(rejected)
+    expect(actor.managedDashboardActorRevision.peek()).toBe(revision + 1)
+    hydrate({ ...rejected, token_valid: true, token_agent: 'dashboard', effective_agent: 'dashboard', auth_error_code: null })
+    expect(actor.managedDashboardActorRevision.peek()).toBe(revision + 1)
+    hydrate(rejected)
+    expect(actor.managedDashboardActorRevision.peek()).toBe(revision + 2)
+    expect(actor.managedDashboardAuthRevision.peek()).toBe(authRevision + 1)
+    expect(actor.managedDashboardRefusal.peek()).toBe(core.currentStoredTokenRevision())
+  })
+
+  it('does not hydrate an older valid shell response after the credential is refused', async () => {
+    const core = await import('./api/core')
+    const actor = await import('./lib/dashboard-session-actor')
+    const store = await import('./store')
+    core.setStoredToken('dev-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
+    let resolveShell!: (value: unknown) => void
+    apiMocks.fetchDashboardShell.mockImplementationOnce(() => new Promise(resolve => { resolveShell = resolve }))
+    const pending = store.refreshShell({ force: true })
+    await vi.waitFor(() => expect(apiMocks.fetchDashboardShell).toHaveBeenCalledOnce())
+    actor.recordManagedCredentialRefusal(core.currentStoredTokenRevision())
+    resolveShell(shellBody({ ...rejected, token_valid: true, token_agent: 'dashboard', effective_agent: 'dashboard', auth_error_code: null }))
+    expect(await pending).toBe(false)
+    expect(actor.currentCanonicalDashboardActor()).toBeNull()
+    expect(actor.managedDashboardRefusal.peek()).toBe(core.currentStoredTokenRevision())
+    expect(store.shellAuthSummary.peek()).toBeNull()
+  })
+
   it('does not recover or hydrate auth from a shell response for a changed credential', async () => {
     const core = await import('./api/core')
     core.setStoredToken('sent-token', { source: 'manual' })

@@ -2,11 +2,12 @@
 
 import { signal } from '@preact/signals'
 import { v4 as randomUuid } from 'uuid'
-import { currentDashboardActor } from '../../api/core'
+import { currentDashboardActor, getStoredToken, getStoredTokenMeta } from '../../api/core'
 import { callMcpToolAtIdentity, mcpCallFailureDisposition, mcpStructuredContentFromError } from '../../api/mcp'
 import { artifactWorkspaceBody, captureArtifactWorkspace, type ArtifactWorkspace } from '../../api/published-artifacts'
 import { storedTokenRevision } from '../../api/token-revision'
-import { dashboardActorRevision } from '../../lib/dashboard-session-actor'
+import { dashboardActorRevision, managedDashboardActorRevision, managedDashboardAuthRevision,
+  managedDashboardRefusal } from '../../lib/dashboard-session-actor'
 import { executionWorkspaceAuthority, refreshGoals, type ExecutionWorkspaceAuthority } from '../../store'
 import { isRecord } from '../common/normalize'
 import { showToast } from '../common/toast'
@@ -38,6 +39,8 @@ type GoalCreateOutcome = {
   authRevision: number
   actor: string
   actorRevision: number
+  managed: boolean
+  managedAuthRevision: number
   workspace: ArtifactWorkspace
   goalId: string
   state: 'pending' | 'created' | 'uncertain'
@@ -50,7 +53,11 @@ let creationTicket = 0
 export function goalCreateOutcomeIsCurrent(outcome: GoalCreateOutcome): boolean {
   return outcome.authority === executionWorkspaceAuthority.peek()
     && outcome.authRevision === storedTokenRevision.peek() && outcome.actor === currentDashboardActor()
-    && outcome.actorRevision === dashboardActorRevision.peek()
+    && (outcome.managed ? getStoredToken() !== null && getStoredTokenMeta()?.source === 'dev'
+      && outcome.actorRevision === managedDashboardActorRevision.peek()
+      && outcome.managedAuthRevision === managedDashboardAuthRevision.peek()
+      && managedDashboardRefusal.peek() !== outcome.authRevision
+      : outcome.actorRevision === dashboardActorRevision.peek())
 }
 
 export function goalCreateDraftHasOutcome(outcomes: readonly GoalCreateOutcome[]): boolean {
@@ -125,11 +132,21 @@ export async function createGoal(input: GoalCreateInput, isStoreUnavailableNow: 
   }
   const authRevision = storedTokenRevision.peek()
   const actor = currentDashboardActor()
-  const actorRevision = dashboardActorRevision.peek()
+  const managed = getStoredToken() !== null && getStoredTokenMeta()?.source === 'dev'
+  const actorRevision = managed ? managedDashboardActorRevision.peek() : dashboardActorRevision.peek()
+  const managedAuthRevision = managedDashboardAuthRevision.peek()
   const sameConnection = () => executionWorkspaceAuthority.peek() === authority
     && storedTokenRevision.peek() === authRevision && currentDashboardActor() === actor
-    && dashboardActorRevision.peek() === actorRevision
-  const canDispatch = () => owner === draftToken && sameConnection() && !isStoreUnavailableNow()
+    && (managed ? getStoredToken() !== null && getStoredTokenMeta()?.source === 'dev'
+      && managedDashboardActorRevision.peek() === actorRevision
+      : dashboardActorRevision.peek() === actorRevision)
+  const decisionCurrent = () => sameConnection() && (!managed
+    || (managedDashboardAuthRevision.peek() === managedAuthRevision && managedDashboardRefusal.peek() !== authRevision))
+  if (!decisionCurrent()) {
+    goalCreateError.value = { kind: 'submit', message: '인증이 거부되었습니다. 인증을 확인한 뒤 다시 시도해 주세요.' }
+    return false
+  }
+  const canDispatch = () => owner === draftToken && decisionCurrent() && !isStoreUnavailableNow()
   goalCreating.value = true
   goalCreateError.value = null
   let outcome: GoalCreateOutcome | null = null
@@ -143,19 +160,35 @@ export async function createGoal(input: GoalCreateInput, isStoreUnavailableNow: 
       return false
     }
     const goalId = `goal-${randomUuid()}`
-    outcome = { ticket: ++creationTicket, draft: owner, authority, authRevision, actor, actorRevision, workspace, goalId, state: 'pending' }
+    outcome = { ticket: ++creationTicket, draft: owner, authority, authRevision, actor, actorRevision, managed,
+      managedAuthRevision, workspace, goalId, state: 'pending' }
     setOutcome(outcome)
+    let recoveryWorkspace: ArtifactWorkspace | null = null
+    const recoveryBaseCurrent = () => owner === draftToken && sameConnection()
+      && workspaceView(workspace) !== 'different' && !isStoreUnavailableNow()
+    const recoveryCurrent = () => recoveryBaseCurrent() && (workspaceView(workspace) === 'current'
+      || (recoveryWorkspace !== null && recoveryWorkspace.basePath === workspace.basePath
+        && recoveryWorkspace.mascRoot === workspace.mascRoot))
+    const waitForRecoveryCurrent = async () => {
+      if (!recoveryBaseCurrent()) return false
+      try {
+        const observed = await captureArtifactWorkspace(authority.workspaceRoot, undefined, { reportCredentialRefusal: false })
+        if (!recoveryBaseCurrent() || observed.basePath !== workspace.basePath || observed.mascRoot !== workspace.mascRoot) return false
+        recoveryWorkspace = observed
+        return true
+      } catch { return false }
+    }
     const response = await callMcpToolAtIdentity('masc_goal_upsert', {
       id: goalId, if_absent: true, expected_workspace: artifactWorkspaceBody(workspace),
       title: trimmedTitle, metric, target_value: targetValue, priority: input.priority,
-    }, { revision: authRevision, actor }, canSend)
+    }, { revision: authRevision, actor }, canSend, recoveryCurrent, waitForRecoveryCurrent)
     const parsed: unknown = JSON.parse(response)
     if (!isRecord(parsed) || parsed.status !== 'ok' || parsed.action !== 'created'
       || parsed.goal_id !== goalId || !isRecord(parsed.goal) || parsed.goal.id !== goalId) {
       throw new Error('Goal creation response does not match the request')
     }
     setOutcome({ ...outcome, state: 'created' })
-    const sameWorkspaceView = sameConnection() && workspaceView(workspace) === 'current'
+    const sameWorkspaceView = decisionCurrent() && workspaceView(workspace) === 'current'
     if (sameWorkspaceView) {
       if (owner === draftToken) {
         showToast('서버가 목표 생성 요청에 응답했습니다.', 'success')
@@ -171,14 +204,14 @@ export async function createGoal(input: GoalCreateInput, isStoreUnavailableNow: 
     const refusal = disposition === 'known_tool_response' ? goalCreateRefusal(err) : null
     if (outcome && disposition !== 'known_pre_effect' && !refusal) {
       setOutcome({ ...outcome, state: 'uncertain' })
-      if (owner === draftToken && sameConnection()) {
+      if (owner === draftToken && decisionCurrent()) {
         goalCreateError.value = { kind: 'uncertain',
           message: '생성 결과를 확인하지 못했습니다. 중복 생성을 피하려면 요청한 작업 공간에서 결과를 확인해 주세요.',
           ticket: outcome.ticket }
       }
     } else {
       if (outcome) goalCreateOutcomes.value = goalCreateOutcomes.peek().filter(item => item.ticket !== outcome?.ticket)
-      if (owner === draftToken && sameConnection()) {
+      if (owner === draftToken && decisionCurrent()) {
         goalCreateError.value = { kind: 'submit', message: (outcome && workspaceView(outcome.workspace) === 'current' ? refusal?.message : null)
           ?? '생성 전에 요청이 거절되었습니다. 작업 공간과 입력을 확인해 주세요.' }
       }

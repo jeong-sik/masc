@@ -13,6 +13,10 @@ import {
   currentCanonicalDashboardActor,
   currentDashboardActorName,
   dashboardActorRevision,
+  managedDashboardActorRevision,
+  managedDashboardAuthRevision,
+  managedDashboardRefusal,
+  recordManagedCredentialRefusal,
   setCanonicalDashboardActor,
 } from '../lib/dashboard-session-actor'
 
@@ -173,9 +177,24 @@ export function clearStoredToken(): void {
   }
 }
 
+export function isLoopbackHostname(hostname: string): boolean {
+  if (hostname === 'localhost' || hostname === '::1' || hostname === '[::1]') return true
+  const octets = hostname.split('.')
+  if (octets.length === 4 && octets.every(part => part !== '' && Number.isInteger(Number(part))
+    && String(Number(part)) === part && Number(part) >= 0 && Number(part) <= 255)) return Number(octets[0]) === 127
+  // URL.hostname canonicalizes IPv4-mapped IPv6 into two hexadecimal words.
+  const host = hostname.startsWith('[') && hostname.endsWith(']') ? hostname.slice(1, -1) : hostname
+  if (!host.startsWith('::ffff:')) return false
+  const words = host.slice('::ffff:'.length).split(':')
+  if (words.length !== 2 || words.some(word => word.length === 0 || word.length > 4)) return false
+  const first = Number(`0x${words[0]}`)
+  const second = Number(`0x${words[1]}`)
+  return Number.isInteger(first) && first >= 0x7f00 && first <= 0x7fff
+    && Number.isInteger(second) && second >= 0 && second <= 0xffff
+}
+
 export function isRemoteAccess(): boolean {
-  const host = window.location.hostname
-  return host !== 'localhost' && host !== '127.0.0.1' && host !== '::1'
+  return !isLoopbackHostname(window.location.hostname)
 }
 
 export function currentDashboardActor(): string {
@@ -193,14 +212,19 @@ export interface DashboardCredentialOwner {
   tokenRevision: number
   actor: string
   actorRevision: number
+  managed: boolean
+  managedAuthRevision: number
 }
 
 export function captureDashboardCredentialOwner(): DashboardCredentialOwner {
+  const token = dashboardBearerToken()
   return {
-    token: dashboardBearerToken(),
+    token,
     tokenRevision: currentStoredTokenRevision(),
     actor: currentDashboardActor(),
     actorRevision: dashboardActorRevision.peek(),
+    managed: token !== null && getStoredTokenMeta()?.source === 'dev',
+    managedAuthRevision: managedDashboardAuthRevision.peek(),
   }
 }
 
@@ -209,6 +233,7 @@ export function dashboardCredentialOwnerIsCurrent(owner: DashboardCredentialOwne
     && owner.tokenRevision === currentStoredTokenRevision()
     && owner.actor === currentDashboardActor()
     && owner.actorRevision === dashboardActorRevision.peek()
+    && (!owner.managed || owner.managedAuthRevision === managedDashboardAuthRevision.peek())
 }
 
 type HeaderOptions = {
@@ -340,6 +365,7 @@ export function extractApiError(err: unknown, fallbackMessage: string): ApiError
 export interface RejectedCredential {
   token: string
   authErrorCode: string | undefined
+  httpStatus?: number
 }
 
 type RejectedCredentialListener = (rejection: RejectedCredential) => void
@@ -367,6 +393,8 @@ async function reportRejectedCredential(
   init: RequestInit,
   response: Response,
   owner: DashboardCredentialOwner,
+  managed: boolean,
+  managedRevision: number,
 ): Promise<void> {
   const listener = rejectedCredentialListener
   if (response.status !== 401 || listener === null) return
@@ -375,8 +403,23 @@ async function reportRejectedCredential(
   // Cloned before this function first awaits, so the caller still owns the
   // original body.
   const info = await errorResponseInfoFromResponse(response.clone())
-  if (!dashboardCredentialOwnerIsCurrent(owner)) return
-  listener({ token, authErrorCode: info.authErrorCode })
+  const managedStillCurrent = managed && owner.token === dashboardBearerToken()
+    && owner.tokenRevision === currentStoredTokenRevision()
+    && getStoredTokenMeta()?.source === 'dev' && owner.actor === currentDashboardActor()
+    && managedRevision === managedDashboardActorRevision.peek()
+    && owner.managedAuthRevision === managedDashboardAuthRevision.peek()
+  if (managed ? !managedStillCurrent : !dashboardCredentialOwnerIsCurrent(owner)) return
+  if (managed && (info.authErrorCode === 'invalid_token' || info.authErrorCode === 'token_expired')) {
+    const expectedAuthRevision = managedDashboardAuthRevision.peek()
+      + (managedDashboardRefusal.peek() === owner.tokenRevision ? 0 : 1)
+    recordManagedCredentialRefusal(owner.tokenRevision)
+    if (owner.token !== dashboardBearerToken() || owner.tokenRevision !== currentStoredTokenRevision()
+      || getStoredTokenMeta()?.source !== 'dev' || owner.actor !== currentDashboardActor()
+      || managedRevision !== managedDashboardActorRevision.peek()
+      || managedDashboardAuthRevision.peek() !== expectedAuthRevision
+      || rejectedCredentialListener !== listener) return
+  }
+  listener({ token, authErrorCode: info.authErrorCode, httpStatus: 401 })
 }
 
 type CredentialedRequestInit = RequestInit & { reportCredentialRefusal?: boolean }
@@ -384,8 +427,10 @@ type CredentialedRequestInit = RequestInit & { reportCredentialRefusal?: boolean
 async function credentialedFetch(path: string, init: CredentialedRequestInit): Promise<Response> {
   const { reportCredentialRefusal = true, ...requestInit } = init
   const owner = captureDashboardCredentialOwner()
+  const managed = owner.token !== null && getStoredTokenMeta()?.source === 'dev'
+  const managedRevision = managedDashboardActorRevision.peek()
   const response = await fetch(path, requestInit)
-  if (reportCredentialRefusal) void reportRejectedCredential(requestInit, response, owner).catch(err => {
+  if (reportCredentialRefusal) void reportRejectedCredential(requestInit, response, owner, managed, managedRevision).catch(err => {
     console.warn('[dashboard-auth] rejected credential listener failed', err)
   })
   return response

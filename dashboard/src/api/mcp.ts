@@ -24,7 +24,7 @@ import {
 } from './tool-host-failure'
 import { showActionToast } from '../components/common/toast'
 import { errorToString } from '../lib/format-string'
-import { dashboardActorRevision } from '../lib/dashboard-session-actor'
+import { dashboardActorRevision, managedDashboardActorRevision, managedDashboardRefusal } from '../lib/dashboard-session-actor'
 
 const MCP_PROTOCOL_VERSION = '2026-07-28'
 const MCP_BLOCKED_MESSAGE = 'MCP 연결이 차단되었습니다.'
@@ -397,6 +397,8 @@ async function callMcpToolInternal(
   allowAuthRecovery = true,
   expectedIdentity?: { revision: number; actor: string },
   isCurrent?: () => boolean,
+  recoveryIsCurrent?: () => boolean,
+  waitForRecoveryCurrent?: () => Promise<boolean>,
 ): Promise<string> {
   const requestId = randomUuid()
   synchronizeMcpAuthRevision()
@@ -404,12 +406,19 @@ async function callMcpToolInternal(
   let sentToken: string | null = null
   let sentActorRevision: number | null = null
   let sentRevision: number | null = null
+  let sentManagedDev = false
+  const sentActorIsCurrent = () => sentManagedDev
+    ? getStoredToken() === sentToken && getStoredTokenMeta()?.source === 'dev'
+      && managedDashboardActorRevision.peek() === sentActorRevision
+    : dashboardActorRevision.peek() === sentActorRevision
   try {
     const binding = await ensureBinding(expectedIdentity !== undefined)
     if (expectedIdentity && (binding.authRevision !== expectedIdentity.revision
       || (getStoredToken() === null && currentDashboardActor() !== expectedIdentity.actor))) {
       throw new McpPreDispatchIdentityChangedError()
     }
+    if (expectedIdentity && getStoredToken() !== null && getStoredTokenMeta()?.source === 'dev'
+      && managedDashboardRefusal.peek() === binding.authRevision) throw new McpPreDispatchIdentityChangedError()
     // ensureBinding may install the loopback dev credential, so classify
     // identity authority only after it returns. Never let a caller-supplied
     // transport hint override the credential used by this request.
@@ -429,8 +438,9 @@ async function callMcpToolInternal(
     })()
     if (isCurrent && !isCurrent()) throw new McpPreDispatchIdentityChangedError()
     sentToken = getStoredToken()
-    sentActorRevision = dashboardActorRevision.peek()
     sentRevision = binding.authRevision
+    sentManagedDev = sentToken !== null && getStoredTokenMeta()?.source === 'dev'
+    sentActorRevision = sentManagedDev ? managedDashboardActorRevision.peek() : dashboardActorRevision.peek()
     const text = await mcpPost({
       jsonrpc: '2.0',
       method: 'tools/call',
@@ -452,18 +462,22 @@ async function callMcpToolInternal(
       allowAuthRecovery
       && explicitActor === null
       && sentRevision !== null && currentStoredTokenRevision() === sentRevision
-      && dashboardActorRevision.peek() === sentActorRevision
+      && sentActorIsCurrent()
       && await refreshDevTokenAfterAuthError(authErrorCode)
     ) {
       observedTokenRevision = currentStoredTokenRevision()
       return callMcpToolInternal(toolName, args, false)
     }
-    if (!allowAuthRecovery && expectedIdentity && isCurrent && explicitActor === null && sentToken) {
+    const recoveryCurrent = recoveryIsCurrent ?? isCurrent
+    const scopedAuthRefusal = (err instanceof ApiRequestError && err.status === 401)
+      || (err instanceof McpToolCallError && authErrorCode === 'actor_mismatch')
+    if (!allowAuthRecovery && expectedIdentity && recoveryCurrent && explicitActor === null && sentToken
+      && scopedAuthRefusal) {
       const token = sentToken
-      const actorRevision = sentActorRevision
-      await recoverScopedRejectedCredential({ token, authErrorCode: typeof authErrorCode === 'string' ? authErrorCode : undefined }, () =>
-        isCurrent() && currentStoredTokenRevision() === expectedIdentity.revision
-        && dashboardActorRevision.peek() === actorRevision)
+      await recoverScopedRejectedCredential({ token, authErrorCode: typeof authErrorCode === 'string' ? authErrorCode : undefined,
+        httpStatus: err instanceof ApiRequestError ? err.status : undefined }, () =>
+        recoveryCurrent() && currentStoredTokenRevision() === expectedIdentity.revision
+        && sentActorIsCurrent(), waitForRecoveryCurrent)
     }
     const message = errorToString(err)
     const failure = toolHostFailureObservation(err)
@@ -491,8 +505,10 @@ export async function callMcpToolAtIdentity(
   args: Record<string, unknown>,
   expectedIdentity: { revision: number; actor: string },
   isCurrent?: () => boolean,
+  recoveryIsCurrent?: () => boolean,
+  waitForRecoveryCurrent?: () => Promise<boolean>,
 ): Promise<string> {
-  return callMcpToolInternal(toolName, args, false, expectedIdentity, isCurrent)
+  return callMcpToolInternal(toolName, args, false, expectedIdentity, isCurrent, recoveryIsCurrent, waitForRecoveryCurrent)
 }
 
 // --- MCP tools/list — fetch tool schemas with inputSchema ---

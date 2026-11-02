@@ -113,8 +113,8 @@ it.each([401, 403])('does not authorize restored evidence when the current crede
   _testResetTaskCreateState({ preserveStorage: true })
   await recheckTaskCreation(requestId)
   expect(taskCreateReceipts.attempts.peek()[0]).toMatchObject({ originalCurrent: false, latestReadCurrent: false,
-    latestReadFailureCurrent: true, original: { kind: 'created', taskId: 'task-private' },
-    reads: [{ kind: 'error', reason: 'lookup_failed' }] })
+    latestReadFailureCurrent: status === 403, original: { kind: 'created', taskId: 'task-private' },
+    reads: status === 403 ? [{ kind: 'error', reason: 'lookup_failed' }] : [] })
   expect(fetchMock.mock.calls.filter(([url]) => url === '/mcp')).toHaveLength(2)
 })
 

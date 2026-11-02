@@ -111,7 +111,8 @@ export type TaskCreateObserveResult =
   | { readonly kind: 'not_found' | 'owner_unavailable' | 'workspace_mismatch' | 'already_checking' | 'stale' | 'disposed' }
 
 type ReceiptStorage = Pick<Storage, 'getItem' | 'setItem'>
-type ReceiptLookup = (owner: TaskReceiptOwner, requestId: string, isCurrent: () => boolean) => Promise<string>
+type ReceiptLookup = (owner: TaskReceiptOwner, requestId: string, isCurrent: () => boolean,
+  onUnauthorized: () => void) => Promise<string>
 
 export interface TaskCreateReceiptStore {
   readonly attempts: ReadonlySignal<readonly TaskCreateAttempt[]>
@@ -128,9 +129,12 @@ export interface TaskCreateReceiptStore {
   readonly forgetDefinite: (requestId: string, confirmResolvedNegative?: boolean) => boolean
   /** A request-specific lease also covers the workspace health preflight. */
   readonly beginCheck: (requestId: string) => symbol | null
+  readonly isCheckCurrent: (requestId: string, check: symbol) => boolean
+  readonly failCheck: (requestId: string, check: symbol) => void
   readonly endCheck: (requestId: string, check: symbol) => void
   /** A deliberate read only. No creation or lookup request is replayed. */
-  readonly observe: (requestId: string, check?: symbol) => Promise<TaskCreateObserveResult>
+  readonly observe: (requestId: string, check?: symbol,
+    onUnauthorized?: (owner: TaskReceiptOwner) => void) => Promise<TaskCreateObserveResult>
   readonly retryStorage: () => boolean
   /** Explicitly remove presented/definite records and redundant identical read errors. */
   readonly compact: () => { readonly removedAttempts: number; readonly removedErrors: number;
@@ -350,9 +354,9 @@ function browserSessionStorage(): ReceiptStorage | null {
   try { return globalThis.sessionStorage ?? null } catch { return null }
 }
 
-const defaultLookup: ReceiptLookup = (owner, requestId, isCurrent) =>
+const defaultLookup: ReceiptLookup = (owner, requestId, isCurrent, onUnauthorized) =>
   callMcpTaskReceiptAtIdentity({ creation_request_id: requestId,
-    expected_workspace: artifactWorkspaceBody(owner.workspace) }, owner.identity, isCurrent)
+    expected_workspace: artifactWorkspaceBody(owner.workspace) }, owner.identity, isCurrent, onUnauthorized)
 
 export function createTaskCreateReceiptStore(options: {
   readonly owner: ReadonlySignal<TaskReceiptOwner | null>
@@ -502,13 +506,24 @@ export function createTaskCreateReceiptStore(options: {
     return check
   }
   const beginCheck = (requestId: string): symbol | null => startCheck(requestId, true)
+  const isCheckCurrent = (requestId: string, check: symbol): boolean => !disposed && checks.get(requestId)?.token === check
+  const failCheck = (requestId: string, check: symbol): void => {
+    if (!isCheckCurrent(requestId, check)) return
+    const item = attempts.peek().find(attempt => attempt.requestId === requestId)
+    const owner = options.owner.peek()
+    if (!item || !owner || !sameWorkspace(owner.workspace, item.workspace)
+      || !ownerGuard(owner, ownerEpoch, item.workspace, owner.identity)()) return
+    attempts.value = attempts.peek().map(attempt => attempt.requestId === requestId
+      ? { ...attempt, latestReadCurrent: false, latestReadFailureCurrent: true } : attempt)
+  }
   const endCheck = (requestId: string, check: symbol): void => {
     if (checks.get(requestId)?.token !== check) return
     checks.delete(requestId)
     attempts.value = attempts.peek().map(item => item.requestId === requestId ? { ...item, checking: false } : item)
   }
 
-  const observe = async (requestId: string, preflight?: symbol): Promise<TaskCreateObserveResult> => {
+  const observe = async (requestId: string, preflight?: symbol,
+    onUnauthorized?: (owner: TaskReceiptOwner) => void): Promise<TaskCreateObserveResult> => {
     if (disposed) return { kind: 'disposed' }
     const check = preflight ?? startCheck(requestId, false)
     if (!check || checks.get(requestId)?.token !== check) return { kind: 'already_checking' }
@@ -531,7 +546,9 @@ export function createTaskCreateReceiptStore(options: {
       }
       let result: TaskCreationRead
       try {
-        const raw = await lookup(owner, requestId, isCurrent)
+        const raw = await lookup(owner, requestId, isCurrent, () => {
+          if (isCurrent()) onUnauthorized?.(owner)
+        })
         if (!isCurrent()) return { kind: 'stale' }
         result = decodeTaskCreationReceipt(raw, requestId, existing.workspace) ?? { kind: 'error', reason: 'invalid_response' }
       } catch {
@@ -608,5 +625,5 @@ export function createTaskCreateReceiptStore(options: {
   }
 
   return { attempts, storageState, reserve, reserveMemoryOnly, settleOriginal, markPresented, forgetDefinite,
-    beginCheck, endCheck, observe, retryStorage, compact, dispose }
+    beginCheck, isCheckCurrent, failCheck, endCheck, observe, retryStorage, compact, dispose }
 }

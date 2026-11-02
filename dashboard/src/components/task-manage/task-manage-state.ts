@@ -136,7 +136,9 @@ effect(() => {
   if (current && !current.isCurrent()) retireReceiptOwner()
 })
 
-async function verifyReceiptOwner(expected?: ArtifactWorkspace, preflightCurrent: () => boolean = () => true): Promise<TaskReceiptOwner | null> {
+async function verifyReceiptOwner(expected?: ArtifactWorkspace, preflightCurrent: () => boolean = () => true,
+  onForbidden: () => void = () => {}):
+Promise<{ owner: TaskReceiptOwner; ticket: number } | null> {
   const ticket = ++receiptHealthTicket
   const authority = executionWorkspaceAuthority.peek()
   if (!authority && !expected) {
@@ -155,14 +157,22 @@ async function verifyReceiptOwner(expected?: ArtifactWorkspace, preflightCurrent
   let invalidationEpoch = receiptInvalidationEpoch
   const connectionCurrent = () => executionWorkspaceAuthority.peek() === authority && executionWorkspaceRevision.peek() === workspaceRevision
     && receiptAuthorityEpoch === authorityEpoch && preflightCurrent()
-    && currentStoredTokenRevision() === revision
+    && currentStoredTokenRevision() === revision && getStoredToken() === token
     && currentDashboardActor() === actor
     && (managed ? getStoredToken() === token && getStoredTokenMeta()?.source === 'dev'
       && managedDashboardActorRevision.peek() === actorVersion && managedDashboardAuthRevision.peek() === managedAuthVersion
       : dashboardActorRevision.peek() === actorVersion)
   const current = () => connectionCurrent() && receiptInvalidationEpoch === invalidationEpoch
+  let healthStatus: number | null = null
   try {
-    const workspace = await observeReceiptWorkspace()
+    const workspace = await observeReceiptWorkspace(status => {
+      healthStatus = status
+      if (status !== 401 || !current() || !ownerAtStart
+        || receiptOwner.peek() !== ownerAtStart || !ownerAtStart.isCurrent()) return
+      latestReceiptHealth = { ticket: Math.max(ticket, latestReceiptHealth?.ticket ?? ticket), workspace: null }
+      retireReceiptOwner()
+      showToast('인증이 거부되어 이전 요청의 표시를 숨겼습니다.', 'warning')
+    })
     if (!connectionCurrent()) return null
     const sameWorkspace = (other: ArtifactWorkspace) => workspace.basePath === other.basePath && workspace.mascRoot === other.mascRoot
     const existing = receiptOwner.peek()
@@ -199,10 +209,12 @@ async function verifyReceiptOwner(expected?: ArtifactWorkspace, preflightCurrent
       showToast('현재 인증과 작업 공간을 다시 확인해 주세요.', 'warning')
       return null
     }
-    return owner
+    return { owner, ticket }
   } catch {
     if (current()) {
-      if (!latestReceiptHealth || ticket >= latestReceiptHealth.ticket) {
+      if (healthStatus === 403) onForbidden()
+      if (healthStatus !== 401 && healthStatus !== 403 && ticket === receiptHealthTicket
+        && (!latestReceiptHealth || ticket >= latestReceiptHealth.ticket)) {
         latestReceiptHealth = { ticket, workspace: null }
         retireReceiptOwner()
       }
@@ -220,9 +232,16 @@ export async function recheckTaskCreation(requestId: string): Promise<void> {
   const check = receipts.beginCheck(requestId)
   if (!check) return
   try {
-    if (!await verifyReceiptOwner(attempt.workspace, () => taskCreateReceipts === receipts
-      && receipts.attempts.peek().some(item => item.requestId === requestId && item.checking))) return
-    const result = await receipts.observe(requestId, check)
+    const verified = await verifyReceiptOwner(attempt.workspace, () => taskCreateReceipts === receipts
+      && receipts.isCheckCurrent(requestId, check), () => receipts.failCheck(requestId, check))
+    if (!verified) return
+    const result = await receipts.observe(requestId, check, owner => {
+      if (owner !== verified.owner || receiptOwner.peek() !== owner || !owner.isCurrent()
+        || !receipts.isCheckCurrent(requestId, check)) return
+      latestReceiptHealth = { ticket: Math.max(verified.ticket, latestReceiptHealth?.ticket ?? verified.ticket), workspace: null }
+      retireReceiptOwner()
+      showToast('인증이 거부되어 이전 요청의 표시를 숨겼습니다.', 'warning')
+    })
     if (result.kind === 'owner_unavailable' || result.kind === 'workspace_mismatch' || result.kind === 'stale') {
       showToast('현재 인증과 작업 공간을 다시 확인해 주세요.', 'warning')
     }
@@ -409,7 +428,7 @@ export async function createTask(input: TaskCreateInput, goalDispatch?: GoalTask
       return false
     }
     receipts.settleOriginal(reservation.requestId, created)
-    if (!dispatch.isCurrent()) {
+    if (!dispatch.isCurrent() || !reservation.isCurrent()) {
       showToast('이전 요청의 태스크 생성 응답이 도착했습니다. 요청한 workspace에서 결과를 확인해 주세요.', 'warning')
       return true
     }

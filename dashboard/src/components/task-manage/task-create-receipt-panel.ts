@@ -49,8 +49,9 @@ export function TaskCreateReceiptsPanel() {
       return html`<div key=${attempt.requestId} role="status" class="mt-2 text-xs text-text-muted">
         <p>요청 ${index + 1}${canShow ? ` · ${attempt.requestId} · ${attempt.createdAt}${attempt.goalId ? ` · Goal ${attempt.goalId}` : ''}` : ''}</p>
         <p>${attemptText(attempt, canShow)}</p>
-        ${sameOwner && !attempt.checking && attempt.latestReadFailureCurrent && latestRead?.kind === 'error'
-          ? html`<p>${readText(latestRead)}</p>` : null}
+        ${sameOwner && !attempt.checking && attempt.latestReadFailureCurrent
+          ? html`<p>${latestRead?.kind === 'error' ? readText(latestRead)
+            : '생성 기록을 확인하지 못했습니다. 원래 요청의 결과는 그대로 보관합니다.'}</p>` : null}
         ${canShow && attempt.latestReadCurrent && attempt.reads.length > 0 ? html`<ol>
           ${attempt.reads.map((read, readIndex) => html`<li key=${readIndex}>${readText(read)}</li>`)}
         </ol>` : null}

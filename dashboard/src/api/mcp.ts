@@ -456,6 +456,7 @@ async function callMcpToolInternal(
   waitForRecoveryCurrent?: () => Promise<boolean>,
   taskCapture?: TaskCreationCapture,
   strictTaskResult = false,
+  onReceiptUnauthorized?: () => void,
 ): Promise<string> {
   const requestId = randomUuid()
   let explicitActor: string | null = null
@@ -520,8 +521,13 @@ async function callMcpToolInternal(
       id: requestId,
     }, binding, DEFAULT_MCP_TIMEOUT_MS, actor, expectedIdentity !== undefined, () => {
       const headerCurrent = recoveryIsCurrent ?? isCurrent
+      const current = expectedIdentity && sentWorkspace && sentRevision === expectedIdentity.revision
+        && currentStoredTokenRevision() === sentRevision && sentActorIsCurrent() && headerCurrent && headerCurrent()
+      if (current && onReceiptUnauthorized) {
+        try { onReceiptUnauthorized() } catch { /* The observer cannot change transport semantics. */ }
+      }
       if (expectedIdentity && sentWorkspace && sentManagedDev && sentRevision === expectedIdentity.revision
-        && currentStoredTokenRevision() === sentRevision && sentActorIsCurrent() && headerCurrent && headerCurrent()) {
+        && currentStoredTokenRevision() === sentRevision && sentActorIsCurrent() && current) {
         noteManagedCredentialRefusalObservation(expectedIdentity.revision)
       }
     }, taskCapture ? text => { retainStaleTaskCreation(text, requestId, taskCapture) } : undefined)
@@ -621,6 +627,7 @@ export async function callMcpTaskReceiptAtIdentity(
   args: Record<string, unknown>,
   expectedIdentity: { revision: number; actor: string },
   isCurrent: () => boolean,
+  onUnauthorized?: () => void,
 ): Promise<string> {
   const workspace = scopedWorkspace(args)
   const requestId = args.creation_request_id
@@ -630,7 +637,7 @@ export async function callMcpTaskReceiptAtIdentity(
   const capturedArgs = { ...args, creation_request_id: requestId,
     expected_workspace: { base_path: workspace.basePath, masc_root: workspace.mascRoot } }
   return callMcpToolInternal('masc_tasks', capturedArgs, false, { ...expectedIdentity }, isCurrent,
-    undefined, undefined, undefined, true)
+    undefined, undefined, undefined, true, onUnauthorized)
 }
 
 // --- MCP tools/list — fetch tool schemas with inputSchema ---

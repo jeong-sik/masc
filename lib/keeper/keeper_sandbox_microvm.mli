@@ -690,13 +690,17 @@ val remove_apple_keeper_volumes :
     guest cannot forge or remove a claim. Workspaces attempt a claim at fresh
     boot ({!add_apple_work_volume_claim}) and release at dissolution
     ({!release_apple_work_volume_claim}). Fresh Apple provisioning stops if the
-    claim helper fails or gives an unexpected report. The marker can still omit a legacy or adopted owner,
-    so a last recorded claim is not proof that no other workspace needs it.
+    claim helper fails or gives an unexpected report. The marker can still
+    omit a legacy or adopted owner, so a last recorded claim is not proof
+    that no other workspace needs it.
 
     Dissolution keeps a volume when the marker is missing or unreadable, but
-    a present marker can still omit an owner. [container list --all] includes
-    stopped guests, while a paused Keeper can have no guest container at all.
-    Neither observation alone establishes that a volume is safe to reclaim. *)
+    a present marker can still omit an owner. Reclamation
+    ({!Keeper_volume_gc}) also keeps work volumes with missing or empty claims;
+    its inventory does not fence a concurrent boot, even for a build-only
+    candidate. [container list --all] includes stopped guests, while a paused
+    Keeper can have no guest container. Neither observation alone establishes
+    that a volume is safe to reclaim. *)
 
 val volume_claims_marker_name : string
 val claims_guest_root : string

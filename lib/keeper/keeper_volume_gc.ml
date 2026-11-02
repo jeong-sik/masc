@@ -1,9 +1,10 @@
 (** Reclamation of retired keepers' Apple volumes: report first, delete on
     request. See the interface for the contract; the ordering of the checks
     below is the safety story: containers first (the strongest live
-    evidence), then the claims marker, then local registration, and only a
-    keeper with no evidence at all becomes a candidate. All effects run
-    through the injected [run]. *)
+    evidence), then local registration and the claims marker. Only a
+    build-only volume with no observed reference becomes a candidate. The
+    inventory does not fence concurrent boots. All effects run through the
+    injected [run]. *)
 
 type volume_role =
   | Work_role
@@ -105,11 +106,9 @@ let group_keeper_volumes volumes =
   List.rev_map (fun (keeper_name, (work, build)) -> keeper_name, work, build) indexed
 ;;
 
-(* The claims marker of one keeper's work volume, read through the one-shot
-   helper. [Ok None] means no claim protects the volume: the marker is
-   absent (a legacy volume, claimed by no marker at all) or its array is
-   empty (every claim was released). Anything unreadable is [Error] and the
-   volumes stay. *)
+(* A missing or empty marker cannot exclude an unrecorded owner in another
+   workspace, including a paused legacy keeper with no container. Keep the
+   work volume until ownership can be established independently. *)
 let bounded_output limit text =
   if String.length text <= limit
   then text
@@ -125,8 +124,9 @@ let work_volume_claimants ~run ~timeout_sec ~keeper_name ~volume_name ~image =
   match status with
   | Unix.WEXITED 0 ->
     (match Keeper_sandbox_microvm.volume_claims_of_output stdout with
-     | Claims_read [] | Marker_absent -> Ok None
-     | Claims_read claimants -> Ok (Some claimants)
+     | Marker_absent -> Error "claims marker absent; unrecorded owners cannot be excluded"
+     | Claims_read [] -> Error "claims marker empty; unrecorded owners cannot be excluded"
+     | Claims_read claimants -> Ok claimants
      | Claims_invalid detail -> Error ("claims marker unreadable: " ^ detail))
   | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
     Error
@@ -145,13 +145,13 @@ let judge_keeper ~run ~timeout_sec ~registered_keeper ~claims_image
   with
   | Error detail -> Kept (Unverified detail)
   | Ok (_ :: _ as owners) -> Kept (Referenced_by_containers owners)
+  | Ok [] when registered_keeper keeper_name -> Kept Registered_in_this_workspace
   | Ok [] ->
     let after_containers () =
       match claims_image, work_volume with
       | Some image, Some volume_name ->
         (match work_volume_claimants ~run ~timeout_sec ~keeper_name ~volume_name ~image with
-         | Ok None -> `No_claims
-         | Ok (Some claimants) -> `Claimed claimants
+         | Ok claimants -> `Claimed claimants
          | Error detail -> `Unverified detail)
       | Some _, None ->
         (* Only a build volume is listed. The build volume is recreated empty
@@ -166,10 +166,7 @@ let judge_keeper ~run ~timeout_sec ~registered_keeper ~claims_image
     (match after_containers () with
      | `Claimed claimants -> Kept (Claimed_by_workspaces claimants)
      | `Unverified detail -> Kept (Unverified detail)
-     | `No_claims ->
-       if registered_keeper keeper_name
-       then Kept Registered_in_this_workspace
-       else Reclaim_candidate)
+     | `No_claims -> Reclaim_candidate)
 ;;
 
 let keep_reason_to_string = function
@@ -188,6 +185,36 @@ let keeper_outcome_to_string = function
   | Reclaim_candidate -> "reclaim candidate"
   | Reclaimed -> "reclaimed"
   | Reclaim_failed detail -> "reclaim failed: " ^ detail
+;;
+
+(* Do not delete a work volume that was absent from the original listing:
+   another workspace may create it after that listing. *)
+let remove_listed_build_volume ~run ~timeout_sec ~volume_name =
+  let status, stdout, stderr =
+    run ~timeout_sec (Keeper_sandbox_microvm.apple_volume_delete_argv ~volume_name)
+  in
+  match run ~timeout_sec (Keeper_sandbox_microvm.apple_volume_list_argv ()) with
+  | Unix.WEXITED 0, listing, _ ->
+    (match Yojson.Safe.from_string listing with
+     | exception Yojson.Json_error detail ->
+       Error ("keeper volume inventory is invalid JSON: " ^ detail)
+     | json ->
+       (match Keeper_sandbox_microvm.volume_names_of_json json with
+        | Error _ as error -> error
+        | Ok names ->
+          if List.exists (String.equal volume_name) names
+          then
+            Error
+              (Printf.sprintf "volume %s remains after removal (%s; stdout: %s; stderr: %s)"
+                 volume_name
+                 (Keeper_sandbox_exec_failure.status_label status)
+                 (bounded_output 200 stdout)
+                 (bounded_output 200 stderr))
+          else Ok ()))
+  | (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) as listing_status, _, _ ->
+    Error
+      (Printf.sprintf "cannot verify volume %s was removed (%s)"
+         volume_name (Keeper_sandbox_exec_failure.status_label listing_status))
 ;;
 
 let apple_keeper_volume_gc ~run ~timeout_sec ~registered_keeper ~claims_image ~execute =
@@ -216,11 +243,17 @@ let apple_keeper_volume_gc ~run ~timeout_sec ~registered_keeper ~claims_image ~e
                      ~keeper_name ~work_volume
                  in
                  let outcome =
-                   if execute && (match outcome with Reclaim_candidate -> true | _ -> false)
+                   if execute
+                      && (match outcome with
+                          | Reclaim_candidate -> true
+                          | Kept _ | Reclaimed | Reclaim_failed _ -> false)
                    then
                      (match
-                        Keeper_sandbox_microvm.remove_apple_keeper_volumes
-                          ~run ~timeout_sec ~keeper_name
+                        match work_volume, build_volume with
+                        | None, Some volume_name ->
+                          remove_listed_build_volume ~run ~timeout_sec ~volume_name
+                        | Some _, _ | None, None ->
+                          Error "reclaim candidate is not a listed build-only volume"
                       with
                       | Ok () -> Reclaimed
                       | Error detail -> Reclaim_failed detail)

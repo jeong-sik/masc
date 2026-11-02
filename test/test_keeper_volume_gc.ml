@@ -155,6 +155,7 @@ let test_the_decision_table_keeps_every_protected_volume () =
          ; `String "masc-keeper-work-registered"
          ; `String "masc-keeper-work-legacy"
          ; `String "masc-keeper-work-live"
+         ; `String "masc-keeper-build-orphan"
          ; `String "unrelated-volume"
          ])
   in
@@ -192,28 +193,31 @@ let test_the_decision_table_keeps_every_protected_volume () =
    | Gc.Kept Gc.Registered_in_this_workspace -> ()
    | other -> Alcotest.failf "a registered keeper stays: %s" (Gc.keeper_outcome_to_string other));
   (match outcome_of "legacy" with
-   | Gc.Reclaimed -> ()
+   | Gc.Kept (Gc.Unverified detail) ->
+     Alcotest.(check bool) "the missing marker is named" true
+       (Astring.String.is_infix ~affix:"claims marker absent" detail)
    | other ->
-     Alcotest.failf "a legacy volume with no claims is reclaimable: %s" (Gc.keeper_outcome_to_string other));
+     Alcotest.failf "a legacy volume without a marker stays: %s" (Gc.keeper_outcome_to_string other));
   (match outcome_of "retired" with
+   | Gc.Kept (Gc.Unverified detail) ->
+     Alcotest.(check bool) "the empty marker is named" true
+       (Astring.String.is_infix ~affix:"claims marker empty" detail)
+   | other ->
+     Alcotest.failf "an empty marker cannot exclude an unrecorded owner: %s"
+       (Gc.keeper_outcome_to_string other));
+  (match outcome_of "orphan" with
    | Gc.Reclaimed -> ()
    | other ->
-     Alcotest.failf "a volume whose claims were all released is reclaimable: %s"
+     Alcotest.failf "an unprotected build-only volume is reclaimable: %s"
        (Gc.keeper_outcome_to_string other));
   Alcotest.(check (list string))
-    "exactly the candidates' volumes are deleted"
-    [ "masc-keeper-work-retired"
-    ; "masc-keeper-build-retired"
-    ; "masc-keeper-work-legacy"
-    ; (* the removal deletes both of a keeper's volumes, including a build
-         volume the listing never showed *)
-      "masc-keeper-build-legacy"
-    ]
+    "only the listed build volume is deleted, never an absent work volume"
+    [ "masc-keeper-build-orphan" ]
     (deleted_volume_names sent)
 ;;
 
 let test_a_report_without_execute_touches_nothing () =
-  let volumes = {|["masc-keeper-work-retired"]|} in
+  let volumes = {|["masc-keeper-build-retired"]|} in
   let call =
     scripted_gc ~volumes ~containers:"[]"
       ~claims:(fun _ -> Unix.WEXITED 0, "[]\n", "")
@@ -228,21 +232,53 @@ let test_a_report_without_execute_touches_nothing () =
 ;;
 
 let test_a_failed_deletion_is_reported () =
-  let volumes = {|["masc-keeper-work-broken"]|} in
-  (* The work volume's delete fails and its name stays in the settling
+  let volumes = {|["masc-keeper-build-broken"]|} in
+  (* The build volume's delete fails and its name stays in the settling
      listing, which is the removal's own unconfirmed path. *)
   let call =
     scripted_gc ~volumes ~containers:"[]"
       ~claims:(fun _ -> Unix.WEXITED 0, "", "")
-      ~delete_answers:[ "masc-keeper-work-broken" ] ()
+      ~delete_answers:[ "masc-keeper-build-broken" ] ()
   in
   let report, _sent = call ~execute:true () in
   (match report.Gc.keepers with
    | [ { Gc.outcome = Gc.Reclaim_failed detail; _ } ] ->
      Alcotest.(check bool) "the failed removal is named" true
-       (Astring.String.is_infix ~affix:"masc-keeper-work-broken" detail)
+       (Astring.String.is_infix ~affix:"masc-keeper-build-broken" detail)
    | keepers ->
      Alcotest.failf "expected one reclaim failure, got %d keepers" (List.length keepers))
+;;
+
+let test_build_only_cleanup_does_not_delete_a_new_work_volume () =
+  let sent = ref [] in
+  let remaining = ref [ "masc-keeper-build-racing" ] in
+  let run ~timeout_sec:_ argv =
+    sent := argv :: !sent;
+    if List.exists (String.equal "--all") argv
+    then Unix.WEXITED 0, "[]", ""
+    else if adjacent ~flag:"volume" ~value:"list" argv
+    then Unix.WEXITED 0, Yojson.Safe.to_string (`List (List.map (fun n -> `String n) !remaining)), ""
+    else if adjacent ~flag:"volume" ~value:"delete" argv
+    then (
+      (* A peer creates its work volume after the first listing. *)
+      remaining := [ "masc-keeper-work-racing" ];
+      Unix.WEXITED 0, "", "")
+    else Alcotest.failf "unexpected command: %s" (String.concat " " argv)
+  in
+  let report =
+    ok_exn
+      (Gc.apple_keeper_volume_gc ~run ~timeout_sec:1.0
+         ~registered_keeper:(fun _ -> false)
+         ~claims_image:(Some "masc-test-minimal:image")
+         ~execute:true)
+  in
+  (match report.Gc.keepers with
+   | [ { Gc.outcome = Gc.Reclaimed; _ } ] -> ()
+   | keepers -> Alcotest.failf "expected one reclaimed build volume, got %d" (List.length keepers));
+  Alcotest.(check (list string)) "only the observed build volume was deleted"
+    [ "masc-keeper-build-racing" ] (deleted_volume_names (List.rev !sent));
+  Alcotest.(check (list string)) "the newly created work volume remains"
+    [ "masc-keeper-work-racing" ] !remaining
 ;;
 
 let test_without_an_image_there_is_no_claim_evidence () =
@@ -327,6 +363,8 @@ let () =
             test_a_report_without_execute_touches_nothing
         ; Alcotest.test_case "a failed deletion is reported" `Quick
             test_a_failed_deletion_is_reported
+        ; Alcotest.test_case "build-only cleanup preserves a newly created work volume" `Quick
+            test_build_only_cleanup_does_not_delete_a_new_work_volume
         ; Alcotest.test_case "without an image there is no claim evidence" `Quick
             test_without_an_image_there_is_no_claim_evidence
         ; Alcotest.test_case "an unreadable claims marker keeps the volumes" `Quick

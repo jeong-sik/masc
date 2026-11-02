@@ -134,19 +134,27 @@ let handle_sandbox_volume_gc ~tool_name ~start_time (ctx : context) args : Tool_
             [ ( "kept"
               , `Int
                   (count (fun v ->
-                       match v.outcome with Kept _ -> true | _ -> false)) )
+                       match v.outcome with
+                       | Kept _ -> true
+                       | Reclaim_candidate | Reclaimed | Reclaim_failed _ -> false)) )
             ; ( "reclaim_candidates"
               , `Int
                   (count (fun v ->
-                       match v.outcome with Reclaim_candidate -> true | _ -> false)) )
+                       match v.outcome with
+                       | Reclaim_candidate -> true
+                       | Kept _ | Reclaimed | Reclaim_failed _ -> false)) )
             ; ( "reclaimed"
               , `Int
                   (count (fun v ->
-                       match v.outcome with Reclaimed -> true | _ -> false)) )
+                       match v.outcome with
+                       | Reclaimed -> true
+                       | Kept _ | Reclaim_candidate | Reclaim_failed _ -> false)) )
             ; ( "reclaim_failed"
               , `Int
                   (count (fun v ->
-                       match v.outcome with Reclaim_failed _ -> true | _ -> false)) )
+                       match v.outcome with
+                       | Reclaim_failed _ -> true
+                       | Kept _ | Reclaim_candidate | Reclaimed -> false)) )
             ] )
       ]
   in

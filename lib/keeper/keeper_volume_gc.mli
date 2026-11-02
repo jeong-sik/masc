@@ -1,11 +1,11 @@
 (** Reclamation of retired keepers' Apple volumes: report first, delete on
     request.
 
-    The claims marker ({!Keeper_sandbox_microvm}) answers which workspaces
-    still want a keeper's volumes. This module turns one volume listing into
-    per-keeper verdicts and, only when the caller asks, deletes the volumes
-    of the keepers no evidence protects. Every unreadable answer keeps the
-    volumes and is reported as its reason, so an operator sees why a keeper
+    The claims marker ({!Keeper_sandbox_microvm}) records participating
+    workspaces, but cannot exclude unrecorded owners. This module turns one
+    volume listing into per-keeper verdicts. A missing or empty claims marker
+    keeps a work volume. Every unreadable answer keeps the affected volumes
+    and is reported as its reason, so an operator sees why a keeper
     was or was not reclaimed. All effects run through the injected [run];
     [registered_keeper] answers the local-registration question so this
     module touches no filesystem. *)
@@ -39,14 +39,14 @@ type keep_reason =
   | Registered_in_this_workspace
         (** This workspace still declares the keeper in its config. *)
   | Unverified of string
-        (** A listing, marker read or registration question that failed. *)
+        (** A listing or marker that cannot establish safe ownership. *)
 
 type keeper_outcome =
   | Kept of keep_reason
   | Reclaim_candidate
   | Reclaimed
-        (** Only after [~execute:true] and a removal whose absence check
-            confirmed both volumes gone. *)
+        (** Only after [~execute:true] and an absence check for the listed
+            build volume. *)
   | Reclaim_failed of string
 
 type keeper_verdict = private
@@ -75,12 +75,16 @@ val apple_keeper_volume_gc :
   -> (report, string) result
 (** List the Apple volumes, group them by keeper, and judge each keeper:
     a container still referencing it keeps it; so do remaining claimants on
-    the work volume's marker and a registration in this workspace. The rest
-    are reclaim candidates, and with [~execute:true] their work and build
-    volumes are deleted through
-    {!Keeper_sandbox_microvm.remove_apple_keeper_volumes}, whose absence
-    check decides [Reclaimed] versus [Reclaim_failed]. Without [execute] no
-    volume is touched. A failed volume listing is [Error] and nothing runs. *)
+    the work volume's marker and a registration in this workspace. A work
+    volume with a missing or empty marker is kept as [Unverified]. Unprotected
+    build-only volumes without an observed reference are reclaim candidates.
+    The owner inventory does not fence concurrent boots, so a build-only
+    candidate is not proof that no other workspace can start using it.
+    With [~execute:true], only
+    the listed build volume is deleted and a new listing decides [Reclaimed]
+    versus [Reclaim_failed]. A work volume that appears after the initial
+    listing is never targeted. Without [execute] no volume is touched. A
+    failed volume listing is [Error] and nothing runs. *)
 
 val keep_reason_to_string : keep_reason -> string
 val keeper_outcome_to_string : keeper_outcome -> string

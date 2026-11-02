@@ -845,6 +845,37 @@ can be traced back to the moment somebody granted it.
 Gate is an authorization workflow. It is not a sandbox and not a credential
 boundary.
 
+## Follow an input through a turn
+
+Open a Keeper's Turn Inspector and select a turn, then **입력과 실행**
+(input and execution). The view uses the complete `turn_ref` — trace and
+absolute turn together — rather than joining nearby timestamps.
+
+- **Input stimuli** lists the queue sources observed at turn entry, their
+  snapshot references, admission revisions and first-admission clocks. This
+  records intake; it does not prove dispatch or queue acknowledgement.
+- **Runtime choices** shows the same turn's manifest events and recorded routing
+  reasons. Multiple starts remain ambiguous; incomplete or damaged scans cannot
+  establish that a start was unique.
+- **Prompt and actual input** opens that turn's request-capture messages, System
+  prompt and tool schemas. `/last-prompt` is the latest assembled context, not
+  the complete submitted user packet. A request capture describes serialization,
+  not provider acceptance.
+- **Skill calls and use** distinguishes invocation, delivery and observed action.
+  This view reads the original trace's activation ledger. Async results originating
+  in another trace are outside that lookup; zero matching rows do not establish
+  that the receiving turn had no such results. Physical actions and their causal
+  links are counted separately.
+- **Tool results** joins the turn's execution IDs to tool-call records. Missing,
+  foreign or duplicate records remain unconfirmed. A tool's return status does
+  not establish the success of an external PR review or merge.
+
+The runtime trace API accepts an exact `trace_id` and `turn_id` at
+`/api/v1/keepers/<name>/runtime-trace`. Its public intake projection includes
+source references, not input bodies. Servers predating that projection show
+unavailable intake metadata in the inspector. Observing a source at turn entry
+also does not describe sources deferred before that turn.
+
 ## When something is wrong
 
 | What you see | What it usually means |

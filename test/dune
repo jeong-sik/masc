@@ -3741,6 +3741,11 @@
   masc_tui_message_layout masc_tui_types))
 
 (test
+ (name test_tui_skill_json_context)
+ (modules test_tui_skill_json_context)
+ (libraries alcotest masc masc.skill_reference masc_tui_types masc_tui_render_tools))
+
+(test
  (name test_tui_text_input_target)
  (modules test_tui_text_input_target)
  (libraries masc_tui_account_login masc_tui_message_input masc_tui_collab masc_tui_identity_model masc_tui_surface_navigation

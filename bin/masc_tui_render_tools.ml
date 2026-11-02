@@ -551,8 +551,8 @@ let skill_usage_box ~cols rows =
 let skill_json_lines ~cols ~indent json =
   let width = max 1 (Masc_tui_frame.inner_width ~cols) in
   let lines = Yojson.Safe.pretty_to_string json
-    |> String.split_on_char '\n'
-    |> List.map Terminal_text.single_line in
+    |> Masc.Tui_terminal_json.sanitize_canonical_preview
+    |> String.split_on_char '\n' in
   let widest = List.fold_left (fun widest line ->
     max widest (Masc_tui_message_layout.widest_grapheme_cells line)) 0 lines in
   let gutter = Masc_tui_message_layout.display_width

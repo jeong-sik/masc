@@ -34,18 +34,45 @@ let test_format_event_preserves_multiline_data () =
   | Error Sse.Missing_data_payload ->
       Alcotest.fail "format_event emitted a frame without a data field"
 
-let register_exn ~auth ?kind session_id ~last_event_id =
+let register_exn ~auth ?kind ?on_disconnect session_id ~last_event_id =
   (* Pre-create the MCP session so registration validates an existing
      session rather than auto-bootstrapping one (security/sse-auth-validation). *)
   let (_ : Session.McpSessionStore.mcp_session) =
     Session.McpSessionStore.get_or_create ~id:session_id ()
   in
-  match Sse.register ?kind ~auth session_id ~last_event_id with
+  match Sse.register ?kind ?on_disconnect ~auth session_id ~last_event_id with
   | Ok result -> result
   | Error e ->
       Alcotest.fail
         (Printf.sprintf "Sse.register failed: %s"
            (Sse.registration_error_to_string e))
+
+(* Both old mailboxes overflow in one broadcast. Removing the first wakes its
+   transport, which reconnects the second session before its old failure is
+   handled. That old failure must not remove the new client. *)
+let test_failed_broadcast_keeps_reconnected_successor ~auth () =
+  reset ();
+  let successor_session = "overflow-race-a" in
+  let first_session = "overflow-race-z" in
+  let reconnected = ref false in
+  Fun.protect
+    ~finally:(fun () -> List.iter Sse.unregister [first_session; successor_session])
+    (fun () ->
+      ignore (register_exn ~auth ~kind:Observer successor_session ~last_event_id:0);
+      ignore (register_exn ~auth ~kind:Observer first_session ~last_event_id:0
+        ~on_disconnect:(fun () ->
+          ignore (register_exn ~auth ~kind:Observer successor_session ~last_event_id:0);
+          reconnected := true));
+      (* The configured stream capacity is clamped to at most 1024. *)
+      for _ = 0 to 1024 do
+        if not !reconnected then Sse.broadcast_to Observers (`Assoc ["type", `String "fill"])
+      done;
+      Alcotest.(check bool) "old transport reconnected its peer" true !reconnected;
+      Alcotest.(check bool) "the replacement remains registered" true (Sse.exists successor_session);
+      Sse.broadcast_to Observers (`Assoc ["type", `String "after-reconnect"]);
+      Alcotest.(check bool) "the replacement receives later events" true
+        (Option.is_some (Sse.try_pop successor_session)))
+;;
 
 (* ============================================================
    pop / try_pop
@@ -587,6 +614,8 @@ let () =
               Alcotest.test_case "a cursor from an earlier process does not hold back events" `Quick
                 (test_a_cursor_from_an_earlier_process_does_not_hold_back_events ~auth);
               Alcotest.test_case "event contains data" `Quick (test_broadcast_event_contains_data ~auth);
+              Alcotest.test_case "stale failure leaves a reconnected client" `Quick
+                (test_failed_broadcast_keeps_reconnected_successor ~auth);
             ] );
           ( "send_to_stream",
             [

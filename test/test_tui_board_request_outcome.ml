@@ -444,12 +444,31 @@ let test_closed_results_settle_board_post_without_hanging_inflight () = with_fix
       ~title:"published fixture" ~body:"original body" ();
     check bool "closed results release the board write lock" true
       (state.board_write = Types.Board_idle);
+    check (option string) "failed launch leaves a single conservative diagnostic"
+      (Some "Board publication not confirmed; check the Board before retrying")
+      state.board_post_error;
     check (list (pair string string)) "no posting notice is emitted when launch does not start"
       [] !reports;
     check int "no Board POST was sent" 0 !posts;
     (match Publication.entries state.board_publications with
      | [Publication.Finished (Publication.Not_attempted _)] -> ()
      | _ -> fail "expected unstarted publication to be recorded as Not_attempted"))
+
+let test_comment_launch_failure_does_not_announce_sending () =
+  let state = Types.create_state ~workspace:"comment-no-launch" ~port:8935
+      ~refresh_interval:0. () in
+  state.workspace_identity <- Types.Workspace_identity_match;
+  Buffer.add_string state.board_draft "draft retained";
+  let request_id = ref () and reports = ref [] in
+  Requests.start_board_comment state ~host:"127.0.0.1" ~request_id
+    ~launch:(fun ~deliver _perform ->
+      Updates.comment_launch_failed state ~request_id;
+      ignore (deliver (Error "launch unavailable")))
+    ~report:(fun kind text -> reports := (kind, text) :: !reports)
+    ~post_id:"post" ~content:"draft retained";
+  check (list (pair string string)) "no sending notice when launch fails" [] !reports;
+  check bool "the write slot is released" true (state.board_write = Types.Board_idle);
+  check string "the draft is retained" "draft retained" (Buffer.contents state.board_draft)
 
 let test_old_comment_result_cannot_settle_same_draft_retry () =
   let state = Types.create_state ~workspace:"comment-owner" ~port:8935
@@ -527,6 +546,8 @@ let () = run "TUI Board request outcomes" ["actual request and registered routes
     test_workspace_return_cannot_revive_original_request_authority;
   test_case "closed results settle board post without hanging in flight" `Quick
     test_closed_results_settle_board_post_without_hanging_inflight;
+  test_case "a failed comment launch does not announce sending" `Quick
+    test_comment_launch_failure_does_not_announce_sending;
   test_case "an old comment result cannot settle a same-draft retry" `Quick
     test_old_comment_result_cannot_settle_same_draft_retry
 ]]

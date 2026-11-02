@@ -66,7 +66,7 @@ let start_board_post state ~host ~results ~admit ~report
        state.board_write <- Board_idle;
        state.board_compose_armed <- false;
        state.board_post_error <-
-         Some "Board publication did not start: Board publication did not start"
+         Some "Board publication not confirmed; check the Board before retrying"
      | Board_posting _ | Board_idle | Board_commenting _ -> ())
   in
   Masc_tui_workspace_result.launch state ~results ~boundary_error
@@ -122,7 +122,6 @@ let start_board_comment state ~host ~request_id ~launch ~report ~(post_id : stri
   end else begin
   state.board_post_error <- None;
   state.board_write <- Board_commenting request_id;
-  report "system" "commenting on Board";
   let sent_draft = Buffer.contents state.board_draft in
   let port = state.port in
   let expected_workspace = state.server_identity in
@@ -135,7 +134,11 @@ let start_board_comment state ~host ~request_id ~launch ~report ~(post_id : stri
         | None -> Error "Board workspace identity is unavailable" in
       match Masc_tui_http.post_board_comment ~expected_workspace ~host ~port ~post_id ~content with
       | Error err -> Error err
-      | Ok json -> Masc.Tui_decode.tool_envelope_outcome json )
+      | Ok json -> Masc.Tui_decode.tool_envelope_outcome json );
+  (match state.board_write with
+   | Board_commenting current when current == request_id ->
+     report "system" "commenting on Board"
+   | Board_idle | Board_posting _ | Board_commenting _ -> ())
   end
 
 (* Send a vote through the tools route. The voter is stamped by the route,

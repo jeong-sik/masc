@@ -41,6 +41,23 @@ function row(overrides: Record<string, unknown> = {}) {
 }
 
 describe('parseGoalVerificationRunsResponse', () => {
+  it('keeps a non-breaking-space Goal ID beside another run', () => {
+    const parsed = parseGoalVerificationRunsResponse({ generated_at: 'now', count: 2,
+      runs: [row({ goal_id: '\u00a0' }), row({ run_id: 'other-run', goal_id: 'goal-a' })] })
+    expect(parsed.runs.map(run => run.goalId)).toEqual(['\u00a0', 'goal-a'])
+  })
+
+  it.each(['', ' \t', null, undefined])('rejects an empty Goal ID %s', goalId => {
+    expect(() => parseGoalVerificationRunsResponse({ generated_at: 'now', count: 1,
+      runs: [row({ goal_id: goalId })] })).toThrow('goal_id')
+  })
+
+  it('preserves a legacy padded nonblank Goal ID in the run record', () => {
+    const parsed = parseGoalVerificationRunsResponse({ generated_at: 'now', count: 1,
+      runs: [row({ goal_id: ' goal-a ' })] })
+    expect(parsed.runs[0]?.goalId).toBe(' goal-a ')
+  })
+
   it('keeps the Goal identity, proof kind, runtime, and tool evidence', () => {
     const parsed = parseGoalVerificationRunsResponse({
       generated_at: '2026-08-21T00:00:00Z',

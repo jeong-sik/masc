@@ -1455,12 +1455,40 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
 
       | `GET, "/api/v1/dashboard/goals" ->
           h2_gate_state h2_reqd (fun state ->
-            let config = Mcp_server.workspace_config state in
-            with_captured_read_workspace config (fun workspace_headers ->
-            let payload =
-              cached_goals_tree_payload ~config
-            in
-            h2_respond_json_value h2_reqd payload.json ~extra_headers:(workspace_headers @ cors)))
+            let scope = Mcp_server.workspace_scope state in
+            let config = scope.config in
+            let accept_encoding = Http_response_payload.accept_encoding_fields
+              (H2.Headers.get_multi (H2.Reqd.request h2_reqd).headers "accept-encoding") in
+            let respond_workspace_refusal error =
+              let json, status = read_workspace_precondition_error_response error in
+              let body, headers = Http_response_payload.compress_body ~accept_encoding (Yojson.Safe.to_string json) in
+              h2_respond_bytes ~status:(status :> H2.Status.t) ~extra_headers:(headers @ cors)
+                ~content_type:"application/json; charset=utf-8" h2_reqd body in
+            match validate_read_workspace_precondition ~config httpun_request with
+            | Ok Workspace_read_unbound ->
+              let payload = cached_goals_tree_payload ~config in
+              h2_respond_json_value h2_reqd payload.json ~extra_headers:cors
+            | Ok Workspace_read_matched ->
+              let json, body, encoding_headers = match direct_goals_tree_payload ~scope ~accept_encoding with
+                | Ok (json, body, headers) -> json, body, headers
+                | Error json ->
+                  let body, headers = Http_response_payload.compress_body ~accept_encoding (Yojson.Safe.to_string json) in
+                  json, body, headers in
+              let status = Http_server_eio.Response.timeout_envelope_status_override ~status:`OK json in
+              let respond_changed_scope () =
+                respond_workspace_refusal Workspace.Workspace_precondition_failed in
+              let still_matched () = goal_tree_scope_current state scope &&
+                match validate_read_workspace_precondition ~config httpun_request with
+                | Ok Workspace_read_matched -> true
+                | Ok Workspace_read_unbound | Error _ -> false in
+              if still_matched () then
+                h2_respond_bytes ~status:(status :> H2.Status.t)
+                  ~extra_headers:(encoding_headers @ ("cache-control", "private, no-store") ::
+                    Server_utils.goal_tree_direct_read_header :: Workspace.read_precondition_admission_header :: cors)
+                  ~content_type:"application/json; charset=utf-8" h2_reqd body
+              else respond_changed_scope ()
+            | Error error ->
+              respond_workspace_refusal error)
 
       | `GET, "/api/v1/dashboard/goals/candle" ->
           h2_gate_state h2_reqd (fun state ->

@@ -154,6 +154,12 @@ val set_default_clock : _ Eio.Time.clock -> unit
     tests and non-Eio contexts rely on. A surface needing a tighter bound
     calls {!get_or_compute_with_timeout} with its own value. *)
 
+val within_default_compute_window :
+  key:string -> (unit -> 'a) -> ('a, Yojson.Safe.t) result
+(** Apply the same default window to an uncached computation, including any
+    wait before it starts. The error is the usual timeout envelope. Without a
+    registered clock, this follows the cache's unbounded non-runtime behavior. *)
+
 val seed_stale_if_missing :
   string -> stale_for:float -> Yojson.Safe.t -> unit
 (** [seed_stale_if_missing key ~stale_for value] inserts [value] as an

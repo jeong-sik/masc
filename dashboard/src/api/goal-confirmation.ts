@@ -34,7 +34,7 @@ export function decodeConfirmation(raw: unknown, goalId: string, workspace: Arti
     throw new Error('목표 확인 응답의 식별자가 일치하지 않습니다')
   if (!isRecord(raw.verification) || raw.verification.goal_id !== goalId)
     throw new Error('verifier 증거의 목표 식별자가 일치하지 않습니다')
-  const decoded = decodeGoalProof(raw.verification)
+  const decoded = decodeGoalProof(raw.verification, goalId)
   if (decoded.state !== 'current' || decoded.completion.state !== 'proven')
     throw new Error('현재 기준에 대한 verifier 증명을 확인할 수 없습니다')
   const completion = raw.verification.completion

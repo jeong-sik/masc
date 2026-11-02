@@ -11,7 +11,19 @@ import {
   asStringList,
   extractArray,
   toIsoTimestamp,
+  mergeRouteRecord,
 } from './normalize'
+
+describe('Goal route identity', () => {
+  it('preserves the structured Goal ID and does not coerce numbers', () => {
+    const context: { goalId?: string } = {}
+    mergeRouteRecord(context, { goal_id: ' \u00a0goal\u00a0 ' })
+    expect(context.goalId).toBe(' \u00a0goal\u00a0 ')
+    const numeric: { goalId?: string } = {}
+    mergeRouteRecord(numeric, { goal_id: 42 })
+    expect(numeric.goalId).toBeUndefined()
+  })
+})
 
 // ================================================================
 // isRecord

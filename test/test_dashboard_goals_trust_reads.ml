@@ -120,7 +120,11 @@ let test_reads_trust_once_for_assigned_keepers_only () =
        check (option string) "the trust read names the latest Keeper" (Some "alpha")
          node.latest_keeper_ref;
        check (option int) "the trust read names the latest turn" (Some 7)
-         node.latest_turn_ref)
+         node.latest_turn_ref;
+       let node = { node with goal = { node.goal with last_review_note = Some "needs evidence" } } in
+       let json = Dashboard_goals.tree_node_to_json node in
+       check string "tree carries the selected Goal's review note" "needs evidence"
+         Yojson.Safe.Util.(json |> member "last_review_note" |> to_string))
     forest
 ;;
 

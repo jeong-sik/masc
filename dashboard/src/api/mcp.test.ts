@@ -133,6 +133,26 @@ afterEach(async () => {
 })
 
 describe('MCP 2026-07-28 dashboard client', () => {
+  it('treats an HTTP 408 after dispatch as an unknown outcome', async () => {
+    fetchWithTimeout.mockResolvedValueOnce(new Response('gateway timeout', { status: 408 }))
+    apiRequestErrorFromResponse.mockResolvedValueOnce(new ApiRequestError({ status: 408, detail: 'gateway timeout' }))
+    const { callMcpToolAtIdentity, mcpCallFailureDisposition } = await import('./mcp')
+    const error: unknown = await callMcpToolAtIdentity('masc_add_task', {}, { revision: 0, actor: 'dashboard' })
+      .catch(error => error)
+    expect(mcpCallFailureDisposition(error)).toBe('outcome_unknown')
+    expect(fetchWithTimeout).toHaveBeenCalledOnce()
+  })
+
+  it('rechecks the original observation after asynchronous credential preparation', async () => {
+    let current = true
+    const { callMcpToolAtIdentity, mcpCallFailureDisposition } = await import('./mcp')
+    const pending = callMcpToolAtIdentity('masc_add_task', {}, { revision: 0, actor: 'dashboard' }, () => current)
+    current = false
+    const error: unknown = await pending.catch(error => error)
+    expect(mcpCallFailureDisposition(error)).toBe('known_pre_effect')
+    expect(fetchWithTimeout).not.toHaveBeenCalled()
+  })
+
   it('refuses before dispatch when a Goal credential or actor changed', async () => {
     currentStoredTokenRevision.mockReturnValue(2)
     const { callMcpToolAtIdentity, mcpCallFailureDisposition } = await import('./mcp')

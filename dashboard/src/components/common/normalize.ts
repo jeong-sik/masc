@@ -8,6 +8,7 @@
 import { isRecord, hasNonEmptyStringField } from '../../lib/type-guards'
 import { unixSecondsToDate } from '../../lib/format-time'
 import { asNullableString } from '../../lib/json-coerce'
+import { exactGoalId } from '../../lib/goal-identity'
 export {
   asString,
   asNumber,
@@ -111,7 +112,7 @@ export function mergeRouteRecord(
   if (location?.filePath && (overwrite || context.filePath === undefined)) context.filePath = location.filePath
   if (location?.line !== undefined && (overwrite || context.line === undefined)) context.line = location.line
 
-  const goalId = idString(record.goal_id)
+  const goalId = exactGoalId(record.goal_id)
   if (goalId && (overwrite || context.goalId === undefined)) context.goalId = goalId
   const taskId = idString(record.task_id)
   if (taskId && (overwrite || context.taskId === undefined)) context.taskId = taskId

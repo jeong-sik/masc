@@ -76,8 +76,10 @@ export class ArtifactWorkspaceReadUnattested extends Error {
   }
 }
 
-export async function captureArtifactWorkspace(expectedBasePath: string, signal?: AbortSignal): Promise<ArtifactWorkspace> {
-  const health = await get<unknown>('/health?full=1', { ...(signal ? { signal } : {}), consumeWithinTimeout: true })
+export async function captureArtifactWorkspace(expectedBasePath: string, signal?: AbortSignal,
+  opts?: { reportCredentialRefusal?: boolean }): Promise<ArtifactWorkspace> {
+  const health = await get<unknown>('/health?full=1', { ...(signal ? { signal } : {}), consumeWithinTimeout: true,
+    reportCredentialRefusal: opts?.reportCredentialRefusal })
   const { paths } = Schema.decodeUnknownSync(ArtifactWorkspaceSchema)(health)
   if (paths.effective_base_path !== expectedBasePath) {
     throw new Error('서버의 작업 공간이 원고를 작성한 작업 공간과 다릅니다. 원고를 보관하고 연결을 확인해 주세요.')

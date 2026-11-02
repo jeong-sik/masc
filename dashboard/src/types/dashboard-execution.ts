@@ -691,6 +691,7 @@ export interface GoalTreeNode extends
   GoalTreeTimestamps {
   id: string
   title: string
+  last_review_note?: string | null
   verification?: GoalProof
   children: GoalTreeNode[]
   child_count: number
@@ -710,6 +711,8 @@ export interface DashboardGoalsTreeResponse {
   approval_queue_state?: KeeperApprovalQueueState
   tree: GoalTreeNode[]
   summary: GoalTreeSummary
+  /** Client-side ID evidence captured before the display decoder drops rows. */
+  identity_observation?: { readonly ids: readonly string[]; readonly complete: boolean }
 }
 
 export interface GoalDetailKeeper {

@@ -430,7 +430,7 @@ describe('keeper tool telemetry fetchers', () => {
             composition_node_id: 'fetch_sources',
             composition_execution: 'async',
             parent_tool_use_id: 'outer-7',
-            goal_ids: ['g-1', 'g-2'],
+            goal_ids: ['g-1', ' \u00a0g-2\u00a0 '],
           },
         ],
       }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
@@ -440,7 +440,7 @@ describe('keeper tool telemetry fetchers', () => {
     const result = await fetchKeeperToolCalls('keeper-alpha')
     const entry = result.entries[0]
     expect(entry?.wire_outcome).toBe('ok')
-    expect(entry?.goal_ids).toEqual(['g-1', 'g-2'])
+    expect(entry?.goal_ids).toEqual(['g-1', ' \u00a0g-2\u00a0 '])
     expect(entry?.tool_use_id).toBe('')
     expect(entry?.turn).toBe(6)
     expect(entry?.planned_index).toBe(2)
@@ -5804,6 +5804,14 @@ describe('fetchKeeperCostMetrics', () => {
 })
 
 describe('fetchKeeperDecisions', () => {
+  it('preserves an exact Goal ID in decision context', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      events: [{ ts_unix: 1, keeper_name: 'keeper-alpha', event_type: 'turn',
+        context: { goal_id: '\u00a0goal-a\u00a0' } }], limit: 1, generated_at: 1,
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })))
+    expect((await fetchKeeperDecisions(1)).events[0]?.context?.goal_id).toBe('\u00a0goal-a\u00a0')
+  })
+
   it('decodes current decision rows without a model identity field', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({

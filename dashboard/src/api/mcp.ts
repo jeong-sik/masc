@@ -308,6 +308,8 @@ export function mcpCallFailureDisposition(error: unknown): McpCallFailureDisposi
     && error.status !== undefined
     && error.status >= 400
     && error.status < 500
+    // A gateway timeout response may arrive after the upstream accepted work.
+    && error.status !== 408
   ) {
     return 'known_pre_effect'
   }
@@ -396,6 +398,7 @@ async function callMcpToolInternal(
   args: Record<string, unknown>,
   allowAuthRecovery = true,
   expectedIdentity?: { revision: number; actor: string },
+  isCurrent?: () => boolean,
 ): Promise<string> {
   const requestId = randomUuid()
   synchronizeMcpAuthRevision()
@@ -423,6 +426,7 @@ async function callMcpToolInternal(
         ? { ...args, _agent_name: actor }
         : args
     })()
+    if (isCurrent && !isCurrent()) throw new McpPreDispatchIdentityChangedError()
     const text = await mcpPost({
       jsonrpc: '2.0',
       method: 'tools/call',
@@ -478,8 +482,9 @@ export async function callMcpToolAtIdentity(
   toolName: string,
   args: Record<string, unknown>,
   expectedIdentity: { revision: number; actor: string },
+  isCurrent?: () => boolean,
 ): Promise<string> {
-  return callMcpToolInternal(toolName, args, false, expectedIdentity)
+  return callMcpToolInternal(toolName, args, false, expectedIdentity, isCurrent)
 }
 
 // --- MCP tools/list — fetch tool schemas with inputSchema ---

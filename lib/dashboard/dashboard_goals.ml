@@ -403,6 +403,7 @@ let rec tree_node_to_json ?(events_for_goal = fun _ -> [])
       ("metric", Json_util.string_opt_to_json goal.metric);
       ("target_value", Json_util.string_opt_to_json goal.target_value);
       ("due_date", Json_util.string_opt_to_json goal.due_date);
+      ("last_review_note", Json_util.string_opt_to_json goal.last_review_note);
       ("tasks", `List (List.map task_to_tree_json node.tasks));
       ("task_count", `Int (List.length node.tasks));
       ("task_done_count",

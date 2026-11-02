@@ -1430,6 +1430,17 @@ let timeout_envelope_tests =
   ]
 ;;
 
+let test_encoding_wildcard_cannot_override_explicit_refusal () =
+  List.iter (fun header ->
+    Alcotest.(check bool) "zstd explicitly refused" false
+      (Http_response_payload.accepts_zstd_header (Some header));
+    Alcotest.(check bool) "unspecified gzip allowed by wildcard" true
+      (Http_response_payload.accepts_gzip_header (Some header)))
+    ["zstd;q=0, *;q=1"; "*;q=1, ZSTD;q=0"];
+  Alcotest.(check bool) "explicit gzip overrides a refused wildcard" true
+    (Http_response_payload.accepts_gzip_header (Some "*;q=0, gzip;q=1"))
+;;
+
 let () =
   Eio_main.run
   @@ fun env ->
@@ -1443,5 +1454,6 @@ let () =
     ; "response", response_tests
     ; "late_response", late_response_tests
     ; "timeout_envelope", timeout_envelope_tests
+    ; "encoding", ["explicit refusal precedes wildcard", `Quick, test_encoding_wildcard_cannot_override_explicit_refusal]
     ]
 ;;

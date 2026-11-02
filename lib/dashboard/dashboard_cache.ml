@@ -1138,6 +1138,15 @@ let set_default_clock clock =
    their own [timeout_sec]. *)
 let default_compute_timeout_sec = 30.0
 
+let within_default_compute_window ~key work =
+  match Atomic.get default_clock with
+  | None -> Ok (work ())
+  | Some clock ->
+    (try Ok (compute_under_timeout ~clock ~timeout_sec:default_compute_timeout_sec ~key work) with
+     | Compute_timeout { key = timed_key; role } when String.equal timed_key key ->
+       Error (timeout_envelope_json ~kind:(timeout_kind_of_role role)
+         ~key ~timeout_sec:default_compute_timeout_sec))
+
 let get_or_compute_unbounded_value ~preparation key ~ttl work =
   let entry = get_or_compute_entry key ~ttl (prepared_work ~preparation work) in
   payload_of_entry entry

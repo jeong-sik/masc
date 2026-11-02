@@ -24,6 +24,7 @@ import type {
 } from './types'
 import { toSandboxProfile } from './types'
 import { isRecord, asString, asNumber, asBoolean, asStringArray, toIsoTimestamp } from './components/common/normalize'
+import { exactGoalIds } from './lib/goal-identity'
 import { isKeeperOffline } from './lib/keeper-predicates'
 import { keeperDisplayStatus } from './lib/keeper-runtime-display'
 import { asKeeperRuntimeBlockerClass } from './lib/runtime-blocker-class'
@@ -383,7 +384,7 @@ function normalizeKeeperTrustLatestEvent(raw: unknown): KeeperTrustLatestEvent |
     ts_unix: asNumber(raw.ts_unix) ?? null,
     keeper_turn_id: asNumber(raw.keeper_turn_id) ?? null,
     task_id: asString(raw.task_id) ?? null,
-    goal_ids: asStringArray(raw.goal_ids),
+    goal_ids: exactGoalIds(raw.goal_ids),
     title,
     summary,
     severity,

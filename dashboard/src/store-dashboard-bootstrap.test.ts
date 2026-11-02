@@ -55,6 +55,23 @@ afterEach(() => {
 })
 
 describe('refreshDashboard bootstrap', () => {
+  it('preserves Goal IDs from the planning snapshot for assignment decisions', async () => {
+    const store = await import('./store')
+    const rollup = { active_count: 3, verifying_count: 0, awaiting_confirmation_count: 0,
+      done_count: 0, dropped_count: 0, paused_count: 0, blocked_count: 0 }
+    store.hydratePlanningSnapshot({ generated_at: 'now', rollup, goals: [
+      { id: 'goal-a', title: 'Canonical', phase: 'executing', created_at: 'now', updated_at: 'now' },
+      { id: ' goal-a ', title: 'Padded', phase: 'executing', created_at: 'now', updated_at: 'now' },
+      { id: 'goal-a', title: '', phase: 'executing', created_at: 'now', updated_at: 'now' },
+    ] })
+    expect(store.goals.value.map(goal => goal.id)).toEqual(['goal-a', ' goal-a '])
+    expect(store.goalIdentityObservation.value?.observation).toEqual({ complete: true, ids: ['goal-a', ' goal-a ', 'goal-a'] })
+    store.hydratePlanningSnapshot({ generated_at: 'now', rollup: { ...rollup, active_count: 4 }, goals: [
+      { id: 'goal-a', title: 'Canonical', phase: 'executing', created_at: 'now', updated_at: 'now' },
+    ] })
+    expect(store.goalIdentityObservation.value?.observation.complete).toBe(false)
+  })
+
   function pending<T>() {
     let resolve!: (value: T) => void
     let reject!: (error: unknown) => void

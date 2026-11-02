@@ -107,7 +107,7 @@ export function normalizeTask(raw: unknown): Task | null {
   return {
     id,
     title,
-    goal_id: asString(raw.goal_id) ?? null,
+    goal_id: typeof raw.goal_id === 'string' && raw.goal_id !== '' ? raw.goal_id : null,
     detail_level: raw.detail_level as Task['detail_level'],
     description_revision: asString(raw.description_revision),
     status: normalizeTaskStatus(raw.status),

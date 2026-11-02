@@ -6,6 +6,11 @@
 
 let vary_accept_encoding = ("vary", "Accept-Encoding")
 
+(* Accept-Encoding is a list field; multiple header lines form one list. *)
+let accept_encoding_fields = function
+  | [] -> None
+  | fields -> Some (String.concat ", " fields)
+
 let is_ascii_space = function
   | ' ' | '\t' | '\n' | '\r' | '\012' -> true
   | _ -> false
@@ -98,34 +103,40 @@ let q_value_in_params value start stop =
   in
   Option.value ~default:1.0 (loop start)
 
-let encoding_matches_span value start stop token =
+let encoding_quality_span value start stop token =
   let token_stop, params_start =
     match index_char value ';' start stop with
     | Some idx -> idx, idx + 1
     | None -> stop, stop
   in
   let token_start, token_stop = trim_span value start token_stop in
-  (equal_ascii_ci_span value token_start token_stop token
-   || equal_ascii_ci_span value token_start token_stop "*")
-  && q_value_in_params value params_start stop > 0.0
+  let quality = q_value_in_params value params_start stop in
+  if equal_ascii_ci_span value token_start token_stop token then `Explicit quality
+  else if equal_ascii_ci_span value token_start token_stop "*" then `Wildcard quality
+  else `Other
 
 let accepts_encoding_header ~token = function
   | None -> false
   | Some accept_encoding ->
       let stop = String.length accept_encoding in
-      let rec loop start =
+      let add_quality previous quality =
+        Some (match previous with None -> quality | Some prior -> Float.max prior quality) in
+      let rec loop start explicit wildcard =
         if start >= stop then
-          false
+          Option.value ~default:0.0 (match explicit with Some _ -> explicit | None -> wildcard) > 0.0
         else
           let next =
             match index_char accept_encoding ',' start stop with
             | Some idx -> idx
             | None -> stop
           in
-          encoding_matches_span accept_encoding start next token
-          || (next < stop && loop (next + 1))
+          let explicit, wildcard = match encoding_quality_span accept_encoding start next token with
+            | `Explicit quality -> add_quality explicit quality, wildcard
+            | `Wildcard quality -> explicit, add_quality wildcard quality
+            | `Other -> explicit, wildcard in
+          loop (if next < stop then next + 1 else stop) explicit wildcard
       in
-      loop 0
+      loop 0 None None
 
 let accepts_zstd_header header =
   accepts_encoding_header ~token:"zstd" header

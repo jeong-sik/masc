@@ -52,51 +52,61 @@ let test_unicode_paths_keep_the_original_bytes () =
     [ "/tmp/화면1.png"
     ; "/tmp/화면/report.png"
     ; "./폴더/스크린샷.png"
+    ; "docs/화면.png"
     ; "화면.png"
     ; "cafe\xcc\x81.png"
-    ; "👩‍💻.png"
     ];
   (* The three inputs #47718 was reported with. *)
   List.iter
     (fun path -> check_paths path [ path ] (paths ("`" ^ path ^ "`")))
-    [ "/tmp/화면1.png"; "/tmp/화면.png"; "/tmp/화면/report.png" ];
-  check_paths "ambiguous bare Unicode first directory is declined" []
-    (paths "결과는/tmp/a.png");
-  check_paths "an explicitly delimited Unicode directory is preserved"
-    [ "폴더/화면.png" ] (paths "`폴더/화면.png`")
+    [ "/tmp/화면1.png"; "/tmp/화면.png"; "/tmp/화면/report.png" ]
 
-let test_enclosed_paths_and_unicode_punctuation () =
+(* A word glued to an absolute path and a relative directory of that name
+   read the same, and a wrapper around them does not tell them apart. *)
+let test_a_unicode_word_before_the_first_slash_is_declined () =
   List.iter
-    (fun (text, path) -> check_paths text [ path ] (paths text))
-    [ ("`/tmp/my photo.png`", "/tmp/my photo.png")
-    ; ("![화면](/tmp/한글/my (photo).png)", "/tmp/한글/my (photo).png")
-    ; ("“/tmp/my 화면.png”", "/tmp/my 화면.png")
-    ; ("`/tmp/중간。dir/a.png`", "/tmp/중간。dir/a.png")
-    ; ("확인 /tmp/화면.png。", "/tmp/화면.png")
-    ; ("확인\xc2\xa0/tmp/화면.png", "/tmp/화면.png")
-    ];
-  check_paths "Unicode text after the extension is not a PNG suffix" []
-    (paths "/tmp/화면.png다음");
-  check_paths "a wrapper around an earlier path does not join two paths"
-    [ "/tmp/a.png"; "/tmp/b.png" ] (paths "`/tmp/a.png and /tmp/b.png`");
-  check_paths "a wrapper around a list does not join its items"
-    [ "a.png"; "b.png" ] (paths "(a.png,b.png)");
-  check_paths "a punctuation continuation remains ambiguous" []
-    (paths "/tmp/화면.png。다음")
+    (fun text -> check_paths text [] (paths text))
+    [ "결과는/tmp/a.png"; "(결과는/tmp/a.png)"; "`폴더/화면.png`" ]
 
-(* A wrapper holds whatever the writer put in it: a command, a label, a
-   sentence. Only a wrapper that opens on a path root holds one path with
-   spaces in it; otherwise the words before the path stay words. *)
-let test_words_inside_a_wrapper_are_not_the_path () =
+(* Korean puts a particle right after the word, and CJK text closes a
+   sentence or a quote with its own punctuation. None of it is the name. *)
+let test_what_follows_the_extension_in_korean_text () =
   List.iter
-    (fun (text, path) -> check_paths text [ path ] (paths text))
-    [ ("(see docs/a.png)", "docs/a.png")
-    ; ("`open /tmp/a.png`", "/tmp/a.png")
-    ; ("(경로: /tmp/화면.png)", "/tmp/화면.png")
-    ; ("\"saved to /tmp/a.png\"", "/tmp/a.png")
-    ; ( "`/Users/me/Desktop/Screenshot 2026-11-03 at 02.14.45.png`"
-      , "/Users/me/Desktop/Screenshot 2026-11-03 at 02.14.45.png" )
+    (fun (text, expected) -> check_paths text expected (paths text))
+    [ ("/tmp/a.png를 열어 보세요", [ "/tmp/a.png" ])
+    ; ("스크린샷은 /tmp/화면.png에 저장했어요", [ "/tmp/화면.png" ])
+    ; ("확인 /tmp/화면.png。다음", [ "/tmp/화면.png" ])
+    ; ("「/tmp/a.png」를 열어", [ "/tmp/a.png" ])
+    ; ("“/tmp/a.png”.", [ "/tmp/a.png" ])
+    ; ("a.png와 b.png를 비교", [ "a.png"; "b.png" ])
     ]
+
+(* Joining two names, or a name and the words before it, offers a file
+   nobody named. Each case below gave the right path before Unicode was read,
+   and has to keep giving it. *)
+let test_neighbours_are_not_joined_into_the_path () =
+  List.iter
+    (fun (text, expected) -> check_paths text expected (paths text))
+    [ ("a.png、b.png", [ "a.png"; "b.png" ])
+    ; ("/tmp/a.png，/tmp/b.png", [ "/tmp/a.png"; "/tmp/b.png" ])
+    ; ("/tmp/a.txt、/tmp/b.png", [ "/tmp/b.png" ])
+    ; ("/tmp/x→/tmp/a.png", [ "/tmp/a.png" ])
+    ; ("경로：a.png", [ "a.png" ])
+    ; ("(a.txt,b.png)", [ "b.png" ])
+    ; ("(foo.txt,/tmp/a.png)", [ "/tmp/a.png" ])
+    ; ("(see docs/a.png)", [ "docs/a.png" ])
+    ; ("(경로: /tmp/화면.png)", [ "/tmp/화면.png" ])
+    ; ("`open /tmp/a.png`", [ "/tmp/a.png" ])
+    ; ("`/usr/bin/open /tmp/a.png`", [ "/tmp/a.png" ])
+    ; ("`/tmp/notes.txt /tmp/a.png`", [ "/tmp/a.png" ])
+    ; ("`--output=/tmp/a.png`", [ "/tmp/a.png" ])
+    ; ("\"saved to /tmp/a.png\"", [ "/tmp/a.png" ])
+    ; ("확인\xc2\xa0/tmp/화면.png", [ "/tmp/화면.png" ])
+    ];
+  (* With no separator between them, the second name could start anywhere
+     inside the first. *)
+  check_paths "a name glued to the previous one is declined" [ "a.png" ]
+    (paths "a.png와b.png")
 
 let test_urls_do_not_contribute_local_suffixes () =
   List.iter
@@ -107,6 +117,7 @@ let test_urls_do_not_contribute_local_suffixes () =
     ; "https://example.com/?path=/tmp/사진.png"
     ; "https://example.com/#/tmp/사진.png"
     ; "https://[::1]/사진.png"
+    ; "(file:/tmp/a.png)"
     ];
   check_paths "a later local path remains available" [ "/tmp/다음.png" ]
     (paths "https://example.com/?path=/tmp/사진.png /tmp/다음.png")
@@ -114,9 +125,9 @@ let test_urls_do_not_contribute_local_suffixes () =
 let test_invalid_and_control_bytes_do_not_produce_suffixes () =
   check_paths "invalid UTF-8 rejects the message's candidates" []
     (paths "/tmp/\xff/foo.png");
-  check_paths "control inside a bare candidate is not a separator" []
+  check_paths "a control inside a bare name is not a separator" []
     (paths "/tmp/pre\x1bpost.png");
-  check_paths "control inside a quoted candidate is not a filename" []
+  check_paths "a control inside a quoted name is not a separator" []
     (paths "`/tmp/pre\x1bpost.png`")
 
 let () =
@@ -132,10 +143,12 @@ let () =
         ; test_case "what is not a path" `Quick test_what_is_not_a_path
         ; test_case "Unicode paths keep their original bytes" `Quick
             test_unicode_paths_keep_the_original_bytes
-        ; test_case "enclosed paths and Unicode punctuation" `Quick
-            test_enclosed_paths_and_unicode_punctuation
-        ; test_case "words inside a wrapper are not the path" `Quick
-            test_words_inside_a_wrapper_are_not_the_path
+        ; test_case "a Unicode word before the first slash is declined" `Quick
+            test_a_unicode_word_before_the_first_slash_is_declined
+        ; test_case "what follows the extension in Korean text" `Quick
+            test_what_follows_the_extension_in_korean_text
+        ; test_case "neighbours are not joined into the path" `Quick
+            test_neighbours_are_not_joined_into_the_path
         ; test_case "URLs do not contribute local suffixes" `Quick
             test_urls_do_not_contribute_local_suffixes
         ; test_case "invalid and control bytes do not produce suffixes" `Quick

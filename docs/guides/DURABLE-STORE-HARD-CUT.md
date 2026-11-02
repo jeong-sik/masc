@@ -171,6 +171,68 @@ old scope, or clear a complete Librarian worker volume. A clean current-payload
 scan is only decoding evidence; actual continuity, execution proofs and
 consumption still require their normal authorities.
 
+## Goal store path failures and rollback
+
+A Goal store path that cannot be read, including a dangling link, may report
+`inspect_path`. Inspect the original paths, links, mounts and server state
+before deciding how to recover. A mirror link observed after a primary commit
+is left in place; the primary can advance while that mirror remains stale.
+
+The current reader accepts the previous Goal unavailable values; upgrading
+does not by itself require fresh state. Once a writer has recorded
+`inspect_path`, older readers reject it. The value can appear in
+`.masc/goal-verification-runs.jsonl` skipped-scan rows and in
+`.masc/keepers/<keeper>/turn-boundaries.jsonl` task context. An older run
+registry can start with a malformed replay but refuse strict reads and
+reconciliation; an older Keeper can fail to read the affected generation
+floor, and Librarian consumption may stop. Older Dashboard and TUI clients
+also reject the new response token. Update those clients with the server.
+
+Observed nonregular Goal paths add distinct `nonregular` and
+`mirror_nonregular` values. Their durable records preserve the observed file
+kind; existing `unreadable` Unix errors, including `eisdir` and `eopnotsupp`,
+stay Unix errors and must not be reinterpreted as a file kind. A target build
+without the new variants rejects records containing them. Dashboard and TUI
+readers without the new response tokens reject the corresponding envelope.
+
+The task context recorded in a turn boundary can also be frozen into
+Librarian original inputs and their related parent and gate work. Before a
+rollback, verify the target readers against the complete affected bundle,
+including the original, parent, gate, source and pending or completed ACK
+evidence described above. Reconcile unresolved work and verify backups before
+setting aside any reviewed scope. Do not remove a boundary or manufacture an
+ACK merely to make an older reader accept the remaining files. The
+`scripts/librarian/compare-preflight.py` analysis reader also validates frozen
+historical task contexts; its successful comparison is not an installation
+preflight or evidence that a target runtime can resume the bundle.
+
+The older `validate-stores` checks turn boundaries, not the Goal verification
+registry. With all writers stopped, identify the registry paths read by the
+rollback build's helper; file names can differ between builds. Before running
+it, inspect each path's file type without opening it and follow any symlink to
+check its target. Record confirmed missing files without creating them. If a
+path or target cannot be checked, or is not a regular file, investigate it
+before running the helper: opening a FIFO can block even in read-only mode.
+These checks cannot eliminate a path replacement race or a stalled mount.
+
+Use a new log path outside the state and evidence being preserved: shell
+redirection replaces an existing log. Then inspect the registries:
+
+```sh
+/path/to/older-build/bin/deployment_preflight_helper.exe cut-run-registries \
+  --base-path /path/to/workspace > /path/to/registry-preflight.log 2>&1
+```
+
+Keep the exit status and log. This checks four registries. An absent or
+unreadable file can produce the same `whole_file=false` summary as an
+incomplete line, so check each reported file's existence and access as well.
+`validate-stores` does not count an incomplete turn-boundary tail as a refused
+row; its success does not prove complete history. Omit `--execute`: it rewrites
+the files. Before rollback, reconcile pending work under a compatible build,
+stop all writers, and preserve the registry, turn boundaries and dependent
+Keeper and Librarian state. Follow the backup and rollback procedure below. Do
+not delete rows or replace the new value with an older recovery instruction.
+
 ## Verify and roll back
 
 Re-run the candidate's full `validate-stores` against the stopped workspace.

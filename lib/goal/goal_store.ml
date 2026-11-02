@@ -64,15 +64,25 @@ and unavailable = Goal_store_unavailable.t =
   ; reset_step : reset_step
   }
 
+and nonregular_kind = Goal_store_unavailable.nonregular_kind =
+  | Nonregular_directory
+  | Nonregular_character_device
+  | Nonregular_block_device
+  | Nonregular_symbolic_link
+  | Nonregular_fifo
+  | Nonregular_socket
+
 and reason = Goal_store_unavailable.reason =
   | Missing_after_init
   | Unreadable of Unix.error
+  | Nonregular of nonregular_kind
   | Not_json of string
   | Schema_rejected of { field : string; detail : string }
 
 and mirror_status = Goal_store_unavailable.mirror_status =
   | Mirror_absent
   | Mirror_unreadable of Unix.error
+  | Mirror_nonregular of nonregular_kind
   | Mirror_decodes of { goal_count : int; updated_at : string }
   | Mirror_rejected of reason
 
@@ -80,40 +90,18 @@ and reset_step = Goal_store_unavailable.reset_step =
   | Repair_field of string
   | Reset_goal_store
   | Restore_permission
+  | Inspect_path
 
 type lookup =
   | Goal_found of goal
   | Goal_absent
   | Store_unavailable of unavailable
 
-(* [Unix.error] is the kernel's sum, not this module's; only [EACCES] names a
-   step other than a reset, so the remaining errnos share one arm. *)
+(* An I/O failure is not evidence that resetting the store is appropriate. *)
 let reset_step_of_reason = function
   | Schema_rejected { field; _ } -> Repair_field field
-  | Unreadable Unix.EACCES -> Restore_permission
-  | Unreadable (Unix.E2BIG) | Unreadable (Unix.EAGAIN) | Unreadable (Unix.EBADF)
-  | Unreadable (Unix.EBUSY) | Unreadable (Unix.ECHILD) | Unreadable (Unix.EDEADLK)
-  | Unreadable (Unix.EDOM) | Unreadable (Unix.EEXIST) | Unreadable (Unix.EFAULT)
-  | Unreadable (Unix.EFBIG) | Unreadable (Unix.EINTR) | Unreadable (Unix.EINVAL)
-  | Unreadable (Unix.EIO) | Unreadable (Unix.EISDIR) | Unreadable (Unix.EMFILE)
-  | Unreadable (Unix.EMLINK) | Unreadable (Unix.ENAMETOOLONG) | Unreadable (Unix.ENFILE)
-  | Unreadable (Unix.ENODEV) | Unreadable (Unix.ENOENT) | Unreadable (Unix.ENOEXEC)
-  | Unreadable (Unix.ENOLCK) | Unreadable (Unix.ENOMEM) | Unreadable (Unix.ENOSPC)
-  | Unreadable (Unix.ENOSYS) | Unreadable (Unix.ENOTDIR) | Unreadable (Unix.ENOTEMPTY)
-  | Unreadable (Unix.ENOTTY) | Unreadable (Unix.ENXIO) | Unreadable (Unix.EPERM)
-  | Unreadable (Unix.EPIPE) | Unreadable (Unix.ERANGE) | Unreadable (Unix.EROFS)
-  | Unreadable (Unix.ESPIPE) | Unreadable (Unix.ESRCH) | Unreadable (Unix.EXDEV)
-  | Unreadable (Unix.EWOULDBLOCK) | Unreadable (Unix.EINPROGRESS) | Unreadable (Unix.EALREADY)
-  | Unreadable (Unix.ENOTSOCK) | Unreadable (Unix.EDESTADDRREQ) | Unreadable (Unix.EMSGSIZE)
-  | Unreadable (Unix.EPROTOTYPE) | Unreadable (Unix.ENOPROTOOPT) | Unreadable (Unix.EPROTONOSUPPORT)
-  | Unreadable (Unix.ESOCKTNOSUPPORT) | Unreadable (Unix.EOPNOTSUPP)
-  | Unreadable (Unix.EPFNOSUPPORT) | Unreadable (Unix.EAFNOSUPPORT) | Unreadable (Unix.EADDRINUSE)
-  | Unreadable (Unix.EADDRNOTAVAIL) | Unreadable (Unix.ENETDOWN) | Unreadable (Unix.ENETUNREACH)
-  | Unreadable (Unix.ENETRESET) | Unreadable (Unix.ECONNABORTED) | Unreadable (Unix.ECONNRESET)
-  | Unreadable (Unix.ENOBUFS) | Unreadable (Unix.EISCONN) | Unreadable (Unix.ENOTCONN)
-  | Unreadable (Unix.ESHUTDOWN) | Unreadable (Unix.ETOOMANYREFS) | Unreadable (Unix.ETIMEDOUT)
-  | Unreadable (Unix.ECONNREFUSED) | Unreadable (Unix.EHOSTDOWN) | Unreadable (Unix.EHOSTUNREACH)
-  | Unreadable (Unix.ELOOP) | Unreadable (Unix.EOVERFLOW) | Unreadable (Unix.EUNKNOWNERR _) -> Reset_goal_store
+  | Unreadable error -> if error = Unix.EACCES then Restore_permission else Inspect_path
+  | Nonregular _ -> Inspect_path
   | Missing_after_init -> Reset_goal_store
   | Not_json _ -> Reset_goal_store
 
@@ -132,31 +120,82 @@ let unavailable_to_string = Goal_store_unavailable.to_string
 type file_read =
   | File_absent
   | File_unreadable of Unix.error
+  | File_nonregular of nonregular_kind
   | File_bytes of string
 
 let read_chunk_bytes = 65536
 
-let read_file path : file_read =
-  match Unix.openfile path [ Unix.O_RDONLY; Unix.O_CLOEXEC ] 0 with
-  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> File_absent
+let rec missing_parent_result path : file_read =
+  match Unix.lstat path with
+  | stat ->
+      if stat.Unix.st_kind = Unix.S_LNK then
+        (match Unix.stat path with
+         | target -> if target.Unix.st_kind = Unix.S_DIR then File_absent else File_unreadable Unix.ENOTDIR
+         | exception Unix.Unix_error (error, _, _) -> File_unreadable error)
+      else if stat.Unix.st_kind = Unix.S_DIR then File_absent
+      else File_unreadable Unix.ENOTDIR
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
+      let parent = Filename.dirname path in
+      if String.equal parent path then File_unreadable Unix.ENOENT
+      else missing_parent_result parent
   | exception Unix.Unix_error (error, _, _) -> File_unreadable error
-  | fd ->
-      let buffer = Buffer.create read_chunk_bytes in
-      let chunk = Bytes.create read_chunk_bytes in
-      (* A directory opens read-only and fails on the first [read] with
-         EISDIR, which is why the loop classifies its own errno. *)
-      let rec drain () =
-        match Unix.read fd chunk 0 read_chunk_bytes with
-        | 0 -> File_bytes (Buffer.contents buffer)
-        | count ->
-            Buffer.add_subbytes buffer chunk 0 count;
-            drain ()
-        | exception Unix.Unix_error (Unix.EINTR, _, _) -> drain ()
-        | exception Unix.Unix_error (error, _, _) -> File_unreadable error
-      in
-      Fun.protect
-        ~finally:(fun () -> try Unix.close fd with Unix.Unix_error _ -> ())
-        drain
+
+let read_path_error path error : file_read =
+  if error = Unix.ENOENT then
+      (* A dangling symlink is an existing entry, not an uninitialized store.
+         A concurrent creation between the failed lookup and lstat is also
+         not safe to classify as absent. *)
+      (match Unix.lstat path with
+       | _ -> File_unreadable Unix.ENOENT
+       | exception Unix.Unix_error (Unix.ENOENT, _, _) -> missing_parent_result (Filename.dirname path)
+       | exception Unix.Unix_error (error, _, _) -> File_unreadable error)
+  else File_unreadable error
+
+let unsupported_kind = function
+  | Unix.S_REG -> None
+  | Unix.S_DIR -> Some Nonregular_directory
+  | Unix.S_CHR -> Some Nonregular_character_device
+  | Unix.S_BLK -> Some Nonregular_block_device
+  | Unix.S_LNK -> Some Nonregular_symbolic_link
+  | Unix.S_FIFO -> Some Nonregular_fifo
+  | Unix.S_SOCK -> Some Nonregular_socket
+
+let read_file path : file_read =
+  (* Follow links to regular files as before. Check the opened descriptor as
+     well, since the path can change after [stat]. [O_NONBLOCK] prevents a
+     replacement FIFO from waiting for a writer during [open], but that open
+     can still wake a FIFO writer. It does not make opening an arbitrary
+     device safe if the path changes to one. *)
+  match Unix.stat path with
+  | exception Unix.Unix_error (error, _, _) -> read_path_error path error
+  | stat ->
+      (match unsupported_kind stat.Unix.st_kind with
+       | Some kind -> File_nonregular kind
+       | None ->
+           match Unix.openfile path [ Unix.O_RDONLY; Unix.O_NONBLOCK; Unix.O_CLOEXEC ] 0 with
+           | exception Unix.Unix_error (error, _, _) -> read_path_error path error
+           | fd ->
+               Fun.protect
+                 ~finally:(fun () -> try Unix.close fd with Unix.Unix_error _ -> ())
+                 (fun () ->
+                   match Unix.fstat fd with
+                   | exception Unix.Unix_error (error, _, _) -> File_unreadable error
+                   | opened ->
+                       match unsupported_kind opened.Unix.st_kind with
+                       | Some kind -> File_nonregular kind
+                       | None ->
+                           let buffer = Buffer.create read_chunk_bytes in
+                           let chunk = Bytes.create read_chunk_bytes in
+                           let rec drain () =
+                             match Unix.read fd chunk 0 read_chunk_bytes with
+                             | 0 -> File_bytes (Buffer.contents buffer)
+                             | count ->
+                                 Buffer.add_subbytes buffer chunk 0 count;
+                                 drain ()
+                             | exception Unix.Unix_error (Unix.EINTR, _, _) -> drain ()
+                             | exception Unix.Unix_error (error, _, _) -> File_unreadable error
+                           in
+                           drain ()))
 
 let decode_bytes bytes : (state, reason) result =
   match Yojson.Safe.from_string bytes with
@@ -249,6 +288,7 @@ let decode_prepared_bytes ~path bytes : (prepared_state, reason) result =
 let mirror_status_of_read = function
   | File_absent -> Mirror_absent
   | File_unreadable error -> Mirror_unreadable error
+  | File_nonregular kind -> Mirror_nonregular kind
   | File_bytes bytes ->
       (match decode_bytes bytes with
        | Ok state ->
@@ -257,7 +297,10 @@ let mirror_status_of_read = function
        | Error reason -> Mirror_rejected reason)
 
 let make_unavailable config ~reason ~mirror =
-  { file = goals_path config; reason; mirror; reset_step = reset_step_of_reason reason }
+  let reset_step = match mirror with
+    | Mirror_unreadable _ | Mirror_nonregular _ -> Inspect_path
+    | Mirror_absent | Mirror_decodes _ | Mirror_rejected _ -> reset_step_of_reason reason in
+  { file = goals_path config; reason; mirror; reset_step }
 
 let load_prepared_source config =
   let path = goals_path config in
@@ -267,11 +310,14 @@ let load_prepared_source config =
       clear_goals_cache_for path;
       (match read_mirror () with
        | Mirror_absent -> `Uninitialized
-       | (Mirror_unreadable _ | Mirror_decodes _ | Mirror_rejected _) as mirror ->
+       | (Mirror_unreadable _ | Mirror_nonregular _ | Mirror_decodes _ | Mirror_rejected _) as mirror ->
            `Unavailable (make_unavailable config ~reason:Missing_after_init ~mirror))
   | File_unreadable error ->
       clear_goals_cache_for path;
       `Unavailable (make_unavailable config ~reason:(Unreadable error) ~mirror:(read_mirror ()))
+  | File_nonregular kind ->
+      clear_goals_cache_for path;
+      `Unavailable (make_unavailable config ~reason:(Nonregular kind) ~mirror:(read_mirror ()))
   | File_bytes bytes ->
       (match decode_prepared_bytes ~path bytes with
        | Ok prepared -> `Available prepared
@@ -299,6 +345,18 @@ let find_goal config ~goal_id : lookup =
 
 (* {1 Writing} *)
 
+(* The local JSON writer publishes by rename, which replaces a final symlink
+   rather than updating its target. Preserve an observed mirror link. *)
+let refuse_symlink_replacement path =
+  match Unix.lstat path with
+  | stat ->
+      if stat.Unix.st_kind = Unix.S_LNK then
+        Error (Printf.sprintf "refusing to replace symbolic link: %s" path)
+      else Ok ()
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok ()
+  | exception Unix.Unix_error (error, _, _) ->
+      Error (Printf.sprintf "cannot inspect %s: %s" path (Unix.error_message error))
+
 let write_state_result config state =
   ensure_dirs config;
   let path = goals_path config in
@@ -308,7 +366,11 @@ let write_state_result config state =
      to that same authority through the shared encoder and atomic writer. *)
   let* () = Workspace_utils.write_json_local path json in
   Goal_projection_generation.advance ();
-  (match Workspace_utils.write_json_local (goals_recovery_path config) json with
+  (match
+     let mirror = goals_recovery_path config in
+     let* () = refuse_symlink_replacement mirror in
+     Workspace_utils.write_json_local mirror json
+   with
    | Ok () -> ()
    | Error msg ->
      Log.Misc.warn

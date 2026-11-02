@@ -95,6 +95,7 @@ function decodeGoalStoreMirror(raw: unknown): GoalStoreMirror {
     }
     case 'mirror_absent':
     case 'mirror_unreadable':
+    case 'mirror_nonregular':
     case 'mirror_rejected':
       if (raw.goal_count !== null) throw new GoalStoreEnvelopeError(`${status} carries a goal_count`)
       return { status, goalCount: null }
@@ -125,6 +126,7 @@ function decodeGoalStoreUnavailable(raw: Record<string, unknown>): GoalStoreUnav
       break
     case 'missing_after_init':
     case 'unreadable':
+    case 'nonregular':
     case 'not_json':
       if (raw.field !== null) throw new GoalStoreEnvelopeError(`${reason} carries a field`)
       field = null

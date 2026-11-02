@@ -260,11 +260,22 @@ def goal_source_error(value: Json) -> None:
         elif kind not in named or error.keys() != {"kind"}:
             raise ValueError("Unix error must use a known variant and its exact fields")
 
+    def nonregular_kind(value: Json) -> None:
+        if value not in ("directory", "character_device", "block_device", "symbolic_link", "fifo", "socket"):
+            raise ValueError("unknown nonregular file kind")
+
+    def exact_fields(value: dict[str, Json], fields: set[str], name: str) -> None:
+        if value.keys() != fields:
+            raise ValueError(f"{name} fields do not match")
+
     def reason(value: Json) -> None:
         error = obj(value, "goal source reason")
         kind = error.get("kind")
         if kind == "unreadable":
             unix_error(error.get("error"))
+        elif kind == "nonregular":
+            exact_fields(error, {"kind", "file_kind"}, "goal source reason")
+            nonregular_kind(error.get("file_kind"))
         elif kind in ("not_json", "schema_rejected"):
             string(error.get("detail"), "goal source detail")
             if kind == "schema_rejected":
@@ -276,6 +287,9 @@ def goal_source_error(value: Json) -> None:
     mirror = obj(record.get("mirror"), "goal mirror")
     if mirror.get("kind") == "mirror_unreadable":
         unix_error(mirror.get("error"))
+    elif mirror.get("kind") == "mirror_nonregular":
+        exact_fields(mirror, {"kind", "file_kind"}, "goal mirror")
+        nonregular_kind(mirror.get("file_kind"))
     elif mirror.get("kind") == "mirror_decodes":
         count(mirror.get("goal_count"), "mirror goal count")
         string(mirror.get("updated_at"), "mirror updated_at")
@@ -286,7 +300,7 @@ def goal_source_error(value: Json) -> None:
     reset = obj(record.get("reset_step"), "goal reset step")
     if reset.get("kind") == "repair_field":
         string(reset.get("field"), "goal repair field")
-    elif reset.get("kind") not in ("reset_goal_store", "restore_permission"):
+    elif reset.get("kind") not in ("reset_goal_store", "restore_permission", "inspect_path"):
         raise ValueError("unknown goal reset step")
 
 

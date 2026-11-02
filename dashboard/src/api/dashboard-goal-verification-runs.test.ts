@@ -126,6 +126,34 @@ describe('parseGoalVerificationRunsResponse', () => {
     expect(parsed.count).toBe(2)
   })
 
+  it('keeps a skipped scan that asks the operator to inspect the store path', () => {
+    const parsed = parseGoalVerificationRunsResponse({ generated_at: 'now', count: 1,
+      runs: [{ kind: 'scan_skipped', run_id: 'scan-path', started_at: 1786000002,
+        reason: 'unreadable', field: null, file: '/work/.masc/goals.json',
+        mirror: { status: 'mirror_unreadable', goal_count: null }, reset_step: 'inspect_path' }] })
+    expect(parsed.skippedScans[0]?.resetStep).toBe('inspect_path')
+  })
+
+  it('keeps observed nonregular primary and mirror statuses distinct from I/O errors', () => {
+    const parsed = parseGoalVerificationRunsResponse({ generated_at: 'now', count: 1,
+      runs: [{ kind: 'scan_skipped', run_id: 'scan-special', started_at: 1786000002,
+        reason: 'nonregular', field: null, file: '/work/.masc/goals.json',
+        mirror: { status: 'mirror_nonregular', goal_count: null }, reset_step: 'inspect_path' }] })
+    expect(parsed.skippedScans[0]).toMatchObject({ reason: 'nonregular',
+      mirror: { status: 'mirror_nonregular' }, resetStep: 'inspect_path' })
+  })
+
+  it.each([
+    [{ reason: 'nonregular', field: 'unexpected' }, 'nonregular carries a field'],
+    [{ mirror: { status: 'mirror_nonregular', goal_count: 1 } }, 'mirror_nonregular carries a goal_count'],
+  ] as const)('rejects inconsistent skipped-scan members', (patch, message) => {
+    expect(() => parseGoalVerificationRunsResponse({ generated_at: 'now', count: 1,
+      runs: [{ kind: 'scan_skipped', run_id: 'scan-special', started_at: 1786000002,
+        reason: 'nonregular', field: null, file: '/work/.masc/goals.json',
+        mirror: { status: 'mirror_nonregular', goal_count: null }, reset_step: 'inspect_path', ...patch }] }))
+      .toThrow(message)
+  })
+
   it('rejects a row without a known kind', () => {
     expect(() => parseGoalVerificationRunsResponse({ generated_at: 'now', count: 1,
       runs: [row({ kind: 'scan' })] })).toThrow('kind has unknown value')

@@ -865,6 +865,33 @@ let test_a_start_state_witnesses_a_position_no_turn_ended_at () =
 
 module Task_context = Masc.Keeper_turn_task_context
 
+let test_path_inspection_survives_turn_boundary () =
+  with_workspace @@ fun ~config ~keepers_dir ->
+  ignore (Masc.Workspace.init config ~agent_name:None);
+  let id = match Keeper_id.Task_id.of_string "task-path" with Ok id -> id | Error e -> fail e in
+  let unavailable : Goal_store.unavailable =
+    { file = "/work/.masc/goals.json"; reason = Goal_store.Unreadable Unix.ENOENT;
+      mirror = Goal_store.Mirror_absent; reset_step = Goal_store.Inspect_path } in
+  let nonregular = { unavailable with reason = Goal_store.Nonregular Goal_store.Nonregular_fifo;
+    mirror = Goal_store.Mirror_nonregular Goal_store.Nonregular_directory } in
+  let record turn unavailable =
+    let task_context = Task_context.Task { task_id = id;
+      goals = Error (Task_context.Goal_source_unavailable unavailable) } in
+    { Boundaries.recorded_at = 200.; event = Boundaries.Turn_ended
+      { turn_ref = Ids.Turn_ref.make ~trace_id:"trace" ~absolute_turn:turn;
+        history_at_start = Boundaries.Fresh_history; position = Boundaries.No_atom_history; task_context } }
+  in
+  let original = record 1 unavailable and observed_kind = record 2 nonregular in
+  List.iter (fun written ->
+    match Boundaries.append ~keepers_dir ~keeper_id written with
+    | Ok () -> () | Error e -> fail (Boundaries.append_error_to_string e)) [original; observed_kind];
+  match read_lines ~keepers_dir with
+  | [_, decoded_original; _, decoded_kind] ->
+      check record_t "path inspection survives boundary replay" original decoded_original;
+      check record_t "nonregular observation survives boundary replay" observed_kind decoded_kind
+  | _ -> fail "missing path-inspection boundary"
+;;
+
 let test_admission_context_survives_task_and_goal_changes () =
   with_workspace @@ fun ~config ~keepers_dir ->
   ignore (Masc.Workspace.init config ~agent_name:None);
@@ -986,6 +1013,7 @@ let () =
   run
     "keeper_turn_boundaries"
     [ ( "admission context", [
+        test_case "path inspection survives boundary replay" `Quick test_path_inspection_survives_turn_boundary;
         test_case "Task and Goal changes preserve admission" `Quick test_admission_context_survives_task_and_goal_changes;
         test_case "strict context and independent goalless observation" `Quick test_admission_context_strict_and_goalless ])
     ; ( "codec"

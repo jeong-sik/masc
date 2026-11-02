@@ -7,6 +7,14 @@ import { get, type AbortableRequestOptions } from './core'
 import { decodeGoalProofCriterion } from './goal-proof'
 import type { GoalProofCriterion } from '../types/core'
 import {
+  GOAL_STORE_MIRROR_STATUSES,
+  GOAL_STORE_RESET_STEPS,
+  GOAL_STORE_UNAVAILABLE_REASONS,
+  type GoalStoreMirrorStatus,
+  type GoalStoreResetStep,
+  type GoalStoreUnavailableReason,
+} from '../types/goal-store-unavailable'
+import {
   parseVerificationToolObservation,
   type VerificationToolObservation,
 } from './dashboard-verification-runs'
@@ -18,9 +26,7 @@ export type GoalVerificationRunStatus = 'running' | 'reviewed' | 'committed' | '
 // run; a skipped scan is a verifier pass the goal store refused, which
 // reviewed nothing and carries the goal_store_unavailable envelope's members.
 export type GoalVerificationRowKind = 'review' | 'scan_skipped'
-export type GoalStoreUnavailableReason = 'missing_after_init' | 'unreadable' | 'not_json' | 'schema_rejected'
-export type GoalStoreMirrorStatus = 'mirror_absent' | 'mirror_unreadable' | 'mirror_decodes' | 'mirror_rejected'
-export type GoalStoreResetStep = 'repair_field' | 'reset_goal_store' | 'restore_permission'
+export type { GoalStoreMirrorStatus, GoalStoreResetStep, GoalStoreUnavailableReason } from '../types/goal-store-unavailable'
 
 export interface GoalVerificationScanSkippedRecord {
   runId: string
@@ -89,22 +95,26 @@ function finiteNonNegative(value: unknown, context: string): number {
 
 function parseScanSkipped(raw: Record<string, unknown>, context: string): GoalVerificationScanSkippedRecord {
   exactFields(raw, ['kind', 'run_id', 'started_at', 'reason', 'field', 'file', 'mirror', 'reset_step'], [], context)
-  const reason = raw.reason
-  if (reason !== 'missing_after_init' && reason !== 'unreadable' && reason !== 'not_json' && reason !== 'schema_rejected') {
-    protocolError(`${context}.reason has unknown value ${JSON.stringify(reason)}`)
+  const reason = GOAL_STORE_UNAVAILABLE_REASONS.find(value => value === raw.reason)
+  if (reason === undefined) {
+    protocolError(`${context}.reason has unknown value ${JSON.stringify(raw.reason)}`)
   }
   const field = raw.field
   if (field !== null && typeof field !== 'string') protocolError(`${context}.field must be a string or null`)
+  if (reason === 'nonregular' && field !== null) protocolError(`${context}.nonregular carries a field`)
   if (!isRecord(raw.mirror)) protocolError(`${context}.mirror must be an object`)
-  exactFields(raw.mirror, ['status', 'goal_count'], [], `${context}.mirror`)
-  const mirrorStatus = raw.mirror.status
-  if (mirrorStatus !== 'mirror_absent' && mirrorStatus !== 'mirror_unreadable' && mirrorStatus !== 'mirror_decodes' && mirrorStatus !== 'mirror_rejected') {
-    protocolError(`${context}.mirror.status has unknown value ${JSON.stringify(mirrorStatus)}`)
+  const mirror = raw.mirror
+  exactFields(mirror, ['status', 'goal_count'], [], `${context}.mirror`)
+  const mirrorStatus = GOAL_STORE_MIRROR_STATUSES.find(value => value === mirror.status)
+  if (mirrorStatus === undefined) {
+    protocolError(`${context}.mirror.status has unknown value ${JSON.stringify(mirror.status)}`)
   }
-  const goalCount = raw.mirror.goal_count
+  const goalCount = mirror.goal_count
   if (goalCount !== null && !Number.isSafeInteger(goalCount)) protocolError(`${context}.mirror.goal_count must be an integer or null`)
+  if (mirrorStatus === 'mirror_nonregular' && goalCount !== null) protocolError(`${context}.mirror_nonregular carries a goal_count`)
   const resetStep = raw.reset_step
-  if (resetStep !== 'repair_field' && resetStep !== 'reset_goal_store' && resetStep !== 'restore_permission') {
+  const resetStepToken = GOAL_STORE_RESET_STEPS.find(step => step === resetStep)
+  if (resetStepToken === undefined) {
     protocolError(`${context}.reset_step has unknown value ${JSON.stringify(resetStep)}`)
   }
   return {
@@ -114,7 +124,7 @@ function parseScanSkipped(raw: Record<string, unknown>, context: string): GoalVe
     field,
     file: nonEmptyString(raw.file, `${context}.file`),
     mirror: { status: mirrorStatus, goalCount: goalCount as number | null },
-    resetStep,
+    resetStep: resetStepToken,
   }
 }
 

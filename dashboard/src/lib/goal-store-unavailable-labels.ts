@@ -33,9 +33,11 @@ function goalStoreLocationLabel(field: string): string {
 export function goalStoreReasonLabel(reason: GoalStoreUnavailableReason, field: string | null): string {
   switch (reason) {
     case 'missing_after_init':
-      return 'goals.json 이 초기화 뒤 사라졌습니다 (.last-good 미러만 남아 있음)'
+      return 'goals.json을 찾지 못했습니다. 마지막 저장본의 상태를 확인하세요'
     case 'unreadable':
       return '파일을 열거나 읽을 수 없습니다'
+    case 'nonregular':
+      return 'Goal 경로가 일반 파일이 아닙니다'
     case 'not_json':
       return '파일 내용이 JSON 이 아닙니다'
     case 'schema_rejected':
@@ -55,6 +57,8 @@ export function goalStoreMirrorLabel(mirror: GoalStoreMirror): string {
       return '.last-good 미러 없음'
     case 'mirror_unreadable':
       return '.last-good 미러를 읽을 수 없음'
+    case 'mirror_nonregular':
+      return '.last-good 미러가 일반 파일이 아님'
     case 'mirror_decodes':
       return mirror.goalCount === null
         ? '.last-good 미러는 읽힘 (서빙하지 않음)'
@@ -78,6 +82,8 @@ export function goalStoreResetStepLabel(resetStep: GoalStoreResetStep, field: st
       return 'masc goals reset --base-path <p> 로 goal store 를 리셋합니다 (파일은 옮기고 지우지 않음)'
     case 'restore_permission':
       return '파일 읽기 권한을 복구합니다'
+    case 'inspect_path':
+      return '파일 경로와 링크, 연결된 저장소와 서버 상태를 확인한 뒤 다시 조회하세요'
     default: {
       const unhandled: never = resetStep
       return unhandled

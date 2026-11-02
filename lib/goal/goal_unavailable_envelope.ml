@@ -8,11 +8,12 @@ let error_code = Tool_args.Unavailable
 
 let field_of_reason = function
   | Goal_store.Schema_rejected { field; _ } -> `String field
-  | Goal_store.Missing_after_init | Goal_store.Unreadable _ | Goal_store.Not_json _ -> `Null
+  | Goal_store.Missing_after_init | Goal_store.Unreadable _ | Goal_store.Nonregular _
+  | Goal_store.Not_json _ -> `Null
 
 let goal_count_of_mirror = function
   | Goal_store.Mirror_decodes { goal_count; _ } -> `Int goal_count
-  | Goal_store.Mirror_absent | Goal_store.Mirror_unreadable _
+  | Goal_store.Mirror_absent | Goal_store.Mirror_unreadable _ | Goal_store.Mirror_nonregular _
   | Goal_store.Mirror_rejected _ -> `Null
 
 let fields ({ file; reason; mirror; reset_step } : Goal_store.unavailable) =

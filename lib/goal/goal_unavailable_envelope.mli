@@ -9,7 +9,9 @@
     refused member or its containing location when the name is not plain
     printable ASCII for [Schema_rejected], and [null] otherwise, and
     [mirror.goal_count] is the mirror's row count for [Mirror_decodes] and
-    [null] otherwise. No response built from it carries a [goals] member. *)
+    [null] otherwise. The reason and mirror status distinguish observed
+    nonregular paths from I/O errors, but this projection does not carry the
+    observed file kind. No response built from it carries a [goals] member. *)
 
 val error_code : Tool_args.error_code
 (** {!Tool_args.Unavailable}; its wire token is [goal_store_unavailable]. *)

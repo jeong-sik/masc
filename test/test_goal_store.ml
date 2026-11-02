@@ -36,10 +36,10 @@ let utc_time date time =
 (* Calendar fixtures use the existing clock dependency, never wall time. *)
 let calendar_fixture_now = utc_time (2026, 9, 22) (12, 0, 0)
 
-let with_workspace ?now f =
+let with_workspace ?now ?dir f =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let dir = temp_dir () in
+  let dir = match dir with Some path -> path | None -> temp_dir () in
   Fun.protect
     ~finally:(fun () ->
       Option.iter (fun _ -> Time_compat.clear_clock ()) now;
@@ -350,7 +350,7 @@ let test_status_field_no_longer_decodes () =
   (match (unavailable config).reason with
    | Goal_store.Schema_rejected { field; _ } ->
      check string "the retired status field is the rejected member" "status" field
-   | Goal_store.Missing_after_init | Goal_store.Unreadable _ | Goal_store.Not_json _ ->
+   | Goal_store.Missing_after_init | Goal_store.Unreadable _ | Goal_store.Nonregular _ | Goal_store.Not_json _ ->
      fail "a row with the retired status field must be a schema rejection");
   (* Fail-closed: an unreadable store must not license a write.  Without this
      the next upsert would overwrite goals.json AND its .last-good mirror with an
@@ -597,7 +597,7 @@ let test_phaseless_row_no_longer_decodes () =
   match (unavailable config).reason with
   | Goal_store.Schema_rejected { field; _ } ->
     check string "phase-less store rejected on the phase member" "phase" field
-  | Goal_store.Missing_after_init | Goal_store.Unreadable _ | Goal_store.Not_json _ ->
+  | Goal_store.Missing_after_init | Goal_store.Unreadable _ | Goal_store.Nonregular _ | Goal_store.Not_json _ ->
     fail "a phase-less row must be a schema rejection"
 
 let test_priorityless_row_no_longer_decodes () =
@@ -633,7 +633,7 @@ let test_priorityless_row_no_longer_decodes () =
   match (unavailable config).reason with
   | Goal_store.Schema_rejected { field; _ } ->
     check string "priority-less store rejected on the priority member" "priority" field
-  | Goal_store.Missing_after_init | Goal_store.Unreadable _ | Goal_store.Not_json _ ->
+  | Goal_store.Missing_after_init | Goal_store.Unreadable _ | Goal_store.Nonregular _ | Goal_store.Not_json _ ->
     fail "a priority-less row must be a schema rejection"
 
 (* A goal in [phase], for fixtures. upsert_goal only creates Executing goals;
@@ -1325,8 +1325,55 @@ let seed_schema_rejected config =
 let reason_name = function
   | Goal_store.Missing_after_init -> "missing_after_init"
   | Goal_store.Unreadable _ -> "unreadable"
+  | Goal_store.Nonregular _ -> "nonregular"
   | Goal_store.Not_json _ -> "not_json"
   | Goal_store.Schema_rejected _ -> "schema_rejected"
+
+let test_nonregular_and_unix_errors_have_distinct_durable_values () =
+  let record reason mirror : Goal_store.unavailable =
+    { file = "/work/.masc/goals.json"; reason; mirror; reset_step = Goal_store.Inspect_path }
+  in
+  let roundtrip value =
+    match Goal_store_unavailable.record_of_yojson (Goal_store_unavailable.record_to_yojson value) with
+    | Ok decoded -> check bool "exact unavailable value survives" true (decoded = value)
+    | Error detail -> fail detail
+  in
+  let kinds = Goal_store.[ Nonregular_directory, Unix.S_DIR; Nonregular_character_device, Unix.S_CHR;
+    Nonregular_block_device, Unix.S_BLK; Nonregular_symbolic_link, Unix.S_LNK;
+    Nonregular_fifo, Unix.S_FIFO; Nonregular_socket, Unix.S_SOCK ] in
+  List.iter (fun (kind, unix_kind) ->
+    let value = record (Goal_store.Nonregular kind) (Goal_store.Mirror_nonregular kind) in
+    roundtrip value;
+    let json = Goal_store_unavailable.record_to_yojson value in
+    let encoded_kind = Yojson.Safe.Util.(json |> member "reason" |> member "file_kind" |> to_string) in
+    check string "kind spelling agrees with filesystem diagnostics"
+      (Fs_compat.file_kind_to_string unix_kind) encoded_kind) kinds;
+  List.iter (fun error ->
+    roundtrip (record (Goal_store.Unreadable error) (Goal_store.Mirror_unreadable error)))
+    [Unix.EISDIR; Unix.EOPNOTSUPP];
+  let legacy = `Assoc [
+    "file", `String "/work/.masc/goals.json";
+    "reason", `Assoc ["kind", `String "unreadable"; "error", `Assoc ["kind", `String "eopnotsupp"]];
+    "mirror", `Assoc ["kind", `String "mirror_unreadable"; "error", `Assoc ["kind", `String "eisdir"]];
+    "reset_step", `Assoc ["kind", `String "inspect_path"]] in
+  (match Goal_store_unavailable.record_of_yojson legacy with
+   | Ok decoded ->
+       check bool "historical errno remains an errno" true
+         (decoded = record (Goal_store.Unreadable Unix.EOPNOTSUPP) (Goal_store.Mirror_unreadable Unix.EISDIR))
+   | Error detail -> fail detail);
+  let rejected reason mirror =
+    let json = `Assoc ["file", `String "/work/.masc/goals.json"; "reason", reason;
+      "mirror", mirror; "reset_step", `Assoc ["kind", `String "inspect_path"]] in
+    match Goal_store_unavailable.record_of_yojson json with
+    | Error _ -> ()
+    | Ok _ -> fail "invalid nonregular value was accepted"
+  in
+  let valid_reason = `Assoc ["kind", `String "nonregular"; "file_kind", `String "fifo"] in
+  let valid_mirror = `Assoc ["kind", `String "mirror_nonregular"; "file_kind", `String "fifo"] in
+  rejected (`Assoc ["kind", `String "nonregular"; "file_kind", `String "invented"]) valid_mirror;
+  rejected valid_reason (`Assoc ["kind", `String "mirror_nonregular"; "file_kind", `String "invented"]);
+  rejected (`Assoc ["kind", `String "nonregular"]) valid_mirror;
+  rejected valid_reason (`Assoc ["kind", `String "mirror_nonregular"; "file_kind", `String "fifo"; "extra", `Null])
 
 let test_source_uninitialized_only_when_both_files_absent () =
   with_workspace @@ fun config ->
@@ -1365,6 +1412,299 @@ let test_source_missing_after_init () =
                 ^ Goal_store.unavailable_to_string u));
   check bool "read did not recreate goals.json" false
     (Sys.file_exists (Goal_store.goals_path config))
+
+let with_goal_file_link path target f =
+  Unix.symlink target path;
+  Fun.protect
+    ~finally:(fun () ->
+      match Unix.unlink path with
+      | () -> ()
+      | exception Unix.Unix_error (Unix.ENOENT, _, _) -> ())
+    f
+
+let check_goal_file_link path target =
+  check bool "link remains a symlink" true ((Unix.lstat path).Unix.st_kind = Unix.S_LNK);
+  check string "link target is unchanged" target (Unix.readlink path)
+
+let fifo_primary_case dir =
+  with_workspace ~dir @@ fun config ->
+  let primary = Goal_store.goals_path config in
+  Unix.mkfifo primary 0o600;
+  let expect_unavailable () =
+    match unavailable config with
+    | { reason = Goal_store.Nonregular Goal_store.Nonregular_fifo;
+        mirror = Goal_store.Mirror_absent; reset_step = Goal_store.Inspect_path; _ } as u ->
+        (match Goal_store_unavailable.record_of_yojson (Goal_store_unavailable.record_to_yojson u) with
+         | Ok decoded -> check bool "unsupported kind survives durable codec" true (decoded = u)
+         | Error detail -> fail detail)
+    | u -> fail ("expected an unreadable FIFO: " ^ Goal_store.unavailable_to_string u)
+  in
+  expect_unavailable ();
+  (match Goal_store.upsert_goal config ~title:"new" ~metric:"count" ~target_value:"1" () with
+   | Error (Goal_store.Store_unavailable _) -> ()
+   | Error error -> fail (write_error_msg error)
+   | Ok _ -> fail "upsert accepted a FIFO primary");
+  let reader = Unix.openfile primary [Unix.O_RDONLY; Unix.O_NONBLOCK] 0 in
+  Fun.protect ~finally:(fun () -> Unix.close reader) (fun () ->
+    let writer = Unix.openfile primary [Unix.O_WRONLY; Unix.O_NONBLOCK] 0 in
+    Fun.protect ~finally:(fun () -> Unix.close writer) (fun () ->
+      let payload = "not a Goal store" in
+      check int "queued FIFO fixture" (String.length payload)
+        (Unix.write_substring writer payload 0 (String.length payload));
+      expect_unavailable ();
+      let data = Bytes.create (String.length payload) in
+      check int "reader can still consume all bytes" (String.length payload)
+        (Unix.read reader data 0 (Bytes.length data));
+      check string "store reader did not consume FIFO bytes" payload (Bytes.to_string data)));
+  check bool "primary remains a FIFO" true ((Unix.lstat primary).Unix.st_kind = Unix.S_FIFO);
+  check bool "no mirror created" false (Sys.file_exists (mirror_path config))
+
+let fifo_mirror_link_case dir =
+  with_workspace ~dir @@ fun config ->
+  let state : Goal_store.state =
+    { version = 1; updated_at = iso_now (); goals = [make_goal "fifo-mirror" "mirror"];
+      pending_events = []; pending_notifications = [] } in
+  (match Goal_store.write_state_result config state with Ok () -> () | Error e -> fail e);
+  let primary = Goal_store.goals_path config in
+  let mirror = mirror_path config in
+  let target = "fifo-mirror-target" in
+  let target_path = Filename.concat (Filename.dirname mirror) target in
+  Unix.unlink mirror;
+  Unix.mkfifo target_path 0o600;
+  with_goal_file_link mirror target @@ fun () ->
+  let next = { state with version = state.version + 1 } in
+  (match Goal_store.write_state_result config next with Ok () -> () | Error e -> fail e);
+  check_goal_file_link mirror target;
+  check int "primary commit remains available" next.version (available config).version;
+  Unix.unlink primary;
+  (match unavailable config with
+   | { reason = Goal_store.Missing_after_init;
+       mirror = Goal_store.Mirror_nonregular Goal_store.Nonregular_fifo;
+       reset_step = Goal_store.Inspect_path; _ } -> ()
+   | u -> fail ("expected FIFO mirror inspection: " ^ Goal_store.unavailable_to_string u));
+  (match Goal_store.upsert_goal config ~title:"new" ~metric:"count" ~target_value:"1" () with
+   | Error (Goal_store.Store_unavailable _) -> ()
+   | Error error -> fail (write_error_msg error)
+   | Ok _ -> fail "upsert accepted a FIFO mirror");
+  check_goal_file_link mirror target;
+  check bool "mirror target remains a FIFO" true ((Unix.lstat target_path).Unix.st_kind = Unix.S_FIFO);
+  check bool "no primary recreated" false (Sys.file_exists primary)
+
+let fifo_mirror_direct_case dir =
+  with_workspace ~dir @@ fun config ->
+  let primary = Goal_store.goals_path config in
+  let mirror = mirror_path config in
+  Unix.mkfifo mirror 0o600;
+  (match unavailable config with
+   | { reason = Goal_store.Missing_after_init;
+       mirror = Goal_store.Mirror_nonregular Goal_store.Nonregular_fifo;
+       reset_step = Goal_store.Inspect_path; _ } -> ()
+   | u -> fail ("expected a direct FIFO mirror: " ^ Goal_store.unavailable_to_string u));
+  write_raw primary "{broken";
+  (match unavailable config with
+   | { reason = Goal_store.Not_json _;
+       mirror = Goal_store.Mirror_nonregular Goal_store.Nonregular_fifo;
+       reset_step = Goal_store.Inspect_path; _ } -> ()
+   | u -> fail ("expected FIFO mirror inspection: " ^ Goal_store.unavailable_to_string u));
+  check bool "mirror remains a FIFO" true ((Unix.lstat mirror).Unix.st_kind = Unix.S_FIFO)
+
+(* Run each FIFO case in a child so a blocking open or read fails the test
+   without hanging the suite. The parent owns and removes the fixture even
+   when the child needs to be killed. *)
+let rec remove_fifo_fixture path =
+  match Unix.lstat path with
+  | stat ->
+      (match stat.Unix.st_kind with
+       | Unix.S_DIR ->
+           Sys.readdir path
+           |> Array.iter (fun entry -> remove_fifo_fixture (Filename.concat path entry));
+           Unix.rmdir path
+       | Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK ->
+           Unix.unlink path)
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> ()
+
+let run_fifo_case name =
+  let dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> remove_fifo_fixture dir) (fun () ->
+    let exe = Sys.executable_name in
+    let pid = Unix.create_process exe [|exe; "--goal-fifo-case"; name; dir|]
+        Unix.stdin Unix.stdout Unix.stderr in
+    let reaped = ref false in
+    Fun.protect
+      ~finally:(fun () ->
+        if not !reaped then begin
+          (try Unix.kill pid Sys.sigkill with Unix.Unix_error (Unix.ESRCH, _, _) -> ());
+          (try ignore (Unix.waitpid [] pid) with Unix.Unix_error (Unix.ECHILD, _, _) -> ())
+        end)
+      (fun () ->
+        let deadline = Unix.gettimeofday () +. 30.0 in
+        let rec wait () =
+          match Unix.waitpid [Unix.WNOHANG] pid with
+          | 0, _ ->
+              if Unix.gettimeofday () >= deadline then fail ("Goal FIFO case blocked: " ^ name);
+              ignore (Unix.select [] [] [] 0.05);
+              wait ()
+          | _, status ->
+              reaped := true;
+              (match status with
+               | Unix.WEXITED 0 -> ()
+               | Unix.WEXITED code -> fail (Printf.sprintf "Goal FIFO case %s exited %d" name code)
+               | Unix.WSIGNALED signal -> fail (Printf.sprintf "Goal FIFO case %s signaled %d" name signal)
+               | Unix.WSTOPPED signal -> fail (Printf.sprintf "Goal FIFO case %s stopped %d" name signal))
+          | exception Unix.Unix_error (Unix.EINTR, _, _) -> wait ()
+        in
+        wait ()))
+
+let test_fifo_primary_is_unavailable_without_consuming_data () = run_fifo_case "primary"
+let test_fifo_mirror_link_survives_commit_and_is_unavailable () = run_fifo_case "mirror-link"
+let test_fifo_mirror_direct_is_unavailable () = run_fifo_case "mirror-direct"
+
+let test_regular_file_links_remain_readable () =
+  with_workspace @@ fun config ->
+  let stamp = "2026-09-08T16:20:13Z" in
+  Goal_store.write_state config
+    { pending_events = []; pending_notifications = []; version = 7; updated_at = stamp;
+      goals = [make_goal "linked-goal" "linked"] };
+  let primary = Goal_store.goals_path config in
+  let primary_target = "regular-primary-target" in
+  Unix.rename primary (Filename.concat (Filename.dirname primary) primary_target);
+  with_goal_file_link primary primary_target (fun () ->
+    check int "linked regular primary decodes" 7 (available config).version;
+    check_goal_file_link primary primary_target);
+  let mirror = mirror_path config in
+  let mirror_target = "regular-mirror-target" in
+  Unix.rename mirror (Filename.concat (Filename.dirname mirror) mirror_target);
+  write_raw primary "{broken";
+  with_goal_file_link mirror mirror_target (fun () ->
+    (match unavailable config with
+     | { reason = Goal_store.Not_json _;
+         mirror = Goal_store.Mirror_decodes { goal_count = 1; updated_at };
+         reset_step = Goal_store.Reset_goal_store; _ } ->
+         check string "linked regular mirror is evidence" stamp updated_at
+     | u -> fail ("expected regular linked mirror evidence: " ^ Goal_store.unavailable_to_string u));
+    check_goal_file_link mirror mirror_target)
+
+let test_dangling_primary_is_not_uninitialized () =
+  with_workspace @@ fun config ->
+  let primary = Goal_store.goals_path config in
+  let target = "missing-primary-goal-store" in
+  with_goal_file_link primary target @@ fun () ->
+  (match unavailable config with
+   | { reason = Goal_store.Unreadable Unix.ENOENT; mirror = Goal_store.Mirror_absent;
+       reset_step = Goal_store.Inspect_path; _ } -> ()
+   | u -> fail ("expected unreadable dangling primary: " ^ Goal_store.unavailable_to_string u));
+  (match Goal_store.upsert_goal config ~title:"new" ~metric:"count" ~target_value:"1" () with
+   | Error (Goal_store.Store_unavailable _) -> ()
+   | Error error -> fail (write_error_msg error)
+   | Ok _ -> fail "upsert replaced a dangling primary link");
+  check_goal_file_link primary target;
+  check bool "no mirror created" false (Sys.file_exists (mirror_path config))
+
+let test_dangling_mirror_is_evidence_of_prior_store () =
+  with_workspace @@ fun config ->
+  let mirror = mirror_path config in
+  let target = "missing-goal-mirror" in
+  with_goal_file_link mirror target @@ fun () ->
+  (match unavailable config with
+   | { reason = Goal_store.Missing_after_init;
+       mirror = Goal_store.Mirror_unreadable Unix.ENOENT; reset_step = Goal_store.Inspect_path; _ } -> ()
+   | u -> fail ("expected unreadable dangling mirror: " ^ Goal_store.unavailable_to_string u));
+  (match Goal_store.upsert_goal config ~title:"new" ~metric:"count" ~target_value:"1" () with
+   | Error (Goal_store.Store_unavailable _) -> ()
+   | Error error -> fail (write_error_msg error)
+   | Ok _ -> fail "upsert treated a dangling mirror as an absent store");
+  check_goal_file_link mirror target;
+  check bool "no primary created" false (Sys.file_exists (Goal_store.goals_path config))
+
+let test_store_root_symlink_paths () =
+  with_workspace @@ fun config ->
+  let root = Filename.dirname (Goal_store.goals_path config) in
+  let saved = root ^ ".saved" in
+  Unix.rename root saved;
+  Fun.protect ~finally:(fun () -> Unix.rename saved root) (fun () ->
+    with_goal_file_link root "missing-masc-directory" (fun () ->
+      match unavailable config with
+      | { reason = Goal_store.Unreadable Unix.ENOENT;
+          mirror = Goal_store.Mirror_unreadable Unix.ENOENT; reset_step = Goal_store.Inspect_path; _ } -> ()
+      | u -> fail ("expected unreadable workspace link: " ^ Goal_store.unavailable_to_string u));
+    with_goal_file_link root (Filename.basename saved) (fun () ->
+      (match Goal_store.load_source config with
+       | Goal_store.Uninitialized -> ()
+       | Goal_store.Available _ -> fail "new linked workspace was already initialized"
+       | Goal_store.Unavailable u -> fail (Goal_store.unavailable_to_string u));
+      (match Goal_store.upsert_goal config ~title:"linked root" ~metric:"count" ~target_value:"1" () with
+       | Ok _ -> () | Error error -> fail (write_error_msg error));
+      check_goal_file_link root (Filename.basename saved);
+      ignore (available config)))
+
+let test_unreadable_mirror_takes_precedence_over_reset () =
+  with_workspace @@ fun config ->
+  let primary = Goal_store.goals_path config in
+  let mirror = mirror_path config in
+  write_raw primary "{broken";
+  with_goal_file_link mirror "missing-mirror-target" (fun () ->
+    let u = unavailable config in
+    (match u with
+     | { reason = Goal_store.Not_json _; mirror = Goal_store.Mirror_unreadable Unix.ENOENT;
+         reset_step = Goal_store.Inspect_path; _ } -> ()
+     | _ -> fail ("expected mirror inspection: " ^ Goal_store.unavailable_to_string u));
+    (match Goal_store_unavailable.record_of_yojson (Goal_store_unavailable.record_to_yojson u) with
+     | Ok decoded -> check bool "path inspection survives durable codec" true (decoded = u)
+     | Error detail -> fail detail);
+    check_goal_file_link mirror "missing-mirror-target")
+
+let test_unresolvable_links_request_path_inspection () =
+  with_workspace @@ fun config ->
+  let primary = Goal_store.goals_path config in
+  let mirror = mirror_path config in
+  with_goal_file_link primary (Filename.basename primary) (fun () ->
+    match unavailable config with
+    | { reason = Goal_store.Unreadable Unix.ELOOP; reset_step = Goal_store.Inspect_path; _ } -> ()
+    | u -> fail ("expected cyclic primary inspection: " ^ Goal_store.unavailable_to_string u));
+  with_goal_file_link mirror (Filename.basename mirror) (fun () ->
+    match unavailable config with
+    | { reason = Goal_store.Missing_after_init; mirror = Goal_store.Mirror_unreadable Unix.ELOOP;
+        reset_step = Goal_store.Inspect_path; _ } -> ()
+    | u -> fail ("expected cyclic mirror inspection: " ^ Goal_store.unavailable_to_string u));
+  let regular = Filename.concat (Filename.dirname primary) "regular-ancestor" in
+  write_raw regular "file, not directory";
+  with_goal_file_link mirror "regular-ancestor/child" (fun () ->
+    match unavailable config with
+    | { reason = Goal_store.Missing_after_init; mirror = Goal_store.Mirror_unreadable Unix.ENOTDIR;
+        reset_step = Goal_store.Inspect_path; _ } -> ()
+    | u -> fail ("expected invalid mirror path inspection: " ^ Goal_store.unavailable_to_string u))
+
+let test_mirror_symlink_is_not_replaced_on_write () =
+  with_workspace @@ fun config ->
+  let state : Goal_store.state =
+    { version = 1; updated_at = iso_now (); goals = [make_goal "mirror-goal" "mirror"];
+      pending_events = []; pending_notifications = [] } in
+  (match Goal_store.write_state_result config state with Ok () -> () | Error e -> fail e);
+  let mirror = mirror_path config in
+  let target = "original-goals-mirror.json" in
+  let target_path = Filename.concat (Filename.dirname mirror) target in
+  Unix.rename mirror target_path;
+  let bytes = Fs_compat.load_file target_path in
+  with_goal_file_link mirror target @@ fun () ->
+  let next = { state with version = state.version + 1 } in
+  (match Goal_store.write_state_result config next with Ok () -> () | Error e -> fail e);
+  check_goal_file_link mirror target;
+  check string "mirror target bytes are unchanged" bytes (Fs_compat.load_file target_path);
+  check int "primary commit still succeeds" next.version (available config).version
+
+let test_dangling_mirror_is_preserved_after_primary_commit () =
+  with_workspace @@ fun config ->
+  let state : Goal_store.state =
+    { version = 1; updated_at = iso_now (); goals = [make_goal "mirror-goal" "mirror"];
+      pending_events = []; pending_notifications = [] } in
+  (match Goal_store.write_state_result config state with Ok () -> () | Error e -> fail e);
+  let mirror = mirror_path config in
+  Unix.unlink mirror;
+  with_goal_file_link mirror "missing-mirror-target" @@ fun () ->
+  let next = { state with version = state.version + 1 } in
+  (match Goal_store.write_state_result config next with Ok () -> () | Error e -> fail e);
+  check_goal_file_link mirror "missing-mirror-target";
+  check int "primary commit still succeeds" next.version (available config).version
 
 let test_source_not_json () =
   with_workspace @@ fun config ->
@@ -1435,13 +1775,13 @@ let test_document_rejection_order_through_public_consumers () =
      | Goal_store.Schema_rejected { field; detail } ->
        check string "reader keeps the canonical rejected field" expected_field field;
        check string "reader keeps the canonical rejection detail" expected_detail detail
-     | Goal_store.Missing_after_init | Goal_store.Unreadable _ | Goal_store.Not_json _ ->
+     | Goal_store.Missing_after_init | Goal_store.Unreadable _ | Goal_store.Nonregular _ | Goal_store.Not_json _ ->
        fail (Goal_store.unavailable_to_string u));
     (match u.mirror with
      | Goal_store.Mirror_decodes { goal_count; updated_at } ->
        check int "valid mirror remains evidence" 1 goal_count;
        check string "mirror evidence keeps its timestamp" stamp updated_at
-     | Goal_store.Mirror_absent | Goal_store.Mirror_unreadable _ | Goal_store.Mirror_rejected _ ->
+     | Goal_store.Mirror_absent | Goal_store.Mirror_unreadable _ | Goal_store.Mirror_nonregular _ | Goal_store.Mirror_rejected _ ->
        fail ("expected a readable mirror: " ^ Goal_store.unavailable_to_string u));
     check bool "repair step names the rejected field" true
       (u.reset_step = Goal_store.Repair_field expected_field)
@@ -1484,16 +1824,14 @@ let test_document_rejection_order_through_public_consumers () =
   check int "restored primary retains its own revision" state.version restored.version;
   check string "reading restored primary leaves the mirror unchanged" valid_mirror (read mirror)
 
-(* A directory at the path opens read-only and fails on the first read, so
-   the errno that survives is EISDIR; it needs no permission change and
-   holds as root. *)
-let test_source_unreadable_eisdir () =
+(* A directory is classified by the observed kind without inventing errno. *)
+let test_source_nonregular_directory () =
   with_workspace @@ fun config ->
   Unix.mkdir (Goal_store.goals_path config) 0o755;
   match unavailable config with
-  | { reason = Goal_store.Unreadable Unix.EISDIR; mirror = Goal_store.Mirror_absent;
-      reset_step = Goal_store.Reset_goal_store; _ } -> ()
-  | u -> fail ("expected Unreadable EISDIR: " ^ Goal_store.unavailable_to_string u)
+  | { reason = Goal_store.Nonregular Goal_store.Nonregular_directory; mirror = Goal_store.Mirror_absent;
+      reset_step = Goal_store.Inspect_path; _ } -> ()
+  | u -> fail ("expected nonregular directory: " ^ Goal_store.unavailable_to_string u)
 
 let test_source_unreadable_eacces () =
   if Unix.geteuid () = 0 then begin
@@ -1537,12 +1875,12 @@ let test_mirror_four_states_are_evidence () =
   in
   write_raw primary "{broken";
   expect "absent" (function Goal_store.Mirror_absent -> true
-    | Goal_store.Mirror_unreadable _ | Goal_store.Mirror_decodes _
+    | Goal_store.Mirror_unreadable _ | Goal_store.Mirror_nonregular _ | Goal_store.Mirror_decodes _
     | Goal_store.Mirror_rejected _ -> false);
   Unix.mkdir mirror 0o755;
-  expect "unreadable" (function Goal_store.Mirror_unreadable Unix.EISDIR -> true
+  expect "nonregular directory" (function Goal_store.Mirror_nonregular Goal_store.Nonregular_directory -> true
     | Goal_store.Mirror_unreadable _ | Goal_store.Mirror_absent
-    | Goal_store.Mirror_decodes _ | Goal_store.Mirror_rejected _ -> false);
+    | Goal_store.Mirror_nonregular _ | Goal_store.Mirror_decodes _ | Goal_store.Mirror_rejected _ -> false);
   Unix.rmdir mirror;
   let stamp = "2026-09-09T00:10:29Z" in
   Goal_store.write_state config
@@ -1550,13 +1888,13 @@ let test_mirror_four_states_are_evidence () =
   write_raw primary "{broken";
   expect "decodes" (function
     | Goal_store.Mirror_decodes { goal_count = 5; updated_at } -> String.equal updated_at stamp
-    | Goal_store.Mirror_decodes _ | Goal_store.Mirror_unreadable _
+    | Goal_store.Mirror_decodes _ | Goal_store.Mirror_unreadable _ | Goal_store.Mirror_nonregular _
     | Goal_store.Mirror_absent | Goal_store.Mirror_rejected _ -> false);
   write_raw mirror (bytes_without_criterion_revision (phase_fixture_goals ()));
   expect "rejected" (function
     | Goal_store.Mirror_rejected
         (Goal_store.Schema_rejected { field = "criterion_revision"; _ }) -> true
-    | Goal_store.Mirror_rejected _ | Goal_store.Mirror_unreadable _
+    | Goal_store.Mirror_rejected _ | Goal_store.Mirror_unreadable _ | Goal_store.Mirror_nonregular _
     | Goal_store.Mirror_absent | Goal_store.Mirror_decodes _ -> false)
 
 (* Criterion 5: every writer refuses a Schema_rejected store and neither
@@ -1974,7 +2312,11 @@ let test_audit_intents_survive_other_goal_mutations () =
   check_pending "deletion preserves audit attribution"
 
 let () =
-  run "Goal_store"
+  match Array.to_list Sys.argv with
+  | [_; "--goal-fifo-case"; "primary"; dir] -> fifo_primary_case dir
+  | [_; "--goal-fifo-case"; "mirror-link"; dir] -> fifo_mirror_link_case dir
+  | [_; "--goal-fifo-case"; "mirror-direct"; dir] -> fifo_mirror_direct_case dir
+  | _ -> run "Goal_store"
     [ ( "audit outbox",
         [ test_case "refused audited upserts preserve store and outbox" `Quick
             test_refused_audited_upserts_preserve_store_and_outbox;
@@ -2065,12 +2407,29 @@ let () =
         [ test_case "uninitialized only when both files are absent" `Quick
             test_source_uninitialized_only_when_both_files_absent;
           test_case "missing after init" `Quick test_source_missing_after_init;
+          test_case "nonregular observations and Unix errors stay distinct in durable records" `Quick
+            test_nonregular_and_unix_errors_have_distinct_durable_values;
+          test_case "FIFO primary is unavailable without consuming data" `Quick
+            test_fifo_primary_is_unavailable_without_consuming_data;
+          test_case "FIFO mirror link survives commit and is unavailable" `Quick
+            test_fifo_mirror_link_survives_commit_and_is_unavailable;
+          test_case "direct FIFO mirror is unavailable" `Quick
+            test_fifo_mirror_direct_is_unavailable;
+          test_case "regular file links remain readable" `Quick
+            test_regular_file_links_remain_readable;
+          test_case "dangling primary is unavailable" `Quick test_dangling_primary_is_not_uninitialized;
+          test_case "dangling mirror is prior-store evidence" `Quick test_dangling_mirror_is_evidence_of_prior_store;
+          test_case "dangling and valid workspace links" `Quick test_store_root_symlink_paths;
+          test_case "unreadable mirror takes recovery priority" `Quick test_unreadable_mirror_takes_precedence_over_reset;
+          test_case "unresolvable links request inspection" `Quick test_unresolvable_links_request_path_inspection;
+          test_case "mirror symlink is preserved on write" `Quick test_mirror_symlink_is_not_replaced_on_write;
+          test_case "dangling mirror is preserved after primary commit" `Quick test_dangling_mirror_is_preserved_after_primary_commit;
           test_case "not json" `Quick test_source_not_json;
           test_case "schema rejected names criterion_revision" `Quick
             test_source_schema_rejected_names_criterion_revision;
           test_case "document errors agree through public consumers" `Quick
             test_document_rejection_order_through_public_consumers;
-          test_case "unreadable EISDIR" `Quick test_source_unreadable_eisdir;
+          test_case "nonregular directory" `Quick test_source_nonregular_directory;
           test_case "unreadable EACCES" `Quick test_source_unreadable_eacces;
           test_case "available never consults the mirror" `Quick
             test_source_available_never_consults_the_mirror;

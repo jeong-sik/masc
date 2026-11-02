@@ -60,8 +60,11 @@ requested offline action; it does not initialize a running store automatically.
 
 One positive recognition path is narrower than creation: an exact Fusion-origin
 replay may return a matching already observed row from best-effort display data
-after guard refusal. It performs no source IO or new publication and grants no
-posts authority, negative evidence, operation receipt or durability guarantee.
+after guard refusal. Matching the row neither directly accesses source files
+nor publishes a new row, and grants no posts authority, negative evidence,
+operation receipt or durability guarantee. The call still runs ordinary
+maintenance scheduling before lookup; a separate flusher may process the
+queued sweep or flush work.
 A different Fusion run still requires ordinary admission before creating a row.
 
 An observed reserved cleanup cause stops later selected snapshot writes. The

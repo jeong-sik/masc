@@ -212,9 +212,11 @@ val create_post_once_by_fusion_run_id :
 (** Serialize exact-origin create attempts with a fiber-aware store mutex.
     An exact normalized payload replay for the same typed Fusion run returns
     the matching observed post instead of appending another row. This positive
-    recognition can use best-effort display rows after guard refusal: the
-    matching-row path performs no IO or new publication and grants neither
-    posts write authority nor an operation receipt or durability guarantee.
+    recognition can use best-effort display rows after guard refusal. Matching
+    the row neither directly accesses source files nor publishes a new row, and
+    grants no posts write authority, operation receipt or durability guarantee.
+    The call still runs ordinary maintenance scheduling before lookup; a
+    separate flusher may process the queued sweep or flush work.
     A conflicting replay returns [Already_exists]; a new run still requires
     ordinary source admission before creation. *)
 

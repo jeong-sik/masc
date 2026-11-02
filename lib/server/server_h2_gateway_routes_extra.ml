@@ -47,6 +47,18 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config ~gate
        | Ok actor -> f (Option.map String.trim actor)
        | Error error -> h2_respond_auth_error error)
   in
+  let with_board_workspace_read f =
+    match config with
+    | None -> f []
+    | Some config ->
+        (match Server_auth.validate_read_workspace_precondition ~config httpun_request with
+         | Ok Server_auth.Workspace_read_unbound -> f []
+         | Ok Server_auth.Workspace_read_matched ->
+             f [Workspace.read_precondition_admission_header]
+         | Error error ->
+             let json, status = Server_auth.read_workspace_precondition_error_response error in
+             h2_respond_json_value h2_reqd json ~status:(status :> H2.Status.t) ~extra_headers:cors)
+  in
   match httpun_meth, path with
   | `GET, path when path = Play_invite.agent_guide_path ->
       gate (fun () ->
@@ -183,6 +195,8 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config ~gate
          && String.length p > 14 ->
       gate (fun () ->
       with_optional_board_reaction_actor (fun reaction_actor ->
+      with_board_workspace_read (fun admission ->
+      let cors = admission @ cors in
       let post_id = String.sub p 14 (String.length p - 14) in
       match
         Server_board_post_response_format.of_query
@@ -210,7 +224,7 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config ~gate
                ?focused_comment:(query_param httpun_request "comment_focus") ~voter
                ~reaction_actor ~config ~response_format ~post_id ()
            in
-           h2_respond_json h2_reqd body ~status ~extra_headers:cors)));
+           h2_respond_json h2_reqd body ~status ~extra_headers:cors))));
       true
 
   | `GET, "/api/v1/karma" ->

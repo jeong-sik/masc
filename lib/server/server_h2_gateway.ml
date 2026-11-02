@@ -424,7 +424,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
     in
     (* H1's token and public wrappers also bind optional GET workspace query
        preconditions. The global ingress guard only checks request headers. *)
-    let with_artifact_read_workspace state f =
+    let with_h2_workspace_read state f =
       match validate_read_workspace_precondition
               ~config:(Mcp_server.workspace_config state) httpun_request with
       | Ok Workspace_read_unbound -> f []
@@ -452,13 +452,13 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
             h2_artifact_kind_disagrees h2_reqd
           | Ok _ ->
             with_h2_token_permission_auth h2_reqd ~permission (fun state actor ->
-              with_artifact_read_workspace state (fun headers -> f state actor headers)))
+              with_h2_workspace_read state (fun headers -> f state actor headers)))
       ; with_public = (fun f ->
           match Result.bind (Lazy.force route_access) Server_h2_route_gate.plan with
           | Error refusal -> h2_respond_gate_refusal h2_reqd refusal
           | Ok Server_h2_route_gate.Public_read ->
             with_h2_public_read h2_reqd (fun state ->
-              with_artifact_read_workspace state (fun headers ->
+              with_h2_workspace_read state (fun headers ->
                 match authorize_optional_token_bound_permission_request
                         ~base_path:(Mcp_server.workspace_config state).base_path
                         ~permission:Masc_domain.CanAdmin httpun_request with
@@ -1216,19 +1216,21 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
             h2_respond_json_value h2_reqd json ~extra_headers:cors)
 
       | `GET, "/api/v1/dashboard/fusion-runs" ->
-          h2_gate_state h2_reqd (fun _state ->
+          h2_gate_state h2_reqd (fun state ->
+            with_h2_workspace_read state (fun admission ->
             let json =
               Server_dashboard_fusion_run_projection.list_response
                 ~generated_at:(Masc_domain.now_iso ())
                 ~registry:(Fusion_run_registry.global ())
             in
-            h2_respond_json_value h2_reqd json ~extra_headers:cors)
+            h2_respond_json_value h2_reqd json ~extra_headers:(admission @ cors)))
 
       | `GET, p
         when String.starts_with
                ~prefix:Server_dashboard_fusion_run_projection.detail_prefix
                p ->
-          h2_gate_state h2_reqd (fun _state ->
+          h2_gate_state h2_reqd (fun state ->
+            with_h2_workspace_read state (fun admission ->
             let status, json =
               Server_dashboard_fusion_run_projection.detail_response
                 ~generated_at:(Masc_domain.now_iso ())
@@ -1239,7 +1241,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
               h2_reqd
               json
               ~status:(status :> H2.Status.t)
-              ~extra_headers:cors)
+              ~extra_headers:(admission @ cors)))
 
       (* H1 serves this through [with_public_read]
          (server_routes_http_routes_dashboard.ml). [with_server_state] only

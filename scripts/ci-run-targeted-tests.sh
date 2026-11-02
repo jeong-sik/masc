@@ -124,7 +124,7 @@ for suite in ${aliases[@]+"${aliases[@]}"}; do
   started=$(date +%s)
   rc=0
   "${timeout_command}" -s TERM -k "${TARGET_SUITE_KILL_GRACE_SEC}" "${TARGET_SUITE_TIMEOUT_SEC}" \
-    env ALCOTEST_VERBOSE=1 opam exec -- dune build --root . --force --no-buffer -j 1 "${suite}" \
+    env ALCOTEST_VERBOSE=1 opam exec -- dune build --root . --force --no-buffer --verbose -j 1 "${suite}" \
     2>&1 | tee -a "${CI_TEST_LOG_FILE}" || rc=$?
   elapsed=$(( $(date +%s) - started ))
   case "${rc}" in

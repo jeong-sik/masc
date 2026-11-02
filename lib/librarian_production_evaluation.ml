@@ -59,7 +59,8 @@ let report_json (report : L.not_committed) =
     "message_descent",text (match report.message_descent with
       | L.No_descent_evidence -> "no_descent_evidence"
       | L.Smaller_input_may_help -> "smaller_input_may_help"
-      | L.Invalid_output_blocks_descent -> "invalid_output_blocks_descent");
+      | L.Invalid_output_blocks_descent -> "invalid_output_blocks_descent"
+      | L.Unsettled_native_blocks_descent -> "unsettled_native_blocks_descent");
     "input_capacity_evidence",text (match report.input_capacity_evidence with
       | L.No_input_capacity_refusal -> "no_input_capacity_refusal"
       | L.Input_capacity_refused -> "input_capacity_refused");

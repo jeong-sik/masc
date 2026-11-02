@@ -5,6 +5,11 @@ type t = private
   { historical_range_size : bool
   ; named_input_capacity : bool
   ; invalid_output : bool
+  ; unsettled_native_execution : bool
+      (** A native visit may have produced output/effects, or its failure
+          carries no proof that execution settled without them. This veto is
+          retained across the whole walk; another slot's size refusal cannot
+          authorize a smaller new original after it. *)
   ; size_independent_execution_failure : bool
   ; measured_cli_capacity : Keeper_lane_cli_oneshot.input_capacity option
   ; provider_input_refusals : Keeper_librarian_input_refusal.t list

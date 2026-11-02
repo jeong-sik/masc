@@ -697,7 +697,7 @@ let test_admission_worker_requires_actual_input_capacity () =
       (Runtime.may_descend_messages reports))
     [Ok "not-json",Runtime.Invalid_output_blocks_descent;
      Ok "{}",Runtime.Invalid_output_blocks_descent;
-     Error (Masc.Fusion_official_client.Setup_failure "offline"),Runtime.No_descent_evidence];
+     Error (Masc.Fusion_official_client.Setup_failure "offline"),Runtime.Unsettled_native_blocks_descent];
   let capacity_answer = Error (Masc.Fusion_official_client.Codex_failure
     (Runtime_codex_app_server.Context_window_exceeded
       {message="fixture explicit input refusal"; tool_effect_attempted=false})) in

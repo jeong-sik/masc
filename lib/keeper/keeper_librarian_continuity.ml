@@ -12,7 +12,7 @@ open Result.Syntax
    unknown or missing fields, or values that fail validation -- is rebuilt
    from atom 0 like an absent one, and the rebuilt snapshot replaces it on
    commit. Its working state is dropped under the hard-cut policy; the
-   rebuild costs one pass per completed turn. A file
+   rebuild reads the captured completed backlog. A file
    that cannot be read at all is an I/O failure, not a decode failure, and
    stays an error. *)
 type stored =
@@ -78,6 +78,28 @@ let read_in ~keepers_dir ~keeper_name =
   | Undecodable { reason } -> Error (S.error_to_string (S.Invalid_snapshot reason))
 let read ~config ~keeper_name =
   read_in ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_name
+let ordinary_memory_interval ~config ~keeper_name ~trace_id ~lines ~messages
+    ~(range : R.range) ~cuts =
+  let* ordinary = Keeper_memory_os_current.committed_durable_range
+    ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Workspace.base_path)
+    ~keeper_id:keeper_name ~receipt_scope:(Workspace.keepers_runtime_dir config) in
+  (* The serial consumer witnesses the interval after its original baseline,
+     not the prefix preceding that baseline. Keep the same proof here and at
+     publication so a batch never combines read and unread Memory sources. *)
+  let floor = match R.select ~trace_id ~lines ~progress:None ~messages R.All_unread with
+    | R.Read {range;_} when range.start_atom = 0 -> Some 0
+    | R.Baseline {position;_} -> Some position.end_atom
+    | R.Read _ | R.Nothing_to_read | R.Position_in_other_trace _ | R.Stop _ -> None in
+  Ok (match ordinary, floor with
+    | Some receipt, Some floor when
+        String.equal receipt.trace_id trace_id
+        && receipt.history_start_boundary_line = range.history_start_boundary_line
+        && receipt.start_atom >= floor && receipt.end_atom > floor
+        && W.atom_opening_digest messages (receipt.end_atom - 1) = Some receipt.last_atom_digest
+        && List.exists (fun (cut : R.atom_cut) ->
+             cut.cut_line = receipt.end_boundary_line && cut.cut_end_atom = receipt.end_atom) cuts ->
+      Some (floor, receipt.end_atom)
+    | Some _, Some _ | None, _ | Some _, None -> None)
 let prepare_source ?previous ?end_atom ~config ~keeper_name ~trace_id () =
   let* lines = B.read ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id:keeper_name in
   let* stored = load ~config ~keeper_name in
@@ -184,15 +206,19 @@ let prepare_source ?previous ?end_atom ~config ~keeper_name ~trace_id () =
             && List.exists (fun (cut : R.atom_cut) -> cut.cut_line = receipt.end_boundary_line
                  && cut.cut_end_atom >= receipt.end_atom) cuts -> Some receipt
         | _ -> None in
+      let* ordinary_interval = match recovery_receipt with
+        | Some _ -> Ok None
+        | None -> ordinary_memory_interval ~config ~keeper_name
+            ~trace_id ~lines ~messages ~range ~cuts in
       let end_atom = match recovery_receipt with
         | Some receipt -> receipt.end_atom
         | None ->
-          (match end_atom with
-           | Some requested -> requested
-           | None ->
-             match List.find_opt (fun (cut : R.atom_cut) -> cut.cut_end_atom > start_atom) cuts with
-             | Some cut -> cut.cut_end_atom
-             | None -> range.end_atom) in
+          let requested = Option.value end_atom ~default:range.end_atom in
+          if requested > range.end_atom then requested
+          else match ordinary_interval with
+            | Some (floor, _) when start_atom < floor -> min requested floor
+            | Some (_, through) when start_atom < through -> min requested through
+            | Some _ | None -> requested in
       if end_atom > range.end_atom || end_atom < 1 then
         Error "continuity cut is outside the completed checkpoint prefix"
       else if end_atom <= start_atom then Ok (No_source Empty_range)
@@ -234,6 +260,18 @@ let select_prefix ~end_atom prepared =
         let unread = R.slice prepared.messages
           {prepared.range with R.start_atom=prepared.start_atom;end_atom} in
         Ok {prepared with end_atom;covering_cut;unread}
+let oldest_completed_turn prepared =
+  match prepared.recovery_receipt with
+  | Some _ -> prepared
+  | None ->
+    match List.find_opt (fun (cut : R.atom_cut) ->
+      cut.cut_end_atom > prepared.start_atom) prepared.cuts with
+    | Some covering_cut when covering_cut.cut_end_atom < prepared.end_atom ->
+      let end_atom = covering_cut.cut_end_atom in
+      let unread = R.slice prepared.messages
+        {prepared.range with R.start_atom=prepared.start_atom;end_atom} in
+      {prepared with end_atom;covering_cut;unread}
+    | Some _ | None -> prepared
 let memory_sources prepared =
   Keeper_librarian_unread.sources_for_atom_range ~trace_id:prepared.trace_id
     ~history_start_boundary_line:prepared.range.history_start_boundary_line
@@ -328,9 +366,12 @@ let narrow prepared =
   let count = prepared.end_atom - prepared.start_atom in
   if count <= 1 || Option.is_some prepared.recovery_receipt then None
   else
-    let end_atom = prepared.start_atom + count / 2 in
-    let unread = R.slice prepared.messages {prepared.range with R.start_atom = prepared.start_atom; end_atom} in
-    Some {prepared with end_atom; unread; recovery_receipt = None}
+    let oldest = oldest_completed_turn prepared in
+    if oldest.end_atom < prepared.end_atom then Some oldest
+    else
+      let end_atom = prepared.start_atom + count / 2 in
+      let unread = R.slice prepared.messages {prepared.range with R.start_atom = prepared.start_atom; end_atom} in
+      Some {prepared with end_atom; unread; recovery_receipt = None}
 let rec fit ~fits prepared =
   let* accepted = fits prepared in
   if accepted then Ok (Some prepared)
@@ -359,28 +400,11 @@ let memory_committed ~config ~keeper_name prepared =
     ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Workspace.base_path)
     ~keeper_id:keeper_name ~receipt_scope:expected.receipt_scope in
   if actual = Some expected then Ok true else
-  let* ordinary = Keeper_memory_os_current.committed_durable_range
-    ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Workspace.base_path)
-    ~keeper_id:keeper_name ~receipt_scope:(Workspace.keepers_runtime_dir config) in
-  (* Only the serial consumer's genuinely read interval is known: a baseline
-     is not evidence for the prefix preceding it. This receipt never changes
-     the independent continuity recovery range. *)
-  let floor = match R.select ~trace_id:prepared.trace_id ~lines:prepared.lines
-      ~progress:None ~messages:prepared.messages R.All_unread with
-    | R.Read {range;_} when range.start_atom = 0 -> Some 0
-    | R.Baseline {position;_} -> Some position.end_atom
-    | R.Read _ | R.Nothing_to_read | R.Position_in_other_trace _ | R.Stop _ -> None in
-  Ok (match ordinary, floor with
-    | Some receipt, Some floor ->
-      String.equal receipt.trace_id prepared.trace_id
-      && receipt.history_start_boundary_line = prepared.range.history_start_boundary_line
-      && receipt.start_atom >= floor && prepared.start_atom >= floor
-      && prepared.end_atom <= receipt.end_atom
-      && W.atom_opening_digest prepared.messages (receipt.end_atom - 1) = Some receipt.last_atom_digest
-      && List.exists (fun (cut : R.atom_cut) ->
-           cut.cut_line = receipt.end_boundary_line && cut.cut_end_atom = receipt.end_atom)
-           prepared.cuts
-    | None, _ | Some _, None -> false)
+  let* interval = ordinary_memory_interval ~config ~keeper_name ~trace_id:prepared.trace_id
+    ~lines:prepared.lines ~messages:prepared.messages ~range:prepared.range ~cuts:prepared.cuts in
+  Ok (match interval with
+    | Some (floor, through) -> prepared.start_atom >= floor && prepared.end_atom <= through
+    | None -> false)
 let previous_working_state prepared = prepared.previous_state
 let previous_unread_messages prepared = prepared.previous_unread_messages
 let prompt_json prepared =

@@ -1249,8 +1249,10 @@ let board_stimulus_fields board =
   ; "content", `String board.content
   ; "hearth", option_json (fun value -> `String value) board.hearth
   ; "updated_at_unix", option_json (fun value -> `Float value) board.updated_at
-  ; "audience", option_json board_audience_to_yojson board.audience
   ]
+  @ (match board.audience with
+     | None -> []
+     | Some audience -> [ "audience", board_audience_to_yojson audience ])
   @
   match board.kind with
   | Post_created -> []

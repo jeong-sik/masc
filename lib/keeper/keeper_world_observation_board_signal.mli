@@ -34,9 +34,9 @@ type board_read_operation =
   | Parse_queued_comment_identity
   | Parse_queued_audience
 
-(** A Board read that answered no row: the id did not parse, or nothing has
-    it ({!Board.board_read_error}). Reads are served from memory, so this is
-    never a passing I/O failure and reading again gives the same answer. *)
+(** A Board observation unavailable because an identifier is invalid, a row
+    is absent, or a legacy queued signal has no pinned audience. The latter
+    preserves the source instead of inferring its audience from current data. *)
 type board_unavailable =
   { operation : board_read_operation
   ; post_id : string

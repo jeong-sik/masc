@@ -94,7 +94,7 @@ let poison_board_signal_stimulus () : Keeper_event_queue.stimulus =
         ; content = "references a post_id that was never created"
         ; hearth = None
         ; updated_at = Some (Time_compat.now ())
-        ; audience = None
+        ; audience = Some Keeper_event_queue.Audience_discoverable
         }
   }
 ;;
@@ -150,6 +150,7 @@ let test_poison_stimulus_intake_does_not_crash_and_stays_dropped () =
        "first pass produces no pending_board_event (consumed, not crashed)"
        0
        (List.length events)
+   | Keeper_heartbeat_stimulus_intake.Stimulus_board_audience_unavailable _
    | Keeper_heartbeat_stimulus_intake.Stimulus_connector_retry_later _
    | Keeper_heartbeat_stimulus_intake.Stimulus_connector_missing _
    | Keeper_heartbeat_stimulus_intake.Stimulus_ask_retry_later _
@@ -172,7 +173,8 @@ let test_poison_stimulus_intake_does_not_crash_and_stays_dropped () =
       "second pass over the same stimulus stays empty (no crash-loop resurgence)"
       0
       (List.length events)
-  | Keeper_heartbeat_stimulus_intake.Stimulus_connector_retry_later _
+  | Keeper_heartbeat_stimulus_intake.Stimulus_board_audience_unavailable _
+   | Keeper_heartbeat_stimulus_intake.Stimulus_connector_retry_later _
    | Keeper_heartbeat_stimulus_intake.Stimulus_connector_missing _
    | Keeper_heartbeat_stimulus_intake.Stimulus_ask_retry_later _
    | Keeper_heartbeat_stimulus_intake.Stimulus_ask_missing _
@@ -346,6 +348,54 @@ let test_permanent_absence_does_not_spend_an_admission_slot () =
   check int "only permanent absence is ACKed during intake" 1 (List.length (pending ()))
 ;;
 
+(* A pre-pinning signal has no trustworthy recipient. Its exact durable
+   selection must survive even if the post later disappears, without blocking
+   a readable sibling or inventing a recipient from the current post. *)
+let test_unpinned_board_source_is_retained_without_blocking_siblings () =
+  with_intake_sources ~max_events:1 @@ fun ~seed ~seed_board ~intake ~pending ~ack ->
+  let legacy_id = seed_board "legacy audience was not recorded" in
+  let pinned = match pending () with
+    | [ selection ] -> selection
+    | _ -> fail "expected the initial Board source" in
+  ack pinned;
+  let legacy = match pinned.source.payload with
+    | Keeper_event_queue.Board_signal board ->
+      { pinned.source with payload = Board_signal { board with audience = None } }
+    | _ -> fail "expected a Board signal" in
+  seed legacy;
+  let original = match pending () with
+    | [ selection ] -> selection
+    | _ -> fail "expected the unpinned legacy source" in
+  let readable = seed_board "a later source with a pinned audience" in
+  let first = intake () in
+  check (list string) "a legacy source does not block the readable sibling"
+    [ readable ] (admitted_ids first);
+  (match first.event_queue_intake_error with
+   | Some (Keeper_heartbeat_stimulus_intake.Board_audience_unavailable _ as error) ->
+     check bool "unknown audience is not a crashed cycle" false
+       (Keeper_heartbeat_stimulus_intake.event_queue_intake_error_counts_as_cycle_failure error)
+   | _ -> fail "the retained legacy source must remain observable");
+  let selections = pending () in
+  let survivor = List.find (fun selection -> selection.Keeper_event_queue_state.source.post_id = legacy_id) selections in
+  check bool "the legacy source keeps its exact incarnation" true
+    (Keeper_event_queue_state.same_entry original survivor);
+  check bool "the legacy source is not replaced or readdressed" true (survivor.source = legacy);
+  let sibling = List.find (fun selection -> selection.Keeper_event_queue_state.source.post_id = readable) selections in
+  ack sibling;
+  (match Board_dispatch.delete_post ~post_id:legacy_id with
+   | Ok Board.Durable_deletion -> ()
+   | Ok (Board.Deletion_persistence_pending detail) -> fail detail
+   | Error error -> fail (Board.show_board_error error));
+  let again = intake () in
+  check (list string) "a removed post cannot turn unknown audience into delivery" [] (admitted_ids again);
+  check int "no legacy observation was fabricated" 0 (List.length again.pending_board_events);
+  (match pending () with
+   | [ selection ] ->
+     check bool "post deletion does not acknowledge the original" true
+       (Keeper_event_queue_state.same_entry original selection && selection.source = legacy)
+   | _ -> fail "the same legacy source must remain pending")
+;;
+
 let rejection_ok = function Ok value -> value | Error detail -> fail detail
 
 let rejection_workspace_ok = function
@@ -465,6 +515,7 @@ let test_unread_rejection_authority_retains_source_and_allows_siblings () =
     check bool "authority read failure is retry, not a crashed cycle" false
       (Keeper_heartbeat_stimulus_intake.event_queue_intake_error_counts_as_cycle_failure error)
   | None | Some (Keeper_heartbeat_stimulus_intake.Pending_selection_failed _
+      | Keeper_heartbeat_stimulus_intake.Board_audience_unavailable _
       | Keeper_heartbeat_stimulus_intake.Connector_read_failed _
       | Keeper_heartbeat_stimulus_intake.Connector_item_missing _
       | Keeper_heartbeat_stimulus_intake.Ask_read_failed _
@@ -785,6 +836,8 @@ let () =
             test_empty_observation_source_still_spends_an_admission_slot
         ; test_case "permanent absence does not spend an admission slot" `Quick
             test_permanent_absence_does_not_spend_an_admission_slot
+        ; test_case "unpinned Board source survives post removal without blocking siblings" `Quick
+            test_unpinned_board_source_is_retained_without_blocking_siblings
         ; test_case "delivered rejection remains current at intake" `Quick
             test_delivered_rejection_remains_current_at_intake
         ; test_case "superseded rejection retires before projection" `Quick

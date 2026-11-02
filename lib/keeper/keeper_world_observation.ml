@@ -1242,13 +1242,26 @@ let pending_board_event_of_stimulus
   =
   match stimulus.payload with
   | Keeper_event_queue.Board_signal bs ->
-    Result.bind
-      (Board_signal.board_observation_of_board_stimulus ~post_id:stimulus.post_id bs)
-      (pending_board_event_of_board_observation
-         ~meta
-         ~arrived_at:stimulus.arrived_at
-         ~allow_legacy_unknown:false)
-    |> Result.map Option.some
+    let audience_check =
+      match bs.kind, bs.audience with
+      | (Post_created | Post_updated _ | Comment_added _), None ->
+        Error
+          { Board_signal.operation = Board_signal.Parse_queued_audience
+          ; post_id = stimulus.post_id
+          ; error = Board.Read_audience_not_pinned
+              ("queued Board signal predates audience pinning")
+          }
+      | (Post_created | Post_updated _ | Comment_added _), Some _
+      | (Reaction_changed _ | Vote_cast _), (None | Some _) -> Ok ()
+    in
+    Result.bind audience_check (fun () ->
+      Result.bind
+        (Board_signal.board_observation_of_board_stimulus ~post_id:stimulus.post_id bs)
+        (pending_board_event_of_board_observation
+           ~meta
+           ~arrived_at:stimulus.arrived_at
+           ~allow_legacy_unknown:false)
+      |> Result.map Option.some)
   | Keeper_event_queue.Board_attention attention ->
     Result.bind
       (Board_signal.board_observation_of_board_stimulus ~post_id:stimulus.post_id attention.signal)

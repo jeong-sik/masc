@@ -221,10 +221,6 @@ let section_lines ?(runtimes = Types.Quota_unread) ?(account_emails = Types.Acco
 (* The rows with a bar, as drawn. *)
 let bar_rows lines = List.filter (contains ~affix:meter_open) lines
 
-(* The SGR code that marks an at-limit window. Name cells carry their
-   section's tone too, so a row is checked where the name is blank. *)
-let bad_tone () = Masc_tui_ansi.Theme.bad ()
-
 let test_section_draws_one_line_per_window () =
   let windows =
     match Masc.Tui_decode_usage.decode_provider_usage_windows (resolved "reported") with
@@ -503,15 +499,6 @@ let test_window_that_gates_nothing_is_not_an_alarm () =
     | Some section -> section
     | None -> fail "a read draws a section"
   in
-  let bad = Masc_tui_ansi.Theme.bad () in
-  (* An empty tone would be found in every row and prove nothing. *)
-  check bool "the exhausted tone is drawn with a code" true (not (String.equal bad ""));
-  (* The first row of an entry carries the name cell, which has its section's
-     tone. TIME_LIMIT and TOKENS_LIMIT are second rows, so their own tone shows. *)
-  let time_limit = List.find (fun line -> contains ~affix:"TIME_LIMIT" (plain line)) section.lines in
-  let tokens_limit = List.find (fun line -> contains ~affix:"TOKENS_LIMIT" (plain line)) section.lines in
-  check bool "the non-gating window is not an alarm" false (contains ~affix:bad time_limit);
-  check bool "the model-call window at full is an alarm" true (contains ~affix:bad tokens_limit);
   check shape_t "only the gating windows at full enter the first group"
     [ (Providers.At_limit_or_exhausted, [ ("id-glm", [ "WEEK_TOKENS_LIMIT"; "TOKENS_LIMIT" ]) ])
     ; (Providers.Other_windows, [ ("id-glm", [ "UNKNOWN_LIMIT"; "TIME_LIMIT" ]) ]) ]
@@ -1160,7 +1147,6 @@ let test_rows_follow_the_plan () =
     (List.length (bar_rows lines));
   check int "an account's name is drawn once for its consecutive windows" 1
     (List.length (List.filter (contains ~affix:"kimi") lines));
-  check bool "the tone is drawn with a code" true (not (String.equal (bad_tone ()) ""));
   (* The sections are drawn in plan order: the two windows at their limit
      are the first two bars. *)
   let bars = bar_rows raw in
@@ -1172,28 +1158,28 @@ let test_rows_follow_the_plan () =
   check int "no other bar says 100%" 2
     (List.length (List.filter (fun line -> contains ~affix:"100%" (plain line)) bars))
 
-(* Tone on a row whose name cell is blank, so the row's own tone shows. *)
-let test_the_at_limit_tone_is_the_reports_not_the_sections () =
-  let second_bar ?runtimes accounts =
-    match bar_rows (section_lines ?runtimes ~width:160 accounts) with
-    | _ :: second :: _ -> second
-    | _ -> fail "expected two bars"
+(* A catalogue observation groups windows, but does not change what their
+   individual reports say about their limits. *)
+let test_at_limit_is_the_reports_not_the_sections () =
+  let decisions ?(runtimes = Types.Quota_unread) accounts =
+    Providers.plan ~now ~runtimes (decode_accounts accounts).puws_accounts
+    |> List.concat_map (fun (group : Providers.plan_group) -> group.pg_entries)
+    |> List.concat_map (fun (entry : Providers.plan_entry) -> entry.pe_windows)
+    |> List.map Providers.window_at_limit
   in
-  check bool "a second window at its limit uses the bad tone" true
-    (contains ~affix:(bad_tone ())
-       (second_bar
-          [ account_json ~name:"a"
-              [ percent_window ~id:"long" ~resets:(now +. 9.0 *. hour) 100
-              ; percent_window ~id:"short" ~resets:(now +. hour) 100 ] ]));
+  check (list bool) "both reports are at their limits" [ true; true ]
+    (decisions
+       [ account_json ~name:"a"
+           [ percent_window ~id:"long" ~resets:(now +. 9.0 *. hour) 100
+           ; percent_window ~id:"short" ~resets:(now +. hour) 100 ] ]);
   (* Observed exhaustion puts both windows in the first group, but neither
      report is at its limit: the tag says the rest. *)
-  check bool "a window grouped only by observation does not take the bad tone" false
-    (contains ~affix:(bad_tone ())
-       (second_bar
-          ~runtimes:(Types.Quota_read [ exhausted_scope "a" ])
-          [ account_json ~name:"a"
-              [ percent_window ~id:"high" ~resets:(now +. 9.0 *. hour) 83
-              ; percent_window ~id:"low" ~resets:(now +. hour) 56 ] ]))
+  check (list bool) "observation does not change either report" [ false; false ]
+    (decisions
+       ~runtimes:(Types.Quota_read [ exhausted_scope "a" ])
+       [ account_json ~name:"a"
+           [ percent_window ~id:"high" ~resets:(now +. 9.0 *. hour) 83
+           ; percent_window ~id:"low" ~resets:(now +. hour) 56 ] ])
 
 let test_an_account_email_is_drawn_once () =
   let lines =
@@ -1479,8 +1465,8 @@ let () =
         ; test_case "the observation is drawn once for a split account" `Quick
             test_the_observation_is_drawn_once_for_a_split_account
         ; test_case "the header counts are typed" `Quick test_the_header_counts_are_typed
-        ; test_case "the at-limit tone is the report's" `Quick
-            test_the_at_limit_tone_is_the_reports_not_the_sections
+        ; test_case "at-limit decisions come from reports" `Quick
+            test_at_limit_is_the_reports_not_the_sections
         ; test_case "at limit is the header decision" `Quick
             test_at_limit_is_the_header_decision
         ; test_case "hidden limit group omits its entries" `Quick

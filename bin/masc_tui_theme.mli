@@ -27,13 +27,15 @@ val side_pane_background : Masc_tui_terminal_palette.t option -> string
     the page are set apart by the same amount. Same fallbacks. *)
 
 val sidebar_selection : Masc_tui_terminal_palette.t option -> string
-(** A restrained neutral band derived from the terminal palette, keeping body
-    text contrast. Falls back to reverse video without a usable colour palette. *)
+(** A restrained neutral band derived from the terminal palette. Falls back
+    to reverse video without a usable colour palette. Indexed colours use
+    xterm defaults for projection, not observed slot values. *)
 
 val recede : Masc_tui_terminal_palette.t option -> string
-(** Secondary text remains readable normal-size text. Blend toward the known
-    background only while the emitted colour retains 4.5:1 contrast, including
-    256-colour quantization. Otherwise retain the terminal's default foreground.
+(** Secondary text is blended toward the palette background while the projected
+    colour is estimated to retain 4.5:1 contrast. For ANSI-256 the estimate
+    uses xterm's default slot value, which the terminal may have changed.
+    Otherwise retain the terminal's default foreground.
     Missing palette or unsupported colour depth also retains that foreground;
     SGR dim and an assumed grey cannot establish contrast. This changes only
     foreground, so callers must close an enclosing dim span before using it.
@@ -179,7 +181,7 @@ val ansi_readable
   :  Masc_tui_terminal_palette.t option
   -> ansi_color
   -> string
-(** The colour, made readable against the page it lands on.
+(** The colour, adjusted toward readability against the palette's page.
 
     masc draws these out of the reader's own palette, so what they come out as
     is their theme's call -- and across twelve base16 schemes that call fails
@@ -188,8 +190,9 @@ val ansi_readable
 
     Where the terminal answered OSC 4 and its entry clears 4.5:1, the plain
     code goes out and the theme keeps its choice. Where it does not, the same
-    colour is lifted in lightness alone until it does, so a red is still a
-    red. Where the terminal said nothing -- a multiplexer, an emulator without
+    colour is lifted in lightness toward the floor before projection. An
+    indexed projection uses an unobserved slot and cannot guarantee contrast.
+    Where the terminal said nothing -- a multiplexer, an emulator without
     the reply -- the plain code goes out, which is what every row drew before
     this existed. *)
 
@@ -198,7 +201,7 @@ val status : status -> string
     entry; use {!status_readable} where the palette is known. *)
 
 val status_readable : Masc_tui_terminal_palette.t option -> status -> string
-(** The same colour, made readable against the page it lands on.
+(** The same colour, adjusted toward readability against the palette's page.
 
     A status colour is drawn out of the reader's palette, so what it comes out
     as is their theme's call -- and across twelve base16 schemes that call
@@ -208,10 +211,19 @@ val status_readable : Masc_tui_terminal_palette.t option -> status -> string
 
     Where the terminal answered OSC 4 and its entry clears 4.5:1, the plain
     code goes out and the theme keeps its choice. Where it does not, the same
-    colour is lifted in lightness alone until it does, so a red is still a
-    red. Where the terminal said nothing -- a multiplexer, an emulator without
+    colour is lifted in lightness toward the floor before projection. An
+    indexed projection uses an unobserved slot and cannot guarantee contrast.
+    Where the terminal said nothing -- a multiplexer, an emulator without
     the reply -- the plain code goes out, which is what every row drew before
     this existed. *)
+
+val status_text_readable : Masc_tui_terminal_palette.t option -> status -> string
+(** For text that names its own status, use the terminal's default foreground
+    when a palette entry is unknown or a projected colour cannot be verified
+    above the text contrast floor. This fallback cannot guarantee readability
+    if the terminal's own foreground is low-contrast. Preserve the original
+    ANSI colour when the reader has explicitly disabled
+    colour lifting. Colour-only distinctions continue to use {!status_readable}. *)
 
 (** Test-only environment and projection fixtures. Code under [bin/] and
     [lib/] may not name this module outside its owner
@@ -269,6 +281,16 @@ module For_testing : sig
     -> string
   (** Pure capability/environment fixture for {!val:ansi_readable}, so a test
       can drive it without the process capability deciding the answer. *)
+
+  val status_text_readable
+    :  colors_enabled:bool
+    -> project:
+         (Masc_tui_terminal_palette.rgb
+          -> Masc_tui_terminal_palette.projected_color option)
+    -> Masc_tui_terminal_palette.t option
+    -> status
+    -> string
+  (** Capability fixture for {!val:status_text_readable}. *)
 
   val recede
     :  colors_enabled:bool
@@ -381,9 +403,8 @@ module Glyph : sig
 end
 
 val set_lift_enabled : bool -> unit
-(** Whether a colour the scheme leaves under the readable floor is raised
-    until it clears. On by default, which is what masc drew before the setting
-    existed.
+(** Whether to try raising a colour the scheme leaves under the readable
+    floor. Output capability can prevent a verified lift. On by default.
 
     Off sends the scheme's colour as it is. That is what ratatui, tcell and
     lipgloss do -- emit the code, let the terminal decide -- and it is what a
@@ -393,19 +414,8 @@ val set_lift_enabled : bool -> unit
     them. Whose call that is, is the reason this is a setting. *)
 
 val lift_is_enabled : unit -> bool
-(** What {!set_lift_enabled} was last given.
-
-    The theme screen reads this to label its last column. The count beside a
-    scheme is the number of its colours under the readable floor, and that
-    number means "lifted" under one setting and "left under the floor" under
-    the other -- so the screen has to be able to ask which.
-
-    Three changes have now moved this one binding, each correct on its own
-    base and wrong once the others landed: #31212 added the setting with no
-    reader, #31216 removed the reader-less export, #31218 added the reader,
-    and #31227 and #31228 each restored the declaration. If it looks dead
-    again, the thing that broke is the theme screen's last column, not this
-    line. *)
+(** What {!set_lift_enabled} was last given; used to invalidate cached
+    colours when the setting changes. *)
 
 val strip_sgr_with_positions : string -> string * int array
 (** The same SGR stripping grammar as {!strip_sgr}, retaining each copied

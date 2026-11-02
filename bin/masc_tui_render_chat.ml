@@ -741,6 +741,17 @@ let keeper_message_identity ~max_cells state keeper_name =
   | Some keeper ->
       let reading = keeper_reading state keeper in
       let health = Keeper_control.health reading in
+      (* Never clip a suggested action into another word or displace the
+         existing identity, gate, runtime or stream facts. The Info pane and
+         selected-Keeper summary carry it when this header has no room. *)
+      let with_suggested_action text =
+        match Keeper_control.next_action reading with
+        | None -> text
+        | Some _ ->
+            let clause = " \xc2\xb7 next: " ^ keeper_suggested_action reading in
+            if Message_layout.display_width text + Message_layout.display_width clause
+               <= max_cells then text ^ clause else text
+      in
       let runtime =
         match reading.Keeper_control.liveness with
         | Keeper_control.Present row -> Some row
@@ -799,7 +810,7 @@ let keeper_message_identity ~max_cells state keeper_name =
                   that stance. *)
                | Persisted_keeper | Remote_keeper -> "absent" ^ stance)
           | Keeper_control.Unobserved | Keeper_control.Invalid _ | Keeper_control.Present _ -> status in
-        fit_identity (compact_status ^ Ansi.reset)
+        with_suggested_action (fit_identity (compact_status ^ Ansi.reset))
       else (match runtime with
        | None ->
            let detail = match keeper.k_origin with
@@ -838,7 +849,7 @@ let keeper_message_identity ~max_cells state keeper_name =
              Option.map (fun live -> live.tl_transcript) state.msg_live
            in
            let prefix_width = Message_layout.display_width prefix in
-           if prefix_width >= max_cells then
+           with_suggested_action (if prefix_width >= max_cells then
              fit_width (prefix ^ runtime_id ^ Ansi.reset) max_cells
            else
              let room = max_cells - prefix_width in
@@ -848,7 +859,7 @@ let keeper_message_identity ~max_cells state keeper_name =
                   ~room:(room - id_width) transcript
               with
               | Some clause -> prefix ^ runtime_id ^ clause ^ Ansi.reset
-              | None -> prefix ^ fit_runtime_id room runtime_id ^ Ansi.reset))
+              | None -> prefix ^ fit_runtime_id room runtime_id ^ Ansi.reset)))
 
 
 (** Render message input/conversation view *)

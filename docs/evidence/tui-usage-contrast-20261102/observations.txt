@@ -1,0 +1,32 @@
+The following lines are transcribed from the Codex tool outputs during the
+isolated capture; this is a human-readable receipt, not an independently
+recorded audit log. The separate health-start-summary.json was written by the
+fixture orchestrator.
+
+Sandbox preflight, before fixture startup:
+{'home_read': 1, 'direct_server_connect': 1, 'unapproved_exec': 1}
+(1 is EPERM on this host.)
+
+Fixture server and proxy readiness:
+{"status":"ready","server":{"base":"/private/tmp/masc-tui-contrast-20261102-yeqf6vui/workspace","pid":77612,"ready":true,"runtime_instance_id":"01a19a1d-8624-7000-933a-b09a35d5482a","account_email_rows":0,"read_email_rows":0},"proxy_pid":78892,"proxy_port":52569}
+
+Before fixture shutdown, post-capture health/account-email read:
+{"runtime_instance_id":"01a19a1d-8624-7000-933a-b09a35d5482a","effective_base_path":"/private/tmp/masc-tui-contrast-20261102-yeqf6vui/workspace","account_email_rows":0,"read_email_rows":0}
+
+Capture exits:
+END candidate-170-color exit 0
+END candidate-35-nocolor exit 0
+A preliminary 170-column process was force-stopped after a single q returned to Dashboard: exit -9. Its bytes are not part of the retained screenshots.
+
+Orchestrator shutdown:
+{"stopped":"proxy","pid":78892,"exit":-15}
+{"stopped":"server","pid":77612,"exit":0}
+
+Test commands run from the source worktree at commit df981f02db0c6ced24ff5e7bc02083f0c1fcbbf2 (commands and environment transcribed from tool calls):
+env MASC_TUI_FORCE_COLOR=1 DUNE_SOURCEROOT="$PWD" _build/default/test/test_tui_overview_providers.exe
+env -u MASC_TUI_FORCE_COLOR NO_COLOR=1 DUNE_SOURCEROOT="$PWD" _build/default/test/test_tui_overview_providers.exe
+env MASC_TUI_FORCE_COLOR=1 DUNE_SOURCEROOT="$PWD" _build/default/test/test_tui_theme_contrast.exe
+
+Executable SHA-256 values observed immediately after the runs:
+0814d53063122693a60f4c9232c5ab6ab6f1b8a0ab116b2935f6c2092a3bc1d6  test_tui_overview_providers.exe
+4b1fc0688c355406e4aa2eba7a09388f21fc61047d3531f37b1e00879adea1ca  test_tui_theme_contrast.exe

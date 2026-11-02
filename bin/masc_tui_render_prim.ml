@@ -1644,11 +1644,11 @@ let connection_status_parts (status : Masc_tui_types.connection_status) =
   (* This badge summarizes HTTP refreshes. A rejected read (for example 429)
      can fail while the independent Recent event feed remains live. *)
   match status with
-  | Connected -> Theme.ok (), "connected", ["HTTP connected", false; "connected", true; "HTTP up", true]
-  | Degraded -> Theme.warn (), "partial", ["HTTP partial", false; "partial", true]
-  | Connecting -> Theme.warn (), "loading...", ["HTTP loading", false; "loading", true]
-  | Booting -> Theme.warn (), "server booting...", ["server booting", false; "booting", true]
-  | Disconnected -> Theme.bad (), "refresh failed", ["HTTP refresh failed", false; "HTTP failed", true; "failed", true]
+  | Connected -> Theme.text_status Masc_tui_theme.Ok, "connected", ["HTTP connected", false; "connected", true; "HTTP up", true]
+  | Degraded -> Theme.text_status Masc_tui_theme.Warn, "partial", ["HTTP partial", false; "partial", true]
+  | Connecting -> Theme.text_status Masc_tui_theme.Warn, "loading...", ["HTTP loading", false; "loading", true]
+  | Booting -> Theme.text_status Masc_tui_theme.Warn, "server booting...", ["server booting", false; "booting", true]
+  | Disconnected -> Theme.text_status Masc_tui_theme.Bad, "refresh failed", ["HTTP refresh failed", false; "HTTP failed", true; "failed", true]
 
 let connection_status_badge status =
   let style, label, _ = connection_status_parts status in
@@ -1721,9 +1721,9 @@ let connection_badge (state : state) =
   let connection = connection_status_badge state.connection_status in
   let connection = match state.workspace_identity with
   | Masc_tui_types.Workspace_identity_mismatch _ ->
-      connection ^ " " ^ (Theme.bad ()) ^ "[workspace mismatch]" ^ Ansi.reset
+      connection ^ " " ^ Theme.text_status Masc_tui_theme.Bad ^ "[workspace mismatch]" ^ Ansi.reset
   | Masc_tui_types.Workspace_identity_match_unconfirmed _ ->
-      connection ^ " " ^ (Theme.warn ()) ^ "[workspace unconfirmed]" ^ Ansi.reset
+      connection ^ " " ^ Theme.text_status Masc_tui_theme.Warn ^ "[workspace unconfirmed]" ^ Ansi.reset
   | Masc_tui_types.Workspace_identity_unread
   | Masc_tui_types.Workspace_identity_match -> connection in
   connection ^ refresh_progress_badge state
@@ -1785,7 +1785,7 @@ let usage_connection_badge (state : state) =
   let badge = connection_badge state in
   match state.workspace_identity, state.connection_status with
   | Workspace_identity_unread, (Connected | Degraded) ->
-      badge ^ " " ^ Theme.warn () ^ "[workspace not observed]" ^ Ansi.reset
+      badge ^ " " ^ Theme.text_status Masc_tui_theme.Warn ^ "[workspace not observed]" ^ Ansi.reset
   | (Workspace_identity_match | Workspace_identity_match_unconfirmed _
     | Workspace_identity_mismatch _), _
   | Workspace_identity_unread, (Connecting | Booting | Disconnected) -> badge
@@ -1800,14 +1800,14 @@ let compact_connection_badge (state : state) ~width =
   in
   let style, options, needs_context =
     match compact_connection_state state with
-    | Compact_workspace_mismatch -> Theme.bad (), ["WS mismatch", true; "mismatch", true], true
-    | Compact_workspace_unconfirmed -> Theme.warn (), ["WS unconfirmed", true; "unconfirmed", true], true
-    | Compact_workspace_unread -> Theme.warn (), ["WS unread", true; "unread", true], true
-    | Compact_read_failed -> Theme.bad (), ["read failed", true; "failed", true], true
-    | Compact_read_partial -> Theme.warn (), ["read partial", true; "partial", true], true
-    | Compact_read_interrupted -> Theme.warn (), ["read interrupted", true; "interrupted", true], true
-    | Compact_read_unfinished -> Theme.warn (), ["read unfinished", true; "unfinished", true], true
-    | Compact_reading -> Theme.warn (), ["reading data", true; "reading", true], true
+    | Compact_workspace_mismatch -> Theme.text_status Masc_tui_theme.Bad, ["WS mismatch", true; "mismatch", true], true
+    | Compact_workspace_unconfirmed -> Theme.text_status Masc_tui_theme.Warn, ["WS unconfirmed", true; "unconfirmed", true], true
+    | Compact_workspace_unread -> Theme.text_status Masc_tui_theme.Warn, ["WS unread", true; "unread", true], true
+    | Compact_read_failed -> Theme.text_status Masc_tui_theme.Bad, ["read failed", true; "failed", true], true
+    | Compact_read_partial -> Theme.text_status Masc_tui_theme.Warn, ["read partial", true; "partial", true], true
+    | Compact_read_interrupted -> Theme.text_status Masc_tui_theme.Warn, ["read interrupted", true; "interrupted", true], true
+    | Compact_read_unfinished -> Theme.text_status Masc_tui_theme.Warn, ["read unfinished", true; "unfinished", true], true
+    | Compact_reading -> Theme.text_status Masc_tui_theme.Warn, ["reading data", true; "reading", true], true
     | Compact_http status ->
         let style, _, options = connection_status_parts status in
         style, options, false in
@@ -1889,17 +1889,9 @@ let keeper_roster_pane_shown (state : state) ~cols =
    nothing observed -- and the word next to it is the exact published status,
    so the column stays legible at four shapes instead of needing a distinct
    glyph per label. *)
-(* One keeper is described by four separate readings, and the status cell draws
-   three of them in three separate channels rather than folding them into one
-   word:
-
-     colour  what to do about it   from next_action, which the runtime derives
-     glyph   whether it is paused  a person's decision, not a health reading
-     word    how it is reporting   from health
-
-   The lifecycle cell is the fourth and has its own column. The cell used to
-   show a single word from [surface_status], which restates health and hides
-   it entirely while a keeper is paused. *)
+(* The colour reinforces the runtime's suggested action; the selected Keeper
+   also names that action in text, including when colours are unavailable.
+   Pause, health and lifecycle remain separate readings. *)
 let keeper_action_color
     (action : Status.keeper_next_action_path option) =
   match action with
@@ -1920,6 +1912,20 @@ let keeper_action_color
      0.027 for protanopia. Blue and white came out worse than green even for
      ordinary vision, because they close on [Probe]'s cyan. *)
   | Some Status.Direct_message -> Theme.action_message ()
+
+(* Preserve what was actually observed: a runtime that names no action is not
+   evidence that nothing needs doing, and an unread roster is not absence. *)
+let keeper_suggested_action reading =
+  match reading.Keeper_control.liveness with
+  | Keeper_control.Unobserved -> "not observed"
+  | Keeper_control.Invalid _ -> "read error"
+  | Keeper_control.Absent -> "unavailable"
+  | Keeper_control.Present runtime ->
+      match runtime.kr_next_action with
+      | None -> "not reported"
+      | Some Status.Recover -> "recover"
+      | Some Status.Probe -> "probe"
+      | Some Status.Direct_message -> "direct message"
 
 
 let keeper_state_glyph ~paused ~(health : Tui_decode.keeper_health option) =
@@ -1961,9 +1967,20 @@ let keeper_roster_pane ?(focused = false) (state : state) ~rows ~cols buf =
   let restore = Ansi.reset ^ ground in
   let draw ?style text = sidebar_line ?style buf ~cols text in
   let rule = sidebar_rule ~cols in
+  let selected = selected_keeper state in
+  let action =
+    Option.fold ~none:[]
+      ~some:
+      (fun keeper ->
+        let indent = if inner >= 3 then "  " else "" in
+        Message_layout.wrap_words ~max_cells:(max 1 (inner - String.length indent))
+          ("Selected next: " ^ keeper_suggested_action (keeper_reading state keeper))
+        |> List.map (fun line -> "", indent ^ line))
+      selected
+  in
   let details =
     if not focused then []
-    else match selected_keeper state with
+    else match selected with
       | None -> []
       | Some keeper ->
           let reading = keeper_reading state keeper in
@@ -1999,7 +2016,23 @@ let keeper_roster_pane ?(focused = false) (state : state) ~rows ~cols buf =
   let details =
     if available >= detail_rows + min count detail_rows then details else []
   in
-  let capacity = available - List.length details in
+  (* Decide the existing detail block first. When the action needs more room,
+     drop its separator and heading before any name, health or runtime. *)
+  let list_minimum = if count > 0 then 1 else 0 in
+  let fits_action details =
+    available - List.length details >= List.length action + list_minimum
+  in
+  let details, action =
+    match action with
+    | [] -> details, []
+    | _ when fits_action details -> details, action
+    | _ ->
+        (match details with
+         | _rule :: rest when fits_action rest -> rest, action
+         | _rule :: _heading :: rest when fits_action rest -> rest, action
+         | _ -> details, [])
+  in
+  let capacity = available - List.length details - List.length action in
   let first = max 0 (min (state.keeper_cursor - capacity + 1) (count - capacity)) in
   let window = Rows.of_list ~first ~height:capacity state.keepers in
   let count_label =
@@ -2033,7 +2066,8 @@ let keeper_roster_pane ?(focused = false) (state : state) ~rows ~cols buf =
            | None -> "  No Keepers listed")
     | None -> draw ""
   done;
-  List.iter (fun (style, text) -> draw ~style text) details
+  List.iter (fun (style, text) -> draw ~style text) details;
+  List.iter (fun (style, text) -> draw ~style text) action
 
 
 (* What a boxed listing draws under its rows: the scroll line -- a row whether

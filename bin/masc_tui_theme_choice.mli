@@ -12,10 +12,8 @@ type entry =
         (** What the scheme says about itself, not a measurement. *)
   ; measured : int  (** How many colours were checked. *)
   ; lifted : int
-        (** How many of them this scheme leaves under the readable floor, so
-            masc has to lift them. Zero means the scheme's author already
-            cleared it everywhere masc looks -- the quiet answer, not the
-            empty one. *)
+        (** How many measured scheme colours start below the readable floor.
+            Output capability determines whether they can be lifted. *)
   ; swatch : Masc_tui_terminal_palette.rgb list
         (** The colours a row can draw beside the name, in the order masc
             reads meaning from them, plus the page they sit on. A name tells a
@@ -23,20 +21,19 @@ type entry =
   }
 
 val entries : unit -> entry list
-(** Every bundled scheme with what picking it would cost, measured against
-    the same floor the renderer lifts to. Native-pass schemes come first;
-    equal lift counts are ordered by name. *)
+(** Every bundled scheme with its unadjusted values measured against the same
+    floor the renderer targets. Native-pass schemes come first; equal counts
+    of colours below the floor are ordered by name. *)
 
 val swatch_cells : entry -> string
 (** [entry]'s colours drawn as two-cell blocks, ending back on the terminal's
     own page. The picker shows a colour for its own sake, which no other
     surface does, so the escape is made here rather than by the renderer. *)
 
-val contrast_status : lift_on:bool -> entry -> string
+val contrast_status : entry -> string
 (** A compact, explicit reading of the measurement. [native 7/7] means every
-    measured colour clears the floor without help; [lift 3/7] means the lift
-    raises three; [3/7 low] means those three remain below it because the lift
-    is disabled. *)
+    measured scheme colour clears the floor; [3/7 low] means three start
+    below it. Neither reports whether the terminal applied the scheme. *)
 
 val apply : string -> bool
 (** Draw with this scheme's colours from now on. [false] for a name no

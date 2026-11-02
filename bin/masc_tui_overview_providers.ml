@@ -248,7 +248,7 @@ type reset_words = {
 let reset_words ~now = function
   | None -> { reset_tone = None; reset_full = "no reset"; reset_short = "no reset" }
   | Some at when at <= now ->
-      { reset_tone = Some (Theme.warn ())
+      { reset_tone = Some (Theme.text_status Masc_tui_theme.Warn)
       ; reset_full = "reset time passed \xc2\xb7 no newer report"
       ; reset_short = "reset passed"
       }
@@ -614,7 +614,7 @@ let role_tag = function
    is drawn like one that gates, since nothing says it does not. *)
 let window_tone (window : Masc.Tui_decode_usage.provider_usage_window) =
   if not (gates_model_calls window.puw_role) then Some (Theme.recede ())
-  else if at_or_past_full window.puw_utilization then Some (Theme.bad ())
+  else if window_at_limit window then Some (Theme.text_status Masc_tui_theme.Bad)
   else None
 
 (* When the account's newest report was heard. *)
@@ -631,6 +631,7 @@ let newest_report (account : Masc.Tui_decode_usage.provider_usage_account) =
 
 type window_line = {
   label : string;
+  at_limit : bool;
   share : float option;  (** [None]: an amount with no cap has no bar. *)
   percent : string;
   detail : string;  (** Amount, reset with its clock, then notes. *)
@@ -641,6 +642,30 @@ type window_line = {
   tone : string option;
   detail_tone : string option;
 }
+
+(* Keep the marker separate from provider text, including on wrapped lines.
+   The empty slot also distinguishes a provider name beginning with [!]. *)
+let marked ~attention text = (if attention then "! " else "  ") ^ text
+
+let wrap_marked ~width ~attention text =
+  let width = max 1 width in
+  let prefix =
+    if width >= 4 then if attention then "! " else "  "
+    else if width >= 2 then if attention then "!" else " "
+    else ""
+  in
+  let lines =
+    Masc_tui_message_layout.wrap_words ~max_cells:(max 1 (width - String.length prefix)) text
+  in
+  match lines with
+  | [] when attention -> [ "!" ]
+  | [] -> []
+  | _ :: _ ->
+      List.map
+        (fun line ->
+          if cells_of line + String.length prefix <= width then prefix ^ line
+          else line)
+        lines
 
 (* A window heard at a different time than its account's newest report says
    so; otherwise the time is left out. *)
@@ -667,6 +692,7 @@ let window_line ~now ~newest (window : Masc.Tui_decode_usage.provider_usage_wind
   let notes = [ heard; role_tag window.puw_role ] in
   let tone = window_tone window in
   { label = window_label window
+  ; at_limit = window_at_limit window
   ; share
   ; percent
   ; detail = detail_with reset.reset_full notes
@@ -683,6 +709,7 @@ type entry_body =
 
 type drawn_entry = {
   de_name : string;
+  de_attention : bool;
   de_body : entry_body;
   de_tag : string option;
       (** The catalogue's observed exhaustion, in the first section only. *)
@@ -722,8 +749,14 @@ let drawn_groups ~now ~account_emails groups =
                 if first_time then account_email ~account_emails entry.pe_account
                 else None
               in
+              let attention =
+                match pg_section with
+                | At_limit_or_exhausted -> true
+                | Other_windows | No_windows -> false
+              in
               ( id :: seen
               , { de_name = scope_name entry.pe_account
+                ; de_attention = attention
                 ; de_body = body
                 ; de_tag = tag
                 ; de_email = email
@@ -742,8 +775,8 @@ let section_title = function
   | No_windows -> "No windows to show"
 
 let section_tone = function
-  | At_limit_or_exhausted -> Theme.bad ()
-  | Other_windows -> Theme.info ()
+  | At_limit_or_exhausted -> Theme.text_status Masc_tui_theme.Bad
+  | Other_windows -> Theme.text_status Masc_tui_theme.Info
   | No_windows -> Theme.recede ()
 
 let pad_left text cells =
@@ -802,7 +835,7 @@ let layout_for ~show_names ~width entries =
         1 + label_cells_min + 1 + bar_frame_cells + bar_cells_min + 1 + percent_cells
       in
       min
-        (widest (fun entry -> cells_of entry.de_name) entries)
+        (widest (fun entry -> cells_of (marked ~attention:entry.de_attention entry.de_name)) entries)
         (min (max 0 (budget - minimum_window))
            (min name_cells_cap (max name_cells_min (budget / name_width_divisor))))
   in
@@ -823,7 +856,7 @@ let layout_for ~show_names ~width entries =
     min
       available
       (min
-         (widest (fun line -> cells_of line.label) window_lines)
+         (widest (fun line -> cells_of (marked ~attention:line.at_limit line.label)) window_lines)
          (min label_cells_cap (max label_cells_min label_room)))
   in
   let head_cells_without_bar =
@@ -851,21 +884,22 @@ let layout_for ~show_names ~width entries =
 let draw_entry layout tone entry =
   let module Text = Masc_tui_message_layout in
   let name_cell tone name =
-    Ansi.bold ^ tone ^ Text.fit_middle layout.name_cells name ^ Ansi.reset
+    Ansi.bold ^ tone ^ Text.fit_middle layout.name_cells (marked ~attention:entry.de_attention name) ^ Ansi.reset
   in
   let window_row tone ~first line =
     let name = match first with Some name -> name_cell tone name | None -> layout.blank_name in
-    let label_overflows = cells_of line.label > layout.label_cells in
+    let label_overflows = cells_of (marked ~attention:line.at_limit line.label) > layout.label_cells in
     let label =
-      if label_overflows then String.make layout.label_cells ' '
-      else Text.fit_middle layout.label_cells line.label
+      if label_overflows then
+        Text.fit_middle layout.label_cells (if line.at_limit then "!" else "")
+      else Text.fit_middle layout.label_cells (marked ~attention:line.at_limit line.label)
     in
     let label_rows =
       if not label_overflows then []
       else
         let prefix = indent ^ name ^ " " in
         let continuation = indent ^ layout.blank_name ^ " " in
-        Text.wrap_words ~max_cells:(max 1 (layout.width - cells_of prefix)) line.label
+        wrap_marked ~width:(layout.width - cells_of prefix) ~attention:line.at_limit line.label
         |> List.mapi (fun index text ->
              (if index = 0 then prefix else continuation) ^ style line.tone text)
     in
@@ -898,19 +932,20 @@ let draw_entry layout tone entry =
     let wrapped_detail () =
       List.map
         (fun wrapped -> layout.continuation ^ style line.detail_tone wrapped)
-        (Text.wrap_words ~max_cells:layout.continuation_cells line.detail)
+        (wrap_marked ~width:layout.continuation_cells ~attention:line.at_limit line.detail)
     in
     if Option.is_some line.share
-       && cells_of (head (rstrip_spaces (label ^ " " ^ gauge))) > layout.width
+       && ((line.at_limit && layout.label_cells = 0)
+           || cells_of (head (rstrip_spaces (label ^ " " ^ gauge))) > layout.width)
     then
       let labels =
         if label_overflows then label_rows
-        else [ indent ^ name ^ " " ^ style line.tone line.label ]
+        else [ indent ^ name ^ " " ^ style line.tone (marked ~attention:line.at_limit line.label) ]
       in
       labels
       @ List.map
           (fun value -> layout.continuation ^ style line.tone value)
-          (Text.wrap_words ~max_cells:layout.continuation_cells line.percent)
+          (wrap_marked ~width:layout.continuation_cells ~attention:line.at_limit line.percent)
       @ wrapped_detail ()
     else
       label_rows
@@ -941,7 +976,7 @@ let draw_entry layout tone entry =
   rows
   @ (match entry.de_tag with
      | None -> []
-     | Some tag -> note_lines ~tone:(Theme.bad ()) ("Catalogue \xc2\xb7 " ^ tag))
+     | Some tag -> note_lines ~tone:(Theme.text_status Masc_tui_theme.Bad) ("Catalogue \xc2\xb7 " ^ tag))
   @ (match entry.de_email with
      | None -> []
      | Some email -> note_lines ~tone:(Theme.recede ()) email)
@@ -978,16 +1013,17 @@ let draw_stacked_entry ~width ~tone entry =
     Masc_tui_message_layout.wrap_words ~max_cells:(max 1 width) text
     |> List.map (style tone) in
   let name =
-    Masc_tui_message_layout.wrap_words ~max_cells:(max 1 width) entry.de_name
+    wrap_marked ~width ~attention:entry.de_attention entry.de_name
     |> List.map (fun text -> Ansi.bold ^ tone ^ text ^ Ansi.reset) in
   let body = match entry.de_body with
     | State_text text -> wrap None text
     | Window_lines lines ->
         List.map (fun line ->
-          wrap line.tone line.label @ wrap line.tone line.percent
-          @ wrap line.detail_tone line.detail) lines |> separated in
+          (wrap_marked ~width ~attention:line.at_limit line.label |> List.map (style line.tone))
+          @ (wrap_marked ~width ~attention:line.at_limit line.percent |> List.map (style line.tone))
+          @ (wrap_marked ~width ~attention:line.at_limit line.detail |> List.map (style line.detail_tone))) lines |> separated in
   name @ body
-  @ Option.fold ~none:[] ~some:(fun tag -> wrap (Some (Theme.bad ())) ("Catalogue · " ^ tag)) entry.de_tag
+  @ Option.fold ~none:[] ~some:(fun tag -> wrap (Some (Theme.text_status Masc_tui_theme.Bad)) ("Catalogue · " ^ tag)) entry.de_tag
   @ Option.fold ~none:[] ~some:(wrap (Some (Theme.recede ()))) entry.de_email
 
 let draw_groups ~show_limit_exhausted ~width groups =
@@ -1006,13 +1042,13 @@ let draw_groups ~show_limit_exhausted ~width groups =
             match entry.de_body with
             | State_text _ -> false
             | Window_lines lines ->
-                List.exists (fun line -> cells_of line.label > layout.label_cells) lines
+                List.exists (fun line -> cells_of (marked ~attention:line.at_limit line.label) > layout.label_cells) lines
           in
-          if cells_of entry.de_name <= layout.name_cells && not label_overflows then
+          if cells_of (marked ~attention:entry.de_attention entry.de_name) <= layout.name_cells && not label_overflows then
             draw_entry layout tone entry
           else
             let heading =
-              Masc_tui_message_layout.wrap_words ~max_cells:(max 1 (width - 2)) entry.de_name
+              wrap_marked ~width:(width - 2) ~attention:entry.de_attention entry.de_name
               |> List.map (fun line -> indent ^ Ansi.bold ^ tone ^ line ^ Ansi.reset)
             in
             heading @ draw_entry (layout_for ~show_names:false ~width [ entry ]) tone entry
@@ -1046,13 +1082,13 @@ let rec pairs = function
 (* An account's windows as a card titled with its name. The name column is
    empty inside the card: the title already says it. *)
 let account_card ~tone entry =
-  { Masc_tui_card.title = entry.de_name
+  { Masc_tui_card.title = marked ~attention:entry.de_attention entry.de_name
   ; body =
       (fun ~cells ->
         let full_name =
-          if cells_of entry.de_name <= max 0 (cells - 1) then []
+          if cells_of (marked ~attention:entry.de_attention entry.de_name) <= max 0 (cells - 1) then []
           else
-            Masc_tui_message_layout.wrap_words ~max_cells:(max 1 cells) entry.de_name
+            wrap_marked ~width:cells ~attention:entry.de_attention entry.de_name
             |> List.map (fun line -> Ansi.bold ^ tone ^ line ^ Ansi.reset)
         in
         full_name @ draw_entry (layout_for ~show_names:false ~width:cells [ entry ]) tone entry)
@@ -1174,7 +1210,7 @@ let section_with ~draw ~bound ~(providers : Types.overview_providers_reading) ~r
       Some
         { title = title_text ()
         ; lines =
-            [ Printf.sprintf " %susage data unavailable: %s%s" (Theme.warn ())
+            [ Printf.sprintf " %susage data unavailable: %s%s" (Theme.text_status Masc_tui_theme.Warn)
                 (detail reason) Ansi.reset
             ]
         }
@@ -1187,7 +1223,7 @@ let section_with ~draw ~bound ~(providers : Types.overview_providers_reading) ~r
       let runtimes_note =
         match (runtimes : Types.overview_quota_reading) with
         | Types.Quota_failed reason ->
-            [ Printf.sprintf " %sexhausted tags unread: %s%s" (Theme.warn ())
+            [ Printf.sprintf " %sexhausted tags unread: %s%s" (Theme.text_status Masc_tui_theme.Warn)
                 (detail reason) Ansi.reset
             ]
         | Types.Quota_unread | Types.Quota_read _ -> []
@@ -1197,11 +1233,11 @@ let section_with ~draw ~bound ~(providers : Types.overview_providers_reading) ~r
       let emails_note =
         match (account_emails : Types.overview_account_emails_reading) with
         | Types.Account_emails_failed reason ->
-            [ Printf.sprintf " %saccount emails unread: %s%s" (Theme.warn ())
+            [ Printf.sprintf " %saccount emails unread: %s%s" (Theme.text_status Masc_tui_theme.Warn)
                 (detail reason) Ansi.reset
             ]
         | Types.Account_emails_read { unreadable_rows; _ } when unreadable_rows > 0 ->
-            [ Printf.sprintf " %saccount emails: %d rows this build cannot read%s" (Theme.warn ())
+            [ Printf.sprintf " %saccount emails: %d rows this build cannot read%s" (Theme.text_status Masc_tui_theme.Warn)
                 unreadable_rows Ansi.reset
             ]
         | Types.Account_emails_unread | Types.Account_emails_read _ -> []
@@ -1215,7 +1251,7 @@ let section_with ~draw ~bound ~(providers : Types.overview_providers_reading) ~r
       let summary =
         [ Printf.sprintf "Accounts %d \xc2\xb7 Reporting %d \xc2\xb7 At limit (reported) %d \xc2\xb7 Exhausted (observed) %s"
             counts.accounts counts.reporting counts.at_limit exhausted
-        ; "Bar: used at last report \xc2\xb7 other use does not block model calls \xc2\xb7 v: Trend" ]
+        ; "!: at limit or exhausted \xc2\xb7 Bar: used at last report \xc2\xb7 other use does not block model calls \xc2\xb7 v: Trend" ]
         |> List.concat_map (Masc_tui_message_layout.wrap_words ~max_cells:width) in
       let notes = runtimes_note @ emails_note in
       match rows with

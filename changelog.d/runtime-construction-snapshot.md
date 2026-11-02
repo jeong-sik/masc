@@ -1,3 +1,0 @@
-### Fixed
-
-- Keep one HTTP runtime binding's admitted provider declaration and model policy through credential-file loading. Concurrent catalog replacement no longer changes the selected capabilities, thinking controls, context ceiling or pricing partway through construction; missing policy stays missing. Provider lookup uses only the declaration's exact ID or explicit aliases.

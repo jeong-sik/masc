@@ -81,15 +81,15 @@ val keeper_trace_projection : keeper list -> keeper_trace_projection
     wire. *)
 type goal_proof =
   | Proof_idle  (** The current ledger has no proof request; prior execution is unknown. *)
-  | Proof_pending  (** A completion request is durable and the judge has not answered. *)
+  | Proof_pending  (** The current projection reports a matching pending request. *)
   | Proof_proven of string option
-      (** Approved. [Some] is what the judge measured; [None] is a verdict
-          recorded without text, which is a different fact from an empty
-          measurement and is drawn as such. *)
+      (** The current projection reports an approval. [Some] carries its
+          evidence; this observation is not proof of dispatch or durability. *)
   | Proof_refuted of string option  (** Refused; [Some] is why. *)
   | Proof_stale of string option
   | Proof_unreadable of string option
-      (** The ledger did not decode, or named a state this build does not know.
+      (** The proof projection did not decode or match this Goal, or named a
+          state this build does not know.
           Distinct from {!Proof_idle}: an unreadable store is not the same fact
           as an unreviewed goal, and showing it as "not reviewed" would
           disguise corruption as quiet. *)
@@ -107,7 +107,9 @@ type goal_retry_binding = {
 }
 (** The phase and readable verification shown with a Goal. [None] request ID
     is the observed idle state on an Executing Goal. Verifying with idle,
-    stale, confirmed or unreadable proof supplies no retry binding. *)
+    stale, confirmed or unreadable proof supplies no retry binding. Executing
+    with a current proven or confirmed proof, or a stale proof whose revision
+    matches the current criterion despite other differences, has no binding. *)
 (** The latest verifier scan could not settle this Verifying goal. It stays
     Verifying until [request_complete] retries it or a later scan settles it,
     or the operator takes it back or drops it. *)

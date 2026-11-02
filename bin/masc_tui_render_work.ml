@@ -388,8 +388,10 @@ let planning_detail_tone (tone : Planning_detail.tone) =
    surface and their own verdicts. *)
 let planning_next_step (goal : planning_goal) =
   match goal.pg_phase, goal.pg_proof with
+  | Goal_phase.Executing, Tui_decode.Proof_unreadable _ when Option.is_none goal.pg_retry_binding ->
+    (Theme.warn (), "verification binding unavailable - inspect proof, server storage and runtime, then [r] refresh")
   | Goal_phase.Executing, _ when Option.is_none goal.pg_retry_binding ->
-    (Theme.warn (), "verification state unavailable - check connection, server storage and runtime, then [r] refresh")
+    (Theme.warn (), "verification binding unavailable - inspect the Goal and proof, then [r] refresh")
   | Goal_phase.Executing, Tui_decode.Proof_refuted _ ->
     ( (Theme.bad ())
     , "refused - fix what the verdict names below, then [c] to resubmit" )

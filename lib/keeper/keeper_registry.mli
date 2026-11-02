@@ -318,7 +318,9 @@ val set_turn_selected_runtime :
 (** Mark the end of a keeper turn. Clears [current_turn_observation]
     so the composite observer reverts to idle and stamps
     [runtime.usage.last_turn_ts] for the completed turn. Idempotent —
-    a stale token cannot finish a successor or clear its wakeup flag. *)
+    a stale token cannot finish a successor. Does not consume [fiber_wakeup]:
+    an input may have arrived while this turn was running, and the heartbeat
+    sleep owns consumption of that signal. *)
 val mark_turn_finished :
   observation_token:Keeper_turn_observation_token.t ->
   base_path:string -> string -> unit

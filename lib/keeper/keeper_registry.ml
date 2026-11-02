@@ -127,9 +127,8 @@ let mark_turn_finished ~observation_token ~base_path name =
               { e.meta.runtime with usage =
                   { e.meta.runtime.usage with last_turn_ts = now } } }
         in
-        (* Reset only the finishing owner's wakeup under the keeper key lock.
-           A stale cleanup must not clear a successor's signal. *)
-        Atomic.set e.fiber_wakeup false;
+        (* A wake received during this turn belongs to pending input, not to
+           the finishing observation. Only the heartbeat sleep consumes it. *)
         { e with meta; current_turn_observation = None; last_completed_turn }, true)
   in
   if changed then

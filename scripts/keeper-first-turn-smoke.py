@@ -225,8 +225,164 @@ def wait_until(description, action, server, timeout=60):
     raise SmokeError('timed out waiting for ' + description)
 
 
+HEAD_FORMAT = 'masc.checkpoint.head'
+CHAIN_START_TAG = 'masc.rfc-0476.chain.v1'
+_HEX_DIGITS = frozenset('0123456789abcdef')
+
+
+def _is_digest(value):
+    return (isinstance(value, str) and len(value) == 64
+            and all(c in _HEX_DIGITS for c in value))
+
+
+def _chain_start():
+    return hashlib.sha256(CHAIN_START_TAG.encode('ascii')).hexdigest()
+
+
+def _chain_step(chain_hex, digest_hex):
+    return hashlib.sha256((chain_hex + digest_hex).encode('ascii')).hexdigest()
+
+
+def _read_object(session_dir, digest):
+    # One file at <session_dir>/objects/<aa>/<sha256>, digest-checked like
+    # Checkpoint_objects.load: a missing, unreadable or mismatched object is
+    # not the checkpoint this smoke waits for.
+    if not _is_digest(digest):
+        return None
+    path = session_dir / 'objects' / digest[:2] / digest
+    try:
+        if path.is_symlink() or not path.is_file():
+            return None
+        data = path.read_bytes()
+    except OSError:
+        return None
+    if hashlib.sha256(data).hexdigest() != digest:
+        return None
+    return data
+
+
+def _bundle_messages(bundle_bytes):
+    # Mirror bundle_entries framing: one JSON header line naming each
+    # message's sha256 and byte length, then each message's bytes on its own
+    # line. Every slice is checked against the header.
+    newline = bundle_bytes.find(b'\n')
+    if newline < 0:
+        return None
+    try:
+        header = json.loads(bundle_bytes[:newline].decode('utf-8'))
+    except (ValueError, UnicodeError):
+        return None
+    if not isinstance(header, dict) or not isinstance(header.get('messages'), list):
+        return None
+    entries = []
+    offset = newline + 1
+    for item in header['messages']:
+        if not isinstance(item, dict) or not _is_digest(item.get('sha256')):
+            return None
+        length = item.get('bytes')
+        if type(length) is not int or length < 0:
+            return None
+        if length >= len(bundle_bytes) - offset:
+            return None
+        if bundle_bytes[offset + length:offset + length + 1] != b'\n':
+            return None
+        raw = bundle_bytes[offset:offset + length]
+        if hashlib.sha256(raw).hexdigest() != item['sha256']:
+            return None
+        try:
+            message = json.loads(raw.decode('utf-8'))
+        except (ValueError, UnicodeError):
+            return None
+        if not isinstance(message, dict):
+            return None
+        entries.append((item['sha256'], message))
+        offset += length + 1
+    if offset != len(bundle_bytes):
+        return None
+    return entries
+
+
+def _head_messages(path):
+    # Decode an RFC-0476 head file (session_dir/<session_id>.json) into its
+    # closed-turn messages, verifying every referenced object. Answers
+    # (head, messages), or None when this file is not a final checkpoint.
+    try:
+        head = json.loads(path.read_text())
+    except (OSError, ValueError, UnicodeError):
+        return None
+    if not isinstance(head, dict) or head.get('format') != HEAD_FORMAT:
+        return None
+    checkpoint = head.get('checkpoint')
+    header_objects = head.get('header_objects')
+    history = head.get('history')
+    if (not isinstance(checkpoint, dict) or not isinstance(header_objects, dict)
+            or not isinstance(history, dict)):
+        return None
+    session_id = checkpoint.get('session_id')
+    if not isinstance(session_id, str) or not session_id:
+        return None
+    # Archived snapshots are heads of older checkpoints; only the
+    # session-named canonical file is the authoritative input for resume.
+    if path.name != session_id + '.json':
+        return None
+    if checkpoint.get('messages') != []:
+        return None
+    session_dir = path.parent
+    for key in ('system_prompt', 'tools'):
+        if _read_object(session_dir, header_objects.get(key)) is None:
+            return None
+    turns = history.get('turns')
+    if not isinstance(turns, list) or not turns:
+        return None
+    if history.get('segment') is not None:
+        return None
+    if history.get('open') != []:
+        return None
+    messages = []
+    chain = _chain_start()
+    for turn in turns:
+        if not isinstance(turn, dict):
+            return None
+        bundle = turn.get('bundle')
+        count = turn.get('messages')
+        expected = turn.get('chain')
+        if not _is_digest(bundle) or type(count) is not int or not isinstance(expected, str):
+            return None
+        raw = _read_object(session_dir, bundle)
+        if raw is None:
+            return None
+        entries = _bundle_messages(raw)
+        if entries is None or len(entries) != count:
+            return None
+        for digest, _message in entries:
+            chain = _chain_step(chain, digest)
+        if chain != expected:
+            return None
+        messages.extend(message for _digest, message in entries)
+    return head, messages
+
+
+def _fixture_match(messages, fixture):
+    call = any(isinstance(m, dict) and m.get('role') == 'assistant' and any(
+        obj.get('id') == fixture.call_id and obj.get('name') == fixture.tool_name
+        for obj in objects(m.get('content'))) for m in messages)
+    result = any(isinstance(m, dict) and m.get('role') == 'tool'
+                 and proof_from(m.get('content'), fixture.marker) for m in messages)
+    final = any(isinstance(m, dict) and m.get('role') == 'assistant' and any(
+        obj.get('text') == fixture.final for obj in objects(m.get('content'))) for m in messages)
+    return call and result and final
+
+
 def checkpoint_proof(base, fixture):
     for path in (base / '.masc').rglob('*.json'):
+        decoded = _head_messages(path)
+        if decoded is not None:
+            head, messages = decoded
+            if _fixture_match(messages, fixture):
+                data = dict(head)
+                data['decoded_messages'] = messages
+                return path, data
+            continue
         try:
             data = json.loads(path.read_text())
         except (OSError, ValueError, UnicodeError):
@@ -240,14 +396,7 @@ def checkpoint_proof(base, fixture):
         messages = data.get('messages')
         if not isinstance(messages, list):
             continue
-        call = any(m.get('role') == 'assistant' and any(
-            obj.get('id') == fixture.call_id and obj.get('name') == fixture.tool_name
-            for obj in objects(m.get('content'))) for m in messages)
-        result = any(m.get('role') == 'tool' and proof_from(m.get('content'), fixture.marker)
-                     for m in messages)
-        final = any(m.get('role') == 'assistant' and any(
-            obj.get('text') == fixture.final for obj in objects(m.get('content'))) for m in messages)
-        if call and result and final:
+        if _fixture_match(messages, fixture):
             return path, data
     return None
 

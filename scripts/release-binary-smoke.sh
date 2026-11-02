@@ -7,6 +7,11 @@
 #
 # Default binary path: _build/default/bin/main_eio.exe
 #
+# Env:
+#   SMOKE_PORT (default 18935), BOOT_WAIT_SEC (default 5),
+#   SMOKE_BOOT_LOG_OUT (default unset): when set, a failing run copies the
+#   full boot.log there before exiting.
+#
 # Exit codes:
 #   0  smoke + doc drift OK
 #   2  binary printed FATAL during boot
@@ -71,6 +76,19 @@ MASC_OTEL_ENABLED=0 \
   "$BINARY" --base-path "$tmp" --port "$PORT" >"$log" 2>&1 &
 PID=$!
 
+# On failure the EXIT trap removes $tmp with the full boot log inside. When
+# SMOKE_BOOT_LOG_OUT names a path, keep a copy there so a slow-boot timeout
+# (or FATAL) can be told apart from a boot regression after the fact.
+preserve_boot_log() {
+  if [ -n "${SMOKE_BOOT_LOG_OUT:-}" ]; then
+    if cp "$log" "$SMOKE_BOOT_LOG_OUT" 2>/dev/null; then
+      echo "smoke: full boot log preserved at $SMOKE_BOOT_LOG_OUT" >&2
+    else
+      echo "smoke: cannot preserve boot log at $SMOKE_BOOT_LOG_OUT" >&2
+    fi
+  fi
+}
+
 # Poll for either a FATAL line or the listening line. Bound by BOOT_WAIT_SEC.
 deadline=$(( $(date +%s) + BOOT_WAIT_SEC ))
 state=pending
@@ -98,6 +116,7 @@ case "$state" in
   fatal)
     echo "smoke: FATAL during boot:" >&2
     grep -B2 -A2 -E 'FATAL|Fatal ' "$log" >&2 || true
+    preserve_boot_log
     exit "$EXIT_FATAL"
     ;;
   pending)
@@ -107,6 +126,7 @@ case "$state" in
     else
       echo "smoke: boot process exited on its own before the deadline (exit status $boot_status) — crash, not a slow boot" >&2
     fi
+    preserve_boot_log
     tail -30 "$log" >&2
     exit "$EXIT_TIMEOUT"
     ;;

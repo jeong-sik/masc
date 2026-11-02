@@ -271,7 +271,6 @@ let stage_collect
        let usage =
          Agent_turn.accumulate_usage
            ~current_usage:agent.state.usage
-           ~provider_config:(Some provider_config)
            ~response_model:(Some response.model)
            ~response_usage:response.usage
        in

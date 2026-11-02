@@ -366,7 +366,7 @@ let complete_prepared_sync
        match result with
         | Ok resp ->
           let resp =
-            Pricing.annotate_response_cost ~provider:(Provider_config.provider_reference config) resp
+            Pricing.annotate_response_cost ~source:(Provider_config.pricing_source config) resp
           in
           let reported_model = resp.Types.model in
           let reasoning_prefix =
@@ -719,7 +719,7 @@ let complete_prepared_stream
     Result.map
       (fun resp ->
          let latency_ms = latency_ms_int latency_counter in
-         let resp = Pricing.annotate_response_cost ~provider:(Provider_config.provider_reference config) resp in
+         let resp = Pricing.annotate_response_cost ~source:(Provider_config.pricing_source config) resp in
          let existing_telemetry = resp.telemetry in
          let ttfrc_ms = Option.bind existing_telemetry (fun t -> t.ttfrc_ms) in
          let prefill_ms = Option.bind existing_telemetry (fun t -> t.prefill_ms) in

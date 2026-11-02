@@ -11,6 +11,18 @@ type pricing =
   ; cache_read_multiplier : float option
   }
 
+type provider_scope =
+  | Provider_reference of Model_catalog.provider_reference
+  | Selected_provider of Model_catalog.provider_entry
+
+type source =
+  { catalog : Model_catalog.t option
+  ; scope : provider_scope
+  }
+
+let of_catalog ~catalog ~provider = {catalog; scope = Provider_reference provider}
+let of_provider_entry ~catalog ~provider = {catalog; scope = Selected_provider provider}
+
 type cache_price_component =
   | Cache_creation
   | Cache_read
@@ -29,6 +41,19 @@ let pricing_of_catalog_entry (entry : Model_catalog.model_entry) =
       ; cache_read_multiplier = entry.cache_read_multiplier
       }
   | None, _ | _, None -> None
+;;
+
+let pricing_for_model source model_id =
+  match source.catalog, Model_identifiers.Model_id.of_string model_id with
+  | None, _ | _, Error _ -> None
+  | Some catalog, Ok model_id ->
+    let row = match source.scope with
+      | Provider_reference provider ->
+        Model_catalog.lookup_model_for_provider catalog ~provider ~model_id
+      | Selected_provider provider ->
+        Model_catalog.lookup_model_for_provider_entry catalog ~provider ~model_id
+    in
+    Option.bind row pricing_of_catalog_entry
 ;;
 
 let catalog_entry_for_model catalog ?provider model_id =
@@ -89,11 +114,11 @@ let estimate_cost
     Estimated (input_cost +. cache_write_cost +. cache_read_cost +. output_cost)
 ;;
 
-let annotate_usage_cost ?provider ~model_id (usage : Types.api_usage) =
+let annotate_usage_cost ~source ~model_id (usage : Types.api_usage) =
   match usage.cost_usd with
   | Some _ -> usage
   | None ->
-    (match pricing_for_model_opt ?provider model_id with
+    (match pricing_for_model source model_id with
      | None -> usage
      | Some pricing ->
        (match
@@ -109,12 +134,18 @@ let annotate_usage_cost ?provider ~model_id (usage : Types.api_usage) =
         | Incomplete _ -> usage))
 ;;
 
-let annotate_response_cost ?provider (response : Types.api_response) =
+let annotate_response_cost ~source (response : Types.api_response) =
   match response.usage with
   | None -> response
   | Some usage ->
+    let model_id = match Option.bind response.telemetry (fun telemetry -> telemetry.Types.reported_model) with
+      | Some (Types.Provider_reported_model model) -> Some model
+      | Some Types.Provider_model_not_reported | None -> None in
+    let usage = match model_id with
+      | Some model_id -> annotate_usage_cost ~source ~model_id usage
+      | None -> usage in
     { response with
-      usage = Some (annotate_usage_cost ?provider ~model_id:response.model usage)
+      usage = Some usage
     }
 ;;
 

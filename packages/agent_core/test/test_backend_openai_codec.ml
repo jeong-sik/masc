@@ -1766,7 +1766,9 @@ let test_reported_openai_cost_reaches_sync_and_stream_usage () =
     (match expected with
      | None -> ()
      | Some _ ->
-       let priced = Pricing.annotate_usage_cost ~model_id:"gpt-4o-mini" streamed in
+       let source = Pricing.of_catalog ~catalog:None
+           ~provider:(Model_catalog.Anonymous_wire OpenAI_compat) in
+       let priced = Pricing.annotate_usage_cost ~source ~model_id:"gpt-4o-mini" streamed in
        Alcotest.(check (option (float 1e-9))) "catalog pricing cannot overwrite reported cost or zero"
          expected priced.cost_usd)) cases;
   List.iter (fun cost ->

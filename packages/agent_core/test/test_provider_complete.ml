@@ -1794,16 +1794,18 @@ let test_annotate_response_cost () =
           ; cache_read_input_tokens = 0
           ; cost_usd = None
           }
-    ; telemetry = None
+    ; telemetry = Some (Llm_provider.Types.with_reported_model ~model:"claude-sonnet-5" None)
     }
   in
-  match Llm_provider.Pricing.annotate_response_cost response with
+  let source = Llm_provider.Pricing.of_catalog ~catalog:(Llm_provider.Model_catalog.global ())
+      ~provider:(Llm_provider.Model_catalog.Anonymous_wire Anthropic) in
+  match Llm_provider.Pricing.annotate_response_cost ~source response with
   | { usage = Some { cost_usd = Some cost; _ }; _ } ->
     Alcotest.(check bool) "annotated cost" true (cost > 0.0)
   | _ -> Alcotest.fail "expected annotated response cost"
 ;;
 
-let test_annotate_response_cost_gpt55 () =
+let test_annotate_response_cost_keeps_missing_scoped_rates () =
   let response : api_response =
     { id = "resp-gpt55"
     ; model = "gpt-5.5"
@@ -1817,13 +1819,16 @@ let test_annotate_response_cost_gpt55 () =
           ; cache_read_input_tokens = 0
           ; cost_usd = None
           }
-    ; telemetry = None
+    ; telemetry = Some (Llm_provider.Types.with_reported_model ~model:"gpt-5.5" None)
     }
   in
-  match Llm_provider.Pricing.annotate_response_cost response with
-  | { usage = Some { cost_usd = Some cost; _ }; _ } ->
-    Alcotest.(check (float 0.001)) "gpt-5.5 cost" 35.0 cost
-  | _ -> Alcotest.fail "expected gpt-5.5 annotated response cost"
+  let source = Llm_provider.Pricing.of_catalog ~catalog:(Llm_provider.Model_catalog.global ())
+      ~provider:(Llm_provider.Model_catalog.Declared_provider "openai") in
+  match Llm_provider.Pricing.annotate_response_cost ~source response with
+  | { usage = Some usage; _ } ->
+    Alcotest.(check (option (float 0.001)))
+      "unpriced scoped row does not inherit the bare row's price" None usage.cost_usd
+  | _ -> Alcotest.fail "expected response usage to remain present"
 ;;
 
 let test_complete_propagates_exact_provider_to_cost_annotation () =
@@ -1860,7 +1865,7 @@ cache_read_multiplier = 1.0
           ; cache_read_input_tokens = 0
           ; cost_usd = None
           }
-    ; telemetry = None
+    ; telemetry = Some (Llm_provider.Types.with_reported_model ~model:"shared-priced-model" None)
     }
   in
   let config =
@@ -2415,9 +2420,9 @@ let () =
     ; ( "cost"
       , [ test_case "annotate response cost" `Quick test_annotate_response_cost
         ; test_case
-            "annotate gpt-5.5 response cost"
+            "unpriced scoped model stays unknown"
             `Quick
-            test_annotate_response_cost_gpt55
+            test_annotate_response_cost_keeps_missing_scoped_rates
         ; test_case
             "complete propagates exact provider to cost annotation"
             `Quick

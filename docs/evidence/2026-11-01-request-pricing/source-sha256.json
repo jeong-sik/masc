@@ -1,0 +1,30 @@
+{
+  "source_head": "ab7634fe1fe3297a86b21784e8e96acc4b189e1a",
+  "files": {
+    ".github/workflows/test.yml": "99286b2989de40ea72ad184b6c8335da64e9213e289e260a4afc16bd3bd8bb6d",
+    "packages/agent_core/lib/agent/agent_turn.ml": "cc2368fda6d5140b8e5c5eaba6cfd6849bfddee262179de8be8b03ab3d2896ca",
+    "packages/agent_core/lib/agent/agent_turn.mli": "c7389a80af65f4e088d6cd40ec97de21c5037fc2353377e2f6fff55774db33c3",
+    "packages/agent_core/lib/llm_provider/capabilities.ml": "08d4795befd39161134101c771d23b6ac390ec0ca08a8a181880ef5a155b8879",
+    "packages/agent_core/lib/llm_provider/capabilities.mli": "efdfd72de39ec7f283aab31b8bc52eb1c4b7502456c9cca4747241313fa70a3f",
+    "packages/agent_core/lib/llm_provider/complete.ml": "ea64f02a4732810b7f68e7f0ba4af1d7967b98773c91dae02c6e2ca1081860bf",
+    "packages/agent_core/lib/llm_provider/complete_stream.ml": "db1af9f97230be715ba5158787cffdb9697264a8ab004ae5aed1514c7c28bd03",
+    "packages/agent_core/lib/llm_provider/complete_stream_state.ml": "48744fa3e05d6f55ba5b47e39a55a8051e1967d8241e879cf41372fba6a36162",
+    "packages/agent_core/lib/llm_provider/prepared_completion_request.ml": "96a77d05e991343061a6ff944a2d3007163bf841ac92590d0cc3d5dc758eb04f",
+    "packages/agent_core/lib/llm_provider/pricing.ml": "fab973947718825f6120552f7bedd4724c94e976aeb6883e533ef19247437f2b",
+    "packages/agent_core/lib/llm_provider/pricing.mli": "0adc09046029be4d178cf26baed7fcc5493e1a7e8d2ef8757c3d0999cf479883",
+    "packages/agent_core/lib/llm_provider/provider_config.ml": "1237ca5c758be1c5578e980f5233b8c9da4bcf7063751746387e6a032b9979ab",
+    "packages/agent_core/lib/llm_provider/provider_config.mli": "428a764fadea44e2dd5c2a3fb3a2661d0375adfe1603610cbedbc14778cf288d",
+    "packages/agent_core/lib/llm_provider/types.ml": "8bd852f1800d7464540ef979d98861525703cce254613b78c4535f9c77826790",
+    "packages/agent_core/lib/llm_provider/types.mli": "c1113f88322be439c935011641da2bdf9b8b7715c35097acdd19d0026c4488b3",
+    "packages/agent_core/lib/pipeline/pipeline.ml": "52c3df37686443bc30e8b826a90325d4b99ac96647cf291ddad75ef704199b6f",
+    "packages/agent_core/lib/pipeline/pipeline_stage_route.ml": "7e61c4f94e9cc3793d91d3e28433a550db39f01a5644bab8ebd9696f95ea8d34",
+    "packages/agent_core/test/dune": "0be80cb94f7ef1c75ba529a6b68a71e1d119c44677ae561040dd7a3a6223fb74",
+    "packages/agent_core/test/test_agent_turn.ml": "9066f59c94b8ca7c7c498399f28dc6b5b462aebbba8cfb2db972762ae003a979",
+    "packages/agent_core/test/test_backend_openai_codec.ml": "459edd7a6ba07cac3dbd9b3c26f1bf4bf03b3fb6b80a11f28a7269134a3f1d93",
+    "packages/agent_core/test/test_complete_http.ml": "43cd4dd1486c613aba1cd724d0f64daeebe621c7b676517d693bf6f322aa2276",
+    "packages/agent_core/test/test_pipeline.ml": "ffa5c23efdecd41b83ccf459d6a47125d7362160fa6cf5fcfe90c32104655f48",
+    "packages/agent_core/test/test_provider_complete.ml": "c2850422743447f5c117473060cb3f44249e595898635ce9b61e294f1d9362de",
+    "packages/agent_core/test/test_provider_config.ml": "fcf49f3a1bc4d55a9f90f8353aac55ab4e1c298dc0ccfa610a642c527a2c749b",
+    "packages/agent_core/test/test_request_pricing_snapshot.ml": "c5939d774e0f7ff6962ca9efe59e93e6b3b14e3488742346041275088396ac06"
+  }
+}

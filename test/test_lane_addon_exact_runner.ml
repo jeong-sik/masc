@@ -78,6 +78,19 @@ let publish ?(lane_id = lane_id) ?(cli_slots = []) ~base_path targets =
        (F.resolver_snapshot ~source:base_path targets)
      : Runtime_exact_output_registry.t)
 
+let publish_responses ?body_timeouts ~base_path targets =
+  let module EO = Agent_core.Exact_output in
+  let document=F.catalog_document ?body_timeouts ~source:base_path targets in
+  let chat_path="request_path = \"/v1/chat/completions\"" in
+  let lines=String.split_on_char '\n' document.contents in
+  check bool "fixture has the expected chat path" true (List.mem chat_path lines);
+  let document={document with contents=String.concat "\n" (List.map (fun line ->
+    if String.equal line chat_path then "request_path = \"/v1/responses\"" else line) lines)} in
+  let snapshot=match EO.load_resolver_snapshot ~catalog:(EO.Full_replacement document) () with
+    | Ok snapshot -> snapshot | Error _ -> fail "Responses catalog fixture did not load" in
+  ignore (F.publish_registry ~lane_id ~slot_ids:(List.map (fun (target : F.target_fixture) -> target.id) targets)
+    ~cli_slot_ids:[] snapshot : Runtime_exact_output_registry.t)
+
 let run_request ?(package=package) ?runner ?schema ?messages ~base_path ~store id =
   let runner = Option.value runner ~default:(Server_lane_addon_exact.runner ~base_path) in
   match Exact.run ~authorize_request:(Server_lane_addon_exact.authorize_request ~base_path) ~store ~declaration_id ~package ~runner (request ?schema ?messages id) with
@@ -115,6 +128,174 @@ let test_an_answer_that_matches_the_schema_is_answered () =
       check bool "the package's system text is sent" true (contains "You write quiz questions.");
       check bool "and its message" true (contains "Write one question about the ledger.")
     | bodies -> failf "expected one request, got %d" (List.length bodies))
+
+let test_original_response_observations_are_bound_to_each_visit () =
+  let response output = Yojson.Safe.to_string (`Assoc [
+    "status",`String "completed";"error",`Null;"output",`List [`Assoc [
+      "type",`String "message";"role",`String "assistant";"content",`List [`Assoc [
+        "type",`String "output_text";"text",`String (Yojson.Safe.to_string output)]]]]]) in
+  let wrong_body=response (`Assoc ["title",`String "x"]) and right_body=response question in
+  with_case (fun ~sw ~net ~clock ~base_path ~store ->
+    let wrong=F.start_server ~sw ~net ~clock (F.Reply wrong_body) in
+    let right=F.start_server ~sw ~net ~clock (F.Reply right_body) in
+    publish_responses ~base_path [{F.id="first";base_url=wrong.base_url};{F.id="second";base_url=right.base_url}];
+    check bool "second Responses visit answered" true
+      (Option.is_some (answered_by (run_request ~base_path ~store "responses-v2")));
+    let receipt=original_receipt ~store:(Lane_addon_store.create ~root:(Lane_addon_store.root store)) "responses-v2" in
+    let module Receipt=Keeper_exact_walk_receipt in
+    let digest body=Agent_core_sha256.(to_hex (digest_string body)) in
+    (match Receipt.response_observations receipt with
+     | Some [first;second] ->
+       check (list string) "original candidate order" ["first";"second"]
+         [first.visit.candidate_id;second.visit.candidate_id];
+       check (list int) "original visit ordinals" [1;2] [first.visit.ordinal;second.visit.ordinal];
+       check bool "visits retain different call identities" true (first.call_id<>second.call_id);
+       List.iter (fun (observed,body) ->
+         check bool "Responses wire family" true (observed.Receipt.family=Receipt.Responses_codec);
+         check (option int) "actual HTTP response" (Some 200) observed.http_status;
+         check (option string) "digest of this visit's response body" (Some (digest body)) observed.body_sha256;
+         check bool "same parse reports completed" true
+           (observed.lifecycle=Some (Receipt.Observed_status Receipt.Completed)))
+         [first,wrong_body;second,right_body]
+     | None | Some _ -> fail "version 2 should retain both actual response observations");
+    let wire=Receipt.to_json receipt in
+    let legacy=match wire with
+      | `Assoc fields -> `Assoc (List.filter_map (fun (key,value) ->
+          if key="response_observations" then None
+          else Some (key,if key="version" then `Int 1 else value)) fields)
+      | _ -> fail "original receipt is not an object" in
+    let old=match Receipt.of_json legacy with Ok old -> old | Error detail -> fail detail in
+    check bool "v1 remains v1 and has no invented observations" true
+      (Receipt.response_observations old=None && Yojson.Safe.equal (Receipt.to_json old) legacy);
+    let change_observations f = match wire with
+      | `Assoc fields -> `Assoc (List.map (fun (key,value) ->
+          key,if key="response_observations" then f value else value) fields)
+      | _ -> fail "original receipt is not an object" in
+    let change_first field replacement = change_observations (function
+      | `List (`Assoc first::rest) -> `List (`Assoc (List.map (fun (key,value) ->
+          key,if key=field then replacement else value) first)::rest)
+      | _ -> fail "actual observations are missing") in
+    let remove_first_body=change_observations (function
+      | `List (`Assoc first::rest) -> `List (`Assoc (List.map (fun (key,value) ->
+          key,if key="body_sha256" || key="lifecycle" then `Null else value) first)::rest)
+      | _ -> fail "actual observations are missing") in
+    let reversed=change_observations (function `List observations -> `List (List.rev observations)
+      | _ -> fail "actual observations are missing") in
+    let missing=change_observations (function `List (_::rest) -> `List rest
+      | _ -> fail "actual observations are missing") in
+    List.iter (fun altered -> check bool "mismatched or missing visit evidence is refused" true
+      (Result.is_error (Receipt.of_json altered)))
+      [reversed;missing;remove_first_body;change_first "call_id" (`String "another-call");
+       change_first "body_sha256" (`String (String.make 64 'a'));
+       change_first "http_status" (`Int 429);
+       change_first "lifecycle" (`List [`String "Observed_status";`List [`String "Queued"]]);
+       change_first "lifecycle" (`List [`String "Unreadable_json"]);
+       change_first "family" (`List [`String "Other_codec"])];
+    let change_field field transform = function
+      | `Assoc fields -> `Assoc (List.map (fun (key,value) -> key,if key=field then transform value else value) fields)
+      | _ -> fail "expected an object in the original receipt" in
+    let first_attempt transform = change_field "http" (change_field "attempts" (function
+      | `List (first::rest) -> `List (transform first::rest)
+      | _ -> fail "original attempts are missing")) in
+    let float_version=change_field "version" (function `Int version -> `Float (float_of_int version)
+      | _ -> fail "original version is missing") in
+    let float_dispatch=first_attempt (change_field "dispatch_count" (fun _ -> `Float 1.0)) in
+    let float_ordinal=first_attempt (change_field "visit" (change_field "ordinal" (fun _ -> `Float 1.0))) in
+    List.iter (fun original -> List.iter (fun alter ->
+      check bool "integer fields refuse integral JSON floats" true (Result.is_error (Receipt.of_json (alter original))))
+      [float_version;float_dispatch;float_ordinal]) [legacy;wire];
+    let float_observation=change_observations (function
+      | `List (first::rest) -> `List (change_field "visit" (change_field "ordinal" (fun _ -> `Float 1.0)) first::rest)
+      | _ -> fail "actual observations are missing") in
+    check bool "v2 observation ordinal refuses an integral float" true
+      (Result.is_error (Receipt.of_json float_observation));
+    let erased_success = wire
+      |> change_field "response_observations" (function
+        | `List [first;second] -> `List [first;
+          second |> change_field "http_status" (fun _ -> `Null)
+                 |> change_field "body_sha256" (fun _ -> `Null)
+                 |> change_field "lifecycle" (fun _ -> `Null)]
+        | _ -> fail "actual observations are missing")
+      |> change_field "http" (change_field "attempts" (function
+        | `List [first;second] -> `List [first;change_field "phase" (fun _ -> `List [`String "Wire_started"]) second]
+        | _ -> fail "original attempts are missing")) in
+    check bool "an accepted visit cannot erase its complete response" true
+      (Result.is_error (Receipt.of_json erased_success));
+    check int "first provider called once" 1 (F.post_count wrong);
+    check int "second provider called once" 1 (F.post_count right))
+
+let test_original_responses_parse_failure_keeps_wire_status () =
+  let body={|{"status":"in_progress","output":[{"type":"function_call"}]}|} in
+  with_case (fun ~sw ~net ~clock ~base_path ~store ->
+    let server=F.start_server ~sw ~net ~clock (F.Reply body) in
+    publish_responses ~base_path [{F.id="responses";base_url=server.base_url}];
+    ignore (run_request ~base_path ~store "responses-invalid-output");
+    let module Receipt=Keeper_exact_walk_receipt in
+    let receipt=original_receipt ~store:(Lane_addon_store.create ~root:(Lane_addon_store.root store))
+      "responses-invalid-output" in
+    (match Receipt.response_observations receipt with
+     | Some [observation] ->
+       check (option int) "the wire status remains 200" (Some 200) observation.http_status;
+       check (option string) "the malformed output body is still bound"
+         (Some Agent_core_sha256.(to_hex (digest_string body))) observation.body_sha256;
+       check bool "the same parse observed in_progress" true
+         (observation.lifecycle=Some (Receipt.Observed_status Receipt.In_progress))
+     | None | Some _ -> fail "expected the original Responses observation");
+    check int "observation read does not resend" 1 (F.post_count server))
+
+let test_original_incomplete_responses_body_stays_unobserved () =
+  with_case (fun ~sw ~net ~clock ~base_path ~store ->
+    let server=F.start_server ~sw ~net ~clock (F.Incomplete_reply {|{"status":"queued"|}) in
+    publish_responses ~body_timeouts:["responses",1.0] ~base_path [{F.id="responses";base_url=server.base_url}];
+    ignore (run_request ~base_path ~store "responses-incomplete-body");
+    let module Receipt=Keeper_exact_walk_receipt in
+    let receipt=original_receipt ~store:(Lane_addon_store.create ~root:(Lane_addon_store.root store))
+      "responses-incomplete-body" in
+    (match Receipt.response_observations receipt with
+     | Some [observation] ->
+       check bool "the captured plan uses Responses" true (observation.family=Receipt.Responses_codec);
+       check (option int) "actual response headers arrived" (Some 200) observation.http_status;
+       check (option string) "an incomplete body has no complete digest" None observation.body_sha256;
+       check bool "an incomplete body has no parsed lifecycle" true (observation.lifecycle=None)
+     | None | Some _ -> fail "expected one incomplete response observation");
+    let unregistered_header=match Receipt.to_json receipt with
+      | `Assoc fields -> `Assoc (List.map (fun (key,value) -> key,
+        if key="response_observations" then (match value with
+          | `List [`Assoc observation] -> `List [`Assoc (List.map (fun (key,value) ->
+              key,if key="http_status" then `Int 600 else value) observation)]
+          | _ -> fail "expected one response observation") else value) fields)
+      | _ -> fail "expected original receipt" in
+    check bool "a body deadline requires its successful response status" true
+      (Result.is_error (Receipt.of_json unregistered_header));
+    let terminal_body_deadline=match Receipt.to_json receipt with
+      | `Assoc fields -> `Assoc (List.map (fun (key,value) -> key,
+        if key="http" then (match value with
+          | `Assoc fields -> `Assoc (List.map (fun (key,value) -> key,
+            if key="attempts" then (match value with
+              | `List [`Assoc attempt] -> `List [`Assoc (List.map (fun (key,value) ->
+                  key,if key="phase" then `List [`String "Terminal"] else value) attempt)]
+              | _ -> fail "expected one response attempt") else value) fields)
+          | _ -> fail "expected HTTP walk") else value) fields)
+      | _ -> fail "expected original receipt" in
+    check bool "a body deadline cannot be a terminal response" true
+      (Result.is_error (Receipt.of_json terminal_body_deadline));
+    let module EO=Agent_core.Exact_output in
+    let module Http=Agent_core.Llm_provider.Http_client in
+    let network_failure=Keeper_exact_walk_failure.(api_observation
+      (EO.Completion_failed {dispatch=EO.Generation_dispatch_started;
+        error=Http.NetworkError {message="synthetic connection reset";kind=Http.Connection_reset}})
+      |> api_observation_to_yojson) in
+    let replaced=ref false in
+    let rec replace_deadline = function
+      | `List [`String "Body_deadline"] -> replaced:=true;network_failure
+      | `List values -> `List (List.map replace_deadline values)
+      | `Assoc fields -> `Assoc (List.map (fun (key,value) -> key,replace_deadline value) fields)
+      | value -> value in
+    let network_with_unregistered_header=replace_deadline unregistered_header in
+    check bool "fixture replaced the original body deadline" true !replaced;
+    check bool "an unregistered header remains representable after a network failure" true
+      (Result.is_ok (Receipt.of_json network_with_unregistered_header));
+    check int "proof read did not resend" 1 (F.post_count server))
 
 let test_an_answer_outside_the_schema_advances () =
   with_case (fun ~sw ~net ~clock ~base_path ~store ->
@@ -970,6 +1151,9 @@ let () =
         ; test_case "returned output survives later configuration changes" `Quick test_returned_answer_survives_dispatch_authority_change
         ; test_case "a CLI authority veto cannot advance or resend" `Quick test_cli_dispatch_veto_never_advances
         ; test_case "an answer that matches the schema is answered" `Quick test_an_answer_that_matches_the_schema_is_answered
+        ; test_case "original response observations follow each visit" `Quick test_original_response_observations_are_bound_to_each_visit
+        ; test_case "original Responses parse failure keeps wire status" `Quick test_original_responses_parse_failure_keeps_wire_status
+        ; test_case "original incomplete Responses body stays unobserved" `Quick test_original_incomplete_responses_body_stays_unobserved
         ; test_case "an answer outside the schema advances" `Quick test_an_answer_outside_the_schema_advances
         ; test_case "every answer outside the schema is invalid_output" `Quick
             test_every_answer_outside_the_schema_is_invalid_output

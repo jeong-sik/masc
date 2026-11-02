@@ -2,6 +2,7 @@
 
 type call_id = Call_id of string
 type provider_trace = Exact_output_provider_trace.t
+type response_family = Openai_responses_codec | Other_http_codec
 
 type effect_phase =
   | Not_started
@@ -23,6 +24,7 @@ val create
   :  call_id:call_id
   -> plan_fingerprint:string
   -> request_body_sha256:string
+  -> response_family:response_family
   -> catalog_generation:Exact_output_resolver.catalog_generation
   -> catalog_evidence:Exact_output_resolver.catalog_evidence
   -> target_identity:Exact_output_resolver.target_identity
@@ -49,6 +51,8 @@ val snapshot_phase : snapshot -> effect_phase
 val snapshot_dispatch_count : snapshot -> int
 val snapshot_generation_dispatched : snapshot -> bool
 val snapshot_http_status : snapshot -> int option
+val snapshot_response_family : snapshot -> response_family
+val snapshot_response_body_sha256 : snapshot -> string option
 val snapshot_responses_lifecycle : snapshot -> Backend_openai_responses.lifecycle_observation option
 val snapshot_call_id : snapshot -> call_id
 val snapshot_plan_fingerprint : snapshot -> string

@@ -1088,13 +1088,9 @@ let render_approvals (state : state) =
                 (fit_width (Terminal_text.single_line a.ap_target_type) 16)
                 target_id
           | Some (Masc_tui_approvals_model.Keeper_tool_row held) ->
-              (* The remaining wait, not the age: this row disappears on its
-                 own when it runs out, and what an operator weighs is how
-                 long they still have. *)
-              let remaining =
-                max 0.
-                  (held.kta_asked_at +. held.kta_timeout_sec -. now_unix)
-              in
+              (* Registration precedes question publication, and the timeout
+                 starts after publication. Show age, not a guessed deadline. *)
+              let elapsed = max 0. (now_unix -. held.kta_asked_at) in
               Printf.sprintf "  %s  %s  %s  %s"
                 (fit_width (Terminal_text.single_line held.kta_keeper) name_width)
                 (fit_width
@@ -1103,7 +1099,7 @@ let render_approvals (state : state) =
                        (Masc.Tool_display.label held.kta_tool))
                    20)
                 (fit_width
-                   (Masc_tui_answering.duration_text remaining ^ " left")
+                   (Masc_tui_answering.duration_text elapsed ^ " waiting")
                    16)
                 (Terminal_text.single_line held.kta_question ^ " — "
                 ^ Terminal_text.single_line_or ~default:"(not provided)"

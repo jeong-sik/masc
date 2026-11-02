@@ -10976,8 +10976,8 @@ let read_file_bytes path =
           | exception End_of_file ->
               Error "the file ended sooner than its length said")
 
-(* Everything written for a picture goes through here, wrapped for tmux when
-   this process is inside one. tmux eats an escape it does not recognise, so
+(* Pixel-graphics payloads go through here, wrapped for tmux when this process
+   is inside one. tmux eats an escape it does not recognise, so
    these reach the terminal underneath only when they are wrapped -- and only
    when tmux was configured to pass them through, which is the operator's
    setting and not something this can check. *)
@@ -10987,6 +10987,12 @@ let write_to_terminal payload =
     | Some _ -> Masc_tui_graphics.tmux_wrapped payload
     | None -> payload
   in
+  output_string stdout payload;
+  flush stdout
+
+(* Cursor movement, SGR and text belong to the tmux pane itself, so they
+   must not be wrapped in the passthrough used by the helper above. *)
+let write_terminal_text payload =
   output_string stdout payload;
   flush stdout
 
@@ -11643,7 +11649,8 @@ let draw_cell_image state ~terminal_size:(rows, columns) (view : image_cell_fram
     | Masc_tui_graphics.Kitty_protocol, true, None -> Masc_tui_graphics.delete_all
     | (Kitty_protocol | ITerm2_protocol | Unsupported_protocol), (true | false), (Some _ | None) -> "" in
   Masc_tui_msx.invalidate ();
-  write_to_terminal (Ansi.clear ^ retire_pixels ^ contents);
+  if not (String.equal retire_pixels "") then write_to_terminal retire_pixels;
+  write_terminal_text (Ansi.clear ^ contents);
   state.browser_viewport <- None;
   state.image_inspection <- None;
   browser_image_region := None;
@@ -11654,7 +11661,7 @@ let draw_cell_image state ~terminal_size:(rows, columns) (view : image_cell_fram
 let draw_withdrawn_cell_image state ~terminal_size:(_, columns as terminal_size) =
   let notice = cell_image_notice ~columns ~short:"key:close"
     ~long:"Image preview no longer available · press any key to close" in
-  write_to_terminal (Ansi.clear ^ notice);
+  write_terminal_text (Ansi.clear ^ notice);
   state.image_cell_view <- Some (Image_cells_withdrawn (Some terminal_size))
 
 let draw_prepared_image ?scene ?(caption=[]) ~origin state ~refuse ~title = function
@@ -28640,7 +28647,7 @@ Use relative paths for resources already held in the package. -->
                   draw_withdrawn_cell_image state ~terminal_size;
                   cell_image_redraw_pending := false
               | None ->
-                  write_to_terminal Ansi.clear;
+                  write_terminal_text Ansi.clear;
                   state.image_cell_view <- Some (Image_cells_withdrawn None);
                   cell_image_redraw_pending := true)
            | Some origin ->
@@ -28657,7 +28664,7 @@ Use relative paths for resources already held in the package. -->
                   if unconfirmed && not view.ic_unconfirmed then begin
                     (* Do not leave a confirmed-looking footer on screen when
                        the source became uncertain and geometry is unknown. *)
-                    write_to_terminal Ansi.clear;
+                    write_terminal_text Ansi.clear;
                     state.image_cell_view <- Some (Image_cells {view with ic_unconfirmed=true});
                     cell_image_redraw_pending := true
                   end))

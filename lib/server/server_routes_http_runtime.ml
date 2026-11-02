@@ -1552,11 +1552,7 @@ let invalidate_full_health_snapshot () =
      observer is a non-Eio domain. *)
   signal_full_health_refresh_wakeup ()
 
-let invalidate_full_health_snapshot_for_registry_change ~base_path = function
-  (* Paused-keeper health still includes registry entries from all workspaces. *)
-  | Keeper_registry.Lifecycle_phase_changed | Keeper_registry.Membership_changed ->
-    invalidate_full_health_snapshot ()
-  | Keeper_registry.Failure_reason_changed ->
+let invalidate_full_health_snapshot_for_workspace ~base_path =
     let wake =
       with_full_health_snapshot_lock (fun () ->
         let in_current_scope =
@@ -1564,14 +1560,23 @@ let invalidate_full_health_snapshot_for_registry_change ~base_path = function
           | None -> true
           | Some state ->
             let current_path = (Mcp_server.workspace_scope state).config.base_path in
-            (match Config_dir_resolver.canonical_base_path current_path with
-             | Ok current_path -> String.equal base_path current_path
-             | Error _ -> true)
+            (match Config_dir_resolver.canonical_base_path base_path,
+                   Config_dir_resolver.canonical_base_path current_path with
+             | Ok base_path, Ok current_path -> String.equal base_path current_path
+             | Error _, _ | _, Error _ -> true)
         in
         if in_current_scope then invalidate_full_health_snapshot_locked ();
         in_current_scope)
     in
     if wake then signal_full_health_refresh_wakeup ()
+;;
+
+let invalidate_full_health_snapshot_for_registry_change ~base_path = function
+  (* Paused-keeper health still includes registry entries from all workspaces. *)
+  | Keeper_registry.Lifecycle_phase_changed | Keeper_registry.Membership_changed ->
+    invalidate_full_health_snapshot ()
+  | Keeper_registry.Failure_reason_changed ->
+    invalidate_full_health_snapshot_for_workspace ~base_path
 ;;
 
 let fleet_stream_hub_for_scope_with ~before_registration

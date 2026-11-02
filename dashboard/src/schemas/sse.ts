@@ -1263,8 +1263,9 @@ export const SSEMessageSchema = schema<SSEMessage>((value) => {
     if (typeof value.keeper_name !== 'string' || value.keeper_name.trim() === '') {
       return fail('keeper_name', 'Expected non-empty keeper_name')
     }
-    if (value.queue_kind !== 'chat_operation' && value.queue_kind !== 'event_queue') {
-      return fail('queue_kind', 'Expected chat_operation or event_queue queue_kind')
+    if (value.queue_kind !== 'chat_operation' && value.queue_kind !== 'event_queue'
+      && value.queue_kind !== 'approval_count' && value.queue_kind !== 'approval_detail') {
+      return fail('queue_kind', 'Expected chat_operation, event_queue, approval_count, or approval_detail queue_kind')
     }
   }
 

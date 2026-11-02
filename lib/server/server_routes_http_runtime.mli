@@ -246,6 +246,10 @@ val invalidate_full_health_snapshot : unit -> unit
     A worker invalidated during its scan cannot certify a current snapshot.
     The wake is coalesced and also works when the caller is outside Eio. *)
 
+val invalidate_full_health_snapshot_for_workspace : base_path:string -> unit
+(** Invalidate only the matching canonical workspace, or conservatively
+    invalidate before the current workspace is known. *)
+
 val invalidate_full_health_snapshot_for_registry_change :
   base_path:string -> Keeper_registry.state_change -> unit
 (** Keep lifecycle phase invalidations global. Failure reason changes invalidate

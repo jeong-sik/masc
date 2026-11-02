@@ -706,12 +706,11 @@ let test_claude_panel_effort_ignores_http_catalog requested expected_effort expe
   let base_dir = Filename.temp_dir "claude-panel-effort-" "" |> Unix.realpath in
   let snapshot = Runtime.For_testing.snapshot () in
   let eio_state = Eio_context.snapshot_state () in
-  let catalog = Llm_provider.Model_catalog.global () in
+  let catalog = Llm_provider.Catalog_snapshot.current () in
   Fun.protect ~finally:(fun () ->
     Runtime.For_testing.restore snapshot;
     Eio_context.restore_state eio_state;
-    (match catalog with None -> Llm_provider.Model_catalog.clear_global ()
-     | Some catalog -> Llm_provider.Model_catalog.set_global catalog);
+    (Llm_provider.Catalog_snapshot.publish catalog);
     Fs_compat.remove_tree base_dir) @@ fun () ->
   let cli_path = Filename.concat base_dir "claude-effort-fixture" in
   write_file ~path:cli_path ~perm:0o700 claude_effort_panel_fixture;
@@ -727,7 +726,7 @@ accepted_reasoning_efforts = ["low"]
 |} in
     (match Llm_provider.Model_catalog.of_toml_string ~source:"Claude Fusion effort collision" source with
      | Error detail -> fail detail
-     | Ok catalog -> Llm_provider.Model_catalog.set_global catalog);
+     | Ok catalog -> (Llm_provider.Catalog_snapshot.publish (Masc_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None))));
     (match Llm_provider.Capabilities.for_model_id "claude-sonnet-5" with
      | Some caps -> check bool "the conflicting HTTP ladder is loaded" true
          (caps.accepted_reasoning_efforts=Some [Llm_provider.Reasoning_effort.Low])
@@ -911,10 +910,8 @@ let test_muse_panel_effort_ignores_http_catalog requested () =
       | None -> fail "Muse fixture missing" in
     write_file ~path:(Filename.concat base_dir "fixture-control.json") ~perm:0o600
       {|{"record_effort_only":true}|};
-    let previous_catalog = Llm_provider.Model_catalog.global () in
-    Fun.protect ~finally:(fun () -> match previous_catalog with
-      | None -> Llm_provider.Model_catalog.clear_global ()
-      | Some catalog -> Llm_provider.Model_catalog.set_global catalog) @@ fun () ->
+    let previous_catalog = Llm_provider.Catalog_snapshot.current () in
+    Fun.protect ~finally:(fun () -> Llm_provider.Catalog_snapshot.publish previous_catalog) @@ fun () ->
     let source = {|[[models]]
 model_id = "muse-spark-1.3"
 supports_reasoning = true
@@ -922,7 +919,7 @@ accepted_reasoning_efforts = ["low"]
 |} in
     (match Llm_provider.Model_catalog.of_toml_string ~source:"Muse Fusion effort collision" source with
      | Error detail -> fail detail
-     | Ok catalog -> Llm_provider.Model_catalog.set_global catalog);
+     | Ok catalog -> (Llm_provider.Catalog_snapshot.publish (Masc_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None))));
     (match Llm_provider.Capabilities.for_model_id "muse-spark-1.3" with
      | Some caps -> check bool "conflicting HTTP ladder is actually loaded" true
          (caps.accepted_reasoning_efforts = Some [Llm_provider.Reasoning_effort.Low])

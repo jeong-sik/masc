@@ -899,7 +899,7 @@ let initialize_synthetic_runtime ~base ~endpoint runtime =
   write catalog_path (Printf.sprintf
     "[[models]]\nmodel_id = %S\nprovider_name = \"preparation_fixture\"\nbase = \"openai_chat\"\nmax_context_tokens = %d\nmax_output_tokens = %d\nsupports_tools = true\nsupports_native_streaming = true\n"
     model (integer "max_context_tokens" runtime) (integer "max_output_tokens" runtime));
-  Llm_provider.Model_catalog.load_file catalog_path |> get Fun.id |> Llm_provider.Model_catalog.set_global;
+  Llm_provider.Model_catalog.load_file catalog_path |> get Fun.id |> (fun models -> Llm_provider.Catalog_snapshot.publish (Masc_test_deps.admit_catalogs ~models:(Some models) ~providers:(None)));
   write (config_path base) (Printf.sprintf
     "[runtime]\ndefault = \"preparation_fixture.sample\"\n[providers.preparation_fixture]\nprotocol = \"openai-compatible-http\"\nendpoint = %S\n[models.sample]\napi-name = %S\nmax-context = %d\nstreaming = true\n[preparation_fixture.sample]\n%s"
     endpoint model (integer "max_context_tokens" runtime) skills_config);

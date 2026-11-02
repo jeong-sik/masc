@@ -60,7 +60,7 @@ let with_temp_model_catalog contents f =
 ;;
 
 let current_catalog () =
-  match Model_catalog.global () with
+  match (Llm_provider.Catalog_snapshot.models (Llm_provider.Catalog_snapshot.current ())) with
   | Some catalog -> catalog | None -> Model_catalog.empty
 ;;
 
@@ -1970,8 +1970,8 @@ thinking_control_format = "chat_template_kwargs"
        match Model_catalog.load_file path with
        | Error msg -> Alcotest.failf "model catalog parse error: %s" msg
        | Ok catalog ->
-         Model_catalog.set_global catalog;
-         Model_catalog.set_global (Model_catalog.with_model_overrides catalog manifest);
+         (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None)));
+         (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some ((Model_catalog.with_model_overrides catalog manifest))) ~providers:(None)));
          Fun.protect
            ~finally:(fun () -> isolate_ambient_runtime_sources ())
            (fun () ->
@@ -2008,14 +2008,12 @@ thinking_control_token = "<|provider|>"
        match Model_catalog.load_file path with
        | Error msg -> Alcotest.failf "model catalog parse error: %s" msg
        | Ok catalog ->
-         let previous_catalog = Model_catalog.global () in
+         let previous_catalog = Llm_provider.Catalog_snapshot.current () in
          let restore () =
-           match previous_catalog with
-           | Some catalog -> Model_catalog.set_global catalog
-           | None -> Model_catalog.clear_global ()
+           Llm_provider.Catalog_snapshot.publish previous_catalog
          in
          Fun.protect ~finally:restore (fun () ->
-           Model_catalog.set_global catalog;
+           (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None)));
            (match
               Capabilities.for_provider_model_id
                 ~wire:None
@@ -2909,14 +2907,12 @@ reasoning_replay = "preserve_always"
        match Model_catalog.load_file path with
        | Error msg -> Alcotest.failf "model catalog parse failed: %s" msg
        | Ok catalog ->
-         let previous_catalog = Model_catalog.global () in
+         let previous_catalog = Llm_provider.Catalog_snapshot.current () in
          let restore () =
-           match previous_catalog with
-           | Some catalog -> Model_catalog.set_global catalog
-           | None -> Model_catalog.clear_global ()
+           Llm_provider.Catalog_snapshot.publish previous_catalog
          in
          Fun.protect ~finally:restore (fun () ->
-           Model_catalog.set_global catalog;
+           (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None)));
            let catalog_caps =
              match Capabilities.for_model_id "parity-model" with
              | Some caps -> caps
@@ -3072,15 +3068,13 @@ supports_reasoning = true
 accepted_reasoning_efforts = ["high"]
 |} (if serves_bare_models then {|["precedence-model"]|} else "[]"))
     (fun path ->
-      let previous = Model_catalog.global () in
+      let previous = Llm_provider.Catalog_snapshot.current () in
       Fun.protect
-        ~finally:(fun () -> match previous with
-          | Some catalog -> Model_catalog.set_global catalog
-          | None -> Model_catalog.clear_global ())
+        ~finally:(fun () -> Llm_provider.Catalog_snapshot.publish previous)
         (fun () ->
           match Model_catalog.load_file path with
           | Error detail -> fail detail
-          | Ok catalog -> Model_catalog.set_global catalog; f ()))
+          | Ok catalog -> (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None))); f ()))
 ;;
 
 let test_a_bare_row_outranks_the_provider_base () =

@@ -317,9 +317,9 @@ let test_catalog_row_can_declare_document_input () =
     | Ok catalog -> catalog
     | Error message -> failf "inline catalog should parse: %s" message
   in
-  Model_catalog.clear_global ();
-  Fun.protect ~finally:Model_catalog.clear_global (fun () ->
-    Model_catalog.set_global catalog;
+  (Llm_provider.Catalog_snapshot.reset ());
+  Fun.protect ~finally:Llm_provider.Catalog_snapshot.reset (fun () ->
+    (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None)));
     let declares model_id =
       Capabilities.for_model_id model_id
       |> Option.map (fun (c : Capabilities.capabilities) -> c.supports_document_input)

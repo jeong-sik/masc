@@ -1227,8 +1227,8 @@ let with_model_catalog toml f =
   match Llm_provider.Model_catalog.of_toml_string ~source:"inline-test-catalog" toml with
   | Error msg -> failf "test catalog parse failed: %s" msg
   | Ok catalog ->
-    Llm_provider.Model_catalog.set_global catalog;
-    Fun.protect ~finally:Llm_provider.Model_catalog.clear_global f
+    (Llm_provider.Catalog_snapshot.publish (Masc_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None)));
+    Fun.protect ~finally:Llm_provider.Catalog_snapshot.reset f
 
 let test_adapter_stamps_declared_provider_id () =
   check
@@ -1405,13 +1405,11 @@ capabilities_base = "glm"
        check_vision_output_wire config)
 
 let test_embedded_glm_vision_catalog_ceiling_reaches_wire () =
-  let previous = Llm_provider.Model_catalog.global () in
-  Llm_provider.Model_catalog.clear_global ();
+  let previous = Llm_provider.Catalog_snapshot.current () in
+  (Llm_provider.Catalog_snapshot.reset ());
   Fun.protect
     ~finally:(fun () ->
-      match previous with
-      | Some catalog -> Llm_provider.Model_catalog.set_global catalog
-      | None -> Llm_provider.Model_catalog.clear_global ())
+      Llm_provider.Catalog_snapshot.publish previous)
     (fun () ->
        glm_vision_binding_config
          ~runtime_caps:Runtime_schema.model_capabilities_default
@@ -2315,12 +2313,10 @@ let test_openai_responses_round_trip_through_runtime_toml () =
   in
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
-  let previous_catalog = Llm_provider.Model_catalog.global () in
+  let previous_catalog = Llm_provider.Catalog_snapshot.current () in
   Eio.Switch.on_release sw (fun () ->
-    match previous_catalog with
-    | Some previous -> Llm_provider.Model_catalog.set_global previous
-    | None -> Llm_provider.Model_catalog.clear_global ());
-  Llm_provider.Model_catalog.set_global catalog;
+    Llm_provider.Catalog_snapshot.publish previous_catalog);
+  (Llm_provider.Catalog_snapshot.publish (Masc_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None)));
   let net = Eio.Stdenv.net env in
   let port = fresh_loopback_port () in
   let requests = ref [] in
@@ -3472,7 +3468,7 @@ accepted_reasoning_efforts = ["low", "high"]
    request that carries effort "high". *)
 let test_bench_anthropic_lane_sends_high_with_the_embedded_catalog () =
   let module Json = Yojson.Safe.Util in
-  Llm_provider.Model_catalog.clear_global ();
+  (Llm_provider.Catalog_snapshot.reset ());
   List.iter (fun model_id ->
     let cfg, binding = bare_rows_runtime ~provider_id:"claude" ~model_id in
     match provider_config_for_binding cfg binding with
@@ -3512,11 +3508,9 @@ capabilities_base = "openai_chat"
   | Ok catalog -> catalog | Error detail -> fail detail
 
 let with_snapshot_auth_catalog auth run =
-  let previous = Llm_provider.Model_catalog.global () in
-  Fun.protect ~finally:(fun () -> match previous with
-    | Some catalog -> Llm_provider.Model_catalog.set_global catalog
-    | None -> Llm_provider.Model_catalog.clear_global ())
-    (fun () -> Llm_provider.Model_catalog.set_global (snapshot_auth_catalog auth); run ())
+  let previous = Llm_provider.Catalog_snapshot.current () in
+  Fun.protect ~finally:(fun () -> Llm_provider.Catalog_snapshot.publish previous)
+    (fun () -> (Llm_provider.Catalog_snapshot.publish (Masc_test_deps.admit_catalogs ~models:(Some ((snapshot_auth_catalog auth))) ~providers:(None))); run ())
 
 let snapshot_auth_runtime ?credential () =
   let credential = match credential with
@@ -3562,7 +3556,7 @@ let test_dispatch_auth_catalog_snapshot ~before ~after () =
   with_snapshot_auth_catalog before (fun () ->
     let original = snapshot_auth_runtime () in
     check_snapshot_auth "original selection before reload" before original;
-    Llm_provider.Model_catalog.set_global (snapshot_auth_catalog after);
+    (Llm_provider.Catalog_snapshot.publish (Masc_test_deps.admit_catalogs ~models:(Some ((snapshot_auth_catalog after))) ~providers:(None)));
     check_snapshot_auth "original selection after reload" before original;
     check_snapshot_auth "fresh selection after reload" after (snapshot_auth_runtime ()))
 

@@ -102,19 +102,17 @@ let with_runtime_fixture f =
   Config_dir_resolver.reset ();
   let previous_runtime = Runtime.For_testing.snapshot () in
   let previous_startup = Runtime_startup_state.get () in
-  let previous_catalog = Llm_provider.Model_catalog.global () in
+  let previous_catalog = Llm_provider.Catalog_snapshot.current () in
   Fun.protect ~finally:(fun () ->
     (* The production withdrawal: it also clears a stale registry a case
        left behind when it failed between a kept save and the fixing one. *)
     Runtime.unpublish_exact_output_registry () |> require_ok "unpublish fixture registry";
     Runtime.For_testing.restore previous_runtime;
     Runtime_startup_state.set previous_startup;
-    (match previous_catalog with
-     | None -> Llm_provider.Model_catalog.clear_global ()
-     | Some catalog -> Llm_provider.Model_catalog.set_global catalog);
+    (Llm_provider.Catalog_snapshot.publish previous_catalog);
     Config_dir_resolver.reset ();
     Fs_compat.remove_tree root) @@ fun () ->
-  Llm_provider.Model_catalog.clear_global ();
+  (Llm_provider.Catalog_snapshot.reset ());
   let path = Filename.concat root "runtime.toml" in
   (* What a server does at boot: load the runtimes, then publish the
      exact-output registry from them. *)

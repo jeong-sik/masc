@@ -22,12 +22,11 @@ let run_case ?(host=false) scenario () =
   Masc_test_deps.init_eio_clock ~sw env;
   Fs_compat.set_fs env#fs;
   let runtime_snapshot = Runtime.For_testing.snapshot () in
-  let catalog_snapshot = Llm_provider.Model_catalog.global () in
+  let catalog_snapshot = Llm_provider.Catalog_snapshot.current () in
   let base_path = Filename.temp_dir "agent-core-result-outbox-" "" in
   Eio.Switch.on_release sw (fun () ->
     Runtime.For_testing.restore runtime_snapshot;
-    (match catalog_snapshot with None -> Llm_provider.Model_catalog.clear_global ()
-     | Some catalog -> Llm_provider.Model_catalog.set_global catalog);
+    (Llm_provider.Catalog_snapshot.publish catalog_snapshot);
     Fs_compat.remove_tree base_path);
   let config = Workspace.default_config base_path in
   ignore (Workspace.init config ~agent_name:(Some keeper_name));
@@ -64,7 +63,7 @@ let run_case ?(host=false) scenario () =
         | Stale_save | Noop_sink | No_sink | Review -> `OK, body)) in
   let catalog = get (Llm_provider.Model_catalog.of_toml_string ~source:"result-consumer-fixture"
       "[[models]]\nmodel_id = \"result-consumer-fixture\"\nprovider_name = \"fixture\"\nbase = \"openai_chat\"\nmax_context_tokens = 200000\nmax_output_tokens = 128\nsupports_tools = true\nsupports_native_streaming = false\n") in
-  Llm_provider.Model_catalog.set_global catalog;
+  (Llm_provider.Catalog_snapshot.publish (Masc_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None)));
   let runtime_path = Filename.concat base_path "runtime.toml" in
   Fs_compat.save_file runtime_path (Printf.sprintf {|[runtime]
 default = "fixture.consumer"

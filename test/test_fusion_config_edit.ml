@@ -81,13 +81,11 @@ let write_file path content =
 ;;
 
 let with_model_catalog f =
-  let previous = Llm_provider.Model_catalog.global () in
+  let previous = Llm_provider.Catalog_snapshot.current () in
   let path = Filename.temp_file "fusion-config-edit-models" ".toml" in
   Fun.protect
     ~finally:(fun () ->
-      (match previous with
-       | Some catalog -> Llm_provider.Model_catalog.set_global catalog
-       | None -> Llm_provider.Model_catalog.clear_global ());
+      (Llm_provider.Catalog_snapshot.publish previous);
       try Sys.remove path with
       | Sys_error _ -> ())
     (fun () ->
@@ -95,7 +93,7 @@ let with_model_catalog f =
        match Llm_provider.Model_catalog.load_file path with
        | Error detail -> failf "test AGENT_CORE model catalog must load: %s" detail
        | Ok catalog ->
-         Llm_provider.Model_catalog.set_global catalog;
+         (Llm_provider.Catalog_snapshot.publish (Masc_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None)));
          f ())
 ;;
 

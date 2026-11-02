@@ -4,7 +4,7 @@ Issue [#27898](https://github.com/jeong-sik/masc/issues/27898) requires one
 immutable provider/model selection and removal of reverse inference. This
 investigation starts at `168e1e2b18aed0ca55dcd121ea565aeca9da89b2`.
 
-## Current boundary
+## Baseline boundary at 168e1e2
 
 `Provider_declarations.capture` reads `Model_catalog.global` and
 `Provider_catalog.global` separately. Each source has its own mutable atomic

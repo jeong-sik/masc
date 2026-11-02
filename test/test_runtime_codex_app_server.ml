@@ -5001,11 +5001,9 @@ let test_production_runtime_walk_receipt ~recover () =
   let module Fault=Llm_provider.Candidate_fault in
   let base_path=temp_workspace "masc-production-runtime-walk-" in
   let trace_id="production-runtime-walk" in
-  let catalog_snapshot=Llm_provider.Model_catalog.global () in
+  let catalog_snapshot = Llm_provider.Catalog_snapshot.current () in
   Fun.protect ~finally:(fun () ->
-    (match catalog_snapshot with
-     | None -> Llm_provider.Model_catalog.clear_global ()
-     | Some catalog -> Llm_provider.Model_catalog.set_global catalog);
+    (Llm_provider.Catalog_snapshot.publish catalog_snapshot);
     cleanup_tree base_path) (fun () ->
     let catalog_path=Filename.concat base_path "walk-models.toml" in
     let model prefix=Printf.sprintf {|
@@ -5021,7 +5019,7 @@ supports_native_streaming = false
     write_fixture_file catalog_path
       (model "projection-http-fixture" ^ model "projection-last-fixture");
     (match Llm_provider.Model_catalog.load_file catalog_path with
-     | Ok catalog -> Llm_provider.Model_catalog.set_global catalog
+     | Ok catalog -> (Llm_provider.Catalog_snapshot.publish (Masc_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None)))
      | Error detail -> fail detail);
     let requests=ref [] in
     let receipt_seen=ref false in
@@ -5160,11 +5158,9 @@ let test_production_turn_records_its_keeper_as_the_failure_recorder () =
 let test_production_last_projection ~http_predecessor ~reject_codex () =
   let base_path = temp_workspace "masc-last-projection-" in
   let capture_path = Filename.concat base_path "codex-requests.jsonl" in
-  let catalog_snapshot = Llm_provider.Model_catalog.global () in
+  let catalog_snapshot = Llm_provider.Catalog_snapshot.current () in
   Fun.protect ~finally:(fun () ->
-    (match catalog_snapshot with
-     | None -> Llm_provider.Model_catalog.clear_global ()
-     | Some catalog -> Llm_provider.Model_catalog.set_global catalog);
+    (Llm_provider.Catalog_snapshot.publish catalog_snapshot);
     cleanup_tree base_path) (fun () ->
     let catalog_path = Filename.concat base_path "models.toml" in
     write_fixture_file catalog_path {|
@@ -5178,7 +5174,7 @@ supports_tools = true
 supports_native_streaming = false
 |};
     (match Llm_provider.Model_catalog.load_file catalog_path with
-     | Ok catalog -> Llm_provider.Model_catalog.set_global catalog
+     | Ok catalog -> (Llm_provider.Catalog_snapshot.publish (Masc_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None)))
      | Error detail -> fail detail);
     let keeper_name = "codex-production-fixture" in
     let trace_id = "last-projection-trace" in

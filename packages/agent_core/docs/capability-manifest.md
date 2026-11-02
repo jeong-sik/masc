@@ -28,7 +28,7 @@ Provider declarations still own permission to use bare model rows. A declared
 provider must list the exact ID in `serves_bare_models`. Anonymous native wires
 can read bare rows; anonymous OpenAI-compatible endpoints cannot acquire them
 from their URL. Compose first, then select a provider from the resulting
-`Provider_declarations` snapshot.
+`Catalog_snapshot` snapshot.
 
 ## Quick Start
 
@@ -58,11 +58,16 @@ match Model_catalog.load_default () with
 | Ok catalog ->
   match Capability_manifest.load_file caps_path with
   | Error detail -> report_configuration_error detail
-  | Ok input -> Model_catalog.set_global (Model_catalog.with_model_overrides catalog input)
+  | Ok input ->
+    let models = Model_catalog.with_model_overrides catalog input in
+    match Catalog_snapshot.of_catalogs ~models:(Some models) ~providers:None with
+    | Error error -> report_configuration_error (Catalog_snapshot.error_to_string error)
+    | Ok snapshot -> Catalog_snapshot.publish snapshot
 ```
 
 `caps_path` and error handling belong to the embedding application. Install
-only the complete successfully parsed value. An existing selected binding or
+only the complete successfully parsed and admitted pair. This example explicitly
+selects no provider JSON overlay; pass a parsed overlay as `providers` when needed. An existing selected binding or
 frozen request keeps its captured policy when a new catalog is installed;
 new selections see the new catalog. There is no separate global manifest.
 
@@ -149,8 +154,8 @@ To select a provider without changing process-global state:
 ```ocaml
 let select catalog input provider_id =
   let catalog = Model_catalog.with_model_overrides catalog input in
-  match Provider_declarations.of_catalogs ~models:(Some catalog) ~providers:None with
-  | Error error -> Error (Provider_declarations.error_to_string error)
+  match Catalog_snapshot.of_catalogs ~models:(Some catalog) ~providers:None with
+  | Error error -> Error (Catalog_snapshot.error_to_string error)
   | Ok declarations ->
     match Agent_core.Provider_runtime_binding.find_in_declarations declarations provider_id with
     | None -> Error "provider is not declared"

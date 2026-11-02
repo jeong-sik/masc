@@ -41,13 +41,11 @@ let write_file path content =
 
 let with_declared_lane f =
   let catalog = Filename.temp_file "routing-body-models" ".toml" in
-  let previous_catalog = Llm_provider.Model_catalog.global () in
+  let previous_catalog = Llm_provider.Catalog_snapshot.current () in
   let runtime_snapshot = Runtime.For_testing.snapshot () in
   Fun.protect
     ~finally:(fun () ->
-      (match previous_catalog with
-       | Some value -> Llm_provider.Model_catalog.set_global value
-       | None -> Llm_provider.Model_catalog.clear_global ());
+      (Llm_provider.Catalog_snapshot.publish previous_catalog);
       Runtime.For_testing.restore runtime_snapshot;
       rm_rf catalog)
     (fun () ->
@@ -63,7 +61,7 @@ supports_tools = true
       (match Llm_provider.Model_catalog.load_file catalog with
        | Error detail -> Alcotest.failf "catalog fixture: %s" detail
        | Ok loaded ->
-         Llm_provider.Model_catalog.set_global loaded);
+         (Llm_provider.Catalog_snapshot.publish (Masc_test_deps.admit_catalogs ~models:(Some (loaded)) ~providers:(None))));
       with_temp_dir "routing-body-runtime" @@ fun dir ->
       let path = Filename.concat dir "runtime.toml" in
       write_file path

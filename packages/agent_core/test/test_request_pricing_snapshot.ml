@@ -28,15 +28,13 @@ serves_bare_models = ["request-model", "returned-model"]
   Model_catalog.of_toml_string ~source:"request pricing fixture" source |> get
 
 let with_catalog catalog run =
-  let previous = Model_catalog.global () in
-  Fun.protect ~finally:(fun () -> match previous with
-    | Some previous -> Model_catalog.set_global previous
-    | None -> Model_catalog.clear_global ())
-    (fun () -> Model_catalog.set_global catalog; run ())
+  let previous = Llm_provider.Catalog_snapshot.current () in
+  Fun.protect ~finally:(fun () -> Llm_provider.Catalog_snapshot.publish previous)
+    (fun () -> (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None))); run ())
 
 let binding ?providers catalog =
-  let declarations = Provider_declarations.of_catalogs ~models:(Some catalog) ~providers
-    |> Result.map_error Provider_declarations.error_to_string |> get in
+  let declarations = Catalog_snapshot.of_catalogs ~models:(Some catalog) ~providers
+    |> Result.map_error Catalog_snapshot.error_to_string |> get in
   match Provider_runtime_binding.find_in_declarations declarations "pricing-provider" with
   | Some binding -> binding
   | None -> Alcotest.fail "declared pricing provider missing"
@@ -78,7 +76,7 @@ let test_selected_before_config () =
   let original = catalog 1.0 and replacement = catalog 10.0 in
   with_catalog original (fun () ->
     let selected = binding original in
-    Model_catalog.set_global replacement;
+    (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some (replacement)) ~providers:(None)));
     let selected = config selected in
     check_cost (Some 3.0) (complete ~stream:false ~config:selected
       ~before_response:(fun () -> ()) (response ())))
@@ -86,26 +84,26 @@ let test_selected_before_config () =
 let test_frozen_before_call () =
   with_catalog (catalog 1.0) (fun () ->
     let frozen = Provider_config.freeze_for_request (raw_config ()) in
-    Model_catalog.set_global (catalog 10.0);
+    (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some ((catalog 10.0))) ~providers:(None)));
     check_cost (Some 3.0) (complete ~stream:false ~config:frozen
       ~before_response:(fun () -> ()) (response ())))
 
 let test_during_call stream () =
   with_catalog (catalog 1.0) (fun () ->
     check_cost (Some 3.0) (complete ~stream ~config:(raw_config ())
-      ~before_response:(fun () -> Model_catalog.set_global (catalog 10.0)) (response ())))
+      ~before_response:(fun () -> (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some ((catalog 10.0))) ~providers:(None)))) (response ())))
 
 let test_returned_model () =
   with_catalog (catalog 1.0) (fun () ->
     check_cost (Some 12.0) (complete ~stream:false ~config:(raw_config ())
-      ~before_response:(fun () -> Model_catalog.set_global (catalog 10.0))
+      ~before_response:(fun () -> (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some ((catalog 10.0))) ~providers:(None))))
       (response ~model:"returned-model" ())))
 
 let test_absence_and_agent_usage () =
   let original = catalog ~priced:false 1.0 in
   with_catalog original (fun () ->
     let selected = config (binding original) in
-    Model_catalog.set_global (catalog 10.0);
+    (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some ((catalog 10.0))) ~providers:(None)));
     let result = complete ~stream:false ~config:selected ~before_response:(fun () -> ()) (response ()) in
     check_cost None result;
     let usage = Agent_turn.accumulate_usage ~current_usage:Agent_core.Types.empty_usage
@@ -127,7 +125,7 @@ let test_provider_reported_cost () =
   with_catalog (catalog 1.0) (fun () ->
     List.iter (fun cost ->
       check_cost (Some cost) (complete ~stream:false ~config:(raw_config ())
-        ~before_response:(fun () -> Model_catalog.set_global (catalog 10.0)) (response ~cost ())))
+        ~before_response:(fun () -> (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some ((catalog 10.0))) ~providers:(None)))) (response ~cost ())))
       [0.0; 0.25])
 
 let test_overlay_permission () =
@@ -145,7 +143,7 @@ let test_fresh_selection () =
   let original = catalog 1.0 and replacement = catalog 10.0 in
   with_catalog original (fun () ->
     let selected = config (binding original) in
-    Model_catalog.set_global replacement;
+    (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some (replacement)) ~providers:(None)));
     check_cost (Some 30.0) (complete ~stream:false ~config:(config (binding replacement))
       ~before_response:(fun () -> ()) (response ()));
     check_cost (Some 3.0) (complete ~stream:false
@@ -159,7 +157,7 @@ let test_missing_cache_price () =
       | Some usage -> {usage with cache_read_input_tokens = 10}
       | None -> Alcotest.fail "fixture usage missing" in
     check_cost None (complete ~stream:false ~config:(raw_config ())
-      ~before_response:(fun () -> Model_catalog.set_global (catalog ~cache:(1.25, 0.1) 10.0))
+      ~before_response:(fun () -> (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some ((catalog ~cache:(1.25, 0.1) 10.0))) ~providers:(None))))
       {response with usage = Some usage}))
 
 let test_agent_run_price ?cost ~priced ~model expected () =
@@ -167,7 +165,7 @@ let test_agent_run_price ?cost ~priced ~model expected () =
   with_catalog original (fun () ->
     let provider_config = config (binding original) in
     Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
-      let transport = transport ~before_response:(fun () -> Model_catalog.set_global (catalog 10.0))
+      let transport = transport ~before_response:(fun () -> (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some ((catalog 10.0))) ~providers:(None))))
           (response ?cost ~model ()) in
       let options = {Agent.default_options with provider_config = Some provider_config;
         transport = Some transport} in

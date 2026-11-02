@@ -855,16 +855,14 @@ let test_runtime_text_carries_the_lane_request_settings () =
 ;;
 
 let with_runtime_catalog f =
-  let previous_catalog = Llm_provider.Model_catalog.global () in
+  let previous_catalog = Llm_provider.Catalog_snapshot.current () in
   let previous_runtime = Runtime.For_testing.snapshot () in
   let catalog = or_fail (Llm_provider.Model_catalog.of_toml_string ~source:"preset activity fixture"
     "[[models]]\nmodel_id = \"qwen\"\nprovider_name = \"runpod_mtp\"\nbase = \"openai_chat\"\nmax_context_tokens = 128000\n\n[[models]]\nmodel_id = \"gpt\"\nprovider_name = \"openai\"\nbase = \"openai_chat\"\nmax_context_tokens = 64000\n") in
   Fun.protect ~finally:(fun () ->
     Runtime.For_testing.restore previous_runtime;
-    match previous_catalog with
-    | Some catalog -> Llm_provider.Model_catalog.set_global catalog
-    | None -> Llm_provider.Model_catalog.clear_global ()) @@ fun () ->
-  Llm_provider.Model_catalog.set_global catalog;
+    Llm_provider.Catalog_snapshot.publish previous_catalog) @@ fun () ->
+  (Llm_provider.Catalog_snapshot.publish (Masc_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None)));
   f ()
 ;;
 

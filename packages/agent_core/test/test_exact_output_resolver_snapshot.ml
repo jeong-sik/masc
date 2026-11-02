@@ -696,8 +696,8 @@ let test_old_and_new_whole_tuples_never_mix_across_domains_and_fibers () =
   in
   let old_observation, new_observation =
     Fun.protect ~finally:(fun () ->
-      Model_catalog.clear_global ();
-      Provider_catalog.clear_global ())
+      (Llm_provider.Catalog_snapshot.reset ());
+      (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Llm_provider.Catalog_snapshot.models (Llm_provider.Catalog_snapshot.current ())) ~providers:(None))))
     @@ fun () ->
     Eio_main.run
     @@ fun _env ->
@@ -716,8 +716,8 @@ let test_old_and_new_whole_tuples_never_mix_across_domains_and_fibers () =
       |> Eio.Promise.resolve resolve_new_result);
     Eio.Promise.await old_arrived;
     Eio.Promise.await new_arrived;
-    Model_catalog.set_global Model_catalog.empty;
-    Provider_catalog.clear_global ();
+    (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some (Model_catalog.empty)) ~providers:(None)));
+    (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Llm_provider.Catalog_snapshot.models (Llm_provider.Catalog_snapshot.current ())) ~providers:(None)));
     Eio.Promise.resolve open_gate ();
     Eio.Promise.await old_result, Eio.Promise.await new_result
   in
@@ -927,12 +927,9 @@ let test_bare_target_does_not_inherit_provider_capability_base () =
   let contents = bare_target_catalog ~serves:true ~model_id:"shared" ~scoped:false ~row_base:false in
   let frozen = snapshot contents in
   let projection = EO.projection_target (admit frozen "bare-target") in
-  let previous = Model_catalog.global () in
-  Fun.protect ~finally:(fun () -> match previous with
-    | Some catalog -> Model_catalog.set_global catalog
-    | None -> Model_catalog.clear_global ()) (fun () ->
-    Model_catalog.set_global
-      (Model_catalog.of_toml_string ~source:"same bare target" contents |> Result.get_ok);
+  let previous = Llm_provider.Catalog_snapshot.current () in
+  Fun.protect ~finally:(fun () -> Llm_provider.Catalog_snapshot.publish previous) (fun () ->
+    (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some ((Model_catalog.of_toml_string ~source:"same bare target" contents |> Result.get_ok))) ~providers:(None)));
     let config = Provider_config.make ~kind:Anthropic ~provider_id:"native"
       ~model_id:"shared" ~base_url:"https://example.invalid" () in
     check bool "bare target never borrows provider tools support" false

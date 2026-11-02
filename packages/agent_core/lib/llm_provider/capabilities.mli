@@ -357,6 +357,13 @@ val resolve_bound_request_policy :
     No global catalog is read; absent thinking controls remain absent. *)
 
 val request_policy_capabilities : request_policy -> capabilities option
+val resolve_snapshot_request_policy :
+  snapshot:Catalog_snapshot.t -> wire:Provider_kind.t ->
+  provider_id:string -> model_id:string -> request_policy
+(** Resolve only the complete admitted selection supplied by the caller.
+    Removed provider aliases do not recover authority from its source catalog;
+    exact custom scoped rows remain available. No publication is read. *)
+
 val request_policy_anthropic_thinking_control :
   request_policy -> anthropic_thinking_control option
 

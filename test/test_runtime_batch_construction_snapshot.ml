@@ -2,8 +2,7 @@ open Alcotest
 open Masc
 
 module Catalog = Llm_provider.Model_catalog
-module Providers = Llm_provider.Provider_catalog
-module Declarations = Llm_provider.Provider_declarations
+module Declarations = Llm_provider.Catalog_snapshot
 module Config = Llm_provider.Provider_config
 module Caps = Llm_provider.Capabilities
 
@@ -82,14 +81,10 @@ let materialize cfg bindings =
   | _ -> fail "reload fixture requires two materialized bindings"
 
 let with_catalog_state run =
-  let previous_models = Catalog.global () in
-  let previous_providers = Providers.global () in
+  let previous = Llm_provider.Catalog_snapshot.current () in
   Fun.protect ~finally:(fun () ->
-    (match previous_models with Some value -> Catalog.set_global value
-     | None -> Catalog.clear_global ());
-    match previous_providers with Some value -> Providers.set_global value
-    | None -> Providers.clear_global ())
-    (fun () -> Providers.clear_global (); run ())
+    Llm_provider.Catalog_snapshot.publish previous)
+    (fun () -> (Llm_provider.Catalog_snapshot.publish (Masc_test_deps.admit_catalogs ~models:(Llm_provider.Catalog_snapshot.models (Llm_provider.Catalog_snapshot.current ())) ~providers:(None))); run ())
 
 let with_reload ~before ~after inspect = with_catalog_state (fun () ->
   let previous_fs = Fs_compat.get_fs_opt () in
@@ -100,7 +95,7 @@ let with_reload ~before ~after inspect = with_catalog_state (fun () ->
     | None -> Fs_compat.clear_fs ()) (fun () ->
     Unix.chmod path 0o600;
     Out_channel.with_open_bin path (fun out -> output_string out "batch-fixture-key\n");
-    Catalog.set_global (catalog before);
+    (Llm_provider.Catalog_snapshot.publish (Masc_test_deps.admit_catalogs ~models:(Some ((catalog before))) ~providers:(None)));
     let cfg = http_configuration path in
     let bindings = ordered_bindings cfg in
     ignore (Declarations.current ());
@@ -119,7 +114,7 @@ let with_reload ~before ~after inspect = with_catalog_state (fun () ->
         check bool "batch started before catalog replacement" true !started;
         check bool "batch suspended before returning" true
           (Option.is_none (Eio.Promise.peek selected));
-        Catalog.set_global (catalog after);
+        (Llm_provider.Catalog_snapshot.publish (Masc_test_deps.admit_catalogs ~models:(Some ((catalog after))) ~providers:(None)));
         let first, second = Eio.Promise.await_exn selected in
         List.iter (fun config ->
           check string "both bindings materialized the real File credential"
@@ -178,18 +173,21 @@ let test_replacement_thinking () =
         (Config.anthropic_thinking_control config = Some Caps.Anthropic_always_adaptive))
         [fresh_first; fresh_second])
 
-let with_invalid_http_catalog run = with_catalog_state (fun () ->
-  Catalog.set_global (parsed_catalog {|[[providers]]
+let with_rejected_http_catalog run = with_catalog_state (fun () ->
+  let previous = Declarations.current () in
+  let invalid = parsed_catalog {|[[providers]]
 id = "missing-capability-base"
 kind = "openai_compat"
 base_url = "https://invalid.invalid"
 request_path = "/v1/chat/completions"
 auth = "none"
-|});
-  (match Declarations.capture () with
+|} in
+  (match Declarations.of_catalogs ~models:(Some invalid) ~providers:None with
    | Error (Declarations.Unknown_capability_base _) -> ()
    | Ok _ | Error (Declarations.Conflicting_identity _) ->
-     fail "negative control requires invalid HTTP declarations");
+     fail "negative control requires rejected HTTP declarations");
+  check bool "rejected input cannot replace the prior publication" true
+    (Declarations.current () == previous);
   run ())
 
 let unused_http_configuration () =
@@ -207,7 +205,7 @@ api-name = "native-model"
 max-context = 4096
 [native.native]
 |} (Filename.concat (Filename.get_temp_dir_name ()) "masc-native-home-fixture")) in
-  with_invalid_http_catalog (fun () ->
+  with_rejected_http_catalog (fun () ->
     match Runtime_instance.partition_bindings cfg cfg.bindings with
     | [runtime], [] ->
       (match runtime.Runtime_instance.execution with
@@ -218,7 +216,7 @@ max-context = 4096
 
 let test_empty () =
   let cfg = unused_http_configuration () in
-  with_invalid_http_catalog (fun () ->
+  with_rejected_http_catalog (fun () ->
     let runtimes, dropped = Runtime_instance.partition_bindings cfg [] in
     check int "empty batch has no runtimes" 0 (List.length runtimes);
     check int "empty batch has no drops" 0 (List.length dropped))
@@ -227,7 +225,7 @@ let test_disabled_binding () =
   let cfg = unused_http_configuration () in
   let original = List.hd (ordered_bindings cfg) in
   let binding = {original with Runtime_schema.enabled=false} in
-  with_invalid_http_catalog (fun () ->
+  with_rejected_http_catalog (fun () ->
     match Runtime_instance.partition_bindings cfg [binding] with
     | [], [_, Runtime_config_error.Binding_disabled] -> ()
     | _ -> fail "disabled binding must retain its drop reason without HTTP lookup")
@@ -236,7 +234,7 @@ let test_disabled_provider () =
   let cfg = unused_http_configuration () in
   let cfg = {cfg with Runtime_schema.providers=List.map
       (fun (provider : Runtime_schema.provider) -> {provider with enabled=false}) cfg.providers} in
-  with_invalid_http_catalog (fun () ->
+  with_rejected_http_catalog (fun () ->
     match Runtime_instance.partition_bindings cfg [List.hd (ordered_bindings cfg)] with
     | [], [_, Runtime_config_error.Provider_disabled "construction"] -> ()
     | _ -> fail "disabled provider must retain its drop reason without HTTP lookup")
@@ -246,7 +244,7 @@ let test_unresolved ~provider () =
   let original = List.hd (ordered_bindings cfg) in
   let binding = if provider then {original with Runtime_schema.provider_id="missing-provider"}
     else {original with Runtime_schema.model_id="missing-model"} in
-  with_invalid_http_catalog (fun () ->
+  with_rejected_http_catalog (fun () ->
     match provider, Runtime_instance.partition_bindings cfg [binding] with
     | true, ([], [_, Runtime_config_error.Provider_not_declared "missing-provider"])
     | false, ([], [_, Runtime_config_error.Model_not_declared "missing-model"]) -> ()

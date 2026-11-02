@@ -30,29 +30,24 @@ type t = private
   ; capabilities : capabilities
   ; available : bool
   ; credential_scope : string option
-  ; declarations : Llm_provider.Provider_declarations.t
+  ; declarations : Llm_provider.Catalog_snapshot.t
     (** Immutable catalog selection owning this binding; construction and record
         updates are restricted to this module. *)
   }
 
-val all_from_declarations : Llm_provider.Provider_declarations.t -> t list
+val all_from_declarations : Llm_provider.Catalog_snapshot.t -> t list
 (** Project exactly one admitted provider snapshot. Credentials are observed
     at this edge; model request policy is not resolved by metadata projection. *)
 
-val find_in_declarations : Llm_provider.Provider_declarations.t -> string -> t option
+val find_in_declarations : Llm_provider.Catalog_snapshot.t -> string -> t option
 (** Select id or alias from the same immutable snapshot used for listing. *)
 
-(** Return runtime bindings from one captured declaration snapshot. Invalid
-    declarations raise the typed admission error rather than fallback. *)
+(** Return runtime bindings from one already admitted whole publication. *)
 val all : unit -> t list
 
 (** Find a runtime binding by provider id or alias. Lookup is
     case-insensitive and whitespace-trimmed. *)
 val find : string -> t option
-
-(** Find a runtime binding only from the explicitly installed provider-catalog
-    overlay. Embedded and registry providers are intentionally excluded. *)
-val find_catalog : string -> t option
 
 (** Runtime provider id already carried by a concrete config. Binding selection
     resolves aliases before {!to_provider_config}; raw ids remain opaque and

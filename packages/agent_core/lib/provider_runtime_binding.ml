@@ -1,9 +1,8 @@
 (** Read-only runtime provider bindings. *)
 
-module PC = Llm_provider.Provider_catalog
 module PR = Llm_provider.Provider_registry
 module PConfig = Llm_provider.Provider_config
-module PD = Llm_provider.Provider_declarations
+module PD = Llm_provider.Catalog_snapshot
 
 type provider_kind = PConfig.provider_kind
 type capabilities = Llm_provider.Capabilities.capabilities
@@ -64,15 +63,6 @@ let find_in_declarations declarations label =
 let all () = all_from_declarations (PD.current ())
 let find label = find_in_declarations (PD.current ()) label
 
-let find_catalog label =
-  match PC.global () with
-  | None -> None
-  | Some providers ->
-    (match PD.of_catalogs ~models:None ~providers:(Some providers) with
-     | Ok declarations -> find_in_declarations declarations label
-     | Error error -> raise (PD.Invalid_declarations error))
-;;
-
 let provider_id_of_provider_config (cfg : PConfig.t) =
   match cfg.provider_id with
   | Some provider_id -> normalize provider_id
@@ -107,7 +97,7 @@ let to_provider_config ?model binding =
     (fun model_id ->
        let request_path = trim_non_empty binding.request_path in
        let max_context = binding.max_context in
-       let policy = PD.request_policy binding.declarations ~wire:binding.kind
+       let policy = Llm_provider.Capabilities.resolve_snapshot_request_policy ~snapshot:binding.declarations ~wire:binding.kind
            ~provider_id:binding.id ~model_id in
        PConfig.make
          ~kind:binding.kind

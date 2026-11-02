@@ -1,10 +1,9 @@
-(** External provider catalog overlay.
+(** Pure decoder and immutable external provider catalog.
 
     Provider entries describe connection and runtime metadata without teaching
-    AGENT_CORE about any downstream coordinator. The catalog augments
-    {!Provider_registry.default}: built-in entries remain as seed data, while
-    file/runtime catalog entries overwrite or add provider ids at process
-    startup.
+    AGENT_CORE about any downstream coordinator. {!Catalog_snapshot.of_catalogs}
+    admits this explicit overlay with model seeds before the whole selection
+    can be published. This decoder owns no process-wide publication state.
 
     @since 0.194.0 *)
 
@@ -81,14 +80,3 @@ val lookup : t -> string -> entry option
 
 (** Return an entry's explicit default model by id or alias. *)
 val default_model_for_provider : t -> string -> string option
-
-(** Process-wide catalog overlay.
-
-    Returns only the runtime override installed explicitly with {!set_global};
-    [None] means no overlay. AGENT_CORE never discovers a provider catalog from the
-    process environment. Callers that need a JSON overlay must call
-    {!load_file} and {!set_global}. *)
-val global : unit -> t option
-
-val set_global : t -> unit
-val clear_global : unit -> unit

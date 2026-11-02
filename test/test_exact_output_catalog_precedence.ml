@@ -1,12 +1,10 @@
 include Test_exact_output_catalog_precedence_fixture
 
 let with_saved_model_catalog f =
-  let previous = Llm_provider.Model_catalog.global () in
+  let previous = Llm_provider.Catalog_snapshot.current () in
   Fun.protect
     ~finally:(fun () ->
-      match previous with
-      | Some catalog -> Llm_provider.Model_catalog.set_global catalog
-      | None -> Llm_provider.Model_catalog.clear_global ())
+      Llm_provider.Catalog_snapshot.publish previous)
     f
 ;;
 
@@ -20,7 +18,7 @@ let test_offline_runtime_save_converges_by_write_stage () =
   write_file catalog_path replacement_catalog;
   (match Llm_provider.Model_catalog.load_file catalog_path with
    | Error detail -> Alcotest.failf "offline capability fixture failed: %s" detail
-   | Ok catalog -> Llm_provider.Model_catalog.set_global catalog);
+   | Ok catalog -> (Llm_provider.Catalog_snapshot.publish (Masc_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None))));
   Test_exact_output_catalog_precedence_fixture
     .test_offline_runtime_save_converges_by_write_stage ()
 ;;
@@ -1104,7 +1102,7 @@ let test_repo_seed_board_attention_lane_admits () =
      explicit global replacements, which unsetting the environment does not
      clear. Follow production startup: embedded catalog, then runtime
      loading. *)
-  Llm_provider.Model_catalog.clear_global ();
+  (Llm_provider.Catalog_snapshot.reset ());
   ignore (Server_runtime_bootstrap.configure_agent_core_model_catalog_env ());
   (match Runtime.init_default ~config_path:runtime_path with
    | Ok () -> ()

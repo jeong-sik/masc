@@ -35,15 +35,13 @@ let run_refusal ~body_limit () =
   Eio.Switch.run @@ fun sw ->
   Masc_test_deps.init_eio_clock ~sw env;
   let runtime_snapshot = Runtime.For_testing.snapshot () in
-  let catalog_snapshot = Llm_provider.Model_catalog.global () in
+  let catalog_snapshot = Llm_provider.Catalog_snapshot.current () in
   let base_path = Filename.temp_file "completion-evidence-" ".dir" in
   Unix.unlink base_path;
   Unix.mkdir base_path 0o700;
   Eio.Switch.on_release sw (fun () ->
     Runtime.For_testing.restore runtime_snapshot;
-    (match catalog_snapshot with
-     | None -> Llm_provider.Model_catalog.clear_global ()
-     | Some catalog -> Llm_provider.Model_catalog.set_global catalog);
+    (Llm_provider.Catalog_snapshot.publish catalog_snapshot);
     Fs_compat.remove_tree base_path);
   let bodies = ref [] in
   let callback _connection _request body =
@@ -70,7 +68,7 @@ let run_refusal ~body_limit () =
     "[[models]]\nmodel_id = %S\nprovider_name = \"fixture\"\nbase = \"openai_chat\"\nmax_context_tokens = 1048576\nmax_output_tokens = 128\nsupports_tools = true\nsupports_native_streaming = false\n"
     model_id);
   (match Llm_provider.Model_catalog.load_file catalog_path with
-   | Ok catalog -> Llm_provider.Model_catalog.set_global catalog
+   | Ok catalog -> (Llm_provider.Catalog_snapshot.publish (Masc_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None)))
    | Error detail -> Alcotest.fail detail);
   let config_path = Filename.concat base_path "runtime.toml" in
   write config_path (Printf.sprintf

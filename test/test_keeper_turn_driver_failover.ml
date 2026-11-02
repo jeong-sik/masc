@@ -40,13 +40,11 @@ let write_file path content =
     (fun () -> output_string oc content)
 
 let with_model_catalog_content content f =
-  let original = Llm_provider.Model_catalog.global () in
+  let original = Llm_provider.Catalog_snapshot.current () in
   let path = Filename.temp_file "runtime-failover-agent_core-models" ".toml" in
   Fun.protect
     ~finally:(fun () ->
-      (match original with
-       | Some catalog -> Llm_provider.Model_catalog.set_global catalog
-       | None -> Llm_provider.Model_catalog.clear_global ());
+      (Llm_provider.Catalog_snapshot.publish original);
       try Sys.remove path with
       | _ -> ())
     (fun () ->
@@ -54,7 +52,7 @@ let with_model_catalog_content content f =
       match Llm_provider.Model_catalog.load_file path with
       | Error msg -> Alcotest.failf "test AGENT_CORE model catalog should load: %s" msg
       | Ok catalog ->
-        Llm_provider.Model_catalog.set_global catalog;
+        (Llm_provider.Catalog_snapshot.publish (Masc_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None)));
         f ())
 
 let checkpoint_with_session_id session_id : Agent_core.Checkpoint.t =

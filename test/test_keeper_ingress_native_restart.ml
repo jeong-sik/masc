@@ -207,15 +207,14 @@ let run_phase ?(empty_terminal = false) ~child ~cut root =
   Prompt_defaults.init ();
   Masc_test_deps.init_unified_tool_registry ();
   let runtime_snapshot = Runtime.For_testing.snapshot () in
-  let catalog_snapshot = Llm_provider.Model_catalog.global () in
+  let catalog_snapshot = Llm_provider.Catalog_snapshot.current () in
   Eio.Switch.on_release sw (fun () ->
     Runtime.For_testing.restore runtime_snapshot;
-    match catalog_snapshot with None -> Llm_provider.Model_catalog.clear_global ()
-    | Some catalog -> Llm_provider.Model_catalog.set_global catalog);
+    Llm_provider.Catalog_snapshot.publish catalog_snapshot);
   let catalog = Printf.sprintf
     "[[models]]\nmodel_id=%S\nprovider_name=\"fixture\"\nbase=\"openai_chat\"\nmax_context_tokens=400000\nmax_output_tokens=256\nsupports_tools=true\nsupports_native_streaming=false\n" model_id in
   Llm_provider.Model_catalog.of_toml_string ~source:"ingress-restart" catalog
-    |> require "catalog" |> Llm_provider.Model_catalog.set_global;
+    |> require "catalog" |> (fun models -> Llm_provider.Catalog_snapshot.publish (Masc_test_deps.admit_catalogs ~models:(Some models) ~providers:(None)));
   let resumed_proof = ref None in
   let server = Exact_output_fixture.start_server ~sw ~net:env#net ~clock:env#clock
       (Exact_output_fixture.Reply_with (fun index body ->

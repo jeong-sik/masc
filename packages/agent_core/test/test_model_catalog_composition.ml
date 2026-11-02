@@ -19,16 +19,14 @@ supports_reasoning = true
 |}
 
 let with_catalog run =
-  let previous = Model_catalog.global () in
+  let previous = Llm_provider.Catalog_snapshot.current () in
   let catalog = get (Model_catalog.of_toml_string ~source:"composition fixture" catalog_source) in
-  Fun.protect ~finally:(fun () -> match previous with
-    | Some previous -> Model_catalog.set_global previous
-    | None -> Model_catalog.clear_global ()) (fun () ->
-    Model_catalog.set_global catalog; run catalog)
+  Fun.protect ~finally:(fun () -> Llm_provider.Catalog_snapshot.publish previous) (fun () ->
+    (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None))); run catalog)
 
 let selected_config catalog =
-  let declarations = Provider_declarations.of_catalogs ~models:(Some catalog) ~providers:None
-      |> Result.map_error Provider_declarations.error_to_string |> get in
+  let declarations = Catalog_snapshot.of_catalogs ~models:(Some catalog) ~providers:None
+      |> Result.map_error Catalog_snapshot.error_to_string |> get in
   let binding = match Agent_core.Provider_runtime_binding.find_in_declarations declarations "catalog-provider" with
     | Some binding -> binding | None -> Alcotest.fail "provider selection disappeared" in
   Agent_core.Provider_runtime_binding.to_provider_config binding
@@ -60,10 +58,9 @@ let overrides entries = Capability_manifest.of_json
   (`Assoc ["schema_version",`Int 2;"models",`List entries]) |> get
 
 let with_catalog_value catalog run =
-  let previous = Model_catalog.global () in
-  Fun.protect ~finally:(fun () -> match previous with
-    | Some catalog -> Model_catalog.set_global catalog | None -> Model_catalog.clear_global ())
-    (fun () -> Model_catalog.set_global catalog; run ())
+  let previous = Llm_provider.Catalog_snapshot.current () in
+  Fun.protect ~finally:(fun () -> Llm_provider.Catalog_snapshot.publish previous)
+    (fun () -> (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None))); run ())
 
 let row catalog name =
   match Model_catalog.lookup catalog (get (Model_identifiers.Model_id.of_string name)) with
@@ -183,7 +180,7 @@ let test_frozen_selection_and_endpoint () = with_catalog (fun original ->
     let selected=selected_config first in
     let raw=raw_config () in
     let frozen=Provider_config.freeze_for_request raw in
-    Model_catalog.set_global second;
+    (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some (second)) ~providers:(None)));
     List.iter (fun config ->
       Alcotest.(check (option int)) "admitted policy survives catalog replacement"
         (Some 4096) (resolved config).max_context_tokens) [selected;frozen];
@@ -199,9 +196,9 @@ let test_provider_overlay_cannot_inherit_seed_permission () = with_catalog (fun 
     [declaration "catalog-model" ~extra:["max_context_tokens",`Int 65536]]) in
   let providers=Provider_catalog.of_json (Yojson.Safe.from_string
     {|{"schema_version":1,"providers":[{"id":"catalog-provider","kind":"openai_compat","base_url":"https://replacement.invalid","request_path":"/v1/chat/completions","auth":{"type":"none"},"default_model":"catalog-model","capabilities_base":"openai_chat"}]}|}) |> get in
-  let declarations=Provider_declarations.of_catalogs ~models:(Some composed) ~providers:(Some providers)
-    |> Result.map_error Provider_declarations.error_to_string |> get in
-  let policy=Provider_declarations.request_policy declarations ~wire:Provider_kind.OpenAI_compat
+  let declarations=Catalog_snapshot.of_catalogs ~models:(Some composed) ~providers:(Some providers)
+    |> Result.map_error Catalog_snapshot.error_to_string |> get in
+  let policy=Capabilities.resolve_snapshot_request_policy ~snapshot:declarations ~wire:Provider_kind.OpenAI_compat
     ~provider_id:"catalog-provider" ~model_id:"catalog-model" in
   Alcotest.(check bool) "replacement provider cannot borrow seed bare authorization" true
     (Capabilities.request_policy_capabilities policy=Some Capabilities.openai_compat_chat_capabilities))

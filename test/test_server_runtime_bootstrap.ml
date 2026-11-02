@@ -270,7 +270,7 @@ let test_model_catalog_configuration_installs_explicit_env_override () =
       ~load_catalog:(fun path ->
         load_calls := path :: !load_calls;
         Ok Llm_provider.Model_catalog.empty)
-      ~set_catalog:(fun (_ : Llm_provider.Model_catalog.t) -> incr set_calls)
+      ~publish_catalog:(fun (_ : Llm_provider.Catalog_snapshot.t) -> incr set_calls)
       ()
   in
   Alcotest.(check (option string))
@@ -282,6 +282,56 @@ let test_model_catalog_configuration_installs_explicit_env_override () =
     [ "/explicit/agent-core-models.toml" ]
     (List.rev !load_calls);
   Alcotest.(check int) "set catalog override" 1 !set_calls
+
+let test_model_catalog_configuration_rejects_before_publication () =
+  let module Snapshot = Llm_provider.Catalog_snapshot in
+  let previous = Snapshot.current () in
+  Fun.protect ~finally:(fun () -> Snapshot.publish previous) (fun () ->
+    let invalid = match Llm_provider.Model_catalog.of_toml_string
+      ~source:"bootstrap rejected fixture" {|[[providers]]
+id = "unmapped-bootstrap-provider"
+kind = "openai_compat"
+base_url = "https://bootstrap.example.invalid"
+request_path = "/v1/chat/completions"
+auth = "none"
+|} with
+      | Ok catalog -> catalog | Error detail -> Alcotest.fail detail in
+    let env = function
+      | "AGENT_CORE_MODEL_CATALOG" -> Some "/fixture/rejected-catalog.toml"
+      | _ -> None in
+    (match Server_runtime_bootstrap.configure_agent_core_model_catalog_env
+       ~env ~load_catalog:(fun _ -> Ok invalid) () with
+     | _ -> Alcotest.fail "invalid provider admission must stop bootstrap"
+     | exception Env_config_core.Config_error detail ->
+       Alcotest.(check bool) "diagnostic retains the catalog path" true
+         (String_util.contains_substring detail "/fixture/rejected-catalog.toml"));
+    Alcotest.(check bool) "bootstrap failure preserves whole prior selection" true
+      (Snapshot.current () == previous))
+
+let test_model_catalog_configuration_replaces_whole_selection () =
+  let module Snapshot = Llm_provider.Catalog_snapshot in
+  let previous = Snapshot.current () in
+  Fun.protect ~finally:(fun () -> Snapshot.publish previous) (fun () ->
+    let providers = match Llm_provider.Provider_catalog.of_json
+      (Yojson.Safe.from_string
+        {|{"schema_version":1,"providers":[{"id":"retired-bootstrap-provider","aliases":["retired-bootstrap-alias"],"kind":"openai_compat","base_url":"https://old.example.invalid","request_path":"/v1/chat/completions","auth":{"type":"none"},"capabilities_base":"openai_chat"}]}|}) with
+      | Ok catalog -> catalog | Error detail -> Alcotest.fail detail in
+    let original = Masc_test_deps.admit_catalogs ~models:None ~providers:(Some providers) in
+    Snapshot.publish original;
+    let env = function
+      | "AGENT_CORE_MODEL_CATALOG" -> Some "/fixture/replacement-catalog.toml"
+      | _ -> None in
+    ignore (Server_runtime_bootstrap.configure_agent_core_model_catalog_env
+      ~env ~load_catalog:(fun _ -> Ok Llm_provider.Model_catalog.empty) ());
+    let models, providers = Snapshot.sources (Snapshot.current ()) in
+    Alcotest.(check bool) "replacement installs explicit model facts" true
+      (Option.is_some models);
+    Alcotest.(check bool) "full replacement selects no provider overlay" true
+      (Option.is_none providers);
+    Alcotest.(check bool) "replacement removes old overlay identity" true
+      (Snapshot.find (Snapshot.current ()) "retired-bootstrap-alias" = None);
+    Alcotest.(check bool) "captured selection retains old overlay identity" true
+      (Option.is_some (Snapshot.find original "retired-bootstrap-alias")))
 
 let test_model_catalog_configuration_ignores_legacy_discovery_inputs () =
   let catalog_calls = ref 0 in
@@ -300,7 +350,7 @@ let test_model_catalog_configuration_ignores_legacy_discovery_inputs () =
       ~load_catalog:(fun (_ : string) ->
         incr load_calls;
         Ok Llm_provider.Model_catalog.empty)
-      ~set_catalog:(fun (_ : Llm_provider.Model_catalog.t) -> incr set_calls)
+      ~publish_catalog:(fun (_ : Llm_provider.Catalog_snapshot.t) -> incr set_calls)
       ()
   in
   Alcotest.(check bool) "ambient catalog selected" true (Option.is_none result);
@@ -6892,6 +6942,12 @@ let () =
           Alcotest.test_case
             "model catalog installs explicit env override"
             `Quick test_model_catalog_configuration_installs_explicit_env_override;
+          Alcotest.test_case
+            "model catalog rejects before publication"
+            `Quick test_model_catalog_configuration_rejects_before_publication;
+          Alcotest.test_case
+            "model catalog replaces whole selection"
+            `Quick test_model_catalog_configuration_replaces_whole_selection;
           Alcotest.test_case
             "model catalog ignores legacy discovery inputs"
             `Quick test_model_catalog_configuration_ignores_legacy_discovery_inputs;

@@ -3,6 +3,13 @@
 
 module Server_grpc_tool_dispatch = Server_grpc_tool_dispatch
 
+(** Pure fixture construction. Both inputs are explicit; publication and
+    restoration use the ordinary complete-snapshot API in each scenario. *)
+let admit_catalogs ~models ~providers =
+  match Llm_provider.Catalog_snapshot.of_catalogs ~models ~providers with
+  | Ok snapshot -> snapshot
+  | Error error -> failwith (Llm_provider.Catalog_snapshot.error_to_string error)
+
 (** Install the Eio clock + optional switch in every registry the lib
     code reads from.
 

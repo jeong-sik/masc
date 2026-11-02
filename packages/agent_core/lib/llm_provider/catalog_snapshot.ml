@@ -14,7 +14,7 @@ type entry =
   ; default_model : string option
   ; discovery_timeout_s : float option
   ; max_context : int option
-  ; capabilities : Capabilities.capabilities
+  ; capabilities : Capability_profile.capabilities
   ; credential_scope : string option
   }
 
@@ -34,21 +34,23 @@ type t =
   { declared : entry list
   ; by_identity : entry Ids.t
   ; models : Model_catalog.t option
+  ; source_providers : Provider_catalog.t option
   ; policy_providers : Model_catalog.provider_entry Ids.t
   }
+
 let normalize s = String.trim s |> String.lowercase_ascii
 open Result.Syntax
 
 let of_model_entry (entry : Model_catalog.provider_entry) =
   let label = Option.value entry.capabilities_base ~default:entry.id in
-  match Capabilities.capabilities_for_provider_label label with
+  match Capability_profile.capabilities_for_provider_label label with
   | None -> Error (Unknown_capability_base {provider_id=entry.id;label})
   | Some capabilities -> Ok
     { id=entry.id;aliases=entry.aliases;
       kind=entry.kind;base_url=entry.base_url;request_path=entry.request_path;
       authentication=(if entry.requires_api_key then Caller_api_key else No_auth);
-      default_model=entry.default_model;discovery_timeout_s=entry.discovery_timeout_s;max_context=capabilities.max_context_tokens;
-      capabilities;credential_scope=None }
+      default_model=entry.default_model;discovery_timeout_s=entry.discovery_timeout_s;
+      max_context=capabilities.max_context_tokens;capabilities;credential_scope=None }
 
 let of_provider_entry (entry : Provider_catalog.entry) =
   let authentication = match entry.auth with
@@ -58,11 +60,11 @@ let of_provider_entry (entry : Provider_catalog.entry) =
   { id=entry.id;aliases=entry.aliases;
     kind=entry.kind;base_url=entry.base_url;request_path=entry.request_path;
     authentication;default_model=entry.default_model;discovery_timeout_s=entry.discovery_timeout_s;
-    max_context=(match entry.max_context with Some _ as n -> n
+    max_context=(match entry.max_context with Some _ as value -> value
       | None -> entry.capabilities.max_context_tokens);
     capabilities=entry.capabilities;credential_scope=entry.credential_scope }
 
-let admit ~models ~policy_providers declared =
+let admit ~models ~source_providers ~policy_providers declared =
   let rec identities entry index = function
     | [] -> Ok index
     | identity::rest ->
@@ -71,7 +73,7 @@ let admit ~models ~policy_providers declared =
            {identity;provider_ids=[other.id;entry.id]})
        | None -> identities entry (Ids.add identity entry index) rest) in
   let rec loop index = function
-    | [] -> Ok {declared;by_identity=index;models;policy_providers}
+    | [] -> Ok {declared;by_identity=index;models;source_providers;policy_providers}
     | entry::rest ->
       let* index = identities entry index
           (List.map normalize (entry.id::entry.aliases)) in
@@ -95,26 +97,19 @@ let of_catalogs ~models ~providers =
       ; base_url=entry.base_url;request_path=entry.request_path
       ; requires_api_key=(match entry.authentication with No_auth -> false
           | Caller_api_key | Api_key_env _ | Setup_token_env _ -> true)
-      ; default_model=entry.default_model;discovery_timeout_s=entry.discovery_timeout_s;capabilities_base=None
-      ; capabilities_base_by_identity_kind=[];supports_parallel_tool_suppression=false
-      ; serves_bare_models=[] } in
+      ; default_model=entry.default_model;discovery_timeout_s=entry.discovery_timeout_s;
+        capabilities_base=None;capabilities_base_by_identity_kind=[]
+      ; supports_parallel_tool_suppression=false;serves_bare_models=[] } in
     Ids.add (normalize entry.id) provider index) policy_providers overlay in
   let rec project acc = function
-    | [] -> admit ~models ~policy_providers (List.rev acc @ overlay)
+    | [] -> admit ~models ~source_providers:providers ~policy_providers (List.rev acc @ overlay)
     | seed::rest ->
-      (* An exact overlay replaces the whole seed before interpretation. *)
       if Ids.mem (normalize seed.Model_catalog.id) replaced then project acc rest
       else let* entry = of_model_entry seed in project (entry::acc) rest in
   project [] seeds
 
-let capture () =
-  let models = Model_catalog.global () in
-  let providers = Provider_catalog.global () in
-  of_catalogs ~models ~providers
-
-exception Invalid_declarations of error
-let current () = match capture () with Ok declarations -> declarations
-  | Error error -> raise (Invalid_declarations error)
+let models t = t.models
+let sources t = t.models, t.source_providers
 let entries t = t.declared
 let find t label = Ids.find_opt (normalize label) t.by_identity
 let requires_api_key = function No_auth -> false
@@ -125,19 +120,37 @@ let policy_provider t provider_id =
     Option.map (fun provider -> entry, provider)
       (Ids.find_opt (normalize entry.id) t.policy_providers))
 
-let request_policy t ~wire ~provider_id ~model_id =
-  match policy_provider t provider_id with
-  | Some (entry, provider) ->
-    Capabilities.resolve_bound_request_policy ~catalog:t.models ~wire ~provider
-      ~capabilities:entry.capabilities ~model_id
-  | None ->
-    (* This identity was not admitted. Keep exact custom-model rows, but do
-       not let a replaced seed's old aliases/defaults grant it authority. *)
-    let catalog = Option.map Model_catalog.without_providers t.models in
-    Capabilities.resolve_request_policy_from_catalog ~catalog ~wire
-      ~provider:(Model_catalog.Declared_provider provider_id) ~model_id
+let model_catalog_for_provider t provider =
+  Option.map (fun catalog -> match provider with
+    | Model_catalog.Declared_provider id ->
+      (match policy_provider t id with
+       | Some (_, provider) -> Model_catalog.with_provider_entry catalog provider
+       | None -> Model_catalog.without_providers catalog)
+    | Model_catalog.Anonymous_wire _ -> Model_catalog.without_providers catalog)
+    t.models
 
 let supports_parallel_tool_suppression t ~provider_id =
   match policy_provider t provider_id with
   | Some (_, provider) -> provider.Model_catalog.supports_parallel_tool_suppression
   | None -> false
+
+type default_error =
+  | Invalid_model_catalog of string
+  | Invalid_provider_declarations of error
+exception Invalid_default_catalog of default_error
+
+let embedded = Lazy.Mutexed.from_fun (fun () ->
+  match Model_catalog.load_default () with
+  | Error detail -> raise (Invalid_default_catalog (Invalid_model_catalog detail))
+  | Ok models ->
+    (match of_catalogs ~models:(Some models) ~providers:None with
+     | Ok snapshot -> snapshot
+     | Error detail ->
+       raise (Invalid_default_catalog (Invalid_provider_declarations detail))))
+
+let published : t option Atomic.t = Atomic.make None
+let publish snapshot = Atomic.set published (Some snapshot)
+let reset () = Atomic.set published None
+let current () = match Atomic.get published with
+  | Some snapshot -> snapshot
+  | None -> Lazy.Mutexed.force embedded

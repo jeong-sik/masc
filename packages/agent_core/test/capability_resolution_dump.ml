@@ -35,7 +35,7 @@ let () =
     Printf.eprintf "embedded catalog unavailable: %s\n" detail;
     exit 1
   | Ok catalog ->
-    Model_catalog.set_global catalog;
+    (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None)));
     print_endline "model_id\tlabel\trow_efforts\tresolved";
     List.iter
       (fun (row : Model_catalog.model_entry) ->

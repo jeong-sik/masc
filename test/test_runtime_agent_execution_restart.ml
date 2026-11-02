@@ -48,14 +48,12 @@ let or_fail = function
   | Error error -> Alcotest.fail (Agent_core.Error.to_string error)
 
 let install_catalog ~sw =
-  let previous = Llm_provider.Model_catalog.global () in
-  Eio.Switch.on_release sw (fun () -> match previous with
-    | None -> Llm_provider.Model_catalog.clear_global ()
-    | Some catalog -> Llm_provider.Model_catalog.set_global catalog);
+  let previous = Llm_provider.Catalog_snapshot.current () in
+  Eio.Switch.on_release sw (fun () -> Llm_provider.Catalog_snapshot.publish previous);
   let source = Printf.sprintf
       "[[models]]\nmodel_id = %S\nprovider_name = \"fixture\"\nbase = \"openai_chat\"\nmax_context_tokens = 8192\nmax_output_tokens = 128\nsupports_native_streaming = false\n" model_id in
   match Llm_provider.Model_catalog.of_toml_string ~source:"execution-restart-test" source with
-  | Ok catalog -> Llm_provider.Model_catalog.set_global catalog
+  | Ok catalog -> (Llm_provider.Catalog_snapshot.publish (Masc_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None)))
   | Error detail -> Alcotest.fail detail
 
 let setup ~sw env ~root ~reply ~require_receipt =

@@ -57,18 +57,18 @@ val find_capable : t -> (Capabilities.capabilities -> bool) -> entry list
 (** Check whether a command is discoverable from PATH without shelling out. *)
 val command_in_path : ?path:string -> string -> bool
 
-val of_declarations : Provider_declarations.t -> t
+val of_declarations : Catalog_snapshot.t -> t
 (** Project an already admitted immutable provider snapshot. Registry entries
     retain canonical ids; alias selection belongs to the declaration snapshot. *)
 
-val authentication_available : Provider_declarations.authentication -> bool
+val authentication_available : Catalog_snapshot.authentication -> bool
 (** Credential-availability edge: caller-supplied credentials are checked by
     the caller, environment-bound credentials are available only when nonblank. *)
 
 (** Default registry projected from one immutable admitted declaration snapshot.
-    The embedded catalog and explicit overlay are captured once. No second
-    provider source or endpoint inference is consulted. Invalid declarations
-    raise {!Provider_declarations.Invalid_declarations}; no fallback is loaded. *)
+    The complete publication is read once. No separate provider source or
+    endpoint inference is consulted. An invalid generated default raises
+    {!Catalog_snapshot.Invalid_default_catalog}. *)
 val default : unit -> t
 
 (** Wire-kind label for a concrete provider config. This exhaustive projection

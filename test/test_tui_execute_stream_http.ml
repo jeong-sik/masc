@@ -363,15 +363,12 @@ let test_observer_rejects_bad_replay_before_delivering_bytes env =
       [ "x-masc-sse-instance-id", "process-a"; "x-masc-sse-replay", "reset-instance-changed" ]
     ; "reset without requested cursor", None,
       [ "x-masc-sse-instance-id", "process-b"; "x-masc-sse-replay", "reset-instance-changed" ]
-    ; "scoped request reported unscoped", requested,
-      [ "x-masc-sse-instance-id", "process-a"; "x-masc-sse-replay", "reset-unscoped-cursor" ]
     ; "future cursor reset with another instance", requested,
       [ "x-masc-sse-instance-id", "process-b"; "x-masc-sse-replay", "reset-cursor-ahead" ]
     ; "future cursor reset without a cursor", None,
       [ "x-masc-sse-instance-id", "process-a"; "x-masc-sse-replay", "reset-cursor-ahead" ]
     ; "resumed with another instance", requested,
       [ "x-masc-sse-instance-id", "process-b"; "x-masc-sse-replay", "resumed" ]
-    ; "unadvertised replay after a cursor", requested, []
     ; "gap does not pass cursor", requested,
       [ "x-masc-sse-instance-id", "process-a"; "x-masc-sse-replay", "resumed-after-gap"
       ; "x-masc-sse-replay-missed-through", "50" ]
@@ -384,7 +381,37 @@ let test_observer_rejects_bad_replay_before_delivering_bytes env =
           ~on_open:(fun _ -> incr opens) ~on_chunk:(fun _ -> incr chunks) in
       (match result with
        | Error (Http.Invalid_handshake _) -> ()
+       | Error (Http.Retry_without_cursor (_, detail)) ->
+           Alcotest.failf "%s: unexpectedly retried: %s" label detail
        | Error (Http.Transport_failed detail) -> Alcotest.failf "%s: transport: %s" label detail
+       | Error (Http.Http_refused { status; _ }) -> Alcotest.failf "%s: HTTP %d" label status
+       | Ok () -> Alcotest.failf "%s: accepted" label);
+      Alcotest.(check int) (label ^ ": no open callback") 0 !opens;
+      Alcotest.(check int) (label ^ ": no body callback") 0 !chunks)) cases
+;;
+
+let test_observer_retries_without_cursor env =
+  let requested = Sse_wire.{ instance_id = "process-a"; event_id = 50 } in
+  let cases =
+    [ "unadvertised replay", []
+    ; "scoped request reported unscoped",
+      [ "x-masc-sse-instance-id", "process-a"; "x-masc-sse-replay", "reset-unscoped-cursor" ]
+    ; "incomplete replay metadata", [ "x-masc-sse-instance-id", "process-a" ]
+    ; "duplicate instance",
+      [ "x-masc-sse-instance-id", "process-a"; "X-Masc-Sse-Instance-Id", "process-b"
+      ; "x-masc-sse-replay", "resumed" ]
+    ] in
+  List.iter (fun (label, headers) ->
+    with_server env ~handler:(stream_response ~receipts:headers [ "data: {}\n\n" ]) (fun ~port ->
+      let opens = ref 0 and chunks = ref 0 in
+      let result = Http.observe_runtime_events ~clock:(Eio.Stdenv.clock env)
+          ~host:"127.0.0.1" ~port ~session_id:"observer-test" ~cursor:(Some requested)
+          ~on_open:(fun _ -> incr opens) ~on_chunk:(fun _ -> incr chunks) in
+      (match result with
+       | Error (Http.Retry_without_cursor (cursor, _)) ->
+           Alcotest.(check bool) (label ^ ": retry names requested cursor") true (cursor = requested)
+       | Error (Http.Invalid_handshake detail | Http.Transport_failed detail) ->
+           Alcotest.failf "%s: %s" label detail
        | Error (Http.Http_refused { status; _ }) -> Alcotest.failf "%s: HTTP %d" label status
        | Ok () -> Alcotest.failf "%s: accepted" label);
       Alcotest.(check int) (label ^ ": no open callback") 0 !opens;
@@ -403,6 +430,8 @@ let test_observer_accepts_valid_and_unadvertised_live_streams env =
        | Ok () -> ()
        | Error (Http.Invalid_handshake detail | Http.Transport_failed detail) ->
            Alcotest.failf "%s: %s" label detail
+       | Error (Http.Retry_without_cursor (_, detail)) ->
+           Alcotest.failf "%s: unexpectedly retried: %s" label detail
        | Error (Http.Http_refused { status; _ }) -> Alcotest.failf "%s: HTTP %d" label status);
       Alcotest.(check int) (label ^ ": open callback") 1 !opens;
       Alcotest.(check bool) (label ^ ": body delivered") true (!chunks > 0)))
@@ -716,6 +745,7 @@ let () =
         ] )
     ; ( "observer replay"
       , [ case "invalid handshake is not opened or read" test_observer_rejects_bad_replay_before_delivering_bytes
+        ; case "unusable replay retries without the requested cursor" test_observer_retries_without_cursor
         ; case "valid and unadvertised live streams still open" test_observer_accepts_valid_and_unadvertised_live_streams
         ; case "MCP rejects duplicate cursor headers" test_mcp_rejects_duplicate_cursors_before_registration
         ; case "MCP resets a future cursor and sends live events" test_mcp_future_cursor_resets_before_live_delivery

@@ -25,7 +25,7 @@ from typing import Callable, Literal, cast
 SESSION = "fixture-session"
 INSTANCE = "fixture-instance"
 CURSORS = {"37", "38", "500", "501", "502"}
-Mode = Literal["invalid", "resumed", "ahead", "media"]
+Mode = Literal["invalid", "resumed", "ahead", "media", "unadvertised", "unscoped"]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -53,7 +53,8 @@ class ObserverServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
         self.sent: list[int] = []
         # The final request is recorded but held until cleanup.
         self.gates = [
-            threading.Event() for _ in range(4 if mode in ("resumed", "media") else 3)
+            threading.Event()
+            for _ in range(4 if mode in ("resumed", "media", "unadvertised", "unscoped") else 3)
         ]
 
     def snapshot(self) -> tuple[int, int, list[StreamRequest], list[int]]:
@@ -174,13 +175,31 @@ class ObserverHandler(http.server.BaseHTTPRequestHandler):
         if index >= len(server.gates) or not server.gates[index].wait(30):
             self.respond(503, {"error": "fixture gate unavailable"})
             return
-        response_count = 3 if server.mode in ("resumed", "media") else 2
+        response_count = (
+            3 if server.mode in ("resumed", "media", "unadvertised", "unscoped") else 2
+        )
         if index >= response_count:
             self.respond(503, {"error": "fixture completed"})
             return
 
         content_type = "text/event-stream"
-        if server.mode == "media":
+        if server.mode in ("unadvertised", "unscoped"):
+            if index == 1:
+                headers = (
+                    ""
+                    if server.mode == "unadvertised"
+                    else f"x-masc-sse-instance-id: {INSTANCE}\r\n"
+                    "x-masc-sse-replay: reset-unscoped-cursor\r\n"
+                )
+            elif index == 2 and server.mode == "unadvertised":
+                headers = ""
+            else:
+                headers = (
+                    f"x-masc-sse-instance-id: {INSTANCE}\r\nx-masc-sse-replay: fresh\r\n"
+                )
+            event_id = (37, 500, 38)[index]
+            name = "fixture-rejected" if index == 1 else "fixture-control"
+        elif server.mode == "media":
             replay = "fresh" if index == 0 else "resumed"
             headers = (
                 f"x-masc-sse-instance-id: {INSTANCE}\r\nx-masc-sse-replay: {replay}\r\n"
@@ -321,9 +340,16 @@ class ObserverHandshakeTest(unittest.TestCase):
                         (None, "missing"),
                         ("37", "fixture"),
                         ("38", "fixture"),
-                        ("38", "fixture"),
+                        (None, "missing"),
                     ]
                     if mode == "resumed"
+                    else [
+                        (None, "missing"),
+                        ("37", "fixture"),
+                        (None, "missing"),
+                        (None, "missing") if mode == "unadvertised" else ("38", "fixture"),
+                    ]
+                    if mode in ("unadvertised", "unscoped")
                     else [
                         (None, "missing"),
                         ("37", "fixture"),
@@ -374,8 +400,14 @@ class ObserverHandshakeTest(unittest.TestCase):
     def test_invalid_handshakes_preserve_session_and_empty_cursor(self) -> None:
         self.run_scenario(mode="invalid")
 
-    def test_rejected_handshake_keeps_last_resumed_cursor(self) -> None:
+    def test_malformed_replay_retries_without_last_resumed_cursor(self) -> None:
         self.run_scenario(mode="resumed")
+
+    def test_unadvertised_replay_retries_live_without_cursor(self) -> None:
+        self.run_scenario(mode="unadvertised")
+
+    def test_unscoped_reset_retries_without_cursor(self) -> None:
+        self.run_scenario(mode="unscoped")
 
     def test_future_cursor_reset_accepts_lower_live_event(self) -> None:
         self.run_scenario(mode="ahead")

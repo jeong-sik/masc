@@ -1667,8 +1667,10 @@ type observer_error =
   | Transport_failed of string
   | Http_refused of { status : int; detail : string }
   | Invalid_handshake of string
+  | Retry_without_cursor of Sse_wire.observer_cursor * string
 
 exception Invalid_sse_response of string
+exception Retry_observer_without_cursor of Sse_wire.observer_cursor * string
 
 (* A comma outside a quoted parameter makes the field ambiguous: an HTTP
    intermediary may have combined multiple Content-Type fields. *)
@@ -1731,7 +1733,10 @@ let observe_runtime_events ~clock ~(host : string) ~(port : int)
     check_sse_response ~status ~headers;
     if Masc.Tui_decode.is_success_http_status status then
       (match Sse_wire.validate_observer_response ~cursor headers with
-       | Error detail -> raise (Invalid_sse_response detail)
+       | Error (Sse_wire.Retry_without_cursor (requested, detail)) ->
+           raise (Retry_observer_without_cursor (requested, detail))
+       | Error (Sse_wire.Invalid_observer_response detail) ->
+           raise (Invalid_sse_response detail)
        | Ok handshake -> on_open handshake)
   in
   match
@@ -1739,6 +1744,8 @@ let observe_runtime_events ~clock ~(host : string) ~(port : int)
       ~url ~headers ~on_response:checked_response ~on_chunk ()
   with
   | exception Invalid_sse_response detail -> Error (Invalid_handshake detail)
+  | exception Retry_observer_without_cursor (requested, detail) ->
+      Error (Retry_without_cursor (requested, detail))
   | Error detail -> Error (Transport_failed (report_err "observer stream failed" detail))
   | Ok (Masc_http_client.Pool.Buffered { status; body; _ }) ->
       Error (Http_refused { status; detail = body })

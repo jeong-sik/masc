@@ -88,12 +88,17 @@ val decode_observer_response :
     metadata, including duplicate or contradictory headers, is an error, never
     an assumed continuation of a previous epoch. *)
 
+type observer_validation_error =
+  | Retry_without_cursor of observer_cursor * string
+  | Invalid_observer_response of string
+
 val validate_observer_response :
   cursor:observer_cursor option -> (string * string) list ->
-  (observer_handshake option, string) result
+  (observer_handshake option, observer_validation_error) result
 (** Validate response metadata against the cursor actually requested.
     An unadvertised capability is usable only without a requested cursor;
     a resumed stream must name that cursor's instance and a gap must pass it.
-    Fresh and reset responses must also be consistent with the request. A
-    peer without replay metadata cannot silently downgrade a scoped cursor to
-    live-only; the caller retains it for a later validated response. *)
+    Fresh and reset responses must also be consistent with the request. Missing,
+    malformed, or unscoped replay metadata rejects the current stream and asks
+    the caller to discard only the named cursor before retrying. A successful
+    retry without replay cannot recover events missed while disconnected. *)

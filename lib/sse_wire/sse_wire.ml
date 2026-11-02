@@ -253,34 +253,44 @@ let decode_observer_response headers =
     Error "Incomplete observer instance/replay response"
 ;;
 
+type observer_validation_error =
+  | Retry_without_cursor of observer_cursor * string
+  | Invalid_observer_response of string
+
 let validate_observer_response ~(cursor : observer_cursor option) headers =
+  let invalid detail = Error (Invalid_observer_response detail) in
+  let retry_without_cursor detail =
+    match cursor with
+    | Some requested -> Error (Retry_without_cursor (requested, detail))
+    | None -> invalid detail
+  in
   match decode_observer_response headers with
-  | Error _ as error -> error
+  | Error detail -> retry_without_cursor detail
   | Ok None when Option.is_some cursor ->
-    Error "Observer peer did not advertise scoped replay; requested cursor retained for retry"
-  | Ok (Some { instance_id; replay = Resumed }) as response ->
+    retry_without_cursor "Observer peer did not advertise scoped replay"
+  | Ok (Some ({ instance_id; replay = Resumed } as handshake)) ->
     (match cursor with
-     | Some requested when String.equal requested.instance_id instance_id -> response
-     | Some _ | None -> Error "Observer resumed without a matching cursor and replay range")
-  | Ok (Some { instance_id; replay = Resumed_after_gap { missed_through } }) as response ->
+     | Some requested when String.equal requested.instance_id instance_id -> Ok (Some handshake)
+     | Some _ | None -> invalid "Observer resumed without a matching cursor and replay range")
+  | Ok (Some ({ instance_id; replay = Resumed_after_gap { missed_through } } as handshake)) ->
     (match cursor with
      | Some requested
        when String.equal requested.instance_id instance_id && missed_through > requested.event_id ->
-       response
-     | Some _ | None -> Error "Observer resumed without a matching cursor and replay range")
-  | Ok (Some { replay = Fresh; _ }) as response ->
+       Ok (Some handshake)
+     | Some _ | None -> invalid "Observer resumed without a matching cursor and replay range")
+  | Ok (Some ({ replay = Fresh; _ } as handshake)) ->
     (match cursor with
-     | None -> response
-     | Some _ -> Error "Observer reported a fresh stream for a requested cursor")
-  | Ok (Some { instance_id; replay = Reset Instance_changed }) as response ->
+     | None -> Ok (Some handshake)
+     | Some _ -> invalid "Observer reported a fresh stream for a requested cursor")
+  | Ok (Some ({ instance_id; replay = Reset Instance_changed } as handshake)) ->
     (match cursor with
-     | Some requested when not (String.equal requested.instance_id instance_id) -> response
-     | Some _ | None -> Error "Observer reported an instance change without a changed requested instance")
-  | Ok (Some { instance_id; replay = Reset Cursor_ahead }) as response ->
+     | Some requested when not (String.equal requested.instance_id instance_id) -> Ok (Some handshake)
+     | Some _ | None -> invalid "Observer reported an instance change without a changed requested instance")
+  | Ok (Some ({ instance_id; replay = Reset Cursor_ahead } as handshake)) ->
     (match cursor with
-     | Some requested when String.equal requested.instance_id instance_id -> response
-     | Some _ | None -> Error "Observer reset a future cursor without its requested instance")
+     | Some requested when String.equal requested.instance_id instance_id -> Ok (Some handshake)
+     | Some _ | None -> invalid "Observer reset a future cursor without its requested instance")
   | Ok (Some { replay = Reset Unscoped_cursor; _ }) ->
-    Error "Observer reported an unscoped cursor for a scoped request"
-  | Ok None as response -> response
+    retry_without_cursor "Observer reported an unscoped cursor for a scoped request"
+  | Ok None -> Ok None
 ;;

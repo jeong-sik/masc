@@ -16551,7 +16551,7 @@ let launch_observer state ~host ~port ~mailbox =
                 let instance_id = ref None in
                 let on_open handshake =
                   instance_id := Option.map (fun handshake -> handshake.Sse_wire.instance_id) handshake;
-                  enqueue_async mailbox (Observer_opened { session_id; handshake = Ok handshake })
+                  enqueue_async mailbox (Observer_opened { session_id; handshake })
                 in
                 let on_chunk chunk =
                   match Masc_tui_observer.feed reader chunk with
@@ -16650,6 +16650,8 @@ let launch_fleet_stream state ~expected_workspace ~host ~port ~mailbox =
            | Error (Masc_tui_http.Transport_failed detail) ->
                Log.Transport.warn "tui_fleet_stream_lost detail=%s" detail
            | Error (Masc_tui_http.Invalid_handshake detail) ->
+               Masc_tui_fleet_stream.invalid_response reader detail
+           | Error (Masc_tui_http.Retry_without_cursor (_, detail)) ->
                Masc_tui_fleet_stream.invalid_response reader detail
            | Ok () -> Log.Transport.debug "tui_fleet_stream_ended");
           Masc_tui_fleet_stream.lost reader ~now:(Eio.Time.now clock);
@@ -20482,17 +20484,14 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
   | Observer_opened { session_id; handshake } ->
       state.mcp_session <- Some session_id;
       (match handshake with
-       | Ok (Some handshake) ->
+       | Some handshake ->
            (match handshake.replay with
             | Sse_wire.Resumed | Sse_wire.Resumed_after_gap _ -> ()
             | Sse_wire.Fresh | Sse_wire.Reset _ -> state.observer_cursor <- None);
            state.observer_replay <- Observer_replay_scoped handshake
-       | Ok None ->
+       | None ->
            state.observer_cursor <- None;
-           state.observer_replay <- Observer_replay_unavailable "peer does not advertise scoped replay"
-       | Error detail ->
-           state.observer_cursor <- None;
-           state.observer_replay <- Observer_replay_unavailable detail);
+           state.observer_replay <- Observer_replay_unavailable "peer does not advertise scoped replay");
       state.observer <-
         Observer_live { session_id; since = Unix.gettimeofday (); events = 0 };
       add_event state "observer" (observer_replay_description state.observer_replay);
@@ -20756,6 +20755,14 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
         | Error (Masc_tui_http.Invalid_handshake detail) ->
             state.observer_replay <- Observer_replay_rejected detail;
             "observer stream handshake rejected: " ^ detail
+        | Error (Masc_tui_http.Retry_without_cursor (requested, detail)) ->
+            if state.observer_cursor = Some requested then begin
+              state.observer_cursor <- None;
+              let replay_detail = "cursor discarded; disconnected events were not replayed: " ^ detail in
+              state.observer_replay <- Observer_replay_unavailable replay_detail;
+              add_event state "observer" ("Replay unavailable: " ^ replay_detail)
+            end;
+            "observer replay cannot resume; reconnecting: " ^ detail
         | Error (Masc_tui_http.Http_refused { status; detail }) ->
             (* Explicit missing/conflicting MCP sessions can be reinitialized.
                EOF and transport errors never invalidate a session by count. *)

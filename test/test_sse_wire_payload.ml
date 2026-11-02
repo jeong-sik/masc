@@ -106,8 +106,40 @@ let test_observer_replay_headers () =
   check bool "a later gap is reported" true
     (Result.is_ok (validate_observer_response ~cursor:requested (gap 51)))
 
+let test_observer_cursor_recovery () =
+  let open Sse_wire in
+  let cursor = { instance_id = "process-a"; event_id = 50 } in
+  let headers replay =
+    [ "x-masc-sse-instance-id", "process-a"; "x-masc-sse-replay", replay ] in
+  let retry label response =
+    match validate_observer_response ~cursor:(Some cursor) response with
+    | Error (Retry_without_cursor (requested, _)) ->
+        check bool (label ^ ": exact requested cursor") true (requested = cursor)
+    | Error (Invalid_observer_response detail) -> failf "%s: rejected: %s" label detail
+    | Ok _ -> failf "%s: accepted a response before retry" label
+  in
+  retry "unadvertised replay" [];
+  retry "unscoped reset" (headers "reset-unscoped-cursor");
+  retry "incomplete replay metadata" [ "x-masc-sse-instance-id", "process-a" ];
+  retry "duplicate replay metadata"
+    [ "x-masc-sse-instance-id", "process-a"
+    ; "X-Masc-Sse-Instance-Id", "process-b"
+    ; "x-masc-sse-replay", "resumed" ];
+  let reject label cursor response =
+    match validate_observer_response ~cursor response with
+    | Error (Invalid_observer_response _) -> ()
+    | Error (Retry_without_cursor _) -> failf "%s: unexpectedly requested a cursor reset" label
+    | Ok _ -> failf "%s: unexpectedly accepted" label
+  in
+  reject "malformed metadata without a cursor" None [ "x-masc-sse-instance-id", "process-a" ];
+  reject "unscoped reset without a cursor" None (headers "reset-unscoped-cursor");
+  reject "fresh response after a scoped request" (Some cursor) (headers "fresh");
+  reject "resumed from another instance" (Some cursor)
+    [ "x-masc-sse-instance-id", "process-b"; "x-masc-sse-replay", "resumed" ]
+
 let () = run "SSE wire payload"
   [ "wire", [ test_case "complete payloads" `Quick test_completed_payloads;
               test_case "formatter roundtrip" `Quick test_payload_framing_roundtrip;
               test_case "literal fields" `Quick test_fields_are_literal;
-              test_case "observer replay headers" `Quick test_observer_replay_headers ] ]
+              test_case "observer replay headers" `Quick test_observer_replay_headers;
+              test_case "observer cursor recovery" `Quick test_observer_cursor_recovery ] ]

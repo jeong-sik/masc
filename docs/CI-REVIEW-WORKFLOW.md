@@ -219,7 +219,7 @@ Only an actual successful completion is build evidence.
 
 A combined candidate receipt names that candidate and selected coverage. It does
 not become an individual PR's check, an independent source approval or merge
-permission. Ordinary review guards do not need a CI receipt; Release admission
+permission. A source review does not establish a CI result; Release admission
 still requires its current-head full verification evidence.
 
 For real browser Addon checks, dispatch `browser-stagehand-proof.yml` with a full

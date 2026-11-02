@@ -61,7 +61,7 @@ while IFS=$'\t' read -r pr author base head branch draft; do
         if [ "$pr_base" != "$base" ] || [ "$pr_branch" != "$branch" ]; then
           waits="unknown:PR base or branch changed during read"
         elif [ "${pr_stack:-null}" != null ]; then
-          if accepted_scope=$(GUARD_GH="$GH" python3 "$here/stack-scope.py" "$repo" "$pr" "$head"); then
+          if accepted_scope=$(MASC_REVIEW_GH="$GH" python3 "$here/stack-scope.py" "$repo" "$pr" "$head"); then
             target=$(printf '%s' "$accepted_scope" | jq -r 'if .stack != null then .stack.base.ref else .scope[0].identity.base.ref end')
             if [ "$(printf '%s' "$accepted_scope" | jq -r '.stack != null')" = true ]; then
               waits="review native stack through #$pr into $target"

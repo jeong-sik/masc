@@ -80,7 +80,7 @@ printf 'CURRENT REVIEW AND CI CHECKS PASS\\n'
         return subprocess.run(
             ["bash", "-c", script, "review-test", HEAD, str(self.gh), str(HERE), *extra],
             capture_output=True, text=True,
-            env=dict(os.environ, GUARD_GH=str(self.gh), NATIVE_TEST_ROOT=str(self.root)))
+            env=dict(os.environ, MASC_REVIEW_GH=str(self.gh), NATIVE_TEST_ROOT=str(self.root)))
 
     def test_current_head_approval_is_reported(self):
         result = self.check()

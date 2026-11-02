@@ -279,7 +279,7 @@ def main():
             raise Rejected(Reason.INVALID_SELECTION)
         receipt = prepare(f, repo=args.repo, leader=args.leader,
                           selected=tuple(args.member), git_dir=args.git_dir,
-                          gh=os.environ.get("GUARD_GH", "gh"))
+                          gh=os.environ.get("MASC_REVIEW_GH", "gh"))
         # Reserve the receipt before creating a ref. Roll back only our own
         # candidate ref if writing fails; never delete a concurrently moved ref.
         receipt["branch"] = args.branch

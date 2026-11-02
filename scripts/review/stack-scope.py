@@ -16,7 +16,7 @@ import sys
 def snapshot(repo, selected, expected_head):
     def get(path):
         return json.loads(subprocess.check_output(
-            [os.environ.get('GUARD_GH', 'gh'), 'api', path, '--jq', '.'], text=True))
+            [os.environ.get('MASC_REVIEW_GH', 'gh'), 'api', path, '--jq', '.'], text=True))
 
     def require(condition, message):
         if not condition:

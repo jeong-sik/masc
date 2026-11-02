@@ -72,7 +72,7 @@ class StackScope(unittest.TestCase):
             [sys.executable, "-I", str(HERE / "stack-scope.py"), REPO, str(selected), sha(selected)],
             capture_output=True, text=True,
             env={"PATH": "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin",
-                 "GUARD_GH": str(self.tmp / "gh"), "FAKE_DIR": str(self.data)})
+                 "MASC_REVIEW_GH": str(self.tmp / "gh"), "FAKE_DIR": str(self.data)})
 
     def test_the_top_open_pr_takes_every_layer_below_it(self):
         numbers = self.stack(["merged", "open", "open"])

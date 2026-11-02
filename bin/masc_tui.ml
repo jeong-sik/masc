@@ -14046,14 +14046,14 @@ let load_http_scoped_surface_reads ~on_progress ~on_dataset ~surface_request ~as
     ~system_log_level ~provider_history_days
     ~(needs : Masc_tui_types.surface_needs) : unit http_scoped_surface_readings =
   let publish_bound ~dataset load =
-    match server_identity, on_dataset, Fs_compat.execution_context () with
-    | Ok expected, Some publish, Fs_compat.Eio_fiber ->
+    match server_identity, Fs_compat.execution_context () with
+    | Ok expected, Fs_compat.Eio_fiber ->
       Masc_tui_workspace_read.with_binding ~host ~port ~expected
         ~proof:Masc_tui_workspace_read.Request_precondition (fun () ->
         let result = load () in
-        publish expected (dataset result);
+        Option.iter (fun publish -> publish expected (dataset result)) on_dataset;
         result)
-    | Error _, _, _ | Ok _, None, _ | Ok _, Some _, Fs_compat.Non_eio -> load ()
+    | Error _, _ | Ok _, Fs_compat.Non_eio -> load ()
   in
   let when_needed ~source ~dataset ~outcome wanted load =
     if wanted then Some (publish_bound ~dataset (fun () ->
@@ -17007,14 +17007,12 @@ let resume_reads_after_authority_change state ~mailbox ~refresh_inflight
      | Some {resume=Some resume; _} -> launch_browser_history state ~mailbox
          ~reload:(match resume with Browser_history.Reload_list -> true | Reload_selection -> false)
      | Some _ | None -> ());
-    (* The bundle was cut under the old authority too: its approval listing
-       carries the approval_flow generation the move replaced, so the
-       listing and the Home operator summary are refused when it lands. Read
-       it again under the new one. Only a matched workspace draws them;
-       another workspace's bundle withheld nothing a second pass would bring.
-       A pass already on the wire records the intent and runs once it
-       lands. *)
-    if workspace_moved && state.workspace_identity = Workspace_identity_match then
+    (* The move may retire data that another collector took from this pass.
+       A matched workspace also needs a new approval listing. For a mismatch,
+       reread only when the open surface still needs an unread observation;
+       foreign approval and question results remain subject to their existing
+       workspace admission rules. *)
+    if revalidate_workspace_surfaces state ~workspace_moved ~needs:(current_surface_needs state) then
       start_http_refresh state ~host:server_peer_host ~port:state.port
         ~intent:Revalidate ~refresh_inflight ~scoped_refresh_inflight
         ~scoped_refresh_followup ~mailbox

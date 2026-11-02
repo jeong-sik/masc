@@ -17555,6 +17555,8 @@ let reset_metrics_scroll (state : state) =
    together. A matched workspace that becomes unconfirmed suspends reads
    without withdrawing this presentation. *)
 let withdraw_usage_workspace (state : state) =
+  state.transport <- None;
+  state.transport_error <- None;
   state.overview_quota <- Quota_unread;
   state.overview_providers <- Providers_unread;
   state.keeper_usage <- Keeper_usage_unread;
@@ -17562,6 +17564,27 @@ let withdraw_usage_workspace (state : state) =
   state.overview_account_emails <- Account_emails_unread;
   state.usage_scope_id <- None;
   reset_metrics_scroll state
+
+(* A later navigation can own a dataset from the previous workspace when a
+   full refresh confirms its successor. That navigation is retired at the
+   authority change, so visible unread datasets need a new workspace read. *)
+let revalidate_workspace_surfaces (state : state) ~workspace_moved ~(needs : surface_needs) =
+  workspace_moved && match state.workspace_identity with
+  | Workspace_identity_match -> true
+  | Workspace_identity_mismatch _ ->
+      let server_logs = System_logs_view.page Server state.system_logs in
+      (needs.needs_transport && Option.is_none state.transport && Option.is_none state.transport_error)
+      || (needs.needs_system_logs && Option.is_none server_logs.lp_snapshot && Option.is_none server_logs.lp_error)
+      || (needs.needs_runtime_quota &&
+          ((match state.overview_quota with Quota_unread -> true | Quota_read _ | Quota_failed _ -> false)
+           || (match state.overview_providers with Providers_unread -> true | Providers_read _ | Providers_failed _ -> false)))
+      || (needs.needs_keeper_usage &&
+          (match state.keeper_usage with Keeper_usage_unread -> true | Keeper_usage_read _ | Keeper_usage_error _ -> false))
+      || (needs.needs_provider_history &&
+          (match state.provider_history with Provider_history_unread -> true | Provider_history_read _ | Provider_history_error _ -> false))
+      || (needs.needs_account_emails &&
+          (match state.overview_account_emails with Account_emails_unread -> true | Account_emails_read _ | Account_emails_failed _ -> false))
+  | Workspace_identity_unread | Workspace_identity_match_unconfirmed _ -> false
 
 (* A period change is an explicit read demand on the same surface. Its
    dataset ticket must supersede the previous period even when cycling back

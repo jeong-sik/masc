@@ -53,7 +53,7 @@ implementation_prs: ["#38733", "#38730", "#39168", "#45971", "#38952"]
   **source 어댑터**(`msx_capture`, `dos_capture`)가 가리키는 기계이고, 요청도 그 source 이름으로
   받는다. 관측은 source 를 캡처해 남기는 길이고, `live` 는 같은 source 를 남기지 않고 지금 보는
   길이다. 새 기계가 source 어댑터를 얻으면 같은 라우트로 보인다. 기계마다 라우트를 만들지 않는다.
-- #38815 의 TUI 는 DOS 화면을 기존 0.3초 주기로 `live` 에 묻는다. MSX 는 열기·입력·load·
+- #38952 의 TUI 는 DOS 화면을 기존 0.3초 주기로 `live` 에 묻는다. MSX 는 열기·입력·load·
   checkpoint 뒤 `live` 를 읽고, 주기 실행은 기존 `POST /api/v1/msx/tick` 을 유지한다.
   `live` 의 "그대로" 답은 몇 바이트다.
 

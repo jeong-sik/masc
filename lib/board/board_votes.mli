@@ -21,10 +21,9 @@
       [vote_direction_of_string_opt].
     - {b Vote log persistence}: [append_vote_log],
       [save_vote_log_jsonl], [record_vote_side_effect].
-    - {b Persistence loaders}: [load_persisted_posts],
-      [load_persisted_comments], [load_persisted_votes], reactions,
-      sub-boards, and [recalculate_reply_counts].
-    - {b Global store}: [global_lazy] ref.
+    - {b Persistence loading and count rebuilding}: owned by private
+      [Board_store_load], using the existing [Board_votes_json] readers.
+    - {b Global store}: private [Board_store_lifecycle] owns its lazy cell.
     - {b Flair extractor internals}: [flair_tag_re],
       [extract_flair]. *)
 

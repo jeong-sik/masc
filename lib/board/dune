@@ -4,7 +4,21 @@
  (name masc_board_handlers)
  (public_name masc.board_handlers)
  (wrapped true)
- (private_modules board_content_json board_content_diagnostics board_posts_rows board_posts_inspection board_posts_guard_json board_initialization_inspect board_initialization_protocol board_vote_transition board_snapshot_batch board_sub_boards board_posts_source)
+ (private_modules
+  board_content_json
+  board_content_diagnostics
+  board_posts_rows
+  board_posts_inspection
+  board_posts_guard_json
+  board_initialization_inspect
+  board_initialization_protocol
+  board_vote_transition
+  board_snapshot_batch
+  board_sub_boards
+  board_posts_source
+  board_vote_row
+  board_store_load
+  board_store_lifecycle)
  (modules
   board
   board_audience
@@ -33,6 +47,9 @@
   board_sub_board_json
   board_sub_boards
   board_vote_key
+  board_vote_row
+  board_store_load
+  board_store_lifecycle
   board_vote_transition
   board_votes
   board_votes_json

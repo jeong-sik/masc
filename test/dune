@@ -3766,7 +3766,7 @@
 (test
  (name test_tui_operator_projection)
  (modules test_tui_operator_projection)
- (libraries alcotest masc_tui_operator_projection yojson))
+ (libraries alcotest masc_tui_approval_detail masc_tui_operator_projection yojson))
 
 (test
  (name test_tui_task_detail)

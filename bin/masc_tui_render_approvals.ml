@@ -96,7 +96,8 @@ let approval_detail_pane (state : state) ~clamped ~rows ~cols (row : Masc_tui_ap
       ; "target", a.Masc_tui_operator_projection.ap_target_type
       ; "summary", a.Masc_tui_operator_projection.ap_summary
       ; "payload",
-        Yojson.Safe.pretty_to_string a.Masc_tui_operator_projection.ap_payload
+        Masc_tui_operator_projection.approval_payload_document_for_terminal
+          a.Masc_tui_operator_projection.ap_payload
       ])
   in
   box_top buf cols;

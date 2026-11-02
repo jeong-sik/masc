@@ -104,6 +104,27 @@ let test_payload_terminal_projection () =
   check bool "UTF-8 C1 code point is visible as inert evidence" true
     (contains_substring rendered "\\u009B")
 
+let test_payload_json_context () =
+  let bidi = "\226\128\174" and c1 = "\194\128" and selector = "\239\184\143" in
+  let emoji = "👩‍💻" in
+  let payload = `Assoc [("key" ^ bidi, `String (c1 ^ "\000" ^ selector ^ emoji))] in
+  let compact = Projection.approval_payload_for_terminal payload in
+  let document = Projection.approval_payload_document_for_terminal payload in
+  let detail = Masc_tui_approval_detail.of_fields ~width:160 ["payload", document]
+    |> List.map (fun (line : Masc_tui_approval_detail.line) -> line.text)
+    |> String.concat "" in
+  List.iter (fun rendered ->
+    List.iter (fun (label, raw) ->
+      check bool label false (contains_substring rendered raw))
+      ["bidi", bidi; "C1", c1; "orphan selector", selector];
+    List.iter (fun escape ->
+      check bool "control has a visible escape" true (contains_substring rendered escape))
+      ["\\u202E"; "\\u0080"; "\\uFE0F"];
+    check bool "valid emoji stays intact" true (contains_substring rendered emoji))
+    [compact; document; detail];
+  check bool "compact JSON value is preserved" true (Yojson.Safe.from_string compact = payload);
+  check bool "document JSON value is preserved" true (Yojson.Safe.from_string document = payload)
+
 let test_fails_closed () =
   let malformed =
     [ `Assoc []
@@ -512,6 +533,7 @@ let () =
             test_workspace_bound_approval_listing
         ; test_case "payload terminal projection" `Quick
             test_payload_terminal_projection
+        ; test_case "payload JSON context" `Quick test_payload_json_context
         ; test_case "fails closed" `Quick test_fails_closed
         ; test_case "semantic confirm status" `Quick
             test_confirm_response_status

@@ -146,6 +146,27 @@ let test_failed_read_waits_for_publication () =
       check int "publication retries observation" 2 !reads;
       check int "publication and recovery invalidate health" 3 !invalidations))
 
+let test_unavailable_wall_timer_waits_for_publication () =
+  with_workspace (fun env state config ->
+    let clock = Eio.Stdenv.clock env in
+    let text, _ = future_time clock 20.0 in
+    let entries = ref [fixture ~token:"timer" ~expires_at:(Some text)] in
+    let reads = ref 0 and waits = ref 0 and invalidations = ref 0 in
+    Eio.Switch.run (fun sw ->
+      Expiry.For_testing.start_with_sleep ~sw ~clock ~state
+        ~sleep_until:(fun _ -> incr waits; failwith "timer source unavailable")
+        ~read:(fun _ -> incr reads; Ok !entries)
+        ~invalidate:(fun ~base_path:_ -> incr invalidations);
+      wait_for clock (fun () -> !invalidations >= 1);
+      Eio.Time.sleep clock 0.2;
+      check int "failed timer is not retried on a cadence" 1 !waits;
+      check int "failed timer does not trigger repeated reads" 1 !reads;
+      entries := [];
+      Store.write_pending_confirms config [] |> Result.get_ok;
+      wait_for clock (fun () -> !reads >= 2);
+      check int "a later publication resumes observation" 2 !reads))
+;;
+
 let test_expired_at_start_wakes_once () =
   with_workspace (fun env state config ->
     let clock = Eio.Stdenv.clock env in
@@ -350,6 +371,8 @@ let () =
           test_replaced_workspace_discards_old_read
       ; test_case "failed source waits for publication" `Quick
           test_failed_read_waits_for_publication
+      ; test_case "unavailable wall timer waits for publication" `Quick
+          test_unavailable_wall_timer_waits_for_publication
       ; test_case "expired entry at startup wakes once" `Quick
           test_expired_at_start_wakes_once
       ; test_case "publication during read rearms deadline" `Quick

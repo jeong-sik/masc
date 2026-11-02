@@ -3028,6 +3028,7 @@
 (include stanzas/test_tui_board_list_signal.inc)
 (include stanzas/test_tui_gate_snapshot_signal.inc)
 (include stanzas/test_tui_held_calls_and_modes_signal.inc)
+(include stanzas/test_tui_keeper_logs_execute_stream.inc)
 (include stanzas/test_tui_waiting_event.inc)
 (include stanzas/test_tui_task_event.inc)
 

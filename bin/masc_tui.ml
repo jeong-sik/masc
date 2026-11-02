@@ -16582,11 +16582,6 @@ let apply_http_refresh_outcome state ~mailbox = function
 (* Preserve the existing physical metrics window, shared by every entry path. *)
 let keeper_log_window = 200
 
-(* The Execute output both views read is one reading with one key, and the
-   key holds its row limit: the view on screen says which limit it asks for. *)
-let keeper_execute_window state =
-  if keeper_terminal_on_screen state then keeper_terminal_window else keeper_log_window
-
 let log_keeper_log_read ~phase request ~outcome =
   let key = Masc_tui_fetched.request_key request.klr_request in
   Log.Transport.info "tui_keeper_logs=%s" (Yojson.Safe.to_string (`Assoc [
@@ -16639,49 +16634,11 @@ let launch_keeper_log_read state ~mailbox ~intent keeper =
                 deliver (Error (Printexc.to_string exn))));
       true
 
-let launch_keeper_execute_read state ~mailbox ~intent keeper =
-  match begin_keeper_execute_read state ~intent ~limit:(keeper_execute_window state) keeper with
-  | None -> false
-  | Some request ->
-    let key = Masc_tui_fetched.request_key request.ker_request in
-    let host = server_peer_host and port = state.port in
-    let read = capture_workspace_json_read state (fun () ->
-      let path = Printf.sprintf "/api/v1/dashboard/execute-output-snapshot/%s?limit=%d"
-          (Uri.pct_encode key.klk_keeper) key.klk_limit in
-      Result.bind (Masc_tui_http.get_json ~host ~port ~path)
-        (decode_keeper_execute_output ~keeper:key.klk_keeper)
-      (* NDT-OK: this is the time the read was observed, not execution authority. *)
-      |> Result.map (fun reading -> reading, Unix.gettimeofday ())) in
-    let stopped, stop = Eio.Promise.create () in
-    state.keeper_execute_cancel <- Some (request.ker_owner,
-      fun () -> ignore (Eio.Promise.try_resolve stop ()));
-    let enqueue_async = workspace_enqueue state in
-    let deliver result = enqueue_async mailbox (Keeper_execute_loaded (request, result)) in
-    let run () = Fun.protect ~finally:(fun () -> finish_keeper_execute_read state request)
-      (fun () -> Eio.Fiber.first
-        (fun () ->
-          let result = try read () with
-            | Eio.Cancel.Cancelled _ as exn -> raise exn
-            | exn -> Error (Printexc.to_string exn) in
-          finish_keeper_execute_read state request;
-          deliver result)
-        (fun () -> Eio.Promise.await stopped)) in
-    (match Eio_context.get_switch_opt () with
-     | None -> finish_keeper_execute_read state request;
-       deliver (Error "Eio switch is unavailable for Execute output reading")
-     | Some sw ->
-       (match fork_workspace_job ~observation:true state ~sw run with
-        | () -> ()
-        | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-        | exception exn -> finish_keeper_execute_read state request;
-          deliver (Error (Printexc.to_string exn))));
-    true
-
-(* The Terminal tab follows a Keeper's Execute output over its stream, so a row
-   reaches the screen when the server logs it rather than at the next poll. The
-   job owns the connection and the reader, and posts the reader's view to the
-   mailbox; the render fiber owns all state. Retriable failures back off; a
-   permanent refusal stops until the tab is reopened. *)
+(* The logs view and the Terminal tab follow a Keeper's Execute output over its
+   stream, so a row reaches the screen when the server logs it. The job owns
+   the connection and the reader, and posts the reader's view to the mailbox;
+   the render fiber owns all state. Retriable failures back off; a permanent
+   refusal stops until the view is reopened. *)
 
 (* The reader is posted at most this often. A command that prints faster draws
    every row all the same; they arrive together. *)
@@ -16689,17 +16646,14 @@ let keeper_execute_stream_post_interval_s = 0.05
 
 (* The job ends when the workspace withdraws it, [stop] is called, a permanent
    refusal occurs, or an exception is reported as the stream going down. An
-   ended job stays registered until the tab is left, so a bug does not turn
-   into a reconnect loop; leaving the tab and coming back opens a new one. *)
+   ended job stays registered until the view is left, so a bug does not turn
+   into a reconnect loop; leaving the view and coming back opens a new one. *)
 let launch_keeper_execute_stream state ~mailbox ~expected_workspace ~key =
   let stream =
     { kxf_key = key; kxf_reading = state.workspace_read_authority; kxf_owner = ref () } in
   let stopped, stop = Eio.Promise.create () in
   state.keeper_execute_stream <-
     Some (stream, fun () -> ignore (Eio.Promise.try_resolve stop ()));
-  (* A poll still out for this Keeper would answer into the cell the stream
-     now fills. *)
-  ignore (stop_keeper_execute_poll state);
   (match Masc_tui_fetched.refresh ~equal:keeper_log_equal_key state.keeper_execute_output ~key with
    | Masc_tui_fetched.Started (next, _) -> state.keeper_execute_output <- next
    | Masc_tui_fetched.Already_loading -> ());
@@ -16765,9 +16719,10 @@ let launch_keeper_execute_stream state ~mailbox ~expected_workspace ~key =
        | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
        | exception exn -> report_unstarted (Printexc.to_string exn))
 
-(* Keep the stream running for what the Terminal tab shows: one for the Keeper
-   under the cursor while the tab is on screen, none otherwise. True when this
-   changed what is running, so the screen is redrawn. *)
+(* Keep the stream running for what the logs view or the Terminal tab shows:
+   one for the Keeper under the cursor while either is on screen, none
+   otherwise. True when this changed what is running, so the screen is
+   redrawn. *)
 let reconcile_keeper_execute_stream state ~mailbox =
   match plan_keeper_execute_stream state, state.server_identity with
   | Stream_stays, _ -> false
@@ -16778,18 +16733,12 @@ let reconcile_keeper_execute_stream state ~mailbox =
       true
   | Stream_follows _, None -> stop_keeper_execute_stream state
 
+(* The Keeper's metrics. Its Execute output arrives over the stream that
+   [reconcile_keeper_logs] opens. *)
 let launch_current_keeper_logs state ~mailbox ~intent =
-  let metrics = match keeper_log_target state with
-    | Some keeper -> launch_keeper_log_read state ~mailbox ~intent keeper
-    | None -> false in
-  (* The Terminal tab follows its Keeper's output over the stream that
-     [reconcile_keeper_logs] opens, so a read of the same output would only
-     race it. *)
-  let execute = match keeper_execute_target state with
-    | Some keeper when not (keeper_terminal_on_screen state) ->
-      launch_keeper_execute_read state ~mailbox ~intent keeper
-    | Some _ | None -> false in
-  metrics || execute
+  match keeper_log_target state with
+  | Some keeper -> launch_keeper_log_read state ~mailbox ~intent keeper
+  | None -> false
 
 let reconcile_keeper_logs state ~mailbox =
   (* Leaving the Terminal tab, or moving to another Keeper, ends what it held
@@ -16807,29 +16756,8 @@ let reconcile_keeper_logs state ~mailbox =
       let held = Option.is_some state.keeper_log_read in
       if held then suspend_keeper_logs state;
       held in
-  let execute = match keeper_execute_target state, state.workspace_identity with
-    | Some _, Workspace_identity_match when keeper_terminal_on_screen state ->
-      (* The stream fills the cell; a poll still held from the logs view is no
-         longer wanted. *)
-      stop_keeper_execute_poll state
-    | Some keeper, Workspace_identity_match ->
-      let key = keeper_log_key state ~limit:(keeper_execute_window state) keeper in
-      (match state.keeper_execute_read with
-       | Some request when request.ker_reading == state.workspace_read_authority
-           && keeper_log_equal_key key (Masc_tui_fetched.request_key request.ker_request) -> false
-       | Some _ | None -> launch_keeper_execute_read state ~mailbox ~intent:Snapshot_read.Poll keeper)
-    | (Some _ | None), (Workspace_identity_match | Workspace_identity_unread
-      | Workspace_identity_mismatch _ | Workspace_identity_match_unconfirmed _) ->
-      let held = Option.is_some state.keeper_execute_read in
-      if held then begin
-        state.keeper_execute_output <- suspend_keeper_execute state.keeper_execute_output;
-        state.keeper_execute_read <- None;
-        Option.iter (fun (_, cancel) -> cancel ()) state.keeper_execute_cancel;
-        state.keeper_execute_cancel <- None
-      end;
-      held in
   let stream = reconcile_keeper_execute_stream state ~mailbox in
-  metrics || execute || stream
+  metrics || stream
 ;;
 
 (* What a detail tab reads on the way in, for the Keeper it is opened on.
@@ -20884,7 +20812,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         | Keeper_chat_journal_loaded _ | Keeper_native_tasks_loaded (_, _)
         | Keeper_child_content_loaded (_, _) | Keeper_preparation_loaded (_, _) | Context_inspector_loaded (_, _, _)
         | Context_inspector_part_loaded (_, _)
-        | Keeper_chat_older_loaded (_, _, _, _) | Local_workspace_read (_, _) | Local_keepers_read (_, _) | Live_context_loaded (_, _, _) | (Keeper_logs_loaded _ | Keeper_execute_loaded _ | Keeper_execute_streamed _) | Keeper_composite_loaded (_, _, _)
+        | Keeper_chat_older_loaded (_, _, _, _) | Local_workspace_read (_, _) | Local_keepers_read (_, _) | Live_context_loaded (_, _, _) | (Keeper_logs_loaded _ | Keeper_execute_streamed _) | Keeper_composite_loaded (_, _, _)
         | Lane_inventory_loaded (_, _) | Clients_loaded (_, _) | Lane_runs_loaded (_, _, _, _)
         | Lane_run_detail_loaded (_, _, _) | Measurement_artifact_loaded (_, _, _)
         | Verification_loaded _ | Harness_loaded _ | Fusion_runs_loaded (_, _)
@@ -26217,11 +26145,6 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         let _, cols = Masc_tui_render_prim.get_terminal_size () in
         state.log_scroll <- min state.log_scroll (max 0 (List.length (keeper_log_rows state ~cols) - 1));
         if admitted.kla_followup then ignore (launch_current_keeper_logs state ~mailbox ~intent:Snapshot_read.Poll)) admission
-  | Keeper_execute_loaded (request, result) ->
-      if take_keeper_execute_read state request result then begin
-        let _, cols = Masc_tui_render_prim.get_terminal_size () in
-        state.log_scroll <- min state.log_scroll (max 0 (List.length (keeper_log_rows state ~cols) - 1))
-      end
   | Keeper_execute_streamed (stream, event) ->
       ignore (take_keeper_execute_stream state stream event)
   | Live_context_loaded (request, started_ns, result) ->

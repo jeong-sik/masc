@@ -651,7 +651,7 @@ let wrap_marked ~width ~attention text =
   let width = max 1 width in
   let prefix =
     if width >= 4 then if attention then "! " else "  "
-    else if width = 3 then if attention then "!" else " "
+    else if width >= 2 then if attention then "!" else " "
     else ""
   in
   let lines =
@@ -660,7 +660,12 @@ let wrap_marked ~width ~attention text =
   match lines with
   | [] when attention -> [ "!" ]
   | [] -> []
-  | _ :: _ -> List.map (fun line -> prefix ^ line) lines
+  | _ :: _ ->
+      List.map
+        (fun line ->
+          if cells_of line + String.length prefix <= width then prefix ^ line
+          else line)
+        lines
 
 (* A window heard at a different time than its account's newest report says
    so; otherwise the time is left out. *)
@@ -885,7 +890,8 @@ let draw_entry layout tone entry =
     let name = match first with Some name -> name_cell tone name | None -> layout.blank_name in
     let label_overflows = cells_of (marked ~attention:line.at_limit line.label) > layout.label_cells in
     let label =
-      if label_overflows then String.make layout.label_cells ' '
+      if label_overflows then
+        Text.fit_middle layout.label_cells (if line.at_limit then "!" else "")
       else Text.fit_middle layout.label_cells (marked ~attention:line.at_limit line.label)
     in
     let label_rows =
@@ -926,10 +932,11 @@ let draw_entry layout tone entry =
     let wrapped_detail () =
       List.map
         (fun wrapped -> layout.continuation ^ style line.detail_tone wrapped)
-        (Text.wrap_words ~max_cells:layout.continuation_cells line.detail)
+        (wrap_marked ~width:layout.continuation_cells ~attention:line.at_limit line.detail)
     in
     if Option.is_some line.share
-       && cells_of (head (rstrip_spaces (label ^ " " ^ gauge))) > layout.width
+       && ((line.at_limit && layout.label_cells = 0)
+           || cells_of (head (rstrip_spaces (label ^ " " ^ gauge))) > layout.width)
     then
       let labels =
         if label_overflows then label_rows
@@ -938,7 +945,7 @@ let draw_entry layout tone entry =
       labels
       @ List.map
           (fun value -> layout.continuation ^ style line.tone value)
-          (Text.wrap_words ~max_cells:layout.continuation_cells line.percent)
+          (wrap_marked ~width:layout.continuation_cells ~attention:line.at_limit line.percent)
       @ wrapped_detail ()
     else
       label_rows
@@ -1013,8 +1020,8 @@ let draw_stacked_entry ~width ~tone entry =
     | Window_lines lines ->
         List.map (fun line ->
           (wrap_marked ~width ~attention:line.at_limit line.label |> List.map (style line.tone))
-          @ wrap line.tone line.percent
-          @ wrap line.detail_tone line.detail) lines |> separated in
+          @ (wrap_marked ~width ~attention:line.at_limit line.percent |> List.map (style line.tone))
+          @ (wrap_marked ~width ~attention:line.at_limit line.detail |> List.map (style line.detail_tone))) lines |> separated in
   name @ body
   @ Option.fold ~none:[] ~some:(fun tag -> wrap (Some (Theme.text_status Masc_tui_theme.Bad)) ("Catalogue · " ^ tag)) entry.de_tag
   @ Option.fold ~none:[] ~some:(wrap (Some (Theme.recede ()))) entry.de_email

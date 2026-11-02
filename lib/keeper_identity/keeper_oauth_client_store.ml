@@ -59,31 +59,45 @@ let guard_io f =
   | Sys_error message -> Error message
 ;;
 
+(* Written to a temp file of its own and renamed over the target, so a reader
+   finds the previous contents or these, and two writers never share a temp
+   file. [Filename.temp_file] creates it 0600. *)
 let write_whole path contents =
   guard_io (fun () ->
-    let temp = path ^ ".tmp" in
-    ensure_dir (Filename.dirname path);
-    Out_channel.with_open_bin temp (fun oc -> Out_channel.output_string oc contents);
-    Unix.chmod temp 0o600;
-    Unix.rename temp path;
-    Ok ())
+    let dir = Filename.dirname path in
+    ensure_dir dir;
+    let temp = Filename.temp_file ~temp_dir:dir (Filename.basename path) ".tmp" in
+    match
+      Out_channel.with_open_bin temp (fun oc -> Out_channel.output_string oc contents);
+      Unix.rename temp path
+    with
+    | () -> Ok ()
+    | exception exn ->
+      (try Sys.remove temp with Sys_error _ -> ());
+      raise exn)
 ;;
 
-let read_json path =
+(* An object whose keys are all in [allowed]. A key outside it is a refusal:
+   a hand-edited "clientSecret" read past would make a confidential client a
+   public one. *)
+let read_json ~allowed path =
   match In_channel.with_open_bin path In_channel.input_all with
   | exception Sys_error _ when not (Sys.file_exists path) -> Ok None
   | exception Sys_error message -> Error message
   | contents ->
     (match Yojson.Safe.from_string contents with
      | exception Yojson.Json_error detail -> Error (Printf.sprintf "%s: %s" path detail)
-     | `Assoc fields -> Ok (Some fields)
+     | `Assoc fields ->
+       (match List.find_opt (fun (key, _) -> not (List.mem key allowed)) fields with
+        | Some (key, _) -> Error (Printf.sprintf "%s: unknown field %S" path key)
+        | None -> Ok (Some fields))
      | _ -> Error (Printf.sprintf "%s: not an object" path))
 ;;
 
 (* Strict field readers. An absent optional field is [None]; a present field
-   of the wrong type is a refusal, because reading it as absent would turn a
-   confidential client into a public one, or an expiring secret into one that
-   never lapses. *)
+   of the wrong type, [null] included, is a refusal, because reading it as
+   absent would turn a confidential client into a public one, or an expiring
+   secret into one that never lapses. The writers never emit [null]. *)
 let required_string ~path fields key =
   match List.assoc_opt key fields with
   | Some (`String value) when String.trim value <> "" -> Ok (String.trim value)
@@ -92,14 +106,14 @@ let required_string ~path fields key =
 
 let optional_string ~path fields key =
   match List.assoc_opt key fields with
-  | None | Some `Null -> Ok None
+  | None -> Ok None
   | Some (`String value) when String.trim value <> "" -> Ok (Some (String.trim value))
   | Some _ -> Error (Printf.sprintf "%s: %s must be a non-empty string when present" path key)
 ;;
 
 let optional_float ~path fields key =
   match List.assoc_opt key fields with
-  | None | Some `Null -> Ok None
+  | None -> Ok None
   | Some (`Float value) -> Ok (Some value)
   | Some (`Int value) -> Ok (Some (float_of_int value))
   | Some _ -> Error (Printf.sprintf "%s: %s must be a number when present" path key)
@@ -134,7 +148,7 @@ let app_path ~identity_dir ~(provider : Keeper_oauth_provider.t) =
 
 let load_app ~identity_dir ~provider =
   let path = app_path ~identity_dir ~provider in
-  let* fields = read_json path in
+  let* fields = read_json ~allowed:[ "client_id"; "client_secret"; "scopes" ] path in
   match fields with
   | None -> Ok None
   | Some fields ->
@@ -178,7 +192,11 @@ let binding_to_json = function
 ;;
 
 let load_binding ~path =
-  let* fields = read_json path in
+  let* fields =
+    read_json
+      ~allowed:[ "kind"; "client_id"; "client_secret"; "secret_expires_at" ]
+      path
+  in
   match fields with
   | None -> Ok None
   | Some fields ->
@@ -207,13 +225,14 @@ let delete_binding ~path =
 ;;
 
 let secret_expired (registered : Registered.t) ~now =
-  match registered.Registered.client_secret with
-  | None -> false
-  | Some _ ->
-    (match registered.Registered.secret_expires_at with
-     | None -> true
-     | Some seconds when Float.equal seconds 0. -> false
-     | Some seconds -> seconds <= now)
+  match registered.Registered.client_secret, registered.Registered.secret_expires_at with
+  | None, _ -> false
+  (* No stated deadline. Measured on the live install 2026-11-02, monday and
+     neon issue a secret without one; reading that as lapsed would refuse
+     every renewal for them. The provider answers a forgotten secret itself. *)
+  | Some _, None -> false
+  | Some _, Some seconds when Float.equal seconds 0. -> false
+  | Some _, Some seconds -> seconds <= now
 ;;
 
 type redeem_error =

@@ -36,8 +36,8 @@ type registered = {
       (** Unix seconds at which [client_secret] lapses, [Some 0.] for a
           secret the server says never does, and [None] both for a public
           client and for a server that issued a secret without the field RFC
-          7591 section 3.2.1 requires beside it. The store keeps the last
-          case apart from "never" -- see
+          7591 section 3.2.1 requires beside it. In the last case the server
+          stated no deadline, and its own answer to a renewal decides -- see
           {!Keeper_oauth_client_store.secret_expired}. *)
   issued_at : float;  (** unix seconds, as the server dated it *)
 }

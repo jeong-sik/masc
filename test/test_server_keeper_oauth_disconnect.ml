@@ -268,6 +268,120 @@ let test_an_unknown_keeper_or_provider_is_refused () =
   check bool "with a reason" true (member answer "error" <> None)
 ;;
 
+module Store = Keeper_oauth_client_store
+
+let binding_path base_path provider =
+  Masc.Keeper_identity_tools.client_binding_path ~base_path ~keeper_name:keeper
+    ~provider_id:provider.Keeper_oauth_provider.id
+
+let registered client_id =
+  { Store.Registered.client_id; client_secret = None; secret_expires_at = None }
+
+let workspace_config () =
+  match Server_auth.current_server_state () with
+  | Some state -> Masc.Mcp_server.workspace_config state
+  | None -> Alcotest.fail "the fixture server state is not installed"
+
+(* What the callback stores, stage by stage. The record of the client the
+   last login used goes away with the old refresh token, so a publication
+   cut between the token and the client leaves no client record -- never the
+   new token beside the old client -- and the client stage records the
+   client that redeemed this code. *)
+let test_a_finished_login_records_the_client_that_redeemed_it () =
+  with_disconnect_router
+  @@ fun ~base_path ~clock:_ ~router:_ ~token:_ ->
+  let provider = provider_or_fail "slack" in
+  (match Store.save_binding ~path:(binding_path base_path provider)
+           (Store.Bound_to_registered (registered "previous-login"))
+   with
+   | Ok () -> ()
+   | Error message -> Alcotest.failf "seeding the previous binding failed: %s" message);
+  let finished =
+    { Keeper_oauth_session.keeper
+    ; provider_id = provider.Keeper_oauth_provider.id
+    ; access_token = "new-access"
+    ; expiry = Keeper_oauth_session.Renewable { expires_at = Some 100.; refresh_token = "new-refresh" }
+    ; client = Store.Registered (registered "this-login")
+    }
+  in
+  let write stage =
+    match Server_keeper_oauth.write_finished_credential ~base_path ~provider ~finished stage with
+    | Ok () -> ()
+    | Error message -> Alcotest.failf "the write failed: %s" message
+  in
+  write Keeper_oauth_pending.Refresh_token;
+  check bool "the previous login's client is gone with its token" true
+    (Store.load_binding ~path:(binding_path base_path provider) = Ok None);
+  check bool "and the new refresh token is on file" true
+    (Masc.Keeper_secret_projection.read_file_entry ~base_path ~keeper_name:keeper
+       ~scope:Masc.Keeper_secret_projection.Keeper_secret
+       ~container_path:provider.Keeper_oauth_provider.refresh_token_file
+     = Ok (Some "new-refresh"));
+  write Keeper_oauth_pending.Client;
+  check bool "the client that redeemed this code is recorded" true
+    (Store.load_binding ~path:(binding_path base_path provider)
+     = Ok (Some (Store.Bound_to_registered (registered "this-login"))))
+;;
+
+(* Revocation names the client the token was issued to, not the install's
+   app, and the record goes with the token. *)
+let test_disconnect_revokes_with_the_logins_client_and_forgets_it () =
+  with_disconnect_router
+  @@ fun ~base_path ~clock ~router:_ ~token:_ ->
+  let provider = provider_or_fail "slack" in
+  seed_attachment base_path provider;
+  let identity_dir = Masc.Keeper_identity_tools.identity_dir ~base_path in
+  (match
+     Store.save_app ~identity_dir ~provider
+       { Store.App.client_id = "someone-elses-app"; client_secret = None; scopes = [] }
+   with
+   | Ok () -> ()
+   | Error message -> Alcotest.failf "seeding the app failed: %s" message);
+  (match Store.save_binding ~path:(binding_path base_path provider)
+           (Store.Bound_to_registered (registered "per-login-client"))
+   with
+   | Ok () -> ()
+   | Error message -> Alcotest.failf "seeding the binding failed: %s" message);
+  let revoked = ref [] in
+  let transports =
+    { Masc.Keeper_identity_tools.mcp_post = (fun ~url:_ ~headers:_ ~body:_ ->
+          Alcotest.fail "disconnect reached the MCP server")
+    ; token_post = (fun ~url ~headers:_ ~body ->
+          revoked := (url, body) :: !revoked;
+          Ok (200, "{}"))
+    ; discover = (fun ~mcp_url:_ ->
+          Ok
+            { Keeper_oauth_discovery.resource = "https://mcp.example.com/mcp"
+            ; issuer = "https://auth.example.com"
+            ; authorize_url = "https://auth.example.com/authorize"
+            ; token_url = "https://auth.example.com/token"
+            ; registration_url = None
+            ; revocation_endpoint = Some "https://auth.example.com/revoke"
+            ; scopes_supported = []
+            ; supports_pkce_s256 = true
+            })
+    }
+  in
+  (match
+     Server_keeper_oauth.disconnect ~transports ~clock ~config:(workspace_config ())
+       ~keeper ~provider_id:provider.Keeper_oauth_provider.id ~now:0. ()
+   with
+   | Ok _ -> ()
+   | Error message -> Alcotest.failf "disconnect failed: %s" message);
+  let form body =
+    List.map (fun (key, values) -> key, String.concat "," values) (Uri.query_of_encoded body)
+  in
+  (match !revoked with
+   | [ (url, body) ] ->
+     check string "sent to the revocation endpoint" "https://auth.example.com/revoke" url;
+     check (option string) "named the client the token was issued to"
+       (Some "per-login-client") (List.assoc_opt "client_id" (form body))
+   | revocations ->
+     Alcotest.failf "expected one revocation, saw %d" (List.length revocations));
+  check bool "the record of the login's client is gone" true
+    (Store.load_binding ~path:(binding_path base_path provider) = Ok None)
+;;
+
 let () =
   Alcotest.run "server_keeper_oauth_disconnect"
     [ ( "detaching a Keeper from a provider",
@@ -276,5 +390,9 @@ let () =
             `Quick test_the_route_removes_the_token_the_catalog_and_writes_a_receipt;
           Alcotest.test_case "an undeclared provider is refused" `Quick
             test_an_unknown_keeper_or_provider_is_refused;
+          Alcotest.test_case "a finished login records the client that redeemed it" `Quick
+            test_a_finished_login_records_the_client_that_redeemed_it;
+          Alcotest.test_case "disconnect revokes with the login's client and forgets it"
+            `Quick test_disconnect_revokes_with_the_logins_client_and_forgets_it;
         ] );
     ]

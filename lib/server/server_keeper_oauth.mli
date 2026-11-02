@@ -43,10 +43,10 @@ val set_client :
     For a provider whose authorization server offers no registration
     endpoint there is no other way in: Slack, GitHub and Figma all publish
     one client per app and expect the operator to have made it. {!start}
-    already prefers what is on file over registering, so this is the road in.
+    uses an app on file instead of registering, so this is the road in.
 
-    One per provider for this install rather than one per Keeper, matching
-    where a registered client is kept.
+    One per client group for this install rather than one per Keeper: the app
+    belongs to the install, and every Keeper's login uses it.
 
     The answer says whether a secret is on file and never what it is. It does
     say the scopes, which are not a credential and are the thing an operator
@@ -60,12 +60,27 @@ val start :
   now:float ->
   (Yojson.Safe.t, string) result
 (** Begin a login. Finds the declaration, asks the provider's server where
-    its authorization lives, registers a client if this install has none, and
-    returns the URL to open along with a non-secret [attempt_id] for authenticated
-    completion observation. Callback state is kept inside the browser URL only.
+    its authorization lives, uses the operator's app or registers a fresh client
+    for this login's callback, and returns the URL to open along with a
+    non-secret [attempt_id] for authenticated completion observation. Callback
+    state is kept inside the browser URL only.
 
-    Nothing is written to the Keeper yet -- an operator who closes the browser
-    leaves no trace beyond a registered client, and that is reused. *)
+    Nothing is written here yet -- an operator who closes the browser leaves no
+    trace on this side. A client registered for that login stays registered at
+    the provider: this install keeps no registration management credentials
+    (RFC 7592), so it cannot delete one. *)
+
+val write_finished_credential :
+  base_path:string ->
+  provider:Keeper_oauth_provider.t ->
+  finished:Keeper_oauth_session.finished ->
+  Keeper_oauth_pending.credential_write ->
+  (unit, string) result
+(** One stage of storing a finished login, as the callback runs it inside
+    {!Keeper_oauth_pending.publish_credentials}. The refresh-token stage also
+    removes the record of the client an earlier login used, so an interrupted
+    publication never leaves a new token beside an old client. The client
+    stage records the client that redeemed this login's code. *)
 
 type attached = {
   keeper : string;

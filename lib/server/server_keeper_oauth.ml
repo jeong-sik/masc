@@ -93,10 +93,9 @@ let declarations_json ~base_path =
        (Declarations.all ()))
 ;;
 
-(* An app an operator made themselves, for a provider that registers none.
-   Kept where a registered one is kept, because it is the same thing arriving
-   by a different road: one per provider for this install, not one per
-   Keeper. A secret is optional -- some providers issue an app without one --
+(* An app an operator made themselves, for a provider that registers none or
+   whose granted scopes the operator wants to decide. One per client group for
+   this install, not one per Keeper. A secret is optional -- some providers issue an app without one --
    and clearing it is saying "this app has none" rather than "leave what is
    there", so an absent field and an empty one mean the same. *)
 let set_client ~base_path ~provider_id ~client_id ~client_secret ~scopes =
@@ -293,13 +292,25 @@ type attached = {
   tool_discovery : (int, string) result;
 }
 
-let publish_finished ~clock ~(config : Workspace.config) ~state ~finished ~now =
-  let base_path = config.Workspace.base_path in
-  (* Which provider is the exchange's own answer, not the URL's: the
-     declaration that named where these tokens go is the one that started
-     this login. *)
-  let* provider = provider_of_id finished.Session.provider_id in
+(* One credential write of a finished login, by stage. The order is
+   {!Keeper_oauth_pending.publish_credentials}'s: refresh token, client, access
+   token, expiry.
+
+   The refresh token first. Every other write can be repeated by logging in
+   again; losing this one means the Keeper works until the access token
+   expires and then stops with nothing on disk to say why. The record of the
+   client an earlier login used is removed in the same step, before the new
+   token lands: a publication interrupted between the token and the client
+   then leaves no client record, which renewal reports as "attach again",
+   rather than the new token beside the old login's client, which a provider
+   refuses with its own wording. *)
+let write_finished_credential ~base_path ~(provider : Provider.t)
+    ~(finished : Session.finished) stage =
   let keeper_name = finished.Session.keeper in
+  let binding_path =
+    Keeper_identity_tools.client_binding_path ~base_path ~keeper_name
+      ~provider_id:provider.Provider.id
+  in
   let set_env ~name ~value =
     Keeper_secret_projection.set_env_entry ~base_path ~keeper_name
       ~scope:Keeper_secret_projection.Keeper_secret ~name ~value
@@ -310,42 +321,50 @@ let publish_finished ~clock ~(config : Workspace.config) ~state ~finished ~now =
     | Session.Renewable { expires_at; refresh_token } -> Some refresh_token, expires_at
     | Session.Expiring_without_renewal expires_at -> None, Some expires_at
   in
-  (* The refresh token first. Every other write can be repeated by logging in
-     again; losing this one means the Keeper works until the access token
-     expires and then stops with nothing on disk to say why.
+  match stage with
+  | Keeper_oauth_pending.Refresh_token ->
+    let* () = Store.delete_binding ~path:binding_path in
+    (match refresh_token with
+     | None ->
+       Keeper_secret_projection.delete_file_entry ~base_path ~keeper_name
+         ~scope:Keeper_secret_projection.Keeper_secret
+         ~container_path:provider.Provider.refresh_token_file
+     | Some value ->
+       Keeper_secret_projection.set_file_entry ~base_path ~keeper_name
+         ~scope:Keeper_secret_projection.Keeper_secret
+         ~container_path:provider.Provider.refresh_token_file ~value)
+  | Keeper_oauth_pending.Client ->
+    Store.save_binding ~path:binding_path
+      (Store.binding_of_login_client finished.Session.client)
+  | Keeper_oauth_pending.Access_token ->
+    set_env ~name:provider.Provider.access_token_env ~value:finished.Session.access_token
+  | Keeper_oauth_pending.Expiry ->
+    (* Clear a previous login's expiry even when this token never expires. *)
+    set_env ~name:provider.Provider.expires_at_env
+      ~value:(match expires_at with
+        | None -> ""
+        | Some expires_at -> Printf.sprintf "%.0f" expires_at)
+;;
 
-     All credential writes run inside [publish_credentials]: a newer start for this
+let publish_finished ~clock ~(config : Workspace.config) ~state ~finished ~now =
+  let base_path = config.Workspace.base_path in
+  (* Which provider is the exchange's own answer, not the URL's: the
+     declaration that named where these tokens go is the one that started
+     this login. *)
+  let* provider = provider_of_id finished.Session.provider_id in
+  let keeper_name = finished.Session.keeper in
+  let expires_at =
+    match finished.Session.expiry with
+    | Session.Never | Session.Renewable { expires_at = None; _ } -> None
+    | Session.Renewable { expires_at = Some at; _ } | Session.Expiring_without_renewal at -> Some at
+  in
+  (* All credential writes run inside [publish_credentials]: a newer start for this
      Keeper and provider supersedes the admitted callback only between two
      publications, never in the middle of one, and a publication that was
      superseded before its first write writes nothing. Superseding the table
      entry alone would only make the final [finish] a no-op after the older
      exchange had already overwritten the newer attempt's tokens. *)
-  let write = function
-    | Keeper_oauth_pending.Refresh_token ->
-        (match refresh_token with
-         | None ->
-             Keeper_secret_projection.delete_file_entry ~base_path ~keeper_name
-               ~scope:Keeper_secret_projection.Keeper_secret
-               ~container_path:provider.Provider.refresh_token_file
-         | Some value ->
-             Keeper_secret_projection.set_file_entry ~base_path ~keeper_name
-               ~scope:Keeper_secret_projection.Keeper_secret
-               ~container_path:provider.Provider.refresh_token_file ~value)
-    | Keeper_oauth_pending.Client ->
-        Store.save_binding
-          ~path:(Keeper_identity_tools.client_binding_path ~base_path ~keeper_name
-                   ~provider_id:provider.Provider.id)
-          (Store.binding_of_login_client finished.Session.client)
-    | Keeper_oauth_pending.Access_token ->
-        set_env ~name:provider.Provider.access_token_env
-          ~value:finished.Session.access_token
-    | Keeper_oauth_pending.Expiry ->
-        (* Clear a previous login's expiry even when this token never expires. *)
-        set_env ~name:provider.Provider.expires_at_env
-          ~value:(match expires_at with
-            | None -> ""
-            | Some expires_at -> Printf.sprintf "%.0f" expires_at)
-  in
+  let write = write_finished_credential ~base_path ~provider ~finished in
   let* attachment =
     match
       Keeper_oauth_pending.publish_credentials (pending_for_base_path base_path)

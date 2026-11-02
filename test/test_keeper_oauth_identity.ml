@@ -1956,13 +1956,21 @@ let test_a_binding_comes_back_as_written () =
     ; Store.Bound_to_registered (registered "public-per-login")
     ]
 
-let test_an_unknown_binding_kind_is_refused () =
+let test_a_binding_that_says_something_else_is_refused () =
+  (* Each of these, read leniently, would become a different client: a
+     public one where a secret was meant, or a kind nobody wrote. *)
   let dir = temp_dir () in
-  let path = Filename.concat dir "binding.json" in
-  Out_channel.with_open_bin path (fun oc ->
-    Out_channel.output_string oc {|{"kind":"shared","client_id":"x"}|});
-  check Alcotest.bool "an unknown kind is an error, not a default" true
-    (match Store.load_binding ~path with Error _ -> true | Ok _ -> false)
+  List.iter
+    (fun contents ->
+      let path = Filename.concat dir "binding.json" in
+      Out_channel.with_open_bin path (fun oc -> Out_channel.output_string oc contents);
+      check Alcotest.bool (contents ^ " is refused") true
+        (match Store.load_binding ~path with Error _ -> true | Ok _ -> false))
+    [ {|{"kind":"shared","client_id":"x"}|}
+    ; {|{"kind":"registered","client_id":"x","client_secret":null}|}
+    ; {|{"kind":"registered","client_id":"x","clientSecret":"s"}|}
+    ; {|{"kind":"registered","client_id":"  "}|}
+    ]
 
 (* A refresh token is bound to the client it was issued to. Renewal follows
    the login's own record, whatever the install's app is now. *)
@@ -1989,9 +1997,9 @@ let test_renewal_redeems_with_the_logins_own_client () =
     (redeem (Store.Bound_to_registered (registered ~secret:"s" ~secret_expires_at:100. "old"))
        ~now:101.
      = Error (Store.Registration_lapsed { client_id = "old" }));
-  check Alcotest.bool "a confidential client with no deadline is lapsed" true
-    (redeem (Store.Bound_to_registered (registered ~secret:"s" "undated")) ~now:1.
-     = Error (Store.Registration_lapsed { client_id = "undated" }));
+  check Alcotest.bool "a secret with no stated deadline is left to the provider" true
+    (redeem (Store.Bound_to_registered (registered ~secret:"s" "undated")) ~now:1.7e9
+     = Ok ("undated", Some "s"));
   check Alcotest.bool "a public client never lapses" true
     (redeem (Store.Bound_to_registered (registered "public")) ~now:1.7e9
      = Ok ("public", None))
@@ -2200,8 +2208,8 @@ let () =
             test_an_unreadable_app_is_not_no_app;
           Alcotest.test_case "a binding comes back as written" `Quick
             test_a_binding_comes_back_as_written;
-          Alcotest.test_case "an unknown binding kind is refused" `Quick
-            test_an_unknown_binding_kind_is_refused;
+          Alcotest.test_case "a binding that says something else is refused" `Quick
+            test_a_binding_that_says_something_else_is_refused;
           Alcotest.test_case "renewal redeems with the login's own client" `Quick
             test_renewal_redeems_with_the_logins_own_client;
           Alcotest.test_case "the id has to be one path component" `Quick

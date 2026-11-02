@@ -18,6 +18,10 @@
     callback while accepting the loopback one, and three more had been
     deleted by their provider.
 
+    The cost is one registration per login at the provider. This install keeps
+    no registration management credentials (RFC 7592), so those records are
+    never deleted from this side.
+
     Whichever client a login used is written beside that Keeper's tokens, at
     a path the caller names, because a refresh token is bound to the client
     it was issued to. Renewing with any other client is refused by the
@@ -47,9 +51,9 @@ module Registered : sig
             registration with. *)
     secret_expires_at : float option;
         (** Unix seconds at which the secret lapses, as registration dated
-            it. [Some 0.] is the server saying it never does. RFC 7591
-            section 3.2.1 makes this REQUIRED when a secret is issued, so a
-            confidential client with [None] has an unknown deadline. *)
+            it. [Some 0.] is the server saying it never does. [None] beside a
+            secret is a server that stated no deadline, although RFC 7591
+            section 3.2.1 requires one. *)
   }
 end
 
@@ -94,6 +98,8 @@ type binding =
 val binding_of_login_client : login_client -> binding
 
 val load_binding : path:string -> (binding option, string) result
+(** Strict: an unknown kind, an unknown field, a [null] or a blank string is an
+    [Error], never a different binding. *)
 val save_binding : path:string -> binding -> (unit, string) result
 (** Written whole and then renamed, so a reader finds the previous binding
     or this one, never half of either. *)
@@ -102,9 +108,9 @@ val delete_binding : path:string -> (unit, string) result
 (** Removing a binding that is not there is not an error. *)
 
 val secret_expired : Registered.t -> now:float -> bool
-(** Whether a registered client's secret can still be redeemed. A public
-    client is never expired. A confidential client with no recorded deadline
-    is: its real deadline is unknown and may be behind us. *)
+(** Whether the deadline registration stated for this secret is behind us.
+    A public client, a secret dated [0.] and a secret with no stated deadline
+    are not expired: the provider's answer to a renewal decides those. *)
 
 type redeem_error =
   | Not_bound

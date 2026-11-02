@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Source receipts and merge admission against a fake `gh`.
 Offline; no network, no real PR."""
+import importlib.util
 import json
 import os
 import pathlib
@@ -1201,6 +1202,60 @@ class PrintFooterCase(GuardHarness):
                 r = self.run_guard("--print-footer", *extra)
                 self.assertEqual(r.returncode, 2, r.stderr)
                 self.assertEqual(r.stdout, "")
+
+
+class PrintFooterAdmissionCase(GuardHarness):
+    """Generation→consumption bridge (task-3093 regression).
+
+    The footer approve-guard actually generates (--print-footer) must be
+    admitted verbatim by review-refusal.py — the single admission test — and
+    must refuse when the verdict line names an old head or the bound diff has
+    moved. Pins the generator's live output to the consumer contract so the
+    two cannot drift apart silently.
+    """
+
+    def setUp(self):
+        super().setUp()
+        spec = importlib.util.spec_from_file_location(
+            "review_refusal_bridge", pathlib.Path(__file__).with_name("review-refusal.py"))
+        self.rr = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.rr)
+
+    def generated_footer(self):
+        r = self.run_guard("--print-footer")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return r.stdout.rstrip("\n")
+
+    @staticmethod
+    def review_body(first_line, footer_line):
+        return {"id": 5731000001, "state": "APPROVED",
+                "author_association": "COLLABORATOR",
+                "body": f"{first_line}\nindependent source review\n\n{footer_line}"}
+
+    def test_generated_footer_is_admitted_for_the_live_head(self):
+        footer = self.generated_footer()
+        reasons = self.rr.diagnose(
+            self.review_body(f"verdict: PASS head: {HEAD} by: bridge-keeper", footer),
+            head=HEAD, policy="source", base_sha=BASE, current_diff=DIFF)
+        self.assertEqual(reasons, [])
+
+    def test_old_head_in_verdict_is_refused_with_generated_footer(self):
+        footer = self.generated_footer()
+        reasons = self.rr.diagnose(
+            self.review_body(f"verdict: PASS head: {'c' * 40} by: bridge-keeper", footer),
+            head=HEAD, policy="source", base_sha=BASE, current_diff=DIFF)
+        self.assertTrue(
+            any("first line is not the exact-head verdict" in line for line in reasons),
+            reasons)
+
+    def test_generated_footer_refuses_after_the_diff_moves(self):
+        footer = self.generated_footer()
+        reasons = self.rr.diagnose(
+            self.review_body(f"verdict: PASS head: {HEAD} by: bridge-keeper", footer),
+            head=HEAD, policy="source", base_sha=BASE, current_diff="e" * 64)
+        self.assertTrue(
+            any("is not the current complete diff" in line for line in reasons),
+            reasons)
 
 
 if __name__ == "__main__":

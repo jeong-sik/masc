@@ -5,8 +5,7 @@ approved PR heads belong in a combined candidate. A PR push, Ready transition
 or approval does not start CI.
 
 The independent source reviewer can submit a GitHub APPROVE for the reviewed
-head directly, without a prescribed review body or footer. The preparation
-command reads current GitHub review records, combines only the leader's explicit
+head directly. The preparation command reads current GitHub review records, combines only the leader's explicit
 selection, then rechecks approvals and main. This initial path selects open,
 Ready PRs targeting main. This preparation tool does not compose non-main bases;
 that local selection limit is not a GitHub Native Stack restriction. Follow the

@@ -19,8 +19,7 @@ gh api --method POST repos/O/R/pulls/N/reviews \
   -f event=APPROVE -f commit_id=HEAD_SHA
 ```
 
-No prescribed review body, footer or helper is required. A reviewer must not
-approve their own change, and GitHub does not permit the PR author account to
+A reviewer must not approve their own change, and GitHub does not permit the PR author account to
 approve its own PR. A commit author or committer account can be shared by
 independent sessions; matching that account does not itself disqualify a review.
 Read back the submitted review ID, state and commit ID. If publication or readback

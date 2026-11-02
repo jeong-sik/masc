@@ -45,7 +45,7 @@ gh api --method POST "repos/$repo/pulls/$pr/reviews" \
   -f event=APPROVE -f commit_id="$head"
 ```
 
-본문 형식이나 footer는 필수가 아니다. 변경 범위가 달라지면 다시 리뷰한다. 소스 검토가 끝나면
+변경 범위가 달라지면 다시 리뷰한다. 소스 검토가 끝나면
 CI를 기다리지 않고 승인한다. 게시 뒤 리뷰 ID·상태·commit_id를
 재조회하고 결과가 불명확하면 기존 효과를 확인한 뒤에만 후속 처리한다.
 

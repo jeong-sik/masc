@@ -11554,9 +11554,11 @@ let draw_cell_image state ~terminal_size:(rows, columns) (view : image_cell_fram
       let body = List.mapi (fun index line ->
         Printf.sprintf "\x1b[%d;1H%s" (index + 2) line) view.ic_lines
         |> String.concat "" in
+      let footer = if view.ic_unconfirmed then "! source unconfirmed · any key: back"
+        else "  colour-cell preview · any key: back" in
       "\x1b[1;1H" ^ Message_layout.fit_width view.ic_title (columns - 1) ^ body
       ^ Printf.sprintf "\x1b[%d;1H%s" rows
-          (Message_layout.fit_width "  colour-cell preview · any key: back" (columns - 1))
+          (Message_layout.fit_width footer (columns - 1))
     else cell_image_notice ~columns ~short:"key:close"
       ~long:"Window too small · resize larger or press any key to close"
   in
@@ -11604,7 +11606,7 @@ let draw_prepared_image ?scene ~origin state ~refuse ~title = function
             draw_cell_image state ~terminal_size:(rows, columns)
               {ic_title=title;ic_lines=lines;ic_columns=image_columns;
                ic_terminal_size=(rows, columns);ic_workspace=state.workspace_authority;
-               ic_origin=origin}
+               ic_origin=origin;ic_unconfirmed=image_cell_source_unconfirmed state origin}
 
 let download_remote_image ?(force_fetch = false) url =
   Masc_tui_image_cache.download ~force_fetch ~run:Unix.system
@@ -11713,7 +11715,7 @@ let launch_image_render state ~mailbox ~notice ~title ~caption ~page_url image_u
   state.image_request_generation <- state.image_request_generation + 1;
   let view = state.view in
   let request = {sir_generation=state.image_request_generation; sir_view=view;
-    sir_keeper=(if view = Resources then None else state.msg_target_keeper_name);
+    sir_keeper=image_keeper_for_view state ~view;
     sir_name=title; sir_owner=Remote_url_image_read state.workspace_authority;
     sir_resource=None; sir_skill_reference=None;
     sir_purpose=Open_image} in
@@ -11938,7 +11940,7 @@ let open_preview_image ?skill_reference ?board_subject state ~mailbox ~notice ~n
       | Board_image_read _ -> Some board_preview_worker
       | Local_file_image_read _ | Remote_url_image_read _ | Draft_image_read _ | Peer_image_read _ -> None in
     let port = state.port in
-    let keeper_name = if state.view = Resources || state.view = Board then None else state.msg_target_keeper_name in
+    let keeper_name = image_keeper_for_view state ~view:state.view in
     let generation = state.image_request_generation in
     let view = state.view in
     let request = {sir_generation=generation; sir_view=view;
@@ -22876,7 +22878,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
         | Some _ ->
           not state.msx_open && request.sir_generation = state.image_request_generation
           && request.sir_view = state.view
-          && (request.sir_view = Resources || request.sir_keeper = state.msg_target_keeper_name)
+          && image_keeper_is_current state ~view:request.sir_view ~keeper_name:request.sir_keeper
         | None -> false in
       if current then begin
       let notice = image_notice state ~view:request.sir_view ~keeper_name:request.sir_keeper in
@@ -27798,10 +27800,12 @@ Use relative paths for resources already held in the package. -->
            | Some origin ->
              let view = if origin == view.ic_origin then view else {view with ic_origin=origin} in
              state.image_cell_view <- Some (Image_cells view);
+             let unconfirmed = image_cell_source_unconfirmed state origin in
              (match cell_image_terminal_size () with
               | Some terminal_size ->
-                  if !cell_image_redraw_pending || resized || terminal_size <> view.ic_terminal_size then
-                    draw_cell_image state ~terminal_size view;
+                  if !cell_image_redraw_pending || resized || terminal_size <> view.ic_terminal_size
+                     || unconfirmed <> view.ic_unconfirmed then
+                    draw_cell_image state ~terminal_size {view with ic_unconfirmed=unconfirmed};
                   cell_image_redraw_pending := false
               | None -> ()))
        | Some (Image_cells_withdrawn last_size) when state.image_open && not state.msx_open ->

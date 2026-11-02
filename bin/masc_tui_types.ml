@@ -8890,6 +8890,7 @@ type image_cell_frame = {
   ic_terminal_size : int * int;
   ic_workspace : workspace_authority;
   ic_origin : sent_image_read;
+  ic_unconfirmed : bool;
 }
 
 type image_cell_view =
@@ -17707,8 +17708,22 @@ let board_preview_subject_is_current state subject =
            && List.exists (( = ) (Ok attachment)) post.bp_attachments
        | None -> false)
 
+let tools_keeper_observation_confirmed (state : state) =
+  state.workspace_identity = Workspace_identity_match
+  && state.local_keepers = Local_workspace_read && Option.is_none state.keepers_error
+
+let image_keeper_for_view (state : state) ~view =
+  match view with
+  | Resources | Board -> None
+  | Tools -> Option.map (fun (keeper : keeper) -> keeper.k_name) (selected_keeper state)
+  | Overview | Acting | Metrics | Keepers _ | Memory | Lanes | Clients | Approvals
+  | Planning | Schedules | Verification | Harness | Fusion | Repositories | Code | Changes
+  | Connectors | Runtime | Config | System_logs -> state.msg_target_keeper_name
+
 let image_keeper_is_current (state : state) ~view ~keeper_name =
-  view = Resources || view = Board || keeper_name = state.msg_target_keeper_name
+  view = Resources || view = Board
+  || ((view <> Tools || tools_keeper_observation_confirmed state)
+      && keeper_name = image_keeper_for_view state ~view)
 
 (* Local files, drafts and explicit remote URLs survive peer reconfirmation
    but never a workspace replacement. Peer images retain their exact reading.
@@ -17744,16 +17759,26 @@ let image_reading_is_current (state : state) (pending : sent_image_read) =
    changed. A completed equal resource reread can replace the retained source
    reference, avoiding repeated comparisons of its bytes on every loop. *)
 let image_cell_origin_for_redraw (state : state) ~workspace (origin : sent_image_read) =
-  let same_skill = match origin.sir_skill_reference, state.tools_inventory with
+  let same_skill = if origin.sir_view = Tools && not (tools_keeper_observation_confirmed state) then true
+    else match origin.sir_skill_reference, state.tools_inventory with
     | None, (Some _ | None) -> true
     | Some expected, Some {Masc.Tui_decode_tools.ts_effective=
         Some (Masc.Tui_decode_tools.Effective_surface_available _);_} ->
-        Option.exists (fun profile -> Skill_reference.equal expected profile.esp_reference)
+        Option.exists (fun profile -> Skill_reference.equal expected profile.Masc.Tui_decode_tools.esp_reference)
           (selected_tools_skill_profile state)
     | Some _, (None | Some {ts_effective=(None | Some
         (Effective_surface_unavailable _ | Effective_surface_warming _));_}) -> true in
+  let keeper_changed = match origin.sir_view, selected_keeper state with
+    | Tools, Some keeper when tools_keeper_observation_confirmed state -> Some keeper.k_name <> origin.sir_keeper
+    | Tools, Some _ -> false
+    | Tools, None when tools_keeper_observation_confirmed state -> Option.is_some origin.sir_keeper
+    | Tools, None -> false
+    | (Overview | Acting | Metrics | Keepers _ | Memory | Lanes | Clients | Board | Approvals
+      | Planning | Schedules | Verification | Harness | Fusion | Repositories | Code | Changes
+      | Connectors | Runtime | Config | Resources | System_logs), (Some _ | None) ->
+        not (image_keeper_is_current state ~view:origin.sir_view ~keeper_name:origin.sir_keeper) in
   if workspace <> state.workspace_authority || origin.sir_view <> state.view
-     || not (image_keeper_is_current state ~view:origin.sir_view ~keeper_name:origin.sir_keeper)
+     || keeper_changed
      || not same_skill then None
   else match origin.sir_owner with
     | Local_file_image_read authority | Remote_url_image_read authority ->
@@ -17770,13 +17795,24 @@ let image_cell_origin_for_redraw (state : state) ~workspace (origin : sent_image
              if not (equal new_key)
                 || Option.exists (fun key -> not (equal key)) pending
                 || Option.exists (fun (key, _) -> not (equal key)) error then None
-             else if Option.is_some pending || Option.is_some error || old_parts == new_parts then Some origin
+             else if old_parts == new_parts then Some origin
              else if old_parts = new_parts then Some {origin with sir_resource=state.resource_content}
              else None
-         | (Some _ | None), None, (Some _ | None), (Some _ | None)
-         | None, Some _, (Some _ | None), (Some _ | None) -> None)
+         | Some (old_key, _), None, pending, error ->
+             let equal = Masc_tui_resource_catalog.equal_key old_key in
+             let different_selection = Option.exists (fun key -> not (equal key)) pending
+               || Option.exists (fun (key, _) -> not (equal key)) error in
+             let report_absent = match old_key, state.resource_inventory_notice with
+               | Masc_tui_resource_catalog.Report_revision _, notice ->
+                   Option.exists (fun (report, _) -> equal (Report_revision report)) notice
+                   || (state.resources_reports_complete && Option.exists (fun entries ->
+                     not (List.exists (fun entry -> Masc_tui_resource_catalog.owns_key entry old_key) entries))
+                     state.resources_list)
+               | Mcp_uri _, (Some _ | None) -> false in
+             if different_selection || report_absent then None else Some origin
+         | None, (Some _ | None), (Some _ | None), (Some _ | None) -> None)
     | Peer_image_read _ -> Some origin
-    | Board_image_read (_, subject, _) ->
+    | Board_image_read (reading, subject, job) ->
         let post_id = match subject with
           | Board_diagram (Board_post_diagram {post_id;_}
                           | Board_comment_diagram {post_id;_})
@@ -17784,9 +17820,63 @@ let image_cell_origin_for_redraw (state : state) ~workspace (origin : sent_image
         (match state.board_mode with
          | Board_read current when String.equal current post_id ->
              (match Masc_tui_board_detail.view_for state.board_detail ~post_id with
-              | Ready _ -> if board_preview_subject_is_current state subject then Some origin else None
+              | Ready (post, comments, _) when String.equal post.bp_id post_id ->
+                  let retain_body ~previous ~current make_subject =
+                    if previous == current then Some origin
+                    else if String.equal previous current then
+                      Some {origin with sir_owner=Board_image_read (reading, make_subject current, job)}
+                    else None in
+                  (match subject with
+                   | Board_diagram (Board_post_diagram {body;_}) ->
+                       retain_body ~previous:body ~current:post.bp_body
+                         (fun body -> Board_diagram (Board_post_diagram {post_id;body}))
+                   | Board_diagram (Board_comment_diagram {comment_id;body;_}) ->
+                       (match List.find_opt (fun comment -> String.equal comment.bc_id comment_id) comments with
+                        | Some comment -> retain_body ~previous:body ~current:comment.bc_content
+                            (fun body -> Board_diagram (Board_comment_diagram {post_id;comment_id;body}))
+                        | None -> Some origin)
+                   | Board_attachment_image _ -> Some origin)
+              | Ready _ -> Some origin
               | Absent | Loading | Failed _ -> Some origin)
          | Board_read _ | Board_list | Board_compose -> None)
+
+(* Retaining an earlier image is useful during a failed observation, but it
+   must not look like the source was just confirmed. *)
+let image_cell_source_unconfirmed (state : state) (origin : sent_image_read) =
+  let workspace_unconfirmed = match state.workspace_identity with
+    | Workspace_identity_match -> false
+    | Workspace_identity_unread | Workspace_identity_match_unconfirmed _
+    | Workspace_identity_mismatch _ -> true in
+  let skill_unconfirmed = match origin.sir_skill_reference, state.tools_inventory with
+    | None, (Some _ | None) -> false
+    | Some _, Some {Masc.Tui_decode_tools.ts_effective=
+        Some (Masc.Tui_decode_tools.Effective_surface_available _);_} ->
+        Option.is_some state.tools_error
+    | Some _, (None | Some {ts_effective=(None | Some
+        (Effective_surface_unavailable _ | Effective_surface_warming _));_}) -> true in
+  skill_unconfirmed || match origin.sir_owner with
+  | Local_file_image_read _ | Remote_url_image_read _ | Draft_image_read _ -> false
+  | Peer_image_read _ ->
+      workspace_unconfirmed ||
+      (if origin.sir_view = Resources then
+         Option.is_none state.resource_content || Option.is_some state.resource_content_error
+       else if origin.sir_view = Tools then not (tools_keeper_observation_confirmed state)
+         || Option.is_none (selected_keeper state)
+       else Option.is_none origin.sir_skill_reference)
+  | Board_image_read (_, subject, _) ->
+      workspace_unconfirmed ||
+      (match state.board_mode with
+       | Board_read post_id ->
+           (match Masc_tui_board_detail.view_for state.board_detail ~post_id with
+            | Ready (post, comments, _) ->
+                (match subject with
+                 | Board_diagram (Board_comment_diagram {comment_id;_}) ->
+                     not (List.exists (fun comment -> String.equal comment.bc_id comment_id) comments)
+                 | Board_attachment_image {attachment;_} ->
+                     not (List.exists (( = ) (Ok attachment)) post.bp_attachments)
+                 | Board_diagram (Board_post_diagram _) -> false)
+            | Absent | Loading | Failed _ -> true)
+       | Board_list | Board_compose -> true)
 
 (* A completion belongs to the exact read that launched it, even if a later
    read happens to have the same name, surface and generation. *)

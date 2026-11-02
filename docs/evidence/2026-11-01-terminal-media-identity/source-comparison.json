@@ -1,0 +1,15 @@
+{
+  "executed_source": "c9776cc2968353a1f66af2c127cf6b28f64ba49a",
+  "reviewed_rebased_reference": "28e080c3cbeeeba4c95d75394c1e2418d8df67c3",
+  "identical_named_inputs": 19,
+  "identical_trees": [
+    "config",
+    "packages/agent_core"
+  ],
+  "excluded_trees": [
+    "lib",
+    "test"
+  ],
+  "case_key_sha256": "03f3d690c042823b9d4f5bb23e965811518ebd2841a55ef6fbe8a36dcf7bb36a",
+  "limits": "The root lib/test trees changed through the lower batch-owner repair. That repair and later documentation heads are not executed by this Core-only result. No same-fixture media before/after or sum with historical143 is claimed."
+}

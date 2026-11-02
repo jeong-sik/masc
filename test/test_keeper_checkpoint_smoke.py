@@ -108,6 +108,26 @@ class CheckpointProofTest(unittest.TestCase):
                 smoke.require_checkpoint_inspector(self.fixture)
         self.assertEqual(invoke.call_args.args[0][1:], ['inspect-checkpoint', '--help'])
 
+    def test_inspector_capability_check_binds_the_pinned_binary(self):
+        accepted = subprocess.CompletedProcess([], 0, '', '')
+        with mock.patch.object(smoke.subprocess, 'run', return_value=accepted) as invoke:
+            smoke.require_checkpoint_inspector(self.fixture)
+        invoke.assert_called_once()
+
+        self.binary.write_bytes(b'changed before help')
+        with mock.patch.object(smoke.subprocess, 'run') as invoke:
+            with self.assertRaisesRegex(smoke.SmokeError, 'before capability check'):
+                smoke.require_checkpoint_inspector(self.fixture)
+        invoke.assert_not_called()
+
+        self.binary.write_bytes(b'pinned executable')
+        def replace_during_help(*_args, **_kwargs):
+            self.binary.write_bytes(b'changed during help')
+            return accepted
+        with mock.patch.object(smoke.subprocess, 'run', side_effect=replace_during_help):
+            with self.assertRaisesRegex(smoke.SmokeError, 'during capability check'):
+                smoke.require_checkpoint_inspector(self.fixture)
+
     def test_ssh_restart_uses_the_new_call_and_final(self):
         self.fixture.call_id = 'ssh-restart-call'
         self.fixture.final = 'restart-final'

@@ -257,6 +257,7 @@ const SIMPLE_ROUTES: Record<string, SimpleRoute> = {
   post_voted:           { target: 'board' },
   comment_voted:        { target: 'board' },
   reaction_changed:     { target: 'board' },
+  post_changed:         { target: 'board' },
   // Observatory activity telemetry
   activity:             { target: 'activity', debounceMs: SSE_ACTIVITY_DEBOUNCE_MS },
   // Fusion run registry — emitted by lib/fusion/fusion_sink.ml broadcast_run_status.

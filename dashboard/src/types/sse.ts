@@ -17,6 +17,7 @@ export type SSEEventType =
   | 'post_voted'
   | 'comment_voted'
   | 'reaction_changed'
+  | 'post_changed'
   | 'heartbeat'
   | 'keeper_heartbeat'
   | 'keeper_phase_changed'

@@ -142,6 +142,13 @@ let board_sse_event_params event =
       ; "emoji", `String emoji
       ; "reacted", `Bool reacted
       ]
+  | Board_dispatch.Post_changed { post_id; change } ->
+    `Assoc
+      [ "type", `String "post_changed"
+      ; "event_type", `String "post.changed"
+      ; "post_id", `String post_id
+      ; "change", `String (Board_dispatch.post_change_to_string change)
+      ]
 ;;
 
 let broadcast_mention_wakeup_action = function
@@ -1689,8 +1696,9 @@ let start_keeper_loops_owned
           ; "method", `String "notifications/board"
           ; "params", params
           ]);
-    (* Emit activity event so Discord/external connectors can detect board posts *)
-    let activity_kind, activity_actor, activity_subject, activity_payload =
+    (* Emit activity event so Discord/external connectors can detect board
+       posts. A change to an existing post is not activity. *)
+    let activity =
       match event with
       | Board_dispatch.Post_created { post_id; author; title; content; post_kind; hearth }
         ->
@@ -1708,12 +1716,14 @@ let start_keeper_loops_owned
           | Some h -> ("hearth", `String h) :: base
           | None -> base
         in
-        ( Event_kind.Board.to_string Event_kind.Board.Posted
+        Some
+          ( Event_kind.Board.to_string Event_kind.Board.Posted
         , Server_utils.board_actor_entity author
         , Some (Activity_graph.entity ~kind:"post" post_id)
         , `Assoc payload_fields )
       | Board_dispatch.Comment_added { post_id; comment_id; author } ->
-        ( Event_kind.Board.to_string Event_kind.Board.Commented
+        Some
+          ( Event_kind.Board.to_string Event_kind.Board.Commented
         , Server_utils.board_actor_entity author
         , Some (Activity_graph.entity ~kind:"post" post_id)
         , `Assoc
@@ -1724,7 +1734,8 @@ let start_keeper_loops_owned
             ] )
       | Board_dispatch.Post_voted { post_id; voter; direction } ->
         let dir = Board_votes.vote_direction_to_string direction in
-        ( Event_kind.Board.to_string Event_kind.Board.Voted
+        Some
+          ( Event_kind.Board.to_string Event_kind.Board.Voted
         , Server_utils.board_actor_entity voter
         , Some (Activity_graph.entity ~kind:"post" post_id)
         , `Assoc
@@ -1735,7 +1746,8 @@ let start_keeper_loops_owned
             ] )
       | Board_dispatch.Comment_voted { comment_id; voter; direction } ->
         let dir = Board_votes.vote_direction_to_string direction in
-        ( Event_kind.Board.to_string Event_kind.Board.Voted
+        Some
+          ( Event_kind.Board.to_string Event_kind.Board.Voted
         , Server_utils.board_actor_entity voter
         , Some (Activity_graph.entity ~kind:"comment" comment_id)
         , `Assoc
@@ -1746,7 +1758,8 @@ let start_keeper_loops_owned
             ] )
       | Board_dispatch.Reaction_changed
           { target_type; target_id; user_id; emoji; reacted } ->
-        ( Event_kind.Board.to_string Event_kind.Board.Voted
+        Some
+          ( Event_kind.Board.to_string Event_kind.Board.Voted
         , Server_utils.board_actor_entity user_id
         , Some
             (Activity_graph.entity
@@ -1760,6 +1773,7 @@ let start_keeper_loops_owned
             ; "emoji", `String emoji
             ; "reacted", `Bool reacted
             ] )
+      | Board_dispatch.Post_changed _ -> None
     in
     (* P2 silent-failure fix: Activity_graph.emit failures (Discord
        webhook, audit trail writes, etc.) were previously ignored
@@ -1767,7 +1781,10 @@ let start_keeper_loops_owned
        had no signal that the external systems failed to receive the
        event.  Catch + warn surfaces the failure in operator logs
        without aborting the SSE broadcast that already succeeded. *)
-    try
+    match activity with
+    | None -> ()
+    | Some (activity_kind, activity_actor, activity_subject, activity_payload) ->
+    (try
       ignore
         (Activity_graph.emit
            (Mcp_server.workspace_config state)
@@ -1783,11 +1800,7 @@ let start_keeper_loops_owned
       Log.Misc.warn
         "board: Activity_graph.emit kind=%s failed: %s"
         activity_kind
-        (Printexc.to_string exn));
-  (* An edit, pin, close, reopen, delete or thread change raises no event above,
-     and the cached pages still answer from before it. *)
-  Board_dispatch.set_board_write_hook
-    Server_dashboard_http_core_cache.invalidate_board_projections;
+        (Printexc.to_string exn)));
   (* Wire broadcast -> keeper delivery. An explicit mention commits a queue
      entry and wakes the named keeper. Every registered keeper then gets the
      same transcript row for its conversation window, with no mention stamp,

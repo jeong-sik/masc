@@ -117,6 +117,24 @@ type addressed_board_signal = {
   audience : Board.audience;
 }
 
+type post_change =
+  | Post_edited
+  | Post_thread_set
+  | Post_pinned
+  | Post_unpinned
+  | Post_closed
+  | Post_reopened
+  | Post_deleted
+
+let post_change_to_string = function
+  | Post_edited -> "edited"
+  | Post_thread_set -> "thread_set"
+  | Post_pinned -> "pinned"
+  | Post_unpinned -> "unpinned"
+  | Post_closed -> "closed"
+  | Post_reopened -> "reopened"
+  | Post_deleted -> "deleted"
+
 type board_sse_event =
   | Post_created of {
       post_id : string;
@@ -135,6 +153,10 @@ type board_sse_event =
       user_id : string;
       emoji : string;
       reacted : bool;
+    }
+  | Post_changed of {
+      post_id : string;
+      change : post_change;
     }
 
 let backend_state : backend_state Atomic.t = Atomic.make Uninitialized
@@ -243,26 +265,20 @@ let emit_board_sse_event event =
   | Some hook -> Safe_ops.protect ~default:() (fun () -> hook event)
   | None -> ()
 
-(* A write that raises no [board_sse_event] -- an edit, a thread change, a pin,
-   a close, a reopen, a delete -- still changes what a projection of the store
-   answers. The composition root hangs the dropping of those projections here. *)
-let board_write_hook : (unit -> unit) option Atomic.t = Atomic.make None
-
-let set_board_write_hook hook =
-  Atomic.set board_write_hook (Some hook)
-
-let emit_board_write () =
-  match Atomic.get board_write_hook with
-  | Some hook -> Safe_ops.protect ~default:() hook
-  | None -> ()
-
-(* The hook follows applied state, including a deletion whose snapshot writes
-   remain pending. Refused writes leave memory unchanged and emit no hook. *)
-let after_write = function
-  | Ok _ as written ->
-    emit_board_write ();
-    written
-  | Error _ as refused -> refused
+(* The store keys a post by its parsed id, so the event names the post by the
+   same id. The event follows applied state, including a deletion whose
+   snapshot writes remain pending. A refused write leaves memory unchanged and
+   raises none. *)
+let write_post ~post_id change write =
+  match Board.Post_id.of_string post_id with
+  | Error e -> Error e
+  | Ok pid ->
+    let post_id = Board.Post_id.to_string pid in
+    (match write post_id with
+     | Ok _ as written ->
+       emit_board_sse_event (Post_changed { post_id; change });
+       written
+     | Error _ as refused -> refused)
 
 (* The non-positive MASC_BOARD_COMMENT_COUNT_CAP opt-out stays allowed, but
    it must not stay silent (wool-nova FAIL issuecomment-5860167607, P2):
@@ -346,8 +362,7 @@ let reset_for_test () =
      it now lives inside the variant. *)
   Atomic.set backend_state Uninitialized;
   Atomic.set board_signal_hook None;
-  Atomic.set board_sse_hook None;
-  Atomic.set board_write_hook None
+  Atomic.set board_sse_hook None
 
 let backend () =
   match Atomic.get backend_state with
@@ -541,6 +556,10 @@ let create_post_once_by_fusion_run_id ~fusion_run_id ~author ~content ~post_kind
          (Board.Post_publication_failure.unknown
             (Board.Post_publication_failure.Raised exn)))
 
+let emit_post_edited (post : Board.post) =
+  emit_board_sse_event
+    (Post_changed { post_id = Board.Post_id.to_string post.id; change = Post_edited })
+
 let update_post_with_unresolved ~post_id ~editor ~content ?title ?body ?new_author () =
   match backend () with
   | Jsonl store ->
@@ -548,11 +567,11 @@ let update_post_with_unresolved ~post_id ~editor ~content ?title ?body ?new_auth
         ~post_id ~editor ~content ?title ?body ?new_author () with
       | Error _ as error -> error
       | Ok { edited = post; content_changed = false; recorded_audience = _; unresolved } ->
-        emit_board_write ();
+        emit_post_edited post;
         Ok (post, unresolved)
       | Ok { edited = post; content_changed = true; recorded_audience = audience
            ; unresolved } ->
-        emit_board_write ();
+        emit_post_edited post;
         emit_board_signal
           { signal =
               { kind = Board_post_updated { content_updated_at = post.content_updated_at }
@@ -955,24 +974,31 @@ let list_hearths ?(exclude_system = false) ?(exclude_automation = false) () =
 
 let set_thread_id ~post_id ~thread_id =
   match backend () with
-  | Jsonl store -> Board.set_thread_id store ~post_id ~thread_id |> after_write
+  | Jsonl store ->
+    write_post ~post_id Post_thread_set (fun post_id ->
+      Board.set_thread_id store ~post_id ~thread_id)
 
 let set_pinned ~post_id ~pinned =
   match backend () with
-  | Jsonl store -> Board.set_pinned store ~post_id ~pinned |> after_write
+  | Jsonl store ->
+    write_post ~post_id (if pinned then Post_pinned else Post_unpinned) (fun post_id ->
+      Board.set_pinned store ~post_id ~pinned)
 
 let set_closed ~post_id ~closed_by ~successor ~summary () =
   match backend () with
   | Jsonl store ->
-    Board.set_closed store ~post_id ~closed_by ~successor ~summary () |> after_write
+    write_post ~post_id Post_closed (fun post_id ->
+      Board.set_closed store ~post_id ~closed_by ~successor ~summary ())
 
 let reopen ~post_id =
   match backend () with
-  | Jsonl store -> Board.reopen store ~post_id |> after_write
+  | Jsonl store ->
+    write_post ~post_id Post_reopened (fun post_id -> Board.reopen store ~post_id)
 
 let delete_post ~post_id =
   match backend () with
-  | Jsonl store -> Board.delete_post store ~post_id |> after_write
+  | Jsonl store ->
+    write_post ~post_id Post_deleted (fun post_id -> Board.delete_post store ~post_id)
 
 let search ~query ~limit =
   match backend () with

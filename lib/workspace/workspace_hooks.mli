@@ -88,6 +88,10 @@ val observe_task_transition_fn : (Workspace_utils_backend_setup.config ->
            Atomic.t
 val on_task_mutation_fn : (unit -> unit) Atomic.t
 
+(** Called after Goal rows or audit events commit. Observers must not yield
+    or re-enter the Goal store. *)
+val on_goal_projection_mutation_fn : (base_path:string -> unit) Atomic.t
+
 (** A workspace message's authoritative row was committed or its delivery
     state changed. Runtime wiring invalidates projections and emits the
     corresponding refresh signal. *)

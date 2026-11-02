@@ -357,7 +357,19 @@ let refuse_symlink_replacement path =
   | exception Unix.Unix_error (error, _, _) ->
       Error (Printf.sprintf "cannot inspect %s: %s" path (Unix.error_message error))
 
-let write_state_result config state =
+type projection_effect = Projection_changed | Projection_unchanged
+
+let notify_projection_change config =
+  try
+    (Atomic.get Workspace_hooks.on_goal_projection_mutation_fn)
+      ~base_path:config.Workspace_utils.base_path
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+      Log.Misc.error "goal_store: projection observer failed for %s: %s"
+        config.base_path (Printexc.to_string exn)
+
+let write_state_with_effect ~projection_effect config state =
   ensure_dirs config;
   let path = goals_path config in
   clear_goals_cache_for path;
@@ -366,6 +378,9 @@ let write_state_result config state =
      to that same authority through the shared encoder and atomic writer. *)
   let* () = Workspace_utils.write_json_local path json in
   Goal_projection_generation.advance ();
+  (match projection_effect with
+   | Projection_changed -> notify_projection_change config
+   | Projection_unchanged -> ());
   (match
      let mirror = goals_recovery_path config in
      let* () = refuse_symlink_replacement mirror in
@@ -378,6 +393,9 @@ let write_state_result config state =
        (goals_recovery_path config)
        msg);
   Ok ()
+
+let write_state_result config state =
+  write_state_with_effect ~projection_effect:Projection_changed config state
 
 let write_state config state =
   match write_state_result config state with
@@ -712,13 +730,16 @@ let append_audit_event config json =
           { error = Fs_compat.End_offset_mismatch {actual;_}; _ } -> append actual
       | (Fs_compat.Private_file_failed (Fs_compat.Incomplete_jsonl_tail | (Fs_compat.Invalid_jsonl_suffix | Fs_compat.Existing_jsonl_refused _ | (Fs_compat.Incomplete_jsonl_tail_truncate_failed _ | (Fs_compat.Negative_expected_end_offset _ | Fs_compat.Durable_jsonl_append_failed _)))) | Fs_compat.Private_file_failed_with_cleanup_failure { error = (Fs_compat.Incomplete_jsonl_tail | (Fs_compat.Invalid_jsonl_suffix | Fs_compat.Existing_jsonl_refused _ | (Fs_compat.Incomplete_jsonl_tail_truncate_failed _ | (Fs_compat.Negative_expected_end_offset _ | Fs_compat.Durable_jsonl_append_failed _))));_} | Fs_compat.Private_file_succeeded _ | Fs_compat.Private_file_succeeded_with_cleanup_failure _) as outcome -> outcome in
     match append expected with
-    | Fs_compat.Private_file_succeeded _ -> Ok ()
+    | Fs_compat.Private_file_succeeded _ ->
+        notify_projection_change config;
+        Ok ()
     | Private_file_succeeded_with_cleanup_failure { cleanup_failure; _ } ->
         (* The durable effect committed; the cleanup failure is descriptor
            settlement, and reporting it as an append failure would invite a
            retry that writes the event twice. *)
         Log.Misc.warn "goal event transaction cleanup failed: %s"
           (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure);
+        notify_projection_change config;
         Ok ()
     | Private_file_failed error ->
         Error (Fs_compat.private_jsonl_append_error_to_string error)
@@ -776,11 +797,11 @@ let flush_pending_events_locked config =
             match inspect () with
             | Error detail -> None, Error detail
             | Ok missing ->
-                let suffix = match missing with
-                  | [] -> None
+                let suffix, changed = match missing with
+                  | [] -> None, false
                   | events -> Some (String.concat "" (List.map (fun event ->
-                      Yojson.Safe.to_string (pending_event_to_yojson event) ^ "\n") events)) in
-                suffix, Ok ()) in
+                      Yojson.Safe.to_string (pending_event_to_yojson event) ^ "\n") events)), true in
+                suffix, Ok changed) in
           let appended = match outcome with
             | Fs_compat.Private_file_succeeded result -> result
             | Private_file_succeeded_with_cleanup_failure { value; cleanup_failure } ->
@@ -791,8 +812,9 @@ let flush_pending_events_locked config =
             | Private_file_failed_with_cleanup_failure { error; cleanup_failure } ->
                 Error (Fs_compat.durable_append_error_to_string error ^ "; "
                        ^ Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure) in
-          let* () = appended in
-          (match write_state_result config
+          let* changed = appended in
+          if changed then notify_projection_change config;
+          (match write_state_with_effect ~projection_effect:Projection_unchanged config
                    { state with pending_events = []; version = state.version + 1;
                      updated_at = Masc_domain.now_iso () } with
            | Ok () -> ()
@@ -1013,7 +1035,8 @@ let update_notification config (expected : pending_notification) change =
                 state.pending_notifications in
               let updated = {state with pending_notifications; version=state.version + 1;
                 updated_at=Masc_domain.now_iso ()} in
-              write_state_result config updated |> Result.map_error (fun detail -> Persist_failed detail)
+              write_state_with_effect ~projection_effect:Projection_unchanged config updated
+              |> Result.map_error (fun detail -> Persist_failed detail)
               |> Result.map (fun () -> next))
 
 (* The host roster arrives as strings; each is parsed here once and the

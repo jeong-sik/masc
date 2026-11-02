@@ -669,7 +669,7 @@ let render_planning_list (state : state) =
   box_bottom tail cols;
   Buffer.add_string tail
     (footer_line state ~max_cells:cols
-       ~hints:(Masc_tui_keys.footer_hints ~detail_open:false state.view));
+       ~hints:Masc_tui_keys.footer_hints_planning_goal_list);
   let tail_rows = count_frame_lines tail in
 
   let now_unix = Unix.gettimeofday () in
@@ -1086,7 +1086,7 @@ let planning_proof_rows ~width lines =
     | [] -> [{line with text=""}]
     | rows -> List.map (fun text -> {line with text="  " ^ text}) rows) lines
 
-let planning_detail_lines (state : state) ~confirmation ~cols (goal : planning_goal) =
+let planning_detail_content (state : state) ~confirmation ~cols (goal : planning_goal) =
   let width = max 1 (framed_inner_width cols - 2) in
   let field ?(tone = Planning_detail.Note) label text =
     let prefix = "  " ^ label ^ ": " in
@@ -1279,15 +1279,26 @@ let planning_detail_lines (state : state) ~confirmation ~cols (goal : planning_g
      | `Submitting | `Inspect (Masc_tui_fetched.Ready _ | Loading | Stale _ | Failed _) ->
          confirmation_rows @ measurement) in
   let wrapped_proof = planning_proof_rows ~width proof in
-  (match confirmation with
-   | `Inspect Masc_tui_fetched.Absent ->
-       metadata @ linked @ candle @ gap
-       @ section
-           (ui_text state ~ko:"3. 검증 판정 · 측정 및 이력"
-              ~en:"3. Verification & Measurement")
-       @ wrapped_proof
-   | `Submitting | `Inspect (Masc_tui_fetched.Ready _ | Loading | Stale _ | Failed _) ->
-       wrapped_proof @ gap @ metadata @ linked @ candle @ timeline)
+  let before_candle, after_candle = match confirmation with
+    | `Inspect Masc_tui_fetched.Absent ->
+        metadata @ linked,
+        gap @ section
+          (ui_text state ~ko:"3. 검증 판정 · 측정 및 이력"
+             ~en:"3. Verification & Measurement") @ wrapped_proof
+    | `Submitting | `Inspect (Masc_tui_fetched.Ready _ | Loading | Stale _ | Failed _) ->
+        wrapped_proof @ gap @ metadata @ linked, timeline
+  in
+  before_candle @ candle @ after_candle,
+  List.length before_candle + List.length gap
+
+let planning_detail_lines state ~confirmation ~cols goal =
+  fst (planning_detail_content state ~confirmation ~cols goal)
+
+let planning_detail_candle_scroll (state : state) (goal : planning_goal) =
+  let _, cols = get_terminal_size () in
+  let cols = if cols < keeper_split_threshold_cols then cols else cols - keeper_roster_pane_cols in
+  snd (planning_detail_content state ~cols goal
+    ~confirmation:(planning_confirmation_view state ~goal_id:goal.pg_id))
 
 let planning_detail_header_rows (state : state) ~cols (goal : planning_goal) =
   let phase = "  " ^ bracketed ~max_cells:planning_phase_column
@@ -2363,6 +2374,12 @@ let render_schedules (state : state) =
   | Some _, None | None, _ -> render_schedule_list state
 
 
+let planning_missing_goal_notice (state : state) ~goal_id =
+  match state.home_opened_request with
+  | Some (Home_goal_confirmation selected) -> String.equal selected goal_id
+  | Some (Home_held_call _ | Home_gate_request _ | Home_operator_request _ | Home_question _)
+  | None -> false
+
 let render_planning (state : state) =
   match state.task_detail_id, state.task_focus, state.planning_mode with
   | Some _, Overview_tasks.Task_focus _, Planning_list ->
@@ -2380,9 +2397,7 @@ let render_planning (state : state) =
           let confirmation = planning_confirmation_view state ~goal_id in
           render_planning_detail state
             ~armed:(goal_action_armed_for state goal_id) ~confirmation goal
-      | None ->
-          (match state.home_opened_request with
-           | Some (Home_goal_confirmation selected) when selected = goal_id ->
+      | None when planning_missing_goal_notice state ~goal_id ->
                let terminal_rows, cols = get_terminal_size () in
                surface_chrome ~overflow:Fits state ~terminal_rows ~cols
                  ~surface_key:"planning_detail"
@@ -2392,8 +2407,4 @@ let render_planning (state : state) =
                    c.push (match state.planning_error with
                      | Some error -> " Goal detail unavailable · " ^ Terminal_text.single_line error
                      | None -> " Goal detail not read · waiting for its source"))
-           | Some
-               ( Home_held_call _ | Home_gate_request _
-               | Home_operator_request _ | Home_question _
-               | Home_goal_confirmation _ )
-           | None -> render_planning_list state)
+      | None -> render_planning_list state

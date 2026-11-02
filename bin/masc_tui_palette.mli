@@ -22,6 +22,7 @@ type palette_action =
   | Palette_addon_results of string
       (** One installation's Results, by its declaration id. *)
   | Palette_goto of Masc_tui_types.surface
+  | Palette_goal_payouts
   | Palette_usage_scope of string option
   | Palette_config of Masc_tui_types.config_pane
   | Palette_ui_language of Masc_tui_types.ui_language

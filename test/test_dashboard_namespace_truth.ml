@@ -743,7 +743,7 @@ let test_warm_dashboard_surfaces_populates_caches () =
         (last_good <> `Assoc []);
       check bool "config_introspect cache key populated" true
         (Option.is_some (Dashboard_cache.peek "config_introspect"));
-      let planning_key = Printf.sprintf "planning:%s" dir in
+      let planning_key = Server_dashboard_http.planning_cache_key ~base_path:dir in
       check bool "planning cache key populated" true
         (Option.is_some (Dashboard_cache.peek planning_key));
       let keeper_health_key = Printf.sprintf "keeper_memory_health:%s" dir in

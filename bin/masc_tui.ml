@@ -33440,6 +33440,7 @@ Use relative paths for resources already held in the package. -->
                         | Masc_tui_palette.Palette_addon_results _
                         | Masc_tui_palette.Palette_lane_history _
                         | Masc_tui_palette.Palette_goto _
+                        | Masc_tui_palette.Palette_goal_payouts
                         | Masc_tui_palette.Palette_usage_scope _
                         | Masc_tui_palette.Palette_config _
                         | Masc_tui_palette.Palette_ui_language _
@@ -33489,6 +33490,12 @@ Use relative paths for resources already held in the package. -->
                  | Some (_, Masc_tui_palette.Palette_lane_addons) ->
                      launch_lane_addons state ~mailbox:async_messages
                        Masc_tui_lane_addons.Inspect
+                 | Some (_, Masc_tui_palette.Palette_goal_payouts) ->
+                     goto_surface state ~mailbox:async_messages Planning;
+                     state.planning_filter <- Planning_filter_all;
+                     state.planning_mode <- Planning_list;
+                     state.planning_cursor <- 0;
+                     state.planning_scroll <- 0
                  | Some (_, Masc_tui_palette.Palette_addon_results declaration_id) ->
                      open_installation_results state ~mailbox:async_messages declaration_id
                  | Some (_, Masc_tui_palette.Palette_lane_history lane) ->
@@ -36521,16 +36528,30 @@ Use relative paths for resources already held in the package. -->
                 report_action state "system"
                   (Printf.sprintf (if state.ui_language = Lang_ko then "D 를 한 번 더 누르면 %s 를 지웁니다" else "Press D again to delete %s") name)
               end)
-       | Some key when Option.is_some (selected_planning_goal_id state)
-           && String.equal key Masc_tui_keys.goal_candle_refresh_key ->
-           start_http_refresh state ~host:server_peer_host ~port:state.port ~intent:Revalidate
-             ~refresh_inflight:http_refresh_inflight ~scoped_refresh_inflight:http_scoped_refresh_inflight
-             ~scoped_refresh_followup ~mailbox:async_messages;
-           (match state.planning_mode with
-            | Planning_detail goal_id ->
-              clear_goal_candle_revalidation state ~goal_id;
-              launch_goal_candle_load state ~mailbox:async_messages goal_id
-            | Planning_list -> ())
+       | Some key when state.view = Planning && String.equal key Masc_tui_keys.goal_candle_refresh_key ->
+           let open_candle () =
+             open_planning_detail state ~mailbox:async_messages;
+             Option.iter (fun goal ->
+               state.planning_scroll <- Masc_tui_render_work.planning_detail_candle_scroll state goal)
+               (goal_detail_on_screen state)
+           in
+           (match goal_detail_on_screen state with
+            | Some goal ->
+              start_http_refresh state ~host:server_peer_host ~port:state.port ~intent:Revalidate
+                ~refresh_inflight:http_refresh_inflight ~scoped_refresh_inflight:http_scoped_refresh_inflight
+                ~scoped_refresh_followup ~mailbox:async_messages;
+              clear_goal_candle_revalidation state ~goal_id:goal.pg_id;
+              launch_goal_candle_load state ~mailbox:async_messages goal.pg_id;
+              state.planning_scroll <- Masc_tui_render_work.planning_detail_candle_scroll state goal
+            | None ->
+              (match selected_planning_goal_id state with
+               | None when not (Masc_tui_overview_tasks.is_focused state.task_focus) ->
+                   open_candle ()
+               | Some goal_id
+                 when not (Masc_tui_render_work.planning_missing_goal_notice state ~goal_id)
+                      && not (Masc_tui_overview_tasks.is_focused state.task_focus) ->
+                   open_candle ()
+               | None | Some _ -> ()))
        | Some key when state.view = Planning
            && Option.is_some (goal_detail_on_screen state)
            && Option.exists

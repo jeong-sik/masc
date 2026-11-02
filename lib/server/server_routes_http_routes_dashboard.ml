@@ -3157,13 +3157,8 @@ let add_routes ~sw ~clock router =
        )
 
   |> Server_route.get Server_route.Public_read "/api/v1/dashboard/planning" (fun state req reqd ->
-         let cache_key =
-           Printf.sprintf "planning:%s"
-             (Mcp_server.workspace_config state).base_path
-         in
-         respond_cached_read ~request:req ~reqd ~cache_key ~ttl:standard_cache_ttl_s
-           (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
-              dashboard_planning_http_json ~config:(Mcp_server.workspace_config state)))
+         Server_cached_read_http.respond ~request:req reqd
+           (cached_planning_payload ~config:(Mcp_server.workspace_config state))
        )
   (* Cold-start bootstrap: routes to the shared SSOT
      [dashboard_bootstrap_http_json] in [Server_dashboard_http] so

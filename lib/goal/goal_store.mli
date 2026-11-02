@@ -431,7 +431,9 @@ val upsert_goal_with_events :
 
 (** Idempotently publish pending audit rows and acknowledge them under the Goal
     lock. A failed append keeps all intents; an acknowledgement failure retains
-    already-published IDs for a safe retry. No external callback is invoked. *)
+    already-published IDs for a safe retry. When rows are appended, the Goal
+    projection mutation hook runs under the lock; it must not yield or reenter
+    the Goal store. *)
 val flush_pending_events : Workspace_utils.config -> (unit, string) result
 
 (** Append to the shared Goal audit ledger with the same cross-process durable

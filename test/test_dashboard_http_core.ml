@@ -2811,6 +2811,94 @@ let test_dashboard_planning_http_json_keeps_utf8_valid_after_truncation () =
   let serialized = Yojson.Safe.to_string json in
   check int "planning json remains valid utf8" 0 (invalid_utf8_byte_count serialized)
 
+let test_cached_planning_reads_a_new_goal () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  let previous = Atomic.get Workspace_hooks.on_goal_projection_mutation_fn in
+  Fun.protect
+    ~finally:(fun () -> Atomic.set Workspace_hooks.on_goal_projection_mutation_fn previous)
+    (fun () ->
+      Server_dashboard_http.install_planning_cache_invalidation ();
+      ignore (Lib.Workspace.init config ~agent_name:(Some "dashboard"));
+      let goals () =
+        let open Yojson.Safe.Util in
+        (Server_dashboard_http.cached_planning_payload ~config).json
+        |> member "goals" |> to_list
+      in
+      check int "planning was read before creation" 0 (List.length (goals ()));
+      let goal, _, _ =
+        match Goal_store.upsert_goal_with_events config ~actor:"dashboard"
+                ~title:"New Goal" ~metric:"goals" ~target_value:"1" () with
+        | Ok result -> result
+        | Error error -> fail (Goal_store.write_error_to_string error)
+      in
+      let ids = List.map (fun json ->
+          Yojson.Safe.Util.(json |> member "id" |> to_string)) (goals ()) in
+      check (list string) "the next read includes the committed Goal" [goal.id] ids;
+      (match Goal_store.flush_pending_events config with
+       | Ok () -> ()
+       | Error error -> fail error);
+      let effects _ () =
+        Goal_store.{ events = []; notifications = ["operator", "Goal changed"] }
+      in
+      (match Goal_store.transact_goal ~effects config ~goal_id:goal.id
+               (fun current -> Ok ({ current with title = "Updated Goal" }, ())) with
+       | Ok _ -> ()
+       | Error error -> fail (Goal_store.write_error_to_string error));
+      ignore (goals ());
+      let notice = match Goal_store.pending_notifications config with
+        | Ok [notice] -> notice
+        | Ok _ -> fail "expected one pending notification"
+        | Error error -> fail (Goal_store.write_error_to_string error) in
+      (match Goal_store.snapshot_notification_recipients config notice
+               ~recipients:["reviewer"] with
+       | Ok _ -> ()
+       | Error error -> fail (Goal_store.write_error_to_string error));
+      let key = Server_dashboard_http.planning_cache_key ~base_path:config.base_path in
+      check bool "notification delivery keeps the planning cache" true
+        (Option.is_some (Dashboard_cache.peek key)))
+
+let test_cached_planning_reads_new_goal_history () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  let previous = Atomic.get Workspace_hooks.on_goal_projection_mutation_fn in
+  Fun.protect
+    ~finally:(fun () -> Atomic.set Workspace_hooks.on_goal_projection_mutation_fn previous)
+    (fun () ->
+      Server_dashboard_http.install_planning_cache_invalidation ();
+      ignore (Lib.Workspace.init config ~agent_name:(Some "dashboard"));
+      let history_ids () =
+        let open Yojson.Safe.Util in
+        (Server_dashboard_http.cached_planning_payload ~config).json
+        |> member "goal_history" |> member "unlisted" |> to_list
+        |> List.map (fun row -> row |> member "goal_id" |> to_string)
+        |> List.sort String.compare
+      in
+      let goal, _, _ =
+        match Goal_store.upsert_goal_with_events config ~actor:"dashboard"
+                ~title:"Departed Goal" ~metric:"goals" ~target_value:"1" () with
+        | Ok result -> result
+        | Error error -> fail (Goal_store.write_error_to_string error)
+      in
+      (match Goal_store.delete_goal config ~goal_id:goal.id with
+       | Ok _ -> ()
+       | Error error -> fail (Goal_store.delete_goal_error_to_string error));
+      check (list string) "pending event is not yet in history" [] (history_ids ());
+      (match Goal_store.flush_pending_events config with
+       | Ok () -> ()
+       | Error error -> fail error);
+      check (list string) "flushed event appears on the next read" [goal.id] (history_ids ());
+      let direct_id = "goal-direct-audit" in
+      let event = `Assoc
+        [ "ts", `String "2026-09-10T00:00:00Z"
+        ; "goal_id", `String direct_id
+        ; "event_type", `String "goal_created"
+        ; "payload", `Assoc ["store_version", `Int 1; "title", `String "Direct audit"]
+        ] in
+      (match Goal_store.append_audit_event config event with
+       | Ok () -> ()
+       | Error error -> fail error);
+      check (list string) "direct audit append appears on the next read"
+        (List.sort String.compare [goal.id; direct_id]) (history_ids ()))
+
 (* A Task awaiting verification is finished work waiting on a verifier, and
    the Planning surface counts that queue on its own tab. Counted as
    in_progress, the same seven Tasks were two numbers under two words on one
@@ -8726,6 +8814,10 @@ let () =
             test_goal_link_source_failure_preserves_unrelated_planning;
           test_case "planning payload keeps UTF-8 valid after truncation" `Quick
             test_dashboard_planning_http_json_keeps_utf8_valid_after_truncation;
+          test_case "cached planning reads a newly committed Goal" `Quick
+            test_cached_planning_reads_a_new_goal;
+          test_case "cached planning reads new Goal history" `Quick
+            test_cached_planning_reads_new_goal_history;
           test_case "planning counts a task awaiting verification on its own"
             `Quick
             test_planning_counts_a_task_awaiting_verification_on_its_own;

@@ -395,6 +395,22 @@ let test_the_palette_goes_to_both_halves_of_task_review () =
     (goes_to "go Task Verdicts" Harness)
 ;;
 
+let test_goal_and_candle_queries_select_their_destinations () =
+  let state = create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 () in
+  List.iter (fun query ->
+    state.palette_query <- query;
+    match palette_matches state with
+    | (_, Palette_goto Planning) :: _ -> ()
+    | _ -> Alcotest.fail (Printf.sprintf "%S did not select Work" query))
+    ["go Work"; "goal"];
+  List.iter (fun query ->
+    state.palette_query <- query;
+    match palette_matches state with
+    | (_, Palette_goal_payouts) :: _ -> ()
+    | _ -> Alcotest.fail (Printf.sprintf "%S did not select Goal payouts" query))
+    ["candle"; "go Candle"]
+;;
+
 let test_msx_is_reached_by_its_name () =
   let state =
     create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
@@ -534,7 +550,7 @@ let test_an_installation_that_asked_has_one_results_row () =
       | _, Palette_addon_results id -> Some id
       | _, ( Palette_browser_lane | Palette_hide_browser_lane | Palette_connectors
            | Palette_collab | Palette_msx | Palette_dos | Palette_lane_addons | Palette_lane_history _
-           | Palette_goto _ | Palette_usage_scope _ | Palette_config _ | Palette_ui_language _
+           | Palette_goto _ | Palette_goal_payouts | Palette_usage_scope _ | Palette_config _ | Palette_ui_language _
            | Palette_gate_mode _ | Palette_chat _ | Palette_task _ | Palette_task_creation _
            | Palette_board_hearth _ | Palette_board_post _ | Palette_lsp _
            | Palette_code_file _ | Palette_code_location _ ) -> None)
@@ -617,6 +633,8 @@ let () =
             test_friendly_runtime_param_editing
         ; Alcotest.test_case "both halves of Task Review are reachable" `Quick
             test_the_palette_goes_to_both_halves_of_task_review
+        ; Alcotest.test_case "Goal and Candle queries select their destinations" `Quick
+            test_goal_and_candle_queries_select_their_destinations
         ; Alcotest.test_case "msx is reached by its name" `Quick
             test_msx_is_reached_by_its_name
         ; Alcotest.test_case "dos is reached by its name" `Quick

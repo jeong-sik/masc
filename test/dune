@@ -3915,6 +3915,11 @@
  (libraries alcotest  masc.agent_core.digest masc masc_tui_types yojson))
 
 (test
+ (name test_tui_terminal_json)
+ (modules test_tui_terminal_json)
+ (libraries alcotest masc masc.string_util yojson))
+
+(test
  (name test_tui_music_launcher)
  (modules test_tui_music_launcher)
  (libraries alcotest masc_tui_score masc_tui_command unix))

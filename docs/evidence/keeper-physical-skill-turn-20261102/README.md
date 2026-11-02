@@ -1,9 +1,11 @@
 # Physical receiving-turn Skill evidence
 
-The browser ran the new frontend at source head `550f233672c0a748cc87cf34f3f42d2106b43376`,
-against backend base `714db48454618f7a442889a98f71436e2216c95c`.
-This bundle uses controlled fixture responses, not an installed backend or a
-live Keeper result. Later documentation/changelog commits do not change that source.
+The browser rendered `KeeperTurnFlow` as a standalone component at source head
+`550f233672c0a748cc87cf34f3f42d2106b43376`, whose backend base is
+`714db48454618f7a442889a98f71436e2216c95c`. The harness supplied fixture props,
+including the turn record and empty tool entries, and intercepted the HTTP
+responses. It did not run the full turn inspector, an installed backend or a
+live Keeper. Later documentation/changelog commits do not change that source.
 
 The original fixture is `test/fixtures/skill-ledger-async-actions.json`. Its
 invocation is `trace-one#41`; results and actions arrive at
@@ -12,15 +14,21 @@ that fixture to check that three physical actions remain distinct from four
 causal links. Original activation frames and the original ledger revision stay
 visible. The physical lookup uses the complete receiving turn reference.
 
+Navigation checks establish callback invocation only: the harness callbacks
+wrote `messages` or `context` into `#navigation`. They did not open the actual
+messages/context tabs or load their provider input. This bundle does not prove
+full inspector or exact-input tab integration.
+
 - [Receiving turn](receiving-turn.png): zero current-turn invocations, three
   received handoffs, three physical actions and four causal links. The runtime
-  trace request deliberately returns 503; Skill evidence and both exact-input
-  navigation buttons still work.
+  trace request deliberately returns 503; Skill evidence renders and both
+  navigation callback checks pass.
 - [Incomplete empty scan](incomplete-empty.png): a damaged original ledger is
   reported, and zero returned facts do not become a claim of no receipt or use.
 - [Browser observation](proof.json): actual GET paths, rendered text and zero
   page errors for both states. Captured 2026-11-02 with headless Chromium and
-  viewport 1120 by 1000. Only the response bodies were mocked.
+  viewport 1120 by 1000, using the fixture props and intercepted HTTP responses
+  described above.
 
 Focused validation from `dashboard/`:
 

@@ -826,13 +826,14 @@ let for_surface = function
       ; b Navigate "s" "sort" ~help:"cycle phase / updated / due"
       ; b Navigate "[ / ]" "previous / next" ~detail:Detail_only
           ~help:"while a detail is open, step to the row before or after it"
-      ; b Act "c" "request completion"
-          ~help:"send the goal to the completion judge; press again to submit"
-      ; b Act "a" "confirm proof"
-          ~help:"read the proven Goal evidence; press again to confirm that exact proof"
-      ; b Act "x" "drop"
-          ~help:"type why the goal is dropped; Enter drops it and cancels its unclaimed tasks"
-      ; b Act "o" "reopen"
+      ; b Act "c" "request completion" ~detail:Detail_only
+          ~help:"in Goal detail, request completion or recovery; press again to submit"
+      ; b Act "a" "confirm proof" ~detail:Detail_only
+          ~help:"in Goal detail, read the proof; confirm it after it is shown and awaiting confirmation"
+      ; b Act "x" "drop" ~detail:Detail_only
+          ~help:"in Goal detail, enter a reason and press Enter; drop may cancel linked Tasks observed unclaimed before the drop"
+      ; b Act "o" "reopen" ~detail:Detail_only
+          ~help:"in Goal detail, press twice to request reopening"
       ; b Act goal_candle_refresh_key "Candle read" ~detail:Detail_only
           ~help:"read the selected Goal's Candle payout record again without changing the Goal"
       ; b Act "Y" "copy link" ~help:"copy the selected goal reference"
@@ -1367,7 +1368,7 @@ let footer_hints_board_compose_armed ~reply =
 (* No [q] here either: while a drop reason has the keys, every printable
    scalar is a letter of it. *)
 let goal_drop_reason_bindings =
-  [ b Act "Enter" "drop" ~help:"drop the goal with this reason; its unclaimed tasks are cancelled"
+  [ b Act "Enter" "drop" ~help:"request a drop with this reason; Tasks observed unclaimed may be cancelled"
   ; b Meta "Esc" "cancel" ~help:"close the reason; the goal stays as it is"
   ]
 

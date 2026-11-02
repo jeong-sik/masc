@@ -466,7 +466,7 @@ let verifying_next_step ~can_retry unreconciled =
     , "the verifier could not settle it - [c] requests recovery; [o] takes it back, [x] drops it" )
   | None ->
     ( Waiting
-    , "with the completion judge - [c] requests recovery; [o] takes it back, [x] drops it" )
+    , "verification unresolved - [c] requests recovery; [o] takes it back, [x] drops it" )
 
 let unreconciled_lines ~width (blocked : Tui_decode.verifier_unreconciled) =
   verdict ~width:(max 1 width) Refused (unreconciled_heading blocked.vu_step)
@@ -484,7 +484,7 @@ let body ~width proof last_review_note =
   | Tui_decode.Proof_refuted reason ->
       verdict ~width Refused "refused" reason @ note ~width last_review_note
   | Tui_decode.Proof_pending ->
-      { tone = Waiting; text = "waiting for the completion judge" }
+      { tone = Waiting; text = "verification result pending" }
       :: note ~width last_review_note
   | Tui_decode.Proof_stale evidence ->
       verdict ~width Note "criterion changed; previous proof is historical" evidence

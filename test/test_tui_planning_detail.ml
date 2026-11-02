@@ -76,7 +76,7 @@ let test_a_stuck_goal_offers_the_retry_first () =
     from 0
   in
   let stuck_tone, stuck =
-    Detail.verifying_next_step
+    Detail.verifying_next_step ~can_retry:true
       (Some
          { Proof.vu_step = Goal_reconcile_step.Reconcile_proof
          ; vu_detail = "goal store unavailable"
@@ -88,8 +88,8 @@ let test_a_stuck_goal_offers_the_retry_first () =
      check_bool "the retry comes before taking it back" true (retry < reopen)
    | None, _ -> Alcotest.fail ("a stuck goal's next step drops [c]: " ^ stuck)
    | Some _, None -> Alcotest.fail ("a stuck goal's next step drops [o]: " ^ stuck));
-  let waiting_tone, waiting = Detail.verifying_next_step None in
-  check_bool "a goal with the judge reads as waiting" true (waiting_tone = Detail.Waiting);
+  let waiting_tone, waiting = Detail.verifying_next_step ~can_retry:true None in
+  check_bool "unresolved verification reads as waiting" true (waiting_tone = Detail.Waiting);
   check_bool "and offers [c] too" true (Option.is_some (index_of "[c]" waiting))
 
 (* The judge's reason and the keeper's note are wire text. An ESC in either

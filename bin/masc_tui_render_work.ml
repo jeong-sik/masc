@@ -451,7 +451,7 @@ let planning_proof_detail ~ko (goal : planning_goal) =
   | Tui_decode.Proof_refuted None -> Some ((Theme.bad ()), text "검증 거절" "refused")
   | Tui_decode.Proof_refuted (Some reason) ->
       Some ((Theme.bad ()), text "검증 거절: " "refused: " ^ Terminal_text.single_line reason)
-  | Tui_decode.Proof_pending -> Some ((Theme.warn ()), text "완료 판정 대기" "waiting for the completion judge")
+  | Tui_decode.Proof_pending -> Some ((Theme.warn ()), text "완료 판정 대기" "verification result pending")
   | Tui_decode.Proof_stale _ ->
       Some ((Theme.warn ()), text "기준 변경 · 이전 증거는 이력" "criterion changed; previous proof is historical")
   | Tui_decode.Proof_unreadable None ->
@@ -1067,7 +1067,7 @@ let planning_detail_action_rows ~cols ~armed ~drop_reason (goal : planning_goal)
        | None -> []
        | Some reason ->
            Message_layout.wrap_words ~max_cells:(max 1 (framed_inner_width cols - 2))
-             (Printf.sprintf "DROP REASON: %s_ -- Enter drops the Goal and cancels its unclaimed Tasks"
+             (Printf.sprintf "DROP REASON: %s_ -- Enter requests drop; linked Tasks may be cancelled"
                 (Terminal_text.single_line reason))
            |> List.map (fun line -> "  " ^ Theme.warn () ^ line ^ Ansi.reset))
 

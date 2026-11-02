@@ -6,9 +6,9 @@ type unavailable =
       (** The runtime requires an environment credential that is unset.
           Carries the dispatch check's own account, which names the variable. *)
   | Invalid_credential of string
-      (** The runtime declares an inline or file credential that resolved to
-          nothing usable. Carries the dispatch check's own account, which names
-          the carrier, so a bad file is not reported as a missing one. *)
+      (** The selected inline or file credential has no usable final secret.
+          Carries the dispatch check's own account, which names the carrier,
+          so an unavailable file value is not reported as a missing env. *)
   | Unsupported_runtime
   | Tools_not_declared
   | Invalid_configuration of string

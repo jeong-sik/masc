@@ -1,3 +1,8 @@
+let execution_for_binding config binding =
+  Runtime_adapter.materialize_execution config binding
+  |> Result.map (fun (selected : Runtime_adapter.execution_materialization) -> selected.execution)
+;;
+
 let test_installer_declarations () =
   let specs = Yojson.Safe.from_file "fixtures/runtime-setup-specs.json" |> Yojson.Safe.Util.to_list in
   List.iter (fun json ->
@@ -501,11 +506,11 @@ let test_cli_reuse_requires_non_interactive () =
     let provider = List.hd config.Runtime_schema.providers in
     let binding = List.hd config.bindings in
     Alcotest.(check bool) (choice ^ " generated provider is executable") true
-      (Result.is_ok (Runtime_adapter.binding_to_execution config binding));
+      (Result.is_ok (execution_for_binding config binding));
     let interactive = {provider with is_non_interactive=false} in
     let interactive_config = {config with providers=[interactive]} in
     Alcotest.(check bool) (choice ^ " actual adapter refuses interactive declaration") true
-      (Result.is_error (Runtime_adapter.binding_to_execution interactive_config binding));
+      (Result.is_error (execution_for_binding interactive_config binding));
     Alcotest.(check bool) (choice ^ " direct reuse refuses interactive declaration") true
       (Option.is_none (Runtime_setup_spec.for_provider spec interactive));
     Alcotest.(check bool) (choice ^ " implicit account resolution refuses before stage") true

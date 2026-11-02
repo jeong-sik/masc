@@ -1,0 +1,35 @@
+{
+  "source_head": "0aba348609a3ca754eab2cac4126018d6cc70a1a",
+  "files": {
+    "lib/runtime/runtime_adapter.ml": "a28e9976a120efdf85c4ffb85709814d4b918af32021b4d541000f0932d8d4be",
+    "lib/runtime/runtime_adapter.mli": "4aed83e35f4870b51aa706fc495512c2a5cd3965bf065f0505a986b74ea789da",
+    "lib/runtime/runtime_credential_selection.ml": "7d5671012ad719af00f03082455324e22551871cd2dc723eb126b6f52867c1c7",
+    "lib/runtime/runtime_credential_selection.mli": "4fffd5a0235bdc5cdeb7bcc1976c7daa476e4939d3d5d45a326c18ceb1485156",
+    "lib/runtime/runtime_instance.ml": "aff8fb5e633c16365b57a2a4b1a2dc8fc34f0de17c962dc75d852c0f05f53749",
+    "lib/runtime/runtime_instance.mli": "4687e0f66e1f3e8af3dbfd8a56fd94eab52ea660bfa249eb96a0e104e56eaaf4",
+    "lib/runtime/runtime_model_discovery.ml": "1ea21f48a448471fa94db2327de11d079e3af892248dff55fdc7c1ffb1e5d5c1",
+    "lib/runtime/runtime_verification.ml": "1dd9511bd1768ba52ebce97bd282c499101db161f5b0e93343f7cbbfbefa58fe",
+    "lib/runtime/runtime_verification.mli": "0c027cb93937365c971e6ea0ae1e2dbecc3f10dbba84c36c8fbef22d1bc2667a",
+    "test/test_runtime_account_declaration.ml": "612ac0f3250b6189c7620794ee949e71427eea509afea1aae06723f79303fee5",
+    "test/test_runtime_adapter_credential_requirement.ml": "725a48db69317ffcd3b81856035258773a33c5b8e0ec2651a79e9b312bb430a4",
+    "test/test_runtime_config_validity.ml": "4af6644776119499ff95be0687a6401600f1cc71c341c01ef8a39559fc43cdd6",
+    "test/test_runtime_per_keeper_routing.ml": "b9e0bb8d90459968ec12a43cd8e5388be6e5733c11dc22f99094b4089cdae3cd",
+    "test/test_runtime_provider_auth_headers.ml": "4a556030ec4ff7d8b1c7be3141dcff1a8b594f9cb0a542adbc41c30d59ccb127",
+    "test/test_runtime_quota_window.ml": "45900f590c82bd5ce68bb60748bc2accbdffc67f6b87581ab26be21020107aad",
+    "test/test_runtime_setup_credentials.ml": "eb238fbbf29b1ed88b69f51583d232628a2c2ca2af93ec864ac02407fbfb0a9a",
+    "test/test_runtime_setup_spec.ml": "3f19a12b72382a380f31191a9c43770111c9cb97f0b5a6f91d9f3ce8088821dc",
+    "test/test_runtime_verification.ml": "55cd664291131bf07a2573bc4256e5afa49d43ae460bb54b6637a95232ada201",
+    ".github/workflows/test.yml": "99286b2989de40ea72ad184b6c8335da64e9213e289e260a4afc16bd3bd8bb6d",
+    "scripts/ci-run-targeted-tests.sh": "7391426895132a2c027aea2d6c85bfcae18a038fd4e9640cc3c0b9fa66a8ca72",
+    "scripts/ci-run-test-suite.sh": "b23ec43af13276b375e3c234b0a3d088225350f3a4983b5c10fdff30f4525426",
+    "test/dune": "a24ea53fdbee08ac26b85d21750a4a798bb91531c99175637bb2b19a42e86b7d",
+    "packages/agent_core/models.toml": "98715a31795637c7736809e419d0075f5620d0d7f44db93a15d6bdaaad7d6145"
+  },
+  "git_tree_inputs": {
+    "lib": "d61e5be27d0c3016c66a1199804efda9f37973e2",
+    "test": "6eca38ec05211eea5b2c2a6e787348c514b4564e",
+    "packages/agent_core": "c5f14ade4405b58e7ddbd95b65ef4f42376f3e42",
+    "config": "b9b3372a0113ac693ee297ea10f22bcb055c53ec"
+  },
+  "not_exhaustive_build_dependency_manifest": true
+}

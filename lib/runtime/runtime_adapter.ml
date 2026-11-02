@@ -19,6 +19,16 @@
 module Runtime_binding = Agent_core.Provider_runtime_binding
 module Provider_binding = Runtime_provider_binding
 
+type provider_materialization =
+  { provider_config : Llm_provider.Provider_config.t
+  ; credential_admission : Runtime_credential_selection.admission
+  }
+
+type execution_materialization =
+  { execution : Runtime_execution.t
+  ; credential_admission : Runtime_credential_selection.admission option
+  }
+
 (* --- Inlined from the deleted [Runtime_config_provider_binding] --- *)
 
 let normalize_header_key key = String.lowercase_ascii (String.trim key)
@@ -133,152 +143,16 @@ let find_registry_entry (provider_id : string)
      | None -> None)
 ;;
 
-(* --- Credential materialization --- *)
-
-let credential_env_candidates = function
-  | "OLLAMA_CLOUD_API_KEY" -> [ "OLLAMA_CLOUD_API_KEY"; "OLLAMA_API_KEY" ]
-  | key -> [ key ]
+let materialize_credentials_from_registry ~provider_id ~registry_entry ~credential =
+  let requires_api_key = Option.map
+    (fun (entry : Llm_provider.Provider_registry.entry) -> entry.defaults.requires_api_key)
+    registry_entry in
+  Runtime_credential_selection.materialize ~provider_id ~requires_api_key ~credential
 ;;
 
-let selected_credential_env key =
-  credential_env_candidates key
-  |> List.find_opt (fun env ->
-    match Sys.getenv_opt env with
-    | Some value -> String.trim value <> ""
-    | None -> false)
-;;
-
-type credential_requirement =
-  | Reference of Runtime_schema.credential
-  | Not_required
-  | Missing_declared_credential of { provider_id : string }
-      (** The catalog row says the endpoint takes an API key and the runtime
-          row declares no credential; the deployment must name one. *)
-  | Unknown_provider
-
-let explicit_credential_requirement = function
-  | Runtime_schema.Env key ->
-    let selected = match selected_credential_env key with
-      | Some selected -> selected | None -> key in
-    Reference (Runtime_schema.Env selected)
-  | (Runtime_schema.File _ | Runtime_schema.Inline _) as explicit -> Reference explicit
-;;
-
-let credential_requirement
-    ~(provider_id : string)
-    (credential : Runtime_schema.credential option) =
-  match credential with
-  | Some explicit -> explicit_credential_requirement explicit
-  | None ->
-    (match find_registry_entry provider_id with
-     | Some entry ->
-       (* The catalog states whether the endpoint takes a key
-          ([requires_api_key]); which environment variable holds it is
-          deployment config, so a key-needing provider with no declared
-          credential is a refusal, not a silent empty key. *)
-       if entry.Llm_provider.Provider_registry.defaults.requires_api_key
-       then Missing_declared_credential { provider_id }
-       else Not_required
-     | None -> Unknown_provider)
-;;
-
-(* The reference view of the same answer, for callers that ask which credential
-   names an identity rather than whether one is needed. Both absences answer
-   [None] here because neither names a credential. *)
-let effective_credential_reference ~provider_id credential =
-  match credential_requirement ~provider_id credential with
-  | Reference reference -> Some reference
-  | Not_required | Missing_declared_credential _ | Unknown_provider -> None
-;;
-
-let api_key_from_env key =
-  (match selected_credential_env key with
-   | Some env -> Sys.getenv_opt env
-   | None -> None)
-  |> Option.value ~default:""
-;;
-
-let api_key_from_file path =
-  if Filename.is_relative path then
-    Error "API credential file must use an absolute path"
-  else
-    (* Keep filesystem diagnostics private: paths and exception messages can
-       contain credential material supplied by configuration. *)
-    match
-      Fs_compat.load_owned_regular_file_with_snapshot
-        ~ownership_root:(Filename.dirname path) path
-    with
-    | Error _ -> Error "API credential file could not be read as an owned regular file"
-    | Ok None -> Error "API credential file is missing"
-    | Ok (Some { snapshot; _ })
-      when snapshot.owner_uid <> Unix.geteuid () || snapshot.permissions land 0o077 <> 0 ->
-      Error "API credential file must be owned by the current user and private"
-    | Ok (Some { content; _ }) ->
-      let value = String.trim content in
-      if value = "" then Error "API credential file is empty"
-      else
-        let structured_json =
-          try
-            match Yojson.Safe.from_string value with
-            | `Assoc _ | `List _ -> true
-            | _ -> false
-          with Yojson.Json_error _ -> false
-        in
-        if structured_json then
-          Error "API credential file must contain a raw API key, not a JSON credential document"
-        else Ok value
-;;
-
-let api_key_of_credential ?registry_entry:_ (credential : Runtime_schema.credential option) =
-  match credential with
-  | Some (Env key) -> Ok (api_key_from_env key)
-  | Some (Inline value) -> Ok value
-  | Some (File path) -> api_key_from_file path
-  | None -> Ok ""
-;;
-
-(* --- Provider kind resolution --- *)
-
-let resolve_credential_requirement = function
-  | Unknown_provider ->
-    (* The runtime row names no credential and the catalog has no row for this
-       provider, so nothing says whether a key is needed. An empty secret here
-       is a guess, and it used to be a silent one: discovery resolved [Ok ""]
-       and reported success without a credential. *)
-    Error "No provider credential is configured and the provider has no catalog entry"
-  | Missing_declared_credential { provider_id } ->
-    Error
-      (Printf.sprintf
-         "provider %S requires an API key and declares no credential: add           [providers.%s.credentials] with the environment variable that holds it"
-         provider_id provider_id)
-  | Not_required -> Ok (Llm_provider.Secret.of_string "")
-  | Reference reference ->
-    (match api_key_of_credential (Some reference) with
-     | Error _ as error -> error
-     | Ok value when String.trim value = "" ->
-       Error "Required provider credential is unavailable"
-     | Ok value -> Ok (Llm_provider.Secret.of_string value))
-;;
-
-let resolve_api_key ~provider_id ~credential =
-  resolve_credential_requirement (credential_requirement ~provider_id credential)
-;;
-
-(* CLI subprocess provider kinds were removed in the agent_core pin bump
-   (agent_core service-name migration). No provider kind is a subprocess CLI, so a
-   CLI-transport provider can never resolve to a provider kind. The reason is
-   surfaced as [Error] (not [None]) so a binding dropped for this cause explains
-   itself at load instead of vanishing silently (Unknown->silent-drop
-   anti-pattern). *)
-let provider_kind_of_cli_provider (provider : Runtime_schema.provider)
-    : (Llm_provider.Provider_config.provider_kind, string) result =
-  Error
-    (Printf.sprintf
-       "provider %S uses protocol %s over a CLI transport, which the runtime \
-        adapter no longer materializes (CLI subprocess provider kinds were \
-        removed in the agent_core pin bump)"
-       provider.id
-       provider.protocol)
+let materialize_credentials ~provider_id ~credential =
+  materialize_credentials_from_registry ~provider_id
+    ~registry_entry:(find_registry_entry provider_id) ~credential
 ;;
 
 let registry_provider_kind = function
@@ -834,7 +708,7 @@ let provider_config_from_declared_provider ?binding_max_context ?keep_alive ?num
     ?max_concurrent_requests
     ~disable_parallel_tool_use
     (provider : Runtime_schema.provider) (spec : Runtime_schema.model_spec)
-  : (Llm_provider.Provider_config.t, string) result =
+  : (provider_materialization, string) result =
   (* Resolve deployment scope before synthesizing custom-model capabilities:
      their max_context is this declaration, not a second independent hard cap.
      Known catalog rows remain unchanged and still clamp the selected value. *)
@@ -894,7 +768,8 @@ let provider_config_from_declared_provider ?binding_max_context ?keep_alive ?num
        let request_path =
          request_path_for_http_provider ~provider ~registry_entry ~kind ~base_url
        in
-       let* api_key = api_key_of_credential ?registry_entry provider.credentials in
+       let* credential = materialize_credentials_from_registry ~provider_id:provider.id
+           ~registry_entry ~credential:provider.credentials in
        let default_headers = Provider_binding.default_headers_for_kind kind in
        let custom_headers =
          match provider.headers with
@@ -912,8 +787,8 @@ let provider_config_from_declared_provider ?binding_max_context ?keep_alive ?num
              (fun (key, _) -> not (List.mem (normalize_header_key key) custom_keys))
              default_headers
        in
-       Ok
-         (Llm_provider.Provider_config.make
+       let provider_config =
+         Llm_provider.Provider_config.make
             ~kind
             (* [provider_id] is the runtime.toml [providers.<id>] table name. It is
                the capability-catalog qualification key: [capability_provider_label]
@@ -926,7 +801,7 @@ let provider_config_from_declared_provider ?binding_max_context ?keep_alive ?num
             ~provider_id:provider.id
             ~model_id:spec.api_name
             ~base_url
-            ~api_key
+            ~api_key:(credential.api_key :> string)
             ~auth_scheme
             ~credential_source
             ~headers
@@ -961,74 +836,19 @@ let provider_config_from_declared_provider ?binding_max_context ?keep_alive ?num
             ?max_concurrent_requests
             ?admission_priority_run_limit
             ?max_tokens
-            ())
+            ()
+       in
+       Ok {provider_config;credential_admission=credential.admission}
      | Error reason -> Error reason)
   | Cli _ ->
-    (match provider_kind_of_cli_provider provider with
-     | Ok kind ->
-       let* api_key = api_key_of_credential ?registry_entry provider.credentials in
-       let model_capabilities_override =
-         model_capabilities_override_of_model_spec
-           ~wire:kind
-           ~provider_id:provider.id
-           spec
-       in
-       let max_context =
-         effective_max_context_of_model_spec
-           ~wire:kind
-           ~provider_id:provider.id
-           ~model_capabilities_override
-           spec
-       in
-       Ok
-         (Llm_provider.Provider_config.make
-            ~kind
-            (* Same capability-qualification key as the Http branch above. *)
-            ~provider_id:provider.id
-            ~model_id:spec.api_name
-            ~base_url:""
-            ~disable_parallel_tool_use
-            ~api_key
-            ~headers:(Option.value ~default:[] provider.headers)
-            ?max_context
-            ?model_capabilities_override
-            ?temperature:spec.temperature
-            ?top_p:spec.top_p
-            ?top_k:spec.top_k
-            ?min_p:spec.min_p
-            (* The declared effort is the only control this dialect has: under
-               [Reasoning_effort] the wire field comes from here, not from
-               [enable_thinking] (reasoning_dialect.ml: Chat_completions,
-               Reasoning_effort -> normalized_effort_field). Without this the
-               model row could name an effort that no HTTP request ever read,
-               which is how a model whose endpoint does honour the control was
-               left reasoning on every turn. Official-client runtimes read the
-               same field through Runtime_inference.resolve_reasoning_effort. *)
-            ?reasoning_effort:spec.reasoning_effort
-            (* Paired with the effort above: on a wire that turns reasoning on when the
-               request carries no control, one of the two has to be said. This is the
-               row saying it rides the provider default on purpose. *)
-            ~reasoning_uncontrolled:spec.reasoning_uncontrolled
-            ?keep_alive
-            ?num_ctx
-            ?repeat_penalty
-            ?repeat_last_n
-            ?return_progress
-            ?connect_timeout_s:provider.connect_timeout_s
-            ?max_concurrent_requests
-            ?admission_priority_run_limit
-            ?max_tokens
-            ())
-     | Error reason -> Error reason)
+    Error (Printf.sprintf
+      "provider %S uses protocol %s over a CLI transport; an HTTP binding is required"
+      provider.id provider.protocol)
 ;;
 
-(* --- binding → Provider_config.t ---
-
-   Replaces the deleted [resolve_binding_config]/[binding_to_provider_config]
-   pair. The typed [adapter_error] list is collapsed into [(_, string) result]
-   strings; the override carrier is dropped (see above). *)
-let binding_to_provider_config (cfg : Runtime_schema.config) (binding : Runtime_schema.binding)
-    : (Llm_provider.Provider_config.t, string) result =
+(* Materialize the exact HTTP binding and its credential authority together. *)
+let materialize_provider_binding (cfg : Runtime_schema.config) (binding : Runtime_schema.binding)
+    : (provider_materialization, string) result =
   match Runtime_schema.model_of_id cfg binding.model_id with
   | None -> Error (Printf.sprintf "model not found: %s" binding.model_id)
   | Some spec ->
@@ -1052,7 +872,9 @@ let binding_to_provider_config (cfg : Runtime_schema.config) (binding : Runtime_
          ?max_tokens:binding.max_tokens
          provider
          spec
-       |> Result.map Llm_provider.Provider_config.freeze_for_request)
+       |> Result.map (fun (materialized : provider_materialization) ->
+           {materialized with provider_config=
+             Llm_provider.Provider_config.freeze_for_request materialized.provider_config}))
 ;;
 
 (* The official-client executions spawn the path
@@ -1274,8 +1096,8 @@ let refuse_anthropic_thinking_control_on_official_client
   | Runtime_schema.Vertex_gemini_api -> Ok ()
 ;;
 
-let binding_to_execution (cfg : Runtime_schema.config) (binding : Runtime_schema.binding)
-    : (Runtime_execution.t, string) result =
+let materialize_execution (cfg : Runtime_schema.config) (binding : Runtime_schema.binding)
+    : (execution_materialization, string) result =
   match Runtime_schema.model_of_id cfg binding.model_id with
   | None -> Error (Printf.sprintf "model not found: %s" binding.model_id)
   | Some spec ->
@@ -1286,17 +1108,21 @@ let binding_to_execution (cfg : Runtime_schema.config) (binding : Runtime_schema
        let* () = validate_parallel_tool_policy provider ~model_id:binding.model_id
            ~disable_parallel_tool_use:binding.disable_parallel_tool_use in
        let* () = refuse_anthropic_thinking_control_on_official_client provider spec in
+       let official result = Result.map
+         (fun execution -> {execution;credential_admission=None}) result in
        (match provider.api_format with
         | Runtime_schema.Codex_app_server_runtime ->
-          codex_app_server_execution provider spec
+          official (codex_app_server_execution provider spec)
         | Runtime_schema.Antigravity_cli_runtime ->
-          antigravity_cli_execution provider spec
+          official (antigravity_cli_execution provider spec)
         | Runtime_schema.Claude_code_runtime ->
-          claude_code_execution provider spec
+          official (claude_code_execution provider spec)
         | Runtime_schema.Muse_serve_runtime ->
-          muse_serve_execution provider spec
+          official (muse_serve_execution provider spec)
         | Messages_api | Chat_completions_api | Ollama_api | Gemini_api | Vertex_gemini_api ->
           Result.map
-            (fun provider_config -> Runtime_execution.Agent_core provider_config)
-            (binding_to_provider_config cfg binding)))
+            (fun (selected : provider_materialization) ->
+              {execution=Runtime_execution.Agent_core selected.provider_config;
+               credential_admission=Some selected.credential_admission})
+            (materialize_provider_binding cfg binding)))
 ;;

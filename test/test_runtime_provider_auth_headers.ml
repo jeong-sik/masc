@@ -1,6 +1,17 @@
 open Alcotest
 open Masc
 
+let provider_config_for_binding config binding =
+  Runtime_adapter.materialize_provider_binding config binding
+  |> Result.map (fun (selected : Runtime_adapter.provider_materialization) -> selected.provider_config)
+;;
+
+let execution_for_binding config binding =
+  Runtime_adapter.materialize_execution config binding
+  |> Result.map (fun (selected : Runtime_adapter.execution_materialization) -> selected.execution)
+;;
+
+
 let header_count name headers =
   headers
   |> List.filter (fun (k, _) -> String.equal k name)
@@ -182,7 +193,7 @@ let test_runtime_toml_threads_provider_connect_timeout () =
      | [ provider ], [ binding ] ->
        check (option (float 0.0)) "provider connect timeout" (Some 123.5)
          provider.Runtime_schema.connect_timeout_s;
-       (match Runtime_adapter.binding_to_provider_config cfg binding with
+       (match provider_config_for_binding cfg binding with
         | Error msg -> failf "unexpected adapter error: %s" msg
         | Ok provider_cfg ->
           check (option (float 0.0)) "provider config connect timeout"
@@ -221,7 +232,7 @@ let test_declared_credential_headers_never_reach_provider_config () =
   | Ok cfg ->
     (match cfg.bindings with
      | [ binding ] ->
-       (match Runtime_adapter.binding_to_provider_config cfg binding with
+       (match provider_config_for_binding cfg binding with
         | Error msg -> failf "unexpected adapter error: %s" msg
         | Ok provider_cfg ->
           let keys =
@@ -267,7 +278,7 @@ min-p = 0.07
        check (option int) "model top_k" (Some 42) model.Runtime_schema.top_k;
        check (option (float 0.0001)) "model min_p" (Some 0.07)
          model.Runtime_schema.min_p;
-       (match Runtime_adapter.binding_to_provider_config cfg binding with
+       (match provider_config_for_binding cfg binding with
         | Error msg -> failf "unexpected adapter error: %s" msg
         | Ok provider_cfg ->
           check (option (float 0.0001)) "provider config top_p" (Some 0.91)
@@ -581,7 +592,7 @@ streaming = true
          Llm_provider.Provider_config.Anthropic);
     (match config.bindings with
      | [ binding ] ->
-       (match Runtime_adapter.binding_to_provider_config config binding with
+       (match provider_config_for_binding config binding with
         | Error message -> fail message
         | Ok provider_config ->
           check
@@ -631,7 +642,7 @@ let test_runtime_adapter_materializes_kimi_messages_http () =
   let cfg = kimi_runtime_config_or_fail () in
   match cfg.bindings with
   | [ binding ] ->
-    (match Runtime_adapter.binding_to_provider_config cfg binding with
+    (match provider_config_for_binding cfg binding with
      | Error msg -> failf "unexpected Kimi messages-http adapter error: %s" msg
      | Ok provider_cfg ->
        check string "base url" "https://example.invalid/kimi" provider_cfg.base_url;
@@ -701,7 +712,7 @@ let test_runtime_adapter_rejects_unregistered_messages_http () =
   | Ok cfg ->
     (match cfg.bindings with
      | [ binding ] ->
-       (match Runtime_adapter.binding_to_provider_config cfg binding with
+       (match provider_config_for_binding cfg binding with
         | Ok provider_cfg ->
           failf
             "unregistered messages-http provider must fail closed, got kind %s"
@@ -723,7 +734,7 @@ let test_runtime_adapter_rejects_incompatible_messages_http_kind () =
   | Ok cfg ->
     (match cfg.bindings with
      | [ binding ] ->
-       (match Runtime_adapter.binding_to_provider_config cfg binding with
+       (match provider_config_for_binding cfg binding with
         | Ok provider_cfg ->
           failf
             "incompatible messages-http provider must fail closed, got kind %s"
@@ -790,7 +801,7 @@ let deepseek_provider_config_or_fail () =
   let cfg = deepseek_runtime_config_or_fail () in
   match cfg.bindings with
   | [ binding ] ->
-    (match Runtime_adapter.binding_to_provider_config cfg binding with
+    (match provider_config_for_binding cfg binding with
      | Ok provider_cfg -> provider_cfg
      | Error msg -> failf "unexpected DeepSeek adapter error: %s" msg)
   | bindings -> failf "expected one DeepSeek binding, got %d" (List.length bindings)
@@ -846,7 +857,7 @@ let glm_coding_provider_config_or_fail () =
   let cfg = glm_coding_runtime_config_or_fail () in
   match cfg.bindings with
   | [ binding ] ->
-    (match Runtime_adapter.binding_to_provider_config cfg binding with
+    (match provider_config_for_binding cfg binding with
      | Ok provider_cfg -> provider_cfg
      | Error msg -> failf "unexpected GLM Coding Plan adapter error: %s" msg)
   | bindings ->
@@ -962,7 +973,7 @@ let test_openai_compat_surface_keeps_the_chat_completions_path () =
     in
     match cfg.bindings with
     | [ binding ] ->
-      (match Runtime_adapter.binding_to_provider_config cfg binding with
+      (match provider_config_for_binding cfg binding with
        | Ok provider_cfg ->
          check bool "kind is the one the workspace declared" true
            (provider_cfg.kind = Llm_provider.Provider_config.OpenAI_compat);
@@ -1072,7 +1083,7 @@ let test_runtime_adapter_file_credentials () =
       ; egress_allowlists = []; lsp_servers = []
       }
     in
-    Runtime_adapter.binding_to_provider_config cfg runpod_binding
+    provider_config_for_binding cfg runpod_binding
   in
   let reject path expected =
     match materialize path with
@@ -1124,7 +1135,7 @@ let test_runtime_adapter_keeps_auth_out_of_headers () =
     ; lsp_servers = []
     }
   in
-  match Runtime_adapter.binding_to_provider_config cfg runpod_binding with
+  match provider_config_for_binding cfg runpod_binding with
   | Error msg -> failf "unexpected adapter error: %s" msg
   | Ok provider_cfg ->
     check string "api key" "rp-test-token" (Llm_provider.Secret.header_value provider_cfg.api_key);
@@ -1159,7 +1170,7 @@ let test_runtime_adapter_filters_toml_auth_headers () =
     ; lsp_servers = []
     }
   in
-  match Runtime_adapter.binding_to_provider_config cfg runpod_binding with
+  match provider_config_for_binding cfg runpod_binding with
   | Error msg -> failf "unexpected adapter error: %s" msg
   | Ok provider_cfg ->
     check string "api key" "rp-test-token" (Llm_provider.Secret.header_value provider_cfg.api_key);
@@ -1195,7 +1206,7 @@ let provider_cfg () =
     ; lsp_servers = []
     }
   in
-  match Runtime_adapter.binding_to_provider_config cfg runpod_binding with
+  match provider_config_for_binding cfg runpod_binding with
   | Ok provider_cfg -> provider_cfg
   | Error msg -> failf "unexpected adapter error: %s" msg
 
@@ -1297,7 +1308,7 @@ thinking_control_format = "ollama_think"
          }
        in
        let provider_cfg =
-         match Runtime_adapter.binding_to_provider_config cfg runpod_binding with
+         match provider_config_for_binding cfg runpod_binding with
          | Ok provider_cfg -> provider_cfg
          | Error msg -> failf "unexpected adapter error: %s" msg
        in
@@ -1335,7 +1346,7 @@ let glm_vision_binding_config ~runtime_caps =
     ; exact_output_lane_decls = []; exec_ssh_endpoints = []; browser = Browser_configuration.none; machines = Machine_configuration.default; typesafeai = Runtime_schema.default_typesafeai
     ; egress_allowlists = []; lsp_servers = [] }
   in
-  match Runtime_adapter.binding_to_provider_config cfg binding with
+  match provider_config_for_binding cfg binding with
   | Ok config -> config
   | Error detail -> failf "vision binding failed: %s" detail
 
@@ -1448,7 +1459,7 @@ let test_runtime_adapter_threads_binding_keep_alive_and_num_ctx () =
          binding.Runtime_schema.keep_alive;
        check (option int) "binding num_ctx parsed" (Some 16384)
          binding.Runtime_schema.num_ctx;
-       (match Runtime_adapter.binding_to_provider_config cfg binding with
+       (match provider_config_for_binding cfg binding with
         | Error msg -> failf "unexpected adapter error: %s" msg
         | Ok provider_cfg ->
           check bool "kind" true
@@ -2262,7 +2273,7 @@ let test_setup_responses_http_dispatch () =
       "request_path", `String request_path; "credential_file", `String credential]) |> Result.get_ok in
     let rendered = Runtime_setup_spec.render spec in
     let runtime = Runtime_toml.parse_string rendered.runtime_toml |> Result.get_ok in
-    let config = Runtime_adapter.binding_to_provider_config runtime (List.hd runtime.bindings) |> Result.get_ok in
+    let config = provider_config_for_binding runtime (List.hd runtime.bindings) |> Result.get_ok in
     let response = (Llm_provider.Complete.complete ~sw ~net ~config
         ~messages:[Llm_provider.Types.make_message ~role:Llm_provider.Types.User [Llm_provider.Types.Text "Reply ok."]] ()).Llm_provider.Completion_outcome.result in
     (match response with
@@ -2374,7 +2385,7 @@ is-default = true
        let config =
          match runtime.bindings with
          | [ binding ] ->
-           (match Runtime_adapter.binding_to_execution runtime binding with
+           (match execution_for_binding runtime binding with
             | Ok (Runtime_execution.Agent_core config) -> config
             | Ok (Runtime_execution.Codex_app_server _
                  | Runtime_execution.Claude_code _
@@ -3246,7 +3257,7 @@ let test_parallel_policy_survives_fresh_resume_and_wire_serialization () =
     List.iter (fun (policy, expected) ->
       let cfg, binding = parallel_policy_runtime ~provider_id ~protocol ~model_id ~policy in
       let provider_cfg =
-        match Runtime_adapter.binding_to_execution cfg binding with
+        match execution_for_binding cfg binding with
         | Ok (Runtime_execution.Agent_core config) -> config
         | Ok _ -> fail "HTTP policy selected an official client"
         | Error detail -> fail detail
@@ -3292,8 +3303,8 @@ let test_parallel_policy_rejects_unsupported_runtimes () =
     let check_refusal = function
       | Error error -> check string "unsupported policy is named" expected error
       | Ok _ -> failf "%s silently accepted the parallel-disable policy" protocol in
-    check_refusal (Runtime_adapter.binding_to_execution cfg binding);
-    check_refusal (Runtime_adapter.binding_to_provider_config cfg binding)
+    check_refusal (execution_for_binding cfg binding);
+    check_refusal (provider_config_for_binding cfg binding)
   ) [ Runtime_schema.Claude_code_runtime, "claude-code"
     ; Codex_app_server_runtime, "codex-app-server"
     ; Antigravity_cli_runtime, "antigravity-cli"
@@ -3327,8 +3338,8 @@ let test_parallel_policy_requires_provider_contract () =
     let check_refusal = function
       | Error error -> check string "missing provider contract is explicit" expected error
       | Ok _ -> fail "wire compatibility silently accepted suppression" in
-    check_refusal (Runtime_adapter.binding_to_execution cfg binding);
-    check_refusal (Runtime_adapter.binding_to_provider_config cfg binding)
+    check_refusal (execution_for_binding cfg binding);
+    check_refusal (provider_config_for_binding cfg binding)
   ) [ "glm-coding"; "openrouter"; "unregistered-endpoint" ];
   let cfg, binding = parallel_policy_runtime ~provider_id:"claude"
       ~protocol:"messages-http" ~model_id:"claude-fable-5" ~policy:"" in
@@ -3347,12 +3358,12 @@ auth = "none"
 |} value in
   List.iter (fun (declaration, supported) ->
     with_model_catalog (catalog declaration) (fun () ->
-      let result = Runtime_adapter.binding_to_execution cfg
+      let result = execution_for_binding cfg
           { binding with disable_parallel_tool_use = true } in
       check bool "canonical alias uses only the provider contract" supported
         (Result.is_ok result);
       check bool "no suppression request needs no contract" true
-        (Result.is_ok (Runtime_adapter.binding_to_execution cfg
+        (Result.is_ok (execution_for_binding cfg
           { binding with disable_parallel_tool_use = false })))
   ) [ "", false; "supports_parallel_tool_suppression = false", false;
       "supports_parallel_tool_suppression = true", true ];
@@ -3418,7 +3429,7 @@ accepted_reasoning_efforts = ["low", "high"]
 |} declaration in
   List.iter (fun (declaration, serves) ->
     with_model_catalog (catalog declaration) (fun () ->
-      match Runtime_adapter.binding_to_provider_config cfg binding with
+      match provider_config_for_binding cfg binding with
       | Error error ->
         failf "%S: the binding was refused before the effort check: %s"
           declaration error
@@ -3462,7 +3473,7 @@ let test_bench_anthropic_lane_sends_high_with_the_embedded_catalog () =
   Llm_provider.Model_catalog.clear_global ();
   List.iter (fun model_id ->
     let cfg, binding = bare_rows_runtime ~provider_id:"claude" ~model_id in
-    match Runtime_adapter.binding_to_provider_config cfg binding with
+    match provider_config_for_binding cfg binding with
     | Error error -> failf "%s: the binding was refused: %s" model_id error
     | Ok config ->
       check (option string) (model_id ^ ": provider") (Some "claude")
@@ -3480,9 +3491,180 @@ let test_bench_anthropic_lane_sends_high_with_the_embedded_catalog () =
            |> Json.to_string)
   ) [ "claude-fable-5"; "claude-fable-5-1" ]
 
+type snapshot_auth = Snapshot_no_auth | Snapshot_api_key | Snapshot_unknown
+
+let snapshot_auth_catalog auth =
+  let source = match auth with
+    | Snapshot_unknown -> ""
+    | Snapshot_no_auth | Snapshot_api_key -> Printf.sprintf {|
+[[providers]]
+id = "dispatch-snapshot"
+kind = "openai_compat"
+base_url = "https://dispatch.invalid/v1"
+request_path = "/v1/chat/completions"
+auth = "%s"
+capabilities_base = "openai_chat"
+|} (match auth with Snapshot_no_auth -> "none" | Snapshot_api_key -> "api-key"
+       | Snapshot_unknown -> assert false) in
+  match Llm_provider.Model_catalog.of_toml_string ~source:"dispatch auth snapshot fixture" source with
+  | Ok catalog -> catalog | Error detail -> fail detail
+
+let with_snapshot_auth_catalog auth run =
+  let previous = Llm_provider.Model_catalog.global () in
+  Fun.protect ~finally:(fun () -> match previous with
+    | Some catalog -> Llm_provider.Model_catalog.set_global catalog
+    | None -> Llm_provider.Model_catalog.clear_global ())
+    (fun () -> Llm_provider.Model_catalog.set_global (snapshot_auth_catalog auth); run ())
+
+let snapshot_auth_runtime ?credential () =
+  let credential = match credential with
+    | None -> ""
+    | Some env -> Printf.sprintf
+        "[providers.dispatch-snapshot.credentials]\ntype = \"env\"\nkey = %S\n" env in
+  let source = {|
+[providers.dispatch-snapshot]
+protocol = "openai-compatible-http"
+endpoint = "https://dispatch.invalid/v1"
+|} ^ credential ^ {|
+[models.selected]
+api-name = "dispatch-model"
+max-context = 4096
+[dispatch-snapshot.selected]
+[runtime]
+default = "dispatch-snapshot.selected"
+|} in
+  let cfg = match Runtime_toml.parse_string source with
+    | Ok cfg -> cfg | Error _ -> fail "dispatch auth fixture must parse" in
+  let binding = match cfg.Runtime_schema.bindings with
+    | [binding] -> binding | _ -> fail "one dispatch binding required" in
+  match Runtime_instance.of_binding cfg binding with
+  | Ok runtime -> runtime
+  | Error reason -> fail (Runtime_config_error.string_of_drop_reason reason)
+
+let check_snapshot_auth label expected runtime =
+  let provider_config = agent_core_provider_config_or_fail runtime in
+  let result = Runtime_instance.validate_dispatch_credential ~provider_config runtime in
+  match expected, result with
+  | (Snapshot_no_auth | Snapshot_unknown), Ok () -> ()
+  | Snapshot_api_key, Error (Runtime_instance.Undeclared_credential {provider_id}) ->
+    check string label "dispatch-snapshot" provider_id
+  | (Snapshot_no_auth | Snapshot_unknown), Error error ->
+    failf "%s: original binding was refused: %s" label
+      (Runtime_instance.dispatch_credential_error_to_string error)
+  | Snapshot_api_key, Ok () -> failf "%s: missing credential requirement was erased" label
+  | Snapshot_api_key, Error error ->
+    failf "%s: wrong credential refusal: %s" label
+      (Runtime_instance.dispatch_credential_error_to_string error)
+
+let test_dispatch_auth_catalog_snapshot ~before ~after () =
+  with_snapshot_auth_catalog before (fun () ->
+    let original = snapshot_auth_runtime () in
+    check_snapshot_auth "original selection before reload" before original;
+    Llm_provider.Model_catalog.set_global (snapshot_auth_catalog after);
+    check_snapshot_auth "original selection after reload" before original;
+    check_snapshot_auth "fresh selection after reload" after (snapshot_auth_runtime ()))
+
+let test_dispatch_auth_alias_snapshot () =
+  with_snapshot_auth_catalog Snapshot_api_key (fun () ->
+    with_env "OLLAMA_CLOUD_API_KEY" "" (fun () ->
+      with_env "OLLAMA_API_KEY" "original-reference-value" (fun () ->
+        let original = snapshot_auth_runtime ~credential:"OLLAMA_CLOUD_API_KEY" () in
+        let config = agent_core_provider_config_or_fail original in
+        check (option string) "materialized request uses the selected alias"
+          (Some "Bearer original-reference-value")
+          (normalized_header_value "authorization" (Llm_provider.Provider_config.auth_headers_for_config config));
+        let expected_scope = Runtime_quota_window.scope_of_credential ~provider_id:"dispatch-snapshot"
+          (Some (Runtime_schema.Env "OLLAMA_API_KEY")) in
+        Unix.putenv "OLLAMA_CLOUD_API_KEY" "replacement-reference-value";
+        Unix.putenv "OLLAMA_API_KEY" "";
+        check bool "quota attribution retains original alias" true
+          (Runtime_quota_window.scope_equal expected_scope (Runtime_instance.quota_scope_of_runtime original));
+        let empty = {config with Llm_provider.Provider_config.api_key = Llm_provider.Secret.of_string ""} in
+        match Runtime_instance.validate_dispatch_credential ~provider_config:empty original with
+        | Error (Runtime_instance.Required_env_credential_missing {provider_id;env_key}) ->
+          check string "missing credential belongs to selected provider" "dispatch-snapshot" provider_id;
+          check string "missing credential names original selected alias" "OLLAMA_API_KEY" env_key
+        | Error error -> fail (Runtime_instance.dispatch_credential_error_to_string error)
+        | Ok () -> fail "emptied required credential must be refused")))
+
+let test_dispatch_auth_fresh_alias_selection () =
+  with_snapshot_auth_catalog Snapshot_api_key (fun () ->
+    with_env "OLLAMA_CLOUD_API_KEY" "" (fun () ->
+      with_env "OLLAMA_API_KEY" "original-reference-value" (fun () ->
+        let original = snapshot_auth_runtime ~credential:"OLLAMA_CLOUD_API_KEY" () in
+        Unix.putenv "OLLAMA_CLOUD_API_KEY" "replacement-reference-value";
+        Unix.putenv "OLLAMA_API_KEY" "";
+        let fresh = snapshot_auth_runtime ~credential:"OLLAMA_CLOUD_API_KEY" () in
+        let headers runtime =
+          agent_core_provider_config_or_fail runtime
+          |> Llm_provider.Provider_config.auth_headers_for_config in
+        check (option string) "existing request keeps the original secret"
+          (Some "Bearer original-reference-value")
+          (normalized_header_value "authorization" (headers original));
+        check (option string) "fresh request selects the new preferred alias"
+          (Some "Bearer replacement-reference-value")
+          (normalized_header_value "authorization" (headers fresh));
+        let expected_scope = Runtime_quota_window.scope_of_credential
+          ~provider_id:"dispatch-snapshot" (Some (Runtime_schema.Env "OLLAMA_CLOUD_API_KEY")) in
+        check bool "fresh request and quota scope select the same new alias" true
+          (Runtime_quota_window.scope_equal expected_scope (Runtime_instance.quota_scope_of_runtime fresh));
+        check bool "separate alias selections have separate account scopes" false
+          (Runtime_quota_window.scope_equal
+            (Runtime_instance.quota_scope_of_runtime original)
+            (Runtime_instance.quota_scope_of_runtime fresh));
+        let config = agent_core_provider_config_or_fail fresh in
+        let empty = {config with Llm_provider.Provider_config.api_key = Llm_provider.Secret.empty} in
+        match Runtime_instance.validate_dispatch_credential ~provider_config:empty fresh with
+        | Error (Runtime_instance.Required_env_credential_missing {env_key;_}) ->
+          check string "fresh missing-auth reason uses its own selected alias" "OLLAMA_CLOUD_API_KEY" env_key
+        | Error error -> fail (Runtime_instance.dispatch_credential_error_to_string error)
+        | Ok () -> fail "fresh required credential remains required")))
+
+let test_dispatch_auth_selected_file_is_not_reopened () =
+  let path = Filename.temp_file "runtime-selected-credential-" ".key" |> Unix.realpath in
+  Fun.protect ~finally:(fun () -> if Sys.file_exists path then Unix.unlink path)
+    (fun () ->
+      Unix.chmod path 0o600;
+      Out_channel.with_open_bin path (fun out -> output_string out "fixture-selected-file-key");
+      let provider = {runpod_provider with credentials=Some (Runtime_schema.File path)} in
+      let runtime = runtime_or_fail ~provider () in
+      let config = agent_core_provider_config_or_fail runtime in
+      Unix.unlink path;
+      check (option string) "selected request retains the original file value"
+        (Some "Bearer fixture-selected-file-key")
+        (normalized_header_value "authorization" (Llm_provider.Provider_config.auth_headers_for_config config));
+      let empty = {config with Llm_provider.Provider_config.api_key=Llm_provider.Secret.empty} in
+      (match Runtime_instance.validate_dispatch_credential ~provider_config:empty runtime with
+       | Error (Runtime_instance.Declared_credential_unavailable {provider_id;carrier=Agent_core.Error.FileCredential}) ->
+         check string "unavailable final secret keeps its selected file carrier" "runpod_mtp" provider_id
+       | Error error -> fail (Runtime_instance.dispatch_credential_error_to_string error)
+       | Ok () -> fail "an emptied selected file credential must be refused");
+      let selected_scope = Runtime_quota_window.scope_of_credential ~provider_id:provider.id provider.credentials in
+      check bool "quota still belongs to the selected file reference" true
+        (Runtime_quota_window.scope_equal selected_scope (Runtime_instance.quota_scope_of_runtime runtime));
+      match Runtime_adapter.materialize_credentials ~provider_id:provider.id
+          ~credential:provider.credentials with
+      | Error _ -> ()
+      | Ok _ -> fail "fresh selection cannot load the removed credential file")
+
 let () =
   run "runtime_provider_auth_headers"
-    [ ( "provider_config"
+    [ ( "selected dispatch credential"
+      , [ test_case "keyless selection survives a later keyed declaration" `Quick
+            (test_dispatch_auth_catalog_snapshot ~before:Snapshot_no_auth ~after:Snapshot_api_key)
+        ; test_case "keyed selection survives a later keyless declaration" `Quick
+            (test_dispatch_auth_catalog_snapshot ~before:Snapshot_api_key ~after:Snapshot_no_auth)
+        ; test_case "keyed selection survives catalog removal" `Quick
+            (test_dispatch_auth_catalog_snapshot ~before:Snapshot_api_key ~after:Snapshot_unknown)
+        ; test_case "unknown selection retains existing admission after keyed declaration" `Quick
+            (test_dispatch_auth_catalog_snapshot ~before:Snapshot_unknown ~after:Snapshot_api_key)
+        ; test_case "missing credential keeps the materialized alias" `Quick
+            test_dispatch_auth_alias_snapshot
+        ; test_case "fresh alias selection owns its new request and quota scope" `Quick
+            test_dispatch_auth_fresh_alias_selection
+        ; test_case "selected File admission does not reopen its secret" `Quick
+            test_dispatch_auth_selected_file_is_not_reopened ] )
+    ; ( "provider_config"
       , [ test_case "parallel policy reaches fresh and resumed provider requests"
             `Quick test_parallel_policy_survives_fresh_resume_and_wire_serialization
         ; test_case "unsupported runtimes refuse parallel policy"

@@ -1,6 +1,17 @@
 open Alcotest
 open Masc
 
+let provider_config_for_binding config binding =
+  Runtime_adapter.materialize_provider_binding config binding
+  |> Result.map (fun (selected : Runtime_adapter.provider_materialization) -> selected.provider_config)
+;;
+
+let execution_for_binding config binding =
+  Runtime_adapter.materialize_execution config binding
+  |> Result.map (fun (selected : Runtime_adapter.execution_materialization) -> selected.execution)
+;;
+
+
 (* These tests assert on the operator-facing wording, so the typed failure is
    rendered once here instead of at every call below. *)
 let load_list_text ~config_path =
@@ -3052,7 +3063,7 @@ let test_runtime_toml_parses_max_tokens () =
          binding.Runtime_schema.max_tokens;
        (* The declaration is worthless unless it survives into the config the
           request builder reads, which is the step that was missing entirely. *)
-       (match Runtime_adapter.binding_to_provider_config cfg binding with
+       (match provider_config_for_binding cfg binding with
         | Error reason -> failf "provider_config should build: %s" reason
         | Ok provider_config ->
           check (option int) "reaches Provider_config" (Some 16384)
@@ -4217,7 +4228,7 @@ let test_anthropic_thinking_control_on_official_client_is_refused () =
   | Ok cfg ->
     (match cfg.Runtime_schema.bindings with
      | [ binding ] ->
-       (match Runtime_adapter.binding_to_execution cfg binding with
+       (match execution_for_binding cfg binding with
         | Ok _ -> fail "an unread declaration on an official client must be refused"
         | Error reason ->
           check bool "the refusal names the official client" true
@@ -7139,7 +7150,7 @@ let test_every_shipped_binding_is_admissible () =
     let refused =
       List.filter_map
         (fun (binding : Runtime_schema.binding) ->
-           match Runtime_adapter.binding_to_provider_config cfg binding with
+           match provider_config_for_binding cfg binding with
            | Error _ -> None
            | Ok provider_config ->
              (match

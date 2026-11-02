@@ -1,6 +1,12 @@
 open Alcotest
 open Masc
 
+let provider_config_for_binding config binding =
+  Runtime_adapter.materialize_provider_binding config binding
+  |> Result.map (fun (selected : Runtime_adapter.provider_materialization) -> selected.provider_config)
+;;
+
+
 let with_home f =
   let home = Filename.temp_file "setup-private-key" "" in
   Unix.unlink home; Unix.mkdir home 0o700;
@@ -92,7 +98,7 @@ default = "deepseek.chat"
     check string "committed raw credential remains usable" "committed-fixture-key"
       (In_channel.with_open_text reference In_channel.input_all);
     let binding = List.find (fun (b : Runtime_schema.binding) -> b.provider_id = "deepseek") config.bindings in
-    match Runtime_adapter.binding_to_provider_config config binding with
+    match provider_config_for_binding config binding with
     | Error error -> fail error
     | Ok materialized -> check string "native request materializes saved key" "committed-fixture-key"
         (Llm_provider.Secret.header_value materialized.api_key))

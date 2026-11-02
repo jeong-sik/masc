@@ -9,6 +9,10 @@ type t =
   ; model : model_spec
   ; binding : binding
   ; execution : Runtime_execution.t
+  ; credential_admission : Runtime_credential_selection.admission option
+    (** Captured alongside an HTTP execution's secret; absent only for
+        official-client ownership. No secret is retained in this value.
+        Provider/credential declaration changes require rematerialization. *)
   ; candidate_backpressure : Runtime_candidate_backpressure.candidate
     (** Candidate-only backpressure tied to the frozen dispatch binding. *)
   ; quota_scope : Runtime_quota_window.scope
@@ -31,6 +35,8 @@ type dispatch_credential_error =
   | Undeclared_credential of { provider_id : string }
       (** The catalog row states [requires_api_key] and the runtime row declares
           no credential, so the request would leave without an auth header. *)
+  | Missing_credential_selection of { provider_id : string }
+      (** An Agent Core execution has no materialized credential authority. *)
 
 val dispatch_credential_error_to_string : dispatch_credential_error -> string
 
@@ -40,7 +46,8 @@ val dispatch_credential_error_to_core_error :
     [MissingEnvVar] configuration error. Other unavailable credential carriers,
     and an undeclared one, use the closed [CredentialUnavailable] variant, so
     consumers never infer terminal configuration state from broad
-    [InvalidConfig] text. *)
+    [InvalidConfig] text. Missing selection authority is a distinct invalid
+    runtime configuration, rather than a missing account credential. *)
 
 val validate_dispatch_credential :
   provider_config:Llm_provider.Provider_config.t ->
@@ -49,7 +56,10 @@ val validate_dispatch_credential :
 (** Fail closed immediately before an Agent Core dispatch when the runtime
     declares a credential but the final provider config has no secret. A
     credential-free provider remains valid. This check intentionally happens
-    after materialization so dashboard missing-auth projection stays intact. *)
+    after materialization so dashboard missing-auth projection stays intact.
+    Empty final credentials use only captured requirements and carriers.
+    Registry, environment and File credentials are not read again. A nonempty
+    transformed final credential remains sufficient. *)
 
 type max_context_source =
   | Override (** runtime.toml [model.max-context] override applies as-is. *)

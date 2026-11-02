@@ -1,3 +1,8 @@
+let provider_config_for_binding config binding =
+  Runtime_adapter.materialize_provider_binding config binding
+  |> Result.map (fun (selected : Runtime_adapter.provider_materialization) -> selected.provider_config)
+;;
+
 open Alcotest
 module Verify = Runtime_verification
 
@@ -195,8 +200,8 @@ let test_provider_refusals_name_their_cause () =
     (Verify.failure_detail (Verify.failure_of_agent_core_error throttled))
 ;;
 
-(* Proves the credential arm keeps the dispatch check's own account. A runtime
-   whose declared file credential resolved to nothing usable reports
+(* Proves the credential arm keeps the dispatch check's selected account. A runtime
+   whose selected file credential has no usable final secret reports
    [Invalid_credential] with a reason naming the file carrier, and one whose
    environment credential is unset reports [Missing_credential] naming the
    variable. On origin/main both arrive as a payload-free [Missing_credential],
@@ -226,15 +231,14 @@ streaming = true
     | Ok config -> config
     | Error _ -> fail "credential fixture parses"
   in
-  (* A file credential that resolves to nothing is dropped at materialization,
-     so the runtime is materialized with an empty inline secret and the declared
-     credential is swapped in afterwards; [verify] reads the declaration, not
-     the file. *)
+  (* Select the actual carrier first, then simulate an unavailable final
+     execution secret without rewriting its captured credential authority.
+     Invalid File materialization is tested separately by the adapter suite. *)
   let materialize credential =
     let providers =
       List.map
         (fun (provider : Runtime_schema.provider) ->
-           { provider with credentials = Some (Runtime_schema.Inline "") })
+           { provider with credentials = Some credential })
         config.Runtime_schema.providers
     in
     match config.Runtime_schema.bindings with
@@ -243,10 +247,11 @@ streaming = true
       (match Runtime_instance.of_binding { config with providers } binding with
        | Error reason -> fail (Runtime_config_error.string_of_drop_reason reason)
        | Ok runtime ->
-         { runtime with
-           Runtime_instance.provider =
-             { runtime.Runtime_instance.provider with Runtime_schema.credentials = Some credential }
-         })
+         match runtime.Runtime_instance.execution with
+         | Runtime_execution.Agent_core provider_config ->
+           { runtime with execution = Runtime_execution.Agent_core
+               { provider_config with api_key = Llm_provider.Secret.of_string "" } }
+         | _ -> fail "credential fixture must materialize an HTTP execution")
   in
   let verify runtime =
     Eio_main.run (fun env ->
@@ -267,9 +272,9 @@ streaming = true
           ~timeout_s:15.
           runtime))
   in
-  let credential_file = Filename.temp_file "runtime-verification-credential-" ".json" in
+  let credential_file = Filename.temp_file "runtime-verification-credential-" ".key" in
   Out_channel.with_open_bin credential_file (fun out ->
-    output_string out "{\"type\":\"service_account\"}");
+    output_string out "fixture-selected-key");
   Unix.chmod credential_file 0o600;
   Fun.protect
     ~finally:(fun () -> Sys.remove credential_file)
@@ -295,7 +300,14 @@ streaming = true
     bool
     "the missing credential names its variable"
     true
-    (contains (Yojson.Safe.Util.to_string (failure_field unset "detail")) env_key)
+    (contains (Yojson.Safe.Util.to_string (failure_field unset "detail")) env_key);
+  let selected = materialize (Runtime_schema.Inline "fixture-selected-key") in
+  let missing_selection = verify {selected with credential_admission=None} in
+  check string "missing selection authority is invalid configuration"
+    "invalid_configuration"
+    (Yojson.Safe.Util.to_string (failure_field missing_selection "code"));
+  check bool "missing selection names the selected provider" true
+    (contains (Yojson.Safe.Util.to_string (failure_field missing_selection "detail")) "cloud")
 ;;
 
 (* A loopback listener that accepts and stays silent stands in for an
@@ -1588,7 +1600,7 @@ streaming = true
   let config = match Runtime_toml.parse_string contents with
     | Ok config -> config | Error _ -> fail "native Vertex TOML must parse" in
   let binding = List.hd config.bindings in
-  let provider_config = match Runtime_adapter.binding_to_provider_config config binding with
+  let provider_config = match provider_config_for_binding config binding with
     | Ok config -> config | Error reason -> fail reason in
   check bool "native Gemini codec" true (provider_config.kind = Llm_provider.Provider_config.Gemini);
   check bool "OAuth bearer selected explicitly" true
@@ -1597,10 +1609,19 @@ streaming = true
   (match provider_config.credential_source with
    | Llm_provider.Provider_config.Refreshable_credential _ -> ()
    | Static_credential -> fail "Vertex must refresh ADC at dispatch");
+  let runtime = match Runtime_instance.of_binding config binding with
+    | Ok runtime -> runtime
+    | Error reason -> fail (Runtime_config_error.string_of_drop_reason reason) in
+  let refresh_calls = ref 0 in
+  let deferred_config = {provider_config with credential_source = Refreshable_credential
+    (fun () -> incr refresh_calls; Error Llm_provider.Provider_config.Credential_unavailable)} in
+  check (result unit reject) "credential admission leaves Vertex refresh deferred" (Ok ())
+    (Runtime_instance.validate_dispatch_credential ~provider_config:deferred_config runtime);
+  check int "admission never invokes the refresh closure" 0 !refresh_calls;
   let unsafe_config = { config with providers = List.map (fun (p : Runtime_schema.provider) ->
     {p with transport=Http "https://other.example/v1"}) config.providers } in
   check bool "ADC cannot attach to arbitrary endpoint" true
-    (Result.is_error (Runtime_adapter.binding_to_provider_config unsafe_config binding))
+    (Result.is_error (provider_config_for_binding unsafe_config binding))
 ;;
 
 (* Proves F054: Vertex discovery resolves its bearer header from the auth

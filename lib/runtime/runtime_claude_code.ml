@@ -620,8 +620,10 @@ let probe_auth_status ~mgr ~cwd config =
           | Unhandled_exception _ | Timeout _ ) ),
       (None | Some _) -> false, result
   in
-  let* environment = client_environment config.account_home in
-  try
+  match client_environment config.account_home with
+  | Error error -> Error error, false
+  | Ok environment ->
+    try
     let stdout =
       Eio.Process.parse_out
         mgr

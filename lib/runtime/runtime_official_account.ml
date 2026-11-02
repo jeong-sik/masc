@@ -61,8 +61,9 @@ let selected_directory (type owner) ~(client : owner client) ~declaration ~envir
     let source, path = match value (directory_variable client) environment with
       | Some path when path <> "" -> Inherited_directory, Some path
       | Some _ | None -> Inherited_user_home,
-        Option.map (fun home -> Filename.concat home (default_directory client))
-          (value "HOME" environment) in
+        (match value "HOME" environment with
+         | Some home when home <> "" -> Some (Filename.concat home (default_directory client))
+         | Some _ | None -> None) in
     let* path = match path with
       | Some path -> Ok path
       | None -> Error "official client context has no selected home" in

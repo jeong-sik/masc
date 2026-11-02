@@ -355,6 +355,21 @@ let test_conflicting_current_codex_homes () =
       (Result.is_error (Runtime_codex_app_server.client_environment
         ~isolated_home:private_home (Runtime_official_account.Current (Some declared))))))
 
+let test_missing_codex_home () =
+  with_directory (fun directory ->
+    with_env environment (fun () ->
+      List.iter (fun home -> List.iter (fun codex_home ->
+        with_env ["HOME", home; "CODEX_HOME", codex_home] (fun () ->
+          check bool "an absent or empty HOME cannot select a cwd credential store" true
+            (Result.is_error (materialization Codex));
+          check bool "direct current calls reject the same missing selection" true
+            (Result.is_error (Runtime_codex_app_server.client_environment
+              (Runtime_official_account.Current None))))) [None; Some ""])
+        [None; Some ""];
+      with_env ["HOME", Some ""; "CODEX_HOME", Some directory] (fun () ->
+        check (option string) "a valid inherited CLI directory does not require HOME"
+          (Some directory) (env_value "CODEX_HOME" (child_environment (materialize Codex))))))
+
 let () = run "native account selection"
   ["admission to execution",
     [test_case "Claude inherited user home is captured" `Quick (test_inherited_home Claude);
@@ -376,6 +391,7 @@ let () = run "native account selection"
      test_case "Codex declared provider retains captured credential keys" `Quick test_declared_codex_credentials;
      test_case "Codex retired profiles fail before dispatch" `Quick test_retired_codex_profiles;
      test_case "Codex direct calls reject conflicting homes" `Quick test_conflicting_current_codex_homes;
+     test_case "Codex empty or missing HOME cannot select a cwd store" `Quick test_missing_codex_home;
      test_case "Claude relative CLI directory is captured" `Quick (test_relative_cli_directory Claude);
      test_case "Codex relative CLI directory is captured" `Quick (test_relative_cli_directory Codex);
      test_case "relative user HOME keeps client-specific admission" `Quick test_relative_user_home;

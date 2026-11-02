@@ -44,11 +44,14 @@ for verification and another for execution. It preserves root `env_key` and
 See also [official profile configuration](https://learn.chatgpt.com/docs/config-file/config-advanced#profiles).
 No provider call, login or native session was made to obtain these observations.
 
-The candidate suite has 26 registered source cases. Besides the original eight
+The candidate suite has 27 registered source cases. Besides the original eight
 scenarios, it covers environment-copy protection, direct-call timing, captured
 Claude credential diagnosis, Codex private-store filtering and declared custom
-credential values, retired-profile rejection, conflicting direct homes, relative
-paths, reload identity and sealed carrier admission. The original scenarios now
+credential values, retired-profile rejection, conflicting direct homes, missing
+or empty HOME rejection, relative paths, reload identity and sealed carrier
+admission. The first complete source review also found a tuple/Result mismatch
+in the Claude auth probe and an empty-HOME Codex fallback; both are corrected
+before requesting another full review. The original scenarios now
 use the typed API, and additional cases change the fixture source. A later
 candidate result must not be presented as an identical-fixture before/after pair.
 

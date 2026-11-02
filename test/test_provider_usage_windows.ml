@@ -478,14 +478,18 @@ let test_codex_default_and_explicit_home_share_scope =
   test_default_and_explicit_home_share_scope
     ~client:"codex" ~protocol:"codex-app-server" ~model:"sol"
     ~api_name:"gpt-5.6-sol" ~max_context:400000
-    ~resolve_home:Runtime_codex_app_server.effective_account_home
+    ~resolve_home:(fun declaration ->
+      Runtime_official_account.resolve_home ~client:Codex ~declaration
+      |> Result.to_option)
 ;;
 
 let test_claude_default_and_explicit_home_share_scope =
   test_default_and_explicit_home_share_scope
     ~client:"claude" ~protocol:"claude-code" ~model:"sonnet"
     ~api_name:"sonnet" ~max_context:200000
-    ~resolve_home:Runtime_claude_code.effective_account_home
+    ~resolve_home:(fun declaration ->
+      Runtime_official_account.resolve_home ~client:Claude_code ~declaration
+      |> Result.to_option)
 ;;
 
 (* A read without the per-limit map falls back to the single [rateLimits];
@@ -910,7 +914,7 @@ let reported scope =
 ;;
 
 let codex_exec : Runtime_execution.codex_app_server =
-  { Runtime_execution.cli_path = "/usr/bin/true"; account_home = None; model = None; timeout_s = 1.0 }
+  { Runtime_execution.cli_path = "/usr/bin/true"; account_home = Masc_test_deps.codex_account (); model = None; timeout_s = 1.0 }
 
 let antigravity_exec : Runtime_execution.antigravity_cli =
   { Runtime_execution.cli_path = "/usr/bin/true"

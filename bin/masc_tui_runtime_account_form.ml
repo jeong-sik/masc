@@ -133,8 +133,12 @@ let field_of_error = function
    read the way the runtime reads it. A new account there would share that
    login, so the declaration refuses it. *)
 let inherited_home = function
-  | D.Claude_code -> Runtime_claude_code.effective_account_home None
-  | D.Codex -> Runtime_codex_app_server.effective_account_home None
+  | D.Claude_code ->
+    Runtime_official_account.resolve_home ~client:Claude_code ~declaration:None
+    |> Result.to_option
+  | D.Codex ->
+    Runtime_official_account.resolve_home ~client:Codex ~declaration:None
+    |> Result.to_option
   | D.Muse -> Sys.getenv_opt "HOME"
   | D.Antigravity -> None
 ;;

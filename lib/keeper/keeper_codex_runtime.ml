@@ -951,7 +951,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
     let* () = on_guidance_prepared () in
     let tool_surface_sha256 =
       Keeper_official_client_session_store.tool_surface_sha256
-        ?account_home:(Runtime_codex_app_server.effective_account_home config.account_home)
+        ?account_home:(Some (Runtime_official_account.home config.account_home))
         ~native_posture
         tools
     in
@@ -1127,7 +1127,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
     in
     let client_config =
       { Runtime_codex_app_server.cli_path = config.cli_path
-      ; account_home = config.account_home
+      ; account_home = Runtime_official_account.Captured config.account_home
       ; isolated_home = None
       ; model = config.model
       ; context_window
@@ -1875,7 +1875,7 @@ let run ?(on_guidance_prepared = fun () -> Ok ()) ~input_source ~media_store ?ar
     ~event_bus ~raw_trace ~on_event ~(config : Runtime_execution.codex_app_server) () =
   let quota_scope =
     Runtime_quota_window.scope_of_codex_home
-      (Runtime_codex_app_server.effective_account_home config.account_home)
+      (Some (Runtime_official_account.home config.account_home))
   in
   let settled_session = Atomic.make None in
   let pending_result_receipts = Atomic.make None in

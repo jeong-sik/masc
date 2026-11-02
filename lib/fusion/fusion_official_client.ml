@@ -99,7 +99,7 @@ let claude_config ~base_dir ~turn_timeout_s ~system_prompt ~override_s ~output_s
   : Runtime_claude_code.config
   =
   { cli_path = execution.cli_path
-  ; account_home = execution.account_home
+  ; account_home = Runtime_official_account.Captured execution.account_home
   ; cwd = base_dir
   ; model = execution.model
   ; native = Runtime_native_tools.claude_code_default
@@ -116,7 +116,7 @@ let codex_config ~runtime ~system_prompt ~override_s ~output_schema
   : Runtime_codex_app_server.config
   =
   { cli_path = execution.cli_path
-  ; account_home = execution.account_home
+  ; account_home = Runtime_official_account.Captured execution.account_home
   ; isolated_home = None
   ; model = execution.model
   ; context_window = Some (Runtime_instance.max_context_of_runtime runtime)

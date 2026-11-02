@@ -87,10 +87,11 @@ let argv ~cli_path = function
 
 let environment = function
   | Native {client=Codex_home; account_home} ->
-    Runtime_codex_app_server.client_environment (Some account_home)
+    Runtime_codex_app_server.client_environment (Runtime_official_account.Current (Some account_home))
     |> Result.map_error Runtime_codex_app_server.error_to_string
   | Native {client=Claude_home; account_home} ->
-    Ok (Runtime_claude_code.client_environment (Some account_home))
+    Runtime_claude_code.client_environment (Runtime_official_account.Current (Some account_home))
+    |> Result.map_error Runtime_claude_code.error_to_string
   | Native {client=Muse_home; account_home} ->
     Ok (Runtime_muse_serve.login_environment ~account_home)
   | Antigravity_home {home; _} -> Ok (Runtime_antigravity_setup.environment home)
@@ -100,7 +101,7 @@ let is_pty = function Native _ -> false | Antigravity_home _ -> true
 let observe ~mgr ~clock ~cwd ~cli_path = function
   | Native {client=Codex_home; account_home} ->
     let config = { (Runtime_codex_app_server.default_config ()) with
-      cli_path; account_home=Some account_home } in
+      cli_path; account_home=Runtime_official_account.Current (Some account_home) } in
     let* result = Runtime_codex_app_server.probe_subscription ~mgr ~clock ~cwd config
       |> Result.map_error Runtime_codex_app_server.error_to_string in
     (match result.subscription with
@@ -109,7 +110,7 @@ let observe ~mgr ~clock ~cwd ~cli_path = function
        Error "Codex did not report authentication for this selected login account.")
   | Native {client=Claude_home; account_home} ->
     let config = { (Runtime_claude_code.default_config ~cwd:account_home) with
-      cli_path; account_home=Some account_home } in
+      cli_path; account_home=Runtime_official_account.Current (Some account_home) } in
     let* result = Runtime_claude_code.probe_subscription ~mgr ~clock ~cwd config
       |> Result.map_error Runtime_claude_code.error_to_string in
     (match result.authentication with

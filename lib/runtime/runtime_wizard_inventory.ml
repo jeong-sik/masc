@@ -152,10 +152,12 @@ let account_scope (provider : Runtime_schema.provider) =
     | Ok home -> Some (scope home) | Error _ -> None) in
   match provider.api_format with
   | Codex_app_server_runtime ->
-      native (Runtime_codex_app_server.effective_account_home provider.account_home)
+      native (Runtime_official_account.resolve_home ~client:Codex ~declaration:provider.account_home
+        |> Result.to_option)
         (fun home -> Runtime_quota_window.scope_of_codex_home (Some home))
   | Claude_code_runtime ->
-      native (Runtime_claude_code.effective_account_home provider.account_home)
+      native (Runtime_official_account.resolve_home ~client:Claude_code ~declaration:provider.account_home
+        |> Result.to_option)
         (fun home -> Runtime_quota_window.scope_of_claude_code_home (Some home))
   | Muse_serve_runtime -> native provider.account_home Runtime_quota_window.scope_of_muse_home
   | Antigravity_cli_runtime ->

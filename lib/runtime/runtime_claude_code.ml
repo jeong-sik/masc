@@ -16,9 +16,11 @@ let api_provider_to_string = function
   | First_party -> "firstParty" | Bedrock -> "bedrock" | Vertex -> "vertex"
   | Foundry -> "foundry" | Mantle -> "mantle"
 
+type account = Runtime_official_account.claude_code Runtime_official_account.selection
+
 type config =
   { cli_path : string
-  ; account_home : string option
+  ; account_home : account
   ; cwd : string
   ; model : string option
   ; system_prompt : string option
@@ -40,7 +42,7 @@ let mcp_server_name = "masc"
 
 let default_config ~cwd =
   { cli_path = "claude"
-  ; account_home = None
+  ; account_home = Runtime_official_account.Current None
   ; cwd
   ; model = None
   ; system_prompt = None
@@ -51,46 +53,25 @@ let default_config ~cwd =
   }
 ;;
 
-let effective_account_home = function
-  | Some path -> Some path
-  | None ->
-    (match Env_config_core.raw_value_opt "CLAUDE_CONFIG_DIR" with
-     | Some path when path <> "" ->
-       (match Runtime_account_home.of_inherited path with
-        | Ok selected -> Some selected
-        (* Keep an invalid inherited choice visible to validation. Falling
-           back to HOME here would silently switch login identities. *)
-        | Error _ -> Some path)
-     | Some _ | None ->
-       Option.map
-         (fun home -> Filename.concat home ".claude")
-         (Env_config_core.raw_value_opt "HOME"))
+let selected_account = function
+  | Runtime_official_account.Current declaration ->
+    Runtime_official_account.capture ~client:Claude_code ~declaration
+  | Captured selected -> Ok selected
 ;;
 
-(* Claude Code 2.1.283 reads [.config.json] in its config directory while that
-   legacy file exists, and otherwise
-   [join(CLAUDE_CONFIG_DIR || homedir(), ".claude.json")]: without
-   CLAUDE_CONFIG_DIR the file sits in HOME itself, not in the HOME/.claude
-   directory above. *)
-let account_file account_home =
-  let legacy =
-    Option.map
-      (fun directory -> Filename.concat directory ".config.json")
-      (effective_account_home account_home)
-  in
-  match legacy with
-  | Some path when Sys.file_exists path -> Some path
-  | Some _ | None ->
-    let directory =
-      match account_home, Env_config_core.raw_value_opt "CLAUDE_CONFIG_DIR" with
-      | Some _, _ -> effective_account_home account_home
-      | None, Some path when path <> "" -> effective_account_home None
-      | None, (Some _ | None) ->
-        (match Env_config_core.raw_value_opt "HOME" with
-         | Some home when home <> "" -> Some home
-         | Some _ | None -> None)
-    in
-    Option.map (fun directory -> Filename.concat directory ".claude.json") directory
+let account_file account =
+  match selected_account account with
+  | Error _ -> None
+  | Ok selected ->
+    let home = Runtime_official_account.home selected in
+    let legacy = Filename.concat home ".config.json" in
+    if Sys.file_exists legacy then Some legacy
+    else match Runtime_official_account.source selected with
+      | Declared_directory | Inherited_directory ->
+        Some (Filename.concat home ".claude.json")
+      | Inherited_user_home ->
+        Option.map (fun home -> Filename.concat home ".claude.json")
+          (Runtime_official_account.environment_value selected "HOME")
 ;;
 
 (* Claude Code uses a cloud provider selection, ANTHROPIC_AUTH_TOKEN,
@@ -114,14 +95,12 @@ let environment_credential_names = provider_switches @ credentials_before_login
 let switch_on value =
   List.mem (String.lowercase_ascii (String.trim value)) [ "1"; "true"; "yes"; "on" ]
 
-let runs_on_environment_credential = function
-  | Some _ -> false
-  | None ->
-    let set test name =
-      match Env_config_core.raw_value_opt name with
-      | Some value -> test value
-      | None -> false
-    in
+let runs_on_environment_credential account =
+  match selected_account account with
+  | Error _ -> false
+  | Ok selected ->
+    let set test name = match Runtime_official_account.environment_value selected name with
+      | Some value -> test value | None -> false in
     List.exists (set switch_on) provider_switches
     || List.exists (set (fun value -> value <> "")) credentials_before_login
 ;;
@@ -560,26 +539,10 @@ let text_value stage fields =
    silently paying for the whole surface -- a runtime failure the lane can
    fail over from. Documented at https://code.claude.com/docs/en/mcp
    ("Configure tool search"). *)
-let client_environment account_home =
-  (* A selected CLI home isolates Claude's own credential store. HOME and XDG
-     remain available for OS facilities, so settings under those shared paths
-     can still influence more than one selected home. *)
-  let inherited =
-    Runtime_claude_environment_projection.inherited_names
-      ~explicit_account:(Option.is_some account_home)
-  |> List.filter_map (fun name ->
-    let value =
-      match name, account_home with
-      | "CLAUDE_CONFIG_DIR", None ->
-        (match Env_config_core.raw_value_opt "CLAUDE_CONFIG_DIR" with
-         | Some path when path <> "" -> effective_account_home None
-         | Some _ -> Some ""
-         | None -> None)
-      | _ -> Sys.getenv_opt name
-    in
-    Option.map (fun value -> name ^ "=" ^ value) value)
-  in
-  Runtime_claude_environment_projection.of_inherited ~account_home inherited
+let client_environment account =
+  selected_account account
+  |> Result.map Runtime_official_account.environment
+  |> Result.map_error (fun detail -> Invalid_config detail)
 ;;
 
 let parse_subscription json =
@@ -657,6 +620,7 @@ let probe_auth_status ~mgr ~cwd config =
           | Unhandled_exception _ | Timeout _ ) ),
       (None | Some _) -> false, result
   in
+  let* environment = client_environment config.account_home in
   try
     let stdout =
       Eio.Process.parse_out
@@ -665,7 +629,7 @@ let probe_auth_status ~mgr ~cwd config =
         ~is_success:(fun code -> code = 0 || code = 1)
         ~cwd
         ~stderr:(Eio.Flow.buffer_sink stderr_buf)
-        ~env:(client_environment config.account_home)
+        ~env:environment
         [ config.cli_path
         ; Runtime_native_tools.claude_setting_sources_arg
         ; "auth"; "status"; "--json" ]
@@ -2998,6 +2962,7 @@ let run_spawned ?on_spawned ~mgr ~clock ~cwd config ~dynamic_tools
     with_system_prompt_file config.system_prompt (fun system_prompt ->
     let system_prompt_file = Option.map fst system_prompt in
     let* argv = command ~system_prompt_file config ~dynamic_tools ~reasoning_effort ~session_mode ~session_id in
+    let* environment = client_environment config.account_home in
     Eio.Switch.run (fun sw ->
     let stdin_r, stdin_w = Eio.Process.pipe ~sw mgr in
     let stdout_r, stdout_w = Eio.Process.pipe ~sw mgr in
@@ -3009,7 +2974,7 @@ let run_spawned ?on_spawned ~mgr ~clock ~cwd config ~dynamic_tools
           ~sw
           mgr
           ~cwd
-          ~env:(client_environment config.account_home)
+          ~env:environment
           ~stdin:stdin_r
           ~stdout:stdout_w
           ~stderr:stderr_w
@@ -3121,15 +3086,10 @@ let run_spawned ?on_spawned ~mgr ~clock ~cwd config ~dynamic_tools
 let validate_process_config config =
   if String.trim config.cli_path = ""
   then Error (Invalid_config "cli_path must not be empty")
-  else if (match config.account_home with
-      | None -> false
-      | Some home -> not (Runtime_account_home.is_valid home))
-  then Error (Invalid_config "account_home must be a non-empty absolute path")
-  else if (match effective_account_home config.account_home with
-      | Some home -> not (Runtime_account_home.is_valid home)
-      | None -> true)
-  then Error (Invalid_config "Claude Code needs account_home, CLAUDE_CONFIG_DIR, or HOME")
-  else if String.trim config.cwd = "" || Filename.is_relative config.cwd
+  else
+  let* _ = selected_account config.account_home
+    |> Result.map_error (fun detail -> Invalid_config detail) in
+  if String.trim config.cwd = "" || Filename.is_relative config.cwd
   then Error (Invalid_config "cwd must be an absolute path")
   else if
     not (Float.is_finite config.admission_timeout_s)

@@ -882,10 +882,12 @@ let codex_app_server_execution (provider : Runtime_schema.provider)
              is-non-interactive = true"
             provider.id)
      | None ->
+       let open Result.Syntax in
+       let* account_home = Runtime_official_account.capture ~client:Codex ~declaration:provider.account_home in
        Ok
          (Runtime_execution.Codex_app_server
             { cli_path = Runtime_official_cli_install.spawn_path Codex ~command
-            ; account_home = provider.account_home
+            ; account_home
             ; model = Some spec.api_name
             ; timeout_s = Runtime_codex_app_server.default_timeout_s
             }))
@@ -985,10 +987,12 @@ let claude_code_execution (provider : Runtime_schema.provider)
              is-non-interactive = true"
             provider.id)
      | None ->
+       let open Result.Syntax in
+       let* account_home = Runtime_official_account.capture ~client:Claude_code ~declaration:provider.account_home in
        Ok
          (Runtime_execution.Claude_code
             { cli_path = Runtime_official_cli_install.spawn_path Claude ~command
-            ; account_home = provider.account_home
+            ; account_home
             ; model = Some spec.api_name
             ; timeout_s = Runtime_claude_code.default_timeout_s
             }))

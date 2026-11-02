@@ -1,0 +1,37 @@
+2026-11-02T01:14:20.2387721Z 74740cfe683856b85ceb12bee2b572ebdeae5c4f
+2026-11-02T01:14:22.4475348Z [command]/usr/bin/git log -1 --format=%H
+2026-11-02T01:14:22.4519909Z 74740cfe683856b85ceb12bee2b572ebdeae5c4f
+2026-11-02T01:15:42.9826964Z   TARGET_SUITES: test/test_runtime_native_account_selection
+2026-11-02T01:15:42.9977938Z   TARGET_SUITES: test/test_runtime_native_account_selection
+2026-11-02T01:15:43.0265243Z [targeted] EIO_BACKEND=<unset> timeout=600s per suite
+2026-11-02T01:15:43.0476303Z [targeted] dune build test/test_runtime_native_account_selection.exe
+2026-11-02T01:18:15.2136039Z [targeted] test/test_runtime_native_account_selection: stanza env MASC_BASE_PATH= ZAI_API_KEY= TYPESAFEAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+2026-11-02T01:18:15.2151315Z [targeted] test/test_runtime_native_account_selection: start 2026-11-02T01:18:15Z
+2026-11-02T01:18:15.2252411Z   [FAIL]        admission to execution          0   Claude inherited user hom...
+2026-11-02T01:18:15.2255148Z   [FAIL]        admission to execution          1   Codex inherited user home...
+2026-11-02T01:18:15.2256125Z   [FAIL]        admission to execution          2   Claude inherited config d...
+2026-11-02T01:18:15.2257695Z   [FAIL]        admission to execution          3   Codex inherited config di...
+2026-11-02T01:18:15.2266320Z   [FAIL]        admission to execution          4   Claude inherited credenti...
+2026-11-02T01:18:15.2269719Z   [FAIL]        admission to execution          5   Codex inherited credentia...
+2026-11-02T01:18:15.2275862Z   [OK]          admission to execution          6   Claude explicit directory...
+2026-11-02T01:18:15.2279767Z   [OK]          admission to execution          7   Codex explicit directory ...
+2026-11-02T01:18:15.2282418Z FAIL child retains the admitted user home
+2026-11-02T01:18:15.2282787Z    Expected: `Some "/tmp/masc-native-account-selection-b85e51"'
+2026-11-02T01:18:15.2283214Z    Received: `Some "/tmp/masc-native-account-selection-5b2cd1"'
+2026-11-02T01:18:15.2293517Z FAIL child retains the admitted user home
+2026-11-02T01:18:15.2293802Z    Expected: `Some "/tmp/masc-native-account-selection-725b31"'
+2026-11-02T01:18:15.2294287Z    Received: `Some "/tmp/masc-native-account-selection-92932b"'
+2026-11-02T01:18:15.2302597Z FAIL child retains the inherited directory selected at admission
+2026-11-02T01:18:15.2302999Z    Expected: `Some "/tmp/masc-native-account-selection-e317f7"'
+2026-11-02T01:18:15.2303311Z    Received: `Some "/tmp/masc-native-account-selection-570821"'
+2026-11-02T01:18:15.2311917Z FAIL child retains the inherited directory selected at admission
+2026-11-02T01:18:15.2312359Z    Expected: `Some "/tmp/masc-native-account-selection-ce73fa"'
+2026-11-02T01:18:15.2312760Z    Received: `Some "/tmp/masc-native-account-selection-41a290"'
+2026-11-02T01:18:15.2320955Z FAIL credential environment belongs to the admitted selection
+2026-11-02T01:18:15.2321225Z    Expected: `Some "admitted-fixture-key"'
+2026-11-02T01:18:15.2321458Z    Received: `Some "replacement-fixture-key"'
+2026-11-02T01:18:15.2327904Z FAIL credential environment belongs to the admitted selection
+2026-11-02T01:18:15.2328184Z    Expected: `Some "admitted-fixture-key"'
+2026-11-02T01:18:15.2328415Z    Received: `Some "replacement-fixture-key"'
+2026-11-02T01:18:15.2333359Z 6 failures! in 0.002s. 8 tests run.
+2026-11-02T01:18:15.2334044Z [targeted] test/test_runtime_native_account_selection: FAIL exit 1 in 0s

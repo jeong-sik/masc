@@ -1,0 +1,39 @@
+{
+  "head": "74740cfe683856b85ceb12bee2b572ebdeae5c4f",
+  "base": "8006617018e0cb91ca488a6c8a5c2f9b44c4333a",
+  "files": {
+    ".github/workflows/test.yml": "99286b2989de40ea72ad184b6c8335da64e9213e289e260a4afc16bd3bd8bb6d",
+    "dune": "a9577d03a707232ba0af2db3583b0063950e4d76517ffe2ed833e7150419cd4c",
+    "dune-project": "e076b750daa7c7e367678526f6e2712ee7dad14d8b0895f836c5d0ce4be398fa",
+    "lib/runtime/runtime_adapter.ml": "59c3cb859f29a2d45d2d422eaabb89a124a959c63228e3a2823cc5fcc13cad49",
+    "lib/runtime/runtime_claude_code.ml": "0c4b491e51fd11b25bfe6ae13a0d16461721a7e856af16c930f47f04a91e6ebe",
+    "lib/runtime/runtime_claude_code.mli": "26cd12a4ebd641cdee58a9a70596949428424f2dae605de7f2cca31be752e60a",
+    "lib/runtime/runtime_claude_environment_projection.ml": "4b6699dc936446e3a99ad2a7378b8e9636da8c83236c231ab979cd182aeb4bcb",
+    "lib/runtime/runtime_codex_app_server.ml": "d772ca997dba5efbce718a04d54eb3eaf67deb6f4f969cdfe7cb8a6f585382fa",
+    "lib/runtime/runtime_codex_app_server.mli": "326ddb1cb485d9133ec80b57fd09c6bada008871509d7ed8943eb4cad1a76757",
+    "lib/runtime/runtime_codex_environment_projection.ml": "5c2664001d5f98254b7e90e8aaed5adbaa0fe7795c8d94b4f38c8ca21b43ac27",
+    "lib/runtime/runtime_execution.ml": "3c05b16ed9babe02b70790d3331cc602e79578e1db9219318f7b40c63df063da",
+    "lib/runtime/runtime_execution.mli": "00fc35380cdd9f1db9d54d2fa3edbe756aaeaaf6922d1249933cff054cbdeaa5",
+    "lib/runtime/runtime_instance.ml": "63fad2092ffc6a1aa60cf5e0e0f9f9cddba8828edaef32173ecd67850f5d9ebc",
+    "lib/runtime/runtime_quota_window.ml": "57ec532d733939414d33935b1a3f15e27fa748dbd6b3b63a345d886db48bdc1f",
+    "scripts/ci-run-targeted-tests.sh": "7391426895132a2c027aea2d6c85bfcae18a038fd4e9640cc3c0b9fa66a8ca72",
+    "test/deps/dune": "67a195fc8b4d7c7858634e5cd05c2999d0bf2565c88220ab82dc2c692c503dd9",
+    "test/dune": "232685dd8fc98ca31242ed2b17e3afa66b69d89fb5b40bc9087cfc3285fce32c",
+    "test/stanzas/test_runtime_native_account_selection.inc": "fcacdb09268b5aaf4f74911a39015a53fcfabe6324a4f4cb392b9c2c44da8f95",
+    "test/test_runtime_native_account_selection.ml": "30b28e8496d31c175d8202c21b19a10cfdd7ba7b9bf007af7cc4c8684ea7b978"
+  },
+  "trees": {
+    "packages/agent_core": "90499dce0d1e33d90ea158178539251f5b9ebc8b",
+    "lib": "699dbf675d7eaece587d0f5b86072c25b8ac871a",
+    "test": "ec3831fa1a23a590471b16d088eb3578e4ffe7cc",
+    "config": "783ac78ba6a516006c5e20d58c1fed0019a0ca5b",
+    "bin": "603abfebdb2eae04c21e68332c4a8f81763e6aec"
+  },
+  "suites": [
+    "test/test_runtime_native_account_selection"
+  ],
+  "role": "Corrected regression-only baseline: unused-open source P2 removed. Eight registered scenarios; no product repair or executed result.",
+  "changed_named_inputs_from_initial": [
+    "test/test_runtime_native_account_selection.ml"
+  ]
+}

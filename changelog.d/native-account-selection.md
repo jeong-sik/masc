@@ -1,0 +1,3 @@
+### Fixed
+
+- Retain a Claude Code or Codex binding's selected home and credential environment through execution, probes, usage reads and verification. Reloading after the environment changes now invalidates old dispatch observations. Codex rejects retired inline profile settings instead of selecting a different connection during verification.

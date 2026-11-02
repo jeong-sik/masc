@@ -435,7 +435,7 @@ let probe_official_client_invocation ~mgr ~clock ~fs ~base_path ~now ~runtime_id
                 probe, abandoned when the turn ends. *)
              let config : Runtime_claude_code.config =
                { cli_path = exec.cli_path
-               ; account_home = exec.account_home
+               ; account_home = Runtime_official_account.Captured exec.account_home
                ; cwd = base_path
                ; model = exec.model
                ; native = Runtime_native_tools.claude_code_default
@@ -478,7 +478,7 @@ let probe_official_client_invocation ~mgr ~clock ~fs ~base_path ~now ~runtime_id
            | Runtime_execution.Codex_app_server exec ->
              let config : Runtime_codex_app_server.config =
                { cli_path = exec.cli_path
-               ; account_home = exec.account_home
+               ; account_home = Runtime_official_account.Captured exec.account_home
                ; isolated_home = None
                ; model = exec.model
                ; context_window = Some (Runtime_instance.max_context_of_runtime rt)

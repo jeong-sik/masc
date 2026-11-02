@@ -794,7 +794,7 @@ let run_without_lifecycle ~result_scope ~media_store ~official_task_reference ~c
     (* Before the plan is read; see the same note in keeper_codex_runtime.ml. *)
     let tool_surface_sha256 =
       Session_store.tool_surface_sha256
-        ?account_home:(Runtime_claude_code.effective_account_home config.account_home)
+        ?account_home:(Some (Runtime_official_account.home config.account_home))
         ~native_posture tools
     in
     let* () = match official_client_continuation with
@@ -936,7 +936,7 @@ let run_without_lifecycle ~result_scope ~media_store ~official_task_reference ~c
     in
     let client_config : Runtime_claude_code.config =
       { cli_path = config.cli_path
-      ; account_home = config.account_home
+      ; account_home = Runtime_official_account.Captured config.account_home
       ; cwd = base_path
       ; model = config.model
       ; native = native_posture
@@ -1637,7 +1637,7 @@ let run ~input_source ~media_store ?argument_source ?on_memory_capacity_refusal 
     ~event_bus ~raw_trace ~on_event ~(config : Runtime_execution.claude_code) () =
   let quota_scope =
     Runtime_quota_window.scope_of_claude_code_home
-      (Runtime_claude_code.effective_account_home config.account_home)
+      (Some (Runtime_official_account.home config.account_home))
   in
   let settled_session = Atomic.make None in
   let pending_result_receipts = Atomic.make None in

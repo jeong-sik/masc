@@ -67,24 +67,18 @@ let route_for_keeper ~audience ~(meta : Keeper_meta_contract.keeper_meta) ~signa
     | Thread_participants ->
       (match Board_signal.wake_reason ~meta ~signal with
        | Board_signal.Unavailable _ as unavailable -> unavailable
-       | Board_signal.Available (Some reason) -> Board_signal.Available (Deliver reason)
-       | Board_signal.Available None ->
-         (* #27329: a comment classified as [Thread_participants] has no
-            deterministic address for a lane that neither owns the post nor authored its direct parent.
-            Folding those lanes to [Ignore] starved the attention judge on
-            the comment surface — the push path is the only producer of
-            comment judgment candidates (the replay scan re-synthesizes
-            post_created signals only). Escalate to [Judge_discoverable] so
-            the lane records an attention candidate; every other kind keeps
-            the [Ignore] fold. *)
-         (match signal.Board_dispatch.kind with
-          | Board_dispatch.Board_comment_added _ when meta.board_interests <> [] ->
+       | Board_signal.Available (Board_signal.Wake reason) ->
+         Board_signal.Available (Deliver reason)
+       | Board_signal.Available (Board_signal.Unaddressed_comment visibility) ->
+         (* Public and internal threads can be discovered through comments
+            (#27329). Unlisted and direct threads do not enter another lane's
+            attention collector merely because someone replied. *)
+         (match visibility with
+          | Board.Public | Board.Internal when meta.board_interests <> [] ->
             Board_signal.Available Judge_discoverable
-          | Board_dispatch.Board_post_created
-          | Board_dispatch.Board_post_updated _
-          | Board_dispatch.Board_comment_added _
-          | Board_dispatch.Board_reaction_changed _
-          | Board_dispatch.Board_vote_cast _ -> Board_signal.Available Ignore))
+          | Board.Public | Board.Internal | Board.Unlisted | Board.Direct ->
+            Board_signal.Available Ignore)
+       | Board_signal.Available Board_signal.Not_addressed -> Board_signal.Available Ignore)
     | Discoverable ->
       if meta.board_interests = []
       then Board_signal.Available Ignore

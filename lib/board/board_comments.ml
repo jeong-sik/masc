@@ -146,6 +146,10 @@ let add_comment_with_audience
      | Error _ as e -> e
      | Ok comment ->
         (match with_persist_lock store (fun () ->
+          (* A display-only parent cannot authorize a durable comment or its
+             later participant routing. Check before the append while holding
+             the same lock that serializes the posts source. *)
+          let* () = require_posts_source_readable store in
           match append_comment store comment with
           | Error _ as e -> e
           | Ok () -> Ok (with_lock store (fun () ->

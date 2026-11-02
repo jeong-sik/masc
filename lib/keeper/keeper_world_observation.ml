@@ -60,8 +60,8 @@ type pending_board_event =
   { event_kind : pending_board_event_kind
   ; post_id : string
   ; author : string
-  ; title : string
-  ; preview : string
+  ; title : string option
+  ; preview : string option
   ; hearth : string option
   ; post_kind : Board.post_kind
   ; updated_at : float
@@ -615,11 +615,12 @@ let pending_board_event_kind_of_observation
 
 let pending_board_event_of_board_observation
       ~(meta : keeper_meta)
-      ~arrived_at:(_ : float)
+      ~(arrived_at : float)
+      ~allow_legacy_unknown
       (observation : Board_signal.board_observation)
   : (pending_board_event, Board_signal.board_unavailable) result
   =
-  match Board_dispatch.read_post ~post_id:observation.post_id with
+  match Board_dispatch.read_post_for_evidence ~post_id:observation.post_id with
   | Error error ->
     Error
       { Board_signal.operation = Board_signal.Get_post
@@ -627,56 +628,70 @@ let pending_board_event_of_board_observation
       ; error
       }
   | Ok post_snapshot ->
-    let matched =
-      Board_signal.match_observation
-        ~post_kind:(post_snapshot : Board.post).post_kind
-        ~meta
-        ~observation
+    let legacy_missing kind_label =
+      if allow_legacy_unknown then Ok None
+      else
+        Error
+          { Board_signal.operation = Board_signal.Parse_queued_audience
+          ; post_id = observation.post_id
+          ; error =
+              Board.Read_audience_not_pinned
+                (Printf.sprintf
+                   "post %s %s predates audience pinning"
+                   observation.post_id
+                   kind_label)
+          }
     in
-    let title, preview, hearth, post_kind, updated_at =
-      let post : Board.post = post_snapshot in
+    let recorded_audience =
       match observation.kind with
-      | Board_signal.Observed_post_updated { content_updated_at } ->
-        ( observation.title
-        , short_preview ~max_len:80 observation.content
-        , observation.hearth
-        , post.post_kind
-        , content_updated_at )
-      | Board_signal.Observed_post_created
-      | Board_signal.Observed_comment_added _
-      | Board_signal.Observed_reaction_changed _
-      | Board_signal.Observed_vote_cast _ ->
-      ( post.title
-      , short_preview ~max_len:80 post.body
-      , post.hearth
-      , post.post_kind
-      , post.updated_at )
-    in
-    let event_kind = pending_board_event_kind_of_observation observation in
-    let latest_external_author, latest_external_preview =
-      match observation.kind with
+      | Board_signal.Observed_post_created ->
+        (match observation.audience with
+         | Some _ as pinned -> Ok pinned
+         | None -> legacy_missing "post_created")
+      | Board_signal.Observed_post_updated _ ->
+        (match observation.audience with
+         | Some _ as pinned -> Ok pinned
+         | None -> legacy_missing "post_updated")
       | Board_signal.Observed_comment_added _ ->
-        Some observation.author, Some (short_preview ~max_len:60 observation.content)
-      | Board_signal.Observed_post_created
-      | Board_signal.Observed_post_updated _
-      | Board_signal.Observed_reaction_changed _
-      | Board_signal.Observed_vote_cast _ -> None, None
+        (match observation.audience with
+         | Some _ as pinned -> Ok pinned
+         | None -> legacy_missing "comment_added")
+      | Board_signal.Observed_reaction_changed _ | Board_signal.Observed_vote_cast _ -> Ok None
     in
-    Ok
-      { event_kind
-      ; post_id = observation.post_id
-      ; author = observation.author
-      ; title
-      ; preview
-      ; hearth
-      ; post_kind
-      ; updated_at
-      ; explicit_mention = matched.explicit_mention
-      ; matched_targets = matched.matched_targets
-      ; replies_after_own_comment = None
-      ; latest_external_author
-      ; latest_external_preview
-      }
+    Result.map (fun audience ->
+      let matched =
+        Board_signal.match_observation
+          ~post_kind:(post_snapshot : Board.post).post_kind ~audience ~meta ~observation
+      in
+      let title, preview, hearth, post_kind, updated_at =
+        let post : Board.post = post_snapshot in
+        match observation.kind with
+        | Board_signal.Observed_post_created ->
+          ( Some observation.title, Some (short_preview ~max_len:80 observation.content)
+          , observation.hearth, post.post_kind, post.created_at )
+        | Board_signal.Observed_post_updated { content_updated_at } ->
+          ( Some observation.title, Some (short_preview ~max_len:80 observation.content)
+          , observation.hearth, post.post_kind, content_updated_at )
+        | Board_signal.Observed_comment_added _
+        | Board_signal.Observed_reaction_changed _ | Board_signal.Observed_vote_cast _ ->
+          (* The event audience belongs to the comment or action, not to the
+             parent post. Its current content has no recipient binding here. *)
+          ( None, None, None, post.post_kind
+          , Option.value observation.updated_at ~default:arrived_at )
+      in
+      let event_kind = pending_board_event_kind_of_observation observation in
+      let latest_external_author, latest_external_preview =
+        match observation.kind with
+        | Board_signal.Observed_comment_added _ ->
+          Some observation.author, Some (short_preview ~max_len:60 observation.content)
+        | Board_signal.Observed_post_created | Board_signal.Observed_post_updated _
+        | Board_signal.Observed_reaction_changed _ | Board_signal.Observed_vote_cast _ -> None, None
+      in
+      { event_kind; post_id = observation.post_id; author = observation.author
+      ; title; preview; hearth; post_kind; updated_at
+      ; explicit_mention = matched.explicit_mention; matched_targets = matched.matched_targets
+      ; replies_after_own_comment = None; latest_external_author; latest_external_preview })
+      recorded_audience
 ;;
 
 (* RFC-0266: fusion answers are the deliberation result the keeper requested,
@@ -752,10 +767,10 @@ let pending_board_event_of_fusion_completion
   { event_kind = Fusion_completed
   ; post_id
   ; author = meta.name
-  ; title
+  ; title = Some title
   ; preview =
-      (let body = short_preview ~max_len:fusion_result_preview_max_len message in
-       if String.equal lookup "" then body else body ^ "\n" ^ lookup)
+      Some (let body = short_preview ~max_len:fusion_result_preview_max_len message in
+            if String.equal lookup "" then body else body ^ "\n" ^ lookup)
   ; hearth = None
   ; post_kind = Board.System_post
   ; updated_at = arrived_at
@@ -802,8 +817,8 @@ let pending_board_event_of_composition_completion
     (* Joined rather than formatted: the ratchet counts a format literal as a
        model-facing prose slot, and the three fields already say everything
        the row states. *)
-  ; title = String.concat " " [ cc.cc_tool; outcome; cc.cc_request_id ]
-  ; preview
+  ; title = Some (String.concat " " [ cc.cc_tool; outcome; cc.cc_request_id ])
+  ; preview = Some preview
   ; hearth = None
   ; post_kind = Board.System_post
   ; updated_at = arrived_at
@@ -827,8 +842,8 @@ let pending_board_event_of_addon_operation_change ~base_path ~keeper_name ~arriv
     "tool",`String record.origin.destination.tool;"publication",P.event_json record.event] in
   Ok {event_kind=Addon_operation_changed {source=change;publication=record.event};
     post_id=Keeper_event_queue.addon_operation_change_post_id change;author=keeper_name;
-    title="Add-on " ^ record.origin.destination.tool ^ " state";
-    preview=Yojson.Safe.to_string preview;hearth=None;post_kind=Board.System_post;
+    title=Some ("Add-on " ^ record.origin.destination.tool ^ " state");
+    preview=Some (Yojson.Safe.to_string preview);hearth=None;post_kind=Board.System_post;
     updated_at=arrived_at;explicit_mention=false;matched_targets=[];replies_after_own_comment=None;
     latest_external_author=None;latest_external_preview=None}
 ;;
@@ -839,8 +854,8 @@ let pending_board_event_of_owned_job_completion ~base_path ~keeper_name ~arrived
     { event_kind = Owned_job_completed completion
     ; post_id = Keeper_event_queue.owned_job_completion_post_id completion
     ; author = keeper_name
-    ; title = "job " ^ Keeper_owned_job_identity.Job_id.to_string completion.Keeper_event_queue.oj_job_id
-    ; preview = Yojson.Safe.to_string (Keeper_owned_job_completion_result.to_json result)
+    ; title = Some ("job " ^ Keeper_owned_job_identity.Job_id.to_string completion.Keeper_event_queue.oj_job_id)
+    ; preview = Some (Yojson.Safe.to_string (Keeper_owned_job_completion_result.to_json result))
     ; hearth = None
     ; post_kind = Board.System_post
     ; updated_at = arrived_at
@@ -905,8 +920,8 @@ let pending_board_event_of_delegate_completion
   { event_kind = Delegate_completed dc.dc_terminal
   ; post_id = Keeper_event_queue.delegate_completion_post_id dc
   ; author = dc.dc_keeper
-  ; title = Printf.sprintf "%s %s" dc.dc_keeper outcome
-  ; preview
+  ; title = Some (Printf.sprintf "%s %s" dc.dc_keeper outcome)
+  ; preview = Some preview
   ; hearth = None
   ; post_kind = Board.System_post
   ; updated_at = arrived_at
@@ -943,8 +958,8 @@ let pending_board_event_of_scheduled_wake
   { event_kind = Schedule_due sw
   ; post_id
   ; author = scheduled_automation_actor
-  ; title
-  ; preview = sw.message
+  ; title = Some title
+  ; preview = Some sw.message
   ; hearth = None
   ; post_kind = Board.System_post
   ; updated_at = arrived_at
@@ -987,14 +1002,14 @@ let pending_board_event_of_external_attention
   ; post_id = "connector-attention:" ^ item.event_id
   ; author = actor
   ; title =
-      event_row_text
+      Some (event_row_text
         Prompt_names.keeper_world_event_rows_external_attention_title
         [ "surface", surface_label
         ; "urgency", urgency_label
         ; "conversation_id", item.conversation.conversation_id
         ]
-        ~fallback:item.conversation.conversation_id
-  ; preview = short_preview ~max_len:fusion_result_preview_max_len item.content_preview
+        ~fallback:item.conversation.conversation_id)
+  ; preview = Some (short_preview ~max_len:fusion_result_preview_max_len item.content_preview)
   ; hearth = None
   ; post_kind = Board.Human_post
   ; updated_at = item.received_at
@@ -1074,15 +1089,15 @@ let pending_board_event_of_ask_answer
   ; post_id = "keeper-ask:" ^ ask.Keeper_ask.ask_id
   ; author = who
   ; title =
-      event_row_text
+      Some (event_row_text
         Prompt_names.keeper_world_event_rows_ask_title
         [ "ask_id", ask.Keeper_ask.ask_id
         ; "surface", Surface_ref.lane_label responder.Keeper_ask.surface
         ]
-        ~fallback:ask.Keeper_ask.ask_id
+        ~fallback:ask.Keeper_ask.ask_id)
   (* A display preview only. The model consumes the typed original questions
      and answers, not this joined display text or its short excerpt. *)
-  ; preview = body
+  ; preview = Some body
   ; hearth = None
     (* Not a Board post: masc wrote this row, nobody posted it. Marked
        [Human_post] the Keeper read it as a post it could fetch and spent a
@@ -1108,12 +1123,12 @@ let pending_board_event_of_completion_authority_rejection
   ; post_id = Keeper_event_queue.completion_authority_rejection_post_id rejection
   ; author = Masc_domain.completion_authority_actor rejection.car_authority
   ; title =
-      event_row_text
+      Some (event_row_text
         Prompt_names.keeper_world_event_rows_completion_authority_title
         [ "task_id", rejection.car_task_id ]
-        ~fallback:rejection.car_task_id
+        ~fallback:rejection.car_task_id)
   ; preview =
-      short_preview
+      Some (short_preview
         ~max_len:fusion_result_preview_max_len
         (event_row_text
            Prompt_names.keeper_world_event_rows_completion_authority_preview
@@ -1123,7 +1138,7 @@ let pending_board_event_of_completion_authority_rejection
              , Masc_domain.completion_authority_kind rejection.car_authority )
            ; "reason", rejection.car_reason
            ]
-           ~fallback:(rejection.car_task_id ^ " " ^ rejection.car_verification_id))
+           ~fallback:(rejection.car_task_id ^ " " ^ rejection.car_verification_id)))
   ; hearth = None
   ; post_kind = Board.System_post
   ; updated_at = arrived_at
@@ -1158,12 +1173,12 @@ let pending_board_event_of_task_cancellation
   ; post_id = Keeper_event_queue.task_cancellation_post_id cancellation
   ; author = cancellation.tc_cancelled_by
   ; title =
-      event_row_text
+      Some (event_row_text
         Prompt_names.keeper_world_event_rows_task_cancelled_title
         [ "task_id", cancellation.tc_task_id ]
-        ~fallback:cancellation.tc_task_id
+        ~fallback:cancellation.tc_task_id)
   ; preview =
-      short_preview
+      Some (short_preview
         ~max_len:fusion_result_preview_max_len
         (event_row_text
            Prompt_names.keeper_world_event_rows_task_cancelled_preview
@@ -1171,7 +1186,7 @@ let pending_board_event_of_task_cancellation
            ; "cancelled_by", cancellation.tc_cancelled_by
            ; "reason", reason_text
            ]
-           ~fallback:(cancellation.tc_task_id ^ " " ^ cancellation.tc_cancelled_by))
+           ~fallback:(cancellation.tc_task_id ^ " " ^ cancellation.tc_cancelled_by)))
   ; hearth = None
   ; post_kind = Board.System_post
   ; updated_at = arrived_at
@@ -1196,12 +1211,12 @@ let pending_board_event_of_task_outcome
   ; post_id = Keeper_event_queue.task_outcome_post_id outcome
   ; author = Masc_domain.completion_authority_actor outcome.to_authority
   ; title =
-      event_row_text
+      Some (event_row_text
         Prompt_names.keeper_world_event_rows_task_outcome_title
         [ "task_id", outcome.to_task_id ]
-        ~fallback:outcome.to_task_id
+        ~fallback:outcome.to_task_id)
   ; preview =
-      short_preview
+      Some (short_preview
         ~max_len:fusion_result_preview_max_len
         (event_row_text
            Prompt_names.keeper_world_event_rows_task_outcome_preview
@@ -1211,7 +1226,7 @@ let pending_board_event_of_task_outcome
              , Masc_domain.completion_authority_kind outcome.to_authority )
            ]
            ~fallback:
-             (outcome.to_task_id ^ " " ^ outcome.to_verification_id))
+             (outcome.to_task_id ^ " " ^ outcome.to_verification_id)))
   ; hearth = None
   ; post_kind = Board.System_post
   ; updated_at = arrived_at
@@ -1232,17 +1247,53 @@ let pending_board_event_of_stimulus
   =
   match stimulus.payload with
   | Keeper_event_queue.Board_signal bs ->
-    Result.bind
-      (Board_signal.board_observation_of_board_stimulus ~post_id:stimulus.post_id bs)
-      (pending_board_event_of_board_observation ~meta ~arrived_at:stimulus.arrived_at)
-    |> Result.map Option.some
+    let audience_check =
+      match bs.kind, bs.audience with
+      | (Post_created | Post_updated _ | Comment_added _), None ->
+        Error
+          { Board_signal.operation = Board_signal.Parse_queued_audience
+          ; post_id = stimulus.post_id
+          ; error = Board.Read_audience_not_pinned
+              ("queued Board signal predates audience pinning")
+          }
+      | (Post_created | Post_updated _ | Comment_added _), Some _
+      | (Reaction_changed _ | Vote_cast _), (None | Some _) -> Ok ()
+    in
+    Result.bind audience_check (fun () ->
+      Result.bind
+        (Board_signal.board_observation_of_board_stimulus ~post_id:stimulus.post_id bs)
+        (pending_board_event_of_board_observation
+           ~meta
+           ~arrived_at:stimulus.arrived_at
+           ~allow_legacy_unknown:false)
+      |> Result.map Option.some)
   | Keeper_event_queue.Board_attention attention ->
     Result.bind
-      (Board_signal.board_observation_of_board_stimulus
-         ~post_id:stimulus.post_id
-         attention.signal)
-      (pending_board_event_of_board_observation ~meta ~arrived_at:stimulus.arrived_at)
-    |> Result.map Option.some
+      (Board_signal.board_observation_of_board_stimulus ~post_id:stimulus.post_id attention.signal)
+      (fun observation ->
+         match observation.kind with
+         | Board_signal.Observed_comment_added _ ->
+           (match Board_dispatch.read_post_for_evidence ~post_id:observation.post_id with
+            | Error error ->
+              Error { Board_signal.operation = Board_signal.Get_post; post_id = observation.post_id; error }
+            | Ok post_snapshot ->
+              match Keeper_board_attention_candidate.filter_comment_parent_visibility post_snapshot.visibility with
+              | Keeper_board_attention_candidate.Skip_non_discoverable_comment -> Ok None
+              | Keeper_board_attention_candidate.Keep_discoverable_comment ->
+                pending_board_event_of_board_observation
+                  ~meta
+                  ~arrived_at:stimulus.arrived_at
+                  ~allow_legacy_unknown:true
+                  observation
+                |> Result.map Option.some)
+         | Board_signal.Observed_post_created | Board_signal.Observed_post_updated _
+         | Board_signal.Observed_reaction_changed _ | Board_signal.Observed_vote_cast _ ->
+           pending_board_event_of_board_observation
+             ~meta
+             ~arrived_at:stimulus.arrived_at
+             ~allow_legacy_unknown:true
+             observation
+           |> Result.map Option.some)
   | Keeper_event_queue.Fusion_completed fc ->
     Ok (Some (pending_board_event_of_fusion_completion ~meta ~arrived_at:stimulus.arrived_at fc))
   | Keeper_event_queue.Schedule_due sw ->
@@ -1324,6 +1375,15 @@ let collect_board_events_with_cursor_policy
   : pending_board_event list * int * int
   =
   try
+    match Board_dispatch.require_persisted_sources_readable () with
+    | Error error ->
+      Otel_metric_store.inc_counter
+        Keeper_metrics.(to_string ObservationQueryFailures)
+        ~labels:[ ("operation", Runtime_observation_query_operation.(to_label Board_events)) ] ();
+      Log.Keeper.warn "board event collection retained cursor: source unavailable: %s"
+        (Board.show_board_error error);
+      [], 0, 0
+    | Ok () ->
     let cursor_ts, cursor_post_id =
       Keeper_registry.get_board_cursor ~base_path meta.name
     in
@@ -1384,7 +1444,11 @@ let collect_board_events_with_cursor_policy
          | Some id -> compare_board_cursor_token token (ts, id) > 0)
         && compare_board_cursor_token token (board_cursor_token_of_post p) <= 0
     in
-    let route_signal ~classified (signal : Board_dispatch.board_signal) =
+    let route_signal
+        ~classified
+        ~(board_audience : Board.audience option)
+        (signal : Board_dispatch.board_signal)
+      =
       match classified with
       | Error error ->
         Otel_metric_store.inc_counter
@@ -1395,14 +1459,25 @@ let collect_board_events_with_cursor_policy
           meta.name signal.post_id (Board_audience.classification_error_to_string error);
         Ok None
       | Ok audience ->
-        (match Board_audience.route_for_keeper ~audience ~meta ~signal with
-         | Board_signal.Unavailable unavailable -> Error (Source_unavailable unavailable)
-         | Board_signal.Available Board_audience.Ignore -> Ok None
-         | Board_signal.Available Board_audience.Judge_discoverable ->
-           (* Prompt previews never persist candidates or wake a lane. *)
-           if advance_cursor then (
-             let candidate = Keeper_board_attention_candidate.of_board_signal
-                 ~meta ~recorded_at:(Time_compat.now ()) signal in
+        (match board_audience with
+         | None ->
+           Otel_metric_store.inc_counter
+             Keeper_metrics.(to_string ObservationQueryFailures)
+             ~labels:[ "operation", Runtime_observation_query_operation.(to_label Board_events) ] ();
+           Log.Keeper.warn
+             "board replay audience missing: keeper=%s post=%s"
+             meta.name signal.post_id;
+           Ok None
+         | Some pinned ->
+           let addressed : Board_dispatch.addressed_board_signal = { signal; audience = pinned } in
+           (match Board_audience.route_for_keeper ~audience ~meta ~signal with
+            | Board_signal.Unavailable unavailable -> Error (Source_unavailable unavailable)
+            | Board_signal.Available Board_audience.Ignore -> Ok None
+            | Board_signal.Available Board_audience.Judge_discoverable ->
+              (* Prompt previews never persist candidates or wake a lane. *)
+              if advance_cursor then (
+                let candidate = Keeper_board_attention_candidate.of_board_signal
+                    ~meta ~recorded_at:(Time_compat.now ()) addressed in
              match Keeper_board_attention_candidate.record_and_wake ~base_path candidate with
              | Ok acceptance ->
                let persistence =
@@ -1430,7 +1505,7 @@ let collect_board_events_with_cursor_policy
            let result =
              if advance_cursor then (
                let stimulus = Board_signal.board_signal_stimulus
-                   ~arrived_at:(Time_compat.now ()) ~reason signal in
+                   ~arrived_at:(Time_compat.now ()) ~reason addressed in
                match Keeper_registry_event_queue.enqueue_stimulus_durable_result
                        ~base_path meta.name stimulus with
                | Keeper_registry_event_queue.Stimulus_enqueued
@@ -1441,16 +1516,20 @@ let collect_board_events_with_cursor_policy
                Result.bind
                  (Board_signal.board_observation_of_board_stimulus
                     ~post_id:signal.post_id
-                    (Board_signal.board_stimulus_of_board_signal signal))
-                 (pending_board_event_of_board_observation ~meta
-                    ~arrived_at:(Time_compat.now ()))
+                    (Board_signal.board_stimulus_of_signal_with_audience
+                       ~signal
+                       ~audience:(Some pinned)))
+                 (pending_board_event_of_board_observation
+                    ~meta
+                    ~arrived_at:(Time_compat.now ())
+                    ~allow_legacy_unknown:false)
                |> Result.map Option.some
                |> Result.map_error (fun error -> Source_unavailable error)
            in
            (match result with
             | Ok _ when reason = Board_signal.Explicit_mention -> incr mention_count
             | Ok _ | Error _ -> ());
-           result)
+           result))
     in
     let events_of_post (p : Board.post) =
       let post_id = Board.Post_id.to_string p.id in
@@ -1469,12 +1548,13 @@ let collect_board_events_with_cursor_policy
         (* Each signal is paired with the audience its post or comment recorded. *)
         let signals =
           (if signal_after_cursor p p.content_updated_at
-           then [ Board_audience.of_post p, post_signal ]
+           then [ Board_audience.of_post p, p.audience, post_signal ]
            else [])
           @ List.filter_map (fun (comment : Board.comment) ->
               if not (signal_after_cursor p comment.created_at) then None
               else Some
                 ( Board_audience.of_comment comment
+                , comment.audience
                 , { post_signal with
                     kind = Board_dispatch.Board_comment_added
                       { comment_id = comment.id; parent_id = comment.parent_id }
@@ -1484,8 +1564,10 @@ let collect_board_events_with_cursor_policy
         in
         let rec collect acc = function
           | [] -> Ok (List.rev acc)
-          | (classified, signal) :: rest ->
-            (match route_signal ~classified signal with
+          | (classified, board_audience, signal) :: rest ->
+            (match route_signal ~classified ~board_audience signal with
+             | Error (Source_unavailable ({ error = Board.Read_source_unavailable _; _ } as unavailable)) ->
+               Error (Source_unavailable unavailable)
              | Error (Source_unavailable unavailable) ->
                log_and_count_unavailable ~context:"signal replay" unavailable;
                collect acc rest
@@ -1508,6 +1590,9 @@ let collect_board_events_with_cursor_policy
             ~labels:[ "operation", Runtime_observation_query_operation.(to_label Board_events) ] ();
           Log.Keeper.warn "board catchup retained cursor: keeper=%s post=%s delivery=%s"
             meta.name (Board.Post_id.to_string p.id) detail;
+          List.rev acc, last_cursor
+        | Error (Source_unavailable ({ error = Board.Read_source_unavailable _; _ } as unavailable)) ->
+          log_and_count_unavailable ~context:"source retained" unavailable;
           List.rev acc, last_cursor
         | Error (Source_unavailable unavailable) ->
           log_and_count_unavailable ~context:"signal replay" unavailable;

@@ -186,6 +186,7 @@ let board_distractor_stimulus ~post_id ~arrived_at : Q.stimulus =
         ; content = "never consumed by this suite"
         ; hearth = None
         ; updated_at = None
+        ; audience = Some (Keeper_event_queue.Audience_discoverable)
         }
   }
 ;;
@@ -219,6 +220,7 @@ let board_attention_stimulus ~label ~arrived_at : Q.stimulus =
             ; content = "content-" ^ label
             ; hearth = None
             ; updated_at = Some post.updated_at
+            ; audience = Some (Keeper_event_queue.Audience_discoverable)
             }
         }
   }
@@ -637,7 +639,7 @@ let test_unread_connector_sources_survive_other_completed_work ~failure () =
           (Keeper_heartbeat_source_batch.count restored.source_batch);
         check (list string) "restoration delivers every original body"
           (List.init count (Printf.sprintf "original message %d"))
-          (List.map (fun (event : Keeper_world_observation.pending_board_event) -> event.preview)
+          (List.map (fun (event : Keeper_world_observation.pending_board_event) -> (Option.get event.preview))
              restored.pending_board_events);
         complete restored.source_batch;
         check (list string) "only successful restored delivery drains the messages" [] (pending_ids ())))
@@ -835,7 +837,7 @@ let test_unavailable_ask_survives_other_completed_work ~failure () =
       (match recovered.pending_board_events with
        | [event] ->
          check string "recovered canonical answer reaches model observation"
-           "notes: original canonical answer" event.preview;
+           "notes: original canonical answer" (Option.get event.preview);
          check string "recovered observation stays bound to the original Ask"
            stimulus.post_id event.post_id
        | _ -> fail "recovered canonical answer produced no single observation");
@@ -872,7 +874,7 @@ let test_unavailable_ask_survives_other_completed_work ~failure () =
          |> List.map (fun (source : Q.stimulus) -> source.post_id));
       (match restored.pending_board_events with
        | [event] ->
-         check string "canonical answer reaches model observation" "notes: original canonical answer" event.preview;
+         check string "canonical answer reaches model observation" "notes: original canonical answer" (Option.get event.preview);
          check string "observation stays bound to the original Ask" stimulus.post_id event.post_id
        | _ -> fail "restored canonical answer produced no single observation");
       assert_no_delivery ();
@@ -941,7 +943,7 @@ let test_missing_prefix_does_not_starve_readable_connector ~cross_conversation (
        |> List.map (fun (source : Q.stimulus) -> source.post_id));
     check (list string) "readable connector body reaches the turn"
       ["readable after missing prefix"]
-      (List.map (fun (event : Keeper_world_observation.pending_board_event) -> event.preview)
+      (List.map (fun (event : Keeper_world_observation.pending_board_event) -> (Option.get event.preview))
          mixed.pending_board_events);
     complete mixed.source_batch;
     check (list string) "unrelated completion retains all missing pointers"
@@ -950,13 +952,13 @@ let test_missing_prefix_does_not_starve_readable_connector ~cross_conversation (
     let first = intake () in
     check (list string) "restored prefix delivers within the admission bound"
       ["recoverable 0"; "recoverable 1"]
-      (List.map (fun (event : Keeper_world_observation.pending_board_event) -> event.preview)
+      (List.map (fun (event : Keeper_world_observation.pending_board_event) -> (Option.get event.preview))
          first.pending_board_events);
     complete first.source_batch;
     let last = intake () in
     check (list string) "remaining restored body is delivered"
       ["recoverable 2"]
-      (List.map (fun (event : Keeper_world_observation.pending_board_event) -> event.preview)
+      (List.map (fun (event : Keeper_world_observation.pending_board_event) -> (Option.get event.preview))
          last.pending_board_events);
     complete last.source_batch;
     check (list string) "another conversation was not mixed with restored messages"
@@ -964,7 +966,7 @@ let test_missing_prefix_does_not_starve_readable_connector ~cross_conversation (
     let separate = intake () in
     check (list string) "later conversation gets its own delivery"
       ["separate conversation"]
-      (List.map (fun (event : Keeper_world_observation.pending_board_event) -> event.preview)
+      (List.map (fun (event : Keeper_world_observation.pending_board_event) -> (Option.get event.preview))
          separate.pending_board_events);
     complete separate.source_batch;
     check (list string) "restored successful deliveries ACK the remaining sources" [] (pending_ids ()))
@@ -1324,7 +1326,7 @@ let test_batch_admits_same_conversation_in_arrival_order_leaves_other_channel_qu
            check bool
              (Printf.sprintf "observation %d carries %s in arrival order" i marker)
              true
-             (contains ~needle:marker ev.preview))
+             (contains ~needle:marker (Option.get ev.preview)))
       [ "MARK-CHAN-A-1"; "MARK-CHAN-A-2"; "MARK-CHAN-A-3" ];
     let queued =
       match Keeper_registry_event_queue.snapshot_result ~base_path keeper_name with

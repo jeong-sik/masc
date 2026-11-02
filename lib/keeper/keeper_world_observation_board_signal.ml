@@ -26,12 +26,14 @@ type board_observation =
   ; content : string
   ; hearth : string option
   ; updated_at : float option
+  ; audience : Board.audience option
   }
 
 type board_read_operation =
   | Get_post
   | Get_comments
   | Parse_queued_comment_identity
+  | Parse_queued_audience
 
 type board_unavailable =
   { operation : board_read_operation
@@ -61,6 +63,7 @@ let board_read_operation_to_string = function
   | Get_post -> "get_post"
   | Get_comments -> "get_comments"
   | Parse_queued_comment_identity -> "parse_queued_comment_identity"
+  | Parse_queued_audience -> "parse_queued_audience"
 ;;
 
 let unavailable_to_string unavailable =
@@ -147,7 +150,49 @@ let queue_vote_change_of_board (vote : Board_dispatch.board_vote_change)
   }
 ;;
 
-let board_stimulus_of_board_signal (signal : Board_dispatch.board_signal) =
+let queue_audience_of_board : Board.audience -> Keeper_event_queue.board_audience
+  = function
+  | Board.Targets targets ->
+    Keeper_event_queue.Audience_targets
+      (List.map Board.Agent_id.to_string targets)
+  | Board.Broadcast -> Keeper_event_queue.Audience_broadcast
+  | Board.Thread_participants -> Keeper_event_queue.Audience_thread_participants
+  | Board.Discoverable -> Keeper_event_queue.Audience_discoverable
+;;
+
+let board_audience_of_queue
+      ~(post_id : string)
+      (audience : Keeper_event_queue.board_audience)
+  : (Board.audience, board_unavailable) result
+  =
+  match audience with
+  | Keeper_event_queue.Audience_broadcast -> Ok Board.Broadcast
+  | Keeper_event_queue.Audience_thread_participants -> Ok Board.Thread_participants
+  | Keeper_event_queue.Audience_discoverable -> Ok Board.Discoverable
+  | Keeper_event_queue.Audience_targets targets ->
+    let rec parse acc = function
+      | [] ->
+        (match List.rev acc with
+         | [] ->
+           Error
+             { operation = Parse_queued_audience
+             ; post_id
+             ; error = Board.Read_invalid_id "queued audience targets must not be empty"
+             }
+         | _ :: _ as parsed -> Ok (Board.Targets parsed))
+      | target :: rest ->
+        (match Board.Agent_id.parse target with
+         | Ok id -> parse (id :: acc) rest
+         | Error error ->
+           Error { operation = Parse_queued_audience; post_id; error })
+    in
+    parse [] targets
+;;
+
+let board_stimulus_of_signal_with_audience
+      ~(signal : Board_dispatch.board_signal)
+      ~(audience : Board.audience option)
+  =
   { Keeper_event_queue.kind =
       (match signal.kind with
        | Board_dispatch.Board_post_created -> Keeper_event_queue.Post_created
@@ -168,7 +213,16 @@ let board_stimulus_of_board_signal (signal : Board_dispatch.board_signal) =
   ; content = signal.content
   ; hearth = signal.hearth
   ; updated_at = signal.updated_at
+  ; audience = Option.map queue_audience_of_board audience
   }
+;;
+
+let board_stimulus_of_board_signal
+      (addressed : Board_dispatch.addressed_board_signal)
+  =
+  board_stimulus_of_signal_with_audience
+    ~signal:addressed.signal
+    ~audience:(Some addressed.audience)
 ;;
 
 (* The queue keeps the comment identity as its wire string (the queue is a
@@ -204,6 +258,13 @@ let board_observation_of_board_stimulus
     | Keeper_event_queue.Vote_cast vote ->
       Ok (Observed_vote_cast (board_vote_change_of_queue vote))
   in
+  let* audience =
+    match bs.audience with
+    | None -> Ok None
+    | Some queued ->
+      let* parsed = board_audience_of_queue ~post_id queued in
+      Ok (Some parsed)
+  in
   Ok
     { kind
     ; post_id
@@ -212,6 +273,7 @@ let board_observation_of_board_stimulus
     ; content = bs.content
     ; hearth = bs.hearth
     ; updated_at = bs.updated_at
+    ; audience
     }
 ;;
 
@@ -270,19 +332,7 @@ let mention_ids_of_text text =
 
 let mention_ids_of_signal signal = mention_ids_of_text (address_text signal)
 
-let address_text_of_observation observation =
-  match observation.kind with
-  | Observed_post_created | Observed_post_updated _ ->
-    String.concat
-      "\n"
-      (List.filter
-         (fun part -> not (String.equal (String.trim part) ""))
-         [ observation.title; observation.content ])
-  | Observed_comment_added _ -> observation.content
-  | Observed_reaction_changed _ | Observed_vote_cast _ -> ""
-;;
-
-let match_authored_text ~(meta : keeper_meta) ~author ~address_text =
+let match_targets_of_ids ~(meta : keeper_meta) ~author target_ids =
   let self_ids = Message_scope.self_ids meta in
   if Message_scope.is_self_author ~self_ids author
   then { explicit_mention = false; matched_targets = [] }
@@ -290,7 +340,6 @@ let match_authored_text ~(meta : keeper_meta) ~author ~address_text =
     let targets =
       if meta.mention_targets <> [] then meta.mention_targets else [ meta.name ]
     in
-    let mentions = mention_ids_of_text address_text in
     let matched_targets =
       targets
       |> List.filter (fun target ->
@@ -299,11 +348,25 @@ let match_authored_text ~(meta : keeper_meta) ~author ~address_text =
         | Some target_id ->
           List.exists
             (Keeper_identity.Keeper_id.equal target_id)
-            mentions)
+            target_ids)
     in
     if matched_targets <> []
     then { explicit_mention = true; matched_targets }
     else { explicit_mention = false; matched_targets = [] })
+;;
+
+let match_authored_text ~(meta : keeper_meta) ~author ~address_text =
+  match_targets_of_ids ~meta ~author (mention_ids_of_text address_text)
+;;
+
+let match_recorded_targets ~(meta : keeper_meta) ~author recorded_targets =
+  let recorded_ids =
+    List.filter_map
+      (fun target ->
+         Keeper_identity.Keeper_id.of_string (Board.Agent_id.to_string target))
+      recorded_targets
+  in
+  match_targets_of_ids ~meta ~author recorded_ids
 ;;
 
 let match_signal
@@ -316,20 +379,30 @@ let match_signal
 
 let match_observation
       ~(post_kind : Board.post_kind)
+      ~(audience : Board.audience option)
       ~(meta : keeper_meta)
       ~(observation : board_observation)
   =
-  match observation.kind, post_kind with
-  | (Observed_post_created | Observed_post_updated _), Board.System_post ->
+  match observation.kind, post_kind, audience with
+  | (Observed_post_created | Observed_post_updated _), Board.System_post, _ ->
     { explicit_mention = false; matched_targets = [] }
   | ( (Observed_post_created | Observed_post_updated _)
-    , (Board.Human_post | Board.Automation_post) )
-  | ( (Observed_comment_added _ | Observed_reaction_changed _ | Observed_vote_cast _)
-    , (Board.System_post | Board.Human_post | Board.Automation_post) ) ->
-    match_authored_text
-      ~meta
-      ~author:observation.author
-      ~address_text:(address_text_of_observation observation)
+    , (Board.Human_post | Board.Automation_post)
+    , Some (Board.Targets targets) )
+  | ( Observed_comment_added _
+    , (Board.System_post | Board.Human_post | Board.Automation_post)
+    , Some (Board.Targets targets) ) ->
+    match_recorded_targets ~meta ~author:observation.author targets
+  | ( (Observed_post_created | Observed_post_updated _)
+    , (Board.Human_post | Board.Automation_post)
+    , (None | Some (Board.Broadcast | Board.Thread_participants | Board.Discoverable)) )
+  | ( Observed_comment_added _
+    , (Board.System_post | Board.Human_post | Board.Automation_post)
+    , (None | Some (Board.Broadcast | Board.Thread_participants | Board.Discoverable)) )
+  | ( (Observed_reaction_changed _ | Observed_vote_cast _)
+    , (Board.System_post | Board.Human_post | Board.Automation_post)
+    , _ ) ->
+    { explicit_mention = false; matched_targets = [] }
 ;;
 
 (** Check whether this keeper has commented on a post, and which comments
@@ -385,11 +458,9 @@ let check_self_comment_status ~self_ids ~(post_id : string) : comment_status =
     {!wake_reason} are the only producers, so a reason no matcher emits — e.g.
     the previously dead ["board_activity"] generic bucket the consumer used to
     match — is now unrepresentable rather than a string the consumer guesses
-    at. [None] stays an [option] at the call site: it means the structural
-    reactive pipeline examined the signal and found no deterministic address for
-    this keeper. Semantic relatedness is intentionally not represented here: it
-    requires an LLM/Judge attention boundary, not goal-keyword matching in the
-    board publish hook. *)
+    at. Semantic relatedness is intentionally not represented here: it requires
+    an LLM/Judge attention boundary, not goal-keyword matching in the board
+    publish hook. *)
 type wake_reason =
   | Explicit_mention
       (** The signal mentions one of the keeper's identity targets. *)
@@ -424,13 +495,13 @@ let wake_reason_label = function
 let board_signal_stimulus
       ~arrived_at
       ~(reason : wake_reason)
-      (signal : Board_dispatch.board_signal)
+      (addressed : Board_dispatch.addressed_board_signal)
   =
   let payload : Keeper_event_queue.stimulus_payload =
     Keeper_event_queue.Board_signal
-      (board_stimulus_of_board_signal signal)
+      (board_stimulus_of_board_signal addressed)
   in
-  { Keeper_event_queue.post_id = signal.post_id
+  { Keeper_event_queue.post_id = addressed.signal.post_id
   ; urgency =
       (match reason with
        | Explicit_mention | Broadcast ->
@@ -494,42 +565,39 @@ let vote_targets_self_writing ~self_ids (vote : Board_dispatch.board_vote_change
   else None
 ;;
 
+type wake_assessment =
+  | Wake of wake_reason
+  | Unaddressed_comment of Board.visibility
+  | Not_addressed
+
 let wake_reason
       ~(meta : keeper_meta)
       ~(signal : Board_dispatch.board_signal)
-  : wake_reason option board_read
+  : wake_assessment board_read
   =
-  (* A post is read for an address once, when its audience is classified: a
-     post that names anyone is [Targets] and never reaches this function. The
-     text of a post that reaches it carries no address, so reading it again
-     would only turn evidence text in a system post into a wake. *)
-  let matched =
-    match signal.kind with
-    | Board_dispatch.Board_post_created | Board_dispatch.Board_post_updated _ ->
-      { explicit_mention = false; matched_targets = [] }
-    | Board_dispatch.Board_comment_added _
-    | Board_dispatch.Board_reaction_changed _
-    | Board_dispatch.Board_vote_cast _ -> match_signal ~meta ~signal
-  in
-  if matched.explicit_mention
-  then Available (Some Explicit_mention)
-  else (
-    let self_ids = Message_scope.self_ids meta in
-    match signal.kind with
+  (* This is the [Thread_participants] route. Explicit recipients were fixed
+     in the audience at write time and are handled by [Targets]; re-reading
+     text here could turn a formerly unresolved name into a new recipient. *)
+  let self_ids = Message_scope.self_ids meta in
+  match signal.kind with
     | Board_dispatch.Board_reaction_changed _ ->
       (match reaction_touches_self_activity ~self_ids ~signal with
        | Unavailable _ as unavailable -> unavailable
-       | Available true -> Available (Some Reaction_after_self_activity)
-       | Available false -> Available None)
+       | Available true -> Available (Wake Reaction_after_self_activity)
+       | Available false -> Available Not_addressed)
     | Board_dispatch.Board_vote_cast vote ->
-      Available (vote_targets_self_writing ~self_ids vote)
+      (match vote_targets_self_writing ~self_ids vote with
+       | Some reason -> Available (Wake reason)
+       | None -> Available Not_addressed)
     | Board_dispatch.Board_comment_added identity ->
-      (match self_authored_post ~self_ids ~post_id:signal.post_id with
-       | Unavailable _ as unavailable -> unavailable
-       | Available true -> Available (Some Comment_on_self_post)
-       | Available false ->
+      (match Board_dispatch.read_post ~post_id:signal.post_id with
+       | Error error -> Unavailable { operation = Get_post; post_id = signal.post_id; error }
+       | Ok post ->
+         if Message_scope.is_self_author ~self_ids (Board.Agent_id.to_string post.author)
+         then Available (Wake Comment_on_self_post)
+         else
          match identity.parent_id with
-         | None -> Available None
+         | None -> Available (Unaddressed_comment post.visibility)
          | Some parent_id ->
            match Board_dispatch.read_comments ~post_id:signal.post_id with
            | Error error -> Unavailable { operation = Get_comments; post_id = signal.post_id; error }
@@ -545,6 +613,8 @@ let wake_reason
                Available
                  (if Message_scope.is_self_author ~self_ids
                        (Board.Agent_id.to_string parent.author)
-                  then Some Reply_to_self_comment else None))
-    | Board_dispatch.Board_post_created | Board_dispatch.Board_post_updated _ -> Available None)
+                  then Wake Reply_to_self_comment
+                  else Unaddressed_comment post.visibility))
+    | Board_dispatch.Board_post_created | Board_dispatch.Board_post_updated _ ->
+      Available Not_addressed
 ;;

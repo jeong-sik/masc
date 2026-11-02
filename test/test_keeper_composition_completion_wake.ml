@@ -285,8 +285,8 @@ let the_turn_can_read_the_result () =
            string
            "the row states what finished, how, and under which id"
            (composition_tool ^ " failed " ^ request_id)
-           event.WO.title;
-         let projected = Yojson.Safe.from_string event.WO.preview in
+           (Option.get event.WO.title);
+         let projected = Yojson.Safe.from_string (Option.get event.WO.preview) in
          check string "the original failure detail is available"
            "node search: timed out"
            Yojson.Safe.Util.(projected |> member "terminal_detail" |> to_string);
@@ -501,6 +501,7 @@ let a_result_is_read_before_the_board_backlog () =
             ; content = ""
             ; hearth = None
             ; updated_at = Some (100.0 +. float_of_int index)
+            ; audience = Some (Keeper_event_queue.Audience_discoverable)
             }
       }
     in

@@ -59,6 +59,7 @@ let candidate ?(keeper_name = "alpha") ?(context = context "primary") ~id ~recor
   { candidate_id = id
   ; keeper_name
   ; signal
+  ; audience = Some Masc.Board.Discoverable
   ; keeper_context = context
   ; recorded_at
   ; status = A.Pending { last_delivery_failure = None }

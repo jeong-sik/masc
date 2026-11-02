@@ -717,7 +717,19 @@ let advance_state partition state =
     Ok { partition with generation; state }
 ;;
 
-let ensure_roots_with_reader ~base_path ~keeper_name read_candidates =
+let ensure_roots_with_reader ~base_path ~keeper_name ~candidates read_candidates =
+  (* Board reads take Eio mutexes. Observe pending comments in the caller's
+     fiber, before [update] offloads its serialized filesystem transaction to
+     a system thread. The transaction still rereads/validates its candidates. *)
+  let visibility = Hashtbl.create (List.length candidates) in
+  List.iter (fun (candidate : Candidate.candidate) ->
+    match Candidate.status_view candidate.status with
+    | Candidate.Direct_resumable (Candidate.Resumable_pending _) ->
+      Hashtbl.replace visibility candidate.candidate_id
+        (candidate, Candidate.candidate_parent_visibility_filter candidate)
+    | Candidate.Direct_resumable
+        (Candidate.Resumable_judged _ | Candidate.Resumable_consumed _)
+    | Candidate.Requeued_resumable _ | Candidate.Suspended_quarantine _ -> ()) candidates;
   update ~base_path ~keeper_name (fun view ->
     let* candidates = read_candidates () in
     let* roots =
@@ -850,7 +862,19 @@ let ensure_roots_with_reader ~base_path ~keeper_name read_candidates =
                 | Candidate.Direct_resumable (Candidate.Resumable_consumed _) ->
                   Ok roots
                 | Candidate.Direct_resumable (Candidate.Resumable_pending _) ->
-                  resolve_root ~reopen_abandoned:true ()
+                  let* observed = match Hashtbl.find_opt visibility candidate.candidate_id with
+                    | Some (original, observed) when original = candidate -> Ok observed
+                    | Some _ | None -> Error "Board attention candidate changed before root restoration"
+                  in
+                  (match observed with
+                   | Ok Candidate.Keep_discoverable_comment ->
+                     resolve_root ~reopen_abandoned:true ()
+                   | Ok Candidate.Skip_non_discoverable_comment -> Ok roots
+                   | Error detail ->
+                     Log.Keeper.warn ~keeper_name
+                       "Board attention comment parent unavailable candidate=%s: %s"
+                       candidate.candidate_id detail;
+                     Ok roots)
                 | Candidate.Direct_resumable (Candidate.Resumable_judged _)
                   -> resolve_root ~reopen_abandoned:false ())
            (Ok [])
@@ -860,11 +884,11 @@ let ensure_roots_with_reader ~base_path ~keeper_name read_candidates =
 ;;
 
 let ensure_roots ~base_path ~keeper_name candidates =
-  ensure_roots_with_reader ~base_path ~keeper_name (fun () -> Ok candidates)
+  ensure_roots_with_reader ~base_path ~keeper_name ~candidates (fun () -> Ok candidates)
 ;;
 
 let ensure_current_roots ~base_path ~keeper_name candidates =
-  ensure_roots_with_reader ~base_path ~keeper_name (fun () ->
+  ensure_roots_with_reader ~base_path ~keeper_name ~candidates (fun () ->
     (* The partition mutation lock encloses this candidate read and the root
        append. Purge removes candidates before partitions: a stale request
        either finishes before partition purge or sees the missing candidate.

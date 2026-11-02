@@ -1577,8 +1577,8 @@ let board_event event_kind : Masc.Keeper_world_observation.pending_board_event =
   { event_kind
   ; post_id = "post-test"
   ; author = "peer"
-  ; title = "event"
-  ; preview = "preview"
+  ; title = Some "event"
+  ; preview = Some "preview"
   ; hearth = None
   ; post_kind = Masc.Board.Human_post
   ; updated_at = 0.0

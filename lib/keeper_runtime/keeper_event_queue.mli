@@ -72,6 +72,16 @@ and board_vote_change = {
   direction : board_vote_direction;
 }
 
+type board_audience =
+  | Audience_targets of string list
+  | Audience_broadcast
+  | Audience_thread_participants
+  | Audience_discoverable
+(** Mirror of [Board.audience]: the queue is a leaf and cannot depend on the
+    board domain library, so target identities ride as wire strings and the
+    keeper layer converts at the enqueue and drain boundaries like
+    [board_reaction_change]. *)
+
 type board_stimulus = {
   kind : board_stimulus_kind;
   author : string;
@@ -79,6 +89,7 @@ type board_stimulus = {
   content : string;
   hearth : string option;
   updated_at : float option;
+  audience : board_audience option;
 }
 (** Typed board-signal payload carried end-to-end (RFC-0020).
 
@@ -86,7 +97,13 @@ type board_stimulus = {
     data module and must not depend on the [board] domain library, so the
     keeper layer converts to/from [Board_dispatch.board_signal] at the
     enqueue and drain boundaries. The board post id is not duplicated here:
-    it is the enclosing [stimulus.post_id]. *)
+    it is the enclosing [stimulus.post_id].
+
+    The [audience] is the event-time audience the producer pinned to this
+    event alongside its content, so Drain-side matching judges the event, not
+    the post's current audience. [None] is a legacy row written before
+    pinning (explicit unknown, never a default): audience-dependent judgments
+    refuse it at drain instead of re-reading the current post. *)
 
 type stimulus_payload =
   | Board_signal of board_stimulus

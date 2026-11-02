@@ -81,7 +81,8 @@ let should_run_turn_after_event_intake
   scheduled
   &&
   match event_queue_intake_error with
-  | None | Some (Stimulus_intake.Connector_read_failed _)
+  | None | Some (Stimulus_intake.Board_unavailable _)
+  | Some (Stimulus_intake.Connector_read_failed _)
   | Some (Stimulus_intake.Connector_item_missing _)
   | Some (Stimulus_intake.Ask_read_failed _)
   | Some (Stimulus_intake.Completion_rejection_read_failed _)

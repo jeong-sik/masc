@@ -434,9 +434,9 @@ let test_external_attention_projects_to_prompt_event () =
     ("connector-attention:" ^ item.A.event_id)
     ev.WO.post_id;
   check bool "title carries typed surface" true
-    (contains ~needle:"External discord attention" ev.WO.title);
+    (contains ~needle:"External discord attention" (Option.get ev.WO.title));
   check bool "preview carries connector message" true
-    (contains ~needle:"TOKEN-123" ev.WO.preview);
+    (contains ~needle:"TOKEN-123" (Option.get ev.WO.preview));
   check bool "ambient is not an explicit mention" false ev.WO.explicit_mention;
   check string "connector actor remains context" "Alex" ev.WO.author;
   check bool "post kind remains context" true

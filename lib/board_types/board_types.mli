@@ -34,14 +34,18 @@ type board_error =
         alias. The write is refused and nothing is stored. *)
 [@@deriving show]
 
-(** What a Board read answers when it has no row to give: the id did not
-    parse, or nothing has it. Reads are served from the in-memory store, so no
-    read answers an I/O failure; persistence failures come from writes, as
-    {!board_error}. *)
+(** An ordinary in-memory read can report an invalid or absent ID. A read for
+    durable evidence also refuses an incomplete or unadmitted source. *)
 type board_read_error =
   | Read_invalid_id of string
   | Read_post_not_found of string
   | Read_comment_not_found of string
+  | Read_audience_not_pinned of string
+      (** A durable queue stimulus predates event-audience pinning and names
+          no audience for its event. The post exists; the queued row cannot
+          support an audience-dependent judgment. *)
+  | Read_source_unavailable of board_error
+      (** The posts source cannot establish either a post or its absence. *)
 [@@deriving show]
 
 val board_error_of_read_error : board_read_error -> board_error

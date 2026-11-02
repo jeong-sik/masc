@@ -126,6 +126,7 @@ type candidate = Keeper_board_attention_candidate_wire.candidate =
   { candidate_id : string
   ; keeper_name : string
   ; signal : Board_dispatch.board_signal
+  ; audience : Board.audience option
   ; keeper_context : Yojson.Safe.t
         (* 후보가 속한 파티션의 정체성이다 ([Context_key]). 소비된 뒤에도
            소속을 확인하므로 상태와 함께 사라지지 않는다. *)
@@ -985,7 +986,10 @@ let board_attention_stimulus candidate =
   ; payload =
       Keeper_event_queue.Board_attention
         { candidate_id = candidate.candidate_id
-        ; signal = Board_signal.board_stimulus_of_board_signal candidate.signal
+        ; signal =
+            Board_signal.board_stimulus_of_signal_with_audience
+              ~signal:candidate.signal
+              ~audience:candidate.audience
         }
   }
 ;;
@@ -1033,11 +1037,46 @@ let request_owner_wake ~site ~base_path candidate =
   outcome
 ;;
 
+type comment_parent_visibility_filter =
+  | Keep_discoverable_comment
+  | Skip_non_discoverable_comment
+
+let filter_comment_parent_visibility = function
+  | Board.Public | Board.Internal -> Keep_discoverable_comment
+  | Board.Unlisted | Board.Direct -> Skip_non_discoverable_comment
+;;
+
+let candidate_parent_visibility_filter (candidate : candidate) =
+  match candidate.signal.kind with
+  | Board_dispatch.Board_post_created
+  | Board_dispatch.Board_post_updated _
+  | Board_dispatch.Board_reaction_changed _
+  | Board_dispatch.Board_vote_cast _ ->
+    Ok Keep_discoverable_comment
+  | Board_dispatch.Board_comment_added _ ->
+    (match Eio_guard.execution_context () with
+     | Eio_guard.Non_eio -> Error "Board comment parent requires an Eio fiber"
+     | Eio_guard.Eio_fiber ->
+       match Board_dispatch.read_post_for_evidence ~post_id:candidate.signal.post_id with
+       | Ok post -> Ok (filter_comment_parent_visibility post.visibility)
+       | Error (Board.Read_post_not_found _ | Board.Read_invalid_id _
+               | Board.Read_comment_not_found _ | Board.Read_audience_not_pinned _) ->
+         Ok Skip_non_discoverable_comment
+       | Error (Board.Read_source_unavailable error) ->
+         Error (Board.show_board_error error))
+;;
+
 let consume_judged ~base_path candidate (judged : judged_state) =
-  match judged.judgment.verdict.decision with
-  | Keeper_board_attention_judgment.Not_relevant ->
+  match
+    judged.judgment.verdict.decision,
+    candidate_parent_visibility_filter candidate
+  with
+  | Keeper_board_attention_judgment.Not_relevant, _
+  | Keeper_board_attention_judgment.Relevant, Ok Skip_non_discoverable_comment ->
     mark_consumed ~base_path candidate judged.judgment Not_relevant
-  | Keeper_board_attention_judgment.Relevant ->
+  | Keeper_board_attention_judgment.Relevant, Error detail ->
+    Error ("Board comment parent unavailable: " ^ detail)
+  | Keeper_board_attention_judgment.Relevant, Ok Keep_discoverable_comment ->
     let stimulus = board_attention_stimulus candidate in
     (match
        Keeper_registry_event_queue.enqueue_if_missing_durable_result

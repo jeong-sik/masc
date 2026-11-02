@@ -92,7 +92,7 @@ let test_origin_admission_uses_actual_source_envelopes () =
     { post_id = "board-post-a"; urgency = Normal; arrived_at = 1.0
     ; payload = Board_signal
         { kind = Post_created; author = "author"; title = "request"; content = "do this"
-        ; hearth = None; updated_at = None } } in
+        ; hearth = None; updated_at = None; audience = Some Keeper_event_queue.Audience_discoverable } } in
   let bootstrap = {board with post_id = "bootstrap-is-not-a-board-post"; payload = Bootstrap} in
   let queue = Keeper_event_queue.enqueue
       (Keeper_event_queue.enqueue Keeper_event_queue.empty board) bootstrap in

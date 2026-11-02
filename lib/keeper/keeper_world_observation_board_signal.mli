@@ -20,17 +20,23 @@ type board_observation =
   ; content : string
   ; hearth : string option
   ; updated_at : float option
+  ; audience : Board.audience option
   }
-(** Durable queue observation, including the producer-issued comment identity. *)
+(** Durable queue observation, including the producer-issued comment identity.
+
+    The [audience] is the event-time audience the producer pinned to the
+    queue row alongside its content. [None] is a legacy row written before
+    pinning (explicit unknown, never a default). *)
 
 type board_read_operation =
   | Get_post
   | Get_comments
   | Parse_queued_comment_identity
+  | Parse_queued_audience
 
-(** A Board read that answered no row: the id did not parse, or nothing has
-    it ({!Board.board_read_error}). Reads are served from memory, so this is
-    never a passing I/O failure and reading again gives the same answer. *)
+(** A Board observation unavailable because an identifier is invalid, a row
+    is absent, or a legacy queued signal has no pinned audience. The latter
+    preserves the source instead of inferring its audience from current data. *)
 type board_unavailable =
   { operation : board_read_operation
   ; post_id : string
@@ -74,12 +80,27 @@ val board_observation_of_board_stimulus
   -> (board_observation, board_unavailable) result
 (** Preserve the queued signal. The queued comment and parent identities are
     wire strings; they are parsed here into {!Board.Comment_id.t}, and one
-    that does not parse is [Error] with [Parse_queued_comment_identity]. *)
+    that does not parse is [Error] with [Parse_queued_comment_identity].
+    The queued audience mirror becomes {!Board.audience}; a target that does
+    not parse is [Error] with [Parse_queued_audience]. A missing queue
+    audience stays [None] (legacy row) for the drain to refuse. *)
 
 val board_stimulus_of_board_signal
-  :  Board_dispatch.board_signal
+  :  Board_dispatch.addressed_board_signal
   -> Keeper_event_queue.board_stimulus
-(** Preserve live signal identity and content in the durable queue. *)
+(** Preserve live signal identity, content, and event-time audience in the
+    durable queue. *)
+
+val queue_audience_of_board : Board.audience -> Keeper_event_queue.board_audience
+(** Mirror a Board audience into the queue leaf DTO. *)
+
+val board_stimulus_of_signal_with_audience
+  :  signal:Board_dispatch.board_signal
+  -> audience:Board.audience option
+  -> Keeper_event_queue.board_stimulus
+(** Preserve a signal with an explicitly pinned audience option. [None] is a
+    legacy row without pinning; the drain refuses audience-dependent
+    judgments for it. Candidates use this with their stored audience. *)
 
 (* [post_id_string] is how [cursor_token_of_post] below keys a post; that is
    its only caller. *)
@@ -103,12 +124,13 @@ val match_signal
 
 val match_observation
   :  post_kind:Board.post_kind
+  -> audience:Board.audience option
   -> meta:Keeper_meta_contract.keeper_meta
   -> observation:board_observation
   -> match_result
-(** The text of a [System_post] carries evidence, not an address, so a created
-    or edited system post matches no lane. Comments, reactions and votes match
-    by their own text whatever the post's kind. *)
+(** Match the recorded [audience] of a Board post or comment against [meta]
+    without re-parsing [@name] tokens from text (RFC-at-name-resolves-to-declared-recipient L2d).
+    A [System_post] matches no lane. *)
 
 val check_self_comment_status
   :  self_ids:Keeper_identity.Keeper_id.t list
@@ -130,17 +152,25 @@ type wake_reason =
     attention boundary, not through board-publish keyword matching. *)
 
 val board_signal_stimulus :
-  arrived_at:float -> reason:wake_reason -> Board_dispatch.board_signal -> Keeper_event_queue.stimulus
+  arrived_at:float -> reason:wake_reason -> Board_dispatch.addressed_board_signal -> Keeper_event_queue.stimulus
 (** Shared live/catchup stimulus construction; identity and urgency remain identical. *)
 
 val wake_reason_label : wake_reason -> string
 (** Stable string label for logs/metrics. *)
 
+type wake_assessment =
+  | Wake of wake_reason
+  | Unaddressed_comment of Board.visibility
+  | Not_addressed
+(** An unaddressed comment carries its parent post's visibility from the same
+    read used to check authorship. The caller decides whether it is discoverable. *)
+
 val wake_reason
   :  meta:Keeper_meta_contract.keeper_meta
   -> signal:Board_dispatch.board_signal
-  -> wake_reason option board_read
-(** [Available None] means the structural reactive pipeline found no
-    deterministic address for this keeper. [Unavailable _] names the Board read
-    that answered no row (the post was swept or an id does not parse); reading
-    again gives the same answer, so callers consume the source. *)
+  -> wake_assessment board_read
+(** Assess a recorded [Thread_participants] audience without reinterpreting the
+    signal text as an address. [Not_addressed] and [Unaddressed_comment _] mean
+    the structural reactive pipeline found no deterministic address for this keeper. [Unavailable _]
+    names the Board read that answered no row (the post was swept or an id does
+    not parse); reading again gives the same answer, so callers consume the source. *)

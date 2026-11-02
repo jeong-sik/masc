@@ -386,8 +386,8 @@ let wakeup_keeper ?base_path ?stimulus name =
    here it only picks urgency (explicit targets and broadcasts are [Immediate]). It is not
    carried in the payload — the next prompt re-derives board context from the
    typed [Board_signal] payload, not from a wake-reason string. *)
-let board_signal_stimulus ~reason signal =
-  Board_wake.board_signal_stimulus ~arrived_at:(Time_compat.now ()) ~reason signal
+let board_signal_stimulus ~reason (addressed : Board_dispatch.addressed_board_signal) =
+  Board_wake.board_signal_stimulus ~arrived_at:(Time_compat.now ()) ~reason addressed
 ;;
 
 let board_signal_entry_accepts_delivery (entry : Keeper_registry.registry_entry) =
@@ -399,13 +399,13 @@ let record_board_attention_candidate
       ~(signal_kind_label : string)
       ~(audience_label : string)
       ~(meta : keeper_meta)
-      (signal : Board_dispatch.board_signal)
+      (addressed : Board_dispatch.addressed_board_signal)
   =
   let candidate =
     Keeper_board_attention_candidate.of_board_signal
       ~meta
       ~recorded_at:(Time_compat.now ())
-      signal
+      addressed
   in
   match
     Keeper_board_attention_candidate.record_and_wake
@@ -435,17 +435,17 @@ let record_board_attention_candidate
     Log.Keeper.warn
       "board attention candidate record failed: keeper=%s post=%s error=%s"
       meta.name
-      signal.post_id
+      addressed.signal.post_id
       err
 ;;
 
 let deliver_addressed_board_signal
       ~(config : Workspace.config)
       ~(reason : Board_wake.wake_reason)
-      ~(signal : Board_dispatch.board_signal)
+      ~(addressed : Board_dispatch.addressed_board_signal)
       (meta : keeper_meta)
   =
-  let stimulus = board_signal_stimulus ~reason signal in
+  let stimulus = board_signal_stimulus ~reason addressed in
   match
     Keeper_registry_event_queue.enqueue_stimulus_durable_result
       ~base_path:config.base_path
@@ -470,9 +470,9 @@ let wakeup_relevant_keeper_for_board_signal
       (addressed : Board_dispatch.addressed_board_signal)
   =
   let candidates = ref [] in
-  let record_board_attention_candidate ~config ~signal_kind_label ~audience_label ~meta signal =
+  let record_board_attention_candidate ~config ~signal_kind_label ~audience_label ~meta addressed =
     match dispatch_attention with
-    | None -> record_board_attention_candidate ~config ~signal_kind_label ~audience_label ~meta signal
+    | None -> record_board_attention_candidate ~config ~signal_kind_label ~audience_label ~meta addressed
     | Some _ ->
       let observe persistence =
         Otel_metric_store.inc_counter
@@ -481,7 +481,7 @@ let wakeup_relevant_keeper_for_board_signal
                    "audience", audience_label; "persistence", persistence] ()
       in
       let candidate = Keeper_board_attention_candidate.of_board_signal
-        ~meta ~recorded_at:(Time_compat.now ()) signal in
+        ~meta ~recorded_at:(Time_compat.now ()) addressed in
       (match Keeper_board_attention_candidate.record ~base_path:config.Workspace.base_path candidate with
        | Keeper_board_attention_candidate.Recorded persisted ->
          observe "recorded";
@@ -584,7 +584,7 @@ let wakeup_relevant_keeper_for_board_signal
                     ~signal_kind_label
                     ~audience_label:(Keeper_board_audience.label audience)
                     ~meta
-                    signal
+                    addressed
                 | Keeper_world_observation_board_signal.Available
                     Keeper_board_audience.Ignore -> ()
                 | Keeper_world_observation_board_signal.Available
@@ -728,7 +728,7 @@ let wakeup_relevant_keeper_for_board_signal
                    ~signal_kind_label
                    ~audience_label:(Keeper_board_audience.label audience)
                    ~meta
-                   signal
+                   addressed
                | Board_dispatch.Board_post_created
                | Board_dispatch.Board_reaction_changed _
                | Board_dispatch.Board_vote_cast _ ->
@@ -745,7 +745,7 @@ let wakeup_relevant_keeper_for_board_signal
                    signal.post_id)
            | Keeper_world_observation_board_signal.Available
                (Keeper_board_audience.Deliver reason) ->
-             (match deliver_addressed_board_signal ~config ~reason ~signal meta with
+             (match deliver_addressed_board_signal ~config ~reason ~addressed meta with
               | Error detail ->
                 Otel_metric_store.inc_counter
                   Keeper_metrics.(to_string KeepaliveSignalFailures)

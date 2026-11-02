@@ -50,16 +50,22 @@ let complete ~base_path ~worker_epoch candidate partition (judged : Jev.judged) 
   let* transition = Partition.complete ~now:(Time_compat.now ()) ~worker_epoch
     ~base_path ~partition ~item:{ candidate_id = candidate.Candidate.candidate_id; judgment } in
   let* completed = confirm_completed ~base_path transition in
-  match verdict.Keeper_board_attention_judgment.decision with
-  | Keeper_board_attention_judgment.Relevant ->
+  match
+    verdict.Keeper_board_attention_judgment.decision,
+    Candidate.candidate_parent_visibility_filter candidate
+  with
+  | Keeper_board_attention_judgment.Relevant, Ok Candidate.Keep_discoverable_comment ->
     ignore (Keeper_registry.wakeup_running ~intent:Keeper_registry.Attention_result
       ~base_path candidate.keeper_name);
     Ok ()
-  | Keeper_board_attention_judgment.Not_relevant ->
+  | Keeper_board_attention_judgment.Not_relevant, _
+  | Keeper_board_attention_judgment.Relevant, Ok Candidate.Skip_non_discoverable_comment ->
     let* _ = Candidate.apply_judgment_and_deliver ~base_path
       ~keeper_name:candidate.keeper_name ~candidate_id:candidate.candidate_id ~judgment in
     let* _ = Partition.settle ~now:(Time_compat.now ()) ~base_path ~partition:completed in
     Ok ()
+  | Keeper_board_attention_judgment.Relevant, Error detail ->
+    Error ("Board comment parent unavailable: " ^ detail)
 
 let run ~clock ~base_path ~wake ~admit candidates =
   let worker_epoch = Partition.Worker_epoch.generate () in
@@ -74,7 +80,11 @@ let run ~clock ~base_path ~wake ~admit candidates =
   in
   let finish () =
     let eligible = List.filter_map (fun candidate ->
-      match Typesafeai_config.board_attention_destinations ~keeper_id:candidate.Candidate.keeper_name with
+      match Candidate.candidate_parent_visibility_filter candidate with
+      | Ok Candidate.Skip_non_discoverable_comment -> None
+      | Error detail -> report candidate detail; wake candidate ~base_path; None
+      | Ok Candidate.Keep_discoverable_comment ->
+        match Typesafeai_config.board_attention_destinations ~keeper_id:candidate.Candidate.keeper_name with
       | Error _ -> wake candidate ~base_path; None
       | Ok destinations ->
         match claim ~base_path ~worker_epoch candidate with
@@ -194,7 +204,10 @@ let enqueue_discoverable_post ~sw ~clock ~(config : Workspace.config) signal =
         match Keeper_board_audience.route_for_keeper
                 ~audience:Keeper_board_audience.Discoverable ~meta ~signal with
         | Keeper_world_observation_board_signal.Available Keeper_board_audience.Judge_discoverable ->
-          let candidate = Candidate.of_board_signal ~meta ~recorded_at:(Time_compat.now ()) signal in
+          let addressed : Board_dispatch.addressed_board_signal =
+            { signal; audience = Board.Discoverable }
+          in
+          let candidate = Candidate.of_board_signal ~meta ~recorded_at:(Time_compat.now ()) addressed in
           let observe persistence = Otel_metric_store.inc_counter
             Keeper_metrics.(to_string BoardSignalAttentionCandidateTotal)
             ~labels:["keeper", meta.name; "kind", "post_created";

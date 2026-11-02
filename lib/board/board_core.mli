@@ -360,6 +360,10 @@ val create_post_with_audience
 val read_post : store -> post_id:string -> (post, board_read_error) Result.t
 (** The post with [post_id], read from the in-memory store. *)
 
+val read_post_for_evidence : store -> post_id:string -> (post, board_read_error) Result.t
+(** Read from an admitted, complete posts source. A source failure cannot
+    establish either visibility or the absence of the post. *)
+
 
 (** RFC-0233 §7: look up a post by the originating turn's join key
     ([Ids.Turn_ref.to_string], i.e. ["<trace_id>#<absolute_turn>"]).  Exact

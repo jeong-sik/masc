@@ -1178,9 +1178,12 @@ let process_claimed
 type ready_root_work =
   | Needs_lane of Candidate.candidate
   | Lane_free
+  | Skip_ready
 
 (* A Ready root whose candidate is already judged, consumed, quarantined,
-   absent or mismatched is finished without a lane call. *)
+   absent or mismatched is finished without a lane call. A Pending comment
+   candidate on an Unlisted or Direct parent post is skipped without invoking
+   the model judge. *)
 let ready_root_work candidates (partition : Partition.t) =
   match candidate_by_id partition.candidate_id candidates with
   | None -> Lane_free
@@ -1191,7 +1194,10 @@ let ready_root_work candidates (partition : Partition.t) =
        (match Candidate.status_view candidate.status with
         | Candidate.Direct_resumable (Candidate.Resumable_pending _)
         | Candidate.Requeued_resumable
-            { resumable = Candidate.Resumable_pending _; _ } -> Needs_lane candidate
+            { resumable = Candidate.Resumable_pending _; _ } ->
+          (match Candidate.candidate_parent_visibility_filter candidate with
+           | Ok Candidate.Keep_discoverable_comment -> Needs_lane candidate
+           | Ok Candidate.Skip_non_discoverable_comment | Error _ -> Skip_ready)
         | Candidate.Direct_resumable
             (Candidate.Resumable_judged _ | Candidate.Resumable_consumed _)
         | Candidate.Requeued_resumable
@@ -1213,28 +1219,33 @@ let prepare_next_ready
       candidates
   =
   let* partitions = Partition.load ~base_path ~keeper_name in
-  let ready =
-    List.filter
-      (fun (partition : Partition.t) ->
+  let ready_lane_free, ready_needs_lane =
+    List.fold_right
+      (fun (partition : Partition.t) (lane_free, needs_lane) ->
          match partition.state with
-         | Partition.Ready ->
-             not (Keeper_board_attention_admission.blocked ~base_path
-                    ~candidate_id:partition.candidate_id)
+         | Partition.Ready
+           when not
+                  (Keeper_board_attention_admission.blocked
+                     ~base_path
+                     ~candidate_id:partition.candidate_id) ->
+           (match ready_root_work candidates partition with
+            | Lane_free -> partition :: lane_free, needs_lane
+            | Needs_lane candidate ->
+              lane_free, (partition, candidate) :: needs_lane
+            | Skip_ready -> lane_free, needs_lane)
+         | Partition.Ready
          | Partition.Running _
          | Partition.Completed _
          | Partition.Settled _
          | Partition.Abandoned _
-         | Partition.Blocked _ -> false)
+         | Partition.Blocked _ -> lane_free, needs_lane)
       partitions
-    |> List.partition_map (fun partition ->
-      match ready_root_work candidates partition with
-      | Lane_free -> Either.Left partition
-      | Needs_lane candidate -> Either.Right (partition, candidate))
+      ([], [])
   in
   let selected (partition : Partition.t) prepared =
     Ok (Some (partition.partition_id, partition.generation, partition.candidate_id, prepared))
   in
-  match ready with
+  match ready_lane_free, ready_needs_lane with
   | partition :: _, _ -> selected partition None
   | [], (partition, candidate) :: _ ->
     (match prepare candidate with

@@ -25,6 +25,7 @@ let pending_board_event_of_stimulus ~base_path ~meta_after_triage stim =
 
 type stimulus_intake_result =
   | Stimulus_consumed of Keeper_world_observation.pending_board_event list
+  | Stimulus_board_unavailable of Keeper_world_observation_board_signal.board_unavailable
   | Stimulus_connector_retry_later of Keeper_external_attention.read_error
   | Stimulus_connector_missing of string
   | Stimulus_ask_retry_later of Keeper_ask_store.read_error
@@ -37,6 +38,7 @@ type stimulus_intake_result =
 
 type event_queue_intake_error =
   | Pending_selection_failed of string
+  | Board_unavailable of Keeper_world_observation_board_signal.board_unavailable
   | Connector_read_failed of Keeper_external_attention.read_error
   | Connector_item_missing of string
   | Ask_read_failed of Keeper_ask_store.read_error
@@ -47,6 +49,8 @@ type event_queue_intake_error =
 let event_queue_intake_error_to_string = function
   | Pending_selection_failed detail ->
     "event queue pending selection failed: " ^ detail
+  | Board_unavailable unavailable ->
+    "Board input unavailable: " ^ Keeper_world_observation_board_signal.unavailable_to_string unavailable
   | Connector_read_failed error ->
     "connector attention intake retry: " ^ Keeper_external_attention.read_error_to_string error
   | Connector_item_missing event_id ->
@@ -64,6 +68,13 @@ let event_queue_intake_error_to_string = function
 
 let event_queue_intake_error_reason_label = function
   | Pending_selection_failed _ -> "event_queue_selection_failed"
+  | Board_unavailable { error = Board.Read_audience_not_pinned _; _ } ->
+    "event_queue_board_audience_unavailable"
+  | Board_unavailable { error = Board.Read_source_unavailable _; _ } ->
+    "event_queue_board_source_unavailable"
+  | Board_unavailable { error = (Board.Read_invalid_id _ | Board.Read_post_not_found _
+                              | Board.Read_comment_not_found _); _ } ->
+    "event_queue_board_unavailable"
   | Connector_read_failed _ -> "event_queue_connector_read_failed"
   | Connector_item_missing _ -> "event_queue_connector_item_missing"
   | Ask_read_failed _ -> "event_queue_ask_read_failed"
@@ -75,15 +86,19 @@ let event_queue_intake_error_reason_label = function
 let event_queue_intake_error_counts_as_cycle_failure = function
   | Pending_selection_failed _ -> true
   | Connector_read_failed _ | Connector_item_missing _
-  | Ask_read_failed _
+  | Board_unavailable _ | Ask_read_failed _
   | Completion_rejection_read_failed _
   | Job_result_unavailable _ | Addon_result_unavailable _ -> false
 ;;
 
 let classify_pending_board_event_result = function
   | Ok events_opt -> Stimulus_consumed (Option.to_list events_opt)
-  | Error (_ : Keeper_world_observation_board_signal.board_unavailable) ->
-    Stimulus_consumed []
+  | Error (unavailable : Keeper_world_observation_board_signal.board_unavailable) ->
+    (match unavailable.error with
+     | Board.Read_audience_not_pinned _ | Board.Read_source_unavailable _ ->
+       Stimulus_board_unavailable unavailable
+     | Board.Read_invalid_id _ | Board.Read_post_not_found _ | Board.Read_comment_not_found _ ->
+       Stimulus_consumed [])
 ;;
 
 let completion_rejection_intake ~config ~(meta_after_triage : keeper_meta) stim
@@ -139,9 +154,16 @@ let pending_board_events_of_stimulus_result ~base_path ~meta_after_triage stim =
           , Runtime_observation_query_operation.(to_label Board_stimulus_intake) )
         ]
       ();
+    let disposition =
+      match unavailable.error with
+      | Board.Read_audience_not_pinned _ | Board.Read_source_unavailable _ -> "retaining"
+      | Board.Read_invalid_id _ | Board.Read_post_not_found _ | Board.Read_comment_not_found _ ->
+        "consuming"
+    in
     Log.Keeper.warn
-      "stimulus intake: board read unavailable, consuming stimulus \
+      "stimulus intake: board read unavailable, %s stimulus \
        stimulus_id=%s keeper=%s: %s"
+      disposition
       stim.Keeper_event_queue.post_id
       meta_after_triage.name
       (Keeper_world_observation_board_signal.unavailable_to_string unavailable);
@@ -435,6 +457,7 @@ let consume_single_heartbeat_stimulus
       Stimulus_consumed []
   in
   match intake_result with
+  | Stimulus_board_unavailable _
   | Stimulus_connector_retry_later _ | Stimulus_connector_missing _
   | Stimulus_ask_retry_later _ | Stimulus_ask_missing _
   | Stimulus_completion_rejection_obsolete | Stimulus_completion_rejection_retry_later _
@@ -1175,6 +1198,13 @@ let heartbeat_event_intake_with_priority
                 keeper_name (event_queue_intake_error_to_string error);
               let first_withdrawn = match first_withdrawn with
                 | None -> Some (selection,error) | Some _ as kept -> kept in
+              loop remaining observations_rev selections_rev first_withdrawn rest
+            | Stimulus_board_unavailable unavailable ->
+              let error = Board_unavailable unavailable in
+              Log.Keeper.warn "turn entry: retaining unavailable Board stimulus keeper=%s: %s"
+                keeper_name (event_queue_intake_error_to_string error);
+              let first_withdrawn = match first_withdrawn with
+                | None -> Some (selection, error) | Some _ as kept -> kept in
               loop remaining observations_rev selections_rev first_withdrawn rest
             | Stimulus_consumed [] when is_board_source selection ->
               (* Permanent Board absence is terminal before dispatch. It is the

@@ -128,6 +128,7 @@ type candidate =
   { candidate_id : string
   ; keeper_name : string
   ; signal : Board_dispatch.board_signal
+  ; audience : Board.audience option
   ; keeper_context : Yojson.Safe.t
         (* 후보가 속한 파티션의 정체성이다 ([Context_key]). 소비된 뒤에도
            소속을 확인하므로 상태와 함께 사라지지 않는다. *)
@@ -359,13 +360,14 @@ let signal_identity_equal
 let of_board_signal
       ~(meta : Keeper_meta_contract.keeper_meta)
   ~recorded_at
-      (signal : Board_dispatch.board_signal)
+      (addressed : Board_dispatch.addressed_board_signal)
   =
   let keeper_context = keeper_context_to_yojson meta in
-  let candidate_id = candidate_id_of_signal ~keeper_name:meta.name signal in
+  let candidate_id = candidate_id_of_signal ~keeper_name:meta.name addressed.signal in
   { candidate_id
   ; keeper_name = meta.name
-  ; signal
+  ; signal = addressed.signal
+  ; audience = Some addressed.audience
   ; keeper_context
   ; recorded_at
   ; status = Pending { last_delivery_failure = None }
@@ -499,6 +501,10 @@ let candidate_to_json candidate =
     ; "candidate_id", `String candidate.candidate_id
     ; "keeper_name", `String candidate.keeper_name
     ; "signal", signal_to_yojson candidate.signal
+    ; ( "audience"
+      , match candidate.audience with
+        | Some audience -> Board_audience.to_yojson audience
+        | None -> `Null )
     ; "keeper_context", candidate.keeper_context
     ; "recorded_at", `Float candidate.recorded_at
     ; "status", status_to_yojson candidate.status
@@ -1406,17 +1412,20 @@ let validate_candidate_for_persistence candidate =
 let candidate_of_json json =
   let context = "board attention candidate" in
   let* fields = assoc ~context json in
+  let has_audience = List.mem_assoc "audience" fields in
   let* () =
     exact_fields
       ~context
-      [ "schema_version"
-      ; "candidate_id"
-      ; "keeper_name"
-      ; "signal"
-      ; "keeper_context"
-      ; "recorded_at"
-      ; "status"
-      ]
+      ([ "schema_version"
+       ; "candidate_id"
+       ; "keeper_name"
+       ; "signal"
+       ]
+       @ (if has_audience then [ "audience" ] else [])
+       @ [ "keeper_context"
+         ; "recorded_at"
+         ; "status"
+         ])
       fields
   in
   let* version_json = field ~context "schema_version" fields in
@@ -1436,6 +1445,14 @@ let candidate_of_json json =
   let* keeper_name = string_json ~context:(context ^ ".keeper_name") keeper_name_json in
   let* signal_json = field ~context "signal" fields in
   let* signal = signal_of_yojson signal_json in
+  let* audience =
+    match List.assoc_opt "audience" fields with
+    | None | Some `Null -> Ok None
+    | Some audience_json ->
+      (match Board_audience.of_yojson audience_json with
+       | Some audience -> Ok (Some audience)
+       | None -> Error (context ^ ".audience has unknown shape"))
+  in
   let expected_id = candidate_id_of_signal ~keeper_name signal in
   let* () =
     if String.equal candidate_id expected_id
@@ -1450,7 +1467,7 @@ let candidate_of_json json =
   let* status_json = field ~context "status" fields in
   let* status = status_of_yojson status_json in
   let candidate =
-    { candidate_id; keeper_name; signal; keeper_context; recorded_at; status }
+    { candidate_id; keeper_name; signal; audience; keeper_context; recorded_at; status }
   in
   let* () = validate_candidate_for_persistence candidate in
   Ok candidate

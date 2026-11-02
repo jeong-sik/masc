@@ -16,8 +16,8 @@ open Keeper_types_profile
 
 (** [pending_board_event_of_stimulus ~meta_after_triage stim] wraps a
     stimulus into a pending board event, threading the keeper meta's
-    continuity summary. [Error unavailable] reports a Board read that answered
-    no row; [pending_board_events_of_stimulus_result] consumes it. *)
+    continuity summary. A permanently absent row is consumed. A queued signal
+    whose original audience is unknown remains pending. *)
 val pending_board_event_of_stimulus
   :  base_path:string
   -> meta_after_triage:keeper_meta
@@ -35,9 +35,11 @@ val pending_board_event_of_stimulus
     acknowledges the exact pending selection instead of retaining it.
     Completion rejection authority is checked at intake: obsolete relations
     retire only their exact selection; unread authority retains it for retry.
-    A Board read that answered no row is consumed as an empty event. *)
+    A Board read that established absence is consumed as an empty event; an
+    unpinned legacy audience or unavailable source retains its selection. *)
 type stimulus_intake_result =
   | Stimulus_consumed of Keeper_world_observation.pending_board_event list
+  | Stimulus_board_unavailable of Keeper_world_observation_board_signal.board_unavailable
   | Stimulus_connector_retry_later of Keeper_external_attention.read_error
   | Stimulus_connector_missing of string (** Missing event ID. *)
   | Stimulus_ask_retry_later of Keeper_ask_store.read_error
@@ -48,15 +50,16 @@ type stimulus_intake_result =
   | Stimulus_completion_rejection_obsolete
   | Stimulus_completion_rejection_retry_later of string
 
-(** Pure boundary for one rendered Board event. A read that answered no row
-    is consumed as an empty event. *)
+(** Pure boundary for one rendered Board event. A missing pinned audience or
+    unavailable source is retained; established absence is consumed. *)
 val classify_pending_board_event_result
   :  (Keeper_world_observation.pending_board_event option, Keeper_world_observation_board_signal.board_unavailable) result
   -> stimulus_intake_result
 
 (** [pending_board_events_of_stimulus_result ~meta_after_triage stim] renders
-    [stim] into zero-or-one pending board events. On [Error unavailable] it
-    logs and counts the read and returns [Stimulus_consumed []]. Original job
+    [stim] into zero-or-one pending board events. An unpinned legacy audience
+    or unavailable posts source returns [Stimulus_board_unavailable];
+    established absence is logged, counted and consumed. Original job
     completions instead require the canonical owner and return
     [Stimulus_job_unavailable] for retention on any source read failure.
     Add-on notices likewise return [Stimulus_addon_unavailable] rather than
@@ -69,6 +72,7 @@ val pending_board_events_of_stimulus_result
 
 type event_queue_intake_error =
   | Pending_selection_failed of string
+  | Board_unavailable of Keeper_world_observation_board_signal.board_unavailable
   | Connector_read_failed of Keeper_external_attention.read_error
   | Connector_item_missing of string (** Missing event ID, not a whole-store failure. *)
   | Ask_read_failed of Keeper_ask_store.read_error
@@ -87,7 +91,8 @@ val event_queue_intake_error_reason_label : event_queue_intake_error -> string
 
 (** Only durable selection corruption/read failures count as a crashed cycle.
     Connector, unread-Ask, job result and completion rejection authority reads
-    are retry conditions: they retain
+    retain their source for retry. An unknown Board audience remains pending
+    without claiming automatic recovery. These conditions retain
     the exact source without advancing Keeper failure state. A missing or
     unanswered Ask source is not a retry: the heartbeat loop acknowledges it
     as terminal, so it never surfaces here. A Board read that answers no row

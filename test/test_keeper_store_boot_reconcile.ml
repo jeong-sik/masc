@@ -1809,7 +1809,8 @@ let test_board_partition_preflight_uses_production_replay ~keeper_name () =
       ; hearth = None; updated_at = Some 1.0 } in
     let candidate : Candidate.candidate =
       { candidate_id = Candidate.candidate_id_of_signal ~keeper_name signal
-      ; keeper_name; signal; keeper_context = `Assoc ["keeper", `String keeper_name]
+      ; keeper_name; signal; audience = Some Board.Discoverable
+      ; keeper_context = `Assoc ["keeper", `String keeper_name]
       ; recorded_at = 1.0; status = Candidate.Pending {last_delivery_failure=None} } in
     (match Partition.ensure_roots ~base_path ~keeper_name [candidate] with
      | Error detail -> fail detail | Ok _ -> ());

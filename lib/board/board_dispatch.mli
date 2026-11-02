@@ -283,6 +283,10 @@ val read_post : post_id:string -> (Board.post, Board.board_read_error) Result.t
 (** The post with [post_id], from the in-memory store. A read answers no I/O
     failure; see {!Board.board_read_error}. *)
 
+val read_post_for_evidence : post_id:string -> (Board.post, Board.board_read_error) Result.t
+(** Refuse an incomplete or unadmitted posts source before returning a post
+    or establishing that it is absent. *)
+
 val get_post : post_id:string -> (Board.post, Board.board_error) Result.t
 (** {!read_post} as a [board_error] result, for callers that also write. *)
 

@@ -14669,7 +14669,7 @@ let apply_planning_load state = function
            state.goal_action_pending <- None;
            state.planning_cursor <- cursor;
            state.planning_mode <- Planning_list;
-           state.planning_scroll <- 0
+           state.planning_scroll <- Planning_scroll_offset 0
        | Planning_selection.Detail_goal { goal_id; cursor } ->
            state.planning_cursor <- cursor;
            state.planning_mode <- Planning_detail goal_id)
@@ -19178,7 +19178,7 @@ let handle_goal_confirmation_key state ~mailbox =
            let receipt_authority = Goal_confirmation.confirmation_receipt_authority confirmation in
            state.goal_confirmation <- Goal_confirmation.Submitting
                (goal_id, Goal_confirmation.suspend_confirmation_read read);
-           state.planning_scroll <- 0;
+           state.planning_scroll <- Planning_scroll_offset 0;
            let workspace_authority = state.workspace_authority in
            let workspace_read_authority = state.workspace_read_authority in
            let expected_workspace = state.server_identity in
@@ -19230,7 +19230,7 @@ let handle_goal_confirmation_key state ~mailbox =
           current state; confirming it would act on what the server no longer
           answered. Ask again. *)
        | Absent | Stale _ | Failed _ ->
-           state.planning_scroll <- 0;
+           state.planning_scroll <- Planning_scroll_offset 0;
            clear_goal_confirmation_revalidation state ~goal_id;
            launch_goal_confirmation_read state ~mailbox ~goal_id)
 
@@ -19459,7 +19459,7 @@ let open_planning_detail state ~mailbox =
   | None -> ()
   | Some g ->
       state.planning_mode <- Planning_detail g.pg_id;
-      state.planning_scroll <- 0;
+      state.planning_scroll <- Planning_scroll_offset 0;
       state.goal_timeline <- Masc_tui_fetched.clear state.goal_timeline;
       launch_goal_timeline_load state ~mailbox g.pg_id
 
@@ -22203,8 +22203,14 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       (match state.goal_confirmation with
        | Goal_confirmation.Inspecting read ->
            let current = Goal_confirmation_read.is_current ~equal:String.equal read request in
+           let goal_id = Goal_confirmation_read.request_key request in
            if current then begin
-             state.planning_scroll <- 0;
+             (match state.planning_mode with
+              | Planning_detail selected when String.equal goal_id selected ->
+                  (match state.planning_scroll with
+                   | Planning_scroll_offset _ -> state.planning_scroll <- Planning_scroll_offset 0
+                   | Planning_scroll_candle _ -> ())
+              | Planning_detail _ | Planning_list -> ());
              state.goal_confirmation_presented <- None
            end;
            let changed_owner = match result with
@@ -22224,7 +22230,6 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                  Error (Goal_confirmation.Read_failed (Some confirmation.credential_owner, "Goal confirmation server changed; read the proof again"))
              | Ok confirmation -> Ok confirmation
              | Error failure -> Error failure in
-           let goal_id = Goal_confirmation_read.request_key request in
            (match result with Ok _ when current -> clear_goal_confirmation_revalidation state ~goal_id | Ok _ | Error _ -> ());
            state.goal_confirmation <- Goal_confirmation.Inspecting
              (Goal_confirmation_read.complete ~equal:String.equal read request result);
@@ -31474,7 +31479,7 @@ Use relative paths for resources already held in the package. -->
                           state.planning_filter <- Planning_filter_active);
                      goto_surface state ~mailbox:async_messages Planning;
                      state.planning_mode <- Planning_detail goal_id;
-                     state.planning_scroll <- 0;
+                     state.planning_scroll <- Planning_scroll_offset 0;
                      state.goal_timeline <- Masc_tui_fetched.clear state.goal_timeline;
                      launch_goal_timeline_load state ~mailbox:async_messages
                        goal_id
@@ -33495,7 +33500,7 @@ Use relative paths for resources already held in the package. -->
                      state.planning_filter <- Planning_filter_all;
                      state.planning_mode <- Planning_list;
                      state.planning_cursor <- 0;
-                     state.planning_scroll <- 0
+                     state.planning_scroll <- Planning_scroll_offset 0
                  | Some (_, Masc_tui_palette.Palette_addon_results declaration_id) ->
                      open_installation_results state ~mailbox:async_messages declaration_id
                  | Some (_, Masc_tui_palette.Palette_lane_history lane) ->
@@ -35105,7 +35110,7 @@ Use relative paths for resources already held in the package. -->
                      state.task_focus <- Masc_tui_overview_tasks.No_task_focus;
                      state.planning_mode <- Planning_detail goal_id;
                      Masc_tui_home.reconcile_home_request_detail state;
-                     state.planning_scroll <- 0;
+                     state.planning_scroll <- Planning_scroll_offset 0;
                      state.goal_timeline <- Masc_tui_fetched.clear state.goal_timeline;
                      launch_goal_timeline_load state ~mailbox:async_messages goal_id)
             | Home_agenda ->
@@ -35944,6 +35949,7 @@ Use relative paths for resources already held in the package. -->
                  | Link.Goal, Planning, Some goal_id ->
                      state.task_focus <- Masc_tui_overview_tasks.No_task_focus;
                      state.planning_mode <- Planning_detail goal_id;
+                     state.planning_scroll <- Planning_scroll_offset 0;
                      state.goal_timeline <- Masc_tui_fetched.clear state.goal_timeline;
                      launch_goal_timeline_load state ~mailbox:async_messages
                        goal_id
@@ -36210,9 +36216,10 @@ Use relative paths for resources already held in the package. -->
                     ~delta:(direction * page) state.config_models_cursor
             | Planning when Option.is_some (goal_detail_on_screen state) ->
                 let count, height = Masc_tui_render.planning_detail_viewport state in
-                state.planning_scroll <-
-                  (if direction > 0 then Masc_tui_scroll.page_down ~count ~height
-                   else Masc_tui_scroll.page_up ~count ~height) state.planning_scroll
+                state.planning_scroll <- Planning_scroll_offset
+                  ((if direction > 0 then Masc_tui_scroll.page_down ~count ~height
+                    else Masc_tui_scroll.page_up ~count ~height)
+                     (planning_scroll_value state.planning_scroll))
             | Code ->
                 move_list_by_rows state ~delta:(direction * page)
             | Board ->
@@ -36529,27 +36536,35 @@ Use relative paths for resources already held in the package. -->
                   (Printf.sprintf (if state.ui_language = Lang_ko then "D 를 한 번 더 누르면 %s 를 지웁니다" else "Press D again to delete %s") name)
               end)
        | Some key when state.view = Planning && String.equal key Masc_tui_keys.goal_candle_refresh_key ->
+           let read_candle goal_id =
+             start_http_refresh state ~host:server_peer_host ~port:state.port ~intent:Revalidate
+               ~refresh_inflight:http_refresh_inflight ~scoped_refresh_inflight:http_scoped_refresh_inflight
+               ~scoped_refresh_followup ~mailbox:async_messages;
+             clear_goal_candle_revalidation state ~goal_id;
+             launch_goal_candle_load state ~mailbox:async_messages goal_id
+           in
+           let follow_candle goal =
+             let target = Masc_tui_render_work.planning_detail_candle_scroll state goal in
+             let count, height = Masc_tui_render.planning_detail_viewport state in
+             state.planning_scroll <- Planning_scroll_candle
+               (Masc_tui_scroll.normalize ~count ~height target)
+           in
            let open_candle () =
              open_planning_detail state ~mailbox:async_messages;
-             Option.iter (fun goal ->
-               state.planning_scroll <- Masc_tui_render_work.planning_detail_candle_scroll state goal)
-               (goal_detail_on_screen state)
+             Option.iter follow_candle (goal_detail_on_screen state)
            in
            (match goal_detail_on_screen state with
             | Some goal ->
-              start_http_refresh state ~host:server_peer_host ~port:state.port ~intent:Revalidate
-                ~refresh_inflight:http_refresh_inflight ~scoped_refresh_inflight:http_scoped_refresh_inflight
-                ~scoped_refresh_followup ~mailbox:async_messages;
-              clear_goal_candle_revalidation state ~goal_id:goal.pg_id;
-              launch_goal_candle_load state ~mailbox:async_messages goal.pg_id;
-              state.planning_scroll <- Masc_tui_render_work.planning_detail_candle_scroll state goal
+              read_candle goal.pg_id;
+              follow_candle goal
             | None ->
               (match selected_planning_goal_id state with
                | None when not (Masc_tui_overview_tasks.is_focused state.task_focus) ->
                    open_candle ()
-               | Some goal_id
-                 when not (Masc_tui_render_work.planning_missing_goal_notice state ~goal_id)
-                      && not (Masc_tui_overview_tasks.is_focused state.task_focus) ->
+               | Some goal_id when Masc_tui_render_work.planning_missing_goal_notice state ~goal_id ->
+                   read_candle goal_id
+               | Some _
+                 when not (Masc_tui_overview_tasks.is_focused state.task_focus) ->
                    open_candle ()
                | None | Some _ -> ()))
        | Some key when state.view = Planning
@@ -36808,7 +36823,7 @@ Use relative paths for resources already held in the package. -->
                 (match state.planning_mode with
                  | Planning_detail _ ->
                      state.planning_mode <- Planning_list;
-                     state.planning_scroll <- 0
+                     state.planning_scroll <- Planning_scroll_offset 0
                  | Planning_list when Option.is_some state.task_detail_id ->
                      state.task_detail_id <- None;
                      reset_task_detail_scroll state
@@ -37008,7 +37023,7 @@ Use relative paths for resources already held in the package. -->
                 (match state.planning_mode with
                  | Planning_detail _ ->
                      state.planning_mode <- Planning_list;
-                     state.planning_scroll <- 0
+                     state.planning_scroll <- Planning_scroll_offset 0
                  | Planning_list -> ())
             | Fusion ->
                 (match state.fusion_mode with
@@ -37242,7 +37257,8 @@ Use relative paths for resources already held in the package. -->
                      if state.planning_cursor < List.length goals - 1 then
                        state.planning_cursor <- state.planning_cursor + 1
                  | Planning_detail _ ->
-                     state.planning_scroll <- Masc_tui_types.scroll_down_from state.planning_scroll ~by:1)
+                     state.planning_scroll <- Planning_scroll_offset
+                       (Masc_tui_types.scroll_down_from (planning_scroll_value state.planning_scroll) ~by:1))
             | Fusion ->
                 (match state.fusion_mode with
                  | Fusion_list ->
@@ -37568,8 +37584,8 @@ Use relative paths for resources already held in the package. -->
                      if state.planning_cursor > 0 then
                        state.planning_cursor <- state.planning_cursor - 1
                  | Planning_detail _ ->
-                     if state.planning_scroll > 0 then
-                       state.planning_scroll <- state.planning_scroll - 1)
+                     state.planning_scroll <- Planning_scroll_offset
+                       (max 0 (planning_scroll_value state.planning_scroll - 1)))
             | Fusion ->
                 (match state.fusion_mode with
                  | Fusion_list ->

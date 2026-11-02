@@ -1354,11 +1354,14 @@ let planning_detail_pane (state : state) ~armed ~confirmation ~rows ~cols (goal 
   let actions = planning_detail_action_rows ~cols ~armed
       ~drop_reason:(goal_drop_reason_for state goal.pg_id) goal in
   List.iter (box_line buf cols) actions;
-  let lines = planning_detail_lines state ~confirmation ~cols goal in
+  let lines, candle_scroll = planning_detail_content state ~confirmation ~cols goal in
   let count = List.length lines in
   let height = planning_detail_height ~rows ~header_rows:(List.length headers)
     ~action_rows:(List.length actions) ~count in
-  let scroll = Masc_tui_scroll.normalize ~count ~height state.planning_scroll in
+  let requested_scroll = match state.planning_scroll with
+    | Planning_scroll_offset value -> value
+    | Planning_scroll_candle _ -> candle_scroll in
+  let scroll = Masc_tui_scroll.normalize ~count ~height requested_scroll in
   let window = Rows.of_list ~first:scroll ~height lines in
   for offset = 0 to height - 1 do
     match Rows.at window (scroll + offset) with

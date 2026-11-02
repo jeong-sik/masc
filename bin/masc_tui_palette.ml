@@ -180,17 +180,12 @@ let addon_result_targets (state : state) =
     [] (from_asks @ from_inventory @ from_addons)
 
 let palette_entries (state : state) =
+  let work_surfaces, other_surfaces =
+    List.partition (fun (surface, _) -> surface = Planning) surface_ring in
   [ "settings", Palette_config Config_params ]
   @ List.map
-      (fun (surface, label) ->
-         let label = match surface with
-           | Planning -> label ^ " / Goals"
-           | Overview | Acting | Metrics | Keepers _ | Memory | Lanes | Clients
-           | Board | Approvals | Schedules | Verification | Harness | Fusion
-           | Repositories | Code | Changes | Connectors | Runtime | Config
-           | Resources | Tools | System_logs -> label in
-         ("go " ^ label, Palette_goto surface))
-      surface_ring
+      (fun (surface, label) -> ("go " ^ label ^ " / Goals", Palette_goto surface))
+      work_surfaces
   @ [ "go Candle payouts / choose a Goal", Palette_goal_payouts ]
   @ List.concat_map (fun lane ->
       List.map (fun mode ->
@@ -240,6 +235,9 @@ let palette_entries (state : state) =
   @ [ "go Approvals", Palette_goto Approvals ]
   @ [ "go Memory", Palette_goto Memory ]
   @ [ "go Fusion", Palette_goto Fusion ]
+  @ List.map
+      (fun (surface, label) -> ("go " ^ label, Palette_goto surface))
+      other_surfaces
   (* After the ring, so "go system" still leads with the System surface: the
      ranks tie on a label that starts with the query, and a tie keeps entry
      order. *)

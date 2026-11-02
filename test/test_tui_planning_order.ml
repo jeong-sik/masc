@@ -55,6 +55,19 @@ let test_default_filter_is_active () =
   check bool "the default sort is phase/priority" true
     (state.planning_sort = Planning_sort_phase_priority)
 
+let test_candle_scroll_follows_until_manual_navigation () =
+  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  state.planning_scroll <- Planning_scroll_candle 12;
+  apply_clamped_scroll state (Planning_confirmation_scroll (23, None));
+  check bool "a new frame keeps the Candle destination" true
+    (state.planning_scroll = Planning_scroll_candle 23);
+  apply_clamped_scroll state (Planning_detail_scroll 24);
+  check bool "manual movement leaves the destination" true
+    (state.planning_scroll = Planning_scroll_offset 24);
+  apply_clamped_scroll state (Planning_confirmation_scroll (17, None));
+  check bool "later frames retain manual scrolling" true
+    (state.planning_scroll = Planning_scroll_offset 17)
+
 let test_filter_cycle_order () =
   check bool "all -> active" true
     (next_planning_filter Planning_filter_all = Planning_filter_active);
@@ -281,6 +294,8 @@ let () =
             test_studio_panel_top_border_and_lane_run_clock
         ; test_case "default filter is Active" `Quick
             test_default_filter_is_active
+        ; test_case "Candle scroll follows until manual navigation" `Quick
+            test_candle_scroll_follows_until_manual_navigation
         ; test_case "filter cycles all/active/completed/dropped" `Quick
             test_filter_cycle_order
         ; test_case "sort cycles phase/updated/due" `Quick test_sort_cycle_order

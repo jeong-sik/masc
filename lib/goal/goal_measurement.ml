@@ -245,6 +245,7 @@ let record config ~goal_id ~criterion_revision ~observed_value ~evidence ~actor 
         Error (Invalid_request "goal_measurement: Goal not found")
     | Error
         (( Goal_store.Store_unavailable _
+         | Goal_store.Goal_identity_ambiguous _
          | Goal_store.Rejected _
          | Goal_store.Persist_failed _ ) as error) ->
         Error (Store_error (Goal_store.write_error_to_string error))

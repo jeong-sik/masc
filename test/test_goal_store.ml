@@ -329,7 +329,7 @@ let test_status_field_no_longer_decodes () =
    | Ok _ -> fail "upsert_goal wrote over an undecodable store"
    | Error (Goal_store.Store_unavailable u) ->
        check string "refusal names the store path" (Goal_store.goals_path config) u.file
-   | Error (Goal_store.Goal_not_found _ | Goal_store.Rejected _
+   | Error (Goal_store.Goal_not_found _ | Goal_store.Goal_identity_ambiguous _ | Goal_store.Rejected _
            | Goal_store.Persist_failed _ as other) ->
        fail ("refusal was not Store_unavailable: " ^ write_error_msg other));
   let on_disk_after = In_channel.with_open_bin (Goal_store.goals_path config)
@@ -1064,6 +1064,65 @@ let test_transact_goal_authoritative_and_noop () =
   check string "recovery evidence untouched" mirror
     (In_channel.with_open_bin (goals_recovery_path config) In_channel.input_all)
 
+let test_duplicate_identity_refuses_goal_writers () =
+  with_workspace @@ fun config ->
+  let first = make_goal "duplicate-goal" "First criterion" in
+  let duplicate = { first with title = "Different criterion"; phase = Goal_phase.Verifying;
+                               criterion_revision = "other-revision" } in
+  let other = make_goal "independent-goal" "Independent" in
+  (match Goal_store.write_state_result config
+      { version = 7; updated_at = iso_now (); goals = [first; duplicate; other];
+        pending_events = []; pending_notifications = [] } with
+   | Ok () -> () | Error detail -> fail detail);
+  let primary = Goal_store.goals_path config in
+  let mirror = goals_recovery_path config in
+  let before = Fs_compat.load_file primary, Fs_compat.load_file mirror in
+  let unchanged () =
+    check string "refusal keeps primary bytes" (fst before) (Fs_compat.load_file primary);
+    check string "refusal keeps recovery bytes" (snd before) (Fs_compat.load_file mirror) in
+  let expect_ambiguous label = function
+    | Error (Goal_store.Goal_identity_ambiguous id) -> check string label first.id id
+    | Error error -> fail (label ^ ": " ^ write_error_msg error)
+    | Ok _ -> fail (label ^ ": duplicate Goal was accepted") in
+  let entered = ref false in
+  let projected = ref false in
+  let effects _ _ : Goal_store.transition_effects =
+    projected := true; { events = []; notifications = [] } in
+  expect_ambiguous "no-op transaction rejects duplicate" (Goal_store.transact_goal ~effects config ~goal_id:first.id
+    (fun goal -> entered := true; Ok (goal, ())));
+  expect_ambiguous "changing transaction rejects duplicate" (Goal_store.transact_goal ~effects config ~goal_id:first.id
+    (fun goal -> entered := true; Ok ({ goal with phase = Goal_phase.Dropped }, ())));
+  check bool "transaction callbacks not entered" false !entered;
+  check bool "transaction effects not projected" false !projected;
+  expect_ambiguous "duplicate beats phase mismatch" (Goal_store.update_goal_if_phase config ~goal_id:first.id
+    ~expected_phase:Goal_phase.Completed (fun goal -> entered := true; goal));
+  check bool "conditional callback not entered" false !entered;
+  expect_ambiguous "ordinary upsert rejects duplicate" (Goal_store.upsert_goal config ~id:first.id ~priority:1 ());
+  expect_ambiguous "revision upsert rejects duplicate" (Goal_store.upsert_goal_with_revision config ~id:first.id ~priority:1 ());
+  expect_ambiguous "audited upsert rejects duplicate" (Goal_store.upsert_goal_with_events config ~actor:"tester" ~id:first.id ~priority:1 ());
+  (match Goal_verification.bind_review config ~goal_id:first.id with
+   | Error (Goal_verification.Binding_unavailable _) -> ()
+   | Error (Goal_verification.No_current_review _) -> fail "ambiguous binding was called ended"
+   | Ok _ -> fail "ambiguous Goal admitted a review");
+  unchanged ();
+  List.iter (fun target ->
+    match Goal_store.update_goal_if_phase config ~goal_id:other.id ~expected_phase:Goal_phase.Executing
+            (fun goal -> { goal with id = target }) with
+    | Error (Goal_store.Rejected _) -> unchanged ()
+    | Error error -> fail ("identity replacement returned wrong error: " ^ write_error_msg error)
+    | Ok _ -> fail "conditional update replaced Goal identity") [first.id; "missing-goal"];
+  let events = match Goal_store.upsert_goal_with_events config ~actor:"tester" ~id:other.id ~priority:1 () with
+    | Ok (_, `updated _, events) -> events
+    | Ok (_, `created, _) -> fail "independent Goal was recreated"
+    | Error error -> fail (write_error_msg error) in
+  check bool "independent update records audit intents" true (events <> []);
+  let state = available config in
+  check int "only independent update advances version" 8 state.version;
+  check bool "independent update leaves both decoded duplicate rows" true
+    (List.filter (fun (goal : Goal_store.goal) -> String.equal goal.id first.id) state.goals = [first; duplicate]);
+  (match Goal_store.flush_pending_events config with Ok () -> () | Error detail -> fail detail);
+  check int "independent audit intents are acknowledged" 0 (List.length (available config).pending_events)
+
 let test_missing_criterion_revision_refuses_bound_mutation () =
   with_workspace @@ fun config ->
   let goal = make_goal "revision-required" "Old-looking goal" in
@@ -1786,6 +1845,7 @@ let () =
           test_case "criterion edits invalidate proof phase" `Quick test_criterion_edits_invalidate_proof_phase;
           test_case "upsert revision witness survives later commits" `Quick test_upsert_revision_witness_survives_later_commits;
           test_case "transaction uses primary and preserves no-op" `Quick test_transact_goal_authoritative_and_noop;
+          test_case "duplicate identity refuses Goal writers and preserves independent work" `Quick test_duplicate_identity_refuses_goal_writers;
           test_case "missing revision refuses bound mutation" `Quick test_missing_criterion_revision_refuses_bound_mutation ] );
       ( "due date",
         [ test_case "a value that is not a calendar day is refused" `Quick

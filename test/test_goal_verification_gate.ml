@@ -259,7 +259,7 @@ let test_undecodable_goal_store_reports_corruption_not_b1 () =
   (* The refusal is the store's typed Unavailable, never the B1 rejection:
      the create/update split is decided only on a state that was read. *)
   | Error (Goal_store.Store_unavailable { reason = Goal_store.Not_json _; _ }) -> ()
-  | Error (Goal_store.Store_unavailable _ | Goal_store.Goal_not_found _
+  | Error (Goal_store.Store_unavailable _ | Goal_store.Goal_not_found _ | Goal_store.Goal_identity_ambiguous _
           | Goal_store.Rejected _ | Goal_store.Persist_failed _ as other) ->
     fail ("expected Store_unavailable Not_json, got: " ^ Goal_store.write_error_to_string other)
 ;;

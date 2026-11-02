@@ -325,6 +325,9 @@ let handle_goal_upsert ~tool_name ~start_time (ctx : context) args : Tool_result
           error_result_typed ~tool_name ~start_time ~code:Validation_error msg
         | Error (Goal_store.Store_unavailable unavailable) ->
           unavailable_result ~tool_name ~start_time unavailable
+        | Error (Goal_store.Goal_identity_ambiguous _ as error) ->
+          error_result_typed ~tool_name ~start_time ~code:Conflict
+            (Goal_store.write_error_to_string error)
         | Error (Goal_store.Goal_not_found _ as error) ->
           error_result_typed ~tool_name ~start_time ~code:Not_found
             (Goal_store.write_error_to_string error)
@@ -623,7 +626,7 @@ let commit_verifier_decision ?before_proof_commit ~tool_name ~start_time config
     (match committed with
      | Error (Goal_store.Store_unavailable unavailable) ->
        unavailable_result ~tool_name ~start_time unavailable
-     | Error (Goal_store.Goal_not_found _ | Goal_store.Rejected _
+     | Error (Goal_store.Goal_not_found _ | Goal_store.Goal_identity_ambiguous _ | Goal_store.Rejected _
              | Goal_store.Persist_failed _ as error) ->
        error_result_typed ~tool_name ~start_time ~code:Conflict
          (Goal_store.write_error_to_string error)
@@ -742,6 +745,9 @@ let proof_request_failure ~tool_name ~start_time = function
     unavailable_result ~tool_name ~start_time unavailable
   | Store (Goal_store.Goal_not_found _ as error) ->
     error_result_typed ~tool_name ~start_time ~code:Not_found
+      (Goal_store.write_error_to_string error)
+  | Store (Goal_store.Goal_identity_ambiguous _ as error) ->
+    error_result_typed ~tool_name ~start_time ~code:Conflict
       (Goal_store.write_error_to_string error)
   | Store (Goal_store.Rejected _ | Goal_store.Persist_failed _ as error) ->
     error_result_typed ~tool_name ~start_time ~code:Internal_error
@@ -1076,6 +1082,9 @@ let finish_goal_drop ~tool_name ~start_time (ctx : context) ~goal_id ~reason =
   | Error (Goal_store.Goal_not_found _ as error) ->
       error_result_typed ~tool_name ~start_time ~code:Not_found
         (Goal_store.write_error_to_string error)
+  | Error (Goal_store.Goal_identity_ambiguous _ as error) ->
+      error_result_typed ~tool_name ~start_time ~code:Conflict
+        (Goal_store.write_error_to_string error)
   | Error (Goal_store.Rejected detail) ->
       error_result_typed ~tool_name ~start_time ~code:Conflict detail
   | Error (Goal_store.Persist_failed _ as error) ->
@@ -1144,7 +1153,7 @@ let finish_goal_suspension ~tool_name ~start_time (ctx : context) ~goal_id ~acti
             | Some text -> Some text, Some (Masc_domain.now_iso ()) in
           Ok ({ goal with phase; last_review_note; last_review_at }, true)) with
   | Error (Goal_store.Store_unavailable unavailable) -> unavailable_result ~tool_name ~start_time unavailable
-  | Error ((Goal_store.Goal_not_found _ | Goal_store.Rejected _ | Goal_store.Persist_failed _) as error) ->
+  | Error ((Goal_store.Goal_not_found _ | Goal_store.Goal_identity_ambiguous _ | Goal_store.Rejected _ | Goal_store.Persist_failed _) as error) ->
       error_result_typed ~tool_name ~start_time ~code:Conflict
         (Goal_store.write_error_to_string error)
   | Ok (goal, changed) ->

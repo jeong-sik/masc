@@ -16176,7 +16176,7 @@ let apply_ui_language state ~base_path lang =
 
 let press_marked_target state ~base_path ~mailbox (target : press_target) =
   match target with
-  | Press_input_rejection _ | Press_quit_confirmation _ -> ()
+  | Press_input_rejection _ | Press_quit_confirmation _ | Press_notice_fragment _ -> ()
   | Press_surface surface ->
       if surface <> state.view then goto_surface state ~mailbox surface
   | Press_ring_edge Ring_before -> cycle_surface state ~mailbox ~backwards:true
@@ -16207,9 +16207,9 @@ let press_marked_target state ~base_path ~mailbox (target : press_target) =
         enter_context_inspector_tab state tab
   | Press_queue_selected presented ->
       let terminal_rows, _ = get_terminal_size () in
-      let panel = match Masc_tui_render.frame_choice state ~terminal_rows with
+      let panel = match Masc_tui_render.frame_choice state ~terminal_rows ~terminal_cols:(snd (Masc_tui_ansi.get_terminal_size ())) ~now:(Unix.gettimeofday ()) with
        | `Queue panel -> Some panel
-       | `Play_card _ -> Masc_tui_render.queue_below_play state ~terminal_rows
+       | `Play_card _ -> Masc_tui_render.queue_below_play state ~terminal_rows ~terminal_cols:(snd (Masc_tui_ansi.get_terminal_size ())) ~now:(Unix.gettimeofday ())
        | `Surface | `Too_small _ | `Account_login _ | `Palette
        | `Collab _ | `Lane_addons _ | `Detail_reading _ | `About | `Context
        | `Keeper_deletions | `Help | `Agenda | `Answering | `Patch | `Link
@@ -22331,7 +22331,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
              state.approval_cursor <- max 0 (count - 1)
        | Error detail -> state.keeper_tool_approvals_error <- Some detail)
   | Listen_prepared (request, result) ->
-      if input_pending () then withdraw_pending_music_editor state;
+      if input_pending () || Option.is_some state.quit_armed then
+        withdraw_pending_music_editor state;
       if take_chat_listen state request then begin
         let notice = chat_notice state ~keeper_name:(Some request.lr_keeper) in
         match result with
@@ -22350,9 +22351,12 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
                 (match Masc_tui_attachment_action.midi_path prepared with
                  | None -> notice ~kind:Notice_failure "/music midi: prepared source is not MIDI"
                  | Some path ->
-                     match open_music_midi ~path with
-                     | Ok () -> notice ~kind:Notice_reply "/music midi: returned from the MIDI editor"
-                     | Error detail -> notice ~kind:Notice_failure ("/music midi: " ^ detail))
+                     if input_pending () || Option.is_some state.quit_armed then
+                       notice ~kind:Notice_failure
+                         "/music midi: opening cancelled while terminal input was pending; run /music midi again when ready"
+                     else match open_music_midi ~path with
+                       | Ok () -> notice ~kind:Notice_reply "/music midi: returned from the MIDI editor"
+                       | Error detail -> notice ~kind:Notice_failure ("/music midi: " ^ detail))
       end
   | Sent_image_ready { generation; view; keeper_name; name; skill_reference; result } ->
       let pending = match state.sent_image_read with
@@ -25064,9 +25068,15 @@ let main
     match state.image_open || state.msx_open, presented_rows with
     | true, (Some _ | None) -> None
     | false, None -> None
-    | false, Some rows ->
-        let _, cols = Masc_tui_ansi.get_terminal_size () in
-        presented_input_rejection ~rows:(List.length rows) ~cols (!presented).presses
+    | false, Some rows -> (
+        match Masc_tui_ansi.probe_terminal_size () with
+        | Some (physical_rows, physical_cols)
+          when not (Terminal_write_repair.damage_pending ())
+               && not (Atomic.get resize_requested)
+               && (physical_rows, physical_cols) = Masc_tui_ansi.get_terminal_size () ->
+            presented_input_rejection ~rows:(List.length rows)
+              ~cols:physical_cols (!presented).presses
+        | (Some _ | None) -> None)
   in
   let last_visible_quit ~presented_rows () =
     (* The probe runs only past the guards that make it moot: it is a fresh
@@ -25097,7 +25107,7 @@ let main
       ~context_search_owner:(context_search_owner ())
   in
   let peer_frame_owner_on_screen ~terminal_rows =
-    match Masc_tui_render.frame_choice state ~terminal_rows with
+    match Masc_tui_render.frame_choice state ~terminal_rows ~terminal_cols:(snd (Masc_tui_ansi.get_terminal_size ())) ~now:(Unix.gettimeofday ()) with
     | `Detail_reading reading -> keeper_peer_frame_owner state reading
     | `Too_small _ | `Play_card _ | `Account_login _ | `Palette | `Collab _
     | `Lane_addons _ | `About | `Context | `Keeper_deletions | `Help | `Agenda
@@ -25109,7 +25119,7 @@ let main
     let content_rows, content_cols = Masc_tui_render_prim.get_terminal_size () in
     if state.image_open || state.msx_open
        || (terminal_rows, terminal_cols) <> Masc_tui_ansi.get_terminal_size () then None
-    else match Masc_tui_render.frame_choice state ~terminal_rows:content_rows with
+    else match Masc_tui_render.frame_choice state ~terminal_rows:content_rows ~terminal_cols:(snd (Masc_tui_ansi.get_terminal_size ())) ~now:(Unix.gettimeofday ()) with
     | `Detail_reading reading ->
         (match keeper_peer_target state reading ~terminal_rows ~terminal_cols with
          | None -> None
@@ -25127,8 +25137,11 @@ let main
       ~drawn_detail_reading ~drawn_tools_task ~input_pending ~write ~flush reader =
     (* Read once: each call copies the whole screen into a fresh list. *)
     let presented_rows = Frame_presenter.presented_rows frame_presenter in
-    let panel_owner = Masc_tui_render.panel_input_owner state
-        ~terminal_rows:frame.Frame_presenter.terminal_rows in
+    let panel_owner =
+      if frame.Frame_presenter.compact_frame then None
+      else Masc_tui_render.panel_input_owner state
+          ~terminal_rows:frame.Frame_presenter.terminal_rows
+          ~terminal_cols:(snd (Masc_tui_ansi.get_terminal_size ())) ~now:(Unix.gettimeofday ()) in
     let candidate_peer_owner = keeper_peer_drawn_owner state
         ~compact:frame.Frame_presenter.compact_frame ~drawn_reading:drawn_detail_reading in
     let candidate_peer_target = Option.bind candidate_peer_owner (fun _ ->
@@ -26948,6 +26961,9 @@ Use relative paths for resources already held in the package. -->
            raise Break
        | (Masc_tui_exit_signals.Interrupt_armed
          | Masc_tui_exit_signals.Interrupt_again) as interrupt ->
+           (* A pending MIDI handoff yields to this gesture before the quit
+              notice is armed: its cancellation reports its own notice. *)
+           withdraw_pending_music_editor state;
            share_interrupt_barrier := true;
            state.resource_copy_pending <- None;
            state.resource_copy_ready <- None;
@@ -27069,7 +27085,7 @@ Use relative paths for resources already held in the package. -->
         && Option.is_none (Frame_presenter.presented_rows frame_presenter) in
       let panel_owner_current () =
         let terminal_rows, _ = get_terminal_size () in
-        Masc_tui_render.panel_input_owner state ~terminal_rows in
+        Masc_tui_render.panel_input_owner state ~terminal_rows ~terminal_cols:(snd (Masc_tui_ansi.get_terminal_size ())) ~now:(Unix.gettimeofday ()) in
       let input_not_yet_admissible () =
         input_barrier_held () || frame_unavailable ()
         || (not state.image_open && not state.msx_open
@@ -27078,7 +27094,8 @@ Use relative paths for resources already held in the package. -->
          withdrawal and async results after this point produce newer notices. *)
       let ordinary_before_input = Masc_tui_action_notice.ordinary state.last_action in
       let retire_music_editor_for_input () =
-        if Option.is_some interrupted_paste || input_reader_has_started_input input_reader then
+        if Option.is_some state.quit_armed || Masc_tui_exit_signals.pending_signal exit_signals
+           || Option.is_some interrupted_paste || input_reader_has_started_input input_reader then
           withdraw_pending_music_editor state
       in
       let asynchronous_input_pending () =
@@ -27092,7 +27109,10 @@ Use relative paths for resources already held in the package. -->
       retire_music_editor_for_input ();
       if
         drain_async_messages ~delivery_round:async_delivery_round ~deferred_share_messages ~deferred_share_sweep ~resource_copy_sweep ~deadline_ns:drain_deadline_ns
-          ~input_pending:(fun () -> input_reader_has_ready_input input_reader)
+          ~input_pending:(fun () -> input_reader_has_ready_input input_reader
+              || Masc_tui_exit_signals.pending_signal exit_signals
+              || Option.is_some state.quit_armed
+              || Frame_presenter.last_frame_is_compact frame_presenter)
           ~share_input_pending:asynchronous_input_pending state ~base_path
           ~http_refresh_inflight
           ~http_scoped_refresh_inflight ~scoped_refresh_followup
@@ -27100,11 +27120,21 @@ Use relative paths for resources already held in the package. -->
       then Render_schedule.request render_schedule Render_schedule.Background;
       prepare_resource_diagrams state ~mailbox:async_messages;
       prepare_inspected_frame state ~mailbox:async_messages;
+      (* A prepared editor may not replace a quit or recovery notice before
+         the covered surface has actually returned to the terminal. *)
+      let editor_waits_for_frame =
+        let terminal_rows, _ = get_terminal_size () in
+        let _, terminal_cols = Masc_tui_ansi.get_terminal_size () in
+        Option.is_some state.quit_armed
+        || Frame_presenter.last_frame_is_compact frame_presenter
+        || Masc_tui_render.compact_frame_required state ~terminal_rows ~terminal_cols
+             ~now:(Unix.gettimeofday ()) in
       (match state.lane_addons with
-       | Some view when view.editor_ready && not (input_not_yet_admissible ()) -> handle_lane_document_editor ()
+       | Some view when view.editor_ready && not editor_waits_for_frame
+                        && not (input_not_yet_admissible ()) -> handle_lane_document_editor ()
        | Some _ | None -> ());
       continue_keeper_settings_editor ~input_pending:(
-        input_not_yet_admissible () || Option.is_some interrupted_paste
+        editor_waits_for_frame || input_not_yet_admissible () || Option.is_some interrupted_paste
         || input_reader_has_ready_input input_reader
         || input_holds_incomplete_sequence input_reader
         || match paste_phase input_reader with No_paste -> false | Pasting _ | Draining_tail _ -> true);
@@ -27352,7 +27382,7 @@ Use relative paths for resources already held in the package. -->
       let queue_viewport_decision =
         let terminal_rows, _ = get_terminal_size () in
         match input, queue_owner_of_reader (!presented).reader,
-              Masc_tui_render.queue_below_play state ~terminal_rows with
+              Masc_tui_render.queue_below_play state ~terminal_rows ~terminal_cols:(snd (Masc_tui_ansi.get_terminal_size ())) ~now:(Unix.gettimeofday ()) with
         | Some event, Some owner, Some panel
           when not state.image_open && not state.msx_open
                && not (queue_owner_matches state panel
@@ -28220,7 +28250,7 @@ Use relative paths for resources already held in the package. -->
         else text_input_target state ~compact_viewport in
       let play_shown = play_card_shown state in
       let rows, _ = get_terminal_size () in
-      let beneath = Masc_tui_render.queue_below_play state ~terminal_rows:rows in
+      let beneath = Masc_tui_render.queue_below_play state ~terminal_rows:rows ~terminal_cols:(snd (Masc_tui_ansi.get_terminal_size ())) ~now:(Unix.gettimeofday ()) in
       let queue_play_owner = queue_play_input_owner ~play_presented:presented_play
           ~play_shown ~compact:compact_viewport ~state ~beneath
           ~viewport:(Option.map (Masc_tui_render_overlays.queue_panel_viewport state) beneath)
@@ -28265,7 +28295,7 @@ Use relative paths for resources already held in the package. -->
               | Some name when String.length name > 1 ->
                   let rows, _ = get_terminal_size () in
                   if panel_owns_commands || Option.is_some presented_queue_input then true
-                  else (match Masc_tui_render.frame_choice state ~terminal_rows:rows with
+                  else (match Masc_tui_render.frame_choice state ~terminal_rows:rows ~terminal_cols:(snd (Masc_tui_ansi.get_terminal_size ())) ~now:(Unix.gettimeofday ()) with
                    | `Queue _ -> true
                    | `Agenda | `Answering | `Help -> not command_reading
                    | `Too_small _ | `Play_card _ | `Account_login _ | `Palette
@@ -28298,7 +28328,7 @@ Use relative paths for resources already held in the package. -->
         state.view = Lanes && Option.is_some state.machine_activity_open
         && not state.help_open
         && (let terminal_rows, _ = get_terminal_size () in
-            match Masc_tui_render.frame_choice state ~terminal_rows with
+            match Masc_tui_render.frame_choice state ~terminal_rows ~terminal_cols:(snd (Masc_tui_ansi.get_terminal_size ())) ~now:(Unix.gettimeofday ()) with
             | `Surface -> true
             | _ -> false)
       in
@@ -28306,7 +28336,7 @@ Use relative paths for resources already held in the package. -->
         state.view = Lanes && Option.is_some state.exact_activity_open
         && not state.help_open
         && (let terminal_rows, _ = get_terminal_size () in
-            match Masc_tui_render.frame_choice state ~terminal_rows with
+            match Masc_tui_render.frame_choice state ~terminal_rows ~terminal_cols:(snd (Masc_tui_ansi.get_terminal_size ())) ~now:(Unix.gettimeofday ()) with
             | `Surface -> true
             | _ -> false)
       in
@@ -30465,7 +30495,7 @@ Use relative paths for resources already held in the package. -->
        | Some k when String.equal k toggle_roster_pane_key -> toggle_roster_chrome ()
        | Some k when String.equal k toggle_acting_pane_key -> toggle_activity_chrome ()
        | Some k when (let terminal_rows, _ = get_terminal_size () in
-             match Masc_tui_render.frame_choice state ~terminal_rows with
+             match Masc_tui_render.frame_choice state ~terminal_rows ~terminal_cols:(snd (Masc_tui_ansi.get_terminal_size ())) ~now:(Unix.gettimeofday ()) with
              | `Queue _ -> true | _ -> false) ->
            Option.iter (fun panel ->
              handle_queue_panel_key state ~base_path ~mailbox:async_messages
@@ -36977,7 +37007,10 @@ Use relative paths for resources already held in the package. -->
       retire_music_editor_for_input ();
       if
         drain_async_messages ~delivery_round:async_delivery_round ~deferred_share_messages ~deferred_share_sweep ~resource_copy_sweep ~deadline_ns:drain_deadline_ns
-          ~input_pending:(fun () -> input_reader_has_ready_input input_reader)
+          ~input_pending:(fun () -> input_reader_has_ready_input input_reader
+              || Masc_tui_exit_signals.pending_signal exit_signals
+              || Option.is_some state.quit_armed
+              || Frame_presenter.last_frame_is_compact frame_presenter)
           ~share_input_pending:asynchronous_input_pending state ~base_path
           ~http_refresh_inflight
           ~http_scoped_refresh_inflight ~scoped_refresh_followup
@@ -37283,7 +37316,7 @@ Use relative paths for resources already held in the package. -->
       reconcile_task_detail_scroll state;
       reconcile_tools_task_scroll state;
       let terminal_rows, _ = get_terminal_size () in
-      let frame_choice = Masc_tui_render.frame_choice state ~terminal_rows in
+      let frame_choice = Masc_tui_render.frame_choice state ~terminal_rows ~terminal_cols:(snd (Masc_tui_ansi.get_terminal_size ())) ~now:(Unix.gettimeofday ()) in
       let owned_frame = match frame_choice with
         | `Queue _ | `Play_card _ | `Help -> true
         | `Too_small _ | `Account_login _ | `Palette | `Collab _ | `Lane_addons _
@@ -37295,7 +37328,7 @@ Use relative paths for resources already held in the package. -->
         | `Detail_reading _ | `About | `Context | `Keeper_deletions | `Help
         | `Agenda | `Answering | `Patch | `Link | `Client_detail _ | `Surface -> false in
       let panel_changed = Presented.panel_presentation_changed !presented
-          ~current_owner:(Masc_tui_render.panel_input_owner state ~terminal_rows) in
+          ~current_owner:(Masc_tui_render.panel_input_owner state ~terminal_rows ~terminal_cols:(snd (Masc_tui_ansi.get_terminal_size ())) ~now:(Unix.gettimeofday ())) in
       let defer_owned_frame = transition_input_pending && not compact_recovery
         && (owned_frame || Option.is_some (queue_owner_of_reader (!presented).reader)
             || Option.is_some (play_card_of_reader (!presented).reader)
@@ -37346,7 +37379,7 @@ Use relative paths for resources already held in the package. -->
                  (* Event folding is frame preparation, so its cost belongs
                     inside Build timing even though only the loop stores it. *)
                  let terminal_rows, terminal_cols = Masc_tui_ansi.get_terminal_size () in
-                 (match acting_pane_chunk_projection state ~terminal_rows ~terminal_cols with
+                 (match acting_pane_chunk_projection state ~terminal_rows ~terminal_cols ~now:(Unix.gettimeofday ()) with
                   | None -> ()
                   | Some projection -> state.acting_chunk_projection <- Some projection);
                  (* This lazy belongs to one synchronous Build on the UI
@@ -37366,7 +37399,7 @@ Use relative paths for resources already held in the package. -->
                    let prepared = Masc_tui_home.prepare state in
                    Masc_tui_frame_timing.finish_stage ~name:"home.prepare" prepare_started;
                    prepared) in
-                 (match state.view, Masc_tui_render.frame_choice state ~terminal_rows with
+                 (match state.view, Masc_tui_render.frame_choice state ~terminal_rows ~terminal_cols:(snd (Masc_tui_ansi.get_terminal_size ())) ~now:(Unix.gettimeofday ()) with
                   | Overview, `Surface ->
                       let prepared = Lazy.force home in
                       let selection_started = Masc_tui_frame_timing.start_stage () in
@@ -37393,7 +37426,7 @@ Use relative paths for resources already held in the package. -->
                  (* This is the renderer's typed choice at its content height;
                     the emitted frame later decides whether it is compact. *)
                  let content_rows, _ = Masc_tui_render_prim.get_terminal_size () in
-                 drawn_detail_reading := (match Masc_tui_render.frame_choice state ~terminal_rows:content_rows with
+                 drawn_detail_reading := (match Masc_tui_render.frame_choice state ~terminal_rows:content_rows ~terminal_cols:(snd (Masc_tui_ansi.get_terminal_size ())) ~now:(Unix.gettimeofday ()) with
                    | `Detail_reading reading -> Some reading
                    | `Too_small _ | `Play_card _ | `Account_login _ | `Palette | `Collab _
                    | `Lane_addons _ | `About | `Context | `Keeper_deletions | `Help | `Agenda

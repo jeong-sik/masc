@@ -625,12 +625,6 @@ let thinking_control_token_for_provider_model_id ~provider_label ~model_id =
 
 [@@@coverage off]
 
-let admit_fixture_catalogs ~models ~providers =
-  match Catalog_snapshot.of_catalogs ~models ~providers with
-  | Ok snapshot -> snapshot
-  | Error error -> failwith (Catalog_snapshot.error_to_string error)
-;;
-
 let%test "for_model_id glm-4.5 has reasoning" =
   match for_model_id "glm-4.5" with
   | Some c ->
@@ -712,6 +706,12 @@ let%test "for_model_id glm-4.5-flash has GLM-4.5 thinking limits" =
    Fixtures are strict TOML snapshots, parsed through the same constructor as
    deployment catalogs; they are not auto-synced with [models.toml]. *)
 let%test_module "catalog fixtures" = (module struct
+let admit_fixture_catalogs ~models ~providers =
+  match Catalog_snapshot.of_catalogs ~models ~providers with
+  | Ok snapshot -> snapshot
+  | Error error -> failwith (Catalog_snapshot.error_to_string error)
+;;
+
 let test_catalog_of_toml contents =
   Model_catalog.of_toml_string ~source:"capabilities inline fixture" contents
   |> Result.get_ok

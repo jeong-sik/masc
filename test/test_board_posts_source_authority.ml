@@ -393,6 +393,25 @@ let check_known_settlement store =
   | Board.Posts_unobserved | Board.Posts_refused _ | Board.Posts_unsettled _ ->
     Alcotest.fail "known success lost its source or cleanup diagnostic"
 
+let test_missing_read_preserves_reserved_cleanup workspace =
+  let store, armed, _, fired, _ = fault_store workspace in
+  load_posts store 0;
+  ignore (require_post (create store "actual Present before disappearance"));
+  Unix.unlink (Board.persist_path store);
+  armed := Some Timeout_close;
+  expect_reserved Timeout_close (fun () -> ignore (Rows.load_persisted_posts store));
+  Alcotest.(check int) "Missing read settled the actual failing descriptor" 1 !fired;
+  (match store.Board.posts_source with
+   | Board.Posts_refused {
+       last_observed = Some _;
+       failure = Posts_missing_after_observation (Some _); } -> ()
+   | Posts_unobserved | Posts_readable _ | Posts_refused _ | Posts_unsettled _ ->
+     Alcotest.fail "Missing refusal lost the actual read cleanup diagnostic");
+  require_io_refusal (Board.with_persist_lock store
+    (fun () -> Board.require_posts_source_readable store));
+  Alcotest.(check bool) "reserved read refusal does not recreate payload" false
+    (Sys.file_exists (Board.persist_path store))
+
 let test_append_cleanup fault workspace =
   let store, armed, _, fired, _ = fault_store workspace in
   load_posts store 0;
@@ -709,7 +728,8 @@ let () =
         ; case "retained typed snapshot cannot overwrite a newer edit" test_retained_snapshot_is_stale
         ; case "all actual writers preserve one posts source" test_cross_writer_projection ]
     ; "descriptor settlement",
-        [ case "append ordinary cleanup preserves success" (test_append_cleanup Ordinary_close)
+        [ case "Missing read refusal preserves reserved cleanup" test_missing_read_preserves_reserved_cleanup
+        ; case "append ordinary cleanup preserves success" (test_append_cleanup Ordinary_close)
         ; case "append timeout publishes before rethrow" (test_append_cleanup Timeout_close)
         ; case "append allocation failure publishes before rethrow" (test_append_cleanup Allocation_close)
         ; case "rewrite ordinary cleanup preserves success" (test_rewrite_cleanup Ordinary_close)

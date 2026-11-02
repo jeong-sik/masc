@@ -521,7 +521,7 @@ type posts_source_failure =
   | Posts_not_observed
   | Posts_rows_rejected of posts_row_error list
   | Posts_transaction_failed of Fs_compat.private_jsonl_transaction_error
-  | Posts_missing_after_observation
+  | Posts_missing_after_observation of Fs_compat.private_jsonl_transaction_error option
   | Posts_source_binding_mismatch
   | Posts_snapshot_stale
   | Posts_raised of { exception_ : exn; backtrace : Printexc.raw_backtrace }

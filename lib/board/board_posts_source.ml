@@ -22,7 +22,7 @@ let failure_to_board_error = function
       | Invalid_posts_row { line } -> Printf.sprintf "line %d: invalid persisted row schema" line) errors in
     Io_error (String.concat "; " detail)
   | Posts_transaction_failed error -> Io_error (Fs_compat.private_jsonl_transaction_error_to_string error)
-  | Posts_missing_after_observation -> Io_error "posts source disappeared after observation or refusal"
+  | Posts_missing_after_observation _ -> Io_error "posts source disappeared after observation or refusal"
   | Posts_source_binding_mismatch -> Io_error "posts source belongs to another captured workspace"
   | Posts_snapshot_stale -> Io_error "captured posts snapshot is stale"
   | Posts_raised { exception_; _ } -> Io_error (Printexc.to_string exception_)
@@ -73,7 +73,8 @@ let propagate_reserved exception_ backtrace =
 let reserved_source_failure = function
   | Posts_transaction_failed error -> reserved_transaction error
   | Posts_raised { exception_; backtrace } -> reserved_exception (exception_, backtrace)
-  | Posts_not_observed | Posts_rows_rejected _ | Posts_missing_after_observation
+  | Posts_missing_after_observation diagnostic -> Option.bind diagnostic reserved_transaction
+  | Posts_not_observed | Posts_rows_rejected _
   | Posts_source_binding_mismatch | Posts_snapshot_stale -> None
 
 let finish_failure failure = raise_reserved (reserved_source_failure failure)
@@ -130,7 +131,8 @@ let read store =
           | Posts_readable { observation; _ } ->
             Fs_compat.Private_jsonl_cursor.is_missing observation.snapshot.cursor
           | Posts_refused _ | Posts_unsettled _ -> false in
-        if missing && not missing_allowed then Posts_unavailable Posts_missing_after_observation
+        if missing && not missing_allowed then
+          Posts_unavailable (Posts_missing_after_observation receipt.settlement_error)
         else
           let posts = ref [] and errors = ref [] in
           String.split_on_char '\n' receipt.value.bytes |> List.iteri (fun index text ->

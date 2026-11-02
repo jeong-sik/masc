@@ -324,7 +324,7 @@ let convert_to_png ~run ~cache_dir input =
           Printf.sprintf "convert %s %s >/dev/null 2>&1" source (Filename.quote out))
       ; Ffmpeg,
         (fun out ->
-          Printf.sprintf "ffmpeg -y -i %s %s >/dev/null 2>&1" source (Filename.quote out))
+          Printf.sprintf "ffmpeg -y -i %s -frames:v 1 %s >/dev/null 2>&1" source (Filename.quote out))
       ]
     in
     match attempt_path ~cache_dir ~prefix:"conv_attempt_" ~suffix:".png" with

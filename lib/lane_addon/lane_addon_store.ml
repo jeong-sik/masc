@@ -873,6 +873,38 @@ let tool_request_owner_inventory_with ~after_listing ~sync_file ~sync_parent t ~
 let tool_request_owner_inventory = tool_request_owner_inventory_with
   ~after_listing:(fun _ -> ()) ~sync_file:Unix.fsync ~sync_parent:Unix.fsync
 
+type owner_metadata_observation =
+  | Published_owner_metadata of string * Yojson.Safe.t
+  | Malformed_owner_json
+
+(* This observation is separate from the strict execution inventory above.
+   Only parsing of bytes that passed the same owned/durable read may become an
+   individual issue; any filesystem or directory verification error remains
+   an error for the entire observation. *)
+let observe_tool_request_owner_metadata_with ~after_listing ~sync_file ~sync_parent t ~scope =
+  let* result = with_tool_request_owner_scope ~sync_parent t ~scope
+    (fun ~owner_uid held names ->
+      after_listing (Fs_compat.owned_inventory_root_path held);
+      let rec read records = function
+        | [] -> Ok (List.rev records)
+        | name :: rest ->
+          match tool_request_owner_entry name with
+          | Staged_entry -> read records rest
+          | Unknown_entry -> Error "unknown entry in original request namespace"
+          | Record_entry ->
+            let stem = Filename.chop_suffix name ".json" in
+            if not (String_util.is_lowercase_sha256_hex stem)
+            then Error "observed original metadata filename is not a SHA-256 key"
+            else
+              let* bytes = read_owned_tool_request_bytes ~sync_file ~sync_parent ~owner_uid held name in
+              let record = try Published_owner_metadata (name, Yojson.Safe.from_string bytes)
+                with Yojson.Json_error _ -> Malformed_owner_json in
+              read (record :: records) rest in
+      read [] names) in
+  Ok (match result with None -> [] | Some records -> records)
+let observe_tool_request_owner_metadata = observe_tool_request_owner_metadata_with
+  ~after_listing:(fun _ -> ()) ~sync_file:Unix.fsync ~sync_parent:Unix.fsync
+
 let fold_tool_request_owner_inventory_all_with ~check_staged ~serialize_scopes t ~init ~f =
   let blocking () = protect (fun () ->
     let* result=Fs_compat.with_owned_inventory_root (Filename.dirname t.root) (fun anchor ->
@@ -1509,6 +1541,7 @@ let publish_for_keeper ~base_path t frozen = protect (fun () ->
 
 module For_testing = struct
   let tool_request_owner_inventory = tool_request_owner_inventory_with
+  let observe_tool_request_owner_metadata = observe_tool_request_owner_metadata_with
   let remove_binding = remove_binding_with
   let binding_inventory = binding_inventory_with
   let issue_detail = issue_detail

@@ -59,6 +59,49 @@ val inventory_for_goal :
     authorize a fresh dispatch. Any selected original's body, identity or
     destination failure still rejects the Goal result. *)
 
+type observation_issue =
+  | Unattributable_metadata
+  | Noncanonical_request_metadata
+  | Original_binding_mismatch
+type observation_binding = {
+  base_path : string;
+  goal_id : string;
+  request_id : string;
+  criterion : Goal_store.criterion;
+  submitted_evidence : Workspace_verification_store.submitted_evidence_item list;
+}
+type request_observation = private {
+  binding : observation_binding;
+  observation_started_at : float;
+  observation_finished_at : float;
+  observed_records : retained list;
+  issues : observation_issue list;
+}
+
+val observe_for_request :
+  store:Lane_addon_store.t -> installation_id:string -> package_id:string ->
+  binding:observation_binding -> (request_observation, error) result
+(** Observe records for this request in the supplied active store without
+    restoring a successor or creating a run. The caller supplies the expected
+    workspace path, criterion and evidence; returned records match those values
+    and have a self-consistent owner, original and fixed run. This does not
+    authenticate the caller or establish that the supplied binding is current.
+
+    Discovery and individual record reads are separate observations: later
+    additions may be absent and already-read phases may advance. The two wall
+    clock values are sampled at the beginning and end, not an atomic snapshot;
+    clock changes can affect their order and they do not measure duration. An
+    issue leaves the known records available but makes discovery incomplete. The scope excludes
+    archives, removed originals and other requests; even an empty list without
+    issues is not proof of no earlier execution. The parent/child chain and
+    verifier-specific phase evidence are not validated here. Filesystem and
+    record reload errors reject the whole observation. No returned phase
+    grants retry, judgment, or terminal authority. The durable read can fsync
+    files and directories. Consumers must bind the store, destination, Goal,
+    workspace, credentials and request ticket and revalidate their ownership.
+    The binding, retained values and error details may contain private input or
+    paths; consumers must project only authorized fields. *)
+
 val inventory_by_goal :
   store:Lane_addon_store.t -> installation_id:string -> package_id:string ->
   (((string * (retained list, error) result) list * (string * error) list), error) result

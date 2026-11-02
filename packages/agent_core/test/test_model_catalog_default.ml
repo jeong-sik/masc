@@ -1190,7 +1190,8 @@ let test_openrouter_refreshed_efforts_reach_the_wire () =
     Model_catalog_test_support.load_repo_model_catalog ~suite:"OpenRouter effort wire"
   in
   with_clean_model_catalog_override (fun () ->
-    Model_catalog.set_global catalog;
+    Llm_provider.Catalog_snapshot.publish
+      (Agent_core_test_deps.admit_catalogs ~models:(Some catalog) ~providers:None);
     List.iter
       (fun (model_id, accepted, boolean_control) ->
          let config ?enable_thinking ?reasoning_effort () =

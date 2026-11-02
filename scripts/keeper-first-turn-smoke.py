@@ -196,9 +196,11 @@ def request(url, token=None, body=None, timeout=30):
         return response.read()
 
 
-def require_chat_completion(output, expected_reply):
+def require_chat_completion(output, expected_reply, keeper, request_id):
     """A closed HTTP stream can still carry an unsuccessful Keeper run."""
-    state, run_id = 0, None
+    state = 0
+    thread_id = 'keeper:' + keeper
+    run_id = 'keeper-operation-run-' + request_id
     for line in output.read_text(encoding='utf-8').splitlines():
         if not line.startswith('data:'):
             continue
@@ -211,19 +213,23 @@ def require_chat_completion(output, expected_reply):
         kind = event.get('type')
         if kind == 'RUN_ERROR':
             raise SmokeError('Keeper chat stream reported a failed run')
-        if state == 0 and kind == 'RUN_STARTED':
-            run_id = event.get('runId')
-            if not isinstance(run_id, str) or not run_id:
-                raise SmokeError('chat stream has no run identity')
+        if (state == 0 and kind == 'CUSTOM' and event.get('name') == 'KEEPER_CHAT_OPERATION_ACCEPTED'
+                and isinstance(event.get('value'), dict)
+                and event['value'].get('operation_id') == request_id):
             state = 1
-        elif (state == 1 and kind == 'CUSTOM' and event.get('name') == 'KEEPER_REPLY_DETAILS'
-              and event.get('runId') == run_id and isinstance(event.get('value'), dict)
+        elif (state == 1 and kind == 'RUN_STARTED' and event.get('threadId') == thread_id
+              and event.get('runId') == run_id):
+            state = 2
+        elif (state == 2 and kind == 'CUSTOM' and event.get('name') == 'KEEPER_REPLY_DETAILS'
+              and event.get('threadId') == thread_id and event.get('runId') == run_id
+              and isinstance(event.get('value'), dict)
               and event['value'].get('reply') == expected_reply
               and event['value'].get('turn_outcome') == 'visible_reply'):
-            state = 2
-        elif state == 2 and kind == 'RUN_FINISHED' and event.get('runId') == run_id:
             state = 3
-    if state != 3:
+        elif (state == 3 and kind == 'RUN_FINISHED' and event.get('threadId') == thread_id
+              and event.get('runId') == run_id):
+            state = 4
+    if state != 4:
         raise SmokeError('Keeper chat stream has no completed run with the expected reply')
 
 
@@ -242,7 +248,7 @@ def chat_request(url, token, body, output, *, expected_reply):
             raise SmokeError('first-turn stream exceeded 180s; partial events saved') from error
     if result.returncode:
         raise SmokeError('first-turn stream failed: ' + result.stderr.decode())
-    require_chat_completion(output, expected_reply)
+    require_chat_completion(output, expected_reply, body['name'], body['request_id'])
 
 
 def wait_until(description, action, server, timeout=60):

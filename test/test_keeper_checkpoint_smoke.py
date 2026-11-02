@@ -169,22 +169,26 @@ class CheckpointProofTest(unittest.TestCase):
 
     def test_chat_stream_requires_a_successful_matching_run(self):
         stream = self.base / 'chat.sse'
-        events = [{'type': 'RUN_STARTED', 'runId': 'run'},
-                  {'type': 'CUSTOM', 'runId': 'run', 'name': 'KEEPER_REPLY_DETAILS',
+        run, thread = 'keeper-operation-run-request', 'keeper:keeper'
+        events = [{'type': 'CUSTOM', 'name': 'KEEPER_CHAT_OPERATION_ACCEPTED',
+                   'value': {'operation_id': 'request'}},
+                  {'type': 'RUN_STARTED', 'runId': run, 'threadId': thread},
+                  {'type': 'CUSTOM', 'runId': run, 'threadId': thread, 'name': 'KEEPER_REPLY_DETAILS',
                    'value': {'reply': 'final', 'turn_outcome': 'visible_reply'}},
-                  {'type': 'RUN_FINISHED', 'runId': 'run'}]
+                  {'type': 'RUN_FINISHED', 'runId': run, 'threadId': thread}]
         def write(items):
             stream.write_text(''.join('data: ' + json.dumps(item) + '\n\n' for item in items))
         write(events)
-        smoke.require_chat_completion(stream, 'final')
-        variants = [events[:-1], events + [{'type': 'RUN_ERROR', 'runId': 'run'}],
-                    events[:2] + [dict(events[2], runId='other')],
-                    [events[0], dict(events[1], value={'reply': 'other', 'turn_outcome': 'visible_reply'}),
-                     events[2]]]
+        smoke.require_chat_completion(stream, 'final', 'keeper', 'request')
+        variants = [events[:-1], events + [{'type': 'RUN_ERROR', 'runId': run}],
+                    events[:3] + [dict(events[3], runId='other')],
+                    events[:2] + [dict(events[2], value={'reply': 'other', 'turn_outcome': 'visible_reply'}), events[3]],
+                    [dict(events[0], value={'operation_id': 'other'})] + events[1:],
+                    [events[0], dict(events[1], threadId='keeper:other')] + events[2:]]
         for variant in variants:
             with self.subTest(variant=variant), self.assertRaises(smoke.SmokeError):
                 write(variant)
-                smoke.require_chat_completion(stream, 'final')
+                smoke.require_chat_completion(stream, 'final', 'keeper', 'request')
 
 
 def check_real_fixture(binary, root, *, expect_open=False):

@@ -168,10 +168,12 @@ let actual_post_row base =
   let seed = Filename.concat base "producer" in
   in_eio (fun () ->
     Fs_compat.mkdir_p seed;
+    let module Preparation = Masc_test_deps.Board_test_preparation in
+    Preparation.prepare ~base_path:seed ~action:Preparation.Bootstrap;
     let store = Board.create_store ~base_path:seed () in
     (match Rows.load_persisted_posts store with
      | Ok 0 -> ()
-     | Ok _ | Error _ -> Alcotest.fail "fresh producer did not load actual Missing");
+     | Ok _ | Error _ -> Alcotest.fail "initialized producer did not load an empty source");
     match Board.create_post store ~lookup:Recipient_lookup.none_declared
       ~author:"initialization-author" ~content:"actual producer bytes"
       ~title:"initialization title" ~body:"actual producer bytes"

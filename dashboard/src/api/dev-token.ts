@@ -12,11 +12,11 @@ import {
   setStoredToken,
   type RejectedCredential,
 } from './core'
-import { currentCanonicalDashboardActor, dashboardActorRevision } from '../lib/dashboard-session-actor'
+import { currentCanonicalDashboardActor, currentDashboardActorName, dashboardActorRevision } from '../lib/dashboard-session-actor'
 
 const DEV_TOKEN_FETCH_TIMEOUT_MS = 3000
 
-type TokenOwner = { token: string | null; revision: number; actor: string; actorRevision: number }
+type TokenOwner = { token: string | null; revision: number; actor: string; actorRevision: number; managed: boolean }
 type OwnedPromise<T> = { owner: TokenOwner; promise: Promise<T> }
 let devTokenBootstrapPromise: OwnedPromise<void> | null = null
 let devTokenRefreshPromise: OwnedPromise<boolean> | null = null
@@ -24,13 +24,15 @@ let bootstrapGeneration = 0
 let bootstrapApplication: { generation: number; before: TokenOwner; after: TokenOwner } | null = null
 
 function tokenOwner(): TokenOwner {
-  return { token: getStoredToken(), revision: currentStoredTokenRevision(), actor: currentDashboardActor(),
-    actorRevision: dashboardActorRevision.peek() }
+  const token = getStoredToken()
+  return { token, revision: currentStoredTokenRevision(), actor: currentDashboardActor(),
+    actorRevision: dashboardActorRevision.peek(), managed: token !== null && getStoredTokenMeta()?.source === 'dev' }
 }
 
 function sameTokenOwner(left: TokenOwner, right: TokenOwner): boolean {
   return left.token === right.token && left.revision === right.revision
-    && left.actor === right.actor && left.actorRevision === right.actorRevision
+    && left.actor === right.actor && left.managed === right.managed
+    && (left.managed || left.actorRevision === right.actorRevision)
 }
 
 /**
@@ -97,7 +99,9 @@ export function isRefreshableDashboardAuthCode(
 export function shouldRefreshDevToken(): boolean {
   const token = getStoredToken()
   const meta = getStoredTokenMeta()
-  if (!token) return true
+  // An explicitly selected operator without a token must not silently be
+  // replaced by the local dashboard administrator on the next MCP request.
+  if (!token) return !isRemoteAccess() && currentDashboardActorName() === 'dashboard'
   if (meta?.source === 'dev') return true
   // A manually-pasted token should never be silently overwritten by the
   // loopback dev-token bootstrapper.  (Issue: token appeared reset after
@@ -121,7 +125,6 @@ export async function ensureDevToken(): Promise<void> {
   if (devTokenBootstrapPromise && sameTokenOwner(devTokenBootstrapPromise.owner, owner)) return devTokenBootstrapPromise.promise
   const generation = ++bootstrapGeneration
   bootstrapApplication = null
-  const actorReset = currentCanonicalDashboardActor() === null ? 0 : 1
   const current = () => generation === bootstrapGeneration && sameTokenOwner(owner, tokenOwner())
   const forget = () => { if (generation === bootstrapGeneration) devTokenBootstrapPromise = null }
   const continueForChangedOwner = async (): Promise<void> => {
@@ -195,6 +198,8 @@ export async function ensureDevToken(): Promise<void> {
           token !== currentToken
           || currentMeta?.source !== 'dev'
         ) {
+          const actorRevisionBeforeSet = dashboardActorRevision.peek()
+          const actorReset = currentCanonicalDashboardActor() === null ? 0 : 1
           setStoredToken(token, {
             source: 'dev',
             actor: 'dashboard',
@@ -202,7 +207,7 @@ export async function ensureDevToken(): Promise<void> {
           })
           const after = tokenOwner()
           if (generation === bootstrapGeneration && after.token === token && after.revision === owner.revision + 1
-            && after.actor === 'dashboard' && after.actorRevision === owner.actorRevision + actorReset) {
+            && after.actor === 'dashboard' && after.actorRevision === actorRevisionBeforeSet + actorReset) {
             bootstrapApplication = { generation, before: owner, after }
           }
         }
@@ -306,16 +311,29 @@ export async function recoverScopedRejectedCredential(
 ): Promise<void> {
   const owner = tokenOwner()
   const current = () => isCurrent() && sameTokenOwner(owner, tokenOwner())
-  const currentAfterWait = async () => {
-    if (current()) return true
-    if (!waitForCurrent || !sameTokenOwner(owner, tokenOwner())) return false
-    try { return await waitForCurrent() && current() } catch { return false }
+  const applyWhenCurrent = async (apply: () => void): Promise<void> => {
+    while (sameTokenOwner(owner, tokenOwner())) {
+      // There is no await between this check and applying the change.
+      if (isCurrent()) { apply(); return }
+      if (!waitForCurrent) return
+      try { if (!await waitForCurrent()) return } catch { return }
+    }
+  }
+  const resetForRecovery = (expectedGeneration: number | null): boolean => {
+    if (expectedGeneration !== null && expectedGeneration !== bootstrapGeneration) return false
+    const resetGeneration = bootstrapGeneration + 1
+    resetDevTokenBootstrap()
+    return bootstrapGeneration === resetGeneration && current()
   }
   if (!current() || owner.token !== rejection.token) return
   const meta = getStoredTokenMeta()
+  let scopedGeneration: number | null = null
   if (isRefreshableDashboardAuthCode(rejection.authErrorCode) && !isRemoteAccess() && shouldRefreshDevToken()) {
     // A prior unscoped bootstrap must not publish after this recovery starts.
+    const generation = bootstrapGeneration + 1
     resetDevTokenBootstrap()
+    if (bootstrapGeneration !== generation || !current()) return
+    scopedGeneration = generation
     try {
       const { res, payload } = await fetchWithTimeout(
         '/api/v1/dashboard/dev-token',
@@ -323,17 +341,18 @@ export async function recoverScopedRejectedCredential(
         DEV_TOKEN_FETCH_TIMEOUT_MS,
         async res => ({ res, payload: res.ok ? await res.json() as DevTokenBootstrapPayload : null }),
       )
-      if (!await currentAfterWait()) return
       if (res.status === 404 && meta?.source === 'dev') {
-        resetDevTokenBootstrap()
-        if (current()) clearStoredToken()
+        await applyWhenCurrent(() => {
+          if (resetForRecovery(scopedGeneration)) clearStoredToken()
+        })
         return
       }
       if (res.ok && payload && typeof payload === 'object' && payload.actor === 'dashboard' && payload.role === 'admin') {
         const token = typeof payload.token === 'string' ? payload.token.trim() : ''
         if (token && token !== owner.token) {
-          resetDevTokenBootstrap()
-          if (current()) setStoredToken(token, { source: 'dev', actor: 'dashboard', role: 'admin' })
+          await applyWhenCurrent(() => {
+            if (resetForRecovery(scopedGeneration)) setStoredToken(token, { source: 'dev', actor: 'dashboard', role: 'admin' })
+          })
         }
         if (token) return
       }
@@ -341,10 +360,11 @@ export async function recoverScopedRejectedCredential(
       // A failed re-mint is not evidence that a loopback dev token should be cleared.
     }
   }
-  if (!isCredentialRejectionCode(rejection.authErrorCode) || !await currentAfterWait()) return
+  if (!isCredentialRejectionCode(rejection.authErrorCode)) return
   if (meta?.source === 'dev' && !isRemoteAccess()) return
-  resetDevTokenBootstrap()
-  if (current()) clearStoredToken()
+  await applyWhenCurrent(() => {
+    if (resetForRecovery(scopedGeneration)) clearStoredToken()
+  })
 }
 
 export function installRejectedCredentialRecovery(): () => void {

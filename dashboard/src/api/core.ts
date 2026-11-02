@@ -180,7 +180,7 @@ export function isRemoteAccess(): boolean {
 
 export function currentDashboardActor(): string {
   const meta = getStoredTokenMeta()
-  const managedActor = meta?.source === 'dev'
+  const managedActor = getStoredToken() && meta?.source === 'dev'
     ? meta.actor
     : null
   if (managedActor) return managedActor

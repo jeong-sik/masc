@@ -9,7 +9,7 @@ import {
   jsonHeaders,
   setStoredToken,
 } from './core'
-import { ensureDevToken, installRejectedCredentialRecovery, recoverScopedRejectedCredential, resetDevTokenBootstrap } from './dev-token'
+import { devTokenBootstrapStatus, ensureDevToken, installRejectedCredentialRecovery, recoverScopedRejectedCredential, resetDevTokenBootstrap } from './dev-token'
 import { setCanonicalDashboardActor } from '../lib/dashboard-session-actor'
 
 /* #44189: a tab holding a pasted token the server had stopped accepting kept
@@ -224,6 +224,70 @@ describe('a refusal owned by a Goal request', () => {
     }), { status: 200, headers: { 'Content-Type': 'application/json' } })))
     await recoverScopedRejectedCredential({ token: 'old-dev-token', authErrorCode: 'token_expired' }, () => true)
     expect(getStoredToken()).toBe('fresh-dev-token')
+  })
+
+  it('keeps a managed recovery current when the shell hydrates the same dashboard actor', async () => {
+    setStoredToken('old-dev-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
+    let resolveFetch!: (response: Response) => void
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(resolve => { resolveFetch = resolve })))
+    const pending = recoverScopedRejectedCredential({ token: 'old-dev-token', authErrorCode: 'token_expired' }, () => true)
+    setCanonicalDashboardActor('dashboard')
+    resolveFetch(new Response(JSON.stringify({ token: 'fresh-dev-token', actor: 'dashboard', role: 'admin' }), {
+      status: 200, headers: { 'Content-Type': 'application/json' },
+    }))
+    await pending
+    expect(getStoredToken()).toBe('fresh-dev-token')
+  })
+
+  it.each([200, 404])('does not let an older scoped %s response cancel a newer same-owner bootstrap', async status => {
+    setStoredToken('old-dev-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
+    let resolveScoped!: (response: Response) => void
+    let resolveBootstrap!: (response: Response) => void
+    vi.stubGlobal('fetch', vi.fn()
+      .mockImplementationOnce(() => new Promise<Response>(resolve => { resolveScoped = resolve }))
+      .mockImplementationOnce(() => new Promise<Response>(resolve => { resolveBootstrap = resolve })))
+    const scoped = recoverScopedRejectedCredential({ token: 'old-dev-token', authErrorCode: 'token_expired' }, () => true)
+    const bootstrap = ensureDevToken()
+    resolveScoped(status === 200
+      ? new Response(JSON.stringify({ token: 'stale-token', actor: 'dashboard', role: 'admin' }), {
+        status, headers: { 'Content-Type': 'application/json' },
+      }) : new Response('', { status }))
+    await scoped
+    expect(getStoredToken()).toBe('old-dev-token')
+    resolveBootstrap(new Response(JSON.stringify({ token: 'fresh-token', actor: 'dashboard', role: 'admin' }), {
+      status: 200, headers: { 'Content-Type': 'application/json' },
+    }))
+    await bootstrap
+    expect(getStoredToken()).toBe('fresh-token')
+  })
+
+  it('yields scoped recovery to a bootstrap started synchronously by reset', async () => {
+    setStoredToken('old-dev-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
+    let resolveOld!: (response: Response) => void
+    let resolveNew!: (response: Response) => void
+    const fetchMock = vi.fn()
+      .mockImplementationOnce(() => new Promise<Response>(resolve => { resolveOld = resolve }))
+      .mockImplementationOnce(() => new Promise<Response>(resolve => { resolveNew = resolve }))
+    vi.stubGlobal('fetch', fetchMock)
+    const old = ensureDevToken()
+    let replacement: Promise<void> | null = null
+    const stop = devTokenBootstrapStatus.subscribe(status => {
+      if (status === 'idle' && replacement === null) replacement = ensureDevToken()
+    })
+    try {
+      await recoverScopedRejectedCredential({ token: 'old-dev-token', authErrorCode: 'token_expired' }, () => true)
+      expect(fetchMock).toHaveBeenCalledTimes(2)
+      expect(replacement).not.toBeNull()
+      resolveNew(new Response(JSON.stringify({ token: 'fresh-token', actor: 'dashboard', role: 'admin' }), {
+        status: 200, headers: { 'Content-Type': 'application/json' },
+      }))
+      await replacement
+      resolveOld(new Response('', { status: 404 }))
+      await old
+      expect(getStoredToken()).toBe('fresh-token')
+    } finally {
+      stop()
+    }
   })
 
   it('does not publish after the same token is removed and restored', async () => {

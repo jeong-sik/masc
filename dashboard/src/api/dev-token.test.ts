@@ -8,6 +8,7 @@ import {
   resetDevTokenBootstrap,
   type DevTokenBootstrapStatus,
 } from './dev-token'
+import { setCanonicalDashboardActor } from '../lib/dashboard-session-actor'
 
 const {
   clearStoredToken,
@@ -67,6 +68,7 @@ describe('ensureDevToken', () => {
   })
 
   afterEach(() => {
+    setCanonicalDashboardActor(null)
     vi.useRealTimers()
   })
 
@@ -100,11 +102,11 @@ describe('ensureDevToken', () => {
 
   it('restarts once for a changed owner that still permits dashboard bootstrap', async () => {
     let finishOld!: (response: Response) => void
-    currentDashboardActor.mockReturnValue('alice')
     fetchWithTimeout.mockImplementationOnce(() => new Promise(resolve => { finishOld = resolve }))
       .mockResolvedValueOnce(jsonResponse({ token: 'current', actor: 'dashboard', role: 'admin' }))
     const pending = ensureDevToken()
-    currentDashboardActor.mockReturnValue('dashboard')
+    setCanonicalDashboardActor('alice')
+    setCanonicalDashboardActor(null)
     finishOld(jsonResponse({ token: 'stale', actor: 'dashboard', role: 'admin' }))
     await pending
     expect(fetchWithTimeout).toHaveBeenCalledTimes(2)
@@ -123,6 +125,15 @@ describe('ensureDevToken', () => {
     expect(fetchWithTimeout).toHaveBeenCalledOnce()
     expect(setStoredToken).not.toHaveBeenCalled()
     expect(devTokenBootstrapStatus.value).toBe('idle')
+  })
+
+  it('does not bootstrap a selected actor even if old dev metadata remains without a token', async () => {
+    getStoredToken.mockReturnValue(null)
+    getStoredTokenMeta.mockReturnValue({ source: 'dev', actor: 'dashboard', role: 'admin' })
+    setCanonicalDashboardActor('alice')
+    await ensureDevToken()
+    expect(fetchWithTimeout).not.toHaveBeenCalled()
+    expect(setStoredToken).not.toHaveBeenCalled()
   })
 
   it('requires an explicit bootstrap call after the server warm-up payload', async () => {

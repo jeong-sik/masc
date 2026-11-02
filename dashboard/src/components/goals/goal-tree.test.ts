@@ -775,13 +775,16 @@ describe('GoalTree', () => {
     }))
   })
 
-  it.each(['same', 'late-token', 'other', 'failed', 'retired'] as const)(
+  it.each(['same', 'late-token', 'other', 'failed', 'retired', 'manual', 'replaced', 'selection-aba',
+    'managed-hydration', 'recovery-hydration'] as const)(
     'settles confirmation recovery only after the %s workspace observation', async outcome => {
-      setStoredToken('old-dev-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
+      if (outcome === 'manual') setStoredToken('old-manual-token', { source: 'manual' })
+      else setStoredToken('old-dev-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
       const goal: GoalTreeNode = { ...makeGoal('goal-confirm-recovery', 'Confirm recovery'), phase: 'awaiting_confirmation',
         goal_fsm: { state: 'awaiting_confirmation', source: 'goal.phase', next_actions: ['drop'], activity_observation: 'goal_metadata' } }
-      const tree = { approval_queue_state: { state: 'ready' }, tree: [goal],
-        summary: { ...emptySummary(), total_goals: 1 } } satisfies DashboardGoalsTreeResponse
+      const otherGoal = makeGoal('goal-other-recovery', 'Other recovery goal')
+      const tree = { approval_queue_state: { state: 'ready' }, tree: outcome === 'selection-aba' ? [goal, otherGoal] : [goal],
+        summary: { ...emptySummary(), total_goals: outcome === 'selection-aba' ? 2 : 1 } } satisfies DashboardGoalsTreeResponse
       const criterion = { revision: goal.criterion_revision, title: goal.title, metric: null, target_value: null }
       const verdict = { criterion, request_id: 'request-recovery', verification_run_id: 'run-recovery',
         outcome: 'proven', reason: null, authority: { kind: 'system_llm_agent', actor: 'verifier' },
@@ -797,9 +800,25 @@ describe('GoalTree', () => {
         'x-masc-runtime-instance-id': '018f83d7-93a4-7f5d-9a72-123456789abc',
       }) }).mockRejectedValueOnce(new ApiRequestError({ method: 'GET', path: '/api/v1/goals/confirmation',
         status: 401, authErrorCode: 'token_expired' }))
-      mocks.post.mockResolvedValueOnce(evidence(true))
+      let rejectPost!: (error: Error) => void
+      let resolvePost!: (value: unknown) => void
+      if (outcome === 'selection-aba') {
+        mocks.getWithResponse.mockReset().mockResolvedValue({ data: evidence(false), headers: new Headers({
+          'x-masc-workspace-read': 'matched-v1', 'x-masc-execution-publication-epoch': 'fixture-a',
+          'x-masc-runtime-instance-id': '018f83d7-93a4-7f5d-9a72-123456789abc',
+        }) })
+        mocks.post.mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectPost = reject }))
+      } else if (outcome === 'managed-hydration') {
+        const headers = new Headers({ 'x-masc-workspace-read': 'matched-v1',
+          'x-masc-execution-publication-epoch': 'fixture-a',
+          'x-masc-runtime-instance-id': '018f83d7-93a4-7f5d-9a72-123456789abc' })
+        mocks.getWithResponse.mockReset().mockResolvedValueOnce({ data: evidence(false), headers })
+          .mockResolvedValueOnce({ data: evidence(true), headers })
+        mocks.post.mockImplementationOnce(() => new Promise(resolve => { resolvePost = resolve }))
+      } else mocks.post.mockResolvedValueOnce(evidence(true))
       mocks.fetchDashboardGoalsTree.mockResolvedValueOnce(tree).mockRejectedValue(new Error('tree unavailable'))
-      mocks.fetchDashboardGoalDetail.mockResolvedValue({ goal, linked_tasks: [], linked_keepers: [], approvals: [], execution_receipts: [], timeline: [] })
+      mocks.fetchDashboardGoalDetail.mockImplementation(async (id: string) => ({ goal: id === otherGoal.id ? otherGoal : goal,
+        linked_tasks: [], linked_keepers: [], approvals: [], execution_receipts: [], timeline: [] }))
       let resolveWorkspace!: (value: { basePath: string; mascRoot: string }) => void
       let rejectWorkspace!: (error: Error) => void
       mocks.captureArtifactWorkspace.mockResolvedValueOnce({ basePath: '/workspace-a', mascRoot: '/workspace-a/.masc' })
@@ -809,15 +828,54 @@ describe('GoalTree', () => {
       const tokenResponse = () => new Response(JSON.stringify({
         token: 'fresh-dev-token', actor: 'dashboard', role: 'admin',
       }), { status: 200, headers: { 'Content-Type': 'application/json' } })
-      const fetchMock = vi.fn(() => outcome === 'late-token'
+      const fetchMock = vi.fn(() => outcome === 'late-token' || outcome === 'recovery-hydration'
         ? new Promise<Response>(resolve => { resolveToken = resolve }) : Promise.resolve(tokenResponse()))
       vi.stubGlobal('fetch', fetchMock)
       render(html`<${GoalTree} />`)
       fireEvent.click(await screen.findByText('이 증명으로 목표 완료 확인'))
+      if (outcome === 'managed-hydration') {
+        await waitFor(() => expect(mocks.post).toHaveBeenCalledTimes(1))
+        setCanonicalDashboardActor('dashboard')
+        resolvePost(evidence(true))
+        await waitFor(() => expect(screen.getByTestId('goal-operation-notice').textContent)
+          .toContain('확인 응답과 재조회에서 완료 기록이 일치했습니다'))
+        expect(mocks.post).toHaveBeenCalledTimes(1)
+        return
+      }
+      if (outcome === 'selection-aba') {
+        await waitFor(() => expect(mocks.post).toHaveBeenCalledTimes(1))
+        fireEvent.click(await screen.findByRole('button', { name: /Other recovery goal/ }))
+        await waitFor(() => expect(screen.getByTestId('goal-detail-panel').getAttribute('data-selected-goal-id')).toBe(otherGoal.id))
+        fireEvent.click(screen.getByRole('button', { name: /Confirm recovery/ }))
+        await waitFor(() => expect(screen.getByTestId('goal-detail-panel').getAttribute('data-selected-goal-id')).toBe(goal.id))
+        rejectPost(new ApiRequestError({ method: 'POST', path: '/api/v1/goals/confirmation',
+          status: 401, authErrorCode: 'token_expired' }))
+        await waitFor(() => expect(mocks.captureArtifactWorkspace).toHaveBeenCalledTimes(2))
+        expect(fetchMock).not.toHaveBeenCalled()
+        expect(getStoredToken()).toBe('old-dev-token')
+        expect(mocks.post).toHaveBeenCalledTimes(1)
+        return
+      }
+      if (outcome === 'manual') {
+        await waitFor(() => expect(getStoredToken()).toBeNull())
+        expect(fetchMock).not.toHaveBeenCalled()
+        expect(mocks.post).toHaveBeenCalledTimes(1)
+        return
+      }
       await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
       await waitFor(() => expect(mocks.captureArtifactWorkspace).toHaveBeenCalledTimes(2))
       expect(getStoredToken()).toBe('old-dev-token')
       expect(screen.queryByRole('button', { name: 'Drop' })).toBeNull()
+      if (outcome === 'replaced') {
+        // The first health transport ignores abort. An independent observation
+        // supersedes it and the replacement must unblock recovery on its own.
+        hydrateGoalTreeSnapshot(tree)
+        await waitFor(() => expect(mocks.captureArtifactWorkspace).toHaveBeenCalledTimes(3))
+        await waitFor(() => expect(getStoredToken()).toBe('fresh-dev-token'))
+        expect(mocks.post).toHaveBeenCalledTimes(1)
+        return
+      }
+      if (outcome === 'recovery-hydration') setCanonicalDashboardActor('dashboard')
       if (outcome === 'retired') {
         ;(executionWorkspaceAuthority as { value: unknown }).value =
           { epoch: 'fixture-b', workspaceRoot: '/workspace-b', connectionGeneration: 2 }
@@ -825,13 +883,15 @@ describe('GoalTree', () => {
       if (outcome === 'failed') rejectWorkspace(new Error('workspace unavailable'))
       else resolveWorkspace({ basePath: '/workspace-a',
         mascRoot: outcome === 'other' ? '/other/.masc' : '/workspace-a/.masc' })
-      if (outcome === 'late-token') {
+      if (outcome === 'late-token' || outcome === 'recovery-hydration') {
         await waitFor(() => expect(mocks.fetchDashboardGoalsTree).toHaveBeenCalledTimes(2))
         await screen.findByText('tree unavailable')
         expect(getStoredToken()).toBe('old-dev-token')
         resolveToken(tokenResponse())
       }
-      if (outcome === 'same' || outcome === 'late-token') await waitFor(() => expect(getStoredToken()).toBe('fresh-dev-token'))
+      if (outcome === 'same' || outcome === 'late-token' || outcome === 'recovery-hydration') {
+        await waitFor(() => expect(getStoredToken()).toBe('fresh-dev-token'))
+      }
       else {
         if (outcome === 'failed') await screen.findByText('workspace unavailable')
         else await waitFor(() => expect(mocks.fetchDashboardGoalsTree).toHaveBeenCalledTimes(2))

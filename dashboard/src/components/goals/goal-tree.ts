@@ -5,7 +5,7 @@ import { GoalCandlePanel } from './goal-candle'
 
 import { html } from 'htm/preact'
 import { GoalConfirmationPanel, confirmationHasUnsettledReceipt, confirmationPending } from './goal-confirmation'
-import { batch, signal } from '@preact/signals'
+import { batch, effect, signal } from '@preact/signals'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'preact/hooks'
 import { SECONDS_PER_HOUR } from '../../lib/format-time'
 import { fetchDashboardGoalDetail, fetchDashboardGoalsTree } from '../../api/dashboard'
@@ -231,8 +231,12 @@ const expandedNodes = signal<Set<string>>(new Set())
 const filterQuery = signal('')
 const treePhaseFilter = signal<GoalPhaseFilter>('all')
 const selectedGoalId = signal<string | null>(null)
-let selectedGoalRevision = 0
-selectedGoalId.subscribe(() => { selectedGoalRevision += 1 })
+const selectedGoalRevision = signal(0)
+function setSelectedGoal(id: string | null) {
+  if (selectedGoalId.peek() === id) return
+  selectedGoalRevision.value += 1
+  selectedGoalId.value = id
+}
 const detailData = signal<DashboardGoalDetailResponse | null>(null)
 const detailLoading = signal(false)
 const detailError = signal<string | null>(null)
@@ -494,7 +498,7 @@ function selectGoal(id: string) {
     delete params.goal
     replaceRoute('workspace', params)
   }
-  selectedGoalId.value = id
+  setSelectedGoal(id)
 }
 
 function cleanRouteGoalId(value: string | undefined): string | null {
@@ -1605,15 +1609,15 @@ function GoalDetailPanel({
     credentialScope: JSON.stringify([binding.authRevision, binding.actor]),
     executionEpoch: binding.authority.epoch,
   } : null
-  const confirmationSelectionRevision = selectedGoalRevision
+  const confirmationSelectionRevision = selectedGoalRevision.peek()
   const confirmationIsCurrent = () => Boolean(binding && goalIdIsUnambiguous(selectedNode.id, binding.snapshot)
     && selectedGoalId.peek() === selectedNode.id
-    && selectedGoalRevision === confirmationSelectionRevision
+    && selectedGoalRevision.peek() === confirmationSelectionRevision
     && treeDecisionBinding.peek() === binding && treeData.peek() === binding.snapshot
     && executionWorkspaceAuthority.peek() === binding.authority
     && storedTokenRevision.peek() === binding.authRevision && goalDecisionActor() === binding.actor)
   const confirmationRecoveryBaseIsCurrent = () => Boolean(binding && treeConsumerCount > 0 && selectedGoalId.peek() === selectedNode.id
-    && selectedGoalRevision === confirmationSelectionRevision
+    && selectedGoalRevision.peek() === confirmationSelectionRevision
     && executionWorkspaceAuthority.peek() === binding.authority
     && storedTokenRevision.peek() === binding.authRevision && goalDecisionActor() === binding.actor)
   const confirmationRecoveryIsCurrent = () => {
@@ -1635,9 +1639,25 @@ function GoalDetailPanel({
       const pending = treeRequestInFlight.peek()
       if (!pending || pending.authority !== binding.authority || pending.authRevision !== binding.authRevision
         || pending.actor !== binding.actor) return false
-      try { await pending.workspaceReady } catch {
+      let dispose = () => {}
+      const replaced = new Promise<void>(resolve => {
+        dispose = effect(() => {
+          // Subscribe to every signal that can retire this confirmation or
+          // replace the read; a transport may ignore its abort signal.
+          void treeRequestInFlight.value
+          void executionWorkspaceAuthority.value
+          void storedTokenRevision.value
+          void dashboardActorRevision.value
+          void selectedGoalId.value
+          void selectedGoalRevision.value
+          if (!confirmationRecoveryBaseIsCurrent() || treeRequestInFlight.peek()?.request !== pending.request) resolve()
+        })
+      })
+      try { await Promise.race([pending.workspaceReady, replaced]) } catch {
         if (treeRequestInFlight.peek()?.request !== pending.request) continue
         return false
+      } finally {
+        dispose()
       }
       if (confirmationRecoveryIsCurrent()) return true
       // A post-write refresh may replace the pre-write read as soon as it
@@ -1997,7 +2017,7 @@ export function GoalTree() {
     if (routeGoalId) batch(() => {
       filterQuery.value = ''
       treePhaseFilter.value = 'all'
-      selectedGoalId.value = routeGoalId
+      setSelectedGoal(routeGoalId)
     })
   }, [routeGoalId, authority, tokenRevision, actorRevision])
 
@@ -2028,17 +2048,17 @@ export function GoalTree() {
   useEffect(() => {
     if (!data) return
     if (allNodes.length === 0) {
-      selectedGoalId.value = null
+      setSelectedGoal(null)
       return
     }
     if (visibleNodes.length === 0) {
-      selectedGoalId.value = null
+      setSelectedGoal(null)
       return
     }
     if (routeGoalId && !routeOwned) {
       const expansionPath = goalExpansionPath(data.tree, routeGoalId)
       if (expansionPath && visibleNodes.some(node => node.id === routeGoalId)) {
-        if (selectedGoalId.value !== routeGoalId) selectedGoalId.value = routeGoalId
+        if (selectedGoalId.value !== routeGoalId) setSelectedGoal(routeGoalId)
         if (expansionPath.some(id => !expandedNodes.value.has(id))) {
           expandedNodes.value = new Set([...expandedNodes.value, ...expansionPath])
         }
@@ -2046,7 +2066,7 @@ export function GoalTree() {
         return
       }
       if (!expansionPath) {
-        selectedGoalId.value = routeGoalId
+        setSelectedGoal(routeGoalId)
         setHandledRoute({ id: routeGoalId, found: false, authority, authRevision: tokenRevision, actor: goalDecisionActor() })
       }
       return

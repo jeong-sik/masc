@@ -197,6 +197,32 @@ it('does not apply a generic MCP 403 block to an independently scoped request', 
   expect(fetchMock).toHaveBeenCalledTimes(2)
 })
 
+it.each([false, true])('keeps an explicitly selected operator without a token (old dev metadata: %s)', async staleMeta => {
+  window.localStorage.setItem('masc_dashboard_agent_name', 'alice')
+  try {
+    if (staleMeta) {
+      setStoredToken('old-dev-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
+      window.sessionStorage.removeItem('masc_bearer_token')
+    }
+    const fetchMock = vi.fn(async (_path: string, init: RequestInit) => {
+      const { id } = JSON.parse(String(init.body))
+      return new Response(JSON.stringify({ id, result: { content: [{ type: 'text', text: 'ok' }] } }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    await expect(callMcpToolAtIdentity('masc_goal_transition', { goal_id: 'goal-1' },
+      { revision: currentStoredTokenRevision(), actor: 'alice' }, () => true)).resolves.toBe('ok')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/mcp')
+    const headers = new Headers(fetchMock.mock.calls[0]?.[1].headers)
+    expect(headers.get('x-masc-agent')).toBe('alice')
+    expect(headers.get('authorization')).toBeNull()
+    expect(getStoredToken()).toBeNull()
+  } finally {
+    window.localStorage.removeItem('masc_dashboard_agent_name')
+  }
+})
+
 it.each([200, 409])('reports an unknown MCP outcome when the %i body stalls', async status => {
   setStoredToken('manual-test-token', { source: 'manual' })
   let bodyStarted!: () => void

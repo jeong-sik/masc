@@ -4729,6 +4729,135 @@ let test_operation_histories_keep_unfinished_and_recovery_owners () =
           && attempt.raa_status=assignment_unsent && attempt.raa_request.ras_runtime_id=None)
           (Runtime_assignment_saves.all state.runtime_assignment_saves))
 
+let task_detail_scroll_fixture () =
+  let open Masc_tui_types in
+  let task_id = "task-scroll" in
+  let task = match Masc_domain.task_of_yojson (`Assoc
+      ["id", `String task_id; "title", `String task_id; "description", `String "fixture";
+       "status", `String "todo"; "created_at", `String "2026-10-19T00:00:00Z"]) with
+    | Ok task -> task | Error detail -> Alcotest.fail detail in
+  let state = create_state ~workspace:"task-scroll" ~port:0 ~refresh_interval:0. () in
+  state.view <- Planning;
+  state.planning_mode <- Planning_list;
+  state.task_detail_id <- Some task_id;
+  state.task_focus <- Masc_tui_overview_tasks.Task_focus {selected=Some task_id};
+  state.task_payloads <- Masc_tui_task_payloads.observe [task];
+  state, task_id
+
+let complete_task_scroll_documents state ~cols requests =
+  List.iter (fun request ->
+    Masc_tui_types.complete_task_document state ~cols request (Ok [])) requests
+
+let task_scroll_history task_id =
+  let module History = Masc.Tui_decode_task_inspection in
+  let request = History.history_first ~task_id ~limit:40 in
+  match History.history_page ~request (`Assoc
+      ["schema",`String "masc.task-history.page/v2"; "task_id",`String task_id;
+       "cursor",`Null; "next_cursor",`Null;
+       "sources",`List [`Assoc ["source",`String "activity-events"; "state",`String "not-created"];
+                        `Assoc ["source",`String "events"; "state",`String "observed"]];
+       "events",`List []]) with
+  | Ok history -> history | Error detail -> Alcotest.fail detail
+
+let test_task_detail_end_respects_presented_input () =
+  let open Masc_tui_types in
+  let state, task_id = task_detail_scroll_fixture () in
+  let cols = 80 in
+  let request = match begin_task_history_read state ~task_id ~limit:40 with
+    | Some request -> request | None -> Alcotest.fail "history read did not start" in
+  complete_task_scroll_documents state ~cols (sync_task_documents state ~cols);
+  task_detail_presented_frame state ~task_id ~count:23 ~height:16 ~offset:0 ~cols;
+  Alcotest.(check bool) "unchanged bounds need no new presentation" false
+    (task_detail_viewport_changed state ~count:23 ~height:16);
+  Alcotest.(check bool) "new bounds require presentation even when the visible rows are unchanged" true
+    (task_detail_viewport_changed state ~count:116 ~height:16);
+  task_detail_select_end state ~cols;
+  Alcotest.(check int) "End uses the emitted viewport" 7 state.task_detail_scroll;
+  Alcotest.(check bool) "End waits for this history" true (task_detail_following_end state);
+  complete_task_history_read state request (Ok (task_scroll_history task_id));
+  let history_documents = sync_task_documents state ~cols in
+  task_detail_user_scroll state (max 0 (state.task_detail_scroll - 1));
+  Alcotest.(check int) "End then Up uses the last emitted viewport" 6 state.task_detail_scroll;
+  Alcotest.(check bool) "Up releases the pending End" false (task_detail_following_end state);
+  complete_task_scroll_documents state ~cols history_documents;
+  task_detail_presented_frame state ~task_id ~count:116 ~height:16 ~offset:6 ~cols;
+  Alcotest.(check int) "an unseen completion does not undo Up" 6 state.task_detail_scroll;
+  let refresh = match begin_task_history_read state ~task_id ~limit:40 with
+    | Some request -> request | None -> Alcotest.fail "history refresh did not start" in
+  task_detail_presented_frame state ~task_id ~count:23 ~height:16 ~offset:6 ~cols;
+  task_detail_select_end state ~cols;
+  let wheel = Masc_tui_render_prim.(reader_after_wheel
+      (clamped_scroll_now state (Task_detail (0, None))) Masc.Tui_mouse_protocol.Wheel_up) in
+  (match task_detail_of_reader wheel with
+   | Some (offset, _) -> task_detail_user_scroll state offset
+   | None -> Alcotest.fail "task wheel did not return a task offset");
+  Alcotest.(check int) "wheel Up leaves the displayed end" 6 state.task_detail_scroll;
+  Alcotest.(check bool) "wheel releases the pending End" false (task_detail_following_end state);
+  task_detail_select_end state ~cols;
+  let count, height = task_detail_presented_viewport state
+      ~fallback:(fun () -> Alcotest.fail "lost displayed viewport") in
+  task_detail_user_scroll state (Masc_tui_scroll.page_up ~count ~height state.task_detail_scroll);
+  Alcotest.(check int) "PageUp uses the displayed height" 0 state.task_detail_scroll;
+  complete_task_history_read state refresh (Error "fixture refresh failed")
+
+let test_task_detail_end_waits_for_current_read_and_frame () =
+  let open Masc_tui_types in
+  let state, task_id = task_detail_scroll_fixture () in
+  let cols = 80 in
+  let old = match begin_task_history_read state ~task_id ~limit:40 with
+    | Some request -> request | None -> Alcotest.fail "history read did not start" in
+  complete_task_scroll_documents state ~cols (sync_task_documents state ~cols);
+  task_detail_select_end state ~cols;
+  Alcotest.(check bool) "End before the first Task frame is retained" true
+    (task_detail_following_end state);
+  Alcotest.(check bool) "relative movement without a displayed viewport is declined" false
+    (task_detail_relative_scroll state 0);
+  Alcotest.(check bool) "declined movement preserves End" true (task_detail_following_end state);
+  task_detail_presented_frame state ~task_id ~count:23 ~height:16 ~offset:7 ~cols;
+  let current = match begin_task_history_read state ~task_id ~limit:40 with
+    | Some request -> request | None -> Alcotest.fail "replacement read did not start" in
+  complete_task_history_read state old (Ok (task_scroll_history task_id));
+  Alcotest.(check bool) "a superseded reply cannot settle the current read" true
+    (task_detail_waiting state ~task_id ~cols);
+  complete_task_history_read state current (Ok (task_scroll_history task_id));
+  let history_documents = sync_task_documents state ~cols in
+  Alcotest.(check bool) "document preparation remains pending after HTTP" true
+    (task_detail_waiting state ~task_id ~cols);
+  task_detail_presented_frame state ~task_id ~count:23 ~height:16 ~offset:7 ~cols;
+  Alcotest.(check bool) "an emitted loading frame retains End" true (task_detail_following_end state);
+  complete_task_scroll_documents state ~cols history_documents;
+  Alcotest.(check int) "a prepared but unpresented result does not move the reader" 7 state.task_detail_scroll;
+  task_detail_forget_frame state;
+  Alcotest.(check bool) "a temporary overlay retains End" true (task_detail_following_end state);
+  task_detail_presented_frame state ~task_id ~count:116 ~height:16 ~offset:100 ~cols;
+  Alcotest.(check int) "a presented result settles at its end" 100 state.task_detail_scroll;
+  Alcotest.(check bool) "the settled End is one shot" false (task_detail_following_end state);
+  let next = match begin_task_history_read state ~task_id ~limit:40 with
+    | Some request -> request | None -> Alcotest.fail "next read did not start" in
+  task_detail_select_end state ~cols;
+  complete_task_history_read state next (Error "fixture refresh failed");
+  task_detail_presented_frame state ~task_id ~count:116 ~height:16 ~offset:100 ~cols;
+  Alcotest.(check bool) "a presented failure settles End without retrying forever" false
+    (task_detail_following_end state);
+  let next = match begin_task_history_read state ~task_id ~limit:40 with
+    | Some request -> request | None -> Alcotest.fail "workspace read did not start" in
+  task_detail_select_end state ~cols;
+  reset_task_detail_scroll state;
+  Alcotest.(check bool) "reopening the same Task drops the previous visit" true
+    (state.task_detail_scroll = 0 && Option.is_none state.task_detail_follow_end
+     && Option.is_none state.task_detail_presented);
+  task_detail_presented_frame state ~task_id ~count:116 ~height:16 ~offset:0 ~cols;
+  task_detail_select_end state ~cols;
+  state.workspace_read_authority <- ref ();
+  reconcile_task_detail_scroll state;
+  complete_task_history_read state next (Error "retired workspace");
+  Alcotest.(check bool) "workspace replacement discards the old End and viewport" true
+    (Option.is_none state.task_detail_follow_end && Option.is_none state.task_detail_presented);
+  state.task_detail_id <- Some "another-task";
+  task_detail_select_end state ~cols;
+  Alcotest.(check bool) "another Task cannot inherit the old End" false
+    (task_detail_following_end state)
+
 let test_detail_histories_follow_refresh_and_workspace_owners () =
   let open Masc_tui_types in
   let module Fetched = Masc_tui_fetched in
@@ -5361,7 +5490,11 @@ let test_queue_detail_respects_source_reading () =
 let () =
   Alcotest.run "tui_server_identity_refresh"
     [ ( "server-identity-refresh"
-      , [ Alcotest.test_case "detail histories retain exact refresh and workspace owners" `Quick
+      , [ Alcotest.test_case "task detail End respects presented input" `Quick
+            test_task_detail_end_respects_presented_input
+        ; Alcotest.test_case "task detail End waits for its current read and frame" `Quick
+            test_task_detail_end_waits_for_current_read_and_frame
+        ; Alcotest.test_case "detail histories retain exact refresh and workspace owners" `Quick
             test_detail_histories_follow_refresh_and_workspace_owners
         ; Alcotest.test_case "operation histories retain unfinished delivery and uncertain recovery owners" `Quick
             test_operation_histories_keep_unfinished_and_recovery_owners

@@ -110,7 +110,7 @@ let frame_panes = ref Masc_tui_pane_selection.no_panes
    now, because keys and notches that arrive between two frames each move it
    and the frame's own reading is behind all of them. *)
 let clamped_scroll_now (state : state) = function
-  | Task_detail _ -> Task_detail state.task_detail_scroll
+  | Task_detail (_, viewport) -> Task_detail (state.task_detail_scroll, viewport)
   | Board_read _ ->
       Board_read (state.board_scroll, state.board_comment_scroll)
   | Message_scroll _ -> Message_scroll {scroll=state.msg_scroll; pin=state.msg_scroll_pin}
@@ -179,7 +179,7 @@ let reader_after_wheel (reader : clamped_scroll)
     | Masc.Tui_mouse_protocol.Wheel_up -> max 0 (value - 1)
   in
   match reader with
-  | Task_detail value -> Some (Task_detail (step value))
+  | Task_detail (value, viewport) -> Some (Task_detail (step value, viewport))
   | Schedule_detail_scroll value -> Some (Schedule_detail_scroll (step value))
   | Acting_detail_scroll value -> Some (Acting_detail_scroll (step value))
   | Memory_fact_detail_scroll value -> Some (Memory_fact_detail_scroll (step value))

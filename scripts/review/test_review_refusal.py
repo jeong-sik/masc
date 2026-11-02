@@ -38,12 +38,12 @@ class RefusalReasons(unittest.TestCase):
         out = run(review(f"approve-guard: head {HEAD}"))
         joined = "\n".join(out)
         self.assertIn("review binding line must start with `approve-guard: head `" + HEAD + "` · `", joined)
-        self.assertIn("expected footer (copy): " + EXISTING_FOOTER, joined)
+        self.assertIn("expected guard-generated footer: " + EXISTING_FOOTER, joined)
 
     def test_backticked_head_without_tail_names_missing_base_and_diff(self):
         out = run(review(f"approve-guard: head `{HEAD}` · source review"))
         self.assertTrue(any("lacks the ' · reviewed base" in line for line in out), out)
-        self.assertIn("expected footer (copy): " + EXISTING_FOOTER, out[-1])
+        self.assertIn("expected guard-generated footer: " + EXISTING_FOOTER, out[-1])
 
     def test_stale_diff_hash_is_reported_with_current_diff(self):
         stale = rr.expected_footer(HEAD, "source", BASE, OTHER_DIFF) + f"\napprove-guard: head {HEAD}"
@@ -136,7 +136,7 @@ class RefusalReasons(unittest.TestCase):
     def test_cli_exits_one_with_reasons_when_refused(self):
         proc = self.cli(review(f"approve-guard: head {HEAD}"))
         self.assertEqual(proc.returncode, rr.EXIT_REFUSED)
-        self.assertIn("expected footer (copy): " + EXISTING_FOOTER, proc.stdout)
+        self.assertIn("expected guard-generated footer: " + EXISTING_FOOTER, proc.stdout)
 
     def cli(self, rev):
         return subprocess.run(

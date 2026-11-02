@@ -109,7 +109,7 @@ def diagnose(review, *, head, policy, base_sha, current_diff, release_run=""):
             reasons.append(tail_msg)
     if reasons:
         reasons.append(
-            "expected footer (copy): " + expected_footer(head, policy, base_sha, current_diff, release_run))
+            "expected guard-generated footer: " + expected_footer(head, policy, base_sha, current_diff, release_run))
     return reasons
 
 

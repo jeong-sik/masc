@@ -1048,3 +1048,64 @@ val execute_flow_once
   -> ( ('accepted, 'rejection) validated_flow_success
        , ('callback_error, 'rejection) validated_flow_error )
        result
+
+type responses_uncertainty =
+  | Response_headers_unobserved
+  | Response_informational
+  | Response_non_success_status
+  | Response_accepted_for_processing
+  | Response_partial_content
+  | Response_lifecycle_unobserved
+  | Response_queued
+  | Response_in_progress
+  | Response_status_unrecognized
+  | Response_envelope_ambiguous
+  | Response_json_unreadable
+  | Response_refusal_on_success_status
+
+type 'rejection unresolved_responses = private
+  { candidate : flow_attempt_receipt
+  ; observation : generation_receipt_snapshot
+  ; reason : responses_uncertainty
+  ; execution_error : execution_error option
+      (** The execution failure returned by the candidate, when one was
+          returned. [None] is not evidence of remote completion. *)
+  ; evidence : flow_evidence
+  ; prior_rejections : 'rejection semantic_rejection_receipt list
+  }
+
+type ('accepted, 'rejection, 'callback_error) guarded_flow_result =
+  | Guarded_finished of
+      ( ('accepted, 'rejection) validated_flow_success
+      , ('callback_error, 'rejection) validated_flow_error ) result
+  | Guarded_unresolved of 'rejection unresolved_responses
+
+val execute_flow_once_guarded
+  :  net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+  -> clock:_ Eio.Time.clock
+  -> before_measurement_dispatch:
+       (flow_measurement_receipt -> (unit, 'callback_error) result)
+  -> on_measurement_terminal:(flow_measurement_receipt -> (unit, 'callback_error) result)
+  -> before_dispatch:(flow_attempt_receipt -> (unit, 'callback_error) result)
+  -> before_advance:
+       (failed:flow_candidate_failure
+        -> next:flow_candidate_visit
+        -> (unit, 'callback_error) result)
+  -> validate:(flow_success -> ('accepted, 'rejection) semantic_verdict)
+  -> flow_attempt
+  -> ('accepted, 'rejection, 'callback_error) guarded_flow_result
+(** On a dispatched Responses attempt, stop before semantic validation or a
+    successor when headers are absent, informational, non-2xx, 202 Accepted,
+    or 206 Partial Content; when another 2xx response has no usable lifecycle
+    observation, is queued/in progress, has
+    an unrecognized status, or has an ambiguous/unreadable envelope; or when
+    its execution error describes a refusal despite the observed 2xx status.
+    A non-2xx status alone does not prove that an intermediary did not forward
+    the request. Even an actual 429 is held here until a caller has a trusted
+    refusal contract or other sufficient proof. Other codecs retain
+    [execute_flow_once] behavior. Classification binds one immutable snapshot
+    to the execution result of that same attempt after admission finishes.
+    The result is in memory only: the caller must durably bind an unresolved
+    result to the original request before it can safely suppress later wakes.
+    No lifecycle observation alone proves remote termination. Cancellation
+    still propagates. *)

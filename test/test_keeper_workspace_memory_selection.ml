@@ -93,6 +93,17 @@ let with_adapter f =
       ~config ~keeper_id:"fixture" ~destinations:(destination,[]) in
     f adapter destination)
 
+let test_missing_clock_does_not_start_an_assessment () = with_adapter (fun adapter _ ->
+  let module IO = Masc.Keeper_workspace_memory_selection_io in
+  (match IO.evaluate ~clock:None adapter ~state:purpose ~questions:[] with
+   | Error (Selection.Unavailable _) -> ()
+   | Error (Selection.Capacity_refused _) | Ok _ ->
+     Alcotest.fail "missing request clock must remain unavailable");
+  Alcotest.(check (list string)) "no assessment identity was admitted" []
+    (IO.request_ids adapter);
+  Alcotest.(check bool) "no assessment journal was created" false
+    (Sys.file_exists (IO.journal_path adapter)))
+
 let test_request_is_durable_before_dispatch () = with_adapter (fun adapter destination ->
   let module IO = Masc.Keeper_workspace_memory_selection_io in
   let calls = ref 0 in
@@ -805,6 +816,8 @@ let () = Alcotest.run "purpose-specific workspace memory selection"
     Alcotest.test_case "source failure is not irrelevance" `Quick test_source_failure_is_not_a_negative_relevance_vote;
     Alcotest.test_case "unresolved applicability stays pending" `Quick test_unresolved_source_does_not_loop;
     Alcotest.test_case "invalid judgment retains uncertainty" `Quick test_invalid_judgment_does_not_deliver_or_discard_memory;
+    Alcotest.test_case "missing clock does not start an assessment" `Quick
+      test_missing_clock_does_not_start_an_assessment;
     Alcotest.test_case "request precedes dispatch durably" `Quick test_request_is_durable_before_dispatch;
     Alcotest.test_case "failed request record prevents dispatch" `Quick test_failed_record_prevents_dispatch;
     Alcotest.test_case "failed response record prevents delivery" `Quick test_failed_response_record_prevents_delivery;

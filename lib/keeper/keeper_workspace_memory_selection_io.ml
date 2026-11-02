@@ -111,8 +111,13 @@ let evaluate_with ~call t ~state ~questions =
            | Other_refusal -> Keeper_workspace_memory_selection.Unavailable detail))
 
 let evaluate ~clock t ~state ~questions =
-  evaluate_with ~call:(fun ~destinations ~state ~questions () ->
-    Client.evaluate ?clock ~destinations ~state ~questions ()) t ~state ~questions
+  match clock with
+  | None ->
+    Error (Keeper_workspace_memory_selection.Unavailable
+      "memory selection requires a request clock")
+  | Some clock ->
+    evaluate_with ~call:(fun ~destinations ~state ~questions () ->
+      Client.evaluate ~clock ~destinations ~state ~questions ()) t ~state ~questions
 
 module For_testing = struct
   let evaluate_with = evaluate_with

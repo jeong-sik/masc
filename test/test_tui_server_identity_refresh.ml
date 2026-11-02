@@ -4759,6 +4759,166 @@ let task_scroll_history task_id =
        "events",`List []]) with
   | Ok history -> history | Error detail -> Alcotest.fail detail
 
+let test_reopened_task_history_retains_only_owned_observation () =
+  let open Masc_tui_types in
+  let module Fetched = Masc_tui_fetched in
+  let state, task_id = task_detail_scroll_fixture () in
+  state.workspace_identity <- Workspace_identity_match;
+  state.server_identity <- Some (identity "/workspace/task-history");
+  let require = function
+    | Some request -> request | None -> Alcotest.fail "history read did not start" in
+  let previous = task_scroll_history task_id in
+  let initial = begin_task_history_read state ~task_id ~limit:40 |> require in
+  complete_task_history_read state initial (Ok previous);
+  prepare_task_history_for_open state ~task_id;
+  let refresh = begin_task_history_read state ~task_id ~limit:40 |> require in
+  Alcotest.(check bool) "reopening retains the previous observation while refreshing" true
+    (Fetched.in_flight state.task_history
+     && Fetched.view_for ~equal:String.equal state.task_history ~key:task_id = Fetched.Ready previous);
+  cancel_task_history_for_view_exit state;
+  complete_task_history_read state refresh (Error "late cancelled response");
+  Alcotest.(check bool) "leaving the view retires the read without inventing an identity failure" true
+    (state.task_history_request = None
+     && Fetched.view_for ~equal:String.equal state.task_history ~key:task_id = Fetched.Ready previous);
+  prepare_task_history_for_open state ~task_id;
+  let refresh = begin_task_history_read state ~task_id ~limit:40 |> require in
+  complete_task_history_read state refresh (Error "fixture unavailable");
+  Alcotest.(check bool) "a failed refresh reports the retained observation as stale" true
+    (Fetched.view_for ~equal:String.equal state.task_history ~key:task_id
+     = Fetched.Stale (previous, "fixture unavailable"));
+  (* The legacy Home route clears the source directly before opening a Task. *)
+  state.task_history <- Fetched.clear state.task_history;
+  let first_other = begin_task_history_read state ~task_id:"task-other" ~limit:40 |> require in
+  complete_task_history_read state first_other (Error "other unavailable");
+  prepare_task_history_for_open state ~task_id:"task-other";
+  Alcotest.(check bool) "an older owner's marker cannot turn another Task's failure into an observation" true
+    (Fetched.current_key state.task_history = None && state.task_history_last_reading = None);
+  let initial = begin_task_history_read state ~task_id ~limit:40 |> require in
+  complete_task_history_read state initial (Ok previous);
+  prepare_task_history_for_open state ~task_id:"task-other";
+  Alcotest.(check bool) "another Task cannot inherit the observation" true
+    (Fetched.current_key state.task_history = None);
+  let initial = begin_task_history_read state ~task_id ~limit:40 |> require in
+  complete_task_history_read state initial (Ok previous);
+  state.workspace_read_authority <- ref ();
+  prepare_task_history_for_open state ~task_id;
+  Alcotest.(check bool) "a new workspace reading cannot inherit it" true
+    (Fetched.current_key state.task_history = None);
+  let old = begin_task_history_read state ~task_id ~limit:40 |> require in
+  state.workspace_read_authority <- ref ();
+  complete_task_history_read state old (Ok previous);
+  prepare_task_history_for_open state ~task_id;
+  Alcotest.(check bool) "a late completion cannot give the new workspace a history owner" true
+    (Fetched.current_key state.task_history = None && state.task_history_last_reading = None);
+  let initial = begin_task_history_read state ~task_id ~limit:40 |> require in
+  complete_task_history_read state initial (Ok previous);
+  state.workspace_identity <- Workspace_identity_match_unconfirmed "fixture disconnected";
+  prepare_task_history_for_open state ~task_id;
+  Alcotest.(check bool) "unconfirmed workspace identity prevents reuse" true
+    (Fetched.current_key state.task_history = None)
+
+let test_reopened_history_document_follows_workspace_owner () =
+  let open Masc_tui_types in
+  let module Fetched = Masc_tui_fetched in
+  let state, task_id = task_detail_scroll_fixture () in
+  state.workspace_identity <- Workspace_identity_match;
+  state.server_identity <- Some (identity "/workspace/task-history");
+  let request = match begin_task_history_read state ~task_id ~limit:40 with
+    | Some request -> request | None -> Alcotest.fail "history read did not start" in
+  complete_task_history_read state request (Ok (task_scroll_history task_id));
+  let cols = 80 in
+  complete_task_scroll_documents state ~cols (sync_task_documents state ~cols);
+  state.task_detail_id <- None;
+  ignore (sync_task_documents state ~cols);
+  Alcotest.(check bool) "leaving a Task retains its completed history document" true
+    (Option.is_some state.task_document_history.tds_previous
+     && Option.is_some (Fetched.current_key state.task_document_history.tds_reading));
+  prepare_task_history_for_open state ~task_id;
+  state.task_detail_id <- Some task_id;
+  ignore (begin_task_history_read state ~task_id ~limit:40);
+  ignore (sync_task_documents state ~cols);
+  Alcotest.(check bool) "same-owner reopening reuses the prepared history without another worker" true
+    (state.task_document_history.tds_request = None
+     && Option.is_some (Fetched.current_key state.task_document_history.tds_reading));
+  state.task_detail_id <- None;
+  cancel_task_history_for_view_exit state;
+  ignore (sync_task_documents state ~cols);
+  suspend_workspace_readings state;
+  Alcotest.(check bool) "workspace withdrawal clears the retained Work history document" true
+    (state.task_document_history.tds_previous = None
+     && Fetched.current_key state.task_document_history.tds_reading = None);
+  prepare_task_history_for_open state ~task_id;
+  Alcotest.(check bool) "a new workspace reading cannot reuse the raw observation" true
+    (Fetched.current_key state.task_history = None)
+
+let test_active_history_remains_until_its_unconfirmed_view_closes () =
+  let open Masc_tui_types in
+  let module Fetched = Masc_tui_fetched in
+  let cols = 80 in
+  let fixture () =
+    let state, task_id = task_detail_scroll_fixture () in
+    state.workspace_identity <- Workspace_identity_match;
+    state.server_identity <- Some (identity "/workspace/task-history");
+    let request = match begin_task_history_read state ~task_id ~limit:40 with
+      | Some request -> request | None -> Alcotest.fail "history read did not start" in
+    complete_task_history_read state request (Ok (task_scroll_history task_id));
+    complete_task_scroll_documents state ~cols (sync_task_documents state ~cols);
+    state,task_id in
+  let state, task_id = fixture () in
+  state.workspace_identity <- Workspace_identity_match_unconfirmed "fixture disconnected";
+  suspend_workspace_readings state;
+  ignore (sync_task_documents state ~cols);
+  Alcotest.(check bool) "an open view keeps its last document while workspace identity is unconfirmed" true
+    (Option.is_some state.task_document_history.tds_previous
+     && state.task_document_history.tds_request = None
+     && state.task_history_last_reading = None);
+  state.task_detail_id <- None;
+  ignore (sync_task_documents state ~cols);
+  Alcotest.(check bool) "closing the unconfirmed view retires its retained document" true
+    (state.task_document_history.tds_previous = None
+     && Fetched.current_key state.task_document_history.tds_reading = None);
+  prepare_task_history_for_open state ~task_id;
+  Alcotest.(check bool) "the unconfirmed observation cannot be reused on reopening" true
+    (Fetched.current_key state.task_history = None);
+  let state, task_id = fixture () in
+  state.workspace_identity <- Workspace_identity_match_unconfirmed "fixture disconnected";
+  suspend_workspace_readings state;
+  state.workspace_identity <- Workspace_identity_match;
+  let request = match begin_task_history_read state ~task_id ~limit:40 with
+    | Some request -> request | None -> Alcotest.fail "history revalidation did not start" in
+  complete_task_history_read state request (Ok (task_scroll_history task_id));
+  state.task_detail_id <- None;
+  ignore (sync_task_documents state ~cols);
+  Alcotest.(check bool) "a fresh raw read cannot make an older authority's document reusable" true
+    (state.task_document_history.tds_previous = None
+     && Fetched.current_key state.task_document_history.tds_reading = None
+     && Fetched.current_key state.task_history = Some task_id);
+  prepare_task_history_for_open state ~task_id;
+  state.task_detail_id <- Some task_id;
+  ignore (sync_task_documents state ~cols);
+  Alcotest.(check bool) "the new authority prepares its own history document" true
+    (Option.is_some state.task_document_history.tds_request);
+  let state, task_id = fixture () in
+  state.task_document_history <- initial_task_document_slot;
+  ignore (sync_task_documents state ~cols);
+  Alcotest.(check bool) "history preparation is in flight before the interruption" true
+    (Option.is_some state.task_document_history.tds_request);
+  state.workspace_identity <- Workspace_identity_match_unconfirmed "fixture disconnected";
+  suspend_workspace_readings state;
+  complete_task_scroll_documents state ~cols (sync_task_documents state ~cols);
+  Alcotest.(check bool) "a document prepared from unconfirmed history has no reusable owner" true
+    (match state.task_document_history.tds_previous with
+     | Some (_,None,_) -> true | Some (_,Some _,_) | None -> false);
+  state.workspace_identity <- Workspace_identity_match;
+  let request = match begin_task_history_read state ~task_id ~limit:40 with
+    | Some request -> request | None -> Alcotest.fail "history revalidation did not start" in
+  complete_task_history_read state request (Ok (task_scroll_history task_id));
+  state.task_detail_id <- None;
+  ignore (sync_task_documents state ~cols);
+  Alcotest.(check bool) "a later raw success cannot authorize a document prepared from unconfirmed history" true
+    (state.task_document_history.tds_previous = None
+     && Fetched.current_key state.task_document_history.tds_reading = None)
+
 let test_task_detail_end_respects_presented_input () =
   let open Masc_tui_types in
   let state, task_id = task_detail_scroll_fixture () in
@@ -5490,7 +5650,13 @@ let test_queue_detail_respects_source_reading () =
 let () =
   Alcotest.run "tui_server_identity_refresh"
     [ ( "server-identity-refresh"
-      , [ Alcotest.test_case "task detail End respects presented input" `Quick
+      , [ Alcotest.test_case "reopened task history retains only its workspace observation" `Quick
+            test_reopened_task_history_retains_only_owned_observation
+        ; Alcotest.test_case "reopened history document follows workspace owner" `Quick
+            test_reopened_history_document_follows_workspace_owner
+        ; Alcotest.test_case "active history is not retained after an unconfirmed view closes" `Quick
+            test_active_history_remains_until_its_unconfirmed_view_closes
+        ; Alcotest.test_case "task detail End respects presented input" `Quick
             test_task_detail_end_respects_presented_input
         ; Alcotest.test_case "task detail End waits for its current read and frame" `Quick
             test_task_detail_end_waits_for_current_read_and_frame

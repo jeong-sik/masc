@@ -5556,7 +5556,9 @@ type task_document_request =
 type task_document_slot =
   { tds_reading : (task_document_key,string list) Masc_tui_fetched.t
   ; tds_request : task_document_request option
-  ; tds_previous : (task_document_key * string list) option }
+  (* A Work History document prepared from an unconfirmed source has no
+     reusable owner, even if the formatter itself ran under the current ref. *)
+  ; tds_previous : (task_document_key * unit ref option * string list) option }
 type task_detail_owner = { tdo_task_id : string; tdo_reading : unit ref }
 type task_detail_presented =
   { tdp_owner : task_detail_owner
@@ -9787,6 +9789,7 @@ type state = {
   mutable goal_timeline: (string, Tui_decode.goal_timeline_event list) Masc_tui_fetched.t;
   mutable task_history: (string, Masc.Tui_decode_task_inspection.history) Masc_tui_fetched.t;
   mutable task_history_request: string task_history_request option;
+  mutable task_history_last_reading: unit ref option;
   mutable task_document_body: task_document_slot;
   mutable task_document_history: task_document_slot;
   mutable verification_evidence:
@@ -13556,6 +13559,11 @@ let suspend_task_documents state =
     set_task_document_slot state part {slot with tds_reading=reading;tds_request=None})
     [Masc_tui_task_document.Body;History]
 
+let invalidate_task_history_document state =
+  let slot = state.task_document_history in
+  state.task_document_history <- {slot with
+    tds_reading=Masc_tui_fetched.clear slot.tds_reading;tds_previous=None}
+
 let suspend_tools_async_task state =
   state.tools_async_task_body <- Masc_tui_fetched.suspend state.tools_async_task_body;
   state.tools_async_task_history <- Masc_tui_fetched.suspend state.tools_async_task_history;
@@ -13853,7 +13861,14 @@ let suspend_workspace_readings state =
   state.chat_call_pending <- None;
   state.task_history <- Masc_tui_fetched.suspend state.task_history;
   state.task_history_request <- None;
+  state.task_history_last_reading <- None;
   suspend_task_documents state;
+  (match state.task_document_history.tds_previous with
+   | Some ({tdk_target=Work_task_document task_id;_},_,_)
+     when state.view=Planning && state.planning_mode=Planning_list
+          && state.task_detail_id=Some task_id -> ()
+   | Some ({tdk_target=Work_task_document _;_},_,_) -> invalidate_task_history_document state
+   | Some ({tdk_target=Async_task_document _;_},_,_) | None -> ());
   suspend_tools_async_detail state;
   retire_keeper_settings_editor state;
   suspend_keeper_logs state;
@@ -18025,8 +18040,33 @@ let complete_task_history_read (state : state) request result =
     && Masc_tui_fetched.is_current ~equal:String.equal state.task_history request.thr_ticket
   then begin
     state.task_history_request <- None;
+    (match result with Ok _ -> state.task_history_last_reading <- Some request.thr_reading
+     | Error _ -> ());
     state.task_history <- Masc_tui_fetched.complete ~equal:String.equal state.task_history request.thr_ticket result
   end
+
+(* Reopening may show a previous observation while the next read is in flight,
+   but only when the Task and the confirmed workspace reading still own it. *)
+let task_history_owned_by state ~task_id =
+  let same_reading = Option.exists (fun owner -> owner == state.workspace_read_authority)
+      state.task_history_last_reading in
+  let has_observation = Option.exists (fun (_,view) ->
+    Option.is_some (Masc_tui_fetched.value view)) (Masc_tui_fetched.current state.task_history) in
+  state.workspace_identity = Workspace_identity_match
+  && server_authority_ready state && same_reading && has_observation
+  && Option.equal String.equal (Masc_tui_fetched.current_key state.task_history) (Some task_id)
+
+let prepare_task_history_for_open state ~task_id =
+  if not (task_history_owned_by state ~task_id) then begin
+    state.task_history <- Masc_tui_fetched.clear state.task_history;
+    state.task_history_last_reading <- None;
+    invalidate_task_history_document state
+  end
+
+let cancel_task_history_for_view_exit state =
+  state.task_history <- Masc_tui_fetched.cancel_pending
+    ~reason:"Task view closed before history loaded." state.task_history;
+  state.task_history_request <- None
 
 let ui_text (state : state) ~ko ~en =
   match state.ui_language with
@@ -18037,7 +18077,8 @@ let withdraw_detail_histories (state : state) =
   clear_task_documents state;
   state.goal_timeline <- Masc_tui_fetched.clear state.goal_timeline;
   state.task_history <- Masc_tui_fetched.clear state.task_history;
-  state.task_history_request <- None
+  state.task_history_request <- None;
+  state.task_history_last_reading <- None
 
 let create_state
     ?(reasoning_visibility = Reasoning_folded)
@@ -18449,6 +18490,7 @@ let create_state
   goal_timeline = Masc_tui_fetched.initial;
   task_history = Masc_tui_fetched.initial;
   task_history_request = None;
+  task_history_last_reading = None;
   task_document_body = initial_task_document_slot;
   task_document_history = initial_task_document_slot;
   verification_evidence = Masc_tui_fetched.initial;
@@ -20091,9 +20133,18 @@ let sync_task_documents state ~cols =
     | None ->
       Option.iter (fun request -> Observation.observe request.tdr_observation
         (Retired Source_unavailable)) slot.tds_request;
-      if Option.is_some (Masc_tui_fetched.current_key slot.tds_reading)
-          || Option.is_some slot.tds_previous || Option.is_some slot.tds_request then
-        set_task_document_slot state part {tds_reading=Masc_tui_fetched.clear slot.tds_reading;tds_request=None;tds_previous=None};
+      let previous = match part,slot.tds_previous with
+        | History,Some ({tdk_target=Work_task_document task_id;_},Some owner,_)
+          when owner == state.workspace_read_authority && task_history_owned_by state ~task_id -> slot.tds_previous
+        | History,(None | Some ({tdk_target=(Work_task_document _ | Async_task_document _);_},_,_))
+        | Masc_tui_task_document.Body,(None | Some _) -> None in
+      let reading = match Masc_tui_fetched.current slot.tds_reading,previous with
+        | Some (key,Masc_tui_fetched.Ready _),Some (old,_,_)
+          when not (Masc_tui_fetched.in_flight slot.tds_reading) && equal_task_document_key key old ->
+          slot.tds_reading
+        | (None | Some (_, (Absent | Loading | Ready _ | Stale _ | Failed _))), (None | Some _) ->
+          Masc_tui_fetched.clear slot.tds_reading in
+      set_task_document_slot state part {tds_reading=reading;tds_request=None;tds_previous=previous};
       None
     | Some key ->
       match Masc_tui_fetched.view_for ~equal:equal_task_document_key slot.tds_reading ~key with
@@ -20144,8 +20195,14 @@ let complete_task_document state ~cols request result =
     end;
     Observation.observe request.tdr_observation (Ui_disposition (Rejected reason))
   | None ->
+    let previous_owner = match part,key.tdk_target with
+      | History,Work_task_document task_id ->
+        if task_history_owned_by state ~task_id then Some request.tdr_reading else None
+      | History,Async_task_document _
+      | Masc_tui_task_document.Body,(Work_task_document _ | Async_task_document _) ->
+        Some request.tdr_reading in
     set_task_document_slot state part {tds_request=None;
-      tds_previous=(match result with Ok rows -> Some (key,rows) | Error _ -> slot.tds_previous);
+      tds_previous=(match result with Ok rows -> Some (key,previous_owner,rows) | Error _ -> slot.tds_previous);
       tds_reading=Masc_tui_fetched.complete ~equal:equal_task_document_key slot.tds_reading request.tdr_ticket result};
     Observation.observe request.tdr_observation (Ui_disposition (match result with Ok _ -> Applied | Error _ -> Applied_failure))
 
@@ -20159,7 +20216,7 @@ let task_document_lines state ~cols part =
     let notice text = Masc_tui_text_block.rows
       ~max_cells:(max 1 (Masc_tui_frame.inner_width ~cols)) text in
     let previous=match slot.tds_previous with
-      | Some (old,rows) when equal_task_document_target old.tdk_target key.tdk_target
+      | Some (old,_,rows) when equal_task_document_target old.tdk_target key.tdk_target
           && Masc_tui_task_document.columns old.tdk_input=cols -> rows
       | Some _ | None -> [] in
     match Masc_tui_fetched.view_for ~equal:equal_task_document_key slot.tds_reading ~key with

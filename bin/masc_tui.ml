@@ -3805,8 +3805,7 @@ let reconcile_task_documents state ~mailbox =
        && Masc_tui_fetched.is_current ~equal:String.equal state.task_history request.thr_ticket in
      if not current then begin
        Masc_tui_workspace_job.cancel_observation state ~key:request.thr_job;
-       state.task_history <- Masc_tui_fetched.suspend state.task_history;
-       state.task_history_request <- None
+       cancel_task_history_for_view_exit state
      end);
   let previous=List.filter_map Fun.id
     [state.task_document_body.tds_request;state.task_document_history.tds_request] in
@@ -29425,7 +29424,7 @@ Use relative paths for resources already held in the package. -->
                      state.planning_mode <- Planning_list;
                      state.task_detail_id <- Some task_id;
                      reset_task_detail_scroll state;
-                     state.task_history <- Masc_tui_fetched.clear state.task_history;
+                     prepare_task_history_for_open state ~task_id;
                      state.task_focus <-
                        Masc_tui_overview_tasks.land_on state.tasks ~task_id;
                      launch_task_history_load state ~mailbox:async_messages
@@ -31151,7 +31150,7 @@ Use relative paths for resources already held in the package. -->
                | Some tid ->
                    state.task_detail_id <- Some tid;
                    reset_task_detail_scroll state;
-                   state.task_history <- Masc_tui_fetched.clear state.task_history;
+                   prepare_task_history_for_open state ~task_id:tid;
                    launch_task_history_load state ~mailbox:async_messages tid;
                    state.task_focus <-
                      Masc_tui_overview_tasks.land_on state.tasks ~task_id:tid
@@ -31472,7 +31471,7 @@ Use relative paths for resources already held in the package. -->
                      state.planning_mode <- Planning_list;
                      state.task_detail_id <- Some task_id;
                      reset_task_detail_scroll state;
-                     state.task_history <- Masc_tui_fetched.clear state.task_history;
+                     prepare_task_history_for_open state ~task_id;
                      launch_task_history_load state ~mailbox:async_messages
                        task_id;
                      state.task_focus <-
@@ -33568,7 +33567,7 @@ Use relative paths for resources already held in the package. -->
                                state.planning_mode <- Planning_list;
                                state.task_detail_id <- Some task_id;
                                reset_task_detail_scroll state;
-                               state.task_history <- Masc_tui_fetched.clear state.task_history;
+                               prepare_task_history_for_open state ~task_id;
                                state.task_focus <-
                                  Masc_tui_overview_tasks.land_on state.tasks ~task_id;
                                launch_task_history_load state
@@ -33826,7 +33825,7 @@ Use relative paths for resources already held in the package. -->
                      state.planning_mode <- Planning_list;
                      state.task_detail_id <- Some task_id;
                      reset_task_detail_scroll state;
-                     state.task_history <- Masc_tui_fetched.clear state.task_history;
+                     prepare_task_history_for_open state ~task_id;
                      state.task_focus <-
                        Masc_tui_overview_tasks.land_on state.tasks ~task_id;
                      launch_task_history_load state ~mailbox:async_messages
@@ -35784,7 +35783,7 @@ Use relative paths for resources already held in the package. -->
                       | Some (Masc_tui_overview_tasks.Open task) ->
                           state.task_detail_id <- Some task.id;
                           reset_task_detail_scroll state;
-                          state.task_history <- Masc_tui_fetched.clear state.task_history;
+                          prepare_task_history_for_open state ~task_id:task.id;
                           launch_task_history_load state
                             ~mailbox:async_messages task.id
                       | Some Masc_tui_overview_tasks.No_held_task ->

@@ -13,7 +13,7 @@
 
 (** {1 SSE hot-queue snapshot} *)
 
-type sse_session_kind =
+type sse_session_kind = Sse_queue_inventory.kind =
   | Observer
   | Agent_stream
   | Presence
@@ -27,7 +27,7 @@ type hot_queue_session =
   ; kind : sse_session_kind
   ; queue_depth : int
   ; last_event_id : int
-  ; idle_seconds : float
+  ; last_seen_at : float
   }
 
 (** {1 SSE metrics} *)

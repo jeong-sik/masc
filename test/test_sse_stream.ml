@@ -380,7 +380,7 @@ let test_idle_session_is_not_hot ~auth () =
   Fun.protect
     ~finally:(fun () -> Sse.unregister "s-idle-hot-probe")
     (fun () ->
-      Sse.sync_transport_snapshot ~force:true ();
+      Sse.sync_transport_snapshot ();
       let hot_sessions =
         Transport_metrics.transport_health_json ()
         |> U.member "sse"
@@ -388,6 +388,85 @@ let test_idle_session_is_not_hot ~auth () =
         |> U.to_list
       in
       Alcotest.(check int) "idle sessions are not hot" 0 (List.length hot_sessions))
+
+let queue_snapshot () =
+  Transport_metrics.transport_health_json () |> U.member "sse"
+
+let check_queue ~label ~max_depth ~hot_count =
+  let sse = queue_snapshot () in
+  Alcotest.(check int) (label ^ " max depth") max_depth
+    (sse |> U.member "queue_max_depth" |> U.to_int);
+  Alcotest.(check int) (label ^ " hot count") hot_count
+    (sse |> U.member "hot_sessions" |> U.to_list |> List.length)
+
+let test_queue_metrics_follow_delivery ~auth () =
+  reset ();
+  let _, stream, _ =
+    register_exn ~auth ~kind:Observer "queue-metrics-drain" ~last_event_id:0 in
+  Fun.protect ~finally:(fun () -> Sse.unregister "queue-metrics-drain") (fun () ->
+    Sse.broadcast_to Observers (`Assoc ["type", `String "queued"]);
+    check_queue ~label:"enqueued" ~max_depth:1 ~hot_count:1;
+    Alcotest.(check bool) "nonblocking take received the event" true
+      (Option.is_some (Sse.take_delivery_nonblocking stream));
+    check_queue ~label:"after nonblocking take" ~max_depth:0 ~hot_count:0;
+    Sse.broadcast_to Observers (`Assoc ["type", `String "queued again"]);
+    ignore (Sse.take_delivery stream);
+    check_queue ~label:"after blocking take" ~max_depth:0 ~hot_count:0)
+
+let test_retired_stream_cannot_change_successor_metrics ~auth () =
+  reset ();
+  let session_id = "queue-metrics-reconnect" in
+  let old_id, old_stream, _ =
+    register_exn ~auth ~kind:Observer session_id ~last_event_id:0 in
+  Fun.protect ~finally:(fun () -> Sse.unregister session_id) (fun () ->
+    Sse.broadcast_to Observers (`Assoc ["type", `String "old"]);
+    let new_id, new_stream, _ =
+      register_exn ~auth ~kind:Observer session_id ~last_event_id:0 in
+    Alcotest.(check bool) "replacement has a new owner" true (old_id <> new_id);
+    Sse.broadcast_to Observers (`Assoc ["type", `String "new"]);
+    check_queue ~label:"successor queued" ~max_depth:1 ~hot_count:1;
+    ignore (Sse.take_delivery old_stream);
+    check_queue ~label:"after retired stream drains" ~max_depth:1 ~hot_count:1;
+    ignore (Sse.take_delivery new_stream);
+    check_queue ~label:"after successor drains" ~max_depth:0 ~hot_count:0)
+
+let test_concurrent_enqueue_and_drain_metrics ~auth () =
+  reset ();
+  let session_id = "queue-metrics-domains" in
+  let _, stream, _ =
+    register_exn ~auth ~kind:Observer session_id ~last_event_id:0 in
+  let produced = Atomic.make 0 and acknowledged = Atomic.make 0 in
+  let stop = Atomic.make false and failure = Atomic.make None in
+  let worker = Domain.spawn (fun () ->
+    try
+      for n = 1 to 200 do
+        if not (Atomic.get stop) then begin
+          Sse.broadcast_to Observers (`Assoc ["type", `String "domain-race"]);
+          Atomic.set produced n;
+          while Atomic.get acknowledged < n && not (Atomic.get stop) do
+            Domain.cpu_relax ()
+          done
+        end
+      done
+    with exn -> Atomic.set failure (Some exn)) in
+  Fun.protect
+    ~finally:(fun () -> Atomic.set stop true; Domain.join worker; Sse.unregister session_id)
+    (fun () ->
+      let deadline = Unix.gettimeofday () +. 30.0 in
+      let check_worker () =
+        (match Atomic.get failure with None -> () | Some exn -> raise exn);
+        if Unix.gettimeofday () > deadline then Alcotest.fail "domain race timed out";
+        Domain.cpu_relax () in
+      for n = 1 to 200 do
+        let rec take () =
+          match Sse.take_delivery_nonblocking stream with
+          | Some _ -> ()
+          | None -> check_worker (); take () in
+        take ();
+        while Atomic.get produced < n do check_worker () done;
+        check_queue ~label:"concurrent drain" ~max_depth:0 ~hot_count:0;
+        Atomic.set acknowledged n
+      done)
 
 let test_waiting_inventory_observer_authority ~auth () =
   reset ();
@@ -652,5 +731,11 @@ let () =
             [
               Alcotest.test_case "idle session is not hot" `Quick
                 (test_idle_session_is_not_hot ~auth);
+              Alcotest.test_case "queue metrics follow delivery" `Quick
+                (test_queue_metrics_follow_delivery ~auth);
+              Alcotest.test_case "retired stream cannot alter successor metrics" `Quick
+                (test_retired_stream_cannot_change_successor_metrics ~auth);
+              Alcotest.test_case "concurrent enqueue and drain metrics" `Quick
+                (test_concurrent_enqueue_and_drain_metrics ~auth);
             ] );
         ])

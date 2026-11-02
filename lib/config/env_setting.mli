@@ -46,7 +46,6 @@ module Float_knob : sig
     | Sidecar_control_timeout_sec
     | Full_health_refresh_timeout_sec
     | Repo_sync_interval_sec
-    | Snapshot_interval_sec
   [@@deriving enumerate]
 
   val env_name : t -> string

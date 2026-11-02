@@ -10,7 +10,7 @@
 
 (** {1 SSE Metrics} *)
 
-type sse_session_kind =
+type sse_session_kind = Sse_queue_inventory.kind =
   | Observer
   | Agent_stream
   | Presence
@@ -26,7 +26,7 @@ type hot_queue_session =
   ; kind : sse_session_kind
   ; queue_depth : int
   ; last_event_id : int
-  ; idle_seconds : float
+  ; last_seen_at : float
   }
 
 let sse_hot_sessions : hot_queue_session list Atomic.t = Atomic.make []
@@ -591,7 +591,7 @@ let hot_session_json (session : hot_queue_session) =
     ; "kind", `String (sse_session_kind_to_string session.kind)
     ; "queue_depth", `Int session.queue_depth
     ; "last_event_id", `Int session.last_event_id
-    ; "idle_seconds", `Float session.idle_seconds
+    ; "idle_seconds", `Float (max 0.0 (Time_compat.now () -. session.last_seen_at))
     ]
 ;;
 

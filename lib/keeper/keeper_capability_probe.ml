@@ -435,13 +435,13 @@ let probe_official_client_invocation ~mgr ~clock ~fs ~base_path ~now ~runtime_id
                 probe, abandoned when the turn ends. *)
              let config : Runtime_claude_code.config =
                { cli_path = exec.cli_path
-               ; account_home = exec.account_home
+               ; account_home = Runtime_official_account.Captured exec.account_home
                ; cwd = base_path
                ; model = exec.model
                ; native = Runtime_native_tools.claude_code_default
                ; system_prompt = None
                ; admission_timeout_s = exec.timeout_s
-               ; timeout_s = Runtime_inference.resolve_turn_timeout_s_or ~runtime_id ~default:exec.timeout_s
+               ; timeout_s = Runtime_inference.turn_timeout_s_of_declared ~default:exec.timeout_s rt.model.turn_timeout_s
 
     (* A capability probe asks what the client can do; it has no domain schema
        to hold an answer to. *)
@@ -449,9 +449,8 @@ let probe_official_client_invocation ~mgr ~clock ~fs ~base_path ~now ~runtime_id
                }
              in
              let reasoning_effort =
-               Runtime_inference.clamp_reasoning_effort_to_catalog
-                 ~model_id:exec.model ~requested:rt.model.reasoning_effort
-               |> Option.map Runtime_claude_code.cli_admitted_reasoning_effort
+               Option.map Runtime_claude_code.cli_admitted_reasoning_effort
+                 rt.model.reasoning_effort
              in
              (match
                 Runtime_claude_code.run_turn
@@ -479,14 +478,14 @@ let probe_official_client_invocation ~mgr ~clock ~fs ~base_path ~now ~runtime_id
            | Runtime_execution.Codex_app_server exec ->
              let config : Runtime_codex_app_server.config =
                { cli_path = exec.cli_path
-               ; account_home = exec.account_home
+               ; account_home = Runtime_official_account.Captured exec.account_home
                ; isolated_home = None
                ; model = exec.model
                ; context_window = Some (Runtime_instance.max_context_of_runtime rt)
                ; native = Runtime_native_tools.codex_default
                ; developer_instructions = None
                ; admission_timeout_s = exec.timeout_s
-               ; timeout_s = Runtime_inference.resolve_turn_timeout_s_or ~runtime_id ~default:exec.timeout_s
+               ; timeout_s = Runtime_inference.turn_timeout_s_of_declared ~default:exec.timeout_s rt.model.turn_timeout_s
 
     (* A probe asks whether the client answers at all; it has no domain schema
        to hold the answer to. *)
@@ -640,7 +639,7 @@ let probe_antigravity_invocation ~sw ~net ~secure_random ~mgr ~clock ~fs ~base_p
                      ; sandbox = true
                      ; disable_slash_commands = true
                      ; admission_timeout_s = exec.timeout_s
-                     ; timeout_s = Runtime_inference.resolve_turn_timeout_s_or ~runtime_id ~default:exec.timeout_s
+                     ; timeout_s = Runtime_inference.turn_timeout_s_of_declared ~default:exec.timeout_s rt.model.turn_timeout_s
 
     (* A capability probe asks what the client can do; it has no domain schema
        to hold an answer to. *)
@@ -695,13 +694,8 @@ let probe_muse_invocation ~net ~secure_random ~mgr ~clock ~fs ~base_path ~now
             timeout_s=(match runtime.model.turn_timeout_s with
               | None -> Some exec.timeout_s | Some 0. -> None | Some seconds -> Some seconds) } in
           let reasoning_effort =
-            Runtime_inference.clamp_reasoning_effort_to_catalog
-              ~model_id:(Some exec.model) ~requested:runtime.model.reasoning_effort
-            |> Option.map (function
-              | Llm_provider.Reasoning_effort.None_ -> Runtime_muse_msp.Effort_none
-              | Minimal -> Effort_minimal | Low -> Effort_low | Medium -> Effort_medium
-              | High -> Effort_high | XHigh -> Effort_xhigh | Max -> Effort_max
-              | Ultra -> Effort_ultra) in
+            Option.map Runtime_muse_msp.reasoning_effort_of_requested
+              runtime.model.reasoning_effort in
           let quota_scope = Runtime_instance.quota_scope_of_runtime runtime in
           let started = now () in
           (match Runtime_verification_muse.run ~secure_random ~net ~mgr ~clock

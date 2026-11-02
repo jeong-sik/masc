@@ -179,11 +179,12 @@ let test_styling_statements_change_nothing () =
 
 let test_node_shapes_database_subroutine_stadium () =
   let g =
-    parsed "flowchart TD\nDB[(Postgres)]\nSUB[[Worker]]\nST([Pill])\nCIR((Ring))\nREC[Box]"
+    parsed "flowchart TD\nDB[(Postgres)]\nSUB[[Worker]]\nST([Pill])\nCIR((Ring))\nREC[Box]\nHEX{{Six}}\nODD>Flag]"
   in
   let shapes = List.map (fun (n : Mermaid.node) -> n.shape) g.nodes in
   Alcotest.(check bool) "all shapes recognized" true
-    (shapes = [ Mermaid.Database; Mermaid.Subroutine; Mermaid.Stadium; Mermaid.Circle; Mermaid.Rect ])
+    (shapes = [ Mermaid.Database; Mermaid.Subroutine; Mermaid.Stadium; Mermaid.Circle; Mermaid.Rect;
+                Mermaid.Hexagon; Mermaid.Asymmetric ])
 
 let test_an_edge_that_crosses_a_subgraph_boundary_is_refused () =
   match failure "graph TD\nsubgraph One\nA --> B\nend\nB --> C" with
@@ -627,10 +628,93 @@ let test_canvas_source_positions () =
       List.iter (fun identity -> Alcotest.(check bool) "equal labels keep distinct origins" true
         (List.mem identity identities)) [Node_label (Named "A"); Node_label (Named "B"); Edge_label 0]
 
+let test_undrawn_source_decisions () =
+  let source = "graph TD\nA[ok]\n  style A fill:#f00  \n  click A href URL" in
+  let fragments = match Mermaid.render_with_status ~cols:120 source with
+    | Ok result -> result.undrawn_sources
+    | Error _ -> Alcotest.fail "trailing undrawn statements should retain source ranges" in
+  let traced = match Mermaid.render_with_source_labels ~cols:120 source with
+    | Ok result -> result.undrawn_sources
+    | Error _ -> Alcotest.fail "traced rendering should make the same source decision" in
+  Alcotest.(check bool) "plain and traced source ranges agree" true (fragments=traced);
+  let bytes = List.map (fun (range : Mermaid.undrawn_source) ->
+    String.sub source range.source_start (range.source_end-range.source_start)) fragments in
+  Alcotest.(check (list string)) "ranges retain the original statements and whitespace"
+    ["  style A fill:#f00  \n  click A href URL"] bytes;
+  List.iter (fun (source, original) ->
+    match Mermaid.render_with_status ~cols:120 source with
+    | Ok {undrawn_sources=[range]; _} ->
+        Alcotest.(check string) "intervening source stays in the range" original
+          (String.sub source range.source_start (range.source_end-range.source_start))
+    | Ok _ | Error _ -> Alcotest.fail "undrawn source should be one continuous range")
+    ["graph TD\nA[ok]\nstyle A fill:red\n\n  click A href URL", "style A fill:red\n\n  click A href URL";
+     "graph TD\nA[ok];style A fill:red; click A href URL", "style A fill:red; click A href URL"];
+  (match Mermaid.render_with_status ~cols:120 "%% important note\ngraph TD\nA[ok]" with
+   | Ok {undrawn_sources=[{placement=Before_diagram; _}]; _} -> ()
+   | Ok _ | Error _ -> Alcotest.fail "leading undrawn source belongs before the drawing");
+  let fallback source =
+    match Mermaid.render_with_status ~cols:120 source, Mermaid.render_with_source_labels ~cols:120 source with
+    | Error (Mermaid.Unsupported _), Error (Mermaid.Unsupported _) -> ()
+    | _ -> Alcotest.fail "source order or overwritten content requires source fallback" in
+  fallback "graph TD\nA[first]\nclassDef hot fill:red\nB[second]";
+  fallback "stateDiagram-v2\nA: first description\nA: second description"
+
+let test_edge_label_line_collision_decisions () =
+  let source direction grouped label_first label =
+    let labelled = "A -->|" ^ label ^ "| C" and other = "B --> D" in
+    let first, second = if label_first then labelled, other else other, labelled in
+    let body = "A[a]\nB[b]\nC[c]\nD[d]\n" ^ first ^ "\n" ^ second in
+    "graph " ^ direction ^ "\n" ^ if grouped then "subgraph G[group]\n" ^ body ^ "\nend" else body
+  in
+  let collision source =
+    match Mermaid.render_with_status ~cols:100 source, Mermaid.render_with_source_labels ~cols:100 source with
+    | Error (Mermaid.Unsupported _), Error (Mermaid.Unsupported _) -> ()
+    | _ -> Alcotest.fail "an edge label crossing a line requires source fallback" in
+  let safe source =
+    match Mermaid.render_with_status ~cols:100 source, Mermaid.render_with_source_labels ~cols:100 source with
+    | Ok _, Ok _ -> ()
+    | _ -> Alcotest.fail "a label beside an edge should still render" in
+  List.iter (fun direction ->
+    List.iter (fun grouped -> List.iter (fun label_first ->
+      List.iter (fun label -> collision (source direction grouped label_first label))
+        ["abcdefgh"; "abcde한x"];
+      safe (source direction grouped label_first "abcdef")) [true; false]) [true; false]) ["TD"; "BT"];
+  List.iter (fun direction ->
+    List.iter (fun grouped -> List.iter (fun label_first ->
+      safe (source direction grouped label_first "abcdefgh")) [true; false]) [true; false]) ["LR"; "RL"];
+  List.iter (fun label_first ->
+    let labelled = "A --> C : abcdefgh" and other = "B --> D" in
+    let first, second = if label_first then labelled, other else other, labelled in
+    collision ("stateDiagram-v2\nA\nB\nC\nD\n" ^ first ^ "\n" ^ second)) [true; false]
+
+let test_label_break_source_decisions () =
+  List.iter (fun source ->
+    match Mermaid.render_with_status ~cols:120 source, Mermaid.render_with_source_labels ~cols:120 source with
+    | Error (Mermaid.Unsupported _), Error (Mermaid.Unsupported _) -> ()
+    | _ -> Alcotest.failf "a normalized label break requires source fallback: %S" source)
+    [ "graph TD\nA[\"first<br>second\"]"
+    ; "graph TD\nA -->|first<br/>second| B"
+    ; "graph TD\nsubgraph G[\"first<br>second\"]\nA\nend"
+    ; "sequenceDiagram\nparticipant A as first<br>second\nA->>B: hello"
+    ; "sequenceDiagram\nA->>B: first<br>second"
+    ; "sequenceDiagram\nNote over A: first<br>second"
+    ; "stateDiagram-v2\nA --> B: first<br>second"
+    ];
+  List.iter (fun source ->
+    match Mermaid.render_with_status ~cols:120 source, Mermaid.render_with_source_labels ~cols:120 source with
+    | Ok _, Ok _ -> ()
+    | _ -> Alcotest.fail "a single-line label should still render")
+    [ "graph TD\nA[first second]"
+    ; "graph TD\nA[first]\n%% <br> is in a comment"
+    ; "sequenceDiagram\nA->>B: first second"
+    ; "stateDiagram-v2\nA --> B: first second"
+    ]
+
 let () =
   Alcotest.run "tui mermaid"
     [ ( "goldens"
-      , [ Alcotest.test_case "canvas semantic byte positions" `Quick test_canvas_source_positions
+      , [ Alcotest.test_case "undrawn source decisions" `Quick test_undrawn_source_decisions
+        ; Alcotest.test_case "canvas semantic byte positions" `Quick test_canvas_source_positions
         ; Alcotest.test_case "state semantic source identities" `Quick test_state_source_label_identity
         ; Alcotest.test_case "group/sequence semantic source identities" `Quick test_group_and_sequence_source_identity
         ; Alcotest.test_case "parser-owned label identity and source ranges" `Quick test_parser_source_label_identity
@@ -645,7 +729,11 @@ let () =
     ; ( "shape"
       , [] )
     ; ( "refusals"
-      , [ Alcotest.test_case "another kind names itself" `Quick
+      , [ Alcotest.test_case "label break source decisions" `Quick
+            test_label_break_source_decisions
+        ; Alcotest.test_case "edge label line collision decisions" `Quick
+            test_edge_label_line_collision_decisions
+        ; Alcotest.test_case "another kind names itself" `Quick
             test_a_diagram_of_another_kind_names_itself
         ; Alcotest.test_case "an unreadable line names its line" `Quick
             test_a_line_this_grammar_cannot_read_names_its_line

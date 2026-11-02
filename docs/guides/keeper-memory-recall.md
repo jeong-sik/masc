@@ -23,7 +23,8 @@ facts and the turn's input to TypeSafe Jev and asks three things:
 
 The Keeper then receives up to two texts:
 
-- **A status line, whenever a judgment ran.** It names the turn and says what
+- **A status line when a judgment ran or its preparation failed.** It names
+  the turn and says what
   the judgment came to: some memories were chosen (their ids follow on the next
   line), none were found, none were needed, or the judgment failed and why. A
   failed judgment says that it does not mean there is no memory. A judgment
@@ -35,11 +36,16 @@ The Keeper then receives up to two texts:
   how it was recorded. A memory whose value is tied to the time it was
   recorded says so. A memory whose time could not be judged says that too.
 
-Some judged turns get no status line. A Keeper with no stored facts has
-nothing to judge. A turn whose facts cannot be read, whose request cannot be
-built, or in which the recall code raised, gets no line either: the host logs a
-warning and the turn goes on without the texts. The older recall notice reads
-the store by itself and says when its own read fails.
+For a Keeper admitted by the recall gate, the turn checks for a request clock
+before reading facts. Without a clock it produces `clock_unavailable`, even
+when the Keeper has no stored facts. With a clock and a successful fact read,
+no stored facts means no judgment or status line if this run has no judgment
+kept for the same turn. Otherwise it reuses the kept judgment. Failed fact reads, request
+construction and non-cancellation exceptions produce an unavailable status
+without a memory body or invented judgment coverage. The host also logs the
+cause and counts the preparation failure. The older recall notice reads the store separately
+and can report its own read failure. Cancellation propagates without a failure
+status or preparation-failure counter.
 
 The block header tells the Keeper that the block is stored data and not an
 instruction, that every value is as recorded and may no longer hold, and that
@@ -142,8 +148,11 @@ the Keepers added to or dropped from the list, or that nothing changes.
   gate of recall does not give today), and whether the lane has a key (`lane`:
   `armed`, `lane_disabled`, `no_armed_destination` or `another_gate_refused`).
   A turn asks the same function first, `Keeper_memory_recall_standing.of_keeper`.
-  `judged` says the gate admits the Keeper: a turn can still make no texts for
-  it, because it has no facts or there is no clock. The reading is not one
+  `judged` says the gate admits the Keeper, not that a judgment succeeded. The
+  turn checks the request clock before reading facts: a missing clock produces
+  an unavailable status without a body, even if there are no facts. With a
+  clock and a successful empty read, no texts are produced unless this run
+  reuses a judgment already kept for the same turn. The reading is not one
   snapshot, so a policy published during a request can show as a lane that
   disagrees with the Keepers; the next request is right. It reads the gate as
   loaded and the environment as it is, so a runtime.toml edited on disk and not
@@ -164,11 +173,17 @@ the Keepers added to or dropped from the list, or that nothing changes.
   - `masc_keeper_memory_recall_request_seconds{kind}`
   - `masc_keeper_memory_recall_input_bytes_total`: size of the saved request
     rows, not of the body on the wire
+  - `masc_keeper_memory_recall_preparation_failures_total{reason}`:
+    `facts_unreadable`, `request_not_built`, `preparation_raised` or
+    `clock_unavailable`. These count preparation failures, not judgments.
 - **Dashboard.** A turn record lists the two blocks as `recalled_memory_status`
   and `recalled_memory`, each with its size and digest. It does not hold their
   text.
-- **Log.** A judged turn whose texts could not be made leaves a `memory recall
-  has no status line` warning with the Keeper name and the cause.
+- **Log.** Preparation failures warn with the Keeper name and diagnostic cause:
+  `memory recall facts could not be read`, `memory recall request could not be
+  built`, `memory recall preparation raised`, or `memory recall has no clock
+  to limit the request`. The bounded metric reason above identifies the case;
+  diagnostic details remain in the warning.
 
 ## Switch it off
 

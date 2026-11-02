@@ -4976,6 +4976,16 @@ let test_partial_pending_snapshot_preserves_readable_entries () =
          "one pending entry read error is exposed"
          1
          (List.length read_errors);
+       let current =
+         `Assoc
+           (Dashboard_http_keeper.For_test.current_gate_fields_for_workspace
+              ~base_path ~keeper_name:"queue-partial-read" ~now_ts:(Unix.gettimeofday ()))
+       in
+       let open Yojson.Safe.Util in
+       Alcotest.check yojson "partial authority does not certify a current gate"
+         `Null (current |> member "current_gate");
+       Alcotest.(check string) "partial authority stays unavailable"
+         "unavailable" (current |> member "approval_queue_state" |> member "state" |> to_string);
        (match
           AQ.submit_pending ~origin:Keeper_approval_origin.unavailable
             ~keeper_name:"queue-partial-read"
@@ -6376,6 +6386,14 @@ let test_audit_append_failure_keeps_resolution_rule_and_grant_committed () =
        Keeper_approval.Audit.For_testing.reset_store ();
        ignore (install_exn ~base_path);
        let approval_id = submit ~base_path ~keeper_name ~input in
+       let gate_fields () =
+         `Assoc
+           (Dashboard_http_keeper.For_test.current_gate_fields_for_workspace
+              ~base_path ~keeper_name ~now_ts:(Unix.gettimeofday ()))
+       in
+       let open Yojson.Safe.Util in
+       Alcotest.(check string) "pending queue owns the displayed gate"
+         approval_id (gate_fields () |> member "current_gate" |> member "id" |> to_string);
        Keeper_approval.Audit.For_testing.set_append_jsonl
          (fun _path _json ->
             failwith "deterministic approval audit append failure");
@@ -6416,6 +6434,22 @@ let test_audit_append_failure_keeps_resolution_rule_and_grant_committed () =
          (match AQ.list_pending_entries_for_workspace ~base_path with
           | Ok entries -> List.length entries
           | Error error -> Alcotest.fail (Masc.Keeper_approval_queue_result.storage_error_to_string error));
+       let rows =
+         Keeper_approval.Audit.read_recent ~base_path ~keeper_name ~n:128 ()
+         |> function
+         | Ok rows -> rows
+         | Error error -> Alcotest.fail (Keeper_approval.Audit.read_error_to_string error)
+       in
+       Alcotest.(check bool) "historical pending audit remains after append failure"
+         true
+         (List.exists (fun row ->
+              (row |> member "id") = `String approval_id
+              && (row |> member "event") = `String "pending") rows);
+       let current = gate_fields () in
+       Alcotest.check yojson "historical audit cannot reopen the displayed gate"
+         `Null (current |> member "current_gate");
+       Alcotest.(check string) "confirmed empty queue is ready"
+         "ready" (current |> member "approval_queue_state" |> member "state" |> to_string);
        let durable_resolution =
          durable_resolution_opt ~base_path ~keeper_name ~approval_id
          |> require_some "approved resolution was not delivered"
@@ -7137,10 +7171,86 @@ let test_incomplete_tail_predicate_matches_the_recovered_errors () =
          (List.length (List.filter (fun (_, error) -> expected error) bare)))
 ;;
 
+let test_approval_waiting_invalidation_follows_committed_state () =
+  let module Waiting = Masc.Keeper_waiting_inventory_broadcast in
+  let module Sse = Masc.Sse in
+  let base_path = temp_dir () in
+  let other_path = temp_dir () in
+  let keeper_name = "waiting-approval" in
+  let authority = Sse.runtime_authority_exn ~base_path in
+  let other_authority = Sse.runtime_authority_exn ~base_path:other_path in
+  let events = ref [] and other_events = ref [] and health_counts = ref [] in
+  let subscriber = "approval-waiting-observer" in
+  let other_subscriber = "approval-waiting-other" in
+  let collect sink (event : Sse.external_event) =
+    let open Yojson.Safe.Util in
+    let payload = event.ext_payload in
+    let kind = member "queue_kind" payload in
+    if member "type" payload = `String "keeper_waiting_inventory_changed"
+       && member "keeper_name" payload = `String keeper_name
+       && (kind = `String "approval_count" || kind = `String "approval_detail")
+    then sink := kind :: !sink in
+  AQ.For_testing.reset_runtime_state ();
+  Fun.protect
+    ~finally:(fun () ->
+      Waiting.install_health_change_observer (fun ~base_path:_ -> ());
+      Sse.unsubscribe_external subscriber;
+      Sse.unsubscribe_external other_subscriber;
+      Sse.unsubscribe_external "approval-waiting-cancel";
+      AQ.For_testing.reset_runtime_state ();
+      Keeper_approval.Audit.For_testing.reset_store ();
+      cleanup_dir base_path;
+      cleanup_dir other_path)
+    (fun () ->
+      ignore (install_exn ~base_path);
+      Waiting.install_health_change_observer (fun ~base_path ->
+        let entries = match AQ.list_pending_entries_for_workspace ~base_path with
+          | Ok entries -> entries
+          | Error error -> Alcotest.fail
+              (Masc.Keeper_approval_queue_result.storage_error_to_string error) in
+        health_counts := List.length entries :: !health_counts);
+      Sse.subscribe_external ~runtime_authority:authority ~id:subscriber
+        ~callback:(collect events) ();
+      Sse.subscribe_external ~runtime_authority:other_authority ~id:other_subscriber
+        ~callback:(collect other_events) ();
+      let input = `Assoc [ "target", `String "observe" ] in
+      let approval_id = submit ~base_path ~keeper_name ~input in
+      let duplicate = submit ~base_path ~keeper_name ~input in
+      Alcotest.(check string) "identical submission is deduplicated" approval_id duplicate;
+      (match AQ.mark_summary_pending ~id:approval_id with
+       | Ok true -> ()
+       | Ok false -> Alcotest.fail "summary did not change"
+       | Error _ -> Alcotest.fail "summary transition failed");
+      reject_and_cleanup ~base_path approval_id;
+      Alcotest.(check (list int)) "health sees committed pending counts" [ 1; 0 ]
+        (List.rev !health_counts);
+      Alcotest.(check (list string)) "only committed approval changes notify the TUI"
+        [ "approval_count"; "approval_detail"; "approval_count" ]
+        (List.rev !events |> List.map Yojson.Safe.Util.to_string);
+      Alcotest.(check int) "another workspace receives no approval invalidation" 0
+        (List.length !other_events);
+      Waiting.install_health_change_observer (fun ~base_path:_ ->
+        raise (Eio.Cancel.Cancelled Exit));
+      Sse.subscribe_external ~runtime_authority:authority ~id:"approval-waiting-cancel"
+        ~callback:(fun (event : Sse.external_event) ->
+          if Yojson.Safe.Util.member "type" event.ext_payload
+             = `String "keeper_waiting_inventory_changed" then (
+            Sse.unsubscribe_external "approval-waiting-cancel";
+            raise (Eio.Cancel.Cancelled Exit))) ();
+      let next_id = submit ~base_path ~keeper_name
+        ~input:(`Assoc [ "target", `String "callback-cancellation" ]) in
+      Alcotest.(check bool) "callback cancellation does not hide committed approval" true
+        (Option.is_some (AQ.For_testing.get_pending_entry_unchecked ~id:next_id)))
+;;
+
+
 let () =
   Alcotest.run
     "Keeper_approval_queue"
-    [ ( "call summary"
+    [ ( "waiting inventory"
+      , [ Alcotest.test_case "approval changes follow committed state" `Quick
+            test_approval_waiting_invalidation_follows_committed_state ] )
+    ; ( "call summary"
       , [ Alcotest.test_case
             "stated once on submission and copied onto every later row"
             `Quick

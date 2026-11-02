@@ -1,6 +1,9 @@
 open Json_util
 open Tui_decode_fields
 
+module String_map = Map.Make (String)
+module String_set = Set.Make (String)
+
 type agent = {
   name : string;
   status : string;
@@ -411,6 +414,7 @@ type goal_source_failure =
 type keeper_tool_approval = {
   kta_keeper : string;
   kta_tool_call_id : string;
+  kta_approval_id : string;
   kta_tool : string;
   kta_args : string;
   kta_question : string;
@@ -533,21 +537,22 @@ let active_tasks_of_domain ?goals_for_task tasks =
   (* Goalless rows are not a cluster of each other: each carries its own
      priority, so one urgent standalone task does not hoist its unrelated
      goalless neighbours over a goal's rows. *)
-  let hottest : (string, int) Hashtbl.t = Hashtbl.create 16 in
-  List.iter
-    (fun (task : task) ->
-      match cluster_of task with
-      | None -> ()
-      | Some cluster -> (
-          match Hashtbl.find_opt hottest cluster with
-          | Some best when best <= task.priority -> ()
-          | Some _ | None -> Hashtbl.replace hottest cluster task.priority))
-    active;
+  let hottest =
+    List.fold_left
+      (fun acc (task : task) ->
+        match cluster_of task with
+        | None -> acc
+        | Some cluster -> (
+            match String_map.find_opt cluster acc with
+            | Some best when best <= task.priority -> acc
+            | Some _ | None -> String_map.add cluster task.priority acc))
+      String_map.empty active
+  in
   let cluster_heat task =
     match cluster_of task with
     | None -> task.priority
     | Some cluster -> (
-        match Hashtbl.find_opt hottest cluster with
+        match String_map.find_opt cluster hottest with
         | Some heat -> heat
         | None -> task.priority)
   in
@@ -1951,20 +1956,17 @@ let decode_runtime_resolved_lane json =
     | _ -> Ok ()
   in
   let* () =
-    let seen = Hashtbl.create (List.length rrl_runtime_ids) in
-    let rec loop = function
+    let rec loop seen = function
       | [] -> Ok ()
       | runtime_id :: rest ->
-          if Hashtbl.mem seen runtime_id then
+          if String_set.mem runtime_id seen then
             Error
               (Printf.sprintf "runtime lane %S repeats candidate %S" rrl_id
                  runtime_id)
-          else begin
-            Hashtbl.add seen runtime_id ();
-            loop rest
-          end
+          else
+            loop (String_set.add runtime_id seen) rest
     in
-    loop rrl_runtime_ids
+    loop String_set.empty rrl_runtime_ids
   in
   Ok { rrl_id; rrl_runtime_ids; rrl_declared }
 
@@ -2003,19 +2005,16 @@ let decode_runtime_resolved_snapshot_using ~read_usage json =
       (decode_runtime_option ~usage:rrs_usage ~default_id:rrs_default_runtime_id)
       runtime_items
   in
-  let runtime_by_id = Hashtbl.create (max 1 (List.length rrs_runtimes)) in
-  let* () =
-    let rec loop = function
-      | [] -> Ok ()
+  let* runtime_by_id =
+    let rec loop acc = function
+      | [] -> Ok acc
       | runtime :: rest ->
-          if Hashtbl.mem runtime_by_id runtime.ro_id then
+          if String_map.mem runtime.ro_id acc then
             Error (Printf.sprintf "duplicate resolved runtime id %S" runtime.ro_id)
-          else begin
-            Hashtbl.add runtime_by_id runtime.ro_id runtime;
-            loop rest
-          end
+          else
+            loop (String_map.add runtime.ro_id runtime acc) rest
     in
-    loop rrs_runtimes
+    loop String_map.empty rrs_runtimes
   in
   let* default_runtime =
     match default_json with
@@ -2030,7 +2029,7 @@ let decode_runtime_resolved_snapshot_using ~read_usage json =
     match default_runtime with
     | None -> Ok ()
     | Some default ->
-        (match Hashtbl.find_opt runtime_by_id default.ro_id with
+        (match String_map.find_opt default.ro_id runtime_by_id with
          | None -> Error "default_runtime is absent from the resolved runtime list"
          | Some listed
            when String.equal default.ro_provider listed.ro_provider
@@ -2053,33 +2052,31 @@ let decode_runtime_resolved_snapshot_using ~read_usage json =
   let* rrs_lanes =
     decode_list "lanes" decode_runtime_resolved_lane lane_items
   in
-  let lane_by_id = Hashtbl.create (max 1 (List.length rrs_lanes)) in
-  let* () =
-    let rec loop = function
-      | [] -> Ok ()
+  let* lane_by_id =
+    let rec loop acc = function
+      | [] -> Ok acc
       | lane :: rest ->
-          if Hashtbl.mem lane_by_id lane.rrl_id then
+          if String_map.mem lane.rrl_id acc then
             Error (Printf.sprintf "duplicate runtime lane id %S" lane.rrl_id)
           else begin
-            Hashtbl.add lane_by_id lane.rrl_id lane;
-            match List.find_opt (fun id -> not (Hashtbl.mem runtime_by_id id)) lane.rrl_runtime_ids with
+            match List.find_opt (fun id -> not (String_map.mem id runtime_by_id)) lane.rrl_runtime_ids with
             | Some runtime_id ->
                 Error
                   (Printf.sprintf "runtime lane %S names absent runtime %S"
                      lane.rrl_id runtime_id)
-            | None -> loop rest
+            | None -> loop (String_map.add lane.rrl_id lane acc) rest
           end
     in
-    loop rrs_lanes
+    loop String_map.empty rrs_lanes
   in
   let* () =
     match rrs_default_route, rrs_default_runtime_id with
     | None, None -> Ok ()
     | Some route, Some runtime_id ->
-        (match Hashtbl.find_opt lane_by_id route with
+        (match String_map.find_opt route lane_by_id with
          | Some lane when List.nth_opt lane.rrl_runtime_ids 0 = Some runtime_id -> Ok ()
          | Some _ -> Error "default_route disagrees with its lane's entry runtime"
-         | None when String.equal route runtime_id && Hashtbl.mem runtime_by_id route -> Ok ()
+         | None when String.equal route runtime_id && String_map.mem route runtime_by_id -> Ok ()
          | None -> Error "default_route is absent from the resolved route list")
     | Some _, None | None, Some _ ->
         Error "default_route and default_runtime must be present together"
@@ -2113,20 +2110,22 @@ let join_runtime_surface ~probe ~probe_error ~resolved =
     | Some snapshot -> snapshot.Tui_decode_runtime_probe.rps_providers
     | None -> []
   in
-  let probe_by_runtime = Hashtbl.create (max 1 (List.length probe_rows)) in
-  List.iter
-    (fun row -> Hashtbl.add probe_by_runtime row.Tui_decode_runtime_probe.rpp_runtime_id row)
-    probe_rows;
-  let runtime_by_id = Hashtbl.create (max 1 (List.length resolved.rrs_runtimes)) in
-  List.iter
-    (fun runtime -> Hashtbl.add runtime_by_id runtime.ro_id runtime)
-    resolved.rrs_runtimes;
+  let probe_by_runtime =
+    List.fold_left
+      (fun acc row -> String_map.add row.Tui_decode_runtime_probe.rpp_runtime_id row acc)
+      String_map.empty probe_rows
+  in
+  let runtime_by_id =
+    List.fold_left
+      (fun acc runtime -> String_map.add runtime.ro_id runtime acc)
+      String_map.empty resolved.rrs_runtimes
+  in
   let rows_of_lane lane =
     let candidate_count = List.length lane.rrl_runtime_ids in
     let rec loop position acc = function
       | [] -> Ok (List.rev acc)
       | runtime_id :: rest ->
-          (match Hashtbl.find_opt runtime_by_id runtime_id with
+          (match String_map.find_opt runtime_id runtime_by_id with
            | None ->
                Error
                  (Printf.sprintf "runtime lane %S names absent runtime %S"
@@ -2138,7 +2137,7 @@ let join_runtime_surface ~probe ~probe_error ~resolved =
                   ; rcr_position = position
                   ; rcr_candidate_count = candidate_count
                   ; rcr_runtime = runtime
-                  ; rcr_probe = Hashtbl.find_opt probe_by_runtime runtime_id
+                  ; rcr_probe = String_map.find_opt runtime_id probe_by_runtime
                   }
                   :: acc)
                  rest)
@@ -2154,14 +2153,15 @@ let join_runtime_surface ~probe ~probe_error ~resolved =
       (Ok []) resolved.rrs_lanes
   in
   let rss_candidates = List.rev reversed_candidates in
-  let candidate_ids = Hashtbl.create (max 1 (List.length rss_candidates)) in
-  List.iter
-    (fun row -> Hashtbl.replace candidate_ids row.rcr_runtime.ro_id ())
-    rss_candidates;
+  let candidate_ids =
+    List.fold_left
+      (fun acc row -> String_set.add row.rcr_runtime.ro_id acc)
+      String_set.empty rss_candidates
+  in
   let rss_unassigned_probe_count =
     List.fold_left
       (fun count row ->
-         if Hashtbl.mem candidate_ids row.Tui_decode_runtime_probe.rpp_runtime_id then count else count + 1)
+         if String_set.mem row.Tui_decode_runtime_probe.rpp_runtime_id candidate_ids then count else count + 1)
       0 probe_rows
   in
   Ok
@@ -3742,6 +3742,12 @@ let decode_keeper_secret_projections json =
 let decode_keeper_tool_approval json =
   let* kta_keeper = required_string_field json "keeper" in
   let* kta_tool_call_id = required_string_field json "tool_call_id" in
+  let* kta_approval_id = required_string_field json "approval_id" in
+  let* () =
+    if String.trim kta_approval_id = "" then
+      Error "approval_id must not be empty"
+    else Ok ()
+  in
   let* kta_tool = required_string_field json "tool" in
   let* kta_args = required_string_field json "args" in
   let* kta_question = required_string_field json "question" in
@@ -3751,6 +3757,7 @@ let decode_keeper_tool_approval json =
   Ok
     { kta_keeper
     ; kta_tool_call_id
+    ; kta_approval_id
     ; kta_tool
     ; kta_args
     ; kta_question
@@ -3789,12 +3796,10 @@ let decode_tool_approval_mode_overrides json =
    says so, because sitting that possibly-truncated wall under "input"
    promised a whole it never was. *)
 type gate_input_rows =
-  | Rows of (string * string) list
-      (** One field per key of the stored input object: the key is the label,
-          the value is what the producer stored -- strings whole, every other
-          value as compact JSON. The order is the producer's, because a
-          producer that leads with the field the operator reads is making a
-          statement the serializer must not rearrange. *)
+  | Rows of (string * Yojson.Safe.t) list
+      (** The decoded input object's fields in producer order. Keeping each
+          value typed distinguishes a string from another JSON value with
+          the same text, and also preserves duplicate keys. *)
   | Flattened of string option
       (** The server's flattened preview, and the fact that this detail
           cannot draw the input per key. [None] means the server recorded no
@@ -3816,10 +3821,9 @@ type gate_pending = {
           show. A [tool_execute] row leads with the command it would run;
           every other operation keeps the server's flattened preview. *)
   gp_input_rows : gate_input_rows;
-      (** The detail pane's copy of the input, uncut. [Rows] is one field per
-          key of the stored input object -- strings whole, other values as
-          compact JSON. [Flattened] says this input never was an object, so
-          the pane draws the server preview under a label that names it. *)
+      (** The detail pane's decoded input object, without the preview limit.
+          [Flattened] says the input was not an object, so the pane draws the
+          server preview under a label that names it. *)
   gp_execution_cwd : string option;
   gp_execution_sandbox : string option;
   gp_waiting_s : float option;
@@ -3922,12 +3926,12 @@ let json_string_list = function
     (* All or nothing. A non-string element that quietly vanished would show
        a command missing one of its words, which is worse than showing the
        envelope. *)
-    List.fold_right
-      (fun item acc ->
-        match item, acc with
-        | `String value, Some rest -> Some (value :: rest)
-        | _, _ -> None)
-      items (Some [])
+    let rec loop acc = function
+      | [] -> Some (List.rev acc)
+      | `String value :: rest -> loop (value :: acc) rest
+      | _ :: _ -> None
+    in
+    loop [] items
   | _ -> None
 
 let shell_word word =
@@ -3989,16 +3993,7 @@ let gate_execution_site ~operation envelope =
 let gate_input_rows ~operation ~server_preview envelope =
   let object_keys json =
     match json with
-    | `Assoc args ->
-      let field (key, value) =
-        let text =
-          match value with
-          | `String text -> text
-          | other -> Yojson.Safe.to_string other
-        in
-        (key, text)
-      in
-      Some (Rows (List.map field args))
+    | `Assoc args -> Some (Rows args)
     | _ -> None
   in
   let input_rows =

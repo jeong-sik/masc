@@ -9,6 +9,9 @@ type queue_selection
 (** The selected Queue row and its workspace, read and action authority at
     the time the frame was drawn. *)
 
+type notice_fragment
+(** One ordered part of a notice at a particular terminal width. *)
+
 (** Each constructor names a place a key already reaches. [Press_surface] is
     a Tab-ring entry or a title-strip entry that is a surface of its own;
     [Press_ring_edge] is the count of ring entries hidden past an edge of a
@@ -37,6 +40,8 @@ type press_target =
       (** Evidence of the complete rejection notice, not a clickable action. *)
   | Press_quit_confirmation of Masc_tui_action_notice.quit_confirmation
       (** Evidence of the complete exit confirmation, not a clickable action. *)
+  | Press_notice_fragment of notice_fragment
+      (** Evidence of one part of a wrapped notice. *)
 
 val press_changes_the_surface : press_target -> bool
 (** Whether a press changes what the surface shows. An overlay keeps its own
@@ -50,6 +55,14 @@ val press_marks : press_target Masc_tui_hit.registry
 val pressable : press_target -> string -> string
 (** [pressable target text] is [text] marked so that a press on it resolves
     to [target] in the frame it is drawn in. *)
+
+val quit_fragments :
+  cols:int -> Masc_tui_action_notice.quit_confirmation -> (press_target * string) list
+(** Split the complete confirmation into ordered, individually marked rows. *)
+
+val rejection_fragments :
+  cols:int -> Masc_tui_action_notice.rejection -> (press_target * string) list
+(** Split the complete input rejection into ordered, individually marked rows. *)
 
 val queue_selection_for_item :
   Masc_tui_types.state -> Masc_tui_types.queue_panel ->

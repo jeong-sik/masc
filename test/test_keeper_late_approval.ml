@@ -107,12 +107,17 @@ let rec drain events acc =
   | Some event -> drain events (event :: acc)
 
 let event_labels events =
+  let requested = Hashtbl.create 4 in
   drain events []
   |> List.filter_map (function
-       | Events.Tool_approval_requested { tool_call_id; question; because; _ } ->
+       | Events.Tool_approval_requested { tool_call_id; approval_id; question; because; _ } ->
+           check bool "the gate publishes an approval identity" true (approval_id <> "");
+           Hashtbl.replace requested tool_call_id approval_id;
            Some
              (Printf.sprintf "requested(%s,%s,%s)" tool_call_id question because)
-       | Events.Tool_approval_settled { tool_call_id; outcome } ->
+       | Events.Tool_approval_settled { tool_call_id; approval_id; outcome } ->
+           check (option string) "the answer names the published approval"
+             (Some approval_id) (Hashtbl.find_opt requested tool_call_id);
            Some (Printf.sprintf "settled(%s,%s)" tool_call_id outcome)
        | _ -> None)
 
@@ -120,44 +125,62 @@ let edit_input file = `Assoc [ "file_path", `String file ]
 
 (* A gated call nobody answers: the wait times out, the turn is over, and the
    ask's description is what a late answer will be attributed to. *)
-let time_out gate ~tool_call_id ~tool_name ~input =
+let time_out gate ~events ~tool_call_id ~tool_name ~input =
   let answer = gate.Gate.tool_approval (request ~tool_call_id ~tool_name ~input) in
-  check approval "the ask times out" Agent_core.Hooks.Timed_out answer
+  check approval "the ask times out" Agent_core.Hooks.Timed_out answer;
+  let published = drain events [] in
+  let requested = List.filter_map (function
+    | Events.Tool_approval_requested { tool_call_id = id; approval_id; _ }
+      when id = tool_call_id -> Some approval_id
+    | _ -> None) published in
+  match requested with
+  | [approval_id] ->
+      check bool "the timed-out gate published its identity" true (approval_id <> "");
+      let settled = List.filter_map (function
+        | Events.Tool_approval_settled { tool_call_id = id; approval_id; outcome }
+          when id = tool_call_id -> Some (approval_id, outcome)
+        | _ -> None) published in
+      check (list (pair string string)) "timeout closes the same published approval"
+        [approval_id, "timed_out"] settled;
+      approval_id
+  | _ -> fail "expected one published approval for the actual gate timeout"
 
 (* ── remembering a late answer ────────────────────────────────────── *)
 
 let test_an_answer_after_the_timeout_is_remembered () =
-  with_gate (fun ~clock:_ ~late ~events:_ ~gate ->
-      time_out gate ~tool_call_id:"call-1" ~tool_name:"Edit"
-        ~input:(edit_input "lib/a.ml");
+  with_gate (fun ~clock:_ ~late ~events ~gate ->
+      let approval_id = time_out gate ~events ~tool_call_id:"call-1" ~tool_name:"Edit"
+        ~input:(edit_input "lib/a.ml") in
       (* What handle_keeper_tool_approval does when settle says the wait is
          gone. *)
       check remember_outcome
         "the late answer descends from an ask that really timed out here"
         (Late.Remembered { tool_name = "Edit" })
-        (Late.remember_late late ~base_path:workspace ~keeper_name:keeper
+        (Late.remember_late late ~approval_id ~base_path:workspace ~keeper_name:keeper
            ~tool_call_id:"call-1" ~actor:"mode-operator"
            Registry.Approve ()))
 
 let test_an_answer_that_names_no_ask_is_dropped () =
   with_gate (fun ~clock:_ ~late ~events:_ ~gate:_ ->
+      let approval_id = Random_id.uuid_v7 () in
       check remember_outcome
         "an answer that cannot be attributed to an ask is not kept"
         Late.No_matching_ask
-        (Late.remember_late late ~base_path:workspace ~keeper_name:keeper
+        (Late.remember_late late ~approval_id ~base_path:workspace ~keeper_name:keeper
            ~tool_call_id:"call-never-held" ~actor:"mode-operator"
            Registry.Approve ()))
 
 let test_an_ask_that_timed_out_long_ago_cannot_be_answered () =
   with_gate (fun ~clock:_ ~late ~events:_ ~gate:_ ->
-      Late.note_timed_out late ~now:1000.0 ~base_path:workspace
+      let approval_id = Random_id.uuid_v7 () in
+      Late.note_timed_out late ~approval_id ~now:1000.0 ~base_path:workspace
         ~keeper_name:keeper ~tool_call_id:"call-old" ~tool_name:"Edit"
         ~args:(edit_input "lib/a.ml") ();
       check remember_outcome
         "an ask older than the operator's moment is reaped before it can be \
          answered"
         Late.No_matching_ask
-        (Late.remember_late late ~now:(1000.0 +. Late.ttl_sec +. 1.0)
+        (Late.remember_late late ~approval_id ~now:(1000.0 +. Late.ttl_sec +. 1.0)
            ~base_path:workspace ~keeper_name:keeper ~tool_call_id:"call-old"
            ~actor:"mode-operator" Registry.Approve ()))
 
@@ -165,10 +188,10 @@ let test_an_ask_that_timed_out_long_ago_cannot_be_answered () =
 
 let test_the_identical_retried_call_is_settled_once () =
   with_gate (fun ~clock:_ ~late ~events ~gate ->
-      time_out gate ~tool_call_id:"call-1" ~tool_name:"Edit"
-        ~input:(edit_input "lib/a.ml");
+      let approval_id = time_out gate ~events ~tool_call_id:"call-1" ~tool_name:"Edit"
+        ~input:(edit_input "lib/a.ml") in
       ignore
-        (Late.remember_late late ~base_path:workspace ~keeper_name:keeper
+        (Late.remember_late late ~approval_id ~base_path:workspace ~keeper_name:keeper
            ~tool_call_id:"call-1" ~actor:"mode-operator"
            Registry.Approve ());
       ignore (drain events []);
@@ -195,10 +218,10 @@ let test_the_identical_retried_call_is_settled_once () =
 
 let test_a_remembered_denial_refuses_the_identical_retry () =
   with_gate (fun ~clock:_ ~late ~events ~gate ->
-      time_out gate ~tool_call_id:"call-1" ~tool_name:"Edit"
-        ~input:(edit_input "lib/a.ml");
+      let approval_id = time_out gate ~events ~tool_call_id:"call-1" ~tool_name:"Edit"
+        ~input:(edit_input "lib/a.ml") in
       ignore
-        (Late.remember_late late ~base_path:workspace ~keeper_name:keeper
+        (Late.remember_late late ~approval_id ~base_path:workspace ~keeper_name:keeper
            ~tool_call_id:"call-1" ~actor:"mode-operator"
            Registry.Deny ());
       ignore (drain events []);
@@ -215,11 +238,11 @@ let test_a_remembered_denial_refuses_the_identical_retry () =
         (event_labels events))
 
 let test_a_call_with_different_arguments_is_asked_about () =
-  with_gate (fun ~clock:_ ~late ~events:_ ~gate ->
-      time_out gate ~tool_call_id:"call-1" ~tool_name:"Edit"
-        ~input:(edit_input "lib/a.ml");
+  with_gate (fun ~clock:_ ~late ~events ~gate ->
+      let approval_id = time_out gate ~events ~tool_call_id:"call-1" ~tool_name:"Edit"
+        ~input:(edit_input "lib/a.ml") in
       ignore
-        (Late.remember_late late ~base_path:workspace ~keeper_name:keeper
+        (Late.remember_late late ~approval_id ~base_path:workspace ~keeper_name:keeper
            ~tool_call_id:"call-1" ~actor:"mode-operator"
            Registry.Approve ());
       let other =
@@ -234,13 +257,13 @@ let test_a_call_with_different_arguments_is_asked_about () =
 let test_the_same_arguments_in_another_order_are_the_same_call () =
   (* The retried call's arguments are model-regenerated JSON, so identity
      rides the canonical fingerprint rather than byte equality. *)
-  with_gate (fun ~clock:_ ~late ~events:_ ~gate ->
-      time_out gate ~tool_call_id:"call-1" ~tool_name:"Edit"
+  with_gate (fun ~clock:_ ~late ~events ~gate ->
+      let approval_id = time_out gate ~events ~tool_call_id:"call-1" ~tool_name:"Edit"
         ~input:
           (`Assoc
-             [ "file_path", `String "lib/a.ml"; "old_string", `String "x" ]);
+             [ "file_path", `String "lib/a.ml"; "old_string", `String "x" ]) in
       ignore
-        (Late.remember_late late ~base_path:workspace ~keeper_name:keeper
+        (Late.remember_late late ~approval_id ~base_path:workspace ~keeper_name:keeper
            ~tool_call_id:"call-1" ~actor:"mode-operator"
            Registry.Approve ());
       let retry =
@@ -254,11 +277,11 @@ let test_the_same_arguments_in_another_order_are_the_same_call () =
         Agent_core.Hooks.Approved retry)
 
 let test_a_remembered_answer_does_not_cross_keepers () =
-  with_gate (fun ~clock ~late ~events:_ ~gate ->
-      time_out gate ~tool_call_id:"call-1" ~tool_name:"Edit"
-        ~input:(edit_input "lib/a.ml");
+  with_gate (fun ~clock ~late ~events ~gate ->
+      let approval_id = time_out gate ~events ~tool_call_id:"call-1" ~tool_name:"Edit"
+        ~input:(edit_input "lib/a.ml") in
       ignore
-        (Late.remember_late late ~base_path:workspace ~keeper_name:keeper
+        (Late.remember_late late ~approval_id ~base_path:workspace ~keeper_name:keeper
            ~tool_call_id:"call-1" ~actor:"mode-operator"
            Registry.Approve ());
       (* Same store, another keeper's gate: the identity carries the keeper
@@ -288,11 +311,11 @@ let test_a_remembered_answer_does_not_cross_keepers () =
 let test_a_fresh_remembered_answer_applies () =
   (* The settle-once test above is this with the store's own clock; here the
      remembered entry's age is pinned explicitly just under the bound. *)
-  with_gate (fun ~clock ~late ~events:_ ~gate ->
-      time_out gate ~tool_call_id:"call-1" ~tool_name:"Edit"
-        ~input:(edit_input "lib/a.ml");
+  with_gate (fun ~clock ~late ~events ~gate ->
+      let approval_id = time_out gate ~events ~tool_call_id:"call-1" ~tool_name:"Edit"
+        ~input:(edit_input "lib/a.ml") in
       ignore
-        (Late.remember_late late
+        (Late.remember_late late ~approval_id
            ~now:(Eio.Time.now clock -. 1.0)
            ~base_path:workspace ~keeper_name:keeper ~tool_call_id:"call-1"
            ~actor:"mode-operator" Registry.Approve ());
@@ -306,13 +329,13 @@ let test_a_fresh_remembered_answer_applies () =
 
 let test_a_remembered_answer_past_its_moment_is_asked_about_again () =
   with_gate (fun ~clock ~late ~events ~gate ->
-      time_out gate ~tool_call_id:"call-1" ~tool_name:"Edit"
-        ~input:(edit_input "lib/a.ml");
+      let approval_id = time_out gate ~events ~tool_call_id:"call-1" ~tool_name:"Edit"
+        ~input:(edit_input "lib/a.ml") in
       (* The answer arrived, but longer ago than one operator moment spans:
          by the time the identical call returns it is a new occurrence, not
          the retry the operator answered. *)
       ignore
-        (Late.remember_late late
+        (Late.remember_late late ~approval_id
            ~now:(Eio.Time.now clock -. Late.ttl_sec -. 1.0)
            ~base_path:workspace ~keeper_name:keeper ~tool_call_id:"call-1"
            ~actor:"mode-operator" Registry.Approve ());
@@ -333,16 +356,17 @@ let test_a_remembered_answer_past_its_moment_is_asked_about_again () =
 
 let test_a_remembered_answer_survives_a_restart_and_settles_the_retry () =
   with_journal (fun ~clock:_ ~journal:_ ~make ~remove:_ ~base_path:_ ->
+      let approval_id = Random_id.uuid_v7 () in
       (* First life: the ask times out and the operator answers late; both
          rows are durable before the process "dies". *)
       let first = make () in
-      Late.note_timed_out first ~base_path:workspace ~keeper_name:keeper
+      Late.note_timed_out first ~approval_id ~base_path:workspace ~keeper_name:keeper
         ~tool_call_id:"call-1" ~tool_name:"Edit"
         ~args:(edit_input "lib/a.ml") ();
       check remember_outcome
         "the late answer stands only when its journal row does"
         (Late.Remembered { tool_name = "Edit" })
-        (Late.remember_late first ~base_path:workspace ~keeper_name:keeper
+        (Late.remember_late first ~approval_id ~base_path:workspace ~keeper_name:keeper
            ~tool_call_id:"call-1" ~actor:"mode-operator"
            Registry.Approve ());
       (* Restart: a fresh store, nothing in memory, bound from the journal
@@ -370,14 +394,15 @@ let test_a_remembered_answer_survives_a_restart_and_settles_the_retry () =
 
 let test_a_workspace_cannot_consume_another_workspaces_answer () =
   with_journal (fun ~clock:_ ~journal:_ ~make ~remove:_ ~base_path:_ ->
+      let approval_id = Random_id.uuid_v7 () in
       let first = make () in
-      Late.note_timed_out first ~base_path:"/ws/a" ~keeper_name:keeper
+      Late.note_timed_out first ~approval_id ~base_path:"/ws/a" ~keeper_name:keeper
         ~tool_call_id:"call-1" ~tool_name:"Edit"
         ~args:(edit_input "lib/a.ml") ();
       check remember_outcome
         "the answer is attributed to the workspace that asked"
         (Late.Remembered { tool_name = "Edit" })
-        (Late.remember_late first ~base_path:"/ws/a" ~keeper_name:keeper
+        (Late.remember_late first ~approval_id ~base_path:"/ws/a" ~keeper_name:keeper
            ~tool_call_id:"call-1" ~actor:"mode-operator-a"
            Registry.Approve ());
       (* Same journal root, another workspace: the identity carries the
@@ -397,12 +422,13 @@ let test_a_workspace_cannot_consume_another_workspaces_answer () =
 
 let test_a_consumed_answer_is_never_reoffered_after_a_restart () =
   with_journal (fun ~clock:_ ~journal:_ ~make ~remove:_ ~base_path:_ ->
+      let approval_id = Random_id.uuid_v7 () in
       let first = make () in
-      Late.note_timed_out first ~base_path:workspace ~keeper_name:keeper
+      Late.note_timed_out first ~approval_id ~base_path:workspace ~keeper_name:keeper
         ~tool_call_id:"call-1" ~tool_name:"Edit"
         ~args:(edit_input "lib/a.ml") ();
       ignore
-        (Late.remember_late first ~base_path:workspace ~keeper_name:keeper
+        (Late.remember_late first ~approval_id ~base_path:workspace ~keeper_name:keeper
            ~tool_call_id:"call-1" ~actor:"mode-operator"
            Registry.Approve ());
       (* The retry consumes it in the first life, deliver row included. *)
@@ -426,12 +452,13 @@ let test_a_consumed_answer_is_never_reoffered_after_a_restart () =
 
 let test_a_consume_without_deliver_reads_as_uncertain () =
   with_journal (fun ~clock:_ ~journal ~make ~remove ~base_path:_ ->
+      let approval_id = Random_id.uuid_v7 () in
       let first = make () in
-      Late.note_timed_out first ~base_path:workspace ~keeper_name:keeper
+      Late.note_timed_out first ~approval_id ~base_path:workspace ~keeper_name:keeper
         ~tool_call_id:"call-1" ~tool_name:"Edit"
         ~args:(edit_input "lib/a.ml") ();
       ignore
-        (Late.remember_late first ~base_path:workspace ~keeper_name:keeper
+        (Late.remember_late first ~approval_id ~base_path:workspace ~keeper_name:keeper
            ~tool_call_id:"call-1" ~actor:"mode-operator"
            Registry.Approve ());
       check bool "the first life's retry is settled"
@@ -463,6 +490,8 @@ let test_a_consume_without_deliver_reads_as_uncertain () =
         ^ "\n");
       close_out oc;
       let second = make () in
+      check bool "consume rows need no approval identity" true
+        (Late.journal_error second = None);
       check bool
         "the consume whose deliver never landed is the uncertain count"
         (Late.journal_uncertain second = 1)
@@ -503,9 +532,10 @@ let test_later_delivery_preserves_earlier_attempt () =
     let args = edit_input "lib/a.ml" in
     let now = Unix.gettimeofday () -. Late.ttl_sec -. 100. in
     let consume call_id =
-      Late.note_timed_out store ~now ~base_path:workspace ~keeper_name:keeper
+      let approval_id = Random_id.uuid_v7 () in
+      Late.note_timed_out store ~approval_id ~now ~base_path:workspace ~keeper_name:keeper
         ~tool_call_id:call_id ~tool_name:"Edit" ~args ();
-      ignore (Late.remember_late store ~now ~base_path:workspace ~keeper_name:keeper
+      ignore (Late.remember_late store ~approval_id ~now ~base_path:workspace ~keeper_name:keeper
         ~tool_call_id:call_id ~actor:"operator" Registry.Approve ());
       check bool "actual consume still returns decision" true
         (Late.take store ~now ~base_path:workspace ~keeper_name:keeper ~tool_name:"Edit" ~args () = Some Registry.Approve) in
@@ -561,11 +591,12 @@ let test_later_delivery_preserves_earlier_attempt () =
 let test_malformed_consume_cannot_restore_approval () =
   List.iter (fun missing ->
     with_journal (fun ~clock:_ ~journal ~make ~remove:_ ~base_path:_ ->
+      let approval_id = Random_id.uuid_v7 () in
       let first = make () in
       let args = edit_input "lib/a.ml" in
-      Late.note_timed_out first ~base_path:workspace ~keeper_name:keeper
+      Late.note_timed_out first ~approval_id ~base_path:workspace ~keeper_name:keeper
         ~tool_call_id:"malformed" ~tool_name:"Edit" ~args ();
-      ignore (Late.remember_late first ~base_path:workspace ~keeper_name:keeper
+      ignore (Late.remember_late first ~approval_id ~base_path:workspace ~keeper_name:keeper
         ~tool_call_id:"malformed" ~actor:"operator" Registry.Approve ());
       let fields =
         [ "schema", `String "masc.late_approval.v2"; "op", `String "consume";
@@ -593,6 +624,7 @@ let test_pre_id_schema_rows_are_skipped_not_fatal () =
      cannot settle or fence anything: restore skips it, reports it, and the
      store keeps working. *)
   with_journal (fun ~clock:_ ~journal ~make ~remove:_ ~base_path:_ ->
+    let approval_id = Random_id.uuid_v7 () in
     Fs_compat.mkdir_p (Filename.dirname journal);
     Out_channel.with_open_bin journal (fun out ->
       output_string out "{\"op\":\"consume\",\"at\":0}\n");
@@ -600,10 +632,10 @@ let test_pre_id_schema_rows_are_skipped_not_fatal () =
     check bool "an old-schema row is not an explicit fault" true
       (Late.journal_error store = None);
     check int "the unreadable row is reported" 1 (Late.journal_skipped store);
-    Late.note_timed_out store ~base_path:workspace ~keeper_name:keeper
+    Late.note_timed_out store ~approval_id ~base_path:workspace ~keeper_name:keeper
       ~tool_call_id:"new" ~tool_name:"Edit" ~args:(edit_input "lib/a.ml") ();
     check bool "a new late answer still stands" true
-      (Late.remember_late store ~base_path:workspace ~keeper_name:keeper
+      (Late.remember_late store ~approval_id ~base_path:workspace ~keeper_name:keeper
         ~tool_call_id:"new" ~actor:"operator" Registry.Approve ()
        = Late.Remembered { tool_name = "Edit" });
     check bool "the old row names nothing ackable" true
@@ -614,12 +646,13 @@ let test_pre_id_schema_rows_are_skipped_not_fatal () =
 
 let test_one_foreign_row_among_valid_rows_does_not_fence_restore () =
   with_journal (fun ~clock:_ ~journal ~make ~remove:_ ~base_path:_ ->
+    let approval_id = Random_id.uuid_v7 () in
     let first = make () in
     let args = edit_input "lib/a.ml" in
-    Late.note_timed_out first ~base_path:workspace ~keeper_name:keeper
+    Late.note_timed_out first ~approval_id ~base_path:workspace ~keeper_name:keeper
       ~tool_call_id:"call-1" ~tool_name:"Edit" ~args ();
     ignore
-      (Late.remember_late first ~base_path:workspace ~keeper_name:keeper
+      (Late.remember_late first ~approval_id ~base_path:workspace ~keeper_name:keeper
         ~tool_call_id:"call-1" ~actor:"operator" Registry.Approve ());
     (* A future schema's row lands after the valid history, the way a
        downgrade or a stray write leaves it. *)
@@ -651,12 +684,13 @@ let test_one_foreign_row_among_valid_rows_does_not_fence_restore () =
 
 let test_unreadable_row_shapes_are_all_counted () =
   with_journal (fun ~clock:_ ~journal ~make ~remove:_ ~base_path:_ ->
+    let approval_id = Random_id.uuid_v7 () in
     let first = make () in
     let args = edit_input "lib/a.ml" in
-    Late.note_timed_out first ~base_path:workspace ~keeper_name:keeper
+    Late.note_timed_out first ~approval_id ~base_path:workspace ~keeper_name:keeper
       ~tool_call_id:"call-1" ~tool_name:"Edit" ~args ();
     ignore
-      (Late.remember_late first ~base_path:workspace ~keeper_name:keeper
+      (Late.remember_late first ~approval_id ~base_path:workspace ~keeper_name:keeper
         ~tool_call_id:"call-1" ~actor:"operator" Registry.Approve ());
     let oc = open_out_gen [Open_append] 0o644 journal in
     output_string oc "this is not json at all\n";
@@ -674,16 +708,17 @@ let test_unreadable_row_shapes_are_all_counted () =
 
 let test_unavailable_journal_exits_through_explicit_restore () =
   with_journal (fun ~clock:_ ~journal ~make ~remove ~base_path:dir ->
+    let approval_id = Random_id.uuid_v7 () in
     ignore remove;
     let store = make () in
-    Late.note_timed_out store ~base_path:workspace ~keeper_name:keeper
+    Late.note_timed_out store ~approval_id ~base_path:workspace ~keeper_name:keeper
       ~tool_call_id:"before" ~tool_name:"Edit" ~args:(edit_input "lib/a.ml") ();
     (* Fence the store the way an unconfirmed append failure leaves it:
        make the journal path unwritable-as-a-file (a directory sits where
        the file should be), so the next append gets no commit receipt. *)
     Unix.rename journal (journal ^ ".bak");
     Unix.mkdir journal 0o700;
-    Late.note_timed_out store ~base_path:workspace ~keeper_name:keeper
+    Late.note_timed_out store ~approval_id:(Random_id.uuid_v7 ()) ~base_path:workspace ~keeper_name:keeper
       ~tool_call_id:"during" ~tool_name:"Edit" ~args:(edit_input "lib/b.ml") ();
     check bool "an append without a commit receipt fences the store" true
       (match Late.journal_error store with
@@ -728,6 +763,198 @@ let test_corrupt_journal_survives_restart_until_operator_moves_it_aside () =
     check bool "the repaired store writes again" true
       (Result.is_ok (Late.uncertain_attempts fenced ~base_path:workspace)))
 
+let test_recycled_call_id_keeps_each_expired_approval_after_restart () =
+  with_journal (fun ~clock:_ ~journal ~make ~remove:_ ~base_path:_ ->
+    let approval_a = Random_id.uuid_v7 () in
+    let approval_b = Random_id.uuid_v7 () in
+    let args_a = edit_input "lib/a.ml" in
+    let args_b = edit_input "lib/b.ml" in
+    let first = make () in
+    Late.note_timed_out first ~base_path:workspace ~keeper_name:keeper
+      ~tool_call_id:"recycled" ~approval_id:approval_a ~tool_name:"Edit" ~args:args_a ();
+    Late.note_timed_out first ~base_path:workspace ~keeper_name:keeper
+      ~tool_call_id:"recycled" ~approval_id:approval_b ~tool_name:"Edit" ~args:args_b ();
+    let read_bytes () = In_channel.with_open_bin journal In_channel.input_all in
+    let second = make () in
+    check bool "both expired identities restore cleanly" true
+      (Late.journal_error second = None);
+    let before_unknown = read_bytes () in
+    List.iter (fun decision ->
+      check remember_outcome "an unknown identity cannot answer either ask" Late.No_matching_ask
+        (Late.remember_late second ~base_path:workspace ~keeper_name:keeper
+          ~tool_call_id:"recycled" ~approval_id:(Random_id.uuid_v7 ())
+          ~actor:"operator" decision ())) [Registry.Approve; Registry.Deny];
+    check string "unknown answers append no journal evidence" before_unknown (read_bytes ());
+    check remember_outcome "A answers only the original A arguments"
+      (Late.Remembered {tool_name = "Edit"})
+      (Late.remember_late second ~base_path:workspace ~keeper_name:keeper
+        ~tool_call_id:"recycled" ~approval_id:approval_a ~actor:"operator"
+        Registry.Approve ());
+    let third = make () in
+    check bool "remembering A replays without removing B" true
+      (Late.journal_error third = None);
+    let before_stale = read_bytes () in
+    check remember_outcome "A cannot be answered twice" Late.No_matching_ask
+      (Late.remember_late third ~base_path:workspace ~keeper_name:keeper
+        ~tool_call_id:"recycled" ~approval_id:approval_a ~actor:"operator"
+        Registry.Deny ());
+    check string "a stale answer appends nothing" before_stale (read_bytes ());
+    check remember_outcome "B is still answerable after A and a restart"
+      (Late.Remembered {tool_name = "Edit"})
+      (Late.remember_late third ~base_path:workspace ~keeper_name:keeper
+        ~tool_call_id:"recycled" ~approval_id:approval_b ~actor:"operator"
+        Registry.Deny ());
+    let fourth = make () in
+    check bool "different arguments cannot consume either decision" true
+      (Late.take fourth ~base_path:workspace ~keeper_name:keeper
+        ~tool_name:"Edit" ~args:(edit_input "lib/other.ml") () = None);
+    List.iter (fun (args, expected) ->
+      check bool "the original arguments receive their own decision" true
+        (Late.take fourth ~base_path:workspace ~keeper_name:keeper
+          ~tool_name:"Edit" ~args () = Some expected);
+      check bool "each approval is consumed once" true
+        (Late.take fourth ~base_path:workspace ~keeper_name:keeper
+          ~tool_name:"Edit" ~args () = None))
+      [args_a, Registry.Approve; args_b, Registry.Deny];
+    let final = make () in
+    List.iter (fun args ->
+      check bool "a restart cannot reoffer a consumed answer" true
+        (Late.take final ~base_path:workspace ~keeper_name:keeper
+          ~tool_name:"Edit" ~args () = None)) [args_a; args_b])
+
+let test_v2_ask_rows_require_approval_id_and_preserve_corrupt_bytes () =
+  List.iter (fun op ->
+    with_journal (fun ~clock:_ ~journal ~make ~remove:_ ~base_path:dir ->
+      let approval_id = Random_id.uuid_v7 () in
+      let args = edit_input "lib/a.ml" in
+      let first = make () in
+      Late.note_timed_out first ~base_path:workspace ~keeper_name:keeper
+        ~tool_call_id:"original" ~approval_id ~tool_name:"Edit" ~args ();
+      check remember_outcome "the valid seed is remembered"
+        (Late.Remembered {tool_name = "Edit"})
+        (Late.remember_late first ~base_path:workspace ~keeper_name:keeper
+          ~tool_call_id:"original" ~approval_id ~actor:"operator" Registry.Approve ());
+      let read_bytes () = In_channel.with_open_bin journal In_channel.input_all in
+      let fields = read_bytes () |> String.split_on_char '\n'
+        |> List.filter (fun line -> line <> "")
+        |> List.map Yojson.Safe.from_string
+        |> List.find_map (function
+             | `Assoc fields when List.assoc_opt "op" fields = Some (`String op) -> Some fields
+             | _ -> None)
+        |> Option.get in
+      check bool "the seed has the required identity before removal" true
+        (List.assoc_opt "approval_id" fields = Some (`String approval_id));
+      Out_channel.with_open_gen [Open_append; Open_binary] 0o600 journal (fun out ->
+        output_string out (Yojson.Safe.to_string
+          (`Assoc (List.remove_assoc "approval_id" fields)) ^ "\n"));
+      let corrupt_bytes = read_bytes () in
+      let fenced = make () in
+      let assert_corrupt () =
+        check bool (op ^ " without approval_id is a corrupt v2 row") true
+          (match Late.journal_error fenced with Some (Late.Corrupt_journal _) -> true | _ -> false) in
+      assert_corrupt ();
+      check bool "restore does not treat the v2 row as a skipped schema" true
+        (Late.journal_skipped fenced = 0);
+      check bool "the earlier valid answer cannot escape the fence" true
+        (Late.take fenced ~base_path:workspace ~keeper_name:keeper ~tool_name:"Edit" ~args () = None);
+      let blocked_id = Random_id.uuid_v7 () in
+      Late.note_timed_out fenced ~base_path:workspace ~keeper_name:keeper
+        ~tool_call_id:"blocked" ~approval_id:blocked_id ~tool_name:"Edit" ~args ();
+      check remember_outcome "a corrupt journal refuses mutation" Late.No_matching_ask
+        (Late.remember_late fenced ~base_path:workspace ~keeper_name:keeper
+          ~tool_call_id:"blocked" ~approval_id:blocked_id ~actor:"operator" Registry.Deny ());
+      check bool "operator reads expose the fault" true
+        (Result.is_error (Late.uncertain_attempts fenced ~base_path:workspace));
+      Late.restore ~base_path:dir fenced;
+      assert_corrupt ();
+      check string "restore, mutation and take preserve the raw corrupt evidence"
+        corrupt_bytes (read_bytes ()))) ["note_timed_out"; "remember_late"]
+
+let test_consume_only_v2_row_needs_no_approval_id () =
+  with_journal (fun ~clock:_ ~journal ~make ~remove:_ ~base_path:_ ->
+    let args = edit_input "lib/a.ml" in
+    Fs_compat.mkdir_p (Filename.dirname journal);
+    let row = `Assoc
+      ["schema", `String "masc.late_approval.v2"; "op", `String "consume";
+       "consume_id", `String "consume-without-approval";
+       "base_path", `String workspace; "keeper", `String keeper;
+       "tool", `String "Edit";
+       "fingerprint", `String (Masc.Keeper_approval_request_fingerprint.request_fingerprint args);
+       "at", `Float (Unix.gettimeofday ())] in
+    Out_channel.with_open_bin journal (fun out ->
+      output_string out (Yojson.Safe.to_string row ^ "\n"));
+    let restored = make () in
+    check bool "a consume-only v2 journal restores cleanly" true
+      (Late.journal_error restored = None);
+    let attempts = Result.get_ok (Late.uncertain_attempts restored ~base_path:workspace) in
+    check (list string) "the consume identity retains uncertainty"
+      ["consume-without-approval"]
+      (List.map (fun (a : Late.uncertain_attempt) -> a.consume_id) attempts);
+    check bool "uncertainty is no approval" true
+      (Late.take restored ~base_path:workspace ~keeper_name:keeper ~tool_name:"Edit" ~args () = None);
+    check bool "the original consume can still be acknowledged" true
+      (Late.ack_uncertain restored ~base_path:workspace ~keeper_name:keeper
+        ~consume_id:"consume-without-approval" () = Late.Acked);
+    let restarted = make () in
+    check bool "the ack still restores without approval_id" true
+      (Late.journal_error restarted = None);
+    check int "the acknowledgement closes the exact uncertainty" 0
+      (Late.journal_uncertain restarted))
+
+let test_failed_remembered_publication_leaves_the_decision_spent () =
+  List.iter (fun decision ->
+    with_journal (fun ~clock ~journal ~make ~remove:_ ~base_path:_ ->
+      let exception Publication_failed in
+      let first = make () in
+      let args = edit_input "lib/publication.ml" in
+      let approval_id = Random_id.uuid_v7 () in
+      Late.note_timed_out first ~base_path:workspace ~keeper_name:keeper
+        ~tool_call_id:"original" ~approval_id ~tool_name:"Edit" ~args ();
+      check remember_outcome "the original answer is remembered"
+        (Late.Remembered {tool_name = "Edit"})
+        (Late.remember_late first ~base_path:workspace ~keeper_name:keeper
+          ~tool_call_id:"original" ~approval_id ~actor:"operator" decision ());
+      let registry = Registry.create () in
+      let published = ref [] in
+      let held_during_publication = ref [] in
+      let gate = Gate.create ~registry ~late_approvals:first ~redact_text:Fun.id
+        ~publish:(fun event ->
+          published := event :: !published;
+          held_during_publication := Registry.pending registry;
+          raise Publication_failed)
+        ~clock ~base_path:workspace ~keeper_name:keeper ~timeout_sec:0.05 in
+      let failed =
+        try
+          ignore (gate.Gate.tool_approval
+            (request ~tool_call_id:"remembered-retry" ~tool_name:"Edit" ~input:args));
+          false
+        with Publication_failed -> true in
+      check bool "the publication failure is observable" true failed;
+      check int "a remembered decision publishes without any live waiter" 0
+        (List.length !held_during_publication);
+      check int "the first publication was attempted once" 1 (List.length !published);
+      let restored = make () in
+      check bool "the consumed decision restores cleanly" true (Late.journal_error restored = None);
+      check int "a committed Deliver intent leaves no consume-only uncertainty" 0
+        (Late.journal_uncertain restored);
+      let ops = In_channel.with_open_bin journal In_channel.input_all
+        |> String.split_on_char '\n' |> List.filter (fun line -> line <> "")
+        |> List.map (fun line -> Yojson.Safe.Util.(Yojson.Safe.from_string line |> member "op" |> to_string)) in
+      check (list string) "publication failure neither reinserts nor acknowledges the decision"
+        ["note_timed_out"; "remember_late"; "consume"; "deliver"] ops;
+      let events = Events.create () in
+      let retry_gate = Gate.create ~registry ~late_approvals:restored ~redact_text:Fun.id
+        ~publish:(Events.publish events) ~clock ~base_path:workspace ~keeper_name:keeper
+        ~timeout_sec:0.05 in
+      let retry = retry_gate.Gate.tool_approval
+        (request ~tool_call_id:"after-publication-failure" ~tool_name:"Edit" ~input:args) in
+      check approval "a restart cannot reoffer the spent approval or denial"
+        Agent_core.Hooks.Timed_out retry;
+      check (list string) "the retry asks again rather than claiming remembered settlement"
+        ["requested(after-publication-failure,Run it?,policy: needs an operator's eye)";
+         "settled(after-publication-failure,timed_out)"] (event_labels events)))
+    [Registry.Approve; Registry.Deny]
+
 let () =
   run "keeper_late_approval"
     [ ( "remembering a late answer"
@@ -735,6 +962,10 @@ let () =
             test_later_delivery_preserves_earlier_attempt
         ; test_case "malformed v2 consume cannot resurrect approval" `Quick
             test_malformed_consume_cannot_restore_approval
+        ; test_case "v2 ask rows require approval ID and preserve corrupt bytes" `Quick
+            test_v2_ask_rows_require_approval_id_and_preserve_corrupt_bytes
+        ; test_case "consume-only v2 rows need no approval ID" `Quick
+            test_consume_only_v2_row_needs_no_approval_id
         ; test_case "pre-ID schema rows are skipped, not fatal" `Quick
             test_pre_id_schema_rows_are_skipped_not_fatal
         ; test_case "one foreign row among valid rows does not fence restore"
@@ -775,7 +1006,9 @@ let () =
             `Quick test_a_remembered_answer_past_its_moment_is_asked_about_again
         ] )
     ; ( "durability across a restart"
-      , [ test_case
+      , [ test_case "recycled call IDs preserve each expired approval across restart" `Quick
+            test_recycled_call_id_keeps_each_expired_approval_after_restart
+        ; test_case
             "a remembered answer survives a restart and settles the retry"
             `Quick
             test_a_remembered_answer_survives_a_restart_and_settles_the_retry
@@ -785,5 +1018,7 @@ let () =
             `Quick test_a_consumed_answer_is_never_reoffered_after_a_restart
         ; test_case "a consume without deliver reads as uncertain" `Quick
             test_a_consume_without_deliver_reads_as_uncertain
+        ; test_case "a failed remembered publication leaves the decision spent" `Quick
+            test_failed_remembered_publication_leaves_the_decision_spent
         ] )
     ]

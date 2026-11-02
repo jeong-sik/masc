@@ -28,7 +28,7 @@ let initialize_runtime ~base_path (server : Exact_output_fixture.test_server) =
     "[[models]]\nmodel_id = %S\nprovider_name = \"fixture\"\nbase = \"openai_chat\"\nmax_context_tokens = 1048576\nmax_output_tokens = 128\nsupports_tools = true\nsupports_native_streaming = true\n"
     model_id);
   Llm_provider.Model_catalog.load_file catalog_path |> get Fun.id
-  |> Llm_provider.Model_catalog.set_global;
+  |> (fun models -> Llm_provider.Catalog_snapshot.publish (Masc_test_deps.admit_catalogs ~models:(Some models) ~providers:(None)));
   let path = Filename.concat
     (Filename.concat (Filename.concat base_path Common.masc_dirname) "config")
     "runtime.toml" in
@@ -107,15 +107,13 @@ let run base_path prompt_root =
     ~proc_mgr:env#process_mgr ~clock:env#clock;
   Masc_test_deps.ensure_rng_initialized ();
   let runtime_snapshot = Runtime.For_testing.snapshot () in
-  let catalog_snapshot = Llm_provider.Model_catalog.global () in
+  let catalog_snapshot = Llm_provider.Catalog_snapshot.current () in
   Eio.Switch.on_release sw (fun () ->
     Board_dispatch.reset_for_test ();
     Board.reset_global_for_test ();
     Keeper_registry.For_testing.clear ();
     Runtime.For_testing.restore runtime_snapshot;
-    match catalog_snapshot with
-    | None -> Llm_provider.Model_catalog.clear_global ()
-    | Some catalog -> Llm_provider.Model_catalog.set_global catalog);
+    Llm_provider.Catalog_snapshot.publish catalog_snapshot);
   let config = Workspace.default_config base_path in
   (match config.backend with
    | Workspace.FileSystem _ -> ()

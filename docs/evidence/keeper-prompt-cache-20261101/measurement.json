@@ -1,0 +1,454 @@
+{
+  "generated_at": "2026-11-01T03:51:33+00:00",
+  "dates": [
+    "2026-11-01"
+  ],
+  "deploy_at": null,
+  "keepers": [
+    "code-reviewer-father"
+  ],
+  "evidence_limits": [
+    "Raw common-prefix bytes are not a provider tokenizer or measured KV-cache reuse.",
+    "First round means first observed ledger row in the sample; ordinal zero may be absent.",
+    "Missed input means input minus cache reads, including any new cache writes.",
+    "Turn usage has no response-to-capture digest; it cannot certify a serialized snapshot cache hit."
+  ],
+  "sources": [
+    {
+      "path": "costs/2026-11/01.jsonl",
+      "bytes": 3580915,
+      "sha256": "fc4bcbba132050be56a52a50a7f66783a3fa033993dcf4b0165e3e9d152394d1"
+    },
+    {
+      "path": "keepers/code-reviewer-father/turn-records/2026-11/01.jsonl",
+      "bytes": 42206,
+      "sha256": "28746f6266b72125e452584c0eabb98c7c1f590c43ec14a352b30e69df4dff7b"
+    },
+    {
+      "path": "keepers/code-reviewer-father/provider-inputs/2026-11/01.jsonl",
+      "bytes": 1194790,
+      "sha256": "514e2ab11a652b909bc9bf66b72d0336ad8c4840132a0d9c2b6aaa7218c7e686"
+    },
+    {
+      "path": "tool_blobs/44/44baef993b53d68674c21a1b35d6514aef582777617a0e527df18ffa29a8185e",
+      "bytes": 126600,
+      "sha256": "44baef993b53d68674c21a1b35d6514aef582777617a0e527df18ffa29a8185e"
+    },
+    {
+      "path": "tool_blobs/ac/ace1f96d457c39946a562c961f5a49bf66cf86c84a80cbceb689b5830df76dac",
+      "bytes": 126600,
+      "sha256": "ace1f96d457c39946a562c961f5a49bf66cf86c84a80cbceb689b5830df76dac"
+    },
+    {
+      "path": "tool_blobs/30/304234ea76bb3b2c3b1e6bc5abb5a141794c9bb57d073c7ccdcfb3fd1bad4f6f",
+      "bytes": 126600,
+      "sha256": "304234ea76bb3b2c3b1e6bc5abb5a141794c9bb57d073c7ccdcfb3fd1bad4f6f"
+    },
+    {
+      "path": "tool_blobs/f8/f8f0df22e7b3a17ba9327af4bcedaa0b721c7cd3b23082e578830c81681a1a3d",
+      "bytes": 125780,
+      "sha256": "f8f0df22e7b3a17ba9327af4bcedaa0b721c7cd3b23082e578830c81681a1a3d"
+    },
+    {
+      "path": "tool_blobs/c4/c48437a6448cd17dfc4d7b9a5adc634dcc3d7f87de59ed6a01dd0bd10eb93492",
+      "bytes": 125780,
+      "sha256": "c48437a6448cd17dfc4d7b9a5adc634dcc3d7f87de59ed6a01dd0bd10eb93492"
+    },
+    {
+      "path": "keepers/code-reviewer-father/execution-receipts/2026-11/01.jsonl",
+      "bytes": 36473,
+      "sha256": "0ce689fdad16a87d11c50c1ff1d6320e66f4033f13c6cf42103327959884c650"
+    }
+  ],
+  "malformed": [],
+  "raw_rows_without_scope": 0,
+  "requests_read": 43,
+  "turn_records_read": 10,
+  "snapshots_read": 5,
+  "receipts_read": 10,
+  "settled_usage_by_family": [
+    {
+      "family": "codex_e641909e",
+      "rows": 5,
+      "completed": 0,
+      "cache_read_positive": 0,
+      "cache_read_over_input": null,
+      "ttfrc_ms_by_uncached_tokens": {}
+    },
+    {
+      "family": "glm-coding",
+      "rows": 5,
+      "completed": 5,
+      "cache_read_positive": 5,
+      "cache_read_over_input": 0.9723809460896677,
+      "ttfrc_ms_by_uncached_tokens": {
+        "0-2000": {
+          "n": 2,
+          "median": 14827.163457870483,
+          "mean": 14827.163457870483,
+          "p90": 25733.84189605713
+        },
+        "2000-8000": {
+          "n": 2,
+          "median": 4371.011972427368,
+          "mean": 4371.011972427368,
+          "p90": 4669.003963470459
+        },
+        "8000-20000": {
+          "n": 1,
+          "median": 4233.788967132568,
+          "mean": 4233.788967132568,
+          "p90": 4233.788967132568
+        }
+      }
+    }
+  ],
+  "rounds_by_family_and_era": [
+    {
+      "family": "glm-coding",
+      "era": "sample",
+      "first_rounds": {
+        "n": 6,
+        "miss_ratio": {
+          "n": 6,
+          "median": 0.24856762619621764,
+          "mean": 0.35385181483246825,
+          "p90": 0.966828955112086
+        },
+        "miss_tokens": {
+          "n": 6,
+          "median": 22270.0,
+          "mean": 113386.33333333333,
+          "p90": 578272
+        },
+        "input_tokens": {
+          "n": 6,
+          "median": 87646.0,
+          "mean": 171157,
+          "p90": 598112
+        },
+        "full_miss_share": 0.16666666666666666
+      },
+      "later_rounds": {
+        "n": 37,
+        "miss_ratio": {
+          "n": 37,
+          "median": 0.010583108528740403,
+          "mean": 0.048691215866318444,
+          "p90": 0.06627138822101357
+        },
+        "miss_tokens": {
+          "n": 37,
+          "median": 1563,
+          "mean": 5408.243243243243,
+          "p90": 7470
+        }
+      },
+      "share_of_missed_tokens_in_first_rounds": 0.7727172052524752,
+      "input_growth_per_turn_tokens": {
+        "n": 2,
+        "median": 1048.0,
+        "mean": 1048,
+        "p90": 1143
+      }
+    }
+  ],
+  "first_round_miss_by_gap": [
+    {
+      "family": "glm-coding",
+      "gap_seconds": "60-300",
+      "first_round_miss_ratio": {
+        "n": 4,
+        "median": 0.17978251634060238,
+        "mean": 0.2089211584942885,
+        "p90": 0.3124422414517349
+      },
+      "full_miss_share": 0.0
+    },
+    {
+      "family": "glm-coding",
+      "gap_seconds": "300-900",
+      "first_round_miss_ratio": {
+        "n": 1,
+        "median": 0.32059729990556934,
+        "mean": 0.32059729990556934,
+        "p90": 0.32059729990556934
+      },
+      "full_miss_share": 0.0
+    }
+  ],
+  "first_round_by_gap_and_tools": [
+    {
+      "family": "glm-coding",
+      "gap": "gap<15m",
+      "tools": "same",
+      "first_round_miss_ratio": {
+        "n": 4,
+        "median": 0.24856762619621764,
+        "mean": 0.24815114350962725,
+        "p90": 0.32059729990556934
+      },
+      "full_miss": 0
+    },
+    {
+      "family": "glm-coding",
+      "gap": "gap<15m",
+      "tools": "unknown",
+      "first_round_miss_ratio": {
+        "n": 1,
+        "median": 0.16367735984421442,
+        "mean": 0.16367735984421442,
+        "p90": 0.16367735984421442
+      },
+      "full_miss": 0
+    }
+  ],
+  "consecutive_snapshot_prefix": [
+    {
+      "keeper": "code-reviewer-father",
+      "lane": "glm-coding.glm-5-3",
+      "era": "sample",
+      "snapshots": 5,
+      "pairs": 4,
+      "prev_is_prefix_of_next": 0,
+      "lcp_share": {
+        "n": 4,
+        "median": 0.9100496277915633,
+        "mean": 0.6978819567529244,
+        "p90": 0.9714285714285714
+      },
+      "first_diff_index": {
+        "n": 4,
+        "median": 26.0,
+        "mean": 21.5,
+        "p90": 34
+      },
+      "body_bytes": {
+        "n": 5,
+        "median": 281774,
+        "mean": 629189.2,
+        "p90": 2011788
+      }
+    }
+  ],
+  "system_prompt_cache_samples": [
+    {
+      "keeper": "code-reviewer-father",
+      "lane": "glm-coding.glm-5-3",
+      "turn_ref": "trace-1793025151961-00000#297",
+      "captured_at": 1793497533.33856,
+      "wire": {
+        "phase": [
+          "Pre_dispatch_serialization"
+        ],
+        "capture_id": "wr-1a194a3286c-22da-0000",
+        "provider": "glm",
+        "model": "glm-5.3",
+        "http_codec": "glm-chat",
+        "stream": true,
+        "body_bytes": 2011788,
+        "body_sha256": "d3e3faabd420adf4e3ad1b87d09549b60dc923d8a2671b739eb07e3e86a9fb51"
+      },
+      "system_bytes": 126600,
+      "system_sha256": "44baef993b53d68674c21a1b35d6514aef582777617a0e527df18ffa29a8185e",
+      "last_reported_turn_usage": {
+        "scope": "per_request",
+        "runtime_profile": "glm-coding.glm-5-3",
+        "selected_model": "glm-5.3",
+        "input_tokens": 580070,
+        "cache_read_input_tokens": 578496,
+        "cache_read_share": 0.9972865343837812,
+        "binding": "same_turn_not_proof_of_same_serialized_request"
+      },
+      "previous_system": null
+    },
+    {
+      "keeper": "code-reviewer-father",
+      "lane": "glm-coding.glm-5-3",
+      "turn_ref": "trace-1793025151961-00000#298",
+      "captured_at": 1793498281.509741,
+      "wire": {
+        "phase": [
+          "Pre_dispatch_serialization"
+        ],
+        "capture_id": "wr-1a194c88fe7-22da-0000",
+        "provider": "glm",
+        "model": "glm-5.3",
+        "http_codec": "glm-chat",
+        "stream": true,
+        "body_bytes": 281774,
+        "body_sha256": "c951a726b8871bdbfb8f5fe7fab0b9e95023d05ecc079e4fff493afe6709d19b"
+      },
+      "system_bytes": 126600,
+      "system_sha256": "ace1f96d457c39946a562c961f5a49bf66cf86c84a80cbceb689b5830df76dac",
+      "last_reported_turn_usage": {
+        "scope": "per_request",
+        "runtime_profile": "glm-coding.glm-5-3",
+        "selected_model": "glm-5.3",
+        "input_tokens": 82829,
+        "cache_read_input_tokens": 78080,
+        "cache_read_share": 0.9426650086322423,
+        "binding": "same_turn_not_proof_of_same_serialized_request"
+      },
+      "previous_system": {
+        "turn_ref": "trace-1793025151961-00000#297",
+        "bytes": 126600,
+        "common_prefix_bytes": 126500,
+        "identical": false,
+        "same_provider_model_codec": true,
+        "same_tool_schemas": true
+      }
+    },
+    {
+      "keeper": "code-reviewer-father",
+      "lane": "glm-coding.glm-5-3",
+      "turn_ref": "trace-1793025151961-00000#299",
+      "captured_at": 1793499070.138008,
+      "wire": {
+        "phase": [
+          "Pre_dispatch_serialization"
+        ],
+        "capture_id": "wr-1a194d6d415-d954-0000",
+        "provider": "glm",
+        "model": "glm-5.3",
+        "http_codec": "glm-chat",
+        "stream": true,
+        "body_bytes": 262739,
+        "body_sha256": "1e7e01a4e1998cdd0f460ce04ac2b79d155ec7cc338760ccd63403205485be1f"
+      },
+      "system_bytes": 126600,
+      "system_sha256": "304234ea76bb3b2c3b1e6bc5abb5a141794c9bb57d073c7ccdcfb3fd1bad4f6f",
+      "last_reported_turn_usage": {
+        "scope": "per_request",
+        "runtime_profile": "glm-coding.glm-5-3",
+        "selected_model": "glm-5.3",
+        "input_tokens": 76393,
+        "cache_read_input_tokens": 75648,
+        "cache_read_share": 0.990247797573076,
+        "binding": "same_turn_not_proof_of_same_serialized_request"
+      },
+      "previous_system": {
+        "turn_ref": "trace-1793025151961-00000#298",
+        "bytes": 126600,
+        "common_prefix_bytes": 126500,
+        "identical": false,
+        "same_provider_model_codec": true,
+        "same_tool_schemas": true
+      }
+    },
+    {
+      "keeper": "code-reviewer-father",
+      "lane": "glm-coding.glm-5-3",
+      "turn_ref": "trace-1793025151961-00000#300",
+      "captured_at": 1793499342.533094,
+      "wire": {
+        "phase": [
+          "Pre_dispatch_serialization"
+        ],
+        "capture_id": "wr-1a194e00055-d954-0000",
+        "provider": "glm",
+        "model": "glm-5.3",
+        "http_codec": "glm-chat",
+        "stream": true,
+        "body_bytes": 271850,
+        "body_sha256": "0fc04105744924ff21c595cf27e513d900e990e268b6fbadcae87e7e6d4a5fae"
+      },
+      "system_bytes": 125780,
+      "system_sha256": "f8f0df22e7b3a17ba9327af4bcedaa0b721c7cd3b23082e578830c81681a1a3d",
+      "last_reported_turn_usage": {
+        "scope": "per_request",
+        "runtime_profile": "glm-coding.glm-5-3",
+        "selected_model": "glm-5.3",
+        "input_tokens": 79115,
+        "cache_read_input_tokens": 65280,
+        "cache_read_share": 0.8251279782594957,
+        "binding": "same_turn_not_proof_of_same_serialized_request"
+      },
+      "previous_system": {
+        "turn_ref": "trace-1793025151961-00000#299",
+        "bytes": 126600,
+        "common_prefix_bytes": 125617,
+        "identical": false,
+        "same_provider_model_codec": true,
+        "same_tool_schemas": true
+      }
+    },
+    {
+      "keeper": "code-reviewer-father",
+      "lane": "glm-coding.glm-5-3",
+      "turn_ref": "trace-1793025151961-00000#301",
+      "captured_at": 1793500111.797973,
+      "wire": {
+        "phase": [
+          "Pre_dispatch_serialization"
+        ],
+        "capture_id": "wr-1a194e428f8-d954-0000",
+        "provider": "glm",
+        "model": "glm-5.3",
+        "http_codec": "glm-chat",
+        "stream": true,
+        "body_bytes": 317795,
+        "body_sha256": "d3d135fad9263c0894051c1f450995a8d6882ef9d79459e5ef52c1ffbf426f38"
+      },
+      "system_bytes": 125780,
+      "system_sha256": "c48437a6448cd17dfc4d7b9a5adc634dcc3d7f87de59ed6a01dd0bd10eb93492",
+      "last_reported_turn_usage": {
+        "scope": "per_request",
+        "runtime_profile": "glm-coding.glm-5-3",
+        "selected_model": "glm-5.3",
+        "input_tokens": 89879,
+        "cache_read_input_tokens": 85696,
+        "cache_read_share": 0.953459651308982,
+        "binding": "same_turn_not_proof_of_same_serialized_request"
+      },
+      "previous_system": {
+        "turn_ref": "trace-1793025151961-00000#300",
+        "bytes": 125780,
+        "common_prefix_bytes": 125705,
+        "identical": false,
+        "same_provider_model_codec": true,
+        "same_tool_schemas": true
+      }
+    }
+  ],
+  "tool_list_changes": {
+    "era": "sample",
+    "pairs": 4,
+    "kinds": {
+      "identical": 4
+    },
+    "added": [],
+    "removed": [],
+    "schema_changed": []
+  },
+  "oversized_requests": [
+    {
+      "runtime": "glm-coding.glm-5-3",
+      "rows": 1,
+      "completed": 1,
+      "max_bytes": 2011788
+    }
+  ],
+  "turn_ends_by_selected_model": [
+    {
+      "selected_model": "unknown",
+      "receipts": 5,
+      "terminal_reason_codes": [
+        [
+          "provider_error_reported:turn_failed",
+          5
+        ]
+      ]
+    },
+    {
+      "selected_model": "glm-5.3",
+      "receipts": 5,
+      "terminal_reason_codes": [
+        [
+          "checkpoint",
+          5
+        ]
+      ]
+    }
+  ]
+}

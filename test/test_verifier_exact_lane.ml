@@ -693,9 +693,15 @@ endpoint = "http://127.0.0.1:1/v1"
 [models.verifier-a]
 api-name = "verifier-model"
 max-context = 8192
+tools-support = true
+[models.verifier-a.capabilities]
+supports-system-prompt = true
 [models.verifier-b]
 api-name = "verifier-model"
 max-context = 8192
+tools-support = true
+[models.verifier-b.capabilities]
+supports-system-prompt = true
 [http.verifier-a]
 [http.verifier-b]
 [runtime]
@@ -857,6 +863,9 @@ endpoint = "http://127.0.0.1:1/v1"
 [models.verifier-a]
 api-name = "verifier-model"
 max-context = 8192
+tools-support = true
+[models.verifier-a.capabilities]
+supports-system-prompt = true
 [http.verifier-a]
 [runtime]
 default = "official.verifier"

@@ -7,9 +7,14 @@ let schema = `Assoc ["type",`String "object";"properties",`Assoc [];"additionalP
 let refused message = {Wire.code=Wire.host_refused;message}
 let model_refusal reason = Model.refusal_to_rpc_error reason
 let text (message:Model.message) =
-  let* blocks=List.fold_right (fun block acc -> let* rest=acc in match block with
-    | Model.Text text -> Ok (text::rest)
-    | Unserved kind -> Error (model_refusal (Content_not_served kind))) message.content (Ok []) in
+  let* blocks =
+    let rec loop acc = function
+      | [] -> Ok (List.rev acc)
+      | Model.Text text :: rest -> loop (text :: acc) rest
+      | Unserved kind :: _ -> Error (model_refusal (Content_not_served kind))
+    in
+    loop [] message.content
+  in
   Ok (`Assoc ["role",`String (match message.role with User -> "user" | Assistant -> "assistant");
     "text",`String (String.concat "\n\n" blocks)])
 let request params =
@@ -22,8 +27,15 @@ let request params =
     | None,None -> Ok ()
     | Some _,(None|Some _) | None,Some _ ->
         Error (refused "the Add-on model route does not serve request temperature or stop sequences") in
-  let* messages=List.fold_right (fun message acc -> let* rest=acc in let* message=text message in
-    Ok (message::rest)) parsed.messages (Ok []) in
+  let* messages =
+    let rec loop acc = function
+      | [] -> Ok (List.rev acc)
+      | message :: rest ->
+        let* message = text message in
+        loop (message :: acc) rest
+    in
+    loop [] parsed.messages
+  in
   let id=Uuidm.(to_string (v4_gen (Random.State.make_self_init ()) ())) in
   Exact.request_of_json (`Assoc (["kind",`String "exact_output";"request_id",`String id;
     "output",`String output_name;"schema",schema;"messages",`List messages]

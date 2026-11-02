@@ -91,6 +91,7 @@ type delta =
       }
   | Approval_requested of
       { call_id : string
+      ; approval_id : string
       ; tool_name : string
       ; args : string
       ; question : string
@@ -103,6 +104,7 @@ type delta =
       }
   | Approval_settled of
       { call_id : string
+      ; approval_id : string
       ; outcome : string
       }
   | Accepted of
@@ -535,12 +537,15 @@ let custom_deltas_unvalidated fields =
       | Some value -> (
           match
             ( string_field value "tool_call_id"
+            , string_field value "approval_id"
             , string_field value "tool_call_name"
             , string_field value "question" )
           with
-          | Some call_id, Some tool_name, Some question ->
+          | Some call_id, Some approval_id, Some tool_name, Some question
+            when String.trim approval_id <> "" ->
               [ Approval_requested
                   { call_id
+                  ; approval_id
                   ; tool_name
                   ; (* Absent arguments are drawn as none rather than dropping
                        the prompt: a reader still has to answer, and the tool
@@ -555,7 +560,7 @@ let custom_deltas_unvalidated fields =
               ]
           | _ ->
               [ Undecodable
-                  "KEEPER_TOOL_APPROVAL_REQUESTED needs tool_call_id, \
+                  "KEEPER_TOOL_APPROVAL_REQUESTED needs tool_call_id, approval_id, \
                    tool_call_name and question"
               ]))
   | Some "KEEPER_TOOL_APPROVAL_SETTLED" -> (
@@ -564,12 +569,16 @@ let custom_deltas_unvalidated fields =
           [ Undecodable "KEEPER_TOOL_APPROVAL_SETTLED value is not an object" ]
       | Some value -> (
           match
-            (string_field value "tool_call_id", string_field value "outcome")
+            ( string_field value "tool_call_id"
+            , string_field value "approval_id"
+            , string_field value "outcome" )
           with
-          | Some call_id, Some outcome -> [ Approval_settled { call_id; outcome } ]
+          | Some call_id, Some approval_id, Some outcome
+            when String.trim approval_id <> "" ->
+              [ Approval_settled { call_id; approval_id; outcome } ]
           | _ ->
               [ Undecodable
-                  "KEEPER_TOOL_APPROVAL_SETTLED needs tool_call_id and outcome"
+                  "KEEPER_TOOL_APPROVAL_SETTLED needs tool_call_id, approval_id and outcome"
               ]))
   | Some "KEEPER_CONTINUATION_CHECKPOINT" -> [ Checkpoint ]
   | Some "KEEPER_EXTERNAL_EFFECT_COMPLETED" -> [ External_effect_completed ]

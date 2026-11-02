@@ -144,6 +144,53 @@ let test_file_action_uses_the_presented_source () =
    | Masc_tui_fetched.Absent | Loading | Ready _ | Failed _ ->
        fail "failed revalidation lost the retained observation")
 
+let test_loss_sequences () =
+  let note source sequence seen =
+    Masc_tui_types.note_observer_source_loss ~source_id:source ~sequence seen
+  in
+  let fresh, seen = note "a" 1 [] in
+  check bool "first notice demands revalidation" true fresh;
+  let fresh, seen = note "a" 1 seen in
+  check bool "a duplicate transport delivery does not" false fresh;
+  let fresh, seen = note "b" 1 seen in
+  check bool "another bridge can use the same sequence" true fresh;
+  let fresh, seen = note "a" 2 seen in
+  check bool "the next loss from a bridge is new" true fresh;
+  let fresh, _ = note "a" 1 seen in
+  check bool "an older retry remains a duplicate" false fresh
+
+let test_forced_read_supersedes_and_clear_retires () =
+  let state = state_on Masc_tui_types.Overview in
+  let scope = state.workspace_authority, state.workspace_read_authority in
+  let key : Masc_tui_types.acting_pane_key = { apk_keeper = "alpha"; apk_scope = scope } in
+  let start read = match read with
+    | Masc_tui_fetched.Started (next, request) -> next, request
+    | Masc_tui_fetched.Already_loading -> fail "expected a fresh request"
+  in
+  let old, old_request = start
+      (Masc_tui_fetched.start ~equal:Masc_tui_types.same_acting_pane_key
+         state.acting_pane_changes ~key) in
+  let newer, newer_request = start
+      (Masc_tui_fetched.refresh ~equal:Masc_tui_types.same_acting_pane_key old ~key) in
+  let reading path : Masc_tui_types.acting_pane_read =
+    { apr_scope = scope; apr_snapshot = changes path }
+  in
+  let newer = Masc_tui_fetched.complete ~equal:Masc_tui_types.same_acting_pane_key
+      newer newer_request (Ok (reading "new.ml")) in
+  let after_late = Masc_tui_fetched.complete ~equal:Masc_tui_types.same_acting_pane_key
+      newer old_request (Ok (reading "old.ml")) in
+  (match Masc_tui_fetched.view_for ~equal:Masc_tui_types.same_acting_pane_key after_late ~key with
+   | Masc_tui_fetched.Ready value ->
+       check bool "the earlier response cannot overwrite the new one" true
+         (value.apr_snapshot = changes "new.ml")
+   | Masc_tui_fetched.Absent | Loading | Stale _ | Failed _ ->
+       fail "the superseding read did not remain ready");
+  let hidden = Masc_tui_fetched.clear old in
+  let after_hidden_response = Masc_tui_fetched.complete
+      ~equal:Masc_tui_types.same_acting_pane_key hidden old_request (Ok (reading "old.ml")) in
+  check bool "a hidden pane still owes a read after a late response" true
+    (Masc_tui_types.acting_pane_read_needed ~key after_hidden_response)
+
 let () =
   run "tui acting pane default"
     [ ( "default layout"
@@ -155,5 +202,9 @@ let () =
             test_a_reader_choice_still_hides_the_pane_on_home
         ; test_case "file action retains its presented source" `Quick
             test_file_action_uses_the_presented_source
+        ; test_case "loss sequence dedup" `Quick
+            test_loss_sequences
+        ; test_case "forced read supersedes or retires old reads" `Quick
+            test_forced_read_supersedes_and_clear_retires
         ] )
     ]

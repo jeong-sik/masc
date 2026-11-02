@@ -143,12 +143,15 @@ let resolve_provider (provider : Runtime_schema.provider) =
     native
       (Option.map
          (fun codex_home -> Runtime_verification_codex_home.auth_path ~codex_home)
-         (Runtime_codex_app_server.effective_account_home provider.account_home))
+         (Runtime_official_account.resolve_home ~client:Codex ~declaration:provider.account_home
+          |> Result.to_option))
       (fun path -> Codex_auth path)
-  | Claude_code_runtime, _ when Runtime_claude_code.runs_on_environment_credential provider.account_home ->
+  | Claude_code_runtime, _ when Runtime_claude_code.runs_on_environment_credential
+      (Runtime_official_account.Current provider.account_home) ->
     Some (Error Environment_credential)
   | Claude_code_runtime, _ ->
-    native (Runtime_claude_code.account_file provider.account_home) (fun path -> Claude_account path)
+    native (Runtime_claude_code.account_file (Runtime_official_account.Current provider.account_home))
+      (fun path -> Claude_account path)
   | Muse_serve_runtime, _ -> native (Runtime_muse_home.auth_path provider.account_home) (fun path -> Muse_auth path)
   | Antigravity_cli_runtime, Some (Runtime_schema.File path) ->
     Some (Ok (Google_oauth path))
@@ -161,7 +164,20 @@ let of_provider provider =
 
 module Source_map = Map.Make (struct
   type nonrec t = login_source
-  let compare = Stdlib.compare
+  let source_rank = function
+    | Codex_auth _ -> 0
+    | Claude_account _ -> 1
+    | Muse_auth _ -> 2
+    | Google_oauth _ -> 3
+  let compare a b =
+    match a, b with
+    | Codex_auth x, Codex_auth y
+    | Claude_account x, Claude_account y
+    | Muse_auth x, Muse_auth y
+    | Google_oauth x, Google_oauth y -> String.compare x y
+    | (Codex_auth _ | Claude_account _ | Muse_auth _ | Google_oauth _),
+      (Codex_auth _ | Claude_account _ | Muse_auth _ | Google_oauth _) ->
+      Int.compare (source_rank a) (source_rank b)
 end)
 
 type observation = {

@@ -56,7 +56,30 @@ type attempt = Not_attempted | Starting | Returned | Failed of failure | Cancell
 
 module Components = Map.Make (struct
   type t = component
-  let compare = Stdlib.compare
+  let component_rank = function
+    | Ready_notification -> 0
+    | Scheduler_probe -> 1
+    | Full_health_refresh -> 2
+    | Heap_roots -> 3
+    | Owner_lanes -> 4
+    | Discord_gateway -> 5
+    | Slack_gateway -> 6
+    | Slack_poll -> 7
+    | Imessage_gateway -> 8
+    | Telegram_gateway -> 9
+    | Startup_banner -> 10
+    | Grpc_listener -> 11
+    | Grpc_client -> 12
+    | Websocket_handler -> 13
+    | Transport_providers -> 14
+    | Execution_refresh -> 15
+    | Transport_health_refresh -> 16
+    | Execution_trust_refresh -> 17
+    | Mission_refresh -> 18
+    | Operator_snapshot_refresh -> 19
+    | Operator_digest_refresh -> 20
+    | Shell_prewarm -> 21
+  let compare a b = Int.compare (component_rank a) (component_rank b)
 end)
 
 type t = { state : attempt Components.t Atomic.t }

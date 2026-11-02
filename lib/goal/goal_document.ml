@@ -339,32 +339,38 @@ let state_of_yojson : Yojson.Safe.t -> (state, schema_rejection) result = functi
       in
       let* goals = collect [] rows in
       let* pending_events =
-        let seen = Hashtbl.create 16 in
-        let rec collect_events acc = function
+        let module String_set = Set.Make (String) in
+        let rec collect_events seen acc = function
           | [] -> Ok (List.rev acc)
           | row :: rest ->
               let* event = pending_event_of_yojson row in
-              if Hashtbl.mem seen event.event_id then
+              if String_set.mem event.event_id seen then
                 rejected ~field:"pending_events" "duplicate pending event_id"
-              else begin
-                Hashtbl.add seen event.event_id ();
-                collect_events (event :: acc) rest
-              end in
+              else
+                collect_events
+                  (String_set.add event.event_id seen)
+                  (event :: acc)
+                  rest in
         match Json_util.assoc_member_opt "pending_events" json with
         | None -> Ok []
-        | Some (`List rows) -> collect_events [] rows
+        | Some (`List rows) -> collect_events String_set.empty [] rows
         | Some _ -> rejected ~field:"pending_events" "pending_events must be a list" in
       let* pending_notifications =
-        let rec collect acc = function
+        let module String_set = Set.Make (String) in
+        let rec collect seen acc = function
           | [] -> Ok (List.rev acc)
           | row :: rest ->
               let* notice = pending_notification_of_yojson row in
-              if List.exists (fun old -> old.notification_id = notice.notification_id) acc then
+              if String_set.mem notice.notification_id seen then
                 rejected ~field:"pending_notifications" "duplicate notification identity"
-              else collect (notice :: acc) rest in
+              else
+                collect
+                  (String_set.add notice.notification_id seen)
+                  (notice :: acc)
+                  rest in
         match Json_util.assoc_member_opt "pending_notifications" json with
         | None -> Ok []
-        | Some (`List rows) -> collect [] rows
+        | Some (`List rows) -> collect String_set.empty [] rows
         | Some _ -> rejected ~field:"pending_notifications" "pending_notifications must be a list" in
       Ok { version; updated_at; goals; pending_events; pending_notifications }
   | json ->

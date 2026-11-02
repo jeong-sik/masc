@@ -213,7 +213,7 @@ let read_archived_tasks path : (Masc_domain.task list * int, string) result =
     Overview list, plus the full domain rows the detail view reads. Terminal
     tasks remain available in Planning rollups and the detail view but do not
     occupy the Overview list. *)
-let load_active_tasks (base_path : string) :
+let load_active_tasks ~fresh (base_path : string) :
     Masc_tui_overview_tasks.rows_reading
     * Masc_domain.task list
     * string option
@@ -221,6 +221,7 @@ let load_active_tasks (base_path : string) :
     * Masc_tui_agenda.stalled Masc_tui_agenda.reading
     * task_goal_links_reading =
   let config = Workspace_core.default_config base_path in
+  if fresh then Workspace_backlog.invalidate_backlog_cache config;
   let path = Workspace_backlog.backlog_path config in
   match Workspace_backlog.read_backlog_observation_with_source_r config with
   | Error err ->
@@ -545,7 +546,7 @@ let with_local_read_mutex mutex read =
   | Ok reading -> reading
   | Error (exn, backtrace) -> Printexc.raise_with_backtrace exn backtrace
 
-let read_local_work_unlocked (base_path : string) : local_reading =
+let read_local_work_unlocked ~fresh (base_path : string) : local_reading =
   let masc_dir = Filename.concat base_path Common.masc_dirname in
   (* Load agents *)
   let agents_dir = Filename.concat masc_dir "agents" in
@@ -573,7 +574,7 @@ let read_local_work_unlocked (base_path : string) : local_reading =
     else []
   in
   let rows, tasks_domain, tasks_error, task_flow, operator_stalled, goal_task_links =
-    load_active_tasks base_path
+    load_active_tasks ~fresh base_path
   in
   let goals_to_confirm = load_goals_to_confirm base_path in
   { lr_agents = agents; lr_rows = rows; lr_task_payloads = Masc_tui_task_payloads.observe tasks_domain
@@ -581,9 +582,11 @@ let read_local_work_unlocked (base_path : string) : local_reading =
   ; lr_operator_stalled = operator_stalled; lr_goal_task_links = goal_task_links
   ; lr_goals_to_confirm = goals_to_confirm }
 
-let read_local_workspace base_path =
+let read_local_workspace ?(fresh = false) base_path =
   with_local_read_mutex local_work_read_mutex
-    (fun () -> read_local_work_unlocked base_path)
+    (fun () ->
+      if fresh then archive_seen := None;
+      read_local_work_unlocked ~fresh base_path)
 
 let read_local_keepers base_path =
   with_local_read_mutex local_keeper_read_mutex (fun () ->
@@ -1939,17 +1942,22 @@ let load_keeper_sandbox_logs ~(host : string) ~(port : int)
     Masc_tui_keeper_sandbox.decode_logs
       ~sanitize:Masc.Tui_terminal_text.sanitize_terminal_text json
 
-let memo_settings_editor = json_memo ()
+let memo_settings_editor_toml = json_memo ()
+let memo_settings_editor_json = json_memo ()
 
 let load_keeper_config_editor ~(host : string) ~(port : int)
-    ~(keeper_name : string) : (Yojson.Safe.t * string, string) result =
+    ~(keeper_name : string) ~format : (Yojson.Safe.t * string, string) result =
   match
     Masc_tui_http.fetch_keeper_config_snapshot ~host ~port ~keeper_name
   with
   | Error err -> Error ("keeper config load failed: " ^ err)
   | Ok json ->
-      decode_offloaded memo_settings_editor ~name:"keeper.settings_editor.decode_wait"
-        (fun json -> Ok (json, Masc_tui_keeper_config.editor_stem json))
+      let memo = match format with
+        | Masc_tui_keeper_config.Toml -> memo_settings_editor_toml
+        | Masc_tui_keeper_config.Json -> memo_settings_editor_json in
+      decode_offloaded memo ~name:"keeper.settings_editor.decode_wait"
+        (fun json -> Result.map (fun stem -> json, stem)
+          (Masc_tui_keeper_config.editor_document ~format json))
         json
 
 let load_keeper_github_identity_view ~(host : string) ~(port : int)

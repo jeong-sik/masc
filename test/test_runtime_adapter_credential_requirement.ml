@@ -1,15 +1,12 @@
 (* Whether a provider needs a credential, and what happens when nothing says.
 
-   [effective_credential_reference] used to answer [None] for two unrelated
-   situations: a catalog row that declares an empty [api_key_env] (a provider
-   that takes no key), and a provider with no catalog row at all (nothing has
-   said either way). Reading them as one answer let model discovery resolve an
-   empty secret and report success without a credential (#35651). *)
+   A selected keyless catalog row and an unknown provider remain distinct.
+   Reading both as an absent credential let model discovery report success
+   without a credential contract (#35651). *)
 
 open Alcotest
 
-(* Declared in packages/agent_core/models.toml with [api_key_env = ""], which
-   is how the catalog says a provider takes no key. Local, so no network
+(* Declared in packages/agent_core/models.toml with no required key. Local, so no network
    reachability is implied by naming it here. *)
 let keyless_catalog_provider = "ollama"
 
@@ -17,27 +14,36 @@ let keyless_catalog_provider = "ollama"
    [resolve_provider_prefix] to find a registered prefix, so there is none. *)
 let provider_with_no_catalog_row = "no-such-provider-in-the-catalog"
 
+let selected_requirement provider_id =
+  match Runtime_adapter.materialize_credentials ~provider_id ~credential:None with
+  | Error detail -> fail detail
+  | Ok selected -> Runtime_credential_selection.requirement selected.admission
+
+let discovery_key ~provider_id ~credential =
+  Result.bind (Runtime_adapter.materialize_credentials ~provider_id ~credential)
+    Runtime_credential_selection.require_key
+
 let test_the_two_absences_are_different_answers () =
   (match
-     Runtime_adapter.credential_requirement ~provider_id:keyless_catalog_provider None
+     selected_requirement keyless_catalog_provider
    with
-   | Runtime_adapter.Not_required -> ()
-   | Reference _ -> fail "a keyless catalog row must not name a credential"
-   | Missing_declared_credential _ ->
+   | Runtime_credential_selection.Not_required -> ()
+   | Required_env _ | Required_inline | Required_file -> fail "a keyless catalog row must not name a credential"
+   | Required_undeclared ->
      fail "a keyless catalog row does not ask the deployment for a credential"
    | Unknown_provider -> fail "a provider in the catalog is not unknown");
   match
-    Runtime_adapter.credential_requirement ~provider_id:provider_with_no_catalog_row None
+    selected_requirement provider_with_no_catalog_row
   with
-  | Runtime_adapter.Unknown_provider -> ()
+  | Runtime_credential_selection.Unknown_provider -> ()
   | Not_required -> fail "no catalog row is not the same as a row saying no key is needed"
-  | Missing_declared_credential _ ->
+  | Required_undeclared ->
     fail "no catalog row is not the same as a row that requires a key"
-  | Reference _ -> fail "nothing names a credential here"
+  | Required_env _ | Required_inline | Required_file -> fail "nothing names a credential here"
 
 let test_a_provider_with_no_catalog_row_is_refused () =
   match
-    Runtime_adapter.resolve_api_key ~provider_id:provider_with_no_catalog_row
+    discovery_key ~provider_id:provider_with_no_catalog_row
       ~credential:None
   with
   | Ok _ -> fail "an unnamed credential for an unknown provider must not resolve"
@@ -49,7 +55,7 @@ let test_a_provider_with_no_catalog_row_is_refused () =
 
 let test_a_keyless_catalog_provider_still_resolves () =
   match
-    Runtime_adapter.resolve_api_key ~provider_id:keyless_catalog_provider ~credential:None
+    discovery_key ~provider_id:keyless_catalog_provider ~credential:None
   with
   | Error detail -> failf "a keyless provider must still resolve: %s" detail
   | Ok secret ->
@@ -59,7 +65,7 @@ let test_an_explicit_credential_carries_an_unknown_provider () =
   (* The refusal above is about an absent credential, not about the provider
      being unfamiliar: an operator who names one is answered. *)
   match
-    Runtime_adapter.resolve_api_key ~provider_id:provider_with_no_catalog_row
+    discovery_key ~provider_id:provider_with_no_catalog_row
       ~credential:(Some (Runtime_schema.Inline "test-inline-value"))
   with
   | Error detail -> failf "an explicit credential must resolve: %s" detail

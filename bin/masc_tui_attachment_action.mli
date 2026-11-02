@@ -74,7 +74,10 @@ val midi_path : prepared -> string option
 (** Frozen cached MIDI source, available only after preparation. Does not
     fetch or launch; the caller must still admit the original request owner. *)
 
-val perform : prepared -> midi_soundfont:string option -> outcome
+val external_file : prepared -> (string * string) option
+(** The name and path of an allowed external file, after preparation. *)
+
+val perform : ?open_url:(string -> (string, string) result) -> prepared -> midi_soundfont:string option -> outcome
 (** Start the prepared action only after the caller admits its original owner.
     Does not fetch, write or parse attachment bytes. *)
 

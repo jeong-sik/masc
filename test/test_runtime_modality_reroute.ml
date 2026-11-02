@@ -712,12 +712,12 @@ supports-multimodal-inputs = true
     let claude =
       runtime "claude.vision"
         (Runtime_execution.Claude_code
-           { cli_path = "claude"; account_home = None; model = Some "vision"; timeout_s = 30. })
+           { cli_path = "claude"; account_home = Masc_test_deps.claude_account (); model = Some "vision"; timeout_s = 30. })
     in
     let codex =
       runtime "codex.vision"
         (Runtime_execution.Codex_app_server
-           { cli_path = "codex"; account_home = None; model = Some "vision"; timeout_s = 30. })
+           { cli_path = "codex"; account_home = Masc_test_deps.codex_account (); model = Some "vision"; timeout_s = 30. })
     in
     let image = Agent_core.Types.image_block ~media_type:"image/png" ~source:((stored_source ~media_type:"image/png" "abc")) in
     (match Runtime_agent.decide_modality_reroute_for_runtime_candidates

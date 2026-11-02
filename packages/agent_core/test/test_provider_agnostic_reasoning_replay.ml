@@ -1478,6 +1478,27 @@ let test_prefix_binding_keeps_thinking_when_the_cached_system_form_is_unchanged 
     (List.mem "thinking" (List.nth types 1))
 ;;
 
+let test_prefix_binding_tracks_split_system_blocks () =
+  let unsplit = anthropic_build_config_variant
+      ~system:"고정 지침\n\nGoal observation" ~cache_system_prompt:true () in
+  let split = {unsplit with Provider_config.system_prompt_cache_prefix = Some "고정 지침"} in
+  let tools = [prefix_test_tool_schema] in
+  let carrier = message User [Text "trigger"] in
+  let assistant config = stamped_assistant ~config ~request_messages:[carrier] ~tools
+      [Thinking {content = "reasoning"; signature = Some "sig"};
+       ToolUse {id = "call-1"; name = "inspect"; input = `Assoc []}] in
+  let replays produced current =
+    let messages = [carrier; assistant produced; message Tool [tool_result "call-1"]] in
+    let body = Backend_anthropic.build_request ~config:current ~messages ~tools () in
+    List.mem "thinking" (List.nth (wire_content_types body) 1) in
+  check_bool "a new System block boundary invalidates the prior signed prefix"
+    false (replays unsplit split);
+  check_bool "the same split System retains valid signed thinking"
+    true (replays split split);
+  check_bool "changing only cache TTL preserves the signed prefix"
+    true (replays split {split with cache_extended_ttl = true})
+;;
+
 let test_prefix_binding_keeps_thinking_across_chained_rounds () =
   let preserve_always =
     { (Capabilities.capabilities_of_kind Provider_config.Anthropic) with
@@ -2113,15 +2134,15 @@ let test_provider_replay_policy_matrix_pinned () =
 ;;
 
 let test_clear_thinking_replay_requires_catalog_reasoning_support () =
-  let previous = Model_catalog.global () in
-  let restore () = match previous with
-    | Some catalog -> Model_catalog.set_global catalog
-    | None -> Model_catalog.clear_global () in
+  let previous = Llm_provider.Catalog_snapshot.current () in
+  let _,providers = Llm_provider.Catalog_snapshot.sources previous in
+  let restore () = Llm_provider.Catalog_snapshot.publish previous in
   let catalog = match Model_catalog.load_default () with
     | Ok catalog -> catalog
     | Error detail -> Alcotest.fail detail in
   Fun.protect ~finally:restore (fun () ->
-    Model_catalog.set_global catalog;
+    Llm_provider.Catalog_snapshot.publish
+      (Agent_core_test_deps.admit_catalogs ~models:(Some catalog) ~providers);
     List.iter (fun (model_id, supports_reasoning) ->
       let config = Provider_config.make
           ~kind:Glm ~provider_id:"glm" ~model_id ~base_url:"https://api.z.ai"
@@ -2979,6 +3000,10 @@ let () =
             "prefix binding keeps thinking when the cached system form is unchanged"
             `Quick
             test_prefix_binding_keeps_thinking_when_the_cached_system_form_is_unchanged
+        ; Alcotest.test_case
+            "prefix binding tracks split System blocks"
+            `Quick
+            test_prefix_binding_tracks_split_system_blocks
         ; Alcotest.test_case
             "prefix binding keeps thinking across chained rounds"
             `Quick

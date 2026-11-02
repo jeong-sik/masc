@@ -309,6 +309,18 @@ let code = function
      SSOT [Server_auth.http_status_of_auth_error] mirrors. *)
   | System (System_error.IoError _ | System_error.LockContention _) -> 503
 
+(* Total dispatch: a new Task_error constructor is a compile error here,
+   so the claim path's NotFound classification cannot silently flip. *)
+let is_task_not_found = function
+  | Task (Task_error.NotFound _) -> true
+  | Task ( Task_error.AlreadyClaimed _
+         | Task_error.NotClaimed _
+         | Task_error.InvalidState _
+         | Task_error.InvalidId _
+         | Task_error.TransitionRejected _
+         | Task_error.VerificationSuperseded _ ) -> false
+  | Agent _ | Auth _ | System _ -> false
+
 (* [dashboard_auth_error_code] is the SSOT mapping from a typed
    [masc_error] to the stable dashboard auth-error-code string that the
    dashboard's shell auth summary / keeper stream 401 retry gate

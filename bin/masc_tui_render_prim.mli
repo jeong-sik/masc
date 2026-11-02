@@ -84,6 +84,9 @@ val frame_acting_pane :
 (** The candidate for the synchronous draw. Input must use the copy accepted
     by the terminal, not this temporary construction cell. *)
 
+val frame_tools_task : tools_task_frame option ref
+(** Task viewport from the current draw; commit only after presentation. *)
+
 val frame_panes : Masc_tui_pane_selection.layout ref
 (** Where each pane of the frame being drawn sits, set by the surface ends
     ([finish_surface], [finish_frame_beside_acting_pane]). Commit it only
@@ -136,6 +139,8 @@ val markdown_with_closing :
   closing:string -> width:int -> string -> string list
 
 val document_markdown : width:int -> string -> string list
+(* Render canonical Yojson output, or a prefix starting at byte zero. *)
+val document_json : width:int -> string -> string list
 
 val search_marker : Masc_tui_types.state -> string option
 (** The "/" query on screen and how many rows it reaches, or [None] when no
@@ -306,6 +311,25 @@ val surface_chrome :
 
 val connection_badge : Masc_tui_types.state -> string
 
+type compact_connection_state =
+  | Compact_workspace_mismatch
+  | Compact_workspace_unconfirmed
+  | Compact_workspace_unread
+  | Compact_read_failed
+  | Compact_read_partial
+  | Compact_read_interrupted
+  | Compact_read_unfinished
+  | Compact_reading
+  | Compact_http of Masc_tui_types.connection_status
+
+val compact_connection_state : Masc_tui_types.state -> compact_connection_state
+(** Select the highest-priority current workspace, read or HTTP observation. *)
+
+val usage_connection_badge : Masc_tui_types.state -> string
+
+val compact_connection_badge : Masc_tui_types.state -> width:int -> string * string option
+(** A narrow textual state and any longer status details that remain to show. *)
+
 val badge_row : cols:int -> lead:string -> label:string -> badge:string -> string
 (** A header row of [lead], a bracketed [label] and [badge] for a surface drawn
     in [cols] columns. The label is cut with an ellipsis to the cells left after
@@ -344,6 +368,9 @@ val slash_hint_text : restore:string -> string -> string option
 val keeper_roster_pane_shown : Masc_tui_types.state -> cols:int -> bool
 
 val keeper_action_color : Status.keeper_next_action_path option -> string
+
+val keeper_suggested_action : Masc_tui_keeper_control.reading -> string
+(** The runtime's suggested action, or why it was not observed. *)
 
 val keeper_state_glyph :
   paused:bool ->

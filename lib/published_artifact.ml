@@ -129,9 +129,13 @@ let of_json json =
   else
     let* revisions = match List.assoc_opt "revisions" fields with
       | Some (`List (_ :: _ as items)) ->
-        List.fold_right (fun json rest ->
-          let* r = revision_of_json json in
-          let* rest = rest in Ok (r :: rest)) items (Ok [])
+        let rec loop acc = function
+          | [] -> Ok (List.rev acc)
+          | json :: rest ->
+            let* r = revision_of_json json in
+            loop (r :: acc) rest
+        in
+        loop [] items
       | _ -> Error "revisions must be nonempty" in
     let rec contiguous expected = function
       | [] -> expected = 0

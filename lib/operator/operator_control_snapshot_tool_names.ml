@@ -4,17 +4,19 @@
     Pure JSON/string helpers used to surface the recent tools a keeper
     has called in the operator's "recent" view. *)
 
+module Tool_name_set = Set.Make (String)
+
 let merge_tool_name_lists primary secondary =
-  let seen = Hashtbl.create 16 in
-  let add acc raw_name =
+  let add (seen, rev_acc) raw_name =
     let name = String.trim raw_name in
-    if name = "" || Hashtbl.mem seen name
-    then acc
-    else (
-      Hashtbl.replace seen name ();
-      name :: acc)
+    if name = "" || Tool_name_set.mem name seen
+    then seen, rev_acc
+    else Tool_name_set.add name seen, name :: rev_acc
   in
-  List.rev (List.fold_left add [] (List.concat [ primary; secondary ]))
+  let _, rev_acc =
+    List.fold_left add (Tool_name_set.empty, []) (List.concat [ primary; secondary ])
+  in
+  List.rev rev_acc
 ;;
 
 let tool_names_of_recent_json (json : Yojson.Safe.t) =

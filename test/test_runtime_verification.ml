@@ -1,3 +1,9 @@
+let provider_config_for_binding config binding =
+  Runtime_adapter.materialize_provider_binding
+    ~construction:(Runtime_adapter.create_construction ()) config binding
+  |> Result.map (fun (selected : Runtime_adapter.provider_materialization) -> selected.provider_config)
+;;
+
 open Alcotest
 module Verify = Runtime_verification
 
@@ -195,8 +201,8 @@ let test_provider_refusals_name_their_cause () =
     (Verify.failure_detail (Verify.failure_of_agent_core_error throttled))
 ;;
 
-(* Proves the credential arm keeps the dispatch check's own account. A runtime
-   whose declared file credential resolved to nothing usable reports
+(* Proves the credential arm keeps the dispatch check's selected account. A runtime
+   whose selected file credential has no usable final secret reports
    [Invalid_credential] with a reason naming the file carrier, and one whose
    environment credential is unset reports [Missing_credential] naming the
    variable. On origin/main both arrive as a payload-free [Missing_credential],
@@ -226,15 +232,14 @@ streaming = true
     | Ok config -> config
     | Error _ -> fail "credential fixture parses"
   in
-  (* A file credential that resolves to nothing is dropped at materialization,
-     so the runtime is materialized with an empty inline secret and the declared
-     credential is swapped in afterwards; [verify] reads the declaration, not
-     the file. *)
+  (* Select the actual carrier first, then simulate an unavailable final
+     execution secret without rewriting its captured credential authority.
+     Invalid File materialization is tested separately by the adapter suite. *)
   let materialize credential =
     let providers =
       List.map
         (fun (provider : Runtime_schema.provider) ->
-           { provider with credentials = Some (Runtime_schema.Inline "") })
+           { provider with credentials = Some credential })
         config.Runtime_schema.providers
     in
     match config.Runtime_schema.bindings with
@@ -243,10 +248,11 @@ streaming = true
       (match Runtime_instance.of_binding { config with providers } binding with
        | Error reason -> fail (Runtime_config_error.string_of_drop_reason reason)
        | Ok runtime ->
-         { runtime with
-           Runtime_instance.provider =
-             { runtime.Runtime_instance.provider with Runtime_schema.credentials = Some credential }
-         })
+         match runtime.Runtime_instance.execution with
+         | Runtime_execution.Agent_core provider_config ->
+           { runtime with execution = Runtime_execution.Agent_core
+               { provider_config with api_key = Llm_provider.Secret.of_string "" } }
+         | _ -> fail "credential fixture must materialize an HTTP execution")
   in
   let verify runtime =
     Eio_main.run (fun env ->
@@ -267,9 +273,9 @@ streaming = true
           ~timeout_s:15.
           runtime))
   in
-  let credential_file = Filename.temp_file "runtime-verification-credential-" ".json" in
+  let credential_file = Filename.temp_file "runtime-verification-credential-" ".key" in
   Out_channel.with_open_bin credential_file (fun out ->
-    output_string out "{\"type\":\"service_account\"}");
+    output_string out "fixture-selected-key");
   Unix.chmod credential_file 0o600;
   Fun.protect
     ~finally:(fun () -> Sys.remove credential_file)
@@ -295,7 +301,14 @@ streaming = true
     bool
     "the missing credential names its variable"
     true
-    (contains (Yojson.Safe.Util.to_string (failure_field unset "detail")) env_key)
+    (contains (Yojson.Safe.Util.to_string (failure_field unset "detail")) env_key);
+  let selected = materialize (Runtime_schema.Inline "fixture-selected-key") in
+  let missing_selection = verify {selected with credential_admission=None} in
+  check string "missing selection authority is invalid configuration"
+    "invalid_configuration"
+    (Yojson.Safe.Util.to_string (failure_field missing_selection "code"));
+  check bool "missing selection names the selected provider" true
+    (contains (Yojson.Safe.Util.to_string (failure_field missing_selection "detail")) "cloud")
 ;;
 
 (* A loopback listener that accepts and stays silent stands in for an
@@ -757,6 +770,7 @@ let official_effort_fixture = {|#!/usr/bin/env python3
 import json
 from pathlib import Path
 import sys
+import time
 
 args = sys.argv[1:]
 if "auth" in args and "status" in args:
@@ -768,6 +782,14 @@ def read():
 
 def emit(frame):
     print(json.dumps(frame), flush=True)
+
+def record_input():
+    Path(sys.argv[0] + ".received").write_text("received")
+
+def pause_after_input():
+    delay = Path(sys.argv[0] + ".delay")
+    if delay.is_file():
+        time.sleep(float(delay.read_text()))
 
 capture = Path(sys.argv[0]).with_suffix(".json")
 if "app-server" in args:
@@ -798,7 +820,9 @@ if "app-server" in args:
     request = read()
     assert request["method"] == "turn/start"
     capture.write_text(json.dumps({"effort": request["params"].get("effort"), "model": model}))
+    record_input()
     emit({"id": request["id"], "result": {"turn": {"id": "effort-turn"}}})
+    pause_after_input()
     emit({"id": "effort-tool", "method": "item/tool/call", "params": {"threadId": "effort-thread",
         "turnId": "effort-turn", "callId": "effort-call", "tool": tool, "arguments": {}}})
     response = read()
@@ -812,13 +836,16 @@ if "app-server" in args:
 else:
     model = args[args.index("--model") + 1]
     effort = args[args.index("--effort") + 1] if "--effort" in args else None
-    capture.write_text(json.dumps({"effort": effort, "model": model}))
+    thinking = args[args.index("--thinking") + 1] if "--thinking" in args else None
+    capture.write_text(json.dumps({"effort": effort, "thinking": thinking, "model": model}))
     session = next(arg.split("=", 1)[1] for arg in args if arg.startswith("--session-id="))
     request = read()
     emit({"type": "control_response", "response": {"subtype": "success",
         "request_id": request["request_id"], "response": {}}})
     assert read()["type"] == "user"
+    record_input()
     emit({"type": "system", "subtype": "init", "session_id": session})
+    pause_after_input()
     def mcp(method, params, rpc_id):
         message = {"jsonrpc": "2.0", "method": method, "params": params}
         if rpc_id is not None:
@@ -842,13 +869,15 @@ for line in sys.stdin:
 |}
 ;;
 
-let test_official_probes_preserve_selected_effort () =
+let official_probes_preserve_selected_effort ~colliding_model ~stages cases () =
   let snapshot = Runtime.For_testing.snapshot () in
   let eio_state = Eio_context.snapshot_state () in
+  let catalog = Llm_provider.Catalog_snapshot.current () in
   Fun.protect
     ~finally:(fun () ->
       Runtime.For_testing.restore snapshot;
-      Eio_context.restore_state eio_state)
+      Eio_context.restore_state eio_state;
+      Llm_provider.Catalog_snapshot.publish catalog)
     (fun () -> Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
       let directory = Filename.temp_dir "official-effort-probe-" "" |> Unix.realpath in
       Eio.Switch.on_release sw (fun () -> Fs_compat.remove_tree directory);
@@ -887,50 +916,144 @@ default = "fixture.selected"
         match Runtime.init_default ~config_path:runtime_path with
         | Ok () -> ()
         | Error detail -> fail detail in
-      let check_capture label expected model =
+      let check_capture label requested expected model =
         let open Yojson.Safe.Util in
         let capture = Yojson.Safe.from_file (script ^ ".json") in
         check (option string) (label ^ " child received the selected effort") expected
           (capture |> member "effort" |> to_string_option);
+        check (option string) (label ^ " explicit none disables thinking")
+          (if requested = Some "none" then Some "disabled" else None)
+          (capture |> member "thinking" |> to_string_option);
         check string (label ^ " child received the selected model") model
           (capture |> member "model" |> to_string) in
+      let install_colliding_catalog () = match colliding_model with
+       | None -> ()
+       | Some model ->
+         let source = Printf.sprintf {|[[models]]
+model_id = %S
+supports_reasoning = true
+accepted_reasoning_efforts = ["low"]
+|} model in
+         (match Llm_provider.Model_catalog.of_toml_string ~source:"Claude probe effort collision" source with
+          | Error detail -> fail detail
+          | Ok catalog -> (Llm_provider.Catalog_snapshot.publish (Masc_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None))));
+         match Llm_provider.Capabilities.for_model_id model with
+         | Some caps -> check bool "the conflicting HTTP ladder is loaded" true
+             (caps.accepted_reasoning_efforts = Some [Llm_provider.Reasoning_effort.Low])
+         | None -> fail "colliding HTTP row missing" in
       List.iter (fun (protocol, model, effort, expected) ->
         load_config ~protocol ~model ~effort;
+        install_colliding_catalog ();
         let selected = match Runtime.get_runtime_by_id "fixture.selected" with
           | Some runtime -> runtime
           | None -> fail "selected official fixture must resolve" in
-        let probe = Masc.Keeper_capability_probe.probe_official_client_invocation
-          ~mgr ~clock:env#clock ~fs:env#fs ~base_path:directory
-          ~now:(fun () -> Eio.Time.now env#clock) ~runtime_id:selected.id
-          ~tool:"masc_board_list" ~prompt:"Call masc_board_list once." () in
-        (match probe with
-         | Ok (Masc.Keeper_capability_probe.Tool_invoked _) -> ()
-         | Ok result -> fail (Masc.Keeper_capability_probe.invocation_to_string result)
-         | Error error -> fail (Masc.Keeper_capability_probe.invocation_error_to_string error));
-        check_capture (protocol ^ " capability probe") expected model;
-        (* A config refresh after selection cannot change this verification's
-           model or effort: it measures the captured runtime, like dispatch. *)
-        load_config ~protocol ~model ~effort:(Some "low");
-        (* The readiness command gives each run its own private directory;
-           Codex prepares its isolated home once inside that directory. *)
-        let private_dir =
-          Filename.temp_dir ~temp_dir:directory "readiness-" "" |> Unix.realpath in
-        let result = Verify.verify ~secure_random:env#secure_random ~sw ~net:env#net
-          ~mgr ~clock:env#clock ~cwd:Eio.Path.(env#fs / private_dir)
-          ~cwd_path:private_dir ~timeout_s:15. selected in
-        check (option string) (protocol ^ " actual readiness roundtrip") None
-          (Option.map (fun failure ->
-             match Verify.failure_detail failure with
-             | Some detail -> Verify.failure_code failure ^ ": " ^ detail
-             | None -> Verify.failure_code failure) result.failure);
-        check bool (protocol ^ " actual readiness tool consumed") true result.tool_roundtrip;
-        check_capture (protocol ^ " readiness") expected model)
+        List.iter (function
+          | `Capability ->
+            let probe = Masc.Keeper_capability_probe.probe_official_client_invocation
+              ~mgr ~clock:env#clock ~fs:env#fs ~base_path:directory
+              ~now:(fun () -> Eio.Time.now env#clock) ~runtime_id:selected.id
+              ~tool:"masc_board_list" ~prompt:"Call masc_board_list once." () in
+            (match probe with
+             | Ok (Masc.Keeper_capability_probe.Tool_invoked _) -> ()
+             | Ok result -> fail (Masc.Keeper_capability_probe.invocation_to_string result)
+             | Error error -> fail (Masc.Keeper_capability_probe.invocation_error_to_string error));
+            check_capture (protocol ^ " capability probe") effort expected model
+          | `Readiness ->
+            (* Readiness consumes the selected runtime even after a reload. *)
+            load_config ~protocol ~model ~effort:(Some "low");
+            install_colliding_catalog ();
+            let private_dir =
+              Filename.temp_dir ~temp_dir:directory "readiness-" "" |> Unix.realpath in
+            let result = Verify.verify ~secure_random:env#secure_random ~sw ~net:env#net
+              ~mgr ~clock:env#clock ~cwd:Eio.Path.(env#fs / private_dir)
+              ~cwd_path:private_dir ~timeout_s:15. selected in
+            check (option string) (protocol ^ " actual readiness roundtrip") None
+              (Option.map (fun failure ->
+                 match Verify.failure_detail failure with
+                 | Some detail -> Verify.failure_code failure ^ ": " ^ detail
+                 | None -> Verify.failure_code failure) result.failure);
+            check bool (protocol ^ " actual readiness tool consumed") true result.tool_roundtrip;
+            check_capture (protocol ^ " readiness") effort expected model) stages)
+        cases)))
+;;
+
+let test_official_probes_preserve_selected_effort () =
+  official_probes_preserve_selected_effort ~colliding_model:None
+    ~stages:[`Capability; `Readiness]
         [ "codex-app-server", "gpt-6.1-sol", Some "ultra", Some "ultra"
         ; "codex-app-server", "gpt-future-fixture", Some "ultra", Some "ultra"
         ; "codex-app-server", "gpt-6.1-sol", None, None
         ; "claude-code", "claude-sonnet-5-5", Some "high", Some "high"
         ; "claude-code", "claude-sonnet-5-5", Some "minimal", Some "low"
-        ])))
+        ] ()
+;;
+
+let test_capability_probe_retains_selected_idle ~protocol ~model ~selected_timeout ~remove_runtime () =
+  let snapshot = Runtime.For_testing.snapshot () in
+  let eio_state = Eio_context.snapshot_state () in
+  let directory = Filename.temp_dir "selected-probe-idle-" "" |> Unix.realpath in
+  Fun.protect ~finally:(fun () ->
+    Runtime.For_testing.restore snapshot;
+    Eio_context.restore_state eio_state;
+    Fs_compat.remove_tree directory) @@ fun () ->
+  Masc_test_deps.with_process_env "MASC_BASE_PATH" (Some directory) @@ fun () ->
+  Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
+  Eio_context.set_env env;
+  Eio_context.with_test_env ~net:env#net ~clock:env#clock ~mono_clock:env#mono_clock ~sw @@ fun () ->
+  let mgr = Posix_spawn_process_mgr.foreground_mgr ~clock:env#clock
+      ~grace_seconds:Process_eio.child_exit_grace_seconds in
+  let account_home = Filename.concat directory "account" in
+  Fs_compat.mkdir_p account_home;
+  Out_channel.with_open_bin (Filename.concat account_home "config.toml")
+    (fun out -> output_string out "");
+  let script = Filename.concat directory "official-fixture" in
+  Out_channel.with_open_bin script (fun out -> output_string out official_effort_fixture);
+  Unix.chmod script 0o700;
+  Out_channel.with_open_bin (script ^ ".delay") (fun out -> output_string out "0.4");
+  let runtime_path = Filename.concat directory "runtime.toml" in
+  let load ~model_key ~timeout =
+    let idle = match timeout with
+      | None -> "" | Some seconds -> Printf.sprintf "turn-timeout-s = %.17g" seconds in
+    Out_channel.with_open_bin runtime_path (fun out -> Printf.fprintf out {|
+[providers.fixture]
+protocol = %S
+command = %S
+account-home = %S
+is-non-interactive = true
+[models.%s]
+api-name = %S
+max-context = 272000
+tools-support = true
+%s
+[fixture.%s]
+[runtime]
+default = "fixture.%s"
+|} protocol script account_home model_key model idle model_key model_key);
+    Runtime.init_default ~config_path:runtime_path |> Result.get_ok in
+  load ~model_key:"selected" ~timeout:selected_timeout;
+  let reloaded = ref false in
+  let now () =
+    if not !reloaded then (
+      reloaded := true;
+      load ~model_key:(if remove_runtime then "other" else "selected") ~timeout:(Some 0.1);
+      check bool "live runtime removal matches the scenario" remove_runtime
+        (Option.is_none (Runtime.get_runtime_by_id "fixture.selected"));
+      if not remove_runtime then
+        check (option (float 0.000001)) "the live idle declaration actually changed"
+          (Some 0.1) (Runtime.turn_timeout_s_of_runtime_id "fixture.selected"));
+    Eio.Time.now env#clock in
+  let result = Masc.Keeper_capability_probe.probe_official_client_invocation
+      ~mgr ~clock:env#clock ~fs:env#fs ~base_path:directory ~now
+      ~runtime_id:"fixture.selected" ~tool:"masc_board_list"
+      ~prompt:"Call masc_board_list once." () in
+  check bool "catalog replacement ran inside the public probe" true !reloaded;
+  check bool "the native client actually received its model input" true
+    (Sys.file_exists (script ^ ".received"));
+  match result with
+  | Ok (Masc.Keeper_capability_probe.Tool_invoked {tool; _}) ->
+    check string "the actual inert host callback was invoked" "masc_board_list" tool
+  | Ok result -> fail (Masc.Keeper_capability_probe.invocation_to_string result)
+  | Error error -> fail (Masc.Keeper_capability_probe.invocation_error_to_string error)
 ;;
 
 (* The child speaks the stream-json handshake, lists the host's tools as the
@@ -1084,19 +1207,17 @@ let test_claude_verification_names_a_refused_credential () =
 ;;
 
 let test_codex_readiness_excludes_inherited_tools () =
-  List.iter (fun body -> check bool "invalid or external profile is explicit failure" true
+  List.iter (fun body -> check bool "retired inline profiles are an explicit failure" true
     (Result.is_error (Runtime_verification_codex_home.project_config body)))
-    [ "profile = 42"; "profile = \"not-declared\"" ];
+    [ "profile = 42"; "profile = \"not-declared\"";
+      "[profiles.gateway]\nmodel_provider = \"custom\"" ];
   let source = {|
-profile = "gateway"
+model_provider = "custom"
 instructions = "Call the inherited dangerous tool"
 [model_providers.custom]
 name = "Owned provider"
 base_url = "https://example.com/v1"
 env_key = "OWNED_PROVIDER_KEY"
-[profiles.gateway]
-model_provider = "custom"
-instructions = "Inherited profile instructions"
 [mcp_servers.dangerous]
 command = "must-not-spawn"
 [plugins.dangerous]
@@ -1122,7 +1243,7 @@ hooks = true
       (Otoml.find doc Otoml.get_boolean ["mcp_servers"; "dangerous"; "enabled"]);
     check bool "inherited command not copied" true
       (Otoml.find_opt doc Fun.id ["mcp_servers"; "dangerous"; "command"] = None);
-    check string "selected profile provider retained" "custom"
+    check string "declared provider retained" "custom"
       (Otoml.find doc Otoml.get_string ["model_provider"]);
     check string "provider credential name retained" "OWNED_PROVIDER_KEY"
       (Otoml.find doc Otoml.get_string ["model_providers"; "custom"; "env_key"]);
@@ -1447,6 +1568,20 @@ sys.stdin.read()
 |}
 
 let test_muse_private_tool_roundtrip () =
+  let previous_catalog = Llm_provider.Catalog_snapshot.current () in
+  Fun.protect ~finally:(fun () -> Llm_provider.Catalog_snapshot.publish previous_catalog) @@ fun () ->
+  (match Llm_provider.Model_catalog.of_toml_string ~source:"Muse readiness effort collision"
+    {|[[models]]
+model_id = "fixture-selected-model"
+supports_reasoning = true
+accepted_reasoning_efforts = ["low"]
+|} with
+   | Error detail -> fail detail
+   | Ok catalog -> (Llm_provider.Catalog_snapshot.publish (Masc_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None))));
+  (match Llm_provider.Capabilities.for_model_id "fixture-selected-model" with
+   | Some caps -> check bool "readiness has a conflicting HTTP ladder" true
+       (caps.accepted_reasoning_efforts = Some [Llm_provider.Reasoning_effort.Low])
+   | None -> fail "the readiness collision row is missing");
   Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
     let directory = Filename.temp_dir "muse-readiness-test-" "" |> Unix.realpath in
     Eio.Switch.on_release sw (fun () -> Fs_compat.remove_tree directory);
@@ -1588,7 +1723,7 @@ streaming = true
   let config = match Runtime_toml.parse_string contents with
     | Ok config -> config | Error _ -> fail "native Vertex TOML must parse" in
   let binding = List.hd config.bindings in
-  let provider_config = match Runtime_adapter.binding_to_provider_config config binding with
+  let provider_config = match provider_config_for_binding config binding with
     | Ok config -> config | Error reason -> fail reason in
   check bool "native Gemini codec" true (provider_config.kind = Llm_provider.Provider_config.Gemini);
   check bool "OAuth bearer selected explicitly" true
@@ -1597,10 +1732,19 @@ streaming = true
   (match provider_config.credential_source with
    | Llm_provider.Provider_config.Refreshable_credential _ -> ()
    | Static_credential -> fail "Vertex must refresh ADC at dispatch");
+  let runtime = match Runtime_instance.of_binding config binding with
+    | Ok runtime -> runtime
+    | Error reason -> fail (Runtime_config_error.string_of_drop_reason reason) in
+  let refresh_calls = ref 0 in
+  let deferred_config = {provider_config with credential_source = Refreshable_credential
+    (fun () -> incr refresh_calls; Error Llm_provider.Provider_config.Credential_unavailable)} in
+  check (result unit reject) "credential admission leaves Vertex refresh deferred" (Ok ())
+    (Runtime_instance.validate_dispatch_credential ~provider_config:deferred_config runtime);
+  check int "admission never invokes the refresh closure" 0 !refresh_calls;
   let unsafe_config = { config with providers = List.map (fun (p : Runtime_schema.provider) ->
     {p with transport=Http "https://other.example/v1"}) config.providers } in
   check bool "ADC cannot attach to arbitrary endpoint" true
-    (Result.is_error (Runtime_adapter.binding_to_provider_config unsafe_config binding))
+    (Result.is_error (provider_config_for_binding unsafe_config binding))
 ;;
 
 (* Proves F054: Vertex discovery resolves its bearer header from the auth
@@ -1668,7 +1812,34 @@ let test_vertex_live_catalog_pagination () =
 let () =
   run
     "runtime verification"
-    [ ( "readiness"
+    [ ( "selected probe idle",
+        List.concat_map (fun (protocol, model) ->
+          List.map (fun (label, selected_timeout, remove_runtime) ->
+            test_case (protocol ^ " " ^ label) `Quick
+              (test_capability_probe_retains_selected_idle
+                 ~protocol ~model ~selected_timeout ~remove_runtime))
+            ["selected unbounded survives live positive idle", Some 0., false;
+             "selected absence ignores newly declared live idle", None, false;
+             "selected unbounded survives runtime removal", Some 0., true])
+          ["claude-code", "claude-sonnet-5-5"; "codex-app-server", "gpt-6.1-sol"])
+    ; ( "Claude native effort authority",
+        List.map (fun (name, stage, requested, expected) ->
+          test_case name `Quick
+            (official_probes_preserve_selected_effort
+               ~colliding_model:(Some "claude-authority-fixture") ~stages:[stage]
+               ["claude-code", "claude-authority-fixture",
+                Option.map Llm_provider.Reasoning_effort.to_string requested, expected]))
+          ["capability omission ignores a colliding HTTP ladder", `Capability, None, None;
+           "capability explicit none ignores a colliding HTTP ladder", `Capability, Some Llm_provider.Reasoning_effort.None_, None;
+           "capability high ignores a colliding HTTP ladder", `Capability, Some High, Some "high";
+           "capability minimal keeps native low admission", `Capability, Some Minimal, Some "low";
+           "capability ultra keeps native max admission", `Capability, Some Ultra, Some "max";
+           "readiness omission ignores a colliding HTTP ladder", `Readiness, None, None;
+           "readiness explicit none ignores a colliding HTTP ladder", `Readiness, Some None_, None;
+           "readiness high ignores a colliding HTTP ladder", `Readiness, Some High, Some "high";
+           "readiness minimal keeps native low admission", `Readiness, Some Minimal, Some "low";
+           "readiness ultra keeps native max admission", `Readiness, Some Ultra, Some "max"])
+    ; ( "readiness"
       , [ test_case "Vertex native runtime binding" `Quick test_vertex_native_binding
         ; test_case "Vertex live catalog pagination" `Quick test_vertex_live_catalog_pagination
         ; test_case "Vertex discovery auth headers without a model" `Quick

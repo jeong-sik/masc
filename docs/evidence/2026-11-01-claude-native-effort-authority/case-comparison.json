@@ -1,0 +1,518 @@
+{
+  "identity": "Byte-identical complete common test source plus actual suite/group/index; full literal names also retained.",
+  "key_encoding": "UTF-8 compact JSON [test source path,group,index,source SHA256] array, ensure_ascii=false, comma/colon separators, one LF",
+  "common_keys_sha256": "2094c08d7b786ce6fa518a170ed0058f6ce1b6d6a055a5da7657f053014bb817",
+  "candidate_keys_sha256": "78a31908439b5f819ca37415c52de606aa593d062e2d7a85a6306a8cc0b7017a",
+  "common_completed_cases": 30,
+  "maintained_pass": 9,
+  "fail_to_pass": 21,
+  "pass_to_fail": 0,
+  "candidate_only_completed_cases": 12,
+  "cases": [
+    {
+      "key": [
+        "test/test_keeper_claude_code_runtime.ml",
+        "native effort authority",
+        0,
+        "99bcce66dd146740a7c27c6b65f0cd619e6f9fa75e42b03f50ba2d876736d5c4"
+      ],
+      "full_literal_name": "Keeper omission ignores a colliding HTTP ladder",
+      "target": "test_keeper_claude_effort_authority",
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "test/test_keeper_claude_code_runtime.ml",
+        "native effort authority",
+        1,
+        "99bcce66dd146740a7c27c6b65f0cd619e6f9fa75e42b03f50ba2d876736d5c4"
+      ],
+      "full_literal_name": "Keeper explicit none ignores a colliding HTTP ladder",
+      "target": "test_keeper_claude_effort_authority",
+      "baseline": "FAIL",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "test/test_keeper_claude_code_runtime.ml",
+        "native effort authority",
+        2,
+        "99bcce66dd146740a7c27c6b65f0cd619e6f9fa75e42b03f50ba2d876736d5c4"
+      ],
+      "full_literal_name": "Keeper minimal keeps native low admission",
+      "target": "test_keeper_claude_effort_authority",
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "test/test_keeper_claude_code_runtime.ml",
+        "native effort authority",
+        3,
+        "99bcce66dd146740a7c27c6b65f0cd619e6f9fa75e42b03f50ba2d876736d5c4"
+      ],
+      "full_literal_name": "Keeper low ignores a colliding HTTP ladder",
+      "target": "test_keeper_claude_effort_authority",
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "test/test_keeper_claude_code_runtime.ml",
+        "native effort authority",
+        4,
+        "99bcce66dd146740a7c27c6b65f0cd619e6f9fa75e42b03f50ba2d876736d5c4"
+      ],
+      "full_literal_name": "Keeper medium ignores a colliding HTTP ladder",
+      "target": "test_keeper_claude_effort_authority",
+      "baseline": "FAIL",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "test/test_keeper_claude_code_runtime.ml",
+        "native effort authority",
+        5,
+        "99bcce66dd146740a7c27c6b65f0cd619e6f9fa75e42b03f50ba2d876736d5c4"
+      ],
+      "full_literal_name": "Keeper high ignores a colliding HTTP ladder",
+      "target": "test_keeper_claude_effort_authority",
+      "baseline": "FAIL",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "test/test_keeper_claude_code_runtime.ml",
+        "native effort authority",
+        6,
+        "99bcce66dd146740a7c27c6b65f0cd619e6f9fa75e42b03f50ba2d876736d5c4"
+      ],
+      "full_literal_name": "Keeper xhigh ignores a colliding HTTP ladder",
+      "target": "test_keeper_claude_effort_authority",
+      "baseline": "FAIL",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "test/test_keeper_claude_code_runtime.ml",
+        "native effort authority",
+        7,
+        "99bcce66dd146740a7c27c6b65f0cd619e6f9fa75e42b03f50ba2d876736d5c4"
+      ],
+      "full_literal_name": "Keeper max ignores a colliding HTTP ladder",
+      "target": "test_keeper_claude_effort_authority",
+      "baseline": "FAIL",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "test/test_keeper_claude_code_runtime.ml",
+        "native effort authority",
+        8,
+        "99bcce66dd146740a7c27c6b65f0cd619e6f9fa75e42b03f50ba2d876736d5c4"
+      ],
+      "full_literal_name": "Keeper ultra keeps native max admission",
+      "target": "test_keeper_claude_effort_authority",
+      "baseline": "FAIL",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "test/test_keeper_claude_code_runtime.ml",
+        "native effort authority",
+        9,
+        "99bcce66dd146740a7c27c6b65f0cd619e6f9fa75e42b03f50ba2d876736d5c4"
+      ],
+      "full_literal_name": "Keeper hook override ignores a colliding HTTP ladder",
+      "target": "test_keeper_claude_effort_authority",
+      "baseline": "FAIL",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "test/test_keeper_claude_code_runtime.ml",
+        "native effort authority",
+        10,
+        "99bcce66dd146740a7c27c6b65f0cd619e6f9fa75e42b03f50ba2d876736d5c4"
+      ],
+      "full_literal_name": "Keeper hook clear leaves native effort absent",
+      "target": "test_keeper_claude_effort_authority",
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "test/test_runtime_verification.ml",
+        "Claude native effort authority",
+        0,
+        "77c113a47eaedc52e6f0dca187869d7fff97ab2b39167c522bc5b9bed31cfdc4"
+      ],
+      "full_literal_name": "capability omission ignores a colliding HTTP ladder",
+      "target": "test_claude_probe_effort_authority",
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "test/test_runtime_verification.ml",
+        "Claude native effort authority",
+        1,
+        "77c113a47eaedc52e6f0dca187869d7fff97ab2b39167c522bc5b9bed31cfdc4"
+      ],
+      "full_literal_name": "capability explicit none ignores a colliding HTTP ladder",
+      "target": "test_claude_probe_effort_authority",
+      "baseline": "FAIL",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "test/test_runtime_verification.ml",
+        "Claude native effort authority",
+        2,
+        "77c113a47eaedc52e6f0dca187869d7fff97ab2b39167c522bc5b9bed31cfdc4"
+      ],
+      "full_literal_name": "capability high ignores a colliding HTTP ladder",
+      "target": "test_claude_probe_effort_authority",
+      "baseline": "FAIL",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "test/test_runtime_verification.ml",
+        "Claude native effort authority",
+        3,
+        "77c113a47eaedc52e6f0dca187869d7fff97ab2b39167c522bc5b9bed31cfdc4"
+      ],
+      "full_literal_name": "capability minimal keeps native low admission",
+      "target": "test_claude_probe_effort_authority",
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "test/test_runtime_verification.ml",
+        "Claude native effort authority",
+        4,
+        "77c113a47eaedc52e6f0dca187869d7fff97ab2b39167c522bc5b9bed31cfdc4"
+      ],
+      "full_literal_name": "capability ultra keeps native max admission",
+      "target": "test_claude_probe_effort_authority",
+      "baseline": "FAIL",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "test/test_runtime_verification.ml",
+        "Claude native effort authority",
+        5,
+        "77c113a47eaedc52e6f0dca187869d7fff97ab2b39167c522bc5b9bed31cfdc4"
+      ],
+      "full_literal_name": "readiness omission ignores a colliding HTTP ladder",
+      "target": "test_claude_probe_effort_authority",
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "test/test_runtime_verification.ml",
+        "Claude native effort authority",
+        6,
+        "77c113a47eaedc52e6f0dca187869d7fff97ab2b39167c522bc5b9bed31cfdc4"
+      ],
+      "full_literal_name": "readiness explicit none ignores a colliding HTTP ladder",
+      "target": "test_claude_probe_effort_authority",
+      "baseline": "FAIL",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "test/test_runtime_verification.ml",
+        "Claude native effort authority",
+        7,
+        "77c113a47eaedc52e6f0dca187869d7fff97ab2b39167c522bc5b9bed31cfdc4"
+      ],
+      "full_literal_name": "readiness high ignores a colliding HTTP ladder",
+      "target": "test_claude_probe_effort_authority",
+      "baseline": "FAIL",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "test/test_runtime_verification.ml",
+        "Claude native effort authority",
+        8,
+        "77c113a47eaedc52e6f0dca187869d7fff97ab2b39167c522bc5b9bed31cfdc4"
+      ],
+      "full_literal_name": "readiness minimal keeps native low admission",
+      "target": "test_claude_probe_effort_authority",
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "test/test_runtime_verification.ml",
+        "Claude native effort authority",
+        9,
+        "77c113a47eaedc52e6f0dca187869d7fff97ab2b39167c522bc5b9bed31cfdc4"
+      ],
+      "full_literal_name": "readiness ultra keeps native max admission",
+      "target": "test_claude_probe_effort_authority",
+      "baseline": "FAIL",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "test/test_fusion_official_client_panel.ml",
+        "Claude native effort authority",
+        0,
+        "af26fa9b324de569d32810552103ae62dd30c90665ea5267c48b77a0b2f655cd"
+      ],
+      "full_literal_name": "panel omission keeps native defaults",
+      "target": "test_fusion_claude_effort_authority",
+      "baseline": "OK",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "test/test_fusion_official_client_panel.ml",
+        "Claude native effort authority",
+        1,
+        "af26fa9b324de569d32810552103ae62dd30c90665ea5267c48b77a0b2f655cd"
+      ],
+      "full_literal_name": "panel explicit none disables native thinking",
+      "target": "test_fusion_claude_effort_authority",
+      "baseline": "FAIL",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "test/test_fusion_official_client_panel.ml",
+        "Claude native effort authority",
+        2,
+        "af26fa9b324de569d32810552103ae62dd30c90665ea5267c48b77a0b2f655cd"
+      ],
+      "full_literal_name": "panel minimal keeps native low admission",
+      "target": "test_fusion_claude_effort_authority",
+      "baseline": "FAIL",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "test/test_fusion_official_client_panel.ml",
+        "Claude native effort authority",
+        3,
+        "af26fa9b324de569d32810552103ae62dd30c90665ea5267c48b77a0b2f655cd"
+      ],
+      "full_literal_name": "panel low ignores a colliding HTTP ladder",
+      "target": "test_fusion_claude_effort_authority",
+      "baseline": "FAIL",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "test/test_fusion_official_client_panel.ml",
+        "Claude native effort authority",
+        4,
+        "af26fa9b324de569d32810552103ae62dd30c90665ea5267c48b77a0b2f655cd"
+      ],
+      "full_literal_name": "panel medium ignores a colliding HTTP ladder",
+      "target": "test_fusion_claude_effort_authority",
+      "baseline": "FAIL",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "test/test_fusion_official_client_panel.ml",
+        "Claude native effort authority",
+        5,
+        "af26fa9b324de569d32810552103ae62dd30c90665ea5267c48b77a0b2f655cd"
+      ],
+      "full_literal_name": "panel high ignores a colliding HTTP ladder",
+      "target": "test_fusion_claude_effort_authority",
+      "baseline": "FAIL",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "test/test_fusion_official_client_panel.ml",
+        "Claude native effort authority",
+        6,
+        "af26fa9b324de569d32810552103ae62dd30c90665ea5267c48b77a0b2f655cd"
+      ],
+      "full_literal_name": "panel xhigh ignores a colliding HTTP ladder",
+      "target": "test_fusion_claude_effort_authority",
+      "baseline": "FAIL",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "test/test_fusion_official_client_panel.ml",
+        "Claude native effort authority",
+        7,
+        "af26fa9b324de569d32810552103ae62dd30c90665ea5267c48b77a0b2f655cd"
+      ],
+      "full_literal_name": "panel max ignores a colliding HTTP ladder",
+      "target": "test_fusion_claude_effort_authority",
+      "baseline": "FAIL",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "test/test_fusion_official_client_panel.ml",
+        "Claude native effort authority",
+        8,
+        "af26fa9b324de569d32810552103ae62dd30c90665ea5267c48b77a0b2f655cd"
+      ],
+      "full_literal_name": "panel ultra keeps native max admission",
+      "target": "test_fusion_claude_effort_authority",
+      "baseline": "FAIL",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "test/test_keeper_claude_code_runtime.ml",
+        "selected inference",
+        0,
+        "99bcce66dd146740a7c27c6b65f0cd619e6f9fa75e42b03f50ba2d876736d5c4"
+      ],
+      "full_literal_name": "selected high survives a replacement low",
+      "target": "test_keeper_claude_selected_inference",
+      "baseline": "not_selected",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "test/test_keeper_claude_code_runtime.ml",
+        "selected inference",
+        1,
+        "99bcce66dd146740a7c27c6b65f0cd619e6f9fa75e42b03f50ba2d876736d5c4"
+      ],
+      "full_literal_name": "selected high survives removing the effort declaration",
+      "target": "test_keeper_claude_selected_inference",
+      "baseline": "not_selected",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "test/test_keeper_claude_code_runtime.ml",
+        "selected inference",
+        2,
+        "99bcce66dd146740a7c27c6b65f0cd619e6f9fa75e42b03f50ba2d876736d5c4"
+      ],
+      "full_literal_name": "selected absence survives adding a live low",
+      "target": "test_keeper_claude_selected_inference",
+      "baseline": "not_selected",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "test/test_keeper_claude_code_runtime.ml",
+        "selected inference",
+        3,
+        "99bcce66dd146740a7c27c6b65f0cd619e6f9fa75e42b03f50ba2d876736d5c4"
+      ],
+      "full_literal_name": "selected explicit none survives a replacement low",
+      "target": "test_keeper_claude_selected_inference",
+      "baseline": "not_selected",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "test/test_keeper_claude_code_runtime.ml",
+        "selected inference",
+        4,
+        "99bcce66dd146740a7c27c6b65f0cd619e6f9fa75e42b03f50ba2d876736d5c4"
+      ],
+      "full_literal_name": "selected high survives removing its runtime",
+      "target": "test_keeper_claude_selected_inference",
+      "baseline": "not_selected",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "test/test_keeper_claude_code_runtime.ml",
+        "selected inference",
+        5,
+        "99bcce66dd146740a7c27c6b65f0cd619e6f9fa75e42b03f50ba2d876736d5c4"
+      ],
+      "full_literal_name": "selected unbounded idle survives a positive replacement",
+      "target": "test_keeper_claude_selected_inference",
+      "baseline": "not_selected",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "test/test_keeper_claude_code_runtime.ml",
+        "selected inference",
+        6,
+        "99bcce66dd146740a7c27c6b65f0cd619e6f9fa75e42b03f50ba2d876736d5c4"
+      ],
+      "full_literal_name": "a hook overrides selected high with native max",
+      "target": "test_keeper_claude_selected_inference",
+      "baseline": "not_selected",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "test/test_keeper_claude_code_runtime.ml",
+        "selected inference",
+        7,
+        "99bcce66dd146740a7c27c6b65f0cd619e6f9fa75e42b03f50ba2d876736d5c4"
+      ],
+      "full_literal_name": "a hook clears the selected effort",
+      "target": "test_keeper_claude_selected_inference",
+      "baseline": "not_selected",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "test/test_keeper_claude_code_runtime.ml",
+        "selected inference",
+        8,
+        "99bcce66dd146740a7c27c6b65f0cd619e6f9fa75e42b03f50ba2d876736d5c4"
+      ],
+      "full_literal_name": "native minimal is still admitted as low",
+      "target": "test_keeper_claude_selected_inference",
+      "baseline": "not_selected",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "test/test_keeper_claude_code_runtime.ml",
+        "selected inference",
+        9,
+        "99bcce66dd146740a7c27c6b65f0cd619e6f9fa75e42b03f50ba2d876736d5c4"
+      ],
+      "full_literal_name": "native ultra is still admitted as max",
+      "target": "test_keeper_claude_selected_inference",
+      "baseline": "not_selected",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "test/test_runtime_claude_effort_admission.ml",
+        "native vocabulary",
+        0,
+        "9f4cc1b3efedb5abd28146ffae37be5914bc8318c8c646e016e90efd7de5be80"
+      ],
+      "full_literal_name": "unsupported raw tiers never reach argv",
+      "target": "test_runtime_claude_effort_admission",
+      "baseline": "not_selected",
+      "candidate": "OK"
+    },
+    {
+      "key": [
+        "test/test_runtime_claude_effort_admission.ml",
+        "native vocabulary",
+        1,
+        "9f4cc1b3efedb5abd28146ffae37be5914bc8318c8c646e016e90efd7de5be80"
+      ],
+      "full_literal_name": "admitted argv preserves all explicit intent",
+      "target": "test_runtime_claude_effort_admission",
+      "baseline": "not_selected",
+      "candidate": "OK"
+    }
+  ],
+  "early_exit_limit": "Failed baseline Keeper cases stop at their first fresh-argv assertion. Their later resume/thinking assertions are not established. Candidate PASS reaches all assertions."
+}

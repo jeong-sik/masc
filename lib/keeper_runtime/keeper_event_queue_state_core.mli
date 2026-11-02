@@ -161,6 +161,7 @@ type t =
   ; projected_dispositions : durable_disposition list
   ; transition_outbox : outbox_entry list
   ; accepted_transfer_projections : accepted_transfer list
+  ; last_non_immediate_served : Keeper_event_queue.urgency option
   }
 
 type transition_result =
@@ -176,6 +177,23 @@ val revision : t -> int64
 val pending : t -> Keeper_event_queue.t
 val pending_selections : t -> pending_selection list
 (** FIFO pending entries with their exact source incarnation authority. *)
+
+val last_non_immediate_served : t -> Keeper_event_queue.urgency option
+(** Non-immediate urgency currently held in this state ([Normal] or [Low]),
+    used by {!peek_when} and {!select_when} for lane preference. On snapshot
+    load it is derived from retained transition evidence, which may not
+    include every acknowledgement. *)
+
+val derived_last_non_immediate_served :
+  transition_outbox:outbox_entry list ->
+  last_transition:transition_receipt option ->
+  projected_dispositions:durable_disposition list ->
+  Keeper_event_queue.urgency option
+(** Reconstruct the most recently served non-immediate urgency across legacy or
+    partially projected snapshots in strict reverse-chronological precedence:
+    1. [transition_outbox] (an applied transition awaiting projection),
+    2. [last_transition] (the latest projected full receipt),
+    3. [projected_dispositions] (newest-first displaced history). *)
 
 type frontier
 (** The point in queue history at which one reader loaded the state. *)
@@ -242,15 +260,17 @@ val peek_when :
   ready:(Keeper_event_queue.stimulus -> bool) ->
   t ->
   Keeper_event_queue.stimulus option
-(** [now] ages a waiting [Low] stimulus into [Normal] priority past
-    {!Keeper_event_queue.low_to_normal_aging_threshold_sec} (#31597). *)
+(** Selects the first ready stimulus under strict [Immediate] priority and
+    deterministic [Normal]/[Low] alternation (#31597). [now] is retained in
+    the signature for caller compatibility; selection is pure and independent
+    of wall-clock elapsed time. *)
 
 val select_when :
   now:float ->
   ready:(Keeper_event_queue.stimulus -> bool) ->
   t ->
   pending_selection option
-(** See {!peek_when} on [now]. *)
+(** See {!peek_when}. *)
 
 val validate_pending_selection :
   selection:pending_selection ->

@@ -74,13 +74,14 @@ let provenance_of_json = function
       let origin_result =
         match List.assoc_opt "origin_artifact_ids" kv with
         | Some (`List xs) ->
-            List.fold_right
-              (fun j acc ->
-                match (Shared_types.Artifact_id.of_json j, acc) with
-                | Ok id, Ok rest -> Ok (id :: rest)
-                | Error e, _ -> Error e
-                | _, Error e -> Error e)
-              xs (Ok [])
+            let rec loop acc = function
+              | [] -> Ok (List.rev acc)
+              | j :: rest ->
+                (match Shared_types.Artifact_id.of_json j with
+                 | Ok id -> loop (id :: acc) rest
+                 | Error _ as err -> err)
+            in
+            loop [] xs
         | None -> Ok []
         | Some other ->
             Error

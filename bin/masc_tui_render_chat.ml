@@ -741,6 +741,17 @@ let keeper_message_identity ~max_cells state keeper_name =
   | Some keeper ->
       let reading = keeper_reading state keeper in
       let health = Keeper_control.health reading in
+      (* Never clip a suggested action into another word or displace the
+         existing identity, gate, runtime or stream facts. The Info pane and
+         selected-Keeper summary carry it when this header has no room. *)
+      let with_suggested_action text =
+        match Keeper_control.next_action reading with
+        | None -> text
+        | Some _ ->
+            let clause = " \xc2\xb7 next: " ^ keeper_suggested_action reading in
+            if Message_layout.display_width text + Message_layout.display_width clause
+               <= max_cells then text ^ clause else text
+      in
       let runtime =
         match reading.Keeper_control.liveness with
         | Keeper_control.Present row -> Some row
@@ -799,7 +810,7 @@ let keeper_message_identity ~max_cells state keeper_name =
                   that stance. *)
                | Persisted_keeper | Remote_keeper -> "absent" ^ stance)
           | Keeper_control.Unobserved | Keeper_control.Invalid _ | Keeper_control.Present _ -> status in
-        fit_identity (compact_status ^ Ansi.reset)
+        with_suggested_action (fit_identity (compact_status ^ Ansi.reset))
       else (match runtime with
        | None ->
            let detail = match keeper.k_origin with
@@ -838,7 +849,7 @@ let keeper_message_identity ~max_cells state keeper_name =
              Option.map (fun live -> live.tl_transcript) state.msg_live
            in
            let prefix_width = Message_layout.display_width prefix in
-           if prefix_width >= max_cells then
+           with_suggested_action (if prefix_width >= max_cells then
              fit_width (prefix ^ runtime_id ^ Ansi.reset) max_cells
            else
              let room = max_cells - prefix_width in
@@ -848,7 +859,7 @@ let keeper_message_identity ~max_cells state keeper_name =
                   ~room:(room - id_width) transcript
               with
               | Some clause -> prefix ^ runtime_id ^ clause ^ Ansi.reset
-              | None -> prefix ^ fit_runtime_id room runtime_id ^ Ansi.reset))
+              | None -> prefix ^ fit_runtime_id room runtime_id ^ Ansi.reset)))
 
 
 (** Render message input/conversation view *)
@@ -1497,6 +1508,10 @@ let committed_request_diagnostics ~tools ~request_id ~execution_id ~edge =
       request_diagnostics ~tools ~request_id ~execution_id
   | Turn_continues | Turn_closes -> []
 
+let compare_request_owner_alias (r1, e1) (r2, e2) =
+  let c = String.compare r1 r2 in
+  if c <> 0 then c else String.compare e1 e2
+
 let chat_request_owners (state : state) ~keeper_name =
   (* All watchers retain their validated request-to-execution binding, even
      when the selected journal has no visible output. Self identities add no
@@ -1510,11 +1525,11 @@ let chat_request_owners (state : state) ~keeper_name =
       if String.equal (Masc_tui_types.turn_log_keeper_name log) keeper_name
          && not (String.equal request_id execution_id)
       then Some (request_id, execution_id) else None)
-  |> List.sort_uniq compare
+  |> List.sort_uniq compare_request_owner_alias
   |> fun aliases ->
      (* Keep the existing first sorted binding if two watchers disagree. *)
-     List.fold_right (fun (request_id, execution_id) owners ->
-       Request_owners.add request_id execution_id owners) aliases Request_owners.empty
+     List.fold_left (fun owners (request_id, execution_id) ->
+       Request_owners.add request_id execution_id owners) Request_owners.empty (List.rev aliases)
 
 let compute_keeper_message_layout_entries (state : state) ~keeper_name ~request_owners
     ~chat_cols ~start_index visible_entries =
@@ -4381,8 +4396,11 @@ let render_keeper_message (state : state) =
           (Theme.recede ()) display_keeper_name Ansi.reset
       in
       let mode_suffix =
-        if String.equal modes "" then ""
-        else Printf.sprintf "  %s%s%s" Ansi.dim modes Ansi.reset
+        (if state.observer_source_loss then
+           "  " ^ Theme.warn () ^ "[events lost]" ^ Ansi.reset
+         else "")
+        ^ (if String.equal modes "" then ""
+           else Printf.sprintf "  %s%s%s" Ansi.dim modes Ansi.reset)
       in
       title, mode_suffix
     in
@@ -4672,6 +4690,7 @@ let render_keeper_message (state : state) =
        | None -> ());
     (match status_frame.kmsf_source with
      | Message_status (live, status) ->
+         let request_id = turn_log_request_id live in
          let live = live.tl_transcript in
          (* The streaming turn is the row the eye waits on: drawn in the
             accent rather than dimmed, behind the mark a running turn wears
@@ -4799,6 +4818,18 @@ let render_keeper_message (state : state) =
                  kind now, rather than by being first among the Attention
                  rows and hoping the order holds. *)
               | Keeper_chat_transcript.Answer_needed ->
+                  Option.iter
+                    (fun (awaiting : Keeper_chat_transcript.awaiting_approval) ->
+                      frame_chat_row_actions :=
+                        Masc_tui_chat_row_actions.with_approval
+                          { scope = (state.workspace_authority, state.workspace_read_authority)
+                          ; keeper = keeper_name
+                          ; request_id
+                          ; tool_call_id = awaiting.call_id
+                          ; approval_id = awaiting.approval_id
+                          }
+                          !frame_chat_row_actions)
+                    (Keeper_chat_transcript.awaiting_approval live);
                   box_line_styled chat_buf chat_cols ~style:(Theme.warn ())
                     ("  " ^ text ^ gate_note)
               | Keeper_chat_transcript.Attention ->

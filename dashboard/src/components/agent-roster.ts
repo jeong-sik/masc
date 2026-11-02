@@ -6,6 +6,7 @@
 
 import { html } from 'htm/preact'
 import { contextObservationMessage } from '../lib/context-observation'
+import { approvalQueueProblem } from '../lib/gate-observation-state'
 import { useEffect, useMemo, useState } from 'preact/hooks'
 import type { Agent, Keeper } from '../types'
 import {
@@ -191,6 +192,11 @@ export function rosterStateNote(
   monitoringHint?: string | null,
 ): RosterStateNote | null {
   if (!keeper) return null
+
+  const queueState = approvalQueueProblem(keeper.approval_queue_state)
+  if (queueState) {
+    return { label: queueState.title, text: queueState.operator_detail }
+  }
 
   const gate = keeper.current_gate
   if (gate?.kind === 'approval_required') {

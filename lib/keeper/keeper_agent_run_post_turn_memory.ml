@@ -70,6 +70,14 @@ let counterpart_observations_before_offloaded ~base_dir ~keeper_name ~before =
     counterpart_observations_before ~base_dir ~keeper_name ~before)
 ;;
 
+let completed_history_changed ~config ~keeper_name =
+  match Env_config.KeeperMemoryOs.librarian_config_state () with
+  | Disabled | Invalid -> ()
+  | Enabled ->
+    Keeper_librarian_queue_signal.changed
+      ~base_path:config.Workspace.base_path ~keeper_name
+;;
+
 let run
   ~config
   ~(meta : Keeper_meta_contract.keeper_meta)
@@ -88,12 +96,7 @@ let run
      configuration wakes nothing. *)
   (match checkpoint_owner with
    | Runtime_execution.Masc_agent_core | Runtime_execution.Official_client ->
-     (match Env_config.KeeperMemoryOs.librarian_config_state () with
-      | Disabled | Invalid -> ()
-      | Enabled ->
-        Keeper_librarian_queue_signal.changed
-          ~base_path:config.Workspace.base_path
-          ~keeper_name:meta.name));
+     completed_history_changed ~config ~keeper_name:meta.name);
   (* Post-turn timing evidence is logged to decisions.jsonl. The keyword
      recall eval that used to ride along here was removed: it was called
      with an empty user message, so it short-circuited to a constant

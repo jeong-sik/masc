@@ -19,8 +19,13 @@ let text = function
 let get parse key json = let* value = field key json in parse value
 let messages = function
   | `List (_ :: _ as values) ->
-      List.fold_right (fun value rest -> let* value = text value in
-        let* rest = rest in Ok (value :: rest)) values (Ok [])
+      let rec loop acc = function
+        | [] -> Ok (List.rev acc)
+        | value :: rest ->
+          let* value = text value in
+          loop (value :: acc) rest
+      in
+      loop [] values
   | _ -> Error "Expected application explanations"
 let decode json =
   let* source_path = get text "source_path" json in

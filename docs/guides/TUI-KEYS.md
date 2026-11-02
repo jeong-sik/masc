@@ -85,7 +85,7 @@ The command palette is `:`.
 | `g` | toggle yolo / auto tool approval |
 | `p / w` | pause / wake |
 | `s` | shutdown |
-| `e` | settings |
+| `e/E` | settings TOML/JSON |
 | `f` | file changes this keeper wrote |
 | `a` | new keeper |
 | `x` | stop and permanently remove the confirmed keeper |
@@ -96,13 +96,14 @@ The command palette is `:`.
 | `PgUp/PgDn` | page |
 | `Home/End` | top/bottom |
 
-Keeper settings `e` reads a fresh snapshot asynchronously before opening the
-external editor. After the editor returns, workspace rechecking and the guarded
-save also run asynchronously; navigation stays available while the receipt is
-pending. Repeated `e` shares that pending save. The footer retains progress or
-failure for the selected Keeper, and a late receipt cannot refresh another Keeper.
+Keeper settings `e` opens TOML and `E` opens JSON in the external editor.
+Both read a fresh snapshot asynchronously and use the same guarded save.
+In TOML, remove an assignment and list `max_context_override` or
+`remote_endpoint` in `reset_fields` to clear it; an omitted field is unchanged.
+Navigation stays available while the receipt is pending. Repeated edit keys
+share that save. A late receipt cannot refresh another Keeper.
 
-After a refusal or unconfirmed result, `e` reads current settings and restores
+After a refusal or unconfirmed result, `e` or `E` reads current settings and restores
 only your changed values for review in the editor. Untouched fields use current
 values. The old revision and context-shrink confirmation are not reused; saving
 requires the new editor roundtrip. Original input and receipts stay with their
@@ -196,7 +197,7 @@ data and paint. A missing finish record remains an unfinished observation.
 | `p` | switch between quota and Keeper usage, and engine telemetry |
 | `f` | search quota accounts; selection follows Plan and Trend |
 | `a` | clear the quota account selection |
-| `x` | show or hide the accounts that cannot be used now |
+| `x` | on Plan: show or hide the group for reports at limit or observed exhaustion |
 | `v` | cycle the Usage reading |
 | `w` | on Usage: cycle the exact UTC day window for provider report history |
 | `1 / 2 / 3` | on Telemetry: Engine, Work, or Tools |
@@ -362,7 +363,7 @@ and UI admission decision; these are not painted-frame or key-latency evidence.
 | `g` | toggle yolo / auto tool approval |
 | `p / w` | pause / wake |
 | `s` | shutdown |
-| `e` | settings |
+| `e/E` | settings TOML/JSON |
 | `f` | file changes this keeper wrote |
 | `a` | new keeper |
 | `x` | stop and permanently remove the confirmed keeper |
@@ -379,7 +380,8 @@ and UI admission decision; these are not painted-frame or key-latency evidence.
 | `d/m/s` | on the Sandbox tab: set the sandbox backend in place: docker / microvm / remote_ssh |
 | `PgUp/PgDn` | on the Sandbox tab: detail page |
 | `R` | on the Sandbox tab: refresh |
-| `e` | on the Settings tab: the settings form; only changed fields are sent |
+| `e` | on the Settings tab: multiline Keeper instructions; only changed fields are sent |
+| `E` | on the Settings tab: the same settings and guarded save in JSON |
 | `L` | on the GitHub tab: start the gh device-flow login with the ticked scopes |
 | `P` | on the GitHub tab: set fine-grained PAT / token |
 | `1` | on the GitHub tab: tick or untick this scope for the next L login |

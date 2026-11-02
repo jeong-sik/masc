@@ -396,7 +396,7 @@ let stream_projection ?on_native_tool_completion ~keeper_name ~raw_trace_run ~tu
     }
 ;;
 
-let run_without_lifecycle ~on_guidance_prepared ~result_scope ~input_source ~argument_source ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~on_results_ready ~required_native_posture ~official_client_continuation ~runtime_id ~keeper_name
+let run_without_lifecycle ~on_guidance_prepared ~result_scope ~input_source ~argument_source ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~on_results_ready ~required_native_posture ~official_client_continuation ~runtime_id ~configured_reasoning_effort ~turn_timeout_s ~keeper_name
     ~on_model_input_window_observation
     ~carried_front_seed
     ~librarian_front
@@ -563,8 +563,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~input_source ~arg
     let* prepared =
       Host.prepare_turn
         ~composed_context
-        ~configured_reasoning_effort:
-          (Runtime_inference.resolve_reasoning_effort ~runtime_id)
+        ~configured_reasoning_effort
         ~runtime_label
         ~keeper_name
         ~turn_count:hook_turn_count
@@ -779,7 +778,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~input_source ~arg
       ; sandbox = true
       ; disable_slash_commands = true
       ; admission_timeout_s = config.timeout_s
-      ; timeout_s = Runtime_inference.resolve_turn_timeout_s_or ~runtime_id ~default:config.timeout_s
+      ; timeout_s = Runtime_inference.turn_timeout_s_of_declared ~default:config.timeout_s turn_timeout_s
       (* A keeper turn is a conversation, not a schema contract: nothing
          downstream parses its text against a domain schema. *)
       ; output_schema = None
@@ -1216,6 +1215,11 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~input_source ~arg
                   { Agent_core.Types.default_inference_telemetry with
                     request_latency_ms = Some latency_ms
                   ; canonical_model_id = Some turn.model
+                  ; reported_cache_usage =
+                      Some
+                        { Agent_core.Types.cache_creation_input_tokens = None
+                        ; cache_read_input_tokens = Some usage.cache_read_input_tokens
+                        }
                   }
             }
           in
@@ -1307,7 +1311,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~input_source ~arg
                   recovery_detail))))
 ;;
 
-let run ?(on_guidance_prepared = fun () -> Ok ()) ~input_source ?argument_source ?official_task_reference ?composed_context ~accepts_image_input ?required_native_posture ?official_client_continuation ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks ~system_prompt
+let run ?(on_guidance_prepared = fun () -> Ok ()) ~input_source ?argument_source ?official_task_reference ?composed_context ~accepts_image_input ?required_native_posture ?official_client_continuation ~runtime_id ~configured_reasoning_effort ~turn_timeout_s ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks ~system_prompt
     ~tools ?(loading_plan = Keeper_official_client_host.All_on_demand) ~initial_messages ~model_input_projection
     ~on_transmitted_model_input ~hooks ~context_injector
     ~context
@@ -1348,6 +1352,8 @@ let run ?(on_guidance_prepared = fun () -> Ok ()) ~input_source ?argument_source
       run_without_lifecycle ~on_guidance_prepared ~result_scope ~input_source ~argument_source ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~on_results_ready ~official_client_continuation
         ~required_native_posture
         ~runtime_id
+        ~configured_reasoning_effort
+        ~turn_timeout_s
         ~keeper_name
         ~on_model_input_window_observation
         ~carried_front_seed

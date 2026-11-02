@@ -7,10 +7,11 @@ No local queue, timer, CI dispatch, request removal or merge is involved.
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from functools import cache
 import importlib.util
 import json
-import os
 from pathlib import Path
 import re
 import subprocess
@@ -19,6 +20,7 @@ import sys
 HERE = Path(__file__).resolve().parent
 
 
+@cache
 def module(name, filename):
     spec = importlib.util.spec_from_file_location(name, HERE / filename)
     result = importlib.util.module_from_spec(spec)
@@ -42,13 +44,6 @@ def command(argv, *, payload=None, env=None):
     result = subprocess.run(argv, input=payload, env=env, text=True,
                             capture_output=True)
     return CommandResult(result.returncode, result.stdout, result.stderr)
-
-
-def review_scope(pr):
-    stack = pr.get("stack")
-    return {"base_ref": pr["base"]["ref"], "base_sha": pr["base"]["sha"],
-            "stack": None if stack is None else {"number": stack["number"],
-                "position": stack["position"], "base_ref": stack["base"]["ref"]}}
 
 
 def pr_identity(pr):
@@ -100,169 +95,20 @@ class GitHub:
             raise Unavailable(f"GET {path}: expected all array pages")
         return [item for page in pages for item in page]
 
-    def commit_accounts(self, base, head):
-        path = f"compare/{base}...{head}?per_page=100"
-        pages = self.api(path, pages=True)
-        identities = module("review_commit_accounts", "review-commit-accounts.py")
-        try:
-            return identities.accounts_from_pages(base, pages)
-        except identities.InvalidComparison as error:
-            raise Unavailable(f"GET {path}: {error}") from error
-
-    def admission(self, pr, reviews, commit_accounts, identities_complete):
-        if not identities_complete or pr["draft"] or pr["state"] != "open" or not any(
-                r["state"] == "APPROVED" for r in reviews):
-            return False
-        # Reuse existing complete-diff/scope authority. Refusal is not a read
-        # error; unreadable evidence must abort planning before any mutation.
-        release = pr["head"]["ref"].startswith("release/v")
-        mode = "--merge-check" if release else "--source-receipt"
-        flags = [mode] + (["--receipt-json"] if release else [])
-        result = command(["bash", str(HERE / "approve-guard.sh"), *flags,
-                          "--repo", self.repo, "--pr", str(pr["number"]),
-                          "--head", pr["head"]["sha"]],
-                         env=dict(os.environ, GUARD_GH=self.gh))
-        if result.returncode not in (0, 2):
-            raise Unavailable(f"review admission #{pr['number']}: {result.stderr.strip()}")
-        if result.returncode == 2:
-            return False
-        try:
-            receipt = json.loads(result.stdout)
-            ids = receipt["approval_ids"]
-            if (receipt["pr"] != pr["number"] or receipt["head"] != pr["head"]["sha"]
-                    or receipt["scope"] != review_scope(pr)
-                    or receipt["policy"] != ("release" if release else "source")
-                    or not isinstance(ids, list) or not ids
-                    or any(type(i) is not int or i < 1 for i in ids)):
-                raise ValueError("invalid receipt scope")
-            by_id = {r["id"]: r for r in reviews}
-            admitted = [by_id[i] for i in ids]
-            actors = [r["user"]["id"] for r in admitted if r["state"] == "APPROVED"]
-            if len(actors) != len(ids) or any(type(a) is not int or a < 1 for a in actors):
-                raise ValueError("invalid admitted reviewer")
-        except (ValueError, KeyError, TypeError) as error:
-            raise Unavailable(f"review admission #{pr['number']}: inconsistent receipt") from error
-        excluded = {actor_id for _, actor_id in commit_accounts} | {pr["user"]["id"]}
-        return any(review.get("commit_id") == pr["head"]["sha"] and actor not in excluded
-                   for review, actor in zip(admitted, actors))
-
-    def independent_source_review(self, pr, reviews, comments, commit_accounts, identities_complete):
-        # A valid independent source review may coexist with somebody else's
-        # unresolved CR. It suppresses a duplicate request; it never admits a
-        # PR or resolves a blocker. Releases still require their CI policy.
-        if (not identities_complete or pr["draft"] or pr["state"] != "open"
-                or pr["head"]["ref"].startswith("release/v")):
-            return False
-        excluded = {actor_id for _, actor_id in commit_accounts} | {pr["user"]["id"]}
-        latest = {}
-        order = module("worklist_formal_order", "review-formal-order.py")
-        try:
-            formal = [r for r in reviews if r.get("state") in order.FORMAL]
-            ordered_latest = order.latest_reviews(formal)
-            ownership = module("worklist_cr_ownership", "review-cr-ownership.py")
-            outstanding = ownership.outstanding([reviews])
-        except (ValueError, TypeError) as error:
-            raise Unavailable(f"#{pr['number']}: formal review ordering unavailable: {error}") from error
-        for review in ordered_latest.values():
-            user = review.get("user")
-            actor_id = user.get("id") if isinstance(user, dict) else None
-            if type(actor_id) is not int or actor_id < 1 or actor_id in latest:
-                raise Unavailable(f"#{pr['number']}: review identity unavailable")
-            latest[actor_id] = review
-        conflicts = any(r["id"] in excluded for r in pr["requested_reviewers"])
-        if any(actor_id is None for _, actor_id, _ in outstanding):
-            raise Unavailable(f"#{pr['number']}: change request identity unavailable")
-        conflicts |= any(actor_id in excluded for _, actor_id, _ in outstanding)
-        candidates = [r for actor_id, r in latest.items()
-                      if actor_id not in excluded and r["state"] == "APPROVED"
-                      and r.get("commit_id") == pr["head"]["sha"]]
-        if not conflicts or not candidates:
-            return False
-        base, head = pr["base"]["sha"], pr["head"]["sha"]
-        decisions = module("worklist_source_decisions", "review-decisions.py")
-        envelopes = ([{"kind": "review", "record": r} for r in reviews]
-                     + [{"kind": "comment", "record": c} for c in comments])
-        try:
-            def record_actor(record, actor):
-                person = record.get("user")
-                if (not isinstance(person, dict) or type(person.get("id")) is not int
-                        or person["id"] < 1 or not isinstance(person.get("login"), str)
-                        or actor is None or person["login"].casefold() != actor.casefold()):
-                    return None
-                return person["id"]
-
-            # Reduction groups by login. Without every decision's user ID,
-            # a later record cannot be proven to belong to the same account.
-            for ordinal, envelope in enumerate(envelopes):
-                decision = decisions.parse_record(envelope, head=head, ordinal=ordinal)
-                if decision is not None and record_actor(envelope["record"], decision.actor) is None:
-                    return False
-            reduction = decisions.reduce_decisions(envelopes, head=head)
-            records = {}
-            for envelope in envelopes:
-                record = envelope["record"]
-                record_id = record.get("id")
-                if type(record_id) is not int or record_id < 1:
-                    continue
-                key = (envelope["kind"], record_id)
-                if key in records:
-                    raise ValueError("duplicate decision record")
-                records[key] = record
-
-            def decision_actor(decision):
-                record = records.get((decision.kind.value, decision.record_id))
-                return record_actor(record, decision.actor) if record is not None else None
-
-            blockers = {decision_actor(d) for d in reduction.blockers}
-            passes = {decision_actor(d) for d in reduction.decisions
-                      if d.state is decisions.State.PASS}
-        except (ValueError, KeyError, TypeError) as error:
-            raise Unavailable(f"review source #{pr['number']}: decision unavailable") from error
-        if None in blockers:
-            return False
-        candidates = [r for r in candidates if r["user"]["id"] in passes
-                      and r["user"]["id"] not in blockers]
-        if not candidates:
-            return False
-        result = command(["python3", str(HERE / "review-diff.py"), "--repo", self.repo,
-                          "--base", base, "--head", head],
-                         env=dict(os.environ, GUARD_GH=self.gh))
-        digest = result.stdout.strip()
-        if result.returncode or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
-            raise Unavailable(f"review source #{pr['number']}: complete diff unavailable")
-        refusal = module("worklist_review_refusal", "review-refusal.py")
-        scope = module("worklist_review_scope", "review-scope.py")
-        try:
-            for review in candidates:
-                if review.get("body") is not None and not isinstance(review["body"], str):
-                    raise ValueError("invalid review body")
-                if refusal.diagnose(review, head=head, policy="source", base_sha=base,
-                                    current_diff=digest):
-                    continue
-                if scope.scope_matches(review.get("body") or "", base_ref=pr["base"]["ref"],
-                        base_sha=base, stack=scope.stack_scope(pr.get("stack")), head=head,
-                        merge_base=lambda b, h: scope.gh_merge_base(self.gh, self.repo, b, h)):
-                    return True
-        except (ValueError, KeyError, TypeError, OSError) as error:
-            raise Unavailable(f"review source #{pr['number']}: scope unavailable") from error
-        return False
-
     def collect_pr(self, pr):
         number = pr["number"]
         reviews = self.collection(f"pulls/{number}/reviews?per_page=100")
-        comments = self.collection(f"issues/{number}/comments?per_page=100")
-        if any(not isinstance(r, dict) for r in (*reviews, *comments)):
-            raise Unavailable(f"#{number}: invalid review or comment record")
-        accounts, identities_complete = self.commit_accounts(pr["base"]["sha"], pr["head"]["sha"])
+        if any(not isinstance(r, dict) for r in reviews):
+            raise Unavailable(f"#{number}: invalid review record")
         if any(not isinstance(r, dict) or not isinstance(r.get("login"), str) or not r["login"]
                or type(r.get("id")) is not int or r["id"] < 1
                for r in pr["requested_reviewers"]):
             raise Unavailable(f"#{number}: requested reviewer identity unavailable")
         known = dict(self.roster_accounts)
         people = [pr["user"], *pr["requested_reviewers"]]
-        people.extend(r.get("user") for r in reviews)
-        people.extend(c.get("user") for c in comments)
-        people.extend({"login": name, "id": actor_id} for name, actor_id in accounts)
+        # Review records can contain an older login, including one later reused
+        # by another account. Only current PR users and the resolved roster
+        # provide login-to-ID mappings for prospective requests.
         for person in people:
             if not isinstance(person, dict):
                 continue
@@ -273,23 +119,18 @@ class GitHub:
             if key in known and known[key] != actor_id:
                 raise Unavailable(f"#{number}: conflicting GitHub account identity")
             known[key] = actor_id
-        decisions = module("worklist_decisions", "review-decisions.py")
-        envelopes = ([{"kind": "review", "record": r} for r in reviews]
-                     + [{"kind": "comment", "record": c} for c in comments])
-        blockers = decisions.reduce_decisions(envelopes, head=pr["head"]["sha"]).to_json()["blockers"]
-        admitted = self.admission(pr, reviews, accounts, identities_complete)
-        independent_review = admitted or self.independent_source_review(
-            pr, reviews, comments, accounts, identities_complete)
-        if admitted or independent_review:
+        native = module("worklist_github_reviews", "github-reviews.py")
+        try:
+            review_state = native.evaluate(pr, reviews, head=pr["head"]["sha"])
+        except (ValueError, TypeError) as error:
+            raise Unavailable(f"#{number}: review state unavailable: {error}") from error
+        if review_state["approval_ids"]:
             after = self.api(f"pulls/{number}")
-            after_accounts, after_complete = self.commit_accounts(pr["base"]["sha"], pr["head"]["sha"])
             after_reviews = self.collection(f"pulls/{number}/reviews?per_page=100")
-            after_comments = self.collection(f"issues/{number}/comments?per_page=100")
             final = self.api(f"pulls/{number}")
             if (pr_identity(after) != pr_identity(pr) or pr_identity(final) != pr_identity(pr)
-                    or after_accounts != accounts or after_complete != identities_complete
-                    or after_reviews != reviews or after_comments != comments):
-                raise Unavailable(f"review admission #{number}: scope or commit identities changed")
+                    or after_reviews != reviews):
+                raise Unavailable(f"review #{number}: scope or review evidence changed")
         return {
             "number": number, "title": pr["title"], "url": pr["html_url"],
             "state": pr["state"], "draft": pr["draft"],
@@ -299,19 +140,20 @@ class GitHub:
             "stack": pr.get("stack"), "created_at": pr["created_at"],
             "requested_reviewers": tuple(r["login"] for r in pr["requested_reviewers"]),
             "requested_teams": tuple(t["slug"] for t in pr["requested_teams"]),
-            "commit_accounts": tuple(name for name, _ in accounts),
-            "commit_actor_ids": tuple(actor_id for _, actor_id in accounts),
-            "account_ids": known, "commit_identities_complete": identities_complete,
+            "account_ids": known,
             "reviews": tuple(reviews),
-            "admission": admitted, "independent_source_review": independent_review,
-            "blockers": tuple(blockers),
         }
 
     def snapshot(self):
         # Each detail read includes authoritative REST stack metadata. Finish
         # all collection/validation before emitting or applying a worklist.
         listed = self.collection("pulls?state=open&per_page=100")
-        return tuple(self.collect_pr(self.api(f"pulls/{p['number']}")) for p in listed)
+        # Load helpers before workers start: some register modules during import.
+        module("worklist_github_reviews", "github-reviews.py")
+        def collect(item):
+            return self.collect_pr(self.api(f"pulls/{item['number']}"))
+        with ThreadPoolExecutor() as executor:
+            return tuple(executor.map(collect, listed))
 
 
 def evidence(snapshot):
@@ -353,14 +195,14 @@ def apply_requests(github, snapshot, worklist):
         if not missing:
             results.append(result | {"state": "already_requested"})
             continue
-        # Own-CR rereviews and replacement independent reviewers may coexist
+        # Own-CR rereviews and other eligible reviewers may coexist
         # with conflicting requests, but never displace a new valid request.
         independent_request = any(
             routing.reviewer_eligibility(parsed, actor) in
             (routing.ReviewerEligibility.ELIGIBLE, routing.ReviewerEligibility.UNKNOWN)
             for actor in live["requested_reviewers"])
-        conflicts = any(a["reason"] == "independent_review" for a in proposed)
-        first = any(a["reason"] not in ("changed_head_cr", "independent_review") for a in proposed)
+        conflicts = any(a["reason"] == "non_author_review" for a in proposed)
+        first = any(a["reason"] not in ("changed_head_cr", "non_author_review") for a in proposed)
         if ((first and (live["requested_reviewers"] or live["requested_teams"]))
                 or (conflicts and (live["requested_teams"] or independent_request))):
             results.append(result | {"state": "assignment_changed"})
@@ -399,22 +241,13 @@ def apply_requests(github, snapshot, worklist):
                                  and a.get("id") not in current_ids
                                  for a in after_requests["users"])
             same_scope = matches_snapshot(after, live)
-            same_identities = None
             if present and same_scope:
-                try:
-                    accounts, complete = github.commit_accounts(live["base_sha"], live["head"])
-                    same_identities = (tuple(name for name, _ in accounts) == live["commit_accounts"]
-                                       and tuple(actor_id for _, actor_id in accounts) == live["commit_actor_ids"]
-                                       and complete == live["commit_identities_complete"])
-                except (Unavailable, ValueError, KeyError, TypeError, OSError):
-                    pass
                 try:
                     final = github.api(f"pulls/{number}")
                     same_scope = matches_snapshot(final, live)
                 except (Unavailable, ValueError, KeyError, TypeError, OSError):
                     same_scope = None
-            result.update(observed=present, scope_unchanged=same_scope,
-                          identities_unchanged=same_identities)
+            result.update(observed=present, scope_unchanged=same_scope)
             prefix = "observed_after_error" if posted.returncode else "requested"
             if wrong_identity:
                 state = prefix + "_wrong_identity"
@@ -424,10 +257,6 @@ def apply_requests(github, snapshot, worklist):
                 state = prefix + "_scope_unconfirmed"
             elif not same_scope:
                 state = prefix + "_scope_changed"
-            elif same_identities is None:
-                state = prefix + "_identity_unconfirmed"
-            elif not same_identities:
-                state = prefix + "_identity_changed"
             else:
                 state = prefix
         except (Unavailable, ValueError, KeyError, TypeError, OSError):
@@ -435,8 +264,8 @@ def apply_requests(github, snapshot, worklist):
         results.append(result | {"state": state,
                                  "planned_head": live["head"],
                                  "error": posted.stderr.strip() if posted.returncode else None})
-        if posted.returncode or state in ("request_unconfirmed", "requested_identity_unconfirmed",
-                                           "requested_scope_unconfirmed", "requested_wrong_identity"):
+        if posted.returncode or state in ("request_unconfirmed", "requested_scope_unconfirmed",
+                                           "requested_wrong_identity"):
             stopped = True
     return results
 

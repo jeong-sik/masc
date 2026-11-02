@@ -12,8 +12,8 @@ let first_model_id ~suite catalog =
 ;;
 
 let with_clean_model_catalog_override f =
-  Model_catalog.clear_global ();
-  Fun.protect ~finally:Model_catalog.clear_global f
+  (Llm_provider.Catalog_snapshot.reset ());
+  Fun.protect ~finally:Llm_provider.Catalog_snapshot.reset f
 ;;
 
 (* Exact model declarations used by subscriptions. The second value records
@@ -97,7 +97,7 @@ let test_haiku_5_5_row_reaches_the_wire () =
   let model_id = "claude-haiku-5-5" in
   let catalog = Model_catalog_test_support.load_repo_model_catalog ~suite:"Haiku 5.5 wire" in
   with_clean_model_catalog_override (fun () ->
-    Model_catalog.set_global catalog;
+    (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None)));
     let messages = [ Llm_provider.Types.make_message ~role:User [ Text "hello" ] ] in
     let config ?temperature ?top_p ?top_k ?enable_thinking ?reasoning_effort () =
       Llm_provider.Provider_config.make
@@ -115,7 +115,7 @@ let test_haiku_5_5_row_reaches_the_wire () =
     check (option bool) "top_k is not offered" (Some false)
       (Option.map
          (fun (caps : Capabilities.capabilities) -> caps.supports_top_k)
-         (Capabilities.for_model_id_catalog model_id));
+         (Capabilities.for_model_id model_id));
     check bool "default leaves adaptive choice to the provider" true
       (thinking (body (config ())) = `Null);
     check bool "thinking on asks for adaptive and binds its blocks" true
@@ -176,7 +176,7 @@ let test_haiku_prefill_admission () =
   let module P = Llm_provider in
   let catalog = Model_catalog_test_support.load_repo_model_catalog ~suite:"Haiku prefill" in
   with_clean_model_catalog_override (fun () ->
-    Model_catalog.set_global catalog;
+    (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None)));
     let user = P.Types.make_message ~role:User [ Text "hello" ] in
     let assistant = P.Types.make_message ~role:Assistant [ Text "Continue:" ] in
     let expected_refusal =
@@ -227,7 +227,7 @@ let test_documented_claude_prefill_exclusions () =
   let module P = Llm_provider in
   let catalog = Model_catalog_test_support.load_repo_model_catalog ~suite:"Claude prefill exclusions" in
   with_clean_model_catalog_override (fun () ->
-    Model_catalog.set_global catalog;
+    (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None)));
     let user = P.Types.make_message ~role:User [Text "hello"] in
     let assistant = P.Types.make_message ~role:Assistant [Text "Continue:"] in
     let prefill = [user; assistant] in
@@ -240,7 +240,7 @@ let test_documented_claude_prefill_exclusions () =
         model_id in
       check (option bool) (model_id ^ " catalog excludes prefill") (Some false)
         (Option.map (fun (caps : Capabilities.capabilities) -> caps.supports_assistant_prefill)
-           (Capabilities.for_model_id_catalog model_id));
+           (Capabilities.for_model_id model_id));
       List.iter (fun stream ->
         check bool (model_id ^ " refuses final assistant before dispatch") true
           (match P.Complete.inspect_serialized_request ~stream ~config ~messages:prefill () with
@@ -278,7 +278,7 @@ let test_sonnet_5_5_thinking_modes_reach_the_wire () =
   let module Effort = Llm_provider.Reasoning_effort in
   let catalog = Model_catalog_test_support.load_repo_model_catalog ~suite:"Sonnet 5.5 wire" in
   with_clean_model_catalog_override (fun () ->
-    Model_catalog.set_global catalog;
+    (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None)));
     let messages = [ Llm_provider.Types.make_message ~role:User [ Text "hello" ] ] in
     let config ?enable_thinking ?reasoning_effort () =
       Llm_provider.Provider_config.make
@@ -338,11 +338,10 @@ let subscription_model_efforts =
   ; Some "openai-responses", "gpt-6-sol", [ "none"; "low"; "medium"; "high"; "xhigh"; "max" ]
   ; Some "openai-responses", "gpt-6-astra", [ "low"; "medium"; "high"; "xhigh"; "max" ]
   ; None, "gpt-5.3-codex-spark", [ "none"; "minimal"; "low"; "medium"; "high"; "xhigh" ]
-    (* The codex lane clamps a binding's effort to the bare row
-       (Keeper_official_client_host.clamp_reasoning_effort_to_catalog). Without
-       "max" here a codex max binding went out as xhigh, and gpt-5.5 fell to the
-       "gpt-5" row, which sent xhigh as high. The Codex cache (2026-09-30)
-       now lists low..ultra for Sol and Terra; gpt-5.5 keeps low..xhigh. *)
+    (* These bare rows belong to HTTP request capability validation.
+       Native Codex model/effort admission reads the client's advertisement;
+       native Claude uses its own CLI vocabulary. Neither consults these
+       unrelated HTTP ladders to choose its requested effort. *)
   ; None, "gpt-5.6-sol", [ "none"; "minimal"; "low"; "medium"; "high"; "xhigh"; "max"; "ultra" ]
   ; None, "gpt-5.6-terra", [ "none"; "minimal"; "low"; "medium"; "high"; "xhigh"; "max"; "ultra" ]
   ; None, "gpt-5.5", [ "low"; "medium"; "high"; "xhigh" ]
@@ -393,7 +392,7 @@ let test_responses_sol_rejects_codex_only_ultra () =
   let module Effort = Llm_provider.Reasoning_effort in
   let catalog = Model_catalog_test_support.load_repo_model_catalog ~suite:"Responses Sol effort" in
   with_clean_model_catalog_override (fun () ->
-    Model_catalog.set_global catalog;
+    (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None)));
     let config effort = Config.make ~kind:OpenAI_compat
       ~provider_id:"openai-responses" ~model_id:"gpt-6-sol"
       ~base_url:"https://api.openai.com/v1" ~reasoning_effort:effort () in
@@ -476,7 +475,7 @@ let test_claude_rows_keep_sampling_parameters_off_the_wire () =
     Model_catalog_test_support.load_repo_model_catalog ~suite:"Claude sampling"
   in
   with_clean_model_catalog_override (fun () ->
-    Model_catalog.set_global catalog;
+    (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None)));
     let messages = [ Llm_provider.Types.make_message ~role:User [ Text "hello" ] ] in
     List.iter
       (fun (model_id, _) ->
@@ -499,7 +498,7 @@ let test_claude_rows_keep_sampling_parameters_off_the_wire () =
            (Some false)
            (Option.map
               (fun (caps : Capabilities.capabilities) -> caps.supports_top_k)
-              (Capabilities.for_model_id_catalog model_id)))
+              (Capabilities.for_model_id model_id)))
       claude_rows_forced_tool_choice)
 ;;
 
@@ -508,10 +507,10 @@ let test_claude_rows_state_forced_tool_choice_as_the_api_takes_it () =
     Model_catalog_test_support.load_repo_model_catalog ~suite:"Claude tool_choice"
   in
   with_clean_model_catalog_override (fun () ->
-    Model_catalog.set_global catalog;
+    (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None)));
     List.iter
       (fun (model_id, accepted) ->
-         match Capabilities.for_model_id_catalog model_id with
+         match Capabilities.for_model_id model_id with
          | None -> failf "%s resolves to no capabilities" model_id
          | Some (caps : Capabilities.capabilities) ->
            check bool
@@ -564,7 +563,7 @@ let test_ollama_cloud_v1_vendor_rows_preserve_probe_truth () =
            (option string)
            (model_id ^ " capability base")
            (Some "ollama_cloud")
-           entry.base_label;
+           (Option.map Llm_provider.Capability_preset.to_string entry.base_label);
          check
            (option int)
            (model_id ^ " context")
@@ -678,12 +677,12 @@ let test_global_loads_default_catalog_for_capabilities () =
     first_model_id ~suite:"model catalog default production path" expected
   in
   with_clean_model_catalog_override (fun () ->
-    match Capabilities.for_model_id_catalog model_id with
+    match Capabilities.for_model_id model_id with
     | Some _ -> ()
     | None ->
       failf
-        "Capabilities.for_model_id_catalog should resolve %S through embedded/default \
-         Model_catalog.global"
+        "Capabilities.for_model_id should resolve %S through embedded/default \
+         Catalog_snapshot.current"
         model_id)
 ;;
 
@@ -769,7 +768,7 @@ let test_catalog_only_runtime_projects_serving_constraint () =
     |> Result.get_ok
   in
   with_clean_model_catalog_override (fun () ->
-    Model_catalog.set_global catalog;
+    (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None)));
     match
       Capabilities.for_provider_model_id
         ~wire:None
@@ -816,7 +815,7 @@ let test_glm_vision_rows_reach_a_runtime_lookup () =
     Model_catalog_test_support.load_repo_model_catalog ~suite:"glm vision runtime rows"
   in
   with_clean_model_catalog_override (fun () ->
-    Model_catalog.set_global catalog;
+    (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None)));
     List.iter
       (fun provider_label ->
         match
@@ -858,7 +857,7 @@ let test_kimi_coding_rows_leave_temperature_out () =
     Model_catalog_test_support.load_repo_model_catalog ~suite:"kimi coding sampling"
   in
   with_clean_model_catalog_override (fun () ->
-    Model_catalog.set_global catalog;
+    (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None)));
     List.iter
       (fun model_id ->
         match
@@ -931,13 +930,14 @@ let test_glm_vision_rows_agree () =
     rows
 ;;
 
-(* Every number here was read from OpenRouter's own GET /api/v1/models
-   metadata or measured on the wire on 2026-09-10
-   (evidence/task-openrouter-support/) or 2026-09-22
-   (evidence/task-openrouter-new-models/). The 2026-10-28 refresh is retained
-   in evidence/2026-10-28-openrouter-bindings/; its two ids, windows and output
-   ceilings also match GET /api/v1/models on 2026-11-01. Provider-scoped lookup
-   is an exact id match, so each row is asserted on its own. *)
+(* Expected declarations from the admitted OpenRouter rows. Historical wire
+   observations are retained in evidence/task-openrouter-support/ and
+   evidence/task-openrouter-new-models/. The October 28 bindings bundle
+   records the exact replacement ids and disabled-reasoning probes, but no
+   listing evidence for the 393216 output ceiling. The November 1 selected
+   listing in evidence/2026-11-01-official-client-audit/ records both ids,
+   windows and output ceilings; it is metadata, not a generation limit test.
+   Provider-scoped lookup is exact, so each row is checked on its own. *)
 let openrouter_rows =
   (* id, context, max output, input $/1M, output $/1M, image input *)
   [ "anthropic/claude-opus-5", 1_000_000, 128_000, 5.0, 25.0, None
@@ -993,7 +993,7 @@ let test_openrouter_rows_preserve_probe_truth () =
          (option string)
          (model_id ^ " capability base")
          (Some "openai_chat_extended")
-         entry.base_label;
+         (Option.map Llm_provider.Capability_preset.to_string entry.base_label);
        check (option int) (model_id ^ " context") (Some context) entry.max_context_tokens;
        check
          (option int)
@@ -1190,7 +1190,8 @@ let test_openrouter_refreshed_efforts_reach_the_wire () =
     Model_catalog_test_support.load_repo_model_catalog ~suite:"OpenRouter effort wire"
   in
   with_clean_model_catalog_override (fun () ->
-    Model_catalog.set_global catalog;
+    Llm_provider.Catalog_snapshot.publish
+      (Agent_core_test_deps.admit_catalogs ~models:(Some catalog) ~providers:None);
     List.iter
       (fun (model_id, accepted, boolean_control) ->
          let config ?enable_thinking ?reasoning_effort () =

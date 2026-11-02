@@ -310,12 +310,15 @@ let fusion_wrapped_block ~width ~indent text =
            |> List.map (fun line -> indent ^ line))
   |> List.map (fun line -> Ansi.reset, line)
 
-let fusion_markdown_block ~width ~indent text =
+let fusion_safe_markdown_block ~width ~indent text =
   let body_width = max 1 (width - Message_layout.display_width indent) in
+  document_markdown ~width:body_width text
+  |> List.map (fun line -> Ansi.reset, indent ^ line)
+
+let fusion_markdown_block ~width ~indent text =
   if String.equal (String.trim text) "" then [ Ansi.dim, indent ^ "(empty)" ]
-  else
-    document_markdown ~width:body_width text
-    |> List.map (fun line -> Ansi.reset, indent ^ line)
+  else fusion_safe_markdown_block ~width ~indent
+      (Keeper_chat.terminal_safe_text ~preserve_newlines:true text)
 
 let fusion_labeled_markdown ~width ~label text =
   (Ansi.bold, "  " ^ label)
@@ -333,34 +336,249 @@ let fusion_tool_agent_suffix actor agent_name =
   then ""
   else "  agent=" ^ Terminal_text.single_line agent_name
 
-let fusion_tool_preview_lines ~width ~label preview =
+type fusion_json_preview =
+  | Fusion_json_container of string
+  | Fusion_json_scalar of string
+  | Fusion_json_original of string * bool list
+
+type fusion_json_lex_state =
+  | Json_code | Json_string | Json_escape | Json_line_comment | Json_block_comment
+
+type fusion_json_scan =
+  { has_comments : bool
+  ; leading_comment : bool
+  ; first_comment : int option
+  ; string_newlines : bool list
+  }
+
+(* Yojson accepts comments but drops them when reprinting. Track comments and
+   string boundaries together, including incomplete previews. *)
+let fusion_json_scan text =
+  let length = String.length text in
+  let index = ref 0 and state = ref Json_code in
+  let has_comments = ref false and leading_comment = ref false in
+  let first_comment = ref None in
+  let leading = ref true and string_newlines = ref [] in
+  while !index < length do
+    let byte = text.[!index] in
+    if byte = '\n' then
+      string_newlines := (!state = Json_string || !state = Json_escape) :: !string_newlines;
+    (match !state with
+     | Json_code ->
+       (match byte with
+        | '"' -> leading := false; state := Json_string
+        | '/' when !index + 1 < length && (text.[!index + 1] = '/' || text.[!index + 1] = '*') ->
+          has_comments := true;
+          if Option.is_none !first_comment then first_comment := Some !index;
+          if !leading then leading_comment := true;
+          state := (if text.[!index + 1] = '/' then Json_line_comment else Json_block_comment);
+          incr index
+        | ' ' | '\t' | '\r' | '\n' -> ()
+        | _ -> leading := false)
+     | Json_string ->
+       if byte = '\\' then state := Json_escape
+       else if byte = '"' then state := Json_code
+     | Json_escape -> state := Json_string
+     | Json_line_comment -> if byte = '\n' then state := Json_code
+     | Json_block_comment ->
+       if byte = '*' && !index + 1 < length && text.[!index + 1] = '/' then begin
+         state := Json_code;
+         incr index
+       end);
+    incr index
+  done;
+  { has_comments = !has_comments
+  ; leading_comment = !leading_comment
+  ; first_comment = !first_comment
+  ; string_newlines = List.rev !string_newlines
+  }
+
+let fusion_json_value_before_comment text scan =
+  match scan.first_comment with
+  | None -> false
+  | Some index ->
+    (try
+       ignore (Yojson.Safe.from_string (String.sub text 0 index));
+       true
+     with Yojson.Json_error _ -> false)
+
+let fusion_json_safe_original text string_newlines =
+  let safe = Masc.Tui_terminal_text.sanitize_terminal_lines text in
+  let output = Buffer.create (String.length safe) in
+  let remaining = ref string_newlines in
+  String.iter (fun byte ->
+    if byte <> '\n' then Buffer.add_char output byte
+    else match !remaining with
+      | in_string :: rest ->
+        remaining := rest;
+        if in_string then Buffer.add_string output "\\x0A"
+        else Buffer.add_char output '\n'
+      | [] -> assert false) safe;
+  Buffer.contents output
+
+let fusion_json_control_byte byte = byte < '\x20' || byte = '\x7f'
+
+(* Yojson.Raw keeps the original spelling of literals, including unescaped
+   controls accepted in a malformed string. Re-encode only those strings so
+   the terminal sanitizer cannot turn the controls into ordinary spaces. *)
+let rec fusion_json_escape_controls (json : Yojson.Raw.t) : Yojson.Raw.t =
+  match json with
+  | `Stringlit literal when String.exists fusion_json_control_byte literal ->
+    `Stringlit (Yojson.Safe.from_string literal |> Yojson.Safe.to_string)
+  | `Assoc fields ->
+    `Assoc (List.map (fun (key, value) -> key, fusion_json_escape_controls value) fields)
+  | `List values -> `List (List.map fusion_json_escape_controls values)
+  | `Null | `Bool _ | `Intlit _ | `Floatlit _ | `Stringlit _ -> json
+
+(* Wrapping can place one indivisible grapheme on a row even when it is wider
+   than the requested body width. Spend indentation after measuring the rows,
+   keeping one indent for the whole reading so its alignment is preserved. *)
+let fusion_preview_indent ~frame_width ~indent_cells rows =
+  let widest = List.fold_left (fun cells line ->
+    max cells (Message_layout.display_width_for_wrapping line)) 0 rows in
+  let indent = String.make (min indent_cells (max 0 (frame_width - widest))) ' ' in
+  List.map (fun line -> Ansi.reset, indent ^ line) rows, widest > frame_width
+
+let fusion_tool_preview_lines ~width ~frame_width ~label preview =
   let size =
     if preview.ftp_truncated
     then Printf.sprintf "%d bytes; preview truncated" preview.ftp_bytes
     else Printf.sprintf "%d bytes" preview.ftp_bytes
   in
-  let payload_text =
-    if preview.ftp_truncated
-    then preview.ftp_text
+  let complete_json =
+    if preview.ftp_truncated then None
     else
       try
-        preview.ftp_text
-        |> Yojson.Safe.from_string
-        |> Yojson.Safe.pretty_to_string
-      with
-      | Yojson.Json_error _ -> preview.ftp_text
+        (* Preserve the old parser's acceptance boundary. Raw accepts some
+           malformed strings that Safe rejects, and formatting those would
+           silently discard comments from what was previously shown verbatim. *)
+        ignore (Yojson.Safe.from_string preview.ftp_text);
+        let scan = fusion_json_scan preview.ftp_text in
+        if scan.has_comments
+        then Some (Fusion_json_original (preview.ftp_text, scan.string_newlines))
+        else
+        (* Keep numeric and string literals while formatting the container:
+           a float conversion can otherwise turn a large exponent into
+           Infinity or round a value before the operator reads it. *)
+        let raw = Yojson.Raw.from_string preview.ftp_text in
+        let has_controls = String.exists fusion_json_control_byte preview.ftp_text in
+        let json = if has_controls then fusion_json_escape_controls raw else raw in
+        match json with
+        | `Floatlit ("NaN" | "Infinity" | "-Infinity") -> None
+        | `Assoc _ | `List _ ->
+          Some (Fusion_json_container (Yojson.Raw.pretty_to_string json))
+        | `Stringlit literal ->
+          let literal_has_controls =
+            match raw with
+            | `Stringlit original -> String.exists fusion_json_control_byte original
+            | _ -> false
+          in
+          Some (Fusion_json_scalar (if literal_has_controls then literal else preview.ftp_text))
+        | `Null | `Bool _ | `Intlit _ | `Floatlit _ ->
+          (* A scalar can also be an arbitrary tool-output string. Preserve
+             its spelling, including exponent and string escapes. *)
+          Some (Fusion_json_scalar preview.ftp_text)
+      with Yojson.Json_error _ -> None
   in
-  let trimmed = String.trim payload_text in
-  let body =
-    if String.starts_with ~prefix:"{" trimmed
-       || String.starts_with ~prefix:"[" trimmed
-    then "```json\n" ^ payload_text ^ "\n```"
-    else payload_text
+  let direct_safe_rows ~language safe =
+    let indent_cells = min 6 (max 0 (width - 1)) in
+    let body_width = max 1 (width - indent_cells) in
+    let palette =
+      { (Masc_tui_markdown_theme.palette ~closing:Ansi.reset) with code_gutter = "" } in
+    Masc_tui_code_lexer.rows_of_source ~language safe
+    |> List.concat_map (fun pieces ->
+         match Masc_tui_markdown.render_lexed_line ~palette ~width:body_width pieces with
+         | [] -> [ "" ]
+         | rows -> rows)
+    |> fusion_preview_indent ~frame_width ~indent_cells
+    |> fst
   in
-  [ Ansi.dim, Printf.sprintf "    %s (%s)" label size ]
-  @ fusion_markdown_block ~width ~indent:"      " body
+  let direct_safe_json_rows ?(language = "json") safe =
+    direct_safe_rows ~language:(Some language) safe in
+  let fenced_json_rows payload =
+    (* Choose a fence only after control characters have been made safe: that
+       pass can otherwise turn a line into a closing fence. *)
+    let safe = Keeper_chat.terminal_safe_text ~preserve_newlines:true payload in
+    let palette = Masc_tui_markdown_theme.palette ~closing:Ansi.reset in
+    let gutter = Message_layout.display_width palette.code_gutter in
+    let indent_cells = min 6 (max 0 (width - gutter - 1)) in
+    match Masc_tui_markdown.non_colliding_fence_marker (String.split_on_char '\n' safe) with
+    | Some marker when width > gutter ->
+      let document = String.concat "\n" [ marker ^ "json"; safe; marker ] in
+      let body_width = max 1 (width - indent_cells) in
+      let render palette body_width =
+        let reading = Masc_tui_markdown.render_with_clipping
+            ~palette ~width:body_width document in
+        let rows, overflow = fusion_preview_indent ~frame_width ~indent_cells reading.reading_rows in
+        rows, reading.clipped, overflow
+      in
+      let rows, clipped, overflow = render palette body_width in
+      if not clipped && not overflow then rows
+      else
+        let palette = if overflow then { palette with code_gutter = "" } else palette in
+        let rows, clipped, overflow = render palette (max 1 frame_width) in
+        if clipped || overflow then direct_safe_json_rows safe else rows
+    | Some _ | None -> direct_safe_json_rows safe
+  in
+  let markdown_rows text =
+    if String.equal (String.trim text) "" then
+      fusion_preview_indent ~frame_width ~indent_cells:6 [ "(empty)" ]
+      |> fst |> List.map (fun (_, line) -> Ansi.dim, line)
+    else
+      let safe = Keeper_chat.terminal_safe_text ~preserve_newlines:true text in
+      let palette = Masc_tui_markdown_theme.palette ~closing:Ansi.reset in
+      let source_rows () =
+        let heading = Message_layout.split_cells ~max_cells:(max 1 frame_width)
+            "Markdown source:" |> List.map (fun line -> Ansi.dim, line) in
+        heading @ direct_safe_rows ~language:None safe
+      in
+      let render body_width =
+        let reading =
+          Masc_tui_markdown.render_with_clipping ~palette ~width:body_width safe in
+        let rows, overflow =
+          fusion_preview_indent ~frame_width ~indent_cells:6 reading.reading_rows in
+        rows, (reading.clipped || overflow), reading.width_sensitive_fence
+      in
+      let rows, clipped, width_sensitive_fence = render (max 1 (width - 6)) in
+      if not clipped then rows
+      (* A wider retry can replace source with a newly drawn diagram or score;
+         retain the source instead of changing that reading during a reflow. *)
+      else if width_sensitive_fence then source_rows ()
+      else begin
+        (* A table cell or code label may be fitted before the frame sees it. *)
+        let rows, clipped, _ = render (max 1 frame_width) in
+        if not clipped then rows
+        else
+          (* Markdown's own list, quote or code chrome can still crowd out a
+             grapheme. Identify the safe source when showing it directly. *)
+          source_rows ()
+      end
+  in
+  let rows =
+    match complete_json with
+    | Some (Fusion_json_container payload) -> fenced_json_rows payload
+    | Some (Fusion_json_original (payload, string_newlines)) ->
+      direct_safe_json_rows ~language:"js" (fusion_json_safe_original payload string_newlines)
+    | Some (Fusion_json_scalar payload) ->
+      direct_safe_json_rows (Keeper_chat.terminal_safe_text ~preserve_newlines:true payload)
+    | None ->
+      (* Keep the existing code reading for incomplete object and array
+         previews. They cannot be parsed or treated as complete JSON. *)
+      let trimmed = String.trim preview.ftp_text in
+      let container = String.starts_with ~prefix:"{" trimmed
+                      || String.starts_with ~prefix:"[" trimmed in
+      let scan = fusion_json_scan preview.ftp_text in
+      if (container && scan.has_comments)
+         || (preview.ftp_truncated
+             && (scan.leading_comment || fusion_json_value_before_comment preview.ftp_text scan)) then
+        direct_safe_json_rows ~language:"js"
+          (fusion_json_safe_original preview.ftp_text scan.string_newlines)
+      else if container then fenced_json_rows preview.ftp_text
+      else markdown_rows preview.ftp_text
+  in
+  [ Ansi.dim, Printf.sprintf "    %s (%s)" label size ] @ rows
 
-let fusion_tool_event_lines ~width = function
+let fusion_tool_event_lines ~width ~frame_width = function
   | Fusion_tool_called event ->
       [ ( (Masc_tui_theme.tone Masc_tui_theme.Accent)
         , Printf.sprintf "  [called] %s%s  %s  turn %d/%d  id=%s"
@@ -370,7 +588,7 @@ let fusion_tool_event_lines ~width = function
             event.fte_turn event.fte_planned_index
             (Terminal_text.single_line event.fte_tool_use_id) )
       ]
-      @ fusion_tool_preview_lines ~width ~label:"Input" event.fte_input
+      @ fusion_tool_preview_lines ~width ~frame_width ~label:"Input" event.fte_input
   | Fusion_tool_completed event ->
       let status, style, output, failure_suffix =
         match event.fte_completion with
@@ -394,9 +612,9 @@ let fusion_tool_event_lines ~width = function
             (Terminal_text.single_line event.fte_tool_use_id)
             failure_suffix )
       ]
-      @ fusion_tool_preview_lines ~width ~label:"Output" output
+      @ fusion_tool_preview_lines ~width ~frame_width ~label:"Output" output
 
-let fusion_tool_trace_lines ~width (trace : Masc.Tui_decode_fusion.fusion_tool_trace) =
+let fusion_tool_trace_uncached ~width ~frame_width (trace : Masc.Tui_decode_fusion.fusion_tool_trace) =
       let coverage =
         if trace.ftt_complete
         then
@@ -435,9 +653,43 @@ let fusion_tool_trace_lines ~width (trace : Masc.Tui_decode_fusion.fusion_tool_t
         | events ->
             events
             |> List.concat_map (fun event ->
-                   (Ansi.dim, "") :: fusion_tool_event_lines ~width event)
+                   (Ansi.dim, "") :: fusion_tool_event_lines ~width ~frame_width event)
       in
       (coverage :: observed) @ gaps @ events
+
+(* Scrolling and refreshes redraw the same immutable trace. Reuse its one
+   retained projection when its full contents and display inputs match. *)
+type fusion_trace_projection =
+  { trace : Masc.Tui_decode_fusion.fusion_tool_trace
+  ; width : int
+  ; frame_width : int
+  ; palette_generation : int
+  ; table_frame : bool
+  ; lines : (string * string) list
+  }
+
+let fusion_trace_projection = ref None
+
+let clear_fusion_trace_projection () = fusion_trace_projection := None
+
+let fusion_tool_trace_lines ~width ~frame_width trace =
+  let palette_generation =
+    Masc_tui_terminal_palette.(snapshot_generation (snapshot ())) in
+  match !fusion_trace_projection with
+  | Some cached
+    when cached.width = width
+         && cached.frame_width = frame_width
+         && cached.palette_generation = palette_generation
+         && cached.table_frame = !table_frame_enabled
+         && (cached.trace == trace || cached.trace = trace) ->
+      if cached.trace != trace then
+        fusion_trace_projection := Some { cached with trace };
+      cached.lines
+  | Some _ | None ->
+    let lines = fusion_tool_trace_uncached ~width ~frame_width trace in
+    fusion_trace_projection := Some
+      { trace; width; frame_width; palette_generation; table_frame = !table_frame_enabled; lines };
+    lines
 
 let fusion_pipeline_diagram (run : Masc.Tui_decode_fusion.fusion_run) =
   let glyph_done = (Theme.ok ()) ^ "\xe2\x97\x8f" ^ Ansi.reset in
@@ -465,7 +717,7 @@ let fusion_pipeline_diagram (run : Masc.Tui_decode_fusion.fusion_run) =
     ~glyph_done ~glyph_active ~glyph_waiting ~glyph_failed ~arrow
     ~status ~stage ~panel_answered ~panel_expected ()
 
-let fusion_evidence_lines ~width (evidence : fusion_evidence) =
+let fusion_evidence_lines ~width ~frame_width (evidence : fusion_evidence) =
   let answered, failed, input_tokens, output_tokens =
     List.fold_left
       (fun (answered, failed, input_tokens, output_tokens) result ->
@@ -637,7 +889,7 @@ let fusion_evidence_lines ~width (evidence : fusion_evidence) =
         :: first_cards
   in
   let tool_lines =
-    fusion_tool_trace_lines ~width evidence.fe_tool_trace
+    fusion_tool_trace_lines ~width ~frame_width evidence.fe_tool_trace
   in
   (* One line per seat: the route it was given and who answered, each
      failed candidate under it. *)
@@ -686,7 +938,7 @@ let fusion_evidence_lines ~width (evidence : fusion_evidence) =
             (Terminal_text.single_line evidence.fe_post_id) )
     ]
 
-let fusion_detail_lines ~width (detail : fusion_detail) =
+let fusion_detail_lines ~width ~frame_width (detail : fusion_detail) =
   let run = detail.fud_run in
   let status = fusion_run_status_to_string run.fur_status in
   let now = Unix.gettimeofday () in
@@ -762,23 +1014,26 @@ let fusion_detail_lines ~width (detail : fusion_detail) =
   let evidence_lines =
     match detail.fud_evidence_status, detail.fud_evidence with
     | Fusion_evidence_pending, None ->
+        clear_fusion_trace_projection ();
         [ (Theme.warn ()), "  Evidence: pending (run is still running)" ]
     | Fusion_evidence_absent, None ->
+        clear_fusion_trace_projection ();
         [ (Theme.warn ())
         , "  Evidence: absent (no current Board projection for this retained run)"
         ]
-    | Fusion_evidence_recorded, Some evidence -> fusion_evidence_lines ~width evidence
+    | Fusion_evidence_recorded, Some evidence -> fusion_evidence_lines ~width ~frame_width evidence
     | Fusion_evidence_recorded, None
     | Fusion_evidence_pending, Some _
     | Fusion_evidence_absent, Some _ ->
         (* The strict decoder makes these states unreachable. Keeping the row
            explicit protects locally-constructed test state from looking like
            a legitimate empty reading. *)
+        clear_fusion_trace_projection ();
         [ (Theme.bad ()), "  Fusion evidence invariant violated" ]
   in
   run_lines @ [ Ansi.dim, "" ] @ evidence_lines
 
-let fusion_historical_lines ~width (detail : fusion_historical_detail) =
+let fusion_historical_lines ~width ~frame_width (detail : fusion_historical_detail) =
   [ Ansi.bold, "  HISTORICAL BOARD EVIDENCE"
   ; Theme.warn (), "  This Board evidence does not provide execution status or finish time"
   ; Ansi.reset, "  Run reference: " ^ Terminal_text.single_line detail.fhd_reference.fhe_run_id
@@ -799,8 +1054,10 @@ let fusion_historical_lines ~width (detail : fusion_historical_detail) =
   @ [ Ansi.dim, "  B: Board original · Y: copy Board link · Esc: back to Fusion list"
   ; Ansi.dim, "" ]
   @ (match detail.fhd_evidence with
-     | Ok evidence -> fusion_evidence_lines ~width evidence
-     | Error error -> [ Theme.bad (), "  Structured Fusion evidence could not be decoded: " ^ Terminal_text.single_line error ])
+     | Ok evidence -> fusion_evidence_lines ~width ~frame_width evidence
+     | Error error ->
+         clear_fusion_trace_projection ();
+         [ Theme.bad (), "  Structured Fusion evidence could not be decoded: " ^ Terminal_text.single_line error ])
   @ [ Ansi.dim, ""; Ansi.bold, "  BOARD ORIGINAL" ]
   @ fusion_markdown_block ~width ~indent:"    " detail.fhd_body
 
@@ -811,6 +1068,16 @@ let fusion_detail_pane (state : state) ~rows ~cols run_id buf =
         Some detail
     | Some _ | None -> None
   in
+  let stale =
+    match state.fusion_mode with
+    | Fusion_historical_detail reference ->
+        state.fusion_historical_detail_stale
+        && Option.exists (fun original ->
+          original.fhd_reference.fhe_post_id = reference.fhe_post_id
+          && original.fhd_reference.fhe_run_id = reference.fhe_run_id)
+             state.fusion_historical_detail
+    | Fusion_list | Fusion_detail _ -> state.fusion_detail_stale && Option.is_some detail
+  in
   let header =
     detail_heading ~cols ~lead:(Lead_text (screen_title fusion_title ^ "  "))
       ~id:run_id ~after:"" ~tail:(connection_badge state)
@@ -818,14 +1085,18 @@ let fusion_detail_pane (state : state) ~rows ~cols run_id buf =
   box_top buf cols;
   box_line buf cols header;
   box_divider buf cols;
+  if stale then
+    box_line_styled buf cols ~style:(Theme.warn ()) "  Fusion reading may be out of date";
   (match state.fusion_detail_error with
    | None -> ()
    | Some error ->
        box_line_styled buf cols ~style:(Theme.bad ())
-         ("  " ^ Keeper_chat.terminal_safe_text error);
-       box_divider buf cols);
+         ("  " ^ Keeper_chat.terminal_safe_text error));
+  if stale || Option.is_some state.fusion_detail_error then box_divider buf cols;
   let chrome_rows =
-    if Option.is_some state.fusion_detail_error then 7 else 5
+    5 + (if stale then 1 else 0)
+      + (if Option.is_some state.fusion_detail_error then 1 else 0)
+      + (if stale || Option.is_some state.fusion_detail_error then 1 else 0)
   in
   let content_height = max 1 (rows - chrome_rows) in
   let lines =
@@ -834,14 +1105,23 @@ let fusion_detail_pane (state : state) ~rows ~cols run_id buf =
         (match state.fusion_historical_detail with
          | Some original when original.fhd_reference.fhe_post_id = reference.fhe_post_id
                               && original.fhd_reference.fhe_run_id = reference.fhe_run_id ->
-             (if Option.is_some state.fusion_detail_error then [ Theme.warn (), "  Previous Board reading retained" ] else [])
-             @ fusion_historical_lines ~width:(max 1 (framed_inner_width cols - 4)) original
-         | Some _ | None -> [ Ansi.dim, "  (waiting for the selected Board original; r retries)" ])
+             (if stale || Option.is_some state.fusion_detail_error then [ Theme.warn (), "  Previous Board reading retained" ] else [])
+             @ fusion_historical_lines ~width:(max 1 (framed_inner_width cols - 4))
+                 ~frame_width:(framed_inner_width cols) original
+         | Some _ | None ->
+             clear_fusion_trace_projection ();
+             [ Ansi.dim, "  (waiting for the selected Board original; r retries)" ])
     | Fusion_list | Fusion_detail _ ->
         (match detail, state.fusion_detail_error with
-         | None, None -> [ Ansi.dim, "  (loading exact Fusion detail)" ]
-         | None, Some _ -> [ Ansi.dim, page_failed_note ]
-         | Some detail, (Some _ | None) -> fusion_detail_lines ~width:(max 1 (framed_inner_width cols - 4)) detail)
+         | None, None ->
+             clear_fusion_trace_projection ();
+             [ Ansi.dim, "  (loading exact Fusion detail)" ]
+         | None, Some _ ->
+             clear_fusion_trace_projection ();
+             [ Ansi.dim, page_failed_note ]
+         | Some detail, (Some _ | None) ->
+             fusion_detail_lines ~width:(max 1 (framed_inner_width cols - 4))
+               ~frame_width:(framed_inner_width cols) detail)
   in
   let total = List.length lines in
   let max_scroll = max 0 (total - content_height) in

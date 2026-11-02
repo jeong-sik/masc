@@ -81,7 +81,7 @@ let config
        unchanged, and [disable_parallel_tool_use] still nests in the object. *)
     ~tool_choice:Auto
     ~disable_parallel_tool_use:true
-    ~response_format:(Types.JsonSchema (`Assoc [ "type", `String "object" ]))
+    ~response_format:(Types.JsonSchema (Types.Raw_schema (`Assoc [ "type", `String "object" ])))
     ?max_concurrent_requests
     ?model_capabilities_override
     ()
@@ -651,11 +651,9 @@ max_output_tokens = 64
 ;;
 
 let with_preserved_catalog f =
-  let previous = Model_catalog.global () in
+  let previous = Llm_provider.Catalog_snapshot.current () in
   Fun.protect ~finally:(fun () ->
-    match previous with
-    | Some catalog -> Model_catalog.set_global catalog
-    | None -> Model_catalog.clear_global ()) f
+    Llm_provider.Catalog_snapshot.publish previous) f
 ;;
 
 let request_policy_catalog ~model_id ~base ~max_output_tokens ~replay ~thinking =
@@ -681,7 +679,7 @@ let test_policy_is_frozen_before_measurement ~stream () =
   let catalog_b = request_policy_catalog ~model_id:"frozen-catalog-model" ~base:"anthropic"
       ~max_output_tokens:16 ~replay:"no_replay"
       ~thinking:{|anthropic_thinking_control = "always_adaptive"|} in
-  Model_catalog.set_global catalog_a;
+  (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some (catalog_a)) ~providers:(None)));
   let counted = ref None in
   let (result, expected_source), dispatched =
     with_admitted_http_mock ~stream ~on_count:(fun body -> counted := Some body)
@@ -691,7 +689,7 @@ let test_policy_is_frozen_before_measurement ~stream () =
     let expected_source = Reasoning_dialect.reasoning_source_for_provider_config cfg |> Result.get_ok in
     let prepared = Complete.prepare_request ~config:cfg ~messages () in
     let serialized = Complete.admit_request_body ~stream prepared |> Result.get_ok in
-    Model_catalog.set_global catalog_b;
+    (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some (catalog_b)) ~providers:(None)));
     let fresh_source = Reasoning_dialect.reasoning_source_for_provider_config cfg |> Result.get_ok in
     check bool "catalog change really changes the unfrozen replay contract" false
       (Types.Reasoning_source.equal expected_source fresh_source);
@@ -726,12 +724,12 @@ let test_catalog_reload_cannot_underreserve_output () =
   with_preserved_catalog @@ fun () ->
   let catalog ceiling = request_policy_catalog ~model_id:"frozen-catalog-model" ~base:"anthropic"
       ~max_output_tokens:ceiling ~replay:"preserve_always" ~thinking:"" in
-  Model_catalog.set_global (catalog 64);
+  (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some ((catalog 64))) ~providers:(None)));
   let (), dispatched = with_admitted_http_mock ~stream:false ~input_tokens:480
     @@ fun ~sw ~net ~base_url ->
     let cfg = { (config ~max_context:512 base_url) with model_id = "frozen-catalog-model"; response_format = Off } in
     let serialized = Complete.prepare_request ~config:cfg ~messages () |> serialize_sync in
-    Model_catalog.set_global (catalog 16);
+    (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some ((catalog 16))) ~providers:(None)));
     let measured = Complete.measure_request ~sw ~net ~next_stage:unbounded_completion serialized |> Result.get_ok in
     match Complete.admit_request ~now_unix_s:0 ~max_context_tokens:512 measured with
     | Error (Complete.Context_window_exceeded fit) ->
@@ -772,7 +770,7 @@ reasoning_replay = "%s"
           | Ok catalog -> catalog | Error detail -> fail detail in
         let original = catalog ~known ~replay:"preserve_always" ~context:512 in
         let replacement = catalog ~known:(not known) ~replay:"no_replay" ~context:1024 in
-        Model_catalog.set_global original;
+        (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some (original)) ~providers:(None)));
         let declared = { (Capabilities.capabilities_of_kind kind) with
           max_context_tokens = Some 256; max_output_tokens = Some 48 } in
         let cfg = Provider_config.make ~kind ~provider_id:"policy-response-provider"
@@ -784,7 +782,7 @@ reasoning_replay = "%s"
         let expected_context = Option.bind expected_capabilities (fun caps -> caps.Capabilities.max_context_tokens) in
         let expected_source = Reasoning_dialect.reasoning_source_for_provider_config cfg |> Result.get_ok in
         let invoke (request : Llm_transport.completion_request) =
-          Model_catalog.set_global replacement;
+          (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some (replacement)) ~providers:(None)));
           check bool "prepared lookup preserves presence and absence" true
             (Provider_config.capabilities_for_config_model request.config = expected_capabilities);
           check bool "prepared thinking policy preserves presence and absence" true
@@ -824,14 +822,12 @@ reasoning_replay = "%s"
 ;;
 
 let test_admitted_body_is_frozen_across_catalog_mutation () =
-  let previous_catalog = Model_catalog.global () in
+  let previous_catalog = Llm_provider.Catalog_snapshot.current () in
   Fun.protect
     ~finally:(fun () ->
-      match previous_catalog with
-      | Some catalog -> Model_catalog.set_global catalog
-      | None -> Model_catalog.clear_global ())
+      Llm_provider.Catalog_snapshot.publish previous_catalog)
     (fun () ->
-       Model_catalog.set_global (thinking_catalog "adaptive_default");
+       (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some ((thinking_catalog "adaptive_default"))) ~providers:(None)));
        let observations = ref [] in
        let (result, admitted_evidence, fresh_serialization), completion_body =
          with_admitted_http_mock ~stream:false
@@ -864,7 +860,7 @@ let test_admitted_body_is_frozen_across_catalog_mutation () =
            Complete.admit_request ~now_unix_s:0 ~max_context_tokens:512 measured
            |> Result.get_ok
          in
-         Model_catalog.set_global (thinking_catalog "always_adaptive");
+         (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some ((thinking_catalog "always_adaptive"))) ~providers:(None)));
          let fresh_serialization =
            Complete.inspect_serialized_request ~stream:false ~config:cfg ~messages ()
          in

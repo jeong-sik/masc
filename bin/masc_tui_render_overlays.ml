@@ -1212,6 +1212,44 @@ let render_agenda (state : state) =
 ;;
 
 let render_terminal_too_small state ~recovery_notice ~rows ~cols =
+  let now = Unix.gettimeofday () in
+  let rejection = Masc_tui_action_notice.rejection state.last_action
+      ~now ~window:Masc_tui_types.last_action_window_s in
+  let csi_text = match recovery_notice with
+    | Some text -> Some (if Message_layout.display_width text <= cols then text
+        else Masc_tui_action_notice.csi_recovery_text)
+    | None when Masc_tui_action_notice.csi_active state.last_action ->
+        Some Masc_tui_action_notice.csi_recovery_text
+    | None -> None in
+  let csi_rows = Option.bind csi_text (fun text ->
+    let parts = Message_layout.split_styled_cells ~max_cells:cols text in
+    if List.length parts <= rows then Some parts else None) in
+  let notice_rows =
+    if Option.is_some recovery_notice || Masc_tui_action_notice.csi_active state.last_action then None
+    else
+      let parts = match rejection, current_quit_confirmation state ~now with
+        | Some notice, (Some _ | None) ->
+            let text = Masc_tui_action_notice.rejection_text notice in
+            if Message_layout.display_width text <= cols then [Press_input_rejection notice, text]
+            else rejection_fragments ~cols notice
+        | None, Some confirmation ->
+            let text = fst (Masc_tui_action_notice.quit_ordinary confirmation) in
+            if Message_layout.display_width text <= cols then [Press_quit_confirmation confirmation, text]
+            else quit_fragments ~cols confirmation
+        | None, None -> [] in
+      if parts <> [] && List.length parts <= rows then Some parts else None in
+  let visible_rows = match csi_rows, notice_rows with
+    | Some parts, (Some _ | None) -> Some parts
+    | None, Some parts -> Some (List.map (fun (target, text) -> pressable target text) parts)
+    | None, None -> None in
+  match visible_rows with
+  | Some parts ->
+      let buf = Buffer.create 64 in
+      List.iter (fun text ->
+        Buffer.add_string buf (fit_width text cols);
+        Buffer.add_char buf '\n') parts;
+      finish_terminal_too_small_frame ~cursor:Frame_presenter.Hidden ~rows ~cols buf
+  | None ->
   (* The hint names physical terminal rows, whereas the guard receives the
      body after navigation, agenda, and composer allocation. At the minimum
      body size the composer can be absent; evaluate its policy at the proposed

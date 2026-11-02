@@ -30,11 +30,14 @@ val render_section_fleet : ?session_rows:int -> cols:int -> state -> string list
 val render_section_resources : cols:int -> state -> string list
 val render_section_tools : cols:int -> state -> string list
 
+val rebase_scroll_for_cards : scroll:int -> previous_cards:int option -> current_cards:int -> int
+
 val render_metrics_body :
   cols:int ->
   budget:int ->
+  suffix_lines:string list ->
   state ->
-  report_scroll:(int -> unit) ->
+  report_scroll:(int -> int -> int -> unit) ->
   push:(string -> unit) ->
   push_styled:(style:string -> string -> unit) ->
   push_selected:(string -> unit) ->

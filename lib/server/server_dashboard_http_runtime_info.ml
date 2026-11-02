@@ -800,59 +800,32 @@ let dashboard_runtime_provider_auth_kind = function
   | Some (Runtime_schema.Inline _) -> "inline"
 ;;
 
-(* One list, owned by [Runtime_adapter] — the module that strips these from
-   [Provider_config.headers]. A separate copy here meant the dashboard could
-   hide a header the adapter still forwarded. *)
-let dashboard_runtime_header_is_auth = Runtime_adapter.is_auth_header_key
-
-let dashboard_runtime_non_auth_headers (provider : Runtime_schema.provider) =
-  match provider.headers with
-  | None -> []
-  | Some headers ->
-    List.filter (fun (name, _) -> not (dashboard_runtime_header_is_auth name)) headers
-;;
-
-let dashboard_runtime_credential_value = function
-  | Runtime_schema.Env key ->
-    (match Option.bind (Sys.getenv_opt key) String_util.trim_nonempty with
-     | Some value -> Ok value
-     | None -> Error (Printf.sprintf "env credential %s is empty or unset" key))
-  | Runtime_schema.File path ->
-    (try
-       match Fs_compat.load_file path |> String_util.trim_nonempty with
-       | Some value -> Ok value
-       | None -> Error (Printf.sprintf "credential file %s is empty" path)
-     with
-     | Eio.Cancel.Cancelled _ as e -> raise e
-     | exn -> Error (Printf.sprintf "credential file %s: %s" path (Printexc.to_string exn)))
-  | Runtime_schema.Inline value ->
-    (match String_util.trim_nonempty value with
-     | Some value -> Ok value
-     | None -> Error "inline credential is empty")
-;;
-
-(* The auth header is the one the transport itself would send for this
-   provider kind ([Provider_config.auth_headers_for_kind_and_key]): Gemini
-   keys go in [x-goog-api-key], Anthropic-style keys in [x-api-key], the rest
-   as a Bearer token. A Bearer literal here answered auth_failed for a Gemini
-   runtime the keepers were using fine. *)
 let dashboard_runtime_probe_headers
-    ~(kind : Llm_provider.Provider_config.provider_kind)
-    (provider : Runtime_schema.provider)
+    ~(provider_config : Llm_provider.Provider_config.t)
+    (runtime : Runtime_instance.t)
   =
-  let base_headers =
-    [ "Accept", "application/json" ] @ dashboard_runtime_non_auth_headers provider
-  in
-  match provider.credentials with
-  | None -> Ok (false, base_headers)
-  | Some credential ->
-    (match dashboard_runtime_credential_value credential with
-     | Ok value ->
-       Ok
-         ( true
-         , Llm_provider.Provider_config.auth_headers_for_kind_and_key ~kind ~api_key:value
-           @ base_headers )
-     | Error _ as error -> error)
+  Runtime_instance.validate_dispatch_credential ~provider_config runtime
+  |> Result.map_error Runtime_instance.dispatch_credential_error_to_string
+  |> Result.map (fun () ->
+    let auth_headers = Llm_provider.Provider_config.auth_headers_for_config provider_config in
+    let base_headers = ["Accept", "application/json"] @ provider_config.headers in
+    (auth_headers <> [], auth_headers @ base_headers))
+;;
+
+let dashboard_runtime_credential_required (runtime : Runtime_instance.t) =
+  match runtime.execution with
+  | Runtime_execution.Codex_app_server _
+  | Runtime_execution.Claude_code _
+  | Runtime_execution.Antigravity_cli _
+  | Runtime_execution.Muse_serve _ -> Option.is_some runtime.provider.credentials
+  | Runtime_execution.Agent_core _ ->
+    match runtime.credential_admission with
+    | None -> false (* The admission check refuses this invalid runtime before HTTP. *)
+    | Some selected ->
+      match Runtime_credential_selection.requirement selected with
+      | Not_required -> false
+      | Unknown_provider -> false (* No selected requirement; existing runtime admission is preserved. *)
+      | Required_undeclared | Required_env _ | Required_inline | Required_file -> true
 ;;
 
 let dashboard_runtime_probe_transport_kind = function
@@ -919,7 +892,7 @@ let dashboard_runtime_provider_probe_json
   =
   let runtime_kind = dashboard_runtime_probe_transport_kind rt.provider.transport in
   let auth_kind = dashboard_runtime_provider_auth_kind rt.provider.credentials in
-  let credential_required = Option.is_some rt.provider.credentials in
+  let credential_required = dashboard_runtime_credential_required rt in
   let endpoint_url =
     match rt.provider.transport with
     | Runtime_schema.Http url -> Some (dashboard_runtime_url_for_json url)
@@ -1034,9 +1007,7 @@ let dashboard_runtime_provider_probe_json
           ()
       else (
       match
-        dashboard_runtime_probe_headers
-          ~kind:provider_config.Llm_provider.Provider_config.kind
-          rt.provider
+        dashboard_runtime_probe_headers ~provider_config rt
       with
       | Error error ->
         make

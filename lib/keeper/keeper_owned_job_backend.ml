@@ -567,7 +567,11 @@ let inspect_object prepared expected_id json =
           Some (Yojson.Safe.from_string (String.sub option_ (split + 1) (String.length option_ - split - 1)))
         | _ -> None) security in
       require (match policies with [actual] -> same_json actual expected.policy | _ -> false) "container seccomp policy changed");
-    let tmpfs = fields (field "Tmpfs" host) |> List.map (fun (target, options) -> target, string options) |> List.sort compare in
+    let compare_tmpfs_pair (target_a, opts_a) (target_b, opts_b) =
+      let cmp = String.compare target_a target_b in
+      if cmp <> 0 then cmp else String.compare opts_a opts_b
+    in
+    let tmpfs = fields (field "Tmpfs" host) |> List.map (fun (target, options) -> target, string options) |> List.sort compare_tmpfs_pair in
     require (tmpfs = prepared.tmpfs) "container private tmpfs footprint changed";
     let mounts = list fields (field "Mounts" root) in
     let bind_count = List.fold_left (fun bind_count mount ->
@@ -615,15 +619,37 @@ module Presence_route = struct
     daemon_id : string; context_name : string; uid : int;
     require_rootless : bool; require_userns : bool;
   }
-  let coordinates route =
-    route.base_path, route.docker_command, route.endpoint, route.daemon_id,
-    route.context_name, route.uid, route.require_rootless, route.require_userns
-  let compare left right = Stdlib.compare (coordinates left) (coordinates right)
+
+  let compare left right =
+    let c = String.compare left.base_path right.base_path in
+    if c <> 0 then c
+    else
+      let c = List.compare String.compare left.docker_command right.docker_command in
+      if c <> 0 then c
+      else
+        let c = String.compare left.endpoint right.endpoint in
+        if c <> 0 then c
+        else
+          let c = String.compare left.daemon_id right.daemon_id in
+          if c <> 0 then c
+          else
+            let c = String.compare left.context_name right.context_name in
+            if c <> 0 then c
+            else
+              let c = Int.compare left.uid right.uid in
+              if c <> 0 then c
+              else
+                let c = Bool.compare left.require_rootless right.require_rootless in
+                if c <> 0 then c
+                else Bool.compare left.require_userns right.require_userns
 end
 module Presence_routes = Map.Make (Presence_route)
 module Presence_owners = Set.Make (struct
   type t = string * string
-  let compare = Stdlib.compare
+
+  let compare (a1, b1) (a2, b2) =
+    let c = String.compare a1 a2 in
+    if c <> 0 then c else String.compare b1 b2
 end)
 type presence_round = {
   mutable inventories : (Presence_owners.t, error) result Eio.Lazy.t Presence_routes.t;

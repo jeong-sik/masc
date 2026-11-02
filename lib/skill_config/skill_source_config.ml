@@ -328,13 +328,16 @@ let path_rejection anchor path =
 ;;
 
 let collect_results results =
-  List.fold_right
-    (fun result (values, diagnostics) ->
-       match result with
-       | Ok value -> value :: values, diagnostics
-       | Error diagnostic -> values, diagnostic :: diagnostics)
-    results
-    ([], [])
+  let values_rev, diagnostics_rev =
+    List.fold_left
+      (fun (values, diagnostics) result ->
+         match result with
+         | Ok value -> value :: values, diagnostics
+         | Error diagnostic -> values, diagnostic :: diagnostics)
+      ([], [])
+      results
+  in
+  List.rev values_rev, List.rev diagnostics_rev
 ;;
 
 let parse_source ~index fields =
@@ -418,13 +421,15 @@ let source_entries doc =
     Error (Invalid_sources_type (value_kind value))
 ;;
 
+module String_map = Map.Make (String)
+
 let duplicate_diagnostics indexed_sources =
-  let seen = Hashtbl.create (List.length indexed_sources) in
+  let seen = ref String_map.empty in
   indexed_sources
   |> List.filter_map (fun (index, source) ->
-    match Hashtbl.find_opt seen source.id with
+    match String_map.find_opt source.id !seen with
     | None ->
-      Hashtbl.add seen source.id index;
+      seen := String_map.add source.id index !seen;
       None
     | Some first_index ->
       Some
@@ -467,15 +472,17 @@ let parse_doc doc =
   let parsed_entries =
     List.mapi (fun index entry -> index, parse_entry ~index entry) entries
   in
-  let indexed_sources, entry_diagnostics =
-    List.fold_right
-      (fun (index, result) (sources, diagnostics) ->
+  let indexed_sources_rev, entry_diagnostics_rev =
+    List.fold_left
+      (fun (sources, diagnostics) (index, result) ->
          match result with
          | Ok source -> (index, source) :: sources, diagnostics
-         | Error errors -> sources, errors @ diagnostics)
-      parsed_entries
+         | Error errors -> sources, List.rev_append errors diagnostics)
       ([], [])
+      parsed_entries
   in
+  let indexed_sources = List.rev indexed_sources_rev in
+  let entry_diagnostics = List.rev entry_diagnostics_rev in
   let diagnostics =
     unexpected
     @ source_container_diagnostics

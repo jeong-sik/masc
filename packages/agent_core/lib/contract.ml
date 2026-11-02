@@ -34,16 +34,20 @@ let trim_to_option value =
   if trimmed = "" then None else Some trimmed
 ;;
 
+module String_set = Set.Make (String)
+
 let dedupe_skills skills =
-  let seen = Hashtbl.create (List.length skills) in
-  skills
-  |> List.filter (fun skill ->
-    let key = skill.Skill_document.name in
-    if Hashtbl.mem seen key
-    then false
-    else (
-      Hashtbl.add seen key ();
-      true))
+  let _, rev =
+    List.fold_left
+      (fun (seen, acc) skill ->
+         let key = skill.Skill_document.name in
+         if String_set.mem key seen
+         then seen, acc
+         else String_set.add key seen, skill :: acc)
+      (String_set.empty, [])
+      skills
+  in
+  List.rev rev
 ;;
 
 let with_runtime_awareness awareness contract =

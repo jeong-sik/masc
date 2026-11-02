@@ -261,14 +261,15 @@ let active_runtime_agents config =
   , failure )
 
 let merge_agents primary secondary =
-  let seen = Hashtbl.create (List.length primary + List.length secondary) in
-  let add_if_new acc (agent : Masc_domain.agent) =
-    if Hashtbl.mem seen agent.name then acc
-    else (
-      Hashtbl.add seen agent.name ();
-      agent :: acc)
+  let module Agent_name_set = Set.Make (String) in
+  let add_if_new (seen, acc) (agent : Masc_domain.agent) =
+    if Agent_name_set.mem agent.name seen
+    then seen, acc
+    else Agent_name_set.add agent.name seen, agent :: acc
   in
-  List.rev (List.fold_left add_if_new (List.fold_left add_if_new [] primary) secondary)
+  let seen, acc = List.fold_left add_if_new (Agent_name_set.empty, []) primary in
+  let _seen, acc = List.fold_left add_if_new (seen, acc) secondary in
+  List.rev acc
 
 (** Get raw agent list (for orchestrator).
     Includes inactive agents. Requires initialization. *)
@@ -433,7 +434,7 @@ let select_all_message_names ~since_seq names =
        let seq = message_seq_of_filename name in
        if seq <= since_seq then None else Some (seq, name))
   |> List.sort (fun (seq_a, name_a) (seq_b, name_b) ->
-       let cmp = compare seq_a seq_b in
+       let cmp = Int.compare seq_a seq_b in
        if cmp <> 0 then cmp else String.compare name_a name_b)
   |> List.map snd
 
@@ -597,7 +598,7 @@ let list_tasks ?(include_done = false) ?(include_cancelled = false) ?status conf
     Buffer.add_string buf "Quest Board\n";
     Buffer.add_string buf "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n";
 
-    let sorted = List.sort (fun a b -> compare a.priority b.priority) tasks in
+    let sorted = List.sort (fun a b -> Int.compare a.priority b.priority) tasks in
     List.iter (fun task ->
       let status_icon = Masc_domain.task_status_icon task.task_status in
       let assignee = Masc_domain.task_display_assignee task.task_status in

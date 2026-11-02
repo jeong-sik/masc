@@ -54,52 +54,55 @@ let participant_json (p : participant) : Yojson.Safe.t =
     @ [ ("message_count", `Int p.message_count) ]
     @ opt_string_field "note" p.note)
 
+module String_map = Map.Make (String)
+module String_set = Set.Make (String)
+
 (* Roster fold: one bucket per speaker_id over user lines. The most
    recent non-empty name wins (people rename; the log remembers, the
    roster reports the latest). *)
 let roster (lane : Store.chat_message list) : participant list =
-  let tbl : (string, participant) Hashtbl.t = Hashtbl.create 8 in
-  List.iter
-    (fun (m : Store.chat_message) ->
-      match m.speaker with
-      | Some { speaker_id = Some id; speaker_name; speaker_authority } ->
-          let updated =
-            match Hashtbl.find_opt tbl id with
-            | None ->
-                {
-                  id;
-                  name = speaker_name;
-                  authority = speaker_authority;
-                  first_seen = Some m.ts;
-                  last_seen = Some m.ts;
-                  message_count = 1;
-                  note = None;
-                }
-            | Some p ->
-                {
-                  p with
-                  name =
-                    (match speaker_name with
+  let by_id =
+    List.fold_left
+      (fun acc (m : Store.chat_message) ->
+         match m.speaker with
+         | Some { speaker_id = Some id; speaker_name; speaker_authority } ->
+           let updated =
+             match String_map.find_opt id acc with
+             | None ->
+               { id
+               ; name = speaker_name
+               ; authority = speaker_authority
+               ; first_seen = Some m.ts
+               ; last_seen = Some m.ts
+               ; message_count = 1
+               ; note = None
+               }
+             | Some p ->
+               { p with
+                 name =
+                   (match speaker_name with
                     | Some n when String.trim n <> "" -> Some n
-                    | Some _ | None -> p.name);
-                  last_seen = Some m.ts;
-                  first_seen =
-                    (match p.first_seen with
+                    | Some _ | None -> p.name)
+               ; last_seen = Some m.ts
+               ; first_seen =
+                   (match p.first_seen with
                     | None -> Some m.ts
-                    | Some _ as seen -> seen);
-                  message_count = p.message_count + 1;
-                }
-          in
-          Hashtbl.replace tbl id updated
-      | Some { speaker_id = None; _ } | None -> ())
-    lane;
-  Hashtbl.fold (fun _id p acc -> p :: acc) tbl []
+                    | Some _ as seen -> seen)
+               ; message_count = p.message_count + 1
+               }
+           in
+           String_map.add id updated acc
+         | Some { speaker_id = None; _ } | None -> acc)
+      String_map.empty
+      lane
+  in
+  String_map.fold (fun _id p acc -> p :: acc) by_id []
   |> List.sort (fun a b ->
-         match (b.last_seen, a.last_seen) with
-         | Some tb, Some ta -> compare tb ta
+         match b.last_seen, a.last_seen with
+         | Some tb, Some ta -> Float.compare tb ta
          | Some _, None -> 1
          | None, Some _ -> -1
-         | None, None -> compare a.id b.id)
+         | None, None -> String.compare a.id b.id)
 
 (* RFC-0229 P1: notes are keeper-scoped deliberate memory. Union them
    into the roster — annotating people still present, and resurrecting
@@ -108,19 +111,30 @@ let roster (lane : Store.chat_message list) : participant list =
    ids come from connector rosters). *)
 let with_notes (notes : (string * string) list) (roster : participant list) :
     participant list =
-  let annotated =
-    List.map
-      (fun p ->
-        match List.assoc_opt p.id notes with
-        | Some n when String.trim n <> "" -> { p with note = Some n }
-        | Some _ | None -> p)
+  let notes_by_id =
+    List.fold_left
+      (fun acc (id, n) ->
+         if String_map.mem id acc then acc else String_map.add id n acc)
+      String_map.empty
+      notes
+  in
+  let annotated, known_set =
+    List.fold_left
+      (fun (rev_annotated, known_set) p ->
+         let p' =
+           match String_map.find_opt p.id notes_by_id with
+           | Some n when String.trim n <> "" -> { p with note = Some n }
+           | Some _ | None -> p
+         in
+         p' :: rev_annotated, String_set.add p.id known_set)
+      ([], String_set.empty)
       roster
   in
-  let known = List.map (fun p -> p.id) annotated in
+  let annotated = List.rev annotated in
   let note_only =
     List.filter_map
       (fun (id, n) ->
-        if String.trim n = "" || List.mem id known then None
+        if String.trim n = "" || String_set.mem id known_set then None
         else
           Some
             {

@@ -802,27 +802,28 @@ let fleet_of keepers =
   }
 ;;
 
+module Keeper_map = Map.Make (String)
+
 let month_view_of_cache ~month ~generated_at (cache : month_cache) =
-  let merged = Hashtbl.create 16 in
-  let days_covered =
+  let days_covered, merged =
     List.fold_left
-      (fun covered (section : day_section) ->
-         if section.keepers = [] && section.turn_ids = [] then covered
-         else begin
-           List.iter
-             (fun k ->
-                match Hashtbl.find_opt merged k.keeper with
-                | Some acc -> Hashtbl.replace merged k.keeper (add_keeper_months acc k)
-                | None -> Hashtbl.replace merged k.keeper k)
-             section.keepers;
-           covered + 1
-         end)
-      0 cache.sections
+      (fun (covered, merged) (section : day_section) ->
+         if section.keepers = [] && section.turn_ids = [] then covered, merged
+         else
+           let merged =
+             List.fold_left
+               (fun acc k ->
+                  match Keeper_map.find_opt k.keeper acc with
+                  | Some prev -> Keeper_map.add k.keeper (add_keeper_months prev k) acc
+                  | None -> Keeper_map.add k.keeper k acc)
+               merged
+               section.keepers
+           in
+           covered + 1, merged)
+      (0, Keeper_map.empty)
+      cache.sections
   in
-  let keepers =
-    Hashtbl.fold (fun _ k list -> k :: list) merged []
-    |> List.sort (fun a b -> String.compare a.keeper b.keeper)
-  in
+  let keepers = Keeper_map.bindings merged |> List.map snd in
   { month; generated_at; days_covered; keepers; fleet = fleet_of keepers }
 ;;
 

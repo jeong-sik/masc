@@ -7,7 +7,6 @@ type 'completion worker =
   ; started_at : float
   ; completion : 'completion
   ; freshness : freshness
-  ; failure_reported : bool
   ; was_requested : bool
   }
 
@@ -93,7 +92,6 @@ let start ~now ~completion (Start_plan state) =
     ; started_at = now
     ; completion
     ; freshness = Current_generation
-    ; failure_reported = false
     ; was_requested = state.requested
     }
   in
@@ -127,12 +125,6 @@ let cancel_worker ~id state =
     in
     let requested = state.requested || worker.was_requested || dirty in
     Some ({ state with flight; requested; active_worker = None }, dirty)
-  | Some _ | None -> None
-
-let note_wait_failure state =
-  match state.active_worker with
-  | Some worker when not worker.failure_reported ->
-    Some { state with active_worker = Some { worker with failure_reported = true } }
   | Some _ | None -> None
 
 let invalidate ~now state =

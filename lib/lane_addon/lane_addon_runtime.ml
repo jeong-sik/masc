@@ -4878,10 +4878,13 @@ let installation_questions ~config =
     let m = manager config in
     offload (fun () ->
       let* ids = Lane_addon_asks.declarations m.store in
-      List.fold_right (fun declaration_id acc ->
-        let* acc = acc in
-        let* rows = Lane_addon_asks.rows m.store ~declaration_id in
-        Ok ((declaration_id, rows) :: acc)) ids (Ok [])))
+      let rec loop acc = function
+        | [] -> Ok (List.rev acc)
+        | declaration_id :: rest ->
+          let* rows = Lane_addon_asks.rows m.store ~declaration_id in
+          loop ((declaration_id, rows) :: acc) rest
+      in
+      loop [] ids))
 
 module For_testing = struct
   let browser_source_table = browser_source_table

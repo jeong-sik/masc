@@ -1,0 +1,16 @@
+{
+  "repository": "meta-models/muse-code-sdk",
+  "head": "42c7658789a2491580658158d2092b2bbca4118b",
+  "blob": "cd9632e6909fc3202cbe413db1bf3d61bb059e47",
+  "path": "schema/msp/msp.d.ts",
+  "raw_bytes": 254189,
+  "raw_sha256": "cb6cfdce4b216aaa5dfbdd8057949645c584cf78aaead80192bed73c0c0a5225",
+  "url": "https://github.com/meta-models/muse-code-sdk/blob/42c7658789a2491580658158d2092b2bbca4118b/schema/msp/msp.d.ts"
+}
+
+Selected unmodified upstream lines:
+1870: /** The reasoning-effort tier sampled at submission (tdd SS3.2, SS3.3). The **same closed tier vocabulary** on both the fresh-turn and steer lanes, spelled identically; invalid tiers are invalid params. `none` is a tier of the vocabulary (ask for no reasoning), not a way to say "unset". */
+1871: export type ReasoningEffort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
+2565:   /** The new session default: the closed eight-string tier vocabulary `turn/start` carries (SS3.2), spelled identically. Invalid tiers are invalid params. A default of `max` rides provider requests verbatim, never clamped (ADR 28621 D8, ADR 31131 D1). */
+3482:   /** Reasoning tier sampled at submission for this turn. */
+3483:   reasoningEffort?: ReasoningEffort;

@@ -1,0 +1,38 @@
+2026-11-01T14:30:09.5806065Z c2aa90ab8b376b7b8c3d418083e3a389b00af355
+2026-11-01T14:30:11.6483723Z [command]/usr/bin/git log -1 --format=%H
+2026-11-01T14:30:11.6506357Z c2aa90ab8b376b7b8c3d418083e3a389b00af355
+2026-11-01T14:31:18.5220279Z   TARGET_SUITES: test_runtime_batch_construction_snapshot
+2026-11-01T14:31:18.5309370Z   TARGET_SUITES: test_runtime_batch_construction_snapshot
+2026-11-01T14:31:18.5635879Z [targeted] EIO_BACKEND=<unset> timeout=600s per suite
+2026-11-01T14:31:18.5843211Z [targeted] dune build test/test_runtime_batch_construction_snapshot.exe
+2026-11-01T14:34:01.9786171Z [targeted] test/test_runtime_batch_construction_snapshot: stanza env MASC_BASE_PATH= ZAI_API_KEY= TYPESAFEAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+2026-11-01T14:34:01.9808354Z [targeted] test/test_runtime_batch_construction_snapshot: start 2026-11-01T14:34:01Z
+2026-11-01T14:34:02.0129272Z   [OK]          batch                        0   no reload retains both bindi...
+2026-11-01T14:34:02.0144745Z   [FAIL]        batch                        1   replacement retains both cap...
+2026-11-01T14:34:02.0159744Z   [FAIL]        batch                        2   replacement retains both pri...
+2026-11-01T14:34:02.0175220Z   [FAIL]        batch                        3   removal retains both provide...
+2026-11-01T14:34:02.0186155Z   [FAIL]        batch                        4   later provider does not fill...
+2026-11-01T14:34:02.0199011Z   [FAIL]        batch                        5   replacement retains both thi...
+2026-11-01T14:34:02.0200756Z   [OK]          unused HTTP catalog          0   native-only batch keeps nati...
+2026-11-01T14:34:02.0202007Z   [OK]          unused HTTP catalog          1   empty batch remains empty.
+2026-11-01T14:34:02.0204006Z   [OK]          unused HTTP catalog          2   disabled binding keeps typed...
+2026-11-01T14:34:02.0205081Z   [OK]          unused HTTP catalog          3   disabled provider keeps type...
+2026-11-01T14:34:02.0205775Z   [OK]          unused HTTP catalog          4   missing provider keeps typed...
+2026-11-01T14:34:02.0208417Z   [OK]          unused HTTP catalog          5   missing model keeps typed drop.
+2026-11-01T14:34:02.0210979Z FAIL second binding shares selected capabilities
+2026-11-01T14:34:02.0211245Z    Expected: `Some true'
+2026-11-01T14:34:02.0211462Z    Received: `Some false'
+2026-11-01T14:34:02.0222056Z FAIL second binding shares selected pricing
+2026-11-01T14:34:02.0222224Z    Expected: `Some 1'
+2026-11-01T14:34:02.0222351Z    Received: `Some 9'
+2026-11-01T14:34:02.0233478Z FAIL second binding shares selected capabilities
+2026-11-01T14:34:02.0233651Z    Expected: `Some true'
+2026-11-01T14:34:02.0233818Z    Received: `None'
+2026-11-01T14:34:02.0243590Z FAIL second binding shares selected capabilities
+2026-11-01T14:34:02.0243768Z    Expected: `None'
+2026-11-01T14:34:02.0243891Z    Received: `Some true'
+2026-11-01T14:34:02.0254811Z FAIL second binding shares selected thinking
+2026-11-01T14:34:02.0255127Z    Expected: `true'
+2026-11-01T14:34:02.0255267Z    Received: `false'
+2026-11-01T14:34:02.0280318Z 5 failures! in 0.029s. 12 tests run.
+2026-11-01T14:34:02.0280967Z [targeted] test/test_runtime_batch_construction_snapshot: FAIL exit 1 in 1s

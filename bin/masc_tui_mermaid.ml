@@ -10,6 +10,8 @@ type shape = Masc_tui_mermaid_grammar.shape =
   | Rect
   | Round
   | Diamond
+  | Hexagon
+  | Asymmetric
   | Database
   | Subroutine
   | Stadium
@@ -189,15 +191,18 @@ include
 
 let parse text = parse_internal text
 
-let parse_with_source_labels text =
+let parse_with_source_labels_internal text =
   let known = Hashtbl.create 16 in
-  let* diagram = parse_internal ~on_label:(fun identity source -> Hashtbl.replace known identity source) text in
+  let undrawn = ref [] in
+  let* diagram = parse_internal
+      ~on_label:(fun identity source -> Hashtbl.replace known identity source)
+      ~on_undrawn:(fun span -> undrawn := span :: !undrawn) text in
   let labels = ref [] in
   let add identity text = if text <> "" then labels := (identity, text) :: !labels in
   (match diagram with
    | Graph graph ->
        List.iter (fun node -> match node.id, node.shape with
-         | Named _, (Rect | Round | Diamond | Subroutine | Database | Stadium | Circle) ->
+         | Named _, (Rect | Round | Diamond | Hexagon | Asymmetric | Subroutine | Database | Stadium | Circle) ->
              add (Node_label node.id) node.label
          | Named _, Bar | (Initial _ | Final _), _ -> ()) graph.nodes;
        List.iteri (fun index edge -> Option.iter (add (Edge_label index)) edge.label) graph.edges;
@@ -223,7 +228,10 @@ let parse_with_source_labels text =
   let source_mapping = match missing with
     | [] -> Complete (List.rev mapped)
     | _ -> Incomplete {mapped=List.rev mapped; missing=List.rev missing} in
-  Ok {diagram; source_mapping}
+  Ok ({diagram; source_mapping}, List.rev !undrawn)
+
+let parse_with_source_labels text =
+  Result.map fst (parse_with_source_labels_internal text)
 
 (* ── Canvas ────────────────────────────────────────────────────────────── *)
 
@@ -253,25 +261,66 @@ type cell =
     }
   | Text of string
   | Skip  (* the second cell of a two-cell glyph *)
+  | Edge_label_text of string  (* must not hide or be hidden by a line *)
+  | Edge_label_skip  (* another occupied cell of the same label glyph *)
 
 type semantic_position = { identity : label_identity; byte : int }
+
+type canvas_issue =
+  | Unattached_text
+  | Overlapping_text
+  | Text_outside_canvas
+  | Adjacent_graphemes
+  | Control_bytes
+  | Edge_label_collision
 
 type canvas = {
   rows : int;
   cols : int;
   cells : cell array array;
   source_cells : semantic_position option array option array array option;
+  boundary_cache : ((string * string), bool) Hashtbl.t;
+  mutable issue : canvas_issue option;
 }
 
 let make_canvas ~trace ~rows ~cols =
   {rows; cols; cells=Array.make_matrix rows cols Empty;
-   source_cells=(if trace then Some (Array.make_matrix rows cols None) else None)}
+   source_cells=(if trace then Some (Array.make_matrix rows cols None) else None);
+   boundary_cache=Hashtbl.create 16;
+   issue=None}
 
 let inside canvas r c = r >= 0 && r < canvas.rows && c >= 0 && c < canvas.cols
 
+let mark_issue canvas issue =
+  if Option.is_none canvas.issue then canvas.issue <- Some issue
+
+let canvas_failure = function
+  | Unattached_text -> Unsupported "a standalone zero-width character in a label"
+  | Overlapping_text -> Unsupported "overlapping text in a diagram"
+  | Text_outside_canvas -> Unsupported "text outside the diagram canvas"
+  | Adjacent_graphemes -> Unsupported "adjacent diagram text that combines across cells"
+  | Control_bytes -> Unsupported "invalid UTF-8 or terminal control characters in a diagram"
+  | Edge_label_collision -> Unsupported "a diagram with an edge label crossing a line"
+
+let unsafe_canvas_text text =
+  if not (String.is_valid_utf_8 text) then true
+  else
+    let length = String.length text in
+    let rec scan at =
+      if at >= length then false
+      else
+        let byte = Char.code text.[at] in
+        byte < 0x20 || byte = 0x7f
+        || (byte = 0xc2 && at + 1 < length
+            && Char.code text.[at + 1] >= 0x80
+            && Char.code text.[at + 1] <= 0x9f)
+        || scan (at + 1)
+    in
+    scan 0
+
 (* Bits merge: a line meeting a border turns the border cell into a
-   junction. A text cell stays text: the head and the label win over the
-   line under them. Two edges of different styles meeting draw solid. *)
+   junction. Text normally stays text, but an edge label colliding with a
+   line requires source fallback. Two edges of different styles draw solid. *)
 let add_bits canvas r c ~style bits ~round =
   if inside canvas r c then
     canvas.cells.(r).(c) <-
@@ -283,76 +332,10 @@ let add_bits canvas r c ~style bits ~round =
              ; style = (if existing.style = style then style else Border_solid)
              ; round = existing.round || round
              }
+       | (Edge_label_text _ | Edge_label_skip) as kept ->
+           mark_issue canvas Edge_label_collision;
+           kept
        | (Text _ | Skip) as kept -> kept)
-
-let put_text ?source canvas r c text =
-  let sources offset length = Array.init length (fun i ->
-    Option.bind source (fun at -> at (offset + i))) in
-  let n = String.length text in
-  let rec walk offset col =
-    if offset < n then (
-      let decoded = String.get_utf_8_uchar text offset in
-      let length = Uchar.utf_decode_length decoded in
-      let glyph = String.sub text offset length in
-      let width = Layout.display_width glyph in
-      if width = 0 then (
-        (* A combining mark joins the cell before it. *)
-        (if inside canvas r (col - 1) then
-           match canvas.cells.(r).(col - 1) with
-           | Text previous ->
-               canvas.cells.(r).(col - 1) <- Text (previous ^ glyph);
-               Option.iter (fun cells ->
-                 let before = match cells.(r).(col - 1) with
-                   | Some positions -> positions
-                   | None -> invalid_arg "Masc_tui_mermaid.put_text: untraced text cell" in
-                 cells.(r).(col - 1) <- Some (Array.append before (sources offset length))) canvas.source_cells
-           | Empty | Line _ | Skip -> ());
-        walk (offset + length) col)
-      else (
-        if inside canvas r col then begin
-          canvas.cells.(r).(col) <- Text glyph;
-          Option.iter (fun cells -> cells.(r).(col) <- Some (sources offset length)) canvas.source_cells
-        end;
-        for extra = 1 to width - 1 do
-          if inside canvas r (col + extra) then begin
-            canvas.cells.(r).(col + extra) <- Skip;
-            Option.iter (fun cells -> cells.(r).(col + extra) <- None) canvas.source_cells
-          end
-        done;
-        walk (offset + length) (col + width)))
-  in
-  walk 0 c
-
-let put_parts canvas row col parts =
-  let text = String.concat "" (List.map snd parts) in
-  let source = match canvas.source_cells with
-    | None -> None
-    | Some _ ->
-        let positions = Array.concat (List.map (fun (identity, text) ->
-          Array.init (String.length text) (fun byte -> Option.map (fun identity -> {identity; byte}) identity)) parts) in
-        Some (fun byte -> positions.(byte)) in
-  put_text ?source canvas row col text
-
-let put_label canvas row col identity text =
-  put_parts canvas row col [identity, text]
-
-(* A straight run between two cells on one row or one column. Each cell
-   gets the bits toward its neighbours on the run, so the ends carry one
-   bit and merge into whatever they touch. *)
-let draw_line canvas ~style (r1, c1) (r2, c2) =
-  if r1 = r2 then (
-    let lo = min c1 c2 and hi = max c1 c2 in
-    for c = lo to hi do
-      add_bits canvas r1 c ~style ~round:false
-        ((if c > lo then left else 0) lor if c < hi then right else 0)
-    done)
-  else if c1 = c2 then (
-    let lo = min r1 r2 and hi = max r1 r2 in
-    for r = lo to hi do
-      add_bits canvas r c1 ~style ~round:false
-        ((if r > lo then up else 0) lor if r < hi then down else 0)
-    done)
-  else invalid_arg "Masc_tui_mermaid.draw_line: not a straight run"
 
 let glyph_of_line ~mask ~(style : border_style) ~round =
   let vertical = mask land (up lor down) <> 0 and horizontal = mask land (left lor right) <> 0 in
@@ -408,6 +391,149 @@ let glyph_of_line ~mask ~(style : border_style) ~round =
         | 15 -> "\xe2\x94\xbc"
         | _ -> " "
 
+
+(* Distinct placements must not combine into one grapheme after the canvas is
+   serialized, even if the combined glyph happens to use the same cell count. *)
+let joins_across_boundary canvas left right =
+  match Hashtbl.find_opt canvas.boundary_cache (left, right) with
+  | Some joins -> joins
+  | None ->
+      let boundary = String.length left in
+      let joined = left ^ right in
+      let joins = ref false in
+      Layout.iter_display_pieces joined
+        ~piece:(fun start stop _width _ansi ->
+          if start < boundary && boundary < stop then joins := true)
+        ~ascii:(fun _ _ -> ());
+      Hashtbl.add canvas.boundary_cache (left, right) !joins;
+      !joins
+
+type text_placement = Reading_text | Generated_glyph | Edge_label_placement
+
+let put_text ?(placement = Reading_text) ?(boundaries = []) ?source canvas r c text =
+  let exception Canvas_unrenderable in
+  let reject issue = mark_issue canvas issue; raise Canvas_unrenderable in
+  let generated = placement = Generated_glyph in
+  let sources offset length = Array.init length (fun i ->
+    Option.bind source (fun at -> at (offset + i))) in
+  (* Canvas geometry is measured in graphemes. Store the same pieces in one
+     text cell, including their original bytes for source mapping. *)
+  let col = ref c in
+  let rec prior_glyph at =
+    if not (inside canvas r at) then None
+    else match canvas.cells.(r).(at) with
+      | Skip | Edge_label_skip -> prior_glyph (at - 1)
+      | Text glyph | Edge_label_text glyph -> Some glyph
+      | Empty -> Some " "
+      | Line {mask; style; round} -> Some (glyph_of_line ~mask ~style ~round)
+  in
+  let put offset stop width =
+      let length = stop - offset in
+      let glyph = String.sub text offset length in
+      if width = 0 then reject Unattached_text
+      else (
+        (* Several edges can share the same generated arrowhead. Keeping the
+           existing cell also keeps any source identity already stored there. *)
+        let duplicate_generated = generated && width = 1 && inside canvas r !col &&
+          match canvas.cells.(r).(!col) with
+          | Text existing -> String.equal existing glyph
+          | Empty | Line _ | Skip | Edge_label_text _ | Edge_label_skip -> false in
+        let overlaps_text = ref false in
+        let overlaps_line = ref false in
+        for cell = !col to !col + width - 1 do
+          if inside canvas r cell then
+            match canvas.cells.(r).(cell) with
+            | Text _ | Skip | Edge_label_text _ | Edge_label_skip -> overlaps_text := true
+            | Line _ when placement = Edge_label_placement -> overlaps_line := true
+            | Empty | Line _ -> ()
+        done;
+        let joins_left = offset = 0 &&
+          Option.fold ~none:false ~some:(fun previous -> joins_across_boundary canvas previous glyph)
+            (prior_glyph (!col - 1)) in
+        let joins_right = stop = String.length text && inside canvas r (!col + width) &&
+          match canvas.cells.(r).(!col + width) with
+          | Text next | Edge_label_text next -> joins_across_boundary canvas glyph next
+          | Empty -> joins_across_boundary canvas glyph " "
+          | Line {mask; style; round} ->
+              joins_across_boundary canvas glyph (glyph_of_line ~mask ~style ~round)
+          | Skip | Edge_label_skip -> false in
+        if not (inside canvas r !col) || width > canvas.cols - !col then
+          reject Text_outside_canvas
+        else if duplicate_generated then ()
+        else if !overlaps_text then reject Overlapping_text
+        else if !overlaps_line then reject Edge_label_collision
+        else if joins_left || joins_right then reject Adjacent_graphemes
+        else begin
+          if inside canvas r !col then begin
+            canvas.cells.(r).(!col) <-
+              (if placement = Edge_label_placement then Edge_label_text glyph else Text glyph);
+            Option.iter (fun cells -> cells.(r).(!col) <- Some (sources offset length)) canvas.source_cells
+          end;
+          for extra = 1 to width - 1 do
+            if inside canvas r (!col + extra) then begin
+              canvas.cells.(r).(!col + extra) <-
+                (if placement = Edge_label_placement then Edge_label_skip else Skip);
+              Option.iter (fun cells -> cells.(r).(!col + extra) <- None) canvas.source_cells
+            end
+          done
+        end;
+        col := !col + width)
+  in
+  if Option.is_some canvas.issue then ()
+  else if unsafe_canvas_text text then
+    mark_issue canvas Control_bytes
+  (* These callers supply exactly one renderer-owned glyph. Reusing its
+     measured width avoids re-segmenting every cell of a note border. *)
+  else if generated then
+    (try put 0 (String.length text) (Layout.display_width text)
+     with Canvas_unrenderable -> ())
+  else
+    try
+      Layout.iter_display_pieces text
+        ~piece:(fun start stop width _ansi ->
+          if List.exists (fun boundary -> start < boundary && boundary < stop) boundaries then
+            reject Adjacent_graphemes;
+          put start stop width)
+        ~ascii:(fun start stop ->
+          for offset = start to stop - 1 do put offset (offset + 1) 1 done)
+    with Canvas_unrenderable -> ()
+
+let put_parts ?(placement = Reading_text) canvas row col parts =
+  let text = String.concat "" (List.map snd parts) in
+  let _, boundaries = List.fold_left (fun (offset, boundaries) (_, part) ->
+    let stop = offset + String.length part in
+    stop, (if stop > 0 && stop < String.length text then stop :: boundaries else boundaries))
+      (0, []) parts in
+  let source = match canvas.source_cells with
+    | None -> None
+    | Some _ ->
+        let positions = Array.concat (List.map (fun (identity, text) ->
+          Array.init (String.length text) (fun byte -> Option.map (fun identity -> {identity; byte}) identity)) parts) in
+        Some (fun byte -> positions.(byte)) in
+  put_text ~placement ~boundaries ?source canvas row col text
+
+let put_label ?(placement = Reading_text) canvas row col identity text =
+  put_parts ~placement canvas row col [identity, text]
+
+(* A straight run between two cells on one row or one column. Each cell
+   gets the bits toward its neighbours on the run, so the ends carry one
+   bit and merge into whatever they touch. *)
+let draw_line canvas ~style (r1, c1) (r2, c2) =
+  if r1 = r2 then (
+    let lo = min c1 c2 and hi = max c1 c2 in
+    for c = lo to hi do
+      add_bits canvas r1 c ~style ~round:false
+        ((if c > lo then left else 0) lor if c < hi then right else 0)
+    done)
+  else if c1 = c2 then (
+    let lo = min r1 r2 and hi = max r1 r2 in
+    for r = lo to hi do
+      add_bits canvas r c1 ~style ~round:false
+        ((if r > lo then up else 0) lor if r < hi then down else 0)
+    done)
+  else invalid_arg "Masc_tui_mermaid.draw_line: not a straight run"
+
+
 let rows_of_canvas canvas =
   Array.to_list canvas.cells
   |> List.map (fun row ->
@@ -417,8 +543,8 @@ let rows_of_canvas canvas =
              match cell with
              | Empty -> Buffer.add_char buffer ' '
              | Line { mask; style; round } -> Buffer.add_string buffer (glyph_of_line ~mask ~style ~round)
-             | Text glyph -> Buffer.add_string buffer glyph
-             | Skip -> ())
+             | Text glyph | Edge_label_text glyph -> Buffer.add_string buffer glyph
+             | Skip | Edge_label_skip -> ())
            row;
          let text = Buffer.contents buffer in
          (* No trailing spaces: the caller pads rows to its own width. *)
@@ -431,10 +557,10 @@ let sources_of_canvas canvas rows =
       let pieces = Array.to_list (Array.mapi (fun col -> function
         | Empty -> [|None|]
         | Line {mask; style; round} -> Array.make (String.length (glyph_of_line ~mask ~style ~round)) None
-        | Text _ -> (match sources.(row).(col) with
+        | Text _ | Edge_label_text _ -> (match sources.(row).(col) with
             | Some positions -> positions
             | None -> invalid_arg "Masc_tui_mermaid.sources_of_canvas: untraced text cell")
-        | Skip -> [||]) canvas.cells.(row)) in
+        | Skip | Edge_label_skip -> [||]) canvas.cells.(row)) in
       let positions = Array.concat pieces in
       Array.sub positions 0 (String.length text)) rows)) canvas.source_cells
 
@@ -487,13 +613,15 @@ let ordering_sweeps = 4
 let bar_length = 7
 let bar_thickness = 1
 
-let shown_label node =
+(* Keep the former diamond geometry for hexagons, including the extra cells
+   around the label, so this shape change does not reroute adjacent edges. *)
+let layout_label node =
   match node.shape with
-  | Diamond -> "\xe2\x9f\xa8" ^ node.label ^ "\xe2\x9f\xa9"
-  | Rect | Round | Database | Subroutine | Stadium | Circle -> node.label
+  | Diamond | Hexagon -> "\xe2\x9f\xa8" ^ node.label ^ "\xe2\x9f\xa9"
+  | Rect | Round | Asymmetric | Database | Subroutine | Stadium | Circle -> node.label
   | Bar -> ""
 
-let box_width node = Layout.display_width (shown_label node) + (2 * box_pad)
+let box_width node = Layout.display_width (layout_label node) + (2 * box_pad)
 
 (* A subgraph already laid out: [c_rows] is its drawing, and the scope that
    holds it treats the whole thing as one box. *)
@@ -730,7 +858,7 @@ let rec layout_scope ~trace ~cols ~direction ~node_of ~nodes ~groups ~edges =
             match node.shape with
             (* Across the flow whichever way the flow runs. *)
             | Bar -> (bar_length, bar_thickness)
-            | Rect | Round | Diamond | Database | Subroutine | Stadium | Circle ->
+            | Rect | Round | Diamond | Hexagon | Asymmetric | Database | Subroutine | Stadium | Circle ->
                 across_and_along (box_width node, box_height))
         | Cluster c -> across_and_along (cluster_width c, cluster_height c)
         | Dummy -> across_and_along (1, 0)
@@ -951,15 +1079,36 @@ let rec layout_scope ~trace ~cols ~direction ~node_of ~nodes ~groups ~edges =
                   done;
                   let identity = match node.id with Named _ -> Some (Node_label node.id)
                     | Initial _ | Final _ -> None in
-                  let prefix, suffix = if node.shape=Diamond then "⟨", "⟩" else "", "" in
+                  let prefix, suffix = match node.shape with
+                    | Diamond -> "⟨", "⟩"
+                    | Hexagon -> " ", " "
+                    | Rect | Round | Asymmetric | Database | Subroutine | Stadium | Circle | Bar -> "", "" in
                   put_parts canvas (top + 1) (lft + 2) [None,prefix;identity,node.label;None,suffix]
                 in
+                let glyph r c text = put_text ~placement:Generated_glyph canvas r c text in
+                let mid = (top + bottom) / 2 in
                 match node.shape with
                 (* One thick run, one cell deep, in the stroke a thick edge
                    uses; the edges meet it as they meet a border. *)
                 | Bar -> draw_line canvas ~style:Border_thick (r0, c0) (r1, c1)
-                | Round | Stadium | Circle -> box ~line:Border_solid ~round:true
+                | Round -> box ~line:Border_solid ~round:true
+                | Stadium ->
+                    box ~line:Border_solid ~round:true;
+                    glyph mid lft "("; glyph mid rgt ")"
+                | Circle ->
+                    box ~line:Border_solid ~round:true;
+                    glyph top lft "/"; glyph top rgt "\\";
+                    glyph mid lft "("; glyph mid rgt ")";
+                    glyph bottom lft "\\"; glyph bottom rgt "/"
                 | Rect | Diamond -> box ~line:Border_solid ~round:false
+                | Hexagon ->
+                    box ~line:Border_solid ~round:false;
+                    glyph top lft "/"; glyph top rgt "\\";
+                    glyph mid lft "‹"; glyph mid rgt "›";
+                    glyph bottom lft "\\"; glyph bottom rgt "/"
+                | Asymmetric ->
+                    box ~line:Border_solid ~round:false;
+                    glyph top lft "\\"; glyph mid lft "›"; glyph bottom lft "/"
                 | Subroutine -> box ~line:Border_double ~round:false
                 | Database -> box ~line:Border_cylinder ~round:false)
             | Cluster c ->
@@ -1014,17 +1163,17 @@ let rec layout_scope ~trace ~cols ~direction ~node_of ~nodes ~groups ~edges =
                draw_line canvas ~style (rc (f_bus, ct)) (rc (ft, ct)));
             if seg.head_at_to then (
               let r, c = rc (ft - 1, ct) in
-              put_text canvas r c (head_glyph ~forward:true));
+              put_text ~placement:Generated_glyph canvas r c (head_glyph ~forward:true));
             if seg.head_at_from then (
               let r, c = rc (fs + 1, cs) in
-              put_text canvas r c (head_glyph ~forward:false));
+              put_text ~placement:Generated_glyph canvas r c (head_glyph ~forward:false));
             match seg.seg_label with
             | None -> ()
             | Some label -> (
                 match flow_axis with
                 | `Rows ->
                     let r, c = rc (fs + 1, cs + 2) in
-                    put_label canvas r c seg.seg_identity label
+                    put_label ~placement:Edge_label_placement canvas r c seg.seg_identity label
                 | `Cols ->
                     let width = Layout.display_width label in
                     let f_start =
@@ -1033,10 +1182,12 @@ let rec layout_scope ~trace ~cols ~direction ~node_of ~nodes ~groups ~edges =
                       | Right_left -> fs + 1 + width
                     in
                     let r, c = rc (f_start, cs - 1) in
-                    put_label canvas r c seg.seg_identity label))
+                    put_label ~placement:Edge_label_placement canvas r c seg.seg_identity label))
           segments;
         let rendered = rows_of_canvas canvas in
-        Ok (rendered, sources_of_canvas canvas rendered, cols_needed, rows)
+        (match canvas.issue with
+         | Some issue -> Error (canvas_failure issue)
+         | None -> Ok (rendered, sources_of_canvas canvas rendered, cols_needed, rows))
 
 let render_graph_internal ~trace ~cols graph =
   let trace = if trace then Some (graph_trace graph) else None in
@@ -1091,7 +1242,10 @@ let event_rows = function
 let render_sequence_internal ~trace ~cols (seq : sequence) =
   let participants = Array.of_list seq.participants in
   let n = Array.length participants in
-  if n = 0 then Ok {canvas_rows=[]; canvas_sources=(if trace then Some [||] else None)}
+  if n = 0 then
+    (match seq.events with
+     | [] -> Ok {canvas_rows=[]; canvas_sources=(if trace then Some [||] else None)}
+     | _ :: _ -> Error (Unsupported "a sequence diagram with events but no participants"))
   else
     let index_of =
       let table = Hashtbl.create 8 in
@@ -1101,17 +1255,38 @@ let render_sequence_internal ~trace ~cols (seq : sequence) =
     let widths = Array.map (fun p -> Layout.display_width p.alias + (2 * box_pad)) participants in
     (* Frames nest inward from both edges, one cell per depth. A [box] groups
        participants in a browser and is not drawn here, so it takes no depth. *)
-    let frame_depth =
-      let depth = ref 0 and deepest = ref 0 in
+    let frame_depth, frame_min_width =
+      let depth = ref 0 and deepest = ref 0 and minimum = ref 0 in
+      let frames = ref [] in
+      let reserve depth kind label =
+        let text = " " ^ kind ^ (if label = "" then "" else " " ^ label) ^ " " in
+        (* An overwide title still needs an exact refusal width, but its
+           grapheme list must not remain in the frame cache after refusal. *)
+        let cells = ref 0 in
+        Layout.iter_display_pieces text
+          ~piece:(fun _ _ width _ -> cells := !cells + width)
+          ~ascii:(fun start stop -> cells := !cells + stop - start);
+        minimum := max !minimum ((2 * depth) + 3 + !cells)
+      in
       List.iter
         (function
-          | Block_open { b_kind; _ } when not (String.equal b_kind "box") ->
+          | Block_open { b_kind; b_label } when not (String.equal b_kind "box") ->
+              reserve !depth b_kind b_label;
+              frames := Some !depth :: !frames;
               incr depth;
               deepest := max !deepest !depth
-          | Block_close -> if !depth > 0 then decr depth
-          | Block_open _ | Block_else _ | Message _ | Note _ -> ())
+          | Block_open _ -> frames := None :: !frames
+          | Block_else label ->
+              (match !frames with Some d :: _ -> reserve d "else" label
+               | None :: _ | [] -> ())
+          | Block_close ->
+              (match !frames with
+               | Some _ :: rest -> frames := rest; decr depth
+               | None :: rest -> frames := rest
+               | [] -> ())
+          | Message _ | Note _ -> ())
         seq.events;
-      !deepest
+      !deepest, !minimum
     in
     let gaps = Array.make (max 1 n) item_gap in
     let extra_right = ref 0 in
@@ -1157,7 +1332,8 @@ let render_sequence_internal ~trace ~cols (seq : sequence) =
       seq.events;
     let x = positions () in
     let margin = frame_depth in
-    let width = margin + x.(n - 1) + widths.(n - 1) + !extra_right + margin in
+    let width = max frame_min_width
+        (margin + x.(n - 1) + widths.(n - 1) + !extra_right + margin) in
     let header_rows = box_height + 1 in
     let body_rows = List.fold_left (fun acc event -> acc + event_rows event) 0 seq.events in
     let rows = header_rows + body_rows + 1 in
@@ -1209,13 +1385,13 @@ let render_sequence_internal ~trace ~cols (seq : sequence) =
                  draw_line canvas ~style:m_bstyle (r + 1, c) (r + 1, c + 3);
                  draw_line canvas ~style:m_bstyle (r + 1, c + 3) (r + 2, c + 3);
                  draw_line canvas ~style:m_bstyle (r + 2, c + 1) (r + 2, c + 3);
-                 put_text canvas (r + 2) (c + 1) (head_glyph m_head ~rightward:false))
+                 put_text ~placement:Generated_glyph canvas (r + 2) (c + 1) (head_glyph m_head ~rightward:false))
                else (
                  let cf = col a and ct = col b in
                  put_label canvas r (min cf ct + 2) (Some (Event_label event_index)) m_text;
                  draw_line canvas ~style:m_bstyle (r + 1, cf) (r + 1, ct);
-                 if ct > cf then put_text canvas (r + 1) (ct - 1) (head_glyph m_head ~rightward:true)
-                 else put_text canvas (r + 1) (ct + 1) (head_glyph m_head ~rightward:false))
+                 if ct > cf then put_text ~placement:Generated_glyph canvas (r + 1) (ct - 1) (head_glyph m_head ~rightward:true)
+                 else put_text ~placement:Generated_glyph canvas (r + 1) (ct + 1) (head_glyph m_head ~rightward:false))
            | Note { n_over; n_text } ->
                let indices = List.map index_of n_over in
                let lo = List.fold_left min (n - 1) indices and hi = List.fold_left max 0 indices in
@@ -1226,16 +1402,20 @@ let render_sequence_internal ~trace ~cols (seq : sequence) =
                in
                (* A note covers the lifelines it sits over, so its border is
                   text rather than line bits that would merge with them. *)
-               let border_row rr l m rgt_glyph =
-                 put_text canvas rr lft l;
+               let border_row ~label_cells rr l m rgt_glyph =
+                 put_text ~placement:Generated_glyph canvas rr lft l;
                  for c = lft + 1 to rgt - 1 do
-                   put_text canvas rr c m
+                   let in_label = match label_cells with
+                     | None -> false
+                     | Some cells -> c >= lft + 2 && c - (lft + 2) < cells in
+                   if not in_label then put_text ~placement:Generated_glyph canvas rr c m
                  done;
-                 put_text canvas rr rgt rgt_glyph
+                 put_text ~placement:Generated_glyph canvas rr rgt rgt_glyph
                in
-               border_row r "\xe2\x94\x8c" "\xe2\x94\x80" "\xe2\x94\x90";
-               border_row (r + 1) "\xe2\x94\x82" " " "\xe2\x94\x82";
-               border_row (r + 2) "\xe2\x94\x94" "\xe2\x94\x80" "\xe2\x94\x98";
+               border_row ~label_cells:None r "\xe2\x94\x8c" "\xe2\x94\x80" "\xe2\x94\x90";
+               border_row ~label_cells:(Some (Layout.display_width n_text))
+                 (r + 1) "\xe2\x94\x82" " " "\xe2\x94\x82";
+               border_row ~label_cells:None (r + 2) "\xe2\x94\x94" "\xe2\x94\x80" "\xe2\x94\x98";
                put_label canvas (r + 1) (lft + 2) (Some (Event_label event_index)) n_text
            | Block_open { b_kind; b_label } ->
                if not (String.equal b_kind "box") then (
@@ -1275,7 +1455,9 @@ let render_sequence_internal ~trace ~cols (seq : sequence) =
           row := r + event_rows event)
         seq.events;
       let rows = rows_of_canvas canvas in
-      Ok {canvas_rows=rows; canvas_sources=sources_of_canvas canvas rows}
+      (match canvas.issue with
+       | Some issue -> Error (canvas_failure issue)
+       | None -> Ok {canvas_rows=rows; canvas_sources=sources_of_canvas canvas rows})
 
 let render_diagram_internal ~trace ~cols diagram =
   match diagram with
@@ -1298,21 +1480,92 @@ let render_diagram_internal ~trace ~cols diagram =
   | Sequence sequence -> render_sequence_internal ~trace ~cols sequence
 
 
+type source_placement = Before_diagram | After_diagram
+type undrawn_source = { source_start : int; source_end : int; placement : source_placement }
+
+(* Source beside a drawing has to be wholly before or after its labels.
+   Otherwise search and scroll would give the two sections inconsistent
+   identities or reading order, so the full source is the safe fallback. *)
+let ordered_undrawn_sources text mapping spans =
+  match spans with
+  | [] -> Ok []
+  | _ ->
+      let* spans = List.fold_left (fun result span ->
+        let* accumulated = result in
+        match span with
+        | Source_fragment (start_byte, end_byte) -> Ok ((start_byte, end_byte) :: accumulated)
+        | Requires_source -> Error (Unsupported "some diagram content")) (Ok []) spans in
+      let* labels = match mapping with
+        | Complete labels -> Ok labels
+        | Incomplete _ -> Error (Unsupported "some diagram content") in
+      let first_label, last_label = List.fold_left (fun (first, last) (label : sourced_label) ->
+        Array.fold_left (fun (first, last) (range : label_source_range) ->
+          min first range.start_byte, max last range.end_byte) (first, last) label.ranges)
+          (max_int, 0) labels in
+      if List.exists (fun (start_byte, end_byte) ->
+        start_byte < 0 || end_byte < start_byte || end_byte > String.length text) spans
+      then Error (Unsupported "some diagram content")
+      else
+        let horizontal = function ' ' | '\t' -> true | _ -> false in
+        let extend (start_byte, end_byte) =
+          let rec left at = if at > 0 && horizontal text.[at-1] then left (at-1) else at in
+          let rec right at = if at < String.length text && horizontal text.[at] then right (at+1) else at in
+          let l = left start_byte and r = right end_byte in
+          let source_start = if l = 0 || text.[l-1] = '\n' then l else start_byte in
+          let source_end =
+            if r = String.length text || text.[r] = '\n'
+               || (text.[r] = '\r' && r+1 < String.length text && text.[r+1] = '\n')
+            then r else end_byte in
+          source_start, source_end in
+        let spans = List.map extend spans |> List.sort compare in
+        (match spans with
+         | [] -> Ok []
+         | (source_start, source_end) :: rest ->
+             (* Keep every byte between omissions. Deleting a separator or an
+                empty line would make the visible text and search disagree. *)
+             let source_end = List.fold_left (fun last (_, stop) -> max last stop) source_end rest in
+             let placement =
+               if first_label <> max_int && source_end <= first_label then Some Before_diagram
+               else if source_start >= last_label then Some After_diagram
+               else None in
+             (match placement with
+              | Some placement -> Ok [{source_start; source_end; placement}]
+              | None -> Error (Unsupported "some diagram content")))
+
+type rendered_with_status = {
+  rows : string list;
+  undrawn_sources : undrawn_source list;
+}
+
+let render_with_status ~cols text =
+  let undrawn = ref [] in
+  let* diagram = parse_internal ~on_undrawn:(fun span -> undrawn := span :: !undrawn) text in
+  let* rendered = render_diagram_internal ~trace:false ~cols diagram in
+  let* undrawn_sources = match !undrawn with
+    | [] -> Ok []
+    | spans when List.exists (function Requires_source -> true | Source_fragment _ -> false) spans ->
+        Error (Unsupported "some diagram content")
+    | _ ->
+        let* parsed, traced_undrawn = parse_with_source_labels_internal text in
+        ordered_undrawn_sources text parsed.source_mapping traced_undrawn in
+  Ok {rows=rendered.canvas_rows; undrawn_sources}
+
 let render ~cols text =
-  let* diagram = parse text in
-  Result.map (fun rendered -> rendered.canvas_rows)
-    (render_diagram_internal ~trace:false ~cols diagram)
+  Result.map (fun rendered -> rendered.rows) (render_with_status ~cols text)
 
 type rendered_with_sources = {
   rendered_rows : string list;
   rendered_positions : semantic_position option array array;
   labels : source_mapping;
+  undrawn_sources : undrawn_source list;
 }
 
 let render_with_source_labels ~cols text =
-  let* parsed = parse_with_source_labels text in
+  let* parsed, undrawn = parse_with_source_labels_internal text in
   let* rendered = render_diagram_internal ~trace:true ~cols parsed.diagram in
+  let* undrawn_sources = ordered_undrawn_sources text parsed.source_mapping undrawn in
   match rendered.canvas_sources with
   | None -> invalid_arg "Masc_tui_mermaid.render_with_source_labels: tracing disabled"
   | Some rendered_positions ->
-      Ok {rendered_rows=rendered.canvas_rows; rendered_positions; labels=parsed.source_mapping}
+      Ok {rendered_rows=rendered.canvas_rows; rendered_positions; labels=parsed.source_mapping;
+          undrawn_sources}

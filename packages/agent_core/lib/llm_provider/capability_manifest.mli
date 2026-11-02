@@ -1,4 +1,4 @@
-(** External JSON capability manifest for model-specific overrides.
+(** Strict JSON input for model-specific capability declarations.
 
     Allows operators and model deployers to describe capabilities for
     custom, quantized, or future model variants without requiring an
@@ -21,44 +21,29 @@
       }
     ]}
 
-    Embedding applications load a file with {!load_file} and explicitly install
-    it with {!set_global}. The manifest layer sits below the model catalog used
-    by [Capabilities.for_model_id]; catalog rows remain the authoritative model
-    capability source when both layers match the same model. When no catalog
-    row matches, the manifest can supply capabilities for custom deployments.
-
-    Priority (highest first):
-    + 1. Model catalog row matching by [model_id] (case-insensitive prefix)
-    + 2. Manifest entry matching an exact [model_id] (ASCII case-insensitive)
-    + 3. [None] when neither source declares the model
+    Embedding applications parse with {!load_file} or {!of_json}, then compose
+    the input with [Model_catalog.with_model_overrides] before selecting provider
+    bindings or freezing requests. All execution consumers read that one model
+    catalog. This parser owns no process-global policy source.
 
     @since 0.188.0 *)
-
-(** Canonical provider capability preset label accepted by the manifest parser. *)
-type base_label = private string
-
-(** Validate and canonicalize a provider capability preset label. *)
-val base_label_of_string : string -> (base_label, string) result
-
-(** Return the canonical wire label. *)
-val base_label_to_string : base_label -> string
 
 (** One entry in the capability manifest.
 
     [model_id] is an exact non-empty model identity without leading or trailing
     whitespace. ASCII case is folded for equality; no suffix, family, separator
     or provider-name transformation is applied.  [base] names a provider preset from
-    {!Capabilities.capabilities_for_provider_label} (e.g.
+    {!Capability_preset} (e.g.
     ["openai_chat"], ["anthropic"]); when absent, the built-in
     [default_capabilities] is used.  Unrecognised labels are rejected
-    by {!base_label_of_string} and by the JSON parser.
+    by the JSON parser; admitted entries carry the closed preset directly.
 
     All other fields are optional overrides: a [None] value means
     "inherit from the base", a [Some v] value replaces the base value. *)
 type entry =
   { model_id : Model_identifiers.Model_id.t
-  ; base_label : base_label option
-    (** Provider preset label, e.g. ["openai_chat"] or ["anthropic"]. *)
+  ; base_label : Capability_preset.t option
+    (** Shared closed provider preset, independent of provider identity. *)
   ; max_context_tokens : int option (** [None] = inherit from base. *)
   ; max_output_tokens : int option (** [None] = inherit from base. *)
   ; supports_tools : bool option
@@ -87,7 +72,7 @@ type entry =
     (** Canonical multimodal block ordering policy (preserve_input_order /
         visual_first, plus the aliases in
         {!Capability_vocab.modality_priority_values}); unknown values fail
-        closed in {!of_json}. Applied in {!Capabilities.apply_manifest_entry}. *)
+        closed in {!of_json}. Applied in [Capabilities.apply_catalog_entry]. *)
   ; supports_native_streaming : bool option
   ; supports_system_prompt : bool option
   ; supports_assistant_prefill : bool option
@@ -102,7 +87,7 @@ type entry =
     (** Canonical thinking-wire format (none / thinking_object /
         thinking_object_adaptive / thinking_object_only / chat_template_kwargs /
         chat_template_token / reasoning_effort / enable_thinking); applied in
-        {!Capabilities.apply_manifest_entry}. Joined from the JSON
+        [Capabilities.apply_catalog_entry]. Joined from the JSON
         [thinking_control_format] and [thinking_control_token] members at parse
         time — [chat_template_token] carries its token in the constructor, so a
         tokenless declaration fails closed in {!of_json}. *)
@@ -113,24 +98,24 @@ type entry =
     (** Canonical historical reasoning preservation wire format (none /
         thinking_object_keep_all / chat_template_kwargs_preserve_thinking /
         top_level_preserve_thinking / always_preserved); applied in
-        {!Capabilities.apply_manifest_entry}. *)
+        [Capabilities.apply_catalog_entry]. *)
   ; content_inline_reasoning : string option
   ; reasoning_output_format : string option
     (** Canonical request-side reasoning output split control (none /
-        split_reasoning_fields); applied in {!Capabilities.apply_manifest_entry}. *)
+        split_reasoning_fields); applied in [Capabilities.apply_catalog_entry]. *)
   ; reasoning_streaming_format : string option
     (** Canonical streaming reasoning side-channel (default / none /
         template_parser / delta:<field>); applied in
-        {!Capabilities.apply_manifest_entry}. *)
+        [Capabilities.apply_catalog_entry]. *)
   ; reasoning_replay : string option
     (** Optional multi-turn reasoning replay policy override (default /
         no_replay / drop_without_tool / preserve_always). *)
   ; emits_usage_tokens : bool option
     (** Whether the standard response carries usage tokens; applied in
-        {!Capabilities.apply_manifest_entry}. *)
+        [Capabilities.apply_catalog_entry]. *)
   ; supported_models : string list option
     (** Exact client-side model allow-list; applied in
-        {!Capabilities.apply_manifest_entry}. {!of_json} rejects an empty list
+        [Capabilities.apply_catalog_entry]. {!of_json} rejects an empty list
         and blank, padded, or duplicate ids. *)
   }
 
@@ -167,31 +152,3 @@ val load_file : string -> (t, string) result
 (** [lookup t model_id] returns the entry with that exact model identity, using
     {!Model_identifiers.Model_id.equal}. Returns [None] for an undeclared model. *)
 val lookup : t -> Model_identifiers.Model_id.t -> entry option
-
-(** The currently active manifest.
-
-    Returns only the manifest explicitly installed with {!set_global}; [None]
-    means no manifest is active. AGENT_CORE never discovers a manifest from the
-    process environment. *)
-val global : unit -> t option
-
-(** [set_global m] installs [m] as the process-wide manifest until
-    {!clear_global} is called.
-
-    Use this when the embedding host already holds a parsed declarative
-    manifest and wants AGENT_CORE to consume the same capability data without
-    round-tripping through another file.
-
-    Safe under multi-domain concurrency via [Atomic.t] internally;
-    concurrent [set_global]/[clear_global]/[global] are race-free but
-    the resulting observed value is whichever set/clear was atomically
-    most recent.
-
-    @since 0.194.0 *)
-val set_global : t -> unit
-
-(** [clear_global ()] removes the installed manifest, after which {!global}
-    returns [None].
-
-    @since 0.194.0 *)
-val clear_global : unit -> unit

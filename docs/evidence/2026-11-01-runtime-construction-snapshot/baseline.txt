@@ -1,0 +1,32 @@
+2026-11-01T13:26:58.6702427Z a91a994c630107a767fe77b17fea8df493049ad7
+2026-11-01T13:27:01.6397967Z [command]/usr/bin/git log -1 --format=%H
+2026-11-01T13:27:01.6425744Z a91a994c630107a767fe77b17fea8df493049ad7
+2026-11-01T13:28:06.8163110Z   TARGET_SUITES: test_runtime_construction_snapshot
+2026-11-01T13:28:06.8301148Z   TARGET_SUITES: test_runtime_construction_snapshot
+2026-11-01T13:28:06.8767484Z [targeted] EIO_BACKEND=<unset> timeout=600s per suite
+2026-11-01T13:28:06.9095869Z [targeted] dune build test/test_runtime_construction_snapshot.exe
+2026-11-01T13:32:09.4119965Z [targeted] test/test_runtime_construction_snapshot: stanza env MASC_BASE_PATH= ZAI_API_KEY= TYPESAFEAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+2026-11-01T13:32:09.4148278Z [targeted] test/test_runtime_construction_snapshot: start 2026-11-01T13:32:09Z
+2026-11-01T13:32:09.4583179Z   [OK]          construction          0   no reload retains policy and creden...
+2026-11-01T13:32:09.4600486Z   [FAIL]        construction          1   replacement retains selected capabi...
+2026-11-01T13:32:09.4617444Z   [FAIL]        construction          2   replacement retains selected pricing.
+2026-11-01T13:32:09.4639445Z   [FAIL]        construction          3   removal retains selected provider p...
+2026-11-01T13:32:09.4654985Z   [FAIL]        construction          4   later provider does not fill captur...
+2026-11-01T13:32:09.4670677Z   [FAIL]        construction          5   replacement retains selected thinki...
+2026-11-01T13:32:09.4675118Z FAIL selected tools policy
+2026-11-01T13:32:09.4675501Z    Expected: `Some true'
+2026-11-01T13:32:09.4675901Z    Received: `Some false'
+2026-11-01T13:32:09.4701499Z FAIL selected input price
+2026-11-01T13:32:09.4701739Z    Expected: `Some 1'
+2026-11-01T13:32:09.4701948Z    Received: `Some 9'
+2026-11-01T13:32:09.4722055Z FAIL selected tools policy
+2026-11-01T13:32:09.4722335Z    Expected: `Some true'
+2026-11-01T13:32:09.4722566Z    Received: `None'
+2026-11-01T13:32:09.4742913Z FAIL selected tools policy
+2026-11-01T13:32:09.4743153Z    Expected: `None'
+2026-11-01T13:32:09.4743374Z    Received: `Some true'
+2026-11-01T13:32:09.4760230Z FAIL selected Anthropic thinking policy
+2026-11-01T13:32:09.4760511Z    Expected: `true'
+2026-11-01T13:32:09.4760720Z    Received: `false'
+2026-11-01T13:32:09.4774743Z 5 failures! in 0.039s. 6 tests run.
+2026-11-01T13:32:09.4788477Z [targeted] test/test_runtime_construction_snapshot: FAIL exit 1 in 0s

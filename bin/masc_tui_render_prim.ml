@@ -92,6 +92,7 @@ let acting_pane_reserved_cols = ref 0
 (* A synchronous draw constructs one candidate. Only the main loop can
    publish it after the terminal accepts its frame. *)
 let frame_acting_pane = ref Masc_tui_acting_pane.empty_frame
+let frame_tools_task : tools_task_frame option ref = ref None
 
 (* Context insertion changes the screen row for every Activity target below
    it. Keep focus inside the pane on its stable header when that happens. *)
@@ -110,7 +111,7 @@ let frame_panes = ref Masc_tui_pane_selection.no_panes
    now, because keys and notches that arrive between two frames each move it
    and the frame's own reading is behind all of them. *)
 let clamped_scroll_now (state : state) = function
-  | Task_detail _ -> Task_detail state.task_detail_scroll
+  | Task_detail (_, viewport) -> Task_detail (state.task_detail_scroll, viewport)
   | Board_read _ ->
       Board_read (state.board_scroll, state.board_comment_scroll)
   | Message_scroll _ -> Message_scroll {scroll=state.msg_scroll; pin=state.msg_scroll_pin}
@@ -147,7 +148,10 @@ let clamped_scroll_now (state : state) = function
   | Repository_changes_diff_scroll _ ->
       Repository_changes_diff_scroll state.repository_changes_diff_scroll
   | Resource_scroll _ -> Resource_scroll state.resource_scroll
-  | Metrics_scroll _ -> Metrics_scroll state.metrics_scroll
+  | Metrics_scroll _ ->
+      Metrics_scroll { scroll = state.metrics_scroll;
+                       content_height = state.metrics_content_height;
+                       card_rows = state.metrics_scroll_card_rows }
   | Approval_detail_scroll _ -> Approval_detail_scroll state.approval_detail_scroll
   | Patch_modal_scroll _ -> Patch_modal_scroll (state.patch_modal_scroll, state.patch_modal_hscroll)
   | Link_modal_scroll _ -> Link_modal_scroll state.link_modal_scroll
@@ -179,7 +183,7 @@ let reader_after_wheel (reader : clamped_scroll)
     | Masc.Tui_mouse_protocol.Wheel_up -> max 0 (value - 1)
   in
   match reader with
-  | Task_detail value -> Some (Task_detail (step value))
+  | Task_detail (value, viewport) -> Some (Task_detail (step value, viewport))
   | Schedule_detail_scroll value -> Some (Schedule_detail_scroll (step value))
   | Acting_detail_scroll value -> Some (Acting_detail_scroll (step value))
   | Memory_fact_detail_scroll value -> Some (Memory_fact_detail_scroll (step value))
@@ -198,7 +202,8 @@ let reader_after_wheel (reader : clamped_scroll)
   | Changes_diff_scroll value -> Some (Changes_diff_scroll (step value))
   | Repository_changes_diff_scroll value ->
       Some (Repository_changes_diff_scroll (step value))
-  | Metrics_scroll value -> Some (Metrics_scroll (step value))
+  | Metrics_scroll { scroll; content_height; card_rows } ->
+      Some (Metrics_scroll { scroll = step scroll; content_height; card_rows })
   | Approval_detail_scroll value -> Some (Approval_detail_scroll (step value))
   | Patch_modal_scroll (vertical, horizontal) ->
       Some (Patch_modal_scroll (step vertical, horizontal))
@@ -334,6 +339,16 @@ let table_frame_enabled = Masc_tui_markdown_theme.table_frame_enabled
 let chat_markdown_palette = Masc_tui_markdown_theme.palette
 let markdown_with_closing = Masc_tui_markdown_theme.render
 let document_markdown = Masc_tui_markdown_theme.document
+
+(* [text] must be canonical Yojson output, or a prefix starting at byte zero.
+   Leave out the gutter so it cannot clip a wide grapheme at the frame edge. *)
+let document_json ~width text =
+  let palette =
+    { (Masc_tui_markdown_theme.palette ~closing:Ansi.reset) with code_gutter = "" } in
+  text
+  |> Masc.Tui_terminal_json.sanitize_canonical_preview
+  |> Masc_tui_markdown_theme.fenced ~language:"json"
+  |> Masc_tui_markdown.render ~palette ~width
 
 (* A level meter, only while a capture is running.
 
@@ -603,8 +618,8 @@ let footer_line ?help_door ?(status = []) ?position ?(recovery_in_slot = None)
     | Some pending
       when pending.sir_generation = state.image_request_generation
            && pending.sir_view = state.view
-           && (pending.sir_view = Resources
-               || pending.sir_keeper = state.msg_target_keeper_name)
+           && Masc_tui_types.image_keeper_is_current state
+                ~view:pending.sir_view ~keeper_name:pending.sir_keeper
            && Masc_tui_types.image_reading_is_current state pending
            && not state.msx_open ->
         Some (Terminal_text.single_line
@@ -1187,7 +1202,7 @@ let acting_pane_input (state : state) =
           state.workspace_identity = Workspace_identity_match
           && server_authority_ready state in
         let waiting =
-          if not workspace_ready then
+          if not workspace_ready || List.mem keeper.k_name state.keeper_waiting_unverified then
             Masc_tui_keeper_list_model.Waiting_unavailable
           else match state.keeper_waiting_failure with
             | Some _ -> Masc_tui_keeper_list_model.Waiting_unavailable
@@ -1625,17 +1640,18 @@ let surface_chrome ~overflow ?help_door ?(frame = Chrome_screen) ?status ?sideba
   finish_surface state ?clamped ~surface_key ~rows:terminal_rows ~cols:full_cols buf
 
 
-let connection_status_badge (status : Masc_tui_types.connection_status) =
+let connection_status_parts (status : Masc_tui_types.connection_status) =
   (* This badge summarizes HTTP refreshes. A rejected read (for example 429)
      can fail while the independent Recent event feed remains live. *)
-  let style, label =
-    match status with
-    | Connected -> Theme.ok (), "connected"
-    | Degraded -> Theme.warn (), "partial"
-    | Connecting -> Theme.warn (), "loading..."
-    | Booting -> Theme.warn (), "server booting..."
-    | Disconnected -> Theme.bad (), "refresh failed"
-  in
+  match status with
+  | Connected -> Theme.text_status Masc_tui_theme.Ok, "connected", ["HTTP connected", false; "connected", true; "HTTP up", true]
+  | Degraded -> Theme.text_status Masc_tui_theme.Warn, "partial", ["HTTP partial", false; "partial", true]
+  | Connecting -> Theme.text_status Masc_tui_theme.Warn, "loading...", ["HTTP loading", false; "loading", true]
+  | Booting -> Theme.text_status Masc_tui_theme.Warn, "server booting...", ["server booting", false; "booting", true]
+  | Disconnected -> Theme.text_status Masc_tui_theme.Bad, "refresh failed", ["HTTP refresh failed", false; "HTTP failed", true; "failed", true]
+
+let connection_status_badge status =
+  let style, label, _ = connection_status_parts status in
   "HTTP " ^ style ^ "[" ^ label ^ "]" ^ Ansi.reset
 
 ;;
@@ -1705,12 +1721,105 @@ let connection_badge (state : state) =
   let connection = connection_status_badge state.connection_status in
   let connection = match state.workspace_identity with
   | Masc_tui_types.Workspace_identity_mismatch _ ->
-      connection ^ " " ^ (Theme.bad ()) ^ "[workspace mismatch]" ^ Ansi.reset
+      connection ^ " " ^ Theme.text_status Masc_tui_theme.Bad ^ "[workspace mismatch]" ^ Ansi.reset
   | Masc_tui_types.Workspace_identity_match_unconfirmed _ ->
-      connection ^ " " ^ (Theme.warn ()) ^ "[workspace unconfirmed]" ^ Ansi.reset
+      connection ^ " " ^ Theme.text_status Masc_tui_theme.Warn ^ "[workspace unconfirmed]" ^ Ansi.reset
   | Masc_tui_types.Workspace_identity_unread
   | Masc_tui_types.Workspace_identity_match -> connection in
-  connection ^ refresh_progress_badge state
+  let source_loss =
+    if state.observer_source_loss then Theme.warn () ^ "[events lost] " ^ Ansi.reset
+    else ""
+  in
+  source_loss ^ connection ^ refresh_progress_badge state
+
+type compact_connection_state =
+  | Compact_workspace_mismatch
+  | Compact_workspace_unconfirmed
+  | Compact_workspace_unread
+  | Compact_read_failed
+  | Compact_read_partial
+  | Compact_read_interrupted
+  | Compact_read_unfinished
+  | Compact_reading
+  | Compact_http of connection_status
+
+let compact_connection_state (state : state) =
+  let progress = match state.http_refresh_progress with
+    | Some (authority, progress) when authority = state.workspace_authority -> Some progress
+    | Some _ | None -> None in
+  let failed, partial, interrupted, unfinished, in_flight =
+    match progress with
+    | None -> false, false, false, false, false
+    | Some progress ->
+        let counts = Http_refresh_progress.counts progress in
+        let failed, interrupted, unfinished =
+          Http_refresh_progress.unreturned_component_reads progress
+          |> List.fold_left (fun (failed, interrupted, unfinished) reading ->
+               match reading.Http_refresh_progress.cr_status with
+               | Component_pending | Component_settled (_, Component_returned Part_received) ->
+                   failed, interrupted, unfinished
+               | Component_settled (_, (Component_returned Part_failed | Component_exception)) ->
+                   true, interrupted, unfinished
+               | Component_settled (_, Component_interrupted) -> failed, true, unfinished
+               | Component_settled (_, Component_unfinished) -> failed, interrupted, true)
+               (false, false, false) in
+        failed || counts.failed > 0, counts.partial > 0,
+        interrupted || counts.interrupted > 0, unfinished,
+        (match progress.phase with In_flight -> true | Finished _ -> false) in
+  let scoped_reading = state.workspace_identity = Workspace_identity_match
+    && Surface_read_order.pending_scoped
+         ~needs:(surface_needs_of_surface state.view) state.http_surface_reads <> [] in
+  match state.workspace_identity with
+  | Workspace_identity_mismatch _ -> Compact_workspace_mismatch
+  | Workspace_identity_match_unconfirmed _ -> Compact_workspace_unconfirmed
+  | Workspace_identity_unread when state.connection_status = Connected
+                                   || state.connection_status = Degraded ->
+      Compact_workspace_unread
+  | Workspace_identity_unread | Workspace_identity_match ->
+      if state.connection_status = Disconnected then Compact_http Disconnected
+      else if failed then Compact_read_failed
+      else if partial then Compact_read_partial
+      else if interrupted then Compact_read_interrupted
+      else if unfinished then Compact_read_unfinished
+      else match state.connection_status with
+        | Connected when in_flight || scoped_reading -> Compact_reading
+        | Connected | Degraded | Connecting | Booting | Disconnected as status -> Compact_http status
+
+let usage_connection_badge (state : state) =
+  let badge = connection_badge state in
+  match state.workspace_identity, state.connection_status with
+  | Workspace_identity_unread, (Connected | Degraded) ->
+      badge ^ " " ^ Theme.text_status Masc_tui_theme.Warn ^ "[workspace not observed]" ^ Ansi.reset
+  | (Workspace_identity_match | Workspace_identity_match_unconfirmed _
+    | Workspace_identity_mismatch _), _
+  | Workspace_identity_unread, (Connecting | Booting | Disconnected) -> badge
+
+(* A narrow Usage title keeps a textual state visible while its longer
+   workspace and refresh details remain available in the scrolled body. *)
+let compact_connection_badge (state : state) ~width =
+  let choose options =
+    match List.find_opt (fun (label, _) -> Message_layout.display_width label <= width) options with
+    | Some choice -> choice
+    | None -> List.hd (List.rev options)
+  in
+  let style, options, needs_context =
+    match compact_connection_state state with
+    | Compact_workspace_mismatch -> Theme.text_status Masc_tui_theme.Bad, ["WS mismatch", true; "mismatch", true], true
+    | Compact_workspace_unconfirmed -> Theme.text_status Masc_tui_theme.Warn, ["WS unconfirmed", true; "unconfirmed", true], true
+    | Compact_workspace_unread -> Theme.text_status Masc_tui_theme.Warn, ["WS unread", true; "unread", true], true
+    | Compact_read_failed -> Theme.text_status Masc_tui_theme.Bad, ["read failed", true; "failed", true], true
+    | Compact_read_partial -> Theme.text_status Masc_tui_theme.Warn, ["read partial", true; "partial", true], true
+    | Compact_read_interrupted -> Theme.text_status Masc_tui_theme.Warn, ["read interrupted", true; "interrupted", true], true
+    | Compact_read_unfinished -> Theme.text_status Masc_tui_theme.Warn, ["read unfinished", true; "unfinished", true], true
+    | Compact_reading -> Theme.text_status Masc_tui_theme.Warn, ["reading data", true; "reading", true], true
+    | Compact_http status ->
+        let style, _, options = connection_status_parts status in
+        style, options, false in
+  let label, needs_full_status = choose options in
+  let details =
+    if needs_context || needs_full_status then usage_connection_badge state
+    else refresh_progress_badge state in
+  style ^ label ^ Ansi.reset, (if String.equal details "" then None else Some details)
 
 (* A header row of [lead], a bracketed [label] and [badge]. The badge says
    whether the screen can be trusted, so it is drawn whole and the label gives
@@ -1784,17 +1893,9 @@ let keeper_roster_pane_shown (state : state) ~cols =
    nothing observed -- and the word next to it is the exact published status,
    so the column stays legible at four shapes instead of needing a distinct
    glyph per label. *)
-(* One keeper is described by four separate readings, and the status cell draws
-   three of them in three separate channels rather than folding them into one
-   word:
-
-     colour  what to do about it   from next_action, which the runtime derives
-     glyph   whether it is paused  a person's decision, not a health reading
-     word    how it is reporting   from health
-
-   The lifecycle cell is the fourth and has its own column. The cell used to
-   show a single word from [surface_status], which restates health and hides
-   it entirely while a keeper is paused. *)
+(* The colour reinforces the runtime's suggested action; the selected Keeper
+   also names that action in text, including when colours are unavailable.
+   Pause, health and lifecycle remain separate readings. *)
 let keeper_action_color
     (action : Status.keeper_next_action_path option) =
   match action with
@@ -1815,6 +1916,20 @@ let keeper_action_color
      0.027 for protanopia. Blue and white came out worse than green even for
      ordinary vision, because they close on [Probe]'s cyan. *)
   | Some Status.Direct_message -> Theme.action_message ()
+
+(* Preserve what was actually observed: a runtime that names no action is not
+   evidence that nothing needs doing, and an unread roster is not absence. *)
+let keeper_suggested_action reading =
+  match reading.Keeper_control.liveness with
+  | Keeper_control.Unobserved -> "not observed"
+  | Keeper_control.Invalid _ -> "read error"
+  | Keeper_control.Absent -> "unavailable"
+  | Keeper_control.Present runtime ->
+      match runtime.kr_next_action with
+      | None -> "not reported"
+      | Some Status.Recover -> "recover"
+      | Some Status.Probe -> "probe"
+      | Some Status.Direct_message -> "direct message"
 
 
 let keeper_state_glyph ~paused ~(health : Tui_decode.keeper_health option) =
@@ -1856,9 +1971,20 @@ let keeper_roster_pane ?(focused = false) (state : state) ~rows ~cols buf =
   let restore = Ansi.reset ^ ground in
   let draw ?style text = sidebar_line ?style buf ~cols text in
   let rule = sidebar_rule ~cols in
+  let selected = selected_keeper state in
+  let action =
+    Option.fold ~none:[]
+      ~some:
+      (fun keeper ->
+        let indent = if inner >= 3 then "  " else "" in
+        Message_layout.wrap_words ~max_cells:(max 1 (inner - String.length indent))
+          ("Selected next: " ^ keeper_suggested_action (keeper_reading state keeper))
+        |> List.map (fun line -> "", indent ^ line))
+      selected
+  in
   let details =
     if not focused then []
-    else match selected_keeper state with
+    else match selected with
       | None -> []
       | Some keeper ->
           let reading = keeper_reading state keeper in
@@ -1894,7 +2020,23 @@ let keeper_roster_pane ?(focused = false) (state : state) ~rows ~cols buf =
   let details =
     if available >= detail_rows + min count detail_rows then details else []
   in
-  let capacity = available - List.length details in
+  (* Decide the existing detail block first. When the action needs more room,
+     drop its separator and heading before any name, health or runtime. *)
+  let list_minimum = if count > 0 then 1 else 0 in
+  let fits_action details =
+    available - List.length details >= List.length action + list_minimum
+  in
+  let details, action =
+    match action with
+    | [] -> details, []
+    | _ when fits_action details -> details, action
+    | _ ->
+        (match details with
+         | _rule :: rest when fits_action rest -> rest, action
+         | _rule :: _heading :: rest when fits_action rest -> rest, action
+         | _ -> details, [])
+  in
+  let capacity = available - List.length details - List.length action in
   let first = max 0 (min (state.keeper_cursor - capacity + 1) (count - capacity)) in
   let window = Rows.of_list ~first ~height:capacity state.keepers in
   let count_label =
@@ -1928,7 +2070,8 @@ let keeper_roster_pane ?(focused = false) (state : state) ~rows ~cols buf =
            | None -> "  No Keepers listed")
     | None -> draw ""
   done;
-  List.iter (fun (style, text) -> draw ~style text) details
+  List.iter (fun (style, text) -> draw ~style text) details;
+  List.iter (fun (style, text) -> draw ~style text) action
 
 
 (* What a boxed listing draws under its rows: the scroll line -- a row whether
@@ -4645,41 +4788,60 @@ let context_part_text_or_status = function
         ((Theme.bad ()) ^ "This part could not be read: "
          ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset)
 
+type context_retained_projection =
+  { retained_text : string
+  ; retained_width : int
+  ; retained_palette_generation : int
+  ; retained_table_frame : bool
+  ; retained_lines : string list
+  }
+
+let context_retained_projection = ref None
+
+let context_retained_body_lines ~width text =
+  let generation = Masc_tui_terminal_palette.(snapshot_generation (snapshot ())) in
+  match !context_retained_projection with
+  | Some cached
+    when cached.retained_text == text
+         && cached.retained_width = width
+         && cached.retained_palette_generation = generation
+         && cached.retained_table_frame = !table_frame_enabled -> cached.retained_lines
+  | Some _ | None ->
+      let section_lines = function
+        | Retained_view.Text text ->
+            document_markdown ~width
+              (Keeper_chat.terminal_safe_text ~preserve_newlines:true text)
+        | Retained_view.Json payload ->
+            Masc_tui_markdown_theme.code ~language:"json" ~width
+              (Keeper_chat.terminal_safe_text ~preserve_newlines:true payload)
+        | Retained_view.Marker label ->
+            [ Ansi.bold ^ "▸ " ^ Keeper_chat.terminal_safe_text label ^ Ansi.reset ]
+      in
+      let lines = Retained_view.sections ~text
+        |> List.concat_map (fun group -> section_lines group @ [ "" ]) in
+      context_retained_projection := Some
+          { retained_text = text; retained_width = width
+          ; retained_palette_generation = generation
+          ; retained_table_frame = !table_frame_enabled; retained_lines = lines };
+      lines
+
 let context_exact_item_detail_lines ~width ~scale ~part
     (item : Masc_tui_context_inspector.exact_input_item) =
   let module Inspector = Masc_tui_context_inspector in
   (* A message's text is wire JSON; its typed blocks are where the prose
      lives. Walking the blocks and rendering each part for what it is --
-     markdown prose, a clipped JSON payload, a structural label -- is the
+     markdown prose, a highlighted JSON payload, a structural label -- is the
      difference between reading the item and re-reading the envelope. *)
-  let section_lines = function
-    | Retained_view.Text text ->
-        document_markdown ~width (Keeper_chat.terminal_safe_text text)
-    | Retained_view.Json payload ->
-        String.split_on_char '\n' payload
-        |> List.map (fun line ->
-               (Masc_tui_theme.tone Masc_tui_theme.Accent)
-               ^ Message_layout.fit_width
-                   (Keeper_chat.terminal_safe_text line) width
-               ^ Ansi.reset)
-    | Retained_view.Marker label ->
-        [ Ansi.bold
-          ^ "▸ " ^ Keeper_chat.terminal_safe_text label
-          ^ Ansi.reset
-        ]
-  in
   let body =
     match context_part_text_or_status part with
     | Error status -> [ status ]
-    | Ok text ->
-        Retained_view.sections ~text
-        |> List.concat_map (fun group -> section_lines group @ [ "" ])
+    | Ok text -> context_retained_body_lines ~width text
   in
   [ Ansi.bold ^ Theme.info () ^ "[ RETAINED ITEM ]" ^ Ansi.reset
   ; Ansi.bold ^ Inspector.exact_input_label item.kind ^ Ansi.reset
   ; Printf.sprintf "%s tok (%s)  ·  sha256 %s"
       (Masc_tui_token_scale.format_estimate scale item.bytes)
-      (Inspector.format_bytes item.bytes)
+      (Inspector.exact_bytes item.bytes)
       (String.sub item.sha256 0 12)
   ; ""
   ; Ansi.dim ^ Masc_tui_token_scale.note scale ^ Ansi.reset
@@ -4770,12 +4932,13 @@ let context_exact_input_summary ~width ~scale
               (max 0 (22 - Message_layout.display_width key))
               ' '
         in
-        Printf.sprintf "  %s%s %s%s %s%3d %s%s  \xe2\x89\x88%6s tok  %6s"
+        Printf.sprintf "  %s%s %s%s %s%3d %s%s  %9s  \xe2\x89\x88%6s tok  %6s"
           (context_source_style source)
           (context_source_glyph source)
           label Ansi.reset Ansi.dim count
           (if count = 1 then "item " else "items")
           Ansi.reset
+          (Masc_tui_context_inspector.exact_bytes bytes)
           (Masc_tui_context_inspector.format_tokens
              (Masc_tui_token_scale.estimate scale bytes))
           share_text)
@@ -4787,7 +4950,7 @@ let context_exact_input_summary ~width ~scale
             (Printf.sprintf "%s, %s tok (%s) retained"
                (Masc_tui_message_layout.count_noun (List.length items) "item")
                (Masc_tui_token_scale.format_estimate scale total)
-               (Masc_tui_context_inspector.format_bytes total))
+               (Masc_tui_context_inspector.exact_bytes total))
     ]
     @ bar @ rows
   , total )
@@ -4831,7 +4994,8 @@ let context_response_body_lines ~width state parts =
       let lines = List.concat_map
           (function
             | Masc_tui_context_inspector.Reply_text text ->
-                document_markdown ~width (Keeper_chat.terminal_safe_text text)
+                document_markdown ~width
+                  (Keeper_chat.terminal_safe_text ~preserve_newlines:true text)
             | Masc_tui_context_inspector.Request_failure detail ->
                 List.map (fun line -> (Theme.bad ()) ^ line ^ Ansi.reset)
                   (Context_bars.wrap ~width
@@ -4935,7 +5099,7 @@ let context_exact_input_lines ~cols ~scale state ~response ~response_parts
         Printf.sprintf "  Prepared request  %s · %s · %s tok (%s) · %s"
           input.wire.provider input.wire.model
           (Masc_tui_token_scale.format_estimate scale input.wire.body_bytes)
-          (Inspector.format_bytes input.wire.body_bytes)
+          (Inspector.exact_bytes input.wire.body_bytes)
           (String.sub input.wire.body_sha256 0 12)
       in
       let summary, retained =
@@ -4948,13 +5112,16 @@ let context_exact_input_lines ~cols ~scale state ~response ~response_parts
                 request%s"
                Ansi.dim
                (Masc_tui_token_scale.format_estimate scale retained)
-               (Inspector.format_bytes retained)
+               (Inspector.exact_bytes retained)
                (Masc_tui_token_scale.format_estimate scale input.wire.body_bytes)
-               (Inspector.format_bytes input.wire.body_bytes)
+               (Inspector.exact_bytes input.wire.body_bytes)
                Ansi.reset
            ]
          else [])
         @ [ Ansi.dim ^ "  " ^ Masc_tui_token_scale.note scale ^ Ansi.reset ]
+        @ (Context_bars.wrap ~width
+             "Item token estimates can change with this ratio even when their bytes and SHA-256 stay identical."
+           |> List.map (fun line -> "  " ^ Ansi.dim ^ line ^ Ansi.reset))
       in
       (* What came back for this exact request, to the extent the turn
          record observed it. The response text lives in the chat store and
@@ -4984,15 +5151,29 @@ let context_exact_input_lines ~cols ~scale state ~response ~response_parts
             | _ ->
                 [ Printf.sprintf "  Response  ·  %s" (String.concat "  ·  " parts) ]
       in
+      (* Usage belongs to the last reported request in the turn. A retained
+         pre-dispatch snapshot can instead name a later failed attempt; the
+         record has no response-to-capture ID, so do not label this as a hit
+         on the prepared request above. All counts here are provider-reported,
+         independent of the byte-to-token scale used for individual items. *)
+      let cache_lines =
+        match response with
+        | None -> [ Ansi.dim ^ "  Provider cache usage unavailable" ^ Ansi.reset ]
+        | Some (record : Turn_record.t) ->
+            Context_bars.wrap ~width
+              (Inspector.provider_usage_summary record.usage)
+            |> List.map (fun line -> "  " ^ line)
+      in
       let common =
-        [ identity; wire ] @ response_line @ [ "" ] @ summary @ against_wire
+        [ identity; wire ] @ response_line @ cache_lines @ [ "" ] @ summary @ against_wire
         @ [ context_response_summary response_parts; "" ]
       in
       (* One letter per row says where the item stands in the assembly. The
          wire is append-only, so the last message is this turn's newest
          addition and every earlier message is history the window carried
-         forward; the prompt and the schemas are the fixed parts that ride
-         every turn. The letter states a position on the wire, not a join
+         forward. The system prompt can include changing turn observations;
+         its position alone does not establish cacheability. The letter
+         states a position on the wire, not a join
          the pane would have to invent. *)
       let last_message_index =
         List.fold_left
@@ -5005,7 +5186,7 @@ let context_exact_input_lines ~cols ~scale state ~response ~response_parts
       in
       let kind_letter index (item : Inspector.exact_input_item) =
         match item.kind with
-        | Inspector.System_prompt -> "F"
+        | Inspector.System_prompt -> "P"
         | Inspector.Tool_schema _ -> "S"
         | Inspector.Message _ ->
             if Some index = last_message_index then "N" else "H"
@@ -5040,7 +5221,7 @@ let context_exact_input_lines ~cols ~scale state ~response ~response_parts
       let legend =
         ("  " ^ context_source_legend)
         :: (Context_bars.wrap ~width
-              "F fixed prompt · H history · N new this turn · S schema"
+              "P system prompt (may include turn observations) · H history · N new this turn · S schema"
            |> List.map (fun line -> "  " ^ Ansi.dim ^ line ^ Ansi.reset))
       in
       let common = common @ legend @ [ "" ] in
@@ -5141,7 +5322,7 @@ let context_input_map_detail_lines ~width ~scale ~part_of
   ; Ansi.bold ^ Inspector.input_component_label row.component ^ Ansi.reset
   ; Printf.sprintf "%s tok (%s)  ·  %s"
       (Masc_tui_token_scale.format_estimate scale row.bytes)
-      (Inspector.format_bytes row.bytes)
+      (Inspector.exact_bytes row.bytes)
       (Inspector.input_source_label row.source)
   ; Ansi.dim ^ digest ^ Ansi.reset
   ; ""
@@ -5189,7 +5370,7 @@ let context_input_map_lines ~cols ~scale state (record : Turn_record.t)
                (Inspector.input_component_label row.component)
                Ansi.reset
                (Masc_tui_token_scale.format_estimate scale row.bytes)
-               (Inspector.format_bytes row.bytes)
+               (Inspector.exact_bytes row.bytes)
                (Inspector.input_source_label row.source)
                (context_evidence_badge row.evidence)
            in

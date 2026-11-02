@@ -464,6 +464,13 @@ val with_isolated_pieces_cache : (unit -> 'a) -> 'a
     domain. The callback is pure wrapping work and must not yield between
     fibers. This does not change the separate UI-only chat row-count cache. *)
 
+val iter_display_pieces :
+  string -> piece:(int -> int -> int -> bool -> unit) ->
+  ascii:(int -> int -> unit) -> unit
+(** Walk the same grapheme and ANSI boundaries used by [display_width]. The
+    [piece] callback receives byte start, byte end, cell width and whether it
+    is ANSI; [ascii] receives a run whose bytes each occupy one cell. *)
+
 val display_width : string -> int
 (** Approximate the display cells of a terminal that draws extended grapheme
     clusters as indivisible layout pieces. Renderer-owned ANSI CSI and
@@ -472,6 +479,16 @@ val display_width : string -> int
     takes two cells whatever its scalars add up to; one holding VS15 takes
     one. A cluster opening with any other scalar sums its parts, so a joiner
     inside a Devanagari conjunct changes nothing. *)
+
+val display_width_for_wrapping : string -> int
+(** The same width, retaining ASCII runs as spans in the frame cache. *)
+
+val fits_within_cells : max_cells:int -> string -> bool
+(** Whether the display width fits the budget. Stops measuring once it cannot
+    fit, without retaining a long input's pieces in the frame cache. *)
+
+val widest_grapheme_cells : string -> int
+(** Maximum display-cell width of one grapheme; ANSI controls contribute zero. *)
 
 val grapheme_count : string -> int
 (** How many extended grapheme clusters the text holds: what the screen
@@ -609,6 +626,11 @@ val split_cells : max_cells:int -> string -> string list
     chunk is padded, and concatenating them returns the input. Use where the
     text has no word boundaries to wrap at -- a fenced code line, an
     identifier longer than the frame. *)
+
+val split_cells_after_prefix :
+  prefix_cells:int -> max_cells:int -> string -> string * string list
+(** The same prefix as {!split_at_cells}, followed by any nonempty remaining
+    text split as {!split_cells}. Reuses one grapheme walk for valid UTF-8. *)
 
 val split_styled_cells : max_cells:int -> string -> string list
 (** Preserve cell padding and prefer space boundaries for renderer-owned SGR text. Each row

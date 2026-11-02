@@ -12,4 +12,5 @@
   masc_tui_theme
   masc_tui_overview_providers
   masc_tui_usage_trend
-  masc_tui_message_layout))
+  masc_tui_message_layout)
+ (action (setenv MASC_TUI_FORCE_COLOR 1 (run %{test}))))

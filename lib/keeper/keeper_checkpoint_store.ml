@@ -50,7 +50,7 @@ let list_agent_core_history_files ~(session_dir : string) : string list =
       Sys.readdir session_dir
       |> Array.to_list
       |> List.filter (is_agent_core_history_file ~session_dir)
-      |> List.sort (fun a b -> compare b a))
+      |> List.sort (fun a b -> String.compare b a))
 
 (* Each entry is a copy of the head the canonical held (RFC-0476 §3.2), so it
    costs the head's bytes; the objects are shared. The only reader is the
@@ -2693,8 +2693,16 @@ let save_agent_core_for_keeper
   |> Result.map_error save_agent_core_error_to_string
 
 module For_testing = struct
+  module Inode_set = Set.Make (struct
+    type t = int * int
+
+    let compare (d1, i1) (d2, i2) =
+      let c = Int.compare d1 d2 in
+      if c <> 0 then c else Int.compare i1 i2
+  end)
+
   let retained_payload_bytes ~directory =
-    let seen = Hashtbl.create 16 in
+    let seen = ref Inode_set.empty in
     let rec count total path =
       let stat = Unix.lstat path in
       match stat.Unix.st_kind with
@@ -2703,9 +2711,9 @@ module For_testing = struct
           total (Sys.readdir path)
       | Unix.S_REG ->
         let key = stat.Unix.st_dev, stat.Unix.st_ino in
-        if Hashtbl.mem seen key then total
+        if Inode_set.mem key !seen then total
         else (
-          Hashtbl.add seen key ();
+          seen := Inode_set.add key !seen;
           if stat.Unix.st_size > max_int - total then invalid_arg "retained payload byte count overflow";
           total + stat.Unix.st_size)
       | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK -> total

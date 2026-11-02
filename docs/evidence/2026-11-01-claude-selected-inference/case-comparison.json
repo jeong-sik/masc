@@ -1,0 +1,123 @@
+{
+  "key_encoding": "UTF-8 compact JSON [suite,group,full literal name] array, ensure_ascii=false, comma/colon separators, one LF",
+  "keys_sha256": "64cdc856f2d684dff06f8ac837315a751d5907256ddcc914857f105e623b75c9",
+  "common_completed_baseline_recheck": 10,
+  "maintained_pass": 4,
+  "fail_to_pass": 6,
+  "pass_to_fail": 0,
+  "interrupted_candidate_completed_common": 1,
+  "interrupted_candidate_without_completed_case_rows": 9,
+  "cases": [
+    {
+      "index": 0,
+      "key": [
+        "test_keeper_claude_code_runtime",
+        "selected inference",
+        "selected high survives a replacement low"
+      ],
+      "baseline": "FAIL",
+      "interrupted_candidate": "OK",
+      "recheck": "OK"
+    },
+    {
+      "index": 1,
+      "key": [
+        "test_keeper_claude_code_runtime",
+        "selected inference",
+        "selected high survives removing the effort declaration"
+      ],
+      "baseline": "FAIL",
+      "interrupted_candidate": "not_observed",
+      "recheck": "OK"
+    },
+    {
+      "index": 2,
+      "key": [
+        "test_keeper_claude_code_runtime",
+        "selected inference",
+        "selected absence survives adding a live low"
+      ],
+      "baseline": "FAIL",
+      "interrupted_candidate": "not_observed",
+      "recheck": "OK"
+    },
+    {
+      "index": 3,
+      "key": [
+        "test_keeper_claude_code_runtime",
+        "selected inference",
+        "selected explicit none survives a replacement low"
+      ],
+      "baseline": "FAIL",
+      "interrupted_candidate": "not_observed",
+      "recheck": "OK"
+    },
+    {
+      "index": 4,
+      "key": [
+        "test_keeper_claude_code_runtime",
+        "selected inference",
+        "selected high survives removing its runtime"
+      ],
+      "baseline": "FAIL",
+      "interrupted_candidate": "not_observed",
+      "recheck": "OK"
+    },
+    {
+      "index": 5,
+      "key": [
+        "test_keeper_claude_code_runtime",
+        "selected inference",
+        "selected unbounded idle survives a positive replacement"
+      ],
+      "baseline": "FAIL",
+      "interrupted_candidate": "not_observed",
+      "recheck": "OK"
+    },
+    {
+      "index": 6,
+      "key": [
+        "test_keeper_claude_code_runtime",
+        "selected inference",
+        "a hook overrides selected high with native max"
+      ],
+      "baseline": "OK",
+      "interrupted_candidate": "not_observed",
+      "recheck": "OK"
+    },
+    {
+      "index": 7,
+      "key": [
+        "test_keeper_claude_code_runtime",
+        "selected inference",
+        "a hook clears the selected effort"
+      ],
+      "baseline": "OK",
+      "interrupted_candidate": "not_observed",
+      "recheck": "OK"
+    },
+    {
+      "index": 8,
+      "key": [
+        "test_keeper_claude_code_runtime",
+        "selected inference",
+        "native minimal is still admitted as low"
+      ],
+      "baseline": "OK",
+      "interrupted_candidate": "not_observed",
+      "recheck": "OK"
+    },
+    {
+      "index": 9,
+      "key": [
+        "test_keeper_claude_code_runtime",
+        "selected inference",
+        "native ultra is still admitted as max"
+      ],
+      "baseline": "OK",
+      "interrupted_candidate": "not_observed",
+      "recheck": "OK"
+    }
+  ],
+  "comparison_limit": "The completed recheck also includes a lower pipeline repair. This is not a claim that the whole production dependency tree is identical across the negative/positive pair."
+}

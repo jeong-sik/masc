@@ -646,6 +646,7 @@ let assemble_hooks
     let active_tool_surface_enabled = ref false in
     let active_checkpoint_owner = ref None in
     let host_memory = ref None in
+    let recall_delivery = Keeper_memory_recall_blocks.create_delivery () in
     (* The recall judgment of this run of the turn is made once, before its
        first request, and every later call gets the same judgment back, unless
        it came to unavailable, which is asked again. A runtime attempt that
@@ -654,9 +655,15 @@ let assemble_hooks
        starts again for the same turn, from a checkpoint, builds a new memo and
        may judge again. *)
     let recall_memo = Keeper_memory_recall_turn.create_memo () in
-    let on_memory_capacity_refusal ~refusal = match !host_memory with
-      | None -> Ok Keeper_memory_delivery_reprojection.Unchanged
-      | Some prepared -> Keeper_workspace_memory_host_recall.defer_for_capacity prepared ~refusal in
+    let on_memory_capacity_refusal ~refusal =
+      let shared = match !host_memory with
+        | None -> Ok Keeper_memory_delivery_reprojection.Unchanged
+        | Some prepared -> Keeper_workspace_memory_host_recall.defer_for_capacity prepared ~refusal in
+      match shared with
+      | Error _ as error -> error
+      | Ok Keeper_memory_delivery_reprojection.Reprojected as reduced -> reduced
+      | Ok Unchanged -> Keeper_memory_recall_blocks.defer_for_capacity recall_delivery
+    in
     let usage_attempt = ref None in
     let usage_report_of_attempt = ref None in
     let client_reported_in_attempt = ref false in
@@ -675,6 +682,7 @@ let assemble_hooks
     in
     let on_runtime_attempt (attempt : Keeper_turn_driver.runtime_attempt) =
       host_memory := None;
+      Keeper_memory_recall_blocks.begin_runtime_attempt recall_delivery;
       active_tool_surface_enabled := attempt.tool_surface_enabled;
       active_checkpoint_owner := Some attempt.checkpoint_owner;
       usage_attempt := Some (attempt.routing_run_id, attempt.runtime_id, attempt.lane_attempt_index);
@@ -933,6 +941,7 @@ let assemble_hooks
               | Agent_core.Hooks.BeforeTurnParams
                   { turn; current_params; messages; last_tool_results; _ } ->
                 let hook_t0 = Time_compat.now () in
+                Keeper_memory_recall_blocks.begin_request recall_delivery;
                 acc.current_turn <- turn;
                 (* A delivered Skill can only inform tool choices made from this
                    exact provider request. Do not carry causal candidates into a
@@ -1155,6 +1164,7 @@ let assemble_hooks
                    in
                    Option.iter
                      (fun recalled ->
+                        let recalled = Keeper_memory_recall_blocks.for_request recall_delivery recalled in
                         List.iter
                           (fun (block, text) -> record_block block text)
                           (Keeper_memory_recall_blocks.prompt_blocks recalled))
@@ -1215,6 +1225,11 @@ let assemble_hooks
                 let recorded_blocks_for_receipt =
                   Keeper_context_assembly.logical_blocks extra_system_context_assembly
                 in
+                Keeper_memory_recall_blocks.observe_request recall_delivery
+                  ~turn_ref:(Ids.Turn_ref.make
+                    ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+                    ~absolute_turn:keeper_turn_id)
+                  ~blocks:extra_system_context_assembly.blocks;
                 (* The assembled text exists only here. The turn record keeps
                    each block's bytes and digest, which answers "how much" but
                    never "what", so an operator asking what this keeper is being

@@ -1,6 +1,19 @@
 open Alcotest
 open Masc
 
+let provider_config_for_binding config binding =
+  Runtime_adapter.materialize_provider_binding
+    ~construction:(Runtime_adapter.create_construction ()) config binding
+  |> Result.map (fun (selected : Runtime_adapter.provider_materialization) -> selected.provider_config)
+;;
+
+let execution_for_binding config binding =
+  Runtime_adapter.materialize_execution
+    ~construction:(Runtime_adapter.create_construction ()) config binding
+  |> Result.map (fun (selected : Runtime_adapter.execution_materialization) -> selected.execution)
+;;
+
+
 (* These tests assert on the operator-facing wording, so the typed failure is
    rendered once here instead of at every call below. *)
 let load_list_text ~config_path =
@@ -231,10 +244,10 @@ let test_runtime_json_not_in_repo_config () =
    embedded catalog, because nothing else answers. *)
 let with_deployment_agent_core_model_catalog f =
   Fun.protect
-    ~finally:Llm_provider.Model_catalog.clear_global
+    ~finally:Llm_provider.Catalog_snapshot.reset
     (fun () ->
-       Llm_provider.Model_catalog.clear_global ();
-       match Llm_provider.Model_catalog.global () with
+       (Llm_provider.Catalog_snapshot.reset ());
+       match (Llm_provider.Catalog_snapshot.models (Llm_provider.Catalog_snapshot.current ())) with
        | None -> fail "embedded catalog should load"
        | Some catalog -> f catalog)
 
@@ -256,7 +269,7 @@ let test_deployment_agent_core_model_catalog_covers_live_runpod_mtp () =
         runpod_model_id
     | Some entry ->
       check (option string) (provider_name ^ " base") (Some "openai_chat")
-        entry.base_label;
+        (Option.map Llm_provider.Capability_preset.to_string entry.base_label);
       check (option int) (provider_name ^ " context") (Some 131072)
         entry.max_context_tokens
   in
@@ -369,7 +382,7 @@ let test_deployment_agent_core_model_catalog_covers_live_runpod_rtxa6000_gemma (
        model_id
    | Some entry ->
      check (option string) (provider_name ^ " base") (Some "openai_chat")
-       entry.base_label;
+       (Option.map Llm_provider.Capability_preset.to_string entry.base_label);
      check (option int) (provider_name ^ " context") (Some 262144)
        entry.max_context_tokens);
   match
@@ -407,7 +420,7 @@ let test_deployment_agent_core_model_catalog_covers_local_gemma4_e2b_qat () =
        model_id
    | Some entry ->
      check (option string) (provider_name ^ " base") (Some "ollama")
-       entry.base_label;
+       (Option.map Llm_provider.Capability_preset.to_string entry.base_label);
      check (option int) (provider_name ^ " context") (Some 131072)
        entry.max_context_tokens;
      check (option bool) (provider_name ^ " audio input") (Some true)
@@ -514,7 +527,7 @@ let test_deployment_agent_core_model_catalog_preserve_axes_resolve () =
      | None -> failf "expected deployment AGENT_CORE catalog row for %s" model_id
      | Some entry ->
        check (option string) (model_id ^ " native base") (Some "kimi")
-         entry.base_label;
+         (Option.map Llm_provider.Capability_preset.to_string entry.base_label);
        check bool (model_id ^ " no request thinking knob") true
          (match entry.thinking_control_format with
           | Some Llm_provider.Capabilities.No_thinking_control -> true
@@ -965,7 +978,7 @@ let test_deployment_agent_core_model_catalog_modality_priorities_resolve () =
          let capabilities =
            match entry.provider_name with
            | None ->
-             Llm_provider.Capabilities.for_model_id_catalog
+             Llm_provider.Capabilities.for_model_id
                (Llm_provider.Model_identifiers.Model_id.to_string entry.model_id)
            | Some provider_label ->
              Llm_provider.Capabilities.for_provider_model_id
@@ -3052,7 +3065,7 @@ let test_runtime_toml_parses_max_tokens () =
          binding.Runtime_schema.max_tokens;
        (* The declaration is worthless unless it survives into the config the
           request builder reads, which is the step that was missing entirely. *)
-       (match Runtime_adapter.binding_to_provider_config cfg binding with
+       (match provider_config_for_binding cfg binding with
         | Error reason -> failf "provider_config should build: %s" reason
         | Ok provider_config ->
           check (option int) "reaches Provider_config" (Some 16384)
@@ -3162,7 +3175,7 @@ let with_model_catalog_content content f =
   close_out oc;
   Fun.protect
     ~finally:(fun () ->
-       Llm_provider.Model_catalog.clear_global ();
+       (Llm_provider.Catalog_snapshot.reset ());
        (try Sys.remove path with
         | _ -> ())
        )
@@ -3170,7 +3183,7 @@ let with_model_catalog_content content f =
        match Llm_provider.Model_catalog.load_file path with
        | Error msg -> failf "provider-qualified AGENT_CORE model catalog should load: %s" msg
        | Ok catalog ->
-         Llm_provider.Model_catalog.set_global catalog;
+         (Llm_provider.Catalog_snapshot.publish (Masc_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None)));
          f ())
 
 (* Config edits now publish the same catalog-validated state as bootstrap.
@@ -3763,7 +3776,7 @@ let with_fake_runtime_model_catalog f =
   close_out oc;
   Fun.protect
     ~finally:(fun () ->
-       Llm_provider.Model_catalog.clear_global ();
+       (Llm_provider.Catalog_snapshot.reset ());
        (try Sys.remove path with
         | _ -> ())
        )
@@ -3771,7 +3784,7 @@ let with_fake_runtime_model_catalog f =
        match Llm_provider.Model_catalog.load_file path with
        | Error msg -> failf "fake AGENT_CORE model catalog should load: %s" msg
        | Ok catalog ->
-         Llm_provider.Model_catalog.set_global catalog;
+         (Llm_provider.Catalog_snapshot.publish (Masc_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None)));
          f ())
 
 let test_runtime_locality_uses_provider_schema () =
@@ -4217,7 +4230,7 @@ let test_anthropic_thinking_control_on_official_client_is_refused () =
   | Ok cfg ->
     (match cfg.Runtime_schema.bindings with
      | [ binding ] ->
-       (match Runtime_adapter.binding_to_execution cfg binding with
+       (match execution_for_binding cfg binding with
         | Ok _ -> fail "an unread declaration on an official client must be refused"
         | Error reason ->
           check bool "the refusal names the official client" true
@@ -7139,7 +7152,7 @@ let test_every_shipped_binding_is_admissible () =
     let refused =
       List.filter_map
         (fun (binding : Runtime_schema.binding) ->
-           match Runtime_adapter.binding_to_provider_config cfg binding with
+           match provider_config_for_binding cfg binding with
            | Error _ -> None
            | Ok provider_config ->
              (match
@@ -7376,10 +7389,8 @@ enabled = %b
 ;;
 
 let test_wizard_provider_models_share_catalog_authority () =
-  let previous = Llm_provider.Model_catalog.global () in
-  Fun.protect ~finally:(fun () -> match previous with
-    | Some catalog -> Llm_provider.Model_catalog.set_global catalog
-    | None -> Llm_provider.Model_catalog.clear_global ()) (fun () ->
+  let previous = Llm_provider.Catalog_snapshot.current () in
+  Fun.protect ~finally:(fun () -> Llm_provider.Catalog_snapshot.publish previous) (fun () ->
     let rows provider = match Runtime_wizard_inventory.provider_model_rows provider with
       | Ok value -> Yojson.Safe.Util.to_list value
       | Error detail -> failf "wizard model inventory: %s" detail in
@@ -7399,9 +7410,84 @@ let test_wizard_provider_models_share_catalog_authority () =
       (List.exists (fun row -> model_id row = "deepseek-v4-pro") proxy))
 ;;
 
+type materialized_catalog_fact = Context_window | Price_row
+
+let test_runtime_selection_owns_catalog ~initially_known ~fact () =
+  let module Catalog = Llm_provider.Model_catalog in
+  let module Config = Llm_provider.Provider_config in
+  let catalog ~known ~scale =
+    let row = if known then Printf.sprintf {|
+[[models]]
+model_id = "selection-model"
+provider_name = "selection-provider"
+base = "openai_chat"
+max_context_tokens = %d
+input_per_million = %.1f
+output_per_million = %.1f
+|} (if scale = 1.0 then 4096 else 8192) scale (2.0 *. scale) else "" in
+    match Catalog.of_toml_string ~source:"runtime selection fixture" ({|
+[[providers]]
+id = "selection-provider"
+kind = "openai_compat"
+base_url = "https://selection.invalid/v1"
+request_path = "/v1/chat/completions"
+auth = "none"
+capabilities_base = "openai_chat"
+|} ^ row) with
+    | Ok catalog -> catalog | Error detail -> fail detail in
+  let runtime = match Runtime_toml.parse_string {|
+[providers.selection-provider]
+protocol = "openai-compatible-http"
+endpoint = "https://selection.invalid/v1"
+[models.selected]
+api-name = "selection-model"
+[selection-provider.selected]
+[runtime]
+default = "selection-provider.selected"
+|} with
+    | Ok runtime -> runtime
+    | Error _ -> fail "runtime selection fixture must parse" in
+  let binding = match runtime.Runtime_schema.bindings with
+    | [binding] -> binding | _ -> fail "one runtime binding required" in
+  let select () = match Runtime_instance.of_binding runtime binding with
+    | Ok selected -> selected | Error _ -> fail "runtime binding must materialize" in
+  let previous = Llm_provider.Catalog_snapshot.current () in
+  Fun.protect ~finally:(fun () -> Llm_provider.Catalog_snapshot.publish previous)
+    (fun () ->
+      (Llm_provider.Catalog_snapshot.publish (Masc_test_deps.admit_catalogs ~models:(Some ((catalog ~known:initially_known ~scale:1.0))) ~providers:(None)));
+      let selected = select () in
+      (Llm_provider.Catalog_snapshot.publish (Masc_test_deps.admit_catalogs ~models:(Some ((catalog ~known:true ~scale:10.0))) ~providers:(None)));
+      let fresh = select () in
+      match fact with
+      | Context_window ->
+        let context runtime = Runtime_instance.resolve_max_context_of_runtime runtime
+          |> Option.map fst in
+        check (option int) "existing runtime retains selected context or its absence"
+          (if initially_known then Some 4096 else None) (context selected);
+        check (option int) "new runtime sees replacement context" (Some 8192) (context fresh)
+      | Price_row ->
+        let input_price runtime =
+          let config = agent_core_provider_config runtime in
+          Llm_provider.Pricing.pricing_for_model (Config.pricing_source config) config.model_id
+          |> Option.map (fun price -> price.Llm_provider.Pricing.input_per_million) in
+        check (option (float 1e-9)) "existing runtime retains selected rates or their absence"
+          (if initially_known then Some 1.0 else None) (input_price selected);
+        check (option (float 1e-9)) "new runtime sees replacement rates" (Some 10.0) (input_price fresh))
+
+;;
+
 let () =
   run "runtime_config_validity"
-    [ ( "runtime TOML gate",
+    [ ( "materialized catalog selection",
+        [ test_case "selected context survives catalog replacement" `Quick
+            (test_runtime_selection_owns_catalog ~initially_known:true ~fact:Context_window);
+          test_case "selected context absence survives catalog replacement" `Quick
+            (test_runtime_selection_owns_catalog ~initially_known:false ~fact:Context_window);
+          test_case "selected price survives catalog replacement" `Quick
+            (test_runtime_selection_owns_catalog ~initially_known:true ~fact:Price_row);
+          test_case "selected price absence survives catalog replacement" `Quick
+            (test_runtime_selection_owns_catalog ~initially_known:false ~fact:Price_row) ] );
+      ( "runtime TOML gate",
         [ test_case "Browser settings and machine activity follow the visible config across save failure and reload" `Quick
             test_browser_config_publication_follows_visible_file;
           test_case "same model serves three context windows concurrently" `Quick

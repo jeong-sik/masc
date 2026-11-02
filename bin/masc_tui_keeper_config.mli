@@ -1,6 +1,18 @@
 val editable_snapshot : Yojson.Safe.t -> Yojson.Safe.t
 val editor_stem : Yojson.Safe.t -> string
 
+type editor_format = Toml | Json
+
+val editor_suffix : editor_format -> string
+val editor_document : format:editor_format -> Yojson.Safe.t -> (string, string) result
+(** Build an editor document from the observed snapshot. TOML presents
+    instructions as a multiline string and represents explicit clears through
+    [reset_fields]; JSON keeps the existing object form. *)
+
+val parse_editor : format:editor_format -> string -> (Yojson.Safe.t, string) result
+(** Parse an editor document into the existing JSON patch projection. Unknown
+    or contradictory reset requests fail before any write. *)
+
 val expected_runtime_assignment_revision :
   Yojson.Safe.t -> (Yojson.Safe.t, string) result
 
@@ -57,16 +69,20 @@ val patch_of_edit :
   after:Yojson.Safe.t ->
   (Yojson.Safe.t, edit_refusal) result
 
-val reopened_stem : reason:string -> string -> string
-(** The operator's edited text with [// reason] on top, replacing any
-    refusal line a previous round put there. It parses to the same JSON as
-    the edited text. *)
+val reopened_stem :
+  format:editor_format -> ?prior_reason:string -> reason:string -> string -> string
+(** Prepend a refusal comment, replacing the exact prior generated comment if
+    it is still present. User comments are otherwise preserved. *)
 
-val reopen_edit_on_current : before:Yojson.Safe.t -> edited:string -> current:Yojson.Safe.t -> (string, edit_refusal) result
+val reopen_edit_on_current :
+  format:editor_format -> patch:Yojson.Safe.t -> current:Yojson.Safe.t ->
+  (string, edit_refusal) result
 (** Explicit recovery after a new authoritative read: retain changed values,
     use current values for untouched fields, and leave the prior composite
-    revision and context-shrink confirmation behind. The caller opens an editor
-    for review; this does not authorize or dispatch a save. *)
+    revision and context-shrink confirmation behind. [patch] is the original
+    admitted patch. The requested format can differ from the original editor.
+    The caller opens an editor for review; this does not authorize or dispatch
+    a save. *)
 
 type system_prompt_unavailable_reason =
   | Constitution_unreadable of { path : string }

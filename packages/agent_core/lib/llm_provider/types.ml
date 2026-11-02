@@ -98,16 +98,44 @@ let tool_choice_to_json = function
   | None_ -> `Assoc [ "type", `String "none" ]
 ;;
 
+type json_schema =
+  | Raw_schema of Yojson.Safe.t
+  | Named_schema of
+      { name : string
+      ; schema : Yojson.Safe.t
+      ; strict : bool option
+      ; description : string option
+      }
+[@@deriving show]
+
+let json_schema_domain = function
+  | Raw_schema schema | Named_schema { schema; _ } -> schema
+;;
+
+let json_schema_to_json = function
+  | Raw_schema schema -> schema
+  | Named_schema { name; schema; strict; description } ->
+    `Assoc
+      ([ "name", `String name; "schema", schema ]
+       @ (match strict with None -> [] | Some value -> [ "strict", `Bool value ])
+       @ (match description with
+          | None -> []
+          | Some value -> [ "description", `String value ]))
+;;
+
 type response_format =
   | Off
   | JsonMode
-  | JsonSchema of Yojson.Safe.t
+  | JsonSchema of json_schema
 [@@deriving show]
 
 let response_format_to_json = function
   | Off -> `Assoc [ "type", `String "off" ]
   | JsonMode -> `Assoc [ "type", `String "json_mode" ]
-  | JsonSchema schema -> `Assoc [ "type", `String "json_schema"; "schema", schema ]
+  | JsonSchema (Raw_schema schema) ->
+    `Assoc [ "type", `String "raw_json_schema"; "schema", schema ]
+  | JsonSchema (Named_schema _ as schema) ->
+    `Assoc [ "type", `String "named_json_schema"; "schema", json_schema_to_json schema ]
 ;;
 
 (** {1 Content Types} *)
@@ -1154,6 +1182,12 @@ type reported_model =
   | Provider_model_not_reported
 [@@deriving show, yojson]
 
+type reported_cache_usage =
+  { cache_creation_input_tokens : int option
+  ; cache_read_input_tokens : int option
+  }
+[@@deriving show, yojson]
+
 type inference_telemetry =
   { system_fingerprint : string option
   ; timings : inference_timings option
@@ -1164,6 +1198,7 @@ type inference_telemetry =
   ; reasoning_effort : string option
   ; canonical_model_id : string option
   ; reported_model : reported_model option [@default None]
+  ; reported_cache_usage : reported_cache_usage option [@default None]
   ; reasoning_source : Reasoning_source.t option
   ; reasoning_prefix : Reasoning_prefix.t option [@default None]
   ; inline_content_replay : Inline_content_replay.t option [@default None]
@@ -1185,6 +1220,7 @@ let default_inference_telemetry : inference_telemetry =
   ; reasoning_effort = None
   ; canonical_model_id = None
   ; reported_model = None
+  ; reported_cache_usage = None
   ; reasoning_source = None
   ; reasoning_prefix = None
   ; inline_content_replay = None
@@ -1201,6 +1237,18 @@ let with_reported_model ~model telemetry =
   { telemetry with reported_model = Some
       (if String.trim model = "" then Provider_model_not_reported else Provider_reported_model model) }
 
+let with_reported_cache_usage
+      ~cache_creation_input_tokens
+      ~cache_read_input_tokens
+      telemetry
+  =
+  let telemetry = Option.value ~default:default_inference_telemetry telemetry in
+  { telemetry with
+    reported_cache_usage =
+      Some { cache_creation_input_tokens; cache_read_input_tokens }
+  }
+;;
+
 (** API response *)
 type api_response =
   { id : string
@@ -1211,6 +1259,20 @@ type api_response =
   ; telemetry : inference_telemetry option
   }
 [@@deriving show]
+
+let reported_cache_creation_input_tokens (resp : api_response) =
+  match resp.usage, resp.telemetry with
+  | Some _, Some { reported_cache_usage = Some reported; _ } ->
+    reported.cache_creation_input_tokens
+  | None, _ | Some _, (Some { reported_cache_usage = None; _ } | None) -> None
+;;
+
+let reported_cache_read_input_tokens (resp : api_response) =
+  match resp.usage, resp.telemetry with
+  | Some _, Some { reported_cache_usage = Some reported; _ } ->
+    reported.cache_read_input_tokens
+  | None, _ | Some _, (Some { reported_cache_usage = None; _ } | None) -> None
+;;
 
 let retain_response_content ~retained_indices ~content (response : api_response) =
   let open Result.Syntax in

@@ -107,9 +107,9 @@ let indexed target =
   | `None -> fail "ANSI-256 projection disappeared"
 ;;
 
-let test_ansi256_projection_uses_only_fixed_entries () =
+let test_ansi256_projection_uses_default_xterm_entries () =
   let rgb red green blue = Palette.make_rgb ~red ~green ~blue in
-  check int "fixed black, not terminal-defined slot 0" 16 (indexed (rgb 0 0 0));
+  check int "default black index, outside the first 16 slots" 16 (indexed (rgb 0 0 0));
   check int "exact cube entry" 52 (indexed (rgb 95 0 0));
   check int "nearest grayscale entry" 241 (indexed (rgb 100 100 100));
   check int "distance tie chooses the lower fixed index" 16 (indexed (rgb 4 4 4));
@@ -221,8 +221,8 @@ let () =
     ; ( "projection"
       , [ test_case "truecolor preserves RGB" `Quick
             test_truecolor_projection_preserves_rgb
-        ; test_case "ANSI-256 uses fixed xterm entries" `Quick
-            test_ansi256_projection_uses_only_fixed_entries
+        ; test_case "ANSI-256 uses default xterm entries for selection" `Quick
+            test_ansi256_projection_uses_default_xterm_entries
         ; test_case "ANSI-16 and unknown stay absent" `Quick
             test_unsupported_levels_do_not_invent_a_background
         ] )

@@ -1,0 +1,31 @@
+{
+  "source_head": "a5e59a3573f51802d4c75c62adde4f397ea51382",
+  "files": {
+    "lib/fusion/fusion_official_client.mli": "0201b1f07e5258b8f2720543ddb0fcc2951d235562e7776b77b9f86ab74fbfb8",
+    "lib/fusion/fusion_official_client.ml": "c99ece21acd2274c15f9c19de8b3ce33073dfda5985bd7c99220baa56766989d",
+    "test/test_fusion_official_client_panel.ml": "a2c0681ab2b5a1c1eb22df873719990afa8dd5347c70a46e344f827181905572",
+    "lib/runtime/runtime_inference.ml": "f27f2b85767e1db02b491d15c67a2651f555293eb119f87d81d6c17003dfb5b6",
+    "lib/runtime/runtime_inference.mli": "80c4cc3dca3a28f1f8bfa26209d9b2b6d753f26a4926b1e6b47f9f8cf4a36e75",
+    "lib/runtime/runtime_instance.ml": "aff8fb5e633c16365b57a2a4b1a2dc8fc34f0de17c962dc75d852c0f05f53749",
+    "lib/runtime/runtime_instance.mli": "4687e0f66e1f3e8af3dbfd8a56fd94eab52ea660bfa249eb96a0e104e56eaaf4",
+    "lib/runtime/runtime_claude_code.mli": "26cd12a4ebd641cdee58a9a70596949428424f2dae605de7f2cca31be752e60a",
+    "lib/runtime/runtime_codex_app_server.mli": "326ddb1cb485d9133ec80b57fd09c6bada008871509d7ed8943eb4cad1a76757",
+    "lib/runtime/runtime_antigravity.mli": "d6816b33feb9bdeba46943615b58193cd5fae318d85275b72b9026e4fde52d89",
+    "lib/runtime/runtime_muse_serve.mli": "ad9469c8b7c51b875b2d12b0b8c4205c96e8d310ee3edb27e00cd7b19d7b6120",
+    "test/test_fusion_selected_timeout.ml": "f209c0bc732dd0ac0d6ced8f250e113e6719236b9a30e6e4ec5280e966a597c2",
+    "test/dune": "17a28ed85be21d9db0a32e6444582729b065a5a5e4ed1063f1a6fd7b0e589e97",
+    "test/deps/masc_test_deps.ml": "867eacb8cdfc177eb05804a06fcf6f8c162f25a49be8b64e969f6e6cdd86002b",
+    ".github/workflows/test.yml": "99286b2989de40ea72ad184b6c8335da64e9213e289e260a4afc16bd3bd8bb6d",
+    "scripts/ci-run-targeted-tests.sh": "7391426895132a2c027aea2d6c85bfcae18a038fd4e9640cc3c0b9fa66a8ca72",
+    "scripts/ci/stanza_env.py": "8e6905e4009423ffdf2655176166444a9f52d584acb7654ef32e04f90819f35b",
+    "lib/fusion_core/fusion_types.mli": "8c1b4deb1d637387f8b7599930f736b773fa50317473564be7fff08d2c4bd86e",
+    "lib/fusion_core/dune": "5706db3354289f527cdf8fe48c434718ba6c32e4563c90b48b38d1c96d2d0da9",
+    "test/deps/dune": "67a195fc8b4d7c7858634e5cd05c2999d0bf2565c88220ab82dc2c692c503dd9"
+  },
+  "trees": {
+    "lib": "202a534910bcbe91053596cf6c403032647bee74",
+    "test": "48e5b1b20bf71172fed6b91c8da32171761adec8",
+    "packages/agent_core": "c4b3002ea517ec584858ee05971ca84f0da15819",
+    "config": "783ac78ba6a516006c5e20d58c1fed0019a0ca5b"
+  }
+}

@@ -61,12 +61,17 @@ let with_fence ~request ~cursor read =
     let* ()=Request.confirm_owner request in
     let* boundaries=Keeper_turn_boundaries.read ~keepers_dir:(Capture.runtime_keepers_dir source)
       ~keeper_id:(Request.keeper_id owner) in
-    let* live=List.fold_right (fun (trace : Capture.Held.trace) rest ->
-      let* rest=rest in
-      let session_dir=Filename.concat root trace.id in
-      let* main=Fragments.read ~session_dir Fragments.Main in
-      let* internal=Fragments.read ~session_dir Fragments.Internal in
-      Ok ({Capture.trace_id=trace.id;main;internal}::rest)) traces (Ok []) in
+    let* live =
+      let rec loop acc = function
+        | [] -> Ok (List.rev acc)
+        | (trace : Capture.Held.trace) :: rest ->
+          let session_dir = Filename.concat root trace.id in
+          let* main = Fragments.read ~session_dir Fragments.Main in
+          let* internal = Fragments.read ~session_dir Fragments.Internal in
+          loop ({ Capture.trace_id = trace.id; main; internal } :: acc) rest
+      in
+      loop [] traces
+    in
     let* ()=Capture.confirm_sources ~boundaries ~messages:(Option.map Checkpoint.exact_snapshot_messages snapshot)
       ~traces:live source |> Result.map_error Capture.error_to_string in
     let* ()=match checkpoint,snapshot with

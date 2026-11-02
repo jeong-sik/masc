@@ -1,0 +1,76 @@
+{
+  "baseline": "fa138512cfb1c9a8b5cffbcc4bb331779ce9449c",
+  "candidate": "ed7c00c5922f1014faf052787923012689bef432",
+  "complete_delta": [
+    "changelog.d/47228.md",
+    "docs/evidence/2026-11-01-fusion-selected-timeout/README.md",
+    "docs/evidence/2026-11-01-fusion-selected-timeout/baseline.txt",
+    "docs/evidence/2026-11-01-fusion-selected-timeout/candidate.txt",
+    "docs/evidence/2026-11-01-fusion-selected-timeout/cases.tsv",
+    "docs/evidence/2026-11-01-fusion-selected-timeout/invalid-compiler-context.txt",
+    "docs/evidence/2026-11-01-fusion-selected-timeout/manifest.json",
+    "docs/evidence/2026-11-01-fusion-selected-timeout/repaired-baseline.txt",
+    "docs/evidence/2026-11-01-fusion-selected-timeout/repaired-candidate.txt",
+    "docs/evidence/2026-11-01-fusion-selected-timeout/repro-baseline.txt",
+    "docs/evidence/2026-11-01-fusion-selected-timeout/source-comparison.json",
+    "docs/evidence/2026-11-01-fusion-selected-timeout/source-sha256.json",
+    "lib/keeper/keeper_antigravity_runtime.ml",
+    "lib/keeper/keeper_antigravity_runtime.mli",
+    "lib/keeper/keeper_turn_driver.ml",
+    "test/test_keeper_antigravity_runtime.ml",
+    "test/test_official_client_claim_cause.ml"
+  ],
+  "production_delta": [
+    "lib/keeper/keeper_antigravity_runtime.ml",
+    "lib/keeper/keeper_antigravity_runtime.mli",
+    "lib/keeper/keeper_turn_driver.ml"
+  ],
+  "identical_fixture_and_runner_inputs": {
+    "test/test_keeper_antigravity_selected_inference.ml": "c47cf1adf64e7b84667fa89040a14d2bfafb19c087f930a804bcc15e84bbc3d1",
+    "test/stanzas/test_keeper_antigravity_selected_inference.inc": "c523a761ba23bfacb7bfa37f2c586675ce1c06e78b9a069193cd9da5db7058ec",
+    "test/dune": "6282da0242d4808a0f9e4a62556879be99874b494ad24ee68f85c130f64250f4",
+    "test/deps/masc_test_deps.ml": "867eacb8cdfc177eb05804a06fcf6f8c162f25a49be8b64e969f6e6cdd86002b",
+    "test/deps/dune": "67a195fc8b4d7c7858634e5cd05c2999d0bf2565c88220ab82dc2c692c503dd9",
+    ".github/workflows/test.yml": "99286b2989de40ea72ad184b6c8335da64e9213e289e260a4afc16bd3bd8bb6d",
+    "scripts/ci-run-targeted-tests.sh": "7391426895132a2c027aea2d6c85bfcae18a038fd4e9640cc3c0b9fa66a8ca72",
+    "scripts/ci/stanza_env.py": "8e6905e4009423ffdf2655176166444a9f52d584acb7654ef32e04f90819f35b"
+  },
+  "lower_parent_delta": "Eleven Fusion evidence files only; no lower production change.",
+  "test_delta": "Only explicit required-argument migrations in two existing fixtures; selected new fixture and its build/runner inputs are byte-identical.",
+  "execution_result": "Observed baseline Test41299786698 FAILURE3PASS/7FAIL and candidate Test41300307241 SUCCESS23PASS/0FAIL. Common10:3maintained7fixed0regression. Candidate-only13 controls are separate.",
+  "limits": "Three baseline reasoning cases stop at their first input-receipt assertion; later typed-error and resume assertions were not reached there. Candidate passes all10 cases. No full regression/live provider/installed runtime/restart/deployment/integration/whole-issue acceptance.",
+  "publication_source_binding": {
+    "reference_head": "ed7c00c5922f1014faf052787923012689bef432",
+    "identical_named_inputs": 21,
+    "comment_only_input": {
+      "path": "lib/keeper/keeper_antigravity_runtime.mli",
+      "reference_sha256": "bc49c4ae064e85a9db544bbf948dad8f92f78f6b1d173ab15e2da6a7b8c5f08f",
+      "publication_sha256": "a16b63f19a5226b3e348d1a891a566e7c256bbad3cac658e9ba23735b199d709",
+      "old_comment": "selected model. They are not looked up again by [runtime_id], including\n    on resume or the driver's history retry. An absent idle declaration keeps",
+      "new_comment": "selected model. They are not looked up again by [runtime_id] on fresh or\n    resumed turns. An absent idle declaration keeps"
+    },
+    "identical_trees": [
+      "test",
+      "config"
+    ],
+    "lib_tree_delta": [
+      "lib/keeper/keeper_antigravity_runtime.mli"
+    ],
+    "reason": "Narrow unsupported history-retry claim by MLI comment only; separately carry lower Core canonical response persistence repair and expanded terminal fixture.",
+    "limits": "No execution at the later publication head. The MLI input, lib tree and Core tree are not byte-identical to ed7; the historical Antigravity run does not execute the new Core repair.",
+    "changed_core_tree": {
+      "reference_tree": "c4b3002ea517ec584858ee05971ca84f0da15819",
+      "identical": false,
+      "changed_paths": [
+        "packages/agent_core/lib/pipeline/pipeline.ml",
+        "packages/agent_core/lib/pipeline/pipeline_execution_resume.mli",
+        "packages/agent_core/lib/pipeline/pipeline_execution_scope.mli",
+        "packages/agent_core/test/test_pipeline.ml"
+      ],
+      "scope": "Excluded from historical targeted execution. Exact current Core identity is reviewed at its own PR; this record retains only the tested reference and changed source paths."
+    },
+    "preserved_external_core_commit": "356a1e02ce3637668c357cf4467d738243c51fe9",
+    "lower_core_production_repair_ancestor": "8b33c1143c9551bc7cbf5624dfbd0566fb7bc836",
+    "lower_core_fixture_correction_ancestor": "b8a1523884e571a91b90971d8cb682442d4296f7"
+  }
+}

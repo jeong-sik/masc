@@ -10,7 +10,7 @@
 
 type codex_app_server =
   { cli_path : string
-  ; account_home : string option
+  ; account_home : Runtime_official_account.codex Runtime_official_account.t
   ; model : string option
   ; timeout_s : float
   }
@@ -29,7 +29,7 @@ type antigravity_cli =
 
 type claude_code =
   { cli_path : string
-  ; account_home : string option
+  ; account_home : Runtime_official_account.claude_code Runtime_official_account.t
   ; model : string option
   ; timeout_s : float
   }
@@ -51,6 +51,10 @@ type t =
   | Antigravity_cli of antigravity_cli
   | Claude_code of claude_code
   | Muse_serve of muse_serve
+
+val same_account_selection : t -> t -> bool
+(** Compare captured official-client contexts without exposing credentials.
+    Other same-kind execution owners retain their existing binding comparison. *)
 
 type checkpoint_owner =
   | Masc_agent_core

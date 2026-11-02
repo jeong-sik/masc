@@ -732,6 +732,20 @@ module Reducer = struct
 
   let validate_update (record : node_record) node_id update =
     match Event.node_kind record.node, update with
+    | Event.Agent_turn _, Event.Turn_ready _ ->
+      let already_ready = List.exists (fun (update:Event.node_update event_record) ->
+        match update.value with
+        | Event.Turn_ready _ -> true
+        | Event.Checkpoint_snapshot _ | Event.Provider_event _
+        | Event.Provider_request_snapshot _ | Event.Provider_response_snapshot _
+        | Event.Output_delta _ | Event.Output_snapshot _ | Event.Tool_input_delta _
+        | Event.Tool_input_snapshot _ | Event.Tool_progress _ | Event.Tool_result _ -> false)
+        record.updates_rev in
+      if already_ready || record.children_rev <> [] then Error (Invalid_update_for_node node_id)
+      else Ok ()
+    | (Event.Agent_run _ | Event.Provider_attempt _ | Event.Output_block _
+       | Event.Tool_invocation _ | Event.Tool_attempt), Event.Turn_ready _ ->
+      Error (Invalid_update_for_node node_id)
     | Event.Agent_run {agent_name}, Event.Checkpoint_snapshot snapshot ->
       if String.equal agent_name (Checkpoint_snapshot.agent_name snapshot) then Ok ()
       else Error (Invalid_update_for_node node_id)
@@ -1006,6 +1020,7 @@ module Reducer = struct
       ; provider_request =
           (match update with
            | Event.Provider_request_snapshot value -> Some value
+           | Event.Turn_ready _
            | Event.Checkpoint_snapshot _ | Event.Provider_event _ | Event.Provider_response_snapshot _
            | Event.Output_delta _ | Event.Output_snapshot _ | Event.Tool_input_delta _
            | Event.Tool_input_snapshot _ | Event.Tool_progress _ | Event.Tool_result _ ->
@@ -1013,7 +1028,7 @@ module Reducer = struct
       ; provider_response =
           (match update with
            | Event.Provider_response_snapshot value -> Some value
-           | Event.Checkpoint_snapshot _
+           | Event.Turn_ready _ | Event.Checkpoint_snapshot _
            | Event.Provider_request_snapshot _
            | Event.Provider_event _
            | Event.Output_delta _
@@ -1025,7 +1040,7 @@ module Reducer = struct
       ; output_snapshot =
           (match update with
            | Event.Output_snapshot value -> Some value
-           | Event.Checkpoint_snapshot _
+           | Event.Turn_ready _ | Event.Checkpoint_snapshot _
            | Event.Provider_request_snapshot _
            | Event.Provider_event _
            | Event.Provider_response_snapshot _
@@ -1037,7 +1052,7 @@ module Reducer = struct
       ; tool_input =
           (match update with
            | Event.Tool_input_snapshot value -> Some value
-           | Event.Checkpoint_snapshot _
+           | Event.Turn_ready _ | Event.Checkpoint_snapshot _
            | Event.Provider_request_snapshot _
            | Event.Provider_event _
            | Event.Provider_response_snapshot _
@@ -1049,7 +1064,7 @@ module Reducer = struct
       ; tool_result =
           (match update with
            | Event.Tool_result value -> Some value
-           | Event.Checkpoint_snapshot _
+           | Event.Turn_ready _ | Event.Checkpoint_snapshot _
            | Event.Provider_request_snapshot _
            | Event.Provider_event _
            | Event.Provider_response_snapshot _

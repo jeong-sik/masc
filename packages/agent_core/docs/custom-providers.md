@@ -103,11 +103,14 @@ let credential_for_binding ~env_name (binding : Provider_runtime_binding.t) =
        | Some value when value <> "" -> Ok value
        | None | Some "" -> Error (Printf.sprintf "%s is required" env_name))
 
-let resolve_catalog_provider ~path ~provider_id ~model ~env_name =
+let resolve_catalog_provider ~path ~models ~provider_id ~model ~env_name =
   let* catalog = Llm_provider.Provider_catalog.load_file path in
-  Llm_provider.Provider_catalog.set_global catalog;
+  let* snapshot =
+    Llm_provider.Catalog_snapshot.of_catalogs ~models ~providers:(Some catalog)
+    |> Result.map_error Llm_provider.Catalog_snapshot.error_to_string
+  in
   let* binding =
-    match Provider_runtime_binding.find_catalog provider_id with
+    match Provider_runtime_binding.find_in_declarations snapshot provider_id with
     | Some binding -> Ok binding
     | None -> Error (Printf.sprintf "unknown catalog provider: %s" provider_id)
   in
@@ -122,6 +125,12 @@ let resolve_catalog_provider ~path ~provider_id ~model ~env_name =
     }
 ```
 
+The caller supplies `models:Model_catalog.t option` explicitly. Use
+`~models:None` for a JSON-only selection or pass the parsed model catalog whose
+rows this provider serves. This example selects without changing process-global
+state; application-wide replacement uses `Catalog_snapshot.publish` on the
+complete admitted value.
+
 `Provider_runtime_binding.to_provider_config` preserves the catalog identity,
 wire kind, endpoint, request path, model, context limit, and declared
 capabilities. Credential material is attached separately so catalog metadata
@@ -131,7 +140,7 @@ never becomes a secret store.
 
 - `Agent.options.provider_config = None` does not mean “local” or
   “Anthropic”; execution returns a configuration error.
-- `Provider_runtime_binding.find_catalog` returning `None` is terminal for that
+- `Provider_runtime_binding.find_in_declarations` returning `None` is terminal for that
   selection. Do not fall back to a similarly named provider.
 - A missing auth environment variable is terminal. Do not replace it with an
   empty token.

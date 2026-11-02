@@ -391,8 +391,9 @@ let responses_json_schema_payload schema =
   | `List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null ->
     `Assoc
       [ "type", `String "json_schema"
-      ; "name", `String (Provider_config.structured_output_name_of_schema schema)
-      ; "schema", schema
+      ; "name", `String (Provider_config.structured_output_name_of_schema
+                            (Types.json_schema_domain schema))
+      ; "schema", Types.json_schema_domain schema
       ; "strict", `Bool true
       ]
 ;;
@@ -676,7 +677,18 @@ let telemetry_of_response_json json =
       | Some (`List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null)
       | None -> None
     in
-    Some { Types.default_inference_telemetry with reasoning_tokens }
+    let cache_read_input_tokens =
+      match List.assoc_opt "input_tokens_details" fields with
+      | Some (`Assoc detail_fields) ->
+        opt_bind (List.assoc_opt "cached_tokens" detail_fields) json_int_opt
+      | Some (`List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null)
+      | None -> None
+    in
+    Some
+      (Types.with_reported_cache_usage
+         ~cache_creation_input_tokens:None
+         ~cache_read_input_tokens
+         (Some { Types.default_inference_telemetry with reasoning_tokens }))
   | Some (`List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null) | None ->
     None
 ;;

@@ -122,7 +122,7 @@ let table_header_of_line trimmed =
   if not (String.starts_with ~prefix:"[" trimmed)
   then Not_table_header
   else
-    match Otoml.Parser.from_string_result trimmed with
+    match Otoml.Parser.from_string_result (normalize_source trimmed) with
     | Ok value ->
       (match singleton_table_path value with
        | Some path -> Standard_table path
@@ -138,7 +138,7 @@ let assignment_path_of_line trimmed =
     if String.equal raw_key ""
     then None
     else
-      match Otoml.Parser.from_string_result (raw_key ^ " = true") with
+      match Otoml.Parser.from_string_result (normalize_source (raw_key ^ " = true")) with
       | Ok value -> singleton_bool_path value
       | Error _ -> None
 ;;
@@ -326,11 +326,19 @@ let update_rendered_field_in_content ~table ~key ~rendered_value content =
     content
 ;;
 
+(* Otoml emits CR literally in multiline basic strings. Escape it so the
+   parser's TOML newline normalization does not remove data before an LF. *)
+let render_otoml_value value =
+  Otoml.Printer.to_string value
+  |> String.split_on_char '\r'
+  |> String.concat "\\r"
+;;
+
 let update_field_in_content ~table ~key ~value content =
   update_rendered_field_in_content
     ~table
     ~key
-    ~rendered_value:(Otoml.Printer.to_string (Otoml.TomlString value) |> String.trim)
+    ~rendered_value:(render_otoml_value (Otoml.TomlString value) |> String.trim)
     content
 ;;
 
@@ -348,21 +356,21 @@ let rec otoml_value_of_toml_value = function
   | Toml_string_array values ->
     Ok (Otoml.TomlArray (List.map (fun value -> Otoml.TomlString value) values))
   | Toml_array values ->
-    List.fold_right
-      (fun value result ->
+    let rec loop acc = function
+      | [] -> Ok (Otoml.TomlArray (List.rev acc))
+      | value :: rest ->
         Result.bind (otoml_value_of_toml_value value) (fun value ->
-          Result.map (fun values -> value :: values) result))
-      values
-      (Ok [])
-    |> Result.map (fun values -> Otoml.TomlArray values)
+          loop (value :: acc) rest)
+    in
+    loop [] values
   | Toml_inline_table fields ->
-    List.fold_right
-      (fun (key, value) result ->
+    let rec loop acc = function
+      | [] -> Ok (Otoml.TomlInlineTable (List.rev acc))
+      | (key, value) :: rest ->
         Result.bind (otoml_value_of_toml_value value) (fun value ->
-          Result.map (fun fields -> (key, value) :: fields) result))
-      fields
-      (Ok [])
-    |> Result.map (fun fields -> Otoml.TomlInlineTable fields)
+          loop ((key, value) :: acc) rest)
+    in
+    loop [] fields
   | Toml_offset_datetime value -> Ok (Otoml.TomlOffsetDateTime value)
   | Toml_local_datetime value -> Ok (Otoml.TomlLocalDateTime value)
   | Toml_local_date value -> Ok (Otoml.TomlLocalDate value)
@@ -378,7 +386,7 @@ let render_toml_value = function
     | Toml_array _ | Toml_inline_table _ | Toml_offset_datetime _ | Toml_local_datetime _
     | Toml_local_date _ | Toml_local_time _ ) as value ->
     Result.map
-      (fun value -> Otoml.Printer.to_string value |> String.trim)
+      (fun value -> render_otoml_value value |> String.trim)
       (otoml_value_of_toml_value value)
 ;;
 
@@ -425,15 +433,13 @@ let create_keeper_toml_file_strict_staged ~(path : string) fields =
          (Printf.sprintf "refusing to overwrite existing keeper TOML: %s" path))
   else
     let rendered_fields =
-      List.fold_right
-        (fun (key, value) result ->
+      let rec loop acc = function
+        | [] -> Ok (List.rev acc)
+        | (key, value) :: rest ->
           Result.bind (render_toml_value value) (fun rendered_value ->
-            Result.map
-              (fun rendered ->
-                Printf.sprintf "%s = %s" key rendered_value :: rendered)
-              result))
-        fields
-        (Ok [])
+            loop (Printf.sprintf "%s = %s" key rendered_value :: acc) rest)
+      in
+      loop [] fields
     in
     Result.bind
       (Result.map_error (before_rename_failure ~path) rendered_fields)

@@ -6,7 +6,7 @@ let load_embedded_model_catalog ~suite =
 ;;
 
 let install_embedded_model_catalog ~suite =
-  Llm_provider.Model_catalog.set_global (load_embedded_model_catalog ~suite)
+  (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some ((load_embedded_model_catalog ~suite))) ~providers:(None)))
 ;;
 
 let repository_model_catalog_path ~suite =

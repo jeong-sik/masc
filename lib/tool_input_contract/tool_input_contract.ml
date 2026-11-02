@@ -102,26 +102,29 @@ let validated_required_names ?(path = "required") schema =
   match Json_util.assoc_member_opt "required" schema with
   | None -> [], []
   | Some (`List values) ->
-    List.fold_right
-      (fun value (names, errors) ->
-         match value with
-         | `String name ->
-           let name = String.trim name in
-           if String.equal name ""
-           then
+    let names_rev, errors_rev =
+      List.fold_left
+        (fun (names, errors) value ->
+           match value with
+           | `String name ->
+             let name = String.trim name in
+             if String.equal name ""
+             then
+               ( names
+               , Printf.sprintf "%s: expected non-empty string, got string" path
+                 :: errors )
+             else name :: names, errors
+           | other ->
              ( names
-             , Printf.sprintf "%s: expected non-empty string, got string" path
-               :: errors )
-           else name :: names, errors
-         | other ->
-           ( names
-           , Printf.sprintf
-               "%s: expected non-empty string, got %s"
-               path
-               (Json_util.kind_name other)
-             :: errors ))
-      values
-      ([], [])
+             , Printf.sprintf
+                 "%s: expected non-empty string, got %s"
+                 path
+                 (Json_util.kind_name other)
+               :: errors ))
+        ([], [])
+        values
+    in
+    List.rev names_rev, List.rev errors_rev
   | Some other ->
     ( []
     , [ Printf.sprintf
@@ -155,14 +158,17 @@ let validated_one_of_required_names schema =
                ] ))
         cases
     in
-    List.fold_right
-      (fun (required, errors) (required_acc, error_acc) ->
-         ( match required with
-           | Some required -> required :: required_acc
-           | None -> required_acc )
-         , errors @ error_acc)
-      mapped_cases
-      ([], [])
+    let required_rev, errors_rev =
+      List.fold_left
+        (fun (required_acc, error_acc) (required, errors) ->
+           ( match required with
+             | Some required -> required :: required_acc
+             | None -> required_acc )
+           , List.rev_append errors error_acc)
+        ([], [])
+        mapped_cases
+    in
+    List.rev required_rev, List.rev errors_rev
   | Some other ->
     ( []
     , [ Printf.sprintf

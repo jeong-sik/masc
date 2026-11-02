@@ -1,13 +1,13 @@
 ---
 title: "기계 화면은 Lane 라우트 하나로 보고, 사람의 조작도 알림을 낸다"
-status: Draft
+status: Active
 created: 2026-09-24
-updated: 2026-10-25
+updated: 2026-11-01
 author: vincent + claude
 supersedes: []
 superseded_by: null
 related: ["0439", "lane-addon-v0"]
-implementation_prs: ["#38733", "#38730", "#39168", "#45971"]
+implementation_prs: ["#38733", "#38730", "#39168", "#45971", "#38952"]
 ---
 
 # RFC — 기계 화면은 Lane 라우트 하나로 본다
@@ -53,7 +53,7 @@ implementation_prs: ["#38733", "#38730", "#39168", "#45971"]
   **source 어댑터**(`msx_capture`, `dos_capture`)가 가리키는 기계이고, 요청도 그 source 이름으로
   받는다. 관측은 source 를 캡처해 남기는 길이고, `live` 는 같은 source 를 남기지 않고 지금 보는
   길이다. 새 기계가 source 어댑터를 얻으면 같은 라우트로 보인다. 기계마다 라우트를 만들지 않는다.
-- #38815 의 TUI 는 DOS 화면을 기존 0.3초 주기로 `live` 에 묻는다. MSX 는 열기·입력·load·
+- #38952 의 TUI 는 DOS 화면을 기존 0.3초 주기로 `live` 에 묻는다. MSX 는 열기·입력·load·
   checkpoint 뒤 `live` 를 읽고, 주기 실행은 기존 `POST /api/v1/msx/tick` 을 유지한다.
   `live` 의 "그대로" 답은 몇 바이트다.
 
@@ -93,8 +93,8 @@ implementation_prs: ["#38733", "#38730", "#39168", "#45971"]
 |---|---|---|
 | 1 | 기계 변경 카운터, `live` 라우트 | 단위: fault 로 끝난 실행 뒤 카운터가 오른다. `since`·`incarnation` 이 같으면 "그대로". 같은 프로그램을 두 번 load 하고 이전 값을 보내면 "그대로"가 아니다. store 에 쓴 바이트 0. 인증 없으면 거절 |
 | 2 | 사람 경로 알림 | 단위: root 가 아닌 domain 에서 부른 `notify_activity` 가 알림을 낸다. `/api/v1/msx/press` 한 번에 `Msx_changed` 한 번. 도구 한 번에도 한 번 |
-| 3a (#38815) | TUI 가 `live` 로 그린다. TUI 의 `/api/v1/msx/frame` 호출을 지운다 | PTY: DOS 도구 한 번 → 그림이 바뀐다. 안 바뀌면 "그대로"만 온다. `rg '/api/v1/(msx|dos)/frame' bin` 결과 0 |
+| 3a (#38952) | TUI 가 `live` 로 그린다. TUI 의 `/api/v1/msx/frame` 호출을 지운다 | PTY: DOS 도구 한 번 → 그림이 바뀐다. 안 바뀌면 "그대로"만 온다. `rg '/api/v1/(msx|dos)/frame' bin` 결과 0 |
 | 3b (#39168) | 서버의 옛 `/api/v1/msx/frame` 라우트와 공개 읽기 허용 항목을 지운다 | `rg '/api/v1/(msx|dos)/frame' bin lib` 결과 0. 라우트 테스트도 `live` 계약으로 옮긴다 |
 
 #38439 는 전용 DOS frame 라우트 방식으로 작성됐고 2026-09-24 병합 없이 닫혔다.
-TUI 의 DOS·MSX 관전은 #38733 의 `live` 계약 위에 쌓인 #38815 에서 진행한다.
+TUI 의 DOS·MSX 관전은 #38733 의 `live` 계약 위에서 #38952 로 착지했다(2026-09-25 병합).

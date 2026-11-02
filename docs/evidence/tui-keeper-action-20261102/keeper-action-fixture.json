@@ -1,0 +1,111 @@
+{
+  "candle": {
+    "status": "off"
+  },
+  "total": 3,
+  "truncated": false,
+  "keepers": [
+    {
+      "runtime_class": "keeper",
+      "name": "fixture-recover",
+      "agent_name": "keeper-fixture-recover-agent",
+      "meta": {
+        "name": "fixture-recover",
+        "trace_id": "trace-fixture-recover",
+        "created_at": "2026-08-21T17:32:29Z",
+        "updated_at": "2026-08-23T06:53:43Z",
+        "sandbox_profile": "docker"
+      },
+      "health": "offline",
+      "paused": false,
+      "next_action": "recover",
+      "runtime_blocker_summary": null,
+      "candle_balance_milli": null,
+      "candle_account_revision": null,
+      "portrait": {
+        "state": "ready",
+        "equipment": {
+          "face": "bare_face",
+          "neck": "bare_neck",
+          "head": "bare_head",
+          "hand": "empty_hand",
+          "base": "no_dish"
+        }
+      },
+      "phase": "running",
+      "keepalive_running": true,
+      "activation_mode": "autonomous",
+      "runtime_id": "fixture.model",
+      "created_at": "2026-08-21T17:32:29Z",
+      "updated_at": "2026-08-23T06:53:43Z"
+    },
+    {
+      "runtime_class": "keeper",
+      "name": "fixture-probe",
+      "agent_name": "keeper-fixture-probe-agent",
+      "meta": {
+        "name": "fixture-probe",
+        "trace_id": "trace-fixture-probe",
+        "created_at": "2026-08-21T17:32:29Z",
+        "updated_at": "2026-08-23T06:53:43Z",
+        "sandbox_profile": "docker"
+      },
+      "health": "failing",
+      "paused": false,
+      "next_action": "probe",
+      "runtime_blocker_summary": null,
+      "candle_balance_milli": null,
+      "candle_account_revision": null,
+      "portrait": {
+        "state": "ready",
+        "equipment": {
+          "face": "bare_face",
+          "neck": "bare_neck",
+          "head": "bare_head",
+          "hand": "empty_hand",
+          "base": "no_dish"
+        }
+      },
+      "phase": "running",
+      "keepalive_running": true,
+      "activation_mode": "autonomous",
+      "runtime_id": "fixture.model",
+      "created_at": "2026-08-21T17:32:29Z",
+      "updated_at": "2026-08-23T06:53:43Z"
+    },
+    {
+      "runtime_class": "keeper",
+      "name": "fixture-message",
+      "agent_name": "keeper-fixture-message-agent",
+      "meta": {
+        "name": "fixture-message",
+        "trace_id": "trace-fixture-message",
+        "created_at": "2026-08-21T17:32:29Z",
+        "updated_at": "2026-08-23T06:53:43Z",
+        "sandbox_profile": "docker"
+      },
+      "health": "healthy",
+      "paused": false,
+      "next_action": "direct_message",
+      "runtime_blocker_summary": null,
+      "candle_balance_milli": null,
+      "candle_account_revision": null,
+      "portrait": {
+        "state": "ready",
+        "equipment": {
+          "face": "bare_face",
+          "neck": "bare_neck",
+          "head": "bare_head",
+          "hand": "empty_hand",
+          "base": "no_dish"
+        }
+      },
+      "phase": "running",
+      "keepalive_running": true,
+      "activation_mode": "autonomous",
+      "runtime_id": "fixture.model",
+      "created_at": "2026-08-21T17:32:29Z",
+      "updated_at": "2026-08-23T06:53:43Z"
+    }
+  ]
+}

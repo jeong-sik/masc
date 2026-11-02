@@ -362,10 +362,11 @@ let make_hooks
           | Some u -> u.input_tokens, u.output_tokens
           | None -> 0, 0
         in
-        let raw_cache_creation_input_tokens, raw_cache_read_input_tokens =
-          match response.usage with
-          | Some u -> u.cache_creation_input_tokens, u.cache_read_input_tokens
-          | None -> 0, 0
+        let raw_cache_creation_input_tokens =
+          Agent_core.Types.reported_cache_creation_input_tokens response
+        in
+        let raw_cache_read_input_tokens =
+          Agent_core.Types.reported_cache_read_input_tokens response
         in
         let input_tok, output_tok, turn_cost_usd =
           match response.usage with
@@ -570,8 +571,8 @@ let make_hooks
                 ?runtime_attempt:(current_runtime_attempt ())
                 ~input_tokens:raw_input_tok ~output_tokens:raw_output_tok
                 ~cost_usd:cost_usd_for_event ~usage_missing
-                ~cache_creation_input_tokens:raw_cache_creation_input_tokens
-                ~cache_read_input_tokens:raw_cache_read_input_tokens
+                ?cache_creation_input_tokens:raw_cache_creation_input_tokens
+                ?cache_read_input_tokens:raw_cache_read_input_tokens
                 ~usage_trust
                 ?telemetry:response.telemetry
                 ());
@@ -612,8 +613,12 @@ let make_hooks
                  (key_cost_usd, cost_usd_for_sse);
                  (key_tool_calls_made, `Int !tool_call_count_ref);
                  (key_cache_read_tokens,
-                  if usage_missing then `Null
-                  else `Int raw_cache_read_input_tokens);
+                  match
+                    if usage_missing then None
+                    else raw_cache_read_input_tokens
+                  with
+                  | Some n -> `Int n
+                  | None -> `Null);
                  (key_cache_n,
                   timings_int_json (fun (t : Agent_core.Types.inference_timings)
                                      -> t.cache_n));

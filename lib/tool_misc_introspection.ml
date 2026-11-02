@@ -13,30 +13,42 @@ type tool_result = Tool_result.result
 (* JSON builders                                                    *)
 (* ================================================================ *)
 
+module String_map = Map.Make (String)
+
 let tool_inventory_json _ctx ~include_hidden =
   (* Returns all tool schemas from catalog with metadata.
      Keeper model visibility is the complete descriptor-declared surface. *)
-  let surface_map : (string, string list) Hashtbl.t = Hashtbl.create 256 in
-  let add_surface name s =
+  let add_surface name s surface_map =
     let prev =
-      match Hashtbl.find_opt surface_map name with Some l -> l | None -> []
+      match String_map.find_opt name surface_map with Some l -> l | None -> []
     in
-    if not (List.mem s prev) then Hashtbl.replace surface_map name (s :: prev)
+    if List.mem s prev
+    then surface_map
+    else String_map.add name (s :: prev) surface_map
   in
   (* The per-actor [surfaces_for_tool] contribution was dropped in the
      surface-cut refactor (the [surface] type is deleted).  Tool visibility is
      now reported via the public_mcp projection below plus the
      Capability_registry projection seeds. *)
-  Config.raw_all_tool_schemas
-  |> List.iter (fun (schema : Masc_domain.tool_schema) ->
-         if Tool_catalog.is_public_mcp schema.name then
-           add_surface schema.name "public_mcp");
-  List.iter
-    (fun (seed : Capability_registry.capability_seed) ->
-      let s = Capability_registry.surface_to_string seed.projection.surface in
-      if not (String.equal s "public_mcp") then
-        add_surface seed.projection.tool_name s)
-    (Capability_registry.all_projection_seeds_from Config.raw_all_tool_schemas);
+  let surface_map =
+    List.fold_left
+      (fun acc (schema : Masc_domain.tool_schema) ->
+         if Tool_catalog.is_public_mcp schema.name
+         then add_surface schema.name "public_mcp" acc
+         else acc)
+      String_map.empty
+      Config.raw_all_tool_schemas
+  in
+  let surface_map =
+    List.fold_left
+      (fun acc (seed : Capability_registry.capability_seed) ->
+         let s = Capability_registry.surface_to_string seed.projection.surface in
+         if not (String.equal s "public_mcp")
+         then add_surface seed.projection.tool_name s acc
+         else acc)
+      surface_map
+      (Capability_registry.all_projection_seeds_from Config.raw_all_tool_schemas)
+  in
   let projection_schemas =
     Capability_registry.all_projection_seeds_from Config.raw_all_tool_schemas
     |> List.map (fun (seed : Capability_registry.capability_seed) ->
@@ -53,14 +65,16 @@ let tool_inventory_json _ctx ~include_hidden =
          Set_util.StringSet.empty
   in
   let dedupe_schemas schemas =
-    let seen = Hashtbl.create 256 in
-    List.filter
-      (fun (schema : Masc_domain.tool_schema) ->
-        if Hashtbl.mem seen schema.name then false
-        else (
-          Hashtbl.add seen schema.name ();
-          true))
-      schemas
+    let _, rev_schemas =
+      List.fold_left
+        (fun (seen, rev_acc) (schema : Masc_domain.tool_schema) ->
+           if Set_util.StringSet.mem schema.name seen
+           then seen, rev_acc
+           else Set_util.StringSet.add schema.name seen, schema :: rev_acc)
+        (Set_util.StringSet.empty, [])
+        schemas
+    in
+    List.rev rev_schemas
   in
   let schemas =
     Config.raw_all_tool_schemas @ projection_schemas
@@ -90,7 +104,7 @@ let tool_inventory_json _ctx ~include_hidden =
                 ("prompt_hints", `List (List.map (fun value -> `String value) help_entry.prompt_hints));
                 ("surfaces",
                  `List
-                   (match Hashtbl.find_opt surface_map schema.name with
+                   (match String_map.find_opt schema.name surface_map with
                    | Some ss -> List.map (fun s -> `String s) (List.rev ss)
                    | None -> []));
               ]

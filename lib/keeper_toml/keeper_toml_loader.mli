@@ -28,7 +28,10 @@ type toml_value =
 type toml_doc = (string * toml_value) list
 
 val normalize_source : string -> string
-(** Keeper's existing CRLF-to-LF syntax-input normalization. *)
+(** Normalize CRLF syntax and Otoml's basic-string escape handling. *)
+
+val normalize_editor_source : string -> (string, string) result
+(** Normalize editor input and reject physical newlines in single-line strings. *)
 
 val of_otoml : Otoml.t -> (toml_doc, string) result
 (** Project an already parsed normalized TOML table; refuse a non-table root. *)

@@ -29,13 +29,12 @@ let with_dispatch_fixture ?(refused_behavior = Fixture.Reply overflow_reply) bod
   Masc_test_deps.init_eio_clock ~sw env;
   Fs_compat.set_fs env#fs;
   let runtime = Runtime.For_testing.snapshot () in
-  let catalog = Llm_provider.Model_catalog.global () in
+  let catalog = Llm_provider.Catalog_snapshot.current () in
   let base_path = Filename.temp_dir "continuity-dispatch-" "" in
   Config_dir_resolver.reset ();
   Eio.Switch.on_release sw (fun () ->
     Runtime.For_testing.restore runtime;
-    (match catalog with None -> Llm_provider.Model_catalog.clear_global ()
-     | Some catalog -> Llm_provider.Model_catalog.set_global catalog);
+    (Llm_provider.Catalog_snapshot.publish catalog);
     Config_dir_resolver.reset ();
     Fs_compat.remove_tree base_path);
   let refused = Fixture.start_server ~sw ~net:env#net ~clock:env#clock refused_behavior in
@@ -46,7 +45,7 @@ let with_dispatch_fixture ?(refused_behavior = Fixture.Reply overflow_reply) bod
     "[[models]]\nmodel_id = \"continuity-model\"\nprovider_name = %S\nbase = \"openai_chat\"\nmax_context_tokens = 1048576\nmax_output_tokens = 128\nsupports_tools = true\nsupports_native_streaming = false\n" provider in
   write catalog_path (row "refused" ^ row "accepted");
   (match Llm_provider.Model_catalog.load_file catalog_path with
-   | Ok catalog -> Llm_provider.Model_catalog.set_global catalog | Error detail -> fail detail);
+   | Ok catalog -> (Llm_provider.Catalog_snapshot.publish (Masc_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None))) | Error detail -> fail detail);
   let config_path = Filename.concat base_path "runtime.toml" in
   write config_path (Printf.sprintf {|[runtime]
 default = "accepted.sample"
@@ -223,7 +222,7 @@ let test_real_dispatch_freezes_unread_across_refusal () =
       (has_content rows "Build the patch.");
     let row=match List.find_opt (fun row -> U.member "runtime_id" row=`String runtime) evidence with
       | Some row -> row | None -> fail "frozen request diagnostic missing" in
-    check string "diagnostic uses the unread observation schema" "masc.continuity-request.v2"
+    check string "diagnostic uses the unread observation schema" "masc.continuity-request.v3"
       (row |> U.member "schema" |> U.to_string);
     check bool "diagnostic binds precisely the sent frozen observation" true
       (U.member "unread" row=Frozen.to_json frozen);

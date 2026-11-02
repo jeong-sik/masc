@@ -221,11 +221,20 @@ include Masc_tui_grapheme_segmentation
    The separate [row_counts_memo] below is still owned by the UI fiber. *)
 (* A sizing hint for one frame's texts, not a bound. *)
 let texts_per_frame = 1024
+type wrapping_piece =
+  | Wrapping_piece of int * int * int * bool
+  | Wrapping_ascii of int * int
+
 type pieces_cache =
   { mutable pieces_current : (string,display_piece list) Hashtbl.t
-  ; mutable pieces_previous : (string,display_piece list) Hashtbl.t }
+  ; mutable pieces_previous : (string,display_piece list) Hashtbl.t
+  ; mutable wrapping_current : (string,wrapping_piece list) Hashtbl.t
+  ; mutable wrapping_previous : (string,wrapping_piece list) Hashtbl.t }
 let create_pieces_cache () =
-  {pieces_current=Hashtbl.create texts_per_frame;pieces_previous=Hashtbl.create texts_per_frame}
+  { pieces_current=Hashtbl.create texts_per_frame
+  ; pieces_previous=Hashtbl.create texts_per_frame
+  ; wrapping_current=Hashtbl.create texts_per_frame
+  ; wrapping_previous=Hashtbl.create texts_per_frame }
 let pieces_cache_key = Domain.DLS.new_key (fun () -> None)
 let current_pieces_cache () = match Domain.DLS.get pieces_cache_key with
   | Some cache -> cache
@@ -242,7 +251,11 @@ let begin_frame () =
   let finished=cache.pieces_current in
   cache.pieces_current <- cache.pieces_previous;
   Hashtbl.clear cache.pieces_current;
-  cache.pieces_previous <- finished
+  cache.pieces_previous <- finished;
+  let finished=cache.wrapping_current in
+  cache.wrapping_current <- cache.wrapping_previous;
+  Hashtbl.clear cache.wrapping_current;
+  cache.wrapping_previous <- finished
 
 (* Top level, so the scan allocates no closure on each layout. *)
 let rec ascii_from text offset =
@@ -266,8 +279,41 @@ let display_pieces text =
         Hashtbl.replace cache.pieces_current text pieces;
         pieces
 
+(* Wrapping can keep an ASCII run as one span: only its eventual cut needs to
+   visit the individual bytes. The same frame lifetime as [display_pieces]
+   lets repeated non-ASCII readings reuse their segmentation. *)
+let wrapping_pieces text =
+  let segment () =
+    let reversed = ref [] in
+    let piece start_offset end_offset width ansi =
+      reversed := Wrapping_piece (start_offset, end_offset, width, ansi) :: !reversed
+    in
+    let ascii start_offset end_offset =
+      reversed := Wrapping_ascii (start_offset, end_offset) :: !reversed
+    in
+    iter_display_pieces text ~piece ~ascii;
+    List.rev !reversed
+  in
+  if ascii_text text then segment ()
+  else
+    let cache = current_pieces_cache () in
+    match Hashtbl.find_opt cache.wrapping_current text with
+    | Some pieces -> pieces
+    | None ->
+        let pieces = match Hashtbl.find_opt cache.wrapping_previous text with
+          | Some pieces -> pieces
+          | None -> segment () in
+        Hashtbl.replace cache.wrapping_current text pieces;
+        pieces
+
 let pieces_width pieces =
   List.fold_left (fun width piece -> width + piece.cell_width) 0 pieces
+
+let rec wrapping_pieces_width width = function
+  | [] -> width
+  | Wrapping_piece (_, _, cells, _) :: rest -> wrapping_pieces_width (width + cells) rest
+  | Wrapping_ascii (start_offset, end_offset) :: rest ->
+      wrapping_pieces_width (width + end_offset - start_offset) rest
 
 (* Segmenting the text is what these cost, so the callers below that need both
    a measurement and a cut take the pieces once and pass them along. Measuring
@@ -314,6 +360,32 @@ let display_width text =
   match ascii_display_width text with
   | Some cells -> cells
   | None -> pieces_width (display_pieces text)
+
+let display_width_for_wrapping text =
+  match ascii_display_width text with
+  | Some cells -> cells
+  | None -> wrapping_pieces_width 0 (wrapping_pieces text)
+
+let fits_within_cells ~max_cells text =
+  if max_cells < 0 then false
+  else
+    let exception Too_wide in
+    let used = ref 0 in
+    let add cells =
+      if cells > max_cells - !used then raise Too_wide;
+      used := !used + cells
+    in
+    try
+      iter_display_pieces text
+        ~piece:(fun _ _ cells _ -> add cells)
+        ~ascii:(fun start_offset end_offset -> add (end_offset - start_offset));
+      true
+    with Too_wide -> false
+
+let widest_grapheme_cells text =
+  match ascii_display_width text with
+  | Some cells -> min 1 cells
+  | None -> widest_display_piece text
 
 let grapheme_count text =
   List.fold_left
@@ -380,6 +452,9 @@ let take_cells text cells =
    whether it moved. *)
 let split_at_cells text cells =
   if cells <= 0 then ("", text)
+  else if printable_ascii_range text 0 (String.length text) then
+    let cut = min cells (String.length text) in
+    (String.sub text 0 cut, String.sub text cut (String.length text - cut))
   else
     let rec walk used cut = function
       | [] -> cut
@@ -953,8 +1028,63 @@ let take_last count values =
   let drop = Int.max 0 (List.length values - Int.max 0 count) in
   values |> List.filteri (fun index _ -> index >= drop)
 
+(* The prefix follows [split_at_cells]. A cut inside an ASCII run retains the
+   rest of that run, so the following split starts at the exact source byte. *)
+let wrapping_prefix ~prefix_cells pieces =
+  let rec take used cut = function
+    | [] -> cut, []
+    | Wrapping_piece (_, stop, width, ansi) :: rest
+      when ansi || used + width <= prefix_cells ->
+        take (used + width) stop rest
+    | Wrapping_ascii (start, stop) :: rest as pieces ->
+        let count = min (stop - start) (max 0 (prefix_cells - used)) in
+        if count = stop - start then take (used + count) stop rest
+        else if count = 0 then cut, pieces
+        else let cut = start + count in cut, Wrapping_ascii (cut, stop) :: rest
+    | (Wrapping_piece _ :: _ as pieces) -> cut, pieces
+  in
+  if prefix_cells <= 0 then 0, pieces else take 0 0 pieces
+
+(* Cut at grapheme boundaries using the same compact runs as width measurement. *)
+let split_cells_with_runs ~prefix_cells ~max_cells text =
+  let length = String.length text in
+  let cut, remaining = wrapping_prefix ~prefix_cells (wrapping_pieces text) in
+  let rec chunks start stop used rows = function
+    | [] ->
+        if start = length then List.rev rows
+        else List.rev (String.sub text start (stop - start) :: rows)
+    | Wrapping_piece (_, piece_end, width, ansi) :: rest
+      when ansi || used = 0 || used + width <= max_cells ->
+        chunks start piece_end (used + width) rows rest
+    | Wrapping_piece (piece_start, piece_end, width, _) :: rest ->
+        chunks piece_start piece_end width (String.sub text start (stop - start) :: rows) rest
+    | Wrapping_ascii (run_start, run_end) :: rest as pieces ->
+        let room =
+          if used = 0 then max 1 max_cells
+          else if used >= max_cells then 0 else max_cells - used in
+        if room = 0 then
+          chunks run_start run_start 0 (String.sub text start (stop - start) :: rows) pieces
+        else
+          let count = min room (run_end - run_start) in
+          let next = run_start + count in
+          if next = run_end then chunks start next (used + count) rows rest
+          else
+            chunks next next 0 (String.sub text start (next - start) :: rows)
+              (Wrapping_ascii (next, run_end) :: rest)
+  in
+  String.sub text 0 cut, chunks cut cut 0 [] remaining
+
 let split_cells ~max_cells text =
   if String.equal text "" then [ "" ]
+  else if printable_ascii_range text 0 (String.length text) then
+    let limit = max 1 max_cells in
+    let rec chunks start rows =
+      if start >= String.length text then List.rev rows
+      else
+        let length = min limit (String.length text - start) in
+        chunks (start + length) (String.sub text start length :: rows)
+    in
+    chunks 0 []
   else
     let rec loop chunk_start chunk_end used_cells rows = function
       | [] ->
@@ -971,6 +1101,31 @@ let split_cells ~max_cells text =
             (chunk :: rows) rest
     in
     loop 0 0 0 [] (display_pieces text)
+
+let split_cells_after_prefix ~prefix_cells ~max_cells text =
+  let length = String.length text in
+  let limit = max 1 max_cells in
+  if printable_ascii_range text 0 length then begin
+    let cut = min length (max 0 prefix_cells) in
+    let rec chunks start rows =
+      if start >= length then List.rev rows
+      else
+        let size = min limit (length - start) in
+        chunks (start + size) (String.sub text start size :: rows)
+    in
+    String.sub text 0 cut, chunks cut []
+  end else if not (String.is_valid_utf_8 text) then begin
+    (* A malformed prefix can make the original whole line use scalar
+       segmentation while its valid suffix uses grapheme segmentation. *)
+    let cut, _ = wrapping_prefix ~prefix_cells (wrapping_pieces text) in
+    let head = String.sub text 0 cut in
+    let tail = String.sub text cut (length - cut) in
+    head,
+    (if String.equal tail "" then []
+     else if printable_ascii_range tail 0 (String.length tail) then split_cells ~max_cells tail
+     else snd (split_cells_with_runs ~prefix_cells:0 ~max_cells tail))
+  end else
+    split_cells_with_runs ~prefix_cells ~max_cells text
 
 let split_styled_cells ~max_cells text =
   (* Replaying the preceding SGR commands restores the exact style at a

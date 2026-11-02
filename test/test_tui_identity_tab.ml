@@ -345,7 +345,7 @@ let test_admitted_callback_outlives_consent_deadline () =
     (match state.identity_attempt_error with
      | Some (_, detail) -> contains "credentials attached" detail | None -> false)
 
-let test_an_offscreen_login_failure_is_reported () =
+let assert_an_offscreen_login_failure_is_reported outcome =
   let state = identity_state () in
   state.server_identity <- Some (workspace_identity ~base_path:"/w/a" ~masc_root:"/r");
   let keeper name = { Decode.k_origin=Decode.Persisted_keeper; k_name=name; k_paused=false;
@@ -361,7 +361,7 @@ let test_an_offscreen_login_failure_is_reported () =
     ~tab:Masc_tui_types.Detail_identity ~keeper:"A" ~now_ns:10L in
   Masc_tui_identity_updates.providers_loaded state read
     ~report:(fun line -> reported := line :: !reported)
-    ~attempts:[expectation, Ok Masc_tui_identity_model.Login_exchange_failed]
+    ~attempts:[expectation, Ok outcome]
     (Ok [declared "slack" "Slack"]);
   check (Alcotest.list Alcotest.string) "the failed attempt ends the wait"
     [] (held_expectations state "A");
@@ -370,6 +370,10 @@ let test_an_offscreen_login_failure_is_reported () =
     (List.for_all (fun line -> contains "A slack" line) !reported);
   check Alcotest.bool "the Keeper on screen gets no notice that is not its own" true
     (Option.is_none state.identity_attempt_error)
+
+let test_an_offscreen_login_failure_is_reported () =
+  List.iter assert_an_offscreen_login_failure_is_reported
+    Masc_tui_identity_model.[Login_exchange_failed; Credential_publication_incomplete]
 
 let test_a_lost_attempt_is_read_against_the_catalog () =
   let setup () =

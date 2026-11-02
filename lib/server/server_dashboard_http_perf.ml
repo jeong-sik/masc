@@ -358,7 +358,7 @@ let worst_live_mcp rows =
   |> List.filter (fun (row : dashboard_perf_row) ->
     String.starts_with ~prefix:"mcp_" row.benchmark
     && not (String.equal row.benchmark "mcp_session_init"))
-  |> List.sort (fun left right -> compare right.p95_ms left.p95_ms)
+  |> List.sort (fun left right -> Int.compare right.p95_ms left.p95_ms)
   |> list_hd_opt
 ;;
 

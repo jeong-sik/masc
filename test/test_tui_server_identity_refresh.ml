@@ -777,6 +777,9 @@ let test_uncertain_identity_retires_reads_not_admitted_operations () =
   Masc_tui_message_input.insert state.msg_input "unsent draft";
   state.keeper_yolo_names <- ["A-keeper"];
   state.keeper_turns_inflight <- true;
+  let keeper_waiting_read, keeper_turns_request = Keeper_waiting_read.start state.keeper_waiting_read in
+  state.keeper_waiting_read <- keeper_waiting_read;
+  Alcotest.(check bool) "keeper-turns read starts" true (Option.is_some keeper_turns_request);
   let browser = Browser_lane_view.create () in
   state.browser_lane <- Some {browser with load=Browser_lane_view.Loading (1, Read)};
   state.keeper_queue_inflight <- ["reading"; "writing"; "mutation-observation"];
@@ -795,7 +798,9 @@ let test_uncertain_identity_retires_reads_not_admitted_operations () =
     (admitted Workspace_operation_outcome);
   Alcotest.(check bool) "observation stream is cancelled" true !cancelled_observation;
   Alcotest.(check bool) "admitted operation is not cancelled" false !cancelled_write;
-  Alcotest.(check bool) "read-only in-flight slot is released" false state.keeper_turns_inflight;
+  Alcotest.(check bool) "read-only in-flight slot is released" false
+    (Keeper_waiting_read.in_flight state.keeper_waiting_read);
+  Alcotest.(check bool) "independent turns slot is released" false state.keeper_turns_inflight;
   Alcotest.(check string) "draft is preserved" "unsent draft"
     (Masc_tui_message_input.contents state.msg_input);
   Alcotest.(check (list string)) "retained mode rows are preserved" ["A-keeper"] state.keeper_yolo_names;
@@ -2111,6 +2116,133 @@ let test_failed_read_keeps_followup_and_withdrawal_retires_it () =
   Alcotest.(check bool) "reconfirmed workspace can observe a new source read" true
     (take_local_workspace_read state ~source:Local_work resumed (Ok ()) = Some (Ok ()))
 
+let test_observer_retry_retires_with_workspace_read_authority () =
+  let open Masc_tui_types in
+  let state = create_state ~workspace:"observer-retry" ~local_base_path:"/workspace/a"
+      ~port:8935 ~refresh_interval:0. () in
+  state.server_identity <- Some (identity "/workspace/a");
+  state.workspace_identity <- Workspace_identity_match;
+  let authority = state.workspace_authority in
+  let reading = Some state.workspace_read_authority in
+  let closed = Observer_closed_before_answer { reason = "closed"; at = 1. } in
+  let owner = ref () in
+  let retry = Masc_tui_async_protocol.Observer_retry_due (authority, owner) in
+  state.observer <- closed;
+  state.observer_retry_owner <- Some owner;
+  Alcotest.(check bool) "closed stream owns its retry" true
+    (Masc_tui_async_protocol.observer_retry_owned state ~authority owner);
+  state.observer <- Observer_closed_before_answer { reason = "closed"; at = 1. };
+  state.observer_retry_owner <- Some (ref ());
+  Alcotest.(check bool) "an equal later close does not own the earlier retry" false
+    (Masc_tui_async_protocol.observer_retry_owned state ~authority owner);
+  state.observer_retry_owner <- Some owner;
+  let Workspace_authority generation = authority in
+  state.workspace_authority <- Workspace_authority (generation + 1);
+  Alcotest.(check bool) "a replaced workspace cannot own the earlier retry" false
+    (Masc_tui_async_protocol.observer_retry_owned state ~authority owner);
+  state.workspace_authority <- authority;
+  state.observer <- Observer_opening;
+  Alcotest.(check bool) "an opening stream cannot be retried" false
+    (Masc_tui_async_protocol.observer_retry_owned state ~authority owner);
+  Alcotest.(check bool) "retry is a workspace observation" true
+    (Masc_tui_async_protocol.workspace_message_is_read retry);
+  Alcotest.(check bool) "current workspace admits the retry" true
+    (Masc_tui_async_protocol.workspace_message_admitted state ~authority ~reading retry);
+  state.workspace_read_authority <- ref ();
+  Alcotest.(check bool) "retired workspace cannot admit the retry" false
+    (Masc_tui_async_protocol.workspace_message_admitted state ~authority ~reading retry)
+
+let test_observer_recovery_belongs_to_unconfirmed_workspace () =
+  let open Masc_tui_types in
+  let state = create_state ~workspace:"observer-recovery" ~local_base_path:"/workspace/a"
+      ~port:8935 ~refresh_interval:0. () in
+  state.server_identity <- Some (identity "/workspace/a");
+  state.workspace_identity <- Workspace_identity_match_unconfirmed "unavailable";
+  let authority = state.workspace_authority in
+  let owner = ref () in
+  state.observer_recovery_owner <- Some owner;
+  Alcotest.(check bool) "unconfirmed workspace owns recovery" true
+    (Masc_tui_async_protocol.observer_recovery_owned state ~authority owner);
+  let expected = identity "/workspace/a" in
+  let live = ref true in
+  let first = Sse_wire.{instance_id="instance-a"; replay=Fresh} in
+  let next = Sse_wire.{instance_id="instance-b"; replay=Fresh} in
+  state.observer_scope_binding <- note_observer_scope Observer_scope_unbound (Some first);
+  let owns_identity () =
+    Masc_tui_async_protocol.observer_recovery_identity_owned state
+      ~authority ~owner ~live ~instance:"instance-a"
+      ~origin:(Masc_tui_async_protocol.Observer_existing_workspace expected) in
+  Alcotest.(check bool) "live scoped stream owns its identity" true (owns_identity ());
+  state.observer_scope_binding <- note_observer_scope state.observer_scope_binding (Some first);
+  Alcotest.(check bool) "same epoch retains its authority" true (owns_identity ());
+  state.observer_scope_binding <- note_observer_scope state.observer_scope_binding (Some next);
+  Alcotest.(check bool) "different process or epoch rejects old workspace evidence" false (owns_identity ());
+  state.observer_scope_binding <- note_observer_scope state.observer_scope_binding (Some first);
+  Alcotest.(check bool) "old epoch cannot revive retired authority" false (owns_identity ());
+  state.observer_scope_binding <- Observer_scope_unbound;
+  Alcotest.(check bool) "unscoped prior connection cannot authorize recovery" false (owns_identity ());
+  state.observer_scope_binding <- note_observer_scope Observer_scope_unbound (Some first);
+  state.observer_scope_binding <- note_observer_scope state.observer_scope_binding None;
+  Alcotest.(check bool) "an unscoped successor retires prior evidence" false (owns_identity ());
+  state.observer_scope_binding <- note_observer_scope Observer_scope_unbound (Some first);
+  live := false;
+  Alcotest.(check bool) "closed stream cannot authorize identity" false (owns_identity ());
+  live := true;
+  state.server_identity <- Some (identity "/workspace/b");
+  Alcotest.(check bool) "a different workspace rejects old identity" false (owns_identity ());
+  state.server_identity <- Some expected;
+  suspend_workspace_readings state;
+  Alcotest.(check bool) "read suspension retains recovery owner" true
+    (Masc_tui_async_protocol.observer_recovery_owned state ~authority owner);
+  state.observer_recovery_owner <- Some (ref ());
+  Alcotest.(check bool) "successor owner rejects stale recovery" false
+    (Masc_tui_async_protocol.observer_recovery_owned state ~authority owner);
+  Alcotest.(check bool) "successor owner rejects stale identity" false (owns_identity ());
+  state.observer_recovery_owner <- Some owner;
+  let Workspace_authority generation = authority in
+  state.workspace_authority <- Workspace_authority (generation + 1);
+  Alcotest.(check bool) "successor workspace rejects stale recovery" false
+    (Masc_tui_async_protocol.observer_recovery_owned state ~authority owner);
+  Alcotest.(check bool) "successor workspace rejects stale identity" false (owns_identity ());
+  state.workspace_authority <- authority;
+  state.workspace_identity <- Workspace_identity_match;
+  Alcotest.(check bool) "confirmed workspace no longer owns recovery" false
+    (Masc_tui_async_protocol.observer_recovery_owned state ~authority owner);
+  Alcotest.(check bool) "confirmed workspace rejects late identity" false (owns_identity ())
+
+let test_observer_initial_identity_ownership () =
+  let open Masc_tui_types in
+  let open Masc_tui_async_protocol in
+  let state = create_state ~workspace:"observer-cold" ~local_base_path:"/workspace/a"
+      ~port:8935 ~refresh_interval:0. () in
+  let authority = state.workspace_authority in
+  let owner = ref () and live = ref true in
+  let paths = Option.get state.local_workspace_paths in
+  let origin = Observer_initial_workspace paths in
+  state.observer_recovery_owner <- Some owner;
+  let accepted () = observer_recovery_identity_owned state ~authority ~owner ~live
+      ~instance:"instance-a" ~origin in
+  Alcotest.(check bool) "live initial matching workspace may establish authority" true (accepted ());
+  live := false;
+  Alcotest.(check bool) "closed initial stream cannot establish authority" false (accepted ());
+  live := true;
+  state.observer_recovery_owner <- Some (ref ());
+  Alcotest.(check bool) "a replaced initial owner cannot establish authority" false (accepted ());
+  state.observer_recovery_owner <- Some owner;
+  let foreign = Observer_initial_workspace (Option.get (local_paths "/workspace/b")) in
+  Alcotest.(check bool) "foreign local paths cannot establish authority" false
+    (observer_recovery_identity_owned state ~authority ~owner ~live
+       ~instance:"instance-a" ~origin:foreign);
+  state.observer_scope_binding <- Observer_scope_retired;
+  Alcotest.(check bool) "a retired scope cannot be reintroduced as initial" false (accepted ());
+  state.observer_scope_binding <- Observer_scope_unbound;
+  state.server_identity <- Some (identity "/workspace/a");
+  Alcotest.(check bool) "a separate identity observation supersedes the cold path" false (accepted ());
+  state.server_identity <- None;
+  let Workspace_authority generation = authority in
+  state.workspace_authority <- Workspace_authority (generation + 1);
+  Alcotest.(check bool) "a later authority rejects a stale initial receipt" false (accepted ())
+
 let test_archive_cache_does_not_cross_equal_stat_files () =
   let first = Filename.temp_file "tui-archive-source-a-" ".json" in
   let second = Filename.temp_file "tui-archive-source-b-" ".json" in
@@ -2133,6 +2265,53 @@ let test_archive_cache_does_not_cross_equal_stat_files () =
       | Error detail -> Alcotest.fail detail in
     Alcotest.(check int) "first archive retains invalid-row evidence" 1 (undecoded first);
     Alcotest.(check int) "second path cannot reuse first archive evidence" 0 (undecoded second))
+
+let test_fresh_local_work_reloads_equal_stat_archive () =
+  let dir = Filename.temp_file "tui-archive-refresh-" "" in
+  Sys.remove dir;
+  Unix.mkdir dir 0o700;
+  let masc = Filename.concat dir ".masc" in
+  let tasks = Filename.concat masc "tasks" in
+  Unix.mkdir masc 0o700;
+  Unix.mkdir tasks 0o700;
+  let backlog = Filename.concat tasks "backlog.json" in
+  let archive = Filename.concat masc "tasks-archive.json" in
+  let write path contents =
+    Out_channel.with_open_bin path (fun channel -> Out_channel.output_string channel contents) in
+  let previous_fs = Fs_compat.get_fs_opt () in
+  let previous_base_path = Sys.getenv_opt "MASC_BASE_PATH" in
+  Fun.protect
+    ~finally:(fun () ->
+      (match previous_fs with Some fs -> Fs_compat.set_fs fs | None -> Fs_compat.clear_fs ());
+      (match previous_base_path with
+       | Some path -> Unix.putenv "MASC_BASE_PATH" path
+       | None -> Unix.unsetenv "MASC_BASE_PATH");
+      Sys.remove backlog;
+      Sys.remove archive;
+      Unix.rmdir tasks;
+      Unix.rmdir masc;
+      Unix.rmdir dir)
+    (fun () ->
+      write backlog "{\"tasks\":[],\"last_updated\":\"2026-01-01T00:00:00Z\",\"version\":1}";
+      write archive "{\"tasks\":[0]}";
+      let stamp = Float.floor (Unix.gettimeofday ()) -. 1. in
+      Unix.utimes archive stamp stamp;
+      Eio_main.run (fun env ->
+        Fs_compat.set_fs (Eio.Stdenv.fs env);
+        let observe ?(fresh = false) () =
+          (Masc_tui_loader.read_local_workspace ~fresh dir).lr_tasks_error in
+        let error = Some "1 archived tasks could not be read; the day bars miss them" in
+        Alcotest.(check (option string)) "unreadable archive is visible" error (observe ());
+        let before = Unix.stat archive in
+        write archive "{\"tasks\":[] }";
+        Unix.utimes archive before.Unix.st_atime before.Unix.st_mtime;
+        let after = Unix.stat archive in
+        Alcotest.(check bool) "archive replacement keeps cache stat" true
+          (before.Unix.st_size = after.Unix.st_size
+           && Float.equal before.Unix.st_mtime after.Unix.st_mtime);
+        Alcotest.(check (option string)) "ordinary read retains its cache" error (observe ());
+        Alcotest.(check (option string)) "fresh work read clears archive error" None
+          (observe ~fresh:true ())))
 
 let test_local_cache_cancel_releases_source_for_followup () =
   let exception Read_replaced in
@@ -3637,7 +3816,7 @@ let keeper_settings_fixture () =
   state, keeper
 
 let keeper_settings_request state =
-  match Masc_tui_types.begin_keeper_settings_editor state ~available:true ~started_ns:10L with
+  match Masc_tui_types.begin_keeper_settings_editor state ~format:Masc_tui_keeper_config.Json ~available:true ~started_ns:10L with
   | Some request -> request | None -> Alcotest.fail "settings preparation did not start"
 
 let keeper_settings_snapshot () : Masc_tui_types.keeper_settings_snapshot =
@@ -3653,7 +3832,7 @@ let test_settings_preparation_hands_off_original_snapshot_once () =
   let request = keeper_settings_request state in
   let take ~input_pending = take_ready_keeper_settings_editor state ~available:true ~input_pending in
   Alcotest.(check bool) "explicit repeated edit shares the pending read without opening an editor" true
-    (Option.is_none (begin_keeper_settings_editor state ~available:true ~started_ns:11L)
+    (Option.is_none (begin_keeper_settings_editor state ~format:Masc_tui_keeper_config.Toml ~available:true ~started_ns:11L)
       && Option.is_none (take ~input_pending:false));
   let snapshot = keeper_settings_snapshot () in
   finish_keeper_settings_worker state request;
@@ -3661,8 +3840,9 @@ let test_settings_preparation_hands_off_original_snapshot_once () =
     (take_keeper_settings_editor_read state request (Ok snapshot));
   Alcotest.(check bool) "queued input defers handoff and repeated edit does not restart a ready read" true
     (Option.is_none (take ~input_pending:true)
-      && Option.is_none (begin_keeper_settings_editor state ~available:true ~started_ns:12L)
-      && Option.exists (fun current -> current.ksr_owner==request.ksr_owner) state.keeper_settings_intent);
+      && Option.is_none (begin_keeper_settings_editor state ~format:Masc_tui_keeper_config.Toml ~available:true ~started_ns:12L)
+      && Option.exists (fun current -> current.ksr_owner==request.ksr_owner
+          && current.ksr_format = Masc_tui_keeper_config.Json) state.keeper_settings_intent);
   state.keeper_config_view <- Some (keeper.k_name,["later rendered observation"]);
   let original, document = match take ~input_pending:false with
     | Some value -> value | None -> Alcotest.fail "ready source did not reach the same editor intent" in
@@ -3765,7 +3945,7 @@ let test_settings_save_keeps_receipt_through_withdrawal () =
   let open Masc_tui_types in
   let state,_,origin,draft,request = keeper_settings_save_fixture () in
   Alcotest.(check bool) "repeat edit shares the admitted save" true
-    (Option.is_none (begin_keeper_settings_editor state ~available:true ~started_ns:21L));
+    (Option.is_none (begin_keeper_settings_editor state ~format:Masc_tui_keeper_config.Toml ~available:true ~started_ns:21L));
   Alcotest.(check bool) "duplicate dispatch refused" true
     (Result.is_error (begin_keeper_settings_save state ~origin
       ~draft ~started_ns:22L));
@@ -3806,7 +3986,7 @@ let test_settings_save_recovers_changes_on_fresh_revision () =
        "manifest",`Assoc ["state",`String "sha256";"value",`String (String.make 64 'b')];
        "runtime_assignment",`Assoc ["state",`String "runtime_config_missing"]]) in
   let edited = match Masc_tui_keeper_config.reopen_edit_on_current
-    ~before:retained.ksd_snapshot.kss_observed ~edited:retained.ksd_text ~current with
+    ~format:Masc_tui_keeper_config.Json ~patch:retained.ksd_patch ~current with
     | Ok text -> text | Error refusal -> Alcotest.fail (Masc_tui_keeper_config.edit_refusal_to_string refusal) in
   let json = Yojson.Safe.from_string edited in
   Alcotest.(check bool) "only operator changes overlay current settings" true
@@ -4047,7 +4227,7 @@ let test_assignment_serializes_same_keeper_config_intents () =
     (Result.is_error (begin_runtime_assignment_save state ~keeper_name:keeper.k_name ~runtime_id:None ~started_ns:31L)
      && original.ras_runtime_id=Some "codex.example" && state.runtime_pick_keeper=Some keeper.k_name);
   state.view <- Keepers Keeper_detail;
-  let editor_refused = Option.is_none (begin_keeper_settings_editor state ~available:true ~started_ns:32L) in
+  let editor_refused = Option.is_none (begin_keeper_settings_editor state ~format:Masc_tui_keeper_config.Toml ~available:true ~started_ns:32L) in
   state.detail_tab <- Detail_sandbox;
   Alcotest.(check bool) "pending assignment excludes same-Keeper editor and Sandbox writes" true
     (editor_refused && Result.is_error (begin_keeper_sandbox_save state ~profile:Keeper_sandbox_config.Docker ~started_ns:32L));
@@ -4729,6 +4909,619 @@ let test_operation_histories_keep_unfinished_and_recovery_owners () =
           && attempt.raa_status=assignment_unsent && attempt.raa_request.ras_runtime_id=None)
           (Runtime_assignment_saves.all state.runtime_assignment_saves))
 
+let task_detail_scroll_fixture () =
+  let open Masc_tui_types in
+  let task_id = "task-scroll" in
+  let task = match Masc_domain.task_of_yojson (`Assoc
+      ["id", `String task_id; "title", `String task_id; "description", `String "fixture";
+       "status", `String "todo"; "created_at", `String "2026-10-19T00:00:00Z"]) with
+    | Ok task -> task | Error detail -> Alcotest.fail detail in
+  let state = create_state ~workspace:"task-scroll" ~port:0 ~refresh_interval:0. () in
+  state.view <- Planning;
+  state.planning_mode <- Planning_list;
+  state.task_detail_id <- Some task_id;
+  state.task_focus <- Masc_tui_overview_tasks.Task_focus {selected=Some task_id};
+  state.task_payloads <- Masc_tui_task_payloads.observe [task];
+  state, task_id
+
+let complete_task_scroll_documents state ~cols requests =
+  List.iter (fun request ->
+    Masc_tui_types.complete_task_document state ~cols request (Ok [])) requests
+
+let task_scroll_history task_id =
+  let module History = Masc.Tui_decode_task_inspection in
+  let request = History.history_first ~task_id ~limit:40 in
+  match History.history_page ~request (`Assoc
+      ["schema",`String "masc.task-history.page/v2"; "task_id",`String task_id;
+       "cursor",`Null; "next_cursor",`Null;
+       "sources",`List [`Assoc ["source",`String "activity-events"; "state",`String "not-created"];
+                        `Assoc ["source",`String "events"; "state",`String "observed"]];
+       "events",`List []]) with
+  | Ok history -> history | Error detail -> Alcotest.fail detail
+
+let tools_task_scroll_fixture () =
+  let open Masc_tui_types in
+  let module Async = Masc.Tui_decode_async_request in
+  let state = create_state ~workspace:"tools-task-scroll" ~port:0 ~refresh_interval:0. () in
+  let target : Async.target =
+    {submitted_by="operator"; request_id="request-1"; keeper_name="keeper"} in
+  let source : tools_async_task_source =
+    {ats_request={target; request_context=`Assoc ["composition_run_id", `String "run-1"]};
+     ats_run_id="run-1"; ats_task_id="task-scroll"; ats_observed_at=1.; ats_retained=false} in
+  state.view <- Tools;
+  state.tools_pane <- Tools_async;
+  state.tools_async_selection <- Some target;
+  state.tools_async_detail_open <- true;
+  state.tools_async_task_source <- Some source;
+  state.workspace_identity <- Workspace_identity_match;
+  state.server_identity <- Some (identity "/workspace/tools-task");
+  state, source
+
+let tools_task_frame state ~count ~height ~offset =
+  let open Masc_tui_types in
+  let owner = match tools_task_display_owner state with
+    | Some owner -> owner | None -> Alcotest.fail "no visible original Task owner" in
+  {ttf_owner=owner; ttf_count=count; ttf_height=height; ttf_offset=offset;
+   ttf_waiting=tools_task_waiting state ~source:owner.tto_source ~cols:72; ttf_cols=72}
+
+let test_tools_task_end_waits_for_both_reads_and_presentation () =
+  let open Masc_tui_types in
+  let state, source = tools_task_scroll_fixture () in
+  let body = Option.get (begin_tools_async_task_body state ~force:false) in
+  let history = Option.get (begin_tools_async_task_history state ~force:false ~limit:40) in
+  let shown = tools_task_frame state ~count:30 ~height:14 ~offset:0 in
+  tools_task_presented_frame state shown;
+  Alcotest.(check bool) "End selects this Task" true (tools_task_select_end state);
+  Alcotest.(check int) "the last displayed end is the input origin" 16 state.tools_scroll;
+  complete_tools_async_task_history state history (Ok (task_scroll_history source.ats_task_id));
+  Alcotest.(check bool) "unprepared History and pending body still wait" true
+    (tools_task_waiting state ~source ~cols:72);
+  let first_documents = sync_task_documents state ~cols:72 in
+  complete_task_scroll_documents state ~cols:72 first_documents;
+  tools_task_presented_frame state (tools_task_frame state ~count:100 ~height:14 ~offset:86);
+  Alcotest.(check bool) "the later body keeps End pending" true (tools_task_following_end state);
+  let detail = Masc.Tui_decode_task_inspection.detail ~task_id:source.ats_task_id (`Assoc [
+    "task", `Assoc ["id", `String source.ats_task_id; "title", `String "fixture";
+                    "description", `String "body"; "goal_id", `Null;
+                    "status", `String "todo"; "created_at", `String "2026-10-19T00:00:00Z"]]) in
+  let detail = match detail with Ok value -> value | Error error -> Alcotest.fail error in
+  complete_tools_async_task_body state body (Ok detail);
+  Alcotest.(check bool) "unprepared Body still waits" true (tools_task_waiting state ~source ~cols:72);
+  let last_documents = sync_task_documents state ~cols:72 in
+  complete_task_scroll_documents state ~cols:72 last_documents;
+  Alcotest.(check bool) "a ready result has not itself settled End" true (tools_task_following_end state);
+  let final = tools_task_frame state ~count:130 ~height:14 ~offset:116 in
+  Alcotest.(check bool) "building a candidate without presenting it leaves End pending" true
+    (tools_task_following_end state && state.tools_scroll=86);
+  tools_task_presented_frame state final;
+  Alcotest.(check bool) "the presented final frame settles End" true
+    (not (tools_task_following_end state) && state.tools_scroll=116);
+  ignore (begin_tools_async_task_body state ~force:true);
+  Alcotest.(check bool) "a later poll does not recreate End" false (tools_task_following_end state)
+
+let test_tools_task_end_respects_input_and_owner () =
+  let open Masc_tui_types in
+  let state, source = tools_task_scroll_fixture () in
+  ignore (begin_tools_async_task_history state ~force:false ~limit:40);
+  tools_task_presented_frame state (tools_task_frame state ~count:100 ~height:14 ~offset:86);
+  ignore (tools_task_select_end state);
+  let count, height = tools_task_presented_viewport state ~fallback:(fun () -> 1000, 2) in
+  let next = Masc_tui_scroll.page_up ~count ~height state.tools_scroll in
+  Alcotest.(check bool) "explicit page movement succeeds" true (tools_task_relative_scroll state next);
+  let moved = state.tools_scroll in
+  Alcotest.(check bool) "movement retires End" false (tools_task_following_end state);
+  tools_task_presented_frame state (tools_task_frame state ~count:100 ~height:14 ~offset:moved);
+  Alcotest.(check int) "later observations do not undo the movement" moved state.tools_scroll;
+  state.tools_scroll <- 86;
+  tools_task_presented_frame state (tools_task_frame state ~count:30 ~height:14 ~offset:16);
+  Alcotest.(check int) "temporary preparation does not discard the prior position" 86 state.tools_scroll;
+  let count,height = tools_task_presented_viewport state ~fallback:(fun () -> 1000, 2) in
+  ignore (tools_task_relative_scroll state (Masc_tui_scroll.up ~count ~height state.tools_scroll));
+  Alcotest.(check int) "Up moves from the actually presented placeholder" 15 state.tools_scroll;
+  ignore (tools_task_select_end state);
+  let old_frame = Option.get state.tools_task_presented in
+  suspend_tools_async_task state;
+  state.tools_async_task_source <- None;
+  state.tools_async_task_source <- Some source;
+  reconcile_tools_task_scroll state;
+  Alcotest.(check bool) "reopening the same Task retires the prior visit" true
+    (not (tools_task_following_end state) && tools_task_reader_withdrawn state);
+  tools_task_presented_frame state old_frame;
+  Alcotest.(check bool) "a late old frame cannot establish the new visit" true
+    (tools_task_reader_withdrawn state && not (tools_task_following_end state));
+  tools_task_presented_frame state (tools_task_frame state ~count:30 ~height:14 ~offset:0);
+  state.workspace_identity <- Workspace_identity_mismatch
+    {local_base_path="/local"; server_base_path="/workspace/tools-task"};
+  Alcotest.(check bool) "confirmed remote workspace supports End" true (tools_task_select_end state);
+  state.workspace_identity <- Workspace_identity_match_unconfirmed "temporarily unavailable";
+  suspend_tools_async_task state;
+  state.workspace_read_authority <- ref ();
+  reconcile_tools_task_scroll state;
+  Alcotest.(check bool) "unconfirmed identity retires the pending End" false (tools_task_following_end state);
+  tools_task_presented_frame state (tools_task_frame state ~count:30 ~height:14 ~offset:0);
+  Alcotest.(check bool) "retained Task remains the visible owner" false (tools_task_reader_withdrawn state);
+  withdraw_tools_async_details state;
+  Alcotest.(check bool) "withdrawal rejects input until a replacement frame" true (tools_task_reader_withdrawn state);
+  tools_task_forget_frame state;
+  Alcotest.(check bool) "a replacement frame retires the visible owner" false (tools_task_reader_withdrawn state)
+
+let test_tools_task_unpresented_frame_and_picker () =
+  let open Masc_tui_types in
+  let state, source = tools_task_scroll_fixture () in
+  let request = Option.get (begin_tools_async_task_history state ~force:false ~limit:40) in
+  state.tools_scroll <- 86;
+  let loading = tools_task_frame state ~count:30 ~height:14 ~offset:16 in
+  tools_task_presented_frame state loading;
+  Alcotest.(check int) "a temporary short frame retains the previous position" 86 state.tools_scroll;
+  complete_tools_async_task_history state request (Error "history unavailable");
+  let settled = tools_task_frame state ~count:30 ~height:14 ~offset:16 in
+  Alcotest.(check bool) "the ready transition needs a presented frame" true
+    (not settled.ttf_waiting && tools_task_viewport_changed state settled);
+  Alcotest.(check int) "an unpresented frame cannot clamp the position" 86 state.tools_scroll;
+  tools_task_presented_frame state settled;
+  Alcotest.(check int) "the presented failure frame settles its actual position" 16 state.tools_scroll;
+  state.tools_skill_source_picker <- Some
+    {ssp_sources=["one";"two"]; ssp_composition=false; ssp_list=Masc_tui_pick_list.closed;
+     ssp_authority=state.workspace_authority; ssp_identity=state.server_identity; ssp_port=state.port};
+  Alcotest.(check bool) "the picker is not an original Task frame" true
+    (Option.is_none (tools_task_display_owner state) && tools_task_reader_withdrawn state);
+  tools_task_forget_frame state;
+  state.tools_skill_source_picker <- None;
+  Alcotest.(check bool) "End can be requested before the first Task frame" true
+    (tools_task_select_end state && tools_task_following_end state);
+  Alcotest.(check bool) "relative input waits for a displayed Task frame" false
+    (tools_task_relative_scroll state 0);
+  Alcotest.(check bool) "declined movement retains the pending End" true
+    (tools_task_following_end state && source.ats_task_id="task-scroll")
+
+let test_task_history_progressive_read_keeps_owner_and_cursor () =
+  let open Masc_tui_types in
+  let module History = Masc.Tui_decode_task_inspection in
+  let module Fetched = Masc_tui_fetched in
+  let state,task_id = task_detail_scroll_fixture () in
+  state.workspace_identity <- Workspace_identity_match;
+  state.server_identity <- Some (identity "/workspace/task-history");
+  let require = function Some request -> request | None -> Alcotest.fail "history read did not start" in
+  let decode request ~offset ~next =
+    let token = function None -> `Null | Some value -> `String value in
+    let body = `Assoc [
+      "schema",`String "masc.task-history.page/v2";"task_id",`String task_id;
+      "cursor",token request.History.hr_cursor;"next_cursor",token next;
+      "sources",`List [`Assoc ["source",`String "activity-events";"state",`String "not-created"];
+                       `Assoc ["source",`String "events";"state",`String "observed"]];
+      "events",`List [`Assoc ["source",`String "events";"file",`String "events/2026-10/19.jsonl";
+        "offset",`Int offset;"event",`Assoc ["type",`String "task_transition";
+          "task",`String task_id;"agent",`String "fixture";"ts",`String "2026-10-19T01:00:00Z";
+          "from_status",`String "todo";"to_status",`String "in_progress"]]] ] in
+    match History.history_page ~request body with
+    | Ok history -> history | Error detail -> Alcotest.fail detail in
+  let first = begin_task_history_read ~progressive:true state ~task_id ~limit:40 |> require in
+  Alcotest.(check int) "initial request observes one event" 1 first.thr_page.hr_limit;
+  let prefix = decode first.thr_page ~offset:20 ~next:(Some "older-cursor") in
+  Alcotest.(check (option int)) "same owner continues the captured prefix" (Some 39)
+    (task_history_followup state first (Ok prefix));
+  Alcotest.(check bool) "an exhausted prefix or failed first read does not continue" true
+    (task_history_followup state first (Ok (task_scroll_history task_id))=None
+     && task_history_followup state first (Error "unavailable")=None);
+  complete_task_history_read state first (Ok prefix);
+  let older = begin_task_history_read ~older:true state ~task_id ~limit:39 |> require in
+  Alcotest.(check bool) "continuation preserves the observed prefix and its cursor" true
+    (older.thr_page.hr_cursor=Some "older-cursor"
+     && Fetched.in_flight state.task_history
+     && Fetched.value (Fetched.view_for ~equal:String.equal state.task_history ~key:task_id)=Some prefix);
+  let all = decode older.thr_page ~offset:10 ~next:None in
+  complete_task_history_read state older (Ok all);
+  Alcotest.(check bool) "continuation keeps both source observations" true
+    (List.length all.history_records=2
+     && Fetched.value (Fetched.view_for ~equal:String.equal state.task_history ~key:task_id)=Some all);
+  let refresh = begin_task_history_read ~progressive:true state ~task_id ~limit:40 |> require in
+  Alcotest.(check bool) "refresh retains a prior full observation instead of replacing it with a preview" true
+    (refresh.thr_page.hr_limit=40 && Option.is_none refresh.thr_followup_limit);
+  complete_task_history_read state refresh (Error "refresh unavailable");
+  state.task_history <- Fetched.clear state.task_history;
+  let retired = begin_task_history_read ~progressive:true state ~task_id ~limit:40 |> require in
+  let retired_result = decode retired.thr_page ~offset:20 ~next:(Some "older-cursor") in
+  let current = begin_task_history_read ~progressive:true state ~task_id ~limit:40 |> require in
+  let payloads = state.task_payloads in
+  let reading = state.task_reading in
+  state.task_payloads <- Masc_tui_task_payloads.observe [];
+  state.task_reading <- Masc_tui_overview_tasks.Rows_unavailable "temporary failure";
+  Alcotest.(check bool) "unavailable backlog preserves the original Task request" true
+    (task_history_request_in_scope state current);
+  state.task_reading <- Masc_tui_overview_tasks.Rows_unread;
+  Alcotest.(check bool) "an unread backlog does not invent Task removal" true
+    (task_history_request_in_scope state current);
+  state.task_reading <- Masc_tui_overview_tasks.Rows_read [];
+  state.tasks_error <- Some "degraded local read";
+  Alcotest.(check bool) "a degraded local read does not prove Task removal" true
+    (task_history_request_in_scope state current);
+  state.tasks_error <- None;
+  Alcotest.(check bool) "a removed Task cannot own an automatic continuation" false
+    (task_history_request_in_scope state current);
+  state.task_payloads <- payloads;
+  state.task_reading <- reading;
+  state.task_focus <- Masc_tui_overview_tasks.No_task_focus;
+  Alcotest.(check bool) "an unfocused Task cannot own an automatic continuation" false
+    (task_history_request_in_scope state current);
+  state.task_focus <- Masc_tui_overview_tasks.Task_focus {selected=Some task_id};
+  Alcotest.(check bool) "superseded and replaced workspace requests cannot continue" true
+    (task_history_followup state retired (Ok retired_result)=None
+     && task_history_request_current state current
+     && task_history_request_in_scope state current
+     && (state.workspace_read_authority <- ref ();
+         task_history_followup state current (Ok retired_result)=None))
+
+let test_task_detail_end_survives_uncertain_backlog () =
+  let open Masc_tui_types in
+  let cols = 80 in
+  let pending_end () =
+    let state,task_id = task_detail_scroll_fixture () in
+    state.task_reading <- Masc_tui_overview_tasks.Rows_read [];
+    let request = match begin_task_history_read state ~task_id ~limit:40 with
+      | Some request -> request | None -> Alcotest.fail "history read did not start" in
+    complete_task_scroll_documents state ~cols (sync_task_documents state ~cols);
+    task_detail_presented_frame state ~task_id ~count:23 ~height:16 ~offset:0 ~cols;
+    task_detail_select_end state ~cols;
+    Alcotest.(check bool) "End follows the pending history" true (task_detail_following_end state);
+    state,task_id,request in
+  List.iter (fun (reading,error) ->
+    let state,task_id,request = pending_end () in
+    let payloads = state.task_payloads in
+    state.task_payloads <- Masc_tui_task_payloads.observe [];
+    state.task_reading <- reading;
+    state.tasks_error <- error;
+    reconcile_task_detail_scroll state;
+    Alcotest.(check bool) "uncertain absence keeps intent without claiming a visible viewport" true
+      (Option.is_some state.task_detail_follow_end
+       && not (task_detail_following_end state) && current_task_detail_presented state=None
+       && task_history_request_in_scope state request);
+    complete_task_history_read state request (Ok (task_scroll_history task_id));
+    state.task_payloads <- payloads;
+    state.task_reading <- Masc_tui_overview_tasks.Rows_read [];
+    state.tasks_error <- None;
+    complete_task_scroll_documents state ~cols (sync_task_documents state ~cols);
+    Alcotest.(check bool) "the same visible Task resumes the pending End" true
+      (task_detail_following_end state && task_detail_render_scroll state=clamped_scroll_end);
+    task_detail_presented_frame state ~task_id ~count:116 ~height:16 ~offset:100 ~cols;
+    Alcotest.(check bool) "the final presented End settles once" true
+      (state.task_detail_scroll=100 && state.task_detail_follow_end=None))
+    [ Masc_tui_overview_tasks.Rows_unread,None;
+      Rows_unavailable "temporary failure",Some "temporary failure";
+      Rows_read [],Some "degraded local read" ];
+  let state,_,request = pending_end () in
+  state.task_payloads <- Masc_tui_task_payloads.observe [];
+  state.task_reading <- Masc_tui_overview_tasks.Rows_unavailable "temporary failure";
+  reconcile_task_detail_scroll state;
+  task_list_user_focus state (Masc_tui_overview_tasks.move []
+    (Masc_tui_overview_tasks.Task_focus {selected=None}) Masc_tui_overview_tasks.Next);
+  Alcotest.(check bool) "moving in an empty list does not select another Task" true
+    (Option.is_some state.task_detail_follow_end);
+  task_list_user_focus state (Masc_tui_overview_tasks.Task_focus {selected=Some "another-task"});
+  reconcile_task_detail_scroll state;
+  Alcotest.(check bool) "choosing a different Task retires the hidden End" true
+    (state.task_detail_follow_end=None && task_history_request_in_scope state request);
+  let state,_,request = pending_end () in
+  let payloads = state.task_payloads in
+  state.task_payloads <- Masc_tui_task_payloads.observe [];
+  state.task_reading <- Masc_tui_overview_tasks.Rows_read [];
+  state.tasks_error <- Some "degraded local read";
+  reconcile_task_detail_scroll state;
+  task_list_user_focus state (Masc_tui_overview_tasks.Task_focus {selected=Some "another-task"});
+  state.task_focus <- fst (Masc_tui_overview_tasks.after_read
+    (Masc_tui_overview_tasks.Rows_read []) state.task_focus);
+  state.task_payloads <- payloads;
+  state.task_reading <- Masc_tui_overview_tasks.Rows_read [];
+  state.tasks_error <- None;
+  reconcile_task_detail_scroll state;
+  Alcotest.(check bool) "recovery cannot hide a newer Task selection" true
+    (state.task_detail_follow_end=None && task_history_request_in_scope state request);
+  let state,_,_ = pending_end () in
+  state.task_payloads <- Masc_tui_task_payloads.observe [];
+  state.task_reading <- Masc_tui_overview_tasks.Rows_read [];
+  state.tasks_error <- None;
+  reconcile_task_detail_scroll state;
+  Alcotest.(check bool) "a confirmed removal retires the End" true (state.task_detail_follow_end=None);
+  let state,_,_ = pending_end () in
+  state.task_payloads <- Masc_tui_task_payloads.observe [];
+  state.task_reading <- Masc_tui_overview_tasks.Rows_unavailable "temporary failure";
+  state.workspace_read_authority <- ref ();
+  reconcile_task_detail_scroll state;
+  Alcotest.(check bool) "a different workspace reading cannot inherit the End" true
+    (state.task_detail_follow_end=None)
+
+let test_task_detail_withdrawn_reader_input () =
+  let open Masc_tui_types in
+  let module Presented = Masc_tui_presented in
+  let state,task_id = task_detail_scroll_fixture () in
+  let cols = 80 in
+  let request = match begin_task_history_read state ~task_id ~limit:40 with
+    | Some request -> request | None -> Alcotest.fail "history read did not start" in
+  complete_task_scroll_documents state ~cols (sync_task_documents state ~cols);
+  task_detail_presented_frame state ~task_id ~count:23 ~height:16 ~offset:0 ~cols;
+  task_detail_select_end state ~cols;
+  task_detail_presented_frame state ~task_id ~count:23 ~height:16 ~offset:7 ~cols;
+  let reader = Some (Task_detail (7, Some (23,16))) in
+  let decide ?(external_surface=false) input =
+    Presented.decide_unpresented_input
+      ~frame_presented:(not (task_detail_reader_withdrawn state reader))
+      ~external_surface input in
+  Alcotest.(check bool) "input is accepted for the current presented Task" true
+    (decide Presented.Action=Presented.Accept_input);
+  state.task_payloads <- Masc_tui_task_payloads.observe [];
+  state.task_reading <- Masc_tui_overview_tasks.Rows_unavailable "temporary failure";
+  reconcile_task_detail_scroll state;
+  Alcotest.(check bool) "unseen replacement cannot receive actions or paste" true
+    (decide Presented.Action=Presented.Reject_action
+     && decide Presented.Paste=Presented.Reject_paste
+     && Option.is_some state.task_detail_follow_end && task_history_request_in_scope state request);
+  Alcotest.(check bool) "protocol and an external screen retain input" true
+    (decide Presented.Protocol=Presented.Accept_input
+     && decide ~external_surface:true Presented.Action=Presented.Accept_input);
+  Alcotest.(check bool) "a newly presented list is not the old Task reader" false
+    (task_detail_reader_withdrawn state None);
+  state.workspace_read_authority <- ref ();
+  Alcotest.(check bool) "a replaced workspace cannot accept the old Task input" true
+    (decide Presented.Action=Presented.Reject_action)
+
+let test_reopened_task_history_retains_only_owned_observation () =
+  let open Masc_tui_types in
+  let module Fetched = Masc_tui_fetched in
+  let state, task_id = task_detail_scroll_fixture () in
+  state.workspace_identity <- Workspace_identity_match;
+  state.server_identity <- Some (identity "/workspace/task-history");
+  let require = function
+    | Some request -> request | None -> Alcotest.fail "history read did not start" in
+  let previous = task_scroll_history task_id in
+  let initial = begin_task_history_read state ~task_id ~limit:40 |> require in
+  complete_task_history_read state initial (Ok previous);
+  prepare_task_history_for_open state ~task_id;
+  let refresh = begin_task_history_read state ~task_id ~limit:40 |> require in
+  Alcotest.(check bool) "reopening retains the previous observation while refreshing" true
+    (Fetched.in_flight state.task_history
+     && Fetched.view_for ~equal:String.equal state.task_history ~key:task_id = Fetched.Ready previous);
+  cancel_task_history_for_view_exit state;
+  complete_task_history_read state refresh (Error "late cancelled response");
+  Alcotest.(check bool) "leaving the view retires the read without inventing an identity failure" true
+    (state.task_history_request = None
+     && Fetched.view_for ~equal:String.equal state.task_history ~key:task_id = Fetched.Ready previous);
+  prepare_task_history_for_open state ~task_id;
+  let refresh = begin_task_history_read state ~task_id ~limit:40 |> require in
+  complete_task_history_read state refresh (Error "fixture unavailable");
+  Alcotest.(check bool) "a failed refresh reports the retained observation as stale" true
+    (Fetched.view_for ~equal:String.equal state.task_history ~key:task_id
+     = Fetched.Stale (previous, "fixture unavailable"));
+  (* The legacy Home route clears the source directly before opening a Task. *)
+  state.task_history <- Fetched.clear state.task_history;
+  let first_other = begin_task_history_read state ~task_id:"task-other" ~limit:40 |> require in
+  complete_task_history_read state first_other (Error "other unavailable");
+  prepare_task_history_for_open state ~task_id:"task-other";
+  Alcotest.(check bool) "an older owner's marker cannot turn another Task's failure into an observation" true
+    (Fetched.current_key state.task_history = None && state.task_history_last_reading = None);
+  let initial = begin_task_history_read state ~task_id ~limit:40 |> require in
+  complete_task_history_read state initial (Ok previous);
+  prepare_task_history_for_open state ~task_id:"task-other";
+  Alcotest.(check bool) "another Task cannot inherit the observation" true
+    (Fetched.current_key state.task_history = None);
+  let initial = begin_task_history_read state ~task_id ~limit:40 |> require in
+  complete_task_history_read state initial (Ok previous);
+  state.workspace_read_authority <- ref ();
+  prepare_task_history_for_open state ~task_id;
+  Alcotest.(check bool) "a new workspace reading cannot inherit it" true
+    (Fetched.current_key state.task_history = None);
+  let old = begin_task_history_read state ~task_id ~limit:40 |> require in
+  state.workspace_read_authority <- ref ();
+  complete_task_history_read state old (Ok previous);
+  prepare_task_history_for_open state ~task_id;
+  Alcotest.(check bool) "a late completion cannot give the new workspace a history owner" true
+    (Fetched.current_key state.task_history = None && state.task_history_last_reading = None);
+  let initial = begin_task_history_read state ~task_id ~limit:40 |> require in
+  complete_task_history_read state initial (Ok previous);
+  state.workspace_identity <- Workspace_identity_match_unconfirmed "fixture disconnected";
+  prepare_task_history_for_open state ~task_id;
+  Alcotest.(check bool) "unconfirmed workspace identity prevents reuse" true
+    (Fetched.current_key state.task_history = None)
+
+let test_reopened_history_document_follows_workspace_owner () =
+  let open Masc_tui_types in
+  let module Fetched = Masc_tui_fetched in
+  let state, task_id = task_detail_scroll_fixture () in
+  state.workspace_identity <- Workspace_identity_match;
+  state.server_identity <- Some (identity "/workspace/task-history");
+  let request = match begin_task_history_read state ~task_id ~limit:40 with
+    | Some request -> request | None -> Alcotest.fail "history read did not start" in
+  complete_task_history_read state request (Ok (task_scroll_history task_id));
+  let cols = 80 in
+  complete_task_scroll_documents state ~cols (sync_task_documents state ~cols);
+  state.task_detail_id <- None;
+  ignore (sync_task_documents state ~cols);
+  Alcotest.(check bool) "leaving a Task retains its completed history document" true
+    (Option.is_some state.task_document_history.tds_previous
+     && Option.is_some (Fetched.current_key state.task_document_history.tds_reading));
+  prepare_task_history_for_open state ~task_id;
+  state.task_detail_id <- Some task_id;
+  ignore (begin_task_history_read state ~task_id ~limit:40);
+  ignore (sync_task_documents state ~cols);
+  Alcotest.(check bool) "same-owner reopening reuses the prepared history without another worker" true
+    (state.task_document_history.tds_request = None
+     && Option.is_some (Fetched.current_key state.task_document_history.tds_reading));
+  state.task_detail_id <- None;
+  cancel_task_history_for_view_exit state;
+  ignore (sync_task_documents state ~cols);
+  suspend_workspace_readings state;
+  Alcotest.(check bool) "workspace withdrawal clears the retained Work history document" true
+    (state.task_document_history.tds_previous = None
+     && Fetched.current_key state.task_document_history.tds_reading = None);
+  prepare_task_history_for_open state ~task_id;
+  Alcotest.(check bool) "a new workspace reading cannot reuse the raw observation" true
+    (Fetched.current_key state.task_history = None)
+
+let test_active_history_remains_until_its_unconfirmed_view_closes () =
+  let open Masc_tui_types in
+  let module Fetched = Masc_tui_fetched in
+  let cols = 80 in
+  let fixture () =
+    let state, task_id = task_detail_scroll_fixture () in
+    state.workspace_identity <- Workspace_identity_match;
+    state.server_identity <- Some (identity "/workspace/task-history");
+    let request = match begin_task_history_read state ~task_id ~limit:40 with
+      | Some request -> request | None -> Alcotest.fail "history read did not start" in
+    complete_task_history_read state request (Ok (task_scroll_history task_id));
+    complete_task_scroll_documents state ~cols (sync_task_documents state ~cols);
+    state,task_id in
+  let state, task_id = fixture () in
+  state.workspace_identity <- Workspace_identity_match_unconfirmed "fixture disconnected";
+  suspend_workspace_readings state;
+  ignore (sync_task_documents state ~cols);
+  Alcotest.(check bool) "an open view keeps its last document while workspace identity is unconfirmed" true
+    (Option.is_some state.task_document_history.tds_previous
+     && state.task_document_history.tds_request = None
+     && state.task_history_last_reading = None);
+  state.task_detail_id <- None;
+  ignore (sync_task_documents state ~cols);
+  Alcotest.(check bool) "closing the unconfirmed view retires its retained document" true
+    (state.task_document_history.tds_previous = None
+     && Fetched.current_key state.task_document_history.tds_reading = None);
+  prepare_task_history_for_open state ~task_id;
+  Alcotest.(check bool) "the unconfirmed observation cannot be reused on reopening" true
+    (Fetched.current_key state.task_history = None);
+  let state, task_id = fixture () in
+  state.workspace_identity <- Workspace_identity_match_unconfirmed "fixture disconnected";
+  suspend_workspace_readings state;
+  state.workspace_identity <- Workspace_identity_match;
+  let request = match begin_task_history_read state ~task_id ~limit:40 with
+    | Some request -> request | None -> Alcotest.fail "history revalidation did not start" in
+  complete_task_history_read state request (Ok (task_scroll_history task_id));
+  state.task_detail_id <- None;
+  ignore (sync_task_documents state ~cols);
+  Alcotest.(check bool) "a fresh raw read cannot make an older authority's document reusable" true
+    (state.task_document_history.tds_previous = None
+     && Fetched.current_key state.task_document_history.tds_reading = None
+     && Fetched.current_key state.task_history = Some task_id);
+  prepare_task_history_for_open state ~task_id;
+  state.task_detail_id <- Some task_id;
+  ignore (sync_task_documents state ~cols);
+  Alcotest.(check bool) "the new authority prepares its own history document" true
+    (Option.is_some state.task_document_history.tds_request);
+  let state, task_id = fixture () in
+  state.task_document_history <- initial_task_document_slot;
+  ignore (sync_task_documents state ~cols);
+  Alcotest.(check bool) "history preparation is in flight before the interruption" true
+    (Option.is_some state.task_document_history.tds_request);
+  state.workspace_identity <- Workspace_identity_match_unconfirmed "fixture disconnected";
+  suspend_workspace_readings state;
+  complete_task_scroll_documents state ~cols (sync_task_documents state ~cols);
+  Alcotest.(check bool) "a document prepared from unconfirmed history has no reusable owner" true
+    (match state.task_document_history.tds_previous with
+     | Some (_,None,_) -> true | Some (_,Some _,_) | None -> false);
+  state.workspace_identity <- Workspace_identity_match;
+  let request = match begin_task_history_read state ~task_id ~limit:40 with
+    | Some request -> request | None -> Alcotest.fail "history revalidation did not start" in
+  complete_task_history_read state request (Ok (task_scroll_history task_id));
+  state.task_detail_id <- None;
+  ignore (sync_task_documents state ~cols);
+  Alcotest.(check bool) "a later raw success cannot authorize a document prepared from unconfirmed history" true
+    (state.task_document_history.tds_previous = None
+     && Fetched.current_key state.task_document_history.tds_reading = None)
+
+let test_task_detail_end_respects_presented_input () =
+  let open Masc_tui_types in
+  let state, task_id = task_detail_scroll_fixture () in
+  let cols = 80 in
+  let request = match begin_task_history_read state ~task_id ~limit:40 with
+    | Some request -> request | None -> Alcotest.fail "history read did not start" in
+  complete_task_scroll_documents state ~cols (sync_task_documents state ~cols);
+  task_detail_presented_frame state ~task_id ~count:23 ~height:16 ~offset:0 ~cols;
+  Alcotest.(check bool) "unchanged bounds need no new presentation" false
+    (task_detail_viewport_changed state ~count:23 ~height:16);
+  Alcotest.(check bool) "new bounds require presentation even when the visible rows are unchanged" true
+    (task_detail_viewport_changed state ~count:116 ~height:16);
+  task_detail_select_end state ~cols;
+  Alcotest.(check int) "End uses the emitted viewport" 7 state.task_detail_scroll;
+  Alcotest.(check bool) "End waits for this history" true (task_detail_following_end state);
+  complete_task_history_read state request (Ok (task_scroll_history task_id));
+  let history_documents = sync_task_documents state ~cols in
+  task_detail_user_scroll state (max 0 (state.task_detail_scroll - 1));
+  Alcotest.(check int) "End then Up uses the last emitted viewport" 6 state.task_detail_scroll;
+  Alcotest.(check bool) "Up releases the pending End" false (task_detail_following_end state);
+  complete_task_scroll_documents state ~cols history_documents;
+  task_detail_presented_frame state ~task_id ~count:116 ~height:16 ~offset:6 ~cols;
+  Alcotest.(check int) "an unseen completion does not undo Up" 6 state.task_detail_scroll;
+  let refresh = match begin_task_history_read state ~task_id ~limit:40 with
+    | Some request -> request | None -> Alcotest.fail "history refresh did not start" in
+  task_detail_presented_frame state ~task_id ~count:23 ~height:16 ~offset:6 ~cols;
+  task_detail_select_end state ~cols;
+  let wheel = Masc_tui_render_prim.(reader_after_wheel
+      (clamped_scroll_now state (Task_detail (0, None))) Masc.Tui_mouse_protocol.Wheel_up) in
+  (match task_detail_of_reader wheel with
+   | Some (offset, _) -> task_detail_user_scroll state offset
+   | None -> Alcotest.fail "task wheel did not return a task offset");
+  Alcotest.(check int) "wheel Up leaves the displayed end" 6 state.task_detail_scroll;
+  Alcotest.(check bool) "wheel releases the pending End" false (task_detail_following_end state);
+  task_detail_select_end state ~cols;
+  let count, height = task_detail_presented_viewport state
+      ~fallback:(fun () -> Alcotest.fail "lost displayed viewport") in
+  task_detail_user_scroll state (Masc_tui_scroll.page_up ~count ~height state.task_detail_scroll);
+  Alcotest.(check int) "PageUp uses the displayed height" 0 state.task_detail_scroll;
+  complete_task_history_read state refresh (Error "fixture refresh failed")
+
+let test_task_detail_end_waits_for_current_read_and_frame () =
+  let open Masc_tui_types in
+  let state, task_id = task_detail_scroll_fixture () in
+  let cols = 80 in
+  let old = match begin_task_history_read state ~task_id ~limit:40 with
+    | Some request -> request | None -> Alcotest.fail "history read did not start" in
+  complete_task_scroll_documents state ~cols (sync_task_documents state ~cols);
+  task_detail_select_end state ~cols;
+  Alcotest.(check bool) "End before the first Task frame is retained" true
+    (task_detail_following_end state);
+  Alcotest.(check bool) "relative movement without a displayed viewport is declined" false
+    (task_detail_relative_scroll state 0);
+  Alcotest.(check bool) "declined movement preserves End" true (task_detail_following_end state);
+  task_detail_presented_frame state ~task_id ~count:23 ~height:16 ~offset:7 ~cols;
+  let current = match begin_task_history_read state ~task_id ~limit:40 with
+    | Some request -> request | None -> Alcotest.fail "replacement read did not start" in
+  complete_task_history_read state old (Ok (task_scroll_history task_id));
+  Alcotest.(check bool) "a superseded reply cannot settle the current read" true
+    (task_detail_waiting state ~task_id ~cols);
+  complete_task_history_read state current (Ok (task_scroll_history task_id));
+  let history_documents = sync_task_documents state ~cols in
+  Alcotest.(check bool) "document preparation remains pending after HTTP" true
+    (task_detail_waiting state ~task_id ~cols);
+  task_detail_presented_frame state ~task_id ~count:23 ~height:16 ~offset:7 ~cols;
+  Alcotest.(check bool) "an emitted loading frame retains End" true (task_detail_following_end state);
+  complete_task_scroll_documents state ~cols history_documents;
+  Alcotest.(check int) "a prepared but unpresented result does not move the reader" 7 state.task_detail_scroll;
+  task_detail_forget_frame state;
+  Alcotest.(check bool) "a temporary overlay retains End" true (task_detail_following_end state);
+  task_detail_presented_frame state ~task_id ~count:116 ~height:16 ~offset:100 ~cols;
+  Alcotest.(check int) "a presented result settles at its end" 100 state.task_detail_scroll;
+  Alcotest.(check bool) "the settled End is one shot" false (task_detail_following_end state);
+  let next = match begin_task_history_read state ~task_id ~limit:40 with
+    | Some request -> request | None -> Alcotest.fail "next read did not start" in
+  task_detail_select_end state ~cols;
+  complete_task_history_read state next (Error "fixture refresh failed");
+  task_detail_presented_frame state ~task_id ~count:116 ~height:16 ~offset:100 ~cols;
+  Alcotest.(check bool) "a presented failure settles End without retrying forever" false
+    (task_detail_following_end state);
+  let next = match begin_task_history_read state ~task_id ~limit:40 with
+    | Some request -> request | None -> Alcotest.fail "workspace read did not start" in
+  task_detail_select_end state ~cols;
+  reset_task_detail_scroll state;
+  Alcotest.(check bool) "reopening the same Task drops the previous visit" true
+    (state.task_detail_scroll = 0 && Option.is_none state.task_detail_follow_end
+     && Option.is_none state.task_detail_presented);
+  task_detail_presented_frame state ~task_id ~count:116 ~height:16 ~offset:0 ~cols;
+  task_detail_select_end state ~cols;
+  state.workspace_read_authority <- ref ();
+  reconcile_task_detail_scroll state;
+  complete_task_history_read state next (Error "retired workspace");
+  Alcotest.(check bool) "workspace replacement discards the old End and viewport" true
+    (Option.is_none state.task_detail_follow_end && Option.is_none state.task_detail_presented);
+  state.task_detail_id <- Some "another-task";
+  task_detail_select_end state ~cols;
+  Alcotest.(check bool) "another Task cannot inherit the old End" false
+    (task_detail_following_end state)
+
 let test_detail_histories_follow_refresh_and_workspace_owners () =
   let open Masc_tui_types in
   let module Fetched = Masc_tui_fetched in
@@ -5358,10 +6151,371 @@ let test_queue_detail_respects_source_reading () =
     {current with qp_detail=Some event};
   check "successful server messages remain available" (Queue_detail_ready (server, server_row)) current
 
+let test_keeper_turns_event_demand_coalesces () =
+  let open Masc_tui_types in
+  let module Read = Keeper_waiting_read in
+  let state = Read.note_change Read.idle in
+  let state, first = Read.start state in
+  let first = Option.get first in
+  Alcotest.(check bool) "waiting remains unavailable while the read runs" true
+    (Read.awaiting_change state);
+  let state = Read.note_change (Read.note_change state) in
+  let state, overlapping = Read.start state in
+  Alcotest.(check bool) "an in-flight read is not duplicated" true (Option.is_none overlapping);
+  let state, follow_up = Option.get (Read.finish state first ~observed:true ~success:true) in
+  Alcotest.(check bool) "changes during the read request one follow-up" true follow_up;
+  let state, second = Read.start state in
+  let second = Option.get second in
+  let state, follow_up = Option.get (Read.finish state second ~observed:true ~success:true) in
+  Alcotest.(check bool) "the follow-up settles the demand" false follow_up;
+  Alcotest.(check bool) "no change remains pending" false (Read.change_pending state)
+;;
+
+let test_keeper_turns_event_demand_survives_failure_and_suspension () =
+  let open Masc_tui_types in
+  let module Read = Keeper_waiting_read in
+  let state, first = Read.start (Read.note_change Read.idle) in
+  let first = Option.get first in
+  let state, follow_up = Option.get (Read.finish state first ~observed:false ~success:false) in
+  Alcotest.(check bool) "a failed launch does not immediately retry" false follow_up;
+  Alcotest.(check bool) "a failed launch retains demand" true (Read.change_pending state);
+  let state, failed = Read.start state in
+  let failed = Option.get failed in
+  let state, follow_up = Option.get (Read.finish state failed ~observed:false ~success:false) in
+  Alcotest.(check bool) "a failed read does not spin" false follow_up;
+  Alcotest.(check bool) "a failed read retains demand" true (Read.change_pending state);
+  let state, retired = Read.start state in
+  let retired = Option.get retired in
+  let state = Read.suspend state in
+  Alcotest.(check bool) "suspension retains the in-flight demand" true (Read.change_pending state);
+  let state, current = Read.start state in
+  let current = Option.get current in
+  Alcotest.(check bool) "retired completion cannot release the new read" true
+    (Option.is_none (Read.finish state retired ~observed:true ~success:true));
+  let state, follow_up = Option.get (Read.finish state current ~observed:true ~success:true) in
+  Alcotest.(check bool) "successful retry needs no follow-up" false follow_up;
+  Alcotest.(check bool) "successful retry clears demand" false (Read.change_pending state);
+  let state = Read.clear (Read.note_change state) in
+  Alcotest.(check bool) "workspace replacement clears old demand" false (Read.change_pending state)
+;;
+
+let test_keeper_turns_waiting_completeness () =
+  let open Masc_tui_types in
+  let open Tui_decode in
+  let turn = { ktr_keeper_name = "alpha"; ktr_chat_control_token = None; ktr_state = Keeper_turn_idle } in
+  let row = { kwr_keeper_name = "alpha"; kwr_state = Keeper_waiting_idle; kwr_waiting_count = 0;
+              kwr_since = None; kwr_due_at = None; kwr_waiting_on = [] } in
+  let projection waiting = Ok Masc.Tui_decode.{ rows = [turn]; waiting } in
+  let complete = keeper_turns_projection_complete ~current:(fun _ -> true) in
+  Alcotest.(check bool) "complete fleet waiting is authoritative" true
+    (complete (projection (Keeper_waiting_observed [row])));
+  Alcotest.(check bool) "missing keeper waiting is incomplete" false
+    (complete (projection (Keeper_waiting_observed [])));
+  let error = { kwi_source = Waiting_source_read_error; kwi_waiting_on = "queue";
+                kwi_what = "failed"; kwi_wake_producer = Wake_read_model_reader;
+                kwi_since = None; kwi_due_at = None; kwi_next_action = "retry" } in
+  Alcotest.(check bool) "partial keeper read failure is incomplete" false
+    (complete (projection (Keeper_waiting_observed [{row with kwr_waiting_on = [error]}])));
+  Alcotest.(check bool) "retired control generation is incomplete" false
+    (keeper_turns_projection_complete ~current:(fun _ -> false)
+       (projection (Keeper_waiting_observed [row])));
+  Alcotest.(check bool) "missing fleet waiting is not authoritative" false
+    (complete (projection (Keeper_waiting_fleet_unreported [row])));
+  Alcotest.(check bool) "unavailable waiting is not authoritative" false
+    (complete (projection (Keeper_waiting_unavailable (Keeper_waiting_invalid "invalid"))));
+  Alcotest.(check bool) "transport failure is not authoritative" false
+    (complete (Error "unavailable"))
+;;
+
+let test_waiting_event_rejects_old_poll_receipts () =
+  let module Read = Masc_tui_types.Keeper_waiting_read in
+  let before = Read.poll_receipt Read.idle in
+  let changed = Read.note_change Read.idle in
+  Alcotest.(check bool) "an event retires an earlier poll" false (Read.accepts_poll changed before);
+  let reading, request = Read.start changed in
+  let during = Read.poll_receipt reading in
+  Alcotest.(check bool) "a concurrent post-event poll may repair waiting" true (Read.accepts_poll reading during);
+  let settled, _ = Option.get (Read.finish reading (Option.get request) ~observed:true ~success:true) in
+  let settled = Read.publish_event settled ~observed:true in
+  Alcotest.(check bool) "a poll cannot overwrite a completed event read" false (Read.accepts_poll settled during);
+  Alcotest.(check bool) "the rejected overlapping poll requires a later observation" true
+    (Read.poll_needs_reconciliation settled during);
+  Alcotest.(check bool) "a poll started before the event stays retired" false (Read.accepts_poll settled before);
+  Alcotest.(check bool) "a subsequent poll may apply waiting" true
+    (Read.accepts_poll settled (Read.poll_receipt settled))
+;;
+
+let test_waiting_failure_can_recover_through_new_poll () =
+  let module Read = Masc_tui_types.Keeper_waiting_read in
+  let reading, request = Read.start (Read.note_change Read.idle) in
+  let failed, follow_up = Option.get (Read.finish reading (Option.get request)
+    ~observed:false ~success:false) in
+  Alcotest.(check bool) "failure retains demand without spinning" true
+    (Read.change_pending failed && not follow_up);
+  let receipt = Read.poll_receipt failed in
+  Alcotest.(check bool) "a post-failure poll may repair waiting" true (Read.accepts_poll failed receipt);
+  let repaired = Read.settle_poll failed ~success:true in
+  Alcotest.(check bool) "a complete poll clears retry demand" false (Read.needs_revalidation repaired);
+  let changed = Read.note_change failed in
+  Alcotest.(check bool) "a newer event retires the poll" false (Read.accepts_poll changed receipt);
+  let event_reading, event_request = Read.start changed in
+  let concurrent = Read.poll_receipt event_reading in
+  Alcotest.(check bool) "a concurrent poll can complete first" true
+    (Read.accepts_poll event_reading concurrent);
+  let poll_won = Read.settle_poll event_reading ~success:true in
+  Alcotest.(check bool) "the old event result cannot overwrite the completed poll" false
+    (Read.accepts_event poll_won (Option.get event_request));
+  Alcotest.(check bool) "the rejected event read requires a later observation" true
+    (Read.event_needs_reconciliation poll_won (Option.get event_request));
+  let partial_poll = Read.settle_poll event_reading ~success:false in
+  Alcotest.(check bool) "a partial poll retires the older event result" false
+    (Read.accepts_event partial_poll (Option.get event_request));
+  Alcotest.(check bool) "a partial poll retains the unfinished demand" true
+    (Read.change_pending partial_poll)
+;;
+
+let test_reconciliation_does_not_compete_with_periodic_reads () =
+  let module Read = Masc_tui_types.Keeper_waiting_read in
+  let competing, older_event = Read.start (Read.note_change Read.idle) in
+  let partial_poll = Read.settle_poll competing ~success:false in
+  let older_event = Option.get older_event in
+  Alcotest.(check bool) "the partial poll retires the older event" false
+    (Read.accepts_event partial_poll older_event);
+  Alcotest.(check bool) "the retired result requires reconciliation" true
+    (Read.event_needs_reconciliation partial_poll older_event);
+  let waiting, follow_up = Option.get (Read.finish partial_poll older_event
+    ~observed:true ~success:true) in
+  Alcotest.(check bool) "partial poll demand survives the retired completion" true follow_up;
+  let started_before_exclusive = Read.poll_receipt waiting in
+  let exclusive = Read.exclusive waiting in
+  Alcotest.(check bool) "exclusive ownership retires an already-started waiting poll" false
+    (Read.accepts_poll exclusive started_before_exclusive);
+  let reconciliation = Read.exclusive (Read.note_change waiting) in
+  let reconciliation, request = Read.start reconciliation in
+  Alcotest.(check bool) "the partial-poll follow-up excludes competing waiting polls" true
+    (Option.is_none (Read.poll_receipt reconciliation));
+  ignore (Read.finish reconciliation (Option.get request) ~observed:true ~success:true);
+  let active, request = Read.start (Read.exclusive (Read.note_change Read.idle)) in
+  Alcotest.(check bool) "periodic waiting is retired during reconciliation" true
+    (Option.is_none (Read.poll_receipt active));
+  let active = Read.note_change active in
+  let active, follow_up = Option.get (Read.finish active (Option.get request)
+    ~observed:true ~success:false) in
+  Alcotest.(check bool) "a concurrent change needs a follow-up" true follow_up;
+  let next, request = Read.start active in
+  Alcotest.(check bool) "the follow-up keeps exclusive waiting ownership" true
+    (Option.is_none (Read.poll_receipt next));
+  let finished, follow_up = Option.get (Read.finish next (Option.get request)
+    ~observed:true ~success:true) in
+  Alcotest.(check bool) "a settled reconciliation terminates" false follow_up;
+  Alcotest.(check bool) "subsequent periodic reads may observe waiting again" true
+    (Option.is_some (Read.poll_receipt finished))
+;;
+
+let test_waiting_row_epochs_isolate_other_keepers_and_controls () =
+  let open Masc_tui_types in
+  let state, alpha, _ = local_keeper_source_fixture () in
+  let beta = { alpha with Tui_decode.k_name = "beta" } in
+  let turn name = Tui_decode.{ ktr_keeper_name = name; ktr_chat_control_token = None;
+                               ktr_state = Keeper_turn_idle } in
+  let row name = Tui_decode.{ kwr_keeper_name = name; kwr_state = Keeper_waiting_idle;
+    kwr_waiting_count = 0; kwr_since = None; kwr_due_at = None; kwr_waiting_on = [] } in
+  state.keepers <- [alpha; beta];
+  note_keeper_waiting_change state Waiting_all;
+  let before = capture_keeper_waiting_snapshot state in
+  note_keeper_waiting_change state (Waiting_keepers ["beta"]);
+  let current = keeper_waiting_row_current state before in
+  let result = Ok Tui_decode.{ rows = [turn "alpha"; turn "beta"];
+    waiting = Keeper_waiting_observed [row "alpha"; row "beta"] } in
+  Alcotest.(check bool) "the unaffected alpha row is current" true (current (turn "alpha"));
+  Alcotest.(check bool) "the changed beta row is retired" false (current (turn "beta"));
+  Alcotest.(check (list string)) "only beta remains unverified" ["beta"]
+    (keeper_waiting_unverified_after state ~current
+       ~current_name:(keeper_waiting_name_current state before) result);
+  let stable = capture_keeper_waiting_snapshot state in
+  let census = Ok Tui_decode.{ rows = [turn "alpha"];
+    waiting = Keeper_waiting_observed [row "alpha"] } in
+  Alcotest.(check (list string)) "a current complete census resolves an absent keeper" []
+    (keeper_waiting_unverified_after state
+       ~current:(keeper_waiting_row_current state stable)
+       ~current_name:(keeper_waiting_name_current state stable) census);
+  note_keeper_waiting_change state (Waiting_keepers ["beta"]);
+  Alcotest.(check (list string)) "a later beta event retires that absence" ["beta"]
+    (keeper_waiting_unverified_after state
+       ~current:(keeper_waiting_row_current state stable)
+       ~current_name:(keeper_waiting_name_current state stable) census);
+  let before_control = capture_keeper_waiting_snapshot state in
+  state.keeper_chat_control_generations <- ["alpha", 1];
+  Alcotest.(check bool) "control generation retires the earlier alpha row" false
+    (keeper_waiting_row_current state before_control (turn "alpha"));
+  state.keeper_chat_control_pending <- ["beta", 1L];
+  let during_control = capture_keeper_waiting_snapshot state in
+  state.keeper_chat_control_pending <- [];
+  Alcotest.(check bool) "a read begun during control stays retired after receipt" false
+    (keeper_waiting_row_current state during_control (turn "beta"));
+  note_keeper_waiting_change state Waiting_all;
+  Alcotest.(check bool) "a new observer epoch retires the old row" false
+    (keeper_waiting_row_current state during_control (turn "alpha"))
+;;
+
+let test_interactive_generation_revalidates_waiting () =
+  let open Masc_tui_types in
+  let state, _, _ = local_keeper_source_fixture () in
+  let turn = Tui_decode.{ ktr_keeper_name = "alpha"; ktr_chat_control_token = None;
+                          ktr_state = Keeper_turn_idle } in
+  note_keeper_waiting_change state (Waiting_keepers ["alpha"]);
+  let reading, request = Keeper_waiting_read.start state.keeper_waiting_read in
+  state.keeper_waiting_read <- reading;
+  let before = capture_keeper_waiting_snapshot state in
+  ignore (advance_keeper_interactive_control state "alpha" : int);
+  Alcotest.(check bool) "interactive dispatch retires the earlier row" false
+    (keeper_waiting_row_current state before turn);
+  let reading, follow_up = Option.get (Keeper_waiting_read.finish state.keeper_waiting_read
+    (Option.get request) ~observed:true ~success:false) in
+  Alcotest.(check bool) "the outstanding read owes an event-driven follow-up" true follow_up;
+  Alcotest.(check bool) "the demand survives a rejected submission" true
+    (Keeper_waiting_read.change_pending reading)
+;;
+
+let test_partial_waiting_only_hides_missing_keepers () =
+  let open Masc_tui_types in
+  let state, alpha, _ = local_keeper_source_fixture () in
+  let beta = { alpha with Tui_decode.k_name = "beta" } in
+  let turn name = Tui_decode.{ ktr_keeper_name = name; ktr_chat_control_token = None;
+                               ktr_state = Keeper_turn_idle } in
+  let row name = Tui_decode.{ kwr_keeper_name = name; kwr_state = Keeper_waiting_idle;
+    kwr_waiting_count = 0; kwr_since = None; kwr_due_at = None; kwr_waiting_on = [] } in
+  state.keepers <- [alpha; beta];
+  state.keeper_turns <- [turn "alpha"; turn "beta"];
+  state.keeper_waiting <- [row "alpha"; row "beta"];
+  let observation = Ok Tui_decode.{ rows = [turn "alpha"; turn "beta"];
+    waiting = Keeper_waiting_observed [row "alpha"] } in
+  state.keeper_waiting_unverified <- keeper_waiting_unverified_names ~current:(fun _ -> true) observation;
+  let reading, request = Keeper_waiting_read.start (Keeper_waiting_read.note_change state.keeper_waiting_read) in
+  let reading, _ = Option.get (Keeper_waiting_read.finish reading (Option.get request)
+    ~observed:true ~success:false) in
+  state.keeper_waiting_read <- reading;
+  Alcotest.(check bool) "partial inventory retains retry demand" true
+    (Keeper_waiting_read.change_pending reading);
+  let rows = keeper_list_rows state in
+  let find name = List.find (fun row -> row.Masc_tui_keeper_list_model.keeper.k_name = name) rows in
+  Alcotest.(check bool) "healthy keeper remains observed" true
+    ((find "alpha").waiting = Masc_tui_keeper_list_model.Waiting_observed (row "alpha"));
+  Alcotest.(check bool) "missing keeper alone is unavailable" true
+    ((find "beta").waiting = Masc_tui_keeper_list_model.Waiting_unavailable)
+;;
+
+let test_waiting_event_does_not_hide_turns () =
+  let open Masc_tui_types in
+  let state, keeper, _ = local_keeper_source_fixture () in
+  let turn = Tui_decode.{ ktr_keeper_name = "alpha"; ktr_chat_control_token = None;
+                          ktr_state = Keeper_turn_idle } in
+  let waiting = Tui_decode.{ kwr_keeper_name = "alpha"; kwr_state = Keeper_waiting_idle;
+    kwr_waiting_count = 0; kwr_since = None; kwr_due_at = None; kwr_waiting_on = [] } in
+  state.keepers <- [keeper];
+  state.keeper_turns <- [turn];
+  state.keeper_waiting <- [waiting];
+  note_keeper_waiting_change state (Waiting_keepers ["alpha"]);
+  let row = List.hd (keeper_list_rows state) in
+  Alcotest.(check bool) "changed waiting is unavailable pending a fresh answer" true
+    (row.waiting = Masc_tui_keeper_list_model.Waiting_unavailable);
+  Alcotest.(check bool) "known turn remains separate" true
+    (row.turn = Some Tui_decode.Keeper_turn_idle);
+  let reading, request = Keeper_waiting_read.start state.keeper_waiting_read in
+  let reading, follow_up = Option.get
+    (Keeper_waiting_read.finish reading (Option.get request) ~observed:true ~success:true) in
+  state.keeper_waiting_read <- reading;
+  state.keeper_waiting_unverified <- keeper_waiting_unverified_after state
+    ~current:(fun _ -> true) ~current_name:(fun _ -> true)
+    (Ok Tui_decode.{ rows = [turn]; waiting = Keeper_waiting_observed [waiting] });
+  Alcotest.(check bool) "no extra read is needed" false follow_up;
+  let row = List.hd (keeper_list_rows state) in
+  Alcotest.(check bool) "completed waiting is available again" true
+    (row.waiting = Masc_tui_keeper_list_model.Waiting_observed waiting)
+;;
+
+let test_continuous_waiting_events_preserve_turn_controls () =
+  let open Masc_tui_types in
+  let state, _, _ = local_keeper_source_fixture () in
+  let turn token = Tui_decode.{ ktr_keeper_name = "alpha"; ktr_chat_control_token = None;
+    ktr_state = Keeper_turn_running { lane = Turn_lane_autonomous; started_at_unix = 1.;
+      interrupt_token = token; turn_ref = None; preview = None } } in
+  let waiting = Tui_decode.{ kwr_keeper_name = "alpha"; kwr_state = Keeper_waiting_idle;
+    kwr_waiting_count = 0; kwr_since = None; kwr_due_at = None; kwr_waiting_on = [] } in
+  state.keeper_turns <- [turn "old-token"];
+  state.keeper_waiting <- [waiting];
+  let reading, first = Keeper_waiting_read.start (Keeper_waiting_read.note_change state.keeper_waiting_read) in
+  let rec supersede reading request remaining =
+    if remaining = 0 then reading else begin
+      let reading = Keeper_waiting_read.note_change reading in
+      let reading, follow_up = Option.get (Keeper_waiting_read.finish reading request
+        ~observed:true ~success:true) in
+      Alcotest.(check bool) "each newer event requests a follow-up" true follow_up;
+      let reading, next = Keeper_waiting_read.start reading in
+      supersede reading (Option.get next) (remaining - 1)
+    end in
+  state.keeper_waiting_read <- supersede reading (Option.get first) 3;
+  accept_keeper_turn_observation ~accept_waiting:false state ~rows:[turn "new-token"]
+    ~waiting:(Tui_decode.Keeper_waiting_observed []) ~observed_at:2.;
+  Alcotest.(check (option (pair (float 0.001) string)))
+    "turn refresh continues to provide an interrupt target" (Some (1., "new-token"))
+    (keeper_observed_turn state "alpha");
+  Alcotest.(check bool) "the turns read cannot overwrite pending waiting" true
+    (state.keeper_waiting = [waiting]);
+  Alcotest.(check bool) "waiting remains pending independently" true
+    (Keeper_waiting_read.awaiting_change state.keeper_waiting_read)
+;;
+
 let () =
   Alcotest.run "tui_server_identity_refresh"
-    [ ( "server-identity-refresh"
-      , [ Alcotest.test_case "detail histories retain exact refresh and workspace owners" `Quick
+    [ ( "keeper-turn-event-read"
+      , [ Alcotest.test_case "coalesces changes during a read" `Quick
+            test_keeper_turns_event_demand_coalesces
+        ; Alcotest.test_case "retains demand across failure and suspension" `Quick
+            test_keeper_turns_event_demand_survives_failure_and_suspension
+        ; Alcotest.test_case "requires complete waiting inventory" `Quick
+            test_keeper_turns_waiting_completeness
+        ; Alcotest.test_case "waiting rejects overlapping poll receipts" `Quick
+            test_waiting_event_rejects_old_poll_receipts
+        ; Alcotest.test_case "waiting recovers through a later poll" `Quick
+            test_waiting_failure_can_recover_through_new_poll
+        ; Alcotest.test_case "reconciliation does not compete with periodic reads" `Quick
+            test_reconciliation_does_not_compete_with_periodic_reads
+        ; Alcotest.test_case "waiting isolates per-keeper and control epochs" `Quick
+            test_waiting_row_epochs_isolate_other_keepers_and_controls
+        ; Alcotest.test_case "interactive generation revalidates waiting" `Quick
+            test_interactive_generation_revalidates_waiting
+        ; Alcotest.test_case "partial waiting isolates missing keepers" `Quick
+            test_partial_waiting_only_hides_missing_keepers
+        ; Alcotest.test_case "waiting refresh preserves turns" `Quick
+            test_waiting_event_does_not_hide_turns
+        ; Alcotest.test_case "continuous waiting events preserve turn controls" `Quick
+            test_continuous_waiting_events_preserve_turn_controls
+        ] )
+    ; ( "server-identity-refresh"
+      , [ Alcotest.test_case "progressive task history keeps its owner and cursor" `Quick
+            test_task_history_progressive_read_keeps_owner_and_cursor
+        ; Alcotest.test_case "pending Task End survives an uncertain backlog" `Quick
+            test_task_detail_end_survives_uncertain_backlog
+        ; Alcotest.test_case "withdrawn task reader rejects input until presentation" `Quick
+            test_task_detail_withdrawn_reader_input
+        ; Alcotest.test_case "reopened task history retains only its workspace observation" `Quick
+            test_reopened_task_history_retains_only_owned_observation
+        ; Alcotest.test_case "reopened history document follows workspace owner" `Quick
+            test_reopened_history_document_follows_workspace_owner
+        ; Alcotest.test_case "active history is not retained after an unconfirmed view closes" `Quick
+            test_active_history_remains_until_its_unconfirmed_view_closes
+        ; Alcotest.test_case "Tools Task End waits for reads and presentation" `Quick
+            test_tools_task_end_waits_for_both_reads_and_presentation
+        ; Alcotest.test_case "Tools Task End respects input and owner" `Quick
+            test_tools_task_end_respects_input_and_owner
+        ; Alcotest.test_case "Tools Task settles only presented frames and excludes the picker" `Quick
+            test_tools_task_unpresented_frame_and_picker
+        ; Alcotest.test_case "task detail End respects presented input" `Quick
+            test_task_detail_end_respects_presented_input
+        ; Alcotest.test_case "task detail End waits for its current read and frame" `Quick
+            test_task_detail_end_waits_for_current_read_and_frame
+        ; Alcotest.test_case "detail histories retain exact refresh and workspace owners" `Quick
             test_detail_histories_follow_refresh_and_workspace_owners
         ; Alcotest.test_case "operation histories retain unfinished delivery and uncertain recovery owners" `Quick
             test_operation_histories_keep_unfinished_and_recovery_owners
@@ -5491,8 +6645,16 @@ let () =
             test_failed_read_keeps_followup_and_withdrawal_retires_it
         ; Alcotest.test_case "concurrent creations retain individual refresh coverage" `Quick
             test_concurrent_created_keepers_retain_individual_refresh_coverage
+        ; Alcotest.test_case "observer retry retires with workspace authority" `Quick
+            test_observer_retry_retires_with_workspace_read_authority
+        ; Alcotest.test_case "observer recovery belongs to unconfirmed workspace" `Quick
+            test_observer_recovery_belongs_to_unconfirmed_workspace
+        ; Alcotest.test_case "initial Observer identity is locally owned" `Quick
+            test_observer_initial_identity_ownership
         ; Alcotest.test_case "archive cache does not cross equal-stat source files" `Quick
             test_archive_cache_does_not_cross_equal_stat_files
+        ; Alcotest.test_case "fresh local work reloads equal-stat archive" `Quick
+            test_fresh_local_work_reloads_equal_stat_archive
         ; Alcotest.test_case "created Keeper waits for owned metadata without Work" `Quick
             test_created_keeper_waits_for_owned_metadata_without_work
         ; Alcotest.test_case "fresh metadata confirms deletion without detail retargeting" `Quick

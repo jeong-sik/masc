@@ -50,6 +50,8 @@ let bytes_of_tool_schema_json (tools : Agent_core.Tool.t list) : int =
       + Agent_core.Tool.wire_bytes_of_schema t.Agent_core.Tool.schema)
     0 tools
 
+module Role_map = Map.Make (String)
+
 (** Count role occurrences across [history_messages], then add [+1] to
     the "user" slot for the pending turn AGENT_CORE will synthesize from
     [~goal]. Returned as a stable-sorted assoc list for deterministic
@@ -57,19 +59,23 @@ let bytes_of_tool_schema_json (tools : Agent_core.Tool.t list) : int =
 let role_counts_with_pending_user
     (history_messages : Agent_core.Types.message list) :
     (string * int) list =
-  let tbl = Hashtbl.create 5 in
-  let increment_role key =
-    match Hashtbl.find_opt tbl key with
-    | None -> Hashtbl.add tbl key 1
-    | Some count -> Hashtbl.replace tbl key (count + 1)
+  let increment_role key counts =
+    let prior =
+      match Role_map.find_opt key counts with
+      | None -> 0
+      | Some count -> count
+    in
+    Role_map.add key (prior + 1) counts
   in
-  List.iter
-    (fun (m : Agent_core.Types.message) ->
-      increment_role (role_key m.role))
-    history_messages;
-  increment_role (role_key Agent_core.Types.User);
-  Hashtbl.fold (fun k v acc -> (k, v) :: acc) tbl []
-  |> List.sort (fun (a, _) (b, _) -> String.compare a b)
+  let counts =
+    List.fold_left
+      (fun acc (m : Agent_core.Types.message) ->
+        increment_role (role_key m.role) acc)
+      Role_map.empty
+      history_messages
+  in
+  let counts = increment_role (role_key Agent_core.Types.User) counts in
+  Role_map.bindings counts
 
 let compute_sizes
     ~(system_prompt : string)

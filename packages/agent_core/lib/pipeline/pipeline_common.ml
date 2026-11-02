@@ -72,6 +72,13 @@ let timestamp_now ?clock () =
    observation. Do not absorb cancellation or allocation/runtime faults here. *)
 let safe_publish ~log:_ bus event = Event_bus.publish bus event
 
+(* Durable turn/tool observations come from the journal's cursor consumer.
+   Store-free runs retain direct, transient event delivery. *)
+let transient_event_bus (agent:Agent_types.t) =
+  match Execution_context.agent_scope () with
+  | None -> agent.options.event_bus
+  | Some _ -> None
+
 let event_envelope agent : Event_bus.envelope =
   let session_id = Option.bind agent.options.raw_trace Raw_trace.session_id in
   let worker_run_id =

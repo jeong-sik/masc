@@ -54,7 +54,23 @@ let start_board_post state ~host ~results ~admit ~report
       Publication.returned prepared (Publication.unanswered detail)
     | Observed outcome -> outcome
   in
+  let started = ref true in
+  let settle_not_run () =
+    started := false;
+    let outcome = boundary_error "Board publication did not start" in
+    (match Publication.record state.board_publications outcome with
+     | Publication.Already_recorded | Publication.Not_registered -> ()
+     | Publication.Recorded history -> state.board_publications <- history);
+    (match state.board_write with
+     | Board_posting current when Publication.same_request current request ->
+       state.board_write <- Board_idle;
+       state.board_compose_armed <- false;
+       state.board_post_error <-
+         Some "Board publication not confirmed; check the Board before retrying"
+     | Board_posting _ | Board_idle | Board_commenting _ -> ())
+  in
   Masc_tui_workspace_result.launch state ~results ~boundary_error
+    ~on_not_run:settle_not_run
     ~cancelled_by:(fun () ->
       Board_publication_done (boundary_error "Board publication interrupted"))
     ~deliver:(function
@@ -93,11 +109,11 @@ let start_board_post state ~host ~results ~admit ~report
       let outcome = Publication.returned prepared response in
       phase := Observed outcome;
       Ok outcome);
-  report "system" "posting to Board"
+  if !started then report "system" "posting to Board"
   end
 
 
-let start_board_comment state ~host ~launch ~report ~(post_id : string)
+let start_board_comment state ~host ~request_id ~launch ~report ~(post_id : string)
     ~(content : string) =
   if state.workspace_identity <> Workspace_identity_match then begin
     let detail = "Cannot write to Board: workspace identity is unverified; draft retained" in
@@ -105,13 +121,12 @@ let start_board_comment state ~host ~launch ~report ~(post_id : string)
     report "error" detail
   end else begin
   state.board_post_error <- None;
-  state.board_write <- Board_commenting;
-  report "system" "commenting on Board";
+  state.board_write <- Board_commenting request_id;
   let sent_draft = Buffer.contents state.board_draft in
   let port = state.port in
   let expected_workspace = state.server_identity in
   launch
-    ~deliver:(fun result -> Board_comment_done { post_id; sent_draft; result })
+    ~deliver:(fun result -> Board_comment_done { request_id; post_id; sent_draft; result })
     (fun () ->
       let open Result.Syntax in
       let* expected_workspace = match expected_workspace with
@@ -119,7 +134,11 @@ let start_board_comment state ~host ~launch ~report ~(post_id : string)
         | None -> Error "Board workspace identity is unavailable" in
       match Masc_tui_http.post_board_comment ~expected_workspace ~host ~port ~post_id ~content with
       | Error err -> Error err
-      | Ok json -> Masc.Tui_decode.tool_envelope_outcome json )
+      | Ok json -> Masc.Tui_decode.tool_envelope_outcome json );
+  (match state.board_write with
+   | Board_commenting current when current == request_id ->
+     report "system" "commenting on Board"
+   | Board_idle | Board_posting _ | Board_commenting _ -> ())
   end
 
 (* Send a vote through the tools route. The voter is stamped by the route,

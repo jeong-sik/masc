@@ -294,6 +294,21 @@ let collect_results parse rows =
   loop [] rows
 ;;
 
+module Schedule_id_map = Map.Make (String)
+module Schedule_id_set = Set.Make (String)
+module Attempt_id_set = Set.Make (String)
+
+module Schedule_instance_key = struct
+  type t = string * string
+
+  let compare (id_a, inst_a) (id_b, inst_b) =
+    let c = String.compare id_a id_b in
+    if c <> 0 then c else String.compare inst_a inst_b
+  ;;
+end
+
+module Schedule_instance_map = Map.Make (Schedule_instance_key)
+
 let state_of_yojson = function
   | `Assoc fields ->
     let* version = int_field "version" fields in
@@ -316,17 +331,18 @@ let state_of_yojson = function
       collect_results Schedule_domain.wake_record_of_yojson wakes_json
     in
     let* () =
-      let ids = Hashtbl.create (List.length wakes) in
-      let rec unique = function
+      let rec unique seen = function
         | [] -> Ok ()
         | (wake : wake_record) :: rest ->
           (match wake.attempt_identity with
-           | Unidentified -> unique rest
+           | Unidentified -> unique seen rest
            | Identified id ->
              let key = wake_attempt_id_to_string id in
-             if Hashtbl.mem ids key then Error "duplicate wake attempt_id"
-             else (Hashtbl.add ids key (); unique rest))
-      in unique wakes
+             if Attempt_id_set.mem key seen
+             then Error "duplicate wake attempt_id"
+             else unique (Attempt_id_set.add key seen) rest)
+      in
+      unique Attempt_id_set.empty wakes
     in
     let* notes =
       collect_results Schedule_domain.schedule_note_of_yojson notes_json
@@ -548,6 +564,57 @@ let write_state config state =
   Ok ()
 ;;
 
+let change_observer : (base_path:string -> unit) Atomic.t =
+  Atomic.make (fun ~base_path:_ -> ())
+
+let install_change_observer observer = Atomic.set change_observer observer
+
+let notify_change_observer config =
+  let base_path = config.Workspace_utils.base_path in
+  let report exn =
+    Log.Misc.warn "schedule_store: change observer failed for %s: %s"
+      base_path (Printexc.to_string exn)
+  in
+  match (Atomic.get change_observer) ~base_path with
+  | () -> ()
+  | exception (Eio.Cancel.Cancelled _ as exn) ->
+    (match Fs_compat.execution_context () with
+     | Eio_fiber -> Eio.Fiber.check ()
+     | Non_eio -> ());
+    report exn
+  | exception exn -> report exn
+;;
+
+(* A publication can fail after landing. Remember an attempted write under the
+   lock, but notify only after releasing it: an observer may re-read the
+   ledger. A no-op runner tick and a rejected mutation do not notify. *)
+let with_observed_mutation config f =
+  let attempted = ref false in
+  let observed_write config state =
+    attempted := true;
+    write_state config state
+  in
+  let result =
+    try
+      Ok (Workspace_utils.with_file_lock config (schedules_path config)
+            (fun () -> f observed_write))
+    with exn -> Error (exn, Printexc.get_raw_backtrace ())
+  in
+  match result with
+  | Ok value ->
+    if !attempted then notify_change_observer config;
+    value
+  | Error (exn, backtrace) ->
+    if !attempted then (
+      match notify_change_observer config with
+      | () -> ()
+      | exception (Eio.Cancel.Cancelled _ as cancelled) ->
+        (match exn with
+         | Eio.Cancel.Cancelled _ -> ()
+         | _ -> raise cancelled));
+    Printexc.raise_with_backtrace exn backtrace
+;;
+
 (* Terminal wake records are history, not state: the runner never reads a
    finished wake back, only [update_latest_running_wake] touches one, and it
    looks for a [Wake_running] row. Kept unbounded they grew to 6,534 records /
@@ -584,18 +651,20 @@ let is_running_wake (wake : Schedule_domain.wake_record) =
    A wake with no schedule row at all is the same fact one step earlier --
    the owner left the store. Fold both into the terminal side below so the
    per-schedule retention cap, not eternity, bounds them. *)
-let wake_is_settleable ~schedules (wake : Schedule_domain.wake_record) =
-  match
-    List.find_opt
-      (fun (request : Schedule_domain.schedule_request) ->
-         String.equal
-           request.Schedule_domain.schedule_id
-           wake.Schedule_domain.schedule_id)
-      schedules
-  with
-  | None -> false
-  | Some { Schedule_domain.status = Scheduled | Due | Running; _ } -> true
-  | Some { Schedule_domain.status = Succeeded | Failed | Cancelled | Expired; _ } -> false
+let settleable_schedule_ids (schedules : Schedule_domain.schedule_request list) =
+  List.fold_left
+    (fun (settleable, seen) (request : Schedule_domain.schedule_request) ->
+       let id = request.Schedule_domain.schedule_id in
+       if Schedule_id_set.mem id seen
+       then settleable, seen
+       else
+         let seen = Schedule_id_set.add id seen in
+         match request.Schedule_domain.status with
+         | Scheduled | Due | Running -> Schedule_id_set.add id settleable, seen
+         | Succeeded | Failed | Cancelled | Expired -> settleable, seen)
+    (Schedule_id_set.empty, Schedule_id_set.empty)
+    schedules
+  |> fst
 ;;
 
 let settle_running_wake ~now ~kind ~reason (wake : wake_record) =
@@ -646,9 +715,11 @@ let prune_wakes ~now ~schedules wakes =
       (fun wake -> is_running_wake wake)
       wakes
   in
+  let settleable_ids = settleable_schedule_ids schedules in
   let live, to_dispose =
     List.partition
-      (fun wake -> wake_is_settleable ~schedules wake)
+      (fun (wake : Schedule_domain.wake_record) ->
+         Schedule_id_set.mem wake.Schedule_domain.schedule_id settleable_ids)
       running
   in
   let dispositions =
@@ -668,20 +739,24 @@ let prune_wakes ~now ~schedules wakes =
          Float.compare right.Schedule_domain.started_at left.Schedule_domain.started_at)
       terminal'
   in
-  let kept_per_schedule : (string, int) Hashtbl.t = Hashtbl.create 16 in
-  let retained =
-    List.filter
-      (fun (wake : Schedule_domain.wake_record) ->
+  let _, retained_rev =
+    List.fold_left
+      (fun (kept_per_schedule, acc) (wake : Schedule_domain.wake_record) ->
          let schedule_id = wake.Schedule_domain.schedule_id in
-         let kept = Option.value (Hashtbl.find_opt kept_per_schedule schedule_id) ~default:0 in
+         let kept =
+           Option.value
+             (Schedule_id_map.find_opt schedule_id kept_per_schedule)
+             ~default:0
+         in
          if kept < terminal_wakes_retained_per_schedule
-         then (
-           Hashtbl.replace kept_per_schedule schedule_id (kept + 1);
-           true)
-         else false)
+         then
+           ( Schedule_id_map.add schedule_id (kept + 1) kept_per_schedule
+           , wake :: acc )
+         else kept_per_schedule, acc)
+      (Schedule_id_map.empty, [])
       newest_first
   in
-  live @ retained
+  live @ List.rev retained_rev
 ;;
 
 let bump_state state ~schedules ~wakes ~notes =
@@ -694,11 +769,157 @@ let bump_state state ~schedules ~wakes ~notes =
   }
 ;;
 
-let find_schedule state schedule_id =
-  List.find_opt
-    (fun (request : Schedule_domain.schedule_request) ->
-      String.equal request.schedule_id schedule_id)
+(* When each schedule id last finished a wake, and when anything was last
+   written about it. A note keeps its schedule: someone is still using it. *)
+let ledger_times state =
+  let keep table schedule_id time =
+    match Schedule_id_map.find_opt schedule_id table with
+    | Some seen when seen >= time -> table
+    | Some _ | None -> Schedule_id_map.add schedule_id time table
+  in
+  let finished, written_about =
+    List.fold_left
+      (fun (finished, written_about) (wake : Schedule_domain.wake_record) ->
+         match wake.Schedule_domain.finished_at with
+         | None -> finished, written_about
+         | Some finished_at ->
+           let schedule_id = wake.Schedule_domain.schedule_id in
+           ( keep finished schedule_id finished_at
+           , keep written_about schedule_id finished_at ))
+      (Schedule_id_map.empty, Schedule_id_map.empty)
+      state.wakes
+  in
+  let written_about =
+    List.fold_left
+      (fun written_about (note : Schedule_domain.schedule_note) ->
+         keep written_about note.Schedule_domain.schedule_id note.Schedule_domain.created_at)
+      written_about
+      state.notes
+  in
+  finished, written_about
+;;
+
+(* When anything was last written about [request], if it is a terminal
+   schedule that finished a wake. Only such a schedule is forgotten, once
+   [now] is more than the retention past this time. *)
+let last_written_if_finished ~finished ~written_about (request : schedule_request) =
+  if not (Schedule_domain.is_terminal request.status)
+  then None
+  else
+    Option.map
+      (fun finished_at ->
+         Float.max
+           finished_at
+           (Option.value
+              (Schedule_id_map.find_opt request.schedule_id written_about)
+              ~default:finished_at))
+      (Schedule_id_map.find_opt request.schedule_id finished)
+;;
+
+let compute_oldest_last_written state =
+  let finished, written_about = ledger_times state in
+  List.fold_left
+    (fun oldest request ->
+       match last_written_if_finished ~finished ~written_about request, oldest with
+       | None, _ -> oldest
+       | Some last_written, None -> Some last_written
+       | Some last_written, Some earlier -> Some (Float.min_num earlier last_written))
+    None
     state.schedules
+;;
+
+type prepared_state =
+  { state : state
+  ; schedules_by_id : Schedule_domain.schedule_request Schedule_id_map.t
+  ; wakes_by_instance : Schedule_domain.wake_record list Schedule_instance_map.t
+  ; notes_by_schedule_id :
+      Schedule_domain.schedule_note list Schedule_id_map.t option Atomic.t
+  ; oldest_finished_last_written : float option
+  }
+
+let build_notes_by_schedule_id (state : state)
+  : Schedule_domain.schedule_note list Schedule_id_map.t
+  =
+  let notes_rev_by_schedule_id =
+    List.fold_left
+      (fun acc (note : Schedule_domain.schedule_note) ->
+         let existing =
+           Option.value (Schedule_id_map.find_opt note.schedule_id acc) ~default:[]
+         in
+         Schedule_id_map.add note.schedule_id (note :: existing) acc)
+      Schedule_id_map.empty
+      state.notes
+  in
+  Schedule_id_map.map
+    (fun rev_notes ->
+       List.rev rev_notes
+       |> List.sort (fun left right ->
+         Float.compare left.Schedule_domain.created_at right.Schedule_domain.created_at))
+    notes_rev_by_schedule_id
+;;
+
+let build_prepared_state (state : state) : prepared_state =
+  let schedules_by_id =
+    List.fold_left
+      (fun acc (request : Schedule_domain.schedule_request) ->
+         if Schedule_id_map.mem request.schedule_id acc
+         then acc
+         else Schedule_id_map.add request.schedule_id request acc)
+      Schedule_id_map.empty
+      state.schedules
+  in
+  let wakes_rev_by_instance =
+    List.fold_left
+      (fun acc (wake : Schedule_domain.wake_record) ->
+         let key = wake.schedule_id, wake.schedule_instance_id in
+         let existing =
+           Option.value (Schedule_instance_map.find_opt key acc) ~default:[]
+         in
+         Schedule_instance_map.add key (wake :: existing) acc)
+      Schedule_instance_map.empty
+      state.wakes
+  in
+  let wakes_by_instance =
+    Schedule_instance_map.map List.rev wakes_rev_by_instance
+  in
+  let oldest_finished_last_written = compute_oldest_last_written state in
+  { state
+  ; schedules_by_id
+  ; wakes_by_instance
+  ; notes_by_schedule_id = Atomic.make None
+  ; oldest_finished_last_written
+  }
+;;
+
+let last_prepared_state : prepared_state option Atomic.t = Atomic.make None
+
+let prepared_of_state (state : state) : prepared_state =
+  match Atomic.get last_prepared_state with
+  | Some prepared when prepared.state == state -> prepared
+  | Some _ | None ->
+    let prepared =
+      Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
+        build_prepared_state state)
+    in
+    Atomic.set last_prepared_state (Some prepared);
+    prepared
+;;
+
+let notes_by_schedule_id_of_prepared (prepared : prepared_state) =
+  match Atomic.get prepared.notes_by_schedule_id with
+  | Some notes_map -> notes_map
+  | None ->
+    let notes_map =
+      Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
+        build_notes_by_schedule_id prepared.state)
+    in
+    Atomic.set prepared.notes_by_schedule_id (Some notes_map);
+    notes_map
+;;
+
+let find_schedule state ~schedule_id =
+  let prepared = prepared_of_state state in
+  Schedule_id_map.find_opt schedule_id prepared.schedules_by_id
 ;;
 
 let replace_schedule schedules (updated : schedule_request) =
@@ -730,11 +951,11 @@ let make_note state ~schedule_id ~author_id ~author_kind ~body ~now =
 ;;
 
 let notes_for_schedule state ~schedule_id =
-  state.notes
-  |> List.filter (fun (note : Schedule_domain.schedule_note) ->
-      String.equal note.schedule_id schedule_id)
-  |> List.sort (fun left right ->
-      compare left.Schedule_domain.created_at right.Schedule_domain.created_at)
+  let prepared = prepared_of_state state in
+  let notes_by_schedule_id = notes_by_schedule_id_of_prepared prepared in
+  Option.value
+    (Schedule_id_map.find_opt schedule_id notes_by_schedule_id)
+    ~default:[]
 ;;
 
 let note_count_per_schedule state schedule_id =
@@ -742,9 +963,9 @@ let note_count_per_schedule state schedule_id =
 ;;
 
 let append_note config ~schedule_id ~author_id ~author_kind ~body ~now =
-  Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
+  with_observed_mutation config (fun write_state ->
     let* state = load_for_mutation config in
-    match find_schedule state schedule_id with
+    match find_schedule state ~schedule_id with
     | None -> Error Schedule_not_found
     | Some _ ->
       let note = make_note state ~schedule_id ~author_id ~author_kind ~body ~now in
@@ -768,7 +989,7 @@ let is_due_wake_candidate (request : schedule_request) =
     false
 ;;
 
-let get_schedule config ~schedule_id = find_schedule (read_state config) schedule_id
+let get_schedule config ~schedule_id = find_schedule (read_state config) ~schedule_id
 
 let make_wake_record ~attempt_id ~now (request : schedule_request) =
   { schedule_instance_id = request.schedule_instance_id
@@ -786,11 +1007,12 @@ let make_wake_record ~attempt_id ~now (request : schedule_request) =
 ;;
 
 let wakes_for_schedule_instance state ~schedule_instance_id ~schedule_id =
-  List.filter
-    (fun (wake : wake_record) ->
-       String.equal wake.schedule_instance_id schedule_instance_id
-       && String.equal wake.schedule_id schedule_id)
-    state.wakes
+  let prepared = prepared_of_state state in
+  Option.value
+    (Schedule_instance_map.find_opt
+       (schedule_id, schedule_instance_id)
+       prepared.wakes_by_instance)
+    ~default:[]
 ;;
 
 let last_wake_for_schedule_instance state ~schedule_instance_id ~schedule_id =
@@ -878,9 +1100,9 @@ let interval_fires_as_declared ~runner_tick_sec (request : schedule_request) =
 ;;
 
 let insert_request config ~runner_tick_sec (request : Schedule_domain.schedule_request) =
-  Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
+  with_observed_mutation config (fun write_state ->
     let* state = load_for_mutation config in
-    match find_schedule state request.schedule_id with
+    match find_schedule state ~schedule_id:request.schedule_id with
     | Some _ -> Error Schedule_already_exists
     | None ->
       let* () = validate_initial_request request in
@@ -942,9 +1164,9 @@ let authorize_mutation authority ~(current : schedule_request) ~target =
 
 let update_request config ~authority ~now ~runner_tick_sec ?(timing_update = Replace_timing)
     (request : Schedule_domain.schedule_request) =
-  Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
+  with_observed_mutation config (fun write_state ->
     let* state = load_for_mutation config in
-    match find_schedule state request.schedule_id with
+    match find_schedule state ~schedule_id:request.schedule_id with
     | None -> Error Schedule_not_found
     | Some current ->
       let* () = authorize_mutation authority ~current ~target:current in
@@ -992,9 +1214,9 @@ let update_request config ~authority ~now ~runner_tick_sec ?(timing_update = Rep
    row active; the withdrawn occurrence stays cancelled in the queue, with the
    queue's own cancellation receipt, and the next occurrence fires as due. *)
 let cancel_request config ~authority ~schedule_id ~cancellation ~withdraw_queued_wakes =
-  Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
+  with_observed_mutation config (fun write_state ->
     let* state = load_for_mutation config in
-    match find_schedule state schedule_id with
+    match find_schedule state ~schedule_id with
     | None -> Error Schedule_not_found
     | Some request ->
       let* () = authorize_mutation authority ~current:request ~target:request in
@@ -1052,56 +1274,14 @@ let retention_seconds ~retention_days =
    the whole ledger and its .last-good mirror in a single write. *)
 let schedules_forgotten_per_pass = 64
 
-(* When each schedule id last finished a wake, and when anything was last
-   written about it. A note keeps its schedule: someone is still using it. *)
-let ledger_times state =
-  let finished = Hashtbl.create 64 in
-  let written_about = Hashtbl.create 64 in
-  let keep table schedule_id time =
-    match Hashtbl.find_opt table schedule_id with
-    | Some seen when seen >= time -> ()
-    | Some _ | None -> Hashtbl.replace table schedule_id time
-  in
-  List.iter
-    (fun (wake : Schedule_domain.wake_record) ->
-       Option.iter
-         (fun finished_at ->
-            keep finished wake.Schedule_domain.schedule_id finished_at;
-            keep written_about wake.Schedule_domain.schedule_id finished_at)
-         wake.Schedule_domain.finished_at)
-    state.wakes;
-  List.iter
-    (fun (note : Schedule_domain.schedule_note) ->
-       keep written_about note.Schedule_domain.schedule_id note.Schedule_domain.created_at)
-    state.notes;
-  finished, written_about
+let past_retention ~now ~retention_days last_written =
+  now -. last_written > retention_seconds ~retention_days
 ;;
 
 (* The schedules to keep and the wakes of those forgotten. Notes stay: they are
    append-only evidence about intent and history, which [prune_completed] also
    leaves behind, and a note about a schedule the ledger no longer holds is
    still what someone wrote. *)
-(* When anything was last written about [request], if it is a terminal
-   schedule that finished a wake. Only such a schedule is forgotten, once
-   [now] is more than the retention past this time. *)
-let last_written_if_finished ~finished ~written_about (request : schedule_request) =
-  if not (Schedule_domain.is_terminal request.status)
-  then None
-  else
-    Option.map
-      (fun finished_at ->
-         Float.max
-           finished_at
-           (Option.value
-              (Hashtbl.find_opt written_about request.schedule_id)
-              ~default:finished_at))
-      (Hashtbl.find_opt finished request.schedule_id)
-;;
-
-let past_retention ~now ~retention_days last_written =
-  now -. last_written > retention_seconds ~retention_days
-;;
-
 let forget_finished_schedules ~now ~retention_days state =
   let finished, written_about = ledger_times state in
   let forgettable request =
@@ -1109,63 +1289,47 @@ let forget_finished_schedules ~now ~retention_days state =
     | None -> false
     | Some last_written -> past_retention ~now ~retention_days last_written
   in
-  let forgotten_ids = Hashtbl.create 16 in
-  let kept =
-    List.filter
-      (fun (request : schedule_request) ->
-         if Hashtbl.length forgotten_ids >= schedules_forgotten_per_pass
+  let kept_rev, forgotten_ids, forgotten_count =
+    List.fold_left
+      (fun (kept_rev, forgotten_ids, forgotten_count) (request : schedule_request) ->
+         if forgotten_count >= schedules_forgotten_per_pass
             || not (forgettable request)
-         then true
-         else (
-           Hashtbl.replace forgotten_ids request.schedule_id ();
-           false))
+         then request :: kept_rev, forgotten_ids, forgotten_count
+         else if Schedule_id_set.mem request.schedule_id forgotten_ids
+         then kept_rev, forgotten_ids, forgotten_count
+         else
+           ( kept_rev
+           , Schedule_id_set.add request.schedule_id forgotten_ids
+           , forgotten_count + 1 ))
+      ([], Schedule_id_set.empty, 0)
       state.schedules
   in
-  let holds_a_kept_schedule schedule_id = not (Hashtbl.mem forgotten_ids schedule_id) in
+  let kept = List.rev kept_rev in
+  let holds_a_kept_schedule schedule_id =
+    not (Schedule_id_set.mem schedule_id forgotten_ids)
+  in
   ( kept
   , List.filter
       (fun (wake : Schedule_domain.wake_record) ->
          holds_a_kept_schedule wake.Schedule_domain.schedule_id)
       state.wakes
-  , Hashtbl.length forgotten_ids )
+  , forgotten_count )
 ;;
 
-(* The oldest [last_written_if_finished] among a state's schedules, kept for
-   the state it was taken from. [now -. t] never shrinks as [t] gets older,
+(* The oldest [last_written_if_finished] among a state's schedules, kept on
+   the state's prepared projection. [now -. t] never shrinks as [t] gets older,
    so when the oldest is not past the retention no schedule is, and the pass
-   would forget nothing. A time that is not a number is past no retention,
-   so [Float.min_num] leaves it out. The store hands every tick of an
-   unchanged ledger the same decoded state, so those ticks take this once
-   instead of indexing every wake and note again. *)
-let oldest_last_written_of_last_state : (state * float option) option Atomic.t =
-  Atomic.make None
-;;
-
+   would forget nothing. *)
 let oldest_last_written state =
-  match Atomic.get oldest_last_written_of_last_state with
-  | Some (seen, oldest) when seen == state -> oldest
-  | Some _ | None ->
-    let finished, written_about = ledger_times state in
-    let oldest =
-      List.fold_left
-        (fun oldest request ->
-           match last_written_if_finished ~finished ~written_about request, oldest with
-           | None, _ -> oldest
-           | Some last_written, None -> Some last_written
-           | Some last_written, Some earlier -> Some (Float.min_num earlier last_written))
-        None
-        state.schedules
-    in
-    Atomic.set oldest_last_written_of_last_state (Some (state, oldest));
-    oldest
+  (prepared_of_state state).oldest_finished_last_written
 ;;
 
 let refresh_due config ~now ~retention_days =
-  Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
+  with_observed_mutation config (fun write_state ->
     let* state = load_for_mutation config in
-    let schedules, changed =
-      List.fold_right
-        (fun request (schedules, changed) ->
+    let schedules_rev, changed =
+      List.fold_left
+        (fun (schedules, changed) request ->
           let updated = Schedule_domain.mark_due ~now request in
           let changed =
             if updated.Schedule_domain.status <> request.Schedule_domain.status
@@ -1173,9 +1337,10 @@ let refresh_due config ~now ~retention_days =
             else changed
           in
           updated :: schedules, changed)
-        state.schedules
         ([], 0)
+        state.schedules
     in
+    let schedules = List.rev schedules_rev in
     (* A clock behind the ledger's own last write cannot judge how long ago
        anything finished, so such a tick only marks what is due. A tick that
        marked nothing holds the loaded state's own schedules, so when the
@@ -1207,25 +1372,23 @@ let refresh_due config ~now ~retention_days =
 ;;
 
 let reschedule_due_recurring config ~now ~schedule_ids =
-  Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
+  let target_ids = Schedule_id_set.of_list schedule_ids in
+  with_observed_mutation config (fun write_state ->
     let* state = load_for_mutation config in
-    let schedules, changed =
-      List.fold_right
-        (fun (request : schedule_request) (schedules, changed) ->
-          if
-            not
-              (List.exists
-                 (String.equal request.schedule_id)
-                 schedule_ids)
+    let schedules_rev, changed =
+      List.fold_left
+        (fun (schedules, changed) (request : schedule_request) ->
+          if not (Schedule_id_set.mem request.schedule_id target_ids)
           then
             request :: schedules, changed
           else
             match Schedule_domain.reschedule_after_due_signal ~now request with
             | None -> request :: schedules, changed
             | Some updated -> updated :: schedules, changed + 1)
-        state.schedules
         ([], 0)
+        state.schedules
     in
+    let schedules = List.rev schedules_rev in
     if changed = 0 then
       Ok (state, 0)
     else (
@@ -1284,9 +1447,9 @@ let start_due_candidate ?started_at config ~now ~(candidate : schedule_request) 
      tick time reports that delay as zero. *)
   let started_at = Option.value started_at ~default:now in
   let schedule_id = candidate.schedule_id in
-  Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
+  with_observed_mutation config (fun write_state ->
     let* state = load_authoritative config ~schedule_id in
-    match find_schedule state schedule_id with
+    match find_schedule state ~schedule_id with
     | None -> Error Schedule_not_found
     | Some request ->
       if not (is_due_wake_candidate request && same_occurrence candidate request) then
@@ -1358,12 +1521,12 @@ let terminal_evidence_valid (wake : wake_record) =
 
 let settle_running config ~now ~finished_at ~(attempt : running_attempt) verdict =
   let schedule_id = attempt.original.schedule_id in
-  Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
+  with_observed_mutation config (fun write_state ->
     let* scope = attempt_scope config ~schedule_id in
     let* () = if same_scope scope attempt.scope then Ok ()
       else attempt_unavailable schedule_id "workspace or backend changed" in
     let* state = load_authoritative config ~schedule_id in
-    match find_schedule state schedule_id with
+    match find_schedule state ~schedule_id with
     | None -> Error Schedule_not_found
     | Some request ->
       let superseded () = Error (Running_attempt_superseded { schedule_id }) in
@@ -1419,7 +1582,7 @@ let accept_running ?finished_at config ~now ~attempt ?detail () =
 ;;
 
 let cancel_matching config ~should_cancel =
-  Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
+  with_observed_mutation config (fun write_state ->
     let* state = load_for_mutation config in
     let rec cancel schedules changed = function
       | [] -> Ok (List.rev schedules, changed)
@@ -1440,17 +1603,29 @@ let cancel_matching config ~should_cancel =
       (* Disposition at the cancel boundary: the matched schedules just
          landed in Cancelled, so their in-flight wake rows are settled
          here -- same boundary, same argument as [cancel_request]. *)
-      let wakes =
+      let cancelled_ids =
         List.fold_left
-          (fun wakes (request : schedule_request) ->
-             if should_cancel request then
-               settle_wakes_for_cancelled_schedule
-                 ~now:(now ())
-                 wakes
-                 ~schedule_id:request.schedule_id
-             else wakes)
-          state.wakes
+          (fun acc (request : schedule_request) ->
+             if should_cancel request
+             then Schedule_id_set.add request.schedule_id acc
+             else acc)
+          Schedule_id_set.empty
           schedules
+      in
+      let stamp = now () in
+      let wakes =
+        List.map
+          (fun (wake : wake_record) ->
+             if Schedule_id_set.mem wake.Schedule_domain.schedule_id cancelled_ids
+                && wake.status = Wake_running
+             then
+               settle_running_wake
+                 ~now:stamp
+                 ~kind:Cancelled_schedule
+                 ~reason:"cancelled schedule settles its in-flight wake"
+                 wake
+             else wake)
+          state.wakes
       in
       write_state config (bump_state state ~schedules ~wakes ~notes:state.notes)
     else Ok ())
@@ -1467,7 +1642,7 @@ let retry_running ?finished_at config ~now ~attempt ~reason =
 
 let recover_running_on_startup config ~now =
   let reason = Interrupted_by_process_restart in
-  Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
+  with_observed_mutation config (fun write_state ->
     let* state = load_for_mutation config in
     let rec recover schedules_rev wakes recovered = function
       | [] -> Ok (List.rev schedules_rev, wakes, recovered)
@@ -1508,9 +1683,9 @@ let fail_due_candidate ?attempted_at config ~now ~(candidate : schedule_request)
      starts and ends at the same instant: [attempted_at] (default [now]). *)
   let attempted_at = Option.value attempted_at ~default:now in
   let schedule_id = candidate.schedule_id in
-  Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
+  with_observed_mutation config (fun write_state ->
     let* state = load_authoritative config ~schedule_id in
-    match find_schedule state schedule_id with
+    match find_schedule state ~schedule_id with
     | None -> Error Schedule_not_found
     | Some request ->
       if not (is_due_wake_candidate request && same_occurrence candidate request) then
@@ -1533,7 +1708,7 @@ let fail_due_candidate ?attempted_at config ~now ~(candidate : schedule_request)
 ;;
 
 let prune_completed config =
-  Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
+  with_observed_mutation config (fun write_state ->
     let* state = load_for_mutation config in
     let before_count = List.length state.schedules in
     let schedules =
@@ -1547,17 +1722,23 @@ let prune_completed config =
     let after_count = List.length schedules in
     let pruned_count = before_count - after_count in
     let remaining_ids =
-      List.map (fun (r : schedule_request) -> r.schedule_id) schedules
+      List.fold_left
+        (fun acc (r : schedule_request) -> Schedule_id_set.add r.schedule_id acc)
+        Schedule_id_set.empty
+        schedules
     in
     let wakes =
       List.filter
         (fun (wake : wake_record) ->
-           List.mem wake.schedule_id remaining_ids)
+           Schedule_id_set.mem wake.schedule_id remaining_ids)
         state.wakes
     in
-    let next_state = bump_state state ~schedules ~wakes ~notes:state.notes in
-    let* () = write_state config next_state in
-    Ok (next_state, pruned_count))
+    if pruned_count = 0 && List.length wakes = List.length state.wakes then
+      Ok (state, 0)
+    else
+      let next_state = bump_state state ~schedules ~wakes ~notes:state.notes in
+      let* () = write_state config next_state in
+      Ok (next_state, pruned_count))
 ;;
 
 let due_wake_candidates state =

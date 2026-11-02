@@ -31,6 +31,20 @@ let field_text fields name =
   | Some (`String value) when String.trim value <> "" -> Ok value
   | _ -> Error ("workspace curator decision " ^ name ^ " must be nonblank text")
 
+let compare_fact_ref (a : Ledger.fact_ref) (b : Ledger.fact_ref) =
+  match a, b with
+  | Ledger.Ordinary a, Ledger.Ordinary b ->
+    let c = String.compare a.keeper_id b.keeper_id in
+    if c <> 0 then c else String.compare a.claim_sha256 b.claim_sha256
+  | Ledger.Ordinary _, Ledger.Source_bound _ -> -1
+  | Ledger.Source_bound _, Ledger.Ordinary _ -> 1
+  | Ledger.Source_bound a, Ledger.Source_bound b ->
+    let c = String.compare a.keeper_id b.keeper_id in
+    if c <> 0 then c
+    else
+      let c = String.compare a.path b.path in
+      if c <> 0 then c else String.compare a.claim_sha256 b.claim_sha256
+
 let rec traverse f = function
   | [] -> Ok []
   | first :: rest ->
@@ -77,6 +91,6 @@ let decode ~batch json =
   then Error "workspace curator answer must classify every selected fact once"
   else
     let seen = List.map (fun (assignment : Ledger.assignment) -> assignment.fact) assignments in
-    if List.length seen <> List.length (List.sort_uniq Stdlib.compare seen)
+    if List.length seen <> List.length (List.sort_uniq compare_fact_ref seen)
     then Error "workspace curator answer repeats a fact"
     else Ok assignments

@@ -38,8 +38,10 @@ let with_manifest json f =
   match CM.of_json (Yojson.Safe.from_string json) with
   | Error msg -> fail ("manifest parse failed: " ^ msg)
   | Ok manifest ->
-    CM.set_global manifest;
-    Fun.protect ~finally:(fun () -> CM.set_global CM.empty) f
+    let previous = Llm_provider.Catalog_snapshot.current () in
+    let catalog=match Llm_provider.Catalog_snapshot.models previous with Some catalog -> catalog | None -> MC.empty in
+    Fun.protect ~finally:(fun () -> Llm_provider.Catalog_snapshot.publish previous)
+      (fun () -> (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some ((MC.with_model_overrides catalog manifest))) ~providers:(None))); f ())
 ;;
 
 let install_repository_catalog () =
@@ -47,13 +49,11 @@ let install_repository_catalog () =
     ~suite:"thinking-control dialect"
 ;;
 
-let without_ambient_manifest f =
-  CM.set_global CM.empty;
+let with_repository_catalog f =
+  let previous = Llm_provider.Catalog_snapshot.current () in
   install_repository_catalog ();
   Fun.protect
-    ~finally:(fun () ->
-      MC.clear_global ();
-      CM.clear_global ())
+    ~finally:(fun () -> Llm_provider.Catalog_snapshot.publish previous)
     f
 ;;
 
@@ -71,7 +71,7 @@ let with_catalog_toml contents f =
        match MC.load_file path with
        | Error msg -> fail ("custom catalog parse failed: " ^ msg)
        | Ok catalog ->
-         MC.set_global catalog;
+         (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None)));
          Fun.protect ~finally:install_repository_catalog f)
 ;;
 
@@ -1442,7 +1442,7 @@ let test_anthropic_output_config_merges_format_and_effort () =
     anthropic_config
       ~enable_thinking:true
       ~reasoning_effort:RE.Max
-      ~response_format:(JsonSchema schema)
+      ~response_format:(JsonSchema (Raw_schema schema))
       "claude-opus-5-5"
   in
   let json = BAN.build_request ~config ~messages:[ user_msg "hi" ] () |> json_of_body in
@@ -1597,7 +1597,7 @@ let test_gemini_default_keeps_sampling_fields () =
   let config =
     PC.make
       ~kind:Gemini
-      ~model_id:"gemini-3.8-flash-high"
+      ~model_id:"gemini-3.8-flash"
       ~base_url:"https://generativelanguage.googleapis.com/v1beta"
       ~temperature:0.7
       ~top_p:0.9
@@ -1615,7 +1615,7 @@ let test_gemini_default_keeps_sampling_fields () =
 ;;
 
 let () =
-  without_ambient_manifest (fun () ->
+  with_repository_catalog (fun () ->
     run
       "thinking_control_dialects"
       [ ( "openai_compat"

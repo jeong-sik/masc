@@ -1075,9 +1075,9 @@ let tool_index_route_add_block route block_index =
   match route with
   | Tool_index_single existing when existing = block_index -> Tool_index_single existing
   | Tool_index_single existing ->
-    Tool_index_ambiguous (List.sort_uniq compare [ existing; block_index ])
+    Tool_index_ambiguous (List.sort_uniq Int.compare [ existing; block_index ])
   | Tool_index_ambiguous indices ->
-    Tool_index_ambiguous (List.sort_uniq compare (block_index :: indices))
+    Tool_index_ambiguous (List.sort_uniq Int.compare (block_index :: indices))
 ;;
 
 let record_tool_index_route ?tx state tool_index block_index =
@@ -1288,7 +1288,7 @@ let openai_open_block_stops (state : openai_stream_state) : sse_event list =
         state.tool_block_identities
         []
   in
-  indices |> List.sort_uniq compare |> List.map (fun index -> ContentBlockStop { index })
+  indices |> List.sort_uniq Int.compare |> List.map (fun index -> ContentBlockStop { index })
 ;;
 
 let emit_inline_segments state emit segments =
@@ -3921,7 +3921,16 @@ let ollama_chunk_to_events (state : openai_stream_state) (chunk : ollama_chunk)
     emit
       (MessageDelta
          { stop_reason
-         ; usage = Option.map Types.delta_usage_of_api_usage chunk.oll_usage
+         ; usage =
+             Option.map
+               (fun (u : Types.api_usage) : Types.delta_usage ->
+                  { input_tokens = Some u.input_tokens
+                  ; output_tokens = Some u.output_tokens
+                  ; cache_creation_input_tokens = None
+                  ; cache_read_input_tokens = None
+                  ; cost_usd = u.cost_usd
+                  })
+               chunk.oll_usage
          });
     emit MessageStop);
   List.rev !events, !telemetry_event

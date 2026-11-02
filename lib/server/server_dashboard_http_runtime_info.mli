@@ -118,6 +118,13 @@ val dashboard_runtime_probe_payload_json_of_runtimes :
     Exactly one metadata request is made per provider; its observation is
     projected onto each model/runtime row so callers keep the runtime-shaped
     schema without multiplying identical endpoint probes.
+    Static authentication and non-auth headers come from the selected HTTP
+    execution; admission uses the same runtime's captured credential authority.
+    This observation does not reselect Env/File credentials. Fresh selection
+    belongs to runtime materialization or explicit model discovery. Vertex
+    native-auth and official-client probes retain their stated skips.
+    [auth_kind] describes the declared credential reference; [auth_present]
+    observes the selected request headers.
     [run_dashboard_runtime_probe] calls this with the live runtime fleet;
     exposed directly (rather than via a [_for_tests] alias) so tests can drive
     it with synthetic runtimes. HTTP execution is supplied by the production

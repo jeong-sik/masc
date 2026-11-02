@@ -75,6 +75,18 @@ module For_testing : sig
       refused as a context overflow is [Vendor_session_full], carrying whether
       a response or tool effect was observed first; everything else is
       {!recovery_failure_of_client_error}. *)
+
+  val request_context_of_request_input
+    :  Runtime_claude_code.request_input
+    -> Runtime_observation.request_context
+
+  val completed_turn_response
+    :  latency_ms:int
+    -> turn_id:string
+    -> model:string
+    -> text:string
+    -> turn_total:Runtime_claude_code.turn_usage option
+    -> Agent_core.Types.api_response
 end
 
 val run :
@@ -88,6 +100,8 @@ val run :
   ?required_native_posture:Runtime_native_tools.posture ->
   ?official_client_continuation:Keeper_semantic_execution.official_client_checkpoint ->
   runtime_id:string ->
+  configured_reasoning_effort:Llm_provider.Reasoning_effort.t option ->
+  turn_timeout_s:float option ->
   keeper_name:string ->
   pre_tool_rejects:Keeper_official_client_host.rejected_tool_call list ref ->
   base_path:string ->
@@ -146,7 +160,14 @@ val run :
   config:Runtime_execution.claude_code ->
   unit ->
   attempt_outcome
-(** [on_model_input_window_observation] receives how much of the offered
+(** [configured_reasoning_effort] and [turn_timeout_s] come from the selected
+    runtime snapshot, without re-resolving its ID. Absent effort leaves the
+    request unset; [Some None_] explicitly requests disabled thinking. Hooks
+    can replace or clear effort before the existing model/CLI admission.
+    An absent timeout keeps [config.timeout_s]; zero removes the model-idle
+    bound. The separate admission timeout remains [config.timeout_s].
+
+    [on_model_input_window_observation] receives how much of the offered
     history this turn actually carried. The Agent Core path reports the same
     reading through [Keeper_turn_driver]'s callback of that name; without it
     here, every official-client turn record was written with no window and no

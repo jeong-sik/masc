@@ -124,7 +124,13 @@ type tool_acc =
 
 module InvocationMap = Map.Make (struct
     type t = string * int * int
-    let compare = Stdlib.compare
+    let compare (id1, t1, p1) (id2, t2, p2) =
+      let c = String.compare id1 id2 in
+      if c <> 0
+      then c
+      else (
+        let c = Int.compare t1 t2 in
+        if c <> 0 then c else Int.compare p1 p2)
   end)
 
 type parser_state =

@@ -101,6 +101,12 @@ Optional:
 | `account-home` | non-empty absolute path | **required** for `muse-serve`; accepted for `claude-code`/`codex-app-server`; refused elsewhere |
 | `admission-priority-run-limit` | positive int | bounds consecutive judgment-lane Priority grants while a Standard Keeper request waits, and combined Priority/Standard grants while Background Librarian work waits. Omitted means one FIFO. Refused on official-client providers and when none of the provider's bindings declares `max-concurrent`. See [provider admission fairness](guides/provider-admission-fairness.md) |
 
+Claude Code and Codex capture their selected home and permitted credential
+environment when the binding is materialized. Execution, probes and verification
+retain that selection until reload; changing the process environment does not
+retarget an existing binding. See [Native account selection](guides/native-account-selection.md)
+for inherited versus explicit homes and Codex configuration requirements.
+
 ### `[providers.<id>.credentials]`
 
 | Key | Meaning |

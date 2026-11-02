@@ -10,6 +10,8 @@ open Masc_board_handlers
 
 open Tool_args
 
+module String_map = Map.Make (String)
+
 (* RFC-0189 PR-1b.2 — handlers in this module return the typed
    [Tool_result.result] variant directly. *)
 
@@ -485,14 +487,14 @@ let handle_post_get ~result_boundary ~tool_name ~start_time args : Tool_result.r
            Board_tool_format.format_post_compact ~replies:total post
        in
        (* Each vote is read once; the page is re-rendered while it grows. *)
-       let votes = Hashtbl.create (List.length comments) in
+       let votes = ref String_map.empty in
        let viewer_vote_of comment_id =
          let key = Board.Comment_id.to_string comment_id in
-         match Hashtbl.find_opt votes key with
+         match String_map.find_opt key !votes with
          | Some vote -> vote
          | None ->
            let vote = viewer_vote_of_comment comment_id in
-           Hashtbl.replace votes key vote;
+           votes := String_map.add key vote !votes;
            vote
        in
        (* The position leads the page so a reader that sees only the head of a

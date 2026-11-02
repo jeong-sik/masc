@@ -301,40 +301,50 @@ let format_comment ?(indent = 0) ?viewer_vote ?reply_to (c : Board.comment) =
 let comment_indent_width = 4
 let max_comment_indent_depth = 5
 
+module Comment_key_set = Set.Make (String)
+module Comment_key_map = Map.Make (String)
+
 let format_comment_tree
       ?(viewer_vote_of = fun (_ : Board.Comment_id.t) -> None)
       (comments : Board.comment list)
   =
   let comment_key (comment : Board.comment) = Board.Comment_id.to_string comment.id in
-  let listed = Hashtbl.create (List.length comments) in
-  List.iter (fun comment -> Hashtbl.replace listed (comment_key comment) ()) comments;
-  let children_map = Hashtbl.create (List.length comments) in
-  List.iter
-    (fun (comment : Board.comment) ->
-       match comment.parent_id with
-       | Some parent_id when Hashtbl.mem listed (Board.Comment_id.to_string parent_id) ->
-         let parent_key = Board.Comment_id.to_string parent_id in
-         let siblings =
-           match Hashtbl.find_opt children_map parent_key with
-           | Some siblings -> siblings
-           | None -> []
-         in
-         Hashtbl.replace children_map parent_key (comment :: siblings)
-       | Some _ | None -> ())
-    comments;
+  let listed =
+    List.fold_left
+      (fun acc comment -> Comment_key_set.add (comment_key comment) acc)
+      Comment_key_set.empty
+      comments
+  in
+  let children_map =
+    List.fold_left
+      (fun acc (comment : Board.comment) ->
+         match comment.parent_id with
+         | Some parent_id ->
+           let parent_key = Board.Comment_id.to_string parent_id in
+           if Comment_key_set.mem parent_key listed
+           then (
+             let siblings =
+               Comment_key_map.find_opt parent_key acc |> Option.value ~default:[]
+             in
+             Comment_key_map.add parent_key (comment :: siblings) acc)
+           else acc
+         | None -> acc)
+      Comment_key_map.empty
+      comments
+  in
   let children_of comment =
-    match Hashtbl.find_opt children_map (comment_key comment) with
+    match Comment_key_map.find_opt (comment_key comment) children_map with
     | Some children -> List.rev children
     | None -> []
   in
-  let drawn = Hashtbl.create (List.length comments) in
   (* [under_parent] is true when the line is drawn right below its parent's
      subtree; the indentation then shows the parent up to the cap. *)
-  let rec render ~under_parent depth (comment : Board.comment) =
-    if Hashtbl.mem drawn (comment_key comment)
-    then []
+  let rec render ~under_parent depth drawn (comment : Board.comment) =
+    let key = comment_key comment in
+    if Comment_key_set.mem key drawn
+    then drawn, []
     else (
-      Hashtbl.replace drawn (comment_key comment) ();
+      let drawn = Comment_key_set.add key drawn in
       let indent = comment_indent_width * min depth max_comment_indent_depth in
       let reply_to =
         match comment.parent_id, under_parent with
@@ -349,24 +359,45 @@ let format_comment_tree
           ?reply_to
           comment
       in
-      self
-      :: List.concat_map (render ~under_parent:true (depth + 1)) (children_of comment))
+      let drawn, child_lines_rev =
+        List.fold_left
+          (fun (drawn, acc) child ->
+             let drawn, lines = render ~under_parent:true (depth + 1) drawn child in
+             drawn, List.rev_append lines acc)
+          (drawn, [])
+          (children_of comment)
+      in
+      drawn, self :: List.rev child_lines_rev)
   in
   let is_root (comment : Board.comment) =
     match comment.parent_id with
     | None -> true
-    | Some parent_id -> not (Hashtbl.mem listed (Board.Comment_id.to_string parent_id))
+    | Some parent_id ->
+      not (Comment_key_set.mem (Board.Comment_id.to_string parent_id) listed)
   in
-  let from_roots =
-    List.concat_map
-      (fun comment ->
-         if is_root comment then render ~under_parent:false 0 comment else [])
+  let drawn, from_roots_rev =
+    List.fold_left
+      (fun (drawn, acc) comment ->
+         if is_root comment
+         then (
+           let drawn, lines = render ~under_parent:false 0 drawn comment in
+           drawn, List.rev_append lines acc)
+         else drawn, acc)
+      (Comment_key_set.empty, [])
       comments
   in
   (* Every listed comment is drawn exactly once. A comment reachable from no
      root (a parent chain that loops back on itself) is drawn here instead of
      disappearing; [render] skips everything the root walk already drew. *)
-  from_roots @ List.concat_map (render ~under_parent:false 0) comments
+  let _drawn, all_lines_rev =
+    List.fold_left
+      (fun (drawn, acc) comment ->
+         let drawn, lines = render ~under_parent:false 0 drawn comment in
+         drawn, List.rev_append lines acc)
+      (drawn, from_roots_rev)
+      comments
+  in
+  List.rev all_lines_rev
 ;;
 
 (** {1 Source-entry rendering} *)

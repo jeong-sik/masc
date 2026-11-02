@@ -103,7 +103,7 @@ let xterm_cube_level = function
   | _ -> invalid_arg "Masc_tui_terminal_palette.xterm_cube_level"
 ;;
 
-let xterm_fixed_rgb index =
+let xterm_default_rgb index =
   if index >= 16 && index <= 231 then (
     let offset = index - 16 in
     make_rgb ~red:(xterm_cube_level (offset / 36))
@@ -112,7 +112,7 @@ let xterm_fixed_rgb index =
   else if index >= 232 && index <= 255 then
     let component = 8 + (10 * (index - 232)) in
     make_rgb ~red:component ~green:component ~blue:component
-  else invalid_arg "Masc_tui_terminal_palette.xterm_fixed_rgb"
+  else invalid_arg "Masc_tui_terminal_palette.xterm_default_rgb"
 ;;
 
 let squared_distance left right =
@@ -122,11 +122,11 @@ let squared_distance left right =
   + square (left.blue - right.blue)
 ;;
 
-let nearest_xterm_fixed_index target =
+let nearest_xterm_default_index target =
   let best_index = ref 16 in
   let best_distance = ref max_int in
   for index = 16 to 255 do
-    let distance = squared_distance target (xterm_fixed_rgb index) in
+    let distance = squared_distance target (xterm_default_rgb index) in
     if distance < !best_distance then (
       best_index := index;
       best_distance := distance)
@@ -137,15 +137,20 @@ let nearest_xterm_fixed_index target =
 let project_color_for_level ~level color =
   match level with
   | True_color -> Some (Rgb color)
-  | Ansi256 -> Some (Indexed (nearest_xterm_fixed_index color))
+  | Ansi256 -> Some (Indexed (nearest_xterm_default_index color))
   | Ansi16 | Unknown -> None
 ;;
 
 let best_color color = project_color_for_level ~level:(stdout_color_level ()) color
 
-let projected_rgb = function
+let direct_rgb = function
+  | Rgb color -> Some color
+  | Indexed _ -> None
+;;
+
+let estimated_rgb = function
   | Rgb color -> color
-  | Indexed index -> xterm_fixed_rgb index
+  | Indexed index -> xterm_default_rgb index
 ;;
 
 let fold_projected_color ~rgb ~indexed = function

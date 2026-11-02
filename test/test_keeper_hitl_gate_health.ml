@@ -30,6 +30,7 @@ let assoc_bool name json =
 let wait ~tool_call_id ~asked_at =
   { R.keeper_name = "keeper.one"
   ; tool_call_id
+  ; approval_id = "019a0000-0000-7000-8000-000000000001"
   ; tool_name = "Execute"
   ; args = "{}"
   ; question = "run?"

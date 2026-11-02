@@ -482,7 +482,7 @@ let invalidate_execution_cache_with_hooks_for_testing
       exn
 ;;
 
-let invalidate_execution_cache () =
+let invalidate_execution_cache_with ~before_broadcast () =
   let invalidate () =
   let invalidated_generation = ref None in
   invalidate_execution_cache_with_hooks_for_testing
@@ -495,12 +495,13 @@ let invalidate_execution_cache () =
     ~invalidate_light_cache:(fun () ->
       Dashboard_cache.invalidate_prefix "execution:")
     ();
+  before_broadcast ();
   Option.iter
     (fun generation ->
        try
          broadcast_cached_surface
            ~encoding:Encode_inline
-           ~event_type:"execution_snapshot"
+           ~event_type:Dashboard_event_slices.execution_snapshot_type
            (`Assoc
                [ execution_publication_epoch_field, `String execution_publication_epoch
                ; execution_publication_generation_field, `Int generation
@@ -520,15 +521,29 @@ let invalidate_execution_cache () =
   | Eio_guard.Non_eio -> invalidate ()
 ;;
 
+let invalidate_execution_cache () =
+  invalidate_execution_cache_with ~before_broadcast:(fun () -> ()) ()
+;;
+
 let invalidate_task_mutation_caches ~invalidate_full_health_snapshot () =
-  invalidate_execution_cache ();
-  try invalidate_full_health_snapshot () with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exn ->
-    record_invalidation_failure
-      ~callback:"full_health_snapshot_invalidate"
-      ~message:"Failed to invalidate full-health snapshot"
-      exn
+  (* Wake health after invalidating execution, but before the SSE fanout can
+     wait on a subscriber. Preserve the old cancellation order: an exception
+     from health is re-raised only after execution's broadcast is attempted. *)
+  let cancellation = ref None in
+  invalidate_execution_cache_with
+    ~before_broadcast:(fun () ->
+      try invalidate_full_health_snapshot () with
+      | Eio.Cancel.Cancelled _ as exn ->
+        cancellation := Some (exn, Printexc.get_raw_backtrace ())
+      | exn ->
+        record_invalidation_failure
+          ~callback:"full_health_snapshot_invalidate"
+          ~message:"Failed to invalidate full-health snapshot"
+          exn)
+    ();
+  match !cancellation with
+  | None -> ()
+  | Some (exn, backtrace) -> Printexc.raise_with_backtrace exn backtrace
 ;;
 
 let install_task_mutation_cache_invalidation ~invalidate_full_health_snapshot () =
@@ -1132,14 +1147,14 @@ let patch_keeper_row ~keeper_name ~event ~keepalive_running = function
 ;;
 
 let patch_keeper_rows ~keeper_name ~event ~keepalive_running rows =
-  List.fold_right
-    (fun row patched ->
-       match patched, patch_keeper_row ~keeper_name ~event ~keepalive_running row with
-       | Patched rows, Patched row -> Patched (row :: rows)
-       | Declaration_row_is_stale, (Patched _ | Declaration_row_is_stale)
-       | Patched _, Declaration_row_is_stale -> Declaration_row_is_stale)
-    rows
-    (Patched [])
+  let rec loop acc = function
+    | [] -> Patched (List.rev acc)
+    | row :: rest ->
+      (match patch_keeper_row ~keeper_name ~event ~keepalive_running row with
+       | Patched patched_row -> loop (patched_row :: acc) rest
+       | Declaration_row_is_stale -> Declaration_row_is_stale)
+  in
+  loop [] rows
 ;;
 
 let replace_keeper_rows_and_rebuild_briefs ~now_ts ~keeper_rows ~keepers_json fields =
@@ -1394,7 +1409,7 @@ let start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock =
       then (
         broadcast_cached_surface
           ~encoding:Encode_inline
-          ~event_type:"execution_snapshot"
+          ~event_type:Dashboard_event_slices.execution_snapshot_type
           (prepare_execution_snapshot_broadcast ~config:workspace_config ());
         !broadcast_namespace_truth_ref state))
 ;;

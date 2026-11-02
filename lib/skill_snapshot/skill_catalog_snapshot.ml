@@ -176,6 +176,17 @@ let identity_key (identity : identity) =
   , identity.name )
 ;;
 
+module Identity_key_map = Map.Make (struct
+  type t = string * string * string
+
+  let compare (s1, p1, n1) (s2, p2, n2) =
+    let c = String.compare s1 s2 in
+    if c <> 0 then c
+    else
+      let c = String.compare p1 p2 in
+      if c <> 0 then c else String.compare n1 n2
+end)
+
 let identity_to_yojson = Skill_reference.identity_to_yojson
 
 let source_operation_to_string = function
@@ -328,7 +339,7 @@ let effective_projection (entries : entry list) =
 ;;
 
 let build_entries sources =
-  let exact = Hashtbl.create (List.length sources) in
+  let exact = ref Identity_key_map.empty in
   let entries, rejections =
     List.fold_left
       (fun (entries, rejections) (source_index, scan) ->
@@ -394,7 +405,7 @@ let build_entries sources =
                     | Loaded document ->
                       let identity = make_identity ~source_id ~package_id ~name:document.name in
                       let key = identity_key identity in
-                      (match Hashtbl.find_opt exact key with
+                      (match Identity_key_map.find_opt key !exact with
                        | Some first_directory ->
                          ( entries
                          , { source_index
@@ -406,7 +417,7 @@ let build_entries sources =
                            }
                            :: rejections )
                        | None ->
-                         Hashtbl.add exact key directory;
+                         exact := Identity_key_map.add key directory !exact;
                          ( { identity
                            ; source_index
                            ; directory
@@ -488,24 +499,28 @@ let same_source
 ;;
 
 let configured ~config scans =
-  let configured_ids =
-    List.map
-      (fun (source : Skill_source_config.source) ->
-         Skill_source_config.source_id_to_string source.id)
+  let module StringSet = Set.Make (String) in
+  let configured_id_set =
+    List.fold_left
+      (fun acc (source : Skill_source_config.source) ->
+         StringSet.add
+           (Skill_source_config.source_id_to_string source.id)
+           acc)
+      StringSet.empty
       config.Skill_source_config.sources
   in
   let unexpected =
     List.filter_map
       (fun (scan : source_scan) ->
          let id = Skill_source_config.source_id_to_string scan.source.source.id in
-         if List.mem id configured_ids
+         if StringSet.mem id configured_id_set
          then None
          else Some (Unexpected_source_scan scan.source.source.id))
       scans
   in
-  let ordered, ordering_errors =
-    List.fold_right
-      (fun (configured_source : Skill_source_config.source) (ordered, errors) ->
+  let ordered_rev, ordering_errors_rev =
+    List.fold_left
+      (fun (ordered, errors) (configured_source : Skill_source_config.source) ->
          let configured_id =
            Skill_source_config.source_id_to_string configured_source.id
          in
@@ -524,9 +539,11 @@ let configured ~config scans =
          | [ _ ] ->
            ordered, Source_scan_config_mismatch configured_source.id :: errors
          | _ -> ordered, Duplicate_source_scan configured_source.id :: errors)
-      config.sources
       ([], [])
+      config.sources
   in
+  let ordered = List.rev ordered_rev in
+  let ordering_errors = List.rev ordering_errors_rev in
   let errors = ordering_errors @ unexpected in
   if errors <> []
   then Error errors

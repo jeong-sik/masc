@@ -1,0 +1,10 @@
+{
+  "sha256": "fa93f2304fe28682d409fd5516a04f335465c9c625a8ec504dee73608a94760f",
+  "base": "/private/tmp/masc-tui-contrast-20261102-yeqf6vui/workspace",
+  "proxy_port": 52569,
+  "rows": 24,
+  "cols": 80,
+  "terminal": "xterm-256color",
+  "no_color": true,
+  "instance": "01a19a5f-2067-7000-9125-9519411ad600"
+}

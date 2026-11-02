@@ -12,6 +12,92 @@ type section = {
 
 let cells_of = Masc_tui_message_layout.display_width
 
+(* Bound the expansion of exceptionally large list labels using the current
+   screen area before grapheme layout. Keep both ends (including a scope id)
+   and mark the omitted middle. Four bytes is the maximum UTF-8 scalar size. *)
+let text_for_viewport ~columns ~rows text =
+  (* Even a one-row viewport can previously show both ends of a long emoji
+     name. Allow enough context for ordinary multi-scalar graphemes there. *)
+  let bytes = max 1 columns * max 4 rows * 4 in
+  if String.length text <= bytes then text
+  else
+    let left = bytes / 2 in
+    (* Segment bounded context on each side so neither cut lands inside a
+       combining or emoji cluster. A cluster larger than that context is
+       omitted rather than rendered as a partial glyph. *)
+    let prefix = String_util.utf8_prefix ~max_bytes:bytes text in
+    let prefix_end =
+      Masc_tui_message_layout.input_boundaries prefix
+      |> List.fold_left (fun last boundary ->
+           if boundary <= left && boundary < String.length prefix then boundary else last) 0
+    in
+    let suffix = String_util.utf8_suffix ~max_bytes:bytes text in
+    let suffix_offset = String.length text - String.length suffix in
+    (* Regional indicators pair from the start of their run. Recover that
+       parity before segmenting bounded suffix context, so the first retained
+       flag has the same members as in the source. *)
+    let is_regional_at offset =
+      offset >= 0 && offset + 4 <= String.length text
+      && text.[offset] = '\240' && text.[offset + 1] = '\159'
+      && text.[offset + 2] = '\135'
+      && text.[offset + 3] >= '\166' && text.[offset + 3] <= '\191'
+    in
+    let rec regional_parity offset remaining odd =
+      if not (is_regional_at (offset - 4)) then Some odd
+      else if remaining < 4 then None
+      else regional_parity (offset - 4) (remaining - 4) (not odd)
+    in
+    let parity =
+      if is_regional_at suffix_offset then regional_parity suffix_offset bytes false
+      else Some false
+    in
+    (* If the run extends beyond the bounded context, its pairing is unknown.
+       Omit the rest of that run rather than scan unbounded input or redraw a
+       different flag. The omission mark still identifies the shortened name. *)
+    let rec after_regional_run offset =
+      if is_regional_at (suffix_offset + offset) then after_regional_run (offset + 4)
+      else offset
+    in
+    let regional_floor = match parity with None -> after_regional_run 0 | Some _ -> 0 in
+    (* An initial extender can belong to a cluster whose base is outside the
+       bounded context. Omit through a scalar that resets the segmenter's
+       emoji, regional-indicator and Indic context before retaining the tail. *)
+    let needs_anchor =
+      if String.length suffix = 0 then false
+      else
+        let decoded = String.get_utf_8_uchar suffix 0 in
+        Uchar.utf_decode_is_valid decoded
+        && (match Uucp.Break.grapheme_cluster (Uchar.utf_decode_uchar decoded) with
+            | `EX | `EM | `SM | `ZWJ -> true
+            | _ -> false)
+    in
+    let rec after_reset_anchor offset =
+      if offset >= String.length suffix then String.length suffix
+      else
+        let decoded = String.get_utf_8_uchar suffix offset in
+        let next = min (String.length suffix) (offset + max 1 (Uchar.utf_decode_length decoded)) in
+        if not (Uchar.utf_decode_is_valid decoded) then after_reset_anchor next
+        else
+          let scalar = Uchar.utf_decode_uchar decoded in
+          match Uucp.Break.grapheme_cluster scalar, Uucp.Break.indic_conjunct_break scalar with
+          | (`EX | `ZWJ | `RI), _ | _, (`Extend | `Linker) -> after_reset_anchor next
+          | _ -> next
+    in
+    let anchor_floor = if needs_anchor then after_reset_anchor 0 else 0 in
+    let suffix_floor = max regional_floor anchor_floor in
+    let regional_context = match parity with Some true -> "🇦" | _ -> "" in
+    let context_bytes = String.length regional_context in
+    let target = String.length suffix - (bytes - left) in
+    let suffix_start =
+      Masc_tui_message_layout.input_boundaries (regional_context ^ suffix)
+      |> List.map (fun boundary -> boundary - context_bytes)
+      |> List.find_opt (fun boundary ->
+           boundary > 0 && boundary >= target && boundary >= suffix_floor)
+      |> Option.value ~default:(String.length suffix)
+    in
+    String.sub prefix 0 prefix_end ^ "…"
+    ^ String.sub suffix suffix_start (String.length suffix - suffix_start)
+
 (* ---- meter ------------------------------------------------------------ *)
 
 let eighths_per_cell = 8
@@ -162,7 +248,7 @@ type reset_words = {
 let reset_words ~now = function
   | None -> { reset_tone = None; reset_full = "no reset"; reset_short = "no reset" }
   | Some at when at <= now ->
-      { reset_tone = Some (Theme.warn ())
+      { reset_tone = Some (Theme.text_status Masc_tui_theme.Warn)
       ; reset_full = "reset time passed \xc2\xb7 no newer report"
       ; reset_short = "reset passed"
       }
@@ -250,7 +336,7 @@ let exhausted_tag ~now = function
         (Printf.sprintf "exhausted (observed) \xc2\xb7 catalogue reopens %s in %s"
            (clock_text ~now at) (span_text (at -. now)))
 
-(* ---- what can be used now ----------------------------------------------- *)
+(* ---- group the reported and observed evidence --------------------------- *)
 
 (* A limit that spending it refuses model calls on. A limit the server could
    not classify counts here too: nothing says it does not gate. *)
@@ -259,20 +345,18 @@ let gates_model_calls = function
   | Masc.Tui_decode_usage.Role_unclassified_limit -> true
   | Masc.Tui_decode_usage.Role_counts_other_use -> false
 
-(* The one decision behind the header's "At limit (reported)" count and the
-   Unusable section: the provider's own report is at its full value, on a
-   window that gates model calls. *)
+(* The header and the first group share this decision. An unclassified role
+   is retained because the report does not say whether it gates calls. *)
 let window_at_limit (window : Masc.Tui_decode_usage.provider_usage_window) =
   gates_model_calls window.puw_role && at_or_past_full window.puw_utilization
 
-let observed_blocked = function
+let is_observed_exhausted = function
   | Observed_exhausted _ -> true
   | Not_observed_exhausted -> false
 
-(* A window cannot be used now when its report is at its limit, or when the
-   runtime catalogue observed the whole account exhausted and the window
-   gates model calls. *)
-let blocks_use_now ~observed window =
+(* Group a window when its last report is at its limit, or when the runtime
+   catalogue observed the account exhausted and the window may gate calls. *)
+let in_limit_or_exhausted_group ~observed window =
   window_at_limit window
   ||
   match observed with
@@ -280,25 +364,25 @@ let blocks_use_now ~observed window =
   | Not_observed_exhausted -> false
 
 type plan_section =
-  | Unusable_now
-  | Usable
-  | No_report
+  | At_limit_or_exhausted
+  | Other_windows
+  | No_windows
 
 (* The catalogue's observation is a fact about the account, not about one
-   window, so only the Unusable_now entry draws it. An account split across
+   window, so only the At_limit_or_exhausted entry draws it. An account split across
    sections would otherwise say it twice. *)
 let drawn_observation section observed =
   match section with
-  | Unusable_now -> observed
-  | Usable | No_report -> Not_observed_exhausted
+  | At_limit_or_exhausted -> observed
+  | Other_windows | No_windows -> Not_observed_exhausted
 
 (* Draw order of the sections. *)
-let all_sections = [ Unusable_now; Usable; No_report ]
+let all_sections = [ At_limit_or_exhausted; Other_windows; No_windows ]
 
 let section_rank = function
-  | Unusable_now -> 0
-  | Usable -> 1
-  | No_report -> 2
+  | At_limit_or_exhausted -> 0
+  | Other_windows -> 1
+  | No_windows -> 2
 
 type plan_entry = {
   pe_account : Masc.Tui_decode_usage.provider_usage_account;
@@ -383,7 +467,7 @@ let entry_pressure entry =
         (pressure_of first) rest
 
 (* One account becomes one entry per section it has a window in. An account
-   observed exhausted always has an entry in Unusable_now, even with no
+   observed exhausted always has an entry in At_limit_or_exhausted, even with no
    window to show, so its catalogue state is drawn. *)
 let entries_of ~now (observed, (account : Masc.Tui_decode_usage.provider_usage_account)) =
   let entry windows =
@@ -392,39 +476,40 @@ let entries_of ~now (observed, (account : Masc.Tui_decode_usage.provider_usage_a
   match account.pua_state with
   | Masc.Tui_decode_usage.Account_not_reported_since_start
   | Masc.Tui_decode_usage.Account_reported_no_windows _ ->
-      [ ((if observed_blocked observed then Unusable_now else No_report), entry []) ]
+      [ ((if is_observed_exhausted observed then At_limit_or_exhausted else No_windows), entry []) ]
   | Masc.Tui_decode_usage.Account_reported (first, rest) ->
-      let blocked, open_ =
-        List.partition (blocks_use_now ~observed) (first :: rest)
+      let at_limit_or_exhausted, other =
+        List.partition (in_limit_or_exhausted_group ~observed) (first :: rest)
       in
-      let blocked =
+      let at_limit_or_exhausted =
         sort_windows_by
           (fun left right ->
             longest_wait_first (window_wait ~now left) (window_wait ~now right))
-          blocked
+          at_limit_or_exhausted
       in
-      let open_ =
+      let other =
         sort_windows_by
           (fun left right -> most_pressed_first (pressure_of left) (pressure_of right))
-          open_
+          other
       in
-      (match (blocked, observed_blocked observed) with
+      (match (at_limit_or_exhausted, is_observed_exhausted observed) with
        | [], false -> []
-       | [], true | _ :: _, true | _ :: _, false -> [ (Unusable_now, entry blocked) ])
-      @ (match open_ with [] -> [] | _ :: _ -> [ (Usable, entry open_) ])
+       | [], true | _ :: _, true | _ :: _, false ->
+           [ (At_limit_or_exhausted, entry at_limit_or_exhausted) ])
+      @ (match other with [] -> [] | _ :: _ -> [ (Other_windows, entry other) ])
 
 let compare_entries ~now section left right =
   let primary =
     match section with
-    | Unusable_now -> longest_wait_first (entry_wait ~now left) (entry_wait ~now right)
-    | Usable -> most_pressed_first (entry_pressure left) (entry_pressure right)
-    | No_report -> 0
+    | At_limit_or_exhausted -> longest_wait_first (entry_wait ~now left) (entry_wait ~now right)
+    | Other_windows -> most_pressed_first (entry_pressure left) (entry_pressure right)
+    | No_windows -> 0
   in
   match primary with
   | 0 -> String.compare (scope_name left.pe_account) (scope_name right.pe_account)
   | order -> order
 
-(* Unusable windows first, then the rest with the least left first, then
+(* Reported limits and observed exhaustion first, then the rest with the least left first, then
    accounts that have not reported. Ties go by account name. *)
 let plan ~now ~runtimes accounts =
   let placed =
@@ -472,6 +557,10 @@ let account_email ~account_emails (account : Masc.Tui_decode_usage.provider_usag
 
 let indent = " "
 let indent_cells = 1
+
+(* A continuation normally spends the indent and a separator. Leave room
+   for a two-cell terminal grapheme after them, or stack the entry instead. *)
+let minimum_inline_cells = indent_cells + 1 + 2
 
 (* "100%" is the widest reading a gauge normally shows. *)
 let percent_cells = 4
@@ -524,8 +613,8 @@ let role_tag = function
    it being full refuses no model call. A limit the server could not classify
    is drawn like one that gates, since nothing says it does not. *)
 let window_tone (window : Masc.Tui_decode_usage.provider_usage_window) =
-  if not (gates_model_calls window.puw_role) then Some Ansi.dim
-  else if at_or_past_full window.puw_utilization then Some (Theme.bad ())
+  if not (gates_model_calls window.puw_role) then Some (Theme.recede ())
+  else if window_at_limit window then Some (Theme.text_status Masc_tui_theme.Bad)
   else None
 
 (* When the account's newest report was heard. *)
@@ -542,6 +631,7 @@ let newest_report (account : Masc.Tui_decode_usage.provider_usage_account) =
 
 type window_line = {
   label : string;
+  at_limit : bool;
   share : float option;  (** [None]: an amount with no cap has no bar. *)
   percent : string;
   detail : string;  (** Amount, reset with its clock, then notes. *)
@@ -552,6 +642,30 @@ type window_line = {
   tone : string option;
   detail_tone : string option;
 }
+
+(* Keep the marker separate from provider text, including on wrapped lines.
+   The empty slot also distinguishes a provider name beginning with [!]. *)
+let marked ~attention text = (if attention then "! " else "  ") ^ text
+
+let wrap_marked ~width ~attention text =
+  let width = max 1 width in
+  let prefix =
+    if width >= 4 then if attention then "! " else "  "
+    else if width >= 2 then if attention then "!" else " "
+    else ""
+  in
+  let lines =
+    Masc_tui_message_layout.wrap_words ~max_cells:(max 1 (width - String.length prefix)) text
+  in
+  match lines with
+  | [] when attention -> [ "!" ]
+  | [] -> []
+  | _ :: _ ->
+      List.map
+        (fun line ->
+          if cells_of line + String.length prefix <= width then prefix ^ line
+          else line)
+        lines
 
 (* A window heard at a different time than its account's newest report says
    so; otherwise the time is left out. *)
@@ -578,6 +692,7 @@ let window_line ~now ~newest (window : Masc.Tui_decode_usage.provider_usage_wind
   let notes = [ heard; role_tag window.puw_role ] in
   let tone = window_tone window in
   { label = window_label window
+  ; at_limit = window_at_limit window
   ; share
   ; percent
   ; detail = detail_with reset.reset_full notes
@@ -594,9 +709,10 @@ type entry_body =
 
 type drawn_entry = {
   de_name : string;
+  de_attention : bool;
   de_body : entry_body;
   de_tag : string option;
-      (** The catalogue's observed exhaustion, in the Unusable section only. *)
+      (** The catalogue's observed exhaustion, in the first section only. *)
   de_email : string option;
       (** Drawn once per account, with its first entry. *)
 }
@@ -633,8 +749,14 @@ let drawn_groups ~now ~account_emails groups =
                 if first_time then account_email ~account_emails entry.pe_account
                 else None
               in
+              let attention =
+                match pg_section with
+                | At_limit_or_exhausted -> true
+                | Other_windows | No_windows -> false
+              in
               ( id :: seen
               , { de_name = scope_name entry.pe_account
+                ; de_attention = attention
                 ; de_body = body
                 ; de_tag = tag
                 ; de_email = email
@@ -648,14 +770,14 @@ let drawn_groups ~now ~account_emails groups =
   List.rev drawn
 
 let section_title = function
-  | Unusable_now -> "Unusable now"
-  | Usable -> "Usable"
-  | No_report -> "No report"
+  | At_limit_or_exhausted -> "Reported at limit / observed exhausted"
+  | Other_windows -> "Other windows"
+  | No_windows -> "No windows to show"
 
 let section_tone = function
-  | Unusable_now -> Theme.bad ()
-  | Usable -> Theme.info ()
-  | No_report -> Theme.recede ()
+  | At_limit_or_exhausted -> Theme.text_status Masc_tui_theme.Bad
+  | Other_windows -> Theme.text_status Masc_tui_theme.Info
+  | No_windows -> Theme.recede ()
 
 let pad_left text cells =
   let gap = cells - cells_of text in
@@ -687,6 +809,7 @@ type layout = {
   name_cells : int;
   label_cells : int;
   bar_cells : int;
+  percent_cells : int;
   blank_name : string;
   continuation : string;
   continuation_cells : int;
@@ -704,12 +827,17 @@ let layout_for ~show_names ~width entries =
         match entry.de_body with Window_lines lines -> lines | State_text _ -> [])
       entries
   in
+  let percent_cells = max percent_cells (widest (fun line -> cells_of line.percent) window_lines) in
   let name_cells =
     if not show_names then 0
     else
+      let minimum_window =
+        1 + label_cells_min + 1 + bar_frame_cells + bar_cells_min + 1 + percent_cells
+      in
       min
-        (widest (fun entry -> cells_of entry.de_name) entries)
-        (min name_cells_cap (max name_cells_min (budget / name_width_divisor)))
+        (widest (fun entry -> cells_of (marked ~attention:entry.de_attention entry.de_name)) entries)
+        (min (max 0 (budget - minimum_window))
+           (min name_cells_cap (max name_cells_min (budget / name_width_divisor))))
   in
   let barred_lines =
     List.filter
@@ -722,20 +850,31 @@ let layout_for ~show_names ~width entries =
     budget - name_cells - 1 - 1 - gauge_cells_min - cells_of detail_gap - widest_base
   in
   let label_cells =
+    let available =
+      max 0 (budget - name_cells - 1 - 1 - bar_frame_cells - 1 - percent_cells)
+    in
     min
-      (widest (fun line -> cells_of line.label) window_lines)
-      (min label_cells_cap (max label_cells_min label_room))
+      available
+      (min
+         (widest (fun line -> cells_of (marked ~attention:line.at_limit line.label)) window_lines)
+         (min label_cells_cap (max label_cells_min label_room)))
   in
   let head_cells_without_bar =
     name_cells + 1 + label_cells + 1 + bar_frame_cells + 1 + percent_cells
   in
   let detail_room = budget - head_cells_without_bar - cells_of detail_gap in
-  let bar_cells = max bar_cells_min (min bar_cells_default (detail_room - widest_base)) in
+  let available_bar =
+    max 0 (budget - name_cells - 1 - label_cells - 1 - bar_frame_cells - 1 - percent_cells)
+  in
+  let bar_cells =
+    min available_bar (max bar_cells_min (min bar_cells_default (detail_room - widest_base)))
+  in
   let blank_name = String.make name_cells ' ' in
   { width
   ; name_cells
   ; label_cells
   ; bar_cells
+  ; percent_cells
   ; blank_name
   ; continuation = indent ^ blank_name ^ " "
   ; continuation_cells = max 1 (budget - name_cells - 1)
@@ -745,17 +884,32 @@ let layout_for ~show_names ~width entries =
 let draw_entry layout tone entry =
   let module Text = Masc_tui_message_layout in
   let name_cell tone name =
-    Ansi.bold ^ tone ^ Text.fit_middle layout.name_cells name ^ Ansi.reset
+    Ansi.bold ^ tone ^ Text.fit_middle layout.name_cells (marked ~attention:entry.de_attention name) ^ Ansi.reset
   in
   let window_row tone ~first line =
     let name = match first with Some name -> name_cell tone name | None -> layout.blank_name in
-    let label = Text.fit_middle layout.label_cells line.label in
-    let gauge_width = layout.bar_cells + bar_frame_cells + 1 + percent_cells in
+    let label_overflows = cells_of (marked ~attention:line.at_limit line.label) > layout.label_cells in
+    let label =
+      if label_overflows then
+        Text.fit_middle layout.label_cells (if line.at_limit then "!" else "")
+      else Text.fit_middle layout.label_cells (marked ~attention:line.at_limit line.label)
+    in
+    let label_rows =
+      if not label_overflows then []
+      else
+        let prefix = indent ^ name ^ " " in
+        let continuation = indent ^ layout.blank_name ^ " " in
+        wrap_marked ~width:(layout.width - cells_of prefix) ~attention:line.at_limit line.label
+        |> List.mapi (fun index text ->
+             (if index = 0 then prefix else continuation) ^ style line.tone text)
+    in
+    let meter_name = if label_overflows then layout.blank_name else name in
+    let gauge_width = layout.bar_cells + bar_frame_cells + 1 + layout.percent_cells in
     let gauge =
       match line.share with
       | Some share ->
           meter_open ^ meter ~cells:layout.bar_cells share ^ meter_close ^ " "
-          ^ pad_left line.percent percent_cells
+          ^ pad_left line.percent layout.percent_cells
       | None -> String.make gauge_width ' '
     in
     (* A row with no bar has an empty gauge. When the detail does not fit
@@ -765,7 +919,7 @@ let draw_entry layout tone entry =
       | Some _ -> [ (label ^ " " ^ gauge, detail_gap) ]
       | None -> [ (label ^ " " ^ gauge, detail_gap); (label, " ") ]
     in
-    let head body = indent ^ name ^ " " ^ style line.tone body in
+    let head body = indent ^ meter_name ^ " " ^ style line.tone body in
     let placements =
       List.concat_map
         (fun (body, gap) ->
@@ -775,13 +929,29 @@ let draw_entry layout tone entry =
     let fits (body, gap, detail) =
       cells_of (head body) + cells_of gap + cells_of detail <= layout.width
     in
-    match List.find_opt fits placements with
-    | Some (body, gap, detail) -> [ head body ^ gap ^ style line.detail_tone detail ]
-    | None ->
-        head (rstrip_spaces (label ^ " " ^ gauge))
-        :: List.map
-             (fun wrapped -> layout.continuation ^ style line.detail_tone wrapped)
-             (Text.wrap_words ~max_cells:layout.continuation_cells line.detail)
+    let wrapped_detail () =
+      List.map
+        (fun wrapped -> layout.continuation ^ style line.detail_tone wrapped)
+        (wrap_marked ~width:layout.continuation_cells ~attention:line.at_limit line.detail)
+    in
+    if Option.is_some line.share
+       && ((line.at_limit && layout.label_cells = 0)
+           || cells_of (head (rstrip_spaces (label ^ " " ^ gauge))) > layout.width)
+    then
+      let labels =
+        if label_overflows then label_rows
+        else [ indent ^ name ^ " " ^ style line.tone (marked ~attention:line.at_limit line.label) ]
+      in
+      labels
+      @ List.map
+          (fun value -> layout.continuation ^ style line.tone value)
+          (wrap_marked ~width:layout.continuation_cells ~attention:line.at_limit line.percent)
+      @ wrapped_detail ()
+    else
+      label_rows
+      @ (match List.find_opt fits placements with
+         | Some (body, gap, detail) -> [ head body ^ gap ^ style line.detail_tone detail ]
+         | None -> head (rstrip_spaces (label ^ " " ^ gauge)) :: wrapped_detail ())
   in
   let note_lines ?tone text =
     List.map
@@ -806,19 +976,31 @@ let draw_entry layout tone entry =
   rows
   @ (match entry.de_tag with
      | None -> []
-     | Some tag -> note_lines ~tone:(Theme.bad ()) ("Catalogue \xc2\xb7 " ^ tag))
+     | Some tag -> note_lines ~tone:(Theme.text_status Masc_tui_theme.Bad) ("Catalogue \xc2\xb7 " ^ tag))
   @ (match entry.de_email with
      | None -> []
      | Some email -> note_lines ~tone:(Theme.recede ()) email)
 
-let group_heading section entries =
-  " " ^ Ansi.bold ^ section_tone section
-  ^ Printf.sprintf "%s (%d)" (section_title section) (List.length entries)
-  ^ Ansi.reset
+let group_heading_text section entries =
+  Printf.sprintf "%s (%d)" (section_title section) (List.length entries)
 
-let hidden_unusable_heading section entries =
-  group_heading section entries
-  ^ Theme.recede () ^ " \xc2\xb7 hidden \xc2\xb7 x:show" ^ Ansi.reset
+let wrap_group_text ~width ~tone text =
+  (* Preserve the six-cell [x:show] key on very narrow screens. *)
+  let indent = if width > 6 then " " else "" in
+  Masc_tui_message_layout.wrap_words ~max_cells:(max 1 (width - String.length indent)) text
+  |> List.map (fun line -> indent ^ tone ^ line ^ Ansi.reset)
+
+let group_heading ~width section entries =
+  wrap_group_text ~width ~tone:(Ansi.bold ^ section_tone section)
+    (group_heading_text section entries)
+
+let hidden_limit_heading ~width section entries =
+  let note = "hidden \xc2\xb7 x:show" in
+  match group_heading ~width section entries with
+  | [ heading ]
+    when cells_of (group_heading_text section entries ^ " \xc2\xb7 " ^ note) + 1 <= width ->
+      [ heading ^ Theme.recede () ^ " \xc2\xb7 " ^ note ^ Ansi.reset ]
+  | headings -> headings @ wrap_group_text ~width ~tone:(Theme.recede ()) note
 
 (* One empty line between blocks so each reads as a unit. *)
 let rec separated = function
@@ -826,15 +1008,53 @@ let rec separated = function
   | [ block ] -> block
   | block :: rest -> block @ ("" :: separated rest)
 
-let draw_groups ~show_unusable ~width groups =
+let draw_stacked_entry ~width ~tone entry =
+  let wrap tone text =
+    Masc_tui_message_layout.wrap_words ~max_cells:(max 1 width) text
+    |> List.map (style tone) in
+  let name =
+    wrap_marked ~width ~attention:entry.de_attention entry.de_name
+    |> List.map (fun text -> Ansi.bold ^ tone ^ text ^ Ansi.reset) in
+  let body = match entry.de_body with
+    | State_text text -> wrap None text
+    | Window_lines lines ->
+        List.map (fun line ->
+          (wrap_marked ~width ~attention:line.at_limit line.label |> List.map (style line.tone))
+          @ (wrap_marked ~width ~attention:line.at_limit line.percent |> List.map (style line.tone))
+          @ (wrap_marked ~width ~attention:line.at_limit line.detail |> List.map (style line.detail_tone))) lines |> separated in
+  name @ body
+  @ Option.fold ~none:[] ~some:(fun tag -> wrap (Some (Theme.text_status Masc_tui_theme.Bad)) ("Catalogue · " ^ tag)) entry.de_tag
+  @ Option.fold ~none:[] ~some:(wrap (Some (Theme.recede ()))) entry.de_email
+
+let draw_groups ~show_limit_exhausted ~width groups =
   let entries = List.concat_map snd groups in
   let layout = layout_for ~show_names:true ~width entries in
   let draw_group (section, entries) =
     match section with
-    | Unusable_now when not show_unusable -> [ hidden_unusable_heading section entries ]
-    | Unusable_now | Usable | No_report ->
-        group_heading section entries
-        :: separated (List.map (draw_entry layout (section_tone section)) entries)
+    | At_limit_or_exhausted when not show_limit_exhausted ->
+        hidden_limit_heading ~width section entries
+    | At_limit_or_exhausted | Other_windows | No_windows ->
+        let tone = section_tone section in
+        let draw entry =
+          if width < minimum_inline_cells then draw_stacked_entry ~width ~tone entry
+          else
+          let label_overflows =
+            match entry.de_body with
+            | State_text _ -> false
+            | Window_lines lines ->
+                List.exists (fun line -> cells_of (marked ~attention:line.at_limit line.label) > layout.label_cells) lines
+          in
+          if cells_of (marked ~attention:entry.de_attention entry.de_name) <= layout.name_cells && not label_overflows then
+            draw_entry layout tone entry
+          else
+            let heading =
+              wrap_marked ~width:(width - 2) ~attention:entry.de_attention entry.de_name
+              |> List.map (fun line -> indent ^ Ansi.bold ^ tone ^ line ^ Ansi.reset)
+            in
+            heading @ draw_entry (layout_for ~show_names:false ~width [ entry ]) tone entry
+        in
+        group_heading ~width section entries
+        @ separated (List.map draw entries)
   in
   List.map (clip width) (separated (List.map draw_group groups))
 
@@ -862,10 +1082,16 @@ let rec pairs = function
 (* An account's windows as a card titled with its name. The name column is
    empty inside the card: the title already says it. *)
 let account_card ~tone entry =
-  { Masc_tui_card.title = entry.de_name
+  { Masc_tui_card.title = marked ~attention:entry.de_attention entry.de_name
   ; body =
       (fun ~cells ->
-        draw_entry (layout_for ~show_names:false ~width:cells [ entry ]) tone entry)
+        let full_name =
+          if cells_of (marked ~attention:entry.de_attention entry.de_name) <= max 0 (cells - 1) then []
+          else
+            wrap_marked ~width:cells ~attention:entry.de_attention entry.de_name
+            |> List.map (fun line -> Ansi.bold ^ tone ^ line ^ Ansi.reset)
+        in
+        full_name @ draw_entry (layout_for ~show_names:false ~width:cells [ entry ]) tone entry)
   }
 
 (* Each pair of accounts is one row of cards that end on the same line; a lone
@@ -895,29 +1121,30 @@ let draw_card_rows ~width ~tone entries =
   in
   separated (List.map row (pairs entries))
 
-let draw_cards ~show_unusable ~width groups =
+let draw_cards ~show_limit_exhausted ~width groups =
   let draw_group (section, entries) =
     match section with
-    | Unusable_now when not show_unusable -> [ hidden_unusable_heading section entries ]
-    | Unusable_now | Usable | No_report ->
-        group_heading section entries
-        :: draw_card_rows ~width ~tone:(section_tone section) entries
+    | At_limit_or_exhausted when not show_limit_exhausted ->
+        hidden_limit_heading ~width section entries
+    | At_limit_or_exhausted | Other_windows | No_windows ->
+        group_heading ~width section entries
+        @ draw_card_rows ~width ~tone:(section_tone section) entries
   in
   List.map (clip width) (separated (List.map draw_group groups))
 
-type blocked_count =
-  | Blocked_unknown
-  | Blocked_accounts of int
+type exhausted_count =
+  | Exhausted_unknown
+  | Exhausted_accounts of int
 
 type counts = {
   accounts : int;
   reporting : int;
   at_limit : int;
-  blocked : blocked_count;
+  exhausted : exhausted_count;
 }
 
 (* The header's four numbers. [at_limit] counts accounts, by the same
-   {!window_at_limit} that puts a window in Unusable_now. *)
+   {!window_at_limit} that puts a window in At_limit_or_exhausted. *)
 let counts ~runtimes (accounts : Masc.Tui_decode_usage.provider_usage_account list) =
   let count keep = List.length (List.filter keep accounts) in
   { accounts = List.length accounts
@@ -934,40 +1161,70 @@ let counts ~runtimes (accounts : Masc.Tui_decode_usage.provider_usage_account li
               List.exists window_at_limit (first :: rest)
           | Masc.Tui_decode_usage.Account_not_reported_since_start
           | Masc.Tui_decode_usage.Account_reported_no_windows _ -> false)
-  ; blocked =
+  ; exhausted =
       (match (runtimes : Types.overview_quota_reading) with
        | Types.Quota_read _ ->
-           Blocked_accounts
+           Exhausted_accounts
              (count (fun account ->
-                  observed_blocked (observed_exhaustion ~runtimes account.pua_scope)))
-       | Types.Quota_unread | Types.Quota_failed _ -> Blocked_unknown)
+                  is_observed_exhausted (observed_exhaustion ~runtimes account.pua_scope)))
+       | Types.Quota_unread | Types.Quota_failed _ -> Exhausted_unknown)
   }
 
 let title_text () = Printf.sprintf " %sPlan usage%s" Ansi.bold Ansi.reset
 
-let section_with ~draw ~(providers : Types.overview_providers_reading) ~runtimes
-    ~account_emails ~now ~width =
+(* Find the formerly visible prefix without segmenting a potentially huge
+   error tail. Grow the UTF-8 sample only until the next grapheme establishes
+   the cut; a single long grapheme may itself need the whole sample. *)
+let error_visible_prefix ~width text =
+  let length = String.length text in
+  let rec find sample_bytes =
+    let sample =
+      if sample_bytes >= length then text
+      else String_util.utf8_prefix ~max_bytes:sample_bytes text in
+    let visible, remaining = Masc_tui_message_layout.split_at_cells sample width in
+    (* The final sampled grapheme can still change width when its next scalar
+       arrives, so a cut is stable only once its following boundary is seen. *)
+    let stable_cut =
+      not (String.equal remaining "")
+      && List.exists (fun boundary ->
+           boundary > String.length visible && boundary < String.length sample)
+           (Masc_tui_message_layout.input_boundaries sample) in
+    if stable_cut || sample_bytes >= length then visible
+    else
+      let next = if sample_bytes > length / 2 then length else sample_bytes * 2 in
+      find next in
+  find (min length (4 * (max 1 width + 1)))
+
+let section_with ~draw ~bound ~(providers : Types.overview_providers_reading) ~runtimes
+    ~account_emails ~now ~width ~rows =
+  let detail text =
+    let text = Terminal_text.single_line text in
+    (* Keep everything the old single row could show, even a grapheme with
+       more bytes than the viewport bound. Bound only the newly exposed tail. *)
+    let visible = error_visible_prefix ~width:(max 1 width) text in
+    let tail = String.sub text (String.length visible) (String.length text - String.length visible) in
+    visible ^ text_for_viewport ~columns:(max 20 width) ~rows tail in
   match providers with
   | Types.Providers_unread -> None
   | Types.Providers_failed reason ->
       Some
         { title = title_text ()
         ; lines =
-            [ Printf.sprintf " %susage data unavailable: %s%s" (Theme.warn ())
-                (Terminal_text.single_line reason) Ansi.reset
+            [ Printf.sprintf " %susage data unavailable: %s%s" (Theme.text_status Masc_tui_theme.Warn)
+                (detail reason) Ansi.reset
             ]
         }
   | Types.Providers_read { Masc.Tui_decode_usage.puws_since = _; puws_accounts } ->
       let rows =
-        draw (drawn_groups ~now ~account_emails (plan ~now ~runtimes puws_accounts))
+        draw (bound (drawn_groups ~now ~account_emails (plan ~now ~runtimes puws_accounts)))
       in
       (* Without the runtime rows the exhausted tag cannot be drawn; the
          section says so instead of drawing every account untagged. *)
       let runtimes_note =
         match (runtimes : Types.overview_quota_reading) with
         | Types.Quota_failed reason ->
-            [ Printf.sprintf " %sexhausted tags unread: %s%s" Ansi.dim
-                (Terminal_text.single_line reason) Ansi.reset
+            [ Printf.sprintf " %sexhausted tags unread: %s%s" (Theme.text_status Masc_tui_theme.Warn)
+                (detail reason) Ansi.reset
             ]
         | Types.Quota_unread | Types.Quota_read _ -> []
       in
@@ -976,25 +1233,25 @@ let section_with ~draw ~(providers : Types.overview_providers_reading) ~runtimes
       let emails_note =
         match (account_emails : Types.overview_account_emails_reading) with
         | Types.Account_emails_failed reason ->
-            [ Printf.sprintf " %saccount emails unread: %s%s" Ansi.dim
-                (Terminal_text.single_line reason) Ansi.reset
+            [ Printf.sprintf " %saccount emails unread: %s%s" (Theme.text_status Masc_tui_theme.Warn)
+                (detail reason) Ansi.reset
             ]
         | Types.Account_emails_read { unreadable_rows; _ } when unreadable_rows > 0 ->
-            [ Printf.sprintf " %saccount emails: %d rows this build cannot read%s" Ansi.dim
+            [ Printf.sprintf " %saccount emails: %d rows this build cannot read%s" (Theme.text_status Masc_tui_theme.Warn)
                 unreadable_rows Ansi.reset
             ]
         | Types.Account_emails_unread | Types.Account_emails_read _ -> []
       in
       let counts = counts ~runtimes puws_accounts in
-      let blocked =
-        match counts.blocked with
-        | Blocked_unknown -> "unknown"
-        | Blocked_accounts count -> string_of_int count
+      let exhausted =
+        match counts.exhausted with
+        | Exhausted_unknown -> "unknown"
+        | Exhausted_accounts count -> string_of_int count
       in
       let summary =
-        [ Printf.sprintf "Accounts %d \xc2\xb7 Reporting %d \xc2\xb7 At limit (reported) %d \xc2\xb7 Blocked (observed) %s"
-            counts.accounts counts.reporting counts.at_limit blocked
-        ; "Bar: share used at the last report \xc2\xb7 dim row: does not block model calls \xc2\xb7 v: Trend graphs" ]
+        [ Printf.sprintf "Accounts %d \xc2\xb7 Reporting %d \xc2\xb7 At limit (reported) %d \xc2\xb7 Exhausted (observed) %s"
+            counts.accounts counts.reporting counts.at_limit exhausted
+        ; "!: at limit or exhausted \xc2\xb7 Bar: used at last report \xc2\xb7 other use does not block model calls \xc2\xb7 v: Trend" ]
         |> List.concat_map (Masc_tui_message_layout.wrap_words ~max_cells:width) in
       let notes = runtimes_note @ emails_note in
       match rows with
@@ -1009,13 +1266,29 @@ let section_with ~draw ~(providers : Types.overview_providers_reading) ~runtimes
             ; lines = summary @ ("" :: rows) @ notes
             }
 
-let section ~providers ~runtimes ~account_emails ~now ~show_unusable ~width =
-  section_with ~draw:(draw_groups ~show_unusable ~width) ~providers ~runtimes
-    ~account_emails ~now ~width
-
-let section_cards ~providers ~runtimes ~account_emails ~now ~show_unusable ~width =
-  let draw =
-    if cards_fit ~width then draw_cards ~show_unusable ~width
-    else draw_groups ~show_unusable ~width
+let bound_groups ~width ~rows groups =
+  (* Below 20 columns, retain the former label bound while laying out at the
+     actual width. *)
+  let text = text_for_viewport ~columns:(max 20 width) ~rows in
+  let bound_entry entry =
+    let body =
+      match entry.de_body with
+      | State_text _ as state -> state
+      | Window_lines lines ->
+          Window_lines (List.map (fun line ->
+            { line with label = text line.label }) lines)
+    in
+    { entry with de_name = text entry.de_name; de_body = body }
   in
-  section_with ~draw ~providers ~runtimes ~account_emails ~now ~width
+  List.map (fun (section, entries) -> section, List.map bound_entry entries) groups
+
+let section ~providers ~runtimes ~account_emails ~now ~show_limit_exhausted ~width ~rows =
+  section_with ~draw:(draw_groups ~show_limit_exhausted ~width) ~bound:(bound_groups ~width ~rows)
+    ~providers ~runtimes ~account_emails ~now ~width ~rows
+
+let section_cards ~providers ~runtimes ~account_emails ~now ~show_limit_exhausted ~width ~rows =
+  let draw =
+    if cards_fit ~width then draw_cards ~show_limit_exhausted ~width
+    else draw_groups ~show_limit_exhausted ~width
+  in
+  section_with ~draw ~bound:(bound_groups ~width ~rows) ~providers ~runtimes ~account_emails ~now ~width ~rows

@@ -162,12 +162,21 @@ let board_reactions_batch ~targets ~voter =
   | [] -> []
   | _ -> Board_dispatch.list_reactions_batch ~targets ?user_id:voter ()
 
+module Reaction_target_map = Map.Make (struct
+  type t = Board.reaction_target_type * string
+
+  let compare (t1, id1) (t2, id2) =
+    let c = Board.compare_reaction_target_type t1 t2 in
+    if c <> 0 then c else String.compare id1 id2
+end)
+
 let board_reactions_lookup rows =
-  let table = Hashtbl.create (List.length rows) in
-  List.iter
-    (fun (target, summaries) -> Hashtbl.replace table target summaries)
-    rows;
-  fun target -> Hashtbl.find_opt table target |> Option.value ~default:[]
+  let table =
+    List.fold_left
+      (fun acc (target, summaries) -> Reaction_target_map.add target summaries acc)
+      Reaction_target_map.empty rows
+  in
+  fun target -> Reaction_target_map.find_opt target table |> Option.value ~default:[]
 
 let board_reaction_fields = function
   | None -> []

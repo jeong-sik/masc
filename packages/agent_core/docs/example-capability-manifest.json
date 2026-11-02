@@ -1,5 +1,5 @@
 {
-  "_comment": "Agent Core contract §5.3 Phase 5 catalog draft — cascade.toml × AGENT_CORE catalog 1:1 identity mapping. Vendor docs research applied 2026-05-26. Load with Capability_manifest.load_file and install with Capability_manifest.set_global.",
+  "_comment": "JSON model capability declarations. Parse with Capability_manifest.load_file, compose with Model_catalog.with_model_overrides, then select provider bindings or install the composed Model_catalog. Model facts below are illustrative declarations, not live endpoint verification.",
   "schema_version": 2,
   "models": [
     {

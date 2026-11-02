@@ -32,10 +32,14 @@ let selection_to_json (selection : selection) =
 let selection_of_json json =
   let* fields = fields ["anchor"; "head"] json in
   let bytes name = match List.assoc_opt name fields with
-    | Some (`List values) -> List.fold_right (fun value rest ->
-        let* rest = rest in match value with
-        | `Int byte when byte >= 0 && byte <= 255 -> Ok (byte :: rest)
-        | _ -> Error "invalid relative-position byte") values (Ok [])
+    | Some (`List values) ->
+      let rec loop acc = function
+        | [] -> Ok (List.rev acc)
+        | `Int byte :: rest when byte >= 0 && byte <= 255 ->
+          loop (byte :: acc) rest
+        | _ :: _ -> Error "invalid relative-position byte"
+      in
+      loop [] values
     | _ -> Error "missing relative position" in
   let* anchor = bytes "anchor" in let* head = bytes "head" in
   Ok { anchor; head }

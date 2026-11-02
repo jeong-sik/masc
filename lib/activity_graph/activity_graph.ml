@@ -158,14 +158,14 @@ let collect_event_files config =
   else
     Sys.readdir root
     |> Array.to_list
-    |> List.sort compare
+    |> List.sort String.compare
     |> List.filter_map (fun month ->
            let month_path = Filename.concat root month in
            if Sys.file_exists month_path && Sys.is_directory month_path then
              Some
                (Sys.readdir month_path
                |> Array.to_list
-               |> List.sort compare
+               |> List.sort String.compare
                |> List.filter_map (fun name ->
                       if Filename.check_suffix name ".jsonl" then
                         Some (Filename.concat month_path name)
@@ -1189,82 +1189,99 @@ let span_end_classification = function
 
 
 
+module Agent_set = Set.Make (String)
+
+module Span_key_map = Map.Make (struct
+    type t = string * string option
+
+    let compare (a1, s1) (a2, s2) =
+      let c = String.compare a1 a2 in
+      if c <> 0 then c else Option.compare String.compare s1 s2
+  end)
+
 let build_agent_spans_json ~events ~events_store_total ~limit =
   let now_ms = now_ts_ms () in
-  let open_spans
-    : (string * string option, int * agent_span_kind * string) Hashtbl.t
-    =
-    Hashtbl.create 32
+  let open_spans, closed_spans_rev, agents_set =
+    List.fold_left
+      (fun (open_spans, closed_spans, agents_set) (e : event) ->
+        let agent_id =
+          match e.actor with
+          | Some a -> Some a.id
+          | None -> None
+        in
+        let subject_id =
+          match e.subject with
+          | Some s -> Some s.id
+          | None -> None
+        in
+        match agent_id with
+        | None -> open_spans, closed_spans, agents_set
+        | Some aid ->
+          let agents_set = Agent_set.add aid agents_set in
+          let kind = drawn_event_kind_of_string e.kind in
+          let open_spans =
+            match span_start_kind kind with
+            | Some sk ->
+              let label =
+                match subject_id with
+                | Some sid -> sid
+                | None -> e.kind
+              in
+              Span_key_map.add (aid, subject_id) (e.ts_ms, sk, label) open_spans
+            | None -> open_spans
+          in
+          let open_spans, closed_spans =
+            match span_end_classification kind with
+            | Some (ek, status, closer) ->
+              (* Verdicts retain their authority as actor. Their producer
+                 owns the span; direct cancellations use the acting owner. *)
+              let closing_aid =
+                match closer with
+                | Task_producer ->
+                  (match
+                     Json_util.assoc_member_opt
+                       Event_kind.Task.producer_payload_key
+                       e.payload
+                   with
+                   | Some (`String name) when String.trim name <> "" -> name
+                   | Some _ | None -> aid)
+                | Acting_agent -> aid
+              in
+              let key = (closing_aid, subject_id) in
+              (match Span_key_map.find_opt key open_spans with
+               | Some (start_ms, sk, label) when sk = ek ->
+                 ( Span_key_map.remove key open_spans
+                 , { agent = closing_aid
+                   ; start_ms
+                   ; end_ms = e.ts_ms
+                   ; span_kind = sk
+                   ; label
+                   ; span_status = status
+                   }
+                   :: closed_spans )
+               | None | Some _ -> open_spans, closed_spans)
+            | None -> open_spans, closed_spans
+          in
+          open_spans, closed_spans, agents_set)
+      (Span_key_map.empty, [], Agent_set.empty)
+      events
   in
-  let closed_spans : agent_span list ref = ref [] in
-  let agents_set : (string, bool) Hashtbl.t = Hashtbl.create 16 in
-  List.iter (fun (e : event) ->
-    let agent_id = match e.actor with
-      | Some a -> Some a.id
-      | None -> None
-    in
-    let subject_id = match e.subject with
-      | Some s -> Some s.id
-      | None -> None
-    in
-    match agent_id with
-    | None -> ()
-    | Some aid ->
-        Hashtbl.replace agents_set aid true;
-        let kind = drawn_event_kind_of_string e.kind in
-        (match span_start_kind kind with
-         | Some sk ->
-             let label = match subject_id with
-               | Some sid -> sid
-               | None -> e.kind
-             in
-             Hashtbl.replace open_spans (aid, subject_id) (e.ts_ms, sk, label)
-         | None -> ());
-        (match span_end_classification kind with
-         | Some (ek, status, closer) ->
-             (* Verdicts retain their authority as actor. Their producer
-                owns the span; direct cancellations use the acting owner. *)
-             let closing_aid =
-               match closer with
-               | Task_producer ->
-                   (match
-                      Json_util.assoc_member_opt
-                        Event_kind.Task.producer_payload_key
-                        e.payload
-                    with
-                    | Some (`String name) when String.trim name <> "" -> name
-                    | Some _ | None -> aid)
-               | Acting_agent -> aid
-             in
-             let key = (closing_aid, subject_id) in
-             (match Hashtbl.find_opt open_spans key with
-              | Some (start_ms, sk, label) when sk = ek ->
-                  Hashtbl.remove open_spans key;
-                  closed_spans := {
-                    agent = closing_aid;
-                    start_ms;
-                    end_ms = e.ts_ms;
-                    span_kind = sk;
-                    label;
-                    span_status = status;
-                  } :: !closed_spans
-              | None | Some _ -> ())
-         | None -> ())
-  ) events;
-  Hashtbl.iter (fun (aid, _subj) (start_ms, sk, label) ->
-    closed_spans := {
-      agent = aid;
-      start_ms;
-      end_ms = now_ms;
-      span_kind = sk;
-      label;
-      span_status = Span_open;
-    } :: !closed_spans
-  ) open_spans;
-  let all_spans = List.rev !closed_spans in
-  let agents = Hashtbl.fold (fun k _ acc -> k :: acc) agents_set []
-    |> List.sort String.compare
+  let closed_spans_rev =
+    Span_key_map.fold
+      (fun (aid, _subj) (start_ms, sk, label) acc ->
+        { agent = aid
+        ; start_ms
+        ; end_ms = now_ms
+        ; span_kind = sk
+        ; label
+        ; span_status = Span_open
+        }
+        :: acc)
+      open_spans
+      closed_spans_rev
   in
+  let all_spans = List.rev closed_spans_rev in
+  let agents = Agent_set.elements agents_set in
   let min_ms = List.fold_left (fun m (s : agent_span) -> min m s.start_ms) max_int all_spans in
   let max_ms = List.fold_left (fun m (s : agent_span) -> max m s.end_ms) 0 all_spans in
   let time_range_min = if all_spans = [] then now_ms else min_ms in

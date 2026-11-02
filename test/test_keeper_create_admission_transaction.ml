@@ -464,14 +464,12 @@ activation_mode = "on_demand"
 
 let with_boot_runtime_catalog f =
   let path = Filename.temp_file "keeper-boot-runtime-catalog" ".toml" in
-  let previous = Llm_provider.Model_catalog.global () in
+  let previous = Llm_provider.Catalog_snapshot.current () in
   let runtime_snapshot = Runtime.For_testing.snapshot () in
   Fun.protect
     ~finally:(fun () ->
       Runtime.For_testing.restore runtime_snapshot;
-      (match previous with
-       | Some catalog -> Llm_provider.Model_catalog.set_global catalog
-       | None -> Llm_provider.Model_catalog.clear_global ());
+      (Llm_provider.Catalog_snapshot.publish previous);
       Sys.remove path)
     (fun () ->
       write_file path
@@ -492,7 +490,7 @@ supports_tools = true
       match Llm_provider.Model_catalog.load_file path with
       | Error detail -> failf "boot fixture catalog rejected: %s" detail
       | Ok catalog ->
-        Llm_provider.Model_catalog.set_global catalog;
+        (Llm_provider.Catalog_snapshot.publish (Masc_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None)));
         f ())
 ;;
 

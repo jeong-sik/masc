@@ -174,16 +174,23 @@ let seed_attachment base_path provider =
    with
    | Ok () -> ()
    | Error message -> Alcotest.failf "seeding the access token failed: %s" message);
+  let attachment = Keeper_oauth_pending.capture_attachment
+    (Keeper_oauth_pending.for_base_path base_path) ~keeper
+    ~provider_id:provider.Keeper_oauth_provider.id in
+  let publication = match Keeper_oauth_pending.begin_catalog attachment with
+    | Some publication -> publication
+    | None -> Alcotest.fail "seeding the catalog was superseded" in
   match
-    Masc.Keeper_identity_tools.save ~base_path ~keeper_name:keeper
+    Masc.Keeper_identity_tools.save ~publication
       { Masc.Keeper_identity_tools.provider_id = provider.Keeper_oauth_provider.id
       ; provider_label = provider.Keeper_oauth_provider.label
       ; discovered_at = 0.
       ; tools = []
       }
   with
-  | Ok () -> ()
-  | Error message -> Alcotest.failf "seeding the catalog failed: %s" message
+  | Keeper_oauth_pending.Published () -> ()
+  | Keeper_oauth_pending.Publication_superseded -> Alcotest.fail "seeding the catalog was superseded"
+  | Keeper_oauth_pending.Publication_failed message -> Alcotest.failf "seeding the catalog failed: %s" message
 ;;
 
 let test_the_route_removes_the_token_the_catalog_and_writes_a_receipt () =

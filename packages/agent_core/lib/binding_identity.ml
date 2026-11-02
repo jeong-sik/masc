@@ -31,30 +31,27 @@ type t =
 
 let canonical_uri value = Uri.of_string value |> Uri.canonicalize
 
-let provider_and_binding config =
+let provider_of_config config =
   match config.PC.provider_id with
-  | Some provider_id ->
-    (match Provider_runtime_binding.find provider_id with
-     | Some binding -> Registered binding.id, Some binding
-     | None -> Registered (String.trim provider_id |> String.lowercase_ascii), None)
-  | None -> Unregistered config.PC.kind, None
+  | Some provider_id -> Registered (String.trim provider_id |> String.lowercase_ascii)
+  | None -> Unregistered config.PC.kind
 ;;
 
-let auth_scheme_of_binding (binding : Provider_runtime_binding.t) =
-  match binding.auth with
-  | Provider_runtime_binding.No_auth -> No_auth
-  | Provider_runtime_binding.Api_key -> Api_key
-  | Provider_runtime_binding.Setup_token -> Setup_token
+let auth_scheme_of_selection (identity : PC.provider_identity) =
+  match identity.authentication with
+  | PC.No_auth -> No_auth
+  | PC.Api_key -> Api_key
+  | PC.Setup_token -> Setup_token
 ;;
 
 let transport_for_call ~injected = if injected then Injected else Http
 
 let of_provider_config ~transport config =
   let open Result_syntax in
-  let provider, binding = provider_and_binding config in
+  let provider = provider_of_config config in
   let auth_scheme, credential_scope =
-    match binding with
-    | Some binding -> auth_scheme_of_binding binding, binding.credential_scope
+    match PC.selected_provider_identity config with
+    | Some identity -> auth_scheme_of_selection identity, identity.credential_scope
     | None -> (if Secret.is_empty config.PC.api_key then No_auth else Api_key), None
   in
   let+ model_id = Llm_provider.Model_id.of_string config.PC.model_id in

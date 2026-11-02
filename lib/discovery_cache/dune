@@ -11,6 +11,8 @@
   masc_core
   masc.agent_core.llm_provider
    masc.agent_core.digest
+  mtime
+  mtime.clock
   yojson
   eio
   time_compat))

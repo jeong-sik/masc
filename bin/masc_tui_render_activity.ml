@@ -90,11 +90,9 @@ let system_log_detail_lines (state : state) ~seq ~width =
         @ (match entry.sl_details with
            | `Null -> [ Ansi.dim, "  STRUCTURED DETAILS  none" ]
            | json ->
-               let source =
-                 "```json\n" ^ Yojson.Safe.pretty_to_string json ^ "\n```"
-               in
+               let source = Yojson.Safe.pretty_to_string json in
                (Ansi.bold, "  STRUCTURED DETAILS")
-               :: (document_markdown ~width source
+               :: (document_json ~width source
                    |> List.map (fun line -> Ansi.reset, "  " ^ line)))
       in
       core_fields @ metadata_fields @ details
@@ -611,7 +609,8 @@ let render_acting_evidence (state : state) entry =
   box_line_styled buf cols ~style:Ansi.dim
     (Printf.sprintf " Retained feed events: %d (selection pinned)" (List.length state.acting));
   box_line_styled buf cols ~style:Ansi.dim
-    (" " ^ Terminal_text.single_line (observer_replay_description state.observer_replay));
+    (" " ^ Terminal_text.single_line
+       (observer_replay_description ~source_loss:state.observer_source_loss state.observer_replay));
   box_divider buf cols;
   let lines =
     detail_section_lines ~first:true "1. 이벤트 식별 · 실행 컨텍스트 (Event Identity & Execution Context)"
@@ -635,8 +634,8 @@ let render_acting_evidence (state : state) entry =
           | None -> ["  " ^ label ^ ": not carried"]
           | Some value ->
               ("  " ^ label ^ " (producer-redacted JSON)")
-              :: (document_markdown ~width:(max 1 (framed_inner_width cols - 3))
-                    ("```json\n" ^ Yojson.Safe.pretty_to_string value ^ "\n```")
+              :: (document_json ~width:(max 1 (framed_inner_width cols - 3))
+                    (Yojson.Safe.pretty_to_string value)
                   |> List.map (fun line -> "  " ^ line)) in
         let preview label = function
           | None -> ["  " ^ label ^ ": not carried"]
@@ -733,6 +732,7 @@ let render_acting (state : state) =
               | Masc_tui_observer.Agent_input_required _
               | Masc_tui_observer.Tool_approval_completed
               | Masc_tui_observer.Telemetry
+              | Masc_tui_observer.Relay_subscription_loss _
               | Masc_tui_observer.Agent_core_other _ )
           ; _
           }
@@ -821,7 +821,8 @@ let render_acting (state : state) =
   box_line_styled buf cols ~style:(Theme.recede ())
     (Printf.sprintf "  %s%s%s%s" feed dropped undecodable unseen);
   box_line_styled buf cols ~style:(Theme.recede ())
-    ("  " ^ Terminal_text.single_line (observer_replay_description state.observer_replay));
+    ("  " ^ Terminal_text.single_line
+       (observer_replay_description ~source_loss:state.observer_source_loss state.observer_replay));
   box_line_styled buf cols ~style:(Theme.recede ())
     ("  " ^ Acting.filter_explanation state.acting_filter);
   (match Masc_tui_acting_pane.trace_unavailable_summary trace_reading.unavailable with

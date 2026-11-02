@@ -123,13 +123,15 @@ let terms text =
   end_wide ();
   List.rev !out
 
+module String_map = Map.Make (String)
+
 let counts_of terms =
-  let table = Hashtbl.create 64 in
-  List.iter
-    (fun term ->
-       Hashtbl.replace table term (1 + Option.value ~default:0 (Hashtbl.find_opt table term)))
-    terms;
-  table
+  List.fold_left
+    (fun acc term ->
+       let prev = Option.value ~default:0 (String_map.find_opt term acc) in
+       String_map.add term (prev + 1) acc)
+    String_map.empty
+    terms
 
 let scores ~query texts =
   let documents = List.map terms texts in
@@ -145,7 +147,7 @@ let scores ~query texts =
     let tables = List.map counts_of documents in
     let document_frequency term =
       List.fold_left
-        (fun seen table -> if Hashtbl.mem table term then seen + 1 else seen)
+        (fun seen table -> if String_map.mem term table then seen + 1 else seen)
         0
         tables
     in
@@ -166,7 +168,7 @@ let scores ~query texts =
          in
          List.fold_left
            (fun score (term, weight) ->
-              match Hashtbl.find_opt table term with
+              match String_map.find_opt term table with
               | None -> score
               | Some count ->
                 let count = float_of_int count in

@@ -39,4 +39,4 @@ area/keeper, area/dashboard, area/ci, area/collab, area/connector, area/continui
 ## 규칙
 
 - 축 라벨은 PR 당 각 하나입니다.
-- 리뷰·충돌·병합 상태는 `pr/*` 라벨이 아니라 GitHub 기본 필드와 리뷰 본문(`verdict: PASS head: <40자>` 첫 줄, `approve-guard: head <40자>` footer)으로 판정합니다.
+- 리뷰·충돌·병합 상태는 `pr/*` 라벨 대신 GitHub의 PR 필드와 리뷰 상태(`APPROVED`, `CHANGES_REQUESTED`)에서 확인합니다. 승인은 검토한 head를 기준으로 확인합니다.

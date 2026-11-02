@@ -29,19 +29,8 @@ let login_window_sec = 600.
    for. *)
 let client_name = "masc"
 
-(* In this process only, like the exchanges it holds. A restart between the
-   two halves loses the login, which is the correct outcome -- see
-   Keeper_oauth_pending. *)
-let pending_mutex = Mutex.create ()
-let pending_by_workspace = Hashtbl.create 1
-let pending_for_base_path base_path =
-  let key = base_path in
-  Mutex.lock pending_mutex;
-  Fun.protect ~finally:(fun () -> Mutex.unlock pending_mutex) (fun () ->
-    match Hashtbl.find_opt pending_by_workspace key with
-    | Some pending -> pending
-    | None -> let pending = Keeper_oauth_pending.create () in
-        Hashtbl.add pending_by_workspace key pending; pending)
+(* Callbacks, tool discovery and renewal share the process-local owner. *)
+let pending_for_base_path = Keeper_oauth_pending.for_base_path
 
 (* One path for every provider. Which login a callback belongs to is the
    state it echoes, not the URL it arrives at, and a state is unguessable and
@@ -173,6 +162,10 @@ let start ~clock ~(config : Workspace.config) ~keeper ~provider_id ~now =
   let transports = Keeper_identity_tools.http_transports ~clock in
   match provider.Provider.credential_source with
   | Provider.Github_cli { hostname } ->
+    let attachment =
+      Keeper_oauth_pending.capture_attachment (pending_for_base_path base_path)
+        ~keeper ~provider_id:provider.id
+    in
     (match Keeper_github_login_lane.stored_token ~config ~keeper_name:keeper ~hostname with
      | Error
          (( Keeper_github_login_lane.Remote_ssh_identity_on_endpoint _
@@ -187,7 +180,7 @@ let start ~clock ~(config : Workspace.config) ~keeper ~provider_id ~now =
             (Keeper_github_login_lane.stored_token_error_to_string problem))
      | Ok _ ->
        let* catalog =
-         Keeper_identity_tools.refresh ~mcp_post:transports.Keeper_identity_tools.mcp_post
+         Keeper_identity_tools.refresh ~attachment ~mcp_post:transports.Keeper_identity_tools.mcp_post
            ~config ~keeper_name:keeper ~provider ~now ()
        in
        Ok
@@ -230,10 +223,14 @@ let start ~clock ~(config : Workspace.config) ~keeper ~provider_id ~now =
         ])
 ;;
 
-let refresh_tools ~clock ~config ~keeper ~provider_id ~now =
+let refresh_tools ~clock ~(config : Workspace.config) ~keeper ~provider_id ~now =
   let* provider = provider_of_id provider_id in
+  let attachment =
+    Keeper_oauth_pending.capture_attachment (pending_for_base_path config.base_path)
+      ~keeper ~provider_id:provider.id
+  in
   let* catalog =
-    Keeper_identity_tools.refresh
+    Keeper_identity_tools.refresh ~attachment
       ~mcp_post:(Keeper_identity_tools.http_transports ~clock).Keeper_identity_tools.mcp_post
       ~config ~keeper_name:keeper ~provider ~now ()
   in
@@ -347,47 +344,44 @@ let publish_finished ~clock ~(config : Workspace.config) ~state ~finished ~now =
      again; losing this one means the Keeper works until the access token
      expires and then stops with nothing on disk to say why.
 
-     All credential writes run inside [while_admitted]: a newer start for this
+     All credential writes run inside [publish_credentials]: a newer start for this
      Keeper and provider supersedes the admitted callback only between two
      publications, never in the middle of one, and a publication that was
      superseded before its first write writes nothing. Superseding the table
      entry alone would only make the final [finish] a no-op after the older
      exchange had already overwritten the newer attempt's tokens. *)
-  let write_credentials () =
-  let* () =
-    match refresh_token with
-    | None ->
-      Keeper_secret_projection.delete_file_entry ~base_path ~keeper_name
-        ~scope:Keeper_secret_projection.Keeper_secret
-        ~container_path:provider.Provider.refresh_token_file
-    | Some value ->
-      Keeper_secret_projection.set_file_entry ~base_path ~keeper_name
-        ~scope:Keeper_secret_projection.Keeper_secret
-        ~container_path:provider.Provider.refresh_token_file ~value
+  let write = function
+    | Keeper_oauth_pending.Refresh_token ->
+        (match refresh_token with
+         | None ->
+             Keeper_secret_projection.delete_file_entry ~base_path ~keeper_name
+               ~scope:Keeper_secret_projection.Keeper_secret
+               ~container_path:provider.Provider.refresh_token_file
+         | Some value ->
+             Keeper_secret_projection.set_file_entry ~base_path ~keeper_name
+               ~scope:Keeper_secret_projection.Keeper_secret
+               ~container_path:provider.Provider.refresh_token_file ~value)
+    | Keeper_oauth_pending.Access_token ->
+        set_env ~name:provider.Provider.access_token_env
+          ~value:finished.Session.access_token
+    | Keeper_oauth_pending.Expiry ->
+        (* Clear a previous login's expiry even when this token never expires. *)
+        set_env ~name:provider.Provider.expires_at_env
+          ~value:(match expires_at with
+            | None -> ""
+            | Some expires_at -> Printf.sprintf "%.0f" expires_at)
   in
-  let* () =
-    set_env ~name:provider.Provider.access_token_env
-      ~value:finished.Session.access_token
-  in
-  (* Written even when there is no expiry, and empty is what says so. A
-     Keeper that was attached to this provider before may have a moment
-     recorded from that login; leaving it there would have the renewal check
-     read a stale clock against a credential that does not answer to it. *)
-  set_env ~name:provider.Provider.expires_at_env
-    ~value:
-      (match expires_at with
-       | None -> ""
-       | Some expires_at -> Printf.sprintf "%.0f" expires_at)
-  in
-  let* () =
+  let* attachment =
     match
-      Keeper_oauth_pending.while_admitted (pending_for_base_path base_path) ~state
-        write_credentials
+      Keeper_oauth_pending.publish_credentials (pending_for_base_path base_path)
+        ~state ~write
     with
-    | Some written -> written
-    | None ->
+    | Keeper_oauth_pending.Published attachment -> Ok attachment
+    | Keeper_oauth_pending.Publication_failed detail ->
+        Error ("credential publication did not complete; stored values may have changed: " ^ detail)
+    | Keeper_oauth_pending.Publication_superseded ->
       Error
-        "this login was superseded by a newer attempt for the same Keeper and \
+        "this login was superseded by disconnect or a newer attempt for the same Keeper and \
          provider; its credentials were not written"
   in
   (* The credentials are on disk by now, so this can fail without undoing
@@ -396,16 +390,17 @@ let publish_finished ~clock ~(config : Workspace.config) ~state ~finished ~now =
   let tool_discovery =
     Result.map
       (fun catalog -> List.length catalog.Keeper_identity_tools.tools)
-      (match Keeper_identity_tools.refresh
+      (match Keeper_identity_tools.refresh ~attachment
          ~mcp_post:(Keeper_identity_tools.http_transports ~clock).Keeper_identity_tools.mcp_post
          ~config ~keeper_name ~provider ~now () with
        | result -> result
        | exception exn ->
+           let backtrace = Printexc.get_raw_backtrace () in
            (* All credential writes completed before discovery began. Keep
               that fact even if discovery is cancelled or raises. *)
-           Keeper_oauth_pending.finish (pending_for_base_path base_path) ~state
-             (Ok Keeper_oauth_pending.Credentials_published_discovery_failed);
-           raise exn)
+           ignore (Keeper_oauth_pending.finish (pending_for_base_path base_path) ~state
+             (Ok Keeper_oauth_pending.Credentials_published_discovery_failed));
+           Printexc.raise_with_backtrace exn backtrace)
   in
   Ok
     { keeper = keeper_name
@@ -420,13 +415,19 @@ let publish_finished ~clock ~(config : Workspace.config) ~state ~finished ~now =
 let finish ~clock ~(config : Workspace.config) ~state ~code ~now =
   let pending = pending_for_base_path config.Workspace.base_path in
   let finish_result result =
-    Keeper_oauth_pending.finish pending ~state
+    let settlement = Keeper_oauth_pending.finish pending ~state
       (match result with
        | Error _ -> Error ()
        | Ok attached -> Ok (match attached.tool_discovery with
            | Ok count -> Keeper_oauth_pending.Tools_discovered count
-           | Error _ -> Keeper_oauth_pending.Credentials_published_discovery_failed));
-    result in
+           | Error _ -> Keeper_oauth_pending.Credentials_published_discovery_failed)) in
+    match settlement with
+    | Keeper_oauth_pending.Recorded -> result
+    | Keeper_oauth_pending.Not_admitted ->
+        (match result with
+         | Error _ -> result
+         | Ok _ -> Error "this login was superseded by disconnect or a newer attempt; it is no longer admitted")
+  in
   match Session.finish
       ~post:(Keeper_oauth_flow.http_post ~clock ~timeout_sec:rest_timeout_sec)
       ~pending ~state ~code ~now () with
@@ -435,8 +436,9 @@ let finish ~clock ~(config : Workspace.config) ~state ~code ~now =
       (match publish_finished ~clock ~config ~state ~finished ~now with
        | result -> finish_result result
        | exception exn ->
-           Keeper_oauth_pending.finish pending ~state (Error ());
-           raise exn)
+           let backtrace = Printexc.get_raw_backtrace () in
+           ignore (Keeper_oauth_pending.finish pending ~state (Error ()));
+           Printexc.raise_with_backtrace exn backtrace)
 
 let attempt_status_json ~base_path ~now ~keeper ~provider_id ~attempt_id =
   let fields = match Keeper_oauth_pending.status (pending_for_base_path base_path)
@@ -450,6 +452,15 @@ let attempt_status_json ~base_path ~now ~keeper ~provider_id ~attempt_id =
           | Tools_discovered count -> `Assoc ["kind", `String "discovered"; "count", `Int count]
           | Credentials_published_discovery_failed -> `Assoc ["kind", `String "failed"])]
     | Some Failed -> ["kind", `String "failed"]
+    | Some (Credential_publication_incomplete progress) ->
+        let name = function
+          | Keeper_oauth_pending.Refresh_token -> "refresh_token"
+          | Keeper_oauth_pending.Access_token -> "access_token"
+          | Keeper_oauth_pending.Expiry -> "expiry" in
+        ["kind", `String "credential_publication_incomplete";
+         "completed_writes", `List (List.map (fun stage -> `String (name stage)) progress.completed_writes);
+         "interrupted_write", `String (name progress.interrupted_write);
+         "interrupted_write_effect", `String "unknown"]
     | Some Expired -> ["kind", `String "expired"]
     | Some Superseded -> ["kind", `String "superseded"] in
   `Assoc fields
@@ -458,7 +469,7 @@ let reject_callback ~base_path ~state ~now =
   let pending = pending_for_base_path base_path in
   match Keeper_oauth_pending.take pending ~now ~state with
   | None -> ()
-  | Some _ -> Keeper_oauth_pending.finish pending ~state (Error ())
+  | Some _ -> ignore (Keeper_oauth_pending.finish pending ~state (Error ()))
 
 (* Detaching one Keeper from one provider. Three separate acts, reported
    separately because they can disagree: the local token is deleted, the
@@ -525,29 +536,11 @@ let disconnect ?transports ~clock ~(config : Workspace.config) ~keeper ~provider
   let base_path = config.Workspace.base_path in
   let* provider = provider_of_id provider_id in
   let keeper_name = keeper in
-  let scope = Keeper_secret_projection.Keeper_secret in
-  (* Read the refresh token before deleting it: it is the thing the provider
-     is asked to forget, and after the delete there is nothing left to send. *)
-  let* refresh_token =
-    Keeper_secret_projection.read_file_entry ~base_path ~keeper_name ~scope
-      ~container_path:provider.Provider.refresh_token_file
+  let* detached =
+    Keeper_identity_tools.detach_local ~base_path ~keeper_name ~provider
   in
-  let* () =
-    Keeper_secret_projection.delete_file_entry ~base_path ~keeper_name ~scope
-      ~container_path:provider.Provider.refresh_token_file
-  in
-  let* () =
-    Keeper_secret_projection.delete_env_entry ~base_path ~keeper_name ~scope
-      ~name:provider.Provider.access_token_env
-  in
-  let* () =
-    Keeper_secret_projection.delete_env_entry ~base_path ~keeper_name ~scope
-      ~name:provider.Provider.expires_at_env
-  in
-  let* tools_removed =
-    Keeper_identity_tools.forget ~base_path ~keeper_name
-      ~provider_id:provider.Provider.id
-  in
+  let refresh_token = detached.Keeper_identity_tools.refresh_token in
+  let tools_removed = detached.Keeper_identity_tools.tools_removed in
   let had_refresh_token =
     match refresh_token with
     | Some value -> not (String.equal (String.trim value) "")

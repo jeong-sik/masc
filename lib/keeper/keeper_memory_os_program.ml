@@ -11,7 +11,27 @@ type coordinate =
   | Atom_coordinate of string * int * int * int
   | Official_coordinate of string * int * int
 
-module Coordinates = Set.Make (struct type t = coordinate let compare = compare end)
+let compare_coordinate a b =
+  match a, b with
+  | Atom_coordinate (t1, b1, a1, m1), Atom_coordinate (t2, b2, a2, m2) ->
+    let c = String.compare t1 t2 in
+    if c <> 0 then c
+    else
+      let c = Int.compare b1 b2 in
+      if c <> 0 then c
+      else
+        let c = Int.compare a1 a2 in
+        if c <> 0 then c else Int.compare m1 m2
+  | Official_coordinate (t1, b1, m1), Official_coordinate (t2, b2, m2) ->
+    let c = String.compare t1 t2 in
+    if c <> 0 then c
+    else
+      let c = Int.compare b1 b2 in
+      if c <> 0 then c else Int.compare m1 m2
+  | Atom_coordinate _, Official_coordinate _ -> -1
+  | Official_coordinate _, Atom_coordinate _ -> 1
+
+module Coordinates = Set.Make (struct type t = coordinate let compare = compare_coordinate end)
 
 let coordinate = function
   | Source.Atom {trace_id;history_start_boundary_line;atom;message_in_atom;_} ->
@@ -73,15 +93,23 @@ let validate_decision (decision : decision) =
     else Error "a program decision requires one run and working state" in
   let* held = index_facts (facts decision.input_current) in
   let* added = index_facts decision.new_claims in
-  let unique values = List.length values = List.length (List.sort_uniq compare values) in
+  let unique ~compare values =
+    List.length values = List.length (List.sort_uniq compare values)
+  in
+  let compare_revision (a : revision) (b : revision) =
+    let c = String.compare a.superseded b.superseded in
+    if c <> 0 then c else String.compare a.superseded_by b.superseded_by
+  in
   let dropped_ids = Identity_set.of_list
     (List.map (fun (drop : dropped_statement) -> drop.memory_id) decision.dropped) in
   let absorbed_ids = Identity_set.of_list
     (List.map (fun (row : absorbed_statement) -> row.absorbed) decision.absorbed) in
   let* () =
-    if unique (List.map (fun (drop : dropped_statement) -> drop.memory_id) decision.dropped)
-       && unique (List.map (fun (row : absorbed_statement) -> row.absorbed) decision.absorbed)
-       && unique decision.revisions then Ok ()
+    if unique ~compare:String.compare
+         (List.map (fun (drop : dropped_statement) -> drop.memory_id) decision.dropped)
+       && unique ~compare:String.compare
+            (List.map (fun (row : absorbed_statement) -> row.absorbed) decision.absorbed)
+       && unique ~compare:compare_revision decision.revisions then Ok ()
     else Error "duplicate program decision relationship" in
   let* () =
     if Payloads.exists (fun identity _ -> Payloads.mem identity held) added

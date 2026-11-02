@@ -164,6 +164,7 @@ type delta =
           a turn-level diagnostic. *)
   | Approval_requested of
       { call_id : string
+      ; approval_id : string
       ; tool_name : string
       ; args : string
       ; question : string
@@ -173,6 +174,7 @@ type delta =
           why it was held; the pane draws it under the question. *)
   | Approval_settled of
       { call_id : string
+      ; approval_id : string
       ; outcome : string
       }
       (** How the wait ended -- the answer, or that none came. Drawn so a

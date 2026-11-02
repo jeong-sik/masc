@@ -905,6 +905,47 @@ let inflight_with_log ~keeper_name ~started_at deltas : Tui_types.inflight =
   }
 ;;
 
+let test_drawn_approval_is_only_a_candidate_until_presented () =
+  let cache = Masc_tui_ansi.terminal_size_cache in
+  let previous = Masc_tui_ansi.get_terminal_size () in
+  let set_size size =
+    ignore (Masc_tui_render_schedule.Terminal_size_cache.refresh cache
+      ~probe:(fun () -> Some size))
+  in
+  Fun.protect ~finally:(fun () -> set_size previous) (fun () ->
+    set_size (40, 160);
+    let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+    state.view <- Tui_types.Keepers Tui_types.Keeper_message;
+    state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
+    state.msg_target_keeper_name <- Some "alpha";
+    let entry = inflight_with_log ~keeper_name:"alpha" ~started_at:1.
+      [ Live.Run_started
+      ; Live.Approval_requested
+          { call_id = "call-a"; approval_id = "waiter-a"; tool_name = "Edit"
+          ; args = "{}"; question = "Run Edit?"; because = "held" }
+      ]
+    in
+    state.msg_inflight <- [ entry ];
+    ignore (Masc_tui_render_chat.render_keeper_message state);
+    (match Masc_tui_chat_row_actions.approval
+       (Masc_tui_render_chat.chat_row_actions ()) with
+     | Some drawn ->
+         check string "the drawn waiter id" "waiter-a" drawn.approval_id;
+         check string "the drawn request" entry.sent_request.request_id drawn.request_id;
+         check string "the drawn keeper" "alpha" drawn.keeper;
+         check bool "the workspace and read epoch belong to this frame" true
+           (Tui_types.same_acting_pane_scope drawn.scope
+              (state.workspace_authority, state.workspace_read_authority))
+     | None -> fail "the drawn approval row has no candidate receipt");
+    check bool "drawing alone grants no slash-command authority" true
+      (Option.is_none state.msg_presented_tool_approval);
+    state.msg_target_keeper_name <- None;
+    ignore (Masc_tui_render_chat.render_keeper_message state);
+    check bool "a frame hiding the chat clears its candidate" true
+      (Option.is_none (Masc_tui_chat_row_actions.approval
+        (Masc_tui_render_chat.chat_row_actions ()))))
+;;
+
 let preflight_input ?(submission_seq = 0) () =
   let entry = inflight_with_log ~keeper_name:"alpha" ~started_at:1. [] in
   let request = {entry.sent_request with
@@ -6156,8 +6197,8 @@ let test_status_details_and_fold_counts_reach_the_frame () =
     state.msg_live <- Some entry.log;
     state.msg_queued <- Masc_tui_keeper_chat_queue.empty;
     List.iteri (fun i delta -> Tui_types.turn_log_add ~now:2. entry.log ~seq:(Some (i+1)) delta)
-      [Live.Approval_requested {call_id="fold-call";tool_name="Execute";args="";question="Approve?";because="fixture"};
-       Live.Approval_settled {call_id="fold-call";outcome="approved"};
+      [Live.Approval_requested {call_id="fold-call";approval_id="fold-approval";tool_name="Execute";args="";question="Approve?";because="fixture"};
+       Live.Approval_settled {call_id="fold-call";approval_id="fold-approval";outcome="approved"};
        Live.Stream_protocol_error {quarantined_occurrence=None;detail="fixture unreadable event"}];
     state.msg_turn_folded <- true;
     List.iter (fun mode ->
@@ -7044,7 +7085,8 @@ let () =
         ; test_case "priority workspace withdrawal" `Quick test_priority_workspace_withdrawal
         ; test_case "Fusion workspace withdrawal" `Quick test_fusion_workspace_withdrawal
         ; test_case "priority completions survive controls" `Quick test_priority_completion_survives_controls
-        ; test_case "status details and fold counts reach the frame" `Quick test_status_details_and_fold_counts_reach_the_frame ] )
+        ; test_case "status details and fold counts reach the frame" `Quick test_status_details_and_fold_counts_reach_the_frame
+        ; test_case "drawn approval is only a frame candidate" `Quick test_drawn_approval_is_only_a_candidate_until_presented ] )
     ; ( "link card layout", [ test_case "a landed preview keeps the entries" `Quick test_a_landed_preview_keeps_the_entries ] )
     ; ( "wiring"
       , [ test_case "original pending delivery identity across queue handoff" `Quick test_pending_delivery_keeps_full_original_identity

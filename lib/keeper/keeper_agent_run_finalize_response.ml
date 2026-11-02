@@ -29,6 +29,8 @@ let turn_boundary_position ~checkpoint_owner saved_checkpoint =
    exception as well as an [Error]: past this point the turn has a saved
    checkpoint and no receipt yet, so nothing raised here may escape except a
    cancellation. After a failure the next line's span covers both turns. *)
+type boundary_recording = Recorded | Not_recorded
+
 let record_turn_boundary
       ~task_context
       ~config
@@ -50,7 +52,8 @@ let record_turn_boundary
     Otel_metric_store.inc_counter
       Keeper_metrics.(to_string TurnBoundaryFailures)
       ~labels:[ "keeper", meta.name; "site", site ]
-      ()
+      ();
+    Not_recorded
   in
   let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
   (* This function owns the durable commit order for a finished turn. Keeping
@@ -99,7 +102,7 @@ let record_turn_boundary
          ~keeper_id:meta.name
          record
      with
-     | Ok () -> ()
+     | Ok () -> Recorded
      | Error error ->
        not_recorded ~site:"append" (Keeper_turn_boundaries.append_error_to_string error)
      | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
@@ -122,7 +125,7 @@ let record_errored_official_turn_boundary
       ~history_at_start
       ~restart_notice_pending
   =
-  record_turn_boundary
+  match record_turn_boundary
     ~task_context
     ~config
     ~meta
@@ -132,7 +135,11 @@ let record_errored_official_turn_boundary
     ~tool_observations
     ~history_at_start
     ~restart_notice_pending
-    None
+    None with
+  | Not_recorded -> ()
+  | Recorded ->
+    Keeper_agent_run_post_turn_memory.completed_history_changed
+      ~config ~keeper_name:meta.name
 ;;
 
 let finalize
@@ -400,7 +407,7 @@ let finalize
     | Runtime_execution.Official_client, None -> Ok None
   in
   let* saved_checkpoint = saved_checkpoint_result in
-    record_turn_boundary
+    let (_ : boundary_recording) = record_turn_boundary
       ~task_context
       ~config
       ~meta
@@ -413,7 +420,7 @@ let finalize
          | Runtime_execution.Masc_agent_core -> [])
       ~history_at_start
       ~restart_notice_pending
-      saved_checkpoint;
+      saved_checkpoint in
     (* Retired proof-ledger evaluation is absent. Strict Task completion
        judgment is owned by the authenticated operator or typed judge
        boundary. *)

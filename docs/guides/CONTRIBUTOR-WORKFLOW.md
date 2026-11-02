@@ -291,95 +291,56 @@ source-backed explanation and resolve a thread only when its concern is handled.
 Update the PR description when scope, evidence or remaining risks change.
 
 A push creates a new head, so earlier review does not certify new changes.
-Reviewers clear their own REQUEST_CHANGES when the corrected code resolves their
-findings. A green CI run alone does not resolve a finding.
-After rereview, use `approve-guard.sh --replace-own-cr REVIEW_ID` to replace
-your own open request with a current-head approval; repeat the option to name
-several requests. Name each unresolved request signed by the Keeper whose review
-is being replaced; other Keepers sharing the account can resolve their own
-requests separately, and those requests continue to block consumption. An
-unsigned request or a request signed by another Keeper cannot be claimed just
-because the GitHub account is shared; its actual owner must resolve it. The
-guard compares claims in review bodies, not authenticated Keeper sessions, so
-verify actual ownership separately. Replacement order is determined from
-submission times, not review IDs. Missing times or a tie for an account's latest
-formal review leave ordering unavailable; a replacement must be strictly later
-than its request.
-The review worklist applies the same ordering and keeps each unresolved request
-owned by its reviewer; multiple requests on one account share a single planned
-rereview. A current-head request still waits for author action.
-Existing CRs and comment verdicts do not prevent recording a new independent
-approval from a different account. At merge/receipt consumption, unresolved
-FAIL/HOLD still blocks: a PASS from another account, including the PR author, or
-from a differently claimed Keeper on the same account cannot clear it.
-Keeper names are claims, not authenticated identities; sharing a GitHub login
-does not add an independent formal reviewer. The guard never dismisses another
-account's request. All head, diff, identity and Release CI checks remain;
-ordinary source publication does
-not wait for selected CI, while merge admission retains the CI pin check.
+After rereview, a later formal approval replaces the earlier change request from
+the same GitHub account. A request from another account remains open; a green CI
+run or another account's approval does not resolve it. A current-head request
+usually waits for author action, unless a rereview was explicitly requested.
+Use submission times, not review IDs, to determine order. Missing times or a tie
+for an account's latest formal decision leave the order unknown. A review body
+or claimed Keeper name cannot authenticate which session used a shared account.
+Consult the original concern and its owner when known; do not claim session
+independence or a resolved finding solely from the account's later approval.
 
-Structured FAIL/HOLD comments are reduced by both GitHub account and the exact
-claimed Keeper name. A missing or malformed name remains a blocker; investigate
-and correct the originating record before relying on a later PASS. These claims
-do not authenticate which Keeper actually wrote a shared account's decision.
+GitHub does not permit the PR author's account to approve its own PR. A commit's linked author or
+committer account may be shared by independent Keeper sessions, so matching
+that account does not disqualify a reviewer. The reviewing session must itself
+be independent of the change; account identity alone cannot establish that.
 
-The ordinary source-review verdict uses actual values:
-
-```text
-verdict: PASS|FAIL head: <40-character-current-SHA> by: <Keeper-name>
-```
-
-Use [approve-guard.sh](../../scripts/review/approve-guard.sh) for APPROVE; its
-`--check` mode checks review eligibility.
-
-The guard compares the reviewer's GitHub account with the PR author and every
-content commit's linked author and committer accounts. It refuses publication
-and approval receipts when a commit account cannot be established, and names
-the affected commit and role. Establish the account linkage or leave a signed
-COMMENT while it is unknown; a Git name or email alone does not prove account
-ownership. Account checks do not establish that the reviewing session was
-independent of the work.
-
-Capture the base SHA and complete diff identity **before source review** and
-keep them with the reviewed head and evidence. Run these commands from the repository
-checkout with authenticated `gh`, Git, Python 3 and `jq` available. The diff helper
-fetches missing exact objects using `gh` credentials without interactive prompts.
+Read the current head, base and complete diff before source review. With an
+authenticated `gh` and `jq`, a reviewer can submit the result directly:
 
 ```bash
 # Set repo and pr to the pull request being reviewed.
 snapshot=$(gh api "repos/$repo/pulls/$pr")
 head=$(printf '%s' "$snapshot" | jq -r '.head.sha')
-review_base=$(printf '%s' "$snapshot" | jq -r '.base.sha')
-review_diff=$(python3 scripts/review/review-diff.py \
-  --repo "$repo" --base "$review_base" --head "$head")
-# Read the complete diff and its source context, then write review-body.md.
-scripts/review/approve-guard.sh --repo "$repo" --pr "$pr" --head "$head" \
-  --review-base "$review_base" --review-diff "$review_diff" --body review-body.md
+gh pr diff "$pr" --repo "$repo"
+# Review the diff and source context, then submit the reviewed head:
+gh api --method POST "repos/$repo/pulls/$pr/reviews" \
+  -f event=APPROVE -f commit_id="$head"
 ```
 
-Publishing requires `--body`, `--review-base` and `--review-diff`. The guard rejects
-scope changes during admission. If the change differs, review it again and capture
-new evidence; do not refresh the digest merely to approve unreviewed changes.
-The guard appends `review-scope:` and `approve-guard:` lines itself: leave them out
-of `--body`, including the output of `--print-footer`. If readback fails after a
-review is posted, inspect that review before retrying. An account mismatch is
-reported after publication; this does not undo the published review.
+No fixed body, footer or approval helper is required. If the change differs,
+review it again. Once the source review passes, approve without waiting for CI;
+Release merge and publication decisions separately require completed full CI.
+After publication, read back review ID, state and commit ID. If publication or
+readback is uncertain, inspect the existing effect before retrying. A GitHub
+approval records the account, decision and commit ID; it does not establish
+which session reviewed, the base or full diff that session saw, or a Release run.
+Report what was actually reviewed and distinguish unverified facts.
 
-An author or a session that pushed the PR cannot independently
-approve it. Release verdicts additionally cite `run: <full-CI-run-id>` for
-completed full verification of the same head. These are formats, not decisions;
-replace placeholders and alternatives with actual values.
+An author or a session that pushed the PR cannot independently approve it.
+For Release, record the completed full-verification run and the head it tested.
 
 Read current reviews and comments again before integration. Outstanding blocking
-reviews and later FAIL/HOLD decisions prevent integration. Land a native stack
+reviews and later FAIL/HOLD decisions prevent integration; inspect comment
+content and actual findings yourself because a native approval record cannot
+automatically establish that unstructured concerns were addressed. Land a native stack
 whole, once, through its top PR — never layer by layer from the bottom — and
 review changes to both base and head before landing. A confirmed non-native
-branch chain still lands parent first. Use
-[merge-guard](../../scripts/review/merge-guard.sh) and the current
-[CI and review workflow](../CI-REVIEW-WORKFLOW.md) for admission. Ordinary stacks
-use source review, plus a merge-compile advisory record for the exact merge head
-(freshness + success status; refusal pending convention adoption);
-release heads require completed full CI. Fork contributors
+branch chain still lands parent first. Consult the current
+[CI and review workflow](../CI-REVIEW-WORKFLOW.md). Ordinary stacks
+use source review; a merge-compile record for the merge head is advisory.
+Release heads require completed full CI. Fork contributors
 hand integration to a maintainer. Source approval does not claim unobserved
 build success or runtime behavior.
 

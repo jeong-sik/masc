@@ -140,6 +140,8 @@
   test_mcp_session
   test_metrics
   test_model_catalog_default
+  test_model_catalog_composition
+  test_request_pricing_snapshot
   test_model_identifiers
   test_module_check
   test_multimodal
@@ -278,6 +280,8 @@
   test_mcp_session
   test_metrics
   test_model_catalog_default
+  test_model_catalog_composition
+  test_request_pricing_snapshot
   test_model_identifiers
   test_module_check
   test_multimodal
@@ -757,8 +761,8 @@
  (libraries agent_core alcotest eio eio_main yojson))
 
 (test
- (name test_provider_declarations)
- (modules test_provider_declarations)
+ (name test_catalog_snapshot)
+ (modules test_catalog_snapshot)
  (libraries agent_core_test_deps llm_provider alcotest yojson unix))
 
 (test

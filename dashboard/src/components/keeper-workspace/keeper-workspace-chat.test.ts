@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DashboardGateResponse, Keeper, KeeperApprovalQueueItem } from '../../types'
 
 const mockNavigate = vi.fn()
+const answerApproval = vi.hoisted(() => vi.fn(async () => false))
 vi.mock('../../router', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../router')>()),
   navigate: (...args: unknown[]) => mockNavigate(...args),
@@ -16,6 +17,7 @@ vi.mock('../../router', async (importOriginal) => ({
 vi.mock('../../keeper-actions', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../keeper-actions')>()),
   hydrateKeeperToolApprovals: vi.fn(async () => undefined),
+  answerHeldKeeperToolApproval: answerApproval,
 }))
 
 const mockKeeper: Keeper = {
@@ -235,7 +237,8 @@ describe('KeeperWorkspaceChat', () => {
     const { keeperToolApprovals } = await import('../../keeper-state')
     keeperToolApprovals.value = {
       sangsu: {
-        'tool-call-1': {
+        'approval-tool-call-1': {
+          approvalId: 'approval-tool-call-1',
           toolCallId: 'tool-call-1',
           toolName: 'Execute',
           args: '{}',
@@ -258,6 +261,10 @@ describe('KeeperWorkspaceChat', () => {
     const card = container.querySelector('[data-testid="keeper-tool-approval-card"]')
     expect(card?.textContent).toContain('이 명령을 실행할까요?')
     expect(card?.textContent).toContain('보류 사유 · process execution requires approval')
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="keeper-tool-approval-approve"]')?.click()
+    })
+    expect(answerApproval).toHaveBeenCalledWith('sangsu', 'tool-call-1', 'approval-tool-call-1', 'approve')
   })
 
   it('hides the pending-approval badge when the keeper has no pending decision', async () => {

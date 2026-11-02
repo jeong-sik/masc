@@ -22,13 +22,20 @@ val apply_publication :
     when a later step failed. Unknown outcomes retain the draft and files.
     Draft protection compares submitted bytes; it does not track revisions. *)
 
+val comment_launch_failed :
+  Masc_tui_types.state -> request_id:Masc_tui_types.board_comment_request_id -> unit
+(** Release only the matching request after launch failure. Dispatch failure
+    does not prove whether the remote comment was sent; retain the draft and
+    ask the user to check the thread before retrying. *)
+
 val comment_done :
-  Masc_tui_types.state -> post_id:string -> sent_draft:string ->
+  Masc_tui_types.state -> request_id:Masc_tui_types.board_comment_request_id ->
+  post_id:string -> sent_draft:string ->
   report:(string -> string -> unit) -> refresh:(unit -> unit) ->
   refresh_detail:(string -> unit) -> (string, string) result -> unit
-(** A current comment completion releases only a comment write. Success clears
-    an unchanged draft and refreshes the list and its post detail. Failure
-    retains the text. Comments carry no staged attachments. *)
+(** Only the exact current comment request may release its write. Success
+    clears an unchanged draft and refreshes the list and its post detail.
+    Failure retains the text. Comments carry no staged attachments. *)
 
 val vote_done :
   Masc_tui_types.state -> report:(string -> string -> unit) ->

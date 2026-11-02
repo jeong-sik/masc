@@ -633,7 +633,7 @@ let%test "response_format_to_openai_json wraps raw json schema" =
       ; "properties", `Assoc [ "answer", `Assoc [ "type", `String "string" ] ]
       ]
   in
-  match response_format_to_openai_json (Types.JsonSchema schema) with
+  match response_format_to_openai_json (Types.JsonSchema (Types.Raw_schema schema)) with
   | Some json ->
     let open Yojson.Safe.Util in
     json |> member "type" |> to_string = "json_schema"
@@ -649,15 +649,16 @@ let%test "response_format_to_openai_json wraps raw json schema" =
 
 let%test "response_format_to_openai_json preserves named schema envelope" =
   let schema =
-    `Assoc
-      [ "name", `String "math_response"
-      ; "strict", `Bool true
-      ; ( "schema"
-        , `Assoc
+    Types.Named_schema
+      { name = "math_response"
+      ; strict = Some true
+      ; description = None
+      ; schema =
+          `Assoc
             [ "type", `String "object"
             ; "properties", `Assoc [ "answer", `Assoc [ "type", `String "number" ] ]
-            ] )
-      ]
+            ]
+      }
   in
   match response_format_to_openai_json (Types.JsonSchema schema) with
   | Some json ->
@@ -1134,7 +1135,7 @@ let%test "build_request uses json_schema response_format" =
       ~kind:OpenAI_compat
       ~model_id:"gpt"
       ~base_url:"https://api.openai.com/v1"
-      ~response_format:(JsonSchema schema)
+      ~response_format:(JsonSchema (Types.Raw_schema schema))
       ()
   in
   let body = build_request ~config ~messages:[] () |> Yojson.Safe.from_string in
@@ -1161,7 +1162,7 @@ let%test "explicit json_schema response_format overrides json mode compatibility
       ~kind:OpenAI_compat
       ~model_id:"gpt"
       ~base_url:"https://api.openai.com/v1"
-      ~response_format:(JsonSchema schema)
+      ~response_format:(JsonSchema (Types.Raw_schema schema))
       ()
   in
   let body = build_request ~config ~messages:[] () |> Yojson.Safe.from_string in

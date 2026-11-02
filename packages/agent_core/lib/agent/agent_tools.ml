@@ -59,24 +59,32 @@ type scoped_settlement =
   | Scoped_settled of scheduled_tool_outcome
   | Scoped_not_started
 
-type tool_index = (string, Tool.t) Hashtbl.t
+module Tool_map = Map.Make (String)
 
-let add_first tbl key value = if not (Hashtbl.mem tbl key) then Hashtbl.add tbl key value
+type tool_index = Tool.t Tool_map.t
 
-let build_index tools =
-  let by_name = Hashtbl.create (List.length tools) in
-  List.iter
-    (fun (tool : Tool.t) ->
-       let name = tool.schema.name in
-       add_first by_name name tool)
-    tools;
-  by_name
+let add_first map key value =
+  Tool_map.update
+    key
+    (function
+      | Some _ as existing -> existing
+      | None -> Some value)
+    map
 ;;
 
-let find_in_index (index : tool_index) name : Tool.t option = Hashtbl.find_opt index name
+let build_index tools =
+  List.fold_left
+    (fun by_name (tool : Tool.t) ->
+       let name = tool.schema.name in
+       add_first by_name name tool)
+    Tool_map.empty
+    tools
+;;
+
+let find_in_index (index : tool_index) name : Tool.t option = Tool_map.find_opt name index
 
 let tool_names_of_index index =
-  Hashtbl.fold (fun name _ acc -> name :: acc) index [] |> List.sort_uniq String.compare
+  Tool_map.fold (fun name _ acc -> name :: acc) index [] |> List.rev
 ;;
 
 let render_tool_names names =
@@ -397,7 +405,7 @@ let restore_durable_tool ~turn_count ~durable (call : scheduled_tool_use) =
 ;;
 
 let prepare_scheduled_tool ~sw ~tool_index (call : scheduled_tool_use) =
-  match call.restored_invocation, Hashtbl.find_opt tool_index call.name with
+  match call.restored_invocation, find_in_index tool_index call.name with
   | Some (Attempted_or_settled_invocation _), (Some _ | None)
   | (None | Some (Unattempted_invocation _)), None -> call
   | (None | Some (Unattempted_invocation _)), Some tool when not (Tool.has_scoped_admission tool) -> call
@@ -1066,7 +1074,7 @@ let execute_scheduled_tool
       Execution_agent_scope.execute_phased
         durable_invocation
         ~invoke:(fun ~start_child ~tool_name ~input ->
-          Execution_context.flush_tool_observations ();
+          Execution_context.flush_bus_observations ();
           observe_before_completion (fun () -> observe_started ~tool_name ~input);
           Execution_context.with_child_scope_factory start_child (fun () ->
             let pending = begin_effect ~publish_event_bus:false ~tool_name ~input in
@@ -1089,7 +1097,7 @@ let execute_scheduled_tool
     | Ok (Execution_agent_scope.Executed (result, _, _))
     | Ok (Execution_agent_scope.Replayed result) ->
       Execution_context.settle_tool_observers invocation;
-      Execution_context.flush_tool_observations ();
+      Execution_context.flush_bus_observations ();
       let dispatch =
         match !completed_dispatch with
         | Some dispatch -> dispatch
@@ -1385,7 +1393,7 @@ let execute_tools
          scheduled)
   | Agent_tool_batch_plan.Admitted batches when not
       (List.exists (fun call ->
-        match Hashtbl.find_opt tool_index call.name with
+        match find_in_index tool_index call.name with
         | Some tool -> Tool.has_scoped_admission tool
         | None -> false) scheduled) ->
     if batches <> [] then Option.iter (fun callback -> callback ()) before_tool_execution;

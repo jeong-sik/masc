@@ -297,7 +297,23 @@ let test_streaming_sse () =
     Eio.Switch.run
     @@ fun sw ->
     let url = start_sse ~sw ~net:env#net ~port:21004 (openai_sse "streamed text") in
-    let agent = make_agent ~net:env#net url in
+    let provider_config =
+      (* Turn projection retains this declaration only for the agent's model. *)
+      Llm_provider.Provider_config.make
+        ~kind:Llm_provider.Provider_config.OpenAI_compat
+        ~provider_id:"test"
+        ~model_id:"test-model"
+        ~base_url:url
+        ~api_key:""
+        ~headers:[ "Content-Type", "application/json" ]
+        ~request_path:"/v1/chat/completions"
+        ~model_capabilities_override:
+          { Llm_provider.Capabilities.default_capabilities with
+            supports_native_streaming = true
+          }
+        ()
+    in
+    let agent = make_agent ~net:env#net ~provider_config url in
     let events = ref [] in
     match
       Agent.run_stream ~sw ~on_event:(fun e -> events := e :: !events) agent "stream"
@@ -518,11 +534,9 @@ let test_structured_extract () =
     let body = openai_text_response {|{"name":"test","age":25}|} in
     let url = start_multi ~sw ~net:env#net ~port:21016 [ body ] in
     let provider_id = "full-pipeline-structured-mock" in
-    let previous_provider_catalog = Llm_provider.Provider_catalog.global () in
+    let previous_provider_catalog = Llm_provider.Catalog_snapshot.current () in
     Eio.Switch.on_release sw (fun () ->
-      match previous_provider_catalog with
-      | Some catalog -> Llm_provider.Provider_catalog.set_global catalog
-      | None -> Llm_provider.Provider_catalog.clear_global ());
+      Llm_provider.Catalog_snapshot.publish previous_provider_catalog);
     let provider_capabilities =
       { Llm_provider.Capabilities.default_capabilities with
         supports_response_format_json = true
@@ -535,12 +549,11 @@ let test_structured_extract () =
       ; kind = Llm_provider.Provider_config.OpenAI_compat
       ; base_url = url
       ; request_path = "/v1/chat/completions"
-      ; api_key_env = ""
       ; auth = Llm_provider.Provider_catalog.No_auth
       ; default_model = Some "test-model"
       ; discovery_timeout_s = None
       ; max_context = None
-      ; capabilities = provider_capabilities
+      ; capabilities = Some provider_capabilities
       ; credential_scope = None
       }
     in
@@ -549,7 +562,7 @@ let test_structured_extract () =
       | Ok catalog -> catalog
       | Error msg -> fail msg
     in
-    Llm_provider.Provider_catalog.set_global provider_catalog;
+    (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Llm_provider.Catalog_snapshot.models (Llm_provider.Catalog_snapshot.current ())) ~providers:(Some (provider_catalog))));
     let schema : (string * int) Structured.schema =
       { params =
           [ { name = "name"

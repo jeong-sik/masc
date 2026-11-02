@@ -14,9 +14,8 @@ let status config =
 
   let state = read_state config in
   let backlog = read_backlog config in
-  let active_task_assignees =
-    Workspace_task_schedule.active_task_assignees_by_task_id backlog
-  in
+  let prepared = prepare_backlog backlog in
+  let active_assignees_by_task_id = prepared.active_assignees_by_task_id in
   let max_agents_display = 40 in
   let max_active_tasks_display = 30 in
 
@@ -33,9 +32,9 @@ let status config =
            let stale_current_task =
              match agent.current_task with
              | Some task_id ->
-                 not
-                   (Workspace_task_schedule.agent_current_task_matches_assignments
-                      active_task_assignees ~agent_name:agent.name task_id)
+                 (match Task_id_map.find_opt task_id active_assignees_by_task_id with
+                  | Some assignee -> not (String.equal assignee agent.name)
+                  | None -> true)
              | None -> false
            in
            let display_status =
@@ -76,7 +75,7 @@ let status config =
 
   Buffer.add_string buf "\nQuest Board:\n";
 
-  let sorted_tasks = List.sort (fun a b -> compare a.priority b.priority) backlog.tasks in
+  let sorted_tasks = List.sort (fun a b -> Int.compare a.priority b.priority) backlog.tasks in
   let active_tasks, done_count, cancelled_count =
     List.fold_left
       (fun (active, done_cnt, cancelled_cnt) task ->

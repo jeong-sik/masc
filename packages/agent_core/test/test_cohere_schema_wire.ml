@@ -5,7 +5,13 @@ module EO = Agent_core.Exact_output
 let schema = `Assoc [ "type", `String "object"
   ; "properties", `Assoc [ "ok", `Assoc [ "type", `String "boolean" ] ]
   ; "required", `List [ `String "ok" ]; "additionalProperties", `Bool false ]
-let named = `Assoc [ "name", `String "answer"; "schema", schema; "strict", `Bool true ]
+let named_schema = Types.Named_schema
+  { name = "answer"; schema; strict = Some true; description = None }
+let named = Types.json_schema_to_json named_schema
+let annotated_schema = `Assoc [ "type", `String "object"
+  ; "name", `String "audit_metadata"; "schema", `Assoc [ "type", `String "string" ]
+  ; "properties", `Assoc [ "ok", `Assoc [ "type", `String "boolean" ] ]
+  ; "required", `List [ `String "ok" ]; "additionalProperties", `Bool false ]
 let messages = [ Types.user_msg "Return a JSON object with ok=true." ]
 let expected = `Assoc [ "type", `String "json_object"; "schema", schema ]
 
@@ -35,7 +41,7 @@ let with_peer ~stream f =
           ~url:(Printf.sprintf "http://127.0.0.1:%d" port) captured)))
 
 let test_complete_sync_and_sse () =
-  List.iter (fun stream -> List.iter (fun requested_schema ->
+  List.iter (fun stream -> List.iter (fun (requested_schema, expected_schema) ->
     with_peer ~stream (fun ~sw ~net ~url captured ->
       let config = Provider_config.make ~kind:OpenAI_compat ~provider_id:"cohere"
         ~model_id:"command-r-plus" ~base_url:url ~request_path:"/chat/completions"
@@ -47,14 +53,20 @@ let test_complete_sync_and_sse () =
       let body = match !captured with Some body -> Yojson.Safe.from_string body
         | None -> fail "peer received no request" in
       check bool "actual peer receives Cohere schema envelope" true
-        (Yojson.Safe.Util.member "response_format" body = expected);
+        (Yojson.Safe.Util.member "response_format" body =
+          `Assoc [ "type", `String "json_object"
+                 ; "schema", expected_schema ]);
       check string "wire model spelling retained" "command-r-plus"
-        Yojson.Safe.Util.(body |> member "model" |> to_string))) [ schema; named ]) [ false; true ]
+        Yojson.Safe.Util.(body |> member "model" |> to_string)))
+      [ Types.Raw_schema schema, schema
+      ; Types.Raw_schema annotated_schema, annotated_schema
+      ; named_schema, schema ])
+    [ false; true ]
 
 let test_explicit_override_and_provider_isolation () =
   let make ?model_capabilities_override provider_id =
     Provider_config.make ~kind:OpenAI_compat ~provider_id ~model_id:"command-r-plus"
-      ~base_url:"https://opaque-proxy.example/v1" ~response_format:(Types.JsonSchema named)
+      ~base_url:"https://opaque-proxy.example/v1" ~response_format:(Types.JsonSchema named_schema)
       ?model_capabilities_override () in
   let wire config = Backend_openai.build_request ~config ~messages ()
     |> Yojson.Safe.from_string |> Yojson.Safe.Util.member "response_format" in
@@ -82,7 +94,7 @@ let test_mistral_and_kimi_declarations () =
   List.iter (fun stream -> with_peer ~stream (fun ~sw ~net ~url captured ->
     let config = Provider_config.make ~kind:OpenAI_compat ~provider_id:"mistral"
       ~model_id:"mistral-large" ~base_url:url ~api_key:"fixture-only"
-      ~response_format:(Types.JsonSchema schema) () in
+      ~response_format:(Types.JsonSchema (Types.Raw_schema schema)) () in
     let outcome = if stream then
         Complete.complete_stream ~sw ~net ~config ~messages ~on_event:(fun _ -> ()) ()
       else Complete.complete ~sw ~net ~config ~messages () in
@@ -99,13 +111,13 @@ let test_mistral_and_kimi_declarations () =
       (Yojson.Safe.Util.member "schema" payload = schema))) [ false; true ];
   let coding = Provider_config.make ~kind:Kimi ~provider_id:"kimi"
     ~model_id:"kimi-k2.7-code" ~base_url:"https://opaque-proxy.example"
-    ~response_format:(Types.JsonSchema schema) () in
+    ~response_format:(Types.JsonSchema (Types.Raw_schema schema)) () in
   check bool "coding capability does not promise platform schema support" true
     (Result.is_error (Provider_config.validate_output_schema_request coding));
   let platform = Provider_config.make ~kind:OpenAI_compat ~provider_id:"platform-fixture"
     ~model_id:"kimi-k2.7-code" ~base_url:"https://opaque-proxy.example"
     ~model_capabilities_override:Capabilities.openai_compat_chat_capabilities
-    ~response_format:(Types.JsonSchema schema) () in
+    ~response_format:(Types.JsonSchema (Types.Raw_schema schema)) () in
   check bool "explicit platform wire/capability is independently admitted" true
     (Result.is_ok (Provider_config.validate_output_schema_request platform));
   let body = Backend_openai.build_request ~config:platform ~messages () |> Yojson.Safe.from_string in
@@ -137,7 +149,8 @@ let test_strict_declarations () =
   let parsed_provider = get_ok "typed provider override" (Provider_catalog.of_json (provider valid)) in
   (match Provider_catalog.entries parsed_provider with
    | [ row ] -> check bool "provider override carries typed dialect" true
-       (row.capabilities.json_schema_dialect = Capabilities.Json_object_schema)
+       (Option.map (fun capabilities -> capabilities.Capabilities.json_schema_dialect)
+          row.capabilities = Some Capabilities.Json_object_schema)
    | _ -> fail "expected one provider");
   List.iter (fun invalid ->
     check bool "unknown TOML dialect is an error" true
@@ -148,7 +161,7 @@ let test_strict_declarations () =
       (Result.is_error (Provider_catalog.of_json (provider invalid)))) [ "unknown"; "" ]
 
 let test_exact_frozen_contract () =
-  let observe ?kind dialect =
+  let observe ?kind ?(schema = schema) dialect =
     let snapshot = get_ok "exact snapshot" (EO.load_resolver_snapshot
       ~catalog:(EO.Full_replacement { source = "dialect fixture"; contents = catalog ?kind dialect }) ()) in
     let admitted = get_ok "exact target admission" (EO.admit_target_ref snapshot "slot") in
@@ -165,6 +178,8 @@ let test_exact_frozen_contract () =
   let raw_generation, raw_plan, raw_schema = observe "json_object_schema" in
   let named_generation, named_plan, named_schema = observe "openai_json_schema" in
   check bool "raw-schema dialect fingerprints its actual domain schema" true raw_schema;
+  let _, _, annotated_raw_schema = observe ~schema:annotated_schema "json_object_schema" in
+  check bool "domain name and schema keys retain the raw fingerprint" true annotated_raw_schema;
   check bool "OpenAI envelope remains part of effective schema" false named_schema;
   check bool "dialect changes catalog evidence identity" true (raw_generation <> named_generation);
   check bool "dialect changes frozen plan identity" true (raw_plan <> named_plan);
@@ -172,9 +187,8 @@ let test_exact_frozen_contract () =
   check bool "GLM exact admission keeps the named wire fingerprint" false glm_raw_schema
 
 let () =
-  Model_catalog.set_global (get_ok "embedded catalog" (Model_catalog.load_default ()));
-  Capability_manifest.set_global Capability_manifest.empty;
-  Provider_catalog.clear_global ();
+  (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some ((get_ok "embedded catalog" (Model_catalog.load_default ())))) ~providers:(None)));
+  (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Llm_provider.Catalog_snapshot.models (Llm_provider.Catalog_snapshot.current ())) ~providers:(None)));
   run "Cohere schema wire" [ "contract", [
     test_case "Complete sync/SSE reaches the peer with declared shape" `Quick test_complete_sync_and_sse;
     test_case "explicit override and provider isolation" `Quick test_explicit_override_and_provider_isolation;

@@ -342,18 +342,6 @@ let failure_leaves_effects_unknown ~admission (error : Serve.error) =
      | Serve.Timeout _ -> false)
 ;;
 
-let msp_reasoning_effort : Llm_provider.Reasoning_effort.t -> Msp.reasoning_effort
-  = function
-  | Llm_provider.Reasoning_effort.None_ -> Msp.Effort_none
-  | Llm_provider.Reasoning_effort.Minimal -> Msp.Effort_minimal
-  | Llm_provider.Reasoning_effort.Low -> Msp.Effort_low
-  | Llm_provider.Reasoning_effort.Medium -> Msp.Effort_medium
-  | Llm_provider.Reasoning_effort.High -> Msp.Effort_high
-  | Llm_provider.Reasoning_effort.XHigh -> Msp.Effort_xhigh
-  | Llm_provider.Reasoning_effort.Max -> Msp.Effort_max
-  | Llm_provider.Reasoning_effort.Ultra -> Msp.Effort_ultra
-;;
-
 (* Only the host's counted-once prompt count normalizes the provider's cache
    convention. A terminal-only raw aggregate cannot establish that split. *)
 let api_usage_of_token_usage (usage : Msp.token_usage) : Agent_core.Types.api_usage =
@@ -369,6 +357,18 @@ let api_usage_of_token_usage (usage : Msp.token_usage) : Agent_core.Types.api_us
   ; cache_read_input_tokens
   ; cost_usd = None
   }
+;;
+
+let reported_cache_usage_of_token_usage (usage : Msp.token_usage)
+  : Agent_core.Types.reported_cache_usage
+  =
+  match usage.prompt_tokens with
+  | None ->
+    { cache_creation_input_tokens = None; cache_read_input_tokens = None }
+  | Some _ ->
+    { cache_creation_input_tokens = usage.cache_write_tokens
+    ; cache_read_input_tokens = usage.cache_read_tokens
+    }
 ;;
 
 (* What the turn's newest request carried. The host's counted-once
@@ -405,6 +405,29 @@ let model_label ~runtime_id ~configured_model reported =
   | Some model, (Some _ | None) -> model
   | None, Some model -> model
   | None, None -> runtime_id
+;;
+
+let completed_turn_response ~runtime_id ~configured_model ~latency_ms (turn : Serve.turn_result)
+  : Agent_core.Types.api_response
+  =
+  let ran_model = Serve.reported_model turn in
+  let model = model_label ~runtime_id ~configured_model ran_model in
+  { Agent_core.Types.id = turn.turn_id
+  ; model
+  ; stop_reason = EndTurn
+  ; content = (match turn.text with None -> [] | Some text -> [ Text text ])
+  ; usage = Option.map api_usage_of_token_usage turn.usage
+  ; telemetry =
+      Some
+        { Agent_core.Types.default_inference_telemetry with
+          request_latency_ms = Some latency_ms
+        ; canonical_model_id = ran_model
+        ; reasoning_tokens =
+            Option.map (fun (usage : Msp.token_usage) -> usage.reasoning_tokens) turn.usage
+        ; reported_cache_usage =
+            Option.map reported_cache_usage_of_token_usage turn.usage
+        }
+  }
 ;;
 
 (* The serve client answers an approval from the posture and reports the
@@ -991,13 +1014,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~inpu
       | [], (true | false) | _ :: _, true -> Ok ()
     in
     let reasoning_effort =
-      Host.effective_reasoning_effort
-        ~runtime_label
-        ~keeper_name
-        ~runtime_id
-        ~model_id:config.model
-        ~requested:prepared.reasoning_effort
-      |> Option.map msp_reasoning_effort
+      Option.map Msp.reasoning_effort_of_requested prepared.reasoning_effort
     in
     let* prepared =
       if is_resume
@@ -1625,29 +1642,19 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~inpu
             | Some detail -> Error (internal_error detail)
           in
           let latency_ms = Int.of_float ((Time_compat.now () -. started_at) *. 1000.0) in
-          let ran_model = Serve.reported_model turn in
-          let model = model_label ~runtime_id ~configured_model:config.model ran_model in
           let usage_scope =
             match turn.usage with
             | Some _ -> Runtime_usage_scope.Turn_total
             | None -> Runtime_usage_scope.Usage_scope_unavailable
           in
           let response =
-            { Agent_core.Types.id = turn.turn_id
-            ; model
-            ; stop_reason = EndTurn
-            ; content = (match turn.text with None -> [] | Some text -> [ Text text ])
-            ; usage = Option.map api_usage_of_token_usage turn.usage
-            ; telemetry =
-                Some
-                  { Agent_core.Types.default_inference_telemetry with
-                    request_latency_ms = Some latency_ms
-                  ; canonical_model_id = ran_model
-                  ; reasoning_tokens =
-                      Option.map (fun (usage : Msp.token_usage) -> usage.reasoning_tokens) turn.usage
-                  }
-            }
+            completed_turn_response
+              ~runtime_id
+              ~configured_model:config.model
+              ~latency_ms
+              turn
           in
+          let model = response.model in
           let* () =
             Host.invoke_turn_completion_hooks
               ~runtime_label
@@ -1925,4 +1932,5 @@ module For_testing = struct
   let runtime_error_to_core_error = runtime_error_to_core_error
   let recovery_failure_of_runtime_error = recovery_failure_of_runtime_error
 
+  let completed_turn_response = completed_turn_response
 end

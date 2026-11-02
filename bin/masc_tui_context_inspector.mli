@@ -412,7 +412,14 @@ val input_map_rows :
     prompt block; it does not authorize an item-level join by itself. *)
 val exact_input_items : provider_input -> exact_input_item list
 val format_bytes : int -> string
+(** Exact byte count with separators, for surfaces that promise exact
+    sizes; [format_bytes] keeps its rounded storage form. *)
+val exact_bytes : int -> string
 val format_tokens : int -> string
+val provider_usage_summary : Turn_record.usage -> string
+(** Format the provider usage line for the exact-input header, distinguishing
+    unreported cache reads ([None] -> ["cache read unreported"]) from an
+    explicitly reported zero ([Some 0] -> ["cache read 0 (0.0% of input)"]). *)
 
 val client_context_tokens :
   scope:Runtime_usage_scope.t -> input_tokens:int option -> output_tokens:int option -> int option

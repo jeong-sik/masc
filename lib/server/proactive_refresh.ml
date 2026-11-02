@@ -188,9 +188,14 @@ let start ~sw ~clock ~config:raw_config ~compute ~on_result =
          | `Wakeup ->
            let coalesce_s = max 0.0 config.wakeup_coalesce_s in
            if coalesce_s > 0.0 then Eio.Time.sleep clock coalesce_s;
+           (* Only consume the siblings observed at the end of this window.
+              Concurrent producers must not keep this loop from reaching the
+              compute; a wake left in the stream can trigger a later pass. *)
+           let observed = Eio.Stream.length stream in
            let siblings = ref 0 in
-           while Option.is_some (Eio.Stream.take_nonblocking stream) do
-             incr siblings
+           for _ = 1 to observed do
+             if Option.is_some (Eio.Stream.take_nonblocking stream) then
+               incr siblings
            done;
            if !siblings > 0
            then

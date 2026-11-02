@@ -145,23 +145,20 @@ let with_direct_attempt ~base_path ~cli_path body =
              ~sw
              (fun () ->
                 Runtime.init_default ~config_path:runtime_path |> Result.get_ok;
+                let runtime = Runtime.get_runtime_by_id "codex.codex" |> Option.get in
                 let config =
-                  match Runtime.get_runtime_by_id "codex.codex" with
-                  | Some
-                      { Runtime_instance.execution =
-                          Runtime_execution.Codex_app_server config
-                      ; _
-                      } ->
-                    config
-                  | Some _ | None -> fail "Codex runtime fixture did not resolve"
+                  match runtime.Runtime_instance.execution with
+                  | Runtime_execution.Codex_app_server config -> config
+                  | Agent_core _ | Claude_code _ | Antigravity_cli _ | Muse_serve _ ->
+                    fail "Codex runtime fixture did not resolve"
                 in
                 let attempt ?on_guidance_prepared ~system_prompt ~on_transmitted_model_input () =
                 Keeper_codex_runtime.run ?on_guidance_prepared
                   ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = "codex-blank-prompt" })
-                  ~context_window:(Some (Runtime_instance.max_context_of_runtime
-                    (Runtime.get_runtime_by_id "codex.codex" |> Option.get)))
-                    ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input
-                      ~runtime:(Runtime.get_runtime_by_id "codex.codex" |> Option.get))
+                  ~context_window:(Some (Runtime_instance.max_context_of_runtime runtime))
+                  ~configured_reasoning_effort:runtime.model.reasoning_effort
+                  ~turn_timeout_s:runtime.model.turn_timeout_s
+                  ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input ~runtime)
                   ~runtime_id:"codex.codex"
                   ~keeper_name:"codex-blank-prompt"
                   ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 0 })
@@ -428,7 +425,7 @@ let test_core_checkpoint_survives_codex_guidance_failure () =
         let meta = Masc_test_deps.meta_of_json_fixture (`Assoc [
           "name",`String "codex-blank-prompt";"trace_id",`String "codex-blank-prompt";
           "activation_mode",`String "manual"]) |> Result.get_ok in
-        let owner = Owner.start ~sw ~keeper_name:meta.name ~initial_meta:(Some meta)
+        let owner = Owner.start ~base_path ~sw ~keeper_name:meta.name ~initial_meta:(Some meta)
             ~store:{replace=(fun _ -> Ok ());remove=(fun _ -> Ok ())}
             ~operation_store_path:(Filename.concat base_path "operations.sqlite3")
             ~session_root:(Filename.concat base_path "traces") ~now:(fun () -> 42.)

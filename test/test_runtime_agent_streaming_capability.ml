@@ -23,18 +23,16 @@ let sse_response =
    data: [DONE]\n\n"
 
 let install_catalog ?(base = "openai_chat") ~sw ~supports_native_streaming () =
-  let previous = Llm_provider.Model_catalog.global () in
+  let previous = Llm_provider.Catalog_snapshot.current () in
   Eio.Switch.on_release sw (fun () ->
-    match previous with
-    | Some catalog -> Llm_provider.Model_catalog.set_global catalog
-    | None -> Llm_provider.Model_catalog.clear_global ());
+    Llm_provider.Catalog_snapshot.publish previous);
   let source =
     Printf.sprintf
       "[[models]]\nmodel_id = %S\nprovider_name = \"fixture\"\nbase = %S\nmax_context_tokens = 8192\nmax_output_tokens = 128\nsupports_native_streaming = %b\n"
       model_id base supports_native_streaming
   in
   match Llm_provider.Model_catalog.of_toml_string ~source:"stream-dispatch-test" source with
-  | Ok catalog -> Llm_provider.Model_catalog.set_global catalog
+  | Ok catalog -> (Llm_provider.Catalog_snapshot.publish (Masc_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None)))
   | Error error -> fail error
 
 let run_case ?(callbacks = Persist_callbacks) ?(observer_failure = false)

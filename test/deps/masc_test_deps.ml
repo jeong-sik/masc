@@ -3,6 +3,26 @@
 
 module Server_grpc_tool_dispatch = Server_grpc_tool_dispatch
 
+(** Pure fixture construction. Both inputs are explicit; publication and
+    restoration use the ordinary complete-snapshot API in each scenario. *)
+let admit_catalogs ~models ~providers =
+  match Llm_provider.Catalog_snapshot.of_catalogs ~models ~providers with
+  | Ok snapshot -> snapshot
+  | Error error -> failwith (Llm_provider.Catalog_snapshot.error_to_string error)
+
+(** Synthetic declared accounts for execution-record fixtures. Ordinary
+    admission supplies the allowed base environment for mock scripts; these
+    contexts are not vendor-login or real-account execution evidence. *)
+let official_account ~client ~home =
+  match Runtime_official_account.capture ~client ~declaration:(Some home) with
+  | Ok selected -> selected | Error detail -> failwith detail
+
+let claude_account ?(home="/synthetic/claude-account") () =
+  official_account ~client:Claude_code ~home
+
+let codex_account ?(home="/synthetic/codex-account") () =
+  official_account ~client:Codex ~home
+
 (** Install the Eio clock + optional switch in every registry the lib
     code reads from.
 

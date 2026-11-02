@@ -45,7 +45,7 @@ val json_assoc_member_opt : string -> Yojson.Safe.t -> Yojson.Safe.t option
 val set_table_frame : bool -> unit
 
 val panel_input_owner :
-  Masc_tui_types.state -> terminal_rows:int -> Masc_tui_presented.panel_owner option
+  Masc_tui_types.state -> terminal_rows:int -> terminal_cols:int -> now:float -> Masc_tui_presented.panel_owner option
 (** The command panel or its search editor selected by the actual frame. *)
 
 val acting_pane_columns : Masc_tui_types.state -> terminal_cols:int -> int
@@ -143,11 +143,15 @@ val answering_selected_target :
     consume chunks. Dimensions are the raw terminal measurement. The loop
     stores this result inside frame Build timing; rendering never stores it. *)
 val acting_pane_chunk_projection :
-  Masc_tui_types.state -> terminal_rows:int -> terminal_cols:int ->
+  Masc_tui_types.state -> terminal_rows:int -> terminal_cols:int -> now:float ->
   Masc_tui_acting.chunk_projection option
 
+val compact_frame_required :
+  Masc_tui_types.state -> terminal_rows:int -> terminal_cols:int -> now:float -> bool
+(** A compact frame is needed for the height or a notice that must wrap. *)
+
 val frame_choice :
-  Masc_tui_types.state -> terminal_rows:int ->
+  Masc_tui_types.state -> terminal_rows:int -> terminal_cols:int -> now:float ->
   [ `Too_small of int
   | `Play_card of Masc_tui_play_card.t
   | `Collab of Masc_tui_collab.t
@@ -160,7 +164,8 @@ val frame_choice :
   | `Client_detail of Masc.Tui_decode.client_row | `Surface ]
 (** The visible surface or overlay, also used before preparing Home focus. *)
 
-val queue_below_play : Masc_tui_types.state -> terminal_rows:int -> Masc_tui_types.queue_panel option
+val queue_below_play :
+  Masc_tui_types.state -> terminal_rows:int -> terminal_cols:int -> now:float -> Masc_tui_types.queue_panel option
 (** The Queue that would own input with Play omitted, respecting the same
     compact and overlay priority as [frame_choice]. *)
 
@@ -173,7 +178,8 @@ val render :
   Masc_tui_press.press_target Masc_tui_hit.zones *
   Masc_tui_pane_selection.layout *
   Masc_tui_types.acting_pane_source Masc_tui_acting_pane.frame *
-  (Masc_tui_types.workspace_authority * unit ref) Masc_tui_chat_row_actions.t
+  (Masc_tui_types.workspace_authority * unit ref) Masc_tui_chat_row_actions.t *
+  Masc_tui_types.tools_task_frame option
 (** The frame without press marks, where each marked text landed in it, and
     where each of its panes sits. Commit the zones, panes, and Activity
     input authority and chat row actions only once the terminal accepts the frame. [home] is a fresh, UI-domain-owned lazy

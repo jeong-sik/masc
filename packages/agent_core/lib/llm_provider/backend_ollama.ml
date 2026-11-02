@@ -148,7 +148,7 @@ let build_request_artifact
   in
   let body =
     match config.response_format with
-    | Types.JsonSchema schema -> ("format", schema) :: body
+    | Types.JsonSchema schema -> ("format", Types.json_schema_domain schema) :: body
     | Types.JsonMode -> ("format", `String "json") :: body
     | Types.Off -> body
   in
@@ -447,7 +447,12 @@ let parse_ollama_response ?(content_inline_reasoning = Capabilities.No_content_i
                    | Inline_reasoning_split.Reasoning content -> Thinking { signature = None; content }) pieces)
           @ tool_blocks
       ; usage
-      ; telemetry = Some (Types.with_reported_model ~model telemetry)
+      ; telemetry =
+          Some
+            (Types.with_reported_cache_usage
+               ~cache_creation_input_tokens:None
+               ~cache_read_input_tokens:None
+               (Some (Types.with_reported_model ~model telemetry)))
       }
 ;;
 

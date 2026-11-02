@@ -1,0 +1,231 @@
+{
+  "workflow": "Test",
+  "ref": "fix/fusion-selected-timeout-20261101",
+  "executions": [
+    {
+      "name": "baseline",
+      "workflow": "Test",
+      "run_id": 41296985674,
+      "job_id": 124819793394,
+      "url": "https://github.com/jeong-sik/masc/actions/runs/41296985674",
+      "head": "6c1e7b08b58a5abc1600b5040bd88a3763e3ecdc",
+      "ref": "fix/fusion-selected-timeout-20261101",
+      "status": "completed",
+      "conclusion": "failure",
+      "checkout_head": "6c1e7b08b58a5abc1600b5040bd88a3763e3ecdc",
+      "raw_capture": "/Users/dancer/me/workspace/yousleepwhen/masc-issues-oldest-20261101/artifacts/issues-oldest-20261101/fusion-selected-timeout/baseline-124819793394.raw.log",
+      "raw_bytes": 99358,
+      "raw_sha256": "68169c6cb5a76141f70a9de99cd593372868cc53d71e8c941d8f63ca9c9142ee",
+      "selected_capture": "baseline.txt",
+      "selected_bytes": 606,
+      "selected_sha256": "cd101ff5e88510298fca06c4eece29dcf55d6e489eb20ec3ced9a7ce49287b16",
+      "actual_pass": 0,
+      "actual_fail": 0,
+      "retained_case_pass": 0,
+      "retained_case_fail": 0,
+      "summaries": [],
+      "retained_capture": "baseline.txt",
+      "minimal": true,
+      "suite_timeout_sec": 900,
+      "suites": [
+        "test/test_fusion_selected_timeout"
+      ],
+      "evidence_class": "invalid_compile_execution"
+    },
+    {
+      "name": "candidate",
+      "workflow": "Test",
+      "run_id": 41297365380,
+      "job_id": 124820921886,
+      "url": "https://github.com/jeong-sik/masc/actions/runs/41297365380",
+      "head": "07854855a9c9665f68490c735738ce3bba3b7dc6",
+      "ref": "fix/fusion-selected-timeout-20261101",
+      "status": "completed",
+      "conclusion": "failure",
+      "checkout_head": "07854855a9c9665f68490c735738ce3bba3b7dc6",
+      "raw_capture": "/Users/dancer/me/workspace/yousleepwhen/masc-issues-oldest-20261101/artifacts/issues-oldest-20261101/fusion-selected-timeout/candidate-124820921886.raw.log",
+      "raw_bytes": 127389,
+      "raw_sha256": "6db9390d3aa9e1d9d4145495171897985976fb639c85b1afa0cb13d39d36fe3c",
+      "selected_capture": "candidate.txt",
+      "selected_bytes": 696,
+      "selected_sha256": "1caa8ab6d77273480ee81a545462130a09862bd02ea142d75a6250bf457bcc07",
+      "actual_pass": 0,
+      "actual_fail": 0,
+      "retained_case_pass": 0,
+      "retained_case_fail": 0,
+      "summaries": [],
+      "retained_capture": "candidate.txt",
+      "minimal": true,
+      "suite_timeout_sec": 900,
+      "suites": [
+        "test/test_fusion_selected_timeout"
+      ],
+      "evidence_class": "invalid_compile_execution"
+    },
+    {
+      "name": "repro-baseline",
+      "workflow": "Test",
+      "run_id": 41297798909,
+      "job_id": 124822231507,
+      "url": "https://github.com/jeong-sik/masc/actions/runs/41297798909",
+      "head": "4b86eab05bae5dfcd4088fa8f34eef0deb03dbc8",
+      "ref": "fix/fusion-selected-timeout-20261101",
+      "status": "completed",
+      "conclusion": "failure",
+      "checkout_head": "4b86eab05bae5dfcd4088fa8f34eef0deb03dbc8",
+      "raw_capture": "/Users/dancer/me/workspace/yousleepwhen/masc-issues-oldest-20261101/artifacts/issues-oldest-20261101/fusion-selected-timeout/repro-baseline-124822231507.raw.log",
+      "raw_bytes": 99192,
+      "raw_sha256": "d97050d19fc7e5f82b49b78850667833e7cfd1c7ad248f5a1d529ca3bbd3eafa",
+      "selected_capture": "repro-baseline.txt",
+      "selected_bytes": 611,
+      "selected_sha256": "b3134bb88225fb42bbf463066b3bf8c326487d44257278d4178b8fbbe3552fe4",
+      "actual_pass": 0,
+      "actual_fail": 0,
+      "retained_case_pass": 0,
+      "retained_case_fail": 0,
+      "summaries": [],
+      "retained_capture": "repro-baseline.txt",
+      "minimal": true,
+      "suite_timeout_sec": 900,
+      "suites": [
+        "test/test_fusion_selected_timeout"
+      ],
+      "evidence_class": "invalid_compile_execution"
+    },
+    {
+      "name": "repaired-baseline",
+      "workflow": "Test",
+      "run_id": 41298581902,
+      "job_id": 124824606434,
+      "url": "https://github.com/jeong-sik/masc/actions/runs/41298581902",
+      "head": "b7c46bd1c0b00c92e4b3bed524912013d394940c",
+      "ref": "fix/fusion-selected-timeout-20261101",
+      "status": "completed",
+      "conclusion": "failure",
+      "checkout_head": "b7c46bd1c0b00c92e4b3bed524912013d394940c",
+      "raw_capture": "/Users/dancer/me/workspace/yousleepwhen/masc-issues-oldest-20261101/artifacts/issues-oldest-20261101/fusion-selected-timeout/repaired-baseline-124824606434.raw.log",
+      "raw_bytes": 113538,
+      "raw_sha256": "b6a2d8b241989476b136b11baa3b54f34b0a605fc6d61614a8cb235018076d8b",
+      "selected_capture": "repaired-baseline.txt",
+      "selected_bytes": 5700,
+      "selected_sha256": "bcc40a86f904693bcd6f6211c8160f74b248e142f4ec6b6550728fc07ad00b03",
+      "actual_pass": 12,
+      "actual_fail": 12,
+      "retained_case_pass": 12,
+      "retained_case_fail": 12,
+      "summaries": [
+        "2026-11-01T10:47:48.5208399Z 12 failures! in 48.796s. 24 tests run."
+      ],
+      "retained_capture": "repaired-baseline.txt",
+      "minimal": true,
+      "suite_timeout_sec": 900,
+      "suites": [
+        "test/test_fusion_selected_timeout"
+      ],
+      "evidence_class": "behavioral"
+    },
+    {
+      "name": "repaired-candidate",
+      "workflow": "Test",
+      "run_id": 41298893697,
+      "job_id": 124825525068,
+      "url": "https://github.com/jeong-sik/masc/actions/runs/41298893697",
+      "head": "a5e59a3573f51802d4c75c62adde4f397ea51382",
+      "ref": "fix/fusion-selected-timeout-20261101",
+      "status": "completed",
+      "conclusion": "success",
+      "checkout_head": "a5e59a3573f51802d4c75c62adde4f397ea51382",
+      "raw_capture": "/Users/dancer/me/workspace/yousleepwhen/masc-issues-oldest-20261101/artifacts/issues-oldest-20261101/fusion-selected-timeout/repaired-candidate-124825525068.raw.log",
+      "raw_bytes": 100820,
+      "raw_sha256": "f9066bbcb6ed8f6ac69afa8ac5454c9d77526530a988c9ebbbf4a16027db17e7",
+      "selected_capture": "repaired-candidate.txt",
+      "selected_bytes": 5827,
+      "selected_sha256": "d43eb05cece774478e68bc7937975dca4e9b1274caf846192ac5761c1791c796",
+      "actual_pass": 33,
+      "actual_fail": 0,
+      "retained_case_pass": 33,
+      "retained_case_fail": 0,
+      "summaries": [
+        "2026-11-01T10:54:22.7524074Z Test Successful in 18.385s. 9 tests run.",
+        "2026-11-01T10:55:21.5056898Z Test Successful in 48.593s. 24 tests run."
+      ],
+      "retained_capture": "repaired-candidate.txt",
+      "minimal": true,
+      "suite_timeout_sec": 900,
+      "suites": [
+        "test/test_fusion_selected_timeout",
+        "test_fusion_claude_effort_authority"
+      ],
+      "evidence_class": "behavioral"
+    }
+  ],
+  "common_case_keys": {
+    "count": 24,
+    "encoding": "group TAB decimal-index NEWLINE, lexicographically sorted (group,index)",
+    "sha256": "926bcb018f393882cf482b66dacf2adb8df7930ab5622d633c501f0ee4c8139f"
+  },
+  "candidate_case_keys": {
+    "count": 33,
+    "encoding": "group TAB decimal-index NEWLINE, lexicographically sorted (group,index)",
+    "sha256": "5bc83114ecf7fc76ec85cc16d71e85caefaf502b95688090c5e2563bf07f5e7b"
+  },
+  "comparison": {
+    "common": 24,
+    "maintained": 12,
+    "fixed": 12,
+    "regressed": 0,
+    "candidate_only_controls": 9
+  },
+  "actual_candidate_execution_order": [
+    "Claude effort authority nine",
+    "selected timeout24"
+  ],
+  "source_head": "a5e59a3573f51802d4c75c62adde4f397ea51382",
+  "source_snapshot": "source-sha256.json",
+  "source_pair": "source-comparison.json",
+  "retained": {
+    "README.md": {
+      "bytes": 5546,
+      "sha256": "5054750710c6fba4e9b9cb1a0a4695e2c2635eaa2eb776a55d79b6abd10f7417"
+    },
+    "baseline.txt": {
+      "bytes": 606,
+      "sha256": "cd101ff5e88510298fca06c4eece29dcf55d6e489eb20ec3ced9a7ce49287b16"
+    },
+    "candidate.txt": {
+      "bytes": 696,
+      "sha256": "1caa8ab6d77273480ee81a545462130a09862bd02ea142d75a6250bf457bcc07"
+    },
+    "cases.tsv": {
+      "bytes": 3138,
+      "sha256": "e99476c8c90532e9d42a25e9e91200e821b2f3a937227bda485b0f594058279c"
+    },
+    "invalid-compiler-context.txt": {
+      "bytes": 1505,
+      "sha256": "d44518ce9061a23e59e9719cca269ce57f3f075db200784cebbd7535c76dee49"
+    },
+    "repaired-baseline.txt": {
+      "bytes": 5700,
+      "sha256": "bcc40a86f904693bcd6f6211c8160f74b248e142f4ec6b6550728fc07ad00b03"
+    },
+    "repaired-candidate.txt": {
+      "bytes": 5827,
+      "sha256": "d43eb05cece774478e68bc7937975dca4e9b1274caf846192ac5761c1791c796"
+    },
+    "repro-baseline.txt": {
+      "bytes": 611,
+      "sha256": "b3134bb88225fb42bbf463066b3bf8c326487d44257278d4178b8fbbe3552fe4"
+    },
+    "source-comparison.json": {
+      "bytes": 2742,
+      "sha256": "1f98e256f3e61f0419fc190a26f8f36aa68974c81fb53dd7979ec82500965a02"
+    },
+    "source-sha256.json": {
+      "bytes": 2464,
+      "sha256": "765d37787d712a882898757d2b1115a047da74dd0473b0cc84fbebc27dd11f4f"
+    }
+  },
+  "full_regression": "not_run",
+  "formal_non_author_approval": false,
+  "issue_closed": false
+}

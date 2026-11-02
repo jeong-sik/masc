@@ -523,6 +523,35 @@ let test_terminal_text_escapes_control_sequences () =
     "safe\\x1B]0;owned\\x07\\x0A\\x09\\u0080done"
     (Masc.Tui_terminal_text.sanitize_terminal_text payload)
 
+let test_terminal_control_escape_cannot_create_selector_base () =
+  let module Terminal = Masc.Tui_terminal_text in
+  let selectors = [ "\xef\xb8\x8e", "\\uFE0E"; "\xef\xb8\x8f", "\\uFE0F" ] in
+  let check source control_escape =
+    List.iter (fun (selector, selector_escape) ->
+      let input = source ^ selector in
+      let expected = control_escape ^ selector_escape in
+      Alcotest.(check string) "selector uses the original control context" expected
+        (Terminal.sanitize_terminal_text input);
+      if source <> "\n" then (
+        let mapped = Terminal.sanitize_terminal_lines_with_source input in
+        Alcotest.(check string) "mapped sanitizer uses the same decisions" expected
+          (Terminal.mapped_text mapped);
+        String.iteri (fun index _ ->
+          let owner = if index < String.length control_escape then 0
+            else String.length source in
+          Alcotest.(check (option int)) "escape belongs to its source" (Some owner)
+            (Terminal.source_byte_at mapped index)) expected)) selectors
+  in
+  List.iter (fun byte ->
+    check (String.make 1 (Char.chr byte)) (Printf.sprintf "\\x%02X" byte))
+    (List.init 32 Fun.id @ [0x7F; 0x80; 0x89; 0x99; 0xF9; 0xFF]);
+  for byte = 0x80 to 0x9F do
+    check ("\xc2" ^ String.make 1 (Char.chr byte))
+      (Printf.sprintf "\\u00%02X" byte)
+  done;
+  Alcotest.(check string) "a line break cannot supply a selector base"
+    "1\n\\uFE0F" (Terminal.sanitize_terminal_lines "1\n\xef\xb8\x8f")
+
 let test_terminal_text_preserves_printable_utf8 () =
   Alcotest.(check string)
     "printable UTF-8 survives"
@@ -699,6 +728,34 @@ let test_terminal_text_keeps_the_joiner_inside_an_emoji () =
   Alcotest.(check string) "the terminal sanitizer keeps it too"
     (shrug ^ zwj ^ male ^ vs16)
     (Masc.Tui_terminal_text.sanitize_terminal_text (shrug ^ zwj ^ male ^ vs16))
+
+let test_terminal_text_breaks_emoji_context_at_escaped_selector () =
+  let module Terminal = Masc.Tui_terminal_text in
+  let woman = "👩" and laptop = "💻" and zwj = "\xe2\x80\x8d" in
+  let valid = "❤\xef\xb8\x8f" ^ zwj ^ "🔥" in
+  Alcotest.(check string) "an admitted selector keeps its emoji joiner"
+    valid (Terminal.sanitize_terminal_text valid);
+  Alcotest.(check string) "mapped sanitizer keeps the valid emoji"
+    valid (Terminal.mapped_text (Terminal.sanitize_terminal_lines_with_source valid));
+  List.iter (fun (selector, escaped) ->
+    let input = woman ^ selector ^ zwj ^ laptop in
+    let expected = woman ^ escaped ^ "\\u200D" ^ laptop in
+    Alcotest.(check string) "an escaped selector also separates the joiner"
+      expected (Terminal.escape_invisible input);
+    let once = Terminal.sanitize_terminal_text input in
+    Alcotest.(check string) "the terminal sanitizer makes the same decision"
+      expected once;
+    Alcotest.(check string) "the first projection is stable" once
+      (Terminal.sanitize_terminal_text once);
+    let mapped = Terminal.sanitize_terminal_lines_with_source input in
+    Alcotest.(check string) "mapped sanitizer makes the same decision" expected
+      (Terminal.mapped_text mapped);
+    let owners = List.init (String.length expected) (fun index ->
+      Option.get (Terminal.source_byte_at mapped index)) in
+    Alcotest.(check (list int)) "both escapes retain their source owners"
+      ([0; 1; 2; 3] @ List.init 6 (fun _ -> 4) @ List.init 6 (fun _ -> 7)
+       @ [10; 11; 12; 13]) owners)
+    [ "\xef\xb8\x8e", "\\uFE0E"; "\xef\xb8\x8f", "\\uFE0F" ]
 
 (* #38501: the tag block copies ASCII into characters a terminal draws as
    nothing, so a sentence can be spelled twice -- once for the reader and once
@@ -8163,6 +8220,7 @@ let keeper_tool_approvals_json =
           [ `Assoc
               [ ("keeper", `String "orbiter")
               ; ("tool_call_id", `String "call-1")
+              ; ("approval_id", `String "waiter-1")
               ; ("tool", `String "Execute")
               ; ("args", `String "{\"argv\":[\"git\",\"status\"]}")
               ; ("question", `String "Run Execute on git status?")
@@ -8179,6 +8237,7 @@ let test_decode_keeper_tool_approvals () =
   | Ok [ held ] ->
       Alcotest.(check string) "keeper" "orbiter" held.Tui_decode.kta_keeper;
       Alcotest.(check string) "call id" "call-1" held.kta_tool_call_id;
+      Alcotest.(check string) "approval id" "waiter-1" held.kta_approval_id;
       Alcotest.(check string) "tool" "Execute" held.kta_tool;
       Alcotest.(check string) "question" "Run Execute on git status?"
         held.kta_question;
@@ -8195,6 +8254,28 @@ let test_decode_keeper_tool_approvals_rejects_a_thin_row () =
   match Tui_decode.decode_keeper_tool_approvals thin with
   | Ok _ -> Alcotest.fail "a row with no call id decoded"
   | Error _ -> ()
+
+let test_decode_keeper_tool_approvals_requires_waiter_identity () =
+  let fields =
+    keeper_tool_approvals_json
+    |> Yojson.Safe.Util.member "pending"
+    |> Yojson.Safe.Util.to_list
+    |> List.hd
+    |> Yojson.Safe.Util.to_assoc
+    |> List.remove_assoc "approval_id"
+  in
+  List.iter
+    (fun identity ->
+      let fields =
+        match identity with
+        | None -> fields
+        | Some value -> ("approval_id", value) :: fields
+      in
+      let json = `Assoc [ "pending", `List [ `Assoc fields ] ] in
+      match Tui_decode.decode_keeper_tool_approvals json with
+      | Error _ -> ()
+      | Ok _ -> Alcotest.fail "a pending row without a waiter identity decoded")
+    [ None; Some `Null; Some (`Int 7); Some (`String " ") ]
 
 let keeper_turns_json =
   `Assoc
@@ -11736,17 +11817,28 @@ let test_decode_execute_row_details_the_whole_command () =
   match rows with
   | Tui_decode.Rows fields ->
     Alcotest.check Alcotest.int "one field per stored key" 2 (List.length fields);
-    Alcotest.check
-      Alcotest.(option string)
-      "argv is whole, not the cut summary"
-      (Some
-         (Yojson.Safe.to_string
-            (`List
-               [ `String "git"; `String "clone";
-                 `String ("https://example.org/" ^ long_url) ])))
-      (List.assoc_opt "argv" fields)
+    Alcotest.check Alcotest.bool "argv is whole, not the cut summary" true
+      (List.assoc_opt "argv" fields =
+       Some (`List
+         [ `String "git"; `String "clone";
+           `String ("https://example.org/" ^ long_url) ]))
   | Tui_decode.Flattened _ ->
     Alcotest.fail "an object input must draw key by key"
+
+let test_decode_execute_row_preserves_input_value_types () =
+  let expected =
+    [ "same", `String "true"
+    ; "same", `Bool true
+    ; "null", `Null
+    ; "nested", `List [ `String "1"; `Int 1 ]
+    ]
+  in
+  let input = `Assoc [ "input", `Assoc expected ] in
+  match decoded_execute_rows ~preview:"cut" ~input with
+  | Tui_decode.Rows fields ->
+    Alcotest.check Alcotest.bool "types, order and duplicate keys survive" true
+      (fields = expected)
+  | Tui_decode.Flattened _ -> Alcotest.fail "object input was flattened"
 
 let test_decode_connector_row_holds_a_korean_body_whole () =
   (* The queue's 200-byte preview spends its budget on JSON keys first, so a
@@ -11778,10 +11870,8 @@ let test_decode_connector_row_holds_a_korean_body_whole () =
     | [ pending ] -> (
       match pending.Tui_decode.gp_input_rows with
       | Tui_decode.Rows fields ->
-        Alcotest.check
-          Alcotest.(option string)
-          "the Korean body is carried whole"
-          (Some body) (List.assoc_opt "content" fields)
+        Alcotest.check Alcotest.bool "the Korean body is carried whole" true
+          (List.assoc_opt "content" fields = Some (`String body))
       | Tui_decode.Flattened _ ->
         Alcotest.fail "an object input must draw key by key")
     | rows -> Alcotest.failf "expected one pending row, got %d" (List.length rows))
@@ -13641,6 +13731,8 @@ let () =
 
       ; Alcotest.test_case "rejects a thin row" `Quick
           test_decode_keeper_tool_approvals_rejects_a_thin_row
+      ; Alcotest.test_case "requires the waiter identity" `Quick
+          test_decode_keeper_tool_approvals_requires_waiter_identity
       ] );
     ( "decode_keeper_turns",
       [ Alcotest.test_case "running, idle, and unavailable rows" `Quick
@@ -14016,6 +14108,8 @@ let () =
           test_terminal_lines_source_mapping
       ; Alcotest.test_case "escapes control sequences" `Quick
           test_terminal_text_escapes_control_sequences
+      ; Alcotest.test_case "control escapes do not create a selector base" `Quick
+          test_terminal_control_escape_cannot_create_selector_base
       ; Alcotest.test_case "preserves printable UTF-8" `Quick
           test_terminal_text_preserves_printable_utf8
       ; Alcotest.test_case "escapes malformed UTF-8 bytes" `Quick
@@ -14026,6 +14120,8 @@ let () =
           test_terminal_text_escapes_invisible_codepoints
       ; Alcotest.test_case "keeps the joiner inside an emoji" `Quick
           test_terminal_text_keeps_the_joiner_inside_an_emoji
+      ; Alcotest.test_case "escaped selectors break emoji joiner context" `Quick
+          test_terminal_text_breaks_emoji_context_at_escaped_selector
       ; Alcotest.test_case "keeps the tags that spell a flag" `Quick
           test_terminal_text_keeps_the_tags_that_spell_a_flag
       ; Alcotest.test_case "escapes every default-ignorable" `Quick
@@ -14298,6 +14394,8 @@ let () =
           test_decode_execute_gate_row_keeps_the_preview_on_an_unknown_shape;
         Alcotest.test_case "an execute detail draws the whole command" `Quick
           test_decode_execute_row_details_the_whole_command;
+        Alcotest.test_case "an execute detail keeps input value types" `Quick
+          test_decode_execute_row_preserves_input_value_types;
         Alcotest.test_case "a connector body is carried whole" `Quick
           test_decode_connector_row_holds_a_korean_body_whole;
         Alcotest.test_case

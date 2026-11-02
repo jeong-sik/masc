@@ -1,0 +1,54 @@
+{
+  "workflow": "Test",
+  "run_id": 41379588690,
+  "job_id": 125067233800,
+  "url": "https://github.com/jeong-sik/masc/actions/runs/41379588690",
+  "head": "79158c71e1fcc250e0f7b55f1b4edfb6906753dd",
+  "ref": "fix/frozen-native-account-selection-20261102",
+  "status": "completed",
+  "conclusion": "failure",
+  "checkout_head": "79158c71e1fcc250e0f7b55f1b4edfb6906753dd",
+  "raw_bytes": 1215952,
+  "raw_sha256": "da175919e13e318411aefba88dbcffccebe21a0b61016050f65864fa21a94093",
+  "selected_bytes": 83319,
+  "selected_sha256": "a50dac3ccc7a4d50328696c3a3840a2877fc7c989c89d6c0f24f1a53ce631dc9",
+  "actual_pass": 668,
+  "actual_fail": 1,
+  "actual_skip": 9,
+  "summaries": [
+    "2026-11-02T02:53:10.5902860Z Test Successful in 0.018s. 27 tests run.",
+    "2026-11-02T02:53:17.1423253Z Test Successful in 6.425s. 132 tests run.",
+    "2026-11-02T02:57:48.0443180Z Test Successful in 270.750s. 196 tests run.",
+    "2026-11-02T02:59:43.4548592Z Test Successful in 115.225s. 38 tests run.",
+    "2026-11-02T02:59:44.0750238Z 1 failure! in 0.386s. 101 tests run.",
+    "2026-11-02T02:59:44.2396650Z Test Successful in 0.011s. 36 tests run.",
+    "2026-11-02T02:59:44.5960741Z Test Successful in 0.212s. 40 tests run.",
+    "2026-11-02T02:59:44.7653965Z Test Successful in 0.040s. 5 tests run.",
+    "2026-11-02T02:59:51.1448823Z Test Successful in 6.250s. 20 tests run.",
+    "2026-11-02T03:01:11.2088553Z Test Successful in 79.855s. 46 tests run.",
+    "2026-11-02T03:01:11.3769837Z Test Successful in 0.041s. 16 tests run.",
+    "2026-11-02T03:01:11.5521217Z Test Successful in 0.051s. 12 tests run."
+  ],
+  "semantic_limits": [
+    "Native account-selection suite actual27PASS.",
+    "Framework totals668OK/1FAIL/9SKIP. Sole failed case is per-keeper routing diagnostic-substring assertion after typed Execution_unbuildable.",
+    "One serial-fence callback assertion is caught as a WARN under an OK case; it limits that old case success evidence. Source analysis finds repeated delta assertion; newer remote424 fixture already checks outside the callback.",
+    "No identical-fixture before/after pair or real provider/account/native model execution."
+  ],
+  "remote_rewrite_observation": {
+    "head": "424a6cdeee9d32cbd7d84fb737b1d3e18f6e4d1b",
+    "execution_not_transferred": true
+  },
+  "raw_capture_retained_in_git": false,
+  "raw_capture_location": "original campaign checkout: artifacts/issues-oldest-20261101/catalog-publication-20261102/native-account-product-observed-125067233800.raw.log",
+  "selected_capture": "selected.txt",
+  "source_inputs": "source-inputs.json",
+  "source_inputs_sha256": "c8c1d69ad2bb6acedabdb6c494ebb1481c8ee17ccc1493994be23e52ca2f3cc4",
+  "callback_warnings": {
+    "capture": "callback-warnings.txt",
+    "bytes": 525,
+    "sha256": "fcfea40ee398db6dace793ba3671f4bdc79389956354502f405432af2ddaf5f7",
+    "actual_lines": 2,
+    "derivation": "Complete matching callback-warning lines from ANSI-stripped raw capture; independent derivative digest, not raw byte identity."
+  }
+}

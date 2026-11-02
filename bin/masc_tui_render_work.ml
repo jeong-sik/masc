@@ -139,6 +139,8 @@ let task_detail_lines (state : state) ~cols (task : Masc_domain.task) =
   @ task_document_lines state ~cols Masc_tui_task_document.Body
   @ (Masc_tui_task_document.history_status_lines ~width ~view:history
       ~in_flight:(Masc_tui_fetched.in_flight state.task_history)
+      ~continuing:(Option.exists (fun request -> Option.is_some request.thr_page.hr_cursor)
+        state.task_history_request)
      |> List.concat_map (fun line -> if line="" then [""] else
        Masc_tui_text_block.rows ~max_cells:(max 1 (framed_inner_width cols)) line))
   @ task_document_lines state ~cols Masc_tui_task_document.History
@@ -159,7 +161,7 @@ let task_detail_viewport (state : state) =
 
 let task_detail_pane (state : state) ~rows ~cols (task : Masc_domain.task) buf =
   let header = Printf.sprintf "%s  %s%s%s  %s"
-    (screen_title " MASC Task") Ansi.dim
+    (screen_title " MASC Task") (Theme.recede ())
     (bracketed ~max_cells:20 (Terminal_text.single_line task.id)) Ansi.reset
     (connection_badge state) in
   box_top buf cols;
@@ -168,17 +170,17 @@ let task_detail_pane (state : state) ~rows ~cols (task : Masc_domain.task) buf =
   let lines = task_detail_lines state ~cols task in
   let count = List.length lines in
   let height = task_detail_height ~rows ~count in
-  let scroll = Masc_tui_scroll.normalize ~count ~height state.task_detail_scroll in
+  let scroll = Masc_tui_scroll.normalize ~count ~height (task_detail_render_scroll state) in
   let window = Rows.of_list ~first:scroll ~height lines in
   for offset = 0 to height - 1 do
     match Rows.at window (scroll + offset) with
     | None -> box_empty buf cols
-    | Some line -> box_line_styled buf cols ~style:Ansi.dim line
+    | Some line -> box_line buf cols line
   done;
   Option.iter (box_line_styled buf cols ~style:(Theme.recede ()))
     (Masc_tui_scroll.position_row ~scroll ~height count);
   box_bottom buf cols;
-  scroll
+  scroll, count, height
 ;;
 
 (* The task list stays beside the task. Overview's rows are the queue
@@ -188,7 +190,7 @@ let render_task_detail (state : state) (task : Masc_domain.task) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
-  let offset =
+  let offset, count, height =
     if cols < keeper_split_threshold_cols then
       task_detail_pane state ~rows ~cols task buf
     else begin
@@ -227,8 +229,11 @@ let render_task_detail (state : state) (task : Masc_domain.task) =
        ~status:[ Masc_tui_footer.Refresh_interval state.refresh_interval ]
        ~hints:"j/k:scroll  PgUp/PgDn:page  Home/End  x:cancel  Left / Esc:back  r:refresh");
 
-  let offset=if task_documents_pending state then state.task_detail_scroll else offset in
-  finish_surface state ~clamped:(Task_detail offset) ~surface_key:"task-detail" ~rows:terminal_rows ~cols buf
+  let offset =
+    if task_documents_pending state && not (task_detail_following_end state)
+    then state.task_detail_scroll else offset in
+  finish_surface state ~clamped:(Task_detail (offset, Some (count, height)))
+    ~surface_key:"task-detail" ~rows:terminal_rows ~cols buf
 
 let render_work_tasks (state : state) =
   let terminal_rows, cols = get_terminal_size () in
@@ -2060,8 +2065,8 @@ let schedule_detail_lines ~width ~freshness ~runner (row : schedule_row)
   @ [ field "Digest" row.sch_payload_digest
     ; Ansi.bold, "  PAYLOAD JSON"
     ]
-  @ (document_markdown ~width:(max 1 (width - 4))
-       ("```json\n" ^ Yojson.Safe.pretty_to_string row.sch_payload ^ "\n```")
+  @ (document_json ~width:(max 1 (width - 4))
+       (Yojson.Safe.pretty_to_string row.sch_payload)
     |> List.map (fun line -> Ansi.reset, "    " ^ line))
 
 let schedule_detail_content (state : state) ~cols ~runner (row : schedule_row) =

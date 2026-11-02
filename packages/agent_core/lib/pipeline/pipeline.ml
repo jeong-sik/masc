@@ -208,6 +208,7 @@ let stage_collect
       ~turn
       ~provider_config
       ~context_message
+      ~execution
       agent
       (response : Llm_provider.Types.api_response)
   =
@@ -248,6 +249,13 @@ let stage_collect
            ~retained_indices:admission.Agent_tools.retained_content_indices response
          |> Result.map_error (fun detail -> Error.Internal detail)
        in
+       (* Freeze admission before hooks can widen the tools and before the
+          collected checkpoint becomes durable. Recovery consumes this exact
+          response rather than reinterpreting the raw provider blocks with a
+          later tool palette. The raw trace above retains the wire blocks. *)
+       let* () =
+         Pipeline_execution_scope.record_provider_response execution response
+       in
        (match admission.Agent_tools.rejected_names with
         | [] -> ()
         | names ->
@@ -263,7 +271,6 @@ let stage_collect
        let usage =
          Agent_turn.accumulate_usage
            ~current_usage:agent.state.usage
-           ~provider_config:(Some provider_config)
            ~response_model:(Some response.model)
            ~response_usage:response.usage
        in
@@ -389,7 +396,7 @@ let stage_collect
            After_assistant_collected
            agent.state
        in
-       (match agent.options.event_bus with
+       (match Pipeline_common.transient_event_bus agent with
         | Some bus ->
           safe_publish
             bus
@@ -409,7 +416,7 @@ let stage_collect
           when the provider did not report them (cloud providers omit timings).
           The nested [None -> ()] arms are explicit (no catch-all) so a future
           telemetry field cannot be silently dropped here. *)
-       (match agent.options.event_bus with
+       (match Pipeline_common.transient_event_bus agent with
         | None -> ()
         | Some bus ->
           (match response.telemetry with
@@ -722,6 +729,9 @@ let run_new_turn
       }
       (fun _tracer -> stage_input ?raw_trace_run ?clock ~turn agent |> tag_error "input")
   in
+  let* execution =
+    Pipeline_execution_scope.open_turn (Execution_context.agent_scope ()) ~ordinal:turn
+  in
   (* Stage 2: Parse *)
   let* prep, turn_config, turn_params =
     Tracing.with_span
@@ -735,6 +745,8 @@ let run_new_turn
       }
       (fun _tracer -> stage_parse ?raw_trace_run ?clock ~turn agent |> tag_error "parse")
   in
+  let* () = Pipeline_execution_scope.record_turn_ready execution
+    ~tool_names:prep.Agent_turn.visible_tool_names in
   (* Stage 2.5: Async input validation *)
   let async_guard = agent.options.guardrails_async in
   match
@@ -745,9 +757,6 @@ let run_new_turn
   | Guardrails_async.Fail { validator_name; reason } ->
     Error (Error.Agent (GuardrailViolation { validator = validator_name; reason }))
   | Guardrails_async.Pass ->
-    let* execution =
-      Pipeline_execution_scope.open_turn (Execution_context.agent_scope ()) ~ordinal:turn
-    in
     (* Stage 3: Route exactly once. Provider [ContextOverflow] remains a typed
        error; AGENT_CORE does not mutate the transcript or retry implicitly. *)
     let api_outcome =
@@ -784,13 +793,9 @@ let run_new_turn
          | Guardrails_async.Fail { validator_name; reason } ->
            Error (Error.Agent (GuardrailViolation { validator = validator_name; reason }))
          | Guardrails_async.Pass ->
-           let* () =
-             Pipeline_execution_scope.record_provider_response execution response
-             |> tag_error "response"
-           in
            let* response, rejected_tool_calls =
              stage_collect ?raw_trace_run ?clock ~turn ~provider_config
-               ~context_message:prep.Agent_turn.context_message agent response
+               ~context_message:prep.Agent_turn.context_message ~execution agent response
              |> tag_error "collect"
            in
            (match Pipeline_execution_scope.provider execution with
@@ -864,6 +869,9 @@ let run_turn
     ~all_pre_tool_use_blocked:(ToolsExecuted After_tool_results_appended)
     ~tools_settled_before_checkpoint:(replay_settled_before_checkpoint agent)
     ~tools_settled:Pipeline_terminal_tool.recovered_outcome
+    ~pending_terminal:(fun ~turn response ->
+      stage_output ?raw_trace_run ?before_tool_execution ~turn
+        ~rejected_tool_calls:[] agent response)
     ~terminal:(fun response -> Complete response)
     ~fresh:(fun ~turn ->
       run_new_turn

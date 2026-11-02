@@ -70,11 +70,17 @@ module Theme = struct
      read once per drawn row. *)
   type resolved =
     { generation : int
+    ; lift_enabled : bool
     ; ok : string
     ; warn : string
     ; bad : string
     ; info : string
     ; muted : string
+    ; text_ok : string
+    ; text_warn : string
+    ; text_bad : string
+    ; text_info : string
+    ; text_muted : string
     ; user : string
     ; inbound : string
     ; keeper : string
@@ -138,20 +144,28 @@ module Theme = struct
   let rec resolved () =
     let probed = Masc_tui_terminal_palette.snapshot () in
     let generation = Masc_tui_terminal_palette.snapshot_generation probed in
+    let lift_enabled = Masc_tui_theme.lift_is_enabled () in
     let previous = Atomic.get resolved_cache in
     match previous with
-    | Some cached when cached.generation = generation -> cached
+    | Some cached when cached.generation = generation && cached.lift_enabled = lift_enabled -> cached
     | Some _ | None ->
       let palette = Masc_tui_terminal_palette.snapshot_palette probed in
       let of_state = Masc_tui_theme.status_readable palette in
+      let of_text = Masc_tui_theme.status_text_readable palette in
       let of_colour = Masc_tui_theme.ansi_readable palette in
       let next =
         { generation
+        ; lift_enabled
         ; ok = of_state Masc_tui_theme.Ok
         ; warn = of_state Masc_tui_theme.Warn
         ; bad = of_state Masc_tui_theme.Bad
         ; info = of_state Masc_tui_theme.Info
         ; muted = of_state Masc_tui_theme.Muted
+        ; text_ok = of_text Masc_tui_theme.Ok
+        ; text_warn = of_text Masc_tui_theme.Warn
+        ; text_bad = of_text Masc_tui_theme.Bad
+        ; text_info = of_text Masc_tui_theme.Info
+        ; text_muted = of_text Masc_tui_theme.Muted
         ; user = of_colour Masc_tui_theme.Bright_cyan
         (* Green against the operator's cyan: two lines addressed to the same
            Keeper, and the pane has to say which of them the reader wrote.
@@ -183,6 +197,15 @@ module Theme = struct
   let bad () = (resolved ()).bad
   let info () = (resolved ()).info
   let muted () = (resolved ()).muted
+
+  (* Labels that name their own state can use the reader's foreground when
+     the terminal did not supply enough palette information to verify colour. *)
+  let text_status = function
+    | Masc_tui_theme.Ok -> (resolved ()).text_ok
+    | Masc_tui_theme.Warn -> (resolved ()).text_warn
+    | Masc_tui_theme.Bad -> (resolved ()).text_bad
+    | Masc_tui_theme.Info -> (resolved ()).text_info
+    | Masc_tui_theme.Muted -> (resolved ()).text_muted
 
   (* Who is speaking is a reading too, so the role colours draw through the
      same path as the state ones. Measured on the twelve schemes, they need it

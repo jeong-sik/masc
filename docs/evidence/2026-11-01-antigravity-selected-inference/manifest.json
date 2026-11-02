@@ -1,0 +1,126 @@
+{
+  "workflow": "Test",
+  "ref": "fix/antigravity-selected-inference-20261101",
+  "executions": [
+    {
+      "name": "baseline",
+      "workflow": "Test",
+      "run_id": 41299786698,
+      "job_id": 124828165762,
+      "url": "https://github.com/jeong-sik/masc/actions/runs/41299786698",
+      "head": "fa138512cfb1c9a8b5cffbcc4bb331779ce9449c",
+      "ref": "fix/antigravity-selected-inference-20261101",
+      "status": "completed",
+      "conclusion": "failure",
+      "checkout_head": "fa138512cfb1c9a8b5cffbcc4bb331779ce9449c",
+      "raw_capture": "/Users/dancer/me/workspace/yousleepwhen/masc-issues-oldest-20261101/artifacts/issues-oldest-20261101/antigravity-selected-inference/baseline-124828165762.raw.log",
+      "raw_bytes": 128326,
+      "raw_sha256": "50cb29578b82923c207de9f51de0d3b5f5d8c00b922b158b090b63be065b3c33",
+      "selected_capture": "baseline.txt",
+      "selected_bytes": 3948,
+      "selected_sha256": "2feee430b01aa817666da4a99fd8c55a1a06fbf805cc281de5e65087e8cbbfe2",
+      "actual_pass": 3,
+      "actual_fail": 7,
+      "retained_case_pass": 3,
+      "retained_case_fail": 7,
+      "summaries": [
+        "2026-11-01T11:02:30.7736844Z 7 failures! in 7.686s. 10 tests run."
+      ],
+      "minimal": true,
+      "suite_timeout_sec": 900,
+      "suites": [
+        "test/test_keeper_antigravity_selected_inference"
+      ],
+      "retained_capture": "baseline.txt"
+    },
+    {
+      "name": "candidate",
+      "workflow": "Test",
+      "run_id": 41300307241,
+      "job_id": 124829681267,
+      "url": "https://github.com/jeong-sik/masc/actions/runs/41300307241",
+      "head": "ed7c00c5922f1014faf052787923012689bef432",
+      "ref": "fix/antigravity-selected-inference-20261101",
+      "status": "completed",
+      "conclusion": "success",
+      "checkout_head": "ed7c00c5922f1014faf052787923012689bef432",
+      "raw_capture": "/Users/dancer/me/workspace/yousleepwhen/masc-issues-oldest-20261101/artifacts/issues-oldest-20261101/antigravity-selected-inference/candidate-124829681267.raw.log",
+      "raw_bytes": 148911,
+      "raw_sha256": "48247d968650f7c2574e01209c93583c25e99f083c22df43dc63b57a6ea8868d",
+      "selected_capture": "candidate.txt",
+      "selected_bytes": 5273,
+      "selected_sha256": "371085a7ba638621e74573bc571beb5e999368beddffda0d52274867b78895de",
+      "actual_pass": 23,
+      "actual_fail": 0,
+      "retained_case_pass": 23,
+      "retained_case_fail": 0,
+      "summaries": [
+        "2026-11-01T11:16:23.4349910Z Test Successful in 0.291s. 1 test run.",
+        "2026-11-01T11:16:47.2240360Z Test Successful in 8.623s. 10 tests run.",
+        "2026-11-01T11:16:47.4251107Z Test Successful in 0.049s. 12 tests run."
+      ],
+      "minimal": true,
+      "suite_timeout_sec": 900,
+      "suites": [
+        "test/test_keeper_antigravity_selected_inference",
+        "test_official_client_claim_cause",
+        "test_keeper_antigravity_async_outbox"
+      ],
+      "retained_capture": "candidate.txt"
+    }
+  ],
+  "common_case_keys": {
+    "count": 10,
+    "encoding": "group TAB decimal-index NEWLINE, sorted by (group,index)",
+    "sha256": "cc0bf58263caf59754938e8a1386709bcc2ca8e815adc3960814a578bd331286"
+  },
+  "candidate_case_keys": {
+    "count": 23,
+    "encoding": "group TAB decimal-index NEWLINE, sorted by (group,index)",
+    "sha256": "9ca667f41df3f80be334c545ff778c427defed1c68cc267b8f06db1ab7c35506"
+  },
+  "comparison": {
+    "common": 10,
+    "maintained": 3,
+    "fixed": 7,
+    "regressed": 0,
+    "candidate_only_controls": 13
+  },
+  "actual_candidate_execution_order": [
+    "async outbox one",
+    "selected inference ten",
+    "claim cause twelve"
+  ],
+  "source_head": "ed7c00c5922f1014faf052787923012689bef432",
+  "source_snapshot": "source-sha256.json",
+  "source_pair": "source-comparison.json",
+  "retained": {
+    "README.md": {
+      "bytes": 5716,
+      "sha256": "9a1fda21e4b042cd6feae17e3353f49a47a1af3b6ff4c0767c89be25b85bf97d"
+    },
+    "baseline.txt": {
+      "bytes": 3948,
+      "sha256": "2feee430b01aa817666da4a99fd8c55a1a06fbf805cc281de5e65087e8cbbfe2"
+    },
+    "candidate.txt": {
+      "bytes": 5273,
+      "sha256": "371085a7ba638621e74573bc571beb5e999368beddffda0d52274867b78895de"
+    },
+    "cases.tsv": {
+      "bytes": 1976,
+      "sha256": "93b716be8ee6fce8e06d284fc7cda52a0c120d052f0e188e3669f32e57fccd3b"
+    },
+    "source-comparison.json": {
+      "bytes": 5153,
+      "sha256": "a1c337c4e18a2458d87e35f488356877f13121f1c1fe4b7d300fd38ff0fd9898"
+    },
+    "source-sha256.json": {
+      "bytes": 2731,
+      "sha256": "aaa6b1293434d09e5770fb4e3875bd0a9971ada65af163babb50f57513122d97"
+    }
+  },
+  "full_regression": "not_run",
+  "formal_non_author_approval": false,
+  "issue_closed": false
+}

@@ -34,17 +34,22 @@ val stdout_color_level : unit -> stdout_color_level
 val best_color : rgb -> projected_color option
 (** Project for the process-local [stdout_color_level ()]. *)
 
-val projected_rgb : projected_color -> rgb
-(** RGB of the emitted colour, including quantization to the fixed xterm
-    palette. Contrast must be checked after projection. *)
+val direct_rgb : projected_color -> rgb option
+(** RGB specified directly by the emitted SGR. An indexed SGR does not carry
+    its own RGB, and this probe has not observed slots 16..255; their usual
+    xterm defaults cannot establish what a particular terminal will draw. *)
+
+val estimated_rgb : projected_color -> rgb
+(** RGB used to select a projection. For an index this is the xterm default,
+    not an observation of the terminal's reconfigurable palette. *)
 
 val fold_projected_color
   :  rgb:(rgb -> 'a)
   -> indexed:(int -> 'a)
   -> projected_color
   -> 'a
-(** Eliminate an abstract projection. The [indexed] branch receives only a
-    fixed xterm index in 16..255. Theme uses this to serialize SGR bytes. *)
+(** Eliminate an abstract projection. The [indexed] branch receives an index
+    in 16..255 chosen against default xterm colours, not an observed RGB. *)
 
 (** Test-only capability and projection fixtures. Code under [bin/] and
     [lib/] may not name this module outside its owner implementation.
@@ -72,7 +77,7 @@ module For_testing : sig
     -> rgb
     -> projected_color option
   (** Pure projection fixture. [True_color] keeps RGB, [Ansi256] chooses the
-      nearest fixed xterm colour in 16..255, and [Ansi16]/[Unknown] return
+      nearest default xterm colour in 16..255, and [Ansi16]/[Unknown] return
       [None]. Production code uses [best_color]. *)
 end
 

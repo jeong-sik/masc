@@ -1057,6 +1057,7 @@ val decode_keeper_secret_projections :
 type keeper_tool_approval = {
   kta_keeper : string;
   kta_tool_call_id : string;
+  kta_approval_id : string;
   kta_tool : string;
   kta_args : string;
   kta_question : string;
@@ -1147,12 +1148,10 @@ val decode_tool_approval_mode_overrides :
    preview, because sitting a possibly-truncated wall under "input" promised
    a whole it never was. *)
 type gate_input_rows =
-  | Rows of (string * string) list
-      (** One field per key of the stored input object: the key is the label,
-          the value is what the producer stored -- strings whole, every other
-          value as compact JSON. The order is the producer's, because a
-          producer that leads with the field the operator reads is making a
-          statement the serializer must not rearrange. *)
+  | Rows of (string * Yojson.Safe.t) list
+      (** The decoded input object's fields in producer order. Keeping each
+          value typed distinguishes a string from another JSON value with
+          the same text, and also preserves duplicate keys. *)
   | Flattened of string option
       (** The server's flattened preview, with the fact that this input never
           was an object. [None] means the server recorded no preview either;
@@ -1182,10 +1181,9 @@ type gate_pending = {
           show. A [tool_execute] row leads with the command it would run;
           every other operation keeps the server's flattened preview. *)
   gp_input_rows : gate_input_rows;
-      (** The detail pane's copy of the input, uncut. [Rows] is one field per
-          key of the stored input object -- strings whole, other values as
-          compact JSON. [Flattened] says this input never was an object, so
-          the pane draws the server preview under a label that names it. *)
+      (** The detail pane's decoded input object, without the preview limit.
+          [Flattened] says the input was not an object, so the pane draws the
+          server preview under a label that names it. *)
   gp_execution_cwd : string option;
       (** The working directory a [tool_execute] request would run in.
           [None] for operations that carry no execution context. *)
@@ -1534,8 +1532,8 @@ type server_identity = {
           that does not carry the field — unknown, so no warning and no
           all-clear. *)
   sid_state_ready : bool option;
-      (** [/health] [startup.state_ready]. [None] when the probe carries no
-          startup section: neither booting nor vouched ready. *)
+      (** [/health] [startup.state_ready] or a ready scoped Observer receipt.
+          [None] means neither booting nor vouched ready. *)
   sid_uptime : string option;
       (** [/health] [uptime] human-readable elapsed duration (e.g. "1h 42m"). *)
   sid_sse_clients : int option;
@@ -1545,7 +1543,8 @@ type server_identity = {
   sid_scheduler : server_scheduler_health option;
       (** [/health] [scheduler] scheduler latency probe distribution and stalls. *)
 }
-(** Which server the TUI is talking to, as [/health] reports it.
+(** Which server the TUI is talking to, from [/health] or an attested scoped
+    Observer response. Fields absent from the latter remain unknown.
 
     The footer said [Port: 8935] and nothing else, so two checkouts serving
     on the same port were indistinguishable from the screen -- and a binary

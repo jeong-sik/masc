@@ -852,6 +852,56 @@ let credential_listing_error_to_string = function
     Printf.sprintf "credential %s is unreadable: %s" path reason
 ;;
 
+let compare_agent_role (a : agent_role) (b : agent_role) =
+  let rank = function
+    | Worker -> 0
+    | Admin -> 1
+    | Player -> 2
+  in
+  Int.compare (rank a) (rank b)
+;;
+
+let compare_agent_credential (a : agent_credential) (b : agent_credential) =
+  let c = Option.compare
+      (fun left right -> String.compare
+          (Ids.Credential_id.to_string left) (Ids.Credential_id.to_string right))
+      a.id b.id in
+  if c <> 0 then c else
+  let c = Option.compare
+      (fun left right -> String.compare
+          (Ids.Agent_id.to_string left) (Ids.Agent_id.to_string right))
+      a.agent_id b.agent_id in
+  if c <> 0 then c else
+  let c = String.compare a.agent_name b.agent_name in
+  if c <> 0 then c else
+  let c = String.compare a.token b.token in
+  if c <> 0 then c else
+  let c = compare_agent_role a.role b.role in
+  if c <> 0 then c else
+  let c = String.compare a.created_at b.created_at in
+  if c <> 0 then c else
+  Option.compare String.compare a.expires_at b.expires_at
+;;
+
+let compare_credential_listing_error (a : credential_listing_error) (b : credential_listing_error) =
+  match a, b with
+  | Invalid_credential_expiry a, Invalid_credential_expiry b ->
+    let c = String.compare a.agent_name b.agent_name in
+    if c <> 0 then c else
+    let c = compare_agent_role a.role b.role in
+    if c <> 0 then c else
+    String.compare a.timestamp b.timestamp
+  | Invalid_credential_expiry _, Unreadable_credential _ -> -1
+  | Unreadable_credential _, Invalid_credential_expiry _ -> 1
+  | Unreadable_credential a, Unreadable_credential b ->
+    let c = String.compare a.path b.path in
+    if c <> 0 then c else String.compare a.reason b.reason
+;;
+
+let compare_credential_result =
+  Result.compare ~ok:compare_agent_credential ~error:compare_credential_listing_error
+;;
+
 let list_credential_results config =
   let unreadable path reason = Error (Unreadable_credential { path; reason }) in
   let decode path json =
@@ -927,7 +977,7 @@ let list_credential_results config =
       [ unreadable dir (Printf.sprintf "%s(%s): %s" operation argument (Unix.error_message error)) ]
     | Eio.Io _ as exn -> [ unreadable dir (Printexc.to_string exn) ]
   in
-  List.sort_uniq compare entries
+  List.sort_uniq compare_credential_result entries
 ;;
 
 (* Current-store discovery keeps decode failures distinct from I/O failure: the former
@@ -1713,15 +1763,23 @@ let () =
     (prevention).  Returns [(token_hash, credentials)] so rotation
     can preserve credential IDs / roles while minting fresh bearer
     material. *)
+module Token_map = Map.Make (String)
+
 let group_credentials_by_token config : (string * agent_credential list) list =
   let creds = list_credentials config in
-  let by_token : (string, agent_credential list) Hashtbl.t = Hashtbl.create 16 in
-  List.iter
-    (fun (cred : agent_credential) ->
-       let prev = Hashtbl.find_opt by_token cred.token |> Option.value ~default:[] in
-       Hashtbl.replace by_token cred.token (cred :: prev))
-    creds;
-  Hashtbl.fold (fun token_hash entries acc -> (token_hash, entries) :: acc) by_token []
+  let by_token =
+    List.fold_left
+      (fun acc (cred : agent_credential) ->
+         Token_map.update
+           cred.token
+           (function
+            | None -> Some [ cred ]
+            | Some prev -> Some (cred :: prev))
+           acc)
+      Token_map.empty
+      creds
+  in
+  Token_map.bindings by_token
 ;;
 
 let token_hash_prefix_of token_hash =

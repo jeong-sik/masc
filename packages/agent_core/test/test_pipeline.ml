@@ -444,7 +444,7 @@ let test_pipeline_sends_exact_supplied_tools () =
     (Option.equal (List.equal Yojson.Safe.equal) (Some expected) !captured)
 ;;
 
-let test_effective_provider_config_drives_lifecycle_and_pricing () =
+let test_effective_provider_config_drives_lifecycle_without_inferred_cost () =
   Eio_main.run
   @@ fun env ->
   Eio.Switch.run
@@ -515,10 +515,11 @@ let test_effective_provider_config_drives_lifecycle_and_pricing () =
    | None -> Alcotest.fail "completed agent has no lifecycle snapshot");
   let usage = (Agent.state agent).usage in
   Alcotest.(check bool)
-    "effective model pricing applied"
+    "display-model fallback does not invent a charge"
     true
-    (usage.estimated_cost_usd > 0.0);
-  Alcotest.(check bool) "no pricing gap" true (Option.is_none usage.pricing_gap)
+    (usage.estimated_cost_usd = 0.0);
+  Alcotest.(check bool) "missing reported model preserves the pricing gap" true
+    (usage.pricing_gap = Some (Types.Pricing_unavailable effective_model))
 ;;
 
 let test_provider_turn_identity_is_shared_across_multiturn_tool_loop () =
@@ -1428,7 +1429,6 @@ let test_accumulate_usage_with_response () =
   let result =
     Agent_turn.accumulate_usage
       ~current_usage:current
-      ~provider_config:None
       ~response_model:None
       ~response_usage:resp_usage
   in
@@ -1448,7 +1448,6 @@ let test_accumulate_usage_no_response () =
   let result =
     Agent_turn.accumulate_usage
       ~current_usage:current
-      ~provider_config:None
       ~response_model:None
       ~response_usage:None
   in
@@ -1479,14 +1478,12 @@ let test_accumulate_usage_cumulative () =
   let after1 =
     Agent_turn.accumulate_usage
       ~current_usage:Types.empty_usage
-      ~provider_config:None
       ~response_model:None
       ~response_usage:u1
   in
   let after2 =
     Agent_turn.accumulate_usage
       ~current_usage:after1
-      ~provider_config:None
       ~response_model:None
       ~response_usage:u2
   in
@@ -1884,6 +1881,203 @@ let test_trace_finalization_preserves_committed_success diagnostic_fault () =
 
 exception Checkpoint_authority_refused
 
+let test_durable_turn_bus_uses_canonical_facts
+    ?(delivery_fault=false) ?(refuse_checkpoint=false) ~caller_checkpoint () =
+  with_execution_test_dir "agent_core-turn-observation-"
+  @@ fun ~env ~sw ~runtime ~dir ->
+  let bus = Event_bus.create () in
+  let subscription = Event_bus.subscribe bus
+      ~config:(Result.get_ok (Event_bus.subscription_config
+        ~capacity:16 ~overflow:Event_bus.Drop_newest)) in
+  let provider_calls = ref 0 and locator = ref None and during_dispatch = ref [] in
+  let response =
+    { (Provider_mock.text_response "done" []) with
+      telemetry = Some {Types.default_inference_telemetry with
+        provider_kind = Some Llm_provider.Provider_kind.OpenAI_compat} } in
+  let next () =
+    during_dispatch := Event_bus.drain subscription;
+    incr provider_calls; Ok response in
+  let transport = Llm_provider.Llm_transport.custom
+    { complete_sync = (fun _ -> {Llm_provider.Llm_transport.response = next (); latency_ms = None})
+    ; complete_stream = (fun ?on_telemetry:_ ~on_event:_ _ -> next ()) } in
+  let checkpoint_sink = if caller_checkpoint then Some (fun (snapshot:Agent.checkpoint_snapshot) ->
+    if refuse_checkpoint && snapshot.stage=After_assistant_collected
+    then Error "assistant collection checkpoint refused" else Ok ()) else None in
+  let agent = Agent.create ~media_store:(Agent_core.History.Memory_store.create ())
+      ~net:(Eio.Stdenv.net env) ?checkpoint_sink
+      ~config:{(Types.default_config ~model:"test-model") with name="canonical-turn-bus"}
+      ~options:{Agent.default_options with transport=Some transport; event_bus=Some bus;
+        provider_config=Some (Provider_mock.to_provider_config ())} () in
+  let store = Agent.execution_store ~runtime ~dir
+      ~on_scope_ready:(fun value -> locator := Some value; Ok ()) () in
+  let outcome = if not delivery_fault then
+      Agent.run ~sw ~execution_store:store agent "observe the provider turn"
+    else
+      let internal_runtime = match Internal_runtime.create ~sw
+          ~domain_mgr:env#domain_mgr ~domain_count:1 with
+        | Ok runtime -> runtime
+        | Error error -> Alcotest.fail (Internal_runtime.create_error_to_string error) in
+      match Internal_writer.run ~codec:(Internal_codec.of_runtime internal_runtime) ~dir
+        (fun ~sw:_ writer ->
+          let scope = match Internal_scope.start ~writer ~agent_name:"canonical-turn-bus" with
+            | Ok scope -> scope | Error error -> Alcotest.fail (Internal_scope.error_to_string error) in
+          locator := Some (match Agent.execution_locator_of_yojson
+              (Internal_scope.scope_locator_to_yojson (Internal_scope.scope_locator scope)) with
+            | Ok locator -> locator | Error detail -> Alcotest.fail detail);
+          let first = ref true in
+          let observer = Internal.Agent_bus_observer.create ~publish:(fun bus event ->
+            Event_bus.publish bus event;
+            match event.Event_bus.payload with
+            | TurnReady _ when !first -> first := false; failwith "accepted ready without acknowledgement"
+            | TurnStarted _ | TurnReady _ | TurnCompleted _ | InferenceTelemetry _
+            | AgentStarted _ | AgentCompleted _ | AgentYielded _ | AgentInputRequired _ | AgentFailed _
+            | ToolCalled _ | ToolCompleted _ | HandoffRequested _ | HandoffCompleted _
+            | ElicitationCompleted _ | ToolApprovalCompleted _ | Custom _ -> ()) scope in
+          observer.register ~run_id:(Internal_scope.scope_locator_run_id
+            (Internal_scope.scope_locator scope)) ~event_bus:(Some bus);
+          let result = Internal.Execution_context.with_bus_observer observer (fun () ->
+            Internal.Execution_context.with_agent_scope scope (fun () ->
+              Agent.run ~sw agent "observe the provider turn")) in
+          (match Internal_scope.finish scope Internal.Execution_event.Succeeded with
+           | Ok () -> () | Error error -> Alcotest.fail (Internal_scope.error_to_string error));
+          result) with
+      | Ok result -> result
+      | Error error -> Alcotest.fail (Internal_writer.scope_failure_to_string error) in
+  (match outcome with
+   | Error _ when refuse_checkpoint -> ()
+   | Ok _ when not refuse_checkpoint -> ()
+   | Ok _ -> Alcotest.fail "required checkpoint refusal did not stop continuation"
+   | Error error -> Alcotest.fail (Error.to_string error));
+  Alcotest.(check int) "provider dispatch once" 1 !provider_calls;
+  let deliveries = (!during_dispatch @ Event_bus.drain subscription) |> List.filter (fun (event:Event_bus.event) ->
+    match event.payload with
+    | TurnStarted _ | TurnReady _ | TurnCompleted _ | InferenceTelemetry _ -> true
+    | AgentStarted _ | AgentCompleted _ | AgentYielded _ | AgentInputRequired _ | AgentFailed _
+    | ToolCalled _ | ToolCompleted _ | HandoffRequested _ | HandoffCompleted _
+    | ElicitationCompleted _ | ToolApprovalCompleted _ | Custom _ -> false) in
+  Alcotest.(check int) "only unacknowledged source delivery repeats"
+    ((if refuse_checkpoint then 3 else 4) + if delivery_fault then 1 else 0) (List.length deliveries);
+  let observations = List.fold_left (fun events (event:Event_bus.event) ->
+    if List.exists (fun (seen:Event_bus.event) -> seen.meta.event_id=event.meta.event_id) events
+    then events else events @ [event]) [] deliveries in
+  Alcotest.(check bool) "ready observation precedes provider dispatch" true
+    (List.exists (fun (event:Event_bus.event) -> match event.payload with
+      | TurnReady {tool_names=[];turn=0;agent_name="canonical-turn-bus"} -> true
+      | _ -> false) !during_dispatch);
+  let projection = match Agent.open_execution_projection ~runtime ~dir (Option.get !locator) with
+    | Ok projection -> projection
+    | Error error -> Alcotest.fail (Agent.Execution_projection.error_to_string error) in
+  let page = match Agent.Execution_projection.read_page projection
+      ~after:(Agent.Execution_projection.beginning_cursor projection) ~limit:1024 () with
+    | Ok page -> page
+    | Error error -> Alcotest.fail (Agent.Execution_projection.error_to_string error) in
+  List.iter (fun (observation:Event_bus.event) ->
+    let source = List.find_opt (fun (source:Agent.Execution_projection.event) ->
+      String.equal observation.meta.event_id
+        (Agent.Execution_projection.Event_id.to_string source.event_id)) page.events in
+    match source with
+    | None -> Alcotest.fail "durable turn observation has no committed source event"
+    | Some source ->
+      Alcotest.(check (option int)) "turn observation keeps committed sequence"
+        (Some source.seq) observation.meta.seq;
+      Alcotest.(check string) "turn observation keeps committed run"
+        (Agent.Execution_projection.Run_id.to_string source.run_id) observation.meta.run_id;
+      Alcotest.(check string) "turn observation keeps committed correlation"
+        (Agent.Execution_projection.Correlation_id.to_string source.correlation_id)
+        observation.meta.correlation_id;
+      Alcotest.(check (option string)) "turn observation keeps committed parent"
+        (Option.map Agent.Execution_projection.Event_id.to_string source.parent_event_id)
+        observation.meta.parent_event_id;
+      Alcotest.(check bool) "payload derives from its exact committed boundary" true
+        (match observation.payload, source.payload with
+         | TurnStarted _, Node_opened {kind=Agent_turn {ordinal=0};_} -> true
+         | TurnReady {tool_names;_}, Node_updated {update=Turn_ready names;_} -> tool_names=names
+         | TurnCompleted _, Node_closed {terminal=Succeeded;_} -> true
+         | InferenceTelemetry {model;prompt_ms;decode_ms;decode_tok_s;_},
+             Node_updated {update=Provider_response_snapshot response;_} ->
+           model=response.model && prompt_ms=None && decode_ms=None && decode_tok_s=None
+         | _ -> false)) observations;
+  let read projection after limit = match Agent.Execution_projection.read_bus_observations projection
+      ~after ~through:page.high_watermark ~limit () with
+    | Ok page -> page | Error error -> Alcotest.fail (Agent.Execution_projection.error_to_string error) in
+  let rec catch_up after acc =
+    let next = read projection after 1 in
+    let acc = List.rev_append next.observations acc in
+    if next.has_more then catch_up next.next_cursor acc else List.rev acc in
+  let replay = catch_up (Agent.Execution_projection.beginning_cursor projection) [] in
+  Alcotest.(check bool) "cursor catch-up matches deduplicated live observations" true
+    (List.map (fun (o:Agent.Execution_projection.bus_observation)->o.event) replay=observations);
+  let first = List.hd replay in
+  let reopened = match Agent.open_execution_projection ~runtime ~dir (Option.get !locator) with
+    | Ok projection -> projection
+    | Error error -> Alcotest.fail (Agent.Execution_projection.error_to_string error) in
+  let retry = read reopened first.through 1024 in
+  Alcotest.(check bool) "reopened acknowledgement skips only accepted observation" true
+    (List.map (fun (o:Agent.Execution_projection.bus_observation)->o.event) retry.observations
+     = List.tl observations);
+  Alcotest.(check int) "acknowledged catch-up has no repeat" 0
+    (List.length (read reopened retry.next_cursor 1024).observations)
+;;
+
+let test_nested_execution_stores_use_their_own_bus_observers () =
+  with_execution_test_dir "agent_core-independent-observers-"
+  @@ fun ~env ~sw ~runtime ~dir ->
+  let root_bus = Event_bus.create () and child_bus = Event_bus.create () in
+  let subscribe bus = Event_bus.subscribe bus
+      ~config:(Result.get_ok (Event_bus.subscription_config ~capacity:16 ~overflow:Drop_newest)) in
+  let root_subscription = subscribe root_bus and child_subscription = subscribe child_bus in
+  let root_locator = ref None and child_locator = ref None in
+  let root_calls = ref 0 and child_calls = ref 0 in
+  let child_dir = Eio.Path.(dir / "independent-child") in
+  Eio.Path.mkdirs ~exists_ok:false ~perm:0o700 child_dir;
+  let child_store = Agent.execution_store ~runtime ~dir:child_dir
+      ~on_scope_ready:(fun value -> child_locator:=Some value; Ok ()) () in
+  let make_agent name bus calls hooks =
+    let response = {(Provider_mock.text_response "done" []) with
+      telemetry=Some {Types.default_inference_telemetry with
+        provider_kind=Some Llm_provider.Provider_kind.OpenAI_compat}} in
+    let next () = incr calls; Ok response in
+    let transport = Llm_provider.Llm_transport.custom
+      { complete_sync=(fun _ -> {Llm_provider.Llm_transport.response=next ();latency_ms=None})
+      ; complete_stream=(fun ?on_telemetry:_ ~on_event:_ _ -> next ()) } in
+    Agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net:env#net
+      ~config:{(Types.default_config ~model:"test-model") with name}
+      ~options:{Agent.default_options with event_bus=Some bus;transport=Some transport;hooks;
+        provider_config=Some (Provider_mock.to_provider_config ())} () in
+  let child = make_agent "independent-child" child_bus child_calls Hooks.empty in
+  let hooks = {Hooks.empty with after_turn=Some (fun _ ->
+    Alcotest.(check bool) "hook child has no shared-journal factory" true
+      (Option.is_none (Internal.Execution_context.child_scope_factory ()));
+    match Agent.run ~sw ~execution_store:child_store child "child" with
+    | Ok _ -> Hooks.Continue
+    | Error error -> Alcotest.fail (Error.to_string error))} in
+  let root = make_agent "independent-root" root_bus root_calls hooks in
+  let root_store = Agent.execution_store ~runtime ~dir
+      ~on_scope_ready:(fun value -> root_locator:=Some value; Ok ()) () in
+  (match Agent.run ~sw ~execution_store:root_store root "root" with
+   | Ok _ -> () | Error error -> Alcotest.fail (Error.to_string error));
+  Alcotest.(check int) "parent provider once" 1 !root_calls;
+  Alcotest.(check int) "separate child provider once" 1 !child_calls;
+  let turn_observations events = List.filter (fun event -> match event.Event_bus.payload with
+    | TurnStarted _ | TurnReady _ | TurnCompleted _ | InferenceTelemetry _ -> true
+    | AgentStarted _ | AgentCompleted _ | AgentYielded _ | AgentInputRequired _ | AgentFailed _
+    | ToolCalled _ | ToolCompleted _ | HandoffRequested _ | HandoffCompleted _
+    | ElicitationCompleted _ | ToolApprovalCompleted _ | Custom _ -> false) events in
+  List.iter (fun (dir, locator, subscription) ->
+    let projection = match Agent.open_execution_projection ~runtime ~dir (Option.get !locator) with
+      | Ok projection -> projection
+      | Error error -> Alcotest.fail (Agent.Execution_projection.error_to_string error) in
+    let page = match Agent.Execution_projection.read_bus_observations projection
+        ~after:(Agent.Execution_projection.beginning_cursor projection) ~limit:1024 () with
+      | Ok page -> page | Error error -> Alcotest.fail (Agent.Execution_projection.error_to_string error) in
+    let source = List.map (fun (o:Agent.Execution_projection.bus_observation)->o.event) page.observations in
+    Alcotest.(check int) "each journal retains its four turn observations" 4 (List.length source);
+    let delivered = turn_observations (Event_bus.drain subscription) in
+    Alcotest.(check int) "separate journal has its own live cursor" 4 (List.length delivered);
+    Alcotest.(check bool) "each audience observes only its exact journal source" true (delivered=source))
+    [dir,root_locator,root_subscription; child_dir,child_locator,child_subscription]
+;;
+
 let test_durable_tool_bus_uses_canonical_facts ?(delivery_fault=false) ?checkpoint_failure () =
   with_execution_test_dir "agent_core-tool-observation-"
   @@ fun ~env ~sw ~runtime ~dir ->
@@ -1940,12 +2134,19 @@ let test_durable_tool_bus_uses_canonical_facts ?(delivery_fault=false) ?checkpoi
               (Internal_scope.scope_locator_to_yojson (Internal_scope.scope_locator scope)) with
             | Ok locator->locator |Error detail->Alcotest.fail detail);
           let first=ref true in
-          let observer=Internal.Agent_tool_observer.create ~publish:(fun bus event ->
+          let observer=Internal.Agent_bus_observer.create ~publish:(fun bus event ->
             Event_bus.publish bus event;
-            if !first then (first:=false;raise (Failure "accepted delivery without acknowledgement"))) scope in
+            match event.Event_bus.payload with
+            | ToolCalled _ when !first ->
+              first:=false;raise (Failure "accepted delivery without acknowledgement")
+            | ToolCalled _ | ToolCompleted _
+            | AgentStarted _ | AgentCompleted _ | AgentYielded _ | AgentInputRequired _ | AgentFailed _
+            | TurnStarted _ | TurnReady _ | TurnCompleted _ | InferenceTelemetry _
+            | HandoffRequested _ | HandoffCompleted _ | ElicitationCompleted _
+            | ToolApprovalCompleted _ | Custom _ -> ()) scope in
           observer.register ~run_id:(Internal_scope.scope_locator_run_id (Internal_scope.scope_locator scope))
             ~event_bus:(Some bus);
-          let result=Internal.Execution_context.with_tool_observer observer (fun () ->
+          let result=Internal.Execution_context.with_bus_observer observer (fun () ->
             Internal.Execution_context.with_agent_scope scope (fun () -> Agent.run ~sw agent "observe the effect")) in
           (match Internal_scope.finish scope Internal.Execution_event.Succeeded with
            | Ok ()->() |Error error->Alcotest.fail (Internal_scope.error_to_string error));
@@ -3187,10 +3388,14 @@ let test_agent_run_resumes_settled_closed_turn
               incr effect_count;
               Ok { Types.content = "duplicate"; content_blocks = None; _meta = None })
        in
+       let bus = Event_bus.create () in
+       let subscription = Event_bus.subscribe bus
+           ~config:(Result.get_ok (Event_bus.subscription_config ~capacity:32 ~overflow:Drop_newest)) in
        let options =
          { Agent.default_options with
            transport = Some transport
          ; provider_config = Some (Provider_mock.to_provider_config ())
+         ; event_bus = Some bus
          }
        in
        let agent =
@@ -3278,6 +3483,26 @@ let test_agent_run_resumes_settled_closed_turn
           | Window_provider_closed | Window_turn_closed ->
             if expect_terminal then 0 else 1)
          !provider_call_count;
+       let projection = match Agent.open_execution_projection ~runtime ~dir locator with
+         | Ok projection -> projection
+         | Error error -> Alcotest.fail (Agent.Execution_projection.error_to_string error) in
+       let observations = match Agent.Execution_projection.read_bus_observations projection
+           ~after:(Agent.Execution_projection.beginning_cursor projection) ~limit:1024 () with
+         | Ok page -> page.observations
+         | Error error -> Alcotest.fail (Agent.Execution_projection.error_to_string error) in
+       let completed_zero event = match event.Event_bus.payload with
+         | TurnCompleted {turn=0;_} -> true | _ -> false in
+       let durable = List.filter (fun (o:Agent.Execution_projection.bus_observation)->completed_zero o.event)
+           observations in
+       Alcotest.(check int) "resumed completed turn has one canonical close observation"
+         (match window with Window_turn_failed -> 0 | Window_provider_closed | Window_turn_closed -> 1)
+         (List.length durable);
+       let live = List.filter completed_zero (Event_bus.drain subscription) in
+       Alcotest.(check int) "live subscription emits only newly committed resume close"
+         (match window with Window_provider_closed -> 1 | Window_turn_closed | Window_turn_failed -> 0)
+         (List.length live);
+       List.iter (fun event -> Alcotest.(check bool) "resume completion keeps canonical source identity" true
+         (List.exists (fun (o:Agent.Execution_projection.bus_observation) -> o.event=event) durable)) live;
        match window with
        | Window_provider_closed | Window_turn_closed ->
          check_terminal_disposition
@@ -3431,6 +3656,376 @@ let test_settled_terminal_replay_refuses_invalid_or_missing_media () =
     ~expected:Refused_terminal_base64 ();
   check_advanced_settled_terminal_replay ~content:(settled_terminal_media_content "AA==")
     ~forget_media:true ~expected:Refused_terminal_missing_media ()
+;;
+
+type terminal_resume_entry = Resume_regular | Resume_streaming | Resume_advanced
+
+type terminal_resume_case =
+  | Exact_terminal
+  | Invalid_terminal_stop of Types.stop_reason
+  | Accepted_stop_hook
+  | Raising_stop_hook
+  | Illegal_stop_hook
+  | Replayed_stop_hook
+  | Provider_closed_stop_hook
+  | Stale_terminal_counter
+  | Different_terminal_content
+  | Unexpected_terminal_invocation
+
+let test_active_terminal_resumes_committed_checkpoint
+    ?(case=Exact_terminal) entry () =
+  with_execution_test_dir "agent-core-active-terminal-"
+  @@ fun ~env ~sw ~runtime ~dir ->
+  let scope_ok = function
+    | Ok value -> value | Error error -> Alcotest.fail (Internal_scope.error_to_string error) in
+  let config = {(Types.default_config ~model:"test-model") with name="active-terminal"} in
+  let provider_config = Provider_mock.to_provider_config () in
+  let binding = match Internal_binding.of_provider_config ~transport:Internal_binding.Injected provider_config with
+    | Ok value -> value | Error detail -> Alcotest.fail detail in
+  let response = {(Provider_mock.text_response "committed final answer" []) with
+    Types.id="active-terminal-seven";
+    stop_reason=(match case with Invalid_terminal_stop reason->reason | _->Types.EndTurn);
+    usage=Some {Types.input_tokens=17;output_tokens=23;cache_creation_input_tokens=5;
+      cache_read_input_tokens=7;cost_usd=Some 0.125}} in
+  let provider_calls = ref 0 and after_turns = ref 0 and on_stops = ref 0 in
+  let on_stop = match case with
+    | Accepted_stop_hook | Replayed_stop_hook -> Some (fun _->incr on_stops;Hooks.Continue)
+    | Raising_stop_hook | Provider_closed_stop_hook ->
+      Some (fun _->incr on_stops;failwith "stop hook failed")
+    | Illegal_stop_hook -> Some (fun _->incr on_stops;Hooks.Block "illegal stop decision")
+    | Exact_terminal | Invalid_terminal_stop _ | Stale_terminal_counter
+    | Different_terminal_content | Unexpected_terminal_invocation -> None in
+  let next () = incr provider_calls; Ok (Provider_mock.text_response "unexpected redispatch" []) in
+  let transport = Llm_provider.Llm_transport.custom
+    {complete_sync=(fun _->{Llm_provider.Llm_transport.response=next ();latency_ms=None});
+     complete_stream=(fun ?on_telemetry:_ ~on_event:_ _->next ())} in
+  let bus = Event_bus.create () in
+  let subscription = Event_bus.subscribe bus
+      ~config:(Result.get_ok (Event_bus.subscription_config ~capacity:16 ~overflow:Drop_newest)) in
+  let options = {Agent.default_options with transport=Some transport;provider_config=Some provider_config;
+    event_bus=Some bus;hooks={Hooks.empty with on_stop;
+      after_turn=Some (fun _->incr after_turns;Hooks.Continue)}} in
+  let media_store = Agent_core.History.Memory_store.create () in
+  let original = Agent.create ~media_store ~net:env#net ~config ~options () in
+  let checkpoint_content = match case with
+    | Different_terminal_content -> [Llm_provider.Types.Text "another response"]
+    | Exact_terminal | Invalid_terminal_stop _ | Accepted_stop_hook | Raising_stop_hook
+    | Illegal_stop_hook | Replayed_stop_hook | Provider_closed_stop_hook
+    | Stale_terminal_counter | Unexpected_terminal_invocation -> response.content in
+  let content = History.of_wire_blocks media_store checkpoint_content |> Result.get_ok in
+  let usage = Types.add_usage Types.empty_usage (Option.get response.usage) in
+  let collected_turn_count = match case with Stale_terminal_counter->9 | _->8 in
+  Agent.set_state original {provider_binding=None;config;turn_count=collected_turn_count;usage;
+    messages=[Types.user_msg "finish this request";Types.make_message ~role:Types.Assistant content]};
+  let checkpoint = Agent.checkpoint original in
+  let writer_runtime = match Internal_runtime.create ~sw ~domain_mgr:env#domain_mgr ~domain_count:1 with
+    | Ok value -> value | Error error -> Alcotest.fail (Internal_runtime.create_error_to_string error) in
+  let locator_json = ref None in
+  (match Internal_writer.run ~codec:(Internal_codec.of_runtime writer_runtime) ~dir (fun ~sw:_ writer ->
+    let scope = scope_ok (Internal_scope.start ~writer ~agent_name:config.name) in
+    locator_json:=Some (Internal_scope.scope_locator_to_yojson (Internal_scope.scope_locator scope));
+    let turn = scope_ok (Internal_scope.open_turn scope ~ordinal:7) in
+    let provider = scope_ok (Internal_scope.open_provider_attempt turn ~ordinal:0 binding) in
+    record_durable_provider_response provider response;
+    let fact = match Checkpoint_snapshot.create ~stage:After_assistant_collected checkpoint with
+      | Ok value -> value | Error error -> Alcotest.fail (Checkpoint_snapshot.error_to_string error) in
+    scope_ok (Internal_scope.record_checkpoint scope fact);
+    (match case with
+     | Replayed_stop_hook ->
+       (* Model a callback that returned before interruption, with its provider
+          still open: recovery must not silently assume its success. *)
+       (match Hooks.invoke_validated on_stop (Hooks.OnStop {reason=response.stop_reason;response}) with
+        | Hooks.Continue -> ()
+        | _ -> Alcotest.fail "replay fixture's first stop decision failed")
+     | Provider_closed_stop_hook ->
+       scope_ok (Internal_scope.close_provider_attempt provider Internal.Execution_event.Succeeded)
+     | Unexpected_terminal_invocation ->
+       let schedule : Tool_contract.schedule = {planned_index=0;batch_index=0;batch_size=1;
+         execution_mode=Tool_contract.Serial} in
+       let invocation = Tool_contract.Invocation.create ~tool_use_id:"unexpected-tool"
+           ~turn:7 ~schedule ~completion:Tool_contract.Continue_after_success in
+       ignore (scope_ok (Internal_scope.open_invocation provider ~invocation
+         ~tool_name:"unexpected-tool" ~input:(`Assoc [])))
+     | Exact_terminal | Invalid_terminal_stop _ | Accepted_stop_hook | Raising_stop_hook
+     | Illegal_stop_hook | Stale_terminal_counter | Different_terminal_content -> ())) with
+   | Ok () -> () | Error error -> Alcotest.fail (Internal_writer.scope_failure_to_string error));
+  let locator = match Agent.execution_locator_of_yojson (Option.get !locator_json) with
+    | Ok value -> value | Error detail -> Alcotest.fail detail in
+  let open_projection () = match Agent.open_execution_projection ~runtime ~dir locator with
+    | Ok value -> value | Error error -> Alcotest.fail (Agent.Execution_projection.error_to_string error) in
+  let snapshot = match Agent.Execution_projection.latest_checkpoint (open_projection ()) with
+    | Ok (Some value) -> value.snapshot
+    | Ok None -> Alcotest.fail "committed assistant checkpoint missing"
+    | Error error -> Alcotest.fail (Agent.Execution_projection.error_to_string error) in
+  let checkpoint = match Checkpoint_snapshot.checkpoint snapshot with
+    | Ok value -> value | Error error -> Alcotest.fail (Checkpoint_snapshot.error_to_string error) in
+  let agent = match Agent.resume ~media_store ~net:env#net ~checkpoint ~config ~options () with
+    | Ok value -> value | Error error -> Alcotest.fail (Agent_checkpoint.resume_error_to_string error) in
+  let store = Agent.execution_store ~runtime ~dir ~resume:locator () in
+  let result = match entry with
+    | Resume_regular -> Agent.run ~sw ~execution_store:store agent "finish this request"
+    | Resume_streaming -> Agent.run_stream ~sw ~execution_store:store ~on_event:(fun _->
+        Alcotest.fail "recovery invented a new provider stream") agent "finish this request"
+    | Resume_advanced ->
+      (match Agent.Advanced.run_blocks ~sw ~execution_store:store ~api_strategy:Agent.Sync
+          ~on_tool_boundary:(fun _->Alcotest.fail "terminal recovery reached a tool boundary")
+          agent [Types.Text "finish this request"] with
+       | Ok (Agent.Advanced.Completed completed) ->
+         Alcotest.(check int) "terminal recovery keeps canonical nonzero ordinal" 7 completed.provider_turn_ordinal;
+         Ok completed.response
+       | Ok (Agent.Advanced.Yielded _ | Agent.Advanced.Terminal_tool_completed _) ->
+         Alcotest.fail "terminal recovery changed outcome kind"
+       | Error error -> Error error) in
+  Alcotest.(check int) "terminal recovery does not redispatch provider" 0 !provider_calls;
+  Alcotest.(check int) "terminal recovery does not repeat AfterTurn" 0 !after_turns;
+  let expect_success = match case with
+    | Exact_terminal | Accepted_stop_hook | Replayed_stop_hook | Provider_closed_stop_hook -> true
+    | Invalid_terminal_stop _ | Raising_stop_hook | Illegal_stop_hook
+    | Stale_terminal_counter | Different_terminal_content | Unexpected_terminal_invocation -> false in
+  (match case, result with
+   | (Exact_terminal | Accepted_stop_hook | Replayed_stop_hook | Provider_closed_stop_hook), Ok restored ->
+     Alcotest.(check bool) "response identity, content, model and usage are exact" true (restored=response)
+   | Invalid_terminal_stop _, Error (Error.Agent (UnrecognizedStopReason _)) -> ()
+   | (Raising_stop_hook | Illegal_stop_hook), Error (Error.Agent
+       (HookExecutionFailed {hook_name;stage;_})) ->
+     Alcotest.(check string) "stop hook identity" "on_stop" hook_name;
+     Alcotest.(check string) "stop hook stage" "on_stop" stage
+   | (Stale_terminal_counter | Different_terminal_content | Unexpected_terminal_invocation),
+     Error (Error.Internal _) -> ()
+   | _, Error error -> Alcotest.fail (Error.to_string error)
+   | _, Ok _ -> Alcotest.fail "invalid terminal frontier was accepted");
+  Alcotest.(check int) "stop callback follows the pending output contract"
+    (match case with Replayed_stop_hook->2 | Accepted_stop_hook | Raising_stop_hook | Illegal_stop_hook->1
+     | Exact_terminal | Invalid_terminal_stop _ | Provider_closed_stop_hook
+     | Stale_terminal_counter | Different_terminal_content | Unexpected_terminal_invocation->0)
+    !on_stops;
+  Alcotest.(check int) "collected checkpoint counter is not advanced again" collected_turn_count (Agent.state agent).turn_count;
+  Alcotest.(check bool) "collected checkpoint usage is not charged twice" true ((Agent.state agent).usage=usage);
+  let projection = open_projection () in
+  (match Agent.read_execution_terminal projection with
+   | Ok (Some terminal) -> Alcotest.(check bool) "resumed root matches validated outcome" expect_success
+       (terminal.disposition.outcome=Agent.Terminal_succeeded)
+   | Ok None -> Alcotest.fail "terminal recovery left root running"
+   | Error error -> Alcotest.fail (Agent.Execution_projection.error_to_string error));
+  let completed = Event_bus.drain subscription |> List.filter (fun event ->
+    match event.Event_bus.payload with TurnCompleted {turn=7;_}->true | _->false) in
+  let page = match Agent.Execution_projection.read_bus_observations projection
+      ~after:(Agent.Execution_projection.beginning_cursor projection) ~limit:1024 () with
+    | Ok value -> value | Error error -> Alcotest.fail (Agent.Execution_projection.error_to_string error) in
+  Alcotest.(check int) "only accepted output emits successful turn close"
+    (if expect_success then 1 else 0) (List.length completed);
+  List.iter (fun event -> Alcotest.(check bool) "completion keeps committed source envelope" true
+    (List.exists (fun (source:Agent.Execution_projection.bus_observation)->source.event=event) page.observations)) completed
+;;
+
+type terminal_stop_window = Stop_provider_open | Stop_provider_closed | Stop_turn_closed
+
+type terminal_surface_change =
+  | Keep_terminal_surface
+  | Remove_terminal_surface
+  | Extend_terminal_surface
+
+let test_terminal_stop_reason_owns_tool_content
+      ?(only_unregistered_tools=false)
+      ?(canonical_only=false)
+      ?(surface_change=Keep_terminal_surface)
+      ~stop_reason ~window entry () =
+  with_execution_test_dir "agent-core-terminal-tool-content-"
+  @@ fun ~env ~sw ~runtime ~dir ->
+  let scope_ok = function
+    | Ok value -> value | Error error -> Alcotest.fail (Internal_scope.error_to_string error) in
+  let accepted = match stop_reason with
+    | Types.Unknown _ | Types.UnmatchedToolCalls -> false
+    | Types.StopToolUse -> Alcotest.fail "this fixture needs a terminal or invalid stop reason"
+    | Types.EndTurn | Types.MaxTokens | Types.StopSequence | Types.Refusal | Types.ContentFilter
+    | Types.RepetitionTruncation | Types.PauseTurn | Types.Compaction
+    | Types.ContextWindowExceeded -> true in
+  let effect_count = ref 0 and provider_calls = ref 0 and after_turns = ref 0 and on_stops = ref 0 in
+  let on_stop_responses = ref [] in
+  let after_turn_responses = ref [] in
+  let tool = Tool.create ~name:"must_not_execute" ~description:"Observe an unintended terminal effect"
+      ~parameters:[] (fun _ -> incr effect_count;
+        Ok {Types.content="unintended effect";content_blocks=None;_meta=None}) in
+  let tools = [tool] in
+  let config = {(Types.default_config ~model:"test-model") with name="terminal-tool-content"} in
+  let provider_config = Provider_mock.to_provider_config () in
+  let binding = match Internal_binding.of_provider_config ~transport:Internal_binding.Injected provider_config with
+    | Ok value -> value | Error detail -> Alcotest.fail detail in
+  let raw_content, admitted_content =
+    if canonical_only then
+      let content = [Llm_provider.Types.Text "terminal with tool content";
+        ToolUse {id="not-a-tool-turn";name="must_not_execute";input=`Assoc []}] in
+      content, content
+    else if only_unregistered_tools then
+      [Llm_provider.Types.Text "terminal with tool content";
+        ToolUse {id="dropped-unknown-tool";name="unregistered_terminal_tool";input=`Assoc []}],
+      [Llm_provider.Types.Text "terminal with tool content"]
+    else
+      [Llm_provider.Types.Text "terminal with tool content";
+        ToolUse {id="not-a-tool-turn";name="must_not_execute1";input=`Assoc []};
+        ToolUse {id="dropped-unknown-tool";name="unregistered_terminal_tool";input=`Assoc []}],
+      [Llm_provider.Types.Text "terminal with tool content";
+        ToolUse {id="not-a-tool-turn";name="must_not_execute";input=`Assoc []}] in
+  let response = {(Provider_mock.text_response "terminal with tool content" []) with
+    Types.id="terminal-tool-content-seven";stop_reason;
+    content=raw_content;
+    usage=Some {Types.input_tokens=17;output_tokens=23;cache_creation_input_tokens=5;
+      cache_read_input_tokens=7;cost_usd=Some 0.125}} in
+  let next () = incr provider_calls; Ok response in
+  let transport = Llm_provider.Llm_transport.custom
+    {complete_sync=(fun _->{Llm_provider.Llm_transport.response=next ();latency_ms=None});
+     complete_stream=(fun ?on_telemetry:_ ~on_event:_ _->next ())} in
+  let active_agent = ref None in
+  let extra_tools = List.map (fun name ->
+      Tool.create ~name ~description:"Added after response admission" ~parameters:[]
+        (fun _ -> incr effect_count;
+          Ok {Types.content="unintended added effect";content_blocks=None;_meta=None}))
+      ["must_not_execute1";"unregistered_terminal_tool"] in
+  let options = {Agent.default_options with transport=Some transport;provider_config=Some provider_config;
+    hooks={Hooks.empty with
+      on_stop=Some (function
+        | Hooks.OnStop {response=stop_response;_} ->
+          incr on_stops; on_stop_responses := stop_response :: !on_stop_responses; Hooks.Continue
+        | _ -> Hooks.Continue);
+      after_turn=Some (function
+        | Hooks.AfterTurn {response=actual;_} ->
+          incr after_turns;
+          after_turn_responses := actual :: !after_turn_responses;
+          (match surface_change, !active_agent with
+           | Extend_terminal_surface, Some agent -> Agent.extend_tools agent extra_tools
+           | Extend_terminal_surface, None -> Alcotest.fail "AfterTurn lost its agent"
+           | (Keep_terminal_surface | Remove_terminal_surface), (Some _ | None) -> ());
+          Hooks.Continue
+        | _ -> Hooks.Continue)}} in
+  let media_store = Agent_core.History.Memory_store.create () in
+  let create () =
+    let agent = Agent.create ~media_store ~net:env#net ~tools ~config ~options () in
+    active_agent := Some agent;
+    agent in
+  (* Establish the fresh public pipeline behavior before constructing a crash. *)
+  let fresh = create () in
+  let fresh_dir = Eio.Path.(dir / "fresh") in
+  Eio.Path.mkdirs ~exists_ok:false ~perm:0o700 fresh_dir;
+  let fresh_locator = ref None in
+  let fresh_store = Agent.execution_store ~runtime ~dir:fresh_dir
+      ~on_scope_ready:(fun value -> fresh_locator:=Some value;Ok ()) () in
+  let fresh_result = Agent.run ~sw ~execution_store:fresh_store fresh "finish this request" in
+  let admitted_response = match !after_turn_responses with
+    | [actual] -> actual
+    | _ -> Alcotest.fail "fresh execution did not observe one collected response" in
+  (* Public completion adds telemetry to the transport result. Independently
+     check the expected admission, then keep that actual complete response as
+     the exact authority for hooks, persistence and restart. *)
+  Alcotest.(check string) "fresh collection preserves response identity" response.id admitted_response.id;
+  Alcotest.(check bool) "fresh collection preserves stop reason" true
+    (admitted_response.stop_reason=stop_reason);
+  Alcotest.(check bool) "fresh collection applies the expected name admission" true
+    (admitted_response.content=admitted_content);
+  Alcotest.(check bool) "fresh collection preserves reported usage" true
+    (admitted_response.usage=response.usage);
+  (match fresh_result with
+   | Ok actual when accepted ->
+     Alcotest.(check bool) "fresh output keeps terminal stop and admitted tool content" true
+       (actual=admitted_response);
+     Alcotest.(check bool) "fresh OnStop receives admitted response" true
+       (!on_stop_responses=[admitted_response])
+   | Error (Error.Agent (UnrecognizedStopReason _)) when not accepted -> ()
+   | Error error -> Alcotest.fail (Error.to_string error)
+   | Ok _ -> Alcotest.fail "fresh output treated terminal content as a tool turn");
+  Alcotest.(check int) "fresh control dispatches exactly one provider call" 1 !provider_calls;
+  Alcotest.(check int) "fresh terminal content never invokes the registered tool" 0 !effect_count;
+  Alcotest.(check int) "fresh output invokes OnStop only for accepted terminal reasons"
+    (if accepted then 1 else 0) !on_stops;
+  if accepted then (
+    let projection = Agent.open_execution_projection ~runtime ~dir:fresh_dir
+        (Option.get !fresh_locator) |> Result.get_ok in
+    let page = Agent.Execution_projection.read_page projection
+        ~after:(Agent.Execution_projection.beginning_cursor projection) ~limit:1024 ()
+      |> Result.get_ok in
+    let responses = List.filter_map (fun (event:Agent.Execution_projection.event) ->
+        match event.payload with
+        | Node_updated {update=Provider_response_snapshot stored;_} -> Some (event.seq,stored)
+        | _ -> None) page.events in
+    match responses with
+    | [(response_seq,stored)] ->
+      Alcotest.(check bool) "durable response freezes the actual admission result" true
+        (stored=admitted_response);
+      Alcotest.(check bool) "response authority precedes the collected checkpoint" true
+        (List.exists (fun (event:Agent.Execution_projection.event) -> match event.payload with
+           | Node_updated {update=Checkpoint_snapshot snapshot;_} ->
+             Checkpoint_snapshot.stage snapshot=After_assistant_collected && response_seq<event.seq
+           | _ -> false) page.events)
+    | _ -> Alcotest.fail "fresh execution did not persist one provider response");
+  provider_calls:=0;after_turns:=0;on_stops:=0;on_stop_responses:=[];after_turn_responses:=[];
+  let collected_state = Agent.state fresh in
+  let usage = collected_state.usage in
+  Agent.set_state fresh {collected_state with turn_count=8};
+  let checkpoint = Agent.checkpoint fresh in
+  let writer_runtime = match Internal_runtime.create ~sw ~domain_mgr:env#domain_mgr ~domain_count:1 with
+    | Ok value -> value | Error error -> Alcotest.fail (Internal_runtime.create_error_to_string error) in
+  let locator_json = ref None in
+  (match Internal_writer.run ~codec:(Internal_codec.of_runtime writer_runtime) ~dir (fun ~sw:_ writer ->
+    let scope = scope_ok (Internal_scope.start ~writer ~agent_name:config.name) in
+    locator_json:=Some (Internal_scope.scope_locator_to_yojson (Internal_scope.scope_locator scope));
+    let turn = scope_ok (Internal_scope.open_turn scope ~ordinal:7) in
+    let provider = scope_ok (Internal_scope.open_provider_attempt turn ~ordinal:0 binding) in
+    record_durable_provider_response provider admitted_response;
+    let fact = match Checkpoint_snapshot.create ~stage:After_assistant_collected checkpoint with
+      | Ok value -> value | Error error -> Alcotest.fail (Checkpoint_snapshot.error_to_string error) in
+    scope_ok (Internal_scope.record_checkpoint scope fact);
+    match window with
+    | Stop_provider_open -> ()
+    | Stop_provider_closed | Stop_turn_closed ->
+      scope_ok (Internal_scope.close_provider_attempt provider Internal.Execution_event.Succeeded);
+      (match window with
+       | Stop_turn_closed -> scope_ok (Internal_scope.close_turn turn Internal.Execution_event.Succeeded)
+       | Stop_provider_open | Stop_provider_closed -> ())) with
+   | Ok () -> () | Error error -> Alcotest.fail (Internal_writer.scope_failure_to_string error));
+  let locator = Agent.execution_locator_of_yojson (Option.get !locator_json) |> Result.get_ok in
+  let resume_tools = match surface_change with
+    | Remove_terminal_surface -> []
+    | Keep_terminal_surface -> tools
+    | Extend_terminal_surface -> tools @ extra_tools in
+  let agent = match Agent.resume ~media_store ~net:env#net ~tools:resume_tools ~checkpoint ~config ~options () with
+    | Ok value -> value | Error error -> Alcotest.fail (Agent_checkpoint.resume_error_to_string error) in
+  let store = Agent.execution_store ~runtime ~dir ~resume:locator () in
+  let result = match entry with
+    | Resume_regular -> Agent.run ~sw ~execution_store:store agent "finish this request"
+    | Resume_streaming -> Agent.run_stream ~sw ~execution_store:store ~on_event:(fun _->
+        Alcotest.fail "terminal recovery invented a provider stream") agent "finish this request"
+    | Resume_advanced ->
+      (match Agent.Advanced.run_blocks ~sw ~execution_store:store ~api_strategy:Agent.Sync
+          ~on_tool_boundary:(fun _->Alcotest.fail "terminal recovery reached a tool boundary")
+          agent [Types.Text "finish this request"] with
+       | Ok (Agent.Advanced.Completed completed) ->
+         Alcotest.(check int) "restored terminal keeps its nonzero ordinal" 7 completed.provider_turn_ordinal;
+         Ok completed.response
+       | Ok _ -> Alcotest.fail "terminal recovery changed the outcome kind"
+       | Error error -> Error error) in
+  (match result with
+   | Ok actual when accepted -> Alcotest.(check bool) "recovery returns the admitted persisted response"
+       true (actual=admitted_response)
+   | Error (Error.Agent (UnrecognizedStopReason _)) when not accepted -> ()
+   | Error error -> Alcotest.fail (Error.to_string error)
+   | Ok _ -> Alcotest.fail "invalid terminal stop was accepted");
+  Alcotest.(check int) "recovery never invokes the registered tool" 0 !effect_count;
+  Alcotest.(check int) "recovery never redispatches provider" 0 !provider_calls;
+  Alcotest.(check int) "recovery never repeats AfterTurn" 0 !after_turns;
+  Alcotest.(check int) "only an active accepted provider runs pending OnStop"
+    (match accepted,window with true,Stop_provider_open->1 | _->0) !on_stops;
+  Alcotest.(check bool) "active recovery passes admitted response to OnStop" true
+    (match accepted,window with true,Stop_provider_open-> !on_stop_responses=[admitted_response] | _-> !on_stop_responses=[]);
+  Alcotest.(check int) "collected counter is unchanged" 8 (Agent.state agent).turn_count;
+  Alcotest.(check bool) "collected usage is not charged twice" true ((Agent.state agent).usage=usage);
+  let projection = Agent.open_execution_projection ~runtime ~dir locator |> Result.get_ok in
+  let page = Agent.Execution_projection.read_tool_observations projection
+      ~after:(Agent.Execution_projection.beginning_cursor projection) ~limit:1024 () |> Result.get_ok in
+  Alcotest.(check int) "terminal content creates no canonical tool observation" 0 (List.length page.observations);
+  match Agent.read_execution_terminal projection with
+  | Ok (Some terminal) -> Alcotest.(check bool) "root outcome follows the persisted stop reason" accepted
+      (terminal.disposition.outcome=Agent.Terminal_succeeded)
+  | Ok None -> Alcotest.fail "terminal recovery left the root running"
+  | Error error -> Alcotest.fail (Agent.Execution_projection.error_to_string error)
 ;;
 
 let test_agent_run_resumes_terminal_after_descriptor_drift () =
@@ -4607,6 +5202,9 @@ let test_nested_tool_observation_audiences audience ~concurrent () =
     | Ok config->config |Error _->Alcotest.fail "invalid audience fixture" in
     Event_bus.subscribe ~config ~filter:Event_bus.filter_tools_only bus in
   let root_sub=subscribe root_bus and child_sub=subscribe child_bus in
+  let subscribe_all bus = Event_bus.subscribe bus
+      ~config:(Result.get_ok (Event_bus.subscription_config ~capacity:128 ~overflow:Drop_newest)) in
+  let root_all = subscribe_all root_bus and child_all = subscribe_all child_bus in
   let child_target=match audience with Shared_tool_bus->Some root_bus
     | Distinct_tool_bus->Some child_bus |No_child_tool_bus->None in
   let parent_calls=ref 0 and child_calls=ref 0 in
@@ -4691,7 +5289,31 @@ let test_nested_tool_observation_audiences audience ~concurrent () =
   let delivered=root_events@child_events in
   List.iter (fun (event:Event_bus.event)->
     Alcotest.(check bool) "audience event is the exact committed source observation" true
-      (List.exists (fun (source:Agent.Execution_projection.tool_observation)->source.event=event) page.observations)) delivered
+      (List.exists (fun (source:Agent.Execution_projection.tool_observation)->source.event=event) page.observations)) delivered;
+  let canonical event = match event.Event_bus.payload with
+    | TurnStarted _ | TurnReady _ | TurnCompleted _ | InferenceTelemetry _ | ToolCalled _ | ToolCompleted _ -> true
+    | AgentStarted _ | AgentCompleted _ | AgentYielded _ | AgentInputRequired _ | AgentFailed _
+    | HandoffRequested _ | HandoffCompleted _ | ElicitationCompleted _ | ToolApprovalCompleted _ | Custom _ -> false in
+  let name event = match event.Event_bus.payload with
+    | TurnStarted {agent_name;_} | TurnReady {agent_name;_} | TurnCompleted {agent_name;_}
+    | InferenceTelemetry {agent_name;_} | ToolCalled {agent_name;_} | ToolCompleted {agent_name;_} -> agent_name
+    | _ -> Alcotest.fail "expected canonical bus projection" in
+  let all = match Agent.Execution_projection.read_bus_observations projection
+      ~after:(Agent.Execution_projection.beginning_cursor projection) ~limit:1024 () with
+    | Ok page -> List.map (fun (source:Agent.Execution_projection.bus_observation) -> source.event) page.observations
+    | Error error -> Alcotest.fail (Agent.Execution_projection.error_to_string error) in
+  let root_all = List.filter canonical (Event_bus.drain root_all)
+  and child_all = List.filter canonical (Event_bus.drain child_all) in
+  let expected_root = match audience with
+    | Shared_tool_bus -> all
+    | Distinct_tool_bus | No_child_tool_bus -> List.filter (fun event -> name event="root-audience") all in
+  let expected_child = match audience with
+    | Distinct_tool_bus -> List.filter (fun event -> name event="child-audience") all
+    | Shared_tool_bus | No_child_tool_bus -> [] in
+  Alcotest.(check bool) "turn and tool observations share ordered root audience" true
+    (root_all=expected_root && ordered root_all);
+  Alcotest.(check bool) "turn and tool observations preserve explicit child audience" true
+    (child_all=expected_child && ordered child_all)
 ;;
 
 let test_unattempted_tool_has_no_bus_execution_observation () =
@@ -4730,7 +5352,54 @@ let test_unattempted_tool_has_no_bus_execution_observation () =
 let () =
   Alcotest.run
     "Pipeline"
-    [ ( "mock_responses"
+    [ ( "terminal stop authority",
+        List.map (fun (name, stop_reason, window, entry) ->
+          Alcotest.test_case name `Quick
+            (test_terminal_stop_reason_owns_tool_content ~stop_reason ~window entry))
+          ["active MaxTokens with tool content completes without effects", Types.MaxTokens, Stop_provider_open, Resume_regular;
+           "active Refusal with tool content completes without effects", Refusal, Stop_provider_open, Resume_regular;
+           "active injected EndTurn with tool content completes without effects", EndTurn, Stop_provider_open, Resume_regular;
+           "provider-closed MaxTokens with tool content replays without hooks", MaxTokens, Stop_provider_closed, Resume_regular;
+           "provider-closed Refusal with tool content replays without hooks", Refusal, Stop_provider_closed, Resume_regular;
+           "provider-closed injected EndTurn with tool content replays without hooks", EndTurn, Stop_provider_closed, Resume_regular;
+           "turn-closed MaxTokens with tool content replays without hooks", MaxTokens, Stop_turn_closed, Resume_regular;
+           "turn-closed Refusal with tool content replays without hooks", Refusal, Stop_turn_closed, Resume_regular;
+           "turn-closed injected EndTurn with tool content replays without hooks", EndTurn, Stop_turn_closed, Resume_regular;
+           "streaming active MaxTokens with tool content completes without effects", MaxTokens, Stop_provider_open, Resume_streaming;
+           "Advanced active MaxTokens with tool content completes without effects", MaxTokens, Stop_provider_open, Resume_advanced;
+           "unknown stop with tool content remains rejected", Unknown "unknown-stop", Stop_provider_open, Resume_regular;
+           "unmatched tool calls remain rejected with tool content", UnmatchedToolCalls, Stop_provider_open, Resume_regular]
+        @ [ Alcotest.test_case
+              "active Refusal with only unregistered tool content completes after admission"
+              `Quick
+              (test_terminal_stop_reason_owns_tool_content
+                 ~only_unregistered_tools:true
+                 ~stop_reason:Refusal
+                 ~window:Stop_provider_open
+                 Resume_regular)
+          ; Alcotest.test_case
+              "turn-closed Refusal with only unregistered tool content replays after admission"
+              `Quick
+              (test_terminal_stop_reason_owns_tool_content
+                 ~only_unregistered_tools:true
+                 ~stop_reason:Refusal
+                 ~window:Stop_turn_closed
+                 Resume_regular)
+          ]
+        @ List.concat_map (fun (label,window) ->
+            [ Alcotest.test_case (label ^ " canonical terminal survives tool removal") `Quick
+                (test_terminal_stop_reason_owns_tool_content
+                   ~canonical_only:true ~surface_change:Remove_terminal_surface
+                   ~stop_reason:Refusal ~window Resume_regular)
+            ; Alcotest.test_case (label ^ " admission survives AfterTurn tool additions") `Quick
+                (test_terminal_stop_reason_owns_tool_content
+                   ~surface_change:Extend_terminal_surface
+                   ~stop_reason:MaxTokens ~window Resume_regular)
+            ])
+            ["active",Stop_provider_open;
+             "provider-closed",Stop_provider_closed;
+             "turn-closed",Stop_turn_closed])
+    ; ( "mock_responses"
       , [ Alcotest.test_case "text response" `Quick test_mock_text_response
         ; Alcotest.test_case "tool use response" `Quick test_mock_tool_use_response
         ; Alcotest.test_case "tool then text" `Quick test_mock_tool_then_text_sequence
@@ -4768,9 +5437,9 @@ let () =
             `Quick
             test_provider_context_retention
         ; Alcotest.test_case
-            "effective provider config drives lifecycle and pricing"
+            "effective provider config drives lifecycle without inferred cost"
             `Quick
-            test_effective_provider_config_drives_lifecycle_and_pricing
+            test_effective_provider_config_drives_lifecycle_without_inferred_cost
         ; Alcotest.test_case
             "provider turn identity spans multiturn tool loop"
             `Quick
@@ -4875,6 +5544,40 @@ let () =
             `Quick
             test_settled_terminal_replay_refuses_invalid_or_missing_media
         ; Alcotest.test_case
+            "regular resumes collected terminal before provider close" `Quick
+            (test_active_terminal_resumes_committed_checkpoint Resume_regular)
+        ; Alcotest.test_case
+            "streaming resumes collected terminal before provider close" `Quick
+            (test_active_terminal_resumes_committed_checkpoint Resume_streaming)
+        ; Alcotest.test_case
+            "Advanced resumes collected terminal before provider close" `Quick
+            (test_active_terminal_resumes_committed_checkpoint Resume_advanced)
+        ; Alcotest.test_case "terminal resume rejects unknown stop" `Quick
+            (test_active_terminal_resumes_committed_checkpoint
+              ~case:(Invalid_terminal_stop (Types.Unknown "unknown-stop")) Resume_regular)
+        ; Alcotest.test_case "terminal resume rejects unmatched tool calls" `Quick
+            (test_active_terminal_resumes_committed_checkpoint
+              ~case:(Invalid_terminal_stop Types.UnmatchedToolCalls) Resume_regular)
+        ; Alcotest.test_case "terminal resume rejects empty tool stop" `Quick
+            (test_active_terminal_resumes_committed_checkpoint
+              ~case:(Invalid_terminal_stop Types.StopToolUse) Resume_regular)
+        ; Alcotest.test_case "terminal resume runs pending OnStop" `Quick
+            (test_active_terminal_resumes_committed_checkpoint ~case:Accepted_stop_hook Resume_regular)
+        ; Alcotest.test_case "terminal resume propagates OnStop exception" `Quick
+            (test_active_terminal_resumes_committed_checkpoint ~case:Raising_stop_hook Resume_regular)
+        ; Alcotest.test_case "terminal resume rejects illegal OnStop decision" `Quick
+            (test_active_terminal_resumes_committed_checkpoint ~case:Illegal_stop_hook Resume_regular)
+        ; Alcotest.test_case "open provider repeats OnStop after interruption" `Quick
+            (test_active_terminal_resumes_committed_checkpoint ~case:Replayed_stop_hook Resume_regular)
+        ; Alcotest.test_case "closed provider reuses output decision without OnStop" `Quick
+            (test_active_terminal_resumes_committed_checkpoint ~case:Provider_closed_stop_hook Resume_regular)
+        ; Alcotest.test_case "terminal resume rejects stale collected counter" `Quick
+            (test_active_terminal_resumes_committed_checkpoint ~case:Stale_terminal_counter Resume_regular)
+        ; Alcotest.test_case "terminal resume rejects different collected content" `Quick
+            (test_active_terminal_resumes_committed_checkpoint ~case:Different_terminal_content Resume_regular)
+        ; Alcotest.test_case "terminal resume rejects persisted tool invocation" `Quick
+            (test_active_terminal_resumes_committed_checkpoint ~case:Unexpected_terminal_invocation Resume_regular)
+        ; Alcotest.test_case
             "terminal resume ignores current descriptor drift"
             `Quick
             test_agent_run_resumes_terminal_after_descriptor_drift
@@ -4934,6 +5637,16 @@ let () =
             "completion callback diagnostic preserves committed success"
             `Quick
             (test_trace_finalization_preserves_committed_success Callback_diagnostic_failed)
+        ; Alcotest.test_case "durable turn observations keep committed identity" `Quick
+            (test_durable_turn_bus_uses_canonical_facts ~caller_checkpoint:false)
+        ; Alcotest.test_case "caller-owned checkpoint preserves canonical turn observations" `Quick
+            (test_durable_turn_bus_uses_canonical_facts ~caller_checkpoint:true)
+        ; Alcotest.test_case "turn publication failure retries source without provider redispatch" `Quick
+            (test_durable_turn_bus_uses_canonical_facts ~delivery_fault:true ~caller_checkpoint:false)
+        ; Alcotest.test_case "checkpoint refusal does not publish assistant collection" `Quick
+            (test_durable_turn_bus_uses_canonical_facts ~refuse_checkpoint:true ~caller_checkpoint:true)
+        ; Alcotest.test_case "nested independent stores own separate live observers" `Quick
+            test_nested_execution_stores_use_their_own_bus_observers
         ; Alcotest.test_case
             "durable tool bus uses canonical committed facts"
             `Quick

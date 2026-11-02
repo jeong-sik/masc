@@ -1,3 +1,9 @@
+let execution_for_binding config binding =
+  Runtime_adapter.materialize_execution
+    ~construction:(Runtime_adapter.create_construction ()) config binding
+  |> Result.map (fun (selected : Runtime_adapter.execution_materialization) -> selected.execution)
+;;
+
 (* Adding a second sign-in of a client an operator already runs: the copy has
    to load, bind the base's models, and point the client at the new login
    store, without touching a line the operator already wrote. *)
@@ -162,10 +168,12 @@ let test_codex_copy_signs_in_at_the_new_home () =
     Alcotest.(check string) "the base's model is bound" "gpt-5.6" binding.model_id;
     Alcotest.(check (option int)) "binding fields travel with it" (Some 2)
       binding.max_concurrent;
-    (match Runtime_adapter.binding_to_execution config binding with
+    (match execution_for_binding config binding with
      | Ok (Runtime_execution.Codex_app_server execution) ->
-       Alcotest.(check (option string)) "the turn runs in the new home"
-         (Some "/home/op/.codex-account2") execution.account_home
+       Alcotest.(check string) "the turn runs in the new home"
+         "/home/op/.codex-account2" (Runtime_official_account.home execution.account_home);
+       Alcotest.(check bool) "the account home is explicitly declared" true
+         (Runtime_official_account.source execution.account_home = Runtime_official_account.Declared_directory)
      | Ok _ -> Alcotest.fail "the copy is no longer a Codex runtime"
      | Error detail -> Alcotest.failf "copy does not materialize: %s" detail)
   | bindings -> Alcotest.failf "expected one binding, got %d" (List.length bindings)
@@ -187,10 +195,12 @@ let test_claude_copy_keeps_the_command () =
   | [ binding ] ->
     Alcotest.(check bool) "wizard-default travels with it" true
       binding.wizard_default;
-    (match Runtime_adapter.binding_to_execution config binding with
+    (match execution_for_binding config binding with
      | Ok (Runtime_execution.Claude_code execution) ->
-       Alcotest.(check (option string)) "the turn runs in the new home"
-         (Some "/home/op/.claude-account2") execution.account_home
+       Alcotest.(check string) "the turn runs in the new home"
+         "/home/op/.claude-account2" (Runtime_official_account.home execution.account_home);
+       Alcotest.(check bool) "the account home is explicitly declared" true
+         (Runtime_official_account.source execution.account_home = Runtime_official_account.Declared_directory)
      | Ok _ -> Alcotest.fail "the copy is no longer a Claude Code runtime"
      | Error detail -> Alcotest.failf "copy does not materialize: %s" detail)
   | bindings -> Alcotest.failf "expected one binding, got %d" (List.length bindings)
@@ -210,7 +220,7 @@ let test_muse_copy_signs_in_at_the_new_home () =
   match bindings_of config "muse_2" with
   | [ binding ] ->
     Alcotest.(check string) "the base's model is bound" "muse_fixture" binding.model_id;
-    (match Runtime_adapter.binding_to_execution config binding with
+    (match execution_for_binding config binding with
      | Ok (Runtime_execution.Muse_serve execution) ->
        Alcotest.(check string) "the turn runs in the new home"
          "/home/op/.muse-account2" execution.account_home

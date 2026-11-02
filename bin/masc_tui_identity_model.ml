@@ -393,7 +393,8 @@ let decode_identity_login ~provider_id ~label ~now (json : Yojson.Safe.t) =
 type identity_login_status =
   | Consent_waiting of float | Callback_in_progress
   | Credentials_published of (int, unit) result
-  | Login_exchange_failed | Consent_expired | Consent_superseded | Attempt_unavailable
+  | Login_exchange_failed | Credential_publication_incomplete
+  | Consent_expired | Consent_superseded | Attempt_unavailable
 let decode_identity_login_status = function
   | `Assoc fields ->
       (match List.assoc_opt "kind" fields with
@@ -411,6 +412,7 @@ let decode_identity_login_status = function
                  | _ -> Error "invalid discovery outcome")
             | _ -> Error "invalid credential publication")
        | Some (`String "failed") -> Ok Login_exchange_failed
+       | Some (`String "credential_publication_incomplete") -> Ok Credential_publication_incomplete
        | Some (`String "expired") -> Ok Consent_expired
        | Some (`String "superseded") -> Ok Consent_superseded
        | Some (`String "unavailable") -> Ok Attempt_unavailable

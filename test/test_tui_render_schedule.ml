@@ -202,6 +202,33 @@ let test_terminal_size_cache_refreshes_without_losing_last_valid () =
     (Schedule.Terminal_size_cache.refresh unavailable ~probe
     = Schedule.Terminal_size_cache.Unchanged (24, 80))
 
+let test_work_geometry_checks_resize_before_admission () =
+  let module Size = Schedule.Terminal_size_cache in
+  let pending = ref false and probes = ref 0 and physical = ref (Some (24, 80)) in
+  let probe () = incr probes; !physical in
+  let check_geometry () = Size.verify_for_work ~cached:(24,80)
+      ~resize_changed:(fun () -> !pending) ~probe in
+  check bool "current geometry may be admitted" true (check_geometry () = Size.Current);
+  pending := true;
+  check bool "pending resize prevents admission" true (check_geometry () = Size.Resize_interrupted);
+  check int "pending resize avoids probing" 1 !probes;
+  pending := false;
+  physical := Some (25,80);
+  check bool "physical resize requests refresh" true (check_geometry () = Size.Resize_detected);
+  physical := None;
+  check bool "unavailable probe retains cached geometry" true (check_geometry () = Size.Current);
+  let pending_during_probe () = pending := true; Some (24,80) in
+  check bool "resize during probe prevents admission" true
+    (Size.verify_for_work ~cached:(24,80) ~resize_changed:(fun () -> !pending)
+       ~probe:pending_during_probe = Size.Resize_interrupted);
+  pending := false;
+  let generation = ref 0 in
+  let resized_and_consumed () = incr generation; Some (24,80) in
+  check bool "consumed resize still prevents admission" true
+    (Size.verify_for_work ~cached:(24,80)
+       ~resize_changed:(fun () -> !pending || !generation <> 0)
+       ~probe:resized_and_consumed = Size.Resize_interrupted)
+
 let test_interrupted_input_wait_retries_until_deadline () =
   let now = ref 0L in
   let polls = ref 0 in
@@ -326,6 +353,8 @@ let () =
             test_terminal_size_cache_reprobes_only_after_invalidation
         ; test_case "terminal size refresh keeps last valid shape" `Quick
             test_terminal_size_cache_refreshes_without_losing_last_valid
+        ; test_case "work admission checks terminal resize" `Quick
+            test_work_geometry_checks_resize_before_admission
         ; test_case "interrupted input waits retry" `Quick
             test_interrupted_input_wait_retries_until_deadline
         ; test_case "quit shortcut preserves message input" `Quick

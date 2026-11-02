@@ -222,6 +222,7 @@ type keeper_chat_event =
           providing a MASC execution result. *)
   | Tool_approval_requested of
       { tool_call_id : string
+      ; approval_id : string
       ; tool_call_name : string
       ; args : string
       ; question : string
@@ -235,6 +236,7 @@ type keeper_chat_event =
           running: the operator cannot see the policy table, only this. *)
   | Tool_approval_settled of
       { tool_call_id : string
+      ; approval_id : string
       ; outcome : string
       }
       (** How the wait ended: the operator's answer, or that nobody gave one.

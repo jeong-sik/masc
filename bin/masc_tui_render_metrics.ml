@@ -645,19 +645,31 @@ let render_section_tools ~cols (state : state) : string list =
   let yolo =
     observe_source ~observed:state.keeper_tool_modes_observed
       ~error:state.keeper_tool_modes_error state.keeper_yolo_names in
-  let counts = Hashtbl.create 16 in
-  Option.iter (List.iter
-    (fun (gp : Decode.gate_pending) ->
-      let tool = Terminal_text.single_line gp.gp_display_tool in
-      let current = Option.value (Hashtbl.find_opt counts tool) ~default:0 in
-      Hashtbl.replace counts tool (current + 1)))
-    (current_value gate);
-  Option.iter (List.iter
-    (fun (kta : Decode.keeper_tool_approval) ->
-      let tool = Terminal_text.single_line kta.kta_tool in
-      let current = Option.value (Hashtbl.find_opt counts tool) ~default:0 in
-      Hashtbl.replace counts tool (current + 1)))
-    (current_value held);
+  let module Tool_map = Map.Make (String) in
+  let counts =
+    let add_tool acc tool =
+      let current = Option.value (Tool_map.find_opt tool acc) ~default:0 in
+      Tool_map.add tool (current + 1) acc
+    in
+    let acc =
+      match current_value gate with
+      | None -> Tool_map.empty
+      | Some gps ->
+        List.fold_left
+          (fun acc (gp : Decode.gate_pending) ->
+            add_tool acc (Terminal_text.single_line gp.gp_display_tool))
+          Tool_map.empty
+          gps
+    in
+    match current_value held with
+    | None -> acc
+    | Some ktas ->
+      List.fold_left
+        (fun acc (kta : Decode.keeper_tool_approval) ->
+          add_tool acc (Terminal_text.single_line kta.kta_tool))
+        acc
+        ktas
+  in
 
   let gate_summary =
     [ "    Pending Gate Calls: " ^ observation_detail gate
@@ -673,7 +685,7 @@ let render_section_tools ~cols (state : state) : string list =
   in
 
   let tool_bars =
-    if Hashtbl.length counts = 0 then
+    if Tool_map.is_empty counts then
       (match gate, held with
        | Current [], Current [] ->
          [ "    (no active pending gate operations or held approval requests)" ]
@@ -682,12 +694,13 @@ let render_section_tools ~cols (state : state) : string list =
        | (Current (_::_), _) | ((Not_observed | (Read_failed _ | (Unavailable _ | Stale _))), _) -> [ "    Pending tool totals unavailable; no empty queue inferred" ])
     else
       let items =
-        Hashtbl.fold
+        Tool_map.fold
           (fun name count acc ->
             { Chart.name; count; style = Some Masc_tui_theme.Warn } :: acc)
           counts []
         |> List.sort (fun (a : Chart.bar_item) (b : Chart.bar_item) ->
-               Int.compare b.count a.count)
+               let c = Int.compare b.count a.count in
+               if c <> 0 then c else String.compare a.name b.name)
       in
       let scope = match gate, held with
         | Current _, Current _ -> []
@@ -706,8 +719,17 @@ let render_section_tools ~cols (state : state) : string list =
   @ [ "" ]
   @ List.map clip tool_bars
 
-let render_metrics_body ~cols ~budget (state : state)
-    ~(report_scroll : int -> unit)
+let rebase_scroll_for_cards ~scroll ~previous_cards ~current_cards =
+  match previous_cards with
+  | None -> scroll
+  | Some previous_cards ->
+      if scroll = 0 || scroll = clamped_scroll_end then scroll
+      else if current_cards >= previous_cards then
+        scroll_down_from scroll ~by:(current_cards - previous_cards)
+      else max 0 (scroll - (previous_cards - current_cards))
+
+let render_metrics_body ~cols ~budget ~suffix_lines (state : state)
+    ~(report_scroll : int -> int -> int -> unit)
     ~(push : string -> unit)
     ~(push_styled : style:string -> string -> unit)
     ~push_selected:_
@@ -720,29 +742,42 @@ let render_metrics_body ~cols ~budget (state : state)
   push pills;
   push_divider ();
   let card_lines = render_kpi_cards ~cols state kpis in
-  List.iter push card_lines;
-  push_divider ();
-  let fixed_rows = 1 + 1 + 1 + List.length card_lines + 1 in
+  (* On a short, wide terminal the cards alone can consume the body. Keep
+     them scrollable in that case so the section and status remain reachable. *)
+  let pinned_cards, scroll_cards =
+    if budget <= 4 + List.length card_lines then [], card_lines
+    else card_lines, [] in
+  List.iter push pinned_cards;
+  if suffix_lines = [] then push_divider ()
+  else push_styled ~style:(Theme.recede ()) "End: status";
+  let fixed_rows = 1 + 1 + 1 + List.length pinned_cards + 1 in
   let room = max 0 (budget - fixed_rows) in
   let section_lines =
     match state.metrics_section with
     | Section_fleet ->
       (* The block's title takes one row and the scroll hint under the
-         section may take another; the rest is the log's. *)
-      render_section_fleet ~session_rows:(max 1 (room - 2)) ~cols state
+         section may take another. Use the space before cards move into the
+         scroll, so the card transition does not also expand the log. *)
+      let room_with_pinned_cards = max 0 (budget - 4 - List.length card_lines) in
+      render_section_fleet ~session_rows:(max 1 (room_with_pinned_cards - 2)) ~cols state
     | Section_resources -> render_section_resources ~cols state
     | Section_tools -> render_section_tools ~cols state
   in
+  let section_lines = scroll_cards @ section_lines @ suffix_lines in
   let total_lines = List.length section_lines in
   let overflowing = total_lines > room in
   let hint_rows = if overflowing && room >= 2 then 1 else 0 in
   let available = max 0 (room - hint_rows) in
   let max_scroll = max 0 (total_lines - available) in
-  let scroll = max 0 (min state.metrics_scroll max_scroll) in
+  let card_rows = List.length scroll_cards in
+  let scroll =
+    rebase_scroll_for_cards ~scroll:state.metrics_scroll
+      ~previous_cards:state.metrics_scroll_card_rows ~current_cards:card_rows
+    |> min max_scroll |> max 0 in
   (* The row this frame could actually start at, handed back so the next
      keypress steps from it rather than from wherever the last one left the
      stored value. *)
-  report_scroll scroll;
+  report_scroll scroll available card_rows;
   let section_lines_window =
     Rows.of_list ~first:scroll ~height:available section_lines
   in

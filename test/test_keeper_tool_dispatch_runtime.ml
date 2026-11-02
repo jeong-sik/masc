@@ -9851,14 +9851,19 @@ default = "official.primary"
     Fun.protect ~finally:(fun () -> Runtime.For_testing.restore saved) (fun () ->
       (match Runtime.init_default ~config_path with Ok () -> () | Error detail -> fail detail);
       on_runtime_ready ();
-      let native_config = match Runtime.get_runtime_by_id "official.gate" with
-        | Some {Runtime_instance.execution=Runtime_execution.Codex_app_server config; _} -> config
-        | _ -> fail "native Gate fixture runtime missing" in
+      let native_runtime = match Runtime.get_runtime_by_id "official.gate" with
+        | Some runtime -> runtime
+        | None -> fail "native Gate fixture runtime missing" in
+      let native_config = match native_runtime.Runtime_instance.execution with
+        | Runtime_execution.Codex_app_server config -> config
+        | Agent_core _ | Claude_code _ | Antigravity_cli _ | Muse_serve _ ->
+          fail "native Gate fixture runtime missing" in
       Masc.Keeper_codex_runtime.run ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id })
-        ~context_window:(Some (Runtime_instance.max_context_of_runtime
-          (Runtime.get_runtime_by_id "official.gate" |> Option.get)))
+        ~context_window:(Some (Runtime_instance.max_context_of_runtime native_runtime))
+        ~configured_reasoning_effort:native_runtime.model.reasoning_effort
+        ~turn_timeout_s:native_runtime.model.turn_timeout_s
         ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input
-          ~runtime:(Runtime.get_runtime_by_id "official.gate" |> Option.get)) ?official_client_continuation:continuation
+          ~runtime:native_runtime) ?official_client_continuation:continuation
         ~runtime_id:"official.gate" ~keeper_name:meta.Masc.Keeper_meta_contract.name
         ~turn_start:(Masc.Keeper_carried_front.Turn_boundary { end_atom = 0 })
         ~pre_tool_rejects:(ref []) ~base_path:config.base_path ~media_store:(Tool_blob_media_store.of_base_path ~base_path:config.base_path) ~goal ~goal_blocks

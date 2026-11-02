@@ -859,7 +859,7 @@ let observe_failed_dispatch ~observe_transport_uncertain = function
   | Runtime_codex_app_server.Runtime_shutting_down -> ()
 ;;
 
-let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~on_results_ready ~required_native_posture ~official_client_continuation ~runtime_id ~context_window ~quota_scope ~keeper_name
+let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~on_results_ready ~required_native_posture ~official_client_continuation ~runtime_id ~context_window ~configured_reasoning_effort ~turn_timeout_s ~quota_scope ~keeper_name
     ~pre_tool_rejects ~base_path ~goal ~goal_blocks
     ~system_prompt ~tools ~loading_plan ~initial_messages ~capacity_bytes ~project_history
     ~on_transmitted_model_input ~hooks
@@ -951,7 +951,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
     let* () = on_guidance_prepared () in
     let tool_surface_sha256 =
       Keeper_official_client_session_store.tool_surface_sha256
-        ?account_home:(Runtime_codex_app_server.effective_account_home config.account_home)
+        ?account_home:(Some (Runtime_official_account.home config.account_home))
         ~native_posture
         tools
     in
@@ -983,8 +983,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
     let* prepared =
       Host.prepare_turn
         ~composed_context
-        ~configured_reasoning_effort:
-          (Runtime_inference.resolve_reasoning_effort ~runtime_id)
+        ~configured_reasoning_effort
         ~runtime_label
         ~keeper_name
         ~turn_count
@@ -1128,14 +1127,15 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
     in
     let client_config =
       { Runtime_codex_app_server.cli_path = config.cli_path
-      ; account_home = config.account_home
+      ; account_home = Runtime_official_account.Captured config.account_home
       ; isolated_home = None
       ; model = config.model
       ; context_window
       ; native = native_posture
       ; developer_instructions
       ; admission_timeout_s = config.timeout_s
-      ; timeout_s = Runtime_inference.resolve_turn_timeout_s_or ~runtime_id ~default:config.timeout_s
+      ; timeout_s = Runtime_inference.turn_timeout_s_of_declared
+          ~default:config.timeout_s turn_timeout_s
       (* A keeper turn is a conversation, not a schema contract: nothing
          downstream parses its text against a domain schema. *)
       ; output_schema = None
@@ -1663,6 +1663,14 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
                { Agent_core.Types.default_inference_telemetry with
                  request_latency_ms = Some latency_ms
                ; canonical_model_id = Some turn.model
+               ; reported_cache_usage =
+                   Option.map
+                     (fun (u : Agent_core.Types.api_usage) ->
+                        { Agent_core.Types.cache_creation_input_tokens =
+                            Some u.cache_creation_input_tokens
+                        ; cache_read_input_tokens = Some u.cache_read_input_tokens
+                        })
+                     spend
                }
          }
        in
@@ -1847,7 +1855,7 @@ let note_transport_uncertainty effect_disposition =
   | true | false -> ()
 ;;
 
-let run ?(on_guidance_prepared = fun () -> Ok ()) ~input_source ~media_store ?argument_source ?on_memory_capacity_refusal ?official_task_reference ?composed_context ~accepts_image_input ?required_native_posture ?official_client_continuation ~runtime_id ~context_window ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
+let run ?(on_guidance_prepared = fun () -> Ok ()) ~input_source ~media_store ?argument_source ?on_memory_capacity_refusal ?official_task_reference ?composed_context ~accepts_image_input ?required_native_posture ?official_client_continuation ~runtime_id ~context_window ~configured_reasoning_effort ~turn_timeout_s ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
     ~system_prompt ~tools ?(loading_plan = Keeper_official_client_host.All_on_demand) ~initial_messages ~model_input_projection
     ~on_transmitted_model_input ~hooks
     ~context_injector ~context
@@ -1867,7 +1875,7 @@ let run ?(on_guidance_prepared = fun () -> Ok ()) ~input_source ~media_store ?ar
     ~event_bus ~raw_trace ~on_event ~(config : Runtime_execution.codex_app_server) () =
   let quota_scope =
     Runtime_quota_window.scope_of_codex_home
-      (Runtime_codex_app_server.effective_account_home config.account_home)
+      (Some (Runtime_official_account.home config.account_home))
   in
   let settled_session = Atomic.make None in
   let pending_result_receipts = Atomic.make None in
@@ -1935,6 +1943,7 @@ let run ?(on_guidance_prepared = fun () -> Ok ()) ~input_source ~media_store ?ar
            from the next one. Effect evidence remains cumulative. *)
         Atomic.set successful_tool_completion No_successful_tool_completion;
         run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~on_results_ready ~official_client_continuation ~context_window
+          ~configured_reasoning_effort ~turn_timeout_s
           ~required_native_posture
           ~runtime_id
           ~quota_scope

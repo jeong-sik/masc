@@ -1,0 +1,254 @@
+2026-11-01T02:54:00.2907385Z   ref: 27a4e3337466de8272e2055fd4035795f7ceebe8
+2026-11-01T02:54:00.7754517Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin 27a4e3337466de8272e2055fd4035795f7ceebe8
+2026-11-01T02:54:09.9043415Z  * branch              27a4e3337466de8272e2055fd4035795f7ceebe8 -> FETCH_HEAD
+2026-11-01T02:54:09.9053771Z [command]/usr/bin/git rev-parse --verify --quiet 27a4e3337466de8272e2055fd4035795f7ceebe8^{object}
+2026-11-01T02:54:09.9085912Z 27a4e3337466de8272e2055fd4035795f7ceebe8
+2026-11-01T02:54:09.9191295Z [command]/usr/bin/git checkout --progress --force 27a4e3337466de8272e2055fd4035795f7ceebe8
+2026-11-01T02:54:12.8132188Z Note: switching to '27a4e3337466de8272e2055fd4035795f7ceebe8'.
+2026-11-01T02:54:12.8136960Z HEAD is now at 27a4e333 docs(evidence): retain terminal resume regression and focused Test proof
+2026-11-01T02:54:12.8355319Z [command]/usr/bin/git log -1 --format=%H
+2026-11-01T02:54:12.8387046Z 27a4e3337466de8272e2055fd4035795f7ceebe8
+2026-11-01T02:55:17.7486875Z   TARGET_SUITES: packages/agent_core/test/test_thinking_control_dialects
+2026-11-01T02:55:17.7693090Z   TARGET_SUITES: packages/agent_core/test/test_thinking_control_dialects
+2026-11-01T02:55:17.8155977Z [targeted] EIO_BACKEND=<unset> timeout=600s per suite
+2026-11-01T02:55:17.8184464Z [targeted] @@packages/agent_core/test/runtest-test_thinking_control_dialects: start 2026-11-01T02:55:17Z (dune alias)
+2026-11-01T02:56:02.1026395Z Testing `thinking_control_dialects'.
+2026-11-01T02:56:02.1027643Z ASSERT chat_template_kwargs absent
+2026-11-01T02:56:02.1028256Z ASSERT thinking absent
+2026-11-01T02:56:02.1029123Z ASSERT reasoning_effort absent
+2026-11-01T02:56:02.1029707Z ASSERT think absent
+2026-11-01T02:56:02.1030227Z ASSERT enable_thinking absent
+2026-11-01T02:56:02.1031509Z   [OK]          openai_compat          0   raw qwen does not infer chat_templ...
+2026-11-01T02:56:02.1032396Z ASSERT enable_thinking false
+2026-11-01T02:56:02.1032990Z ASSERT preserve_thinking true
+2026-11-01T02:56:02.1033548Z ASSERT thinking absent
+2026-11-01T02:56:02.1034095Z ASSERT reasoning_effort absent
+2026-11-01T02:56:02.1034663Z ASSERT enable_thinking absent
+2026-11-01T02:56:02.1035543Z   [OK]          openai_compat          1   declared qwen3.6 endpoint uses cha...
+2026-11-01T02:56:02.1036404Z ASSERT toggle wire
+2026-11-01T02:56:02.1036868Z ASSERT replay policy
+2026-11-01T02:56:02.1037659Z   [OK]          openai_compat          2   raw qwen3.6 dialect does not infer...
+2026-11-01T02:56:02.1038709Z ASSERT toggle wire
+2026-11-01T02:56:02.1039240Z ASSERT replay policy
+2026-11-01T02:56:02.1039816Z ASSERT no tool-call replay requirement
+2026-11-01T02:56:02.1040482Z ASSERT no ignored sampling params
+2026-11-01T02:56:02.1041367Z   [OK]          openai_compat          3   declared qwen3.6 dialect uses chat...
+2026-11-01T02:56:02.1042170Z ASSERT replay policy
+2026-11-01T02:56:02.1042758Z ASSERT plain assistant reasoning is omitted
+2026-11-01T02:56:02.1043473Z ASSERT assistant tool-call reasoning is retained
+2026-11-01T02:56:02.1044410Z   [OK]          openai_compat          4   declared qwen3.6 dialect keeps too...
+2026-11-01T02:56:02.1045211Z ASSERT toggle wire
+2026-11-01T02:56:02.1045706Z ASSERT replay policy
+2026-11-01T02:56:02.1046304Z ASSERT requires tool-call reasoning replay
+2026-11-01T02:56:02.1046908Z ASSERT thinking type
+2026-11-01T02:56:02.1047461Z ASSERT chat_template_kwargs absent
+2026-11-01T02:56:02.1048049Z ASSERT reasoning_effort absent
+2026-11-01T02:56:02.1048907Z ASSERT response_format type
+2026-11-01T02:56:02.1049498Z ASSERT json_schema absent
+2026-11-01T02:56:02.1050341Z   [OK]          openai_compat          5   mimo v2.5 uses thinking object and...
+2026-11-01T02:56:02.1051115Z ASSERT toggle wire
+2026-11-01T02:56:02.1051595Z ASSERT replay policy
+2026-11-01T02:56:02.1052127Z ASSERT typed preserve minimal
+2026-11-01T02:56:02.1052688Z ASSERT typed preserve high
+2026-11-01T02:56:02.1053228Z ASSERT typed preserve xhigh
+2026-11-01T02:56:02.1054089Z ASSERT typed preserve max
+2026-11-01T02:56:02.1054916Z   [OK]          openai_compat          6   openai reasoning dialect uses reas...
+2026-11-01T02:56:02.1055706Z ASSERT reasoning_effort
+2026-11-01T02:56:02.1056210Z ASSERT thinking absent
+2026-11-01T02:56:02.1056723Z ASSERT enable_thinking absent
+2026-11-01T02:56:02.1057292Z ASSERT chat_template_kwargs absent
+2026-11-01T02:56:02.1058166Z   [OK]          openai_compat          7   openai reasoning request uses reas...
+2026-11-01T02:56:02.1059342Z ASSERT explicit disable renders none
+2026-11-01T02:56:02.1060009Z ASSERT explicit enable keeps the row effort
+2026-11-01T02:56:02.1060633Z ASSERT thinking absent
+2026-11-01T02:56:02.1061168Z ASSERT enable_thinking absent
+2026-11-01T02:56:02.1061999Z   [OK]          openai_compat          8   openai reasoning request renders e...
+2026-11-01T02:56:02.1062904Z ASSERT rejection names the missing off value
+2026-11-01T02:56:02.1063789Z   [OK]          openai_compat          9   openai reasoning request rejects d...
+2026-11-01T02:56:02.1064583Z ASSERT thinking type
+2026-11-01T02:56:02.1065117Z ASSERT reasoning_effort absent
+2026-11-01T02:56:02.1065699Z ASSERT chat_template_kwargs absent
+2026-11-01T02:56:02.1066247Z ASSERT think absent
+2026-11-01T02:56:02.1067249Z   [OK]          openai_compat         10   deepseek uses thinking object.
+2026-11-01T02:56:02.1068102Z ASSERT enabled thinking type
+2026-11-01T02:56:02.1068908Z ASSERT enabled reasoning split
+2026-11-01T02:56:02.1069495Z ASSERT reasoning_effort absent
+2026-11-01T02:56:02.1070061Z ASSERT chat_template_kwargs absent
+2026-11-01T02:56:02.1070636Z ASSERT default reasoning split
+2026-11-01T02:56:02.1071174Z ASSERT disabled thinking type
+2026-11-01T02:56:02.1071737Z ASSERT reasoning_split absent
+2026-11-01T02:56:02.1072282Z ASSERT tool_choice absent
+2026-11-01T02:56:02.1072806Z ASSERT toggle wire
+2026-11-01T02:56:02.1073297Z ASSERT replay policy
+2026-11-01T02:56:02.1074085Z   [OK]          openai_compat         11   minimax m3 uses adaptive thinking ...
+2026-11-01T02:56:02.1074915Z ASSERT delta.reasoning parsed
+2026-11-01T02:56:02.1075459Z ASSERT reported response id
+2026-11-01T02:56:02.1075991Z ASSERT reported model
+2026-11-01T02:56:02.1076792Z   [OK]          openai_compat         12   ollama cloud openai-compat streams...
+2026-11-01T02:56:02.1077569Z ASSERT toggle wire
+2026-11-01T02:56:02.1078043Z ASSERT replay policy
+2026-11-01T02:56:02.1079053Z ASSERT plain assistant reasoning is eligible on tool-enabled requests
+2026-11-01T02:56:02.1080003Z ASSERT tool-call assistant reasoning must replay
+2026-11-01T02:56:02.1080859Z ASSERT eligibility is not restricted to tool-call messages
+2026-11-01T02:56:02.1081570Z ASSERT typed high stays high
+2026-11-01T02:56:02.1082097Z ASSERT typed max stays max
+2026-11-01T02:56:02.1082614Z ASSERT typed low is unsupported
+2026-11-01T02:56:02.1083177Z ASSERT typed minimal omitted
+2026-11-01T02:56:02.1083733Z ASSERT ignored sampling params
+2026-11-01T02:56:02.1084605Z   [OK]          openai_compat         13   deepseek reasoning dialect semantics.
+2026-11-01T02:56:02.1089802Z ASSERT temperature absent
+2026-11-01T02:56:02.1090449Z ASSERT top_p absent
+2026-11-01T02:56:02.1091521Z   [OK]          openai_compat         14   deepseek suppresses ignored sampli...
+2026-11-01T02:56:02.1092298Z ASSERT temperature
+2026-11-01T02:56:02.1092754Z ASSERT top_p
+2026-11-01T02:56:02.1093505Z   [OK]          openai_compat         15   deepseek disabled thinking keeps s...
+2026-11-01T02:56:02.1101859Z ASSERT reasoning_content absent
+2026-11-01T02:56:02.1102536Z ASSERT request tools retain prior assistant reasoning
+2026-11-01T02:56:02.1110093Z ASSERT reasoning_content absent
+2026-11-01T02:56:02.1110804Z ASSERT request tools retain prior assistant reasoning
+2026-11-01T02:56:02.1111790Z   [OK]          openai_compat         16   deepseek replay depends on current...
+2026-11-01T02:56:02.1112609Z ASSERT reasoning_content
+2026-11-01T02:56:02.1113422Z   [OK]          openai_compat         17   qwen preserve replays reasoning_co...
+2026-11-01T02:56:02.1114244Z ASSERT reasoning is not visible content
+2026-11-01T02:56:02.1115104Z   [OK]          openai_compat         18   declared reasoning_content accumul...
+2026-11-01T02:56:02.1115870Z ASSERT thinking type
+2026-11-01T02:56:02.1116342Z ASSERT thinking keep
+2026-11-01T02:56:02.1116861Z ASSERT chat_template_kwargs absent
+2026-11-01T02:56:02.1117430Z ASSERT preserve_thinking absent
+2026-11-01T02:56:02.1118283Z   [OK]          openai_compat         19   thinking_object_keep_all axis uses...
+2026-11-01T02:56:02.1119249Z ASSERT toggle wire
+2026-11-01T02:56:02.1119730Z ASSERT replay policy
+2026-11-01T02:56:02.1120286Z ASSERT no tool-call replay requirement
+2026-11-01T02:56:02.1120902Z ASSERT reasoning_content
+2026-11-01T02:56:02.1121714Z   [OK]          openai_compat         20   thinking_object_keep_all axis repl...
+2026-11-01T02:56:02.1122503Z ASSERT replay policy
+2026-11-01T02:56:02.1123029Z ASSERT requires tool-call replay
+2026-11-01T02:56:02.1131323Z ASSERT reasoning_content absent
+2026-11-01T02:56:02.1132091Z ASSERT tool reasoning_content
+2026-11-01T02:56:02.1132889Z   [OK]          openai_compat         21   thinking_object_keep_all axis defa...
+2026-11-01T02:56:02.1133623Z ASSERT toggle wire
+2026-11-01T02:56:02.1134058Z ASSERT replay policy
+2026-11-01T02:56:02.1134590Z ASSERT requires tool-call replay
+2026-11-01T02:56:02.1135170Z ASSERT ignored sampling params
+2026-11-01T02:56:02.1135716Z ASSERT thinking absent
+2026-11-01T02:56:02.1143599Z ASSERT reasoning_content absent
+2026-11-01T02:56:02.1144166Z ASSERT tool reasoning_content
+2026-11-01T02:56:02.1145055Z   [OK]          openai_compat         22   kimi k2.6 defaults to tool-call re...
+2026-11-01T02:56:02.1150045Z ASSERT temperature absent
+2026-11-01T02:56:02.1150534Z ASSERT top_p absent
+2026-11-01T02:56:02.1151258Z   [OK]          openai_compat         23   kimi k2.6 omits fixed sampling wit...
+2026-11-01T02:56:02.1152052Z ASSERT replay policy
+2026-11-01T02:56:02.1152533Z ASSERT thinking type
+2026-11-01T02:56:02.1153005Z ASSERT thinking keep
+2026-11-01T02:56:02.1153528Z ASSERT chat_template_kwargs absent
+2026-11-01T02:56:02.1154396Z   [OK]          openai_compat         24   kimi k2.6 preserve requests keep all.
+2026-11-01T02:56:02.1155176Z ASSERT replay policy
+2026-11-01T02:56:02.1155650Z ASSERT thinking type
+2026-11-01T02:56:02.1156127Z ASSERT keep absent
+2026-11-01T02:56:02.1156911Z   [OK]          openai_compat         25   kimi k2.5 does not emit keep all.
+2026-11-01T02:56:02.1157672Z ASSERT toggle wire
+2026-11-01T02:56:02.1158144Z ASSERT replay policy
+2026-11-01T02:56:02.1158959Z ASSERT ignored sampling params
+2026-11-01T02:56:02.1159520Z ASSERT thinking absent
+2026-11-01T02:56:02.1160049Z ASSERT chat_template_kwargs absent
+2026-11-01T02:56:02.1160634Z ASSERT preserve_thinking absent
+2026-11-01T02:56:02.1161244Z ASSERT reasoning_content
+2026-11-01T02:56:02.1162066Z   [OK]          openai_compat         26   kimi latest always-preserved omits...
+2026-11-01T02:56:02.1162846Z ASSERT toggle wire
+2026-11-01T02:56:02.1163289Z ASSERT replay policy
+2026-11-01T02:56:02.1163739Z ASSERT thinking absent
+2026-11-01T02:56:02.1164240Z ASSERT chat_template_kwargs absent
+2026-11-01T02:56:02.1165079Z   [OK]          openai_compat         27   kimi latest highspeed uses k2.7 se...
+2026-11-01T02:56:02.1170065Z ASSERT thinking absent
+2026-11-01T02:56:02.1170795Z ASSERT temperature absent
+2026-11-01T02:56:02.1171311Z ASSERT top_p absent
+2026-11-01T02:56:02.1172114Z   [OK]          openai_compat         28   kimi latest omits fixed sampling p...
+2026-11-01T02:56:02.1172879Z ASSERT think true
+2026-11-01T02:56:02.1173392Z ASSERT chat_template_kwargs absent
+2026-11-01T02:56:02.1173952Z ASSERT thinking absent
+2026-11-01T02:56:02.1174467Z ASSERT reasoning_effort absent
+2026-11-01T02:56:02.1175245Z   [OK]          ollama                 0   qwen uses native think bool.
+2026-11-01T02:56:02.1175940Z ASSERT think absent
+2026-11-01T02:56:02.1176562Z   [OK]          ollama                 1   qwen unset omits think.
+2026-11-01T02:56:02.1177197Z ASSERT model
+2026-11-01T02:56:02.1177608Z ASSERT think true
+2026-11-01T02:56:02.1178062Z ASSERT thinking absent
+2026-11-01T02:56:02.1178788Z ASSERT reasoning_content absent
+2026-11-01T02:56:02.1179368Z ASSERT reasoning_effort absent
+2026-11-01T02:56:02.1179921Z ASSERT tool_stream absent
+2026-11-01T02:56:02.1180419Z ASSERT toggle wire
+2026-11-01T02:56:02.1181149Z   [OK]          ollama                 2   cloud GLM uses native think not ZA...
+2026-11-01T02:56:02.1181895Z ASSERT think absent
+2026-11-01T02:56:02.1182370Z ASSERT system role
+2026-11-01T02:56:02.1182933Z ASSERT system prompt starts with think token
+2026-11-01T02:56:02.1183997Z   [OK]          ollama                 3   gemma4 enabled uses chat template ...
+2026-11-01T02:56:02.1184756Z ASSERT think absent
+2026-11-01T02:56:02.1396047Z   [FAIL]        ollama                 4   chat_template_token uses catalog t...
+2026-11-01T02:56:02.1396998Z ASSERT names the offending model_id
+2026-11-01T02:56:02.1397635Z ASSERT mentions the required token
+2026-11-01T02:56:02.1398664Z   [OK]          ollama                 5   chat_template_token without token ...
+2026-11-01T02:56:02.1399488Z ASSERT think false
+2026-11-01T02:56:02.1400037Z ASSERT system prompt unchanged
+2026-11-01T02:56:02.1400848Z   [OK]          ollama                 6   gemma4 disabled uses native think ...
+2026-11-01T02:56:02.1401593Z ASSERT toggle wire
+2026-11-01T02:56:02.1402078Z ASSERT replay policy
+2026-11-01T02:56:02.1402709Z ASSERT native tool-call thinking replay required
+2026-11-01T02:56:02.1403397Z ASSERT no ignored sampling params
+2026-11-01T02:56:02.1404266Z   [OK]          ollama                 7   gemma4 reasoning dialect uses temp...
+2026-11-01T02:56:02.1405088Z ASSERT toggle wire
+2026-11-01T02:56:02.1405590Z ASSERT replay policy
+2026-11-01T02:56:02.1406139Z ASSERT xhigh effort stays exact
+2026-11-01T02:56:02.1406726Z ASSERT max effort stays exact
+2026-11-01T02:56:02.1407567Z   [OK]          native                 0   anthropic reasoning dialect preser...
+2026-11-01T02:56:02.1408345Z ASSERT thinking absent
+2026-11-01T02:56:02.1409111Z ASSERT effort
+2026-11-01T02:56:02.1409837Z   [OK]          native                 1   anthropic opus 5.5 sends effort al...
+2026-11-01T02:56:02.1413942Z   [FAIL]        native                 2   anthropic claude alias uses adapti...
+2026-11-01T02:56:02.1414708Z ASSERT thinking type
+2026-11-01T02:56:02.1415229Z ASSERT budget_tokens absent
+2026-11-01T02:56:02.1415794Z ASSERT output_config absent
+2026-11-01T02:56:02.1416653Z   [OK]          native                 3   anthropic sonnet 5 defaults to ada...
+2026-11-01T02:56:02.1417872Z ASSERT effort
+2026-11-01T02:56:02.1418320Z ASSERT format type
+2026-11-01T02:56:02.1419385Z   [OK]          native                 4   anthropic output_config merges for...
+2026-11-01T02:56:02.1426770Z ASSERT temperature absent
+2026-11-01T02:56:02.1427260Z ASSERT top_p absent
+2026-11-01T02:56:02.1427697Z ASSERT top_k stays
+2026-11-01T02:56:02.1428400Z   [OK]          native                 5   anthropic declared ignored samplin...
+2026-11-01T02:56:02.1432504Z ASSERT temperature
+2026-11-01T02:56:02.1432958Z ASSERT top_p
+2026-11-01T02:56:02.1448002Z   [OK]          native                 6   anthropic default keeps sampling f...
+2026-11-01T02:56:02.1449062Z ASSERT toggle wire
+2026-11-01T02:56:02.1449416Z ASSERT replay policy
+2026-11-01T02:56:02.1449881Z   [OK]          native                 7   gemini reasoning dialect uses thin...
+2026-11-01T02:56:02.1450347Z ASSERT temperature absent
+2026-11-01T02:56:02.1450802Z   [FAIL]        native                 8   gemini declared ignored sampling d...
+2026-11-01T02:56:02.1451235Z ASSERT temperature
+2026-11-01T02:56:02.1451496Z ASSERT topP
+2026-11-01T02:56:02.1451739Z ASSERT topK
+2026-11-01T02:56:02.1452137Z   [OK]          native                 9   gemini default keeps sampling fields.
+2026-11-01T02:56:02.1452646Z ASSERT budget rides max_completion_tokens
+2026-11-01T02:56:02.1453000Z ASSERT max_tokens absent
+2026-11-01T02:56:02.1453424Z   [OK]          native                10   chat budget field max_completion_t...
+2026-11-01T02:56:02.1453900Z ASSERT budget rides classic max_tokens
+2026-11-01T02:56:02.1454252Z ASSERT max_completion_tokens absent
+2026-11-01T02:56:02.1454714Z   [OK]          native                11   chat budget field default is class...
+2026-11-01T02:56:02.1455123Z ASSERT one tool
+2026-11-01T02:56:02.1455386Z ASSERT enum gone
+2026-11-01T02:56:02.1455654Z ASSERT vocabulary survives
+2026-11-01T02:56:02.1456095Z   [OK]          native                12   conformant tool schema drops enum ...
+2026-11-01T02:56:02.1456508Z ASSERT enum stays
+2026-11-01T02:56:02.1456920Z   [OK]          native                13   rich tool schema keeps enum by def...
+2026-11-01T02:56:02.1458165Z │ [FAIL]        ollama                 4   chat_template_token uses catalo...  │
+2026-11-01T02:56:02.1460499Z FAIL think absent
+2026-11-01T02:56:02.1460788Z    Expected: `true'
+2026-11-01T02:56:02.1461066Z    Received: `false'
+2026-11-01T02:56:02.1468366Z │ [FAIL]        native                 2   anthropic claude alias uses ada...  │
+2026-11-01T02:56:02.1470260Z Backend_anthropic.build_request: model "claude-sonnet-5-20260101" has no catalog-declared Anthropic thinking-control policy; an explicit enable_thinking value cannot be encoded safely
+2026-11-01T02:56:02.1481903Z │ [FAIL]        native                 8   gemini declared ignored samplin...  │
+2026-11-01T02:56:02.1483585Z FAIL temperature absent
+2026-11-01T02:56:02.1483890Z    Expected: `true'
+2026-11-01T02:56:02.1484286Z    Received: `false'
+2026-11-01T02:56:02.1489116Z 3 failures! in 0.040s. 51 tests run.
+2026-11-01T02:56:02.1759598Z [targeted] @@packages/agent_core/test/runtest-test_thinking_control_dialects: FAIL exit 1 in 45s
+2026-11-01T02:56:02.1771913Z ##[error]Process completed with exit code 1.

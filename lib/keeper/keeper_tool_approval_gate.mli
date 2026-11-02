@@ -46,6 +46,10 @@ val create :
     published: the bus feeds the canonical journal (RFC-0412), so what is
     published is what is kept.
 
+    A live question is published only after its exact waiter is registered.
+    The registry's [asked_at] is captured at registration, before publication;
+    the approval timeout starts after publication completes.
+
     [timeout_sec] bounds how long a call waits. It is required: a wait with no
     bound parks the turn for the life of the process when nobody is watching,
     and how long an operator gets is not something this module can know.
@@ -60,7 +64,12 @@ val create :
     there, and an operator's answer arriving after the wait is gone settles
     the identical retried call once instead of being dropped. The callback
     consults it before opening a new wait, so a remembered answer still
-    publishes the requested/settled pair — the stream shows the question was
+    publishes the requested/settled pair without registering a live waiter — the stream shows the question was
     raised and settled from the operator's earlier word. The memory is
     age-bounded ({!Keeper_late_approval.ttl_sec}): an answer too old to still
-    be the operator's moment is reaped, and the call is asked about again. *)
+    be the operator's moment is reaped, and the call is asked about again.
+    A remembered decision is consumed before publishing this pair. If
+    publication fails, it remains spent: it is never reinserted, registered
+    under the same ID or automatically acknowledged. A journaled Deliver is
+    delivery intent, not evidence of a completed tool effect; consume-only
+    uncertainty keeps its existing acknowledgement contract. *)

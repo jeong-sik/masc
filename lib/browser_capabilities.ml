@@ -30,7 +30,8 @@ let conditional ?action ?mode tool constraints =
   Conditional {invocation=invoke ?action ?mode tool;constraints}
 let ego_input_availability method_ support =
   match Browser_lane.Native_input.contract method_ with
-  | Browser_lane.Native_input.No_hold | Browser_lane.Native_input.Observed_receipt -> support
+  | Browser_lane.Native_input.No_hold | Browser_lane.Native_input.Observed_receipt
+  | Browser_lane.Native_input.Observed_native_window -> support
   | Browser_lane.Native_input.Unattestable_raw_hold reason -> Unsupported (Browser_lane.Native_input.message reason)
 let missing = Unsupported "No public browser tool implements this operation."
 let viewport_bounds = Printf.sprintf "width and height are CSS pixels between %d and %d, given together"
@@ -245,7 +246,7 @@ let support backend operation = match backend with
     | Native_workflow -> (match backend with
       | Connected Browser_lane.Ego_task_space -> conditional ~action:"workflow" Interact
           [observed;ego_agent_pages;"Known native Page calls run serially with SDK waits and one final snapshot. expectedUrl checks the starting page; navigation can change it afterward. Per-method options use native SDK names and milliseconds; selectionJson preserves string/object/array/null forms. No cumulative command window. Failures retain completed steps; never replay the sequence. Unconfirmed button/key release blocks further input.";
-           "The whole workflow is refused before any step if it contains unavailable raw holding input. Native fill replaces an observed field/editor; keyboard.insertText inserts literal text without key-down/up; keyboard.paste supports text/HTML."]
+           "Native keyboard.type preserves its void receipt and returns separate nativeCompletion only after its same-command native window verifies. An unconfirmed window stops before the next step and retains pending input. Typing consumes the native Page event buffer; later events are not a full history. Native fill replaces an observed field/editor; keyboard.insertText inserts literal text without key-down/up; keyboard.paste supports text/HTML."]
       | Connected (Browser_lane.Web_extension | Browser_lane.Webdriver_bidi) | Owned_gecko | Owned_chromium | Safari_unavailable ->
           Unsupported "Native workflows require an ego connection.")
     | Click_snapshot_target -> snapshot_target backend ~action:"click"
@@ -268,7 +269,8 @@ let support backend operation = match backend with
       | Connected Browser_lane.Ego_task_space -> ego_input_availability Browser_lane.Native_input.Keyboard_type
           (conditional ~action:"type_text" Interact
             [observed;"Requires current documentId and expectedUrl; stale document/URL is refused.";
-             "Requires the current enabled editable focus. Unicode text is literal; C0/DEL controls are refused.";ego_agent_pages])
+             "Requires the current enabled editable focus. Unicode text is literal; C0/DEL controls are refused.";
+             "One native typing call with separately verified nativeCompletion; its SDK return remains void. Interruption or missing native evidence retains pending input. Observe application acceptance; never replay uncertain typing.";ego_agent_pages])
       | Connected (Browser_lane.Web_extension | Browser_lane.Webdriver_bidi) | Owned_gecko | Owned_chromium | Safari_unavailable ->
       if native backend then conditional ~action:"type_text" Interact
         [observed;"Requires current documentId and expectedUrl; stale document/URL is refused.";"Requires the current enabled editable focus. Unicode text is literal; C0/DEL controls are refused, use press_key for Tab/Enter.";

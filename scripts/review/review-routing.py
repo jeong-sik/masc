@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Pure review routing from GitHub assignments and admitted source receipts.
+"""Pure review routing from GitHub assignments and submitted reviews.
 
 The plan proposes requests, never claims reviews have started or completed.
-All network reads and writes belong to the caller. Admission is supplied by the
-existing source-receipt guard; a formal approval alone does not establish it.
+All network reads and writes belong to the caller. A current-head approval is
+a GitHub account fact; it does not prove session independence or CI status.
 """
 from __future__ import annotations
 
@@ -30,20 +30,19 @@ def _load_review_helper(name, filename):
     return module
 
 
-formal_order = _load_review_helper("routing_formal_order", "review-formal-order.py")
-cr_ownership = _load_review_helper("routing_cr_ownership", "review-cr-ownership.py")
+github_reviews = _load_review_helper("routing_github_reviews", "github-reviews.py")
 
 
 class Reason(str, Enum):
     EXISTING_REQUEST = "existing_request"
+    AMBIGUOUS_REVIEW = "ambiguous_review"
     CHANGED_HEAD_CR = "changed_head_cr"
     AWAITING_AUTHOR = "awaiting_author"
     AWAITING_OWNER = "awaiting_owner"
     FIRST_REVIEW = "first_review"
     REVIEW_NEEDED = "review_needed"
-    INDEPENDENT_REVIEW = "independent_review"
-    COMMIT_IDENTITY_UNKNOWN = "commit_identity_unknown"
-    ADMITTED = "admitted"
+    NON_AUTHOR_REVIEW = "non_author_review"
+    APPROVED = "approved"
     DRAFT = "draft"
     CLOSED = "closed"
     NO_REVIEWER = "no_reviewer"
@@ -72,17 +71,7 @@ class ReviewState(str, Enum):
 class ReviewerEligibility(str, Enum):
     ELIGIBLE = "eligible"
     PR_AUTHOR = "pr_author"
-    COMMIT_ACTOR = "commit_actor"
     UNKNOWN = "unknown"
-
-
-class BlockerState(str, Enum):
-    FAIL = "FAIL"
-    HOLD = "HOLD"
-    COMMENT = "COMMENT"
-    UNKNOWN = "UNKNOWN"
-    INVALID = "INVALID"
-    UNTRUSTED = "UNTRUSTED"
 
 
 @dataclass(frozen=True)
@@ -109,16 +98,8 @@ class Review:
     actor_id: int
     review_id: int
     state: ReviewState
-    head: str
+    head: str | None
     submitted_at: datetime
-
-
-@dataclass(frozen=True)
-class Blocker:
-    actor: str | None
-    record_id: int | None
-    state: BlockerState
-    raw_json: str
 
 
 @dataclass(frozen=True)
@@ -130,15 +111,13 @@ class Pull:
     author_id: int
     requested_reviewers: tuple[str, ...]
     requested_teams: tuple[str, ...]
-    commit_accounts: tuple[str, ...]
-    commit_actor_ids: tuple[int, ...]
     account_ids: tuple[tuple[str, int], ...]
-    commit_identities_complete: bool
     reviews: tuple[Review, ...]
+    has_submitted_review: bool
     unresolved_cr_ids: frozenset[int]
-    admission: bool
-    independent_source_review: bool
-    blockers: tuple[Blocker, ...]
+    approval_ids: tuple[int, ...]
+    ambiguous_reviews: tuple[Review, ...]
+    superseded_change_requests: tuple[tuple[int, int, str], ...]
 
 
 @dataclass(frozen=True)
@@ -151,9 +130,11 @@ class Action:
     team: str | None = None
     actionable: bool = False
     reviewer_eligibility: ReviewerEligibility | None = None
-    independent_source_review: bool = False
+    approval_ids: tuple[int, ...] = ()
+    ambiguous_reviews: tuple[Review, ...] = ()
+    superseded_change_requests: tuple[tuple[int, int, str], ...] = ()
     review_ids: tuple[int, ...] = ()
-    blockers: tuple[Blocker, ...] = ()
+    review_authors: tuple[tuple[int, str], ...] = ()
 
     def to_json(self) -> dict:
         return {**self.identity.to_json(), "reason": self.reason.value,
@@ -162,9 +143,20 @@ class Action:
                 "team": self.team, "actionable": self.actionable,
                 "reviewer_eligibility": (self.reviewer_eligibility.value
                                          if self.reviewer_eligibility else None),
-                "independent_source_review": self.independent_source_review,
+                "approval_ids": list(self.approval_ids),
+                "ambiguous_review_ids": [r.review_id for r in self.ambiguous_reviews],
+                "ambiguous_reviews": [
+                    {"review_id": r.review_id, "account_id": r.actor_id,
+                     "observed_login": r.actor, "state": r.state.value,
+                     "head": r.head, "submitted_at": r.submitted_at.isoformat()}
+                    for r in self.ambiguous_reviews],
+                "superseded_change_requests": [
+                    {"review_id": rid, "account_id": actor_id, "observed_login": actor,
+                     "finding_resolution": "unverified"}
+                    for rid, actor_id, actor in self.superseded_change_requests],
                 "review_ids": list(self.review_ids),
-                "blockers": [json.loads(b.raw_json) for b in self.blockers]}
+                "review_authors": [{"account_id": actor_id, "observed_login": actor}
+                                   for actor_id, actor in self.review_authors]}
 
 
 @dataclass(frozen=True)
@@ -261,7 +253,7 @@ def parse_review(raw: object) -> Review | None:
         state = ReviewState(raw.get("state"))
     except (ValueError, TypeError) as exc:
         raise ValueError("unknown review state") from exc
-    if state is ReviewState.PENDING:
+    if state in (ReviewState.PENDING, ReviewState.COMMENTED):
         return None
     user = raw.get("user")
     if not isinstance(user, dict):
@@ -269,26 +261,9 @@ def parse_review(raw: object) -> Review | None:
     return Review(login(user.get("login"), "review.user.login"),
                   positive_id(user.get("id"), "review.user.id"),
                   positive_id(raw.get("id"), "review.id"), state,
-                  sha(raw.get("commit_id"), "review.commit_id"),
+                  (None if raw.get("commit_id") is None else
+                   sha(raw.get("commit_id"), "review.commit_id")),
                   instant(raw.get("submitted_at"), "review.submitted_at"))
-
-
-def parse_blocker(raw: object) -> Blocker:
-    if not isinstance(raw, dict):
-        raise ValueError("blocker must be an object")
-    if not {"actor", "id", "state"}.issubset(raw):
-        raise ValueError("blocker requires actor, id and state")
-    try:
-        state = BlockerState(raw.get("state"))
-    except (ValueError, TypeError) as exc:
-        raise ValueError("unknown blocker state") from exc
-    actor = raw.get("actor")
-    if actor is not None:
-        actor = login(actor, "blocker.actor")
-    rid = raw.get("id")
-    if rid is not None:
-        rid = positive_id(rid, "blocker.id")
-    return Blocker(actor, rid, state, frozen_json(raw, "blocker"))
 
 
 def parse_pull(raw: object) -> Pull:
@@ -296,9 +271,7 @@ def parse_pull(raw: object) -> Pull:
         raise ValueError("pull must be an object")
     required = {"number", "title", "url", "state", "draft", "author", "head",
                 "base_ref", "base_sha", "stack", "created_at", "requested_reviewers",
-                "requested_teams", "author_id", "account_ids", "commit_accounts",
-                "commit_actor_ids", "commit_identities_complete",
-                "reviews", "admission", "independent_source_review", "blockers"}
+                "requested_teams", "author_id", "account_ids", "reviews"}
     missing = required.difference(raw)
     if missing:
         raise ValueError("pull missing fields: " + ",".join(sorted(missing)))
@@ -316,19 +289,18 @@ def parse_pull(raw: object) -> Pull:
                         frozen_json(stack, "stack"),
                         instant(raw["created_at"], "created_at"))
     review_records = sequence(raw["reviews"], "reviews")
-    # Refuse an ambiguous latest formal decision just as the admission guard
-    # does. Retain each CR separately until its own owner replaces it.
-    formal_order.ordered_rows([r for r in review_records
-                               if isinstance(r, dict) and r.get("state") in formal_order.FORMAL])
-    unresolved = frozenset(rid for rid, _, _ in cr_ownership.outstanding([list(review_records)]))
+    # GitHub accounts, not body signatures, define the latest formal review.
+    review_state = github_reviews.evaluate(
+        {"number": identity.number, "user": {"id": raw["author_id"]},
+         "head": {"sha": identity.head}}, list(review_records), head=identity.head)
+    unresolved = frozenset(cr["id"] for cr in review_state["change_requests"])
+    has_submitted_review = any(r["state"] != "PENDING" for r in review_records)
     reviews = tuple(r for r in (parse_review(r) for r in review_records)
                     if r is not None)
-    review_names = {}
-    for review in reviews:
-        name = review.actor.casefold()
-        if review.actor_id in review_names and review_names[review.actor_id] != name:
-            raise ValueError("one review account has conflicting logins")
-        review_names[review.actor_id] = name
+    by_review_id = {r.review_id: r for r in reviews}
+    ambiguous = tuple(by_review_id[rid] for rid in review_state["ambiguous_review_ids"])
+    superseded = tuple((cr["id"], by_review_id[cr["id"]].actor_id, cr["login"])
+                       for cr in review_state["superseded_change_requests"])
     if not isinstance(raw["account_ids"], dict):
         raise ValueError("account_ids must be an object")
     accounts = tuple((login(name, "account_ids").casefold(), positive_id(value, "account_ids"))
@@ -338,24 +310,14 @@ def parse_pull(raw: object) -> Pull:
     author = login(raw["author"], "author")
     author_id = positive_id(raw["author_id"], "author_id")
     known = dict(accounts)
-    if known.get(author.casefold()) != author_id or any(
-            known.get(r.actor.casefold()) != r.actor_id for r in reviews):
-        raise ValueError("account identity does not match author or review")
-    commit_ids = tuple(positive_id(i, "commit_actor_ids")
-                       for i in sequence(raw["commit_actor_ids"], "commit_actor_ids"))
-    commit_names = unique_logins(raw["commit_accounts"], "commit_accounts")
-    if (len(commit_names) != len(commit_ids)
-            or any(known.get(name.casefold()) != actor_id
-                   for name, actor_id in zip(commit_names, commit_ids))):
-        raise ValueError("commit account identity mismatch")
+    if known.get(author.casefold()) != author_id:
+        raise ValueError("account identity does not match author")
     return Pull(identity, state, boolean(raw["draft"], "draft"), author, author_id,
                 unique_logins(raw["requested_reviewers"], "requested_reviewers"),
                 unique_logins(raw["requested_teams"], "requested_teams"),
-                commit_names, commit_ids, accounts,
-                boolean(raw["commit_identities_complete"], "commit_identities_complete"), reviews, unresolved,
-                boolean(raw["admission"], "admission"),
-                boolean(raw["independent_source_review"], "independent_source_review"),
-                tuple(parse_blocker(b) for b in sequence(raw["blockers"], "blockers")))
+                accounts, reviews, has_submitted_review, unresolved,
+                tuple(review_state["approval_ids"]), ambiguous,
+                superseded)
 
 
 def reviewer_eligibility(pull: Pull, account: str) -> ReviewerEligibility:
@@ -365,10 +327,6 @@ def reviewer_eligibility(pull: Pull, account: str) -> ReviewerEligibility:
         return ReviewerEligibility.UNKNOWN
     if actor_id == pull.author_id:
         return ReviewerEligibility.PR_AUTHOR
-    if actor_id in pull.commit_actor_ids:
-        return ReviewerEligibility.COMMIT_ACTOR
-    if not pull.commit_identities_complete:
-        return ReviewerEligibility.UNKNOWN
     return ReviewerEligibility.ELIGIBLE
 
 
@@ -405,7 +363,7 @@ def plan(snapshot: Sequence[dict], roster: Sequence[str]) -> Worklist:
     actions = []
 
     def add(pull: Pull, reason: Reason, assignment=Assignment.NONE, *, account=None,
-            team=None, actionable=False, reviews=(), blockers=()):
+            team=None, actionable=False, reviews=()):
         if account is not None:
             actor_key = key(account)
             canonical.setdefault(actor_key, account)
@@ -417,8 +375,11 @@ def plan(snapshot: Sequence[dict], roster: Sequence[str]) -> Worklist:
         actions.append(Action(pull.identity, reason, assignment, account=account,
                               account_id=account_id, team=team, actionable=actionable,
                               reviewer_eligibility=eligibility,
-                              independent_source_review=pull.independent_source_review,
-                              review_ids=tuple(r.review_id for r in reviews), blockers=tuple(blockers)))
+                              approval_ids=pull.approval_ids,
+                              ambiguous_reviews=pull.ambiguous_reviews,
+                              superseded_change_requests=pull.superseded_change_requests,
+                              review_ids=tuple(r.review_id for r in reviews),
+                              review_authors=tuple((r.actor_id, r.actor) for r in reviews)))
 
     # Ownership routes are planned first so first-review balancing includes the
     # requests needed to return changed code to the reviewers who refused it.
@@ -430,12 +391,10 @@ def plan(snapshot: Sequence[dict], roster: Sequence[str]) -> Worklist:
         requested = {key(actor) for actor in pull.requested_reviewers}
         crs = current_crs(pull)
         for actor in pull.requested_reviewers:
-            own = tuple(r for r in crs if key(r.actor) == key(actor))
-            owned = tuple(b for b in pull.blockers if b.actor is not None
-                          and key(b.actor) == key(actor))
+            own = tuple(r for r in crs if r.actor_id == key(actor))
             add(pull, Reason.EXISTING_REQUEST if active else inactive_reason,
                 Assignment.EXISTING_USER, account=actor, actionable=active,
-                reviews=own, blockers=owned)
+                reviews=own)
         for team in pull.requested_teams:
             add(pull, Reason.EXISTING_REQUEST if active else inactive_reason,
                 Assignment.EXISTING_TEAM, team=team, actionable=active)
@@ -443,57 +402,36 @@ def plan(snapshot: Sequence[dict], roster: Sequence[str]) -> Worklist:
             if not requested and not pull.requested_teams:
                 add(pull, inactive_reason)
             continue
-        # Exact-head structured refusals cannot be inferred resolved by a code
-        # change, formal approval, comment, or a different account's review.
-        blocker_groups: dict[int | str | None, list[Blocker]] = {}
-        for blocker in pull.blockers:
-            owner = key(blocker.actor) if blocker.actor is not None else None
-            blocker_groups.setdefault(owner, []).append(blocker)
-        for owner, blockers in blocker_groups.items():
-            if owner not in requested:
-                own = tuple(r for r in crs if key(r.actor) == owner)
-                same_head_ids = {r.review_id for r in own if r.head == pull.identity.head}
-                independent = tuple(b for b in blockers
-                                    if not (b.record_id in same_head_ids
-                                            and json.loads(b.raw_json).get("kind") == "review"))
-                if independent:
-                    add(pull, Reason.AWAITING_OWNER, account=blockers[0].actor,
-                        reviews=own, blockers=independent)
-        # A shared account may have several unresolved CRs. Keep every ID,
-        # but propose at most one request to that account.
+        ambiguous_owners = {r.actor_id for r in pull.ambiguous_reviews}
+        if pull.ambiguous_reviews:
+            # Keep conflicting GitHub decisions visible without treating an
+            # arbitrary order as approval or dispatching another request.
+            add(pull, Reason.AMBIGUOUS_REVIEW, reviews=pull.ambiguous_reviews)
+        # Only the latest formal decision on each account can be outstanding.
         cr_groups: dict[int, list[Review]] = {}
         for review in crs:
             cr_groups.setdefault(review.actor_id, []).append(review)
         for group in cr_groups.values():
             review = group[0]
-            owner = key(review.actor)
-            if owner in requested:
+            owner = review.actor_id
+            if owner in requested or owner in ambiguous_owners:
                 continue
             same_head = tuple(r for r in group if r.head == pull.identity.head)
             if same_head:
-                same_head_ids = {r.review_id for r in same_head}
-                own_blockers = tuple(b for b in blocker_groups.get(owner, ())
-                                     if b.record_id in same_head_ids
-                                     and json.loads(b.raw_json).get("kind") == "review")
                 add(pull, Reason.AWAITING_AUTHOR, account=pull.author,
-                    reviews=tuple(group), blockers=own_blockers)
-            elif owner in blocker_groups:
-                continue
-            elif not pull.admission and owner in pool_keys \
-                    and reviewer_eligibility(pull, review.actor) is ReviewerEligibility.ELIGIBLE:
+                    reviews=tuple(group))
+            elif review.head is not None and owner in pool_keys \
+                    and reviewer_eligibility(pull, canonical[owner]) is ReviewerEligibility.ELIGIBLE:
                 add(pull, Reason.CHANGED_HEAD_CR, Assignment.PROPOSED_USER,
-                    account=review.actor, actionable=True, reviews=tuple(group))
+                    account=canonical[owner], actionable=True, reviews=tuple(group))
             else:
-                add(pull, Reason.AWAITING_OWNER, account=review.actor, reviews=tuple(group))
-        # An existing request or CR stays owned even when that account also
-        # contributed to the current diff. It does not supply an independent
-        # reviewer, so propose one separately while retaining all old facts.
-        conflicting = any(reviewer_eligibility(pull, actor) in
-                          (ReviewerEligibility.PR_AUTHOR, ReviewerEligibility.COMMIT_ACTOR)
+                # The login in a review is historical. Without a current
+                # verified roster mapping, report its ID but do not assign it.
+                add(pull, Reason.AWAITING_OWNER, reviews=tuple(group))
+        # A PR-author request or CR remains visible but cannot approve its own PR.
+        conflicting = any(reviewer_eligibility(pull, actor) is ReviewerEligibility.PR_AUTHOR
                           for actor in pull.requested_reviewers)
-        conflicting |= any(reviewer_eligibility(pull, review.actor) in
-                           (ReviewerEligibility.PR_AUTHOR, ReviewerEligibility.COMMIT_ACTOR)
-                           for review in crs)
+        conflicting |= any(review.actor_id == pull.author_id for review in crs)
         independent_requested = any(reviewer_eligibility(pull, actor) is ReviewerEligibility.ELIGIBLE
                                     for actor in pull.requested_reviewers)
         unknown_requested = any(reviewer_eligibility(pull, actor) is ReviewerEligibility.UNKNOWN
@@ -501,22 +439,18 @@ def plan(snapshot: Sequence[dict], roster: Sequence[str]) -> Worklist:
         independent_proposed = any(a.assignment is Assignment.PROPOSED_USER
                                    and a.reviewer_eligibility is ReviewerEligibility.ELIGIBLE
                                    for a in actions[first_action:])
-        if (conflicting and not pull.admission and not pull.independent_source_review
+        if (conflicting and not pull.approval_ids and not pull.ambiguous_reviews
                 and not pull.requested_teams
                 and not independent_requested and not unknown_requested and not independent_proposed
                 and not any(r.head == pull.identity.head for r in crs)):
-            unassigned.append((pull, Reason.INDEPENDENT_REVIEW))
+            unassigned.append((pull, Reason.NON_AUTHOR_REVIEW))
             continue
-        if crs or pull.blockers or requested or pull.requested_teams:
+        if pull.approval_ids and not crs:
+            add(pull, Reason.APPROVED)
+        if crs or requested or pull.requested_teams or pull.ambiguous_reviews or pull.approval_ids:
             continue
-        if pull.admission:
-            add(pull, Reason.ADMITTED)
-        else:
-            unassigned.append((pull, Reason.REVIEW_NEEDED if pull.reviews else Reason.FIRST_REVIEW))
+        unassigned.append((pull, Reason.REVIEW_NEEDED if pull.has_submitted_review else Reason.FIRST_REVIEW))
     for pull, reason in unassigned:
-        if not pull.commit_identities_complete:
-            add(pull, Reason.COMMIT_IDENTITY_UNKNOWN)
-            continue
         eligible = [actor for actor in pool
                     if reviewer_eligibility(pull, actor) is ReviewerEligibility.ELIGIBLE]
         if not eligible:
@@ -526,8 +460,13 @@ def plan(snapshot: Sequence[dict], roster: Sequence[str]) -> Worklist:
                                              a.casefold()))
         add(pull, reason, Assignment.PROPOSED_USER, account=actor, actionable=True)
     rank = {reason: i for i, reason in enumerate(Reason)}
-    ordered = tuple(sorted(actions, key=lambda a: (rank[a.reason], a.identity.created_at,
-                                                  a.identity.number, a.account or "", a.team or "")))
+    # Changed-head CRs go back to their owners first. All other proposed
+    # reviews share one oldest-first class, so new PRs cannot starve older
+    # PRs whose earlier review no longer covers their current scope.
+    ordinary_review = {Reason.FIRST_REVIEW, Reason.REVIEW_NEEDED, Reason.NON_AUTHOR_REVIEW}
+    ordered = tuple(sorted(actions, key=lambda a: (
+        rank[Reason.FIRST_REVIEW] if a.reason in ordinary_review else rank[a.reason],
+        a.identity.created_at, a.identity.number, rank[a.reason], a.account or "", a.team or "")))
     loads = tuple(AccountLoad(canonical[actor_key], actor_key in pool_keys, outstanding[actor_key], proposed[actor_key],
                               tuple(a for a in ordered if a.account is not None
                                     and key(a.account) == actor_key))

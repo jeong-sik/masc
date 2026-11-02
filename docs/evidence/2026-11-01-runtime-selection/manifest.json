@@ -1,0 +1,81 @@
+{
+  "schema_version": 1,
+  "captured_at": "2026-11-01T04:13:30.842046+00:00",
+  "issue": 27898,
+  "pr": 47111,
+  "base": "29cdfab14394dd3dfb762eb836fa1873a64be64b",
+  "candidate_source_head": "1b4b399005ada1427cdf1bfe27a8087ed17f2b35",
+  "candidate_run": 41271778781,
+  "candidate_ref": "fix/runtime-selection-snapshot-20261101",
+  "selection": "UTF-8 BOM and ANSI removed; actual checkout, explicit suite, all actual cases, assertion failures and summaries selected in order; trailing whitespace removed; one final newline. Raw and selected hashes are distinct.",
+  "executions": [
+    {
+      "name": "baseline",
+      "workflow": "Test",
+      "run_id": 41271591841,
+      "job_id": 124745304457,
+      "url": "https://github.com/jeong-sik/masc/actions/runs/41271591841",
+      "head": "469c440fdb4ddfe046a592a49ff86f14f7264db7",
+      "ref": "fix/runtime-selection-snapshot-20261101",
+      "status": "completed",
+      "conclusion": "failure",
+      "event": "workflow_dispatch",
+      "created_at": "2026-11-01T04:03:53Z",
+      "updated_at": "2026-11-01T04:09:12Z",
+      "raw_capture": "artifacts/issues-oldest-20261101/runtime-selection/baseline.log",
+      "raw_bytes": 190969,
+      "raw_sha256": "ad64c33632312846712fb400c85642411ce45ee231d05190bb5d90c7fe625a4f",
+      "selected_capture": "baseline.txt",
+      "selected_bytes": 27338,
+      "selected_sha256": "6badf1ad9c08de14a607f7330e854304434f238defaea628eb992131b7b692a1",
+      "actual_pass": 174,
+      "actual_fail": 4,
+      "summaries": [
+        "2026-11-01T04:09:08.1925612Z 4 failures! in 2.373s. 178 tests run."
+      ]
+    },
+    {
+      "name": "final",
+      "workflow": "Test",
+      "run_id": 41271778781,
+      "job_id": 124745852445,
+      "url": "https://github.com/jeong-sik/masc/actions/runs/41271778781",
+      "head": "1b4b399005ada1427cdf1bfe27a8087ed17f2b35",
+      "ref": "fix/runtime-selection-snapshot-20261101",
+      "status": "completed",
+      "conclusion": "success",
+      "event": "workflow_dispatch",
+      "created_at": "2026-11-01T04:06:40Z",
+      "updated_at": "2026-11-01T04:12:48Z",
+      "raw_capture": "artifacts/issues-oldest-20261101/runtime-selection/final.log",
+      "raw_bytes": 322291,
+      "raw_sha256": "fa65ae699de36258130429f3ace831f29f7224400e84bcc621196a4f78e6069b",
+      "selected_capture": "final.txt",
+      "selected_bytes": 32378,
+      "selected_sha256": "3f78bbc05f17f2d156e9cbd0da254f8346ab65a6c799bc3b0018adee0027a4a1",
+      "actual_pass": 270,
+      "actual_fail": 0,
+      "suite_cases": {
+        "packages/agent_core/test/test_request_pricing_snapshot": 19,
+        "test/test_runtime_config_validity": 178,
+        "test/test_runtime_provider_auth_headers": 73
+      },
+      "summaries": [
+        "2026-11-01T04:08:49.3111878Z Test Successful in 0.048s. 19 tests run.",
+        "2026-11-01T04:12:41.4679200Z Test Successful in 2.329s. 178 tests run.",
+        "2026-11-01T04:12:41.9203542Z Test Successful in 0.232s. 73 tests run."
+      ]
+    }
+  ],
+  "source_review": {
+    "head": "1b4b399005ada1427cdf1bfe27a8087ed17f2b35",
+    "base": "29cdfab14394dd3dfb762eb836fa1873a64be64b",
+    "full_diff_sha256": "b0df37e8dfcf617d4a7d4f1ea8ade584bebe8a4fe7f7792de6be0bac721e789b",
+    "adversarial": "source-only PASS no P0-P2",
+    "response": "source-only PASS no P0-P2",
+    "formal_non_author_approval": false
+  },
+  "candidate_outcome": "completed SUCCESS; actual270PASS/0FAIL across3 explicitly selected suites",
+  "scope": "Post-materialization model policy and pricing facts/absence. Not runtime loader admission, a single transaction for all construction-time projections, dispatch credential-requirement capture, official-client policy or full issue completion.",
+  "executed_source_head": "1b4b399005ada1427cdf1bfe27a8087ed17f2b35"
+}

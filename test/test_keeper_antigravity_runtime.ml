@@ -1182,6 +1182,7 @@ let test_noncompletion_preserves_durable_identity_and_effect_fence () =
                 let failure_detail = ref None in
                 let usage_reports = ref [] in
                 let attempt = Keeper_antigravity_runtime.run
+                    ~configured_reasoning_effort:None ~turn_timeout_s:None
                     ~input_source:(Keeper_request_source.Keeper_history { trace_id = "antigravity-incomplete" })
                     ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 0 })
                     ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input ~runtime)
@@ -1635,7 +1636,7 @@ let test_spawn_failure_is_pre_dispatch () =
                   in
                   let reports = ref [] in
                   let attempt =
-                    Keeper_antigravity_runtime.run ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = "antigravity-pre-dispatch" })
+                    Keeper_antigravity_runtime.run ~configured_reasoning_effort:None ~turn_timeout_s:None ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = "antigravity-pre-dispatch" })
                     ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 0 })
                     ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input
                       ~runtime:(Runtime.get_runtime_by_id "antigravity.gemini" |> Option.get))
@@ -1736,7 +1737,7 @@ let test_blank_system_prompt_is_refused_not_defaulted () =
                   in
                   let reports = ref [] in
                   let attempt =
-                    Keeper_antigravity_runtime.run ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = "antigravity-blank-prompt" })
+                    Keeper_antigravity_runtime.run ~configured_reasoning_effort:None ~turn_timeout_s:None ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = "antigravity-blank-prompt" })
                     ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 0 })
                     ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input
                       ~runtime:(Runtime.get_runtime_by_id "antigravity.gemini" |> Option.get))
@@ -2232,7 +2233,7 @@ let test_losing_claim_cannot_publish_native_policy () =
            | Ok _ -> won := true
            | Error detail -> fail detail);
           Agent_core.Hooks.Continue)} in
-        let attempt = Keeper_antigravity_runtime.run ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = keeper_name })
+        let attempt = Keeper_antigravity_runtime.run ~configured_reasoning_effort:None ~turn_timeout_s:None ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = keeper_name })
           ~turn_start:(Keeper_carried_front.Turn_boundary {end_atom=0})
           ~accepts_image_input:false ~required_native_posture:Runtime_native_tools.Native_read
           ~runtime_id:"antigravity.gemini" ~keeper_name ~pre_tool_rejects:(ref []) ~base_path
@@ -2288,7 +2289,7 @@ let test_native_policy_failure_releases_claim () =
           Unix.unlink settings;
           Unix.mkdir settings 0o700;
           Agent_core.Hooks.Continue)} in
-        let attempt = Keeper_antigravity_runtime.run ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = keeper_name })
+        let attempt = Keeper_antigravity_runtime.run ~configured_reasoning_effort:None ~turn_timeout_s:None ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = keeper_name })
           ~turn_start:(Keeper_carried_front.Turn_boundary {end_atom=0})
           ~accepts_image_input:false ~required_native_posture:Runtime_native_tools.Native_read
           ~runtime_id:"antigravity.gemini" ~keeper_name ~pre_tool_rejects:(ref []) ~base_path
@@ -2578,7 +2579,7 @@ let test_actual_start_demotes_arguments_but_resume_keeps_them_held () =
           let before=F.snapshot () in
           let transmissions=ref [] in
           let run seed =
-            let attempt=Keeper_antigravity_runtime.run ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = keeper_name })
+            let attempt=Keeper_antigravity_runtime.run ~configured_reasoning_effort:None ~turn_timeout_s:None ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = keeper_name })
               ?argument_source:(F.source ~base_path ~keeper_name seed)
               ~accepts_image_input:false ~runtime_id:"antigravity.gemini" ~keeper_name
               ~pre_tool_rejects:(ref []) ~base_path ~goal:"Continue the work" ~goal_blocks:None
@@ -2754,7 +2755,7 @@ let test_original_result_survives_a_vendor_session_change () =
               ~parameters:[marker] (fun _ -> Ok
                 {Agent_core.Types.content="MASC_TOOL_RESULT";content_blocks=None;_meta=None}) in
             let run () =
-              let attempt = Keeper_antigravity_runtime.run
+              let attempt = Keeper_antigravity_runtime.run ~configured_reasoning_effort:None ~turn_timeout_s:None
                 ~input_source:(Keeper_request_source.Keeper_history {trace_id=keeper_name})
                 ~accepts_image_input:false ~runtime_id:"antigravity.gemini" ~keeper_name
                 ~pre_tool_rejects:(ref []) ~base_path ~goal:"Continue from the original result"

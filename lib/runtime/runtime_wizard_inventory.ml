@@ -104,11 +104,12 @@ let integrations_json ~include_credential_references (config : Runtime_schema.co
       let protocol = protocol_of_catalog_kind entry.kind in
       let task =
         match entry.default_model with
-        | None -> entry.capabilities.task
+        | None -> Option.bind entry.capabilities (fun capabilities -> capabilities.Llm_provider.Capabilities.task)
         | Some model_id ->
-          (match Llm_provider.Capabilities.for_provider_model_id
-                   ~wire:(Some entry.kind) ~provider:(Llm_provider.Model_catalog.Declared_provider entry.id) ~model_id with
-           | None -> entry.capabilities.task
+          (match Llm_provider.Capabilities.resolve_snapshot_request_policy
+                   ~snapshot:entry.declarations ~wire:entry.kind ~provider_id:entry.id ~model_id
+                   |> Llm_provider.Capabilities.request_policy_capabilities with
+           | None -> Option.bind entry.capabilities (fun capabilities -> capabilities.Llm_provider.Capabilities.task)
            | Some capabilities -> capabilities.task)
       in
       let supported = protocol <> None && task = None in
@@ -151,10 +152,12 @@ let account_scope (provider : Runtime_schema.provider) =
     | Ok home -> Some (scope home) | Error _ -> None) in
   match provider.api_format with
   | Codex_app_server_runtime ->
-      native (Runtime_codex_app_server.effective_account_home provider.account_home)
+      native (Runtime_official_account.resolve_home ~client:Codex ~declaration:provider.account_home
+        |> Result.to_option)
         (fun home -> Runtime_quota_window.scope_of_codex_home (Some home))
   | Claude_code_runtime ->
-      native (Runtime_claude_code.effective_account_home provider.account_home)
+      native (Runtime_official_account.resolve_home ~client:Claude_code ~declaration:provider.account_home
+        |> Result.to_option)
         (fun home -> Runtime_quota_window.scope_of_claude_code_home (Some home))
   | Muse_serve_runtime -> native provider.account_home Runtime_quota_window.scope_of_muse_home
   | Antigravity_cli_runtime ->
@@ -319,15 +322,15 @@ let binding_for_provider (cfg : Runtime_schema.config)
    from the provider base still reports the capabilities it will actually run
    with. A row without a positive declared context is not wizard-offerable —
    the wizard writes a runtime entry that needs a context — and stays out of
-   the list. The loaded catalog is installed as the global before resolving
-   capabilities, so entries and capabilities provably read one catalog
-   whatever a caller left in the global before this call. *)
+   the list. Entries and capabilities use the same explicitly admitted
+   embedded snapshot; a concurrent global replacement cannot mix their facts. *)
 let provider_model_rows (provider_id : string) : (Yojson.Safe.t, string) result =
-  match Llm_provider.Model_catalog.load_default () with
-  | Error message -> Error message
-  | Ok catalog ->
-    Llm_provider.Model_catalog.set_global catalog;
-    let providers = Catalog_binding.all () in
+  let open Result.Syntax in
+  let* catalog = Llm_provider.Model_catalog.load_default () in
+  let* snapshot = Llm_provider.Catalog_snapshot.of_catalogs
+      ~models:(Some catalog) ~providers:None
+    |> Result.map_error Llm_provider.Catalog_snapshot.error_to_string in
+    let providers = Catalog_binding.all_from_declarations snapshot in
     let provider =
       providers
       |> List.find_opt (fun (entry : Catalog_binding.t) -> String.equal entry.id provider_id)
@@ -350,12 +353,12 @@ let provider_model_rows (provider_id : string) : (Yojson.Safe.t, string) result 
               match entry.max_context_tokens with
               | Some context when context > 0 ->
                 (match
-                   Llm_provider.Capabilities.for_provider_model_id
-                     ~wire:(Some provider.kind)
-                     ~provider:(Llm_provider.Model_catalog.Declared_provider provider.id)
+                   Llm_provider.Capabilities.resolve_snapshot_request_policy
+                     ~snapshot ~wire:provider.kind ~provider_id:provider.id
                      ~model_id:
                        (Llm_provider.Model_identifiers.Model_id.to_string
                           entry.model_id)
+                   |> Llm_provider.Capabilities.request_policy_capabilities
                  with
                  | None -> None
                  | Some capabilities ->
@@ -389,7 +392,7 @@ let provider_model_rows (provider_id : string) : (Yojson.Safe.t, string) result 
                         ; ( "label"
                           , `String
                               (match entry.base_label with
-                               Some label -> label
+                               Some preset -> Llm_provider.Capability_preset.to_string preset
                                | None ->
                                  Llm_provider.Model_identifiers.Model_id.to_string
                                    entry.model_id) )

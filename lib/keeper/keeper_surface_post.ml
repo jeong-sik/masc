@@ -194,25 +194,30 @@ let message_matches_target target (message : Keeper_chat_store.chat_message) =
         | Surface_ref.Agent | Surface_ref.Broadcast | Surface_ref.Gate _ ) ) ->
     false
 
+module Roster_set = Set.Make (String)
+
 let validate_user_mentions_against_roster ~target ~messages mention_user_ids =
   if mention_user_ids = [] then Ok ()
   else
-    let roster = Hashtbl.create 8 in
-    List.iter
-      (fun (message : Keeper_chat_store.chat_message) ->
-         if
-           Keeper_chat_store.Role.equal message.role Keeper_chat_store.Role.User
-           && message_matches_target target message
-         then
-           match message.speaker with
-           | Some { speaker_id = Some id; _ } when String.trim id <> "" ->
-             Hashtbl.replace roster (String.trim id) ()
-           | Some { speaker_id = Some _; _ }
-           | Some { speaker_id = None; _ }
-           | None -> ())
-      messages;
+    let roster =
+      List.fold_left
+        (fun acc (message : Keeper_chat_store.chat_message) ->
+           if
+             Keeper_chat_store.Role.equal message.role Keeper_chat_store.Role.User
+             && message_matches_target target message
+           then
+             match message.speaker with
+             | Some { speaker_id = Some id; _ } ->
+               let trimmed = String.trim id in
+               if trimmed <> "" then Roster_set.add trimmed acc else acc
+             | Some { speaker_id = None; _ }
+             | None -> acc
+           else acc)
+        Roster_set.empty
+        messages
+    in
     let missing =
-      List.filter (fun id -> not (Hashtbl.mem roster id)) mention_user_ids
+      List.filter (fun id -> not (Roster_set.mem id roster)) mention_user_ids
     in
     match missing with
     | [] -> Ok ()

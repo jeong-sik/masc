@@ -210,13 +210,21 @@ val assert_input_reset : t -> generation:string -> (unit, string) result
     double-clicks, and selector drags without waypoints using [dragAndDrop],
     hold input until their declared SDK receipt proves release. A failure adds
     no synthetic mouse-up; a dialog or missing release proof preserves the same
-    release-uncertain state as raw drag. Only a declared object receipt without
-    a dialog settles the input. A refusal before the native action restores the
-    previous readiness, including its operator provenance. Coordinate and scene drags retain the observed
-    waypoint contract and require zero duration. They attempt the release in the
-    same run, but the mouse calls answer void, so the release is never confirmed:
-    the result is an unknown outcome and the input stays pending until the
-    operator's reset.
+    release-uncertain state. These receipt-backed methods require a declared
+    object receipt without a dialog. Raw [type_text] and workflow
+    [keyboard.type] retain the SDK's void return and carry separately verified
+    native-window completion. The same command, generation and canonical
+    source/current Page bind that evidence before retained Input settlement;
+    it does not attest physical input freshness or application acceptance.
+    The fixed producer stops before later workflow actions when its interval
+    is unconfirmed, and the Host independently checks it. Native event captures
+    remain private; public results contain only a safe [nativeCompletion].
+    Typing consumes this SDK process's Page event buffer for that check.
+    A proven unentered holding call can restore previous input readiness,
+    including operator provenance, without asserting that observation setup
+    had no effects. A workflow judges its complete entered holding prefix.
+    Coordinate, waypoint and scene-node raw drags are refused before input;
+    selector-to-selector native [dragAndDrop] remains receipt-backed.
     Unconfirmed release blocks further input on this peer; read/finish remain
     available. The private operator controls can record an explicit human
     check/reset assertion for this pending input generation and resume the

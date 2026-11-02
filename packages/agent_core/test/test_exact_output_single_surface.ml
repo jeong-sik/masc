@@ -102,6 +102,7 @@ let catalog_entry
 let catalog_fixture_toml entry =
   Printf.sprintf
     "[[providers]]\n\
+     capabilities_base = \"models_only\"\n\
      id = %S\n\
      kind = %S\n\
      base_url = %S\n\
@@ -710,7 +711,9 @@ let assert_absent json field =
 ;;
 
 let test_no_measure_one_post_and_wire_authority () =
-  let run ?(domain_schema = schema) ~id ~kind ~path ~response inspect =
+  let run ?(domain_schema = schema)
+        ?(json_schema_dialect = Capabilities.Openai_json_schema)
+        ~id ~kind ~path ~response inspect =
     let (provenance, plan_fingerprint, result), completion_posts, token_posts, captures =
       with_server ~response
       @@ fun ~sw:_ ~net ~clock ~base_url ->
@@ -720,7 +723,7 @@ let test_no_measure_one_post_and_wire_authority () =
           ~kind
           ~base_url
           ~request_path:path
-          ~capabilities:(capabilities ~native:true ~json:true)
+          ~capabilities:{ (capabilities ~native:true ~json:true) with json_schema_dialect }
           ()
       in
       with_catalog [ entry ]
@@ -834,6 +837,30 @@ let test_no_measure_one_post_and_wire_authority () =
                   |> EO.schema_fingerprint_to_string)
                  (EO.schema_fingerprint_to_string effective)))
        | None -> fail "OpenAI native schema must expose its wire fingerprint");
+  let annotated_domain =
+    `Assoc [ "type", `String "object"; "name", `String "audit_metadata"
+           ; "schema", `Assoc [ "type", `String "string" ]
+           ; "properties", `Assoc [ "name", `Assoc [ "type", `String "string" ] ]
+           ; "required", `List [ `String "name" ]; "additionalProperties", `Bool false ]
+  in
+  run
+    ~domain_schema:annotated_domain
+    ~json_schema_dialect:Capabilities.Json_object_schema
+    ~id:"cohere-domain-surface"
+    ~kind:Provider_config.OpenAI_compat
+    ~path:"/v1/chat/completions"
+    ~response:(openai_response content)
+    (fun provenance body ->
+       let format = Yojson.Safe.Util.member "response_format" body in
+       check bool "Cohere sends the entire raw domain schema" true
+         (format = `Assoc [ "type", `String "json_object"; "schema", annotated_domain ]);
+       match EO.plan_provenance_effective_schema_fingerprint provenance with
+       | Some effective ->
+         check string "Cohere effective schema describes the transmitted domain"
+           (EO.plan_provenance_source_schema_fingerprint provenance
+            |> EO.schema_fingerprint_to_string)
+           (EO.schema_fingerprint_to_string effective)
+       | None -> fail "Cohere native schema fingerprint missing");
   run
     ~id:"ollama-surface"
     ~kind:Provider_config.Ollama

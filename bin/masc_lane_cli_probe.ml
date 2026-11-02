@@ -111,8 +111,17 @@ let () =
 " config_path detail;
      exit 2
    | Ok () -> ());
-  let outcomes = Hashtbl.create 8 in
-  let bump key = Hashtbl.replace outcomes key (1 + Option.value ~default:0 (Hashtbl.find_opt outcomes key)) in
+  let module String_map = Map.Make (String) in
+  let outcomes = ref String_map.empty in
+  let bump key =
+    outcomes :=
+      String_map.update
+        key
+        (function
+          | Some count -> Some (count + 1)
+          | None -> Some 1)
+        !outcomes
+  in
   for trial = 1 to !trials do
     let started = Unix.gettimeofday () in
     let result =
@@ -147,12 +156,12 @@ let () =
       Printf.printf "%s %s trial=%d FAIL %.1fs %s\n%!" !lane !runtime trial elapsed detail
   done;
   let summary =
-    Hashtbl.fold (fun key count acc -> Printf.sprintf "%s=%d" key count :: acc) outcomes []
+    String_map.fold (fun key count acc -> Printf.sprintf "%s=%d" key count :: acc) !outcomes []
   in
   Printf.printf
     "SUMMARY lane=%s runtime=%s trials=%d %s\n%!"
     !lane
     !runtime
     !trials
-    (String.concat " " (List.sort compare summary))
+    (String.concat " " (List.sort String.compare summary))
 ;;

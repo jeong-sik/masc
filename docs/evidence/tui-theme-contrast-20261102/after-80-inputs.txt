@@ -1,0 +1,7 @@
+colon
+go_themes
+enter
+snapshot theme-after-80
+escape
+q
+quit

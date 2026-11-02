@@ -85,8 +85,14 @@ let of_json json =
     let* button = button_of_string name in
     let* label = nonempty (List.assoc "label" item) in
     let* keys = match List.assoc "keys" item with
-      | `List (_::_ as items) -> List.fold_right (fun item rest ->
-          let* key = nonempty item in let* rest = rest in Ok (key::rest)) items (Ok [])
+      | `List (_::_ as items) ->
+        let rec loop acc = function
+          | [] -> Ok (List.rev acc)
+          | item :: rest ->
+            let* key = nonempty item in
+            loop (key :: acc) rest
+        in
+        loop [] items
       | _ -> Error "pad keys must be a nonempty array" in
     if List.mem_assoc button layout then Error "duplicate pad button"
     else Ok ((button,{keys;label})::layout)) (Ok []) items in

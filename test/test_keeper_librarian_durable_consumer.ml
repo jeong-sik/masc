@@ -854,7 +854,7 @@ let test_committed_wide_range_recovers_before_retry_narrowing () =
    that follow must reach the end of turn 3 without a model call: turn 2
    through the snapshot, which outlives the receipt the WAL replaced, and
    turn 3 through that receipt. *)
-let test_memory_the_continuity_round_saved_is_not_sent_again () =
+let test_memory_the_continuity_round_saved_is_not_sent_again ~batched () =
   with_workspace @@ fun config ->
   let module Continuity = Masc.Keeper_librarian_continuity in
   let module Current = Masc.Keeper_memory_os_current in
@@ -870,7 +870,8 @@ let test_memory_the_continuity_round_saved_is_not_sent_again () =
   let continuity_saves ~publish =
     let prepared =
       match Continuity.prepare ~config ~keeper_name ~trace_id () with
-      | Ok (Some prepared) -> prepared
+      | Ok (Some prepared) ->
+        if batched then prepared else Continuity.oldest_completed_turn prepared
       | Ok None -> fail "the continuity round found no completed unit"
       | Error detail -> failf "continuity prepare: %s" detail
     in
@@ -914,10 +915,14 @@ let test_memory_the_continuity_round_saved_is_not_sent_again () =
    | Consumer.Baseline_advanced _
    | Consumer.Official_advanced _
    | Consumer.Progress_advanced _ -> fail "the failing durable round advanced");
-  check int "the continuity round saves and publishes turn 2" 2
-    (continuity_saves ~publish:true);
-  check int "the continuity round saves turn 3 and stops before publishing" 3
-    (continuity_saves ~publish:false);
+  if batched then
+    check int "one Memory receipt covers both completed turns before W publication" 3
+      (continuity_saves ~publish:false)
+  else (
+    check int "the continuity round saves and publishes turn 2" 2
+      (continuity_saves ~publish:true);
+    check int "the continuity round saves turn 3 and stops before publishing" 3
+      (continuity_saves ~publish:false));
   let sent = ref [] in
 
     let commit original =
@@ -3576,7 +3581,7 @@ let test_runtime_checkpoint_memory_floor ?native case () =
   let expected_calls = match native with
     | Some scenario -> if native_descent_succeeds scenario then 4 else List.length native_answers
     | None -> match case with
-    | Unknown_checkpoint_refusal -> 1 | Cli_tail_checkpoint_refusal -> 2
+    | Unknown_checkpoint_refusal | Cli_tail_checkpoint_refusal -> 1
     | Checkpoint_holes_without_observations -> 3 | All_checkpoint_holes -> 5
     | Partial_checkpoint_hole | Retired_checkpoint_hole | Late_checkpoint_failure
     | Rewritten_checkpoint_source | Appended_checkpoint_suffix | Restarted_checkpoint_history
@@ -3585,7 +3590,7 @@ let test_runtime_checkpoint_memory_floor ?native case () =
   check int "only declared API slots receive HTTP generation requests"
     (if Option.is_some native then 0 else expected_calls) (F.post_count server);
   check int "only the declared CLI tail is dispatched and never treated as proven API exhaustion"
-    (if Option.is_some native then expected_calls else if case=Cli_tail_checkpoint_refusal then 2 else 0) !cli_calls;
+    (if Option.is_some native then expected_calls else if case=Cli_tail_checkpoint_refusal then 1 else 0) !cli_calls;
   let contains ~sub text =
     let rec at index = index+String.length sub<=String.length text
       && (String.sub text index (String.length sub)=sub || at (index+1)) in
@@ -3609,7 +3614,9 @@ let test_runtime_checkpoint_memory_floor ?native case () =
     (match result with
      | Ok (Consumer.Memory_not_committed (_::_ as reports)) ->
        (match native with
-        | None -> ()
+        | None -> if case=Cli_tail_checkpoint_refusal then
+          check bool "an opaque native tail vetoes the earlier API capacity witness" false
+            (Keeper_librarian_runtime.may_descend_messages reports)
         | Some scenario ->
           check bool "aggregate native evidence blocks message descent" false
             (Keeper_librarian_runtime.may_descend_messages reports);
@@ -4653,7 +4660,9 @@ let () =
         ; test_case "committed wide range repairs before retry narrowing" `Quick
             test_committed_wide_range_recovers_before_retry_narrowing
         ; test_case "Memory the continuity round saved is not sent again" `Quick
-            test_memory_the_continuity_round_saved_is_not_sent_again
+            (test_memory_the_continuity_round_saved_is_not_sent_again ~batched:false)
+        ; test_case "batched continuity Memory receipt prevents repeated judgement before W save" `Quick
+            (test_memory_the_continuity_round_saved_is_not_sent_again ~batched:true)
         ; test_case "receipt does not cross a restarted repeated endpoint" `Quick
             test_receipt_does_not_cross_restarted_history_with_repeated_endpoint
         ; test_case "historical range does not borrow current task" `Quick

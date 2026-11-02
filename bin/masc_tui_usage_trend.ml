@@ -30,9 +30,14 @@ let utc_day at = int_of_float (floor (at /. seconds_per_day))
    reaches; the chart's own table is the one glyph set. *)
 let top_level = 7
 
-let mark share =
+let reported_zero = function
+  | Masc.Tui_decode_usage.Utilization_fraction value -> value = 0.0
+  | Utilization_percent value -> value = 0
+  | Utilization_usd { used; _ } -> used = 0.0
+
+let mark value share =
   if share < 0.0 then "↓" else if share > 1.0 then "↑" else
-  if share = 0.0 then "0" else
+  if reported_zero value then "0" else
   let clamped = Float.min 1.0 (Float.max 0.0 share) in
   Masc_tui_chart.sparkline ~min:0 ~max:top_level
     [ int_of_float (floor (clamped *. float_of_int top_level)) ]
@@ -88,7 +93,7 @@ let of_history ~share (history : Masc.Tui_decode_usage.provider_usage_history) =
              | None -> no_report_mark
              | Some { report = Reported_no_windows; _ } -> empty_report_mark
              | Some { report = Measured (_, None); _ } -> "$"
-             | Some { report = Measured (_, Some share); _ } -> mark share) samples |> String.concat "" in
+             | Some { report = Measured (value, Some share); _ } -> mark value share) samples |> String.concat "" in
            { scope_id; kind; limit_id; marks; samples;
              reported_days = Day_map.cardinal reported })
   in
@@ -98,6 +103,12 @@ let of_history ~share (history : Masc.Tui_decode_usage.provider_usage_history) =
     rows }
 
 let latest row = List.find_map Fun.id (List.rev row.samples)
+
+let dated_samples trend row =
+  let first_day = utc_day trend.generated_at - List.length row.samples + 1 in
+  List.mapi (fun offset sample ->
+    (Unix.gmtime (float_of_int (first_day + offset) *. seconds_per_day), sample))
+    row.samples
 
 (* Five braille rows of line over the fixed 0-100% scale: twenty dot-levels.
    The rows set drawing resolution only; the full limit stays 100%, never
@@ -136,17 +147,19 @@ let point_of_sample = function
       else if share > 0.0 then Some { clipped = 1.0; above = true }
       else Some { clipped = 0.0; above = false }
 
+let axis_cells = 7
+
+let compact ~width row =
+  let days = List.length row.samples in
+  width > 0 && (days = 0 || width < axis_cells + (days * 2))
+
 let plot ~width trend row =
-  let axis_cells = 7 in
   let days = List.length row.samples in
   if width <= 0 then []
-  else if days = 0 || width < axis_cells + (days * 2) then
+  else if compact ~width row then
     let marks = List.map (function
       | None -> no_report_mark
-      | Some {report = Measured (_, Some share); _} when share < 0.0 -> "↓"
-      | Some {report = Measured (_, Some share); _} when share = 0.0 -> "0"
-      | Some {report = Measured (_, Some share); _} when share > 1.0 -> "↑"
-      | Some {report = Measured (_, Some share); _} -> mark share
+      | Some {report = Measured (value, Some share); _} -> mark value share
       | Some {report = Measured (_, None); _} -> "$"
       | Some {report = Reported_no_windows; _} -> empty_report_mark) row.samples |> String.concat "" in
     Masc_tui_message_layout.wrap_words ~max_cells:width (marks ^ " (daily levels; · no report)")
@@ -250,13 +263,12 @@ let plot ~width trend row =
     let baseline = "  0% └ " ^ (List.map (function
       | None -> pad no_report_mark
       | Some {report = Measured (_, Some share); _} when share < 0.0 -> pad "↓"
-      | Some {report = Measured (_, Some share); _} when share = 0.0 -> pad "0"
+      | Some {report = Measured (value, Some _); _} when reported_zero value -> pad "0"
       | Some {report = Measured (_, None); _} -> pad "$"
       | Some {report = Reported_no_windows; _} -> pad empty_report_mark
       | Some {report = Measured (_, Some _); _} -> pad "─") row.samples |> String.concat "") in
-    let first_day = utc_day trend.generated_at - days + 1 in
-    let dates = List.init days (fun offset ->
-      let day = Unix.gmtime (float_of_int (first_day + offset) *. seconds_per_day) in
+    let dates = List.map (fun (day, _) ->
       Printf.sprintf "%02d%s" day.Unix.tm_mday (String.make (max 0 (step - 2)) ' '))
+      (dated_samples trend row)
       |> String.concat "" in
     bands @ [baseline; " UTC   " ^ dates]

@@ -220,8 +220,8 @@ let test_native_effort_requires_reasoning_support () =
           [ "model_id", `String "native-effort-fixture"
           ; "supports_reasoning", `Bool supports_reasoning
           ; "accepted_reasoning_efforts", `List [ `String "high" ] ] ] ] in
-    let capabilities = match Capability_manifest.of_json manifest |> Result.map Capability_manifest.entries with
-      | Ok [ entry ] -> Capabilities.apply_manifest_entry entry
+    let capabilities = match Capability_manifest.of_json manifest |> Result.map (fun input -> Model_catalog.model_entries (Model_catalog.with_model_overrides Model_catalog.empty input)) with
+      | Ok [ entry ] -> Capabilities.apply_catalog_entry ~provider_entry:None ~wire:None entry
       | Ok _ -> fail "expected one capability declaration"
       | Error detail -> fail detail in
     let config = Provider_config.make
@@ -471,7 +471,7 @@ let test_output_schema () =
       ; "required", `List [ `String "answer" ]
       ]
   in
-  let config = gemini_config ~response_format:(Types.JsonSchema schema) () in
+  let config = gemini_config ~response_format:(Types.JsonSchema (Types.Raw_schema schema)) () in
   let messages = [ Types.user_msg "Return structured JSON." ] in
   let body = Backend_gemini.build_request ~config ~messages () in
   let json = parse_body body in

@@ -2,7 +2,13 @@ module Store = Lane_addon_store
 module Owner = Lane_addon_tool_request_owner
 module Progress = Lane_addon_request_progress
 module Digests = Set.Make (String)
-module Body_keys = Set.Make (struct type t = string * string let compare = Stdlib.compare end)
+module Body_keys = Set.Make (struct
+  type t = string * string
+
+  let compare (a1, b1) (a2, b2) =
+    let c = String.compare a1 a2 in
+    if c <> 0 then c else String.compare b1 b2
+end)
 open Result.Syntax
 
 type archive = Archive_not_needed | Archive_read

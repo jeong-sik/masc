@@ -357,61 +357,76 @@ let observe_turn ~keeper_name ~usage () =
    [ordinal] counts every ToolUse block, not only the offered ones: the window
    measures distance back through the conversation, and a built-in call fills
    the conversation the same way an attached one does. *)
+module Tool_name_set = Set.Make (String)
+
 let carry_from_history ~carry_window ~entries history =
-  (* One membership table for the offering rather than a scan per block:
+  (* One membership set for the offering rather than a scan per block:
      [observe] runs on every ToolUse block in the whole history, built-ins
      included, and history is not pruned, so a scan here is the attached list
      (145 tools on the largest measured Keeper) times the conversation. *)
-  let offered_names : (string, unit) Hashtbl.t = Hashtbl.create 64 in
-  List.iter (fun (entry : entry) -> Hashtbl.replace offered_names entry.name ()) entries;
-  let offered name = Hashtbl.mem offered_names name in
+  let offered_names =
+    List.fold_left
+      (fun acc (entry : entry) -> Tool_name_set.add entry.name acc)
+      Tool_name_set.empty
+      entries
+  in
+  let offered name = Tool_name_set.mem name offered_names in
   (* Name and the ordinal of its most recent call. A list because the largest
      carried set measured over three days was 41 tools. *)
-  let carried : (string * int) list ref = ref [] in
-  let ever : string list ref = ref [] in
-  let ordinal = ref 0 in
-  let observe name =
-    incr ordinal;
-    if offered name
-    then begin
-      if not (List.exists (String.equal name) !ever) then ever := name :: !ever;
-      let others =
-        List.filter (fun (carried_name, _) -> not (String.equal carried_name name)) !carried
+  let observe (carried, ever_set, ever_rev, ordinal) name =
+    let ordinal = ordinal + 1 in
+    if not (offered name)
+    then carried, ever_set, ever_rev, ordinal
+    else (
+      let ever_set, ever_rev =
+        if Tool_name_set.mem name ever_set
+        then ever_set, ever_rev
+        else Tool_name_set.add name ever_set, name :: ever_rev
       in
-      (* [others] is [!carried] without [name], so it is shorter exactly when
+      let others =
+        List.filter (fun (carried_name, _) -> not (String.equal carried_name name)) carried
+      in
+      (* [others] is [carried] without [name], so it is shorter exactly when
          the carry already held it. That is the test for whether this call
          grows the array, and it is true again for a name the window dropped
          earlier -- which is what keeps a re-used name from re-entering the
          carry without the rest of it being measured. *)
-      let grows = List.compare_lengths others !carried = 0 in
-      let grown = (name, !ordinal) :: others in
-      carried
-        := (if grows && carry_window > 0
-            then List.filter (fun (_, seen) -> !ordinal - seen <= carry_window) grown
-            else grown)
-    end
+      let grows = List.compare_lengths others carried = 0 in
+      let grown = (name, ordinal) :: others in
+      let carried =
+        if grows && carry_window > 0
+        then List.filter (fun (_, seen) -> ordinal - seen <= carry_window) grown
+        else grown
+      in
+      carried, ever_set, ever_rev, ordinal)
   in
-  List.iter
-    (fun (message : Agent_core.Types.message) ->
-       List.iter
-         (fun (block : Agent_core.Types.content_block) ->
-            match block with
-            | Agent_core.Types.ToolUse { name; _ } -> observe name
-            | Agent_core.Types.Text _
-            | Agent_core.Types.Thinking _
-            | Agent_core.Types.RedactedThinking _
-            | Agent_core.Types.ToolResult _
-            | Agent_core.Types.Image _
-            | Agent_core.Types.Document _
-            | Agent_core.Types.ReasoningDetails _
-            | Agent_core.Types.Audio _ -> ())
-         message.Agent_core.Types.content)
-    history;
-  let carried_names = List.map (fun (carried_name, _) -> carried_name) !carried in
-  let held name = List.exists (String.equal name) carried_names in
+  let carried, _ever_set, ever_rev, _ordinal =
+    List.fold_left
+      (fun acc (message : Agent_core.Types.message) ->
+         List.fold_left
+           (fun acc (block : Agent_core.Types.content_block) ->
+              match block with
+              | Agent_core.Types.ToolUse { name; _ } -> observe acc name
+              | Agent_core.Types.Text _
+              | Agent_core.Types.Thinking _
+              | Agent_core.Types.RedactedThinking _
+              | Agent_core.Types.ToolResult _
+              | Agent_core.Types.Image _
+              | Agent_core.Types.Document _
+              | Agent_core.Types.ReasoningDetails _
+              | Agent_core.Types.Audio _ -> acc)
+           acc
+           message.Agent_core.Types.content)
+      ([], Tool_name_set.empty, [], 0)
+      history
+  in
+  let carried_names = List.map (fun (carried_name, _) -> carried_name) carried in
+  let held_set = Tool_name_set.of_list carried_names in
   (* Ran at some point in this conversation and not carried now. The only
      input an operator has for deciding whether the window is too tight. *)
-  let dropped = List.filter (fun name -> not (held name)) (List.rev !ever) in
+  let dropped =
+    List.filter (fun name -> not (Tool_name_set.mem name held_set)) (List.rev ever_rev)
+  in
   carried_names, dropped
 ;;
 

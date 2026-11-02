@@ -109,11 +109,11 @@ let test_publication_retains_sources_until_release () =
 
 let claude_lane =
   Runtime_execution.Claude_code
-    { cli_path = "claude"; account_home = None; model = None; timeout_s = 1.0 }
+    { cli_path = "claude"; account_home = Masc_test_deps.claude_account (); model = None; timeout_s = 1.0 }
 
 let codex_lane =
   Runtime_execution.Codex_app_server
-    { cli_path = "codex"; account_home = None; model = None; timeout_s = 1.0 }
+    { cli_path = "codex"; account_home = Masc_test_deps.codex_account (); model = None; timeout_s = 1.0 }
 
 let antigravity_lane =
   Runtime_execution.Antigravity_cli

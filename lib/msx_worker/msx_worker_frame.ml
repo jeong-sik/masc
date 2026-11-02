@@ -6,17 +6,22 @@
 let players_window_sec = 60
 let players_window_frames = players_window_sec * Msx_lane.frames_per_second
 
+module String_map = Map.Make (String)
+
 let recent_players_of ~now entries =
-  let last : (string, int) Hashtbl.t = Hashtbl.create 8 in
-  List.iter
-    (fun (e : Msx_lane.entry) ->
-      Hashtbl.replace last e.Msx_lane.who e.Msx_lane.at_frame)
-    entries;
-  Hashtbl.fold
+  let last =
+    List.fold_left
+      (fun acc (e : Msx_lane.entry) ->
+        String_map.add e.Msx_lane.who e.Msx_lane.at_frame acc)
+      String_map.empty entries
+  in
+  String_map.fold
     (fun who f acc ->
       if now - f <= players_window_frames then (who, f) :: acc else acc)
     last []
-  |> List.sort (fun (_, a) (_, b) -> compare b a)
+  |> List.sort (fun (w1, a) (w2, b) ->
+       let c = Int.compare b a in
+       if c <> 0 then c else String.compare w1 w2)
 ;;
 
 (* The lane owns immutable RGB snapshots and reuses their identity until a

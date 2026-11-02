@@ -4,10 +4,12 @@ type observe_error =
   | Transport_failure of string
   | Http_refusal of { status : int; detail : string }
   | Unattested of { status : int; detail : string }
+  | Invalid_response of { status : int; detail : string }
 
 type stop_reason =
   | Http_status of int
   | Unattested_response of int
+  | Invalid_stream_response of int
   | Unexpected_error
 (** Keep the actual status and whether workspace attestation was missing;
     [Unexpected_error] names a failure outside the connection loop. *)

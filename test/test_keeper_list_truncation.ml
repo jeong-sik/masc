@@ -137,7 +137,8 @@ let list_length json key =
 
 (* Run masc_keeper_list against a workspace seeded with [names], through the
    same dispatch an MCP client and the HTTP route use. *)
-let keeper_list ?(before_list = fun _ -> ()) ?after_list ~names ~args f =
+let keeper_list ?(before_list = fun _ -> ()) ?after_list ?after_list_with_args
+    ?after_list_with_dispatch ~names ~args f =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   ensure_runtime ();
@@ -166,15 +167,88 @@ let keeper_list ?(before_list = fun _ -> ()) ?after_list ~names ~args f =
             Masc_test_deps.non_runtime_publication_recovery_provider
         }
       in
-      let read () = match Keeper_tool_surface.dispatch ctx ~name:"masc_keeper_list" ~args with
+      let dispatch args = match Keeper_tool_surface.dispatch ctx ~name:"masc_keeper_list" ~args with
         | None -> fail "masc_keeper_list did not dispatch"
-        | Some result ->
+        | Some result -> result in
+      let read_with_args args =
+          let result = dispatch args in
           let body = Tool_result.message result in
           match Yojson.Safe.from_string body with
           | exception Yojson.Json_error error -> failf "masc_keeper_list returned invalid JSON: %s" error
           | json -> json in
+      let read () = read_with_args args in
       f (read ());
-      Option.iter (fun observe -> observe config read) after_list)
+      Option.iter (fun observe -> observe config read) after_list;
+      Option.iter (fun observe -> observe config read_with_args) after_list_with_args;
+      Option.iter (fun observe -> observe dispatch) after_list_with_dispatch)
+;;
+
+let test_invalid_fresh_tool_argument_is_rejected () =
+  keeper_list ~names:[] ~args:(`Assoc [])
+    ~after_list_with_dispatch:(fun dispatch ->
+      List.iter (fun fields ->
+        match dispatch (`Assoc fields) with
+        | Tool_result.Failed _ -> ()
+        | Tool_result.Completed _ | Tool_result.Deferred _ ->
+            fail "invalid freshness argument was accepted")
+        [ [ "fresh", `String "true" ]; [ "fresh", `Null ]
+        ; [ "fresh", `Bool true; "fresh", `Bool false ] ])
+    (fun _ -> ())
+;;
+
+let test_fresh_roster_reads_new_names_without_changing_shared_cache () =
+  Masc_test_deps.with_process_env "MASC_KEEPER_LIST_CACHE_TTL_S" (Some "3600") @@ fun () ->
+  let args fresh = `Assoc [ "detailed", `Bool false; "fresh", `Bool fresh ] in
+  keeper_list ~names:[ "alpha" ] ~args:(args false)
+    ~after_list_with_args:(fun config read ->
+      seed_keepers config [ "beta" ];
+      check int "ordinary read still has the cached census" 1
+        (int_field (read (args false)) "total");
+      let fresh = read (args true) in
+      check int "fresh read sees the newly persisted keeper" 2
+        (int_field fresh "total");
+      check bool "fresh read certifies cache bypass" true
+        (Json_util.assoc_member_opt "projection_cache_bypassed" fresh = Some (`Bool true));
+      check int "fresh read did not replace the shared cached census" 1
+        (int_field (read (args false)) "total");
+      seed_keepers config [ "gamma" ];
+      check int "another fresh read performs another census" 3
+        (int_field (read (args true)) "total"))
+    (fun json -> check int "initial census" 1 (int_field json "total"))
+;;
+
+let test_fresh_roster_reads_lifecycle_transition () =
+  Masc_test_deps.with_process_env "MASC_KEEPER_LIST_CACHE_TTL_S" (Some "3600") @@ fun () ->
+  let args fresh = `Assoc [ "detailed", `Bool true; "fresh", `Bool fresh ] in
+  let running json =
+    match Tui_decode.decode_keeper_runtime_list json with
+    | Ok ([row], [], false, 1, _) -> Tui_decode.keeper_phase_is_running row.kr_phase
+    | Ok _ -> fail "expected one complete typed Keeper row"
+    | Error error -> failf "roster did not decode: %s" error in
+  keeper_list ~names:[ "alpha" ] ~args:(args false)
+    ~before_list:(fun config ->
+      ignore (Keeper_registry.register_offline
+        ~base_path:config.Workspace.base_path "alpha" (make_meta "alpha")))
+    ~after_list_with_args:(fun config read ->
+      let events = ref [] in
+      let subscriber = "fresh-roster-lifecycle-test" in
+      Sse.subscribe_external
+        ~runtime_authority:(Sse.runtime_authority_exn ~base_path:config.Workspace.base_path)
+        ~id:subscriber ~callback:(fun event ->
+          events := event.Sse.ext_payload :: !events) ();
+      Fun.protect ~finally:(fun () -> Sse.unsubscribe_external subscriber) (fun () ->
+        (match Keeper_registry.dispatch_event ~base_path:config.Workspace.base_path
+            "alpha" Keeper_state_machine.Fiber_started with
+         | Ok _ -> ()
+         | Error error -> fail (Keeper_state_machine.transition_error_to_string error));
+        check bool "the lifecycle transition emits the roster change signal" true
+          (List.exists (fun event ->
+            Yojson.Safe.Util.member "type" event = `String "keeper_composite_changed"
+            && Yojson.Safe.Util.member "name" event = `String "alpha") !events);
+        check bool "the shared cached row remains offline" false (running (read (args false)));
+        check bool "the fresh typed row observes the lifecycle transition" true
+          (running (read (args true)))))
+    (fun json -> check bool "the registered keeper starts offline" false (running json))
 ;;
 
 (* Ten names, sorted, so a limit of 4 keeps k00..k03 and drops the rest —
@@ -566,6 +640,72 @@ let test_another_list_query_does_not_repeat_completed_work () =
     check string "both query keys coexist in the same generation" "detailed"
       (Yojson.Safe.Util.to_string cached_detailed))
 
+let test_same_list_query_retains_the_winning_publication () =
+  List.iter
+    (fun seed_expired ->
+      with_empty_roster_cache (fun () ->
+        let read = Keeper_tool_surface.For_testing.cached_keeper_list_data in
+        if seed_expired then
+          ignore (read ~key:"roster" ~ttl_s:0. (fun () -> `String "expired"));
+        let calls = ref 0 in
+        let result = read ~key:"roster" ~ttl_s:3600. (fun () ->
+          incr calls;
+          ignore (read ~key:"roster" ~ttl_s:3600. (fun () -> `String "new roster"));
+          `String "older roster") in
+        check int "completed roster computation is not repeated" 1 !calls;
+        check string "the in-flight read may return its captured roster" "older roster"
+          (Yojson.Safe.Util.to_string result);
+        let cached = read ~key:"roster" ~ttl_s:3600.
+            (fun () -> fail "the winning roster was not retained") in
+        check string "a later read retains the winning publication" "new roster"
+          (Yojson.Safe.Util.to_string cached)))
+    [false; true]
+
+let test_same_list_query_does_not_renew_an_expired_winner () =
+  with_empty_roster_cache (fun () ->
+    let read = Keeper_tool_surface.For_testing.cached_keeper_list_data in
+    ignore (read ~key:"roster" ~ttl_s:3600. (fun () ->
+      ignore (read ~key:"roster" ~ttl_s:0. (fun () -> `String "expired winner"));
+      `String "older roster"));
+    let current = read ~key:"roster" ~ttl_s:3600. (fun () -> `String "current roster") in
+    check string "an older computation cannot extend the winning roster's TTL"
+      "current roster" (Yojson.Safe.Util.to_string current))
+
+let test_same_list_query_does_not_restore_a_pruned_winner () =
+  with_empty_roster_cache (fun () ->
+    let read = Keeper_tool_surface.For_testing.cached_keeper_list_data in
+    ignore (read ~key:"roster" ~ttl_s:3600. (fun () ->
+      ignore (read ~key:"roster" ~ttl_s:0. (fun () -> `String "expired winner"));
+      ignore (read ~key:"other" ~ttl_s:3600. (fun () -> `String "other query"));
+      `String "older roster"));
+    let current = read ~key:"roster" ~ttl_s:3600. (fun () -> `String "current roster") in
+    check string "pruning a winner cannot authorize its older competitor"
+      "current roster" (Yojson.Safe.Util.to_string current))
+
+let test_failed_list_query_removes_its_pending_slot () =
+  with_empty_roster_cache (fun () ->
+    let read = Keeper_tool_surface.For_testing.cached_keeper_list_data in
+    let failed = ref false in
+    (try ignore (read ~key:"roster" ~ttl_s:3600. (fun () -> failwith "fixture failure"))
+     with Failure _ -> failed := true);
+    check bool "the computation failure propagates" true !failed;
+    check int "failed computation leaves no pending query" 0
+      (Keeper_tool_surface.For_testing.keeper_list_cache_entry_count ());
+    let current = read ~key:"roster" ~ttl_s:3600. (fun () -> `String "current roster") in
+    check string "a later query can publish" "current roster"
+      (Yojson.Safe.Util.to_string current))
+
+let test_failed_list_query_preserves_a_completed_winner () =
+  with_empty_roster_cache (fun () ->
+    let read = Keeper_tool_surface.For_testing.cached_keeper_list_data in
+    (try ignore (read ~key:"roster" ~ttl_s:3600. (fun () ->
+       ignore (read ~key:"roster" ~ttl_s:3600. (fun () -> `String "winning roster"));
+       failwith "fixture failure")) with Failure _ -> ());
+    let current = read ~key:"roster" ~ttl_s:3600.
+        (fun () -> fail "failed competitor removed the winning roster") in
+    check string "completed winner survives failed competitor cleanup" "winning roster"
+      (Yojson.Safe.Util.to_string current))
+
 let test_expired_list_query_releases_payload_without_evicting_live_queries () =
   with_empty_roster_cache (fun () ->
     let read = Keeper_tool_surface.For_testing.cached_keeper_list_data in
@@ -774,8 +914,24 @@ let () =
             test_fenced_empty_turn_row_carries_its_signature
         ] )
     ; ( "cache publication"
-      , [ test_case "a competing query does not repeat completed work" `Quick
+      , [ test_case "fresh roster reads bypass the shared cache" `Quick
+            test_fresh_roster_reads_new_names_without_changing_shared_cache
+        ; test_case "fresh roster reads see lifecycle transitions" `Quick
+            test_fresh_roster_reads_lifecycle_transition
+        ; test_case "invalid freshness arguments are refused" `Quick
+            test_invalid_fresh_tool_argument_is_rejected
+        ; test_case "a competing query does not repeat completed work" `Quick
             test_another_list_query_does_not_repeat_completed_work
+        ; test_case "the same query retains its winning publication" `Quick
+            test_same_list_query_retains_the_winning_publication
+        ; test_case "an older query cannot renew an expired winner" `Quick
+            test_same_list_query_does_not_renew_an_expired_winner
+        ; test_case "a pruned winner cannot restore its older competitor" `Quick
+            test_same_list_query_does_not_restore_a_pruned_winner
+        ; test_case "failed computations release pending cache slots" `Quick
+            test_failed_list_query_removes_its_pending_slot
+        ; test_case "failed competitors preserve completed winners" `Quick
+            test_failed_list_query_preserves_a_completed_winner
         ; test_case "expired queries release payloads without evicting live queries" `Quick
             test_expired_list_query_releases_payload_without_evicting_live_queries
         ; test_case "explicit invalidation rejects obsolete work" `Quick

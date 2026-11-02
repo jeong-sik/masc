@@ -15,7 +15,7 @@ let () =
   | None -> Alcotest.fail "models.toml not found for provider_complete tests"
   | Some path ->
     (match Llm_provider.Model_catalog.load_file path with
-     | Ok catalog -> Llm_provider.Model_catalog.set_global catalog
+     | Ok catalog -> (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None)))
      | Error msg -> Alcotest.failf "failed to load %s: %s" path msg)
 ;;
 
@@ -238,7 +238,7 @@ let test_anthropic_output_schema () =
       ~kind:Anthropic
       ~model_id:"claude-sonnet-5"
       ~base_url:""
-      ~response_format:(JsonSchema schema)
+      ~response_format:(JsonSchema (Raw_schema schema))
       ()
   in
   let body = BA.build_request ~config ~messages:[ user_msg "hi" ] () in
@@ -264,7 +264,7 @@ let test_anthropic_json_schema_response_format () =
   in
   let config =
     { (PC.make ~kind:Anthropic ~model_id:"claude-sonnet-5" ~base_url:"" ()) with
-      response_format = JsonSchema schema
+      response_format = JsonSchema (Raw_schema schema)
     }
   in
   let body = BA.build_request ~config ~messages:[ user_msg "hi" ] () in
@@ -617,7 +617,7 @@ let test_ollama_output_schema () =
       ~kind:Ollama
       ~model_id:"qwen3.5:9b"
       ~base_url:"http://localhost:11434"
-      ~response_format:(JsonSchema schema)
+      ~response_format:(JsonSchema (Raw_schema schema))
       ()
   in
   let body = BOL.build_request ~config ~messages:[ user_msg "hi" ] () in
@@ -942,7 +942,7 @@ let test_openai_with_json_schema () =
       ~kind:OpenAI_compat
       ~model_id:"gpt-mini"
       ~base_url:"https://api.openai.com/v1"
-      ~response_format:(JsonSchema schema)
+      ~response_format:(JsonSchema (Raw_schema schema))
       ()
   in
   let body = BO.build_request ~config ~messages:[ user_msg "Return JSON." ] () in
@@ -981,7 +981,7 @@ let test_gemini_with_json_schema () =
       ~model_id:"gemini-3.7-flash"
       ~base_url:"https://generativelanguage.googleapis.com/v1beta"
       ~api_key:"test-key"
-      ~response_format:(JsonSchema schema)
+      ~response_format:(JsonSchema (Raw_schema schema))
       ()
   in
   let body = BGemini.build_request ~config ~messages:[ user_msg "Return JSON." ] () in
@@ -1598,7 +1598,7 @@ let test_standard_openai_request_without_toggle_is_unchanged () =
 ;;
 
 let with_model_catalog_toml contents f =
-  let original = Llm_provider.Model_catalog.global () in
+  let original = Llm_provider.Catalog_snapshot.current () in
   match
     Llm_provider.Model_catalog.of_toml_string
       ~source:"test_provider_complete provider pricing"
@@ -1606,12 +1606,10 @@ let with_model_catalog_toml contents f =
   with
   | Error message -> Alcotest.fail message
   | Ok catalog ->
-    Llm_provider.Model_catalog.set_global catalog;
+    (Llm_provider.Catalog_snapshot.publish (Agent_core_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None)));
     Fun.protect
       ~finally:(fun () ->
-        match original with
-        | Some catalog -> Llm_provider.Model_catalog.set_global catalog
-        | None -> Llm_provider.Model_catalog.clear_global ())
+        Llm_provider.Catalog_snapshot.publish original)
       f
 ;;
 
@@ -1730,7 +1728,7 @@ let test_complete_rejects_output_schema_for_glm () =
       ~kind:Glm
       ~model_id:"glm-5"
       ~base_url:"https://api.z.ai/api/coding/paas/v4"
-      ~response_format:(JsonSchema (`Assoc [ "type", `String "object" ]))
+      ~response_format:(JsonSchema (Raw_schema (`Assoc [ "type", `String "object" ])))
       ()
   in
   match
@@ -1759,7 +1757,7 @@ let test_complete_stream_rejects_output_schema_for_glm () =
       ~kind:Glm
       ~model_id:"glm-5"
       ~base_url:"https://api.z.ai/api/coding/paas/v4"
-      ~response_format:(JsonSchema (`Assoc [ "type", `String "object" ]))
+      ~response_format:(JsonSchema (Raw_schema (`Assoc [ "type", `String "object" ])))
       ()
   in
   match
@@ -1794,16 +1792,18 @@ let test_annotate_response_cost () =
           ; cache_read_input_tokens = 0
           ; cost_usd = None
           }
-    ; telemetry = None
+    ; telemetry = Some (Llm_provider.Types.with_reported_model ~model:"claude-sonnet-5" None)
     }
   in
-  match Llm_provider.Pricing.annotate_response_cost response with
+  let source = Llm_provider.Pricing.of_catalog ~catalog:(Llm_provider.Catalog_snapshot.models (Llm_provider.Catalog_snapshot.current ()))
+      ~provider:(Llm_provider.Model_catalog.Anonymous_wire Anthropic) in
+  match Llm_provider.Pricing.annotate_response_cost ~source response with
   | { usage = Some { cost_usd = Some cost; _ }; _ } ->
     Alcotest.(check bool) "annotated cost" true (cost > 0.0)
   | _ -> Alcotest.fail "expected annotated response cost"
 ;;
 
-let test_annotate_response_cost_gpt55 () =
+let test_annotate_response_cost_keeps_missing_scoped_rates () =
   let response : api_response =
     { id = "resp-gpt55"
     ; model = "gpt-5.5"
@@ -1817,13 +1817,16 @@ let test_annotate_response_cost_gpt55 () =
           ; cache_read_input_tokens = 0
           ; cost_usd = None
           }
-    ; telemetry = None
+    ; telemetry = Some (Llm_provider.Types.with_reported_model ~model:"gpt-5.5" None)
     }
   in
-  match Llm_provider.Pricing.annotate_response_cost response with
-  | { usage = Some { cost_usd = Some cost; _ }; _ } ->
-    Alcotest.(check (float 0.001)) "gpt-5.5 cost" 35.0 cost
-  | _ -> Alcotest.fail "expected gpt-5.5 annotated response cost"
+  let source = Llm_provider.Pricing.of_catalog ~catalog:(Llm_provider.Catalog_snapshot.models (Llm_provider.Catalog_snapshot.current ()))
+      ~provider:(Llm_provider.Model_catalog.Declared_provider "openai") in
+  match Llm_provider.Pricing.annotate_response_cost ~source response with
+  | { usage = Some usage; _ } ->
+    Alcotest.(check (option (float 0.001)))
+      "unpriced scoped row does not inherit the bare row's price" None usage.cost_usd
+  | _ -> Alcotest.fail "expected response usage to remain present"
 ;;
 
 let test_complete_propagates_exact_provider_to_cost_annotation () =
@@ -1860,7 +1863,7 @@ cache_read_multiplier = 1.0
           ; cache_read_input_tokens = 0
           ; cost_usd = None
           }
-    ; telemetry = None
+    ; telemetry = Some (Llm_provider.Types.with_reported_model ~model:"shared-priced-model" None)
     }
   in
   let config =
@@ -1998,6 +2001,47 @@ let test_cache_system_prompt () =
     (cc |> member "type" |> to_string)
 ;;
 
+let test_cache_stable_system_prefix_before_changing_observations () =
+  let prefix = "고정 Keeper 지침\n" in
+  let config = PC.make ~kind:Anthropic ~model_id:"claude-sonnet-5"
+      ~base_url:"" ~system_prompt_cache_prefix:prefix
+      ~cache_system_prompt:true ~cache_extended_ttl:true () in
+  let tool = `Assoc ["name", `String "inspect"; "description", `String "inspect"] in
+  let request suffix =
+    let config = {config with system_prompt = Some (prefix ^ suffix)} in
+    BA.build_request ~config ~messages:[user_msg "Continue."] ~tools:[tool] ()
+    |> Yojson.Safe.from_string in
+  let first = request "\nGoal observation; scheduled turn 1" in
+  let next = request "\nGoal observation; scheduled turn 2" in
+  let open Yojson.Safe.Util in
+  let first_system = first |> member "system" |> to_list in
+  let next_system = next |> member "system" |> to_list in
+  Alcotest.(check (list string)) "all observations retain exact System text"
+    [prefix; "\nGoal observation; scheduled turn 2"]
+    (List.map (fun block -> block |> member "text" |> to_string) next_system);
+  Alcotest.(check bool) "the stable cache block survives the changed turn" true
+    (List.hd first_system = List.hd next_system);
+  List.iter (fun block ->
+    Alcotest.(check string) "each System boundary keeps the configured TTL" "1h"
+      (block |> member "cache_control" |> member "ttl" |> to_string)) next_system;
+  let explicit = List.filter (fun block -> member "cache_control" block <> `Null)
+      (next_system @ (next |> member "tools" |> to_list)) |> List.length in
+  let automatic = if member "cache_control" next = `Null then 0 else 1 in
+  Alcotest.(check bool) "System/tools/automatic cache fits the API's four slots" true
+    (explicit + automatic <= 4);
+  (* A hook can replace the whole System. The hint must never discard or
+     misattribute that override, including an empty or overlong prefix. *)
+  List.iter (fun hint ->
+    let config = {config with system_prompt = Some "Replacement System";
+        system_prompt_cache_prefix = Some hint} in
+    let blocks = BA.build_request ~config ~messages:[user_msg "hi"] ()
+        |> Yojson.Safe.from_string |> member "system" |> to_list in
+    Alcotest.(check (list string)) "an incompatible hint preserves the whole override"
+      ["Replacement System"]
+      (List.map (fun block -> block |> member "text" |> to_string) blocks))
+    [""; prefix; "Replacement System"; "Replacement System with an extra suffix"]
+;;
+
 let test_cache_short_prompt_preserves_opt_in () =
   let config =
     PC.make
@@ -2030,6 +2074,7 @@ let test_cache_no_system_no_cache () =
       ~base_url:""
       ~max_tokens:128
       ~system_prompt:"Hello."
+      ~system_prompt_cache_prefix:"Hello"
       ~cache_system_prompt:false
       ()
   in
@@ -2060,6 +2105,7 @@ let test_cache_opt_in_emits_top_level_automatic_breakpoint () =
       ~base_url:""
       ~max_tokens:128
       ~system_prompt:"Hello."
+      ~system_prompt_cache_prefix:"Hello"
       ~cache_system_prompt:true
       ()
   in
@@ -2121,6 +2167,7 @@ let test_cache_top_level_not_emitted_for_kimi () =
       ~base_url:""
       ~max_tokens:128
       ~system_prompt:"Hello."
+      ~system_prompt_cache_prefix:"Hello"
       ~cache_system_prompt:true
       ()
   in
@@ -2132,6 +2179,8 @@ let test_cache_top_level_not_emitted_for_kimi () =
     true
     (json |> member "cache_control" = `Null);
   let system_block = json |> member "system" |> to_list |> List.hd in
+  Alcotest.(check int) "Kimi retains one System block" 1
+    (json |> member "system" |> to_list |> List.length);
   Alcotest.(check string)
     "block-level system breakpoint unchanged"
     "ephemeral"
@@ -2369,9 +2418,9 @@ let () =
     ; ( "cost"
       , [ test_case "annotate response cost" `Quick test_annotate_response_cost
         ; test_case
-            "annotate gpt-5.5 response cost"
+            "unpriced scoped model stays unknown"
             `Quick
-            test_annotate_response_cost_gpt55
+            test_annotate_response_cost_keeps_missing_scoped_rates
         ; test_case
             "complete propagates exact provider to cost annotation"
             `Quick
@@ -2383,6 +2432,8 @@ let () =
         ] )
     ; ( "prompt_caching"
       , [ test_case "system block with cache_control" `Quick test_cache_system_prompt
+        ; test_case "stable System prefix before changing observations" `Quick
+            test_cache_stable_system_prefix_before_changing_observations
         ; test_case "no cache when disabled" `Quick test_cache_no_system_no_cache
         ; test_case
             "opt-in emits top-level automatic breakpoint"

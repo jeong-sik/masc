@@ -55,6 +55,95 @@ end = struct
   let in_flight state = Option.is_some state.pending
 end
 
+(* One event-driven waiting read, plus a change observed while it was running.
+   A failed event-triggered read keeps the demand for a later retry. *)
+module Keeper_waiting_read : sig
+  type t
+  type request
+
+  val idle : t
+  val note_change : t -> t
+  val start : t -> t * request option
+  val finish : t -> request -> observed:bool -> success:bool -> (t * bool) option
+  val suspend : t -> t
+  val clear : t -> t
+  val in_flight : t -> bool
+  val change_pending : t -> bool
+  val awaiting_change : t -> bool
+  val needs_revalidation : t -> bool
+  val poll_receipt : t -> (int * int) option
+  val accepts_poll : t -> (int * int) option -> bool
+  val settle_poll : t -> success:bool -> t
+  val accepts_event : t -> request -> bool
+  val publish_event : t -> observed:bool -> t
+  val poll_needs_reconciliation : t -> (int * int) option -> bool
+  val event_needs_reconciliation : t -> request -> bool
+  val exclusive : t -> t
+end = struct
+  type request = { ticket : Snapshot_read.request; after_change : bool; revision : int; publication : int }
+  type t = { reading : Snapshot_read.t; pending : bool; active_after_change : bool;
+             awaiting : bool; revision : int; publication : int; exclusive : bool }
+
+  let idle = { reading = Snapshot_read.idle; pending = false; active_after_change = false;
+               awaiting = false; revision = 0; publication = 0; exclusive = false }
+  let note_change t = { t with pending = true; awaiting = true; revision = t.revision + 1 }
+  let in_flight t = Snapshot_read.in_flight t.reading
+  let change_pending t = t.pending
+  let awaiting_change t = t.awaiting
+  let needs_revalidation t = t.pending || t.active_after_change
+  let poll_receipt t = if t.exclusive then None else Some (t.revision, t.publication)
+  let accepts_poll t = function
+    | Some (revision, publication) ->
+        revision = t.revision && publication = t.publication && not t.exclusive
+    | None -> false
+  let settle_poll t ~success =
+    if success then { t with pending = false; awaiting = false; publication = t.publication + 1 }
+    else { t with pending = t.pending || t.active_after_change;
+                  publication = t.publication + 1 }
+  let accepts_event (t : t) (request : request) = request.publication = t.publication
+  let publish_event (t : t) ~observed =
+    if observed then { t with publication = t.publication + 1 } else t
+  let poll_needs_reconciliation (t : t) = function
+    | Some (revision, publication) -> revision = t.revision && publication <> t.publication
+    | None -> false
+  let event_needs_reconciliation (t : t) (request : request) =
+    request.revision = t.revision && request.publication <> t.publication
+  let exclusive t = { t with exclusive = true }
+
+  let start t =
+    let reading, ticket = Snapshot_read.start ~intent:Snapshot_read.Poll t.reading in
+    match ticket with
+    | None -> t, None
+    | Some ticket ->
+      let request = { ticket; after_change = t.pending; revision = t.revision; publication = t.publication } in
+      { t with reading; pending = false; active_after_change = request.after_change }, Some request
+
+  let finish t request ~observed ~success =
+    match Snapshot_read.settle t.reading request.ticket with
+    | None -> None
+    | Some reading ->
+      let follow_up = t.pending in
+      let pending = t.pending || (request.after_change && not success) in
+      let awaiting = t.pending || (request.after_change && not observed) in
+      Some ({ t with reading; pending; active_after_change = false; awaiting;
+                     exclusive = t.exclusive && follow_up }, follow_up)
+
+  let suspend t =
+    { reading = Snapshot_read.invalidate t.reading
+    ; pending = t.pending || t.active_after_change
+    ; active_after_change = false
+    ; awaiting = t.awaiting
+    ; revision = t.revision + 1
+    ; publication = t.publication + 1
+    ; exclusive = false
+    }
+
+  let clear t =
+    { reading = Snapshot_read.invalidate t.reading; pending = false; active_after_change = false;
+      awaiting = false; revision = t.revision + 1; publication = t.publication + 1;
+      exclusive = false }
+end
+
 (* Original read ownership and a fresh observation owed after a binding write.
    Tokens are supplied by the UI edge; these transitions do not launch work. *)
 module Connector_read : sig
@@ -2572,14 +2661,16 @@ type board_outbound_attachment = Masc_tui_board_publication.board_outbound_attac
 let board_outbound_attachments_field =
   Masc_tui_board_publication.board_outbound_attachments_field
 
+type board_comment_request_id = unit ref
+
 type board_write =
   | Board_idle
   | Board_posting of workspace_authority Masc_tui_board_publication.request
-  | Board_commenting
+  | Board_commenting of board_comment_request_id
 
 let board_write_inflight = function
   | Board_idle -> false
-  | Board_posting _ | Board_commenting -> true
+  | Board_posting _ | Board_commenting _ -> true
 
 (** Board post (light projection for list view) *)
 type board_post = {
@@ -3283,7 +3374,8 @@ type lanes_mode =
 module Measurement = struct
   module R = Masc.Librarian_continuity_report
 
-  type t = { report : R.t; context_hashes : (string * string) list }
+  type snapshot = { report : R.t; context_hashes : (string * string) list }
+  type t = Snapshot of snapshot | Temporal of Masc.Tui_decode_temporal_continuity.t
 
   type counts = { scored : int; failed : int; incomplete : int }
 
@@ -3321,13 +3413,18 @@ module Measurement = struct
            else
              (match Yojson.Safe.from_string content with
               | json ->
-                Result.map (fun (report : R.t) ->
+                let schema = match json with
+                  | `Assoc fields -> List.assoc_opt "schema" fields | _ -> None in
+                if schema = Some (`String Masc.Tui_decode_temporal_continuity.schema) then
+                  Result.map (fun report -> Temporal report)
+                    (Masc.Tui_decode_temporal_continuity.of_yojson json)
+                else Result.map (fun (report : R.t) ->
                   let context_hashes = List.map (fun (sample : R.sample) ->
                     sample.case.id,
                     Agent_core_sha256.(to_hex (digest_string
                       (Yojson.Safe.to_string (R.answer_context_to_yojson sample.case.context)))))
                     report.samples in
-                  { report; context_hashes }) (R.of_yojson json)
+                  Snapshot { report; context_hashes }) (R.of_yojson json)
               | exception Yojson.Json_error detail ->
                 Error ("Measurement artifact is not JSON: " ^ detail))
        | _ -> Error "Measurement artifact response requires sha256, bytes and content fields")
@@ -3549,9 +3646,8 @@ type workspace_health =
   | Workspace_health_unknown
 
 (** What the runtime event feed ([GET /mcp?sse_kind=observer]) is doing.
-    The feed is opened once the server has answered a refresh and reopened
-    on the refresh cadence after it closes, so an operator reads the same
-    row for "no server yet" and "the stream dropped" -- with the reason. *)
+    The feed opens after server contact and has a workspace-scoped delayed
+    retry after it closes. The reason remains visible while retry is pending. *)
 type observer_status =
   | Observer_off  (** not opened: no server has answered yet *)
   | Observer_opening  (** initialize and subscribe in flight *)
@@ -3585,10 +3681,29 @@ type observer_replay_status =
   | Observer_replay_unobserved
   | Observer_replay_scoped of Sse_wire.observer_handshake
   | Observer_replay_unavailable of string
+  | Observer_replay_rejected of string
 
-let observer_replay_description = function
+(* Unlike the latest replay handshake, this is tied to the admitted workspace
+   authority. A later unscoped or different stream cannot replace its origin. *)
+type observer_scope_binding =
+  | Observer_scope_unbound
+  | Observer_scope_bound of string
+  | Observer_scope_retired
+
+let note_observer_scope binding handshake =
+  match binding, handshake with
+  | Observer_scope_unbound, None -> Observer_scope_unbound
+  | Observer_scope_unbound, Some handshake -> Observer_scope_bound handshake.Sse_wire.instance_id
+  | Observer_scope_bound previous, Some handshake
+    when String.equal previous handshake.Sse_wire.instance_id -> binding
+  | Observer_scope_bound _, (Some _ | None) | Observer_scope_retired, (Some _ | None) ->
+      Observer_scope_retired
+
+let observer_replay_description ?(source_loss = false) replay =
+  let description = match replay with
   | Observer_replay_unobserved -> "Replay: not negotiated"
   | Observer_replay_unavailable detail -> "Replay unavailable (live only): " ^ detail
+  | Observer_replay_rejected detail -> "Observer handshake rejected: " ^ detail
   | Observer_replay_scoped { replay = Sse_wire.Fresh; _ } ->
       "Replay: live from connection; earlier history not loaded"
   | Observer_replay_scoped { replay = Sse_wire.Resumed; _ } ->
@@ -3598,9 +3713,21 @@ let observer_replay_description = function
         "Replay resumed after a gap: events up to #%d expired while disconnected"
         missed_through
   | Observer_replay_scoped { replay = Sse_wire.Reset Sse_wire.Instance_changed; _ } ->
-      "Replay reset: server instance changed; disconnected history not recovered"
+      "Replay reset: server or workspace changed; disconnected history not recovered"
   | Observer_replay_scoped { replay = Sse_wire.Reset Sse_wire.Unscoped_cursor; _ } ->
       "Replay reset: previous cursor had no instance; disconnected history not recovered"
+  | Observer_replay_scoped { replay = Sse_wire.Reset Sse_wire.Cursor_ahead; _ } ->
+      "Replay reset: cursor ahead of server; disconnected history not recovered"
+  in
+  if source_loss then "SOURCE EVENTS LOST · " ^ description
+  else description
+
+(* A retry after a partially published SSE event can have a new transport
+   cursor. Remember the highest notice sequence independently per source. *)
+let note_observer_source_loss ~source_id ~sequence seen =
+  match List.assoc_opt source_id seen with
+  | Some previous when previous >= sequence -> false, seen
+  | Some _ | None -> true, (source_id, sequence) :: List.remove_assoc source_id seen
 
 (** One event off the feed, kept for the Acting surface. *)
 (* How many feed events the TUI keeps. On the live runtime the feed ran at
@@ -4795,6 +4922,7 @@ type keeper_settings_key = {
 }
 type keeper_settings_request = {
   ksr_request : keeper_settings_key Masc_tui_fetched.request;
+  ksr_format : Masc_tui_keeper_config.editor_format;
   ksr_reading : unit ref;
   ksr_owner : unit ref;
   ksr_expected : Tui_decode.server_identity;
@@ -5519,23 +5647,38 @@ type tools_async_task_request =
 type 'key task_history_request =
   { thr_ticket : 'key Masc_tui_fetched.request
   ; thr_reading : unit ref; thr_job : unit ref
-  ; thr_page : Masc.Tui_decode_task_inspection.history_request }
+  ; thr_page : Masc.Tui_decode_task_inspection.history_request
+  ; thr_followup_limit : int option }
 
 (* A continuation captures the immutable prefix before it enters the worker.
    Refresh replaces that prefix; an older read can only extend a known cursor. *)
-let begin_history_page ~task_id ~limit ~older ~equal ~key ~authority fetched =
+let begin_history_page ?(progressive=false) ~task_id ~limit ~older ~equal ~key ~authority fetched =
   let module History = Masc.Tui_decode_task_inspection in
+  let previous = Masc_tui_fetched.value (Masc_tui_fetched.view_for ~equal fetched ~key) in
+  (* A first observation can appear as soon as its newest event is known.
+     A cursor then continues the very same captured prefix in the background. *)
+  let followup_limit =
+    if progressive && not older && limit > 1 && Option.is_none previous
+    then Some (limit - 1) else None in
+  let page_limit = if Option.is_some followup_limit then 1 else limit in
   if older && Masc_tui_fetched.in_flight fetched then None else
   let page = if older then
-      Option.bind (Masc_tui_fetched.value (Masc_tui_fetched.view_for ~equal fetched ~key))
+      Option.bind previous
         (History.history_earlier ~task_id ~limit)
-    else Some (History.history_first ~task_id ~limit) in
+    else Some (History.history_first ~task_id ~limit:page_limit) in
   Option.bind page (fun thr_page ->
     let start=if older then Masc_tui_fetched.start else Masc_tui_fetched.refresh in
     match start ~equal fetched ~key with
     | Already_loading -> None
     | Started (reading,thr_ticket) ->
-      Some (reading,{thr_ticket;thr_reading=authority;thr_job=ref ();thr_page}))
+      Some (reading,{thr_ticket;thr_reading=authority;thr_job=ref ();thr_page;
+                     thr_followup_limit=followup_limit}))
+
+let history_followup_limit request
+    (result : (Masc.Tui_decode_task_inspection.history, string) result) =
+  match request.thr_followup_limit,result with
+  | Some limit,Ok history when Option.is_some history.history_next_cursor -> Some limit
+  | Some _,Ok _ | Some _,Error _ | None,_ -> None
 
 let equal_tools_async_task_source a b =
   Masc.Tui_decode_async_request.equal_source a.ats_request b.ats_request
@@ -5550,7 +5693,24 @@ type task_document_request =
 type task_document_slot =
   { tds_reading : (task_document_key,string list) Masc_tui_fetched.t
   ; tds_request : task_document_request option
-  ; tds_previous : (task_document_key * string list) option }
+  (* A Work History document prepared from an unconfirmed source has no
+     reusable owner, even if the formatter itself ran under the current ref. *)
+  ; tds_previous : (task_document_key * unit ref option * string list) option }
+type task_detail_owner = { tdo_task_id : string; tdo_reading : unit ref }
+type task_detail_presented =
+  { tdp_owner : task_detail_owner
+  ; tdp_count : int
+  ; tdp_height : int
+  ; tdp_waiting : bool }
+type tools_task_owner =
+  { tto_source : tools_async_task_source; tto_reading : unit ref; tto_visit : unit ref }
+type tools_task_frame =
+  { ttf_owner : tools_task_owner
+  ; ttf_count : int
+  ; ttf_height : int
+  ; ttf_offset : int
+  ; ttf_waiting : bool
+  ; ttf_cols : int }
 let initial_task_document_slot = {tds_reading=Masc_tui_fetched.initial;tds_request=None;tds_previous=None}
 let equal_task_document_target a b = match a,b with
    | Work_task_document a,Work_task_document b -> a=b
@@ -8794,11 +8954,22 @@ type schedule_form_refusal =
   ; sfr_workspace : workspace_input_identity option
   }
 
+(* The content selected on Board owns an image request until the exact post,
+   comment, or attachment is no longer the one on screen. *)
+type board_diagram_subject =
+  | Board_post_diagram of { post_id : string; body : string }
+  | Board_comment_diagram of { post_id : string; comment_id : string; body : string }
+
+type board_preview_subject =
+  | Board_diagram of board_diagram_subject
+  | Board_attachment_image of { post_id : string; attachment : board_attachment }
+
 type image_read_owner =
   | Local_file_image_read of workspace_authority
   | Remote_url_image_read of workspace_authority
   | Draft_image_read of workspace_authority * Masc_tui_keeper_chat_projection.attachment
   | Peer_image_read of unit ref
+  | Board_image_read of unit ref * board_preview_subject * unit ref
 
 type sent_image_read =
   { sir_generation : int
@@ -8807,6 +8978,7 @@ type sent_image_read =
   ; sir_name : string
   ; sir_owner : image_read_owner
   ; sir_resource : (Masc_tui_resource_catalog.key * Masc_tui_mcp.resource_content list) option
+  ; sir_skill_reference : Skill_reference.t option
   ; sir_purpose : image_read_purpose
   }
 and image_read_purpose =
@@ -8999,11 +9171,13 @@ type state = {
   credential_preparation : Masc_tui_credential_preparation.t;
   mutable home_chat_visit : Masc_tui_chat_visit.request option;
   mutable metrics_scroll: int;
+  mutable metrics_content_height: int;
+  mutable metrics_scroll_card_rows: int option;
   mutable metrics_section: metrics_section;
   mutable usage_telemetry_open: bool;
   mutable usage_section: usage_section;
   mutable usage_scope_id: string option;
-  mutable usage_show_unusable: bool;
+  mutable usage_show_limit_exhausted: bool;
   mutable agents: agent list;
   mutable tasks: task list;
   (* Full Task values and their original immutable producer snapshot are one
@@ -9042,7 +9216,7 @@ type state = {
      observation epoch. A late answer must not reopen a closed reader. *)
   (* A pending page does not replace the last observed page until it succeeds. *)
   mutable keeper_peer_reading: keeper_peer_reading option;
-  mutable board_reader_owner: (workspace_authority * unit ref) option;
+  mutable board_reader_owner: (workspace_authority * unit ref * board_attachment_kind) option;
   mutable board_reader: Masc_tui_board_reader.t;
   mutable keeper_deletions_open: bool;
   mutable keeper_deletions_loading: bool;
@@ -9221,6 +9395,8 @@ type state = {
      complete a tool call and on the operator cadence. *)
   mutable acting_pane_changes:
     (acting_pane_key, acting_pane_read) Masc_tui_fetched.t;
+  (* A loss during a read owes one more reading after that read settles. *)
+  mutable acting_pane_changes_loss_followup: acting_pane_key option;
   (* When the answer on screen landed, so the tab can say how old it is. *)
   mutable acting_pane_changes_at: float option;
   (* Derived display phase for the selected long name in the narrow roster.
@@ -9618,6 +9794,8 @@ type state = {
   mutable identity_disconnect_armed: (string * string) option;
   mutable task_detail_id: string option;
   mutable task_detail_scroll: int;
+  mutable task_detail_presented: task_detail_presented option;
+  mutable task_detail_follow_end: task_detail_owner option;
   mutable tasks_error: string option;
   mutable events: event list;
   mutable keepers: keeper list;
@@ -9773,6 +9951,7 @@ type state = {
   mutable goal_timeline: (string, Tui_decode.goal_timeline_event list) Masc_tui_fetched.t;
   mutable task_history: (string, Masc.Tui_decode_task_inspection.history) Masc_tui_fetched.t;
   mutable task_history_request: string task_history_request option;
+  mutable task_history_last_reading: unit ref option;
   mutable task_document_body: task_document_slot;
   mutable task_document_history: task_document_slot;
   mutable verification_evidence:
@@ -9876,8 +10055,13 @@ type state = {
      field stays absent here; neither it nor a failed refresh means idle. *)
   mutable keeper_waiting: Tui_decode.keeper_waiting_row list;
   mutable keeper_waiting_failure: Tui_decode.keeper_waiting_failure option;
+  mutable keeper_waiting_unverified: string list;
+  mutable keeper_waiting_error: string option;
+  mutable keeper_waiting_epoch: int;
+  mutable keeper_waiting_versions: (string * int) list;
   mutable keeper_turns_error: string option;
   mutable keeper_turns_inflight: bool;
+  mutable keeper_waiting_read: Keeper_waiting_read.t;
   mutable msg_preparation_details: Masc_tui_preparation_details.t;
   mutable keeper_observed_interrupts: observed_interrupt list;
   mutable keeper_run_next_inflight: Masc_tui_keeper_chat_projection.request list;
@@ -9985,6 +10169,10 @@ type state = {
      read against the open post's thread: an id that thread does not hold
      selects nothing. *)
   mutable board_comment_cursor: string option;
+  (* The diagram index belongs to its original post or comment, not the
+     current list position. A changed reading starts again at the first. *)
+  mutable board_diagram_cursor: (board_diagram_subject * int) option;
+  mutable board_image_selection: board_preview_subject option;
   (* One frame's request to scroll the comment column so the selected
      comment is on screen. j/k set it; PgUp/PgDn do not, so they still move
      by rows through a comment longer than the column. Cleared with
@@ -10157,6 +10345,9 @@ type state = {
   mutable skills_catalog: Masc.Tui_decode_tools.skills_catalog option;
   mutable skills_catalog_error: string option;
   mutable tools_scroll: int;
+  mutable tools_task_visit: unit ref;
+  mutable tools_task_follow_end: tools_task_owner option;
+  mutable tools_task_presented: tools_task_frame option;
   mutable tools_skill_cursor: int;
   mutable tools_skill_source_picker: skill_source_picker option;
   mutable tools_skill_create_drafts: skill_create_draft list;
@@ -10477,6 +10668,10 @@ type state = {
      why beside them ([Masc_tui_fetched.Stale]), rather than a registry that
      could not be read drawing as an empty one. *)
   mutable fusion_runs: (unit, Masc.Tui_decode_fusion.fusion_snapshot) Masc_tui_fetched.t;
+  (* A change observed after the current list read started needs one later read. *)
+  mutable fusion_runs_reread_pending: bool;
+  mutable fusion_runs_awaiting_observer: bool;
+  mutable fusion_runs_open_at_start: string option;
   (* Why the launch form could not open. Not a reading of the run list, so it
      is not folded into that list's failure; the next list answer clears it. *)
   mutable fusion_launch_error: string option;
@@ -10485,6 +10680,7 @@ type state = {
   mutable fusion_mode: fusion_mode;
   mutable fusion_detail: Masc.Tui_decode_fusion.fusion_detail option;
   mutable fusion_detail_error: string option;
+  mutable fusion_detail_stale: bool;
   (* A detail GET captures this generation. A late response for a run the
      operator already left cannot replace the exact run now on screen. *)
   mutable fusion_detail_generation: int;
@@ -10492,8 +10688,13 @@ type state = {
      do not pile another GET on top of it; changing runs still starts a new
      request immediately, whose pair replaces this marker. *)
   mutable fusion_detail_inflight: (int * string) option;
+  mutable fusion_detail_reread_pending: bool;
+  mutable fusion_detail_awaiting_observer: bool;
   mutable fusion_historical_detail: Masc.Tui_decode_fusion.fusion_historical_detail option;
+  mutable fusion_historical_detail_stale: bool;
   mutable fusion_historical_inflight: (int * Masc.Tui_decode_fusion.fusion_historical_evidence) option;
+  mutable fusion_historical_reread_pending: bool;
+  mutable fusion_historical_awaiting_observer: bool;
   mutable fusion_launch: fusion_launch option;
   (* The read or the submit the form is waiting on. A key that closes the
      form bumps it, so the answer to a read the operator left cannot open
@@ -10503,6 +10704,9 @@ type state = {
      into an option: a report that failed to load must not draw as a report
      with no features, which reads as "nothing is proven". *)
   mutable observer: observer_status;
+  mutable observer_retry_owner: unit ref option;
+  mutable observer_recovery_owner: unit ref option;
+  mutable observer_scope_binding: observer_scope_binding;
   mutable mcp_session: string option;
       (** The MCP session the server issued, kept across streams: the server
           holds it after a stream closes, so reopening the feed and calling
@@ -10511,6 +10715,8 @@ type state = {
   mutable observer_cursor: Sse_wire.observer_cursor option;
       (** Last applied complete event, scoped to the responding process. *)
   mutable observer_replay: observer_replay_status;
+  mutable observer_source_loss: bool;
+  mutable observer_source_loss_sequences: (string * int) list;
   mutable acting: Masc_tui_acting.entry list;  (** newest first, at most [acting_retained_entries] + [acting_retained_quiet] *)
   mutable acting_dropped: int;  (** events that fell off the end of [acting] *)
   mutable acting_undecodable: int;  (** frames the feed reader could not read *)
@@ -10589,6 +10795,8 @@ type state = {
      Cleared when the turn settles; the settled value moves to
      [msg_settled_logs]. *)
   mutable msg_live: turn_log option;
+  mutable msg_presented_tool_approval:
+    (workspace_authority * unit ref) Masc_tui_chat_row_actions.approval option;
   (* The current Keeper's durable rows already read, including older pages.
      Refresh merges by structural row identity. Inactive conversations keep
      their reading and cursor in [msg_loaded_pages] until revisited. *)
@@ -10616,6 +10824,7 @@ type state = {
      arrive after the second alpha request and still name the visible Keeper. *)
   mutable msg_history_load_generation: int;
   mutable msg_history_inflight: Keeper_history_read.t option;
+  mutable msg_history_loss_followup: (string * workspace_authority * unit ref) option;
   mutable msg_copy_generation: int;
   mutable chat_command_reads: (unit ref * unit ref * string) list;
   mutable msg_copy_pending: (int * string * unit ref) option;
@@ -11146,25 +11355,6 @@ let restore_message_draft (state : state) keeper_name =
       (Masc_tui_message_input.invalidate_revision state.msg_input; state.msg_references <- draft.kcd_references);
       state.msg_attachments_since <- draft.kcd_since;
       state.msg_recall_walk <- draft.kcd_recall
-
-(* Local files, drafts and explicit remote URLs survive peer reconfirmation
-   but never a workspace replacement. Peer images retain their exact reading.
-   Completion, retirement and footer projection use this same admission. *)
-let image_reading_is_current (state : state) (pending : sent_image_read) =
-  match pending.sir_owner with
-  | Local_file_image_read authority -> authority = state.workspace_authority
-  | Remote_url_image_read authority -> authority = state.workspace_authority
-  | Draft_image_read (authority, attachment) ->
-    authority = state.workspace_authority
-    && List.exists (fun current -> current == attachment) state.msg_attachments
-  | Peer_image_read reading ->
-    reading == state.workspace_read_authority
-    && (pending.sir_view <> Resources
-        || (Masc_tui_resource_images.same_reading
-              ~equal:Masc_tui_resource_catalog.equal_key
-              pending.sir_resource state.resource_content
-            && Option.is_none state.resource_pending_key
-            && Option.is_none state.resource_content_error))
 
 (* These transitions are shared by the mailbox handler and readonly overview
    projection. Preview admission never changes confirmed data or authority. *)
@@ -12082,10 +12272,11 @@ let keeper_list_rows (state : state) : Masc_tui_keeper_list_model.row list =
           state.keeper_waiting
       in
       let waiting, activity_waiting =
-        match state.keeper_waiting_failure, observed_waiting with
-        | Some _, _ -> Masc_tui_keeper_list_model.Waiting_unavailable, None
-        | None, Some row -> Masc_tui_keeper_list_model.Waiting_observed row, Some row
-        | None, None -> Masc_tui_keeper_list_model.Waiting_unobserved, None
+        match List.mem name state.keeper_waiting_unverified,
+              state.keeper_waiting_failure, observed_waiting with
+        | true, _, _ | false, Some _, _ -> Masc_tui_keeper_list_model.Waiting_unavailable, None
+        | false, None, Some row -> Masc_tui_keeper_list_model.Waiting_observed row, Some row
+        | false, None, None -> Masc_tui_keeper_list_model.Waiting_unobserved, None
       in
       let approval =
         List.find_opt
@@ -12290,10 +12481,95 @@ let select_keeper_waiting_observation ~fresh ~stale ~previous_failure observatio
   | Tui_decode.Keeper_waiting_fleet_unreported waiting ->
       select waiting (fun rows -> Tui_decode.Keeper_waiting_fleet_unreported rows)
 
-let accept_keeper_turn_observation state ~rows ~waiting ~observed_at =
-  preserve_keeper_list_selection state (fun () ->
-    state.keeper_turns <- rows;
-    (match waiting with
+let keeper_turns_projection_complete ~current = function
+  | Ok { Tui_decode.rows; waiting = Tui_decode.Keeper_waiting_observed waiting } ->
+      List.for_all (fun (turn : Tui_decode.keeper_turn_row) ->
+        current turn && List.exists (fun (row : Tui_decode.keeper_waiting_row) ->
+          String.equal row.kwr_keeper_name turn.ktr_keeper_name
+          && List.for_all (fun item ->
+            item.Tui_decode.kwi_source <> Tui_decode.Waiting_source_read_error)
+              row.kwr_waiting_on) waiting) rows
+  | Ok { Tui_decode.waiting = (Tui_decode.Keeper_waiting_fleet_unreported _
+                             | Tui_decode.Keeper_waiting_unavailable _); _ }
+  | Error _ -> false
+
+type keeper_waiting_snapshot = {
+  kws_epoch : int;
+  kws_versions : (string * int) list;
+  kws_controls : (string * int) list;
+  kws_pending_controls : string list;
+}
+
+type keeper_waiting_change = Waiting_all | Waiting_keepers of string list
+
+let note_keeper_waiting_change state change =
+  let names = match change with
+    | Waiting_all ->
+        state.keeper_waiting_epoch <- state.keeper_waiting_epoch + 1;
+        List.map (fun (keeper : Tui_decode.keeper) -> keeper.k_name) state.keepers
+        @ List.map (fun (turn : Tui_decode.keeper_turn_row) -> turn.ktr_keeper_name) state.keeper_turns
+        @ List.map (fun (row : Tui_decode.keeper_waiting_row) -> row.kwr_keeper_name) state.keeper_waiting
+    | Waiting_keepers names ->
+        List.iter (fun name ->
+          let version = Option.value ~default:0 (List.assoc_opt name state.keeper_waiting_versions) in
+          state.keeper_waiting_versions <- (name, version + 1) ::
+            List.remove_assoc name state.keeper_waiting_versions) names;
+        names in
+  state.keeper_waiting_unverified <-
+    List.sort_uniq String.compare (names @ state.keeper_waiting_unverified);
+  state.keeper_waiting_read <- Keeper_waiting_read.note_change state.keeper_waiting_read
+
+let capture_keeper_waiting_snapshot state =
+  { kws_epoch = state.keeper_waiting_epoch
+  ; kws_versions = state.keeper_waiting_versions
+  ; kws_controls = state.keeper_chat_control_generations
+  ; kws_pending_controls = List.map fst state.keeper_chat_control_pending
+  }
+
+let keeper_waiting_name_current state snapshot name =
+  let version versions = Option.value ~default:0 (List.assoc_opt name versions) in
+  snapshot.kws_epoch = state.keeper_waiting_epoch
+  && version snapshot.kws_versions = version state.keeper_waiting_versions
+  && version snapshot.kws_controls = version state.keeper_chat_control_generations
+  && not (List.mem name snapshot.kws_pending_controls)
+  && not (List.mem_assoc name state.keeper_chat_control_pending)
+
+let keeper_waiting_row_current state snapshot (turn : Tui_decode.keeper_turn_row) =
+  keeper_waiting_name_current state snapshot turn.ktr_keeper_name
+
+let keeper_waiting_unverified_names ~current = function
+  | Ok { Tui_decode.rows; waiting = (Tui_decode.Keeper_waiting_observed waiting
+                                    | Tui_decode.Keeper_waiting_fleet_unreported waiting) } ->
+      List.filter_map (fun (turn : Tui_decode.keeper_turn_row) ->
+        if current turn && List.exists (fun (row : Tui_decode.keeper_waiting_row) ->
+            String.equal row.kwr_keeper_name turn.ktr_keeper_name) waiting
+        then None else Some turn.ktr_keeper_name) rows
+  | Ok { Tui_decode.waiting = Tui_decode.Keeper_waiting_unavailable _; _ }
+  | Error _ -> []
+
+let keeper_waiting_unverified_after state ~current ~current_name result =
+  let resolved name =
+    match result with
+    | Ok { Tui_decode.rows; waiting = Tui_decode.Keeper_waiting_observed waiting } ->
+        let found = List.find_opt (fun (turn : Tui_decode.keeper_turn_row) ->
+          String.equal turn.ktr_keeper_name name) rows in
+        (match found with
+         | None -> current_name name
+         | Some turn -> current turn && List.exists (fun (row : Tui_decode.keeper_waiting_row) ->
+             String.equal row.kwr_keeper_name name) waiting)
+    | Ok { Tui_decode.rows; waiting = Tui_decode.Keeper_waiting_fleet_unreported waiting } ->
+        List.exists (fun (turn : Tui_decode.keeper_turn_row) ->
+          String.equal turn.ktr_keeper_name name && current turn) rows
+        && List.exists (fun (row : Tui_decode.keeper_waiting_row) ->
+          String.equal row.kwr_keeper_name name) waiting
+    | Ok { Tui_decode.waiting = Tui_decode.Keeper_waiting_unavailable _; _ }
+    | Error _ -> false in
+  List.sort_uniq String.compare
+    (List.filter (fun name -> not (resolved name)) state.keeper_waiting_unverified
+     @ keeper_waiting_unverified_names ~current result)
+
+let update_keeper_waiting state ~rows ~waiting =
+    match waiting with
      | Tui_decode.Keeper_waiting_fleet_unreported waiting ->
        state.keeper_waiting <- merge_keeper_waiting
          ~previous:state.keeper_waiting ~rows ~waiting
@@ -12311,7 +12587,15 @@ let accept_keeper_turn_observation state ~rows ~waiting ~observed_at =
      | Tui_decode.Keeper_waiting_unavailable failure ->
        state.keeper_waiting <- merge_keeper_waiting
          ~previous:state.keeper_waiting ~rows ~waiting:[];
-       state.keeper_waiting_failure <- Some failure);
+       state.keeper_waiting_failure <- Some failure
+
+let accept_keeper_waiting_observation state ~rows ~waiting =
+  preserve_keeper_list_selection state (fun () -> update_keeper_waiting state ~rows ~waiting)
+
+let accept_keeper_turn_observation ?(accept_waiting = true) state ~rows ~waiting ~observed_at =
+  preserve_keeper_list_selection state (fun () ->
+    state.keeper_turns <- rows;
+    if accept_waiting then update_keeper_waiting state ~rows ~waiting;
     state.keeper_turns_observed_at <- Some observed_at;
     state.keeper_turns_error <- None)
 
@@ -13396,7 +13680,7 @@ let keeper_settings_save_notice state =
             | Settings_observation_required _ | Settings_unconfirmed _) as outcome)) ->
             if attempt.ksa_recoverable then
               let recovery = match attempt.ksa_request.ksv_input with
-                | Settings_editor_input _ -> "e reloads current and restores changed values"
+                | Settings_editor_input _ -> "e/E reloads current and restores changed values"
                 | Sandbox_shortcut_input _ -> "Sandbox d/m/s reads current and saves the selected profile" in
               Some (label ^ " · " ^ keeper_settings_save_outcome_detail outcome ^ " · " ^ recovery)
             else None
@@ -13408,7 +13692,7 @@ let reconcile_keeper_settings_editor state ~available =
       retire_keeper_settings_editor state; true
   | Some _ | None -> false
 
-let begin_keeper_settings_editor state ~available ~started_ns =
+let begin_keeper_settings_editor state ~format ~available ~started_ns =
   ignore (reconcile_keeper_settings_editor state ~available);
   let ready_waiting = match state.keeper_settings_intent with
     | Some request when keeper_settings_request_current state request ->
@@ -13425,7 +13709,7 @@ let begin_keeper_settings_editor state ~available ~started_ns =
        | Already_loading -> None
        | Started (reading, ticket) ->
            supersede_keeper_settings_read state None;
-           let request = {ksr_request=ticket;ksr_reading=state.workspace_read_authority;
+           let request = {ksr_request=ticket;ksr_format=format;ksr_reading=state.workspace_read_authority;
              ksr_owner=ref ();ksr_expected=expected;ksr_started_ns=started_ns} in
            state.keeper_settings_editor <- reading;
            state.keeper_settings_intent <- Some request;
@@ -13542,11 +13826,18 @@ let suspend_task_documents state =
     set_task_document_slot state part {slot with tds_reading=reading;tds_request=None})
     [Masc_tui_task_document.Body;History]
 
+let invalidate_task_history_document state =
+  let slot = state.task_document_history in
+  state.task_document_history <- {slot with
+    tds_reading=Masc_tui_fetched.clear slot.tds_reading;tds_previous=None}
+
 let suspend_tools_async_task state =
   state.tools_async_task_body <- Masc_tui_fetched.suspend state.tools_async_task_body;
   state.tools_async_task_history <- Masc_tui_fetched.suspend state.tools_async_task_history;
   state.tools_async_task_body_request <- None;
-  state.tools_async_task_history_request <- None
+  state.tools_async_task_history_request <- None;
+  state.tools_task_visit <- ref ();
+  state.tools_task_follow_end <- None
 
 let suspend_tools_async_detail state =
   suspend_tools_async_task state;
@@ -13563,7 +13854,9 @@ let withdraw_tools_async_details state =
   state.tools_async_task_body <- Masc_tui_fetched.clear state.tools_async_task_body;
   state.tools_async_task_history <- Masc_tui_fetched.clear state.tools_async_task_history;
   state.tools_async_task_body_request <- None;
-  state.tools_async_task_history_request <- None
+  state.tools_async_task_history_request <- None;
+  state.tools_task_visit <- ref ();
+  state.tools_task_follow_end <- None
 
 let tools_async_source_task state =
   let module Detail = Masc.Tui_decode_async_request in
@@ -13839,7 +14132,14 @@ let suspend_workspace_readings state =
   state.chat_call_pending <- None;
   state.task_history <- Masc_tui_fetched.suspend state.task_history;
   state.task_history_request <- None;
+  state.task_history_last_reading <- None;
   suspend_task_documents state;
+  (match state.task_document_history.tds_previous with
+   | Some ({tdk_target=Work_task_document task_id;_},_,_)
+     when state.view=Planning && state.planning_mode=Planning_list
+          && state.task_detail_id=Some task_id -> ()
+   | Some ({tdk_target=Work_task_document _;_},_,_) -> invalidate_task_history_document state
+   | Some ({tdk_target=Async_task_document _;_},_,_) | None -> ());
   suspend_tools_async_detail state;
   retire_keeper_settings_editor state;
   suspend_keeper_logs state;
@@ -13883,6 +14183,7 @@ let suspend_workspace_readings state =
   state.workspace_observation_cancellations <- [];
   List.iter (fun (_, cancel) -> cancel ()) cancellations;
   state.observer <- Observer_off;
+  state.observer_retry_owner <- None;
   state.fleet_stream_reader <- Fleet_stream_idle;
   state.detail_read_authority <- ref ();
   state.detail_reads <- [];
@@ -13930,6 +14231,7 @@ let suspend_workspace_readings state =
   state.lane_addons_reading <- None;
   state.board_detail <- Masc_tui_board_detail.suspend state.board_detail;
   state.acting_pane_changes <- Masc_tui_fetched.suspend state.acting_pane_changes;
+  state.acting_pane_changes_loss_followup <- None;
   state.prompts <- Masc_tui_fetched.suspend state.prompts;
   state.preset_detail <- Masc_tui_fetched.suspend state.preset_detail;
   state.keeper_board_quarantines <- Masc_tui_fetched.suspend state.keeper_board_quarantines;
@@ -13951,6 +14253,9 @@ let suspend_workspace_readings state =
   state.code_lsp_query <- Masc_tui_fetched.suspend state.code_lsp_query;
   state.code_location_offer <- None;
   state.fusion_runs <- Masc_tui_fetched.suspend state.fusion_runs;
+  state.fusion_runs_reread_pending <- false;
+  state.fusion_runs_awaiting_observer <- false;
+  state.fusion_runs_open_at_start <- None;
   (match state.goal_confirmation with
    | Masc_tui_planning_detail.Inspecting reading ->
        state.goal_confirmation <- Masc_tui_planning_detail.Inspecting
@@ -13996,9 +14301,14 @@ let suspend_workspace_readings state =
   state.verification_inflight <- false;
   state.verification_refresh_after_inflight <- false;
   state.fusion_detail_inflight <- None;
+  state.fusion_detail_reread_pending <- false;
+  state.fusion_detail_awaiting_observer <- false;
   state.fusion_historical_inflight <- None;
+  state.fusion_historical_reread_pending <- false;
+  state.fusion_historical_awaiting_observer <- false;
   state.lane_runs_loading <- false;
   state.schedule_wake_history_inflight <- None;
+  state.keeper_waiting_read <- Keeper_waiting_read.suspend state.keeper_waiting_read;
   state.keeper_turns_inflight <- false;
   state.msg_preparation_details <- Masc_tui_preparation_details.empty;
   state.keeper_calls_loading <- false;
@@ -14009,6 +14319,7 @@ let suspend_workspace_readings state =
     | Some request -> Keeper_history_read.page_pending request
     | None -> false in
   state.msg_history_inflight <- None;
+  state.msg_history_loss_followup <- None;
   (* A cold page is refresh preparation, not an explicit older-page demand.
      Normal eligible history dispatch can request it again. A scrolled view
      retains its cached source and uses explicit refresh/paging instead. *)
@@ -14661,11 +14972,20 @@ let abandon_fusion_launch (state : state) =
 let withdraw_fusion_workspace (state : state) =
   ignore (abandon_fusion_launch state);
   state.fusion_runs <- Masc_tui_fetched.clear state.fusion_runs;
+  state.fusion_runs_reread_pending <- false;
+  state.fusion_runs_awaiting_observer <- false;
+  state.fusion_runs_open_at_start <- None;
   state.fusion_detail_generation <- state.fusion_detail_generation + 1;
   state.fusion_detail_inflight <- None;
+  state.fusion_detail_reread_pending <- false;
+  state.fusion_detail_awaiting_observer <- false;
   state.fusion_historical_inflight <- None;
+  state.fusion_historical_reread_pending <- false;
+  state.fusion_historical_awaiting_observer <- false;
   state.fusion_detail <- None;
+  state.fusion_detail_stale <- false;
   state.fusion_historical_detail <- None;
+  state.fusion_historical_detail_stale <- false;
   state.fusion_detail_error <- None;
   state.fusion_launch_error <- None;
   state.fusion_mode <- Fusion_list;
@@ -15961,6 +16281,11 @@ let advance_keeper_chat_control state keeper_name =
     List.remove_assoc keeper_name state.keeper_chat_control_generations;
   generation
 
+let advance_keeper_interactive_control state keeper_name =
+  let generation = advance_keeper_chat_control state keeper_name in
+  note_keeper_waiting_change state (Waiting_keepers [keeper_name]);
+  generation
+
 (* A server control that stops or resumes the owner supersedes the priority
    requests still waiting locally for that Keeper. *)
 let clear_keeper_priority_requests state keeper_name =
@@ -15995,6 +16320,7 @@ let begin_keeper_chat_control ?(preserve_input_holds = false)
     ?(preserve_priority_requests = false) state keeper_name =
   let previous_generation = keeper_chat_control_generation state keeper_name in
   let generation = advance_keeper_chat_control state keeper_name in
+  note_keeper_waiting_change state (Waiting_keepers [keeper_name]);
   state.keeper_chat_control_pending <- (keeper_name, Mtime_clock.elapsed_ns ()) :: List.remove_assoc keeper_name state.keeper_chat_control_pending;
   state.keeper_chat_control_tokens <- List.remove_assoc keeper_name state.keeper_chat_control_tokens;
   if not preserve_priority_requests then clear_keeper_priority_requests state keeper_name;
@@ -17530,6 +17856,46 @@ let usage_providers_reading (state : state) =
       Providers_read {reading with puws_accounts=List.filter (fun account ->
         String.equal account.Masc.Tui_decode_usage.pua_scope_id scope_id) reading.puws_accounts}
 
+let reset_metrics_scroll (state : state) =
+  state.metrics_scroll <- 0;
+  state.metrics_content_height <- 0;
+  state.metrics_scroll_card_rows <- None
+
+(* When workspace presentation is withdrawn, retire its usage observations
+   together. A matched workspace that becomes unconfirmed suspends reads
+   without withdrawing this presentation. *)
+let withdraw_usage_workspace (state : state) =
+  state.transport <- None;
+  state.transport_error <- None;
+  state.overview_quota <- Quota_unread;
+  state.overview_providers <- Providers_unread;
+  state.keeper_usage <- Keeper_usage_unread;
+  state.provider_history <- Provider_history_unread;
+  state.overview_account_emails <- Account_emails_unread;
+  state.usage_scope_id <- None;
+  reset_metrics_scroll state
+
+(* A later navigation can own a dataset from the previous workspace when a
+   full refresh confirms its successor. That navigation is retired at the
+   authority change, so visible unread datasets need a new workspace read. *)
+let revalidate_workspace_surfaces (state : state) ~workspace_moved ~(needs : surface_needs) =
+  workspace_moved && match state.workspace_identity with
+  | Workspace_identity_match -> true
+  | Workspace_identity_mismatch _ ->
+      let server_logs = System_logs_view.page Server state.system_logs in
+      (needs.needs_transport && Option.is_none state.transport && Option.is_none state.transport_error)
+      || (needs.needs_system_logs && Option.is_none server_logs.lp_snapshot && Option.is_none server_logs.lp_error)
+      || (needs.needs_runtime_quota &&
+          ((match state.overview_quota with Quota_unread -> true | Quota_read _ | Quota_failed _ -> false)
+           || (match state.overview_providers with Providers_unread -> true | Providers_read _ | Providers_failed _ -> false)))
+      || (needs.needs_keeper_usage &&
+          (match state.keeper_usage with Keeper_usage_unread -> true | Keeper_usage_read _ | Keeper_usage_error _ -> false))
+      || (needs.needs_provider_history &&
+          (match state.provider_history with Provider_history_unread -> true | Provider_history_read _ | Provider_history_error _ -> false))
+      || (needs.needs_account_emails &&
+          (match state.overview_account_emails with Account_emails_unread -> true | Account_emails_read _ | Account_emails_failed _ -> false))
+  | Workspace_identity_unread | Workspace_identity_match_unconfirmed _ -> false
+
 (* A period change is an explicit read demand on the same surface. Its
    dataset ticket must supersede the previous period even when cycling back
    to the same number of days; the surface-needs delta cannot express this. *)
@@ -17541,7 +17907,7 @@ let cycle_usage_history_window (state : state) =
      | 7 -> 14
      | 14 | _ -> 1);
   state.provider_history <- Provider_history_unread;
-  state.metrics_scroll <- 0;
+  reset_metrics_scroll state;
   { nothing with needs_provider_history = true }
 
 let usage_history_reading (state : state) =
@@ -17565,6 +17931,79 @@ let board_post_on_screen (state : state) =
     | Planning | Schedules | Verification | Harness | Fusion | Repositories | Changes
     | Connectors | Runtime | Config | Resources | Tools | Code | System_logs), _
   | Board, (Board_list | Board_compose) -> None
+
+let board_diagram_subject (state : state) =
+  Option.bind (board_post_on_screen state) (fun post ->
+    if not state.board_comments_focused then
+      Some (Board_post_diagram {post_id=post.bp_id; body=post.bp_body})
+    else
+      match Masc_tui_board_detail.view_for state.board_detail ~post_id:post.bp_id,
+            state.board_comment_cursor with
+      | Ready (_, comments, _), Some comment_id ->
+          List.find_opt (fun comment -> comment.bc_id = comment_id) comments
+          |> Option.map (fun comment -> Board_comment_diagram
+               {post_id=post.bp_id; comment_id; body=comment.bc_content})
+      | (Absent | Loading | Failed _ | Ready _), _ -> None)
+
+let board_preview_subject_is_current state subject =
+  match subject with
+  | Board_diagram subject ->
+      board_diagram_subject state = Some subject
+  | Board_attachment_image {post_id; attachment} ->
+      (match board_post_on_screen state with
+       | Some post -> post.bp_id = post_id
+           && List.exists (( = ) (Ok attachment)) post.bp_attachments
+       | None -> false)
+
+let image_keeper_is_current (state : state) ~view ~keeper_name =
+  view = Resources || view = Board || keeper_name = state.msg_target_keeper_name
+
+(* Local files, drafts and explicit remote URLs survive peer reconfirmation
+   but never a workspace replacement. Peer images retain their exact reading.
+   Completion, retirement and footer projection use this same admission. *)
+let image_reading_is_current (state : state) (pending : sent_image_read) =
+  let same_skill = match pending.sir_skill_reference with
+    | None -> true
+    | Some reference ->
+        (match selected_tools_skill_profile state with
+         | Some profile -> Skill_reference.equal reference profile.esp_reference
+         | None -> false) in
+  same_skill &&
+  match pending.sir_owner with
+  | Local_file_image_read authority -> authority = state.workspace_authority
+  | Remote_url_image_read authority -> authority = state.workspace_authority
+  | Draft_image_read (authority, attachment) ->
+    authority = state.workspace_authority
+    && List.exists (fun current -> current == attachment) state.msg_attachments
+  | Peer_image_read reading ->
+    reading == state.workspace_read_authority
+    && (pending.sir_view <> Resources
+        || (Masc_tui_resource_images.same_reading
+              ~equal:Masc_tui_resource_catalog.equal_key
+              pending.sir_resource state.resource_content
+            && Option.is_none state.resource_pending_key
+            && Option.is_none state.resource_content_error))
+  | Board_image_read (reading, subject, _) ->
+    reading == state.workspace_read_authority && server_authority_ready state
+    && pending.sir_view = Board && board_preview_subject_is_current state subject
+
+(* A completion belongs to the exact read that launched it, even if a later
+   read happens to have the same name, surface and generation. *)
+let take_image_read (state : state) (request : sent_image_read) =
+  match state.sent_image_read with
+  | Some pending when pending == request ->
+      state.sent_image_read <- None;
+      if image_reading_is_current state pending then Some pending else None
+  | Some _ | None -> None
+
+(* Inspection rerasterization stays in flight until its worker returns. Only
+   an unopened preview is withdrawn by a new operator gesture. *)
+let withdraw_image_open (state : state) =
+  match state.sent_image_read with
+  | Some ({sir_purpose=Open_image;_} as pending) ->
+      state.sent_image_read <- None;
+      Some pending
+  | Some {sir_purpose=Inspect_image _;_} | None -> None
 
 let board_successor (state : state) =
   Option.bind (board_post_on_screen state) (fun post ->
@@ -17638,14 +18077,14 @@ let keeper_peer_frame_owner_changed ~presented ~candidate =
 let current_board_reader (state : state) =
   match state.board_reader_owner, Masc_tui_board_reader.key state.board_reader,
         board_post_on_screen state with
-  | Some (authority,reading),Some key,Some post
+  | Some (authority,reading,kind),Some key,Some post
     when authority=state.workspace_authority && reading==state.workspace_read_authority
       && server_authority_ready state && post.bp_id=key.post_id ->
     if List.exists (function
-      | Ok {ba_kind=(Ak_file|Ak_score);ba_source=As_artifact {sha256;bytes};ba_name} ->
-        sha256=key.sha256 && bytes=key.bytes && ba_name=key.name
-      | Ok {ba_kind=(Ak_file|Ak_score);ba_source=As_url _;_}
-      | Ok {ba_kind=(Ak_image|Ak_video|Ak_youtube|Ak_external_link|Ak_audio|Ak_midi|Ak_unknown _);_}
+      | Ok {ba_kind=(Ak_file|Ak_score|Ak_image as current_kind);ba_source=As_artifact {sha256;bytes};ba_name} ->
+        current_kind=kind && sha256=key.sha256 && bytes=key.bytes && ba_name=key.name
+      | Ok {ba_kind=(Ak_file|Ak_score|Ak_image);ba_source=As_url _;_}
+      | Ok {ba_kind=(Ak_video|Ak_youtube|Ak_external_link|Ak_audio|Ak_midi|Ak_unknown _);_}
       | Error _ -> false) post.bp_attachments then Some state.board_reader else None
   | Some _,Some _,Some _ | None,_,_ | _,None,_ | _,_,None -> None
 
@@ -17997,22 +18436,53 @@ let complete_goal_timeline_read (state : state) request result =
       Error (Masc_tui_planning_detail.timeline_unavailability_detail failure)) in
   state.goal_timeline <- Masc_tui_fetched.complete ~equal:String.equal state.goal_timeline request result
 
-let begin_task_history_read ?(older=false) (state : state) ~task_id ~limit =
-  match begin_history_page ~task_id ~limit ~older ~equal:String.equal ~key:task_id
+let begin_task_history_read ?(older=false) ?(progressive=false) (state : state) ~task_id ~limit =
+  match begin_history_page ~progressive ~task_id ~limit ~older ~equal:String.equal ~key:task_id
     ~authority:state.workspace_read_authority state.task_history with
   | None -> None
   | Some (reading,request) ->
     state.task_history <- reading;
     state.task_history_request <- Some request;Some request
 
-let complete_task_history_read (state : state) request result =
-  if request.thr_reading==state.workspace_read_authority
+let task_history_request_current (state : state) request =
+  request.thr_reading==state.workspace_read_authority
     && Option.exists (fun current -> current==request) state.task_history_request
     && Masc_tui_fetched.is_current ~equal:String.equal state.task_history request.thr_ticket
-  then begin
+
+let task_history_followup state request result =
+  if task_history_request_current state request
+  then history_followup_limit request result else None
+
+let complete_task_history_read (state : state) request result =
+  if task_history_request_current state request then begin
     state.task_history_request <- None;
+    (match result with Ok _ -> state.task_history_last_reading <- Some request.thr_reading
+     | Error _ -> ());
     state.task_history <- Masc_tui_fetched.complete ~equal:String.equal state.task_history request.thr_ticket result
   end
+
+(* Reopening may show a previous observation while the next read is in flight,
+   but only when the Task and the confirmed workspace reading still own it. *)
+let task_history_owned_by state ~task_id =
+  let same_reading = Option.exists (fun owner -> owner == state.workspace_read_authority)
+      state.task_history_last_reading in
+  let has_observation = Option.exists (fun (_,view) ->
+    Option.is_some (Masc_tui_fetched.value view)) (Masc_tui_fetched.current state.task_history) in
+  state.workspace_identity = Workspace_identity_match
+  && server_authority_ready state && same_reading && has_observation
+  && Option.equal String.equal (Masc_tui_fetched.current_key state.task_history) (Some task_id)
+
+let prepare_task_history_for_open state ~task_id =
+  if not (task_history_owned_by state ~task_id) then begin
+    state.task_history <- Masc_tui_fetched.clear state.task_history;
+    state.task_history_last_reading <- None;
+    invalidate_task_history_document state
+  end
+
+let cancel_task_history_for_view_exit state =
+  state.task_history <- Masc_tui_fetched.cancel_pending
+    ~reason:"Task view closed before history loaded." state.task_history;
+  state.task_history_request <- None
 
 let ui_text (state : state) ~ko ~en =
   match state.ui_language with
@@ -18023,7 +18493,8 @@ let withdraw_detail_histories (state : state) =
   clear_task_documents state;
   state.goal_timeline <- Masc_tui_fetched.clear state.goal_timeline;
   state.task_history <- Masc_tui_fetched.clear state.task_history;
-  state.task_history_request <- None
+  state.task_history_request <- None;
+  state.task_history_last_reading <- None
 
 let create_state
     ?(reasoning_visibility = Reasoning_folded)
@@ -18050,11 +18521,13 @@ let create_state
   credential_preparation = Masc_tui_credential_preparation.create ();
   home_chat_visit = None;
   metrics_scroll = 0;
+  metrics_content_height = 0;
+  metrics_scroll_card_rows = None;
   metrics_section = Section_fleet;
   usage_telemetry_open = false;
   usage_section = Usage_plan;
   usage_scope_id = None;
-  usage_show_unusable = false;
+  usage_show_limit_exhausted = false;
   agents = [];
   tasks = [];
   task_payloads = Task_payloads.empty;
@@ -18146,6 +18619,7 @@ let create_state
   acting_pane_expanded = [];
   acting_chunk_projection = None;
   acting_pane_changes = Masc_tui_fetched.initial;
+  acting_pane_changes_loss_followup = None;
   acting_pane_changes_at = None;
   roster_marquee_frame = 0;
   activity_frame = -1;
@@ -18355,6 +18829,8 @@ let create_state
   github_identity_view_error = None;
   task_detail_id = None;
   task_detail_scroll = 0;
+  task_detail_presented = None;
+  task_detail_follow_end = None;
   tasks_error = None;
   events = [];
   keepers = [];
@@ -18433,6 +18909,7 @@ let create_state
   goal_timeline = Masc_tui_fetched.initial;
   task_history = Masc_tui_fetched.initial;
   task_history_request = None;
+  task_history_last_reading = None;
   task_document_body = initial_task_document_slot;
   task_document_history = initial_task_document_slot;
   verification_evidence = Masc_tui_fetched.initial;
@@ -18496,8 +18973,13 @@ let create_state
   keeper_turns = [];
   keeper_waiting = [];
   keeper_waiting_failure = None;
+  keeper_waiting_unverified = [];
+  keeper_waiting_error = None;
+  keeper_waiting_epoch = 0;
+  keeper_waiting_versions = [];
   keeper_turns_error = None;
   keeper_turns_inflight = false;
+  keeper_waiting_read = Keeper_waiting_read.idle;
   msg_preparation_details = Masc_tui_preparation_details.empty;
   keeper_observed_interrupts = [];
   keeper_run_next_inflight = [];
@@ -18546,6 +19028,8 @@ let create_state
   board_comment_scroll = 0;
   board_comments_focused = false;
   board_comment_cursor = None;
+  board_diagram_cursor = None;
+  board_image_selection = None;
   board_comment_follow = false;
   board_mode = Board_list;
   board_focus = Right_pane;
@@ -18647,6 +19131,9 @@ let create_state
   skills_catalog = None;
   skills_catalog_error = None;
   tools_scroll = 0;
+  tools_task_visit = ref ();
+  tools_task_follow_end = None;
+  tools_task_presented = None;
   tools_skill_cursor = 0;
   tools_skill_source_picker = None;
   tools_skill_create_drafts = [];
@@ -18819,22 +19306,36 @@ let create_state
   harness_detail = None;
   harness_detail_scroll = 0;
   fusion_runs = Masc_tui_fetched.initial;
+  fusion_runs_reread_pending = false;
+  fusion_runs_awaiting_observer = false;
+  fusion_runs_open_at_start = None;
   fusion_launch_error = None;
   fusion_cursor = 0;
   fusion_scroll = 0;
   fusion_mode = Fusion_list;
   fusion_detail = None;
   fusion_detail_error = None;
+  fusion_detail_stale = false;
   fusion_detail_generation = 0;
   fusion_detail_inflight = None;
+  fusion_detail_reread_pending = false;
+  fusion_detail_awaiting_observer = false;
   fusion_historical_detail = None;
+  fusion_historical_detail_stale = false;
   fusion_historical_inflight = None;
+  fusion_historical_reread_pending = false;
+  fusion_historical_awaiting_observer = false;
   fusion_launch = None;
   fusion_launch_generation = 0;
   observer = Observer_off;
+  observer_retry_owner = None;
+  observer_recovery_owner = None;
+  observer_scope_binding = Observer_scope_unbound;
   mcp_session = None;
   observer_cursor = None;
   observer_replay = Observer_replay_unobserved;
+  observer_source_loss = false;
+  observer_source_loss_sequences = [];
   acting = [];
   acting_dropped = 0;
   acting_undecodable = 0;
@@ -18872,6 +19373,7 @@ let create_state
   msg_recall_walk = None;
   msg_recall_edits = [];
   msg_live = None;
+  msg_presented_tool_approval = None;
   msg_loaded_sources = empty_keeper_chat_sources;
   msg_loaded = [];
   msg_loaded_pages = [];
@@ -18889,6 +19391,7 @@ let create_state
   msg_memory_dropped = 0;
   msg_history_load_generation = 0;
   msg_history_inflight = None;
+  msg_history_loss_followup = None;
   msg_copy_generation = 0;
   msg_copy_pending = None;
   chat_command_reads = [];
@@ -19228,6 +19731,7 @@ let restore_keeper_chat_page (state : state) keeper_name =
      restored during A -> B -> A, even before the next GET starts. *)
   state.msg_history_load_generation <- state.msg_history_load_generation + 1;
   state.msg_history_inflight <- None;
+  state.msg_history_loss_followup <- None;
   state.msg_older_loading <- false;
   match List.assoc_opt keeper_name state.msg_loaded_pages with
   | Some page ->
@@ -19761,7 +20265,7 @@ let composer_extra_rows (state : state) =
     drawing reaching back into the state it is drawing from: the drawing is a
     function of the state again, and every write lives on one side of it. *)
 type clamped_scroll =
-  | Task_detail of int
+  | Task_detail of int * (int * int) option
   | Board_read of (int * int)
   | Message_scroll of chat_scroll_position
   | Schedule_detail_scroll of int
@@ -19807,7 +20311,7 @@ type clamped_scroll =
      took one press per step taken beyond it. Named here so End can reach the
      bottom of a section at all -- without a report there is nothing to
      correct the row it names. *)
-  | Metrics_scroll of int
+  | Metrics_scroll of { scroll : int; content_height : int; card_rows : int option }
   | Approval_detail_scroll of int
   (* Both modals draw over a surface rather than being one, and both counted
      their rows the same way the diff does: the patch modal out of the recorded
@@ -19838,6 +20342,21 @@ type clamped_scroll =
      the stored value past it until the frame says where it drew from. *)
   | Context_inspector_scroll of int
   | Context_inspector_response_scroll of int
+
+let task_detail_of_reader = function
+  | Some (Task_detail (offset, viewport)) -> Some (offset, viewport)
+  | Some (Planning_list_page_rows _ | Board_read _ | Message_scroll _ | Schedule_detail_scroll _
+         | Keeper_detail _ | Keeper_terminal_scroll _ | Keeper_calls _ | Keeper_logs_scroll _ | Acting _
+         | Acting_selection _ | Acting_detail_scroll _ | Memory_fact_detail_scroll _
+         | Client_detail_scroll _ | Verification_detail_scroll _ | Harness_detail_scroll _
+         | Fusion_detail_scroll _ | Runtime_detail_scroll _ | Runtime_params_scroll _
+         | System_log_detail_scroll _ | Planning_confirmation_scroll _ | Planning_detail_scroll _
+         | Lane_run_detail_scroll _ | Changes_diff_scroll _ | Repository_changes_diff_scroll _
+         | Resource_scroll _ | Metrics_scroll _ | Approval_detail_scroll _ | Patch_modal_scroll _
+         | Link_modal_scroll _ | Play_invite_scroll _ | Voice_scroll _ | Preset_detail_scroll _
+         | Keeper_list_scroll _ | Context_inspector_scroll _ | Context_inspector_response_scroll _
+         | Queue_panel_presented _ | Help_presented)
+  | None -> None
 
 let play_card_of_reader = function
   | Some (Play_invite_scroll (card, _)) -> Some card
@@ -19921,7 +20440,7 @@ let scroll_down_from scroll ~by =
   if scroll > max_int - by then max_int else scroll + by
 
 let apply_clamped_scroll (state : state) = function
-  | Task_detail value -> state.task_detail_scroll <- value
+  | Task_detail (value, _) -> state.task_detail_scroll <- value
   | Board_read (body, comments) ->
       state.board_scroll <- body;
       state.board_comment_scroll <- comments;
@@ -19962,7 +20481,10 @@ let apply_clamped_scroll (state : state) = function
   | Repository_changes_diff_scroll value ->
       state.repository_changes_diff_scroll <- value
   | Resource_scroll value -> state.resource_scroll <- value
-  | Metrics_scroll value -> state.metrics_scroll <- value
+  | Metrics_scroll { scroll; content_height; card_rows } ->
+      state.metrics_scroll <- scroll;
+      state.metrics_content_height <- content_height;
+      state.metrics_scroll_card_rows <- card_rows
   | Approval_detail_scroll value -> state.approval_detail_scroll <- value
   | Patch_modal_scroll (vertical, horizontal) ->
       state.patch_modal_scroll <- vertical;
@@ -20060,9 +20582,18 @@ let sync_task_documents state ~cols =
     | None ->
       Option.iter (fun request -> Observation.observe request.tdr_observation
         (Retired Source_unavailable)) slot.tds_request;
-      if Option.is_some (Masc_tui_fetched.current_key slot.tds_reading)
-          || Option.is_some slot.tds_previous || Option.is_some slot.tds_request then
-        set_task_document_slot state part {tds_reading=Masc_tui_fetched.clear slot.tds_reading;tds_request=None;tds_previous=None};
+      let previous = match part,slot.tds_previous with
+        | History,Some ({tdk_target=Work_task_document task_id;_},Some owner,_)
+          when owner == state.workspace_read_authority && task_history_owned_by state ~task_id -> slot.tds_previous
+        | History,(None | Some ({tdk_target=(Work_task_document _ | Async_task_document _);_},_,_))
+        | Masc_tui_task_document.Body,(None | Some _) -> None in
+      let reading = match Masc_tui_fetched.current slot.tds_reading,previous with
+        | Some (key,Masc_tui_fetched.Ready _),Some (old,_,_)
+          when not (Masc_tui_fetched.in_flight slot.tds_reading) && equal_task_document_key key old ->
+          slot.tds_reading
+        | (None | Some (_, (Absent | Loading | Ready _ | Stale _ | Failed _))), (None | Some _) ->
+          Masc_tui_fetched.clear slot.tds_reading in
+      set_task_document_slot state part {tds_reading=reading;tds_request=None;tds_previous=previous};
       None
     | Some key ->
       match Masc_tui_fetched.view_for ~equal:equal_task_document_key slot.tds_reading ~key with
@@ -20113,8 +20644,14 @@ let complete_task_document state ~cols request result =
     end;
     Observation.observe request.tdr_observation (Ui_disposition (Rejected reason))
   | None ->
+    let previous_owner = match part,key.tdk_target with
+      | History,Work_task_document task_id ->
+        if task_history_owned_by state ~task_id then Some request.tdr_reading else None
+      | History,Async_task_document _
+      | Masc_tui_task_document.Body,(Work_task_document _ | Async_task_document _) ->
+        Some request.tdr_reading in
     set_task_document_slot state part {tds_request=None;
-      tds_previous=(match result with Ok rows -> Some (key,rows) | Error _ -> slot.tds_previous);
+      tds_previous=(match result with Ok rows -> Some (key,previous_owner,rows) | Error _ -> slot.tds_previous);
       tds_reading=Masc_tui_fetched.complete ~equal:equal_task_document_key slot.tds_reading request.tdr_ticket result};
     Observation.observe request.tdr_observation (Ui_disposition (match result with Ok _ -> Applied | Error _ -> Applied_failure))
 
@@ -20128,7 +20665,7 @@ let task_document_lines state ~cols part =
     let notice text = Masc_tui_text_block.rows
       ~max_cells:(max 1 (Masc_tui_frame.inner_width ~cols)) text in
     let previous=match slot.tds_previous with
-      | Some (old,rows) when equal_task_document_target old.tdk_target key.tdk_target
+      | Some (old,_,rows) when equal_task_document_target old.tdk_target key.tdk_target
           && Masc_tui_task_document.columns old.tdk_input=cols -> rows
       | Some _ | None -> [] in
     match Masc_tui_fetched.view_for ~equal:equal_task_document_key slot.tds_reading ~key with
@@ -20151,6 +20688,254 @@ let task_document_lines state ~cols part =
 let task_documents_pending state =
   Masc_tui_fetched.in_flight state.task_document_body.tds_reading
   || Masc_tui_fetched.in_flight state.task_document_history.tds_reading
+
+(* The last emitted Task viewport is the authority for a key pressed while a
+   newer history or document is waiting to be drawn. *)
+let task_detail_owner state =
+  if state.view <> Planning || state.planning_mode <> Planning_list
+     || not (Masc_tui_overview_tasks.is_focused state.task_focus) then None
+  else match state.task_detail_id with
+    | Some id when List.exists (fun (task : Masc_domain.task) -> task.id = id)
+                         (task_domain_values state) ->
+      Some { tdo_task_id = id; tdo_reading = state.workspace_read_authority }
+    | Some _ | None -> None
+
+let same_task_detail_owner a b =
+  a.tdo_task_id = b.tdo_task_id && a.tdo_reading == b.tdo_reading
+
+let task_detail_owner_current state owner =
+  Option.exists (same_task_detail_owner owner) (task_detail_owner state)
+
+let task_detail_owner_in_scope state owner =
+  let current = task_detail_owner_current state owner in
+  state.view = Planning && state.planning_mode = Planning_list
+  && Masc_tui_overview_tasks.is_focused state.task_focus
+  && state.task_detail_id = Some owner.tdo_task_id
+  && state.workspace_read_authority == owner.tdo_reading
+  (* An unavailable or degraded local read cannot prove Task removal. A
+     recovered backup can omit newer Tasks; unrelated archive errors also make
+     this conservative, but must never turn an uncertain absence into fact. *)
+  && match state.task_reading,state.tasks_error with
+     | (Masc_tui_overview_tasks.Rows_unread | Rows_unavailable _),_ -> true
+     | Rows_read _,Some _ -> true
+     | Rows_read _,None -> current
+
+let task_history_request_in_scope state request =
+  task_detail_owner_in_scope state
+    {tdo_task_id=Masc_tui_fetched.request_key request.thr_ticket;
+     tdo_reading=request.thr_reading}
+
+let task_detail_end_in_scope state owner =
+  task_detail_owner_in_scope state owner
+  && match state.task_focus with
+     | Masc_tui_overview_tasks.No_task_focus -> false
+     | Task_focus {selected=None} -> true
+     | Task_focus {selected=Some selected} -> selected = owner.tdo_task_id
+
+let task_detail_following_end state =
+  Option.exists (task_detail_owner_current state) state.task_detail_follow_end
+
+let current_task_detail_presented state =
+  match state.task_detail_presented with
+  | Some shown when task_detail_owner_current state shown.tdp_owner -> Some shown
+  | Some _ | None -> None
+
+let task_detail_reader_withdrawn state reader =
+  Option.is_some (task_detail_of_reader reader)
+  && Option.is_none (current_task_detail_presented state)
+
+let task_detail_viewport_changed state ~count ~height =
+  match current_task_detail_presented state with
+  | None -> true
+  | Some shown -> count <> shown.tdp_count || height <> shown.tdp_height
+
+let reconcile_task_detail_scroll state =
+  (* An unread or degraded backlog hides the viewport, but does not prove
+     that its Task disappeared. Keep the pending End until the same owner is
+     visible again or an explicit navigation/workspace change retires it. *)
+  if not (Option.exists (task_detail_end_in_scope state) state.task_detail_follow_end)
+  then state.task_detail_follow_end <- None;
+  if Option.is_none (current_task_detail_presented state) then
+    state.task_detail_presented <- None
+
+let task_documents_waiting state ~cols =
+  let body, history_document = task_document_inputs state ~cols in
+  let preparing part key = match key with
+    | None -> false
+    | Some key ->
+      let slot = task_document_slot state part in
+      match Masc_tui_fetched.view_for ~equal:equal_task_document_key slot.tds_reading ~key with
+      | Masc_tui_fetched.Absent | Loading -> true
+      | Ready _ | Stale _ | Failed _ ->
+        Masc_tui_fetched.in_flight slot.tds_reading
+        && Option.exists (equal_task_document_key key)
+             (Masc_tui_fetched.current_key slot.tds_reading) in
+  preparing Masc_tui_task_document.Body body
+  || preparing Masc_tui_task_document.History history_document
+
+let task_detail_waiting state ~task_id ~cols =
+  (Masc_tui_fetched.in_flight state.task_history
+   && Option.equal String.equal (Masc_tui_fetched.current_key state.task_history)
+        (Some task_id))
+  || task_documents_waiting state ~cols
+
+let task_detail_select_end state ~cols =
+  match current_task_detail_presented state with
+  | None ->
+    (* Enter and End can arrive before the first Task frame is emitted. *)
+    state.task_detail_follow_end <- task_detail_owner state
+  | Some shown ->
+    state.task_detail_scroll <-
+      Masc_tui_scroll.maximum ~count:shown.tdp_count ~height:shown.tdp_height;
+    state.task_detail_follow_end <-
+      if shown.tdp_waiting || task_detail_waiting state ~task_id:shown.tdp_owner.tdo_task_id ~cols
+      then Some shown.tdp_owner else None
+
+let task_detail_cancel_follow_end state = state.task_detail_follow_end <- None
+
+let task_list_user_focus state focus =
+  (match state.task_detail_follow_end, focus with
+   | Some _, Masc_tui_overview_tasks.Task_focus {selected=None} -> ()
+   | Some owner, Task_focus {selected=Some selected} when selected=owner.tdo_task_id -> ()
+   | (Some _ | None), (Task_focus _ | No_task_focus) -> task_detail_cancel_follow_end state);
+  state.task_focus <- focus
+
+let task_detail_user_scroll state offset =
+  task_detail_cancel_follow_end state;
+  state.task_detail_scroll <- offset
+
+let task_detail_relative_scroll state offset =
+  if task_detail_following_end state
+     && Option.is_none (current_task_detail_presented state) then false
+  else begin task_detail_user_scroll state offset; true end
+
+let task_detail_presented_viewport state ~fallback =
+  match current_task_detail_presented state with
+  | Some shown -> shown.tdp_count, shown.tdp_height
+  | None -> fallback ()
+
+let task_detail_render_scroll state =
+  if task_detail_following_end state then clamped_scroll_end else state.task_detail_scroll
+
+let task_detail_presented_frame state ~task_id ~count ~height ~offset ~cols =
+  match task_detail_owner state with
+  | Some owner when owner.tdo_task_id = task_id ->
+    let waiting = task_detail_waiting state ~task_id ~cols in
+    state.task_detail_presented <- Some
+      { tdp_owner = owner; tdp_count = count; tdp_height = height; tdp_waiting = waiting };
+    if task_detail_following_end state then begin
+      state.task_detail_scroll <- offset;
+      if not waiting then state.task_detail_follow_end <- None
+    end
+  | Some _ | None ->
+    state.task_detail_presented <- None;
+    state.task_detail_follow_end <- None
+
+let task_detail_forget_frame state = state.task_detail_presented <- None
+
+let reset_task_detail_scroll state =
+  state.task_detail_scroll <- 0;
+  state.task_detail_follow_end <- None;
+  task_detail_forget_frame state
+
+let tools_task_display_owner state =
+  if state.view <> Tools || state.tools_pane <> Tools_async
+     || not state.tools_async_detail_open
+     || Option.is_some state.tools_skill_source_picker then None
+  else match state.tools_async_task_source, state.tools_async_selection with
+    | Some source, Some selection
+      when Masc.Tui_decode_async_request.equal_target selection source.ats_request.target ->
+      Some {tto_source=source; tto_reading=state.workspace_read_authority;
+            tto_visit=state.tools_task_visit}
+    | Some _, (Some _ | None) | None, (Some _ | None) -> None
+
+let tools_task_owner state =
+  if server_authority_ready state
+  then tools_task_display_owner state else None
+
+let same_tools_task_owner a b =
+  a.tto_reading == b.tto_reading
+  && a.tto_visit == b.tto_visit
+  && equal_tools_async_task_source a.tto_source b.tto_source
+
+let tools_task_owner_current state owner =
+  Option.exists (same_tools_task_owner owner) (tools_task_owner state)
+
+let tools_task_display_owner_current state owner =
+  Option.exists (same_tools_task_owner owner) (tools_task_display_owner state)
+
+let current_tools_task_presented state =
+  match state.tools_task_presented with
+  | Some frame when tools_task_display_owner_current state frame.ttf_owner -> Some frame
+  | Some _ | None -> None
+
+let tools_task_reader_withdrawn state =
+  Option.is_some state.tools_task_presented
+  && Option.is_none (current_tools_task_presented state)
+
+let reconcile_tools_task_scroll state =
+  if not (Option.exists (tools_task_owner_current state) state.tools_task_follow_end)
+  then state.tools_task_follow_end <- None
+
+let tools_task_waiting state ~source ~cols =
+  let pending reading =
+    Masc_tui_fetched.in_flight reading
+    && Option.exists (equal_tools_async_task_source source)
+         (Masc_tui_fetched.current_key reading) in
+  pending state.tools_async_task_body || pending state.tools_async_task_history
+  || task_documents_waiting state ~cols
+
+let tools_task_following_end state =
+  Option.exists (tools_task_owner_current state) state.tools_task_follow_end
+
+let tools_task_select_end state =
+  match tools_task_owner state with
+  | None -> false
+  | Some owner ->
+    Option.iter (fun frame ->
+      state.tools_scroll <- Masc_tui_scroll.maximum
+          ~count:frame.ttf_count ~height:frame.ttf_height)
+      (current_tools_task_presented state);
+    state.tools_task_follow_end <- Some owner;
+    true
+
+let tools_task_user_scroll state offset =
+  state.tools_task_follow_end <- None;
+  state.tools_scroll <- offset
+
+let tools_task_relative_scroll state offset =
+  if tools_task_following_end state
+     && Option.is_none (current_tools_task_presented state) then false
+  else begin tools_task_user_scroll state offset; true end
+
+let tools_task_presented_viewport state ~fallback =
+  match current_tools_task_presented state with
+  | Some frame -> frame.ttf_count, frame.ttf_height
+  | None -> fallback ()
+
+let tools_task_render_scroll state =
+  if tools_task_following_end state then clamped_scroll_end else state.tools_scroll
+
+let tools_task_viewport_changed state frame =
+  match current_tools_task_presented state with
+  | None -> true
+  | Some shown ->
+    not (same_tools_task_owner frame.ttf_owner shown.ttf_owner)
+    || frame.ttf_count <> shown.ttf_count || frame.ttf_height <> shown.ttf_height
+    || (shown.ttf_waiting && not frame.ttf_waiting
+        && state.tools_scroll <> frame.ttf_offset)
+
+let tools_task_presented_frame state frame =
+  if tools_task_display_owner_current state frame.ttf_owner then begin
+    state.tools_task_presented <- Some frame;
+    if tools_task_following_end state || not frame.ttf_waiting then
+      state.tools_scroll <- frame.ttf_offset;
+    if tools_task_following_end state && not frame.ttf_waiting
+       && not (tools_task_waiting state ~source:frame.ttf_owner.tto_source ~cols:frame.ttf_cols)
+    then state.tools_task_follow_end <- None
+  end else state.tools_task_presented <- Some frame
+
+let tools_task_forget_frame state = state.tools_task_presented <- None
 
 (* The strip above the composer: what fires next, and who is blocked on the
    operator. Both are already in the state and neither was readable from the

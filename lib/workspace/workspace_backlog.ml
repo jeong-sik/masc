@@ -55,20 +55,107 @@ let decode_backlog ~path json =
     mtime and size cannot be distinguished. A Memory backend may use the same
     path for a different authoritative value, so it neither reads nor populates
     this filesystem cache. *)
+module Task_id_map = Map.Make (String)
+module Task_id_set = Set.Make (String)
+
+type prepared_backlog =
+  { backlog : backlog
+  ; tasks_by_id : task Task_id_map.t
+  ; active_assignees_by_task_id : string Task_id_map.t
+  ; priority_ordered_tasks : task list
+  ; claimable_ordered_tasks : task list
+  }
+
+let compare_task_priority_order (a : task) (b : task) =
+  let priority_cmp = Int.compare a.priority b.priority in
+  if priority_cmp <> 0
+  then priority_cmp
+  else (
+    let created_cmp = String.compare a.created_at b.created_at in
+    if created_cmp <> 0 then created_cmp else String.compare a.id b.id)
+
+let build_prepared_backlog (backlog : backlog) : prepared_backlog =
+  let tasks_by_id, active_assignees_by_task_id =
+    List.fold_left
+      (fun (by_id, active) (task : task) ->
+         (* Preserve first-row precedence so [Task_id_map.find_opt] agrees with
+            [List.find_opt] when a backlog contains duplicate task IDs. *)
+         let by_id =
+           Task_id_map.update
+             task.id
+             (function
+               | Some existing -> Some existing
+               | None -> Some task)
+             by_id
+         in
+         let active =
+           match task.task_status with
+           | Claimed { assignee; _ } | InProgress { assignee; _ } ->
+             Task_id_map.update
+               task.id
+               (function
+                 | Some existing -> Some existing
+                 | None -> Some assignee)
+               active
+           | Todo | AwaitingVerification _ | Done _ | Cancelled _ -> active
+         in
+         by_id, active)
+      (Task_id_map.empty, Task_id_map.empty)
+      backlog.tasks
+  in
+  let priority_ordered_tasks =
+    List.sort compare_task_priority_order backlog.tasks
+  in
+  let claimable_ordered_tasks =
+    List.filter
+      Masc_domain.task_claim_next_action_is_claimable
+      priority_ordered_tasks
+  in
+  { backlog
+  ; tasks_by_id
+  ; active_assignees_by_task_id
+  ; priority_ordered_tasks
+  ; claimable_ordered_tasks
+  }
+
+let last_prepared_backlog : prepared_backlog option Atomic.t = Atomic.make None
+
+let prepare_backlog (backlog : backlog) : prepared_backlog =
+  match Atomic.get last_prepared_backlog with
+  | Some prepared when prepared.backlog == backlog -> prepared
+  | Some _ | None ->
+    let prepared = build_prepared_backlog backlog in
+    Atomic.set last_prepared_backlog (Some prepared);
+    prepared
+
+let find_task_in_backlog_opt (backlog : backlog) (task_id : string) : task option =
+  Task_id_map.find_opt task_id (prepare_backlog backlog).tasks_by_id
+
 type backlog_cache_entry = {
   mtime : float;
   size : int;
   backlog : backlog;
+  mutable prepared : prepared_backlog option;
 }
 
 let backlog_cache : (string, backlog_cache_entry) Hashtbl.t = Hashtbl.create 16
 let backlog_cache_mu = Stdlib.Mutex.create ()
+(* A miss may finish decoding after invalidation. Its token prevents it from
+   repopulating the cache with a value read before that invalidation. *)
+let backlog_cache_generation = ref (ref ())
+
+(* Test seam for an in-flight miss racing invalidation. *)
+let before_backlog_cache_registration_hook = Atomic.make (fun () -> ())
 
 let file_stat_opt path =
   try Some (Unix.stat path) with Unix.Unix_error _ | Sys_error _ -> None
 
 let clear_backlog_cache_for path =
-  Stdlib.Mutex.protect backlog_cache_mu (fun () -> Hashtbl.remove backlog_cache path)
+  Stdlib.Mutex.protect backlog_cache_mu (fun () ->
+      backlog_cache_generation := ref ();
+      Hashtbl.remove backlog_cache path)
+
+let invalidate_backlog_cache config = clear_backlog_cache_for (backlog_path config)
 
 type backlog_recovery = {
   primary_error : string;
@@ -77,6 +164,11 @@ type backlog_recovery = {
 
 type backlog_observation = {
   observed_backlog : backlog;
+  recovered_from : backlog_recovery option;
+}
+
+type prepared_backlog_observation = {
+  observed_prepared : prepared_backlog;
   recovered_from : backlog_recovery option;
 }
 
@@ -114,20 +206,23 @@ let read_backlog_with_source_r config =
            recovery_path
            (json_doc_error_to_string recovery_error))
   in
-  let cached =
+  let cached, generation =
     match config.backend with
-    | Memory _ -> None
+    | Memory _ -> None, None
     | FileSystem _ ->
         Stdlib.Mutex.protect backlog_cache_mu (fun () ->
-            match Hashtbl.find_opt backlog_cache path with
-            | None -> None
-            | Some entry -> (
-                match file_stat_opt path with
-                | None -> None
-                | Some st ->
-                    if st.Unix.st_mtime = entry.mtime && st.Unix.st_size = entry.size
-                    then Some entry.backlog
-                    else None))
+            let cached =
+              match Hashtbl.find_opt backlog_cache path with
+              | None -> None
+              | Some entry -> (
+                  match file_stat_opt path with
+                  | None -> None
+                  | Some st ->
+                      if st.Unix.st_mtime = entry.mtime && st.Unix.st_size = entry.size
+                      then Some entry.backlog
+                      else None)
+            in
+            cached, Some !backlog_cache_generation)
   in
   match cached with
   | Some backlog ->
@@ -146,13 +241,13 @@ let read_backlog_with_source_r config =
         | FileSystem _ -> file_stat_opt path
       in
       (* The miss path — the read, the JSON parse and the typed decode of a
-         file that is 2 MB on a live root — runs as one job on the domain
-         pool when one is installed and inline otherwise. Every keeper wake
-         reads the backlog and every writer's commit clears this cache, so on
-         a busy fleet most reads miss; on the calling fiber each miss held
-         the main domain about 60 ms (RFC main-domain-scheduler-latency
-         §8.8). The stats stay on the fiber: they order the cache
-         registration against a concurrent commit, not the decode. *)
+         file that is 2 MB on a live root — runs as one job on the domain pool
+         when one is installed and inline otherwise. Every keeper wake reads
+         the backlog and every writer's commit clears this cache, so on a busy
+         fleet most reads miss; on the calling fiber each miss held the main
+         domain about 60 ms (RFC main-domain-scheduler-latency §8.8). The
+         stats stay on the fiber: they order the cache registration against a
+         concurrent commit, not the decode. *)
       match
         Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
           Result.map (Option.map (decode_backlog ~path)) (read_json_doc config path))
@@ -164,16 +259,19 @@ let read_backlog_with_source_r config =
               let stat_after =
                 match stat_before with None -> None | Some _ -> file_stat_opt path
               in
-              (match (stat_before, stat_after) with
-              | Some before, Some after
+              (match (stat_before, stat_after, generation) with
+              | Some before, Some after, Some generation
                 when after.Unix.st_mtime = before.Unix.st_mtime
                      && after.Unix.st_size = before.Unix.st_size ->
+                  (Atomic.get before_backlog_cache_registration_hook) ();
                   Stdlib.Mutex.protect backlog_cache_mu (fun () ->
-                      Hashtbl.replace backlog_cache path
-                        { mtime = after.Unix.st_mtime
-                        ; size = after.Unix.st_size
-                        ; backlog
-                        })
+                      if !backlog_cache_generation == generation then
+                        Hashtbl.replace backlog_cache path
+                          { mtime = after.Unix.st_mtime
+                          ; size = after.Unix.st_size
+                          ; backlog
+                          ; prepared = None
+                          })
               | _ ->
                   (* The file moved under the read (or vanished before it):
                      hand back the value but leave the cache to the next
@@ -185,6 +283,62 @@ let read_backlog_with_source_r config =
           recover
             (Printf.sprintf "backlog read failed for %s: %s" path
                (json_doc_error_to_string primary_error)))
+
+let read_prepared_backlog_with_source_r config =
+  let path = backlog_path config in
+  Result.map
+    (fun { observed_backlog; recovered_from } ->
+       let cached_prepared =
+         match config.backend with
+         | Memory _ -> None
+         | FileSystem _ ->
+           Stdlib.Mutex.protect backlog_cache_mu (fun () ->
+             match Hashtbl.find_opt backlog_cache path with
+             | Some entry when entry.backlog == observed_backlog -> entry.prepared
+             | Some _ | None -> None)
+       in
+       let observed_prepared =
+         match cached_prepared with
+         | Some prepared -> prepared
+         | None ->
+           let prepared =
+             match Atomic.get last_prepared_backlog with
+             | Some prepared when prepared.backlog == observed_backlog -> prepared
+             | Some _ | None ->
+               Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
+                 prepare_backlog observed_backlog)
+           in
+           (match config.backend with
+            | Memory _ -> ()
+            | FileSystem _ ->
+              Stdlib.Mutex.protect backlog_cache_mu (fun () ->
+                match Hashtbl.find_opt backlog_cache path with
+                | Some entry when entry.backlog == observed_backlog ->
+                  entry.prepared <- Some prepared
+                | Some _ | None -> ()));
+           prepared
+       in
+       { observed_prepared; recovered_from })
+    (read_backlog_with_source_r config)
+
+let read_prepared_backlog_observation_with_source_r =
+  read_prepared_backlog_with_source_r
+
+let read_prepared_backlog_r config =
+  match read_prepared_backlog_with_source_r config with
+  | Ok { observed_prepared; recovered_from = None } -> Ok observed_prepared
+  | Ok
+      {
+        observed_prepared;
+        recovered_from = Some { primary_error; recovery_path };
+      } ->
+    Error
+      (Printf.sprintf
+         "%s; recovery snapshot at %s revision=%d is available but non-authoritative for mutation"
+         primary_error
+         recovery_path
+         observed_prepared.backlog.version)
+  | Error _ as error -> error
 
 let read_backlog_r config =
   match read_backlog_with_source_r config with

@@ -255,29 +255,35 @@ let select_from_listing store (listing : run_listing) = function
         List.filter (fun run -> run.session.updated_at >= lower_bound) listing.runs, [])
 ;;
 
+module String_set = Set.Make (String)
+module String_map = Map.Make (String)
+
 let dedupe_runs runs =
-  let seen = Hashtbl.create (List.length runs) in
-  runs
-  |> List.filter (fun run ->
-    let session_id = run.session.session_id in
-    if Hashtbl.mem seen session_id
-    then false
-    else (
-      Hashtbl.replace seen session_id ();
-      true))
-  |> sort_runs
+  let _, rev =
+    List.fold_left
+      (fun (seen, acc) run ->
+         let session_id = run.session.session_id in
+         if String_set.mem session_id seen
+         then seen, acc
+         else String_set.add session_id seen, run :: acc)
+      (String_set.empty, [])
+      runs
+  in
+  List.rev rev |> sort_runs
 ;;
 
 let dedupe_failures failures =
-  let seen = Hashtbl.create (List.length failures) in
-  failures
-  |> List.filter (fun (failure : run_load_failure) ->
-    let key = failure.session_id ^ "\x00" ^ failure.path ^ "\x00" ^ failure.detail in
-    if Hashtbl.mem seen key
-    then false
-    else (
-      Hashtbl.replace seen key ();
-      true))
+  let _, rev =
+    List.fold_left
+      (fun (seen, acc) (failure : run_load_failure) ->
+         let key = failure.session_id ^ "\x00" ^ failure.path ^ "\x00" ^ failure.detail in
+         if String_set.mem key seen
+         then seen, acc
+         else String_set.add key seen, failure :: acc)
+      (String_set.empty, [])
+      failures
+  in
+  List.rev rev
   |> List.sort (fun (left : run_load_failure) (right : run_load_failure) ->
     match String.compare left.session_id right.session_id with
     | 0 -> String.compare left.detail right.detail
@@ -345,31 +351,35 @@ let run_event_id session_id (event : event) = Printf.sprintf "%s#%d" session_id 
 
 let read_window_events store windows =
   let* listing = select_run_windows store windows in
-  let event_seen = Hashtbl.create 64 in
-  let run_order = Hashtbl.create (List.length listing.runs) in
-  List.iteri
-    (fun index run -> Hashtbl.replace run_order run.session.session_id index)
-    listing.runs;
-  let events, event_failures =
+  let _, run_order =
     List.fold_left
-      (fun (events, failures) run ->
+      (fun (index, acc) run ->
+         index + 1, String_map.add run.session.session_id index acc)
+      (0, String_map.empty)
+      listing.runs
+  in
+  let _, events, event_failures =
+    List.fold_left
+      (fun (event_seen, events, failures) run ->
          let session_id = run.session.session_id in
          match read_events store session_id () with
          | Error err ->
-           events, run_failure store session_id (Error.to_string err) :: failures
+           event_seen, events, run_failure store session_id (Error.to_string err) :: failures
          | Ok loaded ->
-           let new_events =
-             loaded
-             |> List.filter_map (fun event ->
-               let event_id = run_event_id session_id event in
-               if Hashtbl.mem event_seen event_id
-               then None
-               else (
-                 Hashtbl.replace event_seen event_id ();
-                 Some { event_id; session_id; event }))
+           let event_seen, new_events_rev =
+             List.fold_left
+               (fun (seen, acc) event ->
+                  let event_id = run_event_id session_id event in
+                  if String_set.mem event_id seen
+                  then seen, acc
+                  else
+                    ( String_set.add event_id seen
+                    , { event_id; session_id; event } :: acc ))
+               (event_seen, [])
+               loaded
            in
-           new_events @ events, failures)
-      ([], [])
+           event_seen, List.rev_append new_events_rev events, failures)
+      (String_set.empty, [], [])
       listing.runs
   in
   Ok
@@ -380,10 +390,10 @@ let read_window_events store windows =
               match
                 Int.compare
                   (Option.value
-                     (Hashtbl.find_opt run_order left.session_id)
+                     (String_map.find_opt left.session_id run_order)
                      ~default:max_int)
                   (Option.value
-                     (Hashtbl.find_opt run_order right.session_id)
+                     (String_map.find_opt right.session_id run_order)
                      ~default:max_int)
               with
               | 0 -> Int.compare left.event.seq right.event.seq

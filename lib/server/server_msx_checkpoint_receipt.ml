@@ -40,13 +40,19 @@ let valid binding =
 let schema_objects db =
   statement db "SELECT name,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY name" []
     (fun stmt ->
-      let rec rows acc = match Keeper_sqlite_observation_io.step stmt with
-        | Row -> rows ((Sqlite3.column_text stmt 0,Sqlite3.column_text stmt 1)::acc)
-        | Done -> Ok (List.rev acc)
-        | Failed _ -> Error (sql_error db) in
+      let rec rows acc =
+        let rc = Sqlite3.step stmt in
+        if rc = Sqlite3.Rc.ROW then
+          rows ((Sqlite3.column_text stmt 0,Sqlite3.column_text stmt 1)::acc)
+        else if rc = Sqlite3.Rc.DONE then Ok (List.rev acc)
+        else Error (sql_error db) in
       rows [])
-let expected_schema = List.sort compare
-  ["receipts",schema;"terminal_immutable",immutable;"receipt_retained",no_delete;"binding_immutable",binding_immutable]
+let expected_schema =
+  List.sort
+    (fun (k1, s1) (k2, s2) ->
+      let c = String.compare k1 k2 in
+      if c <> 0 then c else String.compare s1 s2)
+    ["receipts",schema;"terminal_immutable",immutable;"receipt_retained",no_delete;"binding_immutable",binding_immutable]
 let validate_schema db =
   let* actual = schema_objects db in
   if actual = expected_schema then Ok () else Error (Store_unavailable "checkpoint receipt schema differs")
@@ -88,10 +94,10 @@ let read db binding =
   statement db
     "SELECT action,slot,epoch,state,detail,incarnation,change_count,checkpoint_sha256 FROM receipts WHERE operation_id=?"
     [text (Keeper_operation_id.to_string binding.operation_id)] (fun stmt ->
-      match Keeper_sqlite_observation_io.step stmt with
-      | Done -> Ok None
-      | Failed _ -> Error (sql_error db)
-      | Row ->
+      let rc = Sqlite3.step stmt in
+      if rc = Sqlite3.Rc.DONE then Ok None
+      else if rc <> Sqlite3.Rc.ROW then Error (sql_error db)
+      else
           if Sqlite3.column_text stmt 0 <> action_name binding.action
              || Sqlite3.column_text stmt 1 <> binding.slot then Error Binding_conflict
           else

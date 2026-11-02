@@ -256,21 +256,6 @@ let said (row : scheduled) =
   | what, who -> Printf.sprintf "%s \xc2\xb7 %s" what who
 ;;
 
-(* Whole minutes while there are any, then seconds. A held call is denied when
-   this reaches zero, so the number is the reason to look rather than
-   decoration. *)
-let time_left ~now (held : awaiting) =
-  let remaining = held.asked_at +. held.timeout_sec -. now in
-  if Float.compare remaining 0.0 <= 0
-  then "expired"
-  else begin
-    let whole = int_of_float remaining in
-    if whole >= 60
-    then Printf.sprintf "%dm %02ds left" (whole / 60) (whole mod 60)
-    else Printf.sprintf "%ds left" whole
-  end
-;;
-
 (* How long the operator has not answered. Coarse on purpose: the row exists
    because the wait is long, and minutes past the first day are noise. *)
 let waited_since ~now since =
@@ -346,7 +331,7 @@ let overlay ~now ~localtime ~cols t =
                two_column
                  ~cols
                  (Printf.sprintf "%s is holding %s" held.asked_by held.question)
-                 (time_left ~now held)
+                 (waited_since ~now held.asked_at)
            })
         rows
   in

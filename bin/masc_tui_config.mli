@@ -138,9 +138,9 @@ val table_frame_of_doc : Keeper_toml_loader.toml_doc -> bool option
 val lift_colours_of_doc : Keeper_toml_loader.toml_doc -> bool option
 (** [tui].lift_colours. [None] is absent, which the caller reads as on.
 
-    On, a colour the scheme leaves under the readable floor is raised in
-    lightness until it clears -- so a status masc says with colour stays
-    visible. Off, the scheme's own colour goes out untouched, which is what
+    On, masc attempts to raise a colour the scheme leaves under the readable
+    floor; projection and terminal palette support affect the result.
+    Off, the scheme's own colour goes out untouched, which is what
     every other terminal UI does and what a reader on a high-contrast scheme
     wants: for them the lift moves a colour their theme placed on purpose. *)
 

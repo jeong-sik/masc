@@ -29,7 +29,15 @@ val verdict_of_bytes : string -> verdict
     {!Masc.Keeper_vision_tool.sniff_image_media_type}, so the cache and the
     composer name the same signatures. *)
 
+val has_png_structure : string -> bool
+(** Check signature, positive IHDR dimensions, bounded chunks and required
+    IDAT/IEND chunks. This does not validate checksums or decode pixels. *)
+
 (** {1 The fetch} *)
+
+type runner_failure = { error : Unix.error; operation : string; argument : string }
+(** An operating-system failure starting or supervising the supplied runner,
+    distinct from a command's exit status. *)
 
 type fetch_failure =
   | Http_error_status  (** curl [--fail] saw an HTTP error status. *)
@@ -40,6 +48,7 @@ type fetch_failure =
   | Curl_exit of { code : int }  (** Any other documented curl exit code. *)
   | Curl_signaled of { signal : int }
   | Curl_stopped of { signal : int }
+  | Curl_runner_failed of runner_failure
   | No_body_written  (** curl exited 0 and wrote no file. *)
 
 val fetch_failure_of_status :
@@ -67,6 +76,7 @@ type decode_failure =
           output permissions, disk space, or other environment failures. *)
   | Decoder_signaled of { signal : int }
   | Decoder_stopped of { signal : int }
+  | Decoder_runner_failed of runner_failure
   | No_frame_written  (** ffmpeg exited 0 and wrote no frame. *)
   | Frame_unreadable of { detail : string }
       (** The frame file could not be read back. *)
@@ -87,14 +97,27 @@ val input_path : cache_dir:string -> string -> string
     renaming its own attempt over it rather than writing it in place. *)
 
 val png_path : cache_dir:string -> string -> string
-(** Where a downloaded input's converted frame lives, derived from the input
-    path the same way and published the same way. *)
+(** Where [convert_to_png] stores a converted frame, derived from its input
+    path. Remote downloads use a separate source-bound cache. *)
+
+type download
+(** The nonempty bytes captured by one download, independent of later cache
+    replacement or invalidation. *)
+
+val download_bytes : download -> string
+
+val with_download_snapshot :
+  cache_dir:string -> download -> (string -> 'a) -> ('a, string) result
+(** Write the captured bytes to an attempt-owned input file for the duration of
+    the callback. Remove that file after the callback returns or raises. *)
 
 val download :
-  run:(string -> Unix.process_status) -> cache_dir:string -> string ->
-  (string, download_error) result
+  ?force_fetch:bool -> run:(string -> Unix.process_status) -> cache_dir:string -> string ->
+  (download, download_error) result
 (** Fetch or reuse nonempty input bytes. Failed fetches and empty bodies are
-    removed; unknown signatures remain eligible for a decoder. *)
+    removed; unknown signatures remain eligible for a decoder. The result owns
+    the bytes read, rather than naming the shared URL cache file. [force_fetch]
+    bypasses the cache for an explicit retry. *)
 
 val run_bounded : deadline_seconds:float -> string -> Unix.process_status
 (** A [run] for the functions below that cannot hang the caller. [command] is
@@ -102,17 +125,27 @@ val run_bounded : deadline_seconds:float -> string -> Unix.process_status
     output, and killed with SIGKILL when it has not exited after
     [deadline_seconds]; the status is then [WSIGNALED Sys.sigkill]. *)
 
+val wait_bounded : ?cancelled:(unit -> bool) -> deadline_seconds:float -> int -> Unix.process_status
+(** Reap an already-started child, killing it at the same deadline or when
+    [cancelled] becomes true. *)
+
+val stop_subprocesses : unit -> unit
+(** Prevent future bounded subprocesses and cancel and reap existing ones. *)
+
 val run_decoder :
   run:(string -> Unix.process_status) -> output_path:string -> string ->
   (string, decode_failure) result
 (** Run one command after discarding any old output, returning a nonempty
-    output file. Failed output is removed. Never removes input bytes. *)
+    output file. Output from a failed command is removed. After a runner OS
+    failure or unexpected exception, the output is left for its owner to
+    remove, since callers may share the path. Never removes input bytes. *)
 
 val convert_to_png :
   run:(string -> Unix.process_status) -> cache_dir:string -> string ->
   (string, conversion_failure) result
 (** Try the existing converter sequence, preserving every failed attempt's
-    typed status. Input is retained even when no converter succeeds. *)
+    typed status. A runner failure stops the sequence; input is retained even
+    when no converter succeeds. *)
 
 val prepare_png :
   run:(string -> Unix.process_status) -> cache_dir:string -> string ->
@@ -152,5 +185,5 @@ val prepare_presentation :
     only from the image acquisition worker. Original bytes are never replaced. *)
 
 val invalidate_download : cache_dir:string -> string -> unit
-(** Explicit user refresh only: remove this URL's input and derived PNG so
+(** Explicit user refresh only: remove this URL's input and derived frames so
     a previously refused body can be fetched again. *)

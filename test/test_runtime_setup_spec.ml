@@ -1,3 +1,9 @@
+let execution_for_binding config binding =
+  Runtime_adapter.materialize_execution
+    ~construction:(Runtime_adapter.create_construction ()) config binding
+  |> Result.map (fun (selected : Runtime_adapter.execution_materialization) -> selected.execution)
+;;
+
 let test_installer_declarations () =
   let specs = Yojson.Safe.from_file "fixtures/runtime-setup-specs.json" |> Yojson.Safe.Util.to_list in
   List.iter (fun json ->
@@ -233,6 +239,14 @@ capabilities_base = "openai_chat"
 capabilities_base_by_identity_kind = { anthropic = "mimo" }
 serves_bare_models = ["bare", "shadowed"]
 
+[[providers]]
+id = "claude"
+kind = "anthropic"
+base_url = "https://api.anthropic.com"
+request_path = "/v1/messages"
+auth = "api-key"
+capabilities_base = "anthropic"
+
 [[models]]
 model_id = "omitted"
 provider_name = "image-fixture"
@@ -280,10 +294,14 @@ base = "anthropic"
       ["openai_chat_extended";"openrouter";"ollama_cloud";"nvidia"]) in
     match Catalog.of_toml_string ~source:"image-declaration-fixture" source with
     | Ok catalog -> catalog | Error error -> Alcotest.fail error in
-  let original = Catalog.global () in
-  Fun.protect ~finally:(fun () -> match original with
-    | Some catalog -> Catalog.set_global catalog | None -> Catalog.clear_global ()) (fun () ->
-    Catalog.set_global (load None);
+  let module Snapshot = Llm_provider.Catalog_snapshot in
+  let original = Snapshot.current () in
+  let publish image =
+    match Snapshot.of_catalogs ~models:(Some (load image)) ~providers:None with
+    | Ok snapshot -> Snapshot.publish snapshot
+    | Error error -> Alcotest.fail (Snapshot.error_to_string error) in
+  Fun.protect ~finally:(fun () -> Snapshot.publish original) (fun () ->
+    publish None;
     let discover ?(protocol=Discovery.Openai) provider rows =
       let connection : Discovery.connection = {
         protocol; provider; endpoint="https://fixture.invalid/v1"; credential=None } in
@@ -344,7 +362,7 @@ base = "anthropic"
     let saved_image = Option.bind (List.hd saved.models).capabilities
       (fun caps -> caps.Runtime_schema.supports_image_input) in
     Alcotest.(check (option bool)) "saving an omitted declaration writes no false override" None saved_image;
-    Catalog.set_global (load (Some true));
+    publish (Some true);
     let corrected = discover (Discovery.Named_provider "image-fixture") rows in
     Alcotest.(check (option bool)) "a corrected catalog can supply the previously omitted declaration"
       (Some true) (image corrected "omitted");
@@ -501,11 +519,11 @@ let test_cli_reuse_requires_non_interactive () =
     let provider = List.hd config.Runtime_schema.providers in
     let binding = List.hd config.bindings in
     Alcotest.(check bool) (choice ^ " generated provider is executable") true
-      (Result.is_ok (Runtime_adapter.binding_to_execution config binding));
+      (Result.is_ok (execution_for_binding config binding));
     let interactive = {provider with is_non_interactive=false} in
     let interactive_config = {config with providers=[interactive]} in
     Alcotest.(check bool) (choice ^ " actual adapter refuses interactive declaration") true
-      (Result.is_error (Runtime_adapter.binding_to_execution interactive_config binding));
+      (Result.is_error (execution_for_binding interactive_config binding));
     Alcotest.(check bool) (choice ^ " direct reuse refuses interactive declaration") true
       (Option.is_none (Runtime_setup_spec.for_provider spec interactive));
     Alcotest.(check bool) (choice ^ " implicit account resolution refuses before stage") true

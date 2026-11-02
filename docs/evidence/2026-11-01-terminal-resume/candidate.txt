@@ -1,0 +1,1006 @@
+2026-11-01T02:21:01.8052199Z HEAD is now at ae3c5868 fix(agent-core): resume collected terminal output through its durable frontier
+2026-11-01T02:22:05.2969933Z   TARGET_SUITES: packages/agent_core/test/test_pipeline,packages/agent_core/test/test_pipeline_illegal_hook,packages/agent_core/test/test_execution_journal
+2026-11-01T02:22:05.3216185Z   TARGET_SUITES: packages/agent_core/test/test_pipeline,packages/agent_core/test/test_pipeline_illegal_hook,packages/agent_core/test/test_execution_journal
+2026-11-01T02:22:05.4345166Z [targeted] EIO_BACKEND=<unset> timeout=600s per suite
+2026-11-01T02:22:05.4373549Z [targeted] @@packages/agent_core/test/runtest-test_pipeline: start 2026-11-01T02:22:05Z (dune alias)
+2026-11-01T02:22:48.9924590Z Testing `Pipeline'.
+2026-11-01T02:22:48.9925233Z ASSERT stop_reason
+2026-11-01T02:22:48.9925538Z ASSERT text content
+2026-11-01T02:22:48.9925987Z   [OK]          mock_responses               0   text response.
+2026-11-01T02:22:48.9926430Z ASSERT stop_reason
+2026-11-01T02:22:48.9927023Z ASSERT tool names
+2026-11-01T02:22:48.9927473Z   [OK]          mock_responses               1   tool use response.
+2026-11-01T02:22:48.9927933Z ASSERT first is tool_use
+2026-11-01T02:22:48.9928242Z ASSERT final text
+2026-11-01T02:22:48.9928522Z ASSERT call count
+2026-11-01T02:22:48.9930482Z   [OK]          mock_responses               2   tool then text.
+2026-11-01T02:22:48.9931195Z ASSERT count after 1
+2026-11-01T02:22:48.9931605Z ASSERT count after reset
+2026-11-01T02:22:48.9931946Z ASSERT reset replays from start
+2026-11-01T02:22:48.9932380Z   [OK]          mock_responses               3   reset.
+2026-11-01T02:22:48.9932799Z ASSERT count after 3 calls
+2026-11-01T02:22:48.9933120Z ASSERT wrapped
+2026-11-01T02:22:48.9933520Z   [OK]          mock_responses               4   cycle wraps.
+2026-11-01T02:22:48.9934180Z ASSERT mentions empty
+2026-11-01T02:22:48.9934811Z   [OK]          mock_responses               5   empty responses.
+2026-11-01T02:22:48.9935474Z ASSERT has thinking
+2026-11-01T02:22:48.9935909Z ASSERT has text
+2026-11-01T02:22:48.9936542Z   [OK]          mock_responses               6   thinking response.
+2026-11-01T02:22:48.9937215Z ASSERT model_id
+2026-11-01T02:22:48.9937626Z ASSERT provider_id
+2026-11-01T02:22:48.9938050Z ASSERT base_url
+2026-11-01T02:22:48.9938548Z ASSERT request_path
+2026-11-01T02:22:48.9939063Z   [OK]          mock_responses               7   to_provider_config.
+2026-11-01T02:22:48.9940001Z ASSERT unexecuted agent has no invented source
+2026-11-01T02:22:49.0202550Z ASSERT text-only state records actual collected source
+2026-11-01T02:22:49.0203141Z ASSERT checkpoint retains actual source
+2026-11-01T02:22:49.0203595Z ASSERT clone retains producer
+2026-11-01T02:22:49.0204010Z ASSERT turn sink sees producer
+2026-11-01T02:22:49.0204825Z   [OK]          agent_state                  0   text-only actual provider bi...
+2026-11-01T02:22:49.0206183Z ASSERT initial turn_count
+2026-11-01T02:22:49.0206575Z ASSERT initial api_calls
+2026-11-01T02:22:49.0206899Z ASSERT initial messages
+2026-11-01T02:22:49.0210590Z   [OK]          agent_state                  1   initial state.
+2026-11-01T02:22:49.0218191Z ASSERT tool count
+2026-11-01T02:22:49.0218529Z ASSERT tool name
+2026-11-01T02:22:49.0230435Z   [OK]          agent_state                  2   tools registered.
+2026-11-01T02:22:49.0231202Z ASSERT total_input_tokens 0
+2026-11-01T02:22:49.0231614Z ASSERT total_output_tokens 0
+2026-11-01T02:22:49.0231930Z ASSERT api_calls 0
+2026-11-01T02:22:49.0232323Z   [OK]          agent_state                  3   initial usage.
+2026-11-01T02:22:49.0232882Z ASSERT 0 tools
+2026-11-01T02:22:49.0233596Z   [OK]          agent_state                  4   empty tools.
+2026-11-01T02:22:49.0234265Z ASSERT 3 tools
+2026-11-01T02:22:49.0234841Z   [OK]          agent_state                  5   multiple tools.
+2026-11-01T02:22:49.0235581Z ASSERT 2 tools in json
+2026-11-01T02:22:49.0236066Z ASSERT 1 message
+2026-11-01T02:22:49.0236576Z ASSERT visible_tool_names matches
+2026-11-01T02:22:49.0237382Z   [OK]          turn_mechanics               0   turn preparation.
+2026-11-01T02:22:49.0238121Z ASSERT 1 message
+2026-11-01T02:22:49.0238600Z ASSERT empty visible_tool_names
+2026-11-01T02:22:49.0239833Z   [OK]          turn_mechanics               1   no tools prep.
+2026-11-01T02:22:49.0240530Z ASSERT 3 messages
+2026-11-01T02:22:49.0241232Z   [OK]          turn_mechanics               2   preserves messages.
+2026-11-01T02:22:49.0243433Z ASSERT completed
+2026-11-01T02:22:49.0243882Z   [OK]          turn_mechanics               3   output completes on end turn.
+2026-11-01T02:22:49.0250981Z ASSERT provider receives exact caller tool schemas
+2026-11-01T02:22:49.0251997Z   [OK]          turn_mechanics               4   provider receives exact supp...
+2026-11-01T02:22:49.0255576Z ASSERT retention follows the producing provider
+2026-11-01T02:22:49.0256277Z ASSERT only Anthropic adds durable context
+2026-11-01T02:22:49.0259011Z ASSERT Anthropic previous request stays an unchanged prefix
+2026-11-01T02:22:49.0268018Z ASSERT retention follows the producing provider
+2026-11-01T02:22:49.0268905Z ASSERT only Anthropic adds durable context
+2026-11-01T02:22:49.0273279Z ASSERT other-provider continuation keeps its existing transcript
+2026-11-01T02:22:49.0277822Z ASSERT retention follows the producing provider
+2026-11-01T02:22:49.0278562Z ASSERT only Anthropic adds durable context
+2026-11-01T02:22:49.0282365Z ASSERT other-provider continuation keeps its existing transcript
+2026-11-01T02:22:49.0285822Z ASSERT retention follows the producing provider
+2026-11-01T02:22:49.0286605Z ASSERT only Anthropic adds durable context
+2026-11-01T02:22:49.0290607Z ASSERT other-provider continuation keeps its existing transcript
+2026-11-01T02:22:49.0294476Z ASSERT retention follows the producing provider
+2026-11-01T02:22:49.0295250Z ASSERT only Anthropic adds durable context
+2026-11-01T02:22:49.0298982Z ASSERT other-provider continuation keeps its existing transcript
+2026-11-01T02:22:49.0302788Z ASSERT retention follows the producing provider
+2026-11-01T02:22:49.0303488Z ASSERT only Anthropic adds durable context
+2026-11-01T02:22:49.0306998Z ASSERT other-provider continuation keeps its existing transcript
+2026-11-01T02:22:49.0312466Z ASSERT retention follows the producing provider
+2026-11-01T02:22:49.0313263Z ASSERT only Anthropic adds durable context
+2026-11-01T02:22:49.0316892Z ASSERT other-provider continuation keeps its existing transcript
+2026-11-01T02:22:49.0320843Z ASSERT retention follows the producing provider
+2026-11-01T02:22:49.0321543Z ASSERT only Anthropic adds durable context
+2026-11-01T02:22:49.0324999Z ASSERT other-provider continuation keeps its existing transcript
+2026-11-01T02:22:49.0330943Z ASSERT retention follows the producing provider
+2026-11-01T02:22:49.0331746Z ASSERT only Anthropic adds durable context
+2026-11-01T02:22:49.0343813Z ASSERT Anthropic previous request stays an unchanged prefix
+2026-11-01T02:22:49.0347325Z ASSERT retention follows the producing provider
+2026-11-01T02:22:49.0348038Z ASSERT only Anthropic adds durable context
+2026-11-01T02:22:49.0359956Z ASSERT Anthropic previous request stays an unchanged prefix
+2026-11-01T02:22:49.0363682Z ASSERT retention follows the producing provider
+2026-11-01T02:22:49.0364449Z ASSERT only Anthropic adds durable context
+2026-11-01T02:22:49.0375933Z ASSERT Anthropic previous request stays an unchanged prefix
+2026-11-01T02:22:49.0379896Z ASSERT retention follows the producing provider
+2026-11-01T02:22:49.0380654Z ASSERT only Anthropic adds durable context
+2026-11-01T02:22:49.0392115Z ASSERT Anthropic previous request stays an unchanged prefix
+2026-11-01T02:22:49.0395708Z ASSERT retention follows the producing provider
+2026-11-01T02:22:49.0396497Z ASSERT only Anthropic adds durable context
+2026-11-01T02:22:49.0407936Z ASSERT Anthropic previous request stays an unchanged prefix
+2026-11-01T02:22:49.0409075Z   [OK]          turn_mechanics               5   provider context retention s...
+2026-11-01T02:22:49.0410175Z ASSERT wire model
+2026-11-01T02:22:49.0410639Z ASSERT lifecycle resolved model
+2026-11-01T02:22:49.0410997Z ASSERT effective model pricing applied
+2026-11-01T02:22:49.0411591Z ASSERT no pricing gap
+2026-11-01T02:22:49.0412047Z   [OK]          turn_mechanics               6   effective provider config dr...
+2026-11-01T02:22:49.0416531Z ASSERT terminal response
+2026-11-01T02:22:49.0417086Z ASSERT BeforeTurn identity
+2026-11-01T02:22:49.0417656Z ASSERT AfterTurn identity
+2026-11-01T02:22:49.0418096Z ASSERT TurnStarted identity
+2026-11-01T02:22:49.0418403Z ASSERT TurnReady identity
+2026-11-01T02:22:49.0418700Z ASSERT TurnCompleted identity
+2026-11-01T02:22:49.0419004Z ASSERT PreToolUse identity
+2026-11-01T02:22:49.0419655Z ASSERT tool handler identity
+2026-11-01T02:22:49.0420183Z ASSERT public tool event identity
+2026-11-01T02:22:49.0420899Z ASSERT state advances after two provider turns
+2026-11-01T02:22:49.0421450Z   [OK]          turn_mechanics               7   provider turn identity spans...
+2026-11-01T02:22:49.0423544Z ASSERT AfterTurn ordinal
+2026-11-01T02:22:49.0423990Z ASSERT agent core emits exactly one turn record, at DEBUG, on the hook's turn
+2026-11-01T02:22:49.0424520Z ASSERT agent_turn span opens under the hook's turn
+2026-11-01T02:22:49.0425036Z   [OK]          turn_mechanics               8   one turn: no INFO turn recor...
+2026-11-01T02:22:49.0426927Z ASSERT unknown reason
+2026-11-01T02:22:49.0427362Z   [OK]          turn_mechanics               9   output rejects unknown termi...
+2026-11-01T02:22:49.0429714Z ASSERT documented provider terminal reason is preserved
+2026-11-01T02:22:49.0430475Z   [OK]          turn_mechanics              10   output completes repetition ...
+2026-11-01T02:22:49.0433378Z ASSERT tool stop rejection
+2026-11-01T02:22:49.0436378Z ASSERT tool stop rejection
+2026-11-01T02:22:49.0436844Z   [OK]          turn_mechanics              11   output rejects tool stop wit...
+2026-11-01T02:22:49.0439051Z   [OK]          turn_mechanics              12   text tool intent remains text.
+2026-11-01T02:22:49.0450210Z ASSERT provider calls
+2026-11-01T02:22:49.0450606Z ASSERT tool handler not executed
+2026-11-01T02:22:49.0450982Z ASSERT provider controls terminal response
+2026-11-01T02:22:49.0451340Z ASSERT provider final text
+2026-11-01T02:22:49.0451819Z   [OK]          turn_mechanics              13   repeated validation error wi...
+2026-11-01T02:22:49.0453919Z ASSERT transport capture identity
+2026-11-01T02:22:49.0454299Z ASSERT native stream follows declared support
+2026-11-01T02:22:49.0454726Z ASSERT undeclared transport uses synchronous fallback
+2026-11-01T02:22:49.0455248Z   [OK]          turn_mechanics              14   undeclared native stream use...
+2026-11-01T02:22:49.0457063Z ASSERT transport capture identity
+2026-11-01T02:22:49.0457422Z ASSERT native stream follows declared support
+2026-11-01T02:22:49.0457849Z ASSERT undeclared transport uses synchronous fallback
+2026-11-01T02:22:49.0458376Z   [OK]          turn_mechanics              15   declared native stream carri...
+2026-11-01T02:22:49.0458845Z ASSERT 2 messages (original + context)
+2026-11-01T02:22:49.0459427Z ASSERT injected context at tail
+2026-11-01T02:22:49.0460026Z   [OK]          turn_mechanics              16   extra system context.
+2026-11-01T02:22:49.0460565Z ASSERT 2 tool results
+2026-11-01T02:22:49.0461002Z ASSERT not error
+2026-11-01T02:22:49.0461260Z ASSERT not error
+2026-11-01T02:22:49.0461777Z   [OK]          tool_results                 0   make ok.
+2026-11-01T02:22:49.0462479Z ASSERT 1 tool result
+2026-11-01T02:22:49.0463003Z ASSERT error content
+2026-11-01T02:22:49.0463694Z   [OK]          tool_results                 1   make error.
+2026-11-01T02:22:49.0464376Z ASSERT 2 results
+2026-11-01T02:22:49.0464994Z   [OK]          tool_results                 2   make mixed.
+2026-11-01T02:22:49.0465583Z ASSERT input tokens
+2026-11-01T02:22:49.0466067Z ASSERT output tokens
+2026-11-01T02:22:49.0466563Z ASSERT api_calls
+2026-11-01T02:22:49.0467072Z   [OK]          accumulate_usage             0   with response.
+2026-11-01T02:22:49.0467873Z ASSERT api_calls incremented
+2026-11-01T02:22:49.0468200Z ASSERT input tokens preserved
+2026-11-01T02:22:49.0468512Z ASSERT output tokens preserved
+2026-11-01T02:22:49.0468909Z   [OK]          accumulate_usage             1   no response.
+2026-11-01T02:22:49.0469556Z ASSERT cumulative input
+2026-11-01T02:22:49.0469867Z ASSERT cumulative output
+2026-11-01T02:22:49.0470187Z ASSERT cumulative calls
+2026-11-01T02:22:49.0470667Z   [OK]          accumulate_usage             2   cumulative.
+2026-11-01T02:22:49.0471314Z ASSERT reason
+2026-11-01T02:22:49.0471689Z   [OK]          error_domain                 0   of_core_error.
+2026-11-01T02:22:49.0472061Z ASSERT roundtrip
+2026-11-01T02:22:49.0472588Z   [OK]          error_domain                 1   roundtrip.
+2026-11-01T02:22:49.0473214Z ASSERT contains stage
+2026-11-01T02:22:49.0473658Z ASSERT has route prefix
+2026-11-01T02:22:49.0474236Z   [OK]          error_domain                 2   with_stage.
+2026-11-01T02:22:49.0474847Z ASSERT rate limited is retryable
+2026-11-01T02:22:49.0475404Z ASSERT internal not retryable
+2026-11-01T02:22:49.0491649Z ASSERT network error retryable
+2026-11-01T02:22:49.0492128Z   [OK]          error_domain                 3   is_retryable.
+2026-11-01T02:22:49.0492623Z ASSERT has string
+2026-11-01T02:22:49.0493146Z ASSERT has string
+2026-11-01T02:22:49.0493450Z ASSERT has string
+2026-11-01T02:22:49.0493898Z ASSERT has string
+2026-11-01T02:22:49.0494566Z ASSERT has string
+2026-11-01T02:22:49.0494986Z   [OK]          error_domain                 4   provider errors.
+2026-11-01T02:22:49.0495418Z ASSERT has tool use
+2026-11-01T02:22:49.0496035Z   [OK]          provider_mock_extra          0   multi tool response.
+2026-11-01T02:22:49.0518245Z ASSERT locator contains durable run identity
+2026-11-01T02:22:49.0820449Z ASSERT completion reports success
+2026-11-01T02:22:49.0821340Z ASSERT terminal response
+2026-11-01T02:22:49.0822032Z ASSERT tool effect executes once
+2026-11-01T02:22:49.0822662Z ASSERT locator is durable before tool effect
+2026-11-01T02:22:49.0823272Z ASSERT terminal outcome
+2026-11-01T02:22:49.0823986Z ASSERT terminal recovery action
+2026-11-01T02:22:49.0824602Z ASSERT completion observes the final durable cursor
+2026-11-01T02:22:49.0825420Z ASSERT durable authority preserves public ToolCalled and ToolCompleted
+2026-11-01T02:22:49.0845298Z   [OK]          provider_mock_extra          1   Agent.run uses durable tool ...
+2026-11-01T02:22:49.1178303Z ASSERT terminal response
+2026-11-01T02:22:49.1179617Z ASSERT settled tool handler is not rerun
+2026-11-01T02:22:49.1180321Z ASSERT settled pre-tool hook is not rerun
+2026-11-01T02:22:49.1181151Z ASSERT settled post-tool hook is not rerun
+2026-11-01T02:22:49.1181907Z ASSERT terminal outcome
+2026-11-01T02:22:49.1182315Z ASSERT terminal recovery action
+2026-11-01T02:22:49.1202043Z   [OK]          provider_mock_extra          2   Agent.run resumes settled to...
+2026-11-01T02:22:49.1303956Z ASSERT typed approval runs once
+2026-11-01T02:22:49.1304657Z ASSERT denied legacy effect stays closed
+2026-11-01T02:22:49.1305426Z ASSERT typed denial opens no durable effect attempt
+2026-11-01T02:22:49.1355343Z   [OK]          provider_mock_extra          3   unattempted legacy invocatio...
+2026-11-01T02:22:49.1651976Z ASSERT terminal response
+2026-11-01T02:22:49.1652810Z ASSERT settled tool handler is not rerun
+2026-11-01T02:22:49.1653435Z ASSERT settled pre-tool hook is not rerun
+2026-11-01T02:22:49.1653987Z ASSERT settled post-tool hook is not rerun
+2026-11-01T02:22:49.1654485Z ASSERT terminal outcome
+2026-11-01T02:22:49.1654913Z ASSERT terminal recovery action
+2026-11-01T02:22:49.1672890Z   [OK]          provider_mock_extra          4   Agent.run resume matches ori...
+2026-11-01T02:22:49.1783609Z ASSERT rejected resume does not run tool handler
+2026-11-01T02:22:49.1799969Z   [OK]          provider_mock_extra          5   Agent.run resume rejects mis...
+2026-11-01T02:22:49.2092642Z ASSERT settled turn resumes and completes
+2026-11-01T02:22:49.2093130Z ASSERT settled tool handler is not rerun
+2026-11-01T02:22:49.2093659Z ASSERT provider count follows persisted completion
+2026-11-01T02:22:49.2123850Z ASSERT resumed completed turn has one canonical close observation
+2026-11-01T02:22:49.2125011Z ASSERT live subscription emits only newly committed resume close
+2026-11-01T02:22:49.2126009Z ASSERT resume completion keeps canonical source identity
+2026-11-01T02:22:49.2126850Z ASSERT terminal outcome
+2026-11-01T02:22:49.2127450Z ASSERT terminal recovery action
+2026-11-01T02:22:49.2143259Z   [OK]          provider_mock_extra          6   Agent.run resumes settled tu...
+2026-11-01T02:22:49.2454263Z ASSERT settled turn resumes and completes
+2026-11-01T02:22:49.2455142Z ASSERT settled tool handler is not rerun
+2026-11-01T02:22:49.2455981Z ASSERT provider count follows persisted completion
+2026-11-01T02:22:49.2485677Z ASSERT resumed completed turn has one canonical close observation
+2026-11-01T02:22:49.2486497Z ASSERT live subscription emits only newly committed resume close
+2026-11-01T02:22:49.2486925Z ASSERT terminal outcome
+2026-11-01T02:22:49.2487233Z ASSERT terminal recovery action
+2026-11-01T02:22:49.2506705Z   [OK]          provider_mock_extra          7   Agent.run resumes settled tu...
+2026-11-01T02:22:49.2635871Z ASSERT replay returns the original nonzero provider ordinal
+2026-11-01T02:22:49.2636798Z ASSERT persisted response identity, content and usage remain exact
+2026-11-01T02:22:49.2637495Z ASSERT settled terminal replay makes no provider call
+2026-11-01T02:22:49.2638244Z ASSERT settled terminal replay invokes no new AfterTurn
+2026-11-01T02:22:49.2638944Z ASSERT restored turn count stays distinct and is not advanced again
+2026-11-01T02:22:49.2653868Z   [OK]          provider_mock_extra          8   Advanced settled terminal re...
+2026-11-01T02:22:49.2810322Z ASSERT terminal recovery does not redispatch provider
+2026-11-01T02:22:49.2811342Z ASSERT terminal recovery does not repeat AfterTurn
+2026-11-01T02:22:49.2812027Z ASSERT response identity, content, model and usage are exact
+2026-11-01T02:22:49.2812685Z ASSERT stop callback follows the pending output contract
+2026-11-01T02:22:49.2813331Z ASSERT collected checkpoint counter is not advanced again
+2026-11-01T02:22:49.2813969Z ASSERT collected checkpoint usage is not charged twice
+2026-11-01T02:22:49.2826057Z ASSERT resumed root matches validated outcome
+2026-11-01T02:22:49.2828280Z ASSERT only accepted output emits successful turn close
+2026-11-01T02:22:49.2829008Z ASSERT completion keeps committed source envelope
+2026-11-01T02:22:49.2843489Z   [OK]          provider_mock_extra          9   regular resumes collected te...
+2026-11-01T02:22:49.3006696Z ASSERT terminal recovery does not redispatch provider
+2026-11-01T02:22:49.3007918Z ASSERT terminal recovery does not repeat AfterTurn
+2026-11-01T02:22:49.3009373Z ASSERT response identity, content, model and usage are exact
+2026-11-01T02:22:49.3010613Z ASSERT stop callback follows the pending output contract
+2026-11-01T02:22:49.3011766Z ASSERT collected checkpoint counter is not advanced again
+2026-11-01T02:22:49.3013063Z ASSERT collected checkpoint usage is not charged twice
+2026-11-01T02:22:49.3023466Z ASSERT resumed root matches validated outcome
+2026-11-01T02:22:49.3025335Z ASSERT only accepted output emits successful turn close
+2026-11-01T02:22:49.3026309Z ASSERT completion keeps committed source envelope
+2026-11-01T02:22:49.3042355Z   [OK]          provider_mock_extra         10   streaming resumes collected ...
+2026-11-01T02:22:49.3196196Z ASSERT terminal recovery keeps canonical nonzero ordinal
+2026-11-01T02:22:49.3196822Z ASSERT terminal recovery does not redispatch provider
+2026-11-01T02:22:49.3197391Z ASSERT terminal recovery does not repeat AfterTurn
+2026-11-01T02:22:49.3197966Z ASSERT response identity, content, model and usage are exact
+2026-11-01T02:22:49.3198555Z ASSERT stop callback follows the pending output contract
+2026-11-01T02:22:49.3199144Z ASSERT collected checkpoint counter is not advanced again
+2026-11-01T02:22:49.3200334Z ASSERT collected checkpoint usage is not charged twice
+2026-11-01T02:22:49.3212875Z ASSERT resumed root matches validated outcome
+2026-11-01T02:22:49.3215828Z ASSERT only accepted output emits successful turn close
+2026-11-01T02:22:49.3216763Z ASSERT completion keeps committed source envelope
+2026-11-01T02:22:49.3234125Z   [OK]          provider_mock_extra         11   Advanced resumes collected t...
+2026-11-01T02:22:49.3364521Z ASSERT terminal recovery does not redispatch provider
+2026-11-01T02:22:49.3365343Z ASSERT terminal recovery does not repeat AfterTurn
+2026-11-01T02:22:49.3365930Z ASSERT stop callback follows the pending output contract
+2026-11-01T02:22:49.3366521Z ASSERT collected checkpoint counter is not advanced again
+2026-11-01T02:22:49.3367102Z ASSERT collected checkpoint usage is not charged twice
+2026-11-01T02:22:49.3382463Z ASSERT resumed root matches validated outcome
+2026-11-01T02:22:49.3401932Z ASSERT only accepted output emits successful turn close
+2026-11-01T02:22:49.3412543Z   [OK]          provider_mock_extra         12   terminal resume rejects unkn...
+2026-11-01T02:22:49.3546834Z ASSERT terminal recovery does not redispatch provider
+2026-11-01T02:22:49.3548097Z ASSERT terminal recovery does not repeat AfterTurn
+2026-11-01T02:22:49.3548934Z ASSERT stop callback follows the pending output contract
+2026-11-01T02:22:49.3550363Z ASSERT collected checkpoint counter is not advanced again
+2026-11-01T02:22:49.3551252Z ASSERT collected checkpoint usage is not charged twice
+2026-11-01T02:22:49.3563230Z ASSERT resumed root matches validated outcome
+2026-11-01T02:22:49.3565609Z ASSERT only accepted output emits successful turn close
+2026-11-01T02:22:49.3583282Z   [OK]          provider_mock_extra         13   terminal resume rejects unma...
+2026-11-01T02:22:49.3715447Z ASSERT terminal recovery does not redispatch provider
+2026-11-01T02:22:49.3716601Z ASSERT terminal recovery does not repeat AfterTurn
+2026-11-01T02:22:49.3717402Z ASSERT stop callback follows the pending output contract
+2026-11-01T02:22:49.3718431Z ASSERT collected checkpoint counter is not advanced again
+2026-11-01T02:22:49.3719615Z ASSERT collected checkpoint usage is not charged twice
+2026-11-01T02:22:49.3731279Z ASSERT resumed root matches validated outcome
+2026-11-01T02:22:49.3734400Z ASSERT only accepted output emits successful turn close
+2026-11-01T02:22:49.3750406Z   [OK]          provider_mock_extra         14   terminal resume rejects empt...
+2026-11-01T02:22:49.3915682Z ASSERT terminal recovery does not redispatch provider
+2026-11-01T02:22:49.3916665Z ASSERT terminal recovery does not repeat AfterTurn
+2026-11-01T02:22:49.3917314Z ASSERT response identity, content, model and usage are exact
+2026-11-01T02:22:49.3917968Z ASSERT stop callback follows the pending output contract
+2026-11-01T02:22:49.3918608Z ASSERT collected checkpoint counter is not advanced again
+2026-11-01T02:22:49.3919560Z ASSERT collected checkpoint usage is not charged twice
+2026-11-01T02:22:49.3931616Z ASSERT resumed root matches validated outcome
+2026-11-01T02:22:49.3934345Z ASSERT only accepted output emits successful turn close
+2026-11-01T02:22:49.3940234Z ASSERT completion keeps committed source envelope
+2026-11-01T02:22:49.3951974Z   [OK]          provider_mock_extra         15   terminal resume runs pending...
+2026-11-01T02:22:49.4075493Z ASSERT terminal recovery does not redispatch provider
+2026-11-01T02:22:49.4076322Z ASSERT terminal recovery does not repeat AfterTurn
+2026-11-01T02:22:49.4076822Z ASSERT stop hook identity
+2026-11-01T02:22:49.4077142Z ASSERT stop hook stage
+2026-11-01T02:22:49.4077546Z ASSERT stop callback follows the pending output contract
+2026-11-01T02:22:49.4078072Z ASSERT collected checkpoint counter is not advanced again
+2026-11-01T02:22:49.4078768Z ASSERT collected checkpoint usage is not charged twice
+2026-11-01T02:22:49.4091404Z ASSERT resumed root matches validated outcome
+2026-11-01T02:22:49.4095860Z ASSERT only accepted output emits successful turn close
+2026-11-01T02:22:49.4115311Z   [OK]          provider_mock_extra         16   terminal resume propagates O...
+2026-11-01T02:22:49.4240818Z ASSERT terminal recovery does not redispatch provider
+2026-11-01T02:22:49.4241726Z ASSERT terminal recovery does not repeat AfterTurn
+2026-11-01T02:22:49.4242470Z ASSERT stop hook identity
+2026-11-01T02:22:49.4242994Z ASSERT stop hook stage
+2026-11-01T02:22:49.4243577Z ASSERT stop callback follows the pending output contract
+2026-11-01T02:22:49.4244138Z ASSERT collected checkpoint counter is not advanced again
+2026-11-01T02:22:49.4244694Z ASSERT collected checkpoint usage is not charged twice
+2026-11-01T02:22:49.4256752Z ASSERT resumed root matches validated outcome
+2026-11-01T02:22:49.4258226Z ASSERT only accepted output emits successful turn close
+2026-11-01T02:22:49.4275607Z   [OK]          provider_mock_extra         17   terminal resume rejects ille...
+2026-11-01T02:22:49.4430893Z ASSERT terminal recovery does not redispatch provider
+2026-11-01T02:22:49.4431577Z ASSERT terminal recovery does not repeat AfterTurn
+2026-11-01T02:22:49.4432401Z ASSERT response identity, content, model and usage are exact
+2026-11-01T02:22:49.4433323Z ASSERT stop callback follows the pending output contract
+2026-11-01T02:22:49.4434312Z ASSERT collected checkpoint counter is not advanced again
+2026-11-01T02:22:49.4435175Z ASSERT collected checkpoint usage is not charged twice
+2026-11-01T02:22:49.4446769Z ASSERT resumed root matches validated outcome
+2026-11-01T02:22:49.4449967Z ASSERT only accepted output emits successful turn close
+2026-11-01T02:22:49.4460004Z ASSERT completion keeps committed source envelope
+2026-11-01T02:22:49.4468083Z   [OK]          provider_mock_extra         18   open provider repeats OnStop...
+2026-11-01T02:22:49.4628414Z ASSERT terminal recovery does not redispatch provider
+2026-11-01T02:22:49.4629469Z ASSERT terminal recovery does not repeat AfterTurn
+2026-11-01T02:22:49.4630026Z ASSERT response identity, content, model and usage are exact
+2026-11-01T02:22:49.4630527Z ASSERT stop callback follows the pending output contract
+2026-11-01T02:22:49.4631028Z ASSERT collected checkpoint counter is not advanced again
+2026-11-01T02:22:49.4631500Z ASSERT collected checkpoint usage is not charged twice
+2026-11-01T02:22:49.4647143Z ASSERT resumed root matches validated outcome
+2026-11-01T02:22:49.4648651Z ASSERT only accepted output emits successful turn close
+2026-11-01T02:22:49.4649872Z ASSERT completion keeps committed source envelope
+2026-11-01T02:22:49.4668058Z   [OK]          provider_mock_extra         19   closed provider reuses outpu...
+2026-11-01T02:22:49.4801800Z ASSERT terminal recovery does not redispatch provider
+2026-11-01T02:22:49.4802630Z ASSERT terminal recovery does not repeat AfterTurn
+2026-11-01T02:22:49.4803129Z ASSERT stop callback follows the pending output contract
+2026-11-01T02:22:49.4803894Z ASSERT collected checkpoint counter is not advanced again
+2026-11-01T02:22:49.4804693Z ASSERT collected checkpoint usage is not charged twice
+2026-11-01T02:22:49.4817102Z ASSERT resumed root matches validated outcome
+2026-11-01T02:22:49.4820609Z ASSERT only accepted output emits successful turn close
+2026-11-01T02:22:49.4837527Z   [OK]          provider_mock_extra         20   terminal resume rejects stal...
+2026-11-01T02:22:49.4963298Z ASSERT terminal recovery does not redispatch provider
+2026-11-01T02:22:49.4963936Z ASSERT terminal recovery does not repeat AfterTurn
+2026-11-01T02:22:49.4964686Z ASSERT stop callback follows the pending output contract
+2026-11-01T02:22:49.4965794Z ASSERT collected checkpoint counter is not advanced again
+2026-11-01T02:22:49.4966837Z ASSERT collected checkpoint usage is not charged twice
+2026-11-01T02:22:49.4978923Z ASSERT resumed root matches validated outcome
+2026-11-01T02:22:49.4982704Z ASSERT only accepted output emits successful turn close
+2026-11-01T02:22:49.5001119Z   [OK]          provider_mock_extra         21   terminal resume rejects diff...
+2026-11-01T02:22:49.5149419Z ASSERT terminal recovery does not redispatch provider
+2026-11-01T02:22:49.5150139Z ASSERT terminal recovery does not repeat AfterTurn
+2026-11-01T02:22:49.5150790Z ASSERT stop callback follows the pending output contract
+2026-11-01T02:22:49.5151840Z ASSERT collected checkpoint counter is not advanced again
+2026-11-01T02:22:49.5152724Z ASSERT collected checkpoint usage is not charged twice
+2026-11-01T02:22:49.5167651Z ASSERT resumed root matches validated outcome
+2026-11-01T02:22:49.5169642Z ASSERT only accepted output emits successful turn close
+2026-11-01T02:22:49.5187835Z   [OK]          provider_mock_extra         22   terminal resume rejects pers...
+2026-11-01T02:22:49.5358251Z ASSERT persisted terminal response provenance is exact
+2026-11-01T02:22:49.5359524Z ASSERT settled tool handler is not rerun
+2026-11-01T02:22:49.5360270Z ASSERT provider count follows persisted completion
+2026-11-01T02:22:49.5377427Z ASSERT resumed completed turn has one canonical close observation
+2026-11-01T02:22:49.5378454Z ASSERT live subscription emits only newly committed resume close
+2026-11-01T02:22:49.5379012Z ASSERT terminal outcome
+2026-11-01T02:22:49.5379718Z ASSERT terminal recovery action
+2026-11-01T02:22:49.5398883Z   [OK]          provider_mock_extra         23   terminal resume ignores curr...
+2026-11-01T02:22:49.5578302Z ASSERT persisted terminal response provenance is exact
+2026-11-01T02:22:49.5578847Z ASSERT settled tool handler is not rerun
+2026-11-01T02:22:49.5579888Z ASSERT provider count follows persisted completion
+2026-11-01T02:22:49.5598765Z ASSERT resumed completed turn has one canonical close observation
+2026-11-01T02:22:49.5600145Z ASSERT live subscription emits only newly committed resume close
+2026-11-01T02:22:49.5600816Z ASSERT terminal outcome
+2026-11-01T02:22:49.5601339Z ASSERT terminal recovery action
+2026-11-01T02:22:49.5617139Z   [OK]          provider_mock_extra         24   terminal resume survives cur...
+2026-11-01T02:22:49.6347759Z ASSERT active-zero-invocation-response-drift: mismatch executes no tool effect
+2026-11-01T02:22:49.6431632Z ASSERT settled-zero-invocation-response-drift: mismatch executes no tool effect
+2026-11-01T02:22:49.7001015Z   [OK]          provider_mock_extra         25   malformed terminal resume do...
+2026-11-01T02:22:49.7136334Z ASSERT exact invocation
+2026-11-01T02:22:49.7137143Z ASSERT exact invocation turn
+2026-11-01T02:22:49.7137793Z ASSERT exact planned index
+2026-11-01T02:22:49.7138398Z ASSERT exact batch index
+2026-11-01T02:22:49.7139355Z ASSERT exact batch size
+2026-11-01T02:22:49.7139966Z ASSERT exact serial schedule
+2026-11-01T02:22:49.7141213Z ASSERT exact closed effect disposition
+2026-11-01T02:22:49.7141797Z ASSERT exact durability detail
+2026-11-01T02:22:49.7142311Z ASSERT terminal durability failure is not retryable
+2026-11-01T02:22:49.7142811Z ASSERT provider called once
+2026-11-01T02:22:49.7143251Z ASSERT terminal effect ran once
+2026-11-01T02:22:49.7150357Z   [OK]          provider_mock_extra         26   terminal durability failure ...
+2026-11-01T02:22:49.7321653Z ASSERT initial provider call
+2026-11-01T02:22:49.7322247Z ASSERT initial effect settled once
+2026-11-01T02:22:49.7395570Z ASSERT removed retains persisted terminal completion
+2026-11-01T02:22:49.7396495Z ASSERT removed total provider calls
+2026-11-01T02:22:49.7397721Z ASSERT removed empty injection preserves the tool-result recovery boundary
+2026-11-01T02:22:49.7398559Z ASSERT removed current handler never runs
+2026-11-01T02:22:49.7546191Z ASSERT initial provider call
+2026-11-01T02:22:49.7546854Z ASSERT initial effect settled once
+2026-11-01T02:22:49.7606944Z ASSERT drifted retains persisted terminal completion
+2026-11-01T02:22:49.7607936Z ASSERT drifted total provider calls
+2026-11-01T02:22:49.7609027Z ASSERT drifted empty injection preserves the tool-result recovery boundary
+2026-11-01T02:22:49.7610418Z ASSERT drifted current handler never runs
+2026-11-01T02:22:49.7630167Z   [OK]          provider_mock_extra         27   stale checkpoint terminal se...
+2026-11-01T02:22:49.7827151Z ASSERT settled tool handler is not rerun
+2026-11-01T02:22:49.7827823Z ASSERT provider count follows persisted completion
+2026-11-01T02:22:49.7847859Z ASSERT resumed completed turn has one canonical close observation
+2026-11-01T02:22:49.7848570Z ASSERT live subscription emits only newly committed resume close
+2026-11-01T02:22:49.7869639Z   [OK]          provider_mock_extra         28   Agent.run rejects a closed-F...
+2026-11-01T02:22:49.8102314Z ASSERT all-blocked settled turn resumes and completes
+2026-11-01T02:22:49.8103209Z ASSERT blocked turn runs no tool effect on resume
+2026-11-01T02:22:49.8103695Z ASSERT terminal outcome
+2026-11-01T02:22:49.8104088Z ASSERT terminal recovery action
+2026-11-01T02:22:49.8123098Z   [OK]          provider_mock_extra         29   Agent.run resumes an all-blo...
+2026-11-01T02:22:49.8415590Z ASSERT resume completes
+2026-11-01T02:22:49.8416355Z ASSERT tool executes once on resume
+2026-11-01T02:22:49.8416954Z ASSERT on_yield fires on the resume turn (fresh/resume parity)
+2026-11-01T02:22:49.8417920Z ASSERT replayed turn 0 then fresh turn 1 in the turn log
+2026-11-01T02:22:49.8418620Z ASSERT agent_turn spans open under the replayed then fresh ordinal
+2026-11-01T02:22:49.8437598Z   [OK]          provider_mock_extra         30   Agent.run fires on_yield on ...
+2026-11-01T02:22:49.8719766Z ASSERT locator persisted
+2026-11-01T02:22:49.8720651Z ASSERT checkpoint persisted
+2026-11-01T02:22:49.8721223Z ASSERT terminal outcome
+2026-11-01T02:22:49.8721747Z ASSERT terminal recovery action
+2026-11-01T02:22:49.8740512Z   [OK]          provider_mock_extra         31   terminal disposition retires...
+2026-11-01T02:22:49.8946496Z ASSERT settled tool handler is not rerun
+2026-11-01T02:22:49.8947412Z ASSERT settled pre-tool hook is not rerun
+2026-11-01T02:22:49.8948258Z ASSERT settled post-tool hook is not rerun
+2026-11-01T02:22:49.8948727Z ASSERT terminal outcome
+2026-11-01T02:22:49.8949559Z ASSERT terminal recovery action
+2026-11-01T02:22:49.8965215Z   [OK]          provider_mock_extra         32   terminal disposition require...
+2026-11-01T02:22:49.9228588Z ASSERT terminal sink called once
+2026-11-01T02:22:49.9229761Z ASSERT terminal journal committed before sink failure
+2026-11-01T02:22:49.9238617Z   [OK]          provider_mock_extra         33   terminal disposition sink fa...
+2026-11-01T02:22:49.9566898Z ASSERT canonical success committed before trace fault
+2026-11-01T02:22:49.9606753Z ASSERT external effect executed once
+2026-11-01T02:22:49.9607630Z ASSERT fault occurs after canonical terminal observation
+2026-11-01T02:22:49.9608530Z ASSERT committed answer survives observer failure
+2026-11-01T02:22:49.9609136Z ASSERT completion callback observes execution success
+2026-11-01T02:22:49.9610226Z ASSERT trace failure diagnostic attempted once
+2026-11-01T02:22:49.9610951Z ASSERT callback diagnostic only follows a callback failure
+2026-11-01T02:22:49.9611682Z ASSERT lifecycle retains committed success
+2026-11-01T02:22:49.9647619Z ASSERT fresh reader sees same canonical terminal
+2026-11-01T02:22:49.9649960Z ASSERT same occurrence identities and sequence after observer failure
+2026-11-01T02:22:49.9665766Z ASSERT observer failure appends no compensating execution failure
+2026-11-01T02:22:49.9678709Z   [OK]          provider_mock_extra         34   trace failure preserves comm...
+2026-11-01T02:22:50.0031632Z ASSERT canonical success committed before trace fault
+2026-11-01T02:22:50.0070568Z ASSERT external effect executed once
+2026-11-01T02:22:50.0071452Z ASSERT fault occurs after canonical terminal observation
+2026-11-01T02:22:50.0072398Z ASSERT committed answer survives observer failure
+2026-11-01T02:22:50.0073204Z ASSERT completion callback observes execution success
+2026-11-01T02:22:50.0074080Z ASSERT trace failure diagnostic attempted once
+2026-11-01T02:22:50.0074827Z ASSERT callback diagnostic only follows a callback failure
+2026-11-01T02:22:50.0075625Z ASSERT lifecycle retains committed success
+2026-11-01T02:22:50.0111368Z ASSERT fresh reader sees same canonical terminal
+2026-11-01T02:22:50.0113683Z ASSERT same occurrence identities and sequence after observer failure
+2026-11-01T02:22:50.0115585Z ASSERT observer failure appends no compensating execution failure
+2026-11-01T02:22:50.0135797Z   [OK]          provider_mock_extra         35   throwing trace diagnostic pr...
+2026-11-01T02:22:50.0461635Z ASSERT canonical success committed before trace fault
+2026-11-01T02:22:50.0501567Z ASSERT external effect executed once
+2026-11-01T02:22:50.0502337Z ASSERT fault occurs after canonical terminal observation
+2026-11-01T02:22:50.0503239Z ASSERT reserved diagnostic preempts completion callback
+2026-11-01T02:22:50.0504106Z ASSERT trace failure diagnostic attempted once
+2026-11-01T02:22:50.0504984Z ASSERT callback diagnostic only follows a callback failure
+2026-11-01T02:22:50.0505813Z ASSERT lifecycle retains committed success
+2026-11-01T02:22:50.0545931Z ASSERT fresh reader sees same canonical terminal
+2026-11-01T02:22:50.0547396Z ASSERT same occurrence identities and sequence after observer failure
+2026-11-01T02:22:50.0549522Z ASSERT observer failure appends no compensating execution failure
+2026-11-01T02:22:50.0572234Z   [OK]          provider_mock_extra         36   reserved trace diagnostic fi...
+2026-11-01T02:22:50.0907924Z ASSERT canonical success committed before trace fault
+2026-11-01T02:22:50.0947569Z ASSERT external effect executed once
+2026-11-01T02:22:50.0948353Z ASSERT fault occurs after canonical terminal observation
+2026-11-01T02:22:50.0948952Z ASSERT committed answer survives observer failure
+2026-11-01T02:22:50.0949772Z ASSERT completion callback observes execution success
+2026-11-01T02:22:50.0950222Z ASSERT trace failure diagnostic attempted once
+2026-11-01T02:22:50.0950677Z ASSERT callback diagnostic only follows a callback failure
+2026-11-01T02:22:50.0951105Z ASSERT lifecycle retains committed success
+2026-11-01T02:22:50.0991569Z ASSERT fresh reader sees same canonical terminal
+2026-11-01T02:22:50.0994683Z ASSERT same occurrence identities and sequence after observer failure
+2026-11-01T02:22:50.0998849Z ASSERT observer failure appends no compensating execution failure
+2026-11-01T02:22:50.1015962Z   [OK]          provider_mock_extra         37   completion callback diagnost...
+2026-11-01T02:22:50.1196205Z ASSERT provider dispatch once
+2026-11-01T02:22:50.1197080Z ASSERT only unacknowledged source delivery repeats
+2026-11-01T02:22:50.1197772Z ASSERT ready observation precedes provider dispatch
+2026-11-01T02:22:50.1214100Z ASSERT turn observation keeps committed sequence
+2026-11-01T02:22:50.1214893Z ASSERT turn observation keeps committed run
+2026-11-01T02:22:50.1215648Z ASSERT turn observation keeps committed correlation
+2026-11-01T02:22:50.1216409Z ASSERT turn observation keeps committed parent
+2026-11-01T02:22:50.1217199Z ASSERT payload derives from its exact committed boundary
+2026-11-01T02:22:50.1217984Z ASSERT turn observation keeps committed sequence
+2026-11-01T02:22:50.1218459Z ASSERT turn observation keeps committed run
+2026-11-01T02:22:50.1218929Z ASSERT turn observation keeps committed correlation
+2026-11-01T02:22:50.1219730Z ASSERT turn observation keeps committed parent
+2026-11-01T02:22:50.1220244Z ASSERT payload derives from its exact committed boundary
+2026-11-01T02:22:50.1220756Z ASSERT turn observation keeps committed sequence
+2026-11-01T02:22:50.1221218Z ASSERT turn observation keeps committed run
+2026-11-01T02:22:50.1221900Z ASSERT turn observation keeps committed correlation
+2026-11-01T02:22:50.1222385Z ASSERT turn observation keeps committed parent
+2026-11-01T02:22:50.1222882Z ASSERT payload derives from its exact committed boundary
+2026-11-01T02:22:50.1223374Z ASSERT turn observation keeps committed sequence
+2026-11-01T02:22:50.1223812Z ASSERT turn observation keeps committed run
+2026-11-01T02:22:50.1224276Z ASSERT turn observation keeps committed correlation
+2026-11-01T02:22:50.1224743Z ASSERT turn observation keeps committed parent
+2026-11-01T02:22:50.1225225Z ASSERT payload derives from its exact committed boundary
+2026-11-01T02:22:50.1226080Z ASSERT cursor catch-up matches deduplicated live observations
+2026-11-01T02:22:50.1243176Z ASSERT reopened acknowledgement skips only accepted observation
+2026-11-01T02:22:50.1243928Z ASSERT acknowledged catch-up has no repeat
+2026-11-01T02:22:50.1262912Z   [OK]          provider_mock_extra         38   durable turn observations ke...
+2026-11-01T02:22:50.1402896Z ASSERT provider dispatch once
+2026-11-01T02:22:50.1403756Z ASSERT only unacknowledged source delivery repeats
+2026-11-01T02:22:50.1404739Z ASSERT ready observation precedes provider dispatch
+2026-11-01T02:22:50.1419205Z ASSERT turn observation keeps committed sequence
+2026-11-01T02:22:50.1420479Z ASSERT turn observation keeps committed run
+2026-11-01T02:22:50.1421408Z ASSERT turn observation keeps committed correlation
+2026-11-01T02:22:50.1422177Z ASSERT turn observation keeps committed parent
+2026-11-01T02:22:50.1422977Z ASSERT payload derives from its exact committed boundary
+2026-11-01T02:22:50.1423773Z ASSERT turn observation keeps committed sequence
+2026-11-01T02:22:50.1424486Z ASSERT turn observation keeps committed run
+2026-11-01T02:22:50.1425124Z ASSERT turn observation keeps committed correlation
+2026-11-01T02:22:50.1425572Z ASSERT turn observation keeps committed parent
+2026-11-01T02:22:50.1426019Z ASSERT payload derives from its exact committed boundary
+2026-11-01T02:22:50.1426477Z ASSERT turn observation keeps committed sequence
+2026-11-01T02:22:50.1426877Z ASSERT turn observation keeps committed run
+2026-11-01T02:22:50.1427289Z ASSERT turn observation keeps committed correlation
+2026-11-01T02:22:50.1427933Z ASSERT turn observation keeps committed parent
+2026-11-01T02:22:50.1428369Z ASSERT payload derives from its exact committed boundary
+2026-11-01T02:22:50.1428799Z ASSERT turn observation keeps committed sequence
+2026-11-01T02:22:50.1429472Z ASSERT turn observation keeps committed run
+2026-11-01T02:22:50.1429920Z ASSERT turn observation keeps committed correlation
+2026-11-01T02:22:50.1430337Z ASSERT turn observation keeps committed parent
+2026-11-01T02:22:50.1430760Z ASSERT payload derives from its exact committed boundary
+2026-11-01T02:22:50.1431249Z ASSERT cursor catch-up matches deduplicated live observations
+2026-11-01T02:22:50.1444305Z ASSERT reopened acknowledgement skips only accepted observation
+2026-11-01T02:22:50.1445107Z ASSERT acknowledged catch-up has no repeat
+2026-11-01T02:22:50.1457549Z   [OK]          provider_mock_extra         39   caller-owned checkpoint pres...
+2026-11-01T02:22:50.1613080Z ASSERT provider dispatch once
+2026-11-01T02:22:50.1613938Z ASSERT only unacknowledged source delivery repeats
+2026-11-01T02:22:50.1614848Z ASSERT ready observation precedes provider dispatch
+2026-11-01T02:22:50.1631480Z ASSERT turn observation keeps committed sequence
+2026-11-01T02:22:50.1632279Z ASSERT turn observation keeps committed run
+2026-11-01T02:22:50.1633132Z ASSERT turn observation keeps committed correlation
+2026-11-01T02:22:50.1633967Z ASSERT turn observation keeps committed parent
+2026-11-01T02:22:50.1634790Z ASSERT payload derives from its exact committed boundary
+2026-11-01T02:22:50.1635297Z ASSERT turn observation keeps committed sequence
+2026-11-01T02:22:50.1635731Z ASSERT turn observation keeps committed run
+2026-11-01T02:22:50.1636171Z ASSERT turn observation keeps committed correlation
+2026-11-01T02:22:50.1636621Z ASSERT turn observation keeps committed parent
+2026-11-01T02:22:50.1637090Z ASSERT payload derives from its exact committed boundary
+2026-11-01T02:22:50.1637559Z ASSERT turn observation keeps committed sequence
+2026-11-01T02:22:50.1637995Z ASSERT turn observation keeps committed run
+2026-11-01T02:22:50.1638415Z ASSERT turn observation keeps committed correlation
+2026-11-01T02:22:50.1638836Z ASSERT turn observation keeps committed parent
+2026-11-01T02:22:50.1639603Z ASSERT payload derives from its exact committed boundary
+2026-11-01T02:22:50.1640084Z ASSERT turn observation keeps committed sequence
+2026-11-01T02:22:50.1640488Z ASSERT turn observation keeps committed run
+2026-11-01T02:22:50.1640906Z ASSERT turn observation keeps committed correlation
+2026-11-01T02:22:50.1641332Z ASSERT turn observation keeps committed parent
+2026-11-01T02:22:50.1641791Z ASSERT payload derives from its exact committed boundary
+2026-11-01T02:22:50.1642291Z ASSERT cursor catch-up matches deduplicated live observations
+2026-11-01T02:22:50.1649988Z ASSERT reopened acknowledgement skips only accepted observation
+2026-11-01T02:22:50.1650823Z ASSERT acknowledged catch-up has no repeat
+2026-11-01T02:22:50.1662968Z   [OK]          provider_mock_extra         40   turn publication failure ret...
+2026-11-01T02:22:50.1775671Z ASSERT provider dispatch once
+2026-11-01T02:22:50.1776383Z ASSERT only unacknowledged source delivery repeats
+2026-11-01T02:22:50.1777022Z ASSERT ready observation precedes provider dispatch
+2026-11-01T02:22:50.1792035Z ASSERT turn observation keeps committed sequence
+2026-11-01T02:22:50.1792838Z ASSERT turn observation keeps committed run
+2026-11-01T02:22:50.1793598Z ASSERT turn observation keeps committed correlation
+2026-11-01T02:22:50.1794353Z ASSERT turn observation keeps committed parent
+2026-11-01T02:22:50.1795469Z ASSERT payload derives from its exact committed boundary
+2026-11-01T02:22:50.1796218Z ASSERT turn observation keeps committed sequence
+2026-11-01T02:22:50.1796699Z ASSERT turn observation keeps committed run
+2026-11-01T02:22:50.1797178Z ASSERT turn observation keeps committed correlation
+2026-11-01T02:22:50.1797674Z ASSERT turn observation keeps committed parent
+2026-11-01T02:22:50.1798228Z ASSERT payload derives from its exact committed boundary
+2026-11-01T02:22:50.1798768Z ASSERT turn observation keeps committed sequence
+2026-11-01T02:22:50.1799554Z ASSERT turn observation keeps committed run
+2026-11-01T02:22:50.1800077Z ASSERT turn observation keeps committed correlation
+2026-11-01T02:22:50.1800595Z ASSERT turn observation keeps committed parent
+2026-11-01T02:22:50.1801125Z ASSERT payload derives from its exact committed boundary
+2026-11-01T02:22:50.1801721Z ASSERT cursor catch-up matches deduplicated live observations
+2026-11-01T02:22:50.1807348Z ASSERT reopened acknowledgement skips only accepted observation
+2026-11-01T02:22:50.1808234Z ASSERT acknowledged catch-up has no repeat
+2026-11-01T02:22:50.1824221Z   [OK]          provider_mock_extra         41   checkpoint refusal does not ...
+2026-11-01T02:22:50.1916321Z ASSERT hook child has no shared-journal factory
+2026-11-01T02:22:50.2120372Z ASSERT parent provider once
+2026-11-01T02:22:50.2121046Z ASSERT separate child provider once
+2026-11-01T02:22:50.2138093Z ASSERT each journal retains its four turn observations
+2026-11-01T02:22:50.2139387Z ASSERT separate journal has its own live cursor
+2026-11-01T02:22:50.2140308Z ASSERT each audience observes only its exact journal source
+2026-11-01T02:22:50.2157214Z ASSERT each journal retains its four turn observations
+2026-11-01T02:22:50.2157841Z ASSERT separate journal has its own live cursor
+2026-11-01T02:22:50.2158454Z ASSERT each audience observes only its exact journal source
+2026-11-01T02:22:50.2182647Z   [OK]          provider_mock_extra         42   nested independent stores ow...
+2026-11-01T02:22:50.2534691Z ASSERT tool effect once
+2026-11-01T02:22:50.2535540Z ASSERT called observation arrives before effect
+2026-11-01T02:22:50.2536587Z ASSERT partial delivery retries only the unacknowledged occurrence
+2026-11-01T02:22:50.2537469Z ASSERT one canonical called and completed identity
+2026-11-01T02:22:50.2573246Z ASSERT bus occurrence uses canonical sequence
+2026-11-01T02:22:50.2573723Z ASSERT bus occurrence uses canonical event id
+2026-11-01T02:22:50.2574147Z ASSERT bus occurrence uses canonical run id
+2026-11-01T02:22:50.2574589Z ASSERT bus occurrence uses canonical correlation id
+2026-11-01T02:22:50.2575026Z ASSERT canonical parent event is preserved
+2026-11-01T02:22:50.2575510Z ASSERT no synthetic lifecycle causation replaces source facts
+2026-11-01T02:22:50.2576003Z ASSERT bus occurrence uses canonical sequence
+2026-11-01T02:22:50.2576404Z ASSERT bus occurrence uses canonical event id
+2026-11-01T02:22:50.2576802Z ASSERT bus occurrence uses canonical run id
+2026-11-01T02:22:50.2577247Z ASSERT bus occurrence uses canonical correlation id
+2026-11-01T02:22:50.2577669Z ASSERT canonical parent event is preserved
+2026-11-01T02:22:50.2578125Z ASSERT no synthetic lifecycle causation replaces source facts
+2026-11-01T02:22:50.2578624Z ASSERT journal checkpoints exist without a caller sink
+2026-11-01T02:22:50.2582031Z ASSERT latest checkpoint cites exact committed event and cursor
+2026-11-01T02:22:50.2584249Z ASSERT each checkpoint reader receives an independent context
+2026-11-01T02:22:50.2622784Z ASSERT reopened reader retains checkpoint identity and cursor
+2026-11-01T02:22:50.2624415Z ASSERT filtered empty pages still advance source cursor
+2026-11-01T02:22:50.2625350Z ASSERT public cursor catch-up matches live canonical observations
+2026-11-01T02:22:50.2655206Z ASSERT reconstructed settlement retains live canonical occurrence
+2026-11-01T02:22:50.2656137Z ASSERT reopened cursor retries the identical undelivered event
+2026-11-01T02:22:50.2656863Z ASSERT acknowledged catch-up has no repeat
+2026-11-01T02:22:50.2674134Z   [OK]          provider_mock_extra         43   durable tool bus uses canoni...
+2026-11-01T02:22:50.2831760Z ASSERT effect committed before checkpoint observer failure
+2026-11-01T02:22:50.2846367Z ASSERT required checkpoint authority refusal rejects continuation
+2026-11-01T02:22:50.2847384Z ASSERT required checkpoint refusal never repeats committed effect
+2026-11-01T02:22:50.2848382Z ASSERT required checkpoint refusal prevents next provider call
+2026-11-01T02:22:50.2867721Z ASSERT caller-owned checkpoints are not dual-written into journal
+2026-11-01T02:22:50.2880838Z   [OK]          provider_mock_extra         44   required checkpoint sink Err...
+2026-11-01T02:22:50.3045579Z ASSERT effect committed before checkpoint observer failure
+2026-11-01T02:22:50.3061086Z ASSERT required checkpoint authority refusal rejects continuation
+2026-11-01T02:22:50.3062217Z ASSERT required checkpoint refusal never repeats committed effect
+2026-11-01T02:22:50.3062935Z ASSERT required checkpoint refusal prevents next provider call
+2026-11-01T02:22:50.3083040Z ASSERT caller-owned checkpoints are not dual-written into journal
+2026-11-01T02:22:50.3092975Z   [OK]          provider_mock_extra         45   required checkpoint sink exc...
+2026-11-01T02:22:50.3442986Z ASSERT tool effect once
+2026-11-01T02:22:50.3443713Z ASSERT called observation arrives before effect
+2026-11-01T02:22:50.3444381Z ASSERT partial delivery retries only the unacknowledged occurrence
+2026-11-01T02:22:50.3444998Z ASSERT one canonical called and completed identity
+2026-11-01T02:22:50.3485251Z ASSERT bus occurrence uses canonical sequence
+2026-11-01T02:22:50.3485853Z ASSERT bus occurrence uses canonical event id
+2026-11-01T02:22:50.3486411Z ASSERT bus occurrence uses canonical run id
+2026-11-01T02:22:50.3487038Z ASSERT bus occurrence uses canonical correlation id
+2026-11-01T02:22:50.3487638Z ASSERT canonical parent event is preserved
+2026-11-01T02:22:50.3488278Z ASSERT no synthetic lifecycle causation replaces source facts
+2026-11-01T02:22:50.3488909Z ASSERT bus occurrence uses canonical sequence
+2026-11-01T02:22:50.3490139Z ASSERT bus occurrence uses canonical event id
+2026-11-01T02:22:50.3490707Z ASSERT bus occurrence uses canonical run id
+2026-11-01T02:22:50.3491336Z ASSERT bus occurrence uses canonical correlation id
+2026-11-01T02:22:50.3491893Z ASSERT canonical parent event is preserved
+2026-11-01T02:22:50.3492482Z ASSERT no synthetic lifecycle causation replaces source facts
+2026-11-01T02:22:50.3493121Z ASSERT journal checkpoints exist without a caller sink
+2026-11-01T02:22:50.3496056Z ASSERT latest checkpoint cites exact committed event and cursor
+2026-11-01T02:22:50.3497425Z ASSERT each checkpoint reader receives an independent context
+2026-11-01T02:22:50.3541922Z ASSERT reopened reader retains checkpoint identity and cursor
+2026-11-01T02:22:50.3542835Z ASSERT filtered empty pages still advance source cursor
+2026-11-01T02:22:50.3543739Z ASSERT public cursor catch-up matches live canonical observations
+2026-11-01T02:22:50.3577784Z ASSERT reconstructed settlement retains live canonical occurrence
+2026-11-01T02:22:50.3578575Z ASSERT reopened cursor retries the identical undelivered event
+2026-11-01T02:22:50.3579101Z ASSERT acknowledged catch-up has no repeat
+2026-11-01T02:22:50.3606180Z   [OK]          provider_mock_extra         46   durable tool partial deliver...
+2026-11-01T02:22:50.4215176Z ASSERT each parent effect runs once
+2026-11-01T02:22:50.4216358Z ASSERT each recursive child effect runs once
+2026-11-01T02:22:50.4217200Z ASSERT root bus keeps explicit audience
+2026-11-01T02:22:50.4217988Z ASSERT child bus keeps explicit audience
+2026-11-01T02:22:50.4218928Z ASSERT shared audience preserves global canonical order
+2026-11-01T02:22:50.4219994Z ASSERT distinct audience preserves canonical order
+2026-11-01T02:22:50.4288470Z ASSERT canonical source retains every child regardless of audience
+2026-11-01T02:22:50.4289624Z ASSERT audience event is the exact committed source observation
+2026-11-01T02:22:50.4290848Z ASSERT audience event is the exact committed source observation
+2026-11-01T02:22:50.4291775Z ASSERT audience event is the exact committed source observation
+2026-11-01T02:22:50.4294715Z ASSERT audience event is the exact committed source observation
+2026-11-01T02:22:50.4295822Z ASSERT turn and tool observations share ordered root audience
+2026-11-01T02:22:50.4296940Z ASSERT turn and tool observations preserve explicit child audience
+2026-11-01T02:22:50.4313106Z   [OK]          provider_mock_extra         47   nested tool observations use...
+2026-11-01T02:22:50.4948745Z ASSERT each parent effect runs once
+2026-11-01T02:22:50.4949557Z ASSERT each recursive child effect runs once
+2026-11-01T02:22:50.4950051Z ASSERT root bus keeps explicit audience
+2026-11-01T02:22:50.4950509Z ASSERT child bus keeps explicit audience
+2026-11-01T02:22:50.4951342Z ASSERT child observations never leak to root audience
+2026-11-01T02:22:50.4952226Z ASSERT shared audience preserves global canonical order
+2026-11-01T02:22:50.4953008Z ASSERT distinct audience preserves canonical order
+2026-11-01T02:22:50.5023567Z ASSERT canonical source retains every child regardless of audience
+2026-11-01T02:22:50.5024374Z ASSERT audience event is the exact committed source observation
+2026-11-01T02:22:50.5024984Z ASSERT audience event is the exact committed source observation
+2026-11-01T02:22:50.5025931Z ASSERT audience event is the exact committed source observation
+2026-11-01T02:22:50.5026844Z ASSERT audience event is the exact committed source observation
+2026-11-01T02:22:50.5027846Z ASSERT turn and tool observations share ordered root audience
+2026-11-01T02:22:50.5028700Z ASSERT turn and tool observations preserve explicit child audience
+2026-11-01T02:22:50.5048639Z   [OK]          provider_mock_extra         48   nested tool observations use...
+2026-11-01T02:22:50.5678189Z ASSERT each parent effect runs once
+2026-11-01T02:22:50.5678941Z ASSERT each recursive child effect runs once
+2026-11-01T02:22:50.5679874Z ASSERT root bus keeps explicit audience
+2026-11-01T02:22:50.5680528Z ASSERT child bus keeps explicit audience
+2026-11-01T02:22:50.5681377Z ASSERT child observations never leak to root audience
+2026-11-01T02:22:50.5682230Z ASSERT shared audience preserves global canonical order
+2026-11-01T02:22:50.5683049Z ASSERT distinct audience preserves canonical order
+2026-11-01T02:22:50.5747519Z ASSERT canonical source retains every child regardless of audience
+2026-11-01T02:22:50.5748122Z ASSERT audience event is the exact committed source observation
+2026-11-01T02:22:50.5748849Z ASSERT audience event is the exact committed source observation
+2026-11-01T02:22:50.5751227Z ASSERT turn and tool observations share ordered root audience
+2026-11-01T02:22:50.5752066Z ASSERT turn and tool observations preserve explicit child audience
+2026-11-01T02:22:50.5772701Z   [OK]          provider_mock_extra         49   nested tool observations pre...
+2026-11-01T02:22:50.6585026Z ASSERT each parent effect runs once
+2026-11-01T02:22:50.6585860Z ASSERT each recursive child effect runs once
+2026-11-01T02:22:50.6586460Z ASSERT root bus keeps explicit audience
+2026-11-01T02:22:50.6587013Z ASSERT child bus keeps explicit audience
+2026-11-01T02:22:50.6587805Z ASSERT shared audience preserves global canonical order
+2026-11-01T02:22:50.6588548Z ASSERT distinct audience preserves canonical order
+2026-11-01T02:22:50.6698214Z ASSERT canonical source retains every child regardless of audience
+2026-11-01T02:22:50.6699523Z ASSERT audience event is the exact committed source observation
+2026-11-01T02:22:50.6700535Z ASSERT audience event is the exact committed source observation
+2026-11-01T02:22:50.6701511Z ASSERT audience event is the exact committed source observation
+2026-11-01T02:22:50.6702255Z ASSERT audience event is the exact committed source observation
+2026-11-01T02:22:50.6702885Z ASSERT audience event is the exact committed source observation
+2026-11-01T02:22:50.6703726Z ASSERT audience event is the exact committed source observation
+2026-11-01T02:22:50.6704351Z ASSERT audience event is the exact committed source observation
+2026-11-01T02:22:50.6704969Z ASSERT audience event is the exact committed source observation
+2026-11-01T02:22:50.6708891Z ASSERT turn and tool observations share ordered root audience
+2026-11-01T02:22:50.6710093Z ASSERT turn and tool observations preserve explicit child audience
+2026-11-01T02:22:50.6736890Z   [OK]          provider_mock_extra         50   concurrent recursive tool ob...
+2026-11-01T02:22:50.7034053Z ASSERT blocked effect is never invoked
+2026-11-01T02:22:50.7034885Z ASSERT blocked effect invents no execution bus event
+2026-11-01T02:22:50.7069903Z ASSERT public reader invents no unattempted execution
+2026-11-01T02:22:50.7089721Z   [OK]          provider_mock_extra         51   unattempted tools have no bu...
+2026-11-01T02:22:50.7176182Z ASSERT terminal outcome
+2026-11-01T02:22:50.7176842Z ASSERT terminal recovery action
+2026-11-01T02:22:50.7193373Z   [OK]          provider_mock_extra         52   terminal disposition observe...
+2026-11-01T02:22:50.7269673Z ASSERT provider retains the caller's fiber binding
+2026-11-01T02:22:50.7270687Z ASSERT provider retains its native scope
+2026-11-01T02:22:50.7287789Z ASSERT terminal callback runs exactly once
+2026-11-01T02:22:50.7288430Z ASSERT terminal outcome
+2026-11-01T02:22:50.7288745Z ASSERT terminal recovery action
+2026-11-01T02:22:50.7289530Z ASSERT provider dispatch follows admission
+2026-11-01T02:22:50.7290263Z ASSERT tool effect is never repeated
+2026-11-01T02:22:50.7308367Z ASSERT callback agrees with canonical terminal evidence
+2026-11-01T02:22:50.7309715Z ASSERT unknown effect keeps its admitted tool attempt
+2026-11-01T02:22:50.7310621Z ASSERT cancellation invents no settled tool result
+2026-11-01T02:22:50.7317204Z   [OK]          provider_mock_extra         53   parent switch cancellation c...
+2026-11-01T02:22:50.7364979Z ASSERT terminal callback runs exactly once
+2026-11-01T02:22:50.7365910Z ASSERT locator publication finishes before cancelled callback admission
+2026-11-01T02:22:50.7366713Z ASSERT terminal outcome
+2026-11-01T02:22:50.7367237Z ASSERT terminal recovery action
+2026-11-01T02:22:50.7367859Z ASSERT provider dispatch follows admission
+2026-11-01T02:22:50.7368471Z ASSERT tool effect is never repeated
+2026-11-01T02:22:50.7375750Z ASSERT callback agrees with canonical terminal evidence
+2026-11-01T02:22:50.7376624Z ASSERT unknown effect keeps its admitted tool attempt
+2026-11-01T02:22:50.7377388Z ASSERT cancellation invents no settled tool result
+2026-11-01T02:22:50.7387143Z   [OK]          provider_mock_extra         54   cancellation before fresh ca...
+2026-11-01T02:22:50.7447390Z ASSERT terminal callback runs exactly once
+2026-11-01T02:22:50.7448044Z ASSERT locator publication finishes before cancelled callback admission
+2026-11-01T02:22:50.7450686Z ASSERT terminal outcome
+2026-11-01T02:22:50.7451033Z ASSERT terminal recovery action
+2026-11-01T02:22:50.7451417Z ASSERT provider dispatch follows admission
+2026-11-01T02:22:50.7451802Z ASSERT tool effect is never repeated
+2026-11-01T02:22:50.7452188Z ASSERT resume preserves the admitted locator
+2026-11-01T02:22:50.7454884Z ASSERT callback agrees with canonical terminal evidence
+2026-11-01T02:22:50.7455598Z ASSERT unknown effect keeps its admitted tool attempt
+2026-11-01T02:22:50.7456062Z ASSERT cancellation invents no settled tool result
+2026-11-01T02:22:50.7476027Z   [OK]          provider_mock_extra         55   cancellation before resumed ...
+2026-11-01T02:22:50.7550436Z ASSERT provider retains the caller's fiber binding
+2026-11-01T02:22:50.7551227Z ASSERT provider retains its native scope
+2026-11-01T02:22:50.7563855Z ASSERT terminal callback runs exactly once
+2026-11-01T02:22:50.7564521Z ASSERT terminal outcome
+2026-11-01T02:22:50.7565004Z ASSERT terminal recovery action
+2026-11-01T02:22:50.7565371Z ASSERT provider dispatch follows admission
+2026-11-01T02:22:50.7565765Z ASSERT tool effect is never repeated
+2026-11-01T02:22:50.7577133Z ASSERT callback agrees with canonical terminal evidence
+2026-11-01T02:22:50.7578010Z ASSERT unknown effect keeps its admitted tool attempt
+2026-11-01T02:22:50.7578772Z ASSERT cancellation invents no settled tool result
+2026-11-01T02:22:50.7587658Z   [OK]          provider_mock_extra         56   nested cancellation retains ...
+2026-11-01T02:22:50.7665729Z ASSERT provider retains the caller's fiber binding
+2026-11-01T02:22:50.7666534Z ASSERT provider retains its native scope
+2026-11-01T02:22:50.7679594Z ASSERT terminal callback runs exactly once
+2026-11-01T02:22:50.7680235Z ASSERT terminal outcome
+2026-11-01T02:22:50.7680558Z ASSERT terminal recovery action
+2026-11-01T02:22:50.7680932Z ASSERT provider dispatch follows admission
+2026-11-01T02:22:50.7681324Z ASSERT tool effect is never repeated
+2026-11-01T02:22:50.7692466Z ASSERT callback agrees with canonical terminal evidence
+2026-11-01T02:22:50.7693168Z ASSERT unknown effect keeps its admitted tool attempt
+2026-11-01T02:22:50.7693662Z ASSERT cancellation invents no settled tool result
+2026-11-01T02:22:50.7717157Z   [OK]          provider_mock_extra         57   losing provider race commits...
+2026-11-01T02:22:50.7794495Z ASSERT provider retains the caller's fiber binding
+2026-11-01T02:22:50.7795261Z ASSERT provider retains its native scope
+2026-11-01T02:22:50.7863581Z ASSERT tool retains the caller's fiber binding
+2026-11-01T02:22:50.7864347Z ASSERT tool retains its child execution authority
+2026-11-01T02:22:50.7880863Z ASSERT terminal callback runs exactly once
+2026-11-01T02:22:50.7881544Z ASSERT terminal outcome
+2026-11-01T02:22:50.7881989Z ASSERT terminal recovery action
+2026-11-01T02:22:50.7882432Z ASSERT provider dispatch follows admission
+2026-11-01T02:22:50.7883120Z ASSERT tool effect is never repeated
+2026-11-01T02:22:50.7904803Z ASSERT callback agrees with canonical terminal evidence
+2026-11-01T02:22:50.7905767Z ASSERT unknown effect keeps its admitted tool attempt
+2026-11-01T02:22:50.7906707Z ASSERT cancellation invents no settled tool result
+2026-11-01T02:22:50.7917777Z   [OK]          provider_mock_extra         58   parent cancellation preserve...
+2026-11-01T02:22:50.7918665Z Test Successful in 1.799s. 101 tests run.
+2026-11-01T02:22:50.8237603Z [targeted] @@packages/agent_core/test/runtest-test_pipeline: OK in 45s
+2026-11-01T02:22:50.8263842Z [targeted] @@packages/agent_core/test/runtest-test_pipeline_illegal_hook: start 2026-11-01T02:22:50Z (dune alias)
+2026-11-01T02:22:52.3201853Z Testing `Pipeline_illegal_hook'.
+2026-11-01T02:22:52.3205225Z ASSERT before_turn Block returns illegal-hook error
+2026-11-01T02:22:52.3206132Z   [OK]          before_turn          0   Block returns typed error.
+2026-11-01T02:22:52.3206911Z Test Successful in 0.000s. 1 test run.
+2026-11-01T02:22:52.3447477Z [targeted] @@packages/agent_core/test/runtest-test_pipeline_illegal_hook: OK in 2s
+2026-11-01T02:22:52.3473776Z [targeted] @@packages/agent_core/test/runtest-test_execution_journal: start 2026-11-01T02:22:52Z (dune alias)
+2026-11-01T02:22:54.0155221Z Testing `Execution journal'.
+2026-11-01T02:22:54.0156578Z ASSERT refusal preserves the committed prefix
+2026-11-01T02:22:54.0157387Z ASSERT refusal preserves the committed prefix
+2026-11-01T02:22:54.0158181Z ASSERT refusal preserves the committed prefix
+2026-11-01T02:22:54.0158960Z ASSERT refusal preserves the committed prefix
+2026-11-01T02:22:54.0160131Z ASSERT turn progress keeps its envelope through durable codec
+2026-11-01T02:22:54.0160993Z ASSERT refusal preserves the committed prefix
+2026-11-01T02:22:54.0161631Z ASSERT global sequence
+2026-11-01T02:22:54.0162129Z ASSERT global sequence
+2026-11-01T02:22:54.0162600Z ASSERT global sequence
+2026-11-01T02:22:54.0163058Z ASSERT global sequence
+2026-11-01T02:22:54.0163510Z ASSERT global sequence
+2026-11-01T02:22:54.0163957Z ASSERT global sequence
+2026-11-01T02:22:54.0164396Z ASSERT global sequence
+2026-11-01T02:22:54.0165124Z   [OK]          topology          0   turn progress rejects wrong ownership a...
+2026-11-01T02:22:54.0173759Z ASSERT all events retained
+2026-11-01T02:22:54.0174355Z ASSERT global sequence
+2026-11-01T02:22:54.0174661Z ASSERT global sequence
+2026-11-01T02:22:54.0175062Z ASSERT global sequence
+2026-11-01T02:22:54.0175549Z ASSERT global sequence
+2026-11-01T02:22:54.0175820Z ASSERT global sequence
+2026-11-01T02:22:54.0176084Z ASSERT global sequence
+2026-11-01T02:22:54.0176482Z ASSERT global sequence
+2026-11-01T02:22:54.0176933Z ASSERT global sequence
+2026-11-01T02:22:54.0177221Z ASSERT global sequence
+2026-11-01T02:22:54.0177564Z ASSERT global sequence
+2026-11-01T02:22:54.0177852Z ASSERT global sequence
+2026-11-01T02:22:54.0178187Z ASSERT global sequence
+2026-11-01T02:22:54.0178478Z ASSERT global sequence
+2026-11-01T02:22:54.0178789Z ASSERT global sequence
+2026-11-01T02:22:54.0179095Z ASSERT global sequence
+2026-11-01T02:22:54.0179743Z ASSERT global sequence
+2026-11-01T02:22:54.0180167Z ASSERT global sequence
+2026-11-01T02:22:54.0180693Z ASSERT global sequence
+2026-11-01T02:22:54.0180992Z ASSERT global sequence
+2026-11-01T02:22:54.0181328Z ASSERT global sequence
+2026-11-01T02:22:54.0181684Z ASSERT global sequence
+2026-11-01T02:22:54.0182010Z ASSERT global sequence
+2026-11-01T02:22:54.0182326Z ASSERT global sequence
+2026-11-01T02:22:54.0182654Z ASSERT global sequence
+2026-11-01T02:22:54.0182976Z ASSERT global sequence
+2026-11-01T02:22:54.0183326Z ASSERT fan-in causes are distinct
+2026-11-01T02:22:54.0183714Z ASSERT exclusive cursor
+2026-11-01T02:22:54.0184057Z ASSERT cursor order
+2026-11-01T02:22:54.0184402Z ASSERT returned cursor watermark
+2026-11-01T02:22:54.0184876Z ASSERT recursive runs share one execution correlation
+2026-11-01T02:22:54.0185657Z   [OK]          topology          1   recursive runs retain hierarchy and order.
+2026-11-01T02:22:54.0186239Z ASSERT rejected open is not committed
+2026-11-01T02:22:54.0186782Z   [OK]          topology          2   hierarchy and lifecycle violations.
+2026-11-01T02:22:54.0191485Z   [OK]          topology          3   closed parent rejects new children as P...
+2026-11-01T02:22:54.0192570Z ASSERT global sequence
+2026-11-01T02:22:54.0193085Z ASSERT global sequence
+2026-11-01T02:22:54.0193568Z ASSERT global sequence
+2026-11-01T02:22:54.0194039Z ASSERT global sequence
+2026-11-01T02:22:54.0194518Z ASSERT global sequence
+2026-11-01T02:22:54.0194996Z ASSERT global sequence
+2026-11-01T02:22:54.0195471Z ASSERT global sequence
+2026-11-01T02:22:54.0195953Z ASSERT global sequence
+2026-11-01T02:22:54.0196420Z ASSERT global sequence
+2026-11-01T02:22:54.0196882Z   [OK]          topology          4   flattened recursion rejected and child-...
+2026-11-01T02:22:54.0202202Z ASSERT every update retained
+2026-11-01T02:22:54.0202768Z ASSERT global sequence
+2026-11-01T02:22:54.0203320Z ASSERT global sequence
+2026-11-01T02:22:54.0203857Z ASSERT global sequence
+2026-11-01T02:22:54.0204413Z ASSERT global sequence
+2026-11-01T02:22:54.0204949Z ASSERT global sequence
+2026-11-01T02:22:54.0205488Z ASSERT global sequence
+2026-11-01T02:22:54.0206047Z ASSERT global sequence
+2026-11-01T02:22:54.0206595Z ASSERT global sequence
+2026-11-01T02:22:54.0207126Z ASSERT global sequence
+2026-11-01T02:22:54.0207662Z ASSERT global sequence
+2026-11-01T02:22:54.0208202Z ASSERT global sequence
+2026-11-01T02:22:54.0208739Z ASSERT global sequence
+2026-11-01T02:22:54.0209475Z ASSERT global sequence
+2026-11-01T02:22:54.0210076Z ASSERT global sequence
+2026-11-01T02:22:54.0210839Z ASSERT global sequence
+2026-11-01T02:22:54.0211511Z ASSERT global sequence
+2026-11-01T02:22:54.0212002Z ASSERT global sequence
+2026-11-01T02:22:54.0212474Z ASSERT global sequence
+2026-11-01T02:22:54.0212942Z ASSERT global sequence
+2026-11-01T02:22:54.0213414Z ASSERT global sequence
+2026-11-01T02:22:54.0214103Z ASSERT global sequence
+2026-11-01T02:22:54.0214576Z ASSERT global sequence
+2026-11-01T02:22:54.0215073Z ASSERT global sequence
+2026-11-01T02:22:54.0215462Z ASSERT global sequence
+2026-11-01T02:22:54.0215724Z ASSERT global sequence
+2026-11-01T02:22:54.0216102Z ASSERT global sequence
+2026-11-01T02:22:54.0216547Z ASSERT global sequence
+2026-11-01T02:22:54.0217075Z ASSERT global sequence
+2026-11-01T02:22:54.0217361Z ASSERT global sequence
+2026-11-01T02:22:54.0217624Z ASSERT global sequence
+2026-11-01T02:22:54.0217907Z ASSERT global sequence
+2026-11-01T02:22:54.0218177Z ASSERT global sequence
+2026-11-01T02:22:54.0218605Z ASSERT global sequence
+2026-11-01T02:22:54.0219080Z ASSERT global sequence
+2026-11-01T02:22:54.0219895Z ASSERT global sequence
+2026-11-01T02:22:54.0220383Z ASSERT global sequence
+2026-11-01T02:22:54.0221143Z   [OK]          topology          5   concurrent updates share one sequence.
+2026-11-01T02:22:54.0222173Z   [OK]          topology          6   output snapshot terminates output updates.
+2026-11-01T02:22:54.0223074Z ASSERT attempt node identity is occurrence identity
+2026-11-01T02:22:54.0223996Z   [OK]          topology          7   streaming provider identity and recursi...
+2026-11-01T02:22:54.0224644Z ASSERT rejected root is not committed
+2026-11-01T02:22:54.0224997Z ASSERT finished scope is not reused
+2026-11-01T02:22:54.0225608Z   [OK]          topology          8   one top-level run defines the execution...
+2026-11-01T02:22:54.0226086Z ASSERT rejected abort is atomic
+2026-11-01T02:22:54.0226509Z ASSERT invalid abort terminal leaves sequence and state unchanged
+2026-11-01T02:22:54.0226963Z ASSERT every open recursive node was closed
+2026-11-01T02:22:54.0227393Z ASSERT abort root records its direct child terminal cause
+2026-11-01T02:22:54.0227778Z ASSERT global sequence
+2026-11-01T02:22:54.0228050Z ASSERT global sequence
+2026-11-01T02:22:54.0228318Z ASSERT global sequence
+2026-11-01T02:22:54.0228579Z ASSERT global sequence
+2026-11-01T02:22:54.0228842Z ASSERT global sequence
+2026-11-01T02:22:54.0229110Z ASSERT global sequence
+2026-11-01T02:22:54.0229850Z ASSERT global sequence
+2026-11-01T02:22:54.0230205Z ASSERT global sequence
+2026-11-01T02:22:54.0230470Z ASSERT global sequence
+2026-11-01T02:22:54.0230741Z ASSERT global sequence
+2026-11-01T02:22:54.0231017Z ASSERT global sequence
+2026-11-01T02:22:54.0231287Z ASSERT global sequence
+2026-11-01T02:22:54.0231551Z ASSERT global sequence
+2026-11-01T02:22:54.0231819Z ASSERT global sequence
+2026-11-01T02:22:54.0232100Z ASSERT global sequence
+2026-11-01T02:22:54.0232361Z ASSERT global sequence
+2026-11-01T02:22:54.0232632Z ASSERT global sequence
+2026-11-01T02:22:54.0232899Z ASSERT global sequence
+2026-11-01T02:22:54.0233158Z ASSERT global sequence
+2026-11-01T02:22:54.0233418Z ASSERT global sequence
+2026-11-01T02:22:54.0233843Z   [OK]          topology          9   abort closes a recursive subtree atomic...
+2026-11-01T02:22:54.2637668Z ASSERT unrelated fiber progresses before deep abort publishes
+2026-11-01T02:22:54.2638363Z ASSERT every deep recursive node closed
+2026-11-01T02:22:54.2750563Z ASSERT deep journal cursor is exact
+2026-11-01T02:22:54.2751511Z   [OK]          topology         10   abort handles deep recursive compositio...
+2026-11-01T02:22:54.2753594Z ASSERT cancelled abort exits
+2026-11-01T02:22:54.2754182Z ASSERT cancelled abort publishes no prefix
+2026-11-01T02:22:54.2754919Z ASSERT later abort closes one four-node provider path
+2026-11-01T02:22:54.2755763Z ASSERT global sequence
+2026-11-01T02:22:54.2756175Z ASSERT global sequence
+2026-11-01T02:22:54.2762168Z ASSERT global sequence
+2026-11-01T02:22:54.2762778Z ASSERT global sequence
+2026-11-01T02:22:54.2763271Z ASSERT global sequence
+2026-11-01T02:22:54.2763631Z ASSERT global sequence
+2026-11-01T02:22:54.2763988Z ASSERT global sequence
+2026-11-01T02:22:54.2764387Z ASSERT global sequence
+2026-11-01T02:22:54.2764800Z ASSERT global sequence
+2026-11-01T02:22:54.2765973Z   [OK]          topology         11   cancelled abort does not publish a part...
+2026-11-01T02:22:54.2766820Z ASSERT empty batch has no events
+2026-11-01T02:22:54.2767440Z ASSERT two semantic mutations are staged
+2026-11-01T02:22:54.2768147Z ASSERT invalid stage reports the exact run root
+2026-11-01T02:22:54.2768898Z ASSERT rejected stage leaves input batch unchanged
+2026-11-01T02:22:54.2769828Z ASSERT staging does not publish a prefix
+2026-11-01T02:22:54.2770533Z ASSERT valid replacement extends original batch
+2026-11-01T02:22:54.2771234Z ASSERT all staged events committed together
+2026-11-01T02:22:54.2771911Z ASSERT one final reducer snapshot is visible
+2026-11-01T02:22:54.2772514Z ASSERT global sequence
+2026-11-01T02:22:54.2772997Z ASSERT global sequence
+2026-11-01T02:22:54.2773484Z ASSERT global sequence
+2026-11-01T02:22:54.2773955Z ASSERT global sequence
+2026-11-01T02:22:54.2774585Z ASSERT commit retains staged event identities and order
+2026-11-01T02:22:54.2775318Z ASSERT published projection uses final batch watermark
+2026-11-01T02:22:54.2775899Z   [OK]          topology         12   immutable batch rejects a stage and pub...
+2026-11-01T02:22:54.2776430Z ASSERT stale rejection retains the immutable batch
+2026-11-01T02:22:54.2776842Z ASSERT stale commit does not mutate journal
+2026-11-01T02:22:54.2777296Z ASSERT staged identity was not substituted for committed state
+2026-11-01T02:22:54.2777852Z   [OK]          topology         13   stale batch is rejected without rebuild...
+2026-11-01T02:22:54.2778394Z ASSERT closed transaction set stages open and terminal events
+2026-11-01T02:22:54.2778881Z ASSERT second abort identifies the already-finished run
+2026-11-01T02:22:54.2779650Z ASSERT rejected abort leaves the staged batch unchanged
+2026-11-01T02:22:54.2780121Z ASSERT closed transaction is invisible before commit
+2026-11-01T02:22:54.2780526Z ASSERT typed abort closes turn and root
+2026-11-01T02:22:54.2780951Z ASSERT closed transaction retains exact event identities
+2026-11-01T02:22:54.2781480Z   [OK]          topology         14   closed abort transaction stages one batch.
+2026-11-01T02:22:54.3084921Z ASSERT request evidence does not invent a provider response
+2026-11-01T02:22:54.3085792Z ASSERT request snapshot codec roundtrip
+2026-11-01T02:22:54.3086724Z   [OK]          codec             0   request snapshot is exact and single as...
+2026-11-01T02:22:54.3087613Z ASSERT start_run returns its exact event
+2026-11-01T02:22:54.3088282Z ASSERT event round-trip
+2026-11-01T02:22:54.3089709Z   [OK]          codec             1   round-trip and exact schema.
+2026-11-01T02:22:54.3090743Z   [OK]          codec             2   reducer rejects gaps and dangling causa...
+2026-11-01T02:22:54.3091803Z   [OK]          codec             3   reducer rejects execution correlation d...
+2026-11-01T02:22:54.3092897Z ASSERT invalid agent name did not advance journal
+2026-11-01T02:22:54.3093641Z ASSERT later batch ordinal roundtrip
+2026-11-01T02:22:54.3094274Z ASSERT batch size roundtrip
+2026-11-01T02:22:54.3094942Z ASSERT provider tool id roundtrip is exact
+2026-11-01T02:22:54.3096057Z ASSERT invalid provider response did not advance journal
+2026-11-01T02:22:54.3096861Z ASSERT invalid JSON did not advance in-memory journal
+2026-11-01T02:22:54.3097772Z   [OK]          codec             4   JSON terminal and identifier boundaries.
+2026-11-01T02:22:54.3098607Z ASSERT certificate retains target node identity
+2026-11-01T02:22:54.3099579Z ASSERT certificate retains the exact terminal payload
+2026-11-01T02:22:54.3100526Z   [OK]          codec             5   terminal validation certificate preserv...
+2026-11-01T02:22:54.3101311Z Test Successful in 0.294s. 21 tests run.
+2026-11-01T02:22:54.3352266Z [targeted] @@packages/agent_core/test/runtest-test_execution_journal: OK in 2s

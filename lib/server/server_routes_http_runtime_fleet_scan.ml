@@ -7,6 +7,7 @@
 open Server_routes_http_common
 
 module String_set = Set.Make (String)
+module String_map = Map.Make (String)
 
 type paused_keeper_scan = {
   names : string list;
@@ -100,14 +101,23 @@ let read_keeper_metas ?profile_snapshot config =
             ~base_path)
            .keeper_names)
   in
-  let reads = Hashtbl.create 64 in
+  let all_read_names =
+    sorted_unique_strings (catalog_names @ declared_names @ owner_names)
+  in
+  let reads =
+    List.fold_left
+      (fun acc meta_name ->
+         String_map.add meta_name (Keeper_meta_store.read_meta config meta_name) acc)
+      String_map.empty
+      all_read_names
+  in
   let read meta_name =
-    match Hashtbl.find_opt reads meta_name with
-    | Some meta_read -> { meta_name; meta_read }
-    | None ->
-      let meta_read = Keeper_meta_store.read_meta config meta_name in
-      Hashtbl.add reads meta_name meta_read;
-      { meta_name; meta_read }
+    let meta_read =
+      match String_map.find_opt meta_name reads with
+      | Some meta_read -> meta_read
+      | None -> Keeper_meta_store.read_meta config meta_name
+    in
+    { meta_name; meta_read }
   in
   let catalog_metas = List.map read catalog_names in
   let declared_metas = List.map read declared_names in
@@ -251,7 +261,8 @@ let keeper_fleet_meta_scan ?(include_paused_details = true) reading =
   let now = Unix.gettimeofday () in
   let profile_snapshot = reading.profiles in
   let config = reading.scope in
-  let is_configured name = List.exists (String.equal name) reading.declared_names in
+  let declared_set = String_set.of_list reading.declared_names in
+  let is_configured name = String_set.mem name declared_set in
   let should_count_autoboot_target name = is_configured name in
   let scan =
     reading.catalog_metas
@@ -967,23 +978,42 @@ let keeper_agent_bindings reading =
       List.sort_uniq compare_string_pair scan.binding_read_errors;
   }
 
-let keeper_names_for_agent admitted_keeper_names assignee =
-  List.filter (String.equal assignee) admitted_keeper_names
+let keeper_names_for_agent admitted_keeper_set assignee =
+  if String_set.mem assignee admitted_keeper_set then [ assignee ] else []
 
-let is_credentialed_external_client reading assignee =
+let is_credentialed_external_client ~persisted_set ~base_path assignee =
   (* With no Keeper list, "not a Keeper" is not a fact this scan has. *)
-  (match reading.persisted_names with
-   | Ok names -> not (List.mem assignee names)
-   | Error _ -> false)
+  (match persisted_set with
+   | Some set -> not (String_set.mem assignee set)
+   | None -> false)
   &&
-  match Auth.load_credential reading.scope.Workspace.base_path assignee with
+  match Auth.load_credential base_path assignee with
   | Some _ -> true
   | None -> false
 
 let active_task_owner_fiber_scan reading ~executable_names =
   let executable_set = string_set_of_list executable_names in
   let binding_scan = keeper_agent_bindings reading in
-  let agent_bindings = binding_scan.admitted_keeper_names in
+  let admitted_keeper_set = string_set_of_list binding_scan.admitted_keeper_names in
+  let excluded_reasons_by_name =
+    List.fold_left
+      (fun acc (name, reason) ->
+         if String_map.mem name acc then acc else String_map.add name reason acc)
+      String_map.empty
+      binding_scan.excluded_keeper_reasons
+  in
+  let profile_read_error_set =
+    List.fold_left
+      (fun acc (name, _) -> String_set.add name acc)
+      String_set.empty
+      binding_scan.profile_read_errors
+  in
+  let persisted_set =
+    match reading.persisted_names with
+    | Ok names -> Some (string_set_of_list names)
+    | Error _ -> None
+  in
+  let base_path = reading.scope.Workspace.base_path in
   let meta_read_errors = binding_scan.binding_read_errors in
   let keeper_read_errors = meta_read_errors @ binding_scan.profile_read_errors in
   match Workspace.read_backlog_observation_with_source_r reading.scope with
@@ -1027,7 +1057,7 @@ let active_task_owner_fiber_scan reading ~executable_names =
                  , non_keeper_rows
                  , excluded_rows )
              | Some (Keeper_task_owner { assignee; task_status }) ->
-                 let keeper_names = keeper_names_for_agent agent_bindings assignee in
+                 let keeper_names = keeper_names_for_agent admitted_keeper_set assignee in
                  (* A live fiber answers the question whatever policy says: a
                     manual keeper a message started is doing the work it
                     holds, and a row saying it waits would be false. *)
@@ -1036,7 +1066,7 @@ let active_task_owner_fiber_scan reading ~executable_names =
                  else (
                    match keeper_names with
                    | []
-                     when is_credentialed_external_client reading assignee ->
+                     when is_credentialed_external_client ~persisted_set ~base_path assignee ->
                        ( pending_rows
                        , blocking_rows
                        , {
@@ -1053,7 +1083,7 @@ let active_task_owner_fiber_scan reading ~executable_names =
                        (* The reason is a fact about this keeper, read from
                           its own meta; another keeper's unreadable file does
                           not take it away. *)
-                       match List.assoc_opt assignee binding_scan.excluded_keeper_reasons with
+                       match String_map.find_opt assignee excluded_reasons_by_name with
                        | Some reason ->
                            ( pending_rows
                            , blocking_rows
@@ -1066,7 +1096,7 @@ let active_task_owner_fiber_scan reading ~executable_names =
                              }
                              :: excluded_rows )
                        | None
-                         when List.mem_assoc assignee binding_scan.profile_read_errors ->
+                         when String_set.mem assignee profile_read_error_set ->
                            (* Whether the boot path would run this keeper is
                               not known while its profile is unreadable. The
                               error is reported on its own. *)
@@ -1171,9 +1201,8 @@ let keeper_fleet_safety_health_json
     | Some snapshot -> snapshot.recovering_names
     | None -> []
   in
-  let is_autoboot_target name =
-    List.exists (String.equal name) autoboot_scan.autoboot_names
-  in
+  let autoboot_target_set = string_set_of_list autoboot_scan.autoboot_names in
+  let is_autoboot_target name = String_set.mem name autoboot_target_set in
   let configuration_blocked_names =
     match phase_snapshot with
     | Some snapshot ->

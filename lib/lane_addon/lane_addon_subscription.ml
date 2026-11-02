@@ -1,6 +1,15 @@
 module Store = Lane_addon_store
 module Types = Lane_addon_types
 type subscription = {keeper_name:string;run_id:string;installation_id:string;output_id:string}
+let compare_subscription (a : subscription) (b : subscription) =
+  let c = String.compare a.keeper_name b.keeper_name in
+  if c <> 0 then c
+  else
+    let c = String.compare a.run_id b.run_id in
+    if c <> 0 then c
+    else
+      let c = String.compare a.installation_id b.installation_id in
+      if c <> 0 then c else String.compare a.output_id b.output_id
 type operation = Inspect | Save | Read | Acknowledge
 open Result.Syntax
 let mutex = Mutex.create ()
@@ -65,7 +74,7 @@ let load config =
         | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTableArray _ -> Error "subscription requires table" in
       let rec loop = function [] -> Ok [] | row::rest -> let* row=parse row in let* rest=loop rest in Ok(row::rest) in
       let* rows = loop rows in
-      if List.length rows<>List.length (List.sort_uniq Stdlib.compare rows)
+      if List.length rows<>List.length (List.sort_uniq compare_subscription rows)
       then Error "duplicate subscription" else Ok (rows,Some (Store.digest bytes))
 let write path bytes =
   Fs_compat.mkdir_p (Filename.dirname path);
@@ -240,7 +249,7 @@ let dispatch_with ~io ?(access=Lane_addon_sources.Unauthenticated) ~config ~call
       let actual=match revision with None->`Null|Some s->`String s in
       if expected<>actual then Error "subscription configuration revision conflict" else
       let* rows=get "subscriptions" (array decode) args in
-      if List.length rows<>List.length (List.sort_uniq Stdlib.compare rows) then Error "duplicate subscription" else
+      if List.length rows<>List.length (List.sort_uniq compare_subscription rows) then Error "duplicate subscription" else
       let* rows = match access with
         | Lane_addon_sources.Operator_configuration -> Ok rows
         | Keeper keeper when String.equal keeper caller ->

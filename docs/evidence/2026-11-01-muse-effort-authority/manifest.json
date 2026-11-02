@@ -1,0 +1,371 @@
+{
+  "schema_version": 1,
+  "captured_at": "2026-11-01T06:45:07.590792+00:00",
+  "issue": 27898,
+  "pr": 47132,
+  "base": "e1be96703b5239392f9c7569c5e7063a8c421936",
+  "comparison_source_head": "18ebea801c69340008481185bb8371e173cf65ac",
+  "current_fixture_source_head": "292ea623091b0a3ae25872f670a98f015f69a450",
+  "selection": "UTF-8 BOM and ANSI removed; focused actual cases, all failures, expected/received details, summaries, runner and exact git-log checkout receipts retained in order; unrelated PASS rows omitted. Invalid iterations share a smaller representative derivative. Counts are derived from full raw logs and suite summaries. Trailing whitespace removed, one final newline. Raw/selected hashes differ.",
+  "executions": [
+    {
+      "name": "initial",
+      "workflow": "Test",
+      "run_id": 41279025500,
+      "job_id": 124766957569,
+      "url": "https://github.com/jeong-sik/masc/actions/runs/41279025500",
+      "head": "9c0d0b8097e1dbe97b6cea0eff1060d268b56968",
+      "ref": "fix/muse-reasoning-authority-20261101",
+      "status": "completed",
+      "conclusion": "failure",
+      "checkout_head": "9c0d0b8097e1dbe97b6cea0eff1060d268b56968",
+      "raw_capture": "artifacts/issues-oldest-20261101/muse-effort-authority/initial-124766957569.raw.log",
+      "raw_bytes": 540042,
+      "raw_sha256": "dd98724638983a016b05d4823800dfd0d00e0b1db5d9b8691df078754bb335ab",
+      "selected_capture": "invalid-iterations.txt",
+      "selected_bytes": 2270,
+      "selected_sha256": "acb01953dcb133a701b90b65164ce4c081c5ab22559aa39b23c2e1872b0ce3d4",
+      "actual_pass": 104,
+      "actual_fail": 17,
+      "summaries": [
+        "2026-11-01T06:10:41.5617252Z 13 failures! in 316.427s. 84 tests run.",
+        "2026-11-01T06:11:34.9695688Z 4 failures! in 53.234s. 37 tests run."
+      ],
+      "suite_cases": {
+        "test/test_keeper_muse_runtime": {
+          "pass": 71,
+          "fail": 13
+        },
+        "test/test_fusion_official_client_panel": {
+          "pass": 33,
+          "fail": 4
+        }
+      },
+      "intended_reproduction_valid": false,
+      "selected_section": "initial",
+      "selection_kind": "shared invalid-iteration summaries and representative failures"
+    },
+    {
+      "name": "baseline-second",
+      "workflow": "Test",
+      "run_id": 41279161841,
+      "job_id": 124767337225,
+      "url": "https://github.com/jeong-sik/masc/actions/runs/41279161841",
+      "head": "ab72750ed048b6213b6fabd6ee17293a05d579f7",
+      "ref": "fix/muse-reasoning-authority-20261101",
+      "status": "completed",
+      "conclusion": "failure",
+      "checkout_head": "ab72750ed048b6213b6fabd6ee17293a05d579f7",
+      "raw_capture": "artifacts/issues-oldest-20261101/muse-effort-authority/baseline-second-124767337225.raw.log",
+      "raw_bytes": 545915,
+      "raw_sha256": "347f097100f0251ae7f475b64790e94bca4442682600afff08539844171ee9fd",
+      "selected_capture": "invalid-iterations.txt",
+      "selected_bytes": 2270,
+      "selected_sha256": "acb01953dcb133a701b90b65164ce4c081c5ab22559aa39b23c2e1872b0ce3d4",
+      "actual_pass": 104,
+      "actual_fail": 18,
+      "summaries": [
+        "2026-11-01T06:11:05.7080028Z 14 failures! in 312.866s. 85 tests run.",
+        "2026-11-01T06:11:58.6713487Z 4 failures! in 52.853s. 37 tests run."
+      ],
+      "suite_cases": {
+        "test/test_keeper_muse_runtime": {
+          "pass": 71,
+          "fail": 14
+        },
+        "test/test_fusion_official_client_panel": {
+          "pass": 33,
+          "fail": 4
+        }
+      },
+      "intended_reproduction_valid": false,
+      "selected_section": "baseline-second",
+      "selection_kind": "shared invalid-iteration summaries and representative failures"
+    },
+    {
+      "name": "candidate-first",
+      "workflow": "Test",
+      "run_id": 41279490118,
+      "job_id": 124768303609,
+      "url": "https://github.com/jeong-sik/masc/actions/runs/41279490118",
+      "head": "db9cdea90b0d6c66a1b7feda4314f268f00ac0ac",
+      "ref": "fix/muse-reasoning-authority-20261101",
+      "status": "completed",
+      "conclusion": "failure",
+      "checkout_head": "db9cdea90b0d6c66a1b7feda4314f268f00ac0ac",
+      "raw_capture": "artifacts/issues-oldest-20261101/muse-effort-authority/candidate-first-124768303609.raw.log",
+      "raw_bytes": 596127,
+      "raw_sha256": "d195204f79837a2b8d537285242c254e52aab259229634c761942898c440b04e",
+      "selected_capture": "invalid-iterations.txt",
+      "selected_bytes": 2270,
+      "selected_sha256": "acb01953dcb133a701b90b65164ce4c081c5ab22559aa39b23c2e1872b0ce3d4",
+      "actual_pass": 146,
+      "actual_fail": 20,
+      "summaries": [
+        "2026-11-01T06:17:36.6004103Z 14 failures! in 319.195s. 86 tests run.",
+        "2026-11-01T06:18:30.0426630Z 4 failures! in 53.267s. 37 tests run.",
+        "2026-11-01T06:19:14.1230904Z 1 failure! in 43.893s. 22 tests run.",
+        "2026-11-01T06:19:14.3635096Z 1 failure! in 0.039s. 21 tests run."
+      ],
+      "suite_cases": {
+        "test/test_keeper_muse_runtime": {
+          "pass": 72,
+          "fail": 14
+        },
+        "test/test_fusion_official_client_panel": {
+          "pass": 33,
+          "fail": 4
+        },
+        "test/test_runtime_verification": {
+          "pass": 21,
+          "fail": 1
+        },
+        "test/test_keeper_capability_probe": {
+          "pass": 20,
+          "fail": 1
+        }
+      },
+      "intended_reproduction_valid": false,
+      "selected_section": "candidate-first",
+      "selection_kind": "shared invalid-iteration summaries and representative failures"
+    },
+    {
+      "name": "baseline-admitted",
+      "workflow": "Test",
+      "run_id": 41279813704,
+      "job_id": 124769254337,
+      "url": "https://github.com/jeong-sik/masc/actions/runs/41279813704",
+      "head": "4912b2428aede0febe67db37094ecb9df7052b66",
+      "ref": "fix/muse-reasoning-authority-20261101",
+      "status": "completed",
+      "conclusion": "failure",
+      "checkout_head": "4912b2428aede0febe67db37094ecb9df7052b66",
+      "raw_capture": "artifacts/issues-oldest-20261101/muse-effort-authority/baseline-admitted-124769254337.raw.log",
+      "raw_bytes": 606496,
+      "raw_sha256": "b75ee66597eef81a428ff2721860e58bf7fd2a11e9754fa96c2a1a4086bbe2ec",
+      "selected_capture": "baseline-admitted.txt",
+      "selected_bytes": 11307,
+      "selected_sha256": "78effedc5a0b931ba9663bc587c605fe91493fbb8c585e78b43e39b1c531c2a6",
+      "actual_pass": 149,
+      "actual_fail": 17,
+      "retained_case_pass": 4,
+      "retained_case_fail": 17,
+      "summaries": [
+        "2026-11-01T06:22:42.3141094Z 13 failures! in 342.413s. 86 tests run.",
+        "2026-11-01T06:23:43.8832731Z 2 failures! in 61.396s. 37 tests run.",
+        "2026-11-01T06:24:28.0883370Z 1 failure! in 44.015s. 22 tests run.",
+        "2026-11-01T06:24:28.4463421Z 1 failure! in 0.155s. 21 tests run."
+      ],
+      "suite_cases": {
+        "test/test_keeper_muse_runtime": {
+          "pass": 73,
+          "fail": 13
+        },
+        "test/test_fusion_official_client_panel": {
+          "pass": 35,
+          "fail": 2
+        },
+        "test/test_runtime_verification": {
+          "pass": 21,
+          "fail": 1
+        },
+        "test/test_keeper_capability_probe": {
+          "pass": 20,
+          "fail": 1
+        }
+      },
+      "intended_reproduction_valid": true,
+      "selection_kind": "focused cases, every failure, expected/received details, summaries and runner/checkout receipts; unrelated passing rows omitted"
+    },
+    {
+      "name": "candidate",
+      "workflow": "Test",
+      "run_id": 41279990328,
+      "job_id": 124769777368,
+      "url": "https://github.com/jeong-sik/masc/actions/runs/41279990328",
+      "head": "18ebea801c69340008481185bb8371e173cf65ac",
+      "ref": "fix/muse-reasoning-authority-20261101",
+      "status": "completed",
+      "conclusion": "failure",
+      "checkout_head": "18ebea801c69340008481185bb8371e173cf65ac",
+      "raw_capture": "artifacts/issues-oldest-20261101/muse-effort-authority/candidate-124769777368.raw.log",
+      "raw_bytes": 563514,
+      "raw_sha256": "90cc94a3fcd97720608db5c1477648b923cdde5e574ce7bd93ae8bd73f4c59e6",
+      "selected_capture": "candidate.txt",
+      "selected_bytes": 8499,
+      "selected_sha256": "b6b7556ee25e4dafe85010a0992ae0e4d41cb9dbad249e26808a2fa3db17a62c",
+      "actual_pass": 163,
+      "actual_fail": 3,
+      "retained_case_pass": 18,
+      "retained_case_fail": 3,
+      "summaries": [
+        "2026-11-01T06:23:42.6975098Z 3 failures! in 337.535s. 86 tests run.",
+        "2026-11-01T06:24:43.8551200Z Test Successful in 61.026s. 37 tests run.",
+        "2026-11-01T06:26:03.4579857Z Test Successful in 79.484s. 22 tests run.",
+        "2026-11-01T06:26:17.9284841Z Test Successful in 14.344s. 21 tests run."
+      ],
+      "suite_cases": {
+        "test/test_keeper_muse_runtime": {
+          "pass": 83,
+          "fail": 3
+        },
+        "test/test_fusion_official_client_panel": {
+          "pass": 37,
+          "fail": 0
+        },
+        "test/test_runtime_verification": {
+          "pass": 22,
+          "fail": 0
+        },
+        "test/test_keeper_capability_probe": {
+          "pass": 21,
+          "fail": 0
+        }
+      },
+      "intended_reproduction_valid": true,
+      "selection_kind": "focused cases, every failure, expected/received details, summaries and runner/checkout receipts; unrelated passing rows omitted"
+    },
+    {
+      "name": "followup",
+      "workflow": "Test",
+      "run_id": 41280919612,
+      "job_id": 124772502177,
+      "url": "https://github.com/jeong-sik/masc/actions/runs/41280919612",
+      "head": "292ea623091b0a3ae25872f670a98f015f69a450",
+      "ref": "fix/muse-reasoning-authority-20261101",
+      "status": "completed",
+      "conclusion": "success",
+      "checkout_head": "292ea623091b0a3ae25872f670a98f015f69a450",
+      "raw_capture": "artifacts/issues-oldest-20261101/muse-effort-authority/followup-124772502177.raw.log",
+      "raw_bytes": 471241,
+      "raw_sha256": "64227bc71b60776ae616672695f961741ea609b77b8f3f26a4f08a82c16e5956",
+      "selected_capture": "followup.txt",
+      "selected_bytes": 4811,
+      "selected_sha256": "58174adfeb94f19709b3315d5bfaa0502e5712191a96ff9fada742d7b5dced05",
+      "actual_pass": 86,
+      "actual_fail": 0,
+      "retained_case_pass": 15,
+      "retained_case_fail": 0,
+      "summaries": [
+        "2026-11-01T06:38:58.1409313Z Test Successful in 360.258s. 86 tests run."
+      ],
+      "suite_cases": {
+        "test/test_keeper_muse_runtime": {
+          "pass": 86,
+          "fail": 0
+        }
+      },
+      "intended_reproduction_valid": true,
+      "selection_kind": "focused cases, every failure, summaries and runner/checkout receipts; unrelated passing rows omitted"
+    }
+  ],
+  "comparison": {
+    "ordered_case_count": 166,
+    "ordered_case_keys_sha256": "c205e562592177c104ee0ad32cf6140dfaa54c6ce23238233830369fda5c98ce",
+    "transitions": {
+      "PASS_to_PASS": 149,
+      "FAIL_to_PASS": 14,
+      "FAIL_to_FAIL": 3,
+      "PASS_to_FAIL": 0
+    },
+    "test_tree": "07788d36e8fc0bafaf912b154ce7fc944840f420",
+    "baseline_head": "4912b2428aede0febe67db37094ecb9df7052b66",
+    "candidate_head": "18ebea801c69340008481185bb8371e173cf65ac",
+    "ordered_case_keys_encoding": "UTF-8 JSON array of [suite, case] arrays in raw case order; case text after [OK]/[FAIL] has whitespace collapsed with ' '.join(text.split()); ensure_ascii=false, separators=(',',':'), no extra spaces, one final LF",
+    "ordered_case_keys_source": "ANSI/BOM-stripped timestamped actual case rows, each assigned to the preceding [targeted] suite start receipt; decorative failure-summary rows excluded"
+  },
+  "suite_selection": {
+    "41279025500": [
+      "test/test_keeper_muse_runtime",
+      "test/test_fusion_official_client_panel"
+    ],
+    "41279161841": [
+      "test/test_keeper_muse_runtime",
+      "test/test_fusion_official_client_panel"
+    ],
+    "41279490118": [
+      "test/test_keeper_muse_runtime",
+      "test/test_fusion_official_client_panel",
+      "test/test_runtime_verification",
+      "test/test_keeper_capability_probe"
+    ],
+    "41279813704": [
+      "test/test_keeper_muse_runtime",
+      "test/test_fusion_official_client_panel",
+      "test/test_runtime_verification",
+      "test/test_keeper_capability_probe"
+    ],
+    "41279990328": [
+      "test/test_keeper_muse_runtime",
+      "test/test_fusion_official_client_panel",
+      "test/test_runtime_verification",
+      "test/test_keeper_capability_probe"
+    ],
+    "41280919612": [
+      "test/test_keeper_muse_runtime"
+    ]
+  },
+  "source_review": {
+    "head": "292ea623091b0a3ae25872f670a98f015f69a450",
+    "base": "e1be96703b5239392f9c7569c5e7063a8c421936",
+    "full_diff_sha256": "00ee9926e4e10cb23f04c0bbaaa0314ec50984a0b943744f76644263d8c4b8c7",
+    "adversarial": "bounded SOURCE PASS; completed captures audited offline",
+    "response": "bounded SOURCE PASS; completed captures audited offline",
+    "formal_non_author_approval": false
+  },
+  "upstream": {
+    "repository": "meta-models/muse-code-sdk",
+    "head": "42c7658789a2491580658158d2092b2bbca4118b",
+    "blob": "cd9632e6909fc3202cbe413db1bf3d61bb059e47",
+    "path": "schema/msp/msp.d.ts",
+    "raw_bytes": 254189,
+    "raw_sha256": "cb6cfdce4b216aaa5dfbdd8057949645c584cf78aaead80192bed73c0c0a5225",
+    "url": "https://github.com/meta-models/muse-code-sdk/blob/42c7658789a2491580658158d2092b2bbca4118b/schema/msp/msp.d.ts",
+    "selected_capture": "upstream.txt",
+    "selected_bytes": 1237,
+    "selected_sha256": "439a5ae0078066a1d77df46993a6ec26d26f729ce8d7088575e0c36551b23e61"
+  },
+  "full_regression": {
+    "this_candidate": "not run",
+    "latest_completed_full_regression": "not established in this bounded repair"
+  },
+  "scope": "Controlled Muse process/MCP forwarding and caller/SDK observation. Probe baseline low-value causality is source/execution inference; no baseline probe low JSON or printed child assertion retained. Actual account/model entitlement, installed runtime, integration, deployment, full regression and full issue acceptance remain unverified.",
+  "followup_execution": {
+    "workflow": "Test",
+    "run_id": 41280919612,
+    "head": "292ea623091b0a3ae25872f670a98f015f69a450",
+    "ref": "fix/muse-reasoning-authority-20261101",
+    "actual_conclusion": "success",
+    "actual_pass": 86,
+    "actual_fail": 0,
+    "scope": "test/test_keeper_muse_runtime only; separate execution",
+    "ordered_keeper_cases_match_earlier_candidate": 86,
+    "transitions": {
+      "PASS_to_PASS": 83,
+      "FAIL_to_PASS": 3,
+      "PASS_to_FAIL": 0,
+      "FAIL_to_FAIL": 0
+    }
+  },
+  "final_fixture_delta": {
+    "comparison_source_head": "18ebea801c69340008481185bb8371e173cf65ac",
+    "followup_source_head": "292ea623091b0a3ae25872f670a98f015f69a450",
+    "unchanged_comparison_inputs": 31,
+    "changed_comparison_inputs": [
+      "test/test_keeper_muse_runtime.ml"
+    ],
+    "additional_recorded_inputs": [
+      "lib/keeper_runtime/keeper_internal_error.ml",
+      "lib/keeper_runtime/keeper_internal_error.mli"
+    ],
+    "production_trees_unchanged": [
+      "lib",
+      "config",
+      "packages/agent_core"
+    ],
+    "routed_helper_bytes": 4149,
+    "routed_helper_sha256": "9a4d07b0497d018a6f2923270bfe87c95b9863641d9f24b323727a12a7840012",
+    "refusal_helper_bytes": 2009,
+    "refusal_helper_sha256": "a894693b3c808df5b8fe94805ec5417e50d85182b61e0a7cc07e0f8bf6fd488b"
+  }
+}

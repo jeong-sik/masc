@@ -1127,16 +1127,16 @@ let approval_rows t =
   |> List.filter_map (fun (kind, text) ->
          if kind = Transcript.Answer_needed then Some text else None)
 
-let requested ~call_id ~tool_name ~question =
+let requested ~approval_id ~call_id ~tool_name ~question =
   Live.Approval_requested
-    { call_id; tool_name; args = ""; question; because = "" }
+    { call_id; approval_id; tool_name; args = ""; question; because = "" }
 
 let test_a_held_call_shows_its_question () =
   let t = fresh () in
   feed t
     [ Live.Run_started
     ; tool_started "c1" "Edit"
-    ; requested ~call_id:"c1" ~tool_name:"Edit" ~question:"Run Edit on a.ml?"
+    ; requested ~approval_id:"approval-c1" ~call_id:"c1" ~tool_name:"Edit" ~question:"Run Edit on a.ml?"
     ];
   (match Transcript.awaiting_approval t with
    | Some awaiting ->
@@ -1155,8 +1155,8 @@ let test_a_held_call_shows_its_question () =
 let test_an_answer_clears_the_prompt () =
   let t = fresh () in
   feed t
-    [ requested ~call_id:"c1" ~tool_name:"Edit" ~question:"Run Edit?"
-    ; Live.Approval_settled { call_id = "c1"; outcome = "approve" }
+    [ requested ~approval_id:"approval-c1" ~call_id:"c1" ~tool_name:"Edit" ~question:"Run Edit?"
+    ; Live.Approval_settled { call_id = "c1"; approval_id = "approval-c1"; outcome = "approve" }
     ];
   check bool "nothing is held any more" true
     (Option.is_none (Transcript.awaiting_approval t));
@@ -1171,8 +1171,8 @@ let test_an_answer_clears_the_prompt () =
 let test_a_timeout_clears_the_prompt_too () =
   let t = fresh () in
   feed t
-    [ requested ~call_id:"c1" ~tool_name:"Edit" ~question:"Run Edit?"
-    ; Live.Approval_settled { call_id = "c1"; outcome = "timed_out" }
+    [ requested ~approval_id:"approval-c1" ~call_id:"c1" ~tool_name:"Edit" ~question:"Run Edit?"
+    ; Live.Approval_settled { call_id = "c1"; approval_id = "approval-c1"; outcome = "timed_out" }
     ];
   (* The decision is over even though nobody made one. Leaving the prompt up
      would ask again for a call that has already been denied. *)
@@ -1188,8 +1188,8 @@ let test_a_timeout_clears_the_prompt_too () =
 let test_a_denial_uses_decision_vocabulary () =
   let t = fresh () in
   feed t
-    [ requested ~call_id:"c1" ~tool_name:"Edit" ~question:"Run Edit?"
-    ; Live.Approval_settled { call_id = "c1"; outcome = "deny" }
+    [ requested ~approval_id:"approval-c1" ~call_id:"c1" ~tool_name:"Edit" ~question:"Run Edit?"
+    ; Live.Approval_settled { call_id = "c1"; approval_id = "approval-c1"; outcome = "deny" }
     ];
   check bool "the decision is denied, not failed" true
     (List.exists
@@ -1201,8 +1201,8 @@ let test_a_denial_uses_decision_vocabulary () =
 let test_a_late_settle_for_another_call_leaves_the_prompt () =
   let t = fresh () in
   feed t
-    [ requested ~call_id:"c2" ~tool_name:"Write" ~question:"Run Write?"
-    ; Live.Approval_settled { call_id = "c1"; outcome = "timed_out" }
+    [ requested ~approval_id:"approval-c2" ~call_id:"c2" ~tool_name:"Write" ~question:"Run Write?"
+    ; Live.Approval_settled { call_id = "c1"; approval_id = "approval-c1"; outcome = "timed_out" }
     ];
   match Transcript.awaiting_approval t with
   | Some awaiting ->
@@ -1210,11 +1210,40 @@ let test_a_late_settle_for_another_call_leaves_the_prompt () =
         awaiting.Transcript.call_id
   | None -> fail "a settle for a different call cleared the wrong prompt"
 
+let test_a_late_settle_cannot_clear_a_replacement_waiter () =
+  let t = fresh () in
+  feed t
+    [ requested ~approval_id:"waiter-a" ~call_id:"c1" ~tool_name:"Edit"
+        ~question:"Run Edit?"
+    ; requested ~approval_id:"waiter-b" ~call_id:"c1" ~tool_name:"Edit"
+        ~question:"Run Edit?"
+    ; Live.Approval_settled
+        { call_id = "c1"; approval_id = "waiter-a"; outcome = "approve" }
+    ];
+  (match Transcript.awaiting_approval t with
+   | Some awaiting ->
+       check string "the replacement remains held" "waiter-b"
+         awaiting.Transcript.approval_id
+   | None -> fail "the stale settlement cleared a replacement waiter");
+  check bool "the stale settlement records no approval" false
+    (List.exists
+       (fun (kind, _) -> kind = Transcript.Approval Transcript.Approved)
+       (rows t));
+  feed t
+    [ Live.Approval_settled
+        { call_id = "c1"; approval_id = "waiter-b"; outcome = "deny" } ];
+  check bool "its own settlement clears the replacement" true
+    (Option.is_none (Transcript.awaiting_approval t));
+  check bool "the matching denial is recorded" true
+    (List.exists
+       (fun (kind, _) -> kind = Transcript.Approval Transcript.Denied)
+       (rows t))
+
 let test_approval_arguments_cannot_update_native_call () =
   let t = fresh () in
   let native = occurrence ~block_index:7 "approval-native" in
   feed t [Live.Run_started; Live.Native_tool_started {occurrence=native;tool_name=Some "Read"};
-    Live.Approval_requested {call_id="approval-native";
+    Live.Approval_requested {call_id="approval-native"; approval_id="approval-native-id";
       tool_name="Read";args="foreign arguments";question="read?";because="provided"}];
   match Transcript.tool_calls t with
   | [call] -> check string "native arguments remain observational" "" call.Transcript.args;
@@ -1229,7 +1258,7 @@ let test_approval_arguments_cannot_update_a_call_of_a_superseded_attempt () =
     ; tool_started "approval-old" "Edit"
     ; Live.Runtime_attempt_started { runtime_id = Some "next-runtime"; attempt_index = Some 1 }
     ; Live.Approval_requested
-        { call_id = "approval-old"; tool_name = "Edit"; args = "late arguments"
+        { call_id = "approval-old"; approval_id = "approval-old-id"; tool_name = "Edit"; args = "late arguments"
         ; question = "edit?"; because = "held" }
     ];
   match Transcript.tool_calls t with
@@ -1749,7 +1778,7 @@ let test_current_attempt_metadata_keeps_observed_activity () =
     Live.Model_content_activity {Masc.Keeper_chat_events.content_generation=0;
       content_scope=0;content_index=1;content_provider_message_id=Some "message";
       channel=Model_thinking;state=Content_observed};
-    Live.Approval_requested {call_id="approval";tool_name="Write";args="";
+    Live.Approval_requested {call_id="approval";approval_id="approval-id";tool_name="Write";args="";
       question="continue?";because="approval required"}];
   let trail = Transcript.trail t in
   let drawn = Transcript.drawn t in
@@ -3428,6 +3457,8 @@ let () =
             test_a_denial_uses_decision_vocabulary
         ; test_case "a settle for another call leaves the prompt" `Quick
             test_a_late_settle_for_another_call_leaves_the_prompt
+        ; test_case "a stale settle leaves a replacement waiter" `Quick
+            test_a_late_settle_cannot_clear_a_replacement_waiter
         ;] )
     ; ( "status rows"
       , [ test_case "rows grow only with what they report" `Quick

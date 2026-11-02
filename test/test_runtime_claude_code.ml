@@ -242,7 +242,7 @@ let run_fixture ?(dynamic_tools = []) ?session_mode ?(timeout_s = 2.0)
     let config =
       { (Runtime_claude_code.default_config ~cwd:"/tmp") with
         cli_path = path
-      ; account_home
+      ; account_home = Runtime_official_account.Current account_home
       ; native
       ; admission_timeout_s = Option.value admission_timeout_s ~default:timeout_s
       ; timeout_s = if no_turn_deadline then None else Some timeout_s
@@ -302,9 +302,11 @@ let test_relative_inherited_home_keeps_auth_environment () =
     Masc_test_deps.with_process_env "ANTHROPIC_API_KEY" (Some "fixture-inherited-key") (fun () ->
       let expected = Filename.concat (Sys.getcwd ()) "relative-claude-account" in
       check (option string) "selected inherited home is absolute"
-        (Some expected) (Runtime_claude_code.effective_account_home None);
+        (Some expected) (Runtime_official_account.resolve_home ~client:Claude_code ~declaration:None
+          |> Result.to_option);
       let scope = Runtime_quota_window.scope_of_claude_code_home
-          (Runtime_claude_code.effective_account_home None) in
+          (Runtime_official_account.resolve_home ~client:Claude_code ~declaration:None
+            |> Result.to_option) in
       check string "quota owns the same selected home"
         ("official:claude-code:home:" ^ expected)
         (Runtime_quota_window.scope_to_string scope);
@@ -816,11 +818,16 @@ let test_result_usage_is_carried () =
          (* turn_usage keeps the CLI's exclusive wire counts as-is; the
             inclusive normalization happens in the keeper's api_usage
             mapping. The frame's cache_read 42 must survive the parse and
-            its absent cache_creation reads as 0. *)
+            its absent cache_creation reads as 0 for accounting while
+            reported_cache_* preserves wire presence. *)
          check int "input tokens" 123456 usage.input_tokens;
          check int "output tokens" 789 usage.output_tokens;
          check int "cache read carried" 42 usage.cache_read_input_tokens;
-         check int "absent cache creation is 0" 0 usage.cache_creation_input_tokens))
+         check int "absent cache creation is 0" 0 usage.cache_creation_input_tokens;
+         check (option int) "reported cache read carried" (Some 42)
+           usage.reported_cache_read_input_tokens;
+         check (option int) "absent reported cache creation stays None" None
+           usage.reported_cache_creation_input_tokens))
 ;;
 
 let test_latest_request_input_and_result_total_both_travel () =
@@ -840,7 +847,11 @@ let test_latest_request_input_and_result_total_both_travel () =
              input.input_tokens;
            check int "latest cache read" 5 input.cache_read_input_tokens;
            check int "latest absent cache creation" 0
-             input.cache_creation_input_tokens
+             input.cache_creation_input_tokens;
+           check (option int) "latest reported cache read" (Some 5)
+             input.reported_cache_read_input_tokens;
+           check (option int) "latest absent reported cache creation stays None" None
+             input.reported_cache_creation_input_tokens
          | None -> fail "a later uncounted assistant erased the latest request");
         (match turn.usage.turn_total with
          | Some total ->
@@ -2020,11 +2031,11 @@ let test_dynamic_tool_meta_follows_declared_loading () =
 let test_tool_result_inline_ceiling_is_lane_specific () =
   let open Runtime_execution in
   let claude =
-    Claude_code { cli_path = "claude"; account_home = None; model = None; timeout_s = 1.0 }
+    Claude_code { cli_path = "claude"; account_home = Masc_test_deps.claude_account (); model = None; timeout_s = 1.0 }
   in
   let codex =
     Codex_app_server
-      { cli_path = "codex"; account_home = None; model = None; timeout_s = 1.0 }
+      { cli_path = "codex"; account_home = Masc_test_deps.codex_account (); model = None; timeout_s = 1.0 }
   in
   let antigravity =
     Antigravity_cli

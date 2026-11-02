@@ -1,0 +1,14 @@
+# baseline Test 41288965057 @ 4f88413fdbd8eb4d27bcb5c134828becdf00720d
+2026-11-01T08:29:44.6128322Z File "packages/agent_core/test/test_pipeline.ml", line 3800, characters 68-73:
+2026-11-01T08:29:44.6130480Z 3800 |   (match run_pipeline_turn ~sw ~api_strategy:Internal_pipeline.Sync fresh with
+2026-11-01T08:29:44.6131677Z                                                                            ^^^^^
+2026-11-01T08:29:44.6132791Z Error: The value fresh has type Agent.t
+2026-11-01T08:29:44.6133487Z        but an expression was expected of type Internal_agent.t
+2026-11-01T08:29:44.6184318Z File "packages/agent_core/test/dune", lines 67-345, characters 0-6120:
+# candidate Test 41289637453 @ 68119836b420bee9d2b26be19cc913f08c2c41e0
+2026-11-01T08:39:15.6213555Z File "packages/agent_core/test/test_pipeline.ml", line 3800, characters 68-73:
+2026-11-01T08:39:15.6214559Z 3800 |   (match run_pipeline_turn ~sw ~api_strategy:Internal_pipeline.Sync fresh with
+2026-11-01T08:39:15.6215279Z                                                                            ^^^^^
+2026-11-01T08:39:15.6215817Z Error: The value fresh has type Agent.t
+2026-11-01T08:39:15.6216344Z        but an expression was expected of type Internal_agent.t
+2026-11-01T08:39:15.6276002Z File "packages/agent_core/test/dune", lines 67-345, characters 0-6120:

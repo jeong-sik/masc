@@ -45,45 +45,61 @@ let assigned_task_ids ~matches_you tasks =
       | Some _ | None -> None)
     tasks
 
-let add_unique table key value =
-  let values = Option.value (Hashtbl.find_opt table key) ~default:[] in
-  if List.exists (String.equal value) values then ()
-  else Hashtbl.replace table key (value :: values)
+module String_map = Map.Make (String)
+module String_set = Set.Make (String)
+
+let add_unique_agent map key value =
+  let seen, rev_values =
+    match String_map.find_opt key map with
+    | Some existing -> existing
+    | None -> String_set.empty, []
+  in
+  if String_set.mem value seen
+  then map
+  else String_map.add key (String_set.add value seen, value :: rev_values) map
 
 let active_assigned_task_ids_lookup
     ~(actual_name : string)
     ~(ctx_agent_name : string)
     ~(agents : Masc_domain.agent list)
     ~(active_tasks : Masc_domain.task list) =
-  let assignee_to_agents = Hashtbl.create (List.length agents * 2) in
-  List.iter
-    (fun (agent : Masc_domain.agent) ->
-      add_unique assignee_to_agents agent.name agent.name;
-      if String.equal agent.name actual_name then
-        add_unique assignee_to_agents ctx_agent_name agent.name)
-    agents;
-  let task_ids_by_agent = Hashtbl.create (List.length agents) in
-  List.iter
-    (fun (task : Masc_domain.task) ->
-      match active_task_assignee task.task_status with
-      | None -> ()
-      | Some assignee ->
-          let agents =
-            Option.value (Hashtbl.find_opt assignee_to_agents assignee)
-              ~default:[]
-          in
-          List.iter
-            (fun agent_name ->
-              let task_ids =
-                Option.value (Hashtbl.find_opt task_ids_by_agent agent_name)
-                  ~default:[]
-              in
-              Hashtbl.replace task_ids_by_agent agent_name (task.id :: task_ids))
-            agents)
-    active_tasks;
+  let assignee_to_agents =
+    List.fold_left
+      (fun acc (agent : Masc_domain.agent) ->
+        let acc = add_unique_agent acc agent.name agent.name in
+        if String.equal agent.name actual_name then
+          add_unique_agent acc ctx_agent_name agent.name
+        else acc)
+      String_map.empty
+      agents
+  in
+  let task_ids_by_agent =
+    List.fold_left
+      (fun acc (task : Masc_domain.task) ->
+        match active_task_assignee task.task_status with
+        | None -> acc
+        | Some assignee ->
+            let agents_rev =
+              match String_map.find_opt assignee assignee_to_agents with
+              | Some (_seen, rev_agents) -> rev_agents
+              | None -> []
+            in
+            List.fold_left
+              (fun inner_acc agent_name ->
+                let task_ids =
+                  Option.value
+                    (String_map.find_opt agent_name inner_acc)
+                    ~default:[]
+                in
+                String_map.add agent_name (task.id :: task_ids) inner_acc)
+              acc
+              agents_rev)
+      String_map.empty
+      active_tasks
+    |> String_map.map List.rev
+  in
   fun agent_name ->
-    Option.value (Hashtbl.find_opt task_ids_by_agent agent_name) ~default:[]
-    |> List.rev
+    Option.value (String_map.find_opt agent_name task_ids_by_agent) ~default:[]
 
 let agent_status_icon = function
   | Masc_domain.Busy -> "🔴"

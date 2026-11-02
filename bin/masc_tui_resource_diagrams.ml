@@ -7,8 +7,17 @@ type request = {
   sources : string list;
 }
 type image = { png : string; key : string; width : int; height : int }
-type outcome = Pending | Ready of image | Failed of string
+type claim = unit ref
+type outcome = Pending | Preparing of claim | Ready of image | Failed of string
 type t = { request : request; entries : (string * outcome) list }
+type frame = {
+  frame_mime_type : string option;
+  frame_contents : Masc_tui_mcp.resource_content list;
+  frame_width : int;
+  frame_cell_pixels : int * int;
+  frame_colors : (string * string) option;
+}
+type admission = Admit | Retire | Ignore
 module Sources = Set.Make (String)
 
 let create ~mime_type ~contents ~width ~cell_pixels ~colors =
@@ -36,6 +45,46 @@ let matches ~mime_type ~contents ~width ~cell_pixels ~colors t =
   && t.request.mime_type=mime_type
   && t.request.cell_pixels=cell_pixels && t.request.colors=colors
 
+let matches_frame (frame : frame) t =
+  matches ~mime_type:frame.frame_mime_type ~contents:frame.frame_contents ~width:frame.frame_width
+    ~cell_pixels:frame.frame_cell_pixels ~colors:frame.frame_colors t
+
+let admission request ~frame snapshot =
+  match snapshot with
+  | Some t when t.request == request ->
+      (match frame with
+       | Some frame when matches_frame frame t -> Admit
+       | Some _ | None -> Retire)
+  | Some _ | None -> Ignore
+
+let claim_next t =
+  if List.exists (function _, Preparing _ -> true | _, (Pending | Ready _ | Failed _) -> false) t.entries
+  then None
+  else match List.find_opt (function _, Pending -> true | _, (Preparing _ | Ready _ | Failed _) -> false) t.entries with
+    | None -> None
+    | Some (source, _) ->
+        let claim = ref () in
+        let entries = List.map (fun (original,outcome) ->
+          original, (if String.equal original source then Preparing claim else outcome)) t.entries in
+        Some (source,claim,{t with entries})
+
+let owns_claim request ~source claim t =
+  t.request == request && List.exists (function
+    | original, Preparing held -> String.equal original source && held == claim
+    | _, (Pending | Ready _ | Failed _) -> false) t.entries
+
+let abandon request ~source claim t =
+  if not (owns_claim request ~source claim t) then t
+  else {t with entries=List.map (fun (original,outcome) ->
+    original, (match outcome with Preparing held when held == claim -> Pending
+      | Pending | Preparing _ | Ready _ | Failed _ -> outcome)) t.entries}
+
+let abandon_preparing t =
+  if not (List.exists (function _, Preparing _ -> true | _, (Pending | Ready _ | Failed _) -> false) t.entries)
+  then t
+  else {t with entries=List.map (fun (source,outcome) ->
+    source, (match outcome with Preparing _ -> Pending | Pending | Ready _ | Failed _ -> outcome)) t.entries}
+
 let settle request ~source result t =
   if request != t.request then t
   else
@@ -49,12 +98,15 @@ let settle request ~source result t =
          | (Ok _ | Error _), (Some _ | None) -> Failed "Diagram renderer did not return a valid PNG") in
     {t with entries=List.map (fun (original,previous) ->
       original, (match previous with
-        | Pending when String.equal original source -> outcome
-        | Pending | Ready _ | Failed _ -> previous)) t.entries}
+        | (Pending | Preparing _) when String.equal original source -> outcome
+        | Pending | Preparing _ | Ready _ | Failed _ -> previous)) t.entries}
+
+let settle_claimed request ~source claim result t =
+  if owns_claim request ~source claim t then settle request ~source result t else t
 
 let image ~source t = match List.assoc_opt source t.entries with
   | Some (Ready image) -> Some image
-  | Some (Pending | Failed _) | None -> None
+  | Some (Pending | Preparing _ | Failed _) | None -> None
 let image_for_display ~source t =
   let matches = List.filter_map (fun (original,outcome) ->
     (* A closed fence's final line ended in LF. Restore that context before
@@ -66,12 +118,12 @@ let image_for_display ~source t =
     if String.equal source displayed then Some outcome else None) t.entries in
   match matches with
   | [Ready image] -> Some image
-  | [] | [Pending | Failed _] | _ :: _ :: _ -> None
+  | [] | [Pending | Preparing _ | Failed _] | _ :: _ :: _ -> None
 let failure ~source t = match List.assoc_opt source t.entries with
   | Some (Failed detail) -> Some detail
-  | Some (Pending | Ready _) | None -> None
+  | Some (Pending | Preparing _ | Ready _) | None -> None
 let failures t = List.filter_map (function
-  | _, Failed detail -> Some detail | _, (Pending | Ready _) -> None) t.entries
+  | _, Failed detail -> Some detail | _, (Pending | Preparing _ | Ready _) -> None) t.entries
 let progress t =
   List.fold_left (fun (done_,total) (_,outcome) ->
-    (done_+(match outcome with Pending -> 0 | Ready _ | Failed _ -> 1),total+1)) (0,0) t.entries
+    (done_+(match outcome with Pending | Preparing _ -> 0 | Ready _ | Failed _ -> 1),total+1)) (0,0) t.entries

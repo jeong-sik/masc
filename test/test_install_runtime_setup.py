@@ -1507,6 +1507,44 @@ class NamedCatalogSources(unittest.TestCase):
         self.assertTrue(spec['tools'])
         self.assertEqual(spec['reasoning_effort'], 'high')
 
+    def test_saved_file_credential_survives_catalog_selection(self):
+        source = self.catalog_sources(self.INVENTORY)[0]
+        source.update(api_key_env='', credential_kind='file',
+                      credential_file='/private/owned-api-key')
+        catalog = dict(id='vendor/selected-model', max_context=8192,
+                       supports_tools=True, supports_streaming=True)
+        _, selected = SETUP.resolve_model_spec(source, dict(id=catalog['id'], catalog=catalog), 1)
+        self.assertNotIn('api_key_env', selected)
+        _, runtime = SETUP.render(selected)
+        credential = tomllib.loads(runtime.decode())['providers']['openrouter']['credentials']
+        self.assertEqual(credential, dict(type='file', path='/private/owned-api-key'))
+
+    def test_catalog_selection_does_not_hide_invalid_file_references(self):
+        source = self.catalog_sources(self.INVENTORY)[0]
+        catalog = dict(id='vendor/selected-model', max_context=8192,
+                       supports_tools=True, supports_streaming=True)
+        for invalid in ['', False, 0]:
+            with self.subTest(credential_file=invalid):
+                source['credential_file'] = invalid
+                with self.assertRaises(SETUP.SetupError):
+                    SETUP.resolve_model_spec(
+                        source, dict(id=catalog['id'], catalog=catalog), 1)
+
+    def test_named_render_validates_each_credential_reference(self):
+        base = named_spec('vendor/selected-model')
+        file_spec = dict(base, api_key_env='', credential_file='/private/owned-api-key')
+        _, runtime = SETUP.render(file_spec)
+        credential = tomllib.loads(runtime.decode())['providers']['openrouter']['credentials']
+        self.assertEqual(credential, dict(type='file', path='/private/owned-api-key'))
+        for invalid in [None, False, 0, ' ']:
+            with self.subTest(api_key_env=invalid), self.assertRaises(SETUP.SetupError):
+                SETUP.render(dict(file_spec, api_key_env=invalid))
+        for invalid in [None, False, '', 'relative/key']:
+            with self.subTest(credential_file=invalid), self.assertRaises(SETUP.SetupError):
+                SETUP.render(dict(file_spec, credential_file=invalid))
+        with self.assertRaises(SETUP.SetupError):
+            SETUP.render(dict(base, credential_file='/private/owned-api-key'))
+
     def test_source_models_leads_with_curated_rows_and_keeps_discovery_extras(self):
         source = self.catalog_sources(self.INVENTORY)[0]
         catalog_rows = [
@@ -2549,6 +2587,23 @@ class WorkspaceChildEnvironment(unittest.TestCase):
                 patch('subprocess.run', return_value=completed) as run:
             SETUP.onboarding_status('/bin/masc')
         self.assertIsNone(run.call_args.kwargs['env'])
+
+    def test_named_render_validates_booleans_and_rejects_dual_credentials(self):
+        base = named_spec('openai/gpt-5')
+        for field, bad_value in [
+            ('provider_declared', None),
+            ('provider_declared', 'false'),
+            ('provider_declared', 0),
+            ('wizard_default', 'true'),
+            ('wizard_default', 1),
+        ]:
+            with self.subTest(field=field, bad_value=bad_value):
+                invalid = dict(base, **{field: bad_value})
+                with self.assertRaises(SETUP.SetupError):
+                    SETUP.render(invalid)
+        dual_creds = dict(base, credential_file='/private/owned-api-key')
+        with self.assertRaisesRegex(SETUP.SetupError, 'cannot declare both'):
+            SETUP.render(dual_creds)
 
 
 if __name__ == '__main__':

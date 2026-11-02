@@ -19,9 +19,11 @@ type probe_result =
   ; user_agent : string option
   }
 
+type account = Runtime_official_account.codex Runtime_official_account.selection
+
 type config =
   { cli_path : string
-  ; account_home : string option
+  ; account_home : account
   ; isolated_home : string option
   ; model : string option
   ; context_window : int option
@@ -47,7 +49,7 @@ let client_version = Runtime_build_version.current
 
 let default_config () =
   { cli_path = "codex"
-  ; account_home = None
+  ; account_home = Runtime_official_account.Current None
   ; isolated_home = None
   ; model = None
   ; context_window = None
@@ -2087,11 +2089,20 @@ let complete_reasoning_item ~stage ~on_stream_event streamed_texts item =
   in
   let* () = complete_parts "summary" (fun index -> Summary index) in
   let* () = complete_parts "content" (fun index -> Content index) in
+  let compare_reasoning_key (id1, p1) (id2, p2) =
+    let c = String.compare id1 id2 in
+    if c <> 0 then c
+    else
+      match p1, p2 with
+      | Summary a, Summary b | Content a, Content b -> Int.compare a b
+      | Summary _, Content _ -> -1
+      | Content _, Summary _ -> 1
+  in
   (* The item closes every observed part, including one whose full text the
      completion payload does not restate. Sort to keep closure deterministic. *)
   Hashtbl.to_seq_keys streamed_texts.reasoning_buffers |> List.of_seq
   |> List.filter (fun (id, _) -> id = item_id)
-  |> List.sort compare
+  |> List.sort compare_reasoning_key
   |> List.iter (fun ((_, part) as key) ->
        if not (Hashtbl.mem streamed_texts.completed_reasoning key) then begin
          Hashtbl.add streamed_texts.completed_reasoning key ();
@@ -2808,67 +2819,24 @@ let run_protocol io (config : config) ~await_handoff ~on_undelivered_tool_result
     }
 ;;
 
-let resolved_codex_home () =
-  let home = match Sys.getenv_opt "CODEX_HOME" with
-    | Some path when path <> "" -> Some path
-    | _ ->
-      (match Sys.getenv_opt "HOME" with
-       | Some home when home <> "" -> Some (Filename.concat home ".codex")
-       | Some _ | None -> None) in
-  Option.map (fun path ->
-    if Filename.is_relative path then Filename.concat (Sys.getcwd ()) path else path) home
+let selected_account = function
+  | Runtime_official_account.Current declaration ->
+    Runtime_official_account.capture ~client:Codex ~declaration
+  | Captured selected -> Ok selected
 ;;
 
-let effective_account_home = function
-  | Some path -> Some path
-  | None -> resolved_codex_home ()
-;;
-
-let configured_auth_environment_keys home =
-  match home with
-  | None -> Ok []
-  | Some home ->
-    let path = Filename.concat home "config.toml" in
-    if not (Sys.file_exists path) then Ok [] else
-    try
-      let toml = Otoml.Parser.from_file path in
-      let table = function
-        | Otoml.TomlTable fields | Otoml.TomlInlineTable fields -> fields
-        | Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
-        | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
-        | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTableArray _ -> raise (Invalid_argument "table") in
-      let env_name = function
-        | Otoml.TomlString name when String.length name > 0 ->
-          let initial = function 'a'..'z' | 'A'..'Z' | '_' -> true | _ -> false in
-          if initial name.[0] && String.for_all (function 'a'..'z' | 'A'..'Z' | '0'..'9' | '_' -> true | _ -> false) name
-          then name else raise (Invalid_argument "environment name")
-        | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _ | Otoml.TomlOffsetDateTime _
-        | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _
-        | Otoml.TomlArray _ | Otoml.TomlTable _ | Otoml.TomlInlineTable _ | Otoml.TomlTableArray _
-        | TomlString _ -> raise (Invalid_argument "environment name") in
-      let providers = match Otoml.find_opt toml Fun.id [ "model_providers" ] with
-        | None -> [] | Some value -> table value in
-      let names = List.concat_map (fun (_, value) ->
-        let fields = table value in
-        let key = match List.assoc_opt "env_key" fields with
-          | None -> [] | Some value -> [ env_name value ] in
-        let headers = match List.assoc_opt "env_http_headers" fields with
-          | None -> [] | Some value -> List.map (fun (_, value) -> env_name value) (table value) in
-        key @ headers) providers in
-      Ok (List.sort_uniq String.compare names)
-    with
-    | Otoml.Parse_error _ | Otoml.Type_error _ | Sys_error _ | Invalid_argument _ ->
-      Error (Invalid_config "Cannot read declared Codex provider credential environment names from the user config; inspect config.toml")
-;;
-
-let client_environment account_home =
-  (* Resolve before the child changes cwd; admission and execution must read
-     the same credential declarations and CLI store. *)
-  let home = effective_account_home account_home in
-  let* configured = configured_auth_environment_keys home in
-  Ok
-    (Runtime_codex_environment_projection.project
-       ~explicit_account:(Option.is_some account_home) ~home ~configured (Unix.environment ()))
+let client_environment ?isolated_home account =
+  let result = match account, isolated_home with
+    | Runtime_official_account.Current (Some _), Some _ ->
+      Error "account_home and isolated_home cannot both be selected"
+    | Current None, Some home ->
+      Runtime_official_account.capture ~client:Codex ~declaration:(Some home)
+      |> Result.map Runtime_official_account.environment
+    | (Current _ | Captured _), None ->
+      selected_account account |> Result.map Runtime_official_account.environment
+    | Captured selected, Some home ->
+      Runtime_official_account.private_codex_environment ~home selected in
+  result |> Result.map_error (fun detail -> Invalid_config detail)
 ;;
 
 let drain_stderr flow tail =
@@ -3006,10 +2974,7 @@ let context_submission frame json payload =
 ;;
 
 let with_spawned_client ?(on_context_submission = fun _ -> ()) ~mgr ~clock ~cwd config run =
-  let selected_home = match config.isolated_home with
-    | Some home -> Some home
-    | None -> config.account_home in
-  let* environment = client_environment selected_home in
+  let* environment = client_environment ?isolated_home:config.isolated_home config.account_home in
   Eio.Switch.run (fun sw ->
     let stdin_r, stdin_w = Eio.Process.pipe ~sw mgr in
     let stdout_r, stdout_w = Eio.Process.pipe ~sw mgr in
@@ -3017,12 +2982,7 @@ let with_spawned_client ?(on_context_submission = fun _ -> ()) ~mgr ~clock ~cwd 
     let stderr_tail = Stderr.create ~limit:stderr_tail_bytes in
     let proc =
       Eio.Process.spawn ~sw mgr ~cwd
-        ~env:(match config.isolated_home with
-          | None -> environment
-          | Some path ->
-            environment |> Array.to_list
-            |> List.filter (fun entry -> Runtime_codex_environment_projection.env_key entry <> "CODEX_HOME")
-            |> fun entries -> Array.of_list (("CODEX_HOME=" ^ path) :: entries))
+        ~env:environment
         ~stdin:stdin_r ~stdout:stdout_w ~stderr:stderr_w
         (client_argv config)
     in
@@ -3179,24 +3139,27 @@ let native_cwd cwd =
 ;;
 
 let validate_process_config config =
+  let declared_account = match config.account_home with
+    | Runtime_official_account.Current (Some _) -> true
+    | Current None | Captured _ -> false in
   if String.trim config.cli_path = ""
   then Error (Invalid_config "cli_path must not be empty")
   else if Option.fold ~none:false ~some:(fun tokens -> tokens <= 0) config.context_window
   then Error (Invalid_config "context_window must be positive")
-  else if Option.is_some config.account_home && Option.is_some config.isolated_home
+  else if declared_account && Option.is_some config.isolated_home
   then Error (Invalid_config "account_home and isolated_home cannot both be selected")
-  else if (match config.account_home with
-      | None -> false
-      | Some home -> not (Runtime_account_home.is_valid home))
-  then Error (Invalid_config "account_home must be a non-empty absolute path")
-  else if (match config.isolated_home with
-      | Some home -> not (Runtime_account_home.is_valid home)
-      | None ->
-        (match effective_account_home config.account_home with
-      | Some home -> not (Runtime_account_home.is_valid home)
-      | None -> true))
-  then Error (Invalid_config "Codex needs an absolute isolated_home, account_home, CODEX_HOME, or HOME")
-  else if
+  else
+  let* () = match config.isolated_home with
+    | None -> Ok ()
+    | Some home -> Runtime_account_home.of_string home
+      |> Result.map (fun _ -> ()) |> Result.map_error (fun detail -> Invalid_config detail) in
+  let* _ = match config.account_home, config.isolated_home with
+    | Runtime_official_account.Current None, Some home ->
+      Runtime_official_account.capture ~client:Codex ~declaration:(Some home)
+      |> Result.map_error (fun detail -> Invalid_config detail)
+    | (Current _ | Captured _), (None | Some _) ->
+      selected_account config.account_home |> Result.map_error (fun detail -> Invalid_config detail) in
+  if
     not (Float.is_finite config.admission_timeout_s)
     || config.admission_timeout_s <= 0.0
   then Error (Invalid_config "admission_timeout_s must be positive and finite")

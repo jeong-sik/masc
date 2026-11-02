@@ -618,13 +618,14 @@ function validateKeeperCustomPayload(
     KEEPER_CHAT_OPERATION_ACCEPTED: ['operation_id', 'state', 'queued_count', 'interactive'],
     KEEPER_CHAT_BATCH_BOUND: ['operation_id', 'execution_id'],
     KEEPER_TOOL_APPROVAL_REQUESTED: [
+      'approval_id',
       'tool_call_id',
       'tool_call_name',
       'args',
       'question',
       'because',
     ],
-    KEEPER_TOOL_APPROVAL_SETTLED: ['tool_call_id', 'outcome'],
+    KEEPER_TOOL_APPROVAL_SETTLED: ['approval_id', 'tool_call_id', 'outcome'],
     KEEPER_STREAM_MESSAGE_START: ['content_generation', 'stream_scope', 'provider_message_id', 'model', 'usage'],
     KEEPER_STREAM_MESSAGE_DELTA: ['content_generation', 'stream_scope', 'stop_reason', 'usage'],
     KEEPER_CONTENT_BLOCK_START: ['index', 'content_type', 'tool_call_id', 'tool_call_name'],
@@ -754,6 +755,8 @@ function validateKeeperCustomPayload(
       return occurrence.success ? requiredString(value, 'executionId') : occurrence
     }
     case 'KEEPER_TOOL_APPROVAL_REQUESTED': {
+      const approvalId = requiredString(value, 'approval_id')
+      if (!approvalId.success) return approvalId
       const toolCallId = requiredString(value, 'tool_call_id')
       if (!toolCallId.success) return toolCallId
       const toolCallName = requiredString(value, 'tool_call_name')
@@ -764,6 +767,8 @@ function validateKeeperCustomPayload(
       return question.success ? optionalText(value, 'because') : question
     }
     case 'KEEPER_TOOL_APPROVAL_SETTLED': {
+      const approvalId = requiredString(value, 'approval_id')
+      if (!approvalId.success) return approvalId
       const toolCallId = requiredString(value, 'tool_call_id')
       if (!toolCallId.success) return toolCallId
       return requiredString(value, 'outcome')
@@ -1258,8 +1263,9 @@ export const SSEMessageSchema = schema<SSEMessage>((value) => {
     if (typeof value.keeper_name !== 'string' || value.keeper_name.trim() === '') {
       return fail('keeper_name', 'Expected non-empty keeper_name')
     }
-    if (value.queue_kind !== 'chat_operation' && value.queue_kind !== 'event_queue') {
-      return fail('queue_kind', 'Expected chat_operation or event_queue queue_kind')
+    if (value.queue_kind !== 'chat_operation' && value.queue_kind !== 'event_queue'
+      && value.queue_kind !== 'approval_count' && value.queue_kind !== 'approval_detail') {
+      return fail('queue_kind', 'Expected chat_operation, event_queue, approval_count, or approval_detail queue_kind')
     }
   }
 

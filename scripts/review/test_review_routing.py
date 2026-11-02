@@ -27,44 +27,20 @@ def uid(name):
 
 def review(actor="alice", *, state="CHANGES_REQUESTED", head=OLD, rid=1, at=T1):
     return {"id": rid, "user": {"login": actor, "id":uid(actor)}, "state": state,
+            "author_association": "MEMBER",
             "commit_id": head, "submitted_at": at, "body": "source findings"}
-
-
-def signed_request(actor="alice", *, keeper="one", rid=1, at=T1, head=OLD):
-    row = review(actor, rid=rid, at=at, head=head)
-    row["body"] = f"verdict: FAIL head: {head} by: {keeper}\nproblem"
-    return row
-
-
-def replacement(actor="alice", *, keeper="one", rid=2, request=1, at=T2):
-    row = review(actor, state="APPROVED", head=HEAD, rid=rid, at=at)
-    row["author_association"] = "MEMBER"
-    row["body"] = (f"verdict: PASS head: {HEAD} by: {keeper}\n"
-                   f'review-scope: {{"base_ref":"main","base_sha":"{BASE}","stack":null}}\n'
-                   f"approve-guard: head `{HEAD}` · source review · replaces own CHANGES_REQUESTED {request}"
-                   f" · reviewed base `{BASE}` · diff sha256 `{'d' * 64}`")
-    return row
 
 
 def pull(number=1, **changes):
     raw = {"number": number, "title": f"Fix {number}", "url": f"https://example/pull/{number}",
            "state": "open", "draft": False, "author": "author", "head": HEAD,
            "base_ref": "main", "base_sha": BASE, "stack": None, "created_at": T1,
-           "requested_reviewers": [], "requested_teams": [], "reviews": [],
-           "commit_accounts": [], "commit_identities_complete": True,
-           "admission": False, "independent_source_review": False, "blockers": []}
+           "requested_reviewers": [], "requested_teams": [], "reviews": []}
     raw.update(changes)
-    names = [raw['author'], 'alice', 'bob', *raw['requested_reviewers'], *raw['commit_accounts']]
-    names.extend(r['user']['login'] for r in raw['reviews'])
+    names = [raw['author'], 'alice', 'bob', *raw['requested_reviewers']]
     raw.setdefault('account_ids', {name.casefold():uid(name) for name in names})
     raw.setdefault('author_id', uid(raw['author']))
-    raw.setdefault('commit_actor_ids', [uid(name) for name in raw['commit_accounts']])
     return raw
-
-
-def blocker(actor="alice", rid=1, state="HOLD"):
-    return {"actor": actor, "id": rid, "state": state,
-            "url": f"https://example/comment/{rid}"}
 
 
 def actions(rows, roster=("alice", "bob")):
@@ -142,68 +118,83 @@ class RoutingScenarios(unittest.TestCase):
         self.assertEqual(unavailable[0].reason, M.Reason.NO_REVIEWER)
         self.assertFalse(unavailable[0].actionable)
 
-    def test_commit_actor_is_excluded_case_insensitively(self):
-        result = actions([pull(commit_accounts=["ALICE"])])
+    def test_non_author_can_receive_review_request(self):
+        result = actions([pull()])
         self.assertEqual((result[0].account, result[0].reviewer_eligibility),
-                         ("bob", M.ReviewerEligibility.ELIGIBLE))
-        unavailable = actions([pull(commit_accounts=["alice", "BOB"])])
-        self.assertEqual(unavailable[0].reason, M.Reason.NO_REVIEWER)
+                         ("alice", M.ReviewerEligibility.ELIGIBLE))
 
-    def test_commit_actor_id_excludes_same_account_with_a_different_login(self):
-        actor_ids = {'author':uid('author'), 'alice':uid('alice'), 'bob':uid('bob'),
-                     'old-alice':uid('alice')}
-        result = actions([pull(commit_accounts=['old-alice'], commit_actor_ids=[uid('alice')],
-                               account_ids=actor_ids)])
-        self.assertEqual(result[0].account, 'bob')
-
-    def test_unknown_blocker_and_known_roster_sort_without_losing_owner(self):
-        result = actions([pull(blockers=[blocker(actor='unknown')]), pull(2)])
-        self.assertIn((M.Reason.AWAITING_OWNER, 'unknown'), {(a.reason, a.account) for a in result})
-
-    def test_unknown_commit_identity_never_proposes_a_reviewer(self):
-        result = actions([pull(commit_accounts=["alice"], commit_identities_complete=False)])
-        self.assertEqual(result[0].reason, M.Reason.COMMIT_IDENTITY_UNKNOWN)
-        self.assertFalse(result[0].actionable)
-
-    def test_conflicting_request_is_preserved_and_independent_reviewer_proposed(self):
-        result = actions([pull(requested_reviewers=["Alice"], commit_accounts=["ALICE"])])
+    def test_pr_author_request_is_preserved_and_another_reviewer_proposed(self):
+        result = actions([pull(author="Alice", requested_reviewers=["Alice"])])
         self.assertEqual({(a.reason, a.account, a.reviewer_eligibility) for a in result}, {
-            (M.Reason.EXISTING_REQUEST, "alice", M.ReviewerEligibility.COMMIT_ACTOR),
-            (M.Reason.INDEPENDENT_REVIEW, "bob", M.ReviewerEligibility.ELIGIBLE)})
+            (M.Reason.EXISTING_REQUEST, "alice", M.ReviewerEligibility.PR_AUTHOR),
+            (M.Reason.NON_AUTHOR_REVIEW, "bob", M.ReviewerEligibility.ELIGIBLE)})
 
-    def test_conflicting_cr_owner_remains_owned_alongside_independent_review(self):
-        result = actions([pull(reviews=[review("alice")], commit_accounts=["ALICE"])])
+    def test_changed_head_cr_returns_to_owner(self):
+        result = actions([pull(reviews=[review("alice")])])
         self.assertEqual({(a.reason, a.account) for a in result},
-                         {(M.Reason.AWAITING_OWNER, "alice"),
-                          (M.Reason.INDEPENDENT_REVIEW, "bob")})
+                         {(M.Reason.CHANGED_HEAD_CR, "alice")})
 
-    def test_valid_independent_approval_does_not_displace_conflicting_cr(self):
-        row = pull(requested_reviewers=['alice'], reviews=[review('alice')],
-                   commit_accounts=['alice'], independent_source_review=True)
+    def test_native_approval_does_not_displace_another_accounts_cr(self):
+        row = pull(author='alice', requested_reviewers=['alice'], reviews=[review('alice'),
+                   review('bob', state='APPROVED', head=HEAD, rid=2)])
         result = actions([row])
         self.assertEqual([(a.reason, a.account, a.review_ids) for a in result],
                          [(M.Reason.EXISTING_REQUEST, 'alice', (1,))])
-        self.assertTrue(result[0].to_json()['independent_source_review'])
+        self.assertEqual(result[0].to_json()['approval_ids'], [2])
         self.assertFalse(any(a.assignment is M.Assignment.PROPOSED_USER for a in result))
+
+    def test_same_head_other_accounts_cr_still_waits_for_author(self):
+        cr = review('alice', head=HEAD)
+        approved = review('bob', state='APPROVED', head=HEAD, rid=2)
+        [action] = actions([pull(reviews=[cr, approved])])
+        self.assertEqual((action.reason, action.account, action.review_ids, action.approval_ids),
+                         (M.Reason.AWAITING_AUTHOR, 'author', (1,), (2,)))
+
+    def test_same_account_old_head_approval_clears_cr_but_not_new_head_review(self):
+        cr = review('alice')
+        approved = review('alice', state='APPROVED', head=OLD, rid=2, at=T2)
+        [action] = actions([pull(reviews=[cr, approved])])
+        self.assertEqual((action.reason, action.approval_ids, action.review_ids),
+                         (M.Reason.REVIEW_NEEDED, (), ()))
+        self.assertEqual(action.to_json()['superseded_change_requests'][0]['finding_resolution'],
+                         'unverified')
+
+    def test_new_cr_stays_active_and_previously_superseded_cr_stays_in_history(self):
+        earlier = review('alice', rid=1, at=T1)
+        approved = review('alice', state='APPROVED', head=HEAD, rid=2, at=T2)
+        later = review('alice', rid=3, at=T3)
+        [action] = actions([pull(reviews=[earlier, approved, later])])
+        self.assertEqual((action.reason, action.review_ids, action.approval_ids),
+                         (M.Reason.CHANGED_HEAD_CR, (3,), ()))
+        self.assertEqual(action.to_json()['superseded_change_requests'], [{
+            'review_id':1, 'account_id':uid('alice'), 'observed_login':'alice',
+            'finding_resolution':'unverified'}])
 
     def test_current_cr_existing_independent_request_or_team_prevents_extra_request(self):
-        rows = [pull(1, reviews=[review(head=HEAD)], commit_accounts=["alice"]),
-                pull(2, requested_reviewers=["alice", "bob"], commit_accounts=["alice"]),
-                pull(3, requested_reviewers=["alice"], requested_teams=["team"],
-                     commit_accounts=["alice"])]
+        rows = [pull(1, reviews=[review(head=HEAD)]),
+                pull(2, requested_reviewers=["alice", "bob"]),
+                pull(3, requested_reviewers=["alice"], requested_teams=["team"])]
         self.assertFalse(any(a.assignment is M.Assignment.PROPOSED_USER for a in actions(rows)))
 
-    def test_unknown_identity_with_conflicting_request_keeps_it_and_does_not_propose(self):
-        result = actions([pull(requested_reviewers=["alice"], commit_accounts=["alice"],
-                               commit_identities_complete=False)])
-        self.assertEqual({a.reason for a in result},
-                         {M.Reason.EXISTING_REQUEST, M.Reason.COMMIT_IDENTITY_UNKNOWN})
+    def test_existing_request_is_not_duplicated(self):
+        result = actions([pull(requested_reviewers=["alice"])])
+        self.assertEqual({a.reason for a in result}, {M.Reason.EXISTING_REQUEST})
         self.assertFalse(any(a.assignment is M.Assignment.PROPOSED_USER for a in result))
 
-    def test_current_head_approval_without_valid_scope_is_routed_for_review(self):
+    def test_current_head_native_approval_needs_no_body_format(self):
         result = actions([pull(reviews=[review(state="APPROVED", head=HEAD)])])
-        self.assertEqual(result[0].reason, M.Reason.REVIEW_NEEDED)
-        self.assertEqual(result[0].assignment, M.Assignment.PROPOSED_USER)
+        self.assertEqual(result[0].reason, M.Reason.APPROVED)
+        self.assertEqual(result[0].approval_ids, (1,))
+        self.assertEqual(result[0].assignment, M.Assignment.NONE)
+
+    def test_native_approval_does_not_require_author_association(self):
+        base = review(state="APPROVED", head=HEAD)
+        missing = {key:value for key, value in base.items() if key != 'author_association'}
+        for approved in (missing, base | {"author_association":"NONE"}):
+            with self.subTest(approved=approved):
+                [action] = actions([pull(reviews=[approved])])
+                self.assertEqual(action.reason, M.Reason.APPROVED)
+                self.assertEqual(action.approval_ids, (1,))
 
     def test_partial_comment_review_does_not_establish_coverage_or_clear_cr(self):
         result = actions([pull(reviews=[review(),
@@ -225,33 +216,168 @@ class RoutingScenarios(unittest.TestCase):
         self.assertEqual(before.to_json(), after.to_json())
         self.assertEqual(after.actions[0].reason, M.Reason.EXISTING_REQUEST)
 
-    def test_only_explicit_later_same_keeper_replacement_clears_a_cr(self):
-        cr = signed_request()
-        self.assertEqual(actions([pull(reviews=[cr, replacement()])])[0].reason, M.Reason.REVIEW_NEEDED)
-        for approval in (review(state="APPROVED", head=HEAD, at=T2, rid=2),
-                         replacement(keeper="other"), replacement(request=99),
-                         review(state="DISMISSED", head=HEAD, at=T2, rid=2)):
-            with self.subTest(approval=approval):
-                result = actions([pull(reviews=[cr, approval])])
-                self.assertEqual((result[0].reason, result[0].account, result[0].review_ids),
-                                 (M.Reason.CHANGED_HEAD_CR, "alice", (1,)))
+    def test_nonformal_review_metadata_does_not_block_current_approval(self):
+        approved = review(state="APPROVED", head=HEAD, rid=2, at=T2)
+        comment = review(state="COMMENTED", rid=1) | {
+            "user": None, "commit_id": None, "submitted_at": None,
+            "body": "A regular comment."}
+        row = pull(reviews=[approved])
+        row["reviews"].append(comment)
+        result = actions([row])
+        self.assertEqual((result[0].reason, result[0].approval_ids), (M.Reason.APPROVED, (2,)))
+
+    def test_cr_without_a_commit_id_remains_visible_without_guessing_changed_head(self):
+        result = actions([pull(reviews=[review() | {"commit_id": None}])])
+        self.assertEqual((result[0].reason, result[0].account, result[0].review_ids),
+                         (M.Reason.AWAITING_OWNER, None, (1,)))
+        self.assertEqual(result[0].to_json()['review_authors'],
+                         [{'account_id':uid('alice'), 'observed_login':'alice'}])
+        self.assertFalse(result[0].actionable)
+
+    def test_renamed_account_approval_replaces_its_own_older_cr(self):
+        cr = review('old-alice') | {'user': {'login':'old-alice', 'id':uid('alice')}}
+        approved = review('alice', state='APPROVED', head=HEAD, rid=2, at=T2)
+        result = actions([pull(reviews=[cr, approved])])
+        self.assertEqual((result[0].reason, result[0].approval_ids), (M.Reason.APPROVED, (2,)))
+        self.assertEqual(result[0].to_json()['superseded_change_requests'], [{
+            'review_id':1, 'account_id':uid('alice'), 'observed_login':'old-alice',
+            'finding_resolution':'unverified'}])
+
+    def test_renamed_cr_owner_routes_to_current_verified_roster_login(self):
+        cr = review('old-alice') | {'user': {'login':'old-alice', 'id':uid('alice')}}
+        result = actions([pull(reviews=[cr])])
+        self.assertEqual((result[0].reason, result[0].account, result[0].account_id),
+                         (M.Reason.CHANGED_HEAD_CR, 'alice', uid('alice')))
+        self.assertEqual(result[0].to_json()['review_authors'],
+                         [{'account_id':uid('alice'), 'observed_login':'old-alice'}])
+
+    def test_reused_historical_login_never_routes_cr_to_new_account(self):
+        cr = review('alice') | {'user': {'login':'alice', 'id':uid('outside')}}
+        result = actions([pull(reviews=[cr])])
+        self.assertEqual((result[0].reason, result[0].account, result[0].actionable),
+                         (M.Reason.AWAITING_OWNER, None, False))
+        self.assertEqual(result[0].to_json()['review_authors'],
+                         [{'account_id':uid('outside'), 'observed_login':'alice'}])
+
+    def test_reused_login_approval_does_not_clear_the_old_accounts_cr(self):
+        cr = review('alice') | {'user': {'login':'alice', 'id':uid('outside')}}
+        approved = review('alice', state='APPROVED', head=HEAD, rid=2, at=T2)
+        [action] = actions([pull(reviews=[cr, approved])])
+        self.assertEqual((action.reason, action.account, action.review_ids, action.approval_ids),
+                         (M.Reason.AWAITING_OWNER, None, (1,), (2,)))
+        self.assertEqual(action.to_json()['superseded_change_requests'], [])
+
+    def test_current_request_matches_renamed_cr_owner_by_account_id(self):
+        cr = review('old-alice') | {'user': {'login':'old-alice', 'id':uid('alice')}}
+        [action] = actions([pull(reviews=[cr], requested_reviewers=['alice'])])
+        self.assertEqual((action.reason, action.account, action.review_ids),
+                         (M.Reason.EXISTING_REQUEST, 'alice', (1,)))
+
+    def test_latest_same_account_approval_or_dismissal_replaces_cr(self):
+        cr = review()
+        approval = review(state="APPROVED", head=HEAD, at=T2, rid=2)
+        self.assertEqual(actions([pull(reviews=[cr, approval])])[0].reason, M.Reason.APPROVED)
+        dismissed = review(state="DISMISSED", head=HEAD, at=T2, rid=2)
+        self.assertEqual(actions([pull(reviews=[cr, dismissed])])[0].reason, M.Reason.REVIEW_NEEDED)
         dismissed = cr | {"state": "DISMISSED"}
         self.assertEqual(actions([pull(reviews=[dismissed])])[0].reason, M.Reason.REVIEW_NEEDED)
 
-    def test_ambiguous_latest_formal_time_or_missing_time_refuses(self):
-        for reviews in ([signed_request(), replacement(at=T1)],
-                        [review(at=None)],
+    def test_missing_or_invalid_latest_formal_time_refuses(self):
+        for reviews in ([review(at=None)],
                         [review(at="invalid")]):
             with self.subTest(reviews=reviews), self.assertRaises(ValueError):
                 actions([pull(reviews=reviews)])
 
-    def test_older_tie_cannot_replace_cr_even_after_unrelated_later_approval(self):
-        cr = signed_request(at=T1)
-        tied = replacement(at=T1)
-        latest = replacement(rid=3, request=99, at=T2)
+    def test_same_head_approvals_at_same_time_are_not_ambiguous(self):
+        one = review(state='APPROVED', head=HEAD, rid=1, at=T1)
+        two = review(state='APPROVED', head=HEAD, rid=2, at=T1)
+        [action] = actions([pull(reviews=[one, two])])
+        self.assertEqual((action.reason, action.approval_ids), (M.Reason.APPROVED, (1, 2)))
+        self.assertEqual(action.to_json()['ambiguous_review_ids'], [])
+
+    def test_same_head_change_requests_at_same_time_route_once(self):
+        one = review(rid=1, at=T1)
+        two = review(rid=2, at=T1)
+        [action] = actions([pull(reviews=[one, two])])
+        self.assertEqual((action.reason, action.account, action.review_ids),
+                         (M.Reason.CHANGED_HEAD_CR, 'alice', (1, 2)))
+        self.assertEqual(action.to_json()['ambiguous_review_ids'], [])
+
+    def test_conflicting_tied_reviews_are_visible_without_stalling_another_pr(self):
+        cr = review('alice', rid=1, at=T1)
+        approval = review('alice', state='APPROVED', head=HEAD, rid=2, at=T1)
+        result = actions([pull(1, reviews=[cr, approval]), pull(2)])
+        first = [a for a in result if a.identity.number == 1]
+        self.assertEqual(len(first), 1)
+        self.assertEqual((first[0].reason, first[0].actionable), (M.Reason.AMBIGUOUS_REVIEW, False))
+        self.assertEqual(first[0].to_json()['ambiguous_review_ids'], [1, 2])
+        self.assertEqual([r['state'] for r in first[0].to_json()['ambiguous_reviews']],
+                         ['CHANGES_REQUESTED', 'APPROVED'])
+        self.assertEqual([(a.reason, a.assignment) for a in result if a.identity.number == 2],
+                         [(M.Reason.FIRST_REVIEW, M.Assignment.PROPOSED_USER)])
+
+    def test_ambiguous_account_does_not_suppress_other_accounts_real_cr(self):
+        cr = review('alice', rid=1, at=T1)
+        approval = review('alice', state='APPROVED', head=HEAD, rid=2, at=T1)
+        other_cr = review('bob', rid=3, at=T2)
+        result = actions([pull(reviews=[cr, approval, other_cr])])
+        self.assertEqual({(a.reason, a.account) for a in result}, {
+            (M.Reason.AMBIGUOUS_REVIEW, None), (M.Reason.CHANGED_HEAD_CR, 'bob')})
+
+    def test_explicit_request_remains_visible_with_ambiguous_review(self):
+        cr = review('alice', rid=1, at=T1)
+        approval = review('alice', state='APPROVED', head=HEAD, rid=2, at=T1)
+        result = actions([pull(reviews=[cr, approval], requested_reviewers=['alice'])])
+        self.assertEqual({(a.reason, a.account) for a in result}, {
+            (M.Reason.AMBIGUOUS_REVIEW, None), (M.Reason.EXISTING_REQUEST, 'alice')})
+        self.assertFalse(any(a.assignment is M.Assignment.PROPOSED_USER for a in result))
+
+    def test_tied_approvals_on_different_heads_are_reported_as_ambiguous(self):
+        one = review(state='APPROVED', head=HEAD, rid=1, at=T1)
+        two = review(state='APPROVED', head=OLD, rid=2, at=T1)
+        [action] = actions([pull(reviews=[one, two])])
+        self.assertEqual((action.reason, action.approval_ids), (M.Reason.AMBIGUOUS_REVIEW, ()))
+        self.assertEqual(action.to_json()['ambiguous_review_ids'], [1, 2])
+
+    def test_tied_change_requests_on_different_heads_both_remain_visible(self):
+        one = review(head=OLD, rid=1, at=T1)
+        two = review(head=HEAD, rid=2, at=T1)
+        [action] = actions([pull(reviews=[one, two])])
+        self.assertEqual(action.reason, M.Reason.AMBIGUOUS_REVIEW)
+        self.assertEqual([r['state'] for r in action.to_json()['ambiguous_reviews']],
+                         ['CHANGES_REQUESTED', 'CHANGES_REQUESTED'])
+        self.assertEqual([r['head'] for r in action.to_json()['ambiguous_reviews']], [OLD, HEAD])
+        self.assertFalse(action.actionable)
+
+    def test_other_accounts_approval_remains_visible_beside_ambiguous_state(self):
+        one = review('alice', state='APPROVED', head=HEAD, rid=1, at=T1)
+        two = review('alice', state='DISMISSED', head=HEAD, rid=2, at=T1)
+        approved = review('bob', state='APPROVED', head=HEAD, rid=3, at=T1)
+        for requests in ({}, {'requested_reviewers':['alice'], 'requested_teams':['qa']}):
+            with self.subTest(requests=requests):
+                result = actions([pull(reviews=[one, two, approved], **requests)])
+                by_reason = {a.reason: a for a in result}
+                self.assertEqual((by_reason[M.Reason.AMBIGUOUS_REVIEW].approval_ids,
+                                  by_reason[M.Reason.APPROVED].approval_ids), ((3,), (3,)))
+                self.assertEqual(by_reason[M.Reason.AMBIGUOUS_REVIEW].to_json()['ambiguous_review_ids'], [1, 2])
+                self.assertFalse(any(a.assignment is M.Assignment.PROPOSED_USER for a in result))
+                if requests:
+                    existing = [a for a in result if a.reason is M.Reason.EXISTING_REQUEST]
+                    self.assertEqual({a.assignment for a in existing},
+                                     {M.Assignment.EXISTING_USER, M.Assignment.EXISTING_TEAM})
+        actual_cr = review('carol', rid=4, at=T2)
+        result = actions([pull(reviews=[one, two, approved, actual_cr])])
+        self.assertNotIn(M.Reason.APPROVED, {a.reason for a in result})
+        owner_action = next(a for a in result if a.reason is M.Reason.AWAITING_OWNER)
+        self.assertEqual(owner_action.review_ids, (4,))
+
+    def test_older_tie_does_not_hide_an_unambiguous_latest_approval(self):
+        cr = review(at=T1)
+        tied = review(state='APPROVED', head=HEAD, rid=2, at=T1)
+        latest = review(state='APPROVED', head=HEAD, rid=3, at=T2)
         result = actions([pull(reviews=[cr, tied, latest])])
-        self.assertEqual((result[0].reason, result[0].review_ids),
-                         (M.Reason.CHANGED_HEAD_CR, (1,)))
+        self.assertEqual((result[0].reason, result[0].approval_ids),
+                         (M.Reason.APPROVED, (3,)))
 
     def test_submitted_time_not_id_preserves_later_cr_owner(self):
         later = review("bob", rid=1, at=T2)
@@ -263,69 +389,34 @@ class RoutingScenarios(unittest.TestCase):
         self.assertEqual((result[0].reason, result[0].account, result[0].review_ids),
                          (M.Reason.CHANGED_HEAD_CR, "bob", (1,)))
 
-    def test_multiple_unresolved_crs_of_same_account_make_one_owned_action(self):
-        crs = [signed_request(keeper="one", rid=1), signed_request(keeper="two", rid=2, at=T2)]
+    def test_latest_cr_of_same_account_is_the_only_outstanding_one(self):
+        crs = [review(rid=1), review(rid=2, at=T2)]
         result = actions([pull(reviews=crs)])
         self.assertEqual([(a.reason, a.account, a.review_ids) for a in result],
-                         [(M.Reason.CHANGED_HEAD_CR, "alice", (1, 2))])
-        current = signed_request(keeper="two", rid=2, at=T2, head=HEAD)
+                         [(M.Reason.CHANGED_HEAD_CR, "alice", (2,))])
+        current = review(rid=2, at=T2, head=HEAD)
         result = actions([pull(reviews=[crs[0], current])])
         self.assertEqual([(a.reason, a.account, a.review_ids) for a in result],
-                         [(M.Reason.AWAITING_AUTHOR, "author", (1, 2))])
-        result = actions([pull(reviews=crs + [replacement(request=1, rid=3, at=T3)])])
+                         [(M.Reason.AWAITING_AUTHOR, "author", (2,))])
+        result = actions([pull(reviews=crs + [review(state='APPROVED', head=HEAD, rid=3, at=T3)])])
         self.assertEqual([(a.reason, a.account, a.review_ids) for a in result],
-                         [(M.Reason.CHANGED_HEAD_CR, "alice", (2,))])
-
-    def test_same_head_cr_structured_failure_remains_author_action(self):
-        formal = {**blocker(state="FAIL"), "kind": "review"}
-        result = actions([pull(reviews=[review(head=HEAD)], blockers=[formal])])
-        self.assertEqual(len(result), 1)
-        self.assertEqual((result[0].reason, result[0].account), (M.Reason.AWAITING_AUTHOR, "author"))
-        self.assertEqual(result[0].blockers[0].record_id, 1)
-
-    def test_separate_nonformal_blocker_retains_owner_action_beside_same_head_cr(self):
-        comment = {**blocker(state="FAIL"), "kind": "comment"}
-        result = actions([pull(reviews=[review(head=HEAD)], blockers=[comment])])
-        self.assertEqual({a.reason for a in result}, {M.Reason.AWAITING_OWNER, M.Reason.AWAITING_AUTHOR})
+                         [(M.Reason.APPROVED, None, ())])
 
     def test_cr_owner_outside_pool_stays_owned_and_is_not_reassigned(self):
         result = actions([pull(reviews=[review("outside")])])
         self.assertEqual((result[0].reason, result[0].account, result[0].actionable),
-                         (M.Reason.AWAITING_OWNER, "outside", False))
+                         (M.Reason.AWAITING_OWNER, None, False))
+        self.assertEqual(result[0].to_json()['review_authors'],
+                         [{'account_id':uid('outside'), 'observed_login':'outside'}])
 
-    def test_admission_prevents_new_request_but_keeps_explicit_requests(self):
-        result = actions([pull(1, admission=True),
-                          pull(2, admission=True, requested_reviewers=["bob"], requested_teams=["qa"]),
-                          pull(3, admission=True, reviews=[review()])])
-        self.assertFalse(any(a.assignment is M.Assignment.PROPOSED_USER for a in result))
+    def test_approval_keeps_existing_requests_and_other_accounts_cr(self):
+        approved = review("bob", state="APPROVED", head=HEAD, rid=2)
+        result = actions([pull(1, reviews=[approved]),
+                          pull(2, reviews=[approved], requested_reviewers=["bob"], requested_teams=["qa"]),
+                          pull(3, reviews=[review(), approved])])
         self.assertEqual({(a.identity.number, a.reason) for a in result},
-                         {(1, M.Reason.ADMITTED), (2, M.Reason.EXISTING_REQUEST),
-                          (3, M.Reason.AWAITING_OWNER)})
-
-    def test_exact_head_structured_refusal_awaits_owner_without_inferred_resolution(self):
-        result = actions([pull(reviews=[review(), review("bob", state="APPROVED", head=HEAD, rid=2)],
-                               blockers=[blocker()])])
-        self.assertEqual(len(result), 1)
-        self.assertEqual((result[0].reason, result[0].account, result[0].actionable),
-                         (M.Reason.AWAITING_OWNER, "alice", False))
-        self.assertEqual(result[0].review_ids, (1,))
-
-    def test_structured_fail_owner_can_rereview_when_explicitly_requested(self):
-        result = actions([pull(requested_reviewers=["alice"], blockers=[blocker(state="FAIL")])])
-        self.assertEqual(len(result), 1)
-        self.assertEqual(result[0].reason, M.Reason.EXISTING_REQUEST)
-        self.assertTrue(result[0].actionable)
-        self.assertEqual(result[0].blockers[0].state, M.BlockerState.FAIL)
-
-    def test_multiple_blockers_same_account_form_one_owned_action(self):
-        result = actions([pull(blockers=[blocker(rid=1), blocker(rid=2)])])
-        self.assertEqual(len(result), 1)
-        self.assertEqual(len(result[0].blockers), 2)
-
-    def test_missing_blocker_identity_cannot_be_assigned_to_an_unrelated_account(self):
-        result = actions([pull(blockers=[blocker(actor=None)])])
-        self.assertEqual((result[0].reason, result[0].account), (M.Reason.AWAITING_OWNER, None))
-        self.assertFalse(result[0].actionable)
+                         {(1, M.Reason.APPROVED), (2, M.Reason.EXISTING_REQUEST), (2, M.Reason.APPROVED),
+                          (3, M.Reason.CHANGED_HEAD_CR)})
 
     def test_ownership_proposals_contribute_to_first_review_load(self):
         result = actions([pull(1, reviews=[review("alice")]), pull(2)])
@@ -353,6 +444,16 @@ class RoutingScenarios(unittest.TestCase):
         self.assertEqual(M.plan(rows, ["alice", "bob"]).to_json(),
                          M.plan(list(reversed(rows)), ["alice", "bob"]).to_json())
 
+    def test_changed_cr_first_then_oldest_new_or_rereview(self):
+        older = pull(1, created_at=T1, reviews=[review(state="COMMENTED")])
+        newer = pull(2, created_at=T2)
+        changed_cr = pull(3, created_at=T3, reviews=[review("bob")])
+        result = M.plan([newer, changed_cr, older], ["alice", "bob"])
+        self.assertEqual([(a.identity.number, a.reason) for a in result.actions], [
+            (3, M.Reason.CHANGED_HEAD_CR),
+            (1, M.Reason.REVIEW_NEEDED),
+            (2, M.Reason.FIRST_REVIEW)])
+
     def test_inputs_are_not_mutated_and_returned_identity_is_frozen(self):
         raw = pull(stack={"number": 5})
         original = copy.deepcopy(raw)
@@ -362,13 +463,12 @@ class RoutingScenarios(unittest.TestCase):
         self.assertEqual(result.actions[0].to_json()["stack"], {"number": 5})
 
     def test_unknown_or_malformed_typed_inputs_fail_instead_of_empty_work(self):
-        bad_rows = [pull(state="merged"), pull(draft="false"), pull(admission=1),
+        bad_rows = [pull(state="merged"), pull(draft="false"),
                     pull(reviews=[review(state="FUTURE_STATE")]), pull(head="bad"),
-                    pull(blockers=[blocker(state="PASS")]), pull(requested_reviewers="alice"),
-                    pull(reviews=[review(actor="")]), pull(created_at="yesterday"),
-                    pull(blockers=[{"state": "HOLD"}])]
+                    pull(requested_reviewers="alice"),
+                    pull(reviews=[review(actor="")]), pull(created_at="yesterday")]
         missing = pull()
-        missing.pop("admission")
+        missing.pop("reviews")
         bad_rows.append(missing)
         for row in bad_rows:
             with self.subTest(row=row), self.assertRaises(ValueError):

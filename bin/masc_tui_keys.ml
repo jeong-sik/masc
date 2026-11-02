@@ -359,7 +359,7 @@ let keeper_actions =
   ; b Act "g" "yolo / auto" ~help:"toggle yolo / auto tool approval"
   ; b Act "p / w" "pause / wake"
   ; b Act "s" "shutdown"
-  ; b Act "e" "settings"
+  ; b Act "e/E" "settings TOML/JSON"
   ; b Act "f" "files" ~help:"file changes this keeper wrote"
   ; b Act "a" "new" ~help:"new keeper"
   ; b Act "x" "delete" ~help:"stop and permanently remove the confirmed keeper"
@@ -519,7 +519,8 @@ let for_surface = function
           ~help:"switch between quota and Keeper usage, and engine telemetry"
       ; b Navigate "f" "account" ~help:"search quota accounts; selection follows Plan and Trend"
       ; b Navigate "a" "all accounts" ~help:"clear the quota account selection"
-      ; b Navigate "x" "hide/show unusable" ~help:"show or hide the accounts that cannot be used now"
+      ; b Navigate "x" "toggle limit group"
+          ~help:"on Plan: show or hide the group for reports at limit or observed exhaustion"
       ; b Navigate "v" "Plan / Trend / Keepers" ~help:"cycle the Usage reading"
       ; b Navigate "w" "1d / 7d / 14d"
           ~help:"on Usage: cycle the exact UTC day window for provider report history"
@@ -740,7 +741,13 @@ let for_surface = function
       ; board_vote_key
       ; board_reply_key
       ; b Navigate "1–9" "attachment" ~detail:Detail_only
-          ~help:"read a stored File/Score here; u:source m:Markdown h:HTML y:copy s:save r:retry Esc:post. Other media use their existing action."
+          ~help:"preview a stored image or read a stored File/Score here; other media use their existing action"
+      ; b Navigate "O" "original image" ~detail:Detail_only
+          ~help:"after selecting a stored image, read it and open or save its verified original"
+      ; b Navigate "Ctrl-O" "diagram" ~detail:Detail_only
+          ~help:"preview the selected post or comment's Mermaid diagram"
+      ; b Navigate ", / ." "diagram choice" ~detail:Detail_only
+          ~help:"choose the previous or next Mermaid diagram in the selected post or comment"
       (* Three keys below answer only while a post is open, and the table said
          so in prose the footer cannot read. The list footer named them and
          the dispatcher refused all three there: [[ / ]] steps the open post
@@ -1734,7 +1741,9 @@ let footer_hints_board_read ~focus_posts ~focus_comments ~full_history
         row. Measured at 140 cells: [o] and this hint ride the same drop
         wave as [c], [Y], [r] and [Tab] — the row is over budget long
         before this key existed. *)
-     @ (if has_attachments then [ b Navigate "1-9" "open" ] else [])
+     @ (if has_attachments then [ b Navigate "1-9" "open"; b Navigate "O" "original image" ] else [])
+     @ (if focus_posts then [] else
+          [b Navigate "Ctrl-O" "diagram"; b Navigate ",/." "choose diagram"])
      @ [ b Navigate "o" (if full_history then "newest 20" else "all comments") ]
      @ [ vote_key
        ; board_reply_key
@@ -1947,12 +1956,13 @@ let reference_notes : surface -> string list = function
       (* The last paragraph also explains the Runtime catalogue, Overview and
          Board readers. It reads under Keepers because the reference has
          carried it there. *)
-      [ "Keeper settings `e` reads a fresh snapshot asynchronously before opening the\n\
-         external editor. After the editor returns, workspace rechecking and the guarded\n\
-         save also run asynchronously; navigation stays available while the receipt is\n\
-         pending. Repeated `e` shares that pending save. The footer retains progress or\n\
-         failure for the selected Keeper, and a late receipt cannot refresh another Keeper."
-      ; "After a refusal or unconfirmed result, `e` reads current settings and restores\n\
+      [ "Keeper settings `e` opens TOML and `E` opens JSON in the external editor.\n\
+         Both read a fresh snapshot asynchronously and use the same guarded save.\n\
+         In TOML, remove an assignment and list `max_context_override` or\n\
+         `remote_endpoint` in `reset_fields` to clear it; an omitted field is unchanged.\n\
+         Navigation stays available while the receipt is pending. Repeated edit keys\n\
+         share that save. A late receipt cannot refresh another Keeper."
+      ; "After a refusal or unconfirmed result, `e` or `E` reads current settings and restores\n\
          only your changed values for review in the editor. Untouched fields use current\n\
          values. The old revision and context-shrink confirmation are not reused; saving\n\
          requires the new editor roundtrip. Original input and receipts stay with their\n\
@@ -2164,8 +2174,10 @@ let keeper_detail_tab_bindings (tab : Masc_tui_types.keeper_detail_tab) =
       ; b Meta "R" "refresh"
       ]
   | Detail_instructions ->
-      [ b Act "e" "edit JSON in $EDITOR"
-          ~help:"the settings form; only changed fields are sent"
+      [ b Act "e" "edit TOML in $EDITOR"
+          ~help:"multiline Keeper instructions; only changed fields are sent"
+      ; b Act "E" "edit JSON in $EDITOR"
+          ~help:"the same settings and guarded save in JSON"
       ]
   | Detail_identity ->
       [ (* Arrows first: the digits only reach the first nine rows and the
@@ -2233,7 +2245,7 @@ let key_atoms key =
 
 (* The keys a detail tab's own arms answer before the Keeper controls do.
    Sandbox takes [s] for the remote_ssh backend and [o] for its container
-   logs; Channels takes [j/k] and [e]; Settings takes [e]. *)
+   logs; Channels takes [j/k] and [e/E]; Settings takes [e/E]. *)
 let keeper_detail_tab_taken_keys tab =
   List.concat_map
     (fun binding -> key_atoms binding.key)

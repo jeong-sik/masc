@@ -34,7 +34,45 @@ type in_flight = {
 
 type t
 
-val create : unit -> t
+val create : base_path:string -> unit -> t
+(** A fresh owner for an explicitly resolved workspace namespace. Production
+    callers share {!for_base_path}; isolated callers can own a fresh table. *)
+
+val for_base_path : string -> t
+(** The existing process-local workspace registry, shared by server callbacks
+    and identity-tool publishers. No filesystem or network operation occurs. *)
+
+type scope = private { base_path : string; keeper : string; provider_id : string }
+type attachment
+type catalog_publication
+type 'a publication = Published of 'a | Publication_superseded | Publication_failed of string
+
+val capture_attachment : t -> keeper:string -> provider_id:string -> attachment
+(** Capture before reading credentials or beginning asynchronous work. This is
+    a publication precondition, not permission to invoke a remote tool. *)
+val attachment_scope : attachment -> scope
+val catalog_scope : catalog_publication -> scope
+val attachment_current : attachment -> bool
+val begin_catalog : attachment -> catalog_publication option
+(** [None] means the captured attachment is no longer current. A newer catalog
+    request supersedes earlier catalog publishers in the same scope. *)
+val publish_catalog :
+  catalog_publication -> write:(unit -> (unit, string) result) -> unit publication
+val publish_renewal :
+  attachment -> write:(unit -> (unit, string) result) -> attachment publication
+(** Validate the captured credential revision, invalidate borrowed observations
+    before attempting writes, and return the resulting revision on success.
+    A failed write can have changed storage; no rollback is implied. *)
+val retire_scope :
+  t -> keeper:string -> provider_id:string ->
+  local_delete:(unit -> ('a, string) result) -> ('a, string) result
+(** Invalidate pending starts, awaiting/admitted callbacks and borrowed
+    credential/catalog publishers before [local_delete], even if deletion
+    fails. Serialize local deletion with publication. New explicit work after
+    this boundary can capture the new scope. Provider revocation belongs outside
+    this function. All publication/deletion callbacks must be short local I/O,
+    must not call back into this owner and must not perform network operations.
+    This registry does not coordinate separate processes or undo remote effects. *)
 
 type admission
 (** Where one start request stands among the starts this table has admitted.
@@ -77,18 +115,36 @@ val waiting : t -> now:float -> int
 
 (** A non-secret handle, generated independently from callback state. *)
 type completion = Tools_discovered of int | Credentials_published_discovery_failed
+type credential_write = Refresh_token | Access_token | Expiry
+type credential_publication = private {
+  completed_writes : credential_write list;
+  interrupted_write : credential_write;
+}
+(** Earlier writes returned successfully. The interrupted write may also have
+    changed storage before returning an error or raising; no rollback is implied. *)
 type status = Awaiting_consent of float | Callback_admitted
-  | Completed of completion | Failed | Expired | Superseded
+  | Completed of completion | Failed
+  | Credential_publication_incomplete of credential_publication
+  | Expired | Superseded
 val status : t -> now:float -> attempt_id:string -> keeper:string -> provider_id:string -> status option
-(** [None] means unavailable in this process/scope, never inferred expiry. *)
-val while_admitted : t -> state:string -> (unit -> 'a) -> 'a option
-(** Run [f] only while the exchange echoed as [state] is still an admitted
-    callback, and keep the table locked for the whole of [f]: a newer start
-    for the same scope cannot supersede it until [f] returns, so a publication
-    that reaches its writes is never overtaken by a later attempt's writes.
-    [None] means the exchange was superseded (or never admitted) and [f] did
-    not run. [f] must be short and must not call back into this table; it is
-    for the credential writes, not for network discovery. *)
+(** [None] means unavailable in this process/scope, never inferred expiry.
+    Terminal metadata, including incomplete publication progress, is retired
+    when the next attempt for the same scope is remembered. It is not a
+    persistent credential journal and does not survive a server restart. *)
+val publish_credentials :
+  t -> state:string ->
+  write:(credential_write -> (unit, string) result) ->
+  attachment publication
+(** Run refresh-token, access-token and expiry writes in order, only for an
+    admitted callback. The table remains locked through the writes and failure
+    recording; a newer start cannot interleave its publication. An error records
+    [Credential_publication_incomplete] before returning it. An exception records
+    the same progress and is re-raised unchanged, including cancellation.
+    [Publication_superseded] means superseded or never admitted, and no write runs. [write] must
+    be short, must not call this table and must not perform network discovery. *)
 
-val finish : t -> state:string -> (completion, unit) result -> unit
-(** Only admitted callbacks can become terminal. Replay cannot replace a result. *)
+type settlement = Recorded | Not_admitted
+val finish : t -> state:string -> (completion, unit) result -> settlement
+(** Only admitted callbacks can become terminal. Replay cannot replace a result.
+    [Not_admitted] also prevents a late successful callback from claiming a
+    completed attachment after disconnect retired its scope. *)

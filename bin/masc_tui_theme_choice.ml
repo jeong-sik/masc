@@ -20,11 +20,8 @@ type entry =
    floor [Masc_tui_theme] lifts against, so the count counts the colours the
    lift would raise.
 
-   Whether it does raise them is a separate answer -- [tui] lift_colours, held
-   in [Masc_tui_theme]. This count does not consult it, because the count is a
-   property of the scheme and stays true either way: with the lift on these
-   are the colours it raises, with it off these are the colours left under the
-   floor. The screen that shows the count is what has to say which. *)
+   Whether a terminal can actually draw a lifted colour is a separate answer.
+   The count is a property of the scheme before adjustment. *)
 let text_floor = 4.5
 
 (* The colours a reader sees a meaning in. Not every ANSI slot -- a theme is
@@ -87,14 +84,10 @@ let entries () =
     sorted
 ;;
 
-(* A zero is a result, not the absence of one: every measured colour already
-   clears the floor without masc touching it. For a non-zero count the same
-   scheme has two honest readings, depending on whether the reader enabled
-   the lift. Keep that distinction beside the measurement so the chooser
-   cannot drift back to the ambiguous "none" / "3 of 7" pair. *)
-let contrast_status ~lift_on (entry : entry) =
+(* The count describes the scheme before adjustment; output capability and
+   the user's lift setting can change what is actually drawn. *)
+let contrast_status (entry : entry) =
   if entry.lifted = 0 then Printf.sprintf "native %d/%d" entry.measured entry.measured
-  else if lift_on then Printf.sprintf "lift %d/%d" entry.lifted entry.measured
   else Printf.sprintf "%d/%d low" entry.lifted entry.measured
 ;;
 

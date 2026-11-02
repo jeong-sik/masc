@@ -134,6 +134,20 @@ let close_sse_conn info =
          (Printexc.to_string exn));
     Sse.unregister_if_current info.session_id info.client_id)
 
+(* A workspace lifetime can end after the same MCP session has already opened
+   a successor connection. Retire only the connection that owned the lifetime. *)
+let stop_sse_conn_if_current info =
+  let rec remove () =
+    let current = Atomic.get sse_conn_by_session in
+    match SMap.find_opt info.session_id current with
+    | Some registered when registered == info ->
+      let next = SMap.remove info.session_id current in
+      if not (Atomic.compare_and_set sse_conn_by_session current next) then remove ()
+    | Some _ | None -> ()
+  in
+  remove ();
+  close_sse_conn info
+
 let stop_sse_session_impl ~clear_guard session_id =
   let info_opt = ref None in
   Atomic_util.update sse_conn_by_session (fun map ->

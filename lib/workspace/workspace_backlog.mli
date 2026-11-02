@@ -5,6 +5,37 @@
 val backlog_path : Workspace_utils_backend_setup.config -> string
 val backlog_lock_path : Workspace_utils_backend_setup.config -> string
 val backlog_recovery_path : Workspace_utils_backend_setup.config -> string
+
+module Task_id_map : Map.S with type key = string
+module Task_id_set : Set.S with type elt = string
+
+type prepared_backlog =
+  { backlog : Masc_domain.backlog
+  ; tasks_by_id : Masc_domain.task Task_id_map.t
+  ; active_assignees_by_task_id : string Task_id_map.t
+  ; priority_ordered_tasks : Masc_domain.task list
+  ; claimable_ordered_tasks : Masc_domain.task list
+  }
+(** Immutable derived index built once per decoded backlog snapshot and cached
+    alongside the canonical [backlog] record under the file's [(mtime, size)].
+    Eliminates repeated $O(T \log T)$ sorting and $O(T)$ linear scans across
+    [keeper_tasks_list], [claim_next_r], and [claim_task_r]. *)
+
+val compare_task_priority_order : Masc_domain.task -> Masc_domain.task -> int
+val prepare_backlog : Masc_domain.backlog -> prepared_backlog
+val find_task_in_backlog_opt :
+  Masc_domain.backlog -> string -> Masc_domain.task option
+
+val read_prepared_backlog_r :
+  Workspace_utils_backend_setup.config -> (prepared_backlog, string) result
+
+val invalidate_backlog_cache : Workspace_utils_backend_setup.config -> unit
+(** Discard this process's cached primary snapshot and prevent older in-flight
+    cache misses from registering after the invalidation. *)
+
+(** Test seam: runs after a cache miss is decoded, before registration. *)
+val before_backlog_cache_registration_hook : (unit -> unit) Atomic.t
+
 val read_backlog_r : Workspace_utils_backend_setup.config ->
            (Masc_domain.backlog, string) result
 (** Strict authoritative read for code that may make a durable decision or
@@ -17,6 +48,13 @@ type backlog_observation = {
   observed_backlog : Masc_domain.backlog;
   recovered_from : backlog_recovery option;
 }
+type prepared_backlog_observation = {
+  observed_prepared : prepared_backlog;
+  recovered_from : backlog_recovery option;
+}
+val read_prepared_backlog_observation_with_source_r :
+  Workspace_utils_backend_setup.config ->
+  (prepared_backlog_observation, string) result
 val read_backlog_observation_with_source_r :
   Workspace_utils_backend_setup.config -> (backlog_observation, string) result
 (** Read-only observation with explicit recovery provenance. Recovered data is

@@ -1126,7 +1126,6 @@ let render_themes (state : state) =
     max 0 (min state.theme_cursor (max 0 (List.length entries - 1)))
   in
   let scroll = max 0 (cursor - content_height + 1) in
-  let lift_on = Masc_tui_theme.lift_is_enabled () in
   let name_width = theme_name_width ~cols in
   box_top buf cols;
   box_line buf cols
@@ -1141,7 +1140,7 @@ let render_themes (state : state) =
     ("  " ^ fit_width (ui_text state ~ko:"테마" ~en:"theme") (name_width + 2) ^ " "
      ^ fit_width (ui_text state ~ko:"색상" ~en:"colours") 16 ^ "  "
      ^ fit_width (ui_text state ~ko:"배경" ~en:"page") 9 ^ " "
-     ^ fit_width (ui_text state ~ko:"대비" ~en:"contrast") 12)
+     ^ fit_width (ui_text state ~ko:"원래 대비" ~en:"raw contrast") 12)
   ;
   (* The key the way the footer spells it, then the three filters as the
      product's tab strip draws a choice: the one in force marked. It read
@@ -1150,8 +1149,7 @@ let render_themes (state : state) =
   let explanation =
     if cols >= 92 then
       "  ·  "
-      ^ (if lift_on then ui_text state ~ko:"원래 7/7=보정 없음 · 보정 N/7=N개 밝힘" ~en:"native 7/7=no lift · lift N/7=N raised"
-         else ui_text state ~ko:"원래 7/7=모두 통과 · 부족 N/7=4.5:1 미달" ~en:"native 7/7=all pass · N/7 low=below 4.5:1")
+      ^ ui_text state ~ko:"테마 값 기준 · 부족 N/7=4.5:1 미달" ~en:"scheme values · N/7 low=below 4.5:1"
     else ""
   in
   let filter_tag =
@@ -1188,9 +1186,8 @@ let render_themes (state : state) =
                        else ui_text state ~ko:"어두움" ~en:"dark") 9
           ^ " "
           ^ fit_width
-              (if state.ui_language = Lang_en then Theme_choice.contrast_status ~lift_on entry
+              (if state.ui_language = Lang_en then Theme_choice.contrast_status entry
                else if entry.lifted = 0 then Printf.sprintf "원래 %d/%d" entry.measured entry.measured
-               else if lift_on then Printf.sprintf "보정 %d/%d" entry.lifted entry.measured
                else Printf.sprintf "부족 %d/%d" entry.lifted entry.measured) 12
         in
         if index = cursor then box_line_selected buf cols (Masc_tui_theme.strip_sgr row)

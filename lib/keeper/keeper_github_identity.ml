@@ -741,7 +741,16 @@ let captured_tool_identity_of_files files =
   let* () = validate_names [] files in
   let* captured = capture_identity_contents
     ~hosts:(List.assoc_opt "hosts.yml" files) ~config:(List.assoc_opt "config.yml" files) in
-  if List.sort compare files <> List.sort compare captured.files
+  let compare_file_pair (name_a, body_a) (name_b, body_b) =
+    let cmp = String.compare name_a name_b in
+    if cmp <> 0 then cmp else String.compare body_a body_b
+  in
+  let equal_file_pair (name_a, body_a) (name_b, body_b) =
+    String.equal name_a name_b && String.equal body_a body_b
+  in
+  if not (List.equal equal_file_pair
+            (List.sort compare_file_pair files)
+            (List.sort compare_file_pair captured.files))
   then Error "GitHub identity snapshot differs from its canonical captured files"
   else Ok captured
 ;;

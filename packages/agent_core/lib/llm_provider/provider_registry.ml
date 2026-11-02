@@ -13,7 +13,7 @@ type entry = Provider_registry_state.entry =
   { name : string
   ; defaults : provider_defaults
   ; max_context : int option
-  ; capabilities : Capabilities.capabilities
+  ; capabilities : Capabilities.capabilities option
   ; is_available : unit -> bool
   }
 
@@ -32,12 +32,12 @@ let unregister t name = apply t (Provider_registry_state.Unregister name)
 let find t name = Provider_registry_state.find name (Atomic.get t)
 let all t = Provider_registry_state.all (Atomic.get t)
 let available t = all t |> List.filter (fun e -> e.is_available ())
-let find_capable t pred = all t |> List.filter (fun e -> pred e.capabilities)
+let find_capable t pred = all t |> List.filter (fun e -> Option.fold ~none:false ~some:pred e.capabilities)
 
 (* ── Default registry ─────────────────────────────────── *)
 
 let authentication_available = function
-  | Provider_declarations.No_auth | Caller_api_key -> true
+  | Catalog_snapshot.No_auth | Caller_api_key -> true
   | Api_key_env env | Setup_token_env env ->
     (match Cli_common_env.get env with
      | Some value -> String.trim value <> ""
@@ -147,18 +147,18 @@ let active_llama_endpoints () = Array.to_list (Atomic.get llama_endpoints_ref)
 
 let of_declarations declarations =
   let registry = create () in
-  List.iter (fun (entry : Provider_declarations.entry) ->
+  List.iter (fun (entry : Catalog_snapshot.entry) ->
     register registry
       { name=entry.id;
         defaults={kind=entry.kind;base_url=entry.base_url;request_path=entry.request_path;
-          requires_api_key=Provider_declarations.requires_api_key entry.authentication};
+          requires_api_key=Catalog_snapshot.requires_api_key entry.authentication};
         max_context=entry.max_context;capabilities=entry.capabilities;
         is_available=(fun () -> authentication_available entry.authentication) })
-    (Provider_declarations.entries declarations);
+    (Catalog_snapshot.entries declarations);
   registry
 ;;
 
-let default () = of_declarations (Provider_declarations.current ())
+let default () = of_declarations (Catalog_snapshot.current ())
 ;;
 
 let provider_name_of_config (config : Provider_config.t) =

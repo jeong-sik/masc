@@ -120,6 +120,11 @@ type reasoning_effort =
 
 val reasoning_effort_to_string : reasoning_effort -> string
 val reasoning_effort_of_string : string -> reasoning_effort option
+val reasoning_effort_of_requested : Llm_provider.Reasoning_effort.t -> reasoning_effort
+(** Exact translation of an explicit turn request to MSP's closed vocabulary.
+    No model or HTTP catalog participates. Callers [Option.map] this function:
+    an omitted effort stays omitted, while [None_] is the explicit [none] tier.
+    The selected Muse host owns admission and any refusal. *)
 
 type model_catalog_source =
   | Provider_catalog

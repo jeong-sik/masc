@@ -775,43 +775,48 @@ let p95_of_sorted (durations : int array) : int =
     let idx = min (n - 1) (int_of_float (Float.round (float_of_int n *. 0.95))) in
     durations.(idx)
 
+module String_map = Map.Make (String)
+
 let aggregate_tool_stats (entries : tool_call_entry list) : tool_stat list =
-  let tbl : (string, int list * int * int * float * string) Hashtbl.t =
-    Hashtbl.create 32
+  let by_tool =
+    List.fold_left
+      (fun acc (e : tool_call_entry) ->
+        let is_failure = entry_is_failure e in
+        match String_map.find_opt e.tool_name acc with
+        | None ->
+          let succ = if is_failure then 0 else 1 in
+          let fail = if is_failure then 1 else 0 in
+          String_map.add e.tool_name ([e.duration_ms], succ, fail, e.ts, e.ts_iso) acc
+        | Some (durations, succ, fail, max_ts, max_iso) ->
+          let succ' = if is_failure then succ else succ + 1 in
+          let fail' = if is_failure then fail + 1 else fail in
+          let (ts', iso') = if e.ts > max_ts then (e.ts, e.ts_iso) else (max_ts, max_iso) in
+          String_map.add e.tool_name (e.duration_ms :: durations, succ', fail', ts', iso') acc)
+      String_map.empty
+      entries
   in
-  List.iter (fun (e : tool_call_entry) ->
-    let is_failure = entry_is_failure e in
-    match Hashtbl.find_opt tbl e.tool_name with
-    | None ->
-      let succ = if is_failure then 0 else 1 in
-      let fail = if is_failure then 1 else 0 in
-      Hashtbl.replace tbl e.tool_name
-        ([e.duration_ms], succ, fail, e.ts, e.ts_iso)
-    | Some (durations, succ, fail, max_ts, max_iso) ->
-      let succ' = if is_failure then succ else succ + 1 in
-      let fail' = if is_failure then fail + 1 else fail in
-      let (ts', iso') = if e.ts > max_ts then (e.ts, e.ts_iso) else (max_ts, max_iso) in
-      Hashtbl.replace tbl e.tool_name
-        (e.duration_ms :: durations, succ', fail', ts', iso')
-  ) entries;
-  let stats = Hashtbl.fold (fun name (durations, succ, fail, _max_ts, last_iso) acc ->
-    let count = succ + fail in
-    let total_dur = List.fold_left (+) 0 durations in
-    let avg = if count > 0 then total_dur / count else 0 in
-    let sorted = Array.of_list durations in
-    Array.sort compare sorted;
-    let max_d = if Array.length sorted > 0 then sorted.(Array.length sorted - 1) else 0 in
-    { name;
-      call_count = count;
-      success_count = succ;
-      failure_count = fail;
-      avg_duration_ms = avg;
-      p95_duration_ms = p95_of_sorted sorted;
-      max_duration_ms = max_d;
-      last_used_at = last_iso;
-    } :: acc
-  ) tbl [] in
-  List.sort (fun (a : tool_stat) (b : tool_stat) -> compare b.call_count a.call_count) stats
+  let stats =
+    String_map.fold
+      (fun name (durations, succ, fail, _max_ts, last_iso) acc ->
+        let count = succ + fail in
+        let total_dur = List.fold_left (+) 0 durations in
+        let avg = if count > 0 then total_dur / count else 0 in
+        let sorted = Array.of_list durations in
+        Array.sort Int.compare sorted;
+        let max_d = if Array.length sorted > 0 then sorted.(Array.length sorted - 1) else 0 in
+        { name;
+          call_count = count;
+          success_count = succ;
+          failure_count = fail;
+          avg_duration_ms = avg;
+          p95_duration_ms = p95_of_sorted sorted;
+          max_duration_ms = max_d;
+          last_used_at = last_iso;
+        } :: acc)
+      by_tool
+      []
+  in
+  List.sort (fun (a : tool_stat) (b : tool_stat) -> Int.compare b.call_count a.call_count) stats
 
 (** Truncate a Unix timestamp to the start of its UTC hour. *)
 let hour_start_iso (ts : float) : string =
@@ -820,18 +825,20 @@ let hour_start_iso (ts : float) : string =
     (t.tm_year + 1900) (t.tm_mon + 1) t.tm_mday t.tm_hour
 
 let hourly_timeline (entries : tool_call_entry list) : hourly_bucket list =
-  let tbl : (string, int * int) Hashtbl.t = Hashtbl.create 24 in
-  List.iter (fun (e : tool_call_entry) ->
-    let hour = hour_start_iso e.ts in
-    let is_err = entry_is_failure e in
-    match Hashtbl.find_opt tbl hour with
-    | None -> Hashtbl.replace tbl hour (1, if is_err then 1 else 0)
-    | Some (c, errs) -> Hashtbl.replace tbl hour (c + 1, errs + (if is_err then 1 else 0))
-  ) entries;
-  let buckets = Hashtbl.fold (fun hour (call_count, error_count) acc ->
-    { hour; call_count; error_count } :: acc
-  ) tbl [] in
-  List.sort (fun a b -> String.compare a.hour b.hour) buckets
+  let by_hour =
+    List.fold_left
+      (fun acc (e : tool_call_entry) ->
+        let hour = hour_start_iso e.ts in
+        let is_err = entry_is_failure e in
+        match String_map.find_opt hour acc with
+        | None -> String_map.add hour (1, if is_err then 1 else 0) acc
+        | Some (c, errs) ->
+          String_map.add hour (c + 1, errs + (if is_err then 1 else 0)) acc)
+      String_map.empty
+      entries
+  in
+  String_map.bindings by_hour
+  |> List.map (fun (hour, (call_count, error_count)) -> { hour; call_count; error_count })
 
 let tool_stat_to_json (s : tool_stat) : Yojson.Safe.t =
   `Assoc [

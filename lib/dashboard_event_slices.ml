@@ -24,17 +24,20 @@ type entry = {
   event_type : string;  (** the [type] field the server puts on the wire *)
   slice : string;  (** the subscription slice it is delivered on *)
   whole_projection : bool;
-      (** [true] when the event carries a whole projection and the payload can
-          be dropped once the name is known; [false] for a delta, which a
-          reader has to apply. *)
+      (** [true] for a snapshot-family event. Some such events are compact
+          invalidations rather than a whole projection. A reader using the
+          type only as a change signal can drop its payload; a reader applying
+          data must inspect it. [false] denotes a delta. *)
 }
 
 (* "namespace_truth_snapshot" was delivered here alongside the canonical name
    while both were broadcast. Only one is now (#27664). *)
+let execution_snapshot_type = "execution_snapshot"
+
 let entries =
   [
     { event_type = "project_snapshot"; slice = "namespace"; whole_projection = true };
-    { event_type = "execution_snapshot"; slice = "execution"; whole_projection = true };
+    { event_type = execution_snapshot_type; slice = "execution"; whole_projection = true };
     { event_type = "operator_snapshot"; slice = "operator"; whole_projection = true };
     { event_type = "operator_digest"; slice = "operator"; whole_projection = true };
     { event_type = "transport_health_snapshot"; slice = "transport"; whole_projection = true };
@@ -52,5 +55,5 @@ let carries_whole_projection event_type =
   | Some entry -> entry.whole_projection
   | None -> false
 
-let slices = List.sort_uniq compare (List.map (fun entry -> entry.slice) entries)
+let slices = List.sort_uniq String.compare (List.map (fun entry -> entry.slice) entries)
 let valid_slice slice = List.mem slice slices

@@ -1,0 +1,22 @@
+2026-11-01T07:28:33.3603800Z 95fc86deba4db4c1bc2d17f5d3c3253f7626475a
+2026-11-01T07:28:35.4431996Z [command]/usr/bin/git log -1 --format=%H
+2026-11-01T07:28:35.4456589Z 95fc86deba4db4c1bc2d17f5d3c3253f7626475a
+2026-11-01T07:29:30.7459927Z   TARGET_SUITES: test_keeper_codex_completion_evidence
+2026-11-01T07:29:30.7549976Z   TARGET_SUITES: test_keeper_codex_completion_evidence
+2026-11-01T07:29:30.7635771Z [targeted] EIO_BACKEND=<unset> timeout=600s per suite
+2026-11-01T07:29:30.7657063Z [targeted] @runtest-test_keeper_codex_completion_evidence: start 2026-11-01T07:29:30Z (dune alias)
+2026-11-01T07:36:49.9686285Z   [FAIL]        completion evidence                 0   completion evidence w...
+2026-11-01T07:36:51.9945409Z   [FAIL]        completion evidence                 1   native Start preserve...
+2026-11-01T07:36:54.0182639Z   [FAIL]        completion evidence                 2   native Start preserve...
+2026-11-01T07:36:54.0196287Z   [OK]          completion evidence                 3   projection refusal pr...
+2026-11-01T07:36:54.0200252Z FAIL Codex receives the exact full evidence, despite a tiny capacity
+2026-11-01T07:36:54.0200710Z    Expected: `true'
+2026-11-01T07:36:54.0200950Z    Received: `false'
+2026-11-01T07:36:54.0206499Z FAIL the native request invents no Keeper unread observation
+2026-11-01T07:36:54.0206731Z    Expected: `false'
+2026-11-01T07:36:54.0206891Z    Received: `true'
+2026-11-01T07:36:54.0216629Z FAIL the native request invents no Keeper unread observation
+2026-11-01T07:36:54.0216928Z    Expected: `false'
+2026-11-01T07:36:54.0217106Z    Received: `true'
+2026-11-01T07:36:54.0225357Z 3 failures! in 4.056s. 4 tests run.
+2026-11-01T07:36:54.2186761Z [targeted] @runtest-test_keeper_codex_completion_evidence: FAIL exit 1 in 444s

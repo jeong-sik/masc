@@ -1,14 +1,13 @@
 (** Read-only runtime provider bindings. *)
 
-module PC = Llm_provider.Provider_catalog
 module PR = Llm_provider.Provider_registry
 module PConfig = Llm_provider.Provider_config
-module PD = Llm_provider.Provider_declarations
+module PD = Llm_provider.Catalog_snapshot
 
 type provider_kind = PConfig.provider_kind
 type capabilities = Llm_provider.Capabilities.capabilities
 
-type auth =
+type auth = PConfig.provider_authentication =
   | No_auth
   | Api_key
   | Setup_token
@@ -24,7 +23,7 @@ type t =
   ; default_model : string option
   ; discovery_timeout_s : float option
   ; max_context : int option
-  ; capabilities : capabilities
+  ; capabilities : capabilities option
   ; available : bool
   ; credential_scope : string option
   ; declarations : PD.t
@@ -64,29 +63,9 @@ let find_in_declarations declarations label =
 let all () = all_from_declarations (PD.current ())
 let find label = find_in_declarations (PD.current ()) label
 
-let find_catalog label =
-  match PC.global () with
-  | None -> None
-  | Some providers ->
-    (match PD.of_catalogs ~models:None ~providers:(Some providers) with
-     | Ok declarations -> find_in_declarations declarations label
-     | Error error -> raise (PD.Invalid_declarations error))
-;;
-
-let binding_for_provider_config (cfg : PConfig.t) = Option.bind cfg.provider_id find
-
-let canonical_explicit_provider_id (cfg : PConfig.t) =
+let provider_id_of_provider_config (cfg : PConfig.t) =
   match cfg.provider_id with
-  | Some provider_id ->
-    (match find provider_id with
-     | Some binding -> Some binding.id
-     | None -> Some (normalize provider_id))
-  | None -> None
-;;
-
-let provider_id_of_provider_config cfg =
-  match canonical_explicit_provider_id cfg with
-  | Some provider_id -> provider_id
+  | Some provider_id -> normalize provider_id
   | None -> PConfig.string_of_provider_kind cfg.kind
 ;;
 
@@ -118,10 +97,8 @@ let to_provider_config ?model binding =
     (fun model_id ->
        let request_path = trim_non_empty binding.request_path in
        let max_context = binding.max_context in
-       let policy = match PD.request_policy binding.declarations
-           ~provider_id:binding.id ~model_id with
-         | Some policy -> policy
-         | None -> invalid_arg "runtime binding must belong to its admitted declarations" in
+       let policy = Llm_provider.Capabilities.resolve_snapshot_request_policy ~snapshot:binding.declarations ~wire:binding.kind
+           ~provider_id:binding.id ~model_id in
        PConfig.make
          ~kind:binding.kind
          ~provider_id:binding.id
@@ -130,6 +107,7 @@ let to_provider_config ?model binding =
          ?request_path
          ?max_context
          ()
-       |> PConfig.with_request_policy policy)
+       |> PConfig.with_binding_policy ~authentication:binding.auth
+            ~credential_scope:binding.credential_scope policy)
     (resolve_model binding ~requested_model:model)
 ;;

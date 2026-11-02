@@ -72,6 +72,7 @@ let waiting ?(state = Model.Keeper_waiting_blocked) ?(items = []) name : Decode.
 let approval name : Decode.keeper_tool_approval =
   { kta_keeper = name
   ; kta_tool_call_id = "call-1"
+  ; kta_approval_id = "approval-call-1"
   ; kta_tool = "Execute"
   ; kta_args = "{}"
   ; kta_question = "May I?"

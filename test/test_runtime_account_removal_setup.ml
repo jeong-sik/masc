@@ -76,7 +76,7 @@ let contains ~sub text =
 let write_file path content = Out_channel.with_open_bin path (fun oc -> output_string oc content)
 
 let with_config f =
-  let previous = Llm_provider.Model_catalog.global () in
+  let previous = Llm_provider.Catalog_snapshot.current () in
   let catalog_path = Filename.temp_file "account-removal-setup-models" ".toml" in
   let snapshot = Runtime.For_testing.snapshot () in
   let dir = Filename.temp_dir "account-removal-setup" "" in
@@ -84,16 +84,14 @@ let with_config f =
   Fun.protect
     ~finally:(fun () ->
       Runtime.For_testing.restore snapshot;
-      (match previous with
-       | Some catalog -> Llm_provider.Model_catalog.set_global catalog
-       | None -> Llm_provider.Model_catalog.clear_global ());
+      (Llm_provider.Catalog_snapshot.publish previous);
       try Sys.remove catalog_path with
       | Sys_error _ -> ())
     (fun () ->
        write_file catalog_path model_catalog;
        (match Llm_provider.Model_catalog.load_file catalog_path with
         | Error detail -> failf "the test model catalog must load: %s" detail
-        | Ok catalog -> Llm_provider.Model_catalog.set_global catalog);
+        | Ok catalog -> (Llm_provider.Catalog_snapshot.publish (Masc_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None))));
        write_file path fixture;
        match Runtime.init_default ~config_path:path with
        | Error detail -> failf "the fixture runtime must initialize: %s" detail

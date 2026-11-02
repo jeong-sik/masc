@@ -293,14 +293,15 @@ let validate_projected_thought_signatures (messages : message list) =
     messages
 ;;
 
+module String_map = Map.Make (String)
+
 let gemini_tool_signatures_of_blocks blocks =
-  let tbl = Hashtbl.create 8 in
-  List.iter
-    (function
+  List.fold_left
+    (fun acc -> function
       | RedactedThinking data ->
         (match gemini_thought_signature_of_redacted data with
-         | Some (tool_use_id, signature) -> Hashtbl.replace tbl tool_use_id signature
-         | None -> ())
+         | Some (tool_use_id, signature) -> String_map.add tool_use_id signature acc
+         | None -> acc)
       | Text _
       | Thinking _
       | ReasoningDetails _
@@ -308,9 +309,9 @@ let gemini_tool_signatures_of_blocks blocks =
       | ToolResult _
       | Image _
       | Document _
-      | Audio _ -> ())
-    blocks;
-  tbl
+      | Audio _ -> acc)
+    String_map.empty
+    blocks
 ;;
 
 (* ── Content block -> Gemini part ───────────────────── *)
@@ -382,7 +383,7 @@ let part_of_content_block tool_signatures (block, tool_result_name) =
       [ "functionCall", `Assoc [ "id", `String id; "name", `String name; "args", input ] ]
     in
     let fields =
-      match Hashtbl.find_opt tool_signatures id with
+      match String_map.find_opt id tool_signatures with
       | Some signature -> ("thoughtSignature", `String signature) :: fields
       | None -> fields
     in
@@ -773,7 +774,8 @@ let build_request_artifact
   let text_response_format =
     match config.response_format with
     | Types.JsonSchema schema ->
-      Some (`Assoc [ "mimeType", `String "APPLICATION_JSON"; "schema", schema ])
+      Some (`Assoc [ "mimeType", `String "APPLICATION_JSON"
+                  ; "schema", Types.json_schema_domain schema ])
     | Types.JsonMode -> Some (`Assoc [ "mimeType", `String "APPLICATION_JSON" ])
     | Types.Off -> None
   in
@@ -928,8 +930,13 @@ let parse_response json =
         content
     in
     let stop_reason = stop_reason_of_finish_reason ~has_tool_use finish_reason in
+    let um = json |> member "usageMetadata" in
+    let raw_cache_read =
+      if um = `Null
+      then None
+      else um |> member "cachedContentTokenCount" |> to_int_option
+    in
     let usage =
-      let um = json |> member "usageMetadata" in
       if um = `Null
       then None
       else
@@ -937,14 +944,18 @@ let parse_response json =
           { input_tokens = Cli_common_json.member_int "promptTokenCount" um
           ; output_tokens = Cli_common_json.member_int "candidatesTokenCount" um
           ; cache_creation_input_tokens = 0
-          ; cache_read_input_tokens =
-              Cli_common_json.member_int "cachedContentTokenCount" um
+          ; cache_read_input_tokens = Option.value raw_cache_read ~default:0
           ; cost_usd = None
           }
     in
     let model_str = Cli_common_json.member_str "modelVersion" json in
     { id = ""; model = model_str; stop_reason; content; usage
-    ; telemetry = Some (Types.with_reported_model ~model:model_str None) }
+    ; telemetry =
+        Some
+          (Types.with_reported_cache_usage
+             ~cache_creation_input_tokens:None
+             ~cache_read_input_tokens:raw_cache_read
+             (Some (Types.with_reported_model ~model:model_str None))) }
   | err ->
     let msg =
       err

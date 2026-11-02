@@ -1,0 +1,47 @@
+{
+  "baseline": "b7c46bd1c0b00c92e4b3bed524912013d394940c",
+  "candidate": "a5e59a3573f51802d4c75c62adde4f397ea51382",
+  "pair_delta": [
+    "lib/fusion/fusion_official_client.ml",
+    "lib/fusion/fusion_official_client.mli",
+    "test/test_fusion_official_client_panel.ml"
+  ],
+  "complete_selected_fixture_and_runner_inputs_identical": {
+    "test/test_fusion_selected_timeout.ml": "f209c0bc732dd0ac0d6ced8f250e113e6719236b9a30e6e4ec5280e966a597c2",
+    "test/dune": "17a28ed85be21d9db0a32e6444582729b065a5a5e4ed1063f1a6fd7b0e589e97",
+    "test/deps/masc_test_deps.ml": "867eacb8cdfc177eb05804a06fcf6f8c162f25a49be8b64e969f6e6cdd86002b",
+    ".github/workflows/test.yml": "99286b2989de40ea72ad184b6c8335da64e9213e289e260a4afc16bd3bd8bb6d",
+    "scripts/ci-run-targeted-tests.sh": "7391426895132a2c027aea2d6c85bfcae18a038fd4e9640cc3c0b9fa66a8ca72"
+  },
+  "candidate_production_reference": "07854855a9c9665f68490c735738ce3bba3b7dc6",
+  "reference_delta": "Only an unused runtime_id binding is removed after switching every timeout consumer to the selected declaration. Original candidate CI reported warning26 as a compile failure.",
+  "whole_test_tree_identical": false,
+  "test_tree_only_delta": [
+    "test/test_fusion_official_client_panel.ml"
+  ],
+  "limits": "Observed targeted baseline24=12PASS/12FAIL and candidate33=33PASS/0FAIL. Common24 are separate from candidate-only9 Claude effort controls. No full regression, live provider, installed runtime, restart, integration or whole-issue acceptance.",
+  "publication_source_binding": {
+    "reference_head": "a5e59a3573f51802d4c75c62adde4f397ea51382",
+    "identical_named_inputs": 20,
+    "identical_trees": [
+      "lib",
+      "test",
+      "config"
+    ],
+    "changed_core_tree": {
+      "reference_tree": "c4b3002ea517ec584858ee05971ca84f0da15819",
+      "identical": false,
+      "changed_paths": [
+        "packages/agent_core/lib/pipeline/pipeline.ml",
+        "packages/agent_core/lib/pipeline/pipeline_execution_resume.mli",
+        "packages/agent_core/lib/pipeline/pipeline_execution_scope.mli",
+        "packages/agent_core/test/test_pipeline.ml"
+      ],
+      "scope": "Excluded from historical targeted execution. Exact current Core identity is reviewed at its own PR; this record retains only the tested reference and changed source paths."
+    },
+    "preserved_external_core_commit": "356a1e02ce3637668c357cf4467d738243c51fe9",
+    "limits": "Historical Fusion execution does not test the later Core producer or terminal fixture. No later publication-head execution is implied.",
+    "lower_core_production_repair_ancestor": "8b33c1143c9551bc7cbf5624dfbd0566fb7bc836",
+    "lower_core_fixture_correction_ancestor": "b8a1523884e571a91b90971d8cb682442d4296f7"
+  }
+}

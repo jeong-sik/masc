@@ -2610,6 +2610,8 @@ let run_named
             ?on_memory_capacity_refusal
             ?on_tool_execution
             ~context_window:(Some (Runtime_instance.max_context_of_runtime runtime))
+            ~configured_reasoning_effort:runtime.model.reasoning_effort
+            ~turn_timeout_s:runtime.model.turn_timeout_s
             ?composed_context:official_client_composed_context
             ~accepts_image_input
             ?required_native_posture
@@ -2772,6 +2774,8 @@ let run_named
               on_request_attribution
           in
           Keeper_antigravity_runtime.run ~on_guidance_prepared ~input_source ?on_native_tool_completion
+            ~configured_reasoning_effort:runtime.model.reasoning_effort
+            ~turn_timeout_s:runtime.model.turn_timeout_s
             ?argument_source:official_argument_source
             ?on_tool_execution
             ?composed_context:official_client_composed_context
@@ -3042,6 +3046,8 @@ let run_named
           let native_attempt : Runtime_native_tasks.attempt =
             { routing_run_id; runtime_id = attempt_runtime_id; lane_attempt_index = idx } in
           Keeper_claude_code_runtime.run ~input_source ~media_store ?on_native_tool_progress ?on_native_tool_completion
+            ~configured_reasoning_effort:runtime.model.reasoning_effort
+            ~turn_timeout_s:runtime.model.turn_timeout_s
             ?argument_source:official_argument_source
             ?on_provider_retry:(Option.map
               (fun observe retry -> observe ~attempt:native_attempt retry)

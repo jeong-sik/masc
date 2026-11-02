@@ -729,43 +729,10 @@ let%test "sampling_parameter round-trips through to_string and of_string" =
     sampling_parameter_table
 ;;
 
-(* Closed vocabulary of catalog/manifest [base] labels — the provider presets a
-   model entry may name as its capability base. This is the SSOT that the catalog
-   ([Model_catalog.parse_entry]) and manifest ([Capability_manifest]) parsers
-   validate against at parse time, so an unknown/misspelled [base] fails closed
-   instead of silently resolving to [default_capabilities]
-   (Agent Core contract §2 rule 4 — unknown -> None, not permissive default).
-
-   Must stay in sync with the set of labels [Capabilities.capabilities_for_provider_label]
-   resolves to [Some]; a drift-guard test in [Capabilities] pins the forward
-   direction (every value here resolves). Labels are normalized
-   (lowercase + trim) before membership checks, matching that resolver. *)
-let base_label_values =
-  [ (* Provider_kind.of_string canonical kinds *)
-    "anthropic"
-  ; "kimi"
-  ; "openai_compat"
-  ; "ollama"
-  ; "gemini"
-  ; "glm"
-  ; (* provider-kind aliases *)
-    "claude"
-  ; "openai"
-  ; "openai_chat"
-  ; "zhipu"
-  ; "glm-coding"
-  ; (* string-only presets not expressible as a Provider_kind.t *)
-    "openai_compat_chat_extended"
-  ; "openai_chat_extended"
-  ; "openrouter"
-  ; "xai"
-  ; "mistral"
-  ; "cohere"
-  ; "mimo"
-  ; "ollama_cloud"
-  ; "ollama_cloud_v1"
-  ; "nvidia"
-  ]
+(* Model-row bases accept only concrete presets. Provider declarations decode
+   their explicit models-only choice separately. One spelling table owns both
+   preset validation and resolution. *)
+let base_label_values = Capability_preset.labels
 ;;
 
 let json_schema_dialect_values = [ "openai_json_schema"; "json_object_schema" ]

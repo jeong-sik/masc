@@ -1,0 +1,31 @@
+{
+  "source_head": "d2c96d510d21fa393191e10611f66ef92637513c",
+  "files": {
+    "changelog.d/47154.md": "bb077d898d63440f1f8ed4e3c7f466f0e446e83db8df92e9099cfe1d57b36df6",
+    "lib/keeper/keeper_claude_code_runtime.ml": "fb915f5d82e21e5a4e37802929d9dc12f53ab91add11698ac71ca33f7df31535",
+    "lib/keeper/keeper_claude_code_runtime.mli": "845aeee32d7cd5ce7082503d63a15c968dd3c06e8eab541216ad13adc68e9d8d",
+    "lib/keeper/keeper_turn_driver.ml": "a2b84859ae43193eb1fc5a80fb4d6ec6bd82289e316241e14cee6989868f637a",
+    "test/stanzas/test_keeper_claude_code_runtime.inc": "87969cb25c20714771eede27859e0eb118a5921b804a1b4043bce764cd0d7002",
+    "test/test_keeper_claude_code_runtime.ml": "0995d7ed38c3d96da9c2a299517d3c9c4b2153cbbf2c3a1270079207d1dceacf",
+    "test/test_official_client_claim_cause.ml": "574844162c5f9c812873002d1a24c66782b646efb1bbc835651e129b5b9c6894",
+    "lib/keeper/keeper_turn_driver.mli": "28ebc72ef13869cc4f7db050c72bbb04c0be10ad3a82c30d9396deb6ddc1c7e5",
+    "lib/keeper/keeper_official_client_host.ml": "51911aa8aa8ba6e0b57adb88dff1de19343389509fc0b716565e062225bd0ba7",
+    "lib/keeper/keeper_official_client_host.mli": "6f545bedc158074c42c8b3fdb290eef4949f74f8df73cb23d9a368bfc2e3c4b8",
+    "lib/runtime/runtime_inference.ml": "f039cf9607f02af603ca7ee01984875305bac938a6f42c3eb30e2d3d686d7c81",
+    "lib/runtime/runtime_inference.mli": "a446d5988e4a4e3fdf3541656c3940644bd2b0d400cc736b091c1f4c5e458125",
+    "lib/runtime/runtime_claude_code.ml": "0c4b491e51fd11b25bfe6ae13a0d16461721a7e856af16c930f47f04a91e6ebe",
+    "lib/runtime/runtime_claude_code.mli": "26cd12a4ebd641cdee58a9a70596949428424f2dae605de7f2cca31be752e60a",
+    "lib/runtime/runtime.ml": "70049493b49713135752873031bc8e6eac0fa30194c065677ec3724d0a743e89",
+    "lib/runtime/runtime.mli": "8e285a8f684aea4d39e6887129cf749cef662be32bff69312a6f051ceac30a02",
+    "test/dune": "afe3e9372850456ac68260ff247edb5a8fba9dc4135e1da0a01715ecd86dd677",
+    ".github/workflows/test.yml": "99286b2989de40ea72ad184b6c8335da64e9213e289e260a4afc16bd3bd8bb6d",
+    "scripts/ci-run-targeted-tests.sh": "7391426895132a2c027aea2d6c85bfcae18a038fd4e9640cc3c0b9fa66a8ca72",
+    "scripts/ci/stanza_env.py": "8e6905e4009423ffdf2655176166444a9f52d584acb7654ef32e04f90819f35b"
+  },
+  "trees": {
+    "lib": "cfc4d00c72305985a0909d187d90b327e1aaba69",
+    "test": "37b1602362d862520d31af5bd4aa78b7caefa1fb",
+    "packages/agent_core": "f3c6dddd65321b227c87bcb4fb1fd17b1119ffb1",
+    "config": "783ac78ba6a516006c5e20d58c1fed0019a0ca5b"
+  }
+}

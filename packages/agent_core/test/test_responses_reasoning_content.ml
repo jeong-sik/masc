@@ -174,9 +174,9 @@ let chat_override_does_not_activate_responses () =
 let manifest_declaration () =
   let manifest=get(Capability_manifest.of_json (Yojson.Safe.from_string
     {|{"schema_version":2,"models":[{"model_id":"declared-responses","reasoning_replay":"preserve_responses_text"}]}|})) in
-  match Capability_manifest.entries manifest with
+  match Model_catalog.model_entries (Model_catalog.with_model_overrides Model_catalog.empty manifest) with
   | [entry] -> Alcotest.(check bool) "public manifest parses dedicated typed policy" true
-      ((Capabilities.apply_manifest_entry entry).reasoning_replay_override=Force_preserve_responses_text)
+      ((Capabilities.apply_catalog_entry ~provider_entry:None ~wire:None entry).reasoning_replay_override=Force_preserve_responses_text)
   | [] | _::_ -> Alcotest.fail "one manifest entry expected"
 
 let opaque_endpoint_control () =

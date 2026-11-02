@@ -320,19 +320,20 @@ let keeper_chat_event_to_json event =
          "completion", Runtime_native_tools.completion_to_json completion ]
        @ json_opt "tool_call_id" (Option.map (fun value -> `String value) tool.tool_call_id)
        @ json_opt "tool_call_name" (Option.map (fun value -> `String value) tool.tool_call_name))
-  | Tool_approval_requested { tool_call_id; tool_call_name; args; question; because } ->
+  | Tool_approval_requested { tool_call_id; approval_id; tool_call_name; args; question; because } ->
     type_tag
       "tool_approval_requested"
-      [ "tool_call_id", `String tool_call_id
+      [ "approval_id", `String approval_id
+      ; "tool_call_id", `String tool_call_id
       ; "tool_call_name", `String tool_call_name
       ; "args", `String args
       ; "question", `String question
       ; "because", `String because
       ]
-  | Tool_approval_settled { tool_call_id; outcome } ->
+  | Tool_approval_settled { tool_call_id; approval_id; outcome } ->
     type_tag
       "tool_approval_settled"
-      [ "tool_call_id", `String tool_call_id; "outcome", `String outcome ]
+      [ "tool_call_id", `String tool_call_id; "approval_id", `String approval_id; "outcome", `String outcome ]
   | Tool_result_ready { occurrence; tool_call_id; execution_id } ->
     type_tag
       "tool_result_ready"
@@ -393,7 +394,7 @@ let keeper_chat_event_of_json json =
     Ok ({ occurrence; tool_call_id; tool_call_name }, fields)
   in
   try
-    let* _ = object_fields ~label:"keeper_chat_event" json in
+    let* fields = object_fields ~label:"keeper_chat_event" json in
     let tag = json |> member "type" |> to_string in
     match tag with
     | "run_started" ->
@@ -621,18 +622,28 @@ let keeper_chat_event_of_json json =
         | Some value -> Runtime_native_tools.completion_of_json value in
       Ok (Native_tool_end (tool, completion))
     | "tool_approval_requested" ->
+      let* approval_id = optional_identity ~label:tag "approval_id" fields in
+      let* approval_id =
+        Option.to_result ~none:(tag ^ ": missing approval_id") approval_id
+      in
       Ok
         (Tool_approval_requested
-           { tool_call_id = json |> member "tool_call_id" |> to_string
+           { approval_id
+           ; tool_call_id = json |> member "tool_call_id" |> to_string
            ; tool_call_name = json |> member "tool_call_name" |> to_string
            ; args = json |> member "args" |> to_string
            ; question = json |> member "question" |> to_string
            ; because = json |> member "because" |> to_string
            })
     | "tool_approval_settled" ->
+      let* approval_id = optional_identity ~label:tag "approval_id" fields in
+      let* approval_id =
+        Option.to_result ~none:(tag ^ ": missing approval_id") approval_id
+      in
       Ok
         (Tool_approval_settled
-           { tool_call_id = json |> member "tool_call_id" |> to_string
+           { approval_id
+           ; tool_call_id = json |> member "tool_call_id" |> to_string
            ; outcome = json |> member "outcome" |> to_string
            })
     | "tool_result_ready" ->

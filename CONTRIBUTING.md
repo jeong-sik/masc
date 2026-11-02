@@ -217,48 +217,33 @@ chore: bump version to 0.34.0
 ## Review decisions and integration
 
 Review function, logic and code cleanliness on the current head. Approve when
-no P0, P1 or P2 issue remains; collect P3 findings for later. An author or a
-session that pushed the PR cannot independently approve it. State actual evidence
-and unverified behavior separately.
+no P0, P1 or P2 issue remains; collect P3 findings for later. State actual
+evidence and unverified behavior separately. GitHub does not allow a PR author's
+account to approve its own PR. A shared commit author or committer account does
+not by itself identify the session that reviewed the change.
 
-The ordinary source-review verdict uses actual values:
-
-```text
-verdict: PASS|FAIL head: <40-character-current-SHA> by: <Keeper-name>
-```
-
-`APPROVE` goes through `scripts/review/approve-guard.sh`; its `--check` mode
-checks review eligibility.
-
-Capture the base SHA and complete diff identity **before source review** and
-keep them with the reviewed head and evidence. Run these commands from the repository
-checkout with authenticated `gh`, Git, Python 3 and `jq` available. The diff helper
-fetches missing exact objects using `gh` credentials without interactive prompts.
+Submit a GitHub review directly for the head you reviewed. The example uses
+authenticated `gh` and `jq`:
 
 ```bash
 # Set repo and pr to the pull request being reviewed.
 snapshot=$(gh api "repos/$repo/pulls/$pr")
 head=$(printf '%s' "$snapshot" | jq -r '.head.sha')
-review_base=$(printf '%s' "$snapshot" | jq -r '.base.sha')
-review_diff=$(python3 scripts/review/review-diff.py \
-  --repo "$repo" --base "$review_base" --head "$head")
-# Read the complete diff and its source context, then write review-body.md.
-scripts/review/approve-guard.sh --repo "$repo" --pr "$pr" --head "$head" \
-  --review-base "$review_base" --review-diff "$review_diff" --body review-body.md
+# Read the diff and its source context, then submit your review.
+gh api --method POST "repos/$repo/pulls/$pr/reviews" \
+  -f event=APPROVE -f commit_id="$head"
 ```
 
-Publishing requires `--body`, `--review-base` and `--review-diff`. The guard rejects
-scope changes during admission. If the change differs, review it again and capture
-new evidence; do not refresh the digest merely to approve unreviewed changes.
-Release verdicts additionally cite `run: <full-CI-run-id>` for completed full
-verification of that head. Read current reviews and comments before integration;
-blocking reviews and later FAIL/HOLD decisions take precedence. Native GitHub
-stacks land whole through their top PR via `merge-async`; non-native branch
-chains land parent first and re-verify child scope after retargeting. See
+An approval needs no prescribed review body or footer. If the change differs,
+review the changed scope before deciding. For Release/Tag, verify the completed
+full CI run for the current head. Read current reviews and comments before
+integration. Native GitHub stacks land whole through their top PR via
+`merge-async`; non-native branch chains land parent first. For a non-stack PR,
+`gh pr merge --match-head-commit "$head"` pins the reviewed head. See
 [the workflow](docs/CI-REVIEW-WORKFLOW.md) and
-[native GitHub stacks](docs/guides/NATIVE-GITHUB-STACKS.md) for admission
-through the review and merge scripts. A source approval does not claim that a
-build or runtime check ran.
+[native GitHub stacks](docs/guides/NATIVE-GITHUB-STACKS.md) for the review and
+integration procedure. A source approval does not claim that a build or runtime
+check ran.
 
 ## Issues
 

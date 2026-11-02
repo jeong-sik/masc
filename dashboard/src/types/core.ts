@@ -2,6 +2,7 @@ import type { KeeperCostCoverage } from '../lib/keeper-cost-coverage'
 import type { KeeperResponseOwner, KeeperResponseState } from '../lib/keeper-response-state'
 import type { KeeperPortraitReading } from '../lib/keeper-portrait'
 import type { KeeperActivationMode } from '../lib/keeper-activation-mode'
+import type { KeeperApprovalQueueState } from './gate'
 // MASC Dashboard — Core entity types (Agent, Task, Message, Board, Keeper)
 
 import type { KeeperChatDeliveryKey, KeeperChatDeliveryProvenance } from '../keeper-delivery-provenance'
@@ -735,6 +736,7 @@ interface KeeperConversationUsage {
 // dashboard drew nothing while the call waited and the answer, when it came,
 // was only the 180-second timeout read as a denial nobody chose.
 export interface KeeperToolApprovalPending {
+  approvalId: string
   toolCallId: string
   toolName: string
   args: string
@@ -746,8 +748,8 @@ export interface KeeperToolApprovalPending {
   // Server-stated seconds until the wait retires itself. Null when unknown;
   // the view derives the remaining time from its own clock.
   timeoutSec: number | null
-  // Client-side answer state: 'answering' while the POST is in flight so the
-  // buttons cannot be double-clicked into two answers for one call.
+  // 'answering' covers the POST and any read reconciling an unsettled answer,
+  // so the same displayed ask cannot send another answer before that settles.
   answering: boolean
   answeredDecision: 'approve' | 'deny' | null
   answeredOutcome: string | null
@@ -1478,6 +1480,7 @@ export interface Keeper {
   last_activity_source?: KeeperLiveActivitySource | null
   live_activity?: KeeperLiveActivity | null
   current_gate?: KeeperCurrentGate | null
+  approval_queue_state?: KeeperApprovalQueueState | null
   context_ratio?: number | null
   context_tokens?: number | null
   context_max?: number | null

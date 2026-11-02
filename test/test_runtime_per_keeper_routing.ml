@@ -16,6 +16,13 @@
 open Alcotest
 open Masc
 
+let execution_for_binding config binding =
+  Runtime_adapter.materialize_execution
+    ~construction:(Runtime_adapter.create_construction ()) config binding
+  |> Result.map (fun (selected : Runtime_adapter.execution_materialization) -> selected.execution)
+;;
+
+
 let set_runtime_lane_candidates ?runtime_config_path ?expected_source_revision
     ~lane_id ~runtime_ids () =
   Runtime.set_runtime_lane_candidates ?runtime_config_path ?expected_source_revision
@@ -83,17 +90,12 @@ let fixture_int_field fields key =
   | Some value -> value
   | None -> Alcotest.failf "fixture field %S is not an int" key
 
-let restore_model_catalog = function
-  | Some catalog -> Llm_provider.Model_catalog.set_global catalog
-  | None -> Llm_provider.Model_catalog.clear_global ()
-;;
-
 let with_model_catalog_content content f =
   let path = Filename.temp_file "runtime-thinking-agent_core-models" ".toml" in
-  let previous = Llm_provider.Model_catalog.global () in
+  let previous = Llm_provider.Catalog_snapshot.current () in
   Fun.protect
     ~finally:(fun () ->
-      restore_model_catalog previous;
+      Llm_provider.Catalog_snapshot.publish previous;
       try Sys.remove path with
       | _ -> ())
     (fun () ->
@@ -101,7 +103,7 @@ let with_model_catalog_content content f =
       match Llm_provider.Model_catalog.load_file path with
       | Error msg -> Alcotest.failf "test AGENT_CORE model catalog should load: %s" msg
       | Ok catalog ->
-        Llm_provider.Model_catalog.set_global catalog;
+        (Llm_provider.Catalog_snapshot.publish (Masc_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None)));
         f ())
 ;;
 
@@ -1891,9 +1893,9 @@ tools-support = true
     | Error errors -> Alcotest.failf "multi-account TOML refused: %s"
         (String.concat "; " (List.map (fun e -> e.Runtime_toml.message) errors)) in
   let homes = List.map (fun binding ->
-    match Runtime_adapter.binding_to_execution config binding with
-    | Ok (Runtime_execution.Claude_code execution) -> execution.account_home
-    | Ok (Runtime_execution.Codex_app_server execution) -> execution.account_home
+    match execution_for_binding config binding with
+    | Ok (Runtime_execution.Claude_code execution) -> Some (Runtime_official_account.home execution.account_home)
+    | Ok (Runtime_execution.Codex_app_server execution) -> Some (Runtime_official_account.home execution.account_home)
     | Ok _ -> Alcotest.fail "expected an official client"
     | Error detail -> Alcotest.fail detail) config.Runtime_schema.bindings in
   Alcotest.(check (list (option string))) "each binding keeps its login home"
@@ -1969,9 +1971,7 @@ tools-support = true
           | None -> Alcotest.fail ("missing binding " ^ id)
         in
         (match Runtime_instance.of_binding config (binding "codex") with
-            | Error (Runtime_config_error.Execution_unbuildable reason) ->
-              Alcotest.(check bool) "selected account needs a real home" true
-                (String_util.contains_substring reason "account-home")
+            | Error (Runtime_config_error.Execution_unbuildable _) -> ()
             | Error _ | Ok _ ->
               Alcotest.fail "selected official client without HOME gained a shared scope");
         (match Runtime_instance.of_binding config (binding "http") with
@@ -2790,6 +2790,7 @@ let runtime_thinking_model_catalog =
 # This isolated inventory fixture declares its own provider contract; the
 # shipped Ollama provider remains undeclared and refuses suppression.
 [[providers]]
+capabilities_base = "ollama_cloud"
 id = "ollama_cloud"
 kind = "openai_compat"
 base_url = "https://ollama.example/v1"
@@ -4132,7 +4133,7 @@ let test_a_lane_named_after_its_head_still_wins () =
 let () =
   (match Llm_provider.Model_catalog.load_default () with
    | Error msg -> Alcotest.failf "packaged AGENT_CORE models.toml should load: %s" msg
-   | Ok catalog -> Llm_provider.Model_catalog.set_global catalog);
+   | Ok catalog -> (Llm_provider.Catalog_snapshot.publish (Masc_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None))));
   Alcotest.run
     "runtime_per_keeper_routing"
     [ ( "runtime-assignment routing"

@@ -62,6 +62,7 @@ let visible filter (event : Observer.event) =
               | Observer.Agent_completed _ | Observer.Agent_failed _
               | Observer.Agent_yielded _ | Observer.Agent_input_required _
               | Observer.Tool_approval_completed
+              | Observer.Relay_subscription_loss _
               | Observer.Agent_core_other _ )
           ; _
           } -> true
@@ -306,6 +307,7 @@ let agent_core_label (e : Observer.agent_core) =
   | Observer.Agent_input_required _ -> "waiting for input"
   | Observer.Tool_approval_completed -> "approval settled"
   | Observer.Telemetry -> "telemetry"
+  | Observer.Relay_subscription_loss _ -> "observer events lost"
   | Observer.Agent_core_other name -> name
 
 let agent_core_row ~at ~duration_ms (e : Observer.agent_core) =
@@ -352,6 +354,8 @@ let agent_core_row ~at ~duration_ms (e : Observer.agent_core) =
     | Observer.Tool_approval_completed ->
         (Attention, Option.value ~default:"" e.Observer.tool)
     | Observer.Telemetry -> (Quiet, "")
+    | Observer.Relay_subscription_loss { dropped_count; _ } ->
+        (Attention, Printf.sprintf "%d events lost before relay" dropped_count)
     | Observer.Agent_core_other _ ->
         (Attention, Option.value ~default:"" e.Observer.tool)
   in
@@ -364,13 +368,13 @@ let agent_core_row ~at ~duration_ms (e : Observer.agent_core) =
         detail
     | ( ( Observer.Tool_called | Observer.Tool_completed | Observer.Turn_started
         | Observer.Turn_ready | Observer.Turn_completed
-        | Observer.Tool_approval_completed | Observer.Telemetry
+        | Observer.Tool_approval_completed | Observer.Telemetry | Observer.Relay_subscription_loss _
         | Observer.Agent_core_other _ )
       , Some task ) ->
         if detail = "" then task else detail ^ " \xc2\xb7 " ^ task
     | ( ( Observer.Tool_called | Observer.Tool_completed | Observer.Turn_started
         | Observer.Turn_ready | Observer.Turn_completed
-        | Observer.Tool_approval_completed | Observer.Telemetry
+        | Observer.Tool_approval_completed | Observer.Telemetry | Observer.Relay_subscription_loss _
         | Observer.Agent_core_other _ )
       , None ) ->
         detail
@@ -725,7 +729,8 @@ let member_of_event (event : Observer.event) =
       | Observer.Agent_started | Observer.Agent_completed _
       | Observer.Agent_failed _ | Observer.Agent_yielded _
       | Observer.Agent_input_required _
-      | Observer.Tool_approval_completed | Observer.Agent_core_other _ ->
+      | Observer.Tool_approval_completed | Observer.Relay_subscription_loss _
+      | Observer.Agent_core_other _ ->
           None)
   | Observer.Keeper_tool_call c ->
       Some
@@ -1231,6 +1236,7 @@ let duration_of_completion ~before (completed : Observer.agent_core) =
                   | Observer.Agent_completed _ | Observer.Agent_failed _
                   | Observer.Agent_yielded _ | Observer.Agent_input_required _
                   | Observer.Tool_approval_completed | Observer.Telemetry
+                  | Observer.Relay_subscription_loss _
                   | Observer.Agent_core_other _ )
               ; _
               }
@@ -1259,7 +1265,9 @@ let evidence_fields (entry : entry) =
         | Agent_yielded _ -> "agent_yielded"
         | Agent_input_required _ -> "agent_input_required"
         | Tool_approval_completed -> "tool_approval_completed"
-        | Telemetry -> "telemetry_event" | Agent_core_other name -> name in
+        | Telemetry -> "telemetry_event"
+        | Relay_subscription_loss _ -> Masc.Keeper_event_bridge.subscription_loss_event_type
+        | Agent_core_other name -> name in
       [ some "Source" "runtime observer event"
       ; some "Event kind" kind
       ; field "Tool name" e.tool
@@ -1278,7 +1286,7 @@ let evidence_fields (entry : entry) =
            | Agent_input_required _ ->
                "Agent run ID"
            | Tool_called | Tool_completed | Turn_started | Turn_ready
-           | Turn_completed | Tool_approval_completed | Telemetry
+           | Turn_completed | Tool_approval_completed | Telemetry | Relay_subscription_loss _
            | Agent_core_other _ ->
                "Task ID")
           e.task

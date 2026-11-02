@@ -13,18 +13,6 @@ open Keeper_types_profile
 include Keeper_registry_types
 include Keeper_registry_setup
 
-let state_change_observer : (unit -> unit) Atomic.t = Atomic.make ignore
-let install_state_change_observer observer = Atomic.set state_change_observer observer
-
-let notify_state_change_observer () =
-  Cancel_safe.observe
-    ~on_exn:(fun exn ->
-      Log.Keeper.warn
-        "registry state-change observer failed: %s"
-        (Printexc.to_string exn))
-    (fun () -> (Atomic.get state_change_observer) ())
-;;
-
 let set_turn_phase ~observation_token ~base_path name (turn_phase : packed_turn_phase) =
   (* RFC-0072 Phase 4b + Phase 5: dispatch via [resolve_turn_phase_transition]
      (PR #14912) instead of the [validate_turn_phase_transition] call.
@@ -72,7 +60,7 @@ let set_turn_phase ~observation_token ~base_path name (turn_phase : packed_turn_
       in
       e', changed)
   in
-  if changed then broadcast_composite_changed ~name ~ts_unix:now
+  if changed then broadcast_composite_changed ~base_path ~name ~ts_unix:now
 ;;
 
 let mark_turn_provider_attempt_started ~observation_token ~base_path name =
@@ -98,7 +86,7 @@ let set_turn_selected_runtime ~observation_token ~base_path name selected_runtim
       in
       e', changed)
   in
-  if changed then broadcast_composite_changed ~name ~ts_unix:now
+  if changed then broadcast_composite_changed ~base_path ~name ~ts_unix:now
 ;;
 
 
@@ -148,7 +136,7 @@ let mark_turn_finished ~observation_token ~base_path name =
     Option.iter
       (Keeper_transition_audit.record_completed_turn ~keeper_name:name)
       !completed_turn_to_record;
-  if changed then broadcast_composite_changed ~name ~ts_unix:now
+  if changed then broadcast_composite_changed ~base_path ~name ~ts_unix:now
 ;;
 
 let record_skip_reasons ~base_path name ~reasons =
@@ -910,8 +898,8 @@ let rec dispatch_event_with_audit_internal
              subscribers re-fetch [/api/v1/keepers/:name/composite] for the
              full snapshot so the spec's "single writer, pull observers"
              invariant is preserved. *)
-          broadcast_composite_changed ~name ~ts_unix:now;
-          notify_state_change_observer ();
+          broadcast_composite_changed ~base_path:entry.base_path ~name ~ts_unix:now;
+          notify_state_change_observer ~base_path:entry.base_path Lifecycle_phase_changed;
           Ok tr)
      | Ok tr ->
        (* No phase change — still update conditions *)
@@ -968,7 +956,7 @@ let rec dispatch_event_with_audit_internal
               ~new_phase:tr.new_phase
               ~conditions_after:tr.updated_conditions
               ~restart_count:entry.restart_count;
-          broadcast_composite_changed ~name ~ts_unix:now;
+          broadcast_composite_changed ~base_path:entry.base_path ~name ~ts_unix:now;
           Ok tr)
      | Error e -> reject_dispatch e)
 ;;
@@ -1089,6 +1077,7 @@ let get_phase ~base_path name =
 
 module For_testing = struct
   let unsafe_put_entry = unsafe_put_entry
+  let finish_unregistration_cleanup = finish_unregistration_cleanup
   let register = register
   let unregister = unregister
   let clear = clear

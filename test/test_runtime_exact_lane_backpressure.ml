@@ -49,16 +49,14 @@ let with_lane_config ?(runtime_text = runtime_toml) f =
   let root = Filename.temp_dir "exact-lane-backpressure-" "" in
   let previous_runtime = Runtime.For_testing.snapshot () in
   let previous_startup = Runtime_startup_state.get () in
-  let previous_catalog = Llm_provider.Model_catalog.global () in
+  let previous_catalog = Llm_provider.Catalog_snapshot.current () in
   Fun.protect ~finally:(fun () ->
     Registry.unpublish () |> require_ok "unpublish fixture registry";
     Runtime.For_testing.restore previous_runtime;
     Runtime_startup_state.set previous_startup;
-    (match previous_catalog with
-     | None -> Llm_provider.Model_catalog.clear_global ()
-     | Some catalog -> Llm_provider.Model_catalog.set_global catalog);
+    (Llm_provider.Catalog_snapshot.publish previous_catalog);
     Fs_compat.remove_tree root) @@ fun () ->
-  Llm_provider.Model_catalog.clear_global ();
+  (Llm_provider.Catalog_snapshot.reset ());
   let path = Filename.concat root "runtime.toml" in
   Fs_compat.save_file path runtime_text;
   Runtime.init_default ~config_path:path |> require_ok "runtime initialization";

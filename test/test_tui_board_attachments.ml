@@ -431,8 +431,9 @@ let state_with staged_files =
 let finish state ~reply_to ~sent_attachments result =
   match reply_to with
   | Some post_id ->
-    state.board_write <- Board_commenting;
-    Masc_tui_board_updates.comment_done state ~post_id ~sent_draft:"title"
+    let request_id = ref () in
+    state.board_write <- Board_commenting request_id;
+    Masc_tui_board_updates.comment_done state ~request_id ~post_id ~sent_draft:"title"
       ~report:(fun _ _ -> ()) ~refresh:(fun () -> ())
       ~refresh_detail:(fun _ -> ()) result
   | None ->

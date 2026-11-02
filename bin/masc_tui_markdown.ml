@@ -362,23 +362,26 @@ let wrap_tokens ?on_row palette ~width tokens =
     let remaining = width - !current_cells in
     if word_cells <= remaining then append token ~start_byte ~word_cells token.word
     else begin
-      let prefix, tail = Layout.split_at_cells token.word remaining in
+      let prefix, chunks =
+        Layout.split_cells_after_prefix ~prefix_cells:remaining
+          ~max_cells:width token.word in
+      let chunks = match chunks with [] -> [""] | _ -> chunks in
       if prefix <> "" then
-        append token ~start_byte ~word_cells:(Layout.display_width prefix) prefix;
+        append token ~start_byte ~word_cells:(Layout.display_width_for_wrapping prefix) prefix;
       (* Split the remaining word once at the full row width, preserving
          graphemes, source bytes and styling. *)
       let next_byte = ref (start_byte + String.length prefix) in
       List.iter (fun word ->
         if Buffer.length current > 0 then flush ();
-        append token ~start_byte:!next_byte ~word_cells:(Layout.display_width word) word;
+        append token ~start_byte:!next_byte ~word_cells:(Layout.display_width_for_wrapping word) word;
         next_byte := !next_byte + String.length word)
-        (Layout.split_cells ~max_cells:width tail)
+        chunks
     end
   in
   List.iter (fun token ->
     let separator_cells = if token.space_before then 1 else 0 in
     let start_byte = !source_byte + separator_cells in
-    let word_cells = Layout.display_width token.word in
+    let word_cells = Layout.display_width_for_wrapping token.word in
     let wrapped = !current_has_word
       && !current_cells + separator_cells + word_cells > width in
     if wrapped then flush ();
@@ -584,7 +587,7 @@ let wrap_pieces ~max_cells pieces =
       let rec place text =
         if String.length text = 0 then ()
         else
-          let cells = Layout.display_width text in
+          let cells = Layout.display_width_for_wrapping text in
           let room = max_cells - !used in
           if cells <= room then begin
             row := (text, kind) :: !row;
@@ -601,18 +604,14 @@ let wrap_pieces ~max_cells pieces =
                next row whole. Cutting by cells here would give it up and pad
                its columns, which holds the alignment and loses the letter --
                and a wrapped line of Korean is where that shows. *)
-            let head, tail =
-              match Layout.split_at_cells text room with
-              | "", _ when !row = [] ->
+            let head, remaining =
+              match Layout.split_cells_after_prefix ~prefix_cells:room
+                      ~max_cells text with
+              | "", chunk :: rest when !row = [] ->
                   (* A grapheme wider than the row itself. [split_cells] takes
                      one piece whatever the width, which is the only rule that
                      ends here; a row one cell over beats never finishing. *)
-                  (match Layout.split_cells ~max_cells:room text with
-                   | chunk :: _ when String.length chunk > 0 ->
-                       ( chunk
-                       , String.sub text (String.length chunk)
-                           (String.length text - String.length chunk) )
-                   | _ -> (text, ""))
+                  (chunk, rest)
               | split -> split
             in
             if String.length head > 0 then row := (head, kind) :: !row;
@@ -623,14 +622,13 @@ let wrap_pieces ~max_cells pieces =
               | [] -> ()
               | [last] ->
                   row := [(last, kind)];
-                  used := Layout.display_width last
+                  used := Layout.display_width_for_wrapping last
               | chunk :: rest ->
                   row := [(chunk, kind)];
                   flush ();
                   place_chunks rest
             in
-            if String.length tail > 0 then
-              place_chunks (Layout.split_cells ~max_cells tail)
+            place_chunks remaining
           end
       in
       place text)
@@ -649,7 +647,7 @@ let diff_row_span palette pieces =
   | _ -> None
 
 let fill_styled_row ~width (opening, closing) text =
-  let remaining = max 0 (width - Layout.display_width text) in
+  let remaining = max 0 (width - Layout.display_width_for_wrapping text) in
   opening ^ text ^ String.make remaining ' ' ^ closing
 
 (* A diff row with token colours underneath: the first run carries the row's
@@ -692,7 +690,7 @@ let styled_diff_mixed_rows ?on_row palette ~width kind pieces =
                       piece_opening ^ text ^ piece_closing ^ opening)
                   row)
          in
-         let remaining = max 0 (width - Layout.display_width plain) in
+         let remaining = max 0 (width - Layout.display_width_for_wrapping plain) in
          let text = opening ^ styled ^ String.make remaining ' ' ^ closing in
          let length = List.fold_left (fun total (text, _) -> total + String.length text) 0 row in
          Option.iter (fun emit -> emit {text;
@@ -717,8 +715,6 @@ let styled_diff_mixed_rows ?on_row palette ~width kind pieces =
 let styled_code_rows ?on_row palette ~width pieces =
   let gutter = palette.code_gutter in
   let body_width = max 1 (width - Layout.display_width gutter) in
-  let plain = String.concat "" (List.map fst pieces) in
-  let cells = Layout.display_width plain in
   let source_byte = ref 0 in
   let mapped plain text =
     let length = String.length plain in
@@ -729,9 +725,11 @@ let styled_code_rows ?on_row palette ~width pieces =
   in
   match diff_row_span palette pieces with
   | Some span ->
+      let plain = String.concat "" (List.map fst pieces) in
+      let cells = Layout.display_width_for_wrapping plain in
       let chunks =
         if cells <= body_width then [ plain ]
-        else Layout.split_cells ~max_cells:body_width plain
+        else snd (Layout.split_cells_after_prefix ~prefix_cells:0 ~max_cells:body_width plain)
       in
       List.map (fun chunk -> mapped chunk (fill_styled_row ~width span (gutter ^ chunk))) chunks
   | None -> (
@@ -751,6 +749,9 @@ let render_lexed_line_with_spans ~palette ~width pieces =
   let semantic_text = String.concat "" (List.map fst pieces) in
   {semantic_text; source_positions=Array.init (String.length semantic_text) (fun i -> Some i);
    mapped_rows=List.rev !mapped_rows}
+
+let render_lexed_line ~palette ~width pieces =
+  styled_code_rows palette ~width:(max 1 width) pieces
 
 let horizontal cells =
   String.concat "" (List.init (max 0 cells) (fun _ -> "\xe2\x94\x80"))
@@ -786,15 +787,15 @@ let code_header ?on_language palette ~width language =
   let prefix = "\xe2\x94\x8c\xe2\x94\x80 " in
   let stem = prefix ^ language ^ " " in
   let stem =
-    if Layout.display_width stem <= width then stem
+    if Layout.display_width_for_wrapping stem <= width then stem
     else
-      match Layout.split_cells ~max_cells:width stem with
+      match snd (Layout.split_cells_after_prefix ~prefix_cells:0 ~max_cells:width stem) with
       | first :: _ -> first
       | [] -> ""
   in
   Option.iter (fun emit -> emit (max 0 (min (String.length language)
     (String.length stem - String.length prefix)))) on_language;
-  let remaining = max 0 (width - Layout.display_width stem) in
+  let remaining = max 0 (width - Layout.display_width_for_wrapping stem) in
   styled_span palette.code_header (stem ^ horizontal remaining)
 
 let code_footer palette ~width =
@@ -815,7 +816,9 @@ let code_rows ?on_row palette ~width line =
     source_byte := end_byte;
     text in
   if String.length line = 0 then [mapped ""]
-  else Layout.split_cells ~max_cells:body_width line |> List.map mapped
+  else
+    let _, chunks = Layout.split_cells_after_prefix ~prefix_cells:0 ~max_cells:body_width line in
+    List.map mapped chunks
 
 (* {1 Tables} *)
 
@@ -912,8 +915,7 @@ let table_row_positions ~columns ~source_start line =
     Array.concat (intersperse parts) in
   normalise_cells ~empty:[||] ~join ~columns positions
 
-let pad ~alignment ~cells text =
-  let missing = max 0 (cells - Layout.display_width text) in
+let pad ~alignment ~missing text =
   match alignment with
   | Left -> text ^ String.make missing ' '
   | Right -> String.make missing ' ' ^ text
@@ -929,7 +931,7 @@ let column_widths ~width ~gutter_cells ~columns rows =
     List.init columns (fun index ->
       List.fold_left
         (fun widest row ->
-          max widest (Layout.display_width (List.nth row index)))
+          max widest (Layout.display_width_for_wrapping (List.nth row index)))
         1 rows)
   in
   let spacing = gutter_cells * max 0 (columns - 1) in
@@ -949,86 +951,187 @@ let column_widths ~width ~gutter_cells ~columns rows =
   shrink ();
   Array.to_list widths
 
+type table_cell_fragment = {
+  rendered_row : int;
+  rendered_start_cell : int;
+  visible_ranges : source_range list;
+}
+
 type table_cell_source = {
   table_row : int;
   table_column : int;
-  rendered_row : int;
   cell_text : string;
   source_positions : int option array;
-  rendered_start_cell : int;
-  visible_range : source_range;
+  fragments : table_cell_fragment list;
 }
 
-let table_block ?on_cell ?source_rows palette ~width ~alignments ~header ~body =
-  let columns = List.length alignments in
-  let gutter = palette.table_gutter in
-  let gutter_cells = Layout.display_width gutter in
-  let cell_mapping = Option.map (fun emit -> emit, Hashtbl.create 16) on_cell in
-  let styled row_index cells =
-    List.mapi
-      (fun column cell ->
-        Option.iter (fun (_, semantic_cells) ->
-          let mapped = render_inline_with_spans ~palette ~width:max_int ~prefix:"" ~continuation:"" cell in
-          let source_positions = match source_rows with
-            | None -> invalid_arg "Masc_tui_markdown.table_block: missing table source positions"
-            | Some rows ->
-                let raw_positions=List.nth (List.nth rows row_index) column in
-                Array.map (fun position -> Option.bind position (fun at -> raw_positions.(at))) mapped.source_positions in
-          Hashtbl.replace semantic_cells (row_index, column) (mapped.semantic_text, source_positions)) cell_mapping;
-        match
-          wrap_inline palette ~width:max_int ~prefix:"" ~continuation:"" cell
-        with
-        | [] -> ""
-        | row :: _ -> row)
-      (normalise_row ~columns cells)
+let table_block ?on_cell ?source_rows ?on_clipped palette ~width ~alignments ~header ~body =
+  let width = max 1 width in
+  let alignments = Array.of_list alignments in
+  let columns = Array.length alignments in
+  let gutter_cells = Layout.display_width palette.table_gutter in
+  let header = normalise_row ~columns header in
+  let body = List.map (normalise_row ~columns) body in
+  let source_rows = Option.map (fun rows ->
+    Array.of_list (List.map Array.of_list rows)) source_rows in
+  let natural row =
+    List.map (fun cell ->
+      match wrap_inline palette ~width:max_int ~prefix:"" ~continuation:"" cell with
+      | [] -> ""
+      | row :: _ -> row) row
   in
-  let header = styled 0 header in
-  let body = List.mapi (fun row -> styled (row + 1)) body in
   (* The frame is paid for out of the columns, not out of the pane: a table
      that drew its own width plus a border would run past the frame it sits
      in, the way the origin margin would have. *)
   let frame_cells = if palette.table_frame then 4 else 0 in
-  let widths =
-    column_widths ~width:(max 1 (width - frame_cells)) ~gutter_cells ~columns
-      (header :: body)
+  let grid_widths =
+    let minimum = frame_cells + columns + gutter_cells * max 0 (columns - 1) in
+    if minimum > width then None
+    else
+      let natural_rows = List.map natural (header :: body) in
+      let widths = Array.of_list
+          (column_widths ~width:(max 1 (width - frame_cells)) ~gutter_cells ~columns
+            natural_rows) in
+      (* Decide before wrapping: a one-cell column with a wide grapheme
+         cannot use the grid, and preparing a long cell there only to discard
+         its many one-cell rows would needlessly stall the reader. *)
+      if List.exists (fun row ->
+        List.mapi (fun column text -> Layout.widest_grapheme_cells text > widths.(column)) row
+        |> List.exists Fun.id) natural_rows
+      then None
+      else
+        (* A very long cell in a many-column grid would repeat every other
+           column on each wrapped line. Compare content-based line estimates
+           before allocating those rows; use the lower estimate. Word wrapping
+           can make either actual height greater than its estimate. *)
+        let lines text cells =
+          let content = Layout.display_width_for_wrapping text in
+          if content = 0 then 1 else 1 + ((content - 1) / cells) in
+        let stacked_width = max 1 (width - frame_cells) in
+        let grid_lines, stacked_lines = List.fold_left (fun (grid, stacked) row ->
+          let counts = List.mapi (fun column text -> lines text widths.(column)) row in
+          grid + List.fold_left max 1 counts,
+          stacked + List.fold_left (fun total text -> total + lines text stacked_width) 0 row)
+            ((if palette.table_frame then 3 else 1),
+             (if palette.table_frame then 3 else 1) + max 0 (List.length body - 1)) natural_rows in
+        if stacked_lines < grid_lines then None else Some widths
+  in
+  let prepare widths row_index row =
+    List.mapi (fun column cell ->
+      let cells = widths.(column) in
+      match on_cell with
+      | None ->
+          let lines = wrap_inline palette ~width:cells ~prefix:"" ~continuation:"" cell in
+          Array.of_list (List.map (fun text -> text, []) lines), None
+      | Some _ ->
+          let mapped = render_inline_with_spans ~palette ~width:cells
+              ~prefix:"" ~continuation:"" cell in
+          let raw_positions = match source_rows with
+            | None -> invalid_arg "Masc_tui_markdown.table_block: missing table source positions"
+            | Some rows -> rows.(row_index).(column) in
+          let source_positions = Array.map
+              (fun position -> Option.bind position (fun at -> raw_positions.(at)))
+              mapped.source_positions in
+          Array.of_list (List.map (fun row -> row.text, row.source_ranges) mapped.mapped_rows),
+          Some (mapped.semantic_text, source_positions)) row
+  in
+  (* When the grid cannot fit or is estimated to need more lines, give each
+     cell the pane instead of drawing it through its neighbours. *)
+  let stacked = Option.is_none grid_widths in
+  let framed = palette.table_frame &&
+    (not stacked ||
+     let inside = width - frame_cells in
+     inside > 0 && List.for_all (fun row ->
+       List.for_all (fun text -> Layout.widest_grapheme_cells text <= inside) (natural row))
+       (header :: body)) in
+  let stacked_width = width - (if framed then frame_cells else 0) in
+  let widths = match stacked, grid_widths with
+    | false, Some widths -> widths
+    | true, _ | false, None -> Array.make columns stacked_width in
+  let prepared = List.mapi (prepare widths) (header :: body) in
+  let gutter = if stacked then "" else palette.table_gutter in
+  let next_row = ref (if framed then 1 else 0) in
+  let prefix_ranges bytes ranges =
+    let rec take remaining = function
+      | [] -> []
+      | _ when remaining <= 0 -> []
+      | range :: rest ->
+          let length = min remaining (range.end_byte - range.start_byte) in
+          {range with end_byte=range.start_byte + length} :: take (remaining - length) rest
+    in
+    take bytes ranges
+  in
+  let draw_group row_index wrapped =
+    let height = List.fold_left (fun height (_, (lines, _)) -> max height (Array.length lines)) 1 wrapped in
+    let fragments = Option.map (fun _ -> Array.make (List.length wrapped) []) on_cell in
+    let lines = List.init height (fun offset ->
+      let cell_start = ref (if framed then 2 else 0) in
+      List.mapi (fun slot (column, (rows, semantic)) ->
+        let cells = widths.(column) in
+        let alignment = alignments.(column) in
+        let fragment = if offset < Array.length rows then Some rows.(offset) else None in
+        let text, ranges = Option.value fragment ~default:("", []) in
+        (* A grapheme wider than the whole pane cannot be drawn in that pane.
+           Fit it and report only the source bytes that remain visible. *)
+        let content_width = Layout.display_width_for_wrapping text in
+        let text, ranges, content_width =
+          if content_width <= cells then text, ranges, content_width
+          else
+            let () = Option.iter (fun notify -> notify ()) on_clipped in
+            let ranges = match semantic with
+              | None -> []
+              | Some (cell_text, _) ->
+                  let plain = List.map (fun range ->
+                    String.sub cell_text range.start_byte (range.end_byte - range.start_byte)) ranges
+                    |> String.concat "" in
+                  prefix_ranges (Layout.fitted_source_bytes plain cells) ranges in
+            let text = Layout.fit_width text cells in
+            text, ranges, Layout.display_width_for_wrapping text in
+        let missing = max 0 (cells - content_width) in
+        let padding = match alignment with Left -> 0 | Right -> missing | Centre -> missing / 2 in
+        (match fragments, semantic, fragment with
+         | Some fragments, Some _, Some _ ->
+             fragments.(slot) <-
+               { rendered_row = !next_row + offset;
+                 rendered_start_cell = !cell_start + padding;
+                 visible_ranges = ranges } :: fragments.(slot)
+         | (Some _, Some _, None) | (Some _, None, _) | (None, _, _) -> ());
+        cell_start := !cell_start + cells + (if stacked then 0 else gutter_cells);
+        pad ~alignment ~missing text) wrapped
+      |> String.concat gutter) in
+    (match on_cell, fragments with
+     | Some emit, Some fragments ->
+      List.iteri (fun slot (column, (_, semantic)) ->
+        Option.iter (fun (cell_text, source_positions) ->
+          emit {table_row=row_index; table_column=column; cell_text; source_positions;
+            fragments=List.rev fragments.(slot)}) semantic) wrapped
+     | None, None -> ()
+     | (Some _, None) | (None, Some _) -> assert false);
+    next_row := !next_row + height;
+    lines
   in
   let draw row_index row =
-    let cell_start = ref (if palette.table_frame then 2 else 0) in
-    List.mapi
-      (fun index cell ->
-        let cells = List.nth widths index in
-        let alignment = List.nth alignments index in
-        (* [fit_width] pads on the left as well as truncating, and a cell it
-           has padded has no room left for the alignment the delimiter row
-           asked for. So it is asked only for the cut. *)
-        let fitted =
-          if Layout.display_width cell > cells then Layout.fit_width cell cells
-          else cell
-        in
-        Option.iter (fun (emit, semantic_cells) ->
-          let cell_text, source_positions = Hashtbl.find semantic_cells (row_index, index) in
-          let rendered_row = if row_index = 0 then (if palette.table_frame then 1 else 0)
-            else row_index + (if palette.table_frame then 2 else 1) in
-          let missing = max 0 (cells - Layout.display_width fitted) in
-          let padding = match alignment with Left -> 0 | Right -> missing | Centre -> missing / 2 in
-          emit {table_row=row_index; table_column=index; rendered_row; cell_text; source_positions;
-            rendered_start_cell= !cell_start + padding;
-            visible_range={start_byte=0; end_byte=Layout.fitted_source_bytes cell_text cells}}) cell_mapping;
-        cell_start := !cell_start + cells + gutter_cells;
-        pad ~alignment ~cells fitted)
-      row
-    |> String.concat gutter
+    let indexed = List.mapi (fun column cell -> column, cell) row in
+    if stacked then List.concat_map (fun cell -> draw_group row_index [cell]) indexed
+    else draw_group row_index indexed
   in
   let opening, closing = palette.table_header in
   let rule_opening, rule_closing = palette.rule in
   let dashes cells = String.concat "" (List.init cells (fun _ -> "\xe2\x94\x80")) in
   let rule =
-    List.map dashes widths |> String.concat palette.table_rule_gutter
+    if stacked then dashes stacked_width
+    else Array.to_list widths |> List.map dashes |> String.concat palette.table_rule_gutter
   in
-  if not palette.table_frame then
-    (opening ^ draw 0 header ^ closing)
-    :: (rule_opening ^ rule ^ rule_closing)
-    :: List.mapi (fun index -> draw (index + 1)) body
+  let header = draw 0 (List.hd prepared) |> List.map (fun line -> opening ^ line ^ closing) in
+  incr next_row; (* the rule follows the header *)
+  let body = List.mapi (fun index row ->
+    let separator = if stacked && index > 0 then begin
+      incr next_row;
+      [rule_opening ^ rule ^ rule_closing]
+    end else [] in
+    separator @ draw (index + 1) row) (List.tl prepared) |> List.concat in
+  if not framed then
+    header @ [rule_opening ^ rule ^ rule_closing] @ body
   else
     (* The box. Each segment spans its column plus the space on either side,
        so a junction lands exactly where the gutter's bar does and the border
@@ -1036,16 +1139,17 @@ let table_block ?on_cell ?source_rows palette ~width ~alignments ~header ~body =
     let border ~left ~joint ~right =
       rule_opening
       ^ left
-      ^ (List.map (fun cells -> dashes (cells + 2)) widths
+      ^ ((if stacked then [stacked_width] else Array.to_list widths)
+        |> List.map (fun cells -> dashes (cells + 2))
         |> String.concat joint)
       ^ right ^ rule_closing
     in
     let edged row = rule_opening ^ "\xe2\x94\x82" ^ rule_closing ^ " " ^ row
       ^ " " ^ rule_opening ^ "\xe2\x94\x82" ^ rule_closing in
     border ~left:"\xe2\x94\x8c" ~joint:"\xe2\x94\xac" ~right:"\xe2\x94\x90"
-    :: edged (opening ^ draw 0 header ^ closing)
-    :: border ~left:"\xe2\x94\x9c" ~joint:"\xe2\x94\xbc" ~right:"\xe2\x94\xa4"
-    :: (List.mapi (fun index row -> edged (draw (index + 1) row)) body
+    :: (List.map edged header
+       @ [border ~left:"\xe2\x94\x9c" ~joint:"\xe2\x94\xbc" ~right:"\xe2\x94\xa4"]
+       @ List.map edged body
        @ [ border ~left:"\xe2\x94\x94" ~joint:"\xe2\x94\xb4"
              ~right:"\xe2\x94\x98" ])
 
@@ -1246,7 +1350,8 @@ type block_layout = {
   source_blocks : source_block list;
 }
 
-let render_streaming_internal ?on_block ?on_diagram ?on_semantic ?on_unmapped ~palette ~width text =
+let render_streaming_internal ?on_block ?on_diagram ?on_semantic ?on_unmapped
+    ?on_clipped ?on_width_sensitive_fence ~palette ~width text =
   let width = max 1 width in
   let rows = ref [] in
   let rendered_rows = ref 0 in
@@ -1331,15 +1436,44 @@ let render_streaming_internal ?on_block ?on_diagram ?on_semantic ?on_unmapped ~p
          | Some _ -> emit_inline ~joins_previous:(i>0) ~base:!source_byte (render_lexed_line_with_spans ~palette ~width pieces));
         source_byte := !source_byte + String.length (String.concat "" (List.map fst pieces)) + 1) lines
     in
+    let emit_undrawn_source placement fragments =
+      let fragments = List.filter (fun (fragment : Masc_tui_mermaid.undrawn_source) ->
+        fragment.placement = placement) fragments in
+      if fragments <> [] then begin
+        (* This is a section marker, not another occurrence of source text. *)
+        emit_all (code_rows palette ~width "mermaid: undrawn source follows");
+        let source = body_text () in
+        List.iter (fun (fragment : Masc_tui_mermaid.undrawn_source) ->
+          let offset = ref fragment.source_start in
+          let text = String.sub source fragment.source_start (fragment.source_end - fragment.source_start) in
+          let lines = String.split_on_char '\n' text in
+          let last = List.length lines - 1 in
+          List.iteri (fun i line ->
+            let visible = if i < last && String.ends_with ~suffix:"\r" line
+              then String.sub line 0 (String.length line - 1) else line in
+            emit_code ~joins_previous:(i>0) ~base:(body_base + !offset) visible;
+            offset := !offset + String.length line + 1) lines) fragments
+      end
+    in
     Option.iter
       (fun language ->
         let label = fence_header_label language in
-        let on_language = Option.map (fun _ visible ->
-          emit_run {joins_previous=false;semantic_text=label;
-            origins=Array.init (String.length label) (fun byte -> Some (Generated {block_start;field=Fence_language;byte}));
-            visible_rows=[!rendered_rows, [{start_byte=0;end_byte=visible}]];
-            reading=Source_order}) on_semantic in
+        let on_language =
+          if Option.is_none on_semantic && Option.is_none on_clipped then None
+          else Some (fun visible ->
+            if visible < String.length label then Option.iter (fun notify -> notify ()) on_clipped;
+            Option.iter (fun _ ->
+              emit_run {joins_previous=false;semantic_text=label;
+                origins=Array.init (String.length label) (fun byte -> Some (Generated {block_start;field=Fence_language;byte}));
+                visible_rows=[!rendered_rows, [{start_byte=0;end_byte=visible}]];
+                reading=Source_order}) on_semantic)
+        in
         emit_all [code_header ?on_language palette ~width label]) language;
+    (match language with
+     | Some "mermaid" -> Option.iter (fun notify -> notify ()) on_width_sensitive_fence
+     | Some tag when is_alphatex_tag tag ->
+         Option.iter (fun notify -> notify ()) on_width_sensitive_fence
+     | Some _ | None -> ());
     let prepared = match closed, language, on_diagram with
       | true, Some "mermaid", Some prepare -> prepare ~row:!rendered_rows (body_text ())
       | (true | false), (Some _ | None), (Some _ | None) -> None in
@@ -1348,8 +1482,11 @@ let render_streaming_internal ?on_block ?on_diagram ?on_semantic ?on_unmapped ~p
      | None, Some "mermaid", _ ->
          let body_width = max 1 (width - Layout.display_width palette.code_gutter) in
          (match on_semantic with
-          | None -> (match Masc_tui_mermaid.render ~cols:body_width (body_text ()) with
-              | Ok rows -> List.iter (fun row -> emit_all (code_rows palette ~width row)) rows
+          | None -> (match Masc_tui_mermaid.render_with_status ~cols:body_width (body_text ()) with
+              | Ok rendered ->
+                  emit_undrawn_source Masc_tui_mermaid.Before_diagram rendered.undrawn_sources;
+                  List.iter (fun row -> emit_all (code_rows palette ~width row)) rendered.rows;
+                  emit_undrawn_source Masc_tui_mermaid.After_diagram rendered.undrawn_sources
               | Error failure ->
                   emit_all (code_rows palette ~width (mermaid_failure_text failure));
                   List.iter (fun line -> emit_all (code_rows palette ~width line.source_text)) body)
@@ -1358,6 +1495,7 @@ let render_streaming_internal ?on_block ?on_diagram ?on_semantic ?on_unmapped ~p
                   emit_generated ~block_start ~field:Mermaid_diagnostic (mermaid_failure_text failure);
                   List.iteri (fun i line -> emit_code ~joins_previous:(i>0) ~base:line.source_start line.source_text) body
               | Ok mapped ->
+                  emit_undrawn_source Masc_tui_mermaid.Before_diagram mapped.undrawn_sources;
                   let labels = match mapped.labels with
                     | Complete labels -> labels
                     | Incomplete {mapped;missing} ->
@@ -1385,7 +1523,8 @@ let render_streaming_internal ?on_block ?on_diagram ?on_semantic ?on_unmapped ~p
                       origins=Array.map (fun (range : Masc_tui_mermaid.label_source_range) ->
                         Some (Original {start_byte=body_base+range.start_byte;end_byte=body_base+range.end_byte})) label.ranges;
                       visible_rows=Option.value (Hashtbl.find_opt visible label.identity) ~default:[] |> List.rev;
-                      reading=Drawn_diagram {block_start}}) labels))
+                      reading=Drawn_diagram {block_start}}) labels;
+                  emit_undrawn_source Masc_tui_mermaid.After_diagram mapped.undrawn_sources))
      | None, Some tag, Some lexer when is_alphatex_tag tag ->
          let source = body_text () in
          let body_width = max 1 (width - Layout.display_width palette.code_gutter) in
@@ -1458,9 +1597,11 @@ let render_streaming_internal ?on_block ?on_diagram ?on_semantic ?on_unmapped ~p
                       table_row_positions ~columns:(List.length alignments) ~source_start:line.source_start line.source_text)) on_semantic in
                     let on_cell=Option.map (fun _ (cell : table_cell_source) ->
                       emit_run {joins_previous=false;semantic_text=cell.cell_text; origins=original_positions 0 cell.source_positions;
-                        visible_rows=[row_start+cell.rendered_row,[cell.visible_range]];
+                        visible_rows=List.map (fun fragment ->
+                          row_start+fragment.rendered_row, fragment.visible_ranges) cell.fragments;
                         reading=Source_order}) on_semantic in
-                    emit_all (table_block ?source_rows ?on_cell palette ~width ~alignments ~header ~body);
+                    emit_all (table_block ?source_rows ?on_cell ?on_clipped
+                      palette ~width ~alignments ~header ~body);
                     walk None [] remaining
                 | None ->
                     begin_block ~can_absorb_terminal:(Option.is_some (table_cells line.source_text)) line;
@@ -1544,3 +1685,22 @@ let render ~palette ~width text =
   if not (String.contains text '\n') && Option.is_none (fence_marker text) then
     block_rows palette ~width:(max 1 width) text
   else (render_streaming ~palette ~width text).rows
+
+type clipping_render = {
+  reading_rows : string list;
+  clipped : bool;
+  width_sensitive_fence : bool;
+}
+
+let render_with_clipping ~palette ~width text =
+  if not (String.contains text '\n') && Option.is_none (fence_marker text) then
+    { reading_rows = block_rows palette ~width:(max 1 width) text;
+      clipped = false; width_sensitive_fence = false }
+  else
+    let clipped = ref false and width_sensitive_fence = ref false in
+    let rendered = render_streaming_internal
+        ~on_clipped:(fun () -> clipped := true)
+        ~on_width_sensitive_fence:(fun () -> width_sensitive_fence := true)
+        ~palette ~width text in
+    { reading_rows = rendered.rows; clipped = !clipped;
+      width_sensitive_fence = !width_sensitive_fence }

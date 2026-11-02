@@ -251,6 +251,17 @@ let reasoning_effort_to_string = function
 let reasoning_effort_of_string s = List.find_opt (fun v -> String.equal (reasoning_effort_to_string v) s) all_of_reasoning_effort
 ;;
 
+let reasoning_effort_of_requested : Llm_provider.Reasoning_effort.t -> reasoning_effort = function
+  | Llm_provider.Reasoning_effort.None_ -> Effort_none
+  | Minimal -> Effort_minimal
+  | Low -> Effort_low
+  | Medium -> Effort_medium
+  | High -> Effort_high
+  | XHigh -> Effort_xhigh
+  | Max -> Effort_max
+  | Ultra -> Effort_ultra
+;;
+
 type model_catalog_source =
   | Provider_catalog
   | Fake_catalog

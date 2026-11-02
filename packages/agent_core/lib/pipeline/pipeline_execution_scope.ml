@@ -12,15 +12,20 @@ type t =
 let core_error error = Error.Internal (Execution_agent_scope.error_to_string error)
 
 (* A [Closed Succeeded] turn/provider found at a resume ordinal under a still-open
-   run: an idempotent completed boundary. [Settled_provider_closed] carries the
+   run: an idempotent completed boundary. [Open_turn] carries the
    still-open turn (window: crash inside [close_success] after the provider close
    but before the turn close) so the caller can finish that interrupted close;
-   [Settled_turn_closed] needs no further journal write (window: crash after the
+   [Closed_turn] needs no further journal write (window: crash after the
    turn close but before the root finish). *)
 type settled_boundary =
-  { provider : Execution_agent_scope.provider_attempt option
-  ; turn_to_close : Execution_agent_scope.turn option
-  }
+  | Closed_turn of
+      { turn : Execution_agent_scope.turn
+      ; provider : Execution_agent_scope.provider_attempt
+      }
+  | Open_turn of
+      { turn : Execution_agent_scope.turn
+      ; provider : Execution_agent_scope.provider_attempt
+      }
 
 type resumed =
   | Fresh
@@ -28,7 +33,7 @@ type resumed =
   | Settled of settled_boundary
 
 let open_turn scope ~ordinal =
-  match scope with
+  let+ turn = match scope with
   | None -> Ok { turn = Transient ordinal; provider = None }
   | Some scope ->
     (match Execution_agent_scope.resume_turn scope ~ordinal with
@@ -44,7 +49,9 @@ let open_turn scope ~ordinal =
        Error
          (core_error
             (Execution_agent_scope.Resume_topology_mismatch
-               "fresh turn ordinal is already settled")))
+                  "fresh turn ordinal is already settled"))) in
+  Execution_context.flush_bus_observations ();
+  turn
 ;;
 
 let resume_current scope =
@@ -63,7 +70,7 @@ let resume_current scope =
                (Execution_agent_scope.Resume_topology_mismatch
                   "closed succeeded turn has no provider attempt authority"))
         | Ok (Resume_provider_settled provider) ->
-          Ok (Settled { provider = Some provider; turn_to_close = None })
+          Ok (Settled (Closed_turn { turn; provider }))
         | Ok (Resume_provider_open _) ->
           Error
             (core_error
@@ -74,23 +81,36 @@ let resume_current scope =
         | Error error -> Error (core_error error)
         | Ok Resume_provider_absent -> Ok Fresh
         | Ok (Resume_provider_settled provider) ->
-          Ok (Settled { provider = Some provider; turn_to_close = Some turn })
+          Ok (Settled (Open_turn { turn; provider }))
         | Ok (Resume_provider_open provider) ->
           Ok (Active { turn = Durable turn; provider = Some provider })))
 ;;
 
 let finalize_settled boundary =
-  match boundary.turn_to_close with
-  | None -> Ok ()
-  | Some turn ->
+  let+ () = match boundary with
+  | Closed_turn _ -> Ok ()
+  | Open_turn {turn;_} ->
     Execution_agent_scope.close_turn turn Execution_event.Succeeded
-    |> Result.map_error core_error
+    |> Result.map_error core_error in
+  Execution_context.flush_bus_observations ()
+;;
+
+let settled_turn_ordinal = function
+  | Closed_turn {turn;_} | Open_turn {turn;_} -> Execution_agent_scope.turn_ordinal turn
 ;;
 
 let turn_ordinal t =
   match t.turn with
   | Transient ordinal -> ordinal
   | Durable turn -> Execution_agent_scope.turn_ordinal turn
+;;
+
+let record_turn_ready t ~tool_names =
+  let+ () = match t.turn with
+    | Transient _ -> Ok ()
+    | Durable turn -> Execution_agent_scope.record_turn_ready turn ~tool_names
+      |> Result.map_error core_error in
+  Execution_context.flush_bus_observations ()
 ;;
 
 let before_provider_attempt t binding =
@@ -115,7 +135,7 @@ let record_provider_request_provenance (t : t) provenance =
 ;;
 
 let record_provider_response (t : t) response =
-  match t.turn, t.provider with
+  let+ () = match t.turn, t.provider with
   | Transient _, None -> Ok ()
   | Durable _, Some provider ->
     Execution_agent_scope.record_provider_response provider response
@@ -124,7 +144,8 @@ let record_provider_response (t : t) response =
     Error
       (core_error
          (Execution_agent_scope.Resume_topology_mismatch
-            "provider response has no matching provider attempt authority"))
+            "provider response has no matching provider attempt authority")) in
+  Execution_context.flush_bus_observations ()
 ;;
 
 let provider_response (t : t) =
@@ -170,25 +191,19 @@ let settled_invocations_with_results (t : t) =
 ;;
 
 let settled_invocations boundary =
-  match boundary.provider with
-  | None -> Ok []
-  | Some provider ->
+  match boundary with
+  | Closed_turn {provider;_} | Open_turn {provider;_} ->
     Execution_agent_scope.provider_invocations provider |> Result.map_error core_error
 ;;
 
 let settled_response boundary =
-  match boundary.provider with
-  | Some provider ->
+  match boundary with
+  | Closed_turn {provider;_} | Open_turn {provider;_} ->
     Execution_agent_scope.provider_response provider |> Result.map_error core_error
-  | None ->
-    Error
-      (core_error
-         (Execution_agent_scope.Resume_topology_mismatch
-            "settled execution has no provider response authority"))
 ;;
 
 let close_success (t : t) =
-  match t.provider, t.turn with
+  let+ () = match t.provider, t.turn with
   | None, Transient _ -> Ok ()
   | Some provider, Durable turn ->
     let* () =
@@ -198,5 +213,6 @@ let close_success (t : t) =
     Execution_agent_scope.close_turn turn Execution_event.Succeeded
     |> Result.map_error core_error
   | None, Durable _ | Some _, Transient _ ->
-    Error (core_error Execution_agent_scope.Invocation_locator_mismatch)
+    Error (core_error Execution_agent_scope.Invocation_locator_mismatch) in
+  Execution_context.flush_bus_observations ()
 ;;

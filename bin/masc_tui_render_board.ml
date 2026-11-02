@@ -1072,17 +1072,19 @@ let board_read_pane ~focus (state : state) (list_post : board_post) ~rows ~cols 
     | Board_detail.Ready (_, comments, _) -> List.length comments
     | Board_detail.Absent | Board_detail.Loading | Board_detail.Failed _ -> 0
   in
+  let content_rows =
+    max 0 (rows - if Option.is_some state.board_attachment_status then 1 else 0) in
   (* [board_read_allocation] and [board_read_side_allocation] share field
      names but are different record types, so this match cannot return one
      of them -- only the scroll and the two drawn-row counts survive it. *)
   let scroll, body_lines_drawn, comment_lines_drawn =
     match side_layout with
     | Some (body_cols, comment_cols) ->
-        draw_board_read_side ~focus buf state document ~rows ~body_cols
+        draw_board_read_side ~focus buf state document ~rows:content_rows ~body_cols
           ~comment_cols ~total_lines ~detail_line_count ~detail_comment_count
     | None ->
         let row_budget =
-          Layout.allocate_board_read ~terminal_rows:rows
+          Layout.allocate_board_read ~terminal_rows:content_rows
             ~body_line_count:total_lines ~comment_line_count:detail_line_count
         in
         let content_height = row_budget.body_rows in

@@ -12,6 +12,17 @@
 
 (** {1 Window counters (runtime-visible)} *)
 
+module Count_map : Map.S with type key = string
+
+val count_map_incr :
+  int Count_map.t -> string -> int Count_map.t
+
+val top_counts_map_json :
+  ?limit:int ->
+  name_key:string ->
+  int Count_map.t ->
+  Yojson.Safe.t list
+
 val count_table_incr :
   (string, int) Hashtbl.t -> string -> unit
 (** [count_table_incr tbl key] increments [tbl.(key)] by 1

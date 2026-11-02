@@ -99,6 +99,10 @@ let unavailable_status ~memory_search_available ~turn_ref ~reason =
       ~unavailable:Prompt_names.keeper_recall_status_search_hint_unavailable
   else main
 
+let capacity_deferred_status ~turn_ref =
+  Prompt_registry.render_prompt_template Prompt_names.keeper_recall_status_capacity_deferred
+    ["turn_ref", Ids.Turn_ref.to_string turn_ref]
+
 (* ---- the body ---- *)
 
 (* What an item writes for a time no date can be made of. *)

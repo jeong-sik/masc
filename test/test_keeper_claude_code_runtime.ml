@@ -192,8 +192,9 @@ type fixture_step =
   | Emit_with_input of string
   | Emit_and_read of string
   | Close_transport
+  | Pause of float
 
-let fixture_script ?system_marker ?prompt_marker ?(remove_after_auth = false) ?(forbid_mcp = false)
+let fixture_script ?system_marker ?prompt_marker ?argv_marker ?(remove_after_auth = false) ?(forbid_mcp = false)
     ?(exit_before_turn_admitted = false) ?(block_user_write = false)
     ?(auth_body = auth_subscription) ?(auth_exit = 0) ?auth_stderr ?auth_first_body
     lines =
@@ -236,6 +237,10 @@ let fixture_script ?system_marker ?prompt_marker ?(remove_after_auth = false) ?(
   output_string output "  esac\n";
   output_string output "done\n";
   output_string output "[ -n \"$session\" ] || exit 94\n";
+  Option.iter (fun marker ->
+    let stamp = "import json,sys; out=open(sys.argv[1],'a'); out.write(json.dumps(sys.argv[2:])+'\\n'); out.close()" in
+    output_string output ("python3 -c " ^ shell_quote stamp ^ " " ^ shell_quote marker ^ " \"$@\"\n"))
+    argv_marker;
   output_string output
     "emit() { printf '%s\\n' \"$1\" | sed \"s/__SESSION__/$session/g\"; }\n";
   output_string output "IFS= read -r initialize\n";
@@ -269,7 +274,8 @@ let fixture_script ?system_marker ?prompt_marker ?(remove_after_auth = false) ?(
       | Emit_and_read line ->
         output_string output ("emit " ^ shell_quote line ^ "\n");
         output_string output "IFS= read -r ignored_response\n"
-      | Close_transport -> output_string output "exit 0\n")
+      | Close_transport -> output_string output "exit 0\n"
+      | Pause seconds -> output_string output (Printf.sprintf "sleep %.17g\n" seconds))
     lines;
   output_string output "while IFS= read -r ignored; do :; done\n";
   close_out output;
@@ -277,10 +283,10 @@ let fixture_script ?system_marker ?prompt_marker ?(remove_after_auth = false) ?(
   path
 ;;
 
-let with_fixture ?system_marker ?prompt_marker ?remove_after_auth ?forbid_mcp ?exit_before_turn_admitted ?block_user_write ?auth_body ?auth_exit
+let with_fixture ?system_marker ?prompt_marker ?argv_marker ?remove_after_auth ?forbid_mcp ?exit_before_turn_admitted ?block_user_write ?auth_body ?auth_exit
     ?auth_stderr ?auth_first_body lines f =
   let path =
-    fixture_script ?system_marker ?prompt_marker ?remove_after_auth ?forbid_mcp ?exit_before_turn_admitted ?block_user_write ?auth_body ?auth_exit
+    fixture_script ?system_marker ?prompt_marker ?argv_marker ?remove_after_auth ?forbid_mcp ?exit_before_turn_admitted ?block_user_write ?auth_body ?auth_exit
       ?auth_stderr ?auth_first_body lines
   in
   Fun.protect
@@ -338,30 +344,44 @@ let with_fixture_sequence
     (fun () -> f path)
 ;;
 
-let runtime_toml ?(tools_support = true) cli_path =
+let runtime_toml ?(tools_support = true) ?(reasoning_effort = None)
+    ?(turn_timeout_s = None) ?(model_id = "claude") cli_path =
+  let inference =
+    (match reasoning_effort with
+     | None -> ""
+     | Some effort -> Printf.sprintf "reasoning-effort = %S\n"
+         (Llm_provider.Reasoning_effort.to_string effort))
+    ^ (match turn_timeout_s with
+       | None -> ""
+       | Some seconds -> Printf.sprintf "turn-timeout-s = %.17g\n" seconds) in
   Printf.sprintf
     "[providers.claude]\n\
      protocol = \"claude-code\"\n\
      command = %S\n\
      is-non-interactive = true\n\
      \n\
-     [models.claude]\n\
+     [models.%s]\n\
      api-name = \"claude-fixture\"\n\
      max-context = 200000\n\
      tools-support = %b\n\
+     %s\
      \n\
-     [claude.claude]\n\
+     [claude.%s]\n\
      \n\
      [runtime]\n\
-     default = \"claude.claude\"\n"
+     default = %S\n"
     cli_path
+    model_id
     tools_support
+    inference
+    model_id
+    ("claude." ^ model_id)
 ;;
 
-let with_runtime_config ?tools_support cli_path f =
+let with_runtime_config ?tools_support ?reasoning_effort ?turn_timeout_s cli_path f =
   let path = Filename.temp_file "masc-keeper-claude-runtime-" ".toml" in
   let output = open_out_bin path in
-  output_string output (runtime_toml ?tools_support cli_path);
+  output_string output (runtime_toml ?tools_support ?reasoning_effort ?turn_timeout_s cli_path);
   close_out output;
   Fun.protect ~finally:(fun () -> Sys.remove path) (fun () -> f path)
 ;;
@@ -421,6 +441,7 @@ let content_of_wire_message raw =
 let fixture_trace_with_no_completed_turn = "fixture-trace-no-completed-turn"
 
 let run_keeper_turn ?(tools = []) ?(tools_support = true) ?(initial_messages = []) ?event_bus
+    ?(reasoning_effort = None) ?(turn_timeout_s = None) ?hooks
     ?required_native_posture
     ?event_capture ?on_child_content_observation ?on_native_task_observation ?on_native_tool_progress ?on_native_tool_completion ?on_event ?agent_core_checkpoint ?runtime_manifest_context
     ?runtime_manifest_append ?raw_trace ?on_official_client_native_action
@@ -437,7 +458,7 @@ let run_keeper_turn ?(tools = []) ?(tools_support = true) ?(initial_messages = [
       Keeper_tool_call_log.reset_for_testing ();
       Runtime.For_testing.restore runtime_snapshot)
     (fun () ->
-       with_runtime_config ~tools_support cli_path (fun runtime_path ->
+       with_runtime_config ~tools_support ~reasoning_effort ~turn_timeout_s cli_path (fun runtime_path ->
          Eio_main.run (fun env ->
            Eio.Switch.run (fun sw ->
              Eio_context.set_env env;
@@ -464,6 +485,7 @@ let run_keeper_turn ?(tools = []) ?(tools_support = true) ?(initial_messages = [
                            ~base_path ~media_store:(Tool_blob_media_store.of_base_path ~base_path)
                            ~goal
                            ~system_prompt
+                           ?hooks
                            ~tools
                            ~agent_core_tools:tools
                            ?required_native_posture
@@ -2331,6 +2353,92 @@ let test_blank_completion_rejected_without_losing_session () =
     [[]; ["result", `Null]; ["result", `Int 7]]
 ;;
 
+let test_selected_claude_inference_survives_catalog_reload
+    ?(remove_runtime = false) ?hook_effort ?(delay_s = 0.)
+    ?(selected_timeout = None) ?(replacement_timeout = None)
+    ?(http_accepted = [Llm_provider.Reasoning_effort.None_; Minimal; Low; Medium; High; XHigh; Max; Ultra])
+    ~selected ~replacement ~expected_effort ~expected_thinking () =
+  let base_path = temp_workspace () in
+  let previous_catalog = Llm_provider.Catalog_snapshot.current () in
+  Fun.protect ~finally:(fun () ->
+    (Llm_provider.Catalog_snapshot.publish previous_catalog);
+    cleanup_tree base_path) @@ fun () ->
+  let marker = Filename.concat base_path "selected-argv.jsonl" in
+  let install_http_catalog () =
+    let source = Printf.sprintf {|[[models]]
+model_id = "claude-fixture"
+supports_reasoning = true
+accepted_reasoning_efforts = [%s]
+|} (String.concat ", " (List.map (fun effort ->
+        Printf.sprintf "%S" (Llm_provider.Reasoning_effort.to_string effort)) http_accepted)) in
+    let catalog = Llm_provider.Model_catalog.of_toml_string
+        ~source:"Claude selected-declaration fixture" source |> require_ok Fun.id in
+    (Llm_provider.Catalog_snapshot.publish (Masc_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None)));
+    match Llm_provider.Capabilities.for_model_id "claude-fixture" with
+    | Some caps -> check bool "the controlled HTTP ladder is actually loaded" true
+        (caps.accepted_reasoning_efforts=Some http_accepted)
+    | None -> fail "controlled HTTP capability row was not loaded" in
+  with_fixture ~argv_marker:marker
+    [Pause delay_s; Emit (assistant ~turn_id:"selected" "CLAUDE_SELECTED_INTENT");
+     Emit (result ~turn_id:"selected-result" "CLAUDE_SELECTED_INTENT")]
+    (fun cli_path ->
+      let replacement_path = Filename.concat base_path "replacement.toml" in
+      Out_channel.with_open_bin replacement_path (fun out -> output_string out
+        (runtime_toml ~reasoning_effort:replacement ~turn_timeout_s:replacement_timeout
+           ~model_id:(if remove_runtime then "replacement" else "claude") cli_path));
+      let attempts = ref 0 in
+      let on_runtime_attempt (attempt : Keeper_turn_driver.runtime_attempt) =
+        incr attempts;
+        check string "the callback follows selection of this runtime" "claude.claude" attempt.runtime_id;
+        Runtime.init_default ~config_path:replacement_path |> require_ok Fun.id;
+        check bool "the live declaration really changed" true
+          (Runtime.reasoning_effort_of_runtime_id "claude.claude"
+             = (if remove_runtime then None else replacement));
+        if remove_runtime then check bool "the selected runtime is absent from the new catalog" true
+            (Option.is_none (Runtime.get_runtime_by_id "claude.claude"));
+        check (option (float 0.000001)) "the live idle declaration really changed"
+          (if remove_runtime then None else replacement_timeout)
+          (Runtime.turn_timeout_s_of_runtime_id "claude.claude");
+        install_http_catalog () in
+      let hooks = Option.map (fun effort ->
+        {Agent_core.Hooks.empty with before_turn_params=Some (function
+           | Agent_core.Hooks.BeforeTurnParams {current_params; _} ->
+             Agent_core.Hooks.AdjustParams {current_params with reasoning_effort=effort}
+           | _ -> Agent_core.Hooks.Continue)}) hook_effort in
+      let invocations () =
+        In_channel.with_open_bin marker In_channel.input_lines
+        |> List.map (fun line -> Yojson.Safe.from_string line
+          |> Yojson.Safe.Util.to_list |> List.map Yojson.Safe.Util.to_string) in
+      let rec flag key = function
+        | name :: value :: _ when String.equal name key -> Some value
+        | _ :: rest -> flag key rest
+        | [] -> None in
+      let check_args argv =
+        check (option string) "the selected effort reaches the native CLI" expected_effort
+          (flag "--effort" argv);
+        check (option string) "explicit none is distinct from no thinking option" expected_thinking
+          (flag "--thinking" argv) in
+      let send () =
+        let answer = run_keeper_turn ~base_path ~cli_path ~goal:"Return the selected intent marker."
+            ~reasoning_effort:selected ~turn_timeout_s:selected_timeout ?hooks
+            ~on_runtime_attempt () |> require_ok Agent_core.Error.to_string in
+        check string "the actual native turn completed" "CLAUDE_SELECTED_INTENT"
+          (keeper_response_text answer) in
+      send ();
+      (match invocations () with [argv] -> check_args argv
+       | _ -> fail "expected exactly one fresh native invocation");
+      send ();
+      check int "two selected public candidates" 2 !attempts;
+      match invocations () with
+      | [fresh; resumed] ->
+        check_args fresh; check_args resumed;
+        check bool "first native process starts a fresh session" true
+          (List.exists (String.starts_with ~prefix:"--session-id=") fresh);
+        check bool "second native process resumes the same Keeper session" true
+          (List.exists (String.starts_with ~prefix:"--resume=") resumed)
+      | _ -> fail "expected one fresh and one resumed native invocation")
+;;
+
 let test_keeper_settles_and_resumes () =
   let effect_count = ref 0 in
   let tool = Agent_core.Tool.create ~name:"masc_probe" ~description:"Record one effect"
@@ -2975,20 +3083,20 @@ let run_direct_attempt
                ~sw
                (fun () ->
                   Runtime.init_default ~config_path:runtime_path |> Result.get_ok;
+                  let runtime = Runtime.get_runtime_by_id "claude.claude" |> Option.get in
                   let config =
-                    match Runtime.get_runtime_by_id "claude.claude" with
-                    | Some
-                        { Runtime_instance.execution = Runtime_execution.Claude_code config
-                        ; _
-                        } ->
-                      config
-                    | Some _ | None -> fail "Claude runtime fixture did not resolve"
+                    match runtime.Runtime_instance.execution with
+                    | Runtime_execution.Claude_code config -> config
+                    | Agent_core _ | Codex_app_server _ | Antigravity_cli _ | Muse_serve _ ->
+                      fail "Claude runtime fixture did not resolve"
                   in
                   let config = match admission_timeout_s with
                     | None -> config
                     | Some timeout_s -> { config with Runtime_execution.timeout_s }
                   in
                   Keeper_claude_code_runtime.run ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = "claude-pre-dispatch" })
+                    ~configured_reasoning_effort:runtime.model.reasoning_effort
+                    ~turn_timeout_s:runtime.model.turn_timeout_s
                     ?terminal_effect_state
                     ?composed_context
                     ?argument_source ?librarian_front
@@ -2996,7 +3104,7 @@ let run_direct_attempt
                     ?required_native_posture ?on_native_task_observation ?on_child_content_observation
                     ~turn_start
                     ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input
-                      ~runtime:(Runtime.get_runtime_by_id "claude.claude" |> Option.get))
+                      ~runtime)
                     ~pre_tool_rejects:(ref [])
                     ~runtime_id:"claude.claude"
                     ~keeper_name:"claude-pre-dispatch"
@@ -6448,7 +6556,61 @@ let () =
   Prompt_registry.set_markdown_dir (Masc_test_deps.source_path "config/prompts");
   run
     "keeper_claude_code_runtime"
-    [ ( "async result outbox",[test_case "original result is delivered on Start and Resume" `Quick
+    [ ( "native effort authority",
+        List.map (fun (name, selected, expected_effort, expected_thinking) ->
+          test_case name `Quick
+            (test_selected_claude_inference_survives_catalog_reload ~http_accepted:[Low]
+               ~selected ~replacement:selected ~expected_effort ~expected_thinking))
+          ["Keeper omission ignores a colliding HTTP ladder", None, None, None;
+           "Keeper explicit none ignores a colliding HTTP ladder", Some None_, None, Some "disabled";
+           "Keeper minimal keeps native low admission", Some Minimal, Some "low", None;
+           "Keeper low ignores a colliding HTTP ladder", Some Low, Some "low", None;
+           "Keeper medium ignores a colliding HTTP ladder", Some Medium, Some "medium", None;
+           "Keeper high ignores a colliding HTTP ladder", Some High, Some "high", None;
+           "Keeper xhigh ignores a colliding HTTP ladder", Some XHigh, Some "xhigh", None;
+           "Keeper max ignores a colliding HTTP ladder", Some Max, Some "max", None;
+           "Keeper ultra keeps native max admission", Some Ultra, Some "max", None]
+        @ [test_case "Keeper hook override ignores a colliding HTTP ladder" `Quick
+             (test_selected_claude_inference_survives_catalog_reload ~http_accepted:[Low]
+                ~hook_effort:(Some Ultra) ~selected:(Some High) ~replacement:(Some High)
+                ~expected_effort:(Some "max") ~expected_thinking:None);
+           test_case "Keeper hook clear leaves native effort absent" `Quick
+             (test_selected_claude_inference_survives_catalog_reload ~http_accepted:[Low]
+                ~hook_effort:None ~selected:(Some High) ~replacement:(Some High)
+                ~expected_effort:None ~expected_thinking:None)])
+    ; ( "selected inference",[
+          test_case "selected high survives a replacement low" `Quick
+            (test_selected_claude_inference_survives_catalog_reload
+               ~selected:(Some High) ~replacement:(Some Low) ~expected_effort:(Some "high") ~expected_thinking:None);
+          test_case "selected high survives removing the effort declaration" `Quick
+            (test_selected_claude_inference_survives_catalog_reload
+               ~selected:(Some High) ~replacement:None ~expected_effort:(Some "high") ~expected_thinking:None);
+          test_case "selected absence survives adding a live low" `Quick
+            (test_selected_claude_inference_survives_catalog_reload
+               ~selected:None ~replacement:(Some Low) ~expected_effort:None ~expected_thinking:None);
+          test_case "selected explicit none survives a replacement low" `Quick
+            (test_selected_claude_inference_survives_catalog_reload
+               ~selected:(Some None_) ~replacement:(Some Low) ~expected_effort:None ~expected_thinking:(Some "disabled"));
+          test_case "selected high survives removing its runtime" `Quick
+            (test_selected_claude_inference_survives_catalog_reload ~remove_runtime:true
+               ~selected:(Some High) ~replacement:(Some Low) ~expected_effort:(Some "high") ~expected_thinking:None);
+          test_case "selected unbounded idle survives a positive replacement" `Quick
+            (test_selected_claude_inference_survives_catalog_reload ~selected_timeout:(Some 0.)
+               ~replacement_timeout:(Some 0.025) ~delay_s:0.25
+               ~selected:None ~replacement:None ~expected_effort:None ~expected_thinking:None);
+          test_case "a hook overrides selected high with native max" `Quick
+            (test_selected_claude_inference_survives_catalog_reload ~hook_effort:(Some Ultra)
+               ~selected:(Some High) ~replacement:(Some Low) ~expected_effort:(Some "max") ~expected_thinking:None);
+          test_case "a hook clears the selected effort" `Quick
+            (test_selected_claude_inference_survives_catalog_reload ~hook_effort:None
+               ~selected:(Some High) ~replacement:(Some Low) ~expected_effort:None ~expected_thinking:None);
+          test_case "native minimal is still admitted as low" `Quick
+            (test_selected_claude_inference_survives_catalog_reload
+               ~selected:(Some Minimal) ~replacement:(Some Minimal) ~expected_effort:(Some "low") ~expected_thinking:None);
+          test_case "native ultra is still admitted as max" `Quick
+            (test_selected_claude_inference_survives_catalog_reload
+               ~selected:(Some Ultra) ~replacement:(Some Ultra) ~expected_effort:(Some "max") ~expected_thinking:None)])
+    ; ( "async result outbox",[test_case "original result is delivered on Start and Resume" `Quick
            test_original_outbox_result_is_delivered_on_start_and_resume;
          test_case "real Keeper acceptance rejection preserves loaded and new originals" `Quick
            test_rejecting_keeper_accept_preserves_loaded_and_new_originals])

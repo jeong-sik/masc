@@ -29,6 +29,7 @@ and reset_step =
   | Repair_field of string
   | Reset_goal_store
   | Restore_permission
+  | Inspect_path
 
 (* {1 Wire names}
 
@@ -52,6 +53,7 @@ let reset_step_name = function
   | Repair_field _ -> "repair_field"
   | Reset_goal_store -> "reset_goal_store"
   | Restore_permission -> "restore_permission"
+  | Inspect_path -> "inspect_path"
 
 (* {1 Rendering}
 
@@ -60,7 +62,7 @@ let reset_step_name = function
 
 let reason_to_string = function
   | Missing_after_init ->
-      "missing_after_init (goals.json is absent while its .last-good mirror exists)"
+      "missing_after_init (goals.json is absent and its .last-good mirror is not confirmed absent)"
   | Unreadable error -> "unreadable (" ^ Unix.error_message error ^ ")"
   | Not_json detail -> "not_json (" ^ detail ^ ")"
   | Schema_rejected { field; detail } ->
@@ -77,6 +79,7 @@ let reset_step_to_string = function
   | Repair_field field -> Printf.sprintf "inspect and repair location %S" field
   | Reset_goal_store -> "reset the goal store"
   | Restore_permission -> "restore read permission on the file"
+  | Inspect_path -> "inspect the store paths, links, mounts and server state before recovery"
 
 let to_string { file; reason; mirror; reset_step } =
   Printf.sprintf "goal_store: unavailable reason=%s file=%s mirror=%s reset=%s"
@@ -386,7 +389,7 @@ let reset_step_to_yojson reset_step : Yojson.Safe.t =
   let kind = kind_member, `String (reset_step_name reset_step) in
   match reset_step with
   | Repair_field field -> `Assoc [ kind; "field", `String field ]
-  | Reset_goal_store | Restore_permission -> `Assoc [ kind ]
+  | Reset_goal_store | Restore_permission | Inspect_path -> `Assoc [ kind ]
 
 let reset_step_of_yojson json =
   let* members = object_members json in
@@ -402,6 +405,9 @@ let reset_step_of_yojson json =
   | "restore_permission" ->
     let* () = exact_members ~required:[ kind_member ] members in
     Ok Restore_permission
+  | "inspect_path" ->
+    let* () = exact_members ~required:[ kind_member ] members in
+    Ok Inspect_path
   | other -> Error (Printf.sprintf "unknown goal store reset step %S" other)
 
 let record_to_yojson { file; reason; mirror; reset_step } : Yojson.Safe.t =

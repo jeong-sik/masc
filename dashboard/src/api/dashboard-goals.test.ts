@@ -563,6 +563,12 @@ describe('goalSourceUnavailable', () => {
     expect(parsed).toEqual({ ...schemaRejectedUnion, resetStep: reset_step })
   })
 
+  it('renders path inspection without recommending a reset', () => {
+    const message = goalStoreResetStepLabel('inspect_path', null)
+    expect(message).toContain('파일 경로')
+    expect(message).not.toContain('reset')
+  })
+
   it.each([
     ['unknown reason', { reason: 'corrupt', field: null }, 'unknown reason "corrupt"'],
     ['unknown mirror status', { mirror: { status: 'mirror_stale', goal_count: null } }, 'unknown mirror status "mirror_stale"'],

@@ -239,6 +239,19 @@ let test_skipped_scan_replays_with_its_typed_value () =
   | None -> fail "a skipped scan was not recorded"
 ;;
 
+let test_skipped_scan_replays_path_inspection () =
+  with_path @@ fun path ->
+  let registry = R.create ~path () in
+  let unavailable : Goal_store.unavailable =
+    { file = "/work/.masc/goals.json"; reason = Goal_store.Unreadable Unix.ENOENT;
+      mirror = Goal_store.Mirror_absent; reset_step = Goal_store.Inspect_path } in
+  R.record_scan_skipped registry ~run_id:"scan-path" ~started_at:31.0 ~unavailable;
+  match R.get (R.replay path) ~run_id:"scan-path" with
+  | Some (R.Scan_skipped { unavailable = replayed; _ }) ->
+      check bool "path inspection survives scan replay" true (replayed = unavailable)
+  | Some (R.Review _) | None -> fail "path-inspection scan did not replay"
+;;
+
 let test_skipped_scans_do_not_evict_retained_reviews () =
   with_path @@ fun path ->
   let registry = R.create ~path () in
@@ -290,6 +303,8 @@ let () =
     ; ( "skipped scans"
       , [ test_case "skipped scan replays with its typed value" `Quick
             test_skipped_scan_replays_with_its_typed_value
+        ; test_case "path inspection survives skipped-scan replay" `Quick
+            test_skipped_scan_replays_path_inspection
         ; test_case "skipped scans do not evict retained reviews" `Quick
             test_skipped_scans_do_not_evict_retained_reviews
         ] )

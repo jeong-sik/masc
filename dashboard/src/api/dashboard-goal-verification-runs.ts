@@ -6,6 +6,7 @@ import { isRecord } from '../components/common/normalize'
 import { get, type AbortableRequestOptions } from './core'
 import { decodeGoalProofCriterion } from './goal-proof'
 import type { GoalProofCriterion } from '../types/core'
+import { GOAL_STORE_RESET_STEPS, type GoalStoreResetStep } from '../types/goal-store-unavailable'
 import {
   parseVerificationToolObservation,
   type VerificationToolObservation,
@@ -20,7 +21,7 @@ export type GoalVerificationRunStatus = 'running' | 'reviewed' | 'committed' | '
 export type GoalVerificationRowKind = 'review' | 'scan_skipped'
 export type GoalStoreUnavailableReason = 'missing_after_init' | 'unreadable' | 'not_json' | 'schema_rejected'
 export type GoalStoreMirrorStatus = 'mirror_absent' | 'mirror_unreadable' | 'mirror_decodes' | 'mirror_rejected'
-export type GoalStoreResetStep = 'repair_field' | 'reset_goal_store' | 'restore_permission'
+export type { GoalStoreResetStep } from '../types/goal-store-unavailable'
 
 export interface GoalVerificationScanSkippedRecord {
   runId: string
@@ -104,7 +105,8 @@ function parseScanSkipped(raw: Record<string, unknown>, context: string): GoalVe
   const goalCount = raw.mirror.goal_count
   if (goalCount !== null && !Number.isSafeInteger(goalCount)) protocolError(`${context}.mirror.goal_count must be an integer or null`)
   const resetStep = raw.reset_step
-  if (resetStep !== 'repair_field' && resetStep !== 'reset_goal_store' && resetStep !== 'restore_permission') {
+  const resetStepToken = GOAL_STORE_RESET_STEPS.find(step => step === resetStep)
+  if (resetStepToken === undefined) {
     protocolError(`${context}.reset_step has unknown value ${JSON.stringify(resetStep)}`)
   }
   return {
@@ -114,7 +116,7 @@ function parseScanSkipped(raw: Record<string, unknown>, context: string): GoalVe
     field,
     file: nonEmptyString(raw.file, `${context}.file`),
     mirror: { status: mirrorStatus, goalCount: goalCount as number | null },
-    resetStep,
+    resetStep: resetStepToken,
   }
 }
 

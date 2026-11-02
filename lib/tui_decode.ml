@@ -2766,6 +2766,7 @@ let goal_store_reset_step_of_wire ~field token :
   | "repair_field", None -> Error "goal store envelope reset_step repair_field names no field"
   | "reset_goal_store", None -> Ok Goal_store_unavailable.Reset_goal_store
   | "restore_permission", None -> Ok Goal_store_unavailable.Restore_permission
+  | "inspect_path", _ -> Ok Goal_store_unavailable.Inspect_path
   | ("reset_goal_store" | "restore_permission"), Some refused ->
       Error
         (Printf.sprintf "goal store envelope reset_step %s carries field %S" token refused)

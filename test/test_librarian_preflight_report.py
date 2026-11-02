@@ -542,7 +542,7 @@ class ReportCliTest(unittest.TestCase):
                         "file": "goals.json",
                         "reason": {"kind": "missing_after_init"},
                         "mirror": {"kind": "mirror_absent"},
-                        "reset_step": {"kind": "reset_goal_store"},
+                        "reset_step": {"kind": "inspect_path" if location == "mirror" else "reset_goal_store"},
                     }
                     source[location] = {
                         "kind": "unreadable"

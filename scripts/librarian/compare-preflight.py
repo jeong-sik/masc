@@ -286,7 +286,7 @@ def goal_source_error(value: Json) -> None:
     reset = obj(record.get("reset_step"), "goal reset step")
     if reset.get("kind") == "repair_field":
         string(reset.get("field"), "goal repair field")
-    elif reset.get("kind") not in ("reset_goal_store", "restore_permission"):
+    elif reset.get("kind") not in ("reset_goal_store", "restore_permission", "inspect_path"):
         raise ValueError("unknown goal reset step")
 
 

@@ -16,7 +16,7 @@ type t =
   }
 
 and reason =
-  | Missing_after_init  (** goals.json is absent while the mirror exists. *)
+  | Missing_after_init  (** goals.json is absent and the mirror is not confirmed absent. *)
   | Unreadable of Unix.error
       (** open/read failed; EACCES, EISDIR and EIO each survive. *)
   | Not_json of string  (** The bytes are not JSON. *)
@@ -34,6 +34,7 @@ and reset_step =
   | Repair_field of string  (** Inspect and repair this named location. *)
   | Reset_goal_store  (** Move the store aside (RFC-0444 §2.6, PR-7). *)
   | Restore_permission  (** [Unreadable EACCES]. *)
+  | Inspect_path  (** Inspect file paths, links and mounts before recovery. *)
 
 (** {1 Wire names}
 

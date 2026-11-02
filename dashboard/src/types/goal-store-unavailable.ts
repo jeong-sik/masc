@@ -24,6 +24,7 @@ export const GOAL_STORE_RESET_STEPS = [
   'repair_field',
   'reset_goal_store',
   'restore_permission',
+  'inspect_path',
 ] as const
 export type GoalStoreResetStep = (typeof GOAL_STORE_RESET_STEPS)[number]
 

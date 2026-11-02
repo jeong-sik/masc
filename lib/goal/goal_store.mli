@@ -1,9 +1,10 @@
 (** Goal_store — shared planning goals with a dedicated lifecycle phase.
 
     Persists goals under [<base>/.masc/goals.json] with an integer [version]
-    counter and an ISO-8601 [updated_at] stamp, and mirrors every committed
-    write to [goals.json.last-good]. Each goal carries a {!Goal_phase.t} — the
-    only persisted lifecycle representation. The goal schema is closed: a row
+    counter and an ISO-8601 [updated_at] stamp, and attempts to update
+    [goals.json.last-good] after every committed write. Each goal carries a
+    {!Goal_phase.t} — the only persisted lifecycle representation. The goal
+    schema is closed: a row
     carrying any other field fails to decode.
 
     Reading (RFC-0444). The store is read through one closed sum,
@@ -16,8 +17,9 @@
 
     Writing. Every read-modify-write holds the goals file lock, calls
     {!load_source} under it, and on {!Unavailable} returns a typed error
-    carrying the {!unavailable} value without touching either file. The
-    first write on an {!Uninitialized} store creates it.
+    carrying the {!unavailable} value without touching either file. Acquiring
+    the lock can itself fail before the source is read. The first write on an
+    {!Uninitialized} store creates it.
 
     Every type is exposed concretely because external callers construct goal
     records by literal, pattern-match on every constructor and read record
@@ -177,7 +179,7 @@ and unavailable = Goal_store_unavailable.t =
   }
 
 and reason = Goal_store_unavailable.reason =
-  | Missing_after_init  (** goals.json is absent while the mirror exists. *)
+  | Missing_after_init  (** goals.json is absent and the mirror is not confirmed absent. *)
   | Unreadable of Unix.error
       (** open/read failed; EACCES, EISDIR and EIO each survive. *)
   | Not_json of string  (** The bytes are not JSON. *)
@@ -199,6 +201,7 @@ and reset_step = Goal_store_unavailable.reset_step =
   | Repair_field of string  (** Inspect and repair this named location. *)
   | Reset_goal_store  (** Move the store aside (RFC-0444 §2.6, PR-7). *)
   | Restore_permission  (** [Unreadable EACCES]. *)
+  | Inspect_path  (** Inspect file paths, links and mounts before recovery. *)
 
 val load_source : Workspace_utils.config -> source
 (** Opens and reads goals.json, and the mirror only when the primary did not
@@ -235,17 +238,20 @@ val load_goals_by_id_result :
 (** {1 State I/O} *)
 
 val write_state : Workspace_utils.config -> state -> unit
-(** Direct overwrite of {!goals_path} and its mirror with the supplied state.
-    Used by tests that need a deterministic initial state. Takes no lock and
-    does not read first; production writers go through the locked
-    read-modify-write operations below. *)
+(** Direct overwrite of {!goals_path}, then a best-effort mirror update with
+    the supplied state. An observed mirror symlink is left in place and a
+    mirror failure is logged after the primary write succeeds. Used by tests that need a
+    deterministic initial state. Takes no lock and does not read first;
+    production writers go through the locked read-modify-write operations below. *)
 
 val write_state_result :
   Workspace_utils.config -> state -> (unit, string) result
 (** Result-returning variant of {!write_state}. Publish through the shared local
     JSON writer for every workspace backend, matching {!load_source}'s local
     primary authority. Advance projection generation after primary publication;
-    a subsequent recovery mirror failure is logged and still [Ok ()]. *)
+    a subsequent recovery mirror failure is logged and still [Ok ()]. An
+    observed mirror link is left in place and treated as a mirror failure.
+    This check does not lock out unrelated processes replacing paths. *)
 
 type write_error =
   | Store_unavailable of unavailable

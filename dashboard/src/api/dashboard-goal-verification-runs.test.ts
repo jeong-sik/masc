@@ -126,6 +126,14 @@ describe('parseGoalVerificationRunsResponse', () => {
     expect(parsed.count).toBe(2)
   })
 
+  it('keeps a skipped scan that asks the operator to inspect the store path', () => {
+    const parsed = parseGoalVerificationRunsResponse({ generated_at: 'now', count: 1,
+      runs: [{ kind: 'scan_skipped', run_id: 'scan-path', started_at: 1786000002,
+        reason: 'unreadable', field: null, file: '/work/.masc/goals.json',
+        mirror: { status: 'mirror_unreadable', goal_count: null }, reset_step: 'inspect_path' }] })
+    expect(parsed.skippedScans[0]?.resetStep).toBe('inspect_path')
+  })
+
   it('rejects a row without a known kind', () => {
     expect(() => parseGoalVerificationRunsResponse({ generated_at: 'now', count: 1,
       runs: [row({ kind: 'scan' })] })).toThrow('kind has unknown value')

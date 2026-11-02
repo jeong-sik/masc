@@ -1366,6 +1366,141 @@ let test_source_missing_after_init () =
   check bool "read did not recreate goals.json" false
     (Sys.file_exists (Goal_store.goals_path config))
 
+let with_goal_file_link path target f =
+  Unix.symlink target path;
+  Fun.protect
+    ~finally:(fun () ->
+      match Unix.unlink path with
+      | () -> ()
+      | exception Unix.Unix_error (Unix.ENOENT, _, _) -> ())
+    f
+
+let check_goal_file_link path target =
+  check bool "link remains a symlink" true ((Unix.lstat path).Unix.st_kind = Unix.S_LNK);
+  check string "link target is unchanged" target (Unix.readlink path)
+
+let test_dangling_primary_is_not_uninitialized () =
+  with_workspace @@ fun config ->
+  let primary = Goal_store.goals_path config in
+  let target = "missing-primary-goal-store" in
+  with_goal_file_link primary target @@ fun () ->
+  (match unavailable config with
+   | { reason = Goal_store.Unreadable Unix.ENOENT; mirror = Goal_store.Mirror_absent;
+       reset_step = Goal_store.Inspect_path; _ } -> ()
+   | u -> fail ("expected unreadable dangling primary: " ^ Goal_store.unavailable_to_string u));
+  (match Goal_store.upsert_goal config ~title:"new" ~metric:"count" ~target_value:"1" () with
+   | Error (Goal_store.Store_unavailable _) -> ()
+   | Error error -> fail (write_error_msg error)
+   | Ok _ -> fail "upsert replaced a dangling primary link");
+  check_goal_file_link primary target;
+  check bool "no mirror created" false (Sys.file_exists (mirror_path config))
+
+let test_dangling_mirror_is_evidence_of_prior_store () =
+  with_workspace @@ fun config ->
+  let mirror = mirror_path config in
+  let target = "missing-goal-mirror" in
+  with_goal_file_link mirror target @@ fun () ->
+  (match unavailable config with
+   | { reason = Goal_store.Missing_after_init;
+       mirror = Goal_store.Mirror_unreadable Unix.ENOENT; reset_step = Goal_store.Inspect_path; _ } -> ()
+   | u -> fail ("expected unreadable dangling mirror: " ^ Goal_store.unavailable_to_string u));
+  (match Goal_store.upsert_goal config ~title:"new" ~metric:"count" ~target_value:"1" () with
+   | Error (Goal_store.Store_unavailable _) -> ()
+   | Error error -> fail (write_error_msg error)
+   | Ok _ -> fail "upsert treated a dangling mirror as an absent store");
+  check_goal_file_link mirror target;
+  check bool "no primary created" false (Sys.file_exists (Goal_store.goals_path config))
+
+let test_store_root_symlink_paths () =
+  with_workspace @@ fun config ->
+  let root = Filename.dirname (Goal_store.goals_path config) in
+  let saved = root ^ ".saved" in
+  Unix.rename root saved;
+  Fun.protect ~finally:(fun () -> Unix.rename saved root) (fun () ->
+    with_goal_file_link root "missing-masc-directory" (fun () ->
+      match unavailable config with
+      | { reason = Goal_store.Unreadable Unix.ENOENT;
+          mirror = Goal_store.Mirror_unreadable Unix.ENOENT; reset_step = Goal_store.Inspect_path; _ } -> ()
+      | u -> fail ("expected unreadable workspace link: " ^ Goal_store.unavailable_to_string u));
+    with_goal_file_link root (Filename.basename saved) (fun () ->
+      (match Goal_store.load_source config with
+       | Goal_store.Uninitialized -> ()
+       | Goal_store.Available _ -> fail "new linked workspace was already initialized"
+       | Goal_store.Unavailable u -> fail (Goal_store.unavailable_to_string u));
+      (match Goal_store.upsert_goal config ~title:"linked root" ~metric:"count" ~target_value:"1" () with
+       | Ok _ -> () | Error error -> fail (write_error_msg error));
+      check_goal_file_link root (Filename.basename saved);
+      ignore (available config)))
+
+let test_unreadable_mirror_takes_precedence_over_reset () =
+  with_workspace @@ fun config ->
+  let primary = Goal_store.goals_path config in
+  let mirror = mirror_path config in
+  write_raw primary "{broken";
+  with_goal_file_link mirror "missing-mirror-target" (fun () ->
+    let u = unavailable config in
+    (match u with
+     | { reason = Goal_store.Not_json _; mirror = Goal_store.Mirror_unreadable Unix.ENOENT;
+         reset_step = Goal_store.Inspect_path; _ } -> ()
+     | _ -> fail ("expected mirror inspection: " ^ Goal_store.unavailable_to_string u));
+    (match Goal_store_unavailable.record_of_yojson (Goal_store_unavailable.record_to_yojson u) with
+     | Ok decoded -> check bool "path inspection survives durable codec" true (decoded = u)
+     | Error detail -> fail detail);
+    check_goal_file_link mirror "missing-mirror-target")
+
+let test_unresolvable_links_request_path_inspection () =
+  with_workspace @@ fun config ->
+  let primary = Goal_store.goals_path config in
+  let mirror = mirror_path config in
+  with_goal_file_link primary (Filename.basename primary) (fun () ->
+    match unavailable config with
+    | { reason = Goal_store.Unreadable Unix.ELOOP; reset_step = Goal_store.Inspect_path; _ } -> ()
+    | u -> fail ("expected cyclic primary inspection: " ^ Goal_store.unavailable_to_string u));
+  with_goal_file_link mirror (Filename.basename mirror) (fun () ->
+    match unavailable config with
+    | { reason = Goal_store.Missing_after_init; mirror = Goal_store.Mirror_unreadable Unix.ELOOP;
+        reset_step = Goal_store.Inspect_path; _ } -> ()
+    | u -> fail ("expected cyclic mirror inspection: " ^ Goal_store.unavailable_to_string u));
+  let regular = Filename.concat (Filename.dirname primary) "regular-ancestor" in
+  write_raw regular "file, not directory";
+  with_goal_file_link mirror "regular-ancestor/child" (fun () ->
+    match unavailable config with
+    | { reason = Goal_store.Missing_after_init; mirror = Goal_store.Mirror_unreadable Unix.ENOTDIR;
+        reset_step = Goal_store.Inspect_path; _ } -> ()
+    | u -> fail ("expected invalid mirror path inspection: " ^ Goal_store.unavailable_to_string u))
+
+let test_mirror_symlink_is_not_replaced_on_write () =
+  with_workspace @@ fun config ->
+  let state : Goal_store.state =
+    { version = 1; updated_at = iso_now (); goals = [make_goal "mirror-goal" "mirror"];
+      pending_events = []; pending_notifications = [] } in
+  (match Goal_store.write_state_result config state with Ok () -> () | Error e -> fail e);
+  let mirror = mirror_path config in
+  let target = "original-goals-mirror.json" in
+  let target_path = Filename.concat (Filename.dirname mirror) target in
+  Unix.rename mirror target_path;
+  let bytes = Fs_compat.load_file target_path in
+  with_goal_file_link mirror target @@ fun () ->
+  let next = { state with version = state.version + 1 } in
+  (match Goal_store.write_state_result config next with Ok () -> () | Error e -> fail e);
+  check_goal_file_link mirror target;
+  check string "mirror target bytes are unchanged" bytes (Fs_compat.load_file target_path);
+  check int "primary commit still succeeds" next.version (available config).version
+
+let test_dangling_mirror_is_preserved_after_primary_commit () =
+  with_workspace @@ fun config ->
+  let state : Goal_store.state =
+    { version = 1; updated_at = iso_now (); goals = [make_goal "mirror-goal" "mirror"];
+      pending_events = []; pending_notifications = [] } in
+  (match Goal_store.write_state_result config state with Ok () -> () | Error e -> fail e);
+  let mirror = mirror_path config in
+  Unix.unlink mirror;
+  with_goal_file_link mirror "missing-mirror-target" @@ fun () ->
+  let next = { state with version = state.version + 1 } in
+  (match Goal_store.write_state_result config next with Ok () -> () | Error e -> fail e);
+  check_goal_file_link mirror "missing-mirror-target";
+  check int "primary commit still succeeds" next.version (available config).version
+
 let test_source_not_json () =
   with_workspace @@ fun config ->
   write_raw (Goal_store.goals_path config) "{broken";
@@ -1492,7 +1627,7 @@ let test_source_unreadable_eisdir () =
   Unix.mkdir (Goal_store.goals_path config) 0o755;
   match unavailable config with
   | { reason = Goal_store.Unreadable Unix.EISDIR; mirror = Goal_store.Mirror_absent;
-      reset_step = Goal_store.Reset_goal_store; _ } -> ()
+      reset_step = Goal_store.Inspect_path; _ } -> ()
   | u -> fail ("expected Unreadable EISDIR: " ^ Goal_store.unavailable_to_string u)
 
 let test_source_unreadable_eacces () =
@@ -2065,6 +2200,13 @@ let () =
         [ test_case "uninitialized only when both files are absent" `Quick
             test_source_uninitialized_only_when_both_files_absent;
           test_case "missing after init" `Quick test_source_missing_after_init;
+          test_case "dangling primary is unavailable" `Quick test_dangling_primary_is_not_uninitialized;
+          test_case "dangling mirror is prior-store evidence" `Quick test_dangling_mirror_is_evidence_of_prior_store;
+          test_case "dangling and valid workspace links" `Quick test_store_root_symlink_paths;
+          test_case "unreadable mirror takes recovery priority" `Quick test_unreadable_mirror_takes_precedence_over_reset;
+          test_case "unresolvable links request inspection" `Quick test_unresolvable_links_request_path_inspection;
+          test_case "mirror symlink is preserved on write" `Quick test_mirror_symlink_is_not_replaced_on_write;
+          test_case "dangling mirror is preserved after primary commit" `Quick test_dangling_mirror_is_preserved_after_primary_commit;
           test_case "not json" `Quick test_source_not_json;
           test_case "schema rejected names criterion_revision" `Quick
             test_source_schema_rejected_names_criterion_revision;

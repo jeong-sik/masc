@@ -4774,7 +4774,7 @@
 (test
  (name test_tui_approval_detail)
  (modules test_tui_approval_detail)
- (libraries alcotest masc_tui_approval_detail))
+ (libraries alcotest masc_tui_approval_detail yojson))
 
 (test
  (name test_tui_connector_state)

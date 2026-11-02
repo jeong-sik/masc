@@ -11736,17 +11736,28 @@ let test_decode_execute_row_details_the_whole_command () =
   match rows with
   | Tui_decode.Rows fields ->
     Alcotest.check Alcotest.int "one field per stored key" 2 (List.length fields);
-    Alcotest.check
-      Alcotest.(option string)
-      "argv is whole, not the cut summary"
-      (Some
-         (Yojson.Safe.to_string
-            (`List
-               [ `String "git"; `String "clone";
-                 `String ("https://example.org/" ^ long_url) ])))
-      (List.assoc_opt "argv" fields)
+    Alcotest.check Alcotest.bool "argv is whole, not the cut summary" true
+      (List.assoc_opt "argv" fields =
+       Some (`List
+         [ `String "git"; `String "clone";
+           `String ("https://example.org/" ^ long_url) ]))
   | Tui_decode.Flattened _ ->
     Alcotest.fail "an object input must draw key by key"
+
+let test_decode_execute_row_preserves_input_value_types () =
+  let expected =
+    [ "same", `String "true"
+    ; "same", `Bool true
+    ; "null", `Null
+    ; "nested", `List [ `String "1"; `Int 1 ]
+    ]
+  in
+  let input = `Assoc [ "input", `Assoc expected ] in
+  match decoded_execute_rows ~preview:"cut" ~input with
+  | Tui_decode.Rows fields ->
+    Alcotest.check Alcotest.bool "types, order and duplicate keys survive" true
+      (fields = expected)
+  | Tui_decode.Flattened _ -> Alcotest.fail "object input was flattened"
 
 let test_decode_connector_row_holds_a_korean_body_whole () =
   (* The queue's 200-byte preview spends its budget on JSON keys first, so a
@@ -11778,10 +11789,8 @@ let test_decode_connector_row_holds_a_korean_body_whole () =
     | [ pending ] -> (
       match pending.Tui_decode.gp_input_rows with
       | Tui_decode.Rows fields ->
-        Alcotest.check
-          Alcotest.(option string)
-          "the Korean body is carried whole"
-          (Some body) (List.assoc_opt "content" fields)
+        Alcotest.check Alcotest.bool "the Korean body is carried whole" true
+          (List.assoc_opt "content" fields = Some (`String body))
       | Tui_decode.Flattened _ ->
         Alcotest.fail "an object input must draw key by key")
     | rows -> Alcotest.failf "expected one pending row, got %d" (List.length rows))
@@ -14298,6 +14307,8 @@ let () =
           test_decode_execute_gate_row_keeps_the_preview_on_an_unknown_shape;
         Alcotest.test_case "an execute detail draws the whole command" `Quick
           test_decode_execute_row_details_the_whole_command;
+        Alcotest.test_case "an execute detail keeps input value types" `Quick
+          test_decode_execute_row_preserves_input_value_types;
         Alcotest.test_case "a connector body is carried whole" `Quick
           test_decode_connector_row_holds_a_korean_body_whole;
         Alcotest.test_case

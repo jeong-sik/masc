@@ -180,6 +180,35 @@ let relation_for_goal ~goal record =
       if Goal_store.criterion_equal criterion (Goal_store.criterion_of_goal goal)
       then Current else Stale_criterion
 
+type verifying_issue =
+  | Missing_proof_record
+  | Idle_proof_record
+  | Mismatched_proof_record
+  | Confirmed_proof_record
+
+type verifying_record =
+  | Current_pending of record * string * Goal_store.criterion
+  | Current_verdict of record * verdict
+  | Unavailable_request of verifying_issue
+
+let classify_verifying_record ~goal = function
+  | None -> Unavailable_request Missing_proof_record
+  | Some record ->
+    (match relation_for_goal ~goal record with
+     | Stale_criterion -> Unavailable_request Mismatched_proof_record
+     | Current ->
+       match record.completion with
+       | Completion_idle -> Unavailable_request Idle_proof_record
+       | Proof_pending pending -> Current_pending (record, pending.request_id, pending.criterion)
+       | Proof_proven verdict | Proof_refuted verdict -> Current_verdict (record, verdict)
+       | Human_confirmed _ -> Unavailable_request Confirmed_proof_record)
+
+let verifying_issue_to_string = function
+  | Missing_proof_record -> "the proof record is missing while the Goal is verifying; an earlier review may still be active"
+  | Idle_proof_record -> "the proof record is idle while the Goal is verifying; an earlier review may still be active"
+  | Mismatched_proof_record -> "the proof record does not match the current Goal criterion; an earlier review may still be active"
+  | Confirmed_proof_record -> "the proof is already confirmed while the Goal is verifying; inspect the Goal and proof record"
+
 let record_to_yojson_for_goal ~goal record =
   match relation_for_goal ~goal record with
   | Current -> `Assoc ["goal_id", `String record.goal_id;
@@ -299,10 +328,26 @@ let clear_verifications_cache_for path =
     ~finally:(fun () -> Stdlib.Mutex.unlock verifications_cache_mu)
     (fun () -> Hashtbl.remove verifications_cache path)
 
+(* A failed follow-symlink existence check is not evidence that the directory
+   entry is absent. In particular, a dangling link may name an earlier ledger. *)
+let local_entry_present path =
+  let result = Eio_guard.run_in_systhread ~label:"goal-proof-entry-presence" (fun () ->
+    match Unix.lstat path with
+    | _ -> Ok true
+    | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok false
+    | exception Unix.Unix_error (error, _, _) -> Error (Unix.error_message error)) in
+  Eio_guard.check_if_ready ();
+  result
+
 let read_raw_doc config path : (string option, Workspace_utils.json_doc_error) result =
+  let confirmed_local_absence () =
+    match local_entry_present path with
+    | Ok false -> Ok None
+    | Ok true -> Error (Workspace_utils.Json_doc_unreadable "Goal proof entry exists but could not be read")
+    | Error detail -> Error (Workspace_utils.Json_doc_unreadable detail) in
   let read_local () =
     match Safe_ops.read_file_result path with
-    | Error (Safe_ops.File_not_found _) -> Ok None
+    | Error (Safe_ops.File_not_found _) -> confirmed_local_absence ()
     | Error (Safe_ops.Read_failed _ as error) ->
         Error
           (Workspace_utils.Json_doc_unreadable
@@ -320,7 +365,10 @@ let read_raw_doc config path : (string option, Workspace_utils.json_doc_error) r
                   (Workspace_utils.Json_doc_unreadable
                      (Printf.sprintf "backend_get failed for %s: %s" key
                         (Backend_types.show_error e)))
-            | Ok None -> Ok None
+            | Ok None ->
+              (match config.Workspace_utils.backend with
+               | Workspace_utils.FileSystem _ -> confirmed_local_absence ()
+               | Workspace_utils.Memory _ -> Ok None)
             | Ok (Some content) -> Ok (Some content)))
   | None -> read_local ()
 
@@ -401,15 +449,59 @@ let load_state config : load_outcome =
        | (Ok (Some _) | Error _) as recovery_read ->
            recovered ~primary_detail:"primary ledger is missing" recovery_read)
 
+(* When the primary is absent, an existing or uninspectable mirror cannot be
+   treated as a new empty ledger. Inspect the entry itself so a dangling
+   symlink or FIFO still counts, without opening the mirror's contents. *)
+let recovery_mirror_present config backend =
+  let path = verifications_recovery_path config in
+  let backend_root = Backend.FileSystem.physical_root backend in
+  Eio_guard.check_if_ready ();
+  match backend_root with
+  | Error error -> Error (Backend_types.show_error error)
+  | Ok backend_root ->
+    let local_root = Eio_guard.run_in_systhread ~label:"goal-proof-workspace-root" (fun () ->
+      match Unix.realpath (Workspace_utils.masc_dir config) with
+      | root -> Ok root
+      | exception Unix.Unix_error (error, _, _) -> Error (Unix.error_message error)) in
+    Eio_guard.check_if_ready ();
+    match local_root with
+    | Error _ as error -> error
+    | Ok local_root when String.equal backend_root local_root -> local_entry_present path
+    | Ok _ -> Error "Goal proof backend and workspace roots differ"
+
+type authority_backend_error = Memory_proof_authority_unavailable
+
+let authority_backend_error_to_string = function
+  | Memory_proof_authority_unavailable ->
+    "goal_verification: Memory backend cannot safely provide proof authority; restore a filesystem-backed workspace context"
+
+let filesystem_authority config =
+  match config.Workspace_utils.backend with
+  | Workspace_utils.Memory _ -> Error Memory_proof_authority_unavailable
+  | Workspace_utils.FileSystem backend -> Ok backend
+
+let check_authority_backend config =
+  Result.map (fun _ -> ()) (filesystem_authority config)
+
+type primary_unavailable =
+  | Primary_undecodable of string
+  | Primary_backend_unavailable of authority_backend_error
+
 let load_primary_state config =
-  ensure_dirs config;
-  match read_state config (verifications_path config) with
-  | Error detail -> Undecodable detail
-  | Ok (Some prepared) -> Loaded prepared
-  | Ok None ->
-      if Workspace_utils.path_exists config (verifications_recovery_path config) then
-        Undecodable "primary ledger is missing while its recovery mirror exists"
-      else Loaded (default_prepared_state ())
+  match filesystem_authority config with
+  | Error unavailable -> Error (Primary_backend_unavailable unavailable)
+  | Ok backend ->
+    ensure_dirs config;
+    match read_state config (verifications_path config) with
+    | Error detail -> Error (Primary_undecodable detail)
+    | Ok (Some prepared) -> Ok prepared
+    | Ok None ->
+        (match recovery_mirror_present config backend with
+         | Ok false -> Ok (default_prepared_state ())
+         | Ok true -> Error (Primary_undecodable "primary ledger is missing while its recovery mirror exists")
+         | Error detail ->
+           Error (Primary_undecodable
+                    ("primary ledger is missing and its recovery mirror cannot be inspected: " ^ detail)))
 
 let undecodable_store_error config detail =
   Printf.sprintf
@@ -423,6 +515,12 @@ let undecodable_load_error config detail =
     "goal_verification: store did not decode (%s); repair or reset %s"
     detail
     (verifications_path config)
+
+let primary_unavailable_error config ~writing = function
+  | Primary_undecodable detail ->
+    if writing then undecodable_store_error config detail
+    else undecodable_load_error config detail
+  | Primary_backend_unavailable unavailable -> authority_backend_error_to_string unavailable
 
 let write_state_result config state =
   ensure_dirs config;
@@ -461,8 +559,8 @@ let replace_record records updated =
 let update_record config ~goal_id f =
   Workspace_utils.with_file_lock config (verifications_path config) (fun () ->
       match load_primary_state config with
-      | Undecodable detail -> Error (undecodable_store_error config detail)
-      | Loaded prepared ->
+      | Error unavailable -> Error (primary_unavailable_error config ~writing:true unavailable)
+      | Ok prepared ->
           let state = prepared.state in
           let current =
             match Goal_store.Goal_id_map.find_opt goal_id prepared.records_by_goal_id with
@@ -503,13 +601,13 @@ let get_record config ~goal_id : (record option, string) result =
 
 let load_records_authoritative config =
   match load_primary_state config with
-  | Loaded prepared -> Ok prepared.state.records
-  | Undecodable detail -> Error (undecodable_load_error config detail)
+  | Ok prepared -> Ok prepared.state.records
+  | Error unavailable -> Error (primary_unavailable_error config ~writing:false unavailable)
 
 let load_records_by_goal_id_authoritative config =
   match load_primary_state config with
-  | Loaded prepared -> Ok prepared.records_by_goal_id
-  | Undecodable detail -> Error (undecodable_load_error config detail)
+  | Ok prepared -> Ok prepared.records_by_goal_id
+  | Error unavailable -> Error (primary_unavailable_error config ~writing:false unavailable)
 
 let get_record_authoritative config ~goal_id =
   let* records_by_goal_id = load_records_by_goal_id_authoritative config in
@@ -555,8 +653,8 @@ let reopen_goal config ~goal_id ~actor ~note =
       in
       Workspace_utils.with_file_lock config (verifications_path config) (fun () ->
         let* prepared = match load_primary_state config with
-          | Loaded prepared -> Ok prepared
-          | Undecodable detail -> Error (undecodable_store_error config detail)
+          | Ok prepared -> Ok prepared
+          | Error unavailable -> Error (primary_unavailable_error config ~writing:true unavailable)
         in
         let state = prepared.state in
         let current =
@@ -652,18 +750,18 @@ let bind_review config ~goal_id =
       | Goal_phase.Verifying ->
         (match get_record_authoritative config ~goal_id with
          | Error detail -> Error (Binding_unavailable detail)
-         | Ok (Some { completion = Proof_pending pending; submitted_evidence; _ })
-           when Goal_store.criterion_equal pending.criterion (Goal_store.criterion_of_goal goal) ->
-           Ok (pending.request_id, pending.criterion, submitted_evidence)
-         | Ok (Some { completion =
-                  ( Completion_idle | Proof_pending _ | Proof_proven _
-                  | Proof_refuted _ | Human_confirmed _ ); _ }
-              | None) ->
-           Error (No_current_review "goal has no pending proof for its current criterion")) in
+         | Ok record ->
+           match classify_verifying_record ~goal record with
+           | Current_pending (record, request_id, criterion) ->
+             Ok (request_id, criterion, record.submitted_evidence)
+           | Current_verdict _ ->
+             Error (No_current_review "goal has a committed proof verdict")
+           | Unavailable_request issue ->
+             Error (Binding_unavailable (verifying_issue_to_string issue))) in
     Ok (goal, binding)) with
   | Ok (goal, Ok binding) -> Ok (goal, binding)
   | Ok (_, Error error) -> Error error
   | Error (Goal_store.Goal_not_found _ as error) ->
     Error (No_current_review (Goal_store.write_error_to_string error))
-  | Error (Goal_store.Store_unavailable _ | Rejected _ | Persist_failed _ as error) ->
+  | Error (Goal_store.Store_unavailable _ | Goal_identity_ambiguous _ | Rejected _ | Persist_failed _ as error) ->
     Error (Binding_unavailable (Goal_store.write_error_to_string error))

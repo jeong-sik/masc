@@ -1,5 +1,25 @@
 (** OpenAI Responses terminal status -> stop_reason SSOT. *)
 
+type status =
+  | Queued
+  | In_progress
+  | Completed
+  | Failed
+  | Incomplete
+  | Cancelled
+  | Other of string
+
+let status_of_wire status =
+  match String.lowercase_ascii status with
+  | "queued" -> Queued
+  | "in_progress" -> In_progress
+  | "completed" -> Completed
+  | "failed" -> Failed
+  | "incomplete" -> Incomplete
+  | "cancelled" -> Cancelled
+  | other -> Other other
+;;
+
 let has_refusal response =
   let field name = function
     | `Assoc fields -> List.assoc_opt name fields
@@ -41,12 +61,15 @@ let of_status ~status ~incomplete_reason ~failed_message ~has_tool_calls =
   | None -> None
   | Some status ->
     Some
-      (match String.lowercase_ascii status with
-       | "incomplete" -> incomplete_stop_reason incomplete_reason
-       | "failed" -> failed_stop_reason failed_message
-       | "completed" when has_tool_calls -> Types.StopToolUse
-       | "completed" -> Types.EndTurn
-       | other -> Types.Unknown other)
+      (match status_of_wire status with
+       | Incomplete -> incomplete_stop_reason incomplete_reason
+       | Failed -> failed_stop_reason failed_message
+       | Completed when has_tool_calls -> Types.StopToolUse
+       | Completed -> Types.EndTurn
+       | Queued -> Types.Unknown "queued"
+       | In_progress -> Types.Unknown "in_progress"
+       | Cancelled -> Types.Unknown "cancelled"
+       | Other other -> Types.Unknown other)
 ;;
 
 [@@@coverage off]

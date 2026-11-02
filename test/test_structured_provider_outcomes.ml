@@ -73,8 +73,8 @@ let text_part = `Assoc [ "type", `String "output_text"; "text", `String answer ]
 
 let parse_responses json =
   match Responses.parse_response_result (Yojson.Safe.to_string json) with
-  | Ok response -> response
-  | Error detail -> Alcotest.fail detail
+  | Ok { response; _ } -> response
+  | Error { detail; _ } -> Alcotest.fail detail
 
 let responses_stream frames =
   let state = Streaming.create_openai_stream_state () in

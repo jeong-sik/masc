@@ -3840,12 +3840,25 @@ type planning_goal = Tui_decode.planning_goal
   pg_metric: string option;
   pg_target_value: string option;
   pg_proof: Tui_decode.goal_proof;
+  pg_retry_binding: Tui_decode.goal_retry_binding option;
   pg_verifier_unreconciled: Tui_decode.verifier_unreconciled option;
   pg_last_review_note: string option;
   pg_last_review_at: string option;
   pg_created_at: string option;
   pg_updated_at: string option;
 }
+
+let planning_goal_has_valid_id (goal : planning_goal) =
+  Result.is_ok (Goal_store.validate_goal_id goal.pg_id)
+
+let planning_goal_offers_action (goal : planning_goal) action =
+  planning_goal_has_valid_id goal
+  && Goal_phase.offers_public_action ~phase:goal.pg_phase ~action
+  && (action <> Goal_phase.Public_action.Request_complete || Option.is_some goal.pg_retry_binding)
+
+let planning_goal_retains_arm (goal : planning_goal) ~action ~phase ~retry_binding =
+  goal.pg_phase = phase && planning_goal_offers_action goal action
+  && (action <> Goal_phase.Public_action.Request_complete || goal.pg_retry_binding = retry_binding)
 
 type planning_rollup = Tui_decode.planning_rollup
   = {
@@ -8856,7 +8869,8 @@ type runtime_catalog_request = {
    must state, because the Tasks it cancels tell their authors that sentence:
    typing it is the confirmation, Enter sends it and Esc cancels. *)
 type goal_action_pending =
-  | Goal_action_armed of { goal_id : string; action : Goal_phase.Public_action.t }
+  | Goal_action_armed of { goal_id : string; action : Goal_phase.Public_action.t;
+      phase : Goal_phase.t; retry_binding : Tui_decode.goal_retry_binding option }
   | Goal_drop_reason of { goal_id : string; reason : string }
 
 (* The Config presets pane's writes that wait for a second press of their
@@ -9171,6 +9185,16 @@ type keeper_peer_status =
   | Keeper_peer_failed of { page : int; retained : int option; reason : string }
   | Keeper_peer_current of int
   | Keeper_peer_unread
+
+type goal_candle_failure = Goal_candle_access_denied of int | Goal_candle_authority_changed of int option | Goal_candle_http_status of int | Goal_candle_read_failed of string
+
+type goal_action_receipt = {
+  gar_goal_id : string;
+  gar_ticket : string;
+  gar_workspace : string;
+  gar_authority : Masc_tui_planning_detail.receipt_authority option;
+  gar_result : (string, string) result;
+}
 
 type state = {
   observation_instance : Masc_tui_observation_origin.instance;
@@ -9965,6 +9989,10 @@ type state = {
   (* Detail histories retain their exact request and last good value. A key
      alone cannot reject an older response after refreshing the same item. *)
   mutable goal_timeline: (string, Tui_decode.goal_timeline_event list) Masc_tui_fetched.t;
+  mutable goal_candle: (string, unit ref * string * Candle_goal_observation.t) Masc_tui_fetched.t;
+  mutable goal_candle_revalidation_attempts: (string * unit ref) list;
+  mutable goal_confirmation_revalidation_attempts: (string * unit ref) list;
+  mutable goal_confirmation_identity_refresh: (string * Masc_tui_planning_detail.confirmation_workspace) option;
   mutable task_history: (string, Masc.Tui_decode_task_inspection.history) Masc_tui_fetched.t;
   mutable task_history_request: string task_history_request option;
   mutable task_history_last_reading: unit ref option;
@@ -10250,7 +10278,10 @@ type state = {
      letters safe: c/x/o are lifecycle only once, and any other key disarms.
      A drop waits for its typed reason instead. *)
   mutable goal_action_pending: goal_action_pending option;
-  mutable goal_action_error: string option;
+  mutable goal_action_errors: (string * string) list;
+  mutable goal_transition_latest: (string * string) list;
+  mutable goal_action_inflight: (string * string) list;
+  mutable goal_action_receipts: goal_action_receipt list;
   mutable goal_confirmation_presented : Masc_tui_planning_detail.confirmation option;
   mutable goal_confirmation:
     Masc_tui_planning_detail.confirmation_state;
@@ -10928,6 +10959,37 @@ type state = {
   port: int;
   refresh_interval: float;
 }
+
+let clear_goal_action_error state ~goal_id =
+  state.goal_action_errors <- List.remove_assoc goal_id state.goal_action_errors
+
+let set_goal_action_error state ~goal_id error =
+  state.goal_action_errors <- (goal_id, error) :: List.remove_assoc goal_id state.goal_action_errors
+
+let note_goal_action_started state ~goal_id ~ticket =
+  if List.mem_assoc goal_id state.goal_action_inflight then false
+  else begin
+    clear_goal_action_error state ~goal_id;
+    state.goal_transition_latest <- (goal_id, ticket) :: List.remove_assoc goal_id state.goal_transition_latest;
+    state.goal_action_inflight <- (goal_id, ticket) :: state.goal_action_inflight;
+    true
+  end
+
+let note_goal_action_result state ~goal_id ~ticket result =
+  if List.assoc_opt goal_id state.goal_transition_latest <> Some ticket then false
+  else begin
+    if List.assoc_opt goal_id state.goal_action_inflight = Some ticket then
+      state.goal_action_inflight <- List.remove_assoc goal_id state.goal_action_inflight;
+    (match result with
+     | Ok _ -> clear_goal_action_error state ~goal_id
+     | Error error -> set_goal_action_error state ~goal_id error);
+    true
+  end
+
+let record_goal_action_receipt ?authority state ~goal_id ~ticket ~workspace result =
+  state.goal_action_receipts <-
+    { gar_goal_id = goal_id; gar_ticket = ticket; gar_workspace = workspace;
+      gar_authority = authority; gar_result = result } :: state.goal_action_receipts
 
 (* The server trims names and accepts ASCII only. Group case aliases
    conservatively even when its filesystem happens to be case-sensitive. *)
@@ -14272,10 +14334,12 @@ let suspend_workspace_readings state =
   state.fusion_runs_reread_pending <- false;
   state.fusion_runs_awaiting_observer <- false;
   state.fusion_runs_open_at_start <- None;
+  state.goal_confirmation_presented <- None;
+  state.goal_candle <- Masc_tui_fetched.suspend state.goal_candle;
   (match state.goal_confirmation with
    | Masc_tui_planning_detail.Inspecting reading ->
        state.goal_confirmation <- Masc_tui_planning_detail.Inspecting
-         (Masc_tui_fetched.suspend reading)
+         (Masc_tui_planning_detail.suspend_confirmation_read reading)
    | Masc_tui_planning_detail.Submitting _ -> ());
   state.exact_activity_sessions <- List.map Masc_tui_exact_activity.suspend_read state.exact_activity_sessions;
   state.machine_activity_sessions <- List.map Masc_tui_machine_activity.suspend_read state.machine_activity_sessions;
@@ -18659,6 +18723,75 @@ let begin_goal_timeline_read (state : state) ~goal_id =
   | Masc_tui_fetched.Already_loading -> None
   | Masc_tui_fetched.Started (reading, request) -> state.goal_timeline <- reading; Some request
 
+let clear_goal_candle_revalidation (state : state) ~goal_id =
+  state.goal_candle_revalidation_attempts <-
+    List.filter (fun (id, _) -> not (String.equal id goal_id)) state.goal_candle_revalidation_attempts
+
+let clear_goal_confirmation_revalidation (state : state) ~goal_id =
+  state.goal_confirmation_revalidation_attempts <-
+    List.filter (fun (id, _) -> not (String.equal id goal_id)) state.goal_confirmation_revalidation_attempts
+
+let take_goal_confirmation_revalidation (state : state) ~goal_id ~owner =
+  if List.exists (fun (id, previous) -> String.equal id goal_id && previous == owner)
+      state.goal_confirmation_revalidation_attempts then false
+  else begin
+    clear_goal_confirmation_revalidation state ~goal_id;
+    state.goal_confirmation_revalidation_attempts <- (goal_id, owner) :: state.goal_confirmation_revalidation_attempts;
+    true
+  end
+
+let take_goal_candle_revalidation (state : state) ~goal_id ~owner =
+  if List.exists (fun (id, previous) -> String.equal id goal_id && previous == owner)
+      state.goal_candle_revalidation_attempts then false
+  else begin
+    clear_goal_candle_revalidation state ~goal_id;
+    state.goal_candle_revalidation_attempts <- (goal_id, owner) :: state.goal_candle_revalidation_attempts;
+    true
+  end
+
+let begin_goal_candle_read (state : state) ~goal_id =
+  (* Withdraw an earlier admin observation immediately. A new request may
+     be refused or come from a different process before its body arrives. *)
+  let previous = match Masc_tui_fetched.view_for ~equal:String.equal state.goal_candle ~key:goal_id with
+    | Masc_tui_fetched.Ready _ | Stale _ -> Masc_tui_fetched.clear state.goal_candle
+    | Absent | Loading | Failed _ -> state.goal_candle in
+  match Masc_tui_fetched.refresh ~equal:String.equal previous ~key:goal_id with
+  | Masc_tui_fetched.Already_loading -> None
+  | Masc_tui_fetched.Started (reading, request) -> state.goal_candle <- reading; Some request
+
+let complete_goal_candle_read (state : state) ~credential_is_current request result =
+  match result with
+    | Ok (owner, Error (Goal_candle_access_denied status)) when credential_is_current owner ->
+      state.goal_candle <- Masc_tui_fetched.refuse ~equal:String.equal state.goal_candle request
+        (if status = 401 then "Candle authentication failed (HTTP 401); check the credential"
+         else Printf.sprintf "Candle access denied (HTTP %d); administrator permission is required" status)
+    | Ok (owner, Error (Goal_candle_authority_changed status)) when credential_is_current owner ->
+      state.goal_candle <- Masc_tui_fetched.refuse ~equal:String.equal state.goal_candle request
+        (match status with Some code -> Printf.sprintf "Candle server or workspace identity changed (HTTP %d); read again" code
+         | None -> "Candle server or workspace identity changed; read again")
+    | Ok (owner, Ok (instance, _))
+      when credential_is_current owner
+           && not (Option.exists (fun identity -> identity.Tui_decode.sid_runtime_instance_id = Some instance) state.server_identity) ->
+      state.goal_candle <- Masc_tui_fetched.refuse ~equal:String.equal state.goal_candle request
+        "Candle server process changed; read again"
+    | Error _ | Ok (_, (Ok _ | Error (Goal_candle_access_denied _ | Goal_candle_authority_changed _ | Goal_candle_http_status _ | Goal_candle_read_failed _))) ->
+  let result = match result with
+    | Error _ -> Error "Candle read unavailable; check the connection and read again"
+    | Ok (owner, _) when not (credential_is_current owner) ->
+      Error "Candle credential changed; read again"
+    | Ok (_, Error (Goal_candle_access_denied status)) -> Error (Printf.sprintf "Candle access denied (HTTP %d)" status)
+    | Ok (_, Error (Goal_candle_authority_changed status)) -> Error
+        (match status with Some code -> Printf.sprintf "Candle server or workspace identity changed (HTTP %d)" code
+         | None -> "Candle server or workspace identity changed")
+    | Ok (_, Error (Goal_candle_http_status status)) -> Error (Printf.sprintf "Candle read failed (HTTP %d)" status)
+    | Ok (_, Error (Goal_candle_read_failed _)) -> Error "Candle read failed; check the connection and read again"
+    | Ok (owner, Ok (instance_id, observation)) ->
+      (match state.server_identity with
+       | Some identity when identity.Tui_decode.sid_runtime_instance_id = Some instance_id ->
+         Ok (owner, instance_id, observation)
+       | Some _ | None -> Error "Candle server instance changed; read again") in
+  state.goal_candle <- Masc_tui_fetched.complete ~equal:String.equal state.goal_candle request result
+
 let complete_goal_timeline_read (state : state) request result =
   let result = Result.bind result (function
     | Tui_decode.Goal_timeline_ready events -> Ok events
@@ -18722,6 +18855,9 @@ let ui_text (state : state) ~ko ~en =
 let withdraw_detail_histories (state : state) =
   clear_task_documents state;
   state.goal_timeline <- Masc_tui_fetched.clear state.goal_timeline;
+  state.goal_candle <- Masc_tui_fetched.clear state.goal_candle;
+  (* Keep the revalidation receipt across workspace withdrawal: alternating
+     server identities must not reset it and start an automatic read loop. *)
   state.task_history <- Masc_tui_fetched.clear state.task_history;
   state.task_history_request <- None;
   state.task_history_last_reading <- None
@@ -19138,6 +19274,10 @@ let create_state
   runtime_catalog_resume = false;
   runtime_catalog_reading = Runtime_catalog_unread;
   goal_timeline = Masc_tui_fetched.initial;
+  goal_candle = Masc_tui_fetched.initial;
+  goal_candle_revalidation_attempts = [];
+  goal_confirmation_revalidation_attempts = [];
+  goal_confirmation_identity_refresh = None;
   task_history = Masc_tui_fetched.initial;
   task_history_request = None;
   task_history_last_reading = None;
@@ -19287,7 +19427,10 @@ let create_state
   planning_filter = Planning_filter_active;
   planning_sort = Planning_sort_phase_priority;
   goal_action_pending = None;
-  goal_action_error = None;
+  goal_action_errors = [];
+  goal_transition_latest = [];
+  goal_action_inflight = [];
+  goal_action_receipts = [];
   goal_confirmation_presented = None;
   goal_confirmation = Masc_tui_planning_detail.Inspecting Masc_tui_fetched.initial;
   schedules = None;

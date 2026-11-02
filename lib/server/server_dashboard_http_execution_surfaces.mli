@@ -69,6 +69,9 @@ type execution_http_response =
   | Execution_json of Yojson.Safe.t
   | Execution_payload of Dashboard_cache.cached_payload
 
+val execution_publication_epoch : string
+(** Process-scoped identity of the execution publication stream. *)
+
 val execution_cache : cached_surface
 (** Cached execution surface JSON.  Reached by
     [Server_dashboard_http_namespace_truth] (via the

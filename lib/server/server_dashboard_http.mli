@@ -109,6 +109,9 @@ val dashboard_planning_http_json :
 val dashboard_goals_tree_http_json :
   config:Workspace.config -> Yojson.Safe.t
 
+val goal_cache_scope : config:Workspace.config -> string
+(** Cache scope including the current canonical Goal store root. *)
+
 val cached_goals_tree_payload :
   config:Workspace.config -> Dashboard_cache.cached_payload
 (** The goals tree as a cached read. Its key names the goal projection

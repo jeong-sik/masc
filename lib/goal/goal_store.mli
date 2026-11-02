@@ -28,6 +28,15 @@
 val parse_goal_phase : string option -> Goal_phase.t option
 (** Delegates to {!Goal_phase.parse}.  [None] passes through. *)
 
+type goal_id_error = Goal_id_blank | Goal_id_padded of string
+
+val goal_id_error_to_string : goal_id_error -> string
+val validate_goal_id : string -> (unit, goal_id_error) result
+(** Require a nonblank Goal ID without leading or trailing space, tab, line
+    feed, carriage return or form feed (the [String.trim] characters). This
+    validates the supplied identifier only; it does not prove Goal membership
+    or that historical stored IDs follow this rule. *)
+
 (** {1 Goal record} *)
 
 type goal = {
@@ -174,9 +183,10 @@ and reason = Goal_store_unavailable.reason =
   | Not_json of string  (** The bytes are not JSON. *)
   | Schema_rejected of { field : string; detail : string }
       (** JSON, but this build's decoder refused member [field]. [field] is
-          the JSON member name ([criterion_revision], [phase], …); ["$"]
-          names the document root when the whole document is not an
-          object. *)
+          usually the JSON member name ([criterion_revision], [phase], …).
+          ["$"] can name the document root, while ["goals"] can name a Goal
+          row. A member name that is not plain printable ASCII is reported at
+          its containing location. *)
 
 and mirror_status = Goal_store_unavailable.mirror_status =
   | Mirror_absent
@@ -186,7 +196,7 @@ and mirror_status = Goal_store_unavailable.mirror_status =
   | Mirror_rejected of reason
 
 and reset_step = Goal_store_unavailable.reset_step =
-  | Repair_field of string  (** Fill or fix this member and it reads again. *)
+  | Repair_field of string  (** Inspect and repair this named location. *)
   | Reset_goal_store  (** Move the store aside (RFC-0444 §2.6, PR-7). *)
   | Restore_permission  (** [Unreadable EACCES]. *)
 
@@ -241,6 +251,8 @@ type write_error =
   | Store_unavailable of unavailable
       (** {!load_source} was {!Unavailable}; no file was touched. *)
   | Goal_not_found of string  (** The id; also on an {!Uninitialized} store. *)
+  | Goal_identity_ambiguous of string
+      (** The decoded primary has more than one row with this Goal ID. *)
   | Rejected of string
       (** The callback's own error, or a callback result the store refused
           (identity replaced, title or RFC-0387 B1 condition missing). *)
@@ -255,7 +267,8 @@ val transact_goal :
   Workspace_utils.config -> goal_id:string ->
   (goal -> (goal * 'a, string) result) -> (goal * 'a, write_error) result
 (** Holds the Goal file lock across an authoritative primary read, callback and
-    conditional write. A callback may acquire the verification ledger lock;
+    conditional write. Refuses a duplicated decoded Goal ID before the callback
+    or effects run. A callback may acquire the verification ledger lock;
     it must not acquire this Goal lock again. A callback [Error] is returned
     as {!Rejected} and an unchanged goal writes nothing. [effects] is a pure
     projection of a changed committed goal/result. Its audit and notification
@@ -272,9 +285,9 @@ val update_goal_if_phase :
   expected_phase:Goal_phase.t ->
   (goal -> goal) ->
   (conditional_update, write_error) result
-(** Atomic compare-and-update under the goals file lock. A phase mismatch is
-    returned without writing, so recovery cannot overwrite a concurrent
-    lifecycle transition. Never {!Rejected}. *)
+(** Atomic compare-and-update under the goals file lock. A duplicated decoded
+    ID is refused before checking the phase or calling the callback; a phase
+    mismatch writes nothing. A callback that changes the Goal ID is {!Rejected}. *)
 
 type delete_goal_outcome =
   | Deleted
@@ -282,6 +295,7 @@ type delete_goal_outcome =
 
 type delete_goal_error =
   | Unknown_goal of string
+  | Ambiguous_goal of string  (** The decoded primary has multiple rows for the id. *)
   | Store_unavailable of unavailable
   | Persistence_failed of string  (** The write after a successful read failed. *)
 
@@ -291,7 +305,8 @@ val delete_goal :
   Workspace_utils.config ->
   goal_id:string ->
   (delete_goal_outcome, delete_goal_error) result
-(** Removes the goal whose [.id] matches.
+(** Removes the uniquely matched goal. A duplicate decoded id is refused before
+    any Goal write or Goal-task link cleanup.
 
     Returns [Error (Unknown_goal _)] when the id is unknown (including on an
     {!Uninitialized} store) and no delete was committed. Goal-task link
@@ -329,7 +344,8 @@ val upsert_goal :
     internally), updates the matched row otherwise. Returns the resolved goal
     paired with [`created], or [`updated previous] carrying the row as it was
     before this write, read inside the write lock. The caller records what
-    changed. Every accepted upsert commits a new store version, including an
+    changed. Multiple decoded rows for the resolved ID return
+    {!Goal_identity_ambiguous} without a write. Every accepted upsert commits a new store version, including an
     update whose editable fields are unchanged. An edit to the title,
     [metric] or [target_value] moves a
     [Verifying], [Awaiting_confirmation] or [Completed] goal back to

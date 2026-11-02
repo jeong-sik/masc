@@ -9,6 +9,21 @@
     non-streaming response or let the stream accumulator report an incomplete
     terminal contract. *)
 
+(** A value read from the Responses [status] field. This is an observation of
+    that field, not proof that an otherwise malformed response is terminal or
+    that a remote effect is safe to retry. Unknown provider values remain
+    distinct from the known statuses. *)
+type status =
+  | Queued
+  | In_progress
+  | Completed
+  | Failed
+  | Incomplete
+  | Cancelled
+  | Other of string
+
+val status_of_wire : string -> status
+
 val of_status
   :  status:string option
   -> incomplete_reason:string option

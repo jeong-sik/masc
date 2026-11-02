@@ -8,13 +8,19 @@ import type {
   DashboardGoalsTreeResponse,
   GoalTreeNode,
 } from '../../types'
-import { hydrateGoalTreeSnapshot } from '../../goal-tree-state'
+import { hydrateGoalTreeError, hydrateGoalTreeSnapshot } from '../../goal-tree-state'
 
 const mocks = vi.hoisted(() => ({
   fetchDashboardGoalDetail: vi.fn(),
   fetchDashboardGoalsTree: vi.fn(),
   get: vi.fn(),
   callMcpTool: vi.fn(),
+  callIdentity: vi.fn(),
+  refreshExecution: vi.fn(),
+  readGoalCandle: vi.fn(),
+  mcpCallFailureDisposition: vi.fn(() => 'known_tool_response'),
+  mcpIdentityRequiresGoalRefresh: vi.fn(() => false),
+  captureArtifactWorkspace: vi.fn(),
   currentDashboardActor: vi.fn(() => 'dashboard-test'),
   route: {
     value: {
@@ -30,6 +36,17 @@ vi.mock('../../api/dashboard', () => ({
   fetchDashboardGoalsTree: mocks.fetchDashboardGoalsTree,
 }))
 
+vi.mock('../../api/goal-candle', () => ({
+  readGoalCandle: mocks.readGoalCandle,
+  GoalCandleEpochMismatchError: class extends Error {},
+  GoalCandleWorkspaceRefusalError: class extends Error {},
+}))
+
+vi.mock('../../api/published-artifacts', async original => ({
+  ...await original<typeof import('../../api/published-artifacts')>(),
+  captureArtifactWorkspace: mocks.captureArtifactWorkspace,
+}))
+
 vi.mock('../../api/core', async importOriginal => ({
   ...await importOriginal<typeof import('../../api/core')>(),
   currentDashboardActor: mocks.currentDashboardActor,
@@ -38,27 +55,38 @@ vi.mock('../../api/core', async importOriginal => ({
 
 // GoalCreateForm reaches the store and the toast through goal-create-state;
 // neither is under test here.
-vi.mock('../../store', () => ({
-  refreshGoals: vi.fn(),
-}))
+vi.mock('../../store', async () => {
+  const { signal } = await import('@preact/signals')
+  return { refreshGoals: vi.fn(), executionWorkspaceAuthority: signal(null), executionError: signal(null), executionLoading: signal(false), refreshExecution: mocks.refreshExecution }
+})
 
 vi.mock('../common/toast', () => ({
   showToast: vi.fn(),
 }))
 
 vi.mock('../../api/mcp', () => ({
-  callMcpTool: mocks.callMcpTool,
+  callMcpToolAtIdentity: (name: string, args: unknown, identity: unknown) => {
+    mocks.callIdentity(identity)
+    return mocks.callMcpTool(name, args)
+  },
+  mcpCallFailureDisposition: mocks.mcpCallFailureDisposition,
+  mcpIdentityRequiresGoalRefresh: mocks.mcpIdentityRequiresGoalRefresh,
 }))
 
 vi.mock('../../router', () => ({
   route: mocks.route,
+  replaceRoute: (tab: string, params: Record<string, string>) => { mocks.route.value = { tab, params, postId: null } },
 }))
 
 vi.mock('../task-manage/task-create-form', () => ({
   TaskCreateForm: () => null,
 }))
 
-import { GoalTree } from './goal-tree'
+import { GoalTree, _testResetGoalActionReceipts } from './goal-tree'
+import { executionError, executionWorkspaceAuthority } from '../../store'
+import { clearStoredToken, setStoredToken } from '../../api/core'
+import { resetDashboardSessionActorForTests, setCanonicalDashboardActor } from '../../lib/dashboard-session-actor'
+import { showToast } from '../common/toast'
 import { GoalCreateForm, resetGoalCreateFormLocal } from './goal-create-form'
 import { showGoalCreate } from './goal-create-state'
 import { fetchDashboardGoalsTree as decodeGoalTree, GoalSourceUnavailableError } from '../../api/dashboard-goals'
@@ -66,6 +94,12 @@ import { fetchDashboardGoalsTree as decodeGoalTree, GoalSourceUnavailableError }
 const measurementFixture = JSON.parse(readFileSync(
   resolve(__dirname, '../../api/fixtures/goal-measurement-tree.json'), 'utf8',
 ))
+
+function transitionResponse(goalId: string, action: string, reconciled = false): string {
+  return JSON.stringify({ status: 'ok', goal_id: goalId, action, ...(reconciled ? { reconciled } : {}),
+    ...(action === 'drop' ? { noop: false, phase: 'dropped', goal: { id: goalId, phase: 'dropped' },
+      tasks: { cancelled: [], cancel_failed: [], held: [] }, effect_delivery: { status: 'delivered' } } : {}) })
+}
 
 function emptySummary(): DashboardGoalsTreeResponse['summary'] {
   return {
@@ -95,6 +129,7 @@ function makeGoal(id: string, title: string, children: GoalTreeNode[] = []): Goa
     target_value: null,
     due_date: null,
     criterion_revision: 'revision-default',
+    verification: { state: 'current', completion: { state: 'idle' } },
     measurement: { state: 'not_recorded' },
     tasks: [],
     task_count: 0,
@@ -114,6 +149,14 @@ function makeGoal(id: string, title: string, children: GoalTreeNode[] = []): Goa
 
 describe('GoalTree', () => {
   beforeEach(() => {
+    _testResetGoalActionReceipts()
+    ;(executionError as { value: string | null }).value = null
+    mocks.refreshExecution.mockResolvedValue(undefined)
+    mocks.readGoalCandle.mockResolvedValue({ config: 'off', ledger: { state: 'missing' } })
+    clearStoredToken()
+    ;(executionWorkspaceAuthority as { value: unknown }).value =
+      { epoch: 'fixture-a', workspaceRoot: '/workspace-a', connectionGeneration: 1 }
+    mocks.captureArtifactWorkspace.mockImplementation(async (basePath: string) => ({ basePath, mascRoot: `${basePath}/.masc` }))
     mocks.route.value = {
       tab: 'workspace',
       params: { section: 'planning' },
@@ -131,11 +174,19 @@ describe('GoalTree', () => {
     showGoalCreate.value = false
     resetGoalCreateFormLocal()
     mocks.callMcpTool.mockReset()
+    mocks.callIdentity.mockReset()
+    mocks.refreshExecution.mockReset()
+    mocks.readGoalCandle.mockReset()
+    mocks.mcpCallFailureDisposition.mockReset().mockReturnValue('known_tool_response')
+    mocks.mcpIdentityRequiresGoalRefresh.mockReset().mockReturnValue(false)
+    mocks.captureArtifactWorkspace.mockReset()
     mocks.currentDashboardActor.mockReset()
     mocks.currentDashboardActor.mockReturnValue('dashboard-test')
     mocks.fetchDashboardGoalDetail.mockReset()
     mocks.fetchDashboardGoalsTree.mockReset()
     mocks.get.mockReset()
+    clearStoredToken()
+    resetDashboardSessionActorForTests()
   })
 
   it('renders the decoded wire measurement with its criterion and evidence', async () => {
@@ -222,8 +273,136 @@ describe('GoalTree', () => {
     })
     expect(screen.getAllByText('Child goal').length).toBeGreaterThan(0)
     await waitFor(() => {
-      expect(mocks.fetchDashboardGoalDetail).toHaveBeenCalledWith('goal-child')
+      expect(mocks.fetchDashboardGoalDetail).toHaveBeenCalledWith('goal-child',
+        { basePath: '/workspace-a', mascRoot: '/workspace-a/.masc' })
     })
+    fireEvent.input(screen.getByLabelText('목표 트리 필터'), { target: { value: 'no matching goal' } })
+    await waitFor(() => expect(screen.queryByTestId('goal-detail-panel')).toBeNull())
+    fireEvent.input(screen.getByLabelText('목표 트리 필터'), { target: { value: '' } })
+    await waitFor(() => expect(screen.getByTestId('goal-detail-panel').getAttribute('data-selected-goal-id')).toBe(child.id))
+    expect(screen.getByRole('button', { name: /Parent goal/ }).getAttribute('aria-expanded')).toBe('true')
+    expect(screen.getByRole('button', { name: /Child goal/ })).toBeTruthy()
+  })
+
+  it('clears a previous filter when a Work link opens a different Goal, then permits new filtering', async () => {
+    const first = { ...makeGoal('goal-active', 'Active target'), priority: 2 }
+    const second = { ...makeGoal('goal-done', 'Completed target'), phase: 'completed', priority: 1 }
+    const tree = { approval_queue_state: { state: 'ready' }, tree: [first, second],
+      summary: { ...emptySummary(), total_goals: 2, active_goals: 1 } } satisfies DashboardGoalsTreeResponse
+    mocks.fetchDashboardGoalsTree.mockResolvedValue(tree)
+    mocks.fetchDashboardGoalDetail.mockImplementation(async (id: string) => ({
+      goal: id === first.id ? first : second, linked_tasks: [], linked_keepers: [], approvals: [], execution_receipts: [], timeline: [],
+    }))
+    const initial = render(html`<${GoalTree} />`)
+    await screen.findByTestId('goal-detail-panel')
+    fireEvent.input(screen.getByLabelText('목표 트리 필터'), { target: { value: 'Completed target' } })
+    await waitFor(() => expect(screen.getByTestId('goal-detail-panel').getAttribute('data-selected-goal-id')).toBe(second.id))
+    initial.unmount()
+    mocks.readGoalCandle.mockClear()
+    mocks.route.value = { tab: 'workspace', params: { section: 'planning', goal: first.id }, postId: null }
+    render(html`<${GoalTree} />`)
+    await waitFor(() => expect(screen.getByTestId('goal-detail-panel').getAttribute('data-selected-goal-id')).toBe(first.id))
+    expect((screen.getByLabelText('목표 트리 필터') as HTMLInputElement).value).toBe('')
+    await waitFor(() => expect(mocks.readGoalCandle.mock.calls.map(args => args.slice(0, 4))).toContainEqual([
+      first.id, { basePath: '/workspace-a', mascRoot: '/workspace-a/.masc' }, 'fixture-a', expect.any(Function),
+    ]))
+    fireEvent.input(screen.getByLabelText('목표 트리 필터'), { target: { value: 'no matching target' } })
+    await waitFor(() => expect(screen.queryByTestId('goal-detail-panel')).toBeNull())
+    fireEvent.input(screen.getByLabelText('목표 트리 필터'), { target: { value: '' } })
+    await waitFor(() => expect(screen.getByTestId('goal-detail-panel').getAttribute('data-selected-goal-id')).toBe(first.id))
+    expect(mocks.route.value.params.goal).toBe(first.id)
+    fireEvent.input(screen.getByLabelText('목표 트리 필터'), { target: { value: 'Completed target' } })
+    await waitFor(() => expect(screen.getByTestId('goal-detail-panel').getAttribute('data-selected-goal-id')).toBe(second.id))
+    expect(mocks.route.value.params.goal).toBeUndefined()
+    expect(mocks.route.value.params.section).toBe('planning')
+  })
+
+  it('does not substitute a different Goal when the routed Goal is absent in a new workspace', async () => {
+    const first = makeGoal('goal-routed', 'Routed goal')
+    const other = makeGoal('goal-other', 'Other workspace goal')
+    mocks.route.value = { tab: 'workspace', params: { section: 'planning', goal: first.id }, postId: null }
+    mocks.fetchDashboardGoalsTree.mockImplementation(async (workspace: { basePath: string }) => ({
+      approval_queue_state: { state: 'ready' }, tree: [workspace.basePath === '/workspace-a' ? first : other],
+      summary: { ...emptySummary(), total_goals: 1, active_goals: 1 },
+    }))
+    mocks.fetchDashboardGoalDetail.mockImplementation(async (id: string) => ({
+      goal: id === first.id ? first : other, linked_tasks: [], linked_keepers: [], approvals: [], execution_receipts: [], timeline: [],
+    }))
+    render(html`<${GoalTree} />`)
+    await waitFor(() => expect(screen.getByTestId('goal-detail-panel').getAttribute('data-selected-goal-id')).toBe(first.id))
+    ;(executionWorkspaceAuthority as { value: unknown }).value =
+      { epoch: 'fixture-b', workspaceRoot: '/workspace-b', connectionGeneration: 2 }
+    await waitFor(() => expect(mocks.fetchDashboardGoalsTree).toHaveBeenCalledWith({ basePath: '/workspace-b', mascRoot: '/workspace-b/.masc' }))
+    await screen.findByRole('button', { name: /Other workspace goal/ })
+    expect(screen.queryByTestId('goal-detail-panel')).toBeNull()
+    expect(mocks.readGoalCandle.mock.calls.filter(([id, workspace]) => id === other.id && workspace.basePath === '/workspace-b')).toHaveLength(0)
+    fireEvent.input(screen.getByLabelText('목표 트리 필터'), { target: { value: 'nothing matches' } })
+    await waitFor(() => expect(screen.queryByRole('button', { name: /Other workspace goal/ })).toBeNull())
+    fireEvent.input(screen.getByLabelText('목표 트리 필터'), { target: { value: '' } })
+    await screen.findByRole('button', { name: /Other workspace goal/ })
+    expect(screen.queryByTestId('goal-detail-panel')).toBeNull()
+    expect(mocks.route.value.params.goal).toBe(first.id)
+    fireEvent.click(screen.getByRole('button', { name: /Other workspace goal/ }))
+    await waitFor(() => expect(screen.getByTestId('goal-detail-panel').getAttribute('data-selected-goal-id')).toBe(other.id))
+  })
+
+  it.each([
+    ['executing', 'Request completion'],
+    ['verifying', 'Retry verification'],
+  ] as const)('explains unavailable proof for a %s Goal', async (phase, completionLabel) => {
+    const goal: GoalTreeNode = {
+      ...makeGoal('goal-unavailable-proof', 'Goal with unavailable proof'),
+      phase,
+      verification: { state: 'unreadable', detail: 'proof backend unavailable' },
+      goal_fsm: { state: phase, source: 'goal.phase', next_actions: ['request_complete', 'pause'],
+        activity_observation: 'goal_metadata' },
+    }
+    mocks.fetchDashboardGoalsTree.mockResolvedValue({
+      approval_queue_state: { state: 'ready' }, tree: [goal],
+      summary: { ...emptySummary(), total_goals: 1, active_goals: 1 },
+    })
+    mocks.fetchDashboardGoalDetail.mockResolvedValue({
+      goal, linked_tasks: [], linked_keepers: [], approvals: [], execution_receipts: [], timeline: [],
+    })
+    render(html`<${GoalTree} />`)
+    await screen.findByText(/서버의 저장소와 실행 환경을 확인하거나/)
+    expect(screen.queryByRole('button', { name: completionLabel })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Pause' })).toBeTruthy()
+    expect(mocks.callMcpTool).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['missing', undefined],
+    ['idle', { state: 'current', completion: { state: 'idle' } }],
+    ['stale', { state: 'stale', historical: { state: 'pending', requestId: 'old-request',
+      requestedAt: '2026-10-30T07:45:56Z', criterion: { revision: 'old-revision',
+        title: 'Old goal', metric: null, target_value: null } } }],
+    ['confirmed', { state: 'current', completion: { state: 'proven', requestId: 'confirmed-request',
+      runId: 'confirmed-run', evidence: 'proof', recordedAt: '2026-10-30T07:45:56Z', actor: 'verifier',
+      criterion: { revision: 'revision-default', title: 'Uncertain proof', metric: null, target_value: null },
+      confirmation: { operatorId: 'operator', confirmedAt: '2026-10-30T08:00:00Z' } } }],
+  ] satisfies Array<[string, GoalTreeNode['verification']]>)
+  ('does not offer a retry for a verifying Goal with %s proof', async (_description, verification) => {
+    const goal: GoalTreeNode = {
+      ...makeGoal('goal-uncertain-proof', 'Uncertain proof'), phase: 'verifying', verification,
+      goal_fsm: { state: 'verifying', source: 'goal.phase', next_actions: ['request_complete', 'pause'],
+        activity_observation: 'goal_metadata' },
+    }
+    mocks.fetchDashboardGoalsTree.mockResolvedValue({
+      approval_queue_state: { state: 'ready' }, tree: [goal],
+      summary: { ...emptySummary(), total_goals: 1, active_goals: 1 },
+    })
+    mocks.fetchDashboardGoalDetail.mockResolvedValue({
+      goal, linked_tasks: [], linked_keepers: [], approvals: [], execution_receipts: [], timeline: [],
+    })
+    render(html`<${GoalTree} />`)
+    await screen.findByRole('button', { name: 'Pause' })
+    expect(screen.queryByRole('button', { name: 'Retry verification' })).toBeNull()
+    if (_description === 'idle') {
+      expect(screen.getByText('검증 · 원장에 현재 요청 없음').getAttribute('title'))
+        .toContain('이전 실행의 종료 여부는 확인되지 않았습니다')
+    }
+    expect(mocks.callMcpTool).not.toHaveBeenCalled()
   })
 
   it('requests goal completion through the goal transition tool and refreshes goal data', async () => {
@@ -247,7 +426,7 @@ describe('GoalTree', () => {
     }
     mocks.fetchDashboardGoalsTree.mockResolvedValue(treePayload)
     mocks.fetchDashboardGoalDetail.mockResolvedValue(detailPayload)
-    mocks.callMcpTool.mockResolvedValue('{"ok":true}')
+    mocks.callMcpTool.mockResolvedValue(transitionResponse('goal-ready', 'request_complete'))
 
     render(html`<${GoalTree} />`)
 
@@ -261,12 +440,11 @@ describe('GoalTree', () => {
       expect(mocks.callMcpTool).toHaveBeenCalledWith('masc_goal_transition', {
         goal_id: 'goal-ready',
         action: 'request_complete',
-        actor: {
-          id: 'dashboard-test',
-          display_name: 'dashboard-test',
-        },
+        expected_workspace: { base_path: '/workspace-a', masc_root: '/workspace-a/.masc' },
+        expected_verification: { phase: 'executing', criterion_revision: 'revision-default' },
       })
     })
+    expect(mocks.callIdentity).toHaveBeenCalledWith({ revision: expect.any(Number), actor: 'dashboard-test' })
     await waitFor(() => {
       expect(mocks.fetchDashboardGoalsTree.mock.calls.length).toBeGreaterThanOrEqual(2)
       expect(mocks.fetchDashboardGoalDetail.mock.calls.length).toBeGreaterThanOrEqual(2)
@@ -284,7 +462,7 @@ describe('GoalTree', () => {
     mocks.fetchDashboardGoalDetail.mockResolvedValue({
       goal, linked_tasks: [], linked_keepers: [], approvals: [], execution_receipts: [], timeline: [],
     })
-    mocks.callMcpTool.mockResolvedValue('{"ok":true}')
+    mocks.callMcpTool.mockResolvedValue(transitionResponse('goal-drop', 'drop'))
     render(html`<${GoalTree} />`)
     await waitFor(() => expect(screen.getByRole('button', { name: 'Drop' })).toBeTruthy())
 
@@ -297,7 +475,7 @@ describe('GoalTree', () => {
     expect(submit.disabled).toBe(true)
     expect(mocks.callMcpTool).not.toHaveBeenCalled()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    fireEvent.click(screen.getByRole('button', { name: '사유 초안 지우기' }))
     expect(document.querySelector('[data-goal-drop-reason]')).toBeNull()
     expect(mocks.callMcpTool).not.toHaveBeenCalled()
 
@@ -307,10 +485,1248 @@ describe('GoalTree', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Drop goal' }))
     await waitFor(() => expect(mocks.callMcpTool).toHaveBeenCalledWith('masc_goal_transition', {
       goal_id: 'goal-drop', action: 'drop', note: 'superseded by goal-next',
-      actor: { id: 'dashboard-test', display_name: 'dashboard-test' },
+      expected_workspace: { base_path: '/workspace-a', masc_root: '/workspace-a/.masc' },
     }))
-    await waitFor(() => expect(document.querySelector('[data-goal-drop-reason]')).toBeNull())
+    await waitFor(() => expect(screen.getByTestId('goal-lifecycle-action-warning')).toBeTruthy())
+    expect((document.querySelector('[data-goal-drop-reason] textarea') as HTMLTextAreaElement).value).toBe('  superseded by goal-next  ')
+    fireEvent.click(screen.getByRole('button', { name: '사유 초안 지우기' }))
+    expect(document.querySelector('[data-goal-drop-reason]')).toBeNull()
     expect(mocks.callMcpTool).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([
+    ['unread candidates and deferred delivery',
+      { noop: false, tasks: { unread: 'backlog unavailable' },
+        effect_delivery: { status: 'deferred', durable_retry: true, detail: 'audit unavailable' } },
+      ['요청 당시 Goal Drop이 적용되었다고 응답했습니다', 'backlog unavailable', 'audit unavailable', '기존 Task 취소는 재시도되지 않습니다']],
+    ['failed and held Tasks',
+      { noop: false, tasks: { cancelled: ['task-ok'], cancel_failed: [{ task_id: 'task-failed', error: 'busy' }],
+        held: [{ task_id: 'task-held', holder: 'keeper-a' }] }, effect_delivery: { status: 'delivered' } },
+      ['요청 당시 Goal Drop이 적용되었다고 응답했습니다', 'task-ok', '이미 취소된 Task가 포함될 수 있습니다', 'task-failed (busy)', '취소가 이미 적용되었을 수 있습니다',
+        'Drop 전에 보유 상태로 관측된 Task: task-held (keeper-a)', '기존 Task 취소는 재시도되지 않습니다']],
+    ['missing Task results', { noop: false, effect_delivery: { status: 'delivered' } },
+      ['요청 당시 Goal Drop이 적용되었다고 응답했습니다', 'Task 취소 결과를 확인할 수 없습니다']],
+    ['malformed Task results', { noop: false, tasks: { cancelled: [], cancel_failed: [{ task_id: 'task-bad' }], held: [] },
+      effect_delivery: { status: 'delivered' } }, ['Task 취소 결과 형식을 확인할 수 없습니다']],
+    ['already dropped', { noop: true, effect_delivery: { status: 'delivered' } },
+      ['요청 당시 Goal이 이미 Dropped 상태였다고 응답했습니다', '이전 Task 취소 결과는 이 응답에 없습니다']],
+    ['already dropped with contradictory tasks', { noop: true, tasks: { cancelled: [], cancel_failed: [], held: [] },
+      effect_delivery: { status: 'delivered' } }, ['일관성을 확인할 수 없습니다', '입력한 사유가 저장됐는지 이 응답으로 확인할 수 없습니다']],
+    ['missing Goal change indicator', { tasks: { cancelled: [], cancel_failed: [], held: [] },
+      effect_delivery: { status: 'delivered' } }, ['Goal 변경 여부를 확인할 수 없습니다']],
+    ['contradictory Goal phase', { noop: false, phase: 'executing', goal: { id: 'goal-drop-partial', phase: 'executing' },
+      tasks: { cancelled: [], cancel_failed: [], held: [] }, effect_delivery: { status: 'delivered' } },
+      ['Drop 응답에서 Goal 상태를 확인할 수 없습니다']],
+    ['missing delivery status', { noop: false, tasks: { cancelled: [], cancel_failed: [], held: [] } },
+      ['요청 당시 Goal Drop이 적용되었다고 응답했습니다', 'Goal 기록·알림 일괄 전달 상태를 확인할 수 없습니다']],
+  ])('shows a partial or unknown Drop result: %s', async (_label, fields, expected) => {
+    const goal = makeGoal('goal-drop-partial', 'Partial drop')
+    mocks.fetchDashboardGoalsTree.mockResolvedValue({
+      approval_queue_state: { state: 'ready' }, tree: [goal],
+      summary: { ...emptySummary(), total_goals: 1, active_goals: 1 },
+    })
+    mocks.fetchDashboardGoalDetail.mockResolvedValue({
+      goal, linked_tasks: [], linked_keepers: [], approvals: [], execution_receipts: [], timeline: [],
+    })
+    mocks.callMcpTool.mockResolvedValue(JSON.stringify({ status: 'ok', goal_id: goal.id, action: 'drop',
+      phase: 'dropped', goal: { id: goal.id, phase: 'dropped' }, ...fields }))
+    render(html`<${GoalTree} />`)
+    fireEvent.click(await screen.findByRole('button', { name: 'Drop' }))
+    fireEvent.input(document.querySelector('[data-goal-drop-reason] textarea')!, { target: { value: 'No longer needed' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Drop goal' }))
+    const receipt = await screen.findByTestId('goal-lifecycle-action-warning')
+    for (const text of expected) expect(receipt.textContent).toContain(text)
+    expect(receipt.textContent).toContain('서버가 관측한 후보에 한정되며 누락될 수 있습니다')
+    expect(receipt.textContent).not.toContain('취소 실패')
+    if (_label === 'contradictory Goal phase' || _label === 'missing Goal change indicator') {
+      expect(receipt.textContent).not.toContain('요청 당시 Goal Drop이 적용되었다고 응답했습니다')
+    }
+    expect((document.querySelector('[data-goal-drop-reason] textarea') as HTMLTextAreaElement).value).toBe('No longer needed')
+    expect(screen.queryByTestId('goal-lifecycle-action-status')).toBeNull()
+    expect(screen.queryByTestId('goal-lifecycle-action-error')).toBeNull()
+  })
+
+  it('shows the server-reported Task outcomes without claiming this Drop caused every cancellation', async () => {
+    const goal = makeGoal('goal-drop-reported', 'Reported drop')
+    mocks.fetchDashboardGoalsTree.mockResolvedValue({
+      approval_queue_state: { state: 'ready' }, tree: [goal],
+      summary: { ...emptySummary(), total_goals: 1, active_goals: 1 },
+    })
+    mocks.fetchDashboardGoalDetail.mockResolvedValue({
+      goal, linked_tasks: [], linked_keepers: [], approvals: [], execution_receipts: [], timeline: [],
+    })
+    mocks.callMcpTool.mockResolvedValue(JSON.stringify({ status: 'ok', goal_id: goal.id, action: 'drop', noop: false,
+      phase: 'dropped', goal: { id: goal.id, phase: 'dropped' },
+      tasks: { cancelled: ['task-reported'], cancel_failed: [], held: [] }, effect_delivery: { status: 'delivered' } }))
+    render(html`<${GoalTree} />`)
+    fireEvent.click(await screen.findByRole('button', { name: 'Drop' }))
+    fireEvent.input(document.querySelector('[data-goal-drop-reason] textarea')!, { target: { value: 'Finished elsewhere' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Drop goal' }))
+    const receipt = await screen.findByTestId('goal-lifecycle-action-warning')
+    expect(receipt.textContent).toContain('서버가 취소 성공으로 보고한 Task: task-reported')
+    expect(receipt.textContent).toContain('이미 취소된 Task가 포함될 수 있습니다')
+    expect(receipt.textContent).toContain('서버가 관측한 후보에 한정되며 누락될 수 있습니다')
+  })
+
+  it('retains a partial Drop result on its original Goal after selection changes', async () => {
+    const first = makeGoal('goal-drop-origin', 'Drop origin')
+    const second = makeGoal('goal-drop-other', 'Other goal')
+    mocks.fetchDashboardGoalsTree.mockResolvedValue({
+      approval_queue_state: { state: 'ready' }, tree: [first, second],
+      summary: { ...emptySummary(), total_goals: 2, active_goals: 2 },
+    })
+    mocks.fetchDashboardGoalDetail.mockImplementation(async (id: string) => ({
+      goal: id === first.id ? first : second,
+      linked_tasks: [], linked_keepers: [], approvals: [], execution_receipts: [], timeline: [],
+    }))
+    let resolveAction!: (value: string) => void
+    mocks.callMcpTool.mockImplementation(() => new Promise<string>(resolve => { resolveAction = resolve }))
+    render(html`<${GoalTree} />`)
+    fireEvent.click(await screen.findByRole('button', { name: 'Drop' }))
+    fireEvent.input(document.querySelector('[data-goal-drop-reason] textarea')!, { target: { value: 'Replace it' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Drop goal' }))
+    fireEvent.click(screen.getByRole('button', { name: /Other goal/ }))
+    resolveAction(JSON.stringify({ status: 'ok', goal_id: first.id, action: 'drop', noop: false,
+      phase: 'dropped', goal: { id: first.id, phase: 'dropped' },
+      tasks: { unread: '<span data-injected>bad</span>' }, effect_delivery: { status: 'delivered' } }))
+    await waitFor(() => expect(showToast).toHaveBeenCalledWith(
+      'Drop 시도 결과에 확인할 항목이 있습니다. 원래 workspace에서 확인하세요.', 'warning'))
+    expect(screen.queryByTestId('goal-lifecycle-action-warning')).toBeNull()
+    expect((await screen.findByTestId('goal-drop-detached-receipt')).textContent).toContain('<span data-injected>bad</span>')
+    fireEvent.click(screen.getByRole('button', { name: /Drop origin/ }))
+    const receipt = await screen.findByTestId('goal-lifecycle-action-warning')
+    expect(receipt.textContent).toContain('<span data-injected>bad</span>')
+    expect(document.querySelector('[data-injected]')).toBeNull()
+  })
+
+  it('keeps a Drop result accessible when the refreshed phase no longer matches the filter', async () => {
+    const executing = makeGoal('goal-filter-drop', 'Filtered drop')
+    const dropped: GoalTreeNode = { ...executing, phase: 'dropped',
+      goal_fsm: { ...executing.goal_fsm, state: 'dropped', next_actions: ['reopen'] } }
+    let committed = false
+    mocks.fetchDashboardGoalsTree.mockImplementation(async () => ({
+      approval_queue_state: { state: 'ready' }, tree: [committed ? dropped : executing],
+      summary: { ...emptySummary(), total_goals: 1, active_goals: committed ? 0 : 1 },
+    }))
+    mocks.fetchDashboardGoalDetail.mockImplementation(async () => ({
+      goal: committed ? dropped : executing,
+      linked_tasks: [], linked_keepers: [], approvals: [], execution_receipts: [], timeline: [],
+    }))
+    mocks.callMcpTool.mockImplementation(async () => {
+      committed = true
+      return JSON.stringify({ status: 'ok', goal_id: executing.id, action: 'drop', noop: false,
+        phase: 'dropped', goal: { id: executing.id, phase: 'dropped' },
+        tasks: { unread: 'candidate read failed' }, effect_delivery: { status: 'delivered' } })
+    })
+    render(html`<${GoalTree} />`)
+    fireEvent.click(await screen.findByRole('tab', { name: /실행 중/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Drop' }))
+    fireEvent.input(document.querySelector('[data-goal-drop-reason] textarea')!, { target: { value: 'No longer relevant' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Drop goal' }))
+    const detached = await screen.findByTestId('goal-drop-detached-receipt')
+    expect(detached.textContent).toContain('goal-filter-drop')
+    expect(detached.textContent).toContain('candidate read failed')
+    fireEvent.click(screen.getByRole('button', { name: '같은 ID Goal 열기' }))
+    await waitFor(() => expect(screen.getByTestId('goal-detail-panel').getAttribute('data-selected-goal-id')).toBe(executing.id))
+    expect((await screen.findByTestId('goal-lifecycle-action-warning')).textContent).toContain('candidate read failed')
+    expect(screen.queryByTestId('goal-drop-detached-receipt')).toBeNull()
+  })
+
+  it('labels a retained Drop response when a different Goal reuses the same id', async () => {
+    const original = makeGoal('goal-reused', 'Original goal')
+    const replacement = { ...makeGoal('goal-reused', 'Replacement goal'), created_at: '2026-11-02T09:00:00Z' }
+    let current = original
+    mocks.fetchDashboardGoalsTree.mockImplementation(async () => ({
+      approval_queue_state: { state: 'ready' }, tree: [current],
+      summary: { ...emptySummary(), total_goals: 1, active_goals: 1 },
+    }))
+    mocks.fetchDashboardGoalDetail.mockImplementation(async () => ({
+      goal: current, linked_tasks: [], linked_keepers: [], approvals: [], execution_receipts: [], timeline: [],
+    }))
+    mocks.callMcpTool.mockResolvedValue(JSON.stringify({ status: 'ok', goal_id: original.id, action: 'drop', noop: false,
+      phase: 'dropped', goal: { id: original.id, phase: 'dropped' },
+      tasks: { unread: 'old-task' }, effect_delivery: { status: 'delivered' } }))
+    render(html`<${GoalTree} />`)
+    fireEvent.click(await screen.findByRole('button', { name: 'Drop' }))
+    fireEvent.input(document.querySelector('[data-goal-drop-reason] textarea')!, { target: { value: 'Original reason' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Drop goal' }))
+    await screen.findByTestId('goal-lifecycle-action-warning')
+    current = replacement
+    fireEvent.click(screen.getByRole('button', { name: '새로고침' }))
+    await screen.findByRole('button', { name: /Replacement goal/ })
+    const receipt = screen.getByTestId('goal-lifecycle-action-warning')
+    expect(receipt.textContent).toContain('과거 Drop 시도 기록입니다')
+    expect(receipt.textContent).toContain('같은 ID의 현재 Goal과 동일한 인스턴스인지는 확인되지 않았습니다')
+    expect(receipt.textContent).toContain('요청 당시 Goal Drop이 적용되었다고 응답했습니다')
+    expect(receipt.textContent).toContain('old-task')
+  })
+
+  it('redacts an earlier Drop result while the workspace root is unverified or has changed', async () => {
+    const goal = makeGoal('goal-root-drop', 'Root drop')
+    mocks.fetchDashboardGoalsTree.mockResolvedValue({
+      approval_queue_state: { state: 'ready' }, tree: [goal],
+      summary: { ...emptySummary(), total_goals: 1, active_goals: 1 },
+    })
+    mocks.fetchDashboardGoalDetail.mockResolvedValue({
+      goal, linked_tasks: [], linked_keepers: [], approvals: [], execution_receipts: [], timeline: [],
+    })
+    mocks.callMcpTool.mockResolvedValue(JSON.stringify({ status: 'ok', goal_id: goal.id, action: 'drop', noop: false,
+      phase: 'dropped', goal: { id: goal.id, phase: 'dropped' },
+      tasks: { unread: 'private-root-a-task' }, effect_delivery: { status: 'delivered' } }))
+    render(html`<${GoalTree} />`)
+    fireEvent.click(await screen.findByRole('button', { name: 'Drop' }))
+    fireEvent.input(document.querySelector('[data-goal-drop-reason] textarea')!, { target: { value: 'Reason' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Drop goal' }))
+    expect((await screen.findByTestId('goal-lifecycle-action-warning')).textContent).toContain('private-root-a-task')
+    let resolveWorkspace!: (value: { basePath: string; mascRoot: string }) => void
+    mocks.captureArtifactWorkspace.mockImplementation(() => new Promise(resolve => { resolveWorkspace = resolve }))
+    ;(executionWorkspaceAuthority as { value: unknown }).value =
+      { epoch: 'fixture-a', workspaceRoot: '/workspace-a', connectionGeneration: 2 }
+    await screen.findByTestId('goal-drop-receipt-owner-unverified')
+    expect(document.body.textContent).not.toContain('private-root-a-task')
+    await waitFor(() => expect(resolveWorkspace).toBeTypeOf('function'))
+    resolveWorkspace({ basePath: '/workspace-a', mascRoot: '/workspace-a/new-masc' })
+    await waitFor(() => expect(screen.queryByTestId('goal-drop-receipt-owner-unverified')).toBeNull())
+    expect(document.body.textContent).not.toContain('private-root-a-task')
+    expect(screen.queryByTestId('goal-drop-detached-receipt')).toBeNull()
+  })
+
+  it('offers an older connection\'s Drop result without attributing it to the current server', async () => {
+    const first = makeGoal('goal-old-drop', 'Old connection goal')
+    const second = makeGoal('goal-new-selection', 'New selection')
+    mocks.fetchDashboardGoalsTree.mockResolvedValue({
+      approval_queue_state: { state: 'ready' }, tree: [first, second],
+      summary: { ...emptySummary(), total_goals: 2, active_goals: 2 },
+    })
+    mocks.fetchDashboardGoalDetail.mockImplementation(async (id: string) => ({
+      goal: id === first.id ? first : second,
+      linked_tasks: [], linked_keepers: [], approvals: [], execution_receipts: [], timeline: [],
+    }))
+    let resolveAction!: (value: string) => void
+    mocks.callMcpTool.mockImplementation(() => new Promise<string>(resolve => { resolveAction = resolve }))
+    render(html`<${GoalTree} />`)
+    fireEvent.click(await screen.findByRole('button', { name: 'Drop' }))
+    fireEvent.input(document.querySelector('[data-goal-drop-reason] textarea')!, { target: { value: 'Reason' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Drop goal' }))
+    ;(executionWorkspaceAuthority as { value: unknown }).value =
+      { epoch: 'fixture-restarted', workspaceRoot: '/workspace-a', connectionGeneration: 2 }
+    await waitFor(() => expect(mocks.fetchDashboardGoalsTree.mock.calls.length).toBeGreaterThanOrEqual(2))
+    fireEvent.click(await screen.findByRole('button', { name: /New selection/ }))
+    resolveAction(JSON.stringify({ status: 'ok', goal_id: first.id, action: 'drop', noop: false,
+      phase: 'dropped', goal: { id: first.id, phase: 'dropped' },
+      tasks: { unread: 'old-connection-detail' }, effect_delivery: { status: 'delivered' } }))
+    const earlier = await screen.findByTestId('goal-drop-earlier-connection')
+    expect(earlier.textContent).toContain('같은 ID Goal이 동일한 인스턴스인지는 확인되지 않았습니다')
+    expect(earlier.textContent).not.toContain('old-connection-detail')
+    fireEvent.click(screen.getByRole('button', { name: '같은 ID Goal 열기' }))
+    const prior = await screen.findByTestId('goal-lifecycle-previous-connection')
+    expect(prior.textContent).not.toContain('old-connection-detail')
+    fireEvent.click(screen.getByRole('button', { name: '이전 연결 결과 보기' }))
+    expect(prior.textContent).toContain('old-connection-detail')
+    expect(prior.textContent).toContain('같은 workspace인지는 확인되지 않았습니다')
+    ;(executionWorkspaceAuthority as { value: unknown }).value =
+      { epoch: 'fixture-third', workspaceRoot: '/workspace-a', connectionGeneration: 3 }
+    await waitFor(() => expect(mocks.fetchDashboardGoalsTree.mock.calls.length).toBeGreaterThanOrEqual(3))
+    const third = await screen.findByTestId('goal-lifecycle-previous-connection')
+    expect(third.textContent).not.toContain('old-connection-detail')
+    fireEvent.click(screen.getByRole('button', { name: '이전 연결 결과 보기' }))
+    expect(third.textContent).toContain('old-connection-detail')
+  })
+
+  it('treats a new connection generation as a previous Drop owner even with the same epoch', async () => {
+    const goal = makeGoal('goal-generation-drop', 'Generation goal')
+    mocks.fetchDashboardGoalsTree.mockResolvedValue({
+      approval_queue_state: { state: 'ready' }, tree: [goal],
+      summary: { ...emptySummary(), total_goals: 1, active_goals: 1 },
+    })
+    mocks.fetchDashboardGoalDetail.mockResolvedValue({
+      goal, linked_tasks: [], linked_keepers: [], approvals: [], execution_receipts: [], timeline: [],
+    })
+    mocks.callMcpTool.mockResolvedValue(JSON.stringify({ status: 'ok', goal_id: goal.id, action: 'drop', noop: false,
+      phase: 'dropped', goal: { id: goal.id, phase: 'dropped' },
+      tasks: { unread: 'generation-private-detail' }, effect_delivery: { status: 'delivered' } }))
+    render(html`<${GoalTree} />`)
+    fireEvent.click(await screen.findByRole('button', { name: 'Drop' }))
+    fireEvent.input(document.querySelector('[data-goal-drop-reason] textarea')!, { target: { value: 'Reason' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Drop goal' }))
+    await screen.findByTestId('goal-lifecycle-action-warning')
+    ;(executionWorkspaceAuthority as { value: unknown }).value =
+      { epoch: 'fixture-a', workspaceRoot: '/workspace-a', connectionGeneration: 2 }
+    const previous = await screen.findByTestId('goal-lifecycle-previous-connection')
+    expect(previous.textContent).not.toContain('generation-private-detail')
+    fireEvent.click(screen.getByRole('button', { name: '이전 연결 결과 보기' }))
+    expect(previous.textContent).toContain('generation-private-detail')
+  })
+
+  it('treats a withdrawn and readmitted authority as previous even when all values match', async () => {
+    const goal = makeGoal('goal-authority-drop', 'Authority goal')
+    mocks.fetchDashboardGoalsTree.mockResolvedValue({
+      approval_queue_state: { state: 'ready' }, tree: [goal],
+      summary: { ...emptySummary(), total_goals: 1, active_goals: 1 },
+    })
+    mocks.fetchDashboardGoalDetail.mockResolvedValue({
+      goal, linked_tasks: [], linked_keepers: [], approvals: [], execution_receipts: [], timeline: [],
+    })
+    mocks.callMcpTool.mockResolvedValue(JSON.stringify({ status: 'ok', goal_id: goal.id, action: 'drop', noop: false,
+      phase: 'dropped', goal: { id: goal.id, phase: 'dropped' },
+      tasks: { unread: 'old-authority-detail' }, effect_delivery: { status: 'delivered' } }))
+    render(html`<${GoalTree} />`)
+    fireEvent.click(await screen.findByRole('button', { name: 'Drop' }))
+    fireEvent.input(document.querySelector('[data-goal-drop-reason] textarea')!, { target: { value: 'Reason' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Drop goal' }))
+    await screen.findByTestId('goal-lifecycle-action-warning')
+    ;(executionWorkspaceAuthority as { value: unknown }).value = null
+    await waitFor(() => expect(screen.queryByTestId('goal-lifecycle-action-warning')).toBeNull())
+    ;(executionWorkspaceAuthority as { value: unknown }).value =
+      { epoch: 'fixture-a', workspaceRoot: '/workspace-a', connectionGeneration: 1 }
+    const previous = await screen.findByTestId('goal-lifecycle-previous-connection')
+    expect(previous.textContent).not.toContain('old-authority-detail')
+    fireEvent.click(screen.getByRole('button', { name: '이전 연결 결과 보기' }))
+    expect(previous.textContent).toContain('old-authority-detail')
+  })
+
+  it('can inspect an older connection\'s Drop result even if that Goal is no longer in the tree', async () => {
+    const original = makeGoal('goal-old-deleted', 'Deleted goal')
+    const remaining = makeGoal('goal-remains', 'Remaining goal')
+    let restarted = false
+    mocks.fetchDashboardGoalsTree.mockImplementation(async () => ({
+      approval_queue_state: { state: 'ready' }, tree: restarted ? [remaining] : [original, remaining],
+      summary: { ...emptySummary(), total_goals: restarted ? 1 : 2, active_goals: restarted ? 1 : 2 },
+    }))
+    mocks.fetchDashboardGoalDetail.mockImplementation(async (id: string) => ({
+      goal: id === original.id ? original : remaining,
+      linked_tasks: [], linked_keepers: [], approvals: [], execution_receipts: [], timeline: [],
+    }))
+    let resolveAction!: (value: string) => void
+    mocks.callMcpTool.mockImplementation(() => new Promise<string>(resolve => { resolveAction = resolve }))
+    render(html`<${GoalTree} />`)
+    fireEvent.click(await screen.findByRole('button', { name: 'Drop' }))
+    fireEvent.input(document.querySelector('[data-goal-drop-reason] textarea')!, { target: { value: 'Reason' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Drop goal' }))
+    restarted = true
+    ;(executionWorkspaceAuthority as { value: unknown }).value =
+      { epoch: 'fixture-restarted', workspaceRoot: '/workspace-a', connectionGeneration: 2 }
+    await screen.findByRole('button', { name: /Remaining goal/ })
+    const pending = await screen.findByTestId('goal-drop-earlier-connection')
+    expect(pending.textContent).toContain('이전 연결의 Drop 시도가 진행 중입니다')
+    expect(pending.textContent).not.toContain('Drop 결과가 있습니다')
+    resolveAction(JSON.stringify({ status: 'ok', goal_id: original.id, action: 'drop', noop: false,
+      phase: 'dropped', goal: { id: original.id, phase: 'dropped' },
+      tasks: { unread: 'deleted-goal-task-detail' }, effect_delivery: { status: 'delivered' } }))
+    const earlier = await screen.findByTestId('goal-drop-earlier-connection')
+    await waitFor(() => expect(earlier.textContent).toContain('이전 연결의 Drop 결과가 있습니다'))
+    expect(earlier.textContent).toContain('goal-old-deleted')
+    expect(earlier.textContent).not.toContain('deleted-goal-task-detail')
+    expect(screen.queryByRole('button', { name: '같은 ID Goal 열기' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '이전 연결 결과 보기' }))
+    expect(earlier.textContent).toContain('deleted-goal-task-detail')
+    expect(earlier.textContent).toContain('같은 workspace인지')
+    expect(earlier.textContent).toContain('현재 Drop 사유 초안(이 시도 당시와 다를 수 있음): Reason')
+    fireEvent.click(screen.getByRole('button', { name: '이 목록에서 숨기기' }))
+    expect(screen.queryByTestId('goal-drop-earlier-connection')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '숨긴 Drop 기록 다시 보기' }))
+    const restored = await screen.findByTestId('goal-drop-earlier-connection')
+    expect(restored.textContent).toContain('deleted-goal-task-detail')
+    fireEvent.click(screen.getByRole('button', { name: '이 초안 지우기' }))
+    expect(restored.textContent).not.toContain('현재 Drop 사유 초안(이 시도 당시와 다를 수 있음): Reason')
+  })
+
+  it('does not disclose a Drop result to a different credential but indicates that a result needs review', async () => {
+    setStoredToken('credential-a')
+    const goal = makeGoal('goal-auth-drop', 'Credential drop')
+    const other = makeGoal('goal-auth-other', 'Other credential goal')
+    let currentGoal = goal
+    mocks.fetchDashboardGoalsTree.mockImplementation(async () => ({
+      approval_queue_state: { state: 'ready' }, tree: [currentGoal, other],
+      summary: { ...emptySummary(), total_goals: 2, active_goals: 2 },
+    }))
+    mocks.fetchDashboardGoalDetail.mockImplementation(async (id: string) => ({
+      goal: id === goal.id ? currentGoal : other, linked_tasks: [], linked_keepers: [], approvals: [], execution_receipts: [], timeline: [],
+    }))
+    mocks.callMcpTool.mockResolvedValue(JSON.stringify({ status: 'ok', goal_id: goal.id, action: 'drop', noop: false,
+      phase: 'dropped', goal: { id: goal.id, phase: 'dropped' },
+      tasks: { unread: 'credential-a-private-task' }, effect_delivery: { status: 'delivered' } }))
+    render(html`<${GoalTree} />`)
+    fireEvent.click(await screen.findByRole('button', { name: 'Drop' }))
+    fireEvent.input(document.querySelector('[data-goal-drop-reason] textarea')!, { target: { value: 'Reason' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Drop goal' }))
+    await screen.findByTestId('goal-lifecycle-action-warning')
+    fireEvent.click(screen.getByRole('button', { name: /Other credential goal/ }))
+    currentGoal = { ...goal, phase: 'dropped', goal_fsm: { ...goal.goal_fsm, state: 'dropped', next_actions: [] } }
+    setStoredToken('credential-b')
+    await screen.findByTestId('goal-drop-other-auth-unverified')
+    expect(document.body.textContent).not.toContain('credential-a-private-task')
+    fireEvent.click(await screen.findByRole('button', { name: /Credential drop/ }))
+    await screen.findByText(/다른 연결 또는 인증의 Goal 요청이나 연결 Task 결과에 확인이 필요한 항목이 있습니다/)
+    expect(document.body.textContent).not.toContain('credential-a-private-task')
+    expect(screen.queryByTestId('goal-drop-detached-receipt')).toBeNull()
+  })
+
+  it('asks for Task inspection when a Drop response is lost after possible effects', async () => {
+    const goal = makeGoal('goal-drop-timeout', 'Timed out drop')
+    mocks.fetchDashboardGoalsTree.mockResolvedValue({
+      approval_queue_state: { state: 'ready' }, tree: [goal],
+      summary: { ...emptySummary(), total_goals: 1, active_goals: 1 },
+    })
+    mocks.fetchDashboardGoalDetail.mockResolvedValue({
+      goal, linked_tasks: [], linked_keepers: [], approvals: [], execution_receipts: [], timeline: [],
+    })
+    mocks.mcpCallFailureDisposition.mockReturnValue('outcome_unknown')
+    mocks.callMcpTool.mockRejectedValue(new Error('connection closed'))
+    render(html`<${GoalTree} />`)
+    fireEvent.click(await screen.findByRole('button', { name: 'Drop' }))
+    fireEvent.input(document.querySelector('[data-goal-drop-reason] textarea')!, { target: { value: 'Reason' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Drop goal' }))
+    const receipt = await screen.findByTestId('goal-lifecycle-action-error')
+    expect(receipt.textContent).toContain('연결 Task의 현재 상태도 확인하세요')
+    expect(receipt.textContent).toContain('기존 Task 취소는 재시도되지 않습니다')
+  })
+
+  it('retains the unfiltered tree Task observations with an uncertain Drop attempt', async () => {
+    const original = makeGoal('goal-observed-tasks', 'Goal to drop')
+    const goal: GoalTreeNode = { ...original, task_count: 2, tasks: [
+      { id: 'task-visible', title: 'Filter needle', status: 'todo', status_color: '', priority: 1,
+        assignee: null, goal_id: original.id, is_terminal: false, created_at: '', updated_at: '' },
+      { id: 'task-filtered-out', title: 'Different task', status: 'claimed', status_color: '', priority: 1,
+        assignee: 'keeper-a', goal_id: original.id, is_terminal: false, created_at: '', updated_at: '' },
+    ] }
+    mocks.fetchDashboardGoalsTree.mockResolvedValue({
+      approval_queue_state: { state: 'ready' }, tree: [goal],
+      summary: { ...emptySummary(), total_goals: 1, active_goals: 1 },
+    })
+    mocks.fetchDashboardGoalDetail.mockResolvedValue({
+      goal, linked_tasks: [], linked_keepers: [], approvals: [], execution_receipts: [], timeline: [],
+    })
+    mocks.mcpCallFailureDisposition.mockReturnValue('outcome_unknown')
+    mocks.callMcpTool.mockRejectedValue(new Error('connection closed'))
+    render(html`<${GoalTree} />`)
+    await screen.findByTestId('goal-detail-panel')
+    fireEvent.input(screen.getByLabelText('목표 트리 필터'), { target: { value: 'Filter needle' } })
+    fireEvent.click(await screen.findByRole('button', { name: 'Drop' }))
+    fireEvent.input(document.querySelector('[data-goal-drop-reason] textarea')!, { target: { value: 'Reason' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Drop goal' }))
+    const receipt = await screen.findByTestId('goal-lifecycle-action-error')
+    expect(receipt.textContent).toContain('task-visible (todo)')
+    expect(receipt.textContent).toContain('task-filtered-out (claimed)')
+    expect(receipt.textContent).toContain('이 관측은 누락될 수 있으며 서버의 취소 대상이나 Task의 현재 상태를 증명하지 않습니다')
+    fireEvent.input(screen.getByLabelText('목표 트리 필터'), { target: { value: '' } })
+  })
+
+  it('does not put another Goal\'s Drop error or Task identifiers in the global toast', async () => {
+    vi.mocked(showToast).mockClear()
+    const original = makeGoal('goal-secret-drop', 'Secret drop')
+    const goal: GoalTreeNode = { ...original, task_count: 1, tasks: [
+      { id: 'task-secret', title: 'Task', status: 'todo', status_color: '', priority: 1,
+        assignee: null, goal_id: original.id, is_terminal: false, created_at: '', updated_at: '' },
+    ] }
+    const other = makeGoal('goal-other-selected', 'Other selected goal')
+    mocks.fetchDashboardGoalsTree.mockResolvedValue({
+      approval_queue_state: { state: 'ready' }, tree: [goal, other],
+      summary: { ...emptySummary(), total_goals: 2, active_goals: 2 },
+    })
+    mocks.fetchDashboardGoalDetail.mockImplementation(async (id: string) => ({
+      goal: id === goal.id ? goal : other, linked_tasks: [], linked_keepers: [], approvals: [], execution_receipts: [], timeline: [],
+    }))
+    let rejectAction!: (error: Error) => void
+    mocks.callMcpTool.mockImplementation(() => new Promise<string>((_resolve, reject) => { rejectAction = reject }))
+    mocks.mcpCallFailureDisposition.mockReturnValue('outcome_unknown')
+    render(html`<${GoalTree} />`)
+    fireEvent.click(await screen.findByRole('button', { name: 'Drop' }))
+    fireEvent.input(document.querySelector('[data-goal-drop-reason] textarea')!, { target: { value: 'Reason' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Drop goal' }))
+    fireEvent.click(screen.getByRole('button', { name: /Other selected goal/ }))
+    rejectAction(new Error('sensitive error'))
+    await waitFor(() => expect(showToast).toHaveBeenCalledWith('Drop 시도의 결과를 원래 workspace에서 확인하세요.', 'warning'))
+    const calls = JSON.stringify(vi.mocked(showToast).mock.calls)
+    expect(calls).not.toContain('goal-secret-drop')
+    expect(calls).not.toContain('task-secret')
+    expect(calls).not.toContain('sensitive error')
+    expect((await screen.findByTestId('goal-drop-detached-receipt')).textContent).toContain('task-secret (todo)')
+  })
+
+  it('does not put the Drop Goal id in a global toast after the credential changes', async () => {
+    vi.mocked(showToast).mockClear()
+    setStoredToken('credential-before')
+    const goal = makeGoal('goal-secret-previous-auth', 'Previous credential goal')
+    mocks.fetchDashboardGoalsTree.mockResolvedValue({
+      approval_queue_state: { state: 'ready' }, tree: [goal],
+      summary: { ...emptySummary(), total_goals: 1, active_goals: 1 },
+    })
+    mocks.fetchDashboardGoalDetail.mockResolvedValue({
+      goal, linked_tasks: [], linked_keepers: [], approvals: [], execution_receipts: [], timeline: [],
+    })
+    let resolveAction!: (value: string) => void
+    mocks.callMcpTool.mockImplementation(() => new Promise<string>(resolve => { resolveAction = resolve }))
+    render(html`<${GoalTree} />`)
+    fireEvent.click(await screen.findByRole('button', { name: 'Drop' }))
+    fireEvent.input(document.querySelector('[data-goal-drop-reason] textarea')!, { target: { value: 'Reason' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Drop goal' }))
+    setStoredToken('credential-after')
+    resolveAction(transitionResponse(goal.id, 'drop'))
+    await waitFor(() => expect(showToast).toHaveBeenCalledWith(
+      '이전 연결의 Drop 시도 결과가 도착했습니다. 원래 workspace에서 확인하세요.', 'warning'))
+    expect(JSON.stringify(vi.mocked(showToast).mock.calls)).not.toContain('goal-secret-previous-auth')
+  })
+
+  it('does not claim a pre-dispatch Drop attempt was sent', async () => {
+    const goal = makeGoal('goal-drop-predispatch', 'Pre-dispatch drop')
+    mocks.fetchDashboardGoalsTree.mockResolvedValue({
+      approval_queue_state: { state: 'ready' }, tree: [goal],
+      summary: { ...emptySummary(), total_goals: 1, active_goals: 1 },
+    })
+    mocks.fetchDashboardGoalDetail.mockResolvedValue({
+      goal, linked_tasks: [], linked_keepers: [], approvals: [], execution_receipts: [], timeline: [],
+    })
+    mocks.mcpCallFailureDisposition.mockReturnValue('known_pre_effect')
+    mocks.callMcpTool.mockRejectedValue(new Error('changed before dispatch'))
+    render(html`<${GoalTree} />`)
+    fireEvent.click(await screen.findByRole('button', { name: 'Drop' }))
+    fireEvent.input(document.querySelector('[data-goal-drop-reason] textarea')!, { target: { value: 'Reason' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Drop goal' }))
+    const receipt = await screen.findByTestId('goal-lifecycle-action-error')
+    expect(receipt.textContent).toContain('과거 Drop 시도 기록입니다')
+    expect(receipt.textContent).toContain('changed before dispatch')
+    expect(receipt.textContent).not.toContain('보낸 과거 Drop')
+    expect(receipt.textContent).not.toContain('연결 Task의 현재 상태도 확인하세요')
+  })
+
+  it('retains a pre-dispatch error when its Goal leaves the current tree', async () => {
+    const goal = makeGoal('goal-rejected-deleted', 'Rejected goal')
+    const other = makeGoal('goal-rejected-other', 'Other goal')
+    let includeOriginal = true
+    mocks.fetchDashboardGoalsTree.mockImplementation(async () => ({
+      approval_queue_state: { state: 'ready' }, tree: includeOriginal ? [goal, other] : [other],
+      summary: { ...emptySummary(), total_goals: includeOriginal ? 2 : 1, active_goals: includeOriginal ? 2 : 1 },
+    }))
+    mocks.fetchDashboardGoalDetail.mockImplementation(async (id: string) => ({
+      goal: id === goal.id ? goal : other, linked_tasks: [], linked_keepers: [], approvals: [], execution_receipts: [], timeline: [],
+    }))
+    mocks.mcpCallFailureDisposition.mockReturnValue('known_pre_effect')
+    mocks.callMcpTool.mockRejectedValue(new Error('rejected before dispatch'))
+    render(html`<${GoalTree} />`)
+    fireEvent.click(await screen.findByRole('button', { name: 'Drop' }))
+    fireEvent.input(document.querySelector('[data-goal-drop-reason] textarea')!, { target: { value: 'Preserved reason' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Drop goal' }))
+    await screen.findByTestId('goal-lifecycle-action-error')
+    includeOriginal = false
+    fireEvent.click(screen.getByRole('button', { name: '새로고침' }))
+    const detached = await screen.findByTestId('goal-drop-detached-receipt')
+    expect(detached.textContent).toContain('rejected before dispatch')
+    expect(detached.textContent).toContain('현재 Drop 사유 초안(이 시도 당시와 다를 수 있음): Preserved reason')
+    expect(detached.textContent).not.toContain('기존 Task 취소는 재시도되지 않습니다')
+  })
+
+  it('preserves a Drop reason when a later lifecycle action is requested', async () => {
+    const goal = makeGoal('goal-drop-draft-pause', 'Draft and pause')
+    mocks.fetchDashboardGoalsTree.mockResolvedValue({
+      approval_queue_state: { state: 'ready' }, tree: [goal],
+      summary: { ...emptySummary(), total_goals: 1, active_goals: 1 },
+    })
+    mocks.fetchDashboardGoalDetail.mockResolvedValue({
+      goal, linked_tasks: [], linked_keepers: [], approvals: [], execution_receipts: [], timeline: [],
+    })
+    mocks.callMcpTool.mockResolvedValueOnce(JSON.stringify({ status: 'ok', goal_id: goal.id, action: 'drop',
+      phase: 'dropped', goal: { id: goal.id, phase: 'dropped' }, tasks: { unread: 'unavailable' },
+      effect_delivery: { status: 'delivered' } }))
+      .mockResolvedValueOnce(transitionResponse(goal.id, 'pause'))
+    render(html`<${GoalTree} />`)
+    fireEvent.click(await screen.findByRole('button', { name: 'Drop' }))
+    fireEvent.input(document.querySelector('[data-goal-drop-reason] textarea')!, { target: { value: 'Keep this reason' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Drop goal' }))
+    await screen.findByTestId('goal-lifecycle-action-warning')
+    fireEvent.click(screen.getByRole('button', { name: 'Pause' }))
+    await waitFor(() => expect(screen.getByTestId('goal-lifecycle-action-status').textContent).toContain('Pause applied'))
+    expect((document.querySelector('[data-goal-drop-reason] textarea') as HTMLTextAreaElement).value).toBe('Keep this reason')
+  })
+
+  it('keeps an unsubmitted Drop draft accessible when its Goal leaves the tree', async () => {
+    const goal = makeGoal('goal-unsent-deleted', 'Unsent goal')
+    const other = makeGoal('goal-unsent-other', 'Other remaining goal')
+    let includeOriginal = true
+    mocks.fetchDashboardGoalsTree.mockImplementation(async () => ({
+      approval_queue_state: { state: 'ready' }, tree: includeOriginal ? [goal, other] : [other],
+      summary: { ...emptySummary(), total_goals: includeOriginal ? 2 : 1, active_goals: includeOriginal ? 2 : 1 },
+    }))
+    mocks.fetchDashboardGoalDetail.mockImplementation(async (id: string) => ({
+      goal: id === goal.id ? goal : other, linked_tasks: [], linked_keepers: [], approvals: [], execution_receipts: [], timeline: [],
+    }))
+    render(html`<${GoalTree} />`)
+    fireEvent.click(await screen.findByRole('button', { name: 'Drop' }))
+    fireEvent.input(document.querySelector('[data-goal-drop-reason] textarea')!, { target: { value: 'Unsent reason' } })
+    includeOriginal = false
+    fireEvent.click(screen.getByRole('button', { name: '새로고침' }))
+    const draft = await screen.findByTestId('goal-drop-detached-draft')
+    expect(draft.textContent).toContain('goal-unsent-deleted')
+    expect(draft.textContent).toContain('Unsent reason')
+    expect(draft.textContent).toContain('동일한 인스턴스인지는 확인되지 않았습니다')
+    expect(mocks.callMcpTool).not.toHaveBeenCalled()
+  })
+
+  it('offers an anonymous draft after dashboard bootstrap even when its Goal was removed', async () => {
+    mocks.currentDashboardActor.mockReturnValue('dashboard')
+    const goal = makeGoal('goal-bootstrap-deleted', 'Bootstrap goal')
+    const other = makeGoal('goal-bootstrap-other', 'Remaining bootstrap goal')
+    let includeOriginal = true
+    mocks.fetchDashboardGoalsTree.mockImplementation(async () => ({
+      approval_queue_state: { state: 'ready' }, tree: includeOriginal ? [goal, other] : [other],
+      summary: { ...emptySummary(), total_goals: includeOriginal ? 2 : 1, active_goals: includeOriginal ? 2 : 1 },
+    }))
+    mocks.fetchDashboardGoalDetail.mockImplementation(async (id: string) => ({
+      goal: id === goal.id ? goal : other, linked_tasks: [], linked_keepers: [], approvals: [], execution_receipts: [], timeline: [],
+    }))
+    render(html`<${GoalTree} />`)
+    fireEvent.click(await screen.findByRole('button', { name: 'Drop' }))
+    fireEvent.input(document.querySelector('[data-goal-drop-reason] textarea')!, { target: { value: 'Anonymous reason' } })
+    includeOriginal = false
+    setStoredToken('dev-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
+    const draft = await screen.findByTestId('goal-drop-detached-draft')
+    expect(draft.textContent).not.toContain('Anonymous reason')
+    fireEvent.click(screen.getByRole('button', { name: '이전 연결 초안 보기' }))
+    expect(draft.textContent).toContain('Anonymous reason')
+    expect(draft.textContent).toContain('같은 workspace인지는 확인되지 않았습니다')
+  })
+
+  it('keeps a sent Drop attempt visible while its original Goal is absent', async () => {
+    const goal = makeGoal('goal-pending-deleted', 'Pending goal')
+    const other = makeGoal('goal-pending-other', 'Other pending goal')
+    let includeOriginal = true
+    mocks.fetchDashboardGoalsTree.mockImplementation(async () => ({
+      approval_queue_state: { state: 'ready' }, tree: includeOriginal ? [goal, other] : [other],
+      summary: { ...emptySummary(), total_goals: includeOriginal ? 2 : 1, active_goals: includeOriginal ? 2 : 1 },
+    }))
+    mocks.fetchDashboardGoalDetail.mockImplementation(async (id: string) => ({
+      goal: id === goal.id ? goal : other, linked_tasks: [], linked_keepers: [], approvals: [], execution_receipts: [], timeline: [],
+    }))
+    let resolveAction!: (value: string) => void
+    mocks.callMcpTool.mockImplementation(() => new Promise<string>(resolve => { resolveAction = resolve }))
+    render(html`<${GoalTree} />`)
+    fireEvent.click(await screen.findByRole('button', { name: 'Drop' }))
+    fireEvent.input(document.querySelector('[data-goal-drop-reason] textarea')!, { target: { value: 'Pending reason' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Drop goal' }))
+    includeOriginal = false
+    fireEvent.click(screen.getByRole('button', { name: '새로고침' }))
+    const receipt = await screen.findByTestId('goal-drop-detached-receipt')
+    expect(receipt.textContent).toContain('Drop 시도가 진행 중입니다')
+    expect(receipt.textContent).toContain('서버 수신 여부는 확인되지 않았습니다')
+    expect(receipt.textContent).toContain('Pending reason')
+    expect(screen.queryByRole('button', { name: '이 초안 지우기' })).toBeNull()
+    resolveAction(transitionResponse(goal.id, 'drop'))
+    await waitFor(() => expect(receipt.textContent).toContain('요청 당시 Goal Drop이 적용되었다고 응답했습니다'))
+  })
+
+  it('distinguishes the submitted reason from a later edited draft', async () => {
+    const goal = makeGoal('goal-reason-history', 'Reason history')
+    const other = makeGoal('goal-reason-other', 'Other reason goal')
+    mocks.fetchDashboardGoalsTree.mockResolvedValue({
+      approval_queue_state: { state: 'ready' }, tree: [goal, other],
+      summary: { ...emptySummary(), total_goals: 2, active_goals: 2 },
+    })
+    mocks.fetchDashboardGoalDetail.mockImplementation(async (id: string) => ({
+      goal: id === goal.id ? goal : other, linked_tasks: [], linked_keepers: [], approvals: [], execution_receipts: [], timeline: [],
+    }))
+    mocks.callMcpTool.mockResolvedValue(transitionResponse(goal.id, 'drop'))
+    render(html`<${GoalTree} />`)
+    fireEvent.click(await screen.findByRole('button', { name: 'Drop' }))
+    fireEvent.input(document.querySelector('[data-goal-drop-reason] textarea')!, { target: { value: 'Attempt reason A' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Drop goal' }))
+    await screen.findByTestId('goal-lifecycle-action-warning')
+    fireEvent.input(document.querySelector('[data-goal-drop-reason] textarea')!, { target: { value: 'Edited draft B' } })
+    fireEvent.click(screen.getByRole('button', { name: /Other reason goal/ }))
+    const receipt = await screen.findByTestId('goal-drop-detached-receipt')
+    expect(receipt.textContent).toContain('이 시도에서 입력한 사유(앞뒤 공백 제거): Attempt reason A')
+    expect(receipt.textContent).toContain('현재 Drop 사유 초안(이 시도 당시와 다를 수 있음): Edited draft B')
+  })
+
+  it('keeps a Drop draft visible without enabling submission when the refreshed Goal has no actions', async () => {
+    const goal = makeGoal('goal-draft-no-actions', 'Draft without actions')
+    let current = goal
+    mocks.fetchDashboardGoalsTree.mockImplementation(async () => ({
+      approval_queue_state: { state: 'ready' }, tree: [current],
+      summary: { ...emptySummary(), total_goals: 1, active_goals: 1 },
+    }))
+    mocks.fetchDashboardGoalDetail.mockImplementation(async () => ({
+      goal: current, linked_tasks: [], linked_keepers: [], approvals: [], execution_receipts: [], timeline: [],
+    }))
+    render(html`<${GoalTree} />`)
+    fireEvent.click(await screen.findByRole('button', { name: 'Drop' }))
+    fireEvent.input(document.querySelector('[data-goal-drop-reason] textarea')!, { target: { value: 'Still needed' } })
+    current = { ...goal, phase: 'dropped', goal_fsm: { ...goal.goal_fsm, state: 'dropped', next_actions: [] } }
+    fireEvent.click(screen.getByRole('button', { name: '새로고침' }))
+    await waitFor(() => expect((screen.getByRole('button', { name: 'Drop goal' }) as HTMLButtonElement).disabled).toBe(true))
+    expect((document.querySelector('[data-goal-drop-reason] textarea') as HTMLTextAreaElement).value).toBe('Still needed')
+    expect(mocks.callMcpTool).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    [transitionResponse('goal-verifying-retry', 'request_complete'), 'Verification retry requested'],
+    [transitionResponse('goal-verifying-retry', 'request_complete', true), 'Existing verification reconciled'],
+  ])('shows the server outcome for a verifying Goal: %s', async (response, status) => {
+    const goal: GoalTreeNode = {
+      ...makeGoal('goal-verifying-retry', 'Goal awaiting verification'), phase: 'verifying',
+      verification: { state: 'current', completion: { state: 'pending', requestId: 'proof-request-1',
+        requestedAt: '2026-10-30T07:45:56Z', criterion: { revision: 'revision-default',
+          title: 'Goal awaiting verification', metric: null, target_value: null } } },
+      goal_fsm: {
+        state: 'verifying', source: 'goal.phase',
+        next_actions: ['request_complete', 'drop', 'reopen', 'pause', 'block'],
+        activity_observation: 'goal_metadata',
+      },
+    }
+    mocks.fetchDashboardGoalsTree.mockResolvedValue({
+      approval_queue_state: { state: 'ready' }, tree: [goal],
+      summary: { ...emptySummary(), total_goals: 1, active_goals: 1 },
+    })
+    mocks.fetchDashboardGoalDetail.mockResolvedValue({
+      goal, linked_tasks: [], linked_keepers: [], approvals: [], execution_receipts: [], timeline: [],
+    })
+    mocks.callMcpTool.mockResolvedValue(response)
+    render(html`<${GoalTree} />`)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Retry verification' }))
+    await waitFor(() => expect(mocks.callMcpTool).toHaveBeenCalledWith('masc_goal_transition', {
+      goal_id: 'goal-verifying-retry', action: 'request_complete',
+      expected_workspace: { base_path: '/workspace-a', masc_root: '/workspace-a/.masc' },
+      expected_verification: { phase: 'verifying', criterion_revision: 'revision-default', request_id: 'proof-request-1' },
+    }))
+    await waitFor(() => expect(screen.getByTestId('goal-lifecycle-action-status').textContent)
+      .toContain(status))
+  })
+
+  it.each([
+    ['empty object', '{}'],
+    ['wrong Goal', transitionResponse('another-goal', 'request_complete')],
+    ['wrong action', transitionResponse('goal-untrusted-response', 'pause')],
+    ['non-JSON', 'accepted'],
+  ])('keeps a %s transition response as an unknown outcome', async (_description, response) => {
+    const goal = makeGoal('goal-untrusted-response', 'Untrusted response goal')
+    mocks.fetchDashboardGoalsTree.mockResolvedValue({
+      approval_queue_state: { state: 'ready' }, tree: [goal],
+      summary: { ...emptySummary(), total_goals: 1, active_goals: 1 },
+    })
+    mocks.fetchDashboardGoalDetail.mockResolvedValue({
+      goal, linked_tasks: [], linked_keepers: [], approvals: [], execution_receipts: [], timeline: [],
+    })
+    mocks.mcpCallFailureDisposition.mockReturnValue('outcome_unknown')
+    mocks.callMcpTool.mockResolvedValue(response)
+    render(html`<${GoalTree} />`)
+    fireEvent.click(await screen.findByRole('button', { name: 'Request completion' }))
+    expect((await screen.findByTestId('goal-lifecycle-action-error')).textContent)
+      .toContain('요청 결과를 확인하지 못했습니다')
+    expect(screen.queryByTestId('goal-lifecycle-action-status')).toBeNull()
+    expect(mocks.callMcpTool).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not claim a retry when the original execution is unresolved', async () => {
+    const goal: GoalTreeNode = {
+      ...makeGoal('goal-unknown', 'Unknown verification'), phase: 'verifying',
+      verification: { state: 'current', completion: { state: 'pending', requestId: 'request-unknown',
+        requestedAt: '2026-10-30T07:45:56Z', criterion: { revision: 'revision-default',
+          title: 'Unknown verification', metric: null, target_value: null } } },
+      goal_fsm: { state: 'verifying', source: 'goal.phase', next_actions: ['request_complete', 'reopen'],
+        activity_observation: 'goal_metadata' },
+    }
+    mocks.fetchDashboardGoalsTree.mockResolvedValue({
+      approval_queue_state: { state: 'ready' }, tree: [goal],
+      summary: { ...emptySummary(), total_goals: 1, active_goals: 1 },
+    })
+    mocks.fetchDashboardGoalDetail.mockResolvedValue({
+      goal, linked_tasks: [], linked_keepers: [], approvals: [], execution_receipts: [], timeline: [],
+    })
+    mocks.callMcpTool.mockRejectedValue(new Error('original outcome is unknown; no new review was started'))
+    render(html`<${GoalTree} />`)
+    fireEvent.click(await screen.findByRole('button', { name: 'Retry verification' }))
+    await waitFor(() => expect(screen.getByTestId('goal-lifecycle-action-error').textContent)
+      .toContain('original outcome is unknown'))
+    expect(screen.getByTestId('goal-lifecycle-action-binding').textContent).toContain('request-unknown')
+    expect(screen.queryByTestId('goal-lifecycle-action-status')).toBeNull()
+  })
+
+  it('retains an unknown transport outcome for the original Goal after navigation', async () => {
+    const first = makeGoal('goal-transport-origin', 'Transport origin')
+    const second = makeGoal('goal-transport-other', 'Transport other')
+    mocks.fetchDashboardGoalsTree.mockResolvedValue({
+      approval_queue_state: { state: 'ready' }, tree: [first, second],
+      summary: { ...emptySummary(), total_goals: 2, active_goals: 2 },
+    })
+    mocks.fetchDashboardGoalDetail.mockImplementation(async (id: string) => ({
+      goal: id === first.id ? first : second,
+      linked_tasks: [], linked_keepers: [], approvals: [], execution_receipts: [], timeline: [],
+    }))
+    let rejectAction!: (error: Error) => void
+    mocks.callMcpTool.mockImplementation(() => new Promise<string>((_resolve, reject) => { rejectAction = reject }))
+    mocks.mcpCallFailureDisposition.mockReturnValue('outcome_unknown')
+    render(html`<${GoalTree} />`)
+    fireEvent.click(await screen.findByRole('button', { name: 'Request completion' }))
+    fireEvent.click(screen.getByRole('button', { name: /Transport other/ }))
+    rejectAction(new Error('POST /mcp: timeout'))
+    await waitFor(() => expect(showToast).toHaveBeenCalledWith(expect.stringContaining('요청 결과를 확인하지 못했습니다'), 'error'))
+    fireEvent.click(screen.getByRole('button', { name: /Transport origin/ }))
+    const receipt = await screen.findByTestId('goal-lifecycle-action-error')
+    expect(receipt.textContent).toContain('다시 시도하기 전에 원래 Goal 상태를 확인하세요')
+    expect(receipt.textContent).toContain('POST /mcp: timeout')
+  })
+
+  it('keeps an earlier unknown proof result when a later Goal action completes', async () => {
+    const goal: GoalTreeNode = {
+      ...makeGoal('goal-history', 'Goal with history'), phase: 'verifying',
+      verification: { state: 'current', completion: { state: 'pending', requestId: 'proof-original',
+        requestedAt: '2026-10-30T07:45:56Z', criterion: { revision: 'revision-default',
+          title: 'Goal with history', metric: null, target_value: null } } },
+      goal_fsm: { state: 'verifying', source: 'goal.phase',
+        next_actions: ['request_complete', 'pause'], activity_observation: 'goal_metadata' },
+    }
+    mocks.fetchDashboardGoalsTree.mockResolvedValue({
+      approval_queue_state: { state: 'ready' }, tree: [goal],
+      summary: { ...emptySummary(), total_goals: 1, active_goals: 1 },
+    })
+    mocks.fetchDashboardGoalDetail.mockResolvedValue({
+      goal, linked_tasks: [], linked_keepers: [], approvals: [], execution_receipts: [], timeline: [],
+    })
+    mocks.callMcpTool.mockRejectedValueOnce(new Error('original outcome unknown')).mockResolvedValueOnce(transitionResponse('goal-history', 'pause'))
+    render(html`<${GoalTree} />`)
+    fireEvent.click(await screen.findByRole('button', { name: 'Retry verification' }))
+    await screen.findByTestId('goal-lifecycle-action-error')
+    fireEvent.click(screen.getByRole('button', { name: 'Pause' }))
+    await waitFor(() => expect(screen.getByTestId('goal-lifecycle-action-status').textContent).toContain('Pause applied'))
+    expect(screen.getByTestId('goal-lifecycle-action-history').textContent).toContain('original outcome unknown')
+    expect(screen.getByTestId('goal-lifecycle-action-history').textContent).toContain('proof-original')
+  })
+
+  it.each(['success', 'failure'] as const)('keeps a %s response with its original Goal after navigation', async outcome => {
+    const first = makeGoal('goal-origin', 'Origin goal')
+    const second = makeGoal('goal-selected', 'Selected goal')
+    const tree = { approval_queue_state: { state: 'ready' }, tree: [first, second],
+      summary: { ...emptySummary(), total_goals: 2, active_goals: 2 } } satisfies DashboardGoalsTreeResponse
+    mocks.fetchDashboardGoalsTree.mockResolvedValue(tree)
+    mocks.fetchDashboardGoalDetail.mockImplementation(async (id: string) => ({
+      goal: id === first.id ? first : second,
+      linked_tasks: [], linked_keepers: [], approvals: [], execution_receipts: [], timeline: [],
+    }))
+    let resolveAction!: (value: string) => void
+    let rejectAction!: (error: Error) => void
+    mocks.callMcpTool.mockImplementation(() => new Promise<string>((resolve, reject) => {
+      resolveAction = resolve
+      rejectAction = reject
+    }))
+    render(html`<${GoalTree} />`)
+    await waitFor(() => expect(screen.getByTestId('goal-detail-panel').getAttribute('data-selected-goal-id')).toBe(first.id))
+    fireEvent.click(screen.getByRole('button', { name: 'Request completion' }))
+    fireEvent.click(screen.getByRole('button', { name: /Selected goal/ }))
+    await waitFor(() => expect(screen.getByTestId('goal-detail-panel').getAttribute('data-selected-goal-id')).toBe(second.id))
+    const firstReads = mocks.fetchDashboardGoalDetail.mock.calls.filter(([id]) => id === first.id).length
+    if (outcome === 'success') resolveAction(transitionResponse(first.id, 'request_complete'))
+    else rejectAction(new Error('original outcome is unknown'))
+    await waitFor(() => expect(showToast).toHaveBeenCalledWith(
+      outcome === 'success' ? 'Goal goal-origin: Request completion applied' : expect.stringContaining('Goal goal-origin: original outcome is unknown'),
+      ...(outcome === 'success' ? [] : ['error']),
+    ))
+    expect(screen.getByTestId('goal-detail-panel').getAttribute('data-selected-goal-id')).toBe(second.id)
+    expect(mocks.fetchDashboardGoalDetail.mock.calls.filter(([id]) => id === first.id)).toHaveLength(firstReads)
+    fireEvent.click(screen.getByRole('button', { name: /Origin goal/ }))
+    const result = await screen.findByTestId(outcome === 'success' ? 'goal-lifecycle-action-status' : 'goal-lifecycle-action-error')
+    expect(result.textContent).toContain(outcome === 'success' ? 'Request completion applied' : 'original outcome is unknown')
+  })
+
+  it('does not apply an old workspace response to the same Goal id in a new workspace', async () => {
+    const goal = makeGoal('goal-same-id', 'Workspace goal')
+    mocks.fetchDashboardGoalsTree.mockResolvedValue({
+      approval_queue_state: { state: 'ready' }, tree: [goal],
+      summary: { ...emptySummary(), total_goals: 1, active_goals: 1 },
+    })
+    mocks.fetchDashboardGoalDetail.mockResolvedValue({
+      goal, linked_tasks: [], linked_keepers: [], approvals: [], execution_receipts: [], timeline: [],
+    })
+    let resolveAction!: (value: string) => void
+    mocks.callMcpTool.mockImplementation(() => new Promise<string>(resolve => { resolveAction = resolve }))
+    render(html`<${GoalTree} />`)
+    await waitFor(() => expect(mocks.fetchDashboardGoalDetail).toHaveBeenCalledTimes(1))
+    fireEvent.click(await screen.findByRole('button', { name: 'Request completion' }))
+    ;(executionWorkspaceAuthority as { value: unknown }).value =
+      { epoch: 'fixture-b', workspaceRoot: '/workspace-b', connectionGeneration: 2 }
+    await waitFor(() => expect((screen.getByRole('button', { name: 'Request completion' }) as HTMLButtonElement).disabled).toBe(false))
+    await waitFor(() => expect(mocks.fetchDashboardGoalDetail).toHaveBeenCalledWith(goal.id,
+      { basePath: '/workspace-b', mascRoot: '/workspace-b/.masc' }))
+    const reads = mocks.fetchDashboardGoalDetail.mock.calls.length
+    resolveAction(transitionResponse(goal.id, 'request_complete'))
+    await waitFor(() => expect(showToast).toHaveBeenCalledWith(
+      'Goal goal-same-id: 이전 연결에서 요청 결과가 도착했습니다. 해당 workspace에서 상태를 확인하세요.', 'warning',
+    ))
+    expect(screen.queryByTestId('goal-lifecycle-action-status')).toBeNull()
+    expect(mocks.fetchDashboardGoalDetail).toHaveBeenCalledTimes(reads)
+  })
+
+  it('keeps the original request result when the server restarts on the same workspace', async () => {
+    const goal = makeGoal('goal-restarted-server', 'Restarted server goal')
+    mocks.fetchDashboardGoalsTree.mockResolvedValue({
+      approval_queue_state: { state: 'ready' }, tree: [goal],
+      summary: { ...emptySummary(), total_goals: 1, active_goals: 1 },
+    })
+    mocks.fetchDashboardGoalDetail.mockResolvedValue({
+      goal, linked_tasks: [], linked_keepers: [], approvals: [], execution_receipts: [], timeline: [],
+    })
+    let rejectAction!: (error: Error) => void
+    mocks.callMcpTool.mockImplementation(() => new Promise<string>((_resolve, reject) => { rejectAction = reject }))
+    mocks.mcpCallFailureDisposition.mockReturnValue('outcome_unknown')
+    render(html`<${GoalTree} />`)
+    fireEvent.click(await screen.findByRole('button', { name: 'Request completion' }))
+    ;(executionWorkspaceAuthority as { value: unknown }).value =
+      { epoch: 'fixture-restarted', workspaceRoot: '/workspace-a', connectionGeneration: 2 }
+    await waitFor(() => expect(mocks.fetchDashboardGoalsTree).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect((screen.getByRole('button', { name: 'Request completion' }) as HTMLButtonElement).disabled).toBe(true))
+    rejectAction(new Error('connection closed'))
+    const prior = await screen.findByTestId('goal-lifecycle-previous-connection')
+    await waitFor(() => expect(prior.textContent).toContain('요청 결과를 확인하지 못했습니다'))
+    expect(prior.textContent).toContain('connection closed')
+    expect(prior.textContent).toContain('revision-default')
+    expect(prior.textContent).toContain('같은 workspace인지는 확인되지 않았습니다')
+    expect(screen.queryByTestId('goal-lifecycle-action-error')).toBeNull()
+  })
+
+  it('keeps a managed dev actor receipt and draft across token rotation', async () => {
+    setStoredToken('dev-token-one', { source: 'dev', actor: 'dashboard', role: 'admin' })
+    const goal = makeGoal('goal-dev-rotation', 'Dev rotation goal')
+    mocks.fetchDashboardGoalsTree.mockResolvedValue({
+      approval_queue_state: { state: 'ready' }, tree: [goal],
+      summary: { ...emptySummary(), total_goals: 1, active_goals: 1 },
+    })
+    mocks.fetchDashboardGoalDetail.mockResolvedValue({
+      goal, linked_tasks: [], linked_keepers: [], approvals: [], execution_receipts: [], timeline: [],
+    })
+    let rejectAction!: (error: Error) => void
+    mocks.callMcpTool.mockImplementation(() => new Promise<string>((_resolve, reject) => { rejectAction = reject }))
+    render(html`<${GoalTree} />`)
+    fireEvent.click(await screen.findByRole('button', { name: 'Drop' }))
+    fireEvent.input(document.querySelector('[data-goal-drop-reason] textarea')!, { target: { value: 'Retain this reason' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Drop goal' }))
+    setStoredToken('dev-token-two', { source: 'dev', actor: 'dashboard', role: 'admin' })
+    rejectAction(new Error('connection closed'))
+    await waitFor(() => expect(screen.getByTestId('goal-lifecycle-action-error').textContent).toContain('connection closed'))
+    expect((document.querySelector('[data-goal-drop-reason] textarea') as HTMLTextAreaElement).value).toBe('Retain this reason')
+  })
+
+  it('blocks a different credential during an earlier request without exposing its result', async () => {
+    setStoredToken('manual-token-a', { source: 'manual' })
+    const goal = makeGoal('goal-credential-pending', 'Credential pending goal')
+    mocks.fetchDashboardGoalsTree.mockResolvedValue({
+      approval_queue_state: { state: 'ready' }, tree: [goal],
+      summary: { ...emptySummary(), total_goals: 1, active_goals: 1 },
+    })
+    mocks.fetchDashboardGoalDetail.mockResolvedValue({
+      goal, linked_tasks: [], linked_keepers: [], approvals: [], execution_receipts: [], timeline: [],
+    })
+    let rejectAction!: (error: Error) => void
+    mocks.callMcpTool.mockImplementation(() => new Promise<string>((_resolve, reject) => { rejectAction = reject }))
+    mocks.mcpCallFailureDisposition.mockReturnValue('outcome_unknown')
+    render(html`<${GoalTree} />`)
+    fireEvent.click(await screen.findByRole('button', { name: 'Request completion' }))
+    setStoredToken('manual-token-b', { source: 'manual' })
+    const button = await screen.findByRole('button', { name: 'Request completion' }) as HTMLButtonElement
+    await waitFor(() => expect(button.disabled).toBe(true))
+    rejectAction(new Error('private prior result'))
+    await screen.findByText(/다른 연결 또는 인증의 Goal 요청이나 연결 Task 결과에 확인이 필요한 항목이 있습니다/)
+    expect(screen.queryByText(/private prior result/)).toBeNull()
+    expect(mocks.callMcpTool).toHaveBeenCalledTimes(1)
+  })
+
+  it('reports when bootstrap changes the credential before sending', async () => {
+    const goal = makeGoal('goal-before-dispatch', 'Before dispatch goal')
+    mocks.fetchDashboardGoalsTree.mockResolvedValue({
+      approval_queue_state: { state: 'ready' }, tree: [goal],
+      summary: { ...emptySummary(), total_goals: 1, active_goals: 1 },
+    })
+    mocks.fetchDashboardGoalDetail.mockResolvedValue({
+      goal, linked_tasks: [], linked_keepers: [], approvals: [], execution_receipts: [], timeline: [],
+    })
+    let rejectAction!: (error: Error) => void
+    mocks.callMcpTool.mockImplementation(() => new Promise<string>((_resolve, reject) => { rejectAction = reject }))
+    mocks.mcpCallFailureDisposition.mockReturnValue('known_pre_effect')
+    mocks.mcpIdentityRequiresGoalRefresh.mockReturnValue(true)
+    render(html`<${GoalTree} />`)
+    fireEvent.click(await screen.findByRole('button', { name: 'Request completion' }))
+    setStoredToken('dev-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
+    rejectAction(new Error('changed before dispatch'))
+    await waitFor(() => expect(showToast).toHaveBeenCalledWith(expect.stringContaining('Goal을 변경하지 않았습니다'), 'warning'))
+  })
+
+  it('reloads an initial read when the unauthenticated actor changes', async () => {
+    const goal = makeGoal('goal-actor-read', 'Actor read goal')
+    const tree = { approval_queue_state: { state: 'ready' }, tree: [goal],
+      summary: { ...emptySummary(), total_goals: 1, active_goals: 1 } } satisfies DashboardGoalsTreeResponse
+    let actor = 'actor-a'
+    let resolveOld!: (tree: DashboardGoalsTreeResponse) => void
+    mocks.currentDashboardActor.mockImplementation(() => actor)
+    mocks.fetchDashboardGoalsTree.mockImplementation(() => actor === 'actor-a'
+      ? new Promise(resolve => { resolveOld = resolve }) : Promise.resolve(tree))
+    mocks.fetchDashboardGoalDetail.mockResolvedValue({
+      goal, linked_tasks: [], linked_keepers: [], approvals: [], execution_receipts: [], timeline: [],
+    })
+    render(html`<${GoalTree} />`)
+    await waitFor(() => expect(mocks.fetchDashboardGoalsTree).toHaveBeenCalled())
+    actor = 'actor-b'
+    setCanonicalDashboardActor('actor-b')
+    await screen.findByRole('button', { name: 'Request completion' })
+    resolveOld(tree)
+    await waitFor(() => expect((screen.getByRole('button', { name: 'Request completion' }) as HTMLButtonElement).disabled).toBe(false))
+  })
+
+  it('retains a pending bearer request when its canonical actor arrives', async () => {
+    setStoredToken('manual-bearer', { source: 'manual' })
+    const goal = makeGoal('goal-actor-hint', 'Actor hint goal')
+    mocks.fetchDashboardGoalsTree.mockResolvedValue({
+      approval_queue_state: { state: 'ready' }, tree: [goal],
+      summary: { ...emptySummary(), total_goals: 1, active_goals: 1 },
+    })
+    mocks.fetchDashboardGoalDetail.mockResolvedValue({
+      goal, linked_tasks: [], linked_keepers: [], approvals: [], execution_receipts: [], timeline: [],
+    })
+    let resolveAction!: (value: string) => void
+    mocks.callMcpTool.mockImplementation(() => new Promise<string>(resolve => { resolveAction = resolve }))
+    render(html`<${GoalTree} />`)
+    fireEvent.click(await screen.findByRole('button', { name: 'Request completion' }))
+    mocks.currentDashboardActor.mockReturnValue('alice')
+    setCanonicalDashboardActor('alice')
+    await waitFor(() => expect((screen.getByRole('button', { name: 'Request completion' }) as HTMLButtonElement).disabled).toBe(true))
+    resolveAction(transitionResponse(goal.id, 'request_complete'))
+    await waitFor(() => expect(screen.getByTestId('goal-lifecycle-action-status').textContent).toContain('Request completion applied'))
+  })
+
+  it('keeps a drop reason with its originating workspace', async () => {
+    const goal = makeGoal('goal-drop-owner', 'Drop owner goal')
+    mocks.fetchDashboardGoalsTree.mockResolvedValue({
+      approval_queue_state: { state: 'ready' }, tree: [goal],
+      summary: { ...emptySummary(), total_goals: 1, active_goals: 1 },
+    })
+    mocks.fetchDashboardGoalDetail.mockResolvedValue({
+      goal, linked_tasks: [], linked_keepers: [], approvals: [], execution_receipts: [], timeline: [],
+    })
+    render(html`<${GoalTree} />`)
+    fireEvent.click(await screen.findByRole('button', { name: 'Drop' }))
+    fireEvent.input(document.querySelector('[data-goal-drop-reason] textarea')!, { target: { value: 'A reason' } })
+    ;(executionWorkspaceAuthority as { value: unknown }).value =
+      { epoch: 'fixture-b', workspaceRoot: '/workspace-b', connectionGeneration: 2 }
+    await waitFor(() => expect(mocks.fetchDashboardGoalsTree).toHaveBeenCalledWith(
+      { basePath: '/workspace-b', mascRoot: '/workspace-b/.masc' }))
+    await waitFor(() => expect(document.querySelector('[data-goal-drop-reason]')).toBeNull())
+    fireEvent.click(await screen.findByRole('button', { name: 'Drop' }))
+    expect((document.querySelector('[data-goal-drop-reason] textarea') as HTMLTextAreaElement).value).toBe('')
+    expect(mocks.callMcpTool).not.toHaveBeenCalled()
+  })
+
+  it('offers an explicit copy of an unsent draft from a previous server connection', async () => {
+    const goal = makeGoal('goal-draft-restart', 'Draft restart goal')
+    mocks.fetchDashboardGoalsTree.mockResolvedValue({
+      approval_queue_state: { state: 'ready' }, tree: [goal],
+      summary: { ...emptySummary(), total_goals: 1, active_goals: 1 },
+    })
+    mocks.fetchDashboardGoalDetail.mockResolvedValue({
+      goal, linked_tasks: [], linked_keepers: [], approvals: [], execution_receipts: [], timeline: [],
+    })
+    render(html`<${GoalTree} />`)
+    fireEvent.click(await screen.findByRole('button', { name: 'Drop' }))
+    fireEvent.input(document.querySelector('[data-goal-drop-reason] textarea')!, { target: { value: 'Original reason' } })
+    ;(executionWorkspaceAuthority as { value: unknown }).value =
+      { epoch: 'fixture-restarted', workspaceRoot: '/workspace-a', connectionGeneration: 2 }
+    const previousDraft = await screen.findByTestId('goal-drop-previous-drafts')
+    expect(previousDraft.textContent).not.toContain('Original reason')
+    fireEvent.click(screen.getByRole('button', { name: '이전 연결 초안 보기' }))
+    expect(previousDraft.textContent).toContain('Original reason')
+    expect(document.querySelector('[data-goal-drop-reason]')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '이 사유를 현재 입력에 복사' }))
+    expect((document.querySelector('[data-goal-drop-reason] textarea') as HTMLTextAreaElement).value).toBe('Original reason')
+    fireEvent.input(document.querySelector('[data-goal-drop-reason] textarea')!, { target: { value: 'Current draft' } })
+    expect((screen.getByRole('button', { name: '이 사유를 현재 입력에 복사' }) as HTMLButtonElement).disabled).toBe(true)
+    expect((document.querySelector('[data-goal-drop-reason] textarea') as HTMLTextAreaElement).value).toBe('Current draft')
+    expect(mocks.callMcpTool).not.toHaveBeenCalled()
+  })
+
+  it('offers an anonymous dashboard draft after dev-token bootstrap', async () => {
+    mocks.currentDashboardActor.mockReturnValue('dashboard')
+    const goal = makeGoal('goal-draft-bootstrap', 'Bootstrap draft goal')
+    mocks.fetchDashboardGoalsTree.mockResolvedValue({
+      approval_queue_state: { state: 'ready' }, tree: [goal],
+      summary: { ...emptySummary(), total_goals: 1, active_goals: 1 },
+    })
+    mocks.fetchDashboardGoalDetail.mockResolvedValue({
+      goal, linked_tasks: [], linked_keepers: [], approvals: [], execution_receipts: [], timeline: [],
+    })
+    let rejectAction!: (error: Error) => void
+    mocks.callMcpTool.mockImplementation(() => new Promise<string>((_resolve, reject) => { rejectAction = reject }))
+    mocks.mcpCallFailureDisposition.mockReturnValue('known_pre_effect')
+    mocks.mcpIdentityRequiresGoalRefresh.mockReturnValue(true)
+    render(html`<${GoalTree} />`)
+    fireEvent.click(await screen.findByRole('button', { name: 'Drop' }))
+    fireEvent.input(document.querySelector('[data-goal-drop-reason] textarea')!, { target: { value: 'Saved before login' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Drop goal' }))
+    setStoredToken('dev-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
+    rejectAction(new Error('changed before dispatch'))
+    await waitFor(() => expect(showToast).toHaveBeenCalledWith(expect.stringContaining('Goal을 변경하지 않았습니다'), 'warning'))
+    await screen.findByTestId('goal-drop-previous-drafts')
+    fireEvent.click(screen.getByRole('button', { name: '이전 연결 초안 보기' }))
+    expect(screen.getByTestId('goal-drop-previous-drafts').textContent).toContain('Saved before login')
+    expect(document.querySelector('[data-goal-drop-reason]')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '이 사유를 현재 입력에 복사' }))
+    expect((document.querySelector('[data-goal-drop-reason] textarea') as HTMLTextAreaElement).value).toBe('Saved before login')
+    expect(mocks.callMcpTool).toHaveBeenCalledTimes(1)
+  })
+
+  it('blocks a new dev action while an anonymous dashboard request remains pending', async () => {
+    mocks.currentDashboardActor.mockReturnValue('dashboard')
+    const goal = makeGoal('goal-pending-bootstrap', 'Pending bootstrap goal')
+    mocks.fetchDashboardGoalsTree.mockResolvedValue({
+      approval_queue_state: { state: 'ready' }, tree: [goal],
+      summary: { ...emptySummary(), total_goals: 1, active_goals: 1 },
+    })
+    mocks.fetchDashboardGoalDetail.mockResolvedValue({
+      goal, linked_tasks: [], linked_keepers: [], approvals: [], execution_receipts: [], timeline: [],
+    })
+    let rejectAction!: (error: Error) => void
+    mocks.callMcpTool.mockImplementation(() => new Promise<string>((_resolve, reject) => { rejectAction = reject }))
+    mocks.mcpCallFailureDisposition.mockReturnValue('outcome_unknown')
+    render(html`<${GoalTree} />`)
+    fireEvent.click(await screen.findByRole('button', { name: 'Drop' }))
+    fireEvent.input(document.querySelector('[data-goal-drop-reason] textarea')!, { target: { value: 'Pending reason' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Drop goal' }))
+    setStoredToken('dev-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
+    await screen.findByTestId('goal-lifecycle-previous-connection')
+    expect((screen.getByRole('button', { name: 'Drop' }) as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.click(screen.getByRole('button', { name: '이전 연결 초안 보기' }))
+    expect((screen.getByRole('button', { name: '이 사유를 현재 입력에 복사' }) as HTMLButtonElement).disabled).toBe(true)
+    rejectAction(new Error('connection closed'))
+    await screen.findByRole('button', { name: '이전 연결 결과 보기' })
+    fireEvent.click(screen.getByRole('button', { name: '이전 연결 결과 보기' }))
+    await waitFor(() => expect(screen.getByTestId('goal-lifecycle-previous-connection').textContent).toContain('connection closed'))
+    expect(mocks.callMcpTool).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not send an action from the previous workspace tree while the new tree is loading', async () => {
+    const goal = makeGoal('goal-cloned', 'Cloned goal')
+    const tree = { approval_queue_state: { state: 'ready' }, tree: [goal],
+      summary: { ...emptySummary(), total_goals: 1, active_goals: 1 } } satisfies DashboardGoalsTreeResponse
+    let resolveNext!: (value: DashboardGoalsTreeResponse) => void
+    mocks.fetchDashboardGoalsTree.mockResolvedValueOnce(tree)
+      .mockImplementationOnce(() => new Promise(resolve => { resolveNext = resolve }))
+    mocks.fetchDashboardGoalDetail.mockResolvedValue({
+      goal, linked_tasks: [], linked_keepers: [], approvals: [], execution_receipts: [], timeline: [],
+    })
+    render(html`<${GoalTree} />`)
+    const button = await screen.findByRole('button', { name: 'Request completion' }) as HTMLButtonElement
+    await waitFor(() => expect(button.disabled).toBe(false))
+    ;(executionWorkspaceAuthority as { value: unknown }).value =
+      { epoch: 'fixture-b', workspaceRoot: '/workspace-b', connectionGeneration: 2 }
+    await waitFor(() => expect(mocks.fetchDashboardGoalsTree).toHaveBeenCalledTimes(2))
+    expect(screen.queryByRole('button', { name: 'Request completion' })).toBeNull()
+    expect(mocks.callMcpTool).not.toHaveBeenCalled()
+    resolveNext(tree)
+    expect((await screen.findByRole('button', { name: 'Request completion' }) as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  it('keeps an action with the captured masc root when the same base changes roots', async () => {
+    const goal = makeGoal('goal-root-swap', 'Root swap goal')
+    const tree = { approval_queue_state: { state: 'ready' }, tree: [goal],
+      summary: { ...emptySummary(), total_goals: 1, active_goals: 1 } } satisfies DashboardGoalsTreeResponse
+    let root = '/root-a'
+    mocks.captureArtifactWorkspace.mockImplementation(async () => ({ basePath: '/workspace-a', mascRoot: root }))
+    mocks.fetchDashboardGoalsTree.mockResolvedValue(tree)
+    mocks.fetchDashboardGoalDetail.mockResolvedValue({
+      goal, linked_tasks: [], linked_keepers: [], approvals: [], execution_receipts: [], timeline: [],
+    })
+    let resolveAction!: (value: string) => void
+    mocks.callMcpTool.mockImplementation(() => new Promise<string>(resolve => { resolveAction = resolve }))
+    render(html`<${GoalTree} />`)
+    const button = await screen.findByRole('button', { name: 'Request completion' }) as HTMLButtonElement
+    await waitFor(() => expect(button.disabled).toBe(false))
+    fireEvent.click(button)
+    await waitFor(() => expect(mocks.callMcpTool).toHaveBeenCalledWith('masc_goal_transition', expect.objectContaining({
+      expected_workspace: { base_path: '/workspace-a', masc_root: '/root-a' },
+    })))
+    root = '/root-b'
+    fireEvent.click(screen.getByRole('button', { name: '새로고침' }))
+    await waitFor(() => expect(mocks.fetchDashboardGoalsTree).toHaveBeenCalledWith(
+      { basePath: '/workspace-a', mascRoot: '/root-b' }))
+    await waitFor(() => expect((screen.getByRole('button', { name: 'Request completion' }) as HTMLButtonElement).disabled).toBe(false))
+    resolveAction(transitionResponse(goal.id, 'request_complete'))
+    await waitFor(() => expect(showToast).toHaveBeenCalledWith(
+      'Goal goal-root-swap: 이전 연결에서 요청 결과가 도착했습니다. 해당 workspace에서 상태를 확인하세요.', 'warning',
+    ))
+    expect(screen.queryByTestId('goal-lifecycle-action-status')).toBeNull()
+  })
+
+  it.each(['empty', 'url'] as const)('does not expose a %s credential receipt after switching to a dev token', async initial => {
+    if (initial === 'url') {
+      mocks.currentDashboardActor.mockReturnValue('dashboard')
+      setStoredToken('test-url-token', { source: 'url' })
+    }
+    const goal = makeGoal('goal-bootstrap', 'Bootstrap goal')
+    mocks.fetchDashboardGoalsTree.mockResolvedValue({
+      approval_queue_state: { state: 'ready' }, tree: [goal],
+      summary: { ...emptySummary(), total_goals: 1, active_goals: 1 },
+    })
+    mocks.fetchDashboardGoalDetail.mockResolvedValue({
+      goal, linked_tasks: [], linked_keepers: [], approvals: [], execution_receipts: [], timeline: [],
+    })
+    let resolveAction!: (value: string) => void
+    mocks.callMcpTool.mockImplementation(() => new Promise<string>(resolve => { resolveAction = resolve }))
+    render(html`<${GoalTree} />`)
+    fireEvent.click(await screen.findByRole('button', { name: 'Request completion' }))
+    setStoredToken('test-dev-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
+    ;(executionWorkspaceAuthority as { value: unknown }).value =
+      { epoch: 'fixture-a', workspaceRoot: '/workspace-a', connectionGeneration: 2 }
+    resolveAction(transitionResponse(goal.id, 'request_complete'))
+    await waitFor(() => expect(showToast).toHaveBeenCalledWith(expect.stringContaining('이전 연결에서 요청 결과'), 'warning'))
+    expect(screen.queryByTestId('goal-lifecycle-action-status')).toBeNull()
+    expect(screen.queryByTestId('goal-lifecycle-previous-connection')).toBeNull()
+  })
+
+  it('waits for the initial workspace observation before sending an action', async () => {
+    ;(executionWorkspaceAuthority as { value: unknown }).value = null
+    const goal = makeGoal('goal-wait', 'Waiting goal')
+    mocks.fetchDashboardGoalsTree.mockResolvedValue({
+      approval_queue_state: { state: 'ready' }, tree: [goal],
+      summary: { ...emptySummary(), total_goals: 1, active_goals: 1 },
+    })
+    mocks.fetchDashboardGoalDetail.mockResolvedValue({
+      goal, linked_tasks: [], linked_keepers: [], approvals: [], execution_receipts: [], timeline: [],
+    })
+    mocks.callMcpTool.mockResolvedValue(transitionResponse(goal.id, 'request_complete'))
+    render(html`<${GoalTree} />`)
+    await screen.findByText(/workspace를 확인할 수 없습니다/)
+    expect(screen.queryByRole('button', { name: 'Request completion' })).toBeNull()
+    expect(mocks.callMcpTool).not.toHaveBeenCalled()
+    ;(executionWorkspaceAuthority as { value: unknown }).value =
+      { epoch: 'fixture-a', workspaceRoot: '/workspace-a', connectionGeneration: 1 }
+    const button = await screen.findByRole('button', { name: 'Request completion' }) as HTMLButtonElement
+    await waitFor(() => expect(button.disabled).toBe(false))
+    fireEvent.click(button)
+    await waitFor(() => expect(mocks.callMcpTool).toHaveBeenCalledTimes(1))
+  })
+
+  it('shows a workspace observation failure and retries its source', async () => {
+    ;(executionWorkspaceAuthority as { value: unknown }).value = null
+    ;(executionError as { value: string | null }).value = 'execution unavailable'
+    mocks.fetchDashboardGoalsTree.mockResolvedValue({
+      approval_queue_state: { state: 'ready' }, tree: [], summary: emptySummary(),
+    })
+    render(html`<${GoalTree} />`)
+    await screen.findByText(/execution unavailable/)
+    fireEvent.click(screen.getByRole('button', { name: '다시 확인' }))
+    expect(mocks.refreshExecution).toHaveBeenCalledWith({ force: true })
+  })
+
+  it('rechecks the workspace after another source replaces the shared tree', async () => {
+    const goal = makeGoal('goal-shared-refresh', 'Shared refresh goal')
+    const tree = { approval_queue_state: { state: 'ready' }, tree: [goal],
+      summary: { ...emptySummary(), total_goals: 1, active_goals: 1 } } satisfies DashboardGoalsTreeResponse
+    mocks.fetchDashboardGoalsTree.mockResolvedValue(tree)
+    mocks.fetchDashboardGoalDetail.mockResolvedValue({
+      goal, linked_tasks: [], linked_keepers: [], approvals: [], execution_receipts: [], timeline: [],
+    })
+    render(html`<${GoalTree} />`)
+    const button = await screen.findByRole('button', { name: 'Request completion' }) as HTMLButtonElement
+    await waitFor(() => expect(button.disabled).toBe(false))
+    const reads = mocks.fetchDashboardGoalsTree.mock.calls.length
+    hydrateGoalTreeSnapshot(tree)
+    await waitFor(() => expect(mocks.fetchDashboardGoalsTree.mock.calls.length).toBeGreaterThan(reads))
+    await waitFor(() => expect(button.disabled).toBe(false))
   })
 
   it.each([
@@ -328,14 +1744,14 @@ describe('GoalTree', () => {
     mocks.fetchDashboardGoalDetail.mockResolvedValue({
       goal, linked_tasks: [], linked_keepers: [], approvals: [], execution_receipts: [], timeline: [],
     })
-    mocks.callMcpTool.mockResolvedValue('{"ok":true}')
+    mocks.callMcpTool.mockResolvedValue(transitionResponse(goal.id, action))
     render(html`<${GoalTree} />`)
     await waitFor(() => expect(screen.getByRole('button', { name: label })).toBeTruthy())
     expect(document.querySelector('[data-goal-resume-phase]')?.textContent).toContain('재개 시')
     expect(screen.queryByRole('button', { name: 'Request completion' })).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: label }))
     await waitFor(() => expect(mocks.callMcpTool).toHaveBeenCalledWith('masc_goal_transition', {
-      goal_id: 'goal-suspended', action, actor: { id: 'dashboard-test', display_name: 'dashboard-test' },
+      goal_id: 'goal-suspended', action, expected_workspace: { base_path: '/workspace-a', masc_root: '/workspace-a/.masc' },
     }))
   })
 
@@ -393,7 +1809,8 @@ describe('GoalTree', () => {
 
     render(html`<${GoalTree} />`)
 
-    expect(screen.getByTestId('goal-tree-loading')).toBeTruthy()
+    expect(screen.getByText('goal manager 로드 중...')).toBeTruthy()
+    await waitFor(() => expect(mocks.fetchDashboardGoalsTree).toHaveBeenCalledTimes(1))
     resolveTree(treePayload)
     await waitFor(() => {
       expect(screen.queryByTestId('goal-tree-loading')).toBeNull()
@@ -403,6 +1820,54 @@ describe('GoalTree', () => {
   // RFC-0444 §2.3 row 4 / criterion 9: a Goal store this build cannot read is
   // drawn as an alert with file · reason · mirror · reset step, and the create
   // form refuses to submit while that state stands.
+  it('keeps a Goal store error from an earlier workspace out of the new workspace view', async () => {
+    const failure = new GoalSourceUnavailableError({
+      kind: 'unavailable', reason: 'not_json', field: null, file: '/workspace-a/private-goals.json',
+      mirror: { status: 'mirror_absent', goalCount: null }, resetStep: 'reset_goal_store',
+    })
+    mocks.fetchDashboardGoalsTree.mockImplementation((workspace: { basePath: string }) =>
+      workspace.basePath === '/workspace-a' ? Promise.reject(failure) : new Promise(() => {}))
+    render(html`<${GoalTree} />`)
+    expect((await screen.findByTestId('goal-store-unavailable')).textContent).toContain('/workspace-a/private-goals.json')
+    ;(executionWorkspaceAuthority as { value: unknown }).value =
+      { epoch: 'fixture-b', workspaceRoot: '/workspace-b', connectionGeneration: 2 }
+    await waitFor(() => expect(screen.queryByTestId('goal-store-unavailable')).toBeNull())
+  })
+
+  it('shows a workspace-bound Goal store failure returned by detail', async () => {
+    const goal = makeGoal('goal-detail-store-failure', 'Detail store failure')
+    mocks.fetchDashboardGoalsTree.mockResolvedValue({
+      approval_queue_state: { state: 'ready' }, tree: [goal],
+      summary: { ...emptySummary(), total_goals: 1, active_goals: 1 },
+    })
+    mocks.fetchDashboardGoalDetail.mockRejectedValue(new GoalSourceUnavailableError({
+      kind: 'unavailable', reason: 'not_json', field: null, file: '/workspace-a/detail-goals.json',
+      mirror: { status: 'mirror_absent', goalCount: null }, resetStep: 'reset_goal_store',
+    }))
+    render(html`<${GoalTree} />`)
+    expect((await screen.findByTestId('goal-store-unavailable')).textContent).toContain('/workspace-a/detail-goals.json')
+  })
+
+  it('rechecks an unowned shared Goal store error without showing its contents', async () => {
+    const goal = makeGoal('goal-shared-error', 'Shared error goal')
+    const tree = { approval_queue_state: { state: 'ready' }, tree: [goal],
+      summary: { ...emptySummary(), total_goals: 1, active_goals: 1 } } satisfies DashboardGoalsTreeResponse
+    mocks.fetchDashboardGoalsTree.mockResolvedValue(tree)
+    mocks.fetchDashboardGoalDetail.mockResolvedValue({
+      goal, linked_tasks: [], linked_keepers: [], approvals: [], execution_receipts: [], timeline: [],
+    })
+    render(html`<${GoalTree} />`)
+    await screen.findByRole('button', { name: 'Request completion' })
+    const count = mocks.fetchDashboardGoalsTree.mock.calls.length
+    mocks.fetchDashboardGoalsTree.mockImplementation(() => new Promise(() => {}))
+    hydrateGoalTreeError(new GoalSourceUnavailableError({
+      kind: 'unavailable', reason: 'not_json', field: null, file: '/other-workspace/private.json',
+      mirror: { status: 'mirror_absent', goalCount: null }, resetStep: 'reset_goal_store',
+    }))
+    await waitFor(() => expect(mocks.fetchDashboardGoalsTree.mock.calls.length).toBeGreaterThan(count))
+    expect(screen.queryByText('/other-workspace/private.json')).toBeNull()
+  })
+
   it('draws the Goal store failure as an alert and refuses goal creation', async () => {
     mocks.fetchDashboardGoalsTree.mockRejectedValue(new GoalSourceUnavailableError({
       kind: 'unavailable',
@@ -423,11 +1888,11 @@ describe('GoalTree', () => {
     expect(alert.textContent).toContain('Goal store 를 읽을 수 없습니다')
     expect(screen.getByTestId('goal-store-unavailable-file').textContent).toBe('/srv/masc/.masc/goals.json')
     expect(screen.getByTestId('goal-store-unavailable-reason').textContent)
-      .toBe('이 빌드의 goal 스키마가 파일을 거절했습니다 (필드: criterion_revision)')
+      .toBe('이 빌드의 goal 스키마가 파일을 거절했습니다 (위치: criterion_revision)')
     expect(screen.getByTestId('goal-store-unavailable-mirror').textContent)
       .toBe('.last-good 미러는 읽힘 · goal 97개 (서빙하지 않음)')
     expect(screen.getByTestId('goal-store-unavailable-reset-step').textContent)
-      .toBe('필드 criterion_revision 를 채우면 다시 읽힙니다')
+      .toBe('파일의 criterion_revision 위치를 확인하고 수정한 뒤 다시 조회하세요')
     // The generic ErrorState line is not drawn beside the structured block.
     expect(container_alerts()).toEqual(['goal-store-unavailable', 'goal-create-source-unavailable'])
 

@@ -2,6 +2,18 @@
     This is not worker wire, execution authority, or a Memory disposition. *)
 type t
 type http
+type visit = private { ordinal:int; candidate_id:string }
+type response_family = Responses_codec | Other_codec
+(** [Other_codec] combines every non-Responses HTTP codec. *)
+type observed_status = Queued | In_progress | Completed | Failed | Incomplete | Cancelled
+  | Other_digest of string
+type lifecycle = Observed_status of observed_status | Ambiguous_envelope | Unreadable_json
+type response_observation = private { visit:visit; call_id:string; family:response_family;
+  http_status:int option; body_sha256:string option; lifecycle:lifecycle option }
+
+val response_observations : t -> response_observation list option
+(** [None] is a version 1 receipt without these observations. [Some] is the
+    version 2 attempt-ordered list, including attempts with no response. *)
 
 type cli_result = Not_reached | Prompt_unavailable | Answered of string | Exhausted
 
@@ -31,9 +43,17 @@ val make : declared_http:string list -> excluded_http:string list ->
     declared CLI tail disqualifies API-only unread proof. The caller's original
     envelope separately binds physical ownership, request/schema and attempt. *)
 
+val make_v2 : declared_http:string list -> excluded_http:string list ->
+  declared_cli:string list -> http:http -> cli:cli -> (t, string) result
+(** As [make], with same-attempt HTTP status, completed response-body digest
+    and Responses lifecycle observations captured in the version 2 receipt.
+    Missing observations stay missing; they do not establish remote completion.
+    An unrecognized status is stored as a digest of its normalized wire value. *)
+
 val to_json : t -> Yojson.Safe.t
 val of_json : Yojson.Safe.t -> (t, string) result
-(** Sole strict current format. Closed normalized causes are classified again;
+(** Strict version 1 and version 2 receipt formats. Version 1 retains its
+    canonical encoding and meaning. Closed normalized causes are classified again;
     unknown/missing/extra or internally inconsistent evidence refuses. Physical
     host receipt authority and original request binding belong to the caller. *)
 

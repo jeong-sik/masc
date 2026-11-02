@@ -12,7 +12,7 @@
   masc_tui_config_mark
   ;; The global quit test, so a detail tab key is checked against the one
   ;; that runs before it rather than against a copy of its two letters.
-  masc_tui_render_schedule
+  masc_tui_render_schedule masc_tui_render_prim
   masc_tui_file_icon
   masc_tui_message_layout
   masc_tui_roster_pane

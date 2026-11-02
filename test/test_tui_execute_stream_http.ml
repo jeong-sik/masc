@@ -17,7 +17,7 @@ let identity : Masc.Tui_decode.server_identity =
   let module Decode = Masc.Tui_decode in
   { sid_version = "test"
   ; sid_binary_commit = "test"
-  ; sid_binary_commit_age_s = None
+  ; sid_binary_commit_age_s = None; sid_runtime_instance_id = None
   ; sid_base_path = Decode.Canonical_path.of_path "/owned-workspace"
   ; sid_masc_root = Decode.Canonical_path.of_path "/owned-workspace/.masc"
   ; sid_executable_in_worktree = None
@@ -240,6 +240,54 @@ let test_a_keeper_name_is_encoded_in_the_path env =
       "the path"
       "/api/v1/dashboard/execute-output/a%20b"
       (List.hd (String.split_on_char '?' !target)))
+;;
+
+let test_goal_timeline_query_preserves_the_requested_id env =
+  let observed = ref None in
+  let handler reqd =
+    let request = Httpun.Reqd.request reqd in
+    let requested = Masc.Server_utils.query_param request "goal_id" in
+    observed := Some request;
+    let received = Option.value ~default:"missing" requested in
+    let returned = if String.equal received "mismatch" then "other" else received in
+    let body = Yojson.Safe.to_string (`Assoc [
+      "goal", `Assoc ["id", `String returned];
+      "approval_queue_state", `Assoc ["state", `String "ready"];
+      "timeline", `List [`Assoc ["ts", `String "t"; "kind", `String "goal";
+        "lane", `String "goal"; "title", `String "event";
+        "summary", `String received; "severity", `String "ok"]]
+    ]) in
+    let headers = Httpun.Headers.of_list [receipt; "content-type", "application/json";
+      "content-length", string_of_int (String.length body)] in
+    Httpun.Reqd.respond_with_string reqd (Httpun.Response.create ~headers `OK) body
+  in
+  with_server env ~handler (fun ~port ->
+    Eio.Switch.run (fun sw ->
+      Eio_context.with_test_env ~net:(Eio.Stdenv.net env) ~clock:(Eio.Stdenv.clock env)
+        ~mono_clock:(Eio.Stdenv.mono_clock env) ~sw (fun () ->
+          Http.start_io_domain ~sw ~env;
+          List.iter (fun goal_id ->
+            observed := None;
+            let result = Masc_tui_workspace_read.with_binding ~host:"127.0.0.1" ~port
+                ~expected:identity ~proof:Masc_tui_workspace_read.Request_precondition
+                (fun () -> Http.fetch_goal_timeline ~host:"127.0.0.1" ~port ~goal_id) in
+            (match result with
+             | Ok (Masc.Tui_decode.Goal_timeline_ready [event]) ->
+                 Alcotest.(check string) "the event belongs to the requested Goal" goal_id event.gt_summary
+             | Ok _ -> Alcotest.fail "the ready timeline was not returned"
+             | Error detail -> Alcotest.fail detail);
+            let request = Option.get !observed in
+            Alcotest.(check (option string)) "the server receives the exact ID"
+              (Some goal_id) (Masc.Server_utils.query_param request "goal_id");
+            Alcotest.(check (option string)) "the server receives the workspace base"
+              (Some "/owned-workspace") (Masc.Server_utils.query_param request "expected_base_path");
+            Alcotest.(check (option string)) "the server receives the workspace root"
+              (Some "/owned-workspace/.masc") (Masc.Server_utils.query_param request "expected_masc_root"))
+            ["goal"; "g+1"; "g&1"; "g,1"; "g%20"; "g#1"; "\194\160g\194\160"];
+          let mismatched = Masc_tui_workspace_read.with_binding ~host:"127.0.0.1" ~port
+              ~expected:identity ~proof:Masc_tui_workspace_read.Request_precondition
+              (fun () -> Http.fetch_goal_timeline ~host:"127.0.0.1" ~port ~goal_id:"mismatch") in
+          Alcotest.(check bool) "a different Goal response is refused" true (Result.is_error mismatched))))
 ;;
 
 (* A raw peer can advertise a body longer than it sends, something the HTTP
@@ -1149,6 +1197,8 @@ let () =
         ; case
             "a keeper name is encoded in the path"
             test_a_keeper_name_is_encoded_in_the_path
+        ; case "a Goal timeline keeps its query ID and workspace"
+            test_goal_timeline_query_preserves_the_requested_id
         ] )
     ; ( "what is refused"
       , [ case

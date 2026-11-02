@@ -52,13 +52,20 @@ val current : base_path:string -> Candle_config.t
 (** Goal control availability and first-use recovery only. A live writer lock
     retains Enabled so Snapshot/Owed's own CAS refuses the transition instead
     of silently skipping its mandatory record. This is not a monetary view. *)
-val for_recording : base_path:string -> Candle_config.t
+type recording =
+  | Recording_off
+  | Recording_disabled of { reason : string }
+  | Recording_enabled of Candle_config.policy
+  | Recording_unavailable of { reason : string }
+
+val for_recording : base_path:string -> recording
 (** Configuration and ledger recovery for durable Snapshot, PayoutOwed and
     Granted facts. An unavailable appraiser postpones settlement without
-    discarding these facts. Configuration and recovery failures retain the
-    same Off/Disabled semantics as {!current}. Each append still acquires
-    its lock. Grants, like spending already recorded money, need no appraisal;
-    an operator outside the server also has no lane registry to consult. *)
+    discarding these facts. Invalid configuration and an unavailable ledger
+    are distinct from Off: callers must refuse the transition on either error
+    so its mandatory fact can be retried after repair. Each append still
+    acquires its lock. Grants need no appraisal; an operator outside the server
+    also has no lane registry to consult. *)
 
 val report_at_start : base_path:string -> unit
 val install_appraiser_check : (unit -> (unit, string) result) -> unit

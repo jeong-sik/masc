@@ -23,7 +23,9 @@ let rec canonical = function
 let equal_items a b = canonical(`List a)=canonical(`List b)
 let item ?phase texts = `Assoc (["type",`String "message";"role",`String "assistant";"content",`List(List.map(fun text->`Assoc["type",`String"output_text";"text",`String text])texts)] @ match phase with None->[]|Some phase->["phase",phase])
 let response items = Yojson.Safe.to_string (`Assoc["id",`String "response";"model",`String "fixture";"status",`String "completed";"output",`List items])
-let projected wire = let response=ok(Codec.parse_response_result wire) in match assistant_message_of_response response with Ok message->message|Error error->Alcotest.fail(show_assistant_message_error error)
+let parse wire = match Codec.parse_response_result wire with
+  | Ok {response;_} -> response | Error {detail;_} -> Alcotest.fail detail
+let projected wire = let response=parse wire in match assistant_message_of_response response with Ok message->message|Error error->Alcotest.fail(show_assistant_message_error error)
 let parts () =
  let input=[item ~phase:(`String"commentary") ["checking"];item ~phase:(`String"final_answer") ["one";"two"]] in
  let message=projected(response input) in
@@ -37,7 +39,7 @@ let tool_order () =
  Alcotest.(check bool) "tool remains between native messages" true (equal_items (replay_input_items(projected(response input))) input)
 let telemetry_roundtrip () =
  let input=[item ~phase:(`String"commentary") ["checking"];item ~phase:(`String"final_answer") ["answer"]] in
- let response=ok(Codec.parse_response_result(response input)) in
+ let response=parse(response input) in
  let telemetry=Option.map(fun t->ok(inference_telemetry_of_yojson(inference_telemetry_to_yojson t)))response.telemetry in
  let restored={response with telemetry} in
  let message=match assistant_message_of_response restored with Ok m->m|Error e->Alcotest.fail(show_assistant_message_error e) in
@@ -134,7 +136,7 @@ end
 let cache_roundtrip () =
   let input=[Sync.item ~phase:(`String "commentary") ["checking"];
              Sync.item ~phase:(`String "final_answer") ["one";"two"]] in
-  let response=Sync.ok(Codec.parse_response_result(Sync.response input)) in
+  let response=Sync.parse(Sync.response input) in
   let cached=Cache.response_to_json response in
   let restored=match Cache.response_of_json cached with Some response->response
     | None->Alcotest.fail "valid native output cache entry rejected" in

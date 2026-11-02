@@ -1149,6 +1149,55 @@ let test_confirmation_uses_token_bound_operator () =
    | Error error -> fail (Types.masc_error_to_string error))
 ;;
 
+let test_memory_confirmation_reports_backend_unavailable () =
+  with_workspace @@ fun config ->
+  let goal, _ = match Goal_store.upsert_goal config ~title:"Proof backend unavailable"
+    ~metric:"observed artifacts" ~target_value:"1" () with
+    | Ok value -> value | Error error -> fail (Goal_store.write_error_to_string error) in
+  ignore (request_complete config goal.id);
+  ignore (prove_complete config goal.id);
+  let verdict = match Goal_verification.get_record_authoritative config ~goal_id:goal.id with
+    | Ok (Some {completion = Goal_verification.Proof_proven verdict; _}) -> verdict
+    | Ok (Some {completion = Goal_verification.Completion_idle | Goal_verification.Proof_pending _
+                           | Goal_verification.Proof_refuted _ | Goal_verification.Human_confirmed _; _})
+    | Ok None | Error _ -> fail "missing current proof" in
+  let primary = Goal_verification.verifications_path config in
+  let primary_before = Fs_compat.load_file primary in
+  let goal_path = Goal_store.goals_path config in
+  let goal_before = Fs_compat.load_file goal_path in
+  let backend = Backend.Memory.create () in
+  let memory = {config with Workspace_utils.backend = Workspace_utils.Memory backend} in
+  let expect_status label expected result =
+    let status, _ = Server_routes_http_routes_verification.goal_confirmation_response result in
+    check bool label true (status = expected) in
+  let read target =
+    let req = Httpun.Request.create `GET target in
+    Server_routes_http_routes_verification.read_goal_confirmation
+      ~config:memory ~operator_id:"operator" req in
+  expect_status "Memory GET is a service failure" `Service_unavailable
+    (read ("/api/v1/goals/confirmation?goal_id=" ^ goal.id));
+  expect_status "missing GET input remains a caller error" `Bad_request
+    (read "/api/v1/goals/confirmation");
+  expect_status "unknown GET Goal remains a caller error" `Bad_request
+    (read "/api/v1/goals/confirmation?goal_id=missing-goal");
+  let workspace = `Assoc ["base_path", `String (Unix.realpath config.base_path);
+                          "masc_root", `String (Unix.realpath (Workspace.masc_dir config))] in
+  let fields = ["goal_id", `String goal.id; "criterion_revision", `String goal.criterion_revision;
+    "request_id", `String verdict.request_id; "verification_run_id", `String verdict.verification_run_id;
+    "expected_workspace", workspace; "expected_operator_id", `String "operator";
+    "expected_runtime_instance_id", `String Build_identity.runtime_instance_id] in
+  let post fields =
+    Server_routes_http_routes_verification.For_testing.commit_goal_confirmation_json
+      ~config:memory ~operator_id:"operator" (`Assoc fields) in
+  expect_status "Memory POST is a service failure" `Service_unavailable (post fields);
+  expect_status "invalid POST input remains a caller error" `Bad_request
+    (post (List.remove_assoc "request_id" fields));
+  expect_status "unknown POST Goal remains a caller error" `Bad_request
+    (post (("goal_id", `String "missing-goal") :: List.remove_assoc "goal_id" fields));
+  check string "confirmation leaves the proof unchanged" primary_before (Fs_compat.load_file primary);
+  check string "confirmation leaves the Goal unchanged" goal_before (Fs_compat.load_file goal_path)
+;;
+
 let test_operator_confirmation_binds_current_proof () =
   with_workspace @@ fun config ->
   let goal, _ = match Goal_store.upsert_goal config ~title:"Human confirmed goal"
@@ -1160,12 +1209,39 @@ let test_operator_confirmation_binds_current_proof () =
   let verdict = match Goal_verification.get_record_authoritative config ~goal_id:goal.id with
     | Ok (Some {completion = Goal_verification.Proof_proven verdict; _}) -> verdict
     | _ -> fail "missing current proof" in
+  let workspace = `Assoc ["base_path", `String (Unix.realpath config.base_path);
+                          "masc_root", `String (Unix.realpath (Workspace.masc_dir config))] in
   let confirm ?(request_id=verdict.request_id) ?(run_id=verdict.verification_run_id)
-      ?(operator_id="authenticated-operator") () =
+      ?(operator_id="authenticated-operator") ?expected_operator_id ?(expected_workspace=workspace) () =
+    let expected_operator_id = Option.value expected_operator_id ~default:operator_id in
     Server_routes_http_routes_verification.For_testing.commit_goal_confirmation_json
       ~config ~operator_id (`Assoc ["goal_id", `String goal.id;
         "criterion_revision", `String goal.criterion_revision; "request_id", `String request_id;
-        "verification_run_id", `String run_id]) in
+        "verification_run_id", `String run_id; "expected_workspace", expected_workspace;
+        "expected_operator_id", `String expected_operator_id;
+        "expected_runtime_instance_id", `String Build_identity.runtime_instance_id]) in
+  let required_fields = ["goal_id", `String goal.id; "criterion_revision", `String goal.criterion_revision;
+    "request_id", `String verdict.request_id; "verification_run_id", `String verdict.verification_run_id;
+    "expected_operator_id", `String "authenticated-operator";
+    "expected_runtime_instance_id", `String Build_identity.runtime_instance_id] in
+  let refused fields =
+    match Server_routes_http_routes_verification.For_testing.commit_goal_confirmation_json
+      ~config ~operator_id:"authenticated-operator" (`Assoc fields) with
+    | Error _ -> () | Ok _ -> fail "invalid workspace binding accepted" in
+  refused required_fields;
+  refused (("expected_workspace", workspace) :: List.remove_assoc "expected_operator_id" required_fields);
+  refused (("expected_workspace", workspace) :: List.remove_assoc "expected_runtime_instance_id" required_fields);
+  refused (("expected_workspace", workspace) :: ("expected_runtime_instance_id", `String "different-instance") ::
+    List.remove_assoc "expected_runtime_instance_id" required_fields);
+  refused (("expected_workspace", `Null) :: required_fields);
+  refused (("expected_workspace", workspace) :: ("expected_workspace", workspace) :: required_fields);
+  (match confirm ~expected_workspace:(`Assoc ["base_path", `String "/different"; "masc_root", `String "/different/.masc"]) () with
+   | Error _ -> () | Ok _ -> fail "foreign workspace accepted");
+  (match confirm ~operator_id:"different-operator" ~expected_operator_id:"authenticated-operator" () with
+   | Error _ -> () | Ok _ -> fail "different inspection operator accepted");
+  (match Goal_verification.get_record_authoritative config ~goal_id:goal.id with
+   | Ok (Some {completion = Goal_verification.Proof_proven _; _}) -> ()
+   | _ -> fail "refused workspace binding changed the proof");
   (match confirm ~request_id:"another-request" () with
    | Error _ -> () | Ok _ -> fail "stale request accepted");
   (match confirm ~run_id:"another-run" () with
@@ -1192,14 +1268,16 @@ let test_operator_confirmation_binds_current_proof () =
     ~operator_id:"another-operator" ~criterion_revision:goal.criterion_revision
     ~request_id:verdict.request_id ~verification_run_id:verdict.verification_run_id in
   (match second_operator with
-   | Ok json -> check bool "retry never rewrites original operator attribution" true (first = json)
+   | Ok json -> check bool "retry never rewrites original operator attribution" true
+       Yojson.Safe.Util.(member "goal" first = member "goal" json && member "verification" first = member "verification" json)
    | Error error -> fail (Goal_store.write_error_to_string error));
   (match Server_routes_http_routes_verification.For_testing.commit_goal_confirmation_json
     ~config ~operator_id:"credential-owner" (`Assoc ["actor", `String "human"] ) with
    | Error _ -> () | Ok _ -> fail "body actor impersonation accepted");
   let second = match confirm () with
     | Ok json -> json | Error detail -> fail (confirmation_error_to_string detail) in
-  check bool "exact confirmation replay preserves timestamp and identity" true (first = second);
+  check bool "exact confirmation replay preserves timestamp and identity" true
+    Yojson.Safe.Util.(member "goal" first = member "goal" second && member "verification" first = member "verification" second);
   check string "retries emit no duplicate confirmation event" history (Fs_compat.load_file history_path);
   (match Goal_verification.reopen_goal config ~goal_id:goal.id ~actor:"operator" ~note:None with
    | Ok _ -> () | Error detail -> fail detail);
@@ -1298,6 +1376,8 @@ let () =
     "goal_tools"
     [ ( "tool_workspace"
       , [ test_case "confirmation requires token-bound operator" `Quick test_confirmation_uses_token_bound_operator
+        ; test_case "Memory confirmation reports backend unavailable" `Quick
+            test_memory_confirmation_reports_backend_unavailable
         ; test_case "operator confirms exact current proof" `Quick test_operator_confirmation_binds_current_proof
         ; test_case "a confirmation step runs once the confirmation is recorded" `Quick
             test_confirmation_step_runs_once_the_confirmation_is_recorded

@@ -213,6 +213,12 @@ typed application boundary가 고정된 `verifier_exact` authority를 만들며,
 - `Verifying`에서의 `request_complete` → `Already <현재 phase>`
   (완료 요청은 파이프라인에 진입해 있다). 핸들러는 이 응답에 verification 상태를 실어
   재시도 힌트로 쓴다 — wall-clock 만료 대신 명시적 재호출.
+  현재 criterion에 결속된 pending을 그대로 재시도하거나 확정 verdict를 반영한다.
+  proof row가 없거나 idle·다른 criterion·이미 사람 확인된 상태라면 기존 외부 실행의
+  종료가 확인되지 않았으므로 새 요청을 만들지 않고 불일치를 표시한다. 명시적 evidence가
+  기존 pending snapshot과 다를 때도 같은 이유로 교체를 거절한다. 이 보수적 제한은
+  해당 기록이 복구될 때까지 가용성을 낮출 수 있으며, 다른 요청 ID의 과거 실행 전체가
+  종료됐다는 보장은 아니다.
 - `record_criterion_*` → 비종료 phase에서 `Already <현재 phase>`: "phase 불변, ledger만
   갱신"의 legality 판정. `Completed`/`Dropped`에서는 invalid — 종료된 goal의 생성 시점
   선언은 확정된 역사다.

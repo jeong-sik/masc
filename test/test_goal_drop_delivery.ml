@@ -89,6 +89,8 @@ let test_repeat_repairs_audit () = with_workspace @@ fun config abandoned _ ->
   let goal = create config in
   obstruct_audit config;
   let response = drop config ~note:"operator cancellation" goal.id |> success in
+  check bool "uninitialized Task store is reported unread" true
+    Yojson.Safe.Util.(response |> member "tasks" |> member "unread" <> `Null);
   let event_id = committed_pending config goal response in
   check int "verifier cancellation notified once" 1 !abandoned;
   restore_audit config;

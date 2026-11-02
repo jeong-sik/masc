@@ -25,9 +25,12 @@ let call = `Assoc ["type",`String "function_call";"call_id",`String "call-weathe
   ;"name",`String "weather";"arguments",`String {|{"city":"Seoul"}|}]
 let answer = `Assoc ["type",`String "message";"role",`String "assistant"
   ;"content",`List [text_part "output_text" "visible answer"]]
-let parse items = Codec.parse_response_result (Yojson.Safe.to_string (`Assoc
-  ["id",`String "reasoning-fixture";"model",`String "fixture";"status",`String "completed"
-  ;"output",`List items])) |> get
+let parse items =
+  match Codec.parse_response_result (Yojson.Safe.to_string (`Assoc
+    ["id",`String "reasoning-fixture";"model",`String "fixture";"status",`String "completed"
+    ;"output",`List items])) with
+  | Ok {response;_} -> response
+  | Error {detail;_} -> Alcotest.fail detail
 let restored_assistant ?(config=config) response =
   let response = Complete_common.patch_telemetry response ~config None in
   let response = Cache.response_to_json response |> Yojson.Safe.to_string
@@ -126,14 +129,14 @@ let malformed_content () =
   let json = `Assoc ["id",`String "malformed";"status",`String "completed"
     ;"output",`List [reasoning "r" ~content:[malformed];answer]] in
   match Codec.parse_response_result (Yojson.Safe.to_string json) with
-  | Error error -> Alcotest.(check string) "malformed recognized text fails closed"
+  | Error {detail=error;_} -> Alcotest.(check string) "malformed recognized text fails closed"
       "malformed_responses_reasoning:text" error
   | Ok _ -> Alcotest.fail "malformed recognized text silently disappeared"
 let malformed_carrier () =
   let json=`Assoc ["id",`String "malformed";"status",`String "completed"
     ;"output",`List [`Assoc["type",`String "reasoning";"content",`Int 7];answer]] in
   match Codec.parse_response_result (Yojson.Safe.to_string json) with
-  | Error error -> Alcotest.(check string) "malformed content carrier fails closed"
+  | Error {detail=error;_} -> Alcotest.(check string) "malformed content carrier fails closed"
       "malformed_responses_reasoning:content" error
   | Ok _ -> Alcotest.fail "malformed content carrier silently disappeared"
 

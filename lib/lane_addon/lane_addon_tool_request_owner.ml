@@ -147,6 +147,50 @@ let decode_published ~directory_name ~file_name json =
   else if not (String.equal file_name (Lane_addon_store.digest request_id ^ ".json"))
   then Error "original request filename does not match its ID"
   else Ok record
+
+type observation_issue = Malformed_owner_metadata
+type observation = { records : Record.t list; issues : observation_issue list }
+
+(* Unlike strict discovery, a verified file's malformed JSON or owner schema is
+   reported alongside other records. Filesystem/durability errors and a valid
+   claimed scope or key that differs from its physical name remain failures. *)
+let observe ~store ~scope =
+  let* () = validate_identity ["scope",scope] in
+  let* entries = Lane_addon_store.observe_tool_request_owner_metadata store ~scope
+    |> Result.map_error (fun detail -> Store_unavailable detail) in
+  let field name = function
+    | `Assoc fields -> (match List.assoc_opt name fields with
+        | Some (`String value) when String.trim value <> "" -> Some value
+        | Some _ | None -> None)
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None in
+  (* Check every claimed identity, including later duplicate fields, before a
+     malformed record can be classified as merely unattributable. *)
+  let identity_conflicts file_name = function
+    | `Assoc fields -> List.exists (fun (name,value) ->
+        match value with
+        | `String claimed when String.trim claimed <> "" && String.equal name "scope" ->
+          not (String.equal claimed scope)
+        | `String claimed when String.trim claimed <> "" && String.equal name "request_id" ->
+          not (String.equal file_name (Lane_addon_store.digest claimed ^ ".json"))
+        | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _ -> false)
+        fields
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> false in
+  let rec collect records issues = function
+    | [] -> Ok {records=List.rev records; issues=List.rev issues}
+    | Lane_addon_store.Malformed_owner_json :: rest ->
+      collect records (Malformed_owner_metadata::issues) rest
+    | Published_owner_metadata (file_name,json) :: rest ->
+      if identity_conflicts file_name json
+      then Error (Store_unavailable "observed original metadata does not match its scope or filename")
+      else (match field "scope" json, field "request_id" json with
+       | Some _, Some request_id ->
+         (match decode ~scope ~request_id json with
+           | Ok record -> collect (record::records) issues rest
+           | Error _ -> collect records (Malformed_owner_metadata::issues) rest)
+       | None, (Some _ | None) | Some _, None ->
+         collect records (Malformed_owner_metadata::issues) rest) in
+  collect [] [] entries
+
 let read_published ~read_body ~directory_name ~file_name json =
   let* record = decode_published ~directory_name ~file_name json in
   let* bytes = read_body ~scope:record.Record.scope ~request_digest:record.request_digest in

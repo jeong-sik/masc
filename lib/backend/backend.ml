@@ -744,9 +744,8 @@ module FileSystem = struct
     | Error
         ((AlreadyExists _ | IOError _ | InvalidKey _) as e) -> Error e
 
-  let acquire_lock t ~key ~owner ~ttl_seconds =
+  let acquire_lock_in_fence t ~key ~owner ~ttl_seconds =
     let lock_key = "locks:" ^ key in
-    with_lease_fence t ~key (fun () ->
       let now = Time_compat.now () in
       let take () =
         let* () =
@@ -768,7 +767,25 @@ module FileSystem = struct
               take ()
           | None ->
               (* Invalid lock metadata, overwrite to recover *)
-              take ()))
+              take ())
+
+  let acquire_lock t ~key ~owner ~ttl_seconds =
+    with_lease_fence t ~key (fun () -> acquire_lock_in_fence t ~key ~owner ~ttl_seconds)
+
+  let try_acquire_lock t ~key ~owner ~ttl_seconds =
+    let* lock_path, fence_path = lease_fence_paths t ~key in
+    _ensure_parent_dir ~log_errors:true lock_path;
+    match File_lock_eio.try_with_durable_lock_observed ~lock_path:fence_path
+      (fun () -> acquire_lock_in_fence t ~key ~owner ~ttl_seconds) with
+    | File_lock_eio.Lock_held_elsewhere -> Ok false
+    | Lock_attempted (Lock_not_acquired error) ->
+      Error (IOError (Printf.sprintf "lease fence %s unavailable: %s" fence_path
+        (File_lock_eio.durable_lock_error_to_string error)))
+    | Lock_attempted (Body_completed {value; release_error=None}) -> value
+    | Lock_attempted (Body_completed {value; release_error=Some error}) ->
+      Log.Misc.error "lease fence %s release failed: %s" fence_path
+        (File_lock_eio.durable_lock_error_to_string error);
+      value
 
   let release_lock t ~key ~owner =
     let lock_key = "locks:" ^ key in

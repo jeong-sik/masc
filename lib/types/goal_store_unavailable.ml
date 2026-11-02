@@ -64,7 +64,7 @@ let reason_to_string = function
   | Unreadable error -> "unreadable (" ^ Unix.error_message error ^ ")"
   | Not_json detail -> "not_json (" ^ detail ^ ")"
   | Schema_rejected { field; detail } ->
-      Printf.sprintf "schema_rejected field=%s (%s)" field detail
+      Printf.sprintf "schema_rejected location=%S (%s)" field detail
 
 let mirror_status_to_string = function
   | Mirror_absent -> "absent"
@@ -74,7 +74,7 @@ let mirror_status_to_string = function
   | Mirror_rejected reason -> "rejected " ^ reason_to_string reason
 
 let reset_step_to_string = function
-  | Repair_field field -> "repair field " ^ field
+  | Repair_field field -> Printf.sprintf "inspect and repair location %S" field
   | Reset_goal_store -> "reset the goal store"
   | Restore_permission -> "restore read permission on the file"
 

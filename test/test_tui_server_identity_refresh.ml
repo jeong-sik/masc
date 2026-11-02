@@ -6,7 +6,7 @@ let local_paths = Masc_tui_types.local_workspace_paths_of_base_path
 let identity base_path : Tui_decode.server_identity =
   { Tui_decode.sid_version = "0.24.0"
   ; sid_binary_commit = "abc1234"
-  ; sid_binary_commit_age_s = Some 10.
+  ; sid_binary_commit_age_s = Some 10.; sid_runtime_instance_id = None
   ; sid_base_path = canonical base_path
   ; sid_masc_root = canonical (base_path ^ "/.masc")
   ; sid_executable_in_worktree = Some false
@@ -16,6 +16,128 @@ let identity base_path : Tui_decode.server_identity =
   ; sid_gc = None
   ; sid_scheduler = None
   }
+
+let test_goal_candle_read_rejects_stale_authority_and_refusals () =
+  let open Masc_tui_types in
+  let state = create_state ~workspace:"goal-candle" ~local_base_path:"/workspace/a"
+      ~port:8935 ~refresh_interval:0. () in
+  let instance name = { (identity "/workspace/a") with sid_runtime_instance_id = Some name } in
+  state.server_identity <- Some (instance "server-a");
+  let owner = ref () in
+  Alcotest.(check bool) "first authority mismatch can revalidate" true
+    (take_goal_candle_revalidation state ~goal_id:"goal-a" ~owner);
+  Alcotest.(check bool) "confirmation mismatch can revalidate once" true
+    (take_goal_confirmation_revalidation state ~goal_id:"goal-a" ~owner);
+  Alcotest.(check bool) "confirmation mismatch cannot spin" false
+    (take_goal_confirmation_revalidation state ~goal_id:"goal-a" ~owner);
+  clear_goal_confirmation_revalidation state ~goal_id:"goal-a";
+  Alcotest.(check bool) "explicit confirmation retry can revalidate" true
+    (take_goal_confirmation_revalidation state ~goal_id:"goal-a" ~owner);
+  withdraw_detail_histories state;
+  Alcotest.(check bool) "workspace withdrawal keeps the revalidation receipt" false
+    (take_goal_candle_revalidation state ~goal_id:"goal-a" ~owner);
+  Alcotest.(check bool) "same mismatch cannot spin" false
+    (take_goal_candle_revalidation state ~goal_id:"goal-a" ~owner);
+  clear_goal_candle_revalidation state ~goal_id:"goal-a";
+  Alcotest.(check bool) "explicit retry permits one more revalidation" true
+    (take_goal_candle_revalidation state ~goal_id:"goal-a" ~owner);
+  clear_goal_candle_revalidation state ~goal_id:"goal-a";
+  let observation = Candle_goal_observation.{configuration=Off; ledger=Missing} in
+  let start () = match begin_goal_candle_read state ~goal_id:"goal-a" with
+    | Some request -> request | None -> Alcotest.fail "read did not start" in
+  let view () = Masc_tui_fetched.view_for ~equal:String.equal state.goal_candle ~key:"goal-a" in
+  let complete request result = complete_goal_candle_read state ~credential_is_current:(fun candidate -> candidate == owner) request result in
+  let first = start () in
+  complete first (Ok (owner, Ok ("server-a", observation)));
+  (match view () with Masc_tui_fetched.Ready (_, "server-a", _) -> () | _ -> Alcotest.fail "first reading absent");
+  let old = start () in
+  (match view () with Masc_tui_fetched.Loading -> () | _ -> Alcotest.fail "refresh retained the prior admin reading");
+  let current = start () in
+  complete old (Ok (owner, Error (Goal_candle_access_denied 403)));
+  (match view () with Masc_tui_fetched.Loading -> () | _ -> Alcotest.fail "retired refusal changed the current read");
+  complete current (Ok (owner, Error (Goal_candle_authority_changed (Some 409))));
+  (match view () with Masc_tui_fetched.Failed _ -> () | _ -> Alcotest.fail "authority change retained old value");
+  let retry = start () in
+  Alcotest.(check bool) "retry is visibly in flight" true (Masc_tui_fetched.in_flight state.goal_candle);
+  (match view () with Masc_tui_fetched.Failed _ -> () | _ -> Alcotest.fail "retry lost its previous failure");
+  complete retry (Ok (owner, Error (Goal_candle_read_failed "private-alpha")));
+  let first_failure = match view () with
+    | Masc_tui_fetched.Failed detail -> detail
+    | _ -> Alcotest.fail "interrupted response retained admin data" in
+  Alcotest.(check bool) "first failed read settled" false (Masc_tui_fetched.in_flight state.goal_candle);
+  Alcotest.(check bool) "first unowned detail is absent from state" false
+    (Astring.String.is_infix ~affix:"private-alpha" first_failure);
+  let another = start () in
+  complete another (Ok (owner, Error (Goal_candle_read_failed "secret-beta")));
+  (match view () with
+   | Masc_tui_fetched.Failed detail ->
+     Alcotest.(check bool) "second failed read settled" false (Masc_tui_fetched.in_flight state.goal_candle);
+     Alcotest.(check bool) "second unowned detail is absent from state" false
+       (Astring.String.is_infix ~affix:"secret-beta" detail);
+     Alcotest.(check string) "unowned details do not alter retained failure" first_failure detail
+   | _ -> Alcotest.fail "another failure retained admin data");
+  state.server_identity <- Some (instance "server-b");
+  let replacement = start () in
+  complete replacement (Ok (owner, Ok ("server-b", observation)));
+  let denied = start () in
+  complete denied (Ok (owner, Error (Goal_candle_access_denied 403)));
+  (match view () with Masc_tui_fetched.Failed _ -> () | _ -> Alcotest.fail "access refusal retained old value");
+  let unauthenticated = start () in
+  complete unauthenticated (Ok (owner, Error (Goal_candle_access_denied 401)));
+  (match view () with Masc_tui_fetched.Failed _ -> () | _ -> Alcotest.fail "authentication failure retained old value");
+  let late = start () in
+  state.server_identity <- Some (instance "server-c");
+  complete late (Ok (owner, Ok ("server-b", observation)));
+  (match view () with Masc_tui_fetched.Failed _ -> () | _ -> Alcotest.fail "old process response was accepted")
+;;
+
+let test_goal_candle_http_status_and_instance_classification () =
+  let open Masc_tui_types in
+  let response status headers = Masc_tui_http.Masc_http_client.{status; headers; body="{\"error\":\"fixture\"}"} in
+  let decode status headers = Masc_tui_http.decode_goal_candle_response (response status headers) in
+  let admission_name, admission_value = Masc.Workspace.read_precondition_admission_header in
+  let headers instance = [admission_name, admission_value; "x-masc-runtime-instance-id", instance] in
+  let early status headers = Masc_tui_http.goal_candle_header_failure ~expected_instance:"server-a" ~status ~headers in
+  Alcotest.(check bool) "authentication headers stop before body" true (early 401 [] = Some (Goal_candle_access_denied 401));
+  Alcotest.(check bool) "forbidden headers stop before body" true (early 403 [] = Some (Goal_candle_access_denied 403));
+  Alcotest.(check bool) "conflict headers stop before body" true (early 409 [] = Some (Goal_candle_authority_changed (Some 409)));
+  Alcotest.(check bool) "rate limit stops before body and keeps status" true (early 429 [] = Some (Goal_candle_http_status 429));
+  Alcotest.(check bool) "new process headers stop before body" true (early 200 (headers "server-b") = Some (Goal_candle_authority_changed None));
+  Alcotest.(check bool) "matching headers permit the body" true (early 200 (headers "server-a") = None);
+  (match early 200 ["x-masc-runtime-instance-id", "server-b"] with
+   | Some (Goal_candle_read_failed _) -> () | _ -> Alcotest.fail "unattested headers claimed authority change");
+  Alcotest.(check bool) "forbidden withdraws access" true (decode 403 [] = Error (Goal_candle_access_denied 403));
+  Alcotest.(check bool) "workspace conflict requires authority refresh" true (decode 409 [] = Error (Goal_candle_authority_changed (Some 409)));
+  Alcotest.(check bool) "rate limit status survives without body" true
+    (decode 429 [] = Error (Goal_candle_http_status 429));
+  (match decode 200 [] with Error (Goal_candle_read_failed _) -> () | _ -> Alcotest.fail "missing instance accepted");
+  (match decode 200 ["x-masc-runtime-instance-id", "server-a"] with
+   | Ok ("server-a", `Assoc _) -> () | _ -> Alcotest.fail "instance-bound response rejected");
+  (match decode 200 ["x-masc-runtime-instance-id", "server-a"; "X-MASC-RUNTIME-INSTANCE-ID", "server-b"] with
+   | Error (Goal_candle_read_failed _) -> () | _ -> Alcotest.fail "duplicate instance accepted")
+;;
+
+let test_goal_confirmation_http_requires_one_matching_instance () =
+  let response headers = Masc_tui_http.Masc_http_client.{status=200; headers; body="{}"} in
+  let decode headers = Masc_tui_http.decode_goal_confirmation_response ~expected_instance:"server-a" (response headers) in
+  let admission = Masc.Workspace.read_precondition_admission_header in
+  Alcotest.(check bool) "matching server is accepted" true
+    (Result.is_ok (decode [admission; "x-masc-runtime-instance-id", "server-a"]));
+  List.iter (fun headers ->
+    Alcotest.(check bool) "missing, different or duplicate server is refused" true (Result.is_error (decode headers)))
+    [[admission]; [admission; "x-masc-runtime-instance-id", "server-b"];
+     [admission; "x-masc-runtime-instance-id", "server-a"; "X-MASC-RUNTIME-INSTANCE-ID", "server-a"]];
+  Alcotest.(check bool) "different server is visible before body" true
+    (Masc_tui_http.goal_confirmation_header_failure ~expected_instance:"server-a" ~status:200
+       ~headers:[admission; "x-masc-runtime-instance-id", "server-b"] = Some Masc_tui_http.Confirmation_server_changed);
+  Alcotest.(check bool) "an HTTP refusal is available before its body" true
+    (Masc_tui_http.goal_confirmation_header_failure ~expected_instance:"server-a" ~status:403 ~headers:[]
+       = Some (Masc_tui_http.Confirmation_status 403));
+  (match Masc_tui_http.goal_confirmation_header_failure ~expected_instance:"server-a" ~status:200
+       ~headers:["x-masc-runtime-instance-id", "server-b"] with
+   | Some (Masc_tui_http.Confirmation_read_failed _) -> ()
+   | None | Some (Masc_tui_http.Confirmation_server_changed | Confirmation_status _) -> Alcotest.fail "unattested server claimed a change")
+;;
 
 let test_keeper_purge_header_and_body_share_workspace () =
   let workspace = identity "/workspace/a" in
@@ -6493,7 +6615,13 @@ let () =
             test_continuous_waiting_events_preserve_turn_controls
         ] )
     ; ( "server-identity-refresh"
-      , [ Alcotest.test_case "progressive task history keeps its owner and cursor" `Quick
+      , [ Alcotest.test_case "Goal Candle HTTP status and process classification" `Quick
+            test_goal_candle_http_status_and_instance_classification
+        ; Alcotest.test_case "Goal confirmation requires one matching server instance" `Quick
+            test_goal_confirmation_http_requires_one_matching_instance
+        ; Alcotest.test_case "Goal Candle reads follow credential and process authority" `Quick
+            test_goal_candle_read_rejects_stale_authority_and_refusals
+        ; Alcotest.test_case "progressive task history keeps its owner and cursor" `Quick
             test_task_history_progressive_read_keeps_owner_and_cursor
         ; Alcotest.test_case "pending Task End survives an uncertain backlog" `Quick
             test_task_detail_end_survives_uncertain_backlog

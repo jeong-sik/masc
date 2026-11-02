@@ -552,6 +552,12 @@ function GoalProjectionDossier({
       ` : null}
 
       <${GoalDetailSection}>
+        <${GoalDetailRow} label="Candle" testHook="candle">
+          <button type="button" class="wk-dossier-link" data-goal-candle-link=${node.id}
+            onClick=${() => navigate('workspace', { section: 'planning', view: 'goal-tree', goal: node.id })}>
+            지급 기록 보기 →
+          </button>
+        <//>
         ${keeperLinks.length > 0 ? html`
           <${GoalDetailRow} label="키퍼" testHook="keepers">
             ${keeperLinks.map((name) => html`

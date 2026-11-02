@@ -424,15 +424,17 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
     in
     (* H1's token and public wrappers also bind optional GET workspace query
        preconditions. The global ingress guard only checks request headers. *)
-    let with_h2_workspace_read state f =
-      match validate_read_workspace_precondition
-              ~config:(Mcp_server.workspace_config state) httpun_request with
+    let with_captured_read_workspace config f =
+      match validate_read_workspace_precondition ~config httpun_request with
       | Ok Workspace_read_unbound -> f []
       | Ok Workspace_read_matched -> f [Workspace.read_precondition_admission_header]
       | Error error ->
         let json, status = read_workspace_precondition_error_response error in
         h2_respond_json_value h2_reqd json ~status:(status :> H2.Status.t)
           ~extra_headers:cors
+    in
+    let with_h2_workspace_read state f =
+      with_captured_read_workspace (Mcp_server.workspace_config state) f
     in
     (* The artifact module names the permission each of its routes needs. The
        gateway does not take that as a kind: it runs the gate that goes with the
@@ -1412,11 +1414,10 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
 
       | `GET, "/api/v1/dashboard/planning" ->
           h2_gate_state h2_reqd (fun state ->
-            let json =
-              dashboard_planning_http_json
-                ~config:(Mcp_server.workspace_config state)
-            in
-            h2_respond_json_value h2_reqd json ~extra_headers:cors)
+            let config = Mcp_server.workspace_config state in
+            with_captured_read_workspace config (fun workspace_headers ->
+              let json = dashboard_planning_http_json ~config in
+              h2_respond_json_value h2_reqd json ~extra_headers:(workspace_headers @ cors)))
 
       | `GET, "/api/v1/dashboard/bootstrap" ->
           (* Same SSOT as the HTTP/1.1 router so the HTTP/2 client sees
@@ -1430,13 +1431,55 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
 
       | `GET, "/api/v1/dashboard/goals" ->
           h2_gate_state h2_reqd (fun state ->
+            let config = Mcp_server.workspace_config state in
+            with_captured_read_workspace config (fun workspace_headers ->
             let payload =
-              cached_goals_tree_payload ~config:(Mcp_server.workspace_config state)
+              cached_goals_tree_payload ~config
             in
-            h2_respond_json_value h2_reqd payload.json ~extra_headers:cors)
+            h2_respond_json_value h2_reqd payload.json ~extra_headers:(workspace_headers @ cors)))
+
+      | `GET, "/api/v1/dashboard/goals/candle" ->
+          h2_gate_state h2_reqd (fun state ->
+            let config = Mcp_server.workspace_config state in
+            with_captured_read_workspace config (fun workspace_headers ->
+              let status, json = Server_dashboard_goal_candle.response ~config httpun_request in
+              h2_respond_json_value h2_reqd json ~status:(status :> H2.Status.t)
+                ~extra_headers:(("cache-control", "private, no-store") :: Server_dashboard_goal_candle.generation_headers @ workspace_headers @ cors)))
+
+      | `GET, "/api/v1/goals/confirmation" ->
+          h2_gate_actor h2_reqd (fun state operator_id ->
+            let config = Mcp_server.workspace_config state in
+            with_captured_read_workspace config (fun workspace_headers ->
+              let status, json =
+                Server_routes_http_routes_verification.read_goal_confirmation
+                  ~config ~operator_id httpun_request
+                |> Server_routes_http_routes_verification.goal_confirmation_response in
+              h2_respond_json_value h2_reqd json ~status:(status :> H2.Status.t)
+                ~compress:false
+                ~extra_headers:(("cache-control", "private, no-store") :: Server_dashboard_goal_candle.generation_headers @ workspace_headers @ cors)))
+
+      | `POST, "/api/v1/goals/confirmation" ->
+          h2_gate_actor h2_reqd (fun state operator_id ->
+            h2_read_body h2_reqd (fun body ->
+              let config = Mcp_server.workspace_config state in
+              let status, json =
+                Server_routes_http_routes_verification.commit_goal_confirmation_body
+                  ~config ~operator_id body
+                |> Server_routes_http_routes_verification.goal_confirmation_response in
+              h2_respond_json_value h2_reqd json ~status:(status :> H2.Status.t)
+                ~compress:false
+                ~extra_headers:(("cache-control", "private, no-store") :: Server_dashboard_goal_candle.generation_headers @ cors)))
+
+      | _, "/api/v1/goals/confirmation" ->
+          (match Lazy.force route_access with
+           | Error refusal -> h2_respond_gate_refusal h2_reqd refusal
+           | Ok _ -> h2_respond_text h2_reqd "405 Method Not Allowed"
+               ~status:`Method_not_allowed ~extra_headers:cors)
 
       | `GET, "/api/v1/dashboard/goals/detail" ->
           h2_gate_state h2_reqd (fun state ->
+            let config = Mcp_server.workspace_config state in
+            with_captured_read_workspace config (fun workspace_headers ->
             let goal_id =
               match Server_utils.query_param httpun_request "goal_id" with
               | Some value -> String.trim value
@@ -1449,14 +1492,14 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                      ("ok", `Bool false);
                      ("error", `String "goal_id query param is required");
                    ])
-                ~status:`Bad_request ~extra_headers:cors
+                ~status:`Bad_request ~extra_headers:(workspace_headers @ cors)
             else
               let json =
                 dashboard_goal_detail_http_json
-                  ~config:(Mcp_server.workspace_config state) ~goal_id
+                  ~config ~goal_id
               in
               h2_respond_json_value h2_reqd json
-                ~extra_headers:cors)
+                ~extra_headers:(workspace_headers @ cors)))
 
       | `GET, "/api/v1/dashboard/tasks/search-text" ->
           h2_gate_state h2_reqd (fun state ->

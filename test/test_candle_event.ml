@@ -170,6 +170,47 @@ let round_trips label row =
     (line_of (ok_or_fail (E.of_line written)))
 ;;
 
+let test_held_window_codec_keeps_unknowns_distinct () =
+  let row = event (E.Candidate_window_held
+    { goal_id="goal-1"; request_id="req-1"; verification_run_id="run-1"
+    ; passed_at=at "2026-09-28T06:32:00Z"; confirmed_at=at "2026-09-29T05:00:00Z"
+    ; tasks=["keeper", E.Found {title="k";assignee=Some "keeper-a";status=E.Todo};
+             "person", E.Found {title="p";assignee=Some "operator";status=E.Todo};
+             "unassigned", E.Found {title="u";assignee=None;status=E.Todo};
+             "missing", E.Deleted; "unobserved", E.Unobserved;
+             "fragments", E.Found_uncertain
+               [{title=Some "known";assignee=E.Assigned "keeper-a";
+                 status=E.Observed_status (E.Done {completed_at=now});keeper=E.Keeper_name "keeper-a"};
+                {title=Some "damaged";assignee=E.Unreadable_assignee;
+                 status=E.Unreadable_status;keeper=E.Keeper_unknown}]]
+    ; task_keepers=["keeper", E.Keeper_name "keeper-a"; "person", E.Not_keeper "operator";
+                    "unassigned", E.No_assignee; "missing", E.Keeper_unknown;
+                    "unobserved", E.Keeper_unknown; "fragments", E.Keeper_unknown] }) in
+  round_trips "held observations and classifications" row;
+  let invalid_keeper = `List [`Assoc ["task_id", `String "keeper"; "state", `String "keeper"; "name", `Null]] in
+  let malformed = match E.to_yojson row with
+    | `Assoc fields -> `Assoc (List.map (fun (name, value) ->
+        name, if name="task_keepers" then invalid_keeper else value) fields)
+    | _ -> Alcotest.fail "held event is not an object" in
+  Alcotest.(check bool) "a Keeper classification cannot omit its name" true
+    (Result.is_error (E.of_yojson malformed))
+;;
+
+let test_candidate_provenance_round_trips_without_changing_legacy_rows () =
+  let original = candidates () in
+  let fenced = match original.body with
+    | E.Candidates evidence -> {original with body=E.Candidates_fenced evidence}
+    | _ -> Alcotest.fail "missing candidate fixture" in
+  round_trips "historical candidates" original;
+  round_trips "fenced candidates" fenced;
+  Alcotest.(check string) "logical kind stays candidates" "candidates" (E.kind fenced.body);
+  let invalid = match E.to_yojson fenced with
+    | `Assoc fields -> `Assoc (List.map (fun (name, value) ->
+        name, if name="observation" then `String "unknown" else value) fields)
+    | _ -> Alcotest.fail "candidate event is not an object" in
+  Alcotest.(check bool) "unknown provenance is rejected" true (Result.is_error (E.of_yojson invalid))
+;;
+
 let test_a_row_reads_back_as_written () =
   round_trips "typical" (snapshot ());
   round_trips "nothing optional" (snapshot ~due_date:None ~metric:None ~linked_task_ids:[] ());
@@ -344,6 +385,10 @@ let () =
     [ ( "codec"
       , [ Alcotest.test_case "the row format" `Quick test_the_row_format
         ; Alcotest.test_case "a row reads back as written" `Quick test_a_row_reads_back_as_written
+        ; Alcotest.test_case "held window codec keeps unknowns distinct" `Quick
+            test_held_window_codec_keeps_unknowns_distinct
+        ; Alcotest.test_case "candidate provenance preserves legacy rows" `Quick
+            test_candidate_provenance_round_trips_without_changing_legacy_rows
         ; Alcotest.test_case
             "a due date is kept as the Goal held it"
             `Quick

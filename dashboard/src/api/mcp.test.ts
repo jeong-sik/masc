@@ -65,7 +65,10 @@ const {
 vi.mock('./core', () => ({
   ApiRequestError,
   apiRequestErrorFromResponse,
-  fetchWithTimeout,
+  fetchWithTimeout: (path: string, init: RequestInit, timeout: number, consume?: (res: Response) => Promise<unknown>) => {
+    const response = fetchWithTimeout(path, init, timeout, consume)
+    return consume ? Promise.resolve(response).then(consume) : response
+  },
   DEFAULT_MCP_TIMEOUT_MS: 30000,
   authHeaders,
   clearStoredToken,
@@ -103,6 +106,7 @@ function deferred<T>() {
 
 beforeEach(() => {
   fetchWithTimeout.mockReset()
+  setStoredToken.mockReset()
   reportToolHostFailure.mockReset().mockResolvedValue({ ok: true })
   apiRequestErrorFromResponse.mockReset().mockImplementation(
     async (method: string, path: string, res: Response) =>
@@ -129,6 +133,94 @@ afterEach(async () => {
 })
 
 describe('MCP 2026-07-28 dashboard client', () => {
+  it('refuses before dispatch when a Goal credential or actor changed', async () => {
+    currentStoredTokenRevision.mockReturnValue(2)
+    const { callMcpToolAtIdentity, mcpCallFailureDisposition } = await import('./mcp')
+    const error: unknown = await callMcpToolAtIdentity('masc_goal_transition', {},
+      { revision: 1, actor: 'dashboard' }).catch(error => error)
+    expect(mcpCallFailureDisposition(error)).toBe('known_pre_effect')
+    expect(fetchWithTimeout).not.toHaveBeenCalled()
+    getStoredToken.mockReturnValue(null)
+    getStoredTokenMeta.mockReturnValue(null)
+    fetchWithTimeout.mockResolvedValueOnce(new Response('not found', { status: 404 }))
+    const actorError: unknown = await callMcpToolAtIdentity('masc_goal_transition', {},
+      { revision: 2, actor: 'previous-actor' }).catch(error => error)
+    expect(mcpCallFailureDisposition(actorError)).toBe('known_pre_effect')
+    expect(fetchWithTimeout).toHaveBeenCalledTimes(1)
+    expect(fetchWithTimeout.mock.calls[0]![0]).toBe('/api/v1/dashboard/dev-token')
+  })
+
+  it('allows a bound bearer when only the actor hint changes before dispatch', async () => {
+    fetchWithTimeout.mockImplementationOnce((_path: string, init: RequestInit) => {
+      const { id } = JSON.parse(String(init.body))
+      return Promise.resolve(new Response(JSON.stringify({ id, result: { content: [{ type: 'text', text: 'ok' }] } })))
+    })
+    const { callMcpToolAtIdentity } = await import('./mcp')
+    const result = callMcpToolAtIdentity('masc_goal_transition', {}, { revision: 0, actor: 'dashboard' })
+    currentDashboardActor.mockReturnValue('alice')
+    await expect(result).resolves.toBe('ok')
+    expect(fetchWithTimeout).toHaveBeenCalledTimes(1)
+    expect(fetchWithTimeout.mock.calls[0]![0]).toBe('/mcp')
+  })
+
+  it('reads the final SSE result after progress and preserves a tool refusal', async () => {
+    fetchWithTimeout.mockImplementationOnce((_path: string, init: RequestInit) => {
+      const { id } = JSON.parse(String(init.body))
+      const progress = JSON.stringify({ jsonrpc: '2.0', method: 'notifications/progress', params: { progress: 1 } })
+      const body = `: keepalive\r\ndata: ${progress}\r\n\r\nevent: message\r\ndata: {"id":${JSON.stringify(id)},\r\ndata: "result":{"isError":true,"content":[{"type":"text","text":"original outcome unknown"}]}}\r\n\r\n`
+      return Promise.resolve(new Response(body, { status: 200 }))
+    })
+    const { callMcpToolAtIdentity, mcpCallFailureDisposition } = await import('./mcp')
+    const error: unknown = await callMcpToolAtIdentity('masc_goal_transition', {},
+      { revision: 0, actor: 'dashboard' }).catch(error => error)
+    expect(error).toMatchObject({ message: 'original outcome unknown' })
+    expect(mcpCallFailureDisposition(error)).toBe('known_tool_response')
+  })
+
+  it.each([
+    ['missing result', () => '{}'],
+    ['progress without result', () => 'data: {"method":"notifications/progress"}\n\n'],
+    ['wrong request id', () => JSON.stringify({ id: 'another-request', result: {} })],
+    ['multiple results', (id: string) => `data: ${JSON.stringify({ id, result: {} })}\n\ndata: ${JSON.stringify({ id, result: {} })}\n\n`],
+  ])('treats %s as an unknown Goal outcome', async (_description, body) => {
+    fetchWithTimeout.mockImplementationOnce((_path: string, init: RequestInit) => {
+      const { id } = JSON.parse(String(init.body))
+      return Promise.resolve(new Response(body(id), { status: 200 }))
+    })
+    const { callMcpToolAtIdentity, mcpCallFailureDisposition } = await import('./mcp')
+    const error: unknown = await callMcpToolAtIdentity('masc_goal_transition', {},
+      { revision: 0, actor: 'dashboard' }).catch(error => error)
+    expect(error).toBeInstanceOf(Error)
+    expect(mcpCallFailureDisposition(error)).toBe('outcome_unknown')
+  })
+
+  it('does not dispatch a Goal action under a credential installed by bootstrap', async () => {
+    let revision = 0
+    currentStoredTokenRevision.mockImplementation(() => revision)
+    getStoredTokenMeta.mockReturnValue({ source: 'dev', actor: 'dashboard', role: 'admin' })
+    setStoredToken.mockImplementation(() => { revision++ })
+    fetchWithTimeout.mockResolvedValueOnce(new Response(JSON.stringify({
+      token: 'replacement-token', actor: 'dashboard', role: 'admin',
+    }), { status: 200 }))
+    const { callMcpToolAtIdentity, mcpCallFailureDisposition } = await import('./mcp')
+    const error: unknown = await callMcpToolAtIdentity('masc_goal_transition', {},
+      { revision: 0, actor: 'dashboard' }).catch(error => error)
+    expect(mcpCallFailureDisposition(error)).toBe('known_pre_effect')
+    expect(fetchWithTimeout).toHaveBeenCalledTimes(1)
+    expect(fetchWithTimeout.mock.calls[0]![0]).toBe('/api/v1/dashboard/dev-token')
+  })
+
+  it('does not automatically replay a bound Goal action after an authentication refusal', async () => {
+    fetchWithTimeout.mockResolvedValueOnce(new Response('expired', { status: 401 }))
+    apiRequestErrorFromResponse.mockResolvedValueOnce(new ApiRequestError({
+      status: 401, authErrorCode: 'token_expired', detail: 'token expired',
+    }))
+    const { callMcpToolAtIdentity } = await import('./mcp')
+    await expect(callMcpToolAtIdentity('masc_goal_transition', {}, { revision: 0, actor: 'dashboard' }))
+      .rejects.toThrow('token expired')
+    expect(fetchWithTimeout).toHaveBeenCalledTimes(1)
+    expect(fetchWithTimeout.mock.calls[0]![0]).toBe('/mcp')
+  })
   it('sends one stateless tools/call with current mirrored metadata', async () => {
     authHeaders.mockReturnValue({ Authorization: 'Bearer current-token' })
     fetchWithTimeout.mockResolvedValueOnce(okToolResponse())
@@ -564,6 +656,31 @@ describe('MCP 2026-07-28 dashboard client', () => {
       ])
     expect(token).toBe('fresh-dev-token')
     expect(reportToolHostFailure).not.toHaveBeenCalled()
+  })
+
+  it('refreshes a refused Goal credential without replaying its action', async () => {
+    let token = 'stale-dev-token'
+    let revision = 0
+    const meta = { source: 'dev', actor: 'dashboard', role: 'admin' }
+    getStoredToken.mockImplementation(() => token)
+    getStoredTokenMeta.mockReturnValue(meta)
+    currentStoredTokenRevision.mockImplementation(() => revision)
+    setStoredToken.mockImplementation(next => { token = next; revision++ })
+    fetchWithTimeout
+      .mockResolvedValueOnce(new Response(JSON.stringify({ token, actor: 'dashboard', role: 'admin' }), { status: 200 }))
+      .mockImplementationOnce((_path: string, init: RequestInit) => {
+        const { id } = JSON.parse(String(init.body))
+        return Promise.resolve(new Response(`data: ${JSON.stringify({ id, result: { isError: true,
+          content: [{ type: 'text', text: 'authentication rejected' }],
+          structuredContent: { auth_error_code: 'actor_mismatch' } } })}\n`, { status: 200 }))
+      })
+      .mockResolvedValueOnce(new Response(JSON.stringify({ token: 'fresh-dev-token', actor: 'dashboard', role: 'admin' }), { status: 200 }))
+    const { callMcpToolAtIdentity, mcpIdentityRequiresGoalRefresh } = await import('./mcp')
+    const error: unknown = await callMcpToolAtIdentity('masc_goal_transition', {},
+      { revision: 0, actor: 'dashboard' }).catch(error => error)
+    expect(mcpIdentityRequiresGoalRefresh(error)).toBe(true)
+    expect(token).toBe('fresh-dev-token')
+    expect(callsByMethod('tools/call')).toHaveLength(1)
   })
 
   it('refreshes a managed token once on a typed HTTP 401', async () => {

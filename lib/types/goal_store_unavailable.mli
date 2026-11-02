@@ -21,7 +21,7 @@ and reason =
       (** open/read failed; EACCES, EISDIR and EIO each survive. *)
   | Not_json of string  (** The bytes are not JSON. *)
   | Schema_rejected of { field : string; detail : string }
-      (** JSON, but this build's decoder refused member [field]. *)
+      (** JSON, but this build's decoder refused [field] or a member at this location. *)
 
 and mirror_status =
   | Mirror_absent
@@ -31,7 +31,7 @@ and mirror_status =
   | Mirror_rejected of reason
 
 and reset_step =
-  | Repair_field of string  (** Fill or fix this member and it reads again. *)
+  | Repair_field of string  (** Inspect and repair this named location. *)
   | Reset_goal_store  (** Move the store aside (RFC-0444 §2.6, PR-7). *)
   | Restore_permission  (** [Unreadable EACCES]. *)
 

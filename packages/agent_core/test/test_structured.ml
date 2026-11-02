@@ -598,8 +598,8 @@ let test_responses_wire_states_reach_structured () =
       "call_id", `String "call"; "name", `String "lookup"; "arguments", `String "{}"] in
   List.iter (fun (wire, expected) ->
     match Llm_provider.Backend_openai_responses.parse_response_result (Yojson.Safe.to_string wire) with
-    | Error detail -> Alcotest.fail detail
-    | Ok response -> (match expected with
+    | Error {detail;_} -> Alcotest.fail detail
+    | Ok {response;_} -> (match expected with
       | Some state -> check_response_state state response
       | None -> check_wire_ready response))
     [ response ~status:"completed" ~output:[refused] [], Some (Error.Refused_response Policy_refusal)

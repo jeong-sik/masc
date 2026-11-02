@@ -21,7 +21,8 @@ let funding_rows (at : Candle_time.t) (payment : Candle_payment.t) : Candle_even
        verification_run_id=identity.verification_run_id;
        tasks=List.map (fun id -> id, Candle_event.Found
          {title="Completed contribution";assignee=Some keeper;
-          status=Candle_event.Done {completed_at=at}}) task_ids;
+          status=Candle_event.Done {completed_at=(match Candle_time.of_rfc3339 "2026-09-20T00:00:00Z" with
+            | Ok value -> value | Error detail -> Alcotest.fail detail)}}) task_ids;
        candidate_task_ids=task_ids;candidate_keepers=[keeper];
        candidate_task_keepers=List.map (fun id -> id, Some keeper) task_ids}}
   ; {Candle_event.at;body=Candle_event.Paid payment}
@@ -208,7 +209,8 @@ let purchases config =
     | E.Half_life_set _ | E.Equipped _ -> None
     | E.Snapshot _
     | E.Payout_owed _
-    | E.Candidates _
+    | E.Candidates _ | E.Candidates_fenced _
+    | E.Candidate_window_held _
     | E.Unattributed _
     | E.Paid _
     | E.Granted _ | E.Gifted _ | E.Gifted_item _
@@ -507,7 +509,9 @@ let test_settlement_replay_requires_durable_authority () =
     | E.Candidates c -> {candidates with body=E.Candidates
         {c with tasks=List.map (fun (id,lookup) -> id,match lookup with
           | E.Found task -> E.Found {task with status}
-          | E.Deleted -> E.Deleted) c.tasks}}
+          | E.Deleted -> E.Deleted
+          | E.Found_uncertain task -> E.Found_uncertain task
+          | E.Unobserved -> E.Unobserved) c.tasks}}
     | _ -> fail "expected Candidates" in
   (* A candidate id that no observed Snapshot-linked task backs. *)
   let ghost_candidate = match candidates.body with
@@ -704,7 +708,7 @@ let test_policy_intervals_preserve_purchase_and_equipped_ownership () =
     check int "explicit Off preserves the money after its fact" 300 (account ()).balance_milli;
     let policy_facts = events config |> List.filter_map (fun (event : E.t) -> match event.body with
       | E.Half_life_set policy -> Some policy
-      | E.Snapshot _ | E.Payout_owed _ | E.Candidates _ | E.Unattributed _ | E.Paid _
+      | E.Snapshot _ | E.Payout_owed _ | E.Candidates _ | E.Candidates_fenced _ | E.Candidate_window_held _ | E.Unattributed _ | E.Paid _
       | E.Payout_failed _ | E.Purchased _ | E.Granted _ | E.Gifted _ | E.Gifted_item _ | E.Equipped _ -> None) in
     check int "only historical Off, Hours and restored Off are recorded" 3 (List.length policy_facts))
 ;;

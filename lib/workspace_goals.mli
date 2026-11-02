@@ -44,7 +44,8 @@ val handle_goal_measure
   -> Tool_result.result
 
 (** [handle_goal_transition ctx args] handles
-    [masc_goal_transition].  Required arg: [action] (one of
+    [masc_goal_transition]. [goal_id] must occur once and match the exact,
+    nonblank identifier without surrounding whitespace. Required arg: [action] (one of
     {!Goal_phase.Public_action.all}). [request_complete] moves an executing
     Goal to [Verifying]. Repeating it while a proof remains pending preserves
     the idempotent [Already] response and emits a fresh verifier scan wake;
@@ -72,6 +73,27 @@ val handle_goal_transition
     verifier retry when the old attempt is definitely settled. Unknown or
     active dispatch grants no retry. Publication failure is reported, rather
     than treating the scheduling wake as durable retry authority. *)
+
+module For_testing : sig
+  val answer_verifying_repeat :
+    ?evidence_refs:string list ->
+    Workspace_types.context -> goal_id:string -> Tool_result.result
+  (** Enter the retry path as if an earlier read observed Verifying. The
+      current Goal and proof are still read through the production path. *)
+
+  val finish_goal_request_complete :
+    ?evidence_refs:string list ->
+    Workspace_types.context -> goal_id:string -> Tool_result.result
+  (** Enter the initial request path as if an earlier read observed Executing.
+      The current Goal and proof are still read through the production path. *)
+
+  val cancel_dropped_goal_todos :
+    ?before_transition:(task_id:string -> unit) ->
+    Workspace_types.context -> goal_id:string -> reason:string -> Masc_domain.task list ->
+    string list * (string * string) list
+  (** Inject a change after the fresh Task read and before the conditional
+      transition. Production calls do not supply the hook. *)
+end
 
 type verifier_decision =
   | Proof_proven
@@ -152,13 +174,18 @@ val request_current_proof : ?evidence_refs:string list -> Workspace_utils_backen
   (Goal_store.goal * Goal_verification.record, proof_request_error) result
 (** Bind a proof request and Verifying phase to the same current criterion.
     Explicit Board/Fusion/Task source references are captured with the request;
-    omitting references on retry retains the same immutable submitted bytes. *)
+    omitting references on retry retains the same immutable submitted bytes.
+    While Verifying, an existing pending request keeps its identity and
+    submitted evidence. Different explicit evidence is refused while the prior
+    review may still be active. A current committed verdict is reconciled. *)
 
 val recover_current_proof : Workspace_utils_backend_setup.config -> goal_id:string ->
   (bool, Goal_store.write_error) result
-(** Recover a missing/stale request only while the current Goal remains Verifying.
-    [Ok false] means a concurrent phase change needs no recovery; no request is
-    created and no other Goal in the scan is blocked. *)
+(** Retain a matching pending request only while the Goal remains Verifying.
+    A current committed verdict observed under that same Goal lock is reconciled
+    instead of being replaced. Missing, idle, mismatched and confirmed records
+    are refused: they do not prove that an earlier review ended. [Ok false]
+    means the phase changed or its verdict was reconciled. *)
 
 val confirm_completion : ?after_confirmation:confirmation_step ->
   Workspace_utils_backend_setup.config -> goal_id:string ->

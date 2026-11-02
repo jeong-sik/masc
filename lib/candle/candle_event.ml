@@ -8,13 +8,22 @@ type task_status =
   | Done of { completed_at : Candle_time.t }
   | Cancelled
 
+type task_found = { title : string; assignee : string option; status : task_status }
+type keeper_observation =
+  | Keeper_name of string
+  | Not_keeper of string
+  | No_assignee
+  | Keeper_unknown
+type assignee_observation = Assigned of string | Unassigned | Unreadable_assignee
+type status_observation = Observed_status of task_status | Unreadable_status
+type task_fragment = { title : string option; assignee : assignee_observation; status : status_observation;
+                       keeper : keeper_observation }
+
 type task_lookup =
-  | Found of
-      { title : string
-      ; assignee : string option
-      ; status : task_status
-      }
+  | Found of task_found
+  | Found_uncertain of task_fragment list
   | Deleted
+  | Unobserved
 
 type attribution = {
   grade : Candle_grade.t;
@@ -24,6 +33,16 @@ type attribution = {
 type unattributed_reason = No_candidates | All_unrelated of attribution | No_related_keepers of attribution
 
 type equipment_choice = Default | Item of Keeper_portrait_item.t
+
+type candidate_observation =
+  { goal_id : string
+  ; request_id : string
+  ; verification_run_id : string
+  ; tasks : (string * task_lookup) list
+  ; candidate_task_ids : string list
+  ; candidate_keepers : string list
+  ; candidate_task_keepers : (string * string option) list
+  }
 
 type body =
   | Half_life_set of Candle_decay.half_life
@@ -47,14 +66,16 @@ type body =
       ; passed_at : Candle_time.t
       ; confirmed_at : Candle_time.t
       }
-  | Candidates of
+  | Candidates of candidate_observation
+  | Candidates_fenced of candidate_observation
+  | Candidate_window_held of
       { goal_id : string
       ; request_id : string
       ; verification_run_id : string
+      ; passed_at : Candle_time.t
+      ; confirmed_at : Candle_time.t
       ; tasks : (string * task_lookup) list
-      ; candidate_task_ids : string list
-      ; candidate_keepers : string list
-      ; candidate_task_keepers : (string * string option) list
+      ; task_keepers : (string * keeper_observation) list
       }
   | Unattributed of
       { goal_id : string
@@ -79,7 +100,8 @@ let kind = function
   | Half_life_set _ -> "half_life_set"
   | Snapshot _ -> "snapshot"
   | Payout_owed _ -> "payout_owed"
-  | Candidates _ -> "candidates"
+  | Candidates _ | Candidates_fenced _ -> "candidates"
+  | Candidate_window_held _ -> "candidate_window_held"
   | Unattributed _ -> "unattributed"
   | Paid _ -> "paid"
   | Purchased _ -> "purchased"
@@ -112,16 +134,44 @@ let completed_at_json = function
   | Todo | Claimed | In_progress | Awaiting_verification | Cancelled -> `Null
 ;;
 
+let found_detail_fields (found : task_found) =
+  [ "title", `String found.title
+  ; "assignee", nullable_text found.assignee
+  ; "status", `String (status_text found.status)
+  ; "completed_at", completed_at_json found.status
+  ]
+
+let fragment_fields (fragment : task_fragment) =
+  let assignee_state, assignee = match fragment.assignee with
+    | Assigned name -> "assigned", Some name
+    | Unassigned -> "unassigned", None
+    | Unreadable_assignee -> "unreadable", None in
+  let status, completed_at = match fragment.status with
+    | Observed_status status -> `String (status_text status), completed_at_json status
+    | Unreadable_status -> `Null, `Null in
+  let keeper_state, keeper_name = match fragment.keeper with
+    | Keeper_name name -> "keeper", Some name | Not_keeper name -> "not_keeper", Some name
+    | No_assignee -> "unassigned", None | Keeper_unknown -> "unknown", None in
+  ["title", nullable_text fragment.title; "assignee_state", `String assignee_state;
+   "assignee", nullable_text assignee; "status", status; "completed_at", completed_at;
+   "keeper_state", `String keeper_state; "keeper", nullable_text keeper_name]
+
 let lookup_fields task_id : task_lookup -> (string * Yojson.Safe.t) list = function
-  | Found found ->
-    [ "task_id", `String task_id
-    ; "state", `String "found"
-    ; "title", `String found.title
-    ; "assignee", nullable_text found.assignee
-    ; "status", `String (status_text found.status)
-    ; "completed_at", completed_at_json found.status
-    ]
+  | Found found -> ["task_id", `String task_id; "state", `String "found"] @ found_detail_fields found
+  | Found_uncertain found ->
+    ["task_id", `String task_id; "state", `String "found_uncertain";
+     "observations", `List (List.map (fun row -> `Assoc (fragment_fields row)) found)]
   | Deleted -> [ "task_id", `String task_id; "state", `String "deleted" ]
+  | Unobserved -> [ "task_id", `String task_id; "state", `String "unobserved" ]
+;;
+
+let keeper_observation_json (task_id, observation) =
+  let state, name = match observation with
+    | Keeper_name name -> "keeper", Some name
+    | Not_keeper name -> "not_keeper", Some name
+    | No_assignee -> "unassigned", None
+    | Keeper_unknown -> "unknown", None in
+  `Assoc ["task_id", `String task_id; "state", `String state; "name", nullable_text name]
 ;;
 
 let unattributed_reason_text = function
@@ -136,6 +186,17 @@ let attribution_fields = function
     ["grade", `String (Candle_grade.to_string a.grade);
      "grade_trace", Candle_appraisal.trace_json a.grade_trace;
      "relations", `List (List.map Candle_appraisal.relation_json a.relations)]
+
+let candidate_fields (c : candidate_observation) =
+  [ "goal_id", `String c.goal_id
+  ; "request_id", `String c.request_id
+  ; "verification_run_id", `String c.verification_run_id
+  ; "tasks", `List (List.map (fun (task_id, lookup) -> `Assoc (lookup_fields task_id lookup)) c.tasks)
+  ; "candidate_task_ids", text_list c.candidate_task_ids
+  ; "candidate_keepers", text_list c.candidate_keepers
+  ; "candidate_task_keepers", `List (List.map (fun (task_id, keeper) ->
+      `Assoc ["task_id", `String task_id; "keeper", nullable_text keeper]) c.candidate_task_keepers)
+  ]
 
 let body_fields : body -> (string * Yojson.Safe.t) list = function
   | Half_life_set half_life ->
@@ -162,16 +223,16 @@ let body_fields : body -> (string * Yojson.Safe.t) list = function
     ; "passed_at", Candle_time.to_yojson p.passed_at
     ; "confirmed_at", Candle_time.to_yojson p.confirmed_at
     ]
-  | Candidates c ->
-    [ "goal_id", `String c.goal_id
-    ; "request_id", `String c.request_id
-    ; "verification_run_id", `String c.verification_run_id
-    ; ( "tasks"
-      , `List (List.map (fun (task_id, lookup) -> `Assoc (lookup_fields task_id lookup)) c.tasks) )
-    ; "candidate_task_ids", text_list c.candidate_task_ids
-    ; "candidate_keepers", text_list c.candidate_keepers
-    ; "candidate_task_keepers", `List (List.map (fun (task_id, keeper) ->
-        `Assoc ["task_id", `String task_id; "keeper", nullable_text keeper]) c.candidate_task_keepers)
+  | Candidates c -> candidate_fields c
+  | Candidates_fenced c -> ("observation", `String "backlog_fenced") :: candidate_fields c
+  | Candidate_window_held h ->
+    [ "goal_id", `String h.goal_id
+    ; "request_id", `String h.request_id
+    ; "verification_run_id", `String h.verification_run_id
+    ; "passed_at", Candle_time.to_yojson h.passed_at
+    ; "confirmed_at", Candle_time.to_yojson h.confirmed_at
+    ; "tasks", `List (List.map (fun (task_id, lookup) -> `Assoc (lookup_fields task_id lookup)) h.tasks)
+    ; "task_keepers", `List (List.map keeper_observation_json h.task_keepers)
     ]
   | Unattributed u ->
     [ "goal_id", `String u.goal_id
@@ -281,6 +342,49 @@ let status_of_fields ~status ~completed_at =
   | unknown, (Some _ | None) -> Error (Printf.sprintf "unknown status %S" unknown)
 ;;
 
+let found_of_fields ~context fields =
+  let field key decode fields = Candle_json.field ~context key decode fields in
+  let* title, fields = field "title" Candle_json.as_string fields in
+  let* assignee, fields = field "assignee" (Candle_json.as_nullable Candle_json.as_non_blank) fields in
+  let* status, fields = field "status" Candle_json.as_non_blank fields in
+  let* completed_at, fields = field "completed_at" (Candle_json.as_nullable Candle_time.of_yojson) fields in
+  let* () = Candle_json.finish ~context fields in
+  let* status = status_of_fields ~status ~completed_at in
+  Ok ({ title; assignee; status } : task_found)
+;;
+
+let fragment_of_json json =
+  let context = "uncertain task observation" in
+  let* fields = Candle_json.object_fields ~context json in
+  let field key decode fields = Candle_json.field ~context key decode fields in
+  let* title, fields = field "title" (Candle_json.as_nullable Candle_json.as_string) fields in
+  let* assignee_state, fields = field "assignee_state" Candle_json.as_string fields in
+  let* name, fields = field "assignee" (Candle_json.as_nullable Candle_json.as_non_blank) fields in
+  let* status, fields = field "status" (Candle_json.as_nullable Candle_json.as_non_blank) fields in
+  let* completed_at, fields = field "completed_at" (Candle_json.as_nullable Candle_time.of_yojson) fields in
+  let* keeper_state, fields = field "keeper_state" Candle_json.as_string fields in
+  let* keeper_name, fields = field "keeper" (Candle_json.as_nullable Candle_json.as_non_blank) fields in
+  let* () = Candle_json.finish ~context fields in
+  let* assignee = match assignee_state, name with
+    | "assigned", Some name -> Ok (Assigned name)
+    | "unassigned", None -> Ok Unassigned
+    | "unreadable", None -> Ok Unreadable_assignee
+    | _ -> Error "uncertain task observation: invalid assignee state" in
+  let* status = match status, completed_at with
+    | None, None -> Ok Unreadable_status
+    | Some status, completed_at -> Result.map (fun status -> Observed_status status)
+        (status_of_fields ~status ~completed_at)
+    | None, Some _ -> Error "uncertain task observation: unreadable status has a completion time" in
+  let* keeper = match assignee, keeper_state, keeper_name with
+    | Assigned name, "keeper", Some actual when name = actual -> Ok (Keeper_name name)
+    | Assigned name, "not_keeper", Some actual when name = actual -> Ok (Not_keeper name)
+    | Assigned _, "unknown", None | Unreadable_assignee, "unknown", None -> Ok Keeper_unknown
+    | Unassigned, "unassigned", None -> Ok No_assignee
+    | (Assigned _ | Unassigned | Unreadable_assignee), _, _ ->
+        Error "uncertain task observation: Keeper classification does not match assignee" in
+  Ok ({title; assignee; status; keeper} : task_fragment)
+;;
+
 let lookup_of_json json =
   let context = "task" in
   let* fields = Candle_json.object_fields ~context json in
@@ -289,24 +393,20 @@ let lookup_of_json json =
   let* state, fields = field "state" Candle_json.as_string fields in
   match state with
   | "found" ->
-    let* title, fields = field "title" Candle_json.as_string fields in
-    let* assignee, fields =
-      field "assignee" (Candle_json.as_nullable Candle_json.as_non_blank) fields
-    in
-    let* status, fields = field "status" Candle_json.as_non_blank fields in
-    let* completed_at, fields =
-      field "completed_at" (Candle_json.as_nullable Candle_time.of_yojson) fields
-    in
+    let* found = found_of_fields ~context fields in
+    Ok (task_id, Found found)
+  | "found_uncertain" ->
+    let* observations, fields = field "observations" (Candle_json.as_list fragment_of_json) fields in
     let* () = Candle_json.finish ~context fields in
-    let* status =
-      Result.map_error
-        (Printf.sprintf "%s %s: %s" context task_id)
-        (status_of_fields ~status ~completed_at)
-    in
-    Ok (task_id, Found { title; assignee; status })
+    (match observations with
+     | [] -> Error "task: uncertain observation must retain at least one row"
+     | _ :: _ -> Ok (task_id, Found_uncertain observations))
   | "deleted" ->
     let* () = Candle_json.finish ~context fields in
     Ok (task_id, Deleted)
+  | "unobserved" ->
+    let* () = Candle_json.finish ~context fields in
+    Ok (task_id, Unobserved)
   | unknown -> Error (Printf.sprintf "%s: unknown state %S" context unknown)
 ;;
 
@@ -319,8 +419,30 @@ let candidate_keeper_of_json json =
   let* () = Candle_json.finish ~context fields in
   Ok (task_id, keeper)
 
+let keeper_observation_of_json json =
+  let context = "held Keeper observation" in
+  let* fields = Candle_json.object_fields ~context json in
+  let* task_id, fields = Candle_json.field ~context "task_id" Candle_json.as_non_blank fields in
+  let* state, fields = Candle_json.field ~context "state" Candle_json.as_string fields in
+  let* name, fields = Candle_json.field ~context "name"
+    (Candle_json.as_nullable Candle_json.as_non_blank) fields in
+  let* () = Candle_json.finish ~context fields in
+  match state, name with
+  | "keeper", Some name -> Ok (task_id, Keeper_name name)
+  | "not_keeper", Some name -> Ok (task_id, Not_keeper name)
+  | "unassigned", None -> Ok (task_id, No_assignee)
+  | "unknown", None -> Ok (task_id, Keeper_unknown)
+  | _ -> Error (Printf.sprintf "%s: invalid state and name" context)
+;;
+
 let candidates_of_fields ~context fields =
   let field key decode fields = Candle_json.field ~context key decode fields in
+  let* fenced, fields =
+    match List.partition (fun (name, _) -> String.equal name "observation") fields with
+    | [], rest -> Ok (false, rest)
+    | [(_, `String "backlog_fenced")], rest -> Ok (true, rest)
+    | [(_ , _)], _ -> Error (context ^ ".observation: invalid observation provenance")
+    | _ :: _ :: _, _ -> Error (context ^ ".observation: field appears more than once") in
   let* goal_id, fields = field "goal_id" Candle_json.as_non_blank fields in
   let* request_id, fields = field "request_id" Candle_json.as_non_blank fields in
   let* verification_run_id, fields = field "verification_run_id" Candle_json.as_non_blank fields in
@@ -334,7 +456,21 @@ let candidates_of_fields ~context fields =
   let* candidate_task_keepers, fields =
     field "candidate_task_keepers" (Candle_json.as_list candidate_keeper_of_json) fields in
   let* () = Candle_json.finish ~context fields in
-  Ok (Candidates { goal_id; request_id; verification_run_id; tasks; candidate_task_ids; candidate_keepers; candidate_task_keepers })
+  let observation = { goal_id; request_id; verification_run_id; tasks; candidate_task_ids; candidate_keepers; candidate_task_keepers } in
+  Ok (if fenced then Candidates_fenced observation else Candidates observation)
+;;
+
+let candidate_window_held_of_fields ~context fields =
+  let field key decode fields = Candle_json.field ~context key decode fields in
+  let* goal_id, fields = field "goal_id" Candle_json.as_non_blank fields in
+  let* request_id, fields = field "request_id" Candle_json.as_non_blank fields in
+  let* verification_run_id, fields = field "verification_run_id" Candle_json.as_non_blank fields in
+  let* passed_at, fields = field "passed_at" Candle_time.of_yojson fields in
+  let* confirmed_at, fields = field "confirmed_at" Candle_time.of_yojson fields in
+  let* tasks, fields = field "tasks" (Candle_json.as_list lookup_of_json) fields in
+  let* task_keepers, fields = field "task_keepers" (Candle_json.as_list keeper_observation_of_json) fields in
+  let* () = Candle_json.finish ~context fields in
+  Ok (Candidate_window_held { goal_id; request_id; verification_run_id; passed_at; confirmed_at; tasks; task_keepers })
 ;;
 
 let unattributed_of_fields ~context fields =
@@ -454,6 +590,7 @@ let of_yojson json =
     | "snapshot" -> snapshot_of_fields ~context fields
     | "payout_owed" -> payout_owed_of_fields ~context fields
     | "candidates" -> candidates_of_fields ~context fields
+    | "candidate_window_held" -> candidate_window_held_of_fields ~context fields
     | "unattributed" -> unattributed_of_fields ~context fields
     | "paid" -> Result.map (fun p -> Paid p) (Candle_payment.of_yojson (`Assoc fields))
     | "purchased" -> purchased_of_fields ~context fields

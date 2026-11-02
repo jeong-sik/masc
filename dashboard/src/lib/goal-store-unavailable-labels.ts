@@ -12,6 +12,24 @@ import type {
 
 export const GOAL_STORE_UNAVAILABLE_TITLE = 'Goal store 를 읽을 수 없습니다'
 
+// Older servers may send an arbitrary member name directly. Keep invisible
+// characters and terminal controls distinguishable from an empty location.
+function goalStoreLocationLabel(field: string): string {
+  if (field === '') return '이름이 빈 필드 · 정확한 위치 미확인'
+  if (field === '$') return '문서 최상위 또는 이름이 $인 필드'
+  const chars = Array.from(field)
+  const simple = chars.every(char => {
+    const code = char.codePointAt(0)!
+    return code >= 0x21 && code <= 0x7e && char !== '"' && char !== '\\'
+  })
+  if (simple) return field
+  return `"${chars.map(char => {
+    const code = char.codePointAt(0)!
+    return code >= 0x21 && code <= 0x7e && char !== '"' && char !== '\\'
+      ? char : `\\u{${code.toString(16)}}`
+  }).join('')}"`
+}
+
 export function goalStoreReasonLabel(reason: GoalStoreUnavailableReason, field: string | null): string {
   switch (reason) {
     case 'missing_after_init':
@@ -23,7 +41,7 @@ export function goalStoreReasonLabel(reason: GoalStoreUnavailableReason, field: 
     case 'schema_rejected':
       return field === null
         ? '이 빌드의 goal 스키마가 파일을 거절했습니다'
-        : `이 빌드의 goal 스키마가 파일을 거절했습니다 (필드: ${field})`
+        : `이 빌드의 goal 스키마가 파일을 거절했습니다 (위치: ${goalStoreLocationLabel(field)})`
     default: {
       const unhandled: never = reason
       return unhandled
@@ -54,8 +72,8 @@ export function goalStoreResetStepLabel(resetStep: GoalStoreResetStep, field: st
   switch (resetStep) {
     case 'repair_field':
       return field === null
-        ? '거절된 필드를 채우면 다시 읽힙니다'
-        : `필드 ${field} 를 채우면 다시 읽힙니다`
+        ? '거절된 위치를 확인하고 수정한 뒤 다시 조회하세요'
+        : `파일의 ${goalStoreLocationLabel(field)} 위치를 확인하고 수정한 뒤 다시 조회하세요`
     case 'reset_goal_store':
       return 'masc goals reset --base-path <p> 로 goal store 를 리셋합니다 (파일은 옮기고 지우지 않음)'
     case 'restore_permission':

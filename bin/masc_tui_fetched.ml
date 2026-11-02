@@ -174,6 +174,11 @@ let complete ~equal state request result =
     { state with status })
 ;;
 
+let refuse ~equal state request error =
+  if is_current ~equal state request then { state with status = Status_failed (request, error) }
+  else state
+;;
+
 (* What this pane is about right now, and what is known about it. A pane
    whose key comes from the fetch itself -- an open file, a selected post --
    cannot call [view_for] without first knowing the key, and the key is what

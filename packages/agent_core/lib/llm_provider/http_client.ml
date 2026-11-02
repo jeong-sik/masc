@@ -12,6 +12,8 @@
 
 open Result_syntax
 
+let is_success_status status = status >= 200 && status < 300
+
 type network_error_kind =
   | Connection_refused
   | Dns_failure
@@ -2352,7 +2354,7 @@ let post_sync_once_after_validation
      | `Failed error ->
        release_connection ();
        fail error
-     | `Deadline_passed timeout_s when Cohttp.Code.is_success response_status ->
+     | `Deadline_passed timeout_s when is_success_status response_status ->
        (* The body is the answer; without it there is none. *)
        release_connection ();
        fail (total_deadline_error timeout_s)

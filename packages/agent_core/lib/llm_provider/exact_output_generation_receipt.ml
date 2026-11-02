@@ -3,6 +3,7 @@ module Trace = Exact_output_provider_trace
 
 type call_id = Call_id of string
 type provider_trace = Trace.t
+type response_family = Openai_responses_codec | Other_http_codec
 
 type terminal_state =
   { status : int
@@ -39,6 +40,7 @@ type t =
   ; call_id : call_id
   ; plan_fingerprint : string
   ; request_body_sha256 : string
+  ; response_family : response_family
   ; catalog_generation : Exact_output_resolver.catalog_generation
   ; catalog_evidence : Exact_output_resolver.catalog_evidence
   ; target_identity : Exact_output_resolver.target_identity
@@ -47,6 +49,10 @@ type t =
 type snapshot =
   { phase : effect_phase
   ; dispatch_count : int
+  ; http_status : int option
+  ; response_family : response_family
+  ; response_body_sha256 : string option
+  ; responses_lifecycle : Backend_openai_responses.lifecycle_observation option
   ; call_id : call_id
   ; plan_fingerprint : string
   ; request_body_sha256 : string
@@ -56,6 +62,7 @@ let create
       ~call_id
       ~plan_fingerprint
       ~request_body_sha256
+      ~response_family
       ~catalog_generation
       ~catalog_evidence
       ~target_identity
@@ -64,6 +71,7 @@ let create
   ; call_id
   ; plan_fingerprint
   ; request_body_sha256
+  ; response_family
   ; catalog_generation
   ; catalog_evidence
   ; target_identity
@@ -109,6 +117,10 @@ let provider_trace receipt =
   | Terminal_state terminal -> terminal.provider_trace
   | Response_received_state received -> received.provider_trace
   | Not_started_state | Before_dispatch_state | Dispatch_started_state -> None
+;;
+
+let responses_lifecycle receipt =
+  Option.bind (provider_trace receipt) Trace.responses_lifecycle
 ;;
 
 let plan_fingerprint (receipt : t) = receipt.plan_fingerprint
@@ -363,16 +375,21 @@ let rec record_provider_trace receipt provider_trace =
 
 let snapshot receipt =
   let state = Atomic.get receipt.state in
-  let phase, dispatch_count =
+  let phase, dispatch_count, http_status, provider_trace =
     match state with
-    | Not_started_state -> Not_started, 0
-    | Before_dispatch_state -> Before_dispatch, 0
-    | Dispatch_started_state -> Dispatch_started, 1
-    | Response_received_state _ -> Response_received, 1
-    | Terminal_state _ -> Terminal, 1
+    | Not_started_state -> Not_started, 0, None, None
+    | Before_dispatch_state -> Before_dispatch, 0, None, None
+    | Dispatch_started_state -> Dispatch_started, 1, None, None
+    | Response_received_state { status; provider_trace } ->
+      Response_received, 1, status, provider_trace
+    | Terminal_state { status; provider_trace } -> Terminal, 1, Some status, provider_trace
   in
   { phase
   ; dispatch_count
+  ; http_status
+  ; response_family = receipt.response_family
+  ; response_body_sha256 = Option.map Trace.raw_body_sha256 provider_trace
+  ; responses_lifecycle = Option.bind provider_trace Trace.responses_lifecycle
   ; call_id = receipt.call_id
   ; plan_fingerprint = receipt.plan_fingerprint
   ; request_body_sha256 = receipt.request_body_sha256
@@ -385,6 +402,10 @@ let snapshot_dispatch_count (snapshot : snapshot) = snapshot.dispatch_count
 (* [generation_dispatched] read off a copy: the copy's count comes from the
    same receipt state. *)
 let snapshot_generation_dispatched (snapshot : snapshot) = snapshot.dispatch_count = 1
+let snapshot_http_status (snapshot : snapshot) = snapshot.http_status
+let snapshot_response_family (snapshot : snapshot) = snapshot.response_family
+let snapshot_response_body_sha256 (snapshot : snapshot) = snapshot.response_body_sha256
+let snapshot_responses_lifecycle (snapshot : snapshot) = snapshot.responses_lifecycle
 let snapshot_call_id (snapshot : snapshot) = snapshot.call_id
 let snapshot_plan_fingerprint (snapshot : snapshot) = snapshot.plan_fingerprint
 let snapshot_request_body_sha256 (snapshot : snapshot) = snapshot.request_body_sha256

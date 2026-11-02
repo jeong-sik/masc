@@ -182,6 +182,8 @@ let goal_ids events =
        | Candle_event.Snapshot { goal_id; _ }
        | Candle_event.Payout_owed { goal_id; _ }
        | Candle_event.Candidates { goal_id; _ }
+       | Candle_event.Candidates_fenced { goal_id; _ }
+       | Candle_event.Candidate_window_held { goal_id; _ }
        | Candle_event.Unattributed { goal_id; _ }
        | Candle_event.Payout_failed { goal_id; _ } -> Some goal_id
        | Candle_event.Paid p -> Some p.identity.goal_id
@@ -239,12 +241,15 @@ let test_no_candle_toml_writes_nothing () =
   no_ledger "off" config
 ;;
 
-let test_a_candle_toml_that_does_not_read_writes_nothing_and_does_not_refuse () =
+let test_invalid_candle_config_refuses_until_repaired () =
   List.iter (fun text ->
     with_workspace @@ fun config ->
     write_file (candle_toml config) text;
-    is_ok "record" (record config);
-    no_ledger "disabled" config)
+    is_refused "invalid config" (record config);
+    no_ledger "invalid config" config;
+    enable_candle config;
+    is_ok "record after config repair" (record config);
+    check (list string) "snapshot retained" [ "goal-1" ] (goal_ids (ledger_events config)))
     [""; "[payout]\nweight_max = 10\n"; "half_life_hours = 72\n"]
 ;;
 
@@ -349,12 +354,12 @@ let test_a_torn_tail_is_cut_the_first_time_and_appended_after () =
     (goal_ids (ledger_events config))
 ;;
 
-let test_an_unreadable_ledger_disables_candle_instead_of_refusing () =
+let test_an_unreadable_ledger_refuses_until_repaired () =
   with_workspace
   @@ fun config ->
   enable_candle config;
   write_file (ledger_path config) "not a row\n";
-  is_ok "the transition is not blocked" (record config);
+  is_refused "unreadable ledger" (record config);
   check string "the ledger is left as it was" "not a row\n"
     (In_channel.with_open_bin (ledger_path config) In_channel.input_all);
   (* The answer is not remembered: once the operator repairs the ledger the
@@ -367,12 +372,12 @@ let test_an_unreadable_ledger_disables_candle_instead_of_refusing () =
 (* The two ways a ledger fails to read give the same answer. A row that does not
    parse is one (above). A ledger that cannot be opened at all is the other; here
    its path is a directory. *)
-let test_a_ledger_that_cannot_be_opened_disables_candle_instead_of_refusing () =
+let test_a_ledger_that_cannot_be_opened_refuses_until_repaired () =
   with_workspace
   @@ fun config ->
   enable_candle config;
   mkdir_p (ledger_path config);
-  is_ok "the transition is not blocked" (record config);
+  is_refused "ledger cannot be opened" (record config);
   check
     bool
     "candle is disabled"
@@ -514,17 +519,17 @@ let () =
     [ ( "when candle is not on"
       , [ test_case "no candle.toml writes nothing" `Quick test_no_candle_toml_writes_nothing
         ; test_case
-            "a candle.toml that does not read writes nothing and does not refuse"
+            "invalid candle config refuses until repaired"
             `Quick
-            test_a_candle_toml_that_does_not_read_writes_nothing_and_does_not_refuse
+            test_invalid_candle_config_refuses_until_repaired
         ; test_case
-            "an unreadable ledger disables candle instead of refusing"
+            "an unreadable ledger refuses until repaired"
             `Quick
-            test_an_unreadable_ledger_disables_candle_instead_of_refusing
+            test_an_unreadable_ledger_refuses_until_repaired
         ; test_case
-            "a ledger that cannot be opened disables candle instead of refusing"
+            "a ledger that cannot be opened refuses until repaired"
             `Quick
-            test_a_ledger_that_cannot_be_opened_disables_candle_instead_of_refusing
+            test_a_ledger_that_cannot_be_opened_refuses_until_repaired
         ] )
     ; ( "when candle is on"
       , [ test_case

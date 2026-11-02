@@ -23,6 +23,7 @@
   masc_keeper_identity
   masc_goal
   masc_workspace
+  masc_core
   masc_types
   masc_keeper_registry
   masc_config_dir_resolver

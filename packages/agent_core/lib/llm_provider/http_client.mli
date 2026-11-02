@@ -7,6 +7,10 @@
     @stability Internal
     @since 0.93.1 *)
 
+val is_success_status : int -> bool
+(** Whether the actual HTTP status is in the 200--299 success class, including
+    codes that the HTTP library does not name individually. *)
+
 (** Structured classification of network errors.
     Enables consumers to pattern-match on error kind instead of
     parsing message strings.

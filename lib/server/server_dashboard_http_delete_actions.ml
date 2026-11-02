@@ -1566,6 +1566,9 @@ let add_delete_action_routes router =
              | Error (Goal_store.Unknown_goal _ as err) ->
                  respond_error ~status:`Not_found ~request:req reqd
                   (Goal_store.delete_goal_error_to_string err)
+             | Error (Goal_store.Ambiguous_goal _ as err) ->
+                 respond_error ~status:`Conflict ~request:req reqd
+                  (Goal_store.delete_goal_error_to_string err)
              | Error (Goal_store.Persistence_failed _ as err) ->
                  respond_error ~status:`Internal_server_error ~request:req reqd
                    (Goal_store.delete_goal_error_to_string err)

@@ -2656,12 +2656,10 @@ let planning_phase_label = function
   | Goal_phase.Paused _ -> "paused"
   | Goal_phase.Blocked _ -> "blocked"
 
-(* The key a goal detail takes for each lifecycle request, and the words its
-   Actions and ARMED rows say it with. The Actions row called [c] "Complete"
-   beside a Next line saying [c] submits the goal for verification, and the
-   ARMED row called it "Request Completion": the key sends the goal to the
-   completion judge. The separate operator confirmation reads and binds the
-   exact proof through the admin route. *)
+(* The key and label a Goal detail uses for each lifecycle request. [c]
+   requests completion or recovery; its submission does not prove a judge was
+   dispatched. Operator confirmation reads and binds the exact proof through
+   the admin route. *)
 let planning_action_key = function
   | Goal_phase.Public_action.Request_complete -> "c"
   | Goal_phase.Public_action.Drop -> "x"
@@ -2675,6 +2673,10 @@ let planning_action_of_key key =
   let key = String.lowercase_ascii key in
   List.find_opt (fun action -> String.equal (planning_action_key action) key)
     Goal_phase.Public_action.all
+
+let planning_action_confirmation_keys action =
+  let key = planning_action_key action in
+  [ key; String.uppercase_ascii key ]
 
 let planning_action_label = function
   | Goal_phase.Public_action.Request_complete -> "Request completion"

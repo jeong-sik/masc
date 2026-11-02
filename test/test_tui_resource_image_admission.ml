@@ -385,6 +385,7 @@ let board_state post comments =
   let module Decode=Masc.Tui_decode in
   let identity : Decode.server_identity =
     {sid_version="test";sid_binary_commit="test";sid_binary_commit_age_s=None;
+     sid_runtime_instance_id=None;
      sid_base_path=Decode.Canonical_path.of_path "/board-test";
      sid_masc_root=Decode.Canonical_path.of_path "/board-test/.masc";
      sid_executable_in_worktree=None;sid_state_ready=Some true;sid_uptime=None;

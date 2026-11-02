@@ -631,6 +631,7 @@ let dashboard_planning_http_json ~(config : Workspace.config) : Yojson.Safe.t =
   let records_by_goal_id =
     Goal_verification.load_records_by_goal_id_authoritative config
   in
+  let verifier_observations = Goal_verification_agent.capture_observations () in
   let goal_json (goal : Goal_store.goal) =
     let record =
       match records_by_goal_id with
@@ -653,7 +654,8 @@ let dashboard_planning_http_json ~(config : Workspace.config) : Yojson.Safe.t =
         (fields
          @ [ "verification", verification
            ; "verifier_unreconciled",
-             Goal_verification_agent.unreconciled_to_yojson ~config ~record goal
+             Goal_verification_agent.unreconciled_from_snapshot_to_yojson
+               verifier_observations ~config ~record goal
            ])
     | json -> json
   in
@@ -727,23 +729,29 @@ let dashboard_goals_tree_http_json ~(config : Workspace.config) : Yojson.Safe.t 
    tree after generation 2's had been served. *)
 let goals_tree_filled = High_water_marks.create ()
 
-let goals_tree_key ~base_path generation = Printf.sprintf "goals_tree:%s:%d" base_path generation
+let goal_cache_scope ~(config : Workspace.config) =
+  let root = Workspace.masc_dir config in
+  let root = try "resolved:" ^ Unix.realpath root
+    with Unix.Unix_error _ -> "unresolved:" ^ root in
+  Printf.sprintf "%S:%S" config.base_path root
+
+let goals_tree_key ~scope generation = Printf.sprintf "goals_tree:%s:%d" scope generation
 
 let cached_goals_tree_payload ~(config : Workspace.config) =
-  let base_path = config.base_path in
+  let scope = goal_cache_scope ~config in
   let generation = Goal_projection_generation.current () in
-  let key = goals_tree_key ~base_path generation in
-  (match High_water_marks.find goals_tree_filled base_path with
+  let key = goals_tree_key ~scope generation in
+  (match High_water_marks.find goals_tree_filled scope with
    | Some filled when filled <> generation ->
      Dashboard_cache.seed_stale_from_if_missing key
-       ~from:(goals_tree_key ~base_path filled)
+       ~from:(goals_tree_key ~scope filled)
        ~stale_for:Server_dashboard_http_core_cache.standard_cache_ttl_s
    | Some _ | None -> ());
   Dashboard_cache.get_or_compute_payload key
     ~ttl:Server_dashboard_http_core_cache.standard_cache_ttl_s
     (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
        let json = dashboard_goals_tree_http_json ~config in
-       High_water_marks.raise_to goals_tree_filled base_path generation;
+       High_water_marks.raise_to goals_tree_filled scope generation;
        json))
 ;;
 

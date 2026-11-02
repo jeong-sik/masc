@@ -65,6 +65,65 @@ let set_phase config goal phase =
       (fun current -> Ok ({ current with phase }, ())) with
   | Ok _ -> () | Error error -> fail (Goal_store.write_error_to_string error)
 
+let test_transition_refuses_ids_that_would_be_retargeted () = with_workspace @@ fun config wakes ->
+  let canonical = create config in
+  let padded = {canonical with id=" " ^ canonical.id ^ " "; title="Imported Goal"} in
+  let original = state config in
+  (match Goal_store.write_state_result config {original with goals=[canonical; padded]} with
+   | Ok () -> () | Error detail -> fail detail);
+  let primary = Goal_store.goals_path config in
+  let mirror = primary ^ ".last-good" in
+  let proof_path = Goal_verification.verifications_path config in
+  let read_optional path = if Sys.file_exists path then Some (Fs_compat.load_file path) else None in
+  let before = Fs_compat.load_file primary, Fs_compat.load_file mirror in
+  let proof_before = read_optional proof_path in
+  let refused_before_effect result =
+    (match result with
+     | Tool_result.Failed { class_ = Tool_result.Policy_rejection;
+                            effect_disposition = Tool_result.Proven_pre_effect; _ } -> ()
+     | Tool_result.Failed _ | Tool_result.Completed _ | Tool_result.Deferred _ ->
+       fail "ID rejection did not prove a pre-effect policy refusal");
+    let body = Yojson.Safe.from_string (Tool_result.message result) in
+    check bool "failure data retains the error envelope" true (Tool_result.data result = body);
+    check string "failure status" "error" Yojson.Safe.Util.(member "status" body |> to_string);
+    check string "failure code" "validation_error" Yojson.Safe.Util.(member "error_code" body |> to_string)
+  in
+  List.iter (fun id ->
+    List.iter (fun action -> refused_before_effect (transition config id action))
+      ["pause"; "block"; "drop"; "request_complete"])
+    [padded.id; " " ^ canonical.id; canonical.id ^ " "; "\t" ^ canonical.id];
+  let ctx : Masc.Workspace_types.context = { config; agent_name = "operator" } in
+  List.iter (fun ids ->
+    let result = Goals.handle_goal_transition ~tool_name:"masc_goal_transition"
+      ~start_time:(Tool_timing.start ()) ctx
+      (`Assoc (ids @ ["action", `String "pause"])) in
+    refused_before_effect result)
+    [ ["goal_id", `String canonical.id; "goal_id", `String padded.id]
+    ; ["goal_id", `String padded.id; "goal_id", `String canonical.id]
+    ; ["goal_id", `String canonical.id; "goal_id", `String canonical.id]
+    ; ["goal_id", `String canonical.id; "goal_id", `Int 3]
+    ; ["goal_id", `Null; "goal_id", `String canonical.id] ];
+  List.iter (fun value ->
+    let result = transition config value "pause" in
+    refused result;
+    let body = Yojson.Safe.from_string (Tool_result.message result) in
+    match Yojson.Safe.Util.member "field_errors" body with
+    | `List [error] ->
+      check string "blank ID keeps the field name" "goal_id"
+        Yojson.Safe.Util.(member "field" error |> to_string);
+      check string "blank ID keeps the nonempty constraint" "non_empty"
+        Yojson.Safe.Util.(member "constraint" error |> to_string)
+    | _ -> fail "blank ID lost its structured field error") [""; "  "];
+  check string "primary unchanged by refused transitions" (fst before) (Fs_compat.load_file primary);
+  check string "mirror unchanged by refused transitions" (snd before) (Fs_compat.load_file mirror);
+  check (option string) "proof unchanged by refused transitions" proof_before (read_optional proof_path);
+  check int "no verification wake for a refused target" 0 !wakes;
+  phase GP.Executing (saved config canonical.id);
+  phase GP.Executing (saved config padded.id);
+  change config canonical.id "pause";
+  phase (GP.Paused GP.Resume_executing) (saved config canonical.id);
+  phase GP.Executing (saved config padded.id)
+
 let test_restore_matrix () = with_workspace @@ fun config _ ->
   List.iter (fun (live, target) ->
     List.iter (fun first ->
@@ -223,6 +282,23 @@ let task_status config id =
   | None -> fail ("missing " ^ id)
 let ok_or_fail = function Ok _ -> () | Error error -> fail (Masc_domain.masc_error_to_string error)
 let drop_field json key = Yojson.Safe.Util.(json |> member "tasks" |> member key |> to_list)
+let failed_task_ids json = drop_field json "cancel_failed" |> List.map (fun row ->
+  Yojson.Safe.Util.(row |> member "task_id" |> to_string))
+let failed_task_errors json = drop_field json "cancel_failed" |> List.map (fun row ->
+  Yojson.Safe.Util.(row |> member "error" |> to_string))
+let contains ~sub text =
+  let n = String.length sub in
+  let rec go i = i + n <= String.length text && (String.sub text i n = sub || go (i + 1)) in
+  go 0
+let backlog config = match Workspace_backlog.read_backlog_r config with
+  | Ok value -> value
+  | Error detail -> fail detail
+let save_atomic path contents = match Fs_compat.save_file_atomic path contents with
+  | Ok () -> ()
+  | Error detail -> fail detail
+let ordered_tasks config ids =
+  (backlog config).tasks |> List.filter_map (fun (task : Masc_domain.task) ->
+    if List.mem task.id ids then Some task.id else None) |> List.sort String.compare
 
 let test_drop_cancels_left_over_todo () = with_workspace @@ fun config _ ->
   ignore (Masc.Workspace.init config ~agent_name:None);
@@ -266,6 +342,309 @@ let test_drop_cancels_left_over_todo () = with_workspace @@ fun config _ ->
   check bool "a repeated drop is a no-op" true Yojson.Safe.Util.(again |> member "noop" |> to_bool);
   check bool "a no-op drop reports no task work" true Yojson.Safe.Util.(again |> member "tasks" = `Null)
 
+let test_drop_cancels_multiple_from_independent_reads () = with_workspace @@ fun config _ ->
+  ignore (Masc.Workspace.init config ~agent_name:None);
+  let goal = create config in
+  let first = add_task ~goal_id:goal.id config "first candidate" in
+  let second = add_task ~goal_id:goal.id config "second candidate" in
+  let version = (backlog config).version in
+  let json = transition config goal.id "drop" |> success in
+  check (list string) "both candidates cancelled" (List.sort String.compare [first; second])
+    (drop_field json "cancelled" |> List.map Yojson.Safe.Util.to_string |> List.sort String.compare);
+  check int "no Task cancellation failures" 0 (List.length (failed_task_ids json));
+  check int "each committed Task advanced the backlog once" (version + 2) (backlog config).version;
+  List.iter (fun id -> match task_status config id with
+      | Masc_domain.Cancelled { cancelled_by; _ } -> check string "cancelled by operator" "operator" cancelled_by
+      | Masc_domain.Todo | Masc_domain.Claimed _ | Masc_domain.InProgress _
+      | Masc_domain.AwaitingVerification _ | Masc_domain.Done _ -> fail ("Task was not cancelled: " ^ id)) [first; second]
+
+let test_drop_does_not_cancel_claim_after_snapshot () = with_workspace @@ fun config _ ->
+  ignore (Masc.Workspace.init config ~agent_name:None);
+  let goal = create config in
+  let one = add_task ~goal_id:goal.id config "first candidate" in
+  let two = add_task ~goal_id:goal.id config "second candidate" in
+  let first, second = match ordered_tasks config [one; two] with
+    | [first; second] -> first, second
+    | [] | [_] | _ :: _ :: _ :: _ -> fail "expected two candidate rows" in
+  let claim = ref None in
+  let hook = Atomic.exchange Workspace_hooks.goal_verification_abandoned_fn
+      (fun hook_config ~goal_id:_ ->
+         claim := Some (Masc.Workspace.transition_task_r hook_config ~agent_name:"operator"
+           ~task_id:first ~action:Masc_domain.Claim ())) in
+  let json = Fun.protect ~finally:(fun () -> Atomic.set Workspace_hooks.goal_verification_abandoned_fn hook)
+      (fun () -> transition config goal.id "drop" |> success) in
+  (match !claim with
+   | Some (Ok _) -> ()
+   | Some (Error error) -> fail (Masc_domain.masc_error_to_string error)
+   | None -> fail "claim hook was not called");
+  check (list string) "independent Task was cancelled" [second]
+    (drop_field json "cancelled" |> List.map Yojson.Safe.Util.to_string);
+  check (list string) "changed Task is reported" [first] (failed_task_ids json);
+  (match failed_task_errors json with
+   | [error] -> check bool "changed Task was not attempted" true (contains ~sub:"Task changed since" error)
+   | [] | _ :: _ :: _ -> fail "expected one Task error");
+  (match task_status config first with
+   | Masc_domain.Claimed { assignee; _ } -> check string "same actor retains the claim" "operator" assignee
+   | Masc_domain.Todo | Masc_domain.InProgress _ | Masc_domain.AwaitingVerification _
+   | Masc_domain.Done _ | Masc_domain.Cancelled _ -> fail "claimed Task was changed");
+  (match task_status config second with
+   | Masc_domain.Cancelled _ -> ()
+   | Masc_domain.Todo | Masc_domain.Claimed _ | Masc_domain.InProgress _ | Masc_domain.AwaitingVerification _
+   | Masc_domain.Done _ -> fail "independent Task was not cancelled");
+  let repeated = transition config goal.id "drop" |> success in
+  check bool "repeated drop is a no-op" true Yojson.Safe.Util.(repeated |> member "noop" |> to_bool);
+  check bool "repeated drop does not retry Tasks" true Yojson.Safe.Util.(repeated |> member "tasks" = `Null)
+
+let test_drop_preserves_new_handoff () = with_workspace @@ fun config _ ->
+  ignore (Masc.Workspace.init config ~agent_name:None);
+  let goal = create config in
+  let changed = add_task ~goal_id:goal.id config "changed candidate" in
+  let independent = add_task ~goal_id:goal.id config "independent candidate" in
+  let handoff : Masc_domain.task_handoff_context =
+    { summary = "work was inspected"; reason = None; next_step = Some "continue";
+      failure_mode = None; reclaim_policy = None; evidence_refs = ["note:handoff"];
+      updated_at = None; updated_by = Some "operator" } in
+  let hook_result = ref None in
+  let hook = Atomic.exchange Workspace_hooks.goal_verification_abandoned_fn
+      (fun hook_config ~goal_id:_ ->
+         let claim = Masc.Workspace.transition_task_r hook_config ~agent_name:"operator" ~task_id:changed
+             ~action:Masc_domain.Claim () in
+         let release = match claim with
+           | Error error -> Error error
+           | Ok _ -> Masc.Workspace.transition_task_r hook_config ~agent_name:"operator" ~task_id:changed
+                       ~action:Masc_domain.Release ~handoff_context:handoff () in
+         hook_result := Some release) in
+  let json = Fun.protect ~finally:(fun () -> Atomic.set Workspace_hooks.goal_verification_abandoned_fn hook)
+      (fun () -> transition config goal.id "drop" |> success) in
+  (match !hook_result with
+   | Some (Ok _) -> ()
+   | Some (Error error) -> fail (Masc_domain.masc_error_to_string error)
+   | None -> fail "claim and release hook was not called");
+  check (list string) "changed Task is reported" [changed] (failed_task_ids json);
+  check (list string) "unrelated candidate still cancels" [independent]
+    (drop_field json "cancelled" |> List.map Yojson.Safe.Util.to_string);
+  let task = match List.find_opt (fun (task : Masc_domain.task) -> String.equal task.id changed) (backlog config).tasks with
+    | Some task -> task | None -> fail "changed Task missing" in
+  (match task.task_status with
+   | Masc_domain.Todo -> ()
+   | Masc_domain.Claimed _ | Masc_domain.InProgress _ | Masc_domain.AwaitingVerification _
+   | Masc_domain.Done _ | Masc_domain.Cancelled _ -> fail "changed Task was cancelled");
+  (match task.handoff_context with
+   | Some context -> check string "new handoff survives" handoff.summary context.summary
+   | None -> fail "new handoff was lost")
+
+let test_drop_cas_refuses_claim_after_fresh_read () = with_workspace @@ fun config _ ->
+  ignore (Masc.Workspace.init config ~agent_name:None);
+  let goal = create config in
+  let id = add_task ~goal_id:goal.id config "candidate" in
+  let original = match List.find_opt (fun (task : Masc_domain.task) -> String.equal task.id id) (backlog config).tasks with
+    | Some task -> task | None -> fail "candidate missing" in
+  let hook_result = ref None in
+  let ctx : Masc.Workspace_types.context = { config; agent_name = "operator" } in
+  let cancelled, failed = Goals.For_testing.cancel_dropped_goal_todos ctx ~goal_id:goal.id ~reason:"fixture"
+      ~before_transition:(fun ~task_id ->
+        hook_result := Some (Masc.Workspace.transition_task_r config ~agent_name:"operator"
+          ~task_id ~action:Masc_domain.Claim ())) [original] in
+  (match !hook_result with
+   | Some (Ok _) -> ()
+   | Some (Error error) -> fail (Masc_domain.masc_error_to_string error)
+   | None -> fail "claim hook was not called");
+  check (list string) "conflicted Task not reported cancelled" [] cancelled;
+  (match failed with
+   | [(task_id, detail)] ->
+       check string "conflicted Task" id task_id;
+       check bool "version conflict reported" true (contains ~sub:"Version mismatch" detail)
+   | [] | _ :: _ :: _ -> fail "expected one version conflict");
+  (match task_status config id with
+   | Masc_domain.Claimed { assignee; _ } -> check string "claim preserved" "operator" assignee
+   | Masc_domain.Todo | Masc_domain.InProgress _ | Masc_domain.AwaitingVerification _
+   | Masc_domain.Done _ | Masc_domain.Cancelled _ -> fail "claim was not preserved")
+
+let test_drop_refuses_deleted_then_restored_task () = with_workspace @@ fun config _ ->
+  ignore (Masc.Workspace.init config ~agent_name:None);
+  let goal = create config in
+  let id = add_task ~goal_id:goal.id config "restored candidate" in
+  let independent = add_task ~goal_id:goal.id config "independent candidate" in
+  let original = match List.find_opt (fun (task : Masc_domain.task) -> String.equal task.id id) (backlog config).tasks with
+    | Some task -> task | None -> fail "candidate missing" in
+  (match Masc.Workspace.append_archive_tasks config [original] with Ok () -> () | Error detail -> fail detail);
+  let hook_result = ref None in
+  let hook = Atomic.exchange Workspace_hooks.goal_verification_abandoned_fn
+      (fun hook_config ~goal_id:_ ->
+         let result = match Masc.Workspace.delete_task_r hook_config ~task_id:id with
+           | Error error -> Error (Masc_domain.masc_error_to_string error)
+           | Ok _ ->
+               (try ignore (Masc.Workspace.archive_terminal_tasks hook_config ~days:1 ()); Ok () with
+                | Eio.Cancel.Cancelled _ as exn -> raise exn
+                | exn -> Error (Printexc.to_string exn)) in
+         hook_result := Some result) in
+  let json = Fun.protect ~finally:(fun () -> Atomic.set Workspace_hooks.goal_verification_abandoned_fn hook)
+      (fun () -> transition config goal.id "drop" |> success) in
+  (match !hook_result with Some (Ok ()) -> () | Some (Error detail) -> fail detail | None -> fail "restore hook was not called");
+  check bool "deletion receipt remains" true
+    (List.exists (fun (receipt : Masc_domain.task_deletion_receipt) -> String.equal receipt.deleted_task_id id)
+       (backlog config).task_deletion_receipts);
+  check (list string) "restored Task is refused" [id] (failed_task_ids json);
+  check (list string) "independent Task still cancels" [independent]
+    (drop_field json "cancelled" |> List.map Yojson.Safe.Util.to_string);
+  (match task_status config id with
+   | Masc_domain.Todo -> ()
+   | Masc_domain.Claimed _ | Masc_domain.InProgress _ | Masc_domain.AwaitingVerification _
+   | Masc_domain.Done _ | Masc_domain.Cancelled _ -> fail "restored Task was changed")
+
+let test_drop_continues_after_post_commit_error () = with_workspace @@ fun config _ ->
+  ignore (Masc.Workspace.init config ~agent_name:None);
+  let goal = create config in
+  let one = add_task ~goal_id:goal.id config "first candidate" in
+  let two = add_task ~goal_id:goal.id config "second candidate" in
+  let first, second = match ordered_tasks config [one; two] with
+    | [first; second] -> first, second
+    | [] | [_] | _ :: _ :: _ :: _ -> fail "expected two candidate rows" in
+  let hook = Atomic.exchange Workspace_hooks.observe_task_transition_fn
+      (fun _ ~agent_name:_ ~task_id ~transition ~details:_ ->
+         if String.equal task_id first && transition = Masc_domain.Cancel then failwith "post-commit fixture") in
+  let json = Fun.protect ~finally:(fun () -> Atomic.set Workspace_hooks.observe_task_transition_fn hook)
+      (fun () -> transition config goal.id "drop" |> success) in
+  check (list string) "only the independent cancellation is reported as confirmed" [second]
+    (drop_field json "cancelled" |> List.map Yojson.Safe.Util.to_string);
+  check (list string) "post-commit error is reported" [first] (failed_task_ids json);
+  (match failed_task_errors json with
+   | [error] -> check bool "first commit may be unknown" true (contains ~sub:"commit status may be unknown" error)
+   | [] | _ :: _ :: _ -> fail "expected one Task error");
+  (match task_status config first with
+   | Masc_domain.Cancelled _ -> ()
+   | Masc_domain.Todo | Masc_domain.Claimed _ | Masc_domain.InProgress _
+   | Masc_domain.AwaitingVerification _ | Masc_domain.Done _ -> fail "committed Task was not cancelled");
+  (match task_status config second with
+   | Masc_domain.Cancelled _ -> ()
+   | Masc_domain.Todo | Masc_domain.Claimed _ | Masc_domain.InProgress _ | Masc_domain.AwaitingVerification _
+   | Masc_domain.Done _ -> fail "independent Task was not cancelled")
+
+let test_drop_refuses_duplicate_task_rows ~claimed () = with_workspace @@ fun config _ ->
+  ignore (Masc.Workspace.init config ~agent_name:None);
+  let goal = create config in
+  let id = add_task ~goal_id:goal.id config "duplicated candidate" in
+  let independent = add_task ~goal_id:goal.id config "independent candidate" in
+  if claimed then
+    Masc.Workspace.transition_task_r config ~agent_name:"operator" ~task_id:id ~action:Masc_domain.Claim ()
+    |> ok_or_fail;
+  Workspace_utils.with_file_lock config (Workspace_backlog.backlog_lock_path config) (fun () ->
+    let current = backlog config in
+    let original = match List.find_opt (fun (task : Masc_domain.task) -> String.equal task.id id) current.tasks with
+      | Some task -> task | None -> fail "candidate missing" in
+    let todo = { original with task_status = Masc_domain.Todo } in
+    Workspace_backlog.write_backlog config { current with tasks = todo :: current.tasks });
+  let duplicate_rows = (backlog config).tasks |> List.filter (fun (task : Masc_domain.task) -> String.equal task.id id) in
+  let json = transition config goal.id "drop" |> success in
+  check (list string) "duplicate Task is reported separately" [id] (failed_task_ids json);
+  check (list string) "independent Task still cancels" [independent]
+    (drop_field json "cancelled" |> List.map Yojson.Safe.Util.to_string);
+  let held = drop_field json "held" |> List.map (fun row -> Yojson.Safe.Util.(
+    to_string (member "task_id" row) ^ "/" ^ to_string (member "holder" row))) in
+  if claimed then begin
+    check (list string) "ambiguous held row remains observable" [id ^ "/operator"] held;
+    (match (state config).pending_notifications with
+     | [notice] ->
+         check bool "holder notice names the ambiguous observation" true
+           (contains ~sub:"stale or ambiguous" notice.content && contains ~sub:(id ^ " (operator)") notice.content)
+     | _ -> fail "expected a durable ambiguous-holder notice")
+  end else check (list string) "duplicate Todo rows have no holder" [] held;
+  let after = (backlog config).tasks |> List.filter (fun (task : Masc_domain.task) -> String.equal task.id id) in
+  check bool "neither duplicate Task row was rewritten" true
+    (List.length duplicate_rows = List.length after && List.for_all2 Masc_domain.equal_task duplicate_rows after)
+
+let test_drop_refuses_duplicate_linked_goal ~claimed () = with_workspace @@ fun config _ ->
+  ignore (Masc.Workspace.init config ~agent_name:None);
+  let goal = create config in
+  let other = match Goal_store.upsert_goal config ~title:"Possibly live" ~metric:"m" ~target_value:"1" () with
+    | Ok (goal, _) -> goal | Error error -> fail (Goal_store.write_error_to_string error) in
+  let id = add_task ~goal_id:goal.id config "possibly shared candidate" in
+  let independent = add_task ~goal_id:goal.id config "independent candidate" in
+  (match Workspace_goal_index.link_task_to_goal_result config ~goal_id:other.id ~task_id:id with
+   | Ok _ -> () | Error _ -> fail "link the other Goal");
+  if claimed then
+    Masc.Workspace.transition_task_r config ~agent_name:"operator" ~task_id:id ~action:Masc_domain.Claim ()
+    |> ok_or_fail;
+  let current = state config in
+  let duplicate = { other with phase = GP.Dropped } in
+  (match Goal_store.write_state_result config { current with goals = duplicate :: current.goals } with
+   | Ok () -> () | Error detail -> fail detail);
+  let json = transition config goal.id "drop" |> success in
+  check (list string) "ambiguous linked Goal is reported" [id] (failed_task_ids json);
+  (match failed_task_errors json with
+   | [error] -> check bool "linked Goal ambiguity is named" true (contains ~sub:"linked Goal ID is ambiguous" error)
+   | [] | _ :: _ :: _ -> fail "expected one Task error");
+  check (list string) "independent Task still cancels" [independent]
+    (drop_field json "cancelled" |> List.map Yojson.Safe.Util.to_string);
+  let held = drop_field json "held" |> List.map (fun row -> Yojson.Safe.Util.(
+    to_string (member "task_id" row) ^ "/" ^ to_string (member "holder" row))) in
+  if claimed then begin
+    check (list string) "ambiguous linked Goal retains holder observation" [id ^ "/operator"] held;
+    (match task_status config id with
+     | Masc_domain.Claimed { assignee; _ } -> check string "holder preserved" "operator" assignee
+     | Masc_domain.Todo | Masc_domain.InProgress _ | Masc_domain.AwaitingVerification _
+     | Masc_domain.Done _ | Masc_domain.Cancelled _ -> fail "held Task was changed")
+  end else begin
+    check (list string) "Todo candidate has no holder" [] held;
+    (match task_status config id with
+     | Masc_domain.Todo -> ()
+     | Masc_domain.Claimed _ | Masc_domain.InProgress _ | Masc_domain.AwaitingVerification _
+     | Masc_domain.Done _ | Masc_domain.Cancelled _ -> fail "shared Task was changed")
+  end
+
+let test_drop_refuses_duplicate_target_goal ~claimed ~dropped_first () = with_workspace @@ fun config _ ->
+  ignore (Masc.Workspace.init config ~agent_name:None);
+  let goal = create config in
+  let id = add_task ~goal_id:goal.id config "candidate" in
+  if claimed then
+    Masc.Workspace.transition_task_r config ~agent_name:"operator" ~task_id:id ~action:Masc_domain.Claim ()
+    |> ok_or_fail;
+  let current = state config in
+  let duplicate = { goal with title = "Different duplicate"; phase = GP.Dropped;
+                              criterion_revision = "different-criterion" } in
+  let rows = if dropped_first then [duplicate; goal] else [goal; duplicate] in
+  (match Goal_store.write_state_result config { current with goals = rows } with
+   | Ok () -> () | Error detail -> fail detail);
+  let primary = Goal_store.goals_path config in
+  let mirror = primary ^ ".last-good" in
+  let before = Fs_compat.load_file primary, Fs_compat.load_file mirror in
+  let abandoned = ref 0 in
+  let hook = Atomic.exchange Workspace_hooks.goal_verification_abandoned_fn
+      (fun _ ~goal_id:_ -> incr abandoned) in
+  let result = Fun.protect ~finally:(fun () -> Atomic.set Workspace_hooks.goal_verification_abandoned_fn hook)
+      (fun () -> transition config goal.id "drop") in
+  refused result;
+  check bool "ambiguous target is named" true (contains ~sub:"goal ID has multiple rows" (Tool_result.message result));
+  check string "ambiguous Goal primary unchanged" (fst before) (Fs_compat.load_file primary);
+  check string "ambiguous Goal mirror unchanged" (snd before) (Fs_compat.load_file mirror);
+  check int "ambiguous Goal does not abandon verification" 0 !abandoned;
+  if claimed then begin
+    (match task_status config id with
+     | Masc_domain.Claimed { assignee; _ } -> check string "holder preserved" "operator" assignee
+     | Masc_domain.Todo | Masc_domain.InProgress _ | Masc_domain.AwaitingVerification _
+     | Masc_domain.Done _ | Masc_domain.Cancelled _ -> fail "ambiguous target changed the held Task")
+  end else begin
+    (match task_status config id with
+     | Masc_domain.Todo -> ()
+     | Masc_domain.Claimed _ | Masc_domain.InProgress _ | Masc_domain.AwaitingVerification _
+     | Masc_domain.Done _ | Masc_domain.Cancelled _ -> fail "ambiguous target cancelled a Task")
+  end
+
+let test_drop_rejects_recovery_candidate ~links () = with_workspace @@ fun config _ ->
+  ignore (Masc.Workspace.init config ~agent_name:None);
+  let goal = create config in
+  ignore (add_task ~goal_id:goal.id config "candidate with recovery");
+  let path = if links then Workspace_goal_index.goal_task_links_path config
+    else Workspace_backlog.backlog_path config in
+  let recovery = path ^ ".last-good" in
+  check bool "valid recovery snapshot exists" true (Sys.file_exists recovery);
+  save_atomic path "{broken";
+  let json = transition config goal.id "drop" |> success in
+  check bool "recovery cannot authorize cancellation" true
+    Yojson.Safe.Util.(json |> member "tasks" |> member "unread" <> `Null);
+  check string "corrupt primary was not rewritten" "{broken" (Fs_compat.load_file path);
+  phase GP.Dropped (saved config goal.id)
+
 let test_drop_without_reason_is_refused () = with_workspace @@ fun config _ ->
   ignore (Masc.Workspace.init config ~agent_name:None);
   let goal = create config in
@@ -295,10 +674,9 @@ let test_binding_unavailable_is_not_an_ended_request () = with_workspace @@ fun 
   List.iter (fun path ->
     let original = Fs_compat.load_file path in
     let corrupt = "{unavailable" in
-    Fun.protect
-      ~finally:(fun () -> ignore (Fs_compat.save_file_atomic path original))
+    Fun.protect ~finally:(fun () -> save_atomic path original)
       (fun () ->
-        ignore (Fs_compat.save_file_atomic path corrupt);
+        save_atomic path corrupt;
         (match Goal_verification.bind_review config ~goal_id:goal.id with
          | Error (Goal_verification.Binding_unavailable _) -> ()
          | Error (Goal_verification.No_current_review _) ->
@@ -318,8 +696,24 @@ let test_binding_unavailable_is_not_an_ended_request () = with_workspace @@ fun 
 
 let () = run "Goal suspension" ["drop", [
   test_case "drop cancels leftover todo, keeps shared and held work" `Quick test_drop_cancels_left_over_todo;
+  test_case "drop cancels multiple Tasks with independent guarded reads" `Quick test_drop_cancels_multiple_from_independent_reads;
+  test_case "drop preserves a same-actor claim after its snapshot" `Quick test_drop_does_not_cancel_claim_after_snapshot;
+  test_case "drop preserves a new handoff after claim and release" `Quick test_drop_preserves_new_handoff;
+  test_case "drop refuses a claim between Task read and transition" `Quick test_drop_cas_refuses_claim_after_fresh_read;
+  test_case "drop refuses a deleted then restored Task" `Quick test_drop_refuses_deleted_then_restored_task;
+  test_case "drop continues after a post-commit Task error" `Quick test_drop_continues_after_post_commit_error;
+  test_case "drop refuses duplicate Todo rows" `Quick (fun () -> test_drop_refuses_duplicate_task_rows ~claimed:false ());
+  test_case "drop refuses duplicate Todo and Claimed rows" `Quick (fun () -> test_drop_refuses_duplicate_task_rows ~claimed:true ());
+  test_case "drop refuses Todo linked to duplicate Goal rows" `Quick (fun () -> test_drop_refuses_duplicate_linked_goal ~claimed:false ());
+  test_case "drop reports holder linked to duplicate Goal rows" `Quick (fun () -> test_drop_refuses_duplicate_linked_goal ~claimed:true ());
+  test_case "drop refuses duplicate target before cancelling Todo" `Quick (fun () -> test_drop_refuses_duplicate_target_goal ~claimed:false ~dropped_first:false ());
+  test_case "repeated drop refuses duplicate target and preserves holder" `Quick (fun () -> test_drop_refuses_duplicate_target_goal ~claimed:true ~dropped_first:true ());
+  test_case "drop refuses backlog recovery as authority" `Quick (fun () -> test_drop_rejects_recovery_candidate ~links:false ());
+  test_case "drop refuses link recovery as authority" `Quick (fun () -> test_drop_rejects_recovery_candidate ~links:true ());
   test_case "drop without a reason is refused and changes nothing" `Quick test_drop_without_reason_is_refused;
 ]; "contract", [
+  test_case "transition refuses IDs that would be retargeted" `Quick
+    test_transition_refuses_ids_that_would_be_retargeted;
   test_case "restore every live state across both suspension kinds" `Quick test_restore_matrix;
   test_case "terminal refusal and Drop/Reopen escape" `Quick test_terminal_and_escape;
   test_case "bound verdict preserves suspension and reconciles on restore" `Quick test_bound_result;

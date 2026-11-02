@@ -147,7 +147,7 @@ let test_default_drift_is_visible_without_failing_restore () =
        ["key", `String "keeper"; "saved_sha256", `String before; "current_sha256", `String after]]]]
 
 let preset_identity base : D.server_identity =
-  { sid_version = "test"; sid_binary_commit = "test"; sid_binary_commit_age_s = None
+  { sid_version = "test"; sid_binary_commit = "test"; sid_binary_commit_age_s = None; sid_runtime_instance_id = None
   ; sid_base_path = D.Canonical_path.of_path base
   ; sid_masc_root = D.Canonical_path.of_path (base ^ "/.masc")
   ; sid_executable_in_worktree = None; sid_state_ready = Some true

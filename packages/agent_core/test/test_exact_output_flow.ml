@@ -174,7 +174,8 @@ let with_catalog entries f =
   | Ok snapshot -> f snapshot
 ;;
 
-let with_bound_targets ?admission_priority_run_limit ~base_url ~body_timeout_s f =
+let with_bound_targets ?admission_priority_run_limit
+      ?(request_path = "/chat/completions") ~base_url ~body_timeout_s f =
   (* The admission registry lives for the whole process and admits one
      allowance per endpoint identity. A loopback port can come back in a
      later case, so each allowance gets its own key. *)
@@ -190,7 +191,7 @@ let with_bound_targets ?admission_priority_run_limit ~base_url ~body_timeout_s f
       ~model_id:"deepseek-v4-pro"
       ~base_url
       ~api_key:key
-      ~request_path:"/chat/completions"
+      ~request_path
       ~max_concurrent_requests:1
       ?admission_priority_run_limit
       ()
@@ -463,6 +464,53 @@ let with_server
     f ~sw ~net ~clock ~base_url:(Printf.sprintf "http://127.0.0.1:%d" port)
   in
   result, Atomic.get completion_posts
+;;
+
+(* Send an informational response while the first request is still awaiting
+   its final response. A later connection can answer a successor if the flow
+   incorrectly advances. *)
+let with_interim_server ~status_line f =
+  let posts = Atomic.make 0 in
+  let result =
+    Eio_main.run @@ fun env ->
+    Eio.Switch.run @@ fun sw ->
+    let net = Eio.Stdenv.net env and clock = Eio.Stdenv.clock env in
+    let port = fresh_port () in
+    let socket = Eio.Net.listen net ~sw ~backlog:8 ~reuse_addr:true
+        (`Tcp (Eio.Net.Ipaddr.V4.loopback, port)) in
+    let read_request reader =
+      ignore (Eio.Buf_read.line reader : string);
+      let rec headers length =
+        let line = String.trim (Eio.Buf_read.line reader) in
+        if String.equal line "" then length
+        else
+          let length = match String.index_opt line ':' with
+            | Some index when
+                String.lowercase_ascii (String.sub line 0 index) = "content-length" ->
+              int_of_string (String.trim (String.sub line (index + 1) (String.length line - index - 1)))
+            | None | Some _ -> length in
+          headers length in
+      ignore (Eio.Buf_read.take (headers 0) reader : string)
+    in
+    let handle flow _ =
+      try
+        let reader = Eio.Buf_read.of_flow ~max_size:max_int flow in
+        read_request reader;
+        let index = Atomic.fetch_and_add posts 1 in
+        if index = 0 then (
+          Eio.Flow.copy_string ("HTTP/1.1 " ^ status_line ^ "\r\n\r\n") flow;
+          Eio.Time.sleep clock 0.25);
+        let body = {|{"status":"completed","output":[]}|} in
+        Eio.Flow.copy_string
+          (Printf.sprintf "HTTP/1.1 200 OK\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s"
+             (String.length body) body) flow
+      with End_of_file | Eio.Io _ | Unix.Unix_error _ -> ()
+    in
+    Eio.Fiber.fork_daemon ~sw (fun () ->
+      while true do Eio.Net.accept_fork socket ~sw ~on_error:(fun _ -> ()) handle done);
+    f ~net ~clock ~base_url:(Printf.sprintf "http://127.0.0.1:%d" port)
+  in
+  result, Atomic.get posts
 ;;
 
 type measurement_reply =
@@ -3781,7 +3829,7 @@ let assert_typed_capacity_refusal_advances_once
   =
   let refused_id = label ^ "-refused" in
   let successor_id = label ^ "-successor" in
-  let ( (result, replay, advances, evidence, observed_advance, dispatches_before_replay)
+  let ( (result, replay, advances, evidence, observed_advance, initial_snapshot, dispatches_before_replay)
       , posts )
     =
     with_server
@@ -3797,13 +3845,17 @@ let assert_typed_capacity_refusal_advances_once
     let flow = start_flow (frozen_flow snapshot [ refused_id; successor_id ]) in
     let advances = ref 0 in
     let observed_advance = ref None in
+    let initial_snapshot = ref None in
     let result =
       execute_with_accepting_test_validator
         ~clock
         ~net
         ~on_measurement_terminal:(fun _ -> Ok ())
         ~before_measurement_dispatch:(fun _ -> Ok ())
-        ~before_dispatch:(fun _ -> Ok ())
+        ~before_dispatch:(fun candidate ->
+          if String.equal (candidate_id candidate) refused_id then
+            initial_snapshot := Some ((attempt_for (EO.flow_attempt_evidence flow) refused_id).receipt);
+          Ok ())
         ~before_advance:(fun ~failed ~next ->
           let failed_candidate, failure = flow_execution_failure failed in
           observed_advance
@@ -3830,6 +3882,7 @@ let assert_typed_capacity_refusal_advances_once
     , !advances
     , evidence
     , !observed_advance
+    , !initial_snapshot
     , dispatches_before_replay )
   in
   (match observed_advance with
@@ -3862,12 +3915,27 @@ let assert_typed_capacity_refusal_advances_once
     (refused_id ^ " dispatch count")
     1
     (EO.generation_receipt_snapshot_dispatch_count refused_attempt.receipt);
+  check
+    (option int)
+    (refused_id ^ " actual HTTP status")
+    (Some (Cohttp.Code.code_of_status (fst first_response)))
+    (EO.generation_receipt_snapshot_http_status refused_attempt.receipt);
+  (match initial_snapshot with
+   | Some snapshot ->
+     check (option int) (refused_id ^ " earlier snapshot remains without headers") None
+       (EO.generation_receipt_snapshot_http_status snapshot)
+   | None -> fail (label ^ " did not publish its initial snapshot"));
   let successor_attempt = attempt_for evidence successor_id in
   check
     int
     (successor_id ^ " dispatch count")
     1
     (EO.generation_receipt_snapshot_dispatch_count successor_attempt.receipt);
+  check
+    (option int)
+    (successor_id ^ " actual HTTP status")
+    (Some 200)
+    (EO.generation_receipt_snapshot_http_status successor_attempt.receipt);
   check int (label ^ " replay adds zero POSTs") 0 (posts - dispatches_before_replay);
   (match replay with
    | Error (EO.Flow_attempt_already_started _) -> ()
@@ -4006,6 +4074,12 @@ let test_network_failure_before_dispatch_is_every_binding_resting () =
        failf
          "a refused connection was not a network failure before dispatch: %s"
          (EO.execution_error_cause_to_string other));
+    let refused_attempt = attempt_for failure.evidence "unreachable-b" in
+    check
+      (option int)
+      "a connection failure has no captured HTTP status"
+      None
+      (EO.generation_receipt_snapshot_http_status refused_attempt.receipt);
     check
       bool
       "every visited binding is at rest"
@@ -4046,6 +4120,11 @@ let test_dropped_connection_after_dispatch_is_not_a_binding_at_rest () =
        failf
          "a dropped connection was not a completion failure after dispatch: %s"
          (EO.execution_error_cause_to_string other));
+    let dropped_attempt = attempt_for failure.evidence "dropped-b" in
+    check bool "the dropped attempt was dispatched" true
+      (EO.generation_receipt_snapshot_generation_dispatched dropped_attempt.receipt);
+    check (option int) "a dispatch can lack response headers" None
+      (EO.generation_receipt_snapshot_http_status dropped_attempt.receipt);
     check
       bool
       "a dropped connection after dispatch is not rest"
@@ -4085,6 +4164,638 @@ let test_rate_limited_429_refusal_advances_once_to_successor () =
         ()
       | _ -> fail "HTTP 429 lost its typed rate-limit cause")
     ()
+;;
+
+(* The body can declare a provider condition even when the actual HTTP status
+   is 200. The retained snapshot must not confuse those separate facts. *)
+let test_http_200_provider_reported_429_keeps_actual_status () =
+  let (result, replay, evidence, initial_snapshot, dispatches_before_replay), posts =
+    with_server ~response:{|{"error":{"code":429,"message":"rate limited"}}|}
+    @@ fun ~sw:_ ~net ~clock ~base_url ->
+    with_catalog
+      [ catalog_entry ~id:"http-200-provider-429" ~base_url ~native:true ~json:true () ]
+    @@ fun snapshot ->
+    let flow = start_flow (frozen_flow snapshot [ "http-200-provider-429" ]) in
+    let initial_snapshot = ref None in
+    let result =
+      execute_with_accepting_test_validator ~net ~clock
+        ~before_measurement_dispatch:(fun _ -> Ok ())
+        ~on_measurement_terminal:(fun _ -> Ok ())
+        ~before_dispatch:(fun _ ->
+          initial_snapshot := Some ((attempt_for (EO.flow_attempt_evidence flow)
+            "http-200-provider-429").receipt);
+          Ok ())
+        ~before_advance:(fun ~failed:_ ~next:_ -> Ok ()) flow
+    in
+    let evidence = EO.flow_attempt_evidence flow in
+    let dispatches_before_replay =
+      List.fold_left (fun count (attempt : EO.flow_attempt_snapshot) ->
+        count + EO.generation_receipt_snapshot_dispatch_count attempt.receipt) 0 evidence.attempts in
+    result, execute_ok ~net ~clock flow, evidence, !initial_snapshot, dispatches_before_replay
+  in
+  check int "one candidate makes one POST" 1 posts;
+  check int "same in-memory flow replay sends nothing" 0 (posts - dispatches_before_replay);
+  (match replay with
+   | Error (EO.Flow_attempt_already_started _) -> ()
+   | Ok _ | Error _ -> fail "same flow replay did not stop");
+  (match initial_snapshot with
+   | Some snapshot -> check (option int) "earlier snapshot stays without headers" None
+       (EO.generation_receipt_snapshot_http_status snapshot)
+   | None -> fail "initial snapshot was not published");
+  let attempt = attempt_for evidence "http-200-provider-429" in
+  check (option int) "wire HTTP status" (Some 200)
+    (EO.generation_receipt_snapshot_http_status attempt.receipt);
+  match result with
+  | Error (EO.Flow_exact_execution_failed { cause = { cause =
+      EO.Provider_response_refused { http_status = 429; refusal = EO.Rate_limited; _ }; _ }; _ }) -> ()
+  | Ok _ | Error _ -> fail "the provider's declared 429 condition was not retained"
+;;
+
+let test_responses_lifecycle_is_captured_with_actual_status () =
+  let run ~label ~path ~status ~response ~expected_lifecycle ~expected_success =
+    let (result, evidence, initial_snapshot, result_snapshot), posts =
+      with_server ~status ~response
+      @@ fun ~sw:_ ~net ~clock ~base_url ->
+      with_catalog
+        [ catalog_entry ~id:label ~base_url ~request_path:path ~native:true ~json:true () ]
+      @@ fun snapshot ->
+      let flow = start_flow (frozen_flow snapshot [ label ]) in
+      let initial = ref None in
+      let result = execute_with_accepting_test_validator ~net ~clock
+        ~before_measurement_dispatch:(fun _ -> Ok ())
+        ~on_measurement_terminal:(fun _ -> Ok ())
+        ~before_dispatch:(fun _ ->
+          initial := Some ((attempt_for (EO.flow_attempt_evidence flow) label).receipt);
+          Ok ())
+        ~before_advance:(fun ~failed:_ ~next:_ -> Ok ()) flow in
+      let receipt = match result with
+        | Ok success -> (EO.flow_success_candidate success).receipt
+        | Error (EO.Flow_exact_execution_failed {candidate;_}) -> candidate.receipt
+        | Error _ -> fail (label ^ " did not reach the provider") in
+      result, EO.flow_attempt_evidence flow, !initial, EO.receipt_snapshot receipt
+    in
+    check int (label ^ " sends once") 1 posts;
+    let receipt = (attempt_for evidence label).receipt in
+    check (option int) (label ^ " actual HTTP status")
+      (Some (Cohttp.Code.code_of_status status))
+      (EO.generation_receipt_snapshot_http_status receipt);
+    check bool (label ^ " frozen response family") true
+      (EO.generation_receipt_snapshot_response_family receipt
+       = (if path="/v1/responses" then EO.Openai_responses_codec else EO.Other_http_codec));
+    let body_sha256=Agent_core_sha256.(to_hex (digest_string response)) in
+    check (option string) (label ^ " complete response body digest") (Some body_sha256)
+      (EO.generation_receipt_snapshot_response_body_sha256 receipt);
+    check bool (label ^ " same-parse lifecycle") true
+      (EO.generation_receipt_snapshot_responses_lifecycle receipt = expected_lifecycle);
+    check (option int) (label ^ " result snapshot HTTP status")
+      (Some (Cohttp.Code.code_of_status status))
+      (EO.generation_receipt_snapshot_http_status result_snapshot);
+    check bool (label ^ " result snapshot lifecycle") true
+      (EO.generation_receipt_snapshot_responses_lifecycle result_snapshot = expected_lifecycle);
+    check (option string) (label ^ " result snapshot body digest") (Some body_sha256)
+      (EO.generation_receipt_snapshot_response_body_sha256 result_snapshot);
+    Option.iter (fun expected -> check bool (label ^ " result") expected (Result.is_ok result))
+      expected_success;
+    match initial_snapshot with
+    | Some snapshot ->
+      check bool (label ^ " earlier snapshot remains unobserved") true
+        (EO.generation_receipt_snapshot_responses_lifecycle snapshot = None);
+      check (option string) (label ^ " earlier snapshot has no body digest") None
+        (EO.generation_receipt_snapshot_response_body_sha256 snapshot)
+    | None -> fail (label ^ " initial snapshot was not published")
+  in
+  let observed status = Some (Backend_openai_responses.Observed_status status) in
+  run ~label:"responses-completed" ~path:"/v1/responses" ~status:`OK
+    ~response:{|{"status":"completed","error":null,"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"{\"name\":\"accepted\"}"}]}]}|}
+    ~expected_lifecycle:(observed Responses_stop_reason.Completed) ~expected_success:(Some true);
+  run ~label:"responses-partial-refusal" ~path:"/v1/responses" ~status:`OK
+    ~response:{|{"status":"queued","output":[{"type":"message","role":"assistant","content":[{"type":"refusal","refusal":"not yet"}]}]}|}
+    ~expected_lifecycle:(observed Responses_stop_reason.Queued) ~expected_success:(Some false);
+  run ~label:"responses-invalid-output-item" ~path:"/v1/responses" ~status:`OK
+    ~response:{|{"status":"in_progress","output":[{"type":"function_call"}]}|}
+    ~expected_lifecycle:(observed Responses_stop_reason.In_progress) ~expected_success:(Some false);
+  run ~label:"responses-invalid-json" ~path:"/v1/responses" ~status:`OK
+    ~response:{|{"status":|}
+    ~expected_lifecycle:(Some Backend_openai_responses.Unreadable_json) ~expected_success:(Some false);
+  run ~label:"responses-duplicate-status" ~path:"/v1/responses" ~status:`OK
+    ~response:{|{"status":"completed","status":"queued","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"{\"name\":\"accepted\"}"}]}]}|}
+    ~expected_lifecycle:(Some Backend_openai_responses.Ambiguous_envelope) ~expected_success:None;
+  run ~label:"responses-actual-refusal" ~path:"/v1/responses"
+    ~status:(Cohttp.Code.status_of_code 429)
+    ~response:{|{"status":"completed","error":null,"output":[]}|}
+    ~expected_lifecycle:None ~expected_success:(Some false);
+  run ~label:"chat-completed" ~path:"/v1/chat/completions" ~status:`OK
+    ~response:(openai_response {|{"name":"accepted"}|}) ~expected_lifecycle:None
+    ~expected_success:(Some true)
+;;
+
+let test_responses_lifecycle_is_bound_to_each_visit () =
+  let (result, evidence), posts =
+    with_server
+      ~first_response:(Cohttp.Code.status_of_code 429, {|{"error":"rate limited"}|})
+      ~response:{|{"status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"{\"name\":\"accepted\"}"}]}]}|}
+    @@ fun ~sw:_ ~net ~clock ~base_url ->
+    with_catalog
+      [ catalog_entry ~id:"refused-visit" ~base_url ~request_path:"/v1/responses" ~native:true ~json:true ()
+      ; catalog_entry ~id:"answered-visit" ~base_url ~request_path:"/v1/responses" ~native:true ~json:true () ]
+    @@ fun snapshot ->
+    let flow = start_flow (frozen_flow snapshot [ "refused-visit"; "answered-visit" ]) in
+    let result = execute_ok ~net ~clock flow in
+    result, EO.flow_attempt_evidence flow
+  in
+  check int "both visits sent once" 2 posts;
+  check bool "the real-refusal successor answered" true (Result.is_ok result);
+  let refused = (attempt_for evidence "refused-visit").receipt in
+  let answered = (attempt_for evidence "answered-visit").receipt in
+  check (option int) "refusal wire status" (Some 429)
+    (EO.generation_receipt_snapshot_http_status refused);
+  check bool "refusal has no Responses body parse" true
+    (EO.generation_receipt_snapshot_responses_lifecycle refused = None);
+  check (option int) "answer wire status" (Some 200)
+    (EO.generation_receipt_snapshot_http_status answered);
+  check bool "answer observation belongs to the answer visit" true
+    (EO.generation_receipt_snapshot_responses_lifecycle answered
+     = Some (Backend_openai_responses.Observed_status Responses_stop_reason.Completed));
+  let (result, evidence), posts =
+    with_server
+      ~first_response:(`OK, {|{"status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"not-json"}]}]}|})
+      ~response:{|{"status":"queued","output":[]}|}
+    @@ fun ~sw:_ ~net ~clock ~base_url ->
+    with_catalog
+      [ catalog_entry ~id:"completed-visit" ~base_url ~request_path:"/v1/responses" ~native:true ~json:true ()
+      ; catalog_entry ~id:"queued-visit" ~base_url ~request_path:"/v1/responses" ~native:true ~json:true () ]
+    @@ fun snapshot ->
+    let flow = start_flow (frozen_flow snapshot [ "completed-visit"; "queued-visit" ]) in
+    let result = execute_ok ~net ~clock flow in
+    result, EO.flow_attempt_evidence flow
+  in
+  check int "both parsed responses sent once" 2 posts;
+  check bool "queued final visit did not yield an answer" true (Result.is_error result);
+  let completed = (attempt_for evidence "completed-visit").receipt in
+  let queued = (attempt_for evidence "queued-visit").receipt in
+  check bool "first parsed visit keeps completed" true
+    (EO.generation_receipt_snapshot_responses_lifecycle completed
+     = Some (Backend_openai_responses.Observed_status Responses_stop_reason.Completed));
+  check bool "second parsed visit keeps queued" true
+    (EO.generation_receipt_snapshot_responses_lifecycle queued
+     = Some (Backend_openai_responses.Observed_status Responses_stop_reason.Queued))
+;;
+
+let test_responses_incomplete_body_has_no_lifecycle () =
+  let (result, evidence), posts =
+    with_server ~first_stalled_response:(`OK, {|{"status":"queued"|}) ~response:"unused"
+    @@ fun ~sw:_ ~net ~clock ~base_url ->
+    with_catalog
+      [ catalog_entry ~body_timeout_s:(Some 1.0) ~id:"partial-responses"
+          ~base_url ~request_path:"/v1/responses" ~native:true ~json:true () ]
+    @@ fun snapshot ->
+    let flow = start_flow (frozen_flow snapshot [ "partial-responses" ]) in
+    let result = execute_ok ~net ~clock flow in
+    result, EO.flow_attempt_evidence flow
+  in
+  check int "partial response sent once" 1 posts;
+  (match result with
+   | Error (EO.Flow_exact_execution_failed {cause={cause=EO.Response_body_deadline_exceeded;_};_}) -> ()
+   | Ok _ | Error _ -> fail "incomplete body did not preserve its deadline result");
+  let receipt = (attempt_for evidence "partial-responses").receipt in
+  check (option int) "partial body kept its actual HTTP status" (Some 200)
+    (EO.generation_receipt_snapshot_http_status receipt);
+  check bool "partial body was not parsed into a lifecycle" true
+    (EO.generation_receipt_snapshot_responses_lifecycle receipt = None);
+  check (option string) "partial body has no complete response digest" None
+    (EO.generation_receipt_snapshot_response_body_sha256 receipt)
+;;
+
+let guarded_flow ~net ~clock ~before_advance ~validate flow =
+  EO.execute_flow_once_guarded ~net ~clock
+    ~before_measurement_dispatch:(fun _ -> Ok ())
+    ~on_measurement_terminal:(fun _ -> Ok ())
+    ~before_dispatch:(fun _ -> Ok ()) ~before_advance ~validate flow
+;;
+
+let check_guarded_observation label (candidate : EO.flow_attempt_receipt)
+      observation evidence =
+  let recorded = attempt_for evidence candidate.visit.identity.candidate_id in
+  let actual = recorded.receipt in
+  let same field = check bool (label ^ " " ^ field) true in
+  same "flow identity"
+    (EO.flow_id_to_string candidate.visit.flow_id = EO.flow_id_to_string recorded.visit.flow_id);
+  same "visit ordinal"
+    (EO.flow_visit_ordinal_to_int candidate.visit.ordinal
+     = EO.flow_visit_ordinal_to_int recorded.visit.ordinal);
+  same "call identity"
+    (EO.call_id_to_string (EO.receipt_call_id candidate.receipt)
+     = EO.call_id_to_string (EO.generation_receipt_snapshot_call_id observation)
+     && EO.call_id_to_string (EO.generation_receipt_snapshot_call_id observation)
+        = EO.call_id_to_string (EO.generation_receipt_snapshot_call_id actual));
+  same "plan fingerprint"
+    (EO.generation_receipt_snapshot_plan_fingerprint observation
+     = EO.generation_receipt_snapshot_plan_fingerprint actual);
+  same "request digest"
+    (EO.generation_receipt_snapshot_request_body_sha256 observation
+     = EO.generation_receipt_snapshot_request_body_sha256 actual);
+  same "phase"
+    (EO.generation_receipt_snapshot_phase observation = EO.generation_receipt_snapshot_phase actual);
+  same "dispatch count"
+    (EO.generation_receipt_snapshot_dispatch_count observation
+     = EO.generation_receipt_snapshot_dispatch_count actual);
+  same "dispatch fact"
+    (EO.generation_receipt_snapshot_generation_dispatched observation
+     = EO.generation_receipt_snapshot_generation_dispatched actual);
+  same "actual HTTP status"
+    (EO.generation_receipt_snapshot_http_status observation
+     = EO.generation_receipt_snapshot_http_status actual);
+  same "response family"
+    (EO.generation_receipt_snapshot_response_family observation
+     = EO.generation_receipt_snapshot_response_family actual);
+  same "response digest"
+    (EO.generation_receipt_snapshot_response_body_sha256 observation
+     = EO.generation_receipt_snapshot_response_body_sha256 actual);
+  same "lifecycle"
+    (EO.generation_receipt_snapshot_responses_lifecycle observation
+     = EO.generation_receipt_snapshot_responses_lifecycle actual)
+;;
+
+let test_guarded_flow_stops_unresolved_responses () =
+  let completed={|{"status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"{\"name\":\"accepted\"}"}]}]}|} in
+  let cases =
+    [ "queued", {|{"status":"queued","output":[]}|}, EO.Response_queued
+    ; "in-progress", {|{"status":"in_progress","output":[{"type":"function_call"}]}|}, EO.Response_in_progress
+    ; "ambiguous-success", {|{"status":"completed","status":"queued","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"{\"name\":\"accepted\"}"}]}]}|}, EO.Response_envelope_ambiguous
+    ; "failed-envelope", {|{"status":"failed","error":{"message":"failed"}}|}, EO.Response_envelope_ambiguous
+    ; "unreadable", {|{"status":|}, EO.Response_json_unreadable
+    ; "new-status", {|{"status":"new_provider_state","output":[]}|}, EO.Response_status_unrecognized
+    ] in
+  List.iter (fun (label,body,expected) ->
+    let (result,replay,validations,advances),posts =
+      with_server ~first_response:(`OK,body) ~response:completed
+      @@ fun ~sw:_ ~net ~clock ~base_url ->
+      with_catalog
+        [ catalog_entry ~id:"first" ~base_url ~request_path:"/v1/responses" ~native:true ~json:true ()
+        ; catalog_entry ~id:"second" ~base_url ~request_path:"/v1/responses" ~native:true ~json:true () ]
+      @@ fun snapshot ->
+      let flow=start_flow (frozen_flow snapshot ["first";"second"]) in
+      let validations=ref 0 and advances=ref 0 in
+      let run ()=guarded_flow ~net ~clock
+        ~before_advance:(fun ~failed:_ ~next:_ -> incr advances;Ok ())
+        ~validate:(fun _ -> incr validations;EO.Accept ()) flow in
+      let result=run () in
+      let replay=run () in
+      result,replay,!validations,!advances in
+    check int (label ^ " sends no successor or replay") 1 posts;
+    check int (label ^ " never enters semantic validation") 0 validations;
+    check int (label ^ " never authorizes an advance") 0 advances;
+    (match result with
+     | EO.Guarded_unresolved unresolved ->
+       check bool (label ^ " reason") true (unresolved.reason=expected);
+       check string (label ^ " candidate") "first" unresolved.candidate.visit.identity.candidate_id;
+       check int (label ^ " records one visit") 1 (List.length unresolved.evidence.attempts);
+       check int (label ^ " has no prior semantic rejection") 0 (List.length unresolved.prior_rejections);
+       check_guarded_observation label unresolved.candidate unresolved.observation unresolved.evidence
+     | EO.Guarded_finished _ -> fail (label ^ " did not stop as unresolved"));
+    (match replay with
+     | EO.Guarded_finished (Error (EO.Flow_execution_terminal {cause=EO.Flow_attempt_already_started _;_})) -> ()
+     | EO.Guarded_finished _ | EO.Guarded_unresolved _ -> fail (label ^ " replay did not stop"))) cases
+;;
+
+let test_guarded_flow_preserves_prior_semantic_rejections () =
+  let completed={|{"status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"{\"name\":\"accepted\"}"}]}]}|} in
+  let (result,validations),posts =
+    with_server ~first_response:(`OK,completed) ~response:{|{"status":"queued","output":[]}|}
+    @@ fun ~sw:_ ~net ~clock ~base_url ->
+    with_catalog (List.map (fun id ->
+      catalog_entry ~id ~base_url ~request_path:"/v1/responses" ~native:true ~json:true ())
+      ["first";"second";"third"])
+    @@ fun snapshot ->
+    let flow=start_flow (frozen_flow snapshot ["first";"second";"third"]) in
+    let validations=ref 0 in
+    let result=guarded_flow ~net ~clock ~before_advance:(fun ~failed:_ ~next:_ -> Ok ())
+      ~validate:(fun _ -> incr validations;EO.Reject_and_advance "domain rejection") flow in
+    result,!validations in
+  check int "no third candidate after unresolved second" 2 posts;
+  check int "only the first response reached semantic validation" 1 validations;
+  match result with
+  | EO.Guarded_unresolved unresolved ->
+    check bool "second response is queued" true (unresolved.reason=EO.Response_queued);
+    check string "second candidate stopped" "second" unresolved.candidate.visit.identity.candidate_id;
+    (match unresolved.prior_rejections with
+     | [earlier] ->
+       check string "earlier semantic rejection stays bound" "first" (semantic_rejection_candidate_id earlier);
+       check string "earlier rejection detail stays" "domain rejection" earlier.rejection
+     | [] | _::_::_ -> fail "expected one earlier semantic rejection")
+  | EO.Guarded_finished _ -> fail "last observed response was not held"
+;;
+
+let test_guarded_flow_keeps_other_response_paths () =
+  let completed={|{"status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"{\"name\":\"accepted\"}"}]}]}|} in
+  List.iter (fun status ->
+    let result, posts =
+      with_server ~first_response:(Cohttp.Code.status_of_code status, {|{"error":"unavailable"}|})
+        ~response:completed
+      @@ fun ~sw:_ ~net ~clock ~base_url ->
+      with_catalog (List.map (fun id ->
+        catalog_entry ~id ~base_url ~request_path:"/v1/responses" ~native:true ~json:true ())
+        ["first";"second"])
+      @@ fun snapshot ->
+      let flow = start_flow (frozen_flow snapshot ["first";"second"]) in
+      guarded_flow ~net ~clock
+        ~before_advance:(fun ~failed:_ ~next:_ -> fail "unproven refusal advanced")
+        ~validate:(fun _ -> fail "unproven refusal was validated") flow in
+    check int "non-success status sent no successor" 1 posts;
+    match result with
+    | EO.Guarded_unresolved unresolved ->
+      check bool "non-success status remains unresolved" true
+        (unresolved.reason = EO.Response_non_success_status);
+      check (option int) "actual non-success status retained" (Some status)
+        (EO.generation_receipt_snapshot_http_status unresolved.observation);
+      (match unresolved.execution_error with
+       | Some {cause=EO.Provider_response_refused {http_status;_};_} ->
+         check int "original refusal status retained" status http_status
+       | None | Some _ -> fail "original refusal cause was discarded");
+      check_guarded_observation "non-success" unresolved.candidate unresolved.observation unresolved.evidence
+    | EO.Guarded_finished _ -> fail "non-success Responses status was not held")
+    [302; 400; 429; 500; 502; 503; 504; 600];
+  let (result,advances),posts =
+    with_server
+      ~first_response:(`OK, {|{"status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"not-json"}]}]}|})
+      ~response:completed
+    @@ fun ~sw:_ ~net ~clock ~base_url ->
+    with_catalog (List.map (fun id ->
+      catalog_entry ~id ~base_url ~request_path:"/v1/responses" ~native:true ~json:true ()) ["first";"second"])
+    @@ fun snapshot ->
+    let flow=start_flow (frozen_flow snapshot ["first";"second"]) in
+    let advances=ref 0 in
+    let result=guarded_flow ~net ~clock
+      ~before_advance:(fun ~failed:_ ~next:_ -> incr advances;Ok ())
+      ~validate:(fun _ -> EO.Accept ()) flow in
+    result,!advances in
+  check int "model JSON normalization keeps the declared successor" 2 posts;
+  check int "normalization failure used the ordinary advance callback" 1 advances;
+  (match result with EO.Guarded_finished (Ok _) -> ()
+   | EO.Guarded_finished (Error _) | EO.Guarded_unresolved _ -> fail "completed successor did not finish");
+  let result,posts =
+    with_server ~response:(openai_response {|{"name":"accepted"}|})
+    @@ fun ~sw:_ ~net ~clock ~base_url ->
+    with_catalog [catalog_entry ~id:"chat" ~base_url ~request_path:"/v1/chat/completions" ~native:true ~json:true ()]
+    @@ fun snapshot ->
+    let flow=start_flow (frozen_flow snapshot ["chat"]) in
+    guarded_flow ~net ~clock ~before_advance:(fun ~failed:_ ~next:_ -> Ok ())
+      ~validate:(fun _ -> EO.Accept ()) flow in
+  check int "other HTTP codec sent once" 1 posts;
+  (match result with EO.Guarded_finished (Ok _) -> ()
+   | EO.Guarded_finished (Error _) | EO.Guarded_unresolved _ -> fail "Chat response was incorrectly held");
+  let result,posts =
+    with_server ~response:completed
+    @@ fun ~sw:_ ~net ~clock ~base_url ->
+    with_catalog [catalog_entry ~id:"denied" ~base_url ~request_path:"/v1/responses" ~native:true ~json:true ()]
+    @@ fun snapshot ->
+    let flow=start_flow (frozen_flow snapshot ["denied"]) in
+    EO.execute_flow_once_guarded ~net ~clock ~before_measurement_dispatch:(fun _ -> Ok ())
+      ~on_measurement_terminal:(fun _ -> Ok ()) ~before_dispatch:(fun _ -> Error "not authorized")
+      ~before_advance:(fun ~failed:_ ~next:_ -> fail "pre-dispatch denial advanced")
+      ~validate:(fun _ -> fail "pre-dispatch denial was validated") flow in
+  check int "pre-dispatch denial sends nothing" 0 posts;
+  match result with
+  | EO.Guarded_finished (Error (EO.Flow_execution_terminal
+      {cause=EO.Flow_before_dispatch_callback_failed {cause="not authorized";_};_})) -> ()
+  | EO.Guarded_finished _ | EO.Guarded_unresolved _ -> fail "pre-dispatch denial became an unresolved response"
+;;
+
+let test_guarded_flow_stops_on_refusal_for_success_status () =
+  let result, posts =
+    with_server ~first_response:(`OK, {|{"status":"completed","output":[{}]}|})
+      ~response:{|{"status":"completed","output":[]}|}
+    @@ fun ~sw:_ ~net ~clock ~base_url ->
+    with_catalog (List.map (fun id ->
+      catalog_entry ~id ~base_url ~request_path:"/v1/responses" ~native:true ~json:true ())
+      ["first";"second"])
+    @@ fun snapshot ->
+    let flow = start_flow (frozen_flow snapshot ["first";"second"]) in
+    guarded_flow ~net ~clock
+      ~before_advance:(fun ~failed:_ ~next:_ -> fail "synthetic refusal advanced")
+      ~validate:(fun _ -> fail "malformed envelope was validated") flow in
+  check int "malformed success response sends no successor" 1 posts;
+  match result with
+  | EO.Guarded_unresolved unresolved ->
+    check bool "success/refusal mismatch retained" true
+      (unresolved.reason = EO.Response_refusal_on_success_status);
+    check (option int) "original wire status is 200" (Some 200)
+      (EO.generation_receipt_snapshot_http_status unresolved.observation);
+    check bool "observed completed status retained" true
+      (EO.generation_receipt_snapshot_responses_lifecycle unresolved.observation
+       = Some (Backend_openai_responses.Observed_status Responses_stop_reason.Completed));
+    (match unresolved.execution_error with
+     | Some {cause=EO.Provider_response_refused {http_status=400;_};_} -> ()
+     | None | Some _ -> fail "synthetic error was not retained separately");
+    check_guarded_observation "synthetic refusal" unresolved.candidate unresolved.observation unresolved.evidence
+  | EO.Guarded_finished _ -> fail "synthetic refusal was not held"
+;;
+
+let test_guarded_flow_stops_after_unobserved_response () =
+  let run ?(abort_completion=false) ?first_stalled_response expected =
+    let result,posts =
+      with_server ~abort_completion ?first_stalled_response ~response:"unused"
+      @@ fun ~sw:_ ~net ~clock ~base_url ->
+      with_catalog (List.map (fun id ->
+        catalog_entry ~body_timeout_s:(Some 1.0) ~id ~base_url ~request_path:"/v1/responses" ~native:true ~json:true ())
+        ["first";"second"])
+      @@ fun snapshot ->
+      let flow=start_flow (frozen_flow snapshot ["first";"second"]) in
+      guarded_flow ~net ~clock
+        ~before_advance:(fun ~failed:_ ~next:_ -> fail "unobserved response advanced")
+        ~validate:(fun _ -> fail "unobserved response was validated") flow in
+    check int "unobserved response sent no successor" 1 posts;
+    match result with
+    | EO.Guarded_unresolved unresolved ->
+      check bool "precise observation reason" true (unresolved.reason=expected);
+      check string "first visit was held" "first" unresolved.candidate.visit.identity.candidate_id;
+      (match unresolved.execution_error with
+       | Some {cause=(EO.Response_body_deadline_exceeded | EO.Completion_failed _);_} -> ()
+       | None | Some _ -> fail "unobserved response lost the original transport failure");
+      check_guarded_observation "unobserved" unresolved.candidate unresolved.observation unresolved.evidence
+    | EO.Guarded_finished _ -> fail "unobserved Responses attempt did not stop" in
+  run ~first_stalled_response:(`OK,{|{"status":"queued"|}) EO.Response_lifecycle_unobserved;
+  run ~abort_completion:true EO.Response_headers_unobserved
+;;
+
+let test_guarded_flow_holds_interim_responses () =
+  List.iter (fun (status, status_line) ->
+    let result, posts =
+      with_interim_server ~status_line @@ fun ~net ~clock ~base_url ->
+      with_catalog (List.map (fun id ->
+        catalog_entry ~id ~base_url ~request_path:"/v1/responses" ~native:true ~json:true ())
+        ["first";"second"])
+      @@ fun snapshot ->
+      let flow = start_flow (frozen_flow snapshot ["first";"second"]) in
+      guarded_flow ~net ~clock
+        ~before_advance:(fun ~failed:_ ~next:_ -> fail "interim response advanced")
+        ~validate:(fun _ -> fail "interim response was validated") flow in
+    check int "interim response did not dispatch a successor" 1 posts;
+    match result with
+    | EO.Guarded_unresolved unresolved ->
+      check bool "interim status is unresolved" true (unresolved.reason = EO.Response_informational);
+      check (option int) "interim status retained" (Some status)
+        (EO.generation_receipt_snapshot_http_status unresolved.observation);
+      check_guarded_observation "interim" unresolved.candidate unresolved.observation unresolved.evidence
+    | EO.Guarded_finished _ -> fail "interim response was treated as a final result")
+    [100, "100 Continue"; 103, "103 Early Hints"]
+;;
+
+let test_guarded_flow_holds_nonfinal_success_status () =
+  let body={|{"status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"{\"name\":\"accepted\"}"}]}]}|} in
+  List.iter (fun (status, reason) ->
+    let headers =
+      if status = 206 then
+        ["content-range", Printf.sprintf "bytes 0-%d/%d" (String.length body - 1) (String.length body + 20)]
+      else [] in
+    let result, posts =
+      with_server ~first_response:(Cohttp.Code.status_of_code status, body)
+        ~first_response_headers:headers ~response:body
+      @@ fun ~sw:_ ~net ~clock ~base_url ->
+      with_catalog (List.map (fun id ->
+        catalog_entry ~id ~base_url ~request_path:"/v1/responses" ~native:true ~json:true ())
+        ["first";"second"])
+      @@ fun snapshot ->
+      let flow = start_flow (frozen_flow snapshot ["first";"second"]) in
+      guarded_flow ~net ~clock
+        ~before_advance:(fun ~failed:_ ~next:_ -> fail "nonfinal success advanced")
+        ~validate:(fun _ -> fail "nonfinal success was validated") flow in
+    check int "nonfinal success sent no successor" 1 posts;
+    match result with
+    | EO.Guarded_unresolved unresolved ->
+      check bool "nonfinal success reason retained" true (unresolved.reason = reason);
+      check (option int) "nonfinal success actual status retained" (Some status)
+        (EO.generation_receipt_snapshot_http_status unresolved.observation);
+      check bool "completed JSON observation was not discarded" true
+        (EO.generation_receipt_snapshot_responses_lifecycle unresolved.observation
+         = Some (Backend_openai_responses.Observed_status Responses_stop_reason.Completed));
+      check bool "normalized success did not invent an execution error" true
+        (Option.is_none unresolved.execution_error);
+      check_guarded_observation "nonfinal success" unresolved.candidate unresolved.observation unresolved.evidence
+    | EO.Guarded_finished _ -> fail "nonfinal success was treated as complete")
+    [202, EO.Response_accepted_for_processing; 206, EO.Response_partial_content]
+;;
+
+let test_guarded_flow_unnamed_success_body_evidence () =
+  let status = Cohttp.Code.status_of_code 299 in
+  let completed={|{"status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"{\"name\":\"accepted\"}"}]}]}|} in
+  let (complete, evidence), complete_posts =
+    with_server ~status ~response:completed @@ fun ~sw:_ ~net ~clock ~base_url ->
+    with_catalog [catalog_entry ~id:"complete" ~base_url ~request_path:"/v1/responses" ~native:true ~json:true ()]
+    @@ fun snapshot ->
+    let flow = start_flow (frozen_flow snapshot ["complete"]) in
+    let result = execute_ok ~net ~clock flow in
+    result, EO.flow_attempt_evidence flow in
+  check int "unnamed success complete body sent once" 1 complete_posts;
+  check bool "legacy flow accepts complete unnamed success" true (Result.is_ok complete);
+  let complete = (attempt_for evidence "complete").receipt in
+  check (option int) "complete wire status" (Some 299)
+    (EO.generation_receipt_snapshot_http_status complete);
+  check bool "complete body has digest" true
+    (Option.is_some (EO.generation_receipt_snapshot_response_body_sha256 complete));
+  let result, posts =
+    with_server ~first_stalled_response:(status, {|{"status":"queued"|}) ~response:"unused"
+    @@ fun ~sw:_ ~net ~clock ~base_url ->
+    with_catalog (List.map (fun id ->
+      catalog_entry ~body_timeout_s:(Some 1.0) ~id ~base_url
+        ~request_path:"/v1/responses" ~native:true ~json:true ()) ["first";"second"])
+    @@ fun snapshot ->
+    let flow = start_flow (frozen_flow snapshot ["first";"second"]) in
+    guarded_flow ~net ~clock
+      ~before_advance:(fun ~failed:_ ~next:_ -> fail "incomplete 299 advanced")
+      ~validate:(fun _ -> fail "incomplete 299 was validated") flow in
+  check int "unnamed success incomplete body sends no successor" 1 posts;
+  match result with
+  | EO.Guarded_unresolved unresolved ->
+    check bool "incomplete body has no lifecycle" true
+      (unresolved.reason = EO.Response_lifecycle_unobserved
+       && EO.generation_receipt_snapshot_responses_lifecycle unresolved.observation = None);
+    check (option int) "incomplete wire status" (Some 299)
+      (EO.generation_receipt_snapshot_http_status unresolved.observation);
+    check (option string) "no fabricated empty-body digest" None
+      (EO.generation_receipt_snapshot_response_body_sha256 unresolved.observation);
+    (match unresolved.execution_error with
+     | Some {cause=EO.Response_body_deadline_exceeded;_} -> ()
+     | None | Some _ -> fail "incomplete 299 did not retain its body deadline");
+    check_guarded_observation "incomplete 299" unresolved.candidate unresolved.observation unresolved.evidence
+  | EO.Guarded_finished _ -> fail "incomplete 299 was not held"
+;;
+
+let test_guarded_flow_holds_final_candidate () =
+  let result, posts =
+    with_server ~response:{|{"status":"queued","output":[]}|}
+    @@ fun ~sw:_ ~net ~clock ~base_url ->
+    with_catalog [catalog_entry ~id:"only" ~base_url ~request_path:"/v1/responses" ~native:true ~json:true ()]
+    @@ fun snapshot ->
+    let flow = start_flow (frozen_flow snapshot ["only"]) in
+    guarded_flow ~net ~clock
+      ~before_advance:(fun ~failed:_ ~next:_ -> fail "single candidate advanced")
+      ~validate:(fun _ -> fail "queued final candidate was validated") flow in
+  check int "single unresolved candidate sent once" 1 posts;
+  match result with
+  | EO.Guarded_unresolved unresolved ->
+    check bool "final queued response is unresolved" true (unresolved.reason = EO.Response_queued);
+    check_guarded_observation "final candidate" unresolved.candidate unresolved.observation unresolved.evidence
+  | EO.Guarded_finished _ -> fail "final queued candidate was reported as finished"
+;;
+
+let test_guarded_flow_admission_work_expiry_keeps_observation () =
+  let result, posts =
+    with_server ~first_stalled_response:(`OK, {|{"status":"queued"|}) ~response:"unused"
+    @@ fun ~sw ~net ~clock:watchdog_clock ~base_url ->
+    with_bound_targets ~request_path:"/v1/responses" ~base_url ~body_timeout_s:1.0
+    @@ fun snapshot _config ->
+    let clock = Eio_mock.Clock.make () in
+    Eio_mock.Clock.set_time clock 0.0;
+    let flow = start_flow (frozen_flow snapshot ["bound-primary";"bound-successor"]) in
+    let headers, headers_resolver = Eio.Promise.create () in
+    let candidate = ref None in
+    let await ~label wait =
+      match Eio.Time.with_timeout watchdog_clock 30.0 (fun () -> Ok (wait ())) with
+      | Ok value -> value
+      | Error `Timeout -> failf "%s did not reach its fixture boundary" label in
+    let observer = Http_request_observer.create (fun event ->
+      (match event.Http_request_observer.phase with
+       | Response_headers_received {status=200} -> Eio.Promise.resolve headers_resolver ()
+       | Client_entered _ | Dispatch_entered | Response_headers_received _ | Client_finished _ -> ());
+      Ok ()) in
+    let work = Eio.Fiber.fork_promise ~sw (fun () ->
+      Http_request_observer.with_observer observer (fun () ->
+        EO.execute_flow_once_guarded ~net ~clock
+          ~before_measurement_dispatch:(fun _ -> Ok ())
+          ~on_measurement_terminal:(fun _ -> Ok ())
+          ~before_dispatch:(fun attempt ->
+            candidate := Some attempt;
+            (* Arm the outer 1.0 deadline before starting the inner 1.0
+               deadline at time 0.25. *)
+            Eio.Fiber.yield ();
+            Eio_mock.Clock.set_time clock 0.25;
+            Ok ())
+          ~before_advance:(fun ~failed:_ ~next:_ -> fail "expired work advanced")
+          ~validate:(fun _ -> fail "incomplete response was validated") flow)) in
+    await ~label:"response headers" (fun () -> Eio.Promise.await headers);
+    let candidate = match !candidate with Some value -> value | None -> fail "dispatch receipt missing" in
+    check (option int) "headers reached the original receipt before expiry" (Some 200)
+      (EO.receipt_http_status candidate.receipt);
+    Eio_mock.Clock.set_time clock 1.0;
+    await ~label:"admission work expiry" (fun () -> Eio.Promise.await_exn work) in
+  check int "outer work expiry sent no successor" 1 posts;
+  match result with
+  | EO.Guarded_unresolved unresolved ->
+    check bool "work expiry holds unobserved lifecycle" true
+      (unresolved.reason = EO.Response_lifecycle_unobserved);
+    (match unresolved.execution_error with
+     | Some {cause=EO.Completion_failed
+         {error=Http_client.TimeoutError
+            {phase=Http_client.Wall_clock; message="exact body deadline exceeded during the provider round trip"};
+          dispatch=EO.Generation_dispatch_started};_} -> ()
+     | None | Some _ -> fail "admission Work_expired result was not preserved");
+    check (option int) "expiry retained actual headers" (Some 200)
+      (EO.generation_receipt_snapshot_http_status unresolved.observation);
+    check (option string) "expiry retained no completed body" None
+      (EO.generation_receipt_snapshot_response_body_sha256 unresolved.observation);
+    check_guarded_observation "outer work expiry" unresolved.candidate unresolved.observation unresolved.evidence
+  | EO.Guarded_finished _ -> fail "outer work expiry was not held"
 ;;
 
 (* The provider's own wait survives the collapsed refusal, so a caller that
@@ -4410,6 +5121,11 @@ let test_body_deadline_advances_after_settlement ~http_status ~settle () =
     (if settle then 2 else 1) posts;
   check (list string) "validator sees only a complete successor result"
     (if settle then [next_id] else []) validated_ids;
+  let timed_out = (attempt_for evidence first_id).receipt in
+  check bool "the snapshot retains the response-received phase" true
+    (EO.generation_receipt_snapshot_phase timed_out = EO.Response_received);
+  check (option int) "a partial body can still have a captured HTTP status" (Some http_status)
+    (EO.generation_receipt_snapshot_http_status timed_out);
   check int "only durable settlement records an advance"
     (if settle then 1 else 0) (List.length evidence.advances);
   (match replay with
@@ -5359,7 +6075,7 @@ let test_concurrent_duplicate_flow_does_not_double_dispatch () =
     (is_replay left <> is_replay right)
 ;;
 
-let check_cancellation_terminalizes_outer_attempt ~after_dispatch () =
+let check_cancellation_terminalizes_outer_attempt ?(guarded=false) ~after_dispatch () =
   let reached_boundary, resolve_reached_boundary = Eio.Promise.create () in
   let (cancelled, replay, receipt_dispatches, evidence), posts =
     with_server
@@ -5368,7 +6084,8 @@ let check_cancellation_terminalizes_outer_attempt ~after_dispatch () =
         Eio.Fiber.await_cancel ())
       ~response:(openai_response {|{"name":"accepted"}|})
     @@ fun ~sw:_ ~net ~clock ~base_url ->
-    with_catalog [ catalog_entry ~id:"cancel-flow" ~base_url ~native:true ~json:true () ]
+    with_catalog [ catalog_entry ~id:"cancel-flow" ~base_url
+      ~request_path:(if guarded then "/v1/responses" else "/v1/chat/completions") ~native:true ~json:true () ]
     @@ fun snapshot ->
     let flow = start_flow (frozen_flow snapshot [ "cancel-flow" ]) in
     let context_ready, resolve_context_ready = Eio.Promise.create () in
@@ -5388,21 +6105,23 @@ let check_cancellation_terminalizes_outer_attempt ~after_dispatch () =
            try
              Eio.Cancel.sub (fun context ->
                Eio.Promise.resolve resolve_context_ready context;
-               ignore
-                 (execute_with_accepting_test_validator
-                    ~net ~clock
-                    ~on_measurement_terminal:(fun _ -> Ok ())
-                    ~before_measurement_dispatch:(fun _ -> Ok ())
-                    ~before_dispatch:(fun candidate ->
-                      observed_receipt := Some candidate;
-                      if after_dispatch then Ok ()
-                      else (
-                        Eio.Promise.resolve resolve_reached_boundary ();
-                        Eio.Fiber.await_cancel ()))
-                    ~before_advance:(fun ~failed:_ ~next:_ ->
-                      fail "cancelled attempt advanced to a successor")
-                    flow
-                  : (EO.flow_success, string EO.flow_execution_error) result));
+               let before_dispatch candidate =
+                 observed_receipt := Some candidate;
+                 if after_dispatch then Ok ()
+                 else (
+                   Eio.Promise.resolve resolve_reached_boundary ();
+                   Eio.Fiber.await_cancel ()) in
+               let before_advance ~failed:_ ~next:_ = fail "cancelled attempt advanced to a successor" in
+               if guarded then
+                 ignore (EO.execute_flow_once_guarded ~net ~clock
+                   ~on_measurement_terminal:(fun _ -> Ok ())
+                   ~before_measurement_dispatch:(fun _ -> Ok ())
+                   ~before_dispatch ~before_advance ~validate:accepting_test_validator flow)
+               else
+                 ignore (execute_with_accepting_test_validator ~net ~clock
+                   ~on_measurement_terminal:(fun _ -> Ok ())
+                   ~before_measurement_dispatch:(fun _ -> Ok ())
+                   ~before_dispatch ~before_advance flow));
              false
            with
            | Eio.Cancel.Cancelled reason ->
@@ -5450,6 +6169,14 @@ let test_cancellation_before_dispatch_terminalizes_outer_attempt () =
 
 let test_cancellation_after_dispatch_terminalizes_outer_attempt () =
   check_cancellation_terminalizes_outer_attempt ~after_dispatch:true ()
+;;
+
+let test_guarded_cancellation_before_dispatch () =
+  check_cancellation_terminalizes_outer_attempt ~guarded:true ~after_dispatch:false ()
+;;
+
+let test_guarded_cancellation_after_dispatch () =
+  check_cancellation_terminalizes_outer_attempt ~guarded:true ~after_dispatch:true ()
 ;;
 
 let () =
@@ -5597,6 +6324,62 @@ let () =
             `Quick
             test_rate_limited_429_refusal_advances_once_to_successor
         ; test_case
+            "HTTP 200 and provider-declared 429 remain distinct"
+            `Quick
+            test_http_200_provider_reported_429_keeps_actual_status
+        ; test_case
+            "Responses lifecycle stays with the observed HTTP status"
+            `Quick
+            test_responses_lifecycle_is_captured_with_actual_status
+        ; test_case
+            "Responses lifecycle remains bound to its visit"
+            `Quick
+            test_responses_lifecycle_is_bound_to_each_visit
+        ; test_case
+            "Responses incomplete body has no lifecycle observation"
+            `Quick
+            test_responses_incomplete_body_has_no_lifecycle
+        ; test_case
+            "guarded flow stops unresolved Responses before validation"
+            `Quick
+            test_guarded_flow_stops_unresolved_responses
+        ; test_case
+            "guarded flow preserves prior semantic rejections"
+            `Quick
+            test_guarded_flow_preserves_prior_semantic_rejections
+        ; test_case
+            "guarded flow keeps other response paths"
+            `Quick
+            test_guarded_flow_keeps_other_response_paths
+        ; test_case
+            "guarded flow holds refusal on a successful wire status"
+            `Quick
+            test_guarded_flow_stops_on_refusal_for_success_status
+        ; test_case
+            "guarded flow stops after unobserved response"
+            `Quick
+            test_guarded_flow_stops_after_unobserved_response
+        ; test_case
+            "guarded flow holds interim HTTP responses"
+            `Quick
+            test_guarded_flow_holds_interim_responses
+        ; test_case
+            "guarded flow holds 202 and 206 Responses"
+            `Quick
+            test_guarded_flow_holds_nonfinal_success_status
+        ; test_case
+            "unnamed success status keeps truthful body evidence"
+            `Quick
+            test_guarded_flow_unnamed_success_body_evidence
+        ; test_case
+            "guarded flow holds its final candidate"
+            `Quick
+            test_guarded_flow_holds_final_candidate
+        ; test_case
+            "guarded flow keeps the admission work-expiry observation"
+            `Quick
+            test_guarded_flow_admission_work_expiry_keeps_observation
+        ; test_case
             "HTTP 429 keeps the provider's Retry-After"
             `Quick
             test_rate_limited_429_keeps_retry_after
@@ -5728,6 +6511,14 @@ let () =
             "cancellation after dispatch terminalizes with one POST"
             `Quick
             test_cancellation_after_dispatch_terminalizes_outer_attempt
+        ; test_case
+            "guarded cancellation before dispatch propagates"
+            `Quick
+            test_guarded_cancellation_before_dispatch
+        ; test_case
+            "guarded cancellation after dispatch propagates"
+            `Quick
+            test_guarded_cancellation_after_dispatch
         ] )
     ]
 ;;

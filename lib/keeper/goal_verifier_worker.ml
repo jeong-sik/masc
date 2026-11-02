@@ -27,6 +27,24 @@ let interruption_of_label = function
   | _ -> Error "unknown Goal review interruption"
 type retry_grant = {parent_digest : string; requested_by : string}
 type retained = {record : Owner.retained; original : V.t; run : run_identity}
+type observation_issue =
+  | Unattributable_metadata
+  | Noncanonical_request_metadata
+  | Original_binding_mismatch
+type observation_binding = {
+  base_path : string;
+  goal_id : string;
+  request_id : string;
+  criterion : Goal_store.criterion;
+  submitted_evidence : Workspace_verification_store.submitted_evidence_item list;
+}
+type request_observation = {
+  binding : observation_binding;
+  observation_started_at : float;
+  observation_finished_at : float;
+  observed_records : retained list;
+  issues : observation_issue list;
+}
 let error_to_string = function Store_unavailable d | Original_invalid d | Authority_changed d | Execution_pending d -> d
 
 let invalid detail = Error (Original_invalid detail)
@@ -183,18 +201,26 @@ type subject_discovery =
 
 (* Noncanonical keys retain their parsed identity only to bound refusal. They
    never become readable originals or permission to dispatch another request. *)
-let discover_subjects ~store =
-  let* records = Owner.discover ~store ~scope
-    |> Result.map_error (fun e -> Store_unavailable (Owner.error_to_string e)) in
-  let* discovery = List.fold_left (fun state record ->
-    let* found = state in
+let classify_subjects records =
+  let discovery = List.fold_left (fun found record ->
     match subject_of_key (Owner.Record.request_id record) with
-    | Ok subject -> Ok { found with subjects=(subject,record)::found.subjects }
+    | Ok subject -> { found with subjects=(subject,record)::found.subjects }
     | Error (attribution,error) ->
       let rejected = {request_id=Owner.Record.request_id record;attribution;error} in
-      Ok { found with invalid=rejected::found.invalid })
-    (Ok { subjects=[]; invalid=[] }) records in
-  Ok { subjects=List.rev discovery.subjects; invalid=List.rev discovery.invalid }
+      { found with invalid=rejected::found.invalid })
+    { subjects=[]; invalid=[] } records in
+  { subjects=List.rev discovery.subjects; invalid=List.rev discovery.invalid }
+
+let discover_subjects ~store =
+  Owner.discover ~store ~scope
+  |> Result.map_error (fun e -> Store_unavailable (Owner.error_to_string e))
+  |> Result.map classify_subjects
+
+let observe_subjects ~store =
+  let* observation = Owner.observe ~store ~scope
+    |> Result.map_error (fun e -> Store_unavailable (Owner.error_to_string e)) in
+  let malformed = match observation.Owner.issues with [] -> false | _::_ -> true in
+  Ok (classify_subjects observation.records, malformed)
 
 let load_discovered ~store ~installation_id ~package_id records =
   let* reversed = List.fold_left (fun state (_,observed) ->
@@ -227,6 +253,43 @@ let inventory_for_goal ~store ~installation_id ~package_id ~goal_id =
       then invalid "Goal original metadata is unavailable and cannot be attributed"
       else Ok () in
     load_discovered ~store ~installation_id ~package_id selected
+
+(* Observation only: unlike [frontier], this does not repair successor links
+   or retain a new request. Keep known records alongside discovery problems;
+   neither an empty list nor a list without issues proves absence. *)
+let observe_for_request ~store ~installation_id ~package_id ~(binding : observation_binding) =
+  let {base_path; goal_id; request_id; criterion; submitted_evidence} = binding in
+  let observation_started_at = Time_compat.now () in
+  let* _ = decode (key ~goal_id ~request_id ~attempt:0) in
+  let* discovery, malformed = observe_subjects ~store in
+  let issues =
+    (if malformed || List.exists invalid_is_unattributable discovery.invalid
+     then [Unattributable_metadata] else [])
+    @ (if List.exists (noncanonical_affects_request ~goal_id ~request_id) discovery.invalid
+       then [Noncanonical_request_metadata] else []) in
+  let selected = List.filter (fun ((observed_goal,observed_request),_) ->
+    observed_goal=goal_id && observed_request=request_id) discovery.subjects in
+  let evidence_json items = `List (List.map
+    Workspace_verification_store.submitted_evidence_item_to_yojson items) in
+  let matches_binding retained =
+    let subject = V.subject retained.original in
+    String.equal (V.base_path retained.original) base_path
+    && Goal_store.criterion_equal subject.criterion criterion
+    && Yojson.Safe.equal (evidence_json (V.submitted_evidence retained.original))
+      (evidence_json submitted_evidence) in
+  let* observed_records, issues = List.fold_left (fun state selected ->
+    let* records,issues = state in
+    let* loaded = load_discovered ~store ~installation_id ~package_id [selected] in
+    match loaded with
+    | [retained] when matches_binding retained -> Ok (retained::records,issues)
+    | [_] -> Ok (records,Original_binding_mismatch::issues)
+    | [] | _::_::_ -> invalid "Goal review observation did not restore one selected record")
+    (Ok ([],List.rev issues)) selected in
+  Ok {binding; observation_started_at;
+    observation_finished_at=Time_compat.now ();
+    observed_records=List.sort (fun left right ->
+      Int.compare (V.attempt left.original) (V.attempt right.original)) observed_records;
+    issues=List.rev issues}
 
 module Goal_map = Map.Make (String)
 
@@ -540,7 +603,11 @@ let request_retry ~store ~installation_id ~package_id ~goal_id ~request_id ~requ
       let* _ = advance ~store parent (Progress.Successor_intended successor) in
       let* _ = select_frontier ~automatic:false ~store ~installation_id ~package_id
         ~goal_id ~request_id ~new_run in Ok ()
-    | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+    | Dispatch_pending (Some (Progress.Outcome_unknown _)) ->
+      Error (Execution_pending "The original Goal verification outcome is unknown; no new review was started. Inspect its original run.")
+    | Dispatch_pending (None | Some (Progress.Waiting _ | Progress.Absent _)) ->
+      Error (Execution_pending "The original Goal verification may still be running; no new review was started. Inspect its original run.")
+    | Captured | Admission_wait _ | Judged _ | Committing _ | Commit_unknown _
     | Finished _ | Conflicted _ | Rejected {stage=Progress.Before_dispatch;_} | Subdividing _ | Subdivided _ -> Ok ())
 
 let run ?on_tool_result ?sw ~store ~retained ~authority ~provider_rest () =

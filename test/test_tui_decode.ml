@@ -1299,25 +1299,33 @@ let planning_goal_json id phase priority =
     ; "verifier_unreconciled", `Null
     ]
 
-(* The ledger rows as the server actually joins them, taken from a live
-   workspace: an approval leaves [reason] null and carries its text in
-   [evidence]; a refusal fills both with the same string. *)
+let proof_criterion ?(title="Goal x") ?(metric=Some "count") ?(target_value=Some "1") revision =
+  Goal_store.criterion_to_yojson (Goal_store.Criterion {revision; title; metric; target_value})
+
+(* The server projects a complete typed completion, including provenance. *)
 let verification_json ?verdict state =
+  let completion = match state, verdict with
+    | "proof_pending", None ->
+      ["requested_at", `String "2026-08-23T13:15:16Z"; "request_id", `String "request-test";
+       "criterion", proof_criterion "revision-default"]
+    | _, None -> []
+    | _, Some v -> [ "verdict", v ] in
   `Assoc
     [ "goal_id", `String "goal-x"
     ; ( "completion"
-      , `Assoc
-          (("state", `String state)
-           :: (match verdict with None -> [] | Some v -> [ "verdict", v ])) )
+      , `Assoc (("state", `String state) :: completion) )
     ; "updated_at", `String "2026-08-23T13:15:16Z"
     ]
 ;;
 
-let proven_verdict evidence =
+let proven_verdict ?(revision="revision-default") ?(title="Goal x") evidence =
   `Assoc
     [ "outcome", `String "proven"
     ; "reason", `Null
+    ; "request_id", `String "request-test"
+    ; "criterion", proof_criterion ~title revision
     ; "verification_run_id", `String "01a02ec2"
+    ; "authority", `Assoc ["kind", `String "system_llm_agent"; "actor", `String "verifier_exact"]
     ; "evidence", `String evidence
     ; "recorded_at", `String "2026-08-23T13:15:16Z"
     ]
@@ -1327,31 +1335,18 @@ let refuted_verdict reason =
   `Assoc
     [ "outcome", `String "refuted"
     ; "reason", `String reason
+    ; "request_id", `String "request-test"
+    ; "criterion", proof_criterion "revision-default"
     ; "verification_run_id", `String "01a028ce"
+    ; "authority", `Assoc ["kind", `String "system_llm_agent"; "actor", `String "verifier_exact"]
     ; "evidence", `String reason
     ; "recorded_at", `String "2026-08-22T09:30:53Z"
     ]
 ;;
 
-let decoded_proof ?verification ?last_review_note ?(extra = []) () =
-  let fields =
-    [ "id", `String "goal-x"
-    ; "title", `String "Goal x"
-    ; "phase", `String "executing"
-    ; "priority", `Int 1
-    ]
-    @ (if List.mem_assoc "verifier_unreconciled" extra
-       then []
-       else [ "verifier_unreconciled", `Null ])
-    @ (match verification with None -> [] | Some v -> [ "verification", v ])
-    @ (match last_review_note with
-       | None -> []
-       | Some note -> [ "last_review_note", `String note ])
-    @ extra
-  in
-  match Tui_decode.decode_planning_snapshot
-          (`Assoc
-            [ "goals", `List [ `Assoc fields ]
+let planning_goals_json goals =
+          `Assoc
+            [ "goals", `List goals
             ; ( "rollup"
               , `Assoc
                   [ "active_count", `Int 1
@@ -1371,15 +1366,250 @@ let decoded_proof ?verification ?last_review_note ?(extra = []) () =
                   ] )
             ; "goal_history", `Assoc [ "unlisted", `List [] ]
             ; "generated_at", `String "2026-08-23T13:25:01Z"
-            ])
+            ]
+;;
+
+let decode_planning_goals goals =
+  match Tui_decode.decode_planning_snapshot (planning_goals_json goals)
   with
   | Error detail -> Alcotest.fail ("planning snapshot did not decode: " ^ detail)
-  | Ok snapshot ->
-    (match snapshot.Tui_decode.pl_goals with
+  | Ok snapshot -> snapshot.Tui_decode.pl_goals
+;;
+
+let decoded_proof ?verification ?last_review_note ?(phase = "executing") ?(extra = []) ?(omit = []) () =
+  let fields =
+    [ "id", `String "goal-x"
+    ; "title", `String "Goal x"
+    ; "phase", `String phase
+    ; "priority", `Int 1
+    ]
+    @ (if List.mem_assoc "criterion_revision" extra then []
+       else ["criterion_revision", `String "revision-default"])
+    @ (if List.mem_assoc "metric" extra then [] else ["metric", `String "count"])
+    @ (if List.mem_assoc "target_value" extra then [] else ["target_value", `String "1"])
+    @ (if List.mem_assoc "verifier_unreconciled" extra
+       then []
+       else [ "verifier_unreconciled", `Null ])
+    @ (match verification with None -> [] | Some v -> [ "verification", v ])
+    @ (match last_review_note with
+       | None -> []
+       | Some note -> [ "last_review_note", `String note ])
+    @ extra
+    |> List.filter (fun (key, _) -> not (List.mem key omit))
+  in
+    (match decode_planning_goals [`Assoc fields] with
      | [ goal ] -> goal
      | goals ->
        Alcotest.fail
          (Printf.sprintf "expected one goal, got %d" (List.length goals)))
+;;
+
+let test_planning_retry_binding_tracks_the_observed_request () =
+  let criterion revision = proof_criterion revision in
+  let pending revision request_id = `Assoc [
+    "goal_id", `String "goal-x";
+    "completion", `Assoc ["state", `String "proof_pending";
+      "request_id", `String request_id; "requested_at", `String "2026-10-30T07:45:56Z";
+      "criterion", criterion revision];
+    "updated_at", `String "2026-10-30T07:45:56Z"] in
+  let decode ?(phase="executing") revision verification =
+    decoded_proof ~phase ~extra:["criterion_revision", `String revision] ~verification () in
+  let current = decode "revision-a" (pending "revision-a" "request-a") in
+  Alcotest.check Alcotest.bool "current request is retained" true
+    (match current.Tui_decode.pg_retry_binding with
+     | Some {grb_phase=Completion_executing; grb_criterion_revision="revision-a"; grb_request_id=Some "request-a"} -> true
+     | Some _ | None -> false);
+  let stale = decode "revision-b" (pending "revision-a" "request-a") in
+  Alcotest.check Alcotest.bool "another criterion grants no retry binding" true
+    (Option.is_none stale.Tui_decode.pg_retry_binding);
+  let verifying = decode ~phase:"verifying" "revision-a" (pending "revision-a" "request-a") in
+  Alcotest.check Alcotest.bool "a current verifying request keeps its binding" true
+    (match verifying.Tui_decode.pg_retry_binding with
+     | Some {grb_phase=Completion_verifying; grb_request_id=Some "request-a"; _} -> true
+     | Some _ | None -> false);
+  let idle = decode ~phase:"verifying" "revision-a" (verification_json "idle") in
+  Alcotest.check Alcotest.bool "an idle verifying record grants no retry" true
+    (Option.is_none idle.Tui_decode.pg_retry_binding);
+  let stale_projection = `Assoc ["goal_id", `String "goal-x";
+    "completion", `Assoc ["state", `String "stale_criterion";
+      "historical_completion", `Assoc ["state", `String "proof_pending";
+        "request_id", `String "old-request"; "requested_at", `String "2026-10-30T07:45:56Z";
+        "criterion", criterion "revision-a"]]; "updated_at", `String "2026-10-30T07:45:56Z"] in
+  let stale_verifying = decode ~phase:"verifying" "revision-b" stale_projection in
+  Alcotest.check Alcotest.bool "a stale verifying record grants no retry" true
+    (Option.is_none stale_verifying.Tui_decode.pg_retry_binding);
+  let stale_executing = decode "revision-b" stale_projection in
+  Alcotest.check Alcotest.bool "a different historical revision can bind an Executing request" true
+    (match stale_executing.Tui_decode.pg_retry_binding with
+     | Some {grb_phase=Completion_executing; grb_request_id=Some "old-request"; _} -> true
+     | Some _ | None -> false)
+;;
+
+(* A state token alone, another Goal, or a contradictory criterion cannot
+   become either a displayed verdict or a retry authority. *)
+let test_planning_proof_requires_a_bound_valid_completion () =
+  let proven verdict = `Assoc ["state", `String "proof_proven"; "verdict", verdict] in
+  let envelope ?(id="goal-x") completion = `Assoc [
+    "goal_id", `String id; "completion", completion; "updated_at", `String "2026-08-23T13:15:16Z"] in
+  let current = proven (proven_verdict "bound evidence") in
+  let cases =
+    [ verification_json "proof_proven"
+    ; envelope (proven (refuted_verdict "not proven"))
+    ; envelope ~id:"another-goal" current
+    ; envelope (proven (proven_verdict ~title:"different title" "other criterion"))
+    ; `Assoc ["goal_id", `String "goal-x"; "completion", current; "completion", current]
+    ; envelope (`Assoc ["state", `String "stale_criterion"; "historical_completion", current])
+    ] in
+  List.iter (fun verification ->
+    let goal = decoded_proof ~phase:"verifying" ~verification () in
+    Alcotest.check Alcotest.bool "unbound proof is unreadable" true
+      (match goal.Tui_decode.pg_proof with Proof_unreadable _ -> true
+       | Proof_idle | Proof_pending | Proof_proven _ | Proof_refuted _ | Proof_stale _ -> false);
+    Alcotest.check Alcotest.bool "unbound proof supplies no retry" true
+      (Option.is_none goal.Tui_decode.pg_retry_binding)) cases;
+  let no_criterion = decoded_proof ~phase:"verifying" ~verification:(envelope current)
+      ~extra:["criterion_revision", `Null] () in
+  Alcotest.check Alcotest.bool "missing current criterion is unreadable" true
+    (match no_criterion.Tui_decode.pg_proof with Proof_unreadable _ -> true
+     | Proof_idle | Proof_pending | Proof_proven _ | Proof_refuted _ | Proof_stale _ -> false);
+  let idle_without_criterion = decoded_proof ~verification:(verification_json "idle")
+      ~extra:["criterion_revision", `Null] () in
+  Alcotest.check Alcotest.bool "idle also needs the current criterion" true
+    (match idle_without_criterion.Tui_decode.pg_proof with Proof_unreadable _ -> true
+     | Proof_idle | Proof_pending | Proof_proven _ | Proof_refuted _ | Proof_stale _ -> false);
+  let confirmed = envelope (`Assoc ["state", `String "human_confirmed";
+    "verdict", proven_verdict "confirmed evidence"; "operator_id", `String "operator";
+    "confirmed_at", `String "2026-08-23T14:00:00Z"]) in
+  let verified = decoded_proof ~phase:"verifying" ~verification:confirmed () in
+  Alcotest.check Alcotest.bool "a valid confirmed proof stays visible" true
+    (match verified.Tui_decode.pg_proof with Proof_proven (Some "confirmed evidence") -> true
+     | Proof_idle | Proof_pending | Proof_proven _ | Proof_refuted _ | Proof_stale _ | Proof_unreadable _ -> false);
+  Alcotest.check Alcotest.bool "confirmed proof cannot grant a Verifying retry" true
+    (Option.is_none verified.Tui_decode.pg_retry_binding);
+  let proven_executing = decoded_proof ~verification:(envelope current) () in
+  let confirmed_executing = decoded_proof ~verification:confirmed () in
+  Alcotest.check Alcotest.bool "current proven or confirmed proof cannot grant an Executing request" true
+    (Option.is_none proven_executing.Tui_decode.pg_retry_binding
+     && Option.is_none confirmed_executing.Tui_decode.pg_retry_binding);
+  let historical = envelope (`Assoc ["state", `String "stale_criterion";
+    "historical_completion", proven (proven_verdict ~title:"earlier title" "old evidence")]) in
+  let old = decoded_proof ~verification:historical () in
+  Alcotest.check Alcotest.bool "same revision with different content remains historical" true
+    (match old.Tui_decode.pg_proof with Proof_stale (Some "old evidence") -> true
+     | Proof_idle | Proof_pending | Proof_proven _ | Proof_refuted _ | Proof_stale _ | Proof_unreadable _ -> false);
+  Alcotest.check Alcotest.bool "same revision mismatch cannot grant a new request" true
+    (Option.is_none old.Tui_decode.pg_retry_binding);
+  let null_pending = envelope (`Assoc ["state", `String "proof_pending"; "request_id", `String "null-request";
+    "requested_at", `String "2026-08-23T13:15:16Z";
+    "criterion", proof_criterion ~metric:None ~target_value:None "revision-default"]) in
+  let null_goal = decoded_proof ~phase:"verifying" ~verification:null_pending
+      ~extra:["metric", `Null; "target_value", `Null] () in
+  Alcotest.check Alcotest.bool "explicit null criterion fields can bind" true
+    (match null_goal.Tui_decode.pg_retry_binding with
+     | Some {grb_request_id=Some "null-request"; _} -> true | Some _ | None -> false);
+  let bad_rows =
+    [ decoded_proof ~phase:"verifying" ~verification:(envelope current) ~omit:["metric"] ()
+    ; decoded_proof ~phase:"verifying" ~verification:(envelope current) ~omit:["target_value"] ()
+    ; decoded_proof ~phase:"verifying" ~verification:(envelope current)
+        ~extra:["metric", `String "count"; "metric", `Null] ()
+    ; decoded_proof ~phase:"verifying" ~verification:(envelope current) ~extra:["title", `String "other"] ()
+    ; decoded_proof ~phase:"verifying" ~verification:(envelope current)
+        ~extra:["verification", `Assoc ["state", `String "ledger_error"]] ()
+    ; decoded_proof ~phase:"verifying" ~verification:(envelope current) ~extra:["phase", `String "executing"] ()
+    ] in
+  List.iter (fun goal ->
+    Alcotest.check Alcotest.bool "incomplete or ambiguous Goal fields leave proof unreadable" true
+      (match goal.Tui_decode.pg_proof with Proof_unreadable _ -> true
+       | Proof_idle | Proof_pending | Proof_proven _ | Proof_refuted _ | Proof_stale _ -> false);
+    Alcotest.check Alcotest.bool "ambiguous Goal fields grant no retry" true
+      (Option.is_none goal.Tui_decode.pg_retry_binding)) bad_rows
+;;
+
+(* Exercise the actual Goal and verification serializers used by the planning
+   producer, including multiple rows with the same identity. *)
+let test_planning_proof_matches_producer_projection () =
+  let goal : Goal_store.goal = {
+    id="goal-x"; criterion_revision="revision-default"; title="Goal x";
+    metric=Some "count"; target_value=Some "1"; due_date=None; priority=1;
+    phase=Goal_phase.Verifying; last_review_note=None; last_review_at=None;
+    created_at="2026-08-23T13:15:16Z"; updated_at="2026-08-23T13:15:16Z"
+  } in
+  let criterion = Goal_store.criterion_of_goal goal in
+  let pending : Goal_verification.record = {
+    goal_id=goal.id;
+    completion=Proof_pending {requested_at=goal.created_at; request_id="request-test"; criterion};
+    submitted_evidence=[]; updated_at=goal.updated_at
+  } in
+  let verdict : Goal_verification.verdict = {
+    outcome=Proven; request_id="request-test"; criterion; verification_run_id="run-test";
+    authority=Masc_domain.System_llm_agent {agent_run_id="verifier_exact"};
+    evidence="measured evidence"; recorded_at=goal.updated_at
+  } in
+  let proven = {pending with completion=Goal_verification.Proof_proven verdict} in
+  let row goal record =
+    match Goal_store.goal_to_yojson goal with
+    | `Assoc fields -> `Assoc (fields @ [
+        "verification", Goal_verification.record_to_yojson_for_goal ~goal record;
+        "verifier_unreconciled", `Null])
+    | `Null | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `String _ ->
+      Alcotest.fail "Goal producer did not emit an object" in
+  let single row = match decode_planning_goals [row] with
+    | [value] -> value
+    | _ -> Alcotest.fail "expected one projected Goal" in
+  let pending_goal = single (row goal pending) in
+  Alcotest.check Alcotest.bool "producer pending retains its request binding" true
+    (pending_goal.pg_proof = Tui_decode.Proof_pending
+     && match pending_goal.pg_retry_binding with
+        | Some {grb_request_id=Some "request-test"; _} -> true | Some _ | None -> false);
+  let proven_goal = single (row goal proven) in
+  Alcotest.check Alcotest.bool "producer verdict retains its evidence" true
+    (proven_goal.pg_proof = Tui_decode.Proof_proven (Some "measured evidence"));
+  let changed_goal = {goal with criterion_revision="revision-next"; title="Different target"} in
+  let stale_goal = single (row changed_goal proven) in
+  Alcotest.check Alcotest.bool "producer stale verdict is historical and cannot retry" true
+    (stale_goal.pg_proof = Tui_decode.Proof_stale (Some "measured evidence")
+     && Option.is_none stale_goal.pg_retry_binding);
+  let other_goal = {goal with id="goal-other"} in
+  let other_pending = {pending with goal_id=other_goal.id} in
+  let padded_goal = {goal with id=" goal-x "} in
+  let padded_pending = {pending with goal_id=padded_goal.id} in
+  let padded_projection = single (row padded_goal padded_pending) in
+  Alcotest.check Alcotest.bool "a Goal ID changed by request validation is unreadable" true
+    (match padded_projection.pg_proof with
+     | Tui_decode.Proof_unreadable _ -> Option.is_none padded_projection.pg_retry_binding
+     | Proof_idle | Proof_pending | Proof_proven _ | Proof_refuted _ | Proof_stale _ -> false);
+  let duplicate_goals = decode_planning_goals
+      [row goal proven; row changed_goal proven; row other_goal other_pending] in
+  (match duplicate_goals with
+  | [first; second; other] ->
+    List.iter (fun duplicate ->
+      Alcotest.check Alcotest.bool "duplicate Goal identity cannot supply proof or retry" true
+        (match duplicate.Tui_decode.pg_proof with
+         | Proof_unreadable _ -> Option.is_none duplicate.pg_retry_binding
+         | Proof_idle | Proof_pending | Proof_proven _ | Proof_refuted _ | Proof_stale _ -> false))
+      [first; second];
+    Alcotest.check Alcotest.bool "a distinct Goal remains readable and bound" true
+      (other.pg_proof = Tui_decode.Proof_pending && Option.is_some other.pg_retry_binding)
+  | _ -> Alcotest.fail "expected all three projected Goals");
+  let conflicting_row = match row goal proven with
+    | `Assoc fields -> `Assoc (fields @ ["id", `String other_goal.id])
+    | `Null | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `String _ ->
+      Alcotest.fail "Goal producer did not emit an object" in
+  (match decode_planning_goals [conflicting_row; row other_goal other_pending] with
+  | [ambiguous; collided] ->
+    List.iter (fun item ->
+      Alcotest.check Alcotest.bool "a duplicate ID declaration taints the collided row" true
+        (match item.Tui_decode.pg_proof with
+         | Proof_unreadable _ -> Option.is_none item.pg_retry_binding
+         | Proof_idle | Proof_pending | Proof_proven _ | Proof_refuted _ | Proof_stale _ -> false))
+      [ambiguous; collided]
+  | _ -> Alcotest.fail "expected both projected Goals");
+  let duplicate_goals_field = match planning_goals_json [row goal proven] with
+    | `Assoc fields -> `Assoc (("goals", `List [row other_goal other_pending]) :: fields)
+    | `Null | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `String _ ->
+      Alcotest.fail "planning fixture did not emit an object" in
+  Alcotest.check Alcotest.bool "a second goals array is refused" true
+    (Result.is_error (Tui_decode.decode_planning_snapshot duplicate_goals_field))
 ;;
 
 (* The phase says "executing" for a goal nobody asked about and for one the
@@ -1421,10 +1651,10 @@ let test_planning_goal_carries_the_judge_verdict () =
      | Tui_decode.Proof_pending -> true
      | _ -> false);
   Alcotest.check Alcotest.bool "old approval is historical after a criterion edit" true
-    (match proof (decoded_proof ~verification:(`Assoc [ "completion",
+    (match proof (decoded_proof ~verification:(`Assoc [ "goal_id", `String "goal-x"; "completion",
         `Assoc [ "state", `String "stale_criterion";
           "historical_completion", `Assoc [ "state", `String "proof_proven";
-            "verdict", proven_verdict "old target reached" ] ] ]) ()) with
+            "verdict", proven_verdict ~revision:"revision-old" "old target reached" ] ] ]) ()) with
      | Tui_decode.Proof_stale (Some "old target reached") -> true
      | _ -> false);
   Alcotest.check Alcotest.bool "an idle ledger is idle" true
@@ -1678,21 +1908,28 @@ let test_goal_store_unavailable_parses_every_wire_token () =
     Tui_decode.Mirror_rejected_view
 
 let test_goal_store_unavailable_preserves_source_detail () =
-  let json = schema_rejected_body () in
-  let rendered =
-    "goal_store: unavailable reason=schema_rejected field=criterion_revision \
-     file=/srv/masc/.masc/goals.json mirror=decodes goal_count=3 \
-     reset=repair field criterion_revision"
-  in
-  (match Tui_decode.decode_planning_snapshot json with
-   | Error message -> Alcotest.(check string) "planning source failure" rendered message
-   | Ok _ -> Alcotest.fail "unavailable Goal store became a planning snapshot");
-  match Tui_decode.decode_goal_detail_timeline json with
-  | Ok (Tui_decode.Goal_timeline_unavailable
-      (Tui_decode.Goal_source_failure (Tui_decode.Goal_store_unavailable view))) ->
-      Alcotest.(check string) "detail source failure is not a Gate failure"
-        rendered (Tui_decode.goal_store_unavailable_view_to_string view)
-  | _ -> Alcotest.fail "Goal detail source failure was not preserved"
+  List.iter (fun field ->
+    let json =
+      goal_store_unavailable_body
+        (Goal_store_unavailable.Schema_rejected { field; detail = "rejected" })
+        (Goal_store_unavailable.Mirror_decodes { goal_count = 3; updated_at = "2026-09-08T16:20:13Z" })
+        (Goal_store_unavailable.Repair_field field)
+    in
+    (match Tui_decode.decode_planning_snapshot json with
+     | Error _ -> ()
+     | Ok _ -> Alcotest.fail "unavailable Goal store became a planning snapshot");
+    match Tui_decode.decode_goal_detail_timeline json with
+    | Ok (Tui_decode.Goal_timeline_unavailable
+        (Tui_decode.Goal_source_failure (Tui_decode.Goal_store_unavailable view))) ->
+        Alcotest.(check string) "file" "/srv/masc/.masc/goals.json" view.gsu_file;
+        Alcotest.(check bool) "source reason and location" true
+          (view.gsu_reason = Tui_decode.Schema_rejected_view field);
+        Alcotest.(check bool) "mirror" true
+          (view.gsu_mirror = Tui_decode.Mirror_decodes_view 3);
+        Alcotest.(check bool) "reset location" true
+          (view.gsu_reset_step = Goal_store_unavailable.Repair_field field)
+    | _ -> Alcotest.fail "Goal detail source failure was not preserved")
+    [ "criterion_revision"; "$"; "goals"; ""; "bad\nmember" ]
 
 let test_goal_store_unavailable_rejects_unknown_or_mismatched_tokens () =
   let with_member key value = function
@@ -2471,6 +2708,16 @@ let test_decode_json_response_body_rejects_error_status () =
       (* The status still leads; the envelope no longer follows it, because
          the server already wrote the sentence. *)
       Alcotest.(check string) "http error" "HTTP 400: bad confirm" err
+
+let test_tool_http_error_preserves_nested_refusal () =
+  let detail = "The original Goal verification outcome is unknown; no new review was started." in
+  let tool_error = Yojson.Safe.to_string (`Assoc ["status", `String "error";
+    "error_code", `String "conflict"; "message", `String detail]) in
+  let body = Yojson.Safe.to_string (`Assoc ["ok", `Bool false; "message", `String tool_error]) in
+  match Tui_decode.decode_json_response_body ~allow_empty:false ~status_code:400 ~body with
+  | Error message -> Alcotest.(check string) "tool refusal survives the HTTP envelope"
+      ("HTTP 400: " ^ detail) message
+  | Ok _ -> Alcotest.fail "a refused Goal retry cannot be a successful response"
 
 (* Raw bodies are bounded; their metadata does not claim a JSON parse result. *)
 let test_decode_json_response_body_bounded_body_names_its_size () =
@@ -9605,6 +9852,7 @@ let health_probe =
       ("build", `Assoc [
         ("binary_commit", `String "030fa9043aafc5c2003f830c86720afff8e8e2ff");
         ("binary_commit_age_seconds", `Float 1106.0);
+        ("runtime_instance_id", `String "process-a");
       ]);
       ("paths", `Assoc [
         ("cwd", `String "/Users/worker/ws");
@@ -9626,12 +9874,15 @@ let test_decode_server_identity_reads_a_probe () =
     Alcotest.(check string) "masc root" "/Users/worker/ws/.masc"
       (Tui_decode.Canonical_path.to_string identity.Tui_decode.sid_masc_root);
     Alcotest.(check (option (float 0.001))) "binary age" (Some 1106.0)
-      identity.Tui_decode.sid_binary_commit_age_s
+      identity.Tui_decode.sid_binary_commit_age_s;
+    Alcotest.(check (option string)) "process identity" (Some "process-a")
+      identity.Tui_decode.sid_runtime_instance_id
 
 let test_decode_server_identity_survives_a_bare_health () =
   match Tui_decode.decode_server_identity (`Assoc [ ("status", `String "ok") ]) with
   | Error detail -> Alcotest.fail detail
   | Ok identity ->
+    Alcotest.(check (option string)) "process identity is unknown" None identity.Tui_decode.sid_runtime_instance_id;
     Alcotest.(check string) "no version reads empty rather than failing" ""
       identity.Tui_decode.sid_version;
     Alcotest.(check string) "no base path either" ""
@@ -12361,6 +12612,81 @@ let test_decode_runtime_params_rejects_a_row_without_a_key () =
    store could not be read, so it must decode to the explicit unavailable
    constructor — an empty list would draw a goal with no history where the
    truth is "the history could not be read". *)
+let test_goal_timeline_binds_ready_events_to_requested_goal () =
+  let response goal = `Assoc ["goal", goal; "timeline", `List []] in
+  let goal id = `Assoc ["id", `String id] in
+  List.iter (fun id ->
+    match Tui_decode.decode_goal_detail_timeline_for_goal ~goal_id:id (response (goal id)) with
+    | Ok (Tui_decode.Goal_timeline_ready []) -> ()
+    | Ok _ | Error _ -> Alcotest.fail "matching Goal timeline was not accepted")
+    ["g"; "\194\160g\194\160"];
+  let rejected = [
+    response (goal "g");
+    response (`Assoc []);
+    response (`Assoc ["id", `String " g "; "id", `String "g"]);
+    `Assoc ["goal", goal " g "; "goal", goal "g"; "timeline", `List []];
+    `Assoc ["timeline", `List []];
+  ] in
+  List.iter (fun json ->
+    match Tui_decode.decode_goal_detail_timeline_for_goal ~goal_id:" g " json with
+    | Error _ -> ()
+    | Ok _ -> Alcotest.fail "timeline without one matching Goal ID was accepted") rejected;
+  (match Tui_decode.decode_goal_detail_timeline_for_goal ~goal_id:"g" (schema_rejected_body ()) with
+   | Ok (Tui_decode.Goal_timeline_unavailable (Tui_decode.Goal_source_failure _)) -> ()
+   | Ok _ | Error _ -> Alcotest.fail "Goal source failure lost its type");
+  let link_failure = `Assoc [ "ok", `Bool false; "error_code", `String "goal_task_links_unavailable";
+    "error", `String "goal_task_links unavailable" ] in
+  (match Tui_decode.decode_goal_detail_timeline_for_goal ~goal_id:"g" link_failure with
+   | Ok (Tui_decode.Goal_timeline_unavailable (Tui_decode.Goal_source_failure _)) -> ()
+   | Ok _ | Error _ -> Alcotest.fail "Goal link failure lost its type");
+  let unavailable = `Assoc ["goal", `Null; "timeline", `Null;
+    "approval_queue_state", `Assoc ["state", `String "unavailable"; "operator_detail", `String "queue unavailable"]] in
+  (match Tui_decode.decode_goal_detail_timeline_for_goal ~goal_id:"g" unavailable with
+   | Ok (Tui_decode.Goal_timeline_unavailable (Tui_decode.Approval_queue_failure _)) -> ()
+   | Ok _ | Error _ -> Alcotest.fail "approval queue failure lost its type");
+  let event = [ "ts", `String "t"; "kind", `String "k"; "lane", `String "goal";
+    "title", `String "title"; "summary", `String "summary"; "severity", `String "ok" ] in
+  let with_timeline fields = `Assoc (("goal", goal "g") :: fields) in
+  let one_event = `List [`Assoc event] in
+  (match Tui_decode.decode_goal_detail_timeline_for_goal ~goal_id:"g"
+      (with_timeline ["timeline", one_event]) with
+   | Ok (Tui_decode.Goal_timeline_ready [_]) -> ()
+   | Ok _ | Error _ -> Alcotest.fail "unique timeline event was not accepted");
+  let duplicate_timelines = [
+    ["timeline", `List []; "timeline", one_event];
+    ["timeline", one_event; "timeline", `List []];
+    ["timeline", `List []; "timeline", `List []];
+    ["timeline", `Null; "timeline", `List []];
+    ["timeline", `List []; "timeline", `Null];
+  ] in
+  let duplicate_events = List.map (fun field ->
+      ["timeline", `List [`Assoc ((field, `String "other") :: event)]])
+      ["ts"; "kind"; "lane"; "title"; "summary"; "severity"] in
+  let queue = `Assoc ["state", `String "unavailable"; "operator_detail", `String "unavailable"] in
+  let duplicate_queue = [
+    ["timeline", `Null; "approval_queue_state", queue; "approval_queue_state", queue];
+    ["timeline", `Null; "approval_queue_state", `Assoc ["state", `String "unavailable";
+      "state", `String "ready"; "operator_detail", `String "unavailable"]];
+    ["timeline", `Null; "approval_queue_state", `Assoc ["state", `String "unavailable";
+      "operator_detail", `String "one"; "operator_detail", `String "two"]];
+  ] in
+  let contradictory_ready = [
+    ["timeline", `List []; "approval_queue_state", queue];
+    ["timeline", `List []; "approval_queue_state", `Assoc ["state", `String "ready"];
+      "approval_queue_state", queue];
+    ["timeline", `List []; "approval_queue_state", `Assoc ["state", `String "ready";
+      "state", `String "unavailable"]];
+    ["timeline", `List []; "approval_queue_state", `Assoc []];
+    ["timeline", `List []; "ok", `Bool false; "error", `String "source failed"];
+    ["timeline", `List []; "ok", `Bool true; "ok", `Bool false];
+    ["timeline", `List []; "error_code", `String "one"; "error_code", `String "two"];
+  ] in
+  List.iter (fun fields ->
+    match Tui_decode.decode_goal_detail_timeline_for_goal ~goal_id:"g" (with_timeline fields) with
+    | Error _ -> ()
+    | Ok _ -> Alcotest.fail "ambiguous timeline data was accepted")
+    (duplicate_timelines @ duplicate_events @ duplicate_queue @ contradictory_ready)
+
 let test_goal_timeline_decodes_ready_events () =
   let json =
     Yojson.Safe.from_string
@@ -13648,7 +13974,9 @@ let () =
           test_verification_evidence_defective_bodies_are_named
       ] );
     ( "decode_goal_timeline",
-      [ Alcotest.test_case "carries ready events" `Quick
+      [ Alcotest.test_case "ready timeline is bound to the requested Goal" `Quick
+          test_goal_timeline_binds_ready_events_to_requested_goal
+      ; Alcotest.test_case "carries ready events" `Quick
           test_goal_timeline_decodes_ready_events
       ; Alcotest.test_case "null decodes as unavailable with detail" `Quick
           test_goal_timeline_null_is_unavailable_with_detail
@@ -14083,6 +14411,12 @@ let () =
           test_decode_planning_snapshot_requires_the_history_field;
         Alcotest.test_case "goal carries the judge verdict" `Quick
           test_planning_goal_carries_the_judge_verdict;
+        Alcotest.test_case "retry binds the observed proof request" `Quick
+          test_planning_retry_binding_tracks_the_observed_request;
+        Alcotest.test_case "proof requires a complete Goal-bound verdict" `Quick
+          test_planning_proof_requires_a_bound_valid_completion;
+        Alcotest.test_case "proof matches producer projection and duplicate identity" `Quick
+          test_planning_proof_matches_producer_projection;
         Alcotest.test_case "unreadable is not unreviewed" `Quick
           test_planning_goal_separates_unreadable_from_unreviewed;
         Alcotest.test_case "carries the verifier unreconciled reason" `Quick
@@ -14199,6 +14533,8 @@ let () =
       [
         Alcotest.test_case "body rejects error status" `Quick
           test_decode_json_response_body_rejects_error_status;
+        Alcotest.test_case "tool HTTP refusal preserves the reason" `Quick
+          test_tool_http_error_preserves_nested_refusal;
         Alcotest.test_case "body allows empty success" `Quick
           test_decode_json_response_body_allows_empty_success;
         Alcotest.test_case "HTTP fallback and terminal controls" `Quick

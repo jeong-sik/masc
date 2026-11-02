@@ -53,6 +53,7 @@ type raw_response_evidence =
   { raw_body : string
   ; raw_body_sha256 : string
   ; response_header_evidence : Http_client.response_header_evidence
+  ; responses_lifecycle : Backend_openai_responses.lifecycle_observation option
   }
 
 type normalized_outcome_with_evidence =
@@ -94,6 +95,7 @@ let raw_response_evidence (raw : Http_client.raw_sync_response) response_header_
   { raw_body = raw.body
   ; raw_body_sha256 = Agent_core_sha256.(to_hex (digest_string raw.body))
   ; response_header_evidence
+  ; responses_lifecycle = None
   }
 ;;
 
@@ -160,7 +162,7 @@ let execute_once_with_evidence ~net ~clock ?on_phase plan =
           { status
           ; error = Http_client.TimeoutError { phase = Http_client.Wall_clock; _ }
           })
-     when Cohttp.Code.is_success status ->
+     when Http_client.is_success_status status ->
      (* The transport closes the incomplete response before returning this
         owned deadline. Non-success statuses retain their separate
         Not_received_in_window refusal contract. Observer exceptions are
@@ -195,8 +197,7 @@ let execute_once_with_evidence ~net ~clock ?on_phase plan =
             } ) as transport_error) ->
      let receipt, provider_error = transport_error_receipt transport_error in
      error receipt (Provider_error provider_error)
-   | Ok receipt
-     when receipt.response.status < 200 || receipt.response.status >= 300 ->
+   | Ok receipt when not (Http_client.is_success_status receipt.response.status) ->
      let raw = receipt.response in
      let raw_response =
        match receipt.body_receipt with
@@ -227,23 +228,29 @@ let execute_once_with_evidence ~net ~clock ?on_phase plan =
      in
      error ?raw_response (response_received_receipt raw.status)
        (Provider_error provider_error)
-   | Ok receipt ->
+   | Ok { response = raw; body_receipt = Http_client.Not_received_in_window; _ } ->
+     (* A successful status without its complete body cannot produce raw-body
+        evidence or a parsed lifecycle, even if a transport returned it. *)
+     error (response_received_receipt raw.status) Response_body_deadline_exceeded
+   | Ok ({ body_receipt = Http_client.Received _; _ } as receipt) ->
      let raw = receipt.response in
      let raw_response =
        raw_response_evidence raw receipt.response_header_evidence
      in
      (match
-        Complete_sync.parse_sync_response
+        Complete_sync.parse_sync_response_observed
           ~http_codec:(Exact_output_plan.response_codec plan)
           ~provider_kind:(Exact_output_plan.provider_kind plan)
           raw.body
       with
-      | Error provider_error ->
+      | Error (provider_error, responses_lifecycle) ->
+        let raw_response = { raw_response with responses_lifecycle } in
         error
           ~raw_response
           (response_received_receipt raw.status)
           (Provider_error provider_error)
-      | Ok response ->
+      | Ok (response, responses_lifecycle) ->
+        let raw_response = { raw_response with responses_lifecycle } in
         (match Exact_output_plan.normalize plan response with
          | Error normalization_error ->
            error

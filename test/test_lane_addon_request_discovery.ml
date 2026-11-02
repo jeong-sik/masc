@@ -125,6 +125,63 @@ let test_bad_record_or_unknown_name_never_returns_a_partial_inventory () = with_
   fail_inventory (Owner.discover ~store ~scope);
   fail_load (load store "damaged"))
 
+let test_partial_observation_keeps_verified_metadata_only () = with_store (fun root store ->
+  retain store "valid"; retain store "damaged";
+  let damaged_path = path root "damaged" in
+  let original = Fs_compat.load_file damaged_path in
+  let expect_partial () =
+    let observation = owned (Owner.observe ~store ~scope) in
+    Alcotest.(check (list string)) "the unrelated valid record remains observable"
+      ["valid"] (List.map Owner.Record.request_id observation.records);
+    Alcotest.(check int) "malformed metadata remains an unattributable issue" 1
+      (List.length observation.issues);
+    fail_inventory (Owner.discover ~store ~scope) in
+  save damaged_path "{invalid JSON";
+  expect_partial ();
+  let malformed_schema = match Yojson.Safe.from_string original with
+    | `Assoc fields -> `Assoc (List.map (fun (key,value) ->
+        if key="schema" then key,`String "unknown-schema" else key,value) fields)
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+      Alcotest.fail "fixture original record is not an object" in
+  save damaged_path (Yojson.Safe.to_string malformed_schema);
+  expect_partial ();
+  let mismatched_key = match Yojson.Safe.from_string original with
+    | `Assoc fields -> `Assoc (List.map (fun (key,value) ->
+        if key="request_id" then key,`String "other-id" else key,value) fields)
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+      Alcotest.fail "fixture original record is not an object" in
+  save damaged_path (Yojson.Safe.to_string mismatched_key);
+  fail_inventory (Owner.observe ~store ~scope);
+  let fields = match Yojson.Safe.from_string original with
+    | `Assoc fields -> fields
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+      Alcotest.fail "fixture original record is not an object" in
+  let conflicting_claims =
+    [ `Assoc ["scope",`String "other-scope"]
+    ; `Assoc ["request_id",`String "other-id"]
+    ; `Assoc (fields @ ["scope",`String "other-scope"])
+    ; `Assoc (fields @ ["request_id",`String "other-id"])
+    ] in
+  List.iter (fun json ->
+    save damaged_path (Yojson.Safe.to_string json);
+    fail_inventory (Owner.observe ~store ~scope)) conflicting_claims;
+  save damaged_path original;
+  let wrong_filename = Filename.concat (directory root) "wrong-key.json" in
+  save wrong_filename "{invalid JSON";
+  fail_inventory (Owner.observe ~store ~scope);
+  Sys.remove wrong_filename;
+  let unknown = Filename.concat (directory root) "unknown-entry" in
+  save unknown original;
+  fail_inventory (Owner.observe ~store ~scope);
+  Sys.remove unknown;
+  let observe ?(after_listing=fun _ -> ()) ?(sync_file=Unix.fsync) ?(sync_parent=Unix.fsync) () =
+    Store.For_testing.observe_tool_request_owner_metadata ~after_listing ~sync_file ~sync_parent store ~scope in
+  let fail_sync _ = raise (Unix.Unix_error (Unix.EIO,"fsync","fixture")) in
+  fail_inventory (observe ~sync_file:fail_sync ());
+  fail_inventory (observe ~sync_parent:fail_sync ());
+  fail_inventory (observe ~after_listing:(fun _ -> Sys.remove damaged_path) ()))
+;;
+
 let test_listed_disappearance_and_same_name_directory_replacement_are_errors () =
   with_store (fun root store -> retain store "original";
     fail_inventory (inventory store ~after_listing:(fun _ -> Sys.remove (path root "original"))));
@@ -614,6 +671,8 @@ let () =
     test_reload_keeps_the_verified_body_and_refuses_another_digest;
   Alcotest.test_case "absence requires owned settled authority and creates nothing" `Quick test_initial_absence_requires_existing_safe_anchor_without_creation;
   Alcotest.test_case "bad record and unknown entry refuse complete inventory" `Quick test_bad_record_or_unknown_name_never_returns_a_partial_inventory;
+  Alcotest.test_case "partial metadata observation keeps verified records and refuses unsafe reads" `Quick
+    test_partial_observation_keeps_verified_metadata_only;
   Alcotest.test_case "listed disappearance and directory replacement" `Quick test_listed_disappearance_and_same_name_directory_replacement_are_errors;
   Alcotest.test_case "symlink hardlink and nonregular records" `Quick test_symlink_hardlink_and_nonregular_records_are_refused;
   Alcotest.test_case "symlink hardlink nonregular and writable bodies" `Quick

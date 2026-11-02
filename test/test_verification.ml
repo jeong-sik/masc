@@ -600,9 +600,8 @@ let test_returning_to_an_earlier_disposition_posts_again () =
     (stalled_posts_for ~verification_id:"vrf-stall-4")
 ;;
 
-(* A Goal review that stops without a verdict uses the same notice as a
-   Task review. Its post names the Goal, the request it answers and the one
-   forward path a Goal has, and none of the Task's. *)
+(* A Goal notice must not promise that request_complete starts a new review:
+   the retained original can still be unresolved, or its state unreadable. *)
 let test_goal_stalled_projection_names_its_forward_path () =
   let content =
     VP.For_testing.stalled_board_content
@@ -615,10 +614,13 @@ let test_goal_stalled_projection_names_its_forward_path () =
     ; "request:req-201"
     ; "evaluator_unavailable"
     ; "requested runtime or lane not found"
-    ; "no retry armed"
+    ; "this observation armed no retry"
     ; "request_complete"
+    ; "retained review state"
+    ; "Whether a later request_complete starts a new review depends"
     ];
-  check_omits content [ "submit_for_verification"; "HITL"; "retry scheduled" ]
+  check_omits content
+    [ "submit_for_verification"; "HITL"; "retry scheduled"; "which starts the next review" ]
 ;;
 
 let test_goal_stalled_metadata_names_its_subject () =

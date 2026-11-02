@@ -78,6 +78,10 @@ val lock_file_path : string -> string
     artifact to flock. *)
 val with_mutex : string -> (unit -> 'a) -> 'a
 
+val try_with_mutex : string -> (unit -> 'a) -> 'a option
+(** One cooperative mutex admission attempt. [None] means the body did not run;
+    after admission the body runs with cancellation deferred through release. *)
+
 (** [with_lock ?clock path f] runs [f] while holding both the
     cooperative Eio.Mutex and an OS-level flock on [path ^ ".lock"].
     The flock uses non-blocking F_TLOCK retries — max 200 attempts,

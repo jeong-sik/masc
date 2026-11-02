@@ -76,6 +76,10 @@ module Overlap_key = struct
   let compare = Stdlib.compare
 end
 module Overlap_keys = Set.Make (Overlap_key)
+module Delivery_keys = Set.Make (struct
+  type t = string * string
+  let compare = Stdlib.compare
+end)
 
 type counterpart_selection = {
   selection_keeper : string;
@@ -103,15 +107,36 @@ let overlap_keys selected =
 
 let select_counterparts (snapshot : counterpart_snapshot) =
   (* The complete original log supplies dedup identities, even outside this
-     interval/frontier: a delivery and its chat projection can straddle it. *)
-  let delivery_keys = List.filter_map (fun (item : Attention.item) ->
+     interval/frontier: a delivery and its chat projection can straddle it.
+     The membership check uses additional space proportional to the smaller
+     input. This does not reduce the full log read or the durable snapshot. *)
+  let chat_key row =
+    let message = Chat.captured_row_message row in
+    match message.conversation_id, message.external_message_id with
+    | Some conversation, Some id -> Some (conversation,id)
+    | None, _ | _, None -> None in
+  let external_key (item : Attention.item) =
     Option.map (fun (message : Attention.external_message_ref) ->
-      item.conversation.conversation_id, message.message_id) item.external_message) snapshot.external_log in
+      item.conversation.conversation_id, message.message_id) item.external_message in
+  let add_key f set value = match f value with
+    | None -> set | Some key -> Delivery_keys.add key set in
+  let rec no_longer left right = match left,right with
+    | [], _ -> true | _ :: _, [] -> false
+    | _ :: left, _ :: right -> no_longer left right in
+  let delivery_keys = match snapshot.chat_rows, snapshot.external_log with
+    | [], _ | _, [] -> Delivery_keys.empty
+    | chats, externals ->
+      if no_longer chats externals then
+        let wanted = List.fold_left (add_key chat_key) Delivery_keys.empty chats in
+        if Delivery_keys.is_empty wanted then Delivery_keys.empty else
+        List.fold_left (fun found item -> match external_key item with
+          | Some key when Delivery_keys.mem key wanted -> Delivery_keys.add key found
+          | None | Some _ -> found) Delivery_keys.empty externals
+      else List.fold_left (add_key external_key) Delivery_keys.empty externals in
   let is_duplicate (message : Chat.chat_message) =
     match message.conversation_id, message.external_message_id with
     | Some conversation_id, Some message_id ->
-      List.exists (fun (conversation, id) ->
-        String.equal conversation_id conversation && String.equal message_id id) delivery_keys
+      Delivery_keys.mem (conversation_id,message_id) delivery_keys
     | None, _ | _, None -> false in
   let externals = selected_external_with_offsets snapshot |> List.map (fun (offset, (item : Attention.item)) ->
     item.received_at, (External_event (offset,item), Keeper_counterpart_observation.of_external_attention item)) in

@@ -692,13 +692,19 @@ let test_counterpart_witness_requires_selected_source_identity () =
   (match record ~base_path delivery with
    | `Recorded -> () | `Duplicate _ -> Alcotest.fail "unexpected delivery duplicate"
    | `Error detail -> Alcotest.fail detail);
-  write_file chat_path (original_row ^ "\n" ^ other_row ^ "\n");
+  let other_conversation = row ~id:"other-conversation" ~ts:30.
+      ["conversation_id",`String "discord:guild-1:other";
+       "external_message_id",`String "original-message"] in
+  write_file chat_path (original_row ^ "\n" ^ other_row ^ "\n" ^ other_conversation ^ "\n");
   let witness = capture 40. in
   let original_input = Sources.counterpart_observations original in
   let witness_input = Sources.counterpart_observations witness in
   Alcotest.(check int) "the original question contained one chat observation" 1 (List.length original_input);
   Alcotest.(check bool) "a different row supplies the same projected value" true
     (List.for_all (fun observation -> List.mem observation witness_input) original_input);
+  Alcotest.(check int) "matching message ID in another conversation is not deduplicated" 2
+    (List.length (List.filter (fun (observation:Masc.Keeper_counterpart_observation.t) ->
+      observation.content="same content") witness_input));
   Alcotest.(check bool) "the deduplicated original is not selected by the witness" false
     (covers ~original ~witness);
   Alcotest.(check bool) "the later delivery may overlap the original chat source" true

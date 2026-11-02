@@ -11,6 +11,10 @@ type link_goalless_task_to_goal_error =
 
 module Task_id_map : Map.S with type key = string
 
+(** The lossy key used by the historical Goal–Task link registry. Equal keys
+    do not establish that the original Goal or Task IDs were equal. *)
+val normalize_link_id : string -> string
+
 (** Build a reverse index from goal_id to its linked tasks.
 
     [goal_task_links] is the authoritative source of goal-task
@@ -88,6 +92,19 @@ val read_goal_task_links_authoritative_r :
 (** Read only the primary registry. Only absence of both primary and recovery
     means a new empty registry. A missing, unreadable, or malformed primary is
     an error when a recovery snapshot exists. Link mutations use this reader. *)
+
+(** Read the same primary authority for an ownership decision, retaining the
+    normalized Task IDs whose original Goal or Task link keys were padded.
+    Duplicate structural JSON members make this observation unreadable. *)
+type goal_task_link_observation =
+  { normalized_links : (string * string list) list
+  ; ambiguous_task_ids : string list
+  ; padded_key_present : bool
+  }
+
+val read_goal_task_links_observed_r :
+  Workspace_utils_backend_setup.config ->
+  (goal_task_link_observation, string) result
 
 (** Persist the goal-task link registry. *)
 val write_goal_task_links :

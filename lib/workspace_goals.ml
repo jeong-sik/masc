@@ -959,24 +959,30 @@ type dropped_goal_work = {
 
 let dropped_goal_work config ~goal_id =
   let ( let* ) = Result.bind in
-  let* links = Workspace_goal_index.read_goal_task_links_authoritative_r config in
+  let* observed_links = Workspace_goal_index.read_goal_task_links_observed_r config in
+  let links = observed_links.Workspace_goal_index.normalized_links in
+  let ambiguous_link_ids = observed_links.ambiguous_task_ids in
   let linked = Option.value ~default:[] (List.assoc_opt goal_id links) in
   let* goals = match Goal_store.load_source config with
     | Goal_store.Available state -> Ok state.goals
     | Goal_store.Uninitialized -> Ok []
     | Goal_store.Unavailable error -> Error (Goal_store.unavailable_to_string error) in
-  let goals_by_id =
+  (* The link registry trims IDs when reading and writing. Preserve every
+     Goal row that could have produced a link key instead of assigning the
+     key to an exact row when a historical padded alias also exists. *)
+  let goals_by_link_id =
     List.fold_left
       (fun acc (goal : Goal_store.goal) ->
-         let rows = Option.value ~default:[] (Goal_store.Goal_id_map.find_opt goal.id acc) in
-         Goal_store.Goal_id_map.add goal.id (goal :: rows) acc)
+         let link_id = Workspace_goal_index.normalize_link_id goal.id in
+         let rows = Option.value ~default:[] (Goal_store.Goal_id_map.find_opt link_id acc) in
+         Goal_store.Goal_id_map.add link_id (goal :: rows) acc)
       Goal_store.Goal_id_map.empty goals
   in
-  let goal_rows id = Option.value ~default:[] (Goal_store.Goal_id_map.find_opt id goals_by_id) in
+  let goal_rows id = Option.value ~default:[] (Goal_store.Goal_id_map.find_opt id goals_by_link_id) in
   let target_problem = match goal_rows goal_id with
-    | [_] -> None
+    | [goal] when String.equal goal.id goal_id -> None
     | [] -> Some "not attempted: target Goal row was unavailable during Task observation"
-    | _ :: _ :: _ -> Some "not attempted: target Goal ID was ambiguous during Task observation" in
+    | [_] | _ :: _ :: _ -> Some "not attempted: target Goal link ID was ambiguous during Task observation" in
   let* backlog =
     try
       if Workspace.is_initialized config then Workspace_backlog.read_backlog_r config
@@ -985,11 +991,12 @@ let dropped_goal_work config ~goal_id =
     | Eio.Cancel.Cancelled _ as exn -> raise exn
     | exn -> Error (Printexc.to_string exn) in
   let linked_set = Workspace_backlog.Task_id_set.of_list linked in
+  let ambiguous_link_ids = Workspace_backlog.Task_id_set.of_list ambiguous_link_ids in
   let task_goal_map = Workspace_goal_index.build_task_goal_map ~goal_task_links:links () in
   let deleted_task_ids =
     List.fold_left
       (fun ids (receipt : Masc_domain.task_deletion_receipt) ->
-         Workspace_backlog.Task_id_set.add receipt.deleted_task_id ids)
+         Workspace_backlog.Task_id_set.add (Workspace_goal_index.normalize_link_id receipt.deleted_task_id) ids)
       Workspace_backlog.Task_id_set.empty backlog.task_deletion_receipts
   in
   let linkage task_id =
@@ -998,16 +1005,19 @@ let dropped_goal_work config ~goal_id =
       |> List.filter (fun id -> not (String.equal id goal_id))
       |> List.sort_uniq String.compare
     in
-    match target_problem with
+    if Workspace_backlog.Task_id_set.mem task_id ambiguous_link_ids then
+      `Ambiguous "not attempted: Goal–Task link ID was ambiguous during Task observation"
+    else match target_problem with
     | Some detail -> `Ambiguous detail
     | None ->
         (match List.find_opt (fun id -> match goal_rows id with
-             | [] | [_] -> false
+             | [] -> false
+             | [goal] -> not (String.equal goal.id id)
              | _ :: _ :: _ -> true) other_ids with
          | Some id -> `Ambiguous ("not attempted: linked Goal ID is ambiguous: " ^ id)
          | None ->
              if List.for_all (fun id -> match goal_rows id with
-                 | [goal] -> goal.phase = Goal_phase.Dropped
+                 | [goal] -> String.equal goal.id id && goal.phase = Goal_phase.Dropped
                  | [] | _ :: _ :: _ -> false) other_ids
              then `Orphaned else `Shared) in
   let holders rows =
@@ -1020,9 +1030,10 @@ let dropped_goal_work config ~goal_id =
   let candidates_by_id =
     List.fold_left
       (fun acc (task : Masc_domain.task) ->
-         if not (Workspace_backlog.Task_id_set.mem task.id linked_set) then acc
+         let link_id = Workspace_goal_index.normalize_link_id task.id in
+         if not (Workspace_backlog.Task_id_set.mem link_id linked_set) then acc
          else
-           Workspace_backlog.Task_id_map.update task.id
+           Workspace_backlog.Task_id_map.update link_id
              (function None -> Some [task] | Some rows -> Some (task :: rows)) acc)
       Workspace_backlog.Task_id_map.empty backlog.tasks
   in
@@ -1037,13 +1048,13 @@ let dropped_goal_work config ~goal_id =
           if deleted then
             (unclaimed, observed_holders @ held, (id, "not attempted: Task ID has a deletion receipt") :: ambiguous)
           else match rows with
-            | [task] ->
+            | [task] when String.equal task.id id ->
                 (match task.task_status with
                  | Masc_domain.Todo -> (task :: unclaimed, held, ambiguous)
                  | Masc_domain.Claimed _ | Masc_domain.InProgress _ | Masc_domain.AwaitingVerification _ ->
                      (unclaimed, observed_holders @ held, ambiguous)
                  | Masc_domain.Done _ | Masc_domain.Cancelled _ -> (unclaimed, held, ambiguous))
-            | [] | _ :: _ :: _ ->
+            | [] | [_] | _ :: _ :: _ ->
                 (unclaimed, observed_holders @ held, (id, "not attempted: linked Task ID is ambiguous") :: ambiguous))
     (Workspace_backlog.Task_id_map.bindings candidates_by_id) ([], [], []) in
   Ok { unclaimed; held; ambiguous }
@@ -1068,13 +1079,16 @@ let cancel_dropped_goal_todos ?(before_transition = fun ~task_id:_ -> ()) (ctx :
       | Error detail -> Either.Right (task_id, "not attempted: backlog unreadable: " ^ detail)
       | Ok backlog ->
           let deleted = List.exists (fun (receipt : Masc_domain.task_deletion_receipt) ->
-              String.equal receipt.deleted_task_id task_id) backlog.task_deletion_receipts in
+              String.equal (Workspace_goal_index.normalize_link_id receipt.deleted_task_id) task_id) backlog.task_deletion_receipts in
           if deleted then Either.Right (task_id, "not attempted: Task ID has a deletion receipt")
-          else match List.filter (fun (task : Masc_domain.task) -> String.equal task.id task_id) backlog.tasks with
+          else match List.filter (fun (task : Masc_domain.task) ->
+              String.equal (Workspace_goal_index.normalize_link_id task.id) task_id) backlog.tasks with
             | [] -> Either.Right (task_id, "not attempted: Task is no longer in the backlog")
             | [_; _] | _ :: _ :: _ :: _ -> Either.Right (task_id, "not attempted: Task ID is ambiguous")
             | [task] ->
-                if not (Masc_domain.equal_task original task) then
+                if not (String.equal task.id task_id) then
+                  Either.Right (task_id, "not attempted: Task ID is ambiguous")
+                else if not (Masc_domain.equal_task original task) then
                   Either.Right (task_id, "not attempted: Task changed since the candidate observation")
                 else (match task.task_status with
                  | Masc_domain.Claimed _ | Masc_domain.InProgress _ | Masc_domain.AwaitingVerification _

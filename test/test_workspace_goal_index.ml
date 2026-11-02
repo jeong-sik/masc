@@ -636,6 +636,8 @@ let test_link_mutations_require_intact_primary () =
           ~goal_id:"goal-old" ~task_id:"task-old")
     ; "prune", (fun config ->
         Workspace_goal_index.prune_links_for_goal_result config ~goal_id:"goal-old")
+    ; "prune task", (fun config ->
+        Workspace_goal_index.prune_links_for_task_result config ~task_id:"task-old")
     ; "assign", (fun config ->
         match Workspace_goal_index.link_goalless_task_to_goal config
           ~goal_id:"goal-new" ~task_id:"task-new" with
@@ -652,6 +654,12 @@ let test_link_mutations_require_intact_primary () =
     ; "missing primary", None, good
     ; "invalid task ID", Some {|{"links":[{"goal_id":"goal-old","task_ids":[123,"task-old"]}]}|}, good
     ; "blank task ID", Some {|{"links":[{"goal_id":"goal-old","task_ids":["task-old"," "]}]}|}, good
+    ; "padded Goal ID", Some {|{"links":[{"goal_id":" goal-old ","task_ids":["task-old"]}]}|}, good
+    ; "padded Goal ID with no tasks", Some {|{"links":[{"goal_id":" goal-old ","task_ids":[]}]}|}, good
+    ; "padded Task ID", Some {|{"links":[{"goal_id":"goal-old","task_ids":[" task-old "]}]}|}, good
+    ; "duplicate links", Some {|{"links":[{"goal_id":"goal-old","task_ids":["task-old"]}],"links":[]}|}, good
+    ; "duplicate Goal ID", Some {|{"links":[{"goal_id":"goal-old","goal_id":"goal-new","task_ids":["task-old"]}]}|}, good
+    ; "duplicate Task IDs", Some {|{"links":[{"goal_id":"goal-old","task_ids":[],"task_ids":["task-old"]}]}|}, good
     ; "both unreadable", Some "{", "{"
     ]
   in
@@ -666,6 +674,8 @@ let test_link_mutations_require_intact_primary () =
        | Some contents -> write path contents
        | None -> if Sys.file_exists path then Sys.remove path);
       write mirror recovery;
+      (* A general read may fill the shared content-addressed cache first. *)
+      ignore (Workspace_goal_index.read_goal_task_links_r config);
       List.iter (fun (name, mutate) ->
         (match mutate config with
          | Error _ -> ()
@@ -684,7 +694,17 @@ let test_link_mutations_require_intact_primary () =
      | Error detail -> Alcotest.failf "fresh registry must accept links: %s" detail);
     match Workspace_goal_index.read_goal_task_links_authoritative_r config with
     | Ok [ ("goal-new", [ "task-new" ]) ] -> ()
-    | _ -> Alcotest.fail "fresh registry must persist the exact new link")
+    | _ -> Alcotest.fail "fresh registry must persist the exact new link");
+  with_test_env (fun config ->
+    let id = "\194\160" in
+    let path = Workspace_goal_index.goal_task_links_path config in
+    let document = `Assoc ["links", `List [`Assoc ["goal_id", `String id; "task_ids", `List [`String "task-old"]]]] in
+    Out_channel.with_open_bin path (fun oc -> Out_channel.output_string oc (Yojson.Safe.to_string document));
+    (match Workspace_goal_index.link_task_to_goal_result config ~goal_id:"goal-new" ~task_id:"task-new" with
+     | Ok () -> () | Error detail -> Alcotest.failf "non-breaking-space Goal ID is not padding: %s" detail);
+    match Workspace_goal_index.read_goal_task_links_authoritative_r config with
+    | Ok links when List.assoc_opt id links = Some ["task-old"] -> ()
+    | Ok _ | Error _ -> Alcotest.fail "the distinct Goal link must remain readable")
 ;;
 
 let test_unreadable_registry_directory_is_not_absence () =
@@ -699,6 +719,29 @@ let test_unreadable_registry_directory_is_not_absence () =
         match Workspace_goal_index.read_goal_task_links_authoritative_r config with
         | Error _ -> ()
         | Ok _ -> Alcotest.fail "unreadable registry directory must not authorize an empty registry"))
+;;
+
+let test_ambiguous_links_preserve_evidence_on_task_creation () =
+  with_test_env (fun config ->
+    let path = Workspace_goal_index.goal_task_links_path config in
+    let mirror = path ^ ".last-good" in
+    let raw = {|{"links":[{"goal_id":" goal-old ","task_ids":["task-old"]}]}|} in
+    let write path = Out_channel.with_open_bin path (fun oc -> Out_channel.output_string oc raw) in
+    write path; write mirror;
+    (match Workspace.add_task_with_result ~goal_id:"goal-new" config
+       ~title:"blocked linked task" ~priority:1 ~description:"" with
+     | Error (Workspace.Goal_link_write_failed _) -> ()
+     | Error error -> Alcotest.failf "wrong refusal: %s" (Workspace.add_task_error_to_string error)
+     | Ok _ -> Alcotest.fail "ambiguous link source accepted a linked Task");
+    let backlog = match Workspace_backlog.read_backlog_r config with
+      | Ok backlog -> backlog | Error detail -> Alcotest.fail detail in
+    check_int "no linked Task was published in the primary backlog" 0 (List.length backlog.tasks);
+    Alcotest.(check string) "primary evidence retained" raw (In_channel.with_open_bin path In_channel.input_all);
+    Alcotest.(check string) "recovery evidence retained" raw (In_channel.with_open_bin mirror In_channel.input_all);
+    (match Workspace.add_task_with_result config ~title:"unlinked task" ~priority:1 ~description:"" with
+     | Ok _ -> ()
+     | Error error -> Alcotest.failf "unlinked Task should still be created: %s" (Workspace.add_task_error_to_string error));
+    Alcotest.(check string) "unlinked Task leaves link evidence alone" raw (In_channel.with_open_bin path In_channel.input_all))
 ;;
 
 let () =
@@ -721,6 +764,10 @@ let () =
               "unreadable registry directory is not absence"
               `Quick
               test_unreadable_registry_directory_is_not_absence
+          ; test_case
+              "ambiguous links preserve evidence during Task creation"
+              `Quick
+              test_ambiguous_links_preserve_evidence_on_task_creation
           ; test_case
               "all link mutations require intact primary without rewriting evidence"
               `Quick

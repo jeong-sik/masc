@@ -3,4 +3,5 @@
 (test
  (name test_h2_route_gate_http)
  (modules test_h2_route_gate_http)
+ (deps fixtures/skill-ledger-async-actions.json)
  (libraries masc_test_deps h2 h2-eio bigstringaf))

@@ -52,6 +52,14 @@ type t =
   ; gaps : gap list
   }
 
+type 'a scan =
+  { value : 'a
+  ; scope : scope
+  ; sessions_inspected : int
+  ; ledgers_loaded : int
+  ; gaps : gap list
+  }
+
 type ordered_evidence =
   { evidence : evidence
   ; activated_at : float
@@ -142,8 +150,8 @@ let latest_across_traces candidates =
     |> fun evidence -> Most_recent_observed_timestamp_tie evidence
 ;;
 
-let empty =
-  { latest = Not_observed
+let empty_scan value =
+  { value
   ; scope = Complete_retained_trace_snapshot
   ; sessions_inspected = 0
   ; ledgers_loaded = 0
@@ -181,7 +189,8 @@ let same_directory_identity left right =
   && left.Unix.st_ino = right.Unix.st_ino
 ;;
 
-let discover_with_after_first_pass ~after_first_pass config reference =
+let scan_with_after_first_pass ~after_first_pass ~init ~observe config =
+  let empty = empty_scan init in
   let root = Keeper_fs.session_store_path config in
   match Unix.lstat root with
   | exception Unix.Unix_error (Unix.ENOENT, _, _) -> empty
@@ -214,7 +223,7 @@ let discover_with_after_first_pass ~after_first_pass config reference =
        ; gaps = [ Trace_root_unavailable error ]
        }
      | Ok entries ->
-       let candidates, sessions_inspected, ledgers_loaded, observations, gaps =
+       let value, sessions_inspected, ledgers_loaded, observations, gaps =
          List.fold_left
            (fun
              (candidates, sessions_inspected, ledgers_loaded, observations, gaps)
@@ -275,11 +284,7 @@ let discover_with_after_first_pass ~after_first_pass config reference =
                         , (trace_id, None) :: observations
                         , gaps )
                       | Ok (Some ledger) ->
-                        let candidates =
-                          match latest_in_ledger trace_id reference ledger with
-                          | None -> candidates
-                          | Some evidence -> evidence :: candidates
-                        in
+                        let candidates = observe candidates ~trace_id ledger in
                         ( candidates
                         , sessions_inspected
                         , ledgers_loaded + 1
@@ -304,7 +309,7 @@ let discover_with_after_first_pass ~after_first_pass config reference =
                      , observations
                      , Trace_entry_not_directory { trace_id; kind = st_kind }
                        :: gaps )))
-           ([], 0, 0, [], [])
+           (init, 0, 0, [], [])
            entries
        in
        after_first_pass ();
@@ -332,8 +337,7 @@ let discover_with_after_first_pass ~after_first_pass config reference =
            , true )
        in
        let gaps = List.rev gaps in
-       { latest =
-           (if root_changed then Not_observed else latest_across_traces candidates)
+       { value = (if root_changed then init else value)
        ; scope =
            (match gaps with
             | [] -> Complete_retained_trace_snapshot
@@ -366,10 +370,32 @@ let discover_with_after_first_pass ~after_first_pass config reference =
     }
 ;;
 
+let scan config ~init ~observe =
+  scan_with_after_first_pass ~after_first_pass:(fun () -> ()) ~init ~observe config
+;;
+
+let discover_with_after_first_pass ~after_first_pass config reference =
+  let observed =
+    scan_with_after_first_pass ~after_first_pass ~init:[]
+      ~observe:(fun candidates ~trace_id ledger ->
+        match latest_in_ledger trace_id reference ledger with
+        | None -> candidates
+        | Some evidence -> evidence :: candidates)
+      config
+  in
+  { latest = latest_across_traces observed.value
+  ; scope = observed.scope
+  ; sessions_inspected = observed.sessions_inspected
+  ; ledgers_loaded = observed.ledgers_loaded
+  ; gaps = observed.gaps
+  }
+;;
+
 let discover config reference =
   discover_with_after_first_pass ~after_first_pass:(fun () -> ()) config reference
 ;;
 
 module For_testing = struct
   let discover = discover_with_after_first_pass
+  let scan = scan_with_after_first_pass
 end

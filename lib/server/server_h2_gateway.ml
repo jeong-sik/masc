@@ -1339,6 +1339,29 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                  in
                  h2_respond_json_value h2_reqd json ~extra_headers:cors))
 
+      | `GET, "/api/v1/dashboard/skill-activations/physical-turn" ->
+          h2_gate_state h2_reqd (fun state ->
+            let config = Mcp_server.workspace_config state in
+            with_captured_read_workspace config (fun workspace_headers ->
+            let extra_headers = workspace_headers @ cors in
+            match Server_utils.query_param httpun_request "turn_ref" with
+            | None ->
+              h2_respond_json_value h2_reqd
+                (`Assoc [ "error", `String "turn_ref query param is required" ])
+                ~status:`Bad_request ~extra_headers
+            | Some raw_turn_ref ->
+              (match
+                 Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+                   Server_skill_physical_turn.project_string
+                     ~config raw_turn_ref)
+               with
+               | Error detail ->
+                 h2_respond_json_value h2_reqd
+                   (`Assoc [ "error", `String detail ])
+                   ~status:`Bad_request ~extra_headers
+               | Ok json ->
+                 h2_respond_json_value h2_reqd json ~extra_headers)))
+
       | `GET, "/api/v1/dashboard/project-snapshot" ->
           h2_gate_state h2_reqd (fun state ->
             let json =

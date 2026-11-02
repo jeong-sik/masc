@@ -458,11 +458,72 @@ let test_chat_history_reads_execution_beyond_the_trace () =
   check bool "the error result remains delivered despite failed execution" true
     (activation |> member "delivery" <> `Null)
 
+let test_physical_turn_finds_origin_evidence_and_preserves_read_gaps () =
+  with_workspace @@ fun config ->
+  let fixture = Yojson.Safe.from_file "fixtures/skill-ledger-async-actions.json" in
+  let canonical = match Ledger.of_projection_yojson fixture with
+    | Ok ledger -> ledger
+    | Error error -> fail (Ledger.decode_error_code error) in
+  let origin = Ledger.session_id canonical in
+  let origin_dir = Keeper_fs.keeper_session_dir config (Keeper_id.Trace_id.to_string origin) in
+  Unix.mkdir origin_dir 0o700;
+  let originals = Ledger.activations canonical in
+  List.iter (fun activation -> match Ledger.record ~config ~trace_id:origin activation with
+    | Ok _ -> () | Error error -> fail (Ledger.store_error_to_string error)) originals;
+  List.iter (fun delivery ->
+    match Ledger.observe_async_result_delivery ~config ~trace_id:origin
+      ~expected_activations:originals delivery with
+    | Ok _ -> () | Error error -> fail (Ledger.store_error_to_string error))
+    (Ledger.async_result_deliveries canonical);
+  List.iter (fun action -> match Ledger.observe_async_action ~config ~trace_id:origin action with
+    | Ok _ -> () | Error error -> fail (Ledger.store_error_to_string error))
+    (Ledger.async_actions canonical);
+  let receiving = "new-physical-trace#73" in
+  let project turn = match Server_skill_physical_turn.project_string ~config turn with
+    | Ok json -> json | Error detail -> fail detail in
+  let open Yojson.Safe.Util in
+  let json = project receiving in
+  check string "exact receiving turn" receiving (json |> member "turn_ref" |> to_string);
+  check string "complete retained lookup" "complete_retained_trace_snapshot"
+    (json |> member "coverage" |> member "scope" |> to_string);
+  let origins = json |> member "origins" |> to_list in
+  check int "finds evidence outside receiving trace" 1 (List.length origins);
+  let observed = List.hd origins in
+  check string "keeps original owner" (Keeper_id.Trace_id.to_string origin)
+    (observed |> member "trace_id" |> to_string);
+  check int "both exact receiving handoffs" 2
+    (observed |> member "async_result_deliveries" |> to_list |> List.length);
+  check int "all three causal links survive" 3
+    (observed |> member "async_actions" |> to_list |> List.length);
+  check int "original admission frame is retained" (List.length originals)
+    (observed |> member "activations" |> to_list |> List.length);
+  let missing = project "new-physical-trace#74" in
+  check int "adjacent physical turn borrows no evidence" 0
+    (missing |> member "origins" |> to_list |> List.length);
+  let receiving_dir = Filename.concat (Keeper_fs.session_store_path config) "new-physical-trace" in
+  check bool "lookup does not create receiving trace" false (Sys.file_exists receiving_dir);
+  let events = Filename.concat origin_dir "skill-activation-events.jsonl" in
+  Fs_compat.save_file events "corrupt original ledger\n";
+  let damaged = project receiving in
+  check string "corrupt origin is not a complete empty read" "incomplete_retained_trace_snapshot"
+    (damaged |> member "coverage" |> member "scope" |> to_string);
+  check bool "preserves an actionable source gap" true
+    (List.exists (fun gap -> gap |> member "code" = `String "ledger_unreadable")
+      (damaged |> member "coverage" |> member "gaps" |> to_list));
+  List.iter (fun raw -> match Server_skill_physical_turn.project_string ~config raw with
+    | Error _ -> () | Ok _ -> fail ("invalid physical turn was accepted: " ^ raw))
+    [ "not-a-turn"; "trace#0"; "trace#-1"; "   #1" ];
+  let nested = project "nested#trace#1" in
+  check string "last separator keeps the exact nested trace" "nested#trace#1"
+    (nested |> member "turn_ref" |> to_string)
+
 let () =
   run
     "keeper Skill activation projection"
     [ ( "projection"
-      , [ test_case "composition exact execution authority" `Quick test_composition_joins_only_its_original_execution
+      , [ test_case "physical turn follows cross-trace origin and read gaps" `Quick
+            test_physical_turn_finds_origin_evidence_and_preserves_read_gaps
+        ; test_case "composition exact execution authority" `Quick test_composition_joins_only_its_original_execution
         ; test_case "chat reads exact execution without trace membership" `Quick test_chat_history_reads_execution_beyond_the_trace
         ; test_case "missing Keeper is no_session" `Quick
             test_missing_keeper_is_no_session

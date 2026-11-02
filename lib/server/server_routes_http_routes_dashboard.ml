@@ -3334,6 +3334,22 @@ let add_routes ~sw ~clock router =
               Http.Response.json_value ~compress:true ~request:req
                 ~extra_headers json reqd)
        )
+  |> Server_route.get Server_route.Public_read "/api/v1/dashboard/skill-activations/physical-turn" (fun state req reqd ->
+         let extra_headers = public_read_cors_headers req in
+         match Server_utils.query_param req "turn_ref" with
+         | None ->
+           Http.Response.json_value ~compress:true ~request:req
+             ~status:`Bad_request ~extra_headers
+             (dashboard_error_json "turn_ref query param is required") reqd
+         | Some raw_turn_ref ->
+           (match Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+              Server_skill_physical_turn.project_string
+                ~config:(Mcp_server.workspace_config state) raw_turn_ref) with
+            | Error detail ->
+              Http.Response.json_value ~compress:true ~request:req
+                ~status:`Bad_request ~extra_headers (dashboard_error_json detail) reqd
+            | Ok json ->
+              Http.Response.json_value ~compress:true ~request:req ~extra_headers json reqd))
   (* Schedule projection, served by its owner. The no-query aggregate keeps its
      shared live cache; an exact schedule_id lookup reads the same ledger and
      row encoder without adding a client-controlled cache key. *)

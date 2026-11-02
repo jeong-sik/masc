@@ -42,6 +42,8 @@ let with_workspace f =
   Unix.putenv "MASC_BASE_PATH" dir;
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
+  Masc_test_deps.Board_test_preparation.prepare ~base_path:dir
+    ~action:Masc_test_deps.Board_test_preparation.Bootstrap;
   Result.get_ok (Board_dispatch.init_jsonl
     ~base_path:(Env_config_core.base_path ())
     ~recipient_lookup:Recipient_lookup.none_declared ());

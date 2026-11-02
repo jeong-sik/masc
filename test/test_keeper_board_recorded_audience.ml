@@ -10,6 +10,7 @@ open Masc
    different set than the one asserted here. *)
 
 module KBA = Keeper_board_audience
+module Preparation = Masc_test_deps.Board_test_preparation
 
 let get_created = function
   | Ok value -> value
@@ -51,6 +52,7 @@ let with_workspace f =
        ignore (Workspace.init config ~agent_name:None : string);
        Board_dispatch.reset_for_test ();
        Board.reset_global_for_test ();
+       Preparation.prepare ~base_path ~action:Preparation.Bootstrap;
        Result.get_ok (Board_dispatch.init_jsonl
          ~base_path:(Env_config_core.base_path ())
          ~recipient_lookup:Recipient_lookup.none_declared ());

@@ -427,6 +427,35 @@ let test_partial_converter_failure_uses_next_converter () =
     check string "fallback retains source without refetch" "x"
       (read_file (Filename.concat cache_dir "fetches")))
 
+let test_published_frame_is_a_snapshot () =
+  with_cache (fun cache_dir _ ->
+    let source = Filename.concat cache_dir "original.bmp" in
+    let captured_path = Filename.concat cache_dir "output-path" in
+    let open_output = ref None in
+    write_file source bmp_header;
+    Fun.protect ~finally:(fun () -> Option.iter Unix.close !open_output) (fun () ->
+      let run command =
+        (* Parse the exact shell-quoted output argument without running a
+           converter; keep its descriptor open after returning success. *)
+        let capture = Printf.sprintf
+            "set -- %s\nfor output do :; done\nprintf '%%s' \"$output\" > %s"
+            command (Filename.quote captured_path) in
+        check bool "fixture captured the converter path" true
+          (Unix.system capture = Unix.WEXITED 0);
+        let fd = Unix.openfile (read_file captured_path)
+            [Unix.O_WRONLY; Unix.O_CREAT; Unix.O_TRUNC] 0o600 in
+        open_output := Some fd;
+        check int "fixture wrote its first frame" (String.length png_header)
+          (Unix.write_substring fd png_header 0 (String.length png_header));
+        Unix.WEXITED 0 in
+      let path = match Cache.convert_to_png ~run ~cache_dir source with
+        | Ok path -> path
+        | Error failures -> failf "conversion failed: %s" (Cache.conversion_failure_text failures) in
+      let fd = match !open_output with Some fd -> fd | None -> fail "no output handle" in
+      ignore (Unix.lseek fd 0 Unix.SEEK_SET);
+      check int "fixture wrote after the decoder returned" 4 (Unix.write_substring fd "late" 0 4);
+      check string "a late write cannot change the published frame" png_header (read_file path)))
+
 let test_explicit_refresh_replaces_a_refused_body () =
   with_cache (fun cache_dir run ->
     let url = "https://fixture.invalid/transient.png" in
@@ -565,6 +594,8 @@ let () =
             test_clear_pending_keeps_claim_and_discards_completion
         ; test_case "partial converter failure uses next converter" `Quick
             test_partial_converter_failure_uses_next_converter
+        ; test_case "the published frame is a snapshot" `Quick
+            test_published_frame_is_a_snapshot
         ; test_case "explicit refresh replaces refused body" `Quick
             test_explicit_refresh_replaces_a_refused_body
         ] )

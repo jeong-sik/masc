@@ -230,6 +230,26 @@ let publish ~attempt ~target =
   try Sys.rename attempt target; Ok target with
   | Sys_error detail -> discard attempt; Error detail
 
+(* The converter may still hold its output open after it reports success.
+   Publish a new file so later writes through that handle cannot change the
+   cached frame. This does not prove the converter had finished writing when
+   its output was read. *)
+let publish_snapshot ~cache_dir ~target bytes =
+  match Filename.open_temp_file ~mode:[Open_binary] ~temp_dir:cache_dir "conv_frame_" ".png" with
+  | exception Sys_error detail -> Error detail
+  | path, channel ->
+    let moved = ref false in
+    Fun.protect ~finally:(fun () ->
+      close_out_noerr channel;
+      if not !moved then discard path) (fun () ->
+      try
+        Out_channel.output_string channel bytes;
+        Out_channel.close channel;
+        Sys.rename path target;
+        moved := true;
+        Ok target
+      with Sys_error detail -> Error detail)
+
 let download ~run ~cache_dir url =
   let target = input_path ~cache_dir url in
   let judge bytes = verdict_of_bytes bytes in
@@ -264,7 +284,7 @@ let download ~run ~cache_dir url =
     match read_cached () with Ok path -> Ok path | Error _ -> fetch ()
   else fetch ()
 
-let run_decoder ~run ~output_path command =
+let run_decoder_bytes ~run ~output_path command =
   discard output_path;
   let status = run command in
   match decode_failure_of_status status ~output_present:(Sys.file_exists output_path) with
@@ -273,7 +293,10 @@ let run_decoder ~run ~output_path command =
     match read_bytes output_path with
     | Error detail -> discard output_path; Error (Frame_unreadable { detail })
     | Ok "" -> discard output_path; Error No_frame_written
-    | Ok _ -> Ok output_path
+    | Ok bytes -> Ok bytes
+
+let run_decoder ~run ~output_path command =
+  Result.map (fun _ -> output_path) (run_decoder_bytes ~run ~output_path command)
 
 type converter = Sips | Image_magick | Ffmpeg
 type conversion_failure = (converter * decode_failure) list
@@ -310,15 +333,15 @@ let convert_to_png ~run ~cache_dir input =
       let rec attempt failures = function
         | [] -> discard attempt_file; Error (List.rev failures)
         | (converter, command) :: rest ->
-          (* The decoder writes into this attempt's own file; only a frame
-             that was actually written is renamed over the shared path. *)
-          match run_decoder ~run ~output_path:attempt_file (command attempt_file) with
-          | Ok _ ->
-            (* Published once, after a converter actually wrote a frame. *)
-            (match publish ~attempt:attempt_file ~target with
-             | Ok path -> Ok path
-             | Error detail ->
-               Error (List.rev ((converter, Frame_unreadable { detail }) :: failures)))
+          (* Publish only a nonempty frame captured from this attempt. *)
+          match run_decoder_bytes ~run ~output_path:attempt_file (command attempt_file) with
+          | Ok bytes ->
+            (* Keep the converter's file separate from the published snapshot. *)
+            Fun.protect ~finally:(fun () -> discard attempt_file) (fun () ->
+              match publish_snapshot ~cache_dir ~target bytes with
+              | Ok path -> Ok path
+              | Error detail ->
+                Error (List.rev ((converter, Frame_unreadable {detail}) :: failures)))
           | Error failure -> attempt ((converter, failure) :: failures) rest
       in
       attempt [] commands

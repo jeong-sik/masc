@@ -511,6 +511,7 @@ type flusher_msg =
 type posts_source_observation = {
   source_path : string;
   snapshot : Fs_compat.private_jsonl_snapshot;
+  workspace_observation : Board_workspace_binding.observation;
 }
 
 type posts_row_error =
@@ -524,6 +525,10 @@ type posts_source_failure =
   | Posts_missing_after_observation of Fs_compat.private_jsonl_transaction_error option
   | Posts_source_binding_mismatch
   | Posts_snapshot_stale
+  | Posts_workspace_binding_refused of {
+      rejection : Board_workspace_binding.rejection;
+      prior_settlement : Fs_compat.private_jsonl_transaction_error option;
+    }
   | Posts_raised of { exception_ : exn; backtrace : Printexc.raw_backtrace }
 
 type posts_source_state =
@@ -573,11 +578,11 @@ type store = {
   mutable votes_load_result : (unit, string) result;
   mutable reactions_load_result : (unit, string) result;
   mutable sub_boards_load_result : (unit, string) result;
-  workspace_masc_dir : string;
-  (** Canonical workspace state directory captured by the store constructor.
-      Every persistence path uses this immutable binding. Constructing an empty
-      store creates no payload files and does not establish loaded-source or
-      verification authority. *)
+  mutable workspace_binding : Board_workspace_binding.t;
+  (** One explicit BasePath capture attempt, refined with actual Present
+      state-directory observations under persist_mutex or quiescent loading.
+      Each binding value is immutable; refinement cannot heal a failed capture.
+      Path projection creates nothing and grants no loaded-source authority. *)
   posts : (string, post) Hashtbl.t;
   comments : (string, comment) Hashtbl.t;
   vote_log : (string, vote_direction * float) Hashtbl.t;

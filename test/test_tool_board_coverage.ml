@@ -40,9 +40,9 @@ let cleanup () =
   Fs_compat.reset_fd_cache_for_testing ();
   Fs_compat.reset_mkdir_memo_for_testing ();
   remove_path (Filename.concat _test_base_path Common.masc_dirname);
+  Fs_compat.mkdir_p _test_base_path;
   Result.get_ok (Board_dispatch.init_jsonl
-    ~workspace_masc_dir:(Common.masc_dir_from_base_path
-      ~base_path:(Env_config_core.base_path ()))
+    ~base_path:(Env_config_core.base_path ())
     ~recipient_lookup:Recipient_lookup.none_declared ())
 
 (* The MCP route: MASC hands the result over whole. *)

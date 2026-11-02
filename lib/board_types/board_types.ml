@@ -796,6 +796,7 @@ type flusher_msg =
 type posts_source_observation = {
   source_path : string;
   snapshot : Fs_compat.private_jsonl_snapshot;
+  workspace_observation : Board_workspace_binding.observation;
 }
 
 type posts_row_error =
@@ -809,6 +810,10 @@ type posts_source_failure =
   | Posts_missing_after_observation of Fs_compat.private_jsonl_transaction_error option
   | Posts_source_binding_mismatch
   | Posts_snapshot_stale
+  | Posts_workspace_binding_refused of {
+      rejection : Board_workspace_binding.rejection;
+      prior_settlement : Fs_compat.private_jsonl_transaction_error option;
+    }
   | Posts_raised of { exception_ : exn; backtrace : Printexc.raw_backtrace }
 
 type posts_source_state =
@@ -858,7 +863,7 @@ type store = {
   mutable votes_load_result : (unit, string) result;
   mutable reactions_load_result : (unit, string) result;
   mutable sub_boards_load_result : (unit, string) result;
-  workspace_masc_dir: string;
+  mutable workspace_binding: Board_workspace_binding.t;
   posts: (string, post) Hashtbl.t;
   comments: (string, comment) Hashtbl.t;
   (* #10086: value carries [(direction, cast_ts)] so

@@ -30,10 +30,10 @@ let with_workspace test () =
       remove_tree base)
     (fun () ->
       Unix.putenv "MASC_BASE_PATH" base;
-      test (Common.masc_dir_from_base_path ~base_path:base))
+      test base (Common.masc_dir_from_base_path ~base_path:base))
 
-let make_store workspace_masc_dir =
-  Board.create_store ~workspace_masc_dir ()
+let make_store base_path =
+  Board.create_store ~base_path:base_path ()
 
 let read_bytes path = In_channel.with_open_bin path In_channel.input_all
 let write_bytes path bytes =
@@ -109,13 +109,13 @@ let check_observed_bytes store =
   Alcotest.(check string) "source owns the captured path"
     (Board.persist_path store) observation.source_path
 
-let reloaded workspace expected =
-  let store = make_store workspace in
+let reloaded base_path expected =
+  let store = make_store base_path in
   load_posts store expected;
   store
 
-let test_explicit_load_before_create workspace =
-  let store = make_store workspace in
+let test_explicit_load_before_create base_path _workspace =
+  let store = make_store base_path in
   let path = Board.persist_path store in
   require_pre_effect (create store "unobserved request");
   Alcotest.(check bool) "refused create made no payload file" false
@@ -127,12 +127,96 @@ let test_explicit_load_before_create workspace =
     (Sys.file_exists path);
   let post = require_post (create store "admitted request") in
   check_observed_bytes store;
-  let fresh = reloaded workspace 1 in
+  let fresh = reloaded base_path 1 in
   Alcotest.(check string) "only the admitted body was persisted"
     "admitted request" (current fresh post).body
 
-let test_two_missing_observations workspace =
-  let first = make_store workspace and second = make_store workspace in
+let test_failed_root_capture_stays_refused base_path _workspace =
+  let missing = Filename.concat base_path "not-created" in
+  let store = make_store missing in
+  refuse_load store;
+  require_pre_effect (create store "missing root has no publication authority");
+  require_io_refusal (Board.create_sub_board store ~slug:"no-root" ~name:"No root"
+    ~description:"must not create a root" ~owner:"source-writer" ());
+  Alcotest.(check bool) "failed capture creates no BasePath" false (Sys.file_exists missing);
+  Unix.mkdir missing 0o700;
+  refuse_load store;
+  Alcotest.(check bool) "later root creation cannot heal this capture" false
+    (Sys.file_exists (Common.masc_dir_from_base_path ~base_path:missing));
+  let fresh = reloaded missing 0 in
+  ignore (require_post (create fresh "new explicit capture can use the prepared root"))
+
+let test_directory_replacement_stays_refused ~replace_root base_path workspace =
+  let store = make_store base_path in
+  load_posts store 0;
+  let original_post = require_post (create store "actual Present source before replacement") in
+  let original = if replace_root then base_path else workspace in
+  let backup = original ^ ".captured-backup" in
+  Unix.rename original backup;
+  Unix.mkdir original 0o700;
+  Fun.protect
+    ~finally:(fun () -> remove_tree original; Unix.rename backup original)
+    (fun () ->
+      refuse_load store;
+      require_pre_effect (create store "replacement directory cannot replace authority");
+      (match Rows.load_persisted_comments store with
+       | Error _ -> ()
+       | Ok _ -> Alcotest.fail "auxiliary load accepted a replacement directory");
+      require_io_refusal (Board.create_sub_board store ~slug:"replaced" ~name:"Replaced"
+        ~description:"must stay unwritten" ~owner:"source-writer" ());
+      Alcotest.(check int) "refused reads and writers leave replacement empty" 0
+        (Array.length (Sys.readdir original)));
+  load_posts store 1;
+  Alcotest.(check string) "restored source retains the original actual post"
+    original_post.body (current store original_post).body;
+  ignore (require_post (create store "restored physical identity remains usable"))
+
+let test_sub_board_only_retains_created_directory base_path workspace =
+  let store = make_store base_path in
+  let create_topic slug = Board.create_sub_board store ~slug ~name:slug
+      ~description:"actual sub-board-only publication" ~owner:"source-writer" () in
+  ignore (require_board (create_topic "first"));
+  (match store.Board.posts_source with
+   | Board.Posts_unobserved -> ()
+   | Posts_readable _ | Posts_refused _ | Posts_unsettled _ ->
+     Alcotest.fail "sub-board-only fixture must not manufacture a posts observation");
+  let path = Board.sub_boards_path store in
+  let original_bytes = read_bytes path in
+  let backup = workspace ^ ".sub-board-backup" in
+  Unix.rename workspace backup;
+  Unix.mkdir workspace 0o700;
+  Fun.protect
+    ~finally:(fun () -> remove_tree workspace; Unix.rename backup workspace)
+    (fun () ->
+      require_io_refusal (create_topic "second");
+      Alcotest.(check int) "replacement remains empty without posts loading" 0
+        (Array.length (Sys.readdir workspace));
+      Alcotest.(check int) "refused sub-board was not published in memory" 1
+        (List.length (Board.list_sub_boards store));
+      Alcotest.(check string) "refused publication preserves the original actual rows"
+        original_bytes (read_bytes (Filename.concat backup (Filename.basename path))));
+  ignore (require_board (create_topic "second"));
+  Alcotest.(check int) "restoring the actual directory permits a new publication" 2
+    (List.length (Board.list_sub_boards store));
+  let slugs = read_bytes path |> String.split_on_char '\n'
+    |> List.filter (fun line -> not (String.equal line ""))
+    |> List.map (fun line -> Yojson.Safe.(Util.(from_string line |> member "slug" |> to_string)))
+    |> List.sort String.compare in
+  Alcotest.(check (list string)) "both actual sub-board rows survive restoration"
+    ["first"; "second"] slugs
+
+let test_base_path_alias base_path _workspace =
+  let alias = Filename.concat base_path "root-alias" in
+  Unix.symlink base_path alias;
+  Fun.protect ~finally:(fun () -> Unix.unlink alias) (fun () ->
+    let store = reloaded alias 0 in
+    let post = require_post (create store "physical BasePath alias is allowed") in
+    let fresh = reloaded base_path 1 in
+    Alcotest.(check string) "alias and canonical BasePath share the real source"
+      post.body (current fresh post).body)
+
+let test_two_missing_observations base_path _workspace =
+  let first = make_store base_path and second = make_store base_path in
   load_posts first 0;
   load_posts second 0;
   let post = require_post (create first "first actual append") in
@@ -146,7 +230,7 @@ let test_two_missing_observations workspace =
   Alcotest.(check string) "reload projects the actual other writer first"
     post.body (current second post).body;
   let next = require_post (create second "explicitly reloaded request") in
-  let fresh = reloaded workspace 2 in
+  let fresh = reloaded base_path 2 in
   Alcotest.(check string) "reloaded authority preserved the first post"
     post.body (current fresh post).body;
   Alcotest.(check string) "reloaded authority admitted the next post"
@@ -179,8 +263,8 @@ let check_dangling_posts ~path ~target ~binding =
     (Sys.readdir (Filename.dirname path) |> Array.exists (fun name ->
        String.starts_with ~prefix:".private_jsonl_" name))
 
-let test_missing_then_dangling_source workspace =
-  let store = make_store workspace in
+let test_missing_then_dangling_source base_path _workspace =
+  let store = make_store base_path in
   load_posts store 0;
   with_dangling_posts store (fun ~path ~target ~binding ->
     require_pre_effect (create store "must not replace an existing dangling source");
@@ -192,12 +276,12 @@ let test_missing_then_dangling_source workspace =
     Unix.unlink path;
     let post = require_post (create store "retry after actual alias removal") in
     check_observed_bytes store;
-    let fresh = reloaded workspace 1 in
+    let fresh = reloaded base_path 1 in
     Alcotest.(check string) "only the later explicit publication survives"
       post.body (current fresh post).body)
 
-let test_initial_dangling_source workspace =
-  let store = make_store workspace in
+let test_initial_dangling_source base_path workspace =
+  let store = make_store base_path in
   Fs_compat.mkdir_p workspace;
   with_dangling_posts store (fun ~path ~target ~binding ->
     refuse_load store;
@@ -227,8 +311,8 @@ let tamper_same_cursor store (post : Board.post) =
     stat_before.Unix.st_size stat_after.Unix.st_size;
   bytes
 
-let test_same_cursor_changed_bytes workspace =
-  let store = make_store workspace in
+let test_same_cursor_changed_bytes base_path _workspace =
+  let store = make_store base_path in
   load_posts store 0;
   let post = require_post (create store "body-aaaa") in
   let path = Board.persist_path store in
@@ -244,8 +328,8 @@ let test_same_cursor_changed_bytes workspace =
   ignore (require_board (edit store post "authorized after explicit reload"));
   check_observed_bytes store
 
-let test_same_cursor_append_refused workspace =
-  let store = make_store workspace in
+let test_same_cursor_append_refused base_path _workspace =
+  let store = make_store base_path in
   load_posts store 0;
   let post = require_post (create store "body-aaaa") in
   let bytes = tamper_same_cursor store post in
@@ -255,15 +339,15 @@ let test_same_cursor_append_refused workspace =
   Alcotest.(check string) "refused append does not adopt external content"
     post.body (current store post).body
 
-let test_partial_then_missing workspace =
-  let writer = make_store workspace in
+let test_partial_then_missing base_path _workspace =
+  let writer = make_store base_path in
   load_posts writer 0;
   let first = require_post (create writer "accepted before malformed row") in
   let second = require_post (create writer "accepted after first row") in
   let path = Board.persist_path writer in
   let bytes = read_bytes path ^ "{}\n" in
   write_bytes path bytes;
-  let reader = make_store workspace in
+  let reader = make_store base_path in
   refuse_load reader;
   Alcotest.(check string) "first valid display row retained"
     first.body (current reader first).body;
@@ -281,14 +365,14 @@ let test_partial_then_missing workspace =
   Alcotest.(check bool) "missing after refusal never recreates a payload" false
     (Sys.file_exists path)
 
-let test_torn_tail_is_not_recovered workspace =
-  let writer = make_store workspace in
+let test_torn_tail_is_not_recovered base_path _workspace =
+  let writer = make_store base_path in
   load_posts writer 0;
   ignore (require_post (create writer "complete row before a torn tail"));
   let path = Board.persist_path writer in
   let bytes = read_bytes path ^ "{\"id\":\"unfinished" in
   write_bytes path bytes;
-  let reader = make_store workspace in
+  let reader = make_store base_path in
   refuse_load reader;
   require_pre_effect (create reader "a normal request cannot recover a tail");
   Alcotest.(check string) "ordinary admission leaves every torn-tail byte" bytes
@@ -297,8 +381,8 @@ let test_torn_tail_is_not_recovered workspace =
   Alcotest.(check string) "re-reading is not startup tail repair" bytes
     (read_bytes path)
 
-let test_present_disappearance_is_retained workspace =
-  let store = make_store workspace in
+let test_present_disappearance_is_retained base_path _workspace =
+  let store = make_store base_path in
   load_posts store 0;
   let post = require_post (create store "established present source") in
   load_posts store 1;
@@ -310,8 +394,8 @@ let test_present_disappearance_is_retained workspace =
   require_pre_effect (create store "repeated Missing is not fresh authority");
   Alcotest.(check bool) "no payload was recreated" false (Sys.file_exists path)
 
-let test_retained_snapshot_is_stale workspace =
-  let store = make_store workspace in
+let test_retained_snapshot_is_stale base_path _workspace =
+  let store = make_store base_path in
   load_posts store 0;
   let post = require_post (create store "before captured snapshot") in
   let snapshot = Board.with_persist_lock store (fun () ->
@@ -336,8 +420,8 @@ let durable_delete store (post : Board.post) =
   | Ok (Board.Deletion_persistence_pending detail) -> Alcotest.fail detail
   | Error error -> Alcotest.fail (Board.show_board_error error)
 
-let test_cross_writer_projection workspace =
-  let store = make_store workspace in
+let test_cross_writer_projection base_path _workspace =
+  let store = make_store base_path in
   load_posts store 0;
   load_comments store 0;
   let topic = require_board (Board.create_sub_board store ~slug:"source-topic"
@@ -368,7 +452,7 @@ let test_cross_writer_projection workspace =
   let order store = Board.list_posts store ()
     |> List.map (fun (post : Board.post) -> Board.Post_id.to_string post.id) in
   let expected_order = order store in
-  let fresh = reloaded workspace 2 in
+  let fresh = reloaded base_path 2 in
   load_comments fresh 1;
   let saved = current fresh first in
   Alcotest.(check string) "edit body survives every writer" "edited first post" saved.body;
@@ -389,19 +473,20 @@ let test_cross_writer_projection workspace =
     (comment.content, 1) (saved_comment.content, saved_comment.votes_up);
   Alcotest.(check string) "second post remains unchanged" second.body (current fresh second).body;
   durable_delete store first;
-  let after_first_delete = reloaded workspace 1 in
+  let after_first_delete = reloaded base_path 1 in
   Alcotest.(check string) "first delete preserves the second row"
     second.body (current after_first_delete second).body;
   durable_delete store second;
   Alcotest.(check string) "last delete persists the empty snapshot" ""
     (read_bytes (Board.persist_path store));
-  let empty = reloaded workspace 0 in
+  let empty = reloaded base_path 0 in
   ignore (require_post (create empty "write after a real empty snapshot"));
   check_observed_bytes empty
 
 type cleanup_fault = Ordinary_close | Timeout_close | Allocation_close
 
-let fault_store workspace =
+let fault_store base_path =
+  let workspace = Common.masc_dir_from_base_path ~base_path in
   let lock_path = Fs_compat.private_jsonl_lock_path
     (Paths.posts_file ~workspace_masc_dir:workspace) in
   let close_fault = ref None and sync_fault = ref false in
@@ -428,7 +513,7 @@ let fault_store workspace =
         | false, (Some _ | None) | true, None -> ())
     } in
   let store = Board.create_store_with_posts_io_for_testing
-    ~workspace_masc_dir:workspace ~io () in
+    ~base_path:base_path ~io () in
   store, close_fault, sync_fault, close_failures, sync_failures
 
 let expect_reserved fault operation =
@@ -450,8 +535,8 @@ let check_known_settlement store =
   | Board.Posts_unobserved | Board.Posts_refused _ | Board.Posts_unsettled _ ->
     Alcotest.fail "known success lost its source or cleanup diagnostic"
 
-let test_missing_read_preserves_reserved_cleanup workspace =
-  let store, armed, _, fired, _ = fault_store workspace in
+let test_missing_read_preserves_reserved_cleanup base_path _workspace =
+  let store, armed, _, fired, _ = fault_store base_path in
   load_posts store 0;
   ignore (require_post (create store "actual Present before disappearance"));
   Unix.unlink (Board.persist_path store);
@@ -469,8 +554,8 @@ let test_missing_read_preserves_reserved_cleanup workspace =
   Alcotest.(check bool) "reserved read refusal does not recreate payload" false
     (Sys.file_exists (Board.persist_path store))
 
-let test_append_cleanup fault workspace =
-  let store, armed, _, fired, _ = fault_store workspace in
+let test_append_cleanup fault base_path _workspace =
+  let store, armed, _, fired, _ = fault_store base_path in
   load_posts store 0;
   armed := Some fault;
   (match fault with
@@ -483,15 +568,15 @@ let test_append_cleanup fault workspace =
   let post = match Board.list_posts store () with
     | [post] -> post
     | [] | _ :: _ -> Alcotest.fail "known append was not published exactly once" in
-  let fresh = reloaded workspace 1 in
+  let fresh = reloaded base_path 1 in
   Alcotest.(check string) "fresh reload sees the committed append"
     post.body (current fresh post).body;
   ignore (require_post (create store "next append without replay"));
-  ignore (reloaded workspace 2);
+  ignore (reloaded base_path 2);
   Alcotest.(check int) "one-shot seam is no longer armed" 1 !fired
 
-let test_rewrite_cleanup fault workspace =
-  let store, armed, _, fired, _ = fault_store workspace in
+let test_rewrite_cleanup fault base_path _workspace =
+  let store, armed, _, fired, _ = fault_store base_path in
   load_posts store 0;
   let post = require_post (create store "before committed rewrite") in
   armed := Some fault;
@@ -504,12 +589,12 @@ let test_rewrite_cleanup fault workspace =
   check_observed_bytes store;
   Alcotest.(check string) "known rewrite published before reserved rethrow"
     "committed rewrite" (current store post).body;
-  let fresh = reloaded workspace 1 in
+  let fresh = reloaded base_path 1 in
   Alcotest.(check string) "fresh reload sees exactly one rewritten row"
     "committed rewrite" (current fresh post).body;
   ignore (require_board (edit store post "next rewrite without replay"));
   ignore (require_post (create store "append after rewrite settlement"));
-  let next = reloaded workspace 2 in
+  let next = reloaded base_path 2 in
   Alcotest.(check string) "persistence mutex remains usable"
     "next rewrite without replay" (current next post).body;
   Alcotest.(check int) "cleanup injection stayed one-shot" 1 !fired
@@ -524,8 +609,8 @@ let require_unknown_parent_sync store =
   | Board.Posts_unsettled _ ->
     Alcotest.fail "rename followed by parent-sync failure lost its unknown outcome"
 
-let test_unknown_rewrite_cannot_be_read_clear workspace =
-  let store, _, armed, _, fired = fault_store workspace in
+let test_unknown_rewrite_cannot_be_read_clear base_path _workspace =
+  let store, _, armed, _, fired = fault_store base_path in
   load_posts store 0;
   let post = require_post (create store "before unknown rewrite") in
   armed := true;
@@ -533,7 +618,7 @@ let test_unknown_rewrite_cannot_be_read_clear workspace =
   Alcotest.(check int) "actual post-rename parent-sync hook failed once" 1 !fired;
   require_unknown_parent_sync store;
   let bytes = read_bytes (Board.persist_path store) in
-  let disk_view = reloaded workspace 1 in
+  let disk_view = reloaded base_path 1 in
   Alcotest.(check string) "rename published the new bytes, not durable proof"
     "published but durability unknown" (current disk_view post).body;
   refuse_load store;
@@ -561,8 +646,8 @@ let check_posts_not_replayed store cursor identity =
     identity (posts_identity store);
   check_observed_bytes store
 
-let test_flush_cleanup_preserves_later_work workspace =
-  let store, armed, _, fired, _ = fault_store workspace in
+let test_flush_cleanup_preserves_later_work base_path _workspace =
+  let store, armed, _, fired, _ = fault_store base_path in
   load_posts store 0;
   load_comments store 0;
   let post = require_post (create store "flush batch source") in
@@ -576,7 +661,7 @@ let test_flush_cleanup_preserves_later_work workspace =
     ignore (require_board (Board.vote_comment store ~voter:"batch-comment-voter"
       ~comment_id ~direction))) [Board.Up; Board.Down; Board.Up];
   require_board (Board.set_thread_id store ~post_id ~thread_id:"flush-batch-thread");
-  let before = reloaded workspace 1 in
+  let before = reloaded base_path 1 in
   load_comments before 1;
   let old_comment = require_board (Board.get_comment before ~comment_id) in
   Alcotest.(check int) "comment counter is not yet in its on-disk snapshot"
@@ -595,7 +680,7 @@ let test_flush_cleanup_preserves_later_work workspace =
      obligations. An actual second flush must finish them in either case. *)
   Board.flush_dirty store;
   check_posts_not_replayed store cursor identity;
-  let fresh = reloaded workspace 1 in
+  let fresh = reloaded base_path 1 in
   load_comments fresh 1;
   let saved_post = current fresh post in
   Alcotest.(check (pair int int)) "posts counters survive interrupted batch"
@@ -609,8 +694,8 @@ let test_flush_cleanup_preserves_later_work workspace =
     (jsonl_row_count votes_path);
   Alcotest.(check int) "cleanup injection stayed one-shot" 1 !fired
 
-let test_delete_cleanup_preserves_dependents workspace =
-  let store, armed, _, fired, _ = fault_store workspace in
+let test_delete_cleanup_preserves_dependents base_path _workspace =
+  let store, armed, _, fired, _ = fault_store base_path in
   load_posts store 0;
   load_comments store 0;
   let post = require_post (create store "delete batch source") in
@@ -652,15 +737,15 @@ let test_delete_cleanup_preserves_dependents workspace =
   List.iter (fun path ->
     Alcotest.(check string) "dependent deletion was completed or retried" ""
       (read_bytes path)) dependents;
-  let fresh = reloaded workspace 0 in
+  let fresh = reloaded base_path 0 in
   load_comments fresh 0;
   Alcotest.(check int) "fresh reload has no orphan comments" 0
     (List.length (Board.list_comments fresh ()));
   ignore (require_post (create store "next write after settled deletion"));
-  ignore (reloaded workspace 1)
+  ignore (reloaded base_path 1)
 
-let test_nonwrite_cleanup_preserves_reload workspace =
-  let store, armed, _, fired, _ = fault_store workspace in
+let test_nonwrite_cleanup_preserves_reload base_path _workspace =
+  let store, armed, _, fired, _ = fault_store base_path in
   load_posts store 0;
   let post = require_post (create store "body-aaaa") in
   let bytes = tamper_same_cursor store post in
@@ -688,10 +773,10 @@ let test_nonwrite_cleanup_preserves_reload workspace =
     "body-bbbb" (current store post).body;
   ignore (require_post (create store "new write after nonwrite cleanup"));
   check_observed_bytes store;
-  ignore (reloaded workspace 2)
+  ignore (reloaded base_path 2)
 
-let test_fusion_cleanup_preserves_origin_mutex workspace =
-  let store, armed, _, fired, _ = fault_store workspace in
+let test_fusion_cleanup_preserves_origin_mutex base_path _workspace =
+  let store, armed, _, fired, _ = fault_store base_path in
   load_posts store 0;
   let create_once run_id =
     let origin : Board.post_origin =
@@ -722,7 +807,7 @@ let test_fusion_cleanup_preserves_origin_mutex workspace =
   let next = match require_post (create_once "b1-cleanup-next") with
     | Board.Post_created creation -> creation.post
     | Board.Post_already_present _ -> Alcotest.fail "new Fusion run reused the old post" in
-  let fresh = reloaded workspace 2 in
+  let fresh = reloaded base_path 2 in
   Alcotest.(check string) "original Fusion post survives the next run"
     post.body (current fresh post).body;
   Alcotest.(check string) "new Fusion run commits after reserved cleanup"
@@ -736,7 +821,7 @@ let test_non_eio_source_inspection () =
     let path = Eio_main.run (fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       Fun.protect ~finally:Fs_compat.clear_fs (fun () ->
-        let store = make_store workspace in
+        let store = make_store base in
         load_posts store 0;
         ignore (require_post (create store "actual preflight row"));
         Board.persist_path store)) in
@@ -787,6 +872,14 @@ let () =
             test_non_eio_source_inspection ]
     ; "source admission",
         [ case "explicit posts load precedes publication" test_explicit_load_before_create
+        ; case "failed BasePath capture never heals" test_failed_root_capture_stays_refused
+        ; case "replaced BasePath cannot rearm a store"
+            (test_directory_replacement_stays_refused ~replace_root:true)
+        ; case "replaced state directory cannot rearm a store"
+            (test_directory_replacement_stays_refused ~replace_root:false)
+        ; case "sub-board-only stores retain the created directory"
+            test_sub_board_only_retains_created_directory
+        ; case "BasePath aliases preserve actual source identity" test_base_path_alias
         ; case "two Missing observations cannot auto-adopt" test_two_missing_observations
         ; case "Missing cannot replace a later dangling source" test_missing_then_dangling_source
         ; case "initial dangling source is never Missing" test_initial_dangling_source

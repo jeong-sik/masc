@@ -45,13 +45,14 @@ val flush_interval_sec : float
     (1024 posts / 4096 comments / 2048 vote-log entries),
     fresh [Eio.Mutex], cold caches, and an [Eio.Stream]
     [flusher_inbox] capped by the persistence-layer flusher inbox capacity.
-    Canonicalizes the explicit state directory once, anchoring relative input;
-    an empty input raises [Invalid_argument]. This creates no payload files
-    and grants no ongoing symlink/resource identity or loaded-source proof. *)
-val create_store : workspace_masc_dir:string -> unit -> store
+    Captures the explicit existing BasePath and its no-follow state boundary,
+    anchoring relative input; empty input raises [Invalid_argument]. No directory
+    or payload is created. A failed capture remains refused on this store;
+    prepare the root before construction, then explicitly load sources. *)
+val create_store : base_path:string -> unit -> store
 
 val create_store_with_posts_io_for_testing :
-  workspace_masc_dir:string ->
+  base_path:string ->
   io:Fs_compat.private_jsonl_transaction_io_for_testing -> unit -> store
 (** The same production store and posts writer with an immutable, store-local
     Fs descriptor-settlement seam. [io.before_sync_parent] covers stable-lock
@@ -101,6 +102,7 @@ val sweep : store -> int * int
 (** Resolves the configured base path. Store persistence uses its captured
     directory instead of consulting this configuration helper. *)
 val board_base_path : unit -> string
+val workspace_masc_dir : store -> string
 
 (** Path to the posts JSONL log in the store's captured workspace. *)
 val persist_path : store -> string
@@ -111,9 +113,8 @@ val comments_path : store -> string
 (** Path to the reactions snapshot in the store's captured workspace. *)
 val reactions_path : store -> string
 
-(** Idempotent captured-directory creation; called before
-    every JSONL append. *)
-val ensure_masc_dir : store -> unit
+(** Checked directory preparation inside a persistence-protected writer. *)
+val ensure_masc_dir : where:string -> store -> (unit, board_error) result
 
 (** {1 Append-only persistence} *)
 
@@ -148,7 +149,7 @@ val capture_posts_snapshot : ?replacement:post -> store -> posts_snapshot
 val save_posts_snapshot : store -> posts_snapshot -> posts_write_outcome
 (** Capture under persist then state; save retains persist and acquires no
     recursive Board lock. A stale or unreadable source cannot authorize save.
-    Snapshots bind the canonical path and exact observation, not a store-owner
+    Snapshots bind the physical workspace and exact source observation, not a store-owner
     token; trusted callers sharing both may pass a captured snapshot. *)
 val require_posts_source_readable : store -> (unit, board_error) result
 (** Pure source gate; caller holds the persistence mutex. Refused and unsettled

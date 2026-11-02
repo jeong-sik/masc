@@ -156,9 +156,16 @@ type initialization_error =
       { active_workspace_masc_dir : string
       ; requested_workspace_masc_dir : string
       }
+  | Workspace_binding_refused of Board_workspace_binding.rejection
+
+val check_store_workspace :
+  base_path:string -> Board.store -> (unit, initialization_error) result
+(** Check the explicit physical BasePath and its no-follow state boundary
+    against an existing store. Installs no lookup or flusher. Reserved causes
+    propagate outside Board locks. *)
 
 val init_jsonl :
-  workspace_masc_dir:string ->
+  base_path:string ->
   recipient_lookup:Recipient_lookup.t ->
   unit ->
   (unit, initialization_error) result
@@ -170,7 +177,7 @@ val init_jsonl :
     A read can start the backend before this runs.  That backend has no lookup
     and its writes refuse every address; this call then installs [recipient_lookup]
     into it. A backend that already has a lookup keeps it. The requested root
-    is canonicalized once (empty input raises [Invalid_argument]) and must
+    is captured as an explicit BasePath (empty input raises [Invalid_argument]) and must
     match the startup-bound store before this call
     installs a lookup or starts a flusher; a mismatch returns [Error] without
     switching the retained backend. *)

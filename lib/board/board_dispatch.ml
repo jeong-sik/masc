@@ -44,6 +44,7 @@ type initialization_error =
       { active_workspace_masc_dir : string
       ; requested_workspace_masc_dir : string
       }
+  | Workspace_binding_refused of Board_workspace_binding.rejection
 
 (** Marker carried inside [Active] tracking whether the flusher fiber has
     been spawned for the current backend.  [Eio.Fiber.fork_daemon] returns
@@ -273,25 +274,43 @@ let warn_comment_cap_once () =
   | Some msg -> Log.BoardLog.warn "%s" msg
   | None -> ()
 
-let init_jsonl ~workspace_masc_dir ~recipient_lookup () =
-  let requested_workspace_masc_dir =
-    Board_paths.capture_workspace_masc_dir workspace_masc_dir
-  in
-  let validate_workspace (store : Board.store) =
-    if String.equal store.workspace_masc_dir requested_workspace_masc_dir
-    then Ok ()
-    else
-      Error
-        (Workspace_mismatch
-           { active_workspace_masc_dir = store.workspace_masc_dir
-           ; requested_workspace_masc_dir
-           })
-  in
+let workspace_result = function
+  | Ok value -> Ok value
+  | Error rejection ->
+    Option.iter (fun (exception_, backtrace) ->
+      Board_posts_source.propagate_reserved exception_ backtrace)
+      (Board_workspace_binding.raised rejection);
+    Error (Workspace_binding_refused rejection)
+
+let validate_workspace requested (store : Board.store) =
+  let open Result.Syntax in
+  let* requested_observation = workspace_result (Board_workspace_binding.observe requested) in
+  let* active_observation = workspace_result
+    (Board.with_persist_lock store (fun () -> Board_paths.observe_workspace store)) in
+  if not (Board_workspace_binding.same_root active_observation requested_observation) then
+    Error (Workspace_mismatch
+      { active_workspace_masc_dir = Board.workspace_masc_dir store
+      ; requested_workspace_masc_dir = Board_workspace_binding.workspace_masc_dir requested })
+  else
+    let* () = workspace_result
+      (Board_workspace_binding.revalidate requested requested_observation) in
+    workspace_result
+      (Board_workspace_binding.revalidate store.workspace_binding active_observation)
+
+let check_store_workspace ~base_path store =
+  validate_workspace (Board_workspace_binding.capture ~base_path) store
+
+let init_jsonl ~base_path ~recipient_lookup () =
+  let open Result.Syntax in
+  let requested = Board_workspace_binding.capture ~base_path in
+  (* Refuse an invalid incoming root before forcing global or starting actors.
+     Global loading can create metadata, so each attempt observes it anew. *)
+  let* _ = workspace_result (Board_workspace_binding.observe requested) in
   let installed = Lookup_installed recipient_lookup in
   let rec install () =
     match Atomic.get backend_state with
     | Active ((Jsonl store as backend), flusher, lookup) as current ->
-      (match validate_workspace store with
+      (match validate_workspace requested store with
        | Error _ as error -> error
        | Ok () ->
          (match lookup with
@@ -309,7 +328,7 @@ let init_jsonl ~workspace_masc_dir ~recipient_lookup () =
             else install ()))
     | Uninitialized ->
       let store = Board.global () in
-      (match validate_workspace store with
+      (match validate_workspace requested store with
        | Error _ as error -> error
        | Ok () ->
          let backend = Active (Jsonl store, false, installed) in

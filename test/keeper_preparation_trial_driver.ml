@@ -965,8 +965,7 @@ let run_trial ~base ~experiment ~strategy ~prompt_root ~counter ~receipt ~sw ~en
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
   Result.get_ok (Board_dispatch.init_jsonl
-    ~workspace_masc_dir:(Common.masc_dir_from_base_path
-      ~base_path:(Env_config_core.base_path ()))
+    ~base_path:(Env_config_core.base_path ())
     ~recipient_lookup:Recipient_lookup.none_declared ());
   ignore (Board_dispatch.create_post ~author:"synthetic-user" ~content:"unaddressed fixture baseline"
       ~post_kind:Board.Human_post ~visibility:Board.Internal () |> get Board.Post_publication_failure.to_string);

@@ -190,8 +190,7 @@ data: [DONE]
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
   Result.get_ok (Board_dispatch.init_jsonl
-    ~workspace_masc_dir:(Common.masc_dir_from_base_path
-      ~base_path:(Env_config_core.base_path ()))
+    ~base_path:(Env_config_core.base_path ())
     ~recipient_lookup:every_name_declared ());
   (* Initialize at an existing head, then deliberately miss the live hook. *)
   ignore (Board_dispatch.create_post ~author:"synthetic-user" ~content:"cursor baseline"

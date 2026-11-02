@@ -83,8 +83,7 @@ let with_fixture run =
       Masc.Board.reset_global_for_test ();
       Masc.Board_dispatch.reset_for_test ();
       Result.get_ok (Masc.Board_dispatch.init_jsonl
-        ~workspace_masc_dir:(Common.masc_dir_from_base_path
-          ~base_path:(Env_config_core.base_path ()))
+        ~base_path:(Env_config_core.base_path ())
         ~recipient_lookup:Masc.Recipient_lookup.none_declared ());
       let router = Server_routes_http_routes_activity.add_routes ~sw
           ~clock:(Eio.Stdenv.clock env) (Http.Router.create ())

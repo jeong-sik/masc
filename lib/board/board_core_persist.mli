@@ -33,14 +33,14 @@ val record_persist_error : where:string -> string -> unit
     their callers. *)
 val persist_io_error : where:string -> string -> ('a, board_error) result
 
-val create_store : workspace_masc_dir:string -> unit -> store
-(** Capture the explicitly supplied state directory with
-    [Fs_compat.realpath_lenient] once. Relative inputs are anchored at capture;
-    the empty string raises [Invalid_argument]. No payload files are created.
-    The binding is a path, not an ongoing symlink or resource-identity lease. *)
+val create_store : base_path:string -> unit -> store
+(** Capture one explicit BasePath, including its original anchored spelling and
+    physical-root result. Exactly empty input raises [Invalid_argument]. No
+    directory or payload is created; a failed capture grants no write authority.
+    Prepare the root before construction, then explicitly load sources. *)
 
 val create_store_with_posts_io_for_testing :
-  workspace_masc_dir:string ->
+  base_path:string ->
   io:Fs_compat.private_jsonl_transaction_io_for_testing -> unit -> store
 (** The same production store and posts writer with an immutable, store-local
     Fs descriptor-settlement seam. [io.before_sync_parent] covers stable-lock
@@ -73,12 +73,16 @@ val sweep_schedule_timestamps_for_test : store -> float * float
 
 val board_base_path : unit -> string
 val board_masc_dir : unit -> string
+val workspace_masc_dir : store -> string
 val persist_path : store -> string
 val comments_path : store -> string
 val reactions_path : store -> string
 val sub_boards_path : store -> string
 val ensure_dir : string -> unit
-val ensure_masc_dir : store -> unit
+val ensure_masc_dir : where:string -> store -> (unit, board_error) result
+(** Checked directory preparation inside a persistence-protected writer.
+    [where] retains the requested operation in its error/log diagnostic.
+    A reserved precondition failure uses the existing deferred settlement carrier. *)
 
 type posts_snapshot
 (** Frozen candidate rows and their exact expected source observation. *)
@@ -86,7 +90,7 @@ val capture_posts_snapshot : ?replacement:post -> store -> posts_snapshot
 val save_posts_snapshot : store -> posts_snapshot -> posts_write_outcome
 (** Capture under persist then state; save retains persist and acquires no
     recursive Board lock. A stale or unreadable source cannot authorize save.
-    Binding is by canonical path and exact observation, not a store-owner token. *)
+    Binding uses the physical workspace and exact source observation, not a store-owner token. *)
 val require_posts_source_readable : store -> (unit, board_error) result
 (** Pure source gate; caller holds the persistence mutex. Refused and unsettled
     sources never grant a write. Definite transient nonwrites retain the expected

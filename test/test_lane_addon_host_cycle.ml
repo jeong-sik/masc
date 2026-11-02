@@ -186,8 +186,7 @@ let with_installation ?await_change ?deliver_reply ?during_delivery ?owner_setup
                 Board.reset_global_for_test ();
                 Board_dispatch.reset_for_test ();
                 Result.get_ok (Board_dispatch.init_jsonl
-                  ~workspace_masc_dir:(Common.masc_dir_from_base_path
-                    ~base_path:(Env_config_core.base_path ()))
+                  ~base_path:(Env_config_core.base_path ())
                   ~recipient_lookup:Recipient_lookup.none_declared ());
                 let state = { mode = ref mode; resolutions = ref 0 } in
                 Runtime.register_exact_runner ~authorize_request (make_runner state);

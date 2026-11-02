@@ -20,7 +20,7 @@ let load_all_persisted store =
 let new_global_lazy () =
   Eio.Lazy.from_fun ~cancel:`Protect (fun () ->
     let store = Board_core.create_store
-      ~workspace_masc_dir:(Board_paths.board_masc_dir ()) () in
+      ~base_path:(Board_paths.board_base_path ()) () in
     load_all_persisted store;
     store)
 

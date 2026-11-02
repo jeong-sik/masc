@@ -567,8 +567,7 @@ pointer = "/profile"
       Board.reset_global_for_test ();
       Board_dispatch.reset_for_test ();
       Result.get_ok (Board_dispatch.init_jsonl
-        ~workspace_masc_dir:(Common.masc_dir_from_base_path
-          ~base_path:(Env_config_core.base_path ()))
+        ~base_path:(Env_config_core.base_path ())
         ~recipient_lookup:Recipient_lookup.none_declared ());
       match Board_dispatch.create_post ~author:"fixture" ~content:(Keeper_types_profile_sandbox.sandbox_profile_to_string (make_meta ()).sandbox_profile ^ " joined evidence")
         ~post_kind:Board.Human_post () with

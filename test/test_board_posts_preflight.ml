@@ -70,7 +70,8 @@ let create store body =
 let canonical_row base =
   let seed = Filename.concat base "producer" in
   in_eio (fun () ->
-    let store = Board.create_store ~workspace_masc_dir:(workspace seed) () in
+    Fs_compat.mkdir_p seed;
+    let store = Board.create_store ~base_path:seed () in
     (match Rows.load_persisted_posts store with
      | Ok 0 -> ()
      | Ok _ | Error _ -> Alcotest.fail "fresh producer source did not load Missing");
@@ -305,7 +306,7 @@ let test_decoder_and_consumer_agree base =
     Unix.mkdir live 0o750;
     let _, live_path = prepare live (wire row) in
     in_eio (fun () ->
-      let store = Board.create_store ~workspace_masc_dir:(workspace live) () in
+      let store = Board.create_store ~base_path:live () in
       let result = rejection_delta (label ^ " loader diagnostics") diagnostics
           (fun () -> Rows.load_persisted_posts store) in
       match accepted, result with
@@ -375,7 +376,7 @@ let test_inspection_grants_no_live_authority base =
   let dir, path = prepare base (wire row) in
   let before = file_state path in
   in_eio (fun () ->
-    let store = Board.create_store ~workspace_masc_dir:(workspace base) () in
+    let store = Board.create_store ~base_path:base () in
     check_present ~accepted:1 ~errors:0 (inspect base);
     check_report ~rows:1 ~refused:0 (scan base);
     (match store.Board.posts_source with

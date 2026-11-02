@@ -12,6 +12,7 @@ let fresh_test_base_path () =
       (Filename.get_temp_dir_name ())
       (Printf.sprintf "masc-test-board-recipient-%06x" (Random.bits ()))
   in
+  Fs_compat.mkdir_p dir;
   Unix.putenv "MASC_BASE_PATH" dir;
   dir
 ;;
@@ -30,8 +31,7 @@ let started ~lookup f () =
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
   Result.get_ok (Board_dispatch.init_jsonl
-    ~workspace_masc_dir:(Common.masc_dir_from_base_path
-      ~base_path:(Env_config_core.base_path ()))
+    ~base_path:(Env_config_core.base_path ())
     ~recipient_lookup:lookup ());
   f ()
 ;;
@@ -708,8 +708,7 @@ let test_an_unchanged_legacy_edit_resolves_its_missing_audience =
     Board.reset_global_for_test ();
     Board_dispatch.reset_for_test ();
     Result.get_ok (Board_dispatch.init_jsonl
-      ~workspace_masc_dir:(Common.masc_dir_from_base_path
-        ~base_path:(Env_config_core.base_path ()))
+      ~base_path:(Env_config_core.base_path ())
       ~recipient_lookup:lookup ());
     let legacy_post = get (Board_dispatch.get_post ~post_id:(post_id post)) in
     check bool "the old row has no audience" true (Option.is_none legacy_post.audience);
@@ -750,8 +749,7 @@ let test_an_unchanged_legacy_edit_resolves_its_missing_audience =
     Board.reset_global_for_test ();
     Board_dispatch.reset_for_test ();
     Result.get_ok (Board_dispatch.init_jsonl
-      ~workspace_masc_dir:(Common.masc_dir_from_base_path
-        ~base_path:(Env_config_core.base_path ()))
+      ~base_path:(Env_config_core.base_path ())
       ~recipient_lookup:lookup ());
     let reloaded = get (Board_dispatch.get_post ~post_id:(post_id post)) in
     check (list string) "the new audience survives reload" [ "alice" ] (target_names reloaded.audience))
@@ -819,8 +817,7 @@ let test_a_backend_started_by_a_read_refuses_addresses_until_a_lookup_is_install
    | error -> fail (Board.show_board_error error));
   ignore (creation (write "no address here"));
   Result.get_ok (Board_dispatch.init_jsonl
-    ~workspace_masc_dir:(Common.masc_dir_from_base_path
-      ~base_path:(Env_config_core.base_path ()))
+    ~base_path:(Env_config_core.base_path ())
     ~recipient_lookup:(declaring table) ());
   let { Board.post; _ } = creation (write "@alice hello") in
   check (list string) "the installed lookup is used" [ "alice" ] (target_names post.audience)
@@ -829,8 +826,7 @@ let test_a_backend_started_by_a_read_refuses_addresses_until_a_lookup_is_install
 let test_a_second_init_keeps_the_first_lookup =
   started ~lookup:(declaring table) (fun () ->
     Result.get_ok (Board_dispatch.init_jsonl
-      ~workspace_masc_dir:(Common.masc_dir_from_base_path
-        ~base_path:(Env_config_core.base_path ()))
+      ~base_path:(Env_config_core.base_path ())
       ~recipient_lookup:Recipient_lookup.none_declared ());
     let { Board.post; _ } = creation (write "@alice hello") in
     check (list string) "the first lookup stays" [ "alice" ] (target_names post.audience))

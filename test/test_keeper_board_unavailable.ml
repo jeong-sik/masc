@@ -893,6 +893,42 @@ let test_malformed_queued_comment_identity_is_a_failed_read () =
   refused "parent id" (queued ~comment_id:valid ~parent_id:(Some "not-a-comment-id"))
 ;;
 
+let test_malformed_queued_audience_is_a_failed_read () =
+  let module Signal = Keeper_world_observation_board_signal in
+  let queued targets : Keeper_event_queue.board_stimulus =
+    { kind = Keeper_event_queue.Post_created
+    ; author = "post-author"
+    ; title = "thread"
+    ; content = "queued post"
+    ; hearth = None
+    ; updated_at = None
+    ; audience = Some (Keeper_event_queue.Audience_targets targets)
+    }
+  in
+  List.iter
+    (fun targets ->
+       match
+         Signal.board_observation_of_board_stimulus
+           ~post_id:"p-queued"
+           (queued targets)
+       with
+       | Ok _ -> fail "a malformed queued audience became an observation"
+       | Error unavailable ->
+         check bool "the failure names the queued audience"
+           true (unavailable.Signal.operation = Signal.Parse_queued_audience);
+         check string "the failure names the queued post" "p-queued"
+           unavailable.Signal.post_id;
+         (match unavailable.Signal.error with
+          | Board.Read_invalid_id _ -> ()
+          | (Board.Read_post_not_found _
+            | Board.Read_comment_not_found _
+            | Board.Read_audience_not_pinned _
+            | Board.Read_source_unavailable _) as error ->
+            failf "malformed targets must be a permanent read failure: %s"
+              (Board.show_board_read_error error)))
+    [ []; [ "../not-a-keeper" ]; [ "alpha"; "../not-a-keeper" ] ]
+;;
+
 let () =
   run
     "keeper_board_unavailable"
@@ -949,6 +985,10 @@ let () =
             "a malformed queued comment identity is a failed read"
             `Quick
             test_malformed_queued_comment_identity_is_a_failed_read
+        ; test_case
+            "a malformed queued audience is a permanent failed read"
+            `Quick
+            test_malformed_queued_audience_is_a_failed_read
         ; test_case
             "queued comment keeps its author and body"
             `Quick

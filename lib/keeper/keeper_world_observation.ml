@@ -1568,7 +1568,15 @@ let collect_board_events_with_cursor_policy
             (match route_signal ~classified ~board_audience signal with
              | Error (Source_unavailable ({ error = Board.Read_source_unavailable _; _ } as unavailable)) ->
                Error (Source_unavailable unavailable)
-             | Error (Source_unavailable unavailable) ->
+             | Error
+                 (Source_unavailable
+                    ({ error =
+                         (Board.Read_invalid_id _
+                         | Board.Read_post_not_found _
+                         | Board.Read_comment_not_found _
+                         | Board.Read_audience_not_pinned _)
+                     ; _
+                     } as unavailable)) ->
                log_and_count_unavailable ~context:"signal replay" unavailable;
                collect acc rest
              | Error (Delivery_failed _ as error) -> Error error
@@ -1594,7 +1602,15 @@ let collect_board_events_with_cursor_policy
         | Error (Source_unavailable ({ error = Board.Read_source_unavailable _; _ } as unavailable)) ->
           log_and_count_unavailable ~context:"source retained" unavailable;
           List.rev acc, last_cursor
-        | Error (Source_unavailable unavailable) ->
+        | Error
+            (Source_unavailable
+               ({ error =
+                    (Board.Read_invalid_id _
+                    | Board.Read_post_not_found _
+                    | Board.Read_comment_not_found _
+                    | Board.Read_audience_not_pinned _)
+                ; _
+                } as unavailable)) ->
           log_and_count_unavailable ~context:"signal replay" unavailable;
           consume_posts (Some next_cursor) acc rest
     in

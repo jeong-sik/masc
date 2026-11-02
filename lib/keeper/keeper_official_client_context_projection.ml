@@ -209,6 +209,7 @@ type carried_body =
   | World_state_sections of world_state_section list
 
 type carried_source = Message_context | Issued_system_observation of Prompt_block_id.t
+type rendered_source = Carried_source of carried_source | Host_notice
 
 (* One carried context a turn composes: its name and digest, whether a resume
    sends it again when the session holds the same bytes, the message a
@@ -697,11 +698,11 @@ let rec rendered_messages = function
          take_blocks [text] [id] (List.rev (sent_unchanged sent))
            (List.rev (sent_held_rows sent)) (List.rev (sent_notices sent)) rest in
        (extra_system_context_message (String.concat resume_section_separator (List.rev texts)),
-        Some (List.rev ids, List.rev unchanged, List.rev held_rows), Message_context)
-       :: List.rev_map (fun notice -> unchanged_sections_message notice, None, Message_context) notices
+        Some (List.rev ids, List.rev unchanged, List.rev held_rows), Carried_source Message_context)
+       :: List.rev_map (fun notice -> unchanged_sections_message notice, None, Host_notice) notices
        @ rendered_messages rest
-     | _ -> ((sent_item sent).message,None,(sent_item sent).source) :: rendered_messages rest)
-  | sent :: rest -> ((sent_item sent).message,None,(sent_item sent).source) :: rendered_messages rest
+     | _ -> ((sent_item sent).message,None,Carried_source (sent_item sent).source) :: rendered_messages rest)
+  | sent :: rest -> ((sent_item sent).message,None,Carried_source (sent_item sent).source) :: rendered_messages rest
 ;;
 
 let resume_prompt ~goal ~held ?composed_context messages =
@@ -719,9 +720,10 @@ let resume_prompt ~goal ~held ?composed_context messages =
       Keeper_context_submission_link.concat ~separator:""
         [Keeper_context_submission_link.literal (history_role_label message.role);
          (match source with
-          | Issued_system_observation block -> Keeper_context_submission_link.encoded_system_observation
+          | Host_notice -> Keeper_context_submission_link.literal (encode_history_message message)
+          | Carried_source (Issued_system_observation block) -> Keeper_context_submission_link.encoded_system_observation
               ~target:Official_resume_user ~block ~assembly:composed_context message
-          | Message_context -> Keeper_context_submission_link.encoded_carrier ~assembly:composed_context
+          | Carried_source Message_context -> Keeper_context_submission_link.encoded_carrier ~assembly:composed_context
               ~selected_blocks:(Option.map (fun (ids, _, _) -> ids) selection)
               ?omitted_sections:(Option.map (fun (_, unchanged, _) -> unchanged) selection)
               ?omitted_rows:(Option.map (fun (_, _, held_rows) -> held_rows) selection) message)])

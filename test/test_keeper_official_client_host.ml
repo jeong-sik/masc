@@ -642,6 +642,7 @@ let test_queued_input_preserves_explicit_terminal_outcomes () =
   let module Tools = Keeper_tools_agent_core in
   List.iter (fun terminal -> with_active_raw_trace (fun ~path:_ ~active ->
     let tool, _ = one_dynamic_tool ~active
+      ~descriptor:(Agent_core.Tool.terminal_descriptor Agent_core.Tool_contract.Effect_outcome_unknown)
       ~terminal_effect_state:(fun () -> terminal)
       ~on_tool_boundary:(fun ~tool_name ->
         Keeper_agent_run.For_testing.official_client_tool_boundary
@@ -1212,6 +1213,7 @@ let test_text_history_uses_the_single_envelope () =
   let expected =
     `Assoc
       [ "role", `String "user"
+      ; "origin", `String "conversation"
       ; ( "content_blocks"
         , `List
             [ `Assoc [ "type", `String "text"; "text", `String "first" ]
@@ -1282,6 +1284,7 @@ let test_typed_blocks_are_preserved_as_canonical_json () =
   let expected =
     `Assoc
       [ "role", `String "assistant"
+      ; "origin", `String "conversation"
       ; ( "content_blocks"
         , `List
             [ `Assoc
@@ -1327,6 +1330,7 @@ let test_tool_result_preserves_structured_content_and_failure_provenance () =
   let expected =
     `Assoc
       [ "role", `String "tool"
+      ; "origin", `String "conversation"
       ; ( "content_blocks"
         , `List
             [ `Assoc
@@ -1395,6 +1399,7 @@ let test_reasoning_and_media_blocks_are_strictly_preserved () =
   let expected =
     `Assoc
       [ "role", `String "assistant"
+      ; "origin", `String "conversation"
       ; ( "content_blocks"
         , `List
             [ `Assoc
@@ -1418,7 +1423,15 @@ let test_reasoning_and_media_blocks_are_strictly_preserved () =
                 ]
             ; `Assoc
                 [ "type", `String "document"
-                ; "source", source "base64" "application/pdf" "document-data"
+                ; ( "source"
+                  , `Assoc
+                      [ "type", `String "stored"
+                      ; "media_type", `String "application/pdf"
+                      ; ( "sha256"
+                        , `String
+                            "90353ba2095e5b5d3251b5caea6b27df1e7e98b56b578ad09e296a6f34e38ed0" )
+                      ; "bytes", `Int 13
+                      ] )
                 ]
             ; `Assoc
                 [ "type", `String "audio"
@@ -3104,6 +3117,9 @@ let test_a_partial_world_state_keeps_its_issuer_attribution () =
   let first = world_state_turn (world_state ()) in
   let second = world_state_turn (world_state ~fleet:"FLEET-TWO" ()) in
   let delivery = resume ~held:(start_holding first) second in
+  let notice = Host.unchanged_sections_notice delivery.unchanged_sections |> Result.get_ok in
+  check bool "the host notice remains in the encoded prompt" true
+    (contains delivery.prompt ("SYSTEM:\n" ^ Host.encode_history_message (carrier_message notice)));
   let binding =
     Keeper_context_submission_link.binding_to_json
       ~slot:Runtime_official_client_write.Whole_write

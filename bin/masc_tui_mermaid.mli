@@ -258,7 +258,8 @@ type rendered_with_status = {
 val render_with_status : cols:int -> string -> (rendered_with_status, failure) result
 (** Like {!render}, also reporting source ranges accepted but not drawn and
     their safe position beside the drawing. If no position preserves source
-    reading order, the renderer requests the source fallback. *)
+    reading order, the renderer requests the source fallback. It also requests
+    source when a label break would otherwise be normalized to a space. *)
 
 
 type semantic_position = { identity : label_identity; byte : int }

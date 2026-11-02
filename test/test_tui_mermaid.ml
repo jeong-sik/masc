@@ -687,6 +687,29 @@ let test_edge_label_line_collision_decisions () =
     let first, second = if label_first then labelled, other else other, labelled in
     collision ("stateDiagram-v2\nA\nB\nC\nD\n" ^ first ^ "\n" ^ second)) [true; false]
 
+let test_label_break_source_decisions () =
+  List.iter (fun source ->
+    match Mermaid.render_with_status ~cols:120 source, Mermaid.render_with_source_labels ~cols:120 source with
+    | Error (Mermaid.Unsupported _), Error (Mermaid.Unsupported _) -> ()
+    | _ -> Alcotest.failf "a normalized label break requires source fallback: %S" source)
+    [ "graph TD\nA[\"first<br>second\"]"
+    ; "graph TD\nA -->|first<br/>second| B"
+    ; "graph TD\nsubgraph G[\"first<br>second\"]\nA\nend"
+    ; "sequenceDiagram\nparticipant A as first<br>second\nA->>B: hello"
+    ; "sequenceDiagram\nA->>B: first<br>second"
+    ; "sequenceDiagram\nNote over A: first<br>second"
+    ; "stateDiagram-v2\nA --> B: first<br>second"
+    ];
+  List.iter (fun source ->
+    match Mermaid.render_with_status ~cols:120 source, Mermaid.render_with_source_labels ~cols:120 source with
+    | Ok _, Ok _ -> ()
+    | _ -> Alcotest.fail "a single-line label should still render")
+    [ "graph TD\nA[first second]"
+    ; "graph TD\nA[first]\n%% <br> is in a comment"
+    ; "sequenceDiagram\nA->>B: first second"
+    ; "stateDiagram-v2\nA --> B: first second"
+    ]
+
 let () =
   Alcotest.run "tui mermaid"
     [ ( "goldens"
@@ -706,7 +729,9 @@ let () =
     ; ( "shape"
       , [] )
     ; ( "refusals"
-      , [ Alcotest.test_case "edge label line collision decisions" `Quick
+      , [ Alcotest.test_case "label break source decisions" `Quick
+            test_label_break_source_decisions
+        ; Alcotest.test_case "edge label line collision decisions" `Quick
             test_edge_label_line_collision_decisions
         ; Alcotest.test_case "another kind names itself" `Quick
             test_a_diagram_of_another_kind_names_itself

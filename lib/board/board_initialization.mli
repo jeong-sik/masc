@@ -1,11 +1,14 @@
 (** Offline posts initialization. Inspection creates no files. Mutations require
     exclusive, quiescent ownership of the existing BasePath; the server adapter
     acquires the actual configured BasePath lease. This API does not admit a
-    live Board store or enforce the guard at server startup. *)
+    live Board store; normal loads and writers independently check the guard. *)
 type inspection
 type outcome
 type decision = Bootstrap_required | Adoption_required | Ready_observed | Refused
 type completion = Completed | Not_completed
+
+val live_guard_enforced : bool
+(** Read-only live policy report, independent of the result of an offline action. *)
 
 val inspect : base_path:string -> inspection
 val decision : inspection -> decision

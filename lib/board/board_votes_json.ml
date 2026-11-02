@@ -75,32 +75,58 @@ let replace_loaded_comments store comments =
     if not (List.mem id ids) then Hashtbl.replace store.comments_by_post post_id (id :: ids)) comments;
   store.karma_cache <- None
 
+let merge_loaded_posts store posts =
+  List.iter (fun (post : post) ->
+    Hashtbl.replace store.posts (Post_id.to_string post.id) post;
+    index_post_origin store post) posts;
+  store.post_count := Hashtbl.length store.posts;
+  rebuild_hot_post_index store;
+  invalidate_post_caches store
+
 let load_persisted_posts store =
   with_persist_lock store (fun () ->
     let path = Board_paths.persist_path store in
     let t0 = Time_compat.now () in
+    let error failure = Error (path,
+      Failure (show_board_error (posts_source_failure_to_board_error failure))) in
     let outcome = read_posts_source store in
-    let result = with_lock store (fun () ->
-      let result = match outcome with
-        | Posts_complete { posts; _ } -> replace_loaded_posts store posts; Ok (List.length posts)
-        | Posts_partial { posts; errors; _ } ->
-          List.iter (fun (post : post) ->
-            Hashtbl.replace store.posts (Post_id.to_string post.id) post;
-            index_post_origin store post) posts;
-          store.post_count := Hashtbl.length store.posts;
-          rebuild_hot_post_index store;
-          invalidate_post_caches store;
-          Error (path, Failure (show_board_error (posts_source_failure_to_board_error (Posts_rows_rejected errors))))
-        | Posts_unavailable failure ->
-          Error (path, Failure (show_board_error (posts_source_failure_to_board_error failure))) in
-      publish_posts_read store outcome;
-      result) in
-    let loaded = match outcome with Posts_complete { posts; _ } | Posts_partial { posts; _ } -> List.length posts
-      | Posts_unavailable _ -> 0 in
-    log_loaded ~noun:"posts" ~loaded ~path ~elapsed:(Time_compat.now () -. t0)
-      (Result.map (fun _ -> ()) result);
-    finish_posts_read outcome;
-    result)
+    let outcome, result =
+      try with_lock store (fun () ->
+        let result = match outcome with
+          | Posts_complete { posts; _ } -> replace_loaded_posts store posts; Ok (List.length posts)
+          | Posts_partial { posts; errors; _ } ->
+            merge_loaded_posts store posts; error (Posts_rows_rejected errors)
+          | Posts_unadmitted { display; failure; _ } ->
+            (match display with
+             | Complete_display posts -> replace_loaded_posts store posts
+             | Partial_display { posts; _ } -> merge_loaded_posts store posts);
+            error failure
+          | Posts_unavailable { failure; _ } -> error failure in
+        publish_posts_read store outcome;
+        outcome, result)
+      with exception_ ->
+        let outcome, failure = Board_posts_source.fail_read store outcome ~stage:Project_posts
+            exception_ (Printexc.get_raw_backtrace ()) in
+        outcome, error failure in
+    try
+      (* This first finishes retained read/cleanup causes before logging. *)
+      finish_posts_read outcome;
+      let loaded = match outcome with
+        | Posts_complete { posts; _ } | Posts_partial { posts; _ }
+        | Posts_unadmitted { display = Complete_display posts; _ }
+        | Posts_unadmitted { display = Partial_display { posts; _ }; _ } -> List.length posts
+        | Posts_unavailable _ -> 0 in
+      log_loaded ~noun:"posts" ~loaded ~path ~elapsed:(Time_compat.now () -. t0)
+        (Result.map (fun _ -> ()) result);
+      result
+    with
+    | Board_posts_source.Reserved_settlement _ as carrier -> raise carrier
+    | exception_ ->
+      let outcome, failure = Board_posts_source.fail_read store outcome ~stage:Report_source
+          exception_ (Printexc.get_raw_backtrace ()) in
+      (* The prefix was already reported once; do not log it a second time. *)
+      Board_posts_source.finish_read outcome;
+      error failure)
 ;;
 
 let propagate_workspace_check = function

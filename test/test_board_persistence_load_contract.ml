@@ -7,12 +7,13 @@
     successful "no file" load from a partially-loaded store after an IO
     failure.
 
-    The current contract returns [(int, string * exn) result] and forces
-    callers to acknowledge failure.  These tests pin the [Ok 0] branch
-    that is exercised on every fresh server start (no persistence file
-    yet). *)
+    The current contract returns [(int, string * exn) result]. Live posts
+    additionally require a valid initialization guard and an actual complete
+    Present payload. Missing comments remain a legitimate empty source. *)
 
 open Masc
+
+module Preparation = Masc_test_deps.Board_test_preparation
 
 let () = Mirage_crypto_rng_unix.use_default ()
 
@@ -48,14 +49,15 @@ let test_load_persisted_posts_missing_file () =
   let _dir = fresh_test_base_path () in
   let store = Board_core.create_store
       ~base_path:(Env_config_core.base_path ()) () in
-  match Masc_board_handlers.Board_votes_json.load_persisted_posts store with
-  | Ok 0 -> ()
-  | Ok n -> Alcotest.failf "expected Ok 0 for missing file, got Ok %d" n
-  | Error (path, e) ->
-    Alcotest.failf
-      "expected Ok 0 for missing file, got Error (%s, %s)"
-      path
-      (Printexc.to_string e)
+  Alcotest.(check bool) "uninitialized Missing posts are refused" true
+    (Result.is_error (Masc_board_handlers.Board_votes_json.load_persisted_posts store));
+  Alcotest.(check bool) "missing source grants no posts authority" true
+    (Result.is_error (posts_source_health store));
+  Alcotest.(check bool) "live reads never bootstrap a posts payload" false
+    (Sys.file_exists (Board.persist_path store));
+  Alcotest.(check bool) "live reads never publish initialization" false
+    (Sys.file_exists (Masc_board_handlers.Board_paths.posts_initialization_guard_file
+       ~workspace_masc_dir:(Board.workspace_masc_dir store)))
 ;;
 
 let test_load_persisted_comments_missing_file () =
@@ -102,6 +104,7 @@ let test_loader_keeps_only_current_rows () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let _dir = fresh_test_base_path () in
+  Preparation.prepare ~base_path:_dir ~action:Preparation.Bootstrap;
   let source_store = Board_core.create_store
       ~base_path:(Env_config_core.base_path ()) () in
   load_posts_source source_store;
@@ -196,6 +199,7 @@ let test_source_failure_clears_only_after_successful_reload () =
   Fun.protect ~finally:(fun () ->
     Unix.putenv "MASC_BASE_PATH" (Option.value ~default:"" previous);
     if Sys.file_exists dir then Fs_compat.remove_tree dir) (fun () ->
+    Preparation.prepare ~base_path:dir ~action:Preparation.Bootstrap;
     let store = Board_core.create_store
       ~base_path:(Env_config_core.base_path ()) () in
     let loaders = [
@@ -239,6 +243,7 @@ let test_partial_load_never_rewrites_the_file () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let _dir = fresh_test_base_path () in
+  Preparation.prepare ~base_path:_dir ~action:Preparation.Bootstrap;
   let source_store = Board_core.create_store
       ~base_path:(Env_config_core.base_path ()) () in
   load_posts_source source_store;
@@ -376,6 +381,7 @@ let test_explicit_workspace_is_captured_once () =
       Unix.chdir first;
       let captured_base = Filename.concat (Unix.realpath first) " state with spaces " in
       Fs_compat.mkdir_p captured_base;
+      Preparation.prepare ~base_path:captured_base ~action:Preparation.Bootstrap;
       let store = Board.create_store ~base_path:" state with spaces " () in
       let captured = Common.masc_dir_from_base_path ~base_path:captured_base in
       Unix.chdir second;
@@ -440,6 +446,7 @@ let test_all_persistence_stays_in_captured_workspace () =
       Alcotest.(check bool) "reset creates no selected workspace metadata" false
         (Sys.file_exists root_a);
       Unix.putenv "MASC_BASE_PATH" base_b;
+      Preparation.prepare ~base_path:base_b ~action:Preparation.Bootstrap;
       let forced_b = Board.global () in
       Alcotest.(check string) "first force captures the newly selected root"
         (Unix.realpath root_b) (Board.workspace_masc_dir forced_b);
@@ -466,6 +473,7 @@ let test_all_persistence_stays_in_captured_workspace () =
         Alcotest.(check string) (label ^ ": " ^ Filename.basename path)
           expected (Fs_compat.load_file path)) baseline_b in
       Unix.putenv "MASC_BASE_PATH" base_a;
+      Preparation.prepare ~base_path:base_a ~action:Preparation.Bootstrap;
       let store_a = init_a () in
       Unix.putenv "MASC_BASE_PATH" base_b;
       let room = board_ok (Board_dispatch.create_sub_board ~slug:"a-room" ~name:"A room"

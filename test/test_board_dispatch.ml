@@ -2,6 +2,8 @@
 
 open Masc
 
+module Preparation = Masc_test_deps.Board_test_preparation
+
 (* These tests pin how the Board routes a text, not who is declared: every name
    with the shape of a Board identity stands for itself.  Which names are
    declared, and what the author is told about the others, is pinned in
@@ -33,7 +35,9 @@ let fresh_test_base_path () =
 let with_eio f () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  Fs_compat.mkdir_p (fresh_test_base_path ());
+  let base_path = fresh_test_base_path () in
+  Fs_compat.mkdir_p base_path;
+  Preparation.prepare ~base_path ~action:Preparation.Bootstrap;
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
   Result.get_ok (Board_dispatch.init_jsonl
@@ -452,7 +456,7 @@ let posts_observation store =
   match store.Board.posts_source with
   | Board.Posts_readable { observation; _ } ->
     observation.source_path, observation.snapshot.bytes, observation.snapshot.cursor
-  | Board.Posts_unobserved | Board.Posts_refused _ | Board.Posts_unsettled _ ->
+  | Board.Posts_unobserved | Board.Posts_guard_observed _ | Board.Posts_refused _ | Board.Posts_unsettled _ ->
     Alcotest.fail "fixture must retain a readable posts source"
 
 let check_retained_posts_source (path, bytes, cursor) store =
@@ -1358,7 +1362,9 @@ let test_failed_flusher_start_clears_the_flag () =
       ~mono_clock:(Eio.Stdenv.mono_clock env)
       ~sw
       (fun () ->
-        Fs_compat.mkdir_p (fresh_test_base_path ());
+        let base_path = fresh_test_base_path () in
+        Fs_compat.mkdir_p base_path;
+        Preparation.prepare ~base_path ~action:Preparation.Bootstrap;
         Board.reset_global_for_test ();
         Board_dispatch.reset_for_test ();
         (* The flusher forks on whatever switch the context names; a finished
@@ -1385,7 +1391,9 @@ let test_vote_persisted_by_flusher_actor () =
       ~mono_clock:(Eio.Stdenv.mono_clock env)
       ~sw
       (fun () ->
-        Fs_compat.mkdir_p (fresh_test_base_path ());
+        let base_path = fresh_test_base_path () in
+        Fs_compat.mkdir_p base_path;
+        Preparation.prepare ~base_path ~action:Preparation.Bootstrap;
         Board.reset_global_for_test ();
         Board_dispatch.reset_for_test ();
         Result.get_ok (Board_dispatch.init_jsonl
@@ -3062,6 +3070,7 @@ let test_initialization_preserves_captured_workspace_and_lookup () =
                    Alcotest.(check bool) "missing root refusal creates nothing" false
                      (Sys.file_exists absent_base);
                    Fs_compat.mkdir_p absent_base;
+                   Preparation.prepare ~base_path:absent_base ~action:Preparation.Bootstrap;
                    Result.get_ok (Board_dispatch.init_jsonl ~base_path:relative_root
                      ~recipient_lookup:every_name_declared ()));
                  Alcotest.(check string) "absent relative init captures the absolute workspace"
@@ -3079,6 +3088,7 @@ let test_initialization_preserves_captured_workspace_and_lookup () =
              | exception Invalid_argument _ -> ());
             let base_a = fresh_test_base_path () in
             Fs_compat.mkdir_p base_a;
+            Preparation.prepare ~base_path:base_a ~action:Preparation.Bootstrap;
             Board.reset_global_for_test ();
             Board_dispatch.reset_for_test ();
             let retained = Board.global () in
@@ -3178,6 +3188,7 @@ let test_initialization_refuses_foreign_workspace_alias ~lookup_installed () =
           (fun () ->
             let base_a = fresh_test_base_path () in
             Fs_compat.mkdir_p base_a;
+            Preparation.prepare ~base_path:base_a ~action:Preparation.Bootstrap;
             Board.reset_global_for_test ();
             Board_dispatch.reset_for_test ();
             let retained = Board.global () in

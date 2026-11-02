@@ -39,17 +39,18 @@ val capture : selection ->
     holds the state lock while the producer observes the store and updates row caches. *)
 
 type outcome
-(** A result for every attempted write, in the same order as the batch, and any
-    deferred reserved exception from known posts settlement. *)
+(** Every selected obligation in batch order, distinguishing attempted writes
+    from work left pending after the first deferred reserved settlement. *)
 
 val persist :
   t ->
   write:(payload -> (unit, Board_types.board_error) result) ->
   outcome
-(** Invoke every selected [write] in batch order, including empty contents.
-    Returned errors do not stop later writes. The private known-settlement
-    carrier is deferred until {!finish_settlement}, preserving later captured
-    obligations. Other exceptions propagate to the caller.
+(** Invoke selected [write] calls in batch order, including empty contents.
+    Returned errors do not stop later writes. The first private known-settlement
+    carrier stops further write calls; its result and original exception are
+    retained until {!finish_settlement}, and every remaining selected kind stays
+    pending for retry. Other exceptions propagate to the caller.
 
     The caller holds the protected persistence lock, outside the state lock,
     and retains it through retry marking. This module neither acquires locks
@@ -62,10 +63,14 @@ val finish_settlement : outcome -> unit
 type retry = Retry_posts | Retry_comments
 
 val retry_for_kind : kind -> retry
-(** Posts, votes and reactions retry through posts; comments retry themselves. *)
+(** Posts, votes and reactions retry through posts; comments retry themselves.
+    Pending auxiliary work can therefore make a separate retry flush rewrite
+    current posts through exact CAS, even when their earlier write succeeded. *)
 
 val retries : outcome -> retry list
-(** Failed write obligations, deduplicated with posts before comments. *)
+(** Failed attempted and unattempted pending obligations, deduplicated with posts
+    before comments. A successful attempted write alone adds no retry obligation. *)
 
 val errors : outcome -> Board_types.board_error list
-(** All returned write errors in batch order. *)
+(** Actual attempted write errors in batch order. Pending work has no fabricated
+    error result. *)

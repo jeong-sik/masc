@@ -517,7 +517,7 @@ let to_yojson inspection =
           "state", `String "refused"; "error", root_failure_to_yojson failure ]);
     "intent_sha256", option_json (fun sha -> `String sha) (intent_sha256 inspection);
     "posts_source_sha256", option_json (fun sha -> `String sha) (posts_source_sha256 inspection);
-    "live_posts_guard_enforced", `Bool false;
+    "live_posts_guard_enforced", `Bool Board_posts_source.live_guard_enforced;
   ]
 
 let finish inspection = match retained_reserved inspection with

@@ -50,8 +50,32 @@ exceptions are raised after structured output is attempted. Lease release is
 reported as attempted: the existing lease API does not certify release, and some
 acquisition rejections retain only a diagnostic string.
 
-`live_posts_guard_enforced` is false. This command does not enable startup guard
-admission or prevent disappearance in a running Board. Writers that bypass the
-BasePath lease remain outside its quiescence contract. Path checks describe
-observed boundaries; they do not make operations descriptor-relative or exclude
-same-UID path races.
+`live_posts_guard_enforced` is true: normal Board loads require an actual valid
+initialization guard and complete Present posts source before granting posts
+write authority. Posts and auxiliary writers freshly revalidate the accepted
+guard; guard-only observations do not authorize posts. A changed guard cannot
+replace retained initialization history through repeated failed loads. Unknown
+posts effects remain unsettled. This command performs only the explicitly
+requested offline action; it does not initialize a running store automatically.
+
+One positive recognition path is narrower than creation: an exact Fusion-origin
+replay may return a matching already observed row from best-effort display data
+after guard refusal. Matching the row neither directly accesses source files
+nor publishes a new row, and grants no posts authority, negative evidence,
+operation receipt or durability guarantee. The call still runs ordinary
+maintenance scheduling before lookup; a separate flusher may process the
+queued sweep or flush work.
+A different Fusion run still requires ordinary admission before creating a row.
+
+An observed reserved cleanup cause stops later selected snapshot writes. The
+attempted write retains its actual result; every unattempted snapshot remains a
+retry obligation without an invented error. Diagnostic counters are retained
+before propagation, without invoking logging after the reserved cause.
+Votes and reactions use the existing posts retry group: a separate retry may
+exact-CAS rewrite current posts while finishing those pending ledgers. This
+preserves logical post/deletion state and does not create another post.
+
+Writers that bypass the BasePath lease remain outside its quiescence contract.
+Guard and posts observations are separate transactions. Path checks describe
+observed boundaries; they do not make operations descriptor-relative, exclude
+same-UID path races, or certify earlier unknown durability.

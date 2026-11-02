@@ -346,8 +346,8 @@ let test_obstructed_delete_retry_refuses_changed_same_cursor_bytes () =
     let snapshot = Board.with_lock active (fun () -> Board.capture_posts_snapshot active) in
     Board.save_posts_snapshot active snapshot) in
   (match retry with
-   | Board.Posts_not_written
-       (Board.Posts_transaction_failed (Fs_compat.Transaction_content_changed _)) -> ()
+   | Board.Posts_not_written {
+       failure = Board.Posts_transaction_failed (Fs_compat.Transaction_content_changed _); _ } -> ()
    | Board.Posts_not_written _ | Board.Posts_write_unknown _ | Board.Posts_written _ ->
      Alcotest.fail "retry must retain the real exact-byte CAS refusal");
   Alcotest.(check bool) "refused retry retains the original store" true (active == store ());

@@ -9,6 +9,7 @@
   board_content_diagnostics
   board_posts_rows
   board_posts_guard_rows
+  board_posts_guard_read
   board_posts_inspection
   board_initialization_inspect
   board_initialization_protocol
@@ -32,6 +33,7 @@
   board_initialization_protocol
   board_posts_rows
   board_posts_guard_rows
+  board_posts_guard_read
   board_posts_inspection
   board_core
   board_core_classify

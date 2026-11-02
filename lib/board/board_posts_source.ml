@@ -1,51 +1,13 @@
 open Board_types
 
+let live_guard_enforced = true
+
 type reserved_settlement = {
   result : (unit, board_error) result;
   exception_ : exn;
   backtrace : Printexc.raw_backtrace;
 }
 exception Reserved_settlement of reserved_settlement
-
-(* The persistence mutex owns source state. Rendering/table access additionally
-   requires the state mutex; Fs callbacks acquire no Board locks. *)
-let last_observed = function
-  | Posts_unobserved -> None
-  | Posts_readable { observation; _ } -> Some observation
-  | Posts_refused { last_observed; _ } | Posts_unsettled { last_observed; _ } -> last_observed
-
-let failure_to_board_error = function
-  | Posts_not_observed -> Io_error "posts source has not been explicitly loaded"
-  | Posts_rows_rejected errors ->
-    let detail = List.map (function
-      | Invalid_posts_json { line; detail } -> Printf.sprintf "line %d: invalid JSON: %s" line detail
-      | Invalid_posts_row { line } -> Printf.sprintf "line %d: invalid persisted row schema" line) errors in
-    Io_error (String.concat "; " detail)
-  | Posts_transaction_failed error -> Io_error (Fs_compat.private_jsonl_transaction_error_to_string error)
-  | Posts_missing_after_observation prior_settlement ->
-    let detail = "posts source disappeared after observation or refusal" in
-    Io_error (match prior_settlement with
-      | None -> detail
-      | Some error -> detail ^ "; read settlement: "
-          ^ Fs_compat.private_jsonl_transaction_error_to_string error)
-  | Posts_source_binding_mismatch -> Io_error "posts source belongs to another captured workspace"
-  | Posts_snapshot_stale -> Io_error "captured posts snapshot is stale"
-  | Posts_workspace_binding_refused { rejection; prior_settlement } ->
-    let detail = Board_workspace_binding.rejection_to_string rejection in
-    let detail = match prior_settlement with
-      | None -> detail
-      | Some error -> detail ^ "; prior read settlement: "
-          ^ Fs_compat.private_jsonl_transaction_error_to_string error
-    in
-    Io_error detail
-  | Posts_raised { exception_; _ } -> Io_error (Printexc.to_string exception_)
-
-let require_readable store = match store.posts_source with
-  | Posts_readable { observation; _ }
-    when String.equal observation.source_path (Board_paths.persist_path store) -> Ok ()
-  | Posts_readable _ -> Error (failure_to_board_error Posts_source_binding_mismatch)
-  | Posts_unobserved -> Error (failure_to_board_error Posts_not_observed)
-  | Posts_refused { failure; _ } | Posts_unsettled { failure; _ } -> Error (failure_to_board_error failure)
 
 let rec reserved_exception (exception_, backtrace) = match exception_ with
   | Eio.Cancel.Cancelled _ | Eio.Time.Timeout | Out_of_memory | Stack_overflow | Sys.Break ->
@@ -76,149 +38,341 @@ let rec reserved_transaction = function
   | Transaction_content_changed _ | Incomplete_transaction_tail _ | Invalid_transaction_suffix
   | Transaction_append_failed _ -> None
 
-let raise_reserved = function
-  | None -> ()
-  | Some (exception_, backtrace) -> Printexc.raise_with_backtrace exception_ backtrace
-
-let propagate_reserved exception_ backtrace =
-  raise_reserved (reserved_exception (exception_, backtrace))
-
-let reserved_source_failure = function
-  | Posts_transaction_failed error -> reserved_transaction error
-  | Posts_raised { exception_; backtrace } -> reserved_exception (exception_, backtrace)
-  | Posts_workspace_binding_refused { rejection; prior_settlement } ->
-    (match Option.bind prior_settlement reserved_transaction with
-     | Some _ as first -> first
-     | None -> Option.bind (Board_workspace_binding.raised rejection) reserved_exception)
-  | Posts_missing_after_observation diagnostic -> Option.bind diagnostic reserved_transaction
-  | Posts_not_observed | Posts_rows_rejected _
-  | Posts_source_binding_mismatch | Posts_snapshot_stale -> None
-
-let finish_failure failure = raise_reserved (reserved_source_failure failure)
+let reserved_diagnostics diagnostics =
+  List.find_map (function
+    | File_diagnostic { error; _ } -> reserved_transaction error
+    | Workspace_diagnostic rejection ->
+      Option.bind (Board_workspace_binding.raised rejection) reserved_exception
+    | Raised_diagnostic { exception_; backtrace; _ } ->
+      reserved_exception (exception_, backtrace)) diagnostics
 
 let carry_reserved result = function
   | None -> ()
   | Some (exception_, backtrace) -> raise (Reserved_settlement { result; exception_; backtrace })
 
+let propagate_reserved exception_ backtrace =
+  match reserved_exception (exception_, backtrace) with
+  | None -> ()
+  | Some (exception_, backtrace) -> Printexc.raise_with_backtrace exception_ backtrace
+
 let defer_reserved ~result exception_ backtrace =
   carry_reserved result (reserved_exception (exception_, backtrace))
 
-let finish_diagnostic diagnostic =
-  Option.iter (fun error -> match reserved_transaction error with
-    | None -> ()
-    | Some reserved -> carry_reserved (Ok ()) (Some reserved)) diagnostic
+let stage_name = function
+  | Read_guard -> "read guard" | Validate_guard -> "validate guard"
+  | Read_posts -> "read posts" | Decode_posts -> "decode posts"
+  | Encode_posts -> "encode posts" | Write_posts -> "write posts"
+  | Project_posts -> "project posts" | Report_source -> "report source"
 
-let finish_write = function
-  | Posts_written { settlement_diagnostic } -> finish_diagnostic settlement_diagnostic; Ok ()
-  | Posts_not_written failure ->
-    let result = Error (failure_to_board_error failure) in
-    carry_reserved result (reserved_source_failure failure);
-    result
-  | Posts_write_unknown failure ->
-    finish_failure failure; Error (failure_to_board_error failure)
+let diagnostic_to_string = function
+  | File_diagnostic { file; error } ->
+    let file = match file with Guard_file -> "initialization guard" | Posts_file -> "posts" in
+    file ^ ": " ^ Fs_compat.private_jsonl_transaction_error_to_string error
+  | Workspace_diagnostic rejection -> Board_workspace_binding.rejection_to_string rejection
+  | Raised_diagnostic { stage; exception_; _ } ->
+    stage_name stage ^ ": " ^ Printexc.to_string exception_
 
-let finish_read = function
-  | Posts_complete { settlement_diagnostic; _ } | Posts_partial { settlement_diagnostic; _ } ->
-    finish_diagnostic settlement_diagnostic
-  | Posts_unavailable failure ->
-    carry_reserved (Error (failure_to_board_error failure)) (reserved_source_failure failure)
+let failure_to_board_error = function
+  | Posts_not_observed -> Io_error "posts source has not been explicitly loaded"
+  | Posts_rows_rejected errors ->
+    let detail = List.map (function
+      | Invalid_posts_json { line; detail } -> Printf.sprintf "line %d: invalid JSON: %s" line detail
+      | Invalid_posts_row { line } -> Printf.sprintf "line %d: invalid persisted row schema" line) errors in
+    Io_error (String.concat "; " detail)
+  | Posts_transaction_failed error -> Io_error (Fs_compat.private_jsonl_transaction_error_to_string error)
+  | Posts_missing -> Io_error "initialized posts source is missing"
+  | Posts_guard_missing -> Io_error "posts initialization guard is missing"
+  | Posts_guard_torn -> Io_error "posts initialization guard has an incomplete row"
+  | Posts_guard_row_count_rejected count ->
+    Io_error (Printf.sprintf "posts initialization guard requires exactly one row (observed %d)" count)
+  | Posts_guard_row_rejected error ->
+    Io_error (Yojson.Safe.to_string (Board_posts_guard_rows.validation_to_yojson
+      (Board_posts_guard_rows.Guard_row_rejected error)))
+  | Posts_guard_changed -> Io_error "posts initialization guard differs from accepted history"
+  | Posts_source_binding_mismatch -> Io_error "posts source belongs to another captured workspace"
+  | Posts_snapshot_stale -> Io_error "captured posts snapshot is stale"
+  | Posts_workspace_binding_refused rejection ->
+    Io_error (Board_workspace_binding.rejection_to_string rejection)
+  | Posts_raised { exception_; _ } -> Io_error (Printexc.to_string exception_)
 
-let refused store failure =
+let history = function
+  | Posts_unobserved -> No_initialization
+  | Posts_guard_observed { initialization; _ } -> Guard_observed initialization
+  | Posts_readable { observation; _ } -> Posts_observed observation
+  | Posts_refused { last_observed; _ } | Posts_unsettled { last_observed; _ } -> last_observed
+
+let guard_of_history = function
+  | No_initialization -> None
+  | Guard_observed guard -> Some guard
+  | Posts_observed observation -> Some observation.initialization
+
+let same_guard (left : posts_guard_observation) (right : posts_guard_observation) =
+  String.equal left.guard_path right.guard_path
+  && String.equal left.snapshot.bytes right.snapshot.bytes
+  && String.equal (Board_posts_guard_json.generation left.value)
+       (Board_posts_guard_json.generation right.value)
+  && Board_workspace_binding.same_root left.workspace_observation right.workspace_observation
+
+let refused store failure diagnostics = match store.posts_source with
+  | Posts_unsettled _ -> ()
+  | Posts_unobserved | Posts_guard_observed _ | Posts_readable _ | Posts_refused _ ->
+    store.posts_source <- Posts_refused {
+      last_observed = history store.posts_source; failure; diagnostics }
+
+let unsettled store failure diagnostics =
+  store.posts_source <- Posts_unsettled {
+    last_observed = history store.posts_source; failure; diagnostics }
+
+let retain_trace store diagnostics = match store.posts_source with
+  | Posts_unobserved | Posts_unsettled _ -> ()
+  | Posts_guard_observed phase -> store.posts_source <- Posts_guard_observed { phase with diagnostics }
+  | Posts_readable phase -> store.posts_source <- Posts_readable { phase with diagnostics }
+  | Posts_refused phase -> store.posts_source <- Posts_refused { phase with diagnostics }
+
+let accept_guard store initialization diagnostics =
+  let update_history = function
+    | No_initialization | Guard_observed _ -> Guard_observed initialization
+    | Posts_observed observation -> Posts_observed { observation with initialization } in
   match store.posts_source with
   | Posts_unsettled _ -> ()
-  | Posts_unobserved | Posts_readable _ | Posts_refused _ ->
-    store.posts_source <- Posts_refused { last_observed = last_observed store.posts_source; failure }
+  | Posts_unobserved | Posts_guard_observed _ ->
+    store.posts_source <- Posts_guard_observed { initialization; diagnostics }
+  | Posts_readable phase ->
+    store.posts_source <- Posts_readable {
+      observation = { phase.observation with initialization }; diagnostics }
+  | Posts_refused phase ->
+    store.posts_source <- Posts_refused {
+      last_observed = update_history phase.last_observed; failure = phase.failure; diagnostics }
 
-let unsettled store failure =
-  store.posts_source <- Posts_unsettled { last_observed = last_observed store.posts_source; failure }
+let expected store = match store.posts_source with
+  | Posts_readable { observation; _ } ->
+    if String.equal observation.source_path (Board_paths.persist_path store)
+    then Ok observation else Error Posts_source_binding_mismatch
+  | Posts_unobserved | Posts_guard_observed _ -> Error Posts_not_observed
+  | Posts_refused { failure; _ } | Posts_unsettled { failure; _ } -> Error failure
 
-let workspace_failure ?(prior_settlement = None) rejection =
-  Posts_workspace_binding_refused { rejection; prior_settlement }
+let require_readable store =
+  expected store
+  |> Result.map (fun _ -> ())
+  |> Result.map_error failure_to_board_error
 
-let check_workspace store =
-  Result.map_error (fun rejection -> workspace_failure rejection)
-    (Board_paths.observe_workspace store)
+let observe_workspace store =
+  try Board_paths.observe_workspace store with exception_ ->
+    Error (Board_workspace_binding.Raised { exception_; backtrace = Printexc.get_raw_backtrace () })
 
-let finish_workspace_observation store before =
-  let binding = store.workspace_binding in
-  if Board_workspace_binding.workspace_directory_missing before then
-    match Board_paths.observe_workspace store with
-    | Error _ as error -> error
-    | Ok after when Board_workspace_binding.workspace_directory_missing after ->
-      Error (Board_workspace_binding.Workspace_directory_changed
-        (Board_paths.workspace_masc_dir store))
-    | Ok after -> Ok after
-  else
-    Result.map (fun () -> before) (Board_workspace_binding.revalidate binding before)
+let finish_workspace store before =
+  try
+    if Board_workspace_binding.workspace_directory_missing before then
+      match observe_workspace store with
+      | Error _ as error -> error
+      | Ok after when Board_workspace_binding.workspace_directory_missing after ->
+        Error (Board_workspace_binding.Workspace_directory_changed (Board_paths.workspace_masc_dir store))
+      | Ok after -> Ok after
+    else Result.map (fun () -> before)
+      (Board_workspace_binding.revalidate store.workspace_binding before)
+  with exception_ ->
+    Error (Board_workspace_binding.Raised { exception_; backtrace = Printexc.get_raw_backtrace () })
 
-let check_observation store observation =
-  Result.map_error (fun rejection -> workspace_failure rejection)
-    (Board_workspace_binding.revalidate store.workspace_binding
-       observation.workspace_observation)
+type initialization_check = {
+  checked : (posts_guard_observation, posts_source_failure) result;
+  workspace : Board_workspace_binding.observation option;
+  diagnostics : posts_source_diagnostic list;
+}
 
-let read store =
-  match store.posts_source with
-  | Posts_unsettled { failure; _ } -> Posts_unavailable failure
-  | Posts_unobserved | Posts_readable _ | Posts_refused _ ->
-    match check_workspace store with
-    | Error failure -> Posts_unavailable failure
-    | Ok workspace_before ->
-    let path = Board_paths.persist_path store in
-    try
-      let result = match store.posts_io_for_testing with
-        | None -> Fs_compat.read_private_jsonl_durable_locked_result path ~after:None
-        | Some io -> Fs_compat.read_private_jsonl_durable_locked_with_io_for_testing ~io path ~after:None in
-      match Fs_compat.private_jsonl_snapshot_success_receipt result with
-      | Error error -> Posts_unavailable (Posts_transaction_failed error)
-      | Ok receipt ->
-        match finish_workspace_observation store workspace_before with
-        | Error rejection ->
-          Posts_unavailable (workspace_failure
-            ~prior_settlement:receipt.settlement_error rejection)
-        | Ok workspace_observation ->
-        let observation = { source_path = path; snapshot = receipt.value;
-                            workspace_observation } in
+let initialization_result (check : initialization_check) = Result.map (fun _ -> ()) check.checked
+let initialization_diagnostics (check : initialization_check) = check.diagnostics
+let finish_initialization ~result (check : initialization_check) =
+  carry_reserved result (reserved_diagnostics check.diagnostics)
+
+let initialization_exception store (check : initialization_check) exception_ backtrace =
+  let diagnostics = check.diagnostics @ [Raised_diagnostic { stage = Report_source; exception_; backtrace }] in
+  let failure = match check.checked with
+    | Error failure -> failure | Ok _ -> Posts_raised { exception_; backtrace } in
+  refused store failure diagnostics;
+  { check with checked = Error failure; diagnostics }
+
+let check_initialization store = match store.posts_source with
+  | Posts_unsettled { failure; _ } ->
+    { checked = Error failure; workspace = None; diagnostics = [] }
+  | Posts_unobserved | Posts_guard_observed _ | Posts_readable _ | Posts_refused _ ->
+    let diagnostics = ref [] in
+    let add diagnostic = diagnostics := !diagnostics @ [diagnostic] in
+    let reject ?workspace failure =
+      refused store failure !diagnostics;
+      { checked = Error failure; workspace; diagnostics = !diagnostics } in
+    match observe_workspace store with
+    | Error rejection -> add (Workspace_diagnostic rejection);
+      reject (Posts_workspace_binding_refused rejection)
+    | Ok before ->
+      let complete candidate =
+        match reserved_diagnostics !diagnostics with
+        | Some (exception_, backtrace) ->
+          let failure = match candidate with Error failure -> failure
+            | Ok _ -> Posts_raised { exception_; backtrace } in
+          reject failure
+        | None ->
+          match finish_workspace store before with
+          | Error rejection -> add (Workspace_diagnostic rejection);
+            reject (Posts_workspace_binding_refused rejection)
+          | Ok workspace ->
+            match candidate with
+            | Error failure -> reject ~workspace failure
+            | Ok (snapshot, value) ->
+              let initialization = {
+                guard_path = Board_paths.posts_initialization_guard_file
+                  ~workspace_masc_dir:(Board_paths.workspace_masc_dir store);
+                snapshot; value; workspace_observation = workspace } in
+              match guard_of_history (history store.posts_source) with
+              | Some accepted when not (same_guard accepted initialization) ->
+                reject ~workspace Posts_guard_changed
+              | None | Some _ ->
+                accept_guard store initialization !diagnostics;
+                { checked = Ok initialization; workspace = Some workspace; diagnostics = !diagnostics }
+      in
+      let path = Board_paths.posts_initialization_guard_file
+          ~workspace_masc_dir:(Board_paths.workspace_masc_dir store) in
+      match Board_posts_guard_read.read ?io:store.posts_source_io.guard ~path () with
+      | Failed error -> add (File_diagnostic { file = Guard_file; error });
+        complete (Error (Posts_transaction_failed error))
+      | Raised (exception_, backtrace) ->
+        add (Raised_diagnostic { stage = Read_guard; exception_; backtrace });
+        complete (Error (Posts_raised { exception_; backtrace }))
+      | Read receipt ->
+        Option.iter (fun error -> add (File_diagnostic { file = Guard_file; error })) receipt.settlement_error;
         let missing = Fs_compat.Private_jsonl_cursor.is_missing receipt.value.cursor in
-        let missing_allowed = match store.posts_source with
-          | Posts_unobserved -> true
-          | Posts_readable { observation; _ } ->
-            Fs_compat.Private_jsonl_cursor.is_missing observation.snapshot.cursor
-          | Posts_refused _ | Posts_unsettled _ -> false in
-        if missing && not missing_allowed then Posts_unavailable (Posts_missing_after_observation receipt.settlement_error)
-        else
-          let posts = ref [] and errors = ref [] in
-          String.split_on_char '\n' receipt.value.bytes |> List.iteri (fun index text ->
-            match Board_posts_rows.decode ~line:(index + 1) text with
-            | Blank -> ()
-            | Accepted { post; diagnostics } ->
-              Board_content_diagnostics.emit diagnostics;
-              posts := post :: !posts
-            | Rejected { error; diagnostics } ->
-              Board_content_diagnostics.emit diagnostics;
-              errors := error :: !errors);
-          let posts = List.rev !posts in
-          match List.rev !errors with
-          | [] -> Posts_complete { observation; posts; settlement_diagnostic = receipt.settlement_error }
-          | errors -> Posts_partial { observation; posts; errors; settlement_diagnostic = receipt.settlement_error }
-    with exception_ ->
-      let backtrace = Printexc.get_raw_backtrace () in
-      let failure = Posts_raised { exception_; backtrace } in
-      refused store failure;
-      carry_reserved (Error (failure_to_board_error failure)) (reserved_source_failure failure);
-      Printexc.raise_with_backtrace exception_ backtrace
+        match reserved_diagnostics !diagnostics with
+        | Some (exception_, backtrace) ->
+          (* Required post-read physical checks have not happened: retain only
+             prior history and stop before any further workspace/posts IO. *)
+          reject (if missing then Posts_guard_missing else Posts_raised { exception_; backtrace })
+        | None ->
+          let candidate =
+            if missing then Error Posts_guard_missing
+            else try
+              match Board_posts_guard_read.validate receipt.value with
+              | Valid_guard value -> Ok (receipt.value, value)
+              | Torn_guard -> Error Posts_guard_torn
+              | Guard_row_count_rejected count -> Error (Posts_guard_row_count_rejected count)
+              | Guard_row_rejected error -> Error (Posts_guard_row_rejected error)
+            with exception_ ->
+              let backtrace = Printexc.get_raw_backtrace () in
+              add (Raised_diagnostic { stage = Validate_guard; exception_; backtrace });
+              Error (Posts_raised { exception_; backtrace }) in
+          complete candidate
 
-let publish_read store = function
-  | Posts_complete { observation; settlement_diagnostic; _ } ->
-    (match store.posts_source with
-     | Posts_unsettled _ -> ()
-     | Posts_unobserved | Posts_readable _ | Posts_refused _ ->
-       store.posts_source <- Posts_readable { observation; settlement_diagnostic })
-  | Posts_partial { observation; errors; _ } ->
-    (match store.posts_source with
-     | Posts_unsettled _ -> ()
-     | Posts_unobserved | Posts_readable _ | Posts_refused _ ->
-       store.posts_source <- Posts_refused { last_observed = Some observation; failure = Posts_rows_rejected errors })
-  | Posts_unavailable failure -> refused store failure
+let read_diagnostics = function
+  | Posts_complete { diagnostics; _ } | Posts_partial { diagnostics; _ }
+  | Posts_unadmitted { diagnostics; _ } | Posts_unavailable { diagnostics; _ } -> diagnostics
+
+let write_diagnostics = function
+  | Posts_written { diagnostics } | Posts_not_written { diagnostics; _ }
+  | Posts_write_unknown { diagnostics; _ } -> diagnostics
+
+let fail_read store outcome ~stage exception_ backtrace =
+  let diagnostics = read_diagnostics outcome @ [Raised_diagnostic { stage; exception_; backtrace }] in
+  let failure = match outcome with
+    | Posts_unadmitted { failure; _ } | Posts_unavailable { failure; _ } -> failure
+    | Posts_complete _ | Posts_partial _ -> Posts_raised { exception_; backtrace } in
+  refused store failure diagnostics;
+  Posts_unavailable { failure; diagnostics }, failure
+
+let finish_read outcome =
+  let result = match outcome with
+    | Posts_complete _ -> Ok ()
+    | Posts_partial { errors; _ } -> Error (failure_to_board_error (Posts_rows_rejected errors))
+    | Posts_unadmitted { failure; _ } | Posts_unavailable { failure; _ } ->
+      Error (failure_to_board_error failure) in
+  carry_reserved result (reserved_diagnostics (read_diagnostics outcome))
+
+let finish_write outcome =
+  let result = match outcome with
+    | Posts_written _ -> Ok ()
+    | Posts_not_written { failure; _ } | Posts_write_unknown { failure; _ } ->
+      Error (failure_to_board_error failure) in
+  let reserved = reserved_diagnostics (write_diagnostics outcome) in
+  (match outcome, reserved with
+   | Posts_write_unknown _, Some (exception_, backtrace) ->
+     Printexc.raise_with_backtrace exception_ backtrace
+   | (Posts_written _ | Posts_not_written _), (None | Some _) -> carry_reserved result reserved
+   | Posts_write_unknown _, None -> ());
+  result
+
+let read store = match store.posts_source with
+  | Posts_unsettled { failure; _ } -> Posts_unavailable { failure; diagnostics = [] }
+  | Posts_unobserved | Posts_guard_observed _ | Posts_readable _ | Posts_refused _ ->
+    let check = check_initialization store in
+    let failure current = match check.checked with Error prior -> prior | Ok _ -> current in
+    let unavailable diagnostics current =
+      let failure = failure current in
+      refused store failure diagnostics; Posts_unavailable { failure; diagnostics } in
+    match check.workspace, reserved_diagnostics check.diagnostics with
+    | None, _ | Some _, Some _ ->
+      let failure = match check.checked with Error failure -> failure
+        | Ok _ -> Posts_not_observed in
+      Posts_unavailable { failure; diagnostics = check.diagnostics }
+    | Some before, None ->
+      let diagnostics = ref check.diagnostics in
+      let add diagnostic = diagnostics := !diagnostics @ [diagnostic] in
+      let path = Board_paths.persist_path store in
+      let stage = ref Read_posts in
+      try
+        let result = match store.posts_source_io.posts with
+          | None -> Fs_compat.read_private_jsonl_durable_locked_result path ~after:None
+          | Some io -> Fs_compat.read_private_jsonl_durable_locked_with_io_for_testing ~io path ~after:None in
+        match Fs_compat.private_jsonl_snapshot_success_receipt result with
+        | Error error -> add (File_diagnostic { file = Posts_file; error });
+          unavailable !diagnostics (Posts_transaction_failed error)
+        | Ok receipt ->
+          Option.iter (fun error -> add (File_diagnostic { file = Posts_file; error })) receipt.settlement_error;
+          let missing = Fs_compat.Private_jsonl_cursor.is_missing receipt.value.cursor in
+          match reserved_diagnostics !diagnostics with
+          | Some (exception_, backtrace) -> unavailable !diagnostics
+              (if missing then Posts_missing else Posts_raised { exception_; backtrace })
+          | None ->
+            match finish_workspace store before with
+            | Error rejection -> add (Workspace_diagnostic rejection);
+              unavailable !diagnostics (Posts_workspace_binding_refused rejection)
+            | Ok workspace ->
+              if missing then unavailable !diagnostics Posts_missing
+              else
+                let () = stage := Decode_posts in
+                let posts = ref [] and errors = ref [] in
+                String.split_on_char '\n' receipt.value.bytes |> List.iteri (fun index text ->
+                  match Board_posts_rows.decode ~line:(index + 1) text with
+                  | Blank -> ()
+                  | Accepted { post; diagnostics } ->
+                    Board_content_diagnostics.emit diagnostics; posts := post :: !posts
+                  | Rejected { error; diagnostics } ->
+                    Board_content_diagnostics.emit diagnostics; errors := error :: !errors);
+                let posts = List.rev !posts and errors = List.rev !errors in
+                match check.checked with
+                | Error failure ->
+                  let display = match errors with [] -> Complete_display posts
+                    | errors -> Partial_display { posts; errors } in
+                  Posts_unadmitted { source_path = path; snapshot = receipt.value;
+                    display; failure; diagnostics = !diagnostics }
+                | Ok initialization ->
+                  let initialization = { initialization with workspace_observation = workspace } in
+                  let observation = { source_path = path; snapshot = receipt.value; initialization } in
+                  match errors with
+                  | [] -> Posts_complete { observation; posts; diagnostics = !diagnostics }
+                  | errors -> Posts_partial { observation; posts; errors; diagnostics = !diagnostics }
+      with exception_ ->
+        let backtrace = Printexc.get_raw_backtrace () in
+        add (Raised_diagnostic { stage = !stage; exception_; backtrace });
+        unavailable !diagnostics (Posts_raised { exception_; backtrace })
+
+let publish_read store outcome = match store.posts_source with
+  | Posts_unsettled _ -> ()
+  | Posts_unobserved | Posts_guard_observed _ | Posts_readable _ | Posts_refused _ ->
+    match outcome with
+    | Posts_complete { observation; diagnostics; _ } ->
+      store.posts_source <- Posts_readable { observation; diagnostics }
+    | Posts_partial { observation; errors; diagnostics; _ } ->
+      store.posts_source <- Posts_refused { last_observed = Posts_observed observation;
+        failure = Posts_rows_rejected errors; diagnostics }
+    | Posts_unadmitted { failure; diagnostics; _ } | Posts_unavailable { failure; diagnostics } ->
+      refused store failure diagnostics
 
 (* Only error branches with actual prepublication evidence are nonwrites. The
    final append fstat uses the same operation tag as its precondition fstat. *)
@@ -261,81 +415,101 @@ let rec contradicts_observation = function
   | Transaction_settlement_failed { primary = Transaction_succeeded _; _ }
   | Transaction_append_failed _ -> false
 
-let classify_write store ~workspace_observation ~bytes result =
+let classify_write store ~initialization ~bytes ~diagnostics result =
   match Fs_compat.private_jsonl_cursor_success_receipt result with
   | Ok receipt ->
+    let diagnostics = diagnostics @ (match receipt.settlement_error with None -> []
+      | Some error -> [File_diagnostic { file = Posts_file; error }]) in
     let observation = { source_path = Board_paths.persist_path store;
-                        snapshot = { Fs_compat.bytes = bytes; cursor = receipt.value };
-                        workspace_observation } in
-    store.posts_source <- Posts_readable { observation; settlement_diagnostic = receipt.settlement_error };
-    Posts_written { settlement_diagnostic = receipt.settlement_error }
+      snapshot = { Fs_compat.bytes = bytes; cursor = receipt.value }; initialization } in
+    store.posts_source <- Posts_readable { observation; diagnostics };
+    Posts_written { diagnostics }
   | Error error ->
+    let diagnostics = diagnostics @ [File_diagnostic { file = Posts_file; error }] in
     let failure = Posts_transaction_failed error in
     if definitely_not_written error then (
-      if contradicts_observation error then refused store failure;
-      Posts_not_written failure)
-    else (unsettled store failure; Posts_write_unknown failure)
+      if contradicts_observation error then refused store failure diagnostics
+      else retain_trace store diagnostics;
+      Posts_not_written { failure; diagnostics })
+    else (unsettled store failure diagnostics; Posts_write_unknown { failure; diagnostics })
 
-let write store ~workspace_observation ~bytes perform =
-  try classify_write store ~workspace_observation ~bytes (perform ()) with exception_ ->
+let write store ~initialization ~bytes ~diagnostics perform =
+  try classify_write store ~initialization ~bytes ~diagnostics (perform ()) with exception_ ->
     let backtrace = Printexc.get_raw_backtrace () in
-    unsettled store (Posts_raised { exception_; backtrace });
-    Printexc.raise_with_backtrace exception_ backtrace
+    let diagnostics = diagnostics @ [Raised_diagnostic { stage = Write_posts; exception_; backtrace }] in
+    let failure = Posts_raised { exception_; backtrace } in
+    unsettled store failure diagnostics; Posts_write_unknown { failure; diagnostics }
 
-let expected store = match store.posts_source with
-  | Posts_readable { observation; _ } ->
-    if String.equal observation.source_path (Board_paths.persist_path store)
-    then Ok observation else Error Posts_source_binding_mismatch
-  | Posts_unobserved -> Error Posts_not_observed
-  | Posts_refused { failure; _ } | Posts_unsettled { failure; _ } -> Error failure
+let not_written failure diagnostics = Posts_not_written { failure; diagnostics }
 
 let append store post = match expected store with
-  | Error failure -> Posts_not_written failure
+  | Error failure -> not_written failure []
   | Ok observation ->
-    match check_observation store observation with
-    | Error failure -> Posts_not_written failure
-    | Ok () ->
-    let suffix = Yojson.Safe.to_string (Board_content_json.post_to_yojson post) ^ "\n" in
-    let bytes = observation.snapshot.bytes ^ suffix in
-    write store ~workspace_observation:observation.workspace_observation ~bytes
-      (fun () -> match store.posts_io_for_testing with
-      | None -> Fs_compat.append_private_jsonl_durable_locked_at_snapshot_result
-          observation.source_path ~expected:observation.snapshot suffix
-      | Some io -> Fs_compat.append_private_jsonl_durable_locked_at_snapshot_with_io_for_testing
-          ~io observation.source_path ~expected:observation.snapshot suffix)
+    let check = check_initialization store in
+    match check.checked with
+    | Error failure -> not_written failure check.diagnostics
+    | Ok initialization ->
+      let encoded = try Ok (Yojson.Safe.to_string (Board_content_json.post_to_yojson post) ^ "\n")
+        with exception_ -> Error (exception_, Printexc.get_raw_backtrace ()) in
+      match encoded with
+      | Error (exception_, backtrace) ->
+        let diagnostics = check.diagnostics @ [Raised_diagnostic { stage = Encode_posts; exception_; backtrace }] in
+        retain_trace store diagnostics;
+        not_written (Posts_raised { exception_; backtrace }) diagnostics
+      | Ok suffix ->
+        let bytes = observation.snapshot.bytes ^ suffix in
+        write store ~initialization ~bytes ~diagnostics:check.diagnostics
+          (fun () -> match store.posts_source_io.posts with
+          | None -> Fs_compat.append_private_jsonl_durable_locked_at_snapshot_result
+              observation.source_path ~expected:observation.snapshot suffix
+          | Some io -> Fs_compat.append_private_jsonl_durable_locked_at_snapshot_with_io_for_testing
+              ~io observation.source_path ~expected:observation.snapshot suffix)
 
 type snapshot = { expected : (posts_source_observation, posts_source_failure) result; bytes : string }
 
 let capture ?replacement store =
-  let bytes = match replacement with
-    | None -> Board_snapshot_rows.render ~rows:store.post_rows
-        ~to_json:Board_content_json.post_to_yojson store.posts
-    | Some (replacement : post) ->
-      let buffer = Buffer.create 4096 in
-      Hashtbl.iter (fun key (post : post) ->
-        let post = if String.equal key (Post_id.to_string replacement.id) then replacement else post in
-        Buffer.add_string buffer (Yojson.Safe.to_string (Board_content_json.post_to_yojson post));
-        Buffer.add_char buffer '\n') store.posts;
-      Buffer.contents buffer in
-  { expected = expected store; bytes }
+  let expected = expected store in
+  let bytes = match expected with
+    | Error _ -> ""
+    | Ok _ -> match replacement with
+      | None -> Board_snapshot_rows.render ~rows:store.post_rows
+          ~to_json:Board_content_json.post_to_yojson store.posts
+      | Some (replacement : post) ->
+        let buffer = Buffer.create 4096 in
+        Hashtbl.iter (fun key (post : post) ->
+          let post = if String.equal key (Post_id.to_string replacement.id) then replacement else post in
+          Buffer.add_string buffer (Yojson.Safe.to_string (Board_content_json.post_to_yojson post));
+          Buffer.add_char buffer '\n') store.posts;
+        Buffer.contents buffer in
+  { expected; bytes }
 
 let rewrite store snapshot = match snapshot.expected, expected store with
-  | Error failure, _ | _, Error failure -> Posts_not_written failure
+  | Error failure, _ | _, Error failure -> not_written failure []
   | Ok captured, Ok current ->
-    if not (String.equal captured.source_path current.source_path)
-    then Posts_not_written Posts_source_binding_mismatch
+    if not (String.equal captured.source_path current.source_path) then
+      not_written Posts_source_binding_mismatch []
     else if not (Fs_compat.Private_jsonl_cursor.equal captured.snapshot.cursor current.snapshot.cursor
-                 && String.equal captured.snapshot.bytes current.snapshot.bytes)
-    then Posts_not_written Posts_snapshot_stale
+      && String.equal captured.snapshot.bytes current.snapshot.bytes
+      && same_guard captured.initialization current.initialization) then
+      not_written Posts_snapshot_stale []
     else
-      let validation = Result.bind (check_observation store captured)
-        (fun () -> check_observation store current) in
+      let validation = try Board_workspace_binding.revalidate store.workspace_binding
+          captured.initialization.workspace_observation with exception_ ->
+        Error (Board_workspace_binding.Raised { exception_; backtrace = Printexc.get_raw_backtrace () }) in
       match validation with
-      | Error failure -> Posts_not_written failure
-      | Ok () -> write store ~workspace_observation:current.workspace_observation
-          ~bytes:snapshot.bytes (fun () -> match store.posts_io_for_testing with
-          | None -> Fs_compat.rewrite_private_jsonl_durable_locked_at_snapshot_result
-              captured.source_path ~expected:captured.snapshot snapshot.bytes
-          | Some io -> Fs_compat.rewrite_private_jsonl_durable_locked_at_snapshot_with_io_for_testing
-              ~io ~before_sync_rewrite_parent:io.before_sync_parent
-              captured.source_path ~expected:captured.snapshot snapshot.bytes)
+      | Error rejection ->
+        let failure = Posts_workspace_binding_refused rejection in
+        let diagnostics = [Workspace_diagnostic rejection] in
+        refused store failure diagnostics; not_written failure diagnostics
+      | Ok () ->
+        let check = check_initialization store in
+        match check.checked with
+        | Error failure -> not_written failure check.diagnostics
+        | Ok initialization ->
+          write store ~initialization ~bytes:snapshot.bytes ~diagnostics:check.diagnostics
+            (fun () -> match store.posts_source_io.posts with
+            | None -> Fs_compat.rewrite_private_jsonl_durable_locked_at_snapshot_result
+                captured.source_path ~expected:captured.snapshot snapshot.bytes
+            | Some io -> Fs_compat.rewrite_private_jsonl_durable_locked_at_snapshot_with_io_for_testing
+                ~io ~before_sync_rewrite_parent:io.before_sync_parent
+                captured.source_path ~expected:captured.snapshot snapshot.bytes)

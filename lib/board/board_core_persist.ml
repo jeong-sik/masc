@@ -43,10 +43,10 @@ let persist_io_error ~where msg =
   Error (Io_error (Printf.sprintf "%s: %s" where msg))
 ;;
 
-let create_store_with_posts_io ~base_path posts_io_for_testing () =
+let create_store_with_source_io ~base_path posts_source_io () =
   let workspace_binding = Board_workspace_binding.capture ~base_path in
   { posts_source = Posts_unobserved
-  ; posts_io_for_testing
+  ; posts_source_io
   ; comments_load_result = Ok ()
   ; votes_load_result = Ok ()
   ; reactions_load_result = Ok ()
@@ -81,9 +81,9 @@ let create_store_with_posts_io ~base_path posts_io_for_testing () =
 ;;
 
 let create_store ~base_path () =
-  create_store_with_posts_io ~base_path None ()
-let create_store_with_posts_io_for_testing ~base_path ~io () =
-  create_store_with_posts_io ~base_path (Some io) ()
+  create_store_with_source_io ~base_path { guard = None; posts = None } ()
+let create_store_with_source_io_for_testing ~base_path ~io () =
+  create_store_with_source_io ~base_path io ()
 
 let require_persisted_snapshot_readable = function
   | Ok () -> Ok ()
@@ -552,14 +552,35 @@ let reactions_path = Board_paths.reactions_path
 let sub_boards_path = Board_paths.sub_boards_path
 let ensure_dir = Board_paths.ensure_dir
 let ensure_masc_dir ~where store =
-  match Board_paths.ensure_masc_dir store with
-  | Ok () -> Ok ()
-  | Error rejection ->
-    let result = persist_io_error ~where
-        (Board_workspace_binding.rejection_to_string rejection) in
-    Option.iter (fun (exception_, backtrace) ->
-      Board_posts_source.defer_reserved ~result exception_ backtrace)
-      (Board_workspace_binding.raised rejection);
+  let check = Board_posts_source.check_initialization store in
+  let requested_result check =
+    match Board_posts_source.initialization_result check with
+    | Ok () -> Ok ()
+    | Error failure -> Error (Io_error (Printf.sprintf "%s: %s" where
+        (show_board_error (Board_posts_source.failure_to_board_error failure)))) in
+  let result = requested_result check in
+  match Board_posts_source.reserved_diagnostics
+      (Board_posts_source.initialization_diagnostics check) with
+  | Some _ ->
+    (* Do not invoke a logger after observing cancellation/another reserved
+       cause. Retain the single requested-operation error count and result. *)
+    (match result with Ok () -> () | Error _ -> Atomic.incr persist_errors);
+    Board_posts_source.finish_initialization ~result check;
+    result
+  | None ->
+    let check = try
+      (match Board_posts_source.initialization_result check with
+       | Error failure -> record_persist_error ~where
+           (show_board_error (Board_posts_source.failure_to_board_error failure))
+       | Ok () -> List.iter (fun diagnostic -> record_persist_error ~where
+           (Board_posts_source.diagnostic_to_string diagnostic))
+           (Board_posts_source.initialization_diagnostics check));
+      check
+    with exception_ ->
+      Board_posts_source.initialization_exception store check exception_
+        (Printexc.get_raw_backtrace ()) in
+    let result = requested_result check in
+    Board_posts_source.finish_initialization ~result check;
     result
 include Board_core_json
 
@@ -592,21 +613,40 @@ let posts_source_failure_to_board_error = Board_posts_source.failure_to_board_er
 let read_posts_source = Board_posts_source.read
 let publish_posts_read = Board_posts_source.publish_read
 let finish_posts_write outcome =
-  (match outcome with
-   | Posts_written { settlement_diagnostic = None } -> ()
-   | Posts_written { settlement_diagnostic = Some error } ->
-     record_persist_error ~where:"posts settlement" (Fs_compat.private_jsonl_transaction_error_to_string error)
-   | Posts_not_written failure | Posts_write_unknown failure ->
-     record_persist_error ~where:"posts source" (show_board_error (posts_source_failure_to_board_error failure)));
-  Board_posts_source.finish_write outcome
+  let diagnostics = Board_posts_source.write_diagnostics outcome in
+  match Board_posts_source.reserved_diagnostics diagnostics with
+  | Some _ ->
+    (* Match ordinary counting without invoking a logger after cancellation or
+       another reserved cause has already been observed. *)
+    (match outcome with
+     | Posts_written _ -> List.iter (fun _ -> Atomic.incr persist_errors) diagnostics
+     | Posts_not_written _ | Posts_write_unknown _ -> Atomic.incr persist_errors);
+    Board_posts_source.finish_write outcome
+  | None ->
+    let result = Board_posts_source.finish_write outcome in
+    (try
+      (match outcome with
+       | Posts_written _ ->
+         List.iter (fun diagnostic -> record_persist_error ~where:"posts settlement"
+           (Board_posts_source.diagnostic_to_string diagnostic)) diagnostics
+       | Posts_not_written { failure; _ } | Posts_write_unknown { failure; _ } ->
+         record_persist_error ~where:"posts source"
+           (show_board_error (posts_source_failure_to_board_error failure)));
+      result
+    with exception_ ->
+      let backtrace = Printexc.get_raw_backtrace () in
+      Board_posts_source.defer_reserved ~result exception_ backtrace;
+      Printexc.raise_with_backtrace exception_ backtrace)
 let finish_posts_read outcome =
-  (match outcome with
-   | Posts_complete { settlement_diagnostic = Some error; _ }
-   | Posts_partial { settlement_diagnostic = Some error; _ } ->
-     record_persist_error ~where:"posts read settlement" (Fs_compat.private_jsonl_transaction_error_to_string error)
-   | Posts_complete { settlement_diagnostic = None; _ }
-   | Posts_partial { settlement_diagnostic = None; _ } | Posts_unavailable _ -> ());
-  Board_posts_source.finish_read outcome
+  let diagnostics = Board_posts_source.read_diagnostics outcome in
+  match Board_posts_source.reserved_diagnostics diagnostics with
+  | Some _ ->
+    List.iter (fun _ -> Atomic.incr persist_errors) diagnostics;
+    Board_posts_source.finish_read outcome
+  | None ->
+    Board_posts_source.finish_read outcome;
+    List.iter (fun diagnostic -> record_persist_error ~where:"posts read settlement"
+      (Board_posts_source.diagnostic_to_string diagnostic)) diagnostics
 type posts_inspection_framing = Board_posts_inspection.posts_inspection_framing =
   | Complete_rows
   | Torn_tail of { rows_end : int; end_offset : int }

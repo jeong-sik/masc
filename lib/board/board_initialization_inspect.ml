@@ -1,3 +1,5 @@
+module Guard_rows = Board_posts_guard_rows
+
 type raised = exn * Printexc.raw_backtrace
 
 type file_io = {
@@ -25,31 +27,23 @@ type root_failure =
 
 type posts_intent = Missing_posts | Present_posts of { sha256 : string }
 
-type framing = Complete | Torn of { rows_end : int; end_offset : int }
-
 type posts_observation =
   | Posts_missing
   | Posts_present of {
       physical_rows : int;
       accepted_rows : int;
       errors : Board_types.posts_row_error list;
-      framing : framing;
+      framing : Guard_rows.framing;
       sha256 : string option;
     }
-
-type guard_validation =
-  | Valid_guard of Board_posts_guard_json.t
-  | Torn_guard
-  | Guard_row_count_rejected of int
-  | Guard_row_rejected of Board_posts_guard_json.rejection
 
 type guard_observation =
   | Guard_missing
   | Guard_present of {
       physical_rows : int;
-      framing : framing;
+      framing : Guard_rows.framing;
       sha256 : string option;
-      validation : guard_validation;
+      validation : Guard_rows.validation;
     }
 
 type 'a file_observation =
@@ -244,12 +238,9 @@ let decode_posts_row rows text =
       diagnostics_rev = List.rev_append diagnostics rows.diagnostics_rev;
     }
 
-let framing ~rows_end ~end_offset =
-  if rows_end = end_offset then Complete else Torn { rows_end; end_offset }
-
 let complete_sha256 framing digest = match framing with
-  | Complete -> Some (Agent_core_sha256.to_hex (Agent_core_sha256.get digest))
-  | Torn _ -> None
+  | Guard_rows.Complete -> Some (Agent_core_sha256.to_hex (Agent_core_sha256.get digest))
+  | Guard_rows.Torn _ -> None
 
 let read_posts ~io root =
   let init = {
@@ -259,9 +250,10 @@ let read_posts ~io root =
   let observe = function
     | Fs_compat.Private_jsonl_fold.Missing -> Posts_missing, []
     | Present { value; rows_end; end_offset } ->
-      let framing = framing ~rows_end ~end_offset in
+      let framing = Guard_rows.framing ~rows_end ~end_offset in
       let diagnostics = match framing with
-        | Complete -> List.rev value.diagnostics_rev | Torn _ -> [] in
+        | Guard_rows.Complete -> List.rev value.diagnostics_rev
+        | Guard_rows.Torn _ -> [] in
       Posts_present {
         physical_rows = value.physical_rows; accepted_rows = value.accepted_rows;
         errors = List.rev value.errors_rev; framing;
@@ -285,32 +277,23 @@ let read_posts ~io root =
 
 type guard_rows = {
   digest : Agent_core_sha256.ctx;
-  physical_rows : int;
-  first_row : string option;
+  rows : Guard_rows.rows;
 }
 
 let decode_guard_row rows text = {
   digest = feed_row rows.digest text;
-  physical_rows = rows.physical_rows + 1;
-  first_row = (match rows.first_row with None -> Some text | Some _ -> rows.first_row);
+  rows = Guard_rows.add_row rows.rows text;
 }
 
 let read_guard ~io root =
-  let init = { digest = Agent_core_sha256.init (); physical_rows = 0; first_row = None } in
+  let init = { digest = Agent_core_sha256.init (); rows = Guard_rows.empty } in
   let observe = function
     | Fs_compat.Private_jsonl_fold.Missing -> Guard_missing
     | Present { value; rows_end; end_offset } ->
-      let framing = framing ~rows_end ~end_offset in
-      let validation = match framing with
-        | Torn _ -> Torn_guard
-        | Complete ->
-          (match value.physical_rows, value.first_row with
-           | 1, Some text ->
-             (match Board_posts_guard_json.decode_row ~line:1 text with
-              | Ok guard -> Valid_guard guard | Error error -> Guard_row_rejected error)
-           | count, (None | Some _) -> Guard_row_count_rejected count) in
+      let framing = Guard_rows.framing ~rows_end ~end_offset in
+      let validation = Guard_rows.validate ~framing value.rows in
       Guard_present {
-        physical_rows = value.physical_rows; framing;
+        physical_rows = Guard_rows.physical_rows value.rows; framing;
         sha256 = complete_sha256 framing value.digest; validation;
       }
   in
@@ -334,7 +317,7 @@ let retained_reserved inspection =
 let posts_intent inspection = match inspection.posts with
   | File_observed { primary = Ok Posts_missing; _ } -> Some Missing_posts
   | File_observed { primary = Ok (Posts_present {
-      framing = Complete; errors = []; sha256 = Some sha256; _ }); _ } ->
+      framing = Guard_rows.Complete; errors = []; sha256 = Some sha256; _ }); _ } ->
     Some (Present_posts { sha256 })
   | File_not_examined | File_raised _ | File_projection_failed _
   | File_observed { primary = Error _; _ }
@@ -342,7 +325,7 @@ let posts_intent inspection = match inspection.posts with
 
 let guard_state inspection = match inspection.guard with
   | File_observed { primary = Ok Guard_missing; _ } -> `Missing
-  | File_observed { primary = Ok (Guard_present { validation = Valid_guard _; _ }); _ } -> `Valid
+  | File_observed { primary = Ok (Guard_present { validation = Guard_rows.Valid_guard _; _ }); _ } -> `Valid
   | File_not_examined | File_raised _ | File_projection_failed _
   | File_observed { primary = Error _; _ }
   | File_observed { primary = Ok (Guard_present _); _ } -> `Refused
@@ -465,11 +448,6 @@ let fold_error_to_yojson = function
   | Operation_failed failure -> `Assoc [
       "kind", `String "operation_failed"; "failure", operation_to_yojson failure ]
 
-let framing_to_yojson = function
-  | Complete -> `Assoc [ "state", `String "complete" ]
-  | Torn { rows_end; end_offset } -> `Assoc [
-      "state", `String "torn_tail"; "rows_end", `Int rows_end; "end_offset", `Int end_offset ]
-
 let row_error_to_yojson = function
   | Board_types.Invalid_posts_json { line; detail } -> `Assoc [
       "kind", `String "invalid_json"; "line", `Int line; "detail", `String detail ]
@@ -480,32 +458,14 @@ let posts_to_yojson = function
   | Posts_present { physical_rows; accepted_rows; errors; framing; sha256 } -> `Assoc [
       "state", `String "present"; "physical_rows", `Int physical_rows;
       "accepted_rows", `Int accepted_rows; "errors", `List (List.map row_error_to_yojson errors);
-      "framing", framing_to_yojson framing; "sha256", option_json (fun sha -> `String sha) sha256 ]
-
-let guard_rejection_to_yojson = function
-  | Board_posts_guard_json.Invalid_json { line; detail } -> `Assoc [
-      "kind", `String "invalid_json"; "line", `Int line; "detail", `String detail ]
-  | Field_set_rejected -> `Assoc [ "kind", `String "field_set_rejected" ]
-  | Schema_not_string -> `Assoc [ "kind", `String "schema_not_string" ]
-  | Unsupported_schema observed -> `Assoc [
-      "kind", `String "unsupported_schema"; "observed", `String observed ]
-  | Invalid_generation -> `Assoc [ "kind", `String "invalid_generation" ]
-
-let guard_validation_to_yojson = function
-  | Valid_guard guard -> `Assoc [
-      "state", `String "valid"; "generation", `String (Board_posts_guard_json.generation guard) ]
-  | Torn_guard -> `Assoc [ "state", `String "torn_tail" ]
-  | Guard_row_count_rejected count -> `Assoc [
-      "state", `String "row_count_rejected"; "physical_rows", `Int count ]
-  | Guard_row_rejected error -> `Assoc [
-      "state", `String "row_rejected"; "error", guard_rejection_to_yojson error ]
+      "framing", Guard_rows.framing_to_yojson framing; "sha256", option_json (fun sha -> `String sha) sha256 ]
 
 let guard_to_yojson = function
   | Guard_missing -> `Assoc [ "state", `String "missing" ]
   | Guard_present { physical_rows; framing; sha256; validation } -> `Assoc [
       "state", `String "present"; "physical_rows", `Int physical_rows;
-      "framing", framing_to_yojson framing; "sha256", option_json (fun sha -> `String sha) sha256;
-      "validation", guard_validation_to_yojson validation ]
+      "framing", Guard_rows.framing_to_yojson framing; "sha256", option_json (fun sha -> `String sha) sha256;
+      "validation", Guard_rows.validation_to_yojson validation ]
 
 let file_to_yojson encode = function
   | File_not_examined -> `Assoc [ "state", `String "not_examined" ]

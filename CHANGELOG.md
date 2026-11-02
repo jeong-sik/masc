@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+- Require explicit JSON provider connection, auth and capability declarations.
+  Preserve `models_only` without a provider preset, keep credentials in one
+  typed auth value, and apply the chat budget, tool schema and inline reasoning
+  overrides previously ignored by the parser (#27898).
+
 - Require an explicit typed capability policy on TOML provider rows. The
   `models_only` choice preserves exact model policy and prices while unknown
   models receive no provider preset; provider identity no longer fills a

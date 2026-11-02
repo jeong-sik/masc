@@ -237,8 +237,8 @@ let supported_is_not_default () = with_catalog (fun () ->
       let entry : Provider_catalog.entry =
         {id="label-a";aliases=[];kind=Provider_config.OpenAI_compat;
          base_url="https://a.invalid";request_path="/v1/chat/completions";
-         api_key_env="";auth=Provider_catalog.No_auth;default_model=None;discovery_timeout_s=None;max_context=None;
-         capabilities={Capabilities.default_capabilities with supported_models=Some ["supported-not-default"]};
+         auth=Provider_catalog.No_auth;default_model=None;discovery_timeout_s=None;max_context=None;
+         capabilities=Some {Capabilities.default_capabilities with supported_models=Some ["supported-not-default"]};
          credential_scope=None} in
       let overlay = match Provider_catalog.of_entries [entry] with
         | Ok catalog -> catalog | Error detail -> Alcotest.fail detail in

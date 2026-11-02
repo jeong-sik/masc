@@ -18,12 +18,11 @@ type entry =
   ; kind : Provider_kind.t
   ; base_url : string
   ; request_path : string
-  ; api_key_env : string
   ; auth : auth_mode
   ; default_model : string option
   ; discovery_timeout_s : float option
   ; max_context : int option
-  ; capabilities : Capability_profile.capabilities
+  ; capabilities : Capability_profile.capabilities option
   ; credential_scope : string option
   }
 
@@ -83,32 +82,30 @@ let validate_typed_entry (entry : entry) =
       Error (Printf.sprintf "provider %S discovery_timeout_s must be finite and greater than zero" entry.id)
     | Some _ | None -> Ok ()
   in
-  let validate_positive_capability field = function
-    | Some value when value <= 0 ->
-      Error (Printf.sprintf "provider %S capability %S must be positive" entry.id field)
-    | Some _ | None -> Ok ()
-  in
-  let* () =
-    validate_positive_capability
-      "max_context_tokens"
-      entry.capabilities.max_context_tokens
-  in
-  let* () =
-    validate_positive_capability "max_output_tokens" entry.capabilities.max_output_tokens
-  in
-  let* () =
-    match entry.capabilities.supported_models with
+  let* () = match entry.capabilities with
     | None -> Ok ()
-    | Some models ->
-      List.fold_left
-        (fun result model ->
-           let* () = result in
-           validate_exact_non_empty
-             ~provider_id:entry.id
-             ~field:"capabilities.supported_models"
-             model)
-        (Ok ())
-        models
+    | Some capabilities ->
+      let* () = Capability_vocab.encode_thinking_control_format capabilities.thinking_control_format
+        |> Result.map (fun _ -> ())
+        |> Result.map_error (fun error -> Printf.sprintf "provider %S: %s" entry.id
+          (Capability_vocab.thinking_control_format_codec_error_to_string error)) in
+      let positive field = function
+        | Some value when value <= 0 -> Error (Printf.sprintf
+            "provider %S capability %S must be positive" entry.id field)
+        | Some _ | None -> Ok () in
+      let* () = positive "max_context_tokens" capabilities.max_context_tokens in
+      let* () = positive "max_output_tokens" capabilities.max_output_tokens in
+      let* () = match capabilities.supported_models with
+        | None -> Ok ()
+        | Some models -> List.fold_left (fun result model ->
+            let* () = result in
+            validate_exact_non_empty ~provider_id:entry.id
+              ~field:"capabilities.supported_models" model) (Ok ()) models in
+      if (capabilities.supports_required_tool_choice || capabilities.supports_named_tool_choice)
+         && not capabilities.supports_tool_choice
+      then Error (Printf.sprintf
+          "provider %S required/named tool choice requires supports_tool_choice=true" entry.id)
+      else Ok ()
   in
   let* () =
     match entry.credential_scope with
@@ -116,40 +113,10 @@ let validate_typed_entry (entry : entry) =
     | Some scope ->
       validate_exact_non_empty ~provider_id:entry.id ~field:"credential_scope" scope
   in
-  let declared_env =
-    match entry.auth with
-    | Api_key_env env | Setup_token_env env -> env
-    | No_auth -> ""
-  in
-  let* () =
-    match entry.auth with
-    | No_auth ->
-      if entry.api_key_env = ""
-      then Ok ()
-      else
-        Error
-          (Printf.sprintf "provider %S auth=none requires an empty api_key_env" entry.id)
-    | Api_key_env env | Setup_token_env env ->
-      let* () = validate_exact_non_empty ~provider_id:entry.id ~field:"auth.env" env in
-      if String.equal entry.api_key_env declared_env
-      then Ok ()
-      else
-        Error
-          (Printf.sprintf
-             "provider %S api_key_env must equal the typed auth env %S"
-             entry.id
-             declared_env)
-  in
-  if
-    (entry.capabilities.supports_required_tool_choice
-     || entry.capabilities.supports_named_tool_choice)
-    && not entry.capabilities.supports_tool_choice
-  then
-    Error
-      (Printf.sprintf
-         "provider %S required/named tool choice requires supports_tool_choice=true"
-         entry.id)
-  else Ok ()
+  match entry.auth with
+  | No_auth -> Ok ()
+  | Api_key_env env | Setup_token_env env ->
+    validate_exact_non_empty ~provider_id:entry.id ~field:"auth.env" env
 ;;
 
 let of_entries entries =
@@ -237,11 +204,6 @@ let member_string key json =
     Error (Printf.sprintf "field %S expected string, got %s" key (json_kind actual))
 ;;
 
-let member_string_default key ~default json =
-  let* value = member_string key json in
-  Ok (Option.value value ~default)
-;;
-
 let member_exact_non_empty_string_strict key json =
   match member_string key json with
   | Error _ as error -> error
@@ -254,6 +216,21 @@ let member_exact_non_empty_string_strict key json =
     then
       Error (Printf.sprintf "field %S must not have leading or trailing whitespace" key)
     else Ok (Some raw)
+;;
+
+let required_exact_string key json =
+  let* value = member_exact_non_empty_string_strict key json in
+  match value with
+  | Some value -> Ok value
+  | None -> Error (Printf.sprintf "missing required field %S" key)
+;;
+
+let required_request_path json =
+  match member_string "request_path" json with
+  | Ok (Some value) when String.equal value (String.trim value) -> Ok value
+  | Ok (Some _) -> Error "field \"request_path\" must not have leading or trailing whitespace"
+  | Ok None -> Error "missing required field \"request_path\""
+  | Error _ as error -> error
 ;;
 
 let member_bool key json =
@@ -355,11 +332,6 @@ let provider_fields =
 
 let auth_fields = [ "type"; "env"; "key"; "path"; "command" ]
 
-let auth_env = function
-  | Api_key_env env | Setup_token_env env -> env
-  | No_auth -> ""
-;;
-
 let parse_auth json =
   match member "auth" json with
   | `Assoc _ as auth_json ->
@@ -369,7 +341,7 @@ let parse_auth json =
     if member_present "key" auth_json
     then Error "removed provider catalog auth field \"key\"; use auth.env"
     else
-      let* auth_type = member_string_default "type" ~default:"none" auth_json in
+      let* auth_type = required_exact_string "type" auth_json in
       let validate_active_fields () =
         match
           List.find_opt (fun key -> member_present key auth_json) [ "path"; "command" ]
@@ -415,11 +387,11 @@ let parse_auth json =
            (Printf.sprintf
               "unknown auth type %S (canonical: none, api_key_env, setup_token_env)"
               other))
-  | `Null -> Ok No_auth
+  | `Null -> Error "missing required provider auth object"
   | actual ->
     Error
       (Printf.sprintf
-         "provider catalog auth expected object or null, got %s"
+         "provider catalog auth expected object, got %s"
          (json_kind actual))
 ;;
 
@@ -551,18 +523,12 @@ let capability_base json =
   if member_present "base" json
   then Error "removed provider catalog field \"base\"; use \"capabilities_base\""
   else
-    let* label = member_exact_non_empty_string_strict "capabilities_base" json in
-    match label with
-    | None -> Ok Capability_profile.default_capabilities
-    | Some raw ->
-      (match Capability_profile.capabilities_for_provider_label raw with
-       | Some caps -> Ok caps
-       | None ->
-         Error
-           (Printf.sprintf
-              "unknown capabilities_base %S (see \
-               Capability_profile.capabilities_for_provider_label for valid presets)"
-              raw))
+    let* raw = required_exact_string "capabilities_base" json in
+    match String.lowercase_ascii raw with
+    | "models_only" -> Ok None
+    | _ -> (match Capability_preset.of_string raw with
+        | Some preset -> Ok (Some preset)
+        | None -> Error (Printf.sprintf "unknown capabilities_base %S" raw))
 ;;
 
 let override value caps f =
@@ -571,39 +537,19 @@ let override value caps f =
   | None -> caps
 ;;
 
-let parse_capabilities provider_json =
-  let* cap_json =
-    match member "capabilities" provider_json with
-    | `Null -> Ok (`Assoc [])
-    | `Assoc _ as cap_json ->
-      let* () =
-        validate_object_fields
-          ~scope:"provider catalog capabilities"
-          ~known:Capability_vocab.capability_fields
-          cap_json
-      in
-      Ok cap_json
-    | actual ->
-      Error
-        (Printf.sprintf
-           "provider catalog capabilities expected object or null, got %s"
-           (json_kind actual))
-  in
-  let* () =
-    match
-      List.find_opt
-        (fun field -> member_present field cap_json)
-        [ "supports_runtime_mcp_tools"; "supports_runtime_tool_events" ]
-    with
-    | None -> Ok ()
-    | Some field ->
-      Error
-        (Printf.sprintf
-           "removed provider catalog capability %S; runtime tool transport is not a \
-            model/provider capability"
-           field)
-  in
-  let* base = capability_base provider_json in
+let parse_capability_overrides ~base cap_json =
+  let enum field values decode =
+    let* raw = member_string field cap_json in
+    parse_optional_capability_value ~field ~canonical:(String.concat ", " values) decode raw in
+  let* chat_output_budget_field = enum "chat_output_budget_field"
+    Capability_vocab.chat_output_budget_field_values
+    Capability_vocab.chat_output_budget_field_of_string in
+  let* tool_schema_conformance = enum "tool_schema_conformance"
+    Capability_vocab.tool_schema_conformance_values
+    Capability_vocab.tool_schema_conformance_of_string in
+  let* content_inline_reasoning = enum "content_inline_reasoning"
+    Capability_vocab.content_inline_reasoning_values
+    Capability_vocab.content_inline_reasoning_of_string in
   let* thinking_control_format =
     (* Provider-level presets declare the same [thinking_control_format] /
        [thinking_control_token] key pair; join them so a chat_template_token
@@ -690,6 +636,12 @@ let parse_capabilities provider_json =
   let* emits_usage_tokens = member_bool "emits_usage_tokens" cap_json in
   let caps =
     base
+    |> fun caps -> override chat_output_budget_field caps (fun caps value ->
+      {caps with Capability_profile.chat_output_budget_field=value})
+    |> fun caps -> override tool_schema_conformance caps (fun caps value ->
+      {caps with Capability_profile.tool_schema_conformance=value})
+    |> fun caps -> override content_inline_reasoning caps (fun caps value ->
+      {caps with Capability_profile.content_inline_reasoning=value})
     |> fun caps ->
     override max_context_tokens caps (fun caps value ->
       { caps with Capability_profile.max_context_tokens = Some value })
@@ -828,6 +780,47 @@ let parse_capabilities provider_json =
   else Ok caps
 ;;
 
+let parse_capabilities provider_json =
+  let* cap_json =
+    match member "capabilities" provider_json with
+    | `Null -> Ok (`Assoc [])
+    | `Assoc _ as cap_json ->
+      let* () =
+        validate_object_fields
+          ~scope:"provider catalog capabilities"
+          ~known:Capability_vocab.capability_fields
+          cap_json
+      in
+      Ok cap_json
+    | actual ->
+      Error
+        (Printf.sprintf
+           "provider catalog capabilities expected object or null, got %s"
+           (json_kind actual))
+  in
+  let* () =
+    match
+      List.find_opt
+        (fun field -> member_present field cap_json)
+        [ "supports_runtime_mcp_tools"; "supports_runtime_tool_events" ]
+    with
+    | None -> Ok ()
+    | Some field ->
+      Error
+        (Printf.sprintf
+           "removed provider catalog capability %S; runtime tool transport is not a \
+            model/provider capability"
+           field)
+  in
+  let* base = capability_base provider_json in
+  match base, cap_json with
+  | None, `Assoc [] -> Ok None
+  | None, _ -> Error "models_only cannot declare provider-wide capability overrides"
+  | Some preset, cap_json ->
+    parse_capability_overrides ~base:(Capability_profile.capabilities_of_preset preset) cap_json
+    |> Result.map Option.some
+;;
+
 let parse_entry json =
   let* () =
     validate_object_fields ~scope:"provider catalog entry" ~known:provider_fields json
@@ -849,7 +842,7 @@ let parse_entry json =
             with auth.env")
     else Ok ()
   in
-  let* kind_raw = with_id (member_string_default "kind" ~default:"openai_compat" json) in
+  let* kind_raw = with_id (required_exact_string "kind" json) in
   let* kind =
     match Provider_kind.of_string kind_raw with
     | Some kind -> Ok kind
@@ -858,14 +851,8 @@ let parse_entry json =
   let* auth = with_id (parse_auth json) in
   let* capabilities = with_id (parse_capabilities json) in
   let* aliases = with_id (member_string_list "aliases" json) in
-  let* base_url = with_id (member_string_default "base_url" ~default:"" json) in
-  let* request_path =
-    with_id
-      (member_string_default
-         "request_path"
-         ~default:(Provider_kind.request_path_default kind)
-         json)
-  in
+  let* base_url = with_id (required_exact_string "base_url" json) in
+  let* request_path = with_id (required_request_path json) in
   let* default_model = with_id (member_string "default_model" json) in
   let* discovery_timeout_s = with_id (member_positive_finite_float "discovery_timeout_s" json) in
   let* max_context_override = with_id (member_positive_int "max_context" json) in
@@ -873,7 +860,7 @@ let parse_entry json =
   let max_context =
     match max_context_override with
     | Some _ as max_context -> max_context
-    | None -> capabilities.Capability_profile.max_context_tokens
+    | None -> Option.bind capabilities (fun capabilities -> capabilities.Capability_profile.max_context_tokens)
   in
   Ok
     { id
@@ -881,7 +868,6 @@ let parse_entry json =
     ; kind
     ; base_url
     ; request_path
-    ; api_key_env = auth_env auth
     ; auth
     ; default_model
     ; discovery_timeout_s

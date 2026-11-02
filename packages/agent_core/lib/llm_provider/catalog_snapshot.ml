@@ -59,8 +59,8 @@ let of_provider_entry (entry : Provider_catalog.entry) =
     kind=entry.kind;base_url=entry.base_url;request_path=entry.request_path;
     authentication;default_model=entry.default_model;discovery_timeout_s=entry.discovery_timeout_s;
     max_context=(match entry.max_context with Some _ as value -> value
-      | None -> entry.capabilities.max_context_tokens);
-    capabilities=Some entry.capabilities;credential_scope=entry.credential_scope }
+      | None -> Option.bind entry.capabilities (fun capabilities -> capabilities.Capability_profile.max_context_tokens));
+    capabilities=entry.capabilities;credential_scope=entry.credential_scope }
 
 let admit ~models ~source_providers ~policy_providers declared =
   let rec identities entry index = function

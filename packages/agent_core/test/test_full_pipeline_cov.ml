@@ -533,12 +533,11 @@ let test_structured_extract () =
       ; kind = Llm_provider.Provider_config.OpenAI_compat
       ; base_url = url
       ; request_path = "/v1/chat/completions"
-      ; api_key_env = ""
       ; auth = Llm_provider.Provider_catalog.No_auth
       ; default_model = Some "test-model"
       ; discovery_timeout_s = None
       ; max_context = None
-      ; capabilities = provider_capabilities
+      ; capabilities = Some provider_capabilities
       ; credential_scope = None
       }
     in

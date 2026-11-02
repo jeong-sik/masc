@@ -908,7 +908,17 @@ let test_uninitialized_rows_remain_display_only base_path _workspace =
          failure = Posts_guard_missing; _ } -> ()
      | _ -> Alcotest.fail "display snapshot became accepted initialization history");
     require_pre_effect (create reader "raw display cannot authorize append");
-    require_io_refusal (edit reader post "raw display cannot authorize replacement") in
+    require_io_refusal (edit reader post "raw display cannot authorize replacement");
+    let comments_path = Board.comments_path reader in
+    let comments_bytes () =
+      if Sys.file_exists comments_path then Some (read_bytes comments_path) else None in
+    let before_comments = comments_bytes () in
+    require_io_refusal
+      (Board.add_comment reader ~lookup:Recipient_lookup.none_declared
+         ~post_id:(Board.Post_id.to_string post.id) ~author:"comment-author"
+         ~content:"display-only parent cannot authorize this" ~ttl_hours:0 ());
+    Alcotest.(check (option string)) "unadmitted parent did not append a comment"
+      before_comments (comments_bytes ()) in
   assert_no_authority ();
   let partial = wire second ^ "{}\n" ^ wire third in
   write_bytes path partial;

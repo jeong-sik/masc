@@ -575,6 +575,10 @@ val classify_volume_probe
     [`Ensured] means idempotent create followed by strict inspect confirmation;
     it does not claim to distinguish a new volume from an existing one.
 
+    Microsandbox requires every listed row to contain exactly one nonblank
+    [name], preserving its bytes. An unidentified or ambiguous row is a probe
+    failure, so a partial inventory never authorizes volume creation.
+
     On Apple, a typed process timeout after create triggers one exact-name
     volume probe. Confirmed presence returns [`Already_present], without
     claiming which actor created the volume. Absence or an unreadable probe

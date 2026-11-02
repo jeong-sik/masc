@@ -247,37 +247,40 @@ function loadActiveView(window: number, view: CostView) {
   }
 }
 
+// A total needs a reading from every lane; missing evidence is not zero.
+function completeMetricSum(values: ReadonlyArray<number | null | undefined>): number | null {
+  if (values.length === 0) return null
+  return values.reduce<number | null>(
+    (sum, value) => sum === null || value == null ? null : sum + value,
+    0,
+  )
+}
+
 const modelTotals = computed(() => {
   const s = modelState.value
   if (s.status !== 'loaded') return null
   const data = s.data
-  let totalCost = 0
-  let totalIn = 0
-  let totalOut = 0
-  let totalCache = 0
-  let totalCacheCreation = 0
-  let totalReasoning = 0
+  const totalCost = completeMetricSum(data.map(m => m.total_cost_usd))
+  const totalIn = completeMetricSum(data.map(m => m.total_input_tokens))
+  const totalOut = completeMetricSum(data.map(m => m.total_output_tokens))
+  const totalCache = completeMetricSum(data.map(m => m.total_cache_read_tokens))
+  const totalCacheCreation = completeMetricSum(data.map(m => m.total_cache_creation_tokens))
+  const totalReasoning = completeMetricSum(data.map(m => m.total_reasoning_tokens))
   let totalSuccess = 0
   let totalError = 0
   let p50Sum = 0
   let p50Count = 0
-  let p95Max = 0
+  let p95Max: number | null = null
   let ttfrcSum = 0
   let ttfrcCount = 0
   for (const m of data) {
-    totalCost += m.total_cost_usd ?? 0
-    totalIn += m.total_input_tokens ?? 0
-    totalOut += m.total_output_tokens ?? 0
-    totalCache += m.total_cache_read_tokens ?? 0
-    totalCacheCreation += m.total_cache_creation_tokens ?? 0
-    totalReasoning += m.total_reasoning_tokens ?? 0
     totalSuccess += m.success_count ?? 0
     totalError += m.error_count ?? 0
     if (m.p50_latency_ms != null) {
       p50Sum += m.p50_latency_ms
       p50Count += 1
     }
-    if (m.p95_latency_ms != null && m.p95_latency_ms > p95Max) p95Max = m.p95_latency_ms
+    if (m.p95_latency_ms != null && (p95Max === null || m.p95_latency_ms > p95Max)) p95Max = m.p95_latency_ms
     // Aggregate TTFRC from recent entries
     if (m.recent_entries) {
       for (const e of m.recent_entries) {
@@ -288,9 +291,9 @@ const modelTotals = computed(() => {
       }
     }
   }
-  const p50Avg = p50Count > 0 ? Math.round(p50Sum / p50Count) : 0
-  const cacheRatio = totalIn > 0 ? totalCache / totalIn : null
-  const reasoningRatio = totalOut > 0 ? totalReasoning / totalOut : null
+  const p50Avg = p50Count > 0 ? Math.round(p50Sum / p50Count) : null
+  const cacheRatio = totalIn != null && totalIn > 0 && totalCache != null ? totalCache / totalIn : null
+  const reasoningRatio = totalOut != null && totalOut > 0 && totalReasoning != null ? totalReasoning / totalOut : null
   const errorRate = (totalSuccess + totalError) > 0 ? totalError / (totalSuccess + totalError) : null
   const avgTtfrc = ttfrcCount > 0 ? Math.round(ttfrcSum / ttfrcCount) : null
   return { totalCost, totalIn, totalOut, totalCache, totalCacheCreation, totalReasoning, totalSuccess, totalError, cacheRatio, reasoningRatio, errorRate, avgTtfrc, p50Avg, p95Max, readCoverage: null, count: data.length }
@@ -478,9 +481,9 @@ function ModelRow({
   maxCost: number
   maxP95: number
 }) {
-  const cost = model.total_cost_usd ?? 0
-  const inTok = model.total_input_tokens ?? 0
-  const outTok = model.total_output_tokens ?? 0
+  const cost = model.total_cost_usd ?? null
+  const inTok = model.total_input_tokens ?? null
+  const outTok = model.total_output_tokens ?? null
   const cacheRead = model.total_cache_read_tokens ?? null
   const cacheCreation = model.total_cache_creation_tokens ?? null
   const reasoning = model.total_reasoning_tokens ?? null
@@ -488,12 +491,12 @@ function ModelRow({
   const coverage = model.coverage_status ?? null
   const p50 = model.p50_latency_ms ?? null
   const p95 = model.p95_latency_ms ?? null
-  const costPct = maxCost > 0 ? (cost / maxCost) * 100 : 0
+  const costPct = maxCost > 0 && cost != null ? (cost / maxCost) * 100 : 0
   const p95Pct = maxP95 > 0 && p95 != null ? (p95 / maxP95) * 100 : 0
   const overBudget = p95 != null && p95 > 8000
 
-  const cacheRatio = inTok > 0 && cacheRead != null ? cacheRead / inTok : null
-  const reasoningRatio = outTok > 0 && reasoning != null ? reasoning / outTok : null
+  const cacheRatio = inTok != null && inTok > 0 && cacheRead != null ? cacheRead / inTok : null
+  const reasoningRatio = outTok != null && outTok > 0 && reasoning != null ? reasoning / outTok : null
 
   // Error rate
   const errCount = model.error_count ?? 0
@@ -518,8 +521,8 @@ function ModelRow({
       <th scope="row" class="px-2 py-1.5 text-left font-mono text-xs text-[var(--color-accent-fg)]">
         ${model.model_id}
       </th>
-      <td class="px-2 py-1.5 text-right font-mono text-xs">${formatCostTokens(inTok)}</td>
-      <td class="px-2 py-1.5 text-right font-mono text-xs">${formatCostTokens(outTok)}</td>
+      <td class="px-2 py-1.5 text-right font-mono text-xs">${formatReportedTokens(inTok)}</td>
+      <td class="px-2 py-1.5 text-right font-mono text-xs">${formatReportedTokens(outTok)}</td>
       <td class="px-2 py-1.5 text-right font-mono text-xs ${cacheRatioColor(cacheRatio)}">
         ${cacheRatio != null ? formatPct1(cacheRatio) : html`<span class="text-text-disabled">—</span>`}
       </td>
@@ -533,7 +536,7 @@ function ModelRow({
         ${thinkingFrac != null ? formatPct1(thinkingFrac) : html`<span class="text-text-disabled">—</span>`}
       </td>
       <td class="px-2 py-1.5 text-right font-mono text-xs text-[var(--color-accent-fg)]">
-        ${formatCost(cost)}
+        ${formatCost(cost, '미보고')}
       </td>
       <td class="px-2 py-1.5 min-w-[80px]">
         <div class="h-1.5 rounded-[var(--r-0)] bg-[var(--color-bg-surface)]">
@@ -643,18 +646,18 @@ function CostMatrix({ models }: { models: DashboardRuntimeModelMetric[] }) {
     return cb - ca
   })
 
-  const grid: number[][] = providers.map(() =>
+  const grid: (number | null)[][] = providers.map(() =>
     modelIds.map(mid => {
       const match = models.find(m => m.model_id === mid)
-      return match?.total_cost_usd ?? 0
+      return match?.total_cost_usd ?? null
     })
   )
 
-  const flat = grid.flat().filter(v => v > 0)
+  const flat = grid.flat().filter((v): v is number => v != null && v > 0)
   const max = flat.length > 0 ? Math.max(...flat) : 0
 
-  const zone = (v: number): string => {
-    if (v === 0) return 'z0'
+  const zone = (v: number | null): string => {
+    if (v == null || v === 0) return 'z0'
     const p = v / max
     if (p < 0.1) return 'z1'
     if (p < 0.3) return 'z2'
@@ -694,7 +697,7 @@ function CostMatrix({ models }: { models: DashboardRuntimeModelMetric[] }) {
                   const z = zone(v)
                   return html`
                     <td key=${j} class="px-2 py-1.5 text-right font-mono text-xs ${zoneClass(z)}">
-                      ${v > 0 ? formatCost(v) : '—'}
+                      ${formatCost(v, '미보고')}
                     </td>
                   `
                 })}

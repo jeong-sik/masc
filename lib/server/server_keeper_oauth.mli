@@ -16,11 +16,12 @@ val callback_path : string
     them: which login a callback belongs to is the state it echoes, and a
     state is unguessable and redeemable once. *)
 
-val declarations_json : base_path:string -> now:float -> Yojson.Safe.t
+val declarations_json : base_path:string -> Yojson.Safe.t
 (** Every provider declared under [config/identity/], as a screen could list
-    them. A readable declaration carries a tagged [client_state] object whose
-    [kind] is ["on_file"], ["lapsed"], ["none"], or ["problem"]. The last
-    also carries the client-store [problem]. A declaration nobody can read is
+    them. A readable declaration carries a tagged [app_state] object whose
+    [kind] says whether an operator app is on file: ["on_file"], ["none"], or
+    ["problem"]. The last also carries the store's [problem]. A declaration
+    nobody can read is
     itself [{id, problem}],
     because the alternative is a shorter list with no reason the provider is
     missing. No client id or secret is returned. *)

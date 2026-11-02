@@ -93,20 +93,16 @@ let handle_callback ~clock request reqd =
 ;;
 
 (* What an operator can attach a Keeper to. Names and labels of files that
-   ship with the binary, plus whether this install already has a client for
+   ship with the binary, plus whether an operator app is on file for
    each -- nothing about any Keeper -- so it reads like the rest of the
    operator snapshot. *)
 let handle_providers = (fun state req reqd ->
       Http.Response.json_value ~compress:true ~request:req
-        (* NDT-OK: the HTTP request boundary samples Unix wall time once;
-           [declarations_json] receives it explicitly to compare persisted
-           Unix expiry timestamps without hiding a clock read in projection. *)
         (`Assoc
           [ ( "providers"
             , Server_keeper_oauth.declarations_json
                 ~base_path:
-                  (Mcp_server.workspace_config state).Workspace.base_path
-                ~now:(Time_compat.now ()) )
+                  (Mcp_server.workspace_config state).Workspace.base_path )
           ])
         reqd)
 ;;

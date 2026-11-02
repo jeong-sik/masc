@@ -11,7 +11,7 @@ type identity_provider =
             operator to consent again for no reason. *)
       ; idp_also_on : string list
         (** Which other Keepers hold this one. A Keeper attaches on its own
-            account -- the client is shared, the token is not -- so this is
+            account -- the token is its own -- so this is
             the one question a single Keeper's tab cannot answer for itself,
             and answering it by opening each Keeper in turn is how an
             operator loses track of which account went where. *)

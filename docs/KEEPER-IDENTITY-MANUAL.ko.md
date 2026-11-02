@@ -21,7 +21,9 @@ Keeper 하나에 Jira 나 Notion 같은 서비스를 붙이면, 그 서비스의
 | **앱을 먼저** | Slack, GitHub, Figma, Google 8개, Zendesk 등 | 각 서비스에서 앱 하나 (`A` 또는 `a` 키로 설정) |
 
 갈리는 이유는 하나입니다. 앞쪽은 masc 가 필요할 때 스스로 클라이언트를 등록할 수
-있고, 뒤쪽은 그 창구를 안 열어 둡니다. Google 은 아예 안 하고, Figma 는 열어는
+있고, 뒤쪽은 그 창구를 안 열어 둡니다. masc 는 로그인할 때마다 그때 서버가 받는
+callback 주소로 클라이언트를 새로 등록합니다. 그래서 서버 base URL 을 바꿔도 예전
+주소로 등록된 클라이언트 때문에 로그인이 막히지 않습니다. Google 은 아예 안 하고, Figma 는 열어는
 뒀는데 아무나 쓰면 403 을 냅니다. 미등록 상태에서 Enter 를 누르면 상단 안내가
 표시되며, `A` 또는 `a` 키를 누르면 TUI 앱 등록 폼(Client ID, Client Secret, Scopes)이
 열립니다.
@@ -187,7 +189,8 @@ Keeper 상세 화면의 Identity 탭에서 `D` 를 두 번 누릅니다. 첫 번
 |---|---|
 | access token / 만료 시각 | 그 Keeper 시크릿의 환경 항목 (선언이 이름을 정함) |
 | refresh token | 그 Keeper 시크릿의 파일 항목 |
-| 클라이언트 id / secret | `.masc/identity/<client_group>/` — masc 전체 공용 |
+| 직접 만든 앱 (id / secret / 권한) | `.masc/identity/apps/<client_group>.json` — masc 전체 공용 |
+| 로그인이 쓴 클라이언트 | `.masc/identity/clients/<keeper>/<서비스>.json` — 갱신과 떼어내기는 이 클라이언트를 씁니다. refresh token 은 발급받은 클라이언트에만 묶이기 때문입니다 |
 | 도구 목록 | `.masc/identity/catalogs/<keeper>/<서비스>.json` |
 | 떼어내기 영수증 | `.masc/identity/disconnects/<keeper>/<서비스>.json` |
 

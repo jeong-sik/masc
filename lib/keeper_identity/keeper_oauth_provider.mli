@@ -38,11 +38,11 @@ type credential_source =
 type t = private {
   id : string;
       (** One path component, checked when the declaration is read. The
-          record is private, so anything built from an id -- a directory
-          holding this provider's registered client, for one -- can rely on
-          that without checking again. *)
+          record is private, so anything built from an id -- a file
+          recording the client a login used, for one -- can rely on that
+          without checking again. *)
   client_group : string;
-      (** Which registered client this provider uses, one path component like
+      (** Which operator app this provider uses, one path component like
           {!id} and defaulting to it.
 
           A client belongs to an authorization server, not to a resource, so

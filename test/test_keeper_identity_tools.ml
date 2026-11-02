@@ -969,6 +969,65 @@ let attachment ~base_path =
   Keeper_oauth_pending.capture_attachment (Keeper_oauth_pending.for_base_path base_path)
     ~keeper:"attaching-fixture" ~provider_id:(provider ()).Provider.id
 
+(* What a completed login leaves beside the Keeper's tokens: the client the
+   code was redeemed with. *)
+let bind_registered_client ~base_path ~provider ~client_id =
+  match
+    Keeper_oauth_client_store.save_binding
+      ~path:
+        (Identity_tools.client_binding_path ~base_path ~keeper_name:"attaching-fixture"
+           ~provider_id:provider.Provider.id)
+      (Keeper_oauth_client_store.Bound_to_registered
+         { Keeper_oauth_client_store.Registered.client_id
+         ; client_secret = None
+         ; secret_expires_at = None
+         })
+  with
+  | Ok () -> ()
+  | Error message -> Alcotest.failf "could not record the login's client: %s" message
+
+let test_a_renewal_with_no_record_of_its_client_asks_for_a_new_login () =
+  (* Without the client the login used there is nothing a provider would
+     accept the refresh token from. Presenting another client is the failure
+     this record exists to prevent, so the renewal stops and says why. *)
+  let base_path = temp_base () in
+  let provider = provider () in
+  store_expiry ~base_path ~provider ~at:100.0;
+  (match
+     Projection.set_file_entry ~base_path ~keeper_name:"attaching-fixture"
+       ~scope:Projection.Keeper_secret
+       ~container_path:provider.Provider.refresh_token_file ~value:"the-refresh-token"
+   with
+  | Ok () -> ()
+  | Error message -> Alcotest.failf "could not store a refresh token: %s" message);
+  let token_post ~url:_ ~headers:_ ~body:_ =
+    Alcotest.fail "a refresh was sent with no record of the login's client"
+  in
+  let discover ~mcp_url:_ =
+    Ok
+      { Keeper_oauth_discovery.resource = "https://mcp.example.com/v1/mcp"
+      ; issuer = "https://auth.example.com"
+      ; authorize_url = "https://auth.example.com/authorize"
+      ; token_url = "https://auth.example.com/oauth/token"
+      ; registration_url = None
+      ; revocation_endpoint = None
+      ; scopes_supported = []
+      ; supports_pkce_s256 = true
+      }
+  in
+  match
+    Identity_tools.renew_if_needed ~attachment:(attachment ~base_path) ~token_post ~discover
+      ~base_path ~keeper_name:"attaching-fixture" ~provider ~now:0.0
+      ~access_token:"about-to-expire" ()
+  with
+  | Ok _ -> Alcotest.fail "renewed without knowing which client the login used"
+  | Error (Identity_tools.Renew_permanent message) ->
+    check str "the refusal names the missing record"
+      (Keeper_oauth_client_store.redeem_error_to_string Keeper_oauth_client_store.Not_bound)
+      message
+  | Error (Identity_tools.Renew_transient message) ->
+    Alcotest.failf "a missing record was read as transient: %s" message
+
 let test_a_fresh_token_is_left_alone () =
   let base_path = temp_base () in
   let provider = provider () in
@@ -1009,18 +1068,20 @@ let test_an_expiring_token_is_exchanged_and_stored () =
    with
   | Ok () -> ()
   | Error message -> Alcotest.failf "could not store a refresh token: %s" message);
+  (* The install's app is not the client this login used; renewal must name
+     the login's own client, the one the refresh token was issued to. *)
   (match
-     Keeper_oauth_client_store.save
-       ~dir:(Filename.concat (Filename.concat base_path ".masc") "identity")
+     Keeper_oauth_client_store.save_app
+       ~identity_dir:(Filename.concat (Filename.concat base_path ".masc") "identity")
        ~provider
-       { Keeper_oauth_client_store.client_id = "client-abc"
+       { Keeper_oauth_client_store.App.client_id = "someone-elses-app"
        ; client_secret = None
-       ; secret_expires_at = None
        ; scopes = []
        }
    with
   | Ok () -> ()
-  | Error message -> Alcotest.failf "could not store a client id: %s" message);
+  | Error message -> Alcotest.failf "could not store an app: %s" message);
+  bind_registered_client ~base_path ~provider ~client_id:"client-abc";
   let sent = ref [] in
   let token_post ~url:_ ~headers:_ ~body =
     sent := body :: !sent;
@@ -1054,6 +1115,10 @@ let test_an_expiring_token_is_exchanged_and_stored () =
       check Alcotest.bool "and it was a refresh_token grant" true
         (match !sent with
         | body :: _ -> Str.string_match (Str.regexp ".*grant_type=refresh_token") body 0
+        | [] -> false);
+      check Alcotest.bool "redeemed by the client the login used" true
+        (match !sent with
+        | body :: _ -> Str.string_match (Str.regexp ".*client_id=client-abc") body 0
         | [] -> false);
       (* Stored, or the next turn exchanges the same expiring token again. *)
       (match
@@ -1129,17 +1194,7 @@ let check_a_401_is_cleared_by_one_reactive_refresh ~proactive () =
    with
   | Ok () -> ()
   | Error message -> Alcotest.failf "could not store a refresh token: %s" message);
-  (match
-     Keeper_oauth_client_store.save
-       ~dir:(Filename.concat (Filename.concat base_path ".masc") "identity") ~provider
-       { Keeper_oauth_client_store.client_id = "client-abc"
-       ; client_secret = None
-       ; secret_expires_at = None
-       ; scopes = []
-       }
-   with
-  | Ok () -> ()
-  | Error message -> Alcotest.failf "could not store a client id: %s" message);
+  bind_registered_client ~base_path ~provider ~client_id:"client-abc";
   (* The endpoint accepts only the refreshed token; the stale one is a 401. *)
   let mcp_post ~url:_ ~headers ~body =
     let authorized =
@@ -1244,9 +1299,7 @@ let test_renewal_cannot_restore_detached_credentials () =
     ~name:provider.access_token_env ~value:"fixture-access" |> require;
   Projection.set_file_entry ~base_path ~keeper_name ~scope:Projection.Keeper_secret
     ~container_path:provider.refresh_token_file ~value:"fixture-refresh" |> require;
-  Keeper_oauth_client_store.save
-    ~dir:(Filename.concat (Filename.concat base_path ".masc") "identity") ~provider
-    {client_id="fixture-client";client_secret=None;secret_expires_at=Some 0.;scopes=[]} |> require;
+  bind_registered_client ~base_path ~provider ~client_id:"fixture-client";
   let discover ~mcp_url:_ = Ok {
     Keeper_oauth_discovery.resource="https://mcp.example.com";
     issuer="https://auth.example.com";authorize_url="https://auth.example.com/authorize";
@@ -1378,6 +1431,8 @@ let () =
             test_reactive_refresh_uses_the_proactive_credential_revision;
           Alcotest.test_case "renewal cannot restore detached credentials" `Quick
             test_renewal_cannot_restore_detached_credentials;
+          Alcotest.test_case "no record of the login's client asks for a new login" `Quick
+            test_a_renewal_with_no_record_of_its_client_asks_for_a_new_login;
           Alcotest.test_case "post-send 401 does not repeat" `Quick
             test_post_send_401_does_not_refresh_and_repeat;
         ] );

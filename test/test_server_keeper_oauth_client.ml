@@ -18,6 +18,9 @@ let base_path () =
   Unix.mkdir path 0o700;
   path
 
+let identity_dir base_path =
+  Filename.concat (Filename.concat base_path ".masc") "identity"
+
 let provider_or_fail id =
   match Keeper_oauth_declarations.find id with
   | Some (Keeper_oauth_declarations.Declared provider) -> provider
@@ -53,15 +56,12 @@ let test_the_secret_never_comes_back () =
 let test_what_was_set_is_what_start_would_use () =
   let base_path = base_path () in
   let _ = set base_path ~client_secret:(Some "s3cret") in
-  let dir =
-    Filename.concat (Filename.concat base_path ".masc") "identity"
-  in
-  match Store.load ~dir ~provider:(provider_or_fail "slack") with
-  | Ok (Some credentials) ->
-    check Alcotest.string "the id" "an-app" credentials.Store.client_id;
+  match Store.load_app ~identity_dir:(identity_dir base_path) ~provider:(provider_or_fail "slack") with
+  | Ok (Some app) ->
+    check Alcotest.string "the id" "an-app" app.Store.App.client_id;
     check
       (Alcotest.option Alcotest.string)
-      "the secret" (Some "s3cret") credentials.Store.client_secret
+      "the secret" (Some "s3cret") app.Store.App.client_secret
   | Ok None -> Alcotest.fail "nothing was written"
   | Error message -> Alcotest.failf "reading back failed: %s" message
 
@@ -111,7 +111,7 @@ let test_the_listing_says_whether_an_app_is_on_file () =
         (function
           | `Assoc pairs ->
             if List.assoc_opt "id" pairs = Some (`String id)
-            then List.assoc_opt "client_state" pairs
+            then List.assoc_opt "app_state" pairs
             else None
           | _ -> None)
         rows
@@ -130,30 +130,28 @@ let test_the_listing_says_whether_an_app_is_on_file () =
     (Some "none")
     (client_state_kind
        "slack"
-       (Oauth.declarations_json ~base_path:listing_base ~now:0.0));
+       (Oauth.declarations_json ~base_path:listing_base));
   let _ = set listing_base ~client_secret:None in
   check (Alcotest.option Alcotest.string) "and it says so once there is"
     (Some "on_file")
     (client_state_kind
        "slack"
-       (Oauth.declarations_json ~base_path:listing_base ~now:0.0));
+       (Oauth.declarations_json ~base_path:listing_base));
   check (Alcotest.option Alcotest.string) "without claiming it for another provider"
     (Some "none")
     (client_state_kind
        "figma"
-       (Oauth.declarations_json ~base_path:listing_base ~now:0.0));
+       (Oauth.declarations_json ~base_path:listing_base));
   let unreadable_base = base_path () in
   let provider = provider_or_fail "slack" in
+  let app_path = Store.app_path ~identity_dir:(identity_dir unreadable_base) ~provider in
   let masc_dir = Filename.concat unreadable_base ".masc" in
-  let identity_dir = Filename.concat masc_dir "identity" in
-  let provider_dir =
-    Filename.concat identity_dir provider.Keeper_oauth_provider.client_group
-  in
-  List.iter (fun path -> Unix.mkdir path 0o700) [ masc_dir; identity_dir; provider_dir ];
-  Unix.mkdir (Filename.concat provider_dir "client_id") 0o700;
+  List.iter (fun path -> Unix.mkdir path 0o700)
+    [ masc_dir; Filename.dirname (Filename.dirname app_path); Filename.dirname app_path ];
+  Unix.mkdir app_path 0o700;
   check Alcotest.bool "an unreadable store says what failed rather than none" true
     (match
-       client_state "slack" (Oauth.declarations_json ~base_path:unreadable_base ~now:0.0)
+       client_state "slack" (Oauth.declarations_json ~base_path:unreadable_base)
      with
      | Some (`Assoc fields) ->
        List.assoc_opt "kind" fields = Some (`String "problem")
@@ -161,55 +159,6 @@ let test_the_listing_says_whether_an_app_is_on_file () =
            | Some (`String problem) -> String.trim problem <> ""
            | Some _ | None -> false)
      | _ -> false)
-
-let test_a_lapsed_registration_is_named_as_lapsed () =
-  (* The listing exists so an operator is not asked to retype an app that is
-     already there. A registration whose secret has lapsed is not that: the
-     next login registers a new one, and saying "on file" would name an app
-     that is about to be replaced.
-
-     An app the operator typed in is stored with an expiry of zero and stays
-     on file however late it is read -- the case above already covers it, at
-     now = 0; this one reads the same store far in the future. *)
-  let base_path = base_path () in
-  let state now =
-    match Oauth.declarations_json ~base_path ~now with
-    | `List rows ->
-      List.find_map
-        (function
-          | `Assoc pairs ->
-            if List.assoc_opt "id" pairs = Some (`String "slack")
-            then
-              (match List.assoc_opt "client_state" pairs with
-               | Some (`Assoc fields) ->
-                 (match List.assoc_opt "kind" fields with
-                  | Some (`String kind) -> Some kind
-                  | Some _ | None -> None)
-               | Some _ | None -> None)
-            else None
-          | _ -> None)
-        rows
-    | _ -> Alcotest.fail "the listing is not a list"
-  in
-  let _ = set base_path ~client_secret:(Some "s3cret") in
-  check (Alcotest.option Alcotest.string) "an operator's own app does not lapse"
-    (Some "on_file") (state 1.7e9);
-  let provider = provider_or_fail "slack" in
-  let dir = Filename.concat (Filename.concat base_path ".masc") "identity" in
-  (match
-     Store.save ~dir ~provider
-       { Store.client_id = "registered-once"
-       ; client_secret = Some "s3cret"
-       ; secret_expires_at = Some 100.0
-       ; scopes = []
-       }
-   with
-   | Ok () -> ()
-   | Error message -> Alcotest.failf "save failed: %s" message);
-  check (Alcotest.option Alcotest.string) "still on file before the deadline"
-    (Some "on_file") (state 99.0);
-  check (Alcotest.option Alcotest.string) "and says why it will be replaced"
-    (Some "lapsed") (state 101.0)
 
 let test_one_google_app_answers_for_all_of_them () =
   (* Google publishes eight MCP resources behind one accounts.google.com,
@@ -223,10 +172,9 @@ let test_one_google_app_answers_for_all_of_them () =
   with
   | Error message -> Alcotest.failf "set_client failed: %s" message
   | Ok _ ->
-    let dir = Filename.concat (Filename.concat base_path ".masc") "identity" in
     let seen id =
-      match Store.load ~dir ~provider:(provider_or_fail id) with
-      | Ok (Some credentials) -> Some credentials.Store.client_id
+      match Store.load_app ~identity_dir:(identity_dir base_path) ~provider:(provider_or_fail id) with
+      | Ok (Some app) -> Some app.Store.App.client_id
       | Ok None -> None
       | Error message -> Alcotest.failf "reading %s back failed: %s" id message
     in
@@ -255,20 +203,17 @@ let test_recorded_scopes_are_what_gets_asked_for () =
   check Alcotest.bool "split and trimmed, blanks dropped" true
     (member payload "scopes"
      = Some (`List [ `String "channels:read"; `String "chat:write" ]));
-  let dir = Filename.concat (Filename.concat base_path ".masc") "identity" in
-  match Store.load ~dir ~provider:(provider_or_fail "slack") with
-  | Ok (Some credentials) ->
+  match Store.load_app ~identity_dir:(identity_dir base_path) ~provider:(provider_or_fail "slack") with
+  | Ok (Some app) ->
     check
       (Alcotest.list Alcotest.string)
       "and they come back" [ "channels:read"; "chat:write" ]
-      credentials.Store.scopes
+      app.Store.App.scopes
   | Ok None -> Alcotest.fail "nothing was written"
   | Error message -> Alcotest.failf "reading back failed: %s" message
 
 let test_no_scopes_means_ask_for_what_the_service_publishes () =
-  (* Empty is not "ask for nothing" -- it is the absence of an override, and
-     a client this install registered can be granted whatever the resource
-     offers. *)
+  (* Empty is not "ask for nothing" -- it is the absence of an override. *)
   let base_path = base_path () in
   let payload = set base_path ~client_secret:None in
   check Alcotest.bool "nothing recorded" true
@@ -281,15 +226,14 @@ let test_clearing_an_app_removes_old_secret_and_scopes () =
       ~client_secret:(Some "old-secret")
   in
   let _ = set base_path ~client_secret:None in
-  let dir = Filename.concat (Filename.concat base_path ".masc") "identity" in
-  match Store.load ~dir ~provider:(provider_or_fail "slack") with
-  | Ok (Some credentials) ->
+  match Store.load_app ~identity_dir:(identity_dir base_path) ~provider:(provider_or_fail "slack") with
+  | Ok (Some app) ->
     check
       (Alcotest.option Alcotest.string)
-      "the old secret is gone" None credentials.Store.client_secret;
+      "the old secret is gone" None app.Store.App.client_secret;
     check
       (Alcotest.list Alcotest.string)
-      "the old scope override is gone" [] credentials.Store.scopes
+      "the old scope override is gone" [] app.Store.App.scopes
   | Ok None -> Alcotest.fail "clearing optional fields removed the client id"
   | Error message -> Alcotest.failf "reading cleared app failed: %s" message
 
@@ -310,8 +254,6 @@ let () =
             test_an_undeclared_provider_is_refused;
           Alcotest.test_case "the listing says whether an app is on file"
             `Quick test_the_listing_says_whether_an_app_is_on_file;
-          Alcotest.test_case "a lapsed registration is named as lapsed"
-            `Quick test_a_lapsed_registration_is_named_as_lapsed;
           Alcotest.test_case "one Google app answers for all of them" `Quick
             test_one_google_app_answers_for_all_of_them;
           Alcotest.test_case "recorded scopes are what gets asked for" `Quick

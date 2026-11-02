@@ -4,12 +4,11 @@
 type in_flight = {
   pending : Keeper_oauth_flow.pending;
   discovered : Keeper_oauth_discovery.t;
-  client_id : string;
-  client_secret : string option;
+  client : Keeper_oauth_client_store.login_client;
 }
 
 type completion = Tools_discovered of int | Credentials_published_discovery_failed
-type credential_write = Refresh_token | Access_token | Expiry
+type credential_write = Refresh_token | Client | Access_token | Expiry
 type credential_publication = {
   completed_writes : credential_write list;
   interrupted_write : credential_write;
@@ -287,4 +286,4 @@ let publish_credentials t ~state ~write =
                  let backtrace = Printexc.get_raw_backtrace () in
                  interrupted completed stage;
                  Printexc.raise_with_backtrace exn backtrace) in
-      publish [] [Refresh_token; Access_token; Expiry])
+      publish [] [Refresh_token; Client; Access_token; Expiry])

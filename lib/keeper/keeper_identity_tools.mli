@@ -24,8 +24,9 @@ val keepers_with :
   base_path:string -> provider_id:string -> excluding:string -> string list
 (** Which Keepers hold a catalog for this provider, sorted.
 
-    A Keeper attaches on its own account -- the client is shared, the token
-    is not -- so "who has this already" is a question no single Keeper's tab
+    A Keeper attaches on its own account -- its token, and the client that
+    token was issued to, are its own -- so "who has this already" is a
+    question no single Keeper's tab
     can answer, and answering it by opening each of them in turn is how an
     operator loses track of which account went where.
 
@@ -48,8 +49,23 @@ val save :
 (** Publish through the ticket captured before discovery. Its scope supplies
     the workspace and Keeper; the catalog must name the same provider. *)
 
+val identity_dir : base_path:string -> string
+(** [<base_path>/.masc/identity]: operator apps, the clients logins used, tool
+    catalogs and detach receipts all live under it. *)
+
+val client_binding_path :
+  base_path:string -> keeper_name:string -> provider_id:string -> string
+(** Where the client a Keeper's login used is recorded
+    ({!Keeper_oauth_client_store.binding}): beside the workspace, next to the
+    tool catalogs, and never in the Keeper's own projection, because a
+    client secret is not the Keeper's to hold. *)
+
 type local_detachment = private {
   refresh_token : string option;
+  client : Keeper_oauth_client_store.binding option;
+      (** The client the login used, read before its record is deleted, for
+          the same best-effort revocation as [refresh_token]. An unreadable
+          record is [None]: deletion never depends on it. *)
   tools_removed : bool;
 }
 val detach_local :
@@ -58,7 +74,8 @@ val detach_local :
   provider:Keeper_oauth_provider.t ->
   (local_detachment, string) result
 (** Retire the scope before reading the refresh token and removing local
-    credential entries/catalog, under the existing publication owner. An error
+    credential entries, the client record and the catalog, under the existing
+    publication owner. An error
     can follow earlier deletions. The returned token is solely for the server's
     best-effort revocation outside the lock; it must never be serialized. *)
 

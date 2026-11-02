@@ -115,18 +115,6 @@ PREFLIGHT_HELPER_COMMIT="$("$PREFLIGHT_HELPER" build-commit)" \
 [[ -n "$PREFLIGHT_HELPER_COMMIT" ]] \
   || fail "typed deployment preflight helper reported an empty build commit: $PREFLIGHT_HELPER"
 
-# Read the durable event-queue filenames from the OCaml owner.
-QUEUE_SNAPSHOT_FILENAME=""
-QUEUE_WAL_FILENAME=""
-while IFS='=' read -r key value; do
-  case "$key" in
-    snapshot) QUEUE_SNAPSHOT_FILENAME="$value" ;;
-    wal) QUEUE_WAL_FILENAME="$value" ;;
-  esac
-done < <("$PREFLIGHT_HELPER" durable-filenames)
-[[ -n "$QUEUE_SNAPSHOT_FILENAME" && -n "$QUEUE_WAL_FILENAME" ]] \
-  || fail "preflight helper did not report both durable event-queue filenames"
-
 # A build that narrows a runtime.toml key refuses the live file on boot, and
 # the part that key belongs to goes empty: #39040 left every Keeper without
 # Skills (#39311). The helper judges the file this workspace's server reads

@@ -480,7 +480,7 @@ class LocalBuildInstall(unittest.TestCase):
                 self.assertTrue(artifact.exists(), "the build tree was cleaned after a refused install")
                 self.assertEqual((checkout / "calls").read_text().splitlines(), ["build"])
 
-    def test_cleanup_protects_selected_workspace_state(self):
+    def test_install_retains_build_and_selected_workspace_state(self):
         for location in ("inside", "build_root", "symlink_inside", "outside"):
             for explicit in (False, True):
                 with self.subTest(location=location, explicit=explicit), \
@@ -533,17 +533,14 @@ class LocalBuildInstall(unittest.TestCase):
                     self.assertIn(f"checking runtime.toml of {selected}", result.stdout)
                     self.assertTrue(state.exists(), "successful installation removed workspace state")
                     self.assertEqual(state.read_text(), "operator state")
-                    protected = location in ("inside", "build_root", "symlink_inside")
-                    self.assertEqual(artifact.exists(), protected)
-                    self.assertEqual((checkout / "calls").read_text().splitlines(),
-                                     ["build"] if protected else ["build", "clean"])
+                    self.assertTrue(artifact.exists(), "installation removed incremental output")
+                    self.assertEqual((checkout / "calls").read_text().splitlines(), ["build"])
 
-    def test_successful_default_install_cleans_only_its_own_build(self):
-        for flags, expected_clean, fail_build in (
-                ([], True, False), (["--keep-build"], False, False),
-                (["--skip-build"], False, False), ([], False, True),
-                (["--prefix", "BUILD_PREFIX"], False, False),
-                (["--manifest-dir", "BUILD_MANIFESTS"], False, False)):
+    def test_install_preserves_incremental_output(self):
+        for flags, fail_build in (
+                ([], False), (["--skip-build"], False), ([], True),
+                (["--prefix", "BUILD_PREFIX"], False),
+                (["--manifest-dir", "BUILD_MANIFESTS"], False)):
             with self.subTest(flags=flags, fail_build=fail_build), \
                     tempfile.TemporaryDirectory() as temporary:
                 root = Path(temporary).resolve()
@@ -586,11 +583,12 @@ class LocalBuildInstall(unittest.TestCase):
                     self.assertEqual(result.returncode, 0, result.stderr)
                     self.assertEqual(subprocess.check_output(
                         [str(prefix / "masc")], text=True).strip(), "main_eio.exe")
-                self.assertEqual(artifact.exists(), not expected_clean)
+                self.assertTrue(artifact.exists(), "installation removed incremental output")
                 calls = checkout / "calls"
                 if calls.exists():
-                    self.assertTrue(all(line.endswith(":1")
-                                        for line in calls.read_text().splitlines()))
+                    self.assertEqual(calls.read_text().splitlines(), ["build:1"])
+                else:
+                    self.assertIn("--skip-build", flags)
 
     def test_every_registered_host_gets_the_new_copy_under_its_own_name(self):
         with tempfile.TemporaryDirectory(prefix="local build ' ") as temporary:

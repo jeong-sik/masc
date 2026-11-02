@@ -322,9 +322,8 @@ class GuestShim(unittest.TestCase):
         self.assertEqual(result.stderr, "")
         lines = result.stdout.splitlines()
         self.assertTrue(lines[0].startswith("# Usage: scripts/install-local-build.sh"), lines[0])
-        self.assertTrue(lines[-1].startswith("#   --no-guest-shim"), lines[-1])
         for option in ("--prefix", "--manifest-dir", "--skip-build", "--build-dir",
-                       "--base-path", "--keep-build", "--no-guest-shim"):
+                       "--base-path", "--no-guest-shim", "--print-build-targets"):
             self.assertEqual(sum(line.startswith(f"#   {option} ") for line in lines), 1, option)
 
 

@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.67.0] - 2026-11-02
+
 - Require explicit JSON provider connection, auth and capability declarations.
   Preserve `models_only` without a provider preset, keep credentials in one
   typed auth value, and apply the chat budget, tool schema and inline reasoning
@@ -17,21 +19,24 @@
   default. A child startup failure now fails these cases instead of skipping
   them (#27898).
 
-## [0.67.0] - 2026-11-02
-
 ### Known issues
 
-- `test_server_runtime_bootstrap` (12 cases) and `test_workspace_coverage` (1 case) fail on this tree; recorded in #47336. The OCaml suites are not a release gate (#47439).
 - The v0.66.0 tag is not a main first-parent ancestor, so the missing-fragment report for this release was skipped.
 
 
 ### Upgrade notes
+
+- AGENT_CORE callers must construct `Types.JsonSchema (Types.Raw_schema domain)` or an explicit `Types.Named_schema` value; named metadata retains its optional strict and description fields (#47488).
 
 - `MASC_KEEPER_MICROVM_MEMORY` and `MASC_KEEPER_MICROVM_CPUS` are no longer read. Set the workspace guest size with `microvm_memory` and `microvm_cpus` in the `[sandbox]` table of `runtime.toml`, which the server reads when it starts (#46805).
 - The 32 settings that have a `runtime.toml` key and that no script sets through the environment (for example `[web_search] provider`, `[turn] batch_limit`, `[metrics] max_bytes`, `[sandbox] microvm_dns`) no longer read the process environment once the server has loaded `runtime.toml`. Move any `export MASC_...` for them into `runtime.toml` (#46845).
 - A `runtime.toml` value that the setting's reader rejects (for example a blank `[autonomous] wake_prompt`) now stops the server at boot with a `Validate` error that names the key. Before, such a value passed the type and range check, the server started, and every turn that read the value raised (#46862).
 
 ### Fresh state required
+
+- Rewrite caller-owned AGENT_CORE checkpoint JSON files whose `response_format.type` is `json_schema` with the intended `raw_json_schema` or `named_json_schema` tag before loading. The decoder rejects the ambiguous tag. Checkpoint serialization has no fixed filename; the caller owns each saved file (#47488).
+
+- Keeper approval events, pending listings and decision requests require `approval_id`. Existing persisted approval events and late-approval Note/Remember rows without this identity are reported as corrupt and retained; consume/deliver/ack records keep their existing semantics. (#47492)
 
 - Keeper checkpoints move to `checkpoint_version` 17: every Keeper's
   agent-core history starts fresh on deploy, and a v16 binary cannot read a
@@ -42,6 +47,25 @@
 - Admission execution schema 1 and absorption gate version 2 are unsupported. The candidate's read-only `validate-stores` now rejects these domain payloads, including historical gates and unpublished preparation/retry bodies, before binary activation. It does not reconstruct absent guidance or migrate records. Reconcile and back up the affected captured physical-owner bundle: execution and gate originals/bodies, candidate parts/partition and replacement records, and their dependent Memory receipts, source/history progress and queue/external ACK evidence. Follow `docs/guides/DURABLE-STORE-HARD-CUT.md` with all writers stopped before setting aside a reviewed scope; do not reset an epoch or clear an entire worker volume. (#46965).
 
 ### Added
+
+- Add a private Keeper temporal-continuity observation harness with exact operation/turn/input/reply/tool joins, a twelve-message interruption/resume scenario and separate offline semantic assessment. Preserve raw probabilities and evidence limits in JSON and a readable timeline without a runtime gate or pass threshold. (#46956)
+
+- Observe candidate Keeper continuity after a completed raw prefix leaves every attributed prepared request, retaining durable originals and exact turn/body evidence. Present the timeline, actual W content, original answers and separate raw semantic probabilities in TUI `/measurement`. (#46971)
+
+- Validate retained continuity rows and the summary-covering boundary by their full typed shape, failing closed on violations, and carry the saved-state and memory readiness into `/measurement` separately from prefix omission. (#46971)
+
+- Keeper-filtered prefix-cache diagnostics can verify retained System blobs and compare their raw byte prefixes without reporting prompt text (#47107).
+
+- Preview Mermaid diagrams from Board posts and comments, and inspect verified image attachments in the terminal. (#47181)
+
+- Support an opt-in fresh Keeper roster snapshot for event-driven consumers. 가이드 없음(문서 없음) (#47331)
+
+- Add a pure decoder for native Ego input completion windows bound to a command,
+  generation and canonical Page. Raw typing remains disabled pending integration. (#47404)
+
+- Verify Ego native typing completion for `type_text` and workflow `keyboard.type`, preserving pending input on interruption and reporting safe completion evidence separately from the SDK's void return. (#47448)
+
+- Edit Keeper settings as multiline TOML in the TUI, with JSON still available and both formats sharing guarded saves and draft recovery. (#47471)
 
 - Publish the original supervisor's immutable physical/input/output receipt, exposing result readiness only after complete original stream verification, exact spool/seal and parent synchronization, and durable receipt readback with current attachments. (#46290)
 - Read complete original terminal results across owner and boot changes through a strict typed receipt checksum codec, preserving known host digests and verifying complete streams, exact file and parent synchronization, and current original source attachments. (#46294)
@@ -96,6 +120,38 @@
 - Inspect nested execution children from exact async requests and verified original tool-result pages in Dashboard, retaining original admissions, node outcomes and available exports under the current workspace and access identity. (#47183)
 
 ### Changed
+
+- Fold the captured completed Keeper backlog on the existing Librarian lane, preserving Memory coverage boundaries and exact refused-message recovery without a fixed turn cadence (#46926).
+
+- Make TUI Usage account names, window labels and Keeper readings easier to compare across terminal sizes, with accessible secondary colours and explicit missing data. (#47190)
+
+- Improve the contrast of TUI Task details and History by using the terminal foreground for primary content. (#47211)
+
+- Make JSON in Plugin technical readings easier to scan. (#47246)
+
+- Wake Keeper event relays on queued events and signal non-Eio health invalidations. (#47329)
+
+- Provider catalog parsing now shares pure capability records and presets without
+  depending on model-policy lookup or execution configuration. Wire default paths
+  live with the closed provider kind. Existing policy values and parsing behavior
+  are preserved. Derived debug-printer module prefixes follow the new profile
+  owner. Atomic publication of the complete catalog remains separate work. (#47361)
+
+- Wait for Keeper lifecycle events instead of periodically draining an idle subscription. (#47381)
+
+- Replace separate provider/model catalog globals with an admitted immutable
+  `Catalog_snapshot` and one atomic publication. Failed admission leaves the
+  previous selection intact; captured bindings, policies and prices retain their
+  whole selection across replacement. Remove the old declaration façade and
+  unused JSON-only binding lookup, and make wizard projections use one selection.
+  Raw model observations respect admitted aliases and permissions without gaining
+  JSON provider capabilities or credentials from an id alone. (#47397)
+
+- Focus Keeper code reviews on verified behavior and unresolved findings while reducing duplicate procedural comments. (#47481)
+
+- Add a Keeper event queue single-item selector that ranks Immediate first and prefers the Normal or Low lane according to the last non-immediate urgency held in queue state (#47498, #46999).
+
+- Carry model and capability-manifest presets as the shared closed type through composition and request projection. Unknown typed labels can no longer fall back to generic capabilities, and equivalent preset aliases render the same catalog evidence. (#47512)
 
 - The Keeper owner uses its published turn slot for admission, interruption, and shutdown idle waiting, removing a duplicate mutable child-active flag (#46612).
 - The Keeper owner uses the same published shutdown reservation for mailbox decisions and external readers (#46614).
@@ -270,6 +326,296 @@
 - Retire the unused RFC format enforcer and superseded development drafts; consolidate native TUI artifact verification in the current guide (#47043).
 
 ### Fixed
+
+- Let Librarian resume a proven original Memory judgment when an invalid working context would otherwise block recovery (#46911).
+
+- Wake the enabled Librarian after a failed official-client turn durably records its end boundary; do not wake on a failed append (#46926).
+
+- Require named input-capacity evidence before continuity descends, and preserve unsettled native-execution vetoes across mixed-provider walks and retained observations (#46926).
+
+- Reconcile MiniMax replay documentation with the merged Chat and Responses repairs, and distinguish configurable provider-verifier expectations from native endpoint evidence. (#47007)
+
+- Preserve the selected provider's authentication and credential scope when computing binding identity and failure ownership, even after catalog replacement or removal. Provider observations no longer re-resolve config aliases through mutable global declarations. (#47015)
+
+- Derive durable Agent turn preparation, inference telemetry and successful turn completion events from committed execution facts, preserving journal event identities and cursors across live delivery and catch-up. Durable completion follows tool/output settlement. Caller-owned checkpoint authority and store-free execution remain explicit. (#47027)
+
+- Refresh current Memory OS recall and snapshot evidence, keeping observed byte counts separate from relevance, growth and admission proof; preserve captures by refusing existing collector outputs. (#47032)
+
+- Resume an already collected terminal response without repeating its provider call or AfterTurn. Preserve the journal's turn identity, validate the restored checkpoint, and complete pending stop validation and OnStop before reporting success. (#47059)
+
+- Recover terminal responses by their persisted stop reason at active and successfully closed boundaries; retained tool blocks never authorize execution for truncation, refusal or another terminal reason. (#47059)
+
+- Persist the admitted response before AfterTurn and checkpoint publication, so terminal recovery keeps the original tool-name normalization and filtering when tools are removed or added. (#47059)
+
+- Compose JSON capability declarations into one exact model catalog before provider selection. Use the same policy projection for raw and selected requests, preserving model allow-lists, usage declarations and provider-independent defaults across catalog reloads. (#47077)
+
+- Keep response pricing bound to the request's original catalog and provider permissions. Agent usage now sums annotated costs and preserves unknown pricing without inferring charges from display model names or later catalog updates. (#47085)
+
+- Context request details now show exact byte sizes beside token estimates and the turn's last reported provider cache reads. System prompts are no longer labelled fixed when they include turn observations (#47107).
+
+- Signed-thinking and response-cache identity now follow the actual split System block structure; other provider wires retain their existing serialization (#47109).
+
+- Preserve model policy, pricing authority and their absence when a MASC runtime binding is materialized, so later catalog reloads affect new selections while existing runtimes retain their selected facts. (#47111)
+
+- Keep an HTTP runtime's selected credential requirement, environment alias and quota owner together with its materialized secret. Later catalog or environment changes affect fresh selections; dispatch retains the existing selection and no longer reconstructs credential authority from mutable configuration. (#47113)
+
+- Keep the shared Codex model set consistent with the shipped profiles, including all six GPT-6.1 Terra effort tiers. (#47113)
+
+- Probe provider reachability with the representative runtime's selected static credentials, auth scheme and headers. Preserve captured credential admission after environment/file changes and refuse missing required credentials before sending the metadata request. (#47127)
+
+- Preserve the requested Muse reasoning tier across Keeper, Fusion and readiness probes. Translate the eight MSP tiers directly, keep omission distinct from explicit `none`, and let the selected Muse host admit or refuse the request instead of changing it through a bare HTTP model catalog. (#47132)
+
+- Keep the selected Codex Keeper model's reasoning effort and protocol idle window through catalog reloads on fresh and resumed turns. Turn hooks and the native client's model admission still own their existing adjustments. (#47146)
+
+- Preserve independent completion evidence through the final native-client source projection without adding Keeper unread observations. Explicit projection errors still refuse dispatch, and Keeper history retains its frozen unread evidence. (#47152)
+
+- Carry the selected Claude Keeper model's reasoning and idle declarations through dispatch, resumes and internal retries, preserving hook precedence and separate native admission. (#47154)
+
+- Preserve Markdown structure in retained Context prose and responses, and show complete, highlighted JSON in Context and Composition Skill readings. (#47175)
+
+- Keep rich Fusion text terminal-safe and reuse retained layouts while wrapping long source lines without repeated grapheme splitting. (#47175)
+
+- Keep Claude native effort independent of bare HTTP model capabilities across Keeper, capability probes and readiness; carry the selected effort into Fusion, preserving native CLI admission and explicit disabled thinking. (#47179)
+
+- Bind HTTP/2 raw artifact reads to their requested workspace and return the matching admission receipt. (#47181)
+
+- Retire pending TUI image previews and browser fallbacks when operator input supersedes them. (#47209)
+
+- Fusion native clients retain the selected model-idle declaration across runtime catalog reloads and removal, including an absent or explicitly unbounded value. Preset timeout precedence and separate native admission remain intact. ([#47218](https://github.com/jeong-sik/masc/pull/47218))
+
+- Keep long Markdown table cells readable when the TUI pane narrows. (#47220)
+
+- Keep the Task History reader at the end when a pending history finishes loading, while respecting later scrolling. (#47222)
+
+- Keep TUI vector inspection workers owned until their rendering work returns. (#47226)
+
+- Keeper Antigravity retains the selected model's idle declaration and generic
+  reasoning intent across catalog reloads and removal. Host hooks and the existing
+  provider-owned native effort policy still apply on fresh and resumed turns;
+  native admission keeps its separate provider timeout. (#47228)
+
+- Keep previously observed Task History visible when reopening the same Task in the same workspace while it refreshes. (#47229)
+
+- Keep TUI vector previews bound to their current image and Skill while their renderers finish. (#47231)
+
+- Keep Resource Mermaid rendering owned until stale work returns. (#47238)
+
+- Settle TUI Board post/comment in-flight state when workspace request dispatch is cancelled or does not run, and enforce boolean and single-credential validation for named catalog providers in `scripts/install-runtime-setup.py`. (#47241)
+
+- Capability probes retain the selected Claude, Codex and Antigravity model's
+  idle declaration across runtime catalog reloads or removal. Native admission
+  and effort keep their existing independent ownership. (#47242)
+
+- Allow the newest Work Task History event to appear while the rest of the observed prefix loads. (#47254)
+
+- Preserve a pending Work Task History End through temporary backlog failures and ask for a retry when the displayed view is no longer current. (#47264)
+
+- Keep one HTTP runtime binding's admitted provider declaration and model policy through credential-file loading. Concurrent catalog replacement no longer changes the selected capabilities, thinking controls, context ceiling or pricing partway through construction; missing policy stays missing. Provider lookup uses only the declaration's exact ID or explicit aliases. (#47290)
+
+- Keep End at the end of an original Task in Tools while its History loads. (#47296)
+
+- Reduce memory needed to wrap long mixed-language JSON and Markdown readings. (#47300)
+
+- Keep one admitted provider/model selection across a batch of HTTP runtime bindings, even when a credential-file read allows catalog replacement between bindings. Native-only, empty, disabled and unresolved batches retain their existing behavior without reading unused HTTP declarations. (#47305)
+
+- Detect incompatible Pele helpers before displaying SVG and cropped diagram previews. (#47307)
+
+- Run macOS TUI proof jobs on a supported runner image. (#47313)
+
+- Clarify reported and observed Plan usage and wrap the collapsed-group hint on narrow terminals. (#47315)
+
+- Compare recovered terminal media by decoded byte identity while preserving exact text, MIME type, order and provider response data. Invalid or unavailable media remains an error before replay succeeds. (#47317)
+
+- Validate observer replay and fleet stream admission before accepting SSE data, and retry without a stale cursor when replay metadata cannot be used. (#47327)
+
+- Preserve Fusion updates during workspace-bound refreshes and observer recovery. (#47328)
+
+- Keep indentation in approval details when the source line fits. (#47333)
+
+- Reject execute-output responses that do not establish a valid SSE stream. (#47338)
+
+- Preserve source context when escaping invisible characters in terminal text. (#47350)
+
+- Keep Fleet SSE readings and subscriptions bound to their workspace generation. (#47354)
+
+- Keeper recall can defer the selected memory body after an admitted input-capacity refusal, allowing the existing safe retry to rebuild a smaller fresh request while retaining the turn's judgment and stored facts. (#47358)
+
+- Deferral is attempt-owned, requires a strict reduction in the final issuer assembly, and resets for the next runtime candidate. (#47358)
+
+- Keep the Usage view shortcut and connection status readable on narrower terminals. (#47365)
+
+- Keep full-health cached observations and refresh failures within their workspace generation. (#47366)
+
+- Preserve Fusion tool JSON preview text and prevent unsafe code fences from hiding output. (#47370)
+
+- Keep comments and line boundaries in Fusion JSON-like tool previews. (#47374)
+
+- Wrap quit and input-rejection notices on narrow terminals when they fit, and require the complete quit notice before confirming. (#47375)
+
+- Discovery cache expiry now uses monotonic elapsed time, so a backward wall-clock adjustment cannot keep an obsolete model selected by the optional local runtime verification probe beyond the existing 30-second lifetime. (#47376)
+
+- Public cache-age reporting continues to describe the wall-clock observation independently of expiry. (#47376)
+
+- Show observer relay queue loss and revalidate visible Keeper readings. (#47379)
+
+- Retry pending archive directory synchronization before treating retained tool requests as settled. (#47382)
+
+- Keep Usage connection and workspace status readable on narrow terminals, and preserve Telemetry scroll access on short screens. (#47384)
+
+- Refresh fleet health when a Keeper's failure reason changes in the active workspace. (#47389)
+
+- Reduce Fusion preview clipping caused by frame indentation and preserve diagram source on reflow. (#47390)
+
+- Deliver Keeper waiting-inventory events only to observers of the same workspace. (#47391)
+
+- Keep Usage Plan details readable and shorten the Keeper usage explanation. (#47395)
+
+- 해결된 승인 요청이 감사 로그 지연이나 기록 실패 때문에 Keeper 목록에 계속 대기로 표시되지 않도록 현재 승인 큐에서 상태를 읽습니다. (#47401)
+
+- Preserve graphemes and source-byte ownership in drawn Mermaid labels. (#47403)
+
+- Refresh Keeper waiting inventory when workspace observer events arrive. (#47409)
+
+- Keeper recall guidance now describes the existing preparation-failure status, bounded metric reasons and warning diagnostics, including missing request clocks. (#47411)
+
+- Show dated values in compact usage trends and distinguish tiny capped USD amounts from zero. (#47412)
+
+- Avoid rendering hidden Usage sections while another section is selected. (#47412)
+
+- Keep undrawn Mermaid statements and comments accessible beside the text diagram or in its source fallback. (#47415)
+
+- Refresh fleet health when Keeper registry membership changes. (#47417)
+
+- Clarified that recall checks the request clock before reading facts, so an admitted Keeper without a clock receives an unavailable status even when it has no stored facts. (#47423)
+
+- Correct the native Claude model discovery fixture to use the Anthropic messages protocol, retain its catalog inheritance checks, and resolve the test harness type diagnostics. (#47425)
+
+- Retire previous workspace Usage readings when its presentation is withdrawn. (#47426)
+
+- Distinguish Mermaid hexagonal, asymmetric, stadium and circular nodes in terminal diagrams. (#47429)
+
+- Refresh fleet health when Keeper Owner metadata changes. (#47432)
+
+- Fall back to Mermaid source when an edge label would hide a diagram line. (#47434)
+
+- Preserve Mermaid source when a parsed label break would be flattened to a space. (#47437)
+
+- Scope Keeper composite change events to their workspace. (#47438)
+
+- Workspace memory selection now stays unavailable when its request clock is missing, without dispatching an unbounded request or creating assessment evidence. Existing request clocks still use the client timeout. (#47442)
+
+- Refresh Keeper waiting observations when approvals change. (#47443)
+
+- Recover affected Usage, transport, account, and server-log readings after overlapping navigation and workspace changes. (#47449)
+
+- Report Task History prewarm failures with their source location instead of logging success, and describe aggregate prewarm completion as completed attempts. (#47453)
+
+- Keep published image cache frames independent of later writes to the converter output. (#47462)
+
+- Retain a Claude Code or Codex binding's selected home and credential environment through execution, probes, usage reads and verification. Reloading after the environment changes now invalidates old dispatch observations. Codex rejects retired inline profile settings instead of selecting a different connection during verification. (#47464)
+
+- Show the first frame of multi-frame images when ffmpeg prepares a still preview. (#47465)
+
+- Make HTML error responses readable in workspace JSON reads. (#47467)
+
+- Refresh cached health observations when schedule records change. (#47469)
+
+- Allow an independent review session to use a shared commit account while continuing to reject PR-author approvals (#47470).
+
+- Process older rereviews alongside first reviews while returning changed-head change requests to their owners first (#47470).
+
+- Keep external event fanout moving when a subscriber fails. (#47472)
+
+- Report image download and decoder runner failures with their operating-system cause. (#47474)
+
+- Show only the first image frame in a link-card mosaic preview. (#47476)
+
+- Refresh cached health observations when operator confirmations change. (#47479)
+
+- Improve Usage and connection status text when terminal colours cannot be verified, while preserving visible limit and exhaustion markers. (#47483)
+
+- Show the selected Keeper's suggested action in text, including when colour is disabled. (#47483)
+
+- Label theme contrast counts as the scheme's original values, rather than claiming every colour was adjusted. (#47483)
+
+- Preserve spacing and syntax highlighting in Keeper temporal-continuity JSON previews. (#47484)
+
+- Avoid a false truncation notice when a measurement preview fits exactly. (#47485)
+
+- Wake full health before broadcasting task invalidations to SSE subscribers. (#47487)
+
+- Preserve raw domain schemas containing `name` and `schema` through Exact native output and its effective-schema fingerprint; serializers now consume an explicit raw or named carrier (#47488).
+
+- Sanitize lane and measurement input JSON previews before terminal rendering. (#47490)
+
+- Fix OCaml type and module errors in trace counts, skill snapshots, credential ordering, tool help, Board reactions, Dashboard metrics, and artifact revisions. (#47491)
+
+- Bind Keeper tool decisions and client completion updates to the exact displayed approval, preventing an older answer from settling or hiding a replacement with the same call ID. (#47492)
+
+- Recover the current pending approval when an older Dashboard answer is no longer applicable, without applying that answer to its replacement. (#47492)
+
+- Register each live approval before publishing its question, so an immediate answer can settle the waiter the operator sees. (#47492)
+
+- Keep Dashboard approvals separate by approval ID across overlapping streams, and apply each successful answer only to its own question. (#47492)
+
+- Preserve Unicode source context when sanitizing JSON previews. (#47493)
+
+- Render activity and schedule JSON without exposing terminal control characters. (#47495)
+
+- Sanitize structured tool-detail JSON before styling terminal output. (#47497)
+
+- Preserve Unicode context when showing operator approval JSON. (#47499)
+
+- Keep older Keeper roster reads from repopulating the cache after a newer result is published or pruned, so later reads retain newly observed Keepers. 가이드 없음(문서 없음) (#47504)
+
+- Refresh the TUI Work list when execution events arrive. (#47508)
+
+- Check missing native account-home admission through its typed rejection instead of diagnostic wording. Retain the first product run's failure, live-test skips and callback assertion warning with their exact source scope. (#47509)
+
+- Preserve Gate input value types in approval details. (#47513)
+
+- Bind TUI Observer streams and replay to the admitted workspace lifetime. (#47520)
+
+- Preserve a reconnected SSE client when an older delivery fails. (#47522)
+
+- Let Terminal and Presence clients detect closed SSE streams promptly. (#47523)
+
+- Distinguish incomplete Keeper OAuth credential storage from token exchange failure, retaining confirmed writes and uncertainty for the interrupted write. 가이드 없음(문서 없음) (#47524)
+
+- Reconnect the TUI Observer after a stream closes without waiting for the refresh cadence. (#47528)
+
+- Keep a character-cell image preview's temporary output reserved while decoding. (#47531)
+
+- Restore Observer and Fleet streams after a workspace identity is reconfirmed. (#47532)
+
+- Align provider and verifier test fixtures with explicit capability admission:
+  qualify the public capability field, declare native streaming for the SSE mock,
+  declare tools and system-prompt support for the HTTP judging models, and publish
+  the model-catalog fixture through one admitted snapshot (#27898). (#47537)
+
+- Reconnect the TUI Observer after a workspace identity outage. (#47539)
+
+- Use captured input snapshots for remote image decoding and bind converted cache entries to their source bytes. (#47542)
+
+- Accept a head-only review footer backed by the existing binding line while retaining current receipts, and bind Release approvals to the selected run in the same review (#47543).
+
+- Keep disconnected Keeper identities detached when an earlier OAuth exchange, token renewal or tool catalog request finishes later. 가이드 없음(문서 없음) (#47544)
+
+- Resume TUI streams from a ready, workspace-bound Observer during an identity outage. (#47549)
+
+- Start TUI streams from a workspace-bound Observer when the initial health check is unavailable. (#47553)
+
+- Document native typing completion checked by the host and refusal of raw coordinate drags before input. [Guide](../docs/guides/ego-native-workflow.md) (#47554)
+
+- Request a full-health refresh when a pending operator confirmation reaches its observed deadline. (#47558)
+
+- Show elapsed wait for Keeper tool approvals in the TUI list and Agenda, avoiding an expiry estimate before question publication completes. (#47563)
+
+- State native typing completion limits in the browser Skill and bind historical options receipts to their captured source revision. [Guide](../docs/guides/ego-native-workflow.md) (#47565)
+
+- Keep workspace admission for HTTP/2 artifact-byte reads after the shared helper is renamed. (#47574)
+
+- Allow explicit Ego tab adoption when native unmanaged inventory omits its Page label, and align Peer fixtures with that SDK contract (#47575).
 
 - Allow original registry readers to overlap without permanently failing terminal receipt publication, while preserving nonwaiting exclusive launch and cancellation admission. (#46290)
 - Enumerate terminal receipt phase, result availability, and stream extent cases explicitly so new protocol states cannot silently bypass validation. (#46294)
@@ -597,6 +943,14 @@
 
 ### Performance
 
+- Anthropic Keeper requests now cache the fixed System prefix separately from changing Goal, approval and scheduling observations while retaining all observation text as System context (#47109).
+
+- Reduce reverse newline scanning overhead in Task History journals. (#47283)
+
+- Reuse unchanged Fusion tool trace rendering while scrolling and refreshing. (#47380)
+
+- Collect the review worklist concurrently without posting from a partial snapshot (#47470).
+
 - A message-floor chain pass judges the steps an earlier pass finished from one read of the owner's gate scope, made when `Floor_chain.run` starts, instead of reading the whole scope six times for each of them. A pass now costs time in proportion to the steps it replays, not to their square, and a turn read one message at a time costs the square of its length, not the cube. A step whose gate journal is not complete and successful, or that needs recovery, a retry or dispatch, is still judged from fresh reads, and nothing that is stored changes. (#46742)
 - Finding the code spans of an address text takes time in proportion to its length. A run of 60,000 backticks took 1.56 s and now takes under 0.01 s, measured at a load average near 40 (#46755).
 - The tool-call read index no longer hashes every ledger day file again in each new process. It skipped the prefix proof only for a file whose stat this process had seen after a proof, so the first reads after a boot re-hashed the whole ledger under one process-wide mutex: 4.7 GB at about 175 MB/s on 2026-10-29, with index reads waiting up to 26.2 s and the goals tree's first compute taking 78.8 s. The verified observation is now also written beside its continuity record and trusted by a later process only on an exact match of the file's identity, size, mtime and ctime and of the continuity it names; a missing or stale record means the prefix is read again. Reopening a 1.2 GB copy of the live ledger took 0.022-0.115 s instead of 13.4-23.6 s (RFC-0474 L4h, #46764).
@@ -676,6 +1030,8 @@
   current Keeper's store (#47311).
 
 ### Internal
+
+- Correct the native-dialog Peer test fixture to model SDK inventory, download waiting and the initial info preflight while preserving interruption assertions (#47371).
 
 - Move the file machinery of the authorization log (the recovery read, the cut of a last line that never ended, the writer zone, the append at the cursor, the stop after a failure) into `Authz_jsonl_file`, which takes the format of the lines as an argument. `Authz_log` applies it to the chain of `Authz_record`. Its `append_error` has one `Rejected` constructor in place of `Wrong_seq` and `Wrong_previous_hash`, and a new `Read_back_changed` for a line that reads back as another record, which `append` refuses before it writes a byte. Nothing calls it yet, so behavior does not change. (#46589)
 - Add `Authz_external_store`, the file that records an intent before an event is appended to the authorization log and the answer after it (design 8.2). The module writes and reads its lines itself, refuses a line that breaks the order of the rules (a store starts with a fresh bootstrap, one intent is pending at a time, an answer names its intent) when it is appended and when the file is opened, and opens and appends through `Authz_jsonl_file`. Nothing calls it yet, so behavior does not change. (#46599)

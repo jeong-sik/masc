@@ -383,7 +383,10 @@ let resolve_provider spec providers =
   let* () = match spec.named_provider with
     | None -> Ok ()
     | Some named ->
-      (match Llm_provider.Model_catalog.global (),Llm_provider.Model_identifiers.Model_id.of_string spec.model with
+      (match Llm_provider.Catalog_snapshot.model_catalog_for_provider
+               (Llm_provider.Catalog_snapshot.current ())
+               (Llm_provider.Model_catalog.Declared_provider named.id),
+             Llm_provider.Model_identifiers.Model_id.of_string spec.model with
        | Some catalog,Ok model_id ->
          (match Llm_provider.Model_catalog.lookup_model_for_provider catalog
              ~provider:(Llm_provider.Model_catalog.Declared_provider named.id) ~model_id with
@@ -508,7 +511,9 @@ let matches_existing_selection spec (config:Runtime_schema.config) =
         | None -> false
         | Some model ->
           let catalog_context =
-            match Llm_provider.Model_catalog.global (),
+            match Llm_provider.Catalog_snapshot.model_catalog_for_provider
+                    (Llm_provider.Catalog_snapshot.current ())
+                    (Llm_provider.Model_catalog.Declared_provider binding.provider_id),
                   Llm_provider.Model_identifiers.Model_id.of_string model.api_name with
             | Some catalog, Ok model_id ->
               (match Llm_provider.Model_catalog.lookup_model_for_provider catalog

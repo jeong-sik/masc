@@ -593,11 +593,14 @@ let test_missing_read_preserves_reserved_cleanup base_path _workspace =
 let test_append_cleanup fault base_path _workspace =
   let store, armed, _, fired, _ = fault_store base_path in
   load_posts store 0;
+  let before_errors = Board.persist_error_count () in
   armed := Some fault;
   (match fault with
    | Ordinary_close -> ignore (require_post (create store "committed before close failure"))
    | Timeout_close | Allocation_close ->
      expect_reserved fault (fun () -> ignore (create store "committed before close failure")));
+  Alcotest.(check int) "known append counts its actual cleanup once"
+    (before_errors + 1) (Board.persist_error_count ());
   Alcotest.(check int) "actual stable-lock descriptor failed once" 1 !fired;
   check_known_settlement store;
   check_observed_bytes store;
@@ -670,18 +673,6 @@ let jsonl_row_count path =
   |> List.filter (fun line -> not (String.equal (String.trim line) ""))
   |> List.length
 
-let posts_identity store =
-  let stats = Unix.stat (Board.persist_path store) in
-  stats.Unix.st_dev, stats.Unix.st_ino
-
-let check_posts_not_replayed store cursor identity =
-  Alcotest.(check bool) "next flush retains the known posts cursor" true
-    (Fs_compat.Private_jsonl_cursor.equal cursor
-      (readable_observation store).snapshot.cursor);
-  Alcotest.(check (pair int int)) "next flush does not replace known posts again"
-    identity (posts_identity store);
-  check_observed_bytes store
-
 let test_flush_cleanup_preserves_later_work base_path _workspace =
   let store, armed, _, fired, _ = fault_store base_path in
   load_posts store 0;
@@ -705,17 +696,26 @@ let test_flush_cleanup_preserves_later_work base_path _workspace =
   let votes_path = Paths.store_file_path store Paths.Votes in
   Alcotest.(check int) "actual flips leave six append-only vote rows" 6
     (jsonl_row_count votes_path);
+  let comments_before = read_bytes (Board.comments_path store) in
   armed := Some Timeout_close;
   expect_reserved Timeout_close (fun () -> Board.flush_dirty store);
   Alcotest.(check int) "posts settlement failed exactly once" 1 !fired;
   check_known_settlement store;
   check_observed_bytes store;
-  let cursor = (readable_observation store).snapshot.cursor in
-  let identity = posts_identity store in
-  (* A batch may have completed the remaining writes or retained their retry
-     obligations. An actual second flush must finish them in either case. *)
+  let known_posts = (readable_observation store).snapshot.bytes in
+  Alcotest.(check string) "reserved posts cleanup stops before the comment snapshot"
+    comments_before (read_bytes (Board.comments_path store));
+  Alcotest.(check int) "reserved posts cleanup stops before votes compaction" 6
+    (jsonl_row_count votes_path);
+  (* Pending ledgers use the existing posts retry group. A separate retry may
+     exact-CAS rewrite the known posts bytes while completing that work. *)
   Board.flush_dirty store;
-  check_posts_not_replayed store cursor identity;
+  check_observed_bytes store;
+  Alcotest.(check string) "separate grouped retry preserves exact known post bytes"
+    known_posts (read_bytes (Board.persist_path store));
+  Alcotest.(check (list string)) "retry neither duplicates nor recreates a post"
+    [post_id] (List.map (fun (post : Board.post) -> Board.Post_id.to_string post.id)
+      (Board.list_posts store ()));
   let fresh = reloaded base_path 1 in
   load_comments fresh 1;
   let saved_post = current fresh post in
@@ -756,6 +756,7 @@ let test_delete_cleanup_preserves_dependents base_path _workspace =
   List.iter (fun path ->
     Alcotest.(check bool) "actual dependent payload exists before delete" true
       (String.length (read_bytes path) > 0)) dependents;
+  let dependent_bytes = List.map (fun path -> path, read_bytes path) dependents in
   armed := Some Timeout_close;
   expect_reserved Timeout_close (fun () ->
     ignore (Board.delete_post store ~post_id));
@@ -766,10 +767,15 @@ let test_delete_cleanup_preserves_dependents base_path _workspace =
     (read_bytes (Board.persist_path store));
   Alcotest.(check int) "known deletion is already published" 0
     (List.length (Board.list_posts store ()));
-  let cursor = (readable_observation store).snapshot.cursor in
-  let identity = posts_identity store in
+  List.iter (fun (path, bytes) ->
+    Alcotest.(check string) "reserved delete settlement stops all later dependent writes"
+      bytes (read_bytes path)) dependent_bytes;
   Board.flush_dirty store;
-  check_posts_not_replayed store cursor identity;
+  check_observed_bytes store;
+  Alcotest.(check string) "separate grouped retry preserves the exact deleted posts state" ""
+    (read_bytes (Board.persist_path store));
+  Alcotest.(check int) "separate retry does not resurrect the deleted model" 0
+    (List.length (Board.list_posts store ()));
   List.iter (fun path ->
     Alcotest.(check string) "dependent deletion was completed or retried" ""
       (read_bytes path)) dependents;
@@ -1094,6 +1100,173 @@ let stable_close_io path ~calls ~fault : Fs_compat.private_jsonl_transaction_io_
         | None -> ()
         | Some exception_ -> fault := None; raise exception_) }
 
+let test_guard_disappears_before_writers base_path _workspace =
+  prepare base_path;
+  let writer = reloaded base_path 0 in
+  let post = require_post (create writer "original before guard disappearance") in
+  let guard = guard_path writer in
+  let original_guard = read_bytes guard and original_posts = read_bytes (Board.persist_path writer) in
+  let guard_calls = ref 0 and posts_calls = ref 0 in
+  let admitted () =
+    let store = Board.create_store_with_source_io_for_testing ~base_path
+      ~io:{ guard = Some (counting_io guard_calls); posts = Some (counting_io posts_calls) } () in
+    load_posts store 1;
+    store in
+  let appending = admitted () and replacing = admitted () and auxiliary = admitted () in
+  let before_posts = !posts_calls in
+  Unix.unlink guard;
+  require_pre_effect (create appending "missing guard denies the real append");
+  require_io_refusal (edit replacing post "missing guard denies the real replacement");
+  require_io_refusal (Board.create_sub_board auxiliary ~slug:"missing-guard"
+    ~name:"Missing guard" ~description:"must remain absent" ~owner:"source-writer" ());
+  Alcotest.(check int) "all three preconditions stop before posts payload IO"
+    before_posts !posts_calls;
+  Alcotest.(check string) "refused writers preserve the exact posts bytes" original_posts
+    (read_bytes (Board.persist_path writer));
+  Alcotest.(check bool) "ordinary writers do not recreate the missing guard" false
+    (Sys.file_exists guard);
+  Alcotest.(check bool) "auxiliary refusal does not create a payload" false
+    (Sys.file_exists (Board.sub_boards_path auxiliary));
+  List.iter (fun store ->
+    Alcotest.(check int) "refused writer adds no model row" 1
+      (List.length (Board.list_posts store ()));
+    Alcotest.(check string) "refused replacement keeps the original model body" post.body
+      (current store post).body;
+    Alcotest.(check string) "missing guard retains accepted guard history" original_guard
+      (retained_guard store).snapshot.bytes;
+    match store.Board.posts_source with
+    | Board.Posts_refused { last_observed = Posts_observed _; failure = Posts_guard_missing; _ } -> ()
+    | Posts_unobserved | Posts_guard_observed _ | Posts_readable _ | Posts_refused _ | Posts_unsettled _ ->
+      Alcotest.fail "fresh writer precondition lost the guard-Missing refusal")
+    [appending; replacing; auxiliary];
+  Alcotest.(check int) "auxiliary refusal publishes no sub-board" 0
+    (List.length (Board.list_sub_boards auxiliary));
+  write_bytes guard original_guard;
+  load_posts appending 1;
+  ignore (require_post (create appending "append after exact guard bytes and explicit reload"));
+  load_posts replacing 2;
+  ignore (require_board (edit replacing post "replacement after explicit reload"));
+  load_posts auxiliary 2;
+  ignore (require_board (Board.create_sub_board auxiliary ~slug:"restored-guard"
+    ~name:"Restored guard" ~description:"actual publication after reload" ~owner:"source-writer" ()));
+  let fresh = reloaded base_path 2 in
+  Alcotest.(check string) "fresh reader sees the separately admitted replacement"
+    "replacement after explicit reload" (current fresh post).body
+
+let test_guard_reserved_keeps_unattempted_batch base_path _workspace =
+  prepare base_path;
+  let guard_calls = ref 0 and posts_calls = ref 0 and fault = ref None in
+  let workspace = Common.masc_dir_from_base_path ~base_path in
+  let guard = Paths.posts_initialization_guard_file ~workspace_masc_dir:workspace in
+  let stopped_at = ref None in
+  let guard_io = stable_close_io guard ~calls:guard_calls ~fault in
+  let io = { guard_io with close_fd = (fun fd ->
+    match guard_io.close_fd fd with
+    | () -> ()
+    | exception (Eio.Time.Timeout as exception_) ->
+      let backtrace = Printexc.get_raw_backtrace () in
+      stopped_at := Some !guard_calls;
+      Printexc.raise_with_backtrace exception_ backtrace) } in
+  let store = Board.create_store_with_source_io_for_testing ~base_path
+    ~io:{ guard = Some io; posts = Some (counting_io posts_calls) } () in
+  load_posts store 0;
+  load_comments store 0;
+  let post = require_post (create store "guard-reserved batch source") in
+  let post_id = Board.Post_id.to_string post.id in
+  let comment = require_board (Board.add_comment store ~lookup:Recipient_lookup.none_declared
+    ~post_id ~author:"batch-reader" ~content:"actual durable comment" ~ttl_hours:0 ()) in
+  let comment_id = Board.Comment_id.to_string comment.id in
+  ignore (require_board (Board.vote store ~voter:"batch-voter" ~post_id ~direction:Board.Up));
+  Board.flush_dirty store;
+  (* Keep the baseline post's final counters on disk. The next real flips
+     create dirty work without relying on reload preserving memory-only edits. *)
+  List.iter (fun direction ->
+    ignore (require_board (Board.vote store ~voter:"batch-voter" ~post_id ~direction)))
+    [Board.Down; Board.Up];
+  List.iter (fun direction ->
+    ignore (require_board (Board.vote_comment store ~voter:"batch-comment-voter"
+      ~comment_id ~direction))) [Board.Up; Board.Down; Board.Up];
+  let votes = Paths.store_file_path store Paths.Votes in
+  let paths = [Board.persist_path store; Board.comments_path store; votes; Board.reactions_path store] in
+  let payloads = List.map (fun path -> path, read_bytes path) paths in
+  Alcotest.(check int) "actual vote flips await compaction" 6 (jsonl_row_count votes);
+  Alcotest.(check bool) "real post votes selected a posts snapshot" true store.Board.dirty_posts;
+  Alcotest.(check bool) "real comment votes selected a comments snapshot" true store.Board.dirty_comments;
+  let before_posts = !posts_calls and before_errors = Board.persist_error_count () in
+  fault := Some Eio.Time.Timeout;
+  expect_reserved Timeout_close (fun () -> Board.flush_dirty store);
+  Alcotest.(check int) "reserved first batch precondition counts once"
+    (before_errors + 1) (Board.persist_error_count ());
+  (match !stopped_at with
+   | Some calls -> Alcotest.(check int) "no later guard IO follows the first reserved cause" calls !guard_calls
+   | None -> Alcotest.fail "actual guard-close fault did not run");
+  Alcotest.(check int) "reserved guard precondition prevents posts IO" before_posts !posts_calls;
+  List.iter (fun (path, before) ->
+    Alcotest.(check string) "no selected payload was written after the reserved precondition"
+      before (read_bytes path)) payloads;
+  Alcotest.(check bool) "posts retry obligation remains selected" true store.Board.dirty_posts;
+  Alcotest.(check bool) "unattempted comments retry obligation remains selected" true store.Board.dirty_comments;
+  Alcotest.(check bool) "original posts retry contains its actual ID" true
+    (Hashtbl.mem store.Board.dirty_post_ids post_id);
+  Alcotest.(check bool) "unattempted comments retry contains its actual ID" true
+    (Hashtbl.mem store.Board.dirty_comment_ids comment_id);
+  Alcotest.(check int) "unattempted comment counter stays in the pending model" 1
+    (require_board (Board.get_comment store ~comment_id)).votes_up;
+  load_posts store 1;
+  Board.flush_dirty store;
+  Alcotest.(check bool) "explicit reload and retry settle posts work" false store.Board.dirty_posts;
+  Alcotest.(check bool) "explicit retry settles comments work" false store.Board.dirty_comments;
+  Alcotest.(check int) "pending votes compaction actually finished" 2 (jsonl_row_count votes);
+  let fresh = reloaded base_path 1 in
+  load_comments fresh 1;
+  Alcotest.(check (pair int int)) "baseline post counters survive the separate retry" (1, 1)
+    ((current fresh post).votes_up, (current fresh post).reply_count);
+  Alcotest.(check int) "previously unattempted comment snapshot survives restart" 1
+    (require_board (Board.get_comment fresh ~comment_id)).votes_up
+
+let test_unadmitted_fusion_positive_replay base_path _workspace =
+  prepare base_path;
+  let writer = reloaded base_path 0 in
+  let run_id = "committed-before-guard-disappearance" in
+  let post = match require_post (create_fusion_once writer run_id) with
+    | Board.Post_created creation -> creation.post
+    | Post_already_present _ -> Alcotest.fail "fresh actual Fusion producer reused a row" in
+  let bytes = read_bytes (Board.persist_path writer) in
+  Unix.unlink (guard_path writer);
+  let guard_calls = ref 0 and posts_calls = ref 0 in
+  let reader = Board.create_store_with_source_io_for_testing ~base_path
+    ~io:{ guard = Some (counting_io guard_calls); posts = Some (counting_io posts_calls) } () in
+  refuse_load reader;
+  let before_guard = !guard_calls and before_posts = !posts_calls in
+  let persistence_hooks = ref 0 in
+  let noop : Board_metrics_hooks.observer =
+    { observe_persist_lock_acquire_sec = (fun _ -> ())
+    ; observe_persist_lock_held_sec = (fun _ -> ())
+    ; inc_dispatch_flusher_start_outcome = (fun ~outcome:_ -> ()) } in
+  Fun.protect ~finally:(fun () -> Board_metrics_hooks.set_observer noop) (fun () ->
+    Board_metrics_hooks.set_observer
+      { noop with observe_persist_lock_acquire_sec = (fun _ -> incr persistence_hooks);
+        observe_persist_lock_held_sec = (fun _ -> incr persistence_hooks) };
+    (match require_post (create_fusion_once reader run_id) with
+     | Board.Post_already_present replay ->
+       Alcotest.(check string) "positive recognition retains the actual committed ID"
+         (Board.Post_id.to_string post.id) (Board.Post_id.to_string replay.id)
+     | Post_created _ -> Alcotest.fail "unadmitted positive replay created another post");
+    Alcotest.(check int) "matching-row replay enters no persistence hook" 0 !persistence_hooks);
+  Alcotest.(check int) "matching-row replay performs no guard IO" before_guard !guard_calls;
+  Alcotest.(check int) "matching-row replay performs no posts IO" before_posts !posts_calls;
+  require_pre_effect (create_fusion_once reader "fresh-run-without-a-guard");
+  (match reader.Board.posts_source with
+   | Board.Posts_refused { last_observed = No_initialization; failure = Posts_guard_missing; _ } -> ()
+   | Posts_unobserved | Posts_guard_observed _ | Posts_readable _ | Posts_refused _ | Posts_unsettled _ ->
+     Alcotest.fail "positive recognition granted source authority");
+  Alcotest.(check string) "positive replay and refused new run preserve disk bytes" bytes
+    (read_bytes (Board.persist_path reader));
+  Alcotest.(check int) "positive replay publishes no additional model row" 1
+    (List.length (Board.list_posts reader ()));
+  Alcotest.(check bool) "neither path recreates the guard" false
+    (Sys.file_exists (guard_path reader))
+
 let test_guard_reserved_stops_posts base_path workspace =
   prepare base_path;
   let guard_calls = ref 0 and posts_calls = ref 0 in
@@ -1102,7 +1275,10 @@ let test_guard_reserved_stops_posts base_path workspace =
   let store = Board.create_store_with_source_io_for_testing ~base_path
     ~io:{ guard = Some (stable_close_io guard ~calls:guard_calls ~fault);
           posts = Some (counting_io posts_calls) } () in
+  let before_errors = Board.persist_error_count () in
   expect_reserved Timeout_close (fun () -> ignore (Rows.load_persisted_posts store));
+  Alcotest.(check int) "reserved first guard read counts its diagnostic once"
+    (before_errors + 1) (Board.persist_error_count ());
   Alcotest.(check bool) "reserved cause came from actual guard descriptor" true
     (!guard_calls > 0 && Option.is_none !fault);
   Alcotest.(check int) "reserved guard cleanup prevents all posts IO" 0 !posts_calls;
@@ -1163,7 +1339,10 @@ let test_ordered_guard_posts_cleanup base_path workspace =
   let store = Board.create_store_with_source_io_for_testing ~base_path
     ~io:{ guard = Some (stable_close_io guard ~calls:guard_calls ~fault:guard_fault);
           posts = Some (stable_close_io posts ~calls:posts_calls ~fault:posts_fault) } () in
+  let before_errors = Board.persist_error_count () in
   expect_reserved Timeout_close (fun () -> ignore (Rows.load_persisted_posts store));
+  Alcotest.(check int) "both actual ordered read cleanups are counted"
+    (before_errors + 2) (Board.persist_error_count ());
   Alcotest.(check bool) "both real descriptor seams fired" true
     (!guard_calls > 0 && !posts_calls > 0
      && Option.is_none !guard_fault && Option.is_none !posts_fault);
@@ -1178,7 +1357,22 @@ let test_ordered_guard_posts_cleanup base_path workspace =
   (match store.Board.posts_source with
    | Board.Posts_readable { diagnostics = []; _ } -> ()
    | _ -> Alcotest.fail "fresh operation replayed prior cleanup diagnostics");
-  ignore (require_post (create store "mutex remains usable after both actual cleanups"))
+  ignore (require_post (create store "mutex remains usable after both actual cleanups"));
+  guard_fault := Some (Failure "actual guard cleanup before committed append");
+  posts_fault := Some Eio.Time.Timeout;
+  let before_errors = Board.persist_error_count () in
+  expect_reserved Timeout_close (fun () ->
+    ignore (create store "known append after two ordered cleanup diagnostics"));
+  Alcotest.(check int) "both actual ordered successful-write cleanups are counted"
+    (before_errors + 2) (Board.persist_error_count ());
+  check_known_settlement store;
+  check_observed_bytes store;
+  (match store.Board.posts_source with
+   | Board.Posts_readable { diagnostics =
+       [File_diagnostic { file = Guard_file; _ }; File_diagnostic { file = Posts_file; _ }]; _ } -> ()
+   | Posts_unobserved | Posts_guard_observed _ | Posts_readable _ | Posts_refused _ | Posts_unsettled _ ->
+     Alcotest.fail "known append lost the chronological two-file cleanup trace");
+  ignore (reloaded base_path 2)
 
 let test_unknown_stops_both_source_files base_path workspace =
   prepare base_path;
@@ -1307,12 +1501,18 @@ let () =
         ; case "exact guard bytes permit a freshly observed replacement"
             test_guard_bytes_and_replacement
         ; case "auxiliary guard checks neither read nor admit posts"
-            test_auxiliary_guard_never_reads_posts ]
+            test_auxiliary_guard_never_reads_posts
+        ; case "admitted writers refuse a disappeared guard until explicit reload"
+            test_guard_disappears_before_writers
+        ; case "unadmitted Fusion replay only recognizes an existing exact row"
+            test_unadmitted_fusion_positive_replay ]
     ; "descriptor settlement",
         [ case "reserved guard cleanup stops before posts IO" test_guard_reserved_stops_posts
         ; case "nested guard cleanup leaves all Fusion locks usable"
             test_nested_guard_cleanup_preserves_fusion_mutex
         ; case "guard and posts cleanup diagnostics retain order" test_ordered_guard_posts_cleanup
+        ; case "first reserved guard settlement retains all unattempted batch work"
+            test_guard_reserved_keeps_unattempted_batch
         ; case "unsettled source stops both files before replacement checks"
             test_unknown_stops_both_source_files
         ; case "Missing read refusal preserves reserved cleanup" test_missing_read_preserves_reserved_cleanup

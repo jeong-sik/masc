@@ -48,7 +48,10 @@ val load_persisted_posts : store -> (int, string * exn) result
     malformed row. Complete display replaces memory; partial display merges its
     accepted rows. Display snapshots grant no negative evidence or write authority.
     Valid expired rows remain source rows. Retained reserved causes propagate
-    unchanged after the current ordered diagnostic trace has been retained. *)
+    unchanged after the current ordered diagnostic trace has been retained.
+    An exception during model projection crosses the state mutex before it is
+    recorded, preserving poisoning for an uncertain partial model mutation.
+    Known read cleanup is finished after a normally returned state callback. *)
 
 val load_persisted_comments : store -> (int, string * exn) result
 (** Missing comments are a legitimate empty source. Invalid rows retain the

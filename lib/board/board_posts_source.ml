@@ -151,7 +151,10 @@ let expected store = match store.posts_source with
   | Posts_unobserved | Posts_guard_observed _ -> Error Posts_not_observed
   | Posts_refused { failure; _ } | Posts_unsettled { failure; _ } -> Error failure
 
-let require_readable store = Result.map (fun _ -> ()) (expected store)
+let require_readable store =
+  expected store
+  |> Result.map (fun _ -> ())
+  |> Result.map_error failure_to_board_error
 
 let observe_workspace store =
   try Board_paths.observe_workspace store with exception_ ->

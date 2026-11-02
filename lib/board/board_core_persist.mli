@@ -97,14 +97,19 @@ val posts_source_failure_to_board_error : posts_source_failure -> board_error
 val finish_posts_write : posts_write_outcome -> (unit, board_error) result
 (** Caller holds persistence. Observe settlement diagnostics only after known
     successful memory publication, or a proven nonwrite after rollback/refusal.
-    Reserved cleanup exceptions leave enclosing Board mutexes normally and are
-    reraised after unlocking with their original backtrace. *)
+    Known-primary reserved cleanup exceptions leave enclosing Board mutexes normally and are
+    reraised after unlocking with their original backtrace. Before propagation,
+    a successful write counts each observed diagnostic; a nonwrite or unknown
+    outcome counts its one failure, without invoking logging after a reserved
+    cause. *)
 val publish_posts_read : store -> posts_source_read -> unit
 (** Loader publication under persistence then state locks. *)
 val read_posts_source : store -> posts_source_read
 (** Caller holds persistence; general reads never recover tails or settle an
     unknown write. Complete and partial reads retain the actual Fs snapshot. *)
 val finish_posts_read : posts_source_read -> unit
+(** Count each observed read diagnostic before reserved propagation, without
+    logging or further IO after an observed reserved cause. *)
 type posts_inspection_framing =
   | Complete_rows
   | Torn_tail of { rows_end : int; end_offset : int }
@@ -206,8 +211,12 @@ val create_post_once_by_fusion_run_id :
   (create_post_once_result, Post_publication_failure.t) result
 (** Serialize exact-origin create attempts with a fiber-aware store mutex.
     An exact normalized payload replay for the same typed Fusion run returns
-    the committed post instead of appending another row. A conflicting replay
-    returns [Already_exists]. The regular create path remains unchanged. *)
+    the matching observed post instead of appending another row. This positive
+    recognition can use best-effort display rows after guard refusal: the
+    matching-row path performs no IO or new publication and grants neither
+    posts write authority nor an operation receipt or durability guarantee.
+    A conflicting replay returns [Already_exists]; a new run still requires
+    ordinary source admission before creation. *)
 
 val create_post_with_audience :
   store ->

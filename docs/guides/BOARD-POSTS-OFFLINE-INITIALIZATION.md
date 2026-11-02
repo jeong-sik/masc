@@ -58,6 +58,20 @@ replace retained initialization history through repeated failed loads. Unknown
 posts effects remain unsettled. This command performs only the explicitly
 requested offline action; it does not initialize a running store automatically.
 
+One positive recognition path is narrower than creation: an exact Fusion-origin
+replay may return a matching already observed row from best-effort display data
+after guard refusal. It performs no source IO or new publication and grants no
+posts authority, negative evidence, operation receipt or durability guarantee.
+A different Fusion run still requires ordinary admission before creating a row.
+
+An observed reserved cleanup cause stops later selected snapshot writes. The
+attempted write retains its actual result; every unattempted snapshot remains a
+retry obligation without an invented error. Diagnostic counters are retained
+before propagation, without invoking logging after the reserved cause.
+Votes and reactions use the existing posts retry group: a separate retry may
+exact-CAS rewrite current posts while finishing those pending ledgers. This
+preserves logical post/deletion state and does not create another post.
+
 Writers that bypass the BasePath lease remain outside its quiescence contract.
 Guard and posts observations are separate transactions. Path checks describe
 observed boundaries; they do not make operations descriptor-relative, exclude

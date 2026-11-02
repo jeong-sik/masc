@@ -613,28 +613,40 @@ let posts_source_failure_to_board_error = Board_posts_source.failure_to_board_er
 let read_posts_source = Board_posts_source.read
 let publish_posts_read = Board_posts_source.publish_read
 let finish_posts_write outcome =
-  (* First settle any already observed reserved cause. A later logger cannot
-     replace it or cause another IO after it was observed. *)
-  let result = Board_posts_source.finish_write outcome in
-  (try
+  let diagnostics = Board_posts_source.write_diagnostics outcome in
+  match Board_posts_source.reserved_diagnostics diagnostics with
+  | Some _ ->
+    (* Match ordinary counting without invoking a logger after cancellation or
+       another reserved cause has already been observed. *)
     (match outcome with
-     | Posts_written _ ->
-       List.iter (fun diagnostic -> record_persist_error ~where:"posts settlement"
-         (Board_posts_source.diagnostic_to_string diagnostic))
-         (Board_posts_source.write_diagnostics outcome)
-     | Posts_not_written { failure; _ } | Posts_write_unknown { failure; _ } ->
-       record_persist_error ~where:"posts source"
-         (show_board_error (posts_source_failure_to_board_error failure)));
-    result
-  with exception_ ->
-    let backtrace = Printexc.get_raw_backtrace () in
-    Board_posts_source.defer_reserved ~result exception_ backtrace;
-    Printexc.raise_with_backtrace exception_ backtrace)
+     | Posts_written _ -> List.iter (fun _ -> Atomic.incr persist_errors) diagnostics
+     | Posts_not_written _ | Posts_write_unknown _ -> Atomic.incr persist_errors);
+    Board_posts_source.finish_write outcome
+  | None ->
+    let result = Board_posts_source.finish_write outcome in
+    (try
+      (match outcome with
+       | Posts_written _ ->
+         List.iter (fun diagnostic -> record_persist_error ~where:"posts settlement"
+           (Board_posts_source.diagnostic_to_string diagnostic)) diagnostics
+       | Posts_not_written { failure; _ } | Posts_write_unknown { failure; _ } ->
+         record_persist_error ~where:"posts source"
+           (show_board_error (posts_source_failure_to_board_error failure)));
+      result
+    with exception_ ->
+      let backtrace = Printexc.get_raw_backtrace () in
+      Board_posts_source.defer_reserved ~result exception_ backtrace;
+      Printexc.raise_with_backtrace exception_ backtrace)
 let finish_posts_read outcome =
-  Board_posts_source.finish_read outcome;
-  List.iter (fun diagnostic -> record_persist_error ~where:"posts read settlement"
-    (Board_posts_source.diagnostic_to_string diagnostic))
-    (Board_posts_source.read_diagnostics outcome)
+  let diagnostics = Board_posts_source.read_diagnostics outcome in
+  match Board_posts_source.reserved_diagnostics diagnostics with
+  | Some _ ->
+    List.iter (fun _ -> Atomic.incr persist_errors) diagnostics;
+    Board_posts_source.finish_read outcome
+  | None ->
+    Board_posts_source.finish_read outcome;
+    List.iter (fun diagnostic -> record_persist_error ~where:"posts read settlement"
+      (Board_posts_source.diagnostic_to_string diagnostic)) diagnostics
 type posts_inspection_framing = Board_posts_inspection.posts_inspection_framing =
   | Complete_rows
   | Torn_tail of { rows_end : int; end_offset : int }

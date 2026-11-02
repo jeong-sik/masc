@@ -90,8 +90,8 @@ let load_persisted_posts store =
     let error failure = Error (path,
       Failure (show_board_error (posts_source_failure_to_board_error failure))) in
     let outcome = read_posts_source store in
-    let outcome, result = with_lock store (fun () ->
-      try
+    let outcome, result =
+      try with_lock store (fun () ->
         let result = match outcome with
           | Posts_complete { posts; _ } -> replace_loaded_posts store posts; Ok (List.length posts)
           | Posts_partial { posts; errors; _ } ->
@@ -103,11 +103,11 @@ let load_persisted_posts store =
             error failure
           | Posts_unavailable { failure; _ } -> error failure in
         publish_posts_read store outcome;
-        outcome, result
+        outcome, result)
       with exception_ ->
         let outcome, failure = Board_posts_source.fail_read store outcome ~stage:Project_posts
             exception_ (Printexc.get_raw_backtrace ()) in
-        outcome, error failure) in
+        outcome, error failure in
     try
       (* This first finishes retained read/cleanup causes before logging. *)
       finish_posts_read outcome;

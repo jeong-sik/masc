@@ -125,6 +125,7 @@ type event =
   | Keeper_turn_observation of keeper_turn_observation
   | Keeper_composite_changed of { keeper : string; at : float }
   | Keeper_chat_appended of { keeper : string; connector : string option; at : float }
+  | Keeper_memory_journal_appended of { keeper : string; at : float }
   | Keeper_chat_stream_frame of
       { keeper : string
       ; operation_id : string
@@ -174,6 +175,17 @@ let chat_appended_keeper = function
      carries no transcript. Even the turn's own settle does not reload the
      chat, so a frame from mid-turn does not either. *)
   | Keeper_turn_observation _
+  | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
+  | Keeper_turn_complete _
+  | Keeper_composite_changed _ | Keeper_memory_journal_appended _
+  | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _
+  | Fusion_run_status _ | Internal_agent_runs_changed | Lane_resource _
+  | Snapshot _ | Other _ ->
+      None
+
+let memory_journal_appended_keeper = function
+  | Keeper_memory_journal_appended { keeper; _ } -> Some keeper
+  | Keeper_chat_appended _ | Keeper_turn_observation _
   | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
   | Keeper_turn_complete _
   | Keeper_composite_changed _
@@ -569,6 +581,11 @@ let reading_of_type type_name =
           decode_named_keeper_event ~event fields (fun ~keeper ~at ->
               Keeper_chat_appended
                 { keeper; connector = string_field fields "connector"; at }))
+  | "keeper_memory_journal_appended" as event ->
+      From_fields
+        (fun fields ->
+          decode_named_keeper_event ~event fields (fun ~keeper ~at ->
+              Keeper_memory_journal_appended { keeper; at }))
   | other -> (
       (* Which event types are whole-projection pushes is the wire's
          business, not this decoder's. Three were named here and the

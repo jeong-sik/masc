@@ -119,6 +119,8 @@ let summary = function
       "composite(" ^ keeper ^ ")"
   | Observer.Event (Observer.Keeper_chat_appended { keeper; connector; _ }) ->
       Printf.sprintf "chat(%s,%s)" keeper (Option.value ~default:"-" connector)
+  | Observer.Event (Observer.Keeper_memory_journal_appended { keeper; _ }) ->
+      "memory(" ^ keeper ^ ")"
   | Observer.Event (Observer.Keeper_chat_stream_frame { keeper; frame; _ }) ->
       Printf.sprintf "stream(%s,%s)" keeper (Option.value ~default:"-" frame)
   | Observer.Event (Observer.Keeper_turn_stream_frame { keeper; turn_ref; _ }) ->
@@ -410,6 +412,12 @@ let chat_appended_frame =
   "data: {\"type\":\"keeper_chat_appended\",\"name\":\"lane-smith\",\
    \"connector\":\"api\",\"ts_unix\":1787507576.0}\n\n"
 
+(* Server shape: keeper_memory_journal_broadcast.ml writes the keeper in
+   "name". *)
+let memory_journal_frame =
+  "data: {\"type\":\"keeper_memory_journal_appended\",\"name\":\"lane-smith\",\
+   \"ts_unix\":1787507576.0}\n\n"
+
 (* The chat pane reloads its history on exactly one event.  Quantified
    over every sample frame in this file: only the appended frame names
    a keeper, so a new variant cannot start reloading the pane by
@@ -448,10 +456,32 @@ let test_only_a_chat_appended_event_names_a_reload_keeper () =
           was added, and the reader silently stopped being exhaustive. Every
           frame this suite can build belongs here, so the next one cannot
           skip the question. *)
-       ; turn_observation_frame
+       ; turn_observation_frame; memory_journal_frame
        ]);
   check (list string) "the appended frame answers its keeper" [ "lane-smith" ]
     (reload_keepers [ chat_appended_frame ])
+
+let test_only_a_memory_journal_event_names_a_journal_keeper () =
+  check (list string) "the journal frame decodes with its keeper"
+    [ "memory(lane-smith)" ]
+    (List.map summary (decode_all [ memory_journal_frame ]));
+  let journal_keepers frames =
+    decode_all frames
+    |> List.filter_map (function
+         | Observer.Event event -> Observer.memory_journal_appended_keeper event
+         | Observer.Undecodable _ -> None)
+  in
+  check (list string) "every other sample event answers no keeper" []
+    (journal_keepers
+       [ tool_called_frame; agent_completed_frame; agent_failed_frame
+       ; heartbeat_frame; turn_complete_frame; keeper_tool_call_frame
+       ; composite_frame; chat_stream_delta_frame; chat_stream_custom_frame
+       ; waiting_inventory_frame; operator_digest_frame
+       ; transport_health_frame; fusion_run_status_frame
+       ; turn_observation_frame; chat_appended_frame
+       ]);
+  check (list string) "the journal frame answers its keeper" [ "lane-smith" ]
+    (journal_keepers [ memory_journal_frame ])
 
 let test_a_fusion_status_frame_decodes_its_identity_strings () =
   check (list string) "the three identity strings survive the decode"
@@ -802,6 +832,8 @@ let () =
             test_a_delta_with_a_slice_is_not_a_snapshot
         ; test_case "only a chat-appended event names a reload keeper" `Quick
             test_only_a_chat_appended_event_names_a_reload_keeper
+        ; test_case "only a memory journal event names a journal keeper" `Quick
+            test_only_a_memory_journal_event_names_a_journal_keeper
         ; test_case "a fusion status frame decodes its identity strings" `Quick
             test_a_fusion_status_frame_decodes_its_identity_strings
         ; test_case "cursor commits only with a complete event" `Quick

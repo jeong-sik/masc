@@ -172,6 +172,9 @@ type event =
   | Keeper_turn_observation of keeper_turn_observation
   | Keeper_composite_changed of { keeper : string; at : float }
   | Keeper_chat_appended of { keeper : string; connector : string option; at : float }
+  | Keeper_memory_journal_appended of { keeper : string; at : float }
+      (** The keeper's memory journal gained a row. The chat pane shows that
+          journal beside the transcript and reads it again. *)
   | Keeper_chat_stream_frame of
       { keeper : string
       ; operation_id : string
@@ -242,7 +245,12 @@ type delivery = {
 val chat_appended_keeper : event -> string option
 (** The keeper whose chat just gained a turn — [Some] only for
     {!Keeper_chat_appended}. The chat pane reloads its history on this
-    and on nothing else. *)
+    and reads its call details again. *)
+
+val memory_journal_appended_keeper : event -> string option
+(** The keeper whose memory journal just gained a row — [Some] only for
+    {!Keeper_memory_journal_appended}. The chat pane reloads its history,
+    which includes that journal, on this. *)
 
 val event_of_json : Yojson.Safe.t -> (event, string) result
 (** Decode one [data:] payload. [Error] for a payload with no [type], or an

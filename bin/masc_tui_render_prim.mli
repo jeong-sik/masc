@@ -139,6 +139,8 @@ val markdown_with_closing :
   closing:string -> width:int -> string -> string list
 
 val document_markdown : width:int -> string -> string list
+(** Render canonical Yojson output, or a prefix starting at byte zero, safely. *)
+val document_json : width:int -> string -> string list
 
 val search_marker : Masc_tui_types.state -> string option
 (** The "/" query on screen and how many rows it reaches, or [None] when no

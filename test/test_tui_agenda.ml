@@ -47,9 +47,8 @@ let done_earlier =
   row ~standing:Agenda.Settled "2026-08-26T01:00:00Z" "orrery" "정기 보드 스윕"
 ;;
 
-(* [kta_asked_at] and [kta_timeout_sec] as the registry reports them: asked a
-   minute before [now], with the five minutes a held call is given before it
-   is denied -- so four remain. *)
+(* Registered a minute before [now]. The registry's timeout starts only after
+   question publication, so these fields do not determine time remaining. *)
 let asked_at_1155 = 1787713140.0
 
 let ask ?(asked_at = asked_at_1155) ?(timeout_sec = 300.0)

@@ -575,6 +575,10 @@ let read_post ~post_id =
   match backend () with
   | Jsonl store -> Board.read_post store ~post_id
 
+let read_post_for_evidence ~post_id =
+  match backend () with
+  | Jsonl store -> Board.read_post_for_evidence store ~post_id
+
 let get_post ~post_id =
   read_post ~post_id |> Result.map_error Board.board_error_of_read_error
 

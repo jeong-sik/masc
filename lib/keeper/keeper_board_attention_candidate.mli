@@ -392,11 +392,11 @@ val filter_comment_parent_visibility :
     [Direct] threads are skipped. *)
 
 val candidate_parent_visibility_filter :
-  candidate -> comment_parent_visibility_filter
+  candidate -> (comment_parent_visibility_filter, string) result
 (** Evaluate {!filter_comment_parent_visibility} for a [Board_comment_added]
-    candidate against its parent post (or skip when the parent post is absent
-    or non-discoverable). Non-comment candidates return
-    [Keep_discoverable_comment]. *)
+    candidate against its parent post. An unreadable source is an error and
+    leaves the candidate retained; a confirmed absent or non-discoverable
+    parent is skipped. Non-comment candidates return [Keep_discoverable_comment]. *)
 
 type judgment_delivery_outcome =
   | Delivered of candidate

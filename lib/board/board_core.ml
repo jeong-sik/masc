@@ -14,6 +14,23 @@ let read_post store ~post_id : (post, board_read_error) Result.t =
       | None -> Error (Read_post_not_found post_id))
 ;;
 
+(* The source gate and the in-memory lookup share the persistence -> state
+   lock order. [maybe_sweep] must run before acquiring the persistence lock. *)
+let read_post_for_evidence store ~post_id : (post, board_read_error) Result.t =
+  maybe_sweep store;
+  match Post_id.of_string_for_read post_id with
+  | Error error -> Error error
+  | Ok pid ->
+    with_persist_lock store (fun () ->
+      match require_posts_source_readable store with
+      | Error error -> Error (Read_source_unavailable error)
+      | Ok () ->
+        with_lock store (fun () ->
+          match Hashtbl.find_opt store.posts (Post_id.to_string pid) with
+          | Some post -> Ok post
+          | None -> Error (Read_post_not_found post_id)))
+;;
+
 (* RFC-0233 §7 guard #2: exact O(1) index lookups, mirroring [read_post] by
    primary key. The index is keyed on the full join string (turn_ref =
    "trace#turn", or the fusion run_id) — never a meta_json substring or a

@@ -620,7 +620,7 @@ let pending_board_event_of_board_observation
       (observation : Board_signal.board_observation)
   : (pending_board_event, Board_signal.board_unavailable) result
   =
-  match Board_dispatch.read_post ~post_id:observation.post_id with
+  match Board_dispatch.read_post_for_evidence ~post_id:observation.post_id with
   | Error error ->
     Error
       { Board_signal.operation = Board_signal.Get_post
@@ -1273,7 +1273,7 @@ let pending_board_event_of_stimulus
       (fun observation ->
          match observation.kind with
          | Board_signal.Observed_comment_added _ ->
-           (match Board_dispatch.read_post ~post_id:observation.post_id with
+           (match Board_dispatch.read_post_for_evidence ~post_id:observation.post_id with
             | Error error ->
               Error { Board_signal.operation = Board_signal.Get_post; post_id = observation.post_id; error }
             | Ok post_snapshot ->
@@ -1375,6 +1375,15 @@ let collect_board_events_with_cursor_policy
   : pending_board_event list * int * int
   =
   try
+    match Board_dispatch.require_persisted_sources_readable () with
+    | Error error ->
+      Otel_metric_store.inc_counter
+        Keeper_metrics.(to_string ObservationQueryFailures)
+        ~labels:[ ("operation", Runtime_observation_query_operation.(to_label Board_events)) ] ();
+      Log.Keeper.warn "board event collection retained cursor: source unavailable: %s"
+        (Board.show_board_error error);
+      [], 0, 0
+    | Ok () ->
     let cursor_ts, cursor_post_id =
       Keeper_registry.get_board_cursor ~base_path meta.name
     in
@@ -1557,6 +1566,8 @@ let collect_board_events_with_cursor_policy
           | [] -> Ok (List.rev acc)
           | (classified, board_audience, signal) :: rest ->
             (match route_signal ~classified ~board_audience signal with
+             | Error (Source_unavailable ({ error = Board.Read_source_unavailable _; _ } as unavailable)) ->
+               Error (Source_unavailable unavailable)
              | Error (Source_unavailable unavailable) ->
                log_and_count_unavailable ~context:"signal replay" unavailable;
                collect acc rest
@@ -1579,6 +1590,9 @@ let collect_board_events_with_cursor_policy
             ~labels:[ "operation", Runtime_observation_query_operation.(to_label Board_events) ] ();
           Log.Keeper.warn "board catchup retained cursor: keeper=%s post=%s delivery=%s"
             meta.name (Board.Post_id.to_string p.id) detail;
+          List.rev acc, last_cursor
+        | Error (Source_unavailable ({ error = Board.Read_source_unavailable _; _ } as unavailable)) ->
+          log_and_count_unavailable ~context:"source retained" unavailable;
           List.rev acc, last_cursor
         | Error (Source_unavailable unavailable) ->
           log_and_count_unavailable ~context:"signal replay" unavailable;

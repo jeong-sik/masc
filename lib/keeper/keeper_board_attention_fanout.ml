@@ -54,16 +54,18 @@ let complete ~base_path ~worker_epoch candidate partition (judged : Jev.judged) 
     verdict.Keeper_board_attention_judgment.decision,
     Candidate.candidate_parent_visibility_filter candidate
   with
-  | Keeper_board_attention_judgment.Relevant, Candidate.Keep_discoverable_comment ->
+  | Keeper_board_attention_judgment.Relevant, Ok Candidate.Keep_discoverable_comment ->
     ignore (Keeper_registry.wakeup_running ~intent:Keeper_registry.Attention_result
       ~base_path candidate.keeper_name);
     Ok ()
   | Keeper_board_attention_judgment.Not_relevant, _
-  | Keeper_board_attention_judgment.Relevant, Candidate.Skip_non_discoverable_comment ->
+  | Keeper_board_attention_judgment.Relevant, Ok Candidate.Skip_non_discoverable_comment ->
     let* _ = Candidate.apply_judgment_and_deliver ~base_path
       ~keeper_name:candidate.keeper_name ~candidate_id:candidate.candidate_id ~judgment in
     let* _ = Partition.settle ~now:(Time_compat.now ()) ~base_path ~partition:completed in
     Ok ()
+  | Keeper_board_attention_judgment.Relevant, Error detail ->
+    Error ("Board comment parent unavailable: " ^ detail)
 
 let run ~clock ~base_path ~wake ~admit candidates =
   let worker_epoch = Partition.Worker_epoch.generate () in
@@ -79,8 +81,9 @@ let run ~clock ~base_path ~wake ~admit candidates =
   let finish () =
     let eligible = List.filter_map (fun candidate ->
       match Candidate.candidate_parent_visibility_filter candidate with
-      | Candidate.Skip_non_discoverable_comment -> None
-      | Candidate.Keep_discoverable_comment ->
+      | Ok Candidate.Skip_non_discoverable_comment -> None
+      | Error detail -> report candidate detail; wake candidate ~base_path; None
+      | Ok Candidate.Keep_discoverable_comment ->
         match Typesafeai_config.board_attention_destinations ~keeper_id:candidate.Candidate.keeper_name with
       | Error _ -> wake candidate ~base_path; None
       | Ok destinations ->

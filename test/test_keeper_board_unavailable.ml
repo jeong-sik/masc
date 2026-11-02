@@ -150,7 +150,7 @@ let test_poison_stimulus_intake_does_not_crash_and_stays_dropped () =
        "first pass produces no pending_board_event (consumed, not crashed)"
        0
        (List.length events)
-   | Keeper_heartbeat_stimulus_intake.Stimulus_board_audience_unavailable _
+   | Keeper_heartbeat_stimulus_intake.Stimulus_board_unavailable _
    | Keeper_heartbeat_stimulus_intake.Stimulus_connector_retry_later _
    | Keeper_heartbeat_stimulus_intake.Stimulus_connector_missing _
    | Keeper_heartbeat_stimulus_intake.Stimulus_ask_retry_later _
@@ -173,7 +173,7 @@ let test_poison_stimulus_intake_does_not_crash_and_stays_dropped () =
       "second pass over the same stimulus stays empty (no crash-loop resurgence)"
       0
       (List.length events)
-  | Keeper_heartbeat_stimulus_intake.Stimulus_board_audience_unavailable _
+  | Keeper_heartbeat_stimulus_intake.Stimulus_board_unavailable _
    | Keeper_heartbeat_stimulus_intake.Stimulus_connector_retry_later _
    | Keeper_heartbeat_stimulus_intake.Stimulus_connector_missing _
    | Keeper_heartbeat_stimulus_intake.Stimulus_ask_retry_later _
@@ -348,6 +348,45 @@ let test_permanent_absence_does_not_spend_an_admission_slot () =
   check int "only permanent absence is ACKed during intake" 1 (List.length (pending ()))
 ;;
 
+let test_unavailable_posts_source_retains_the_exact_durable_selection () =
+  with_intake_sources ~max_events:1 @@ fun ~seed:_ ~seed_board ~intake ~pending ~ack:_ ->
+  let post_id = seed_board "retain this queued source" in
+  let original = match pending () with
+    | [selection] -> selection | _ -> fail "expected one queued Board source" in
+  let store = Board.global () in
+  let posts = Board.persist_path store in
+  let held = posts ^ ".test-held" in
+  Unix.rename posts held;
+  Fun.protect ~finally:(fun () -> if Sys.file_exists held then Unix.rename held posts)
+  @@ fun () ->
+  (match Masc_board_handlers.Board_votes_json.load_persisted_posts store with
+   | Error _ -> () | Ok _ -> fail "missing posts source was admitted");
+  (match Board_dispatch.read_post ~post_id with
+   | Ok _ -> () | Error error -> fail (Board.show_board_read_error error));
+  let selected = intake () in
+  check (list string) "an unavailable source is not admitted" [] (admitted_ids selected);
+  (match selected.event_queue_intake_error with
+   | Some (Keeper_heartbeat_stimulus_intake.Board_unavailable
+       { error = Board.Read_source_unavailable _; _ }) -> ()
+   | _ -> fail "unavailable posts source lost its typed retention reason");
+  (match pending () with
+   | [selection] ->
+     check bool "the exact queued selection was not acknowledged" true
+       (Keeper_event_queue_state.same_entry original selection)
+   | _ -> fail "the unavailable source did not stay queued");
+  Unix.rename held posts;
+  (match Masc_board_handlers.Board_votes_json.load_persisted_posts store with
+   | Ok _ -> () | Error (_, error) -> fail (Printexc.to_string error));
+  let recovered = intake () in
+  check (list string) "the retained source is admitted after recovery" [post_id]
+    (admitted_ids recovered);
+  (match pending () with
+   | [selection] ->
+     check bool "recovery keeps the same queued selection" true
+       (Keeper_event_queue_state.same_entry original selection)
+   | _ -> fail "source selection changed during recovery")
+;;
+
 (* A pre-pinning signal has no trustworthy recipient. Its exact durable
    selection must survive even if the post later disappears, without blocking
    a readable sibling or inventing a recipient from the current post. *)
@@ -371,7 +410,7 @@ let test_unpinned_board_source_is_retained_without_blocking_siblings () =
   check (list string) "a legacy source does not block the readable sibling"
     [ readable ] (admitted_ids first);
   (match first.event_queue_intake_error with
-   | Some (Keeper_heartbeat_stimulus_intake.Board_audience_unavailable _ as error) ->
+   | Some (Keeper_heartbeat_stimulus_intake.Board_unavailable _ as error) ->
      check bool "unknown audience is not a crashed cycle" false
        (Keeper_heartbeat_stimulus_intake.event_queue_intake_error_counts_as_cycle_failure error)
    | _ -> fail "the retained legacy source must remain observable");
@@ -515,7 +554,7 @@ let test_unread_rejection_authority_retains_source_and_allows_siblings () =
     check bool "authority read failure is retry, not a crashed cycle" false
       (Keeper_heartbeat_stimulus_intake.event_queue_intake_error_counts_as_cycle_failure error)
   | None | Some (Keeper_heartbeat_stimulus_intake.Pending_selection_failed _
-      | Keeper_heartbeat_stimulus_intake.Board_audience_unavailable _
+      | Keeper_heartbeat_stimulus_intake.Board_unavailable _
       | Keeper_heartbeat_stimulus_intake.Connector_read_failed _
       | Keeper_heartbeat_stimulus_intake.Connector_item_missing _
       | Keeper_heartbeat_stimulus_intake.Ask_read_failed _
@@ -696,6 +735,46 @@ let test_missing_parent_comment_does_not_abort_later_comment_replay () =
     1 (List.length queued)
 ;;
 
+let test_unavailable_posts_source_retains_both_cursor_states () =
+  let base_path = Sys.getenv "MASC_BASE_PATH" in
+  let existing = test_meta "catchup-source" and fresh = test_meta "fresh-source" in
+  ignore (Keeper_registry.For_testing.register ~base_path existing.name existing);
+  ignore (Keeper_registry.For_testing.register ~base_path fresh.name fresh);
+  Fun.protect ~finally:(fun () ->
+    Keeper_registry.For_testing.unregister ~base_path existing.name;
+    Keeper_registry.For_testing.unregister ~base_path fresh.name)
+  @@ fun () ->
+  ignore (create_thread ~title:"baseline" "before cursor" : string);
+  ignore (Keeper_world_observation.collect_board_events ~base_path ~meta:existing);
+  let before = Keeper_registry.get_board_cursor ~base_path existing.name in
+  let fresh_before = Keeper_registry.get_board_cursor ~base_path fresh.name in
+  check bool "the new keeper has no initialized cursor" true (fresh_before = (0.0, None));
+  ignore (create_thread ~title:"addressed" "@catchup-source preserve this" : string);
+  let store = Board.global () in
+  let posts = Board.persist_path store in
+  let held = posts ^ ".test-held" in
+  Unix.rename posts held;
+  Fun.protect ~finally:(fun () -> if Sys.file_exists held then Unix.rename held posts)
+  @@ fun () ->
+  (match Masc_board_handlers.Board_votes_json.load_persisted_posts store with
+   | Error _ -> () | Ok _ -> fail "missing posts source was admitted");
+  ignore (Keeper_world_observation.collect_board_events ~base_path ~meta:existing);
+  ignore (Keeper_world_observation.collect_board_events ~base_path ~meta:fresh);
+  check bool "existing cursor remains at the last readable position" true
+    (before = Keeper_registry.get_board_cursor ~base_path existing.name);
+  check bool "a first cursor is not initialized from unavailable data" true
+    (fresh_before = Keeper_registry.get_board_cursor ~base_path fresh.name);
+  Unix.rename held posts;
+  (match Masc_board_handlers.Board_votes_json.load_persisted_posts store with
+   | Ok _ -> () | Error (_, error) -> fail (Printexc.to_string error));
+  ignore (Keeper_world_observation.collect_board_events ~base_path ~meta:existing);
+  let queue = match Keeper_event_queue_persistence.load_result ~base_path ~keeper_name:existing.name with
+    | Ok queue -> queue | Error detail -> fail detail in
+  check int "recovery admits the addressed event once" 1 (Keeper_event_queue.length queue);
+  check bool "recovery advances the existing cursor" true
+    (before <> Keeper_registry.get_board_cursor ~base_path existing.name)
+;;
+
 let test_catchup_storage_failure_retains_cursor () =
   let base_path = Sys.getenv "MASC_BASE_PATH" in
   let meta = test_meta "catchup-storage" in
@@ -836,6 +915,8 @@ let () =
             test_empty_observation_source_still_spends_an_admission_slot
         ; test_case "permanent absence does not spend an admission slot" `Quick
             test_permanent_absence_does_not_spend_an_admission_slot
+        ; test_case "unavailable posts retain the exact durable selection" `Quick
+            test_unavailable_posts_source_retains_the_exact_durable_selection
         ; test_case "unpinned Board source survives post removal without blocking siblings" `Quick
             test_unpinned_board_source_is_retained_without_blocking_siblings
         ; test_case "delivered rejection remains current at intake" `Quick
@@ -852,6 +933,10 @@ let () =
             "catchup storage failure retains cursor"
             `Quick
             (with_eio test_catchup_storage_failure_retains_cursor)
+        ; test_case
+            "unavailable posts retain existing and initial cursor states"
+            `Quick
+            (with_eio test_unavailable_posts_source_retains_both_cursor_states)
         ; test_case
             "accepted comment identity survives queue projection"
             `Quick

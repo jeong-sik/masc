@@ -522,6 +522,15 @@ let test_distinct_comment_ids_with_the_same_body_are_distinct_candidates () =
        (A.candidate_id_of_signal ~keeper_name:"alpha" second))
 ;;
 
+let test_comment_visibility_refuses_a_non_eio_caller () =
+  let comment = { (signal "post-comment") with
+    kind = Masc.Board_dispatch.Board_comment_added
+      { comment_id = comment_id "c-00000000000000000000000000000001"; parent_id = None } } in
+  match A.candidate_parent_visibility_filter (candidate comment) with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "a non-Eio caller cannot read the Board parent"
+;;
+
 (* A purged keeper's Board attention ledgers go with it: a same-name successor
    must not inherit another keeper's Ready roots and quarantines. The plan
    names both ledgers, and the path the purge removes is the file [record]
@@ -1458,6 +1467,10 @@ let () =
             "distinct comment ids with the same body are distinct candidates"
             `Quick
             test_distinct_comment_ids_with_the_same_body_are_distinct_candidates
+        ; Alcotest.test_case
+            "comment visibility refuses a non-Eio caller"
+            `Quick
+            test_comment_visibility_refuses_a_non_eio_caller
         ; Alcotest.test_case
             "pending row has no Board thread history"
             `Quick

@@ -1196,8 +1196,8 @@ let ready_root_work candidates (partition : Partition.t) =
         | Candidate.Requeued_resumable
             { resumable = Candidate.Resumable_pending _; _ } ->
           (match Candidate.candidate_parent_visibility_filter candidate with
-           | Candidate.Keep_discoverable_comment -> Needs_lane candidate
-           | Candidate.Skip_non_discoverable_comment -> Skip_ready)
+           | Ok Candidate.Keep_discoverable_comment -> Needs_lane candidate
+           | Ok Candidate.Skip_non_discoverable_comment | Error _ -> Skip_ready)
         | Candidate.Direct_resumable
             (Candidate.Resumable_judged _ | Candidate.Resumable_consumed _)
         | Candidate.Requeued_resumable

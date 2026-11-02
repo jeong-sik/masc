@@ -704,6 +704,82 @@ let test_existing_durable_comment_candidates_respect_parent_visibility () =
     ]
 ;;
 
+let test_unavailable_posts_retain_a_judged_comment () =
+  Eio_main.run @@ fun _env ->
+  with_temp_workspace @@ fun config ->
+  let meta = keeper_meta ~board_interests:[ "research" ] config "durablelane" in
+  register config meta;
+  let post = get_created (Board_dispatch.create_post ~author:"thread-author"
+    ~title:"thread" ~content:"research" ~visibility:Board.Public
+    ~post_kind:Board.Human_post ()) in
+  let post_id = Board.Post_id.to_string post.id in
+  let comment = match Board_dispatch.add_comment ~post_id ~author:"comment-author"
+      ~content:"research comment" () with
+    | Ok comment -> comment | Error error -> fail (Board.show_board_error error) in
+  let signal : Board_dispatch.board_signal =
+    { kind = Board_comment_added { comment_id = comment.id; parent_id = comment.parent_id }
+    ; post_id; author = "comment-author"; title = post.title; content = comment.content
+    ; hearth = post.hearth; updated_at = Some comment.created_at } in
+  let candidate = KBAC.of_board_signal ~meta ~recorded_at:comment.created_at
+      { signal; audience = Board.Thread_participants } in
+  let candidate = match KBAC.record ~base_path:config.base_path candidate with
+    | KBAC.Recorded candidate | KBAC.Duplicate candidate -> candidate
+    | KBAC.Record_error detail -> fail detail in
+  let post_signal : Board_dispatch.board_signal =
+    { signal with kind = Board_post_created; author = "thread-author"; content = post.body } in
+  let post_candidate = KBAC.of_board_signal ~meta ~recorded_at:post.created_at
+      { signal = post_signal; audience = Board.Discoverable } in
+  let post_candidate = match KBAC.record ~base_path:config.base_path post_candidate with
+    | KBAC.Recorded candidate | KBAC.Duplicate candidate -> candidate
+    | KBAC.Record_error detail -> fail detail in
+  let judgment : KBAC.judgment =
+    { verdict = { decision = Keeper_board_attention_judgment.Relevant; rationale = "research" }
+    ; slot_id = "slot-1"; source = KBAC.Cli_lane_slot; judged_at = comment.created_at +. 1.0 } in
+  let posts = Board.persist_path (Board.global ()) in
+  let held = posts ^ ".test-held" in
+  let restart () =
+    Board_dispatch.reset_for_test ();
+    Board.reset_global_for_test ();
+    Result.get_ok (Board_dispatch.init_jsonl ~base_path:config.base_path
+      ~recipient_lookup:every_name_declared ()) in
+  Unix.rename posts held;
+  Fun.protect ~finally:(fun () -> if Sys.file_exists held then Unix.rename held posts)
+  @@ fun () ->
+  restart ();
+  (match Board_dispatch.read_post_for_evidence ~post_id with
+   | Error (Board.Read_source_unavailable _) -> ()
+   | Error error -> fail (Board.show_board_read_error error)
+   | Ok _ -> fail "unavailable source authorized a parent post");
+  (match Keeper_board_attention_partition.ensure_roots
+      ~base_path:config.base_path ~keeper_name:meta.name [candidate; post_candidate] with
+   | Ok 1 -> () | Ok _ -> fail "only the independent post may acquire a root"
+   | Error detail -> fail detail);
+  (match KBAC.apply_judgment_and_deliver ~base_path:config.base_path
+      ~keeper_name:meta.name ~candidate_id:post_candidate.candidate_id ~judgment with
+   | Ok (KBAC.Delivered { status = KBAC.Consumed { delivery = KBAC.Enqueued_to_keeper_lane; _ }; _ }) -> ()
+   | Ok _ -> fail "the independent post candidate was not delivered"
+   | Error detail -> fail detail);
+  (match KBAC.apply_judgment_and_deliver ~base_path:config.base_path
+      ~keeper_name:meta.name ~candidate_id:candidate.candidate_id ~judgment with
+   | Error _ -> () | Ok _ -> fail "unavailable source consumed a judged candidate");
+  (match KBAC.load_candidates ~base_path:config.base_path ~keeper_name:meta.name with
+   | Ok candidates ->
+     (match List.find_opt (fun (held : KBAC.candidate) -> held.candidate_id = candidate.candidate_id) candidates with
+      | Some { status = KBAC.Judged _; _ } -> ()
+      | Some _ | None -> fail "the original judgment was not retained")
+   | Error detail -> fail detail);
+  check int "only the independent stimulus was enqueued" 1
+    (queue_length config meta.name);
+  Unix.rename held posts;
+  restart ();
+  (match KBAC.apply_judgment_and_deliver ~base_path:config.base_path
+      ~keeper_name:meta.name ~candidate_id:candidate.candidate_id ~judgment with
+   | Ok (KBAC.Delivered { status = KBAC.Consumed { delivery = KBAC.Enqueued_to_keeper_lane; _ }; _ }) -> ()
+   | Ok _ -> fail "recovered source did not deliver the retained judgment"
+   | Error detail -> fail detail);
+  check int "recovery delivers exactly one more stimulus" 2 (queue_length config meta.name)
+;;
+
 let () =
   run
     "keeper Board discoverable cursor"
@@ -716,6 +792,8 @@ let () =
             test_replayed_comment_discovery_respects_parent_visibility
         ; test_case "existing durable comment candidates respect parent visibility" `Quick
             test_existing_durable_comment_candidates_respect_parent_visibility
+        ; test_case "unavailable posts retain a judged comment until recovery" `Quick
+            test_unavailable_posts_retain_a_judged_comment
         ; test_case "queued creation keeps content and audience after an edit" `Quick
             test_queued_creation_keeps_content_and_audience_after_edit
         ; test_case "thread activity excludes unbound parent content" `Quick

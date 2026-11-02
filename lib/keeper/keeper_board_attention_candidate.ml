@@ -1052,13 +1052,18 @@ let candidate_parent_visibility_filter (candidate : candidate) =
   | Board_dispatch.Board_post_updated _
   | Board_dispatch.Board_reaction_changed _
   | Board_dispatch.Board_vote_cast _ ->
-    Keep_discoverable_comment
+    Ok Keep_discoverable_comment
   | Board_dispatch.Board_comment_added _ ->
-    (match Board_dispatch.read_post ~post_id:candidate.signal.post_id with
-     | Ok post -> filter_comment_parent_visibility post.visibility
-     | Error (Board.Read_post_not_found _ | Board.Read_invalid_id _
-             | Board.Read_comment_not_found _ | Board.Read_audience_not_pinned _) ->
-       Skip_non_discoverable_comment)
+    (match Eio_guard.execution_context () with
+     | Eio_guard.Non_eio -> Error "Board comment parent requires an Eio fiber"
+     | Eio_guard.Eio_fiber ->
+       match Board_dispatch.read_post_for_evidence ~post_id:candidate.signal.post_id with
+       | Ok post -> Ok (filter_comment_parent_visibility post.visibility)
+       | Error (Board.Read_post_not_found _ | Board.Read_invalid_id _
+               | Board.Read_comment_not_found _ | Board.Read_audience_not_pinned _) ->
+         Ok Skip_non_discoverable_comment
+       | Error (Board.Read_source_unavailable error) ->
+         Error (Board.show_board_error error))
 ;;
 
 let consume_judged ~base_path candidate (judged : judged_state) =
@@ -1067,9 +1072,11 @@ let consume_judged ~base_path candidate (judged : judged_state) =
     candidate_parent_visibility_filter candidate
   with
   | Keeper_board_attention_judgment.Not_relevant, _
-  | Keeper_board_attention_judgment.Relevant, Skip_non_discoverable_comment ->
+  | Keeper_board_attention_judgment.Relevant, Ok Skip_non_discoverable_comment ->
     mark_consumed ~base_path candidate judged.judgment Not_relevant
-  | Keeper_board_attention_judgment.Relevant, Keep_discoverable_comment ->
+  | Keeper_board_attention_judgment.Relevant, Error detail ->
+    Error ("Board comment parent unavailable: " ^ detail)
+  | Keeper_board_attention_judgment.Relevant, Ok Keep_discoverable_comment ->
     let stimulus = board_attention_stimulus candidate in
     (match
        Keeper_registry_event_queue.enqueue_if_missing_durable_result

@@ -35,14 +35,13 @@ type board_error =
         alias. The write is refused and nothing is stored. *)
   [@@deriving show]
 
-(* What a Board read answers when it has no row to give. Reads are served from
-   the in-memory store, so none of them answers an I/O failure; persistence
-   failures come from writes, as [board_error]. *)
+(* An evidence read can also refuse a partial or unadmitted posts source. *)
 type board_read_error =
   | Read_invalid_id of string
   | Read_post_not_found of string
   | Read_comment_not_found of string
   | Read_audience_not_pinned of string
+  | Read_source_unavailable of board_error
   [@@deriving show]
 
 let board_error_of_read_error = function
@@ -53,6 +52,7 @@ let board_error_of_read_error = function
      stimuli; [read_post]/[read_comments] never do, so this arm only satisfies
      exhaustiveness where a caller carries reads and writes in one result. *)
   | Read_audience_not_pinned detail -> Validation_error detail
+  | Read_source_unavailable error -> error
 
 (** {1 Safe ID Module - Parse Don't Validate} *)
 

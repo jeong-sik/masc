@@ -448,11 +448,11 @@ let test_keeper_management_projection_is_explicit () =
     [ "masc_keeper_delegate"
     ; "masc_keeper_delegate_status"
     ; "masc_keeper_delegate_cancel"
+    ; "masc_keeper_list"
     ];
   List.iter
     (fun name -> check_projection name Descriptor.Operator_only)
     [ "masc_keeper_waiting_inventory"
-    ; "masc_keeper_list"
     ; "masc_keeper_delegate_list"
     ; "masc_keeper_clear"
     ; "masc_keeper_sandbox_start"

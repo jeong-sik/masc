@@ -87,11 +87,11 @@ let test_model_surface_exposes_delegation_not_keeper_administration () =
     [ "masc_keeper_delegate"
     ; "masc_keeper_delegate_status"
     ; "masc_keeper_delegate_cancel"
+    ; "masc_keeper_list"
     ];
   List.iter
     (fun name -> check_member (name ^ " is operator-only") name false names)
     [ "masc_keeper_waiting_inventory"
-    ; "masc_keeper_list"
     ; "masc_keeper_delegate_list"
     ; "masc_keeper_clear"
     ; "masc_keeper_sandbox_start"

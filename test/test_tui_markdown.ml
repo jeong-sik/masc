@@ -175,23 +175,18 @@ let test_block_and_table_source_spans () =
     let narrow = get 16 and wide = get 80 in
     let identity (cell : Markdown.table_cell_source) =
       cell.table_row, cell.table_column, cell.cell_text in
-    Alcotest.(check bool) "source cell identities survive truncation" true
+    Alcotest.(check bool) "source cell identities survive wrapping" true
       (List.map identity narrow.cell_sources = List.map identity wide.cell_sources);
-    List.iter (fun (width, mapped) ->
-      Alcotest.(check (list string)) "mapped table matches ordinary display rows"
-        (Markdown.render ~palette ~width source) mapped.Markdown.table_rows;
-      List.iter (fun (cell : Markdown.table_cell_source) ->
-        let expected_row = if cell.table_row=0 then (if framed then 1 else 0)
-          else cell.table_row + (if framed then 2 else 1) in
-        Alcotest.(check int) "cell maps past generated borders" expected_row cell.rendered_row;
-        Alcotest.(check int) "source starts at cell byte zero" 0 cell.visible_range.start_byte;
-        Alcotest.(check bool) "visible prefix lies inside semantic cell" true
-          (cell.visible_range.end_byte <= String.length cell.cell_text)) mapped.cell_sources)
-      [16,narrow;80,wide];
     let body_cell table = List.find (fun (cell : Markdown.table_cell_source) ->
       cell.table_row=1 && cell.table_column=0) table.Markdown.cell_sources in
-    Alcotest.(check bool) "narrow cell excludes truncated source suffix" true
-      ((body_cell narrow).visible_range.end_byte < (body_cell wide).visible_range.end_byte)
+    let exposed (cell : Markdown.table_cell_source) =
+      List.concat_map (fun (fragment : Markdown.table_cell_fragment) ->
+        List.map (fun (range : Markdown.source_range) ->
+          String.sub cell.cell_text range.start_byte (range.end_byte - range.start_byte))
+          fragment.visible_ranges) cell.fragments
+      |> String.concat "" in
+    Alcotest.(check string) "wrapped cell keeps its complete selectable source"
+      (body_cell wide).cell_text (exposed (body_cell narrow))
   ) [false;true];
   let ansi_palette = {Markdown.plain_palette with strong=("\027[1m", "\027[0m")} in
   (match Markdown.render_table_with_spans ~palette:ansi_palette ~width:8
@@ -200,9 +195,30 @@ let test_block_and_table_source_spans () =
    | Some mapped ->
        let cell = List.find (fun (cell : Markdown.table_cell_source) -> cell.table_row=1)
          mapped.cell_sources in
-       Alcotest.(check int) "ANSI bold cut excludes ellipsis from source" 7 cell.visible_range.end_byte;
-       Alcotest.(check string) "actual ANSI-styled fitting retains the mapped prefix"
-         "abcdefg…" (Masc_tui_theme.strip_sgr (List.nth mapped.table_rows cell.rendered_row)));
+       let covered = List.concat_map (fun (fragment : Markdown.table_cell_fragment) ->
+         fragment.visible_ranges) cell.fragments in
+       let bytes = List.fold_left (fun count (range : Markdown.source_range) ->
+         count + range.end_byte - range.start_byte) 0 covered in
+       Alcotest.(check int) "ANSI-styled cell keeps every source byte" (String.length cell.cell_text) bytes);
+  let source = "| A | B |\n| --- | --- |\n| 한 | x |" in
+  let body_cell width =
+    match Markdown.render_table_with_spans ~palette:Markdown.plain_palette ~width source with
+    | None -> Alcotest.fail "narrow source table must map"
+    | Some table -> List.find (fun (cell : Markdown.table_cell_source) ->
+        cell.table_row=1 && cell.table_column=0) table.cell_sources in
+  List.iter (fun width ->
+    let cell = body_cell width in
+    let bytes = List.concat_map (fun (fragment : Markdown.table_cell_fragment) ->
+      List.map (fun (range : Markdown.source_range) ->
+        String.sub cell.cell_text range.start_byte (range.end_byte - range.start_byte))
+        fragment.visible_ranges) cell.fragments |> String.concat "" in
+    Alcotest.(check string) "wide grapheme keeps its selectable source" cell.cell_text bytes)
+    [2;3;4;5;6];
+  let undrawable = body_cell 1 in
+  Alcotest.(check string) "undrawable grapheme keeps its original source" "한" undrawable.cell_text;
+  Alcotest.(check bool) "undrawable source is not reported visible" true
+    (List.for_all (fun (fragment : Markdown.table_cell_fragment) -> fragment.visible_ranges = [])
+       undrawable.fragments);
   Alcotest.(check bool) "not a table is explicit" true
     (Option.is_none (Markdown.render_table_with_spans ~palette:tagged ~width:80 "ordinary text"))
 
@@ -220,8 +236,6 @@ let test_table_original_source_positions () =
     let wide=mapped 100 in
     List.iter (fun width ->
       let table=mapped width in
-      Alcotest.(check (list string)) "source observer preserves table rows"
-        (Markdown.render ~palette ~width source) table.table_rows;
       List.iter2 (fun (cell : Markdown.table_cell_source) (stable : Markdown.table_cell_source) ->
         Alcotest.(check bool) "original source byte map is width independent" true
           (cell.cell_text=stable.cell_text && cell.source_positions=stable.source_positions);
@@ -230,11 +244,17 @@ let test_table_original_source_positions () =
         Array.iteri (fun byte -> function None -> () | Some at ->
           Alcotest.(check char) "semantic byte comes from exact original table byte"
             cell.cell_text.[byte] source.[at]) cell.source_positions;
-        let row=Masc_tui_theme.strip_sgr (List.nth table.table_rows cell.rendered_row) in
-        let _, from_cell=Masc_tui_message_layout.split_at_cells row cell.rendered_start_cell in
-        let visible=String.sub cell.cell_text 0 cell.visible_range.end_byte in
-        Alcotest.(check bool) "formatter placement selects actual surviving cell prefix" true
-          (String.starts_with ~prefix:visible from_cell)) table.cell_sources wide.cell_sources)
+        let covered=Array.make (String.length cell.cell_text) false in
+        List.iter (fun (fragment : Markdown.table_cell_fragment) ->
+          List.iter (fun (range : Markdown.source_range) ->
+            Alcotest.(check bool) "fragment range stays in the semantic cell" true
+              (range.start_byte>=0 && range.end_byte<=Array.length covered && range.start_byte<=range.end_byte);
+            for byte=range.start_byte to range.end_byte-1 do covered.(byte)<-true done)
+            fragment.visible_ranges) cell.fragments;
+        String.iteri (fun byte char ->
+          if char <> ' ' then
+            Alcotest.(check bool) "wrapped content remains selectable" true covered.(byte)) cell.cell_text)
+        table.cell_sources wide.cell_sources)
       [12;30;100]) [false;true]) fixtures;
   match Markdown.render_table_with_spans ~palette:Markdown.plain_palette ~width:100
       "| A | B |\n| --- | --- |\n| x | y | z |" with

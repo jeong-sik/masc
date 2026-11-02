@@ -947,86 +947,184 @@ let column_widths ~width ~gutter_cells ~columns rows =
   shrink ();
   Array.to_list widths
 
+type table_cell_fragment = {
+  rendered_row : int;
+  rendered_start_cell : int;
+  visible_ranges : source_range list;
+}
+
 type table_cell_source = {
   table_row : int;
   table_column : int;
-  rendered_row : int;
   cell_text : string;
   source_positions : int option array;
-  rendered_start_cell : int;
-  visible_range : source_range;
+  fragments : table_cell_fragment list;
 }
 
 let table_block ?on_cell ?source_rows palette ~width ~alignments ~header ~body =
-  let columns = List.length alignments in
-  let gutter = palette.table_gutter in
-  let gutter_cells = Layout.display_width gutter in
-  let cell_mapping = Option.map (fun emit -> emit, Hashtbl.create 16) on_cell in
-  let styled row_index cells =
-    List.mapi
-      (fun column cell ->
-        Option.iter (fun (_, semantic_cells) ->
-          let mapped = render_inline_with_spans ~palette ~width:max_int ~prefix:"" ~continuation:"" cell in
-          let source_positions = match source_rows with
-            | None -> invalid_arg "Masc_tui_markdown.table_block: missing table source positions"
-            | Some rows ->
-                let raw_positions=List.nth (List.nth rows row_index) column in
-                Array.map (fun position -> Option.bind position (fun at -> raw_positions.(at))) mapped.source_positions in
-          Hashtbl.replace semantic_cells (row_index, column) (mapped.semantic_text, source_positions)) cell_mapping;
-        match
-          wrap_inline palette ~width:max_int ~prefix:"" ~continuation:"" cell
-        with
-        | [] -> ""
-        | row :: _ -> row)
-      (normalise_row ~columns cells)
+  let width = max 1 width in
+  let alignments = Array.of_list alignments in
+  let columns = Array.length alignments in
+  let gutter_cells = Layout.display_width palette.table_gutter in
+  let header = normalise_row ~columns header in
+  let body = List.map (normalise_row ~columns) body in
+  let source_rows = Option.map (fun rows ->
+    Array.of_list (List.map Array.of_list rows)) source_rows in
+  let natural row =
+    List.map (fun cell ->
+      match wrap_inline palette ~width:max_int ~prefix:"" ~continuation:"" cell with
+      | [] -> ""
+      | row :: _ -> row) row
   in
-  let header = styled 0 header in
-  let body = List.mapi (fun row -> styled (row + 1)) body in
   (* The frame is paid for out of the columns, not out of the pane: a table
      that drew its own width plus a border would run past the frame it sits
      in, the way the origin margin would have. *)
   let frame_cells = if palette.table_frame then 4 else 0 in
-  let widths =
-    column_widths ~width:(max 1 (width - frame_cells)) ~gutter_cells ~columns
-      (header :: body)
+  let grid_widths =
+    let minimum = frame_cells + columns + gutter_cells * max 0 (columns - 1) in
+    if minimum > width then None
+    else
+      let natural_rows = List.map natural (header :: body) in
+      let widths = Array.of_list
+          (column_widths ~width:(max 1 (width - frame_cells)) ~gutter_cells ~columns
+            natural_rows) in
+      (* Decide before wrapping: a one-cell column with a wide grapheme
+         cannot use the grid, and preparing a long cell there only to discard
+         its many one-cell rows would needlessly stall the reader. *)
+      if List.exists (fun row ->
+        List.mapi (fun column text -> Layout.widest_grapheme_cells text > widths.(column)) row
+        |> List.exists Fun.id) natural_rows
+      then None
+      else
+        (* A very long cell in a many-column grid would repeat every other
+           column on each wrapped line. Compare content-based line estimates
+           before allocating those rows; use the lower estimate. Word wrapping
+           can make either actual height greater than its estimate. *)
+        let lines text cells =
+          let content = Layout.display_width text in
+          if content = 0 then 1 else 1 + ((content - 1) / cells) in
+        let stacked_width = max 1 (width - frame_cells) in
+        let grid_lines, stacked_lines = List.fold_left (fun (grid, stacked) row ->
+          let counts = List.mapi (fun column text -> lines text widths.(column)) row in
+          grid + List.fold_left max 1 counts,
+          stacked + List.fold_left (fun total text -> total + lines text stacked_width) 0 row)
+            ((if palette.table_frame then 3 else 1),
+             (if palette.table_frame then 3 else 1) + max 0 (List.length body - 1)) natural_rows in
+        if stacked_lines < grid_lines then None else Some widths
+  in
+  let prepare widths row_index row =
+    List.mapi (fun column cell ->
+      let cells = widths.(column) in
+      match on_cell with
+      | None ->
+          let lines = wrap_inline palette ~width:cells ~prefix:"" ~continuation:"" cell in
+          Array.of_list (List.map (fun text -> text, []) lines), None
+      | Some _ ->
+          let mapped = render_inline_with_spans ~palette ~width:cells
+              ~prefix:"" ~continuation:"" cell in
+          let raw_positions = match source_rows with
+            | None -> invalid_arg "Masc_tui_markdown.table_block: missing table source positions"
+            | Some rows -> rows.(row_index).(column) in
+          let source_positions = Array.map
+              (fun position -> Option.bind position (fun at -> raw_positions.(at)))
+              mapped.source_positions in
+          Array.of_list (List.map (fun row -> row.text, row.source_ranges) mapped.mapped_rows),
+          Some (mapped.semantic_text, source_positions)) row
+  in
+  (* When the grid cannot fit or is estimated to need more lines, give each
+     cell the pane instead of drawing it through its neighbours. *)
+  let stacked = Option.is_none grid_widths in
+  let framed = palette.table_frame &&
+    (not stacked ||
+     let inside = width - frame_cells in
+     inside > 0 && List.for_all (fun row ->
+       List.for_all (fun text -> Layout.widest_grapheme_cells text <= inside) (natural row))
+       (header :: body)) in
+  let stacked_width = width - (if framed then frame_cells else 0) in
+  let widths = match stacked, grid_widths with
+    | false, Some widths -> widths
+    | true, _ | false, None -> Array.make columns stacked_width in
+  let prepared = List.mapi (prepare widths) (header :: body) in
+  let gutter = if stacked then "" else palette.table_gutter in
+  let next_row = ref (if framed then 1 else 0) in
+  let prefix_ranges bytes ranges =
+    let rec take remaining = function
+      | [] -> []
+      | _ when remaining <= 0 -> []
+      | range :: rest ->
+          let length = min remaining (range.end_byte - range.start_byte) in
+          {range with end_byte=range.start_byte + length} :: take (remaining - length) rest
+    in
+    take bytes ranges
+  in
+  let draw_group row_index wrapped =
+    let height = List.fold_left (fun height (_, (lines, _)) -> max height (Array.length lines)) 1 wrapped in
+    let fragments = Option.map (fun _ -> Array.make (List.length wrapped) []) on_cell in
+    let lines = List.init height (fun offset ->
+      let cell_start = ref (if framed then 2 else 0) in
+      List.mapi (fun slot (column, (rows, semantic)) ->
+        let cells = widths.(column) in
+        let alignment = alignments.(column) in
+        let fragment = if offset < Array.length rows then Some rows.(offset) else None in
+        let text, ranges = Option.value fragment ~default:("", []) in
+        (* A grapheme wider than the whole pane cannot be drawn in that pane.
+           Fit it and report only the source bytes that remain visible. *)
+        let text, ranges =
+          if Layout.display_width text <= cells then text, ranges
+          else
+            let ranges = match semantic with
+              | None -> []
+              | Some (cell_text, _) ->
+                  let plain = List.map (fun range ->
+                    String.sub cell_text range.start_byte (range.end_byte - range.start_byte)) ranges
+                    |> String.concat "" in
+                  prefix_ranges (Layout.fitted_source_bytes plain cells) ranges in
+            Layout.fit_width text cells, ranges in
+        let missing = max 0 (cells - Layout.display_width text) in
+        let padding = match alignment with Left -> 0 | Right -> missing | Centre -> missing / 2 in
+        (match fragments, semantic, fragment with
+         | Some fragments, Some _, Some _ ->
+             fragments.(slot) <-
+               { rendered_row = !next_row + offset;
+                 rendered_start_cell = !cell_start + padding;
+                 visible_ranges = ranges } :: fragments.(slot)
+         | (Some _, Some _, None) | (Some _, None, _) | (None, _, _) -> ());
+        cell_start := !cell_start + cells + (if stacked then 0 else gutter_cells);
+        pad ~alignment ~cells text) wrapped
+      |> String.concat gutter) in
+    (match on_cell, fragments with
+     | Some emit, Some fragments ->
+      List.iteri (fun slot (column, (_, semantic)) ->
+        Option.iter (fun (cell_text, source_positions) ->
+          emit {table_row=row_index; table_column=column; cell_text; source_positions;
+            fragments=List.rev fragments.(slot)}) semantic) wrapped
+     | None, None -> ()
+     | (Some _, None) | (None, Some _) -> assert false);
+    next_row := !next_row + height;
+    lines
   in
   let draw row_index row =
-    let cell_start = ref (if palette.table_frame then 2 else 0) in
-    List.mapi
-      (fun index cell ->
-        let cells = List.nth widths index in
-        let alignment = List.nth alignments index in
-        (* [fit_width] pads on the left as well as truncating, and a cell it
-           has padded has no room left for the alignment the delimiter row
-           asked for. So it is asked only for the cut. *)
-        let fitted =
-          if Layout.display_width cell > cells then Layout.fit_width cell cells
-          else cell
-        in
-        Option.iter (fun (emit, semantic_cells) ->
-          let cell_text, source_positions = Hashtbl.find semantic_cells (row_index, index) in
-          let rendered_row = if row_index = 0 then (if palette.table_frame then 1 else 0)
-            else row_index + (if palette.table_frame then 2 else 1) in
-          let missing = max 0 (cells - Layout.display_width fitted) in
-          let padding = match alignment with Left -> 0 | Right -> missing | Centre -> missing / 2 in
-          emit {table_row=row_index; table_column=index; rendered_row; cell_text; source_positions;
-            rendered_start_cell= !cell_start + padding;
-            visible_range={start_byte=0; end_byte=Layout.fitted_source_bytes cell_text cells}}) cell_mapping;
-        cell_start := !cell_start + cells + gutter_cells;
-        pad ~alignment ~cells fitted)
-      row
-    |> String.concat gutter
+    let indexed = List.mapi (fun column cell -> column, cell) row in
+    if stacked then List.concat_map (fun cell -> draw_group row_index [cell]) indexed
+    else draw_group row_index indexed
   in
   let opening, closing = palette.table_header in
   let rule_opening, rule_closing = palette.rule in
   let dashes cells = String.concat "" (List.init cells (fun _ -> "\xe2\x94\x80")) in
   let rule =
-    List.map dashes widths |> String.concat palette.table_rule_gutter
+    if stacked then dashes stacked_width
+    else Array.to_list widths |> List.map dashes |> String.concat palette.table_rule_gutter
   in
-  if not palette.table_frame then
-    (opening ^ draw 0 header ^ closing)
-    :: (rule_opening ^ rule ^ rule_closing)
-    :: List.mapi (fun index -> draw (index + 1)) body
+  let header = draw 0 (List.hd prepared) |> List.map (fun line -> opening ^ line ^ closing) in
+  incr next_row; (* the rule follows the header *)
+  let body = List.mapi (fun index row ->
+    let separator = if stacked && index > 0 then begin
+      incr next_row;
+      [rule_opening ^ rule ^ rule_closing]
+    end else [] in
+    separator @ draw (index + 1) row) (List.tl prepared) |> List.concat in
+  if not framed then
+    header @ [rule_opening ^ rule ^ rule_closing] @ body
   else
     (* The box. Each segment spans its column plus the space on either side,
        so a junction lands exactly where the gutter's bar does and the border
@@ -1034,16 +1132,17 @@ let table_block ?on_cell ?source_rows palette ~width ~alignments ~header ~body =
     let border ~left ~joint ~right =
       rule_opening
       ^ left
-      ^ (List.map (fun cells -> dashes (cells + 2)) widths
+      ^ ((if stacked then [stacked_width] else Array.to_list widths)
+        |> List.map (fun cells -> dashes (cells + 2))
         |> String.concat joint)
       ^ right ^ rule_closing
     in
     let edged row = rule_opening ^ "\xe2\x94\x82" ^ rule_closing ^ " " ^ row
       ^ " " ^ rule_opening ^ "\xe2\x94\x82" ^ rule_closing in
     border ~left:"\xe2\x94\x8c" ~joint:"\xe2\x94\xac" ~right:"\xe2\x94\x90"
-    :: edged (opening ^ draw 0 header ^ closing)
-    :: border ~left:"\xe2\x94\x9c" ~joint:"\xe2\x94\xbc" ~right:"\xe2\x94\xa4"
-    :: (List.mapi (fun index row -> edged (draw (index + 1) row)) body
+    :: (List.map edged header
+       @ [border ~left:"\xe2\x94\x9c" ~joint:"\xe2\x94\xbc" ~right:"\xe2\x94\xa4"]
+       @ List.map edged body
        @ [ border ~left:"\xe2\x94\x94" ~joint:"\xe2\x94\xb4"
              ~right:"\xe2\x94\x98" ])
 
@@ -1456,7 +1555,8 @@ let render_streaming_internal ?on_block ?on_diagram ?on_semantic ?on_unmapped ~p
                       table_row_positions ~columns:(List.length alignments) ~source_start:line.source_start line.source_text)) on_semantic in
                     let on_cell=Option.map (fun _ (cell : table_cell_source) ->
                       emit_run {joins_previous=false;semantic_text=cell.cell_text; origins=original_positions 0 cell.source_positions;
-                        visible_rows=[row_start+cell.rendered_row,[cell.visible_range]];
+                        visible_rows=List.map (fun fragment ->
+                          row_start+fragment.rendered_row, fragment.visible_ranges) cell.fragments;
                         reading=Source_order}) on_semantic in
                     emit_all (table_block ?source_rows ?on_cell palette ~width ~alignments ~header ~body);
                     walk None [] remaining

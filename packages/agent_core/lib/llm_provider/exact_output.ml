@@ -533,16 +533,19 @@ let flow_evidence_generation_dispatch (evidence : flow_evidence) =
 
 let receipt_http_status = Generation_receipt.http_status
 let receipt_provider_trace = Generation_receipt.provider_trace
+let receipt_responses_lifecycle = Generation_receipt.responses_lifecycle
 let provider_trace_fingerprint = Trace.fingerprint
 let receipt_plan_fingerprint = Generation_receipt.plan_fingerprint
 let receipt_request_body_sha256 = Generation_receipt.request_body_sha256
 let receipt_catalog_generation = Generation_receipt.catalog_generation
 let receipt_catalog_evidence = Generation_receipt.catalog_evidence
 let receipt_target_identity = Generation_receipt.target_identity
+let receipt_snapshot = Generation_receipt.snapshot
 let candidate_visit_count_to_int (Candidate_visit_count count) = count
 let generation_receipt_snapshot_phase = Generation_receipt.snapshot_phase
 let generation_receipt_snapshot_generation_dispatched = Generation_receipt.snapshot_generation_dispatched
 let generation_receipt_snapshot_http_status = Generation_receipt.snapshot_http_status
+let generation_receipt_snapshot_responses_lifecycle = Generation_receipt.snapshot_responses_lifecycle
 
 let generation_receipt_snapshot_dispatch_count =
   Generation_receipt.snapshot_dispatch_count

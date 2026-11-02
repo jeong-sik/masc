@@ -53,6 +53,7 @@ type raw_response_evidence =
   { raw_body : string
   ; raw_body_sha256 : string
   ; response_header_evidence : Http_client.response_header_evidence
+  ; responses_lifecycle : Backend_openai_responses.lifecycle_observation option
   }
 
 type normalized_outcome_with_evidence =

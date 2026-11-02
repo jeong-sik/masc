@@ -643,7 +643,18 @@ val receipt_phase : receipt -> effect_phase
 val receipt_dispatch_count : receipt -> int
 val receipt_http_status : receipt -> int option
 val receipt_provider_trace : receipt -> provider_trace option
+(** The Responses status/error-envelope observation produced while parsing this
+    receipt's own body. [None] means it was not captured; it can also describe
+    another codec, an incomplete body, or an unexpected parser failure. Receipt
+    publication can expose a terminal phase before the trace is published, so
+    [None] may also be a temporary observation. This does not establish that the
+    remote execution terminated. *)
+val receipt_responses_lifecycle
+  :  receipt
+  -> Backend_openai_responses.lifecycle_observation option
 val provider_trace_fingerprint : provider_trace -> string
+(** The existing v1 transport/body fingerprint does not directly encode the
+    separate lifecycle observation. *)
 val receipt_plan_fingerprint : receipt -> string
 val receipt_request_body_sha256 : receipt -> string
 val receipt_catalog_generation : receipt -> catalog_generation
@@ -652,6 +663,9 @@ val receipt_target_identity : receipt -> target_identity
 
 (** Immutable generation-receipt fact captured from one atomic state read. *)
 type generation_receipt_snapshot
+
+val receipt_snapshot : receipt -> generation_receipt_snapshot
+(** Capture phase, status and any published lifecycle observation together. *)
 
 val generation_receipt_snapshot_phase : generation_receipt_snapshot -> effect_phase
 val generation_receipt_snapshot_dispatch_count : generation_receipt_snapshot -> int
@@ -666,6 +680,12 @@ val generation_receipt_snapshot_http_status : generation_receipt_snapshot -> int
     occurred. A status does not prove that the body completed or that the
     provider's model turn has terminated. This in-memory snapshot alone is
     not a durable execution proof. *)
+
+val generation_receipt_snapshot_responses_lifecycle
+  :  generation_receipt_snapshot
+  -> Backend_openai_responses.lifecycle_observation option
+(** The same observation as {!receipt_responses_lifecycle}, copied with the
+    phase and status from the same immutable snapshot. *)
 
 val generation_receipt_snapshot_call_id : generation_receipt_snapshot -> call_id
 val generation_receipt_snapshot_plan_fingerprint : generation_receipt_snapshot -> string

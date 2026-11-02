@@ -34,6 +34,7 @@ val phase : t -> effect_phase
 val dispatch_count : t -> int
 val http_status : t -> int option
 val provider_trace : t -> provider_trace option
+val responses_lifecycle : t -> Backend_openai_responses.lifecycle_observation option
 val plan_fingerprint : t -> string
 val request_body_sha256 : t -> string
 val catalog_generation : t -> Exact_output_resolver.catalog_generation
@@ -48,6 +49,7 @@ val snapshot_phase : snapshot -> effect_phase
 val snapshot_dispatch_count : snapshot -> int
 val snapshot_generation_dispatched : snapshot -> bool
 val snapshot_http_status : snapshot -> int option
+val snapshot_responses_lifecycle : snapshot -> Backend_openai_responses.lifecycle_observation option
 val snapshot_call_id : snapshot -> call_id
 val snapshot_plan_fingerprint : snapshot -> string
 val snapshot_request_body_sha256 : snapshot -> string

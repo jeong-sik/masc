@@ -360,6 +360,67 @@ let test_non_eio_invalidation_runs_refresh_worker () =
       true !refreshed_while_running)
 ;;
 
+let test_approval_count_wakes_only_its_workspace () =
+  let module Waiting = Masc.Keeper_waiting_inventory_broadcast in
+  let base_path = Masc_test_deps.setup_test_workspace () in
+  let other_path = Filename.concat base_path "other-approval-workspace" in
+  let previous_state = Server_auth.For_testing.snapshot_server_state () in
+  Fun.protect
+    ~finally:(fun () ->
+      Waiting.install_health_change_observer (fun ~base_path:_ -> ());
+      reset ();
+      Server_auth.For_testing.restore_server_state previous_state;
+      Masc_test_deps.cleanup_test_workspace base_path)
+    (fun () ->
+      Unix.mkdir other_path 0o755;
+      Unix.mkdir (Filename.concat other_path Common.masc_dirname) 0o755;
+      let state = Masc.Mcp_server.For_testing.create_state ~base_path in
+      Server_auth.For_testing.restore_server_state (Some state);
+      Waiting.install_health_change_observer
+        Runtime.invalidate_full_health_snapshot_for_workspace;
+      reset ();
+      Waiting.changed ~base_path:other_path ~keeper_name:"other" ~source:Approval_count;
+      check bool "another workspace does not wake health" false
+        (Runtime.For_testing.take_full_health_wakeup_nonblocking ());
+      Waiting.changed ~base_path ~keeper_name:"current" ~source:Approval_detail;
+      check bool "approval detail alone does not change health counts" false
+        (Runtime.For_testing.take_full_health_wakeup_nonblocking ());
+      Waiting.changed ~base_path:(Filename.concat base_path Common.masc_dirname)
+        ~keeper_name:"current" ~source:Approval_count;
+      check bool "canonical matching workspace wakes health" true
+        (Runtime.For_testing.take_full_health_wakeup_nonblocking ());
+      let _, _, _, _, _, requested = Runtime.For_testing.full_health_refresh_worker_stats () in
+      check bool "matching approval count invalidates the snapshot" true requested)
+;;
+
+let test_approval_health_callback_preserves_scope_cancellation () =
+  let module Waiting = Masc.Keeper_waiting_inventory_broadcast in
+  let original_buffer = Masc.Sse.event_buffer_events_for_test () in
+  Fun.protect
+    ~finally:(fun () ->
+      Waiting.install_health_change_observer (fun ~base_path:_ -> ());
+      Masc.Sse.set_event_buffer_for_test original_buffer)
+    (fun () ->
+      Eio_main.run (fun _env ->
+        Waiting.install_health_change_observer (fun ~base_path:_ ->
+          raise (Eio.Cancel.Cancelled Exit));
+        let before = Masc.Sse.current_id () in
+        Waiting.changed ~base_path:"/tmp/approval-observer-cancel"
+          ~keeper_name:"current" ~source:Approval_count;
+        check bool "callback-only cancellation does not suppress the event" true
+          (Masc.Sse.current_id () > before);
+        let reason = Failure "cancelled caller" in
+        (match Eio.Cancel.sub (fun context ->
+           Waiting.install_health_change_observer (fun ~base_path:_ ->
+             Eio.Cancel.cancel context reason;
+             raise (Eio.Cancel.Cancelled Exit));
+           Waiting.changed ~base_path:"/tmp/approval-observer-cancel"
+             ~keeper_name:"current" ~source:Approval_count) with
+         | () -> fail "caller cancellation did not propagate"
+         | exception Eio.Cancel.Cancelled actual when actual == reason -> ()
+         | exception exn -> fail ("unexpected cancellation: " ^ Printexc.to_string exn))))
+;;
+
 let () =
   let _ = Sys.signal Sys.sigalrm (Sys.Signal_handle (fun _ ->
     prerr_endline "full health wakeup test watchdog expired";
@@ -380,5 +441,9 @@ let () =
             test_registry_membership_wakes_health
         ; test_case "owner metadata wakes fleet subscriber" `Quick
             test_owner_metadata_wakes_fleet_subscriber
+        ; test_case "approval count wakes only its workspace" `Quick
+            test_approval_count_wakes_only_its_workspace
+        ; test_case "approval health callback preserves caller cancellation" `Quick
+            test_approval_health_callback_preserves_scope_cancellation
         ]
       ])

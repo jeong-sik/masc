@@ -1,6 +1,7 @@
 (** Read-only queue outcomes for the sources selected by one exact Keeper turn.
     The manifest supplies the selection; the reaction ledger supplies terminal
-    receipts. No queue state, operation, Task or business result is changed. *)
+    receipts through the core's public observation API. No queue state,
+    operation, Task or business result is changed. *)
 
 val project :
   config:Workspace.config ->

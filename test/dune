@@ -38,7 +38,7 @@
 (test
  (name test_keeper_turn_source_outcomes)
  (modules test_keeper_turn_source_outcomes)
- (libraries masc alcotest yojson eio_main unix))
+ (libraries masc_test_deps))
 
 (test
  (name test_eio_process_capture_pipe_close)

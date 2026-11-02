@@ -130,7 +130,15 @@ val attached_tools_json : base_path:string -> keeper:string -> Yojson.Safe.t
     Keeper never attached to is listed as such rather than left out, because
     "not attached" and "attached with no tools" are different things to
     whoever is looking. Each readable row also carries [app_state], the same
-    object {!declarations_json} gives. *)
+    object {!declarations_json} gives, and a provider declared
+    [callback = "loopback"] carries its own [callback] object. *)
+
+val redirect_uri_for : Keeper_oauth_provider.t -> (string, string) result
+(** The redirect URI a login for this provider names: this server's callback
+    under its base URL, or for a provider declared [callback = "loopback"]
+    the RFC 8252 loopback form [http://127.0.0.1:<bound port>/...]. A server
+    bound to an address a browser cannot reach as 127.0.0.1 gets an [Error]
+    for the loopback form rather than a guess. *)
 
 val finish :
   clock:float Eio.Time.clock_ty Eio.Resource.t ->

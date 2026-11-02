@@ -25,6 +25,10 @@ type credential_source =
   | Oauth_exchange
   | Github_cli of { hostname : string }
 
+type callback =
+  | Server_callback
+  | Loopback_callback
+
 type t = {
   id : string;
   client_group : string;
@@ -35,6 +39,7 @@ type t = {
   refresh_token_file : string;
   renew_before_sec : int;
   credential_source : credential_source;
+  callback : callback;
   authorize_params : (string * string) list;
 }
 
@@ -159,6 +164,15 @@ let load ~file_name ~contents =
     let* label = string_field pairs "label" in
     let* mcp_url = https_field pairs "mcp_url" in
     let* authorize_params = string_table_field pairs "authorize_params" in
+    (* Absent is this server's own callback; any spelling other than
+       "loopback" is an error, for the same reason as credential_source. *)
+    let* callback =
+      let* declared = optional_string_field pairs "callback" in
+      match declared with
+      | None -> Ok Server_callback
+      | Some "loopback" -> Ok Loopback_callback
+      | Some _ -> Error (Wrong_type { field = "callback"; expected = "\"loopback\" or absent" })
+    in
     let* access_token_env = string_field pairs "access_token_env" in
     let* expires_at_env = string_field pairs "expires_at_env" in
     let* refresh_token_file = string_field pairs "refresh_token_file" in
@@ -193,6 +207,7 @@ let load ~file_name ~contents =
         ; refresh_token_file
         ; renew_before_sec
         ; credential_source
+        ; callback
         ; authorize_params
         }
   | Ok

@@ -61,6 +61,15 @@ let lines ~cols (view : view) =
         | Masc_tui_identity_model.Identity_unreadable _ -> None)
       providers
   in
+  let callback_of id =
+    List.find_map
+      (function
+        | Masc_tui_identity_model.Identity_declared { idp_id; idp_callback; _ }
+          when String.equal idp_id id -> idp_callback
+        | Masc_tui_identity_model.Identity_declared _
+        | Masc_tui_identity_model.Identity_unreadable _ -> None)
+      providers
+  in
   let numbered =
     List.mapi
       (fun index (id, label) ->
@@ -110,7 +119,18 @@ let lines ~cols (view : view) =
              Theme.bad () ^ "  · app unreadable" ^ Ansi.reset
            | Some Masc_tui_identity_model.App_none | None -> ""
          in
-         Printf.sprintf "%s %2d  %s %s%s%s" marker (index + 1) shown row_state app elsewhere)
+         (* A service that takes only a loopback redirect sends the browser
+            back to 127.0.0.1, so the browser has to run on this machine. *)
+         let own_callback =
+           match callback_of id with
+           | Some (Masc_tui_identity_model.Callback_url _) ->
+             Ansi.dim ^ "  · loopback callback" ^ Ansi.reset
+           | Some (Masc_tui_identity_model.Callback_unknown _) ->
+             Theme.bad () ^ "  · loopback callback unavailable" ^ Ansi.reset
+           | None -> ""
+         in
+         Printf.sprintf "%s %2d  %s %s%s%s%s" marker (index + 1) shown row_state app
+           own_callback elsewhere)
       connectable
   in
   let attached_tool_lines =

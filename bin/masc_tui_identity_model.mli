@@ -36,6 +36,9 @@ type identity_provider =
       ; idp_app : identity_app option
         (** Whether an app the operator made is on file for this service.
             [None] when the server did not say. *)
+      ; idp_callback : identity_callback option
+        (** The service's own callback when it is not the server's: a
+            service that accepts only an RFC 8252 loopback redirect. *)
       }
   | Identity_unreadable of
       { idp_id : string

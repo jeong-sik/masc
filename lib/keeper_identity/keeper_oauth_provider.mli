@@ -35,6 +35,15 @@ type credential_source =
           GitHub is the case this was written for. The credential's
           lifecycle belongs to [gh], so masc never renews it. *)
 
+type callback =
+  | Server_callback
+      (** The provider sends the browser back to this server's own base URL
+          ([MASC_HTTP_BASE_URL], or the address it bound). *)
+  | Loopback_callback
+      (** The provider accepts only an RFC 8252 loopback redirect URI,
+          [http://127.0.0.1:<port>/...], and refuses one on a public host.
+          Declared as [callback = "loopback"]; measured per provider. *)
+
 type t = private {
   id : string;
       (** One path component, checked when the declaration is read. The
@@ -82,6 +91,9 @@ type t = private {
           yet and a provider whose token lives elsewhere are different
           states, and reading the second as the first is how a working
           credential gets asked for again. *)
+  callback : callback;
+      (** Where this provider will send the browser back to. Absent in the
+          declaration means {!Server_callback}. *)
   authorize_params : (string * string) list;
       (** Parameters this server wants on the authorize call beyond what the
           specs define, in declaration order.

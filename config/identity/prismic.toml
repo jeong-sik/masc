@@ -13,6 +13,15 @@ id = "prismic"
 label = "Prismic"
 mcp_url = "https://mcp.prismic.io/mcp"
 
+# Measured 2026-11-02: registration refuses a redirect URI on a public https
+# host and accepts the RFC 8252 loopback form,
+# http://127.0.0.1:<port>/api/v1/keepers/oauth/callback. With the loopback
+# client the authorize step goes on to consent, while an unregistered
+# loopback URI is refused there. So a login here names the loopback
+# callback, and the browser that consents has to reach this server on
+# 127.0.0.1.
+callback = "loopback"
+
 access_token_env = "PRISMIC_ACCESS_TOKEN"
 expires_at_env = "PRISMIC_EXPIRES_AT"
 refresh_token_file = "/home/keeper/.prismic/refresh_token"

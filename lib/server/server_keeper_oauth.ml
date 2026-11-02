@@ -46,13 +46,55 @@ let redirect_uri () =
   | Ok base_url -> Ok (base_url ^ callback_path)
 ;;
 
+(* RFC 8252 7.3: a provider that accepts only native-app redirects takes
+   http://127.0.0.1:<port>/... and refuses a public host. The browser that
+   consents has to reach this server there, which holds when it bound a
+   loopback address or every interface. Bound anywhere else, 127.0.0.1 is
+   not this server, and saying so beats a callback that lands nowhere. *)
+let loopback_redirect_uri () =
+  let host = Env_config_core.masc_host () in
+  let port = Env_config_core.masc_http_port () in
+  let literal =
+    if Masc_network_defaults.is_unspecified_host host
+    then Some Masc_network_defaults.masc_http_loopback_peer
+    else if Masc_network_defaults.is_loopback_host host
+    then Some (if String.contains host ':' then "[" ^ host ^ "]" else host)
+    else None
+  in
+  match literal with
+  | Some literal -> Ok (Printf.sprintf "http://%s:%s%s" literal port callback_path)
+  | None ->
+    Error
+      (Printf.sprintf
+         "this provider accepts only a loopback callback (RFC 8252), and this \
+          server listens on %s, which a browser cannot reach as 127.0.0.1"
+         host)
+;;
+
+let redirect_uri_for (provider : Provider.t) =
+  match provider.Provider.callback with
+  | Provider.Server_callback -> redirect_uri ()
+  | Provider.Loopback_callback -> loopback_redirect_uri ()
+;;
+
+let callback_result_json = function
+  | Ok url -> `Assoc [ "url", `String url ]
+  | Error problem -> `Assoc [ "problem", `String problem ]
+;;
+
 (* The callback a login started now would name, for a screen to show. An
    operator who makes their own app has to register exactly this URL, and an
    operator who moved the server wants to see what it answers at. *)
-let callback_json () =
-  match redirect_uri () with
-  | Ok url -> `Assoc [ "url", `String url ]
-  | Error problem -> `Assoc [ "problem", `String problem ]
+let callback_json () = callback_result_json (redirect_uri ())
+;;
+
+(* A row names its own callback only when it is not the server's: the
+   loopback providers. *)
+let row_callback_fields (provider : Provider.t) =
+  match provider.Provider.callback with
+  | Provider.Server_callback -> []
+  | Provider.Loopback_callback ->
+    [ "callback", callback_result_json (loopback_redirect_uri ()) ]
 ;;
 
 let provider_of_id provider_id =
@@ -182,7 +224,7 @@ let start ~clock ~(config : Workspace.config) ~keeper ~provider_id ~now =
                     keeper (List.length catalog.Keeper_identity_tools.tools)) )
            ]))
   | Provider.Oauth_exchange ->
-    let* redirect_uri = redirect_uri () in
+    let* redirect_uri = redirect_uri_for provider in
     let* app = Store.load_app ~identity_dir:(identity_dir ~base_path) ~provider in
     let* started =
       Result.map_error Session.start_error_to_string
@@ -255,18 +297,20 @@ let attached_tools_json ~base_path ~keeper =
               `Assoc [ "provider", `String id; "problem", `String problem ]
             | Ok None ->
               `Assoc
-                [ "provider", `String id
-                ; "provider_label", `String provider.Provider.label
-                ; "attached", `Bool false
-                ; "app_state", app_state ~base_path ~provider |> app_state_to_json
-                ; ( "also_on"
+                ([ "provider", `String id
+                 ; "provider_label", `String provider.Provider.label
+                 ; "attached", `Bool false
+                 ; "app_state", app_state ~base_path ~provider |> app_state_to_json
+                 ]
+                 @ row_callback_fields provider
+                 @ [ ( "also_on"
                   , `List
                       (List.map
                          (fun name -> `String name)
                          (Keeper_identity_tools.keepers_with ~base_path
                             ~provider_id:provider.Provider.id
                             ~excluding:keeper)) )
-                ]
+                   ])
             | Ok (Some catalog) ->
               `Assoc
                 ([ "provider", `String id
@@ -274,6 +318,7 @@ let attached_tools_json ~base_path ~keeper =
                  ; "attached", `Bool true
                  ; "app_state", app_state ~base_path ~provider |> app_state_to_json
                  ]
+                 @ row_callback_fields provider
                  @ switch_fields provider.Provider.id
                  @ [ ( "also_on"
                      , `List

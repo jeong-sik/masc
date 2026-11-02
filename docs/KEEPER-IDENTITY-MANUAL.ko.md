@@ -209,6 +209,7 @@ Keeper 상세 화면의 Identity 탭에서 `D` 를 두 번 누릅니다. 첫 번
 | `renew_before_sec` | 만료 몇 초 전에 갱신할지 |
 | `client_group` | 앱을 나눠 쓸 이름. 안 적으면 `id` |
 | `[authorize_params]` | 그 서비스가 추가로 요구하는 항목 |
+| `callback` | RFC 8252 redirect(`http://127.0.0.1:<port>/api/v1/keepers/oauth/callback`)만 받는 서비스면 `"loopback"`. 없으면 이 서버의 base URL 을 씁니다. 적기 전에 재 보세요. 등록이나 authorize 단계가 공개 callback 은 거절하고 loopback 은 받아야 합니다. 동의하는 브라우저는 서버와 같은 기계에서 떠야 합니다. |
 
 여기 적지 않는 것: authorize·token·등록 주소, 권한 목록, 비밀키가 필요한지 여부.
 전부 서비스가 스스로 내놓는 문서에서 가져오니 이 파일에서 낡을 수가 없습니다.

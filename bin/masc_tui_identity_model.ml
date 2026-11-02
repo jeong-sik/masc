@@ -39,6 +39,9 @@ type identity_provider =
       ; idp_app : identity_app option
         (** Whether an app the operator made is on file for this service.
             [None] when the server did not say. *)
+      ; idp_callback : identity_callback option
+        (** The service's own callback when it is not the server's: a
+            service that accepts only an RFC 8252 loopback redirect. *)
       }
   | Identity_unreadable of
       { idp_id : string
@@ -541,17 +544,16 @@ let decode_identity_providers (json : Yojson.Safe.t)
         | Some _ | None -> None)
       | _ -> None
     in
-    (* The server's own callback, or why it has none. Anything else is not
-       read as either. *)
+    (* A callback object, or why there is none. Anything else is not read as
+       either. *)
+    let callback_of = function
+      | Some (`Assoc [ ("url", `String url) ]) -> Some (Callback_url url)
+      | Some (`Assoc [ ("problem", `String why) ]) -> Some (Callback_unknown why)
+      | Some _ | None -> None
+    in
     let callback =
       match json with
-      | `Assoc fields -> (
-        match List.assoc_opt "callback" fields with
-        | Some (`Assoc [ ("url", `String url) ]) ->
-          Some (Callback_url url)
-        | Some (`Assoc [ ("problem", `String why) ]) ->
-          Some (Callback_unknown why)
-        | Some _ | None -> None)
+      | `Assoc fields -> callback_of (List.assoc_opt "callback" fields)
       | _ -> None
     in
     (match rows with
@@ -616,9 +618,10 @@ let decode_identity_providers (json : Yojson.Safe.t)
                     | Some _ | None -> None)
                   | Some _ | None -> None
                 in
+                let idp_callback = callback_of (field "callback") in
                 Some
                   (Identity_declared
                      { idp_id; idp_label; idp_tools; idp_also_on
-                     ; idp_enabled; idp_switch_problem; idp_app })
+                     ; idp_enabled; idp_switch_problem; idp_app; idp_callback })
               | None, _ -> None)
             rows, callback))

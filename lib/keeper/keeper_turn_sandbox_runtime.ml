@@ -3011,9 +3011,10 @@ let remove_keeper_volumes_by_name
      | Some Keeper_microvm_backend.Apple_container ->
        (* Work and build names contain the Keeper name but not its workspace.
           The marker records confirmed claims, but a legacy or adopted owner
-          may be unrecorded and a paused owner may have no container. The release
+          may be unrecorded and a paused owner may have no container, so the
+          release keeps the volumes instead of deleting them. The release
           helper runs on the Keeper's own sandbox image; an unresolvable image
-          prevents this call from attempting deletion. *)
+          prevents this call from releasing the claim. *)
        (match sandbox_image with
         | None ->
           Error
@@ -3038,7 +3039,6 @@ let remove_keeper_volumes_by_name
                   ~image
                   ~claimant
               with
-              | Keeper_sandbox_microvm.Removed -> Ok ()
               | Keeper_sandbox_microvm.Kept_for_claimants claimants ->
                 Log.Keeper.warn ~keeper_name
                   "keeper removed; its Apple volumes are kept: %d other workspace(s) \

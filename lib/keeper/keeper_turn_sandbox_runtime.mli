@@ -498,13 +498,12 @@ val remove_keeper_volumes_by_name :
 
     Apple volume names are shared by same-named Keepers in different
     workspaces. {!Keeper_sandbox_microvm.release_apple_work_volume_claim}
-    releases [base_path]'s recorded claim and attempts deletion when it was
-    the last recorded claim and no owner container is observed. A legacy or
-    adopted Keeper may be unrecorded, and a paused Keeper may have no
-    container, so these observations do not prove exclusive ownership.
-    A missing or unreadable marker, failed owner listing, or unavailable
-    [sandbox_image] prevents deletion in that call. A failed removal may have
-    deleted either volume and is reported as unverified.
+    releases [base_path]'s recorded claim and always keeps the volumes: a
+    legacy or adopted Keeper may be unrecorded, and a paused Keeper may
+    have no container, so the last recorded claim plus an empty owner
+    listing does not prove exclusive ownership. An unverified release --
+    a missing or unreadable marker, a failed owner listing, or an
+    unavailable [sandbox_image] -- is [Error] naming what was kept.
     Docker and remote SSH keepers own no volume.
     Microsandbox and nerdctl create the work volume as a host directory but
     have no established removal spelling, so they return [Error] naming the

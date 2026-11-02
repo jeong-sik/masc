@@ -2504,37 +2504,27 @@ let add_apple_work_volume_claim ~run ~timeout_sec ~keeper_name ~volume_name ~ima
 ;;
 
 type apple_volume_claim_release =
-  | Removed
   | Kept_for_claimants of string list
   | Kept_for_containers of string list
   | Skipped_unverified of string
 
-(* Release one workspace's claim; deletion is attempted after the last
-   recorded claim is released and no owner container is observed. Those
-   observations do not exclude an unrecorded owner. The release helper runs
-   even when owner containers are present or the owner listing fails. A dissolved
-   workspace should release its claim: dissolution is one-shot, and a
-   workspace that never comes back would keep the marker naming it forever.
-   A helper failure does not prove that the release took effect.
-   Removing the claim does not itself delete a volume; on an unreadable
-   listing this call does not attempt deletion. One helper reads the marker,
-   filters our claim out and
-   rewrites it: the read and the write are one container, so no other helper
-   can land a claim between them. Deletion needs both our claim being the
-   last one and a readable owner listing with no owner container. The helper
-   removes the marker before the deletion attempts. Other
-   claimants, owner containers, a legacy volume with no marker, an
-   unreadable marker, or a claims release helper failure prevent this call
-   from attempting deletion; the outcome reports the observation.
-
-   Residual window, documented rather than leased: after the release and/or
-   owner listing and before deletion, another workspace can boot the
-   same-named keeper and claim. The shared helper name serializes claim
-   writes against each other, the delete's settling listing reports a
-   volume that survived, and whether the runtime refuses to delete a
-   volume a guest holds is unmeasured. A paused owner may have no container,
-   and an unrecorded owner is absent from the marker; these checks do not
-   prove exclusive ownership. *)
+(* Release one workspace's claim and always keep the volumes. The last
+   recorded claim plus an empty owner listing cannot prove exclusive
+   ownership: a legacy, adopted, or paused-unrecorded owner in another
+   workspace is absent from both the marker and the container listing, and
+   no host-side enumeration can complete the owner set, so deletion on
+   those signals could destroy another keeper's resume data. A concurrent
+   boot between the listing and a deletion is likewise unfenced. This call
+   therefore never deletes; it only releases the caller's claim. The
+   release helper runs even when owner containers are present or the owner
+   listing fails. A dissolved workspace should release its claim:
+   dissolution is one-shot, and a workspace that never comes back would
+   keep the marker naming it forever. A helper failure does not prove that
+   the release took effect. One helper reads the marker, filters our claim
+   out and rewrites it: the read and the write are one container, so no
+   other helper can land a claim between them. When ours was the last
+   recorded claim the helper removes the marker; the volumes stay, and the
+   outcome reports the observation. *)
 let release_apple_work_volume_claim ~run ~timeout_sec ~keeper_name ~volume_name ~image ~claimant
   : apple_volume_claim_release
   =
@@ -2609,9 +2599,12 @@ let release_apple_work_volume_claim ~run ~timeout_sec ~keeper_name ~volume_name 
        | Unix.WEXITED 0, Released_last_claim ->
          (match owners with
           | [] ->
-            (match remove_apple_keeper_volumes ~run ~timeout_sec ~keeper_name with
-             | Ok () -> Removed
-             | Error detail -> skipped ("microvm_volume_removal_unconfirmed: " ^ detail))
+            skipped
+              "microvm_volume_ownership_unprovable: the last recorded claim was \
+               released and no owner container was observed, but a legacy, \
+               adopted, or paused-unrecorded owner in another workspace cannot \
+               be excluded and a concurrent boot is not fenced; the work and \
+               build volumes are kept"
           | _ :: _ -> Kept_for_containers owners)
        | Unix.WEXITED 0, Report_unrecognized word ->
          skipped

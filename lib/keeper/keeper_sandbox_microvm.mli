@@ -777,7 +777,6 @@ val add_apple_work_volume_claim :
     [Ok] requires the helper's exact [added] or [present] report. *)
 
 type apple_volume_claim_release =
-  | Removed
   | Kept_for_claimants of string list
   | Kept_for_containers of string list
         (** The claim was released and the volumes kept: a live or stopped
@@ -792,20 +791,20 @@ val release_apple_work_volume_claim :
   -> image:string
   -> claimant:string
   -> apple_volume_claim_release
-(** Release [claimant]'s claim, and delete both volumes only when that claim
-    was the last one and a readable owner listing shows no container
-    referencing the keeper. One helper reads the marker, filters the claim
-    out and rewrites it, so no other helper can land a claim between the
-    read and the write; the release helper runs even when owner containers
-    are present and even when the owner listing itself fails. A failed or
-    interrupted helper does not prove whether the claim was released. An
-    unreadable listing prevents this call from attempting deletion and returns
-    [Skipped_unverified]. When ours was the last claim the helper removes the
-    marker before the owner check and deletion attempts. If owner containers
-    are present, this call keeps the volumes with [Kept_for_containers].
-    [Kept_for_claimants] carries the claimants that remain. A removal failure
-    is [Skipped_unverified]: either volume may already have been deleted, so
-    that outcome does not prove both volumes remain. *)
+(** Release [claimant]'s claim; the volumes are always kept. The last
+    recorded claim plus an empty owner listing cannot prove exclusive
+    ownership -- a legacy, adopted, or paused-unrecorded owner in another
+    workspace is absent from both observations -- so this call never
+    deletes. One helper reads the marker, filters the claim out and
+    rewrites it, so no other helper can land a claim between the read and
+    the write; the release helper runs even when owner containers are
+    present and even when the owner listing itself fails. A failed or
+    interrupted helper does not prove whether the claim was released. When
+    ours was the last recorded claim the helper removes the marker and
+    this call returns [Skipped_unverified] naming the unprovable
+    ownership. If owner containers are present, this call keeps the
+    volumes with [Kept_for_containers]. [Kept_for_claimants] carries the
+    claimants that remain. *)
 
 val recreate_apple_build_volume
   :  volume_name:string

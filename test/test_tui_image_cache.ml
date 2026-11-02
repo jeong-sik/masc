@@ -235,6 +235,18 @@ let test_runner_failure_stops_converter_fallback () =
     check string "runner failure leaves the unowned output path alone" "partial"
       (read_file (read_file (Filename.concat cache_dir "output-path"))))
 
+let test_signalled_converter_stops_fallback () =
+  with_cache (fun cache_dir _ ->
+    let source = Filename.concat cache_dir "original.bmp" in
+    let calls = ref 0 in
+    write_file source bmp_header;
+    let run _ = incr calls; Unix.WSIGNALED Sys.sigkill in
+    let result = Cache.convert_to_png ~run ~cache_dir source in
+    check bool "a terminated converter preserves its status" true
+      (result = Error [Cache.Sips, Cache.Decoder_signaled {signal=Sys.sigkill}]);
+    check int "a fallback cannot reuse the terminated converter's output" 1 !calls;
+    check string "source remains intact" bmp_header (read_file source))
+
 exception Runner_interrupted
 
 let test_unexpected_runner_exception_preserves_shared_output () =
@@ -360,7 +372,7 @@ let test_remote_capability_changes () =
   check bool "confirmed non-pixel terminal prepares cells" true
     (Cache.decide_remote ~graphics:(Some false) ~colour:true (Cache.Remote_png png) = Cache.Prepare_remote_cells png);
   check bool "prepared cells are used on a colour terminal" true
-    (Cache.decide_remote ~graphics:(Some false) ~colour:true frame = Cache.Draw_remote_cells rgba);
+    (Cache.decide_remote ~graphics:(Some false) ~colour:true frame = Cache.Draw_remote_cells {png;cells=rgba});
   check bool "late native support uses the original PNG even after cell failure" true
     (Cache.decide_remote ~graphics:(Some true) ~colour:true
        (Cache.Remote_cells {png;cells=Error "decoder failed"}) = Cache.Draw_remote_png png);
@@ -369,12 +381,22 @@ let test_remote_capability_changes () =
   check bool "no pixel or colour capability falls back" true
     (match Cache.decide_remote ~graphics:(Some false) ~colour:false frame with
      | Cache.Open_remote_page _ -> true
-     | Cache.Fetch_remote | Cache.Prepare_remote_cells _ | Cache.Draw_remote_png _ | Cache.Draw_remote_cells _ -> false);
+     | Cache.Fetch_remote | Cache.Prepare_remote_cells _ | Cache.Draw_remote_png _
+     | Cache.Draw_remote_cells _ -> false);
   check bool "failed cell decoding falls back" true
     (match Cache.decide_remote ~graphics:(Some false) ~colour:true
        (Cache.Remote_cells {png;cells=Error "decoder failed"}) with
      | Cache.Open_remote_page _ -> true
-     | Cache.Fetch_remote | Cache.Prepare_remote_cells _ | Cache.Draw_remote_png _ | Cache.Draw_remote_cells _ -> false)
+     | Cache.Fetch_remote | Cache.Prepare_remote_cells _ | Cache.Draw_remote_png _
+     | Cache.Draw_remote_cells _ -> false);
+  check bool "busy conversion can use PNG when native support arrives" true
+    (Cache.decide_remote ~graphics:(Some true) ~colour:true (Cache.Remote_busy (Some png))
+     = Cache.Draw_remote_png png);
+  check bool "busy colour conversion falls back to the browser" true
+    (match Cache.decide_remote ~graphics:(Some false) ~colour:true (Cache.Remote_busy (Some png)) with
+     | Cache.Open_remote_page _ -> true
+     | Cache.Fetch_remote | Cache.Prepare_remote_cells _ | Cache.Draw_remote_png _
+     | Cache.Draw_remote_cells _ -> false)
 
 let test_mosaic_failure_retains_input_and_can_recover () =
   List.iter (fun code -> with_cache (fun cache_dir run ->
@@ -867,6 +889,8 @@ let () =
             test_decoder_reports_runner_failure_without_removing_shared_output
         ; test_case "runner failure stops converter fallback" `Quick
             test_runner_failure_stops_converter_fallback
+        ; test_case "signalled converter stops fallback" `Quick
+            test_signalled_converter_stops_fallback
         ; test_case "unexpected runner exceptions preserve shared output" `Quick
             test_unexpected_runner_exception_preserves_shared_output
         ; test_case "local refusal and explicit recovery" `Quick test_local_file_failure_and_recovery

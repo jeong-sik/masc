@@ -11713,31 +11713,67 @@ let prepare_remote_image_bytes url =
     ~run:(Masc_tui_image_cache.run_bounded ~deadline_seconds:image_process_deadline_seconds)
     ~cache_dir:(ensure_img_cache_dir ()) url
 
+let remote_fetch_worker = Masc_tui_board_preview_work.create ()
+let remote_cell_worker = Masc_tui_board_preview_work.create ()
+
+let withdraw_remote_image_reservations () =
+  ignore (Masc_tui_board_preview_work.withdraw_pending remote_fetch_worker);
+  ignore (Masc_tui_board_preview_work.withdraw_pending remote_cell_worker)
+
 let launch_remote_image_result ~mailbox ~request ~title ~caption ~page_url ~image_url work =
   Masc_tui_workspace_result.launch_session ~results:mailbox.workspace_results
     ~boundary_error:Fun.id
     ~deliver:(fun result -> Image_render_ready {request;title;caption;page_url;image_url;result})
     work
 
-let remote_image_fetch image_url () =
-  Eio_guard.run_in_systhread ~label:"tui-remote-image-bytes" (fun () ->
-    Result.map (fun png -> Masc_tui_image_cache.Remote_png png)
-      (prepare_remote_image_bytes image_url))
+let launch_remote_image_worker state ~mailbox ~request ~title ~caption ~page_url ~image_url
+    ~worker ~label ~busy ~on_exception work =
+  launch_remote_image_result ~mailbox ~request ~title ~caption ~page_url ~image_url (fun () ->
+    let current = Option.exists (fun pending -> pending == request) state.sent_image_read
+      && request.sir_generation=state.image_request_generation && request.sir_view=state.view
+      && not state.msx_open && image_request_keeper_is_current state request
+      && image_reading_is_current state request in
+    if not current then Ok (Masc_tui_image_cache.Remote_busy busy)
+    else match Masc_tui_board_preview_work.reserve worker with
+      | None -> Ok (Masc_tui_image_cache.Remote_busy busy)
+      | Some admission ->
+          (match Fun.protect
+            ~finally:(fun () -> Masc_tui_board_preview_work.withdraw worker admission)
+            (fun () -> Eio_guard.run_in_systhread ~label (fun () ->
+              match Masc_tui_board_preview_work.run_reserved worker admission work with
+              | Some result -> result
+              | None -> Ok (Masc_tui_image_cache.Remote_busy busy))) with
+           | result -> result
+           | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+           | exception exn -> on_exception exn))
 
-let remote_image_cells ~display png () =
-  let cells = match display with
-    | Error detail -> Error detail
-    | Ok display ->
-        Eio_guard.run_in_systhread ~label:"tui-remote-image-cells" (fun () ->
-          Masc_tui_image_cache.prepare_presentation
+let launch_remote_image_fetch state ~mailbox ~request ~title ~caption ~page_url ~image_url =
+  launch_remote_image_worker state ~mailbox ~request ~title ~caption ~page_url ~image_url
+    ~worker:remote_fetch_worker ~label:"tui-remote-image-bytes" ~busy:None
+    ~on_exception:(fun exn -> Error (Printexc.to_string exn)) (fun () ->
+      Result.map (fun png -> Masc_tui_image_cache.Remote_png png) (prepare_remote_image_bytes image_url))
+
+let launch_remote_image_cells state ~mailbox ~request ~title ~caption ~page_url ~image_url ~display png =
+  match display with
+  | Error detail ->
+      launch_remote_image_result ~mailbox ~request ~title ~caption ~page_url ~image_url
+        (fun () -> Ok (Masc_tui_image_cache.Remote_cells {png;cells=Error detail}))
+  | Ok display ->
+      launch_remote_image_worker state ~mailbox ~request ~title ~caption ~page_url ~image_url
+        ~worker:remote_cell_worker ~label:"tui-remote-image-cells" ~busy:(Some png)
+        ~on_exception:(fun exn ->
+          Ok (Masc_tui_image_cache.Remote_cells {png;cells=Error (Printexc.to_string exn)}))
+        (fun () ->
+          let cells = Masc_tui_image_cache.prepare_presentation
             ~run:(Masc_tui_image_cache.run_bounded ~deadline_seconds:image_process_deadline_seconds)
-            ~cache_dir:(ensure_img_cache_dir ()) display png) in
-  Ok (Masc_tui_image_cache.Remote_cells {png;cells})
+            ~cache_dir:(ensure_img_cache_dir ()) display png in
+          Ok (Masc_tui_image_cache.Remote_cells {png;cells}))
 
 (* A remote preview retains one input-cancellable owner across download and,
    when needed, colour-cell conversion.  Each blocking stage runs off the
    render loop; the completion chooses with the latest terminal capability. *)
-let launch_image_render state ~mailbox ~notice ~title ~caption ~page_url image_url =
+let launch_image_render state ~mailbox ~notice:_ ~title ~caption ~page_url image_url =
+  withdraw_remote_image_reservations ();
   state.image_request_generation <- state.image_request_generation + 1;
   let view = state.view in
   let request = {sir_generation=state.image_request_generation; sir_view=view;
@@ -11746,12 +11782,11 @@ let launch_image_render state ~mailbox ~notice ~title ~caption ~page_url image_u
     sir_resource=None; sir_skill_reference=None;
     sir_purpose=Open_image} in
   state.sent_image_read <- Some request;
-  let unavailable = !terminal_draws_images = Some false && not (character_images_available ()) in
-  if not unavailable then
-    notice ~kind:Notice_reply (Printf.sprintf "Loading image: %s" image_url);
+  (* Classify already-buffered input and signals before starting a download.
+     This first completion has no external side effects and goes through the
+     same input barrier as the later download and conversion completions. *)
   launch_remote_image_result ~mailbox ~request ~title ~caption ~page_url ~image_url
-    (if unavailable then (fun () -> Ok Masc_tui_image_cache.Remote_unfetched)
-     else remote_image_fetch image_url)
+    (fun () -> Ok Masc_tui_image_cache.Remote_unfetched)
 
 let image_request_is_active state entry =
   let matches request =
@@ -11829,11 +11864,15 @@ let board_preview_worker = Masc_tui_board_preview_work.create ()
 let vector_inspection_worker = Masc_tui_board_preview_work.create ()
 
 let () = at_exit (fun () ->
+  Masc_tui_board_preview_work.stop remote_fetch_worker;
+  Masc_tui_board_preview_work.stop remote_cell_worker;
   Masc_tui_board_preview_work.stop board_preview_worker;
   Masc_tui_board_preview_work.stop vector_inspection_worker;
   Masc_tui_board_preview_work.stop resource_diagram_worker;
   Masc_tui_board_preview_work.stop board_image_prepare_worker;
   Masc_tui_image_cache.stop_subprocesses ();
+  Masc_tui_board_preview_work.await_stopped remote_fetch_worker;
+  Masc_tui_board_preview_work.await_stopped remote_cell_worker;
   Masc_tui_board_preview_work.await_stopped board_preview_worker;
   Masc_tui_board_preview_work.await_stopped vector_inspection_worker;
   Masc_tui_board_preview_work.await_stopped resource_diagram_worker;
@@ -11878,8 +11917,19 @@ let withdraw_pending_image_open state =
   match Masc_tui_types.withdraw_image_open state with
   | Some {sir_owner=Board_image_read (_,_,job);_} ->
       Masc_tui_workspace_job.cancel_observation state ~key:job
-  | Some {sir_owner=(Local_file_image_read _ | Remote_url_image_read _
+  | Some {sir_owner=Remote_url_image_read _;_} -> withdraw_remote_image_reservations ()
+  | Some {sir_owner=(Local_file_image_read _
                     | Draft_image_read _ | Peer_image_read _);_}
+  | None -> ()
+
+(* Retire the owner as well as its unstarted physical reservations before an
+   asynchronous navigation. Returning to the old view must not re-admit its
+   delayed result. *)
+let retire_remote_image_for_navigation state =
+  match state.sent_image_read with
+  | Some {sir_owner=Remote_url_image_read _;_} -> withdraw_pending_image_open state
+  | Some {sir_owner=(Local_file_image_read _ | Draft_image_read _
+                    | Peer_image_read _ | Board_image_read _);_}
   | None -> ()
 
 (* Settle the exact interrupted preview without replacing a newer selection. *)
@@ -11887,6 +11937,9 @@ let settle_retired_sent_image state =
   match state.sent_image_read with
   | Some pending when not (image_reading_is_current state pending) ->
     if Option.is_none (retired_skill_image_notice state) then begin
+      (match pending.sir_owner with
+       | Remote_url_image_read _ -> withdraw_remote_image_reservations ()
+       | Local_file_image_read _ | Draft_image_read _ | Peer_image_read _ | Board_image_read _ -> ());
       cancel_board_image_read state;
       state.sent_image_read <- None;
       if not state.msx_open && pending.sir_generation = state.image_request_generation
@@ -11931,6 +11984,7 @@ let board_image_source_matches subject source =
            | Local_file _ | Draft _ | Retained _ | Generated _ -> false)
 
 let open_preview_image ?skill_reference ?board_subject state ~mailbox ~notice ~name source =
+  withdraw_remote_image_reservations ();
   cancel_board_image_read state;
   state.image_request_generation <- state.image_request_generation + 1;
   state.sent_image_read <- None;
@@ -12465,6 +12519,7 @@ let withdraw_pending_music_editor state =
    its own layer, so clearing the screen is not enough to remove one. *)
 let close_image state =
   let cell_was_open = Option.is_some state.image_cell_view in
+  withdraw_remote_image_reservations ();
   state.sent_image_read <- None;
   browser_pointer_press := None;
   browser_image_region := None;
@@ -14149,7 +14204,8 @@ let apply_remote_keeper_rows state =
             k_paused = false; k_identity = Error reason; k_activity = None }) errors,
         Some (String.concat "; " (List.map (fun (name, reason) -> name ^ ": " ^ reason) errors))
     in
-    replace_keeper_rows ~preserve_on_error:false state
+    replace_keeper_rows ~before_view_change:(fun () -> retire_remote_image_for_navigation state)
+      ~preserve_on_error:false state
       ~keepers ~error;
     clear_keeper_logs state
 
@@ -14894,6 +14950,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.lane_addons <- None;
   state.lane_addons_cached <- Masc_tui_lane_addons.initial;
   state.lane_nested_read_resume <- None;
+  withdraw_remote_image_reservations ();
   state.sent_image_read <- None;
   state.msg_copy_pending <- None;
   state.chat_command_reads <- [];
@@ -16818,6 +16875,7 @@ let resolve_opening_chat state ~base_path ~mailbox =
               ("Could not open chat with " ^ keeper_name
                ^ " (Keeper not found). Showing Dashboard.")
           else begin
+            retire_remote_image_for_navigation state;
             open_message_for_keeper ~remember_home_chat:false
               ~return_to:Keeper_chat_return_list state keeper_name
               ~drain_queue:(fun () -> drain_queued_message state ~base_path ~mailbox);
@@ -17047,6 +17105,7 @@ let resume_task_followups state ~mailbox ~refresh_inflight
                 that editor (which would retire its recalled draft). *)
              if task_handoff_may_focus state ~keeper editor then begin
                withdraw_resource_diagram_pending state;
+               retire_remote_image_for_navigation state;
                close_key_modals state;
                state.palette_open <- false;
                state.palette_mode <- Masc_tui_types.Palette_jump;
@@ -21116,6 +21175,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
                  wait_for_created_keeper_metadata state request.kcr_keeper;
                  if focus && cleared && not (input_pending ()) then begin
                    withdraw_resource_diagram_pending state;
+                   retire_remote_image_for_navigation state;
                    open_message_for_keeper ~return_to:request.kcr_return state
                      request.kcr_keeper ~drain_queue:(fun () -> ());
                    set_msg_scroll state 0;
@@ -22940,6 +23000,13 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
                  (Printf.sprintf "image %s: %s; browser: %s" title e opener_err) in
       let refuse reason =
         notice ~kind:Notice_failure (Printf.sprintf "image %s: %s" title reason) in
+      let defer_page ~png reason =
+        (* A size change can refuse a cell frame after the worker completes.
+           Let pending terminal input withdraw the request before opening the
+           browser, just as it can for an ordinary worker failure. *)
+        state.sent_image_read <- Some request;
+        launch_remote_image_result ~mailbox ~request ~title ~caption ~page_url ~image_url
+          (fun () -> Ok (Masc_tui_image_cache.Remote_cells {png;cells=Error reason})) in
       (match result with
        | Error e -> open_page e
        | Ok prepared ->
@@ -22948,19 +23015,17 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
            | Fetch_remote ->
                state.sent_image_read <- Some request;
                notice ~kind:Notice_reply (Printf.sprintf "Loading image: %s" image_url);
-               launch_remote_image_result ~mailbox ~request ~title ~caption ~page_url ~image_url
-                 (remote_image_fetch image_url)
+               launch_remote_image_fetch state ~mailbox ~request ~title ~caption ~page_url ~image_url
            | Prepare_remote_cells png ->
                let display = match cell_image_terminal_size () with
                  | None -> Error "terminal size is unavailable"
                  | Some (rows, columns) -> Ok (Masc_tui_image_cache.Character_cells {
                      columns=max 0 (columns - 2);rows=max 0 (rows - 3 - List.length caption)}) in
                state.sent_image_read <- Some request;
-               launch_remote_image_result ~mailbox ~request ~title ~caption ~page_url ~image_url
-                 (remote_image_cells ~display png)
+               launch_remote_image_cells state ~mailbox ~request ~title ~caption ~page_url ~image_url ~display png
            | Draw_remote_png png -> draw_image state ~caption ~refuse ~title png
-           | Draw_remote_cells cells ->
-               draw_prepared_image ~caption ~origin:request state ~refuse ~title cells
+           | Draw_remote_cells {png;cells} ->
+               draw_prepared_image ~caption ~origin:request state ~refuse:(defer_page ~png) ~title cells
            | Open_remote_page reason -> open_page reason)
       end
   | Msx_tick_withdrawn (request, detail) ->
@@ -24571,7 +24636,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
             | Error detail -> report_action state "error" ("Keeper metadata read failed: " ^ detail)
             | Ok reading ->
                 Local_read_observation.apply request.lwr_observation
-                  (Masc_tui_loader.apply_local_keepers state) reading;
+                  (Masc_tui_loader.apply_local_keepers
+                     ~before_view_change:(fun () -> retire_remote_image_for_navigation state) state) reading;
                 refresh_visible_detail_after_authority_recovery state ~mailbox
                   ~previous_authority:state.detail_read_authority;
                 resume_task_followups state ~mailbox ~refresh_inflight:http_refresh_inflight

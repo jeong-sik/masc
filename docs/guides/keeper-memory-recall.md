@@ -36,11 +36,14 @@ The Keeper then receives up to two texts:
   how it was recorded. A memory whose value is tied to the time it was
   recorded says so. A memory whose time could not be judged says that too.
 
-A Keeper with no stored facts has nothing to judge and gets no status line.
-Failed fact reads, request construction, non-cancellation exceptions and a
-missing request clock instead produce an unavailable status without a memory
-body or invented judgment coverage. The host also logs the cause and counts
-the preparation failure. The older recall notice reads the store separately
+For a Keeper admitted by the recall gate, the turn checks for a request clock
+before reading facts. Without a clock it produces `clock_unavailable`, even
+when the Keeper has no stored facts. With a clock and a successful fact read,
+no stored facts means no judgment or status line if this run has no judgment
+kept for the same turn. Otherwise it reuses the kept judgment. Failed fact reads, request
+construction and non-cancellation exceptions produce an unavailable status
+without a memory body or invented judgment coverage. The host also logs the
+cause and counts the preparation failure. The older recall notice reads the store separately
 and can report its own read failure. Cancellation propagates without a failure
 status or preparation-failure counter.
 
@@ -145,9 +148,11 @@ the Keepers added to or dropped from the list, or that nothing changes.
   gate of recall does not give today), and whether the lane has a key (`lane`:
   `armed`, `lane_disabled`, `no_armed_destination` or `another_gate_refused`).
   A turn asks the same function first, `Keeper_memory_recall_standing.of_keeper`.
-  `judged` says the gate admits the Keeper, not that a judgment succeeded. No
-  facts means no texts; a missing request clock produces an unavailable status
-  without a body. The reading is not one
+  `judged` says the gate admits the Keeper, not that a judgment succeeded. The
+  turn checks the request clock before reading facts: a missing clock produces
+  an unavailable status without a body, even if there are no facts. With a
+  clock and a successful empty read, no texts are produced unless this run
+  reuses a judgment already kept for the same turn. The reading is not one
   snapshot, so a policy published during a request can show as a lane that
   disagrees with the Keepers; the next request is right. It reads the gate as
   loaded and the environment as it is, so a runtime.toml edited on disk and not

@@ -2016,14 +2016,23 @@ let keeper_roster_pane ?(focused = false) (state : state) ~rows ~cols buf =
   let details =
     if available >= detail_rows + min count detail_rows then details else []
   in
-  (* Decide the existing detail block first, so adding an action cannot make
-     health and runtime disappear at the height where they used to fit. *)
-  let remaining = available - List.length details in
+  (* Decide the existing detail block first. When the action needs more room,
+     drop its separator and heading before any name, health or runtime. *)
   let list_minimum = if count > 0 then 1 else 0 in
-  let action =
-    if remaining >= List.length action + list_minimum then action else []
+  let fits_action details =
+    available - List.length details >= List.length action + list_minimum
   in
-  let capacity = remaining - List.length action in
+  let details, action =
+    match action with
+    | [] -> details, []
+    | _ when fits_action details -> details, action
+    | _ ->
+        (match details with
+         | _rule :: rest when fits_action rest -> rest, action
+         | _rule :: _heading :: rest when fits_action rest -> rest, action
+         | _ -> details, [])
+  in
+  let capacity = available - List.length details - List.length action in
   let first = max 0 (min (state.keeper_cursor - capacity + 1) (count - capacity)) in
   let window = Rows.of_list ~first ~height:capacity state.keepers in
   let count_label =

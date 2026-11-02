@@ -631,23 +631,26 @@ let test_fusion_capture_retains_exact_state_across_terminal_change () =
           (require (Store.read_blob store reference));
         check bool "observed actor is not the requested Keeper" true
           (member "actor" terminal=`Null);
-        List.iteri (fun index (producer,author) ->
+        List.iteri (fun index (producer, author) ->
           let reused_run = run_id ^ "/reused/" ^ string_of_int index in
           let origin : Masc.Board.post_origin = {turn_ref=None;source=Some "fusion";
-            fusion_run_id=Some reused_run;fusion_producer=producer} in
-          (match producer with
-           | Some _ ->
-             (match Masc.Board_dispatch.create_post_once_by_fusion_run_id
-               ~fusion_run_id:reused_run ~author ~content:"private foreign transcript"
-               ~meta_json:(`Assoc ["prompt",`String "private foreign prompt"])
-               ~post_kind:Masc.Board.System_post ~visibility:Masc.Board.Unlisted ~ttl_hours:0 ~origin () with
-              | Ok _ -> () | Error _ -> fail "fixture Board post creation failed")
-           | None ->
-             (match Masc.Board_dispatch.create_post
-               ~author ~content:"private foreign transcript"
-               ~meta_json:(`Assoc ["prompt",`String "private foreign prompt"])
-               ~post_kind:Masc.Board.System_post ~visibility:Masc.Board.Unlisted ~ttl_hours:0 ~origin () with
-              | Ok _ -> () | Error _ -> fail "fixture Board post creation failed"));
+            fusion_run_id=Some reused_run;fusion_producer=Some producer} in
+          let post = match Masc.Board_dispatch.create_post_once_by_fusion_run_id
+              ~fusion_run_id:reused_run ~author:producer ~content:"private foreign transcript"
+              ~meta_json:(`Assoc ["prompt",`String "private foreign prompt"])
+              ~post_kind:Masc.Board.System_post ~visibility:Masc.Board.Unlisted ~ttl_hours:0 ~origin () with
+            | Ok (Masc.Board.Post_created creation) -> creation.post
+            | Ok (Masc.Board.Post_already_present _) -> fail "fresh fixture reused an existing Fusion post"
+            | Error error -> fail (Masc.Board.Post_publication_failure.to_string error) in
+          let transferred = match Masc.Board_dispatch.update_post
+              ~post_id:(Masc.Board.Post_id.to_string post.id) ~editor:producer
+              ~content:"private foreign transcript" ~new_author:author () with
+            | Ok post -> post
+            | Error error -> fail (Masc.Board.show_board_error error) in
+          check string "public transfer reaches the intended current author" author
+            (Masc.Board.Agent_id.to_string transferred.author);
+          check (option string) "public transfer retains the original producer"
+            (Some producer) (Option.bind transferred.origin (fun origin -> origin.fusion_producer));
           Fusion_run_registry.register_running registry ~run_id:reused_run
             ~keeper:"fixture" ~preset:"default" ~roster:Fusion_types.preset_roster
             ~topology:Fusion_types.Simple ~started_at:2.;
@@ -660,7 +663,34 @@ let test_fusion_capture_retains_exact_state_across_terminal_change () =
             (member "complete" captured |> Yojson.Safe.Util.to_bool);
           check int "no foreign prompt or transcript crosses package boundary" 0
             (member "observations" captured |> list |> List.length))
-          [Some "foreign", "fixture"; Some "fixture", "foreign"; None, "fixture"] ))
+          ["foreign", "fixture"; "fixture", "foreign"];
+        (* A missing producer with a run ID is rejected at creation and by the
+           persisted decoder. Test that boundary without inventing a stored row. *)
+        let rejected_run = run_id ^ "/missing-producer" in
+        let origin : Masc.Board.post_origin = {turn_ref=None;source=Some "fusion";
+          fusion_run_id=Some rejected_run;fusion_producer=None} in
+        let path = Masc.Board.persist_path (Masc.Board.global ()) in
+        let bytes () = In_channel.with_open_bin path In_channel.input_all in
+        let before = bytes () in
+        (match Masc.Board_dispatch.create_post ~author:"fixture"
+            ~content:"private foreign transcript"
+            ~meta_json:(`Assoc ["prompt",`String "private foreign prompt"])
+            ~post_kind:Masc.Board.System_post ~visibility:Masc.Board.Unlisted ~ttl_hours:0 ~origin () with
+         | Ok _ -> fail "missing producer unexpectedly published a post"
+         | Error failure ->
+           (match Masc.Board.Post_publication_failure.cause failure with
+            | Masc.Board.Post_publication_failure.Board_error (Masc.Board.Validation_error _) -> ()
+            | Board_error error -> fail (Masc.Board.show_board_error error)
+            | Raised error -> fail (Printexc.to_string error));
+           (match Masc.Board.Post_publication_failure.effect_disposition failure with
+            | Failure_effect.Proven_pre_effect -> ()
+            | Proven_post_effect | Effect_outcome_unknown ->
+              fail "missing producer refusal lost its pre-effect proof");
+           check bool "missing producer has no committed publication receipt" true
+             (Option.is_none (Masc.Board.Post_publication_failure.committed failure)));
+        check string "missing producer preserves actual posts bytes" before (bytes ());
+        check bool "missing producer creates no origin-index entry" true
+          (Option.is_none (Masc.Board_dispatch.find_post_by_run_id ~run_id:rejected_run)) ))
 
 let test_fusion_binding_targets_only_exact_run () =
   let source run_id = `Assoc ["source_id",`String "fusion";

@@ -968,7 +968,7 @@ let run_trial ~base ~experiment ~strategy ~prompt_root ~counter ~receipt ~sw ~en
   Board_dispatch.reset_for_test ();
   Result.get_ok (Board_dispatch.init_jsonl
     ~base_path:(Env_config_core.base_path ())
-    ~recipient_lookup:Recipient_lookup.none_declared ());
+    ~recipient_lookup:(Keeper_board_recipient_lookup.make ~config) ());
   ignore (Board_dispatch.create_post ~author:"synthetic-user" ~content:"unaddressed fixture baseline"
       ~post_kind:Board.Human_post ~visibility:Board.Internal () |> get Board.Post_publication_failure.to_string);
   ignore (Keeper_world_observation.collect_board_events ~base_path:base ~meta);
@@ -1322,6 +1322,11 @@ let main () =
        Unix.chmod (Filename.concat base_path "docker-peer.sh") 0o700;
        setup ~base:base_path ~experiment ~counter ~receipt:!receipt ~sw ~env
      | "run" ->
+       (* The measured cycle owns real native request journals under this
+          application switch; model configuration alone does not install it. *)
+       Runtime_agent_execution_runtime.initialize
+         ~sw ~domain_mgr:env#domain_mgr ~domain_count:1
+       |> get Runtime_agent_execution_runtime.initialization_error_to_string;
        require (not (Filename.is_relative !prompt_root) && Sys.file_exists (Filename.concat !prompt_root "keeper.md"))
          "--prompt-root must be a frozen absolute prompt directory";
        run_trial ~base:base_path ~experiment ~strategy:(strategy_of_string !strategy)

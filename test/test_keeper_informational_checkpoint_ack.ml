@@ -1,4 +1,5 @@
-(* Actual Owner/heartbeat/model/checkpoint/ACK, followed by a fresh process reader.
+(* Actual Owner/heartbeat/model/checkpoint retention and completed-turn ACK,
+   followed by a fresh process reader.
    HTTP is a synthetic provider; no sandbox tools or external messages execute. *)
 open Masc
 module Preparation = Masc_test_deps.Board_test_preparation
@@ -59,6 +60,7 @@ let queue_count config name = Keeper_event_queue.length (queue config name)
 
 
 module Q = Keeper_event_queue
+module Queue_state = Keeper_event_queue_state
 let later_work : Q.stimulus =
   { post_id = "later-work-26165"; urgency = Q.Low; arrived_at = 100.
   ; payload = Q.Bootstrap }
@@ -92,24 +94,113 @@ let check_sources_visible text =
     ("provider input omitted " ^ marker))
     ([ "fusion-result-26165"; "delegate-result-26165"; "composition-result-26165" ]
      @ List.map (fun (source : Q.stimulus) -> source.post_id) (informational_sources ()))
-let check_checkpoint config meta =
+let completed_text = "Completed retained informational continuation."
+let check_checkpoint ~turn_count config meta =
   let trace_id = Keeper_id.Trace_id.to_string meta.Keeper_meta_contract.runtime.trace_id in
   let checkpoint = Keeper_checkpoint_store.load_agent_core
     ~session_dir:(Keeper_types_support.keeper_session_dir config trace_id)
     ~session_id:trace_id
     |> get Keeper_checkpoint_store.checkpoint_load_error_to_string in
-  require (checkpoint.session_id=trace_id && checkpoint.turn_count=1)
+  require (checkpoint.session_id=trace_id && checkpoint.turn_count=turn_count)
     "canonical checkpoint has the wrong session or turn";
   let blocks = List.concat_map (fun (message : Agent_core.Types.message) -> message.content)
       checkpoint.messages in
-  require (List.exists (function
+  require (List.length (List.filter (function
     | Agent_core.Types.ToolUse {id;name;_} ->
       id="context-call-26165" && name="keeper_context_status"
-    | _ -> false) blocks) "canonical checkpoint lost its actual tool call";
-  require (List.exists (function
+    | _ -> false) blocks)=1) "canonical checkpoint lost or replayed its actual tool call";
+  require (List.length (List.filter (function
     | Agent_core.Types.ToolResult {tool_use_id;_} -> tool_use_id="context-call-26165"
-    | _ -> false) blocks) "canonical checkpoint lost its actual tool result"
+    | _ -> false) blocks)=1) "canonical checkpoint lost or replayed its actual tool result";
+  if turn_count=2 then
+    require (List.exists (function
+      | Agent_core.Types.Text text -> text=completed_text
+      | _ -> false) blocks) "canonical continuation has no completed assistant answer"
 let captured_request_path config = Filename.concat config.Workspace.base_path "observed-provider-request.json"
+let checkpoint_record_path config = Filename.concat config.Workspace.base_path "checkpoint-turn-record.json"
+let completed_request_path config = Filename.concat config.Workspace.base_path "completed-provider-request.json"
+let terminal_receipts_path config = Filename.concat config.Workspace.base_path "completed-source-receipts.json"
+let turn_records config =
+  Dated_jsonl.read_recent_result (Keeper_types_support.keeper_turn_record_store config keeper_name) 2
+  |> get Dated_jsonl.read_error_to_string
+  |> List.map (function
+    | Dated_jsonl.Parsed row -> row, (Turn_record.of_json row |> get Fun.id)
+    | Dated_jsonl.Malformed_json {detail;_} -> failwith detail)
+let check_native_journal (config : Workspace.config) (record : Turn_record.t) body =
+  let observation = match record.request_observations with
+    | [observation] -> observation
+    | [] | _::_ -> failwith "expected one native request observation" in
+  let call_id, requests = match observation.Request_observation.evidence with
+    | Request_observation.Recorded {call_id;requests} -> call_id,requests
+    | Not_dispatched | No_durable_scope | No_matching_call | Read_failed _ ->
+      failwith "native request has no durable journal evidence" in
+  let journal = Keeper_request_execution.reopen ~base_path:config.base_path ~keeper_name ~call_id
+      |> get Fun.id in
+  let reopened = Keeper_request_execution.request_evidence journal in
+  require (Request_observation.to_json observation =
+    Request_observation.to_json {observation with evidence=reopened})
+    "native request journal disagrees with the persisted turn observation";
+  (match requests with
+   | [{Request_observation.provenance=Some (Llm_provider.Completion_outcome.Serialized request);_}] ->
+     require (request.body_bytes=String.length body &&
+       request.body_sha256=Agent_core_sha256.(digest_string body |> to_hex))
+       "durable native request witness differs from the actual peer body"
+   | [] | _::_ -> failwith "expected one serialized native HTTP request")
+let check_completed_receipts config =
+  let state = Keeper_registry_event_queue.durable_state_result
+    ~base_path:config.Workspace.base_path keeper_name |> get Fun.id in
+  require (Queue_state.pending_selections state=[]) "completed batch remains durably pending";
+  (* Superseded completion receipts leave the queue snapshot. Their actual
+     source-bearing ACK rows remain in the production reaction ledger. *)
+  let receipts=ref [] in
+  let ledger=Dated_jsonl.open_store
+    (Keeper_reaction_ledger.location ~base_path:config.base_path ~keeper_name) in
+  Dated_jsonl.iter_all_entries_result ledger (function
+    | Dated_jsonl.Malformed_json {detail;_} -> failwith detail
+    | Dated_jsonl.Parsed row ->
+      let open Yojson.Safe.Util in
+      require (member "schema" row=`String Keeper_reaction_ledger.schema)
+        "reaction ledger contains another schema";
+      (match member "record_kind" row with
+       | `String "stimulus" -> ()
+       | `String "reaction" ->
+         let reaction=member "reaction" row in
+         let kind=match Keeper_reaction_ledger.reaction_kind_of_string
+           (member "kind" reaction |> to_string) with
+           | Ok kind -> kind
+           | Error (Keeper_reaction_ledger.Unknown_reaction_kind kind) ->
+             failwith ("unknown actual reaction kind: " ^ kind) in
+         (match kind with
+          | Keeper_reaction_ledger.Turn_started | Keeper_reaction_ledger.Turn_finished
+          | Keeper_reaction_ledger.Event_queue_cancelled -> ()
+          | Keeper_reaction_ledger.Event_queue_ack ->
+            let receipt=Queue_state.transition_receipt_of_yojson
+              (member "transition_receipt" reaction) |> get Fun.id in
+            receipts := receipt :: !receipts)
+       | _ -> failwith "reaction ledger has an unknown record kind"))
+  |> get Dated_jsonl.read_error_to_string;
+  let completed=List.map (fun source ->
+    let source_ref=Queue_state.source_snapshot_ref source in
+    let receipt=match List.filter (fun (receipt : Queue_state.transition_receipt) ->
+      Queue_state.source_snapshot_ref (Queue_state.transition_source receipt.transition)=source_ref)
+        !receipts with
+      | [receipt] -> receipt
+      | [] | _::_ -> failwith "exact source has no unique actual ACK row" in
+    (match receipt.transition with
+     | Queue_state.Ack_source_terminal terminal ->
+       require (Queue_state.source_snapshot_ref terminal.source=source_ref)
+         "terminal receipt changed the complete original source";
+       (match terminal.source_receipt with
+        | Queue_state.Turn_completed -> ()
+        | Queue_state.Fusion_terminal _ | Queue_state.Hitl_terminal _
+        | Queue_state.Turn_attempt_terminal _ ->
+          failwith "source was not ACKed by its actual completed consumer")
+     | Queue_state.Cancel_accepted _ | Queue_state.Transfer_accepted _ ->
+       failwith "original source was cancelled or transferred");
+    Queue_state.transition_receipt_to_yojson receipt)
+    (informational_sources () @ [later_work]) in
+  `List completed
+
 let check_delivery_journal config meta =
   (* The peer body is a fixture capture, never a replacement production ledger.
      Compare it with the production journal's sealed serialization witness. *)
@@ -119,10 +210,14 @@ let check_delivery_journal config meta =
     "HTTP request omitted the retained result";
   require (Astring.String.is_infix ~affix:unread_trace body)
     "HTTP request omitted the unread evidence";
-  let store = Keeper_types_support.keeper_turn_record_store config keeper_name in
-  let record = match Dated_jsonl.read_recent_result store 1 |> get Dated_jsonl.read_error_to_string with
-    | [Dated_jsonl.Parsed row] -> Turn_record.of_json row |> get Fun.id
-    | [] | _::_ -> failwith "one strict actual TurnRecord is required" in
+  let saved_row = Yojson.Safe.from_string (Fs_compat.load_file (checkpoint_record_path config)) in
+  let saved_record=Turn_record.of_json saved_row |> get Fun.id in
+  let record=match List.filter (fun (_, (record : Turn_record.t)) ->
+      Ids.Turn_ref.equal record.turn_ref saved_record.turn_ref) (turn_records config) with
+    | [(row,record)] ->
+      require (Yojson.Safe.equal row saved_row) "canonical checkpoint TurnRecord changed";
+      record
+    | [] | _::_ -> failwith "exact checkpoint TurnRecord is absent or duplicated" in
   require (record.trace_id=Keeper_id.Trace_id.to_string meta.Keeper_meta_contract.runtime.trace_id)
     "delivery record belongs to a different trace";
   let manifest = Keeper_provider_input_snapshot.read_manifest
@@ -175,27 +270,31 @@ let check_delivery_journal config meta =
   require (List.exists (fun (component : Turn_record.input_component) ->
     component.component=Turn_record.Message_user && component.bytes=user_bytes)
     components) "input attribution omitted unread-message bytes";
-  let observation = match record.request_observations with
-    | [observation] -> observation
-    | [] | _::_ -> failwith "expected one native request observation" in
-  let call_id, requests = match observation.Request_observation.evidence with
-    | Request_observation.Recorded {call_id;requests} -> call_id,requests
-    | Not_dispatched | No_durable_scope | No_matching_call | Read_failed _ ->
-      failwith "native request has no durable journal evidence" in
-  let journal = Keeper_request_execution.reopen ~base_path:config.base_path ~keeper_name ~call_id
-      |> get Fun.id in
-  let reopened = Keeper_request_execution.request_evidence journal in
-  require (Request_observation.to_json observation =
-    Request_observation.to_json {observation with evidence=reopened})
-    "native request journal disagrees with the persisted turn observation";
-  (match requests with
-   | [{Request_observation.provenance=Some (Llm_provider.Completion_outcome.Serialized request);_}] ->
-     require (request.body_bytes=String.length body &&
-       request.body_sha256=Agent_core_sha256.(digest_string body |> to_hex))
-       "durable native request witness differs from the actual peer body"
-   | [] | _::_ -> failwith "expected one serialized native HTTP request")
+  check_native_journal config record body
+
+let check_completed_journal config =
+  let completed_body=Fs_compat.load_file (completed_request_path config) in
+  check_sources_visible completed_body;
+  let checkpoint_record=Turn_record.of_json
+    (Yojson.Safe.from_string (Fs_compat.load_file (checkpoint_record_path config))) |> get Fun.id in
+  let completed_record=match turn_records config with
+    | [(_,first);(_,second)] ->
+      require (Ids.Turn_ref.equal first.turn_ref checkpoint_record.turn_ref
+        && first.trace_id=second.trace_id && second.absolute_turn=first.absolute_turn+1)
+        "completed continuation changed trace or reused a TurnRecord identity";
+      second
+    | [] | [_] | _::_::_ -> failwith "expected exactly two canonical TurnRecords" in
+  require (completed_record.finish_reason=Some "completed")
+    "second actual TurnRecord has no completed native turn";
+  (* This is another autonomous heartbeat over the saved history, not a
+     direct-operation Native Resume. Its request must carry the retained
+     sources; the canonical checkpoint separately retains the original tool pair. *)
+  check_native_journal config completed_record completed_body
+
+let chat_operation_id () =
+  Keeper_chat_operation.Operation_id.of_string "kmsg-checkpoint-person" |> get Fun.id
 let queue_chat config =
-  let operation_id = Keeper_chat_operation.Operation_id.of_string "kmsg-checkpoint-person" |> get Fun.id in
+  let operation_id = chat_operation_id () in
   let thread_id = "keeper:" ^ keeper_name in
   let channel = Keeper_continuation_channel.dashboard ~thread_id |> get Fun.id in
   let source = Keeper_chat_operation_payload.source_to_json ~submitted_by:"operator"
@@ -266,23 +365,31 @@ let run base_path prompt_root =
   in
   let server = Exact_output_fixture.start_server ~on_request_before_reply
     ~sw ~net:env#net ~clock:env#clock
-    (Exact_output_fixture.Stream_reply
-      {|data: {"id":"information-checkpoint","model":"informational-protocol-fixture","choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"context-call-26165","type":"function","function":{"name":"keeper_context_status","arguments":"{}"}}]},"finish_reason":null}]}
+    (Exact_output_fixture.Replies
+      [{|data: {"id":"information-checkpoint","model":"informational-protocol-fixture","choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"context-call-26165","type":"function","function":{"name":"keeper_context_status","arguments":"{}"}}]},"finish_reason":null}]}
 
 data: {"id":"information-checkpoint","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":7,"completion_tokens":5,"total_tokens":12}}
 
 data: [DONE]
 
-|}) in
+|}; {|data: {"id":"information-completed","model":"informational-protocol-fixture","choices":[{"index":0,"delta":{"role":"assistant","content":"Completed retained informational continuation."},"finish_reason":null}]}
+
+data: {"id":"information-completed","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":7,"completion_tokens":5,"total_tokens":12}}
+
+data: [DONE]
+
+|}]) in
   initialize_runtime ~base_path server;
   Prompt_registry.clear (); Prompt_registry.set_markdown_dir prompt_root; Prompt_defaults.init ();
   Masc_test_deps.init_unified_tool_registry (); Keeper_registry.For_testing.clear ();
+  let chat_settled, resolve_chat_settled = Eio.Promise.create () in
   let operation_runner : Keeper_owner.operation_runner =
     { ready = (fun ~keeper_name:_ -> true)
     ; execute = (fun ~sw:_ ~keeper_name:_ ~claim ->
         require (Option.is_some (claim () |> get Keeper_owner.error_to_string)) "chat claim absent";
         Keeper_owner.Operation_succeeded {outcome_ref="person-after-checkpoint"})
-    ; on_execution_settled = (fun ~keeper_name:_ ~claimed_operation_id:_ ~operations:_ ~execution:_ -> ()) } in
+    ; on_execution_settled = (fun ~keeper_name:_ ~claimed_operation_id ~operations:_ ~execution:_ ->
+        ignore (Eio.Promise.try_resolve resolve_chat_settled claimed_operation_id)) } in
   ignore (Keeper_owner_registry.install_from_store ~sw ~operation_runner:(Some operation_runner)
     ~on_turn_slot_released:None config |> get Keeper_owner_registry.install_error_to_string);
   let meta, registry_entry = install_keeper config keeper_name in
@@ -322,6 +429,9 @@ data: [DONE]
   List.iter (fun source -> Keeper_registry_event_queue.enqueue_durable_result
     ~base_path keeper_name source |> get Fun.id) (informational_sources ());
   require (queue_count config keeper_name=3) "expected three completion sources";
+  let original_selections=Keeper_registry_event_queue.pending_selections_result
+    ~base_path keeper_name |> get Fun.id in
+  require (List.length original_selections=3) "expected three exact durable completion selections";
   let outcome = Keeper_heartbeat_loop.run_keepalive_unified_turn
       ~scheduled_handoff:None ~on_handoff_observed:ignore
     ~wake:Keeper_world_observation.Attention_wake ~ctx ~registry_entry ~meta_after_triage:meta
@@ -329,7 +439,7 @@ data: [DONE]
     ~reactive_wake:true ~shared_context:(Agent_core.Context.create ()) ~deferred_runtime_lane:None
     ~on_deferred_runtime_consumed:(fun () -> ())
     ~settle_deferred_runtime_lane:(function Some _ -> failwith "unexpected runtime failover" | None -> ()) in
-  require outcome.stimuli_acked "actual checkpoint did not ACK informational batch";
+  require (not outcome.stimuli_acked) "checkpoint prematurely ACKed informational results";
   (match Keeper_last_turn_stop.get ~base_path ~keeper:keeper_name with
    | Some Keeper_turn_checkpoint_reason.Operation_queued -> ()
    | Some _ | None -> failwith "actual cycle did not checkpoint for queued person chat");
@@ -338,22 +448,86 @@ data: [DONE]
     | [body] -> body | _ -> failwith "expected one captured provider request" in
   check_sources_visible request;
   save (captured_request_path config) request;
+  let checkpoint_row,checkpoint_record=match turn_records config with
+    | [row,record] -> row,record
+    | [] | _::_ -> failwith "checkpoint did not write one actual TurnRecord" in
+  require (checkpoint_record.finish_reason=Some "yielded_to_operation_queued:1")
+    "first actual TurnRecord does not record the queued-operation checkpoint";
+  save (checkpoint_record_path config) (Yojson.Safe.to_string checkpoint_row);
   check_delivery_journal config outcome.meta;
-  check_checkpoint config outcome.meta;
-  let pending = Keeper_event_queue.to_list (queue config keeper_name) in
-  require (List.map (fun (s:Q.stimulus)->s.post_id) pending = [later_work.post_id])
-    "ACK lost later work or retained delivered completions";
+  check_checkpoint ~turn_count:1 config outcome.meta;
+  let retained=Keeper_registry_event_queue.pending_selections_result
+    ~base_path keeper_name |> get Fun.id in
+  let ids selections=List.map (fun (selection : Queue_state.pending_selection) ->
+    selection.source.post_id) selections |> List.sort String.compare in
+  require (ids retained=List.sort String.compare
+    (later_work.post_id::ids original_selections)) "checkpoint lost or duplicated a pending source";
+  List.iter (fun (original : Queue_state.pending_selection) ->
+    let current=match List.filter (Queue_state.same_entry original) retained with
+      | [selection] -> selection
+      | [] | _::_ -> failwith "checkpoint replaced the original queue entry" in
+    require (Queue_state.source_snapshot_ref original.source=
+      Queue_state.source_snapshot_ref current.source)
+      "checkpoint changed the complete informational source";
+    require (current.checkpoint_retentions=original.checkpoint_retentions+1
+      && current.first_admitted_at=original.first_admitted_at
+      && Option.equal Keeper_execution_scope_id.equal
+        current.repetition_scope original.repetition_scope)
+      "checkpoint did not durably preserve the original queue metadata";
+    let observed=evidence config original.source in
+    require (not observed.event_queue_ack_seen && not observed.event_queue_cancelled_seen)
+      "checkpoint terminalized an original result") original_selections;
+  (* The hook runs after the Owner's durable settlement; the mailbox read
+     below additionally crosses its slot-release boundary before resuming. *)
+  let claimed=Eio.Time.with_timeout_exn env#clock Exact_output_fixture.fixture_wait_seconds
+    (fun () -> Eio.Promise.await chat_settled) in
+  (match claimed with
+   | Some id -> require (Keeper_chat_operation.Operation_id.equal id (chat_operation_id ()))
+       "another chat settled at the checkpoint boundary"
+   | None -> failwith "queued chat settled without a claim");
+  (match Keeper_owner_registry.exact_operation ~base_path ~keeper_name (chat_operation_id ())
+    |> get Keeper_owner_registry.command_error_to_string with
+   | Some operation ->
+     (match operation.state with
+      | Keeper_chat_operation.Succeeded {outcome_ref;_} ->
+        require (outcome_ref="person-after-checkpoint") "queued chat has another accepted outcome"
+      | Keeper_chat_operation.Queued | Keeper_chat_operation.Running _
+      | Keeper_chat_operation.Failed _ | Keeper_chat_operation.Cancelled _ ->
+        failwith "queued chat did not durably succeed before continuation")
+   | None -> failwith "settled queued chat is absent from its Owner");
+  let completed=Keeper_heartbeat_loop.run_keepalive_unified_turn
+    ~scheduled_handoff:None ~on_handoff_observed:ignore
+    ~wake:Keeper_world_observation.Attention_wake ~ctx ~registry_entry ~meta_after_triage:outcome.meta
+    ~pending_board_events:[] ~stop:(Atomic.make false) ~proactive_warmup_elapsed:true
+    ~reactive_wake:true ~shared_context:(Agent_core.Context.create ()) ~deferred_runtime_lane:None
+    ~on_deferred_runtime_consumed:(fun () -> ())
+    ~settle_deferred_runtime_lane:(function Some _ -> failwith "unexpected runtime failover" | None -> ()) in
+  require completed.stimuli_acked "actual completed continuation did not ACK its source batch";
+  require (Keeper_last_turn_stop.get ~base_path ~keeper:keeper_name=None)
+    "resumed cycle checkpointed instead of completing";
+  require (Exact_output_fixture.post_count server=2) "continuation did not make exactly one new model request";
+  let completed_body=match Exact_output_fixture.request_bodies server with
+    | [_;body] -> body
+    | [] | [_] | _::_::_ -> failwith "expected the checkpoint and continuation requests" in
+  check_sources_visible completed_body;
+  save (completed_request_path config) completed_body;
+  check_completed_journal config;
+  check_checkpoint ~turn_count:2 config completed.meta;
+  check_delivery_journal config completed.meta;
+  let receipts=check_completed_receipts config in
+  save (terminal_receipts_path config) (Yojson.Safe.to_string receipts);
   List.iter (fun source ->
     let observed=evidence config source in
     require (observed.event_queue_ack_seen && not observed.event_queue_cancelled_seen)
-      "completion has no durable ACK evidence";
+      "completed continuation has no durable ACK evidence";
     require (Keeper_reaction_ledger.event_queue_delivery_seen_for_source_strict_result
       ~not_before:0. ~base_path ~keeper_name ~post_id:source.post_id
       ~stimulus_kind:(Keeper_reaction_ledger.stimulus_kind_of_event_queue source)
       |> get Keeper_reaction_ledger.strict_delivery_evidence_error_to_string)
       "exact source has no canonical durable delivery evidence") (informational_sources ());
-  print_endline (Yojson.Safe.to_string (`Assoc ["phase",`String "actual-checkpoint"
-    ;"provider_rounds",`Int 1;"informational_acks",`Int 3;"later_work_retained",`Bool true]))
+  print_endline (Yojson.Safe.to_string (`Assoc ["phase",`String "actual-completed-continuation"
+    ;"provider_rounds",`Int 2;"checkpoint_informational_acks",`Int 0
+    ;"completed_informational_acks",`Int 3;"later_work_completed",`Bool true]))
 
 let reopen base_path =
   Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
@@ -370,13 +544,18 @@ let reopen base_path =
   let ctx : _ Keeper_types_profile.context =
     {config;agent_name="informational-reader";sw;clock=env#clock;proc_mgr=None;net=None
     ;publication_recovery_provider=Masc_test_deps.non_runtime_publication_recovery_provider} in
-  check_checkpoint config meta;
+  check_checkpoint ~turn_count:2 config meta;
   check_delivery_journal config meta;
+  check_completed_journal config;
+  let receipts=check_completed_receipts config in
+  require (Yojson.Safe.equal receipts
+    (Yojson.Safe.from_string (Fs_compat.load_file (terminal_receipts_path config))))
+    "fresh process changed or duplicated the actual terminal receipts";
   let intake=Keeper_heartbeat_stimulus_intake.heartbeat_event_intake
     ~ctx ~meta_after_triage:meta ~pending_board_events:[] in
   require (List.map (fun (s:Q.stimulus)->s.post_id)
-    (Keeper_heartbeat_source_batch.stimuli intake.source_batch)=[later_work.post_id])
-    "fresh process re-admitted delivered informational input or lost later work";
+    (Keeper_heartbeat_source_batch.stimuli intake.source_batch)=[])
+    "fresh process re-admitted completed informational input or later work";
   List.iter(fun (source : Q.stimulus)->
     require (evidence config source).event_queue_ack_seen "fresh process lost ACK evidence";
     require (Keeper_reaction_ledger.event_queue_delivery_seen_for_source_strict_result
@@ -385,7 +564,7 @@ let reopen base_path =
       |> get Keeper_reaction_ledger.strict_delivery_evidence_error_to_string)
       "fresh process lost exact source delivery evidence") (informational_sources ());
   print_endline (Yojson.Safe.to_string (`Assoc ["phase",`String "new-process-reopen"
-    ;"pid",`Int (Unix.getpid ());"redelivered_completions",`Int 0;"later_work_admitted",`Bool true]))
+    ;"pid",`Int (Unix.getpid ());"redelivered_completions",`Int 0;"later_work_completed",`Bool true]))
 
 let test () =
   let prompt_root=Masc_test_deps.source_path "config/prompts" |> Unix.realpath in
@@ -410,4 +589,4 @@ let test () =
 let () = match Array.to_list Sys.argv with
   | [_;"--reopen";base] -> reopen base
   | _ -> Alcotest.run "informational_checkpoint_ack"
-      ["production cycle",[Alcotest.test_case "completion input checkpoints, ACKs, and stays delivered after restart" `Quick test]]
+      ["production cycle",[Alcotest.test_case "completion input survives checkpoint, completes once, and stays ACKed after restart" `Quick test]]

@@ -100,7 +100,9 @@ val request_retry :
     the Goal admission projection grants no judgment or automatic retry.
     Store the actor/parent
     authorization in the complete staged child before acknowledging it.
-    An ordinary wake, active/unknown dispatch or judgment grants no retry. *)
+    An ordinary wake or judgment grants no retry. An active or unknown dispatch
+    returns [Execution_pending], so the caller cannot report a new retry as
+    accepted while its original result is unresolved. *)
 
 val original : retained -> Goal_verifier_original.t
 val run_identity : retained -> run_identity

@@ -1954,6 +1954,7 @@ let planning_goal_row id title =
   ; pg_metric = None
   ; pg_target_value = None
   ; pg_proof = Tui_decode.Proof_idle
+  ; pg_retry_binding = None
   ; pg_verifier_unreconciled = None
   ; pg_last_review_note = None
   ; pg_last_review_at = None
@@ -2053,6 +2054,61 @@ let test_input_that_is_not_the_second_press_cancels () =
     ; "e", [ "y"; "Y"; "n"; "N" ], true, "an unrelated key cancels it"
     ; "x", [], true, "an arm with no second press cancels on any key"
     ]
+
+let test_goal_action_second_press_keeps_only_its_own_arm () =
+  List.iter (fun action ->
+    let key = Masc_tui_render_prim.planning_action_key action in
+    let second_press = Masc_tui_render_prim.planning_action_confirmation_keys action in
+    List.iter (fun pressed ->
+      check Alcotest.bool ("second press " ^ pressed) false
+        (Masc_tui_keys.cancels_two_press ~input_seen:true ~key:(Some pressed) ~second_press))
+      [ key; String.uppercase_ascii key ];
+    check Alcotest.bool ("unrelated input cancels " ^ key) true
+      (Masc_tui_keys.cancels_two_press ~input_seen:true ~key:(Some "?") ~second_press))
+    Goal_phase.Public_action.all
+
+let test_goal_action_receipts_follow_the_goal_and_latest_ticket () =
+  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  check Alcotest.bool "first request starts" true
+    (note_goal_action_started state ~goal_id:"a" ~ticket:"a1");
+  check Alcotest.bool "another request for A waits for its result" false
+    (note_goal_action_started state ~goal_id:"a" ~ticket:"a2");
+  state.planning_mode <- Planning_detail "b";
+  check Alcotest.bool "the original Goal owns a late failure" true
+    (note_goal_action_result state ~goal_id:"a" ~ticket:"a1" (Error "unknown"));
+  check Alcotest.(option string) "failure remains with A" (Some "unknown")
+    (List.assoc_opt "a" state.goal_action_errors);
+  check Alcotest.(option string) "B does not inherit A's failure" None
+    (List.assoc_opt "b" state.goal_action_errors);
+  check Alcotest.bool "a later request may start after the result" true
+    (note_goal_action_started state ~goal_id:"a" ~ticket:"a2");
+  check Alcotest.bool "an earlier reply cannot replace the current result" false
+    (note_goal_action_result state ~goal_id:"a" ~ticket:"a1" (Error "old"));
+  check Alcotest.bool "current failure is retained" true
+    (note_goal_action_result state ~goal_id:"a" ~ticket:"a2" (Error "new"));
+  check Alcotest.(option string) "A retains its current failure" (Some "new")
+    (List.assoc_opt "a" state.goal_action_errors);
+  record_goal_action_receipt state ~goal_id:"a" ~ticket:"a2" ~workspace:"/old"
+    (Error "outcome unknown");
+  state.goal_action_errors <- [];
+  state.goal_action_inflight <- [];
+  check Alcotest.bool "an earlier workspace retains its request outcome" true
+    (match state.goal_action_receipts with
+     | [("a", "a2", "/old", Error "outcome unknown")] -> true
+     | _ -> false)
+
+let test_goal_completion_requires_an_observed_binding () =
+  let goal = planning_goal_row "a" "Goal" in
+  let action = Goal_phase.Public_action.Request_complete in
+  check Alcotest.bool "unreadable proof cannot authorize the action" false
+    (planning_goal_offers_action goal action);
+  let binding = { Tui_decode.grb_phase = Tui_decode.Completion_executing;
+                  grb_criterion_revision = "revision"; grb_request_id = None } in
+  check Alcotest.bool "an observed proof binding authorizes the action" true
+    (planning_goal_offers_action { goal with pg_retry_binding = Some binding } action);
+  check Alcotest.bool "a changed phase invalidates the first press" false
+    (planning_goal_retains_arm { goal with pg_phase = Goal_phase.Verifying; pg_retry_binding = Some binding }
+       ~action ~phase:Goal_phase.Executing ~retry_binding:(Some binding))
 
 let test_code_search_count_tracks_fetched_source () =
   let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
@@ -2450,6 +2506,12 @@ let () =
             test_planning_searches_what_the_filter_left
         ; Alcotest.test_case "a goal detail keeps the key closed" `Quick
             test_planning_detail_keeps_the_key_closed
+        ; Alcotest.test_case "each Goal action keeps its own second press" `Quick
+            test_goal_action_second_press_keeps_only_its_own_arm
+        ; Alcotest.test_case "Goal replies retain their owner and ticket" `Quick
+            test_goal_action_receipts_follow_the_goal_and_latest_ticket
+        ; Alcotest.test_case "Goal completion needs its observed binding" `Quick
+            test_goal_completion_requires_an_observed_binding
         ] )
     ; ( "lanes rows"
       , [ Alcotest.test_case "role grouping retains the original settings and activity target" `Quick

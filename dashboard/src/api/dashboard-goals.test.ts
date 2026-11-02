@@ -3,10 +3,12 @@ import { resolve } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 const getMock = vi.hoisted(() => vi.fn())
+const getWithResponseMock = vi.hoisted(() => vi.fn())
 
 vi.mock('./core', async importOriginal => ({
   ...await importOriginal<typeof import('./core')>(),
   get: getMock,
+  getWithResponse: getWithResponseMock,
 }))
 
 import {
@@ -79,6 +81,25 @@ afterEach(() => {
 })
 
 describe('fetchDashboardGoalsTree decoding', () => {
+  it('requires a workspace attestation for a bound tree and detail', async () => {
+    const workspace = { basePath: '/workspace-a', mascRoot: '/workspace-a/.masc' }
+    getWithResponseMock.mockResolvedValueOnce({ data: measurementFixture, headers: new Headers() })
+    await expect(fetchDashboardGoalsTree(workspace)).rejects.toThrow('작업 공간 확인')
+    const headers = new Headers({ 'x-masc-workspace-read': 'matched-v1' })
+    getWithResponseMock.mockResolvedValueOnce({ data: measurementFixture, headers })
+    const tree = await fetchDashboardGoalsTree(workspace)
+    expect(tree.tree[0]?.id).toBe('goal-measured')
+    expect(getWithResponseMock.mock.calls[1]![0]).toContain('expected_base_path=%2Fworkspace-a')
+    expect(getWithResponseMock.mock.calls[1]![1]).toEqual({ consumeWithinTimeout: true })
+    getWithResponseMock.mockResolvedValueOnce({
+      data: { approval_queue_state: { state: 'ready' }, goal: measurementFixture.tree[0],
+        linked_tasks: [], linked_keepers: [], approvals: [], execution_receipts: [], timeline: [] }, headers,
+    })
+    expect((await fetchDashboardGoalDetail('goal-measured', workspace)).goal.id).toBe('goal-measured')
+    expect(getWithResponseMock.mock.calls[2]![0]).toContain('expected_masc_root=%2Fworkspace-a%2F.masc')
+    expect(getWithResponseMock.mock.calls[2]![1]).toEqual({ consumeWithinTimeout: true })
+  })
+
   it('preserves current criterion measurements through tree and detail fetches', async () => {
     getMock.mockResolvedValueOnce(measurementFixture)
     const tree = await fetchDashboardGoalsTree()

@@ -78,7 +78,7 @@ export function isRefreshableDashboardAuthCode(
     && REFRESHABLE_AUTH_CODES.has(value as DashboardAuthErrorCode)
 }
 
-function shouldRefreshDevToken(): boolean {
+export function shouldRefreshDevToken(): boolean {
   const token = getStoredToken()
   const meta = getStoredTokenMeta()
   if (!token) return true
@@ -107,10 +107,11 @@ export async function ensureDevToken(): Promise<void> {
     ;(devTokenBootstrapStatus as { value: DevTokenBootstrapStatus }).value = 'fetching'
     if (getStoredTokenMeta()?.source === 'manual' && getStoredToken()) return
     try {
-        const res = await fetchWithTimeout(
+        const { res, payload } = await fetchWithTimeout(
           '/api/v1/dashboard/dev-token',
           { method: 'GET', headers: { Accept: 'application/json' } },
           DEV_TOKEN_FETCH_TIMEOUT_MS,
+          async res => ({ res, payload: res.ok ? await res.json() as DevTokenBootstrapPayload : null }),
         )
         if (!res.ok) {
           if (res.status === 404 && storedMeta?.source === 'dev') {
@@ -126,7 +127,10 @@ export async function ensureDevToken(): Promise<void> {
           }
           return
         }
-        const payload = (await res.json()) as DevTokenBootstrapPayload
+        if (payload === null || typeof payload !== 'object') {
+          ;(devTokenBootstrapStatus as { value: DevTokenBootstrapStatus }).value = 'invalid_response'
+          return
+        }
         if (payload.status === 'initializing') {
           ;(devTokenBootstrapStatus as { value: DevTokenBootstrapStatus }).value = 'warming'
           devTokenBootstrapPromise = null

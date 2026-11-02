@@ -3176,8 +3176,13 @@ let add_routes ~sw ~clock router =
          Http.Response.json_value_on_cpu ~compress:true ~request:req json reqd
        )
   |> Server_route.get Server_route.Public_read "/api/v1/dashboard/goals" (fun state req reqd ->
-         Server_cached_read_http.respond ~request:req reqd
-           (cached_goals_tree_payload ~config:(Mcp_server.workspace_config state))
+         let config = Mcp_server.workspace_config state in
+         match Server_auth.validate_read_workspace_precondition ~config req with
+         | Ok (Server_auth.Workspace_read_unbound | Server_auth.Workspace_read_matched) ->
+           Server_cached_read_http.respond ~request:req reqd (cached_goals_tree_payload ~config)
+         | Error error ->
+           let body, status = Server_auth.read_workspace_precondition_error_response error in
+           respond_json_value_with_cors ~status req reqd body
        )
   |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/dashboard/goals/measurements" (fun state actor req reqd ->
            Http.Request.read_body_async reqd (fun body ->
@@ -3206,6 +3211,12 @@ let add_routes ~sw ~clock router =
                    (`Assoc (("ok", `Bool true)
                             :: Goal_measurement.receipt_fields receipt))))
   |> Server_route.get Server_route.Public_read "/api/v1/dashboard/goals/detail" (fun state req reqd ->
+         let config = Mcp_server.workspace_config state in
+         match Server_auth.validate_read_workspace_precondition ~config req with
+         | Error error ->
+           let body, status = Server_auth.read_workspace_precondition_error_response error in
+           respond_json_value_with_cors ~status req reqd body
+         | Ok (Server_auth.Workspace_read_unbound | Server_auth.Workspace_read_matched) ->
          let goal_id =
            Server_utils.query_param req "goal_id"
            |> Option.map String.trim
@@ -3215,9 +3226,8 @@ let add_routes ~sw ~clock router =
            respond_public_read_json_value ~status:`Bad_request req reqd
              (dashboard_error_json ~ok:false "goal_id query param is required")
          else
-           let config = Mcp_server.workspace_config state in
            let cache_key =
-             Printf.sprintf "goal_detail:%s:%s:%d" config.base_path goal_id
+             Printf.sprintf "goal_detail:%s:%s:%d" (goal_cache_scope ~config) goal_id
                (Goal_projection_generation.current ())
            in
            respond_cached_read ~request:req ~reqd ~cache_key ~ttl:standard_cache_ttl_s

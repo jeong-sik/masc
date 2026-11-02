@@ -1382,6 +1382,27 @@ let decoded_proof ?verification ?last_review_note ?(extra = []) () =
          (Printf.sprintf "expected one goal, got %d" (List.length goals)))
 ;;
 
+let test_planning_retry_binding_tracks_the_observed_request () =
+  let criterion revision = Goal_store.criterion_to_yojson
+      (Goal_store.Criterion { revision; title="Goal x"; metric=Some "count"; target_value=Some "1" }) in
+  let pending revision request_id = `Assoc [
+    "goal_id", `String "goal-x";
+    "completion", `Assoc ["state", `String "proof_pending";
+      "request_id", `String request_id; "requested_at", `String "2026-10-30T07:45:56Z";
+      "criterion", criterion revision];
+    "updated_at", `String "2026-10-30T07:45:56Z"] in
+  let decode revision verification =
+    decoded_proof ~extra:["criterion_revision", `String revision] ~verification () in
+  let current = decode "revision-a" (pending "revision-a" "request-a") in
+  Alcotest.check Alcotest.bool "current request is retained" true
+    (match current.Tui_decode.pg_retry_binding with
+     | Some {grb_phase=Completion_executing; grb_criterion_revision="revision-a"; grb_request_id=Some "request-a"} -> true
+     | Some _ | None -> false);
+  let stale = decode "revision-b" (pending "revision-a" "request-a") in
+  Alcotest.check Alcotest.bool "another criterion grants no retry binding" true
+    (Option.is_none stale.Tui_decode.pg_retry_binding)
+;;
+
 (* The phase says "executing" for a goal nobody asked about and for one the
    judge refused with a reason. Before this the pane could not tell them apart,
    and the reason — the whole product of the verification lane — stopped at the
@@ -2471,6 +2492,16 @@ let test_decode_json_response_body_rejects_error_status () =
       (* The status still leads; the envelope no longer follows it, because
          the server already wrote the sentence. *)
       Alcotest.(check string) "http error" "HTTP 400: bad confirm" err
+
+let test_tool_http_error_preserves_nested_refusal () =
+  let detail = "The original Goal verification outcome is unknown; no new review was started." in
+  let tool_error = Yojson.Safe.to_string (`Assoc ["status", `String "error";
+    "error_code", `String "conflict"; "message", `String detail]) in
+  let body = Yojson.Safe.to_string (`Assoc ["ok", `Bool false; "message", `String tool_error]) in
+  match Tui_decode.decode_json_response_body ~allow_empty:false ~status_code:400 ~body with
+  | Error message -> Alcotest.(check string) "tool refusal survives the HTTP envelope"
+      ("HTTP 400: " ^ detail) message
+  | Ok _ -> Alcotest.fail "a refused Goal retry cannot be a successful response"
 
 (* Raw bodies are bounded; their metadata does not claim a JSON parse result. *)
 let test_decode_json_response_body_bounded_body_names_its_size () =
@@ -14083,6 +14114,8 @@ let () =
           test_decode_planning_snapshot_requires_the_history_field;
         Alcotest.test_case "goal carries the judge verdict" `Quick
           test_planning_goal_carries_the_judge_verdict;
+        Alcotest.test_case "retry binds the observed proof request" `Quick
+          test_planning_retry_binding_tracks_the_observed_request;
         Alcotest.test_case "unreadable is not unreviewed" `Quick
           test_planning_goal_separates_unreadable_from_unreviewed;
         Alcotest.test_case "carries the verifier unreconciled reason" `Quick
@@ -14199,6 +14232,8 @@ let () =
       [
         Alcotest.test_case "body rejects error status" `Quick
           test_decode_json_response_body_rejects_error_status;
+        Alcotest.test_case "tool HTTP refusal preserves the reason" `Quick
+          test_tool_http_error_preserves_nested_refusal;
         Alcotest.test_case "body allows empty success" `Quick
           test_decode_json_response_body_allows_empty_success;
         Alcotest.test_case "HTTP fallback and terminal controls" `Quick

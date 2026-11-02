@@ -74,10 +74,9 @@ val body :
 val unreconciled_heading : Goal_reconcile_step.t -> string
 (** Which verifier step could not settle the goal, as the row's headline. *)
 
-val verifying_next_step : Tui_decode.verifier_unreconciled option -> tone * string
-(** The next-step sentence for a Verifying goal. Both offer [c] first: on a
-    goal the latest scan could not settle it is the retry that applies the
-    committed proof or re-arms the request, and shows why when it cannot. *)
+val verifying_next_step : can_retry:bool -> Tui_decode.verifier_unreconciled option -> tone * string
+(** The retry is offered only while the displayed proof has a readable binding.
+    Its response may report an unresolved original instead of a new review. *)
 
 val unreconciled_lines :
   width:int -> Tui_decode.verifier_unreconciled -> line list

@@ -3157,17 +3157,25 @@ let post_goal_confirmation ~host ~port confirmation =
     its rejection to return, not the TUI's to pre-guess. *)
 let post_goal_transition ~expected_workspace ~(host : string) ~(port : int)
     ~(goal_id : string) ~(action : Goal_phase.Public_action.t)
-    ~(note : string option) : (Yojson.Safe.t, string) result =
+    ~(note : string option) ~(retry_binding : Masc.Tui_decode.goal_retry_binding option)
+    : (Yojson.Safe.t, string) result =
   let payload =
     `Assoc
       ([ expected_workspace_field expected_workspace
        ; ("goal_id", `String goal_id)
        ; ("action", `String (Goal_phase.Public_action.to_string action))
        ]
-      @
-      match note with
-      | Some text -> [ ("note", `String text) ]
-      | None -> [])
+      @ (match note with Some text -> [ ("note", `String text) ] | None -> [])
+      @ (match retry_binding with
+         | None -> []
+         | Some binding ->
+           ["expected_verification", `Assoc
+             (["phase", `String (match binding.grb_phase with
+                 | Masc.Tui_decode.Completion_executing -> "executing"
+                 | Completion_verifying -> "verifying");
+               "criterion_revision", `String binding.grb_criterion_revision]
+              @ (match binding.grb_request_id with
+                 | None -> [] | Some id -> ["request_id", `String id]))]))
   in
   post_json ~host ~port ~path:"/api/v1/tools/masc_goal_transition"
     ~body:(Yojson.Safe.to_string payload)

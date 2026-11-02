@@ -345,13 +345,17 @@ let unreconciled_heading = function
    with the reason when it still cannot. [o] reopens the goal, which archives
    a committed proof, so it is offered as taking the goal back, never as the
    way to unstick it. *)
-let verifying_next_step = function
+let verifying_next_step ~can_retry unreconciled =
+  if not can_retry then
+    ( Unreadable
+    , "the verification binding is unavailable - refresh before retrying; [o] takes it back, [x] drops it" )
+  else match unreconciled with
   | Some (_ : Tui_decode.verifier_unreconciled) ->
     ( Refused
-    , "the verifier could not settle it - [c] retries and shows why; [o] takes it back, [x] drops it" )
+    , "the verifier could not settle it - [c] requests recovery; [o] takes it back, [x] drops it" )
   | None ->
     ( Waiting
-    , "with the completion judge - [c] re-arms the request; [o] takes it back, [x] drops it" )
+    , "with the completion judge - [c] requests recovery; [o] takes it back, [x] drops it" )
 
 let unreconciled_lines ~width (blocked : Tui_decode.verifier_unreconciled) =
   verdict ~width:(max 1 width) Refused (unreconciled_heading blocked.vu_step)

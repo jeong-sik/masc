@@ -4,13 +4,17 @@ import { GoalProofDetail } from './goal-proof'
 
 import { html } from 'htm/preact'
 import { GoalConfirmationPanel } from './goal-confirmation'
-import { signal } from '@preact/signals'
-import { useCallback, useEffect, useMemo, useState } from 'preact/hooks'
+import { batch, signal } from '@preact/signals'
+import { useCallback, useEffect, useMemo } from 'preact/hooks'
 import { SECONDS_PER_HOUR } from '../../lib/format-time'
 import { fetchDashboardGoalDetail, fetchDashboardGoalsTree } from '../../api/dashboard'
-import { currentDashboardActor } from '../../api/core'
+import { currentDashboardActor, getStoredToken, getStoredTokenMeta } from '../../api/core'
+import { storedTokenRevision } from '../../api/token-revision'
+import { dashboardActorRevision } from '../../lib/dashboard-session-actor'
+import { executionError, executionLoading, executionWorkspaceAuthority, refreshExecution, type ExecutionWorkspaceAuthority } from '../../store'
+import { artifactWorkspaceBody, captureArtifactWorkspace, type ArtifactWorkspace } from '../../api/published-artifacts'
 import { approvalInputText } from '../../lib/keeper-approval-input-text'
-import { callMcpTool } from '../../api/mcp'
+import { callMcpToolAtIdentity, mcpCallFailureDisposition, mcpIdentityRequiresGoalRefresh } from '../../api/mcp'
 import { route } from '../../router'
 import {
   goalStoreUnavailable as storeUnavailable,
@@ -25,6 +29,7 @@ import { EmptyState, ErrorState, LoadingState } from '../common/feedback-state'
 import { ActionButton } from '../common/button'
 import { FilterChips } from '../common/filter-chips'
 import { StatusBadge } from '../common/status-badge'
+import { showToast } from '../common/toast'
 import { executionOutcomeLabel } from '../fsm-hub-types'
 import { operatorDispositionReasonLabel } from '../fsm-hub-types'
 import { runtimeOutcomeLabel } from '../fsm-hub-types'
@@ -34,10 +39,12 @@ import { TimeAgo } from '../common/time-ago'
 import { TaskCreateForm } from '../task-manage/task-create-form'
 import type {
   DashboardGoalDetailResponse,
+  DashboardGoalsTreeResponse,
   GoalDetailKeeper,
   GoalDetailTimelineEvent,
   GoalFsmProjection,
   GoalMeasurementProjection,
+  GoalStoreUnavailable,
   GoalTreeNode,
   GoalTreeTask,
   GoalTreeSummary,
@@ -220,6 +227,92 @@ const detailLoading = signal(false)
 const detailError = signal<string | null>(null)
 const detailTab = signal<GoalDetailTab>('summary')
 let detailRequestSeq = 0
+let treeRequestSeq = 0
+const treeDecisionBinding = signal<{
+  authority: ExecutionWorkspaceAuthority
+  workspace: ArtifactWorkspace
+  snapshot: DashboardGoalsTreeResponse
+  authRevision: number
+  actor: string
+} | null>(null)
+const detailDecisionBinding = signal<typeof treeDecisionBinding.value>(null)
+const treeErrorOwner = signal<{ authority: ExecutionWorkspaceAuthority; authRevision: number; actor: string;
+  error: string | null; unavailable: GoalStoreUnavailable | null } | null>(null)
+
+function recordTreeErrorOwner(authority: ExecutionWorkspaceAuthority, authRevision: number, actor: string) {
+  treeErrorOwner.value = { authority, authRevision, actor, error: treeError.peek(), unavailable: storeUnavailable.peek() }
+}
+
+type GoalActionOwner = { epoch: string; workspaceRoot: string; mascRoot: string; authRevision: number; authScope: string; actor: string; goalId: string }
+type GoalActionReceipt = {
+  ticket: number
+  action: GoalTransitionAction
+  state: 'pending' | 'success' | 'error'
+  message: string
+  owner: GoalActionOwner
+  uncertain?: boolean
+  binding?: { phase: 'executing' | 'verifying'; criterion_revision: string; request_id?: string }
+}
+const goalActionReceipts = signal<Record<string, GoalActionReceipt>>({})
+const goalActionHistory = signal<Record<string, GoalActionReceipt[]>>({})
+const goalDropDrafts = signal<Record<string, { owner: GoalActionOwner; reason: string }>>({})
+let goalActionTicket = 0
+
+function goalActionAuthScope(revision: number): string {
+  const meta = getStoredTokenMeta()
+  return getStoredToken() && meta?.source === 'dev' && meta.actor === 'dashboard' && meta.role === 'admin'
+    ? 'managed-dev-dashboard' : `credential:${revision}`
+}
+
+// A bearer, not the dashboard's late-arriving actor hint, owns authenticated
+// actions. Without a bearer the actor hint is part of the request authority.
+function goalDecisionActor(): string {
+  return getStoredToken() ? 'credential-bound' : currentDashboardActor()
+}
+
+function relatedEarlierGoalOwner(earlier: GoalActionOwner, current: GoalActionOwner): boolean {
+  const sameLocation = earlier.workspaceRoot === current.workspaceRoot && earlier.mascRoot === current.mascRoot
+    && earlier.goalId === current.goalId
+  const previousConnection = earlier.epoch !== current.epoch && earlier.authScope === current.authScope
+    && earlier.actor === current.actor
+  const dashboardBootstrap = earlier.actor === 'dashboard' && earlier.authScope.startsWith('credential:')
+    && current.authScope === 'managed-dev-dashboard'
+  return sameLocation && (previousConnection || dashboardBootstrap)
+}
+
+function otherGoalActionPending(
+  receipts: Record<string, GoalActionReceipt>, ownerKey: string, owner: GoalActionOwner,
+): boolean {
+  return Object.entries(receipts).some(([key, item]) => key !== ownerKey && item.state === 'pending'
+    && item.owner.workspaceRoot === owner.workspaceRoot && item.owner.mascRoot === owner.mascRoot
+    && item.owner.goalId === owner.goalId)
+}
+
+/** Requests can outlive a detail panel. Keep their last result with its Goal
+    for this dashboard session, including while that Goal is not selected. */
+function setGoalActionReceipt(ownerKey: string, receipt: GoalActionReceipt) {
+  batch(() => {
+    goalActionReceipts.value = { ...goalActionReceipts.value, [ownerKey]: receipt }
+    if (receipt.state !== 'pending') {
+      const previous = goalActionHistory.peek()[ownerKey] ?? []
+      goalActionHistory.value = { ...goalActionHistory.peek(),
+        [ownerKey]: [...previous.filter(item => item.ticket !== receipt.ticket), receipt] }
+    }
+  })
+}
+
+export function _testResetGoalActionReceipts() {
+  goalActionReceipts.value = {}
+  goalActionHistory.value = {}
+  goalDropDrafts.value = {}
+}
+
+function setGoalDropDraft(key: string, value: string | null, owner?: GoalActionOwner) {
+  const next = { ...goalDropDrafts.peek() }
+  if (value === null) delete next[key]
+  else if (owner) next[key] = { owner, reason: value }
+  goalDropDrafts.value = next
+}
 
 function toggleNode(id: string) {
   const next = new Set(expandedNodes.value)
@@ -263,45 +356,82 @@ function collapseAll() {
 }
 
 async function refreshTree() {
+  const request = ++treeRequestSeq
+  const authority = executionWorkspaceAuthority.peek()
+  if (!authority) {
+    treeDecisionBinding.value = null
+    treeErrorOwner.value = null
+    treeLoading.value = false
+    return
+  }
+  const authRevision = storedTokenRevision.peek()
+  const actor = goalDecisionActor()
+  const current = () => treeRequestSeq === request && executionWorkspaceAuthority.peek() === authority
+    && storedTokenRevision.peek() === authRevision && goalDecisionActor() === actor
   treeLoading.value = true
   treeError.value = null
+  treeErrorOwner.value = null
   try {
-    const payload = await fetchDashboardGoalsTree()
-    if (!hydrateGoalTreeSnapshot(payload)) {
-      hydrateGoalTreeObservationError(
-        new Error('Goal Store tree payload was malformed'),
-      )
-    }
+    const workspace = authority ? await captureArtifactWorkspace(authority.workspaceRoot) : null
+    if (!current()) return
+    const payload = await fetchDashboardGoalsTree(workspace ?? undefined)
+    if (!current()) return
+    batch(() => {
+      if (!hydrateGoalTreeSnapshot(payload)) {
+        treeDecisionBinding.value = null
+        hydrateGoalTreeObservationError(new Error('Goal Store tree payload was malformed'))
+        recordTreeErrorOwner(authority, authRevision, actor)
+      } else {
+        const snapshot = treeData.peek()
+        treeDecisionBinding.value = authority && workspace && snapshot ? { authority, workspace, snapshot, authRevision, actor } : null
+        if (!snapshot && (treeError.peek() || storeUnavailable.peek())) recordTreeErrorOwner(authority, authRevision, actor)
+      }
+    })
   } catch (err) {
+    if (!current()) return
+    treeDecisionBinding.value = null
     if (!hydrateGoalTreeError(err)) {
       hydrateGoalTreeObservationError(err)
     }
+    recordTreeErrorOwner(authority, authRevision, actor)
   } finally {
-    treeLoading.value = false
+    if (treeRequestSeq === request) treeLoading.value = false
   }
 }
 
 async function refreshGoalDetail(goalId: string) {
+  if (selectedGoalId.value !== goalId) return
+  const binding = treeDecisionBinding.peek()
+  if (!binding || binding.snapshot !== treeData.peek()
+    || binding.authority !== executionWorkspaceAuthority.peek()
+    || binding.authRevision !== storedTokenRevision.peek() || binding.actor !== goalDecisionActor()) return
   const reqId = ++detailRequestSeq
+  const current = () => detailRequestSeq === reqId && selectedGoalId.value === goalId
+    && treeDecisionBinding.peek() === binding && treeData.peek() === binding.snapshot
+    && executionWorkspaceAuthority.peek() === binding.authority
+    && binding.authRevision === storedTokenRevision.peek() && binding.actor === goalDecisionActor()
   detailLoading.value = true
   detailError.value = null
   try {
-    const next = await fetchDashboardGoalDetail(goalId)
+    const next = await fetchDashboardGoalDetail(goalId, binding.workspace)
     if (!next || typeof next !== 'object' || !('goal' in next)) {
       throw new Error('invalid goal detail payload')
     }
-    if (detailRequestSeq !== reqId) return
+    if (!current()) return
     detailData.value = next
+    detailDecisionBinding.value = binding
   } catch (err) {
-    if (detailRequestSeq !== reqId) return
+    if (!current()) return
     detailData.value = null
+    detailDecisionBinding.value = null
     if (hydrateGoalTreeError(err)) {
+      recordTreeErrorOwner(binding.authority, binding.authRevision, binding.actor)
       detailError.value = treeError.value
     } else {
       detailError.value = errorToString(err)
     }
   } finally {
-    if (detailRequestSeq === reqId) detailLoading.value = false
+    if (current()) detailLoading.value = false
   }
 }
 
@@ -412,11 +542,29 @@ function GoalTaskRelationStrip({
   `
 }
 
+function completionBindingForGoal(node: GoalTreeNode): {
+  phase: 'executing' | 'verifying'; criterion_revision: string; request_id?: string
+} | null {
+  const phase = node.phase === 'executing' ? 'executing' : node.phase === 'verifying' ? 'verifying' : null
+  if (phase === null) return null
+  const proof = node.verification
+  if (!proof || proof.state === 'unreadable') return null
+  const completion = proof.state === 'current' ? proof.completion : proof.historical
+  const binding: { phase: 'executing' | 'verifying'; criterion_revision: string } =
+    { phase, criterion_revision: node.criterion_revision }
+  if (completion.state === 'idle') return proof.state === 'current' ? binding : null
+  const matches = completion.criterion.revision === node.criterion_revision
+  if ((proof.state === 'current') !== matches) return null
+  return { ...binding, request_id: completion.requestId }
+}
+
 function lifecycleActionsForGoal(node: GoalTreeNode): Array<{
   action: GoalTransitionAction
   variant: 'primary' | 'ok' | 'danger'
 }> {
-  return goalLifecycleActions(node.goal_fsm.next_actions).map(action => ({
+  return goalLifecycleActions(node.goal_fsm.next_actions)
+    .filter(action => action !== 'request_complete' || completionBindingForGoal(node) !== null)
+    .map(action => ({
     action,
     variant: action === 'drop' ? 'danger' : 'primary',
   }))
@@ -424,47 +572,127 @@ function lifecycleActionsForGoal(node: GoalTreeNode): Array<{
 
 function GoalLifecycleActionPanel({ node }: { node: GoalTreeNode }) {
   const actions = lifecycleActionsForGoal(node)
-  const [pendingAction, setPendingAction] = useState<GoalTransitionAction | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [lastAction, setLastAction] = useState<GoalTransitionAction | null>(null)
+  const authority = executionWorkspaceAuthority.value
+  const observed = treeDecisionBinding.value
+  const tokenRevision = storedTokenRevision.value
+  const binding = observed && observed.authority === authority && observed.snapshot === treeData.value
+    && observed.authRevision === tokenRevision && observed.actor === goalDecisionActor() ? observed : null
+  const authScope = goalActionAuthScope(tokenRevision)
+  const owner = authority && binding ? { epoch: authority.epoch, workspaceRoot: authority.workspaceRoot,
+    mascRoot: binding.workspace.mascRoot, authRevision: tokenRevision, authScope, actor: binding.actor, goalId: node.id } : null
+  const ownerKey = owner ? JSON.stringify([owner.epoch, owner.workspaceRoot, owner.mascRoot, owner.authScope, owner.actor, owner.goalId]) : ''
+  const receipt = goalActionReceipts.value[ownerKey]
+  const history = (goalActionHistory.value[ownerKey] ?? []).filter(item => item.ticket !== receipt?.ticket)
+  const previous = owner ? [
+    ...Object.values(goalActionHistory.value).flat(),
+    ...Object.values(goalActionReceipts.value).filter(item => item.state === 'pending'),
+  ].filter(item => relatedEarlierGoalOwner(item.owner, owner)) : []
+  const pendingAction = receipt?.state === 'pending' ? receipt.action : null
+  const previousPending = previous.some(item => item.state === 'pending')
+  const otherPending = owner ? otherGoalActionPending(goalActionReceipts.value, ownerKey, owner) : false
+  const otherUncertain = owner ? Object.entries(goalActionHistory.value).some(([key, items]) => key !== ownerKey
+    && items.some(item => item.uncertain && item.owner.workspaceRoot === owner.workspaceRoot
+      && item.owner.mascRoot === owner.mascRoot && item.owner.goalId === owner.goalId)) : false
   // Drop opens a reason instead of sending: the server refuses a drop that
   // does not say why, and each cancelled Task's author is told that sentence.
-  const [dropReason, setDropReason] = useState<string | null>(null)
+  const dropReason = goalDropDrafts.value[ownerKey]?.reason ?? null
+  const previousDrafts = owner ? Object.values(goalDropDrafts.value).filter(item =>
+    item.reason.trim() !== '' && relatedEarlierGoalOwner(item.owner, owner)) : []
 
   const runAction = useCallback((action: GoalTransitionAction, note?: string) => {
+    if (!authority || !binding || !owner || executionWorkspaceAuthority.peek() !== authority
+      || treeDecisionBinding.peek() !== binding || treeData.peek() !== binding.snapshot
+      || storedTokenRevision.peek() !== binding.authRevision) return
+    if (goalDecisionActor() !== binding.actor) {
+      showToast('인증 정보가 변경되어 Goal을 다시 확인합니다.', 'warning')
+      void refreshTree()
+      return
+    }
+    const completionBinding = action === 'request_complete' ? completionBindingForGoal(node) : null
+    if (action === 'request_complete' && completionBinding === null) {
+      setGoalActionReceipt(ownerKey, { owner, ticket: ++goalActionTicket, action, state: 'error',
+        message: '검증 요청을 읽지 못했습니다. 새로고침 후 다시 시도해 주세요.' })
+      return
+    }
+    if (goalActionReceipts.value[ownerKey]?.state === 'pending'
+      || otherGoalActionPending(goalActionReceipts.peek(), ownerKey, owner)) return
     const actorId = currentDashboardActor()
-    setPendingAction(action)
-    setError(null)
-    setLastAction(null)
+    const ticket = ++goalActionTicket
+    setGoalActionReceipt(ownerKey, { owner, ticket, action, state: 'pending', message: '', ...(completionBinding ? { binding: completionBinding } : {}) })
+    const ownerIsCurrent = () => {
+      const current = executionWorkspaceAuthority.peek()
+      const currentBinding = treeDecisionBinding.peek()
+      return current?.epoch === authority.epoch && current.workspaceRoot === authority.workspaceRoot
+        && currentBinding?.authority === current && currentBinding.snapshot === treeData.peek()
+        && currentBinding.workspace.mascRoot === binding.workspace.mascRoot
+        && storedTokenRevision.peek() === owner.authRevision && goalDecisionActor() === owner.actor
+    }
     void (async () => {
       try {
-        await callMcpTool('masc_goal_transition', {
+        const response = await callMcpToolAtIdentity('masc_goal_transition', {
           goal_id: node.id,
           action,
+          expected_workspace: artifactWorkspaceBody(binding.workspace),
           ...(note === undefined ? {} : { note }),
-          actor: {
-            id: actorId,
-            display_name: actorId,
-          },
-        })
-        setLastAction(action)
-        setDropReason(null)
+          ...(completionBinding === null ? {} : { expected_verification: completionBinding }),
+        }, { revision: owner.authRevision, actor: actorId })
+        const retry = action === 'request_complete' && node.phase === 'verifying'
+        const parsed: unknown = JSON.parse(response)
+        if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)
+          || !('status' in parsed) || parsed.status !== 'ok'
+          || !('goal_id' in parsed) || parsed.goal_id !== node.id
+          || !('action' in parsed) || parsed.action !== action) {
+          throw new Error('Goal transition response does not match the request')
+        }
+        const reconciled = 'reconciled' in parsed && parsed.reconciled === true
+        const message = reconciled ? 'Existing verification reconciled'
+          : retry ? 'Verification retry requested' : `${GOAL_TRANSITION_LABELS[action]} applied`
+        if (goalActionReceipts.value[ownerKey]?.ticket !== ticket) return
+        setGoalActionReceipt(ownerKey, { owner, ticket, action, state: 'success', message, ...(completionBinding ? { binding: completionBinding } : {}) })
+        if (!ownerIsCurrent()) {
+          showToast(`Goal ${node.id}: 이전 연결에서 요청 결과가 도착했습니다. 해당 workspace에서 상태를 확인하세요.`, 'warning')
+          return
+        }
+        setGoalDropDraft(ownerKey, null)
+        if (selectedGoalId.value !== node.id) showToast(`Goal ${node.id}: ${message}`)
         await Promise.all([
           refreshTree(),
           refreshGoalDetail(node.id),
         ])
       } catch (err) {
-        setError(errorToString(err))
-      } finally {
-        setPendingAction(null)
+        const rawDetail = errorToString(err)
+        const disposition = mcpCallFailureDisposition(err)
+        const detail = disposition === 'outcome_unknown'
+          ? `요청 결과를 확인하지 못했습니다. 다시 시도하기 전에 원래 Goal 상태를 확인하세요. ${rawDetail}`
+          : disposition === 'known_tool_response'
+            ? `${rawDetail} 일부 변경이 적용되었을 수 있습니다. 다시 시도하기 전에 Goal 상태를 확인하세요.` : rawDetail
+        if (goalActionReceipts.value[ownerKey]?.ticket !== ticket) return
+        setGoalActionReceipt(ownerKey, { owner, ticket, action, state: 'error', message: detail,
+          uncertain: disposition !== 'known_pre_effect', ...(completionBinding ? { binding: completionBinding } : {}) })
+        if (!ownerIsCurrent()) {
+          if (mcpIdentityRequiresGoalRefresh(err)) {
+            showToast('인증이 변경되거나 거부되어 Goal을 변경하지 않았습니다. 현재 Goal을 다시 확인한 뒤 요청해 주세요.', 'warning')
+            return
+          }
+          showToast(`Goal ${node.id}: 이전 연결에서 요청 결과가 도착했습니다. 해당 workspace에서 상태를 확인하세요.`, 'warning')
+          return
+        }
+        if (selectedGoalId.value !== node.id) showToast(`Goal ${node.id}: ${detail}`, 'error')
       }
     })()
-  }, [node.id])
+  }, [node, ownerKey, authority, binding, tokenRevision, previousPending])
 
-  if (actions.length === 0) return null
+  const bindingUnavailable = (node.phase === 'executing' || node.phase === 'verifying')
+    && completionBindingForGoal(node) === null
+  if (actions.length === 0 && !receipt && !bindingUnavailable && previous.length === 0 && previousDrafts.length === 0) return null
 
   return html`
     <div class=${CARD_BOX} data-goal-lifecycle-actions>
+      ${bindingUnavailable ? html`
+        <p role="status" class="mb-3 text-xs text-text-muted">검증 상태를 확인할 수 없어 완료 요청을 사용할 수 없습니다. Goal을 새로고침해 주세요.</p>` : null}
+      ${binding === null ? html`<p role="status" class="mb-3 text-xs text-text-muted">현재 workspace에서 Goal을 다시 확인한 뒤 변경할 수 있습니다.</p>` : null}
+      ${otherPending && !previousPending ? html`<p role="status" class="mb-3 text-xs text-text-muted">다른 연결 또는 인증의 같은 Goal 요청이 끝나기를 기다리는 중입니다.</p>` : null}
+      ${otherUncertain && !otherPending ? html`<p role="status" class="mb-3 text-xs text-text-muted">다른 연결 또는 인증의 Goal 요청 결과가 확인되지 않았습니다. 현재 Goal 상태를 확인해 주세요.</p>` : null}
       ${node.resume_phase ? html`<p class="mb-3 text-xs text-text-muted" data-goal-resume-phase>재개 시 ${goalPhaseLabel(node.resume_phase)} · 연결된 Task는 별도로 진행됩니다.</p>` : null}
       <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
         <div>
@@ -474,22 +702,24 @@ function GoalLifecycleActionPanel({ node }: { node: GoalTreeNode }) {
       </div>
       <div class="flex flex-wrap gap-2">
         ${actions.map(({ action, variant }) => {
-          const label = GOAL_TRANSITION_LABELS[action]
+          const label = action === 'request_complete' && node.phase === 'verifying'
+            ? 'Retry verification'
+            : GOAL_TRANSITION_LABELS[action]
           const isPending = pendingAction === action
           return html`
             <${ActionButton}
               key=${action}
               variant=${variant}
               size="sm"
-              disabled=${pendingAction !== null}
+              disabled=${pendingAction !== null || otherPending || binding === null}
               ariaBusy=${isPending}
               ariaLabel=${label}
               title=${label}
               onClick=${() => {
                 if (action === 'drop') {
-                  setDropReason(current => current ?? '')
+                  setGoalDropDraft(ownerKey, dropReason ?? '', owner ?? undefined)
                 } else {
-                  setDropReason(null)
+                  setGoalDropDraft(ownerKey, null)
                   runAction(action)
                 }
               }}
@@ -517,7 +747,7 @@ function GoalLifecycleActionPanel({ node }: { node: GoalTreeNode }) {
               value=${dropReason}
               disabled=${pendingAction !== null}
               autoFocus
-              onInput=${(event: Event) => setDropReason((event.target as HTMLTextAreaElement).value)}
+              onInput=${(event: Event) => setGoalDropDraft(ownerKey, (event.target as HTMLTextAreaElement).value, owner ?? undefined)}
             ></textarea>
           </label>
           <div class="flex flex-wrap gap-2">
@@ -525,7 +755,7 @@ function GoalLifecycleActionPanel({ node }: { node: GoalTreeNode }) {
               type="submit"
               variant="danger"
               size="sm"
-              disabled=${pendingAction !== null || dropReason.trim() === ''}
+              disabled=${pendingAction !== null || otherPending || binding === null || dropReason.trim() === ''}
               ariaBusy=${pendingAction === 'drop'}
             >
               Drop goal
@@ -534,23 +764,50 @@ function GoalLifecycleActionPanel({ node }: { node: GoalTreeNode }) {
               variant="ghost"
               size="sm"
               disabled=${pendingAction !== null}
-              onClick=${() => setDropReason(null)}
+              onClick=${() => setGoalDropDraft(ownerKey, null)}
             >
               Cancel
             <//>
           </div>
         </form>
       `}
-      ${lastAction ? html`
+      ${receipt?.state === 'success' ? html`
         <div class="mt-3 rounded-[var(--r-1)] border border-[var(--ok-25)] bg-[var(--ok-10)] px-3 py-2 text-xs text-[var(--color-status-ok)]" data-testid="goal-lifecycle-action-status">
-          ${GOAL_TRANSITION_LABELS[lastAction]} applied
+          ${receipt.message}
         </div>
       ` : null}
-      ${error ? html`
+      ${receipt?.state === 'error' ? html`
         <div class="mt-3 rounded-[var(--r-1)] border border-[var(--err-25)] bg-[var(--err-10)] px-3 py-2 text-xs text-[var(--color-status-err)]" data-testid="goal-lifecycle-action-error">
-          ${error}
+          ${receipt.message}
         </div>
       ` : null}
+      ${receipt?.binding && receipt.state !== 'pending' ? html`
+        <p class="mt-2 break-all text-xs text-text-muted" data-testid="goal-lifecycle-action-binding">
+          요청 당시 기준 ${receipt.binding.criterion_revision} · 검증 요청 ${receipt.binding.request_id ?? '없음'}
+        </p>` : null}
+      ${history.length > 0 ? html`
+        <div class="mt-3 space-y-1 text-xs text-text-muted" data-testid="goal-lifecycle-action-history">
+          ${history.map(item => html`<p key=${item.ticket}>
+            ${item.message}${item.binding ? ` · 요청 당시 기준 ${item.binding.criterion_revision} · 검증 요청 ${item.binding.request_id ?? '없음'}` : ''}
+          </p>`)}
+        </div>` : null}
+      ${previous.length > 0 ? html`
+        <div class="mt-3 space-y-1 text-xs text-text-muted" data-testid="goal-lifecycle-previous-connection">
+          <p>이전 연결이나 인증의 요청 기록입니다. 현재 서버와 같은 workspace인지는 확인되지 않았습니다.</p>
+          ${previous.map(item => html`<p key=${item.ticket}>
+            서버 ${item.owner.epoch} · ${GOAL_TRANSITION_LABELS[item.action]} · ${item.state === 'pending' ? '결과 대기 중' : item.message}
+            ${item.binding ? ` · 기준 ${item.binding.criterion_revision} · 검증 요청 ${item.binding.request_id ?? '없음'}` : ''}
+          </p>`)}
+        </div>` : null}
+      ${previousDrafts.length > 0 ? html`
+        <div class="mt-3 space-y-1 text-xs text-text-muted" data-testid="goal-drop-previous-drafts">
+          <p>이전 연결이나 인증에서 보존된 Drop 사유입니다. 요청이 이미 적용됐을 수 있으니 상태를 확인해 주세요.</p>
+          ${previousDrafts.map(item => html`<div key=${item.owner.epoch}>
+            <p class="whitespace-pre-wrap">서버 ${item.owner.epoch} · ${item.reason}</p>
+            <button type="button" disabled=${pendingAction !== null || otherPending}
+              onClick=${() => setGoalDropDraft(ownerKey, item.reason, owner ?? undefined)}>이 사유를 현재 입력에 복사</button>
+          </div>`)}
+        </div>` : null}
     </div>
   `
 }
@@ -966,7 +1223,12 @@ function GoalDetailPanel({
     `
   }
 
-  const detail = data?.goal.id === selectedNode.id ? data : null
+  const binding = treeDecisionBinding.value
+  const authorized = binding && binding.authority === executionWorkspaceAuthority.value
+    && binding.snapshot === treeData.value && binding.authRevision === storedTokenRevision.value
+    && binding.actor === goalDecisionActor()
+  const detail = authorized && binding === detailDecisionBinding.value
+    && data?.goal.id === selectedNode.id ? data : null
   return html`
     <section
       class=${`${GOAL_PANEL} flex flex-col gap-4`}
@@ -1012,7 +1274,7 @@ function GoalDetailPanel({
       <${GoalMeasurementDetail} node=${selectedNode} />
       <${GoalProofDetail} proof=${selectedNode.verification} />
       <${GoalLifecycleActionPanel} key=${selectedNode.id} node=${selectedNode} />
-      ${selectedNode.phase === 'awaiting_confirmation' || selectedNode.phase === 'completed' ? html`
+      ${authorized && (selectedNode.phase === 'awaiting_confirmation' || selectedNode.phase === 'completed') ? html`
         <${GoalConfirmationPanel} key=${selectedNode.id} goalId=${selectedNode.id}
           onConfirmed=${() => { void Promise.all([refreshGoalDetail(selectedNode.id), refreshTree()]) }} />` : null}
 
@@ -1135,18 +1397,42 @@ function GoalDetailPanel({
 }
 
 export function GoalTree() {
+  const authority = executionWorkspaceAuthority.value
+  const authorityError = executionError.value
+  const authorityLoading = executionLoading.value
+  const tokenRevision = storedTokenRevision.value
+  const actorRevision = dashboardActorRevision.value
   useEffect(() => {
     void refreshTree()
-  }, [])
+  }, [authority, tokenRevision, actorRevision])
 
-  const data = treeData.value
+  const observedData = treeData.value
   const loading = treeLoading.value
-  const error = treeError.value
-  const unavailable = storeUnavailable.value
+  const decisionBinding = treeDecisionBinding.value
+  const data = decisionBinding && decisionBinding.authority === authority
+    && decisionBinding.snapshot === observedData && decisionBinding.authRevision === tokenRevision
+    && decisionBinding.actor === goalDecisionActor() ? observedData : null
+  const errorOwner = treeErrorOwner.value
+  const observedError = treeError.value
+  const observedUnavailable = storeUnavailable.value
+  const ownsError = errorOwner && errorOwner.authority === authority && errorOwner.authRevision === tokenRevision
+    && errorOwner.actor === goalDecisionActor() && errorOwner.error === observedError
+    && errorOwner.unavailable === observedUnavailable
+  const error = ownsError ? observedError : null
+  const unavailable = ownsError ? observedUnavailable : null
   const query = filterQuery.value
   const activePhaseFilter = treePhaseFilter.value
   const selectedId = selectedGoalId.value
   const routeGoalId = cleanRouteGoalId(route.value.params.goal)
+
+  useEffect(() => {
+    if (authority && !loading && ((observedData
+      && (decisionBinding?.authority !== authority || decisionBinding.snapshot !== observedData
+        || decisionBinding.authRevision !== tokenRevision || decisionBinding.actor !== goalDecisionActor()))
+      || (!observedData && (observedError || observedUnavailable) && !ownsError))) {
+      void refreshTree()
+    }
+  }, [authority, observedData, loading, decisionBinding, tokenRevision, actorRevision, observedError, observedUnavailable, ownsError])
 
   const visibleTree = useMemo(
     () => {
@@ -1173,7 +1459,8 @@ export function GoalTree() {
   )
 
   useEffect(() => {
-    if (!data || allNodes.length === 0) {
+    if (!data) return
+    if (allNodes.length === 0) {
       selectedGoalId.value = null
       return
     }
@@ -1198,13 +1485,16 @@ export function GoalTree() {
   }, [allNodes, data, routeGoalId, visibleNodes])
 
   useEffect(() => {
-    if (!selectedId) {
+    if (!selectedId || !decisionBinding || decisionBinding.authority !== authority || decisionBinding.snapshot !== data) {
+      detailRequestSeq += 1
       detailData.value = null
+      detailDecisionBinding.value = null
       detailError.value = null
+      detailLoading.value = false
       return
     }
     void refreshGoalDetail(selectedId)
-  }, [selectedId])
+  }, [selectedId, authority, data, decisionBinding])
 
   const phaseCounts = useMemo(() => {
     const counts: Record<GoalPhaseFilter, number> = {
@@ -1306,6 +1596,13 @@ export function GoalTree() {
 
       ${loading && !data ? html`
         <${LoadingState}>goal manager 로드 중...<//>
+      ` : !data && !authority && !authorityLoading ? html`
+        <div role="alert" class="text-sm text-[var(--color-status-err)]">
+          workspace를 확인할 수 없습니다${authorityError ? `: ${authorityError}` : '.'}
+          <button type="button" onClick=${() => { void refreshExecution({ force: true }).catch(() => {}) }}>다시 확인</button>
+        </div>
+      ` : !data && !error && !unavailable ? html`
+        <${LoadingState}>현재 workspace와 인증을 확인하는 중...<//>
       ` : data && data.tree.length === 0 ? html`
         <${EmptyState} message="등록된 목표 없음" />
       ` : data && isFiltering && visibleTree.length === 0 ? html`

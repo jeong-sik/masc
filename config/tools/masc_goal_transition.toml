@@ -37,3 +37,35 @@ name = "evidence_refs"
 type = "array"
 items = { type = "string" }
 description = "For request_complete: explicit board:<post_id>, fusion:<run_id> or task:<task_id> references. Their exact source is captured with this proof request. Task lifecycle state is not complete approval history or external acceptance. Omit on retry to keep the submitted snapshot; supplying changed evidence creates a new request."
+
+[[params]]
+name = "expected_verification"
+type = "object"
+additional_properties = false
+description = "Bind a completion request to the displayed Goal phase, criterion and proof request. Omit request_id only when the observed verification is idle. The server rejects a changed phase, criterion or request. Evidence may be submitted with an executing Goal."
+[[params.params]]
+name = "phase"
+type = "string"
+required = true
+enum = ["executing", "verifying"]
+[[params.params]]
+name = "criterion_revision"
+type = "string"
+required = true
+[[params.params]]
+name = "request_id"
+type = "string"
+
+[[params]]
+name = "expected_workspace"
+type = "object"
+additional_properties = false
+description = "Optional canonical workspace paths observed by the caller. A mismatch refuses the transition before changing the Goal."
+[[params.params]]
+name = "base_path"
+type = "string"
+required = true
+[[params.params]]
+name = "masc_root"
+type = "string"
+required = true

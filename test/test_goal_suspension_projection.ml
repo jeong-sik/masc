@@ -6,7 +6,7 @@ let test_actions () =
   check (list string) "blocked public controls" ["drop";"reopen";"pause";"unblock"]
     (actions (Goal_phase.Blocked Goal_phase.Resume_awaiting_confirmation));
   check (list string) "verifier actions not exposed as operator controls"
-    ["drop";"reopen";"pause";"block"] (actions Goal_phase.Verifying)
+    ["request_complete";"drop";"reopen";"pause";"block"] (actions Goal_phase.Verifying)
 let test_timeline () =
   let event = `Assoc ["event_type", `String "goal_phase"; "ts", `String "2026-10-04T00:00:00Z";
     "payload", `Assoc ["phase", `String "blocked"; "resume_phase", `String "verifying"; "actor", `String "operator"]] in

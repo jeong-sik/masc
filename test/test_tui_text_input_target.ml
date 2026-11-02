@@ -279,7 +279,7 @@ let test_a_drop_reason_claims_typing_on_its_goal_detail () =
   state.Tui_types.planning_mode <- Tui_types.Planning_detail "goal-a";
   check target "reading the detail" None (resolved state);
   state.Tui_types.goal_action_pending <-
-    Some (Tui_types.Goal_action_armed { goal_id = "goal-a"; action = Goal_phase.Public_action.Pause });
+    Some (Tui_types.Goal_action_armed { goal_id = "goal-a"; action = Goal_phase.Public_action.Pause; phase = Goal_phase.Executing; retry_binding = None });
   check target "an armed action is a key" None (resolved state);
   state.Tui_types.goal_action_pending <-
     Some (Tui_types.Goal_drop_reason { goal_id = "goal-a"; reason = "" });

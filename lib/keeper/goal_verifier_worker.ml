@@ -540,7 +540,11 @@ let request_retry ~store ~installation_id ~package_id ~goal_id ~request_id ~requ
       let* _ = advance ~store parent (Progress.Successor_intended successor) in
       let* _ = select_frontier ~automatic:false ~store ~installation_id ~package_id
         ~goal_id ~request_id ~new_run in Ok ()
-    | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+    | Dispatch_pending (Some (Progress.Outcome_unknown _)) ->
+      Error (Execution_pending "The original Goal verification outcome is unknown; no new review was started. Inspect its original run.")
+    | Dispatch_pending (None | Some (Progress.Waiting _ | Progress.Absent _)) ->
+      Error (Execution_pending "The original Goal verification may still be running; no new review was started. Inspect its original run.")
+    | Captured | Admission_wait _ | Judged _ | Committing _ | Commit_unknown _
     | Finished _ | Conflicted _ | Rejected {stage=Progress.Before_dispatch;_} | Subdividing _ | Subdivided _ -> Ok ())
 
 let run ?on_tool_result ?sw ~store ~retained ~authority ~provider_rest () =

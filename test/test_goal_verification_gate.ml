@@ -1371,6 +1371,67 @@ let test_verifying_repeat_rearms_a_missing_proof_request () =
     (json_state completed [ "goal"; "phase" ])
 ;;
 
+let test_bound_retry_does_not_create_or_replace_a_request () =
+  with_workspace @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx "Bound retry" in
+  let Goal_store.Criterion {revision=initial_revision; _} = current_criterion config goal_id in
+  ignore (must_succeed "initial request" (transition ctx goal_id "request_complete"));
+  let request_id, Goal_store.Criterion {revision; _} = proof_identity config goal_id in
+  ignore (must_fail "a stale executing click must not retry another actor's request"
+    (dispatch ctx ~name:"masc_goal_transition"
+       ["goal_id", `String goal_id; "action", `String "request_complete";
+        "expected_verification", `Assoc ["phase", `String "executing";
+          "criterion_revision", `String initial_revision]]));
+  let still_original, _ = proof_identity config goal_id in
+  check string "the other actor's request is unchanged" request_id still_original;
+  let retry () = dispatch ctx ~name:"masc_goal_transition"
+      ["goal_id", `String goal_id; "action", `String "request_complete";
+       "expected_verification", `Assoc ["phase", `String "verifying"; "criterion_revision", `String revision;
+         "request_id", `String request_id]] in
+  ignore (must_succeed "current retry" (retry ()));
+  ignore (must_succeed "the verifier refutes the original"
+    (verifier_transition config goal_id
+       (Workspace_goals.Proof_refuted {reason="target not met"}) "target not met"));
+  ignore (must_fail "old retry must not start a new request after refutation" (retry ()));
+  check string "the old click leaves the Goal executing" "executing" (stored_phase config goal_id);
+  ignore (must_succeed "a new explicit completion request" (transition ctx goal_id "request_complete"));
+  let replacement, _ = proof_identity config goal_id in
+  check bool "the replacement request has its own identity" false (String.equal request_id replacement);
+  ignore (must_fail "old retry must not target the replacement" (retry ()));
+  let observed, _ = proof_identity config goal_id in
+  check string "the replacement remains untouched" replacement observed
+;;
+
+let test_transition_refuses_a_different_workspace () =
+  with_workspace @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx "Workspace-bound transition" in
+  ignore (must_fail "other workspace is refused"
+    (dispatch ctx ~name:"masc_goal_transition"
+       ["goal_id", `String goal_id; "action", `String "request_complete";
+        "expected_workspace", `Assoc ["base_path", `String "/different-workspace";
+          "masc_root", `String "/different-workspace/.masc"]]));
+  check string "the Goal has not changed" "executing" (stored_phase config goal_id)
+;;
+
+let test_goal_cache_scope_tracks_the_resolved_store () =
+  let base = temp_dir () in
+  let first = Filename.concat base "first" and second = Filename.concat base "second" in
+  let link = Filename.concat base ".masc" in
+  Fun.protect ~finally:(fun () -> (try Unix.unlink link with Unix.Unix_error _ -> ()); rm_rf base)
+    (fun () ->
+      Unix.mkdir first 0o755;
+      Unix.mkdir second 0o755;
+      Unix.symlink first link;
+      let config = Workspace.default_config base in
+      let old_scope = Server_dashboard_http.goal_cache_scope ~config in
+      Unix.unlink link;
+      Unix.symlink second link;
+      let new_scope = Server_dashboard_http.goal_cache_scope ~config in
+      check bool "changing the store root changes the cache scope" false (String.equal old_scope new_scope))
+;;
+
 let test_verifying_repeat_wakes_an_existing_proof_request () =
   with_workspace
   @@ fun config ->
@@ -2205,6 +2266,12 @@ let () =
             test_proof_refuted_returns_to_executing_with_reason
         ; test_case "verifying repeat re-arms a missing proof request" `Quick
             test_verifying_repeat_rearms_a_missing_proof_request
+        ; test_case "retry is bound to the observed proof request" `Quick
+            test_bound_retry_does_not_create_or_replace_a_request
+        ; Alcotest.test_case "workspace binding refuses another workspace" `Quick
+            test_transition_refuses_a_different_workspace
+        ; Alcotest.test_case "Goal cache follows the resolved store root" `Quick
+            test_goal_cache_scope_tracks_the_resolved_store
         ; test_case "verifying repeat wakes an existing proof request" `Quick
             test_verifying_repeat_wakes_an_existing_proof_request
         ; test_case "verifying repeat reconciles a committed proof" `Quick

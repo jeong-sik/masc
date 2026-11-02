@@ -3800,8 +3800,7 @@ let reconcile_task_documents state ~mailbox =
   (match state.task_history_request with
    | None -> ()
    | Some request ->
-     let current=state.view=Planning && state.planning_mode=Planning_list
-       && state.task_detail_id=Some (Masc_tui_fetched.request_key request.thr_ticket)
+     let current=task_history_request_in_scope state request
        && Masc_tui_fetched.is_current ~equal:String.equal state.task_history request.thr_ticket in
      if not current then begin
        Masc_tui_workspace_job.cancel_observation state ~key:request.thr_job;
@@ -4257,11 +4256,11 @@ let launch_goal_timeline_load state ~mailbox goal_id =
     (fun () -> Masc_tui_http.fetch_goal_timeline ~host ~port ~goal_id)
   end
 
-let launch_task_history_load ?(older=false) state ~mailbox task_id =
+let launch_task_history_load ?(older=false) ?limit state ~mailbox task_id =
   if server_authority_ready state then begin
     let previous=state.task_history_request in
-    let limit,_=get_terminal_size () in
-    match begin_task_history_read ~older state ~task_id ~limit with
+    let limit=match limit with Some limit -> limit | None -> fst (get_terminal_size ()) in
+    match begin_task_history_read ~older ~progressive:(not older) state ~task_id ~limit with
     | None -> ()
     | Some request ->
       Option.iter (fun old -> Masc_tui_workspace_job.cancel_observation state ~key:old.thr_job) previous;
@@ -20883,7 +20882,12 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
   | Goal_timeline_loaded (request, result) ->
       complete_goal_timeline_read state request result
   | Task_history_loaded (request, result) ->
-      complete_task_history_read state request result
+      let task_id=Masc_tui_fetched.request_key request.thr_ticket in
+      let followup =
+        if task_history_request_in_scope state request
+        then task_history_followup state request result else None in
+      complete_task_history_read state request result;
+      Option.iter (fun limit -> launch_task_history_load ~older:true ~limit state ~mailbox task_id) followup
   | Board_attachment_loaded (request,result) ->
       if Option.is_some (current_board_reader state) then
         state.board_reader <- Masc_tui_board_reader.complete state.board_reader request result

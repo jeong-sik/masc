@@ -329,6 +329,8 @@ let async_source_task_lines ~cols state source =
   @ pending @ errors @ content
   @ (Masc_tui_task_document.history_status_lines ~width ~view:history
        ~in_flight:(Masc_tui_fetched.in_flight state.tools_async_task_history)
+       ~continuing:(Option.exists (fun request -> Option.is_some request.thr_page.hr_cursor)
+         state.tools_async_task_history_request)
       |> List.concat_map (text ""))
   @ (task_document_lines state ~cols Masc_tui_task_document.History
      |> List.map (fun line -> "",line))

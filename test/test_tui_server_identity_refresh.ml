@@ -4759,6 +4759,83 @@ let task_scroll_history task_id =
        "events",`List []]) with
   | Ok history -> history | Error detail -> Alcotest.fail detail
 
+let test_task_history_progressive_read_keeps_owner_and_cursor () =
+  let open Masc_tui_types in
+  let module History = Masc.Tui_decode_task_inspection in
+  let module Fetched = Masc_tui_fetched in
+  let state,task_id = task_detail_scroll_fixture () in
+  state.workspace_identity <- Workspace_identity_match;
+  state.server_identity <- Some (identity "/workspace/task-history");
+  let require = function Some request -> request | None -> Alcotest.fail "history read did not start" in
+  let decode request ~offset ~next =
+    let token = function None -> `Null | Some value -> `String value in
+    let body = `Assoc [
+      "schema",`String "masc.task-history.page/v2";"task_id",`String task_id;
+      "cursor",token request.History.hr_cursor;"next_cursor",token next;
+      "sources",`List [`Assoc ["source",`String "activity-events";"state",`String "not-created"];
+                       `Assoc ["source",`String "events";"state",`String "observed"]];
+      "events",`List [`Assoc ["source",`String "events";"file",`String "events/2026-10/19.jsonl";
+        "offset",`Int offset;"event",`Assoc ["type",`String "task_transition";
+          "task",`String task_id;"agent",`String "fixture";"ts",`String "2026-10-19T01:00:00Z";
+          "from_status",`String "todo";"to_status",`String "in_progress"]]] ] in
+    match History.history_page ~request body with
+    | Ok history -> history | Error detail -> Alcotest.fail detail in
+  let first = begin_task_history_read ~progressive:true state ~task_id ~limit:40 |> require in
+  Alcotest.(check int) "initial request observes one event" 1 first.thr_page.hr_limit;
+  let prefix = decode first.thr_page ~offset:20 ~next:(Some "older-cursor") in
+  Alcotest.(check (option int)) "same owner continues the captured prefix" (Some 39)
+    (task_history_followup state first (Ok prefix));
+  Alcotest.(check bool) "an exhausted prefix or failed first read does not continue" true
+    (task_history_followup state first (Ok (task_scroll_history task_id))=None
+     && task_history_followup state first (Error "unavailable")=None);
+  complete_task_history_read state first (Ok prefix);
+  let older = begin_task_history_read ~older:true state ~task_id ~limit:39 |> require in
+  Alcotest.(check bool) "continuation preserves the observed prefix and its cursor" true
+    (older.thr_page.hr_cursor=Some "older-cursor"
+     && Fetched.in_flight state.task_history
+     && Fetched.value (Fetched.view_for ~equal:String.equal state.task_history ~key:task_id)=Some prefix);
+  let all = decode older.thr_page ~offset:10 ~next:None in
+  complete_task_history_read state older (Ok all);
+  Alcotest.(check bool) "continuation keeps both source observations" true
+    (List.length all.history_records=2
+     && Fetched.value (Fetched.view_for ~equal:String.equal state.task_history ~key:task_id)=Some all);
+  let refresh = begin_task_history_read ~progressive:true state ~task_id ~limit:40 |> require in
+  Alcotest.(check bool) "refresh retains a prior full observation instead of replacing it with a preview" true
+    (refresh.thr_page.hr_limit=40 && Option.is_none refresh.thr_followup_limit);
+  complete_task_history_read state refresh (Error "refresh unavailable");
+  state.task_history <- Fetched.clear state.task_history;
+  let retired = begin_task_history_read ~progressive:true state ~task_id ~limit:40 |> require in
+  let retired_result = decode retired.thr_page ~offset:20 ~next:(Some "older-cursor") in
+  let current = begin_task_history_read ~progressive:true state ~task_id ~limit:40 |> require in
+  let payloads = state.task_payloads in
+  let reading = state.task_reading in
+  state.task_payloads <- Masc_tui_task_payloads.observe [];
+  state.task_reading <- Masc_tui_overview_tasks.Rows_unavailable "temporary failure";
+  Alcotest.(check bool) "unavailable backlog preserves the original Task request" true
+    (task_history_request_in_scope state current);
+  state.task_reading <- Masc_tui_overview_tasks.Rows_unread;
+  Alcotest.(check bool) "an unread backlog does not invent Task removal" true
+    (task_history_request_in_scope state current);
+  state.task_reading <- Masc_tui_overview_tasks.Rows_read [];
+  state.tasks_error <- Some "degraded local read";
+  Alcotest.(check bool) "a degraded local read does not prove Task removal" true
+    (task_history_request_in_scope state current);
+  state.tasks_error <- None;
+  Alcotest.(check bool) "a removed Task cannot own an automatic continuation" false
+    (task_history_request_in_scope state current);
+  state.task_payloads <- payloads;
+  state.task_reading <- reading;
+  state.task_focus <- Masc_tui_overview_tasks.No_task_focus;
+  Alcotest.(check bool) "an unfocused Task cannot own an automatic continuation" false
+    (task_history_request_in_scope state current);
+  state.task_focus <- Masc_tui_overview_tasks.Task_focus {selected=Some task_id};
+  Alcotest.(check bool) "superseded and replaced workspace requests cannot continue" true
+    (task_history_followup state retired (Ok retired_result)=None
+     && task_history_request_current state current
+     && task_history_request_in_scope state current
+     && (state.workspace_read_authority <- ref ();
+         task_history_followup state current (Ok retired_result)=None))
+
 let test_reopened_task_history_retains_only_owned_observation () =
   let open Masc_tui_types in
   let module Fetched = Masc_tui_fetched in
@@ -5650,7 +5727,9 @@ let test_queue_detail_respects_source_reading () =
 let () =
   Alcotest.run "tui_server_identity_refresh"
     [ ( "server-identity-refresh"
-      , [ Alcotest.test_case "reopened task history retains only its workspace observation" `Quick
+      , [ Alcotest.test_case "progressive task history keeps its owner and cursor" `Quick
+            test_task_history_progressive_read_keeps_owner_and_cursor
+        ; Alcotest.test_case "reopened task history retains only its workspace observation" `Quick
             test_reopened_task_history_retains_only_owned_observation
         ; Alcotest.test_case "reopened history document follows workspace owner" `Quick
             test_reopened_history_document_follows_workspace_owner

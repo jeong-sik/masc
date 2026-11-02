@@ -260,6 +260,17 @@ function pendingToolApproval(row: KeeperToolApprovalRow): KeeperToolApprovalPend
   }
 }
 
+function sameToolApprovalCallRows(
+  before: Record<string, KeeperToolApprovalPending> | undefined,
+  after: Record<string, KeeperToolApprovalPending> | undefined,
+  toolCallId: string,
+): boolean {
+  const beforeRows = Object.values(before ?? {}).filter(row => row.toolCallId === toolCallId)
+  const afterRows = Object.values(after ?? {}).filter(row => row.toolCallId === toolCallId)
+  return beforeRows.length === afterRows.length
+    && beforeRows.every(row => after?.[row.approvalId] === row)
+}
+
 // Re-hydrates waits whose REQUESTED event this view never saw: the listing is
 // public-read, so a dashboard opened after the gate fired still draws the
 // card instead of discovering the wait only as a 180s timeout.
@@ -283,14 +294,18 @@ export async function hydrateKeeperToolApprovals(): Promise<void> {
   for (const row of rows) {
     const currentKeeper = afterRead[row.keeper]
     const beforeKeeper = beforeRead[row.keeper]
-    const current = currentKeeper?.[row.tool_call_id]
+    const current = Object.values(currentKeeper ?? {}).filter(held => held.toolCallId === row.tool_call_id)
     // A concurrent stream/answer owns its newer observation. Otherwise the
     // listing can replace an unchanged older ask with the current exact ask.
-    if (current !== beforeKeeper?.[row.tool_call_id]) continue
+    if (!sameToolApprovalCallRows(beforeKeeper, currentKeeper, row.tool_call_id)) continue
     // An ask may have appeared and settled while this read was in flight.
     // Two absent rows do not prove that its observation is still current.
-    if (!current && currentKeeper !== beforeKeeper) continue
-    if (current?.approvalId === row.approval_id) continue
+    if (current.length === 0 && currentKeeper !== beforeKeeper) continue
+    for (const held of current) {
+      if (held.approvalId !== row.approval_id) {
+        dropKeeperToolApproval(row.keeper, held.toolCallId, held.approvalId)
+      }
+    }
     upsertKeeperToolApproval(row.keeper, pendingToolApproval(row))
   }
 }
@@ -301,9 +316,9 @@ export async function answerHeldKeeperToolApproval(
   approvalId: string,
   decision: 'approve' | 'deny',
 ): Promise<boolean> {
-  const existing = keeperToolApprovals.value[keeperName]?.[toolCallId]
+  const existing = keeperToolApprovals.value[keeperName]?.[approvalId]
   if (typeof approvalId !== 'string' || approvalId.trim() === ''
-    || !existing || existing.approvalId !== approvalId || existing.settled) return false
+    || !existing || existing.approvalId !== approvalId || existing.toolCallId !== toolCallId || existing.settled) return false
   if (existing.answering) return false
   const workspace = executionWorkspaceAuthority.peek()
   const workspaceRevision = executionWorkspaceRevision.peek()
@@ -313,38 +328,46 @@ export async function answerHeldKeeperToolApproval(
     answering: true,
     answeredDecision: decision,
   }))
-  const submitted = keeperToolApprovals.value[keeperName]?.[toolCallId]
+  const submittedKeeper = keeperToolApprovals.value[keeperName]
+  const submitted = submittedKeeper?.[approvalId]
   if (!submitted || submitted.approvalId !== approvalId) return false
-  const ownsAnswer = () => executionWorkspaceAuthority.peek() === workspace
+  const ownsSubmittedRow = () => executionWorkspaceAuthority.peek() === workspace
     && executionWorkspaceRevision.peek() === workspaceRevision
     && currentStoredTokenRevision() === authRevision
-    && keeperToolApprovals.value[keeperName]?.[toolCallId] === submitted
+    && keeperToolApprovals.value[keeperName]?.[approvalId] === submitted
+  const ownsCallContext = () => ownsSubmittedRow()
+    && sameToolApprovalCallRows(submittedKeeper, keeperToolApprovals.value[keeperName], toolCallId)
   try {
     let result
     try {
       result = await answerKeeperToolApproval(keeperName, toolCallId, approvalId, decision)
     } catch (err) {
-      if (!ownsAnswer()) return false
+      if (!ownsCallContext()) return false
       const message = err instanceof Error ? err.message : String(err)
       console.warn('[keeper] tool approval answer failed', { keeperName, toolCallId, message })
       setRecordValue(keeperActionErrors, keeperName, message)
       return false
     }
-    if (!ownsAnswer()) return false
+    if (!ownsSubmittedRow()) return false
     if (result.settled || result.remembered) {
+      const ownsContext = ownsCallContext()
       settleKeeperToolApproval(keeperName, toolCallId, approvalId, result.decision)
-      setRecordValue(keeperActionErrors, keeperName, null)
+      if (ownsContext) setRecordValue(keeperActionErrors, keeperName, null)
       return true
     }
+    if (!ownsCallContext()) return false
     setRecordValue(keeperActionErrors, keeperName, '승인 응답이 적용되지 않았습니다. 현재 승인 요청을 확인해 주세요.')
     try {
       const rows = await fetchKeeperToolApprovals()
-      if (!ownsAnswer()) return false
+      if (!ownsCallContext()) return false
       const current = rows.find(row => row.keeper === keeperName && row.tool_call_id === toolCallId)
       if (!current) dropKeeperToolApproval(keeperName, toolCallId, approvalId)
-      else if (current.approval_id !== approvalId) upsertKeeperToolApproval(keeperName, pendingToolApproval(current))
+      else if (current.approval_id !== approvalId) {
+        dropKeeperToolApproval(keeperName, toolCallId, approvalId)
+        upsertKeeperToolApproval(keeperName, pendingToolApproval(current))
+      }
     } catch (err) {
-      if (!ownsAnswer()) return false
+      if (!ownsCallContext()) return false
       const message = err instanceof Error ? err.message : String(err)
       setRecordValue(keeperActionErrors, keeperName, `승인 응답이 적용되지 않았고 현재 요청 조회도 실패했습니다: ${message}`)
     }
@@ -352,7 +375,7 @@ export async function answerHeldKeeperToolApproval(
   } finally {
     // Release only this operation's local busy flag, including after scope
     // withdrawal. A superseding observation or answer owns a different row.
-    if (keeperToolApprovals.value[keeperName]?.[toolCallId] === submitted) {
+    if (keeperToolApprovals.value[keeperName]?.[approvalId] === submitted) {
       updateKeeperToolApproval(keeperName, toolCallId, approvalId, approval => ({
         ...approval, answering: false, answeredDecision: null,
       }))

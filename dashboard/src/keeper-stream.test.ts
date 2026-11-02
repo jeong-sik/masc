@@ -1410,7 +1410,7 @@ describe('Keeper operation stream projection', () => {
       },
     })).toBeNull()
 
-    const pending = keeperToolApprovals.value.sangsu?.['call-approve-1']
+    const pending = keeperToolApprovals.value.sangsu?.['approval-1']
     expect(pending).toBeDefined()
     expect(pending?.toolName).toBe('Execute')
     expect(pending?.question).toBe('Execute ls -la 를 실행할까요?')
@@ -1432,14 +1432,14 @@ describe('Keeper operation stream projection', () => {
         question: 'run it?',
       },
     })
-    expect(keeperToolApprovals.value.sangsu?.['call-settle-1']).toBeDefined()
+    expect(keeperToolApprovals.value.sangsu?.['approval-1']).toBeDefined()
 
     expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'CUSTOM',
       name: 'KEEPER_TOOL_APPROVAL_SETTLED',
       value: { approval_id: 'approval-1', tool_call_id: 'call-settle-1', outcome: 'Approved' },
     })).toBeNull()
-    expect(keeperToolApprovals.value.sangsu?.['call-settle-1']).toBeUndefined()
+    expect(keeperToolApprovals.value.sangsu?.['approval-1']).toBeUndefined()
   })
 
   it('keeps the stream alive when a settle names a call this view never drew', () => {
@@ -1464,20 +1464,27 @@ describe('Keeper operation stream projection', () => {
     request('approval-a')
     request('approval-b')
     request('other-approval', 'other-call')
-    const replacement = keeperToolApprovals.value.sangsu?.['reused-call']
-    const other = keeperToolApprovals.value.sangsu?.['other-call']
+    const replacement = keeperToolApprovals.value.sangsu?.['approval-b']
+    const other = keeperToolApprovals.value.sangsu?.['other-approval']
+    expect(keeperToolApprovals.value.sangsu?.['approval-a']).toBeDefined()
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM', name: 'KEEPER_TOOL_APPROVAL_SETTLED',
+      value: { approval_id: 'approval-b', tool_call_id: 'other-call', outcome: 'Denied' },
+    })).toBeNull()
+    expect(keeperToolApprovals.value.sangsu?.['approval-b']).toBe(replacement)
     expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'CUSTOM', name: 'KEEPER_TOOL_APPROVAL_SETTLED',
       value: { approval_id: 'approval-a', tool_call_id: 'reused-call', outcome: 'Denied' },
     })).toBeNull()
-    expect(keeperToolApprovals.value.sangsu?.['reused-call']).toBe(replacement)
-    expect(keeperToolApprovals.value.sangsu?.['other-call']).toBe(other)
+    expect(keeperToolApprovals.value.sangsu?.['approval-a']).toBeUndefined()
+    expect(keeperToolApprovals.value.sangsu?.['approval-b']).toBe(replacement)
+    expect(keeperToolApprovals.value.sangsu?.['other-approval']).toBe(other)
     applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'CUSTOM', name: 'KEEPER_TOOL_APPROVAL_SETTLED',
       value: { approval_id: 'approval-b', tool_call_id: 'reused-call', outcome: 'Approved' },
     })
-    expect(keeperToolApprovals.value.sangsu?.['reused-call']).toBeUndefined()
-    expect(keeperToolApprovals.value.sangsu?.['other-call']).toBe(other)
+    expect(keeperToolApprovals.value.sangsu?.['approval-b']).toBeUndefined()
+    expect(keeperToolApprovals.value.sangsu?.['other-approval']).toBe(other)
   })
 
   it('projects queued acceptance without a receipt or queue revision', () => {

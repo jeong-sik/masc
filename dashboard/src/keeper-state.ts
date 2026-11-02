@@ -76,7 +76,9 @@ export const keeperStreamStartedAt = signal<Record<string, number | null>>({})
 export const keeperStreamLastEventAt = signal<Record<string, number | null>>({})
 
 // Tool calls each keeper is holding for an operator decision, keyed by keeper
-// then tool_call_id. Minted by KEEPER_TOOL_APPROVAL_REQUESTED, retired by
+// then immutable approvalId. A provider call ID can recur in another operation,
+// whose delayed frames must not replace a different ask. Minted by
+// KEEPER_TOOL_APPROVAL_REQUESTED, retired by
 // KEEPER_TOOL_APPROVAL_SETTLED or a server-side timeout settle; the pending
 // GET listing re-hydrates waits whose owning stream watcher is gone
 // (masc#30034). This is UI state only — the server registry is the SSOT.
@@ -1026,10 +1028,10 @@ export function upsertKeeperToolApproval(
 ): void {
   const byKeeper = keeperToolApprovals.value[keeperName] ?? {}
   if (typeof approval.approvalId !== 'string' || approval.approvalId.trim() === '') return
-  if (byKeeper[approval.toolCallId]?.approvalId === approval.approvalId) return
+  if (byKeeper[approval.approvalId]?.approvalId === approval.approvalId) return
   keeperToolApprovals.value = {
     ...keeperToolApprovals.value,
-    [keeperName]: { ...byKeeper, [approval.toolCallId]: approval },
+    [keeperName]: { ...byKeeper, [approval.approvalId]: approval },
   }
 }
 
@@ -1040,11 +1042,11 @@ export function updateKeeperToolApproval(
   updater: (approval: KeeperToolApprovalPending) => KeeperToolApprovalPending,
 ): void {
   const byKeeper = keeperToolApprovals.value[keeperName]
-  const existing = byKeeper?.[toolCallId]
-  if (!existing || existing.approvalId !== approvalId) return
+  const existing = byKeeper?.[approvalId]
+  if (!existing || existing.approvalId !== approvalId || existing.toolCallId !== toolCallId) return
   keeperToolApprovals.value = {
     ...keeperToolApprovals.value,
-    [keeperName]: { ...byKeeper, [toolCallId]: updater(existing) },
+    [keeperName]: { ...byKeeper, [approvalId]: updater(existing) },
   }
 }
 
@@ -1064,9 +1066,10 @@ export function settleKeeperToolApproval(
 
 export function dropKeeperToolApproval(keeperName: string, toolCallId: string, approvalId: string): void {
   const byKeeper = keeperToolApprovals.value[keeperName]
-  if (!byKeeper || byKeeper[toolCallId]?.approvalId !== approvalId) return
+  const existing = byKeeper?.[approvalId]
+  if (!existing || existing.approvalId !== approvalId || existing.toolCallId !== toolCallId) return
   const next = { ...byKeeper }
-  delete next[toolCallId]
+  delete next[approvalId]
   keeperToolApprovals.value = { ...keeperToolApprovals.value, [keeperName]: next }
 }
 

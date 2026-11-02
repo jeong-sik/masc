@@ -237,7 +237,7 @@ describe('KeeperWorkspaceChat', () => {
     const { keeperToolApprovals } = await import('../../keeper-state')
     keeperToolApprovals.value = {
       sangsu: {
-        'tool-call-1': {
+        'approval-tool-call-1': {
           approvalId: 'approval-tool-call-1',
           toolCallId: 'tool-call-1',
           toolName: 'Execute',

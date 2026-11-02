@@ -855,6 +855,16 @@ type posts_source_failure =
   | Posts_workspace_binding_refused of Board_workspace_binding.rejection
   | Posts_raised of { exception_ : exn; backtrace : Printexc.raw_backtrace }
 
+type posts_unsettled_write_kind =
+  | Append_write
+  | Rewrite_write
+
+type posts_unsettled_write = {
+  expected : posts_source_observation;
+  kind : posts_unsettled_write_kind;
+  intended_bytes : string;
+}
+
 type posts_source_state =
   | Posts_unobserved
   | Posts_guard_observed of {
@@ -873,6 +883,7 @@ type posts_source_state =
   | Posts_unsettled of {
       last_observed : posts_source_history;
       failure : posts_source_failure;
+      pending : posts_unsettled_write;
       diagnostics : posts_source_diagnostic list;
     }
 
@@ -886,6 +897,25 @@ type posts_write_outcome =
       failure : posts_source_failure;
       diagnostics : posts_source_diagnostic list;
     }
+
+type posts_settle_outcome =
+  | Posts_settled_written of {
+      observation : posts_source_observation;
+      diagnostics : posts_source_diagnostic list;
+    }
+  | Posts_settled_not_written of {
+      observation : posts_source_observation;
+      diagnostics : posts_source_diagnostic list;
+    }
+  | Posts_settle_superseded of {
+      failure : posts_source_failure;
+      diagnostics : posts_source_diagnostic list;
+    }
+  | Posts_settle_inconclusive of {
+      failure : posts_source_failure;
+      diagnostics : posts_source_diagnostic list;
+    }
+  | Posts_settle_nothing_to_settle
 
 type posts_source_display =
   | Complete_display of post list

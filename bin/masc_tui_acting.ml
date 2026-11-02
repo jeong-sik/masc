@@ -391,14 +391,16 @@ let agent_core_row ~at ~duration_ms (e : Observer.agent_core) =
   ; detail
   }
 
-(* The Keeper a Gate change names, or ["server"] for a change of the whole
-   queue, the rules or a Gate mode. *)
+(* The Keeper a change names, or ["server"] for a change of the whole queue,
+   the rules, a Gate mode or an installation's questions. *)
 let approval_change_keeper = function
   | Observer.Gate_keeper_settings_changed { keeper }
   | Observer.Tool_approval_waits_changed { keeper }
-  | Observer.Tool_approval_mode_changed { keeper } ->
+  | Observer.Tool_approval_mode_changed { keeper }
+  | Observer.Keeper_asks_changed { keeper } ->
       keeper
-  | Observer.Approval_queue_changed | Observer.Approval_rules_changed | Observer.Gate_mode_changed ->
+  | Observer.Approval_queue_changed | Observer.Approval_rules_changed | Observer.Gate_mode_changed
+  | Observer.Installation_asks_changed _ ->
       "server"
 
 let keeper_of_event ~traces (event : Observer.event) =
@@ -474,6 +476,9 @@ let label_of_event (event : Observer.event) =
   | Observer.Approval_change
       (Observer.Tool_approval_waits_changed _ | Observer.Tool_approval_mode_changed _) ->
       "tool approval"
+  | Observer.Approval_change
+      (Observer.Keeper_asks_changed _ | Observer.Installation_asks_changed _) ->
+      "questions"
   | Observer.Snapshot _ -> "snapshot"
   | Observer.Other name -> name
 
@@ -615,6 +620,9 @@ let row_of_event ~at ~duration_ms (event : Observer.event) =
         | Observer.Gate_keeper_settings_changed _ -> "the Keeper's Gate settings changed"
         | Observer.Tool_approval_waits_changed _ -> "a held tool call changed"
         | Observer.Tool_approval_mode_changed _ -> "the tool approval mode changed"
+        | Observer.Keeper_asks_changed _ -> "the Keeper's questions changed"
+        | Observer.Installation_asks_changed { declaration_id } ->
+            "the questions of " ^ declaration_id ^ " changed"
       in
       { at; keeper = approval_change_keeper change; glyph = Quiet; label; detail }
   | Observer.Snapshot name ->

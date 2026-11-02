@@ -139,7 +139,10 @@ let summary = function
          | Observer.Gate_mode_changed -> "gate_mode"
          | Observer.Gate_keeper_settings_changed { keeper } -> "keeper_settings:" ^ keeper
          | Observer.Tool_approval_waits_changed { keeper } -> "waits:" ^ keeper
-         | Observer.Tool_approval_mode_changed { keeper } -> "mode:" ^ keeper)
+         | Observer.Tool_approval_mode_changed { keeper } -> "mode:" ^ keeper
+         | Observer.Keeper_asks_changed { keeper } -> "asks:" ^ keeper
+         | Observer.Installation_asks_changed { declaration_id } ->
+             "installation_asks:" ^ declaration_id)
   | Observer.Event (Observer.Board_changed { post_id }) ->
       Printf.sprintf "board(%s)" (Option.value ~default:"-" post_id)
   | Observer.Event (Observer.Lane_resource { lr_package; lr_instance; lr_detail; _ })
@@ -578,6 +581,43 @@ let tool_approval_frames =
 |}
   ]
 
+let asks_frames =
+  [ {|data: {"type":"keeper_asks_changed","name":"lane-smith"}
+
+|}
+  ; {|data: {"type":"lane_addon_asks_changed","declaration_id":"quiz"}
+
+|}
+  ]
+
+let test_only_a_question_change_reads_the_questions () =
+  check (list string) "question changes decode with what asked them"
+    [ "approval(asks:lane-smith)"; "approval(installation_asks:quiz)" ]
+    (List.map summary (decode_all asks_frames));
+  let count reads frames =
+    decode_all frames
+    |> List.filter (function
+         | Observer.Event event -> reads event
+         | Observer.Undecodable _ -> false)
+    |> List.length
+  in
+  check int "both question changes read the questions" 2
+    (count Observer.asks_changed asks_frames);
+  check int "no Gate, held call or mode change does" 0
+    (count Observer.asks_changed (gate_frames @ tool_approval_frames));
+  check int "a question change reads no Gate, held calls or modes" 0
+    (count
+       (fun event ->
+          Observer.gate_snapshot_changed event || Observer.held_calls_changed event
+          || Observer.tool_modes_changed event)
+       asks_frames);
+  check bool "a question change without its asker says why it was not read" true
+    (match decode_all [ {|data: {"type":"lane_addon_asks_changed"}
+
+|} ] with
+     | [ Observer.Undecodable reason ] -> String.starts_with ~prefix:"lane_addon_asks_changed" reason
+     | _ -> false)
+
 let test_only_a_gate_change_changes_the_gate_snapshot () =
   check (list string) "Gate changes decode to what changed"
     [ "approval(queue)"; "approval(queue)"; "approval(queue)"; "approval(rules)"
@@ -981,6 +1021,8 @@ let () =
             test_only_a_board_notification_names_a_board_change
         ; test_case "only a Gate change changes the Gate snapshot" `Quick
             test_only_a_gate_change_changes_the_gate_snapshot
+        ; test_case "only a question change reads the questions" `Quick
+            test_only_a_question_change_reads_the_questions
         ; test_case "a fusion status frame decodes its identity strings" `Quick
             test_a_fusion_status_frame_decodes_its_identity_strings
         ; test_case "cursor commits only with a complete event" `Quick

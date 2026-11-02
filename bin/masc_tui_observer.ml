@@ -124,6 +124,8 @@ type approval_change =
   | Gate_keeper_settings_changed of { keeper : string }
   | Tool_approval_waits_changed of { keeper : string }
   | Tool_approval_mode_changed of { keeper : string }
+  | Keeper_asks_changed of { keeper : string }
+  | Installation_asks_changed of { declaration_id : string }
 
 type event =
   | Agent_core of agent_core
@@ -232,7 +234,8 @@ let held_calls_changed = function
   | Approval_change (Tool_approval_waits_changed _) -> true
   | Approval_change
       ( Approval_queue_changed | Approval_rules_changed | Gate_mode_changed
-      | Gate_keeper_settings_changed _ | Tool_approval_mode_changed _ )
+      | Gate_keeper_settings_changed _ | Tool_approval_mode_changed _
+      | Keeper_asks_changed _ | Installation_asks_changed _ )
   | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_turn_observation _
   | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
   | Keeper_turn_complete _
@@ -246,7 +249,22 @@ let tool_modes_changed = function
   | Approval_change (Tool_approval_mode_changed _ | Gate_keeper_settings_changed _) -> true
   | Approval_change
       ( Approval_queue_changed | Approval_rules_changed | Gate_mode_changed
-      | Tool_approval_waits_changed _ )
+      | Tool_approval_waits_changed _ | Keeper_asks_changed _ | Installation_asks_changed _ )
+  | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_turn_observation _
+  | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
+  | Keeper_turn_complete _
+  | Keeper_composite_changed _
+  | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _
+  | Fusion_run_status _ | Internal_agent_runs_changed | Board_changed _ | Lane_resource _
+  | Snapshot _ | Other _ ->
+      false
+
+let asks_changed = function
+  | Approval_change (Keeper_asks_changed _ | Installation_asks_changed _) -> true
+  | Approval_change
+      ( Approval_queue_changed | Approval_rules_changed | Gate_mode_changed
+      | Gate_keeper_settings_changed _ | Tool_approval_waits_changed _
+      | Tool_approval_mode_changed _ )
   | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_turn_observation _
   | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
   | Keeper_turn_complete _
@@ -272,7 +290,9 @@ let gate_snapshot_changed = function
       ( Approval_queue_changed | Approval_rules_changed | Gate_mode_changed
       | Gate_keeper_settings_changed _ ) ->
       true
-  | Approval_change (Tool_approval_waits_changed _ | Tool_approval_mode_changed _)
+  | Approval_change
+      ( Tool_approval_waits_changed _ | Tool_approval_mode_changed _ | Keeper_asks_changed _
+      | Installation_asks_changed _ )
   | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_turn_observation _
   | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
   | Keeper_turn_complete _
@@ -692,6 +712,19 @@ let reading_of_type type_name =
           match string_field fields "name" with
           | Some keeper -> Ok (Approval_change (Tool_approval_mode_changed { keeper }))
           | None -> Error (event ^ " carries no name"))
+  | "keeper_asks_changed" as event ->
+      From_fields
+        (fun fields ->
+          match string_field fields "name" with
+          | Some keeper -> Ok (Approval_change (Keeper_asks_changed { keeper }))
+          | None -> Error (event ^ " carries no name"))
+  | "lane_addon_asks_changed" as event ->
+      From_fields
+        (fun fields ->
+          match string_field fields "declaration_id" with
+          | Some declaration_id ->
+              Ok (Approval_change (Installation_asks_changed { declaration_id }))
+          | None -> Error (event ^ " carries no declaration_id"))
   | "keeper_memory_journal_appended" as event ->
       From_fields
         (fun fields ->

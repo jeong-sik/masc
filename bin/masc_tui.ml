@@ -8546,6 +8546,46 @@ let failed_read owed =
 
 let fail_board_list_read state = state.board_list_owed <- failed_read state.board_list_owed
 
+(* The questions a Keeper or an installation puts to the operator read again
+   when their log changes, on a resumed authority, and after a failed read
+   (RFC-0480 §3.1). Every full refresh but the cadence reads them too. *)
+let owe_asks_read state = state.asks_owed <- Masc_tui_owed_read.changed state.asks_owed
+
+let settle_asks_read state = function
+  | Ok _ -> state.asks_owed <- Masc_tui_owed_read.succeeded state.asks_owed
+  | Error _ -> state.asks_owed <- failed_read state.asks_owed
+
+let launch_asks_read state ~mailbox =
+  match state.server_identity with
+  | None -> false
+  | Some expected_workspace ->
+    (match Masc_tui_types.begin_asks_read state with
+     | None -> false
+     | Some asks_request ->
+       let enqueue_async = workspace_enqueue state in
+       let host = server_peer_host and port = state.port in
+       Masc_tui_async_read.launch
+         ~deliver:(fun asks_result ->
+           enqueue_async mailbox (Asks_reloaded { asks_request; asks_result }))
+         (fun () -> Masc_tui_http.fetch_asks ~expected_workspace ~host ~port ());
+       true)
+
+(* Runs on every loop iteration. A read already in flight, the refresh's or
+   this one's, is let finish first; one that will not deliver leaves the
+   questions owed again. While an answer is being sent no read starts: the
+   answer reads the questions again itself. *)
+let launch_owed_asks state ~mailbox =
+  let reading = Snapshot_read.in_flight state.asks_read in
+  let read =
+    if reading then state.asks_owed else Masc_tui_owed_read.abandoned state.asks_owed
+  in
+  state.asks_owed <- read;
+  if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read
+     && server_authority_ready state
+     && not reading
+     && launch_asks_read state ~mailbox
+  then state.asks_owed <- Masc_tui_owed_read.started read
+
 (* The Gate snapshot reads again when the queue, the standing rules, a Gate
    mode or a Keeper's Gate settings change, on a revalidation or a resumed
    authority, and after a failed read (RFC-0480 §3.1). Entering a surface
@@ -14711,8 +14751,14 @@ let apply_asks_load state = function
         ~set_error:(fun value -> state.asks_error <- value)
         err
 
+(* A read of the questions: what it found, and whether the owed read is
+   settled or waits to retry. *)
+let apply_asks_read state result =
+  settle_asks_read state result;
+  apply_asks_load state result
+
 let apply_asks_observation state observation =
-  Option.iter (apply_asks_load state)
+  Option.iter (apply_asks_read state)
     (Masc_tui_types.take_asks_observation state observation)
 
 let take_approval_observation state observation =
@@ -17671,7 +17717,11 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
        answer read early in it is still kept when the next pass asks. *)
     Masc_tui_http.start_read_generation ();
     let approval_ticket = dispatch_approvals_listing state in
-    let ask_request = Masc_tui_types.begin_asks_read state in
+    (* The cadence leaves the questions out: they read again when their log
+       changes ([launch_owed_asks]). *)
+    let ask_request = match intent with
+      | Revalidate -> Masc_tui_types.begin_asks_read state
+      | Cadence -> None in
     (* Read before the label below moves. While the last probe said the
        server is booting, only the probe goes out this tick: the side loads
        below would each wait out a timeout against a process that has not
@@ -18010,8 +18060,9 @@ let resume_reads_after_authority_change state ~mailbox ~refresh_inflight
         launch_owed_history state ~mailbox)
       state.msg_target_keeper_name;
     (* A Gate change while the reading was withdrawn reached nobody, and a
-       cold admission has read no Gate yet. *)
+       cold admission has read no Gate yet. The same holds for the questions. *)
     owe_gate_snapshot_read state;
+    owe_asks_read state;
     (* Under the same condition the tick sends them: a server that is not
        booting, whether or not its workspace is this checkout's. *)
     launch_tick_side_reads state ~mailbox ~needs:(current_surface_needs state);
@@ -19024,7 +19075,7 @@ let apply_ask_answer_completion state submission result asks =
        (* A lost or invalid response cannot establish that the write did not
           land. Keep the draft and read the canonical questions again. *)
        report_action state "error" (Printf.sprintf "Answer recording unconfirmed: %s" err));
-  apply_asks_load state asks
+  apply_asks_read state asks
 
 (* TEL-OK: the TUI-local submit gate emits user-visible events here; the
    ask-answer endpoint owns the durable answer telemetry. *)
@@ -20831,7 +20882,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         | Tools_loaded (_, _, _) | Skills_catalog_loaded (_, _) | Skill_evidence_loaded (_, _, _)
         | (Tools_async_observation_loaded (_, _) | ((Tools_async_detail_loaded _ | Task_document_prepared _) | Tools_async_task_body_loaded _ | Tools_async_task_history_loaded _)) | Runtime_lane_slots_written (_, _, _)
         | Runtime_catalog_loaded (_, _) | Runtime_assignment_changed (_, _, _)
-        | Keeper_chat_approval_answered (_, _, _, _) | Keeper_tool_approvals_loaded (_, _, _)
+        | Keeper_chat_approval_answered (_, _, _, _) | Keeper_tool_approvals_loaded (_, _, _) | Asks_reloaded _
         | Listen_prepared _ | Sent_image_ready _ | Image_render_ready _ | Keeper_turns_loaded _ | Keeper_waiting_loaded _
         | Keeper_chat_control_received (_, _, _) | Gate_approval_resolved (_, _, _, _, _)
         | Gate_auto_judge_retried (_, _, _, _) | Gate_mode_set (_, _, _)
@@ -21454,9 +21505,10 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
             (match result with Ok _ -> "received" | Error _ -> "failed"))
           state.http_refresh_started_ns)
         (take_approval_observation state early.eap_observation)
+  | Asks_reloaded observation -> apply_asks_observation state observation
   | Http_asks_loaded early ->
       Option.iter (fun result ->
-        apply_asks_load state result;
+        apply_asks_read state result;
         Option.iter (fun started_ns ->
           Log.Transport.info "tui_asks_early request=%d refresh_started_ns=%Ld admitted_ms=%.3f outcome=%s"
             (Snapshot_read.request_id early.ea_observation.asks_request) started_ns
@@ -21607,6 +21659,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       let board_changed = ref false in
       let gate_changed = ref false in
       let held_calls_changed = ref false in
+      let asks_changed = ref false in
       let tool_modes_changed = ref false in
       (* The chat operations the open pane's keeper streamed a frame for in
          this batch, with the highest journal seq named and the earliest
@@ -21693,6 +21746,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                 board_changed := true;
               if Masc_tui_observer.gate_snapshot_changed event then gate_changed := true;
               if Masc_tui_observer.held_calls_changed event then held_calls_changed := true;
+              if Masc_tui_observer.asks_changed event then asks_changed := true;
               if Masc_tui_observer.tool_modes_changed event then tool_modes_changed := true;
               (match Masc_tui_observer.board_changed_post event, board_post_on_screen state with
                | Some (Some post), Some open_post when String.equal post open_post ->
@@ -21882,6 +21936,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
          owe_board_list_read state);
       (if !gate_changed && not !observer_source_loss_seen then owe_gate_snapshot_read state);
       (if !held_calls_changed && not !observer_source_loss_seen then owe_held_calls_read state);
+      (if !asks_changed && not !observer_source_loss_seen then owe_asks_read state);
       (if !tool_modes_changed && not !observer_source_loss_seen then owe_tool_modes_read state);
       (if (!open_chat_gained_turn || !open_chat_memory_grew)
           && not !observer_source_loss_seen then
@@ -31005,6 +31060,7 @@ Use relative paths for resources already held in the package. -->
       launch_owed_gate_snapshot state ~mailbox:async_messages;
       launch_owed_held_calls state ~mailbox:async_messages;
       launch_owed_tool_modes state ~mailbox:async_messages;
+      launch_owed_asks state ~mailbox:async_messages;
       launch_owed_board_list state ~refresh_inflight:http_scoped_refresh_inflight
         ~full_refresh_inflight:http_refresh_inflight ~scoped_refresh_followup
         ~mailbox:async_messages;

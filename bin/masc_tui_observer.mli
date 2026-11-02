@@ -164,8 +164,9 @@ type keeper_tool_call = {
   kt_tool_output_preview : string option;
 }
 
-(** What changed in the Gate, the held tool calls or the tool approval
-    modes. Each is a server push with no data: the reader re-fetches. *)
+(** What changed in the Gate, the held tool calls, the tool approval modes
+    or the questions put to the operator. Each is a server push with no
+    data: the reader re-fetches. *)
 type approval_change =
   | Approval_queue_changed
       (** [approval:pending], [approval:resolved], [approval:summary_updated] *)
@@ -177,6 +178,9 @@ type approval_change =
       (** [keeper_tool_approval_waits_changed] *)
   | Tool_approval_mode_changed of { keeper : string }
       (** [keeper_tool_approval_mode_changed] *)
+  | Keeper_asks_changed of { keeper : string }  (** [keeper_asks_changed] *)
+  | Installation_asks_changed of { declaration_id : string }
+      (** [lane_addon_asks_changed] *)
 
 type event =
   | Agent_core of agent_core
@@ -291,6 +295,10 @@ val held_calls_changed : event -> bool
 val tool_modes_changed : event -> bool
 (** What [/api/v1/keepers/tool-approval-mode] and the Keeper Gate settings
     answer changed: a tool approval mode or a Keeper's Gate setting. *)
+
+val asks_changed : event -> bool
+(** The questions a Keeper or a Lane Add-on installation puts to the operator
+    changed. *)
 
 val board_changed_post : event -> string option option
 (** [Some post] for {!Board_changed}, where [post] is the post it names or

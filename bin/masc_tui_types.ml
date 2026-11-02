@@ -1250,11 +1250,6 @@ type keeper_chat_page = {
   kcp_older_error : string option;
 }
 
-(** The open chat's history read that the TUI owes (RFC-0480 §3.1): the
-    server announced a change, events were lost, or a read failed. It belongs
-    to one Keeper under one workspace reading; any other drops it. [kho_audit]
-    has the owed read recheck child content and native tasks as well, because
-    events were lost rather than announced. *)
 (** The failed-read retries of the Fusion readings (RFC-0480 L2b). A change
     during a read is the readings' own reread flag; these say only when a
     read that failed is tried again. *)
@@ -1269,6 +1264,11 @@ let no_fusion_retries =
   ; fr_detail = Masc_tui_owed_read.settled
   ; fr_historical = Masc_tui_owed_read.settled }
 
+(** The open chat's history read that the TUI owes (RFC-0480 §3.1): the
+    server announced a change, events were lost, or a read failed. It belongs
+    to one Keeper under one workspace reading; any other drops it. [kho_audit]
+    has the owed read recheck child content and native tasks as well, because
+    events were lost rather than announced. *)
 type keeper_history_owed = {
   kho_keeper : string;
   kho_authority : workspace_authority;

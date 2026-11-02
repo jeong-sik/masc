@@ -210,7 +210,7 @@ path.chmod(0o755)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout, "")
 
-    def run_custom_action(self, suite_path, exit_code=0):
+    def run_custom_action(self, suite_path, exit_code=0, build_exit_code=0):
         directory, name = suite_path.rsplit("/", 1)
         source = self.root / (suite_path + ".ml")
         source.parent.mkdir(parents=True, exist_ok=True)
@@ -226,25 +226,47 @@ path.chmod(0o755)
         shutil.copyfile(SCRIPTS / runner.name, runner)
         commands = self.root / "commands"
         commands.mkdir()
-        self.executable(commands / "timeout", "import os,sys\nos.execvp(sys.argv[6], sys.argv[6:])\n")
+        self.executable(commands / "timeout", """
+import os,sys
+env = dict(os.environ, TARGETED_FIXTURE_TIMED="1")
+os.execvpe(sys.argv[6], sys.argv[6:], env)
+""")
         self.executable(commands / "opam", """
 import json,os,sys
 from pathlib import Path
-Path('alias-call.json').write_text(json.dumps({'argv':sys.argv[1:],
-                                           'verbose':os.environ.get('ALCOTEST_VERBOSE')}))
-raise SystemExit(int(os.environ['FAKE_DUNE_EXIT']))
+invocation = {'argv':sys.argv[1:],
+              'verbose':os.environ.get('ALCOTEST_VERBOSE'),
+              'timed':os.environ.get('TARGETED_FIXTURE_TIMED') == '1'}
+with Path('opam-calls.jsonl').open('a') as handle:
+    handle.write(json.dumps(invocation) + "\\n")
+is_alias = '--force' in sys.argv[1:]
+raise SystemExit(int(os.environ['FAKE_DUNE_EXIT' if is_alias else 'FAKE_BUILD_EXIT']))
 """)
         env = dict(os.environ, PATH=str(commands) + os.pathsep + os.environ["PATH"],
                    TARGET_SUITES=suite_path, FAKE_DUNE_EXIT=str(exit_code),
+                   FAKE_BUILD_EXIT=str(build_exit_code), DUNE_JOBS="2",
                    CI_TEST_LOG_FILE=str(self.root / "runner.log"))
+        env.pop("ALCOTEST_VERBOSE", None)
+        env.pop("TARGETED_FIXTURE_TIMED", None)
         result = subprocess.run(["bash", str(runner)], cwd=self.root, env=env,
                                 text=True, capture_output=True, timeout=15)
-        invocation = json.loads((self.root / "alias-call.json").read_text())
-        self.assertEqual(invocation, {
-            "argv": ["exec", "--", "dune", "build", "--root", ".", "--force",
-                     "--no-buffer", "--verbose", "-j", "1", f"@@{directory}/runtest-{name}"],
-            "verbose": "1",
-        })
+        invocations = [json.loads(line) for line in
+                       (self.root / "opam-calls.jsonl").read_text().splitlines()]
+        expected = [{
+            "argv": ["exec", "--", "dune", "build", "--root", ".", "-j", "2",
+                     f"{suite_path}.exe"],
+            "verbose": None,
+            "timed": False,
+        }]
+        if build_exit_code == 0:
+            expected.append({
+                "argv": ["exec", "--", "dune", "build", "--root", ".", "--force",
+                         "--no-buffer", "--verbose", "-j", "1",
+                         f"@@{directory}/runtest-{name}"],
+                "verbose": "1",
+                "timed": True,
+            })
+        self.assertEqual(invocations, expected)
         return result
 
     def test_custom_action_runs_only_its_nonrecursive_generated_alias(self):
@@ -262,6 +284,11 @@ raise SystemExit(int(os.environ['FAKE_DUNE_EXIT']))
         result = self.run_custom_action("test/test_browser_activity", exit_code=23)
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn("FAIL exit 23", result.stdout)
+
+    def test_custom_action_build_failure_prevents_the_timed_action(self):
+        self.inc.unlink()
+        result = self.run_custom_action("test/test_browser_activity", build_exit_code=23)
+        self.assertEqual(result.returncode, 23, result.stdout + result.stderr)
 
 
 if __name__ == "__main__":

@@ -96,10 +96,15 @@ def outstanding(pages):
             match = header(review, "PASS")
             body = review.get("body")
             lines = body.split("\n") if isinstance(body, str) else []
-            footer = FOOTER.fullmatch(next((line for line in reversed(lines) if line), ""))
+            nonempty = [line for line in lines if line]
+            last = nonempty[-1] if nonempty else ""
+            head_only = re.fullmatch(r"approve-guard: head ([0-9a-f]{40})", last)
+            binding = nonempty[-2] if head_only and len(nonempty) > 1 else last
+            footer = FOOTER.fullmatch(binding)
             actor = actor_id(review)
             approved_at = submitted_at(review)
-            if (match is None or footer is None or footer[1] != match[2] or actor is None
+            if (match is None or footer is None or footer[1] != match[2]
+                    or (head_only is not None and head_only[1] != footer[1]) or actor is None
                     or approved_at is None
                     or (footer[2] == "source" and (match[3] is not None or footer[3] is not None))
                     or (footer[2] == "release" and (match[3] is None or footer[3] != match[3]))

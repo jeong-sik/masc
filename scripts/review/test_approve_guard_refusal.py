@@ -780,6 +780,7 @@ print(f'{rid}\\tAPPROVED\\t{review["commit_id"]}')
         self.assertEqual(result.returncode, 0, result.stderr)
         review = json.loads((self.data / "reviews.json").read_text())[0]
         self.assertEqual(sum(line.startswith("review-scope: ") for line in review["body"].splitlines()), 1)
+        self.assertEqual(review["body"].splitlines()[-1], footer_line())
         receipt = self.run_guard("--source-receipt")
         self.assertEqual(receipt.returncode, 0, receipt.stderr)
         self.assertEqual(json.loads(receipt.stdout)["approval_ids"], [review["id"]])
@@ -1176,13 +1177,34 @@ class PrintFooterCase(GuardHarness):
         self.assertEqual(r.stdout, self.expected + "\n")
         self.assertEqual(r.stderr, "")
 
+    def test_generated_footer_is_consumed_as_an_exact_source_receipt(self):
+        generated = self.run_guard("--print-footer")
+        self.assertEqual(generated.returncode, 0, generated.stderr)
+        self.review(generated.stdout.rstrip("\n"))
+        admitted = self.run_guard("--source-receipt")
+        self.assertEqual(admitted.returncode, 0, admitted.stderr)
+
+        self.review(generated.stdout.rstrip("\n").replace(f"head `{HEAD}`", f"head `{'a' * 40}`"))
+        stale = self.run_guard("--source-receipt")
+        self.assertNotEqual(stale.returncode, 0)
+
     def test_print_footer_names_release_policy_for_release_branch(self):
         pr = json.loads((self.data / "pr.json").read_text())
-        pr["head"]["ref"] = "release/v0.50.0"
+        pr["head"]["ref"] = "release/v0.62.0"
         (self.data / "pr.json").write_text(json.dumps(pr))
         r = self.run_guard("--print-footer")
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn(" · release review · ", r.stdout)
+        self.assertIn(f" · release review · release run {RELEASE_RUN} · ", r.stdout)
+
+    def test_print_footer_requires_a_completed_release_run(self):
+        pr = json.loads((self.data / "pr.json").read_text())
+        pr["head"]["ref"] = "release/v0.62.0"
+        (self.data / "pr.json").write_text(json.dumps(pr))
+        (self.data / "runs.json").write_text('{"workflow_runs": []}')
+        r = self.run_guard("--print-footer")
+        self.assertEqual(r.returncode, 2, r.stderr)
+        self.assertEqual(r.stdout, "")
+        self.assertIn("release requires the latest completed successful", r.stderr)
 
     def test_print_footer_refuses_when_pr_is_not_on_head(self):
         pr = json.loads((self.data / "pr.json").read_text())

@@ -69,6 +69,18 @@ class OwnershipReduction(unittest.TestCase):
                          ((11, 2, "one"),))
         self.assertEqual(M.outstanding([[request(), request(rid=11), approval(replaces="10 11")]]), ())
 
+    def test_head_only_last_line_preserves_owned_replacement(self):
+        passed = approval()
+        passed["body"] += f"\napprove-guard: head {HEAD}"
+        self.assertEqual(M.outstanding([[request(), passed]]), ())
+
+        for suffix in (f"approve-guard: head {'c' * 40}",
+                       f"unrelated\napprove-guard: head {HEAD}"):
+            with self.subTest(suffix=suffix):
+                bad = approval()
+                bad["body"] += "\n" + suffix
+                self.assertEqual(M.outstanding([[request(), bad]]), ((10, 2, "one"),))
+
     def test_missing_signer_or_incomplete_footer_does_not_clear(self):
         unsigned = request()
         unsigned["body"] = "Please change this"
@@ -94,10 +106,12 @@ class OwnershipReduction(unittest.TestCase):
         good = approval()
         good["body"] = (good["body"].replace(f"head: {HEAD} by:", f"head: {HEAD} run: 123 by:")
                         .replace("source review ·", "release review · release run 123 ·"))
-        self.assertEqual(M.outstanding([[request(), good]]), ())
-        bad = dict(good)
-        bad["body"] = good["body"].replace("release run 123", "release run 124")
-        self.assertEqual(M.outstanding([[request(), bad]]), ((10, 2, "one"),))
+        for suffix in ("", f"\napprove-guard: head {HEAD}"):
+            with self.subTest(suffix=suffix):
+                current = dict(good, body=good["body"] + suffix)
+                self.assertEqual(M.outstanding([[request(), current]]), ())
+                bad = dict(current, body=current["body"].replace("release run 123", "release run 124"))
+                self.assertEqual(M.outstanding([[request(), bad]]), ((10, 2, "one"),))
 
     def test_invalid_or_duplicate_pages_are_unavailable(self):
         for pages in ([], [None], [[request(), request()]], [[{"id": None}]]):

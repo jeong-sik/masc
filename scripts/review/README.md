@@ -27,10 +27,15 @@ executed outside that checkout. Missing exact objects are fetched from the
 named repository; unreadable evidence refuses admission.
 
 The reviewer supplies the captured identity explicitly. The guard does not
-stamp a current diff onto an old source review. New approval footers preserve
-the reviewed base and identity. Consumption compares the current complete
+stamp a current diff onto an old source review. Approval consumers accept the
+existing binding line as the last line, and also accept an exact
+`approve-guard: head <40-character SHA>` line when the preceding non-empty line
+is that binding.
+Both forms preserve the reviewed base and diff identity. Consumption compares the current complete
 change: a moved/renamed base with identical change keeps the approval; retarget
 or parent landing that changes the diff requires independent re-review.
+For a Release PR, `--print-footer` reads the selected successful exact-head
+release run and includes it in the binding; it refuses if that run is unavailable.
 Head-only approvals supply no evidence of the reviewed diff and are not
 backfilled. Use `--check` for a read-only admission probe. A source-reviewed child may be
 approved while its parent is still open. Inspect the REST PR's `stack` metadata
@@ -162,7 +167,8 @@ When a non-author APPROVED review exists but is not admitted, the
 (from `approve-guard.sh --merge-check`, and so from `merge-guard.sh`) lists,
 per review, which test failed (author association, first-line verdict,
 footer prefix, `reviewed base`/`diff sha256` tail, a stale diff hash, or the
-`review-scope` stamp) and prints the exact last line to copy. `review-refusal.py`
+`review-scope` stamp) and prints the expected footer for diagnosis. The guard
+adds these lines itself; do not copy them into the review body. `review-refusal.py`
 makes the admission decision and the reasons come from the same code, so the
 guard and the explanation cannot disagree.
 

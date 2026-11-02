@@ -42,9 +42,11 @@ source "$here/review-verdict.sh"
 # base/head. Posts nothing and approves nothing.
 if [ "$print_footer" -eq 1 ]; then
   read_current_pr || exit $?
+  if [ "$review_policy" = release ]; then check_current_ci || exit $?; fi
   current_diff=$(python3 "$here/review-diff.py" --repo "$repo" --base "$pr_base_sha" --head "$head") || exit 1
-  printf 'approve-guard: head `%s` · %s review · reviewed base `%s` · diff sha256 `%s`\n' \
-    "$head" "$review_policy" "$pr_base_sha" "$current_diff"
+  printf 'approve-guard: head `%s` · %s review' "$head" "$review_policy"
+  [ -z "$release_run" ] || printf ' · release run %s' "$release_run"
+  printf ' · reviewed base `%s` · diff sha256 `%s`\n' "$pr_base_sha" "$current_diff"
   exit 0
 fi
 refuse() { echo "REFUSED #$pr head $head: $*" >&2; exit 2; }

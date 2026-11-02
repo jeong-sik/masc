@@ -118,7 +118,8 @@ let never_token_post ~url:_ ~headers:_ ~body:_ =
 let never_discover ~mcp_url:_ =
   Alcotest.fail "renewal reached the network when it should not have"
 
-let transports_of_post post =
+let transports_of_post send =
+  let post : Mcp_client.post = { deadline_s = 60.; send = (fun ~deadline:_ -> send) } in
   { Identity_tools.mcp_post = post; token_post = never_token_post; discover = never_discover }
 
 let execute_offered ?(post = never_post) ~base_path

@@ -697,8 +697,8 @@ let rec zai_error_of_mcp : Mcp_client.error -> provider_error = function
    response: a refused key is then a refused key. Seen on 2026-10-14 with an
    invalid key; a streamed answer is not JSON and passes through. *)
 let lift_zai_failure_code ~refused (post : Mcp_client.post) : Mcp_client.post =
- fun ~url ~headers ~body ->
-  match post ~url ~headers ~body with
+ { post with send = (fun ~deadline ~url ~headers ~body ->
+  match post.send ~deadline ~url ~headers ~body with
   | Error _ as error -> error
   | Ok ({ Masc_http_client.status = 200; body = reply; _ } as response) ->
       (match Yojson.Safe.from_string reply with
@@ -721,13 +721,13 @@ let lift_zai_failure_code ~refused (post : Mcp_client.post) : Mcp_client.post =
             | _ -> Ok response)
        | _ -> Ok response
        | exception Yojson.Json_error _ -> Ok response)
-  | Ok response -> Ok response
+  | Ok response -> Ok response) }
 
 (* The session and the call, over a transport the caller supplies so a test can
    answer both. [initialize], the [initialized] notification and the
    [tools/call] are three requests; the session id the first returns rides on
-   the others. Each is its own request with the provider timeout, so a slow
-   server can take three times as long as the other providers. *)
+   the others. Handshake requests have their own windows. Catalog pages and
+   the tool request share one provider timeout. *)
 let search_via_zai ~post ~api_key ~query ~limit =
   let refused = ref None in
   let post = lift_zai_failure_code ~refused post in
@@ -776,21 +776,22 @@ let search_via_zai_for_test ~post ~api_key ~query ~limit =
    The one header the helper writes itself is dropped from the client's list.
    [run] is the helper, passed in so a test sees what it is given. *)
 let curl_mcp_post_with ~run ~timeout_sec : Mcp_client.post =
- fun ~url ~headers ~body ->
+ { deadline_s = float_of_int (max 1 timeout_sec)
+ ; send = (fun ~deadline ~url ~headers ~body ->
   let headers =
     List.filter
       (fun (name, _) -> not (String.equal (String.lowercase_ascii name) "content-type"))
       headers
   in
-  match run ~timeout_sec ~headers ~url ~body_json:body () with
+  match run ~deadline ~timeout_sec ~headers ~url ~body_json:body () with
   | Error detail -> Error detail
   | Ok { Tool_local_runtime_http.status; headers; body } ->
-      Ok { Masc_http_client.status; headers; body }
+      Ok { Masc_http_client.status; headers; body }) }
 
 let curl_mcp_post ~timeout_sec =
   curl_mcp_post_with
-    ~run:(fun ~timeout_sec ~headers ~url ~body_json () ->
-      Tool_local_runtime_http.http_post_json_response_with_headers ~timeout_sec ~headers ~url
+    ~run:(fun ~deadline ~timeout_sec ~headers ~url ~body_json () ->
+      Tool_local_runtime_http.http_post_json_response_with_headers ~deadline ~timeout_sec ~headers ~url
         ~body_json ())
     ~timeout_sec
 

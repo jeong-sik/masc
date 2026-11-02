@@ -187,6 +187,7 @@ val split_http_response_with_headers : string -> http_header_response option
 
 val http_post_json_response_with_headers :
   timeout_sec:int ->
+  ?deadline:Monotonic_deadline.t ->
   ?headers:(string * string) list ->
   url:string ->
   body_json:string ->
@@ -197,7 +198,9 @@ val http_post_json_response_with_headers :
     keeps the response headers, which {!http_post_json_text_with_status_with_headers}
     drops. A caller must not pass its own [Content-Type]: it would be sent
     twice. The answer is read whole, so a server that holds a stream open ends
-    only at [timeout_sec]. *)
+    only at [timeout_sec]. An optional [deadline] further bounds both curl and
+    its host runner by the remaining fractional seconds. An expired deadline
+    returns an error without starting curl. *)
 
 val curl_post_json_response_argv_for_test :
   timeout_sec:int ->

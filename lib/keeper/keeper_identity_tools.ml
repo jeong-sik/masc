@@ -22,9 +22,9 @@ type transports = {
    ([Keeper_runtime_resolved.provider_call_deadline_sec]): a tools/call is
    work the model is waiting on, and the attempt watchdog does not watch a
    tool in flight, so this deadline is the only liveness the call has. The
-   bound is per request, not per call: a server that answers nothing ends
-   the call one threshold after its last completed request, and one that
-   answers each request inside the threshold runs the call to its end. The
+   catalog enumeration and tool request share one monotonic deadline. A
+   server cannot renew the window by returning another catalog page, and
+   an explicit continuation retains the initial operation's deadline. The
    OAuth hops a renewal makes -- discovery and the token endpoint -- are
    short JSON round trips of the same class as the Slack and Discord REST
    calls, and run under the shared request timeout those use. *)

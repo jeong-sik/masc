@@ -66,24 +66,35 @@ let rec error_to_string = function
   | Malformed detail ->
     Printf.sprintf "the server's answer could not be read: %s" detail
 
-type post =
-  url:string ->
-  headers:(string * string) list ->
-  body:string ->
-  (Masc_http_client.response, string) result
+type post = {
+  deadline_s : float;
+  send :
+    deadline:Monotonic_deadline.t ->
+    url:string ->
+    headers:(string * string) list ->
+    body:string ->
+    (Masc_http_client.response, string) result;
+}
 
-(* The one production transport. Each request of a session -- initialize,
-   the initialized notification, tools/list, tools/call -- runs under
-   [deadline_s] on [clock], one window per request. Building one takes a
-   clock and a deadline, so a caller without either cannot open a session. Before this the default was the shared client's
-   unbounded arm, and a server that accepted the connection and never
-   answered held the keeper turn that called it for as long as the socket
-   stayed open: the attempt watchdog does not watch a tool in flight, so
-   the transport's deadline is the only liveness the call has. *)
+let operation_deadline post = Monotonic_deadline.after ~seconds:post.deadline_s
+
+let check_deadline deadline =
+  if Monotonic_deadline.passed deadline
+  then Error (Transport "MCP operation deadline expired")
+  else Ok ()
+
+(* Catalog pages, the tool request and explicit continuations use the same
+   monotonic deadline. Handshake requests each get their own window. The
+   attempt watchdog does not watch an in-flight tool, so the sender must
+   bound the actual request by the time remaining, including fractions. *)
 let http_post ~clock ~deadline_s : post =
-  fun ~url ~headers ~body ->
-    Masc_http_client.post_response_sync
-      ~clock ~timeout_sec:deadline_s ~url ~headers ~body ()
+  { deadline_s
+  ; send = (fun ~deadline ~url ~headers ~body ->
+      let timeout_sec = min deadline_s (Monotonic_deadline.remaining_seconds deadline) in
+      if timeout_sec <= 0. then Error "MCP operation deadline expired"
+      else Masc_http_client.post_response_sync
+          ~clock ~timeout_sec ~url ~headers ~body ())
+  }
 
 type era = Legacy | Modern
 
@@ -298,8 +309,13 @@ let headers_for t ~include_protocol_version ~method_ ~name ~extra_headers =
      | None -> [])
   @ extra_headers
 
-let request ~post t ~include_protocol_version ~method_ ~name ~extra_headers ~body =
-  match post ~url:t.url
+let request ?deadline ~post t ~include_protocol_version ~method_ ~name ~extra_headers ~body =
+  let deadline = match deadline with
+    | Some deadline -> deadline
+    | None -> operation_deadline post
+  in
+  let* () = check_deadline deadline in
+  match post.send ~deadline ~url:t.url
           ~headers:(headers_for t ~include_protocol_version ~method_ ~name ~extra_headers) ~body with
   | Error detail -> Error (Transport detail)
   | Ok response ->
@@ -343,7 +359,7 @@ let request ~post t ~include_protocol_version ~method_ ~name ~extra_headers ~bod
 let client_info =
   `Assoc [ "name", `String "masc"; "version", `String Build_version.current ]
 
-let rpc ~extra_headers ~post t ~include_protocol_version ~id ~method_ ~params =
+let rpc ?deadline ~extra_headers ~post t ~include_protocol_version ~id ~method_ ~params =
   let name =
     match method_ with
     | "tools/call" | "prompts/get" -> (match member "name" params with Some (`String name) -> Some name | _ -> None)
@@ -370,7 +386,7 @@ let rpc ~extra_headers ~post t ~include_protocol_version ~id ~method_ ~params =
         ; "params", params
         ])
   in
-  match request ~post t ~include_protocol_version ~method_ ~name ~extra_headers ~body with
+  match request ?deadline ~post t ~include_protocol_version ~method_ ~name ~extra_headers ~body with
   | Ok response ->
     let* json =
       json_of_body
@@ -698,22 +714,8 @@ let tool_of_json ~era json =
            | _ -> None)))
   | Some _ | None -> None
 
-(* WORKAROUND: a server that keeps returning cursors never ends the listing,
-   and every page still answers inside the per-request deadline, so that
-   deadline never fires. This page count stands in for one deadline shared by
-   the whole listing, which RFC #46355 D4 chose for continuation rounds. 1000
-   is not measured against any real server. The cursors stay opaque: this
-   counts pages and never looks at a cursor. Root fix: #46538. *)
-let max_tools_list_pages = 1000
-
-let list_tools ~post t =
-  let rec pages fetched cursor acc =
-    if fetched >= max_tools_list_pages then
-      Error
-        (Malformed
-           (Printf.sprintf "tools/list did not end within %d pages"
-              max_tools_list_pages))
-    else
+let list_tools_with_deadline ~post ~deadline t =
+  let rec pages cursor acc =
     let params =
       match cursor with
       | None -> `Assoc []
@@ -721,9 +723,10 @@ let list_tools ~post t =
     in
     let* _, result =
       let id = next_request_id t.request_ids ~slot:t.request_ids.list_used ~primary:2 in
-      rpc ~extra_headers:[] ~post t ~include_protocol_version:true ~id ~method_:"tools/list"
+      rpc ~deadline ~extra_headers:[] ~post t ~include_protocol_version:true ~id ~method_:"tools/list"
         ~params
     in
+    let* () = check_deadline deadline in
     let* result_type = unique_member "resultType" result in
     let* () =
       match t.era, result_type with
@@ -740,12 +743,16 @@ let list_tools ~post t =
     match member "nextCursor" result with
     | None | Some `Null -> Ok (List.rev acc)
     | Some (`String next) ->
-      pages (fetched + 1) (Some next) acc
+      pages (Some next) acc
     | Some _ -> Error (Malformed "tools/list returned a non-string cursor")
   in
-  let* tools = pages 0 None [] in
+  let* tools = pages None [] in
+  let* () = check_deadline deadline in
   Atomic.set t.tools (Some tools);
   Ok tools
+
+let list_tools ~post t =
+  list_tools_with_deadline ~post ~deadline:(operation_deadline post) t
 
 (* Text blocks joined; anything else named by its type. A model shown a
    shorter answer than the one that arrived would reason from a gap it
@@ -762,9 +769,10 @@ let text_of_content content =
     |> String.concat "\n"
   | _ -> ""
 
-let call_tool_internal ~post ~catalog_authority ~claim_send ~request_state
+let call_tool_internal ~post ~deadline ~catalog_authority ~claim_send ~request_state
     ~refresh_catalog ~observe_tool t ~name ~arguments =
   let headers_result =
+    let* () = check_deadline deadline in
     match t.era, catalog_authority with
     | Legacy, Unbound -> Ok []
     | (Legacy | Modern), (Unbound | Bound _) ->
@@ -776,7 +784,7 @@ let call_tool_internal ~post ~catalog_authority ~claim_send ~request_state
       let* tools =
         match refresh_catalog, Atomic.get t.tools with
         | false, Some tools -> Ok tools
-        | true, (Some _ | None) | false, None -> list_tools ~post t
+        | true, (Some _ | None) | false, None -> list_tools_with_deadline ~post ~deadline t
       in
       (match List.find_opt (fun tool -> String.equal tool.name name) tools with
        | None -> Error (Malformed "the tool is absent from the current catalog")
@@ -800,6 +808,7 @@ let call_tool_internal ~post ~catalog_authority ~claim_send ~request_state
          Ok headers)
   in
   let* extra_headers = Result.map_error (fun error -> Before_tool_call error) headers_result in
+  let* () = Result.map_error (fun error -> Before_tool_call error) (check_deadline deadline) in
   let* () =
     if claim_send () then Ok ()
     else Error (Before_tool_call (Malformed "the continuation was already consumed"))
@@ -810,7 +819,7 @@ let call_tool_internal ~post ~catalog_authority ~claim_send ~request_state
     @ (match request_state with Some state -> [ "requestState", `String state ] | None -> [])
   in
   let* _, result =
-    rpc ~extra_headers ~post t ~include_protocol_version:true ~id ~method_:"tools/call"
+    rpc ~deadline ~extra_headers ~post t ~include_protocol_version:true ~id ~method_:"tools/call"
       ~params:(`Assoc params)
   in
   let* result_type = unique_member "resultType" result in
@@ -856,7 +865,8 @@ let call_tool_internal ~post ~catalog_authority ~claim_send ~request_state
   Ok { is_error; text; content; structured_content }
 
 let call_tool ~post ?(catalog_authority = Unbound) t ~name ~arguments =
-  call_tool_internal ~post ~catalog_authority ~claim_send:(fun () -> true)
+  call_tool_internal ~post ~deadline:(operation_deadline post)
+    ~catalog_authority ~claim_send:(fun () -> true)
     ~request_state:None ~refresh_catalog:false ~observe_tool:(fun _ -> ()) t ~name ~arguments
 
 type state_only_continuation =
@@ -866,6 +876,7 @@ type state_only_continuation =
   ; catalog_authority : catalog_authority
   ; request_state : string
   ; consumed : bool Atomic.t
+  ; deadline : Monotonic_deadline.t
   }
 
 type state_only_step =
@@ -876,31 +887,32 @@ type continuation_error =
   | Continuation_consumed
   | Continuation_failed of error
 
-let state_only_step ~client ~name ~arguments ~catalog_authority = function
+let state_only_step ~deadline ~client ~name ~arguments ~catalog_authority = function
   | Ok result -> Ok (Tool_completed result)
   | Error (Input_required { input_requests = None; request_state = Some request_state } as error) ->
     (match client.era, catalog_authority with
      | Modern, Bound (Some _) ->
        Ok (Tool_continuation
              { client; name; arguments; catalog_authority; request_state
-             ; consumed = Atomic.make false })
+             ; consumed = Atomic.make false; deadline })
      | Modern, (Unbound | Bound None) -> Error (Malformed "the original tool schema was not observed")
      | Legacy, (Unbound | Bound _) -> Error error)
   | Error (Transport _ | Unauthorized _ | Http _ | Rpc _ | Input_required _
           | Before_tool_call _ | Malformed _ as error) -> Error error
 
 let start_tool_with_continuation ~post ?(catalog_authority = Unbound) client ~name ~arguments =
+  let deadline = operation_deadline post in
   let offered = ref None in
   let observe_tool (tool : tool) =
     offered := Some { input_schema = tool.input_schema; read_only = tool.read_only }
   in
-  let result = call_tool_internal ~post ~catalog_authority ~claim_send:(fun () -> true)
+  let result = call_tool_internal ~post ~deadline ~catalog_authority ~claim_send:(fun () -> true)
       ~request_state:None ~refresh_catalog:false ~observe_tool client ~name ~arguments in
   let authority = match !offered with
     | Some binding -> Bound (Some binding)
     | None -> catalog_authority
   in
-  state_only_step ~client ~name ~arguments ~catalog_authority:authority result
+  state_only_step ~deadline ~client ~name ~arguments ~catalog_authority:authority result
 
 let resume_tool_with_state ~post continuation =
   if Atomic.get continuation.consumed then Error Continuation_consumed
@@ -911,7 +923,8 @@ let resume_tool_with_state ~post continuation =
       else (claim_rejected := true; false)
     in
     let result =
-      call_tool_internal ~post ~catalog_authority:continuation.catalog_authority
+      call_tool_internal ~post ~deadline:continuation.deadline
+        ~catalog_authority:continuation.catalog_authority
         ~claim_send ~request_state:(Some continuation.request_state)
         ~refresh_catalog:true ~observe_tool:(fun _ -> ())
         continuation.client ~name:continuation.name ~arguments:continuation.arguments
@@ -919,6 +932,7 @@ let resume_tool_with_state ~post continuation =
     if !claim_rejected then Error Continuation_consumed
     else
       result
-      |> state_only_step ~client:continuation.client ~name:continuation.name
+      |> state_only_step ~deadline:continuation.deadline
+           ~client:continuation.client ~name:continuation.name
            ~arguments:continuation.arguments ~catalog_authority:continuation.catalog_authority
       |> Result.map_error (fun error -> Continuation_failed error)

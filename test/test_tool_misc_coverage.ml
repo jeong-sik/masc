@@ -499,8 +499,11 @@ let json_rpc_result id result =
 
 (* A scripted z.ai: [initialize] answers with a session id, the notification
    with 202, and the call with [call_response]. Every request is recorded. *)
+let bounded_mcp_post send : Mcp_client.post =
+  { deadline_s = 60.; send = (fun ~deadline:_ -> send) }
+
 let zai_fake_post ~call_response requests =
-  fun ~url ~headers ~body ->
+  bounded_mcp_post (fun ~url ~headers ~body ->
     let json = Yojson.Safe.from_string body in
     let meth =
       match json with
@@ -531,7 +534,7 @@ let zai_fake_post ~call_response requests =
         }
     | "notifications/initialized" ->
       Ok { Masc_http_client.status = 202; headers = []; body = "" }
-    | _ -> call_response ()
+    | _ -> call_response ())
 
 let zai_call_ok text () =
   Ok
@@ -678,7 +681,8 @@ let () = test "search_via_zai reads a refusal at every stage" (fun () ->
         ; body = Printf.sprintf {|{"code":%s,"msg":"nope","success":false}|} code_json
         }
   in
-  let run post =
+  let run send =
+    let post = bounded_mcp_post send in
     Tool_misc_web_search.search_via_zai_for_test ~post ~api_key:"zai-test-key" ~query:"q"
       ~limit:5
   in
@@ -708,7 +712,9 @@ let () = test "search_via_zai reads a refusal at every stage" (fun () ->
 
 let () = test "the zai transport drops the content type and carries the answer" (fun () ->
   let seen = ref [] in
-  let run ~timeout_sec ~headers ~url ~body_json () =
+  let deadline = Monotonic_deadline.after ~seconds:0.25 in
+  let run ~deadline ~timeout_sec ~headers ~url ~body_json () =
+    assert (Monotonic_deadline.remaining_seconds deadline <= 0.25);
     seen := (timeout_sec, headers, url, body_json) :: !seen;
     Ok
       { Tool_local_runtime_http.status = 202
@@ -718,7 +724,7 @@ let () = test "the zai transport drops the content type and carries the answer" 
   in
   let post = Tool_misc_web_search.curl_mcp_post_with_for_test ~run ~timeout_sec:9 in
   (match
-     post ~url:"https://example.invalid/mcp"
+     post.send ~deadline ~url:"https://example.invalid/mcp"
        ~headers:
          [ ("Content-Type", "application/json")
          ; ("content-type", "application/json")
@@ -735,10 +741,10 @@ let () = test "the zai transport drops the content type and carries the answer" 
    | [ (9, headers, "https://example.invalid/mcp", "{}") ] ->
      assert (headers = [ ("Authorization", "Bearer k") ])
    | _ -> failwith "run was not given the request");
-  let failing ~timeout_sec:_ ~headers:_ ~url:_ ~body_json:_ () = Error "curl exit code 28" in
+  let failing ~deadline:_ ~timeout_sec:_ ~headers:_ ~url:_ ~body_json:_ () = Error "curl exit code 28" in
+  let post = Tool_misc_web_search.curl_mcp_post_with_for_test ~run:failing ~timeout_sec:1 in
   assert
-    (Tool_misc_web_search.curl_mcp_post_with_for_test ~run:failing ~timeout_sec:1
-       ~url:"https://example.invalid/mcp" ~headers:[] ~body:"{}"
+    (post.send ~deadline ~url:"https://example.invalid/mcp" ~headers:[] ~body:"{}"
      = Error "curl exit code 28")
 )
 

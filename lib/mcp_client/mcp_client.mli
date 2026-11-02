@@ -84,24 +84,34 @@ val error_to_string : error -> string
 (** How a request reaches the server. Injected so the wire contract can be
     exercised against recorded answers: a test that needs network is a test
     that does not run. *)
-type post =
-  url:string ->
-  headers:(string * string) list ->
-  body:string ->
-  (Masc_http_client.response, string) result
+type post = {
+  deadline_s : float;
+  send :
+    deadline:Monotonic_deadline.t ->
+    url:string ->
+    headers:(string * string) list ->
+    body:string ->
+    (Masc_http_client.response, string) result;
+}
+(** [deadline_s] bounds one catalog enumeration or tool operation. [send]
+    must honor the supplied absolute deadline, including its remaining
+    fractional seconds, and must not start a request after it expires.
+    Recorded transports may supply their own sender without a network. *)
 
 val http_post
   :  clock:[> float Eio.Time.clock_ty ] Eio.Resource.t
   -> deadline_s:float
   -> post
-(** The production transport for a caller that has a clock: each request of
-    a session runs under [deadline_s] on [clock], one window per request. It
+(** The production transport for a caller that has a clock. Each tool
+    operation shares [deadline_s] between its catalog discovery and tool
+    request. A standalone {!list_tools} gets one enumeration window.
+    Handshake requests each retain their own window. It
     cannot be built without a clock and a deadline: a tools/call is work a
     keeper turn is waiting on with the attempt watchdog off, so a server
     that accepts the connection and never answers is ended by this deadline
     or not at all. A caller with no clock (the web search tool, which runs
     curl as its other providers do) supplies a {!post} of its own, under the
-    same rule: it must bound each request. *)
+    same rule: it must honor the supplied monotonic deadline. *)
 
 type t
 
@@ -132,14 +142,10 @@ val negotiated_protocol_version : t -> string
 
 val session_id : t -> string option
 
-val max_tools_list_pages : int
-(** Pages {!list_tools} reads before it refuses a listing that does not end.
-    A stopgap for one deadline shared by the whole listing (#46538). *)
-
 val list_tools : post:post -> t -> (tool list, error) result
 (** Read every page, treating cursors as opaque, including empty strings. A
-    listing that still returns a cursor after {!max_tools_list_pages} pages is
-    refused with [Malformed]. *)
+    single deadline covers the entire enumeration. Expiry returns [Transport]
+    without caching a partial catalog; there is no page-count limit. *)
 
 val call_tool :
   post:post ->
@@ -148,11 +154,14 @@ val call_tool :
   name:string ->
   arguments:Yojson.Safe.t ->
   (tool_result, error) result
+(** Catalog discovery and the tool request share one [post.deadline_s]
+    window. Discovery and deadline checks before the send claim report
+    [Before_tool_call]. *)
 
 type state_only_continuation
 (** In-memory, single-use continuation of one modern tools/call. It binds
-    the original client, tool, arguments and catalog authority; server state
-    is opaque and is not exposed to the caller. *)
+    the original client, tool, arguments, catalog authority and deadline.
+    Server state is opaque and is not exposed to the caller. *)
 
 type state_only_step =
   | Tool_completed of tool_result
@@ -173,7 +182,7 @@ val start_tool_with_continuation :
     only [requestState]. Server input requests are not handled by this API
     and remain an {!Input_required} error. The actual offered schema and hint
     are captured even for an unbound initial call. The continuation is not
-    durable. *)
+    durable. The initial catalog and tool request start one shared deadline. *)
 
 val resume_tool_with_state :
   post:post -> state_only_continuation -> (state_only_step, continuation_error) result
@@ -182,4 +191,5 @@ val resume_tool_with_state :
     Validation happens before a single caller claims the
     continuation; once claimed for transmission it cannot be reused, even
     if the response is lost. A failed continuation does not prove the
-    original operation had no effect. *)
+    original operation had no effect. The original deadline also covers
+    catalog refresh and all later continuations; resuming does not renew it. *)

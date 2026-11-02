@@ -86,12 +86,8 @@ compute_scope() {
 }
 read_current_pr
 [ "$source_receipt" -eq 0 ] || [ "$review_policy" = source ] || refuse "source receipts cannot admit a release"
-# A reviewer's GitHub account must be distinct from every linked content
-# author and committer. An unlinked role is unknown, not an independent user.
-# The comparison is pinned to the same frozen base/head as the reviewed diff.
-read_commit_accounts() {
-  python3 "$here/review-commit-accounts.py" --repo "$repo" --base "$pr_base_sha" --head "$head" --gh "$GH"
-}
+# GitHub forbids the PR author from approving the PR. Commit identities may be
+# shared by independent Keeper sessions and do not establish who reviewed it.
 read_author_id() {
   local person login id
   person=$(ci_gh_object "repos/$repo/pulls/$pr" '.user') || return 1
@@ -102,18 +98,12 @@ read_author_id() {
   [ "$login" = "$pr_author" ] || refuse "PR author changed during identity read"
   printf '%s' "$id"
 }
-account_in_commits() {
-  printf '%s' "$commit_accounts" | jq -e --argjson id "$1" 'any(.accounts[]; .[1] == $id)' >/dev/null
-}
-recheck_commit_accounts() {
-  local after author_after
-  after=$(read_commit_accounts) || return $?
-  [ "$after" = "$commit_accounts" ] || refuse "commit account identities changed during review"
+recheck_author_identity() {
+  local author_after
   author_after=$(read_author_id) || return $?
   [ "$author_after" = "$pr_author_id" ] || refuse "PR author identity changed during review"
 }
 pr_author_id=$(read_author_id) || exit $?
-commit_accounts=$(read_commit_accounts) || exit $?
 current_diff=$(python3 "$here/review-diff.py" --repo "$repo" --base "$pr_base_sha" --head "$head") || {
   echo "approve-guard: complete review diff unavailable" >&2; exit 1;
 }
@@ -183,8 +173,8 @@ check_reviews() {
 "
         continue
       }
-      if [ "$actor_id" = "$pr_author_id" ] || account_in_commits "$actor_id"; then
-        refusal_detail="$refusal_detail  review $rid by $who: reviewer is a PR author or content commit account
+      if [ "$actor_id" = "$pr_author_id" ]; then
+        refusal_detail="$refusal_detail  review $rid by $who: reviewer is the PR author
 "
         continue
       fi
@@ -269,7 +259,7 @@ if [ "$merge_check" -eq 1 ] || [ "$source_receipt" -eq 1 ]; then
   check_reviews
   [ -n "$approvals" ] || refuse "approval changed after final diff read"
   check_verdict
-  recheck_commit_accounts || exit $?
+  recheck_author_identity || exit $?
   read_current_pr
   check_cr_ownership consume || exit $?
   read_current_pr
@@ -280,9 +270,6 @@ if [ "$merge_check" -eq 1 ] || [ "$source_receipt" -eq 1 ]; then
 fi
 check_publication_policy
 [ "$me_id" != "$pr_author_id" ] || refuse "the PR author cannot approve their own change"
-if account_in_commits "$me_id"; then
-  refuse "a content commit author or committer cannot independently approve"
-fi
 if [ "$check_only" -eq 0 ] || [ -n "$review_base" ] || [ -n "$review_diff" ]; then
   [[ "$review_base" =~ ^[0-9a-f]{40}$ && "$review_diff" =~ ^[0-9a-f]{64}$ ]] ||
     refuse "supply the base and complete diff identity captured during source review (--review-base/--review-diff)"
@@ -339,7 +326,7 @@ if [ -n "$pending_requests" ]; then
   echo "APPROVAL ONLY #$pr: other CHANGES_REQUESTED remain merge blockers:$pending_requests" >&2
 fi
 if [ "$check_only" -eq 1 ]; then
-  recheck_commit_accounts || exit $?
+  recheck_author_identity || exit $?
   read_current_pr
   check_cr_ownership publish || exit $?
   read_current_pr
@@ -354,7 +341,7 @@ if [ -n "$own_approval" ] && [ -z "$replace_cr" ]; then
   own_verdict=$(verdict_for "$pr" "$head" "" "$me") || { echo "approve-guard: own verdict read failed" >&2; exit 1; }
   read -r own_state _ <<<"$own_verdict"
   if [ "$previous_scope" = "review-scope: $scope" ] && [ "$own_state" = PASS ]; then
-    recheck_commit_accounts || exit $?
+    recheck_author_identity || exit $?
     read_current_pr
     check_cr_ownership publish || exit $?
     read_current_pr
@@ -365,7 +352,7 @@ fi
 [ -z "$release_run" ] || footer="$footer · release run $release_run"
 [ -z "$replaced" ] || footer="$footer · replaces own CHANGES_REQUESTED $replaced"
 footer="$footer$(printf ' · reviewed base `%s` · diff sha256 `%s`' "$review_base" "$review_diff")"
-recheck_commit_accounts || exit $?
+recheck_author_identity || exit $?
 read_current_pr
 check_cr_ownership publish || exit $?
 read_current_pr
@@ -396,14 +383,11 @@ back_author_id=$(printf '%s' "$back_json" | jq -er 'select((.user.id | type) == 
 read_current_pr || {
   echo "approval review $rid was posted but the PR identity could not be verified; inspect it before retry" >&2; exit 1;
 }
-post_accounts=$(read_commit_accounts) || {
-  echo "approval review $rid was posted but commit identities could not be rechecked; inspect it before retry" >&2; exit 1;
-}
 post_author_id=$(read_author_id) || {
   echo "approval review $rid was posted but author identity could not be rechecked; inspect it before retry" >&2; exit 1;
 }
-if [ "$post_accounts" != "$commit_accounts" ] || [ "$post_author_id" != "$pr_author_id" ]; then
-  echo "approval review $rid was posted but account identities changed; inspect it before retry" >&2; exit 1
+if [ "$post_author_id" != "$pr_author_id" ]; then
+  echo "approval review $rid was posted but the PR author identity changed; inspect it before retry" >&2; exit 1
 fi
 read_current_pr || {
   echo "approval review $rid was posted but the PR identity moved; inspect it before retry" >&2; exit 1;

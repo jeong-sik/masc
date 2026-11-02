@@ -77,18 +77,33 @@ val waiting : t -> now:float -> int
 
 (** A non-secret handle, generated independently from callback state. *)
 type completion = Tools_discovered of int | Credentials_published_discovery_failed
+type credential_write = Refresh_token | Access_token | Expiry
+type credential_publication = private {
+  completed_writes : credential_write list;
+  interrupted_write : credential_write;
+}
+(** Earlier writes returned successfully. The interrupted write may also have
+    changed storage before returning an error or raising; no rollback is implied. *)
 type status = Awaiting_consent of float | Callback_admitted
-  | Completed of completion | Failed | Expired | Superseded
+  | Completed of completion | Failed
+  | Credential_publication_incomplete of credential_publication
+  | Expired | Superseded
 val status : t -> now:float -> attempt_id:string -> keeper:string -> provider_id:string -> status option
-(** [None] means unavailable in this process/scope, never inferred expiry. *)
-val while_admitted : t -> state:string -> (unit -> 'a) -> 'a option
-(** Run [f] only while the exchange echoed as [state] is still an admitted
-    callback, and keep the table locked for the whole of [f]: a newer start
-    for the same scope cannot supersede it until [f] returns, so a publication
-    that reaches its writes is never overtaken by a later attempt's writes.
-    [None] means the exchange was superseded (or never admitted) and [f] did
-    not run. [f] must be short and must not call back into this table; it is
-    for the credential writes, not for network discovery. *)
+(** [None] means unavailable in this process/scope, never inferred expiry.
+    Terminal metadata, including incomplete publication progress, is retired
+    when the next attempt for the same scope is remembered. It is not a
+    persistent credential journal and does not survive a server restart. *)
+val publish_credentials :
+  t -> state:string ->
+  write:(credential_write -> (unit, string) result) ->
+  (unit, string) result option
+(** Run refresh-token, access-token and expiry writes in order, only for an
+    admitted callback. The table remains locked through the writes and failure
+    recording; a newer start cannot interleave its publication. An error records
+    [Credential_publication_incomplete] before returning it. An exception records
+    the same progress and is re-raised unchanged, including cancellation.
+    [None] means superseded or never admitted, and no write runs. [write] must
+    be short, must not call this table and must not perform network discovery. *)
 
 val finish : t -> state:string -> (completion, unit) result -> unit
 (** Only admitted callbacks can become terminal. Replay cannot replace a result. *)

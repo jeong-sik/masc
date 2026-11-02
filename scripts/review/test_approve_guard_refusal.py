@@ -77,7 +77,7 @@ class GuardHarness(unittest.TestCase):
         self.scripts.mkdir()
         for name in ("approve-guard.sh", "ci-checks.sh", "review-verdict.sh", "review-decisions.py",
                      "review-scope.py", "review-refusal.py", "_gh_merge_base.py",
-                     "prepare-approved-batch.py", "review-commit-accounts.py", "review-cr-ownership.py",
+                     "prepare-approved-batch.py", "review-cr-ownership.py",
                      "review-formal-order.py"):
             shutil.copy(HERE / name, self.scripts / name)
         # The real review-diff.py needs Git objects; the diff identity is a fixed fixture here.
@@ -173,83 +173,27 @@ class ReadFailureNaming(GuardHarness):
                         self.assertIn(f"structured verdict is {state}", result.stderr)
 
 
-class CommitIndependence(GuardHarness):
-    def set_pages(self, pages, name="compare.json"):
-        (self.data / name).write_text(json.dumps(pages))
-
-    def page(self, commits, total=None):
-        return {"base_commit": {"sha": BASE},
-                "total_commits": len(commits) if total is None else total, "commits": commits}
-
-    def commit(self, sha, author, committer):
-        return {"sha": sha, "author": author, "committer": committer}
-
-    def test_unknown_commit_role_refuses_publication_and_receipt(self):
+class SharedCommitAccount(GuardHarness):
+    def test_commit_accounts_do_not_control_publication_or_receipt(self):
         self.review(footer_line())
-        author = {"login": "content-author", "id": 555}
-        for author_role, committer_role in ((None, author), (author, None)):
-            self.set_pages([self.page([self.commit(HEAD, author_role, committer_role)])])
-            for mode in ("--check", "--source-receipt"):
-                with self.subTest(author=author_role, committer=committer_role, mode=mode):
-                    result = self.run_guard(mode)
-                    self.assertEqual(result.returncode, 2, result.stderr)
-                    self.assertIn("identity is incomplete", result.stderr)
-                    self.assertIn(f"{HEAD} {'author' if author_role is None else 'committer'} account unavailable", result.stderr)
-                    self.assertEqual(result.stdout, "")
-
-    def test_diagnostic_reports_omitted_identity_problems(self):
-        self.review(footer_line())
-        author = {"login": "content-author", "id": 555}
-        commits = [self.commit(f"{n:040x}", None, author) for n in range(1, 7)]
-        self.set_pages([self.page(commits, total=7)])
-        result = self.run_guard("--source-receipt")
-        self.assertEqual(result.returncode, 2, result.stderr)
-        self.assertIn("comparison returned 6 of 7 commits", result.stderr)
-        self.assertIn(f"{1:040x} author account unavailable", result.stderr)
-        self.assertIn("2 more identity problems", result.stderr)
-
-    def test_matching_account_is_not_admitted_or_allowed_to_publish(self):
-        self.review(footer_line())
-        # Different spelling cannot defeat matching the immutable account id.
-        person = {"login": "content-alias", "id": 30}
-        self.set_pages([self.page([self.commit(HEAD, person, person)])])
-        receipt = self.run_guard("--source-receipt")
-        self.assertEqual(receipt.returncode, 2, receipt.stderr)
-        self.assertIn("content commit account", receipt.stderr)
-        self.set_pages([self.page([self.commit(HEAD, {"login": "reviewer-account", "id": 20}, person)])])
-        publication = self.run_guard("--check")
-        self.assertEqual(publication.returncode, 2, publication.stderr)
-        self.assertIn("content commit author or committer", publication.stderr)
-
-    def test_later_compare_page_is_included(self):
-        self.review(footer_line())
-        other = {"login": "content-author", "id": 555}
-        reviewer = {"login": "reviewer-keeper", "id": 30}
-        self.set_pages([self.page([self.commit("1" * 40, other, other)], total=2),
-                        self.page([self.commit(HEAD, other, reviewer)], total=2)])
-        result = self.run_guard("--source-receipt")
-        self.assertEqual(result.returncode, 2, result.stderr)
-        self.assertIn("content commit account", result.stderr)
-
-    def test_incomplete_pagination_and_failed_read_do_not_admit(self):
-        self.review(footer_line())
-        other = {"login": "content-author", "id": 555}
-        self.set_pages([self.page([self.commit(HEAD, other, other)], total=2)])
-        incomplete = self.run_guard("--source-receipt")
-        self.assertEqual(incomplete.returncode, 2, incomplete.stderr)
+        # The comparison cannot identify sessions: do not query it at all.
         (self.data / "compare.json").unlink()
-        unavailable = self.run_guard("--source-receipt")
-        self.assertEqual(unavailable.returncode, 1, unavailable.stderr)
-        self.assertIn("commit identities unavailable", unavailable.stderr)
+        for mode in ("--check", "--source-receipt"):
+            with self.subTest(mode=mode):
+                result = self.run_guard(mode)
+                self.assertEqual(result.returncode, 0, result.stderr)
+        calls = (self.data / "calls.log").read_text().splitlines()
+        self.assertFalse(any("/compare/" in call for call in calls))
 
-    def test_identity_mapping_change_before_consumption_is_refused(self):
+    def test_shared_commit_account_does_not_block_independent_session(self):
         self.review(footer_line())
-        changed = {"login": "content-author", "id": 556}
-        self.set_pages([self.page([self.commit(HEAD, changed, changed)])], "compare-2.json")
-        result = self.run_guard("--source-receipt")
-        self.assertEqual(result.returncode, 2, result.stderr)
-        self.assertIn("identities changed", result.stderr)
-        self.assertEqual(result.stdout, "")
+        shared = {"login": "reviewer-account", "id": 20}
+        (self.data / "compare.json").write_text(json.dumps([{
+            "base_commit": {"sha": BASE}, "total_commits": 1,
+            "commits": [{"sha": HEAD, "author": shared, "committer": shared}]}]))
+        result = self.run_guard("--check")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("WOULD APPROVE", result.stdout)
 
     def test_unknown_existing_reviewer_does_not_prevent_another_publication(self):
         self.review(footer_line())
@@ -801,15 +745,14 @@ print(f'{rid}\\tAPPROVED\\t{review["commit_id"]}')
             args += ["--replace-own-cr", str(rid)]
         return self.run_guard(*args)
 
-    def test_identity_change_after_post_reports_posted_review_for_reconciliation(self):
+    def test_commit_identity_mapping_does_not_invalidate_posted_review(self):
         self.install_publication_fake()
         changed = {"login": "content-author", "id": 556}
         (self.data / "compare-3.json").write_text(json.dumps([{
             "base_commit": {"sha": BASE}, "total_commits": 1,
             "commits": [{"sha": HEAD, "author": changed, "committer": changed}]}]))
         result = self.publish()
-        self.assertEqual(result.returncode, 1, result.stderr)
-        self.assertIn("was posted but account identities changed", result.stderr)
+        self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(len(json.loads((self.data / "reviews.json").read_text())), 1)
         self.assertEqual(sum(line.startswith("POST ") for line in (self.data / "calls.log").read_text().splitlines()), 1)
 

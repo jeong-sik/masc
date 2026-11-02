@@ -179,9 +179,10 @@ val pending_selections : t -> pending_selection list
 (** FIFO pending entries with their exact source incarnation authority. *)
 
 val last_non_immediate_served : t -> Keeper_event_queue.urgency option
-(** Most recently acknowledged non-immediate urgency ([Normal] or [Low]), used
-    by {!peek_when} and {!select_when} to alternate deterministically between
-    [Normal] and [Low] lanes without wall-clock aging thresholds. *)
+(** Non-immediate urgency currently held in this state ([Normal] or [Low]),
+    used by {!peek_when} and {!select_when} for lane preference. On snapshot
+    load it is derived from retained transition evidence, which may not
+    include every acknowledgement. *)
 
 val derived_last_non_immediate_served :
   transition_outbox:outbox_entry list ->

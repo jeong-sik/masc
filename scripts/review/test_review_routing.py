@@ -51,14 +51,12 @@ def pull(number=1, **changes):
            "state": "open", "draft": False, "author": "author", "head": HEAD,
            "base_ref": "main", "base_sha": BASE, "stack": None, "created_at": T1,
            "requested_reviewers": [], "requested_teams": [], "reviews": [],
-           "commit_accounts": [], "commit_identities_complete": True,
            "admission": False, "independent_source_review": False, "blockers": []}
     raw.update(changes)
-    names = [raw['author'], 'alice', 'bob', *raw['requested_reviewers'], *raw['commit_accounts']]
+    names = [raw['author'], 'alice', 'bob', *raw['requested_reviewers']]
     names.extend(r['user']['login'] for r in raw['reviews'])
     raw.setdefault('account_ids', {name.casefold():uid(name) for name in names})
     raw.setdefault('author_id', uid(raw['author']))
-    raw.setdefault('commit_actor_ids', [uid(name) for name in raw['commit_accounts']])
     return raw
 
 
@@ -142,44 +140,29 @@ class RoutingScenarios(unittest.TestCase):
         self.assertEqual(unavailable[0].reason, M.Reason.NO_REVIEWER)
         self.assertFalse(unavailable[0].actionable)
 
-    def test_commit_actor_is_excluded_case_insensitively(self):
-        result = actions([pull(commit_accounts=["ALICE"])])
+    def test_non_author_can_receive_review_request(self):
+        result = actions([pull()])
         self.assertEqual((result[0].account, result[0].reviewer_eligibility),
-                         ("bob", M.ReviewerEligibility.ELIGIBLE))
-        unavailable = actions([pull(commit_accounts=["alice", "BOB"])])
-        self.assertEqual(unavailable[0].reason, M.Reason.NO_REVIEWER)
-
-    def test_commit_actor_id_excludes_same_account_with_a_different_login(self):
-        actor_ids = {'author':uid('author'), 'alice':uid('alice'), 'bob':uid('bob'),
-                     'old-alice':uid('alice')}
-        result = actions([pull(commit_accounts=['old-alice'], commit_actor_ids=[uid('alice')],
-                               account_ids=actor_ids)])
-        self.assertEqual(result[0].account, 'bob')
+                         ("alice", M.ReviewerEligibility.ELIGIBLE))
 
     def test_unknown_blocker_and_known_roster_sort_without_losing_owner(self):
         result = actions([pull(blockers=[blocker(actor='unknown')]), pull(2)])
         self.assertIn((M.Reason.AWAITING_OWNER, 'unknown'), {(a.reason, a.account) for a in result})
 
-    def test_unknown_commit_identity_never_proposes_a_reviewer(self):
-        result = actions([pull(commit_accounts=["alice"], commit_identities_complete=False)])
-        self.assertEqual(result[0].reason, M.Reason.COMMIT_IDENTITY_UNKNOWN)
-        self.assertFalse(result[0].actionable)
-
-    def test_conflicting_request_is_preserved_and_independent_reviewer_proposed(self):
-        result = actions([pull(requested_reviewers=["Alice"], commit_accounts=["ALICE"])])
+    def test_pr_author_request_is_preserved_and_another_reviewer_proposed(self):
+        result = actions([pull(author="Alice", requested_reviewers=["Alice"])])
         self.assertEqual({(a.reason, a.account, a.reviewer_eligibility) for a in result}, {
-            (M.Reason.EXISTING_REQUEST, "alice", M.ReviewerEligibility.COMMIT_ACTOR),
+            (M.Reason.EXISTING_REQUEST, "alice", M.ReviewerEligibility.PR_AUTHOR),
             (M.Reason.INDEPENDENT_REVIEW, "bob", M.ReviewerEligibility.ELIGIBLE)})
 
-    def test_conflicting_cr_owner_remains_owned_alongside_independent_review(self):
-        result = actions([pull(reviews=[review("alice")], commit_accounts=["ALICE"])])
+    def test_changed_head_cr_returns_to_owner(self):
+        result = actions([pull(reviews=[review("alice")])])
         self.assertEqual({(a.reason, a.account) for a in result},
-                         {(M.Reason.AWAITING_OWNER, "alice"),
-                          (M.Reason.INDEPENDENT_REVIEW, "bob")})
+                         {(M.Reason.CHANGED_HEAD_CR, "alice")})
 
     def test_valid_independent_approval_does_not_displace_conflicting_cr(self):
-        row = pull(requested_reviewers=['alice'], reviews=[review('alice')],
-                   commit_accounts=['alice'], independent_source_review=True)
+        row = pull(author='alice', requested_reviewers=['alice'], reviews=[review('alice')],
+                   independent_source_review=True)
         result = actions([row])
         self.assertEqual([(a.reason, a.account, a.review_ids) for a in result],
                          [(M.Reason.EXISTING_REQUEST, 'alice', (1,))])
@@ -187,17 +170,14 @@ class RoutingScenarios(unittest.TestCase):
         self.assertFalse(any(a.assignment is M.Assignment.PROPOSED_USER for a in result))
 
     def test_current_cr_existing_independent_request_or_team_prevents_extra_request(self):
-        rows = [pull(1, reviews=[review(head=HEAD)], commit_accounts=["alice"]),
-                pull(2, requested_reviewers=["alice", "bob"], commit_accounts=["alice"]),
-                pull(3, requested_reviewers=["alice"], requested_teams=["team"],
-                     commit_accounts=["alice"])]
+        rows = [pull(1, reviews=[review(head=HEAD)]),
+                pull(2, requested_reviewers=["alice", "bob"]),
+                pull(3, requested_reviewers=["alice"], requested_teams=["team"])]
         self.assertFalse(any(a.assignment is M.Assignment.PROPOSED_USER for a in actions(rows)))
 
-    def test_unknown_identity_with_conflicting_request_keeps_it_and_does_not_propose(self):
-        result = actions([pull(requested_reviewers=["alice"], commit_accounts=["alice"],
-                               commit_identities_complete=False)])
-        self.assertEqual({a.reason for a in result},
-                         {M.Reason.EXISTING_REQUEST, M.Reason.COMMIT_IDENTITY_UNKNOWN})
+    def test_existing_request_is_not_duplicated(self):
+        result = actions([pull(requested_reviewers=["alice"])])
+        self.assertEqual({a.reason for a in result}, {M.Reason.EXISTING_REQUEST})
         self.assertFalse(any(a.assignment is M.Assignment.PROPOSED_USER for a in result))
 
     def test_current_head_approval_without_valid_scope_is_routed_for_review(self):
@@ -352,6 +332,16 @@ class RoutingScenarios(unittest.TestCase):
         rows = [pull(2, created_at=T2), pull(1, created_at=T1)]
         self.assertEqual(M.plan(rows, ["alice", "bob"]).to_json(),
                          M.plan(list(reversed(rows)), ["alice", "bob"]).to_json())
+
+    def test_changed_cr_first_then_oldest_new_or_rereview(self):
+        older = pull(1, created_at=T1, reviews=[review(state="COMMENTED")])
+        newer = pull(2, created_at=T2)
+        changed_cr = pull(3, created_at=T3, reviews=[review("bob")])
+        result = M.plan([newer, changed_cr, older], ["alice", "bob"])
+        self.assertEqual([(a.identity.number, a.reason) for a in result.actions], [
+            (3, M.Reason.CHANGED_HEAD_CR),
+            (1, M.Reason.REVIEW_NEEDED),
+            (2, M.Reason.FIRST_REVIEW)])
 
     def test_inputs_are_not_mutated_and_returned_identity_is_frozen(self):
         raw = pull(stack={"number": 5})

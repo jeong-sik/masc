@@ -347,44 +347,41 @@ let publish_finished ~clock ~(config : Workspace.config) ~state ~finished ~now =
      again; losing this one means the Keeper works until the access token
      expires and then stops with nothing on disk to say why.
 
-     All credential writes run inside [while_admitted]: a newer start for this
+     All credential writes run inside [publish_credentials]: a newer start for this
      Keeper and provider supersedes the admitted callback only between two
      publications, never in the middle of one, and a publication that was
      superseded before its first write writes nothing. Superseding the table
      entry alone would only make the final [finish] a no-op after the older
      exchange had already overwritten the newer attempt's tokens. *)
-  let write_credentials () =
-  let* () =
-    match refresh_token with
-    | None ->
-      Keeper_secret_projection.delete_file_entry ~base_path ~keeper_name
-        ~scope:Keeper_secret_projection.Keeper_secret
-        ~container_path:provider.Provider.refresh_token_file
-    | Some value ->
-      Keeper_secret_projection.set_file_entry ~base_path ~keeper_name
-        ~scope:Keeper_secret_projection.Keeper_secret
-        ~container_path:provider.Provider.refresh_token_file ~value
-  in
-  let* () =
-    set_env ~name:provider.Provider.access_token_env
-      ~value:finished.Session.access_token
-  in
-  (* Written even when there is no expiry, and empty is what says so. A
-     Keeper that was attached to this provider before may have a moment
-     recorded from that login; leaving it there would have the renewal check
-     read a stale clock against a credential that does not answer to it. *)
-  set_env ~name:provider.Provider.expires_at_env
-    ~value:
-      (match expires_at with
-       | None -> ""
-       | Some expires_at -> Printf.sprintf "%.0f" expires_at)
+  let write = function
+    | Keeper_oauth_pending.Refresh_token ->
+        (match refresh_token with
+         | None ->
+             Keeper_secret_projection.delete_file_entry ~base_path ~keeper_name
+               ~scope:Keeper_secret_projection.Keeper_secret
+               ~container_path:provider.Provider.refresh_token_file
+         | Some value ->
+             Keeper_secret_projection.set_file_entry ~base_path ~keeper_name
+               ~scope:Keeper_secret_projection.Keeper_secret
+               ~container_path:provider.Provider.refresh_token_file ~value)
+    | Keeper_oauth_pending.Access_token ->
+        set_env ~name:provider.Provider.access_token_env
+          ~value:finished.Session.access_token
+    | Keeper_oauth_pending.Expiry ->
+        (* Clear a previous login's expiry even when this token never expires. *)
+        set_env ~name:provider.Provider.expires_at_env
+          ~value:(match expires_at with
+            | None -> ""
+            | Some expires_at -> Printf.sprintf "%.0f" expires_at)
   in
   let* () =
     match
-      Keeper_oauth_pending.while_admitted (pending_for_base_path base_path) ~state
-        write_credentials
+      Keeper_oauth_pending.publish_credentials (pending_for_base_path base_path)
+        ~state ~write
     with
-    | Some written -> written
+    | Some written -> Result.map_error (fun detail ->
+        "credential publication did not complete; stored values may have changed: " ^ detail)
+        written
     | None ->
       Error
         "this login was superseded by a newer attempt for the same Keeper and \
@@ -401,11 +398,12 @@ let publish_finished ~clock ~(config : Workspace.config) ~state ~finished ~now =
          ~config ~keeper_name ~provider ~now () with
        | result -> result
        | exception exn ->
+           let backtrace = Printexc.get_raw_backtrace () in
            (* All credential writes completed before discovery began. Keep
               that fact even if discovery is cancelled or raises. *)
            Keeper_oauth_pending.finish (pending_for_base_path base_path) ~state
              (Ok Keeper_oauth_pending.Credentials_published_discovery_failed);
-           raise exn)
+           Printexc.raise_with_backtrace exn backtrace)
   in
   Ok
     { keeper = keeper_name
@@ -435,8 +433,9 @@ let finish ~clock ~(config : Workspace.config) ~state ~code ~now =
       (match publish_finished ~clock ~config ~state ~finished ~now with
        | result -> finish_result result
        | exception exn ->
+           let backtrace = Printexc.get_raw_backtrace () in
            Keeper_oauth_pending.finish pending ~state (Error ());
-           raise exn)
+           Printexc.raise_with_backtrace exn backtrace)
 
 let attempt_status_json ~base_path ~now ~keeper ~provider_id ~attempt_id =
   let fields = match Keeper_oauth_pending.status (pending_for_base_path base_path)
@@ -450,6 +449,15 @@ let attempt_status_json ~base_path ~now ~keeper ~provider_id ~attempt_id =
           | Tools_discovered count -> `Assoc ["kind", `String "discovered"; "count", `Int count]
           | Credentials_published_discovery_failed -> `Assoc ["kind", `String "failed"])]
     | Some Failed -> ["kind", `String "failed"]
+    | Some (Credential_publication_incomplete progress) ->
+        let name = function
+          | Keeper_oauth_pending.Refresh_token -> "refresh_token"
+          | Keeper_oauth_pending.Access_token -> "access_token"
+          | Keeper_oauth_pending.Expiry -> "expiry" in
+        ["kind", `String "credential_publication_incomplete";
+         "completed_writes", `List (List.map (fun stage -> `String (name stage)) progress.completed_writes);
+         "interrupted_write", `String (name progress.interrupted_write);
+         "interrupted_write_effect", `String "unknown"]
     | Some Expired -> ["kind", `String "expired"]
     | Some Superseded -> ["kind", `String "superseded"] in
   `Assoc fields

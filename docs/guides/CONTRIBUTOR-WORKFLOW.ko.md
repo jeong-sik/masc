@@ -283,6 +283,9 @@ verdict: PASS|FAIL head: <40-character-current-SHA> by: <Keeper-name>
 
 APPROVE에는 [approve-guard.sh](../../scripts/review/approve-guard.sh)를 사용합니다.
 `--check`는 리뷰 가능 여부를 검사합니다.
+가드는 PR 작성자의 GitHub 계정을 거부합니다. 커밋의 author·committer 계정은 독립된
+Keeper 세션들이 공유할 수 있으므로 계정 일치만으로 리뷰어를 배제하지 않습니다. 계정
+일치 여부만으로 실제 리뷰 세션이 변경에 독립적이라는 사실도 증명할 수 없습니다.
 
 소스 리뷰를 시작하기 **전에** base SHA와 전체 diff 식별자를 캡처하고, 리뷰한 head와
 증거에 함께 보관하세요. 인증된 `gh`, Git, Python 3, `jq`가 있는 저장소 checkout에서

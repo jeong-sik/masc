@@ -794,17 +794,71 @@ let test_a_superseded_publication_writes_nothing () =
     (Keeper_oauth_pending.take table ~now:1. ~state <> None);
   let writes = ref 0 in
   check Alcotest.bool "an admitted publication runs its writes" true
-    (Keeper_oauth_pending.while_admitted table ~state (fun () -> incr writes)
-     = Some ());
+    (Keeper_oauth_pending.publish_credentials table ~state
+       ~write:(fun _ -> incr writes; Ok ()) = Some (Ok ()));
   let () = match Keeper_oauth_pending.remember table (admit_scope table provider)
                    ~now:2. ~ttl_sec:600. second with
     | Ok _ -> ()
     | Error Keeper_oauth_pending.Newer_start_admitted ->
         Alcotest.fail "the newer start was refused" in
   check Alcotest.bool "a superseded publication runs no write" true
-    (Keeper_oauth_pending.while_admitted table ~state (fun () -> incr writes)
+    (Keeper_oauth_pending.publish_credentials table ~state ~write:(fun _ -> incr writes; Ok ())
      = None);
-  Alcotest.(check int) "only the admitted publication wrote" 1 !writes
+  Alcotest.(check int) "only the admitted publication wrote its three entries" 3 !writes
+
+let test_incomplete_publication_preserves_progress () =
+  let provider = load_or_fail atlassian_toml in
+  List.iter (fun (interrupted, completed) ->
+    let table = Keeper_oauth_pending.create () in
+    let held = in_flight_for provider in
+    let attempt_id = remember_held table ~now:0. ~ttl_sec:600. held in
+    let state = held.pending.Keeper_oauth_flow.state in
+    ignore (Keeper_oauth_pending.take table ~now:1. ~state);
+    let writes = ref [] in
+    let result = Keeper_oauth_pending.publish_credentials table ~state
+      ~write:(fun stage -> writes := !writes @ [stage];
+        if stage=interrupted then Error "fixture storage failure" else Ok ()) in
+    check Alcotest.bool "failure returned" true (result=Some (Error "fixture storage failure"));
+    check Alcotest.bool "later writes did not run" true (!writes=completed @ [interrupted]);
+    let status () = Keeper_oauth_pending.status table ~now:2. ~attempt_id
+      ~keeper:"oauth-fixture" ~provider_id:provider.Keeper_oauth_provider.id in
+    let before = status () in
+    check Alcotest.bool "completed writes and interrupted write remain distinct" true
+      (match before with
+       | Some (Keeper_oauth_pending.Credential_publication_incomplete progress) ->
+           progress.completed_writes=completed && progress.interrupted_write=interrupted
+       | None | Some (Awaiting_consent _ | Callback_admitted | Completed _ | Failed
+         | Expired | Superseded) -> false);
+    Keeper_oauth_pending.finish table ~state (Error ());
+    check Alcotest.bool "outer failure cannot erase publication progress" true (status ()=before);
+    check Alcotest.bool "a replay cannot start writes again" true
+      (Keeper_oauth_pending.publish_credentials table ~state
+        ~write:(fun _ -> Alcotest.fail "a replay reached storage") = None))
+    Keeper_oauth_pending.[Refresh_token, []; Access_token, [Refresh_token];
+      Expiry, [Refresh_token; Access_token]]
+
+let test_publication_exception_preserves_progress_and_unlocks () =
+  let provider = load_or_fail atlassian_toml in
+  let table = Keeper_oauth_pending.create () in
+  let held = in_flight_for provider in
+  let attempt_id = remember_held table ~now:0. ~ttl_sec:600. held in
+  let state = held.pending.Keeper_oauth_flow.state in
+  ignore (Keeper_oauth_pending.take table ~now:1. ~state);
+  let interrupted = ref false in
+  (try ignore (Keeper_oauth_pending.publish_credentials table ~state
+      ~write:(function
+        | Refresh_token -> Ok ()
+        | Access_token -> raise Exit
+        | Expiry -> Alcotest.fail "expiry ran after interrupted access write"))
+   with Exit -> interrupted := true);
+  check Alcotest.bool "the original exception escaped" true !interrupted;
+  check Alcotest.bool "the mutex was released and progress survived" true
+    (match Keeper_oauth_pending.status table ~now:2. ~attempt_id
+       ~keeper:"oauth-fixture" ~provider_id:provider.Keeper_oauth_provider.id with
+     | Some (Credential_publication_incomplete progress) ->
+         progress.completed_writes=[Refresh_token] && progress.interrupted_write=Access_token
+     | None | Some (Awaiting_consent _ | Callback_admitted | Completed _ | Failed
+       | Expired | Superseded) -> false)
 
 let test_an_earlier_start_cannot_retire_a_later_one () =
   let provider = load_or_fail atlassian_toml in
@@ -2087,6 +2141,10 @@ let () =
             test_a_start_for_another_scope_does_not_refuse_an_earlier_one;
           Alcotest.test_case "a superseded publication writes nothing" `Quick
             test_a_superseded_publication_writes_nothing;
+          Alcotest.test_case "incomplete publication preserves step progress" `Quick
+            test_incomplete_publication_preserves_progress;
+          Alcotest.test_case "publication exception preserves progress and unlocks" `Quick
+            test_publication_exception_preserves_progress_and_unlocks;
           Alcotest.test_case "an earlier start cannot retire a later one" `Quick
             test_an_earlier_start_cannot_retire_a_later_one;
           Alcotest.test_case "a restart during discovery keeps its consent" `Quick

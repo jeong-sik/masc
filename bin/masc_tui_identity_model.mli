@@ -131,7 +131,8 @@ val decode_identity_login
 type identity_login_status =
   | Consent_waiting of float | Callback_in_progress
   | Credentials_published of (int, unit) result
-  | Login_exchange_failed | Consent_expired | Consent_superseded | Attempt_unavailable
+  | Login_exchange_failed | Credential_publication_incomplete
+  | Consent_expired | Consent_superseded | Attempt_unavailable
 val decode_identity_login_status : Yojson.Safe.t -> (identity_login_status, string) result
 
 (* The server answered a detach with a receipt. Say what was deleted and

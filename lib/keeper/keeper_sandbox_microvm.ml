@@ -1675,20 +1675,59 @@ let remote_max_concurrent_sessions = 8
 
 (* ── Provisioning the work volume ──────────────────────────────────── *)
 
-(** Volume ids in a [container volume list --format json] payload. *)
+(** Volume ids in a [container volume list --format json] payload. Every
+    row must be identifiable before the list can prove that a volume is
+    absent. Apple encodes both [id] and [configuration.name] as the volume
+    name; accept either alone but refuse conflicting or malformed fields. *)
 let volume_names_of_json = function
   | `List entries ->
-    let open Yojson.Safe.Util in
-    Ok
-      (List.filter_map
-         (fun entry ->
-           match member "id" entry with
-           | `String id -> Some id
-           | _ ->
-             (match entry |> member "configuration" |> member "name" with
-              | `String name -> Some name
-              | _ -> None))
-         entries)
+    let unique_member key fields =
+      match List.filter (fun (name, _) -> String.equal name key) fields with
+      | [] -> Ok None
+      | [ (_, value) ] -> Ok (Some value)
+      | _ -> Error ("duplicate " ^ key)
+    in
+    let name_member key fields =
+      match unique_member key fields with
+      | Error _ as error -> error
+      | Ok None -> Ok None
+      | Ok (Some (`String name)) when not (String.equal (String.trim name) "") ->
+        Ok (Some name)
+      | Ok (Some _) -> Error (key ^ " is not a nonblank string")
+    in
+    let name_of_entry = function
+      | `Assoc fields ->
+        (match name_member "id" fields, unique_member "configuration" fields with
+         | Error detail, _ | _, Error detail -> Error detail
+         | Ok id, Ok configuration ->
+           let configured_name =
+             match configuration with
+             | None -> Ok None
+             | Some (`Assoc config) ->
+               (match name_member "name" config with
+                | Ok None -> Error "configuration.name is missing"
+                | Ok (Some _) as result -> result
+                | Error _ as error -> error)
+             | Some _ -> Error "configuration is not an object"
+           in
+           (match id, configured_name with
+            | _, Error detail -> Error detail
+            | Some id, Ok (Some name) when not (String.equal id name) ->
+              Error "id and configuration.name disagree"
+            | Some id, Ok _ -> Ok id
+            | None, Ok (Some name) -> Ok name
+            | None, Ok None -> Error "id and configuration.name are missing"))
+      | _ -> Error "row is not an object"
+    in
+    let rec collect index names = function
+      | [] -> Ok (List.rev names)
+      | entry :: rest ->
+        (match name_of_entry entry with
+         | Error detail ->
+           Error (Printf.sprintf "container volume list row %d: %s" index detail)
+         | Ok name -> collect (index + 1) (name :: names) rest)
+    in
+    collect 0 [] entries
   | _ -> Error "container volume list did not return a JSON array"
 ;;
 

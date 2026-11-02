@@ -1840,6 +1840,21 @@ let test_msb_volume_creation_requires_an_identified_inventory () =
     ]
 ;;
 
+let test_a_malformed_volume_listing_does_not_prove_removal () =
+  let ok = Unix.WEXITED 0, "", "" in
+  let result, sent =
+    run_volume_removal
+      ~deletes:[ ok; ok ]
+      ~listing:(Unix.WEXITED 0, {|[{"configuration":{}}]|}, "")
+      ~keeper_name:"retired"
+  in
+  Alcotest.(check bool)
+    "an unidentified row cannot establish absence" true (Result.is_error result);
+  Alcotest.(check (list string)) "both deletes were attempted before verification"
+    [ "masc-keeper-work-retired"; "masc-keeper-build-retired" ]
+    (deleted_volume_names sent)
+;;
+
 (* ── The work volume claims marker ────────────────────────────────────
    A claim is a workspace base path; the marker is a JSON array of them,
    written by the root helper scripts. Three layers are tested separately:
@@ -5048,6 +5063,39 @@ let test_volume_names_of_json_refuses_non_arrays () =
   | Error _ -> ()
 ;;
 
+let test_volume_names_require_an_unambiguous_name_for_every_row () =
+  let accepted =
+    Yojson.Safe.from_string
+      {|[{"id":"by-id"},{"configuration":{"name":"by-name"}},{"id":"both","configuration":{"name":"both"}},{"id":"foreign 외부 volume"}]|}
+  in
+  (match M.volume_names_of_json accepted with
+   | Error detail -> Alcotest.failf "valid rows rejected: %s" detail
+   | Ok names ->
+     Alcotest.(check (list string)) "both identity forms in order"
+       [ "by-id"; "by-name"; "both"; "foreign 외부 volume" ] names);
+  List.iter
+    (fun row ->
+       let json = Yojson.Safe.from_string ("[{\"id\":\"other\"}," ^ row ^ "]") in
+       match M.volume_names_of_json json with
+       | Error _ -> ()
+       | Ok _ -> Alcotest.failf "accepted malformed volume row %s" row)
+    [ {|"string row"|}
+    ; {|{}|}
+    ; {|{"id":42}|}
+    ; {|{"id":""}|}
+    ; {|{"id":" \t\n"}|}
+    ; {|{"configuration":{"name":"  "}}|}
+    ; {|{"id":"v","configuration":null}|}
+    ; {|{"id":"v","configuration":{}}|}
+    ; {|{"id":null,"configuration":{"name":"v"}}|}
+    ; {|{"configuration":{"name":42}}|}
+    ; {|{"id":"other","configuration":{"name":"v"}}|}
+    ; {|{"id":"other","id":"v"}|}
+    ; {|{"configuration":{"name":"other","name":"v"}}|}
+    ; {|{"id":"other","configuration":{"name":"other"},"configuration":{"name":"v"}}|}
+    ]
+;;
+
 let test_volume_probe_exit_zero_is_present () =
   Alcotest.(check bool)
     "inspect 0 needs no listing"
@@ -5110,6 +5158,17 @@ let test_volume_probe_refuses_to_guess () =
           ~volume_name:"v"
           ~inspect:(wexited 1 "" "")
           ~listing:(Some (wexited 0 "not json" ""))));
+  List.iter
+    (fun listing ->
+       Alcotest.(check bool)
+         "an unidentified row is not read as absence"
+         true
+         (failed
+            (M.classify_volume_probe
+               ~volume_name:"v"
+               ~inspect:(wexited 1 "" "")
+               ~listing:(Some (wexited 0 listing "")))))
+    [ {|[{"configuration":{}}]|}; {|[{"id":42}]|}; {|["v"]|} ];
   Alcotest.(check bool)
     "an unexpected inspect status is not read as presence"
     true
@@ -5900,6 +5959,8 @@ let () =
             test_volume_names_of_json_reads_ids
         ; Alcotest.test_case "listing must be an array" `Quick
             test_volume_names_of_json_refuses_non_arrays
+        ; Alcotest.test_case "listing requires identifiable rows" `Quick
+            test_volume_names_require_an_unambiguous_name_for_every_row
         ; Alcotest.test_case "exit 0 is present" `Quick
             test_volume_probe_exit_zero_is_present
         ; Alcotest.test_case "exit 1 is confirmed against the listing" `Quick
@@ -5926,6 +5987,8 @@ let () =
             test_an_unreadable_volume_listing_is_an_error
         ; Alcotest.test_case "msb volume creation requires an identified inventory" `Quick
             test_msb_volume_creation_requires_an_identified_inventory
+        ; Alcotest.test_case "a malformed volume listing does not prove removal" `Quick
+            test_a_malformed_volume_listing_does_not_prove_removal
         ; Alcotest.test_case "claims marker decode is strict" `Quick
             test_volume_claims_decode_is_strict
         ; Alcotest.test_case "claims helper report decode is strict" `Quick

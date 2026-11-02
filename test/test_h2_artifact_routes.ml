@@ -3,6 +3,7 @@
    transport fixture uses a minimal synthetic transformer; the optional run
    uses the actual masc-artifact-document executable. *)
 open Alcotest
+module Preparation = Masc_test_deps.Board_test_preparation
 module Http = Masc.Http_server_eio
 module Live = Masc.Artifact_draft_live
 module Draft = Masc.Artifact_draft
@@ -68,7 +69,8 @@ let with_gateway ?(runtime = false) ?resources ?(zero_window = false) run =
               Fun.protect ~finally:(fun () -> if runtime then Process_eio.reset_for_testing ()) (fun () ->
                 if runtime then (
                   Masc.Board.reset_global_for_test ();
-                  Masc.Board_dispatch.reset_for_test ());
+                  Masc.Board_dispatch.reset_for_test ();
+                  Preparation.prepare ~base_path ~action:Preparation.Bootstrap);
                 let state = if runtime then Masc.Mcp_server.create_state_eio ~sw
                   ~proc_mgr:(Eio.Stdenv.process_mgr env) ~fs:(Eio.Stdenv.fs env)
                   ~clock:(Eio.Stdenv.clock env) ~mono_clock:(Eio.Stdenv.mono_clock env)

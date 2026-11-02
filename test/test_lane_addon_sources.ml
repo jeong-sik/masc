@@ -1,5 +1,6 @@
 (** Source acquisition reuses owners and preserves measured bytes. *)
 open Alcotest
+module Preparation = Masc_test_deps.Board_test_preparation
 module Sources = Masc.Lane_addon_sources
 module Store = Masc.Lane_addon_store
 module Types = Masc.Lane_addon_types
@@ -544,6 +545,7 @@ let test_fusion_capture_retains_exact_state_across_terminal_change () =
       (fun () ->
         Unix.putenv "MASC_BASE_PATH" dir;
         reset ();
+        Preparation.prepare ~base_path:dir ~action:Preparation.Bootstrap;
         let registry = Fusion_run_registry.create ~path:(Filename.concat dir "fusion-runs.jsonl") () in
         (match Fusion_run_registry.install_global registry with
          | Ok () -> () | Error _ -> fail "source fixture registry already installed");
@@ -704,6 +706,7 @@ let test_fusion_envelope_overflow_does_not_retain_or_remove_blobs () =
       (fun () ->
         Unix.putenv "MASC_BASE_PATH" dir;
         reset ();
+        Preparation.prepare ~base_path:dir ~action:Preparation.Bootstrap;
         let registry = Fusion_run_registry.global () in
         let run_id = "fusion-envelope-" ^ Store.digest dir in
         Fusion_run_registry.register_running registry ~run_id

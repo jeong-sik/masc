@@ -150,20 +150,23 @@ let curl_post_json_argv ~timeout_sec ?(headers = []) ~url ~body_json () =
    would print the proxy's [200 Connection established] block in front of the
    real one under [-i]; [--suppress-connect-headers] is the option curl(1)
    gives for exactly that pairing. *)
-let curl_post_json_response_argv ~timeout_sec ?(headers = []) ~url ~body_json () =
-  let timeout_sec = max 1 timeout_sec in
+let curl_post_json_response_argv_with_timeout ~timeout_sec ~headers ~url ~body_json =
   [
     "curl";
     "-q";
     "-sS";
     "--http1.1";
     "--max-time";
-    Int.to_string timeout_sec;
+    Printf.sprintf "%.17g" timeout_sec;
     "-H";
     "Content-Type: application/json";
   ]
   @ header_args headers
   @ [ "-i"; "--suppress-connect-headers"; "-d"; body_json; url ]
+
+let curl_post_json_response_argv ~timeout_sec ?(headers = []) ~url ~body_json () =
+  curl_post_json_response_argv_with_timeout
+    ~timeout_sec:(float_of_int (max 1 timeout_sec)) ~headers ~url ~body_json
 
 let curl_get_argv_for_test = curl_get_argv
 let curl_post_json_response_argv_for_test = curl_post_json_response_argv
@@ -356,13 +359,27 @@ let split_http_response_with_headers text =
   in
   block_from 0
 
-let http_post_json_response_with_headers ~timeout_sec ?(headers = []) ~url ~body_json () =
+let http_post_json_response_with_headers ~timeout_sec ?deadline ?(headers = []) ~url ~body_json () =
   let timeout_sec = max 1 timeout_sec in
-  let argv = curl_post_json_response_argv ~timeout_sec ~headers ~url ~body_json () in
+  let remaining () =
+    match deadline with
+    | None -> float_of_int timeout_sec
+    | Some deadline -> min (float_of_int timeout_sec) (Monotonic_deadline.remaining_seconds deadline)
+  in
+  let request_timeout = remaining () in
+  if request_timeout <= 0. then Error "HTTP request deadline expired"
+  else
+  let argv =
+    curl_post_json_response_argv_with_timeout
+      ~timeout_sec:request_timeout ~headers ~url ~body_json
+  in
+  let runner_timeout = remaining () in
+  if runner_timeout <= 0. then Error "HTTP request deadline expired"
+  else
   let status, body =
     Fd_accountant.observe ~kind:Sandbox_exec (fun () ->
       Process_eio.run_argv_with_status
-        ~timeout_sec:(Stdlib.Float.of_int timeout_sec)
+        ~timeout_sec:runner_timeout
         argv)
   in
   match transport_failure_of_status status with

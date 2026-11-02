@@ -11,6 +11,9 @@ let response ?(status = 200) ?(headers = [ ("content-type", "application/json") 
     body =
   { Masc_http_client.status; headers; body }
 
+let bounded ?(deadline_s = 60.) send : Mcp_client.post =
+  { deadline_s; send = (fun ~deadline:_ -> send) }
+
 let recording () =
   let sent = ref [] in
   let answer = ref (fun (_ : string) -> response "{}") in
@@ -18,7 +21,7 @@ let recording () =
     sent := (url, headers, body) :: !sent;
     Ok (!answer body)
   in
-  (post, sent, answer)
+  (bounded post, sent, answer)
 
 let sent_bodies sent = List.rev_map (fun (_, _, body) -> body) !sent
 
@@ -156,7 +159,7 @@ let test_a_refused_token_carries_where_to_get_one () =
   in
   ignore post;
   match
-    Mcp_client.connect ~post:refusing ~url:"https://mcp.atlassian.com/v1/mcp/authv2"
+    Mcp_client.connect ~post:(bounded refusing) ~url:"https://mcp.atlassian.com/v1/mcp/authv2"
       ~access_token:"stale" ()
   with
   | Ok _ -> Alcotest.fail "accepted a refused token"
@@ -184,7 +187,7 @@ let test_a_pointer_inside_another_parameter_is_not_one () =
          {|{"error":"invalid_token"}|})
   in
   match
-    Mcp_client.connect ~post:refusing ~url:"https://mcp.atlassian.com/v1/mcp/authv2"
+    Mcp_client.connect ~post:(bounded refusing) ~url:"https://mcp.atlassian.com/v1/mcp/authv2"
       ~access_token:"stale" ()
   with
   | Ok _ -> Alcotest.fail "accepted a refused token"
@@ -352,7 +355,7 @@ let test_forbidden_is_not_a_refreshable_401 () =
                      {|Bearer error="insufficient_scope", scope="read write", resource_metadata="https://example.com/meta"|} ]
           {|{"error":"insufficient_scope"}|})
   in
-  match Mcp_client.connect ~post:refusing ~url:"https://mcp.example.com"
+  match Mcp_client.connect ~post:(bounded refusing) ~url:"https://mcp.example.com"
           ~access_token:"token" () with
   | Error (Mcp_client.Http { status; bearer_error; required_scope; resource_metadata; www_authenticate; _ }) ->
       check Alcotest.int "forbidden stays distinguishable" 403 status;
@@ -448,8 +451,8 @@ let test_timed_out_call_id_is_not_reused () =
     else Ok (response (Printf.sprintf
         {|{"jsonrpc":"2.0","id":%d,"result":{"content":[]}}|} (request_id body)))
   in
-  ignore (Mcp_client.call_tool ~post:failing_then_answering client ~name:"x" ~arguments:(`Assoc []));
-  (match Mcp_client.call_tool ~post:failing_then_answering client ~name:"x" ~arguments:(`Assoc []) with
+  ignore (Mcp_client.call_tool ~post:(bounded failing_then_answering) client ~name:"x" ~arguments:(`Assoc []));
+  (match Mcp_client.call_tool ~post:(bounded failing_then_answering) client ~name:"x" ~arguments:(`Assoc []) with
    | Ok _ -> ()
    | Error error -> Alcotest.failf "second call: %s" (Mcp_client.error_to_string error));
   match !ids with
@@ -616,6 +619,7 @@ let test_continuation_rechecks_catalog_and_does_not_replay_lost_response () =
         {|{"jsonrpc":"2.0","id":%d,"result":{"resultType":"input_required","requestState":"opaque"}}|} id))
       else Error "response lost"
     | _ -> Ok (response "{}") in
+  let post = bounded post in
   let client = match Mcp_client.connect ~post ~url:"https://mcp.example.com" ~access_token:"token" () with
     | Ok client -> client | Error error -> Alcotest.fail (Mcp_client.error_to_string error) in
   let continuation = match Mcp_client.start_tool_with_continuation ~post client ~name:"remote" ~arguments:(`Assoc []) with
@@ -671,6 +675,7 @@ let test_concurrent_continuation_has_one_sender () =
         Ok (response (Printf.sprintf
           {|{"jsonrpc":"2.0","id":%d,"result":{"resultType":"complete","content":[]}}|} id)))
     | _ -> Ok (response "{}") in
+  let post = bounded post in
   let client = match Mcp_client.connect ~post ~url:"https://mcp.example.com" ~access_token:"token" () with
     | Ok client -> client | Error error -> Alcotest.fail (Mcp_client.error_to_string error) in
   let continuation = match Mcp_client.start_tool_with_continuation ~post client ~name:"remote" ~arguments:(`Assoc []) with
@@ -719,6 +724,7 @@ let test_cancelled_continuation_cannot_be_sent_again () =
         Eio.Promise.await hold;
         Ok (response "{}"))
     | _ -> Ok (response "{}") in
+  let post = bounded post in
   let client = match Mcp_client.connect ~post ~url:"https://mcp.example.com" ~access_token:"token" () with
     | Ok client -> client | Error error -> Alcotest.fail (Mcp_client.error_to_string error) in
   let continuation = match Mcp_client.start_tool_with_continuation ~post client ~name:"remote" ~arguments:(`Assoc []) with
@@ -845,20 +851,111 @@ let test_repeated_cursor_is_still_opaque () =
   | Error error -> Alcotest.failf "cursor was interpreted: %s" (Mcp_client.error_to_string error)
 
 let test_a_listing_that_never_ends_is_refused () =
+  Eio_main.run @@ fun env ->
+  Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 2.0 @@ fun () ->
+  let post, _, answer = recording () in
+  let client = connect_or_fail post answer in
+  let post = { post with deadline_s = 0.02 } in
+  let count = ref 0 in
+  answer := (fun body ->
+      Eio.Fiber.yield ();
+      incr count;
+      response (Printf.sprintf {|{"jsonrpc":"2.0","id":%d,"result":{"tools":[],"nextCursor":"page-%d"}}|} (request_id body) !count));
+  (match Mcp_client.list_tools ~post client with
+   | Error (Mcp_client.Transport _) -> ()
+   | Error error -> Alcotest.failf "wrong error: %s" (Mcp_client.error_to_string error)
+   | Ok _ -> Alcotest.fail "an endless listing was read to its end");
+  check Alcotest.bool "the enumeration reached the sender" true (!count > 0)
+
+let test_more_than_a_thousand_catalog_pages_are_allowed () =
   let post, _, answer = recording () in
   let client = connect_or_fail post answer in
   let count = ref 0 in
   answer := (fun body ->
       incr count;
-      response (Printf.sprintf {|{"jsonrpc":"2.0","id":%d,"result":{"tools":[],"nextCursor":"page-%d"}}|} (request_id body) !count));
+      let result =
+        if !count <= 1000 then {|"tools":[],"nextCursor":"same"|}
+        else {|"tools":[{"name":"last"}]|}
+      in
+      response (Printf.sprintf {|{"jsonrpc":"2.0","id":%d,"result":{%s}}|}
+          (request_id body) result));
   (match Mcp_client.list_tools ~post client with
-   | Error (Mcp_client.Malformed detail) ->
-     check str "the refusal says why"
-       (Printf.sprintf "tools/list did not end within %d pages" Mcp_client.max_tools_list_pages)
-       detail
-   | Error error -> Alcotest.failf "wrong error: %s" (Mcp_client.error_to_string error)
-   | Ok _ -> Alcotest.fail "an endless listing was read to its end");
-  check Alcotest.int "it stopped at the bound" Mcp_client.max_tools_list_pages !count
+   | Ok [ tool ] -> check str "the final page is retained" "last" tool.name
+   | Ok _ -> Alcotest.fail "missing final tool"
+   | Error error -> Alcotest.fail (Mcp_client.error_to_string error));
+  check Alcotest.int "all pages were read" 1001 !count
+
+let connect_modern_or_fail post answer =
+  answer := (fun _ -> response
+      {|{"jsonrpc":"2.0","id":1,"result":{"resultType":"complete","supportedVersions":["2026-07-28"],"capabilities":{"tools":{}},"ttlMs":0,"cacheScope":"private"}}|});
+  match Mcp_client.connect ~post ~url:"https://mcp.example.com" ~access_token:"token" () with
+  | Ok client -> client
+  | Error error -> Alcotest.fail (Mcp_client.error_to_string error)
+
+let test_expired_catalog_is_not_cached_or_sent_as_a_tool () =
+  Eio_main.run @@ fun env ->
+  Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 2.0 @@ fun () ->
+  let post, sent, answer = recording () in
+  let client = connect_modern_or_fail post answer in
+  answer := (fun body ->
+      Eio.Fiber.yield ();
+      response (Printf.sprintf
+          {|{"jsonrpc":"2.0","id":%d,"result":{"resultType":"complete","tools":[{"name":"partial","inputSchema":{"type":"object"}}],"nextCursor":"same","ttlMs":0,"cacheScope":"private"}}|}
+          (request_id body)));
+  (match Mcp_client.call_tool ~post:{ post with deadline_s = 0.02 }
+           client ~name:"partial" ~arguments:(`Assoc []) with
+   | Error (Mcp_client.Before_tool_call (Mcp_client.Transport _)) -> ()
+   | Error error -> Alcotest.fail (Mcp_client.error_to_string error)
+   | Ok _ -> Alcotest.fail "partial catalog authorized a call");
+  let before = List.length !sent in
+  answer := (fun body -> response (Printf.sprintf
+      {|{"jsonrpc":"2.0","id":%d,"result":{"resultType":"complete","tools":[],"ttlMs":0,"cacheScope":"private"}}|}
+      (request_id body)));
+  (match Mcp_client.call_tool ~post client ~name:"partial" ~arguments:(`Assoc []) with
+   | Error (Mcp_client.Before_tool_call (Mcp_client.Malformed _)) -> ()
+   | Error error -> Alcotest.fail (Mcp_client.error_to_string error)
+   | Ok _ -> Alcotest.fail "a partial tool was cached");
+  check Alcotest.int "a new operation rediscovers the catalog" (before + 1) (List.length !sent);
+  check Alcotest.bool "no tool request was sent" true
+    (List.for_all (fun (_, _, body) -> method_of body <> "tools/call") !sent)
+
+let test_continuation_does_not_renew_the_deadline () =
+  Eio_main.run @@ fun env ->
+  Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 2.0 @@ fun () ->
+  let post, sent, answer = recording () in
+  let client = connect_modern_or_fail post answer in
+  let first_deadline = ref None in
+  let post =
+    { Mcp_client.deadline_s = 0.2
+    ; send = (fun ~deadline ~url ~headers ~body ->
+        if method_of body = "tools/call" then first_deadline := Some deadline;
+        post.send ~deadline ~url ~headers ~body)
+    }
+  in
+  answer := (fun body ->
+      let result =
+        if method_of body = "tools/list" then
+          {|"resultType":"complete","tools":[{"name":"remote","inputSchema":{"type":"object"}}],"ttlMs":0,"cacheScope":"private"|}
+        else {|"resultType":"input_required","requestState":"opaque"|}
+      in
+      response (Printf.sprintf {|{"jsonrpc":"2.0","id":%d,"result":{%s}}|}
+          (request_id body) result));
+  let continuation =
+    match Mcp_client.start_tool_with_continuation ~post client ~name:"remote" ~arguments:(`Assoc []) with
+    | Ok (Mcp_client.Tool_continuation value) -> value
+    | Ok (Mcp_client.Tool_completed _) -> Alcotest.fail "expected a continuation"
+    | Error error -> Alcotest.fail (Mcp_client.error_to_string error)
+  in
+  let deadline = match !first_deadline with
+    | Some deadline -> deadline
+    | None -> Alcotest.fail "no initial tool request"
+  in
+  Eio.Time.sleep (Eio.Stdenv.clock env) (Monotonic_deadline.remaining_seconds deadline +. 0.001);
+  let before = List.length !sent in
+  (match Mcp_client.resume_tool_with_state ~post:{ post with deadline_s = 60. } continuation with
+   | Error (Mcp_client.Continuation_failed (Mcp_client.Before_tool_call (Mcp_client.Transport _))) -> ()
+   | Error _ | Ok _ -> Alcotest.fail "resuming renewed the original deadline");
+  check Alcotest.int "expiry sends neither catalog nor tool" before (List.length !sent)
 
 let test_structured_only_tool_result_is_preserved () =
   let post, _, answer = recording () in
@@ -943,6 +1040,12 @@ let () =
             test_repeated_cursor_is_still_opaque;
           Alcotest.test_case "a listing that never ends is refused" `Quick
             test_a_listing_that_never_ends_is_refused;
+          Alcotest.test_case "catalogs may exceed a thousand pages" `Quick
+            test_more_than_a_thousand_catalog_pages_are_allowed;
+          Alcotest.test_case "expired catalog cannot authorize or poison cache" `Quick
+            test_expired_catalog_is_not_cached_or_sent_as_a_tool;
+          Alcotest.test_case "continuation keeps the original deadline" `Quick
+            test_continuation_does_not_renew_the_deadline;
           Alcotest.test_case "an event stream answer is read" `Quick
             test_an_event_stream_answer_is_read;
           Alcotest.test_case "a stream ignores what came before the answer"

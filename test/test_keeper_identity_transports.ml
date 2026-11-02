@@ -255,7 +255,8 @@ let never_token_post ~url:_ ~headers:_ ~body:_ =
 
 let never_discover ~mcp_url:_ = fail "renewal reached discovery when it should not have"
 
-let run_with mcp_post =
+let run_with send =
+  let mcp_post : Mcp_client.post = { deadline_s = 60.; send = (fun ~deadline:_ -> send) } in
   with_temp_base
   @@ fun ~base_path ->
   project_token ~base_path;

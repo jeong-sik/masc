@@ -143,7 +143,8 @@ val parse_zai_search_text : string -> ((string * string * string) list, provider
 
 val curl_mcp_post_with_for_test :
   run:
-    (timeout_sec:int ->
+    (deadline:Monotonic_deadline.t ->
+     timeout_sec:int ->
      headers:(string * string) list ->
      url:string ->
      body_json:string ->
@@ -154,7 +155,8 @@ val curl_mcp_post_with_for_test :
 (** The MCP transport the [Zai] provider uses, over a caller-supplied [run]
     (in production, {!Tool_local_runtime_http.http_post_json_response_with_headers}).
     It drops any [Content-Type] the client lists, since the helper writes its
-    own, and turns the helper's answer into the client's response record. *)
+    own, forwards the shared deadline, and turns the helper's answer into the
+    client's response record. *)
 
 val search_via_zai_for_test :
   post:Mcp_client.post ->

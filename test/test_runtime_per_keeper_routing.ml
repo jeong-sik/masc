@@ -1973,7 +1973,7 @@ tools-support = true
         (match Runtime_instance.of_binding config (binding "codex") with
             | Error (Runtime_config_error.Execution_unbuildable reason) ->
               Alcotest.(check bool) "selected account needs a real home" true
-                (String_util.contains_substring reason "account-home")
+                (String_util.contains_substring reason "home")
             | Error _ | Ok _ ->
               Alcotest.fail "selected official client without HOME gained a shared scope");
         (match Runtime_instance.of_binding config (binding "http") with

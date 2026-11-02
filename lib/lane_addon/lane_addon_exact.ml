@@ -62,12 +62,13 @@ let request_of_json = function
     let* messages =
       match List.assoc_opt "messages" fields with
       | Some (`List (_ :: _ as values)) ->
-        List.fold_right
-          (fun value acc ->
-             let* acc = acc in
-             let* message = message_of_json value in
-             Ok (message :: acc))
-          values (Ok [])
+        let rec loop acc = function
+          | [] -> Ok (List.rev acc)
+          | value :: rest ->
+            let* message = message_of_json value in
+            loop (message :: acc) rest
+        in
+        loop [] values
       | Some _ | None -> Error "messages requires at least one conversation message"
     in
     let* schema = match List.assoc_opt "schema" fields with
@@ -429,9 +430,14 @@ let record_of_json = function
     let* request = Option.to_result ~none:"record request" (List.assoc_opt "request" fields) in
     let* attempts =
       match List.assoc_opt "attempts" fields with
-      | Some (`List values) -> List.fold_right (fun value result ->
-          let* attempt = recorded_attempt_of_json value in
-          let* rest = result in Ok (attempt :: rest)) values (Ok [])
+      | Some (`List values) ->
+        let rec loop acc = function
+          | [] -> Ok (List.rev acc)
+          | value :: rest ->
+            let* attempt = recorded_attempt_of_json value in
+            loop (attempt :: acc) rest
+        in
+        loop [] values
       | _ -> Error "record attempts"
     in
     let* final =

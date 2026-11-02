@@ -360,14 +360,16 @@ let agent_matches_author_filter ~needle (agent_id : Board.Agent_id.t) =
   let author = Board.Agent_id.to_string agent_id |> String.lowercase_ascii in
   String_util.contains_substring author needle
 
+module Post_id_set = Set.Make (String)
+
 let matching_post_ids_for_comment_author_filter ~needle (comments : Board.comment list) =
-  let matches = Hashtbl.create 64 in
-  List.iter
-    (fun (comment : Board.comment) ->
+  List.fold_left
+    (fun acc (comment : Board.comment) ->
       if agent_matches_author_filter ~needle comment.author then
-        Hashtbl.replace matches (Board.Post_id.to_string comment.post_id) true)
-    comments;
-  matches
+        Post_id_set.add (Board.Post_id.to_string comment.post_id) acc
+      else acc)
+    Post_id_set.empty
+    comments
 
 let emit_post_created ~(audience : Board.audience) (post : Board.post) =
   let pid = Board.Post_id.to_string post.id in
@@ -592,8 +594,9 @@ let list_posts ?(visibility_filter = None) ?hearth ?author_filter ?exclude_autho
             List.filter
               (fun (post : Board.post) ->
                 agent_matches_author_filter ~needle post.author
-                || Hashtbl.mem matching_comment_post_ids
-                     (Board.Post_id.to_string post.id))
+                || Post_id_set.mem
+                     (Board.Post_id.to_string post.id)
+                     matching_comment_post_ids)
               filtered
       in
       (* Exclude posts by author (post author only, not comment author).

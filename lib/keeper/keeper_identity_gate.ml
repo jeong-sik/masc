@@ -30,7 +30,9 @@ let provider_authority_sha256 (provider : Provider.t) =
     ; "renew_before_sec", `Int provider.renew_before_sec
     ; "authorize_params", `List
         (provider.authorize_params
-         |> List.sort compare
+         |> List.sort (fun (kl, vl) (kr, vr) ->
+           let c = String.compare kl kr in
+           if c <> 0 then c else String.compare vl vr)
          |> List.map (fun (key, value) -> `List [ `String key; `String value ]))
     ] in
   Agent_core_sha256.(authority |> Yojson.Safe.to_string |> digest_string |> to_hex)

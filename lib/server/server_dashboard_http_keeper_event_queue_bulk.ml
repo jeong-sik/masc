@@ -177,16 +177,19 @@ let row_matches filter row =
    cancels exactly these, so the two can never disagree. *)
 let plan_rows filter rows = List.filter (row_matches filter) rows
 
+module String_map = Map.Make (String)
+
 let count_by key rows =
-  let table = Hashtbl.create 16 in
-  List.iter
-    (fun row ->
-       let k = key row in
-       let seen = match Hashtbl.find_opt table k with Some n -> n | None -> 0 in
-       Hashtbl.replace table k (seen + 1))
-    rows;
-  Hashtbl.fold (fun k v acc -> (k, v) :: acc) table []
-  |> List.sort (fun (left, _) (right, _) -> String.compare left right)
+  let counts =
+    List.fold_left
+      (fun acc row ->
+         let k = key row in
+         let seen = match String_map.find_opt k acc with Some n -> n | None -> 0 in
+         String_map.add k (seen + 1) acc)
+      String_map.empty
+      rows
+  in
+  String_map.bindings counts
 ;;
 
 let oldest_age_seconds rows =

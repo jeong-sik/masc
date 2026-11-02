@@ -39,6 +39,7 @@ type message =
   }
 
 open Result.Syntax
+module String_set = Set.Make (String)
 let error stage detail = Error { stage; detail }
 
 let create_session () =
@@ -84,20 +85,18 @@ let transition_state session ~stage ~expected ~next =
 
 let rec validate_message_value ~stage ~path = function
   | `Assoc fields ->
-    let seen = Hashtbl.create (min 32 (List.length fields)) in
-    let rec loop = function
+    let rec loop seen = function
       | [] -> Ok ()
       | (name, value) :: rest ->
-        if Hashtbl.mem seen name
+        if String_set.mem name seen
         then error stage (Printf.sprintf "duplicate object key %S at %s" name path)
         else (
-          Hashtbl.add seen name ();
           let* () =
             validate_message_value ~stage ~path:(path ^ "." ^ name) value
           in
-          loop rest)
+          loop (String_set.add name seen) rest)
     in
-    loop fields
+    loop String_set.empty fields
   | `List values ->
     let rec loop index = function
       | [] -> Ok ()

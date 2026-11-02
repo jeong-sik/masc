@@ -803,7 +803,7 @@ let build_notes_by_schedule_id (state : state)
     (fun rev_notes ->
        List.rev rev_notes
        |> List.sort (fun left right ->
-         compare left.Schedule_domain.created_at right.Schedule_domain.created_at))
+         Float.compare left.Schedule_domain.created_at right.Schedule_domain.created_at))
     notes_rev_by_schedule_id
 ;;
 

@@ -78,48 +78,78 @@ let task_to_tree_json (task : Masc_domain.task) =
        | Masc_domain.AwaitingVerification _
        | Masc_domain.Done _ -> []))
 
-let count_assoc_json preferred_keys table =
-  let keys =
-    Hashtbl.fold (fun key _ acc -> key :: acc) table []
-    |> List.sort_uniq String.compare
-  in
+module Status_count_map = Set_util.StringMap
+
+let count_assoc_json preferred_keys by_status =
+  let keys = Status_count_map.bindings by_status |> List.map fst in
   let ordered_keys =
     preferred_keys
     @ List.filter (fun key -> not (List.mem key preferred_keys)) keys
   in
   `Assoc
     (List.map
-       (fun key -> key, `Int (Option.value ~default:0 (Hashtbl.find_opt table key)))
+       (fun key ->
+          key, `Int (Option.value ~default:0 (Status_count_map.find_opt key by_status)))
        ordered_keys)
 
 let task_summary_to_json tasks =
-  let by_status = Hashtbl.create 8 in
-  let bump table key =
-    let current = Option.value ~default:0 (Hashtbl.find_opt table key) in
-    Hashtbl.replace table key (current + 1)
+  let ( by_status
+      , done_count
+      , open_count
+      , terminal_count
+      , awaiting_verification_count
+      , cancelled_count
+      , unassigned_count )
+    =
+    List.fold_left
+      (fun ( by_status
+           , done_count
+           , open_count
+           , terminal_count
+           , awaiting_verification_count
+           , cancelled_count
+           , unassigned_count )
+        (task : Masc_domain.task) ->
+         let status_key = Masc_domain.task_status_to_string task.task_status in
+         let current =
+           Option.value ~default:0 (Status_count_map.find_opt status_key by_status)
+         in
+         let by_status = Status_count_map.add status_key (current + 1) by_status in
+         let done_count = if task_is_done task then done_count + 1 else done_count in
+         let open_count, terminal_count =
+           if task_is_terminal task
+           then open_count, terminal_count + 1
+           else open_count + 1, terminal_count
+         in
+         (* One exhaustive match over the variant instead of two string equalities
+            against a label that had its own spelling. *)
+         let awaiting_verification_count, cancelled_count =
+           match task.task_status with
+           | Masc_domain.AwaitingVerification _ ->
+             awaiting_verification_count + 1, cancelled_count
+           | Masc_domain.Cancelled _ ->
+             awaiting_verification_count, cancelled_count + 1
+           | Masc_domain.Todo
+           | Masc_domain.Claimed _
+           | Masc_domain.InProgress _
+           | Masc_domain.Done _ ->
+             awaiting_verification_count, cancelled_count
+         in
+         let unassigned_count =
+           match task_assignee task with
+           | None -> unassigned_count + 1
+           | Some _ -> unassigned_count
+         in
+         ( by_status
+         , done_count
+         , open_count
+         , terminal_count
+         , awaiting_verification_count
+         , cancelled_count
+         , unassigned_count ))
+      (Status_count_map.empty, 0, 0, 0, 0, 0, 0)
+      tasks
   in
-  let done_count = ref 0 in
-  let open_count = ref 0 in
-  let terminal_count = ref 0 in
-  let awaiting_verification_count = ref 0 in
-  let cancelled_count = ref 0 in
-  let unassigned_count = ref 0 in
-  List.iter
-    (fun (task : Masc_domain.task) ->
-      bump by_status (Masc_domain.task_status_to_string task.task_status);
-      if task_is_done task then incr done_count;
-      if task_is_terminal task then incr terminal_count else incr open_count;
-      (* One exhaustive match over the variant instead of two string equalities
-         against a label that had its own spelling. *)
-      (match task.task_status with
-       | Masc_domain.AwaitingVerification _ -> incr awaiting_verification_count
-       | Masc_domain.Cancelled _ -> incr cancelled_count
-       | Masc_domain.Todo
-       | Masc_domain.Claimed _
-       | Masc_domain.InProgress _
-       | Masc_domain.Done _ -> ());
-      match task_assignee task with None -> incr unassigned_count | Some _ -> ())
-    tasks;
   let total = List.length tasks in
   let completion_pct =
     if total = 0 then
@@ -127,17 +157,17 @@ let task_summary_to_json tasks =
     else
       `Int
         (int_of_float
-           (float_of_int !done_count /. float_of_int total *. 100.0))
+           (float_of_int done_count /. float_of_int total *. 100.0))
   in
   `Assoc
     [
       ("total", `Int total);
-      ("done", `Int !done_count);
-      ("open", `Int !open_count);
-      ("terminal", `Int !terminal_count);
-      ("awaiting_verification", `Int !awaiting_verification_count);
-      ("cancelled", `Int !cancelled_count);
-      ("unassigned", `Int !unassigned_count);
+      ("done", `Int done_count);
+      ("open", `Int open_count);
+      ("terminal", `Int terminal_count);
+      ("awaiting_verification", `Int awaiting_verification_count);
+      ("cancelled", `Int cancelled_count);
+      ("unassigned", `Int unassigned_count);
       ("completion_pct", completion_pct);
       (* Preferred keys are the Variant SSOT spelling. They read "pending" and
          "completed" until the emitter moved to [task_status_to_string]; the

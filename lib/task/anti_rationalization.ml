@@ -198,16 +198,20 @@ let contract_section = function
 (* required_evidence items are requirements from the task contract, not
    evidence this reviewer fetched. Order-preserving dedup keeps an item listed
    twice from appearing twice. *)
+module String_set = Set.Make (String)
+
 let evidence_section ~required_evidence =
-  let items =
+  let _, rev_items =
     List.fold_left
-      (fun acc raw ->
+      (fun (seen, rev_acc) raw ->
          let item = String.trim raw in
-         if item = "" || List.mem item acc then acc else acc @ [ item ])
-      []
+         if item = "" || String_set.mem item seen
+         then seen, rev_acc
+         else String_set.add item seen, item :: rev_acc)
+      (String_set.empty, [])
       required_evidence
   in
-  match items with
+  match List.rev rev_items with
   | [] -> Ok ""
   | items ->
     render

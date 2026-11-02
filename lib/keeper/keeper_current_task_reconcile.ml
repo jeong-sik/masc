@@ -104,15 +104,15 @@ let current_task_rank (meta : Keeper_meta_contract.keeper_meta) task_id =
   | Some _ | None -> 1
 
 let compare_owned_active_task ~(meta : Keeper_meta_contract.keeper_meta) a b =
-  let cmp = compare (current_task_rank meta a.task_id) (current_task_rank meta b.task_id) in
+  let cmp = Int.compare (current_task_rank meta a.task_id) (current_task_rank meta b.task_id) in
   if cmp <> 0
   then cmp
   else (
-    let cmp = compare (active_status_rank a.task.task_status) (active_status_rank b.task.task_status) in
+    let cmp = Int.compare (active_status_rank a.task.task_status) (active_status_rank b.task.task_status) in
     if cmp <> 0
     then cmp
     else (
-      let cmp = compare a.task.priority b.task.priority in
+      let cmp = Int.compare a.task.priority b.task.priority in
       if cmp <> 0
       then cmp
       else (

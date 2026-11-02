@@ -2,6 +2,27 @@ module Ledger = Workspace_memory_ledger
 module Context = Workspace_memory_context
 module String_map = Map.Make (String)
 
+module Fact_map = Map.Make (struct
+  type t = Ledger.fact_ref
+
+  let compare a b =
+    let key = function
+      | Ledger.Ordinary { keeper_id; claim_sha256 } -> keeper_id, 0, "", claim_sha256
+      | Ledger.Source_bound { keeper_id; path; claim_sha256 } -> keeper_id, 1, path, claim_sha256
+    in
+    let keeper_a, store_a, path_a, hash_a = key a
+    and keeper_b, store_b, path_b, hash_b = key b in
+    match String.compare keeper_a keeper_b with
+    | 0 ->
+      (match Int.compare store_a store_b with
+       | 0 ->
+         (match String.compare path_a path_b with
+          | 0 -> String.compare hash_a hash_b
+          | order -> order)
+       | order -> order)
+    | order -> order
+end)
+
 open Result.Syntax
 
 (* Both the full view and the summary must bind their payload to the observed
@@ -38,15 +59,19 @@ let read ~base_path =
     let* ledger = load_observed ~load:Ledger.load ~base_path
         ~ledger_sha256:descriptor.ledger_sha256 in
     let current = current_facts ~base_path ledger in
-    let current_by_ref = Hashtbl.create (List.length (Ledger.dispositions ledger)) in
-    (match current with
-     | Error _ -> ()
-     | Ok (_, rows) -> List.iter (fun (row : Ledger.pending_fact) ->
-         Hashtbl.replace current_by_ref row.fact row.claim) rows);
+    let current_by_ref =
+      match current with
+      | Error _ -> Fact_map.empty
+      | Ok (_, rows) ->
+        List.fold_left
+          (fun acc (row : Ledger.pending_fact) ->
+             Fact_map.add row.fact row.claim acc)
+          Fact_map.empty rows
+    in
     let facts =
       Ledger.to_json ledger |> Yojson.Safe.Util.member "facts" |> Yojson.Safe.Util.to_list in
     let enriched = List.map2 (fun (fact, _) json ->
-      let observed = Hashtbl.find_opt current_by_ref fact in
+      let observed = Fact_map.find_opt fact current_by_ref in
       let source_state = match observed, current with
         | Some _, _ -> "present"
         | None, Error _ -> "unavailable"

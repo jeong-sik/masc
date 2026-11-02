@@ -152,12 +152,13 @@ let request_of_json = function
 let listing_of_json = function
   | `Assoc [ "requests", `List values ] ->
     let* requests =
-      List.fold_right
-        (fun value acc ->
-           let* acc = acc in
-           let* request = request_of_json value in
-           Ok (request :: acc))
-        values (Ok [])
+      let rec loop acc = function
+        | [] -> Ok (List.rev acc)
+        | value :: rest ->
+          let* request = request_of_json value in
+          loop (request :: acc) rest
+      in
+      loop [] values
     in
     let ids = List.map request_id requests in
     if List.length (List.sort_uniq String.compare ids) <> List.length ids
@@ -179,9 +180,13 @@ let availability_of_json = function
       let* revision = match List.assoc "revision" fields with
         | `String value when String.trim value<>"" -> Ok value | _ -> Error "invalid host request revision" in
       let* request_ids = match List.assoc "request_ids" fields with
-        | `List values -> List.fold_right (fun value acc -> let* rest=acc in
-            match value with `String id when String.trim id<>"" -> Ok (id::rest)
-              | _ -> Error "invalid pending host request id") values (Ok [])
+        | `List values ->
+          let rec loop acc = function
+            | [] -> Ok (List.rev acc)
+            | `String id :: rest when String.trim id <> "" -> loop (id :: acc) rest
+            | _ :: _ -> Error "invalid pending host request id"
+          in
+          loop [] values
         | _ -> Error "pending host requests must be an array" in
       if List.length request_ids <> List.length (List.sort_uniq String.compare request_ids)
       then Error "duplicate pending host request id" else Ok {revision;request_ids}

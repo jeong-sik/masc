@@ -55,13 +55,11 @@ let set_task_goal config ~task_id ~goal_id : (unit, set_task_goal_error) result 
   let goal_id = String.trim goal_id in
   match Goal_store.with_existing_goals config ~goal_ids:[goal_id] (fun () ->
     match Workspace_utils.with_file_lock_r config (Workspace_backlog.backlog_lock_path config) (fun () ->
-      match Workspace_backlog.read_backlog_r config with
+      match Workspace_backlog.read_prepared_backlog_r config with
       | Error message -> Error (Backlog_read_failed message)
-      | Ok backlog ->
+      | Ok prepared ->
         (match
-           List.find_opt
-             (fun (t : Masc_domain.task) -> String.equal t.id task_id)
-             backlog.tasks
+           Workspace_backlog.Task_id_map.find_opt task_id prepared.tasks_by_id
          with
          | None -> Error (Unknown_task task_id)
          | Some task when Masc_domain.task_status_is_terminal task.Masc_domain.task_status ->

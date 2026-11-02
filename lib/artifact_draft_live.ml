@@ -1,6 +1,15 @@
 module Draft = Artifact_draft
 module Engine = Artifact_document_engine
-module Rooms = Map.Make (struct type t = string * string * string let compare = Stdlib.compare end)
+module Rooms = Map.Make (struct
+  type t = string * string * string
+
+  let compare (a1, b1, c1) (a2, b2, c2) =
+    let c = String.compare a1 a2 in
+    if c <> 0 then c
+    else
+      let c = String.compare b1 b2 in
+      if c <> 0 then c else String.compare c1 c2
+end)
 module Peers = Map.Make (String)
 type source = Dashboard_connection | Keeper_turn of Ids.Turn_ref.t
 type session = { source : source; id : string; base_path : string; actor : string; target : Draft.target }

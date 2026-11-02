@@ -105,32 +105,100 @@ let call_of_row ~source_position json =
    history that omits the call it needs to see. *)
 type execution_identity = Recorded_trace of string | Unattributed_occurrence of int
 
+let compare_execution_identity left right =
+  match left, right with
+  | Recorded_trace l, Recorded_trace r -> String.compare l r
+  | Recorded_trace _, Unattributed_occurrence _ -> -1
+  | Unattributed_occurrence _, Recorded_trace _ -> 1
+  | Unattributed_occurrence l, Unattributed_occurrence r -> Int.compare l r
+;;
+
+let equal_execution_identity left right =
+  compare_execution_identity left right = 0
+;;
+
+module Turn_key_map = Map.Make (struct
+    type t = execution_identity * int
+
+    let compare (exec_l, turn_l) (exec_r, turn_r) =
+      let c = compare_execution_identity exec_l exec_r in
+      if c <> 0 then c else Int.compare turn_l turn_r
+  end)
+
+let compare_provenance (left : provenance) (right : provenance) =
+  let c = Option.compare String.compare left.task_id right.task_id in
+  if c <> 0
+  then c
+  else Option.compare String.compare left.trace_id right.trace_id
+;;
+
+module Failure_key_map = Map.Make (struct
+    type t = string * string * provenance * int option
+
+    let compare (tool_l, input_l, prov_l, turn_l) (tool_r, input_r, prov_r, turn_r) =
+      let c = String.compare tool_l tool_r in
+      if c <> 0
+      then c
+      else (
+        let c = String.compare input_l input_r in
+        if c <> 0
+        then c
+        else (
+          let c = compare_provenance prov_l prov_r in
+          if c <> 0
+          then c
+          else Option.compare Int.compare turn_l turn_r))
+  end)
+
 (* A missing trace does not authorize joining an earlier equal turn number.
    Preserve only its contiguous occurrence, including across clipping. *)
 let rows_with_turn_keys rows =
-  let previous = ref None in
-  List.mapi (fun position row ->
-    let keeper = string_field "keeper" row in
-    let key = match turn_id_field row with
-      | None -> None
-      | Some turn_id ->
-        let execution = match (provenance_of_row row).trace_id with
-          | Some trace -> Recorded_trace trace
-          | None ->
-            (match !previous with
-             | Some (prior_keeper, (Unattributed_occurrence _ as identity), prior_turn)
-               when prior_keeper = keeper && prior_turn = turn_id -> identity
-             | None
-             | Some (_, (Recorded_trace _ | Unattributed_occurrence _), _) ->
-               Unattributed_occurrence position) in
-        Some (execution, turn_id) in
-    previous := Option.map (fun (execution, turn) -> keeper, execution, turn) key;
-    position, key, row) rows
+  let _, rev_rows =
+    List.fold_left
+      (fun (previous, (position, acc)) row ->
+         let keeper = string_field "keeper" row in
+         let key =
+           match turn_id_field row with
+           | None -> None
+           | Some turn_id ->
+             let execution =
+               match (provenance_of_row row).trace_id with
+               | Some trace -> Recorded_trace trace
+               | None ->
+                 (match previous with
+                  | Some
+                      ( prior_keeper
+                      , (Unattributed_occurrence _ as identity)
+                      , prior_turn )
+                    when Option.equal String.equal prior_keeper keeper
+                         && Int.equal prior_turn turn_id -> identity
+                  | None
+                  | Some (_, (Recorded_trace _ | Unattributed_occurrence _), _) ->
+                    Unattributed_occurrence position)
+             in
+             Some (execution, turn_id)
+         in
+         let next_previous =
+           Option.map (fun (execution, turn) -> keeper, execution, turn) key
+         in
+         next_previous, (position + 1, (position, key, row) :: acc))
+      (None, (0, []))
+      rows
+  in
+  List.rev (snd rev_rows)
+;;
+
+let equal_turn_key (exec_l, turn_l) (exec_r, turn_r) =
+  equal_execution_identity exec_l exec_r && Int.equal turn_l turn_r
+;;
 
 let drop_clipped_leading_turn rows =
   match List.find_map (fun (_, key, _) -> key) rows with
   | None -> rows
-  | Some clipped -> List.filter (fun (_, key, _) -> key <> Some clipped) rows
+  | Some clipped ->
+    List.filter
+      (fun (_, key, _) -> not (Option.equal equal_turn_key key (Some clipped)))
+      rows
 ;;
 
 let turns_of_rows ~keeper_name ~max_turns ~window_saturated rows =
@@ -142,25 +210,31 @@ let turns_of_rows ~keeper_name ~max_turns ~window_saturated rows =
     (* One pass in persisted order builds each turn's call list; the turn order
        is then the order the turns first appeared, so both stay source order
        without a sort. *)
-    let order = ref [] in
-    let calls = Hashtbl.create 16 in
-    List.iter
-      (fun (source_position, key, row) ->
-         match string_field "keeper" row, key, call_of_row ~source_position row with
-         | Some k, Some turn_id, Some call when String.equal k keeper_name ->
-           if not (Hashtbl.mem calls turn_id)
-           then (
-             Hashtbl.replace calls turn_id [];
-             order := turn_id :: !order);
-           Hashtbl.replace calls turn_id (call :: Hashtbl.find calls turn_id)
-         | _ -> ())
-      rows;
-    let ordered = List.rev !order in
+    let rev_order, calls_by_turn =
+      List.fold_left
+        (fun (rev_order, calls_by_turn) (source_position, key, row) ->
+           match string_field "keeper" row, key, call_of_row ~source_position row with
+           | Some k, Some turn_id, Some call when String.equal k keeper_name ->
+             (match Turn_key_map.find_opt turn_id calls_by_turn with
+              | None ->
+                ( turn_id :: rev_order
+                , Turn_key_map.add turn_id [ call ] calls_by_turn )
+              | Some existing ->
+                ( rev_order
+                , Turn_key_map.add turn_id (call :: existing) calls_by_turn ))
+           | _ -> rev_order, calls_by_turn)
+        ([], Turn_key_map.empty)
+        rows
+    in
+    let ordered = List.rev rev_order in
     let keep = max 0 (List.length ordered - max_turns) in
     ordered
     |> List.filteri (fun i _ -> i >= keep)
     |> List.map (fun turn_id ->
-      { turn_id = snd turn_id; calls = List.rev (Hashtbl.find calls turn_id) }))
+      let rev_calls =
+        Option.value ~default:[] (Turn_key_map.find_opt turn_id calls_by_turn)
+      in
+      { turn_id = snd turn_id; calls = List.rev rev_calls }))
 ;;
 
 (* The salience problem this answers: a 12-turn window renders as a hundred
@@ -179,53 +253,78 @@ type failure_digest =
   ; failure_last_turn : int
   }
 
+type failure_accumulator =
+  { acc_tool : string
+  ; acc_input : string
+  ; acc_provenance : provenance
+  ; acc_count : int
+  ; acc_detail : string option
+  ; acc_last_turn : int
+  ; acc_last_position : int
+  }
+
 let digest_failures ?(limit = 8) (turns : turn list) : failure_digest list =
-  let counts = Hashtbl.create 16 in
-  let provenances = Hashtbl.create 16 in
-  let sources = Hashtbl.create 16 in
-  let details = Hashtbl.create 16 in
-  let last_turn = Hashtbl.create 16 in
-  let last_position = Hashtbl.create 16 in
   (* Grouped turns can interleave in the original log. The source ordinal,
      not traversal order or trace-local turn number, owns recency. *)
-  List.iteri
-    (fun position (turn : turn) ->
-       List.iter
-         (fun (call : call) ->
-            match call.outcome with
-            | Ok_call | Deferred_call | Unrecorded_call -> ()
-            | Failed_call detail ->
-              let unknown_turn = match call.provenance.task_id, call.provenance.trace_id with
-                | Some _, Some _ -> None
-                | None, _ | _, None -> Some position in
-              let key = call.tool, call.input, call.provenance, unknown_turn in
-              Hashtbl.replace provenances key call.provenance;
-              Hashtbl.replace counts key
-                (1 + Option.value ~default:0 (Hashtbl.find_opt counts key));
-              Hashtbl.replace sources key (call.tool, call.input);
-              let newest = match Hashtbl.find_opt last_position key with
-                | None -> true | Some prior -> call.source_position > prior in
-              if newest then (
-                Hashtbl.replace details key detail;
-                Hashtbl.replace last_turn key turn.turn_id;
-                Hashtbl.replace last_position key call.source_position))
-         turn.calls)
-    turns;
-  Hashtbl.fold
-    (fun key _count acc ->
-       let tool, input = Hashtbl.find sources key in
-       (Hashtbl.find last_position key, { failure_tool = tool
-       ; failure_input = input
-       ; failure_count = Hashtbl.find counts key
-       ; failure_detail = Hashtbl.find details key
-       ; failure_provenance = Hashtbl.find provenances key
-       ; failure_last_turn = Hashtbl.find last_turn key
-       })
+  let _, by_key =
+    List.fold_left
+      (fun (position, by_key) (turn : turn) ->
+         let by_key =
+           List.fold_left
+             (fun by_key (call : call) ->
+                match call.outcome with
+                | Ok_call | Deferred_call | Unrecorded_call -> by_key
+                | Failed_call detail ->
+                  let unknown_turn =
+                    match call.provenance.task_id, call.provenance.trace_id with
+                    | Some _, Some _ -> None
+                    | None, _ | _, None -> Some position
+                  in
+                  let key = call.tool, call.input, call.provenance, unknown_turn in
+                  let updated =
+                    match Failure_key_map.find_opt key by_key with
+                    | None ->
+                      { acc_tool = call.tool
+                      ; acc_input = call.input
+                      ; acc_provenance = call.provenance
+                      ; acc_count = 1
+                      ; acc_detail = detail
+                      ; acc_last_turn = turn.turn_id
+                      ; acc_last_position = call.source_position
+                      }
+                    | Some prior ->
+                      if call.source_position > prior.acc_last_position
+                      then
+                        { prior with
+                          acc_count = prior.acc_count + 1
+                        ; acc_detail = detail
+                        ; acc_last_turn = turn.turn_id
+                        ; acc_last_position = call.source_position
+                        }
+                      else { prior with acc_count = prior.acc_count + 1 }
+                  in
+                  Failure_key_map.add key updated by_key)
+             by_key
+             turn.calls
+         in
+         position + 1, by_key)
+      (0, Failure_key_map.empty)
+      turns
+  in
+  Failure_key_map.fold
+    (fun _key entry acc ->
+       ( entry.acc_last_position
+       , { failure_tool = entry.acc_tool
+         ; failure_input = entry.acc_input
+         ; failure_count = entry.acc_count
+         ; failure_detail = entry.acc_detail
+         ; failure_provenance = entry.acc_provenance
+         ; failure_last_turn = entry.acc_last_turn
+         } )
        :: acc)
-    counts
+    by_key
     []
-  |> List.sort (fun left right ->
-         Int.compare (fst right) (fst left))
+  |> List.sort (fun left right -> Int.compare (fst right) (fst left))
   |> List.filteri (fun index _ -> index < limit)
   |> List.map snd
 ;;

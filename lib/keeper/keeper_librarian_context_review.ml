@@ -40,23 +40,38 @@ let source_json (s : Context.source) =
   `Assoc ["reference", `String s.reference; "content", s.content]
 let strings xs = `List (List.map (fun s -> `String s) xs)
 let optional_string = function None -> `Null | Some s -> `String s
+module String_set = Set.Make (String)
+
 let state (input : Context.input) (proposed : Context.pocket list) =
-  let selected = List.concat_map (fun (p : Context.pocket) -> p.sources) proposed in
-  let targets = List.concat_map (fun (p : Context.pocket) -> p.merge_contexts) proposed in
+  let selected_set =
+    List.fold_left
+      (fun acc (p : Context.pocket) ->
+         List.fold_left (fun acc s -> String_set.add s acc) acc p.sources)
+      String_set.empty
+      proposed
+  in
+  let targets_set =
+    List.fold_left
+      (fun acc (p : Context.pocket) ->
+         List.fold_left (fun acc id -> String_set.add id acc) acc p.merge_contexts)
+      String_set.empty
+      proposed
+  in
   let previous = match input.previous with
     | None -> []
     | Some previous -> List.filter_map (fun (p : Context.pocket) ->
-        if not (List.mem p.id targets) then None else
+        if not (String_set.mem p.id targets_set) then None else
+        let pocket_sources_set = String_set.of_list p.sources in
         Some (`Assoc ["id", `String p.id; "context", `String p.context;
           "next_steps", strings p.next_steps;
           "completeness", `String (match p.completeness with
             | Context.Current -> "current" | Needs_reconsideration -> "needs_reconsideration");
           "sources", `List (List.filter_map (fun (s : Context.source) ->
-            if List.mem s.reference p.sources then Some (source_json s) else None) previous.sources)])) previous.pockets
+            if String_set.mem s.reference pocket_sources_set then Some (source_json s) else None) previous.sources)])) previous.pockets
   in
   `Assoc ["proposed_contexts", Context.pockets_to_json proposed;
     "selected_sources", `List (List.filter_map (fun (s : Context.source) ->
-      if List.mem s.reference selected then Some (source_json s) else None) input.sources);
+      if String_set.mem s.reference selected_set then Some (source_json s) else None) input.sources);
     "merged_previous", `List previous;
     "observed_references", strings (List.map (fun (s : Context.source) -> s.reference) input.sources);
     "unavailable", strings input.unavailable;

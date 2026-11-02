@@ -50,21 +50,20 @@ let keeper_action_stale_sec = Env_config.Dashboard.keeper_action_stale_sec
 let task_assignee (task : Masc_domain.task) =
   Masc_domain.task_performer_of_status task.task_status
 
-let last_message_map messages =
-  let table = Hashtbl.create 32 in
-  List.iter
-    (fun (message : Masc_domain.message) ->
-      let key = String.lowercase_ascii (String.trim message.from_agent) in
-      match Masc_domain.parse_iso8601_opt message.timestamp with
-      | None -> ()
-      | Some ts -> (
-          match Hashtbl.find_opt table key with
-          | Some (existing_ts, _) when existing_ts >= ts -> ()
-          | _ -> Hashtbl.replace table key (ts, message)))
-    messages;
-  table
-
 module Agent_name_map = Set_util.StringMap
+
+let last_message_map messages =
+  List.fold_left
+    (fun acc (message : Masc_domain.message) ->
+       let key = String.lowercase_ascii (String.trim message.from_agent) in
+       match Masc_domain.parse_iso8601_opt message.timestamp with
+       | None -> acc
+       | Some ts ->
+         (match Agent_name_map.find_opt key acc with
+          | Some (existing_ts, _) when existing_ts >= ts -> acc
+          | _ -> Agent_name_map.add key (ts, message) acc))
+    Agent_name_map.empty
+    messages
 
 let active_task_counts ~agents tasks =
   (* Index only names this render will read. An unlisted assignee must not
@@ -86,11 +85,11 @@ let active_task_counts ~agents tasks =
 
 let worker_state_of_agent
     ~(now_ts : float)
-    ~(messages_by_agent : (string, float * Masc_domain.message) Hashtbl.t)
+    ~(messages_by_agent : (float * Masc_domain.message) Agent_name_map.t)
     ~(active_task_count : int)
     (agent : Masc_domain.agent) : worker_context =
   let key = String.lowercase_ascii (String.trim agent.name) in
-  let message_opt = Hashtbl.find_opt messages_by_agent key in
+  let message_opt = Agent_name_map.find_opt key messages_by_agent in
   let last_seen_ts =
     Dashboard_utils.parse_iso_opt (String_util.trim_nonempty agent.last_seen) |> Option.value ~default:0.0
   in

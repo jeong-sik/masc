@@ -418,13 +418,15 @@ let source_entries doc =
     Error (Invalid_sources_type (value_kind value))
 ;;
 
+module String_map = Map.Make (String)
+
 let duplicate_diagnostics indexed_sources =
-  let seen = Hashtbl.create (List.length indexed_sources) in
+  let seen = ref String_map.empty in
   indexed_sources
   |> List.filter_map (fun (index, source) ->
-    match Hashtbl.find_opt seen source.id with
+    match String_map.find_opt source.id !seen with
     | None ->
-      Hashtbl.add seen source.id index;
+      seen := String_map.add source.id index !seen;
       None
     | Some first_index ->
       Some

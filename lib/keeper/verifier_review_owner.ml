@@ -448,13 +448,21 @@ let retained_commits ~store ~selection ~installation_id ~package_id =
     | Subdividing _ | Subdivided _ -> Ok acc) (Ok []) records
 
 let pending_commits ~terminal_pending ~store ~selection ~installation_id ~package_id =
-  let* records=retained_commits ~store ~selection ~installation_id ~package_id in
-  List.fold_right (fun retained acc ->
-    let* acc=acc in
-    match Progress.phase (progress retained) with
-    | Finished _ | Conflicted _ ->
-      let* pending=terminal_pending retained |> Result.map_error (fun detail -> Corrupt_original detail) in
-      Ok (if pending then retained::acc else acc)
-    | Judged _ | Committing _ | Commit_unknown _ -> Ok (retained::acc)
-    | Captured | Admission_wait _ | Dispatch_pending _ | Rejected _
-    | Subdividing _ | Subdivided _ -> Ok acc) records (Ok [])
+  let* records = retained_commits ~store ~selection ~installation_id ~package_id in
+  let rec loop acc = function
+    | [] -> Ok (List.rev acc)
+    | retained :: rest ->
+      match Progress.phase (progress retained) with
+      | Finished _ | Conflicted _ ->
+        let* pending =
+          terminal_pending retained
+          |> Result.map_error (fun detail -> Corrupt_original detail)
+        in
+        loop (if pending then retained :: acc else acc) rest
+      | Judged _ | Committing _ | Commit_unknown _ ->
+        loop (retained :: acc) rest
+      | Captured | Admission_wait _ | Dispatch_pending _ | Rejected _
+      | Subdividing _ | Subdivided _ ->
+        loop acc rest
+  in
+  loop [] records

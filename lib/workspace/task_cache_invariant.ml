@@ -25,14 +25,10 @@ type fresh_task_lookup =
 (** Read the current task status directly from the backlog (snapshot read,
     no write lock), preserving absence and read failure as distinct facts. *)
 let read_fresh_task_status config ~(task_id : string) : fresh_task_lookup =
-  match Workspace_backlog.read_backlog_r config with
+  match Workspace_backlog.read_prepared_backlog_r config with
   | Error detail -> Unavailable detail
-  | Ok backlog ->
-    (match
-       List.find_opt
-         (fun (t : Masc_domain.task) -> String.equal t.id task_id)
-         backlog.tasks
-     with
+  | Ok prepared ->
+    (match Workspace_backlog.Task_id_map.find_opt task_id prepared.tasks_by_id with
      | Some task -> Found task.task_status
      | None -> Absent)
 ;;

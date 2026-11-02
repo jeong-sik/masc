@@ -677,6 +677,14 @@ let replay_settlements config ~clock pending_settlements =
   List.rev pending, List.rev errors
 ;;
 
+module Settlement_key_set = Set.Make (struct
+    type t = string * string
+
+    let compare (inst_l, sched_l) (inst_r, sched_r) =
+      let c = String.compare inst_l inst_r in
+      if c <> 0 then c else String.compare sched_l sched_r
+  end)
+
 let tick ?consumer ?clock config ~pending_settlements ~now ~retention_days =
   (* Without a clock every wake stamp copies [now], which is the tick start:
      the store then records a dispatch that took fourteen seconds as one
@@ -691,15 +699,27 @@ let tick ?consumer ?clock config ~pending_settlements ~now ~retention_days =
   let failed error =
     let pending_settlements, settlement_errors = !progress in
     Error { error; pending_settlements; settlement_errors } in
+  let pending_settlement_keys =
+    List.fold_left
+      (fun acc (pending : pending_settlement) ->
+         Settlement_key_set.add
+           (pending.schedule_instance_id, pending.schedule_id)
+           acc)
+      Settlement_key_set.empty
+      pending_settlements
+  in
   let run_fresh () =
     match Schedule_store.refresh_due config ~now ~retention_days with
     | Error err -> Error (Service_error (Schedule_service.Store_error err))
     | Ok (state, due_changed) ->
-      let all_candidates = candidates ~now state
+      let all_candidates =
+        candidates ~now state
         |> List.filter (fun (_, (signal : wake_signal)) ->
-             not (List.exists (fun (pending : pending_settlement) ->
-               String.equal signal.schedule_instance_id pending.schedule_instance_id
-               && String.equal signal.schedule_id pending.schedule_id) pending_settlements)) in
+             not
+               (Settlement_key_set.mem
+                  (signal.schedule_instance_id, signal.schedule_id)
+                  pending_settlement_keys))
+      in
       (* Self-clock (#36213): a consumer may hold a due schedule back when its
          target still carries the previous unconsumed occurrence. Held candidates
          emit no signal and are not dispatched or advanced — they stay due and are

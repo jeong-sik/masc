@@ -270,12 +270,21 @@ type address_memo = (occurrence, memo_entry) Hashtbl.t
 
 let create_address_memo () = Hashtbl.create 64
 
+module Sha256_map = Map.Make (String)
+
 let pending_lookup pending =
-    let placeholders = Hashtbl.create (List.length pending) in
-    List.iter
-      (fun (entry : pending) ->
-         Hashtbl.add placeholders entry.placeholder_sha256 entry)
-      pending;
+    let placeholders =
+      List.fold_left
+        (fun acc (entry : pending) ->
+           let prior =
+             match Sha256_map.find_opt entry.placeholder_sha256 acc with
+             | Some entries -> entries
+             | None -> []
+           in
+           Sha256_map.add entry.placeholder_sha256 (entry :: prior) acc)
+        Sha256_map.empty
+        pending
+    in
     let planned_entry (block : Agent_core.Types.content_block) =
       let reference =
         match block with
@@ -295,9 +304,10 @@ let pending_lookup pending =
         | Agent_core.Types.Audio _ -> None
       in
       Option.bind reference (fun reference ->
-        match Hashtbl.find_opt placeholders reference.Tool_output.sha256 with
-        | Some entry when block == entry.placeholder -> Some entry
-        | Some _ | None -> None)
+        match Sha256_map.find_opt reference.Tool_output.sha256 placeholders with
+        | Some entries ->
+          List.find_opt (fun (entry : pending) -> block == entry.placeholder) entries
+        | None -> None)
     in
     planned_entry
 ;;
@@ -358,22 +368,25 @@ let materialize ~store ~addresses ~pending messages =
     (* Only retained placeholders need addressing. The queue is keyed by
        occurrence, so even repeated IDs with equal previews stay independent.
        Hashing stays in the CPU pool; writes remain on the owning fiber. *)
-    let queued = Hashtbl.create 16 in
-    List.iter
-      (fun (message : Agent_core.Types.message) ->
-         List.iter
-           (fun block ->
-              match planned_entry block with
-              | None -> ()
-              | Some entry ->
-                (match address_of entry with
-                 | Some _ -> ()
-                 | None -> Hashtbl.replace queued entry.occurrence entry))
-           message.content)
-      messages;
+    let queued =
+      List.fold_left
+        (fun acc (message : Agent_core.Types.message) ->
+           List.fold_left
+             (fun acc block ->
+                match planned_entry block with
+                | None -> acc
+                | Some entry ->
+                  (match address_of entry with
+                   | Some _ -> acc
+                   | None -> Occurrences.add entry.occurrence entry acc))
+             acc
+             message.content)
+        Occurrences.empty
+        messages
+    in
     List.iter
       (fun (occurrence, memo) -> Hashtbl.replace addresses occurrence memo)
-      (match Hashtbl.fold (fun _ entry acc -> entry :: acc) queued [] with
+      (match Occurrences.fold (fun _ entry acc -> entry :: acc) queued [] with
        | [] -> []
        | _ :: _ as to_address ->
          Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->

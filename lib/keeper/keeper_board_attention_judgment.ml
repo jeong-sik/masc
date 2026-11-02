@@ -100,8 +100,8 @@ let batch_item_shape_error ~index fields =
 
 let batch_item_of_yojson ~index = function
   | `Assoc fields ->
-    let keys = List.sort compare (List.map fst fields) in
-    if keys <> expected_batch_item_keys
+    let keys = List.sort String.compare (List.map fst fields) in
+    if not (List.equal String.equal keys expected_batch_item_keys)
     then Error (batch_item_shape_error ~index fields)
     else
       (match

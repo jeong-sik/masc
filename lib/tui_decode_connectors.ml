@@ -21,6 +21,23 @@ type connector_name_kind =
   | Connector_person_name
   | Connector_server_name
 
+let compare_connector_name_kind left right =
+  let rank = function
+    | Connector_channel_name -> 0
+    | Connector_person_name -> 1
+    | Connector_server_name -> 2
+  in
+  Int.compare (rank left) (rank right)
+
+module Mapping_key_map = Map.Make (struct
+  type t = connector_name_kind * string
+
+  let compare (k1, id1) (k2, id2) =
+    match compare_connector_name_kind k1 k2 with
+    | 0 -> String.compare id1 id2
+    | order -> order
+end)
+
 type connector_name_mapping = {
   cnm_kind : connector_name_kind;
   cnm_id : string;
@@ -381,20 +398,16 @@ let connector_with_name_pages connector ~pages ~error =
       pages
   in
   let mappings =
-    let keyed = Hashtbl.create 32 in
-    List.iter
-      (fun page ->
-        List.iter
-          (fun mapping ->
-            Hashtbl.replace keyed (mapping.cnm_kind, mapping.cnm_id) mapping)
-          page.cnp_mappings)
-      pages;
-    Hashtbl.to_seq_values keyed
-    |> List.of_seq
-    |> List.sort (fun left right ->
-           match compare left.cnm_kind right.cnm_kind with
-           | 0 -> String.compare left.cnm_id right.cnm_id
-           | order -> order)
+    let keyed =
+      List.fold_left
+        (fun acc page ->
+          List.fold_left
+            (fun acc mapping ->
+              Mapping_key_map.add (mapping.cnm_kind, mapping.cnm_id) mapping acc)
+            acc page.cnp_mappings)
+        Mapping_key_map.empty pages
+    in
+    List.map snd (Mapping_key_map.bindings keyed)
   in
   let channel_name channel_id =
     List.find_map

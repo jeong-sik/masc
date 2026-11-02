@@ -3,6 +3,19 @@ open Keeper_memory_os_types
 let ( let* ) = Result.bind
 let ( let+ ) value f = Result.map f value
 
+module Request_id_map = Map.Make (String)
+module Sequence_map = Map.Make (Int)
+
+let equal_explicit_candidate_id
+    (a : Keeper_memory_os_current.explicit_candidate_id)
+    (b : Keeper_memory_os_current.explicit_candidate_id)
+  =
+  String.equal a.queue_generation b.queue_generation
+  && String.equal a.request_id b.request_id
+  && Int.equal a.sequence b.sequence
+  && String.equal a.input_sha256 b.input_sha256
+;;
+
 (* In memory [pending] is newest-first so an append is O(1); the wire format
    and every consumer-facing batch stay strictly ascending, enforced by
    [state_of_json] and produced by reversing only at the serialization and
@@ -206,23 +219,27 @@ let acknowledge_with ~read_receipts ~keepers_dir ~keeper_id =
       | Some state when state.generation <> initial.generation ->
         Error "pending admission generation changed before acknowledgement"
       | Some state ->
-        let by_request = Hashtbl.create (List.length receipts) in
-        let by_sequence = Hashtbl.create (List.length receipts) in
-        let* () = List.fold_left (fun result (receipt : Keeper_memory_os_current.explicit_candidate_id) ->
-          let* () = result in
-          if receipt.queue_generation <> state.generation || receipt.sequence > state.last_sequence then
-            Error "committed admission candidate is outside the queue generation or sequence history"
-          else (
-            Hashtbl.add by_request receipt.request_id receipt;
-            Hashtbl.add by_sequence receipt.sequence receipt;
-            Ok ())) (Ok ()) receipts in
+        let* by_request, by_sequence =
+          List.fold_left
+            (fun result (receipt : Keeper_memory_os_current.explicit_candidate_id) ->
+               let* by_request, by_sequence = result in
+               if receipt.queue_generation <> state.generation || receipt.sequence > state.last_sequence then
+                 Error "committed admission candidate is outside the queue generation or sequence history"
+               else
+                 Ok (Request_id_map.add receipt.request_id receipt by_request,
+                     Sequence_map.add receipt.sequence receipt by_sequence))
+            (Ok (Request_id_map.empty, Sequence_map.empty))
+            receipts
+        in
         let* retained = List.fold_left (fun result row ->
           let* retained = result in
           let expected = candidate_id ~generation:state.generation row in
-          match Hashtbl.find_opt by_request row.request_id,
-                Hashtbl.find_opt by_sequence row.sequence with
+          match Request_id_map.find_opt row.request_id by_request,
+                Sequence_map.find_opt row.sequence by_sequence with
           | None, None -> Ok (row :: retained)
-          | Some by_id, Some by_seq when by_id = expected && by_seq = expected -> Ok retained
+          | Some by_id, Some by_seq
+            when equal_explicit_candidate_id by_id expected
+                 && equal_explicit_candidate_id by_seq expected -> Ok retained
           | Some _, None | None, Some _ | Some _, Some _ ->
             Error "committed admission candidate does not match pending identity and payload")
           (Ok []) state.pending in

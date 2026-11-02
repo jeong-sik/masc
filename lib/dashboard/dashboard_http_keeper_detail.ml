@@ -44,13 +44,11 @@ let compute_metrics_window
     | Some value -> value
     | None -> `Null
   in
-  let work_kind_counts : (string, int) Hashtbl.t = Hashtbl.create 16 in
-  let tool_counts_window : (string, int) Hashtbl.t = Hashtbl.create 16 in
-  let acc, items_rev =
+  let acc, work_kind_counts, tool_counts_window, items_rev =
     List.fold_left
-      (fun (acc, items) json ->
+      (fun (acc, work_kinds, tool_counts, items) json ->
         match Keeper_metrics_record.kind_of_json json with
-        | None -> acc, items
+        | None -> acc, work_kinds, tool_counts, items
         | Some Keeper_metrics_record.Heartbeat ->
             (match
                Safe_ops.json_float_opt "ts_unix" json,
@@ -61,8 +59,10 @@ let compute_metrics_window
                      ma_sample_points = acc.ma_sample_points + 1
                    ; ma_heartbeat_points = acc.ma_heartbeat_points + 1
                    }
+                 , work_kinds
+                 , tool_counts
                  , items )
-             | _ -> acc, items)
+             | _ -> acc, work_kinds, tool_counts, items)
         | Some Keeper_metrics_record.Turn ->
             let parsed_channel =
               Option.bind
@@ -110,8 +110,10 @@ let compute_metrics_window
                        acc.ma_tool_call_count + tool_call_count
                    }
                  in
-                 count_table_incr work_kind_counts work_kind;
-                 List.iter (count_table_incr tool_counts_window) tools_used;
+                 let work_kinds = count_map_incr work_kinds work_kind in
+                 let tool_counts =
+                   List.fold_left count_map_incr tool_counts tools_used
+                 in
                  let output_item =
                    if compact
                    then None
@@ -151,19 +153,19 @@ let compute_metrics_window
                          ])
                  in
                  (match output_item with
-                  | Some item -> acc, item :: items
-                  | None -> acc, items)
-             | _ -> acc, items))
-      (init_acc, [])
+                  | Some item -> acc, work_kinds, tool_counts, item :: items
+                  | None -> acc, work_kinds, tool_counts, items)
+             | _ -> acc, work_kinds, tool_counts, items))
+      (init_acc, Count_map.empty, Count_map.empty, [])
       parsed_metrics
   in
   let items = List.rev items_rev in
   let interaction_points = acc.ma_turn_points + acc.ma_proactive_points in
   let top_work_kinds =
-    top_counts_json ~limit:5 ~name_key:"kind" work_kind_counts
+    top_counts_map_json ~limit:5 ~name_key:"kind" work_kind_counts
   in
   let top_tools =
-    top_counts_json ~limit:5 ~name_key:"tool" tool_counts_window
+    top_counts_map_json ~limit:5 ~name_key:"tool" tool_counts_window
   in
   let summary =
     `Assoc

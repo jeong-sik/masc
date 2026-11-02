@@ -11,7 +11,13 @@
 
 module Link_task_cache_key = struct
   type t = string * string * string
-  let compare = compare
+
+  let compare (k1, t1, r1) (k2, t2, r2) =
+    let c = String.compare k1 k2 in
+    if c <> 0 then c
+    else
+      let c = String.compare t1 t2 in
+      if c <> 0 then c else String.compare r1 r2
 end
 
 module Link_task_cache_map = Map.Make (Link_task_cache_key)

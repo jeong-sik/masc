@@ -841,24 +841,50 @@ let dropped_goal_work config ~goal_id =
     try Ok (Workspace.get_tasks_raw config) with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
     | exn -> Error (Printexc.to_string exn) in
-  let dropped id =
-    String.equal id goal_id
-    || List.exists (fun (goal : Goal_store.goal) ->
-        String.equal goal.id id && goal.phase = Goal_phase.Dropped) goals in
-  let linked = Option.value ~default:[] (List.assoc_opt goal_id links) in
+  let dropped_goal_ids =
+    List.fold_left
+      (fun acc (goal : Goal_store.goal) ->
+         if goal.phase = Goal_phase.Dropped
+         then Workspace_backlog.Task_id_set.add goal.id acc
+         else acc)
+      (Workspace_backlog.Task_id_set.singleton goal_id)
+      goals
+  in
+  let dropped id = Workspace_backlog.Task_id_set.mem id dropped_goal_ids in
+  let linked_set =
+    match List.assoc_opt goal_id links with
+    | None -> Workspace_backlog.Task_id_set.empty
+    | Some ids -> Workspace_backlog.Task_id_set.of_list ids
+  in
+  let task_goal_map =
+    Workspace_goal_index.build_task_goal_map ~goal_task_links:links ()
+  in
   let orphaned (task : Masc_domain.task) =
-    List.mem task.id linked
-    && List.for_all (fun (id, task_ids) -> not (List.mem task.id task_ids) || dropped id) links in
-  Ok (List.fold_right (fun (task : Masc_domain.task) work ->
-      if not (orphaned task) then work
-      else match task.task_status with
-        | Masc_domain.Todo -> { work with unclaimed = task.id :: work.unclaimed }
-        | Masc_domain.Claimed _ | Masc_domain.InProgress _ | Masc_domain.AwaitingVerification _ ->
-            (match Masc_domain.task_assignee_of_status task.task_status with
-             | Some holder -> { work with held = (task.id, holder) :: work.held }
-             | None -> work)
-        | Masc_domain.Done _ | Masc_domain.Cancelled _ -> work)
-    tasks { unclaimed = []; held = [] })
+    Workspace_backlog.Task_id_set.mem task.id linked_set
+    && List.for_all
+         dropped
+         (Workspace_goal_index.goals_for_task_in_map task_goal_map ~task_id:task.id)
+  in
+  let rev_unclaimed, rev_held =
+    List.fold_left
+      (fun (rev_unclaimed, rev_held) (task : Masc_domain.task) ->
+         if not (orphaned task)
+         then rev_unclaimed, rev_held
+         else
+           match task.task_status with
+           | Masc_domain.Todo -> task.id :: rev_unclaimed, rev_held
+           | Masc_domain.Claimed _
+           | Masc_domain.InProgress _
+           | Masc_domain.AwaitingVerification _ ->
+             (match Masc_domain.task_assignee_of_status task.task_status with
+              | Some holder -> rev_unclaimed, (task.id, holder) :: rev_held
+              | None -> rev_unclaimed, rev_held)
+           | Masc_domain.Done _ | Masc_domain.Cancelled _ ->
+             rev_unclaimed, rev_held)
+      ([], [])
+      tasks
+  in
+  Ok { unclaimed = List.rev rev_unclaimed; held = List.rev rev_held }
 ;;
 
 let dropped_goal_notice ~(goal : Goal_store.goal) held =

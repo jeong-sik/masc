@@ -38,22 +38,42 @@ let configuration_of_json = function
               | [] -> Ok ()
               | _ :: _ as duplicates -> Error (Printf.sprintf "%s outputs must have distinct names; these repeat: %s"
                   configuration_label (String.concat ", " duplicates)) in
-            List.fold_right (fun (name,value) acc -> let* rest=acc in
-              let output_label=Printf.sprintf "%s output %s" configuration_label name in
-              let* ()=if Runtime_schema.exact_output_name_valid name then Ok ()
-                else Error (Printf.sprintf "%s output name %S is not a valid exact output name" configuration_label name) in
-              let* schema,request_schema = match value with
-                | `Assoc fields when List.sort String.compare (List.map fst fields)=output_keys ->
+            let rec loop acc = function
+              | [] -> Ok (List.rev acc)
+              | (name, value) :: rest ->
+                let output_label = Printf.sprintf "%s output %s" configuration_label name in
+                let* () =
+                  if Runtime_schema.exact_output_name_valid name then Ok ()
+                  else
+                    Error
+                      (Printf.sprintf
+                         "%s output name %S is not a valid exact output name"
+                         configuration_label name)
+                in
+                let* schema, request_schema =
+                  match value with
+                  | `Assoc fields when List.sort String.compare (List.map fst fields) = output_keys ->
                     (match List.assoc "request_schema" fields with
-                     | `Bool allowed -> Ok (List.assoc "schema" fields,
-                         if allowed then Lane_addon_types.Consumer_request_schema else Package_schema_only)
-                     | found -> Error (Printf.sprintf "%s field request_schema must be a boolean; it is %s"
-                         output_label (Yojson.Safe.to_string found)))
-                | `Assoc fields ->
-                    Error (Resource_requirement.keys ~label:output_label ~found:(List.map fst fields) ~required:output_keys)
-                | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> Error (not_object output_label value) in
-              let* ()=Lane_addon_action.validate_value_schema schema in
-              Ok ({Lane_addon_types.name;schema;request_schema}::rest)) outputs (Ok [])
+                     | `Bool allowed ->
+                       Ok
+                         ( List.assoc "schema" fields
+                         , if allowed then Lane_addon_types.Consumer_request_schema
+                           else Package_schema_only )
+                     | found ->
+                       Error
+                         (Printf.sprintf "%s field request_schema must be a boolean; it is %s"
+                            output_label (Yojson.Safe.to_string found)))
+                  | `Assoc fields ->
+                    Error
+                      (Resource_requirement.keys ~label:output_label
+                         ~found:(List.map fst fields) ~required:output_keys)
+                  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+                    Error (not_object output_label value)
+                in
+                let* () = Lane_addon_action.validate_value_schema schema in
+                loop ({ Lane_addon_types.name; schema; request_schema } :: acc) rest
+            in
+            loop [] outputs
         | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ as value ->
             Error (not_object (configuration_label ^ " field outputs") value) in
       let* locate_system = match List.assoc "locate_system" fields with

@@ -178,7 +178,7 @@ let sort_goals goals =
   (* Sort key is [(priority asc, updated_at desc)]. *)
   List.sort
     (fun left right ->
-      let by_priority = compare left.priority right.priority in
+      let by_priority = Int.compare left.priority right.priority in
       if by_priority <> 0 then
         by_priority
       else

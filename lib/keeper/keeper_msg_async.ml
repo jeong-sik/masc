@@ -2294,7 +2294,9 @@ let list_for_keeper ~base_path ~caller ?keeper_name () :
              | (Queued | Running | Cancelling _), (Some _ | None) -> entry :: acc)
         pending
         [])
-    |> List.sort (fun a b -> compare b.submitted_at a.submitted_at)
+    |> List.sort (fun a b ->
+         let cmp = Float.compare b.submitted_at a.submitted_at in
+         if cmp <> 0 then cmp else String.compare a.request_id b.request_id)
   in
   Ok entries
 ;;

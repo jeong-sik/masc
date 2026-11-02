@@ -208,6 +208,7 @@ val reaction_summary_to_yojson : reaction_summary -> Yojson.Safe.t
 val reaction_toggle_result_to_yojson : reaction_toggle_result -> Yojson.Safe.t
 val reaction_target_type_to_string : reaction_target_type -> string
 val reaction_target_type_of_string_opt : string -> reaction_target_type option
+val compare_reaction_target_type : reaction_target_type -> reaction_target_type -> int
 val valid_reaction_target_type_strings : string list
 val board_reaction_emojis : string list
 

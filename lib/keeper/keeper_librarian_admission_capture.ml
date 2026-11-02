@@ -22,7 +22,14 @@ let number = function
   | _ -> Error "Original Librarian capture expects a finite time"
 let boolean = function `Bool value -> Ok value | _ -> Error "Original Librarian capture expects a boolean"
 let list decode = function
-  | `List values -> List.fold_right (fun value result -> let* value=decode value in let+ rest=result in value::rest) values (Ok [])
+  | `List values ->
+    let rec loop acc = function
+      | [] -> Ok (List.rev acc)
+      | value :: rest ->
+        let* x = decode value in
+        loop (x :: acc) rest
+    in
+    loop [] values
   | _ -> Error "Original Librarian capture expects an array"
 let option decode = function `Null -> Ok None | json -> let+ value=decode json in Some value
 let optional encode = Option.fold ~none:`Null ~some:encode

@@ -75,7 +75,13 @@ type t = { names : Names.t; entries : row list }
 let label_pairs = function
   | `Assoc fields ->
     let rec decode seen acc = function
-      | [] -> Some (List.sort compare acc)
+      | [] ->
+        Some
+          (List.sort
+             (fun (k1, v1) (k2, v2) ->
+               let c = String.compare k1 k2 in
+               if c <> 0 then c else String.compare v1 v2)
+             acc)
       | (key, `String value) :: rest ->
         if Names.mem key seen then None
         else decode (Names.add key seen) ((key, value) :: acc) rest

@@ -133,11 +133,20 @@ let stores_json metrics =
 ;;
 
 let event_bus_json metrics =
-  let canon (m : Otel_metric_store.metric) = List.sort compare m.labels in
+  let compare_label_pair (k1, v1) (k2, v2) =
+    let c = String.compare k1 k2 in
+    if c <> 0 then c else String.compare v1 v2
+  in
+  let canon (m : Otel_metric_store.metric) =
+    List.sort compare_label_pair m.labels
+  in
   let find_by_labels rows_ canon_labels =
     List.find_map
       (fun (m : Otel_metric_store.metric) ->
-         if canon m = canon_labels then Some m.value else None)
+         if List.equal (fun (k1, v1) (k2, v2) -> String.equal k1 k2 && String.equal v1 v2)
+              (canon m) canon_labels
+         then Some m.value
+         else None)
       rows_
   in
   let depth_rows = rows metrics Otel_metric_store.metric_bus_subscriber_depth in
@@ -153,7 +162,7 @@ let event_bus_json metrics =
     let contracts =
       depth_rows
       |> List.filter (fun m -> label m "bus" = Some bus)
-      |> List.sort (fun a b -> compare (canon a) (canon b))
+      |> List.sort (fun a b -> List.compare compare_label_pair (canon a) (canon b))
       |> List.map (fun (m : Otel_metric_store.metric) ->
         let canon_labels = canon m in
         (* The producer encodes an absent subscription purpose as

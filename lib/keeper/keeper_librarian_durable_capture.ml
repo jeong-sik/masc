@@ -29,7 +29,14 @@ let number = function
   | `Int value -> Ok (float_of_int value)
   | _ -> refuse "Durable capture expects a finite number"
 let list decode = function
-  | `List values -> List.fold_right (fun value rest -> let* value=decode value in let+ rest=rest in value::rest) values (Ok [])
+  | `List values ->
+    let rec loop acc = function
+      | [] -> Ok (List.rev acc)
+      | value :: rest ->
+        let* x = decode value in
+        loop (x :: acc) rest
+    in
+    loop [] values
   | _ -> refuse "Durable capture expects an array"
 let option decode = function `Null -> Ok None | value -> let+ value=decode value in Some value
 let optional encode = function None -> `Null | Some value -> encode value
@@ -484,14 +491,17 @@ let confirm_sources ~boundaries ~messages ~traces original =
         end_boundary_line=held.end_boundary_line} : checkpoint) in
   let live_official (held:Held.official) =
     let changed="Original official-client fragment prefix changed" in
-    let+ traces=List.fold_right (fun (held:Held.trace) rest ->
-      let* rest=rest in
-      match List.find_opt (fun (trace:official_trace) -> trace.trace_id=held.id) traces with
-      | None -> refuse changed
-      | Some trace ->
-        let* main=held_prefix ~changed fragment_row_json held.main trace.main in
-        let+ internal=held_prefix ~changed fragment_row_json held.internal trace.internal in
-        ({trace_id=held.id;main;internal} : official_trace)::rest) held.traces (Ok []) in
+    let rec loop acc = function
+      | [] -> Ok (List.rev acc)
+      | (held:Held.trace) :: rest ->
+        match List.find_opt (fun (trace:official_trace) -> trace.trace_id=held.id) traces with
+        | None -> refuse changed
+        | Some trace ->
+          let* main=held_prefix ~changed fragment_row_json held.main trace.main in
+          let* internal=held_prefix ~changed fragment_row_json held.internal trace.internal in
+          loop (({trace_id=held.id;main;internal} : official_trace) :: acc) rest
+    in
+    let+ traces=loop [] held.traces in
     ({selected=held.selected;traces} : official) in
   let* source=match original.held_source with
     | Held.Checkpoint_only checkpoint -> let+ checkpoint=live_checkpoint checkpoint in Checkpoint_only checkpoint

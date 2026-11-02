@@ -71,6 +71,8 @@ let parse_row ~file_path line : (string * string) option =
       ~detail;
     None
 
+module Speaker_note_map = Map.Make (String)
+
 let notes ~base_dir ~keeper_name : (string * string) list =
   let path = notes_path ~base_dir ~keeper_name in
   if not (Sys.file_exists path) then []
@@ -79,18 +81,17 @@ let notes ~base_dir ~keeper_name : (string * string) list =
       (* Latest row wins per speaker; insertion order of first
          appearance is irrelevant to callers (roster sorts on its own
          keys). A blank note deletes the entry. *)
-      let tbl : (string, string) Hashtbl.t = Hashtbl.create 8 in
-      let (), _boundary =
-        Fs_compat.fold_appended_lines ~path ~from:0 ~init:()
-          ~f:(fun () line ->
+      let by_speaker, _boundary =
+        Fs_compat.fold_appended_lines ~path ~from:0 ~init:Speaker_note_map.empty
+          ~f:(fun acc line ->
             match parse_row ~file_path:path (String.trim line) with
-            | Some (id, note) -> Hashtbl.replace tbl id note
-            | None -> ())
+            | Some (id, note) -> Speaker_note_map.add id note acc
+            | None -> acc)
       in
-      Hashtbl.fold
+      Speaker_note_map.fold
         (fun id note acc ->
           if String.trim note = "" then acc else (id, note) :: acc)
-        tbl []
+        by_speaker []
     with
     | Sys_error detail ->
         report_read_drop

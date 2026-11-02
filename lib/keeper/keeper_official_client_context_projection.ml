@@ -574,19 +574,22 @@ let carried_delivery ~held item =
       (* The frame and the sections sent on every resume go out whenever any
          section does; only a section sent when changed is ever left out. *)
       let out, unchanged =
-        List.fold_right
-          (fun (section, holding) (out, unchanged) ->
-             match holding with
-             | Holds_rows { head; tail; sent_rows; held_rows } ->
-               Section_new_rows { section; head; tail; sent_rows; held_rows } :: out, unchanged
-             | Holds_all ->
-               (match Keeper_context_layers.resend_on_resume section.section with
-                | Keeper_context_layers.Sent_when_changed -> out, section :: unchanged
-                | Keeper_context_layers.(Sent_every_resume | Sent_with_other_sections) ->
-                  Section_whole section :: out, unchanged)
-             | Holds_none -> Section_whole section :: out, unchanged)
-          holdings
-          ([], [])
+        let out_rev, unchanged_rev =
+          List.fold_left
+            (fun (out, unchanged) (section, holding) ->
+               match holding with
+               | Holds_rows { head; tail; sent_rows; held_rows } ->
+                 Section_new_rows { section; head; tail; sent_rows; held_rows } :: out, unchanged
+               | Holds_all ->
+                 (match Keeper_context_layers.resend_on_resume section.section with
+                  | Keeper_context_layers.Sent_when_changed -> out, section :: unchanged
+                  | Keeper_context_layers.(Sent_every_resume | Sent_with_other_sections) ->
+                    Section_whole section :: out, unchanged)
+               | Holds_none -> Section_whole section :: out, unchanged)
+            ([], [])
+            holdings
+        in
+        List.rev out_rev, List.rev unchanged_rev
       in
       let partly =
         List.filter_map

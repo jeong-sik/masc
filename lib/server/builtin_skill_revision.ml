@@ -12,7 +12,15 @@ let file_digest content = Agent_core_sha256.(to_hex (digest_string content))
 let revision entries =
   entries
   |> List.map (fun { kind; path; mode; digest } -> entry_kind_tag kind, path, mode, digest)
-  |> List.sort compare
+  |> List.sort (fun (k1, p1, m1, d1) (k2, p2, m2, d2) ->
+       let c = String.compare k1 k2 in
+       if c <> 0 then c
+       else
+         let c = String.compare p1 p2 in
+         if c <> 0 then c
+         else
+           let c = Int.compare m1 m2 in
+           if c <> 0 then c else String.compare d1 d2)
   |> List.map (fun (kind, path, mode, digest) ->
     `List [ `String kind; `String path; `Int mode; `String digest ])
   |> (fun items -> `List items)

@@ -513,23 +513,31 @@ let load_persisted_sub_boards store =
 
 (** {1 Hearth (topic) operations} *)
 
+module String_map = Set_util.StringMap
+
 (** List active hearths with post counts for the requested post-kind axis. *)
 let list_hearths store ?(exclude_system = false) ?(exclude_automation = false) ()
     : (string * int) list =
   with_lock store (fun () ->
-    let counts = Hashtbl.create 16 in
-    Hashtbl.iter (fun _ (p : post) ->
-      if Board_core_classify.post_matches_filters
-           ~exclude_system ~exclude_automation p
-      then
-        match p.hearth with
-        | Some h ->
-            let c = Hashtbl.find_opt counts h |> Option.value ~default:0 in
-            Hashtbl.replace counts h (c + 1)
-        | None -> ()
-    ) store.posts;
-    Hashtbl.fold (fun k v acc -> (k, v) :: acc) counts []
-    |> List.sort (fun (_, a) (_, b) -> compare b a)
+    let counts =
+      Hashtbl.fold
+        (fun _ (p : post) acc ->
+           if Board_core_classify.post_matches_filters
+                ~exclude_system ~exclude_automation p
+           then
+             match p.hearth with
+             | Some h ->
+               let c = String_map.find_opt h acc |> Option.value ~default:0 in
+               String_map.add h (c + 1) acc
+             | None -> acc
+           else acc)
+        store.posts
+        String_map.empty
+    in
+    String_map.bindings counts
+    |> List.sort (fun (kl, a) (kr, b) ->
+         let c = Int.compare b a in
+         if c <> 0 then c else String.compare kl kr)
   )
 
 (** Update a post's thread_id (for linking Board post → Conversation thread) *)
@@ -1058,13 +1066,18 @@ let build_karma_ledger store =
     total so the highest-karma agents appear first.  Suitable for
     populating the karma leaderboard without re-reading the store. *)
 let totals_of_karma_ledger events =
-  let tbl = Hashtbl.create 64 in
-  List.iter (fun (e : karma_event) ->
-    let prev = Hashtbl.find_opt tbl e.recipient |> Option.value ~default:0 in
-    Hashtbl.replace tbl e.recipient (prev + e.delta)
-  ) events;
-  Hashtbl.fold (fun k v acc -> (k, v) :: acc) tbl []
-  |> List.sort (fun (_, a) (_, b) -> Int.compare b a)
+  let by_recipient =
+    List.fold_left
+      (fun acc (e : karma_event) ->
+         let prev = String_map.find_opt e.recipient acc |> Option.value ~default:0 in
+         String_map.add e.recipient (prev + e.delta) acc)
+      String_map.empty
+      events
+  in
+  String_map.bindings by_recipient
+  |> List.sort (fun (kl, a) (kr, b) ->
+       let c = Int.compare b a in
+       if c <> 0 then c else String.compare kl kr)
 
 (** JSON serialiser for a single karma event.
 
@@ -1107,21 +1120,25 @@ let get_all_karma store =
     match store.karma_cache with
     | Some cached -> cached
     | None ->
-        let tbl = Hashtbl.create 64 in
-        Hashtbl.iter
-          (fun key vote ->
-             match karma_event_of_vote store key vote with
-             | None -> ()
-             | Some (e : karma_event) ->
+        let by_recipient =
+          Hashtbl.fold
+            (fun key vote acc ->
+               match karma_event_of_vote store key vote with
+               | None -> acc
+               | Some (e : karma_event) ->
                  let prev =
-                   Hashtbl.find_opt tbl e.recipient
+                   String_map.find_opt e.recipient acc
                    |> Option.value ~default:0
                  in
-                 Hashtbl.replace tbl e.recipient (prev + e.delta))
-          store.vote_log;
+                 String_map.add e.recipient (prev + e.delta) acc)
+            store.vote_log
+            String_map.empty
+        in
         let result =
-          Hashtbl.fold (fun k v acc -> (k, v) :: acc) tbl []
-          |> List.sort (fun (_, a) (_, b) -> Int.compare b a)
+          String_map.bindings by_recipient
+          |> List.sort (fun (kl, a) (kr, b) ->
+               let c = Int.compare b a in
+               if c <> 0 then c else String.compare kl kr)
         in
         store.karma_cache <- Some result;
         result)

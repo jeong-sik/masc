@@ -227,6 +227,21 @@ let list_json ~actor target =
 (* Keyed by the id the caller asked about so a row it did not ask for cannot
    be read as an answer, and so an id the store has nothing for still comes
    back -- as an empty list rather than a gap the caller has to guess at. *)
+module Target_map = Map.Make (struct
+    type t = Board.reaction_target_type * string
+
+    let compare_target_type left right =
+      match left, right with
+      | Board.Reaction_post, Board.Reaction_post
+      | Board.Reaction_comment, Board.Reaction_comment -> 0
+      | Board.Reaction_post, Board.Reaction_comment -> -1
+      | Board.Reaction_comment, Board.Reaction_post -> 1
+
+    let compare (tl, idl) (tr, idr) =
+      let c = compare_target_type tl tr in
+      if c <> 0 then c else String.compare idl idr
+  end)
+
 let list_batch_json ~actor targets =
   let rows =
     Board_dispatch.list_reactions_batch
@@ -235,12 +250,15 @@ let list_batch_json ~actor targets =
       ~user_id:actor
       ()
   in
-  let summaries_for =
-    let table = Hashtbl.create (List.length rows) in
-    List.iter (fun (key, summaries) -> Hashtbl.replace table key summaries) rows;
-    fun target ->
-      Hashtbl.find_opt table (target.target_type, target.target_id)
-      |> Option.value ~default:[]
+  let by_target =
+    List.fold_left
+      (fun acc (key, summaries) -> Target_map.add key summaries acc)
+      Target_map.empty
+      rows
+  in
+  let summaries_for target =
+    Target_map.find_opt (target.target_type, target.target_id) by_target
+    |> Option.value ~default:[]
   in
   `Assoc
     [ ( "targets"

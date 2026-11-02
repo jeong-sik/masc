@@ -516,7 +516,7 @@ let canonical_catalog_evidence catalog model_entries target_declarations =
       [ "model"
       ; option_string model.provider_name
       ; Model_identifiers.Model_id.to_string model.model_id
-      ; option_string model.base_label
+      ; option_string (Option.map Capability_preset.to_string model.base_label)
       ; Binding.option_int model.max_context_tokens
       ; Binding.option_int model.max_output_tokens
       ; option_bool model.supports_response_format_json

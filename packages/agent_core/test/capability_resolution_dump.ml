@@ -44,7 +44,7 @@ let () =
         let label =
           match row.provider_name, row.base_label with
           | Some p, _ -> p
-          | None, Some b -> b
+          | None, Some preset -> Llm_provider.Capability_preset.to_string preset
           | None, None -> "?"
         in
         let model_id = Llm_provider.Model_identifiers.Model_id.to_string row.model_id in

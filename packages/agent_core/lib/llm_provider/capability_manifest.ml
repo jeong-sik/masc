@@ -2,27 +2,9 @@
 
     @since 0.188.0 *)
 
-type base_label = string
-
-let normalize_base_label raw = String.lowercase_ascii (String.trim raw)
-
-let base_label_of_string raw =
-  let normalized = normalize_base_label raw in
-  if List.mem normalized Capability_vocab.base_label_values
-  then Ok normalized
-  else
-    Error
-      (Printf.sprintf
-         "unknown base preset %S (canonical: %s)"
-         normalized
-         (String.concat ", " Capability_vocab.base_label_values))
-;;
-
-let base_label_to_string label = label
-
 type entry =
   { model_id : Model_identifiers.Model_id.t
-  ; base_label : base_label option
+  ; base_label : Capability_preset.t option
   ; max_context_tokens : int option
   ; max_output_tokens : int option
   ; supports_tools : bool option
@@ -428,7 +410,10 @@ let parse_entry json =
   let* base_label =
     match base_label_raw with
     | None -> Ok None
-    | Some raw -> Result.map (fun label -> Some label) (base_label_of_string raw)
+    | Some raw ->
+      (match Capability_preset.of_string raw with
+       | Some preset -> Ok (Some preset)
+       | None -> Error (Printf.sprintf "unknown base preset %S" raw))
   in
   (* Read the raw label/token pair and decode it through the exact vocabulary
      authority. The codec owns label exactness, token exactness, and the
@@ -672,7 +657,7 @@ let%test "of_json: valid manifest parses successfully" =
   match of_json json with
   | Ok [ entry ] ->
     Model_identifiers.Model_id.to_string entry.model_id = "my-llm"
-    && entry.base_label = Some "openai_chat"
+    && entry.base_label = Some Capability_preset.Openai_chat
     && entry.max_context_tokens = Some 131072
     && entry.supports_tools = Some true
   | Ok _ | Error _ -> false

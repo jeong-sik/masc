@@ -269,7 +269,7 @@ let test_deployment_agent_core_model_catalog_covers_live_runpod_mtp () =
         runpod_model_id
     | Some entry ->
       check (option string) (provider_name ^ " base") (Some "openai_chat")
-        entry.base_label;
+        (Option.map Llm_provider.Capability_preset.to_string entry.base_label);
       check (option int) (provider_name ^ " context") (Some 131072)
         entry.max_context_tokens
   in
@@ -382,7 +382,7 @@ let test_deployment_agent_core_model_catalog_covers_live_runpod_rtxa6000_gemma (
        model_id
    | Some entry ->
      check (option string) (provider_name ^ " base") (Some "openai_chat")
-       entry.base_label;
+       (Option.map Llm_provider.Capability_preset.to_string entry.base_label);
      check (option int) (provider_name ^ " context") (Some 262144)
        entry.max_context_tokens);
   match
@@ -420,7 +420,7 @@ let test_deployment_agent_core_model_catalog_covers_local_gemma4_e2b_qat () =
        model_id
    | Some entry ->
      check (option string) (provider_name ^ " base") (Some "ollama")
-       entry.base_label;
+       (Option.map Llm_provider.Capability_preset.to_string entry.base_label);
      check (option int) (provider_name ^ " context") (Some 131072)
        entry.max_context_tokens;
      check (option bool) (provider_name ^ " audio input") (Some true)
@@ -527,7 +527,7 @@ let test_deployment_agent_core_model_catalog_preserve_axes_resolve () =
      | None -> failf "expected deployment AGENT_CORE catalog row for %s" model_id
      | Some entry ->
        check (option string) (model_id ^ " native base") (Some "kimi")
-         entry.base_label;
+         (Option.map Llm_provider.Capability_preset.to_string entry.base_label);
        check bool (model_id ^ " no request thinking knob") true
          (match entry.thinking_control_format with
           | Some Llm_provider.Capabilities.No_thinking_control -> true

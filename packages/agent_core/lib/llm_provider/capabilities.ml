@@ -42,10 +42,10 @@ let anthropic_thinking_control_for_provider_from_catalog ~catalog ~provider mode
 
 (** Apply admitted capability fields on top of a base capabilities record.
 
-    [base_label] resolves to a provider preset via
-    [capabilities_for_provider_label]; defaults to [default_capabilities]
-    when absent or unrecognised.  Each [Some] field in [entry] overrides
-    the corresponding field of the base; [None] fields are left unchanged. *)
+    [base_label] carries an admitted closed preset directly. Absence retains
+    the supplied base or existing [default_capabilities] baseline. Each [Some]
+    field in [entry] overrides the corresponding field of the base; [None]
+    fields are left unchanged. *)
 
 let preserve_thinking_control_format_of_catalog_string raw =
   Capability_vocab.preserve_thinking_control_format_of_string raw
@@ -122,7 +122,7 @@ let reasoning_efforts_of_catalog_strings ~field values =
 ;;
 
 type declarative_capability_overrides =
-  { base_label : string option
+  { base_label : Capability_preset.t option
   ; max_context_tokens : int option
   ; serving_constraint : Serving_constraint.t option
   ; max_output_tokens : int option
@@ -168,10 +168,7 @@ let apply_declarative_capability_overrides ?(base=default_capabilities) override
   let base =
     match overrides.base_label with
     | None -> base
-    | Some label ->
-      (match capabilities_for_provider_label label with
-       | Some c -> c
-       | None -> default_capabilities)
+    | Some preset -> capabilities_of_preset preset
   in
   let base = match overrides.supports_image_input with
     | Some value -> with_declared_image_input value base

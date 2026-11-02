@@ -392,7 +392,7 @@ let provider_model_rows (provider_id : string) : (Yojson.Safe.t, string) result 
                         ; ( "label"
                           , `String
                               (match entry.base_label with
-                               Some label -> label
+                               Some preset -> Llm_provider.Capability_preset.to_string preset
                                | None ->
                                  Llm_provider.Model_identifiers.Model_id.to_string
                                    entry.model_id) )

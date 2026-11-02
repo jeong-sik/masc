@@ -11,7 +11,7 @@ type suggested_client = Claude_code | Codex
 type model_entry =
   { model_id : Model_identifiers.Model_id.t
   ; suggested_clients : suggested_client list
-  ; base_label : string option
+  ; base_label : Capability_preset.t option
   ; provider_name : string option
   ; max_context_tokens : int option
   ; serving_constraint : Serving_constraint.t option
@@ -132,7 +132,7 @@ let with_model_overrides catalog declarations =
   let replace previous (entry : Capability_manifest.entry) : model_entry =
     { model_id = entry.model_id
     ; suggested_clients = (match previous with Some row -> row.suggested_clients | None -> [])
-    ; base_label = Option.map Capability_manifest.base_label_to_string entry.base_label
+    ; base_label = entry.base_label
     ; provider_name = None
     ; max_context_tokens = entry.max_context_tokens
     ; serving_constraint = (match previous with Some row -> row.serving_constraint | None -> None)
@@ -522,13 +522,19 @@ let parse_entry entry_toml =
         else parse (client :: seen) rest in
     parse [] (Option.value names ~default:[])
   in
-  let* base_label =
+  let* base_label_raw =
     canonical_string_opt
       ~entry_id
       "base"
       ~allowed:Capability_vocab.base_label_values
       entry_toml
   in
+  let* base_label = match base_label_raw with
+    | None -> Ok None
+    | Some raw ->
+      (match Capability_preset.of_string raw with
+       | Some preset -> Ok (Some preset)
+       | None -> Error (Printf.sprintf "model entry %S has unknown base preset %S" entry_id raw)) in
   let* provider_name =
     non_empty_string_field ~entry_id "provider_name" entry_toml
   in

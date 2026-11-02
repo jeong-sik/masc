@@ -93,6 +93,31 @@ let pending state owner =
     sir_skill_reference = None;
     sir_purpose = Types.Open_image }
 
+let test_repeated_remote_save_keeps_the_exact_request () =
+  let state=state () in
+  let origin=pending state (Types.Remote_url_image_read state.workspace_authority) in
+  state.image_request_generation <- state.image_request_generation + 1;
+  let save={origin with sir_generation=state.image_request_generation} in
+  state.image_open <- true;
+  state.image_cell_view <- Some (Types.Image_cells {
+    ic_title="captured";ic_caption=[];ic_lines=[];ic_columns=0;ic_terminal_size=(24,80);
+    ic_workspace=state.workspace_authority;ic_origin=origin;ic_unconfirmed=false;
+    ic_copy_path=Some "https://fixture.invalid/image";ic_copy_page=Some "https://fixture.invalid/image";
+    ic_alternate_target=None;ic_last_open=None;
+    ic_unsaved_remote=Some {uri_bytes="original";uri_image_url="https://fixture.invalid/image";
+                            uri_reason="preview limit"};ic_save_cancelled=false });
+  state.sent_image_read <- Some save;
+  check bool "the fresh save owns this displayed source" true (Types.unsaved_remote_save_in_flight state);
+  state.image_request_generation <- state.image_request_generation + 1;
+  check bool "a later generation retires the save" false (Types.unsaved_remote_save_in_flight state);
+  state.image_request_generation <- save.sir_generation;
+  let other={save with sir_owner=Types.Remote_url_image_read state.workspace_authority} in
+  state.sent_image_read <- Some other;
+  check bool "a different remote request is not the save" false (Types.unsaved_remote_save_in_flight state);
+  state.sent_image_read <- Some save;
+  state.image_open <- false;
+  check bool "a closed card no longer owns the save" false (Types.unsaved_remote_save_in_flight state)
+
 let test_skill_image_owner () =
   let module Tools=Masc.Tui_decode_tools in
   let reference name revision =
@@ -125,7 +150,8 @@ let test_skill_image_owner () =
   state.image_open <- true;
   state.image_cell_view <- Some (Types.Image_cells {
     ic_title="diagram";ic_caption=[];ic_lines=[];ic_columns=0;ic_terminal_size=(24,80);
-    ic_workspace=state.workspace_authority;ic_origin=image;ic_unconfirmed=false });
+    ic_workspace=state.workspace_authority;ic_origin=image;ic_unconfirmed=false;
+             ic_copy_path=None;ic_copy_page=None;ic_alternate_target=None;ic_last_open=None;ic_unsaved_remote=None;ic_save_cancelled=false });
   let window : Masc_tui_image_viewport.window = {x=0;y=0;width=1;height=1;columns=1;rows=1} in
   let inspection={image with sir_purpose=Inspect_image {identity=ref ();window}} in
   state.tools_inventory <- Some (inventory [original]);
@@ -579,7 +605,8 @@ let test_tools_image_keeper_owner () =
   state.image_open <- true;
   state.image_cell_view <- Some (Types.Image_cells {
     ic_title="diagram";ic_caption=[];ic_lines=[];ic_columns=0;ic_terminal_size=(24,80);
-    ic_workspace=state.workspace_authority;ic_origin=origin;ic_unconfirmed=false });
+    ic_workspace=state.workspace_authority;ic_origin=origin;ic_unconfirmed=false;
+    ic_copy_path=None;ic_copy_page=None;ic_alternate_target=None;ic_last_open=None;ic_unsaved_remote=None;ic_save_cancelled=false });
   state.msx_open <- true;
   check bool "a hidden image cannot restore Tools selection" true
     (Option.is_none (Types.tools_skill_cell_image_owner state));
@@ -935,6 +962,39 @@ let test_physical_inspection_worker () =
   check bool "shutdown prevents later inspections" true
     (Option.is_none (Work.try_run worker (fun () -> ())))
 
+let test_queued_copy_waits_for_physical_worker () =
+  let module Work=Masc_tui_board_preview_work in
+  let worker=Work.create () in
+  check bool "first worker acquires the slot" true (Work.try_acquire worker);
+  let retired=match Work.reserve_after_active worker with
+    | Some ticket -> ticket | None -> fail "queued reservation" in
+  check bool "only one reservation can wait" true
+    (Option.is_none (Work.reserve_after_active worker));
+  ignore (Work.withdraw_pending worker);
+  let current=match Work.reserve_after_active worker with
+    | Some ticket -> ticket | None -> fail "replacement reservation" in
+  let stale=Work.run_reserved_after_active worker retired (fun () -> fail "withdrawn work ran") in
+  check bool "withdrawn reservation cannot start" true (Option.is_none stale);
+  let started=Atomic.make false and result=ref None in
+  let thread=Thread.create (fun () ->
+    result := Work.run_reserved_after_active worker current (fun () -> Atomic.set started true)) () in
+  check bool "a queued worker does not release the active one" true (Work.is_busy worker);
+  Work.release worker;
+  Thread.join thread;
+  check bool "current reservation runs after physical completion" true
+    (Atomic.get started && Option.is_some !result);
+  check bool "a completed worker releases the slot" false (Work.is_busy worker);
+  check bool "another physical worker acquires the slot" true (Work.try_acquire worker);
+  let queued=match Work.reserve_after_active worker with
+    | Some ticket -> ticket | None -> fail "shutdown reservation" in
+  let result=ref None in
+  let thread=Thread.create (fun () ->
+    result := Work.run_reserved_after_active worker queued (fun () -> fail "stopped work ran")) () in
+  Work.stop worker;
+  Thread.join thread;
+  Work.release worker;
+  check bool "shutdown wakes a queued worker without running it" true (Option.is_none !result)
+
 let test_initial_vector_worker () =
   let module Work=Masc_tui_board_preview_work in
   let module Requests=Masc_tui_image_requests in
@@ -1183,6 +1243,7 @@ let () =
   | _ -> run "resource image admission" ["stored source",[
   test_case "protocol replies are not cancellation input" `Quick test_operator_protocol_boundary;
   test_case "image input retains exact read ownership" `Quick test_image_input_ownership;
+  test_case "repeated remote save keeps the exact request" `Quick test_repeated_remote_save_keeps_the_exact_request;
   test_case "image results bypass a full shared mailbox" `Quick test_image_result_with_full_mailbox;
   test_case "Board post and comment diagram ownership" `Quick test_board_diagram_ownership;
   test_case "Board attachment ownership" `Quick test_board_attachment_ownership;
@@ -1196,6 +1257,7 @@ let () =
   test_case "Board SVG and original-image reader" `Quick test_board_svg_and_original_reader;
   test_case "Board worker and PNG header boundary" `Quick test_board_worker_and_png_boundary;
   test_case "inspection worker stays owned until physical return" `Quick test_physical_inspection_worker;
+  test_case "queued image copy waits for physical completion" `Quick test_queued_copy_waits_for_physical_worker;
   test_case "initial vectors require their owned renderer" `Quick test_initial_vector_worker;
   test_case "vector character conversion uses the bounded runner" `Quick test_vector_character_presentation_is_bounded;
   test_case "Board Pele deadline releases worker" `Quick test_board_pele_deadline;

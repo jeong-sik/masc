@@ -32,7 +32,11 @@ let run_all () =
    | Some cancel ->
      let t_start = Unix.gettimeofday () in
      Log.Server.info "Stopping Keeper owners and workspace observation...";
-     cancel ();
+     (* The phase timeout must not release the server switch while a child
+        is still publishing its terminal receipt through its Owner. The
+        process watchdog still bounds a stuck drain; an expired cleanup
+        phase continues after the original settlement attempt finishes. *)
+     Eio.Cancel.protect cancel;
      Log.Server.info
        "[Shutdown] Keeper owners and workspace observation stopped (%.2fs)"
        (Unix.gettimeofday () -. t_start)

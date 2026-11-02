@@ -184,7 +184,11 @@ let board_audience_of_queue
         (match Board.Agent_id.parse target with
          | Ok id -> parse (id :: acc) rest
          | Error error ->
-           Error { operation = Parse_queued_audience; post_id; error })
+           Error
+             { operation = Parse_queued_audience
+             ; post_id
+             ; error = Board.Read_invalid_id (Board.show_board_error error)
+             })
     in
     parse [] targets
 ;;

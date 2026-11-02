@@ -142,7 +142,8 @@ let summary = function
          | Observer.Tool_approval_mode_changed { keeper } -> "mode:" ^ keeper
          | Observer.Keeper_asks_changed { keeper } -> "asks:" ^ keeper
          | Observer.Installation_asks_changed { declaration_id } ->
-             "installation_asks:" ^ declaration_id)
+             "installation_asks:" ^ declaration_id
+         | Observer.Pending_confirms_changed -> "pending_confirms")
   | Observer.Event (Observer.Keeper_async_requests_changed { keeper }) ->
       "async_requests:" ^ keeper
   | Observer.Event (Observer.Board_changed { post_id }) ->
@@ -596,6 +597,33 @@ let async_requests_frame =
   {|data: {"type":"keeper_async_requests_changed","name":"lane-smith"}
 
 |}
+
+let pending_confirms_frame =
+  {|data: {"type":"pending_confirms_changed"}
+
+|}
+
+let test_only_a_confirmation_change_reads_the_confirmations () =
+  check (list string) "a confirmation change decodes as one"
+    [ "approval(pending_confirms)" ]
+    (List.map summary (decode_all [ pending_confirms_frame ]));
+  let count reads frames =
+    decode_all frames
+    |> List.filter (function
+         | Observer.Event event -> reads event
+         | Observer.Undecodable _ -> false)
+    |> List.length
+  in
+  check int "it reads the confirmations" 1
+    (count Observer.pending_confirms_changed [ pending_confirms_frame ]);
+  check int "no question, Gate, held call or mode change does" 0
+    (count Observer.pending_confirms_changed (asks_frames @ gate_frames @ tool_approval_frames));
+  check int "it reads no Gate, held calls, modes or questions" 0
+    (count
+       (fun event ->
+          Observer.gate_snapshot_changed event || Observer.held_calls_changed event
+          || Observer.tool_modes_changed event || Observer.asks_changed event)
+       [ pending_confirms_frame ])
 
 let test_only_an_async_request_change_reads_the_async_requests () =
   check (list string) "an async request change decodes with its Keeper"
@@ -1055,6 +1083,8 @@ let () =
             test_only_a_question_change_reads_the_questions
         ; test_case "only an async request change reads the async requests" `Quick
             test_only_an_async_request_change_reads_the_async_requests
+        ; test_case "only a confirmation change reads the confirmations" `Quick
+            test_only_a_confirmation_change_reads_the_confirmations
         ; test_case "a fusion status frame decodes its identity strings" `Quick
             test_a_fusion_status_frame_decodes_its_identity_strings
         ; test_case "cursor commits only with a complete event" `Quick

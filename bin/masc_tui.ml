@@ -8558,6 +8558,15 @@ let fail_board_list_read state = state.board_list_owed <- failed_read state.boar
    (RFC-0480 §3.1). Every full refresh but the cadence reads them too. *)
 let owe_asks_read state = state.asks_owed <- Masc_tui_owed_read.changed state.asks_owed
 
+(* The confirmations waiting for an operator read again under the same rules:
+   a change or a passed deadline, a resumed authority, a failed read. *)
+let owe_pending_confirms_read state =
+  state.pending_confirms_owed <- Masc_tui_owed_read.changed state.pending_confirms_owed
+
+let settle_pending_confirms_read state = function
+  | Ok _ -> state.pending_confirms_owed <- Masc_tui_owed_read.succeeded state.pending_confirms_owed
+  | Error _ -> state.pending_confirms_owed <- failed_read state.pending_confirms_owed
+
 let settle_asks_read state = function
   | Ok _ -> state.asks_owed <- Masc_tui_owed_read.succeeded state.asks_owed
   | Error _ -> state.asks_owed <- failed_read state.asks_owed
@@ -14806,8 +14815,14 @@ let take_approval_observation state observation =
   state.approvals_order <- order;
   if admitted then Some observation.ao_result else None
 
+(* A read of the confirmations: what it found, and whether the owed read is
+   settled or waits to retry. *)
+let apply_approvals_read state result =
+  settle_pending_confirms_read state result;
+  apply_approvals_load state result
+
 let apply_approval_observation state observation =
-  Option.iter (apply_approvals_load state)
+  Option.iter (apply_approvals_read state)
     (take_approval_observation state observation)
 
 (* The held-call listing goes out from both the full and the scoped refresh,
@@ -15106,6 +15121,53 @@ let launch_approvals_summary_load state ~mailbox =
                     let* () = check_identity
                       ~prior_contact:Masc_tui_server_lifecycle.Server_reached () in
                     snapshot)
+
+(* The owed read of the confirmations, also when their count is drawn: that
+   count is what changed. Its answer names the workspace it was read from, so
+   no [/health] check brackets it, and a read made while only the observer
+   stream vouches for the server cannot turn an unanswered [/health] into a
+   lost workspace. *)
+let launch_pending_confirms_read state ~mailbox =
+  if state.workspace_identity <> Workspace_identity_match then false
+  else if Snapshot_read.in_flight state.approvals_summary_read then false
+  else
+    match state.server_identity with
+    | None -> false
+    | Some expected_workspace ->
+      match dispatch_approvals_listing state with
+      | None -> false
+      | Some listing_ticket ->
+        let read, request =
+          Snapshot_read.start ~intent:Snapshot_read.Refresh state.approvals_summary_read
+        in
+        state.approvals_summary_read <- read;
+        match request with
+        | None -> false
+        | Some request ->
+          let enqueue_async = workspace_enqueue state in
+          let host = server_peer_host and port = state.port in
+          Masc_tui_async_read.launch
+            ~deliver:(fun result ->
+              enqueue_async mailbox
+                (Approvals_summary_loaded (request, listing_ticket, expected_workspace, result)))
+            (fun () -> Masc_tui_loader.load_workspace_approvals ~expected_workspace ~host ~port);
+          true
+
+(* Runs on every loop iteration. A read already on the wire is let finish
+   first; one that will not deliver, or whose answer the listing refused,
+   leaves the confirmations owed again. *)
+let launch_owed_pending_confirms state ~mailbox =
+  let reading = Snapshot_read.in_flight state.approvals_summary_read in
+  let read =
+    if reading then state.pending_confirms_owed
+    else Masc_tui_owed_read.abandoned state.pending_confirms_owed
+  in
+  state.pending_confirms_owed <- read;
+  if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read
+     && server_authority_ready state
+     && not reading
+     && launch_pending_confirms_read state ~mailbox
+  then state.pending_confirms_owed <- Masc_tui_owed_read.started read
 
 let observe_http_reader ~on_progress source ~outcome read =
   match on_progress with
@@ -17754,9 +17816,12 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
        its addresses one after another and can outlive several ticks, and an
        answer read early in it is still kept when the next pass asks. *)
     Masc_tui_http.start_read_generation ();
-    let approval_ticket = dispatch_approvals_listing state in
-    (* The cadence leaves the questions out: they read again when their log
-       changes ([launch_owed_asks]). *)
+    (* The cadence leaves the confirmations and the questions out: they read
+       again when they change ([launch_owed_pending_confirms],
+       [launch_owed_asks]). *)
+    let approval_ticket = match intent with
+      | Revalidate -> dispatch_approvals_listing state
+      | Cadence -> None in
     let ask_request = match intent with
       | Revalidate -> Masc_tui_types.begin_asks_read state
       | Cadence -> None in
@@ -18102,6 +18167,7 @@ let resume_reads_after_authority_change state ~mailbox ~refresh_inflight
     owe_gate_snapshot_read state;
     owe_asks_read state;
     owe_async_requests_read state;
+    owe_pending_confirms_read state;
     (* Under the same condition the tick sends them: a server that is not
        booting, whether or not its workspace is this checkout's. *)
     launch_tick_side_reads state ~mailbox ~needs:(current_surface_needs state);
@@ -21536,7 +21602,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       if Masc_tui_types.can_admit_early_http_read state ~ticket:early.eap_ticket
           ~authority:early.eap_authority early.eap_identity
       then Option.iter (fun result ->
-        apply_approvals_load state result;
+        apply_approvals_read state result;
         Option.iter (fun started_ns ->
           Log.Transport.info "tui_approvals_early request=%d refresh_started_ns=%Ld admitted_ms=%.3f outcome=%s"
             (Approval.Listing_order.request_id early.eap_observation.ao_ticket) started_ns
@@ -21700,6 +21766,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       let held_calls_changed = ref false in
       let asks_changed = ref false in
       let async_requests_changed = ref false in
+      let pending_confirms_changed = ref false in
       let tool_modes_changed = ref false in
       (* The chat operations the open pane's keeper streamed a frame for in
          this batch, with the highest journal seq named and the earliest
@@ -21788,6 +21855,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
               if Masc_tui_observer.held_calls_changed event then held_calls_changed := true;
               if Masc_tui_observer.asks_changed event then asks_changed := true;
               if Masc_tui_observer.async_requests_changed event then async_requests_changed := true;
+              if Masc_tui_observer.pending_confirms_changed event then pending_confirms_changed := true;
               if Masc_tui_observer.tool_modes_changed event then tool_modes_changed := true;
               (match Masc_tui_observer.board_changed_post event, board_post_on_screen state with
                | Some (Some post), Some open_post when String.equal post open_post ->
@@ -21981,6 +22049,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       (if !asks_changed && not !observer_source_loss_seen then owe_asks_read state);
       (if !async_requests_changed && not !observer_source_loss_seen then
          owe_async_requests_read state);
+      (if !pending_confirms_changed && not !observer_source_loss_seen then
+         owe_pending_confirms_read state);
       (if !tool_modes_changed && not !observer_source_loss_seen then owe_tool_modes_read state);
       (if (!open_chat_gained_turn || !open_chat_memory_grew)
           && not !observer_source_loss_seen then
@@ -31110,6 +31180,7 @@ Use relative paths for resources already held in the package. -->
       launch_owed_tool_modes state ~mailbox:async_messages;
       launch_owed_asks state ~mailbox:async_messages;
       launch_owed_async_requests state ~mailbox:async_messages;
+      launch_owed_pending_confirms state ~mailbox:async_messages;
       launch_owed_board_list state ~refresh_inflight:http_scoped_refresh_inflight
         ~full_refresh_inflight:http_refresh_inflight ~scoped_refresh_followup
         ~mailbox:async_messages;

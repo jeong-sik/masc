@@ -126,6 +126,7 @@ type approval_change =
   | Tool_approval_mode_changed of { keeper : string }
   | Keeper_asks_changed of { keeper : string }
   | Installation_asks_changed of { declaration_id : string }
+  | Pending_confirms_changed
 
 type event =
   | Agent_core of agent_core
@@ -240,7 +241,7 @@ let held_calls_changed = function
   | Approval_change
       ( Approval_queue_changed | Approval_rules_changed | Gate_mode_changed
       | Gate_keeper_settings_changed _ | Tool_approval_mode_changed _
-      | Keeper_asks_changed _ | Installation_asks_changed _ )
+      | Keeper_asks_changed _ | Installation_asks_changed _ | Pending_confirms_changed )
   | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_turn_observation _
   | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
   | Keeper_turn_complete _
@@ -255,7 +256,8 @@ let tool_modes_changed = function
   | Approval_change (Tool_approval_mode_changed _ | Gate_keeper_settings_changed _) -> true
   | Approval_change
       ( Approval_queue_changed | Approval_rules_changed | Gate_mode_changed
-      | Tool_approval_waits_changed _ | Keeper_asks_changed _ | Installation_asks_changed _ )
+      | Tool_approval_waits_changed _ | Keeper_asks_changed _ | Installation_asks_changed _
+      | Pending_confirms_changed )
   | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_turn_observation _
   | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
   | Keeper_turn_complete _
@@ -277,12 +279,28 @@ let async_requests_changed = function
   | Lane_resource _ | Snapshot _ | Other _ ->
       false
 
+let pending_confirms_changed = function
+  | Approval_change Pending_confirms_changed -> true
+  | Approval_change
+      ( Approval_queue_changed | Approval_rules_changed | Gate_mode_changed
+      | Gate_keeper_settings_changed _ | Tool_approval_waits_changed _
+      | Tool_approval_mode_changed _ | Keeper_asks_changed _ | Installation_asks_changed _ )
+  | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_turn_observation _
+  | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
+  | Keeper_turn_complete _
+  | Keeper_composite_changed _
+  | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _
+  | Keeper_async_requests_changed _
+  | Fusion_run_status _ | Internal_agent_runs_changed | Board_changed _ | Lane_resource _
+  | Snapshot _ | Other _ ->
+      false
+
 let asks_changed = function
   | Approval_change (Keeper_asks_changed _ | Installation_asks_changed _) -> true
   | Approval_change
       ( Approval_queue_changed | Approval_rules_changed | Gate_mode_changed
       | Gate_keeper_settings_changed _ | Tool_approval_waits_changed _
-      | Tool_approval_mode_changed _ )
+      | Tool_approval_mode_changed _ | Pending_confirms_changed )
   | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_turn_observation _
   | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
   | Keeper_turn_complete _
@@ -312,7 +330,7 @@ let gate_snapshot_changed = function
       true
   | Approval_change
       ( Tool_approval_waits_changed _ | Tool_approval_mode_changed _ | Keeper_asks_changed _
-      | Installation_asks_changed _ )
+      | Installation_asks_changed _ | Pending_confirms_changed )
   | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_turn_observation _
   | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
   | Keeper_turn_complete _
@@ -739,6 +757,7 @@ let reading_of_type type_name =
           match string_field fields "name" with
           | Some keeper -> Ok (Keeper_async_requests_changed { keeper })
           | None -> Error (event ^ " carries no name"))
+  | "pending_confirms_changed" -> Named (Approval_change Pending_confirms_changed)
   | "keeper_asks_changed" as event ->
       From_fields
         (fun fields ->

@@ -181,6 +181,7 @@ type approval_change =
   | Keeper_asks_changed of { keeper : string }  (** [keeper_asks_changed] *)
   | Installation_asks_changed of { declaration_id : string }
       (** [lane_addon_asks_changed] *)
+  | Pending_confirms_changed  (** [pending_confirms_changed] *)
 
 type event =
   | Agent_core of agent_core
@@ -302,6 +303,10 @@ val tool_modes_changed : event -> bool
 
 val async_requests_changed : event -> bool
 (** The durable async message requests changed. *)
+
+val pending_confirms_changed : event -> bool
+(** The confirmations waiting for an operator changed or one passed its
+    deadline. *)
 
 val asks_changed : event -> bool
 (** The questions a Keeper or a Lane Add-on installation puts to the operator

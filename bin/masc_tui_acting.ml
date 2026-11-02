@@ -400,7 +400,7 @@ let approval_change_keeper = function
   | Observer.Keeper_asks_changed { keeper } ->
       keeper
   | Observer.Approval_queue_changed | Observer.Approval_rules_changed | Observer.Gate_mode_changed
-  | Observer.Installation_asks_changed _ ->
+  | Observer.Installation_asks_changed _ | Observer.Pending_confirms_changed ->
       "server"
 
 let keeper_of_event ~traces (event : Observer.event) =
@@ -481,6 +481,7 @@ let label_of_event (event : Observer.event) =
   | Observer.Approval_change
       (Observer.Keeper_asks_changed _ | Observer.Installation_asks_changed _) ->
       "questions"
+  | Observer.Approval_change Observer.Pending_confirms_changed -> "confirmations"
   | Observer.Snapshot _ -> "snapshot"
   | Observer.Other name -> name
 
@@ -626,6 +627,7 @@ let row_of_event ~at ~duration_ms (event : Observer.event) =
         | Observer.Keeper_asks_changed _ -> "the Keeper's questions changed"
         | Observer.Installation_asks_changed { declaration_id } ->
             "the questions of " ^ declaration_id ^ " changed"
+        | Observer.Pending_confirms_changed -> "the confirmations waiting for an operator changed"
       in
       { at; keeper = approval_change_keeper change; glyph = Quiet; label; detail }
   | Observer.Snapshot name ->

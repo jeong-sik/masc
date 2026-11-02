@@ -11,7 +11,7 @@ val dispatch : t -> Browser_addon_wire.request -> Browser_addon_wire.reply
 val snapshot : t -> Yojson.Safe.t
 val incarnation : t -> string
 val is_retired : t -> bool
-val mark_ego_user_owned_name : t -> space:string -> observed_at:float -> (unit, string) result
+val mark_ego_user_owned_name : t -> space:string -> ids:int list -> observed_at:float -> (unit, string) result
 (** Publish an observed startup conflict only while this owner serves. *)
 (** Admission observation only. It grants neither a new poll nor process cleanup
     authority; an owned resource still waits for its original cleanup request. *)

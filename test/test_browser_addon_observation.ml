@@ -146,7 +146,7 @@ let published_space_presence () =
         (serving [client "01a16363-ef67-7000-ad62-05bcd0320d99" "firefox" |> set "spacePresence" encoded]))))
     [O.Missing;O.Unknown (O.Transport_unavailable "offline")]
 let unavailable_reads_back () =
-  let unavailable = Observation.Ego_user_owned_name {space="masc";observed_at=42.} in
+  let unavailable = Observation.Ego_user_owned_name {space="masc";ids=[36];observed_at=42.} in
   let snapshot = match serving [] with
     | `Assoc fields -> `Assoc (("unavailable",`List [Observation.unavailable_to_json unavailable]) :: fields)
     | _ -> assert false in
@@ -155,10 +155,22 @@ let unavailable_reads_back () =
   let malformed = match snapshot with
     | `Assoc fields -> `Assoc (("unavailable",`List [`Assoc ["backend",`String "ego"]]) :: List.remove_assoc "unavailable" fields)
     | _ -> assert false in
-  check bool "an incomplete unavailable reason is not accepted" true (Result.is_error (Observation.decode_snapshot malformed))
+  check bool "an incomplete unavailable reason is not accepted" true (Result.is_error (Observation.decode_snapshot malformed));
+  List.iter (fun ids ->
+    let broken = match Observation.unavailable_to_json unavailable with
+      | `Assoc fields -> `Assoc (("ids",`List ids)::List.remove_assoc "ids" fields)
+      | value -> value in
+    let snapshot = match serving [] with
+      | `Assoc fields -> `Assoc (("unavailable",`List [broken]) :: fields)
+      | _ -> assert false in
+    check bool "an unreadable id list is not an unavailable backend" true
+      (Result.is_error (Observation.decode_snapshot snapshot)))
+    (* An empty id list stays readable: the worker observed the name without
+       deciding an id, and the owner refuses to claim on it. *)
+    [[`Int 0];[`Int (-1)];[`Int 36;`Int 36];[`String "36"]]
 (* Distinct live workers retain their source observations. *)
 let merge_keeps_the_live_workers_unavailability () =
-  let unavailable = Observation.Ego_user_owned_name {space="masc";observed_at=42.} in
+  let unavailable = Observation.Ego_user_owned_name {space="masc";ids=[36];observed_at=42.} in
   let published unavailable =
     { (ok (Observation.read (ok (Observation.of_snapshot ~observed_at:1. (serving []))))) with unavailable } in
   let ego = published [unavailable] and firefox = published [] in

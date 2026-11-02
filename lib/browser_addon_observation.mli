@@ -3,8 +3,9 @@
 val of_snapshot : observed_at:float -> Yojson.Safe.t ->
   (Lane_addon_types.output, string) result
 
-(** A backend that could not start while the rest of the worker serves. *)
-type unavailable = Ego_user_owned_name of { space : string; observed_at : float }
+(** A backend that could not start while the rest of the worker serves. The
+    ids are the user-owned Spaces that matched the refused name. *)
+type unavailable = Ego_user_owned_name of { space : string; ids : int list; observed_at : float }
 val unavailable_to_json : unavailable -> Yojson.Safe.t
 val unavailable_of_json : Yojson.Safe.t -> (unavailable, string) result
 

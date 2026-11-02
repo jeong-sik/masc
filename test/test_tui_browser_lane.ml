@@ -683,7 +683,7 @@ let test_unified_browser_picker () =
     (accept_clients ~generation:90 (Ok (found [firefox])) live = (live, false))
 
 let test_failed_discovery_retains_startup_observation () =
-  let conflict = Masc.Browser_addon_observation.Ego_user_owned_name {space="masc";observed_at=42.} in
+  let conflict = Masc.Browser_addon_observation.Ego_user_owned_name {space="masc";ids=[36];observed_at=42.} in
   let unavailable = decode_unavailable
       (Some (`List [Masc.Browser_addon_observation.unavailable_to_json conflict])) in
   let observed = { (pinned ()) with unavailable; selected_tab=Some 2; scroll=9;
@@ -717,7 +717,7 @@ let test_failed_discovery_retains_startup_observation () =
     expect "a stale success cannot replace recovery evidence"
       (accept_clients ~generation:41 (Ok (found [firefox])) pending=(pending,false)))
     [Choose_client;Read_after_discovery];
-  let next = Masc.Browser_addon_observation.Ego_user_owned_name {space="different";observed_at=84.} in
+  let next = Masc.Browser_addon_observation.Ego_user_owned_name {space="different";ids=[36];observed_at=84.} in
   let next_observation = decode_unavailable
       (Some (`List [Masc.Browser_addon_observation.unavailable_to_json next])) in
   List.iter (fun replacement ->
@@ -751,7 +751,7 @@ let test_bidi_host_discovery () =
   expect "a server that says nothing of the host still lists its connections"
     (decode_discovery (answer []) = Ok (found [firefox])
      && decode_discovery (answer ["bidiHost", `Null]) = Ok (found [firefox]));
-  let conflict = Masc.Browser_addon_observation.Ego_user_owned_name {space="masc";observed_at=42.} in
+  let conflict = Masc.Browser_addon_observation.Ego_user_owned_name {space="masc";ids=[36];observed_at=42.} in
   let decoded = success (decode_discovery (answer ["unavailable",`List [Masc.Browser_addon_observation.unavailable_to_json conflict]])) in
   expect "the same discovery retains the unavailable backend and its original observation"
     (decoded.listed=[firefox] && decoded.unavailable=Backends_unavailable [conflict]);
@@ -1147,7 +1147,22 @@ let test_inventory_summary_contract () =
     (with_inventory_fields ["inventoryComplete",`Bool true;"inventoryIssues",`List []]
       (automatic_answer (recommended "live" (Some zen.client_id) "existing_login") recommended_work)) in
   expect "a consistent complete report preserves the concrete server recommendation"
-    (read && complete.inventory_report=Inventory_reported [] && complete.selected_client=Some zen)
+    (read && complete.inventory_report=Inventory_reported [] && complete.selected_client=Some zen);
+  (* A lane fact beside a complete inventory is not a contradiction: the
+     server and this rule share the same completeness predicate. *)
+  let refused_space=I.Ego_user_owned_space {instance_id="worker-a";space="masc";observed_at=42.} in
+  let lane_fact=with_inventory_fields
+    ["inventoryComplete",`Bool true;"inventoryIssues",I.issues_to_json [refused_space]] answer in
+  let decoded=success (decode_discovery lane_fact) in
+  expect "a refused ego Space beside a complete inventory stays reported"
+    (decoded.inventory_report=Inventory_reported [refused_space]
+     && not (invalid decoded.automatic));
+  let contradicting=with_inventory_fields
+    ["inventoryComplete",`Bool false;"inventoryIssues",I.issues_to_json [refused_space]] answer in
+  expect "an incomplete report with only lane facts is still contradictory"
+    (match (success (decode_discovery contradicting)).inventory_report with
+     | Inventory_report_unreadable _ -> true
+     | Inventory_not_reported|Inventory_reported _ -> false)
 
 let () =
   List.iter (fun (name, test) -> test (); Printf.printf "PASS %s\n%!" name)

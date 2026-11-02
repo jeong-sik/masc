@@ -58,11 +58,17 @@ let snapshot t = `Assoc ([
   "owned_backends",Browser_addon_inventory.owned_to_json (Browser_addon_inventory.observe ())]
   @ (match t.unavailable with [] -> [] | items ->
       ["unavailable",`List (List.map Browser_addon_observation.unavailable_to_json items)]))
-let mark_ego_user_owned_name t ~space ~observed_at =
+let mark_ego_user_owned_name t ~space ~ids ~observed_at =
+  (* The published record must decode on the other side, so the producer
+     meets the same shape the decoders require: positive, distinct ids. *)
+  let readable_ids (id : int) = id > 0 in
   Eio.Mutex.use_rw ~protect:true t.gate (fun () -> match t.phase, t.unavailable with
     | Retired,_ -> Error "browser owner is retired"
-    | Serving,_ when space = "" || not (Float.is_finite observed_at) || observed_at < 0. -> Error "invalid ego user-owned space observation"
-    | Serving,[] -> t.unavailable <- [Browser_addon_observation.Ego_user_owned_name {space; observed_at}]; Ok ()
+    | Serving,_ when space = "" || ids = [] || not (List.for_all readable_ids ids)
+      || List.length (List.sort_uniq compare ids) <> List.length ids
+      || not (Float.is_finite observed_at) || observed_at < 0. ->
+      Error "invalid ego user-owned space observation"
+    | Serving,[] -> t.unavailable <- [Browser_addon_observation.Ego_user_owned_name {space; ids; observed_at}]; Ok ()
     | Serving,_ :: _ -> Error "ego unavailability is already published")
 let models_enabled t = Option.is_some t.models
 let attach_models t models =

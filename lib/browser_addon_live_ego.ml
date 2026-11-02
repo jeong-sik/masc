@@ -303,7 +303,8 @@ let remove_capture_directory directory = Eio_unix.run_in_systhread (fun () ->
 (* The ego connection's downloads sit beside the owned Gecko's, in the
    worker's download folder the broker publishes from. *)
 let downloads_folder = "ego"
-type connection_end = Connected | User_owned_name of { space : string; observed_at : float }
+type user_owned_name = { space : string; ids : int list; observed_at : float }
+type connection_end = Connected | User_owned_name of user_owned_name
 
 let run ~env ~owner ~input_store ~downloads (configuration : Browser_configuration.live_ego) work =
   let command = configuration.command in
@@ -325,8 +326,8 @@ let run ~env ~owner ~input_store ~downloads (configuration : Browser_configurati
        Log.Server.warn "browser Add-on could not inspect ego task space %S: %s" space detail
      | Some (_, (Peer.No_user_owned_match | Peer.User_owned_matches _)) | None -> ());
     ended @@ match observation with
-    | Some (space, Peer.User_owned_matches _) ->
-      Ok (User_owned_name {space; observed_at=Eio.Time.now (Eio.Stdenv.clock env)})
+    | Some (space, Peer.User_owned_matches ids) ->
+      Ok (User_owned_name {space; ids; observed_at=Eio.Time.now (Eio.Stdenv.clock env)})
     | Some (_, (Peer.No_user_owned_match | Peer.Space_names_unavailable _)) | None ->
     let input ~space_id =
       let active ()=not (Browser_addon_owner.is_retired owner) in
@@ -405,8 +406,8 @@ let run ~env ~owner ~input_store ~downloads (configuration : Browser_configurati
         | exception exn -> Error (Printexc.to_string exn) in
       Eio.Cancel.protect (fun () ->
         let outcome = match outcome with
-          | Ok (User_owned_name {space; observed_at} as unavailable) ->
-            (match Browser_addon_owner.mark_ego_user_owned_name owner ~space ~observed_at with
+          | Ok (User_owned_name {space; ids; observed_at} as unavailable) ->
+            (match Browser_addon_owner.mark_ego_user_owned_name owner ~space ~ids ~observed_at with
              | Error detail -> Error detail
              | Ok () ->
                Log.Server.warn "browser Add-on ego unavailable: task space %S is user-owned; resolve the conflict and restart the worker to recheck"

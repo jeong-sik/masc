@@ -1685,7 +1685,7 @@
  (name masc_tui_keeper_config)
  (wrapped false)
  (modules masc_tui_keeper_config)
- (libraries yojson masc masc.config masc_tui_runtime_config_receipt masc_tui_theme masc.string_util))
+ (libraries yojson otoml masc masc.config masc.keeper_toml masc_tui_runtime_config_receipt masc_tui_theme masc.string_util))
 
 (library
  (name masc_tui_keeper_items)

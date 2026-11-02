@@ -3637,7 +3637,7 @@ let keeper_settings_fixture () =
   state, keeper
 
 let keeper_settings_request state =
-  match Masc_tui_types.begin_keeper_settings_editor state ~available:true ~started_ns:10L with
+  match Masc_tui_types.begin_keeper_settings_editor state ~format:Masc_tui_keeper_config.Json ~available:true ~started_ns:10L with
   | Some request -> request | None -> Alcotest.fail "settings preparation did not start"
 
 let keeper_settings_snapshot () : Masc_tui_types.keeper_settings_snapshot =
@@ -3653,7 +3653,7 @@ let test_settings_preparation_hands_off_original_snapshot_once () =
   let request = keeper_settings_request state in
   let take ~input_pending = take_ready_keeper_settings_editor state ~available:true ~input_pending in
   Alcotest.(check bool) "explicit repeated edit shares the pending read without opening an editor" true
-    (Option.is_none (begin_keeper_settings_editor state ~available:true ~started_ns:11L)
+    (Option.is_none (begin_keeper_settings_editor state ~format:Masc_tui_keeper_config.Toml ~available:true ~started_ns:11L)
       && Option.is_none (take ~input_pending:false));
   let snapshot = keeper_settings_snapshot () in
   finish_keeper_settings_worker state request;
@@ -3661,8 +3661,9 @@ let test_settings_preparation_hands_off_original_snapshot_once () =
     (take_keeper_settings_editor_read state request (Ok snapshot));
   Alcotest.(check bool) "queued input defers handoff and repeated edit does not restart a ready read" true
     (Option.is_none (take ~input_pending:true)
-      && Option.is_none (begin_keeper_settings_editor state ~available:true ~started_ns:12L)
-      && Option.exists (fun current -> current.ksr_owner==request.ksr_owner) state.keeper_settings_intent);
+      && Option.is_none (begin_keeper_settings_editor state ~format:Masc_tui_keeper_config.Toml ~available:true ~started_ns:12L)
+      && Option.exists (fun current -> current.ksr_owner==request.ksr_owner
+          && current.ksr_format = Masc_tui_keeper_config.Json) state.keeper_settings_intent);
   state.keeper_config_view <- Some (keeper.k_name,["later rendered observation"]);
   let original, document = match take ~input_pending:false with
     | Some value -> value | None -> Alcotest.fail "ready source did not reach the same editor intent" in
@@ -3765,7 +3766,7 @@ let test_settings_save_keeps_receipt_through_withdrawal () =
   let open Masc_tui_types in
   let state,_,origin,draft,request = keeper_settings_save_fixture () in
   Alcotest.(check bool) "repeat edit shares the admitted save" true
-    (Option.is_none (begin_keeper_settings_editor state ~available:true ~started_ns:21L));
+    (Option.is_none (begin_keeper_settings_editor state ~format:Masc_tui_keeper_config.Toml ~available:true ~started_ns:21L));
   Alcotest.(check bool) "duplicate dispatch refused" true
     (Result.is_error (begin_keeper_settings_save state ~origin
       ~draft ~started_ns:22L));
@@ -3806,7 +3807,7 @@ let test_settings_save_recovers_changes_on_fresh_revision () =
        "manifest",`Assoc ["state",`String "sha256";"value",`String (String.make 64 'b')];
        "runtime_assignment",`Assoc ["state",`String "runtime_config_missing"]]) in
   let edited = match Masc_tui_keeper_config.reopen_edit_on_current
-    ~before:retained.ksd_snapshot.kss_observed ~edited:retained.ksd_text ~current with
+    ~format:Masc_tui_keeper_config.Json ~patch:retained.ksd_patch ~current with
     | Ok text -> text | Error refusal -> Alcotest.fail (Masc_tui_keeper_config.edit_refusal_to_string refusal) in
   let json = Yojson.Safe.from_string edited in
   Alcotest.(check bool) "only operator changes overlay current settings" true
@@ -4047,7 +4048,7 @@ let test_assignment_serializes_same_keeper_config_intents () =
     (Result.is_error (begin_runtime_assignment_save state ~keeper_name:keeper.k_name ~runtime_id:None ~started_ns:31L)
      && original.ras_runtime_id=Some "codex.example" && state.runtime_pick_keeper=Some keeper.k_name);
   state.view <- Keepers Keeper_detail;
-  let editor_refused = Option.is_none (begin_keeper_settings_editor state ~available:true ~started_ns:32L) in
+  let editor_refused = Option.is_none (begin_keeper_settings_editor state ~format:Masc_tui_keeper_config.Toml ~available:true ~started_ns:32L) in
   state.detail_tab <- Detail_sandbox;
   Alcotest.(check bool) "pending assignment excludes same-Keeper editor and Sandbox writes" true
     (editor_refused && Result.is_error (begin_keeper_sandbox_save state ~profile:Keeper_sandbox_config.Docker ~started_ns:32L));

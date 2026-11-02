@@ -1939,17 +1939,22 @@ let load_keeper_sandbox_logs ~(host : string) ~(port : int)
     Masc_tui_keeper_sandbox.decode_logs
       ~sanitize:Masc.Tui_terminal_text.sanitize_terminal_text json
 
-let memo_settings_editor = json_memo ()
+let memo_settings_editor_toml = json_memo ()
+let memo_settings_editor_json = json_memo ()
 
 let load_keeper_config_editor ~(host : string) ~(port : int)
-    ~(keeper_name : string) : (Yojson.Safe.t * string, string) result =
+    ~(keeper_name : string) ~format : (Yojson.Safe.t * string, string) result =
   match
     Masc_tui_http.fetch_keeper_config_snapshot ~host ~port ~keeper_name
   with
   | Error err -> Error ("keeper config load failed: " ^ err)
   | Ok json ->
-      decode_offloaded memo_settings_editor ~name:"keeper.settings_editor.decode_wait"
-        (fun json -> Ok (json, Masc_tui_keeper_config.editor_stem json))
+      let memo = match format with
+        | Masc_tui_keeper_config.Toml -> memo_settings_editor_toml
+        | Masc_tui_keeper_config.Json -> memo_settings_editor_json in
+      decode_offloaded memo ~name:"keeper.settings_editor.decode_wait"
+        (fun json -> Result.map (fun stem -> json, stem)
+          (Masc_tui_keeper_config.editor_document ~format json))
         json
 
 let load_keeper_github_identity_view ~(host : string) ~(port : int)

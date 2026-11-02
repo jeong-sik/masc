@@ -5191,7 +5191,7 @@ let launch_keeper_settings_editor_read state ~mailbox request =
           let open Result.Syntax in
           let* () = check () in
           let* observed, stem = Masc_tui_loader.load_keeper_config_editor ~host ~port
-              ~keeper_name:key.ksk_keeper in
+              ~keeper_name:key.ksk_keeper ~format:request.ksr_format in
           let* () = check () in
           Ok {kss_observed=observed;kss_stem=stem})
         (fun () ->
@@ -26574,11 +26574,12 @@ Use relative paths for resources already held in the package. -->
     let key = Masc_tui_fetched.request_key request.ksr_request in
     let keeper_name = key.ksk_keeper in
     let observed = snapshot.kss_observed in
+    let format = request.ksr_format in
     (* The same frozen snapshot supplies the editor text and guarded patch. *)
-    let rec edit_round stem =
+    let rec edit_round ?prior_reason stem =
       match
         Masc_tui_editor.roundtrip ~restore:restore_terminal
-          ~reenter:reenter_terminal stem
+          ~reenter:reenter_terminal ~suffix:(Masc_tui_keeper_config.editor_suffix format) stem
       with
       | Error abort ->
           report_editor_abort state
@@ -26591,13 +26592,12 @@ Use relative paths for resources already held in the package. -->
             report_action state "error"
               (keeper_name ^ ": " ^ reason ^ " (settings unchanged)")
           else
-            edit_round
-              (Masc_tui_keeper_config.reopened_stem ~reason edited)
+            edit_round ~prior_reason:reason
+              (Masc_tui_keeper_config.reopened_stem ~format ?prior_reason ~reason edited)
         in
-        (match Yojson.Safe.from_string edited with
-         | exception Yojson.Json_error detail ->
-             reopen ("settings are not JSON: " ^ detail)
-         | edited_json -> apply_edit ~reopen ~edited edited_json)
+        (match Masc_tui_keeper_config.parse_editor ~format edited with
+         | Error detail -> reopen detail
+         | Ok edited_json -> apply_edit ~reopen ~edited edited_json)
     and apply_edit ~reopen ~edited edited_json =
         match
           Masc_tui_keeper_config.patch_of_edit ~before:observed
@@ -26619,12 +26619,12 @@ Use relative paths for resources already held in the package. -->
     let stem = match keeper_settings_recovery state key with
       | None -> Ok snapshot.kss_stem
       | Some retained -> Masc_tui_keeper_config.reopen_edit_on_current
-          ~before:retained.ksd_snapshot.kss_observed ~edited:retained.ksd_text ~current:observed in
+          ~format ~patch:retained.ksd_patch ~current:observed in
     match stem with
     | Ok stem -> edit_round stem
     | Error refusal -> report_action state "error" (Masc_tui_keeper_config.edit_refusal_to_string refusal)
   in
-  let handle_keeper_settings_edit () =
+  let handle_keeper_settings_edit ~format () =
     match selected_keeper state with
     | None -> report_action state "system" no_keeper_under_cursor
     | Some _ ->
@@ -26633,6 +26633,7 @@ Use relative paths for resources already held in the package. -->
            "no $EDITOR set; export EDITOR to edit keeper settings here"
        | Some _ ->
          match Masc_tui_types.begin_keeper_settings_editor state
+             ~format
              ~available:(keeper_settings_editor_available state)
              ~started_ns:(Mtime_clock.elapsed_ns ()) with
          | Some request -> launch_keeper_settings_editor_read state ~mailbox:async_messages request
@@ -36599,13 +36600,16 @@ Use relative paths for resources already held in the package. -->
            (* The picker owns focus while it is open. *)
            if Option.is_none state.runtime_lane_pick then
              open_selected_slot_config ()
-       | Some "e" | Some "E" ->
+       | Some (("e" | "E") as edit_key) ->
            (* The terminal roundtrip stays here; preparation and the guarded
               save run as owned asynchronous operations around it. *)
            (match state.view with
             | Code -> ()
             | Keepers Keeper_runtime_pick -> ()
-            | Keepers (Keeper_list | Keeper_detail) -> handle_keeper_settings_edit ()
+            | Keepers (Keeper_list | Keeper_detail) ->
+                let format = if String.equal edit_key "e"
+                  then Masc_tui_keeper_config.Toml else Masc_tui_keeper_config.Json in
+                handle_keeper_settings_edit ~format ()
             | Lanes ->
                 (* [missing] is the note for a table runtime.toml does not
                    have yet. *)

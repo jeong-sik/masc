@@ -4801,6 +4801,7 @@ type keeper_settings_key = {
 }
 type keeper_settings_request = {
   ksr_request : keeper_settings_key Masc_tui_fetched.request;
+  ksr_format : Masc_tui_keeper_config.editor_format;
   ksr_reading : unit ref;
   ksr_owner : unit ref;
   ksr_expected : Tui_decode.server_identity;
@@ -13402,7 +13403,7 @@ let keeper_settings_save_notice state =
             | Settings_observation_required _ | Settings_unconfirmed _) as outcome)) ->
             if attempt.ksa_recoverable then
               let recovery = match attempt.ksa_request.ksv_input with
-                | Settings_editor_input _ -> "e reloads current and restores changed values"
+                | Settings_editor_input _ -> "e/E reloads current and restores changed values"
                 | Sandbox_shortcut_input _ -> "Sandbox d/m/s reads current and saves the selected profile" in
               Some (label ^ " · " ^ keeper_settings_save_outcome_detail outcome ^ " · " ^ recovery)
             else None
@@ -13414,7 +13415,7 @@ let reconcile_keeper_settings_editor state ~available =
       retire_keeper_settings_editor state; true
   | Some _ | None -> false
 
-let begin_keeper_settings_editor state ~available ~started_ns =
+let begin_keeper_settings_editor state ~format ~available ~started_ns =
   ignore (reconcile_keeper_settings_editor state ~available);
   let ready_waiting = match state.keeper_settings_intent with
     | Some request when keeper_settings_request_current state request ->
@@ -13431,7 +13432,7 @@ let begin_keeper_settings_editor state ~available ~started_ns =
        | Already_loading -> None
        | Started (reading, ticket) ->
            supersede_keeper_settings_read state None;
-           let request = {ksr_request=ticket;ksr_reading=state.workspace_read_authority;
+           let request = {ksr_request=ticket;ksr_format=format;ksr_reading=state.workspace_read_authority;
              ksr_owner=ref ();ksr_expected=expected;ksr_started_ns=started_ns} in
            state.keeper_settings_editor <- reading;
            state.keeper_settings_intent <- Some request;

@@ -57,6 +57,119 @@ let test_editor_starts_from_observed_values () =
     (Yojson.Safe.to_string projected)
     (editor_stem observed |> Yojson.Safe.from_string |> Yojson.Safe.to_string)
 
+let replace_field key value = function
+  | `Assoc fields -> `Assoc ((key, value) :: List.remove_assoc key fields)
+  | _ -> Alcotest.fail "expected object"
+
+let document format snapshot =
+  match editor_document ~format snapshot with
+  | Ok text -> text
+  | Error detail -> Alcotest.fail detail
+
+let parse format text =
+  match parse_editor ~format text with
+  | Ok value -> value
+  | Error detail -> Alcotest.fail detail
+
+let patch before after =
+  match patch_of_edit ~before ~after with
+  | Ok value -> value
+  | Error detail -> Alcotest.fail (edit_refusal_to_string detail)
+
+let test_toml_instruction_roundtrip_and_edit () =
+  let samples =
+    [ ""; "one line"; "one\ntwo\n"; "\n첫 줄\n\n둘째 줄\n"
+    ; "carriage\r\nreturn\r"; "quotes \"\"\" and slash \\n and tab\t\000"
+    ; "last backslash\\\n"; "control\027abcDEF019 end"; "delete\127a1"
+    ; "literal \\u001babc is text" ] in
+  List.iter (fun instructions ->
+    let before = replace_field "prompt" (`Assoc ["instructions", `String instructions]) observed in
+    let text = document Toml before in
+    let marker = Str.regexp_string "instructions = \"\"\"\n" in
+    Alcotest.(check bool) "even a single line opens as editable multiline TOML" true
+      (try ignore (Str.search_forward marker text 0); true with Not_found -> false);
+    let after = parse Toml text in
+    Alcotest.(check bool) "instruction bytes survive TOML conversion" true
+      (Yojson.Safe.Util.member "instructions" after = `String instructions);
+    Alcotest.(check bool) "opening and saving unchanged does not send a patch" true
+      (patch before after = `Assoc [])) samples;
+  let after = parse Toml "instructions = \"\"\"\n첫째\n둘째\"\"\"\n" in
+  let sent = patch observed after in
+  Alcotest.(check bool) "literal newlines reach the guarded request" true
+    (Yojson.Safe.Util.member "instructions" sent = `String "첫째\n둘째"
+     && Yojson.Safe.Util.member "expected_config_revision" sent
+        = Yojson.Safe.Util.member "config_revision" observed
+     && List.sort String.compare (assoc_keys sent) = ["expected_config_revision"; "instructions"])
+
+let test_toml_reset_contract () =
+  let before = observed
+    |> replace_field "max_context_override" (`Int 4096)
+    |> replace_field "remote_endpoint" (`String "builder") in
+  let after = parse Toml {|reset_fields = ["max_context_override", "remote_endpoint"]|} in
+  let sent = patch before after in
+  Alcotest.(check bool) "explicit resets send the existing null API values" true
+    (List.mem_assoc "max_context_override" (match sent with `Assoc fields -> fields | _ -> [])
+     && List.mem_assoc "remote_endpoint" (match sent with `Assoc fields -> fields | _ -> [])
+     && Yojson.Safe.Util.member "max_context_override" sent = `Null
+     && Yojson.Safe.Util.member "remote_endpoint" sent = `Null);
+  Alcotest.(check bool) "an omitted value stays unchanged" true
+    (patch before (parse Toml "") = `Assoc []);
+  List.iter (fun text ->
+    Alcotest.(check bool) "invalid or contradictory resets are refused" true
+      (Result.is_error (parse_editor ~format:Toml text)))
+    [ {|reset_fields = ["instructions"]|}
+    ; {|reset_fields = ["remote_endpoint", "remote_endpoint"]|}
+    ; "reset_fields = [\"remote_endpoint\"]\nremote_endpoint = \"builder\"\n"
+    ; {|reset_fields = [42]|} ]
+
+let test_toml_other_field_roundtrip () =
+  let before = observed
+    |> replace_field "workspace" (`Assoc [
+      "mention_targets", `List [`String "first\r\nsecond"; `String "control\027abcDEF"];
+      "board_interests", `List []])
+    |> replace_field "skills" (`Assoc ["names", `List [`String "skill\r\nname"]]) in
+  let after = parse Toml (document Toml before) in
+  Alcotest.(check bool) "other string and array fields keep their original bytes" true
+    (Yojson.Safe.Util.member "mention_targets" after = `List [`String "first\r\nsecond"; `String "control\027abcDEF"]
+     && Yojson.Safe.Util.member "skills" after = `Assoc ["names", `List [`String "skill\r\nname"]]
+     && patch before after = `Assoc [])
+
+let test_recovery_crosses_editor_formats () =
+  let before = observed |> replace_field "max_context_override" (`Int 8192) in
+  let original = patch before (`Assoc [
+    "instructions", `String "first\nsecond";
+    "max_context_override", `Null;
+    "confirm_context_shrink", `Bool true ]) in
+  let current = before
+    |> replace_field "activation_mode" (`String "manual")
+    |> replace_field "config_revision" (`Assoc [
+      "manifest", `Assoc ["state", `String "missing"];
+      "runtime_assignment", `Assoc ["state", `String "runtime_config_missing"]]) in
+  List.iter (fun format ->
+    let text = match reopen_edit_on_current ~format ~patch:original ~current with
+      | Ok text -> text
+      | Error refusal -> Alcotest.fail (edit_refusal_to_string refusal) in
+    let after = parse format text in
+    let sent = patch current after in
+    let fields = match sent with `Assoc fields -> fields | _ -> Alcotest.fail "not an object" in
+    Alcotest.(check bool) "recovery retains changes and uses the new revision" true
+      (List.mem_assoc "max_context_override" fields
+       && List.assoc "max_context_override" fields = `Null
+       && List.assoc "instructions" fields = `String "first\nsecond"
+       && List.assoc "expected_config_revision" fields = Yojson.Safe.Util.member "config_revision" current
+       && not (List.mem_assoc "activation_mode" fields)
+       && not (List.mem_assoc "confirm_context_shrink" fields))) [Toml; Json]
+
+let test_toml_refusal_preserves_user_comments () =
+  let original = "# MASC settings: first\n# operator note\ninstructions = \"\"\"\ntext\"\"\"\n" in
+  let once = reopened_stem ~format:Toml ~reason:"first" original in
+  let twice = reopened_stem ~format:Toml ~prior_reason:"first" ~reason:"second" once in
+  Alcotest.(check bool) "the edited data survives repeated refusals" true
+    (parse Toml twice = parse Toml original);
+  Alcotest.(check bool) "the operator comment remains" true
+    (List.mem "# operator note" (String.split_on_char '\n' twice)
+     && List.mem "# MASC settings: first" (String.split_on_char '\n' twice))
+
 let test_remote_sandbox_selection () =
   let snapshot names endpoint profile =
     match observed with
@@ -237,16 +350,16 @@ let test_reopened_stem_parses_and_replaces () =
   let edited = {|{
   "activation_mode": "auto"
 }|} in
-  let once = reopened_stem ~reason:"first\nreason" edited in
-  let twice = reopened_stem ~reason:"second" once in
+  let once = reopened_stem ~format:Json ~reason:"first\nreason" edited in
+  let twice = reopened_stem ~format:Json ~prior_reason:"first\nreason" ~reason:"second" once in
   Alcotest.(check string) "same JSON as the edit"
     (Yojson.Safe.to_string (Yojson.Safe.from_string edited))
     (Yojson.Safe.to_string (Yojson.Safe.from_string twice));
-  Alcotest.(check (list string)) "one refusal line, the latest" [ "// second" ]
+  Alcotest.(check (list string)) "one refusal line, the latest" [ "// MASC settings: second" ]
     (String.split_on_char '\n' twice
      |> List.filter (fun line -> String.starts_with ~prefix:"//" line));
   Alcotest.(check bool) "reason is kept on one line" true
-    (String.starts_with ~prefix:"// first reason\n" once)
+    (String.starts_with ~prefix:"// MASC settings: first reason\n" once)
 
 (* No revision to send against is not the operator's text to fix: reopening
    the editor over it would loop on something no edit can change. *)
@@ -666,6 +779,15 @@ let () =
         ; Alcotest.test_case "complete remote sandbox selection" `Quick test_remote_sandbox_selection
         ; Alcotest.test_case "observed editor stem" `Quick
             test_editor_starts_from_observed_values
+        ; Alcotest.test_case "multiline instructions survive editing" `Quick
+            test_toml_instruction_roundtrip_and_edit
+        ; Alcotest.test_case "TOML explicit resets" `Quick test_toml_reset_contract
+        ; Alcotest.test_case "TOML other fields preserve bytes" `Quick
+            test_toml_other_field_roundtrip
+        ; Alcotest.test_case "recovery across editor formats" `Quick
+            test_recovery_crosses_editor_formats
+        ; Alcotest.test_case "TOML refusal keeps user comments" `Quick
+            test_toml_refusal_preserves_user_comments
         ; Alcotest.test_case "changed-only patch" `Quick
             test_patch_contains_only_changed_fields
         ; Alcotest.test_case "deleted means unchanged" `Quick

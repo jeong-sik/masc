@@ -1423,7 +1423,15 @@ let test_reasoning_and_media_blocks_are_strictly_preserved () =
                 ]
             ; `Assoc
                 [ "type", `String "document"
-                ; "source", source "base64" "application/pdf" "document-data"
+                ; ( "source"
+                  , `Assoc
+                      [ "type", `String "stored"
+                      ; "media_type", `String "application/pdf"
+                      ; ( "sha256"
+                        , `String
+                            "90353ba2095e5b5d3251b5caea6b27df1e7e98b56b578ad09e296a6f34e38ed0" )
+                      ; "bytes", `Int 13
+                      ] )
                 ]
             ; `Assoc
                 [ "type", `String "audio"

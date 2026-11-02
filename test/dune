@@ -3056,6 +3056,16 @@
 (include stanzas/test_keeper_checkpoint_stale_guard.inc)
 (include stanzas/test_keeper_checkpoint_object_sweep.inc)
 (include stanzas/test_keeper_owned_checkpoint.inc)
+(include stanzas/test_checkpoint_inspection_cli.inc)
+
+(rule
+ (alias runtest-test_keeper_checkpoint_smoke)
+ (deps test_keeper_checkpoint_smoke.py ../scripts/keeper-first-turn-smoke.py)
+ (action (run python3 %{dep:test_keeper_checkpoint_smoke.py})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_keeper_checkpoint_smoke)))
 (include stanzas/test_keeper_checkpoint_read_once.inc)
 
 (include stanzas/test_keeper_context_isolation.inc)

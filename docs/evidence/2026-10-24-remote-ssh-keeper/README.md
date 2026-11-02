@@ -62,6 +62,13 @@ Its output includes a private `.workspace` with an isolated admin token; do not
 publish that directory. A nonzero exit and `result:FAIL` preserve failure
 evidence. Keep the output on the host when investigating the socket-path failure.
 
+The pinned binary must support `masc inspect-checkpoint`; older binaries without
+that command cannot run this version of the proof. The command loads the
+Keeper's canonical checkpoint and its referenced objects using the binary's
+checkpoint reader. Its JSON is a decoded projection and can contain conversation
+context and tool results. The proof saves it in the private output directory;
+review its contents before sharing any evidence.
+
 ## Exact-source candidate: long paths and pin recovery
 
 On October 25, the candidate at

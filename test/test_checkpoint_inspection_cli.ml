@@ -1,0 +1,125 @@
+(* Exercise the installed command in a separate process against a head and
+   objects written by the real Keeper checkpoint store. *)
+open Alcotest
+open Masc
+
+let keeper = "checkpoint-inspection-fixture"
+let trace = "checkpoint-inspection-trace"
+
+let require label = function
+  | Ok value -> value
+  | Error detail -> fail (label ^ ": " ^ detail)
+
+let message role content =
+  Agent_core.Types.{ origin = Llm_provider.Types.Conversation; role; content;
+                     name = None; tool_call_id = None; metadata = [] }
+
+let checkpoint () =
+  let open Agent_core.Types in
+  let messages =
+    [ message User [Text "Run the command"]
+    ; message Assistant [ToolUse {id="call"; name="Execute"; input=`Assoc []}]
+    ; message Tool [ToolResult {tool_use_id="call"; content="fixture result";
+                                outcome=Tool_succeeded; json=None; content_blocks=None}]
+    ; message Assistant [Text "finished"] ]
+  in
+  Agent_core.Checkpoint.{ provider_binding = None; version = checkpoint_version;
+    session_id = trace; agent_name = keeper; model = "fixture"; system_prompt = None;
+    messages; usage = empty_usage; turn_count = 1; created_at = 1000.0; tools = [];
+    tool_choice = None; disable_parallel_tool_use = false; temperature = None;
+    top_p = None; top_k = None; min_p = None; reasoning_effort = None;
+    enable_thinking = None; preserve_thinking = None; response_format = Off;
+    cache_system_prompt = false; context = Agent_core.Context.create_sync ();
+    pending_input = None; mcp_sessions = []; working_context = None }
+
+let rec remove path =
+  match Unix.lstat path with
+  | {Unix.st_kind = Unix.S_DIR; _} ->
+    Array.iter (fun name -> remove (Filename.concat path name)) (Sys.readdir path);
+    Unix.rmdir path
+  | _ -> Unix.unlink path
+
+let run_cli root name =
+  let executable = Sys.getenv "MASC_TEST_MASC_EXE" |> Unix.realpath in
+  let stdout_path = Filename.concat root "inspect.stdout" in
+  let stderr_path = Filename.concat root "inspect.stderr" in
+  let flags = [Unix.O_WRONLY; Unix.O_CREAT; Unix.O_TRUNC] in
+  let stdout_fd = Unix.openfile stdout_path flags 0o600 in
+  let stderr_fd = Unix.openfile stderr_path flags 0o600 in
+  let env = [|"HOME=" ^ root; "MASC_BASE_PATH=" ^ root;
+               "PATH=" ^ Option.value ~default:"/usr/bin:/bin" (Sys.getenv_opt "PATH")|] in
+  let pid = Unix.create_process_env executable
+      [|executable; "inspect-checkpoint"; "--base-path"; root; "--keeper"; name|]
+      env Unix.stdin stdout_fd stderr_fd in
+  Unix.close stdout_fd;
+  Unix.close stderr_fd;
+  let _, status = Unix.waitpid [] pid in
+  let read path = In_channel.with_open_bin path In_channel.input_all in
+  status, read stdout_path, read stderr_path
+
+let require_json root name =
+  match run_cli root name with
+  | Unix.WEXITED 0, stdout, _ -> Yojson.Safe.from_string stdout
+  | _, stdout, stderr -> fail ("inspection failed: " ^ stdout ^ stderr)
+
+let expect_refusal root name =
+  match run_cli root name with
+  | Unix.WEXITED 0, stdout, stderr -> fail ("inspection accepted invalid input: " ^ stdout ^ stderr)
+  | Unix.WEXITED _, _, _ -> ()
+  | (Unix.WSIGNALED _ | Unix.WSTOPPED _), stdout, stderr ->
+    fail ("inspection terminated abnormally: " ^ stdout ^ stderr)
+
+let test_canonical_objects () =
+  Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+    Masc_test_deps.init_eio_clock ~sw env;
+    Fs_compat.set_fs env#fs;
+    ignore (Server_startup_state.mark_state_ready ());
+    let root = Filename.temp_file "checkpoint-inspection" "" in
+    Unix.unlink root;
+    Unix.mkdir root 0o700;
+    let root = Unix.realpath root in
+    Fun.protect ~finally:(fun () -> remove root) (fun () ->
+      let workspace = Workspace.default_config root in
+      ignore (Workspace.init workspace ~agent_name:(Some "checkpoint-inspection-test"));
+      let meta = Masc_test_deps.meta_of_json_fixture
+          (`Assoc ["name", `String keeper; "trace_id", `String trace;
+                   "activation_mode", `String "manual"]) |> require "metadata" in
+      Keeper_meta_store.replace_snapshot workspace meta |> require "write metadata";
+      let session_dir = Filename.concat (Keeper_fs.session_store_path_for_base_path root) trace in
+      let open Yojson.Safe.Util in
+      let missing = require_json root keeper in
+      check string "missing canonical" "not_found" (missing |> member "status" |> to_string);
+      ignore (Keeper_checkpoint_store.save_agent_core_classified
+        ~boundary:Agent_core.Checkpoint_objects.Turn_closes ~history_retained:0
+        ~session_dir (checkpoint ()) |> require "save canonical");
+      let head_path = Keeper_checkpoint_store.agent_core_checkpoint_path ~session_dir ~session_id:trace in
+      let actual = require_json root keeper in
+      check string "available canonical" "available" (actual |> member "status" |> to_string);
+      check string "keeper" keeper (actual |> member "keeper" |> to_string);
+      check string "trace" trace (actual |> member "trace_id" |> to_string);
+      check string "canonical path" head_path (actual |> member "canonical_path" |> to_string);
+      let projection = actual |> member "checkpoint" in
+      check string "projection session" trace (projection |> member "session_id" |> to_string);
+      check int "projection messages" 4 (projection |> member "messages" |> to_list |> List.length);
+      let reference = actual |> member "reference" in
+      check int "reference turn" 1 (reference |> member "turn_count" |> to_int);
+      check int "content digest length" 64 (reference |> member "content_sha256" |> to_string |> String.length);
+      let head = Yojson.Safe.from_file head_path in
+      let turns = head |> member "history" |> member "turns" |> to_list in
+      let digest = match turns with
+        | turn :: _ -> turn |> member "bundle" |> to_string
+        | [] -> fail "writer did not create a turn bundle" in
+      let object_path = Filename.concat
+          (Filename.concat (Filename.concat session_dir "objects") (String.sub digest 0 2)) digest in
+      let original_object = In_channel.with_open_bin object_path In_channel.input_all in
+      Out_channel.with_open_bin object_path (fun ch -> output_string ch "corrupt");
+      expect_refusal root keeper;
+      Out_channel.with_open_bin object_path (fun ch -> output_string ch original_object);
+      Unix.rename head_path (Filename.concat session_dir "agent-core-snapshot-0000000001000.json");
+      let missing_again = require_json root keeper in
+      check string "missing head is not an archive" "not_found"
+        (missing_again |> member "status" |> to_string);
+      expect_refusal root "../another-keeper")))
+
+let () = run "checkpoint inspection CLI"
+    ["canonical", [test_case "production objects and refusals" `Quick test_canonical_objects]]

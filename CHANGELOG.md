@@ -48,6 +48,10 @@
 
 ### Added
 
+- `masc inspect-checkpoint --base-path PATH --keeper NAME` reads a Keeper's
+  canonical checkpoint and its objects with the running version's codec. The
+  decoded JSON can include conversation context and tool results. (#47439)
+
 - Add a private Keeper temporal-continuity observation harness with exact operation/turn/input/reply/tool joins, a twelve-message interruption/resume scenario and separate offline semantic assessment. Preserve raw probabilities and evidence limits in JSON and a readable timeline without a runtime gate or pass threshold. (#46956)
 
 - Observe candidate Keeper continuity after a completed raw prefix leaves every attributed prepared request, retaining durable originals and exact turn/body evidence. Present the timeline, actual W content, original answers and separate raw semantic probabilities in TUI `/measurement`. (#46971)
@@ -326,6 +330,10 @@
 - Retire the unused RFC format enforcer and superseded development drafts; consolidate native TUI artifact verification in the current guide (#47043).
 
 ### Fixed
+
+- Check the canonical checkpoint and ordered tool result in installed Keeper
+  smoke proofs using the pinned executable's reader. The current proof scripts
+  require a binary with `inspect-checkpoint`. (#47439)
 
 - Read named model declarations from the published catalog snapshot in runtime discovery and setup, restoring compilation after removal of the old global catalog API. (#47577)
 

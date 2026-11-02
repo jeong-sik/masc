@@ -339,9 +339,13 @@ def run(args):
                'not_measured': ['model quality', 'sustained continuity', 'GitHub authentication',
                                 'bootstrap CLI', 'redirects and long jobs', 'candidate source unless commit matches',
                                 'shim sandbox application receipt when peer omits it']}
+    fixture.checkpoint_binary = binary
+    fixture.checkpoint_binary_sha256 = receipt['binary_sha256']
+    fixture.checkpoint_keeper = args.keeper
     try:
         env = {k: v for k, v in os.environ.items() if k in ('PATH', 'LANG', 'LC_ALL', 'TMPDIR')}
         env.update(HOME=str(home), MASC_BASE_PATH=str(base), MASC_KEEPER_AUTONOMOUS_ENABLED='true')
+        fixture.checkpoint_env = env
         commit = smoke.command([binary, 'build-commit'], env).strip().splitlines()[-1]
         receipt['binary_commit'] = commit
         if commit != args.expected_commit:
@@ -382,9 +386,9 @@ def run(args):
         token = (base / '.masc/auth/ssh-proof-admin.token').read_text().strip()
         with (output / 'server.log').open('w') as log:
             server = subprocess.Popen([binary, 'start', *cli], env=env, stdout=log, stderr=log, cwd=base)
-            def health():
+            def health(remaining):
                 try:
-                    snapshot = json.loads(smoke.request(url + '/health?full=1', timeout=2))
+                    snapshot = json.loads(smoke.request(url + '/health?full=1', timeout=min(2, remaining)))
                     return snapshot if snapshot.get('startup', {}).get('state_ready') is True else None
                 except (urllib.error.URLError, TimeoutError):
                     return None
@@ -412,8 +416,9 @@ def run(args):
             if fixture.step != len(fixture.steps):
                 raise smoke.SmokeError('Keeper did not finish the requested file workflow')
             checkpoint, data = smoke.wait_until('canonical final SSH checkpoint',
-                lambda: smoke.checkpoint_proof(base, fixture), server)
-            (output / 'checkpoint.json').write_text(json.dumps(data, indent=2))
+                lambda remaining: smoke.checkpoint_proof(base, fixture, remaining), server)
+            (output / 'checkpoint.json').write_text(json.dumps(data['checkpoint'], indent=2))
+            (output / 'checkpoint-inspection.json').write_text(json.dumps(data, indent=2))
             if args.exercise_pin_rotation:
                 prior_dispatch = pin_observation(url, token, args, output, 'before')
                 fixture.pin_phase(denied=True)
@@ -485,8 +490,9 @@ def run(args):
             if fixture.step != len(fixture.steps):
                 raise smoke.SmokeError('Keeper did not complete resumed file reads')
             checkpoint, data = smoke.wait_until('canonical resumed SSH checkpoint',
-                lambda: smoke.checkpoint_proof(base, fixture), server)
-            (output / 'checkpoint-after-restart.json').write_text(json.dumps(data, indent=2))
+                lambda remaining: smoke.checkpoint_proof(base, fixture, remaining), server)
+            (output / 'checkpoint-after-restart.json').write_text(json.dumps(data['checkpoint'], indent=2))
+            (output / 'checkpoint-inspection-after-restart.json').write_text(json.dumps(data, indent=2))
             after_restart = json.loads(ssh(args, reread_argv))
             if after_restart != after_stop:
                 raise smoke.SmokeError('endpoint bytes or declared initial hashes changed after restart/resume')
@@ -495,6 +501,7 @@ def run(args):
             receipt.update(result='PASS', model_requests=len(fixture.requests), tool_calls=len(fixture.results),
                 runtime_instances=[initial_instance, resumed_instance],
                 checkpoint_relative_path=str(checkpoint.relative_to(base)),
+                checkpoint_reference=data['reference'],
                 actual_remote_cwd=actual['cwd'], model_projected_cwd=fixture.proof['cwd'],
                 claims=['actual Keeper Execute/Write/Read/Edit/Grep over SSH',
                         'endpoint bytes match tool results', 'canonical final checkpoint',

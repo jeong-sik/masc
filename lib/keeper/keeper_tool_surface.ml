@@ -14,6 +14,18 @@ include Keeper_tool_surface_ops
    [Workspace.config] only (no Eio fields), letting Keeper_tool_surface register
    masc_keeper_list with [Keeper_dispatch_ref] at module load. *)
 let keeper_list_body ~(config : Workspace.config) args : tool_result =
+  let fresh =
+    match args with
+    | `Assoc fields ->
+        (match List.filter (fun (key, _) -> String.equal key "fresh") fields with
+         | [] -> Ok false
+         | [ (_, `Bool value) ] -> Ok value
+         | _ -> Error "fresh must be one boolean value")
+    | _ -> Ok false
+  in
+  match fresh with
+  | Error detail -> tool_result_error ~class_:Tool_result.Policy_rejection detail
+  | Ok fresh ->
   (* Read before consulting the projection cache: a previously readable
      roster cannot certify a directory that has since become unreadable.
      The census also raises when the roster path cannot even be ensured
@@ -32,9 +44,7 @@ let keeper_list_body ~(config : Workspace.config) args : tool_result =
   let cache_key =
     Printf.sprintf "%s:%d:%b" config.base_path limit detailed
   in
-  let data =
-    cached_json_by_key keeper_list_cache ~key:cache_key
-      ~ttl_s:(keeper_list_cache_ttl_s ()) (fun () ->
+  let compute () =
         let registry_names =
           Keeper_registry.all ~base_path:config.base_path ()
           |> List.map (fun (entry : Keeper_registry.registry_entry) -> entry.name)
@@ -88,7 +98,12 @@ let keeper_list_body ~(config : Workspace.config) args : tool_result =
                ]
               @ listing)
         in
-        json)
+        json
+  in
+  let data =
+    if fresh then compute ()
+    else cached_json_by_key keeper_list_cache ~key:cache_key
+      ~ttl_s:(keeper_list_cache_ttl_s ()) compute
   in
   (* Equipment bypasses the metadata TTL; one immutable ledger read serves
      all rows, including failures, for this response. *)
@@ -110,6 +125,10 @@ let keeper_list_body ~(config : Workspace.config) args : tool_result =
           match value with `List rows -> key, `List (List.map row rows) | value -> key, value
         else key, value) fields)
     | json -> json in
+  let data = match fresh, data with
+    | true, `Assoc fields ->
+        `Assoc (("projection_cache_bypassed", `Bool true) :: fields)
+    | false, _ | true, _ -> data in
   tool_result_ok_data data
 
 let handle_keeper_list ctx args : tool_result =

@@ -249,6 +249,9 @@ export interface KeeperRuntimeTraceResponse {
   manifest_path: string
   manifest_path_present: boolean
   manifest_total_rows: number
+  /** Whether the scan reached the beginning of the retained manifest.
+   * Missing/null is unknown, never evidence of a complete scan. */
+  manifest_total_rows_exact?: boolean | null
   manifest_returned_rows: number
   receipt_returned_rows: number
   manifest_scan_diagnostics: KeeperRuntimeManifestScanDiagnostics
@@ -692,6 +695,7 @@ export function parseKeeperRuntimeTrace(raw: unknown): KeeperRuntimeTraceRespons
     manifest_path: stringField(raw, 'manifest_path'),
     manifest_path_present: raw.manifest_path_present === true,
     manifest_total_rows: numberField(raw, 'manifest_total_rows'),
+    manifest_total_rows_exact: nullableBooleanField(raw, 'manifest_total_rows_exact'),
     manifest_returned_rows: numberField(raw, 'manifest_returned_rows'),
     receipt_returned_rows: numberField(raw, 'receipt_returned_rows'),
     manifest_scan_diagnostics: parseManifestScanDiagnostics(raw.manifest_scan_diagnostics),

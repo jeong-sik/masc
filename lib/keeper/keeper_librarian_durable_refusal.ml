@@ -76,9 +76,9 @@ let counterpart_only source =
   let input = Source.input source in
   input.messages = [] && input.tool_observations = [] && input.counterpart_observations <> []
 
-(* Pin the witness even when its refusal is ready to move now. Settlement moves
-   records one at a time, so the refusal must leave the live inventory before
-   the finished execution it may still need is allowed to leave it. *)
+(* Pin possible partial witnesses too. Settlement moves records one at a time,
+   so a refusal must leave the live inventory before any finished execution
+   with overlapping source identity can leave. This does not prove coverage. *)
 let preserves_completed ~settled ~(record:Retained.retained) ~request =
   match member settled ~record ~request with
   | None -> true
@@ -89,7 +89,12 @@ let preserves_completed ~settled ~(record:Retained.retained) ~request =
          match Progress.phase original.record.progress with
          | Rejected {stage=Progress.Execution;_} ->
            let source = Request.source original.request in
-           counterpart_only source && completed_covers ~original:original.request ~original_selection:original.selection candidate
+           counterpart_only source
+           && Yojson.Safe.equal (Request.owner_to_json (Request.physical_owner original.request))
+                (Request.owner_to_json (Request.physical_owner candidate.request))
+           && Sources.counterpart_selection_may_overlap
+                ~original:(Lazy.Mutexed.force original.selection)
+                ~candidate:(Lazy.Mutexed.force candidate.selection)
          | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _
          | Commit_unknown _ | Finished _ | Conflicted _ | Rejected {stage=Progress.Before_dispatch;_}
          | Subdividing _ | Subdivided _ -> false) settled

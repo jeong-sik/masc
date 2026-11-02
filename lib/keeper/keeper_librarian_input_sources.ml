@@ -67,10 +67,39 @@ type counterpart_source =
   | External_event of int * Attention.item
   | Chat_row of Chat.captured_row
 
+module Overlap_key = struct
+  type t =
+    | Chat_id of string
+    | External_offset of int
+    | External_id of string
+    | Delivery_id of string * string
+  let compare = Stdlib.compare
+end
+module Overlap_keys = Set.Make (Overlap_key)
+
 type counterpart_selection = {
   selection_keeper : string;
   selected : (counterpart_source * Keeper_counterpart_observation.t) list;
+  overlap_keys : Overlap_keys.t Lazy.Mutexed.t;
 }
+
+let overlap_keys selected =
+  List.fold_left (fun keys (source, _) ->
+    match source with
+    | Chat_row row ->
+      let message = Chat.captured_row_message row in
+      let keys = Overlap_keys.add (Overlap_key.Chat_id message.id) keys in
+      (match message.conversation_id, message.external_message_id with
+       | Some conversation, Some id -> Overlap_keys.add (Overlap_key.Delivery_id (conversation,id)) keys
+       | None, _ | _, None -> keys)
+    | External_event (offset, item) ->
+      let keys = keys |> Overlap_keys.add (Overlap_key.External_offset offset)
+        |> Overlap_keys.add (Overlap_key.External_id item.event_id) in
+      (match item.external_message with
+       | None -> keys
+       | Some message -> Overlap_keys.add
+           (Overlap_key.Delivery_id (item.conversation.conversation_id,message.message_id)) keys))
+    Overlap_keys.empty selected
 
 let select_counterparts (snapshot : counterpart_snapshot) =
   (* The complete original log supplies dedup identities, even outside this
@@ -100,7 +129,9 @@ let select_counterparts (snapshot : counterpart_snapshot) =
       if Float.compare chat_ts external_ts < 0
       then interleave (chat :: acc) externals chat_rest
       else interleave (external_row :: acc) external_rest chats in
-  {selection_keeper=snapshot.keeper_name;selected=interleave [] externals chats |> List.map snd}
+  let selected = interleave [] externals chats |> List.map snd in
+  {selection_keeper=snapshot.keeper_name;selected;
+   overlap_keys=Lazy.Mutexed.from_fun (fun () -> overlap_keys selected)}
 
 let counterpart_observations snapshot =
   List.map snd (select_counterparts snapshot).selected
@@ -127,6 +158,12 @@ let counterpart_selection_covers ~original ~witness =
   in
   original.selection_keeper = witness.selection_keeper
   && contains original.selected witness.selected
+
+let counterpart_selection_may_overlap ~original ~candidate =
+  original.selection_keeper = candidate.selection_keeper
+  && let left = Lazy.Mutexed.force original.overlap_keys in
+     let right = Lazy.Mutexed.force candidate.overlap_keys in
+     Overlap_keys.exists (fun key -> Overlap_keys.mem key right) left
 
 let counterpart_observations_digest (snapshot : counterpart_snapshot) =
   Keeper_counterpart_observation.digest (counterpart_observations snapshot)

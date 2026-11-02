@@ -1738,6 +1738,8 @@ let test_refusal_does_not_accept_a_different_equal_chat_row () =
     Keeper_chat_store.append_user_message ~base_dir:fixture.base_path ~keeper_name
       ~conversation_id:"agent:source-identity" ~external_message_id:"original-message"
       ~content ~speaker ();
+    Keeper_chat_store.append_user_message ~base_dir:fixture.base_path ~keeper_name
+      ~content:"shared original counterpart" ~speaker ();
     io (fun () ->
       official_empty_turn fixture.config ~turn:2 ~time:(Time_compat.now () +. 10.);
       let session_dir=Keeper_fs.keeper_session_dir fixture.config trace_id in
@@ -1796,8 +1798,22 @@ let test_refusal_does_not_accept_a_different_equal_chat_row () =
        | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> false);
     let witness_source=Capture.source witness_capture in
     let witness_snapshot=Source.counterparts witness_source in
+    let witness_gates=gate_records fixture witness_capture |> List.filter (fun gate ->
+      Gate.parent_execution_id gate |> get |> String.equal witness.request_id) in
+    check bool "the partly overlapping completion has Gate evidence" true (witness_gates<>[]);
     let original_input=(Source.input original_source).counterpart_observations in
     let witness_input=(Source.input witness_source).counterpart_observations in
+    let shared_rows snapshot =
+      Sources.counterpart_snapshot_to_json snapshot |> member "chat_rows" |> Yojson.Safe.Util.to_list
+      |> List.filter (fun row -> row |> member "raw_line" |> Yojson.Safe.Util.to_string
+        |> Astring.String.is_infix ~affix:"shared original counterpart") in
+    let shared_original,shared_witness = match shared_rows original_snapshot,shared_rows witness_snapshot with
+      | [old],[newer] -> old,newer
+      | _ -> fail "both captures must retain exactly one shared chat source" in
+    check json "the partial completion captures the same shared chat source" shared_original shared_witness;
+    check bool "both actual inputs include the shared source projection" true
+      (List.for_all (fun input -> List.exists (fun (observation:Keeper_counterpart_observation.t) ->
+        observation.content="shared original counterpart") input) [original_input;witness_input]);
     check bool "every old projected value occurs in the later input" true
       (List.for_all (fun observation -> List.mem observation witness_input) original_input);
     check bool "the same value does not establish the selected original row" false
@@ -1868,16 +1884,27 @@ let test_refusal_does_not_accept_a_different_equal_chat_row () =
     replace_actual_worker_configuration fixture ~sw (fixture.declaration true);
     let before_cursor=Keeper_external_read_cursor.observation_to_json (cursor ()) in
     let calls=F.post_count fixture.server in
-    (match run_worker fixture with
-     | Error (Consumer.Counterpart_input_capacity_refused _) -> ()
-     | Error error -> fail (Consumer.error_to_string error)
-     | Ok _ -> fail "returning to the refused destination must stay blocked");
-    check json "holding the refusal does not acknowledge another delivery" before_cursor
-      (Keeper_external_read_cursor.observation_to_json (cursor ()));
-    check int "holding the refusal does not dispatch again" calls (F.post_count fixture.server);
-    check bool "the rejected original remains retained" true
-      (List.exists (fun ((record:Owner.retained),_) -> record.request_id=rejected.request_id)
-        (observed_originals fixture)))
+    let check_held () =
+      (match run_worker fixture with
+       | Error (Consumer.Counterpart_input_capacity_refused _) -> ()
+       | Error error -> fail (Consumer.error_to_string error)
+       | Ok _ -> fail "returning to the refused destination must stay blocked");
+      check json "holding the refusal does not acknowledge another delivery" before_cursor
+        (Keeper_external_read_cursor.observation_to_json (cursor ()));
+      check int "holding the refusal does not dispatch again" calls (F.post_count fixture.server);
+      let originals=observed_originals fixture in
+      check bool "the rejected original remains retained" true
+        (List.exists (fun ((record:Owner.retained),_) -> record.request_id=rejected.request_id) originals);
+      check bool "the partial completion remains retained" true
+        (List.exists (fun ((record:Owner.retained),_) -> record.request_id=witness.request_id) originals);
+      check bool "the partial completion retains its Gate evidence" true
+        (List.for_all (fun (gate:Owner.retained) ->
+          List.exists (fun (current:Owner.retained) -> current.request_id=gate.request_id)
+            (gate_records fixture witness_capture)) witness_gates) in
+    check_held ();
+    Consumer.For_testing.reset_process_state ();
+    restart_actual_worker ~while_off:check_held fixture ~sw;
+    check_held ())
 
 let test_purge_joins_unknown_then_worker_restart_does_not_resubmit history_kind () =
   with_fixture ~history_kind (fun ~sw fixture ->

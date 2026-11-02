@@ -30,6 +30,14 @@ val counterpart_selection_covers :
     rows do not count as selected. No chat/external identity is inferred. The
     caller must separately establish that both selections belong to the same
     physical source and owner epoch. *)
+val counterpart_selection_may_overlap :
+  original:counterpart_selection -> candidate:counterpart_selection -> bool
+(** Conservatively compare selected source identities for retention only.
+    A shared chat ID, external offset or event ID, or conversation/message ID
+    among chat or external delivery may indicate overlap, even if projections
+    differ. The caller must separately establish the physical owner and epoch.
+    Neither a match nor its absence proves processing or authorizes recovery,
+    release, publication or acknowledgement. *)
 val counterpart_observations_digest : counterpart_snapshot -> string
 val external_through : counterpart_snapshot -> int
 val counterpart_snapshot_matches_selection : counterpart_snapshot -> external_after:int ->

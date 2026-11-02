@@ -635,6 +635,8 @@ let test_counterpart_witness_requires_selected_source_identity () =
   let get = function Ok value -> value | Error detail -> Alcotest.fail detail in
   let covers ~original ~witness = Sources.counterpart_selection_covers
       ~original:(Sources.select_counterparts original) ~witness:(Sources.select_counterparts witness) in
+  let may_overlap ~original ~candidate = Sources.counterpart_selection_may_overlap
+      ~original:(Sources.select_counterparts original) ~candidate:(Sources.select_counterparts candidate) in
   let keeper_name = "witness-owner" in
   let row ~id ~ts extra =
     `Assoc (["id",`String id;"role",`String "user";"content",`String "same content";
@@ -669,6 +671,22 @@ let test_counterpart_witness_requires_selected_source_identity () =
     | _ -> Alcotest.fail "fixture must retain a snapshot object" in
   Alcotest.(check bool) "the same raw chat row with a different delivered projection is not a witness" false
     (covers ~original ~witness:changed_projection);
+  Alcotest.(check bool) "a different projection still retains the matching source" true
+    (may_overlap ~original ~candidate:changed_projection);
+  write_file chat_path (other_row ^ "\n");
+  let plain_chat = capture 40. in
+  Alcotest.(check bool) "the same chat ID overlaps without a delivery identity" true
+    (may_overlap ~original:plain_chat ~candidate:plain_chat);
+  let same_delivery_row = row ~id:"different-chat-id" ~ts:10.
+      ["conversation_id",`String "discord:guild-1:chan-1";
+       "external_message_id",`String "original-message"] in
+  write_file chat_path (same_delivery_row ^ "\n");
+  let same_delivery_chat = capture 15. in
+  Alcotest.(check bool) "a different chat row is not a complete witness" false
+    (covers ~original ~witness:same_delivery_chat);
+  Alcotest.(check bool) "chat rows with the same delivery identity may overlap" true
+    (may_overlap ~original ~candidate:same_delivery_chat);
+  write_file chat_path (original_row ^ "\n");
   let delivery = item ~keeper_name ~dedupe_key:"witness-delivery" ~received_at:20.
       ~preview:"different delivery preview" ~external_message:(external_message "original-message") () in
   (match record ~base_path delivery with
@@ -683,6 +701,12 @@ let test_counterpart_witness_requires_selected_source_identity () =
     (List.for_all (fun observation -> List.mem observation witness_input) original_input);
   Alcotest.(check bool) "the deduplicated original is not selected by the witness" false
     (covers ~original ~witness);
+  Alcotest.(check bool) "the later delivery may overlap the original chat source" true
+    (may_overlap ~original ~candidate:witness);
+  let unrelated = Sources.capture_counterparts ~external_after:1 ~base_dir:base_path ~keeper_name
+      ~after:(Some 25.) ~before:40. |> Result.map_error Sources.read_error_to_string |> get in
+  Alcotest.(check bool) "an unrelated selected chat does not hold this source" false
+    (may_overlap ~original ~candidate:unrelated);
   let current_original_window = capture 15. in
   Sources.snapshot_extends ~original ~current:current_original_window |> get;
   Alcotest.(check bool) "the old frontier can already be acknowledged" true
@@ -735,11 +759,33 @@ let test_counterpart_witness_distinguishes_external_occurrences () =
   let covers ~original ~witness = Sources.counterpart_selection_covers
       ~original:(Sources.select_counterparts original) ~witness:(Sources.select_counterparts witness) in
   let keeper_name = "offset-witness" in
-  (match record ~base_path (item ~keeper_name ~dedupe_key:"same-event" ~received_at:1. ()) with
+  (match record ~base_path (item ~keeper_name ~dedupe_key:"same-event"
+     ~external_message:(external_message "same-message") ~received_at:1. ()) with
    | `Recorded -> () | `Duplicate _ -> Alcotest.fail "unexpected initial duplicate"
    | `Error detail -> Alcotest.fail detail);
   let first = Sources.capture_counterparts ~external_after:0 ~base_dir:base_path ~keeper_name
       ~after:None ~before:2. |> Result.map_error Sources.read_error_to_string |> get in
+  let with_events ~after events = match Sources.counterpart_snapshot_to_json first with
+    | `Assoc fields ->
+      `Assoc (List.map (fun (key,value) -> key,
+        if key="external_log" then `List (List.map A.item_to_json events)
+        else if key="external_after" then `Int after
+        else if key="external_through" then `Int (List.length events)
+        else value) fields) |> Sources.counterpart_snapshot_of_json |> get
+    | _ -> Alcotest.fail "fixture must retain a snapshot object" in
+  let other_at_same_offset = with_events ~after:0
+      [item ~keeper_name ~dedupe_key:"other-offset-event" ~received_at:1. ()] in
+  Alcotest.(check bool) "a different event at the same offset is not a complete witness" false
+    (covers ~original:first ~witness:other_at_same_offset);
+  Alcotest.(check bool) "the same external offset alone may overlap" true
+    (Sources.counterpart_selection_may_overlap ~original:(Sources.select_counterparts first)
+       ~candidate:(Sources.select_counterparts other_at_same_offset));
+  let same_id_at_other_offset = with_events ~after:1
+      [item ~keeper_name ~dedupe_key:"first-placeholder" ~received_at:1. ();
+       item ~keeper_name ~dedupe_key:"same-event" ~received_at:1. ()] in
+  Alcotest.(check bool) "the same event ID at another offset may overlap" true
+    (Sources.counterpart_selection_may_overlap ~original:(Sources.select_counterparts first)
+       ~candidate:(Sources.select_counterparts same_id_at_other_offset));
   let repeated ~after = match Sources.counterpart_snapshot_to_json first with
     | `Assoc fields ->
       let log = match List.assoc "external_log" fields with
@@ -757,7 +803,21 @@ let test_counterpart_witness_distinguishes_external_occurrences () =
   Alcotest.(check bool) "the same first append remains a valid witness" true
     (covers ~original:first ~witness:both);
   Alcotest.(check bool) "a later identical append cannot stand in for the first" false
-    (covers ~original:first ~witness:second)
+    (covers ~original:first ~witness:second);
+  Alcotest.(check bool) "the repeated event still retains possible partial evidence" true
+    (Sources.counterpart_selection_may_overlap ~original:(Sources.select_counterparts first)
+       ~candidate:(Sources.select_counterparts second));
+  (match record ~base_path (item ~keeper_name ~dedupe_key:"other-event"
+     ~external_message:(external_message "same-message") ~received_at:1.5 ()) with
+   | `Recorded -> () | `Duplicate _ -> Alcotest.fail "unexpected second delivery duplicate"
+   | `Error detail -> Alcotest.fail detail);
+  let other_delivery = Sources.capture_counterparts ~external_after:1 ~base_dir:base_path ~keeper_name
+      ~after:None ~before:2. |> Result.map_error Sources.read_error_to_string |> get in
+  Alcotest.(check bool) "a different external event is not a complete witness" false
+    (covers ~original:first ~witness:other_delivery);
+  Alcotest.(check bool) "external events with the same delivery identity may overlap" true
+    (Sources.counterpart_selection_may_overlap ~original:(Sources.select_counterparts first)
+       ~candidate:(Sources.select_counterparts other_delivery))
 ;;
 
 let test_cursor_observation_preserves_complete_preparation () =

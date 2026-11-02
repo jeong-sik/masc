@@ -57,12 +57,13 @@ val preserves_completed :
   settled:inventory ->
   record:Lane_addon_tool_request_owner.retained ->
   request:Keeper_librarian_durable_request.t -> bool
-(** Call after strict validation of the entire live inventory. Keep this
-    finished original and its complete lineage while any live counterpart-only
-    execution refusal it can cover remains, even when that refusal is ready to
-    settle in this pass. Its record and Gate lineage are the historical proof;
-    this check grants no Memory or cursor effect. A pair outside the prepared
-    inventory is preserved, never assumed safe to settle. *)
+(** Call after strict validation of the entire live inventory. Keep a finished
+    original and its lineage while any live counterpart-only execution refusal
+    with the same physical owner and epoch may overlap its selected sources,
+    even when that refusal is ready to settle in this pass. This conservatively
+    preserves partial evidence; it does not establish coverage, recover
+    previously archived evidence, or grant a Memory or cursor effect. A pair
+    outside the prepared inventory is preserved, never assumed safe to settle. *)
 
 val blocks_destination : t list -> Keeper_librarian_durable_request.destination ->
   Keeper_librarian_durable_consumer.error option

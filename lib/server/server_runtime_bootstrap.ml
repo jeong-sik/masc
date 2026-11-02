@@ -538,6 +538,8 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
     ();
   Keeper_registry.install_state_change_observer
     Server_routes_http_runtime.invalidate_full_health_snapshot_for_registry_change;
+  Keeper_waiting_inventory_broadcast.install_health_change_observer
+    Server_routes_http_runtime.invalidate_full_health_snapshot_for_workspace;
   Keeper_owner.install_state_change_observer
     Server_routes_http_runtime.invalidate_full_health_snapshot;
   Keeper_reaction_ledger.install_state_change_observer

@@ -86,7 +86,9 @@ class WaitingHandler(FixtureHandler):
                     payload = {
                         "type": "keeper_waiting_inventory_changed",
                         "keeper_name": keeper,
-                        "queue_kind": "event_queue",
+                        "queue_kind": (
+                            "approval_count" if keeper == "analyst" else "event_queue"
+                        ),
                         "ts_unix": 1.0,
                     }
                 data = json.dumps(payload).encode()

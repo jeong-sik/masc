@@ -313,6 +313,9 @@ val subscribe
   -> subscription
 
 val unsubscribe : t -> subscription -> unit
+(** Stops the subscription and wakes waiters, including if the calling fiber
+    is cancelled while waiting for a publisher's delivery lock. Cancellation
+    is propagated after cleanup. *)
 
 (** Stop accepting events for [subscription], remove it from [t], and return
     every event still queued at cancellation in FIFO order.
@@ -324,6 +327,10 @@ val unsubscribe : t -> subscription -> unit
     Unlike {!unsubscribe}, pending events are counted as drained rather than
     discarded.
 
+    If cancellation interrupts closure before the final drain, the
+    subscription is closed and the events remain available to {!drain}.
+    Once the final drain completes, the returned list belongs to the caller.
+
     @since 0.212.0 *)
 val unsubscribe_and_drain : t -> subscription -> event list
 
@@ -331,6 +338,24 @@ val unsubscribe_and_drain : t -> subscription -> event list
 
 val publish : t -> event -> unit
 val drain : subscription -> event list
+
+type awaited_batch =
+  | Events of event list
+  | Unsubscribed
+
+val await_batch : subscription -> awaited_batch
+(** Wait until at least one event is available, then drain the queue in FIFO
+    order under the same lock used by publishers. A publication between the
+    empty check and suspension cannot be missed. Returns [Unsubscribed] when
+    the subscription is cancelled, and propagates fiber cancellation. *)
+
+module For_testing : sig
+  val with_delivery_lock : subscription -> (unit -> 'a) -> 'a
+  (** Hold the delivery lock to exercise cancellation under contention. *)
+
+  val with_hub_lock : t -> (unit -> 'a) -> 'a
+  (** Hold the hub lock to exercise close/drain ownership under contention. *)
+end
 
 (** {2 Queries} *)
 

@@ -306,7 +306,7 @@ let model_routing_entries =
 let agent_core_sse_entries =
   [
     entry ~default:"2.0" "MASC_AGENT_CORE_SSE_DRAIN_INTERVAL_SEC"
-      "SSE drain interval (seconds, floor 0.1)";
+      "SSE relay retry delay after failure (seconds; values below 0.1 use default)";
   ]
 
 let operator_entries =

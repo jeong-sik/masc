@@ -3100,6 +3100,7 @@
 (include stanzas/test_keeper_long_turn_9943.inc)
 
 (include stanzas/test_keeper_execution_join.inc)
+(include stanzas/test_full_health_wakeup.inc)
 
 (include stanzas/test_keeper_msg_async_path_traversal.inc)
 

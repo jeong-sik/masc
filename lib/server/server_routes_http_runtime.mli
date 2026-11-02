@@ -244,9 +244,7 @@ val invalidate_full_health_snapshot : unit -> unit
     live state mutation. [full=1] retains its fields and measurement timestamp,
     with stale metadata; only a cold cache returns warming placeholders.
     A worker invalidated during its scan cannot certify a current snapshot.
-    Cancellation
-    does not interrupt it, and a caller outside Eio invalidates without waking
-    the refresh loop, which then refreshes at its next interval. *)
+    The wake is coalesced and also works when the caller is outside Eio. *)
 
 val fleet_stream_hub : Fleet_stream_hub.t
 (** The fleet events the Keepers screen reads in place of polling
@@ -268,6 +266,13 @@ val start_full_health_snapshot_refresh_loop :
     read of listener environment. *)
 
 module For_testing : sig
+  val take_full_health_wakeup : unit -> unit
+  val take_full_health_wakeup_nonblocking : unit -> bool
+  (** Consume a wakeup from the production refresh mailbox. *)
+
+  val full_health_wakeup_stream : unit -> unit Eio.Stream.t
+  (** Exposes the mailbox to an isolated refresh worker test. *)
+
   val reset_full_health_snapshot : unit -> unit
   (** Clears the cached full-health snapshot and in-flight refresh marker. *)
 

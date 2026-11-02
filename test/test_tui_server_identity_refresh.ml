@@ -4836,6 +4836,118 @@ let test_task_history_progressive_read_keeps_owner_and_cursor () =
      && (state.workspace_read_authority <- ref ();
          task_history_followup state current (Ok retired_result)=None))
 
+let test_task_detail_end_survives_uncertain_backlog () =
+  let open Masc_tui_types in
+  let cols = 80 in
+  let pending_end () =
+    let state,task_id = task_detail_scroll_fixture () in
+    state.task_reading <- Masc_tui_overview_tasks.Rows_read [];
+    let request = match begin_task_history_read state ~task_id ~limit:40 with
+      | Some request -> request | None -> Alcotest.fail "history read did not start" in
+    complete_task_scroll_documents state ~cols (sync_task_documents state ~cols);
+    task_detail_presented_frame state ~task_id ~count:23 ~height:16 ~offset:0 ~cols;
+    task_detail_select_end state ~cols;
+    Alcotest.(check bool) "End follows the pending history" true (task_detail_following_end state);
+    state,task_id,request in
+  List.iter (fun (reading,error) ->
+    let state,task_id,request = pending_end () in
+    let payloads = state.task_payloads in
+    state.task_payloads <- Masc_tui_task_payloads.observe [];
+    state.task_reading <- reading;
+    state.tasks_error <- error;
+    reconcile_task_detail_scroll state;
+    Alcotest.(check bool) "uncertain absence keeps intent without claiming a visible viewport" true
+      (Option.is_some state.task_detail_follow_end
+       && not (task_detail_following_end state) && current_task_detail_presented state=None
+       && task_history_request_in_scope state request);
+    complete_task_history_read state request (Ok (task_scroll_history task_id));
+    state.task_payloads <- payloads;
+    state.task_reading <- Masc_tui_overview_tasks.Rows_read [];
+    state.tasks_error <- None;
+    complete_task_scroll_documents state ~cols (sync_task_documents state ~cols);
+    Alcotest.(check bool) "the same visible Task resumes the pending End" true
+      (task_detail_following_end state && task_detail_render_scroll state=clamped_scroll_end);
+    task_detail_presented_frame state ~task_id ~count:116 ~height:16 ~offset:100 ~cols;
+    Alcotest.(check bool) "the final presented End settles once" true
+      (state.task_detail_scroll=100 && state.task_detail_follow_end=None))
+    [ Masc_tui_overview_tasks.Rows_unread,None;
+      Rows_unavailable "temporary failure",Some "temporary failure";
+      Rows_read [],Some "degraded local read" ];
+  let state,_,request = pending_end () in
+  state.task_payloads <- Masc_tui_task_payloads.observe [];
+  state.task_reading <- Masc_tui_overview_tasks.Rows_unavailable "temporary failure";
+  reconcile_task_detail_scroll state;
+  task_list_user_focus state (Masc_tui_overview_tasks.move []
+    (Masc_tui_overview_tasks.Task_focus {selected=None}) Masc_tui_overview_tasks.Next);
+  Alcotest.(check bool) "moving in an empty list does not select another Task" true
+    (Option.is_some state.task_detail_follow_end);
+  task_list_user_focus state (Masc_tui_overview_tasks.Task_focus {selected=Some "another-task"});
+  reconcile_task_detail_scroll state;
+  Alcotest.(check bool) "choosing a different Task retires the hidden End" true
+    (state.task_detail_follow_end=None && task_history_request_in_scope state request);
+  let state,_,request = pending_end () in
+  let payloads = state.task_payloads in
+  state.task_payloads <- Masc_tui_task_payloads.observe [];
+  state.task_reading <- Masc_tui_overview_tasks.Rows_read [];
+  state.tasks_error <- Some "degraded local read";
+  reconcile_task_detail_scroll state;
+  task_list_user_focus state (Masc_tui_overview_tasks.Task_focus {selected=Some "another-task"});
+  state.task_focus <- fst (Masc_tui_overview_tasks.after_read
+    (Masc_tui_overview_tasks.Rows_read []) state.task_focus);
+  state.task_payloads <- payloads;
+  state.task_reading <- Masc_tui_overview_tasks.Rows_read [];
+  state.tasks_error <- None;
+  reconcile_task_detail_scroll state;
+  Alcotest.(check bool) "recovery cannot hide a newer Task selection" true
+    (state.task_detail_follow_end=None && task_history_request_in_scope state request);
+  let state,_,_ = pending_end () in
+  state.task_payloads <- Masc_tui_task_payloads.observe [];
+  state.task_reading <- Masc_tui_overview_tasks.Rows_read [];
+  state.tasks_error <- None;
+  reconcile_task_detail_scroll state;
+  Alcotest.(check bool) "a confirmed removal retires the End" true (state.task_detail_follow_end=None);
+  let state,_,_ = pending_end () in
+  state.task_payloads <- Masc_tui_task_payloads.observe [];
+  state.task_reading <- Masc_tui_overview_tasks.Rows_unavailable "temporary failure";
+  state.workspace_read_authority <- ref ();
+  reconcile_task_detail_scroll state;
+  Alcotest.(check bool) "a different workspace reading cannot inherit the End" true
+    (state.task_detail_follow_end=None)
+
+let test_task_detail_withdrawn_reader_input () =
+  let open Masc_tui_types in
+  let module Presented = Masc_tui_presented in
+  let state,task_id = task_detail_scroll_fixture () in
+  let cols = 80 in
+  let request = match begin_task_history_read state ~task_id ~limit:40 with
+    | Some request -> request | None -> Alcotest.fail "history read did not start" in
+  complete_task_scroll_documents state ~cols (sync_task_documents state ~cols);
+  task_detail_presented_frame state ~task_id ~count:23 ~height:16 ~offset:0 ~cols;
+  task_detail_select_end state ~cols;
+  task_detail_presented_frame state ~task_id ~count:23 ~height:16 ~offset:7 ~cols;
+  let reader = Some (Task_detail (7, Some (23,16))) in
+  let decide ?(external_surface=false) input =
+    Presented.decide_unpresented_input
+      ~frame_presented:(not (task_detail_reader_withdrawn state reader))
+      ~external_surface input in
+  Alcotest.(check bool) "input is accepted for the current presented Task" true
+    (decide Presented.Action=Presented.Accept_input);
+  state.task_payloads <- Masc_tui_task_payloads.observe [];
+  state.task_reading <- Masc_tui_overview_tasks.Rows_unavailable "temporary failure";
+  reconcile_task_detail_scroll state;
+  Alcotest.(check bool) "unseen replacement cannot receive actions or paste" true
+    (decide Presented.Action=Presented.Reject_action
+     && decide Presented.Paste=Presented.Reject_paste
+     && Option.is_some state.task_detail_follow_end && task_history_request_in_scope state request);
+  Alcotest.(check bool) "protocol and an external screen retain input" true
+    (decide Presented.Protocol=Presented.Accept_input
+     && decide ~external_surface:true Presented.Action=Presented.Accept_input);
+  Alcotest.(check bool) "a newly presented list is not the old Task reader" false
+    (task_detail_reader_withdrawn state None);
+  state.workspace_read_authority <- ref ();
+  Alcotest.(check bool) "a replaced workspace cannot accept the old Task input" true
+    (decide Presented.Action=Presented.Reject_action)
+
 let test_reopened_task_history_retains_only_owned_observation () =
   let open Masc_tui_types in
   let module Fetched = Masc_tui_fetched in
@@ -5729,6 +5841,10 @@ let () =
     [ ( "server-identity-refresh"
       , [ Alcotest.test_case "progressive task history keeps its owner and cursor" `Quick
             test_task_history_progressive_read_keeps_owner_and_cursor
+        ; Alcotest.test_case "pending Task End survives an uncertain backlog" `Quick
+            test_task_detail_end_survives_uncertain_backlog
+        ; Alcotest.test_case "withdrawn task reader rejects input until presentation" `Quick
+            test_task_detail_withdrawn_reader_input
         ; Alcotest.test_case "reopened task history retains only its workspace observation" `Quick
             test_reopened_task_history_retains_only_owned_observation
         ; Alcotest.test_case "reopened history document follows workspace owner" `Quick

@@ -276,9 +276,19 @@ jobs:
         run: scripts/quickstart-smoke.sh
 
       - name: Release binary smoke (boot + README drift)
+        env:
+          SMOKE_BOOT_LOG_OUT: ${{ runner.temp }}/smoke-boot-${{ matrix.arch }}.log
         run: |
           chmod +x scripts/release-binary-smoke.sh
           scripts/release-binary-smoke.sh "$MASC_BIN_DIR"/main_eio.exe
+
+      - name: Upload smoke boot log on failure
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: smoke-boot-log-${{ matrix.arch }}-${{ github.run_id }}-${{ github.sha }}-attempt-${{ github.run_attempt }}
+          if-no-files-found: ignore
+          path: ${{ runner.temp }}/smoke-boot-${{ matrix.arch }}.log
 
       # masc-tui refuses to start without an interactive TTY, so a runner
       # cannot boot it the way the server binary is booted above. --help

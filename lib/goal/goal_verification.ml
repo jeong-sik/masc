@@ -423,43 +423,56 @@ let load_state config : load_outcome =
 (* When the primary is absent, an existing or uninspectable mirror cannot be
    treated as a new empty ledger. Inspect the entry itself so a dangling
    symlink or FIFO still counts, without opening the mirror's contents. *)
-let recovery_mirror_present config =
+let recovery_mirror_present config backend =
   let path = verifications_recovery_path config in
-  let local_presence () = local_entry_present path in
-  match config.Workspace_utils.backend, Workspace_utils.key_of_path config path with
-  | Workspace_utils.Memory _, Some key ->
-    (match Workspace_utils.backend_get config ~key with
-     | Ok None -> Ok false
-     | Ok (Some _) -> Ok true
-     | Error error -> Error (Backend_types.show_error error))
-  | Workspace_utils.Memory _, None -> local_presence ()
-  | Workspace_utils.FileSystem backend, _ ->
-    let backend_root = Backend.FileSystem.physical_root backend in
+  let backend_root = Backend.FileSystem.physical_root backend in
+  Eio_guard.check_if_ready ();
+  match backend_root with
+  | Error error -> Error (Backend_types.show_error error)
+  | Ok backend_root ->
+    let local_root = Eio_guard.run_in_systhread ~label:"goal-proof-workspace-root" (fun () ->
+      match Unix.realpath (Workspace_utils.masc_dir config) with
+      | root -> Ok root
+      | exception Unix.Unix_error (error, _, _) -> Error (Unix.error_message error)) in
     Eio_guard.check_if_ready ();
-    (match backend_root with
-     | Error error -> Error (Backend_types.show_error error)
-     | Ok backend_root ->
-       let local_root = Eio_guard.run_in_systhread ~label:"goal-proof-workspace-root" (fun () ->
-         match Unix.realpath (Workspace_utils.masc_dir config) with
-         | root -> Ok root
-         | exception Unix.Unix_error (error, _, _) -> Error (Unix.error_message error)) in
-       Eio_guard.check_if_ready ();
-       match local_root with
-       | Error _ as error -> error
-       | Ok local_root when String.equal backend_root local_root -> local_presence ()
-       | Ok _ -> Error "Goal proof backend and workspace roots differ")
+    match local_root with
+    | Error _ as error -> error
+    | Ok local_root when String.equal backend_root local_root -> local_entry_present path
+    | Ok _ -> Error "Goal proof backend and workspace roots differ"
+
+type authority_backend_error = Memory_proof_authority_unavailable
+
+let authority_backend_error_to_string = function
+  | Memory_proof_authority_unavailable ->
+    "goal_verification: Memory backend cannot safely provide proof authority; restore a filesystem-backed workspace context"
+
+let filesystem_authority config =
+  match config.Workspace_utils.backend with
+  | Workspace_utils.Memory _ -> Error Memory_proof_authority_unavailable
+  | Workspace_utils.FileSystem backend -> Ok backend
+
+let check_authority_backend config =
+  Result.map (fun _ -> ()) (filesystem_authority config)
+
+type primary_unavailable =
+  | Primary_undecodable of string
+  | Primary_backend_unavailable of authority_backend_error
 
 let load_primary_state config =
-  ensure_dirs config;
-  match read_state config (verifications_path config) with
-  | Error detail -> Undecodable detail
-  | Ok (Some prepared) -> Loaded prepared
-  | Ok None ->
-      (match recovery_mirror_present config with
-       | Ok false -> Loaded (default_prepared_state ())
-       | Ok true -> Undecodable "primary ledger is missing while its recovery mirror exists"
-       | Error detail ->
-         Undecodable ("primary ledger is missing and its recovery mirror cannot be inspected: " ^ detail))
+  match filesystem_authority config with
+  | Error unavailable -> Error (Primary_backend_unavailable unavailable)
+  | Ok backend ->
+    ensure_dirs config;
+    match read_state config (verifications_path config) with
+    | Error detail -> Error (Primary_undecodable detail)
+    | Ok (Some prepared) -> Ok prepared
+    | Ok None ->
+        (match recovery_mirror_present config backend with
+         | Ok false -> Ok (default_prepared_state ())
+         | Ok true -> Error (Primary_undecodable "primary ledger is missing while its recovery mirror exists")
+         | Error detail ->
+           Error (Primary_undecodable
+                    ("primary ledger is missing and its recovery mirror cannot be inspected: " ^ detail)))
 
 let undecodable_store_error config detail =
   Printf.sprintf
@@ -473,6 +486,12 @@ let undecodable_load_error config detail =
     "goal_verification: store did not decode (%s); repair or reset %s"
     detail
     (verifications_path config)
+
+let primary_unavailable_error config ~writing = function
+  | Primary_undecodable detail ->
+    if writing then undecodable_store_error config detail
+    else undecodable_load_error config detail
+  | Primary_backend_unavailable unavailable -> authority_backend_error_to_string unavailable
 
 let write_state_result config state =
   ensure_dirs config;
@@ -511,8 +530,8 @@ let replace_record records updated =
 let update_record config ~goal_id f =
   Workspace_utils.with_file_lock config (verifications_path config) (fun () ->
       match load_primary_state config with
-      | Undecodable detail -> Error (undecodable_store_error config detail)
-      | Loaded prepared ->
+      | Error unavailable -> Error (primary_unavailable_error config ~writing:true unavailable)
+      | Ok prepared ->
           let state = prepared.state in
           let current =
             match Goal_store.Goal_id_map.find_opt goal_id prepared.records_by_goal_id with
@@ -553,13 +572,13 @@ let get_record config ~goal_id : (record option, string) result =
 
 let load_records_authoritative config =
   match load_primary_state config with
-  | Loaded prepared -> Ok prepared.state.records
-  | Undecodable detail -> Error (undecodable_load_error config detail)
+  | Ok prepared -> Ok prepared.state.records
+  | Error unavailable -> Error (primary_unavailable_error config ~writing:false unavailable)
 
 let load_records_by_goal_id_authoritative config =
   match load_primary_state config with
-  | Loaded prepared -> Ok prepared.records_by_goal_id
-  | Undecodable detail -> Error (undecodable_load_error config detail)
+  | Ok prepared -> Ok prepared.records_by_goal_id
+  | Error unavailable -> Error (primary_unavailable_error config ~writing:false unavailable)
 
 let get_record_authoritative config ~goal_id =
   let* records_by_goal_id = load_records_by_goal_id_authoritative config in
@@ -605,8 +624,8 @@ let reopen_goal config ~goal_id ~actor ~note =
       in
       Workspace_utils.with_file_lock config (verifications_path config) (fun () ->
         let* prepared = match load_primary_state config with
-          | Loaded prepared -> Ok prepared
-          | Undecodable detail -> Error (undecodable_store_error config detail)
+          | Ok prepared -> Ok prepared
+          | Error unavailable -> Error (primary_unavailable_error config ~writing:true unavailable)
         in
         let state = prepared.state in
         let current =

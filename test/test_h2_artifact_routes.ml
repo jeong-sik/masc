@@ -14,6 +14,7 @@ type gateway =
   { client : H2_eio.Client.t
   ; flow : Eio_unix.Net.stream_socket_ty Eio.Resource.t
   ; router : Http.Router.t
+  ; state : Masc.Mcp_server.server_state
   ; authority : Server_request_authority.authority
   ; mutable next_stream : int
   }
@@ -111,7 +112,7 @@ let with_gateway ?(runtime = false) ?resources ?(zero_window = false) run =
                 let config = if zero_window then { H2.Config.default with initial_window_size = 0l } else H2.Config.default in
                 let client = H2_eio.Client.create_connection ~sw ~config
                   ~error_handler:(fun _ -> if not !closing then fail "H2 connection failed") client_flow in
-                let gateway = { client; flow = client_flow; router; authority; next_stream = 1 } in
+                let gateway = { client; flow = client_flow; router; state; authority; next_stream = 1 } in
                 Fun.protect ~finally:(fun () -> closing := true; Eio.Flow.shutdown client_flow `All) (fun () ->
                   run ~base_path ~worker ~player ~admin gateway);
                 Eio.Promise.await_exn server))))))
@@ -381,6 +382,25 @@ let test_goal_confirmation_h1_h2 () =
        "different workspace", payload ~workspace_root:(root ^ "-other") ();
        "different server instance", payload ~instance:"another-instance" ();
        "stale verification run", payload ~run:"another-run" ()];
+    let primary = Goal_verification.verifications_path config in
+    let primary_before = Fs_compat.load_file primary in
+    let goal_path = Goal_store.goals_path config in
+    let goal_before = Fs_compat.load_file goal_path in
+    let memory = {config with Workspace_utils.backend = Workspace_utils.Memory (Backend.Memory.create ())} in
+    let select config = match Masc.Mcp_server.set_workspace_config gateway.state config with
+      | Ok () -> () | Error _ -> fail "could not select fixture workspace" in
+    select memory;
+    Fun.protect ~finally:(fun () -> select config) (fun () ->
+      let get_h1, get_h2 = both gateway ~token:admin path in
+      pair_status "Memory proof GET" 503 (get_h1, get_h2);
+      check_json "Memory GET has the same response" (json get_h1) (json get_h2);
+      let post_h1, post_h2 = both gateway ~token:admin ~meth:`POST ~body:(payload ()) endpoint in
+      pair_status "Memory proof POST" 503 (post_h1, post_h2);
+      check_json "Memory POST has the same response" (json post_h1) (json post_h2);
+      pair_status "Memory malformed POST remains 400" 400
+        (both gateway ~token:admin ~meth:`POST ~body:"{}" endpoint));
+    check string "Memory confirmation leaves proof untouched" primary_before (Fs_compat.load_file primary);
+    check string "Memory confirmation leaves Goal untouched" goal_before (Fs_compat.load_file goal_path);
     let still_pending = request H2 gateway ~token:admin path in
     check string "refusals did not confirm" "awaiting_confirmation"
       (member "goal" (json still_pending) |> field_string "phase");

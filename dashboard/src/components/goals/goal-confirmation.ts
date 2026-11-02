@@ -155,7 +155,7 @@ export function GoalConfirmationPanel({ owner, isCurrent, readAuthority, lifecyc
         ? { kind: 'confirmed', evidence } : { kind: 'ready', evidence })
     } catch (error) {
       if (ticket === generation.current && current()) {
-        const detail = '증거 조회에 실패했습니다. 현재 연결과 권한을 확인한 뒤 다시 조회해 주세요.'
+        const detail = '증거 조회에 실패했습니다. 연결과 권한, 저장소 상태를 확인한 뒤 다시 조회해 주세요.'
         refuseAuthority(detail, errorStatus(error))
         if (receipt?.view.kind === 'uncertain') {
           setReceipt({ ...receipt, view: { ...receipt.view, detail: `${receipt.view.detail} · 재조회 실패` } })

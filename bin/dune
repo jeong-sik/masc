@@ -1947,7 +1947,8 @@
  (name masc_tui_markdown_theme)
  (wrapped false)
  (modules masc_tui_markdown_theme)
- (libraries masc_tui_ansi masc_tui_theme masc_tui_markdown))
+ (libraries masc_tui_ansi masc_tui_theme masc_tui_markdown
+  masc_tui_code_lexer masc_tui_message_layout))
 
 (library
  (name masc_tui_resource_reading)
@@ -2101,6 +2102,9 @@
   masc_tui_press
   masc_tui_frame
   masc_tui_message_layout
+  masc_tui_markdown
+  masc_tui_markdown_theme
+  masc_tui_terminal_palette
   masc
   masc.agent_core
   masc.runtime

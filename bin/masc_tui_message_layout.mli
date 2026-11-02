@@ -473,6 +473,9 @@ val display_width : string -> int
     one. A cluster opening with any other scalar sums its parts, so a joiner
     inside a Devanagari conjunct changes nothing. *)
 
+val widest_grapheme_cells : string -> int
+(** Maximum display-cell width of one grapheme; ANSI controls contribute zero. *)
+
 val grapheme_count : string -> int
 (** How many extended grapheme clusters the text holds: what the screen
     shows as characters. ANSI CSI spans are not characters and are not
@@ -609,6 +612,11 @@ val split_cells : max_cells:int -> string -> string list
     chunk is padded, and concatenating them returns the input. Use where the
     text has no word boundaries to wrap at -- a fenced code line, an
     identifier longer than the frame. *)
+
+val split_cells_after_prefix :
+  prefix_cells:int -> max_cells:int -> string -> string * string list
+(** The same prefix as {!split_at_cells}, followed by any nonempty remaining
+    text split as {!split_cells}. Reuses one grapheme walk for valid UTF-8. *)
 
 val split_styled_cells : max_cells:int -> string -> string list
 (** Preserve cell padding and prefer space boundaries for renderer-owned SGR text. Each row

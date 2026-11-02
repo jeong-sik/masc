@@ -1,8 +1,18 @@
 (** Durable Goal proof requests and verdicts bound to the exact success-criterion
-    revision. Pending requests never expire. Mutations require the primary
-    ledger; recovery mirrors may supply historical reads, never write authority.
+    revision. Pending requests never expire. Authoritative reads and mutations
+    require a filesystem backend and the primary ledger; an in-process Memory
+    backend cannot establish durable proof authority. Recovery mirrors may
+    supply historical reads, never write authority.
     Callers hold the Goal lock before acquiring this ledger's lock when they
     bind or commit a request against the current Goal. *)
+
+type authority_backend_error = Memory_proof_authority_unavailable
+
+val authority_backend_error_to_string : authority_backend_error -> string
+
+val check_authority_backend : Workspace_utils.config -> (unit, authority_backend_error) result
+(** Reject backend kinds that cannot supply proof authority. Success does not
+    verify the workspace root, ledger contents, or filesystem crash durability. *)
 
 type verdict_outcome =
   | Proven

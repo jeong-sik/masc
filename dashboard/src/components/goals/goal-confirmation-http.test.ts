@@ -23,6 +23,16 @@ const props = { owner, isCurrent: () => true, readAuthority: {}, lifecyclePendin
 afterEach(() => { cleanup(); _testResetConfirmationReceipts(); setRejectedCredentialListener(null); clearStoredToken(); vi.unstubAllGlobals() })
 
 describe('Goal confirmation refusal visibility', () => {
+  it('shows storage as a possible cause of an unavailable proof and permits a fresh read', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ error: 'proof backend unavailable' }), { status: 503 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(proof), { status: 200, headers })))
+    render(html`<${GoalConfirmationPanel} ...${props} />`)
+    await screen.findByText(/저장소 상태를 확인한 뒤/)
+    expect(screen.queryByText(evidence)).toBeNull()
+    fireEvent.click(screen.getByText('현재 증거 다시 조회'))
+    await screen.findByText(evidence)
+  })
+
   it.each([400, 401, 403, 429, 503])('withdraws proof at POST %i headers and retains the completed error detail', async status => {
     let stream!: ReadableStreamDefaultController<Uint8Array>
     const pending = new ReadableStream<Uint8Array>({ start(controller) { stream = controller } })

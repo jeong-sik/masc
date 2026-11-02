@@ -1949,6 +1949,87 @@ let test_proof_mirror_presence_guarded () =
     fail (Printf.sprintf "Goal mirror presence check ended with signal %d" signal)
 ;;
 
+let test_memory_proof_cannot_supply_authority () =
+  with_workspace @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx "Keep the durable proof authority" in
+  let executing_goal_id = create_goal ctx "Do not capture evidence without proof authority" in
+  ignore (must_succeed "request" (transition ctx goal_id "request_complete"));
+  let request_id, criterion = proof_identity config goal_id in
+  let primary = Goal_verification.verifications_path config in
+  let mirror = primary ^ ".last-good" in
+  let primary_before = Fs_compat.load_file primary in
+  let mirror_before = Fs_compat.load_file mirror in
+  let events_before = goal_events_text config in
+  let backend = Backend.Memory.create () in
+  let memory = { config with Workspace_utils.backend = Workspace_utils.Memory backend } in
+  let key path = match Workspace_utils.key_of_path memory path with
+    | Some key -> key | None -> fail "proof path is outside the workspace" in
+  let primary_key = key primary and mirror_key = key mirror in
+  let expect_unavailable label = function
+    | Ok _ -> fail (label ^ ": Memory supplied proof authority")
+    | Error detail ->
+      check bool (label ^ ": diagnostic names the backend") true
+        (String_util.contains_substring detail "Memory backend cannot safely provide proof authority") in
+  let expect_missing key = match Backend.Memory.get backend key with
+    | Error (Backend_types.NotFound _) -> ()
+    | Error ((Backend_types.AlreadyExists _ | Backend_types.IOError _ | Backend_types.InvalidKey _) as error) ->
+      fail (Backend_types.show_error error)
+    | Ok _ -> fail "refused request changed the Memory backend" in
+  let expect_local_unchanged () =
+    check string "local primary is preserved" primary_before (Fs_compat.load_file primary);
+    check string "local recovery mirror is preserved" mirror_before (Fs_compat.load_file mirror);
+    check string "reopen audit is not appended" events_before (goal_events_text config);
+    check string "the Goal stays verifying" "verifying" (stored_phase config goal_id);
+    check string "the other Goal stays executing" "executing" (stored_phase config executing_goal_id) in
+  expect_unavailable "empty Memory authoritative read"
+    (Goal_verification.get_record_authoritative memory ~goal_id);
+  expect_unavailable "empty Memory pending request"
+    (Goal_verification.mark_proof_pending memory ~goal_id ~criterion);
+  (match Workspace_goals.request_current_proof ~evidence_refs:["board:missing-proof-source"]
+           memory ~goal_id:executing_goal_id with
+   | Error (Workspace_goals.Refused { code = Tool_args.Internal_error; message }) ->
+     check bool "backend refusal precedes evidence capture" true
+       (String_util.contains_substring message "Memory backend cannot safely provide proof authority")
+   | Error (Workspace_goals.Refused _) | Error (Workspace_goals.Store _) | Ok _ ->
+     fail "evidence capture ran before the Memory backend refusal");
+  (match Goal_verification.bind_review memory ~goal_id with
+   | Error (Goal_verification.Binding_unavailable _) -> ()
+   | Error (Goal_verification.No_current_review _) | Ok _ ->
+     fail "unavailable Memory proof did not retain the review binding");
+  (match Workspace_goals.recover_current_proof memory ~goal_id with
+   | Error _ -> () | Ok _ -> fail "Memory recovered a proof request");
+  expect_missing primary_key;
+  expect_missing mirror_key;
+  expect_local_unchanged ();
+  (match Backend.Memory.set backend primary_key primary_before with
+   | Ok () -> () | Error error -> fail (Backend_types.show_error error));
+  (match Backend.Memory.set backend mirror_key mirror_before with
+   | Ok () -> () | Error error -> fail (Backend_types.show_error error));
+  (match Goal_verification.get_record memory ~goal_id with
+   | Ok (Some { completion = Goal_verification.Proof_pending _; _ }) -> ()
+   | Ok (Some { completion = Goal_verification.Completion_idle | Goal_verification.Proof_proven _
+                            | Goal_verification.Proof_refuted _ | Goal_verification.Human_confirmed _; _ })
+   | Ok None | Error _ -> fail "historical Memory observation is unavailable");
+  let before_commit_called = ref false in
+  let before_commit () = before_commit_called := true; Ok () in
+  expect_unavailable "Memory verdict"
+    (Goal_verification.record_proof_verdict ~before_commit memory ~goal_id
+       (verdict ~request_id ~criterion Goal_verification.Proven));
+  expect_unavailable "Memory reopen"
+    (Goal_verification.reopen_goal memory ~goal_id ~actor:"operator" ~note:None);
+  check bool "Memory refusal precedes verdict effects" false !before_commit_called;
+  (match Backend.Memory.get backend primary_key, Backend.Memory.get backend mirror_key with
+   | Ok primary_after, Ok mirror_after ->
+     check string "Memory primary is preserved" primary_before primary_after;
+     check string "Memory mirror is preserved" mirror_before mirror_after
+   | Error _, _ | _, Error _ -> fail "Memory proof snapshot disappeared");
+  expect_local_unchanged ();
+  (match Goal_verification.record_proof_verdict config ~goal_id
+           (verdict ~request_id ~criterion Goal_verification.Proven) with
+   | Ok _ -> () | Error detail -> fail detail)
+;;
+
 
 (* {1 The caller's step before a passing verdict is written} *)
 
@@ -2443,6 +2524,8 @@ let () =
             test_recovery_proof_cannot_authorize_mutation
         ; test_case "unknown proof mirror refuses admission without reading it" `Quick
             test_proof_mirror_presence_guarded
+        ; test_case "Memory cannot authorize a durable Goal proof" `Quick
+            test_memory_proof_cannot_supply_authority
         ] )
     ; ( "store discipline"
       , [ test_case "undecodable ledger fails closed and loud" `Quick

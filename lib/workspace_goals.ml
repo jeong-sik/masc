@@ -780,6 +780,9 @@ let request_current_proof_bound ?evidence_refs ?expected_verification ~mode conf
         if matches_expected_verification expected goal record then Ok ()
         else Error (refuse Conflict "The Goal or verification request changed; refresh before requesting completion") in
     let request phase =
+      let* () = Goal_verification.check_authority_backend config
+        |> Result.map_error (fun error ->
+             refuse Internal_error (Goal_verification.authority_backend_error_to_string error)) in
       Result.bind (capture_goal_evidence config evidence_refs) (fun submitted_evidence ->
         Result.map (fun record -> { goal with phase }, record)
           (mark_proof_pending ?submitted_evidence config ~goal_id goal)) in

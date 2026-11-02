@@ -833,7 +833,7 @@ function GoalLifecycleActionPanel({ node }: { node: GoalTreeNode }) {
   return html`
     <div class=${CARD_BOX} data-goal-lifecycle-actions>
       ${bindingUnavailable ? html`
-        <p role="status" class="mb-3 text-xs text-text-muted">검증 상태를 확인할 수 없어 완료 요청을 사용할 수 없습니다. Goal을 새로고침해 주세요.</p>` : null}
+        <p role="status" class="mb-3 text-xs text-text-muted">검증 상태를 확인할 수 없어 완료 요청이나 재검증을 사용할 수 없습니다. 서버의 저장소와 실행 환경을 확인하거나 운영자에게 문의하고, 문제가 복구되면 Goal을 새로고침해 주세요.</p>` : null}
       ${binding === null ? html`<p role="status" class="mb-3 text-xs text-text-muted">현재 workspace에서 Goal을 다시 확인한 뒤 변경할 수 있습니다.</p>` : null}
       ${otherPending && !previousPending ? html`<p role="status" class="mb-3 text-xs text-text-muted">다른 연결 또는 인증의 같은 Goal 요청이 끝나기를 기다리는 중입니다.</p>` : null}
       ${confirmationInFlight ? html`<p role="status" class="mb-3 text-xs text-text-muted">이 목표의 최종 확인이 끝나기를 기다리는 중입니다.</p>` : null}

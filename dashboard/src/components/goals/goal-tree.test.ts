@@ -346,6 +346,31 @@ describe('GoalTree', () => {
     await waitFor(() => expect(screen.getByTestId('goal-detail-panel').getAttribute('data-selected-goal-id')).toBe(other.id))
   })
 
+  it.each([
+    ['executing', 'Request completion'],
+    ['verifying', 'Retry verification'],
+  ] as const)('explains unavailable proof for a %s Goal', async (phase, completionLabel) => {
+    const goal: GoalTreeNode = {
+      ...makeGoal('goal-unavailable-proof', 'Goal with unavailable proof'),
+      phase,
+      verification: { state: 'unreadable', detail: 'proof backend unavailable' },
+      goal_fsm: { state: phase, source: 'goal.phase', next_actions: ['request_complete', 'pause'],
+        activity_observation: 'goal_metadata' },
+    }
+    mocks.fetchDashboardGoalsTree.mockResolvedValue({
+      approval_queue_state: { state: 'ready' }, tree: [goal],
+      summary: { ...emptySummary(), total_goals: 1, active_goals: 1 },
+    })
+    mocks.fetchDashboardGoalDetail.mockResolvedValue({
+      goal, linked_tasks: [], linked_keepers: [], approvals: [], execution_receipts: [], timeline: [],
+    })
+    render(html`<${GoalTree} />`)
+    await screen.findByText(/서버의 저장소와 실행 환경을 확인하거나/)
+    expect(screen.queryByRole('button', { name: completionLabel })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Pause' })).toBeTruthy()
+    expect(mocks.callMcpTool).not.toHaveBeenCalled()
+  })
+
   it('requests goal completion through the goal transition tool and refreshes goal data', async () => {
     const goal = {
       ...makeGoal('goal-ready', 'Ready goal'),
